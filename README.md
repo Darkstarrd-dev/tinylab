@@ -133,6 +133,7 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 - **API Base URL / Endpoint**：`http://localhost:8080/v1` （端口见 Settings 页面，默认 `8080`）
 - **API Key**：填入任意字符串即可（如 `sk-local`；若在 Settings 中启用了本地密码保护，请填入您设置的密码）。
+- **AI First**: 不会设置的可以直接委派AI代为设置，因为各个软件的要求各自有些区别，可以直接贴各个软件的仓库地址，然后告诉AI TinyRouter的端点，因为是兼容+透传，AI会自动帮你搞定一切的
 - **OpenCode示例**
 ```opencode.jsonc
   "provider": {
