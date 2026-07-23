@@ -146,3 +146,8 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 #### 3. 直接调用特定 Provider 的模型
 - **带前缀形式**：不需要用户自己填写，在provider的详情卡里可以直接点击模型ID，复制到剪贴板里，直接黏贴即可
+
+
+## 社区支持
+
+- 特别感谢[LinuxDO](https://linux.do)社区佬友们的支持
