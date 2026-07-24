@@ -133,6 +133,45 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 - **API Base URL / Endpoint**：`http://localhost:8080/v1` （端口见 Settings 页面，默认 `8080`）
 - **API Key**：填入任意字符串即可（如 `sk-local`；若在 Settings 中启用了本地密码保护，请填入您设置的密码）。
+- **AI First**: 不会设置的可以直接委派AI代为设置，因为各个软件的要求各自有些区别，可以直接贴各个软件的仓库地址，然后告诉AI TinyRouter的端点，因为是兼容+透传，AI会自动帮你搞定一切的
+- **OpenCode示例**
+```opencode.jsonc
+  "provider": {
+    "TinyRouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "TinyRouter",
+      "options": {
+        "baseURL": "http://localhost:20102/v1", //你设定的端口
+        "apiKey": "any", //随意
+      },
+      "models": {
+        "01-Plan": { //OpenCode内部使用的字段，比如用来设置某个Agent使用什么使用这个
+          "id": "Plan", //向服务器端请求的名字，对应你在TinyRouter里指定的名称
+          "name": "01-Plan", //OpenCode里面显示的名字
+          "attachment": false, //是否支持附件
+          "reasoning": true, //是否支持推理
+          "tool_call": true, //是否支持工具调用
+          "structured_output": true, //是否支持结构化输出
+          "temperature": true, //是否支持传递温度参数
+          "release_date": "2026-06-13",
+          "last_updated": "2026-06-13",
+          "limit": { "context": 1000000, "output": 131072 }, //上下文大小、最大输出token
+          "modalities": { "input": ["text"], "output": ["text"] }, //支持的输入、输出
+          "variants": {
+            "high": { "reasoningEffort": "high" },
+            "max": { "reasoningEffort": "max" },
+          }, //思考映射，需要服务器端支持
+          "cost": {
+            "input": 1.4, //输入价格
+            "output": 4.4, //输出价格
+            "cache": {
+              "read": 0.26, //缓存读取价格
+              "write": 0, //缓存写入价格
+            },    
+          },
+        },
+}
+```
 
 ### 3 种模型名称 (Model) 调用方式：
 
@@ -146,3 +185,8 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 #### 3. 直接调用特定 Provider 的模型
 - **带前缀形式**：不需要用户自己填写，在provider的详情卡里可以直接点击模型ID，复制到剪贴板里，直接黏贴即可
+
+
+## 社区支持
+
+- 特别感谢[LinuxDO](https://linux.do)社区佬友们的支持

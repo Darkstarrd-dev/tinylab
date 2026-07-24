@@ -146,3 +146,8 @@ Configure TinyRouter's local endpoint in any OpenAI-compatible client (such as N
 
 #### 3. Calling Specific Provider Models
 - **Prefixed Format**: Simply click the model ID inside the Provider Card to copy `provider_id/model_id` directly to your clipboard for easy pasting into clients.
+
+
+## Community
+
+- Speacial thanks to the [LinuxDO](https://linux.do) community for their support
