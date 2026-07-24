@@ -268,7 +268,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 input::placeholder,textarea::placeholder{color:var(--text-muted)}
 label{display:block;margin-bottom:6px;color:var(--text-secondary);font-size:calc(var(--font-base) - 1.5px);font-weight:500;letter-spacing:0.2px}
 .form-group{margin-bottom:14px}
-.form-hint{margin:-10px 0 14px;font-size:calc(var(--font-base) - 2px);color:var(--text-muted);line-height:1.45}
+.form-hint{margin:6px 0 0;font-size:calc(var(--font-base) - 2px);color:var(--text-muted);line-height:1.45}
 
 /* =====================================================================
    Tables & Badges

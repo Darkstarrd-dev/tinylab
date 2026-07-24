@@ -373,7 +373,20 @@ function openSettingsModal(title, bodyHtml) {
         <button type="button" class="btn btn-primary" id="settings-modal-save">' + t('save') + '</button>\
       </div>\
     </div>';
-  requestAnimationFrame(function() { overlay.classList.add('show'); });
+  requestAnimationFrame(function() {
+    overlay.classList.add('show');
+    var input = overlay.querySelector('input:not([type="hidden"]), textarea, select');
+    if (input) {
+      if (input.type === 'checkbox' || input.type === 'radio') {
+        var textInput = overlay.querySelector('input[type="text"], input[type="number"], textarea');
+        if (textInput) input = textInput;
+      }
+      input.focus();
+      if (typeof input.select === 'function' && input.tagName === 'INPUT' && (input.type === 'text' || input.type === 'number' || input.type === '' || !input.type)) {
+        input.select();
+      }
+    }
+  });
 }
 
 function openPortModal() {

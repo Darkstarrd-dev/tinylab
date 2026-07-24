@@ -443,23 +443,24 @@ document.addEventListener('keydown', function(e) {
 
   // ---- Modal is open: modal interactions take precedence ----
   if (modal) {
-    // Collect all focusable buttons in the modal (supports both main-app
-    // .btn-ghost/.btn-primary and gallery .pg-btn button styles).
-    var modalBtns = Array.prototype.slice.call(modal.querySelectorAll('button, .pg-btn, .btn'));
-    modalBtns = modalBtns.filter(function(b) { return b.offsetParent !== null; }); // visible only
+    // Collect all focusable elements in the modal (buttons, inputs, textareas, selects)
+    var modalFocusables = Array.prototype.slice.call(modal.querySelectorAll('button, input, textarea, select, a[href], .pg-btn, .btn'));
+    modalFocusables = modalFocusables.filter(function(b) { return b.offsetParent !== null && !b.disabled; }); // visible & enabled only
     if (e.key === 'Tab') {
-      e.preventDefault();
-      if (modalBtns.length > 1) {
-        var curIdx = modalBtns.indexOf(document.activeElement);
+      if (modalFocusables.length > 1) {
+        e.preventDefault();
+        var curIdx = modalFocusables.indexOf(document.activeElement);
         var nextIdx = e.shiftKey
-          ? (curIdx <= 0 ? modalBtns.length - 1 : curIdx - 1)
-          : (curIdx + 1) % modalBtns.length;
-        modalBtns[nextIdx].focus();
+          ? (curIdx <= 0 ? modalFocusables.length - 1 : curIdx - 1)
+          : (curIdx + 1) % modalFocusables.length;
+        modalFocusables[nextIdx].focus();
       }
       return;
     }
     if (e.key === 'Escape') { e.preventDefault(); dismissTopModal(); return; }
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (!isInput && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      var modalBtns = Array.prototype.slice.call(modal.querySelectorAll('button, .pg-btn, .btn'));
+      modalBtns = modalBtns.filter(function(b) { return b.offsetParent !== null; }); // visible only
       if (modalBtns.length > 1) {
         e.preventDefault();
         var curIdx = modalBtns.indexOf(document.activeElement);
@@ -481,9 +482,9 @@ document.addEventListener('keydown', function(e) {
         ae.click();
         return;
       }
-      // No button focused: click the last button (typically Cancel) or primary
-      var primary = modal.querySelector('.btn-primary') || (modalBtns.length ? modalBtns[modalBtns.length - 1] : null);
-      if (primary) { e.preventDefault(); primary.click(); }
+      // No button focused: click the primary or last button
+      var primary = modal.querySelector('.btn-primary') || (modalFocusables.length ? modalFocusables[modalFocusables.length - 1] : null);
+      if (primary && typeof primary.click === 'function') { e.preventDefault(); primary.click(); }
       return;
     }
     // block page shortcuts while a modal is open

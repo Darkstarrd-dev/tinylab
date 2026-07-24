@@ -564,6 +564,7 @@ function renderDetailModels(p) {
         <div id="batch-actions" style="display:' + (batchManageMode ? 'inline-flex' : 'none') + ';gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap;flex-shrink:0">\
           <input id="batch-filter-input" class="form-control" placeholder="' + t('filterModels') + '" style="width:130px;max-width:140px;height:28px;padding:3px 8px;font-size:calc(var(--font-base) - 1px);border-radius:var(--radius-sm);box-sizing:border-box;flex-shrink:0" oninput="filterBatchModels(this.value)">\
           <button type="button" class="btn btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="clearBatchFilter()">' + t('clear') + '</button>\
+          <button type="button" class="btn btn-sm" id="batch-toggle-select-btn" style="flex-shrink:0;white-space:nowrap" onclick="batchToggleSelectAll()">' + ((models.length > 0 && batchSelectedModels.size === models.length) ? t('deselectAll') : t('selectAll')) + '</button>\
           <button type="button" class="btn btn-sm btn-primary" style="flex-shrink:0;white-space:nowrap" onclick="withLoading(this, () => batchKeepSelected(\'' + escapeForJsString(p.id) + '\'))">' + t('keepSelected') + '</button>\
           <button type="button" class="btn btn-sm btn-danger" style="flex-shrink:0;white-space:nowrap" onclick="withLoading(this, () => batchRemoveSelected(\'' + escapeForJsString(p.id) + '\'))">' + t('removeSelected') + '</button>\
           <button type="button" class="btn btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="batchCancel()">' + t('cancel') + '</button>\
@@ -1279,6 +1280,15 @@ function enterBatchManage(pid) {
   renderDetailModels(providerDetailCache);
 }
 
+function updateBatchToggleSelectBtn() {
+  var btn = document.getElementById('batch-toggle-select-btn');
+  if (!btn) return;
+  var p = providerDetailCache;
+  var models = (p && p.models) ? p.models : [];
+  var allSelected = models.length > 0 && batchSelectedModels.size === models.length;
+  btn.textContent = allSelected ? t('deselectAll') : t('selectAll');
+}
+
 function batchToggleModel(mid) {
   if (batchSelectedModels.has(mid)) {
     batchSelectedModels.delete(mid);
@@ -1296,6 +1306,32 @@ function batchToggleModel(mid) {
       break;
     }
   }
+  updateBatchToggleSelectBtn();
+}
+
+function batchToggleSelectAll() {
+  var p = providerDetailCache;
+  if (!p) return;
+  var models = p.models || [];
+  if (models.length === 0) return;
+  var allSelected = models.length > 0 && batchSelectedModels.size === models.length;
+  if (allSelected) {
+    batchSelectedModels.clear();
+  } else {
+    for (var i = 0; i < models.length; i++) {
+      batchSelectedModels.add(models[i].id);
+    }
+  }
+  var rows = document.querySelectorAll('[data-batch-mid]');
+  for (var j = 0; j < rows.length; j++) {
+    var rmid = rows[j].getAttribute('data-batch-mid');
+    if (batchSelectedModels.has(rmid)) {
+      rows[j].classList.add('batch-selected');
+    } else {
+      rows[j].classList.remove('batch-selected');
+    }
+  }
+  updateBatchToggleSelectBtn();
 }
 
 function batchSelectAll() {
@@ -1309,6 +1345,7 @@ function batchSelectAll() {
   for (var j = 0; j < rows.length; j++) {
     rows[j].classList.add('batch-selected');
   }
+  updateBatchToggleSelectBtn();
 }
 
 function batchInvert() {
@@ -1332,6 +1369,7 @@ function batchInvert() {
       rows[j].classList.remove('batch-selected');
     }
   }
+  updateBatchToggleSelectBtn();
 }
 
 function filterBatchModels(val) {
@@ -1634,6 +1672,10 @@ function showModelAliasModal(pid, mid, currentAlias) {
   document.getElementById('settings-modal-save').onclick = function() {
     withLoading(this, function() { return saveModelAlias(pid, mid); });
   };
+  requestAnimationFrame(function() {
+    var input = document.getElementById('modal-alias-input');
+    if (input) { input.focus(); if (typeof input.select === 'function') input.select(); }
+  });
 }
 
 async function saveModelAlias(pid, mid) {
@@ -1663,6 +1705,10 @@ function showModelNoteModal(pid, mid, currentNote) {
   document.getElementById('settings-modal-save').onclick = function() {
     withLoading(this, function() { return saveModelNote(pid, mid); });
   };
+  requestAnimationFrame(function() {
+    var input = document.getElementById('modal-note-input');
+    if (input) { input.focus(); if (typeof input.setSelectionRange === 'function') input.setSelectionRange(input.value.length, input.value.length); }
+  });
 }
 
 async function saveModelNote(pid, mid) {
@@ -1683,28 +1729,32 @@ function showModelNIMModal(pid, mid, btnEl) {
   var reqCount = parseInt(btnEl.getAttribute('data-nim-count')) || 0;
   var minInterval = parseInt(btnEl.getAttribute('data-nim-interval')) || 0;
   openSettingsModal(t('modelNIM'),
-    '<p class="muted">' + t('nimDesc') + '</p>\
-    <div class="form-group">\
-      <label>' + t('nimEnabled') + '\
+    '<p class="muted" style="margin:0 0 16px;line-height:1.55">' + t('nimDesc') + '</p>\
+    <div class="form-group" style="margin-bottom:16px">\
+      <label style="margin-bottom:0;display:inline-flex;align-items:center;cursor:pointer">' + t('nimEnabled') + '\
         <label class="toggle-switch" style="margin-left:8px">\
           <input type="checkbox" id="modal-nim-enabled" ' + (enabled ? 'checked' : '') + '>\
           <span class="toggle-slider"></span>\
         </label>\
       </label>\
     </div>\
-    <div class="form-group">\
-      <label>' + t('nimRequestCount') + '</label>\
+    <div class="form-group" style="margin-bottom:16px">\
+      <label style="margin-bottom:6px;display:block">' + t('nimRequestCount') + '</label>\
       <input type="number" id="modal-nim-count" value="' + reqCount + '" placeholder="30" style="max-width:120px">\
     </div>\
-    <div class="form-group">\
-      <label>' + t('nimMinInterval') + '</label>\
+    <div class="form-group" style="margin-bottom:0">\
+      <label style="margin-bottom:6px;display:block">' + t('nimMinInterval') + '</label>\
       <input type="number" id="modal-nim-interval" value="' + minInterval + '" placeholder="2000" style="max-width:120px">\
-      <div class="form-hint">' + t('nimMinIntervalHint') + '</div>\
+      <div class="form-hint" style="margin-top:6px;margin-bottom:0">' + t('nimMinIntervalHint') + '</div>\
     </div>'
   );
   document.getElementById('settings-modal-save').onclick = function() {
     withLoading(this, function() { return saveModelNIM(pid, mid); });
   };
+  requestAnimationFrame(function() {
+    var input = document.getElementById('modal-nim-count');
+    if (input) { input.focus(); if (typeof input.select === 'function') input.select(); }
+  });
 }
 
 async function saveModelNIM(pid, mid) {
