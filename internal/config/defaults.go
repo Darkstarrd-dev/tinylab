@@ -185,5 +185,8 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 	if cfg.Theme.LightVariant == "" {
 		cfg.Theme.LightVariant = "default"
 	}
+	if cfg.Theme.Style == "" {
+		cfg.Theme.Style = "default"
+	}
 	return cfg
 }

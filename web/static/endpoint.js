@@ -817,11 +817,14 @@ async function saveShortcutsModal() {
 
 function openThemeModal() {
   var title = t('appearance');
-  var bodyHtml = '<div id="theme-modal-picker-container" class="theme-modal-picker"></div>';
+  var bodyHtml = '<div id="theme-modal-picker-container" class="theme-modal-picker"></div>'
+    + '<div class="style-modal-section"><div class="style-modal-title">' + t('themeStyle') + '</div>'
+    + '<div id="style-modal-picker-container"></div></div>';
   openSettingsModal(title, bodyHtml);
   var modalEl = document.querySelector('#modal-overlay .modal');
   if (modalEl) modalEl.style.maxWidth = '620px';
   ThemeSystem.renderThemePicker('theme-modal-picker-container');
+  ThemeSystem.renderStylePicker('style-modal-picker-container');
   var saveBtn = document.getElementById('settings-modal-save');
   if (saveBtn) {
     saveBtn.onclick = function() {

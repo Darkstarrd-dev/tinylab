@@ -16,6 +16,8 @@
   document.documentElement.setAttribute('data-theme', theme);
   var themeVariant = localStorage.getItem('themeVariant') || 'default';
   document.documentElement.setAttribute('data-theme-variant', themeVariant);
+  var themeStyle = localStorage.getItem('themeStyle') || 'default';
+  document.documentElement.setAttribute('data-theme-style', themeStyle);
   var fontSize = localStorage.getItem('fontSize') || 's';
   document.documentElement.setAttribute('data-font-size', fontSize);
   var lang = localStorage.getItem('lang') || 'en';

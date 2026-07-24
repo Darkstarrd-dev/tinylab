@@ -43,8 +43,9 @@ func (rt *Router) testProviderModelProto(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Proto != config.ProtocolOpenAICompat &&
 		req.Proto != config.ProtocolOpenAIResponses &&
-		req.Proto != config.ProtocolAnthropic {
-		writeAPIError(w, http.StatusBadRequest, "invalid proto: must be one of openai-compat, openai-responses, anthropic")
+		req.Proto != config.ProtocolAnthropic &&
+		req.Proto != config.ProtocolOpenAIEmbedding {
+		writeAPIError(w, http.StatusBadRequest, "invalid proto: must be one of openai-compat, openai-responses, anthropic, openai-embedding")
 		return
 	}
 
@@ -67,6 +68,8 @@ func (rt *Router) testProviderModelProto(w http.ResponseWriter, r *http.Request)
 		res = probeOpenAIResponses(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
 	case config.ProtocolAnthropic:
 		res = probeAnthropic(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
+	case config.ProtocolOpenAIEmbedding:
+		res = probeOpenAIEmbedding(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -89,6 +92,7 @@ func probeResultToMap(res ProbeResult) map[string]any {
 		"latencyMs":       res.LatencyMs,
 		"outputTokens":    res.OutputTokens,
 		"tokensPerSec":    res.TokensPerSec,
+		"embeddingDim":    res.EmbeddingDim,
 		"error":           res.Error,
 		"skipped":         res.Skipped,
 		"request":         res.Request,

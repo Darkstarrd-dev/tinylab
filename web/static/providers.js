@@ -507,7 +507,7 @@ function buildModelRowMainInner(p, m) {
   var testBtnDisabled = isCurrentBatchTesting ? ' disabled' : '';
   return '<div class="model-row-main" onclick="' + rowOnclick + '">' +
     chevronDown +
-    '<button type="button" class="btn btn-sm btn-test-model ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '"' + testBtnDisabled + ' onclick="event.stopPropagation(); withLoading(this, () => testSingleModel(\'' + pidEsc + '\', \'' + midJs + '\'))">' + testBtnText + '</button>' +
+    '<button type="button" class="btn btn-sm btn-test-model ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '"' + testBtnDisabled + ' onclick="event.stopPropagation(); withLoading(this, () => { var kind = this.parentElement.querySelector(\'.model-kind-select\') ? this.parentElement.querySelector(\'.model-kind-select\').value : \'' + kindVal + '\'; testSingleModel(\'' + pidEsc + '\', \'' + midJs + '\', kind); })">' + testBtnText + '</button>' +
     buildMiniProtocolBadges(ts, m.id) +
     '<select class="model-quota-select" onclick="event.stopPropagation()" onchange="updateModelQuotaType(\'' + pidEsc + '\', this)" data-model="' + midEsc + '">' +
       '<option value="unlimited"' + (m.quotaType === 'unlimited' ? ' selected' : '') + '>' + t('unlimited') + '</option>' +
@@ -515,8 +515,9 @@ function buildModelRowMainInner(p, m) {
       '<option value="paid"' + (m.quotaType === 'paid' ? ' selected' : '') + '>' + t('paid') + '</option>' +
     '</select>' +
     '<select class="model-quota-select model-kind-select" onclick="event.stopPropagation()" onchange="updateModelKind(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" title="' + t('modelKind') + '">' +
-      '<option value="text"' + (kindVal !== 'image' ? ' selected' : '') + '>' + t('textModel') + '</option>' +
+      '<option value="text"' + (kindVal !== 'image' && kindVal !== 'embedding' ? ' selected' : '') + '>' + t('textModel') + '</option>' +
       '<option value="image"' + (kindVal === 'image' ? ' selected' : '') + '>' + t('imageModel') + '</option>' +
+      '<option value="embedding"' + (kindVal === 'embedding' ? ' selected' : '') + '>' + t('embeddingModel') + '</option>' +
     '</select>' +
     '<select class="model-quota-select model-protocol-select" style="display:' + protoDisplay + '" onclick="event.stopPropagation()" onchange="updateModelImgProtocol(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" title="' + t('imgProtocol') + '">' +
       '<option value="gpt"' + (protoVal === 'gpt' ? ' selected' : '') + '>GPT</option>' +
@@ -903,14 +904,15 @@ function updateModelRowStatus(pid, modelId) {
   }
 }
 
-async function testSingleModel(pid, modelId) {
-  await doTestModel(pid, modelId);
+async function testSingleModel(pid, modelId, kind) {
+  kind = kind || 'text';
+  await doTestModel(pid, modelId, kind);
   currentProviderId = pid;
   updateModelRowStatus(pid, modelId);
 }
 
-async function doTestModel(pid, modelId) {
-  await testModelProtosSerial(pid, modelId, {
+async function doTestModel(pid, modelId, kind) {
+  await testModelProtosSerial(pid, modelId, kind, {
     onComplete: function(result) {
       if (!result.ok) {
         var err = '';
@@ -925,8 +927,8 @@ async function doTestModel(pid, modelId) {
 }
 
 // renderMultiProtocolBadge renders the top #m-test-result badge for the new
-// three-protocol composite test response. It shows a summary badge plus one
-// badge per protocol (openaiCompat / openaiResponses / anthropic).
+// protocol composite test response. It shows a summary badge plus one
+// badge per protocol (openaiCompat / openaiResponses / anthropic / openaiEmbedding).
 function renderMultiProtocolBadge(el, result, modelId) {
   if (!result) {
     el.innerHTML = '<span class="badge badge-invalid">' + t('failed', [t('noData')]) + '</span>';
@@ -942,7 +944,8 @@ function renderMultiProtocolBadge(el, result, modelId) {
   var protoHtml = '<span class="mp-summary-badges">';
   [['openaiCompat', 'O', t('protoOpenAICompat')],
    ['openaiResponses', 'R', t('protoOpenAIResponses')],
-   ['anthropic', 'A', t('protoAnthropic')]].forEach(function(p) {
+   ['anthropic', 'A', t('protoAnthropic')],
+   ['openaiEmbedding', 'E', t('protoOpenAIEmbedding')]].forEach(function(p) {
     var r = result[p[0]];
     var cls = 'mp-skip';
     var label = t('mptestStatusSkip');
@@ -952,6 +955,10 @@ function renderMultiProtocolBadge(el, result, modelId) {
       else { cls = 'mp-err'; label = t('mptestStatusFail'); }
     }
     var title = p[2] + ': ' + label + (r && r.latencyMs != null ? ' (' + r.latencyMs + 'ms)' : '');
+    // Add embedding dimension to title if available
+    if (p[0] === 'openaiEmbedding' && r && r.embeddingDim != null && r.embeddingDim > 0) {
+      title += ' dim:' + r.embeddingDim;
+    }
     protoHtml += '<span class="mp-proto-badge ' + cls + '" title="' + escapeAttr(title) + '">' + escapeAttr(p[1]) + '</span>';
   });
   protoHtml += '</span>';
@@ -966,7 +973,7 @@ function updateMiniBadge(modelId, protoKey, status) {
   var el = document.querySelector('.mp-mini-badge[data-model="' + CSS.escape(modelId) + '"][data-proto="' + protoKey + '"]');
   if (!el) return;
   el.className = 'mp-mini-badge mp-' + status;
-  var labelMap = {openaiCompat: 'OpenAI Compatible', openaiResponses: 'OpenAI Responses', anthropic: 'Anthropic Messages'};
+  var labelMap = {openaiCompat: 'OpenAI Compatible', openaiResponses: 'OpenAI Responses', anthropic: 'Anthropic Messages', openaiEmbedding: 'OpenAI Embeddings'};
   var statusMap = {testing: 'testing', ok: 'OK', err: 'failed', skip: 'skipped'};
   el.title = (labelMap[protoKey] || protoKey) + ': ' + (statusMap[status] || status);
   var cursorStyle = (status === 'testing') ? 'cursor:default' : 'cursor:pointer';
@@ -979,17 +986,31 @@ function updateMiniBadge(modelId, protoKey, status) {
   }
 }
 
-async function testModelProtosSerial(pid, modelId, options) {
-  var protos = [
-    {key: 'openaiCompat', endpoint: 'openai-compat'},
-    {key: 'openaiResponses', endpoint: 'openai-responses'},
-    {key: 'anthropic', endpoint: 'anthropic'}
+async function testModelProtosSerial(pid, modelId, kind, options) {
+  kind = kind || 'text';
+  // Filter protocols by model kind
+  var allProtos = [
+    {key: 'openaiCompat', endpoint: 'openai-compat', kinds: ['text']},
+    {key: 'openaiResponses', endpoint: 'openai-responses', kinds: ['text']},
+    {key: 'anthropic', endpoint: 'anthropic', kinds: ['text']},
+    {key: 'openaiEmbedding', endpoint: 'openai-embedding', kinds: ['embedding']}
   ];
-  var result = modelTestStatus[modelId] || {};
-  // Reset all mini badges to testing
-  for (var pi = 0; pi < protos.length; pi++) {
-    updateMiniBadge(modelId, protos[pi].key, 'testing');
+  var protos = allProtos.filter(function(p) {
+    return p.kinds.indexOf(kind) !== -1;
+  });
+  // Fallback: if kind is unknown or no matching protos, test all
+  if (protos.length === 0) {
+    protos = allProtos;
   }
+  var result = modelTestStatus[modelId] || {};
+  // Reset all mini badges to testing for active protos, skip for inactive
+  allProtos.forEach(function(p) {
+    if (protos.indexOf(p) !== -1) {
+      updateMiniBadge(modelId, p.key, 'testing');
+    } else {
+      updateMiniBadge(modelId, p.key, 'skip');
+    }
+  });
   // Show testing state in top result area if applicable
   var resultEl = document.getElementById('m-test-result');
   if (resultEl) resultEl.innerHTML = '<span class="badge badge-testing">' + t('testing', [modelId]) + '</span>';
@@ -1029,6 +1050,7 @@ async function testModelProtosSerial(pid, modelId, options) {
   // Compute final protocols list and speed
   result.protocols = [];
   var bestSpeed = null;
+  var embeddingDim = null;
   for (var pi2 = 0; pi2 < protos.length; pi2++) {
     var pKey = protos[pi2].key;
     if (result[pKey] && result[pKey].ok) {
@@ -1041,10 +1063,15 @@ async function testModelProtosSerial(pid, modelId, options) {
           bestSpeed = Math.floor(pr.outputTokens / (pr.latencyMs / 1000));
         }
       }
+      // Capture embedding dimension if available
+      if (pr.embeddingDim != null && pr.embeddingDim > 0) {
+        embeddingDim = pr.embeddingDim;
+      }
     }
   }
   result.ok = result.protocols.length > 0;
   result.speed = bestSpeed;
+  result.embeddingDim = embeddingDim;
   modelTestStatus[modelId] = result;
   if (resultEl) renderMultiProtocolBadge(resultEl, result, modelId);
   if (options && options.onComplete) options.onComplete(result);
@@ -1090,15 +1117,16 @@ async function batchTestModels(pid, btn) {
       if (state.aborted) break;
       var m = p.models[i];
       state.currentModelId = m.id;
+      var mKind = m.kind || 'text';
 
       var rowEl = document.getElementById('mrow-' + sanitizeId(pid) + '-' + sanitizeId(m.id));
       var modelBtn = rowEl ? rowEl.querySelector('.btn-test-model') : null;
       if (modelBtn) {
         await withLoading(modelBtn, function() {
-          return testSingleModel(pid, m.id);
+          return testSingleModel(pid, m.id, mKind);
         });
       } else {
-        await testSingleModel(pid, m.id);
+        await testSingleModel(pid, m.id, mKind);
       }
     }
   } finally {
@@ -1114,13 +1142,14 @@ async function batchTestModels(pid, btn) {
   }
 }
 
-// buildMiniProtocolBadges returns the inline 3-dot mini badge HTML for a model
+// buildMiniProtocolBadges returns the inline mini badge HTML for a model
 // row, mirroring the per-protocol status from modelTestStatus.
 function buildMiniProtocolBadges(ts, modelId) {
   var letters = [
     ['openaiCompat', 'O', t('protoOpenAICompat')],
     ['openaiResponses', 'R', t('protoOpenAIResponses')],
-    ['anthropic', 'A', t('protoAnthropic')]
+    ['anthropic', 'A', t('protoAnthropic')],
+    ['openaiEmbedding', 'E', t('protoOpenAIEmbedding')]
   ];
   var html = '<span class="mp-mini-badges">';
   letters.forEach(function(p) {
@@ -1132,6 +1161,10 @@ function buildMiniProtocolBadges(ts, modelId) {
       if (r.ok) {
         cls = 'mp-ok';
         title = p[2] + ': ' + t('mptestStatusOk') + (r.latencyMs != null ? ' (' + r.latencyMs + 'ms)' : '');
+        // Add embedding dimension to title if available
+        if (p[0] === 'openaiEmbedding' && r.embeddingDim != null && r.embeddingDim > 0) {
+          title += ' dim:' + r.embeddingDim;
+        }
       } else if (r.skipped) {
         cls = 'mp-skip';
         title = p[2] + ': ' + t('mptestStatusSkip');
@@ -1161,7 +1194,8 @@ function showProtoDetail(modelId, protoKey) {
   var nameMap = {
     openaiCompat: 'protoOpenAICompat',
     openaiResponses: 'protoOpenAIResponses',
-    anthropic: 'protoAnthropic'
+    anthropic: 'protoAnthropic',
+    openaiEmbedding: 'protoOpenAIEmbedding'
   };
   var nameKey = nameMap[protoKey] || protoKey;
   titleEl.textContent = modelId + ' \u2014 ' + t(nameKey);
@@ -1186,7 +1220,8 @@ function renderProtocolSection(key, r) {
   var nameKey = {
     openaiCompat: 'protoOpenAICompat',
     openaiResponses: 'protoOpenAIResponses',
-    anthropic: 'protoAnthropic'
+    anthropic: 'protoAnthropic',
+    openaiEmbedding: 'protoOpenAIEmbedding'
   }[key] || key;
   var statusKey, statusCls;
   if (r.ok) { statusKey = 'mptestStatusOk'; statusCls = 'mp-ok'; }
@@ -1202,6 +1237,10 @@ function renderProtocolSection(key, r) {
   var metaHtml = '';
   metaHtml += renderInfoSection(t('status'), { status: r.status });
   metaHtml += renderInfoSection(t('latency'), { latencyMs: r.latencyMs });
+  // Show embedding dimension for embedding protocol
+  if (key === 'openaiEmbedding' && r.embeddingDim != null && r.embeddingDim > 0) {
+    metaHtml += renderInfoSection('Embedding Dim', { embeddingDim: r.embeddingDim });
+  }
   metaHtml += renderInfoSection(t('error'), { error: r.error });
 
   var detailHtml = '';
@@ -1525,7 +1564,8 @@ async function updateModelKind(pid, selectEl) {
   var kind = selectEl.value;
   try {
     await apiPatch('/providers/' + pid + '/models/kind', { model: modelId, kind: kind });
-    toast(t('modelKind') + ' \u2192 ' + t(kind === 'text' ? 'textModel' : 'imageModel'), 'success');
+    var kindLabel = (kind === 'text' ? 'textModel' : (kind === 'image' ? 'imageModel' : 'embeddingModel'));
+    toast(t('modelKind') + ' \u2192 ' + t(kindLabel), 'success');
     var row = selectEl.closest('.model-row-main');
     var protoSelect = row ? row.querySelector('.model-protocol-select') : null;
     if (protoSelect) {
