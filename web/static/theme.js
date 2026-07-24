@@ -42,12 +42,23 @@ var ThemeSystem = (function() {
     ]
   };
 
+  // --- Style Registry ---
+  // Independent style dimension (shape, motion, weight) — orthogonal to color variant.
+  var styleRegistry = [
+    { id: 'default', name: 'Rounded', nameZh: '圆润', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="6"/></svg>' },
+    { id: 'sharp', name: 'Sharp', nameZh: '锐利', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="1"/></svg>' },
+    { id: 'soft', name: 'Soft', nameZh: '柔和', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="10"/></svg>' },
+    { id: 'compact', name: 'Compact', nameZh: '紧凑', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="3"/><line x1="9" y1="12" x2="15" y2="12"/></svg>' }
+  ];
+
   // --- State ---
   // Per-mode variant memory (so toggling mode restores each mode's variant).
   var variants = {
     dark: localStorage.getItem('themeVariantDark') || 'default',
     light: localStorage.getItem('themeVariantLight') || 'default'
   };
+  // Style dimension state (global, independent of mode).
+  var currentStyle = localStorage.getItem('themeStyle') || 'default';
 
   // --- Core API ---
 
@@ -64,6 +75,7 @@ var ThemeSystem = (function() {
     var variant = variants[mode] || 'default';
     document.documentElement.setAttribute('data-theme', mode);
     document.documentElement.setAttribute('data-theme-variant', variant);
+    document.documentElement.setAttribute('data-theme-style', currentStyle);
     localStorage.setItem('theme', mode);
     localStorage.setItem('themeVariant', variant);
   }
@@ -101,9 +113,10 @@ var ThemeSystem = (function() {
   }
 
   function init() {
-    // Restore mode + variant from localStorage on page load.
+    // Restore mode + variant + style from localStorage on page load.
     var mode = localStorage.getItem('theme') || 'dark';
     var variant = localStorage.getItem('themeVariant') || 'default';
+    currentStyle = localStorage.getItem('themeStyle') || 'default';
     // Sync per-mode memory.
     variants[mode] = variant;
     applyMode(mode);
@@ -120,7 +133,11 @@ var ThemeSystem = (function() {
         variants.light = settings.theme.lightVariant;
         localStorage.setItem('themeVariantLight', settings.theme.lightVariant);
       }
-      // Re-apply current mode with correct variant.
+      if (settings.theme.style) {
+        currentStyle = settings.theme.style;
+        localStorage.setItem('themeStyle', currentStyle);
+      }
+      // Re-apply current mode with correct variant + style.
       var mode = getMode();
       applyMode(mode);
     }
@@ -137,7 +154,8 @@ var ThemeSystem = (function() {
     apiPatch('/settings', {
       theme: {
         darkVariant: variants.dark,
-        lightVariant: variants.light
+        lightVariant: variants.light,
+        style: currentStyle
       }
     }).catch(function() { /* best-effort */ });
   }
@@ -250,6 +268,56 @@ var ThemeSystem = (function() {
     setVariant(mode, variant);
   }
 
+  // --- Style API ---
+
+  function getStyle() {
+    return currentStyle;
+  }
+
+  function applyStyle(styleId) {
+    currentStyle = styleId;
+    document.documentElement.setAttribute('data-theme-style', styleId);
+    localStorage.setItem('themeStyle', styleId);
+  }
+
+  function setStyle(styleId) {
+    applyStyle(styleId);
+    persistToBackend();
+    renderStylePicker('style-picker');
+    renderStylePicker('style-modal-picker-container');
+  }
+
+  function getStyleRegistry() {
+    return styleRegistry;
+  }
+
+  // --- Style Picker UI ---
+
+  function renderStylePicker(targetId) {
+    var container = document.getElementById(targetId);
+    if (!container) return;
+    var lang = document.documentElement.getAttribute('data-lang') || 'en';
+    var html = '<div class="style-picker-row">';
+    for (var i = 0; i < styleRegistry.length; i++) {
+      var s = styleRegistry[i];
+      var isActive = (currentStyle === s.id);
+      var label = lang === 'cn' ? s.nameZh : s.name;
+      html += '<button type="button" class="style-swatch' + (isActive ? ' active' : '') + '"'
+        + ' data-style="' + s.id + '"'
+        + ' title="' + label + '"'
+        + ' onclick="ThemeSystem.onStyleClick(this)"'
+        + '>' + s.icon + '<span>' + label + '</span></button>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function onStyleClick(el) {
+    var styleId = el.getAttribute('data-style');
+    if (!styleId) return;
+    setStyle(styleId);
+  }
+
   // --- Helpers ---
 
   function capitalize(s) {
@@ -267,6 +335,12 @@ var ThemeSystem = (function() {
     initFromSettings: initFromSettings,
     getRegistry: getRegistry,
     renderThemePicker: renderThemePicker,
-    onSwatchClick: onSwatchClick
+    onSwatchClick: onSwatchClick,
+    getStyle: getStyle,
+    setStyle: setStyle,
+    applyStyle: applyStyle,
+    getStyleRegistry: getStyleRegistry,
+    renderStylePicker: renderStylePicker,
+    onStyleClick: onStyleClick
   };
 })();

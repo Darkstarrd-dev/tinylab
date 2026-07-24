@@ -146,8 +146,8 @@ func (rt *Router) updateModelNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// updateModelKind updates the kind (text/image) of a single model on a provider.
-// Request: {"model": "model-id", "kind": "text|image"}
+// updateModelKind updates the kind (text/image/embedding) of a single model on a provider.
+// Request: {"model": "model-id", "kind": "text|image|embedding"}
 func (rt *Router) updateModelKind(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "id")
 	var req struct {
@@ -163,9 +163,9 @@ func (rt *Router) updateModelKind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Kind {
-	case "text", "image":
+	case "text", "image", "embedding":
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid kind, must be text | image")
+		writeAPIError(w, http.StatusBadRequest, "invalid kind, must be text | image | embedding")
 		return
 	}
 	if rt.reg.UpdateModelKind(providerID, req.Model, req.Kind) {

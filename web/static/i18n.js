@@ -64,6 +64,7 @@ const L = {
     modelKind: 'Model Kind',
     textModel: 'Text',
     imageModel: 'Image',
+    embeddingModel: 'Embedding',
     imgProtocol: 'Protocol',
     kindSaved: 'Model type saved',
     imgProtocolSaved: 'Image protocol saved',
@@ -170,10 +171,11 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     latency: 'Latency',
     error: 'Error',
     mptestSummary: 'Test completed · {0} protocol(s) supported',
-    mptestAllFailed: 'All 3 protocol probes failed',
+    mptestAllFailed: 'All 4 protocol probes failed',
     protoOpenAICompat: 'OpenAI Compatible',
     protoOpenAIResponses: 'OpenAI Responses',
     protoAnthropic: 'Anthropic Messages',
+    protoOpenAIEmbedding: 'OpenAI Embeddings',
     mptestSummaryTitle: 'Probe Summary',
     mptestStatusOk: 'OK',
     mptestStatusFail: 'Fail',
@@ -349,7 +351,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     appearanceDesc: 'Customize application theme mode and color schemes.',
     themeDark: 'Dark',
     themeLight: 'Light',
-    themeDefault: 'Default'
+    themeDefault: 'Default',
+    themeStyle: 'Style'
   },
   cn: {
     endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', usage: '用量', console: '控制台', playground: '测试', gallery: '图片库',
@@ -415,6 +418,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     modelKind: '模型类型',
     textModel: '文本',
     imageModel: '图片',
+    embeddingModel: '嵌入',
     imgProtocol: '协议',
     kindSaved: '模型类型已保存',
     imgProtocolSaved: '图片协议已保存',
@@ -521,10 +525,11 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     latency: '延迟',
     error: '错误',
     mptestSummary: '测试完成 · 支持 {0} 种协议',
-    mptestAllFailed: '三种协议探测均失败',
+    mptestAllFailed: '四种协议探测均失败',
     protoOpenAICompat: 'OpenAI 兼容',
     protoOpenAIResponses: 'OpenAI Responses',
     protoAnthropic: 'Anthropic Messages',
+    protoOpenAIEmbedding: 'OpenAI Embeddings',
     mptestSummaryTitle: '探测汇总',
     mptestStatusOk: '通过',
     mptestStatusFail: '失败',
@@ -700,7 +705,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     appearanceDesc: '自定义应用主题模式与色彩配色方案。',
     themeDark: '暗色',
     themeLight: '亮色',
-    themeDefault: '默认'
+    themeDefault: '默认',
+    themeStyle: '风格'
   }
 };
 

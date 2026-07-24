@@ -170,6 +170,10 @@ func (h *Handler) ImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	h.handleProxy(w, r, "/v1/images/generations", combo.EntryFormatOpenAI)
 }
 
+func (h *Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
+	h.handleProxy(w, r, "/v1/embeddings", combo.EntryFormatOpenAI)
+}
+
 func (h *Handler) PollTask(w http.ResponseWriter, r *http.Request) {
 	h.handleProxy(w, r, r.URL.Path, combo.EntryFormatOpenAI)
 }

@@ -229,6 +229,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	r.Post("/v1/completions", proxyHandler.Completions)
 	r.Get("/v1/models", proxyHandler.ListModels)
 	r.Post("/v1/images/generations", proxyHandler.ImagesGenerations)
+	r.Post("/v1/embeddings", proxyHandler.Embeddings)
 	// Proxy route (Anthropic protocol). Anthropic /v1/messages has no GET
 	// semantics, so only POST is registered. CORS is handled by the
 	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed.

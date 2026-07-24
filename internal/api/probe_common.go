@@ -19,16 +19,18 @@ const (
 	probeProtocolOpenAICompat    = "openai-compat"
 	probeProtocolOpenAIResponses = "openai-responses"
 	probeProtocolAnthropic       = "anthropic"
+	probeProtocolOpenAIEmbedding = "openai-embedding"
 )
 
 // ProbeResult is the outcome of probing a single protocol entry point for a model.
 type ProbeResult struct {
-	Protocol        string         // "openai-compat" / "openai-responses" / "anthropic"
+	Protocol        string         // "openai-compat" / "openai-responses" / "anthropic" / "openai-embedding"
 	Ok              bool           // resp.StatusCode == 200 and body has no error field
 	Status          int            // HTTP status code
 	LatencyMs       int64          // round-trip latency in milliseconds
 	OutputTokens    int            // extracted or estimated output token count
 	TokensPerSec    float64        // speed in tokens per second
+	EmbeddingDim    int            // embedding vector dimension (only for openai-embedding protocol)
 	Error           string         // human-readable error (empty on success)
 	Request         map[string]any // {method, url, headers, body, bodyRaw}
 	ResponseHeaders map[string][]string
@@ -44,6 +46,10 @@ type ProbeResult struct {
 type probeQuotaHook func(model string, resp *http.Response)
 
 const probeTestPrompt = "generate 100 tokens self introduction"
+
+// probeEmbeddingTestInput is the input text used for embedding model probes.
+// Chosen to be a meaningful sentence that exercises the embedding model.
+const probeEmbeddingTestInput = "The quick brown fox jumps over the lazy dog near a river at sunset."
 
 // probeOpenAICompat sends an /v1/chat/completions probe request (OpenAI Chat
 // Completions compatible). Body: {model, messages:[{role:"user",content:probeTestPrompt}],
@@ -88,6 +94,30 @@ func probeAnthropic(ctx context.Context, client *http.Client, baseURL, model, ap
 		"stream":     false,
 	}
 	return doProbe(ctx, client, probeProtocolAnthropic, http.MethodPost, url, "application/json", "x-api-key", apiKey, body, onOK, "anthropic-version", "2023-06-01")
+}
+
+// probeOpenAIEmbedding sends an /v1/embeddings probe request (OpenAI Embeddings API).
+// Body: {model, input:probeEmbeddingTestInput}. Auth: Authorization: Bearer <key>.
+// Validates response format: expects {data:[{embedding:[float64]}]}, extracts dimension.
+func probeOpenAIEmbedding(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK probeQuotaHook) ProbeResult {
+	const path = "/v1/embeddings"
+	url := proxy.BuildUpstreamURL(baseURL, path)
+	body := map[string]any{
+		"model": model,
+		"input": probeEmbeddingTestInput,
+	}
+	res := doProbe(ctx, client, probeProtocolOpenAIEmbedding, http.MethodPost, url, "application/json", "Authorization", "Bearer "+apiKey, body, onOK)
+	// Validate embedding response format and extract dimension
+	if res.Ok {
+		dim, err := extractEmbeddingDim(res.ResponseBodyRaw)
+		if err != "" {
+			res.Ok = false
+			res.Error = "invalid embedding response: " + err
+		} else {
+			res.EmbeddingDim = dim
+		}
+	}
+	return res
 }
 
 // doProbe performs a single JSON POST probe and normalizes the result into a
@@ -340,4 +370,30 @@ func headerToMap(h http.Header) map[string][]string {
 		m[k] = v
 	}
 	return m
+}
+
+// extractEmbeddingDim parses the embedding vector dimension from an upstream
+// /v1/embeddings response body. Expects {data:[{embedding:[float64]}]}.
+// Returns (dimension, "") on success or (0, errorMessage) on failure.
+func extractEmbeddingDim(raw string) (int, string) {
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return 0, "response is not valid JSON"
+	}
+	dataArr, ok := resp["data"].([]any)
+	if !ok || len(dataArr) == 0 {
+		return 0, "missing or empty 'data' array"
+	}
+	firstObj, ok := dataArr[0].(map[string]any)
+	if !ok {
+		return 0, "first data element is not an object"
+	}
+	embeddingArr, ok := firstObj["embedding"].([]any)
+	if !ok {
+		return 0, "missing or invalid 'embedding' array"
+	}
+	if len(embeddingArr) == 0 {
+		return 0, "embedding array is empty"
+	}
+	return len(embeddingArr), ""
 }

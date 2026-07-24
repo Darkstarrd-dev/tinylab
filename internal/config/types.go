@@ -32,9 +32,10 @@ type Key struct {
 // to support, as determined by probing (Step 3b). They are persisted on
 // ModelDef.Protocols and consumed by the multi-protocol composite detection UI.
 const (
-	ProtocolOpenAICompat    = "openai-compat"    // OpenAI Chat Completions compatible
-	ProtocolOpenAIResponses = "openai-responses" // OpenAI Responses API
-	ProtocolAnthropic       = "anthropic"        // Anthropic Messages API
+	ProtocolOpenAICompat     = "openai-compat"     // OpenAI Chat Completions compatible
+	ProtocolOpenAIResponses  = "openai-responses"  // OpenAI Responses API
+	ProtocolAnthropic        = "anthropic"         // Anthropic Messages API
+	ProtocolOpenAIEmbedding  = "openai-embedding"  // OpenAI Embeddings API
 )
 
 // ModelDef represents one upstream model with its quota type tag.
@@ -279,9 +280,11 @@ type AnySearchConfig struct {
 
 // ThemeConfig stores user theme preferences persisted across sessions.
 // Each mode (dark/light) remembers its selected variant independently.
+// Style controls the shape/motion dimension (default, sharp, soft, compact).
 type ThemeConfig struct {
 	DarkVariant  string `yaml:"darkVariant,omitempty" json:"darkVariant,omitempty"`   // default: "default"
 	LightVariant string `yaml:"lightVariant,omitempty" json:"lightVariant,omitempty"` // default: "default"
+	Style        string `yaml:"style,omitempty" json:"style,omitempty"`               // default: "default"
 }
 
 // Config is the top-level configuration structure.
