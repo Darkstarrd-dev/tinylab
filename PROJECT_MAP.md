@@ -104,9 +104,9 @@
 | `registry.go` | `Registry` 结构：`sync.RWMutex` 保护的 config + 运行时 key-state map；`New`/`Config`/`Reload` |
 | `providers.go` | Provider CRUD |
 | `keys.go` | Key CRUD（provider 内） |
-| `models.go` | Provider 自定义模型列表（`ListModels`、`AddModel`、`DeleteModel`、`UpdateModelQuotaType`、`UpdateModelAlias`、`UpdateModelNote`、`UpdateModelNIMOverride`、`ResolveModelAlias`、`GetModelByAliasOrID`） |
+| `models.go` | Provider 自定义模型列表（`ListModels`、`AddModel`、`DeleteModel`、`UpdateModelQuotaType`、`UpdateModelAlias` [含前缀自动剥离 `sanitizeAlias`]、`UpdateModelNote`、`UpdateModelNIMOverride`、`ResolveModelAlias` [含容错剥离]、`GetModelByAliasOrID`） |
 | `combos.go` | Combo CRUD；新增 `GetComboByID`(id) 方法供 combo 测速排序 handler 使用 |
-| `quickslots.go` | QuickSlot（预设模型切换槽）CRUD |
+| `quickslots.go` | QuickSlot（预设模型切换槽）CRUD（含 `sanitizeQuickSlotModels` 自动化简 `prefix/prefix/model` 条目） |
 | `state.go` | 每 key 运行时状态（`KeyRuntimeState`：冷却/锁/退避/NIM 计数）+ 合并/保留逻辑 |
 | `crud_test.go` / `reload_merge_test.go` / `state_test.go` | 测试 |
 | `models_protocols_test.go` / `probe_records_test.go` | 新增 ModelDef.Protocols CRUD 与 probeRecords 运行时状态测试 |

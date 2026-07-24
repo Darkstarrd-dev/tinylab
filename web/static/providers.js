@@ -1638,6 +1638,10 @@ function showModelAliasModal(pid, mid, currentAlias) {
 
 async function saveModelAlias(pid, mid) {
   var alias = document.getElementById('modal-alias-input').value.trim();
+  var p = (providersCache || []).find(function(item) { return item.id === pid; });
+  if (p && p.prefix && alias.indexOf(p.prefix + '/') === 0) {
+    alias = alias.slice(p.prefix.length + 1).trim();
+  }
   try {
     await apiPatch('/providers/' + pid + '/models/alias', { model: mid, alias: alias });
     toast(t('aliasSaved'), 'success');

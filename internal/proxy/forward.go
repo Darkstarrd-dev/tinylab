@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
@@ -173,6 +174,22 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 		return
 	}
 	providerID = provider.ID
+
+	// Clean up potential duplicate provider prefix/ID in upstreamModel
+	for {
+		trimmed := false
+		if provider.Prefix != "" && strings.HasPrefix(upstreamModel, provider.Prefix+"/") {
+			upstreamModel = strings.TrimPrefix(upstreamModel, provider.Prefix+"/")
+			trimmed = true
+		}
+		if provider.ID != "" && strings.HasPrefix(upstreamModel, provider.ID+"/") {
+			upstreamModel = strings.TrimPrefix(upstreamModel, provider.ID+"/")
+			trimmed = true
+		}
+		if !trimmed {
+			break
+		}
+	}
 
 	// NOTE: entry-format ↔ provider protocol matching was removed. TinyRouter
 	// fronts aggregating proxies (e.g. newapi / 2api) that serve multiple

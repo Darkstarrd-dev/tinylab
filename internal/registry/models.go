@@ -2,9 +2,32 @@ package registry
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
 )
+
+func sanitizeAlias(providerPrefix, providerID, alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return ""
+	}
+	for {
+		trimmed := false
+		if providerPrefix != "" && strings.HasPrefix(alias, providerPrefix+"/") {
+			alias = strings.TrimPrefix(alias, providerPrefix+"/")
+			trimmed = true
+		}
+		if providerID != "" && strings.HasPrefix(alias, providerID+"/") {
+			alias = strings.TrimPrefix(alias, providerID+"/")
+			trimmed = true
+		}
+		if !trimmed {
+			break
+		}
+	}
+	return alias
+}
 
 // ListModels returns the custom model definitions for a provider.
 func (r *Registry) ListModels(providerID string) []config.ModelDef {
@@ -31,7 +54,9 @@ func (r *Registry) AddModel(providerID string, model config.ModelDef) bool {
 		if r.config.Providers[i].ID != providerID {
 			continue
 		}
-		for _, m := range r.config.Providers[i].Models {
+		p := &r.config.Providers[i]
+		model.Alias = sanitizeAlias(p.Prefix, p.ID, model.Alias)
+		for _, m := range p.Models {
 			if m.ID == model.ID {
 				return true // already exists, not an error
 			}
@@ -40,7 +65,7 @@ func (r *Registry) AddModel(providerID string, model config.ModelDef) bool {
 				return false
 			}
 		}
-		r.config.Providers[i].Models = append(r.config.Providers[i].Models, model)
+		p.Models = append(p.Models, model)
 		return true
 	}
 	return false
@@ -95,10 +120,12 @@ func (r *Registry) UpdateModelAlias(providerID, modelID, alias string) bool {
 		if r.config.Providers[i].ID != providerID {
 			continue
 		}
+		p := &r.config.Providers[i]
+		alias = sanitizeAlias(p.Prefix, p.ID, alias)
 		// Check alias uniqueness: must not conflict with existing model IDs or
 		// aliases in the same provider (excluding the model being updated).
 		if alias != "" {
-			for _, m := range r.config.Providers[i].Models {
+			for _, m := range p.Models {
 				if m.ID == modelID {
 					continue // skip the model being updated
 				}
@@ -107,9 +134,9 @@ func (r *Registry) UpdateModelAlias(providerID, modelID, alias string) bool {
 				}
 			}
 		}
-		for j := range r.config.Providers[i].Models {
-			if r.config.Providers[i].Models[j].ID == modelID {
-				r.config.Providers[i].Models[j].Alias = alias
+		for j := range p.Models {
+			if p.Models[j].ID == modelID {
+				p.Models[j].Alias = alias
 				return true
 			}
 		}
@@ -248,8 +275,9 @@ func (r *Registry) ResolveModelAlias(providerPrefix, aliasOrModelID string) (mod
 	if !ok {
 		return aliasOrModelID, false
 	}
+	cleanInput := sanitizeAlias(p.Prefix, p.ID, aliasOrModelID)
 	for _, m := range p.Models {
-		if m.Alias == aliasOrModelID {
+		if m.Alias != "" && (m.Alias == aliasOrModelID || m.Alias == cleanInput) {
 			return m.ID, true
 		}
 	}
@@ -265,8 +293,10 @@ func (r *Registry) GetModelByAliasOrID(providerID, aliasOrModel string) (config.
 		if r.config.Providers[i].ID != providerID {
 			continue
 		}
-		for _, m := range r.config.Providers[i].Models {
-			if m.Alias == aliasOrModel || m.ID == aliasOrModel {
+		p := &r.config.Providers[i]
+		cleanInput := sanitizeAlias(p.Prefix, p.ID, aliasOrModel)
+		for _, m := range p.Models {
+			if m.Alias == aliasOrModel || m.Alias == cleanInput || m.ID == aliasOrModel || m.ID == cleanInput {
 				return m, true
 			}
 		}

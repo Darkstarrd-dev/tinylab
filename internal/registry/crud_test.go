@@ -356,3 +356,34 @@ func TestReorderProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestAliasAndQuickSlotSanitization(t *testing.T) {
+	r := New(crudTestConfig())
+	// p1 has prefix "p1"
+	if !r.UpdateModelAlias("p1", "m1", "p1/my-alias") {
+		t.Fatal("UpdateModelAlias failed")
+	}
+	// Verify that the prefix "p1/" was automatically stripped
+	if realID, ok := r.ResolveModelAlias("p1", "my-alias"); !ok || realID != "m1" {
+		t.Errorf("expected ResolveModelAlias(my-alias) = m1, got (%s, %v)", realID, ok)
+	}
+	// Verify that querying with redundant prefix still resolves properly
+	if realID, ok := r.ResolveModelAlias("p1", "p1/my-alias"); !ok || realID != "m1" {
+		t.Errorf("expected ResolveModelAlias(p1/my-alias) = m1, got (%s, %v)", realID, ok)
+	}
+
+	// Test quickslot sanitization
+	qs := config.QuickSlot{
+		ID:     "qs1",
+		Name:   "QS1",
+		Models: []string{"p1/p1/m1", "p1/p1/my-alias"},
+	}
+	r.AddQuickSlot(qs)
+	gotQS, ok := r.GetQuickSlot("qs1")
+	if !ok {
+		t.Fatal("GetQuickSlot failed")
+	}
+	if gotQS.Models[0] != "p1/m1" || gotQS.Models[1] != "p1/my-alias" {
+		t.Errorf("quickslot models not properly sanitized, got: %v", gotQS.Models)
+	}
+}

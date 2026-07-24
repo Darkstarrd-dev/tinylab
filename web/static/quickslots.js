@@ -532,6 +532,9 @@ async function openModelSelectorModal(opts) {
     } else {
       for (var j = 0; j < models.length; j++) {
         var displayId = models[j].alias || models[j].id;
+        if (p.prefix && displayId.indexOf(p.prefix + '/') === 0) {
+          displayId = displayId.slice(p.prefix.length + 1);
+        }
         var fullId = p.prefix + '/' + displayId;
         var note = models[j].note || '';
         var isInList = initialSelected.indexOf(fullId) >= 0;
