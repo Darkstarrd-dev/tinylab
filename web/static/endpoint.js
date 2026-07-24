@@ -43,6 +43,7 @@ async function renderEndpoint(c) {
         </div>\
         <div class="settings-row">\
           <span class="settings-row-title" title="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + t('shortcutSettings') + '</span>\
+          <span class="code settings-row-endpoint" id="shortcut-settings-summary" title="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + escapeHtml(getShortcutSettingsSummary()) + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openShortcutsModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
@@ -514,6 +515,35 @@ function openPasswordModal() {
 //      PATCH /api/settings { shortcuts: {...} }. An empty object {} is
 //      sent explicitly so the backend clears any previous overrides.
 
+function getShortcutSettingsSummary() {
+  if (typeof Shortcuts === 'undefined') return '';
+  var tabs = (typeof scRegionTabs === 'function') ? scRegionTabs() : Shortcuts.getAllRegions();
+  var total = 0;
+  for (var i = 0; i < tabs.length; i++) {
+    var actions = tabs[i].actions || [];
+    total += actions.length;
+  }
+  var overrides = Object.keys(Shortcuts.getAllOverrides() || {}).length;
+  if (overrides > 0) {
+    return t('shortcutSummaryCustom', [total, overrides]);
+  }
+  return t('shortcutSummaryDefault', [total]);
+}
+
+function updateShortcutSettingsSummary() {
+  var el = document.getElementById('shortcut-settings-summary');
+  if (el) {
+    el.textContent = getShortcutSettingsSummary();
+  }
+}
+
+function closeShortcutsModal() {
+  if (window.__settings && window.__settings.shortcuts && typeof Shortcuts !== 'undefined') {
+    Shortcuts.loadOverrides(window.__settings.shortcuts || {});
+  }
+  closeModalOverlay();
+}
+
 function scRegionTabs() {
   var regions = Shortcuts.getAllRegions();
   var hasPg = (typeof window.__hasPlayground === 'boolean') ? window.__hasPlayground : true;
@@ -554,7 +584,7 @@ function openShortcutsModal() {
       '<div class="modal-title">' + escapeHtml(t('shortcutSettings')) + '</div>' +
       '<div class="modal-body">' + body + '</div>' +
       '<div class="modal-footer">' +
-        '<button type="button" class="btn btn-ghost" onclick="closeModalOverlay()">' + t('cancel') + '</button>' +
+        '<button type="button" class="btn btn-ghost" onclick="closeShortcutsModal()">' + t('cancel') + '</button>' +
         '<button type="button" class="btn btn-primary" id="settings-modal-save">' + t('save') + '</button>' +
       '</div>' +
     '</div>';
@@ -775,6 +805,7 @@ async function saveShortcutsModal() {
     if (window.__settings) {
       window.__settings.shortcuts = overrides;
     }
+    updateShortcutSettingsSummary();
     toast(t('shortcutSaved'), 'success');
     closeModalOverlay();
   } catch (e) {

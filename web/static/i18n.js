@@ -342,6 +342,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     shortcutSaveFailed: 'Failed to save shortcuts: {0}',
     shortcutNoOverrides: 'No overrides — using system defaults.',
     shortcutPlaygroundUnavailable: 'Playground and Gallery shortcuts are only available when the Playground build is enabled.',
+    shortcutSummaryDefault: '{0} shortcuts',
+    shortcutSummaryCustom: '{0} shortcuts ({1} modified)',
     // Theme / Appearance
     appearance: 'Appearance',
     appearanceDesc: 'Customize application theme mode and color schemes.',
@@ -691,6 +693,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     shortcutSaveFailed: '保存快捷键失败: {0}',
     shortcutNoOverrides: '当前没有覆盖项——使用系统默认。',
     shortcutPlaygroundUnavailable: 'Playground 与 Gallery 的快捷键仅在启用 Playground 构建时可用。',
+    shortcutSummaryDefault: '{0} 个快捷键',
+    shortcutSummaryCustom: '{0} 个快捷键（{1} 个已修改）',
     // Theme / Appearance
     appearance: '外观',
     appearanceDesc: '自定义应用主题模式与色彩配色方案。',

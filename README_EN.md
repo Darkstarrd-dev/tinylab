@@ -47,75 +47,88 @@ Furthermore, TinyRouter deeply integrates a multi-mode Playground (supporting AI
 
 ## Detailed Feature Guide & Shortcuts
 
-### Page Navigation Shortcuts
+## Detailed Feature Guide & Shortcuts
 
-| Shortcut | Description |
-|---|---|
-| `F1` | Switch to **Usage** (Statistics & Monitoring) page |
-| `F2` | Switch to **Settings** (Config, Providers & Combos) page |
-| `F3` | Switch to **Console** (Logs, Monitor & Terminal) page |
-| `F4` | Switch to **Playground** (Multi-Model AI Testing) page |
-| `F5` | Switch to **Download** (Video/Audio Download Manager) page |
-| `F6` | Switch to **Gallery** (Image/Manga/Video Viewer) page |
+TinyRouter provides rich keyboard shortcut support. Core shortcuts across Global, Playground, and Gallery can be **customized and rebound** on the **Settings → Shortcut Settings** page (defaults live in memory; only overrides are written to `config.yaml`).
+
+### 1. Page Navigation & System Shortcuts (*Customizable*)
+
+| Shortcut | Default Binding | Description |
+|---|---|---|
+| `F1` | `F1` | Switch to **Usage** (Real-Time Statistics & Monitoring) page |
+| `F2` | `F2` | Switch to **Settings** (Config, Providers & Combos) page |
+| `F3` | `F3` | Switch to **Console** (Logs, Monitor & Terminal) page |
+| `F4` | `F4` | Switch to **Playground** (Multi-Model AI Testing) page |
+| `F5` | `F5` | Switch to **Download** (Video/Audio Download Manager) page |
+| `F6` | `F6` | Switch to **Gallery** (Image/Manga/Video Viewer) page |
+| `1`–`9` | `1`–`9` | Open & cycle QuickSlot #1–#9 model selector popup |
+| `f` | `f` | Toggle web / native fullscreen mode |
+| `Escape` | `Escape` | Safely shutdown TinyRouter service (when no modal is open) |
+
+---
+
+### 2. Playground Shortcuts & Modes
+
+| Shortcut | Default / Type | Description |
+|---|---|---|
+| `Enter` | `Enter` (*Customizable*) | Send message in main prompt input (`!Shift` for newline) |
+| `Ctrl+Enter` | `Ctrl+Enter` (*Customizable*) | Save and apply edited message in chat history |
+| `Escape` | `Escape` (*Customizable*) | Cancel message edit mode |
+| `Enter` | `Enter` (*Customizable*) | Send message in AutoChat input |
+| `Alt + ~` | Mode Hotkey | **Focus Input**: Quick-focus cursor to the prompt input box |
+| `Alt + 1`–`4` | Mode Hotkey | **Switch Mode**: `1`-Normal, `2`-Search, `3`-Image, `4`-Auto |
+| `Alt + C` | Mode Hotkey | **Clear Chat**: Clear conversation history for current mode |
+| `Ctrl + 1`–`4` | Mode Hotkey | **Split Count**: Switch Playground to 1–4 split windows |
+| `Shift + 1`–`4` | Mode Hotkey | **Set Active Window**: Switch active focus pane to pane 1–4 |
+
+---
+
+### 3. Gallery (Viewer & Player) Shortcuts
+
+| Shortcut | Default / Type | Description |
+|---|---|---|
+| `d` | `d` (*Customizable*) | **Toggle Dual View**: Switch between Single View and Dual View (Left Image, Right Video) |
+| `m` | `m` (*Customizable*) | **Toggle Media Mode**: Switch between Picture Mode and Video Mode |
+| `Tab` | `Tab` (*Customizable*) | **Switch Focus**: Toggle active control focus between left and right panes in Dual View |
+| `←` / `→` | `ArrowLeft` / `Right` (*Customizable*) | Prev / Next item (Synonyms: `PageUp` / `PageDown` / `Space`) |
+| `↑` / `↓` | `ArrowUp` / `Down` (*Customizable*) | Prev / Next folder or directory |
+| `a` | `a` (*Customizable*) | **Autoplay**: Toggle image/video autoplay |
+| `f` | `f` (*Customizable*) | **Fullscreen**: Toggle web / native fullscreen |
+| `t` | `t` (*Customizable*) | **Directory Tree**: Toggle count-badged directory tree panel |
+| `c` | `c` (*Customizable*) | **Clear Filter**: Clear active tree selection filter |
+| `Escape` | `Escape` (*Customizable*) | **Exit Fullscreen**: Exit fullscreen view (Synonym: `Enter`) |
+| `Delete` | Item Management | Mark current item for deletion / Toggle check in review mode |
+| `Shift + Delete` | Item Management | Prompt modal to delete entire ZIP archive from disk |
+| `Ctrl + Delete` | Item Management | Prompt modal to delete current single image item from disk |
+| `1`–`9` | Video Active | Set playback volume (11%–99%) / Set autoplay interval (1s–9s) |
+| `←` / `→` | Video Active | Rewind / Fast-forward video (Fullscreen: 5s / Normal: 10s) |
+| `↑` / `↓` | Video Active | Volume +/- 10% (Fullscreen) or Prev / Next video (Normal page) |
+| `Space` | Video Active | Play / Pause video |
+
+---
+
+### 4. Modal & Popup Interaction Shortcuts
+
+- **QuickSlot Selection Popup**:
+  - `1`–`9`: Move focus to model index (resets 1s auto-close timer);
+  - `↑` / `↓`: Move focus up/down (cancels auto-close);
+  - `+` or `=`: Open model import selector modal;
+  - `Enter`: Confirm and set focused model active;
+  - `Delete`: Remove focused model from slot; `Escape` or Right-click background: Close popup.
+- **QuickSlot Model Import Modal**:
+  - `↑` / `↓`: Move focus item by item in model list;
+  - `PageUp` / `PageDown` / `Home` / `End`: Page scroll or jump to top/bottom;
+  - `Space`: Check / uncheck highlighted model; `Enter`: Confirm import;
+  - `Tab` / `Shift+Tab`: Focus trap loop across search filter, select all, deselect all, close, add buttons and list.
+- **Global Modals**:
+  - `Escape`: Dismiss top modal (Settings, Proxy, Port, Logs, Password, etc.);
+  - `Tab` / `Shift+Tab`: Modal Focus Trap loop;
+  - `←` / `→` / `↑` / `↓`: Navigate focus across modal footer buttons;
+  - `Enter`: Click focused button (or trigger `.btn-primary` if no button focused).
 
 ---
 
 ### Quick Slot Guide
-
-Quick Slot is a preset "model fast-switching slot" mechanism designed to bind multiple frequently-used models or combos to number keys `1`–`9` for 1-click cycling without opening dropdown menus.
-
-- **Model & Combo Hybrid Binding**: In addition to individual Provider models (e.g., `ms/deepseek-chat` or `gpt-4o`), Quick Slots **fully support adding Model Combos as options**!
-- **Key Cycling & Popup Management**: Pressing number keys `1`–`9` displays a popup showing available models for that slot. Repeatedly pressing the key cycles through active models, and stopping closes the window. Models can also be added or removed directly inside the popup.
-- **Expose Quick Slots Only (`QuickSlotOnly`)**:
-  - Enable `QuickSlotOnly` in Settings so that `/v1/models` returns only models configured in Quick Slots. This keeps model dropdown lists extremely clean in third-party clients (such as Zed, avoiding hundreds of clutter models).
-
----
-
-### Combo Strategy Guide
-
-Combos allow you to aggregate multiple models from different Providers into a single virtual model name for frontend or client calls. Combos support 3 scheduling strategies:
-
-1. **`fallback` (Failover Order)**:
-   - Tries model nodes in configured sequential order.
-   - When a preceding model encounters errors, rate limits (429), or cooldowns, TinyRouter automatically falls back to the next model node transparently.
-2. **`round-robin` (Load Balancing)**:
-   - Rotates requests sequentially among all available model nodes to balance traffic load.
-3. **`greedy-squirrel` (Tiered Quota Strategy)**:
-   - Reads quota types (`QuotaType`: `unlimited` / `limited` / `paid`) configured on Providers.
-   - Automatically prioritizes requests in order: **Unlimited Free → Limited → Paid**. It degrades to paid nodes only when free/limited nodes are exhausted, saving maximum cost.
-
----
-
-### Playground Shortcuts & Gestures
-
-Playground provides independent state sandboxes and message isolation for each mode with free bi-directional switching:
-
-| Shortcut | Description |
-|---|---|
-| `Alt + ~` | **Focus Prompt Input**: Quick-focus cursor to the prompt text box |
-| `Alt + 1` | Switch to **Normal** Mode |
-| `Alt + 2` | Switch to **Search** (AI Web Search & Dual View) Mode |
-| `Alt + 3` | Switch to **Image** (AI Image Generation) Mode |
-| `Alt + 4` | Switch to **Auto** (Multi-Model AutoChat Battle) Mode |
-| `Alt + C` | **Clear Chat**: Clear chat history for current mode |
-| `Ctrl + 1`–`4` | **Set Split Count**: Switch Playground to 1–4 split windows (Auto mode min 2) |
-| `Shift + 1`–`4` | **Set Active Window**: Switch active focus window to pane 1–4 |
-
----
-
-### Gallery Shortcuts
-
-| Shortcut | Description |
-|---|---|
-| `Space` | **Play / Pause**: Toggle video playback |
-| `F` | **Fullscreen**: Toggle web / native frameless fullscreen (Right-click to exit) |
-| `D` | **Toggle Dual View**: Switch between Single View and Dual View (Left Image, Right Video) |
-| `Tab` | **Switch Focus**: Toggle active control focus between left and right panes in Dual View |
-| `M` | **Toggle Media Mode**: Switch between Picture Mode and Video Mode |
-| `A` | **Autoplay**: Toggle image autoplay (Hover to set 1s–120s interval) |
-| `T` | **Directory Tree**: Toggle count-badged directory tree panel |
-| `←` / `→` | Prev / Next image (or video rewind / fast-forward 5s) |
-| `↑` / `↓` / `PageUp` / `PageDown` | Prev / Next folder or directory |
 
 ---
 
