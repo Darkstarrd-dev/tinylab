@@ -368,3 +368,9 @@ pgSaveSuccess: 'Markdown 文件已保存',
     'OK': '确定', 'Reset': '复位', 'Filter': '筛选', 'No models available': '无可用模型', '(no response)': '（无回复）',
   }
 };
+
+// Playground translation fallback. Uses host t() when available, else
+// returns the key verbatim. Shared by gallery-state.js and editor-state.js.
+function T(key) {
+  return (typeof t === 'function') ? t(key) : key;
+}
