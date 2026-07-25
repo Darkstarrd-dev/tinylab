@@ -14,21 +14,98 @@ function getItemBlob(item) {
       return Promise.resolve(item.file);
     }
     if (item.kind === 'zip') {
-      var sid = item.sessionId || galleryState.zipSessionId;
-      var zPath = item.zipPath || item.path || '';
-      // Use zipPath (path stable after deletion; index is renumbered by DELETE
-      // and would become stale — zipPath is unique per entry and never changes).
-      var identifier = zPath.split('/').map(encodeURIComponent).join('/');
-      var url = '/api/gallery/zip/' + encodeURIComponent(sid) + '/' + identifier;
-      return fetch(url).then(function(r) {
-        if (!r.ok) throw new Error('zip entry http ' + r.status);
-        return r.blob();
-      });
+      return getZipEntryBlob(item);
     }
   } catch (e) {
     return Promise.reject(e);
   }
   return Promise.resolve(null);
+}
+
+// getZipEntryBlob fetches a single zip entry image, rehydrating the backend
+// session on a 404 (the session was evicted by the LRU) by re-uploading the
+// pack from its original source, then retrying the fetch once. The retry uses
+// the fresh session id stored back onto the item (and onto every sibling item
+// of the same pack) so a single re-upload revives the whole pack.
+function getZipEntryBlob(item) {
+  var sid = item.sessionId || galleryState.zipSessionId;
+  var zPath = item.zipPath || item.path || '';
+  // Use zipPath (path stable after deletion; index is renumbered by DELETE
+  // and would become stale — zipPath is unique per entry and never changes).
+  var identifier = zPath.split('/').map(encodeURIComponent).join('/');
+  var url = '/api/gallery/zip/' + encodeURIComponent(sid) + '/' + identifier;
+  return fetch(url).then(function(r) {
+    if (r.ok) return r.blob();
+    if (r.status !== 404) throw new Error('zip entry http ' + r.status);
+    // Session evicted by LRU — rehydrate from the pack's source and retry once.
+    return rehydrateZipSession(item).then(function(newSid) {
+      if (!newSid) throw new Error('zip session rehydrate failed');
+      var nurl = '/api/gallery/zip/' + encodeURIComponent(item.sessionId) + '/' + identifier;
+      return fetch(nurl).then(function(r2) {
+        if (!r2.ok) throw new Error('zip entry http ' + r2.status);
+        return r2.blob();
+      });
+    });
+  });
+}
+
+// rehydrateZipSession re-creates an evicted backend zip session from the
+// pack's original source and migrates every item of the same pack to the new
+// session id. Deduped per old session id so concurrent 404s for the same pack
+// share a single re-upload. Returns the new session id, or null on failure.
+var _rehydrateInFlight = {}; // oldSessionId -> Promise<newSessionId|null>
+function rehydrateZipSession(item) {
+  var oldSid = item.sessionId;
+  if (oldSid && _rehydrateInFlight[oldSid]) return _rehydrateInFlight[oldSid];
+  var p = (async function() {
+    try {
+      var newSid = null;
+      if (item.zipAbsPath) {
+        // Backend-path packs re-create from the on-disk path (no upload).
+        var res = await fetch('/api/gallery/zip-from-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: item.zipAbsPath })
+        });
+        if (!res.ok) return null;
+        var d = await res.json();
+        newSid = d.sessionId;
+      } else {
+        // FS Access API or pasted blob packs re-upload the zip bytes.
+        var blob = null;
+        if (item.zipFileHandle) {
+          blob = await item.zipFileHandle.getFile();
+        } else if (item.zipFile) {
+          blob = item.zipFile;
+        }
+        if (!blob) return null;
+        var buf = await blob.arrayBuffer();
+        var res = await fetch('/api/gallery/zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/zip' },
+          body: buf
+        });
+        if (!res.ok) return null;
+        var d = await res.json();
+        newSid = d.sessionId;
+      }
+      if (newSid && oldSid) {
+        // Migrate all items of the evicted pack to the fresh session.
+        for (var i = 0; i < galleryState.items.length; i++) {
+          var it = galleryState.items[i];
+          if (it && it.kind === 'zip' && it.sessionId === oldSid) it.sessionId = newSid;
+        }
+      }
+      return newSid;
+    } catch (e) {
+      console.warn('rehydrateZipSession failed:', e);
+      return null;
+    } finally {
+      if (oldSid) delete _rehydrateInFlight[oldSid];
+    }
+  })();
+  if (oldSid) _rehydrateInFlight[oldSid] = p;
+  return p;
 }
 
 async function ensureMainSrc(item) {
@@ -210,6 +287,35 @@ function appendNewItems(newItems) {
   }
 }
 
+// runWithConcurrency runs task(item) over every item with at most `limit`
+// in-flight at once. Preserves input order of completion tracking but does not
+// wait for earlier items to finish before starting later ones up to the cap.
+// Returns a promise that resolves when all tasks have settled.
+function runWithConcurrency(items, limit, task) {
+  if (!items || !items.length) return Promise.resolve();
+  var cap = Math.max(1, limit || 1);
+  var i = 0;
+  return new Promise(function(resolve) {
+    var active = 0;
+    function next() {
+      while (active < cap && i < items.length) {
+        var idx = i++;
+        active++;
+        Promise.resolve()
+          .then(function() { return task(items[idx]); })
+          .then(function() { settle(); }, function() { settle(); });
+      }
+      if (i >= items.length && active === 0) resolve();
+    }
+    function settle() {
+      active--;
+      if (i >= items.length && active === 0) resolve();
+      else next();
+    }
+    next();
+  });
+}
+
 async function processCollectedEntries(collected) {
   galleryState.pendingZipQueue = [];
   galleryState.loadingZip = false;
@@ -242,10 +348,13 @@ async function processCollectedEntries(collected) {
   });
 
   if (zipFiles.length > 0) {
-    var zipPromises = zipFiles.map(function(zf) {
+    // Bounded concurrency: uploading hundreds of zips at once previously let
+    // the backend LRU evict the earliest sessions before their thumbnails were
+    // fetched (the "first N packs fail" bug). Capping at 6 keeps the working
+    // set within the session store and avoids a thundering-herd upload burst.
+    await runWithConcurrency(zipFiles, 6, function(zf) {
       return addZipBlob(zf.file, outImg, zf.zipFileHandle);
     });
-    await Promise.all(zipPromises);
   }
 
   // Append videos (preserve existing)
@@ -362,14 +471,22 @@ async function addZipBlob(file, out, zipFileHandle) {
     }
     var data = await res.json();
     var sessionId = data.sessionId;
-    galleryState.zipSessionId = sessionId;
-    galleryState.zipEntriesCache = data.manifest;
+    // Do not stomp the global zipSessionId here: under bounded-concurrency
+    // bulk import, every addZipBlob would race and the global would end up
+    // pointing at the last-imported pack, breaking AI Review (which previously
+    // read this global). Each item carries its own sessionId (below), and
+    // setActive now updates the global to the currently-viewed pack's session.
     var entries = (data.manifest && data.manifest.entries) || [];
     var zipName = file.path || file.name || 'archive.zip';
     // zipFileHandle: FileSystemFileHandle|null — null means the zip cannot be
     // written back to disk (e.g. pasted blob, legacy drop). UI will degrade
     // delete/overwrite actions accordingly.
     var handle = zipFileHandle || null;
+    // Retain the original Blob only when there is no FS handle and no on-disk
+    // path to re-create the session from — those cases (pasted/legacy-drop
+    // zips) need it for rehydrateZipSession on a 404. FS-handle and backend-
+    // path packs rehydrate via handle.getFile() / zip-from-path respectively.
+    var rehydrateBlob = handle ? null : file;
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i];
       var nm = e.path.split('/').pop();
@@ -383,7 +500,8 @@ async function addZipBlob(file, out, zipFileHandle) {
         sessionId: sessionId,
         size: e.size || 0,
         getBlob: null,
-        zipFileHandle: handle
+        zipFileHandle: handle,
+        zipFile: rehydrateBlob
       });
     }
   } catch (e) {

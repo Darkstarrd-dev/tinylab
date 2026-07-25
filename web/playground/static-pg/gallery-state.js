@@ -43,10 +43,6 @@ function isTiff(name) {
   return ext === 'tiff' || ext === 'tif';
 }
 
-function T(key) {
-  return (typeof t === 'function') ? t(key) : key;
-}
-
 function prettySize(n) {
   if (!n && n !== 0) return '';
   n = Number(n) || 0;
@@ -68,7 +64,7 @@ function formatTime(secs) {
 }
 
 function escapeHtml(s) {
-  if (s === null || s === undefined) return '';
+  if (!s) return '';
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -150,7 +146,6 @@ var galleryState = {
   pasteHandler: null,
   pageKeyHandler: null,
   zipSessionId: null,
-  zipEntriesCache: null,
   // zip item fields (constructed in gallery-io.js):
   //   zipFileHandle: FileSystemFileHandle|null — null means the zip cannot
   //   be written back to disk (pasted blob or legacy drop). UI should

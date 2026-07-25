@@ -43,7 +43,7 @@ func NewSession(shellPath string, conn *websocket.Conn, onClose func()) (*Sessio
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := pt.CommandContext(ctx, path)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = buildShellEnv()
 	// NOTE: CREATE_NO_WINDOW is NOT set here even though it would hide the
 	// console window. go-pty uses ConPTY (CreatePseudoConsole) to create a
 	// pseudo console for the shell. Setting CREATE_NO_WINDOW conflicts with

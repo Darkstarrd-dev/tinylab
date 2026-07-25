@@ -263,6 +263,32 @@ function renderTreePanel() {
   }
 }
 
+// releaseZipSessions fires best-effort DELETE /api/gallery/zip/{sessionId} for
+// every distinct zip session referenced by removedItems, skipping any session
+// still referenced by a surviving item (so sibling entries of the same pack
+// keep their session alive). Fire-and-forget: errors are swallowed (the
+// session may already be evicted) and the UI never blocks on this.
+function releaseZipSessions(removedItems) {
+  if (!removedItems || !removedItems.length) return;
+  var sids = {};
+  for (var i = 0; i < removedItems.length; i++) {
+    var it = removedItems[i];
+    if (it && it.kind === 'zip' && it.sessionId) sids[it.sessionId] = true;
+  }
+  if (!Object.keys(sids).length) return;
+  var alive = {};
+  var survivors = (galleryState.items || []).concat(galleryState.videoItems || []);
+  for (var j = 0; j < survivors.length; j++) {
+    var s = survivors[j];
+    if (s && s.kind === 'zip' && s.sessionId) alive[s.sessionId] = true;
+  }
+  for (var sid in sids) {
+    if (alive[sid]) continue;
+    var url = '/api/gallery/zip/' + encodeURIComponent(sid);
+    fetch(url, { method: 'DELETE' }).catch(function() { /* already evicted */ });
+  }
+}
+
 function clearActiveSideTree() {
   var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
 
@@ -295,12 +321,16 @@ function clearActiveSideTree() {
     return;
   }
 
-  for (var j = 0; j < galleryState.items.length; j++) {
-    var im = galleryState.items[j];
+  var cleared = galleryState.items.slice();
+  for (var j = 0; j < cleared.length; j++) {
+    var im = cleared[j];
     if (im && im.mainURL && String(im.mainURL).indexOf('blob:') === 0) FsApi.BlobTracker.revoke(im.mainURL);
     if (im && im.thumbURL && String(im.thumbURL).indexOf('blob:') === 0) FsApi.BlobTracker.revoke(im.thumbURL);
   }
   galleryState.items = [];
+  // Free the backend zip sessions of the cleared packs immediately (no
+  // surviving items reference them, so all are released).
+  releaseZipSessions(cleared);
   galleryState.index = -1;
   galleryState.mainURL = null;
   galleryState.curDirPath = '';
@@ -495,6 +525,15 @@ function setActive(index) {
     }
   }
   galleryState.index = index;
+  // Point the shared zipSessionId at the currently-viewed pack (AI Review and
+  // the getItemBlob fallback read it) and bump the session's LRU position so
+  // the viewed pack resists eviction. Fire-and-forget the touch; a 404 just
+  // means rehydrateZipSession will recreate it on next entry fetch.
+  var cur = galleryState.items[index];
+  if (cur && cur.kind === 'zip' && cur.sessionId) {
+    galleryState.zipSessionId = cur.sessionId;
+    fetch('/api/gallery/zip/' + encodeURIComponent(cur.sessionId) + '/touch', { method: 'POST' }).catch(function() {});
+  }
   renderActive(index);
 }
 
@@ -552,6 +591,8 @@ function removeItem(removedIndex) {
   }
   // Splice
   galleryState.items.splice(removedIndex, 1);
+  // Release the backend zip session if no surviving item still references it.
+  if (item && item.kind === 'zip') releaseZipSessions([item]);
   // Adjust current index (no wrap)
   var cur = galleryState.index;
   if (removedIndex < cur) {
@@ -601,6 +642,11 @@ function removeItemsByFilter(filterFn) {
   // Determine current item's fate (by reference)
   var curItem = galleryState.items[galleryState.index];
   galleryState.items = kept;
+  // Release backend zip sessions whose packs are fully removed (no kept item
+  // still references them). Sibling entries of a partially-removed pack keep
+  // their session alive. Must run after the splice so survivors are read from
+  // the new galleryState.items.
+  releaseZipSessions(removed);
   var newIdx = -1;
   if (curItem) {
     for (var k = 0; k < kept.length; k++) {
