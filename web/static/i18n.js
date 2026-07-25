@@ -352,7 +352,22 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     themeDark: 'Dark',
     themeLight: 'Light',
     themeDefault: 'Default',
-    themeStyle: 'Style'
+    themeStyle: 'Style',
+    // Editor keys
+    editor: 'Editor',
+    editorEditMode: 'Edit', editorDiff: 'Diff', editorDiffSource: 'Diff Source', editorSaveAll: 'Save All',
+    editorOpen: 'Open', editorSave: 'Save', editorRaw: 'Raw', editorParsed: 'Parsed', editorWrap: 'Wrap',
+    editorLeftBeforeAfter: 'Left: before\u2192after', editorRightBeforeAfter: 'Right: before\u2192after', editorLeftVsRight: 'Left vs Right',
+    editorFind: 'Find', editorReplace: 'Replace', editorReplaceAll: 'Replace All',
+    editorCaseSensitive: 'Aa', editorPrev: 'Prev', editorNext: 'Next',
+    editorGoToLine: 'Go to Line', editorGoToLinePrompt: 'Enter line number:',
+    editorUntitled: 'untitled', editorUnsaved: 'unsaved',
+    editorDeleted: 'Deleted', editorAdded: 'Added', editorModified: 'Modified',
+    editorLines: 'lines', editorCharRetention: 'Char retention:',
+    editorNoFile: 'No files loaded.',
+    editorCancelled: 'Cancelled', editorUnsupported: 'Unsupported file type',
+    editorSaved: 'File saved', editorSaveFailed: 'Save failed',
+    editorFileTooLarge: 'File is too large (max 32MB)'
   },
   cn: {
     endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', usage: '用量', console: '控制台', playground: '测试', gallery: '图片库',
@@ -706,7 +721,22 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     themeDark: '暗色',
     themeLight: '亮色',
     themeDefault: '默认',
-    themeStyle: '风格'
+    themeStyle: '风格',
+    // Editor keys
+    editor: '编辑器',
+    editorEditMode: '编辑', editorDiff: '比较', editorDiffSource: '比较来源', editorSaveAll: '全部保存',
+    editorOpen: '打开', editorSave: '保存', editorRaw: '原始', editorParsed: '预览', editorWrap: '换行',
+    editorLeftBeforeAfter: '左：修改前\u2192后', editorRightBeforeAfter: '右：修改前\u2192后', editorLeftVsRight: '左 vs 右',
+    editorFind: '查找', editorReplace: '替换', editorReplaceAll: '全部替换',
+    editorCaseSensitive: 'Aa', editorPrev: '上一个', editorNext: '下一个',
+    editorGoToLine: '跳转到行', editorGoToLinePrompt: '输入行号：',
+    editorUntitled: '未命名', editorUnsaved: '未保存',
+    editorDeleted: '删除', editorAdded: '新增', editorModified: '修改',
+    editorLines: '行', editorCharRetention: '字符保留率：',
+    editorNoFile: '未加载文件。',
+    editorCancelled: '已取消', editorUnsupported: '不支持的文件类型',
+    editorSaved: '文件已保存', editorSaveFailed: '保存失败',
+    editorFileTooLarge: '文件过大（最大 32MB）'
   }
 };
 

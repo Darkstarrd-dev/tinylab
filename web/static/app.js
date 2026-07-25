@@ -42,6 +42,10 @@ function navigateTo(page) {
   if (currentPage !== 'gallery' && typeof cleanupGallery === 'function') {
     cleanupGallery();
   }
+  // Cleanup editor resources when leaving the page.
+  if (currentPage !== 'editor' && typeof cleanupEditor === 'function') {
+    cleanupEditor();
+  }
   // Close the download SSE stream when leaving the download page.
   if (page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
@@ -54,8 +58,13 @@ function navigateTo(page) {
     if (typeof closeTerminalSession === 'function') closeTerminalSession();
   }
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    el.classList.toggle('active', el.dataset.page === page || (page === 'editor' && el.dataset.page === 'gallery'));
   });
+  // Gallery nav button label toggle
+  var galBtn = document.querySelector('.nav-item[data-page="gallery"]');
+  if (galBtn) {
+    galBtn.textContent = page === 'editor' ? t('editor') : t('gallery');
+  }
   const container = document.getElementById('page-content');
   // Remove any per-page main modifier classes before rendering the new page.
   const mainEl = document.querySelector('.main');
@@ -75,9 +84,10 @@ function navigateTo(page) {
       case 'console': return renderConsole(container);
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
+      case 'editor': return renderEditor(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint') && mainEl) mainEl.classList.add('main-no-scroll');
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor') && mainEl) mainEl.classList.add('main-no-scroll');
   
   function restoreFullscreenState() {
     if (wasFullscreen) {
@@ -104,6 +114,12 @@ function navigateTo(page) {
     // Sync render: restore fullscreen state immediately.
     restoreFullscreenState();
   }
+}
+
+function gotoGalleryToggle() {
+  if (currentPage === 'gallery') navigateTo('editor');
+  else if (currentPage === 'editor') navigateTo('gallery');
+  else navigateTo('gallery');
 }
 
 function escapeHtml(s) {
@@ -339,7 +355,14 @@ function initLang() {
 function updateSidebarNav() {
   document.querySelectorAll('.nav-item').forEach(function(el) {
     var page = el.dataset.page;
-    if (page) el.textContent = t(page);
+    if (page) {
+      // Gallery nav button reflects current page
+      if (page === 'gallery') {
+        el.textContent = currentPage === 'editor' ? t('editor') : t('gallery');
+      } else {
+        el.textContent = t(page);
+      }
+    }
   });
   var shutdownBtn = document.querySelector('.shutdown-btn');
   if (shutdownBtn) {
@@ -348,6 +371,7 @@ function updateSidebarNav() {
     shutdownBtn.setAttribute('aria-label', shutdownLabel);
   }
 }
+
 
 function toggleFontSize() {
   const current = document.documentElement.getAttribute('data-font-size') || 's';
@@ -504,7 +528,7 @@ document.addEventListener('keydown', function(e) {
   if (Shortcuts.matchEvent('global.goto-console', e))    { e.preventDefault(); navigateTo('console'); return; }
   if (Shortcuts.matchEvent('global.goto-playground', e)) { e.preventDefault(); var pgNav = document.querySelector('.nav-item[data-page="playground"]'); if (pgNav) navigateTo('playground'); return; }
   if (Shortcuts.matchEvent('global.goto-download', e))   { e.preventDefault(); navigateTo('download'); return; }
-  if (Shortcuts.matchEvent('global.goto-gallery', e))    { e.preventDefault(); var galNav = document.querySelector('.nav-item[data-page="gallery"]'); if (galNav) navigateTo('gallery'); return; }
+  if (Shortcuts.matchEvent('global.goto-gallery', e))    { e.preventDefault(); var galNav = document.querySelector('.nav-item[data-page="gallery"]'); if (galNav) gotoGalleryToggle(); return; }
 
   // F: toggle fullscreen (ignore when typing in any input field)
   if (Shortcuts.matchEvent('global.toggle-fullscreen', e)) {
@@ -531,9 +555,8 @@ document.addEventListener('keydown', function(e) {
 
   // Number keys 1-9: open quickslot modal (only when not in input and not in gallery)
   if (!isInput) {
-    if (typeof currentPage !== 'undefined' && currentPage === 'gallery') {
-      // Gallery page owns these keys; do not double-trigger quickslot.
-    } else if (typeof isQuickSlotModalOpen === 'function' && isQuickSlotModalOpen()) {
+    if (typeof currentPage !== 'undefined' && (currentPage === 'gallery' || currentPage === 'editor')) {
+      // Gallery/Editor page owns these keys; do not double-trigger quickslot.
       // QuickSlot modal handles its own keys; skip global processing.
     } else {
       var matchedQuickslot = false;

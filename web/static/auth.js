@@ -106,7 +106,11 @@ function initApp() {
   document.querySelectorAll('.nav-item').forEach(function(el) {
     el.addEventListener('click', function() {
       var page = el.dataset.page;
-      if (page) navigateTo(page);
+      if (page === 'gallery') {
+        gotoGalleryToggle();
+      } else if (page) {
+        navigateTo(page);
+      }
     });
   });
   navigateTo('endpoint');

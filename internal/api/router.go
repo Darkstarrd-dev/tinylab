@@ -407,6 +407,20 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		r.Post("/paste-paths", rt.galleryPastePaths)
 	})
 
+	// Editor API: text file open (native picker) + atomic save. Outside the
+	// /api group to bypass the 1MB body limit (large text files), still auth-gated.
+	r.Route("/api/editor", func(r chi.Router) {
+		r.Use(rt.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
+		r.Post("/open", rt.editorOpen)
+		r.Post("/save", rt.editorSave)
+	})
+
 	// Embedded UI (fallback to index.html)
 	// Playground static routes: only register when the playground module is
 	// compiled into the binary (build tag `playground`). At runtime the flag
@@ -429,7 +443,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				"pg-setup.js", "pg-director.js", "pg-search.js",
 				"gallery-state.js", "gallery-io.js", "gallery-layout.js",
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
-				"gallery.js",
+				"gallery.js", "editor-state.js", "editor.js",
 			}
 			for _, f := range pgJSFiles {
 				r.Get("/"+f, noCacheHandler)
