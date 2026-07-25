@@ -916,8 +916,8 @@ function edBuildFindBar(container, idx) {
   container.innerHTML =
     '<div class="ed-find-row">' +
       '<input type="text" class="ed-find-input" id="ed-find-input-' + idx + '" placeholder="' + T('editorFind') + '..." />' +
-      '<button class="ed-btn ed-btn-xs ed-find-prev" id="ed-find-prev-' + idx + '" title="' + T('editorPrev') + '">&larr;</button>' +
-      '<button class="ed-btn ed-btn-xs ed-find-next" id="ed-find-next-' + idx + '" title="' + T('editorNext') + '">&rarr;</button>' +
+      '<button class="ed-btn ed-btn-xs ed-find-prev" id="ed-find-prev-' + idx + '" data-tooltip="' + T('editorPrev') + '">&larr;</button>' +
+      '<button class="ed-btn ed-btn-xs ed-find-next" id="ed-find-next-' + idx + '" data-tooltip="' + T('editorNext') + '">&rarr;</button>' +
       '<span class="ed-find-count" id="ed-find-count-' + idx + '"></span>' +
       '<label class="ed-find-label"><input type="checkbox" class="ed-find-case" id="ed-find-case-' + idx + '" /> ' + T('editorCaseSensitive') + '</label>' +
       '<label class="ed-find-label"><input type="checkbox" class="ed-find-regex" id="ed-find-regex-' + idx + '" /> Regex</label>' +

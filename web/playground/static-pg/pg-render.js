@@ -351,7 +351,7 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
       prettyContent = '<div class="pg-pretty-hint" style="color:var(--text-muted);font-size:12px;padding:8px 0">点击上面的 Pretty 按钮，将使用 AI 自动修复语法结构并完成标准 Markdown 渲染。</div>';
     }
 
-    var btnDisabled = canPretty ? '' : ' disabled style="opacity:0.4;cursor:not-allowed;" title="请等待搜索与总结完成"';
+    var btnDisabled = canPretty ? '' : ' disabled style="opacity:0.4;cursor:not-allowed;" data-tooltip="请等待搜索与总结完成"';
     inner += '<div class="pg-search-raw collapsed">' +
       '<div class="pg-search-raw-head" onclick="event.stopPropagation();this.parentElement.classList.toggle(\'collapsed\')">' +
         '<span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchRawResults')) + '</span>' +
@@ -503,35 +503,35 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
   var html = '<span>' + metaLines + '</span>';
   html += '<div class="pg-msg-actions">';
   if (msg.role === 'assistant' && msg.status !== 'loading') {
-    html += '<button class="pg-action" onclick="pgActionCopy(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgCopy')) + '">' + PG_ICON_COPY + '</button>';
+    html += '<button class="pg-action" onclick="pgActionCopy(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + PG_ICON_COPY + '</button>';
     if (!isSearch || i === 1) {
-      html += '<button class="pg-action" onclick="pgToggleSource(' + i + ',' + idx + ')" title="' + pgEscapeHtml(msg.sourceVisible ? pgT('pgShowPreview') : pgT('pgShowSource')) + '">' + PG_ICON_SRC + '</button>';
+      html += '<button class="pg-action" onclick="pgToggleSource(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(msg.sourceVisible ? pgT('pgShowPreview') : pgT('pgShowSource')) + '">' + PG_ICON_SRC + '</button>';
     }
     if (isSearch && i === 0) {
-      html += '<button class="pg-action" onclick="pgSaveActiveSearchRawMarkdown()" title="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
+      html += '<button class="pg-action" onclick="pgSaveActiveSearchRawMarkdown()" data-tooltip="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
     }
     if (isSearch && i === 1) {
-      html += '<button class="pg-action" onclick="pgSaveActiveSearchResultMarkdown()" title="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
+      html += '<button class="pg-action" onclick="pgSaveActiveSearchResultMarkdown()" data-tooltip="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
     }
     if (!isSearch) {
-      html += '<button class="pg-action" onclick="pgRegenerate(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgRegenerate')) + '">' + PG_ICON_REGEN + '</button>';
+      html += '<button class="pg-action" onclick="pgRegenerate(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRegenerate')) + '">' + PG_ICON_REGEN + '</button>';
     }
     if (msg.status === 'error') {
-      html += '<button class="pg-action" onclick="pgRetryError(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgRetry')) + '">' + PG_ICON_RETRY + '</button>';
-      html += '<button class="pg-action" onclick="pgEditPromptForError(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgEditPrompt')) + '">' + PG_ICON_EDIT + '</button>';
+      html += '<button class="pg-action" onclick="pgRetryError(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRetry')) + '">' + PG_ICON_RETRY + '</button>';
+      html += '<button class="pg-action" onclick="pgEditPromptForError(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEditPrompt')) + '">' + PG_ICON_EDIT + '</button>';
     }
     if (!isSearch) {
-      html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
+      html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
     }
   } else if (!isSearch && msg.role === 'user') {
-    html += '<button class="pg-action" onclick="pgActionCopy(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgCopy')) + '">' + PG_ICON_COPY + '</button>';
-    html += '<button class="pg-action" onclick="pgToggleRole(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgToggleRole')) + '">' + PG_ICON_ROLE + '</button>';
-    html += '<button class="pg-action" onclick="pgBeginEdit(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgEdit')) + '">' + PG_ICON_EDIT + '</button>';
-    html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
+    html += '<button class="pg-action" onclick="pgActionCopy(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + PG_ICON_COPY + '</button>';
+    html += '<button class="pg-action" onclick="pgToggleRole(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgToggleRole')) + '">' + PG_ICON_ROLE + '</button>';
+    html += '<button class="pg-action" onclick="pgBeginEdit(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEdit')) + '">' + PG_ICON_EDIT + '</button>';
+    html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
   } else if (!isSearch && msg.role === 'system') {
-    html += '<button class="pg-action" onclick="pgToggleRole(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgToggleRole')) + '">' + PG_ICON_ROLE + '</button>';
-    html += '<button class="pg-action" onclick="pgBeginEdit(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgEdit')) + '">' + PG_ICON_EDIT + '</button>';
-    html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" title="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
+    html += '<button class="pg-action" onclick="pgToggleRole(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgToggleRole')) + '">' + PG_ICON_ROLE + '</button>';
+    html += '<button class="pg-action" onclick="pgBeginEdit(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEdit')) + '">' + PG_ICON_EDIT + '</button>';
+    html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
   }
   html += '</div>';
   return html;

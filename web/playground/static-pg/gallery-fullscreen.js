@@ -22,7 +22,8 @@ function stopAutoplay() {
   var btn = document.getElementById('gallery-autoplay-btn');
   if (btn) {
     btn.innerHTML = GALLERY_ICONS.play;
-    btn.setAttribute('title', 'Autoplay (A / ▶)');
+    btn.setAttribute('data-tooltip', 'Autoplay (A / ▶)');
+    btn.setAttribute('aria-label', 'Autoplay');
   }
 }
 
@@ -34,7 +35,8 @@ function startAutoplay() {
   var btn = document.getElementById('gallery-autoplay-btn');
   if (btn) {
     btn.innerHTML = GALLERY_ICONS.stop;
-    btn.setAttribute('title', 'Stop (A / ■)');
+    btn.setAttribute('data-tooltip', 'Stop (A / ■)');
+    btn.setAttribute('aria-label', 'Stop');
   }
 }
 

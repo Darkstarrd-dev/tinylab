@@ -210,13 +210,13 @@ async function renderProviderDetail(c, id) {
       <div class="provider-detail-header">\
         <div style="display:flex;align-items:baseline;gap:10px;min-width:0;flex:1;flex-wrap:wrap">\
           <h2>' + escapeHtml(p.name) + '</h2>\
-          <p class="muted" id="detail-info-summary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + t('prefix') + ' <span class="code">' + escapeHtml(p.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + baseUrlAttr + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" title="' + t('clickToCopy') + '">' + baseUrlEsc + '</span></p>\
+          <p class="muted" id="detail-info-summary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + t('prefix') + ' <span class="code">' + escapeHtml(p.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + baseUrlAttr + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" data-tooltip="' + t('clickToCopy') + '">' + baseUrlEsc + '</span></p>\
           <div class="flex" style="gap:8px;flex-shrink:0;align-items:center">\
             <button type="button" class="btn btn-sm" onclick="backToProviderList()">' + t('back') + '</button>\
             <button type="button" class="btn btn-sm" onclick="showEditProvider(\'' + p.id + '\')">' + t('edit') + '</button>\
             <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" onclick="toggleProvider(\'' + p.id + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
             <button type="button" class="btn btn-sm btn-danger" onclick="deleteProvider(\'' + p.id + '\')">' + t('delete') + '</button>\
-            <input type="number" class="btn-order-input" id="provider-order-input" min="1" max="' + totalProviders + '" value="' + currentOrder + '" title="' + escapeHtml(orderTitle) + '" onchange="changeProviderOrder(\'' + p.id + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)" onkeydown="if(event.key===\'Enter\') this.blur()"/>\
+            <input type="number" class="btn-order-input" id="provider-order-input" min="1" max="' + totalProviders + '" value="' + currentOrder + '" data-tooltip="' + escapeHtml(orderTitle) + '" onchange="changeProviderOrder(\'' + p.id + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)" onkeydown="if(event.key===\'Enter\') this.blur()"/>\
           </div>\
         </div>\
       </div>\
@@ -282,7 +282,7 @@ function renderDetailKeys(p) {
                 <button type="button" class="btn btn-sm" onclick="toggleKeyDetail(\'' + p.id + '\',\'' + k.id + '\',' + (!k.isActive) + ')">' + (k.isActive ? t('pause') : t('resume')) + '</button>\
                 <button type="button" class="btn btn-sm btn-danger" onclick="deleteKeyDetail(\'' + p.id + '\',\'' + k.id + '\')">' + t('delete') + '</button>\
               </td>\
-              <td><span class="code copyable" data-copy="' + escapeHtml(k.key) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'), \'' + escapeForJsString(k.name || 'key') + '\')" title="' + t('clickToCopy') + '">' + maskKey(k.key) + '</span></td>\
+              <td><span class="code copyable" data-copy="' + escapeHtml(k.key) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'), \'' + escapeForJsString(k.name || 'key') + '\')" data-tooltip="' + t('clickToCopy') + '">' + maskKey(k.key) + '</span></td>\
               <td>' + k.priority + '</td>\
               <td><span class="badge ' + (k.isActive ? 'badge-active' : 'badge-inactive') + '">' + (k.isActive ? t('active') : t('pause')) + '</span></td>\
             </tr>';
@@ -514,12 +514,12 @@ function buildModelRowMainInner(p, m) {
       '<option value="limited"' + (m.quotaType === 'limited' || !m.quotaType ? ' selected' : '') + '>' + t('limited') + '</option>' +
       '<option value="paid"' + (m.quotaType === 'paid' ? ' selected' : '') + '>' + t('paid') + '</option>' +
     '</select>' +
-    '<select class="model-quota-select model-kind-select" onclick="event.stopPropagation()" onchange="updateModelKind(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" title="' + t('modelKind') + '">' +
+    '<select class="model-quota-select model-kind-select" onclick="event.stopPropagation()" onchange="updateModelKind(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" data-tooltip="' + t('modelKind') + '">' +
       '<option value="text"' + (kindVal !== 'image' && kindVal !== 'embedding' ? ' selected' : '') + '>' + t('textModel') + '</option>' +
       '<option value="image"' + (kindVal === 'image' ? ' selected' : '') + '>' + t('imageModel') + '</option>' +
       '<option value="embedding"' + (kindVal === 'embedding' ? ' selected' : '') + '>' + t('embeddingModel') + '</option>' +
     '</select>' +
-    '<select class="model-quota-select model-protocol-select" style="display:' + protoDisplay + '" onclick="event.stopPropagation()" onchange="updateModelImgProtocol(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" title="' + t('imgProtocol') + '">' +
+    '<select class="model-quota-select model-protocol-select" style="display:' + protoDisplay + '" onclick="event.stopPropagation()" onchange="updateModelImgProtocol(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" data-tooltip="' + t('imgProtocol') + '">' +
       '<option value="gpt"' + (protoVal === 'gpt' ? ' selected' : '') + '>GPT</option>' +
       '<option value="xai"' + (protoVal === 'xai' ? ' selected' : '') + '>xAI</option>' +
       '<option value="modelscope"' + (protoVal === 'modelscope' ? ' selected' : '') + '>ModelScope</option>' +
@@ -527,10 +527,10 @@ function buildModelRowMainInner(p, m) {
     allBadge +
     '<span class="model-quota-numbers" style="display:none"></span>' +
     '<button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteModelDetail(\'' + pidEsc + '\', \'' + midJs + '\')">' + t('delete') + '</button>' +
-    '<button type="button" class="btn btn-sm ' + (m.alias ? 'btn-primary' : '') + '" data-alias="' + escapeHtml(m.alias || '') + '" onclick="event.stopPropagation(); showModelAliasModal(\'' + pidEsc + '\', \'' + midJs + '\', this.getAttribute(\'data-alias\'))" title="' + t('alias') + '">' + t('alias') + '</button>' +
-    '<button type="button" class="btn btn-sm ' + (m.note ? 'btn-info' : '') + '" data-note="' + escapeHtml(m.note || '') + '" onclick="event.stopPropagation(); showModelNoteModal(\'' + pidEsc + '\', \'' + midJs + '\', this.getAttribute(\'data-note\'))" title="' + escapeHtml(m.note || t('note')) + '">' + t('note') + '</button>' +
-    '<button type="button" class="btn btn-sm ' + (m.nim && m.nim.enabled ? 'btn-primary' : '') + '" data-nim-enabled="' + (m.nim && m.nim.enabled ? '1' : '0') + '" data-nim-count="' + (m.nim ? (m.nim.request_count_per_key || 0) : 0) + '" data-nim-interval="' + (m.nim ? (m.nim.min_interval_ms || 0) : 0) + '" onclick="event.stopPropagation(); showModelNIMModal(\'' + pidEsc + '\', \'' + midJs + '\', this)" title="' + t('modelNIM') + '">' + t('modelNIM') + '</button>' +
-    '<span class="model-id copyable" onclick="' + modelIdOnclick + '" title="' + t('clickToCopy') + '">' + prefixEsc + '/' + displayId + '</span>' +
+    '<button type="button" class="btn btn-sm ' + (m.alias ? 'btn-primary' : '') + '" data-alias="' + escapeHtml(m.alias || '') + '" onclick="event.stopPropagation(); showModelAliasModal(\'' + pidEsc + '\', \'' + midJs + '\', this.getAttribute(\'data-alias\'))" data-tooltip="' + t('alias') + '">' + t('alias') + '</button>' +
+    '<button type="button" class="btn btn-sm ' + (m.note ? 'btn-info' : '') + '" data-note="' + escapeHtml(m.note || '') + '" onclick="event.stopPropagation(); showModelNoteModal(\'' + pidEsc + '\', \'' + midJs + '\', this.getAttribute(\'data-note\'))" data-tooltip="' + escapeHtml(m.note || t('note')) + '">' + t('note') + '</button>' +
+    '<button type="button" class="btn btn-sm ' + (m.nim && m.nim.enabled ? 'btn-primary' : '') + '" data-nim-enabled="' + (m.nim && m.nim.enabled ? '1' : '0') + '" data-nim-count="' + (m.nim ? (m.nim.request_count_per_key || 0) : 0) + '" data-nim-interval="' + (m.nim ? (m.nim.min_interval_ms || 0) : 0) + '" onclick="event.stopPropagation(); showModelNIMModal(\'' + pidEsc + '\', \'' + midJs + '\', this)" data-tooltip="' + t('modelNIM') + '">' + t('modelNIM') + '</button>' +
+    '<span class="model-id copyable" onclick="' + modelIdOnclick + '" data-tooltip="' + t('clickToCopy') + '">' + prefixEsc + '/' + displayId + '</span>' +
   '</div>';
 }
 
@@ -688,7 +688,7 @@ function renderModelKeyDetailRow(pid, mid, data) {
       '<span class="model-key-ttft"></span>' +
       '<span class="model-key-speed"></span>' +
       '<span class="model-key-tokens"></span>' +
-      '<span class="model-key-error"' + (k.lastError ? ' title="' + escapeHtml(k.lastError) + '"' : '') + '>' + (errStr ? escapeHtml(errStr) : '') + '</span>' +
+      '<span class="model-key-error"' + (k.lastError ? ' data-tooltip="' + escapeHtml(k.lastError) + '"' : '') + '>' + (errStr ? escapeHtml(errStr) : '') + '</span>' +
     '</div>';
   });
   html += '</div>';
@@ -959,7 +959,7 @@ function renderMultiProtocolBadge(el, result, modelId) {
     if (p[0] === 'openaiEmbedding' && r && r.embeddingDim != null && r.embeddingDim > 0) {
       title += ' dim:' + r.embeddingDim;
     }
-    protoHtml += '<span class="mp-proto-badge ' + cls + '" title="' + escapeAttr(title) + '">' + escapeAttr(p[1]) + '</span>';
+    protoHtml += '<span class="mp-proto-badge ' + cls + '" data-tooltip="' + escapeAttr(title) + '">' + escapeAttr(p[1]) + '</span>';
   });
   protoHtml += '</span>';
   el.innerHTML = summary + protoHtml;
@@ -975,7 +975,7 @@ function updateMiniBadge(modelId, protoKey, status) {
   el.className = 'mp-mini-badge mp-' + status;
   var labelMap = {openaiCompat: 'OpenAI Compatible', openaiResponses: 'OpenAI Responses', anthropic: 'Anthropic Messages', openaiEmbedding: 'OpenAI Embeddings'};
   var statusMap = {testing: 'testing', ok: 'OK', err: 'failed', skip: 'skipped'};
-  el.title = (labelMap[protoKey] || protoKey) + ': ' + (statusMap[status] || status);
+  el.setAttribute('data-tooltip', (labelMap[protoKey] || protoKey) + ': ' + (statusMap[status] || status));
   var cursorStyle = (status === 'testing') ? 'cursor:default' : 'cursor:pointer';
   el.style.cursor = cursorStyle;
   // Update onclick: once tested, make it clickable to show detail
@@ -1175,7 +1175,7 @@ function buildMiniProtocolBadges(ts, modelId) {
     }
     var cursorStyle = hasData ? 'cursor:pointer' : 'cursor:default';
     var onclickAttr = hasData ? ' onclick="showProtoDetail(\'' + escapeForJsString(modelId || '') + '\',\'' + p[0] + '\')"' : '';
-    html += '<span class="mp-mini-badge ' + cls + '" data-model="' + escapeAttr(modelId || '') + '" data-proto="' + p[0] + '" style="' + cursorStyle + '"' + onclickAttr + ' title="' + escapeAttr(title) + '">' + escapeAttr(p[1]) + '</span>';
+    html += '<span class="mp-mini-badge ' + cls + '" data-model="' + escapeAttr(modelId || '') + '" data-proto="' + p[0] + '" style="' + cursorStyle + '"' + onclickAttr + ' data-tooltip="' + escapeAttr(title) + '">' + escapeAttr(p[1]) + '</span>';
   });
   html += '</span>';
   return html;
@@ -1680,7 +1680,7 @@ async function saveEditProvider(id) {
     // Update and show summary in header
     var summary = document.getElementById('detail-info-summary');
     if (summary) {
-      summary.innerHTML = t('prefix') + ' <span class="code">' + escapeHtml(np.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + escapeHtml(np.baseUrl) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" title="' + t('clickToCopy') + '">' + escapeHtml(np.baseUrl) + '</span>';
+      summary.innerHTML = t('prefix') + ' <span class="code">' + escapeHtml(np.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + escapeHtml(np.baseUrl) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(np.baseUrl) + '</span>';
       summary.style.display = '';
     }
     // Clear detail-info (rotation is now part of edit form)

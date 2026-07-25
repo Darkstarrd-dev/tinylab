@@ -934,7 +934,7 @@ function renderQuotaBarItem(bar) {
   var toggleCall = "toggleModelDetail('" + escapeHtml(bar.provider).replace(/'/g, "\\'") + "','" + escapeHtml(bar.model).replace(/'/g, "\\'") + "')";
   var currentKeyHtml = '';
   if (bar.currentKeyName) {
-    currentKeyHtml = '<span class="current-key-tag" title="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
+    currentKeyHtml = '<span class="current-key-tag" data-tooltip="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
   } else {
     currentKeyHtml = '<span class="current-key-tag current-key-tag-none">' + escapeHtml(t('noCurrentKey')) + '</span>';
   }
@@ -1033,7 +1033,7 @@ function patchQuotaBarItem(el, bar) {
     '</span>';
   var currentKeyHtml = '';
   if (bar.currentKeyName) {
-    currentKeyHtml = '<span class="current-key-tag" title="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
+    currentKeyHtml = '<span class="current-key-tag" data-tooltip="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
   } else {
     currentKeyHtml = '<span class="current-key-tag current-key-tag-none">' + escapeHtml(t('noCurrentKey')) + '</span>';
   }
@@ -1349,7 +1349,7 @@ function renderModelKeyDetail(provider, model, data) {
     var errorInfo = '<span class="model-key-error"';
     if (k.lastError) {
       var errStr = k.lastError.length > 60 ? k.lastError.slice(0, 60) + '…' : k.lastError;
-      errorInfo += ' title="' + escapeHtml(k.lastError) + '">' + escapeHtml(errStr);
+      errorInfo += ' data-tooltip="' + escapeHtml(k.lastError) + '">' + escapeHtml(errStr);
     } else {
       errorInfo += '>';
     }

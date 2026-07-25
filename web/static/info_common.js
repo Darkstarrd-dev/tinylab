@@ -154,7 +154,7 @@ function buildFieldWithSubFields(key, obj, rawStr) {
   var collapseBtn = '';
   var previewHtml = '';
   if (needsCollapse) {
-    collapseBtn = '<button type="button" class="info-collapse-btn" onclick="toggleInfoCollapse(this)" title="' + t('expand') + '">' +
+    collapseBtn = '<button type="button" class="info-collapse-btn" onclick="toggleInfoCollapse(this)" data-tooltip="' + t('expand') + '" aria-label="' + t('expand') + '">' +
       '<svg width="10" height="10" viewBox="0 0 10 10"><polygon points="2,2 8,5 2,8" fill="currentColor"/></svg></button>';
     previewHtml = '<div class="info-field-preview"><span class="info-preview-count">(' + n + ')</span> ' + buildPreview(obj) + '</div>';
   }
@@ -188,7 +188,9 @@ function toggleInfoCollapse(btn) {
   if (!field) return;
   field.classList.toggle('collapsed');
   var isCollapsed = field.classList.contains('collapsed');
-  btn.title = isCollapsed ? t('expand') : t('collapse');
+  var label = isCollapsed ? t('expand') : t('collapse');
+  btn.setAttribute('data-tooltip', label);
+  btn.setAttribute('aria-label', label);
   var svg = btn.querySelector('svg polygon');
   if (svg) {
     if (isCollapsed) {

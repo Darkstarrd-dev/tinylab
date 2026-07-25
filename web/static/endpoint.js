@@ -19,44 +19,44 @@ async function renderEndpoint(c) {
     <div class="settings-layout">\
       <div class="settings-panel-left">\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('listenPortDesc')) + '">' + t('listenPort') + '</span>\
-          <span class="code copyable settings-row-endpoint" onclick="copyToClipboard(this.dataset.url, this.dataset.url)" data-url="http://localhost:' + s.port + '/v1" title="' + escapeHtml(t('clickToCopy')) + '">' + s.port + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('listenPortDesc')) + '">' + t('listenPort') + '</span>\
+          <span class="code copyable settings-row-endpoint" onclick="copyToClipboard(this.dataset.url, this.dataset.url)" data-url="http://localhost:' + s.port + '/v1" data-tooltip="' + escapeHtml(t('clickToCopy')) + '">' + s.port + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openPortModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('proxyDesc')) + '">' + t('proxySettings') + '</span>\
-          <label class="toggle-switch settings-row-toggle" title="' + escapeHtml(t('proxyDesc')) + '"><input type="checkbox" id="proxy-toggle"' + (s.proxy && s.proxy.enabled ? ' checked' : '') + ' onchange="toggleProxy(this.checked)"><span class="toggle-slider"></span></label>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('proxyDesc')) + '">' + t('proxySettings') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('proxyDesc')) + '"><input type="checkbox" id="proxy-toggle"' + (s.proxy && s.proxy.enabled ? ' checked' : '') + ' onchange="toggleProxy(this.checked)"><span class="toggle-slider"></span></label>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openProxyModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('rotationDesc')) + '">' + t('rotationSettings') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('rotationDesc')) + '">' + t('rotationSettings') + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openRotationModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('serverTimeoutDesc')) + '">' + t('serverTimeoutSettings') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('serverTimeoutDesc')) + '">' + t('serverTimeoutSettings') + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openServerTimeoutModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('passwordProtectionDesc')) + '">' + t('passwordProtection') + '</span>\
-          <label class="toggle-switch settings-row-toggle" title="' + escapeHtml(t('passwordProtectionDesc')) + '"><input type="checkbox" id="password-toggle"' + (s.security && s.security.passwordEnabled ? ' checked' : '') + ' onchange="togglePasswordProtection(this.checked)"><span class="toggle-slider"></span></label>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '">' + t('passwordProtection') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '"><input type="checkbox" id="password-toggle"' + (s.security && s.security.passwordEnabled ? ' checked' : '') + ' onchange="togglePasswordProtection(this.checked)"><span class="toggle-slider"></span></label>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openPasswordModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + t('shortcutSettings') + '</span>\
-          <span class="code settings-row-endpoint" id="shortcut-settings-summary" title="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + escapeHtml(getShortcutSettingsSummary()) + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + t('shortcutSettings') + '</span>\
+          <span class="code settings-row-endpoint" id="shortcut-settings-summary" data-tooltip="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + escapeHtml(getShortcutSettingsSummary()) + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openShortcutsModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('appearanceDesc')) + '">' + t('appearance') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('appearanceDesc')) + '">' + t('appearance') + '</span>\
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openThemeModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('debugModeDesc')) + '">' + t('debugMode') + '</span>\
-          <label class="toggle-switch settings-row-toggle" title="' + escapeHtml(t('debugModeDesc')) + '"><input type="checkbox" id="debug-mode-toggle"' + (s.debugMode ? ' checked' : '') + ' onchange="toggleDebugMode(this.checked)"><span class="toggle-slider"></span></label>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '">' + t('debugMode') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '"><input type="checkbox" id="debug-mode-toggle"' + (s.debugMode ? ' checked' : '') + ' onchange="toggleDebugMode(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" title="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
-          <label class="toggle-switch settings-row-toggle" title="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
       </div>\
       <div class="settings-panel-right">\
@@ -161,7 +161,7 @@ function renderComboListInline(combos) {
     <div class="card combo-card' + (cb.disabled ? ' combo-disabled' : '') + '">\
       <div class="provider-card-row">\
         <div class="provider-card-left">\
-          <span class="card-title copyable" data-name="' + escapeHtml(cb.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" title="' + t('clickToCopy') + '">' + escapeHtml(cb.name) + '</span>\
+          <span class="card-title copyable" data-name="' + escapeHtml(cb.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(cb.name) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (cb.disabled ? 'badge-inactive' : 'badge-active') + '">' + escapeHtml(cb.strategy) + '</span>\
@@ -170,7 +170,7 @@ function renderComboListInline(combos) {
       </div>\
       <div class="provider-card-row mt-12">\
         <div class="provider-card-left">\
-          <span class="muted card-left-models" title="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
+          <span class="muted card-left-models" data-tooltip="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + cb.id + '\')">' + t('edit') + '</button>\
@@ -659,7 +659,7 @@ function renderScRow(actionId) {
     : '';
   return '' +
     '<div class="sc-row" data-sc-action="' + escapeHtml(actionId) + '">' +
-      '<div class="sc-action-name" title="' + escapeHtml(actionId) + '">' + escapeHtml(scActionLabel(actionId)) +
+      '<div class="sc-action-name" data-tooltip="' + escapeHtml(actionId) + '">' + escapeHtml(scActionLabel(actionId)) +
         (overridden ? '<br>' + defCellHtml : '') +
       '</div>' +
       '<div class="sc-controls">' + curCellHtml + resetBtn +

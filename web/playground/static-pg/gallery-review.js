@@ -83,7 +83,7 @@ function renderConfigPanel(rs) {
     html += '<option value="' + escapeHtml(p.id) + '"' + sel + '>' + escapeHtml(p.name) + '</option>';
   }
   html += '</select>' +
-    '<button class="gallery-review-model-btn" id="gallery-review-delete-preset-btn" style="flex:0 0 auto" title="' + T('galleryReviewDeletePreset') + '">✕</button>' +
+    '<button class="gallery-review-model-btn" id="gallery-review-delete-preset-btn" style="flex:0 0 auto" data-tooltip="' + T('galleryReviewDeletePreset') + '">✕</button>' +
     '</div></div>';
 
   // 2. 提示词生成模型
@@ -97,7 +97,7 @@ function renderConfigPanel(rs) {
   // 3. 审核目标描述
   html += '<div class="gallery-review-field">' +
     '<label class="gallery-review-label">' + T('galleryReviewJudgeTarget') +
-    '<button class="gallery-review-expand-btn" id="gallery-review-expand-judge" type="button" title="Expand">▼</button>' +
+    '<button class="gallery-review-expand-btn" id="gallery-review-expand-judge" type="button" data-tooltip="Expand">▼</button>' +
     '</label>' +
     '<textarea class="gallery-review-textarea" id="gallery-review-judge-target" placeholder="' + T('galleryReviewJudgeTargetPlaceholder') + '">' + escapeHtml(rs.judgeTarget) + '</textarea>' +
     '</div>';
@@ -111,7 +111,7 @@ function renderConfigPanel(rs) {
   // 5. 系统提示词
   html += '<div class="gallery-review-field">' +
     '<label class="gallery-review-label">' + T('galleryReviewSystemPrompt') +
-    '<button class="gallery-review-expand-btn" id="gallery-review-expand-system" type="button" title="Expand">▼</button>' +
+    '<button class="gallery-review-expand-btn" id="gallery-review-expand-system" type="button" data-tooltip="Expand">▼</button>' +
     '</label>' +
     '<textarea class="gallery-review-textarea" id="gallery-review-system-prompt" placeholder="' + T('galleryReviewSystemPromptPlaceholder') + '">' + escapeHtml(rs.systemPrompt) + '</textarea>' +
     '</div>';
@@ -194,7 +194,7 @@ function renderActivePanel(rs) {
         var shortPath = (r.path || '').split('/').pop();
         html += '<div class="gallery-review-result-item" data-ri="' + ri + '">' +
           '<span style="color:var(--danger);flex-shrink:0">\u26a0</span>' +
-          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="' + escapeHtml(r.reason || '') + '">' + escapeHtml(shortPath) + '</span>' +
+          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" data-tooltip="' + escapeHtml(r.reason || '') + '">' + escapeHtml(shortPath) + '</span>' +
           '</div>';
       }
       html += '</div>';

@@ -244,7 +244,7 @@ var ThemeSystem = (function() {
           var label = lang === 'cn' ? (v.nameZh || v.name) : v.name;
           html += '<button type="button" class="theme-swatch' + (isActive ? ' active' : '') + '"'
             + ' data-mode="' + mode + '" data-variant="' + v.id + '"'
-            + ' title="' + label + '"'
+            + ' data-tooltip="' + label + '"'
             + ' style="background:' + v.swatchColor + '"'
             + ' onclick="ThemeSystem.onSwatchClick(this)"'
             + '></button>';
@@ -311,7 +311,7 @@ var ThemeSystem = (function() {
       var label = lang === 'cn' ? s.nameZh : s.name;
       html += '<button type="button" class="style-swatch' + (isActive ? ' active' : '') + '"'
         + ' data-style="' + s.id + '"'
-        + ' title="' + label + '"'
+        + ' data-tooltip="' + label + '"'
         + ' onclick="ThemeSystem.onStyleClick(this)"'
         + '>' + s.icon + '<span>' + label + '</span></button>';
     }
