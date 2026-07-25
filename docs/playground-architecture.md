@@ -570,7 +570,7 @@ Director 和 Narrator 模型可以独立配置；空值回退第一个有模型�
 
 以下是当前实现事实，不代表都要在同一轮修复：
 
-1. **Lite 入口漂移。** `index-nopg.html` 已落后于 `index.html`，当前还缺少 Download 导航、`download.js`、`info_common.js`、Chart.js 等非 Playground 内容；关闭 Playground 会连带改变其他模块。
+1. **Lite 入口漂移。** `index-nopg.html` 已落后于 `index.html`，当前还缺少 Download 导航、`download.js`、`info_common.js` 等非 Playground 内容；关闭 Playground 会连带改变其他模块。
 2. **多窗口持久化不对称。** 只有 window 0 是普通聊天 reload 后的事实源；window 1–3 是临时态。
 3. **运行时开关不是安全边界。** 它只切换入口 HTML，不撤销已编译资源，也不关闭 `/v1/*`。
 4. **配置能力与编译能力可能不一致。** Lite 构建中 `enablePlayground` 仍可为 true，Settings API 也不暴露 `PlaygroundCompiled()` 能力位。
@@ -707,7 +707,7 @@ zip、tiff 及文件系统操作需后端参与：
 
 > 2026-07-19：除 1-9（间隔档位，全屏内仍硬编码不可自定义）外的所有全屏键已切到 `web/static/shortcuts.js` 注册中心。`onFullscreenKey` 与 `onGalleryKeyDown` 改用 `Shortcuts.matchEvent('gallery.<actionID>', e)`：`gallery.prev`/`gallery.next`/`gallery.prev-folder`/`gallery.next-folder`/`gallery.toggle-autoplay`/`gallery.toggle-fullscreen`/`gallery.toggle-tree`/`gallery.exit-fullscreen`/`gallery.toggle-split`/`gallery.toggle-media`/`gallery.switch-focus`。视频激活时 `ArrowLeft/Right/Up/Down/Space/1-9`（媒体控制：倒退 10 秒、上一/下一视频、音量、暂停）仍保持硬编码，**刻意不纳入自定义**以避免与全局 quickslot 1-9（弹出模型选择 modal）产生跨区域冲突；`Space`/`PageUp`/`PageDown` 仍走通用导览分支作为快捷的同义键。详见 §16.x（快捷键注册中心）与 §23“变更维护清单”。
 
-> 2026-07-26：Gallery & Usage UI 矩形无缝化重构与交互优化：(1) 移除 Usage 和 Gallery 页面所有容器间隙 (`gap: 0`)、内边距 (`padding: 0`) 与圆角 (`border-radius: 0`)，采用 1px `--glass-border` 分割网格，Usage 页 `repeat(2, minmax(0, 1fr))` 解决分辨率/DPI 切换时 50/50 破坏并重绘 Chart.js；(2) 视频 hover 控制栏精简为单行，进度条在非全屏模式下贴底常驻；(3) 在 `gallery-io.js` 调用 File System Access API 发起 `requestPermission` 之前前置弹出居中提示模态框 (`showPermissionNoticeModal`)，说明读写权限用途；(4) 全屏模式下，`.gallery-bottom` 控制栏取消死板的 `height: 42px` 限制，改为 `height: auto` 动态包裹 104px 缩略图与 42px 操作栏，避免操作控件溢出屏幕下方，且仅当鼠标滑入底部热区时进度条与操作栏合体联动 Overlay 浮现。涉及 `web/static/style.css`、`web/static/usage.js`、`web/playground/static-pg/gallery-layout.js`、`web/playground/static-pg/gallery-video.js`、`web/playground/static-pg/gallery-io.js`。
+> 2026-07-26：Gallery & Usage UI 矩形无缝化重构与交互优化：(1) 移除 Usage 和 Gallery 页面所有容器间隙 (`gap: 0`)、内边距 (`padding: 0`) 与圆角 (`border-radius: 0`)，采用 1px `--glass-border` 分割网格，Usage 页 `repeat(2, minmax(0, 1fr))` 解决分辨率/DPI 切换时 50/50 破坏并重绘趋势图（SVG 堆叠柱）；(2) 视频 hover 控制栏精简为单行，进度条在非全屏模式下贴底常驻；(3) 在 `gallery-io.js` 调用 File System Access API 发起 `requestPermission` 之前前置弹出居中提示模态框 (`showPermissionNoticeModal`)，说明读写权限用途；(4) 全屏模式下，`.gallery-bottom` 控制栏取消死板的 `height: 42px` 限制，改为 `height: auto` 动态包裹 104px 缩略图与 42px 操作栏，避免操作控件溢出屏幕下方，且仅当鼠标滑入底部热区时进度条与操作栏合体联动 Overlay 浮现。涉及 `web/static/style.css`、`web/static/usage.js`、`web/playground/static-pg/gallery-layout.js`、`web/playground/static-pg/gallery-video.js`、`web/playground/static-pg/gallery-io.js`。
 
 ### 缩略图
 前端懒生成：IntersectionObserver 触发 → `createImageBitmap(blob)` + `OffscreenCanvas(THUMB_SIZE=300)` 等比例缩放 → `convertToBlob('image/jpeg',0.8)` → `FsApi.BlobTracker.create`；失败回退原 blob。

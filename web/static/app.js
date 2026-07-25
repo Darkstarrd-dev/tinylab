@@ -480,9 +480,7 @@ function toggleFontSize() {
   document.documentElement.setAttribute('data-font-size', next);
   localStorage.setItem('fontSize', next);
   updateFontButton(next);
-  if (typeof trendChartInstance !== 'undefined' && trendChartInstance) {
-    trendChartInstance.destroy();
-    trendChartInstance = null;
+  if (document.getElementById('trend-chart-card') && typeof initTrendChart === 'function' && typeof lastUsageEntries !== 'undefined') {
     initTrendChart(lastUsageEntries);
   }
 }

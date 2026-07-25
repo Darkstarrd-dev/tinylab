@@ -2,7 +2,7 @@
 
 var lastUsageSig = '';
 var lastUsageEntries = [];
-var _lastTrendConfigSig = '';
+var _lastTrendSig = '';
 
 var modelColorMap = {};
 var expandedModels = new Set();
@@ -239,8 +239,7 @@ var CHART_JS_COLORS = [
   'rgb(201, 203, 207)'
 ];
 
-var trendChartInstance = null;
-var trendChartRawData = null;
+var _trendHoverState = { data: null, geom: null };
 
 function readCssVar(name, fallback) {
   var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -270,47 +269,26 @@ function getProviderPrefix(name) {
   return name;
 }
 
-function buildTrendChartConfig(entries) {
-  trendChartRawData = buildTrendData(entries);
-  var groups = trendChartRawData.groups;
+// buildTrendChartSVG renders the stacked-bar trend chart as an inline SVG
+// string plus a legend HTML string. Stateless string concatenation (no
+// canvas/Chart.js lifecycle) so page switches and SSE refreshes are cheap.
+function buildTrendChartSVG(entries) {
+  var data = buildTrendData(entries);
+  var groups = data.groups;
 
-  var labels = [];
-  for (var i = 0; i < TREND_BUCKETS; i++) {
-    var hoursAgo = (TREND_BUCKETS - i) * 15 / 60;
-    labels.push(hoursAgo === 0 ? 'now' : '-' + hoursAgo + 'h');
-  }
+  var w = 720, h = 280;
+  var leftPad = 40, rightPad = 12, topPad = 12, bottomPad = 24;
+  var chartX0 = leftPad, chartX1 = w - rightPad;
+  var chartY0 = topPad, chartY1 = h - bottomPad;
+  var chartW = chartX1 - chartX0;
+  var chartH = chartY1 - chartY0;
+  var bucketW = chartW / TREND_BUCKETS;
 
-  var datasets = groups.map(function(g, idx) {
-    var baseColor = CHART_JS_COLORS[idx % CHART_JS_COLORS.length];
-    var fillColor = desaturateRgb(baseColor, 0.3);
-    var prefix = getProviderPrefix(g.provider);
-    var displayModel = g._displayModel || g.model;
-    return {
-      label: prefix + '/' + displayModel,
-      _provider: g.provider,
-      _model: g.model,
-      _displayModel: displayModel,
-      data: g.buckets.slice(),
-      backgroundColor: fillColor,
-      borderColor: baseColor,
-      borderWidth: 1
-    };
-  });
-
-  if (datasets.length === 0) {
-    datasets.push({
-      label: '',
-      data: new Array(TREND_BUCKETS).fill(0),
-      backgroundColor: 'transparent',
-      borderColor: 'transparent',
-      borderWidth: 0
-    });
-  }
-
+  // Stacked max + stepped y-axis (matches Chart.js axis algorithm).
   var stackedMax = 0;
   for (var bi = 0; bi < TREND_BUCKETS; bi++) {
     var sum = 0;
-    groups.forEach(function(g) { sum += g.buckets[bi]; });
+    for (var gi = 0; gi < groups.length; gi++) sum += groups[gi].buckets[bi];
     if (sum > stackedMax) stackedMax = sum;
   }
   var yStep = 10;
@@ -322,98 +300,199 @@ function buildTrendChartConfig(entries) {
   var textColor = readCssVar('--text-secondary', '#a0a0a8');
   var gridColor = readCssVar('--glass-border', 'rgba(128,128,128,0.25)');
 
-  return {
-    type: 'bar',
-    data: { labels: labels, datasets: datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      color: textColor,
-      plugins: {
-        title: { display: false },
-        legend: {
-          position: 'bottom',
-          labels: { boxWidth: 12, boxHeight: 12, padding: 8, color: textColor, font: { size: badgeSize } }
-        },
-        tooltip: {
-          mode: 'index',
-          intersect: false,
-          callbacks: {
-            title: function(tooltipItems) {
-              var idx = tooltipItems[0].dataIndex;
-              var bucketEnd = trendChartRawData.now - (TREND_BUCKETS - 1 - idx) * TREND_BUCKET_MS;
-              var bucketStart = bucketEnd - TREND_BUCKET_MS;
-              var fmtTime = function(ts) {
-                var d = new Date(ts);
-                var hh = String(d.getHours()).padStart(2, '0');
-                var mm = String(d.getMinutes()).padStart(2, '0');
-                return hh + ':' + mm;
-              };
-              return fmtTime(bucketStart) + ' - ' + fmtTime(bucketEnd);
-            },
-            label: function(context) {
-              return context.dataset._provider + '/' + (context.dataset._displayModel || context.dataset._model) + ': ' + context.parsed.y + ' ' + t('requests');
-            }
-          }
-        }
-      },
-      interaction: {
-        mode: 'index',
-        intersect: false
-      },
-      scales: {
-        x: { stacked: true, ticks: { color: textColor, font: { size: badgeSize } }, grid: { display: false } },
-        y: { stacked: true, beginAtZero: true, max: yMax, ticks: { stepSize: yStep, precision: 0, color: textColor, font: { size: badgeSize } }, grid: { display: true, color: gridColor }, border: { display: true, color: gridColor } }
-      }
+  var svg = '<svg class="trend-chart" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid meet">';
+
+  // Y-axis gridlines + labels (stepped ticks).
+  for (var yv = 0; yv <= yMax; yv += yStep) {
+    var yPos = chartY1 - (yv / yMax) * chartH;
+    svg += '<line x1="' + chartX0 + '" y1="' + yPos.toFixed(1) + '" x2="' + chartX1 + '" y2="' + yPos.toFixed(1) + '" stroke="' + gridColor + '" stroke-width="1" opacity="0.5"/>';
+    svg += '<text x="' + (chartX0 - 6) + '" y="' + (yPos + 3).toFixed(1) + '" text-anchor="end" fill="' + textColor + '" font-size="' + badgeSize + '">' + yv + '</text>';
+  }
+
+  // X-axis labels every 4 buckets (~1h) + faint vertical gridlines.
+  for (var xi = 0; xi < TREND_BUCKETS; xi += 4) {
+    var xPos = chartX0 + xi * bucketW;
+    var hoursAgo = (TREND_BUCKETS - xi) * 15 / 60;
+    var label = hoursAgo === 0 ? 'now' : '-' + hoursAgo + 'h';
+    svg += '<text x="' + xPos.toFixed(1) + '" y="' + (chartY1 + 16) + '" text-anchor="middle" fill="' + textColor + '" font-size="' + badgeSize + '">' + label + '</text>';
+    if (xi > 0) {
+      svg += '<line x1="' + xPos.toFixed(1) + '" y1="' + chartY0 + '" x2="' + xPos.toFixed(1) + '" y2="' + chartY1 + '" stroke="' + gridColor + '" stroke-width="0.5" opacity="0.3"/>';
     }
-  };
+  }
+
+  // Stacked bars: per bucket, iterate groups in order, stack upward.
+  for (var i = 0; i < TREND_BUCKETS; i++) {
+    var cumH = 0;
+    for (var gidx = 0; gidx < groups.length; gidx++) {
+      var g = groups[gidx];
+      var baseColor = CHART_JS_COLORS[gidx % CHART_JS_COLORS.length];
+      var fillColor = desaturateRgb(baseColor, 0.3);
+      var barH = (g.buckets[i] / yMax) * chartH;
+      if (barH <= 0) continue;
+      var yTop = chartY1 - cumH - barH;
+      var rx = chartX0 + i * bucketW + 0.5;
+      svg += '<rect x="' + rx.toFixed(1) + '" y="' + yTop.toFixed(1) + '" width="' + (bucketW - 1).toFixed(1) + '" height="' + barH.toFixed(1) + '" fill="' + fillColor + '" stroke="' + baseColor + '" stroke-width="1"/>';
+      cumH += barH;
+    }
+  }
+
+  // Hover vertical line (hidden until mousemove).
+  svg += '<line id="trend-hover-line" x1="0" y1="' + chartY0 + '" x2="0" y2="' + chartY1 + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0"/>';
+
+  // Axis lines.
+  svg += '<line x1="' + chartX0 + '" y1="' + chartY1 + '" x2="' + chartX1 + '" y2="' + chartY1 + '" stroke="' + gridColor + '" stroke-width="1"/>';
+  svg += '<line x1="' + chartX0 + '" y1="' + chartY0 + '" x2="' + chartX0 + '" y2="' + chartY1 + '" stroke="' + gridColor + '" stroke-width="1"/>';
+
+  // Empty state: muted centered message.
+  if (groups.length === 0) {
+    svg += '<text x="' + ((chartX0 + chartX1) / 2).toFixed(1) + '" y="' + ((chartY0 + chartY1) / 2).toFixed(1) + '" text-anchor="middle" dominant-baseline="middle" fill="' + textColor + '" font-size="' + badgeSize + '">' + escapeHtml(t('noUsage') || '') + '</text>';
+  }
+
+  svg += '</svg>';
+
+  // Legend at bottom: color box = fill color (matches Chart.js legend backgroundColor).
+  var legend = '<div class="trend-legend">';
+  groups.forEach(function(grp, idx) {
+    var bColor = CHART_JS_COLORS[idx % CHART_JS_COLORS.length];
+    var fColor = desaturateRgb(bColor, 0.3);
+    var prefix = getProviderPrefix(grp.provider);
+    var displayModel = grp._displayModel || grp.model;
+    legend += '<span class="trend-legend-item"><span class="trend-legend-dot" style="background:' + fColor + '"></span>' + escapeHtml(prefix) + '/' + escapeHtml(displayModel) + '</span>';
+  });
+  legend += '</div>';
+
+  var geom = { w: w, h: h, leftPad: leftPad, rightPad: rightPad, topPad: topPad, bottomPad: bottomPad, chartX0: chartX0, chartX1: chartX1, chartY0: chartY0, chartY1: chartY1, chartW: chartW, chartH: chartH, bucketW: bucketW };
+  _trendHoverState.data = data;
+  _trendHoverState.geom = geom;
+
+  return { html: svg, legend: legend, data: data, geom: geom };
 }
 
+// renderTrendChart returns the trend card HTML with the SVG inlined so the
+// page shows cached data immediately on switch (no canvas init blank).
 function renderTrendChart(entries) {
-  return '<div class="card" id="trend-chart-card"><div class="card-title">' + t('trendChart') + '</div><div class="trend-canvas-wrap"><canvas id="trend-canvas"></canvas></div></div>';
+  var built = buildTrendChartSVG(entries);
+  return '<div class="card" id="trend-chart-card"><div class="card-title">' + t('trendChart') + '</div><div class="trend-chart-wrap" id="trend-chart-wrap">' + built.html + built.legend + '</div></div>';
 }
 
+// initTrendChart attaches the hover handlers; the SVG is already in the DOM
+// from renderTrendChart. Falls back to a full rebuild if the wrap is missing.
 function initTrendChart(entries) {
-  var canvas = document.getElementById('trend-canvas');
-  if (!canvas) return;
-  if (typeof Chart === 'undefined') {
-    console.warn('Chart.js not loaded');
+  if (!document.getElementById('trend-chart-wrap')) {
+    updateTrendChart(entries);
     return;
   }
-  if (trendChartInstance) {
-    trendChartInstance.destroy();
-    trendChartInstance = null;
-  }
-  var config = buildTrendChartConfig(entries);
-  _lastTrendConfigSig = JSON.stringify(config.data);
-  trendChartInstance = new Chart(canvas, config);
-  requestAnimationFrame(function() {
-    if (trendChartInstance) trendChartInstance.resize();
-  });
-  if (!window._usageTrendResizeListenerAdded) {
-    window._usageTrendResizeListenerAdded = true;
-    window.addEventListener('resize', function() {
-      if (trendChartInstance && typeof currentPage !== 'undefined' && currentPage === 'usage') {
-        trendChartInstance.resize();
+  attachTrendHover(entries);
+}
+
+// updateTrendChart cheaply skips rebuilds when the data signature is
+// unchanged, otherwise re-renders the SVG in place and re-attaches hover.
+function updateTrendChart(entries) {
+  var data = buildTrendData(entries);
+  var sig = data.groups.length + '|' + data.max + '|' + data.groups.map(function(g) { return g.buckets.join(','); }).join(';');
+  if (sig === _lastTrendSig) return;
+  _lastTrendSig = sig;
+  var card = document.getElementById('trend-chart-card');
+  if (!card) return;
+  var built = buildTrendChartSVG(entries);
+  card.innerHTML = '<div class="card-title">' + t('trendChart') + '</div>' + built.html + built.legend;
+  attachTrendHover(entries);
+}
+
+// attachTrendHover binds mousemove/mouseleave on #trend-chart-wrap and shows
+// an index-mode tooltip (bucket time range + per-group counts + total),
+// reusing _trendHoverState so buildTrendData is not recomputed.
+function attachTrendHover(entries) {
+  var wrap = document.getElementById('trend-chart-wrap');
+  if (!wrap) return;
+  var svg = wrap.querySelector('svg');
+  if (!svg) return;
+  var data = _trendHoverState.data;
+  var geom = _trendHoverState.geom;
+  if (!data || !geom) return;
+
+  var w = geom.w, h = geom.h;
+  var chartX0 = geom.chartX0, chartY0 = geom.chartY0, chartY1 = geom.chartY1;
+  var bucketW = geom.bucketW;
+
+  var hoverLine = svg.querySelector('#trend-hover-line');
+
+  var existingTooltip = wrap.querySelector('.trend-tooltip');
+  if (existingTooltip) existingTooltip.remove();
+  var tooltip = document.createElement('div');
+  tooltip.className = 'trend-tooltip';
+  tooltip.style.display = 'none';
+  wrap.appendChild(tooltip);
+
+  wrap.onmousemove = function(ev) {
+    var rect = svg.getBoundingClientRect();
+    var scale = Math.min(rect.width / w, rect.height / h);
+    var renderedW = w * scale;
+    var renderedH = h * scale;
+    var offsetX = (rect.width - renderedW) / 2;
+    var offsetY = (rect.height - renderedH) / 2;
+    var svgX = (ev.clientX - rect.left - offsetX) / scale;
+    var svgY = (ev.clientY - rect.top - offsetY) / scale;
+
+    if (svgX < 0 || svgX > w || svgY < 0 || svgY > h) {
+      hoverLine.setAttribute('opacity', '0');
+      tooltip.style.display = 'none';
+      return;
+    }
+
+    var bucketIdx = Math.floor((svgX - chartX0) / bucketW);
+    if (bucketIdx < 0) bucketIdx = 0;
+    if (bucketIdx >= TREND_BUCKETS) bucketIdx = TREND_BUCKETS - 1;
+
+    var lineX = chartX0 + (bucketIdx + 0.5) * bucketW;
+    hoverLine.setAttribute('x1', lineX.toFixed(1));
+    hoverLine.setAttribute('x2', lineX.toFixed(1));
+    hoverLine.setAttribute('opacity', '1');
+
+    var bucketEnd = data.now - (TREND_BUCKETS - 1 - bucketIdx) * TREND_BUCKET_MS;
+    var bucketStart = bucketEnd - TREND_BUCKET_MS;
+    var fmtTime = function(ts) {
+      var d = new Date(ts);
+      var hh = String(d.getHours()).padStart(2, '0');
+      var mm = String(d.getMinutes()).padStart(2, '0');
+      return hh + ':' + mm;
+    };
+
+    var rows = '';
+    var totalReq = 0;
+    data.groups.forEach(function(grp, idx) {
+      var count = grp.buckets[bucketIdx];
+      if (count > 0) {
+        var bColor = CHART_JS_COLORS[idx % CHART_JS_COLORS.length];
+        var fColor = desaturateRgb(bColor, 0.3);
+        var prefix = getProviderPrefix(grp.provider);
+        var displayModel = grp._displayModel || grp.model;
+        rows += '<div class="trend-tooltip-row"><span class="trend-tooltip-dot" style="background:' + fColor + '"></span>' + escapeHtml(prefix) + '/' + escapeHtml(displayModel) + '<span class="trend-tooltip-count">' + count + ' ' + t('requests') + '</span></div>';
+        totalReq += count;
       }
     });
-  }
-}
+    if (rows === '') {
+      rows = '<div class="trend-tooltip-row" style="color:var(--text-muted)">' + escapeHtml(t('noUsage')) + '</div>';
+    }
 
-function updateTrendChart(entries) {
-  if (!trendChartInstance) {
-    initTrendChart(entries);
-    return;
-  }
-  var config = buildTrendChartConfig(entries);
-  var sig = JSON.stringify(config.data);
-  if (sig === _lastTrendConfigSig) return;
-  _lastTrendConfigSig = sig;
-  trendChartInstance.data = config.data;
-  trendChartInstance.options.scales.y.max = config.options.scales.y.max;
-  trendChartInstance.options.scales.y.ticks.stepSize = config.options.scales.y.ticks.stepSize;
-  trendChartInstance.update('none');
+    tooltip.innerHTML = '<div class="trend-tooltip-hour">' + fmtTime(bucketStart) + ' - ' + fmtTime(bucketEnd) + '</div>' + rows + '<div class="trend-tooltip-total">' + t('total') + ': ' + totalReq + '</div>';
+    tooltip.style.display = 'block';
+
+    var wrapRect = wrap.getBoundingClientRect();
+    var tipW = tooltip.offsetWidth;
+    var tipH = tooltip.offsetHeight;
+    var leftPx = ev.clientX - wrapRect.left + 12;
+    if (leftPx + tipW > wrapRect.width) leftPx = ev.clientX - wrapRect.left - tipW - 12;
+    var topPx = ev.clientY - wrapRect.top + 12;
+    if (topPx + tipH > wrapRect.height) topPx = ev.clientY - wrapRect.top - tipH - 12;
+    tooltip.style.left = leftPx + 'px';
+    tooltip.style.top = topPx + 'px';
+  };
+
+  wrap.onmouseleave = function() {
+    hoverLine.setAttribute('opacity', '0');
+    tooltip.style.display = 'none';
+  };
 }
 
 async function renderUsage(c) {
@@ -925,10 +1004,6 @@ function stopUsageRefresh() {
   }
   lockCountdownTimerStarted = false;
   stopProcessingTimer();
-  if (trendChartInstance) {
-    trendChartInstance.destroy();
-    trendChartInstance = null;
-  }
 }
 
 function computeQuotaSig(bars) {
