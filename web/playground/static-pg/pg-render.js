@@ -801,16 +801,3 @@ function pgSetDebugTab(tab) {
   tabs.forEach(function(el) { el.classList.toggle('active', el.dataset.tab === tab); });
   pgRenderDebugContent();
 }
-
-function pgToggleSearchRaw(btn, view) {
-  var container = btn.closest('.pg-search-raw');
-  if (!container) return;
-  var btns = container.querySelectorAll('.pg-search-toggle-btn');
-  btns.forEach(function(b) {
-    b.classList.toggle('pg-search-toggle-btn-active', b.dataset.view === view);
-  });
-  var rawView = container.querySelector('.pg-search-raw-view');
-  var prettyView = container.querySelector('.pg-search-pretty-view');
-  if (rawView) rawView.style.display = view === 'raw' ? '' : 'none';
-  if (prettyView) prettyView.style.display = view === 'pretty' ? '' : 'none';
-}
