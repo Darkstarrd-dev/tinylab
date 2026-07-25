@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
 
 // --- Keys ---
@@ -35,7 +36,7 @@ func (r *Registry) AddKey(providerID string, k config.Key) bool {
 		r.config.Providers[i].Keys = append(r.config.Providers[i].Keys, k)
 
 		r.stateMu.Lock()
-		r.states[stateKey(providerID, k.ID)] = &KeyRuntimeState{
+		r.states[stateKey(providerID, k.ID)] = &keystate.KeyRuntimeState{
 			ModelLocks:  make(map[string]time.Time),
 			ModelStatus: make(map[string]string),
 			ModelErrors: make(map[string]string),

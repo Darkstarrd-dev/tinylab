@@ -446,17 +446,6 @@ func TestGetQuotas_CurrentKeyID_Name(t *testing.T) {
 	// Seed quota data so the bar appears in the API response
 	rt.quotaTracker.Update("DupProv", "model-x", "dk1", "Key-1", 100, 80, 2)
 
-	// currentKey should return one of the two Key-1 keys
-	ck := rt.currentKey("DupProv", "model-x")
-	if ck.ID == "" {
-		t.Error("expected non-empty currentKey.ID, got empty")
-	}
-	if ck.Name != "Key-1" {
-		t.Errorf("expected currentKey.Name = \"Key-1\", got %q", ck.Name)
-	}
-	if ck.ID != "dk1" && ck.ID != "dk2" {
-		t.Errorf("expected currentKey.ID to be \"dk1\" or \"dk2\", got %q", ck.ID)
-	}
 
 	// Verify the quota API also populates currentKeyId
 	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")

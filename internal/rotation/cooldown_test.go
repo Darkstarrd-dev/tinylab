@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
 )
 
-func setupTest(t *testing.T) (*registry.Registry, *Selector) {
+func setupTest(t *testing.T) (*fakeStore, *Selector) {
 	t.Helper()
 	cfg := &config.Config{
 		Providers: []config.Provider{
@@ -31,7 +30,7 @@ func setupTest(t *testing.T) (*registry.Registry, *Selector) {
 			BackoffMaxSec: 240,
 		},
 	}
-	reg := registry.New(cfg)
+	reg := newFakeStore(cfg)
 	sel := New(reg, &cfg.Rotation)
 	return reg, sel
 }

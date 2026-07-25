@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
 
 // getNIMDefaults returns default NIMSettings values.
@@ -163,13 +163,13 @@ func (s *Selector) MarkNIM429(providerID, keyID, model string) time.Time {
 	return unlock
 }
 
-func isNIMCandidateAvailable(state *registry.KeyRuntimeState, reqCount int) bool {
+func isNIMCandidateAvailable(state *keystate.KeyRuntimeState, reqCount int) bool {
 	state.Lock()
 	defer state.Unlock()
 	return state.NIMRequestCount < reqCount
 }
 
-func resetNIMRequestCount(state *registry.KeyRuntimeState) {
+func resetNIMRequestCount(state *keystate.KeyRuntimeState) {
 	state.Lock()
 	defer state.Unlock()
 	state.NIMRequestCount = 0

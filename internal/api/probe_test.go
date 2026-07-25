@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
@@ -47,7 +48,12 @@ func okServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func decodeProbeResult(t *testing.T, srv *httptest.Server, fn func(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK probeQuotaHook) ProbeResult) (ProbeResult, map[string]any) {
+// newTestProbeHandler creates a minimal probe handler for static probe helper tests.
+func newTestProbeHandler() *probe.Handler {
+	return probe.NewHandler(nil)
+}
+
+func decodeProbeResult(t *testing.T, srv *httptest.Server, fn func(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK probe.ProbeQuotaHook) probe.ProbeResult) (probe.ProbeResult, map[string]any) {
 	t.Helper()
 	client := srv.Client()
 	res := fn(context.Background(), client, srv.URL, "model-x", "sk-test", nil)
@@ -65,7 +71,8 @@ func TestProbe_OpenAICompat_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, body := decodeProbeResult(t, srv, probeOpenAICompat)
+	h := newTestProbeHandler()
+	res, body := decodeProbeResult(t, srv, h.ProbeOpenAICompat)
 	if !res.Ok {
 		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
 	}
@@ -93,7 +100,8 @@ func TestProbe_OpenAIResponses_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, body := decodeProbeResult(t, srv, probeOpenAIResponses)
+	h := newTestProbeHandler()
+	res, body := decodeProbeResult(t, srv, h.ProbeOpenAIResponses)
 	if !res.Ok {
 		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
 	}
@@ -122,7 +130,8 @@ func TestProbe_Anthropic_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, body := decodeProbeResult(t, srv, probeAnthropic)
+	h := newTestProbeHandler()
+	res, body := decodeProbeResult(t, srv, h.ProbeAnthropic)
 	if !res.Ok {
 		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
 	}
@@ -147,7 +156,8 @@ func TestProbe_OpenAICompat_Failure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, _ := decodeProbeResult(t, srv, probeOpenAICompat)
+	h := newTestProbeHandler()
+	res, _ := decodeProbeResult(t, srv, h.ProbeOpenAICompat)
 	if res.Ok {
 		t.Fatalf("expected Ok=false, got %+v", res)
 	}

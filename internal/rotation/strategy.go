@@ -4,28 +4,28 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
 
-func readRotatedAt(state *registry.KeyRuntimeState) time.Time {
+func readRotatedAt(state *keystate.KeyRuntimeState) time.Time {
 	state.Lock()
 	defer state.Unlock()
 	return state.RotatedAt
 }
 
-func readKeyRoundRobinState(state *registry.KeyRuntimeState) (time.Time, int) {
+func readKeyRoundRobinState(state *keystate.KeyRuntimeState) (time.Time, int) {
 	state.Lock()
 	defer state.Unlock()
 	return state.LastUsedAt, state.ConsecCount
 }
 
-func readLastUsedAt(state *registry.KeyRuntimeState) time.Time {
+func readLastUsedAt(state *keystate.KeyRuntimeState) time.Time {
 	state.Lock()
 	defer state.Unlock()
 	return state.LastUsedAt
 }
 
-func resetConsecCount(state *registry.KeyRuntimeState) {
+func resetConsecCount(state *keystate.KeyRuntimeState) {
 	state.Lock()
 	defer state.Unlock()
 	state.ConsecCount = 0

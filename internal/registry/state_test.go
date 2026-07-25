@@ -3,10 +3,12 @@ package registry
 import (
 	"sync"
 	"testing"
+
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
 
 func TestIncInFlight(t *testing.T) {
-	s := &KeyRuntimeState{}
+	s := &keystate.KeyRuntimeState{}
 	if got := s.GetInFlight(); got != 0 {
 		t.Fatalf("expected 0, got %d", got)
 	}
@@ -21,7 +23,7 @@ func TestIncInFlight(t *testing.T) {
 }
 
 func TestDecInFlight(t *testing.T) {
-	s := &KeyRuntimeState{}
+	s := &keystate.KeyRuntimeState{}
 	s.InFlight = 3
 	s.DecInFlight()
 	if got := s.GetInFlight(); got != 2 {
@@ -35,7 +37,7 @@ func TestDecInFlight(t *testing.T) {
 }
 
 func TestDecInFlightClamp(t *testing.T) {
-	s := &KeyRuntimeState{}
+	s := &keystate.KeyRuntimeState{}
 	// Dec below 0 should clamp at 0
 	s.DecInFlight()
 	if got := s.GetInFlight(); got != 0 {
@@ -49,7 +51,7 @@ func TestDecInFlightClamp(t *testing.T) {
 }
 
 func TestIncDecConcurrent(t *testing.T) {
-	s := &KeyRuntimeState{}
+	s := &keystate.KeyRuntimeState{}
 	var wg sync.WaitGroup
 	n := 100
 	for i := 0; i < n; i++ {

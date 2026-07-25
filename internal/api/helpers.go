@@ -6,9 +6,8 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
-	"sync/atomic"
 
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 )
 
@@ -35,30 +34,31 @@ func (rt *Router) saveConfigAndReload(cfg *config.Config) error {
 func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"error": msg})
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // checkPortAvailable tests whether a TCP port can be bound on 127.0.0.1.
 func checkPortAvailable(port int) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("port %d is not available: %w", port, err)
 	}
-	return ln.Close()
+	ln.Close()
+	return nil
 }
 
 // getIntQuery reads an integer query parameter with a default fallback.
 func (rt *Router) getIntQuery(r *http.Request, key string, defaultVal int) int {
-	v := r.URL.Query().Get(key)
-	if v == "" {
+	valStr := r.URL.Query().Get(key)
+	if valStr == "" {
 		return defaultVal
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
+	val, err := strconv.Atoi(valStr)
+	if err != nil || val < 0 {
 		return defaultVal
 	}
-	return n
+	return val
 }
 
 var idCounter int64
@@ -67,39 +67,24 @@ var idCounter int64
 // base36. SyncIDCounter must be called at startup so the counter starts above
 // the highest existing ID and avoids collisions across restarts.
 func generateID(prefix string) string {
-	id := atomic.AddInt64(&idCounter, 1)
-	return prefix + "_" + strconv.FormatInt(id, 36)
+	// Delegate to apibase so all ID generation shares a single counter.
+	return apibase.GenerateID(prefix)
 }
 
 // SyncIDCounter scans existing IDs in the config and advances idCounter past
 // the highest numeric suffix found for each prefix. This must be called once
 // at startup, after config is loaded, to prevent ID collisions after restart.
 func SyncIDCounter(cfg *config.Config) {
-	var maxVal int64
-	scan := func(id string) {
-		i := strings.LastIndexByte(id, '_')
-		if i < 0 {
-			return
-		}
-		n, err := strconv.ParseInt(id[i+1:], 36, 64)
-		if err != nil {
-			return
-		}
-		if n > maxVal {
-			maxVal = n
+	// Delegated to apibase; kept for backward compatibility.
+	apibase.SyncIDCounter(cfg)
+}
+
+// firstActiveKey returns the first active key for a provider, or nil if none found.
+func firstActiveKey(provider *config.Provider) *config.Key {
+	for i := range provider.Keys {
+		if provider.Keys[i].IsActive {
+			return &provider.Keys[i]
 		}
 	}
-	for _, p := range cfg.Providers {
-		scan(p.ID)
-		for _, k := range p.Keys {
-			scan(k.ID)
-		}
-	}
-	for _, c := range cfg.Combos {
-		scan(c.ID)
-	}
-	for _, qs := range cfg.QuickSlots {
-		scan(qs.ID)
-	}
-	atomic.StoreInt64(&idCounter, maxVal)
+	return nil
 }

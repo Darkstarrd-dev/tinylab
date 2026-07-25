@@ -13,6 +13,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 )
 
 // resolveDisplayModel returns the best display name for console logs:
@@ -324,7 +325,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			Source:        r.Header.Get("X-TinyRouter-Source"),
 			InputTokens:   len(bodyBytes) / 4, // rough estimate for live UI
 		}
-		upstreamURL := BuildUpstreamURL(sel.Provider.BaseURL, path)
+		upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
 		if len(bodyBytes) > 0 {
 			rb := bodyBytes
 			if !json.Valid(rb) {

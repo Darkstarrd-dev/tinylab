@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
 
 // CooldownManager manages key cooldown, backoff, and daily quota locks.
@@ -67,7 +67,7 @@ func (s *Selector) ClearError(providerID, keyID, model string) {
 	}
 }
 
-func (s *Selector) isKeyAvailable(state *registry.KeyRuntimeState, model string) bool {
+func (s *Selector) isKeyAvailable(state *keystate.KeyRuntimeState, model string) bool {
 	state.Lock()
 	defer state.Unlock()
 
