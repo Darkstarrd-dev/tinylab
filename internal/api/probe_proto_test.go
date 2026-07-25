@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 )
 
@@ -31,20 +33,20 @@ func sampleConfig(baseURL string) *config.Config {
 	}
 }
 
-// serveProtoTest routes a POST /api/providers/{id}/models/test-proto through
-// chi so that chi.URLParam resolves the provider id as the real handler expects.
-func serveProtoTest(t *testing.T, rt *Router, providerID, model, proto string) *httptest.ResponseRecorder {
+// serveProtoTest routes through chi so that chi.URLParam resolves the provider id.
+func serveProtoTest(t *testing.T, h *probe.Handler, providerID, model, proto string) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"model": model, "proto": proto})
-	req := httptest.NewRequest(http.MethodPost, "/api/providers/"+providerID+"/models/test-proto", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/providers/"+providerID+"/models/test-proto", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	r := chi.NewRouter()
-	r.Post("/api/providers/{id}/models/test-proto", rt.testProviderModelProto)
+	h.Register(r)
 	r.ServeHTTP(rec, req)
 	return rec
 }
+
 
 // ---------------------------------------------------------------------------
 // Happy-path tests: each proto returns a single-probe result with the expected
@@ -61,7 +63,13 @@ func TestTestProviderModelProto_OpenAICompat(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "p1", "m1", config.ProtocolOpenAICompat)
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", config.ProtocolOpenAICompat)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
@@ -94,7 +102,13 @@ func TestTestProviderModelProto_OpenAIResponses(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "p1", "m1", config.ProtocolOpenAIResponses)
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", config.ProtocolOpenAIResponses)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
@@ -118,7 +132,13 @@ func TestTestProviderModelProto_Anthropic(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "p1", "m1", config.ProtocolAnthropic)
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", config.ProtocolAnthropic)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
@@ -142,7 +162,13 @@ func TestTestProviderModelProto_InvalidProto(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "p1", "m1", "bogus")
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", "bogus")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid proto, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
@@ -154,12 +180,18 @@ func TestTestProviderModelProto_EmptyModel(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
 	body, _ := json.Marshal(map[string]string{"model": "", "proto": config.ProtocolOpenAICompat})
-	req := httptest.NewRequest(http.MethodPost, "/api/providers/p1/models/test-proto", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/providers/p1/models/test-proto", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r := chi.NewRouter()
-	r.Post("/api/providers/{id}/models/test-proto", rt.testProviderModelProto)
+	h.Register(r)
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty model, got %d (body=%s)", rec.Code, rec.Body.String())
@@ -172,7 +204,13 @@ func TestTestProviderModelProto_ProviderNotFound(t *testing.T) {
 	cfg := sampleConfig(srv.URL)
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "ghost", "m1", config.ProtocolOpenAICompat)
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "ghost", "m1", config.ProtocolOpenAICompat)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing provider, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
@@ -185,7 +223,13 @@ func TestTestProviderModelProto_NoActiveKey(t *testing.T) {
 	cfg.Providers[0].Keys[0].IsActive = false
 	rt, _ := newTestRouter(t, cfg)
 
-	rec := serveProtoTest(t, rt, "p1", "m1", config.ProtocolOpenAICompat)
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", config.ProtocolOpenAICompat)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for no active key, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
