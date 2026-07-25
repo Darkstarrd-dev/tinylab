@@ -1,8 +1,10 @@
 # TinyRouter Download 下载功能架构
 
-> **文档定位：** `internal/download/` 包、`internal/api/download.go` 与前端 `web/static/download.js` 实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
+> **文档定位：** `internal/download/` 包、`internal/api/download/`（子包，原 `internal/api/download.go`）与前端 `web/static/download.js` 实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-22，仓库工作区（`main`）。本轮变更：下载设置弹窗的文件/目录浏览按钮从前端 File System Access API 迁移至后端 `browseSystemPath` API（`POST /api/downloads/browse`），调用 `fsutil.OpenFilePicker`/`fsutil.OpenDirectoryPicker`（Windows 原生 COM IFileOpenDialog 现代对话框，返回绝对路径）；`openDownloadDir` 迁移至 `fsutil.OpenInFileManager`；`openExternalURL` 迁移至 `fsutil.OpenInBrowser`。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api/download.go` → `internal/api/download/register.go`，`internal/api/settings.go` → `internal/api/settings/register.go`。共享 `Deps` 经 `internal/api/apibase` 传递。此前重构：`killProcessTree`/`setupProcessGroup` 从 `internal/download/kill_unix.go` 和 `kill_windows.go` 提取到共享包 `internal/procutil/`（Unix SIGTERM→2s→SIGKILL，Windows taskkill /T /F）。行为不变。下载设置弹窗的文件/目录浏览按钮从前端 File System Access API 迁移至后端 `browseSystemPath` API（`POST /api/downloads/browse`），调用 `fsutil.OpenFilePicker`/`fsutil.OpenDirectoryPicker`（Windows 原生 COM IFileOpenDialog 现代对话框，返回绝对路径）；`openDownloadDir` 迁移至 `fsutil.OpenInFileManager`；`openExternalURL` 迁移至 `fsutil.OpenInBrowser`。
+>
+> **Download 包文件拆分（2026-07-25，行为不变）**：`internal/download/` 三个超大文件按职责拆分为 12 个文件——`manager.go`→`manager.go`+`worker.go`+`events.go`+`playlist.go`+`lifecycle.go`；`executor.go`→`executor.go`+`progress.go`+`binary.go`+`parse.go`；`args.go`→`args.go`+`formats.go`+`network.go`。所有导出符号名/签名不变，同包内未导出符号跨新文件可达，build/vet/test 全绿。下文内联的旧 `file:line` 锚点（如 `executor.go:199`、`args.go:258`）已随拆分迁移，请以 §13.4 的文件→符号映射为准。
 >
 > **本轮后续修复（2026-07-19，bug fix）**：(a) `openDownloadDir` handler（download.go:398）移除 `setCmdHideWindow(cmd)` 调用——该函数（exec_windows.go:10）设置 `HideWindow: true + CREATE_NO_WINDOW` 会隐藏 `explorer.exe` 这个 GUI 应用的窗口，导致"打开目录"按钮点击静默失效（API 返回 `{status:ok}` 但 explorer 窗口不可见）；`setCmdHideWindow` 保留用于 `openExternalURL`（`cmd /c start`，download.go:457）与 `browseSystemPath`（`powershell`，download.go:486）两处控制台程序以隐藏黑色控制台窗口。(b) 清理 `download.js` 的 `openDownloadDir` 注释中残留的"falling back to copying the path to the clipboard if that fails"——上一轮已彻底移除 clipboard 回退逻辑，注释残留与实际行为不符。(c) 修复 `dl-info-preview` 在多个 `dl-parsed-card` 时自带滚动条截断后续卡片的问题：移除其 `max-height + overflow-y: auto` 改为 `flex-shrink: 0` 自然高度；`.dl-task-list` 移除 `overflow-y: auto + height: 100%` 改为 `flex-shrink: 0`；父容器 `.dl-task-left-col` 加 `overflow-y: auto + min-height: 0` 成为唯一滚动区——实现 `dl-info-preview` 与 `dl-task-list` 共享父容器滚动条（两者总高度超出 `calc(100vh - 170px)` 时才出现滚动条），落实第 547 行所述"普通流式内容"的设计意图。
 >
@@ -492,9 +494,18 @@ go build -o tinyrouter .
 
 本包（`internal/download/`）：
 
-- `manager.go`：Event（16-19）、Manager 结构体（23-41）、taskControl（44-47）、NewManager（50-68）、UpdateSettings（72-82）、Started（85-89）、Start（92-104）、Stop（107-120）、worker（123-136）、processTask（139-203）、finalizeTask（206-224）、updateTaskProgress（227-240）、CreateTask（244-293）、CreatePlaylistTask（298-343）、GetVideoInfo（346-348）、GetPlaylistInfo（351-353）、CancelTask（358-378）、ListTasks（381-391）、GetTask（394-402）、ClearCompleted（405-424）、RemoveTask（427-451）、Subscribe（454-460）、Unsubscribe（463-470）、publishEvent（473-487）、snapshot（490-494）、isTerminal（497-499）、generateID（502-509）、fileSizeOf（512-518）。
-- `executor.go`：Executor（21-24）、NewExecutor（27-29）、Execute（36-142）、ExecuteInfo（145-156）、ExecutePlaylistInfo（159-170）、runCapture（173-193）、resolveYtDlpPath（199-211）、resolveFfmpegPath（217-229）、progressRe（233-235）、parseProgressLine（239-260）、parseSize（268-283）、parseSpeed（286-289）、parseETA（292-307）、processingPatterns（311-316）、hasPostprocessSignal（318-326）、mergeRe/destRe/alreadyRe（330-334）、extractSavedFilePath（342-353）、classifyPatterns（357-369）、classifyExitError（372-380）、wrapInfoError（383-389）、parseVideoInfoJSON（393-421）、parsePlaylistInfoJSON（423-459）、tailBuffer（464-487）。
-- `args.go`：RuntimeSettings（13-22）、常量（24-32）、BuildDownloadArgs（47-132）、resolveVideoFormatSelector（144-171）、resolveAudioFormatSelector（175-186）、qualityToVideoHeight（189-202）、qualityToAudioAbr（205-220）、dedupe（223-237）、BuildVideoInfoArgs（241-246）、BuildPlaylistInfoArgs（250-255）、appendNetworkArgs（258-273）、isYouTubeURL（277-289）、isBilibiliURL（293-301）、hostOf（304-310）、resolveFfmpegDir（314-323）、FormatYtDlpCommand（336-343）、quoteArg（346-354）。
+- `manager.go`：Manager 结构体（17-36）、taskControl（38-42）、NewManager（44-64）、UpdateSettings（66-77）、Started（79-84）、CreateTask（87-140）、GetVideoInfo（142-145）、GetPlaylistInfo（147-150）、ListTasks（152-163）、GetTask（165-174）、snapshot（176-181）、isTerminal（183-186）、generateID（188-196）、fileSizeOf（198-204）。
+- `lifecycle.go`：CancelTask（12-35）、RetryTask（37-77）、ClearCompleted（79-99）、RemoveTask（101-124）。
+- `worker.go`：Start（9-23）、Stop（25-39）、worker（41-55）、processTask（57-121）、finalizeTask（123-142）、updateTaskProgress（144-171）。
+- `events.go`：Event（4-8）、Subscribe（10-17）、Unsubscribe（19-27）、publishEvent（29-42）。
+- `playlist.go`：CreatePlaylistTask（8-52）。
+- `executor.go`：ErrCancelled（18）、Executor（22-26）、NewExecutor（28-35）、Execute（37-164）、ExecuteInfo（166-178）、ExecutePlaylistInfo（180-192）、runCapture（194-216）。
+- `progress.go`：progressRe（11-14）、parseProgressLine（17-38）、parseFloat（40-43）、parseSize（46-62）、parseSpeed（64-68）、parseETA（70-87）、processingPatterns（89-95）、hasPostprocessSignal（97-107）、tailBuffer（109-132）。
+- `binary.go`：resolveYtDlpPath（15-31）、resolveFfmpegPath（33-47）、mergeRe/destRe/alreadyRe（49-53）、extractSavedFilePath（61-72）。
+- `parse.go`：classifyPatterns（12-25）、classifyExitError（27-36）、wrapInfoError（38-46）、parseVideoInfoJSON（48-76）、parsePlaylistInfoJSON（78-114）。
+- `args.go`：RuntimeSettings（11-20）、常量（22-30）、BuildDownloadArgs（45-132）、BuildVideoInfoArgs（134-141）、BuildPlaylistInfoArgs（143-150）、FormatYtDlpCommand（152-160）、quoteArg（162-170）。
+- `formats.go`：resolveVideoFormatSelector（18-47）、resolveAudioFormatSelector（49-61）、qualityToVideoHeight（63-77）、qualityToAudioAbr（79-95）、dedupe（97-111）。
+- `network.go`：appendNetworkArgs（11-28）、isYouTubeURL（30-44）、isBilibiliURL（46-55）、hostOf（57-65）、resolveFfmpegDir（67-77）、isDir（79-85）。
 - `types.go`：TaskStatus（8-15）、DownloadType（18-23）、QualityPreset（26-34）、ContainerFormat（37-45）、Progress（48-55）、Task（58-81）、CreateTaskInput（84-101）、VideoInfo（104-112）、PlaylistEntry（115-121）、PlaylistInfo（124-128）。
 - `kill_windows.go`：killProcessTree / taskkill /T /F（17-19）、setupProcessGroup（23-27）。
 - `kill_unix.go`：killProcessTree / SIGTERM → 2s grace → SIGKILL 兜底（12-31）、setupProcessGroup / Setpgid（22-27）。

@@ -2,7 +2,9 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-25，仓库工作区（`main`）。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问违例闪退），`internal/api/editor.go` 缩短文件选择器 filter，修复 `editor.js` 初始化时 findbar 的 `document.getElementById` NPE（改为 `container.querySelector`）。涉及文件同原条目。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。涉及 Playground 的子包：`models.go` → `internal/api/models/`，`anysearch.go` → `internal/api/anysearch/`，`editor.go` → `internal/api/editor/`，`review_presets.go` → `internal/api/review_presets/`，`gallery.go`/`gallery_fs.go`/`gallery_review.go`/`gallery_session.go` → `internal/api/gallery/`，`image.go` → `internal/api/image/`，`settings.go` → `internal/api/settings/`，`providers_models_crud.go` 等 4 文件 → `internal/api/providers/`。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问...
+
+> **2026-07-26 更新（Gallery 批量导入修复）：** 修复"一次导入大量 zip 时前 N 个包无缩略图、仅末尾约 20-30 个正常"的 bug。根因：前端 `processCollectedEntries` 用 `Promise.all` 同时上传全部 zip，后端 `gallerySessionStore` LRU 容量仅 32，第 33 个 `put` 起驱逐最早会话，前 N-32 个包会话在缩略图拉取前已被驱逐 → 404。本次修复（`internal/api/gallery/register.go` + `web/playground/static-pg/gallery-io.js`/`gallery-tree.js`）：(1) `galleryMaxSessions` 32→128；(2) 新增 `DELETE /api/gallery/zip/{sessionId}`（`galleryDeleteZipSession`，整会话删除，204 幂等）与 `POST /api/gallery/zip/{sessionId}/touch`（`galleryTouchSession`，刷新 LRU 位置），前端 `setActive` fire-and-forget 调 touch、`clearActiveSideTree`/`removeItem`/`removeItemsByFilter` 经 `releaseZipSessions` 调 DELETE；(3) 前端 `getZipEntryBlob` 在 404 时经 `rehydrateZipSession` 按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目后重试一次（驱逐不再致命）；(4) `processCollectedEntries` 改用 `runWithConcurrency`（6 并发）取代无界 `Promise.all`，避免上传 herd；(5) 移除 `addZipBlob` 对全局 `galleryState.zipSessionId`/`zipEntriesCache` 的并发踩踏，改由 `setActive` 跟踪当前查看包的会话（AI Review 读全局即得正确包）；(6) 删除已死的 `zipEntriesCache` 状态字段。测试：`internal/api/gallery/register_test.go` 覆盖 LRU 驱逐契约、`touch`、`remove`、新增 HTTP 路由及 chi 区分会话删除 vs 条目删除。
 
 > **2026-07-22 更新（Search 模式 UI/UX 优化）：**
 > - **双窗口左右并列布局与交互：** `pgState.mode === 'search'` 时强制使用 2 窗口布局（`splitCount = 2`，`1fr 1fr`），左侧窗口显示 Search Strategy 与 Raw Search Results 视图，右侧窗口专门渲染 Synthesized 最终回复；问句留在 `#pg-input` 并呈灰色锁定态（`pg-input-search-locked`）；打字时恢复亮色编辑。
@@ -264,7 +266,7 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 | `pg-director.js` | Director 判断、Narrator 生成和生命周期 |
 | `pg-search.js` | Search 模式：3 步 AI 编排（分类→搜索→综合）、搜索设置面板、结果渲染 |
 | `pg-lifecycle.js` | `renderPlayground`（含 search 模式恢复后重新渲染） / `cleanupPlayground`（search 模式 early return 不 abort） |
-| `pg-i18n.js` | Playground 独立中英文字典 |
+| `pg-i18n.js` | Playground 独立中英文字典 + 共享 `T()` 回退（`gallery-state.js`/`editor-state.js` 复用） |
 | `playground.css` | 全屏布局、消息、侧栏、modal、响应式样式 |
 
 ### 5.3 宿主适配契约
@@ -694,8 +696,10 @@ zip、tiff 及文件系统操作需后端参与：
 - **POST `/api/gallery/zip-from-path`**：从磁盘路径直接创建 zip 会话（避免上传往返）。
 - **POST `/api/gallery/zip-writeback`**：将 zip 会话字节写回磁盘原文件（`fsutil.AtomicWrite`）。
 - **POST `/api/gallery/paste-paths`**：读取 Windows 剪贴板 CF_HDROP 格式文件路径（`fsutil.GetClipboardFilePaths()`）。
-- **POST `/api/gallery/zip`**：上 zip 二进制（500MB 上限覆盖 `/api` 1MB 组级限制），返回 `{sessionId, manifest:{entries:[{path,size,kind}], total}}`；zip bytes 缓存于进程内 LRU 会话（上限 32 个、5 分钟空闲过期，`internal/api/gallery_session.go:10`）。
-- **GET `/api/gallery/zip/{sessionId}/{entryPath:*}`**：从会话取 zip 内单张图二进制。`{entryPath:*}` 是 chi 通配匹配含 `/` 的路径；前端 `encodeURIComponent` 拼接。
+- **POST `/api/gallery/zip`**：上 zip 二进制（500MB 上限覆盖 `/api` 1MB 组级限制），返回 `{sessionId, manifest:{entries:[{path,size,kind}], total}}`；zip bytes 缓存于进程内纯 LRU 会话（`galleryMaxSessions=128`，无 TTL；`internal/api/gallery/register.go` 的 `gallerySessionStore`）。容量从早期 32 上调到 128 以覆盖一次批量导入；驱逐不再致命——前端 `rehydrateZipSession` 在 404 时按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目。
+- **GET `/api/gallery/zip/{sessionId}/{entryPath:*}`**：从会话取 zip 内单张图二进制。`{entryPath:*}` 是 chi 通配匹配含 `/` 的路径；前端 `encodeURIComponent` 拼接。会话被 LRU 驱逐后返回 404，前端 `getZipEntryBlob` 触发 `rehydrateZipSession` 重传后重试一次。
+- **DELETE `/api/gallery/zip/{sessionId}`**：删除整个 zip 会话（`galleryDeleteZipSession`，204 No Content，幂等）。前端 `releaseZipSessions` 在清空/移除包时 fire-and-forget 调用，使后端立即回收内存而非等 LRU 驱逐。chi 以更具体的非通配路由优先，与 `DELETE /zip/{sessionId}/*`（条目删除）共存。
+- **POST `/api/gallery/zip/{sessionId}/touch`**：刷新会话 LRU 位置（`galleryTouchSession`，204；会话已驱逐则 404）。前端 `setActive` 在切到某包时 fire-and-forget 调用，使当前查看的会话不易被驱逐。
 - **POST `/api/gallery/tiff`**：上 TIFF 二进制（50MB 上限），后端用 `golang.org/x/image/tiff` 解码后重编码为 JPEG 返回。解码后检查图片尺寸：任一维度超过 `maxTIFFDim`（16384）时返回错误，防止解压炸弹 DoS（`internal/gallery/tiff.go:15`、`internal/gallery/tiff.go:29-31`）。
 
 ### 全屏交互
@@ -766,11 +770,10 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 |---|---|
 | 修改拖拽/粘贴/打开交互 | `web/playground/static-pg/gallery-io.js`（`onOpenClick`/`onOpenDirBackend`/`onPaste`/`onDrop`/`loadBackendPaths`）、`internal/api/gallery_fs.go`（后端 Picker/列表/删除/剪贴板） |
 | 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery_fs.go`（`galleryDeleteFs`/`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
-| 修改 Gallery modal 交互/焦点 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteItemPrompt`/`deleteZipPrompt`/`deleteCurrentVideo` 自动 focus）、`web/static/app.js`（全局 modal handler 按钮循环） |
-| 修改双屏 focus/树面板切换 | `web/playground/static-pg/gallery-layout.js`（`updateFocusUIOnly`/`bindEventsForCurrentLayout` 树面板点击）、`web/playground/static-pg/gallery-tree.js`（`toggleTreePanel` DOM focus 同步） |
-| 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery.go::galleryListZip`（500MB 上限） |
-| 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery.go::galleryConvertTiff` |
-| 修改 zip 会话 LRU 容量/过期 | `internal/api/gallery_session.go` |
+| 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/register.go::galleryListZip`（500MB 上限） |
+| 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/register.go::galleryConvertTiff` |
+| 修改 zip 会话 LRU 容量/过期/驱逐 | `internal/api/gallery/register.go`（`galleryMaxSessions`、`gallerySessionStore.put`/`get`/`touch`/`pin`/`unpin`、`galleryDeleteZipSession`/`galleryTouchSession` 处理器） |
+| 修改 zip 会话重建/批量导入并发 | `web/playground/static-pg/gallery-io.js`（`rehydrateZipSession`/`getZipEntryBlob`/`runWithConcurrency`/`addZipBlob` 的 `zipFile` 保留）、`web/playground/static-pg/gallery-tree.js`（`setActive` 的 touch、`releaseZipSessions`） |
 | 修改自动播放档位 | `web/playground/static-pg/gallery.js::AUTOPLAY_INTERVALS` |
 | 修改全屏快捷键集 | `web/playground/static-pg/gallery.js::onFullscreenKey` |
 | 修改 Gallery i18n 文案 | `web/static/i18n.js` (`gallery*` 键) |
