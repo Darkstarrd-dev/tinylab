@@ -443,6 +443,11 @@ document.addEventListener('keydown', function(e) {
 
   // ---- Modal is open: modal interactions take precedence ----
   if (modal) {
+    if (modal.querySelector('#theme-modal-picker-container')) {
+      if (handleThemeModalKeyDown(e, modal)) {
+        return;
+      }
+    }
     // Collect all focusable elements in the modal (buttons, inputs, textareas, selects)
     var modalFocusables = Array.prototype.slice.call(modal.querySelectorAll('button, input, textarea, select, a[href], .pg-btn, .btn'));
     modalFocusables = modalFocusables.filter(function(b) { return b.offsetParent !== null && !b.disabled; }); // visible & enabled only
@@ -550,3 +555,127 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 });
+
+function handleThemeModalKeyDown(e, modal) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    dismissTopModal();
+    return true;
+  }
+
+  var darkCards = Array.prototype.slice.call(modal.querySelectorAll('[data-group="dark"] .theme-card'));
+  var lightCards = Array.prototype.slice.call(modal.querySelectorAll('[data-group="light"] .theme-card'));
+  var styleSwatches = Array.prototype.slice.call(modal.querySelectorAll('.style-swatch'));
+  var footerBtns = Array.prototype.slice.call(modal.querySelectorAll('.modal-footer button'));
+
+  var groups = [
+    { name: 'dark', items: darkCards },
+    { name: 'night', items: lightCards },
+    { name: 'style', items: styleSwatches },
+    { name: 'button', items: footerBtns }
+  ];
+
+  var activeEl = document.activeElement;
+  var targetControl = activeEl ? (activeEl.closest ? activeEl.closest('.theme-card, .style-swatch, .btn, button') : activeEl) : null;
+  var currentGroupIdx = -1;
+  var currentItemIdx = -1;
+
+  for (var gi = 0; gi < groups.length; gi++) {
+    var idx = groups[gi].items.indexOf(targetControl);
+    if (idx !== -1) {
+      currentGroupIdx = gi;
+      currentItemIdx = idx;
+      break;
+    }
+  }
+
+  // 1. Tab key cycling: dark -> night -> style -> button -> dark
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    var nextGroupIdx;
+    if (e.shiftKey) {
+      if (currentGroupIdx <= 0) nextGroupIdx = groups.length - 1;
+      else nextGroupIdx = currentGroupIdx - 1;
+    } else {
+      if (currentGroupIdx < 0 || currentGroupIdx >= groups.length - 1) nextGroupIdx = 0;
+      else nextGroupIdx = currentGroupIdx + 1;
+    }
+
+    var targetGroup = groups[nextGroupIdx];
+    if (targetGroup && targetGroup.items.length > 0) {
+      var targetItem = targetGroup.items.find(function(el) {
+        return el.classList.contains('active') || el.classList.contains('selected') || el.id === 'settings-modal-save';
+      }) || targetGroup.items[0];
+      if (targetItem) targetItem.focus();
+    }
+    return true;
+  }
+
+  // 2. Arrow keys: Move focus within the active group
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (currentGroupIdx === -1) {
+      if (groups[0].items.length > 0) {
+        var firstItem = groups[0].items.find(function(el) { return el.classList.contains('active') || el.classList.contains('selected'); }) || groups[0].items[0];
+        if (firstItem) firstItem.focus();
+      }
+      return true;
+    }
+
+    var items = groups[currentGroupIdx].items;
+    if (items.length === 0) return true;
+
+    var nextItemIdx = currentItemIdx;
+    if (currentGroupIdx === 0 || currentGroupIdx === 1) {
+      // 3x3 Card Grid (Dark or Night Group)
+      var cols = 3;
+      var total = items.length;
+      if (e.key === 'ArrowRight') {
+        nextItemIdx = (currentItemIdx + 1) % total;
+      } else if (e.key === 'ArrowLeft') {
+        nextItemIdx = (currentItemIdx - 1 + total) % total;
+      } else if (e.key === 'ArrowDown') {
+        nextItemIdx = (currentItemIdx + cols) % total;
+      } else if (e.key === 'ArrowUp') {
+        nextItemIdx = (currentItemIdx - cols + total) % total;
+      }
+    } else {
+      // Linear layout (Style Group or Button Group)
+      var totalLinear = items.length;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        nextItemIdx = (currentItemIdx + 1) % totalLinear;
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        nextItemIdx = (currentItemIdx - 1 + totalLinear) % totalLinear;
+      }
+    }
+
+    if (items[nextItemIdx]) {
+      items[nextItemIdx].focus();
+    }
+    return true;
+  }
+
+  // 3. Spacebar: Select / Activate item
+  if (e.key === ' ' || e.key === 'Spacebar') {
+    if (activeEl && (activeEl.classList.contains('theme-card') || activeEl.classList.contains('style-swatch') || activeEl.tagName === 'BUTTON')) {
+      e.preventDefault();
+      activeEl.click();
+      return true;
+    }
+  }
+
+  // 4. Enter: Confirm and Exit
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (activeEl && activeEl.tagName === 'BUTTON' && activeEl.id !== 'settings-modal-save') {
+      activeEl.click();
+    } else {
+      var saveBtn = modal.querySelector('#settings-modal-save');
+      if (saveBtn) saveBtn.click();
+      else dismissTopModal();
+    }
+    return true;
+  }
+
+  return false;
+}

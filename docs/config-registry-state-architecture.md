@@ -1,7 +1,7 @@
 # TinyRouter Config / Registry / State 基础设施架构
 
 > **文档定位：** `internal/config/`、`internal/registry/`、`internal/state/` 三个包共同构成的 **配置定义 + 内存注册表 + 运行时状态持久化** 基础设施的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
-> **最后核对：** 2026-07-25，仓库工作区（`main`）。本轮更新：ThemeSystem 新增独立风格维度（Style Dimension）——`ThemeConfig.Style` 字段持久化 + `data-theme-style` HTML 属性驱动 4 种风格预设（default/sharp/soft/compact）覆盖形状/动效/字重 token。上一轮：快捷键摘要渲染 + ThemeSystem 双层主题架构升级。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。本轮更新：Theme Modal 760px 横版自适应 + modal-body `overflow-x: hidden` 消除意外横向滚动条 + `.theme-card` 原生 `<button>` 标签化重构 + 4 组键盘无缝轮询（dark→night→style→button）与 Save 按钮高对比度双重 Focus Ring 光环。上一轮：ThemeSystem 新增独立风格维度（Style Dimension）。
 
 ## 1. 范围与结论
 
