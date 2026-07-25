@@ -32,7 +32,7 @@ func requestHeaders(r *http.Request) http.Header {
 
 // maxRetries returns the configured max retry count with a default fallback.
 func (h *Handler) maxRetries() int {
-	mr := h.selector.Settings().MaxRetries
+	mr := h.rotSet.Settings().MaxRetries
 	if mr <= 0 {
 		return 5
 	}
@@ -45,7 +45,7 @@ func (h *Handler) logRequest(sel *rotation.SelectedKey, logLabel, providerName, 
 	if providerName != "" {
 		dspName = providerName
 	}
-	dspModel := resolveDisplayModel(dspName, upstreamModel, originalModel, h.reg)
+	dspModel := resolveDisplayModel(dspName, upstreamModel, originalModel, h.aliases)
 	h.logger.Info("REQUEST %s%s | %s | %d msgs | Key %s", logLabel, dspName, dspModel, msgCount, sel.Key.Name)
 	state.requestLogged = true
 }
@@ -53,7 +53,7 @@ func (h *Handler) logRequest(sel *rotation.SelectedKey, logLabel, providerName, 
 // handleNetworkError processes upstream network errors. Always continues to the next key.
 func (h *Handler) handleNetworkError(sel *rotation.SelectedKey, providerID, model string, err error, state *retryState, reqID string, reqBody []byte, reqHeaders http.Header, upstreamURL string, originalModel string) {
 	h.logger.Error("upstream error: %v", err)
-	h.selector.OnKeyFailure(providerID, sel.Key.ID, model, 0, err.Error())
+	h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, 0, err.Error())
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 	h.recordUsage(reqID, providerID, model, sel, "error", 0, 0, 0, 0, err.Error(), reqBody, nil, nil, 0, reqHeaders, upstreamURL, originalModel)
 	state.temp429Retries = 0
@@ -71,8 +71,8 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	latencyMs := time.Since(startTime).Milliseconds()
 
 	// NIM 429: use NIM-specific cooldown ladder.
-	if h.selector.IsNIMEnabled(providerID, model) {
-		h.selector.MarkNIM429(providerID, sel.Key.ID, model)
+	if h.nim.IsNIMEnabled(providerID, model) {
+		h.nim.MarkNIM429(providerID, sel.Key.ID, model)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		state.tpmWaitRetries = 0
@@ -86,7 +86,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	snap := adapter.ParseHeaders(resp.Header)
 	if snap != nil {
 		// Update quota state from the 429 response headers
-		keyState := h.reg.GetKeyState(providerID, sel.Key.ID)
+		keyState := h.keyState.GetKeyState(providerID, sel.Key.ID)
 		if keyState != nil {
 			keyState.UpdateQuota(model, snap.ModelLimit, snap.ModelRemaining, snap.GlobalLimit, snap.GlobalRemaining)
 		}
@@ -103,7 +103,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 
 	// If adapter detected quota exhaustion (ModelRemaining == 0), lock the key for this model
 	if snap != nil && snap.ModelExhausted() {
-		h.selector.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
+		h.quotaLock.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		h.logger.Warn("429 quota exhausted: %s | locked Key %s until next CST day", util.TruncStr(bodyStr, 200), sel.Key.Name)
@@ -130,7 +130,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 		}
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
-		h.selector.OnKeyFailure(providerID, sel.Key.ID, model, 429, bodyStr)
+		h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, 429, bodyStr)
 		h.logger.Warn("429 retries exhausted for Key %s, switching", sel.Key.Name)
 		h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel)
 		return
@@ -147,7 +147,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 		case sn429RPM:
 			// rpm exhausted: per-account. Cool current key+model 60s, exclude same-account
 			// keys, switch to a different account immediately.
-			h.selector.MarkRateLimited(providerID, sel.Key.ID, model, 60*time.Second)
+			h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, 60*time.Second)
 			h.excludeSameAccountKeys(sel, state)
 			state.temp429Retries = 0
 			h.logger.Warn("429 rpm: %s | Key %s cooled 60s, switching account", util.TruncStr(bodyStr, 200), sel.Key.Name)
@@ -168,7 +168,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 				}
 				return
 			}
-			h.selector.MarkRateLimited(providerID, sel.Key.ID, model, 60*time.Second)
+			h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, 60*time.Second)
 			state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 			state.tpmWaitRetries = 0
 			h.logger.Warn("429 tpm: %s | Key %s cooled 60s after retry exhausted", util.TruncStr(bodyStr, 200), sel.Key.Name)
@@ -181,21 +181,21 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	rule := rotation.ClassifyError(429, bodyStr)
 	switch rule.Action {
 	case rotation.ActionDailyQuota:
-		h.selector.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
+		h.quotaLock.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		h.logger.Warn("429 daily quota: %s | locked Key %s until next CST day", util.TruncStr(bodyStr, 200), sel.Key.Name)
 		h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel)
 		return
 	case rotation.ActionCooldown:
-		h.selector.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rule.CooldownSec)*time.Second)
+		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rule.CooldownSec)*time.Second)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		h.logger.Warn("429: %s | Key %s cooled %ds", util.TruncStr(bodyStr, 200), sel.Key.Name, rule.CooldownSec)
 		h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel)
 		return
 	case rotation.ActionTransient:
-		h.selector.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
+		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		h.logger.Warn("429: %s | Key %s cooled %ds (transient)", util.TruncStr(bodyStr, 200), sel.Key.Name, rotation.DefaultTransientCooldownSec)
@@ -206,7 +206,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	}
 
 	if rotation.IsDailyQuota429(bodyStr, model) {
-		h.selector.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
+		h.quotaLock.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		state.temp429Retries = 0
 		h.logger.Warn("429 daily quota: %s | locked Key %s until next CST day", util.TruncStr(bodyStr, 200), sel.Key.Name)
@@ -231,7 +231,7 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 	state.temp429Retries = 0
-	h.selector.OnKeyFailure(providerID, sel.Key.ID, model, 429, bodyStr)
+	h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, 429, bodyStr)
 	h.logger.Warn("429 retries exhausted for Key %s, switching", sel.Key.Name)
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel)
 }
@@ -255,7 +255,7 @@ func (h *Handler) handleUpstreamError(resp *http.Response, sel *rotation.Selecte
 	// lock the key for this model, invalidate its stale quota snapshot so the quota
 	// monitor stops showing misleading "remaining" numbers, then switch.
 	if rotation.IsBalanceExhausted(resp.StatusCode, bodyStr) {
-		h.selector.MarkBalanceLocked(providerID, sel.Key.ID, model, bodyStr)
+		h.quotaLock.MarkBalanceLocked(providerID, sel.Key.ID, model, bodyStr)
 		h.quotaTracker.RemoveKey(sel.Provider.Name, model, sel.Key.ID)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 		h.logger.Error("upstream %d (balance exhausted) for Key %s (%s), body=%s | locked", resp.StatusCode, sel.Key.Name, sel.Provider.Name, util.TruncStr(bodyStr, 500))
@@ -267,13 +267,13 @@ func (h *Handler) handleUpstreamError(resp *http.Response, sel *rotation.Selecte
 	rule := rotation.ClassifyError(resp.StatusCode, bodyStr)
 	switch rule.Action {
 	case rotation.ActionBackoff:
-		h.selector.OnKeyFailure(providerID, sel.Key.ID, model, resp.StatusCode, bodyStr)
+		h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, resp.StatusCode, bodyStr)
 	case rotation.ActionCooldown:
-		h.selector.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rule.CooldownSec)*time.Second)
+		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rule.CooldownSec)*time.Second)
 	case rotation.ActionDailyQuota:
-		h.selector.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
+		h.quotaLock.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
 	case rotation.ActionTransient:
-		h.selector.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
+		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
 	}
 
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)

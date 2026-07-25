@@ -6,8 +6,8 @@ import (
 )
 
 func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
-	providers := h.reg.ListProviders()
-	combos := h.reg.ListCombos()
+	providers := h.providers.ListProviders()
+	combos := h.comboList.ListCombos()
 
 	type modelObj struct {
 		ID          string `json:"id"`
@@ -23,7 +23,7 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 
 	// quickSlotOnly 模式：仅返回 quickslot 中的模型，不返回 provider/combo 模型
 	if h.quickSlotOnly() {
-		for _, qs := range h.reg.ListQuickSlots() {
+		for _, qs := range h.quickSlots.ListQuickSlots() {
 			if qs.Disabled {
 				continue
 			}
@@ -80,7 +80,7 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 			OwnedBy: "combo",
 		})
 	}
-	for _, qs := range h.reg.ListQuickSlots() {
+	for _, qs := range h.quickSlots.ListQuickSlots() {
 		if qs.Disabled {
 			continue
 		}

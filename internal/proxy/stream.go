@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -13,33 +12,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/util"
 )
-
-// sseContentLength extracts the unescaped character length of the "content"
-// field from an SSE data payload. It uses a lightweight byte search instead
-// of full JSON parsing to minimize overhead. Returns 0 if no content field
-// is found or the content is empty.
-func sseContentLength(payload []byte) int {
-	marker := []byte(`"content":"`)
-	idx := bytes.Index(payload, marker)
-	if idx < 0 {
-		return 0
-	}
-	i := idx + len(marker)
-	length := 0
-	for i < len(payload) {
-		if payload[i] == '\\' {
-			i += 2
-			length++
-			continue
-		}
-		if payload[i] == '"' {
-			break
-		}
-		length++
-		i++
-	}
-	return length
-}
 
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel string) {
 	defer resp.Body.Close()
@@ -231,8 +203,8 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					// 非 normalize 路径：remaining 已经在循环中通过 w.Write(buf[:n]) 原样发出，
 					// 不应重复写出。仅提取 token 计入 totalOutput/usage。
 				}
-			// 统一提取 token（两个路径都需要）
-			line := strings.TrimSpace(remaining)
+				// 统一提取 token（两个路径都需要）
+				line := strings.TrimSpace(remaining)
 				if strings.HasPrefix(line, "data:") {
 					payload := strings.TrimSpace(line[5:])
 					if payload != "[DONE]" {
@@ -275,7 +247,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	}
 	totalLatencyMs := latencyMs + time.Since(streamStart).Milliseconds()
 	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
-	dspModel := resolveDisplayModel(sel.Provider.Name, model, originalModel, h.reg)
+	dspModel := resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases)
 	h.logger.Info("\U0001f300 [STREAM] %s | %s | %dms | %d", sel.Provider.Name, dspModel, totalLatencyMs, resp.StatusCode)
 	// 非捕获模式下传 nil，recordUsage 内部 respBody 为空即不写 RespPayload
 	var sseBody []byte
@@ -335,196 +307,6 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 		respBodyForEntry = bodyBytes
 	}
 	h.logger.Info("\U0001f4ca [response] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
-	h.logger.Info("\U0001f300 [RESPONSE] %s | %s | %dms | %d", sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, model, originalModel, h.reg), latencyMs, resp.StatusCode)
+	h.logger.Info("\U0001f300 [RESPONSE] %s | %s | %dms | %d", sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases), latencyMs, resp.StatusCode)
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, latencyMs, 0, inputTokens, outputTokens, errMsg, reqBody, respBodyForEntry, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel)
-}
-
-// parseAndBroadcastChunk extracts delta text from an SSE data: line in debug
-// mode and broadcasts request-chunk events through the RequestUpdates
-// broadcaster. The line argument is a raw SSE line (e.g. "data: {...}").
-// The sb argument is the SSELineBuffer that has already produced this line;
-// it is preserved so subsequent calls can continue scanning without losing
-// any partial data between calls.
-func (h *Handler) parseAndBroadcastChunk(reqID, line string, sb *sse.SSELineBuffer) {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "data:") {
-		return
-	}
-	payload := strings.TrimSpace(trimmed[5:])
-	if payload == "[DONE]" {
-		return
-	}
-
-	deltas := parseSSEChunkDelta([]byte(payload))
-	for _, d := range deltas {
-		h.RequestUpdates.Broadcast(RequestEvent{
-			Type:    "request-chunk",
-			ID:      reqID,
-			Section: d.section,
-			Delta:   d.delta,
-		})
-	}
-}
-
-// chunkDelta is the per-chunk parse result for a single SSE data payload.
-type chunkDelta struct {
-	section string // "reasoning" | "assistant" | "usage"
-	delta   string
-}
-
-// parseAnthropicSSEUsage extracts token usage from a single Anthropic-format
-// SSE data payload. Anthropic streams usage in two events:
-//
-//   - event: message_start → data.message.usage.input_tokens
-//   - event: message_delta → data.usage.output_tokens
-//
-// It returns the token counts and ok=true only when the payload carries a
-// recognized usage field; other event types return ok=false. Parse failures
-// are treated as ok=false (best-effort, never an error).
-func parseAnthropicSSEUsage(payload []byte) (inputTokens, outputTokens int, ok bool) {
-	var obj map[string]any
-	if err := json.Unmarshal(payload, &obj); err != nil {
-		return 0, 0, false
-	}
-	eventType, _ := obj["type"].(string)
-	switch eventType {
-	case "message_start":
-		msg, ok := obj["message"].(map[string]any)
-		if !ok {
-			return 0, 0, false
-		}
-		usage, ok := msg["usage"].(map[string]any)
-		if !ok {
-			return 0, 0, false
-		}
-		if in, ok := usage["input_tokens"].(float64); ok {
-			return int(in), 0, true
-		}
-	case "message_delta":
-		usage, ok := obj["usage"].(map[string]any)
-		if !ok {
-			return 0, 0, false
-		}
-		if out, ok := usage["output_tokens"].(float64); ok {
-			return 0, int(out), true
-		}
-	}
-	return 0, 0, false
-}
-
-// parseSSEChunkDelta extracts incremental delta fields from an OpenAI-format
-// SSE data payload. It returns at most three deltas (one per section) but may
-// return zero if the payload contains no relevant fields.
-func parseSSEChunkDelta(payload []byte) []chunkDelta {
-	var result []chunkDelta
-
-	var obj map[string]any
-	if err := json.Unmarshal(payload, &obj); err != nil {
-		return result
-	}
-
-	// Extract reasoning_content from choices[].delta
-	if choices, ok := obj["choices"].([]any); ok && len(choices) > 0 {
-		for _, c := range choices {
-			choice, ok := c.(map[string]any)
-			if !ok {
-				continue
-			}
-			delta, ok := choice["delta"].(map[string]any)
-			if !ok {
-				continue
-			}
-			if v, ok := delta["reasoning_content"].(string); ok && v != "" {
-				result = append(result, chunkDelta{section: "reasoning", delta: v})
-			}
-			if v, ok := delta["content"].(string); ok && v != "" {
-				result = append(result, chunkDelta{section: "assistant", delta: v})
-			}
-		}
-	}
-
-	// Extract usage
-	if usage, ok := obj["usage"].(map[string]any); ok {
-		if in, ok := usage["input_tokens"].(float64); ok && in > 0 {
-			result = append(result, chunkDelta{section: "usage", delta: formatTokenDelta("input_tokens", int(in))})
-		}
-		if out, ok := usage["output_tokens"].(float64); ok && out > 0 {
-			result = append(result, chunkDelta{section: "usage", delta: formatTokenDelta("output_tokens", int(out))})
-		}
-	}
-
-	return result
-}
-
-// formatTokenDelta builds a short delta string for usage chunks so the
-// frontend can display a readable summary.
-func formatTokenDelta(field string, value int) string {
-	return field + "=" + itoa(value)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
-}
-
-// extractThoughtSignature scans an OpenAI-format SSE data payload for a Gemini
-// thought_signature nested under delta.tool_calls[].extra_content.google.
-// It returns the tool_call id (the cache key) and signature on the first match.
-// A malformed payload or a payload without a signature returns ok=false.
-func extractThoughtSignature(payload []byte) (toolCallID, signature string, ok bool) {
-	var obj map[string]any
-	if err := json.Unmarshal(payload, &obj); err != nil {
-		return "", "", false
-	}
-	choices, okc := obj["choices"].([]any)
-	if !okc {
-		return "", "", false
-	}
-	for _, c := range choices {
-		choice, okc := c.(map[string]any)
-		if !okc {
-			continue
-		}
-		delta, okd := choice["delta"].(map[string]any)
-		if !okd {
-			continue
-		}
-		toolCalls, okt := delta["tool_calls"].([]any)
-		if !okt {
-			continue
-		}
-		for _, tc := range toolCalls {
-			m, okm := tc.(map[string]any)
-			if !okm {
-				continue
-			}
-			id, _ := m["id"].(string)
-			if id == "" {
-				continue
-			}
-			extra, oke := m["extra_content"].(map[string]any)
-			if !oke {
-				continue
-			}
-			google, okg := extra["google"].(map[string]any)
-			if !okg {
-				continue
-			}
-			sig, oks := google["thought_signature"].(string)
-			if !oks || sig == "" {
-				continue
-			}
-			return id, sig, true
-		}
-	}
-	return "", "", false
 }

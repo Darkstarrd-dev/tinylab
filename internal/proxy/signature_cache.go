@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -101,4 +102,57 @@ func (c *SignatureCache) evictExpired(now time.Time) {
 			delete(c.entries, id)
 		}
 	}
+}
+
+// extractThoughtSignature scans an OpenAI-format SSE data payload for a Gemini
+// thought_signature nested under delta.tool_calls[].extra_content.google.
+// It returns the tool_call id (the cache key) and signature on the first match.
+// A malformed payload or a payload without a signature returns ok=false.
+func extractThoughtSignature(payload []byte) (toolCallID, signature string, ok bool) {
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return "", "", false
+	}
+	choices, okc := obj["choices"].([]any)
+	if !okc {
+		return "", "", false
+	}
+	for _, c := range choices {
+		choice, okc := c.(map[string]any)
+		if !okc {
+			continue
+		}
+		delta, okd := choice["delta"].(map[string]any)
+		if !okd {
+			continue
+		}
+		toolCalls, okt := delta["tool_calls"].([]any)
+		if !okt {
+			continue
+		}
+		for _, tc := range toolCalls {
+			m, okm := tc.(map[string]any)
+			if !okm {
+				continue
+			}
+			id, _ := m["id"].(string)
+			if id == "" {
+				continue
+			}
+			extra, oke := m["extra_content"].(map[string]any)
+			if !oke {
+				continue
+			}
+			google, okg := extra["google"].(map[string]any)
+			if !okg {
+				continue
+			}
+			sig, oks := google["thought_signature"].(string)
+			if !oks || sig == "" {
+				continue
+			}
+			return id, sig, true
+		}
+	}
+	return "", "", false
 }

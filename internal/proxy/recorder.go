@@ -116,7 +116,7 @@ func (h *Handler) parseAndUpdateQuota(sel *rotation.SelectedKey, providerID, mod
 	if snap == nil {
 		return
 	}
-	state := h.reg.GetKeyState(providerID, sel.Key.ID)
+	state := h.keyState.GetKeyState(providerID, sel.Key.ID)
 	if state == nil {
 		return
 	}
