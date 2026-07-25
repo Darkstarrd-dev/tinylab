@@ -199,6 +199,20 @@ func TestBuildUpstreamURL(t *testing.T) {
 		{"https://api.openai.com/v1", "/v1/responses", "https://api.openai.com/v1/responses"},
 		// /v2 版本段也识别：不注入
 		{"https://api.example.com/v2", "/v1/chat/completions", "https://api.example.com/v2/chat/completions"},
+		// Ollama (cloud): user-entered path is dropped, /v1 is injected uniformly.
+		{"https://ollama.com", "/v1/chat/completions", "https://ollama.com/v1/chat/completions"},
+		{"https://ollama.com/api", "/v1/chat/completions", "https://ollama.com/v1/chat/completions"},
+		{"https://ollama.com/api/tags", "/v1/models", "https://ollama.com/v1/models"},
+		{"https://ollama.com/api/chat", "/v1/chat/completions", "https://ollama.com/v1/chat/completions"},
+		{"https://ollama.com/v1", "/v1/chat/completions", "https://ollama.com/v1/chat/completions"},
+		{"https://ollama.com/v1/chat/completions", "/v1/chat/completions", "https://ollama.com/v1/chat/completions"},
+		// Ollama (local default port): same path-dropping behavior.
+		{"http://localhost:11434", "/v1/chat/completions", "http://localhost:11434/v1/chat/completions"},
+		{"http://localhost:11434/api", "/v1/chat/completions", "http://localhost:11434/v1/chat/completions"},
+		{"http://localhost:11434/api/chat", "/v1/chat/completions", "http://localhost:11434/v1/chat/completions"},
+		{"http://127.0.0.1:11434/api/tags", "/v1/models", "http://127.0.0.1:11434/v1/models"},
+		// Non-Ollama localhost port must NOT get the special treatment.
+		{"http://localhost:8080/api", "/v1/chat/completions", "http://localhost:8080/api/v1/chat/completions"},
 	}
 	for _, tt := range tests {
 		got := BuildUpstreamURL(tt.baseURL, tt.path)
