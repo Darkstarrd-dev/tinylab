@@ -166,12 +166,8 @@ var ThemeSystem = (function() {
     // Update header theme button icon.
     if (typeof updateThemeButton === 'function') updateThemeButton(mode);
     // Rebuild chart with new theme colors.
-    if (typeof trendChartInstance !== 'undefined' && trendChartInstance) {
-      trendChartInstance.destroy();
-      trendChartInstance = null;
-      if (typeof initTrendChart === 'function' && typeof lastUsageEntries !== 'undefined') {
-        initTrendChart(lastUsageEntries);
-      }
+    if (document.getElementById('trend-chart-card') && typeof initTrendChart === 'function' && typeof lastUsageEntries !== 'undefined') {
+      initTrendChart(lastUsageEntries);
     }
     // Terminal xterm theme.
     if (typeof updateTerminalTheme === 'function') updateTerminalTheme();

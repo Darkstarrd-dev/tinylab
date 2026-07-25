@@ -595,8 +595,17 @@ tbody tr:last-child td{border-bottom:none}
 /* ---------------------------------------------------------------------
    Trend Chart
    --------------------------------------------------------------------- */
-.trend-canvas-wrap{position:relative;width:100%;flex:1;min-height:200px;min-width:0;height:100%}
-#trend-canvas{max-width:100%!important;max-height:100%!important}
+.trend-chart-wrap{position:relative;width:100%;flex:1;min-height:200px;min-width:0;height:100%;display:flex;flex-direction:column}
+.trend-chart{width:100%;height:100%;display:block}
+.trend-tooltip{position:absolute;background:var(--modal-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);border-radius:8px;padding:8px 12px;font-size:var(--font-badge);pointer-events:none;z-index:10;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.trend-tooltip-hour{font-weight:600;margin-bottom:4px;color:var(--text)}
+.trend-tooltip-row{display:flex;align-items:center;gap:6px;color:var(--text-secondary);line-height:1.6}
+.trend-tooltip-dot{display:inline-block;width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.trend-tooltip-count{margin-left:auto;font-weight:600;color:var(--text)}
+.trend-tooltip-total{margin-top:4px;padding-top:4px;border-top:1px solid var(--glass-border);font-weight:600;color:var(--text)}
+.trend-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;flex-shrink:0}
+.trend-legend-item{display:flex;align-items:center;gap:5px;font-size:var(--font-badge);color:var(--text-secondary)}
+.trend-legend-dot{display:inline-block;width:8px;height:8px;border-radius:2px;flex-shrink:0}
 
 /* ---------------------------------------------------------------------
    Quota Hover Tooltip (C)
