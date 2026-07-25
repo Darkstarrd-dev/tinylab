@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,19 +40,26 @@ func (h *Handler) maxRetries() int {
 }
 
 // logRequest logs the initial request line (only once per forwardWithRetry call).
-func (h *Handler) logRequest(sel *rotation.SelectedKey, logLabel, providerName, upstreamModel, originalModel string, msgCount int, state *retryState) {
+// reqID and callerTag thread requester identity into the console so concurrent
+// clients can be told apart.
+func (h *Handler) logRequest(sel *rotation.SelectedKey, logLabel, providerName, upstreamModel, originalModel string, msgCount int, state *retryState, reqID, callerTag string) {
 	dspName := sel.Provider.Name
 	if providerName != "" {
 		dspName = providerName
 	}
 	dspModel := resolveDisplayModel(dspName, upstreamModel, originalModel, h.aliases)
-	h.logger.Info("REQUEST %s%s | %s | %d msgs | Key %s", logLabel, dspName, dspModel, msgCount, sel.Key.Name)
+	if callerTag != "" {
+		h.logger.Info("[%s] REQUEST %s%s | %s | %d msgs | Key %s | %s", reqID, logLabel, dspName, dspModel, msgCount, sel.Key.Name, callerTag)
+	} else {
+		h.logger.Info("[%s] REQUEST %s%s | %s | %d msgs | Key %s", reqID, logLabel, dspName, dspModel, msgCount, sel.Key.Name)
+	}
 	state.requestLogged = true
 }
 
 // handleNetworkError processes upstream network errors. Always continues to the next key.
 func (h *Handler) handleNetworkError(sel *rotation.SelectedKey, providerID, model string, err error, state *retryState, reqID string, reqBody []byte, reqHeaders http.Header, upstreamURL string, originalModel string) {
-	h.logger.Error("upstream error: %v", err)
+	h.logger.Error("[%s] upstream error: %v", reqID, err)
+	h.logger.Warn("[%s] %s: 网络错误（%v）→ 退避后切换", reqID, sel.Key.Name, err)
 	h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, 0, err.Error())
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
 	h.recordUsage(reqID, providerID, model, sel, "error", 0, 0, 0, 0, err.Error(), reqBody, nil, nil, 0, reqHeaders, upstreamURL, originalModel)
@@ -236,13 +244,18 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 }
 
 // handleUpstreamError processes HTTP 5xx and 4xx (non-429) responses.
-// Uses ClassifyError to determine the appropriate action, then switches to the next key.
-// For 5xx errors, applies a short backoff (500ms-5s) before the next retry to avoid
-// hammering the upstream (P3.14).
-func (h *Handler) handleUpstreamError(resp *http.Response, sel *rotation.SelectedKey, providerID, model string, state *retryState, r *http.Request, reqID string, reqBody []byte, upstreamURL string, startTime time.Time, originalModel string) {
+// Returns true when the upstream error has already been written to the client
+// as a pass-through response (request-shape 4xx) and the retry loop must STOP
+// (and return success-ish so the caller does NOT also writeError 502). Returns
+// false to continue the retry/switch-key loop as before.
+//
+// Uses ClassifyError to determine the appropriate action, then switches to the
+// next key. For 5xx errors, applies a short backoff (500ms-5s) before the next
+// retry to avoid hammering the upstream (P3.14).
+func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response, sel *rotation.SelectedKey, providerID, model string, state *retryState, r *http.Request, reqID string, reqBody []byte, upstreamURL string, startTime time.Time, originalModel string) bool {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		h.logger.Warn("failed to read upstream error body: %v", err)
+		h.logger.Warn("[%s] failed to read upstream error body: %v", reqID, err)
 	}
 	resp.Body.Close()
 	bodyStr := string(body)
@@ -257,26 +270,55 @@ func (h *Handler) handleUpstreamError(resp *http.Response, sel *rotation.Selecte
 		h.quotaLock.MarkBalanceLocked(providerID, sel.Key.ID, model, bodyStr)
 		h.quotaTracker.RemoveKey(sel.Provider.Name, model, sel.Key.ID)
 		state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
-		h.logger.Error("upstream %d (balance exhausted) for Key %s (%s), body=%s | locked", resp.StatusCode, sel.Key.Name, sel.Provider.Name, util.TruncStr(bodyStr, 500))
+		h.logger.Error("[%s] upstream %d (balance exhausted) for Key %s (%s), body=%s | locked", reqID, resp.StatusCode, sel.Key.Name, sel.Provider.Name, util.TruncStr(bodyStr, 500))
+		h.logger.Warn("[%s] %s: 账户余额耗尽 → 锁至次日 CST 00:05 后切换", reqID, sel.Key.Name)
 		state.temp429Retries = 0
 		state.tpmWaitRetries = 0
-		return
+		return false
 	}
 
 	rule := rotation.ClassifyError(resp.StatusCode, bodyStr)
+
+	// Pass-through: the request itself is malformed (400/422 request-validation).
+	// The key is healthy — retrying the SAME request on another key 400s again, and
+	// locking the key would punish a healthy key + block all concurrent requests
+	// for the cooldown window. Forward the upstream error to the client as-is and
+	// stop retrying. (A body matching a transient text rule, e.g. an aggregator
+	// reporting "upstream request failed", overrides this to a retryable action.)
+	if rule.Action == rotation.ActionPassThrough {
+		ct := resp.Header.Get("Content-Type")
+		if ct == "" {
+			ct = "application/json"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+		h.logger.Warn("[%s] %s: 上游返回 %d（请求格式错误：%s）→ 直接返回客户端，不冷却 key", reqID, sel.Key.Name, resp.StatusCode, util.TruncStr(bodyStr, 120))
+		state.temp429Retries = 0
+		state.tpmWaitRetries = 0
+		state.consecutive5xx = 0
+		return true
+	}
+
+	var consequence string
 	switch rule.Action {
 	case rotation.ActionBackoff:
 		h.keySel.OnKeyFailure(providerID, sel.Key.ID, model, resp.StatusCode, bodyStr)
+		consequence = "→ 指数退避后切换"
 	case rotation.ActionCooldown:
 		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rule.CooldownSec)*time.Second)
+		consequence = fmt.Sprintf("→ 冷却 %ds 后切换", rule.CooldownSec)
 	case rotation.ActionDailyQuota:
 		h.quotaLock.MarkDailyQuotaLocked(providerID, sel.Key.ID, model, bodyStr)
+		consequence = "→ 锁至次日 CST 00:05"
 	case rotation.ActionTransient:
 		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
+		consequence = fmt.Sprintf("→ 冷却 %ds 后切换", rotation.DefaultTransientCooldownSec)
 	}
 
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
-	h.logger.Error("upstream %d for Key %s (%s), body=%s | switching", resp.StatusCode, sel.Key.Name, sel.Provider.Name, util.TruncStr(bodyStr, 500))
+	h.logger.Error("[%s] upstream %d for Key %s (%s), body=%s | switching", reqID, resp.StatusCode, sel.Key.Name, sel.Provider.Name, util.TruncStr(bodyStr, 500))
+	h.logger.Warn("[%s] %s: %s", reqID, sel.Key.Name, consequence)
 	state.temp429Retries = 0
 	state.tpmWaitRetries = 0
 	if resp.StatusCode < 500 {
@@ -291,18 +333,19 @@ func (h *Handler) handleUpstreamError(resp *http.Response, sel *rotation.Selecte
 		if backoff > 5*time.Second {
 			backoff = 5 * time.Second
 		}
-		h.logger.Debug("5xx backoff: waiting %v before next retry (consecutive5xx=%d)", backoff, state.consecutive5xx)
+		h.logger.Debug("[%s] 5xx backoff: waiting %v before next retry (consecutive5xx=%d)", reqID, backoff, state.consecutive5xx)
 		if r != nil {
 			select {
 			case <-r.Context().Done():
-				h.logger.Debug("client canceled during 5xx backoff")
-				return
+				h.logger.Debug("[%s] client canceled during 5xx backoff", reqID)
+				return false
 			case <-time.After(backoff):
 			}
 		} else {
 			time.Sleep(backoff)
 		}
 	}
+	return false
 }
 
 // senseNova429Type classifies SenseNova 429 responses by body content.

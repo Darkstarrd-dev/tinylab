@@ -17,6 +17,22 @@ type CooldownManager interface {
 	MarkDailyQuotaLocked(providerID, keyID, model string, body string) time.Time
 	MarkRateLimited(providerID, keyID, model string, duration time.Duration) time.Time
 	MarkBalanceLocked(providerID, keyID, model, body string) time.Time
+	// SonestCooldown returns the soonest-expiring ModelLock[model] among the
+	// provider's active keys that are NOT in excludeKeyIDs and are currently
+	// locked (lock in the future). Used by the proxy to wait for a cooldown to
+	// expire instead of instantly returning 502 when every available key is
+	// merely cooling down (e.g. a concurrent 429 locked the only key). Returns
+	// ok=false when no such locked key exists (keys are absent, all excluded,
+	// or genuinely available — SelectKey should already have returned one).
+	SonestCooldown(providerID, model string, excludeKeyIDs []string) (CooldownInfo, bool)
+}
+
+// CooldownInfo describes the soonest-expiring cooldown among a provider's keys.
+type CooldownInfo struct {
+	Deadline time.Time // when ModelLock[model] expires
+	KeyID    string
+	KeyName  string
+	Reason   string // ModelErrors[model] ("%d: <body>"), empty if none recorded
 }
 
 func (s *Selector) MarkUnavailable(providerID, keyID, model string, statusCode int, body string) time.Time {
@@ -199,6 +215,51 @@ func (s *Selector) MarkRateLimited(providerID, keyID, model string, duration tim
 		s.onStateChange()
 	}
 	return unlock
+}
+
+// SonestCooldown returns the soonest-expiring ModelLock[model] among the
+// provider's active keys that are NOT in excludeKeyIDs and are currently
+// locked (the lock deadline is in the future). It lets the proxy wait for a
+// cooldown to expire instead of instantly 502-ing when every available key is
+// only temporarily cooling down (e.g. a concurrent 429 locked the only key).
+//
+// A key whose lock has already expired is treated as available (and skipped
+// here) — SelectKey would have returned it. Keys in excludeKeyIDs are skipped:
+// they already failed this request, waiting for their lock won't help. Returns
+// ok=false when no qualifying locked key exists.
+func (s *Selector) SonestCooldown(providerID, model string, excludeKeyIDs []string) (CooldownInfo, bool) {
+	provider, ok := s.reg.GetProvider(providerID)
+	if !ok {
+		return CooldownInfo{}, false
+	}
+	exclude := make(map[string]bool, len(excludeKeyIDs))
+	for _, id := range excludeKeyIDs {
+		exclude[id] = true
+	}
+	now := time.Now()
+	var best CooldownInfo
+	found := false
+	for _, k := range provider.Keys {
+		if !k.IsActive || exclude[k.ID] {
+			continue
+		}
+		state := s.reg.GetKeyState(provider.ID, k.ID)
+		if state == nil {
+			continue
+		}
+		state.Lock()
+		unlock, locked := state.ModelLocks[model]
+		reason := state.ModelErrors[model]
+		state.Unlock()
+		if !locked || !now.Before(unlock) {
+			continue
+		}
+		if !found || unlock.Before(best.Deadline) {
+			best = CooldownInfo{Deadline: unlock, KeyID: k.ID, KeyName: k.Name, Reason: reason}
+			found = true
+		}
+	}
+	return best, found
 }
 
 // Compile-time interface checks.

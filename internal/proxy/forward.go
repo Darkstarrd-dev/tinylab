@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,72 @@ func resolveDisplayModel(providerName, upstreamModel, originalModel string, reg 
 		return originalModel
 	}
 	return upstreamModel
+}
+
+// requestCallerTag returns a short, log-safe string identifying the client that
+// made r, for inclusion in console log lines so concurrent clients can be told
+// apart. It never exposes a full credential. Format example:
+// "src=playground ua=OpenCode/1.2 from=127.0.0.1:54321". Fields with no value are
+// omitted; the whole tag is bounded to ~80 chars so it fits one console line.
+func requestCallerTag(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	var parts []string
+	if src := strings.TrimSpace(r.Header.Get("X-TinyRouter-Source")); src != "" {
+		parts = append(parts, "src="+clipStr(src, 16))
+	}
+	if auth := r.Header.Get("Authorization"); auth != "" {
+		parts = append(parts, "auth="+maskAuth(auth))
+	}
+	if ua := strings.TrimSpace(r.Header.Get("User-Agent")); ua != "" {
+		parts = append(parts, "ua="+clipStr(ua, 24))
+	}
+	if from := strings.TrimSpace(r.RemoteAddr); from != "" {
+		parts = append(parts, "from="+from)
+	}
+	tag := strings.Join(parts, " ")
+	// Hard bound at 80 bytes so the tag never blows out a console line.
+	if len(tag) > 80 {
+		tag = tag[:80]
+	}
+	return tag
+}
+
+// maskAuth returns a log-safe rendering of an Authorization header value: the
+// first 4 and last 4 characters separated by "…" (e.g. "sk-x…yz"). The common
+// "Bearer " scheme prefix is stripped before masking so only the key itself is
+// masked. If the key is too short to mask without revealing the whole thing
+// (<=8 chars), "<len>chars" is returned instead. The full credential is never
+// returned.
+func maskAuth(auth string) string {
+	v := strings.TrimSpace(auth)
+	// Strip a "Bearer" scheme prefix (case-insensitive). Trimming first means a
+	// "Bearer " with trailing space collapses to "Bearer", so match the 6-char
+	// scheme and trim any whitespace that followed it.
+	if len(v) >= 6 && strings.EqualFold(v[:6], "bearer") {
+		v = strings.TrimSpace(v[6:])
+	}
+	if v == "" {
+		return "0chars"
+	}
+	n := len(v)
+	if n <= 8 {
+		return fmt.Sprintf("%dchars", n)
+	}
+	return v[:4] + "…" + v[n-4:]
+}
+
+// clipStr shortens s to at most n runes, appending "…" if truncated.
+func clipStr(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 // generateToolCallID creates a unique tool_call id compatible with the

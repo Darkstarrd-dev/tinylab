@@ -13,7 +13,17 @@ import (
 func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, providerID, upstreamModel, path string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, logLabel, providerName string, entryFormat combo.EntryFormat, originalModel string) (bool, string) {
 	state := &retryState{maxRetries: h.maxRetries()}
 
+	// reqID is per-forwardWithRetry (shared across retries) so the console can
+	// correlate the REQUEST/SEND/PROXY/error lines of one client request, and the
+	// EntryTracker entry reuses the same id across retries.
+	reqID := generateRequestID()
+	callerTag := requestCallerTag(r)
+
 	cfgProvider, _ := h.providers.GetProvider(providerID)
+	dispName := providerID
+	if cfgProvider != nil && cfgProvider.Name != "" {
+		dispName = cfgProvider.Name
+	}
 	if isStream && cfgProvider != nil && cfgProvider.InjectStreamOpts {
 		if _, ok := parsed["stream_options"]; !ok {
 			parsed["stream_options"] = map[string]any{"include_usage": true}
@@ -23,12 +33,40 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 	for {
 		sel, err := h.keySel.SelectKey(providerID, upstreamModel, state.excludeKeyIDs)
 		if err != nil {
-			dispName := providerID
-			if cfgProvider != nil && cfgProvider.Name != "" {
-				dispName = cfgProvider.Name
+			// All available keys are momentarily unavailable. Before returning an
+			// instant 502 (which bursts for every concurrent request during the
+			// cooldown window), check whether the unavailable keys are only
+			// cooling down — if so, wait for the soonest cooldown to expire (capped)
+			// and retry SelectKey once more. Excluded keys are skipped: they
+			// already failed this request, waiting for their lock won't help.
+			if info, ok := h.cooldown.SonestCooldown(providerID, upstreamModel, state.excludeKeyIDs); ok {
+				wait := time.Until(info.Deadline)
+				if wait > 30*time.Second {
+					wait = 30 * time.Second
+				}
+				reason := info.Reason
+				if reason == "" {
+					reason = "上游错误冷却"
+				}
+				if wait > 0 {
+					h.logger.Warn("[%s] %s/%s: 所有可用 key 冷却中（Key %s 原因: %s，%s 后到期）→ 等待恢复后重试", reqID, dispName, upstreamModel, info.KeyName, reason, wait.Round(time.Second))
+					select {
+					case <-r.Context().Done():
+						h.logger.Debug("[%s] client canceled during cooldown wait", reqID)
+						return false, ""
+					case <-time.After(wait):
+					}
+				}
+				sel, err = h.keySel.SelectKey(providerID, upstreamModel, state.excludeKeyIDs)
 			}
-			h.logger.Error("no available keys for %s/%s: %v", dispName, upstreamModel, err)
-			return false, ""
+			if err != nil {
+				if callerTag != "" {
+					h.logger.Error("[%s] %s: no available keys for %s/%s（所有 key 已耗尽，返回 502）| %s", reqID, callerTag, dispName, upstreamModel, callerTag)
+				} else {
+					h.logger.Error("[%s] no available keys for %s/%s（所有 key 已耗尽，返回 502）", reqID, dispName, upstreamModel)
+				}
+				return false, ""
+			}
 		}
 
 		// Track in-flight: mark key as in-use immediately after selection.
@@ -38,7 +76,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if !state.requestLogged {
-			h.logRequest(sel, logLabel, providerName, upstreamModel, originalModel, msgCount, state)
+			h.logRequest(sel, logLabel, providerName, upstreamModel, originalModel, msgCount, state, reqID, callerTag)
 		}
 
 		// NIM min_interval: wait if too soon since last send on this key.
@@ -65,12 +103,11 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			writeError(w, http.StatusInternalServerError, "internal marshalling error")
 			return false, ""
 		}
-		h.logger.Debug("SEND %s | %s | body=%dB", sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))
+		h.logger.Debug("[%s] SEND %s | %s | body=%dB", reqID, sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))
 
 		// Create a processing usage entry now that we are about to forward the
 		// request. This gives the UI an immediate "request-start" signal so
 		// the recent-requests list shows the entry the moment it arrives.
-		reqID := generateRequestID()
 		processingEntry := usage.Entry{
 			ID:            reqID,
 			Timestamp:     time.Now(),
@@ -130,7 +167,19 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if resp.StatusCode >= 400 {
-			h.handleUpstreamError(resp, sel, providerID, upstreamModel, state, r, reqID, upstreamBody, upstreamURL, startTime, originalModel)
+			written := h.handleUpstreamError(w, resp, sel, providerID, upstreamModel, state, r, reqID, upstreamBody, upstreamURL, startTime, originalModel)
+			if written {
+				// Pass-through: the upstream 4xx error was already written to the
+				// client as-is. Stop retrying and return success-ish so the caller
+				// does NOT also writeError(502). The key is healthy — do not lock
+				// or exclude it.
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				return true, reqID
+			}
 			h.EntryTracker.Remove(reqID)
 			if keyState != nil {
 				keyState.DecInFlight()
@@ -152,7 +201,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 
 		maskedURL := maskURL(sel.Provider.BaseURL)
 		dspModel := resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases)
-		h.logger.Info("PROXY %s | %s | conn=%s | url=%s", sel.Provider.Name, dspModel, sel.KeyName, maskedURL)
+		h.logger.Info("[%s] PROXY %s | %s | conn=%s | url=%s", reqID, sel.Provider.Name, dspModel, sel.KeyName, maskedURL)
 
 		latencyMs := time.Since(startTime).Milliseconds()
 

@@ -3,6 +3,7 @@
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -152,7 +153,7 @@ func TestHandleUpstreamError_401(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -193,7 +194,7 @@ func TestHandleUpstreamError_500(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -234,7 +235,7 @@ func TestHandleUpstreamError_403(t *testing.T) {
 	state := &retryState{maxRetries: 5}
 
 	// The handleUpstreamError should not panic
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -294,7 +295,7 @@ func TestLogRequest_FirstCall(t *testing.T) {
 	sel := newSelectedKey()
 	state := &retryState{maxRetries: 5}
 
-	h.logRequest(sel, "", "", "gpt-4", "", 3, state)
+	h.logRequest(sel, "", "", "gpt-4", "", 3, state, "test-id", "")
 
 	if !state.requestLogged {
 		t.Fatal("expected requestLogged to be true after logRequest")
@@ -510,7 +511,7 @@ func TestHandleUpstreamError_402(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -538,7 +539,7 @@ func TestHandleUpstreamError_404(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -565,7 +566,7 @@ func TestHandleUpstreamError_NoBody(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
 
 	// Should not panic with empty body
 	keyState := h.reg.GetKeyState("test", "key1")
