@@ -17,6 +17,9 @@ var _lastPerKeyRefresh = 0;
 var inflightEntries = {};
 var processingTimer = null;
 var usageFilters = { success: true, failure: true, processing: true };
+var recentPageSize = 30;
+var recentPage = 1;
+var recentFilteredCount = 0;
 var currentInfoModalRequestId = null;
 var currentInfoModalReasoningEl = null;
 var currentInfoModalAssistantEl = null;
@@ -156,7 +159,7 @@ function renderUsageRow(e) {
   else dotClass += ' status-dot-processing';
   var dotHtml = '<span class="' + dotClass + '"></span>';
   var statusInner;
-  if (usageDebugMode && (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing')) {
+  if (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing') {
     statusInner = '<button type="button" class="btn btn-sm btn-info" onclick="showUsageEntryInfoById(\'' + (e.id || '') + '\')">' + dotHtml + '</button>';
   } else {
     statusInner = dotHtml;
@@ -484,15 +487,81 @@ async function renderUsage(c) {
   }
 }
 
+function recentMaxPage() {
+  return Math.max(1, Math.ceil(recentFilteredCount / recentPageSize));
+}
+
+function recentPrevPage() {
+  if (recentPage <= 1) return;
+  recentPage--;
+  updateRecentRequestsInline(lastUsageEntries);
+}
+
+function recentNextPage() {
+  if (recentPage >= recentMaxPage()) return;
+  recentPage++;
+  updateRecentRequestsInline(lastUsageEntries);
+}
+
+function recentSetPageSize(sel) {
+  recentPageSize = Number(sel.value) || 30;
+  recentPage = 1;
+  updateRecentRequestsInline(lastUsageEntries);
+}
+
+function recentPageSizeOptions() {
+  var opts = [20, 30, 40, 50];
+  return opts.map(function(n) {
+    var s = (n === recentPageSize) ? ' selected' : '';
+    return '<option value="' + n + '"' + s + '>' + n + '</option>';
+  }).join('');
+}
+
+function updateRecentPagerState() {
+  var maxPage = recentMaxPage();
+  var ind = document.getElementById('recent-page-indicator');
+  if (ind) ind.textContent = recentPage + ' / ' + maxPage;
+  var sel = document.getElementById('recent-page-size');
+  if (sel && String(sel.value) !== String(recentPageSize)) sel.value = String(recentPageSize);
+  var prev = document.getElementById('recent-prev-page');
+  if (prev) {
+    var atFirst = recentPage <= 1;
+    prev.disabled = atFirst;
+    prev.style.opacity = atFirst ? '0.4' : '';
+    prev.style.cursor = atFirst ? 'not-allowed' : '';
+  }
+  var next = document.getElementById('recent-next-page');
+  if (next) {
+    var atLast = recentPage >= maxPage;
+    next.disabled = atLast;
+    next.style.opacity = atLast ? '0.4' : '';
+    next.style.cursor = atLast ? 'not-allowed' : '';
+  }
+}
+
 function renderRecentRequestsInline(entries) {
-  var limit = 50;
-  var rows = entries.slice(0, limit);
+  var filtered = entries.filter(shouldShowUsageEntry);
+  recentFilteredCount = filtered.length;
+  var maxPage = recentMaxPage();
+  if (recentPage > maxPage) recentPage = maxPage;
+  if (recentPage < 1) recentPage = 1;
+  var start = (recentPage - 1) * recentPageSize;
+  var end = start + recentPageSize;
+  var rows = filtered.slice(start, end);
+  var pagerHtml =
+    '<span class="recent-pager" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px">' +
+      '<select id="recent-page-size" onchange="recentSetPageSize(this)" style="width:auto;padding:3px 8px;font-size:var(--font-badge);border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">' + recentPageSizeOptions() + '</select>' +
+      '<button type="button" class="btn btn-sm btn-filter" id="recent-prev-page" onclick="recentPrevPage()">\u2190</button>' +
+      '<span id="recent-page-indicator" style="font-size:var(--font-badge);color:var(--text-muted);min-width:52px;text-align:center">' + recentPage + ' / ' + maxPage + '</span>' +
+      '<button type="button" class="btn btn-sm btn-filter" id="recent-next-page" onclick="recentNextPage()">\u2192</button>' +
+    '</span>';
   var header = '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">' +
     '<span>' + t('recentRequests') + '<span class="recent-count">' + entries.length + '</span></span>' +
     '<span class="console-controls" style="gap:4px">' +
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="success" onclick="toggleUsageFilter(this,\'success\')">' + t('filterSuccess') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
+      pagerHtml +
     '</span>' +
   '</div>';
   var body;
@@ -520,8 +589,13 @@ function renderRecentRequestsInline(entries) {
 function updateRecentRequestsInline(entries) {
   var tbody = document.getElementById('recent-tbody');
   var filtered = entries.filter(shouldShowUsageEntry);
-  var limit = 50;
-  var rows = filtered.slice(0, limit);
+  recentFilteredCount = filtered.length;
+  var maxPage = recentMaxPage();
+  if (recentPage > maxPage) recentPage = maxPage;
+  if (recentPage < 1) recentPage = 1;
+  var start = (recentPage - 1) * recentPageSize;
+  var end = start + recentPageSize;
+  var rows = filtered.slice(start, end);
   if (!tbody) {
     if (entries.length > 0) {
       var card = document.querySelector('.recent-requests-card');
@@ -532,15 +606,17 @@ function updateRecentRequestsInline(entries) {
         if (newCard) card.parentNode.replaceChild(newCard, card);
         document.querySelectorAll('.recent-requests-card .btn-filter').forEach(function(b) {
           var f = b.dataset.filter;
-          b.classList.toggle('active', usageFilters[f]);
+          if (f) b.classList.toggle('active', usageFilters[f]);
         });
+        updateRecentPagerState();
       }
     }
     return;
   }
   tbody.innerHTML = rows.map(renderUsageRow).join('');
   var countEl = document.querySelector('.recent-requests-card .recent-count');
-  if (countEl) countEl.textContent = String(entries.length);
+  if (countEl) countEl.textContent = String(filtered.length);
+  updateRecentPagerState();
 }
 
 function formatCompactTokens(n) {
@@ -669,8 +745,6 @@ function handleRequestStart(entry) {
   }
   sortEntriesByTimeDesc(lastUsageEntries);
   updateRecentRequestsInline(lastUsageEntries);
-  var countEl = document.querySelector('.recent-requests-card .recent-count');
-  if (countEl) countEl.textContent = String(lastUsageEntries.length);
   ensureProcessingTimer();
 }
 
@@ -698,8 +772,6 @@ function handleRequestDone(id, status, entry) {
   sortEntriesByTimeDesc(lastUsageEntries);
   delete inflightEntries[id];
   updateRecentRequestsInline(lastUsageEntries);
-  var countEl = document.querySelector('.recent-requests-card .recent-count');
-  if (countEl) countEl.textContent = String(lastUsageEntries.length);
   if (!hasProcessingEntries()) stopProcessingTimer();
   if (currentInfoModalRequestId === id) {
     currentInfoModalStreamingDone = true;

@@ -12,9 +12,10 @@ import (
 
 // recordUsage records a completed (or errored) request into the usage ring
 // buffer, broadcasts a request-done event for the live UI, and signals the
-// usage broadcaster. Payload/headers are captured only when debugMode is on
-// or the request is from the playground source (always captured and routed to
-// a dedicated pg ring); reqBody is truncated to 64KB, respBody to 512KB.
+// usage broadcaster. Payload/headers are now always captured so Recent
+// Requests are viewable regardless of debug mode; the playground source is
+// routed to a dedicated pg ring. Memory is bounded by ring size × body
+// size; reqBody is truncated to 64KB, respBody to 512KB.
 func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string) {
 	entry := usage.Entry{
 		ID:            id,
@@ -36,11 +37,13 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 	}
 
 	// 分流与门控：
-	//   - source == "playground" 的请求写入独立的 pg ring（若已注入），始终捕获详情；
-	//   - 其余请求写入 Recent Requests ring，仅在 debugMode 时捕获 payload/headers。
-	// 这样两个列表物理隔离，且 Recent Requests 在非调试模式下只存元数据，降低内存。
+	//   - source == "playground" 的请求写入独立的 pg ring（若已注入）；
+	//   - 其余请求写入 Recent Requests ring。
+	// payload/headers 现在始终捕获，使 Recent Requests 在任意 debugMode 状态下都可查看；
+	// 内存开销由 ring 容量（config.UsageRingSize，默认 500）× 单条 body 大小封顶。
+	// reqBody 截断到 64KB，respBody 到 512KB。
 	isPlayground := entry.Source == "playground"
-	captureDetails := h.debugMode() || isPlayground
+	captureDetails := true
 	if captureDetails {
 		if len(reqBody) > 0 {
 			// reqBody 截断上限，与 respBody 的 512KB 同思路，避免单条过大。
