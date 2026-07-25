@@ -2,7 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-**最后核对：** 2026-07-26，仓库工作区（`main`）。本次新增/核对：(1) 输入栏按钮组固定宽度约束——给 `.pg-input-actions` 设置固定 `120px` 宽度（`flex: 0 0 120px`）与居中对齐，解决在英文模式下 Image（Generate）与 Normal（Send）等模式间切换时导致的按钮组宽度跳动与输入框挤压问题。涉及 `playground.css`、`playground-architecture.md`；(2) AutoChat 模式切换覆盖判定修复与 Search History 项一键删除功能。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问违例闪退），`internal/api/editor.go` 缩短文件选择器 filter，修复 `editor.js` 初始化时 findbar 的 `document.getElementById` NPE（改为 `container.querySelector`）。涉及文件同原条目。
 
 > **2026-07-22 更新（Search 模式 UI/UX 优化）：**
 > - **双窗口左右并列布局与交互：** `pgState.mode === 'search'` 时强制使用 2 窗口布局（`splitCount = 2`，`1fr 1fr`），左侧窗口显示 Search Strategy 与 Raw Search Results 视图，右侧窗口专门渲染 Synthesized 最终回复；问句留在 `#pg-input` 并呈灰色锁定态（`pg-input-search-locked`）；打字时恢复亮色编辑。
@@ -158,6 +158,8 @@ Playground 后端相关职责只有三类：
 | `POST /api/anysearch/search` | Search 模式搜索代理 | 管理 session | 1 MiB |
 | `POST /api/anysearch/subdomains` | Search 模式子域查询 | 管理 session | 1 MiB |
 | `POST /api/anysearch/extract` | Search 模式 URL 内容提取 | 管理 session | 1 MiB |
+| `POST /api/editor/open` | Editor 原生文件选择器打开文本文件 | 管理 session | 32 MiB |
+| `POST /api/editor/save` | Editor 原子写保存文本文件 | 管理 session | 32 MiB |
 
 前端源码中的 `pgApiGet('/models')` 经宿主 `apiGet` 自动加 `/api`，实际请求是 `/api/models`。聊天相关代码直接 `fetch('/v1/chat/completions')`。
 
@@ -669,6 +671,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 | 发布 Playground 变体 | 无 tag/tag 测试、资源 200、完整首页手测 |
 | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `pgJSFiles` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 修改 Search 状态持久化 | `pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支跳过 localStorage messages）、`pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后重新渲染）、`pg-search.js`（`pgSearchSend()` 即时保存、`pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查） |
+| 修改/新增 Editor 功能 | `editor-state.js`、`editor.js`、`playground.css`（`.ed-*`）、`internal/api/editor.go`、`internal/api/router.go`（路由 + pgJSFiles）、`web/static/app.js`（`gotoGalleryToggle`/`navigateTo`）、`web/static/auth.js`（nav-item toggle）、`web/static/i18n.js`（`editor*` 键）、`web/static/shortcuts.js`（F6 label）、`web/static/index.html`（脚本加载） |
 
 ## 16. Gallery 模块（图片查看器分页）
 
@@ -776,3 +779,45 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 | 修改审核策略/并发 | `internal/api/gallery_review.go`（`galleryStartReview`/`runReview`/`selectReviewIndices`/`selectHeadTailIndices`） |
 | 修改审核前端交互 | `web/playground/static-pg/gallery-review.js`（`renderReviewPanel`/`startPolling`/`applyReviewFilter`）、`web/playground/static-pg/gallery-state.js`（`reviewState`）、`web/static/style.css`（`.gallery-review-*`） |
 | 修改审核预设 CRUD | `internal/api/review_presets.go`、`internal/registry/review_presets.go`、`internal/config/types.go`（`ReviewPreset`）、`internal/config/defaults.go`（内置预设） |
+
+## 17. Editor 模块（双栏文本编辑器）
+
+Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编辑器，与 Gallery 共享同一个导航按钮（第 1 次点击 → Gallery，第 2 次 → Editor，循环 toggle）。UI 由 `web/playground/static-pg/editor.js` + `editor-state.js` 实现（vanilla JS，`window.renderEditor`/`window.cleanupEditor` 入口）。
+
+### 核心功能
+- **双栏编辑**：左右两个独立编辑面板，每面板有独立的文件名、脏标记、打开/保存、原始/预览视图切换、自动换行切换。
+- **原始/预览视图**：`raw` 模式显示带行号的 textarea（等宽字体、Tab=2空格、Enter 自动缩进）；`parsed` 模式基于文件扩展名渲染——`.md` 用 `marked` + `DOMPurify`（复用 playground 的 `pgRenderMarkdown`/`pgHighlight`），代码扩展名用 `highlight.js`，其余用 `<pre>` 纯文本。
+- **Diff 对比**：`mode: 'diff'` 切换为双栏对齐的对比视图，基于 vendored `diff` 库（`window.Diff.diffLines`/`diffChars`）。支持 `Before→After`（左→右或右→左）方向选择。行类型：`context`/`del`/`add`/`mod`（mod 行有字符级高亮）。头部统计：删除/新增/修改行数 + 字符保留率。自动滚动到首个差异行。纯查看，无接受/拒绝/编辑按钮。
+- **查找替换**：Ctrl+F 切换查找栏（大小写敏感、正则、匹配计数 `current/total`、前一/后一、替换、全部替换）。Ctrl+H 快速切换到替换模式。Esc 关闭。F3/Enter 下一匹配；Shift+F3/Shift+Enter 上一匹配。
+- **跳转到行**：Ctrl+G 弹出 prompt 跳转到指定行。
+- **文件 IO**：`POST /api/editor/open` 后端原生文件选择器（失败回退 `FsApi.pickFiles`）；`POST /api/editor/save` 后端原子写（无 path 时回退浏览器下载）。Ctrl+S 保存当前面板；Ctrl+Shift+S 全部保存。
+- **脏追踪**：`content !== original` 时显示黄色脏点 `.ed-dirty-dot`，启用保存按钮。
+- **无持久化**：状态在内存中保持（同 `galleryState`），页面切换不丢失。
+
+### 导航 toggle 逻辑
+- Gallery 导航按钮和 F6 快捷键共享 `gotoGalleryToggle()`：Gallery → Editor → Gallery 循环。Gallery 页面时按钮显示 t('gallery')，Editor 页面时按钮显示 t('editor')。高亮始终在 Gallery 按钮上。
+- 注册于 `web/static/app.js`（`navigateTo` switch、`currentPage` guard、`main-no-scroll`）、`web/static/auth.js`（nav-item click 事件绑定额外判断 `gotoGalleryToggle()`）、`web/static/shortcuts.js`（F6 label 改为 "Toggle Gallery / Editor"）。
+
+### HTTP 接口
+| 接口 | 用途 | 鉴权 | Body 上限 |
+|---|---|---|---:|
+| `POST /api/editor/open` | 原生文件选择器打开文本文件，返回 `{path,name,size,content}` 或 `{cancelled:true}` 或 `{unsupported:true}` | 管理 session | 32 MiB |
+| `POST /api/editor/save` | 原子写保存 `{path,content}`，返回 `{ok:true,path}` | 管理 session | 32 MiB |
+
+原生文件选择器复用 `internal/fsutil/open_windows.go` 的 COM `IFileOpenDialog`；取消路径此前可正常返回 `{cancelled:true}`，确认路径因 `IFileDialog::GetResult` 的 vtable 索引错误触发访问违例并闪退，2026-07-25 已修正（索引 26→20）。
+
+### 依赖
+- `diff.min.js`（vendored 至 `vendor/diff.min.js`，暴露 `window.Diff`）
+- 复用 playground 已有 vendor：`marked.min.js`、`highlight.min.js`、`katex.min.js`、`marked-katex-extension`、`purify.min.js`
+
+### 源码锚点
+- `web/playground/static-pg/editor-state.js`：状态对象 + 常量 + 辅助函数
+- `web/playground/static-pg/editor.js`：`renderEditor`/`cleanupEditor` + `editorAlignedDiff` + 全部编辑、diff、查找替换逻辑
+- `web/playground/static-pg/playground.css`：Editor/Diff 样式（`.ed-*` 前缀）
+- `internal/api/editor.go`：后端 handlers `editorOpen`/`editorSave`（由另一 worker 创建）
+- `internal/api/router.go`：`/api/editor/*` 路由注册 + `pgJSFiles` 含 `editor-state.js`、`editor.js`
+- `web/static/app.js`：`gotoGalleryToggle()`、`navigateTo` switch 新增 `case 'editor'`、cleanup guard、active toggle、main-no-scroll
+- `web/static/auth.js`：Gallery nav-item click 改调 `gotoGalleryToggle()`
+- `web/static/i18n.js`：`editor` 及所有 Editor UI 字符串
+- `web/static/shortcuts.js`：`global.goto-gallery` label 更新
+- `web/static/index.html`：`diff.min.js` + `editor-state.js` + `editor.js` 脚本

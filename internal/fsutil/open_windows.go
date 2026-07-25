@@ -96,7 +96,7 @@ const (
 	vtblSetOptions   = 9
 	vtblGetOptions   = 8
 	vtblSetFileTypes = 4
-	vtblGetResult    = 26
+	vtblGetResult    = 20
 )
 
 // IShellItem vtable indices (after IUnknown: 0-2).

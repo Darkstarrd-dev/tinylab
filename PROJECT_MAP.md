@@ -219,6 +219,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 | `url_validation.go` | `validateBaseURL` 辅助 |
 | `gallery.go` | Gallery 图片查看器后端 handlers：`galleryListZip` (POST `/api/gallery/zip` 上传 zip → 返回 `{sessionId, manifest}`)，`galleryGetZipEntry` (GET `/api/gallery/zip/{sessionId}/{entryIndexOrPath:*}` 支持按 Index / Path 提取单图字节)，`galleryConvertTiff` (POST `/api/gallery/tiff` TIFF→JPEG 转码) |
 | `gallery_fs.go` | Gallery 文件系统操作 handlers：`galleryOpenDir` (POST `/api/gallery/open-dir` 后端原生目录选择器 + 递归文件列表)，`galleryListDir` (POST `/api/gallery/list-dir`)，`galleryServeFile` (GET `/api/gallery/file?path=` 按绝对路径提供文件)，`galleryDeleteFs` (DELETE `/api/gallery/fs` 后端 os.Remove/os.RemoveAll)，`galleryZipFromPath` (POST `/api/gallery/zip-from-path` 从磁盘路径创建 zip 会话)，`galleryZipWriteback` (POST `/api/gallery/zip-writeback` 会话字节写回磁盘)，`galleryPastePaths` (POST `/api/gallery/paste-paths` 读取剪贴板 CF_HDROP 路径) |
+| `editor.go` | Editor 后端 handlers：`editorOpen`（POST `/api/editor/open` 原生文件选择器返回 `{path,name,size,content}`），`editorSave`（POST `/api/editor/save` 原子写返回 `{ok,path}`）。`/api/editor/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB） |
 | `gallery_session.go` | Gallery zip 会话存储：包级 `gallerySessions` LRU（线程安全，上限 32 个、5 分钟空闲过期），`sync.Once` 启动后台定时清理 goroutine |
 | `*_test.go` | 测试（api/auth/bulk_keys/url_validation/settings） |
 
@@ -259,7 +260,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 |---|---|---|
 | `atomic.go` | — | `AtomicWrite(path, data, perm)`：确定性 `.tmp` + `os.Rename` 原子写，失败回退直写，保留 crash-recovery 语义 |
 | `open.go` | — | `ErrUnsupportedPlatform` 共享错误变量 |
-| `open_windows.go` | `windows` | `OpenInFileManager`（ShellExecute + `/select,`）、`OpenInBrowser`（rundll32）、`OpenFilePicker`/`OpenDirectoryPicker`（原生 COM IFileOpenDialog，现代 Windows 10/11 对话框，返回绝对路径） |
+| `open_windows.go` | `windows` | `OpenInFileManager`（ShellExecute + `/select,`）、`OpenInBrowser`（rundll32）、`OpenFilePicker`/`OpenDirectoryPicker`（原生 COM IFileOpenDialog，现代 Windows 10/11 对话框，返回绝对路径）；2026-07-25 修正 `IFileDialog::GetResult` vtable 索引 26→20，修复确认选择时进程闪退 |
 | `open_other.go` | `!windows` | macOS（`open -R`/`osascript`）、Linux（`xdg-open`）实现；文件/目录选择器 Linux 返回 `ErrUnsupportedPlatform` |
 | `clipboard_windows.go` | `windows` | `GetClipboardFilePaths()`：读取 Windows 剪贴板 CF_HDROP 格式文件路径（OpenClipboard + DragQueryFileW） |
 | `clipboard_other.go` | `!windows` | `GetClipboardFilePaths()` 返回 nil（非 Windows 平台不支持） |
@@ -357,9 +358,8 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 内容 |
 |---|---|
 | 文档 | `README.md` |
-| 核心 JS | `static-pg/playground.js`、`playground.css` |
-| 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery.js` |
-| vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2) |
+  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery.js`、`editor-state.js`、`editor.js` |
+| vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2) |
 
 ---
 
