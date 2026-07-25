@@ -33,7 +33,7 @@ function renderActiveVideo(index) {
 
   if (!item) {
     if (vidEl) vidEl.removeAttribute('src');
-    if (pathEl) { pathEl.textContent = '-'; pathEl.title = ''; }
+    if (pathEl) { pathEl.textContent = '-'; pathEl.removeAttribute('data-tooltip'); }
     if (info) info.textContent = '0 / 0 | Video';
     return;
   }
@@ -41,7 +41,7 @@ function renderActiveVideo(index) {
   if (pathEl) {
     var displayPath = item.path || item.name || '';
     pathEl.textContent = displayPath;
-    pathEl.title = displayPath;
+    pathEl.setAttribute('data-tooltip', displayPath);
   }
 
   ensureMainSrc(item).then(function() {

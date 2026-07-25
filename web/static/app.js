@@ -192,6 +192,106 @@ function hideModelNotePopover() {
   var existing = document.getElementById('model-note-tip');
   if (existing) existing.remove();
 }
+// ===================== TooltipSystem =====================
+// Unified themed tooltip for any element carrying a `data-tooltip` attribute.
+// Replaces native title= tooltips (which the UA renders as un-styled OS blocks
+// that ignore the theme). Shows on hover AND keyboard focus — matching the
+// native title behaviour for sighted keyboard users. A single shared DOM node
+// is reused; listeners are delegated at document level so dynamically inserted
+// content (rendered lists, dropdowns, streamed messages) needs no per-item
+// binding. Styling comes from the `.tip` class in style.css, which consumes the
+// same theme tokens as .model-note-tip / .quota-tip, so it follows every
+// mode/variant/style automatically.
+var TooltipSystem = (function() {
+  var tip = null;          // shared <div class="tip">
+  var showTimer = null;    // hover delay handle
+  var currentEl = null;    // element the tip is currently anchored to
+  var SHOW_DELAY = 600;     // ms — matches native title hover delay, avoids flicker on rapid traversal
+
+  function ensureTip() {
+    if (tip) return tip;
+    tip = document.createElement('div');
+    tip.className = 'tip';
+    tip.id = 'app-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    tip.style.display = 'none';
+    document.body.appendChild(tip);
+    return tip;
+  }
+
+  function showFor(el, content) {
+    if (!content) { hide(); return; }
+    currentEl = el;
+    var t = ensureTip();
+    t.textContent = content;          // textContent keeps us immune to HTML injection from data-tooltip values
+    t.style.display = '';
+    position(t, el);
+  }
+
+  function position(t, el) {
+    var rect = el.getBoundingClientRect();
+    var margin = 6;
+    var left = rect.left;
+    if (left + t.offsetWidth > window.innerWidth - 4) left = window.innerWidth - t.offsetWidth - 4;
+    if (left < 4) left = 4;
+    var top = rect.top - t.offsetHeight - margin;       // prefer above
+    if (top < 4) top = rect.bottom + margin;            // flip below if no room above
+    if (top + t.offsetHeight > window.innerHeight - 4) top = window.innerHeight - t.offsetHeight - 4;
+    t.style.left = left + 'px';
+    t.style.top = top + 'px';
+  }
+
+  function hide() {
+    if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+    if (tip) tip.style.display = 'none';
+    currentEl = null;
+  }
+
+  function scheduleShow(el, content) {
+    clearTimeout(showTimer);
+    showTimer = setTimeout(function() { showFor(el, content); }, SHOW_DELAY);
+  }
+
+  function contentOf(el) { return el.getAttribute('data-tooltip') || ''; }
+
+  // Hover path (delegated — covers dynamically inserted elements).
+  document.addEventListener('mouseover', function(e) {
+    var el = e.target.closest && e.target.closest('[data-tooltip]');
+    if (!el || el === document.documentElement) return;
+    var c = contentOf(el);
+    if (!c) return;
+    scheduleShow(el, c);
+  });
+  document.addEventListener('mouseout', function(e) {
+    var el = e.target.closest && e.target.closest('[data-tooltip]');
+    if (!el || el === document.documentElement) return;
+    if (e.relatedTarget && el.contains(e.relatedTarget)) return;   // moving within the same el
+    hide();
+  });
+
+  // Focus path — restores the visual tooltip sighted keyboard users get from
+  // native title=. Without this, removing title= would regress keyboard UX.
+  // Immediate (no delay): focus is an intentional act, not incidental traversal.
+  document.addEventListener('focusin', function(e) {
+    var el = e.target.closest && e.target.closest('[data-tooltip]');
+    if (!el || el === document.documentElement) return;
+    var c = contentOf(el);
+    if (!c) return;
+    showFor(el, c);
+  });
+  document.addEventListener('focusout', function(e) {
+    var el = e.target.closest && e.target.closest('[data-tooltip]');
+    if (!el || el === document.documentElement) return;
+    if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+    hide();
+  });
+
+  // Reposition / hide on scroll/resize so the tip never floats away from its anchor.
+  window.addEventListener('scroll', function() { if (currentEl && tip && tip.style.display !== 'none') position(tip, currentEl); }, true);
+  window.addEventListener('resize', function() { if (currentEl && tip && tip.style.display !== 'none') position(tip, currentEl); });
+
+  return { showFor: showFor, hide: hide };
+})();
 
 function maskKey(key) {
   if (!key || key.length < 8) return '***';
@@ -367,7 +467,7 @@ function updateSidebarNav() {
   var shutdownBtn = document.querySelector('.shutdown-btn');
   if (shutdownBtn) {
     var shutdownLabel = t('shutdown');
-    shutdownBtn.setAttribute('title', shutdownLabel);
+    shutdownBtn.setAttribute('data-tooltip', shutdownLabel);
     shutdownBtn.setAttribute('aria-label', shutdownLabel);
   }
 }

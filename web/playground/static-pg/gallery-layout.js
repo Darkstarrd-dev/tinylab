@@ -126,21 +126,21 @@ function buildPanelHTML(type, isSplit) {
   var modeBtnTitle = (galleryState.mediaType === 'video') ? 'Picture Mode (M)' : 'Video Mode (M)';
 
   // Mode button is hidden in split mode!
-  var modeBtnHTML = isSplit ? '' : '<button class="gallery-btn gallery-btn-icon" id="gallery-mode-btn" type="button" title="' + modeBtnTitle + '">' + modeIcon + '</button>';
+  var modeBtnHTML = isSplit ? '' : '<button class="gallery-btn gallery-btn-icon" id="gallery-mode-btn" type="button" data-tooltip="' + modeBtnTitle + '">' + modeIcon + '</button>';
 
   var autoPlayIcon = galleryState.autoplayOn ? GALLERY_ICONS.stop : GALLERY_ICONS.play;
   var autoPlayTitle = galleryState.autoplayOn ? 'Stop (A / ■)' : 'Autoplay (A / ▶)';
 
   var ctrlCenter = isVid ?
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-prev-btn" type="button" title="Prev Video (‹ / Up)">' + GALLERY_ICONS.prev + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-play" type="button" title="Play / Pause (Space)">' + GALLERY_ICONS.play + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-stop" type="button" title="Stop">' + GALLERY_ICONS.stop + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-next-btn" type="button" title="Next Video (› / Down)">' + GALLERY_ICONS.next + '</button>'
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-prev-btn" type="button" data-tooltip="Prev Video (‹ / Up)">' + GALLERY_ICONS.prev + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-play" type="button" data-tooltip="Play / Pause (Space)">' + GALLERY_ICONS.play + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-stop" type="button" data-tooltip="Stop">' + GALLERY_ICONS.stop + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-next-btn" type="button" data-tooltip="Next Video (› / Down)">' + GALLERY_ICONS.next + '</button>'
     :
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-folder-btn" type="button" title="Prev Folder (&lt;| / Up)">' + GALLERY_ICONS.prevFolder + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-btn" type="button" title="Prev (‹ / Left / PageUp)">' + GALLERY_ICONS.prev + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-folder-btn" type="button" data-tooltip="Prev Folder (&lt;| / Up)">' + GALLERY_ICONS.prevFolder + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-btn" type="button" data-tooltip="Prev (‹ / Left / PageUp)">' + GALLERY_ICONS.prev + '</button>' +
     '<div class="gallery-auto-wrapper" id="gallery-auto-wrapper">' +
-      '<button class="gallery-btn gallery-btn-icon" id="gallery-autoplay-btn" type="button" title="' + autoPlayTitle + '">' + autoPlayIcon + '</button>' +
+      '<button class="gallery-btn gallery-btn-icon" id="gallery-autoplay-btn" type="button" data-tooltip="' + autoPlayTitle + '">' + autoPlayIcon + '</button>' +
       '<div class="gallery-interval-dropdown" id="gallery-interval-dropdown">' +
         AUTOPLAY_LABELS.map(function(l, i) {
           var act = (AUTOPLAY_INTERVALS[i] === galleryState.autoplayInterval) ? ' active' : '';
@@ -151,14 +151,14 @@ function buildPanelHTML(type, isSplit) {
         }).join('') +
       '</div>' +
     '</div>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-btn" type="button" title="Next (› / Right / PageDown / Space)">' + GALLERY_ICONS.next + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-folder-btn" type="button" title="Next Folder (|&gt; / Down)">' + GALLERY_ICONS.nextFolder + '</button>';
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-btn" type="button" data-tooltip="Next (› / Right / PageDown / Space)">' + GALLERY_ICONS.next + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-folder-btn" type="button" data-tooltip="Next Folder (|&gt; / Down)">' + GALLERY_ICONS.nextFolder + '</button>';
 
   var extraRight = isVid ?
     '<div class="gallery-vol-wrapper">' +
-      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" title="Volume">' + GALLERY_ICONS.volume + '</button>' +
+      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" data-tooltip="Volume">' + GALLERY_ICONS.volume + '</button>' +
       '<div class="gallery-vol-popover">' +
-        '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="80" min="0" max="100" title="Volume">' +
+        '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="80" min="0" max="100" data-tooltip="Volume">' +
       '</div>' +
     '</div>'
     : '';
@@ -192,15 +192,15 @@ function buildPanelHTML(type, isSplit) {
              '<div class="gallery-bottom">' +
                thumbsHTML +
                '<div class="gallery-controls">' +
-                 '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" title="Directory Tree (T)">' + GALLERY_ICONS.tree + '</button>' +
-                 '<div class="gallery-path" id="' + pathId + '" title="">-</div>' +
+                 '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" data-tooltip="Directory Tree (T)">' + GALLERY_ICONS.tree + '</button>' +
+                 '<div class="gallery-path" id="' + pathId + '" data-tooltip="">-</div>' +
                  '<div class="gallery-ctrl-center">' + ctrlCenter + '</div>' +
                  '<div class="gallery-ctrl-right">' +
                    extraRight +
                    '<span class="gallery-info" id="' + infoId + '">0 / 0</span>' +
-                   '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" title="' + splitBtnTitle + '">' + splitIcon + '</button>' +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" data-tooltip="' + splitBtnTitle + '">' + splitIcon + '</button>' +
                    modeBtnHTML +
-                   '<button class="gallery-btn gallery-btn-icon" id="gallery-fs-btn" type="button" title="Fullscreen (F)">' + GALLERY_ICONS.fullscreen + '</button>' +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-fs-btn" type="button" data-tooltip="Fullscreen (F)">' + GALLERY_ICONS.fullscreen + '</button>' +
                  '</div>' +
                '</div>' +
              '</div>' +

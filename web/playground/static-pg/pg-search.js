@@ -319,11 +319,11 @@ function pgRenderSearchHistory() {
     var display = entry.query.length > 30 ? entry.query.substring(0, 30) + '…' : entry.query;
     var timeStr = pgFormatTime(entry.ts);
     var num = i + 1;  // search number: 1 = first, N = latest
-    html += '<li class="pg-search-history-item' + (isActive ? ' active' : '') + '" title="' + pgEscapeAttr(entry.query) + '" onclick="pgSwitchSearch(' + entry.id + ')">' +
+    html += '<li class="pg-search-history-item' + (isActive ? ' active' : '') + '" data-tooltip="' + pgEscapeAttr(entry.query) + '" onclick="pgSwitchSearch(' + entry.id + ')">' +
       '<span class="pg-search-history-num">' + num + '</span>' +
       '<span class="pg-search-history-text">' + pgEscapeHtml(display) + '</span>' +
       '<span class="pg-search-history-time">' + pgEscapeHtml(timeStr) + '</span>' +
-      '<button class="pg-search-history-del" onclick="event.stopPropagation(); pgDeleteSearchHistory(' + entry.id + ')" title="Delete search history">✕</button>' +
+      '<button class="pg-search-history-del" onclick="event.stopPropagation(); pgDeleteSearchHistory(' + entry.id + ')" data-tooltip="Delete search history">✕</button>' +
     '</li>';
   }
   html += '</ul>';

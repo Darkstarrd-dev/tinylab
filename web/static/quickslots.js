@@ -22,7 +22,7 @@ function renderQuickSlotListInline(quickslots) {
     <div class="card quickslot-card' + (qs.disabled ? ' quickslot-disabled' : '') + '">\
       <div class="provider-card-row">\
         <div class="provider-card-left">\
-          <span class="card-title copyable" data-name="' + escapeHtml(qs.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" title="' + t('clickToCopy') + '">' + escapeHtml(qs.name) + '</span>\
+          <span class="card-title copyable" data-name="' + escapeHtml(qs.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(qs.name) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (qs.disabled ? 'badge-inactive' : 'badge-active') + '">order: ' + (qs.order || 0) + '</span>\
@@ -31,7 +31,7 @@ function renderQuickSlotListInline(quickslots) {
       </div>\
       <div class="provider-card-row mt-12">\
         <div class="provider-card-left">\
-          <span class="muted card-left-models" title="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
+          <span class="muted card-left-models" data-tooltip="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditQuickSlot(\'' + escapeAttr(qs.id) + '\')">' + t('edit') + '</button>\
@@ -688,14 +688,14 @@ function renderQuickSlotModelsList() {
     var isCombo = slashIdx <= 0;
     html += '<div class="model-row' + hasNoteCls + '" data-index="' + i + '" draggable="true"' + disabledRowStyle + '>' +
       '<div class="model-row-main"' + noteAttr + '>' +
-        '<span class="drag-handle" title="' + t('dragToReorder') + '" draggable="false">⠿</span>' +
+        '<span class="drag-handle" data-tooltip="' + t('dragToReorder') + '" draggable="false">⠿</span>' +
         (isCombo ? '' : '<button type="button" class="btn btn-sm ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '" onclick="withLoading(this, () => testQuickSlotModel(' + i + '))">' + t('test') + '</button>') +
         (isCombo ? '' : buildMiniProtocolBadges(ts, modelId)) +
         '<button type="button" class="btn btn-sm ' + (isFirst ? 'disabled ' : '') + 'onclick="moveQuickSlotModel(' + i + ',' + (i - 1) + ')">' + t('moveUp') + '</button>' +
         '<button type="button" class="btn btn-sm ' + (isLast ? 'disabled ' : '') + 'onclick="moveQuickSlotModel(' + i + ',' + (i + 1) + ')">' + t('moveDown') + '</button>' +
         '<button type="button" class="btn btn-sm btn-danger" onclick="removeQuickSlotModel(' + i + ')">' + t('delete') + '</button>' +
         (isCombo ? '<span class="badge badge-combo" style="margin-right:6px">' + t('combo') + '</span>' : '') +
-        '<span class="model-id copyable" onclick="copyToClipboard(\'' + escapeForJsString(fullIdEsc) + '\')" title="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
+        '<span class="model-id copyable" onclick="copyToClipboard(\'' + escapeForJsString(fullIdEsc) + '\')" data-tooltip="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
       '</div>' +
     '</div>';
   }
@@ -885,7 +885,7 @@ async function renderHeaderQuickSlots() {
       var fullIdEsc = escapeHtml(fullId);
       var num = i + 1;
       var titleAttr = fullIdEsc ? nameEsc + '&#10;' + fullIdEsc : nameEsc;
-      html += '<div class="quickslot-btn" onclick="openQuickSlotModalById(\'' + escapeAttr(qs.id) + '\', false)" oncontextmenu="event.preventDefault();" data-qs-id="' + escapeAttr(qs.id) + '" title="' + titleAttr + '">\
+      html += '<div class="quickslot-btn" onclick="openQuickSlotModalById(\'' + escapeAttr(qs.id) + '\', false)" oncontextmenu="event.preventDefault();" data-qs-id="' + escapeAttr(qs.id) + '" data-tooltip="' + titleAttr + '">\
         <div class="qs-number">' + num + '</div>\
         <div class="qs-content">\
           <div class="qs-name">' + nameEsc + '</div>\

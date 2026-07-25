@@ -58,7 +58,7 @@ function renderDownload(container) {
         <input type="text" id="dl-url" class="input" placeholder="${escapeHtml(t('downloadUrlPlaceholder'))}" />
         <button class="btn btn-primary" id="dl-parse-btn" type="button" onclick="parseDownloadUrl()">${escapeHtml(t('parse'))}</button>
         <button class="btn btn-ghost" type="button" onclick="openDownloadSettingsModal()">${escapeHtml(t('settings'))}</button>
-        <button class="btn btn-ghost btn-icon" type="button" onclick="clearCompletedDownloads()" title="${escapeHtml(t('clearCompleted'))}">
+        <button class="btn btn-ghost btn-icon" type="button" onclick="clearCompletedDownloads()" data-tooltip="${escapeHtml(t('clearCompleted'))}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <path d="M3 6h18"></path>
             <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
@@ -151,11 +151,11 @@ function renderSinglePreview(cardId, url, info) {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </div>
           <div class="dl-playlist-header-text">
-            <div class="dl-playlist-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+            <div class="dl-playlist-title" data-tooltip="${escapeHtml(title)}">${escapeHtml(title)}</div>
             <div class="dl-playlist-subtitle">${escapeHtml(sub.join(' · '))}</div>
           </div>
           <div class="dl-playlist-header-actions">
-            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" title="Remove List">
+            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="Remove List">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -198,15 +198,15 @@ function renderPlaylistPreview(cardId, url, playlist) {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
           </div>
           <div class="dl-playlist-header-text">
-            <div class="dl-playlist-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+            <div class="dl-playlist-title" data-tooltip="${escapeHtml(title)}">${escapeHtml(title)}</div>
             <div class="dl-playlist-subtitle">${escapeHtml(t('playlistDetected', [count]))}</div>
           </div>
           <div class="dl-playlist-header-actions">
-            <button class="btn-action-icon" type="button" onclick="toggleParsedCard('${cardId}')" title="Collapse/Expand List">
+            <button class="btn-action-icon" type="button" onclick="toggleParsedCard('${cardId}')" data-tooltip="Collapse/Expand List">
               <svg class="icon-chevron-up" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
               <svg class="icon-chevron-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
-            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" title="Remove List">
+            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="Remove List">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -807,7 +807,7 @@ function taskListItemHtml(task) {
   return '' +
     '<div class="dl-task-item' + isSelected + '" id="dl-task-item-' + tid + '" data-task-id="' + tid + '" onclick="selectTask(event, \'' + tid + '\')">' +
       '<span class="dl-status-dot ' + escapeAttr('dl-status-' + status) + '"></span>' +
-      '<span class="dl-task-item-title" title="' + escapeAttr(title) + '">' + escapeHtml(title) + '</span>' +
+      '<span class="dl-task-item-title" data-tooltip="' + escapeAttr(title) + '">' + escapeHtml(title) + '</span>' +
       pctHtml +
     '</div>';
 }
@@ -857,7 +857,7 @@ function taskDetailHtml(task) {
     actions += '<button class="btn btn-ghost" type="button" onclick="removeDownload(\'' + tid + '\')">' + escapeHtml(t('removeDownload')) + '</button>';
   }
 
-  var urlRow = '<div class="dl-detail-url" title="' + escapeAttr(task.url || '') + '">' + escapeHtml(task.url || '') + '</div>';
+  var urlRow = '<div class="dl-detail-url" data-tooltip="' + escapeAttr(task.url || '') + '">' + escapeHtml(task.url || '') + '</div>';
 
   var errorRow = task.error
     ? '<div class="dl-detail-error">' + escapeHtml(task.error) + '</div>'
@@ -881,7 +881,7 @@ function taskDetailHtml(task) {
     '<div class="dl-detail-layout" data-task-id="' + tid + '">' +
       '<div class="dl-detail-left">' +
         '<div class="dl-detail-thumb">' + thumb + '</div>' +
-        '<div class="dl-detail-title" title="' + escapeAttr(title) + '">' + escapeHtml(title) + '</div>' +
+        '<div class="dl-detail-title" data-tooltip="' + escapeAttr(title) + '">' + escapeHtml(title) + '</div>' +
         metaInfoRows +
         '<div class="dl-detail-status">' +
           '<span class="dl-status-badge ' + escapeAttr('dl-status-' + status) + '">' + escapeHtml(statusLabel) + '</span>' +

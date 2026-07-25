@@ -297,8 +297,8 @@ function pgRenderPanes() {
           '<span class="pg-pane-typing" style="display:none"></span>' +
         '</span>' +
         '<span class="pg-pane-model">' + modelLabel + '</span>' +
-        (pgState.mode !== 'search' ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" title="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
-        '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" title="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' +
+        (pgState.mode !== 'search' ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
+        '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' +
       '</div>' +
       '<div class="pg-messages" id="pg-messages-' + i + '"></div>' +
     '</div>';
@@ -432,7 +432,7 @@ function pgRenderSidebar() {
   for (var k = 0; k < 4; k++) {
     var isActive = k === pgState.activeWin ? ' active' : '';
     var isDisabled = (k >= pgState.splitCount || generating) ? ' disabled' : '';
-    winBtns += '<button class="pg-win-btn' + isActive + '" onclick="pgSetActiveWin(' + k + ')"' + (isDisabled ? ' disabled' : '') + ' title="' + pgEscapeHtml(pgT('pgWinBtnTitle', [k + 1])) + '">' + (k + 1) + '</button>';
+    winBtns += '<button class="pg-win-btn' + isActive + '" onclick="pgSetActiveWin(' + k + ')"' + (isDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(pgT('pgWinBtnTitle', [k + 1])) + '">' + (k + 1) + '</button>';
   }
   var splitOpts = '';
   var startSplit = (pgState.mode === 'autochat') ? 2 : 1;
@@ -444,7 +444,7 @@ function pgRenderSidebar() {
     '<div class="pg-winbar-row">' +
       '<div class="pg-winbar-btns">' +
         winBtns +
-        '<button class="pg-win-btn pg-reset-btn" onclick="pgResetSettings()"' + (generating ? ' disabled' : '') + ' title="' + pgEscapeHtml(pgT('pgResetCfg')) + '">' + PG_ICON_RESET + '</button>' +
+        '<button class="pg-win-btn pg-reset-btn" onclick="pgResetSettings()"' + (generating ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(pgT('pgResetCfg')) + '">' + PG_ICON_RESET + '</button>' +
       '</div>' +
       '<select onchange="pgSetSplitCount(parseInt(this.value,10))"' + (generating ? ' disabled' : '') + '>' + splitOpts + '</select>' +
     '</div>'
@@ -481,7 +481,7 @@ function pgRenderSidebar() {
       ? '<input type="number" min="' + min + '" step="' + step + '" ' + valAttr + ' onchange="pgOnParam(\'' + key + '\', this.value==\'\'?0:'+ (min < 0 ? 'parseFloat(this.value)' : 'parseInt(this.value,10)||0') + ')">'
       : '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" oninput="pgOnParam(\'' + key + '\', parseFloat(this.value))"><span class="pg-val" id="pg-val-' + key + '">' + (typeof val === 'number' ? val.toFixed(2) : val) + '</span>';
     return '<div class="pg-param' + (disabled ? ' disabled' : '') + '">' +
-      '<button class="pg-toggle' + (on ? ' on' : '') + '" onclick="pgToggleParam(\'' + key + '\')" title="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (on ? '✓' : '✕') + '</button>' +
+      '<button class="pg-toggle' + (on ? ' on' : '') + '" onclick="pgToggleParam(\'' + key + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (on ? '✓' : '✕') + '</button>' +
       '<label>' + pgEscapeHtml(pgT(label)) + '</label>' +
       input +
     '</div>';
@@ -494,7 +494,7 @@ function pgRenderSidebar() {
     paramRow('maxTokens', 'pgMaxTokens', 0, 1, 1, true) +
     paramRow('thinkingBudget', 'pgThinking', 0, 100000, 100, true) +
     '<div class="pg-param' + (!en.seed || customMode ? ' disabled' : '') + '">' +
-      '<button class="pg-toggle' + (en.seed ? ' on' : '') + '" onclick="pgToggleParam(\'seed\')" title="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.seed ? '✓' : '✕') + '</button>' +
+      '<button class="pg-toggle' + (en.seed ? ' on' : '') + '" onclick="pgToggleParam(\'seed\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.seed ? '✓' : '✕') + '</button>' +
       '<label>' + pgEscapeHtml(pgT('pgSeed')) + '</label>' +
       '<input type="text" placeholder="' + pgEscapeHtml(pgT('pgSeedPlaceholder')) + '" value="' + pgEscapeHtml(cfg.seed || '') + '" oninput="pgOnParam(\'seed\', this.value)"' + (!en.seed || customMode ? ' disabled' : '') + '>' +
     '</div>' +
@@ -714,7 +714,7 @@ function pgImgParamSelectWithEdit(key, proto, modelId, cfg, builtinOpts) {
   var opts = arr.map(function(o) {
     return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg[key] === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
   }).join('');
-  var labelBtn = '<button type="button" class="pg-param-label-btn" onclick="pgOpenImgSizesModal()" title="' + pgEscapeAttr(pgT('pgImgEditSizesTitle')) + '">' + sel + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.65;margin-left:3px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>';
+  var labelBtn = '<button type="button" class="pg-param-label-btn" onclick="pgOpenImgSizesModal()" data-tooltip="' + pgEscapeAttr(pgT('pgImgEditSizesTitle')) + '">' + sel + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.65;margin-left:3px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>';
   var html = '<div class="pg-param-row">' +
     labelBtn +
     '<select onchange="pgOnImgSizeSelect(this.value)">' + opts + '</select>' +
@@ -814,13 +814,13 @@ function pgRenderImageBlock(customMode) {
     urls.forEach(function(u, i) {
       rows += '<div class="pg-image-row-input">' +
         '<input type="text" value="' + pgEscapeHtml(u || '') + '" oninput="pgOnImageUrl(' + i + ', this.value)" placeholder="https://example.com/image' + (i + 1) + '.jpg">' +
-        '<button class="pg-image-rem" onclick="pgRemoveImageUrl(' + i + ')" title="×">✕</button>' +
+        '<button class="pg-image-rem" onclick="pgRemoveImageUrl(' + i + ')" data-tooltip="×">✕</button>' +
       '</div>';
     });
   }
   return '<div class="pg-image-block' + (en ? '' : ' disabled') + '">' +
     '<div class="pg-switch"><input type="checkbox" id="pg-imgenable" ' + (cfg.imageEnabled ? 'checked' : '') + ' onchange="pgOnParam(\'imageEnabled\', this.checked); pgRenderSidebar()"' + (customMode ? ' disabled' : '') + '><label for="pg-imgenable">' + pgEscapeHtml(pgT('pgImageEnable')) + '</label>' +
-      '<button class="pg-image-add" onclick="pgAddImageUrl()" ' + (en ? '' : 'disabled') + ' title="' + pgEscapeHtml(pgT('pgImageAdd')) + '">+</button>' +
+      '<button class="pg-image-add" onclick="pgAddImageUrl()" ' + (en ? '' : 'disabled') + ' data-tooltip="' + pgEscapeHtml(pgT('pgImageAdd')) + '">+</button>' +
     '</div>' +
     (rows || '') +
     '<div class="pg-image-hint">' + pgEscapeHtml(hintText) + '</div>' +
@@ -1134,7 +1134,7 @@ function pgRenderInputBar() {
       sendBtn +
       '<div class="pg-btn-row">' +
         (pgState.autoChat.enabled && pgState.autoChat.isRunning
-          ? '<button class="pg-btn danger" onclick="pgAutoChatStop()" title="' + pgEscapeHtml(pgT('pgAutoChatStop')) + '">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>'
+          ? '<button class="pg-btn danger" onclick="pgAutoChatStop()" data-tooltip="' + pgEscapeHtml(pgT('pgAutoChatStop')) + '">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>'
           : '') +
         '<button class="pg-btn danger" onclick="pgClear()">' + pgEscapeHtml(pgT('pgClear')) + '</button>' +
       '</div>' +
@@ -1182,7 +1182,7 @@ function pgRenderInputThumbs() {
   w.config.imageUrls.forEach(function(url, idx) {
     html += '<div class="pg-input-thumb-wrap">' +
       '<img class="pg-input-thumb" src="' + pgEscapeHtml(url) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(url) + '\')">' +
-      '<button class="pg-input-thumb-del" onclick="event.stopPropagation();pgRemoveInputImage(' + idx + ')" title="' + pgEscapeHtml(pgT('pgDelete')) + '">✕</button>' +
+      '<button class="pg-input-thumb-del" onclick="event.stopPropagation();pgRemoveInputImage(' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">✕</button>' +
     '</div>';
   });
   container.innerHTML = html;

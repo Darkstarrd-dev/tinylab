@@ -95,9 +95,9 @@ function pgShowImageModal(url) {
   var html = '<div class="pg-modal-header">' +
     '<span class="pg-modal-title">&#x1F5BC; ' + pgEscapeHtml(pgT('pgImagePreview')) + '</span>' +
     '<span class="pg-modal-header-actions">' +
-      '<button class="pg-img-btn" onclick="pgCopyImage(\'' + pgEscapeAttr(url) + '\', this)" title="' + pgEscapeHtml(pgT('pgCopy')) + '">' + pgEscapeHtml(pgT('pgCopy')) + '</button>' +
-      '<button class="pg-img-btn" onclick="pgSaveImage(\'' + pgEscapeAttr(url) + '\', this)" title="' + pgEscapeHtml(pgT('pgSave')) + '">' + pgEscapeHtml(pgT('pgSave')) + '</button>' +
-      '<button class="pg-img-btn" id="pg-img-reset-btn" onclick="pgResetImageZoom()" title="' + pgEscapeHtml(pgT('pgReset')) + '" style="display:none">' + pgEscapeHtml(pgT('pgReset')) + '</button>' +
+      '<button class="pg-img-btn" onclick="pgCopyImage(\'' + pgEscapeAttr(url) + '\', this)" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + pgEscapeHtml(pgT('pgCopy')) + '</button>' +
+      '<button class="pg-img-btn" onclick="pgSaveImage(\'' + pgEscapeAttr(url) + '\', this)" data-tooltip="' + pgEscapeHtml(pgT('pgSave')) + '">' + pgEscapeHtml(pgT('pgSave')) + '</button>' +
+      '<button class="pg-img-btn" id="pg-img-reset-btn" onclick="pgResetImageZoom()" data-tooltip="' + pgEscapeHtml(pgT('pgReset')) + '" style="display:none">' + pgEscapeHtml(pgT('pgReset')) + '</button>' +
       '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
     '</span>' +
   '</div>' +

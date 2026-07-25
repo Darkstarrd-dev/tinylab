@@ -11,7 +11,7 @@ function pgInitMarker() {
     renderer: {
       link: function(href, title, text) {
         var out = '<a href="' + href + '" target="_blank" rel="noopener noreferrer">';
-        if (title) out += ' title="' + title + '"';
+        if (title) out += ' data-tooltip="' + title + '"';
         out += (text || href) + '</a>';
         return out;
       }

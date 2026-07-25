@@ -27,7 +27,7 @@ async function renderCombos(c) {
     <div class="card combo-card' + (cb.disabled ? ' combo-disabled' : '') + '">\
       <div class="provider-card-row">\
         <div class="provider-card-left">\
-          <span class="card-title copyable" data-name="' + escapeHtml(cb.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" title="' + t('clickToCopy') + '">' + escapeHtml(cb.name) + '</span>\
+          <span class="card-title copyable" data-name="' + escapeHtml(cb.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(cb.name) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (cb.disabled ? 'badge-inactive' : 'badge-active') + '">' + escapeHtml(cb.strategy) + '</span>\
@@ -36,7 +36,7 @@ async function renderCombos(c) {
       </div>\
       <div class="provider-card-row mt-12">\
         <div class="provider-card-left">\
-          <span class="muted card-left-models" title="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
+          <span class="muted card-left-models" data-tooltip="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + escapeAttr(cb.id) + '\')">' + t('edit') + '</button>\
@@ -269,7 +269,7 @@ function renderComboModelsList() {
     var isLast = mainIdx === comboEditingModels.length - 1;
     html += '<div class="model-row' + hasNoteCls + '" data-index="' + i + '" draggable="' + (isInMain ? 'true' : 'false') + '"' + disabledRowStyle + ' id="combo-row-' + i + '" data-fullid="' + fullIdEsc + '">' +
       '<div class="model-row-main"' + noteAttr + '>' +
-        '<span class="drag-handle" title="' + t('dragToReorder') + '" draggable="false">⠿</span>' +
+        '<span class="drag-handle" data-tooltip="' + t('dragToReorder') + '" draggable="false">⠿</span>' +
         (isDisabled && isInMain
           ? '<button type="button" class="btn btn-sm" onclick="toggleComboModelDisabled(' + mainIdx + ')">' + t('enable') + '</button>'
           : isDisabled
@@ -280,7 +280,7 @@ function renderComboModelsList() {
         (isInMain ? '<button type="button" class="btn btn-sm ' + (isFirst ? 'disabled ' : '') + 'onclick="moveComboModel(' + mainIdx + ',' + (mainIdx - 1) + ')">' + t('moveUp') + '</button>' : '') +
         (isInMain ? '<button type="button" class="btn btn-sm ' + (isLast ? 'disabled ' : '') + 'onclick="moveComboModel(' + mainIdx + ',' + (mainIdx + 1) + ')">' + t('moveDown') + '</button>' : '') +
         (isInMain ? '<button type="button" class="btn btn-sm btn-danger" onclick="removeComboModel(' + mainIdx + ')">' + t('delete') + '</button>' : '') +
-        '<span class="model-id copyable" onclick="copyToClipboard(\'' + fullIdEsc + '\')" title="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
+        '<span class="model-id copyable" onclick="copyToClipboard(\'' + fullIdEsc + '\')" data-tooltip="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
       '</div>' +
       '<span class="combo-speed-status" data-fullid="' + fullIdEsc + '"></span>' +
     '</div>';

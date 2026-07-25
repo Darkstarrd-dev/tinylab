@@ -65,8 +65,8 @@ function renderTreePanel() {
   if (!panel) return;
 
   var headerHTML = '<div class="gallery-tree-header">' +
-    '<button class="gallery-tree-clear-btn" type="button" title="' + T('galleryClearTitle') + '">' + T('galleryClear') + '</button>' +
-    (isVidActive ? '' : '<button class="gallery-tree-clear-btn' + (galleryState.reviewState.reviewOpen ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" title="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>') +
+    '<button class="gallery-tree-clear-btn" type="button" data-tooltip="' + T('galleryClearTitle') + '">' + T('galleryClear') + '</button>' +
+    (isVidActive ? '' : '<button class="gallery-tree-clear-btn' + (galleryState.reviewState.reviewOpen ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>') +
     '</div>';
   var contentHTML = '';
   var needVideoNodeBinding = false;
@@ -92,7 +92,7 @@ function renderTreePanel() {
           var item = galleryState.videoItems[i];
           var vName = item.name || item.path || ('Video ' + (i + 1));
           var isAct = (i === galleryState.videoIndex) ? ' active' : '';
-          html += '<div class="gallery-tree-node' + isAct + '" data-vid-idx="' + i + '" style="padding-left:8px" title="' + escapeHtml(vName) + '">' +
+          html += '<div class="gallery-tree-node' + isAct + '" data-vid-idx="' + i + '" style="padding-left:8px" data-tooltip="' + escapeHtml(vName) + '">' +
                     '<span class="tree-icon">🎬</span>' +
                     '<span class="tree-name">' + escapeHtml(vName) + '</span>' +
                   '</div>';
@@ -119,7 +119,7 @@ function renderTreePanel() {
             var dParts = dirKey.split('/');
             var dName = dParts[dParts.length - 1];
             var dIndent = (dParts.length - 1) * 12 + 8;
-            html += '<div class="gallery-tree-node tree-folder-node" style="padding-left:' + dIndent + 'px;font-weight:600" title="' + escapeHtml(dirKey) + '">' +
+            html += '<div class="gallery-tree-node tree-folder-node" style="padding-left:' + dIndent + 'px;font-weight:600" data-tooltip="' + escapeHtml(dirKey) + '">' +
                       '<span class="tree-icon">📁</span>' +
                       '<span class="tree-name">' + escapeHtml(dName) + '</span>' +
                       '<span class="tree-count">' + vIndices.length + '</span>' +
@@ -131,7 +131,7 @@ function renderTreePanel() {
             var vItem = galleryState.videoItems[vIdx];
             var fName = vItem.name || (vItem.path ? vItem.path.split('/').pop() : ('Video ' + (vIdx + 1)));
             var vAct = (vIdx === galleryState.videoIndex) ? ' active' : '';
-            html += '<div class="gallery-tree-node' + vAct + '" data-vid-idx="' + vIdx + '" style="padding-left:' + fileIndent + 'px" title="' + escapeHtml(fName) + '">' +
+            html += '<div class="gallery-tree-node' + vAct + '" data-vid-idx="' + vIdx + '" style="padding-left:' + fileIndent + 'px" data-tooltip="' + escapeHtml(fName) + '">' +
                       '<span class="tree-icon">🎬</span>' +
                       '<span class="tree-name">' + escapeHtml(fName) + '</span>' +
                     '</div>';
@@ -191,7 +191,7 @@ function renderTreePanel() {
           icon = '🖼';
         }
 
-        htmlImg += '<div class="gallery-tree-node' + isActive + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" title="' + escapeHtml(tKey || 'Root') + '">' +
+        htmlImg += '<div class="gallery-tree-node' + isActive + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
                      '<span class="tree-icon">' + icon + '</span>' +
                      '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
                      '<span class="tree-count">' + node.count + '</span>' +
@@ -315,7 +315,7 @@ function clearActiveSideTree() {
     }
     var vPath = document.getElementById('gallery-video-path') || document.getElementById('gallery-path');
     var vInfo = document.getElementById('gallery-video-info') || document.getElementById('gallery-info');
-    if (vPath) { vPath.textContent = '-'; vPath.title = ''; }
+    if (vPath) { vPath.textContent = '-'; vPath.removeAttribute('data-tooltip'); }
     if (vInfo) vInfo.textContent = '0 / 0 | Video';
     renderTreePanel();
     return;
@@ -464,7 +464,7 @@ function renderActive(index) {
   if (!item) {
     updateDeleteOverlay(null);
     if (imgEl) imgEl.removeAttribute('src');
-    if (pathEl) { pathEl.textContent = '-'; pathEl.title = ''; }
+    if (pathEl) { pathEl.textContent = '-'; pathEl.removeAttribute('data-tooltip'); }
     if (info) info.textContent = '0 / 0';
     if (empty) empty.style.display = '';
     return;
@@ -475,7 +475,7 @@ function renderActive(index) {
   var displayPath = item.path || item.name || '';
   if (pathEl) {
     pathEl.textContent = displayPath;
-    pathEl.title = displayPath;
+    pathEl.setAttribute('data-tooltip', displayPath);
   }
 
   ensureMainSrc(item).then(function() {
