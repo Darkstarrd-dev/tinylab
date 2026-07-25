@@ -293,7 +293,7 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 		w.Header().Set("Content-Type", ct)
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)
-		h.logger.Warn("[%s] %s: 上游返回 %d（请求格式错误：%s）→ 直接返回客户端，不冷却 key", reqID, sel.Key.Name, resp.StatusCode, util.TruncStr(bodyStr, 120))
+		h.logger.Warn("[%s] %s: 上游返回 %d（请求格式错误：%s）→ 直接返回客户端，不冷却 key", reqID, sel.Key.Name, resp.StatusCode, util.TruncStr(bodyStr, 500))
 		state.temp429Retries = 0
 		state.tpmWaitRetries = 0
 		state.consecutive5xx = 0
