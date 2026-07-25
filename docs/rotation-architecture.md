@@ -2,7 +2,7 @@
 
 > **文档定位：** `internal/rotation/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-19，仓库工作区（`main`）。+ test-proto 单协议 endpoint 替换复合探测 + URL 归一化修复。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。**运行时状态类型抽离 + 反向依赖消除**：per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 迁移到新包 `internal/keystate`；`rotation` 不再 `import registry`，改为 `import keystate`（类型）+ 依赖本包新定义的 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足，由 `app.go` 组合根注入）。`Selector.reg` 字段类型由 `*registry.Registry` 改为 `KeyStateProvider`。`proxy.ModelResolver.GetKeyState` 返回类型随之改为 `*keystate.KeyRuntimeState`。行为不变。此前：test-proto 单协议 endpoint 替换复合探测 + URL 归一化修复。
 
 > **2026-07-18 更新（软策略修正 + Responses 路由 + 多协议探测）：** (1) **移除 anthropic 入口的 target 过滤**——`Resolver.Resolve(name, entryFormat)` 不再对 `entryFormat == EntryFormatAnthropic` 做 `IsAnthropic()` 过滤（resolver.go:103-118 已删除），现对所有 `entryFormat` 返回同一 target 集合；`entryFormat` 参数保留但不再被消费（供未来扩展）。(2) **新增 OpenAI Responses 入口** `EntryFormatOpenAIResponses`（resolver.go:22-25），与 OpenAI Chat / Anthropic 并列。(3) **协议感知 usage 提取**——OpenAI Chat / Responses 入口走 `util.ExtractTokens`；Anthropic 入口走 `parseAnthropicSSEUsage`（`internal/proxy/stream.go:415-450`）提取 `message_start`/`message_delta` 的 input/output tokens 并复用 `recordUsage`。(4) **多协议探测**——`api/probe_model.go`+`probe_common.go` 三协议并发探测，结果写回 `config.ModelDef.Protocols` 与 `state.yaml` 的 `probes` map。rotation 仍对协议无感知，Key 轮询/冷却/退避对三入口完全复用同一套机制。详见 §4.4、§5（usage）、§17、§18。
 
@@ -11,18 +11,18 @@
 `internal/rotation/` 是 TinyRouter 的 **Key 轮询（Rotation）模块**，承载 provider 下多个 key 的选取与 per-key 运行时记账：冷却（cooldown）、指数退避（backoff）、配额锁（daily-quota / balance / rate-limit）、NIM 请求计数与节流、以及上游速率限制响应头的解析。它自身不处理 HTTP 转发、SSE、用量记录或管理接口。
 
 - **谁调用它：** `internal/proxy/` 通过 `KeyProvider` 接口（proxy/interfaces.go:27-38）注入 `*rotation.Selector`，在 `forwardWithRetry` 循环中调用 `SelectKey`、`OnKeyFailure`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429`、`MarkDailyQuotaLocked`、`MarkRateLimited`、`MarkBalanceLocked`、`ClearError`、`Settings`；`internal/app/app.go` 作为组合根构造 `Selector` 并调用 `SetStateHook` 将状态变更回调挂到 `state.yaml` 持久化（selector.go:36-39）。
-- **它调用谁：** `registry.Registry`（读取 provider/key 定义、`GetKeyState` 取得 per-key 运行时状态、state）、`config`（配置与 `Provider.IsNIM()` 判定）。rotation 不直接写磁盘；状态持久化由注入的 `onStateChange` 钩子旁路触发。
+- **它调用谁：** `keystate`（`*keystate.KeyRuntimeState` 类型 + 自带锁方法）、`config`（配置与 `Provider.IsNIM()` 判定）；经 `KeyStateProvider` 接口（selector.go）取得 provider 定义与 per-key 运行时状态——接口由 `*registry.Registry` 结构性满足（`app.go` 组合根注入），故 rotation **不 import registry**。rotation 不直接写磁盘；状态持久化由注入的 `onStateChange` 钩子旁路触发。
 
 ```mermaid
 flowchart LR
     Proxy["proxy.Handler (KeyProvider)"]
     Sel["rotation.Selector"]
-    Reg["registry.Registry"]
+    Reg["registry.Registry (实现 KeyStateProvider)"]
     Cfg["config (RotationConfig / Provider)"]
     Hook["onStateChange 钩子 -> state.yaml"]
 
     Proxy -->|"SelectKey / OnKeyFailure / Mark*"| Sel
-    Sel -->|"GetProvider / GetKeyState"| Reg
+    Sel -->|"GetProvider / GetKeyState (via KeyStateProvider 接口)"| Reg
     Sel -->|"Settings / IsNIM / NIMConfig"| Cfg
     Sel -->|"状态变更回调"| Hook
 ```
@@ -55,11 +55,11 @@ AGENTS.md 不精确之处（以本文源码锚点为准）：
 
 `KeySelector` 组合 `CooldownManager` 并额外声明 `SelectKey`、`OnKeyFailure`、`Settings`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429`。`*Selector` 在包内以 `var _ KeySelector = (*Selector)(nil)` 做编译期接口满足检查（selector.go:160-161）。
 
-### 3.2 Selector 结构体与构造（selector.go:24-30、32-34）
+### 3.2 Selector 结构体与构造（selector.go:34-40、42-44）
 
 ```go
 type Selector struct {
-    reg        *registry.Registry
+    reg        KeyStateProvider
     settings   *config.RotationConfig
     settingsMu sync.RWMutex
 
@@ -71,7 +71,7 @@ type Selector struct {
 
 ### 3.3 归属边界：状态归 registry，rotation 只可变
 
-`KeyRuntimeState` 由 `registry` 拥有（registry/state.go:21-45），包含 `BackoffLevel`、`ModelLocks`、`ModelStatus`、`ModelErrors`、`LastUsedAt`、`ConsecCount`、`RotatedAt`、`InFlight` 以及 NIM 专用字段（`NIMRequestCount`/`NIMLastSendTime`/`NIMCooldownLevel`/`NIMLast429Time`）。rotation 不复制也不缓存这些状态：每次都 `s.reg.GetKeyState(providerID, keyID)` 取指针后加 `state.Lock()` 可变（如 cooldown.go:22-49、nim.go:64-83）。`Selector` 持有的 `reg`/`settings` 是指针，本身**零 per-key 状态**。
+`KeyRuntimeState` 类型定义于 `internal/keystate`（`keystate/state.go`），由 `registry` 持有 `states map[string]*keystate.KeyRuntimeState` 并负责 snapshot/restore/reload-merge（registry/state.go）。字段包含 `BackoffLevel`、`ModelLocks`、`ModelStatus`、`ModelErrors`、`LastUsedAt`、`ConsecCount`、`RotatedAt`、`InFlight` 以及 NIM 专用字段（`NIMRequestCount`/`NIMLastSendTime`/`NIMCooldownLevel`/`NIMLast429Time`）。rotation 不复制也不缓存这些状态：每次都经 `KeyStateProvider.GetKeyState(providerID, keyID)`（由 `*registry.Registry` 实现）取指针后加 `state.Lock()` 可变（如 cooldown.go:22-49、nim.go:64-83）。`Selector` 持有的 `reg`（`KeyStateProvider` 接口）/`settings` 是指针，本身**零 per-key 状态**。
 
 ### 3.4 CooldownManager 接口（cooldown.go:14-20）
 
@@ -499,7 +499,7 @@ go build -o tinyrouter .
 
 本包（internal/rotation）：
 
-- `selector.go`：KeySelector 接口（xx-xx）、Selector 结构体（xx-xx）、New（xx-xx）、SetStateHook（xx-xx）、SelectedKey（xx-xx）、SelectKey 算法（xx-xx）、IsNIMEnabled（xx-xx）、OnKeyFailure 分发（xx-xx）、RotateToBack（xx-xx）、Settings（xx-xx）、UpdateSettings（xx-xx）、编译期检查（xx-xx）。
+- `selector.go`：KeyStateProvider 接口（12-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（21-32）、Selector 结构体（34-40，`reg KeyStateProvider` 非 `*registry.Registry`）、New（42-44）、SetStateHook（46-49）、SelectedKey、SelectKey 算法、IsNIMEnabled、OnKeyFailure 分发、RotateToBack、Settings、UpdateSettings、编译期检查。
 - `strategy.go`：selectRotation（39-64）、selectFillFirst（66-77）、selectRoundRobin（79-130）、effectiveStrategy（132-137）、effectiveStickyLimit（139-144）。
 - `cooldown.go`：CooldownManager 接口（14-20）、MarkUnavailable（22-49）、ClearError（51-68）、isKeyAvailable（70-92）、BackoffSequence（96-113）、IsDailyQuota429（123-128）、nextCSTMidnight05（130-141）、MarkDailyQuotaLocked（143-159）、MarkBalanceLocked（165-181）、MarkRateLimited（186-202）、编译期检查（204-205）。
 - `error_rules.go`：ErrorAction（8-15）、ErrorRule（17-23）、DefaultErrorRules（28-50）、DefaultTransientCooldownSec（53）、ClassifyError（58-74）、IsBalanceExhausted（80-86）。
@@ -508,7 +508,7 @@ go build -o tinyrouter .
 
 外部依赖：
 
-- `internal/registry/state.go`：KeyRuntimeState 承载 per-key 运行时状态（21-45）、QuotaInfo（12-18）、GetKeyState（69-73）、Inc/Dec/GetInFlight（48-60）、UpdateQuota/GetQuota（166-186）。
+- `internal/keystate/state.go`：`KeyRuntimeState` per-key 运行时状态类型（含 `mu sync.Mutex`、`BackoffLevel`、`ModelLocks`/`ModelStatus`/`ModelErrors`、`LastUsedAt`/`ConsecCount`/`RotatedAt`、`InFlight`、NIM 四字段、`ModelQuotas`）+ `QuotaInfo`；自带锁纯方法 `Inc/Dec/GetInFlight`、`Lock/Unlock`、`UpdateQuota/GetQuota`。无 map、无 registry/rotation 依赖。`registry/state.go` 现仅保留 `GetKeyState`/`SnapshotKeyStates`/`snapshotKeyState`/`RestoreKeyState`/`ResetAllCooldowns`/probe records。
 - `internal/config/types.go`：RotationConfig（11-19）、Provider（74-96，含 RotationStrategy 83、StickyLimit 84、NIMConfig 92、AnthropicVersion 96、AnthropicBeta 97、IsAnthropic 139-141）、ModelDef（32-38，含 Alias 35、Note 36、NIMOver 37、Protocols 50）、ModelNIMOverride（44-48）、IsNIM（102-107）、NIMSettings（121-126）、Config.Rotation（208）、Protocol 合法值常量 `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`（types.go:31-37）。
 - `internal/combo/resolver.go`：EntryFormat 类型与常量（14-25，含新增 `EntryFormatOpenAIResponses` 22-25）、Resolve（60-135，**不再按 entryFormat 过滤 target**，原 103-118 的 anthropic `IsAnthropic()` 过滤已移除）、rotateTargets（139-165）、sortTargetsByTier（210-227）。
 - `internal/config/defaults.go`：DefaultConfig 的 Rotation 默认（44-52，含 Strategy 45、StickyLimit 46、MaxRetries 47、RetryDelaySec 48、BackoffMaxSec 49）。
@@ -524,6 +524,6 @@ go build -o tinyrouter .
 | 修改错误分类 | error_rules.go DefaultErrorRules（28-50）+ ClassifyError（58-74）+ IsBalanceExhausted（80-86）+ DefaultTransientCooldownSec（53） |
 | 修改 NIM | nim.go（getNIMSettings/getModelNIMOverride/getEffectiveNIMSettings/WaitNIMInterval/OnNIMRequestSuccess/MarkNIM429/filterNIMCandidates）+ config NIMSettings（121-126）+ ModelNIMOverride（40-48）+ IsNIM（102-107）+ selector.go IsNIMEnabled + OnKeyFailure NIM 分支 + proxy 层 IsNIMEnabled 门控（forward.go、retry.go） |
 | 修改速率限制头 | ratelimit.go 各 Adapter（36-56）+ adapterRegistry（59-64）+ GetAdapter（71-80） |
-| 修改运行时状态字段 | registry/state.go KeyRuntimeState（21-45）+ state.yaml 快照/恢复（SnapshotKeyState 90-116、RestoreKeyState 130-163） |
+| 修改运行时状态字段 | `keystate/state.go` KeyRuntimeState(26-51) + `registry/state.go` snapshotKeyState(76-102)/RestoreKeyState(113-146) + state.yaml 快照/恢复；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
 | 新增/修改 Anthropic 协议路由（combo 入口过滤，已移除） | combo/resolver.go `Resolve(name, entryFormat)` **不再**做 `entryFormat==EntryFormatAnthropic` 的 `IsAnthropic()` 过滤（原 103-118 已删除，现 resolver.go:70-135 对所有 entryFormat 返回同一 target 集合）；EntryFormat 类型（14-25，新增 `EntryFormatOpenAIResponses` 22-25）；rotation 的 SelectKey / 冷却 / 退避 / 配额锁对三入口 provider 复用同一套机制（selector.go:47-108、cooldown.go、error_rules.go，不按协议分支） |
 | 软策略修正 / Responses 路由 / 单协议探测 | combo/resolver.go 移除 anthropic `IsAnthropic()` 过滤 + 保留 `entryFormat` 参数（供未来扩展）；config/types.go `ModelDef.Protocols`（50）+ `Protocol*` 常量（31-37）+ validate.go `validateModelDef`；proxy/forward.go 删除入口协议严格匹配（§13.1）+ upstream.go 三分支 + stream.go `parseAnthropicSSEUsage`（415-450）；api/probe_model.go `testProviderModelProto` 单协议单次探测（**不持久化**）+ probe_common.go `normalizeProbeBaseURL` + `buildProbeURL`/`buildAnthropicURL` 归一化修复 + probe_proto_test.go；前端 providers.js/combos.js/quickslots.js 串行调用三次实现三协议探测；registry `UpdateModelProtocols` + `UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord` + `WithProbeStateProvider`（app.go:166） |

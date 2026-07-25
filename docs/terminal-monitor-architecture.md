@@ -1,8 +1,8 @@
 # TinyRouter Terminal + Monitor 架构（终端 + 监控）
 
-> **文档定位：** `internal/terminal/`（交互式 PTY over WebSocket）、`internal/monitor/`（白名单 shell 命令、SSE 输出）、对应 API `internal/api/terminal.go` / `internal/api/monitor.go` 与前端 `web/static/terminal.js` / `web/static/monitor.js` 的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
+> **文档定位：** `internal/terminal/`（交互式 PTY over WebSocket）、`internal/monitor/`（白名单 shell 命令、SSE 输出）、对应 API `internal/api/terminal/` / `internal/api/monitor/`（子包，原 `internal/api/terminal.go` / `internal/api/monitor.go`）与前端 `web/static/terminal.js` / `web/static/monitor.js` 的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-19，仓库工作区（`main`）。**外延修复**（不改变本文覆盖的 terminal/monitor 架构本身，仅触及承载页面）：`web/static/console.js` 的 `startConsoleStream` 删除冗余的 `apiGet('/console-logs')` 历史拉取——`/api/console-logs/stream` 的 SSE 流在握手后已先回放全部历史行（见 `internal/api/console_logs.go` 的 `streamConsoleLogs` L33-38 "Send existing lines first"），此前同时做 REST 拉取 + SSE 回放导致已存在的日志行被渲染两次。Terminal/Monitor 主流程未变。基线仍为 `2026-07-13 提交 c2f89c6`。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。
+> **最后核对：** 2026-07-26，仓库工作区（`main`）。**Windows PATH 注册表补齐**：`internal/terminal/session.go:46` 改为调用 `buildShellEnv()`（实现在 `path.go`），在 Windows 上若继承 PATH 缺失注册表条目则从 `HKLM` 系统 PATH + `HKCU` 用户 PATH 补齐（`path_windows.go`，非 Windows `path_other.go` 为 no-op）；`os.Environ()` 全量继承 + `TERM=xterm-256color` 末尾叠加的行为不变。API 子包拆分（Phase 3 完成）：`internal/api/terminal.go` → `internal/api/terminal/register.go`，`internal/api/monitor.go` → `internal/api/monitor/register.go`，`internal/api/settings.go` → `internal/api/settings/register.go`。Terminal 会话状态（`terminalMu`+`activeTerm`）经 `apibase.Deps.TerminalState`（`*TerminalState{Mu sync.Mutex, Term *terminal.Session}`）传递。共享 `Deps` 经 `internal/api/apibase` 传递。此前重构：`setProcessGroup`/`killProcessGroup` 从 `internal/monitor/manager_unix.go` 和 `manager_windows.go` 提取到共享包 `internal/procutil/`（Unix SIGTERM→2s→SIGKILL，Windows taskkill /T/F）。行为不变。
 
 ## 1. 范围与结论
 
@@ -98,10 +98,11 @@ sequenceDiagram
 2. `exec.LookPath(shellPath)` 校验 shell 存在（session.go:34-37）。
 3. `pty.New()` 创建 PTY（session.go:39-42）。
 4. `pt.CommandContext(ctx, path)` 把 shell 绑定到 PTY 的 context（session.go:44-45）。
-5. **环境变量块**（session.go:46）：通过 `cmd.Env = append(os.Environ(), "TERM=xterm-256color")` 继承父进程的全部环境变量（`os.Environ()` 返回所有环境变量），再附加 `TERM=xterm-256color`。注意这里**没有**固定白名单继承——shell 子进程获得与 TinyRouter 自身完全相同的环境变量集合，唯一叠加的是 `TERM`。另注意**刻意不设** `CREATE_NO_WINDOW`（见 §4.6）。
-6. `cmd.Start()` 启动 shell（session.go:69-73，失败则 cancel + 关 pty 返回错误）。
-7. `session.pty.Resize(80, 24)` 初始尺寸（session.go:83）。
-8. 启动**三个 goroutine**（session.go:85-87）：`readFromPTY`、`readFromWebSocket`、`waitForProcess`。
+5. **环境变量块**（session.go:46 → `cmd.Env = buildShellEnv()`，实现在 `path.go`）：以 `os.Environ()` 为基继承父进程的全部环境变量（`os.Environ()` 返回所有环境变量），再附加 `TERM=xterm-256color`（末尾叠加，与历史行为一致）。注意这里**没有**固定白名单继承——shell 子进程获得与 TinyRouter 自身完全相同的环境变量集合，唯一叠加的是 `TERM`。另注意**刻意不设** `CREATE_NO_WINDOW`（见 §4.6）。
+6. **Windows PATH 注册表补齐**（`path_windows.go`，build tag `windows`；`path_other.go` 在非 Windows 为 no-op）：在构建 env 之前，`mergedPathFromRegistry()` 读 `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment` 的系统 PATH 与 `HKCU\Environment` 的用户 PATH（REG_EXPAND_SZ 经 `os.ExpandEnv` 展开 `%SystemRoot%` 等），按系统在前、用户在后的 Windows 语义合并；`withAugmentedPath` 比较 `os.Environ()` 的继承 PATH 与注册表 PATH——若继承 PATH 已含全部注册表条目则**no-op**（启动上下文 PATH 已完整时不变），否则将 PATH 条目替换为「注册表条目 + 继承 PATH 中未出现的额外条目」（去重，Windows 大小写不敏感）。**动机**：explorer.exe 在登录时缓存环境块，登录后安装的工具（git/node/python）不在继承 PATH 中——从注册表补齐使终端 shell 无论 TinyRouter 以何种上下文启动都能找到这些工具。任一注册表读取失败返回 "" → 不补齐，回落到继承 PATH（绝不劣于历史行为）。
+7. `cmd.Start()` 启动 shell（session.go:69-73，失败则 cancel + 关 pty 返回错误）。
+8. `session.pty.Resize(80, 24)` 初始尺寸（session.go:83）。
+9. 启动**三个 goroutine**（session.go:85-87）：`readFromPTY`、`readFromWebSocket`、`waitForProcess`。
 
 ### 4.3 readFromPTY（session.go:123-144）
 
@@ -415,10 +416,15 @@ go test ./...
 
 **Terminal：**
 
-- `internal/terminal/session.go`：Session 结构体（18-26）、NewSession（29-90）、defaultShell（104-121）、readFromPTY（123-144）、readFromWebSocket（146-179）、waitForProcess（181-184）、cleanup（186-210）、GetConn（93-97）、Close（99-102）、CREATE_NO_WINDOW 注释（59-67）。
+- `internal/terminal/session.go`：Session 结构体（18-26）、NewSession（29-90，env 经 `buildShellEnv()` 46）、defaultShell（92-109）、parseResizeMessage（111-121）、readFromPTY（123-144）、readFromWebSocket（146-171）、waitForProcess（173-176）、cleanup（178-209）、GetConn（81-85）、Close（87-90）、CREATE_NO_WINDOW 注释（47-55）。
+- `internal/terminal/path.go`：buildShellEnv/buildShellEnvWith（os.Environ 基 + Windows PATH 补齐 + TERM 末尾叠加）、withAugmentedPath（继承 PATH 与注册表 PATH 比较/合并/去重）、splitPathList/normalizePathEntry/envKey/envValue 辅助（跨平台，无 build tag）。
+- `internal/terminal/path_windows.go`（build windows）：mergedPathFromRegistry（HKLM 系统 PATH + HKCU 用户 PATH，os.ExpandEnv 展开 REG_EXPAND_SZ，失败返回 ""）、readRegistryPath（registry.OpenKey + GetStringValue "PATH"）。
+- `internal/terminal/path_other.go`（build !windows）：mergedPathFromRegistry no-op（返回 ""）。
 - `internal/terminal/process_windows.go`：killProcessGroup / taskkill /F /T /PID（10-11，build windows）。
 - `internal/terminal/process_unix.go`：killProcessGroup / syscall.Kill(-pid, SIGKILL)（7-8，build !windows）。
 - `internal/terminal/session_test.go`：5 个 `Test*` 函数（8-57），均为健全性/无 panic。
+- `internal/terminal/path_test.go`：9 个 `Test*` 函数，覆盖 withAugmentedPath（no-op/补齐/保留继承额外项/去重/无 PATH 条目/空 regPath/大小写不敏感键）与 buildShellEnv（空注册表 = os.Environ+TERM；补齐后 TERM 仍在末尾）。
+- `internal/terminal/session_lifecycle_test.go`：Close 幂等、parseResizeMessage、NewSession 失败清理、端到端 PTY、wsPair/detectShell 辅助。
 - `internal/api/terminal.go`：terminalUpgrader（11-19）、handleTerminalWS（23-67，debug 门 24-27、密码门移除 29-34、单会话守卫 57-65）、stopTerminal（69-84）。
 - `web/static/terminal.js`：renderTerminalView（7-23）、initTerminal（25-106）、Terminal 选项（29-35）、WebSocket（63-66）、onopen（68-74）、onmessage（76-86）、onerror/onclose（88-94）、onData（96-100）、onResize（103-105）、doFit（121-158）、sendTerminalResize（160-176，5 字节 0x01 协议）、stopTerminalSession（238-244）。
 

@@ -1,22 +1,22 @@
 # TinyRouter Config / Registry / State 基础设施架构
 
 > **文档定位：** `internal/config/`、`internal/registry/`、`internal/state/` 三个包共同构成的 **配置定义 + 内存注册表 + 运行时状态持久化** 基础设施的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
-> **最后核对：** 2026-07-25，仓库工作区（`main`）。本轮更新：Theme Modal 760px 横版自适应 + modal-body `overflow-x: hidden` 消除意外横向滚动条 + `.theme-card` 原生 `<button>` 标签化重构 + 4 组键盘无缝轮询（dark→night→style→button）与 Save 按钮高对比度双重 Focus Ring 光环。上一轮：ThemeSystem 新增独立风格维度（Style Dimension）。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。**运行时状态类型抽离（keystate 包）**：per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 及其自带锁的纯方法（Inc/Dec/GetInFlight、Lock/Unlock、UpdateQuota/GetQuota）从 `internal/registry/state.go` 迁移到新包 `internal/keystate`（`state.go`）。`registry` 仍持有 `states map[string]*keystate.KeyRuntimeState` 并负责 `GetKeyState`/snapshot/restore/reload-merge/`ResetAllCooldowns`；`rotation` 不再 `import registry`，改为依赖 `keystate` 类型 + 新定义的 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）。`proxy.ModelResolver.GetKeyState` 返回类型随之改为 `*keystate.KeyRuntimeState`。行为不变（state.yaml 往返、冷却/退避/NIM/配额锁/快照恢复语义完全一致）。此前：API 子包拆分（Phase 3 完成）——`internal/api` 全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。
 
 ## 1. 范围与结论
 
 `internal/config/`、`internal/registry/`、`internal/state/` 三者是 TinyRouter 的 **基础设施层**，分别承担：
 
 - **`internal/config/`** —— 全部配置**类型定义**（`Config` 及其子结构、`Provider`/`Key`/`ModelDef`/`Combo`/`QuickSlot` 等）、`config.yaml` 的**原子读写与首次生成**、以及保护 API Key 不为明文落盘的 **AES-256-GCM 加密**（`crypto.go`）。不持有任何运行时可变状态。
-- **`internal/registry/`** —— 进程内**内存后端**：存放当前 `Config` 副本，以及每个 key 的 **`KeyRuntimeState`**（冷却、退避、配额锁、NIM 计数等运行时记账）。提供 provider/key/model/combo/quickslot 的 **CRUD**，并负责 reload 时**保持既有 `KeyRuntimeState` 指针稳定**（merge 语义）。
+- **`internal/registry/`** —— 进程内**内存后端**：存放当前 `Config` 副本，以及每个 key 的运行时状态 **`*keystate.KeyRuntimeState`**（冷却、退避、配额锁、NIM 计数等运行时记账；**类型定义在 `internal/keystate`**，registry 持有 `states` map 与全部 snapshot/restore/reload-merge 逻辑）。提供 provider/key/model/combo/quickslot 的 **CRUD**，并负责 reload 时**保持既有 `*keystate.KeyRuntimeState` 指针稳定**（merge 语义）。`rotation` 经 `KeyStateProvider` 接口（而非 `*registry.Registry`）取得这些指针，故 rotation **不 import registry**。
 - **`internal/state/`** —— `state.yaml` 的**去抖持久化层**：通过**回调（callback）**与 registry / combo 解耦抽取快照、写盘、并在启动时恢复。`Manager` 不 import registry，只依赖函数签名（`state.go`/`manager.go`）。
 
 三者彼此正交，核心结论如下：
 
-1. **三个正交的“所有者”：** config 拥有 `config.yaml` 的**定义与读写**（`persistence.go`）；registry 拥有内存态 `Config` 副本 + `states map[string]*KeyRuntimeState`（`registry.go:11-16`）；state 拥有 `state.yaml` 的**持久化与去抖编排**（`manager.go:14-30`）。combo 拥有自己的 `comboState`（`internal/combo/resolver.go:36`），经 state 的两个 combo 回调同步（app.go:165）。
+1. **三个正交的"所有者"：** config 拥有 `config.yaml` 的**定义与读写**（`persistence.go`）；registry 拥有内存态 `Config` 副本 + `states map[string]*keystate.KeyRuntimeState`（`registry.go:11-16`，**类型定义在 `internal/keystate`**）；state 拥有 `state.yaml` 的**持久化与去抖编排**（`manager.go:14-30`）。combo 拥有自己的 `comboState`（`internal/combo/resolver.go:36`），经 state 的两个 combo 回调同步（app.go:165）。
 2. **回调模式打破 import 循环：** `registry` import `state`、调用 `state.KeySnapshot`；但 `state` **绝不 import `registry`**——它只持有 `func()` 类型的快照/恢复回调（`manager.go:18-21`）。持久化层因此与具体数据持有者解耦，依赖方向单向（registry → state）。
 3. **registry 用两把锁：`cfgMu`（外）与 `stateMu`（内）：** `Registry` 同时持有一把保护 `Config` 的 `cfgMu` 和一把保护 `states` map 的 `stateMu`（`registry.go:12-15`）。约定 `cfgMu` 为外层锁、`stateMu` 为内层锁（见 `reloadStatesLocked` 注释 `registry.go:29`）。所有 CRUD 在 `cfgMu` 下、必要时再取 `stateMu` 做 key-state 簿记。
-4. **`KeyRuntimeState` 指针稳定性是 reload-merge 契约：** `Reload` 不会整体重建 `states`，而是 `reloadStatesLocked` 按 `providerID/keyID` 复用既有的 `*KeyRuntimeState` 指针，仅对新 key 分配、对消失 key 丢弃（`registry.go:36-53`）。rotation 等模块持有的指针因此跨 reload 仍然有效——**若整体替换 `states` map 则已有的冷却/锁定会被清零**。
+4. **`KeyRuntimeState` 指针稳定性是 reload-merge 契约：** `Reload` 不会整体重建 `states`，而是 `reloadStatesLocked` 按 `providerID/keyID` 复用既有的 `*keystate.KeyRuntimeState` 指针，仅对新 key 分配、对消失 key 丢弃（`registry.go:36-53`）。rotation 等模块持有的指针因此跨 reload 仍然有效——**若整体替换 `states` map 则已有的冷却/锁定会被清零**。
 5. **`config.yaml` 严格解析 vs `state.yaml` 宽松解析：** `config.Load` 用 `dec.KnownFields(true)` 拒绝未知字段（`persistence.go:65`）；`state.Load` 用宽松 `yaml.Unmarshal`（未知字段静默忽略，`state.go:61`）。两者对“未知字段”的容忍度相反，源于 config 是用户手写的契约、state 是程序生成的快照。
 
 ## 2. 事实优先级
@@ -43,11 +43,11 @@ AGENTS.md 不精确之处（以本文源码锚点为准）：
 |---|---|---|---|
 | 配置**定义**（`Config` 及子结构） | `config` 包 | `types.go` | `config.yaml`（定义 + 全局设置） |
 | 内存态 `Config` 副本 + `states map` | `registry` 包 | `registry.go:11-16` | 不持久化定义；`KeyRuntimeState` 子集持久化到 `state.yaml` |
-| per-key 运行时状态 `KeyRuntimeState` | `registry` 包（指针稳定） | `state.go:21-45` | 经 `SnapshotKeyStates` 抽快照 → `state.yaml`（子集） |
+| per-key 运行时状态 `KeyRuntimeState`（类型） | `keystate` 包（类型定义）；`registry` 包（map 持有 + 指针稳定） | `keystate/state.go`（类型）+ `registry/state.go`（`GetKeyState`/snapshot/restore） | 经 `SnapshotKeyStates` 抽快照 → `state.yaml`（子集） |
 | per-combo 轮转状态 `comboState` | `combo` 包（自有） | `internal/combo/resolver.go:36` | 经 `SnapshotComboStates`/`RestoreComboState` → `state.yaml`（子集） |
 | `state.yaml` 持久化与去抖编排 | `state` 包（`Manager`） | `manager.go` | 磁盘文件 |
 
-**关键约束：** rotation 通过 `registry.GetKeyState(...)` 取得 `*KeyRuntimeState` 后只**可变**、不拥有（rotation-architecture.md §3.3）；combo 经由各自的 resolver 持有 `comboState`，只在状态变更后触发持久化回调。config 全包无自有并发锁（见第 19 节），调用方负责串行化配置读写。
+**关键约束：** rotation 经 `KeyStateProvider` 接口（`GetKeyState`，由 `*registry.Registry` 结构性满足）取得 `*keystate.KeyRuntimeState` 后只**可变**、不拥有（rotation-architecture.md §3.3）；combo 经由各自的 resolver 持有 `comboState`，只在状态变更后触发持久化回调。config 全包无自有并发锁（见第 19 节），调用方负责串行化配置读写。
 
 ### 3.2 所有权图
 
@@ -63,7 +63,7 @@ flowchart TD
     subgraph REG["internal/registry (内存后端)"]
         R["Registry: cfgMu + stateMu"]
         CFG2["config *Config (副本)"]
-        ST["states map[string]*KeyRuntimeState (指针稳定)"]
+        ST["states map[string]*keystate.KeyRuntimeState (指针稳定)"]
         CRUD["providers/keys/models/combos/quickslots CRUD"]
     end
 
@@ -113,7 +113,7 @@ flowchart TD
 - `IsNIM()`（types.go:102-107）：`APIType=="nim"` 或 `BaseURL` 含 “nvidia”（小写）时为真——保证 misconfigured apiType 不会静默绕过 NIM 节流。
 - `IsGeminiOpenAICompat()`（types.go:113-117）：`BaseURL` 含 “generativelanguage.googleapis.com” **且** 含 “/openai” 时为真，用于判定需要 thought_signature 处理的 Gemini OpenAI 兼容端点。
 
-**协议合法值常量与探测校验：** `config` 包定义三协议合法值常量 `ProtocolOpenAICompat`="openai-compat" / `ProtocolOpenAIResponses`="openai-responses" / `ProtocolAnthropic`="anthropic"（types.go:31-37），供单协议探测（`api/probe_common.go` 的 `probeOpenAICompat`/`probeOpenAIResponses`/`probeAnthropic` 函数，`api/probe_model.go` 的 `testProviderModelProto` handler 按 `proto` 参数分发）+ 前端串行调用三次实现三协议探测，以及 `ModelDef.Protocols` 字段使用。`validate.go` 新增 `validateModelDef(p, m)`（10-42 区）+ `validProtocols` 集合（9），在 `validateProviders` 遍历 `p.Models` 时对每个模型的 `Protocols` 值做合法性告警（未知协议值仅 `os.Stderr` 告警，不阻断 Save）。
+**协议合法值常量与探测校验：** `config` 包定义三协议合法值常量 `ProtocolOpenAICompat`="openai-compat" / `ProtocolOpenAIResponses`="openai-responses" / `ProtocolAnthropic`="anthropic"（types.go:31-37），供单协议探测（`api/probe_common.go` 的 `probeEndpoint` 通用函数 + `probeOpenAICompat`/`probeOpenAIResponses`/`probeAnthropic` 薄封装，`api/probe_model.go` 的 `testProviderModelProto` handler 按 `proto` 参数分发）+ 前端串行调用三次实现三协议探测，以及 `ModelDef.Protocols` 字段使用。`validate.go` 新增 `validateModelDef(p, m)`（10-42 区）+ `validProtocols` 集合（9），在 `validateProviders` 遍历 `p.Models` 时对每个模型的 `Protocols` 值做合法性告警（未知协议值仅 `os.Stderr` 告警，不阻断 Save）。
 
 `config.go` 为本包文档注释文件（config.go:1-11），说明各文件职责，无导出符号。
 
@@ -220,7 +220,7 @@ type Registry struct {
 
 **簿记约定：** 任何会改变 `states` map 键集的写操作（Add/Delete provider、Add/Delete key）都在持 `cfgMu` 期间取 `stateMu` 同步增删 state，保证 `config.Providers` 与 `states` 键集一致。
 
-## 11. internal/registry — KeyRuntimeState 与运行时状态归属（state.go）
+## 11. internal/registry — 运行时状态归属（state.go）与 internal/keystate（类型）
 
 ```go
 type KeyRuntimeState struct {
@@ -242,16 +242,16 @@ type KeyRuntimeState struct {
 }
 ```
 
-- **`QuotaInfo`（state.go:12-18）：** `ModelLimit`/`ModelRemaining`/`GlobalLimit`/`GlobalRemaining`/`LastUpdated`，由 `UpdateQuota`/`GetQuota` 维护。
-- **`KeyRuntimeState`（state.go:21-45）：** per-key 运行时状态，**仅 `ModelLocks`/`ModelStatus`/`ModelErrors` 三个 map 在新建时初始化为空 map**（registry.go:45-49、providers.go:64-68、keys.go:38-42）；`ModelQuotas` 懒初始化（state.go:169）。**这是 rotation 模块所可变的结构**（rotation-architecture.md §3.3）。
-- **InFlight 计数（state.go:48-60）：** `IncInFlight` 加锁自增；`DecInFlight` 加锁自减并**钳制在 0**（53-55）；`GetInFlight` 加锁读。三者各自加锁，故可独立调用，但不可对**同一** state 在外部已加锁后再次调用（非可重入，见下）。
-- **`Lock`/`Unlock`（state.go:63-66）：** **直接暴露 `mu` 的加锁/解锁**，注释为“acquires/releases the state's mutex”。**该锁非可重入**（普通 `sync.Mutex`），外部已 `Lock()` 后再调用 `IncInFlight`/`DecInFlight`/`GetInFlight`/`UpdateQuota`/`GetQuota` 会死锁——测试 `TestGetKeyStateNil` 专门注释提醒（crud_test.go:247）。
-- **`GetKeyState`（state.go:69-73）：** 在 `stateMu.RLock` 下返回 `*KeyRuntimeState`（存在的**活指针**）。
-- **`SnapshotKeyStates`（state.go:77-88）：** `stateMu.RLock` 下遍历 `states`，调 `snapshotKeyState` 并把 key 由 `"a/b"` 经 `convertKey`（state.go:118-126）转为 `"a::b"`。
-- **`snapshotKeyState`（state.go:90-116）：** 先 `ks.Lock()` 再拷贝——**刻意排除** `ModelErrors`、`InFlight`、`ModelQuotas`（只拷 `BackoffLevel`/`RotatedAt`/`ConsecCount`/`LastUsedAt`/NIM 四字段/`ModelLocks`/`ModelStatus`）。
-- **`RestoreKeyState`（state.go:130-163）：** 取活指针 → `Lock` → 字段回填（不含 `ModelErrors`/`InFlight`/`ModelQuotas`）；key 不存在返回 error。
-- **`UpdateQuota`/`GetQuota`（state.go:166-186）：** 加锁写/读 `ModelQuotas[model]`。
-- **`ResetAllCooldowns`（state.go:191-204）：** `stateMu.RLock` 下遍历所有 state，逐一 `Lock` 后清空 `ModelLocks`/`ModelStatus`/`ModelErrors`、`BackoffLevel=0`、`NIMCooldownLevel=0`、`NIMLast429Time=零值`；**不动** `LastUsedAt`/`ConsecCount`/`RotatedAt`/`InFlight`/NIM 计数（`NIMRequestCount`/`NIMLastSendTime` 保留）。
+- **`QuotaInfo`（keystate/state.go）：** `ModelLimit`/`ModelRemaining`/`GlobalLimit`/`GlobalRemaining`/`LastUpdated`，由 `UpdateQuota`/`GetQuota` 维护（方法随类型迁至 keystate）。
+- **`KeyRuntimeState`（keystate/state.go）：** per-key 运行时状态**类型定义 + 自带锁纯方法**（`IncInFlight`/`DecInFlight`/`GetInFlight`/`Lock`/`Unlock`/`UpdateQuota`/`GetQuota`）已于 2026-07-25 从 `registry/state.go` 迁至 `internal/keystate`。**仅 `ModelLocks`/`ModelStatus`/`ModelErrors` 三个 map 在新建时初始化为空 map**（registry.go:50-54、providers.go:65-69、keys.go:38-42）；`ModelQuotas` 懒初始化。**这是 rotation 模块所可变的结构**（rotation-architecture.md §3.3）；rotation 经 `KeyStateProvider` 接口（selector.go）取得 `*keystate.KeyRuntimeState` 指针。
+- **InFlight 计数（keystate/state.go:53-66）：** `IncInFlight` 加锁自增；`DecInFlight` 加锁自减并**钳制在 0**（57-63）；`GetInFlight` 加锁读。三者各自加锁，故可独立调用，但不可对**同一** state 在外部已加锁后再次调用（非可重入，见下）。**方法随类型定义迁至 keystate 包。**
+- **`Lock`/`Unlock`（keystate/state.go:68-72）：** **直接暴露 `mu` 的加锁/解锁**，注释为"acquires/releases the state's mutex"。**该锁非可重入**（普通 `sync.Mutex`），外部已 `Lock()` 后再调用 `IncInFlight`/`DecInFlight`/`GetInFlight`/`UpdateQuota`/`GetQuota` 会死锁——测试 `TestGetKeyStateNil` 专门注释提醒（crud_test.go:247）。**方法随类型定义迁至 keystate 包。**
+- **`GetKeyState`（registry/state.go:13-17）：** 在 `stateMu.RLock` 下返回 `*keystate.KeyRuntimeState`（存在的**活指针**）。
+- **`SnapshotKeyStates`（registry/state.go:63-74）：** `stateMu.RLock` 下遍历 `states`，调 `snapshotKeyState` 并把 key 由 `"a/b"` 经 `convertKey`（registry/state.go:107-109）转为 `"a::b"`。
+- **`snapshotKeyState`（registry/state.go:76-102）：** 先 `ks.Lock()` 再拷贝——**刻意排除** `ModelErrors`、`InFlight`、`ModelQuotas`（只拷 `BackoffLevel`/`RotatedAt`/`ConsecCount`/`LastUsedAt`/NIM 四字段/`ModelLocks`/`ModelStatus`）。
+- **`RestoreKeyState`（registry/state.go:113-146）：** 取活指针 → `Lock` → 字段回填（不含 `ModelErrors`/`InFlight`/`ModelQuotas`）；key 不存在返回 error。
+- **`UpdateQuota`/`GetQuota`（keystate/state.go:74-95）：** 加锁写/读 `ModelQuotas[model]`。**方法随类型定义迁至 keystate 包。**
+- **`ResetAllCooldowns`（registry/state.go:151-164）：** `stateMu.RLock` 下遍历所有 state，逐一 `Lock` 后清空 `ModelLocks`/`ModelStatus`/`ModelErrors`、`BackoffLevel=0`、`NIMCooldownLevel=0`、`NIMLast429Time=零值`；**不动** `LastUsedAt`/`ConsecCount`/`RotatedAt`/`InFlight`/NIM 计数（`NIMRequestCount`/`NIMLastSendTime` 保留）。
 
 ## 12. internal/registry — Reload/merge 语义
 
@@ -502,7 +502,11 @@ go build -o tinyrouter .
 - `models.go`：ListModels(6-17)、AddModel(20-36)、DeleteModel(39-56)、UpdateModelQuotaType(59-75)、UpdateModelKind、UpdateModelImgProtocol、UpdateModelProtocols(177-194，写回 ModelDef.Protocols)。
 - `combos.go`：ListCombos/GetComboByName/HasCombo(7-37)、AddCombo(39-43)、UpdateCombo(45-59)、DeleteCombo(61-71)。
 - `quickslots.go`：ListQuickSlots/GetQuickSlotByName/GetQuickSlot/HasQuickSlot(7-51)、AddQuickSlot(53-57)、UpdateQuickSlot(59-74)、DeleteQuickSlot(76-86)。
-- `state.go`：QuotaInfo(12-18)、KeyRuntimeState(21-45)、Inc/Dec/GetInFlight(48-60)、Lock/Unlock(63-66)、GetKeyState(69-73)、SnapshotKeyStates(77-88)、snapshotKeyState(90-116)、convertKey(118-126)、RestoreKeyState(130-163)、UpdateQuota/GetQuota(166-186)、ResetAllCooldowns(191-204)、UpdateProbeRecord(80-86)、GetProbeRecord(88-93)、SnapshotProbeRecords(95-106)、RestoreProbeRecord(108-114)。
+- `state.go`：GetKeyState(13-17)、UpdateProbeRecord(26-30)、GetProbeRecord(33-37)、SnapshotProbeRecords(41-50)、RestoreProbeRecord(54-59)、SnapshotKeyStates(63-74)、snapshotKeyState(76-102)、convertKey(107-109)、RestoreKeyState(113-146)、ResetAllCooldowns(151-164)。**类型定义 `KeyRuntimeState`/`QuotaInfo` 及自带锁方法已迁出至 `internal/keystate`（见下）。**
+
+**internal/keystate（2026-07-25 新增，叶包仅依赖 sync+time）：**
+
+- `state.go`：QuotaInfo(17-24)、KeyRuntimeState(26-51，含 `mu`/`BackoffLevel`/`ModelLocks`/`ModelStatus`/`ModelErrors`/`LastUsedAt`/`ConsecCount`/`RotatedAt`/`ModelQuotas`/`InFlight`/NIM 四字段)、IncInFlight(54)、DecInFlight(57-63)、GetInFlight(66)、Lock(69)、Unlock(72)、UpdateQuota(75-88)、GetQuota(91-95)。**无 map、无 registry/rotation/config/state 依赖。**
 
 **internal/state：**
 
@@ -517,7 +521,7 @@ go build -o tinyrouter .
 | 修改默认值 | `defaults.go`：`DefaultConfig`(39-64) 与 `finalizeConfig`(69-146) 两处需一致 |
 | 修改持久化原子性 | `fsutil/atomic.go` AtomicWrite（统一实现）+ `persistence.go` Save(79-107) + `state.go` Save(79-96)（两者均委托 fsutil，注意错误语义不同，见第 20 节 #4） |
 | 修改加密 | `crypto.go`（GenerateKey/Encrypt/Decrypt/encryptKeysCopy）+ `defaults.go` 解密分支(130-144) + `types.go` SecurityConfig(150-154) |
-| 修改 `KeyRuntimeState` 字段 | `registry/state.go` KeyRuntimeState(21-45) + `state.go` KeySnapshot(25-38)（同步持久化子集）+ `snapshotKeyState`(90-116)/`RestoreKeyState`(130-163) |
+| 修改 `KeyRuntimeState` 字段 | `keystate/state.go` `KeyRuntimeState`（类型 + 自带锁方法）+ `registry/state.go` `snapshotKeyState`/`RestoreKeyState`（同步持久化子集）+ `state.go` `KeySnapshot`(25-38)（同步持久化子集）；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
 | 修改 reload merge | `registry.go` reloadStatesLocked(28-54) + `reload_merge_test.go`（TestReload_MergesStates） |
 | 修改去抖 | `manager.go` ScheduleWrite(67-82)/flushNow(85-119)/FlushSync(152-170) |
 | 修改回调接线 | `app.go` WithKeyStateProvider/WithComboStateProvider(164-165) 与 registry/combo 的 Snapshot*/Restore* 实现 |

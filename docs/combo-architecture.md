@@ -2,7 +2,7 @@
 
 > **文档定位：** `internal/combo/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-20，当前 HEAD。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。
+> **最后核对：** 2026-07-25，仓库工作区（`main`）。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。**本轮修复：** combo warning 输出从 `log.Printf` 改为 `fmt.Fprintf(os.Stderr, …)`（resolver.go:91），符合「log 仅限 main.go」规则。
 
 ## 1. 范围与结论
 
@@ -102,7 +102,7 @@ func (r *Resolver) IsComboName(name string) bool {
 3. **遍历 Models 构建 targets（resolver.go:79-111）：**
    - `isModelDisabled(m, combo.DisabledModels)` 为真（精确相等）→ 跳过（resolver.go:81-83、225-232）；
    - `prefix, model := util.SplitModel(m)`（resolver.go:84），`prefix==""`（无 `/`）→ 跳过（resolver.go:85-87）；
-   - `provider, ok := r.reg.GetProviderByPrefix(prefix)`（resolver.go:89），未命中 → `log.Printf` 警告并跳过（resolver.go:90-93）；
+   - `provider, ok := r.reg.GetProviderByPrefix(prefix)`（resolver.go:89），未命中 → `fmt.Fprintf(os.Stderr, …)` 警告并跳过（resolver.go:90-93）；
    - **Alias 解析**：`r.reg.ResolveModelAlias(prefix, model)`（resolver.go:97），若命中则用真实 ID 替换 `model`（resolver.go:98-99）；因为 API 返回的 model 列表使用 alias（如果有），combo 配置中存储的也是 `prefix/alias`，所以需要先解析为真实 ID 再匹配 provider 的 Models 列表中的 QuotaType；
    - 构建 `ModelTarget{ProviderID: provider.ID, Model: model}`（resolver.go:94），遍历 `provider.Models` 按 `md.ID == model` 取 `QuotaType`（resolver.go:101-106），空则兜底 `"limited"`（resolver.go:107-109）；
    - append（resolver.go:110）。

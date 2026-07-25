@@ -97,7 +97,7 @@
 
 ## 4. `internal/registry/` — Provider/Key/Combo/QuickSlot CRUD 与运行时状态
 
-线程安全的配置 + 运行时 key 状态映射；所有管理 API 的数据后端。架构基线见 [`docs/config-registry-state-architecture.md`](docs/config-registry-state-architecture.md)（与 config/state 合著，含 CRUD、KeyRuntimeState 归属、reload merge 语义、双锁模型、源码锚点）。
+线程安全的配置 + 运行时 key 状态映射；所有管理 API 的数据后端。架构基线见 [`docs/config-registry-state-architecture.md`](docs/config-registry-state-architecture.md)（与 config/state 合著，含 CRUD、KeyRuntimeState 归属、reload merge 语义、双锁模型、源码锚点）。**2026-07-25：** per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 及其自带锁纯方法抽离到新包 [`internal/keystate`](#keystate)（见 §4 末），registry 仍持有 `states map[string]*keystate.KeyRuntimeState` 并负责 `GetKeyState`/snapshot/restore/reload-merge/`ResetAllCooldowns`/probe records；`rotation` 不再 `import registry`（改用 `keystate` + `KeyStateProvider` 接口）。
 
 | 文件 | 职责 |
 |---|---|
@@ -107,9 +107,18 @@
 | `models.go` | Provider 自定义模型列表（`ListModels`、`AddModel`、`DeleteModel`、`UpdateModelQuotaType`、`UpdateModelAlias` [含前缀自动剥离 `sanitizeAlias`]、`UpdateModelNote`、`UpdateModelNIMOverride`、`ResolveModelAlias` [含容错剥离]、`GetModelByAliasOrID`） |
 | `combos.go` | Combo CRUD；新增 `GetComboByID`(id) 方法供 combo 测速排序 handler 使用 |
 | `quickslots.go` | QuickSlot（预设模型切换槽）CRUD（含 `sanitizeQuickSlotModels` 自动化简 `prefix/prefix/model` 条目） |
-| `state.go` | 每 key 运行时状态（`KeyRuntimeState`：冷却/锁/退避/NIM 计数）+ 合并/保留逻辑 |
+| `state.go` | per-key 运行时状态**访问**：`GetKeyState`（返回 `*keystate.KeyRuntimeState`）、`SnapshotKeyStates`/`snapshotKeyState`/`RestoreKeyState`/`ResetAllCooldowns`、probe records（`UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord`）。**类型定义已迁出**至 `internal/keystate` |
 | `crud_test.go` / `reload_merge_test.go` / `state_test.go` | 测试 |
 | `models_protocols_test.go` / `probe_records_test.go` | 新增 ModelDef.Protocols CRUD 与 probeRecords 运行时状态测试 |
+
+<a id="keystate"></a>
+**`internal/keystate/`（新包，2026-07-25）** — per-key 运行时状态**类型定义**抽离自 `registry/state.go`，打破原先 rotation→registry 的反向依赖：
+
+| 文件 | 职责 |
+|---|---|
+| `state.go` | `KeyRuntimeState` 结构（`mu`/`BackoffLevel`/`ModelLocks`/`ModelStatus`/`ModelErrors`/`LastUsedAt`/`ConsecCount`/`RotatedAt`/`ModelQuotas`/`InFlight`/NIM 四字段）+ `QuotaInfo`；自带锁纯方法 `IncInFlight`/`DecInFlight`/`GetInFlight`/`Lock`/`Unlock`/`UpdateQuota`/`GetQuota`。无 map、无 registry/rotation/config/state 依赖（叶包，仅 sync+time） |
+
+**依赖方向：** `keystate` ← `registry`（持有 map + snapshot/restore）与 ← `rotation`（类型 + `KeyStateProvider` 接口返回类型）；`rotation` 不再 import `registry`，无循环。map/snapshot/restore/reload-merge 留在 registry（与 config CRUD 强耦合，迁移无收益）。
 
 ---
 
@@ -119,7 +128,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子 |
+| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子；定义 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）——`Selector.reg` 字段类型为该接口，故 rotation **不 import registry**（改 import `keystate`） |
 | `strategy.go` | 轮询策略（fill-first / round-robin / failover）+ stickyLimit |
 | `cooldown.go` | 指数退避（1s→240s），429 日配额锁至次日 CST 00:05，per-model 锁 |
 | `ratelimit.go` | 每 key 请求速率记账 |
@@ -151,8 +160,8 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 | `handler.go` | `Handler`（基于接口装配，非具体类型）：路由 `/v1/*`，构造 HTTP client（普通/流式/管理 + 代理变体）；`pgUsage UsageRecorder` + `SetPgUsage`：Playground 来源请求专用 ring 注入；Anthropic 入口 `Messages`（`POST /v1/messages`，`handleProxy(..., EntryFormatAnthropic)`）；OpenAI Responses 入口 `Responses`（`POST /v1/responses`，`handleProxy(..., EntryFormatOpenAIResponses)`）；OpenAI Embeddings 入口 `Embeddings`（`POST /v1/embeddings`，`handleProxy(..., EntryFormatOpenAI)`）；新增 `quickSlotOnlyProvider func() bool` + `SetQuickSlotOnlyProvider` + `quickSlotOnly()` 方法，供 `ListModels` 过滤使用 |
 | `interfaces.go` | handler 依赖的能力接口（`ModelResolver`（含 `ResolveModelAlias`）/`KeyProvider`（含 `IsNIMEnabled`）/`ComboResolver`（`Resolve(name, entryFormat)`）/`UsageRecorder`/`Logger` 等） |
 | `forward.go` | 上游请求转发 / body 改写（替换 model 字段、注入 `stream_options`）；**非流式 keep-alive 刷新**（首字节 `\n` + 5s ticker ` ` 字节，§8.7 见 proxy-architecture.md）；`handleProxy`/`handleCombo`/`forwardWithRetry`/`forwardUpstream` 带 `entryFormat` 参数；**软策略**：客户端用什么协议入口请求就按该协议转发，proxy 不再因 `provider.APIType` 拒绝请求（已移除入口协议严格匹配 400 块） |
-| `upstream.go` | `normalizeBaseURL`：最长优先剥除已知 endpoint 后缀（含 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 等）；`isOllamaBaseURL`+`normalizeOllamaBaseURL`：Ollama 特例（纯字符串匹配 host=`ollama.com` 或 `localhost`/`127.0.0.1`+port=`11434`，清空 path 降为 host root，让请求落到 OpenAI 兼容 `/v1/*` 而非原生 `/api/*`，避免格式转换）；`BuildUpstreamURL`：统一的 endpoint URL 拼接函数，启发式 A（判断路径是否含版本段如 `v1`/`v1beta`/`v2` 等决定是否注入 `/v1`），Ollama 分支在 Raw 模式之后、归一化之前介入；`forwardUpstream` 按 `entryFormat` 三分支（OpenAI Chat / Anthropic / OpenAI Responses）；`buildAnthropicUpstreamRequest`+`setAnthropicHeaders`：`x-api-key`+`anthropic-version`(+可选 `anthropic-beta`)，URL 由 `BuildUpstreamURL` 统一构造，绝不设 `Authorization`；`buildResponsesUpstreamRequest`：URL 由 `BuildUpstreamURL` 统一构造，鉴权头 `Authorization: Bearer <key>`（同 OpenAI Chat） |
-| `stream.go` | SSE 流式透传（`http.Flusher` 逐 chunk 转发），提取 JSON payload，用量计数；`entryFormat` 控制：anthropic 入口用 `parseAnthropicSSEUsage` 提取 `message_start`/`message_delta` 的 input/output tokens（复用 `recordUsage`，OpenAI `util.ExtractTokens` 加 guard 避免 anthropic `output_tokens` 干扰）；OpenAI Chat/Responses 入口走 `util.ExtractTokens`；客户端断开（`w.Write` 失败）→ `clientDisconnected` 标志 → `break` 退出循环 → `recordUsage(status="error", errMsg="client disconnected")` 保证 request-done 广播 |
+| `upstream.go` | 委托 `internal/urlutil` 的 `BuildUpstreamURL`/`normalizeBaseURL`/`isOllamaBaseURL`/`normalizeOllamaBaseURL` 进行 URL 构造；`forwardUpstream` 按 `entryFormat` 三分支（OpenAI Chat / Anthropic / OpenAI Responses）；**统一上游请求构造器** `buildUpstreamRequest(ctx, sel, body, endpointPath, authBearer bool)`（upstream.go:84）：URL 由 `urlutil.BuildUpstreamURL` 统一构造；`authBearer=true` 时设 `Authorization: Bearer <key>`（OpenAI Chat / Responses 入口），`authBearer=false` 时调 `setAnthropicHeaders`（`x-api-key`+`anthropic-version`+可选 `anthropic-beta`，绝不设 `Authorization`，Anthropic 入口）；原 `buildAnthropicUpstreamRequest`/`buildResponsesUpstreamRequest` 两个独立函数已于 Phase 2 合并为单一 `buildUpstreamRequest` + `authBearer` 开关 |
+| `stream.go` | SSE 流式透传（`http.Flusher` 逐 chunk 转发），提取 JSON payload，用量计数；委托 `internal/sse` 的 `SSELineBuffer`/`NormalizeSSEChunk` 进行行帧缓冲与 chunk 规范化；`entryFormat` 控制：anthropic 入口用 `parseAnthropicSSEUsage` 提取 `message_start`/`message_delta` 的 input/output tokens（复用 `recordUsage`，OpenAI `util.ExtractTokens` 加 guard 避免 anthropic `output_tokens` 干扰）；OpenAI Chat/Responses 入口走 `util.ExtractTokens`；客户端断开（`w.Write` 失败）→ `clientDisconnected` 标志 → `break` 退出循环 → `recordUsage(status="error", errMsg="client disconnected")` 保证 request-done 广播 |
 | `retry.go` | 跨 key/combo 故障转移的重试状态机 |
 | `models.go` | 模型列表/解析辅助；`ListModels` 新增 `quickSlotOnly()` 门控——开启时仅返回 QuickSlot 模型，跳过 provider/combo |
 | `recorder.go` | `recordUsage`：按 source 分流写入 Recent Requests ring 或 Playground ring；payload/headers 仅在 debugMode 或 playground 来源时捕获；reqBody 截断 64KB、respBody 截断 512KB（见 proxy-architecture.md 2026-07-15 更新） |
@@ -192,38 +201,152 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 ---
 
 ## 10. `internal/api/` — 管理 REST API（chi 路由）
+<!-- last verified: 2026-07-25 -->
 
-管理 UI 与外部操作的全部 HTTP 端点。
+管理 UI 与外部操作的全部 HTTP 端点。2026-07-25 重构（Phase 3 完成）：全部 21 个领域 handler 已按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。根包仅保留 `router.go`（路由装配）、`helpers.go`（向后兼容委托）与测试文件。
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | `New()`：装配 chi `Router`，注入所有 handler；`deps` 依赖束（含 `pgUsage *usage.RingBuffer`）；新增 `quickSlotOnly atomic.Bool` + `QuickSlotOnly()`/`SetQuickSlotOnly(bool)` 方法，供 proxy handler 通过 `quickSlotOnlyProvider` 获取实时状态 |
-| `helpers.go` | 共享辅助（`saveConfig` + 状态持久触发） |
-| `anysearch.go` | AnySearch 搜索代理：3 个 handler（`POST /api/anysearch/search`、`/subdomains`、`/extract`），委托 `internal/anysearch.Client` 调用 JSON-RPC API |
-| `auth.go` | 本地密码鉴权：AES-256-GCM、session token、HttpOnly cookie、登录 |
-| `rate_limit.go` | 登录速率限制 |
-| `compress.go` | Brotli/gzip 响应压缩中间件；对 `/v1/images/generations` 与 `/v1/images/edits` 直接放行（见 proxy-architecture.md §8.7） |
-| `sse_events.go` | usage/inflight 事件 SSE 流 |
-| `console_logs.go` | 控制台日志 SSE |
-| `providers.go` / `providers_validate.go` / `providers_models.go` / `providers_models_crud.go` | Provider 列表/重排（`reorderProvider`）/校验/模型拉取/模型增删改查（`addProviderModel`、`updateModelQuota`、`updateModelAlias`、`updateModelNote`、`updateModelNIM`、`updateModelKind`、`updateModelImgProtocol`、`updateModelImgSizes`、`deleteProviderModel`） |
-| `keys.go` / `bulk_keys.go` / `model_keys.go` | Key 列表/CRUD、批量添加、模型可用 key 查询 |
-| `models.go` | 模型列表（`/api/models`，返回 `prefix/alias` 或 `prefix/model_id`） |
-| `combos.go` / `quickslots.go` | Combo / QuickSlot CRUD |
-| `combo_speedtest.go` | Combo 批量测速排序 handler：`speedTestCombo`（`POST /combos/{id}/speed-test`，SSE 流式）对 combo 内全部模型（含 `DisabledModels`）全并发流式测速（发"写约1000字短篇小说"prompt，`stream:true`、`max_tokens:1200`），按 `TokensPerSec` 降序（失败排末尾）排序，分别写回 `Models` 与 `DisabledModels` 并 `saveConfig` 持久化；事件序列 `meta` → `model`*N → `done`；复用 `proxy.{BuildUpstreamURL,SSELineBuffer,SSEDataPayloads}`、`util.ExtractTokens`、`extractContentFromSSE`（位于 `probe_common.go` 包内）、`firstActiveKey`（位于 `providers_validate.go`）、`rt.proxyHandler.ManagementClient`；60s 整体超时、单模型早停（60 chunks 或 30s） |
-| `settings.go` | GET/PUT 设置（server/security/rotation/quickSlotOnly/theme 等）；`getSettings` 返回 `quickSlotOnly`、`theme` 字段，`updateSettings` 接收并同步到 `cfg.QuickSlotOnly` + `rt.SetQuickSlotOnly()`、`cfg.Theme`（`ThemeConfig` 双层主题 variant + 风格维度持久化） |
-| `usage.go` / `usage_reset.go` / `quota.go` | 用量摘要/重置/配额；`getPlaygroundUsage`（`GET /api/usage/playground`）：返回 Playground 来源 ring + 在途条目；`getUsage` 开头调用 `SweepStale(10min)` 兜底：超时 processing 条目转 `Status="error"`/`Error="timeout"` 写入 RingBuffer + 广播 request-done |
-| `probe_common.go` / `probe_model.go` / `probe_keys.go` | 单模型单协议探测 + 全 key 批量探测（共享 SSE 内容提取 / URL 归一化）；`probe_common.go` 提供 `probeOpenAICompat`/`probeOpenAIResponses`/`probeAnthropic`/`probeOpenAIEmbedding` 单协议探测函数（chat/responses/anthropic 提示词为 "generate 100 tokens self introduction"，`max_tokens: 150`；embedding 输入为 `probeEmbeddingTestInput` 完整句子，**不传 max_tokens**）；`probeOpenAIEmbedding` 调用 `extractEmbeddingDim` 验证响应格式（`data[0].embedding` 数组非空）并提取维度，写入 `ProbeResult.EmbeddingDim`；`probe_model.go` 的 `testProviderModelProto` handler（`POST /providers/{id}/models/test-proto`，body `{model, proto}`）支持 `openai-embedding` 协议，`probeResultToMap` 输出 `embeddingDim`，**不持久化**；`probe_keys.go` 的 `testProviderModelAllKeys`（`/models/test-all` 批量 key 探测）保持不变；`probe_test.go` / `probe_proto_test.go`（覆盖新 handler + URL 归一化）；删除 `probe_compound_test.go` |
-| `monitor.go` / `terminal.go` | Monitor 命令状态 / Terminal WebSocket |
-| `download.go` | 下载任务创建/状态（委托 `internal/download.Manager`）；`openDownloadDir` handler 调用 `fsutil.OpenInFileManager` 打开下载目录；`openExternalURL` 调用 `fsutil.OpenInBrowser`；`browseSystemPath` 调用 `fsutil.OpenFilePicker`/`fsutil.OpenDirectoryPicker`（现代 Common Item Dialog）；`retryDownloadTask` handler 原地重试失败/取消任务（`POST /downloads/{id}/retry`） |
-| `image.go` | `saveImage`：保存图片到可配置目录（`Config.ImageSaveDir`，默认 `imgs/`）；支持 data: URL 和 http(s) URL |
-| `url_validation.go` | `validateBaseURL` 辅助 |
-| `gallery.go` | Gallery 图片查看器后端 handlers：`galleryListZip` (POST `/api/gallery/zip` 上传 zip → 返回 `{sessionId, manifest}`)，`galleryGetZipEntry` (GET `/api/gallery/zip/{sessionId}/{entryIndexOrPath:*}` 支持按 Index / Path 提取单图字节)，`galleryConvertTiff` (POST `/api/gallery/tiff` TIFF→JPEG 转码) |
-| `gallery_fs.go` | Gallery 文件系统操作 handlers：`galleryOpenDir` (POST `/api/gallery/open-dir` 后端原生目录选择器 + 递归文件列表)，`galleryListDir` (POST `/api/gallery/list-dir`)，`galleryServeFile` (GET `/api/gallery/file?path=` 按绝对路径提供文件)，`galleryDeleteFs` (DELETE `/api/gallery/fs` 后端 os.Remove/os.RemoveAll)，`galleryZipFromPath` (POST `/api/gallery/zip-from-path` 从磁盘路径创建 zip 会话)，`galleryZipWriteback` (POST `/api/gallery/zip-writeback` 会话字节写回磁盘)，`galleryPastePaths` (POST `/api/gallery/paste-paths` 读取剪贴板 CF_HDROP 路径) |
-| `editor.go` | Editor 后端 handlers：`editorOpen`（POST `/api/editor/open` 原生文件选择器返回 `{path,name,size,content}`），`editorSave`（POST `/api/editor/save` 原子写返回 `{ok,path}`）。`/api/editor/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB） |
-| `gallery_session.go` | Gallery zip 会话存储：包级 `gallerySessions` LRU（线程安全，上限 32 个、5 分钟空闲过期），`sync.Once` 启动后台定时清理 goroutine |
-| `*_test.go` | 测试（api/auth/bulk_keys/url_validation/settings） |
+| `router.go` | `New()`：装配 chi `Router`，注入所有 handler；私有 `deps` 依赖束；`Routes()` 创建 `*apibase.Deps` 并调用各子包的 `Register`；`securityHeaders` 中间件；`serveUI` 嵌入 UI；`Cleanup` 停 monitor/terminal/download；`DebugMode`/`SetDebugMode`/`QuickSlotOnly`/`SetQuickSlotOnly`（`atomic.Bool`） |
+| `helpers.go` | 向后兼容委托：`saveConfig`/`saveConfigAndReload`/`writeAPIError`/`checkPortAvailable`/`getIntQuery`/`generateID`/`SyncIDCounter` 全部委托 `apibase` |
+| `api_test.go` | API 集成测试 |
+| `probe_test.go` / `probe_proto_test.go` | 探测协议测试（仍在根包，引用 `apibase` 构造 `*Deps`） |
+| `bulk_keys_test.go` / `selector_hot_reload_test.go` | 批量 key / 选择器热重载测试 |
 
-### 10.1 `internal/gallery/` — Gallery 图片查看器后端
+### 10.1 `internal/api/apibase/` — 共享依赖与辅助
+
+为 `internal/api` 子包提供共享类型和辅助函数，避免父包与子包间的循环导入。
+
+| 文件 | 职责 |
+|---|---|
+| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`MonitorMgr`/`DebugMode`/`QuickSlotOnly`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`TerminalState`）+ `TerminalState`（`Mu sync.Mutex` + `Term *terminal.Session`）+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数 |
+
+### 10.2 `internal/api/auth/` — 鉴权
+
+| 文件 | 职责 |
+|---|---|
+| `handler.go` | `Handler` 结构体 + `Register`/`AuthMiddleware`/`AuthStatusHandler`/`LoginHandler`/`LogoutHandler` + `SessionStore`/`GenerateToken`/`IsValidSession`/`SetSessionCookie` |
+| `rate_limit.go` | 登录速率限制（`loginRateLimiter`） |
+| `auth_test.go` | 测试 |
+
+### 10.3 `internal/api/anysearch/` — AnySearch 搜索代理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `anySearchHandler`/`anySearchSubDomainsHandler`/`anySearchExtractHandler`，委托 `internal/anysearch.Client` 调用 JSON-RPC API |
+
+### 10.4 `internal/api/combos/` — Combo CRUD + 测速
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `listCombos`/`createCombo`/`updateCombo`/`reorderCombo`/`deleteCombo`/`getCombo` + `comboSpeedTest`（SSE 流式测速，`comboSpeedCache` 进程内缓存）+ 辅助 `fullSortedOrder`/`probeComboModel`/`firstActiveKey`/`extractContentFromSSE` |
+
+### 10.5 `internal/api/compress/` — 响应压缩中间件
+
+| 文件 | 职责 |
+|---|---|
+| `compress.go` | Brotli/gzip 响应压缩中间件；对 `/v1/images/generations` 与 `/v1/images/edits` 直接放行（见 proxy-architecture.md §8.7） |
+
+### 10.6 `internal/api/console_logs/` — 控制台日志 SSE
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `getConsoleLogs`/`streamConsoleLogs`/`clearConsoleLogs` |
+
+### 10.7 `internal/api/download/` — 下载任务管理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `createDownload`/`listDownloads`/`getDownload`/`cancelDownload`/`removeDownload`/`clearCompletedDownloads`/`streamDownloadEvents`/`getDownloadLog`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload`/`playDownloadFile`/`openDownloadDir`/`retryDownloadTask`/`openExternalURL`/`browseSystemPath` + `validateDownloadURL`/`validateDownloadDir` 辅助（SSRF 拦截经 `apibase.IsBlockedSSRFHost`） |
+
+### 10.8 `internal/api/editor/` — 编辑器后端
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `editorOpen`/`editorSave`。`/api/editor/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB） |
+
+### 10.9 `internal/api/gallery/` — Gallery HTTP handler
+
+Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委托顶层 `internal/gallery/` 包；本子包仅持有 HTTP handler、会话 LRU 存储、AI 审核编排。
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `galleryListZip`/`galleryGetZipEntry`/`galleryDeleteZipEntry`/`galleryDeleteZipSession`（`DELETE /api/gallery/zip/{sessionId}`，整会话删除）/`galleryTouchSession`（`POST /api/gallery/zip/{sessionId}/touch`，刷新 LRU 位置）/`galleryConvertTiff`/`galleryStartReview`/`galleryReviewStatus`/`galleryCancelReview`/`galleryGeneratePrompt`/`galleryOpenDir`/`galleryListDir`/`galleryServeFile`/`galleryDeleteFs`/`galleryZipFromPath`/`galleryZipWriteback`/`galleryPastePaths` + `zipSession`/`gallerySessionStore`（纯 LRU 无 TTL，容量 `galleryMaxSessions=128`）+ `touch`/`pin`/`unpin` + `newGallerySessionID` |
+| `register_test.go` | 测试：`gallerySessionStore` LRU 驱逐契约（容量 128，最早会话先驱逐）、`touch` MRU 提升、`remove` 幂等；HTTP 层 `DELETE /zip/{sessionId}`（204）与 `POST /zip/{sessionId}/touch`（204/404），并验证 chi 区分 `DELETE /zip/{sessionId}`（会话删除）与 `DELETE /zip/{sessionId}/*`（条目删除） |
+
+### 10.10 `internal/api/image/` — 图片保存与同源代理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `saveImage`（`POST /api/save-image`，下载图片到 `ImageSaveDir`）+ `imageProxy`（`GET /api/image-proxy`，同源代理避免 CORS）+ `saveImageRequest` 类型 + `extensionFromContentType` 辅助（SSRF 拦截经 `apibase.IsBlockedSSRFHost`） |
+
+### 10.11 `internal/api/keys/` — Key 管理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `listKeys`/`createKey`/`bulkAddKeys`/`updateKey`/`deleteKey`/`getKeyState` |
+
+### 10.12 `internal/api/models/` — 模型列表
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `listModels`（`/api/models`，返回 `prefix/alias` 或 `prefix/model_id`） |
+
+### 10.13 `internal/api/monitor/` — Monitor 命令状态
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `getMonitorStatus`/`startMonitor`/`stopMonitor`/`streamMonitor`（SSE，含 buffered replay + keepalive） |
+
+### 10.14 `internal/api/probe/` — 模型协议探测
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（`POST /providers/{id}/models/test-proto`、`POST /providers/{id}/models/test-all`）+ `probeModel`/`probeKey` + 通用 `probeEndpoint`（4 协议：`openai-compat`/`openai-responses`/`anthropic`/`openai-embedding`）+ `ProbeResult` 类型 + 协议常量与测试 prompt |
+
+### 10.15 `internal/api/providers/` — Provider CRUD / 校验 / 模型管理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（17 路由：provider CRUD 6 + test 1 + model 10）+ `listProviders`/`createProvider`/`validateProvider`/`updateProvider`/`reorderProvider`/`deleteProvider`/`testProviderKey`/`fetchProviderModels`/`addProviderModel`/`updateModelQuota`/`updateModelAlias`/`updateModelNote`/`updateModelNIM`/`updateModelKind`/`updateModelImgProtocol`/`updateModelImgSizes`/`updateModelProtocols`/`deleteProviderModel`（BaseURL 校验经 `apibase.ValidateBaseURL`） |
+
+### 10.16 `internal/api/quickslots/` — QuickSlot 管理
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `listQuickSlots`/`createQuickSlot`/`updateQuickSlot`/`deleteQuickSlot` |
+
+### 10.17 `internal/api/review_presets/` — 审核预设
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `listReviewPresets`/`upsertReviewPreset`/`deleteReviewPreset` |
+
+### 10.18 `internal/api/settings/` — Settings / 生命周期
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（`GET/PATCH /settings`、`POST /reload`、`POST /shutdown`）+ `getSettings`/`updateSettings`/`reload`/`handleShutdown`/`validateProxyConfig`（端口可用性经 `apibase.CheckPortAvailable`；debug/quickSlotOnly 开关写 `atomic.Bool`；restart/serverCfg/upstreamTimeout 回调） |
+
+### 10.19 `internal/api/sse/` — Usage/inflight 事件 SSE 流
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register` + `streamUsageEvents`（`GET /api/usage/events`） |
+
+### 10.20 `internal/api/terminal/` — Terminal WebSocket
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（`GET /terminal/ws`、`POST /terminal/stop`）+ `handleTerminalWS`（debug-mode 门 + 单会话守卫，状态经 `apibase.Deps.TerminalState`）+ `stopTerminal` + `upgrader` |
+
+### 10.21 `internal/api/usage/` — 用量 / 配额 / 模型 key 状态
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（7 路由：`GET /usage`、`GET /usage/playground`、`GET /usage/summary`、`GET /usage/quotas`、`GET /usage/model-keys`、`DELETE /usage`、`POST /usage/reset-quota`）+ `getUsage`/`getPlaygroundUsage`/`getUsageSummary`/`getQuotas`/`getModelKeys`/`clearUsage`/`resetQuota` + `getIntQuery` 辅助 |
+
+### 10.22 `internal/gallery/` — Gallery 图片查看器后端（库）
 
 为前端 Gallery 分页（图片查看器，playground 构建变体）提供 zip 解析与 TIFF 转码能力。不持久化、不写盘；状态仅驻进程内存（zip 会话 LRU）。
 
@@ -237,9 +360,6 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 架构基线见 [`docs/playground-architecture.md`](docs/playground-architecture.md)（Gallery 一节）。
 
 引入依赖：`golang.org/x/image`（webp/bmp/tiff/draw 子包），纯 Go 无 CGO。
-
----
-
 ## 11. `internal/state/` — `state.yaml` 运行时持久化
 
 架构基线见 [`docs/config-registry-state-architecture.md`](docs/config-registry-state-architecture.md)（与 config/registry 合著，含 Snapshot 格式、500ms 去抖、回调模式破除循环依赖、源码锚点）。
@@ -274,6 +394,40 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 |---|---|
 | `util.go` | `SplitModel("provider/model")`、`TruncStr`、JSON 辅助 |
 
+
+## 13a. `internal/sse/` — SSE  framing 工具
+
+通用 SSE（Server-Sent Events）行帧缓冲、data payload 提取与 chunk 规范化。从 `internal/proxy/stream.go` 中提取，供 proxy 处理器与 API 探测/测速代码共同使用。无外部依赖（仅 stdlib）。
+
+| 文件 | 职责 |
+|---|---|
+| `sse.go` | `SSELineBuffer`（行帧缓冲 + Feed/Remaining）、`SSEDataPayloads`（提取 data payload）、`NormalizeSSEChunk`（choices:null → [] 规范化） |
+| `sse_test.go` | 测试 |
+
+---
+
+## 13b. `internal/urlutil/` — URL 规范化工具
+
+通用 URL 归一化与上游端点构造工具。从 `internal/proxy/upstream.go` 中提取，供 proxy 转发器与 API 探测/管理代码共同使用。无外部依赖（仅 stdlib）。
+
+| 文件 | 职责 |
+|---|---|
+| `urlutil.go` | `BuildUpstreamURL`（统一端点 URL 拼接 + 启发式 A 版本段检测）、`normalizeBaseURL`（剥除已知 endpoint 后缀）、`isOllamaBaseURL`/`normalizeOllamaBaseURL`（Ollama 特例）、`isHostRoot`（路径检测） |
+| `urlutil_test.go` | 测试 |
+
+---
+
+
+## 13c. `internal/procutil/` — 进程工具（跨平台进程组管理）
+
+跨平台进程组管理工具，从 `internal/download/kill_unix.go` 和 `internal/monitor/manager_unix.go` 中提取的重复代码统一为共享包。Unix 实现：SIGTERM → 2s grace → SIGKILL 兜底；Windows 实现：`taskkill /T /F`。无外部依赖（仅 stdlib）。
+
+| 文件 | build tag | 职责 |
+|---|---|---|
+| `procutil_unix.go` | `!windows` | `KillProcessGroup(pid)` 先 SIGTERM 再 2s 后 SIGKILL；`SetProcessGroup(cmd)` 设 `Setpgid=true` |
+| `procutil_windows.go` | `windows` | `KillProcessGroup(pid)` 执行 `taskkill /PID /T /F`；`SetProcessGroup(cmd)` 设 `CREATE_NEW_PROCESS_GROUP\|createNoWindow` |
+
+`internal/download/` 和 `internal/monitor/` 的平台文件均委托此包实现进程组管理。
 ---
 
 ## 14. `internal/terminal/` — 交互式终端
@@ -282,11 +436,15 @@ Debug Mode 下的完整交互式终端（xterm.js + WebSocket + ConPTY/PTY），
 
 | 文件 | build tag | 职责 |
 |---|---|---|
-| `session.go` | — | PTY 会话（`go-pty` + `gorilla/websocket`） |
-| `process_windows.go` | `windows` | ConPTY 进程生成 |
-| `process_unix.go` | `!windows` | PTY 进程生成 |
+| `session.go` | — | PTY 会话（`go-pty` + `gorilla/websocket`）；`buildShellEnv()`（session.go:46）构建子进程 env |
+| `path.go` | — | `buildShellEnv`/`buildShellEnvWith`/`withAugmentedPath`：基于 `os.Environ()` 构建 shell env，Windows 上若继承 PATH 缺失注册表条目则用注册表 PATH 补齐，末尾附加 `TERM=xterm-256color` |
+| `path_windows.go` | `windows` | `mergedPathFromRegistry()`：读 HKLM 系统 PATH + HKCU 用户 PATH（REG_EXPAND_SZ 经 `os.ExpandEnv` 展开），合并返回；失败返回 "" 回落到继承 PATH |
+| `path_other.go` | `!windows` | `mergedPathFromRegistry()` no-op（返回 ""）；非 Windows 以 `os.Environ()` 为唯一来源 |
+| `path_test.go` | — | `withAugmentedPath`/`buildShellEnv` 合并逻辑测试（跨平台，单组件路径条目保证确定性） |
+| `process_windows.go` | `windows` | ConPTY 进程生成（`killProcessGroup` taskkill /T /F） |
+| `process_unix.go` | `!windows` | PTY 进程生成（`killProcessGroup` SIGKILL 进程组） |
 | `session_test.go` | — | 测试 |
-
+| `session_lifecycle_test.go` | — | Close 幂等、resize 解析、NewSession 失败清理、端到端 PTY 测试 |
 ---
 
 ## 15. `internal/monitor/` — Monitor 命令
@@ -296,8 +454,8 @@ Debug Mode 下的完整交互式终端（xterm.js + WebSocket + ConPTY/PTY），
 | 文件 | build tag | 职责 |
 |---|---|---|
 | `manager.go` | — | 单条 monitor 命令调度 + 输出流 |
-| `manager_windows.go` | `windows` | Windows 进程 spawn |
-| `manager_unix.go` | `!windows` | Unix 进程 spawn |
+| `manager_windows.go` | `windows` | Windows 进程 spawn（委托 `internal/procutil`） |
+| `manager_unix.go` | `!windows` | Unix 进程 spawn（委托 `internal/procutil`） |
 | `manager_test.go` | — | 测试 |
 
 ---
@@ -308,12 +466,21 @@ Debug Mode 下的完整交互式终端（xterm.js + WebSocket + ConPTY/PTY），
 
 | 文件 | build tag | 职责 |
 |---|---|---|
-| `manager.go` | — | 下载任务队列管理 |
-| `executor.go` | — | yt-dlp 执行调度 |
-| `args.go` | — | yt-dlp 参数构造 |
-| `types.go` | — | 下载任务类型 |
-| `kill_windows.go` | `windows` | 进程终止 |
-| `kill_unix.go` | `!windows` | 进程终止 |
+| `types.go` | — | 下载任务类型（Task/Progress/状态常量/VideoInfo/PlaylistInfo/CreateTaskInput） |
+| `args.go` | — | yt-dlp 参数构造核心：RuntimeSettings、常量、BuildDownloadArgs/BuildVideoInfoArgs/BuildPlaylistInfoArgs/FormatYtDlpCommand/quoteArg |
+| `formats.go` | — | 格式选择器与质量映射：resolveVideoFormatSelector/resolveAudioFormatSelector/qualityToVideoHeight/qualityToAudioAbr/dedupe |
+| `network.go` | — | 网络参数与 URL 识别：appendNetworkArgs/isYouTubeURL/isBilibiliURL/hostOf/resolveFfmpegDir/isDir |
+| `manager.go` | — | Manager 核心：结构体/任务存储与顺序、NewManager/UpdateSettings/Started/CreateTask/GetVideoInfo/GetPlaylistInfo/snapshot/isTerminal/generateID/fileSizeOf |
+| `lifecycle.go` | — | 任务生命周期变更：CancelTask/RetryTask/ClearCompleted/RemoveTask |
+| `worker.go` | — | worker 池与执行循环：Start/Stop/worker/processTask/finalizeTask/updateTaskProgress |
+| `events.go` | — | SSE 事件总线：Event/Subscribe/Unsubscribe/publishEvent |
+| `playlist.go` | — | 播放列表展开：CreatePlaylistTask |
+| `executor.go` | — | Executor 核心：ErrCancelled/Executor/NewExecutor/Execute/ExecuteInfo/ExecutePlaylistInfo/runCapture |
+| `progress.go` | — | 进度解析与尾部缓冲：progressRe/parseProgressLine/parseSize/parseSpeed/parseETA/processingPatterns/hasPostprocessSignal/tailBuffer |
+| `binary.go` | — | yt-dlp/ffmpeg 路径解析与输出文件提取：resolveYtDlpPath/resolveFfmpegPath/extractSavedFilePath |
+| `parse.go` | — | 错误分类与 JSON 解析：classifyExitError/wrapInfoError/parseVideoInfoJSON/parsePlaylistInfoJSON |
+| `kill_windows.go` | `windows` | 进程终止（委托 `internal/procutil`） |
+| `kill_unix.go` | `!windows` | 进程终止（委托 `internal/procutil`） |
 | `download_test.go` | — | 测试 |
 
 > 外部依赖：yt-dlp、ffmpeg 需用户自装（见 README.md）。
@@ -405,7 +572,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 ## 22. Gitignored 参考副本（非本项目模块）
 
 | 路径 | 说明 |
-|---|---|
+| Combo 批量测速排序 | combo、proxy | `api/combo_speedtest.go`（`speedTestCombo` SSE handler + `probeComboModel`，复用 `urlutil.BuildUpstreamURL`/`sse.SSELineBuffer`/`sse.SSEDataPayloads`、`util.ExtractTokens`、`probe_common.go::extractContentFromSSE`、`providers_validate.go::firstActiveKey`、`proxy/handler.go::ManagementClient`）、`registry/combos.go`（`GetComboByID`）、`api/router.go`（路由注册）、`web/static/combos.js`（`runComboSpeedTest` + 编辑弹窗按钮 + `renderComboModelsList` 行 `data-fullid`/状态 span）、`web/static/i18n.js`（`comboSpeedTest*` 键） |
 | `new-api/` | vendored 的 "new-api" LLM gateway 副本（~600+ `.go` 文件）。`.gitignore` 排除、`go.mod` 不引用、`package main` 不引用。**仅作实现参考**，不参与编译，勿计入本项目模块。 |
 
 ---
