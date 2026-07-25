@@ -4,10 +4,9 @@ import (
 	"testing"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
 )
 
-func setupTestProvider(t *testing.T, priorities []int, strategy string, stickyLimit int) (*registry.Registry, *Selector) {
+func setupTestProvider(t *testing.T, priorities []int, strategy string, stickyLimit int) (*fakeStore, *Selector) {
 	t.Helper()
 	keys := make([]config.Key, len(priorities))
 	for i, p := range priorities {
@@ -35,7 +34,7 @@ func setupTestProvider(t *testing.T, priorities []int, strategy string, stickyLi
 			BackoffMaxSec: 240,
 		},
 	}
-	reg := registry.New(cfg)
+	reg := newFakeStore(cfg)
 	sel := New(reg, &cfg.Rotation)
 	return reg, sel
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/state"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 )
 
 // HostLoopFunc blocks until the host (console signal, tray, webview) requests
@@ -93,9 +94,8 @@ func New(configPath string) (*App, error) {
 	lockFile.Truncate(0)
 	lockFile.Seek(0, 0)
 	fmt.Fprintf(lockFile, "%d\n", os.Getpid())
-
 	// Sync ID counter with existing IDs to prevent collisions after restart.
-	api.SyncIDCounter(cfg)
+	apibase.SyncIDCounter(cfg)
 
 	configDir = filepath.Dir(configPath)
 	a := &App{

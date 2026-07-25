@@ -5,10 +5,9 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
 )
 
-func setupNIMTest(t *testing.T) (*registry.Registry, *Selector) {
+func setupNIMTest(t *testing.T) (*fakeStore, *Selector) {
 	t.Helper()
 	cfg := &config.Config{
 		Providers: []config.Provider{
@@ -36,7 +35,7 @@ func setupNIMTest(t *testing.T) (*registry.Registry, *Selector) {
 			BackoffMaxSec: 240,
 		},
 	}
-	reg := registry.New(cfg)
+	reg := newFakeStore(cfg)
 	sel := New(reg, &cfg.Rotation)
 	return reg, sel
 }

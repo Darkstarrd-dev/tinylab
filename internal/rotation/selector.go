@@ -6,8 +6,17 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
+
+// KeyStateProvider is the subset of *registry.Registry that the Selector needs:
+// provider config lookup plus per-key runtime-state access. Depending on this
+// capability (rather than on *registry.Registry directly) lets rotation avoid
+// importing internal/registry; the concrete registry satisfies it structurally.
+type KeyStateProvider interface {
+	GetProvider(providerID string) (*config.Provider, bool)
+	GetKeyState(providerID, keyID string) *keystate.KeyRuntimeState
+}
 
 // KeySelector combines key selection and cooldown management.
 // *Selector implements this interface.
@@ -23,14 +32,14 @@ type KeySelector interface {
 }
 
 type Selector struct {
-	reg        *registry.Registry
+	reg        KeyStateProvider
 	settings   *config.RotationConfig
 	settingsMu sync.RWMutex
 
 	onStateChange func() // injected by main.go for state persistence
 }
 
-func New(reg *registry.Registry, settings *config.RotationConfig) *Selector {
+func New(reg KeyStateProvider, settings *config.RotationConfig) *Selector {
 	return &Selector{reg: reg, settings: settings}
 }
 

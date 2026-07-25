@@ -1,3 +1,4 @@
+// Package api provides HTTP handlers for the management REST API.
 package api
 
 import (
@@ -7,12 +8,32 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/api/auth"
+	"github.com/tinyrouter/tinyrouter/internal/api/providers"
+	"github.com/tinyrouter/tinyrouter/internal/api/anysearch"
+	"github.com/tinyrouter/tinyrouter/internal/api/compress"
+	"github.com/tinyrouter/tinyrouter/internal/api/console_logs"
+	"github.com/tinyrouter/tinyrouter/internal/api/combos"
+	"github.com/tinyrouter/tinyrouter/internal/api/editor"
+	"github.com/tinyrouter/tinyrouter/internal/api/image"
+	"github.com/tinyrouter/tinyrouter/internal/api/keys"
+	"github.com/tinyrouter/tinyrouter/internal/api/models"
+	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
+	"github.com/tinyrouter/tinyrouter/internal/api/quickslots"
+	"github.com/tinyrouter/tinyrouter/internal/api/review_presets"
+	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
+	"github.com/tinyrouter/tinyrouter/internal/api/settings"
+	"github.com/tinyrouter/tinyrouter/internal/api/probe"
+	"github.com/tinyrouter/tinyrouter/internal/api/sse"
+	apiterminal "github.com/tinyrouter/tinyrouter/internal/api/terminal"
+	apidownload "github.com/tinyrouter/tinyrouter/internal/api/download"
+	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -21,7 +42,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/terminal"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 	"github.com/tinyrouter/tinyrouter/web"
 )
@@ -51,28 +71,22 @@ type deps struct {
 	debugMode atomic.Bool
 	// quickSlotOnly reflects the live QuickSlot-only toggle from settings.
 	quickSlotOnly atomic.Bool
-
-	// The following callbacks are configured after construction via setters.
 	restartFn         func(string)
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
+
+	// terminalState is shared with the terminal sub-package via apibase.Deps.
+	terminalState *apibase.TerminalState
 }
 
-// terminalState holds the websocket terminal session and its guard mutex. It is
-// kept separate from deps because it is only touched by the terminal handlers.
-type terminalState struct {
-	terminalMu sync.Mutex
-	activeTerm *terminal.Session
-}
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and
-// terminal state; individual handler methods live in the per-domain files
-// (settings.go, providers.go, keys.go, combos.go, quickslots.go, usage.go,
-// quota.go, model_keys.go, console_logs.go, sse_events.go, models.go, probe.go).
+// handler methods live in the per-domain files that have not yet been extracted
+// to sub-packages (settings.go, providers.go, keys.go, combos.go, quickslots.go,
+// usage.go, quota.go, model_keys.go, probe.go).
 type Router struct {
 	deps
-	terminalState
 }
 
 // New creates an API Router. The signature is kept stable so existing callers
@@ -97,13 +111,14 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 					if len(via) >= 5 {
 						return fmt.Errorf("too many redirects")
 					}
-					if isBlockedSSRFHost(req.URL.Hostname()) {
+					if apibase.IsBlockedSSRFHost(req.URL.Hostname()) {
 						return fmt.Errorf("redirect to blocked host: %s", req.URL.Hostname())
 					}
 					return nil
 				},
 			},
 			monitorMgr: monitor.New(500, cfg.Monitor.MaxLineLength),
+			terminalState: &apibase.TerminalState{},
 		},
 	}
 }
@@ -155,10 +170,10 @@ func (rt *Router) Cleanup() {
 	if err := rt.monitorMgr.Stop(); err != nil {
 		rt.logger.Warn("monitor cleanup: %v", err)
 	}
-	rt.terminalMu.Lock()
-	term := rt.activeTerm
-	rt.activeTerm = nil
-	rt.terminalMu.Unlock()
+	rt.terminalState.Mu.Lock()
+	term := rt.terminalState.Term
+	rt.terminalState.Term = nil
+	rt.terminalState.Mu.Unlock()
 
 	if term != nil {
 		term.Close()
@@ -197,7 +212,6 @@ func isLocalhostOrigin(origin string) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
-// Routes returns the root HTTP handler with all routes registered.
 func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	r := chi.NewRouter()
 
@@ -206,8 +220,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(securityHeaders(rt.reg.Config().Port))
 	// Compress responses (brotli/gzip) for compressible content types.
-	// SSE responses and pre-compressed binaries are auto-skipped inside.
-	r.Use(Compress)
+	r.Use(compress.Compress)
 
 	// CORS preflight for proxy routes only (/v1/*). Management /api/* routes
 	// have NO CORS — the admin UI is same-origin and external pages must not
@@ -245,6 +258,50 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		proxyHandler.TaskGet(w, r, taskID, modelStr)
 	})
 
+	// Build the shared Deps for sub-packages.
+	apiDeps := &apibase.Deps{
+		Reg:          rt.reg,
+		ConfigPath:   rt.configPath,
+		Usage:        rt.usage,
+		PgUsage:      rt.pgUsage,
+		QuotaTracker: rt.quotaTracker,
+		Logger:       rt.logger,
+		ProxyHandler: rt.proxyHandler,
+		Selector:     rt.selector,
+		ComboRes:     rt.comboRes,
+		DownloadMgr:  rt.downloadMgr,
+		Shutdown:     rt.shutdown,
+		TestClient:   rt.testClient,
+		MonitorMgr:   rt.monitorMgr,
+		DebugMode:    &rt.debugMode,
+		QuickSlotOnly: &rt.quickSlotOnly,
+		RestartFn:    rt.restartFn,
+		ServerCfgFn:  rt.serverCfgFn,
+		UpstreamTimeoutFn: rt.upstreamTimeoutFn,
+		StateSaveFn:  rt.stateSaveFunc,
+		TerminalState: rt.terminalState,
+	}
+	authHandler := auth.NewHandler(apiDeps)
+	anysearchHandler := anysearch.NewHandler(apiDeps)
+	combosHandler := combos.NewHandler(apiDeps)
+	sseHandler := sse.NewHandler(apiDeps)
+	consoleLogsHandler := console_logs.NewHandler(apiDeps)
+	editorHandler := editor.NewHandler()
+	reviewPresetsHandler := review_presets.NewHandler(apiDeps)
+	keysHandler := keys.NewHandler(apiDeps)
+	modelsHandler := models.NewHandler(apiDeps)
+	quickslotsHandler := quickslots.NewHandler(apiDeps)
+	imageHandler := image.NewHandler(apiDeps)
+	monitorHandler := apimonitor.NewHandler(apiDeps)
+	terminalHandler := apiterminal.NewHandler(apiDeps)
+	settingsHandler := settings.NewHandler(apiDeps)
+	providersHandler := providers.NewHandler(apiDeps)
+	usageHandler := apiusage.NewHandler(apiDeps)
+	downloadHandler := apidownload.NewHandler(apiDeps)
+	galleryHandler := gallery.NewHandler(apiDeps)
+	probeHandler := probe.NewHandler(apiDeps)
+
+
 	// API routes
 	r.Route("/api", func(r chi.Router) {
 		// 1 MB API request body limit
@@ -255,131 +312,55 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			})
 		})
 
-		// --- Public routes (no auth required) ---
-		r.Get("/auth/status", rt.AuthStatusHandler)
-		loginLimiter := newLoginRateLimiter()
-		r.Post("/auth/login", loginLimiter.Wrap(rt.LoginHandler))
+		// --- Public routes + auth middleware ---
+		authMW := authHandler.Register(r)
 
 		// --- Protected routes (auth required) ---
 		r.Group(func(r chi.Router) {
-			r.Use(rt.AuthMiddleware)
+			r.Use(authMW)
 
-			// Settings
-			r.Get("/settings", rt.getSettings)
-			r.Patch("/settings", rt.updateSettings)
-			r.Post("/reload", rt.reload)
-			r.Post("/shutdown", rt.handleShutdown)
+			settingsHandler.Register(r)
 
 			// Providers
-			r.Get("/providers", rt.listProviders)
-			r.Post("/providers", rt.createProvider)
-			r.Post("/providers/validate", rt.validateProvider)
-			r.Put("/providers/{id}", rt.updateProvider)
-			r.Put("/providers/{id}/reorder", rt.reorderProvider)
-			r.Delete("/providers/{id}", rt.deleteProvider)
-
-			// Provider testing
-			r.Post("/providers/{id}/test", rt.testProviderKey)
-
-			// Provider models
-			r.Get("/providers/{id}/models", rt.fetchProviderModels)
-			r.Post("/providers/{id}/models", rt.addProviderModel)
-			r.Post("/providers/{id}/models/test-proto", rt.testProviderModelProto)
-			r.Post("/providers/{id}/models/test-all", rt.testProviderModelAllKeys)
-			r.Patch("/providers/{id}/models/quota", rt.updateModelQuota)
-			r.Patch("/providers/{id}/models/alias", rt.updateModelAlias)
-			r.Patch("/providers/{id}/models/note", rt.updateModelNote)
-			r.Patch("/providers/{id}/models/nim", rt.updateModelNIM)
-			r.Patch("/providers/{id}/models/kind", rt.updateModelKind)
-			r.Patch("/providers/{id}/models/imgProtocol", rt.updateModelImgProtocol)
-			r.Patch("/providers/{id}/models/imgSizes", rt.updateModelImgSizes)
-			r.Patch("/providers/{id}/models/protocols", rt.updateModelProtocols)
-			r.Delete("/providers/{id}/models", rt.deleteProviderModel)
-
-			// Keys
-			r.Get("/providers/{id}/keys", rt.listKeys)
-			r.Post("/providers/{id}/keys", rt.createKey)
-			r.Post("/providers/{id}/keys/bulk", rt.bulkAddKeys)
-			r.Put("/providers/{id}/keys/{kid}", rt.updateKey)
-			r.Delete("/providers/{id}/keys/{kid}", rt.deleteKey)
-			r.Get("/providers/{id}/keys/{kid}/state", rt.getKeyState)
+			providersHandler.Register(r)
+			// Probe
+			probeHandler.Register(r)
 
 			// Combos
-			r.Get("/combos", rt.listCombos)
-			r.Post("/combos", rt.createCombo)
-			r.Put("/combos/{id}", rt.updateCombo)
-			r.Delete("/combos/{id}", rt.deleteCombo)
-			r.Post("/combos/{id}/speed-test", rt.speedTestCombo)
-			r.Get("/combos/{id}/speed-results", rt.getComboSpeedResults)
+			combosHandler.Register(r)
 
+			// Keys
+			keysHandler.Register(r)
 			// QuickSlots
-			r.Get("/quickslots", rt.listQuickSlots)
-			r.Post("/quickslots", rt.createQuickSlot)
-			r.Put("/quickslots/{id}", rt.updateQuickSlot)
-			r.Delete("/quickslots/{id}", rt.deleteQuickSlot)
+			quickslotsHandler.Register(r)
 
 			// ReviewPresets
-			r.Get("/review-presets", rt.listReviewPresets)
-			r.Post("/review-presets", rt.upsertReviewPreset)
-			r.Delete("/review-presets/{id}", rt.deleteReviewPreset)
+			reviewPresetsHandler.Register(r)
 
 			// Usage
-			r.Get("/usage", rt.getUsage)
-			r.Get("/usage/playground", rt.getPlaygroundUsage)
-			r.Get("/usage/summary", rt.getUsageSummary)
-			r.Get("/usage/quotas", rt.getQuotas)
-			r.Get("/usage/model-keys", rt.getModelKeys)
-			r.Get("/usage/events", rt.streamUsageEvents)
-			r.Delete("/usage", rt.clearUsage)
-			r.Post("/usage/reset-quota", rt.resetQuota)
+			usageHandler.Register(r)
+			sseHandler.Register(r)
 
 			// Image save + same-origin proxy (avoids CORS for browser-side reads)
-			r.Post("/save-image", rt.saveImage)
-			r.Get("/image-proxy", rt.imageProxy)
+			imageHandler.Register(r)
 
 			// Console logs
-			r.Get("/console-logs", rt.getConsoleLogs)
-			r.Get("/console-logs/stream", rt.streamConsoleLogs)
-			r.Delete("/console-logs", rt.clearConsoleLogs)
+			consoleLogsHandler.Register(r)
+
 
 			// Monitor
-			r.Get("/monitor/status", rt.getMonitorStatus)
-			r.Post("/monitor/start", rt.startMonitor)
-			r.Post("/monitor/stop", rt.stopMonitor)
-			r.Get("/monitor/stream", rt.streamMonitor)
+			monitorHandler.Register(r)
 
 			// Terminal (debug-mode only)
-			r.Get("/terminal/ws", rt.handleTerminalWS)
-			r.Post("/terminal/stop", rt.stopTerminal)
-
-			// Auth - logout (requires auth)
-			r.Post("/auth/logout", rt.LogoutHandler)
-
+			terminalHandler.Register(r)
 			// Models
-			r.Get("/models", rt.listModels)
+			modelsHandler.Register(r)
 
 			// Downloads
-			r.Get("/downloads", rt.listDownloads)
-			r.Post("/downloads", rt.createDownload)
-			r.Get("/downloads/stream", rt.streamDownloadEvents)
-			r.Post("/downloads/info", rt.getVideoInfo)
-			r.Post("/downloads/playlist-info", rt.getPlaylistInfo)
-			r.Post("/downloads/playlist", rt.createPlaylistDownload)
-			r.Post("/downloads/clear-completed", rt.clearCompletedDownloads)
-			r.Get("/downloads/{id}", rt.getDownload)
-			r.Get("/downloads/{id}/log", rt.getDownloadLog)
-			r.Get("/downloads/{id}/file", rt.playDownloadFile)
-			r.Post("/downloads/{id}/cancel", rt.cancelDownload)
-			r.Post("/downloads/{id}/open", rt.openDownloadDir)
-			r.Post("/downloads/{id}/retry", rt.retryDownloadTask)
-			r.Delete("/downloads/{id}", rt.removeDownload)
-			r.Post("/open-url", rt.openExternalURL)
-			r.Post("/browse", rt.browseSystemPath)
+			downloadHandler.Register(r)
 
 			// AnySearch
-			r.Post("/anysearch/search", rt.anySearchHandler)
-			r.Post("/anysearch/subdomains", rt.anySearchSubDomainsHandler)
-			r.Post("/anysearch/extract", rt.anySearchExtractHandler)
+			anysearchHandler.Register(r)
 		})
 	})
 
@@ -387,38 +368,21 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// limit (zip uploads can be up to 500MB) but still require auth, matching
 	// the protected /api/* authorization boundary.
 	r.Route("/api/gallery", func(r chi.Router) {
-		r.Use(rt.AuthMiddleware)
-		r.Post("/zip", rt.galleryListZip)
-		r.Get("/zip/{sessionId}/*", rt.galleryGetZipEntry)
-		r.Delete("/zip/{sessionId}/*", rt.galleryDeleteZipEntry)
-		r.Post("/tiff", rt.galleryConvertTiff)
-		r.Post("/review/start", rt.galleryStartReview)
-		r.Get("/review/status/{sessionId}", rt.galleryReviewStatus)
-		r.Post("/review/cancel/{sessionId}", rt.galleryCancelReview)
-		r.Post("/review/gen-prompt", rt.galleryGeneratePrompt)
-		// Filesystem-backed gallery operations (backend picker, file serving,
-		// disk delete, clipboard paste paths).
-		r.Post("/open-dir", rt.galleryOpenDir)
-		r.Post("/list-dir", rt.galleryListDir)
-		r.Get("/file", rt.galleryServeFile)
-		r.Delete("/fs", rt.galleryDeleteFs)
-		r.Post("/zip-from-path", rt.galleryZipFromPath)
-		r.Post("/zip-writeback", rt.galleryZipWriteback)
-		r.Post("/paste-paths", rt.galleryPastePaths)
+		r.Use(authHandler.AuthMiddleware)
+		galleryHandler.Register(r)
 	})
 
 	// Editor API: text file open (native picker) + atomic save. Outside the
 	// /api group to bypass the 1MB body limit (large text files), still auth-gated.
 	r.Route("/api/editor", func(r chi.Router) {
-		r.Use(rt.AuthMiddleware)
+		r.Use(authHandler.AuthMiddleware)
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 				next.ServeHTTP(w, r)
 			})
 		})
-		r.Post("/open", rt.editorOpen)
-		r.Post("/save", rt.editorSave)
+		editorHandler.Register(r)
 	})
 
 	// Embedded UI (fallback to index.html)

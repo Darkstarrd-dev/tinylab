@@ -269,9 +269,9 @@ func TestMessages_AnthropicProvider_HostRootAppendsPath(t *testing.T) {
 	}
 }
 
-// TestBuildAnthropicUpstreamRequest_Headers verifies the low-level request
+// TestBuildUpstreamRequest_AnthropicHeaders verifies the low-level request
 // builder uses x-api-key + anthropic-version and no Authorization.
-func TestBuildAnthropicUpstreamRequest_Headers(t *testing.T) {
+func TestBuildUpstreamRequest_AnthropicHeaders(t *testing.T) {
 	sel := &rotation.SelectedKey{
 		Provider: config.Provider{
 			ID: "anth", Name: "Anthropic", Prefix: "anth",
@@ -283,9 +283,9 @@ func TestBuildAnthropicUpstreamRequest_Headers(t *testing.T) {
 		Key:     config.Key{ID: "k1", Key: "sk-ant-key", Name: "AnthKey"},
 		KeyName: "AnthKey",
 	}
-	url, req, err := buildAnthropicUpstreamRequest(context.Background(), sel, []byte(`{"model":"claude"}`), nil, true)
+	url, req, err := buildUpstreamRequest(context.Background(), sel, []byte(`{"model":"claude"}`), "/v1/messages", false)
 	if err != nil {
-		t.Fatalf("buildAnthropicUpstreamRequest failed: %v", err)
+		t.Fatalf("buildUpstreamRequest failed: %v", err)
 	}
 	if url != "https://api.anthropic.com/v1/messages" {
 		t.Errorf("expected verbatim URL, got %q", url)
@@ -309,7 +309,7 @@ func TestBuildAnthropicUpstreamRequest_Headers(t *testing.T) {
 
 // TestBuildAnthropicUpstreamRequest_DefaultVersion verifies the version defaults
 // to 2023-06-01 when not configured.
-func TestBuildAnthropicUpstreamRequest_DefaultVersion(t *testing.T) {
+func TestBuildUpstreamRequest_DefaultAnthropicVersion(t *testing.T) {
 	sel := &rotation.SelectedKey{
 		Provider: config.Provider{
 			ID: "anth", Name: "Anthropic", Prefix: "anth",
@@ -319,9 +319,9 @@ func TestBuildAnthropicUpstreamRequest_DefaultVersion(t *testing.T) {
 		Key:     config.Key{ID: "k1", Key: "sk-ant-key", Name: "AnthKey"},
 		KeyName: "AnthKey",
 	}
-	_, req, err := buildAnthropicUpstreamRequest(context.Background(), sel, nil, nil, false)
+	_, req, err := buildUpstreamRequest(context.Background(), sel, nil, "/v1/messages", false)
 	if err != nil {
-		t.Fatalf("buildAnthropicUpstreamRequest failed: %v", err)
+		t.Fatalf("buildUpstreamRequest failed: %v", err)
 	}
 	if req.Header.Get("anthropic-version") != "2023-06-01" {
 		t.Errorf("expected default anthropic-version 2023-06-01, got %q", req.Header.Get("anthropic-version"))

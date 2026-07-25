@@ -5,7 +5,7 @@ import (
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinyrouter/tinyrouter/internal/keystate"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
@@ -50,7 +50,7 @@ type ModelResolver interface {
 	GetQuickSlotByName(name string) (*config.QuickSlot, bool)
 	GetProviderByPrefix(prefix string) (*config.Provider, bool)
 	GetProvider(id string) (*config.Provider, bool)
-	GetKeyState(providerID, keyID string) *registry.KeyRuntimeState
+	GetKeyState(providerID, keyID string) *keystate.KeyRuntimeState
 	ListProviders() []config.Provider
 	ListCombos() []config.Combo
 	ListQuickSlots() []config.QuickSlot

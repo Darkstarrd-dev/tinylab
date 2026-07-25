@@ -10,104 +10,9 @@ import (
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
+	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/util"
 )
-
-type SSELineBuffer struct {
-	buf []byte
-}
-
-func (b *SSELineBuffer) Feed(data []byte) []string {
-	b.buf = append(b.buf, data...)
-	var lines []string
-	for {
-		idx := bytes.IndexByte(b.buf, '\n')
-		if idx < 0 {
-			break
-		}
-		lines = append(lines, string(b.buf[:idx]))
-		b.buf = b.buf[idx+1:]
-	}
-	return lines
-}
-
-func (b *SSELineBuffer) Remaining() string {
-	if len(b.buf) > 0 {
-		s := string(b.buf)
-		b.buf = nil
-		return s
-	}
-	return ""
-}
-
-// SSEDataPayloads extracts the JSON payload strings from a batch of SSE lines
-// (as produced by SSELineBuffer.Feed). Lines that are not "data:" directives or
-// that are the SSE [DONE] sentinel are skipped. Each returned payload is trimmed
-// of surrounding whitespace and is ready to be parsed as JSON or scanned for
-// tokens. This centralizes the "data:" prefix handling and [DONE] filtering that
-// upstream callers (e.g. the API model-probe handlers) previously duplicated
-// inline, so there is a single source of truth for line framing.
-func SSEDataPayloads(lines []string) []string {
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		t := strings.TrimSpace(line)
-		if !strings.HasPrefix(t, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(t[len("data:"):])
-		if payload == "" || payload == "[DONE]" {
-			continue
-		}
-		out = append(out, payload)
-	}
-	return out
-}
-
-// normalizeSSEChunk normalizes a single SSE line coming from an upstream.
-// It only rewrites "data:" payloads where "choices" is null and no "error"
-// field is present, turning "choices":null into "choices":[] so that strict
-// OpenAI-chunk validators (which require choices to be an array) accept the
-// usage-only preamble chunks emitted by some providers (e.g. ModelScope).
-// All other lines (blank separators, comments, [DONE], error chunks, valid
-// chunks) are returned unchanged. Parse failures fall back to the original
-// line to avoid dropping data.
-func normalizeSSEChunk(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "data:") {
-		return line
-	}
-	payload := strings.TrimSpace(trimmed[5:])
-	if payload == "[DONE]" {
-		return line
-	}
-
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(payload), &obj); err != nil {
-		return line
-	}
-	// Never touch error chunks: they must reach the client as-is.
-	if _, hasErr := obj["error"]; hasErr {
-		return line
-	}
-	// Only fix the specific malformed case: choices is explicitly null.
-	choices, exists := obj["choices"]
-	if !exists {
-		return line
-	}
-	if choices == nil {
-		obj["choices"] = []any{}
-	} else if arr, ok := choices.([]any); ok && len(arr) == 0 {
-		// already an empty array; nothing to do
-	} else {
-		return line
-	}
-
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return line
-	}
-	return "data: " + string(out)
-}
 
 // sseContentLength extracts the unescaped character length of the "content"
 // field from an SSE data payload. It uses a lightweight byte search instead
@@ -179,7 +84,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	totalOutput := 0
 	inputTokens := 0
 	outputTokens := 0
-	sb := &SSELineBuffer{}
+	sb := &sse.SSELineBuffer{}
 	var sseBuf bytes.Buffer
 	var contentCharsTotal int
 	var lastTokenBroadcast time.Time
@@ -192,7 +97,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 			var contentChars int
 			if normalize {
 				for _, line := range sb.Feed(buf[:n]) {
-					out := normalizeSSEChunk(line)
+					out := sse.NormalizeSSEChunk(line)
 					if _, werr := w.Write([]byte(out + "\n")); werr != nil {
 						h.logger.Debug("client disconnected during SSE stream: %v", werr)
 						clientDisconnected = true
@@ -313,7 +218,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 			if remaining != "" {
 				if normalize {
 					// normalize 路径未在循环中原样写出过整块，需要在这里写出规范化后的 remaining
-					out := normalizeSSEChunk(remaining)
+					out := sse.NormalizeSSEChunk(remaining)
 					if _, werr := w.Write([]byte(out + "\n")); werr != nil {
 						h.logger.Debug("client disconnected during SSE stream: %v", werr)
 						clientDisconnected = true
@@ -440,7 +345,7 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 // The sb argument is the SSELineBuffer that has already produced this line;
 // it is preserved so subsequent calls can continue scanning without losing
 // any partial data between calls.
-func (h *Handler) parseAndBroadcastChunk(reqID, line string, sb *SSELineBuffer) {
+func (h *Handler) parseAndBroadcastChunk(reqID, line string, sb *sse.SSELineBuffer) {
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "data:") {
 		return
