@@ -4,35 +4,6 @@ var lastUsageSig = '';
 var lastUsageEntries = [];
 var _lastTrendConfigSig = '';
 
-var USAGE_CACHE_KEY = 'tinyrouter_usage_cache';
-
-function saveUsageCache() {
-  try {
-    var slim = lastUsageEntries.slice(0, 200)
-      .filter(function(e) { return e && e.source !== 'playground'; })
-      .map(function(e) {
-        return {
-          id: e.id, timestamp: e.timestamp, provider: e.provider,
-          model: e.model, keyName: e.keyName, status: e.status,
-          latencyMs: e.latencyMs, inputTokens: e.inputTokens, outputTokens: e.outputTokens
-        };
-      });
-    localStorage.setItem(USAGE_CACHE_KEY, JSON.stringify(slim));
-  } catch(e) {}
-}
-
-function loadUsageCache() {
-  try {
-    var raw = localStorage.getItem(USAGE_CACHE_KEY);
-    if (!raw) return [];
-    var arr = JSON.parse(raw);
-    // 过滤掉历史残留的 Playground 条目（旧缓存兼容）
-    if (Array.isArray(arr)) {
-      return arr.filter(function(e) { return !e || e.source !== 'playground'; });
-    }
-    return [];
-  } catch(e) { return []; }
-}
 var modelColorMap = {};
 var expandedModels = new Set();
 var lockCountdownTimerStarted = false;
@@ -444,7 +415,6 @@ function updateTrendChart(entries) {
 
 async function renderUsage(c) {
   try {
-  if (lastUsageEntries.length === 0) lastUsageEntries = loadUsageCache();
   var cachedEntries = lastUsageEntries.slice();
   var quotaCardHtml = '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + t('quotaMonitor') + '</span><button type="button" class="btn btn-sm btn-ghost" onclick="resetQuotaTimers()">' + t('resetQuota') + '</button></div><div class="quota-section quota-section-scroll"></div></div>';
   c.innerHTML = '\
@@ -632,7 +602,6 @@ async function refreshQuotaData() {
     updateRecentRequestsInline(lastUsageEntries);
     ensureProcessingTimer();
     maybeRefreshPerKeyDetails();
-    saveUsageCache();
   } catch(e) { console.warn('refreshQuotaData failed:', e); }
 }
 
