@@ -96,67 +96,16 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		h.EntryTracker.Register(processingEntry)
 		h.broadcastRequestStart(reqID, processingEntry)
 
-		// Delayed keep-alive: for non-streaming requests, only start flushing
-		// whitespace bytes after a grace period (keepAliveDelay). This allows
-		// quick failures (429, 5xx, network errors) to return the correct HTTP
-		// status code. If the upstream takes longer than the grace period, the
-		// keep-alive bytes commit a 200 status and subsequent errors are written
-		// in the body (acceptable trade-off for genuinely long-running requests).
-		keepAliveDelay := 20 * time.Second
-		keepAliveInterval := 5 * time.Second
-		keepAliveDone := make(chan struct{})
-		keepAliveStopped := make(chan struct{})
-		if !isStream {
-			go func() {
-				defer close(keepAliveStopped)
-				timer := time.NewTimer(keepAliveDelay)
-				defer timer.Stop()
-				ticker := time.NewTicker(keepAliveInterval)
-				defer ticker.Stop()
-				flusher, _ := w.(http.Flusher)
-				for {
-					select {
-					case <-keepAliveDone:
-						return
-					case <-r.Context().Done():
-						return
-					case <-timer.C:
-						// Grace period elapsed: flush headers + first keep-alive byte.
-						if !state.headersFlushed {
-							state.headersFlushed = true
-							w.Header().Set("Content-Type", "application/json")
-							if sel != nil {
-								w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-								w.Header().Set("X-TinyRouter-Key", sel.KeyName)
-							}
-							w.Write([]byte("\n"))
-							if flusher != nil {
-								flusher.Flush()
-							}
-						}
-					case <-ticker.C:
-						if state.headersFlushed {
-							if _, err := w.Write([]byte(" ")); err != nil {
-								return
-							}
-							if flusher != nil {
-								flusher.Flush()
-							}
-						}
-					}
-				}
-			}()
-		}
+		// NOTE: a non-streaming keep-alive byte-flush goroutine used to live here.
+		// It wrote "\n" + Flush after a 20s grace period, which implicitly committed
+		// HTTP 200 and silently broke the 502 status when all keys exhausted (H-8).
+		// It was removed: no bytes are written to w until the final response, so
+		// writeError's WriteHeader(502) always takes effect. The server's WriteTimeout
+		// (config.ServerConfig.WriteTimeoutSec, default 300s) still caps non-streaming
+		// responses; clients with short read timeouts must set an adequate timeout.
 
 		startTime := time.Now()
 		resp, err := h.forwardUpstream(r.Context(), sel, upstreamBody, r.Header, isStream, path, entryFormat)
-
-		// Stop the keep-alive goroutine and wait for it to exit before writing
-		// the response body, to avoid concurrent writes to the ResponseWriter.
-		if !isStream {
-			close(keepAliveDone)
-			<-keepAliveStopped
-		}
 
 		if err != nil {
 			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel)
@@ -213,7 +162,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			normalize := cfgProvider != nil && cfgProvider.NormalizeStreamChunks
 			h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel)
 		} else {
-			h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, state.headersFlushed, originalModel)
+			h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel)
 		}
 		h.EntryTracker.Remove(reqID)
 		// DecInFlight after the synchronous response handling completes — this

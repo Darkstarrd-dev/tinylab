@@ -263,20 +263,15 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, inputTokens, outputTokens, errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel)
 }
 
-func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, headersFlushed bool, originalModel string) {
+func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, originalModel string) {
 	defer resp.Body.Close()
 
-	// If the keep-alive goroutine already flushed headers (committed 200),
-	// skip WriteHeader to avoid a superfluous-header warning. The response
-	// body is written directly with the already-committed 200 status.
-	if !headersFlushed {
-		w.Header().Set("Content-Type", "application/json")
-		if sel != nil {
-			w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-			w.Header().Set("X-TinyRouter-Key", sel.KeyName)
-		}
-		w.WriteHeader(resp.StatusCode)
+	w.Header().Set("Content-Type", "application/json")
+	if sel != nil {
+		w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
+		w.Header().Set("X-TinyRouter-Key", sel.KeyName)
 	}
+	w.WriteHeader(resp.StatusCode)
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
