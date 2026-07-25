@@ -2,7 +2,11 @@
 
 > **文档定位：** `internal/proxy/` 包实现的 canonical 架构事实基线。
 >
-> **最后核对：** 2026-07-25，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包（apibase, auth, anysearch, combos, compress, console_logs, download, editor, gallery, image, keys, models, monitor, probe, providers, quickslots, review_presets, settings, sse, terminal, usage），共享 `Deps` 通过 `internal/api/apibase` 传递。`sse_events.go` 移至 `internal/api/sse/`，`compress.go` 移至 `internal/api/compress/`。**代码重构**：`buildAnthropicUpstreamRequest` 与 `buildResponsesUpstreamRequest` 合并为统一 `buildUpstreamRequest(ctx, sel, body, endpointPath, authBearer)`，移除死参数 `isStream`/`headers`。`forwardUpstream` 调用 `buildUpstreamRequest(ctx, sel, body, "/v1/messages", false)`（Anthropic）和 `buildUpstreamRequest(ctx, sel, body, "/v1/responses", true)`（Responses/Bearer）。行为不变。本轮还包含：(i) **SSE 类型与 URL 工具提取**——`SSELineBuffer`、`SSEDataPayloads`、`NormalizeSSEChunk` 从 `internal/proxy/stream.go` 移至 `internal/sse`；`BuildUpstreamURL`、`normalizeBas...
+> **最后核对：** 2026-07-26，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包（apibase, auth, anysearch, combos, compress, console_logs, download, editor, gallery, image, keys, models, monitor, probe, providers, quickslots, review_presets, settings, sse, terminal, usage），共享 `Deps` 通过 `internal/api/apibase` 传递。`sse_events.go` 移至 `internal/api/sse/`，`compress.go` 移至 `internal/api/compress/`。**代码重构**：`buildAnthropicUpstreamRequest` 与 `buildResponsesUpstreamRequest` 合并为统一 `buildUpstreamRequest(ctx, sel, body, endpointPath, authBearer)`，移除死参数 `isStream`/`headers`。`forwardUpstream` 调用 `buildUpstreamRequest(ctx, sel, body, "/v1/messages", false)`（Anthropic）和 `buildUpstreamRequest(ctx, sel, body, "/v1/responses", true)`（Responses/Bearer）。行为不变。本轮还包含：(i) **SSE 类型与 URL 工具提取**——`SSELineBuffer`、`SSEDataPayloads`、`NormalizeSSEChunk` 从 `internal/proxy/stream.go` 移至 `internal/sse`；`BuildUpstreamURL`、`normalizeBas...
+>
+> **2026-07-26 更新（P1-5 文件拆分，行为不变）：** `internal/proxy/forward.go`（591 行）按职责拆为 4 个文件：`forward.go`（共享叶级工具：`resolveDisplayModel`/`generateToolCallID`/`ensureToolCallIDs`/`writeError`/`maskURL`/`backfillThoughtSignatures`/`hasThoughtSignature`）、`forward_request.go`（`handleProxy` 请求解析入口）、`forward_combo.go`（`handleCombo` 策略路由）、`forward_retry.go`（`forwardWithRetry` 重试循环 + 非流式 keep-alive 延迟刷新 + `broadcastRequestStart`/`broadcastTTFT`/`broadcastTokens`，**H-8 bug 区原样搬迁未改语义**）。`internal/proxy/stream.go`（531 行）拆为 4 个文件 + 1 处迁移：`stream.go`（`streamResponse`/`passThroughResponse` I/O 循环）、`stream_usage.go`（`sseContentLength`/`parseSSEChunkDelta`/`chunkDelta`/`formatTokenDelta`/`itoa`）、`stream_anthropic.go`（`parseAnthropicSSEUsage`）、`stream_debug.go`（`parseAndBroadcastChunk`）；`extractThoughtSignature` 迁入 `signature_cache.go`（与 `SignatureCacheProvider` 伴生）。`package proxy` 不变、无可见性/签名/行为变更，测试未改动。本文档内散落的 `forward.go:`/`stream.go:` 旧行号锚点（§5/§6/§7/§8/§17 等）尚未逐条重锚，以本节与 `PROJECT_MAP.md` §7 表为准。
+>
+> **2026-07-26 更新（P1-6 接口隔离，行为不变）：** `internal/proxy/interfaces.go` 的两个胖接口按职责拆分为窄接口 + composite：`KeyProvider`（原 11 方法）= `KeySelector`/`NIMProvider`/`CooldownManager`/`QuotaLocker`/`RotationSettings`（interfaces.go:24-62）；`ModelResolver`（原 9 方法）= `QuickSlotResolver`/`ProviderResolver`/`KeyStateAccessor`/`AliasResolver`/`ComboLister`（interfaces.go:65-106）。`Handler` 单一 `selector KeyProvider` 字段拆为 `keySel`/`nim`/`cooldown`/`quotaLock`/`rotSet` 5 个窄字段；单一 `reg ModelResolver` 字段拆为 `quickSlots`/`providers`/`keyState`/`aliases`/`comboList` 5 个窄字段（`reg` 保留为完整 `ModelResolver`，仅供现有测试经 `h.reg.GetKeyState` 访问 key 运行时状态）。`New` 签名不变（仍接收 composite 入参），内部将复合入参直接赋给各窄字段；所有非测试调用点经窄字段路由（`h.keySel.SelectKey` 等），`resolveDisplayModel` 形参由 `ModelResolver` 收窄为 `AliasResolver`。无行为变化，测试文件未改。
 >
 > **2026-07-24 更新：** (a) **QuickSlot & Alias 前缀多重防护兜底**——后端 `proxy/forward.go` 的 `handleProxy` 在 `util.SplitModel` 拆分后自动循环剥离 `upstreamModel` 中重复的 `provider.Prefix` / `provider.ID` 前缀；`registry/models.go` 新增 `sanitizeAlias` 辅助函数，在 `AddModel` 与 `UpdateModelAlias` 保存别名时自动净化剥离前缀，且 `ResolveModelAlias` / `GetModelByAliasOrID` 支持容错剥离匹配；`registry/quickslots.go` 新增 `sanitizeQuickSlotModels` 自动化简 QuickSlot 中的 `prefix/prefix/model` 重复条目；前端 `web/static/quickslots.js` 模型选择 modal 与 `web/static/providers.js` 别名保存 modal 均增加前缀自动检测与剥离逻辑，防止产生 `prefix/prefix/model` 双重前缀。(b) URL 拼接统一并修复——`proxy.BuildUpstreamURL` 成为唯一 endpoint URL 拼接函数，新增启发式 A（自动检测路径中是否含版本段 `/v1`/`/v1beta`/`/v2` 等，有则不注入 `/v1` 前缀，无则注入）；`api/probe_common.go` 删除 `normalizeProbeBaseURL`/`buildProbeURL`/`buildAnthropicURL` 三个私有函数，改用 `proxy.BuildUpstreamURL`。`normalizeBaseURL` 扩展为最长优先剥除完整 endpoint 后缀（含 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 等）。`buildAnthropicUpstreamRequest` 与 `buildResponsesUpstreamRequest` 的 URL 部分变更为一行调用 `BuildUpstreamURL`。(c) `usage.Entry` 新增 `OriginalModel` 字段，记录请求时传入的原始模型名（alias 解析前的值）；`handleProxy` 在 alias 解析前（forward.go:175）捕获 `originalModel := upstreamModel`，经 `forwardWithRetry` → 错误处理器 / `streamResponse` / `passThroughResponse` → `recordUsage` 传递到 `usage.Entry`；前端 `usage.js` 的 `renderUsageRow` 优先显示 `originalModel`（`e.originalModel || e.model`）。(d) **模型 alias 全链路显示**——`registry` 新增 `ResolveModelAliasByID(providerName, modelID)` 反向查找方法（models.go:278-296），`proxy.ModelResolver` 接口（interfaces.go:59）新增对应条目；`usage.QuotaBar` 新增 `Alias` 字段（quota.go:22），`api/quota.go` `getQuotas` 对所有 bar 调用 `ResolveModelAliasByID` 填充（quota.go:54）；`proxy/retry.go` `logRequest`（retry.go:43-54）优先使用 alias 显示模型名，其次 `originalModel`，兜底 `upstreamModel`；前端 `usage.js` 新增 `buildModelIdToAlias`（从 `providersCache` 构建 ID→alias map）、`displayModelName` 辅助函数，`renderUsageRow`、`renderQuotaBarItem`、`patchQuotaBarItem`、`buildTrendData`、`buildTrendChartConfig` 均使用 alias 显示。(e) **QuickSlot Only 模式**——`GET /v1/models`（`proxy/models.go` `ListModels`）新增 `quickSlotOnly()` 门控：当 `quickSlotOnlyProvider()` 返回 true 时，仅返回启用的 QuickSlot 模型，跳过 provider/combo；`proxy/handler.go` 新增 `quickSlotOnlyProvider func() bool` 字段 + `SetQuickSlotOnlyProvider`/`quickSlotOnly()` 方法，`api/router.go` 维护 `quickSlotOnly atomic.Bool` 并通过 `QuickSlotOnly()` 方法暴露，`api/settings.go` 的 `GET /api/settings` 返回 `quickSlotOnly`、`PATCH /api/settings` 接收并同步到 `cfg.QuickSlotOnly` + `rt.SetQuickSlotOnly()`，`app.go` 绑定 `a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)`。(f) **Recent Requests 稳定性修复**——`streamResponse` 客户端断开早返回路径（`w.Write` 失败）由 `return` 改为 `clientDisconnected=true; break`，末尾据 `clientDisconnected` 设置 `recordUsage(status="error", errMsg="client disconnected")`，保证 `request-done` 广播不遗漏；`passThroughResponse` 的 `io.ReadAll` 错误路径补 `recordUsage(status="error")`，`client_disconnected` 独立状态统一为 `error`+errMsg；`entry_tracker.go` 新增 `SweepStale(maxAge)` 方法兜底清理超时 processing 条目；`api/usage.go` `getUsage` 开头调用 `SweepStale(10min)`，超时条目转 `Status="error"`/`Error="timeout"` 写入 RingBuffer + 广播 `request-done`；前端 `usage.js` 新增 `handleRequestStart` 去重、`handleRequestDone` 兜底清理、`updateProcessingLatencyCells` 超 10 分钟停止计时、`refreshQuotaData` 中 inflight stale 判定。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。
 
@@ -128,8 +132,9 @@ flowchart LR
 
 | 字段 | 类型 | 用途 |
 |---|---|---|
-| `reg` | `ModelResolver` | provider / quickslot 解析、key 运行时状态、模型列表 |
-| `selector` | `KeyProvider` | key 选择 + 冷却 / 退避 / 锁定 |
+| `reg` | `ModelResolver` | 完整 composite（保留供测试经 `h.reg.GetKeyState` 访问 key 运行时状态） |
+| `quickSlots` / `providers` / `keyState` / `aliases` / `comboList` | `QuickSlotResolver` / `ProviderResolver` / `KeyStateAccessor` / `AliasResolver` / `ComboLister` | registry 侧 5 个窄能力（内部调用点经此路由） |
+| `keySel` / `nim` / `cooldown` / `quotaLock` / `rotSet` | `KeySelector` / `NIMProvider` / `CooldownManager` / `QuotaLocker` / `RotationSettings` | selector 侧 5 个窄能力（key 选择 + NIM + 冷却 + 配额锁 + 配置快照） |
 | `comboRes` | `ComboResolver` | combo 解析 |
 | `usage` | `UsageRecorder` | 用量记录 |
 | `quotaTracker` | `QuotaTracker` | quota 展示 |
@@ -148,18 +153,28 @@ flowchart LR
 
 `New`（handler.go:43-80）从能力接口而非具体类型构造 `Handler`。调用方（组合根）通常传入 `*registry.Registry`、`*rotation.Selector`、`*combo.Resolver`、`*usage.RingBuffer`、`*usage.QuotaTracker`、`*console.Logger`，它们都结构性满足这些接口。默认上游超时 300s（`upstreamTimeoutSec<=0` 时回退，handler.go:44-47）。构造函数内创建 `UsageUpdates`(32)、`InflightUpdates`(32)、`RequestUpdates`(64) 三个 `Broadcaster`、`InflightTracker`、`EntryTracker` 与 `SignatureCache`（handler.go:55-60），并构造 6 个 `*http.Client`（直连 / 代理 / 管理各一对；流式 client 不设 `Timeout`，由请求 `r.Context()` 控制连接生命周期，handler.go:61-78）。
 
-### 4.3 六个能力接口
+### 4.3 能力接口（窄接口 + composite）
 
 `interfaces.go` 定义代理核心对外的结构性依赖接口：
 
 | 接口 | 行 | 实现类型 | 关键方法 |
 |---|---|---|---|
 | `Logger` | interfaces.go:16-21 | `*console.Logger` | `Info/Error/Warn/Debug` |
-| `KeyProvider` | interfaces.go:27-39 | `*rotation.Selector` | `SelectKey`、`IsNIMEnabled`、`WaitNIMInterval`、`ClearError`、`OnNIMRequestSuccess`、`Settings`、`OnKeyFailure`、`MarkNIM429`、`MarkDailyQuotaLocked`、`MarkRateLimited`、`MarkBalanceLocked` |
-| `ModelResolver` | interfaces.go:48-59 | `*registry.Registry` | `GetQuickSlotByName`、`GetProviderByPrefix`、`GetProvider`、`GetKeyState`、`ListProviders`、`ListCombos`、`ListQuickSlots`、`ResolveModelAlias`、`ResolveModelAliasByID` |
-| `ComboResolver` | interfaces.go:61-64 | `*combo.Resolver` | `IsComboName`、`Resolve` |
-| `UsageRecorder` | interfaces.go:68-70 | `usage.UsageStore`（含 `*usage.RingBuffer`） | `Add` |
-| `QuotaTracker` | interfaces.go:75-77 | `*usage.QuotaTracker` | `Update`、`RemoveKey` |
+| `KeySelector` | interfaces.go:24-27 | `*rotation.Selector` | `SelectKey`、`OnKeyFailure` |
+| `NIMProvider` | interfaces.go:30-35 | `*rotation.Selector` | `IsNIMEnabled`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429` |
+| `CooldownManager` | interfaces.go:38-41 | `*rotation.Selector` | `ClearError`、`MarkRateLimited` |
+| `QuotaLocker` | interfaces.go:44-47 | `*rotation.Selector` | `MarkDailyQuotaLocked`、`MarkBalanceLocked` |
+| `RotationSettings` | interfaces.go:50-52 | `*rotation.Selector` | `Settings` |
+| `KeyProvider` | interfaces.go:56-62 | `*rotation.Selector` | composite，组合上述 5 窄接口（`New` 入参，向后兼容） |
+| `QuickSlotResolver` | interfaces.go:65-68 | `*registry.Registry` | `GetQuickSlotByName`、`ListQuickSlots` |
+| `ProviderResolver` | interfaces.go:71-75 | `*registry.Registry` | `GetProviderByPrefix`、`GetProvider`、`ListProviders` |
+| `KeyStateAccessor` | interfaces.go:78-80 | `*registry.Registry` | `GetKeyState` |
+| `AliasResolver` | interfaces.go:83-86 | `*registry.Registry` | `ResolveModelAlias`、`ResolveModelAliasByID` |
+| `ComboLister` | interfaces.go:89-91 | `*registry.Registry` | `ListCombos` |
+| `ModelResolver` | interfaces.go:100-106 | `*registry.Registry` | composite，组合上述 5 窄接口（`New` 入参，向后兼容） |
+| `ComboResolver` | interfaces.go:111-114 | `*combo.Resolver` | `IsComboName`、`Resolve` |
+| `UsageRecorder` | interfaces.go:118-120 | `usage.UsageStore`（含 `*usage.RingBuffer`） | `Add` |
+| `QuotaTracker` | interfaces.go:125-128 | `*usage.QuotaTracker` | `Update`、`RemoveKey` |
 
 ### 4.4 HTTP 客户端与运行时开关
 
@@ -183,7 +198,7 @@ flowchart TD
     HCB --> FWR["forward.go:130 forwardWithRetry (for)"]
     QS --> FWR
     PR --> FWR
-    FWR --> SEL["rotation.SelectKey (retry.go 通过 KeyProvider)"]
+    FWR --> SEL["rotation.SelectKey (retry.go 通过 h.keySel / KeySelector)"]
     FWR --> FU["upstream.go:66 forwardUpstream"]
     FU -->|"isStream"| SR["stream.go:138 streamResponse"]
     FU -->|"非流式"| PT["stream.go:309 passThroughResponse"]
@@ -543,7 +558,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 
 | 结构体 | 位置 | 字段 / 用途 |
 |---|---|---|
-| `Handler` | handler.go:15-36 | 聚合 6 能力接口 + 6 个 client + 3 个 Broadcaster + Inflight/EntryTracker/sigCache/debugModeProvider |
+| `Handler` | handler.go:18-56 | 聚合 6 能力接口（`reg` + 5 registry 窄字段 + 5 selector 窄字段）+ 6 个 client + 3 个 Broadcaster + Inflight/EntryTracker/sigCache/debugModeProvider/quickSlotOnlyProvider |
 | `retryState` | retry.go:14-21 | 单轮 `forwardWithRetry` 的跨迭代可变状态（excludeKeyIDs / 重试计数 / consecutive5xx） |
 | `SSELineBuffer` | stream.go:15-17（方法 19-40） | 跨块缓冲并按换行符切 SSE 行 |
 | `chunkDelta` | stream.go:371-374 | 单 chunk 解析结果（`section`/`delta`） |
@@ -617,7 +632,7 @@ go build -o tinyrouter .
 后端与集成：
 
 - `internal/proxy/handler.go`：Handler 结构体（15-36）、构造函数 New（43-80）、ChatCompletions/Completions（159-165）、Messages（179-181，Anthropic 入口，调用 `handleProxy(..., EntryFormatAnthropic)`）、Responses（188-189，OpenAI Responses 入口，调用 `handleProxy(..., EntryFormatOpenAIResponses)`）、Embeddings（174-175，OpenAI Embeddings 入口，调用 `handleProxy(..., EntryFormatOpenAI)`）、SetProxy（102-142）、SetUpstreamTimeout（147-154）、SetDebugModeProvider（215-224）、ImagesGenerations（167-169）、PollTask（171-173）。
-- `internal/proxy/interfaces.go`：6 个能力接口 Logger/KeyProvider/ModelResolver/ComboResolver（`Resolve(name, entryFormat)`，61-64）/UsageRecorder/QuotaTracker（16-81）。
+- `internal/proxy/interfaces.go`：能力接口——`Logger`（16-21）；selector 侧 5 窄接口 `KeySelector`/`NIMProvider`/`CooldownManager`/`QuotaLocker`/`RotationSettings`（24-52）+ composite `KeyProvider`（56-62）；registry 侧 5 窄接口 `QuickSlotResolver`/`ProviderResolver`/`KeyStateAccessor`/`AliasResolver`/`ComboLister`（65-91）+ composite `ModelResolver`（100-106）；`ComboResolver`（111-114）/`UsageRecorder`（118-120）/`QuotaTracker`（125-128）。`Handler` 持有窄字段，`New` 入参仍为 `ModelResolver`/`KeyProvider` composite。
 - `internal/proxy/forward.go`：handleProxy（95-185，软策略：不再做入口协议严格匹配 400 块，仅模型解析 + 透传准备；alias 解析前 line 175 捕获 originalModel）、handleCombo（188-222，含 `entryFormat` 透传，combo 目标传 `""` 为 originalModel）、forwardWithRetry（225-436，含 `entryFormat`/`originalModel` 透传，延迟 keep-alive，processingEntry 含 `InputTokens` 粗估 line 295 与 `OriginalModel` line 291，TTFT 广播 line 419-420）、broadcastRequestStart（439-449）、broadcastTTFT（451-463，2026-07-21 新增）、broadcastTokens（465-478，2026-07-21 新增）、writeError（480-489）、backfillThoughtSignatures（504-558）、hasThoughtSignature（550-561）。
 - `internal/proxy/upstream.go`：normalizeBaseURL（17-53，最长优先剥除 endpoint 后缀）、BuildUpstreamURL（55-101，启发式 A：判断路径是否含版本段决定注入 `/v1`）、forwardUpstream（113-174，按 `entryFormat` 三分支：OpenAI Chat / Anthropic / OpenAI Responses）、buildUpstreamRequest（78-97，统一上游请求构造，`authBearer` 控制 Bearer 或 x-api-key）、setAnthropicHeaders（100-111，x-api-key/anthropic-version/anthropic-beta，不设 Authorization）。
 - `internal/proxy/stream.go`：SSELineBuffer（15-41）、SSEDataPayloads（50-64）、normalizeSSEChunk（74-110）、streamResponse（139-358，`entryFormat` 控制 OpenAI 专用 `parseAndBroadcastChunk` 仅 OpenAI 入口调用、anthropic 入口走 `parseAnthropicSSEUsage` 提取 usage；2026-07-21 新增 `contentCharsTotal` 累积器 line 181、token 进度广播 line 286-294；`originalModel` 透传到 recordUsage line 357）、passThroughResponse（360-397，`headersFlushed`/`originalModel` 参数，recordUsage line 396）、parseAndBroadcastChunk（399-418）、chunkDelta/parseSSEChunkDelta（427-512）、extractThoughtSignature（540-587）、parseAnthropicSSEUsage（441-470，读 message_start/message_delta 的 input/output tokens）。
@@ -635,9 +650,9 @@ go build -o tinyrouter .
 
 外部依赖：
 
-- `internal/rotation`：`Selector` 实现 KeyProvider（SelectKey/WaitNIMInterval/ClearError/OnNIMRequestSuccess/Settings/OnKeyFailure/MarkNIM429/MarkDailyQuotaLocked/MarkRateLimited/MarkBalanceLocked）；`GetAdapter`/`ParseHeaders`/`BackoffSequence`/`ClassifyError`/`IsDailyQuota429`/`IsBalanceExhausted`/`DefaultTransientCooldownSec`。
+- `internal/rotation`：`Selector` 实现 `KeyProvider`（= `KeySelector`/`NIMProvider`/`CooldownManager`/`QuotaLocker`/`RotationSettings` 全部方法：SelectKey/OnKeyFailure/IsNIMEnabled/WaitNIMInterval/OnNIMRequestSuccess/MarkNIM429/ClearError/MarkRateLimited/MarkDailyQuotaLocked/MarkBalanceLocked/Settings）；`GetAdapter`/`ParseHeaders`/`BackoffSequence`/`ClassifyError`/`IsDailyQuota429`/`IsBalanceExhausted`/`DefaultTransientCooldownSec`。
 - `internal/combo`：`Resolver` 实现 ComboResolver（`IsComboName`/`Resolve(name, entryFormat)`）；`EntryFormat`（OpenAI/Anthropic/OpenAI-Responses）保留但 Resolve 不再按它过滤 target（软策略，见 §3.3）；`ComboPlan.Targets` 携带 `ProviderID`/`Model`。
-- `internal/registry`：`Registry` 实现 ModelResolver；`KeyRuntimeState` 承载 per-key 运行时状态（InFlight/Quota）。
+- `internal/registry`：`Registry` 实现 `ModelResolver`（= `QuickSlotResolver`/`ProviderResolver`/`KeyStateAccessor`/`AliasResolver`/`ComboLister`）；`KeyRuntimeState` 承载 per-key 运行时状态（InFlight/Quota）。
 - `internal/usage`：`RingBuffer` 实现 UsageRecorder.Add；`Entry` 为用量记录结构（含 `Source` 来源标记字段、`OriginalModel` 原始模型名字段）；`QuotaBar` 含 `Alias` 字段（quota.go:22）供 UI 显示 alias；`QuotaTracker` 实现 QuotaTracker（Update/RemoveKey）。
 - `internal/config`：`Provider`/`QuickSlot`/`Combo`/`RotationConfig`；`Provider.IsNIM`/`IsGeminiOpenAICompat` 决定特殊转发/回填分支。
 - `internal/util`：`SplitModel`（拆 provider/model）、`ExtractTokens`（提 token）、`TruncStr`（日志截断）。
@@ -647,13 +662,14 @@ go build -o tinyrouter .
 | 变更类型 | 必查位置 |
 |---|---|
 | 新增/修改 `/v1/*` 路由 | api/router.go 挂载（196-209）+ CORS preflight（180-192）+ 鉴权边界（auth 组外，212-214）+ securityHeaders 跳过（151-165）；Anthropic 入口仅 `POST /v1/messages`（router.go:203），OpenAI Responses 入口仅 `POST /v1/responses`（router.go:207） |
-| 修改 SSE 改写 | stream.go:139-305 + `internal/sse`（`NormalizeSSEChunk`/`SSELineBuffer`）+ passThroughResponse（307-341）；Anthropic 入口经 `entryFormat` 跳过 OpenAI 专用 `parseAndBroadcastChunk`（§8.8） |
-| 修改 body 改写 | forward.go:79-83（alias 解析）+ forward.go:130-179（stream_options / model / backfill）+ upstream.go（头与 URL） |
+| 修改 SSE 改写 | stream.go（`streamResponse`/`passThroughResponse` I/O 循环）+ `internal/sse`（`NormalizeSSEChunk`/`SSELineBuffer`）；token/usage 解析在 `stream_usage.go`、Anthropic usage 在 `stream_anthropic.go`、调试 chunk 广播在 `stream_debug.go`；Anthropic 入口经 `entryFormat` 跳过 OpenAI 专用 `parseAndBroadcastChunk`（§8.8） |
+| 修改 body 改写 | forward_request.go `handleProxy`（alias 解析）+ forward_retry.go `forwardWithRetry`（stream_options / model 替换 / `backfillThoughtSignatures`）+ upstream.go（头与 URL） |
 | 修改 URL 构造 | `internal/urlutil`（`BuildUpstreamURL`/`normalizeBaseURL`/`isOllamaBaseURL`/`normalizeOllamaBaseURL`/`isHostRoot`）+ proxy/upstream.go（`forwardUpstream` 调用 `urlutil.BuildUpstreamURL`）+ api/probe_common.go/probe_keys.go/providers_validate.go/providers_models.go/combo_speedtest.go 调用 `urlutil.BuildUpstreamURL` |
-| 修改非流式 keep-alive 刷新 | forward.go `forwardWithRetry`（延迟 20s 宽限期 goroutine + 5s ticker，`keepAliveStopped` 同步退出，§8.7）+ stream.go `passThroughResponse`（`headersFlushed` 参数）+ compress.go `Compress`（`/v1/images/*` 绕过列表） |
-| 修改 Gemini 签名 | signature_cache.go（11-104）+ forward.go backfill（314-355）+ stream.go extract（444-490）+ config IsGeminiOpenAICompat（109-117） |
+| 修改非流式 keep-alive 刷新 | forward_retry.go `forwardWithRetry`（延迟 20s 宽限期 goroutine + 5s ticker，`keepAliveStopped` 同步退出，§8.7，H-8 bug 区勿改语义）+ stream.go `passThroughResponse`（`headersFlushed` 参数）+ compress.go `Compress`（`/v1/images/*` 绕过列表） |
+| 修改 Gemini 签名 | signature_cache.go（`SignatureCache` 11-104 + `extractThoughtSignature` 已并入此文件）+ forward.go `backfillThoughtSignatures`/`hasThoughtSignature` + config `IsGeminiOpenAICompat`（109-117） |
 | 新增/修改 ListModels 过滤逻辑 | proxy | `proxy/models.go` `ListModels`（8-65）+ `proxy/handler.go` `quickSlotOnlyProvider`/`quickSlotOnly()`（40/238-245）+ `api/router.go` `quickSlotOnly atomic.Bool` + `api/settings.go` `getSettings`/`updateSettings` |
-| 修改用量/在途/兜底清理 | recorder.go（16-90）+ entry_tracker.go（13-138，含 `SetTTFT`/`UpdateTokens`/`SweepStale`）+ inflight.go（11-88）+ broadcaster.go（9-80）+ api/sse_events.go（16-79）+ forward.go `broadcastTTFT`/`broadcastTokens`（451-478）+ stream.go token 广播（286-294）+ 客户端断开补 recordUsage（`clientDisconnected` 标志 + 外层 `break` + 末尾 status 判断）+ api/usage.go `getUsage` 调用 `SweepStale(10min)` 转超时条目为 error + 前端 `usage.js`（`handleRequestStart` 去重、`handleRequestDone` 兜底清理、`updateProcessingLatencyCells` 超时停止、`refreshQuotaData` stale 判定）；改 `Entry.Source` 来源标记须同步前端 `X-TinyRouter-Source` 头（pg-stream.js）；改 `Entry.OriginalModel` 须同步 forward.go alias 解析前捕获（line 175）、所有 `recordUsage` 调用点、前端 `usage.js` `displayModelName`/`buildModelIdToAlias`/`renderUsageRow`；改 `QuotaBar.Alias` 须同步 `api/quota.go` `getQuotas` 填充（line 54）、`registry.ResolveModelAliasByID`（models.go:278）、`proxy.ModelResolver` 接口（interfaces.go:59）、`logRequest` alias 解析（retry.go:48-51）、前端 `usage.js` `renderQuotaBarItem`/`patchQuotaBarItem`；改 `RespPayload` 截断策略须同步 §8.7 上方"recorder.go 大响应截断"更新块。改 `request-ttft`/`request-tokens` 事件格式须同步前端 `usage.js` 的 `handleRequestTTFT`/`handleRequestTokens` |
-| 新增 combo 策略 | combo/resolver + handleCombo 分支（forward.go:107-142） |
+| 修改用量/在途/兜底清理 | recorder.go（16-90）+ entry_tracker.go（13-138，含 `SetTTFT`/`UpdateTokens`/`SweepStale`）+ inflight.go（11-88）+ broadcaster.go（9-80）+ api/sse_events.go（16-79）+ forward_retry.go `broadcastTTFT`/`broadcastTokens` + stream.go token 广播 + 客户端断开补 recordUsage（`clientDisconnected` 标志 + 外层 `break` + 末尾 status 判断）+ api/usage.go `getUsage` 调用 `SweepStale(10min)` 转超时条目为 error + 前端 `usage.js`（`handleRequestStart` 去重、`handleRequestDone` 兜底清理、`updateProcessingLatencyCells` 超时停止、`refreshQuotaData` stale 判定）；改 `Entry.Source` 来源标记须同步前端 `X-TinyRouter-Source` 头（pg-stream.js）；改 `Entry.OriginalModel` 须同步 forward_request.go `handleProxy` alias 解析前捕获、所有 `recordUsage` 调用点、前端 `usage.js` `displayModelName`/`buildModelIdToAlias`/`renderUsageRow`；改 `QuotaBar.Alias` 须同步 `api/quota.go` `getQuotas` 填充（line 54）、`registry.ResolveModelAliasByID`（models.go:278）、`proxy.ModelResolver` 接口（interfaces.go:59）、`logRequest` alias 解析（retry.go:48-51）、前端 `usage.js` `renderQuotaBarItem`/`patchQuotaBarItem`；改 `RespPayload` 截断策略须同步 §8.7 上方"recorder.go 大响应截断"更新块。改 `request-ttft`/`request-tokens` 事件格式须同步前端 `usage.js` 的 `handleRequestTTFT`/`handleRequestTokens` |
+| 新增 combo 策略 | combo/resolver + `handleCombo` 分支（forward_combo.go） |
 | 新增/修改 Anthropic 协议路由 | handler.go `Messages`（179-181）+ `handleProxy`/`handleCombo`/`forwardWithRetry`/`forwardUpstream` 的 `entryFormat` 参数 + upstream.go `buildUpstreamRequest`/`setAnthropicHeaders`（78-111）+ stream.go `entryFormat` 跳过 OpenAI 解析（§8.8）+ combo/resolver `EntryFormat` 过滤（resolver.go:14-22、103-118）+ api/router.go `POST /v1/messages`（203）+ config/types.go `AnthropicVersion`/`AnthropicBeta`/`IsAnthropic()` + defaults.go 回填（97-98）+ validate.go anthropic BaseURL 告警（33-35） |
-| 软策略修正 / Responses 路由 / 单协议探测 | forward.go 删除入口协议严格匹配 400 块（软策略，§3.3、§13.1）+ handler.go `Responses`（188-189、`EntryFormatOpenAIResponses`）+ upstream.go `forwardUpstream` 三分支（24-37）+ `buildUpstreamRequest`（78-97）+ stream.go `parseAnthropicSSEUsage`（441-470，anthropic usage 提取 + OpenAI `ExtractTokens` guard，§8.8/§8.9）+ combo/resolver 移除 anthropic `IsAnthropic()` 过滤 + api/router.go `POST /v1/responses`（207）+ `PATCH /providers/{id}/models/protocols`（262）+ api/probe_model.go `testProviderModelProto` 单协议单次探测（`POST /providers/{id}/models/test-proto`，body `{model, proto}`，**不持久化**）+ probe_common.go `probeEndpoint` 通用探测函数 + 4 个薄封装 + probe_proto_test.go 覆盖新 handler + URL 归一化；前端 providers.js/comb…
+| 软策略修正 / Responses 路由 / 单协议探测 | forward_request.go 删除入口协议严格匹配 400 块（`handleProxy` 现位于此）（软策略，§3.3、§13.1）+ handler.go `Responses`（188-189、`EntryFormatOpenAIResponses`）+ upstream.go `forwardUpstream` 三分支（24-37）+ `buildUpstreamRequest`（78-97）+ stream_anthropic.go `parseAnthropicSSEUsage`（anthropic usage 提取 + OpenAI `ExtractTokens` guard，§8.8/§8.9）+ combo/resolver 移除 anthropic `IsAnthropic()` 过滤 + api/router.go `POST /v1/responses`（207）+ `PATCH /providers/{id}/models/protocols`（262）+ api/probe_model.go `testProviderModelProto` 单协议单次探测（`POST /providers/{id}/models/test-proto`，body `{model, proto}`，**不持久化**）+ probe_common.go `probeEndpoint` 通用探测函数 + 4 个薄封装 + probe_proto_test.go 覆盖新 handler + URL 归一化；前端 providers.js/comb…
+| 接口隔离 / Handler 字段拆分 | `internal/proxy/interfaces.go`（窄接口 + composite：KeySelector/NIMProvider/CooldownManager/QuotaLocker/RotationSettings→KeyProvider；QuickSlotResolver/ProviderResolver/KeyStateAccessor/AliasResolver/ComboLister→ModelResolver）+ `handler.go` Handler 字段拆为窄字段（`keySel`/`nim`/`cooldown`/`quotaLock`/`rotSet` + `quickSlots`/`providers`/`keyState`/`aliases`/`comboList`，`reg` 保留供测试）+ `New` 入参不变 + 所有非测试调用点 `h.selector.*`/`h.reg.*` 路由到窄字段 + `forward.go` `resolveDisplayModel` 形参收窄为 `AliasResolver`；`New` 签名不变、行为不变、测试不改 |

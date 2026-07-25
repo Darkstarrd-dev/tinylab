@@ -16,27 +16,42 @@ import (
 )
 
 type Handler struct {
-	reg               ModelResolver // 原 *registry.Registry：provider/quickslot 解析 + key 运行时状态 + 模型列表
-	selector          KeyProvider   // 原 rotation.KeySelector：key 选择 + 冷却/退避/锁定
-	comboRes          ComboResolver // 原 *combo.Resolver：combo 解析
-	usage             UsageRecorder // 原 *usage.RingBuffer：Recent Requests usage 记录（不含 playground 来源）
-	pgUsage           UsageRecorder // Playground 来源请求专用 ring（始终捕获详情）
-	quotaTracker      QuotaTracker  // 原 *usage.QuotaTracker：quota 展示
-	logger            Logger        // 原 *console.Logger：日志输出
-	client            *http.Client  // 非流式：300s 超时
-	streamClient      *http.Client  // 流式：无超时，由 r.Context() 控制
-	proxyClient       *http.Client  // 经配置代理转发（非流式，300s 超时）
-	proxyStream       *http.Client  // 经配置代理转发（流式，无超时）
-	mgmtClient        *http.Client  // 管理类探测（模型导入/连通性/探测），直连，15s 超时
-	mgmtProxyClient   *http.Client  // 同上，但经配置代理转发
-	proxyURL          atomic.Value  // 当前代理 *url.URL，nil 表示不走代理
-	UsageUpdates      *Broadcaster
-	InflightUpdates   *Broadcaster
-	RequestUpdates    *Broadcaster
-	Inflight          *InflightTracker
-	EntryTracker      *EntryTracker
-	sigCache          SignatureCacheProvider
-	debugModeProvider func() bool
+	// Registry-side capabilities (split from the former single reg ModelResolver
+	// field). reg is retained as the full ModelResolver solely so existing test
+	// helpers can read key runtime state via h.reg.GetKeyState; all non-test
+	// call sites go through the narrow fields below.
+	reg        ModelResolver
+	quickSlots QuickSlotResolver
+	providers  ProviderResolver
+	keyState   KeyStateAccessor
+	aliases    AliasResolver
+	comboList  ComboLister
+	// Selector-side capabilities (split from the former single selector
+	// KeyProvider field).
+	keySel                KeySelector
+	nim                   NIMProvider
+	cooldown              CooldownManager
+	quotaLock             QuotaLocker
+	rotSet                RotationSettings
+	comboRes              ComboResolver // 原 *combo.Resolver：combo 解析
+	usage                 UsageRecorder // 原 *usage.RingBuffer：Recent Requests usage 记录（不含 playground 来源）
+	pgUsage               UsageRecorder // Playground 来源请求专用 ring（始终捕获详情）
+	quotaTracker          QuotaTracker  // 原 *usage.QuotaTracker：quota 展示
+	logger                Logger        // 原 *console.Logger：日志输出
+	client                *http.Client  // 非流式：300s 超时
+	streamClient          *http.Client  // 流式：无超时，由 r.Context() 控制
+	proxyClient           *http.Client  // 经配置代理转发（非流式，300s 超时）
+	proxyStream           *http.Client  // 经配置代理转发（流式，无超时）
+	mgmtClient            *http.Client  // 管理类探测（模型导入/连通性/探测），直连，15s 超时
+	mgmtProxyClient       *http.Client  // 同上，但经配置代理转发
+	proxyURL              atomic.Value  // 当前代理 *url.URL，nil 表示不走代理
+	UsageUpdates          *Broadcaster
+	InflightUpdates       *Broadcaster
+	RequestUpdates        *Broadcaster
+	Inflight              *InflightTracker
+	EntryTracker          *EntryTracker
+	sigCache              SignatureCacheProvider
+	debugModeProvider     func() bool
 	quickSlotOnlyProvider func() bool
 }
 
@@ -52,7 +67,16 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 	upstreamTimeout := time.Duration(upstreamTimeoutSec) * time.Second
 	h := &Handler{
 		reg:             reg,
-		selector:        selector,
+		quickSlots:      reg,
+		providers:       reg,
+		keyState:        reg,
+		aliases:         reg,
+		comboList:       reg,
+		keySel:          selector,
+		nim:             selector,
+		cooldown:        selector,
+		quotaLock:       selector,
+		rotSet:          selector,
 		comboRes:        comboRes,
 		usage:           usageBuf,
 		quotaTracker:    quotaTracker,
@@ -201,12 +225,12 @@ func (h *Handler) TaskGet(w http.ResponseWriter, r *http.Request, taskID, modelS
 		writeError(w, http.StatusBadRequest, "invalid model format: "+modelStr)
 		return
 	}
-	provider, ok := h.reg.GetProviderByPrefix(providerID)
+	provider, ok := h.providers.GetProviderByPrefix(providerID)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unknown provider prefix: "+providerID)
 		return
 	}
-	sel, err := h.selector.SelectKey(provider.ID, upstreamModel, nil)
+	sel, err := h.keySel.SelectKey(provider.ID, upstreamModel, nil)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "no available keys")
 		return
