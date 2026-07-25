@@ -14,6 +14,44 @@ import (
 // versionSegmentRE matches a path segment like "v1", "v1beta", "v2", "v3", etc.
 var versionSegmentRE = regexp.MustCompile(`^v\d+(?:beta|alpha)?$`)
 
+// isOllamaBaseURL reports whether baseURL points at an Ollama instance: the
+// public cloud (host "ollama.com") or a local default-port server (host
+// localhost/127.0.0.1 on port 11434). Detection is purely string-based so it
+// works without contacting the server (the local server may not be running).
+func isOllamaBaseURL(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	switch host {
+	case "ollama.com":
+		return true
+	case "localhost", "127.0.0.1":
+		return port == "11434"
+	}
+	return false
+}
+
+// normalizeOllamaBaseURL reduces any Ollama BaseURL to its host root by
+// discarding the entire path (and query/fragment). Ollama serves a native API
+// under /api/* and an OpenAI-compatible API under /v1/*; the project does no
+// format conversion, so requests must always land on /v1/*. Whatever path the
+// user entered (native forms like /api, /api/tags, /api/chat, or OpenAI forms
+// like /v1, /v1/chat/completions), dropping the path lets BuildUpstreamURL's
+// host-root branch inject /v1 uniformly.
+func normalizeOllamaBaseURL(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return baseURL
+	}
+	u.Path = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 // normalizeBaseURL strips known endpoint suffixes so the URL ends at the API root.
 // Stripping is done longest-first so "/v1/chat/completions" is removed before
 // "/chat/completions".  This method does NOT strip trailing version segments
@@ -75,6 +113,16 @@ func BuildUpstreamURL(baseURL, endpointPath string) string {
 	// 1) Raw mode: trailing '*' marks the prefix as the complete endpoint.
 	if strings.HasSuffix(trimmed, "*") {
 		return strings.TrimRight(strings.TrimSuffix(trimmed, "*"), "/")
+	}
+
+	// Ollama special case: drop the user-entered path entirely so the request
+	// always lands on Ollama's OpenAI-compatible /v1/* endpoints (the project
+	// does no format conversion; the native /api/* endpoints use a different
+	// request/response/streaming shape). Whatever the user typed (/api,
+	// /api/chat, /v1, /v1/chat/completions, …) is reduced to the host root and
+	// the host-root branch below injects /v1 uniformly.
+	if isOllamaBaseURL(trimmed) {
+		trimmed = normalizeOllamaBaseURL(trimmed)
 	}
 
 	normalized := normalizeBaseURL(trimmed)
