@@ -205,7 +205,7 @@ var ThemeSystem = (function() {
         var variantList = registry[mode] || [];
         var isModeActive = (mode === currentMode);
 
-        html += '<div class="theme-modal-group">';
+        html += '<div class="theme-modal-group" data-group="' + mode + '">';
         html += '  <div class="theme-modal-group-title">' + icons[mode] + ' <span>' + modeLabels[mode] + '</span></div>';
         html += '  <div class="theme-modal-grid">';
         for (var vi = 0; vi < variantList.length; vi++) {
@@ -214,7 +214,7 @@ var ThemeSystem = (function() {
           var isCurrentActive = (mode === currentMode && isSelected);
           var label = lang === 'cn' ? (v.nameZh || v.name) : v.name;
 
-          html += '<div class="theme-card' + (isSelected ? ' selected' : '') + (isCurrentActive ? ' active' : '') + '"'
+          html += '<button type="button" class="theme-card' + (isSelected ? ' selected' : '') + (isCurrentActive ? ' active' : '') + '"'
             + ' data-mode="' + mode + '" data-variant="' + v.id + '"'
             + ' onclick="ThemeSystem.onSwatchClick(this)">';
           html += '  <div class="theme-card-preview" style="background:' + v.swatchColor + ';">';
@@ -224,7 +224,7 @@ var ThemeSystem = (function() {
           if (isSelected) {
             html += '  <div class="theme-card-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg></div>';
           }
-          html += '</div>';
+          html += '</button>';
         }
         html += '  </div>';
         html += '</div>';
@@ -266,6 +266,13 @@ var ThemeSystem = (function() {
       notifyModeChange(mode);
     }
     setVariant(mode, variant);
+
+    requestAnimationFrame(function() {
+      if (document.querySelector('#theme-modal-picker-container')) {
+        var target = document.querySelector('#theme-modal-picker-container [data-mode="' + mode + '"][data-variant="' + variant + '"]');
+        if (target) target.focus();
+      }
+    });
   }
 
   // --- Style API ---
@@ -316,6 +323,13 @@ var ThemeSystem = (function() {
     var styleId = el.getAttribute('data-style');
     if (!styleId) return;
     setStyle(styleId);
+
+    requestAnimationFrame(function() {
+      if (document.querySelector('#style-modal-picker-container')) {
+        var target = document.querySelector('#style-modal-picker-container [data-style="' + styleId + '"]');
+        if (target) target.focus();
+      }
+    });
   }
 
   // --- Helpers ---

@@ -822,7 +822,10 @@ function openThemeModal() {
     + '<div id="style-modal-picker-container"></div></div>';
   openSettingsModal(title, bodyHtml);
   var modalEl = document.querySelector('#modal-overlay .modal');
-  if (modalEl) modalEl.style.maxWidth = '620px';
+  if (modalEl) {
+    modalEl.style.maxWidth = '760px';
+    modalEl.classList.add('modal-theme-dialog');
+  }
   ThemeSystem.renderThemePicker('theme-modal-picker-container');
   ThemeSystem.renderStylePicker('style-modal-picker-container');
   var saveBtn = document.getElementById('settings-modal-save');
@@ -831,6 +834,16 @@ function openThemeModal() {
       closeModalOverlay();
     };
   }
+  requestAnimationFrame(function() {
+    setTimeout(function() {
+      var initialFocus = document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card.active')
+        || document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card.selected')
+        || document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card');
+      if (initialFocus) {
+        initialFocus.focus();
+      }
+    }, 60);
+  });
 }
 
 // ===================== Modal Save Functions =====================
