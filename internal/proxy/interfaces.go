@@ -38,6 +38,11 @@ type NIMProvider interface {
 type CooldownManager interface {
 	ClearError(providerID, keyID, model string)
 	MarkRateLimited(providerID, keyID, model string, d time.Duration) time.Time
+	// SonestCooldown returns the soonest-expiring ModelLock[model] among the
+	// provider's active keys not in excludeKeyIDs that are currently cooling
+	// down. Used to wait for a cooldown instead of instantly 502-ing when every
+	// available key is only temporarily locked. ok=false ⇒ no such key.
+	SonestCooldown(providerID, model string, excludeKeyIDs []string) (rotation.CooldownInfo, bool)
 }
 
 // QuotaLocker is the daily-quota / balance-lock capability.

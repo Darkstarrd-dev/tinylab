@@ -8,10 +8,11 @@ import (
 type ErrorAction int
 
 const (
-	ActionBackoff    ErrorAction = iota // exponential backoff
-	ActionCooldown                      // fixed-duration cooldown
-	ActionDailyQuota                    // daily quota lock (until next CST 00:05)
-	ActionTransient                     // transient cooldown (default 30s)
+	ActionBackoff     ErrorAction = iota // exponential backoff (retry another key after backoff)
+	ActionCooldown                       // fixed-duration cooldown (key locked N seconds)
+	ActionDailyQuota                     // daily quota lock (until next CST 00:05)
+	ActionTransient                      // transient cooldown (default 30s)
+	ActionPassThrough                    // request-shape client error (4xx): return upstream error to client as-is, do not retry/lock/exclude — key is healthy
 )
 
 // ErrorRule defines one error classification rule.
@@ -40,12 +41,27 @@ var DefaultErrorRules = []ErrorRule{
 	// it as a hard daily lock instead of a transient cooldown.
 	{BodyMatch: "insufficient_balance", Action: ActionDailyQuota},
 	{BodyMatch: "insufficient balance", Action: ActionDailyQuota},
+	// Aggregator (newapi/2api-style) reporting its OWN upstream failed — the
+	// request shape was fine, the aggregator's backend transiently errored.
+	// Retrying on another key (multi-key) can help, so treat as backoff
+	// rather than pass-through. Checked BEFORE the 400/422 status rules so a
+	// 400/422 body containing this phrase still retries.
+	{BodyMatch: "upstream request failed", Action: ActionBackoff},
 
 	// --- Status-based rules (fallback when text doesn't match) ---
 	{StatusCode: 401, Action: ActionCooldown, CooldownSec: 120},
 	{StatusCode: 402, Action: ActionCooldown, CooldownSec: 120},
 	{StatusCode: 403, Action: ActionCooldown, CooldownSec: 120},
 	{StatusCode: 404, Action: ActionCooldown, CooldownSec: 120},
+	// 400/422 are request-validation client errors per HTTP semantics: the
+	// request is malformed (bad param, invalid value, wrong shape), the KEY is
+	// healthy. Retrying the SAME request on ANOTHER key 400s again, and locking
+	// the key would punish a healthy key + block all concurrent requests for the
+	// cooldown window. Pass the upstream error through to the client as-is.
+	// A body matching a text rule above (e.g. "upstream request failed") can
+	// still override to a retryable action.
+	{StatusCode: 400, Action: ActionPassThrough},
+	{StatusCode: 422, Action: ActionPassThrough},
 	{StatusCode: 429, Action: ActionBackoff},
 }
 

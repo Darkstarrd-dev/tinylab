@@ -2,6 +2,7 @@ package rotation
 
 import (
 	"testing"
+	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
 )
@@ -231,5 +232,77 @@ func TestSelectFailover_FillFirstStillUsesMarkUnavailable(t *testing.T) {
 	state.Unlock()
 	if !hasLock {
 		t.Fatal("expected ModelLocks to be set for fill-first strategy (MarkUnavailable path), indicating cooldown")
+	}
+}
+
+func TestSonestCooldown_PicksEarliestLock(t *testing.T) {
+	reg, sel := setupTestProvider(t, []int{1, 2, 3}, "fill-first", 3)
+	// Lock key 'a' for gpt-4 in 2s, key 'c' in 500ms. Key 'b' stays available.
+	_ = reg
+	soon := time.Now().Add(500 * time.Millisecond)
+	later := time.Now().Add(2 * time.Second)
+	sa := sel.reg.GetKeyState("test", "a")
+	sa.Lock()
+	sa.ModelLocks["gpt-4"] = later
+	sa.ModelErrors["gpt-4"] = "429: rate limited"
+	sa.Unlock()
+	sc := sel.reg.GetKeyState("test", "c")
+	sc.Lock()
+	sc.ModelLocks["gpt-4"] = soon
+	sc.ModelErrors["gpt-4"] = "500: internal"
+	sc.Unlock()
+
+	info, ok := sel.SonestCooldown("test", "gpt-4", nil)
+	if !ok {
+		t.Fatal("expected ok=true with locked keys")
+	}
+	if info.KeyID != "c" {
+		t.Fatalf("expected soonest key 'c', got %s", info.KeyID)
+	}
+	if info.Reason != "500: internal" {
+		t.Fatalf("expected reason from key c, got %q", info.Reason)
+	}
+}
+
+func TestSonestCooldown_SkipsExcluded(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1, 2}, "fill-first", 2)
+	// Lock key 'a' soon, key 'b' later. Exclude 'a' (already failed this req).
+	soon := time.Now().Add(400 * time.Millisecond)
+	later := time.Now().Add(2 * time.Second)
+	sa := sel.reg.GetKeyState("test", "a")
+	sa.Lock()
+	sa.ModelLocks["gpt-4"] = soon
+	sa.Unlock()
+	sb := sel.reg.GetKeyState("test", "b")
+	sb.Lock()
+	sb.ModelLocks["gpt-4"] = later
+	sb.Unlock()
+
+	info, ok := sel.SonestCooldown("test", "gpt-4", []string{"a"})
+	if !ok {
+		t.Fatal("expected ok=true (key b is locked and not excluded)")
+	}
+	if info.KeyID != "b" {
+		t.Fatalf("expected soonest non-excluded key 'b', got %s", info.KeyID)
+	}
+}
+
+func TestSonestCooldown_NoLockedKey(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1, 2}, "fill-first", 2)
+	// No key is locked → not ok.
+	if _, ok := sel.SonestCooldown("test", "gpt-4", nil); ok {
+		t.Fatal("expected ok=false when no key is locked")
+	}
+}
+
+func TestSonestCooldown_ExpiredLockIgnored(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1}, "fill-first", 1)
+	// Lock in the past → key is actually available → not counted.
+	sa := sel.reg.GetKeyState("test", "a")
+	sa.Lock()
+	sa.ModelLocks["gpt-4"] = time.Now().Add(-1 * time.Second)
+	sa.Unlock()
+	if _, ok := sel.SonestCooldown("test", "gpt-4", nil); ok {
+		t.Fatal("expected ok=false when lock already expired")
 	}
 }
