@@ -18,7 +18,6 @@ type retryState struct {
 	consecutive5xx int
 	maxRetries     int
 	requestLogged  bool
-	headersFlushed bool // true when early headers have been flushed to the client
 }
 
 // requestHeaders safely extracts request headers, returning nil when the
