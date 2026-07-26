@@ -331,14 +331,31 @@ func (e *Engine) acquireAndClaim(s *Session) (int, []int) {
 // maxChars and marks each "claimed" so it is not picked twice. Must be called
 // under the session lock. Returns the chapter indices (empty if none).
 func (e *Engine) nextBatchLocked(s *Session, maxChars int) []int {
-	var view []Chapter
-	var orig []int
+	// Collect pending chapter indices in order (the "pending queue").
+	var pendingIdx []int
 	for i := range s.Chapters {
-		if s.RangeEnd > 0 && (i < s.RangeStart || i >= s.RangeEnd) {
-			continue
+		st := s.Chapters[i].Status
+		if st == StatusPending || st == StatusNeedsReproc {
+			pendingIdx = append(pendingIdx, i)
 		}
-		view = append(view, s.Chapters[i])
-		orig = append(orig, i)
+	}
+	// Apply range as positions in the pending queue (0-based half-open).
+	start := s.RangeStart
+	if start > len(pendingIdx) {
+		start = len(pendingIdx)
+	}
+	end := len(pendingIdx)
+	if s.RangeEnd > 0 && s.RangeEnd < end {
+		end = s.RangeEnd
+	}
+	if start >= end {
+		return nil
+	}
+	view := make([]Chapter, 0, end-start)
+	orig := make([]int, 0, end-start)
+	for _, idx := range pendingIdx[start:end] {
+		view = append(view, s.Chapters[idx])
+		orig = append(orig, idx)
 	}
 	sel := dequeueBatch(view, maxChars)
 	batch := make([]int, len(sel))
@@ -351,22 +368,24 @@ func (e *Engine) nextBatchLocked(s *Session, maxChars int) []int {
 	return batch
 }
 
-// hasPending reports whether any in-range chapter is still pending or marked
-// needsReprocess. Out-of-range chapters are never claimed, so they do not
-// block completion of the requested range.
+// hasPending reports whether any chapter in the pending-queue range is still
+// pending or marked needsReprocess. The range is interpreted as positions in
+// the pending queue, not absolute chapter indices.
 func (e *Engine) hasPending(s *Session) bool {
 	s.lock()
 	defer s.unlock()
+	var pendingCount int
 	for i := range s.Chapters {
-		if s.RangeEnd > 0 && (i < s.RangeStart || i >= s.RangeEnd) {
-			continue
-		}
 		st := s.Chapters[i].Status
 		if st == StatusPending || st == StatusNeedsReproc {
-			return true
+			pendingCount++
 		}
 	}
-	return false
+	end := pendingCount
+	if s.RangeEnd > 0 && s.RangeEnd < end {
+		end = s.RangeEnd
+	}
+	return s.RangeStart < end
 }
 
 // nodeSnapshot returns a copy of the node runtime slice for SSE broadcast.

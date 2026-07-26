@@ -170,7 +170,7 @@ function trStepLocked(n) {
   if (n === 1) return false;
   if (n === 2) return !trState.rawText;
   if (n === 3) return !(trState.chapters && trState.chapters.length);
-  if (n === 4) return !trState.sessionId;
+  if (n === 4) return !window.trS3HasCompleted || !window.trS3HasCompleted();
   return true;
 }
 
