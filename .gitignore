@@ -55,3 +55,8 @@ tmp/
 
 # Runtime lock file (PID for single-instance lock)
 .tinyrouter.lock
+
+# Harness-local agent/skill artifacts (Oh My Pi / Claude skills), not project content
+.agents/
+.claude/
+skills-lock.json
