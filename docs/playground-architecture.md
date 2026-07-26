@@ -2,9 +2,17 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
-> **最后核对：** 2026-07-25，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。涉及 Playground 的子包：`models.go` → `internal/api/models/`，`anysearch.go` → `internal/api/anysearch/`，`editor.go` → `internal/api/editor/`，`review_presets.go` → `internal/api/review_presets/`，`gallery.go`/`gallery_fs.go`/`gallery_review.go`/`gallery_session.go` → `internal/api/gallery/`，`image.go` → `internal/api/image/`，`settings.go` → `internal/api/settings/`，`providers_models_crud.go` 等 4 文件 → `internal/api/providers/`。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问...
+> **最后核对：** 2026-07-26，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。涉及 Playground 的子包：`models.go` → `internal/api/models/`，`anysearch.go` → `internal/api/anysearch/`，`editor.go` → `internal/api/editor/`，`review_presets.go` → `internal/api/review_presets/`，`gallery.go`/`gallery_fs.go`/`gallery_review.go`/`gallery_session.go` → `internal/api/gallery/`，`image.go` → `internal/api/image/`，`settings.go` → `internal/api/settings/`，`providers_models_crud.go` 等 4 文件 → `internal/api/providers/`。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问...
+
+> **最后核对（2026-07-26 增补）：** 新增 **AI 文本审核（Text Review）** 4 步向导（导入 → 切分 → AI 清理 → 审校），后端 `internal/textreview` 进程内会话引擎（SSE 进度 + 502-exhausted 并发 ramp-down 落盘），新增 `/api/text-review/*` 端点组与 `tr-*.js`/`text-review*.js` pg 模块；3-way 导航 Gallery→Editor→TextReview。详见下方 2026-07-26 更新块与 §18。
 
 > **2026-07-26 更新（Gallery 批量导入修复）：** 修复"一次导入大量 zip 时前 N 个包无缩略图、仅末尾约 20-30 个正常"的 bug。根因：前端 `processCollectedEntries` 用 `Promise.all` 同时上传全部 zip，后端 `gallerySessionStore` LRU 容量仅 32，第 33 个 `put` 起驱逐最早会话，前 N-32 个包会话在缩略图拉取前已被驱逐 → 404。本次修复（`internal/api/gallery/register.go` + `web/playground/static-pg/gallery-io.js`/`gallery-tree.js`）：(1) `galleryMaxSessions` 32→128；(2) 新增 `DELETE /api/gallery/zip/{sessionId}`（`galleryDeleteZipSession`，整会话删除，204 幂等）与 `POST /api/gallery/zip/{sessionId}/touch`（`galleryTouchSession`，刷新 LRU 位置），前端 `setActive` fire-and-forget 调 touch、`clearActiveSideTree`/`removeItem`/`removeItemsByFilter` 经 `releaseZipSessions` 调 DELETE；(3) 前端 `getZipEntryBlob` 在 404 时经 `rehydrateZipSession` 按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目后重试一次（驱逐不再致命）；(4) `processCollectedEntries` 改用 `runWithConcurrency`（6 并发）取代无界 `Promise.all`，避免上传 herd；(5) 移除 `addZipBlob` 对全局 `galleryState.zipSessionId`/`zipEntriesCache` 的并发踩踏，改由 `setActive` 跟踪当前查看包的会话（AI Review 读全局即得正确包）；(6) 删除已死的 `zipEntriesCache` 状态字段。测试：`internal/api/gallery/register_test.go` 覆盖 LRU 驱逐契约、`touch`、`remove`、新增 HTTP 路由及 chi 区分会话删除 vs 条目删除。
+
+> **2026-07-26 更新（AI 文本审核 / Text Review）：**
+> - **4 步向导页面：** 新增 Playground 第三类分页 AI Text Review（F6 3-way toggle：Gallery → Editor → TextReview → Gallery）。`web/playground/static-pg/text-review.js`（入口 `renderTextReview`/`cleanupTextReview`）+ `text-review-step1..4.js`（导入/切分/AI 清理/审校四步）+ `tr-state.js`（会话状态 + 切页快照/重订阅）+ `tr-split.js`/`tr-diff.js`（章节切分与 diff 算法，移植自 novelhelper `m1-import`）。`web/static/app.js` `gotoGalleryToggle` 扩为 3-way，`navigateTo` 新增 `case 'textreview'`。
+> - **后端会话引擎：** `internal/textreview`（`session.go`/`scheduler.go`/`cleaner.go`/`proxy_call.go`/`streaming_writer.go`/`events.go`）—— 调度器跨节点池派发 worker，经共享代理栈流式清理每章，增量经 SSE 广播；支持 pause/resume/stop 与单章 reprocess；502-exhausted 时自动 ramp-down 节点并发（`NodePersister` 落盘到 `config.yaml`）；会话仅驻内存（无 `state.yaml`）。
+> - **HTTP 端点：** `internal/api/textreview`（`register.go`/`sessions.go`/`nodepersister.go`）注册 `/api/text-review/*`（review-nodes / split-patterns / prompt-default CRUD + sessions / sessions/{id}/events SSE / pause / resume / stop / chapters/{idx}/reprocess），独立于 `/api` 组以绕过 1MB 上限（32 MiB），仍经 `AuthMiddleware`。
+> - **配置：** `internal/config` 新增 `TextReviewConfig`（`Nodes`/`SplitPatterns`/`DefaultPromptPresetID`）+ `TextReviewNode`/`SplitPattern` 类型；`finalizeConfig` 首启注入内置章节检测 split-pattern（nil 判断，用户清空为 `[]` 不再注入）；`internal/registry/text_review.go` 提供线程安全 CRUD。
 
 > **2026-07-22 更新（Search 模式 UI/UX 优化）：**
 > - **双窗口左右并列布局与交互：** `pgState.mode === 'search'` 时强制使用 2 窗口布局（`splitCount = 2`，`1fr 1fr`），左侧窗口显示 Search Strategy 与 Raw Search Results 视图，右侧窗口专门渲染 Synthesized 最终回复；问句留在 `#pg-input` 并呈灰色锁定态（`pg-input-search-locked`）；打字时恢复亮色编辑。
@@ -121,7 +129,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 
 - `/playground.css`；
 - `/vendor/*`；
-- 显式白名单中的 `playground.js`、`pg-i18n.js` 和所有 `pg-*.js`。
+- 显式白名单中的 `playground.js`、`pg-i18n.js`、所有 `pg-*.js`，以及 AI Text Review 的 `tr-*.js`（`tr-split`/`tr-diff`/`tr-state`）与 `text-review*.js`（`text-review.js` + `text-review-step1..4.js`）——由 `internal/api/router.go` 的 `pgJSFiles` 列表显式枚举。
 
 新增或重命名前端模块时必须同时更新：
 
@@ -162,6 +170,20 @@ Playground 后端相关职责只有三类：
 | `POST /api/anysearch/extract` | Search 模式 URL 内容提取 | 管理 session | 1 MiB |
 | `POST /api/editor/open` | Editor 原生文件选择器打开文本文件 | 管理 session | 32 MiB |
 | `POST /api/editor/save` | Editor 原子写保存文本文件 | 管理 session | 32 MiB |
+| `GET /api/text-review/review-nodes` | AI 文本审核节点池列表 | 管理 session | 32 MiB（`/api/text-review/*` 独立组） |
+| `POST /api/text-review/review-nodes` | 新增/更新节点（无 ID 创建、有 ID 更新） | 管理 session | 32 MiB |
+| `DELETE /api/text-review/review-nodes/{id}` | 删除节点 | 管理 session | 32 MiB |
+| `GET /api/text-review/split-patterns` | 章节切分模式列表 | 管理 session | 32 MiB |
+| `POST /api/text-review/split-patterns` | 新增/更新切分模式（按 key） | 管理 session | 32 MiB |
+| `DELETE /api/text-review/split-patterns/{key}` | 删除切分模式 | 管理 session | 32 MiB |
+| `GET /api/text-review/prompt-default` | 内置默认清理 system prompt | 管理 session | 32 MiB |
+| `POST /api/text-review/sessions` | 创建并启动审核会话（携带 `rawText`/`chapters`） | 管理 session | 32 MiB |
+| `GET /api/text-review/sessions/{id}` | 会话完整快照 | 管理 session | 32 MiB |
+| `GET /api/text-review/sessions/{id}/events` | SSE 实时进度流（chunk/status/node 事件） | 管理 session | 32 MiB |
+| `POST /api/text-review/sessions/{id}/pause` | 暂停调度器（在途 worker 继续） | 管理 session | 32 MiB |
+| `POST /api/text-review/sessions/{id}/resume` | 恢复调度器 | 管理 session | 32 MiB |
+| `POST /api/text-review/sessions/{id}/stop` | 取消会话（标记 cancelled） | 管理 session | 32 MiB |
+| `POST /api/text-review/sessions/{id}/chapters/{idx}/reprocess` | 单章重清理（必要时重启调度） | 管理 session | 32 MiB |
 
 前端源码中的 `pgApiGet('/models')` 经宿主 `apiGet` 自动加 `/api`，实际请求是 `/api/models`。聊天相关代码直接 `fetch('/v1/chat/completions')`。
 
@@ -245,6 +267,9 @@ modules:
 pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 -> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui -> pg-modal
 -> pg-lifecycle
+-> tr-split -> tr-diff -> tr-state
+-> text-review-step1 -> text-review-step2 -> text-review-step3 -> text-review-step4
+-> text-review
 ```
 
 全部模块使用浏览器全局函数/变量协作，没有 ES module、bundler、事件总线或响应式框架。
@@ -268,6 +293,14 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 | `pg-lifecycle.js` | `renderPlayground`（含 search 模式恢复后重新渲染） / `cleanupPlayground`（search 模式 early return 不 abort） |
 | `pg-i18n.js` | Playground 独立中英文字典 + 共享 `T()` 回退（`gallery-state.js`/`editor-state.js` 复用） |
 | `playground.css` | 全屏布局、消息、侧栏、modal、响应式样式 |
+| `tr-split.js` | AI Text Review 章节切分算法（移植自 novelhelper `split.ts`，按 `SplitPattern` 正则检测章节边界） |
+| `tr-diff.js` | AI Text Review 行级 diff 对比算法（原文 vs 清理后） |
+| `tr-state.js` | AI Text Review 会话状态 + 切页快照/重订阅（snapshot + re-subscribe，会话驻后端内存不丢失） |
+| `text-review.js` | AI Text Review 入口：`renderTextReview`/`cleanupTextReview` + 4 步路由 |
+| `text-review-step1.js` | step1 导入：粘贴/上传长文本原文 |
+| `text-review-step2.js` | step2 切分：调整章节边界（用 `tr-split.js`） |
+| `text-review-step3.js` | step3 AI 清理：选节点池 + prompt，SSE 订阅实时进度 |
+| `text-review-step4.js` | step4 审校：`tr-diff.js` 行级 diff 逐章接受/拒绝/重处理 |
 
 ### 5.3 宿主适配契约
 
@@ -625,6 +658,10 @@ go build -tags playground -o tinyrouter-pg.exe .
 - `internal/config/types.go`、`internal/config/defaults.go`：配置结构和默认值；
 - `internal/proxy/forward.go`、`internal/proxy/upstream.go`、`internal/proxy/stream.go`：代理契约；
 - `build.ps1`：Windows 构建矩阵。
+- `internal/textreview/`：AI 文本清理会话引擎（`session.go`/`scheduler.go`/`cleaner.go`/`proxy_call.go`/`streaming_writer.go`/`events.go`，详见 §18）；
+- `internal/api/textreview/`：`/api/text-review/*` HTTP handler + ramp-down 落盘 `nodepersister.go`；
+- `internal/registry/text_review.go`：节点池/切分模式 CRUD；
+- `internal/config/types.go` 中的 `TextReviewConfig`/`TextReviewNode`/`SplitPattern` + `defaults.go` 中的内置 split-pattern 注入。
 
 前端：
 
@@ -653,6 +690,12 @@ go build -tags playground -o tinyrouter-pg.exe .
 - `internal/api/anysearch.go`：3 个 Search 模式 HTTP handler（`POST /api/anysearch/search`、`/subdomains`、`/extract`）；
 - `internal/config/types.go` 中的 `AnySearchConfig` 结构体（`APIKey`/`MaxResults` 字段）+ `Config.AnySearch` 字段；
 - `internal/config/defaults.go` 中的 `AnySearch.MaxResults` 默认值 5 回填。
+- `web/playground/static-pg/text-review.js`：AI Text Review 入口（`renderTextReview`/`cleanupTextReview` + 4 步路由）；
+- `web/playground/static-pg/text-review-step1..4.js`：导入/切分/AI 清理/审校四步 UI；
+- `web/playground/static-pg/tr-state.js`：会话状态 + 切页快照/重订阅；
+- `web/playground/static-pg/tr-split.js`/`tr-diff.js`：章节切分与 diff 算法（移植自 novelhelper `m1-import`）；
+- `web/static/app.js` 中的 `gotoGalleryToggle`（3-way Gallery→Editor→TextReview）+ `navigateTo` `case 'textreview'` + cleanup guard；
+- `web/static/i18n.js` 中的 `textReview` 及相关 UI 字符串。
 
 ## 15. 变更维护清单
 
@@ -824,3 +867,80 @@ Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编�
 - `web/static/i18n.js`：`editor` 及所有 Editor UI 字符串
 - `web/static/shortcuts.js`：`global.goto-gallery` label 更新
 - `web/static/index.html`：`diff.min.js` + `editor-state.js` + `editor.js` 脚本
+
+## 18. AI Text Review 模块（4 步文本清理向导）
+
+AI Text Review 是 playground 构建变体（`-tags playground`）下的长文本 AI 清理分页，与 Gallery/Editor 共享同一导航按钮的 3-way toggle（Gallery → Editor → TextReview → Gallery，复用 F6 `global.goto-gallery`）。UI 由 `web/playground/static-pg/text-review.js` + `text-review-step1..4.js` + `tr-state.js` + `tr-split.js`/`tr-diff.js` 实现（vanilla JS，`window.renderTextReview`/`window.cleanupTextReview` 入口，移植自 novelhelper `frontend/src/pages/m1-import`）。
+
+### 4 步向导
+
+1. **导入（step1）**：粘贴/上传长文本原文。
+2. **切分（step2）**：按 `SplitPattern` 正则（默认内置"第X章/回/卷/节"等，移植自 `split.ts`）检测章节边界；`tr-split.js` 提供切分算法，用户可调整。
+3. **AI 清理（step3）**：选处理节点池 + system prompt，发起会话；后端逐章流式清理，前端 SSE 订阅实时显示每章增量。
+4. **审校（step4）**：`tr-diff.js` 行级 diff 对比原文/清理后，逐章接受/拒绝/重处理。
+
+### 后端会话引擎
+
+`internal/textreview` 在进程内驱动会话（不持久化，重启清零）：
+
+```mermaid
+flowchart LR
+    UI["前端 4 步向导"]
+    API["api/textreview handler"]
+    Eng["textreview.Engine 调度器"]
+    Node["节点池 worker"]
+    Proxy["共享 proxy 栈 /v1/chat/completions"]
+    SSE["SSE 事件流"]
+    Cfg["config.yaml ramp-down 落盘"]
+
+    UI -->|POST /sessions| API
+    API --> Eng
+    Eng --> Node
+    Node --> Proxy
+    Proxy -->|流式 chunk| Node
+    Node -->|onChunk 增量| SSE
+    SSE -->|GET /sessions/{id}/events| UI
+    Node -.->|502 exhausted| Cfg
+```
+
+- **调度：** `Engine.dispatch` 取下一 pending 章节 → 找 `Active<Target && Enabled` 节点 → spawn worker；`runWorker` 调 `Cleaner.Clean` 流式清理并按 `CleanResult` 分类（`OK`/`Exhausted`/`Passed4xx`）。per-chapter `maxRetries=3`。
+- **并发 ramp-down：** 节点返回 502（"all keys exhausted"/"no available keys"）时，调度器递减该节点 `Target` 并经 `NodePersister` 落盘到 `config.yaml`；`Target` 到 0 则禁用节点。与普通代理重试的关键差异——key 池整体耗尽时**降低并发**而非重试。
+- **故障分类：** `Exhausted`（502 全 key 耗尽 → ramp-down）vs `Passed4xx`（请求格式 4xx 透传 → 标记章节失败，不锁 key、不 ramp-down）vs mid-stream 错误（流中断 → 标记失败，可重试）。
+- **切页存活：** 会话驻进程内存，前端切页时 `cleanupTextReview` 仅退订 SSE；返回时 `tr-state.js` 取会话快照 + 重新订阅 `/sessions/{id}/events` 恢复进度（snapshot + re-subscribe，会话不丢失）。
+- **pause/resume/stop/reprocess：** `Pause` 置 paused 标志（在途 worker 继续，调度器停止取新章）；`Stop` 取消 ctx 并标记 cancelled；`ReprocessChapter` 单章回 pending 并按需重启调度。
+
+### HTTP 接口
+
+见 §4.2 表中 `/api/text-review/*` 行（独立路由组，32 MiB body，`AuthMiddleware` 鉴权）。
+
+### 配置
+
+`internal/config.TextReviewConfig`（`Nodes`/`SplitPatterns`/`DefaultPromptPresetID`）持久化于 `config.yaml`；`finalizeConfig` 首启注入内置 split-pattern（nil 判断，用户清空为 `[]` 不再注入）；`internal/registry/text_review.go` 提供线程安全 CRUD；`internal/api/textreview/nodepersister.go` 在 ramp-down 时写回。
+
+### 源码锚点
+
+- `web/playground/static-pg/text-review.js`：`renderTextReview`/`cleanupTextReview` 入口 + 4 步路由
+- `web/playground/static-pg/text-review-step1..4.js`：导入/切分/AI 清理/审校四步 UI
+- `web/playground/static-pg/tr-state.js`：会话状态 + 切页快照/重订阅
+- `web/playground/static-pg/tr-split.js`：章节切分算法（移植自 novelhelper `split.ts`）
+- `web/playground/static-pg/tr-diff.js`：行级 diff 对比算法
+- `internal/textreview/{session,scheduler,cleaner,proxy_call,streaming_writer,events}.go`：会话引擎
+- `internal/api/textreview/{register,sessions,nodepersister}.go`：HTTP handler + ramp-down 落盘
+- `internal/registry/text_review.go`：节点池/切分模式 CRUD
+- `internal/config/types.go`（`TextReviewConfig`/`TextReviewNode`/`SplitPattern`）+ `defaults.go`（内置 split-pattern 注入）
+- `internal/api/router.go`：`/api/text-review/*` 路由组 + `pgJSFiles` 含 `tr-*`/`text-review*`
+- `web/static/app.js`：`gotoGalleryToggle` 3-way + `navigateTo` `case 'textreview'` + cleanup guard
+- `web/static/i18n.js`：`textReview` 及相关 UI 字符串
+- `web/static/index.html`：`tr-*.js` + `text-review*.js` 脚本加载
+
+### 变更维护清单
+
+| 触发变更 | 涉及源码 |
+|---|---|
+| 修改切分算法/默认模式 | `tr-split.js`、`internal/config/defaults.go`（内置 split-pattern）、`internal/config/types.go`（`SplitPattern`） |
+| 修改 diff 算法 | `tr-diff.js` |
+| 修改调度/ramp-down/重试 | `internal/textreview/scheduler.go`（`dispatch`/`runWorker`/`maxRetries`）、`nodepersister.go`（落盘）、`internal/config/types.go`（`TextReviewNode.Concurrency`/`Enabled`） |
+| 修改会话端点/SSE | `internal/api/textreview/sessions.go`、`internal/textreview/events.go`、`internal/api/router.go`（路由组） |
+| 修改节点池/切分模式 CRUD | `internal/registry/text_review.go`、`internal/api/textreview/register.go`、`internal/config/types.go` |
+| 修改 4 步向导交互 | `text-review.js`、`text-review-step1..4.js`、`tr-state.js`、`playground.css`（`.tr-s3`/`.tr-s4`）、`web/static/i18n.js` |
+| 修改 3-way 导航 | `web/static/app.js`（`gotoGalleryToggle`/`navigateTo`）、`web/static/auth.js`、`web/static/shortcuts.js`（F6 label）、`web/static/index.html` |

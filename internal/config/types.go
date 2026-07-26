@@ -32,10 +32,10 @@ type Key struct {
 // to support, as determined by probing (Step 3b). They are persisted on
 // ModelDef.Protocols and consumed by the multi-protocol composite detection UI.
 const (
-	ProtocolOpenAICompat     = "openai-compat"     // OpenAI Chat Completions compatible
-	ProtocolOpenAIResponses  = "openai-responses"  // OpenAI Responses API
-	ProtocolAnthropic        = "anthropic"         // Anthropic Messages API
-	ProtocolOpenAIEmbedding  = "openai-embedding"  // OpenAI Embeddings API
+	ProtocolOpenAICompat    = "openai-compat"    // OpenAI Chat Completions compatible
+	ProtocolOpenAIResponses = "openai-responses" // OpenAI Responses API
+	ProtocolAnthropic       = "anthropic"        // Anthropic Messages API
+	ProtocolOpenAIEmbedding = "openai-embedding" // OpenAI Embeddings API
 )
 
 // ModelDef represents one upstream model with its quota type tag.
@@ -272,6 +272,31 @@ type ReviewPreset struct {
 	UserPrompt   string `yaml:"userPrompt,omitempty" json:"userPrompt,omitempty"`
 }
 
+// TextReviewNode 是文本审核处理池中的一个节点 = 一个 provider 的一个 model + 并发配置。
+type TextReviewNode struct {
+	ID          string `yaml:"id" json:"id"`
+	ProviderID  string `yaml:"providerId" json:"providerId"`
+	ModelID     string `yaml:"modelId" json:"modelId"`
+	Concurrency int    `yaml:"concurrency" json:"concurrency"`
+	Enabled     bool   `yaml:"enabled" json:"enabled"`
+}
+
+// SplitPattern 章节检测正则（持久化形，regex 为字符串）。
+type SplitPattern struct {
+	Key     string `yaml:"key" json:"key"`
+	Label   string `yaml:"label" json:"label"`
+	Regex   string `yaml:"regex" json:"regex"`
+	Flags   string `yaml:"flags,omitempty" json:"flags,omitempty"`
+	Builtin bool   `yaml:"builtin,omitempty" json:"builtin,omitempty"`
+}
+
+// TextReviewConfig 持有文本审核功能的节点池、章节切分模式与默认清理 prompt 预设引用。
+type TextReviewConfig struct {
+	Nodes                 []TextReviewNode `yaml:"nodes,omitempty" json:"nodes,omitempty"`
+	SplitPatterns         []SplitPattern   `yaml:"splitPatterns,omitempty" json:"splitPatterns,omitempty"`
+	DefaultPromptPresetID string           `yaml:"defaultPromptPresetId,omitempty" json:"defaultPromptPresetId,omitempty"`
+}
+
 // AnySearchConfig stores the configuration for the AnySearch web search feature.
 type AnySearchConfig struct {
 	APIKey     string `yaml:"apiKey,omitempty" json:"apiKey,omitempty"`
@@ -289,23 +314,24 @@ type ThemeConfig struct {
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Port               int             `yaml:"port" json:"port"`
-	ConsoleLogMaxLines int             `yaml:"consoleLogMaxLines" json:"consoleLogMaxLines"`
-	UsageRingSize      int             `yaml:"usageRingSize" json:"usageRingSize"`
-	Rotation           RotationConfig  `yaml:"rotation" json:"rotation"`
-	EnablePlayground   bool            `yaml:"enablePlayground" json:"enablePlayground"`
-	QuickSlotOnly      bool            `yaml:"quickSlotOnly" json:"quickSlotOnly"`
-	Providers          []Provider      `yaml:"providers" json:"providers"`
-	Combos             []Combo         `yaml:"combos" json:"combos"`
-	QuickSlots         []QuickSlot     `yaml:"quickSlots" json:"quickSlots"`
-	Security           SecurityConfig  `yaml:"security" json:"security"`
-	Monitor            MonitorConfig   `yaml:"monitor" json:"monitor"`
-	Proxy              ProxyConfig     `yaml:"proxy" json:"proxy"`
-	Server             ServerConfig    `yaml:"server" json:"server"`
-	Download           DownloadConfig  `yaml:"download" json:"download"`
-	Shortcuts          ShortcutsConfig `yaml:"shortcuts,omitempty" json:"shortcuts,omitempty"`
-	ReviewPresets      []ReviewPreset  `yaml:"reviewPresets,omitempty" json:"reviewPresets,omitempty"`
-	AnySearch          AnySearchConfig `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
-	ImageSaveDir       string          `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
-	Theme              ThemeConfig     `yaml:"theme,omitempty" json:"theme,omitempty"`
+	Port               int              `yaml:"port" json:"port"`
+	ConsoleLogMaxLines int              `yaml:"consoleLogMaxLines" json:"consoleLogMaxLines"`
+	UsageRingSize      int              `yaml:"usageRingSize" json:"usageRingSize"`
+	Rotation           RotationConfig   `yaml:"rotation" json:"rotation"`
+	EnablePlayground   bool             `yaml:"enablePlayground" json:"enablePlayground"`
+	QuickSlotOnly      bool             `yaml:"quickSlotOnly" json:"quickSlotOnly"`
+	Providers          []Provider       `yaml:"providers" json:"providers"`
+	Combos             []Combo          `yaml:"combos" json:"combos"`
+	QuickSlots         []QuickSlot      `yaml:"quickSlots" json:"quickSlots"`
+	Security           SecurityConfig   `yaml:"security" json:"security"`
+	Monitor            MonitorConfig    `yaml:"monitor" json:"monitor"`
+	Proxy              ProxyConfig      `yaml:"proxy" json:"proxy"`
+	Server             ServerConfig     `yaml:"server" json:"server"`
+	Download           DownloadConfig   `yaml:"download" json:"download"`
+	Shortcuts          ShortcutsConfig  `yaml:"shortcuts,omitempty" json:"shortcuts,omitempty"`
+	ReviewPresets      []ReviewPreset   `yaml:"reviewPresets,omitempty" json:"reviewPresets,omitempty"`
+	AnySearch          AnySearchConfig  `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
+	ImageSaveDir       string           `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
+	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
+	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
 }
