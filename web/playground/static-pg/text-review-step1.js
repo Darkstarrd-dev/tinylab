@@ -33,20 +33,45 @@ window.trRenderStep1 = function (panel, state) {
   root.style.minHeight = '0';
   panel.appendChild(root);
 
-  // --- title row ---
+  // --- title row: left actions | centered title | right actions ---
   var titleRow = document.createElement('div');
   titleRow.className = 'tr-s1-title-row';
   root.appendChild(titleRow);
+
+  var leftActions = document.createElement('div');
+  leftActions.className = 'tr-s1-left-actions';
+  titleRow.appendChild(leftActions);
+
+  var openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'tr-btn';
+  openBtn.id = 'tr-s1-open';
+  openBtn.textContent = trT('trOpenFile');
+  openBtn.addEventListener('click', trStep1OpenFile);
+  leftActions.appendChild(openBtn);
+
+  if (hasText) {
+    var totalLines = trCountLines(state.rawText);
+    trS1LinesShown = Math.min(trS1PreviewLines, totalLines);
+    if (trS1LinesShown < totalLines) {
+      var loadMoreBtn = document.createElement('button');
+      loadMoreBtn.type = 'button';
+      loadMoreBtn.className = 'tr-btn';
+      loadMoreBtn.id = 'tr-s1-loadmore';
+      loadMoreBtn.textContent = trT('trLoadMore');
+      loadMoreBtn.addEventListener('click', trStep1LoadMore);
+      leftActions.appendChild(loadMoreBtn);
+    }
+  }
 
   var titleEl = document.createElement('span');
   titleEl.className = 'tr-s1-title';
   titleEl.textContent = trT('trStepImport');
   titleRow.appendChild(titleEl);
 
-  // actions (right side)
-  var actions = document.createElement('div');
-  actions.className = 'tr-s1-actions';
-  titleRow.appendChild(actions);
+  var rightActions = document.createElement('div');
+  rightActions.className = 'tr-s1-actions';
+  titleRow.appendChild(rightActions);
 
   var nextBtn = document.createElement('button');
   nextBtn.type = 'button';
@@ -55,7 +80,7 @@ window.trRenderStep1 = function (panel, state) {
   nextBtn.textContent = trT('trNext');
   nextBtn.disabled = !hasText;
   nextBtn.addEventListener('click', trStep1Next);
-  actions.appendChild(nextBtn);
+  rightActions.appendChild(nextBtn);
 
   if (hasText) {
     var abandonBtn = document.createElement('button');
@@ -64,7 +89,7 @@ window.trRenderStep1 = function (panel, state) {
     abandonBtn.id = 'tr-s1-abandon';
     abandonBtn.textContent = trT('trAbandon');
     abandonBtn.addEventListener('click', trStep1Abandon);
-    actions.appendChild(abandonBtn);
+    rightActions.appendChild(abandonBtn);
   }
 
   // --- info row (shown after import) ---
@@ -111,55 +136,21 @@ window.trRenderStep1 = function (panel, state) {
     preview.readOnly = true;
     previewWrap.appendChild(preview);
 
-    // Load first chunk
     var totalLines = trCountLines(state.rawText);
     trS1LinesShown = Math.min(trS1PreviewLines, totalLines);
     preview.textContent = trGetChunk(state.rawText, 0, trS1LinesShown);
 
     body.appendChild(previewWrap);
-
-    // Load-more button
-    if (trS1LinesShown < totalLines) {
-      var loadMoreBtn = document.createElement('button');
-      loadMoreBtn.type = 'button';
-      loadMoreBtn.className = 'tr-btn tr-s1-loadmore';
-      loadMoreBtn.id = 'tr-s1-loadmore';
-      loadMoreBtn.textContent = trT('trLoadMore');
-      loadMoreBtn.addEventListener('click', trStep1LoadMore);
-      body.appendChild(loadMoreBtn);
-    }
   } else {
-    // --- before-import view: intro ---
+    // --- before-import view: clean textarea with placeholder ---
     var intro = document.createElement('div');
     intro.className = 'tr-s1-intro';
     intro.id = 'tr-s1-intro';
 
-    var desc = document.createElement('p');
-    desc.className = 'tr-section-desc';
-    desc.textContent = trT('trImportDesc');
-    intro.appendChild(desc);
-
-    var btnRow = document.createElement('div');
-    btnRow.className = 'tr-btn-row';
-    var openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'tr-btn';
-    openBtn.id = 'tr-s1-open';
-    openBtn.textContent = trT('trOpenFile');
-    openBtn.addEventListener('click', trStep1OpenFile);
-    btnRow.appendChild(openBtn);
-    intro.appendChild(btnRow);
-
-    var pasteLabel = document.createElement('label');
-    pasteLabel.className = 'tr-label';
-    pasteLabel.htmlFor = 'tr-s1-paste';
-    pasteLabel.textContent = trT('trPasteHere');
-    intro.appendChild(pasteLabel);
-
     var pasteTa = document.createElement('textarea');
     pasteTa.className = 'tr-textarea';
     pasteTa.id = 'tr-s1-paste';
-    pasteTa.placeholder = trT('trPastePlaceholder');
+    pasteTa.placeholder = trT('trImportDesc');
     pasteTa.addEventListener('paste', trStep1PasteHandler);
     pasteTa.addEventListener('input', trStep1OnInput);
     intro.appendChild(pasteTa);
