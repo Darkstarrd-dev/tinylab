@@ -21,10 +21,12 @@ var trS3ActiveTab = 'pending';   // active chapter tab: pending|processing|compl
 var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an error
 var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
+var trS3ModelNames = {};        // modelId (realModelId||id) -> alias (from /api/models)
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
 
 function trS3ProviderName(id) { return trS3ProviderNames[id] || id || ''; }
 function trS3ProviderPrefix(id) { return trS3ProviderPrefixes[id] || ''; }
+function trS3ModelName(id) { return trS3ModelNames[id] || id || ''; }
 window._trS3ProviderPrefix = trS3ProviderPrefix;
 
 function trS3PopulateProviders(models) {
@@ -36,6 +38,11 @@ function trS3PopulateProviders(models) {
       var slash = m.id.indexOf('/');
       if (slash > 0) {
         trS3ProviderPrefixes[m.providerId] = m.id.slice(0, slash);
+      }
+      // Build modelId -> alias map (modelId = realModelId||id, the form stored on review nodes)
+      var mid = m.realModelId || m.id;
+      if (mid) {
+        trS3ModelNames[mid] = m.alias || m.name || m.id || mid;
       }
     }
   }
@@ -196,12 +203,12 @@ function trS3RenderConfigNodes(nodes) {
       '<td><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(n.id || '') + '"' +
         (n.enabled ? ' checked' : '') + ' onchange="trS3OnNodeToggle(' + idAttr + ')"></td>' +
       '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
+      '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
       '<td><input type="number" class="tr-node-conc" min="0" value="' +
         (n.concurrency != null ? n.concurrency : 1) + '" data-id="' + trEscapeHtml(n.id || '') +
         '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
-      '<td class="tr-s3-num">' + (n.intervalSec || 0) + '</td>' +
-      '<td class="tr-s3-num">' + (n.batchChars || 0) + '</td>' +
+      '<td><input type="number" class="tr-node-interval" min="0" value="' + (n.intervalSec != null ? n.intervalSec : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeInterval(' + idAttr + ')"></td>' +
+      '<td><input type="number" class="tr-node-batch" min="0" value="' + (n.batchChars != null ? n.batchChars : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeBatch(' + idAttr + ')"></td>' +
     '</tr>';
   }
   html += '</tbody></table>';
@@ -226,11 +233,34 @@ function trS3OnNodeConcurrency(id) {
   trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
 }
 
+function trS3OnNodeInterval(id) {
+  var row = trS3FindNodeRow(id);
+  if (!row) return;
+  var node = null;
+  for (var i = 0; i < trState.reviewNodes.length; i++) { if (trState.reviewNodes[i].id === id) { node = trState.reviewNodes[i]; break; } }
+  if (!node) return;
+  node.intervalSec = Math.max(0, parseInt(row.interval.value, 10) || 0);
+  trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
+}
+
+function trS3OnNodeBatch(id) {
+  var row = trS3FindNodeRow(id);
+  if (!row) return;
+  var node = null;
+  for (var i = 0; i < trState.reviewNodes.length; i++) { if (trState.reviewNodes[i].id === id) { node = trState.reviewNodes[i]; break; } }
+  if (!node) return;
+  node.batchChars = Math.max(0, parseInt(row.batch.value, 10) || 0);
+  trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
+}
+
 function trS3FindNodeRow(id) {
-  var en = document.querySelector('.tr-node-en[data-id="' + trS3CssSelector(nid(id)) + '"]');
-  var conc = document.querySelector('.tr-node-conc[data-id="' + trS3CssSelector(nid(id)) + '"]');
+  var sel = trS3CssSelector(nid(id));
+  var en = document.querySelector('.tr-node-en[data-id="' + sel + '"]');
+  var conc = document.querySelector('.tr-node-conc[data-id="' + sel + '"]');
   if (!en || !conc) return null;
-  return { en: en, conc: conc };
+  var interval = document.querySelector('.tr-node-interval[data-id="' + sel + '"]');
+  var batch = document.querySelector('.tr-node-batch[data-id="' + sel + '"]');
+  return { en: en, conc: conc, interval: interval, batch: batch };
 }
 
 function trS3UpsertNode(id, enabled, concurrency) {
@@ -255,6 +285,8 @@ function trS3UpsertNode(id, enabled, concurrency) {
     }
     node.concurrency = concurrency;
     node.enabled = enabled;
+    node.intervalSec = patch.intervalSec;
+    node.batchChars = patch.batchChars;
     var total = 0;
     for (var j = 0; j < trState.reviewNodes.length; j++) {
       if (trState.reviewNodes[j].enabled) total += (trState.reviewNodes[j].concurrency || 0);
@@ -312,7 +344,7 @@ function trStep3RenderSettingsModal() {
       var n = nodes[ni];
       nodeRows += '<tr>' +
         '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-        '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
+        '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
         '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td>' + (n.enabled ? '&#10003;' : '&#10007;') + '</td>' +
         '<td><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
@@ -393,7 +425,7 @@ function trStep3OnModalProviderChange() {
     if (m.type === 'provider' && m.providerId === providerId) {
       var opt = document.createElement('option');
       opt.value = m.realModelId || m.id;
-      opt.textContent = m.id;
+      opt.textContent = m.alias || m.name || m.id;
       modelSel.appendChild(opt);
     }
   }
@@ -488,7 +520,7 @@ function trS3RenderRuntimeNodes(nodes) {
     var rowClass = n.enabled ? '' : ' tr-s3-node-disabled';
     html += '<tr class="' + rowClass + '">' +
       '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
+      '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
       '<td>' + (n.target || 0) + '</td>' +
       '<td>' + (n.active || 0) + '</td>' +
     '</tr>';
@@ -581,7 +613,7 @@ function trStep3Start() {
     rangeEnd: range.rangeEnd
   }).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); trS3SessionStatus = 'idle'; trS3UpdateControls(); return; }
-    trState.sessionId = res && res.id;
+    trState.sessionId = res && res.sessionId;
     trSave();
     trSubscribeSession(trState.sessionId);
   }).catch(function (err) {
