@@ -31,14 +31,16 @@ var trState = {
   lineDecisions: {},         // {chapterIdx: {rowIdx: {action, content?}}} Step4 decisions (persisted)
   reviewNodes: [],           // node pool (fetched in Step3; in-memory)
   promptCollapsed: true,      // system prompt section collapsed state (Step3)
+  rangeStart: 0,             // chapter range: 1-based start chapter number (0 = from beginning / all)
+  rangeEnd: 0,               // chapter range: 1-based end chapter number (0 = to end / all)
   _loaded: false             // guard: trLoad() ran at least once
 };
 
 // Fields persisted to localStorage. chapters is stored as a META stub:
-// [{title, isVolume, contentLen, cleanedLen}] — no full text.
 var TR_PERSIST_FIELDS = [
   'sessionId', 'step', 'fileName', 'selectedPatternKey', 'customRegex',
-  'titleTemplate', 'keepPrologue', 'systemPrompt', 'autoRetry', 'lineDecisions', 'promptCollapsed'
+  'titleTemplate', 'keepPrologue', 'systemPrompt', 'autoRetry', 'lineDecisions', 'promptCollapsed',
+  'rangeStart', 'rangeEnd'
 ];
 
 /**
@@ -144,6 +146,8 @@ function trResetState() {
   trState.autoRetry = true;
   trState.lineDecisions = {};
   trState.reviewNodes = [];
+  trState.rangeStart = 0;
+  trState.rangeEnd = 0;
 }
 
 // ===================== exported API =====================

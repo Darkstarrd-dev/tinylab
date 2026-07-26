@@ -21,6 +21,7 @@ var trS3ActiveTab = 'pending';   // active chapter tab: pending|processing|compl
 var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an error
 var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
+var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
 
 function trS3ProviderName(id) { return trS3ProviderNames[id] || id || ''; }
 function trS3ProviderPrefix(id) { return trS3ProviderPrefixes[id] || ''; }
@@ -56,7 +57,7 @@ window.trRenderStep3 = function (panel, state) {
     '<div class="tr-step-panel">' +
 
       // node pool (config form when idle, runtime table when session live)
-      '<div class="tr-section">' +
+      '<div class="tr-section" id="tr-s3-pool-section">' +
         '<div class="tr-s3-node-head">' +
           '<h3 class="tr-section-title" style="margin:0">' + trEscapeHtml(trT('trNodePool')) + '</h3>' +
           '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-settings" onclick="trStep3OpenSettings()">' +
@@ -70,7 +71,7 @@ window.trRenderStep3 = function (panel, state) {
       '</div>' +
 
       // system prompt + auto-retry (collapsible)
-      '<div class="tr-section">' +
+      '<div class="tr-section" id="tr-s3-prompt-section">' +
         '<h3 class="tr-section-title tr-s3-prompt-head" id="tr-s3-prompt-head" onclick="trStep3TogglePrompt()"' +
           ' style="cursor:pointer;user-select:none">' +
           '<span class="tr-s3-chev' + (collapsed ? ' tr-s3-chev-collapsed' : '') + '" id="tr-s3-chev">&#9660;</span> ' +
@@ -92,6 +93,16 @@ window.trRenderStep3 = function (panel, state) {
         '<div class="tr-s3-controls">' +
           '<button type="button" class="tr-btn tr-btn-ghost" onclick="trGotoStep(2)">' +
             trEscapeHtml(trT('trPrev')) + '</button>' +
+          '<span class="tr-s3-range">' +
+            '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeStart')) + '</label>' +
+            '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-start" min="1" placeholder="' +
+              trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeStart ? state.rangeStart : '') +
+              '" onchange="trS3OnRangeChange()">' +
+            '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeEnd')) + '</label>' +
+            '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-end" min="1" placeholder="' +
+              trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeEnd ? state.rangeEnd : '') +
+              '" onchange="trS3OnRangeChange()">' +
+          '</span>' +
           '<span class="tr-spacer"></span>' +
           '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-start" onclick="trStep3Start()">' +
             trEscapeHtml(trT('trStartClean')) + '</button>' +
@@ -173,6 +184,8 @@ function trS3RenderConfigNodes(nodes) {
     '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
+    '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
+    '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
     '</tr></thead><tbody>';
   var totalConc = 0;
   for (var i = 0; i < nodes.length; i++) {
@@ -187,6 +200,8 @@ function trS3RenderConfigNodes(nodes) {
       '<td><input type="number" class="tr-node-conc" min="0" value="' +
         (n.concurrency != null ? n.concurrency : 1) + '" data-id="' + trEscapeHtml(n.id || '') +
         '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
+      '<td class="tr-s3-num">' + (n.intervalSec || 0) + '</td>' +
+      '<td class="tr-s3-num">' + (n.batchChars || 0) + '</td>' +
     '</tr>';
   }
   html += '</tbody></table>';
@@ -229,7 +244,9 @@ function trS3UpsertNode(id, enabled, concurrency) {
     providerId: node.providerId,
     modelId: node.modelId,
     concurrency: concurrency,
-    enabled: enabled
+    enabled: enabled,
+    intervalSec: node.intervalSec || 0,
+    batchChars: node.batchChars || 0
   };
   trApiPost('/text-review/review-nodes', patch).then(function (res) {
     if (res && res.error) {
@@ -315,6 +332,10 @@ function trStep3RenderSettingsModal() {
           '<select class="tr-select" id="tr-s3-modal-model"><option value="">--</option></select>' +
           '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + '</label>' +
           '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:80px">' +
+          '<label class="tr-label">' + trEscapeHtml(trT('trIntervalSec')) + '</label>' +
+          '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0" style="width:80px">' +
+          '<label class="tr-label">' + trEscapeHtml(trT('trBatchChars')) + '</label>' +
+          '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0" style="width:80px">' +
           '<label class="tr-check">' +
             '<input type="checkbox" id="tr-s3-modal-enabled" checked> ' +
             trEscapeHtml(trT('trNodeEnabled')) +
@@ -386,6 +407,8 @@ function trStep3AddNode() {
   var modelSel = document.getElementById('tr-s3-modal-model');
   var concEl = document.getElementById('tr-s3-modal-conc');
   var enEl = document.getElementById('tr-s3-modal-enabled');
+  var intervalEl = document.getElementById('tr-s3-modal-interval');
+  var batchEl = document.getElementById('tr-s3-modal-batch');
   if (!providerSel || !modelSel) return;
   var providerId = providerSel.value;
   var modelId = modelSel.value;
@@ -394,7 +417,9 @@ function trStep3AddNode() {
     providerId: providerId,
     modelId: modelId,
     concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
-    enabled: enEl ? enEl.checked : true
+    enabled: enEl ? enEl.checked : true,
+    intervalSec: intervalEl ? Math.max(0, parseInt(intervalEl.value, 10) || 0) : 0,
+    batchChars: batchEl ? Math.max(0, parseInt(batchEl.value, 10) || 0) : 0
   };
   trApiPost('/text-review/review-nodes', body).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
@@ -504,6 +529,29 @@ function trStep3TogglePrompt() {
   trSave();
 }
 
+// trS3OnRangeChange persists the (1-based) chapter range inputs to trState.
+function trS3OnRangeChange() {
+  var rs = document.getElementById('tr-s3-range-start');
+  var re = document.getElementById('tr-s3-range-end');
+  if (rs) trState.rangeStart = parseInt(rs.value, 10) || 0;
+  if (re) trState.rangeEnd = parseInt(re.value, 10) || 0;
+  trSave();
+}
+
+// trS3RangeBounds converts the 1-based chapter range inputs into the backend's
+// 0-based half-open [rangeStart, rangeEnd) bounds. Empty/0 means "no bound".
+function trS3RangeBounds() {
+  var rs = trState.rangeStart || 0;
+  var re = trState.rangeEnd || 0;
+  var rangeStart = rs > 0 ? rs - 1 : 0;
+  var rangeEnd = 0;
+  if (rs > 0 || re > 0) {
+    var total = trState.chapters ? trState.chapters.length : 0;
+    rangeEnd = re > 0 ? re : total;
+  }
+  return { rangeStart: rangeStart, rangeEnd: rangeEnd };
+}
+
 // ===================== run controls =====================
 
 /**
@@ -523,11 +571,14 @@ function trStep3Start() {
   }
   trS3SessionStatus = 'running';
   trS3UpdateControls();
-  trApiPost('/sessions', {
+  var range = trS3RangeBounds();
+  trApiPost('/text-review/sessions', {
     chapters: trState.chapters.map(function (c) { return { title: c.title, content: c.content }; }),
     systemPrompt: trState.systemPrompt || '',
     autoRetry: !!trState.autoRetry,
-    nodeIds: nodeIds
+    nodeIds: nodeIds,
+    rangeStart: range.rangeStart,
+    rangeEnd: range.rangeEnd
   }).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); trS3SessionStatus = 'idle'; trS3UpdateControls(); return; }
     trState.sessionId = res && res.id;
@@ -542,25 +593,25 @@ function trStep3Start() {
 }
 
 function trStep3Pause() {
-  trApiPost('/sessions/' + trState.sessionId + '/pause', {}).then(function () {}, function () {
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/pause', {}).then(function () {}, function () {
     trToast(trT('trPauseFailed'), 'error');
   });
 }
 
 function trStep3Resume() {
-  trApiPost('/sessions/' + trState.sessionId + '/resume', {}).then(function () {}, function () {
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/resume', {}).then(function () {}, function () {
     trToast(trT('trResumeFailed'), 'error');
   });
 }
 
 function trStep3Stop() {
-  trApiPost('/sessions/' + trState.sessionId + '/stop', {}).then(function () {}, function () {
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/stop', {}).then(function () {}, function () {
     trToast(trT('trStopFailed'), 'error');
   });
 }
 
 function trStep3Reprocess(idx) {
-  trApiPost('/sessions/' + trState.sessionId + '/reprocess', { chapterIdx: idx }).then(function () {
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/chapters/' + idx + '/reprocess', {}).then(function () {
     trToast(trT('trReprocessQueued'), 'success');
   }, function () {
     trToast(trT('trReprocessFailed'), 'error');
@@ -591,6 +642,18 @@ function trS3UpdateControls() {
   if (resume) resume.style.display = paused ? '' : 'none';
   if (stop) stop.style.display = (running || paused) ? '' : 'none';
   if (toreview) toreview.style.display = done ? '' : 'none';
+  // Problem3: hide the node-pool and system-prompt config sections while a
+  // run is active; show them again when idle, paused, completed, or cancelled.
+  var pool = document.getElementById('tr-s3-pool-section');
+  var promptSec = document.getElementById('tr-s3-prompt-section');
+  if (pool) pool.style.display = running ? 'none' : '';
+  if (promptSec) promptSec.style.display = running ? 'none' : '';
+  // Range inputs are fixed at session creation; lock them while a session is live.
+  var rs = document.getElementById('tr-s3-range-start');
+  var re = document.getElementById('tr-s3-range-end');
+  var lockRange = running || paused;
+  if (rs) rs.disabled = lockRange;
+  if (re) re.disabled = lockRange;
 }
 
 // ===================== chapter tabs + list =====================
@@ -627,9 +690,8 @@ function trS3SelectTab(key) {
 }
 
 /**
- * Render every chapter card once (preserving DOM identity so live-pane scroll
- * positions survive tab switches and status transitions). Tab membership is
- * applied via display:none toggles, not innerHTML rebuilds.
+ * Render every chapter card once. Tab membership is applied via display:none
+ * toggles, not innerHTML rebuilds, so in-place status updates keep working.
  */
 function trS3RenderChapterList() {
   var list = document.getElementById('tr-s3-chapters');
@@ -647,33 +709,54 @@ function trS3RenderChapterList() {
   }
   list.innerHTML = html;
   trS3ApplyTabFilter();
+  // Highlight the selected card and render its content in the right pane.
+  if (trS3SelectedIdx >= trS3Chapters.length) trS3SelectedIdx = 0;
+  trS3SelectChapter(trS3SelectedIdx);
 }
 
 function trS3CardHtml(c, idx) {
   var status = c.status || 'pending';
   var badge = trT('trStatus_' + status);
   var badgeClass = 'tr-s3-badge tr-s3-badge-' + status;
-  var meta = trS3MetaHtml(c);
-  return '<div class="tr-s3-card" data-status="' + status + '" data-idx="' + idx + '">' +
-    '<div class="tr-s3-card-head">' +
-      '<span class="tr-s3-card-title">' + trEscapeHtml(c.title || ('#' + (idx + 1))) + '</span>' +
-      '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
-    '</div>' +
-    (meta ? '<div class="tr-s3-card-meta">' + meta + '</div>' : '') +
-    '<div class="tr-s3-live" id="tr-s3-live-' + idx + '"></div>' +
-    '<div class="tr-s3-card-foot">' +
-      '<button class="tr-btn tr-btn-xs" onclick="trStep3Reprocess(' + idx + ')">' +
-        trEscapeHtml(trT('trReprocess')) + '</button>' +
-    '</div>' +
+  var sel = (idx === trS3SelectedIdx) ? ' selected' : '';
+  var title = c.title || ('#' + (idx + 1));
+  // Title attribute surfaces error/retry info without breaking the compact row.
+  var tip = c.error ? ('[' + c.error + ']') : (c.nodeId ? c.nodeId : '');
+  return '<div class="tr-s3-card' + sel + '" data-status="' + status + '" data-idx="' + idx +
+    '" title="' + trEscapeHtml(tip) + '" onclick="trS3SelectChapter(' + idx + ')">' +
+    '<span class="tr-s3-card-title">' + trEscapeHtml(title) + '</span>' +
+    '<span class="tr-s3-card-progress">' + trEscapeHtml(trS3CardProgress(c)) + '</span>' +
+    '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
+    '<button class="tr-btn tr-btn-xs tr-s3-reproc" onclick="event.stopPropagation();trStep3Reprocess(' + idx + ')">' +
+      trEscapeHtml(trT('trReprocess')) + '</button>' +
   '</div>';
 }
 
-function trS3MetaHtml(c) {
-  var parts = [];
-  if (c.nodeId) parts.push('<span class="tr-s3-meta-node">' + trEscapeHtml(c.nodeId) + '</span>');
-  if (c.retryCount) parts.push('<span class="tr-s3-meta-retry">' + trEscapeHtml(trT('trRetry', [String(c.retryCount)])) + '</span>');
-  if (c.error) parts.push('<span class="tr-s3-error">' + trEscapeHtml(c.error) + '</span>');
-  return parts.join(' ');
+// trS3CardProgress renders the compact card's progress cell: the cleaned-char
+// count when there is cleaned text, "streaming" while processing with no text
+// yet, otherwise empty.
+function trS3CardProgress(c) {
+  if (c.cleaned) return String(c.cleaned.length);
+  if (c.status === 'processing') return trT('trStreaming');
+  return '';
+}
+
+// trS3SelectChapter selects a chapter card: highlights it and renders its
+// content (or cleaned stream) in the right content pane (#ed-review-content).
+function trS3SelectChapter(idx) {
+  if (idx < 0 || idx >= trS3Chapters.length) return;
+  trS3SelectedIdx = idx;
+  var cards = document.querySelectorAll('#tr-s3-chapters .tr-s3-card');
+  for (var i = 0; i < cards.length; i++) cards[i].classList.remove('selected');
+  var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + idx + '"]');
+  if (card) card.classList.add('selected');
+  var pane = document.getElementById('ed-review-content');
+  if (!pane) return;
+  var c = trS3Chapters[idx];
+  var text = c.cleaned ? c.cleaned : (c.content || '');
+  if (c.status === 'failed' && c.error) text += (text ? '\n\n' : '') + '[' + c.error + ']';
+  pane.textContent = text;
+  if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
 }
 
 function trS3ApplyTabFilter() {
@@ -694,9 +777,8 @@ function trS3ApplyTabFilter() {
 }
 
 /**
- * Update a single card in place (badge, meta, foot, data-status) and re-apply
- * the tab filter. Does NOT rebuild the list, so other cards' live panes keep
- * their scroll positions.
+ * Update a single card in place (badge, progress, data-status) and re-apply
+ * the tab filter. Does NOT rebuild the list, so other cards keep their state.
  */
 function trS3UpdateCardStatus(idx) {
   var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + idx + '"]');
@@ -704,13 +786,15 @@ function trS3UpdateCardStatus(idx) {
   var c = trS3Chapters[idx];
   var status = c.status || 'pending';
   card.setAttribute('data-status', status);
+  var tip = c.error ? ('[' + c.error + ']') : (c.nodeId ? c.nodeId : '');
+  card.setAttribute('title', tip);
   var badge = card.querySelector('.tr-s3-badge');
   if (badge) {
     badge.textContent = trT('trStatus_' + status);
     badge.className = 'tr-s3-badge tr-s3-badge-' + status;
   }
-  var meta = card.querySelector('.tr-s3-card-meta');
-  if (meta) meta.innerHTML = trS3MetaHtml(c);
+  var prog = card.querySelector('.tr-s3-card-progress');
+  if (prog) prog.textContent = trS3CardProgress(c);
   trS3ApplyTabFilter();
 }
 
@@ -722,7 +806,7 @@ function trS3UpdateCardStatus(idx) {
  * authoritative; events overwrite the in-memory mirror post-snapshot.
  */
 function trSubscribeSession(id) {
-  trApiGet('/sessions/' + id).then(function (res) {
+  trApiGet('/text-review/sessions/' + id).then(function (res) {
     if (res && !res.error) {
       trS3ReconcileFromSnapshot(res);
       trS3RenderAll();
@@ -765,13 +849,16 @@ function trS3OnChunk(evt) {
   c.cleaned += evt.delta || '';
   var old = c.status;
   c.status = 'processing';
-  var live = document.getElementById('tr-s3-live-' + idx);
-  if (live) {
-    live.textContent = c.cleaned;
-    if (trS3ScrolledToBottom(live)) live.scrollTop = live.scrollHeight;
+  trS3UpdateCardStatus(idx);
+  // Mirror the stream into the right content pane when this chapter is selected.
+  if (idx === trS3SelectedIdx) {
+    var pane = document.getElementById('ed-review-content');
+    if (pane) {
+      pane.textContent = c.cleaned;
+      if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
+    }
   }
-  if (old !== 'processing') trS3UpdateCardStatus(idx);
-  trS3UpdateTabCounts();
+  if (old !== 'processing') trS3UpdateTabCounts();
 }
 
 /**

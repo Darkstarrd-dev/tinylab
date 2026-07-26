@@ -279,6 +279,13 @@ type TextReviewNode struct {
 	ModelID     string `yaml:"modelId" json:"modelId"`
 	Concurrency int    `yaml:"concurrency" json:"concurrency"`
 	Enabled     bool   `yaml:"enabled" json:"enabled"`
+	// IntervalSec is the minimum number of seconds between two dispatches on
+	// this node (node-level request rate limiting). 0 = no limit.
+	IntervalSec int `yaml:"intervalSec,omitempty" json:"intervalSec,omitempty"`
+	// BatchChars is the maximum accumulated chapter characters sent in one
+	// LLM request (multi-chapter batching). 0 = no batching (one chapter per
+	// request, the default single-chapter behavior).
+	BatchChars int `yaml:"batchChars,omitempty" json:"batchChars,omitempty"`
 }
 
 // SplitPattern 章节检测正则（持久化形，regex 为字符串）。

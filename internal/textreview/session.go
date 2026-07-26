@@ -47,6 +47,9 @@ type NodeRuntime struct {
 	config.TextReviewNode
 	Active int `json:"active"`
 	Target int `json:"target"`
+	// lastRequest is the dispatch time of the most recent batch on this node,
+	// used for IntervalSec rate-limiting. Unexported — not serialized.
+	lastRequest time.Time
 }
 
 // CreateSessionRequest is the body of POST /sessions.
@@ -56,6 +59,11 @@ type CreateSessionRequest struct {
 	Chapters     []CreateChapter `json:"chapters"`
 	SystemPrompt string          `json:"systemPrompt"`
 	NodeIDs      []string        `json:"nodeIds"`
+	// RangeStart/RangeEnd restrict cleaning to chapters in the half-open
+	// index range [RangeStart, RangeEnd). Both 0 (the default) means all
+	// chapters are cleaned.
+	RangeStart int `json:"rangeStart,omitempty"`
+	RangeEnd   int `json:"rangeEnd,omitempty"`
 }
 
 // CreateChapter is one chapter in a create-session request.
@@ -76,6 +84,8 @@ type Session struct {
 	SystemPrompt string        `json:"systemPrompt"`
 	Status       string        `json:"status"`
 	CreatedAt    time.Time     `json:"createdAt"`
+	RangeStart   int           `json:"rangeStart,omitempty"`
+	RangeEnd     int           `json:"rangeEnd,omitempty"`
 
 	mu     sync.Mutex
 	paused bool
@@ -133,6 +143,8 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 		SystemPrompt: req.SystemPrompt,
 		Status:       SessionIdle,
 		CreatedAt:    time.Now(),
+		RangeStart:   req.RangeStart,
+		RangeEnd:     req.RangeEnd,
 	}
 	return s
 }
@@ -186,5 +198,7 @@ func (s *Session) Snapshot() *Session {
 		SystemPrompt: s.SystemPrompt,
 		Status:       s.Status,
 		CreatedAt:    s.CreatedAt,
+		RangeStart:   s.RangeStart,
+		RangeEnd:     s.RangeEnd,
 	}
 }

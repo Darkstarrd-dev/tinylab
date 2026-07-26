@@ -2,9 +2,11 @@ package textreview
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 )
 
@@ -69,11 +71,12 @@ func (e *Engine) Start(s *Session) bool {
 	return true
 }
 
-// dispatch is the main scheduling loop. It pops the next pending (or
-// needsReprocess) chapter, finds a node with Active < Target && Enabled, and
-// spawns a worker goroutine for it. It respects pause (blocks until resumed
-// or ctx done) and ctx cancellation. When no chapter is pending and no worker
-// is in flight, it marks the session completed.
+// dispatch is the main scheduling loop. It acquires a node with a free slot
+// (Active<Target, Enabled, and IntervalSec elapsed), claims a batch of pending
+// in-range chapters sized to that node's BatchChars, and spawns one worker
+// goroutine per batch. It respects pause (blocks until resumed or ctx done)
+// and ctx cancellation. The session completes when no in-range chapter is
+// pending and no worker is in flight.
 func (e *Engine) dispatch(ctx context.Context, s *Session) {
 	defer close(s.done)
 	var inFlight int32
@@ -91,105 +94,140 @@ func (e *Engine) dispatch(ctx context.Context, s *Session) {
 		default:
 		}
 
-		idx, ok := e.nextPendingChapter(s)
-		if !ok {
-			// No pending chapter. If no workers in flight, we're done.
-			if atomic.LoadInt32(&inFlight) == 0 {
-				e.finalizeCompleted(s)
-				return
-			}
-			// Workers still running; wait briefly and re-check.
-			select {
-			case <-ctx.Done():
-				e.finalizeCancelled(s)
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
+		nodeIdx, batch := e.acquireAndClaim(s)
+		if len(batch) > 0 {
+			atomic.AddInt32(&inFlight, 1)
+			go e.runBatch(ctx, s, batch, nodeIdx, &inFlight)
 			continue
 		}
 
-		nodeIdx := e.acquireNode(s)
-		if nodeIdx < 0 {
-			// No node available right now. Mark the chapter back to pending
-			// (it was popped as processing) and wait for a worker to release.
-			e.requeueChapter(s, idx)
-			select {
-			case <-ctx.Done():
-				e.finalizeCancelled(s)
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
-			continue
+		// Nothing dispatched: no free node, or no pending in-range chapter. If no
+		// worker is in flight and nothing remains pending, the run is complete.
+		if atomic.LoadInt32(&inFlight) == 0 && !e.hasPending(s) {
+			e.finalizeCompleted(s)
+			return
 		}
-
-		atomic.AddInt32(&inFlight, 1)
-		go e.runWorker(ctx, s, idx, nodeIdx, &inFlight)
+		select {
+		case <-ctx.Done():
+			e.finalizeCancelled(s)
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
-// runWorker processes one chapter on one node. It sets the chapter to
-// processing, calls the cleaner, then applies the failure rules.
-func (e *Engine) runWorker(ctx context.Context, s *Session, chapterIdx, nodeIdx int, inFlight *int32) {
+// runBatch processes one batch of chapters on one node. A single-chapter
+// batch (the node's BatchChars<=0) is exactly the original one-chapter-per-
+// request path: OK marks the chapter completed with no quality gate. A
+// multi-chapter batch (BatchChars>0) merges the chapters into one LLM call;
+// the streamed result is split per chapter and, on OK, any chapter whose
+// cleaned text is <10 chars is marked failed. Exhausted/4xx/mid-stream
+// failures apply to the whole batch (one ramp-down per batch).
+func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx int, inFlight *int32) {
 	defer atomic.AddInt32(inFlight, -1)
 
 	s.lock()
-	ch := &s.Chapters[chapterIdx]
-	ch.Status = StatusProcessing
-	ch.NodeID = s.Nodes[nodeIdx].ID
 	node := s.Nodes[nodeIdx]
-	s.Nodes[nodeIdx].Active++
-	content := ch.Content
+	nodeID := node.ID
+	sysPrompt := s.SystemPrompt
+	batchChs := make([]BatchChapter, len(batch))
+	for j, idx := range batch {
+		s.Chapters[idx].Status = StatusProcessing
+		s.Chapters[idx].NodeID = nodeID
+		batchChs[j] = BatchChapter{Key: strconv.Itoa(idx), Content: s.Chapters[idx].Content}
+	}
 	s.unlock()
-	broadcast(s, Event{Type: EventStatus, ChapterIdx: chapterIdx, Status: StatusProcessing, NodeID: node.ID})
+
+	for _, idx := range batch {
+		broadcast(s, Event{Type: EventStatus, ChapterIdx: idx, Status: StatusProcessing, NodeID: nodeID})
+	}
 	broadcast(s, Event{Type: EventNode, Nodes: e.nodeSnapshot(s)})
 
-	// Accumulate deltas under the session mutex; broadcast each chunk.
-	onChunk := func(delta string) {
+	// onChunk routes a streamed delta back to its chapter under the session
+	// mutex and broadcasts it to SSE subscribers.
+	onChunk := func(chapterKey string, delta string) {
+		idx, err := strconv.Atoi(chapterKey)
+		if err != nil {
+			return
+		}
 		s.lock()
-		s.Chapters[chapterIdx].Cleaned += delta
+		s.Chapters[idx].Cleaned += delta
 		s.unlock()
-		broadcast(s, Event{Type: EventChunk, ChapterIdx: chapterIdx, Delta: delta})
+		broadcast(s, Event{Type: EventChunk, ChapterIdx: idx, Delta: delta})
 	}
 
-	res := e.cleaner.Clean(ctx, node.TextReviewNode, s.SystemPrompt, content, onChunk)
+	var res CleanResult
+	switch {
+	case len(batch) == 1:
+		idx := batch[0]
+		single := func(delta string) { onChunk(strconv.Itoa(idx), delta) }
+		res = e.cleaner.Clean(ctx, node.TextReviewNode, sysPrompt, batchChs[0].Content, single)
+	default:
+		if bc, ok := e.cleaner.(BatchCleaner); ok {
+			res = bc.CleanBatch(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk)
+		} else {
+			res = e.cleanBatchFallback(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk)
+		}
+	}
 
+	// Apply the result under the lock. Ramp-down happens once per batch.
 	s.lock()
 	s.Nodes[nodeIdx].Active--
-	switch {
-	case res.OK:
-		s.Chapters[chapterIdx].Status = StatusCompleted
-		s.Chapters[chapterIdx].Error = ""
-	case res.Exhausted:
-		// Ramp-down: Target-- (min 0); at 0 disable.
+	gateEmpty := len(batch) > 1 // <10-char quality gate only for true batches
+	if res.Exhausted {
 		if s.Nodes[nodeIdx].Target > 0 {
 			s.Nodes[nodeIdx].Target--
 		}
 		if s.Nodes[nodeIdx].Target == 0 {
 			s.Nodes[nodeIdx].Enabled = false
 		}
-		// Persist the ramp-down decision (outside lock below).
-		s.Chapters[chapterIdx].Retry++
-		if s.Chapters[chapterIdx].Retry <= maxRetries {
-			s.Chapters[chapterIdx].Status = StatusPending
-		} else {
-			s.Chapters[chapterIdx].Status = StatusFailed
-			s.Chapters[chapterIdx].Error = "node exhausted"
-		}
-	case res.Passed4xx:
-		s.Chapters[chapterIdx].Status = StatusFailed
-		s.Chapters[chapterIdx].Error = res.ErrMsg
-	default: // mid-stream / other failure
-		s.Chapters[chapterIdx].Status = StatusFailed
-		s.Chapters[chapterIdx].Error = res.ErrMsg
-		if s.Chapters[chapterIdx].Error == "" {
-			s.Chapters[chapterIdx].Error = "stream interrupted"
+	}
+	type outcome struct {
+		idx    int
+		status string
+		errMsg string
+	}
+	outs := make([]outcome, len(batch))
+	for j, idx := range batch {
+		ch := &s.Chapters[idx]
+		switch {
+		case res.OK:
+			if gateEmpty && len(ch.Cleaned) < 10 {
+				ch.Status = StatusFailed
+				ch.Error = "empty result"
+				outs[j] = outcome{idx, StatusFailed, "empty result"}
+			} else {
+				ch.Status = StatusCompleted
+				ch.Error = ""
+				outs[j] = outcome{idx, StatusCompleted, ""}
+			}
+		case res.Exhausted:
+			ch.Retry++
+			if ch.Retry <= maxRetries {
+				ch.Status = StatusPending
+				outs[j] = outcome{idx, StatusPending, ""}
+			} else {
+				ch.Status = StatusFailed
+				ch.Error = "node exhausted"
+				outs[j] = outcome{idx, StatusFailed, "node exhausted"}
+			}
+		case res.Passed4xx:
+			ch.Status = StatusFailed
+			ch.Error = res.ErrMsg
+			outs[j] = outcome{idx, StatusFailed, res.ErrMsg}
+		default: // mid-stream / other failure
+			msg := res.ErrMsg
+			if msg == "" {
+				msg = "stream interrupted"
+			}
+			ch.Status = StatusFailed
+			ch.Error = msg
+			outs[j] = outcome{idx, StatusFailed, msg}
 		}
 	}
-	nodeID := s.Nodes[nodeIdx].ID
+	nodeID = s.Nodes[nodeIdx].ID
 	target := s.Nodes[nodeIdx].Target
 	enabled := s.Nodes[nodeIdx].Enabled
-	status := s.Chapters[chapterIdx].Status
-	errMsg := s.Chapters[chapterIdx].Error
 	s.unlock()
 
 	// Persist ramp-down decision to config.yaml (permanent write).
@@ -204,50 +242,130 @@ func (e *Engine) runWorker(ctx context.Context, s *Session, chapterIdx, nodeIdx 
 	}
 
 	broadcast(s, Event{Type: EventNode, Nodes: e.nodeSnapshot(s)})
-	broadcast(s, Event{Type: EventStatus, ChapterIdx: chapterIdx, Status: status, Error: errMsg, NodeID: nodeID})
+	for _, o := range outs {
+		broadcast(s, Event{Type: EventStatus, ChapterIdx: o.idx, Status: o.status, Error: o.errMsg, NodeID: nodeID})
+	}
 }
 
-// nextPendingChapter pops the next chapter whose status is pending or
-// needsReprocess, marking it (transiently) processing so it isn't picked
-// twice. Returns (index, true) or (-1, false) if none.
-func (e *Engine) nextPendingChapter(s *Session) (int, bool) {
+// cleanBatchFallback handles a multi-chapter batch when the cleaner does not
+// implement BatchCleaner (e.g. a test fake): it cleans each chapter with a
+// separate Clean call, stopping at the first non-OK result. This is not true
+// batching but keeps behavior correct; production uses ProxyCleaner.CleanBatch.
+func (e *Engine) cleanBatchFallback(ctx context.Context, node config.TextReviewNode, sysPrompt string, batchChs []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult {
+	var res CleanResult
+	for _, bc := range batchChs {
+		key := bc.Key
+		single := func(delta string) { onChunk(key, delta) }
+		res = e.cleaner.Clean(ctx, node, sysPrompt, bc.Content, single)
+		if !res.OK {
+			return res
+		}
+	}
+	return res
+}
+
+// dequeueBatch selects a batch of chapter indices to clean in one request. It
+// scans chapters in order; the first pending (or needsReprocess) chapter is
+// always taken, then pending chapters are accumulated while their content fits
+// within maxChars. maxChars<=0 means no batching: exactly one chapter is taken.
+// dequeueBatch is pure: it does not mutate chapters; the caller marks them
+// claimed.
+func dequeueBatch(chapters []Chapter, maxChars int) []int {
+	var batch []int
+	accChars := 0
+	for i := range chapters {
+		st := chapters[i].Status
+		if st != StatusPending && st != StatusNeedsReproc {
+			continue
+		}
+		if len(batch) == 0 {
+			batch = append(batch, i)
+			accChars += len(chapters[i].Content)
+			continue
+		}
+		if maxChars <= 0 {
+			break // no batching: one chapter only
+		}
+		if accChars >= maxChars {
+			break
+		}
+		if accChars+len(chapters[i].Content) > maxChars {
+			break
+		}
+		batch = append(batch, i)
+		accChars += len(chapters[i].Content)
+	}
+	return batch
+}
+
+// acquireAndClaim finds the first node with a free slot — Active<Target,
+// Enabled, and (when IntervalSec>0) past its last dispatch time — that has
+// pending in-range chapters, claims a batch for it sized to the node's
+// BatchChars, bumps Active, and records the dispatch time. Returns
+// (nodeIdx, batch); (-1, nil) if no node can take work right now.
+func (e *Engine) acquireAndClaim(s *Session) (int, []int) {
+	s.lock()
+	defer s.unlock()
+	now := time.Now()
+	for i := range s.Nodes {
+		n := &s.Nodes[i]
+		if !n.Enabled || n.Active >= n.Target {
+			continue
+		}
+		if n.IntervalSec > 0 && !n.lastRequest.IsZero() && now.Sub(n.lastRequest) < time.Duration(n.IntervalSec)*time.Second {
+			continue
+		}
+		batch := e.nextBatchLocked(s, n.BatchChars)
+		if len(batch) == 0 {
+			continue // node free but nothing pending; try the next node
+		}
+		n.Active++
+		n.lastRequest = now
+		return i, batch
+	}
+	return -1, nil
+}
+
+// nextBatchLocked dequeues a batch of pending, in-range chapters sized to
+// maxChars and marks each "claimed" so it is not picked twice. Must be called
+// under the session lock. Returns the chapter indices (empty if none).
+func (e *Engine) nextBatchLocked(s *Session, maxChars int) []int {
+	var view []Chapter
+	var orig []int
+	for i := range s.Chapters {
+		if s.RangeEnd > 0 && (i < s.RangeStart || i >= s.RangeEnd) {
+			continue
+		}
+		view = append(view, s.Chapters[i])
+		orig = append(orig, i)
+	}
+	sel := dequeueBatch(view, maxChars)
+	batch := make([]int, len(sel))
+	for j, f := range sel {
+		batch[j] = orig[f]
+	}
+	for _, idx := range batch {
+		s.Chapters[idx].Status = "claimed"
+	}
+	return batch
+}
+
+// hasPending reports whether any in-range chapter is still pending or marked
+// needsReprocess. Out-of-range chapters are never claimed, so they do not
+// block completion of the requested range.
+func (e *Engine) hasPending(s *Session) bool {
 	s.lock()
 	defer s.unlock()
 	for i := range s.Chapters {
+		if s.RangeEnd > 0 && (i < s.RangeStart || i >= s.RangeEnd) {
+			continue
+		}
 		st := s.Chapters[i].Status
 		if st == StatusPending || st == StatusNeedsReproc {
-			// Leave it pending; the worker will set processing. To avoid
-			// double-dispatch we mark it needsReprocess-cleared by setting
-			// processing only at worker start. Instead use a claim: set a
-			// transitional status here.
-			s.Chapters[i].Status = "claimed"
-			return i, true
+			return true
 		}
 	}
-	return -1, false
-}
-
-// requeueChapter returns a claimed chapter to pending (no node was available).
-func (e *Engine) requeueChapter(s *Session, idx int) {
-	s.lock()
-	defer s.unlock()
-	if s.Chapters[idx].Status == "claimed" {
-		s.Chapters[idx].Status = StatusPending
-	}
-}
-
-// acquireNode finds the first node with Active < Target && Enabled and returns
-// its index. The caller bumps Active in the worker (after the chapter is
-// claimed) — acquireNode just selects.
-func (e *Engine) acquireNode(s *Session) int {
-	s.lock()
-	defer s.unlock()
-	for i := range s.Nodes {
-		if s.Nodes[i].Enabled && s.Nodes[i].Active < s.Nodes[i].Target {
-			return i
-		}
-	}
-	return -1
+	return false
 }
 
 // nodeSnapshot returns a copy of the node runtime slice for SSE broadcast.

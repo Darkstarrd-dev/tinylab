@@ -297,9 +297,10 @@ window.renderEditor = function(container) {
   reviewArea.id = 'ed-review-area';
   reviewWrap.appendChild(reviewArea);
 
-  var reviewSpacer = document.createElement('div');
-  reviewSpacer.className = 'ed-review-spacer';
-  reviewWrap.appendChild(reviewSpacer);
+  var reviewContent = document.createElement('pre');
+  reviewContent.className = 'ed-review-content';
+  reviewContent.id = 'ed-review-content';
+  reviewWrap.appendChild(reviewContent);
 
   layout.appendChild(reviewWrap);
 
