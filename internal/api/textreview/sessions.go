@@ -87,7 +87,7 @@ func (h *Handler) sessionEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			data := evt.JSON()
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data); err != nil {
 				return
 			}
 			flusher.Flush()

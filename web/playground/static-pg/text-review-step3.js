@@ -768,9 +768,10 @@ function trS3CardHtml(c, idx) {
 // count when there is cleaned text, "streaming" while processing with no text
 // yet, otherwise empty.
 function trS3CardProgress(c) {
-  if (c.cleaned) return String(c.cleaned.length);
-  if (c.status === 'processing') return trT('trStreaming');
-  return '';
+  var total = (c.content || '').length;
+  var done = (c.cleaned || '').length;
+  if (c.status === 'processing' || c.cleaned) return done + '/' + total;
+  return String(total);
 }
 
 // trS3SelectChapter selects a chapter card: highlights it and renders its
@@ -785,7 +786,14 @@ function trS3SelectChapter(idx) {
   var pane = document.getElementById('ed-review-content');
   if (!pane) return;
   var c = trS3Chapters[idx];
-  var text = c.cleaned ? c.cleaned : (c.content || '');
+  var text;
+  if (c.status === 'processing') {
+    text = c.cleaned || '';
+  } else if (c.status === 'completed' || c.status === 'failed') {
+    text = c.cleaned || c.content || '';
+  } else {
+    text = c.content || '';
+  }
   if (c.status === 'failed' && c.error) text += (text ? '\n\n' : '') + '[' + c.error + ']';
   pane.textContent = text;
   if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
@@ -899,7 +907,13 @@ function trS3OnChunk(evt) {
  */
 function trS3OnStatus(evt) {
   var idx = evt.chapterIdx;
-  if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
+  if (idx == null) {
+    // Session-level status (running/paused/resumed/cancelled/completed).
+    if (evt.status) { trS3SessionStatus = evt.status; trS3UpdateControls(); }
+    trS3MaybeSessionDone();
+    return;
+  }
+  if (idx < 0 || idx >= trS3Chapters.length) return;
   trS3Chapters[idx].status = evt.status || 'pending';
   if (evt.error) trS3Chapters[idx].error = evt.error;
   if (evt.nodeId) trS3Chapters[idx].nodeId = evt.nodeId;
