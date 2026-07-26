@@ -675,7 +675,7 @@ function trS3UpdateControls() {
   var running = (s === 'running');
   var paused = (s === 'paused');
   var done = (s === 'completed' || s === 'cancelled');
-  if (start) start.style.display = idle ? '' : 'none';
+  if (start) start.style.display = (idle || done) ? '' : 'none';
   if (pause) pause.style.display = running ? '' : 'none';
   if (resume) resume.style.display = paused ? '' : 'none';
   if (stop) stop.style.display = (running || paused) ? '' : 'none';
@@ -760,6 +760,9 @@ function trS3CardHtml(c, idx) {
   var title = c.title || ('#' + (idx + 1));
   // Title attribute surfaces error/retry info without breaking the compact row.
   var tip = c.error ? ('[' + c.error + ']') : (c.nodeId ? c.nodeId : '');
+  var passBtn = (status === 'processing' || status === 'failed')
+    ? '<button class="tr-btn tr-btn-xs tr-s3-pass" onclick="event.stopPropagation();trS3PassChapter(' + idx + ')">' + trEscapeHtml(trT('trPass')) + '</button>'
+    : '';
   return '<div class="tr-s3-card' + sel + '" data-status="' + status + '" data-idx="' + idx +
     '" title="' + trEscapeHtml(tip) + '" onclick="trS3SelectChapter(' + idx + ')">' +
     '<span class="tr-s3-card-title">' + trEscapeHtml(title) + '</span>' +
@@ -767,6 +770,7 @@ function trS3CardHtml(c, idx) {
     '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
     '<button class="tr-btn tr-btn-xs tr-s3-reproc" onclick="event.stopPropagation();trStep3Reprocess(' + idx + ')">' +
       trEscapeHtml(trT('trReprocess')) + '</button>' +
+    passBtn +
   '</div>';
 }
 
@@ -803,6 +807,26 @@ function trS3SelectChapter(idx) {
   if (c.status === 'failed' && c.error) text += (text ? '\n\n' : '') + '[' + c.error + ']';
   pane.textContent = text;
   if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
+}
+// trS3PassChapter manually passes a processing/failed chapter: moves it to
+// completed (preserving any cleaned text, falling back to content) and syncs
+// to persisted state so Step4's review list includes it.
+function trS3PassChapter(idx) {
+  if (idx < 0 || idx >= trS3Chapters.length) return;
+  var c = trS3Chapters[idx];
+  if (c.status !== 'processing' && c.status !== 'failed') return;
+  c.status = 'completed';
+  c.error = '';
+  if (!c.cleaned) c.cleaned = c.content || '';
+  if (trState.chapters && trState.chapters[idx]) {
+    trState.chapters[idx].status = 'completed';
+    trState.chapters[idx].cleaned = c.cleaned;
+    trState.chapters[idx].error = '';
+  }
+  trSave();
+  trS3RenderChapterList();
+  trS3UpdateTabCounts();
+  trS3UpdateControls();
 }
 
 function trS3ApplyTabFilter() {

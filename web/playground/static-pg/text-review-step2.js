@@ -395,7 +395,7 @@ function trStep2RenderPreview() {
   for (var i = 0; i < chapters.length; i++) {
     var c = chapters[i];
     var len = (typeof c.content === 'string' ? c.content.length : 0);
-    html += '<tr' + (c.isVolume ? ' class="tr-row-volume"' : '') + '>' +
+    html += '<tr' + (c.isVolume ? ' class="tr-row-volume"' : '') + ' style="cursor:pointer" onclick="trS2SelectChapter(' + i + ')">' +
       '<td class="tr-col-idx">' + (i + 1) + '</td>' +
       '<td class="tr-col-title">' + trEscapeHtml(c.title || '') + '</td>' +
       '<td class="tr-col-len">' + len + '</td>' +
@@ -403,6 +403,18 @@ function trStep2RenderPreview() {
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
+}
+// trS2SelectChapter shows the chapter's original content in the right pane
+// (#ed-review-content) so the user can preview a split chapter before cleaning.
+function trS2SelectChapter(idx) {
+  var chapters = trState.chapters || [];
+  if (idx < 0 || idx >= chapters.length) return;
+  var pane = document.getElementById('ed-review-content');
+  if (!pane) return;
+  pane.textContent = chapters[idx].content || '';
+  var rows = document.querySelectorAll('#tr-s2-preview tbody tr');
+  for (var i = 0; i < rows.length; i++) rows[i].classList.remove('selected');
+  if (rows[idx]) rows[idx].classList.add('selected');
 }
 
 // ===================== Step2: AI split (optional) =====================
