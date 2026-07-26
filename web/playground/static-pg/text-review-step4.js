@@ -70,7 +70,11 @@ function trS4Load() {
       return c.status === 'completed' && typeof c.cleaned === 'string' && typeof c.content === 'string';
     });
     if (trS4Completed.length === 0) {
-      trS4RenderEmpty(trT('trS4NoCompleted'));
+      trS4RenderLayout();
+      var diff = document.getElementById('tr-s4-diff');
+      if (diff) diff.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trS4NoCompleted')) + '</div>';
+      var allBtn0 = document.getElementById('tr-s4-exportall');
+      if (allBtn0) allBtn0.disabled = true;
       return;
     }
     // Keep the previous selection if still valid, else pick the first.
@@ -93,8 +97,9 @@ function trS4Load() {
 // ===================== layout + empty state =====================
 
 function trS4RenderEmpty(msg) {
-  var layout = document.getElementById('tr-s4-layout');
-  if (layout) layout.innerHTML = '<div class="tr-empty">' + trEscapeHtml(msg) + '</div>';
+  trS4RenderLayout();
+  var diff = document.getElementById('tr-s4-diff');
+  if (diff) diff.innerHTML = '<div class="tr-empty">' + trEscapeHtml(msg) + '</div>';
   var allBtn = document.getElementById('tr-s4-exportall');
   if (allBtn) allBtn.disabled = true;
 }
