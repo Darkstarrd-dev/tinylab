@@ -131,7 +131,7 @@ var TREND_PALETTE = [
   '#f97316', '#ef4444'
 ];
 
-var TREND_BUCKETS = 16;
+var TREND_BUCKETS = 24;
 var TREND_BUCKET_MS = 15 * 60 * 1000;
 var TREND_WINDOW_MS = TREND_BUCKETS * TREND_BUCKET_MS;
 
@@ -727,7 +727,7 @@ function updateRecentRequestsInline(entries) {
 // fit on one page therefore appears on multiple pages — acceptable for v1 and
 // the simplest way to keep paging semantics identical in both modes.
 function renderRecentRows(rows) {
-  if (!recentGroupBySession) return rows.map(renderUsageRow).join('');
+  if (!recentGroupBySession) return rows.map(function(e) { return renderUsageRow(e, undefined, false); }).join('');
   return renderRecentRowsGrouped(rows);
 }
 
