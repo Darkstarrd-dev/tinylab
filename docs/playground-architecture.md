@@ -6,6 +6,9 @@
 
 > **最后核对（2026-07-26 增补#2）：** P1-P5 Editor/Clean-mode refactor：**(1)** Top-level nav simplified to 2-way Gallery↔Editor（persisted via `sessionStorage.trGalView`）；AI Text Review wizard is now Editor's **Clean** mode（3rd toolbar button alongside Edit/Diff）— `gotoGalleryToggle` 2-way，`navigateTo` `case 'textreview'` removed。**(2)** Editor state（mode + panes）persisted to `sessionStorage.trEditor`；`edSaveState()`/`edLoadState()` added in `editor-state.js`。**(3)** Step1 large-text performance：chunked preview（2000 lines/65536 chars first chunk）+ Load-more button + paste interception + Abandon button；layout reworked（centered title row + Next/Abandon right，flex body fills height）。**(4)** Step2 layout reworked（Back/centered Split/Next header，single-row controls1，4 evenly-distributed buttons in controls2，flex preview）；auto-detect runs on fresh entry（no chapters）。**(5)** Step3 Node Pool Settings modal（pg-modal with add-node form + provider/model dropdowns from `/api/models` + delete per node）+ System Prompt default-collapsed（`trState.promptCollapsed` persisted）。**(6)** Clean mode wizard constrained to left 50% pane（`.ed-review-wrap` horizontal flex + spacer）。详情见 Phases P1-P5。
 
+> **最后核对（2026-07-26 增补#3）：** 导航栏与 Monitor 页面重构——**(1)** 移除 Console 独立页面与导航按钮，内容并入 Monitor（原 Usage）页右栏；(2) 导航按钮重排：Row1=Monitor(原Usage)/Settings/Playground，Row2=Gallery/Download；(3) 快捷键重映射：F1→Monitor, F2→Settings, F3→Playground, F4→Gallery, F5→Download，F6 移除；(4) `goto-console` shortcut 预设移除；`renderConsole` 替换为 `buildConsoleInto(container)`；(5) 移除 6H Request Trend 图表及全部趋势相关代码（`renderTrendChart`/`initTrendChart`/`updateTrendChart`/`buildTrendChartSVG`/`buildTrendData`/`attachTrendHover` 等）。涉及文件：`web/static/app.js`、`shortcuts.js`、`usage.js`、`console.js`、`i18n.js`、`theme.js`、`style.css`、`index.html`、`index-nopg.html`。`internal/proxy/`、`internal/usage/` 无变化（用量数据为共享环形缓冲，趋势完全由前端派生）。
+
+
 > **2026-07-26 更新（Gallery 批量导入修复）：** 修复"一次导入大量 zip 时前 N 个包无缩略图、仅末尾约 20-30 个正常"的 bug。根因：前端 `processCollectedEntries` 用 `Promise.all` 同时上传全部 zip，后端 `gallerySessionStore` LRU 容量仅 32，第 33 个 `put` 起驱逐最早会话，前 N-32 个包会话在缩略图拉取前已被驱逐 → 404。本次修复（`internal/api/gallery/register.go` + `web/playground/static-pg/gallery-io.js`/`gallery-tree.js`）：(1) `galleryMaxSessions` 32→128；(2) 新增 `DELETE /api/gallery/zip/{sessionId}`（`galleryDeleteZipSession`，整会话删除，204 幂等）与 `POST /api/gallery/zip/{sessionId}/touch`（`galleryTouchSession`，刷新 LRU 位置），前端 `setActive` fire-and-forget 调 touch、`clearActiveSideTree`/`removeItem`/`removeItemsByFilter` 经 `releaseZipSessions` 调 DELETE；(3) 前端 `getZipEntryBlob` 在 404 时经 `rehydrateZipSession` 按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目后重试一次（驱逐不再致命）；(4) `processCollectedEntries` 改用 `runWithConcurrency`（6 并发）取代无界 `Promise.all`，避免上传 herd；(5) 移除 `addZipBlob` 对全局 `galleryState.zipSessionId`/`zipEntriesCache` 的并发踩踏，改由 `setActive` 跟踪当前查看包的会话（AI Review 读全局即得正确包）；(6) 删除已死的 `zipEntriesCache` 状态字段。测试：`internal/api/gallery/register_test.go` 覆盖 LRU 驱逐契约、`touch`、`remove`、新增 HTTP 路由及 chi 区分会话删除 vs 条目删除。
 
 > **2026-07-26 更新（AI 文本审核 / Text Review）：**
@@ -720,7 +723,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 
 ## 16. Gallery 模块（图片查看器分页）
 
-Gallery 是 playground 构建变体（`-tags playground`）下的图片查看器分页，绑定 F6 快捷键，UI 由 `web/playground/static-pg/gallery.js` 实现（约 827 行 vanilla JS，IIFE + `window.renderGallery`/`window.cleanupGallery` 入口）。
+Gallery 是 playground 构建变体（`-tags playground`）下的图片查看器分页，绑定 F4 快捷键，UI 由 `web/playground/static-pg/gallery.js` 实现（约 827 行 vanilla JS，IIFE + `window.renderGallery`/`window.cleanupGallery` 入口）。
 
 ### 交互方式
 - **拖拽**：drop 事件读 `DataTransferItem.getAsFileSystemHandle()` 拿 `FileSystemDirectoryHandle`/`FileSystemFileHandle`，立即调用 `requestPermission({mode:'readwrite'})` 前置授权（一次性系统弹窗，之后所有磁盘操作免确认），递归 BFS 遍历目录；不支持 FS Access API 时降级 `DataTransfer.files` blob。
@@ -841,8 +844,8 @@ Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编�
 - **无持久化**：状态在内存中保持（同 `galleryState`），页面切换不丢失。
 
 ### 导航 toggle 逻辑
-- Gallery 导航按钮和 F6 快捷键共享 `gotoGalleryToggle()`：Gallery → Editor → Gallery 循环。Gallery 页面时按钮显示 t('gallery')，Editor 页面时按钮显示 t('editor')。高亮始终在 Gallery 按钮上。
-- 注册于 `web/static/app.js`（`navigateTo` switch、`currentPage` guard、`main-no-scroll`）、`web/static/auth.js`（nav-item click 事件绑定额外判断 `gotoGalleryToggle()`）、`web/static/shortcuts.js`（F6 label 改为 "Toggle Gallery / Editor"）。
+- Gallery 导航按钮和 F4 快捷键共享 `gotoGalleryToggle()`：Gallery → Editor → Gallery 循环。Gallery 页面时按钮显示 t('gallery')，Editor 页面时按钮显示 t('editor')。高亮始终在 Gallery 按钮上。
+- 注册于 `web/static/app.js`（`navigateTo` switch、`currentPage` guard、`main-no-scroll`）、`web/static/auth.js`（nav-item click 事件绑定额外判断 `gotoGalleryToggle()`）、`web/static/shortcuts.js`（F4 label 改为 "Toggle Gallery / Editor"）。
 
 ### HTTP 接口
 | 接口 | 用途 | 鉴权 | Body 上限 |
