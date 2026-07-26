@@ -1,7 +1,7 @@
 // ===================== Translation System =====================
 const L = {
   en: {
-    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', usage: 'Usage', console: 'Console', playground: 'Playground', gallery: 'Gallery', textReview: 'Text Review',
+    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', usage: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', textReview: 'Text Review',
     shutdown: 'Shutdown',
     debugSettings: 'Debug Settings', debugMode: 'Debug Mode',
     debugModeDesc: 'When enabled, request/response details are cached for inspection in the Usage page.',
@@ -150,7 +150,6 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     clear: 'Clear', keepSelected: 'Keep Selected', removeSelected: 'Remove Selected', confirmKeepSelected: 'Keep {0} selected models and delete remaining {1} models?', confirmRemoveSelected: 'Delete {0} selected models?',
     pause: 'Paused',
     all: 'All', searchLogs: 'Search logs...',
-    trendChart: '6h Request Trend',
     runAllKeysTest: 'Run All-Keys Test',
     runningAllKeysTest: 'Testing...',
     allKeysTestDone: 'All-Keys Test Done',
@@ -427,7 +426,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     trS4ExportDone: 'Exported'
   },
   cn: {
-    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', usage: '用量', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校',
+    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', usage: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校',
     shutdown: '关闭',
     debugSettings: '调试设置', debugMode: '调试模式',
     debugModeDesc: '开启后，请求/响应详情将缓存以供 Usage 页面查看。',
@@ -576,7 +575,6 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     clear: '清除', keepSelected: '保留选中', removeSelected: '移除选中', confirmKeepSelected: '保留选中的 {0} 个模型，并删除其余 {1} 个模型？', confirmRemoveSelected: '确认删除选中的 {0} 个模型？',
     pause: '已暂停',
     all: '全部', searchLogs: '搜索日志...',
-    trendChart: '6小时请求趋势',
     runAllKeysTest: '测试全部 Key',
     runningAllKeysTest: '测试中...',
     allKeysTestDone: '全部测试完成',

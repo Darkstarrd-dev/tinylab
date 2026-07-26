@@ -175,10 +175,9 @@ h3{font-size:var(--font-h3);font-weight:var(--font-weight-normal);color:var(--te
 .nav-item{width:100%;height:100%;padding:0;cursor:pointer;color:var(--text-muted);border-radius:var(--radius-sm);transition:all var(--transition-fast);font-size:13px;font-weight:var(--font-weight-normal);border:1px solid transparent;background:none;font-family:inherit;text-align:center;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0.3px}
 .nav-item[data-page="usage"]{order:1}
 .nav-item[data-page="endpoint"]{order:2}
-.nav-item[data-page="console"]{order:3}
-.nav-item[data-page="playground"]{order:4}
+.nav-item[data-page="playground"]{order:3}
+.nav-item[data-page="gallery"]{order:4}
 .nav-item[data-page="download"]{order:5}
-.nav-item[data-page="gallery"]{order:6}
 .nav-item:hover{color:var(--text);background:var(--glass-hover)}
 .nav-item.active{color:var(--accent);background:rgba(79,195,247,0.10);border-color:rgba(79,195,247,0.20);box-shadow:0 0 8px rgba(79,195,247,0.08)}
 .nav-item.active::before{display:none}
@@ -522,14 +521,11 @@ tbody tr:last-child td{border-bottom:none}
    Usage Page & Quota Monitor
    ===================================================================== */
 /* ---------------------------------------------------------------------
-   Usage Page
+   Usage Page (Monitor)
    --------------------------------------------------------------------- */
 .usage-header{flex-shrink:0}
 .usage-fullscreen{display:flex;flex-direction:column;height:100%;gap:0;overflow:hidden}
 
-/* Main body: 2-col grid, quota spans both rows on the left */
-.trend-card{min-height:0;display:flex;flex-direction:column;width:100%}
-.trend-card > .card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
 .quota-monitor-card{min-height:0;display:flex;flex-direction:column;width:100%}
 .quota-monitor-card .card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
 .quota-section-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:4px;scrollbar-width:none;-ms-overflow-style:none}
@@ -545,71 +541,29 @@ tbody tr:last-child td{border-bottom:none}
 .usage-table th,.usage-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 .usage-table tbody tr:hover{background:var(--table-hover)}
 
-/* Rectangular seamless containers grid layout */
-.usage-body-grid{display:grid;gap:0;flex:1;min-height:0;min-width:0;grid-template-columns:1fr;grid-template-rows:auto;align-items:stretch;background:transparent;padding:0;overflow-y:auto}
+/* Two-column layout: left=quota+recent, right=console */
+.usage-body-grid{display:grid;gap:0;flex:1;min-height:0;min-width:0;grid-template-columns:1fr;grid-template-rows:1fr;align-items:stretch;background:transparent;padding:0;overflow:hidden}
 .usage-body-grid > *{min-width:0;min-height:0;box-sizing:border-box}
 .usage-body-grid .card{margin-bottom:0;border-radius:0;box-shadow:none;border:none;padding:14px 16px}
 .usage-body-grid .card:hover{box-shadow:none}
 
-/* Single-column fallback ordering when layout cannot fit two columns: QuotaMonitor -> RecentRequests -> RequestTrend */
-.usage-body-grid .quota-monitor-card{order:1;grid-column:1;grid-row:auto}
-.usage-body-grid .quota-monitor-card .card{border-bottom:1px solid var(--glass-border)}
-.usage-body-grid .recent-requests-section{order:2;grid-column:1;grid-row:auto}
-.usage-body-grid .recent-requests-section .card{border-bottom:1px solid var(--glass-border)}
-.usage-body-grid .trend-card{order:3;grid-column:1;grid-row:auto}
-.usage-body-grid .trend-card .card{border-bottom:none}
+/* Left column: vertical stack */
+.usage-left-col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.usage-left-col .quota-monitor-card{flex:1 1 0;min-height:0;overflow:hidden;border-bottom:1px solid var(--glass-border)}
+.usage-left-col .quota-monitor-card .card{height:100%;border:none}
+.usage-left-col .recent-requests-section{flex:1 1 0;min-height:0;overflow:hidden}
+.usage-left-col .recent-requests-section .card{height:100%;border:none}
 
-/* Two-column 50/50 split layout for wider screens */
+/* Right column: console fills available height */
+.usage-right-col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.usage-right-col .console-layout{height:100%;padding:0 10px 10px 10px}
+
+/* Two-column grid for wider screens */
 @media (min-width:1024px){
-  .usage-body-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));height:100%;overflow:hidden}
-  .usage-body-grid .quota-monitor-card{grid-column:1;grid-row:1 / span 2;order:0}
-  .usage-body-grid .quota-monitor-card .card{border-right:1px solid var(--glass-border);border-bottom:none}
-  .usage-body-grid .trend-card{grid-column:2;grid-row:1;order:0}
-  .usage-body-grid .trend-card .card{border-bottom:1px solid var(--glass-border)}
-  .usage-body-grid .recent-requests-section{grid-column:2;grid-row:2;order:0}
-  .usage-body-grid .recent-requests-section .card{border-bottom:none}
+  .usage-body-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:1fr;height:100%}
+  .usage-left-col{border-right:1px solid var(--glass-border)}
 }
 
-/* ---------------------------------------------------------------------
-   Recent Requests Modal
-   --------------------------------------------------------------------- */
-.recent-requests-scroll{max-height:50vh;overflow-y:auto}
-.recent-requests-scroll thead{position:sticky;top:0;z-index:1}
-.recent-requests-scroll thead th{background:var(--option-bg)}
-
-/* ---------------------------------------------------------------------
-   Quota Bars
-   --------------------------------------------------------------------- */
-.quota-section{margin-bottom:16px}
-.quota-section h3{font-size:var(--font-h3);margin-bottom:10px;color:var(--text)}
-.quota-bar-item{margin-bottom:10px;cursor:pointer;transition:background var(--transition-fast)}
-.quota-bar-item:hover{background:var(--input-bg);border-radius:var(--radius-md)}
-.quota-bar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.quota-bar-model{font-size:var(--font-base);color:var(--text-secondary);font-weight:500}
-.quota-bar-numbers{font-size:var(--font-badge);color:var(--text-muted);font-variant-numeric:tabular-nums;flex-shrink:0;min-width:80px;text-align:right}
-.quota-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.quota-bar-track{height:5px;background:var(--input-bg);border-radius:3px;overflow:hidden;flex:1;min-width:0}
-.quota-bar-fill{height:100%;border-radius:3px;transition:width .4s cubic-bezier(0.4,0,0.2,1);background:var(--accent-gradient)}
-.quota-bar-tokens{font-size:var(--font-badge);color:var(--text-muted);font-weight:400}
-
-/* ---------------------------------------------------------------------
-   Trend Chart
-   --------------------------------------------------------------------- */
-.trend-chart-wrap{position:relative;width:100%;flex:1;min-height:200px;min-width:0;height:100%;display:flex;flex-direction:column}
-.trend-chart{width:100%;height:100%;display:block}
-.trend-tooltip{position:absolute;background:var(--modal-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);border-radius:8px;padding:8px 12px;font-size:var(--font-badge);pointer-events:none;z-index:10;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
-.trend-tooltip-hour{font-weight:600;margin-bottom:4px;color:var(--text)}
-.trend-tooltip-row{display:flex;align-items:center;gap:6px;color:var(--text-secondary);line-height:1.6}
-.trend-tooltip-dot{display:inline-block;width:8px;height:8px;border-radius:2px;flex-shrink:0}
-.trend-tooltip-count{margin-left:auto;font-weight:600;color:var(--text)}
-.trend-tooltip-total{margin-top:4px;padding-top:4px;border-top:1px solid var(--glass-border);font-weight:600;color:var(--text)}
-.trend-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;flex-shrink:0}
-.trend-legend-item{display:flex;align-items:center;gap:5px;font-size:var(--font-badge);color:var(--text-secondary)}
-.trend-legend-dot{display:inline-block;width:8px;height:8px;border-radius:2px;flex-shrink:0}
-
-/* ---------------------------------------------------------------------
-   Quota Hover Tooltip (C)
-   --------------------------------------------------------------------- */
 .quota-tip{position:fixed;z-index:var(--z-tooltip,900);background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px 12px;font-size:var(--font-badge);pointer-events:none;box-shadow:var(--shadow-card-hover);white-space:nowrap;line-height:1.7}
 .quota-tip div{display:flex;justify-content:space-between;gap:14px}
 .quota-tip-k{color:var(--text-muted)}
@@ -2042,10 +1996,9 @@ tbody tr:last-child td{border-bottom:none}
   .top-header-shutdown{margin-left:auto}
   .main{padding:16px}
   .main.main-no-scroll{padding:0}
-  .usage-body-grid{grid-template-columns:1fr;grid-template-rows:auto}
-  .usage-body-grid .quota-monitor-card,
-  .usage-body-grid .trend-card,
-  .usage-body-grid .recent-requests-section{grid-column:1;grid-row:auto;min-height:260px}
+  .usage-body-grid{grid-template-columns:1fr;grid-template-rows:auto;overflow-y:auto}
+  .usage-body-grid .usage-left-col{min-height:260px}
+  .usage-body-grid .usage-right-col{min-height:260px}
   .detail-header{flex-direction:column;align-items:flex-start;gap:12px}
   .provider-detail-header{flex-direction:column;align-items:flex-start;gap:12px}
   .card-actions,.provider-card-actions{width:auto;min-width:0;max-width:none;flex-shrink:1}

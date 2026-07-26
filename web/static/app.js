@@ -52,8 +52,8 @@ function navigateTo(page) {
     downloadEventSource.close();
     downloadEventSource = null;
   }
-  // Close Console/Monitor/Terminal streams when leaving the console page.
-  if (page !== 'console') {
+  // Close Console/Monitor/Terminal streams when leaving the usage page.
+  if (page !== 'usage') {
     if (typeof closeConsoleStream === 'function') closeConsoleStream();
     if (typeof closeMonitorStream === 'function') closeMonitorStream();
     if (typeof closeTerminalSession === 'function') closeTerminalSession();
@@ -84,7 +84,6 @@ function navigateTo(page) {
       case 'combos': return renderCombos(container);
       case 'playground': return renderPlayground(container);
       case 'usage': return renderUsage(container);
-      case 'console': return renderConsole(container);
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
       case 'editor': return renderEditor(container);
@@ -485,9 +484,6 @@ function toggleFontSize() {
   document.documentElement.setAttribute('data-font-size', next);
   localStorage.setItem('fontSize', next);
   updateFontButton(next);
-  if (document.getElementById('trend-chart-card') && typeof initTrendChart === 'function' && typeof lastUsageEntries !== 'undefined') {
-    initTrendChart(lastUsageEntries);
-  }
 }
 
 function toggleTheme() {
@@ -628,7 +624,6 @@ document.addEventListener('keydown', function(e) {
   // via Settings > Shortcut Settings (action IDs global.goto-*).
   if (Shortcuts.matchEvent('global.goto-usage', e))      { e.preventDefault(); navigateTo('usage'); return; }
   if (Shortcuts.matchEvent('global.goto-endpoint', e))   { e.preventDefault(); navigateTo('endpoint'); return; }
-  if (Shortcuts.matchEvent('global.goto-console', e))    { e.preventDefault(); navigateTo('console'); return; }
   if (Shortcuts.matchEvent('global.goto-playground', e)) { e.preventDefault(); var pgNav = document.querySelector('.nav-item[data-page="playground"]'); if (pgNav) navigateTo('playground'); return; }
   if (Shortcuts.matchEvent('global.goto-download', e))   { e.preventDefault(); navigateTo('download'); return; }
   if (Shortcuts.matchEvent('global.goto-gallery', e))    { e.preventDefault(); var galNav = document.querySelector('.nav-item[data-page="gallery"]'); if (galNav) gotoGalleryToggle(); return; }

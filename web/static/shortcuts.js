@@ -22,12 +22,11 @@
 
 var SHORTCUT_PRESETS = {
   global: {
-    'global.goto-usage':       { key: 'F1', label: 'Go to Usage' },
+    'global.goto-usage':       { key: 'F1', label: 'Go to Monitor' },
     'global.goto-endpoint':    { key: 'F2', label: 'Go to Settings' },
-    'global.goto-console':     { key: 'F3', label: 'Go to Console' },
-    'global.goto-playground':  { key: 'F4', label: 'Go to Playground' },
+    'global.goto-playground':  { key: 'F3', label: 'Go to Playground' },
     'global.goto-download':    { key: 'F5', label: 'Go to Download' },
-    'global.goto-gallery':     { key: 'F6', label: 'Toggle Gallery / Editor' },
+    'global.goto-gallery':     { key: 'F4', label: 'Toggle Gallery / Editor' },
     'global.quickslot-cycle-1': { key: '1', label: 'Quickslot #1' },
     'global.quickslot-cycle-2': { key: '2', label: 'Quickslot #2' },
     'global.quickslot-cycle-3': { key: '3', label: 'Quickslot #3' },

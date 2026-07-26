@@ -8,7 +8,7 @@ var consoleAllLines = [];
 var consoleSubView = 'logs';
 var consoleDebugMode = false;
 
-async function renderConsole(c) {
+async function buildConsoleInto(c) {
   consoleAllLines = [];
   consoleAutoScroll = true;
   consoleSubView = 'logs';
@@ -53,9 +53,6 @@ async function renderConsole(c) {
     '</div>';
 
   initLogsView();
-  c.style.height = '100%';
-  var mainEl = document.querySelector('.main');
-  if (mainEl) mainEl.classList.add('main-no-scroll');
   startConsoleStream();
 }
 
