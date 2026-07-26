@@ -898,6 +898,21 @@ async function refreshQuotaData() {
       }
     }
     sortEntriesByTimeDesc(merged);
+    // Preserve entries from lastUsageEntries that have terminal status and are
+    // NOT in the API response (their IDs are not in seenIds). This prevents
+    // entries from vanishing when the ring evicts them between polls, or when
+    // the SSE request-done fires in between refreshQuotaData calls. Without
+    // this, a completed entry that was handled by handleRequestDone (which
+    // deletes inflightEntries[id]) is gone from both merged and inflightEntries
+    // if the ring entry was evicted or the limit=500 cutoff excluded it.
+    for (var i = 0; i < lastUsageEntries.length; i++) {
+      var e = lastUsageEntries[i];
+      if (e.id && e.status !== 'processing' && !seenIds[e.id]) {
+        merged.push(e);
+        seenIds[e.id] = true;
+      }
+    }
+    sortEntriesByTimeDesc(merged);
     lastUsageEntries = merged;
     updateUsageSummary(summary);
     updateTrendChart(lastUsageEntries);
@@ -1774,13 +1789,32 @@ async function clearUsageFromModal() {
 
 // ===================== Usage Entry Info Modal (Debug Mode) =====================
 
-function showUsageEntryInfoById(id) {
+async function showUsageEntryInfoById(id) {
   if (!id) return;
   var e = lastUsageEntries.find(function(x) { return x.id === id; });
   if (!e) {
     e = inflightEntries[id];
   }
   if (!e) return;
+  // If the entry is processing-status but no longer in inflightEntries, the
+  // request completed but the SSE request-done event may have been dropped
+  // (broadcaster channel full) or the entry came from refreshQuotaData's merged
+  // result which only has the tracker's processing copy. Also handle the case
+  // where the entry has a terminal status (success/error) but no respPayload/
+  // respHeaders — this happens when handleRequestDone fell back to the inflight
+  // entry (which lacks payloads) because the SSE event's entry field was
+  // missing or incomplete. In both cases, try to fetch the ring entry (which
+  // carries respPayload/respHeaders) from the API.
+  if ((e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
+    try {
+      var usage = await apiGet('/usage?limit=100&offset=0');
+      var entries = usage.entries || [];
+      var ringEntry = entries.find(function(x) { return x.id === id; });
+      if (ringEntry && ringEntry.status !== 'processing') {
+        e = ringEntry;
+      }
+    } catch(ex) { /* fall through to the entry we have */ }
+  }
   showUsageEntryInfoWithData(e);
 }
 
