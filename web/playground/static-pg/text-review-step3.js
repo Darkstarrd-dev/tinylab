@@ -426,45 +426,49 @@ function trStep3RenderSettingsModal() {
 
 /**
  * Open the playground's model picker (pgOpenModelPicker) to select a model.
- * Replaces the dual provider+model dropdown to avoid provider/model mismatch
- * and maintain UI consistency with the rest of the playground.
+ * Ensures pgState.models is loaded first (pgLoadModels), since the Editor Clean
+ * mode may not have triggered the playground's normal model load.
  */
 function trStep3PickModel() {
   if (typeof pgOpenModelPicker !== 'function') {
     trToast(trT('trPatternEditorUnavailable'), 'warning');
     return;
   }
-  var current = trS3ModalModel ? trS3ModalModel.modelId : '';
-  pgOpenModelPicker(current, function (v) {
-    // v is the full model id (e.g. "sn/sensenova-6.7-flash-lite").
-    // Look it up in the cached /api/models response to get providerId + alias.
-    var all = window._trS3ModalModels || [];
-    var found = null;
-    for (var i = 0; i < all.length; i++) {
-      if (all[i].type === 'provider' && (all[i].id === v || all[i].realModelId === v)) {
-        found = all[i]; break;
+  var doPick = function () {
+    var current = trS3ModalModel ? trS3ModalModel.modelId : '';
+    pgOpenModelPicker(current, function (v) {
+      // v is the full model id (e.g. "sn/sensenova-6.7-flash-lite").
+      // Look it up in the cached /api/models response to get providerId + alias.
+      var all = window._trS3ModalModels || pgState.models || [];
+      var found = null;
+      for (var i = 0; i < all.length; i++) {
+        if (all[i].type === 'provider' && (all[i].id === v || all[i].realModelId === v)) {
+          found = all[i]; break;
+        }
       }
-    }
-    if (found) {
-      trS3ModalModel = {
-        providerId: found.providerId,
-        modelId: found.realModelId || found.id,
-        label: found.alias || found.name || found.id
-      };
-    } else if (v) {
-      trS3ModalModel = { providerId: '', modelId: v, label: v };
-    }
-    var btn = document.getElementById('tr-s3-modal-model-btn');
-    if (btn && trS3ModalModel) {
-      btn.innerHTML = trEscapeHtml(trS3ModalModel.label) + ' <span style="float:right;opacity:0.5">▼</span>';
-    }
-  }, { kindFilter: 'text' });
+      if (found) {
+        trS3ModalModel = {
+          providerId: found.providerId,
+          modelId: found.realModelId || found.id,
+          label: found.alias || found.name || found.id
+        };
+      } else if (v) {
+        trS3ModalModel = { providerId: '', modelId: v, label: v };
+      }
+      var btn = document.getElementById('tr-s3-modal-model-btn');
+      if (btn && trS3ModalModel) {
+        btn.innerHTML = trEscapeHtml(trS3ModalModel.label) + ' <span style="float:right;opacity:0.5">▼</span>';
+      }
+    }, { kindFilter: 'text' });
+  };
+  if (pgState && pgState.models && pgState.models.length) {
+    doPick();
+  } else if (typeof pgLoadModels === 'function') {
+    pgLoadModels().then(function () { doPick(); });
+  } else {
+    doPick();
+  }
 }
-
-/**
- * Add a new node via POST (no id -> create). Reads the model from trS3ModalModel
- * (selected via pgOpenModelPicker) instead of dropdowns.
- */
 function trStep3AddNode() {
   if (!trS3ModalModel || !trS3ModalModel.providerId) {
     trToast(trT('trSelectModel'), 'warning');
