@@ -997,9 +997,14 @@ window.openMediaEditor = function(item, mediaType) {
   // Pre-fill destination directory from source file
   setTimeout(function() {
     var destDir = document.getElementById('ge-dest-dir');
-    if (destDir && _editCurrentItem && _editCurrentItem.absPath) {
-      var lastSep = Math.max(_editCurrentItem.absPath.lastIndexOf('/'), _editCurrentItem.absPath.lastIndexOf('\\'));
-      if (lastSep >= 0) destDir.value = _editCurrentItem.absPath.substring(0, lastSep);
+    if (destDir && _editCurrentItem) {
+      // For zip-extracted items, prefer the zip file's directory over the temp dir.
+      var refPath = (_editCurrentItem._tempExtracted && _editCurrentItem.zipAbsPath)
+        ? _editCurrentItem.zipAbsPath : _editCurrentItem.absPath;
+      if (refPath) {
+        var lastSep = Math.max(refPath.lastIndexOf('/'), refPath.lastIndexOf('\\'));
+        if (lastSep >= 0) destDir.value = refPath.substring(0, lastSep);
+      }
     }
   }, 30);
 
@@ -1062,11 +1067,74 @@ window.triggerMediaEditor = function(mediaType) {
     showMsg(_geT('geNoItem') || 'No item selected');
     return;
   }
-  if (!item.absPath) {
-    showMsg(_geT('geNoDiskPath') || 'This item does not have a disk path. Open files from a directory to enable editing.');
+
+  // Resolve disk path: backend items have absPath directly; zip items need extraction.
+  if (item.absPath) {
+    if (typeof window.openMediaEditor === 'function') {
+      window.openMediaEditor(item, mediaType);
+    }
     return;
   }
-  if (typeof window.openMediaEditor === 'function') {
-    window.openMediaEditor(item, mediaType);
+
+  // Zip items: extract to temp file via backend, then open editor.
+  if (item.kind === 'zip' && (item.zipAbsPath || item.sessionId)) {
+    showMsg(_geT('geExtracting') || 'Extracting from archive...');
+    var body = { zipPath: item.zipPath };
+    if (item.zipAbsPath) body.zipAbsPath = item.zipAbsPath;
+    else body.sessionId = item.sessionId;
+
+    fetch('/api/gallery/edit/extract-zip-entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
+    .then(function(data) {
+      // Create a shallow clone with absPath pointing to the temp file.
+      var resolved = {};
+      for (var k in item) { if (item.hasOwnProperty(k)) resolved[k] = item[k]; }
+      resolved.absPath = data.tempPath;
+      resolved._tempExtracted = true;
+      if (typeof window.openMediaEditor === 'function') {
+        window.openMediaEditor(resolved, mediaType);
+      }
+    })
+    .catch(function(err) {
+      showMsg((_geT('geExtractFail') || 'Extract failed') + ': ' + (err.message || err));
+    });
+    return;
   }
+
+  // FSAA / drag-drop items: upload blob to a temp file via backend.
+  if (typeof item.getBlob === 'function') {
+    showMsg(_geT('geExtracting') || 'Preparing file for editing...');
+    item.getBlob().then(function(blob) {
+      return fetch('/api/gallery/edit/upload-temp?name=' + encodeURIComponent(item.name || 'file'), {
+        method: 'POST',
+        body: blob
+      });
+    })
+    .then(function(r) {
+      return r.json().then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .then(function(data) {
+      var resolved = {};
+      for (var k in item) { if (item.hasOwnProperty(k)) resolved[k] = item[k]; }
+      resolved.absPath = data.tempPath;
+      resolved._tempExtracted = true;
+      if (typeof window.openMediaEditor === 'function') {
+        window.openMediaEditor(resolved, mediaType);
+      }
+    })
+    .catch(function(err) {
+      showMsg((_geT('geExtractFail') || 'Prepare failed') + ': ' + (err.message || err));
+    });
+    return;
+  }
+
+  // Truly unsupported item kind.
+  showMsg(_geT('geNoDiskPath') || 'This item does not have a disk path. Open files from a directory to enable editing.');
 };

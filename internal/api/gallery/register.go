@@ -477,6 +477,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/edit/start", h.galleryEditStart)
 	r.Get("/edit/status/{jobId}", h.galleryEditStatus)
 	r.Post("/edit/cancel/{jobId}", h.galleryEditCancel)
+	r.Post("/edit/extract-zip-entry", h.galleryEditExtractZipEntry)
+	r.Post("/edit/upload-temp", h.galleryEditUploadTemp)
 	r.Post("/paste-paths", h.galleryPastePaths)
 }
 
@@ -1411,4 +1413,104 @@ func (h *Handler) galleryEditCancel(w http.ResponseWriter, r *http.Request) {
 
 	h.d.Logger.Info("gallery: cancelled edit job %s", jobID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// galleryEditUploadTemp accepts a raw file body (with optional ?name= query
+// param for extension detection) and writes it to a temp file, returning
+// {"tempPath": "..."}. Used by the frontend to materialize FSAA/drag-drop
+// items that lack a disk path.
+// POST /api/gallery/edit/upload-temp?name=video.mp4
+func (h *Handler) galleryEditUploadTemp(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == "" {
+		ext = ".bin"
+	}
+	tmpFile, err := os.CreateTemp("", "gallery-edit-upload-*"+ext)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "temp file: "+err.Error())
+		return
+	}
+	defer tmpFile.Close()
+	if _, err := io.Copy(tmpFile, r.Body); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "write: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"tempPath": tmpFile.Name()})
+}
+
+// galleryEditExtractZipEntry extracts a single entry from a zip archive to a
+// temporary file on disk so that ffmpeg can operate on it directly.
+// POST /api/gallery/edit/extract-zip-entry
+//
+//	{ "zipAbsPath": "...", "zipPath": "entry/inside/zip.png" }
+//	or { "sessionId": "...", "zipPath": "entry/inside/zip.png" }
+//
+// Returns { "tempPath": "..." }.
+func (h *Handler) galleryEditExtractZipEntry(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ZipAbsPath string `json:"zipAbsPath"`
+		SessionID  string `json:"sessionId"`
+		ZipPath    string `json:"zipPath"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ZipPath == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "zipPath is required")
+		return
+	}
+	if req.ZipAbsPath == "" && req.SessionID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "zipAbsPath or sessionId is required")
+		return
+	}
+
+	var zipData []byte
+	if req.ZipAbsPath != "" {
+		var err error
+		zipData, err = os.ReadFile(req.ZipAbsPath)
+		if err != nil {
+			apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())
+			return
+		}
+	} else {
+		data, ok := gallerySessions.get(req.SessionID)
+		if !ok {
+			apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
+			return
+		}
+		zipData = data
+	}
+
+	reader := bytes.NewReader(zipData)
+	entry, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), req.ZipPath)
+	if err != nil {
+		if gallerylib.IsNotFound(err) {
+			apibase.WriteAPIError(w, http.StatusNotFound, "entry not found in zip")
+			return
+		}
+		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to read entry: "+err.Error())
+		return
+	}
+
+	// Write to temp file preserving the original extension.
+	ext := filepath.Ext(req.ZipPath)
+	if ext == "" {
+		ext = ".bin"
+	}
+	tmpFile, err := os.CreateTemp("", "gallery-edit-*"+ext)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create temp file")
+		return
+	}
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(entry); err != nil {
+		os.Remove(tmpFile.Name())
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to write temp file")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"tempPath": tmpFile.Name(),
+	})
 }
