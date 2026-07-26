@@ -150,7 +150,7 @@ function getModelColor(provider, model) {
 function sanitizeId(s) {
   return String(s || '').replace(/[^a-zA-Z0-9_-]/g, '-');
 }
-function renderUsageRow(e, sessionKey) {
+function renderUsageRow(e, sessionKey, hidden) {
   var statusDot;
   var dotClass = 'status-dot';
   if (e.status === 'success') dotClass += ' status-dot-success';
@@ -190,7 +190,8 @@ function renderUsageRow(e, sessionKey) {
   var inSession = sessionKey !== undefined;
   var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row"' : '';
   var firstCellStyle = inSession ? ' style="padding-left:18px"' : '';
-  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + '>\
+  var hiddenAttr = (inSession && hidden) ? ' style="display:none"' : '';
+  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + hiddenAttr + '>\
     <td class="status-col-cell"' + firstCellStyle + '>' + statusInner + '</td>\
     <td>' + new Date(e.timestamp).toLocaleTimeString() + '</td>\
     <td>' + escapeHtml(e.provider) + '</td>\
@@ -535,18 +536,34 @@ async function renderUsage(c) {
   if (rejected) toast(t('loadFailed') || 'Load failed', 'error');
   usageDebugMode = !!(settings && settings.debugMode);
   var usageEntries = usage.entries || [];
-  lastUsageEntries = [];
-  var existingIds = {};
-  inflightEntries = {};
+  var apiIds = {};
   usageEntries.forEach(function(e) {
-    if (e.id) {
-      existingIds[e.id] = true;
-      lastUsageEntries.push(e);
+    if (e.id) apiIds[e.id] = true;
+  });
+
+  var merged = usageEntries.map(function(e) {
+    var existing = lastUsageEntries.find(function(x) { return x.id === e.id; });
+    if (existing) {
+      if (existing.__streamingReasoning) e.__streamingReasoning = existing.__streamingReasoning;
+      if (existing.__streamingAssistant) e.__streamingAssistant = existing.__streamingAssistant;
+      if (existing.__streamingUsage) e.__streamingUsage = existing.__streamingUsage;
+    }
+    return e;
+  });
+
+  Object.keys(inflightEntries).forEach(function(id) {
+    if (!apiIds[id]) {
+      var ts = new Date(inflightEntries[id].timestamp).getTime();
+      if (Date.now() - ts > MAX_PROCESSING_MS) {
+        delete inflightEntries[id];
+      } else {
+        merged.unshift(inflightEntries[id]);
+      }
     }
   });
-  for (var key in inflightEntries) {
-    lastUsageEntries.push(inflightEntries[key]);
-  }
+
+  sortEntriesByTimeDesc(merged);
+  lastUsageEntries = merged;
   var quotaBars = quotas.quotas || [];
   quotaBarItems = {};
   lastQuotaSig = '';
@@ -730,14 +747,16 @@ function renderRecentRowsGrouped(rows) {
   }
   var html = '';
   if (ungrouped.length) {
-    html += renderSessionGroupHeader('', t('ungrouped'), ungrouped);
+    html += '<tr class="session-group-header ungrouped" data-session-group=""><td colspan="7" style="font-size:var(--font-badge);color:var(--text-muted)">' +
+      escapeHtml(t('ungrouped')) + ' \u00B7 ' + ungrouped.length + ' ' + t('requests') +
+    '</td></tr>';
     html += ungrouped.map(function(e) { return renderUsageRow(e, ''); }).join('');
   }
   for (var gi = 0; gi < order.length; gi++) {
     var sk = order[gi];
     var g = groups[sk];
     html += renderSessionGroupHeader(sk, 'sess:' + sk, g);
-    html += g.map(function(e) { return renderUsageRow(e, sk); }).join('');
+    html += g.map(function(e) { return renderUsageRow(e, sk, true); }).join('');
   }
   return html;
 }
@@ -750,7 +769,7 @@ function renderSessionGroupHeader(sk, label, group) {
   var span = new Date(first.timestamp).toLocaleTimeString() + ' \u2192 ' + new Date(last.timestamp).toLocaleTimeString();
   var prov = escapeHtml(first.provider || '');
   var model = escapeHtml(displayModelName(first.model, first.originalModel));
-  return '<tr class="session-group-header" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
+  return '<tr class="session-group-header collapsed" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
     '<td colspan="7" style="font-size:var(--font-badge);color:var(--text-muted);cursor:pointer">' +
       '<span class="session-group-arrow">\u25B8</span> ' +
       escapeHtml(label) + ' \u00B7 ' + group.length + ' ' + t('requests') + ' \u00B7 ' + escapeHtml(span) + ' \u00B7 ' + prov + ' / ' + model +
@@ -792,7 +811,7 @@ function toggleSessionGroup(headerEl, sk) {
   var rows = tbody.querySelectorAll('tr.session-row[data-session="' + sk + '"]');
   for (var i = 0; i < rows.length; i++) rows[i].style.display = collapsed ? 'none' : '';
   var arrow = headerEl.querySelector('.session-group-arrow');
-  if (arrow) arrow.textContent = collapsed ? '\u25BE' : '\u25B8';
+  if (arrow) arrow.textContent = collapsed ? '\u25B8' : '\u25BE';
 }
 
 function formatCompactTokens(n) {
