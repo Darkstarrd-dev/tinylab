@@ -421,9 +421,27 @@ function trStep2AISplit() {
   }
   var btn = document.getElementById('tr-s2-aisplit');
   if (btn) { btn.disabled = true; btn.textContent = trT('trWorking'); }
+
+  // Find first enabled review node for model routing through the proxy.
+  var node = (trState.reviewNodes || []).filter(function (n) { return n.enabled; })[0];
+  if (!node) {
+    if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
+    trToast(trT('trAISplitNoNode'), 'warning');
+    return;
+  }
+  // Build model string: proxy expects "providerPrefix/modelId" format.
+  // modelId may or may not already include the prefix; if not, resolve it.
+  var modelStr = node.modelId || '';
+  if (modelStr.indexOf('/') === -1) {
+    var prefix = (window._trS3ProviderPrefix && window._trS3ProviderPrefix(node.providerId)) || '';
+    if (prefix) {
+      modelStr = prefix + '/' + modelStr;
+    }
+  }
+
   var sample = trState.rawText.length > 20000 ? trState.rawText.slice(0, 20000) : trState.rawText;
   var body = {
-    model: '',
+    model: modelStr,
     stream: false,
     messages: [
       { role: 'system', content: TR_AI_SPLIT_PROMPT },
@@ -439,7 +457,9 @@ function trStep2AISplit() {
     .then(function (data) {
       if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
       if (!data || data.error) {
-        trToast((data && data.error) || trT('trAISplitFailed'), 'error');
+        var em = (data && data.error);
+        if (em && typeof em !== 'string') em = JSON.stringify(em);
+        trToast(em || trT('trAISplitFailed'), 'error');
         return;
       }
       var content = trExtractChatContent(data);

@@ -1,11 +1,12 @@
-// tr-state.js — AI Text Review page state + localStorage persistence.
+// tr-state.js — AI Text Review page state + sessionStorage persistence.
 // Mirrors editor-state.js style: top-level 'use strict' + var/function.
 //
-// Only the lightweight fields are persisted to localStorage (key 'tr-session'):
+// Only the lightweight fields are persisted to sessionStorage (key 'tr-session'):
 // sessionId, step, fileName, selectedPatternKey, systemPrompt, lineDecisions,
 // and chapters META (title + content/cleaned length stubs, NOT full content).
 // rawText + full chapter content/cleaned are kept in memory only — never
-// persisted — to avoid the 5MB localStorage blowup on large novels.
+// persisted — to avoid the 5MB sessionStorage blowup on large novels.
+// sessionStorage ensures refresh keeps progress but process restart clears state.
 
 'use strict';
 
@@ -71,7 +72,7 @@ function trLoad() {
   trState._loaded = true;
   var raw = null;
   try {
-    raw = localStorage.getItem(TR_STORE_KEY);
+    raw = sessionStorage.getItem(TR_STORE_KEY);
   } catch (e) {
     return null;
   }
@@ -90,19 +91,19 @@ function trLoad() {
     }
   }
   // chaptersMeta is informational only; we do NOT reconstruct chapters content
-  // from localStorage. The caller (text-review.js) will re-split from rawText
+  // from sessionStorage. The caller (text-review.js) will re-split from rawText
   // if present, or prompt the user to re-import.
   return snap;
 }
 
 /**
- * Persist the lightweight snapshot to localStorage. Safe to call even when
+ * Persist the lightweight snapshot to sessionStorage. Safe to call even when
  * rawText/chapters are large — only meta is written.
  */
 function trSave() {
   var snap = trBuildSnapshot();
   try {
-    localStorage.setItem(TR_STORE_KEY, JSON.stringify(snap));
+    sessionStorage.setItem(TR_STORE_KEY, JSON.stringify(snap));
   } catch (e) {
     // Quota exceeded or storage disabled — non-fatal; state is in-memory.
     if (typeof toast === 'function') {
@@ -117,7 +118,7 @@ function trSave() {
  */
 function trClearPersisted() {
   try {
-    localStorage.removeItem(TR_STORE_KEY);
+    sessionStorage.removeItem(TR_STORE_KEY);
   } catch (e) {
     // non-fatal
   }

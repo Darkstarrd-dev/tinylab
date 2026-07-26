@@ -19,6 +19,28 @@ var trS3Chapters = [];           // live mirror of session chapters (snapshot + 
 var trS3Nodes = [];              // live mirror of session runtime nodes
 var trS3ActiveTab = 'pending';   // active chapter tab: pending|processing|completed|failed
 var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an error
+var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
+var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
+
+function trS3ProviderName(id) { return trS3ProviderNames[id] || id || ''; }
+function trS3ProviderPrefix(id) { return trS3ProviderPrefixes[id] || ''; }
+window._trS3ProviderPrefix = trS3ProviderPrefix;
+
+function trS3PopulateProviders(models) {
+  if (!models || !models.length) return;
+  for (var i = 0; i < models.length; i++) {
+    var m = models[i];
+    if (m.type === 'provider' && m.providerId) {
+      trS3ProviderNames[m.providerId] = m.provider || m.providerId;
+      var slash = m.id.indexOf('/');
+      if (slash > 0) {
+        trS3ProviderPrefixes[m.providerId] = m.id.slice(0, slash);
+      }
+    }
+  }
+}
+
+
 
 // ===================== main render =====================
 
@@ -103,6 +125,7 @@ window.trRenderStep3 = function (panel, state) {
       trSubscribeSession(trState.sessionId);
     }
   } else {
+    trS3Chapters = (trState.chapters || []).map(function (c) { return { title: c.title, content: c.content, status: 'pending' }; });
     trStep3LoadNodes();
     trS3UpdateTabCounts();
     trS3RenderChapterList();
@@ -121,6 +144,12 @@ window.trRenderStep3 = function (panel, state) {
 function trStep3LoadNodes() {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
+  // Populate provider name/prefix maps from /api/models so inline config
+  // table shows human-readable provider names even before the modal opens.
+  trApiGet('/models').then(function (res) {
+    var models = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
+    trS3PopulateProviders(models);
+  });
   trApiGet('/text-review/review-nodes').then(function (res) {
     var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
     trState.reviewNodes = nodes;
@@ -153,7 +182,7 @@ function trS3RenderConfigNodes(nodes) {
     html += '<tr>' +
       '<td><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(n.id || '') + '"' +
         (n.enabled ? ' checked' : '') + ' onchange="trS3OnNodeToggle(' + idAttr + ')"></td>' +
-      '<td>' + trEscapeHtml(n.providerId || '') + '</td>' +
+      '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
       '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
       '<td><input type="number" class="tr-node-conc" min="0" value="' +
         (n.concurrency != null ? n.concurrency : 1) + '" data-id="' + trEscapeHtml(n.id || '') +
@@ -236,6 +265,7 @@ function trStep3RenderSettingsModal() {
   // Fetch models for provider/model dropdowns
   trApiGet('/models').then(function (res) {
     var allModels = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
+    trS3PopulateProviders(allModels);
 
     // Extract unique providers from models
     var providerMap = {};
@@ -264,7 +294,7 @@ function trStep3RenderSettingsModal() {
     for (var ni = 0; ni < nodes.length; ni++) {
       var n = nodes[ni];
       nodeRows += '<tr>' +
-        '<td>' + trEscapeHtml(n.providerId || '') + '</td>' +
+        '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
         '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
         '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td>' + (n.enabled ? '&#10003;' : '&#10007;') + '</td>' +
@@ -432,7 +462,7 @@ function trS3RenderRuntimeNodes(nodes) {
     var n = nodes[i];
     var rowClass = n.enabled ? '' : ' tr-s3-node-disabled';
     html += '<tr class="' + rowClass + '">' +
-      '<td>' + trEscapeHtml(n.providerId || '') + '</td>' +
+      '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
       '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
       '<td>' + (n.target || 0) + '</td>' +
       '<td>' + (n.active || 0) + '</td>' +
