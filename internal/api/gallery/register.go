@@ -29,6 +29,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
 	"golang.org/x/image/draw"
+	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
 
 	// Register all image format decoders so image.Decode works for PNG/GIF/WebP/BMP.
 	_ "golang.org/x/image/bmp"
@@ -268,6 +269,23 @@ type reviewTask struct {
 // reviewTasks is the global review task map.
 var reviewTasks sync.Map
 
+// mediaJobs is the package-level media edit job manager.
+var mediaJobs = mediaedit.NewManager()
+
+// resolveFfmpeg resolves ffmpeg and ffprobe paths from config.
+func (h *Handler) resolveFfmpeg() (string, string, error) {
+	cfg := h.d.Reg.Config()
+	ff, err := mediaedit.ResolveFfmpeg(cfg.Download.FfmpegPath)
+	if err != nil {
+		return "", "", err
+	}
+	fp, err := mediaedit.ResolveFfprobe(ff)
+	if err != nil {
+		return ff, "", err
+	}
+	return ff, fp, nil
+}
+
 // startReviewRequest is the request body for starting a review.
 type startReviewRequest struct {
 	SessionID    string `json:"sessionId"`
@@ -452,6 +470,13 @@ func (h *Handler) Register(r chi.Router) {
 	r.Delete("/fs", h.galleryDeleteFs)
 	r.Post("/zip-from-path", h.galleryZipFromPath)
 	r.Post("/zip-writeback", h.galleryZipWriteback)
+	// Media edit endpoints.
+	r.Get("/edit/ffmpeg-status", h.galleryEditFfmpegStatus)
+	r.Post("/edit/probe", h.galleryEditProbe)
+	r.Post("/edit/subtitle-upload", h.galleryEditSubtitleUpload)
+	r.Post("/edit/start", h.galleryEditStart)
+	r.Get("/edit/status/{jobId}", h.galleryEditStatus)
+	r.Post("/edit/cancel/{jobId}", h.galleryEditCancel)
 	r.Post("/paste-paths", h.galleryPastePaths)
 }
 
@@ -1210,4 +1235,180 @@ func (h *Handler) galleryGeneratePrompt(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]any{
 		"systemPrompt": systemPrompt,
 	})
+}
+
+// --- Media edit handlers ---
+
+// galleryEditFfmpegStatus reports whether ffmpeg is available.
+func (h *Handler) galleryEditFfmpegStatus(w http.ResponseWriter, r *http.Request) {
+	ffmpegPath, _, err := h.resolveFfmpeg()
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"available": false,
+			"path":      "",
+			"error":     err.Error(),
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"available": true,
+		"path":      ffmpegPath,
+		"error":     "",
+	})
+}
+
+// probeRequest is the body for POST /edit/probe.
+type probeRequest struct {
+	Path string `json:"path"`
+}
+
+// galleryEditProbe probes a media file and returns metadata.
+func (h *Handler) galleryEditProbe(w http.ResponseWriter, r *http.Request) {
+	var req probeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	_, ffprobePath, err := h.resolveFfmpeg()
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "ffmpeg/ffprobe not available: "+err.Error())
+		return
+	}
+
+	result, err := mediaJobs.ProbeMedia(ffprobePath, req.Path)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "probe failed: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// galleryEditSubtitleUpload receives a subtitle file and writes it to a temp dir.
+func (h *Handler) galleryEditSubtitleUpload(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = "subtitle.srt"
+	}
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid filename")
+		return
+	}
+
+	ext := filepath.Ext(name)
+	if ext != ".srt" && ext != ".ass" && ext != ".ssa" && ext != ".vtt" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "unsupported subtitle format: "+ext)
+		return
+	}
+
+	// Write to a shared temp dir.
+	tmpDir := filepath.Join(os.TempDir(), "tinyrouter-subs")
+	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create temp dir")
+		return
+	}
+
+	// Generate random prefix to avoid collisions.
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to generate filename")
+		return
+	}
+	outPath := filepath.Join(tmpDir, hex.EncodeToString(b)+ext)
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create file")
+		return
+	}
+	defer f.Close()
+
+	limited := io.LimitReader(r.Body, 16<<20)
+	if _, err := io.Copy(f, limited); err != nil {
+		os.Remove(outPath)
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to write file")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"subtitlePath": outPath,
+	})
+}
+
+// galleryEditStart starts a media edit job.
+func (h *Handler) galleryEditStart(w http.ResponseWriter, r *http.Request) {
+	var req mediaedit.StartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.InputPath == "" || req.Operation == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "inputPath and operation are required")
+		return
+	}
+
+	ffmpegPath, ffprobePath, err := h.resolveFfmpeg()
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "ffmpeg not available: "+err.Error())
+		return
+	}
+
+	job, err := mediaJobs.Start(ffmpegPath, ffprobePath, req)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to start job: "+err.Error())
+		return
+	}
+
+	h.d.Logger.Info("gallery: started edit job %s (%s, %s)", job.ID, job.Operation, job.InputPath)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"jobId": job.ID,
+	})
+}
+
+// galleryEditStatus returns the status of an edit job.
+func (h *Handler) galleryEditStatus(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "jobId")
+
+	job, ok := mediaJobs.Get(jobID)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	resp := map[string]any{
+		"id":         job.ID,
+		"status":     job.Status,
+		"progress":   job.Progress,
+		"operation":  job.Operation,
+		"inputPath":  job.InputPath,
+		"outputName": job.OutputName,
+		"outputPath": job.OutputPath,
+		"error":      job.Error,
+	}
+	if job.Status == mediaedit.StatusCompleted && job.OutputPath != "" {
+		resp["outputURL"] = "/api/gallery/file?path=" + url.PathEscape(job.OutputPath)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// galleryEditCancel cancels a running edit job.
+func (h *Handler) galleryEditCancel(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "jobId")
+
+	if !mediaJobs.Cancel(jobID) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "job not found or already finished")
+		return
+	}
+
+	h.d.Logger.Info("gallery: cancelled edit job %s", jobID)
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -4,6 +4,8 @@
 >
 > **最后核对：** 2026-07-26，仓库工作区（`main`）。**API 子包拆分（Phase 3 完成）**：`internal/api` 的全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。涉及 Playground 的子包：`models.go` → `internal/api/models/`，`anysearch.go` → `internal/api/anysearch/`，`editor.go` → `internal/api/editor/`，`review_presets.go` → `internal/api/review_presets/`，`gallery.go`/`gallery_fs.go`/`gallery_review.go`/`gallery_session.go` → `internal/api/gallery/`，`image.go` → `internal/api/image/`，`settings.go` → `internal/api/settings/`，`providers_models_crud.go` 等 4 文件 → `internal/api/providers/`。本次新增/核对：(1) Editor 页面——双栏文本编辑器，支持原生文件打开/保存、原始/预览视图切换、`window.Diff` 行级 diff 对比、查找替换、行号、Tab 缩进自动缩进，Gallery 导航按钮切换画廊/编辑器的 toggle 逻辑；(2) 修复 Editor Open 闪退：`internal/fsutil/open_windows.go` 修正 `IFileDialog::GetResult` 的 vtable 索引 26→20（确认选择时返回路径而非访问...
 
+> **最后核对（2026-07-26 增补#6）：** Gallery 媒体编辑器（ffmpeg 子进程）——新增 `internal/mediaedit/` leaf 包（types/binary/probe/args/executor/manager），通过 `internal/api/gallery/register.go` 的 6 个 edit handler（`/api/gallery/edit/*`）提供图片转码、视频转码/裁剪/字幕烧录能力。`gallery-edit.js` 前端模块加载于 `gallery-fullscreen.js` 之后、`gallery.js` 之前。复用 `DownloadConfig.FfmpegPath` 配置字段，经 `FFMPEG_PATH`/`FFPROBE_PATH` env fallback 解析二进制。文档：PROJECT_MAP §10.9a、playground-architecture.md §16。
+
 > **最后核对（2026-07-26 增补#2）：** P1-P5 Editor/Clean-mode refactor：**(1)** Top-level nav simplified to 2-way Gallery↔Editor（persisted via `sessionStorage.trGalView`）；AI Text Review wizard is now Editor's **Clean** mode（3rd toolbar button alongside Edit/Diff）— `gotoGalleryToggle` 2-way，`navigateTo` `case 'textreview'` removed。**(2)** Editor state（mode + panes）persisted to `sessionStorage.trEditor`；`edSaveState()`/`edLoadState()` added in `editor-state.js`。**(3)** Step1 large-text performance：chunked preview（2000 lines/65536 chars first chunk）+ Load-more button + paste interception + Abandon button；layout reworked（centered title row + Next/Abandon right，flex body fills height）。**(4)** Step2 layout reworked（Back/centered Split/Next header，single-row controls1，4 evenly-distributed buttons in controls2，flex preview）；auto-detect runs on fresh entry（no chapters）。**(5)** Step3 Node Pool Settings modal（pg-modal with add-node form + provider/model dropdowns from `/api/models` + delete per node）+ System Prompt default-collapsed（`trState.promptCollapsed` persisted）。**(6)** Clean mode wizard constrained to left 50% pane（`.ed-review-wrap` horizontal flex + spacer）。详情见 Phases P1-P5。
 
 > **最后核对（2026-07-26 增补#3）：** 导航栏与 Monitor 页面重构——**(1)** 移除 Console 独立页面与导航按钮，内容并入 Monitor（原 Usage）页右栏；(2) 导航按钮重排：Row1=Monitor(原Usage)/Settings/Playground，Row2=Gallery/Download；(3) 快捷键重映射：F1→Monitor, F2→Settings, F3→Playground, F4→Gallery, F5→Download，F6 移除；(4) `goto-console` shortcut 预设移除；`renderConsole` 替换为 `buildConsoleInto(container)`；(5) 移除 6H Request Trend 图表及全部趋势相关代码（`renderTrendChart`/`initTrendChart`/`updateTrendChart`/`buildTrendChartSVG`/`buildTrendData`/`attachTrendHover` 等）。涉及文件：`web/static/app.js`、`shortcuts.js`、`usage.js`、`console.js`、`i18n.js`、`theme.js`、`style.css`、`index.html`、`index-nopg.html`。`internal/proxy/`、`internal/usage/` 无变化（用量数据为共享环形缓冲，趋势完全由前端派生）。
@@ -191,6 +193,12 @@ Playground 后端相关职责只有三类：
 | `POST /api/text-review/sessions/{id}/resume` | 恢复调度器 | 管理 session | 32 MiB |
 | `POST /api/text-review/sessions/{id}/stop` | 取消会话（标记 cancelled） | 管理 session | 32 MiB |
 | `POST /api/text-review/sessions/{id}/chapters/{idx}/reprocess` | 单章重清理（必要时重启调度） | 管理 session | 32 MiB |
+| `GET /api/gallery/edit/ffmpeg-status` | ffmpeg 可用性检测 | 管理 session | 无上限（`/api/gallery` 组） |
+| `POST /api/gallery/edit/probe` | 媒体文件元数据探针（宽/高/编码/时长/IsImage） | 管理 session | 无上限 |
+| `POST /api/gallery/edit/subtitle-upload` | 字幕文件上传（.srt/.ass/.vtt，≤16MB） | 管理 session | 16 MiB |
+| `POST /api/gallery/edit/start` | 启动 ffmpeg 编辑 job（转码/裁剪/字幕烧录） | 管理 session | 无上限 |
+| `GET /api/gallery/edit/status/{jobId}` | 查询 job 进度与结果（含 outputURL） | 管理 session | 无上限 |
+| `POST /api/gallery/edit/cancel/{jobId}` | 取消运行中 job（kill 进程树） | 管理 session | 无上限 |
 
 前端源码中的 `pgApiGet('/models')` 经宿主 `apiGet` 自动加 `/api`，实际请求是 `/api/models`。聊天相关代码直接 `fetch('/v1/chat/completions')`。
 
@@ -832,6 +840,60 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 | 修改审核策略/并发 | `internal/api/gallery_review.go`（`galleryStartReview`/`runReview`/`selectReviewIndices`/`selectHeadTailIndices`） |
 | 修改审核前端交互 | `web/playground/static-pg/gallery-review.js`（`renderReviewPanel`/`startPolling`/`applyReviewFilter`）、`web/playground/static-pg/gallery-state.js`（`reviewState`）、`web/static/style.css`（`.gallery-review-*`） |
 | 修改审核预设 CRUD | `internal/api/review_presets.go`、`internal/registry/review_presets.go`、`internal/config/types.go`（`ReviewPreset`）、`internal/config/defaults.go`（内置预设） |
+
+### Gallery 媒体编辑器（ffmpeg）
+
+Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/register.go` 的 6 个 edit handler。
+
+#### API 端点（`/api/gallery/edit/*`）
+
+| 端点 | 方法 | 请求体 | 响应 |
+|---|---|---|---|
+| `/edit/ffmpeg-status` | GET | — | `{available:bool, path:string, error:string}` |
+| `/edit/probe` | POST | `{path}` | `ProbeResult`（width/height/codec/duration/hasAudio/frameRate/isImage） |
+| `/edit/subtitle-upload` | POST | raw body + `?name=` query | `{subtitlePath}`（abs path，写入 `%TEMP%/tinyrouter-subs/`） |
+| `/edit/start` | POST | `StartRequest`（inputPath/operation/overwrite/params） | `{jobId}` |
+| `/edit/status/{jobId}` | GET | — | job snapshot（status/progress/outputPath/outputURL/error） |
+| `/edit/cancel/{jobId}` | POST | — | 204 No Content |
+
+#### 操作类型与 params
+
+- **image_transcode**：`ImageTranscodeParams{format, quality, scalePercent, stripMetadata}` — JPEG/PNG/WebP/BMP/TIFF/GIF 转码
+- **video_transcode**：`VideoTranscodeParams{codec, container, qualityTier, preset, scalePercent, audioCodec, audioBitrate, stripMetadata}` — H264/H265/VP9/AV1 编码，含编码-容器兼容校验
+- **video_trim**：`VideoTrimParams{start, duration, reencode, codec, qualityTier}` — 无损裁剪（`-c copy`）或重编码裁剪
+- **video_subtitle**：`VideoSubtitleParams{subtitlePath, mode, language, fontSize, fontName, container}` — burn（烧录进视频，H.264+AAC 重编码）或 soft（作为独立字幕轨 mux，无损 remux）
+
+#### 约束
+
+- **absPath-only**：所有操作基于绝对路径（非沙箱），前端通过 `POST /api/gallery/open-dir` 原生对话框获取绝对路径后传给 edit 端点；输出文件也通过 `GET /api/gallery/file?path=` 提供访问。
+- **输出路径**：非覆盖模式（`overwrite:false`）下在原文件同目录生成 `{base}_{desc}.{ext}`，冲突时追加 `_2`/`_3`；覆盖模式（`overwrite:true`）直接写入原文件。
+- **ffmpeg 解析**：配置 `download.ffmpegPath` → env `FFMPEG_PATH` → PATH；ffprobe 同理（`FFPROBE_PATH` env → 同目录派生 → PATH）。
+- **job 生命周期**：纯内存 `sync.Map`，进程退出即丢失。无超时自动清理；job 对象小（仅元数据指针），无泄漏风险。
+
+#### 源码锚点
+
+- `internal/mediaedit/types.go`：Job/ProbeResult/StartRequest/各操作 params 类型
+- `internal/mediaedit/binary.go`：ResolveFfmpeg/ResolveFfprobe
+- `internal/mediaedit/probe.go`：Probe(ffprobePath, path)
+- `internal/mediaedit/args.go`：BuildImageTranscodeArgs/BuildVideoTranscodeArgs/BuildVideoTrimArgs/BuildVideoSubtitleArgs + BuildOutputPath
+- `internal/mediaedit/executor.go`：RunFfmpeg + tailBuffer
+- `internal/mediaedit/manager.go`：Manager.Start/Get/Cancel/ProbeMedia
+- `internal/api/gallery/register.go`：mediaJobs + resolveFfmpeg + 6 个 edit handler
+- `internal/api/router.go`：pgJSFiles 含 `gallery-edit.js`
+- `web/static/index.html`：`<script src="/gallery-edit.js">` 加载于 `gallery-fullscreen.js` 后、`gallery.js` 前
+
+#### 变更维护清单
+
+| 触发变更 | 涉及源码 |
+|---|---|
+| 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/register.go`（manager.go 的 `buildArgs` switch） |
+| 修改质量/编码参数默认值 | `internal/mediaedit/args.go`（CRF 表/jpegQuality/clamp）+ `internal/mediaedit/args_test.go` |
+| 修改 ffmpeg 二进制解析 | `internal/mediaedit/binary.go` |
+| 修改 ffprobe 探针逻辑 | `internal/mediaedit/probe.go` |
+| 修改 job 生命周期/超时 | `internal/mediaedit/manager.go`（Start/runJob/cleanup） |
+| 修改 edit HTTP 端点 | `internal/api/gallery/register.go`（handler 方法 + Register 方法） |
+| 修改前端编辑器 UI | `web/playground/static-pg/gallery-edit.js` |
+| 修改加载顺序 | `internal/api/router.go`（pgJSFiles）+ `web/static/index.html` |
 
 ## 17. Editor 模块（双栏文本编辑器）
 

@@ -420,7 +420,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				"pg-setup.js", "pg-director.js", "pg-search.js",
 				"gallery-state.js", "gallery-io.js", "gallery-layout.js",
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
-				"gallery.js", "editor-state.js", "editor.js",
+				"gallery-edit.js", "gallery.js", "editor-state.js", "editor.js",
 				// AI Text Review (load order: split/diff/state first, then steps, then entry)
 				"tr-split.js", "tr-diff.js", "tr-state.js",
 				"text-review-step1.js", "text-review-step2.js",
