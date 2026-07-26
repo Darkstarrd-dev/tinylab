@@ -28,12 +28,18 @@ var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an erro
  * @param {object} state trState
  */
 window.trRenderStep3 = function (panel, state) {
+  var collapsed = state.promptCollapsed !== false; // default true
+
   panel.innerHTML =
     '<div class="tr-step-panel">' +
 
       // node pool (config form when idle, runtime table when session live)
       '<div class="tr-section">' +
-        '<h3 class="tr-section-title">' + trEscapeHtml(trT('trNodePool')) + '</h3>' +
+        '<div class="tr-s3-node-head">' +
+          '<h3 class="tr-section-title" style="margin:0">' + trEscapeHtml(trT('trNodePool')) + '</h3>' +
+          '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-settings" onclick="trStep3OpenSettings()">' +
+            trEscapeHtml(trT('trSettings')) + '</button>' +
+        '</div>' +
         '<p class="tr-section-desc">' + trEscapeHtml(trT('trNodePoolDesc')) + '</p>' +
         '<div class="tr-nodes-wrap" id="tr-s3-nodes">' +
           '<div class="tr-empty">' + trEscapeHtml(trT('trLoading')) + '</div>' +
@@ -41,15 +47,22 @@ window.trRenderStep3 = function (panel, state) {
         '<div class="tr-s3-total" id="tr-s3-total"></div>' +
       '</div>' +
 
-      // system prompt + auto-retry
+      // system prompt + auto-retry (collapsible)
       '<div class="tr-section">' +
-        '<h3 class="tr-section-title">' + trEscapeHtml(trT('trSystemPrompt')) + '</h3>' +
-        '<textarea class="tr-textarea" id="tr-s3-prompt" placeholder="' +
-          trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
-          trEscapeHtml(state.systemPrompt || '') +
-        '</textarea>' +
-        '<label class="tr-check"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
-          (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
+        '<h3 class="tr-section-title tr-s3-prompt-head" id="tr-s3-prompt-head" onclick="trStep3TogglePrompt()"' +
+          ' style="cursor:pointer;user-select:none">' +
+          '<span class="tr-s3-chev' + (collapsed ? ' tr-s3-chev-collapsed' : '') + '" id="tr-s3-chev">&#9660;</span> ' +
+          trEscapeHtml(trT('trSystemPrompt')) +
+        '</h3>' +
+        '<div class="tr-s3-prompt-body" id="tr-s3-prompt-body"' +
+          (collapsed ? ' style="display:none"' : '') + '>' +
+          '<textarea class="tr-textarea" id="tr-s3-prompt" placeholder="' +
+            trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
+            trEscapeHtml(state.systemPrompt || '') +
+          '</textarea>' +
+          '<label class="tr-check"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
+            (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
+        '</div>' +
       '</div>' +
 
       // run controls
@@ -177,7 +190,6 @@ function trS3FindNodeRow(id) {
 }
 
 function trS3UpsertNode(id, enabled, concurrency) {
-  // Preserve providerId/modelId from the local mirror; patch concurrency/enabled.
   var node = null;
   for (var i = 0; i < trState.reviewNodes.length; i++) {
     if (trState.reviewNodes[i].id === id) { node = trState.reviewNodes[i]; break; }
@@ -205,17 +217,212 @@ function trS3UpsertNode(id, enabled, concurrency) {
   }, function () { trToast(trT('trNodeSaveFailed'), 'error'); });
 }
 
+// ===================== node pool: Settings modal =====================
+
+/**
+ * Open the node pool Settings modal (pg-modal). Shows an add-node form
+ * (provider select + model select + concurrency + enabled + Add) plus
+ * the existing node list with Delete buttons.
+ */
+function trStep3OpenSettings() {
+  if (typeof pgShowModal !== 'function') {
+    trToast(trT('trPatternEditorUnavailable'), 'warning');
+    return;
+  }
+  trStep3RenderSettingsModal();
+}
+
+function trStep3RenderSettingsModal() {
+  // Fetch models for provider/model dropdowns
+  trApiGet('/models').then(function (res) {
+    var allModels = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
+
+    // Extract unique providers from models
+    var providerMap = {};
+    for (var i = 0; i < allModels.length; i++) {
+      var m = allModels[i];
+      if (m.type === 'provider' && m.providerId) {
+        if (!providerMap[m.providerId]) {
+          providerMap[m.providerId] = { id: m.providerId, name: m.provider || m.providerId };
+        }
+      }
+    }
+    var providers = [];
+    for (var k in providerMap) {
+      if (Object.prototype.hasOwnProperty.call(providerMap, k)) providers.push(providerMap[k]);
+    }
+
+    var providerOpts = '';
+    for (var pi = 0; pi < providers.length; pi++) {
+      providerOpts += '<option value="' + trEscapeHtml(providers[pi].id) + '">' +
+        trEscapeHtml(providers[pi].name) + '</option>';
+    }
+
+    // Node list rows
+    var nodes = trState.reviewNodes || [];
+    var nodeRows = '';
+    for (var ni = 0; ni < nodes.length; ni++) {
+      var n = nodes[ni];
+      nodeRows += '<tr>' +
+        '<td>' + trEscapeHtml(n.providerId || '') + '</td>' +
+        '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
+        '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
+        '<td>' + (n.enabled ? '&#10003;' : '&#10007;') + '</td>' +
+        '<td><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
+          trEscapeHtml(n.id || '') + '\')">' + trEscapeHtml(trT('trDelete')) + '</button></td>' +
+      '</tr>';
+    }
+
+    var body =
+      '<div class="tr-s3-settings-section">' +
+        '<h4>' + trEscapeHtml(trT('trAddNode')) + '</h4>' +
+        '<div class="tr-s3-settings-form">' +
+          '<label class="tr-label">' + trEscapeHtml(trT('trNodeProvider')) + '</label>' +
+          '<select class="tr-select" id="tr-s3-modal-provider" onchange="trStep3OnModalProviderChange()">' +
+            '<option value="">--</option>' + providerOpts +
+          '</select>' +
+          '<label class="tr-label">' + trEscapeHtml(trT('trNodeModel')) + '</label>' +
+          '<select class="tr-select" id="tr-s3-modal-model"><option value="">--</option></select>' +
+          '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + '</label>' +
+          '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:80px">' +
+          '<label class="tr-check">' +
+            '<input type="checkbox" id="tr-s3-modal-enabled" checked> ' +
+            trEscapeHtml(trT('trNodeEnabled')) +
+          '</label>' +
+          '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep3AddNode()">' +
+            trEscapeHtml(trT('trAdd')) + '</button>' +
+        '</div>' +
+      '</div>';
+
+    if (nodes.length > 0) {
+      body +=
+        '<hr class="tr-pe-sep">' +
+        '<div class="tr-s3-settings-section">' +
+          '<h4>' + trEscapeHtml(trT('trNodePool')) + '</h4>' +
+          '<table class="tr-pe-table" style="width:100%"><thead><tr>' +
+            '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
+            '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
+            '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
+            '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
+            '<th></th>' +
+          '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
+        '</div>';
+    }
+
+    var html =
+      '<div class="pg-modal-header">' +
+        '<span class="pg-modal-title">' + trEscapeHtml(trT('trSettings')) + ' — ' +
+          trEscapeHtml(trT('trNodePool')) + '</span>' +
+        '<button class="pg-modal-close" onclick="pgCloseModal();trStep3OnSettingsClosed()">&#10005;</button>' +
+      '</div>' +
+      '<div class="pg-modal-body" style="max-height:70vh;overflow-y:auto">' + body + '</div>';
+
+    pgShowModal(html);
+
+    // Store model data for filtering
+    window._trS3ModalModels = allModels;
+  }, function () {
+    trToast(trT('trNodesLoadFailed'), 'error');
+  });
+}
+
+/**
+ * Provider changed in the settings modal: reload model dropdown.
+ */
+function trStep3OnModalProviderChange() {
+  var sel = document.getElementById('tr-s3-modal-provider');
+  var modelSel = document.getElementById('tr-s3-modal-model');
+  if (!sel || !modelSel) return;
+  var providerId = sel.value;
+  modelSel.innerHTML = '<option value="">--</option>';
+  if (!providerId) return;
+  var all = window._trS3ModalModels || [];
+  for (var i = 0; i < all.length; i++) {
+    var m = all[i];
+    if (m.type === 'provider' && m.providerId === providerId) {
+      var opt = document.createElement('option');
+      opt.value = m.realModelId || m.id;
+      opt.textContent = m.id;
+      modelSel.appendChild(opt);
+    }
+  }
+}
+
+/**
+ * Add a new node via POST (no id → create).
+ */
+function trStep3AddNode() {
+  var providerSel = document.getElementById('tr-s3-modal-provider');
+  var modelSel = document.getElementById('tr-s3-modal-model');
+  var concEl = document.getElementById('tr-s3-modal-conc');
+  var enEl = document.getElementById('tr-s3-modal-enabled');
+  if (!providerSel || !modelSel) return;
+  var providerId = providerSel.value;
+  var modelId = modelSel.value;
+  if (!providerId || !modelId) { trToast(trT('trImportFirst'), 'warning'); return; }
+  var body = {
+    providerId: providerId,
+    modelId: modelId,
+    concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
+    enabled: enEl ? enEl.checked : true
+  };
+  trApiPost('/text-review/review-nodes', body).then(function (res) {
+    if (res && res.error) { trToast(res.error, 'error'); return; }
+    // Re-fetch nodes and refresh both inline table and modal
+    return trApiGet('/text-review/review-nodes');
+  }).then(function (res) {
+    var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
+    trState.reviewNodes = nodes;
+    trS3RenderConfigNodes(nodes);
+    trStep3RenderSettingsModal();
+  }).catch(function (err) {
+    console.warn('tr add node failed:', err);
+    trToast(trT('trNodeAddFailed'), 'error');
+  });
+}
+
+/**
+ * Delete a node via DELETE.
+ */
+function trStep3DeleteNode(id) {
+  if (!id) return;
+  trApiDelete('/text-review/review-nodes/' + encodeURIComponent(id)).then(function (res) {
+    if (res && res.error) { trToast(res.error, 'error'); return; }
+    return trApiGet('/text-review/review-nodes');
+  }).then(function (res) {
+    var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
+    trState.reviewNodes = nodes;
+    trS3RenderConfigNodes(nodes);
+    trStep3RenderSettingsModal();
+  }).catch(function (err) {
+    console.warn('tr delete node failed:', err);
+    trToast(trT('trNodeDeleteFailed'), 'error');
+  });
+}
+
+/**
+ * Called when the settings modal is closed (via X or backdrop).
+ */
+function trStep3OnSettingsClosed() {
+  // Re-fetch to keep inline table in sync
+  trApiGet('/text-review/review-nodes').then(function (res) {
+    var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
+    trState.reviewNodes = nodes;
+    trS3RenderConfigNodes(nodes);
+  }, function () { /* ignore */ });
+}
+
 // ===================== node pool: runtime table (live, during a run) =====================
 
 function trS3RenderRuntimeNodes(nodes) {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
   if (!nodes || nodes.length === 0) {
-    wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNoNodes')) + '</div>';
+    wrap.innerHTML = '';
+    trS3RenderTotal(0);
     return;
   }
   var html = '<table class="tr-nodes-table tr-s3-runtime"><thead><tr>' +
-    '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeTarget')) + '</th>' +
@@ -223,16 +430,17 @@ function trS3RenderRuntimeNodes(nodes) {
     '</tr></thead><tbody>';
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
-    html += '<tr' + (n.enabled ? '' : ' class="tr-s3-node-disabled"') + '>' +
-      '<td>' + (n.enabled ? '✓' : '✗') + '</td>' +
+    var rowClass = n.enabled ? '' : ' tr-s3-node-disabled';
+    html += '<tr class="' + rowClass + '">' +
       '<td>' + trEscapeHtml(n.providerId || '') + '</td>' +
       '<td>' + trEscapeHtml(n.modelId || '') + '</td>' +
-      '<td>' + (n.target != null ? n.target : 0) + '</td>' +
-      '<td>' + (n.active != null ? n.active : 0) + '</td>' +
+      '<td>' + (n.target || 0) + '</td>' +
+      '<td>' + (n.active || 0) + '</td>' +
     '</tr>';
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
+  trS3RenderTotal(0);
 }
 
 // ===================== system prompt + auto-retry =====================
@@ -251,6 +459,21 @@ function trStep3OnAutoRetry() {
   trSave();
 }
 
+/**
+ * Toggle the system prompt section collapsed/expanded.
+ */
+function trStep3TogglePrompt() {
+  trState.promptCollapsed = !trState.promptCollapsed;
+  var body = document.getElementById('tr-s3-prompt-body');
+  var chev = document.getElementById('tr-s3-chev');
+  if (body) body.style.display = trState.promptCollapsed ? 'none' : '';
+  if (chev) {
+    if (trState.promptCollapsed) chev.classList.add('tr-s3-chev-collapsed');
+    else chev.classList.remove('tr-s3-chev-collapsed');
+  }
+  trSave();
+}
+
 // ===================== run controls =====================
 
 /**
@@ -259,91 +482,85 @@ function trStep3OnAutoRetry() {
  * subscribe to the SSE stream. The button is disabled while a run is active.
  */
 function trStep3Start() {
-  var chapters = trState.chapters || [];
-  if (chapters.length === 0) { trToast(trT('trNoChaptersToClean'), 'warn'); return; }
-  var enabledIds = trS3EnabledNodeIds();
-  if (enabledIds.length === 0) { trToast(trT('trNoNodesEnabled'), 'warn'); return; }
-  var startBtn = document.getElementById('tr-s3-start');
-  if (startBtn) startBtn.disabled = true;
-  var body = {
-    fileName: trState.fileName || '',
-    rawText: trState.rawText || '',
-    chapters: chapters.map(function (c) { return { title: c.title || '', content: c.content || '' }; }),
+  if (!trState.chapters || trState.chapters.length === 0) {
+    trToast(trT('trNoChaptersToClean'), 'warning');
+    return;
+  }
+  var nodeIds = trS3EnabledNodeIds();
+  if (nodeIds.length === 0) {
+    trToast(trT('trNoNodesEnabled'), 'warning');
+    return;
+  }
+  trS3SessionStatus = 'running';
+  trS3UpdateControls();
+  trApiPost('/sessions', {
+    chapters: trState.chapters.map(function (c) { return { title: c.title, content: c.content }; }),
     systemPrompt: trState.systemPrompt || '',
-    nodeIds: enabledIds
-  };
-  trApiPost('/text-review/sessions', body).then(function (res) {
-    if (!res || res.error || !res.sessionId) {
-      if (startBtn) startBtn.disabled = false;
-      trToast((res && res.error) ? res.error : trT('trStartFailed'), 'error');
-      return;
-    }
-    trState.sessionId = res.sessionId;
+    autoRetry: !!trState.autoRetry,
+    nodeIds: nodeIds
+  }).then(function (res) {
+    if (res && res.error) { trToast(res.error, 'error'); trS3SessionStatus = 'idle'; trS3UpdateControls(); return; }
+    trState.sessionId = res && res.id;
     trSave();
-    trS3SessionStatus = 'running';
-    trS3UpdateControls();
-    trSubscribeSession(res.sessionId);
-  }, function () {
-    if (startBtn) startBtn.disabled = false;
+    trSubscribeSession(trState.sessionId);
+  }).catch(function (err) {
+    console.warn('tr start failed:', err);
     trToast(trT('trStartFailed'), 'error');
+    trS3SessionStatus = 'idle';
+    trS3UpdateControls();
   });
 }
 
 function trStep3Pause() {
-  if (!trState.sessionId) return;
-  trApiPost('/text-review/sessions/' + encodeURIComponent(trState.sessionId) + '/pause', {}).then(function (res) {
-    if (res && res.error) trToast(trT('trPauseFailed'), 'error');
-    else { trS3SessionStatus = 'paused'; trS3UpdateControls(); }
-  }, function () { trToast(trT('trPauseFailed'), 'error'); });
+  trApiPost('/sessions/' + trState.sessionId + '/pause', {}).then(function () {}, function () {
+    trToast(trT('trPauseFailed'), 'error');
+  });
 }
 
 function trStep3Resume() {
-  if (!trState.sessionId) return;
-  trApiPost('/text-review/sessions/' + encodeURIComponent(trState.sessionId) + '/resume', {}).then(function (res) {
-    if (res && res.error) trToast(trT('trResumeFailed'), 'error');
-    else { trS3SessionStatus = 'running'; trS3UpdateControls(); }
-  }, function () { trToast(trT('trResumeFailed'), 'error'); });
+  trApiPost('/sessions/' + trState.sessionId + '/resume', {}).then(function () {}, function () {
+    trToast(trT('trResumeFailed'), 'error');
+  });
 }
 
 function trStep3Stop() {
-  if (!trState.sessionId) return;
-  trApiPost('/text-review/sessions/' + encodeURIComponent(trState.sessionId) + '/stop', {}).then(function (res) {
-    if (res && res.error) trToast(trT('trStopFailed'), 'error');
-    else { trS3SessionStatus = 'cancelled'; trS3UpdateControls(); }
-  }, function () { trToast(trT('trStopFailed'), 'error'); });
+  trApiPost('/sessions/' + trState.sessionId + '/stop', {}).then(function () {}, function () {
+    trToast(trT('trStopFailed'), 'error');
+  });
 }
 
 function trStep3Reprocess(idx) {
-  if (!trState.sessionId) return;
-  trApiPost('/text-review/sessions/' + encodeURIComponent(trState.sessionId) +
-    '/chapters/' + encodeURIComponent(String(idx)) + '/reprocess', {}).then(function (res) {
-    if (res && res.error) trToast(trT('trReprocessFailed'), 'error');
-    else trToast(trT('trReprocessQueued'), 'info');
-  }, function () { trToast(trT('trReprocessFailed'), 'error'); });
+  trApiPost('/sessions/' + trState.sessionId + '/reprocess', { chapterIdx: idx }).then(function () {
+    trToast(trT('trReprocessQueued'), 'success');
+  }, function () {
+    trToast(trT('trReprocessFailed'), 'error');
+  });
 }
 
 function trS3EnabledNodeIds() {
   var ids = [];
-  var nodes = trState.reviewNodes || [];
-  for (var i = 0; i < nodes.length; i++) {
-    if (nodes[i].enabled && (nodes[i].concurrency || 0) > 0) ids.push(nodes[i].id);
+  for (var i = 0; i < trState.reviewNodes.length; i++) {
+    if (trState.reviewNodes[i].enabled) ids.push(trState.reviewNodes[i].id);
   }
   return ids;
 }
 
 function trS3UpdateControls() {
-  var hasSession = !!trState.sessionId;
-  var active = (trS3SessionStatus === 'running' || trS3SessionStatus === 'idle' || trS3SessionStatus === 'paused');
-  var startBtn = document.getElementById('tr-s3-start');
-  var pauseBtn = document.getElementById('tr-s3-pause');
-  var resumeBtn = document.getElementById('tr-s3-resume');
-  var stopBtn = document.getElementById('tr-s3-stop');
-  var reviewBtn = document.getElementById('tr-s3-toreview');
-  if (startBtn) startBtn.disabled = active;
-  if (pauseBtn) pauseBtn.style.display = (hasSession && trS3SessionStatus === 'running') ? '' : 'none';
-  if (resumeBtn) resumeBtn.style.display = (hasSession && trS3SessionStatus === 'paused') ? '' : 'none';
-  if (stopBtn) stopBtn.style.display = (hasSession && active) ? '' : 'none';
-  if (reviewBtn) reviewBtn.style.display = (hasSession && trS3SessionStatus === 'completed') ? '' : 'none';
+  var start = document.getElementById('tr-s3-start');
+  var pause = document.getElementById('tr-s3-pause');
+  var resume = document.getElementById('tr-s3-resume');
+  var stop = document.getElementById('tr-s3-stop');
+  var toreview = document.getElementById('tr-s3-toreview');
+  var s = trS3SessionStatus;
+  var idle = (s === 'idle');
+  var running = (s === 'running');
+  var paused = (s === 'paused');
+  var done = (s === 'completed' || s === 'cancelled');
+  if (start) start.style.display = idle ? '' : 'none';
+  if (pause) pause.style.display = running ? '' : 'none';
+  if (resume) resume.style.display = paused ? '' : 'none';
+  if (stop) stop.style.display = (running || paused) ? '' : 'none';
+  if (toreview) toreview.style.display = done ? '' : 'none';
 }
 
 // ===================== chapter tabs + list =====================
@@ -351,7 +568,7 @@ function trS3UpdateControls() {
 function trS3TabCounts() {
   var counts = { pending: 0, processing: 0, completed: 0, failed: 0 };
   for (var i = 0; i < trS3Chapters.length; i++) {
-    var s = trS3Chapters[i].status;
+    var s = trS3Chapters[i].status || 'pending';
     if (counts[s] != null) counts[s]++;
   }
   return counts;
@@ -361,20 +578,14 @@ function trS3UpdateTabCounts() {
   var tabs = document.getElementById('tr-s3-tabs');
   if (!tabs) return;
   var counts = trS3TabCounts();
-  var tabDefs = [
-    { key: 'pending', label: trT('trTabPending') },
-    { key: 'processing', label: trT('trTabProcessing') },
-    { key: 'completed', label: trT('trTabCompleted') },
-    { key: 'failed', label: trT('trTabFailed') }
-  ];
+  var keys = ['pending', 'processing', 'completed', 'failed'];
   var html = '';
-  for (var i = 0; i < tabDefs.length; i++) {
-    var td = tabDefs[i];
-    html += '<button type="button" class="tr-s3-tab' +
-      (td.key === trS3ActiveTab ? ' active' : '') + '" onclick="trS3SelectTab(\'' + td.key + '\')">' +
-      trEscapeHtml(td.label) +
-      ' <span class="tr-s3-tab-count">' + (counts[td.key] || 0) + '</span>' +
-    '</button>';
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    html += '<button class="tr-s3-tab' + (trS3ActiveTab === k ? ' active' : '') +
+      '" onclick="trS3SelectTab(\'' + k + '\')">' +
+      trEscapeHtml(trT('trTab' + k.charAt(0).toUpperCase() + k.slice(1))) +
+      ' <span class="tr-s3-tab-count">' + (counts[k] || 0) + '</span></button>';
   }
   tabs.innerHTML = html;
 }
@@ -391,68 +602,65 @@ function trS3SelectTab(key) {
  * applied via display:none toggles, not innerHTML rebuilds.
  */
 function trS3RenderChapterList() {
-  var wrap = document.getElementById('tr-s3-chapters');
-  if (!wrap) return;
+  var list = document.getElementById('tr-s3-chapters');
+  var empty = document.getElementById('tr-s3-empty-hint');
+  if (!list) return;
   if (trS3Chapters.length === 0) {
-    wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNoSession')) + '</div>';
-    var hint0 = document.getElementById('tr-s3-empty-hint');
-    if (hint0) hint0.style.display = 'none';
+    list.innerHTML = '';
+    if (empty) empty.style.display = '';
     return;
   }
+  if (empty) empty.style.display = 'none';
   var html = '';
   for (var i = 0; i < trS3Chapters.length; i++) {
-    html += trS3CardHtml(trS3Chapters[i]);
+    html += trS3CardHtml(trS3Chapters[i], i);
   }
-  wrap.innerHTML = html;
+  list.innerHTML = html;
   trS3ApplyTabFilter();
 }
 
-function trS3CardHtml(c) {
-  var idx = c.index;
-  var badge = '<span class="tr-s3-badge tr-s3-badge-' + trEscapeHtml(c.status) + '">' +
-    trEscapeHtml(trT('trStatus_' + c.status)) + '</span>';
+function trS3CardHtml(c, idx) {
+  var status = c.status || 'pending';
+  var badge = trT('trStatus_' + status);
+  var badgeClass = 'tr-s3-badge tr-s3-badge-' + status;
   var meta = trS3MetaHtml(c);
-  var reproc = '';
-  if (c.status === 'completed' || c.status === 'failed') {
-    reproc = '<button type="button" class="tr-btn tr-btn-xs" onclick="trStep3Reprocess(' + idx + ')">' +
-      trEscapeHtml(trT('trReprocess')) + '</button>';
-  }
-  // The live pane is always present (empty for pending) so streaming chunks
-  // can append to it in place without rebuilding the card.
-  var live = '<pre class="tr-s3-live" id="tr-s3-live-' + idx + '">' +
-    trEscapeHtml(c.cleaned || '') + '</pre>';
-  return '<div class="tr-s3-card" data-idx="' + idx + '" data-status="' + trEscapeHtml(c.status) + '">' +
+  return '<div class="tr-s3-card" data-status="' + status + '" data-idx="' + idx + '">' +
     '<div class="tr-s3-card-head">' +
-      '<span class="tr-s3-card-title">' + (idx + 1) + '. ' + trEscapeHtml(c.title || '') + '</span>' +
-      badge +
+      '<span class="tr-s3-card-title">' + trEscapeHtml(c.title || ('#' + (idx + 1))) + '</span>' +
+      '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
     '</div>' +
-    live +
-    '<div class="tr-s3-card-meta">' + meta + '</div>' +
-    '<div class="tr-s3-card-foot">' + reproc + '</div>' +
+    (meta ? '<div class="tr-s3-card-meta">' + meta + '</div>' : '') +
+    '<div class="tr-s3-live" id="tr-s3-live-' + idx + '"></div>' +
+    '<div class="tr-s3-card-foot">' +
+      '<button class="tr-btn tr-btn-xs" onclick="trStep3Reprocess(' + idx + ')">' +
+        trEscapeHtml(trT('trReprocess')) + '</button>' +
+    '</div>' +
   '</div>';
 }
 
 function trS3MetaHtml(c) {
-  var m = '';
-  if (c.nodeId) m += '<span class="tr-s3-meta-node">' + trEscapeHtml(c.nodeId) + '</span>';
-  if (c.retry && c.retry > 0) m += '<span class="tr-s3-meta-retry">' +
-    trEscapeHtml(trT('trRetry', [String(c.retry)])) + '</span>';
-  if (c.error) m += '<span class="tr-s3-error">' + trEscapeHtml(c.error) + '</span>';
-  return m;
+  var parts = [];
+  if (c.nodeId) parts.push('<span class="tr-s3-meta-node">' + trEscapeHtml(c.nodeId) + '</span>');
+  if (c.retryCount) parts.push('<span class="tr-s3-meta-retry">' + trEscapeHtml(trT('trRetry', [String(c.retryCount)])) + '</span>');
+  if (c.error) parts.push('<span class="tr-s3-error">' + trEscapeHtml(c.error) + '</span>');
+  return parts.join(' ');
 }
 
 function trS3ApplyTabFilter() {
   var cards = document.querySelectorAll('#tr-s3-chapters .tr-s3-card');
-  var anyVisible = false;
+  var visible = 0;
   for (var i = 0; i < cards.length; i++) {
     var card = cards[i];
-    var status = card.getAttribute('data-status');
-    var show = (status === trS3ActiveTab);
-    card.style.display = show ? '' : 'none';
-    if (show) anyVisible = true;
+    var status = card.getAttribute('data-status') || 'pending';
+    if (status === trS3ActiveTab || (trS3ActiveTab === 'pending' && !status)) {
+      card.style.display = '';
+      visible++;
+    } else {
+      card.style.display = 'none';
+    }
   }
-  var hint = document.getElementById('tr-s3-empty-hint');
-  if (hint) hint.style.display = anyVisible ? 'none' : '';
+  var empty = document.getElementById('tr-s3-empty-hint');
+  if (empty) empty.style.display = visible === 0 ? '' : 'none';
 }
 
 /**
@@ -461,27 +669,18 @@ function trS3ApplyTabFilter() {
  * their scroll positions.
  */
 function trS3UpdateCardStatus(idx) {
-  var ch = trS3Chapters[idx];
-  if (!ch) return;
-  var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + trS3CssSelector(String(idx)) + '"]');
-  if (!card) return;
-  card.setAttribute('data-status', ch.status);
+  var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + idx + '"]');
+  if (!card || idx < 0 || idx >= trS3Chapters.length) return;
+  var c = trS3Chapters[idx];
+  var status = c.status || 'pending';
+  card.setAttribute('data-status', status);
   var badge = card.querySelector('.tr-s3-badge');
   if (badge) {
-    badge.className = 'tr-s3-badge tr-s3-badge-' + trEscapeHtml(ch.status);
-    badge.textContent = trT('trStatus_' + ch.status);
+    badge.textContent = trT('trStatus_' + status);
+    badge.className = 'tr-s3-badge tr-s3-badge-' + status;
   }
   var meta = card.querySelector('.tr-s3-card-meta');
-  if (meta) meta.innerHTML = trS3MetaHtml(ch);
-  var foot = card.querySelector('.tr-s3-card-foot');
-  if (foot) {
-    var reproc = '';
-    if (ch.status === 'completed' || ch.status === 'failed') {
-      reproc = '<button type="button" class="tr-btn tr-btn-xs" onclick="trStep3Reprocess(' + idx + ')">' +
-        trEscapeHtml(trT('trReprocess')) + '</button>';
-    }
-    foot.innerHTML = reproc;
-  }
+  if (meta) meta.innerHTML = trS3MetaHtml(c);
   trS3ApplyTabFilter();
 }
 
@@ -489,47 +688,36 @@ function trS3UpdateCardStatus(idx) {
 
 /**
  * Subscribe to a session: FIRST GET /sessions/{id} snapshot → reconcile + render
- * the full chapter list + runtime node pool, THEN open EventSource for live
- * deltas. On reconnect after an error, the snapshot is re-fetched in onopen to
- * reconcile any events missed while disconnected.
+ * the full state → THEN open EventSource for live deltas. The snapshot is
+ * authoritative; events overwrite the in-memory mirror post-snapshot.
  */
 function trSubscribeSession(id) {
-  trApiGet('/text-review/sessions/' + encodeURIComponent(id)).then(function (res) {
-    if (!res || res.error) { trS3OnSessionGone(); return; }
-    trS3ReconcileFromSnapshot(res);
-    trS3RenderAll();
-    trS3OpenEventSource(id);
-  }, function () { trS3OnSessionGone(); });
+  trApiGet('/sessions/' + id).then(function (res) {
+    if (res && !res.error) {
+      trS3ReconcileFromSnapshot(res);
+      trS3RenderAll();
+    } else {
+      trS3OnSessionGone();
+    }
+  }).catch(function () {
+    trS3OnSessionGone();
+  });
+  trS3OpenEventSource(id);
 }
 
 function trS3OpenEventSource(id) {
-  if (trEventSource) { try { trEventSource.close(); } catch (_) {} trEventSource = null; }
-  var url = '/api/text-review/sessions/' + encodeURIComponent(id) + '/events';
-  var es = new EventSource(url);
-  trEventSource = es;
-  es.onopen = function () {
-    // On reconnect after an error, re-fetch the snapshot to reconcile missed events.
-    if (trS3NeedsReconcile) {
-      trS3NeedsReconcile = false;
-      trApiGet('/text-review/sessions/' + encodeURIComponent(id)).then(function (res) {
-        if (res && !res.error) {
-          trS3ReconcileFromSnapshot(res);
-          trS3RenderAll();
-        }
-      });
-    }
-  };
-  es.onmessage = function (e) {
-    var evt;
-    try { evt = JSON.parse(e.data); } catch (_) { return; }
-    if (!evt || typeof evt.type !== 'string') return;
-    if (evt.type === 'chunk') trS3OnChunk(evt);
-    else if (evt.type === 'status') trS3OnStatus(evt);
-    else if (evt.type === 'node') trS3OnNode(evt);
-  };
-  es.onerror = function () {
-    // EventSource auto-reconnects; the backend task continues (切页不丢). Do NOT
-    // alert. Mark for snapshot reconcile on the next successful reopen.
+  trEventSource = new EventSource('/api/text-review/sessions/' + id + '/events');
+  trEventSource.addEventListener('chunk', function (e) {
+    try { var d = JSON.parse(e.data); trS3OnChunk(d); } catch (_) {}
+  });
+  trEventSource.addEventListener('status', function (e) {
+    try { var d = JSON.parse(e.data); trS3OnStatus(d); } catch (_) {}
+  });
+  trEventSource.addEventListener('node', function (e) {
+    try { var d = JSON.parse(e.data); trS3OnNode(d); } catch (_) {}
+  });
+  trEventSource.onerror = function () {
+    trEventSource.close();
     trS3NeedsReconcile = true;
   };
 }
@@ -541,23 +729,19 @@ function trS3OpenEventSource(id) {
  */
 function trS3OnChunk(evt) {
   var idx = evt.chapterIdx;
-  var ch = trS3Chapters[idx];
-  if (!ch) return;
-  var delta = evt.delta || '';
-  var wasProcessing = (ch.status === 'processing');
-  ch.cleaned = (ch.cleaned || '') + delta;
-  if (!wasProcessing) {
-    ch.status = 'processing';
-    trS3UpdateCardStatus(idx);
-    trS3UpdateTabCounts();
-    trS3MaybeSessionDone();
+  if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
+  var c = trS3Chapters[idx];
+  if (!c.cleaned) c.cleaned = '';
+  c.cleaned += evt.delta || '';
+  var old = c.status;
+  c.status = 'processing';
+  var live = document.getElementById('tr-s3-live-' + idx);
+  if (live) {
+    live.textContent = c.cleaned;
+    if (trS3ScrolledToBottom(live)) live.scrollTop = live.scrollHeight;
   }
-  var pre = document.getElementById('tr-s3-live-' + idx);
-  if (pre && delta) {
-    var atBottom = trS3ScrolledToBottom(pre);
-    pre.appendChild(document.createTextNode(delta));
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
-  }
+  if (old !== 'processing') trS3UpdateCardStatus(idx);
+  trS3UpdateTabCounts();
 }
 
 /**
@@ -566,17 +750,13 @@ function trS3OnChunk(evt) {
  */
 function trS3OnStatus(evt) {
   var idx = evt.chapterIdx;
-  var ch = trS3Chapters[idx];
-  if (!ch) return;
-  var changed = false;
-  if (evt.status && ch.status !== evt.status) { ch.status = evt.status; changed = true; }
-  if (evt.error) ch.error = evt.error;
-  if (evt.nodeId) ch.nodeId = evt.nodeId;
-  if (changed) {
-    trS3UpdateCardStatus(idx);
-    trS3UpdateTabCounts();
-    trS3MaybeSessionDone();
-  }
+  if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
+  trS3Chapters[idx].status = evt.status || 'pending';
+  if (evt.error) trS3Chapters[idx].error = evt.error;
+  if (evt.nodeId) trS3Chapters[idx].nodeId = evt.nodeId;
+  trS3UpdateCardStatus(idx);
+  trS3UpdateTabCounts();
+  trS3MaybeSessionDone();
 }
 
 /**
@@ -584,10 +764,8 @@ function trS3OnStatus(evt) {
  * /enabled; a node ramped down to 0 shows enabled:false here).
  */
 function trS3OnNode(evt) {
-  if (Array.isArray(evt.nodes)) {
-    trS3Nodes = evt.nodes;
-    trS3RenderRuntimeNodes(evt.nodes);
-  }
+  trS3Nodes = evt.nodes || [];
+  trS3RenderRuntimeNodes(trS3Nodes);
 }
 
 /**
@@ -595,13 +773,11 @@ function trS3OnNode(evt) {
  * (completed or failed), then refresh controls (shows the 进入审校 button).
  */
 function trS3MaybeSessionDone() {
-  if (trS3Chapters.length === 0) return;
-  var allDone = true;
   for (var i = 0; i < trS3Chapters.length; i++) {
     var s = trS3Chapters[i].status;
-    if (s !== 'completed' && s !== 'failed') { allDone = false; break; }
+    if (s !== 'completed' && s !== 'failed') return;
   }
-  if (allDone) trS3SessionStatus = 'completed';
+  trS3SessionStatus = 'completed';
   trS3UpdateControls();
 }
 
@@ -610,43 +786,33 @@ function trS3MaybeSessionDone() {
  * snapshot is authoritative for chapter status/cleaned and node runtime state.
  */
 function trS3ReconcileFromSnapshot(snap) {
-  if (!snap) return;
-  if (typeof snap.status === 'string') trS3SessionStatus = snap.status;
+  if (snap.status) trS3SessionStatus = snap.status;
   if (Array.isArray(snap.chapters)) {
-    trS3Chapters = snap.chapters.map(function (c) {
-      return {
-        index: c.index,
-        title: c.title,
-        status: c.status,
-        error: c.error || '',
-        nodeId: c.nodeId || '',
-        retry: c.retry || 0,
-        cleaned: c.cleaned || ''
-      };
-    });
+    trS3Chapters = snap.chapters;
   }
-  if (Array.isArray(snap.nodes)) trS3Nodes = snap.nodes;
+  if (Array.isArray(snap.nodes)) {
+    trS3Nodes = snap.nodes;
+  }
 }
 
 function trS3RenderAll() {
-  if (trState.sessionId) trS3RenderRuntimeNodes(trS3Nodes);
-  trS3UpdateTabCounts();
+  trS3RenderRuntimeNodes(trS3Nodes);
   trS3RenderChapterList();
+  trS3UpdateTabCounts();
   trS3UpdateControls();
 }
 
 function trS3OnSessionGone() {
-  // Session no longer exists on the backend (expired/restart). Close the ES,
-  // surface cancelled state. trState.sessionId is kept so the user can re-run.
-  if (trEventSource) { try { trEventSource.close(); } catch (_) {} trEventSource = null; }
-  trS3SessionStatus = 'cancelled';
+  trS3SessionStatus = 'idle';
+  trState.sessionId = null;
+  trSave();
+  if (trEventSource) { trEventSource.close(); trEventSource = null; }
   trS3UpdateControls();
+  trS3RenderChapterList();
 }
 
 function trS3ScrolledToBottom(el) {
-  // Treat "near bottom" (within 24px) as at-bottom so partial renders don't
-  // fight a user who has scrolled up slightly.
-  return (el.scrollHeight - el.scrollTop - el.clientHeight) < 24;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 30;
 }
 
 // ===================== cleanup =====================
@@ -658,10 +824,9 @@ function trS3ScrolledToBottom(el) {
  */
 window.trCleanupStep3 = function () {
   if (trEventSource) {
-    try { trEventSource.close(); } catch (_) {}
+    trEventSource.close();
     trEventSource = null;
   }
-  trS3NeedsReconcile = false;
 };
 
 // ===================== small helpers =====================

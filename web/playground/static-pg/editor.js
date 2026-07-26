@@ -96,6 +96,7 @@ var edGutterTimers = []; // per-pane resize observers / scroll sync timers
 
 window.renderEditor = function(container) {
   edContainer = container;
+  edLoadState();
   container.innerHTML = '';
   container.style.height = '100%';
   container.style.overflow = 'hidden';
@@ -125,6 +126,11 @@ window.renderEditor = function(container) {
   modeDiffBtn.dataset.mode = 'diff';
   modeGroup.appendChild(modeEditBtn);
   modeGroup.appendChild(modeDiffBtn);
+  var modeCleanBtn = document.createElement('button');
+  modeCleanBtn.className = 'ed-btn ed-btn-sm' + (editorState.mode === 'clean' ? ' active' : '');
+  modeCleanBtn.textContent = T('editorClean');
+  modeCleanBtn.dataset.mode = 'clean';
+  modeGroup.appendChild(modeCleanBtn);
   toolbar.appendChild(modeGroup);
 
   // Diff source selector (hidden in edit mode)
@@ -281,11 +287,28 @@ window.renderEditor = function(container) {
   diffArea.id = 'ed-diff-area';
   layout.appendChild(diffArea);
 
+  // Review area wrapper (Clean mode — hosts AI Text Review wizard in left pane)
+  var reviewWrap = document.createElement('div');
+  reviewWrap.className = 'ed-review-wrap' + (editorState.mode === 'clean' ? '' : ' ed-hidden');
+  reviewWrap.id = 'ed-review-wrap';
+
+  var reviewArea = document.createElement('div');
+  reviewArea.className = 'ed-review-area';
+  reviewArea.id = 'ed-review-area';
+  reviewWrap.appendChild(reviewArea);
+
+  var reviewSpacer = document.createElement('div');
+  reviewSpacer.className = 'ed-review-spacer';
+  reviewWrap.appendChild(reviewSpacer);
+
+  layout.appendChild(reviewWrap);
+
   // ===================== Bind events =====================
 
   // Mode toggle
   modeEditBtn.addEventListener('click', function() { edSetMode('edit'); });
   modeDiffBtn.addEventListener('click', function() { edSetMode('diff'); });
+  modeCleanBtn.addEventListener('click', function() { edSetMode('clean'); });
 
   // Diff source
   dsSelect.addEventListener('change', function() {
@@ -409,7 +432,12 @@ window.renderEditor = function(container) {
 
   // Initial gutter update
   edUpdateGutters();
-  edRenderDiff();
+
+  if (editorState.mode === 'clean') {
+    edSetMode('clean');
+  } else {
+    edRenderDiff();
+  }
 };
 
 // ===================== cleanup =====================
@@ -418,6 +446,9 @@ window.cleanupEditor = function() {
   if (edKeyHandler) {
     document.removeEventListener('keydown', edKeyHandler);
     edKeyHandler = null;
+  }
+  if (editorState.mode === 'clean' && typeof window.cleanupTextReview === 'function') {
+    window.cleanupTextReview();
   }
   for (var i = 0; i < edGutterTimers.length; i++) {
     if (edGutterTimers[i]) clearTimeout(edGutterTimers[i]);
@@ -448,23 +479,47 @@ function edGetContent(idx) {
 // ===================== mode / view toggles =====================
 
 function edSetMode(mode) {
+  var prev = editorState.mode;
   editorState.mode = mode;
+
+  // Active state on all three mode buttons
   var editBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="edit"]');
   var diffBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="diff"]');
+  var cleanBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="clean"]');
   if (editBtn) editBtn.classList.toggle('active', mode === 'edit');
   if (diffBtn) diffBtn.classList.toggle('active', mode === 'diff');
+  if (cleanBtn) cleanBtn.classList.toggle('active', mode === 'clean');
 
   var diffSourceGroup = document.getElementById('ed-diff-source-group');
   if (diffSourceGroup) diffSourceGroup.style.display = mode === 'diff' ? '' : 'none';
 
   var panes = document.getElementById('ed-panes');
   var diffArea = document.getElementById('ed-diff-area');
-  if (panes) panes.style.display = mode === 'edit' ? '' : 'none';
-  if (diffArea) diffArea.classList.toggle('ed-hidden', mode !== 'diff');
+  var reviewWrap = document.getElementById('ed-review-wrap');
+  var reviewArea = document.getElementById('ed-review-area');
 
-  if (mode === 'diff') {
-    edRenderDiff();
+  // Leaving clean mode
+  if (prev === 'clean' && mode !== 'clean') {
+    if (typeof window.cleanupTextReview === 'function') window.cleanupTextReview();
+    if (reviewArea) reviewArea.innerHTML = '';
   }
+
+  if (mode === 'clean') {
+    if (panes) panes.style.display = 'none';
+    if (diffArea) diffArea.classList.add('ed-hidden');
+    if (reviewWrap) {
+      reviewWrap.classList.remove('ed-hidden');
+      if (reviewArea && reviewArea.children.length === 0 && typeof window.renderTextReview === 'function') {
+        window.renderTextReview(reviewArea);
+      }
+    }
+  } else {
+    // edit or diff
+    if (reviewWrap) reviewWrap.classList.add('ed-hidden');
+    if (panes) panes.style.display = mode === 'edit' ? '' : 'none';
+  }
+
+  edSaveState();
 }
 
 function edSetPaneView(idx, view) {
@@ -482,6 +537,7 @@ function edSetPaneView(idx, view) {
   if (view === 'parsed') {
     edRenderParsed(idx);
   }
+  edSaveState();
 }
 
 function edToggleWrap(idx) {
@@ -491,6 +547,7 @@ function edToggleWrap(idx) {
   var ta = document.getElementById('ed-input-' + idx);
   if (ta) ta.classList.toggle('ed-wrap', editorState.panes[idx].wrap);
   edUpdateGutters();
+  edSaveState();
 }
 
 function edFocusPane(idx) {
@@ -824,6 +881,7 @@ function edOpenFile(idx) {
       edUpdateDirty(idx);
       edUpdateGutters();
       edRenderDiff();
+      edSaveState();
     }
   })
   .catch(function(err) {
@@ -852,6 +910,7 @@ function edOpenFallback(idx) {
       edUpdateDirty(idx);
       edUpdateGutters();
       edRenderDiff();
+      edSaveState();
     });
   }).catch(function() {
     // Cancelled — no-op
@@ -875,6 +934,7 @@ function edSaveFile(idx) {
       if (data.ok) {
         p.original = content;
         edUpdateDirty(idx);
+        edSaveState();
         if (typeof toast === 'function') toast(T('editorSaved'), 'success');
       } else {
         if (typeof toast === 'function') toast(T('editorSaveFailed'), 'error');
@@ -890,6 +950,7 @@ function edSaveFile(idx) {
       FsApi.saveFile(content, name, 'text/plain');
       p.original = content;
       edUpdateDirty(idx);
+      edSaveState();
     } else {
       // Fallback: download via Blob
       var blob = new Blob([content], { type: 'text/plain' });
@@ -900,6 +961,7 @@ function edSaveFile(idx) {
       a.click();
       URL.revokeObjectURL(url);
       p.original = content;
+      edSaveState();
       edUpdateDirty(idx);
     }
   }

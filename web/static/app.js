@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function navigateTo(page) {
   var wasFullscreen = document.body.classList.contains('gallery-fullscreen-active') || (typeof isFullscreen === 'function' && isFullscreen());
   currentPage = page;
+  if (page === 'gallery' || page === 'editor') sessionStorage.setItem('trGalView', page);
   var gen = ++navGen;
   currentProviderId = null;
   stopUsageRefresh();
@@ -46,10 +47,6 @@ function navigateTo(page) {
   if (currentPage !== 'editor' && typeof cleanupEditor === 'function') {
     cleanupEditor();
   }
-  // Cleanup text-review resources when leaving the page.
-  if (currentPage !== 'textreview' && typeof cleanupTextReview === 'function') {
-    cleanupTextReview();
-  }
   // Close the download SSE stream when leaving the download page.
   if (page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
@@ -63,14 +60,12 @@ function navigateTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page ||
-      ((page === 'editor' || page === 'textreview') && el.dataset.page === 'gallery'));
+      (page === 'editor' && el.dataset.page === 'gallery'));
   });
-  // Gallery nav button label toggle (3-way: Gallery / Editor / TextReview)
+  // Gallery nav button label toggle (2-way: Gallery / Editor)
   var galBtn = document.querySelector('.nav-item[data-page="gallery"]');
   if (galBtn) {
-    var label = (page === 'editor') ? t('editor')
-              : (page === 'textreview') ? t('textReview')
-              : t('gallery');
+    var label = (page === 'editor') ? t('editor') : t('gallery');
     galBtn.textContent = label;
   }
   const container = document.getElementById('page-content');
@@ -90,13 +85,12 @@ function navigateTo(page) {
       case 'playground': return renderPlayground(container);
       case 'usage': return renderUsage(container);
       case 'console': return renderConsole(container);
-      case 'textreview': return renderTextReview(container);
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
       case 'editor': return renderEditor(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'textreview') && mainEl) mainEl.classList.add('main-no-scroll');
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor') && mainEl) mainEl.classList.add('main-no-scroll');
   
   function restoreFullscreenState() {
     if (wasFullscreen) {
@@ -126,12 +120,11 @@ function navigateTo(page) {
 }
 
 function gotoGalleryToggle() {
-  // 3-way cycle: Gallery -> Editor -> TextReview -> Gallery.
-  // Reuses the single Gallery nav button (label toggles per state, set in
-  // navigateTo), matching the pre-existing F6 Gallery<->Editor UX.
+  // 2-way toggle: Gallery <-> Editor. Persisted via sessionStorage so the
+  // toggle returns to the last-used page on initial load.
   if (currentPage === 'gallery') navigateTo('editor');
-  else if (currentPage === 'editor') navigateTo('textreview');
-  else navigateTo('gallery');
+  else if (currentPage === 'editor') navigateTo('gallery');
+  else { var last = sessionStorage.getItem('trGalView') || 'gallery'; navigateTo(last); }
 }
 
 function escapeHtml(s) {
@@ -470,8 +463,7 @@ function updateSidebarNav() {
     if (page) {
       // Gallery nav button reflects current page
       if (page === 'gallery') {
-        el.textContent = currentPage === 'editor' ? t('editor')
-          : (currentPage === 'textreview' ? t('textReview') : t('gallery'));
+        el.textContent = currentPage === 'editor' ? t('editor') : t('gallery');
       } else {
         el.textContent = t(page);
       }
