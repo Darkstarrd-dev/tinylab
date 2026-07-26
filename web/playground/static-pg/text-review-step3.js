@@ -460,6 +460,15 @@ function trStep3AddNode() {
   if (!providerSel || !modelSel) return;
   var providerId = providerSel.value;
   var modelId = modelSel.value;
+  // Derive providerId from the selected model to avoid provider/model mismatch
+  // (the provider dropdown may show models from multiple providers if filtering is imperfect).
+  var all = window._trS3ModalModels || [];
+  for (var mi = 0; mi < all.length; mi++) {
+    if (all[mi].type === 'provider' && (all[mi].realModelId || all[mi].id) === modelId) {
+      providerId = all[mi].providerId || providerId;
+      break;
+    }
+  }
   if (!providerId || !modelId) { trToast(trT('trImportFirst'), 'warning'); return; }
   var body = {
     providerId: providerId,
@@ -768,7 +777,6 @@ function trS3CardHtml(c, idx) {
   var badgeClass = 'tr-s3-badge tr-s3-badge-' + status;
   var sel = (idx === trS3SelectedIdx) ? ' selected' : '';
   var title = c.title || ('#' + (idx + 1));
-  // Title attribute surfaces error/retry info without breaking the compact row.
   var tip = c.error ? ('[' + c.error + ']') : (c.nodeId ? c.nodeId : '');
   var passBtn = (status === 'processing' || status === 'failed')
     ? '<button class="tr-btn tr-btn-xs tr-s3-pass" onclick="event.stopPropagation();trS3PassChapter(' + idx + ')">' + trEscapeHtml(trT('trPass')) + '</button>'
@@ -777,6 +785,7 @@ function trS3CardHtml(c, idx) {
     '" title="' + trEscapeHtml(tip) + '" onclick="trS3SelectChapter(' + idx + ')">' +
     '<span class="tr-s3-card-title">' + trEscapeHtml(title) + '</span>' +
     '<span class="tr-s3-card-progress">' + trEscapeHtml(trS3CardProgress(c)) + '</span>' +
+    (c.error ? '<span class="tr-s3-card-error">' + trEscapeHtml(c.error) + '</span>' : '') +
     '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
     (c.nodeId ? trS3NodeBadge(c.nodeId) : '') +
     '<button class="tr-btn tr-btn-xs tr-s3-reproc" onclick="event.stopPropagation();trStep3Reprocess(' + idx + ')">' +
