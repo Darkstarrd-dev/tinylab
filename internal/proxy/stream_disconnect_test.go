@@ -108,7 +108,7 @@ func TestStreamResponse_ClientDisconnect_NonNormalize(t *testing.T) {
 			chunkSize: 50,
 		}),
 	}
-	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-disconnect-non-norm", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-disconnect-non-norm", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	checkUsageEntry(t, h, "test-disconnect-non-norm", true)
 }
@@ -134,7 +134,7 @@ func TestStreamResponse_ClientDisconnect_NormalizePath(t *testing.T) {
 		Header:     http.Header{"Content-Type": {"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader(raw)),
 	}
-	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), true, "test-disconnect-norm", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), true, "test-disconnect-norm", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	checkUsageEntry(t, h, "test-disconnect-norm", true)
 }
@@ -157,12 +157,12 @@ func TestStreamResponse_ClientDisconnect_Immediate(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": {"text/event-stream"}},
-		Body:       io.NopCloser(&smallChunkReader{
+		Body: io.NopCloser(&smallChunkReader{
 			reader:    strings.NewReader(raw),
 			chunkSize: 50,
 		}),
 	}
-	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-disconnect-immediate", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-disconnect-immediate", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	checkUsageEntry(t, h, "test-disconnect-immediate", true)
 }
@@ -192,12 +192,12 @@ func TestStreamResponse_ClientDisconnect_RemovesEntryTracker(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": {"text/event-stream"}},
-		Body:       io.NopCloser(&smallChunkReader{
+		Body: io.NopCloser(&smallChunkReader{
 			reader:    strings.NewReader(raw),
 			chunkSize: 50,
 		}),
 	}
-	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-tracker-cleanup", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-tracker-cleanup", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	// Verify the usage entry was recorded as error (pre-requisite for cleanup)
 	checkUsageEntry(t, h, "test-tracker-cleanup", true)
@@ -219,7 +219,7 @@ func TestStreamResponse_NormalPathNoDisconnect(t *testing.T) {
 		Header:     http.Header{"Content-Type": {"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader(raw)),
 	}
-	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-normal-success", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w, resp, "gpt-4", sel, 5, []byte("{}"), false, "test-normal-success", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	checkUsageEntry(t, h, "test-normal-success", false)
 }

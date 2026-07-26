@@ -64,7 +64,7 @@ func TestStreamSignature_RoundTrip(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(raw)),
 	}
 	w1 := httptest.NewRecorder()
-	h.streamResponse(w1, resp, "gemini", sel, 5, []byte("{}"), false, "req-1", nil, "", combo.EntryFormatOpenAI, "")
+	h.streamResponse(w1, resp, "gemini", sel, 5, []byte("{}"), false, "req-1", nil, "", combo.EntryFormatOpenAI, "", "")
 
 	if sig, ok := h.sigCache.Get("FL1tqiJ9"); !ok || sig != "Eo4GCosG===" {
 		t.Fatalf("expected cached sig Eo4GCosG===, got %q ok=%v", sig, ok)
@@ -91,7 +91,7 @@ func TestStreamSignature_RoundTrip(t *testing.T) {
 
 	w2 := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	ok, _ := h.forwardWithRetry(w2, req, "gem", "gemini", "/v1/chat/completions", nil, parsed, false, 2, "", "Gem", combo.EntryFormatOpenAI, "")
+	ok, _ := h.forwardWithRetry(w2, req, "gem", "gemini", "/v1/chat/completions", nil, parsed, false, 2, "", "Gem", combo.EntryFormatOpenAI, "", "")
 	if !ok {
 		t.Fatalf("forwardWithRetry failed for round 2")
 	}

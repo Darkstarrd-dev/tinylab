@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strings"
 	"time"
@@ -244,4 +245,120 @@ func hasThoughtSignature(tc map[string]any) bool {
 	}
 	sig, ok := google["thought_signature"].(string)
 	return ok && sig != ""
+}
+
+// sessionKeyFromMessages computes a short, stable hash identifying the
+// conversation a request belongs to. It hashes the system message (if any) and
+// the first user message content — the "conversation root" that stays fixed
+// across turns of a chat session (each turn resends the full history, so the
+// root is stable while msgCount grows). Returns "" when no usable root can be
+// extracted (single-shot requests, non-chat payloads) — callers treat empty as
+// "ungrouped".
+//
+// Content is truncated to 4096 runes before hashing to cap cost on huge
+// prompts. The hash is FNV-1a 64-bit (stable, no crypto need) → first 8 hex
+// chars. A null separator separates system+user so "a"+"bc" ≠ "ab"+"c".
+//
+// This is INFERENCE, not ground truth. Known edge cases (v1 accepts these):
+//   - history-truncating clients (some agents drop old turns to fit context)
+//     cause the root to drift → one logical session may split into multiple keys;
+//   - two concurrent sessions that happen to share the exact system+first-user
+//     text (rare) merge into one key.
+//
+// v1 uses the simple root hash; sliding-window fingerprinting is deliberately
+// not implemented (over-engineering for v1).
+func sessionKeyFromMessages(parsed map[string]any) string {
+	if parsed == nil {
+		return ""
+	}
+	msgs, ok := parsed["messages"].([]any)
+	if !ok || len(msgs) == 0 {
+		return ""
+	}
+	var systemContent, firstUserContent string
+	systemFound, userFound := false, false
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := mm["role"].(string)
+		switch role {
+		case "system":
+			if !systemFound {
+				systemContent = extractMessageContent(mm["content"])
+				systemFound = true
+			}
+		case "user":
+			if !userFound {
+				firstUserContent = extractMessageContent(mm["content"])
+				userFound = true
+			}
+		}
+		if systemFound && userFound {
+			break
+		}
+	}
+	if !userFound {
+		return ""
+	}
+	var root string
+	if systemFound {
+		root = truncateRunes(systemContent, 4096) + "\x00" + truncateRunes(firstUserContent, 4096)
+	} else {
+		root = truncateRunes(firstUserContent, 4096)
+	}
+	h := fnv.New64a()
+	h.Write([]byte(root))
+	return fmt.Sprintf("%016x", h.Sum64())[:8]
+}
+
+// extractMessageContent pulls the text out of an OpenAI message `content`
+// field, which may be a plain string or an array of content parts
+// ({type, text, ...}). For arrays, the `text` fields of `type:"text"` parts are
+// concatenated in order. Non-text parts (images, etc.) contribute nothing.
+func extractMessageContent(content any) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []any:
+		var sb strings.Builder
+		for _, part := range c {
+			pm, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			if t, _ := pm["type"].(string); t == "text" {
+				if text, _ := pm["text"].(string); text != "" {
+					sb.WriteString(text)
+				}
+			}
+		}
+		return sb.String()
+	}
+	return ""
+}
+
+// truncateRunes returns the first n runes of s (no ellipsis), so hashing is
+// deterministic regardless of whether the input was actually truncated.
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// reqLogTag formats the per-request console tag used in [%s] log lines. When
+// sessionKey is non-empty it appends "|sess:<key>" so concurrent sessions can
+// be told apart; otherwise it returns reqID unchanged (no "sess:" shown for
+// ungrouped requests).
+func reqLogTag(reqID, sessionKey string) string {
+	if sessionKey == "" {
+		return reqID
+	}
+	return reqID + "|sess:" + sessionKey
 }

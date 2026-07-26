@@ -10,7 +10,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
 
-func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, providerID, upstreamModel, path string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, logLabel, providerName string, entryFormat combo.EntryFormat, originalModel string) (bool, string) {
+func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, providerID, upstreamModel, path string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, logLabel, providerName string, entryFormat combo.EntryFormat, originalModel string, sessionKey string) (bool, string) {
 	state := &retryState{maxRetries: h.maxRetries()}
 
 	// reqID is per-forwardWithRetry (shared across retries) so the console can
@@ -18,6 +18,10 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 	// EntryTracker entry reuses the same id across retries.
 	reqID := generateRequestID()
 	callerTag := requestCallerTag(r)
+	// logTag is reqID augmented with the inferred session key (|sess:xxxxxxxx)
+	// for console log lines, so concurrent sessions can be told apart. reqID
+	// itself stays bare for entry tracking / recordUsage IDs.
+	logTag := reqLogTag(reqID, sessionKey)
 
 	cfgProvider, _ := h.providers.GetProvider(providerID)
 	dispName := providerID
@@ -49,10 +53,10 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 					reason = "上游错误冷却"
 				}
 				if wait > 0 {
-					h.logger.Warn("[%s] %s/%s: 所有可用 key 冷却中（Key %s 原因: %s，%s 后到期）→ 等待恢复后重试", reqID, dispName, upstreamModel, info.KeyName, reason, wait.Round(time.Second))
+					h.logger.Warn("[%s] %s/%s: 所有可用 key 冷却中（Key %s 原因: %s，%s 后到期）→ 等待恢复后重试", logTag, dispName, upstreamModel, info.KeyName, reason, wait.Round(time.Second))
 					select {
 					case <-r.Context().Done():
-						h.logger.Debug("[%s] client canceled during cooldown wait", reqID)
+						h.logger.Debug("[%s] client canceled during cooldown wait", logTag)
 						return false, ""
 					case <-time.After(wait):
 					}
@@ -61,9 +65,9 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			}
 			if err != nil {
 				if callerTag != "" {
-					h.logger.Error("[%s] %s: no available keys for %s/%s（所有 key 已耗尽，返回 502）| %s", reqID, callerTag, dispName, upstreamModel, callerTag)
+					h.logger.Error("[%s] %s: no available keys for %s/%s（所有 key 已耗尽，返回 502）| %s", logTag, callerTag, dispName, upstreamModel, callerTag)
 				} else {
-					h.logger.Error("[%s] no available keys for %s/%s（所有 key 已耗尽，返回 502）", reqID, dispName, upstreamModel)
+					h.logger.Error("[%s] no available keys for %s/%s（所有 key 已耗尽，返回 502）", logTag, dispName, upstreamModel)
 				}
 				return false, ""
 			}
@@ -76,7 +80,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if !state.requestLogged {
-			h.logRequest(sel, logLabel, providerName, upstreamModel, originalModel, msgCount, state, reqID, callerTag)
+			h.logRequest(sel, logLabel, providerName, upstreamModel, originalModel, msgCount, state, reqID, callerTag, sessionKey)
 		}
 
 		// NIM min_interval: wait if too soon since last send on this key.
@@ -103,7 +107,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			writeError(w, http.StatusInternalServerError, "internal marshalling error")
 			return false, ""
 		}
-		h.logger.Debug("[%s] SEND %s | %s | body=%dB", reqID, sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))
+		h.logger.Debug("[%s] SEND %s | %s | body=%dB", logTag, sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))
 
 		// Create a processing usage entry now that we are about to forward the
 		// request. This gives the UI an immediate "request-start" signal so
@@ -145,7 +149,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		resp, err := h.forwardUpstream(r.Context(), sel, upstreamBody, r.Header, isStream, path, entryFormat)
 
 		if err != nil {
-			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel)
+			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel, sessionKey)
 			h.EntryTracker.Remove(reqID)
 			// DecInFlight before continue — cannot use defer in for loop (would
 			// accumulate across retry iterations).
@@ -157,7 +161,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if resp.StatusCode == 429 {
-			h.handle429(resp, sel, providerID, upstreamModel, startTime, state, r, reqID, upstreamBody, upstreamURL, originalModel)
+			h.handle429(resp, sel, providerID, upstreamModel, startTime, state, r, reqID, upstreamBody, upstreamURL, originalModel, sessionKey)
 			h.EntryTracker.Remove(reqID)
 			if keyState != nil {
 				keyState.DecInFlight()
@@ -167,7 +171,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if resp.StatusCode >= 400 {
-			written := h.handleUpstreamError(w, resp, sel, providerID, upstreamModel, state, r, reqID, upstreamBody, upstreamURL, startTime, originalModel)
+			written := h.handleUpstreamError(w, resp, sel, providerID, upstreamModel, state, r, reqID, upstreamBody, upstreamURL, startTime, originalModel, sessionKey)
 			if written {
 				// Pass-through: the upstream 4xx error was already written to the
 				// client as-is. Stop retrying and return success-ish so the caller
@@ -201,7 +205,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 
 		maskedURL := maskURL(sel.Provider.BaseURL)
 		dspModel := resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases)
-		h.logger.Info("[%s] PROXY %s | %s | conn=%s | url=%s", reqID, sel.Provider.Name, dspModel, sel.KeyName, maskedURL)
+		h.logger.Info("[%s] PROXY %s | %s | conn=%s | url=%s", logTag, sel.Provider.Name, dspModel, sel.KeyName, maskedURL)
 
 		latencyMs := time.Since(startTime).Milliseconds()
 
@@ -209,9 +213,9 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			h.EntryTracker.SetTTFT(reqID, latencyMs)
 			h.broadcastTTFT(reqID, latencyMs)
 			normalize := cfgProvider != nil && cfgProvider.NormalizeStreamChunks
-			h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel)
+			h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel, sessionKey)
 		} else {
-			h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel)
+			h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
 		}
 		h.EntryTracker.Remove(reqID)
 		// DecInFlight after the synchronous response handling completes — this

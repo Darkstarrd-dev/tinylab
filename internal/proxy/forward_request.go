@@ -43,8 +43,12 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 		msgCount = len(msgs)
 	}
 
+	// sessionKey is an inferred per-conversation hash (system + first user
+	// message root). Empty for single-shot/non-chat requests → ungrouped.
+	sessionKey := sessionKeyFromMessages(parsed)
+
 	if h.comboRes.IsComboName(modelStr) {
-		h.handleCombo(w, r, modelStr, bodyBytes, parsed, isStream, msgCount, path, entryFormat)
+		h.handleCombo(w, r, modelStr, bodyBytes, parsed, isStream, msgCount, path, entryFormat, sessionKey)
 		return
 	}
 
@@ -63,7 +67,7 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 	}
 
 	if h.comboRes.IsComboName(modelStr) {
-		h.handleCombo(w, r, modelStr, bodyBytes, parsed, isStream, msgCount, path, entryFormat)
+		h.handleCombo(w, r, modelStr, bodyBytes, parsed, isStream, msgCount, path, entryFormat, sessionKey)
 		return
 	}
 
@@ -115,7 +119,7 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 	// NIM providers must not participate in Combo routing: the model name
 	// carries a nv/* prefix and never matches a combo name, so no combo
 	// resolution is attempted for them — fall through to the forward path.
-	if ok, _ := h.forwardWithRetry(w, r, providerID, upstreamModel, path, bodyBytes, parsed, isStream, msgCount, "", provider.Name, entryFormat, originalModel); !ok {
+	if ok, _ := h.forwardWithRetry(w, r, providerID, upstreamModel, path, bodyBytes, parsed, isStream, msgCount, "", provider.Name, entryFormat, originalModel, sessionKey); !ok {
 		writeError(w, http.StatusBadGateway, "all keys exhausted")
 	}
 }

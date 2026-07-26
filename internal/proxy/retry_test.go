@@ -1,4 +1,4 @@
-﻿package proxy
+package proxy
 
 import (
 	"io"
@@ -38,7 +38,7 @@ func TestHandle429_DailyQuota(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -72,7 +72,7 @@ func TestHandle429_RateLimited(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -119,7 +119,7 @@ func TestHandle429_Transient(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 0}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -153,7 +153,7 @@ func TestHandleUpstreamError_401(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -194,7 +194,7 @@ func TestHandleUpstreamError_500(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -235,7 +235,7 @@ func TestHandleUpstreamError_403(t *testing.T) {
 	state := &retryState{maxRetries: 5}
 
 	// The handleUpstreamError should not panic
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -263,7 +263,7 @@ func TestHandleNetworkError(t *testing.T) {
 	sel := newSelectedKey()
 
 	state := &retryState{maxRetries: 5}
-	h.handleNetworkError(sel, "test", "gpt-4", io.ErrUnexpectedEOF, state, "test-id", nil, nil, "", "")
+	h.handleNetworkError(sel, "test", "gpt-4", io.ErrUnexpectedEOF, state, "test-id", nil, nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -295,7 +295,7 @@ func TestLogRequest_FirstCall(t *testing.T) {
 	sel := newSelectedKey()
 	state := &retryState{maxRetries: 5}
 
-	h.logRequest(sel, "", "", "gpt-4", "", 3, state, "test-id", "")
+	h.logRequest(sel, "", "", "gpt-4", "", 3, state, "test-id", "", "")
 
 	if !state.requestLogged {
 		t.Fatal("expected requestLogged to be true after logRequest")
@@ -421,7 +421,7 @@ func TestHandle429_NIMCooldown(t *testing.T) {
 
 	before := time.Now()
 	state := &retryState{maxRetries: 2}
-	h.handle429(resp, sel, "test", "gpt-4", before, state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", before, state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -459,7 +459,7 @@ func TestHandle429_DailyQuotaViaBodyText(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -489,7 +489,7 @@ func TestHandle429_WithExistingKeyExclusion(t *testing.T) {
 		Header:     http.Header{},
 	}
 
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	// With maxRetries=0, the key should be excluded after retry exhaustion
 	if len(state.excludeKeyIDs) < 2 {
@@ -511,7 +511,7 @@ func TestHandleUpstreamError_402(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -539,7 +539,7 @@ func TestHandleUpstreamError_404(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
@@ -566,7 +566,7 @@ func TestHandleUpstreamError_NoBody(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "")
+	h.handleUpstreamError(httptest.NewRecorder(), resp, sel, "test", "gpt-4", state, nil, "test-id", nil, "", time.Now(), "", "")
 
 	// Should not panic with empty body
 	keyState := h.reg.GetKeyState("test", "key1")
@@ -588,7 +588,7 @@ func TestHandle429_TPM_FirstRetry(t *testing.T) {
 
 	state := &retryState{maxRetries: 5}
 	// This should set tpmWaitRetries=1 and return (no exclusion)
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	if state.tpmWaitRetries != 1 {
 		t.Fatalf("expected tpmWaitRetries=1, got %d", state.tpmWaitRetries)
@@ -611,7 +611,7 @@ func TestHandle429_RPM_ExcludesAccount(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	// RPM �?MarkRateLimited + excludeSameAccountKeys
 	if len(state.excludeKeyIDs) == 0 {
@@ -633,7 +633,7 @@ func TestHandle429_MaxRetriesExhausted(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 0}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	// With maxRetries=0, temp429Retries should not be < maxRetries
 	// So it falls through to: exclude + OnKeyFailure
@@ -669,7 +669,7 @@ func TestHandle429_ModelScopeExhausted(t *testing.T) {
 	}
 
 	state := &retryState{maxRetries: 5}
-	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "")
+	h.handle429(resp, sel, "test", "gpt-4", time.Now(), state, &http.Request{}, "test-id", nil, "", "", "")
 
 	keyState := h.reg.GetKeyState("test", "key1")
 	if keyState == nil {
