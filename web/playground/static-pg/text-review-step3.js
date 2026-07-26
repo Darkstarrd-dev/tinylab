@@ -21,7 +21,7 @@ var trS3ActiveTab = 'pending';   // active chapter tab: pending|processing|compl
 var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an error
 var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
-var trS3ModelNames = {};        // modelId (realModelId||id) -> alias (from /api/models)
+var trS3ModelNames = {};        // "providerId/modelId" -> alias (from /api/models); keyed by providerId to avoid collision when multiple providers carry the same realModelId
 var trS3NodeNumbers = {};       // nodeId -> 1-based display number
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
 var trS3ModalModel = null;      // {providerId, modelId, label} selected via pgOpenModelPicker in Settings modal
@@ -34,7 +34,7 @@ function trS3NodeBadge(nodeId) {
 
 function trS3ProviderName(id) { return trS3ProviderNames[id] || id || ''; }
 function trS3ProviderPrefix(id) { return trS3ProviderPrefixes[id] || ''; }
-function trS3ModelName(id) { return trS3ModelNames[id] || id || ''; }
+function trS3ModelName(providerId, modelId) { return trS3ModelNames[providerId + '/' + modelId] || trS3ModelNames[modelId] || modelId || ''; }
 window._trS3ProviderPrefix = trS3ProviderPrefix;
 
 function trS3PopulateProviders(models) {
@@ -50,7 +50,7 @@ function trS3PopulateProviders(models) {
       // Build modelId -> alias map (modelId = realModelId||id, the form stored on review nodes)
       var mid = m.realModelId || m.id;
       if (mid) {
-        trS3ModelNames[mid] = m.alias || m.name || m.id || mid;
+        trS3ModelNames[m.providerId + '/' + mid] = m.alias || m.name || m.id || mid;
       }
     }
   }
@@ -220,7 +220,7 @@ function trS3RenderConfigNodes(nodes) {
       '<td><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(n.id || '') + '"' +
         (n.enabled ? ' checked' : '') + ' onchange="trS3OnNodeToggle(' + idAttr + ')"></td>' +
       '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
+      '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
       '<td><input type="number" class="tr-node-conc" min="0" value="' +
         (n.concurrency != null ? n.concurrency : 1) + '" data-id="' + trEscapeHtml(n.id || '') +
         '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
@@ -362,7 +362,7 @@ function trStep3RenderSettingsModal() {
       var n = nodes[ni];
       nodeRows += '<tr>' +
         '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-        '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
+        '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
         '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td>' + (n.enabled ? '&#10003;' : '&#10007;') + '</td>' +
         '<td><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
@@ -552,7 +552,7 @@ function trS3RenderRuntimeNodes(nodes) {
     var rowClass = n.enabled ? '' : ' tr-s3-node-disabled';
     html += '<tr class="' + rowClass + '">' +
       '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(trS3ModelName(n.modelId)) + '</td>' +
+      '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
       '<td>' + (n.target || 0) + '</td>' +
       '<td>' + (n.active || 0) + '</td>' +
     '</tr>';
