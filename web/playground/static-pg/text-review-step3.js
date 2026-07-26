@@ -119,15 +119,11 @@ window.trRenderStep3 = function (panel, state) {
               '" onchange="trS3OnRangeChange()">' +
           '</span>' +
           '<span class="tr-spacer"></span>' +
-          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-start" onclick="trStep3Start()">' +
+          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-startpause" onclick="trStep3StartPause()">' +
             trEscapeHtml(trT('trStartClean')) + '</button>' +
-          '<button type="button" class="tr-btn" id="tr-s3-pause" onclick="trStep3Pause()" style="display:none">' +
-            trEscapeHtml(trT('trPause')) + '</button>' +
-          '<button type="button" class="tr-btn" id="tr-s3-resume" onclick="trStep3Resume()" style="display:none">' +
-            trEscapeHtml(trT('trResume')) + '</button>' +
-          '<button type="button" class="tr-btn tr-btn-danger" id="tr-s3-stop" onclick="trStep3Stop()" style="display:none">' +
+          '<button type="button" class="tr-btn tr-btn-danger" id="tr-s3-stop" onclick="trStep3Stop()" disabled>' +
             trEscapeHtml(trT('trStop')) + '</button>' +
-          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-toreview" onclick="trGotoStep(4)" style="display:none">' +
+          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-toreview" onclick="trGotoStep(4)">' +
             trEscapeHtml(trT('trToReview')) + '</button>' +
         '</div>' +
       '</div>' +
@@ -619,10 +615,15 @@ function trS3RangeBounds() {
 // ===================== run controls =====================
 
 /**
- * "开始清理": gather chapters (Step2 output), systemPrompt, and the enabled
- * node IDs from the config pool → POST /sessions → persist sessionId →
- * subscribe to the SSE stream. The button is disabled while a run is active.
+ * Single-button toggle for Start / Pause / Resume.
+ * Dispatches to the appropriate action based on trS3SessionStatus.
  */
+function trStep3StartPause() {
+  if (trS3SessionStatus === 'running') trStep3Pause();
+  else if (trS3SessionStatus === 'paused') trStep3Resume();
+  else trStep3Start();
+}
+
 function trStep3Start() {
   if (!trState.chapters || trState.chapters.length === 0) {
     trToast(trT('trNoChaptersToClean'), 'warning');
@@ -691,23 +692,20 @@ function trS3EnabledNodeIds() {
 }
 
 function trS3UpdateControls() {
-  var start = document.getElementById('tr-s3-start');
-  var pause = document.getElementById('tr-s3-pause');
-  var resume = document.getElementById('tr-s3-resume');
+  var sp = document.getElementById('tr-s3-startpause');
   var stop = document.getElementById('tr-s3-stop');
-  var toreview = document.getElementById('tr-s3-toreview');
   var s = trS3SessionStatus;
-  var idle = (s === 'idle');
   var running = (s === 'running');
   var paused = (s === 'paused');
-  var done = (s === 'completed' || s === 'cancelled');
-  if (start) start.style.display = (idle || done) ? '' : 'none';
-  if (pause) pause.style.display = running ? '' : 'none';
-  if (resume) resume.style.display = paused ? '' : 'none';
-  if (stop) stop.style.display = (running || paused) ? '' : 'none';
-  if (toreview) toreview.style.display = (done || (window.trS3HasCompleted && window.trS3HasCompleted())) ? '' : 'none';
-  // Problem3: hide the node-pool and system-prompt config sections while a
-  // run is active; show them again when idle, paused, completed, or cancelled.
+  var active = running || paused;
+  if (sp) {
+    sp.disabled = false;
+    if (running) { sp.textContent = trT('trPause'); sp.className = 'tr-btn'; }
+    else if (paused) { sp.textContent = trT('trResume'); sp.className = 'tr-btn tr-btn-primary'; }
+    else { sp.textContent = trT('trStartClean'); sp.className = 'tr-btn tr-btn-primary'; }
+  }
+  if (stop) stop.disabled = !active;
+  // Hide node-pool and system-prompt config sections while a run is active.
   var pool = document.getElementById('tr-s3-pool-section');
   var promptSec = document.getElementById('tr-s3-prompt-section');
   if (pool) pool.style.display = running ? 'none' : '';
@@ -715,9 +713,8 @@ function trS3UpdateControls() {
   // Range inputs are fixed at session creation; lock them while a session is live.
   var rs = document.getElementById('tr-s3-range-start');
   var re = document.getElementById('tr-s3-range-end');
-  var lockRange = running || paused;
-  if (rs) rs.disabled = lockRange;
-  if (re) re.disabled = lockRange;
+  if (rs) rs.disabled = active;
+  if (re) re.disabled = active;
 }
 
 // ===================== chapter tabs + list =====================
