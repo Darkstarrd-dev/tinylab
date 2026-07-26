@@ -13,6 +13,7 @@
 var trS1PreviewLines = 2000;   // max lines per chunk
 var trS1PreviewChars = 65536;  // max chars per chunk
 var trS1LinesShown = 0;        // how many lines currently in the DOM preview
+var trS1RawBytes = null;        // raw ArrayBuffer from file import (null for paste)
 
 // ---------- render ------------------------------------------------
 /**
@@ -113,7 +114,19 @@ window.trRenderStep1 = function (panel, state) {
 
     var encRow = document.createElement('div');
     encRow.className = 'tr-fileinfo-row';
-    encRow.innerHTML = '<span class="tr-fileinfo-k">' + trEscapeHtml(trT('trFileEncoding')) + ':</span> <span class="tr-fileinfo-v">' + trEscapeHtml(state.encoding || 'UTF-8') + '</span>';
+    var encOptions = ['UTF-8','GBK','GB18030','Big5','Shift_JIS','EUC-KR','ISO-8859-1'];
+    var encHtml = '<span class="tr-fileinfo-k">' + trEscapeHtml(trT('trFileEncoding')) + ':</span> <span class="tr-fileinfo-v">';
+    if (trS1RawBytes) {
+      encHtml += '<select id="tr-s1-encoding" onchange="trStep1OnEncodingChange(this)">';
+      for (var ei = 0; ei < encOptions.length; ei++) {
+        encHtml += '<option value="' + encOptions[ei] + '"' + ((state.encoding || 'UTF-8') === encOptions[ei] ? ' selected' : '') + '>' + encOptions[ei] + '</option>';
+      }
+      encHtml += '</select>';
+    } else {
+      encHtml += trEscapeHtml(state.encoding || 'UTF-8');
+    }
+    encHtml += '</span>';
+    encRow.innerHTML = encHtml;
     infoEl.appendChild(encRow);
 
     root.appendChild(infoEl);
@@ -194,60 +207,48 @@ function trGetChunk(text, startLine, endLine) {
 // ---------- Step1 actions -----------------------------------------
 
 /**
- * Open a file via the backend native picker (POST /api/editor/open, reused).
+ * Open a file via the browser FileReader (ArrayBuffer) so re-decoding on
+ * encoding change is possible without re-reading the file.
  */
 function trStep1OpenFile() {
-  var btn = document.getElementById('tr-s1-open');
-  if (btn) { btn.disabled = true; }
-  fetch('/api/editor/open', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}'
-  })
-    .then(function (resp) { return resp.json(); })
-    .then(function (data) {
-      if (btn) { btn.disabled = false; }
-      if (!data || data.cancelled) return;
-      if (data.unsupported) {
-        trStep1FallbackPicker();
-        return;
-      }
-      if (data.path !== undefined && data.content !== undefined) {
-        trStep1SetImport(data.name || '', data.content);
-      } else if (data.error) {
-        trToast(data.error, 'error');
-      }
-    })
-    .catch(function (err) {
-      if (btn) { btn.disabled = false; }
-      console.warn('tr open file failed:', err);
-      trStep1FallbackPicker();
-    });
-}
-
-/**
- * Browser-side fallback file picker (when the native picker is unsupported).
- */
-function trStep1FallbackPicker() {
   var input = document.createElement('input');
   input.type = 'file';
   input.accept = '.txt,.md,.markdown,.text,text/plain';
   input.style.display = 'none';
   input.onchange = function () {
-    if (!input.files || input.files.length === 0) return;
+    if (!input.files || !input.files.length) return;
     var file = input.files[0];
     var reader = new FileReader();
     reader.onload = function () {
-      trStep1SetImport(file.name, String(reader.result || ''));
+      trS1RawBytes = reader.result;
+      trStep1DecodeAndImport(file.name, trS1RawBytes, 'UTF-8');
     };
-    reader.onerror = function () {
-      trToast(trT('trReadFailed'), 'error');
-    };
-    reader.readAsText(file, 'UTF-8');
+    reader.onerror = function () { trToast(trT('trReadFailed'), 'error'); };
+    reader.readAsArrayBuffer(file);
   };
   document.body.appendChild(input);
   input.click();
   document.body.removeChild(input);
+}
+
+
+function trStep1DecodeAndImport(name, bytes, encoding) {
+  var dec = new TextDecoder(encoding || 'UTF-8', { fatal: false });
+  var text = dec.decode(bytes);
+  trState.fileName = name || '';
+  trState.rawText = text;
+  trState.encoding = encoding || 'UTF-8';
+  trS1LinesShown = 0;
+  trState.chapters = [];
+  trState.lineDecisions = {};
+  trState.sessionId = null;
+  trSave();
+  trRenderStep();
+}
+
+function trStep1OnEncodingChange(sel) {
+  if (!trS1RawBytes) return;
+  trStep1DecodeAndImport(trState.fileName, trS1RawBytes, sel.value);
 }
 
 /**
@@ -256,6 +257,7 @@ function trStep1FallbackPicker() {
  * preview. Resets the preview offset so the next render starts fresh.
  */
 function trStep1SetImport(name, content) {
+  trS1RawBytes = null;  // paste has no bytes buffer
   trState.fileName = name || '';
   trState.rawText = content || '';
   if (!trState.fileName) {

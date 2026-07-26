@@ -126,6 +126,7 @@ function trS4RenderChapterList() {
         ' onclick="trS4SelectChapter(' + c.index + ')" data-idx="' + c.index + '">' +
         '<span class="tr-s4-chapter-num">#' + (c.index + 1) + '</span>' +
         '<span class="tr-s4-chapter-title">' + trEscapeHtml(c.title || ('#' + (c.index + 1))) + '</span>' +
+        (c.nodeId && window.trS3NodeNumbers && window.trS3NodeNumbers[c.nodeId] ? '<span class="tr-node-badge">' + window.trS3NodeNumbers[c.nodeId] + '</span>' : '') +
       '</button>';
   }
   side.innerHTML = html;

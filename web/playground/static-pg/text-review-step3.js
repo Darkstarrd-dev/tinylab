@@ -23,6 +23,13 @@ var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
 var trS3ModelNames = {};        // modelId (realModelId||id) -> alias (from /api/models)
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
+var trS3NodeNumbers = {};     // maps nodeId -> 1-based number
+window.trS3NodeNumbers = trS3NodeNumbers;
+
+function trS3NodeBadge(nodeId) {
+  var n = trS3NodeNumbers[nodeId];
+  return n ? '<span class="tr-node-badge">' + n + '</span>' : '';
+}
 
 function trS3ProviderName(id) { return trS3ProviderNames[id] || id || ''; }
 function trS3ProviderPrefix(id) { return trS3ProviderPrefixes[id] || ''; }
@@ -168,18 +175,16 @@ window.trRenderStep3 = function (panel, state) {
 function trStep3LoadNodes() {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
-  // Populate provider name/prefix maps from /api/models so inline config
-  // table shows human-readable provider names even before the modal opens.
   trApiGet('/models').then(function (res) {
     var models = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
     trS3PopulateProviders(models);
-  });
-  trApiGet('/text-review/review-nodes').then(function (res) {
+    return trApiGet('/text-review/review-nodes');
+  }).then(function (res) {
     var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
     trState.reviewNodes = nodes;
     trS3RenderConfigNodes(nodes);
   }, function () {
-    wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNodesLoadFailed')) + '</div>';
+    if (wrap) wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNodesLoadFailed')) + '</div>';
     trS3RenderTotal(0);
   });
 }
@@ -193,6 +198,7 @@ function trS3RenderConfigNodes(nodes) {
     return;
   }
   var html = '<table class="tr-nodes-table"><thead><tr>' +
+    '<th>#</th>' +
     '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
@@ -200,12 +206,16 @@ function trS3RenderConfigNodes(nodes) {
     '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
     '</tr></thead><tbody>';
+  trS3NodeNumbers = {};
+  for (var k = 0; k < nodes.length; k++) { trS3NodeNumbers[nodes[k].id] = k + 1; }
+  window.trS3NodeNumbers = trS3NodeNumbers;
   var totalConc = 0;
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
     if (n.enabled) totalConc += (n.concurrency || 0);
     var idAttr = trS3JsString(n.id);
     html += '<tr>' +
+      '<td class="tr-node-num">' + (i + 1) + '</td>' +
       '<td><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(n.id || '') + '"' +
         (n.enabled ? ' checked' : '') + ' onchange="trS3OnNodeToggle(' + idAttr + ')"></td>' +
       '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
@@ -679,7 +689,7 @@ function trS3UpdateControls() {
   if (pause) pause.style.display = running ? '' : 'none';
   if (resume) resume.style.display = paused ? '' : 'none';
   if (stop) stop.style.display = (running || paused) ? '' : 'none';
-  if (toreview) toreview.style.display = done ? '' : 'none';
+  if (toreview) toreview.style.display = (done || (window.trS3HasCompleted && window.trS3HasCompleted())) ? '' : 'none';
   // Problem3: hide the node-pool and system-prompt config sections while a
   // run is active; show them again when idle, paused, completed, or cancelled.
   var pool = document.getElementById('tr-s3-pool-section');
@@ -768,6 +778,7 @@ function trS3CardHtml(c, idx) {
     '<span class="tr-s3-card-title">' + trEscapeHtml(title) + '</span>' +
     '<span class="tr-s3-card-progress">' + trEscapeHtml(trS3CardProgress(c)) + '</span>' +
     '<span class="' + badgeClass + '">' + trEscapeHtml(badge) + '</span>' +
+    (c.nodeId ? trS3NodeBadge(c.nodeId) : '') +
     '<button class="tr-btn tr-btn-xs tr-s3-reproc" onclick="event.stopPropagation();trStep3Reprocess(' + idx + ')">' +
       trEscapeHtml(trT('trReprocess')) + '</button>' +
     passBtn +
@@ -1007,6 +1018,13 @@ function trS3OnSessionGone() {
 function trS3ScrolledToBottom(el) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 30;
 }
+
+window.trS3HasCompleted = function () {
+  for (var i = 0; i < trS3Chapters.length; i++) {
+    if (trS3Chapters[i].status === 'completed') return true;
+  }
+  return false;
+};
 
 // ===================== cleanup =====================
 
