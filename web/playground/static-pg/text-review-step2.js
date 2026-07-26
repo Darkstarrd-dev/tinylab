@@ -31,75 +31,189 @@ window.trRenderStep2 = function (panel, state) {
   var patterns = state.splitPatterns || [];
   var selKey = state.selectedPatternKey || 'zhang';
   var hasChapters = !!(state.chapters && state.chapters.length);
+  var freshEntry = !hasChapters; // auto-detect only on fresh entry
 
-  // Pattern dropdown options
-  var opts = '';
+  panel.innerHTML = '';
+
+  var root = document.createElement('div');
+  root.className = 'tr-step-panel tr-s2-root';
+  root.style.height = '100%';
+  root.style.minHeight = '0';
+  panel.appendChild(root);
+
+  // --- Header row: Back left | centered title | Next right ---
+  var header = document.createElement('div');
+  header.className = 'tr-s2-header';
+
+  var backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'tr-btn tr-btn-ghost';
+  backBtn.textContent = trT('trPrev');
+  backBtn.addEventListener('click', function () { trGotoStep(1); });
+  header.appendChild(backBtn);
+
+  var headerTitle = document.createElement('span');
+  headerTitle.className = 'tr-s2-title';
+  headerTitle.textContent = trT('trStepSplit');
+  header.appendChild(headerTitle);
+
+  var nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'tr-btn tr-btn-primary';
+  nextBtn.id = 'tr-s2-next';
+  nextBtn.textContent = trT('trNext');
+  nextBtn.disabled = !hasChapters;
+  nextBtn.addEventListener('click', trStep2Next);
+  header.appendChild(nextBtn);
+
+  root.appendChild(header);
+
+  // --- Controls1: Pattern label + select + Title Template label + input + KeepPrologue ---
+  var c1 = document.createElement('div');
+  c1.className = 'tr-s2-controls1';
+
+  var patLabel = document.createElement('label');
+  patLabel.className = 'tr-label';
+  patLabel.htmlFor = 'tr-s2-pattern';
+  patLabel.textContent = trT('trPattern');
+  c1.appendChild(patLabel);
+
+  var patSelect = document.createElement('select');
+  patSelect.className = 'tr-select';
+  patSelect.id = 'tr-s2-pattern';
   for (var i = 0; i < patterns.length; i++) {
-    var p = patterns[i];
-    opts += '<option value="' + trEscapeHtml(p.key) + '"' +
-      (p.key === selKey ? ' selected' : '') + '>' +
-      trEscapeHtml(p.label || p.key) + '</option>';
+    var opt = document.createElement('option');
+    opt.value = patterns[i].key;
+    opt.textContent = patterns[i].label || patterns[i].key;
+    if (patterns[i].key === selKey) opt.selected = true;
+    patSelect.appendChild(opt);
   }
+  patSelect.addEventListener('change', trStep2OnPatternChange);
+  c1.appendChild(patSelect);
 
-  panel.innerHTML =
-    '<div class="tr-step-panel">' +
-      '<div class="tr-section">' +
-        '<h3 class="tr-section-title">' + trEscapeHtml(trT('trStepSplit')) + '</h3>' +
-        '<p class="tr-section-desc">' + trEscapeHtml(trT('trSplitDesc')) + '</p>' +
+  var tmplLabel = document.createElement('label');
+  tmplLabel.className = 'tr-label';
+  tmplLabel.htmlFor = 'tr-s2-template';
+  tmplLabel.textContent = trT('trTitleTemplate');
+  c1.appendChild(tmplLabel);
 
-        '<div class="tr-row">' +
-          '<label class="tr-label" for="tr-s2-pattern">' + trEscapeHtml(trT('trPattern')) + '</label>' +
-          '<select class="tr-select" id="tr-s2-pattern" onchange="trStep2OnPatternChange()">' + opts + '</select>' +
-          '<button type="button" class="tr-btn" onclick="trStep2OpenPatternEditor()">' +
-            trEscapeHtml(trT('trPatternEditor')) + '</button>' +
-        '</div>' +
+  var tmplInput = document.createElement('input');
+  tmplInput.type = 'text';
+  tmplInput.className = 'tr-input';
+  tmplInput.id = 'tr-s2-template';
+  tmplInput.placeholder = trT('trTitleTemplatePlaceholder');
+  tmplInput.value = state.titleTemplate || '';
+  tmplInput.addEventListener('input', trStep2OnTemplateChange);
+  c1.appendChild(tmplInput);
 
-        '<div class="tr-row" id="tr-s2-custom-row"' +
-          (selKey === 'custom' ? '' : ' style="display:none"') + '>' +
-          '<label class="tr-label" for="tr-s2-custom-regex">' + trEscapeHtml(trT('trCustomRegex')) + '</label>' +
-          '<input type="text" class="tr-input" id="tr-s2-custom-regex" placeholder="' +
-            trEscapeHtml(trT('trCustomRegexPlaceholder')) + '" value="' +
-            trEscapeHtml(state.customRegex || '') + '" oninput="trStep2OnCustomChange()">' +
-        '</div>' +
+  var kpLabel = document.createElement('label');
+  kpLabel.className = 'tr-check';
+  var kpCheck = document.createElement('input');
+  kpCheck.type = 'checkbox';
+  kpCheck.id = 'tr-s2-keeppro';
+  kpCheck.checked = !!state.keepPrologue;
+  kpCheck.addEventListener('change', trStep2OnKeepPrologue);
+  kpLabel.appendChild(kpCheck);
+  kpLabel.appendChild(document.createTextNode(' ' + trT('trKeepPrologue')));
+  c1.appendChild(kpLabel);
 
-        '<div class="tr-btn-row">' +
-          '<button type="button" class="tr-btn" onclick="trStep2AutoDetect()">' +
-            trEscapeHtml(trT('trAutoDetect')) + '</button>' +
-          '<button type="button" class="tr-btn" onclick="trStep2ReSplit()">' +
-            trEscapeHtml(trT('trResplit')) + '</button>' +
-          '<button type="button" class="tr-btn tr-btn-ghost" id="tr-s2-aisplit" onclick="trStep2AISplit()">' +
-            trEscapeHtml(trT('trAISplit')) + '</button>' +
-        '</div>' +
-        '<div class="tr-hint" id="tr-s2-detect-info"></div>' +
+  root.appendChild(c1);
 
-        '<div class="tr-row">' +
-          '<label class="tr-label" for="tr-s2-template">' + trEscapeHtml(trT('trTitleTemplate')) + '</label>' +
-          '<input type="text" class="tr-input" id="tr-s2-template" placeholder="' +
-            trEscapeHtml(trT('trTitleTemplatePlaceholder')) + '" value="' +
-            trEscapeHtml(state.titleTemplate || '') + '" oninput="trStep2OnTemplateChange()">' +
-          '<label class="tr-check"><input type="checkbox" id="tr-s2-keeppro" onchange="trStep2OnKeepPrologue()"' +
-            (state.keepPrologue ? ' checked' : '') + '> ' + trEscapeHtml(trT('trKeepPrologue')) + '</label>' +
-        '</div>' +
-      '</div>' +
+  // --- Custom regex row (shown only when pattern === 'custom') ---
+  var customRow = document.createElement('div');
+  customRow.className = 'tr-row';
+  customRow.id = 'tr-s2-custom-row';
+  customRow.style.display = selKey === 'custom' ? '' : 'none';
 
-      '<div class="tr-section">' +
-        '<h3 class="tr-section-title">' + trEscapeHtml(trT('trPreview')) +
-          ' <span class="tr-count" id="tr-s2-count">0</span></h3>' +
-        '<div class="tr-preview-wrap" id="tr-s2-preview"></div>' +
-      '</div>' +
+  var crLabel = document.createElement('label');
+  crLabel.className = 'tr-label';
+  crLabel.htmlFor = 'tr-s2-custom-regex';
+  crLabel.textContent = trT('trCustomRegex');
+  customRow.appendChild(crLabel);
 
-      '<div class="tr-step-footer">' +
-        '<button type="button" class="tr-btn tr-btn-ghost" onclick="trGotoStep(1)">' +
-          trEscapeHtml(trT('trPrev')) + '</button>' +
-        '<span class="tr-spacer"></span>' +
-        '<button type="button" class="tr-btn tr-btn-primary" id="tr-s2-next" ' +
-          (hasChapters ? '' : 'disabled') +
-          ' onclick="trStep2Next()">' + trEscapeHtml(trT('trNext')) + '</button>' +
-      '</div>' +
-    '</div>';
+  var crInput = document.createElement('input');
+  crInput.type = 'text';
+  crInput.className = 'tr-input';
+  crInput.id = 'tr-s2-custom-regex';
+  crInput.placeholder = trT('trCustomRegexPlaceholder');
+  crInput.value = state.customRegex || '';
+  crInput.addEventListener('input', trStep2OnCustomChange);
+  customRow.appendChild(crInput);
 
-  // Render an initial preview (uses persisted chapters if present and pattern
-  // matches; otherwise re-splits from rawText).
+  root.appendChild(customRow);
+
+  // --- Controls2: four evenly-distributed buttons ---
+  var c2 = document.createElement('div');
+  c2.className = 'tr-s2-controls2';
+
+  var editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'tr-btn';
+  editBtn.textContent = trT('trPatternEditor');
+  editBtn.addEventListener('click', trStep2OpenPatternEditor);
+  c2.appendChild(editBtn);
+
+  var autoBtn = document.createElement('button');
+  autoBtn.type = 'button';
+  autoBtn.className = 'tr-btn';
+  autoBtn.textContent = trT('trAutoDetect');
+  autoBtn.addEventListener('click', trStep2AutoDetect);
+  c2.appendChild(autoBtn);
+
+  var resplitBtn = document.createElement('button');
+  resplitBtn.type = 'button';
+  resplitBtn.className = 'tr-btn';
+  resplitBtn.textContent = trT('trResplit');
+  resplitBtn.addEventListener('click', trStep2ReSplit);
+  c2.appendChild(resplitBtn);
+
+  var aiBtn = document.createElement('button');
+  aiBtn.type = 'button';
+  aiBtn.className = 'tr-btn tr-btn-ghost';
+  aiBtn.id = 'tr-s2-aisplit';
+  aiBtn.textContent = trT('trAISplit');
+  aiBtn.addEventListener('click', trStep2AISplit);
+  c2.appendChild(aiBtn);
+
+  root.appendChild(c2);
+
+  // --- Detect info hint ---
+  var infoEl = document.createElement('div');
+  infoEl.className = 'tr-hint';
+  infoEl.id = 'tr-s2-detect-info';
+  root.appendChild(infoEl);
+
+  // --- Preview section: fills remaining height ---
+  var previewSection = document.createElement('div');
+  previewSection.className = 'tr-s2-preview-section';
+
+  var previewHead = document.createElement('div');
+  previewHead.className = 'tr-s2-preview-head';
+
+  var previewTitle = document.createElement('span');
+  previewTitle.className = 'tr-section-title';
+  previewTitle.textContent = trT('trPreview');
+  previewHead.appendChild(previewTitle);
+
+  var previewCount = document.createElement('span');
+  previewCount.className = 'tr-count';
+  previewCount.id = 'tr-s2-count';
+  previewCount.textContent = '0';
+  previewHead.appendChild(previewCount);
+
+  previewSection.appendChild(previewHead);
+
+  var previewWrap = document.createElement('div');
+  previewWrap.className = 'tr-preview-wrap';
+  previewWrap.id = 'tr-s2-preview';
+  previewSection.appendChild(previewWrap);
+
+  root.appendChild(previewSection);
+
+  // --- Auto-detect on fresh entry (no existing chapters) ---
+  if (freshEntry) {
+    trStep2AutoDetect(true);
+  }
   trStep2RenderPreview();
 };
 
@@ -172,16 +286,11 @@ function trStep2ResolveRegex() {
  * "自动检测": run TR.detectChapterPattern over rawText, pick the best pattern
  * key, update the dropdown + state, then re-split and show the reason.
  */
-function trStep2AutoDetect() {
+function trStep2AutoDetect(silent) {
   if (!window.TR || !window.TR.detectChapterPattern || !trState.rawText) {
-    trToast(trT('trImportFirst'), 'warning');
+    if (!silent) trToast(trT('trImportFirst'), 'warning');
     return;
   }
-  // detectChapterPattern expects the stored (regex-string) form; pass the
-  // trState.splitPatterns de-compiled back to strings is unnecessary because
-  // compilePatterns is idempotent on stored form — but detectChapterPattern
-  // calls TR.compilePatterns internally, so pass the stored form. We keep a
-  // stored-form copy by mapping runtime -> stored (regex back to source).
   var stored = trState.splitPatterns.map(function (p) {
     return { key: p.key, label: p.label, regex: (p.regex ? p.regex.source : ''), flags: p.flags, builtin: p.builtin };
   });
@@ -212,13 +321,9 @@ function trStep2ReSplit() {
     return;
   }
   var resolved = trStep2ResolveRegex();
-  // No usable regex → TR.splitChapters returns a single "全文（未匹配）" chapter
-  // when given a null regex is NOT supported; guard by passing a never-matching
-  // regex so the whole text becomes one prologue chapter instead.
   var regex = resolved.regex;
   if (!regex) {
-    // Use a regex that matches nothing (zero-width at an impossible position).
-    regex = /(?!)/;
+    regex = /(?!)/; // never-matching
   }
   var chapters = window.TR.splitChapters(trState.rawText, regex, trState.keepPrologue);
   if (trState.titleTemplate) {
@@ -277,11 +382,9 @@ function trStep2AISplit() {
   }
   var btn = document.getElementById('tr-s2-aisplit');
   if (btn) { btn.disabled = true; btn.textContent = trT('trWorking'); }
-  // Truncate to a reasonable prefix to keep the request small — we only need
-  // the model to identify title lines, not process the whole body.
   var sample = trState.rawText.length > 20000 ? trState.rawText.slice(0, 20000) : trState.rawText;
   var body = {
-    model: '', // empty model → proxy picks the default / first model
+    model: '',
     stream: false,
     messages: [
       { role: 'system', content: TR_AI_SPLIT_PROMPT },
@@ -367,7 +470,7 @@ function trStep2RenderPatternEditor() {
   var html =
     '<div class="pg-modal-header">' +
       '<span class="pg-modal-title">' + trEscapeHtml(trT('trPatternEditor')) + '</span>' +
-      '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+      '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>' +
     '</div>' +
     '<div class="pg-modal-body" style="max-height:70vh;overflow-y:auto">' +
       '<table class="tr-pe-table"><thead><tr>' +
@@ -405,7 +508,6 @@ function trStep2AddPattern() {
     key: key, label: label || key, regex: regex, builtin: false
   }).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
-    // Re-fetch merged patterns then refresh the drawer.
     return trApiGet('/text-review/split-patterns');
   }).then(function (res) {
     var backendPats = (res && !res.error && Array.isArray(res.patterns)) ? res.patterns : [];

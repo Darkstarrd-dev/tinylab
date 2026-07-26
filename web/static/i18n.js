@@ -355,7 +355,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     themeStyle: 'Style',
     // Editor keys
     editor: 'Editor',
-    editorEditMode: 'Edit', editorDiff: 'Diff', editorDiffSource: 'Diff Source', editorSaveAll: 'Save All',
+    editorEditMode: 'Edit', editorDiff: 'Diff', editorClean: 'Clean', editorDiffSource: 'Diff Source', editorSaveAll: 'Save All',
     editorOpen: 'Open', editorSave: 'Save', editorRaw: 'Raw', editorParsed: 'Parsed', editorWrap: 'Wrap',
     editorLeftBeforeAfter: 'Left: before\u2192after', editorRightBeforeAfter: 'Right: before\u2192after', editorLeftVsRight: 'Left vs Right',
     editorFind: 'Find', editorReplace: 'Replace', editorReplaceAll: 'Replace All',
@@ -781,7 +781,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     themeStyle: '风格',
     // Editor keys
     editor: '编辑器',
-    editorEditMode: '编辑', editorDiff: '比较', editorDiffSource: '比较来源', editorSaveAll: '全部保存',
+    editorEditMode: '编辑', editorDiff: '比较', editorClean: '清理', editorDiffSource: '比较来源', editorSaveAll: '全部保存',
     editorOpen: '打开', editorSave: '保存', editorRaw: '原始', editorParsed: '预览', editorWrap: '换行',
     editorLeftBeforeAfter: '左：修改前\u2192后', editorRightBeforeAfter: '右：修改前\u2192后', editorLeftVsRight: '左 vs 右',
     editorFind: '查找', editorReplace: '替换', editorReplaceAll: '全部替换',

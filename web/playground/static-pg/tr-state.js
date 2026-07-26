@@ -29,6 +29,7 @@ var trState = {
   autoRetry: true,          // auto-retry failed chapters on node exhaustion (Step3)
   lineDecisions: {},         // {chapterIdx: {rowIdx: {action, content?}}} Step4 decisions (persisted)
   reviewNodes: [],           // node pool (fetched in Step3; in-memory)
+  promptCollapsed: true,      // system prompt section collapsed state (Step3)
   _loaded: false             // guard: trLoad() ran at least once
 };
 
@@ -36,7 +37,7 @@ var trState = {
 // [{title, isVolume, contentLen, cleanedLen}] — no full text.
 var TR_PERSIST_FIELDS = [
   'sessionId', 'step', 'fileName', 'selectedPatternKey', 'customRegex',
-  'titleTemplate', 'keepPrologue', 'systemPrompt', 'autoRetry', 'lineDecisions'
+  'titleTemplate', 'keepPrologue', 'systemPrompt', 'autoRetry', 'lineDecisions', 'promptCollapsed'
 ];
 
 /**

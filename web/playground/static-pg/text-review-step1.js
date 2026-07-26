@@ -1,11 +1,20 @@
 // text-review-step1.js — Step1 panel: 导入文本 (import text).
 // Exposes window.trRenderStep1(panel, state).
 // Two import paths: (a) "打开文件" -> POST /api/editor/open (native picker,
-// reused); (b) a paste textarea. Shows file info + enables "下一步" when
-// rawText non-empty. Mirrors editor.js style: 'use strict' + function + var.
+// reused); (b) a paste-capable <textarea> with paste interception.
+// Mirrors editor.js style: 'use strict' + function + var.
+// Large-text strategy: only a small chunk of rawText is ever rendered into the
+// DOM preview; the full rawText stays in memory (trState.rawText). A "Load
+// more" button appends the next chunk without re-rendering the whole page.
 
 'use strict';
 
+// ---------- preview chunking --------------------------------------
+var trS1PreviewLines = 2000;   // max lines per chunk
+var trS1PreviewChars = 65536;  // max chars per chunk
+var trS1LinesShown = 0;        // how many lines currently in the DOM preview
+
+// ---------- render ------------------------------------------------
 /**
  * Render the Step1 (import) panel.
  * @param {HTMLElement} panel container element
@@ -13,58 +22,188 @@
  */
 window.trRenderStep1 = function (panel, state) {
   var hasText = !!state.rawText;
-  var sizeInfo = state.rawText ? trFormatBytes(trByteLength(state.rawText)) : '';
-  var fname = state.fileName || (state.rawText ? trT('trPastedText') : '');
+  if (!hasText) trS1LinesShown = 0; // reset on fresh import
 
-  panel.innerHTML =
-    '<div class="tr-step-panel">' +
-      '<div class="tr-section">' +
-        '<h3 class="tr-section-title">' + trEscapeHtml(trT('trStepImport')) + '</h3>' +
-        '<p class="tr-section-desc">' + trEscapeHtml(trT('trImportDesc')) + '</p>' +
+  panel.innerHTML = '';
 
-        '<div class="tr-btn-row">' +
-          '<button type="button" class="tr-btn" id="tr-s1-open" onclick="trStep1OpenFile()">' +
-            trEscapeHtml(trT('trOpenFile')) +
-          '</button>' +
-        '</div>' +
+  // --- .tr-step-panel wrapper ---
+  var root = document.createElement('div');
+  root.className = 'tr-step-panel tr-s1-root';
+  root.style.height = '100%';
+  root.style.minHeight = '0';
+  panel.appendChild(root);
 
-        '<div class="tr-paste-block">' +
-          '<label class="tr-label" for="tr-s1-paste">' + trEscapeHtml(trT('trPasteHere')) + '</label>' +
-          '<textarea class="tr-textarea" id="tr-s1-paste" placeholder="' +
-            trEscapeHtml(trT('trPastePlaceholder')) + '" oninput="trStep1OnPaste()">' +
-            trEscapeHtml(hasText ? state.rawText : '') +
-          '</textarea>' +
-        '</div>' +
+  // --- title row ---
+  var titleRow = document.createElement('div');
+  titleRow.className = 'tr-s1-title-row';
+  root.appendChild(titleRow);
 
-        '<div class="tr-fileinfo" id="tr-s1-info"' + (hasText ? '' : ' style="display:none"') + '>' +
-          '<div class="tr-fileinfo-row"><span class="tr-fileinfo-k">' +
-            trEscapeHtml(trT('trFileName')) + ':</span> <span class="tr-fileinfo-v" id="tr-s1-name">' +
-            trEscapeHtml(fname) + '</span></div>' +
-          '<div class="tr-fileinfo-row"><span class="tr-fileinfo-k">' +
-            trEscapeHtml(trT('trFileSize')) + ':</span> <span class="tr-fileinfo-v" id="tr-s1-size">' +
-            trEscapeHtml(sizeInfo) + '</span></div>' +
-          '<div class="tr-fileinfo-row"><span class="tr-fileinfo-k">' +
-            trEscapeHtml(trT('trFileEncoding')) + ':</span> <span class="tr-fileinfo-v">' +
-            trEscapeHtml(state.encoding || 'UTF-8') + '</span></div>' +
-        '</div>' +
-      '</div>' +
+  var titleEl = document.createElement('span');
+  titleEl.className = 'tr-s1-title';
+  titleEl.textContent = trT('trStepImport');
+  titleRow.appendChild(titleEl);
 
-      '<div class="tr-step-footer">' +
-        '<span class="tr-spacer"></span>' +
-        '<button type="button" class="tr-btn tr-btn-primary" id="tr-s1-next" ' +
-          (hasText ? '' : 'disabled') +
-          ' onclick="trStep1Next()">' + trEscapeHtml(trT('trNext')) + '</button>' +
-      '</div>' +
-    '</div>';
+  // actions (right side)
+  var actions = document.createElement('div');
+  actions.className = 'tr-s1-actions';
+  titleRow.appendChild(actions);
+
+  var nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'tr-btn tr-btn-primary';
+  nextBtn.id = 'tr-s1-next';
+  nextBtn.textContent = trT('trNext');
+  nextBtn.disabled = !hasText;
+  nextBtn.addEventListener('click', trStep1Next);
+  actions.appendChild(nextBtn);
+
+  if (hasText) {
+    var abandonBtn = document.createElement('button');
+    abandonBtn.type = 'button';
+    abandonBtn.className = 'tr-btn tr-btn-danger';
+    abandonBtn.id = 'tr-s1-abandon';
+    abandonBtn.textContent = trT('trAbandon');
+    abandonBtn.addEventListener('click', trStep1Abandon);
+    actions.appendChild(abandonBtn);
+  }
+
+  // --- info row (shown after import) ---
+  if (hasText) {
+    var fname = state.fileName || trT('trPastedText');
+    var sizeInfo = trFormatBytes(trByteLength(state.rawText));
+
+    var infoEl = document.createElement('div');
+    infoEl.className = 'tr-s1-info';
+    infoEl.id = 'tr-s1-info';
+
+    var nameRow = document.createElement('div');
+    nameRow.className = 'tr-fileinfo-row';
+    nameRow.innerHTML = '<span class="tr-fileinfo-k">' + trEscapeHtml(trT('trFileName')) + ':</span> <span class="tr-fileinfo-v" id="tr-s1-name">' + trEscapeHtml(fname) + '</span>';
+    infoEl.appendChild(nameRow);
+
+    var sizeRow = document.createElement('div');
+    sizeRow.className = 'tr-fileinfo-row';
+    sizeRow.innerHTML = '<span class="tr-fileinfo-k">' + trEscapeHtml(trT('trFileSize')) + ':</span> <span class="tr-fileinfo-v" id="tr-s1-size">' + trEscapeHtml(sizeInfo) + '</span>';
+    infoEl.appendChild(sizeRow);
+
+    var encRow = document.createElement('div');
+    encRow.className = 'tr-fileinfo-row';
+    encRow.innerHTML = '<span class="tr-fileinfo-k">' + trEscapeHtml(trT('trFileEncoding')) + ':</span> <span class="tr-fileinfo-v">' + trEscapeHtml(state.encoding || 'UTF-8') + '</span>';
+    infoEl.appendChild(encRow);
+
+    root.appendChild(infoEl);
+  }
+
+  // --- body (fills remaining height) ---
+  var body = document.createElement('div');
+  body.className = 'tr-s1-body';
+  body.id = 'tr-s1-body';
+  root.appendChild(body);
+
+  if (hasText) {
+    // --- after-import view: preview pane ---
+    var previewWrap = document.createElement('div');
+    previewWrap.className = 'tr-s1-preview-wrap';
+
+    var preview = document.createElement('pre');
+    preview.className = 'tr-s1-preview';
+    preview.id = 'tr-s1-preview';
+    preview.readOnly = true;
+    previewWrap.appendChild(preview);
+
+    // Load first chunk
+    var totalLines = trCountLines(state.rawText);
+    trS1LinesShown = Math.min(trS1PreviewLines, totalLines);
+    preview.textContent = trGetChunk(state.rawText, 0, trS1LinesShown);
+
+    body.appendChild(previewWrap);
+
+    // Load-more button
+    if (trS1LinesShown < totalLines) {
+      var loadMoreBtn = document.createElement('button');
+      loadMoreBtn.type = 'button';
+      loadMoreBtn.className = 'tr-btn tr-s1-loadmore';
+      loadMoreBtn.id = 'tr-s1-loadmore';
+      loadMoreBtn.textContent = trT('trLoadMore');
+      loadMoreBtn.addEventListener('click', trStep1LoadMore);
+      body.appendChild(loadMoreBtn);
+    }
+  } else {
+    // --- before-import view: intro ---
+    var intro = document.createElement('div');
+    intro.className = 'tr-s1-intro';
+    intro.id = 'tr-s1-intro';
+
+    var desc = document.createElement('p');
+    desc.className = 'tr-section-desc';
+    desc.textContent = trT('trImportDesc');
+    intro.appendChild(desc);
+
+    var btnRow = document.createElement('div');
+    btnRow.className = 'tr-btn-row';
+    var openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'tr-btn';
+    openBtn.id = 'tr-s1-open';
+    openBtn.textContent = trT('trOpenFile');
+    openBtn.addEventListener('click', trStep1OpenFile);
+    btnRow.appendChild(openBtn);
+    intro.appendChild(btnRow);
+
+    var pasteLabel = document.createElement('label');
+    pasteLabel.className = 'tr-label';
+    pasteLabel.htmlFor = 'tr-s1-paste';
+    pasteLabel.textContent = trT('trPasteHere');
+    intro.appendChild(pasteLabel);
+
+    var pasteTa = document.createElement('textarea');
+    pasteTa.className = 'tr-textarea';
+    pasteTa.id = 'tr-s1-paste';
+    pasteTa.placeholder = trT('trPastePlaceholder');
+    pasteTa.addEventListener('paste', trStep1PasteHandler);
+    pasteTa.addEventListener('input', trStep1OnInput);
+    intro.appendChild(pasteTa);
+
+    body.appendChild(intro);
+  }
 };
 
-// ===================== Step1 actions =====================
+// ---------- preview helpers ---------------------------------------
+function trCountLines(text) {
+  if (!text) return 0;
+  // Count \n occurrences + 1 for the last line (even if empty)
+  var n = 1;
+  for (var i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) n++;
+  }
+  return n;
+}
+
+/**
+ * Return lines [start, end) from text, joined.
+ */
+function trGetChunk(text, startLine, endLine) {
+  if (!text) return '';
+  var lines = 0;
+  var begin = 0;
+  // Seek to line `startLine`
+  while (lines < startLine && begin < text.length) {
+    if (text.charCodeAt(begin) === 10) lines++;
+    begin++;
+  }
+  var end = begin;
+  // Collect lines startLine..endLine
+  while (lines < endLine && end < text.length) {
+    if (text.charCodeAt(end) === 10) lines++;
+    end++;
+  }
+  return text.substring(begin, end);
+}
+
+// ---------- Step1 actions -----------------------------------------
 
 /**
  * Open a file via the backend native picker (POST /api/editor/open, reused).
- * On success: fill trState.rawText + fileName, refresh the panel.
- * On {cancelled}: no-op. On {unsupported}: fall back to a hidden <input
- * type=file> browser picker (matches editor.js edOpenFallback approach).
  */
 function trStep1OpenFile() {
   var btn = document.getElementById('tr-s1-open');
@@ -97,7 +236,6 @@ function trStep1OpenFile() {
 
 /**
  * Browser-side fallback file picker (when the native picker is unsupported).
- * Reads the file as UTF-8 text. Mirrors editor.js edOpenFallback.
  */
 function trStep1FallbackPicker() {
   var input = document.createElement('input');
@@ -123,6 +261,8 @@ function trStep1FallbackPicker() {
 
 /**
  * Apply an imported (or pasted) text + name into trState and re-render.
+ * Stores the FULL text in trState.rawText; only a chunk is rendered in the
+ * preview. Resets the preview offset so the next render starts fresh.
  */
 function trStep1SetImport(name, content) {
   trState.fileName = name || '';
@@ -131,6 +271,7 @@ function trStep1SetImport(name, content) {
     trState.fileName = trT('trPastedText');
   }
   trState.encoding = 'UTF-8';
+  trS1LinesShown = 0;
   // Reset downstream state — a new import invalidates prior splits/cleanups.
   trState.chapters = [];
   trState.lineDecisions = {};
@@ -140,29 +281,49 @@ function trStep1SetImport(name, content) {
 }
 
 /**
- * oninput handler for the paste textarea: sync rawText live, toggle the
- * "下一步" button + file info block.
+ * Paste handler: intercepts large pastes so the textarea never holds the
+ * full 10 MB text. Reads clipboard data → sets trState.rawText → re-renders.
  */
-function trStep1OnPaste() {
-  var ta = document.getElementById('tr-s1-paste');
-  if (!ta) return;
-  var v = ta.value;
-  trState.fileName = trT('trPastedText');
-  trState.rawText = v;
-  var hasText = !!v;
-  var next = document.getElementById('tr-s1-next');
-  if (next) next.disabled = !hasText;
-  var info = document.getElementById('tr-s1-info');
-  var nameEl = document.getElementById('tr-s1-name');
-  var sizeEl = document.getElementById('tr-s1-size');
-  if (info) info.style.display = hasText ? '' : 'none';
-  if (nameEl) nameEl.textContent = trState.fileName;
-  if (sizeEl) sizeEl.textContent = hasText ? trFormatBytes(trByteLength(v)) : '';
+function trStep1PasteHandler(e) {
+  var text = (e.clipboardData || window.clipboardData || {}).getData('text');
+  if (text) {
+    e.preventDefault();
+    trStep1SetImport('', text);
+  }
+  // For small/empty pastes, let the browser handle it (trStep1OnInput will
+  // pick up via the textarea value change).
 }
 
 /**
- * "下一步" handler: advance to Step2. Guarded by the button being enabled
- * (rawText non-empty), but double-check defensively.
+ * oninput handler for the paste textarea: sync small text live.
+ */
+function trStep1OnInput() {
+  var el = document.getElementById('tr-s1-paste');
+  if (!el) return;
+  var v = el.value;
+  if (v === trState.rawText) return; // already synced
+  trState.fileName = trT('trPastedText');
+  trState.rawText = v;
+}
+
+/**
+ * Abandon the current import: clear rawText/fileName/encoding, reset offset,
+ * re-render to the before-import state. No confirm dialog — one-click revert.
+ */
+function trStep1Abandon() {
+  trState.rawText = '';
+  trState.fileName = '';
+  trState.encoding = 'UTF-8';
+  trS1LinesShown = 0;
+  trState.chapters = [];
+  trState.lineDecisions = {};
+  trState.sessionId = null;
+  trSave();
+  trRenderStep();
+}
+
+/**
+ * "下一步" handler: advance to Step2.
  */
 function trStep1Next() {
   if (!trState.rawText) {
@@ -172,24 +333,45 @@ function trStep1Next() {
   trGotoStep(2);
 }
 
+/**
+ * Load more: append the next chunk of lines to the preview without
+ * re-rendering the whole page.
+ */
+function trStep1LoadMore() {
+  var preview = document.getElementById('tr-s1-preview');
+  if (!preview) return;
+  var totalLines = trCountLines(trState.rawText);
+  var nextEnd = Math.min(trS1LinesShown + trS1PreviewLines, totalLines);
+  if (nextEnd <= trS1LinesShown) return; // already at end
+
+  var chunk = trGetChunk(trState.rawText, trS1LinesShown, nextEnd);
+  preview.textContent += chunk;
+  trS1LinesShown = nextEnd;
+
+  // Hide load-more button when done
+  if (trS1LinesShown >= totalLines) {
+    var btn = document.getElementById('tr-s1-loadmore');
+    if (btn) btn.style.display = 'none';
+  }
+}
+
 // ===================== size helpers =====================
 
 function trByteLength(s) {
   if (!s) return 0;
-  // UTF-8 byte length without allocating a Blob.
   var n = 0;
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i);
     if (c < 0x80) n += 1;
     else if (c < 0x800) n += 2;
-    else if (c >= 0xD800 && c <= 0xDBFF) { n += 4; i++; } // surrogate pair
+    else if (c >= 0xD800 && c <= 0xDBFF) { n += 4; i++; }
     else n += 3;
   }
   return n;
 }
 
 function trFormatBytes(n) {
-  if (n == null || n < 0) return '—';
+  if (n == null || n < 0) return '\u2014';
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   return (n / (1024 * 1024)).toFixed(2) + ' MB';
