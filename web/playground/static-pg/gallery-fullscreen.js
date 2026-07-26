@@ -321,6 +321,11 @@ function onGalleryKeyDown(e) {
   if (Shortcuts.matchEvent('gallery.toggle-media', e)) {
     e.preventDefault(); e.stopPropagation(); toggleMediaType(); return;
   }
+  if (k === 'E' || k === 'e') {
+    e.preventDefault(); e.stopPropagation();
+    if (typeof window.triggerMediaEditor === 'function') { window.triggerMediaEditor(); }
+    return;
+  }
 
   // Delete key family: deletion interactions (mark / prompt item / prompt zip)
   if (k === 'Delete') {

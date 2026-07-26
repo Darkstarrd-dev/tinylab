@@ -278,8 +278,26 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `galleryListZip`/`galleryGetZipEntry`/`galleryDeleteZipEntry`/`galleryDeleteZipSession`（`DELETE /api/gallery/zip/{sessionId}`，整会话删除）/`galleryTouchSession`（`POST /api/gallery/zip/{sessionId}/touch`，刷新 LRU 位置）/`galleryConvertTiff`/`galleryStartReview`/`galleryReviewStatus`/`galleryCancelReview`/`galleryGeneratePrompt`/`galleryOpenDir`/`galleryListDir`/`galleryServeFile`/`galleryDeleteFs`/`galleryZipFromPath`/`galleryZipWriteback`/`galleryPastePaths` + `zipSession`/`gallerySessionStore`（纯 LRU 无 TTL，容量 `galleryMaxSessions=128`）+ `touch`/`pin`/`unpin` + `newGallerySessionID` |
+| `register.go` | `Handler` + `Register` + `galleryListZip`/`galleryGetZipEntry`/`galleryDeleteZipEntry`/`galleryDeleteZipSession`（`DELETE /api/gallery/zip/{sessionId}`，整会话删除）/`galleryTouchSession`（`POST /api/gallery/zip/{sessionId}/touch`，刷新 LRU 位置）/`galleryConvertTiff`/`galleryStartReview`/`galleryReviewStatus`/`galleryCancelReview`/`galleryGeneratePrompt`/`galleryOpenDir`/`galleryListDir`/`galleryServeFile`/`galleryDeleteFs`/`galleryZipFromPath`/`galleryZipWriteback`/`galleryPastePaths` + `galleryEditFfmpegStatus`/`galleryEditProbe`/`galleryEditSubtitleUpload`/`galleryEditStart`/`galleryEditStatus`/`galleryEditCancel`（媒体编辑 ffmpeg 端点，委托 `internal/mediaedit`）+ `zipSession`/`gallerySessionStore`（纯 LRU 无 TTL，容量 `galleryMaxSessions=128`）+ `touch`/`pin`/`unpin` + `newGallerySessionID` + `mediaJobs`（`mediaedit.NewManager()`）+ `resolveFfmpeg` |
 | `register_test.go` | 测试：`gallerySessionStore` LRU 驱逐契约（容量 128，最早会话先驱逐）、`touch` MRU 提升、`remove` 幂等；HTTP 层 `DELETE /zip/{sessionId}`（204）与 `POST /zip/{sessionId}/touch`（204/404），并验证 chi 区分 `DELETE /zip/{sessionId}`（会话删除）与 `DELETE /zip/{sessionId}/*`（条目删除） |
+
+
+### 10.9a `internal/mediaedit/` — Gallery 媒体编辑器（ffmpeg job runner）
+
+自包含的 ffmpeg 子进程 job runner（leaf 包，不导入 config/registry/api）。接收 ffmpeg 路径与参数经 method args 传入，为 Gallery UI 提供图片/视频转码、裁剪、字幕烧录能力。
+
+| 文件 | 职责 |
+|---|---|
+| `types.go` | `Job`/`JobStatus`/`ProbeResult`/`StartRequest` + per-operation params 类型（`ImageTranscodeParams`/`VideoTranscodeParams`/`VideoTrimParams`/`VideoSubtitleParams`） |
+| `binary.go` | `ResolveFfmpeg`（config → `FFMPEG_PATH` env → `exec.LookPath`）+ `ResolveFfprobe`（`FFPROBE_PATH` env → 同目录派生 → `exec.LookPath`） |
+| `probe.go` | `Probe(ffprobePath, path)`：`ffprobe -v error -select_streams ... -of json` → `ProbeResult`（宽/高/编码/时长/帧率/IsImage/HasAudio），含 15s 超时与 `procutil.SetProcessGroup` |
+| `args.go` | 四种操作的 ffmpeg 参数构造器（`BuildImageTranscodeArgs`/`BuildVideoTranscodeArgs`/`BuildVideoTrimArgs`/`BuildVideoSubtitleArgs`）→ `(args, desc, ext, error)`；含编码-容器兼容校验、质量映射（JPEG `-q:v`/PNG `-compression_level`/H264-H265-VP9-AV1 CRF）、`BuildOutputPath`（非覆盖时追加 `_desc` 后缀并去重） |
+| `executor.go` | `RunFfmpeg`：`exec.CommandContext` + `procutil.SetProcessGroup`/`KillProcessGroup` + StdoutPipe（progress 解析 `out_time_us`→百分比）+ StderrPipe（`tailBuffer` 16KB）+ `ErrCancelled`；`tailBuffer` 定长环形缓冲 |
+| `manager.go` | `Manager`（`sync.Map` 存 job）：`Start`（验证输入→构建 args→探测时长→`generateID`→后台 `runJob`）/`Get`/`Cancel`/`ProbeMedia` |
+| `args_test.go` | 参数构建器测试（格式/质量/缩放/裁剪/字幕/兼容性校验/输出路径去重） |
+| `manager_test.go` | 集成测试（需 ffmpeg，否则 skip）：探针、图片转码、覆盖模式、取消、job snapshot |
+
+> Gallery HTTP handler（`internal/api/gallery/register.go`）通过 `mediaJobs`（`*Manager`）与 `resolveFfmpeg` 助手调用此包。路由挂载于 `/api/gallery/edit/*`（`/api/gallery` 组，绕过 1MB body 上限，auth-gated）。
 
 ### 10.10 `internal/api/image/` — 图片保存与同源代理
 
@@ -557,7 +575,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 内容 |
 |---|---|
 | 文档 | `README.md` |
-  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery.js`、`editor-state.js`、`editor.js`、`tr-split.js`、`tr-diff.js`、`tr-state.js`、`text-review.js`、`text-review-step1.js`、`text-review-step2.js`、`text-review-step3.js`、`text-review-step4.js` |
+  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery-edit.js`、`gallery.js`、`editor-state.js`、`editor.js`、`tr-split.js`、`tr-diff.js`、`tr-state.js`、`text-review.js`、`text-review-step1.js`、`text-re...
 | vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2) |
 
 ---
@@ -653,6 +671,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改多协议探测/单协议 Test / Responses 路由 / Provider 详情页 UI 与 Batch Manage（含 Select All / Deselect All 动态切换按钮及 Alias/Note/Quota 弹窗自动 focus 与键盘防穿透） | proxy、rotation | internal/proxy/forward.go+upstream.go+stream.go+handler.go、internal/api/probe_model.go+probe_common.go+probe_keys.go+providers_validate.go、internal/combo/resolver.go、internal/config/types.go+validate.go、internal/api/router.go、internal/registry/models.go+state.go、web/static/providers.js+endpoint.js+style.css+i18n.js+app.js+auth.js |
 | 修改 Provider / Combo / QuickSlot 卡片外观与 2x2 按钮布局 | PROJECT_MAP §18 | `web/static/providers.js`、`web/static/combos.js`、`web/static/quickslots.js`、`web/static/endpoint.js`、`web/static/style.css` |
 | 新增/修改 Gallery 图片查看器 | playground | `web/playground/static-pg/gallery.js`、`internal/api/gallery.go`+`gallery_fs.go`+`gallery_session.go`、`internal/gallery/{zip,tiff}.go`、`internal/api/router.go`（新增 `/api/gallery/*` 路由 + `pgJSFiles` 含 `gallery.js`）、`web/static/{index.html,app.js,style.css,i18n.js}`、`internal/api/compress.go`（`skipTypes` 加 `image/tiff`）、`go.mod`（`golang.org/x/image`）、`internal/fsutil/clipboard_*.go`（剪贴板路径读取） |
+| 新增/修改 Gallery 媒体编辑 | playground | `internal/mediaedit/`（types/binary/probe/args/executor/manager + 测试）、`internal/api/gallery/register.go`（`mediaJobs` + `resolveFfmpeg` + 6 个 edit handler）、`internal/api/router.go`（`pgJSFiles` 加 `gallery-edit.js`）、`web/static/index.html`（script 标签加载顺序）、`docs/playground-architecture.md`（§4.2 表 + §16 小节） |
 | 新增/修改 Search 模式 | playground、config-registry-state | `web/playground/static-pg/pg-search.js`+`pg-ui.js`+`pg-render.js`+`pg-state.js`+`pg-i18n.js`、`internal/anysearch/client.go`、`internal/api/anysearch.go`+`settings.go`+`router.go`、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go` |
 | 修改 Search 状态持久化 | playground | `web/playground/static-pg/pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支）、`web/playground/static-pg/pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后渲染）、`web/playground/static-pg/pg-search.js`（`pgSearchSend()` 即时保存、DOM 存在检查） |
 | 新增/修改主题变体与 Appearance Modal 键盘/布局自适应 | config-registry-state、PROJECT_MAP §18.2 | `web/static/theme.js`（ThemeSystem registry 扩展 9 暗 + 9 亮 Variant + 4 风格预设 Style Dimension，支持弹窗 3×3 Grid 卡片式 Theme Picker 渲染与双 Mode 对勾标记 + Style Picker 独立维度选择，data-group 属性与重新渲染焦点保持）、`web/static/style.css`（18 种 CSS 变量覆盖层 + 弹窗横版左右双栏与小屏响应式自适应 + `.theme-card` 键盘 Focus 高亮框）、`web/static/app.js`（`handleThemeModalKeyDown` 全局处理 Tab 轮询: dark→night→style→button、方向键组内移动、Space选择、Enter确认退出、Esc/右键退出）、`internal/config/types.go`、`internal/config/defaults.go`、`internal/api/settings.go`、`web/static/endpoint.js`（外观 Modal 打开与初始焦点聚焦）、`web/static/i18n.js` |

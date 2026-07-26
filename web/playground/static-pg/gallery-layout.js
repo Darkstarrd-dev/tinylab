@@ -127,6 +127,8 @@ function buildPanelHTML(type, isSplit) {
 
   // Mode button is hidden in split mode!
   var modeBtnHTML = isSplit ? '' : '<button class="gallery-btn gallery-btn-icon" id="gallery-mode-btn" type="button" data-tooltip="' + modeBtnTitle + '">' + modeIcon + '</button>';
+  var editBtnTitle = 'Edit (ffmpeg)';
+
 
   var autoPlayIcon = galleryState.autoplayOn ? GALLERY_ICONS.stop : GALLERY_ICONS.play;
   var autoPlayTitle = galleryState.autoplayOn ? 'Stop (A / ■)' : 'Autoplay (A / ▶)';
@@ -200,6 +202,7 @@ function buildPanelHTML(type, isSplit) {
                    '<span class="gallery-info" id="' + infoId + '">0 / 0</span>' +
                    '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" data-tooltip="' + splitBtnTitle + '">' + splitIcon + '</button>' +
                    modeBtnHTML +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-edit-btn" type="button" data-tooltip="' + editBtnTitle + '">' + GALLERY_ICONS.edit + '</button>' +
                    '<button class="gallery-btn gallery-btn-icon" id="gallery-fs-btn" type="button" data-tooltip="Fullscreen (F)">' + GALLERY_ICONS.fullscreen + '</button>' +
                  '</div>' +
                '</div>' +
@@ -319,6 +322,25 @@ function bindEventsForCurrentLayout() {
     b.onclick = function(e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
       toggleFullscreen();
+    };
+  });
+
+  // Edit button — delegates to the shared triggerMediaEditor function
+  var editBtns = document.querySelectorAll('#gallery-edit-btn');
+  editBtns.forEach(function(b) {
+    b.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      // Determine media type from which pane the button is in
+      var mt;
+      if (galleryState.viewMode === 'split') {
+        var paneEl = e.currentTarget.closest('.gallery-pane');
+        mt = paneEl && paneEl.id === 'gallery-pane-video' ? 'video' : 'image';
+      } else {
+        mt = galleryState.mediaType;
+      }
+      if (typeof window.triggerMediaEditor === 'function') {
+        window.triggerMediaEditor(mt);
+      }
     };
   });
 

@@ -79,5 +79,8 @@ window.cleanupGallery = function() {
   if (typeof window.cleanupReview === 'function') {
     window.cleanupReview();
   }
+  if (typeof window.cleanupMediaEditor === 'function') {
+    window.cleanupMediaEditor();
+  }
   clearObjectURLs();
 };
