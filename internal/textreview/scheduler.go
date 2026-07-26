@@ -331,29 +331,23 @@ func (e *Engine) acquireAndClaim(s *Session) (int, []int) {
 // maxChars and marks each "claimed" so it is not picked twice. Must be called
 // under the session lock. Returns the chapter indices (empty if none).
 func (e *Engine) nextBatchLocked(s *Session, maxChars int) []int {
-	// Collect pending chapter indices in order (the "pending queue").
-	var pendingIdx []int
-	for i := range s.Chapters {
-		st := s.Chapters[i].Status
-		if st == StatusPending || st == StatusNeedsReproc {
-			pendingIdx = append(pendingIdx, i)
+	// Only consider eligible chapters (snapshot at session creation) that are
+	// still pending or need reprocessing. Fall back to all chapters if Eligible
+	// is nil (e.g. test sessions created without CreateSession).
+	eligible := s.Eligible
+	if eligible == nil {
+		eligible = make([]int, len(s.Chapters))
+		for i := range s.Chapters {
+			eligible[i] = i
 		}
 	}
-	// Apply range as positions in the pending queue (0-based half-open).
-	start := s.RangeStart
-	if start > len(pendingIdx) {
-		start = len(pendingIdx)
-	}
-	end := len(pendingIdx)
-	if s.RangeEnd > 0 && s.RangeEnd < end {
-		end = s.RangeEnd
-	}
-	if start >= end {
-		return nil
-	}
-	view := make([]Chapter, 0, end-start)
-	orig := make([]int, 0, end-start)
-	for _, idx := range pendingIdx[start:end] {
+	var view []Chapter
+	var orig []int
+	for _, idx := range eligible {
+		st := s.Chapters[idx].Status
+		if st != StatusPending && st != StatusNeedsReproc {
+			continue
+		}
 		view = append(view, s.Chapters[idx])
 		orig = append(orig, idx)
 	}
@@ -368,24 +362,26 @@ func (e *Engine) nextBatchLocked(s *Session, maxChars int) []int {
 	return batch
 }
 
-// hasPending reports whether any chapter in the pending-queue range is still
-// pending or marked needsReprocess. The range is interpreted as positions in
-// the pending queue, not absolute chapter indices.
+// hasPending reports whether any eligible chapter is still pending or marked
+// needsReprocess. When false, the session has processed its full range and
+// should finalize.
 func (e *Engine) hasPending(s *Session) bool {
 	s.lock()
 	defer s.unlock()
-	var pendingCount int
-	for i := range s.Chapters {
-		st := s.Chapters[i].Status
-		if st == StatusPending || st == StatusNeedsReproc {
-			pendingCount++
+	eligible := s.Eligible
+	if eligible == nil {
+		eligible = make([]int, len(s.Chapters))
+		for i := range s.Chapters {
+			eligible[i] = i
 		}
 	}
-	end := pendingCount
-	if s.RangeEnd > 0 && s.RangeEnd < end {
-		end = s.RangeEnd
+	for _, idx := range eligible {
+		st := s.Chapters[idx].Status
+		if st == StatusPending || st == StatusNeedsReproc {
+			return true
+		}
 	}
-	return s.RangeStart < end
+	return false
 }
 
 // nodeSnapshot returns a copy of the node runtime slice for SSE broadcast.

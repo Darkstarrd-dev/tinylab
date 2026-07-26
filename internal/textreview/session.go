@@ -86,6 +86,7 @@ type Session struct {
 	CreatedAt    time.Time     `json:"createdAt"`
 	RangeStart   int           `json:"rangeStart,omitempty"`
 	RangeEnd     int           `json:"rangeEnd,omitempty"`
+	Eligible     []int         `json:"-"` // chapter indices eligible for this session (snapshot at creation)
 
 	mu     sync.Mutex
 	paused bool
@@ -121,7 +122,7 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 			Title:   c.Title,
 			Content: c.Content,
 			Status:  StatusPending,
-		}
+	}
 	}
 	nodes := make([]NodeRuntime, 0, len(req.NodeIDs))
 	for _, id := range req.NodeIDs {
@@ -134,6 +135,23 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 			Target:         n.Concurrency,
 		})
 	}
+	// Compute eligible chapter indices: positions [RangeStart, RangeEnd) in the
+	// pending queue at session creation (all chapters start pending, so this is
+	// just the index range). The session processes only these chapters and
+	// completes when they're all done — the user can Start again with the same
+	// range to process the next batch.
+	eligibleEnd := len(chapters)
+	if req.RangeEnd > 0 && req.RangeEnd < eligibleEnd {
+		eligibleEnd = req.RangeEnd
+	}
+	eligibleStart := req.RangeStart
+	if eligibleStart > len(chapters) {
+		eligibleStart = len(chapters)
+	}
+	eligible := make([]int, 0, eligibleEnd-eligibleStart)
+	for i := eligibleStart; i < eligibleEnd; i++ {
+		eligible = append(eligible, i)
+	}
 	s := &Session{
 		ID:           apibase.GenerateID("tr"),
 		FileName:     req.FileName,
@@ -145,6 +163,7 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 		CreatedAt:    time.Now(),
 		RangeStart:   req.RangeStart,
 		RangeEnd:     req.RangeEnd,
+		Eligible:     eligible,
 	}
 	return s
 }
