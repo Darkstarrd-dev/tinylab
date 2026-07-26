@@ -46,6 +46,10 @@ function navigateTo(page) {
   if (currentPage !== 'editor' && typeof cleanupEditor === 'function') {
     cleanupEditor();
   }
+  // Cleanup text-review resources when leaving the page.
+  if (currentPage !== 'textreview' && typeof cleanupTextReview === 'function') {
+    cleanupTextReview();
+  }
   // Close the download SSE stream when leaving the download page.
   if (page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
@@ -58,12 +62,16 @@ function navigateTo(page) {
     if (typeof closeTerminalSession === 'function') closeTerminalSession();
   }
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page || (page === 'editor' && el.dataset.page === 'gallery'));
+    el.classList.toggle('active', el.dataset.page === page ||
+      ((page === 'editor' || page === 'textreview') && el.dataset.page === 'gallery'));
   });
-  // Gallery nav button label toggle
+  // Gallery nav button label toggle (3-way: Gallery / Editor / TextReview)
   var galBtn = document.querySelector('.nav-item[data-page="gallery"]');
   if (galBtn) {
-    galBtn.textContent = page === 'editor' ? t('editor') : t('gallery');
+    var label = (page === 'editor') ? t('editor')
+              : (page === 'textreview') ? t('textReview')
+              : t('gallery');
+    galBtn.textContent = label;
   }
   const container = document.getElementById('page-content');
   // Remove any per-page main modifier classes before rendering the new page.
@@ -82,12 +90,13 @@ function navigateTo(page) {
       case 'playground': return renderPlayground(container);
       case 'usage': return renderUsage(container);
       case 'console': return renderConsole(container);
+      case 'textreview': return renderTextReview(container);
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
       case 'editor': return renderEditor(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor') && mainEl) mainEl.classList.add('main-no-scroll');
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'textreview') && mainEl) mainEl.classList.add('main-no-scroll');
   
   function restoreFullscreenState() {
     if (wasFullscreen) {
@@ -117,8 +126,11 @@ function navigateTo(page) {
 }
 
 function gotoGalleryToggle() {
+  // 3-way cycle: Gallery -> Editor -> TextReview -> Gallery.
+  // Reuses the single Gallery nav button (label toggles per state, set in
+  // navigateTo), matching the pre-existing F6 Gallery<->Editor UX.
   if (currentPage === 'gallery') navigateTo('editor');
-  else if (currentPage === 'editor') navigateTo('gallery');
+  else if (currentPage === 'editor') navigateTo('textreview');
   else navigateTo('gallery');
 }
 
@@ -458,7 +470,8 @@ function updateSidebarNav() {
     if (page) {
       // Gallery nav button reflects current page
       if (page === 'gallery') {
-        el.textContent = currentPage === 'editor' ? t('editor') : t('gallery');
+        el.textContent = currentPage === 'editor' ? t('editor')
+          : (currentPage === 'textreview' ? t('textReview') : t('gallery'));
       } else {
         el.textContent = t(page);
       }

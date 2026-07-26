@@ -175,6 +175,23 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 			},
 		}
 	}
+
+	// 若 textReview.splitPatterns 为 nil（首次启动或配置无此字段），注入内置章节检测模式。
+	// 是 nil 而非 len==0 判断：用户清空后存为 []，不应再次注入。移植自
+	// novelhelper/frontend/src/utils/split.ts::DEFAULT_SPLIT_PATTERNS。
+	if cfg.TextReview.SplitPatterns == nil {
+		cfg.TextReview.SplitPatterns = []SplitPattern{
+			{Key: "zhang", Label: "第X章（中文/阿拉伯数字）", Regex: "^(第[0-9零一二三四五六七八九十百千万]+章.*)", Builtin: true},
+			{Key: "hui", Label: "第X回", Regex: "^(第[0-9零一二三四五六七八九十百千万]+回.*)", Builtin: true},
+			{Key: "juan", Label: "第X卷", Regex: "^(第[0-9零一二三四五六七八九十百千万]+卷.*)", Builtin: true},
+			{Key: "jie", Label: "第X节", Regex: "^(第[0-9零一二三四五六七八九十百千万]+节.*)", Builtin: true},
+			{Key: "x-zhang", Label: "X章（无「第」字）", Regex: "^([0-9零一二三四五六七八九十百千万]+章.*)", Builtin: true},
+			{Key: "chapter", Label: "Chapter N（英文）", Regex: "^(chapter\\s+[0-9ivxlc]+.*)", Flags: "i", Builtin: true},
+			{Key: "dunhao", Label: "数字+顿号（3、标题）", Regex: "^(\\d{1,4}、.*)", Builtin: true},
+			{Key: "maohao", Label: "数字+冒号（001：标题）", Regex: "^(\\d{1,4}[:：].*)", Builtin: true},
+			{Key: "custom", Label: "自定义正则", Regex: "", Builtin: true},
+		}
+	}
 	if cfg.AnySearch.MaxResults == 0 {
 		cfg.AnySearch.MaxResults = 5
 	}

@@ -85,13 +85,13 @@
 
 | 文件 | 职责 |
 |---|---|
-| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embedding"`；`Config` 顶层含 `AnySearch` 字段与 `ImageSaveDir` 字段（图片保存目录，默认 `"imgs"`）及 `Theme ThemeConfig` 字段 |
-| `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"` |
+| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embedding"`；`Config` 顶层含 `AnySearch` 字段与 `ImageSaveDir` 字段（图片保存目录，默认 `"imgs"`）及 `Theme ThemeConfig` 字段；`Config` 顶层含 `TextReview TextReviewConfig` 字段（`Nodes` 节点池 / `SplitPatterns` 章节切分 / `DefaultPromptPresetID`）+ `TextReviewNode`（`ID`/`ProviderID`/`ModelID`/`Concurrency`/`Enabled`）与 `SplitPattern`（`Key`/`Label`/`Regex`/`Flags`/`Builtin`）类型 |
+| `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"`；`finalizeConfig` 在 `TextReview.SplitPatterns == nil`（首次启动）时注入内置章节检测模式（移植自 novelhelper `split.ts::DEFAULT_SPLIT_PATTERNS`，nil 判断避免用户清空 `[]` 后重新注入） |
 | `persistence.go` | `Load`/`Save`：`.tmp` 恢复 + 原子写（委托 `fsutil.AtomicWrite`） |
 | `validate.go` | 尽力校验（API 类型、重复 ID/prefix、ModelDef.Protocols 值合法性），仅告警；anthropic provider 的 BaseURL 未以 `/v1/messages` 或 `*` 结尾时告警 |
 | `crypto.go` | AES-256-GCM：API Key 静态加密，`GenerateKey`/`encryptKeysCopy` |
 | `config.go` | 包文档 + 职责拆分说明 |
-| `config_test.go` / `crypto_test.go` | 测试 |
+| `config_test.go` / `crypto_test.go` / `text_review_test.go` | 测试（`text_review_test.go` 覆盖 TextReview 默认 split-pattern 注入与配置持久化往返） |
 
 ---
 
@@ -110,6 +110,7 @@
 | `state.go` | per-key 运行时状态**访问**：`GetKeyState`（返回 `*keystate.KeyRuntimeState`）、`SnapshotKeyStates`/`snapshotKeyState`/`RestoreKeyState`/`ResetAllCooldowns`、probe records（`UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord`）。**类型定义已迁出**至 `internal/keystate` |
 | `crud_test.go` / `reload_merge_test.go` / `state_test.go` | 测试 |
 | `models_protocols_test.go` / `probe_records_test.go` | 新增 ModelDef.Protocols CRUD 与 probeRecords 运行时状态测试 |
+| `text_review.go` | TextReview 处理池与切分模式 CRUD：`ListTextReviewNodes`/`AddTextReviewNode`/`UpdateTextReviewNode`/`DeleteTextReviewNode` + `ListSplitPatterns`/`AddSplitPattern`/`UpdateSplitPattern`/`DeleteSplitPattern`（线程安全，`cfgMu` 保护） |
 
 <a id="keystate"></a>
 **`internal/keystate/`（新包，2026-07-25）** — per-key 运行时状态**类型定义**抽离自 `registry/state.go`，打破原先 rotation→registry 的反向依赖：
@@ -366,6 +367,18 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 架构基线见 [`docs/playground-architecture.md`](docs/playground-architecture.md)（Gallery 一节）。
 
 引入依赖：`golang.org/x/image`（webp/bmp/tiff/draw 子包），纯 Go 无 CGO。
+
+### 10.23 `internal/api/textreview/` — AI 文本审核 HTTP handler
+
+AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/切分模式/默认 prompt 的 CRUD 与会话调度端点（SSE 进度 + pause/resume/stop/reprocess）。会话引擎委托 [`internal/textreview`](#textreview)；`NodePersister`（ramp-down 落盘）实现在 `nodepersister.go`。`/api/text-review/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB，与会话携带的 `rawText` 相称），仍经 `AuthMiddleware` 鉴权。
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Register`（路由注册 + 文档注释列出全部端点）+ 配置 CRUD handler（`listReviewNodes`/`upsertReviewNode`/`deleteReviewNode`/`listSplitPatterns`/`upsertSplitPattern`/`deleteSplitPattern`/`getPromptDefault`）+ `engineOnce` 懒构造 `*tr.Engine`（默认 `ProxyCleaner`，测试可经 `SetCleanerForTest` 注入 fake）+ 内置默认清理 system prompt 常量 |
+| `sessions.go` | 会话/调度 handler：`createSession`（POST `/sessions`）/`getSession`（GET `/sessions/{id}` 快照）/`streamSessionEvents`（GET `/sessions/{id}/events` SSE 实时流）/`pauseSession`/`resumeSession`/`stopSession`/`reprocessChapter`（POST `/sessions/{id}/chapters/{idx}/reprocess`） |
+| `nodepersister.go` | `registryPersister`：`tr.NodePersister` 生产实现，ramp-down 决策（`UpdateNodeConcurrency`/`DisableNode`）写回 registry + `SaveConfig` 持久化到 `config.yaml` |
+| `routes_test.go` / `sessions_test.go` | 测试：路由注册契约 + 会话端点（含 fake Cleaner） |
+
 ## 11. `internal/state/` — `state.yaml` 运行时持久化
 
 架构基线见 [`docs/config-registry-state-architecture.md`](docs/config-registry-state-architecture.md)（与 config/registry 合著，含 Snapshot 格式、500ms 去抖、回调模式破除循环依赖、源码锚点）。
@@ -501,6 +514,20 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 |---|---|
 | `client.go` | `Client` 结构体（`httpClient`+`apiKey`）；`New(apiKey)` 构造（30s 超时）；`Search`/`GetSubDomains`/`Extract` 方法调用 AnySearch JSON-RPC API（endpoint `https://api.anysearch.com/mcp`，method `tools/call`）；`callAPI` 私有方法发送 JSON-RPC 请求，提取 `result.content[].text` |
 
+## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
+
+<a id="textreview"></a>AI 长文本清理的进程内会话引擎：一个 `Session` 持有待清理的章节列表与处理节点池，调度器跨节点派发 worker goroutine，经共享代理栈流式清理每章并把增量广播给 SSE 订阅者。支持 pause/resume/stop、单章重处理、以及节点 502-exhausted 时的自动并发 ramp-down（落盘到 `config.yaml`）。会话仅驻内存，**不持久化**（重启清零，已确认决策：无 `state.yaml`）。架构基线见 [`docs/playground-architecture.md`](docs/playground-architecture.md)（AI Text Review 一节）。
+
+| 文件 | 职责 |
+|---|---|
+| `cleaner.go` | 包文档 + `CleanResult`（`OK`/`Exhausted`/`Passed4xx`/`ErrMsg` 故障分类）+ `Cleaner` 接口（`Clean(ctx, node, systemPrompt, content, onChunk)` 流式清理一章，`onChunk` 回调每个 delta） |
+| `session.go` | `Session`/`Chapter`/`NodeRuntime`/`CreateSessionRequest` 类型 + 全局 `sessions sync.Map` + `CreateSession`/`GetSession`/`StoreSession`/`DeleteSession`/`Snapshot`（深拷贝供 JSON 序列化，持锁内取一致快照）+ 章节/会话状态常量 |
+| `scheduler.go` | `Engine` 调度器：`Start`/`dispatch`（主循环：取下一 pending 章节 → 找 `Active<Target && Enabled` 节点 → spawn worker）/`runWorker`（清理 + 故障分类 + ramp-down 规则）/`acquireNode`/`nextPendingChapter`/`Pause`/`Resume`/`Stop`/`ReprocessChapter`；`maxRetries=3` per-chapter 重试上限；`NodePersister` 接口（ramp-down 落盘） |
+| `proxy_call.go` | `ProxyCleaner`：`Cleaner` 生产实现——构造 OpenAI 兼容流式 chat 请求，经 `httptest` 提交共享 proxy handler，实时解析 SSE chunk 的 `choices[0].delta.content` 并经 `onChunk` 回传 |
+| `streaming_writer.go` | `streamingResponseWriter`：自定义 `http.ResponseWriter`+`http.Flusher`，把 proxy 流式写入镜像到带背压的 channel（`Write` 阻塞至消费者读取或 ctx 取消），供 `ProxyCleaner` 并发消费 SSE；`sync.Once` 守护 `closeChunks` |
+| `events.go` | SSE 事件类型常量（`EventChunk`/`EventStatus`/`EventNode`）+ `Event` payload（`Type`/`ChapterIdx`/`Delta`/`Status`/`NodeID`/`Error`/`Nodes`）+ `JSON()` |
+| `scheduler_test.go` | 测试（调度/ramp-down/reprocess，经 fake Cleaner） |
+
 ---
 
 ## 18. `web/` — 内嵌前端
@@ -530,7 +557,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 内容 |
 |---|---|
 | 文档 | `README.md` |
-  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery.js`、`editor-state.js`、`editor.js` |
+  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery.js`、`editor-state.js`、`editor.js`、`tr-split.js`、`tr-diff.js`、`tr-state.js`、`text-review.js`、`text-review-step1.js`、`text-review-step2.js`、`text-review-step3.js`、`text-review-step4.js` |
 | vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2) |
 
 ---
@@ -630,6 +657,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改 Search 状态持久化 | playground | `web/playground/static-pg/pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支）、`web/playground/static-pg/pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后渲染）、`web/playground/static-pg/pg-search.js`（`pgSearchSend()` 即时保存、DOM 存在检查） |
 | 新增/修改主题变体与 Appearance Modal 键盘/布局自适应 | config-registry-state、PROJECT_MAP §18.2 | `web/static/theme.js`（ThemeSystem registry 扩展 9 暗 + 9 亮 Variant + 4 风格预设 Style Dimension，支持弹窗 3×3 Grid 卡片式 Theme Picker 渲染与双 Mode 对勾标记 + Style Picker 独立维度选择，data-group 属性与重新渲染焦点保持）、`web/static/style.css`（18 种 CSS 变量覆盖层 + 弹窗横版左右双栏与小屏响应式自适应 + `.theme-card` 键盘 Focus 高亮框）、`web/static/app.js`（`handleThemeModalKeyDown` 全局处理 Tab 轮询: dark→night→style→button、方向键组内移动、Space选择、Enter确认退出、Esc/右键退出）、`internal/config/types.go`、`internal/config/defaults.go`、`internal/api/settings.go`、`web/static/endpoint.js`（外观 Modal 打开与初始焦点聚焦）、`web/static/i18n.js` |
 | 修改 tooltip 样式/行为 | PROJECT_MAP §18.2 | `web/static/app.js`（TooltipSystem 模块：委托 hover+focusin 监听 + 单共享 `.tip` 节点 + `showFor`/`hide`/`scheduleShow`/`position` 定位与翻转 + `SHOW_DELAY` 延迟）、`web/static/style.css`（`.tip` 类：消费 `--modal-bg`/`--glass-blur`/`--glass-border`/`--radius-sm`/`--shadow-card-hover`/`--z-tooltip` 令牌）、`web/static/<page>.js`（使用 `data-tooltip=\"` 属性的模板字符串，取代原生 `title=`；动态更新用 `el.setAttribute('data-tooltip', val)`）；icon-only 按钮需同步维护 `aria-label` |
+| 新增/修改文本审核节点池/会话 | playground、config-registry-state | `internal/textreview/`（engine：`session.go`+`scheduler.go`+`cleaner.go`+`proxy_call.go`+`streaming_writer.go`+`events.go`）、`internal/api/textreview/`（handler：`register.go`+`sessions.go`+`nodepersister.go`）、`internal/registry/text_review.go`（CRUD）、`internal/config/types.go`（`TextReviewConfig`/`TextReviewNode`/`SplitPattern`）+`defaults.go`（内置 split-pattern 注入）、`internal/api/router.go`（`/api/text-review/*` 路由组 + `pgJSFiles`）、`web/playground/static-pg/{tr-split,tr-diff,tr-state,text-review,text-review-step1..4}.js`、`web/static/{index.html,app.js,i18n.js}`（3-way nav + script tags + i18n 键） |
 
 ---
 

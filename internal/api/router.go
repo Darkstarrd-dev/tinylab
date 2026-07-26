@@ -13,27 +13,28 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tinyrouter/tinyrouter/internal/api/anysearch"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
-	"github.com/tinyrouter/tinyrouter/internal/api/providers"
-	"github.com/tinyrouter/tinyrouter/internal/api/anysearch"
+	"github.com/tinyrouter/tinyrouter/internal/api/combos"
 	"github.com/tinyrouter/tinyrouter/internal/api/compress"
 	"github.com/tinyrouter/tinyrouter/internal/api/console_logs"
-	"github.com/tinyrouter/tinyrouter/internal/api/combos"
+	apidownload "github.com/tinyrouter/tinyrouter/internal/api/download"
 	"github.com/tinyrouter/tinyrouter/internal/api/editor"
+	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
 	"github.com/tinyrouter/tinyrouter/internal/api/models"
 	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
+	"github.com/tinyrouter/tinyrouter/internal/api/probe"
+	"github.com/tinyrouter/tinyrouter/internal/api/providers"
 	"github.com/tinyrouter/tinyrouter/internal/api/quickslots"
 	"github.com/tinyrouter/tinyrouter/internal/api/review_presets"
-	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
 	"github.com/tinyrouter/tinyrouter/internal/api/settings"
-	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	apiterminal "github.com/tinyrouter/tinyrouter/internal/api/terminal"
-	apidownload "github.com/tinyrouter/tinyrouter/internal/api/download"
-	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
+	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
+	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -70,7 +71,7 @@ type deps struct {
 	// debugMode reflects the live debug flag toggled from settings.
 	debugMode atomic.Bool
 	// quickSlotOnly reflects the live QuickSlot-only toggle from settings.
-	quickSlotOnly atomic.Bool
+	quickSlotOnly     atomic.Bool
 	restartFn         func(string)
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
@@ -79,7 +80,6 @@ type deps struct {
 	// terminalState is shared with the terminal sub-package via apibase.Deps.
 	terminalState *apibase.TerminalState
 }
-
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and
 // handler methods live in the per-domain files that have not yet been extracted
@@ -117,7 +117,7 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 					return nil
 				},
 			},
-			monitorMgr: monitor.New(500, cfg.Monitor.MaxLineLength),
+			monitorMgr:    monitor.New(500, cfg.Monitor.MaxLineLength),
 			terminalState: &apibase.TerminalState{},
 		},
 	}
@@ -260,26 +260,26 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 	// Build the shared Deps for sub-packages.
 	apiDeps := &apibase.Deps{
-		Reg:          rt.reg,
-		ConfigPath:   rt.configPath,
-		Usage:        rt.usage,
-		PgUsage:      rt.pgUsage,
-		QuotaTracker: rt.quotaTracker,
-		Logger:       rt.logger,
-		ProxyHandler: rt.proxyHandler,
-		Selector:     rt.selector,
-		ComboRes:     rt.comboRes,
-		DownloadMgr:  rt.downloadMgr,
-		Shutdown:     rt.shutdown,
-		TestClient:   rt.testClient,
-		MonitorMgr:   rt.monitorMgr,
-		DebugMode:    &rt.debugMode,
-		QuickSlotOnly: &rt.quickSlotOnly,
-		RestartFn:    rt.restartFn,
-		ServerCfgFn:  rt.serverCfgFn,
+		Reg:               rt.reg,
+		ConfigPath:        rt.configPath,
+		Usage:             rt.usage,
+		PgUsage:           rt.pgUsage,
+		QuotaTracker:      rt.quotaTracker,
+		Logger:            rt.logger,
+		ProxyHandler:      rt.proxyHandler,
+		Selector:          rt.selector,
+		ComboRes:          rt.comboRes,
+		DownloadMgr:       rt.downloadMgr,
+		Shutdown:          rt.shutdown,
+		TestClient:        rt.testClient,
+		MonitorMgr:        rt.monitorMgr,
+		DebugMode:         &rt.debugMode,
+		QuickSlotOnly:     &rt.quickSlotOnly,
+		RestartFn:         rt.restartFn,
+		ServerCfgFn:       rt.serverCfgFn,
 		UpstreamTimeoutFn: rt.upstreamTimeoutFn,
-		StateSaveFn:  rt.stateSaveFunc,
-		TerminalState: rt.terminalState,
+		StateSaveFn:       rt.stateSaveFunc,
+		TerminalState:     rt.terminalState,
 	}
 	authHandler := auth.NewHandler(apiDeps)
 	anysearchHandler := anysearch.NewHandler(apiDeps)
@@ -287,6 +287,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	sseHandler := sse.NewHandler(apiDeps)
 	consoleLogsHandler := console_logs.NewHandler(apiDeps)
 	editorHandler := editor.NewHandler()
+	textReviewHandler := textreview.NewHandler(apiDeps)
 	reviewPresetsHandler := review_presets.NewHandler(apiDeps)
 	keysHandler := keys.NewHandler(apiDeps)
 	modelsHandler := models.NewHandler(apiDeps)
@@ -300,7 +301,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
-
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -347,7 +347,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// Console logs
 			consoleLogsHandler.Register(r)
 
-
 			// Monitor
 			monitorHandler.Register(r)
 
@@ -385,6 +384,20 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		editorHandler.Register(r)
 	})
 
+	// Text-review API: AI text-review config + sessions. Outside the /api
+	// group to bypass the 1MB body limit (sessions carry large rawText),
+	// still auth-gated. Mirrors /api/editor.
+	r.Route("/api/text-review", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
+		textReviewHandler.Register(r)
+	})
+
 	// Embedded UI (fallback to index.html)
 	// Playground static routes: only register when the playground module is
 	// compiled into the binary (build tag `playground`). At runtime the flag
@@ -408,6 +421,11 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				"gallery-state.js", "gallery-io.js", "gallery-layout.js",
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
 				"gallery.js", "editor-state.js", "editor.js",
+				// AI Text Review (load order: split/diff/state first, then steps, then entry)
+				"tr-split.js", "tr-diff.js", "tr-state.js",
+				"text-review-step1.js", "text-review-step2.js",
+				"text-review-step3.js", "text-review-step4.js",
+				"text-review.js",
 			}
 			for _, f := range pgJSFiles {
 				r.Get("/"+f, noCacheHandler)
