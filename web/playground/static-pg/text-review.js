@@ -193,6 +193,10 @@ function trGotoStep(n) {
 function trRenderStep() {
   var panel = document.getElementById('tr-panel');
   if (!panel) return;
+  // Step4 uses the full editor area (left wizard + right pane); other steps
+  // keep the wizard in the left half with the right content pane beside it.
+  var wrap = document.querySelector('.ed-review-wrap');
+  if (wrap) wrap.classList.toggle('tr-s4-active', trState.step === 4);
   if (trState.step === 1 && typeof window.trRenderStep1 === 'function') {
     window.trRenderStep1(panel, trState);
   } else if (trState.step === 2 && typeof window.trRenderStep2 === 'function') {
