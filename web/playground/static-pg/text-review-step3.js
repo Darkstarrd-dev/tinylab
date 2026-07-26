@@ -137,8 +137,14 @@ window.trRenderStep3 = function (panel, state) {
   // snapshot + re-subscribe (no Start button needed). If already subscribed
   // (re-render within Step3), just repaint from the in-memory mirror.
   if (trState.sessionId) {
+    // Optimistic sync: immediately show controls + in-memory chapter mirror so
+    // the UI is correct on re-entry (e.g. returning from Step4) before the async
+    // snapshot reconciles. trS3SessionStatus persists across page switches.
+    trS3UpdateControls();
+    trS3RenderChapterList();
+    trS3UpdateTabCounts();
     if (trEventSource && trEventSource.readyState !== 2 /* CLOSED */) {
-      trS3RenderAll();
+      trS3RenderRuntimeNodes(trS3Nodes);
     } else {
       trSubscribeSession(trState.sessionId);
     }

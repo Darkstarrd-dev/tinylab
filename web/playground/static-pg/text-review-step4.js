@@ -222,8 +222,9 @@ function trS4RowHtml(row, idx) {
   return (
     '<div class="' + cls + '" id="tr-s4-row-' + idx + '">' +
       '<div class="tr-s4-cell tr-s4-left">' + leftText + '</div>' +
-      '<div class="tr-s4-cell tr-s4-right">' + rightText + '</div>' +
-      '<div class="tr-s4-ctrl" id="tr-s4-ctrl-' + idx + '">' + ctrl + '</div>' +
+      '<div class="tr-s4-cell tr-s4-right">' + rightText +
+        '<div class="tr-s4-ctrl" id="tr-s4-ctrl-' + idx + '">' + ctrl + '</div>' +
+      '</div>' +
     '</div>'
   );
 }

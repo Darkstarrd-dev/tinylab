@@ -594,6 +594,8 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .ed-review-wrap{flex:1 1 0;min-height:0;display:flex;overflow:hidden}
 .ed-review-area{flex:1;min-width:0;max-width:50%;height:100%;overflow:auto;border-right:1px solid var(--glass-border)}
 .ed-review-content{flex:1;min-width:0;height:100%;overflow:auto;padding:8px 10px;margin:0;font-family:ui-monospace,Consolas,monospace;font-size:var(--font-code);line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;scrollbar-width:thin}
+.ed-review-wrap.tr-s4-active .ed-review-area{max-width:100%;border-right:none}
+.ed-review-wrap.tr-s4-active .ed-review-content{display:none}
 
 .ed-panes{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:0;overflow:hidden;min-height:0}
 .ed-pane{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--glass-border)}
@@ -840,11 +842,9 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .tr-s4-toolbar{display:flex;flex-direction:column;gap:8px;background:var(--glass-bg);border:none;border-bottom:1px solid var(--glass-border);border-radius:0;padding:10px 16px;margin:0}
 .tr-s4-toolbar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tr-s4-toolbar-title{font-size:var(--font-section-title);font-weight:600;color:var(--text);word-break:break-all;flex:1;min-width:0}
-.tr-s4-stats{font-size:var(--font-badge);color:var(--accent);background:var(--accent-glow);padding:2px 10px;border-radius:0;font-weight:600;white-space:nowrap}
+.tr-s4-row{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;border-bottom:1px solid var(--glass-border)}
 .tr-s4-diff{flex:1 1 0;border:none;border-radius:0;background:var(--bg);overflow:auto;max-height:none;height:100%;scrollbar-width:thin;font-family:ui-monospace,Consolas,monospace}
-.tr-s4-row{display:grid;grid-template-columns:1fr 1fr 84px;align-items:stretch;border-bottom:1px solid var(--glass-border)}
-.tr-s4-row:last-child{border-bottom:none}
-.tr-s4-cell{padding:4px 8px;font-size:var(--font-code);line-height:1.55;color:var(--text-secondary);display:flex;align-items:flex-start;gap:8px;min-width:0;white-space:pre-wrap;word-break:break-word}
+.tr-s4-cell{padding:4px 8px;font-size:var(--font-code);line-height:1.55;color:var(--text-secondary);display:flex;align-items:flex-start;gap:8px;min-width:0;white-space:pre-wrap;word-break:break-word;position:relative}
 .tr-s4-left{border-right:1px solid var(--glass-border);background:var(--glass-bg)}
 .tr-s4-num{flex-shrink:0;min-width:32px;color:var(--text-muted);text-align:right;user-select:none;font-variant-numeric:tabular-nums;opacity:.7}
 .tr-s4-text{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word}
@@ -857,9 +857,9 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .tr-s4-row-mod .tr-s4-right{background:var(--accent-glow)}
 .tr-s4-char-add{background:var(--accent-glow);color:var(--accent);border-radius:0}
 .tr-s4-char-del{background:var(--danger-glow);color:var(--danger);text-decoration:line-through;border-radius:0}
-.tr-s4-final{color:var(--text)}
+.tr-s4-ctrl{position:absolute;top:2px;right:2px;display:flex;align-items:center;gap:4px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:0;padding:1px 2px;opacity:0;transition:opacity var(--transition-fast);z-index:1}
+.tr-s4-row:hover .tr-s4-ctrl,.tr-s4-ctrl:has(.active){opacity:1}
 .tr-s4-edited{font-style:italic}
-.tr-s4-ctrl{display:flex;align-items:center;justify-content:center;gap:4px;border-left:1px solid var(--glass-border);background:var(--glass-bg);padding:2px}
 .tr-s4-btn{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--glass-border);border-radius:0;background:var(--glass-bg);color:var(--text-muted);cursor:pointer;font-size:13px;line-height:1;transition:all var(--transition-fast)}
 .tr-s4-btn:hover{background:var(--glass-hover);border-color:var(--glass-border-hover);color:var(--text)}
 .tr-s4-accept.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
