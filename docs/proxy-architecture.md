@@ -30,6 +30,8 @@
 >
 > **2026-07-15 更新（`recorder.go` 大响应截断）：** `recordUsage` 在写入 `RespPayload` 前，若响应体大于 512 KiB 且解析为合法 JSON，会把 `data[].b64_json` 大于 200 字节的内容替换为 `[truncated: N bytes]` 占位符，再行截断。避免图片响应（~2-5 MB base64 PNG）无意义占满 512 KiB 调试面板缓冲且无可读性。
 
+> **2026-07-26 更新（Recent Requests 前端合并去重 + inflightEntries 清理，行为变更）：** 修复 4 个关联症状——已完成请求 Latency 继续增长（计时不停止）、Output Tokens 显示 0、详情 modal 无响应头/响应体、"按会话分组"折叠失效（同 sessionKey 的请求显示为平铺行）。根因：`usage.js` 的 `refreshQuotaData` 与 `renderUsage` 周期合并逻辑中，`newEntries.map()` 对 API 返回的 `combined = ringEntries + inflightEntries` 不做 ID 去重——当 ring（已完成条目，status=success/error，携带 outputTokens/respPayload/respHeaders/sessionKey）与 EntryTracker（在途条目，status=processing，无上述字段）因竞态/泄露窗口对同一 request ID 同时存在时，两条目均进入 `lastUsageEntries`。processing 条目无 sessionKey → 落入"未分组"伪组单独显示；info modal 的 `find()` 返回首条（若排序后 processing 在前则读到空字段）。修复：合并循环改为 `forEach` + `seenIds` 去重（首次出现保留，后续同 ID 跳过——ring 条目在 API 响应中先于 inflight 条目，故完成条目天然胜出）；合并后新增扫尾：对 `merged` 中终态条目（status ≠ processing）删 `inflightEntries[id]`，防止其随 ring 条目被逐出后在后续轮询重新 `unshift` 注入。前端纯 JS 修改，后端未变。
+
 ## 1. 范围与结论
 
 `internal/proxy/` 是 TinyRouter 的**代理核心包**，承载所有 `/v1/*`（OpenAI-compatible）请求的处理：模型解析、Key 选择、上游转发、SSE 流式透传、重试/故障转移、用量记录、在途跟踪与事件广播。它自身不含任何管理接口、配置加载或 UI 逻辑。
