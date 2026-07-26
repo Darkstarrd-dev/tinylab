@@ -285,6 +285,8 @@ pgSaveSuccess: 'Markdown file saved successfully',
     geBatchDone: '%s completed, %s failed',
     geNoBatchItems: 'No other images found in this folder',
     geNoDiskPath: 'This item does not have a disk path. Use files from a directory.',
+    geExtracting: 'Extracting from archive...',
+    geExtractFail: 'Extract failed',
   },
   cn: {
     pgSelectModel: '选择模型', pgNoModels: '未配置模型', pgSendMessage: '发送', pgStop: '停止', pgClear: '清空对话',
@@ -571,6 +573,8 @@ pgSaveSuccess: 'Markdown 文件已保存',
     geBatchDone: '%s 个完成，%s 个失败',
     geNoBatchItems: '此文件夹中没有其他图片',
     geNoDiskPath: '此项目没有磁盘路径。请从目录中打开文件。',
+    geExtracting: '正在从压缩包提取...',
+    geExtractFail: '提取失败',
   }
 };
 
