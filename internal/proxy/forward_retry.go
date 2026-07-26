@@ -122,6 +122,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			KeyName:       sel.KeyName,
 			Status:        "processing",
 			Source:        r.Header.Get("X-TinyRouter-Source"),
+			SessionKey:    sessionKey,
 			InputTokens:   len(bodyBytes) / 4, // rough estimate for live UI
 		}
 		upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)

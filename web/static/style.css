@@ -536,10 +536,28 @@ tbody tr:last-child td{border-bottom:none}
 .recent-requests-card .card-scroll{flex:1;overflow-y:auto;min-height:0;scrollbar-width:none;-ms-overflow-style:none}
 .recent-requests-card .card-scroll::-webkit-scrollbar{display:none}
 .recent-count{font-size:var(--font-badge);color:var(--text-muted);font-weight:400;margin-left:8px}
-.usage-table{width:100%;border-collapse:collapse;font-size:var(--font-base)}
+.usage-table{width:100%;border-collapse:collapse;font-size:var(--font-base);table-layout:fixed}
 .usage-table thead{position:sticky;top:0;z-index:1;background:var(--option-bg)}
-.usage-table th,.usage-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.usage-table th,.usage-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .usage-table tbody tr:hover{background:var(--table-hover)}
+/* Fixed column widths: stable proportions, no reflow when session rows show/hide (header stays put). */
+.usage-table th:nth-child(1),.usage-table td:nth-child(1){width:28px;min-width:28px}
+.usage-table th:nth-child(2){width:76px}
+.usage-table th:nth-child(3){width:88px}
+.usage-table th:nth-child(4){width:160px}
+.usage-table th:nth-child(5){width:120px}
+.usage-table th:nth-child(6){width:68px}
+.usage-table th:nth-child(7){width:88px}
+/* Colspan cells (session group headers) span all columns; neutralize per-cell max-width. */
+.usage-table td[colspan]{max-width:none}
+/* Session group header: structured flex layout with pre-allocated field widths so rows align. */
+.session-group-cell{padding:6px 10px!important;cursor:pointer;overflow:hidden}
+.session-group-flex{display:flex;align-items:center;gap:14px;font-size:var(--font-badge);color:var(--text-muted);white-space:nowrap;overflow:hidden}
+.session-group-arrow{display:inline-block;width:14px;flex-shrink:0;text-align:center}
+.session-group-name{flex:0 0 120px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.session-group-count{flex:0 0 90px}
+.session-group-time{flex:0 0 180px}
+.session-group-model{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 /* Two-column layout: left=quota+recent, right=console */
 .usage-body-grid{display:grid;gap:0;flex:1;min-height:0;min-width:0;grid-template-columns:1fr;grid-template-rows:1fr;align-items:stretch;background:transparent;padding:0;overflow:hidden}
