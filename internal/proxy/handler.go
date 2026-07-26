@@ -83,7 +83,7 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 		logger:          logger,
 		UsageUpdates:    NewBroadcaster(32),
 		InflightUpdates: NewBroadcaster(32),
-		RequestUpdates:  NewBroadcaster(64),
+		RequestUpdates:  NewBroadcaster(256),
 		Inflight:        NewInflightTracker(),
 		EntryTracker:    NewEntryTracker(),
 		sigCache:        NewSignatureCache(),

@@ -20,6 +20,7 @@ var recentPageSize = 30;
 var recentPage = 1;
 var recentFilteredCount = 0;
 var recentGroupBySession = false;
+var expandedSessions = {}; // sessionKey -> true when expanded; survives re-renders so periodic refresh won't re-collapse
 var currentInfoModalRequestId = null;
 var currentInfoModalReasoningEl = null;
 var currentInfoModalAssistantEl = null;
@@ -70,6 +71,7 @@ function hasProcessingEntries() {
 }
 
 var MAX_PROCESSING_MS = 10 * 60 * 1000; // 10 分钟，超时停止计时
+var MAX_PRESERVED_TERMINAL = 200; // 保留被 ring 驱逐的终态条目上限，避免无界增长
 
 function updateProcessingLatencyCells() {
   var rows = document.querySelectorAll('tr[data-status="processing"]');
@@ -176,7 +178,7 @@ function renderUsageRow(e, sessionKey, hidden) {
   }
   var tsAttr = e.timestamp ? ' data-ts="' + escapeHtml(e.timestamp) + '"' : '';
   var ttftAttr = (e.status === 'processing' && e.ttftMs && e.ttftMs > 0) ? ' data-ttft="1"' : '';
-  var idAttr = e.id ? ' data-id="' + escapeHtml(e.id) + '"' : '';
+  var idAttr = e.id ? ' data-id="' + sanitizeId(e.id) + '"' : '';
   var inSession = sessionKey !== undefined;
   var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row"' : '';
   var firstCellStyle = inSession ? ' style="padding-left:18px"' : '';
@@ -275,6 +277,19 @@ async function renderUsage(c) {
   }
 
   sortEntriesByTimeDesc(merged);
+  // Preserve terminal entries from lastUsageEntries that are NOT in the API
+  // response (ring-evicted), mirroring refreshQuotaData, so switching pages
+  // does not drop completed entries. Bounded by MAX_PRESERVED_TERMINAL.
+  var _preserved = 0;
+  for (var i = 0; i < lastUsageEntries.length; i++) {
+    var e = lastUsageEntries[i];
+    if (e.id && e.status !== 'processing' && !seenIds[e.id]) {
+      merged.push(e);
+      seenIds[e.id] = true;
+      if (++_preserved >= MAX_PRESERVED_TERMINAL) break;
+    }
+  }
+  sortEntriesByTimeDesc(merged);
   lastUsageEntries = merged;
   var quotaBars = quotas.quotas || [];
   quotaBarItems = {};
@@ -370,11 +385,11 @@ function renderRecentRequestsInline(entries) {
       '<button type="button" class="btn btn-sm btn-filter" id="recent-next-page" onclick="recentNextPage()">\u2192</button>' +
     '</span>';
   var header = '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">' +
-    '<span>' + t('recentRequests') + '<span class="recent-count">' + entries.length + '</span></span>' +
+    '<span>' + t('recentRequests') + '<span class="recent-count">' + filtered.length + '</span></span>' +
     '<span class="console-controls" style="gap:4px">' +
-      '<button type="button" class="btn btn-sm btn-filter active" data-filter="success" onclick="toggleUsageFilter(this,\'success\')">' + t('filterSuccess') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-filter active" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-filter active" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
+      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.success ? ' active' : '') + '" data-filter="success" onclick="toggleUsageFilter(this,\'success\')">' + t('filterSuccess') + '</button>' +
+      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.failure ? ' active' : '') + '" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
+      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.processing ? ' active' : '') + '" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter' + (recentGroupBySession ? ' active' : '') + '" id="recent-group-toggle" onclick="toggleRecentGroupBySession()">' + t('groupBySession') + '</button>' +
       pagerHtml +
     '</span>' +
@@ -470,8 +485,9 @@ function renderRecentRowsGrouped(rows) {
   for (var gi = 0; gi < order.length; gi++) {
     var sk = order[gi];
     var g = groups[sk];
-    html += renderSessionGroupHeader(sk, 'sess:' + sk, g);
-    html += g.map(function(e) { return renderUsageRow(e, sk, true); }).join('');
+    var expanded = !!expandedSessions[sk];
+    html += renderSessionGroupHeader(sk, 'sess:' + sk, g, expanded);
+    html += g.map(function(e) { return renderUsageRow(e, sk, !expanded); }).join('');
   }
   return html;
 }
@@ -479,15 +495,22 @@ function renderRecentRowsGrouped(rows) {
 // renderSessionGroupHeader emits a clickable header row spanning all columns:
 // "label · N requests · first→last time · provider/model". Clicking toggles
 // the visibility of that session's rows.
-function renderSessionGroupHeader(sk, label, group) {
+function renderSessionGroupHeader(sk, label, group, expanded) {
   var first = group[0], last = group[group.length - 1];
   var span = new Date(first.timestamp).toLocaleTimeString() + ' \u2192 ' + new Date(last.timestamp).toLocaleTimeString();
   var prov = escapeHtml(first.provider || '');
   var model = escapeHtml(displayModelName(first.model, first.originalModel));
-  return '<tr class="session-group-header collapsed" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
-    '<td colspan="7" style="font-size:var(--font-badge);color:var(--text-muted);cursor:pointer">' +
-      '<span class="session-group-arrow">\u25B8</span> ' +
-      escapeHtml(label) + ' \u00B7 ' + group.length + ' ' + t('requests') + ' \u00B7 ' + escapeHtml(span) + ' \u00B7 ' + prov + ' / ' + model +
+  var cls = expanded ? 'session-group-header expanded' : 'session-group-header collapsed';
+  var arrow = expanded ? '\u25BE' : '\u25B8';
+  return '<tr class="' + cls + '" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
+    '<td colspan="7" class="session-group-cell">' +
+      '<div class="session-group-flex">' +
+        '<span class="session-group-arrow">' + arrow + '</span>' +
+        '<span class="session-group-name">' + escapeHtml(label) + '</span>' +
+        '<span class="session-group-count">' + group.length + ' ' + t('requests') + '</span>' +
+        '<span class="session-group-time">' + escapeHtml(span) + '</span>' +
+        '<span class="session-group-model">' + prov + ' / ' + model + '</span>' +
+      '</div>' +
     '</td>' +
   '</tr>';
 }
@@ -498,6 +521,7 @@ function renderSessionGroupHeader(sk, label, group) {
 // the header). Resetting to page 1 avoids an out-of-range page.
 function toggleRecentGroupBySession() {
   recentGroupBySession = !recentGroupBySession;
+  if (!recentGroupBySession) expandedSessions = {};
   recentPage = 1;
   var card = document.querySelector('.recent-requests-card');
   if (card && card.parentNode) {
@@ -519,14 +543,16 @@ function toggleRecentGroupBySession() {
 // display directly in the DOM (no re-render). The header's arrow flips to
 // reflect state.
 function toggleSessionGroup(headerEl, sk) {
-  headerEl.classList.toggle('collapsed');
-  var collapsed = headerEl.classList.contains('collapsed');
+  var nowExpanded = !expandedSessions[sk];
+  if (nowExpanded) { expandedSessions[sk] = true; } else { delete expandedSessions[sk]; }
+  headerEl.classList.toggle('collapsed', !nowExpanded);
+  headerEl.classList.toggle('expanded', nowExpanded);
   var tbody = document.getElementById('recent-tbody');
   if (!tbody) return;
   var rows = tbody.querySelectorAll('tr.session-row[data-session="' + sk + '"]');
-  for (var i = 0; i < rows.length; i++) rows[i].style.display = collapsed ? 'none' : '';
+  for (var i = 0; i < rows.length; i++) rows[i].style.display = nowExpanded ? '' : 'none';
   var arrow = headerEl.querySelector('.session-group-arrow');
-  if (arrow) arrow.textContent = collapsed ? '\u25B8' : '\u25BE';
+  if (arrow) arrow.textContent = nowExpanded ? '\u25BE' : '\u25B8';
 }
 
 function formatCompactTokens(n) {
@@ -603,11 +629,13 @@ async function refreshQuotaData() {
     // this, a completed entry that was handled by handleRequestDone (which
     // deletes inflightEntries[id]) is gone from both merged and inflightEntries
     // if the ring entry was evicted or the limit=500 cutoff excluded it.
+    var _preserved = 0;
     for (var i = 0; i < lastUsageEntries.length; i++) {
       var e = lastUsageEntries[i];
       if (e.id && e.status !== 'processing' && !seenIds[e.id]) {
         merged.push(e);
         seenIds[e.id] = true;
+        if (++_preserved >= MAX_PRESERVED_TERMINAL) break;
       }
     }
     sortEntriesByTimeDesc(merged);
@@ -1441,7 +1469,7 @@ function openRecentRequests() {
     '<div class="recent-requests-scroll">' +
     '<table>' +
       '<thead><tr><th class="status-col-header"></th><th>' + t('time') + '</th><th>' + t('provider') + '</th><th>' + t('model') + '</th><th>Key</th><th>' + t('latency') + '</th><th>' + t('tokens') + '</th></tr></thead>' +
-      '<tbody>' + entries.map(renderUsageRow).join('') + '</tbody>' +
+      '<tbody>' + entries.filter(shouldShowUsageEntry).map(function(e) { return renderUsageRow(e, undefined, false); }).join('') + '</tbody>' +
     '</table>' +
     '</div>';
 
@@ -1473,7 +1501,7 @@ function updateRecentRequestsModal() {
     var body = modal.querySelector('.modal-body');
     if (body) body.innerHTML = emptyState(t('noUsage'));
   } else {
-    tbody.innerHTML = entries.map(renderUsageRow).join('');
+    tbody.innerHTML = entries.filter(shouldShowUsageEntry).map(function(e) { return renderUsageRow(e, undefined, false); }).join('');
   }
 }
 
@@ -1504,7 +1532,7 @@ async function showUsageEntryInfoById(id) {
   // carries respPayload/respHeaders) from the API.
   if ((e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
     try {
-      var usage = await apiGet('/usage?limit=100&offset=0');
+      var usage = await apiGet('/usage?limit=500&offset=0');
       var entries = usage.entries || [];
       var ringEntry = entries.find(function(x) { return x.id === id; });
       if (ringEntry && ringEntry.status !== 'processing') {

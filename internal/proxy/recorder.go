@@ -52,6 +52,9 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 			if len(reqBody) > maxReqBody {
 				reqBody = reqBody[:maxReqBody]
 			}
+			if !json.Valid(reqBody) {
+				reqBody, _ = json.Marshal(map[string]string{"raw": string(reqBody)})
+			}
 			entry.ReqPayload = append([]byte(nil), reqBody...)
 		}
 		if len(respBody) > 0 {
