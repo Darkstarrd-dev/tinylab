@@ -541,14 +541,21 @@ async function renderUsage(c) {
     if (e.id) apiIds[e.id] = true;
   });
 
-  var merged = usageEntries.map(function(e) {
+  // Deduplicate by ID: ring entries come first in the API response and carry
+  // terminal status (success/error). Subsequent inflight (processing) entries
+  // with the same ID are skipped so the completed entry always wins.
+  var seenIds = {};
+  var merged = [];
+  usageEntries.forEach(function(e) {
+    if (e.id && seenIds[e.id]) return;
     var existing = lastUsageEntries.find(function(x) { return x.id === e.id; });
     if (existing) {
       if (existing.__streamingReasoning) e.__streamingReasoning = existing.__streamingReasoning;
       if (existing.__streamingAssistant) e.__streamingAssistant = existing.__streamingAssistant;
       if (existing.__streamingUsage) e.__streamingUsage = existing.__streamingUsage;
     }
-    return e;
+    if (e.id) seenIds[e.id] = true;
+    merged.push(e);
   });
 
   Object.keys(inflightEntries).forEach(function(id) {
@@ -561,6 +568,16 @@ async function renderUsage(c) {
       }
     }
   });
+
+  // Clean up inflightEntries for IDs that now have a terminal-status entry in
+  // the merged result, so stale inflight entries don't persist and get re-added
+  // on future polls after the ring entry is evicted.
+  for (var i = 0; i < merged.length; i++) {
+    var me = merged[i];
+    if (me.id && me.status !== 'processing' && inflightEntries[me.id]) {
+      delete inflightEntries[me.id];
+    }
+  }
 
   sortEntriesByTimeDesc(merged);
   lastUsageEntries = merged;
@@ -844,14 +861,21 @@ async function refreshQuotaData() {
     newEntries.forEach(function(e) {
       if (e.id) apiIds[e.id] = true;
     });
-    var merged = newEntries.map(function(e) {
+    // Deduplicate by ID: ring entries come first in the API response and carry
+    // terminal status (success/error). Subsequent inflight (processing) entries
+    // with the same ID are skipped so the completed entry always wins.
+    var seenIds = {};
+    var merged = [];
+    newEntries.forEach(function(e) {
+      if (e.id && seenIds[e.id]) return;
       var existing = lastUsageEntries.find(function(x) { return x.id === e.id; });
       if (existing) {
         if (existing.__streamingReasoning) e.__streamingReasoning = existing.__streamingReasoning;
         if (existing.__streamingAssistant) e.__streamingAssistant = existing.__streamingAssistant;
         if (existing.__streamingUsage) e.__streamingUsage = existing.__streamingUsage;
       }
-      return e;
+      if (e.id) seenIds[e.id] = true;
+      merged.push(e);
     });
     Object.keys(inflightEntries).forEach(function(id) {
       if (!apiIds[id]) {
@@ -864,6 +888,15 @@ async function refreshQuotaData() {
         }
       }
     });
+    // Clean up inflightEntries for IDs that now have a terminal-status entry in
+    // the merged result, so stale inflight entries don't persist and get re-added
+    // on future polls after the ring entry is evicted.
+    for (var i = 0; i < merged.length; i++) {
+      var me = merged[i];
+      if (me.id && me.status !== 'processing' && inflightEntries[me.id]) {
+        delete inflightEntries[me.id];
+      }
+    }
     sortEntriesByTimeDesc(merged);
     lastUsageEntries = merged;
     updateUsageSummary(summary);
