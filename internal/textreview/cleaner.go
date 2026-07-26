@@ -39,3 +39,31 @@ type CleanResult struct {
 type Cleaner interface {
 	Clean(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string)) CleanResult
 }
+
+// ChapterSep is the marker that delimits chapters in a batch clean request and
+// in the model's streamed output. Mirrors the novelhelper batch protocol.
+const ChapterSep = "<<<|||CHAPTER_SEP|||>>>"
+
+// chapterIDHeader prefixes each chapter block in a batch. The token after it
+// (up to the closing "===") is the chapter key, which the stream router uses to
+// route chunks back to the originating chapter.
+const chapterIDHeader = "===CHAPTER_ID:"
+
+// BatchChapter is one chapter in a batch clean request. Key is the stable
+// identifier used to route streamed output back to the chapter (the chapter's
+// index as a string).
+type BatchChapter struct {
+	Key     string `json:"key"`
+	Content string `json:"content"`
+}
+
+// BatchCleaner cleans a batch of chapters in a single LLM request. The
+// implementation merges the chapters into one prompt (separated by ChapterSep,
+// each prefixed with an ===CHAPTER_ID:Key=== header) and routes the streamed
+// result back per chapter via onChunk(chapterKey, delta). A Cleaner that also
+// implements BatchCleaner enables multi-chapter batching when a node's
+// BatchChars > 0; otherwise the engine falls back to one Clean call per
+// chapter.
+type BatchCleaner interface {
+	CleanBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult
+}

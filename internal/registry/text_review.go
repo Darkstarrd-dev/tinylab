@@ -32,6 +32,8 @@ func (r *Registry) UpdateTextReviewNode(id string, updates config.TextReviewNode
 			r.config.TextReview.Nodes[i].ModelID = updates.ModelID
 			r.config.TextReview.Nodes[i].Concurrency = updates.Concurrency
 			r.config.TextReview.Nodes[i].Enabled = updates.Enabled
+			r.config.TextReview.Nodes[i].IntervalSec = updates.IntervalSec
+			r.config.TextReview.Nodes[i].BatchChars = updates.BatchChars
 			return true
 		}
 	}
