@@ -9,26 +9,27 @@ import (
 
 // Entry records a single request's usage.
 type Entry struct {
-	ID           string          `json:"id"`
-	Timestamp    time.Time       `json:"timestamp"`
-	Provider     string          `json:"provider"`
+	ID            string          `json:"id"`
+	Timestamp     time.Time       `json:"timestamp"`
+	Provider      string          `json:"provider"`
 	Model         string          `json:"model"`
 	OriginalModel string          `json:"originalModel"` // original request model name (alias, before resolution)
 	KeyID         string          `json:"keyId"`
-	KeyName      string          `json:"keyName"`
-	Status       string          `json:"status"` // "success" | "error" | "retry" | "processing"
-	LatencyMs    int64           `json:"latencyMs"`
-	TTFTMs       int64           `json:"ttftMs"`
-	InputTokens  int             `json:"inputTokens"`
-	OutputTokens int             `json:"outputTokens"`
-	Error        string          `json:"error,omitempty"`
-	ReqPayload   json.RawMessage `json:"reqPayload,omitempty"`
-	RespPayload  json.RawMessage `json:"respPayload,omitempty"`
-	RespHeaders  http.Header     `json:"respHeaders,omitempty"`
-	RespStatus   int             `json:"respStatus,omitempty"`
-	ReqHeaders   http.Header     `json:"reqHeaders,omitempty"`
-	UpstreamURL  string          `json:"upstreamUrl,omitempty"`
-	Source       string          `json:"source,omitempty"` // origin tag, e.g. "playground"
+	KeyName       string          `json:"keyName"`
+	Status        string          `json:"status"` // "success" | "error" | "retry" | "processing"
+	LatencyMs     int64           `json:"latencyMs"`
+	TTFTMs        int64           `json:"ttftMs"`
+	InputTokens   int             `json:"inputTokens"`
+	OutputTokens  int             `json:"outputTokens"`
+	Error         string          `json:"error,omitempty"`
+	ReqPayload    json.RawMessage `json:"reqPayload,omitempty"`
+	RespPayload   json.RawMessage `json:"respPayload,omitempty"`
+	RespHeaders   http.Header     `json:"respHeaders,omitempty"`
+	RespStatus    int             `json:"respStatus,omitempty"`
+	ReqHeaders    http.Header     `json:"reqHeaders,omitempty"`
+	UpstreamURL   string          `json:"upstreamUrl,omitempty"`
+	Source        string          `json:"source,omitempty"`     // origin tag, e.g. "playground"
+	SessionKey    string          `json:"sessionKey,omitempty"` // inferred conversation root hash; empty = single-shot/ungrouped
 }
 
 // UsageStore provides write access to usage entries.

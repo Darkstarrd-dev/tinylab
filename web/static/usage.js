@@ -20,6 +20,7 @@ var usageFilters = { success: true, failure: true, processing: true };
 var recentPageSize = 30;
 var recentPage = 1;
 var recentFilteredCount = 0;
+var recentGroupBySession = false;
 var currentInfoModalRequestId = null;
 var currentInfoModalReasoningEl = null;
 var currentInfoModalAssistantEl = null;
@@ -149,8 +150,7 @@ function getModelColor(provider, model) {
 function sanitizeId(s) {
   return String(s || '').replace(/[^a-zA-Z0-9_-]/g, '-');
 }
-
-function renderUsageRow(e) {
+function renderUsageRow(e, sessionKey) {
   var statusDot;
   var dotClass = 'status-dot';
   if (e.status === 'success') dotClass += ' status-dot-success';
@@ -187,8 +187,11 @@ function renderUsageRow(e) {
   var tsAttr = e.timestamp ? ' data-ts="' + escapeHtml(e.timestamp) + '"' : '';
   var ttftAttr = (e.status === 'processing' && e.ttftMs && e.ttftMs > 0) ? ' data-ttft="1"' : '';
   var idAttr = e.id ? ' data-id="' + escapeHtml(e.id) + '"' : '';
-  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + '>\
-    <td class="status-col-cell">' + statusInner + '</td>\
+  var inSession = sessionKey !== undefined;
+  var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row"' : '';
+  var firstCellStyle = inSession ? ' style="padding-left:18px"' : '';
+  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + '>\
+    <td class="status-col-cell"' + firstCellStyle + '>' + statusInner + '</td>\
     <td>' + new Date(e.timestamp).toLocaleTimeString() + '</td>\
     <td>' + escapeHtml(e.provider) + '</td>\
     <td>' + escapeHtml(displayModelName(e.model, e.originalModel)) + '</td>\
@@ -640,6 +643,7 @@ function renderRecentRequestsInline(entries) {
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="success" onclick="toggleUsageFilter(this,\'success\')">' + t('filterSuccess') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter active" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
+      '<button type="button" class="btn btn-sm btn-filter' + (recentGroupBySession ? ' active' : '') + '" id="recent-group-toggle" onclick="toggleRecentGroupBySession()">' + t('groupBySession') + '</button>' +
       pagerHtml +
     '</span>' +
   '</div>';
@@ -658,7 +662,7 @@ function renderRecentRequestsInline(entries) {
           '<th>' + t('thLatency') + '</th>' +
           '<th>' + t('thTokens') + '</th>' +
         '</tr></thead>' +
-        '<tbody id="recent-tbody">' + rows.map(renderUsageRow).join('') + '</tbody>' +
+        '<tbody id="recent-tbody">' + renderRecentRows(rows) + '</tbody>' +
       '</table>' +
     '</div>';
   }
@@ -692,10 +696,103 @@ function updateRecentRequestsInline(entries) {
     }
     return;
   }
-  tbody.innerHTML = rows.map(renderUsageRow).join('');
+  tbody.innerHTML = renderRecentRows(rows);
   var countEl = document.querySelector('.recent-requests-card .recent-count');
   if (countEl) countEl.textContent = String(filtered.length);
   updateRecentPagerState();
+}
+
+// renderRecentRows renders the current page's rows either flat (default) or
+// grouped by inferred sessionKey. Grouping is a DISPLAY transform on the
+// already-paginated page slice: paging still operates on the flat filtered
+// list (one page = recentPageSize rows), and within that page rows are
+// clustered under collapsible session headers. A session with more rows than
+// fit on one page therefore appears on multiple pages — acceptable for v1 and
+// the simplest way to keep paging semantics identical in both modes.
+function renderRecentRows(rows) {
+  if (!recentGroupBySession) return rows.map(renderUsageRow).join('');
+  return renderRecentRowsGrouped(rows);
+}
+
+// renderRecentRowsGrouped buckets the page's rows by sessionKey in
+// first-appearance order. Empty sessionKey (single-shot / ungrouped) collects
+// into a pseudo-group shown first.
+function renderRecentRowsGrouped(rows) {
+  var order = [];
+  var groups = {};
+  var ungrouped = [];
+  for (var i = 0; i < rows.length; i++) {
+    var e = rows[i];
+    var sk = e.sessionKey || '';
+    if (!sk) { ungrouped.push(e); continue; }
+    if (!groups[sk]) { groups[sk] = []; order.push(sk); }
+    groups[sk].push(e);
+  }
+  var html = '';
+  if (ungrouped.length) {
+    html += renderSessionGroupHeader('', t('ungrouped'), ungrouped);
+    html += ungrouped.map(function(e) { return renderUsageRow(e, ''); }).join('');
+  }
+  for (var gi = 0; gi < order.length; gi++) {
+    var sk = order[gi];
+    var g = groups[sk];
+    html += renderSessionGroupHeader(sk, 'sess:' + sk, g);
+    html += g.map(function(e) { return renderUsageRow(e, sk); }).join('');
+  }
+  return html;
+}
+
+// renderSessionGroupHeader emits a clickable header row spanning all columns:
+// "label · N requests · first→last time · provider/model". Clicking toggles
+// the visibility of that session's rows.
+function renderSessionGroupHeader(sk, label, group) {
+  var first = group[0], last = group[group.length - 1];
+  var span = new Date(first.timestamp).toLocaleTimeString() + ' \u2192 ' + new Date(last.timestamp).toLocaleTimeString();
+  var prov = escapeHtml(first.provider || '');
+  var model = escapeHtml(displayModelName(first.model, first.originalModel));
+  return '<tr class="session-group-header" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
+    '<td colspan="7" style="font-size:var(--font-badge);color:var(--text-muted);cursor:pointer">' +
+      '<span class="session-group-arrow">\u25B8</span> ' +
+      escapeHtml(label) + ' \u00B7 ' + group.length + ' ' + t('requests') + ' \u00B7 ' + escapeHtml(span) + ' \u00B7 ' + prov + ' / ' + model +
+    '</td>' +
+  '</tr>';
+}
+
+// toggleRecentGroupBySession flips grouping on/off and rebuilds the whole
+// Recent Requests card so the toggle button's active state and the grouped
+// body refresh together (the in-place tbody update path does not re-render
+// the header). Resetting to page 1 avoids an out-of-range page.
+function toggleRecentGroupBySession() {
+  recentGroupBySession = !recentGroupBySession;
+  recentPage = 1;
+  var card = document.querySelector('.recent-requests-card');
+  if (card && card.parentNode) {
+    var temp = document.createElement('div');
+    temp.innerHTML = renderRecentRequestsInline(lastUsageEntries);
+    var newCard = temp.firstElementChild;
+    if (newCard) card.parentNode.replaceChild(newCard, card);
+    document.querySelectorAll('.recent-requests-card .btn-filter').forEach(function(b) {
+      var f = b.dataset.filter;
+      if (f) b.classList.toggle('active', usageFilters[f]);
+    });
+    updateRecentPagerState();
+  } else {
+    updateRecentRequestsInline(lastUsageEntries);
+  }
+}
+
+// toggleSessionGroup collapses/expands one session's rows by toggling their
+// display directly in the DOM (no re-render). The header's arrow flips to
+// reflect state.
+function toggleSessionGroup(headerEl, sk) {
+  headerEl.classList.toggle('collapsed');
+  var collapsed = headerEl.classList.contains('collapsed');
+  var tbody = document.getElementById('recent-tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr.session-row[data-session="' + sk + '"]');
+  for (var i = 0; i < rows.length; i++) rows[i].style.display = collapsed ? 'none' : '';
+  var arrow = headerEl.querySelector('.session-group-arrow');
+  if (arrow) arrow.textContent = collapsed ? '\u25BE' : '\u25B8';
 }
 
 function formatCompactTokens(n) {
