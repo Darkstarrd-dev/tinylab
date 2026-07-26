@@ -22,8 +22,9 @@ var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an erro
 var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
 var trS3ModelNames = {};        // modelId (realModelId||id) -> alias (from /api/models)
+var trS3NodeNumbers = {};       // nodeId -> 1-based display number
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
-var trS3NodeNumbers = {};     // maps nodeId -> 1-based number
+var trS3ModalModel = null;      // {providerId, modelId, label} selected via pgOpenModelPicker in Settings modal
 window.trS3NodeNumbers = trS3NodeNumbers;
 
 function trS3NodeBadge(nodeId) {
@@ -327,6 +328,7 @@ function trStep3OpenSettings() {
 }
 
 function trStep3RenderSettingsModal() {
+  trS3ModalModel = null; // reset previous selection
   // Fetch models for provider/model dropdowns
   trApiGet('/models').then(function (res) {
     var allModels = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
@@ -372,12 +374,9 @@ function trStep3RenderSettingsModal() {
       '<div class="tr-s3-settings-section">' +
         '<h4>' + trEscapeHtml(trT('trAddNode')) + '</h4>' +
         '<div class="tr-s3-settings-form">' +
-          '<label class="tr-label">' + trEscapeHtml(trT('trNodeProvider')) + '</label>' +
-          '<select class="tr-select" id="tr-s3-modal-provider" onchange="trStep3OnModalProviderChange()">' +
-            '<option value="">--</option>' + providerOpts +
-          '</select>' +
           '<label class="tr-label">' + trEscapeHtml(trT('trNodeModel')) + '</label>' +
-          '<select class="tr-select" id="tr-s3-modal-model"><option value="">--</option></select>' +
+          '<button type="button" class="pg-btn pg-model-btn" id="tr-s3-modal-model-btn" onclick="trStep3PickModel()" style="width:100%;text-align:left;justify-content:flex-start">' +
+            trEscapeHtml(trT('trSelectModel')) + ' <span style="float:right;opacity:0.5">▼</span></button>' +
           '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + '</label>' +
           '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:80px">' +
           '<label class="tr-label">' + trEscapeHtml(trT('trIntervalSec')) + '</label>' +
@@ -426,53 +425,58 @@ function trStep3RenderSettingsModal() {
 }
 
 /**
- * Provider changed in the settings modal: reload model dropdown.
+ * Open the playground's model picker (pgOpenModelPicker) to select a model.
+ * Replaces the dual provider+model dropdown to avoid provider/model mismatch
+ * and maintain UI consistency with the rest of the playground.
  */
-function trStep3OnModalProviderChange() {
-  var sel = document.getElementById('tr-s3-modal-provider');
-  var modelSel = document.getElementById('tr-s3-modal-model');
-  if (!sel || !modelSel) return;
-  var providerId = sel.value;
-  modelSel.innerHTML = '<option value="">--</option>';
-  if (!providerId) return;
-  var all = window._trS3ModalModels || [];
-  for (var i = 0; i < all.length; i++) {
-    var m = all[i];
-    if (m.type === 'provider' && m.providerId === providerId) {
-      var opt = document.createElement('option');
-      opt.value = m.realModelId || m.id;
-      opt.textContent = m.alias || m.name || m.id;
-      modelSel.appendChild(opt);
-    }
+function trStep3PickModel() {
+  if (typeof pgOpenModelPicker !== 'function') {
+    trToast(trT('trPatternEditorUnavailable'), 'warning');
+    return;
   }
+  var current = trS3ModalModel ? trS3ModalModel.modelId : '';
+  pgOpenModelPicker(current, function (v) {
+    // v is the full model id (e.g. "sn/sensenova-6.7-flash-lite").
+    // Look it up in the cached /api/models response to get providerId + alias.
+    var all = window._trS3ModalModels || [];
+    var found = null;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].type === 'provider' && (all[i].id === v || all[i].realModelId === v)) {
+        found = all[i]; break;
+      }
+    }
+    if (found) {
+      trS3ModalModel = {
+        providerId: found.providerId,
+        modelId: found.realModelId || found.id,
+        label: found.alias || found.name || found.id
+      };
+    } else if (v) {
+      trS3ModalModel = { providerId: '', modelId: v, label: v };
+    }
+    var btn = document.getElementById('tr-s3-modal-model-btn');
+    if (btn && trS3ModalModel) {
+      btn.innerHTML = trEscapeHtml(trS3ModalModel.label) + ' <span style="float:right;opacity:0.5">▼</span>';
+    }
+  }, { kindFilter: 'text' });
 }
 
 /**
- * Add a new node via POST (no id → create).
+ * Add a new node via POST (no id -> create). Reads the model from trS3ModalModel
+ * (selected via pgOpenModelPicker) instead of dropdowns.
  */
 function trStep3AddNode() {
-  var providerSel = document.getElementById('tr-s3-modal-provider');
-  var modelSel = document.getElementById('tr-s3-modal-model');
+  if (!trS3ModalModel || !trS3ModalModel.providerId) {
+    trToast(trT('trSelectModel'), 'warning');
+    return;
+  }
   var concEl = document.getElementById('tr-s3-modal-conc');
   var enEl = document.getElementById('tr-s3-modal-enabled');
   var intervalEl = document.getElementById('tr-s3-modal-interval');
   var batchEl = document.getElementById('tr-s3-modal-batch');
-  if (!providerSel || !modelSel) return;
-  var providerId = providerSel.value;
-  var modelId = modelSel.value;
-  // Derive providerId from the selected model to avoid provider/model mismatch
-  // (the provider dropdown may show models from multiple providers if filtering is imperfect).
-  var all = window._trS3ModalModels || [];
-  for (var mi = 0; mi < all.length; mi++) {
-    if (all[mi].type === 'provider' && (all[mi].realModelId || all[mi].id) === modelId) {
-      providerId = all[mi].providerId || providerId;
-      break;
-    }
-  }
-  if (!providerId || !modelId) { trToast(trT('trImportFirst'), 'warning'); return; }
   var body = {
-    providerId: providerId,
-    modelId: modelId,
+    providerId: trS3ModalModel.providerId,
+    modelId: trS3ModalModel.modelId,
     concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
     enabled: enEl ? enEl.checked : true,
     intervalSec: intervalEl ? Math.max(0, parseInt(intervalEl.value, 10) || 0) : 0,
@@ -480,7 +484,6 @@ function trStep3AddNode() {
   };
   trApiPost('/text-review/review-nodes', body).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
-    // Re-fetch nodes and refresh both inline table and modal
     return trApiGet('/text-review/review-nodes');
   }).then(function (res) {
     var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
