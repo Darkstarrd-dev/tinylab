@@ -179,6 +179,9 @@ function trStepLocked(n) {
  */
 function trGotoStep(n) {
   if (trStepLocked(n)) return;
+  if (n === 2) {
+    trState.configPanelExpanded = false;
+  }
   trState.step = n;
   trSave();
   trRenderStepBar();

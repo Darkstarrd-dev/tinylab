@@ -41,21 +41,28 @@ window.trRenderStep2 = function (panel, state) {
   root.style.minHeight = '0';
   panel.appendChild(root);
 
-  // --- Header row: Back left | centered title | Next right ---
+  // --- Header row: Back left | centered Title | Next right ---
   var header = document.createElement('div');
   header.className = 'tr-s2-header';
+
+  var headerLeft = document.createElement('div');
+  headerLeft.className = 'tr-s2-header-left';
 
   var backBtn = document.createElement('button');
   backBtn.type = 'button';
   backBtn.className = 'tr-btn tr-btn-ghost';
   backBtn.textContent = trT('trPrev');
   backBtn.addEventListener('click', function () { trGotoStep(1); });
-  header.appendChild(backBtn);
+  headerLeft.appendChild(backBtn);
+  header.appendChild(headerLeft);
 
   var headerTitle = document.createElement('span');
   headerTitle.className = 'tr-s2-title';
   headerTitle.textContent = trT('trStepSplit');
   header.appendChild(headerTitle);
+
+  var headerRight = document.createElement('div');
+  headerRight.className = 'tr-s2-header-right';
 
   var nextBtn = document.createElement('button');
   nextBtn.type = 'button';
@@ -64,20 +71,42 @@ window.trRenderStep2 = function (panel, state) {
   nextBtn.textContent = trT('trNext');
   nextBtn.disabled = !hasChapters;
   nextBtn.addEventListener('click', trStep2Next);
-  header.appendChild(nextBtn);
+  headerRight.appendChild(nextBtn);
+  header.appendChild(headerRight);
 
   root.appendChild(header);
 
-  // --- Controls1: Pattern label + select + Title Template label + input + KeepPrologue ---
-  var c1 = document.createElement('div');
-  c1.className = 'tr-s2-controls1';
+  // --- Config Panel (collapsible 2-column grid, hidden by default on step entry) ---
+  var configPanel = document.createElement('div');
+  configPanel.className = 'tr-s2-config-panel';
+  configPanel.id = 'tr-s2-config-panel';
+  configPanel.style.display = state.configPanelExpanded === true ? '' : 'none';
 
+  var grid = document.createElement('div');
+  grid.className = 'tr-s2-form-grid';
+
+  // Row 1: Labels (Left: Pattern | Right: Title Template)
+  var l1 = document.createElement('div');
+  l1.className = 'tr-s2-col';
   var patLabel = document.createElement('label');
   patLabel.className = 'tr-label';
   patLabel.htmlFor = 'tr-s2-pattern';
   patLabel.textContent = trT('trPattern');
-  c1.appendChild(patLabel);
+  l1.appendChild(patLabel);
+  grid.appendChild(l1);
 
+  var l2 = document.createElement('div');
+  l2.className = 'tr-s2-col';
+  var tmplLabel = document.createElement('label');
+  tmplLabel.className = 'tr-label';
+  tmplLabel.htmlFor = 'tr-s2-template';
+  tmplLabel.textContent = trT('trTitleTemplate');
+  l2.appendChild(tmplLabel);
+  grid.appendChild(l2);
+
+  // Row 2: Inputs (Left: Select | Right: Text Input)
+  var i1 = document.createElement('div');
+  i1.className = 'tr-s2-col';
   var patSelect = document.createElement('select');
   patSelect.className = 'tr-select';
   patSelect.id = 'tr-s2-pattern';
@@ -89,14 +118,11 @@ window.trRenderStep2 = function (panel, state) {
     patSelect.appendChild(opt);
   }
   patSelect.addEventListener('change', trStep2OnPatternChange);
-  c1.appendChild(patSelect);
+  i1.appendChild(patSelect);
+  grid.appendChild(i1);
 
-  var tmplLabel = document.createElement('label');
-  tmplLabel.className = 'tr-label';
-  tmplLabel.htmlFor = 'tr-s2-template';
-  tmplLabel.textContent = trT('trTitleTemplate');
-  c1.appendChild(tmplLabel);
-
+  var i2 = document.createElement('div');
+  i2.className = 'tr-s2-col';
   var tmplInput = document.createElement('input');
   tmplInput.type = 'text';
   tmplInput.className = 'tr-input';
@@ -104,31 +130,19 @@ window.trRenderStep2 = function (panel, state) {
   tmplInput.placeholder = trT('trTitleTemplatePlaceholder');
   tmplInput.value = state.titleTemplate || '';
   tmplInput.addEventListener('input', trStep2OnTemplateChange);
-  c1.appendChild(tmplInput);
+  i2.appendChild(tmplInput);
+  grid.appendChild(i2);
 
-  var kpLabel = document.createElement('label');
-  kpLabel.className = 'tr-check';
-  var kpCheck = document.createElement('input');
-  kpCheck.type = 'checkbox';
-  kpCheck.id = 'tr-s2-keeppro';
-  kpCheck.checked = !!state.keepPrologue;
-  kpCheck.addEventListener('change', trStep2OnKeepPrologue);
-  kpLabel.appendChild(kpCheck);
-  kpLabel.appendChild(document.createTextNode(' ' + trT('trKeepPrologue')));
-  c1.appendChild(kpLabel);
-
-  root.appendChild(c1);
-
-  // --- Custom regex row (shown only when pattern === 'custom') ---
+  // Custom regex row (when pattern === 'custom')
   var customRow = document.createElement('div');
-  customRow.className = 'tr-row';
+  customRow.className = 'tr-s2-col tr-s2-col-full';
   customRow.id = 'tr-s2-custom-row';
   customRow.style.display = selKey === 'custom' ? '' : 'none';
 
   var crLabel = document.createElement('label');
   crLabel.className = 'tr-label';
   crLabel.htmlFor = 'tr-s2-custom-regex';
-  crLabel.textContent = trT('trCustomRegex');
+  crLabel.textContent = trT('trCustomRegex') + ': ';
   customRow.appendChild(crLabel);
 
   var crInput = document.createElement('input');
@@ -139,10 +153,12 @@ window.trRenderStep2 = function (panel, state) {
   crInput.value = state.customRegex || '';
   crInput.addEventListener('input', trStep2OnCustomChange);
   customRow.appendChild(crInput);
+  grid.appendChild(customRow);
 
-  root.appendChild(customRow);
+  configPanel.appendChild(grid);
+  root.appendChild(configPanel);
 
-  // --- Controls2: four evenly-distributed buttons ---
+  // --- Controls2: four buttons ---
   var c2 = document.createElement('div');
   c2.className = 'tr-s2-controls2';
 
@@ -201,6 +217,18 @@ window.trRenderStep2 = function (panel, state) {
   previewCount.textContent = '0';
   previewHead.appendChild(previewCount);
 
+  // Keep prologue checkbox placed on the right side of Preview count badge
+  var kpLabel = document.createElement('label');
+  kpLabel.className = 'tr-check tr-s2-preview-kp';
+  var kpCheck = document.createElement('input');
+  kpCheck.type = 'checkbox';
+  kpCheck.id = 'tr-s2-keeppro';
+  kpCheck.checked = !!state.keepPrologue;
+  kpCheck.addEventListener('change', trStep2OnKeepPrologue);
+  kpLabel.appendChild(kpCheck);
+  kpLabel.appendChild(document.createTextNode(' ' + trT('trKeepPrologue')));
+  previewHead.appendChild(kpLabel);
+
   previewSection.appendChild(previewHead);
 
   var previewWrap = document.createElement('div');
@@ -226,7 +254,7 @@ function trStep2OnPatternChange() {
   var customRow = document.getElementById('tr-s2-custom-row');
   if (customRow) customRow.style.display = (sel.value === 'custom') ? '' : 'none';
   trSave();
-  trStep2ReSplit();
+  trStep2DoSplit();
 }
 
 function trStep2OnCustomChange() {
@@ -235,7 +263,7 @@ function trStep2OnCustomChange() {
   trState.customRegex = inp.value;
   trSave();
   if (trState.selectedPatternKey === 'custom') {
-    trStep2ReSplit();
+    trStep2DoSplit();
   }
 }
 
@@ -244,7 +272,7 @@ function trStep2OnTemplateChange() {
   if (!inp) return;
   trState.titleTemplate = inp.value;
   trSave();
-  trStep2RenderPreview();
+  trStep2DoSplit();
 }
 
 function trStep2OnKeepPrologue() {
@@ -252,7 +280,7 @@ function trStep2OnKeepPrologue() {
   if (!cb) return;
   trState.keepPrologue = cb.checked;
   trSave();
-  trStep2ReSplit();
+  trStep2DoSplit();
 }
 
 // ===================== Step2: the runtime regex =====================
@@ -303,10 +331,11 @@ function trStep2AutoDetect(silent) {
     var customRow = document.getElementById('tr-s2-custom-row');
     if (customRow) customRow.style.display = 'none';
     trSave();
-    trStep2ReSplit();
+    trStep2DoSplit();
     if (info) info.textContent = (res.reason || '') + (res.hitCount != null ? ' (' + res.hitCount + ')' : '');
   } else {
     if (info) info.textContent = (res && res.reason) ? res.reason : trT('trDetectNoMatch');
+    trStep2DoSplit();
   }
 }
 
@@ -315,6 +344,16 @@ function trStep2AutoDetect(silent) {
  * and store the result in trState.chapters; refresh the preview + next button.
  */
 function trStep2ReSplit() {
+  var panel = document.getElementById('tr-s2-config-panel');
+  if (panel && panel.style.display === 'none') {
+    panel.style.display = '';
+    trState.configPanelExpanded = true;
+    return;
+  }
+  trStep2DoSplit();
+}
+
+function trStep2DoSplit() {
   if (!window.TR || !window.TR.splitChapters || !trState.rawText) {
     trState.chapters = [];
     trStep2RenderPreview();
