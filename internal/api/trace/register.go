@@ -139,11 +139,15 @@ func (h *Handler) getIndex(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "missing date parameter")
 		return
 	}
-	if !yyyymmddRe.MatchString(date) {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid date format, expected YYYYMMDD")
+	// Accept both YYYYMMDD (8 digits) and YYYY-MM-DD (dashed, as emitted by
+	// getDates). Normalize to YYYYMMDD for the on-disk filename lookup (files
+	// are written as index-20060127.jsonl by the proxy's now.Format("20060102")).
+	fileDate := strings.ReplaceAll(date, "-", "")
+	if !yyyymmddRe.MatchString(fileDate) {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid date format, expected YYYYMMDD or YYYY-MM-DD")
 		return
 	}
-	if !sanitizePathParam(date) {
+	if !sanitizePathParam(fileDate) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid date parameter")
 		return
 	}
@@ -168,7 +172,7 @@ func (h *Handler) getIndex(w http.ResponseWriter, r *http.Request) {
 	statusFilter := r.URL.Query().Get("status")
 	qFilter := r.URL.Query().Get("q")
 
-	indexPath := filepath.Join(tracesDir, "index-"+date+".jsonl")
+	indexPath := filepath.Join(tracesDir, "index-"+fileDate+".jsonl")
 	f, err := os.Open(indexPath)
 	if err != nil {
 		if os.IsNotExist(err) {
