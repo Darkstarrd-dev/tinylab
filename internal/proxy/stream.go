@@ -16,9 +16,10 @@ import (
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel, sessionKey string) {
 	defer resp.Body.Close()
 
-	// 始终累积 SSE 全量以写入 usage ring，使 Recent Requests 在任意 debugMode 下可查看；
-	// 内存开销由 ring 容量 × 单条 body 大小封顶。
-	captureDetails := true
+	// 仅在 debug 模式开启（非 playground）或 playground（始终）时累积 SSE 全量写入 usage ring；
+	// 否则跳过累积，避免存储无人消费的大响应体。SSE 仍照常转发给客户端。
+	isPlayground := reqHeaders != nil && reqHeaders.Get("X-TinyRouter-Source") == "playground"
+	captureDetails := isPlayground || h.debugMode()
 
 	streamStart := time.Now()
 	var inflightID int64
@@ -301,8 +302,10 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 		errMsg = "client disconnected: " + werr.Error()
 		h.logger.Warn("client disconnected during pass-through: %v", werr)
 	}
-	// 始终把 body 传给 recordUsage 以写入 ring，使 Recent Requests 在任意 debugMode 下可查看。
-	captureDetails := true
+	// 仅在捕获时把 body 传给 recordUsage（playground 始终；非 playground 仅 debug 开），
+	// 避免存储无人消费的响应体。
+	isPlayground := reqHeaders != nil && reqHeaders.Get("X-TinyRouter-Source") == "playground"
+	captureDetails := isPlayground || h.debugMode()
 	var respBodyForEntry []byte
 	if captureDetails {
 		respBodyForEntry = bodyBytes
