@@ -48,6 +48,27 @@ function logsFormatBytes(n) {
   return (n / 1048576).toFixed(1) + ' MB';
 }
 
+function logsFormatBody(body) {
+  if (body == null) return '';
+  if (typeof body === 'object') {
+    try { return JSON.stringify(body, null, 2); } catch (e) { return String(body); }
+  }
+  var s = String(body);
+  // SSE stream: split lines and pretty-print each data: JSON payload.
+  if (s.indexOf('data:') === 0 || s.indexOf('\ndata:') >= 0) {
+    return s.split(/\r?\n/).map(function(line) {
+      if (line.indexOf('data: ') === 0) {
+        var payload = line.slice(6);
+        if (payload === '[DONE]') return 'data: [DONE]';
+        try { return 'data: ' + JSON.stringify(JSON.parse(payload), null, 2); }
+        catch (e) { return line; }
+      }
+      return line;
+    }).join('\n');
+  }
+  return s;
+}
+
 // ===================== abort =====================
 
 function logsAbortFetch() {
@@ -413,7 +434,6 @@ function logsSelectRequest(reqID, listEl) {
   logsSelectedReq = null;
   var detail = document.getElementById('log-detail');
   if (detail) detail.innerHTML = '<div class="log-loading">' + t('logLoading') + '</div>';
-
   // Highlight selected row
   if (listEl) {
     var rows = listEl.querySelectorAll('.log-index-row');
@@ -421,10 +441,13 @@ function logsSelectRequest(reqID, listEl) {
       rows[i].classList.toggle('log-row-selected', rows[i].dataset.reqId === reqID);
     }
   }
-
+  // Look up the index line (last-write-wins) for the header summary fields.
+  var indexLine = null;
+  for (var i = 0; i < logsAllLines.length; i++) {
+    if (logsAllLines[i].reqID === reqID) indexLine = logsAllLines[i];
+  }
   logsAbortFetch();
   logsAbort = new AbortController();
-
   apiGet('/traces/req/' + encodeURIComponent(reqID), logsAbort.signal).then(function(data) {
     logsAbort = null;
     if (!data || data.error) {
@@ -432,7 +455,7 @@ function logsSelectRequest(reqID, listEl) {
       return;
     }
     logsSelectedReq = data;
-    logsRenderDetail(detail, data);
+    logsRenderDetail(detail, data, indexLine);
   }).catch(function(err) {
     logsAbort = null;
     if (err.name === 'AbortError') return;
@@ -442,30 +465,33 @@ function logsSelectRequest(reqID, listEl) {
 
 // ===================== render detail =====================
 
-function logsRenderDetail(container, data) {
+function logsRenderDetail(container, data, indexLine) {
   container.innerHTML = '';
 
-  // Header block
+  // Header summary comes from the index line (session/status/latency/attempts
+  // live only in the index file, not in the per-request detail file).
+  var ix = indexLine || {};
+
   var header = document.createElement('div');
   header.className = 'log-detail-header';
 
   var reqIDTitle = document.createElement('h3');
-  reqIDTitle.textContent = data.reqID;
+  reqIDTitle.textContent = data.reqID || ix.reqID || '';
   header.appendChild(reqIDTitle);
 
   var infoGrid = document.createElement('div');
   infoGrid.className = 'log-detail-grid';
 
   var fields = [
-    { label: t('logSession'), value: data.session || '\u2014' },
-    { label: t('logProvenance'), value: data.provenance || '\u2014' },
-    { label: t('logSource'), value: data.source || '\u2014' },
-    { label: t('logModel'), value: data.model || '\u2014' },
-    { label: t('logOriginalModel'), value: data.originalModel || '\u2014' },
-    { label: t('logProvider'), value: data.provider || '\u2014' },
-    { label: t('logStatus'), value: data.status || '\u2014' },
-    { label: t('logLatency'), value: (data.latencyMs != null ? data.latencyMs + 'ms' : '\u2014') },
-    { label: t('logAttempts'), value: (data.attempts != null ? data.attempts : '\u2014') }
+    { label: t('logSession'), value: ix.session || '\u2014' },
+    { label: t('logProvenance'), value: ix.provenance || '\u2014' },
+    { label: t('logSource'), value: ix.source || '\u2014' },
+    { label: t('logModel'), value: ix.model || '\u2014' },
+    { label: t('logOriginalModel'), value: ix.originalModel || '\u2014' },
+    { label: t('logProvider'), value: ix.provider || '\u2014' },
+    { label: t('logStatus'), value: ix.status || '\u2014' },
+    { label: t('logLatency'), value: (ix.latencyMs != null ? ix.latencyMs + 'ms' : '\u2014') },
+    { label: t('logAttempts'), value: (ix.attempts != null ? ix.attempts : '\u2014') }
   ];
 
   for (var i = 0; i < fields.length; i++) {
@@ -485,7 +511,14 @@ function logsRenderDetail(container, data) {
   header.appendChild(infoGrid);
   container.appendChild(header);
 
-  // Request line
+  // Request line: reqHeaders + reqBody live in the per-request detail file's
+  // "request" line, not at the top level of the API response.
+  var lines = data.lines || [];
+  var reqLine = null;
+  for (var ri = 0; ri < lines.length; ri++) {
+    if (lines[ri].type === 'request') { reqLine = lines[ri]; break; }
+  }
+
   var reqSection = document.createElement('div');
   reqSection.className = 'log-detail-section';
 
@@ -493,35 +526,39 @@ function logsRenderDetail(container, data) {
   reqHeading.textContent = t('logRequest');
   reqSection.appendChild(reqHeading);
 
-  // reqHeaders
-  if (data.reqHeaders && Object.keys(data.reqHeaders).length > 0) {
-    var headersPre = document.createElement('pre');
-    headersPre.className = 'code';
-    var headerLines = [];
-    var keys = Object.keys(data.reqHeaders);
-    for (var hi = 0; hi < keys.length; hi++) {
-      var key = keys[hi];
-      var vals = data.reqHeaders[key];
-      headerLines.push(key + ': ' + (Array.isArray(vals) ? vals.join(', ') : vals));
+  if (reqLine) {
+    if (reqLine.reqHeaders && Object.keys(reqLine.reqHeaders).length > 0) {
+      var headersPre = document.createElement('pre');
+      headersPre.className = 'code';
+      var headerLines = [];
+      var keys = Object.keys(reqLine.reqHeaders);
+      for (var hi = 0; hi < keys.length; hi++) {
+        var key = keys[hi];
+        var vals = reqLine.reqHeaders[key];
+        headerLines.push(key + ': ' + (Array.isArray(vals) ? vals.join(', ') : vals));
+      }
+      headersPre.textContent = headerLines.join('\n');
+      reqSection.appendChild(headersPre);
     }
-    headersPre.textContent = headerLines.join('\n');
-    reqSection.appendChild(headersPre);
-  }
-
-  // reqBody
-  if (data.reqBody != null) {
-    var bodyPre = document.createElement('pre');
-    bodyPre.className = 'code';
-    bodyPre.textContent = JSON.stringify(data.reqBody, null, 2);
-    reqSection.appendChild(bodyPre);
+    if (reqLine.reqBody != null) {
+      var bodyPre = document.createElement('pre');
+      bodyPre.className = 'code';
+      bodyPre.textContent = logsFormatBody(reqLine.reqBody);
+      reqSection.appendChild(bodyPre);
+    }
+  } else {
+    var emptyReq = document.createElement('div');
+    emptyReq.className = 'muted';
+    emptyReq.style.fontSize = 'var(--font-badge)';
+    emptyReq.textContent = t('logReqNotFound') || '(no request data)';
+    reqSection.appendChild(emptyReq);
   }
 
   container.appendChild(reqSection);
 
   // Attempts timeline
-  var attempts = data.lines || [];
-  for (var ai = 0; ai < attempts.length; ai++) {
-    var attempt = attempts[ai];
+  for (var ai = 0; ai < lines.length; ai++) {
+    var attempt = lines[ai];
     if (attempt.type !== 'attempt') continue;
     logsRenderAttemptCard(container, attempt);
   }
@@ -605,7 +642,7 @@ function logsRenderAttemptCard(container, attempt) {
   if (attempt.respBody != null) {
     var respBodyPre = document.createElement('pre');
     respBodyPre.className = 'code';
-    respBodyPre.textContent = JSON.stringify(attempt.respBody, null, 2);
+    respBodyPre.textContent = logsFormatBody(attempt.respBody);
     details.appendChild(respBodyPre);
   }
 
