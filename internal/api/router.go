@@ -376,7 +376,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// AnySearch
 			anysearchHandler.Register(r)
 			// Traces
-			traceHandler.Register(r)
+			r.Route("/traces", traceHandler.Register)
 		})
 	})
 
