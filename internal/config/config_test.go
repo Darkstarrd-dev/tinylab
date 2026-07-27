@@ -57,8 +57,8 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Combos) != 0 {
 		t.Fatalf("len(Combos) = %d, want 0", len(cfg.Combos))
 	}
-	if !cfg.Trace.Enabled {
-		t.Fatal("Trace.Enabled should be true")
+	if cfg.Trace.Enabled {
+		t.Fatal("Trace.Enabled should be false by default")
 	}
 	if cfg.Trace.RetainDays != 2 {
 		t.Fatalf("Trace.RetainDays = %d, want 2", cfg.Trace.RetainDays)
@@ -178,7 +178,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("Combo mismatch: %+v", loaded.Combos[0])
 	}
 	if !loaded.Trace.Enabled {
-		t.Fatal("Trace.Enabled should be true")
+		t.Fatal("Trace.Enabled should be true (explicit user setting round-trips)")
 	}
 	if loaded.Trace.RetainDays != 2 {
 		t.Fatalf("Trace.RetainDays = %d, want 2", loaded.Trace.RetainDays)

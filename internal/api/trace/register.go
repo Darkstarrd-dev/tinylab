@@ -31,6 +31,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/dates", h.getDates)
 	r.Get("/index", h.getIndex)
 	r.Get("/req/{reqID}", h.getReq)
+	r.Post("/clear", h.clearTraces)
 }
 
 var dateFilenameRe = regexp.MustCompile(`^index-(\d{8})\.jsonl$`)
@@ -293,5 +294,58 @@ func (h *Handler) getReq(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"reqID": reqID,
 		"lines": lines,
+	})
+}
+
+// clearTraces wipes all trace data (index-*.jsonl files and every file under
+// req/) from the traces directory. It keeps the directory structure so
+// in-flight and future writes continue to work. Tracing must be stopped or
+// allowed to race-best-effort with new writes. Returns the count of removed
+// files and their total size in bytes.
+func (h *Handler) clearTraces(w http.ResponseWriter, r *http.Request) {
+	tracesDir := h.d.ProxyHandler.TracesDir()
+	w.Header().Set("Content-Type", "application/json")
+	if tracesDir == "" {
+		apibase.WriteAPIError(w, http.StatusNotFound, "tracing not configured")
+		return
+	}
+	var clearedFiles int
+	var clearedBytes int64
+	// Remove top-level index-*.jsonl files.
+	if entries, err := os.ReadDir(tracesDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !strings.HasPrefix(name, "index-") || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			if info, err := e.Info(); err == nil {
+				clearedBytes += info.Size()
+			}
+			if os.Remove(filepath.Join(tracesDir, name)) == nil {
+				clearedFiles++
+			}
+		}
+	}
+	// Remove every file under req/.
+	reqDir := filepath.Join(tracesDir, "req")
+	if reqEntries, err := os.ReadDir(reqDir); err == nil {
+		for _, e := range reqEntries {
+			if e.IsDir() {
+				continue
+			}
+			if info, err := e.Info(); err == nil {
+				clearedBytes += info.Size()
+			}
+			if os.Remove(filepath.Join(reqDir, e.Name())) == nil {
+				clearedFiles++
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"clearedFiles": clearedFiles,
+		"clearedBytes": clearedBytes,
 	})
 }
