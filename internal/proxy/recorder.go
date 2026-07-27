@@ -44,12 +44,13 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 
 	// 分流与门控：
 	//   - source == "playground" 的请求写入独立的 pg ring（若已注入），且始终捕获详情；
-	//   - 其余请求写入 Recent Requests ring，仅在 debug 模式开启时捕获 payload/headers
-	//     （debug 关时 Recent Requests 仅保留基本字段：时间/服务商/模型/密钥/延迟/Tokens）。
+	//   - 其余请求写入 Recent Requests ring，仅在 debug 开 且 追踪关 时捕获 payload/headers
+	//     ——追踪开时完整 body 已落盘 JSONL 文件（由 Log Reader 查看），ring 退化为轻量表
+	//     （时间/服务商/模型/密钥/延迟/Tokens），避免 body 在内存与磁盘重复占用。
 	// 内存开销由 ring 容量（config.UsageRingSize，默认 500）× 单条 body 大小封顶。
 	// reqBody 截断到 64KB，respBody 到 512KB。
 	isPlayground := entry.Source == "playground"
-	captureDetails := isPlayground || h.debugMode()
+	captureDetails := isPlayground || (h.debugMode() && !h.logRequests())
 	if captureDetails {
 		if len(reqBody) > 0 {
 			// reqBody 截断上限，与 respBody 的 512KB 同思路，避免单条过大。
