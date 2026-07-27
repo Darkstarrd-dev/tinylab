@@ -53,6 +53,8 @@ type Handler struct {
 	sigCache              SignatureCacheProvider
 	debugModeProvider     func() bool
 	quickSlotOnlyProvider func() bool
+	logRequestsProvider   func() bool
+	requestLogDir         string
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete
@@ -271,6 +273,28 @@ func (h *Handler) quickSlotOnly() bool {
 		return h.quickSlotOnlyProvider()
 	}
 	return false
+}
+
+func (h *Handler) SetLogRequestsProvider(fn func() bool) {
+	h.logRequestsProvider = fn
+}
+
+func (h *Handler) logRequests() bool {
+	if h.logRequestsProvider != nil {
+		return h.logRequestsProvider()
+	}
+	return false
+}
+
+func (h *Handler) SetRequestLogDir(dir string) {
+	h.requestLogDir = dir
+}
+
+// TracesDir returns the directory where two-tier JSONL trace files are
+// written, or "" if tracing is not configured. Read-only access for the
+// trace reader API.
+func (h *Handler) TracesDir() string {
+	return h.requestLogDir
 }
 
 // SetPgUsage 注入 Playground 来源请求专用的 usage ring。注入后，source ==

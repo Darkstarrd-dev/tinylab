@@ -52,9 +52,9 @@ const (
 )
 
 const (
-	probeTestPrompt          = "generate 100 tokens self introduction"
-	testAllKeysPrompt        = "generate 100 tokens self introduction"
-	probeEmbeddingTestInput  = "The quick brown fox jumps over the lazy dog near a river at sunset."
+	probeTestPrompt         = "generate 100 tokens self introduction"
+	testAllKeysPrompt       = "generate 100 tokens self introduction"
+	probeEmbeddingTestInput = "The quick brown fox jumps over the lazy dog near a river at sunset."
 )
 
 // ---------------------------------------------------------------------------
@@ -63,19 +63,19 @@ const (
 
 // ProbeResult is the outcome of probing a single protocol entry point for a model.
 type ProbeResult struct {
-	Protocol        string             `json:"protocol"` // "openai-compat" / "openai-responses" / "anthropic" / "openai-embedding"
-	Ok              bool               `json:"ok"`       // resp.StatusCode == 200 and body has no error field
-	Status          int                `json:"status"`   // HTTP status code
-	LatencyMs       int64              `json:"latencyMs"` // round-trip latency in milliseconds
-	OutputTokens    int                `json:"outputTokens"` // extracted or estimated output token count
-	TokensPerSec    float64            `json:"tokensPerSec"` // speed in tokens per second
-	EmbeddingDim    int                `json:"embeddingDim"` // embedding vector dimension (only for openai-embedding protocol)
-	Error           string             `json:"error"` // human-readable error (empty on success)
-	Request         map[string]any     `json:"request"` // {method, url, headers, body, bodyRaw}
+	Protocol        string              `json:"protocol"`     // "openai-compat" / "openai-responses" / "anthropic" / "openai-embedding"
+	Ok              bool                `json:"ok"`           // resp.StatusCode == 200 and body has no error field
+	Status          int                 `json:"status"`       // HTTP status code
+	LatencyMs       int64               `json:"latencyMs"`    // round-trip latency in milliseconds
+	OutputTokens    int                 `json:"outputTokens"` // extracted or estimated output token count
+	TokensPerSec    float64             `json:"tokensPerSec"` // speed in tokens per second
+	EmbeddingDim    int                 `json:"embeddingDim"` // embedding vector dimension (only for openai-embedding protocol)
+	Error           string              `json:"error"`        // human-readable error (empty on success)
+	Request         map[string]any      `json:"request"`      // {method, url, headers, body, bodyRaw}
 	ResponseHeaders map[string][]string `json:"responseHeaders"`
-	ResponseBody    any                `json:"responseBody"` // JSON-parsed response body; nil if not parseable
-	ResponseBodyRaw string             `json:"responseBodyRaw"`
-	Skipped         bool               `json:"skipped"` // true if the probe was skipped (e.g. no key available)
+	ResponseBody    any                 `json:"responseBody"` // JSON-parsed response body; nil if not parseable
+	ResponseBodyRaw string              `json:"responseBodyRaw"`
+	Skipped         bool                `json:"skipped"` // true if the probe was skipped (e.g. no key available)
 }
 
 // ProbeQuotaHook is invoked (when non-nil) on a successful probe so the caller
@@ -406,6 +406,7 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 		result.Ok = false
 		result.Error = err.Error()
 		result.LatencyMs = time.Since(t0).Milliseconds()
+		h.d.ProxyHandler.TraceMgmtCall("probe:singlekey:provider="+providerID+":model="+model+":key="+k.ID, "probe", "probe", model, provider.Name, chatURL, httpReq.Header, bodyBytes, 0, nil, nil, err.Error(), time.Since(t0).Milliseconds())
 		return result
 	}
 
@@ -421,6 +422,7 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 		result.Status = resp.StatusCode
 		result.Error = errMsg
 		result.LatencyMs = time.Since(t0).Milliseconds()
+		h.d.ProxyHandler.TraceMgmtCall("probe:singlekey:provider="+providerID+":model="+model+":key="+k.ID, "probe", "probe", model, provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, errMsg, time.Since(t0).Milliseconds())
 		return result
 	}
 
@@ -512,6 +514,7 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 	result.InputTokens = inputTokens
 	result.OutputTokens = outputTokens
 	result.TokensPerSec = tokensPerSec
+	h.d.ProxyHandler.TraceMgmtCall("probe:singlekey:provider="+providerID+":model="+model+":key="+k.ID, "probe", "probe", model, provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, "", time.Since(t0).Milliseconds())
 	return result
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
@@ -163,6 +164,7 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TinyRouter-Provenance", "textreview:clean:node="+node.ID)
 
 	// Run the proxy call in its own goroutine: ChatCompletions blocks until
 	// the upstream stream finishes (or ctx cancels), and we consume chunks
@@ -210,6 +212,7 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TinyRouter-Provenance", "textreview:cleanbatch:node="+node.ID+":chapters="+strconv.Itoa(len(batch)))
 
 	proxyDone := make(chan struct{})
 	go func() {

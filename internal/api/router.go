@@ -34,6 +34,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	apiterminal "github.com/tinyrouter/tinyrouter/internal/api/terminal"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
+	"github.com/tinyrouter/tinyrouter/internal/api/trace"
 	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
@@ -71,8 +72,11 @@ type deps struct {
 	// debugMode reflects the live debug flag toggled from settings.
 	debugMode atomic.Bool
 	// quickSlotOnly reflects the live QuickSlot-only toggle from settings.
-	quickSlotOnly     atomic.Bool
-	restartFn         func(string)
+	quickSlotOnly atomic.Bool
+	// logRequests reflects the live trace toggle from settings.
+	logRequests atomic.Bool
+	restartFn   func(string)
+
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
@@ -92,7 +96,7 @@ type Router struct {
 // New creates an API Router. The signature is kept stable so existing callers
 // (main.go and the package tests) do not need to change.
 func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf *usage.RingBuffer, pgUsageBuf *usage.RingBuffer, quotaTracker *usage.QuotaTracker, logger *console.Logger, proxyHandler *proxy.Handler, shutdown context.CancelFunc, selector *rotation.Selector, comboRes *combo.Resolver, downloadMgr *download.Manager) *Router {
-	return &Router{
+	rt := &Router{
 		deps: deps{
 			reg:          reg,
 			configPath:   configPath,
@@ -121,6 +125,8 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 			terminalState: &apibase.TerminalState{},
 		},
 	}
+	rt.deps.logRequests.Store(cfg.Trace.Enabled)
+	return rt
 }
 
 // SetRestartFunc configures a callback that will gracefully restart the HTTP
@@ -162,6 +168,14 @@ func (rt *Router) QuickSlotOnly() bool {
 
 func (rt *Router) SetQuickSlotOnly(on bool) {
 	rt.quickSlotOnly.Store(on)
+}
+
+func (rt *Router) LogRequests() bool {
+	return rt.deps.logRequests.Load()
+}
+
+func (rt *Router) SetLogRequests(on bool) {
+	rt.deps.logRequests.Store(on)
 }
 
 // Cleanup stops the monitor manager and closes any active terminal session.
@@ -260,21 +274,21 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 	// Build the shared Deps for sub-packages.
 	apiDeps := &apibase.Deps{
-		Reg:               rt.reg,
-		ConfigPath:        rt.configPath,
-		Usage:             rt.usage,
-		PgUsage:           rt.pgUsage,
-		QuotaTracker:      rt.quotaTracker,
-		Logger:            rt.logger,
-		ProxyHandler:      rt.proxyHandler,
-		Selector:          rt.selector,
-		ComboRes:          rt.comboRes,
-		DownloadMgr:       rt.downloadMgr,
-		Shutdown:          rt.shutdown,
-		TestClient:        rt.testClient,
-		MonitorMgr:        rt.monitorMgr,
-		DebugMode:         &rt.debugMode,
-		QuickSlotOnly:     &rt.quickSlotOnly,
+		Reg:           rt.reg,
+		ConfigPath:    rt.configPath,
+		Usage:         rt.usage,
+		PgUsage:       rt.pgUsage,
+		QuotaTracker:  rt.quotaTracker,
+		Logger:        rt.logger,
+		ProxyHandler:  rt.proxyHandler,
+		Selector:      rt.selector,
+		ComboRes:      rt.comboRes,
+		DownloadMgr:   rt.downloadMgr,
+		Shutdown:      rt.shutdown,
+		DebugMode:     &rt.debugMode,
+		QuickSlotOnly: &rt.quickSlotOnly,
+		LogRequests:   &rt.deps.logRequests,
+
 		RestartFn:         rt.restartFn,
 		ServerCfgFn:       rt.serverCfgFn,
 		UpstreamTimeoutFn: rt.upstreamTimeoutFn,
@@ -300,6 +314,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	usageHandler := apiusage.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
+	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
 
 	// API routes
@@ -360,6 +375,8 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 			// AnySearch
 			anysearchHandler.Register(r)
+			// Traces
+			traceHandler.Register(r)
 		})
 	})
 

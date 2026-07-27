@@ -450,6 +450,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 		res.LatencyMs = time.Since(t0).Milliseconds()
 		return res
 	}
+	h.d.ProxyHandler.TraceMgmtCall("probe:combo:provider="+input.provider.ID+":model="+input.modelId+":key="+input.key.ID, "probe", "probe", input.modelId, input.provider.Name, chatURL, httpReq.Header, bodyBytes, 0, nil, nil, err.Error(), time.Since(t0).Milliseconds())
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
@@ -464,6 +465,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 		res.LatencyMs = time.Since(t0).Milliseconds()
 		return res
 	}
+	h.d.ProxyHandler.TraceMgmtCall("probe:combo:provider="+input.provider.ID+":model="+input.modelId+":key="+input.key.ID, "probe", "probe", input.modelId, input.provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, "", time.Since(t0).Milliseconds())
 
 	var ttftMs int64
 	inputTokens := 0
@@ -535,6 +537,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 	res.InputTokens = inputTokens
 	res.OutputTokens = outputTokens
 	res.TokensPerSec = tokensPerSec
+	h.d.ProxyHandler.TraceMgmtCall("probe:combo:provider="+input.provider.ID+":model="+input.modelId+":key="+input.key.ID, "probe", "probe", input.modelId, input.provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, "", time.Since(t0).Milliseconds())
 	res.Score = tokensPerSec / (1 + float64(ttftMs)/1500.0)
 	return res
 }

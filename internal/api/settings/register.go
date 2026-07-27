@@ -48,6 +48,11 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"enablePlayground":   cfg.EnablePlayground,
 		"quickSlotOnly":      cfg.QuickSlotOnly,
 		"debugMode":          h.d.DebugMode.Load(),
+		"trace": map[string]any{
+			"enabled":    h.d.LogRequests.Load(),
+			"retainDays": cfg.Trace.RetainDays,
+			"maxDiskMB":  cfg.Trace.MaxDiskMB,
+		},
 		"proxy":              cfg.Proxy,
 		"server":             cfg.Server,
 		"download":           cfg.Download,
@@ -66,16 +71,21 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var updates struct {
-		Port               *int                   `json:"port"`
-		ConsoleLogMaxLines *int                   `json:"consoleLogMaxLines"`
-		UsageRingSize      *int                   `json:"usageRingSize"`
-		Rotation           *config.RotationConfig `json:"rotation"`
-		EnablePlayground   *bool                  `json:"enablePlayground"`
-		QuickSlotOnly      *bool                  `json:"quickSlotOnly"`
-		DebugMode          *bool                  `json:"debugMode"`
-		Proxy              *config.ProxyConfig    `json:"proxy"`
-		Server             *config.ServerConfig   `json:"server"`
-		Download           *config.DownloadConfig `json:"download"`
+		Port               *int                    `json:"port"`
+		ConsoleLogMaxLines *int                    `json:"consoleLogMaxLines"`
+		UsageRingSize      *int                    `json:"usageRingSize"`
+		Rotation           *config.RotationConfig  `json:"rotation"`
+		EnablePlayground   *bool                   `json:"enablePlayground"`
+		QuickSlotOnly      *bool                   `json:"quickSlotOnly"`
+		DebugMode          *bool                   `json:"debugMode"`
+		Trace *struct {
+			Enabled    *bool `json:"enabled"`
+			RetainDays *int  `json:"retainDays"`
+			MaxDiskMB  *int  `json:"maxDiskMB"`
+		} `json:"trace"`
+		Proxy              *config.ProxyConfig     `json:"proxy"`
+		Server             *config.ServerConfig    `json:"server"`
+		Download           *config.DownloadConfig  `json:"download"`
 		Shortcuts          *config.ShortcutsConfig `json:"shortcuts"`
 		Security           *struct {
 			PasswordEnabled *bool  `json:"passwordEnabled"`
@@ -128,6 +138,18 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.DebugMode != nil {
 		h.d.DebugMode.Store(*updates.DebugMode)
+	}
+	if updates.Trace != nil {
+		if updates.Trace.Enabled != nil {
+			h.d.LogRequests.Store(*updates.Trace.Enabled)
+			cfg.Trace.Enabled = *updates.Trace.Enabled
+		}
+		if updates.Trace.RetainDays != nil {
+			cfg.Trace.RetainDays = *updates.Trace.RetainDays
+		}
+		if updates.Trace.MaxDiskMB != nil {
+			cfg.Trace.MaxDiskMB = *updates.Trace.MaxDiskMB
+		}
 	}
 	if updates.Security != nil {
 		if updates.Security.PasswordEnabled != nil {

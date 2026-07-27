@@ -208,15 +208,18 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 
 	resp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(req)
 	if err != nil {
+		h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", modelsURL, req.Header, nil, 0, nil, nil, err.Error(), 0)
 		return false, "", "request failed: " + err.Error()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 200 {
+		h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", modelsURL, req.Header, nil, resp.StatusCode, resp.Header, nil, "", 0)
 		return true, "models", ""
 	}
 
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", modelsURL, req.Header, nil, resp.StatusCode, resp.Header, nil, "authentication failed (status "+http.StatusText(resp.StatusCode)+")", 0)
 		return false, "", "authentication failed (status " + http.StatusText(resp.StatusCode) + ")"
 	}
 
@@ -232,16 +235,20 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 
 		chatResp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(chatReq)
 		if err != nil {
+			h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", chatURL, chatReq.Header, nil, 0, nil, nil, err.Error(), 0)
 			return false, "", "chat request failed: " + err.Error()
 		}
 		defer chatResp.Body.Close()
 
 		if chatResp.StatusCode == 401 || chatResp.StatusCode == 403 {
+			h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", chatURL, chatReq.Header, nil, chatResp.StatusCode, chatResp.Header, nil, "authentication failed (status "+http.StatusText(chatResp.StatusCode)+")", 0)
 			return false, "", "authentication failed (status " + http.StatusText(chatResp.StatusCode) + ")"
 		}
+		h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", chatURL, chatReq.Header, nil, chatResp.StatusCode, chatResp.Header, nil, "", 0)
 		return true, "chat", ""
 	}
 
+	h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", modelsURL, req.Header, nil, resp.StatusCode, resp.Header, nil, "upstream returned status "+http.StatusText(resp.StatusCode), 0)
 	return false, "", "upstream returned status " + http.StatusText(resp.StatusCode)
 }
 
@@ -322,6 +329,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.d.ProxyHandler.ManagementClient(*provider).Do(req)
 	if err != nil {
+		h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, 0, nil, nil, err.Error(), 0)
 		apibase.WriteAPIError(w, http.StatusBadGateway, "request failed: "+err.Error())
 		return
 	}
@@ -334,9 +342,11 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resp.StatusCode != 200 {
+		h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, resp.StatusCode, resp.Header, respBody, "upstream returned "+http.StatusText(resp.StatusCode)+": "+string(respBody), 0)
 		apibase.WriteAPIError(w, http.StatusBadGateway, "upstream returned "+http.StatusText(resp.StatusCode)+": "+string(respBody))
 		return
 	}
+
 
 	var result struct {
 		Data []struct {
@@ -355,6 +365,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, resp.StatusCode, resp.Header, respBody, "", 0)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"models": models})
 }

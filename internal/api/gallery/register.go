@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"strconv"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -1131,6 +1132,7 @@ func (h *Handler) sendVisionRequest(ctx context.Context, imgData []byte, mimeTyp
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TinyRouter-Provenance", "gallery:review:image="+strconv.Itoa(entry.Index))
 	rec := httptest.NewRecorder()
 
 	h.d.ProxyHandler.ChatCompletions(rec, req)
@@ -1202,6 +1204,7 @@ func (h *Handler) galleryGeneratePrompt(w http.ResponseWriter, r *http.Request) 
 
 	proxyReq := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 	proxyReq.Header.Set("Content-Type", "application/json")
+	proxyReq.Header.Set("X-TinyRouter-Provenance", "gallery:promptgen")
 	rec := httptest.NewRecorder()
 
 	h.d.ProxyHandler.ChatCompletions(rec, proxyReq)

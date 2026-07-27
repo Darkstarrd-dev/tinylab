@@ -124,12 +124,61 @@ window.renderEditor = function(container) {
   container.innerHTML = '';
   container.style.height = '100%';
   container.style.overflow = 'hidden';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  // Mode switch: File Editor | Log Reader
+  var modeSwitch = document.createElement('div');
+  modeSwitch.className = 'log-mode-switch';
+
+  var fileEditorBtn = document.createElement('button');
+  fileEditorBtn.className = 'log-mode-btn' + (editorState.mode !== 'logReader' ? ' active' : '');
+  fileEditorBtn.textContent = t('logFileEditor');
+  fileEditorBtn.dataset.mode = 'fileEditor';
+
+  var logReaderBtn = document.createElement('button');
+  logReaderBtn.className = 'log-mode-btn' + (editorState.mode === 'logReader' ? ' active' : '');
+  logReaderBtn.textContent = t('logReader');
+  logReaderBtn.dataset.mode = 'logReader';
+
+  modeSwitch.appendChild(fileEditorBtn);
+  modeSwitch.appendChild(logReaderBtn);
+  container.appendChild(modeSwitch);
+
+  // Content container for either log reader or file editor UI
+  fileEditorBtn.addEventListener('click', function() {
+    editorState.mode = 'edit';
+    if (typeof window.cleanupEditorLogs === 'function') {
+      window.cleanupEditorLogs();
+    }
+    window.renderEditor(container);
+  });
+  logReaderBtn.addEventListener('click', function() {
+    editorState.mode = 'logReader';
+    if (typeof window.renderLogReader === 'function') {
+      window.renderLogReader(contentContainer);
+    }
+  });
+  var contentContainer = document.createElement('div');
+  contentContainer.className = 'log-reader-content';
+  contentContainer.style.flex = '1';
+  contentContainer.style.minHeight = '0';
+  container.appendChild(contentContainer);
+
+  // If Log Reader mode, render log reader into content container and stop here
+  if (editorState.mode === 'logReader') {
+    if (typeof window.renderLogReader === 'function') {
+      window.renderLogReader(contentContainer);
+    }
+    return;
+  }
+
+  // File Editor mode: render the existing editor UI below the mode switch
 
   // Build layout
   var layout = document.createElement('div');
   layout.className = 'ed-layout';
   layout.id = 'ed-layout';
-  container.appendChild(layout);
+  contentContainer.appendChild(layout);
 
   // Toolbar
   var toolbar = document.createElement('div');
@@ -480,8 +529,10 @@ window.cleanupEditor = function() {
   }
   edGutterTimers = [];
   edContainer = null;
+  if (typeof window.cleanupEditorLogs === 'function') {
+    window.cleanupEditorLogs();
+  }
 };
-
 // ===================== state helpers =====================
 
 function edFocusedPaneIndex() {
