@@ -1570,19 +1570,25 @@ async function loadTraceDetails(e) {
   var loadingEl = document.getElementById('trace-loading-section');
   if (!loadingEl) return;
   try {
-    var data = await apiGet('/api/traces/req/' + encodeURIComponent(e.id));
+    var data = await apiGet('/traces/req/' + encodeURIComponent(e.id));
     if (currentInfoModalRequestId !== e.id) return;
     var traceHtml = '';
     if (data && data.lines && data.lines.length > 0) {
       var reqLine = data.lines.find(function(l) { return l.type === 'request'; });
       var attemptLines = data.lines.filter(function(l) { return l.type === 'attempt'; });
       var lastAttempt = attemptLines.length > 0 ? attemptLines[attemptLines.length - 1] : null;
-      if (reqLine && reqLine.reqBody) traceHtml += renderInfoSection('Request', formatBody(reqLine.reqBody));
+      if (reqLine && reqLine.reqBody) {
+        var rb = (typeof reqLine.reqBody === 'object') ? reqLine.reqBody : { Body: formatBody(reqLine.reqBody) };
+        traceHtml += renderInfoSection('Request', rb);
+      }
       if (reqLine && reqLine.reqHeaders) traceHtml += renderInfoSection('Request Headers', reqLine.reqHeaders);
       if (lastAttempt) {
         if (lastAttempt.respHeaders) traceHtml += renderInfoSection('Response Headers', lastAttempt.respHeaders);
         if (lastAttempt.respStatus) traceHtml += '<div class="info-section"><div class="info-section-title">Status: ' + escapeHtml(String(lastAttempt.respStatus)) + '</div></div>';
-        if (lastAttempt.respBody) traceHtml += renderInfoSection('Response Body', formatBody(lastAttempt.respBody));
+        if (lastAttempt.respBody) {
+          var pb = (typeof lastAttempt.respBody === 'object') ? lastAttempt.respBody : { Body: formatBody(lastAttempt.respBody) };
+          traceHtml += renderInfoSection('Response Body', pb);
+        }
       }
     }
     if (!traceHtml) traceHtml = '<div class="info-section"><div class="info-section-title">Trace Detail</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">(trace not available)</pre></div></div></div>';
