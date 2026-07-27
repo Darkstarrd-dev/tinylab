@@ -10,6 +10,7 @@ var lockCountdownInterval = null;
 var quotaBarItems = {};
 var lastQuotaSig = '';
 var usageDebugMode = false;
+var traceEnabled = false;
 var usageVisibilityHandler = null;
 var usagePeriodicTimer = null;
 var _lastPerKeyRefresh = 0;
@@ -25,6 +26,26 @@ var currentInfoModalRequestId = null;
 var currentInfoModalReasoningEl = null;
 var currentInfoModalAssistantEl = null;
 var currentInfoModalUsageEl = null;
+
+function formatBody(body) {
+  if (body == null) return '';
+  if (typeof body === 'object') {
+    try { return JSON.stringify(body, null, 2); } catch (e) { return String(body); }
+  }
+  var s = String(body);
+  if (s.indexOf('data:') === 0 || s.indexOf('\ndata:') >= 0) {
+    return s.split(/\r?\n/).map(function(line) {
+      if (line.indexOf('data: ') === 0) {
+        var payload = line.slice(6);
+        if (payload === '[DONE]') return 'data: [DONE]';
+        try { return 'data: ' + JSON.stringify(JSON.parse(payload), null, 2); }
+        catch (e) { return line; }
+      }
+      return line;
+    }).join('\n');
+  }
+  return s;
+}
 var currentInfoModalStreamingDone = false;
 var modelIdToAlias = {};
 
@@ -151,7 +172,7 @@ function renderUsageRow(e, sessionKey, hidden) {
   else dotClass += ' status-dot-processing';
   var dotHtml = '<span class="' + dotClass + '"></span>';
   var statusInner;
-  if (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing') {
+  if (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing' || traceEnabled) {
     statusInner = '<button type="button" class="btn btn-sm btn-info" onclick="showUsageEntryInfoById(\'' + (e.id || '') + '\')">' + dotHtml + '</button>';
   } else {
     statusInner = dotHtml;
@@ -232,6 +253,7 @@ async function renderUsage(c) {
   var rejected = results.slice(0, 4).some(function(r) { return r.status === 'rejected'; });
   if (rejected) toast(t('loadFailed') || 'Load failed', 'error');
   usageDebugMode = !!(settings && settings.debugMode);
+  traceEnabled = !!(settings && settings.trace && settings.trace.enabled);
   var usageEntries = usage.entries || [];
   var apiIds = {};
   usageEntries.forEach(function(e) {
@@ -1530,9 +1552,8 @@ async function showUsageEntryInfoById(id) {
   // entry (which lacks payloads) because the SSE event's entry field was
   // missing or incomplete. In both cases, try to fetch the ring entry (which
   // carries respPayload/respHeaders) from the API.
-  if ((e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
+  if (!traceEnabled && (e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
     try {
-      var usage = await apiGet('/usage?limit=500&offset=0');
       var entries = usage.entries || [];
       var ringEntry = entries.find(function(x) { return x.id === id; });
       if (ringEntry && ringEntry.status !== 'processing') {
@@ -1543,6 +1564,34 @@ async function showUsageEntryInfoById(id) {
   showUsageEntryInfoWithData(e);
 }
 
+
+async function loadTraceDetails(e) {
+  if (currentInfoModalRequestId !== e.id) return;
+  var loadingEl = document.getElementById('trace-loading-section');
+  if (!loadingEl) return;
+  try {
+    var data = await apiGet('/api/traces/req/' + encodeURIComponent(e.id));
+    if (currentInfoModalRequestId !== e.id) return;
+    var traceHtml = '';
+    if (data && data.lines && data.lines.length > 0) {
+      var reqLine = data.lines.find(function(l) { return l.type === 'request'; });
+      var attemptLines = data.lines.filter(function(l) { return l.type === 'attempt'; });
+      var lastAttempt = attemptLines.length > 0 ? attemptLines[attemptLines.length - 1] : null;
+      if (reqLine && reqLine.reqBody) traceHtml += renderInfoSection('Request', formatBody(reqLine.reqBody));
+      if (reqLine && reqLine.reqHeaders) traceHtml += renderInfoSection('Request Headers', reqLine.reqHeaders);
+      if (lastAttempt) {
+        if (lastAttempt.respHeaders) traceHtml += renderInfoSection('Response Headers', lastAttempt.respHeaders);
+        if (lastAttempt.respStatus) traceHtml += '<div class="info-section"><div class="info-section-title">Status: ' + escapeHtml(String(lastAttempt.respStatus)) + '</div></div>';
+        if (lastAttempt.respBody) traceHtml += renderInfoSection('Response Body', formatBody(lastAttempt.respBody));
+      }
+    }
+    if (!traceHtml) traceHtml = '<div class="info-section"><div class="info-section-title">Trace Detail</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">(trace not available)</pre></div></div></div>';
+    loadingEl.outerHTML = traceHtml;
+  } catch (ex) {
+    if (currentInfoModalRequestId !== e.id) return;
+    loadingEl.outerHTML = '<div class="info-section"><div class="info-section-title">Trace Detail</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">(trace not available)</pre></div></div></div>';
+  }
+}
 function showUsageEntryInfoWithData(e) {
   var overlay = document.getElementById('info-modal-overlay');
   var titleEl = document.getElementById('info-modal-title');
@@ -1638,8 +1687,14 @@ function showUsageEntryInfoWithData(e) {
       html += '<div class="info-section"><div class="info-section-title">Assistant Message</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap">' + escapeHtml(e.__streamingAssistant) + '</pre></div></div></div>';
     }
   }
+  if (traceEnabled && e.status !== 'processing' && !e.reqPayload && !e.respPayload && !e.reqHeaders && !e.respHeaders) {
+    html += '<div class="info-section" id="trace-loading-section"><div class="info-section-title">Trace Detail</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">Loading trace…</pre></div></div></div>';
+  }
   bodyEl.innerHTML = html || '<div class="info-section">' + t('noData') + '</div>';
   postProcessRawFields();
+  if (traceEnabled && e.status !== 'processing' && !e.reqPayload && !e.respPayload && !e.reqHeaders && !e.respHeaders) {
+    loadTraceDetails(e);
+  }
   if (e.status === 'processing' && usageDebugMode) {
     currentInfoModalReasoningEl = document.getElementById('streaming-reasoning-text');
     currentInfoModalAssistantEl = document.getElementById('streaming-assistant-text');
