@@ -19,6 +19,7 @@ var trS3Chapters = [];           // live mirror of session chapters (snapshot + 
 var trS3Nodes = [];              // live mirror of session runtime nodes
 var trS3ActiveTab = 'pending';   // active chapter tab: pending|processing|completed|failed
 var trS3NeedsReconcile = false;  // re-fetch snapshot on ES reopen after an error
+var trS3ReconnectTimer = null;    // reconnect timer for SSE recovery (Bug #2)
 var trS3ProviderNames = {};     // providerId -> human name (from /api/models)
 var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id field)
 var trS3ModelNames = {};        // "providerId/modelId" -> alias (from /api/models); keyed by providerId to avoid collision when multiple providers carry the same realModelId
@@ -914,6 +915,7 @@ function trSubscribeSession(id) {
 }
 
 function trS3OpenEventSource(id) {
+  if (trEventSource) { trEventSource.close(); trEventSource = null; }
   trEventSource = new EventSource('/api/text-review/sessions/' + id + '/events');
   trEventSource.addEventListener('chunk', function (e) {
     try { var d = JSON.parse(e.data); trS3OnChunk(d); } catch (_) {}
@@ -926,7 +928,17 @@ function trS3OpenEventSource(id) {
   });
   trEventSource.onerror = function () {
     trEventSource.close();
+    trEventSource = null;
     trS3NeedsReconcile = true;
+    // Delayed reconnect: re-fetch the snapshot (recovers events lost while the
+    // forward-only SSE was down) then reopen ES. Skip if the session is gone or terminal.
+    if (trS3ReconnectTimer) clearTimeout(trS3ReconnectTimer);
+    trS3ReconnectTimer = setTimeout(function () {
+      trS3ReconnectTimer = null;
+      if (!trState.sessionId) return;
+      if (trS3SessionStatus === 'completed' || trS3SessionStatus === 'cancelled' || trS3SessionStatus === 'idle') return;
+      trSubscribeSession(trState.sessionId);
+    }, 3000);
   };
 }
 
@@ -939,6 +951,9 @@ function trS3OnChunk(evt) {
   var idx = evt.chapterIdx;
   if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
   var c = trS3Chapters[idx];
+  // Only accept chunks while the chapter is pending/processing; a residual or
+  // out-of-order chunk must not resurrect a completed/failed chapter.
+  if (c.status !== 'pending' && c.status !== 'processing') return;
   if (!c.cleaned) c.cleaned = '';
   c.cleaned += evt.delta || '';
   var old = c.status;
@@ -968,9 +983,16 @@ function trS3OnStatus(evt) {
     return;
   }
   if (idx < 0 || idx >= trS3Chapters.length) return;
+  var prevStatus = trS3Chapters[idx].status;
   trS3Chapters[idx].status = evt.status || 'pending';
   if (evt.error) trS3Chapters[idx].error = evt.error;
   if (evt.nodeId) trS3Chapters[idx].nodeId = evt.nodeId;
+  // Mirror backend ReprocessChapter reset: when a chapter is reset to pending,
+  // clear the accumulated cleaned text + error so new chunks don't append to stale text.
+  if (evt.status === 'pending' && prevStatus !== 'pending') {
+    trS3Chapters[idx].cleaned = '';
+    trS3Chapters[idx].error = '';
+  }
   trS3UpdateCardStatus(idx);
   trS3UpdateTabCounts();
   trS3MaybeSessionDone();
@@ -990,6 +1012,9 @@ function trS3OnNode(evt) {
  * (completed or failed), then refresh controls (shows the 进入审校 button).
  */
 function trS3MaybeSessionDone() {
+  // Don't let a client-side "all chapters resolved" synthesis override a backend
+  // running/paused state (e.g. after a reprocess or an SSE-drop leaving a stale mirror).
+  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused') return;
   for (var i = 0; i < trS3Chapters.length; i++) {
     var s = trS3Chapters[i].status;
     if (s !== 'completed' && s !== 'failed') return;
@@ -1024,8 +1049,15 @@ function trS3OnSessionGone() {
   trState.sessionId = null;
   trSave();
   if (trEventSource) { trEventSource.close(); trEventSource = null; }
+  // Session is gone — its old chapter statuses are meaningless; reset to pending.
+  for (var i = 0; i < trS3Chapters.length; i++) {
+    trS3Chapters[i].status = 'pending';
+    trS3Chapters[i].error = '';
+    trS3Chapters[i].nodeId = '';
+  }
   trS3UpdateControls();
   trS3RenderChapterList();
+  trS3UpdateTabCounts();
 }
 
 function trS3ScrolledToBottom(el) {
@@ -1047,6 +1079,7 @@ window.trS3HasCompleted = function () {
  * Called by text-review.js::cleanupTextReview on page leave.
  */
 window.trCleanupStep3 = function () {
+  if (trS3ReconnectTimer) { clearTimeout(trS3ReconnectTimer); trS3ReconnectTimer = null; }
   if (trEventSource) {
     trEventSource.close();
     trEventSource = null;

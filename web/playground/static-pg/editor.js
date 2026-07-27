@@ -593,6 +593,7 @@ function edSetMode(mode) {
     // edit or diff
     if (reviewWrap) reviewWrap.classList.add('ed-hidden');
     if (panes) panes.style.display = mode === 'edit' ? '' : 'none';
+    if (mode === 'diff') edRenderDiff();
   }
 
   edSaveState();
