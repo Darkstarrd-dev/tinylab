@@ -275,6 +275,23 @@ func TestTraceIndex_InvalidDate(t *testing.T) {
 	}
 }
 
+func TestTraceIndex_DashedDate(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+
+	// Files on disk are named index-YYYYMMDD.jsonl (8-digit, no dashes).
+	// The API should accept YYYY-MM-DD (dashed) as the date parameter,
+	// normalize it, and find the file.
+	writeIndexFile(t, tracesDir, "20260727", []string{
+		mustJSON(map[string]any{"type": "index", "ts": "2026-07-27T10:00:00Z", "reqID": "1"}),
+	})
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date=2026-07-27", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for dashed date, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestTraceReq(t *testing.T) {
 	tracesDir, r := setupTraceTest(t)
 	reqID := "abc-123"
