@@ -72,7 +72,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 		}
 	}()
 
-	if h.requestLogDir == "" {
+	if h.requestLogDir == "" || !h.logRequests() {
 		return
 	}
 

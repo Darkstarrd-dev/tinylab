@@ -320,7 +320,7 @@ type ThemeConfig struct {
 }
 
 // TraceConfig controls per-request tracing (two-tier JSONL logging).
-// Enabled defaults to true. Retention and disk caps are enforced by
+// Enabled defaults to false. Retention and disk caps are enforced by
 // the background sweep goroutine in proxy.Handler.
 type TraceConfig struct {
 	Enabled    bool `yaml:"enabled" json:"enabled"`
