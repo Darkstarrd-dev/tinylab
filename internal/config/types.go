@@ -319,6 +319,15 @@ type ThemeConfig struct {
 	Style        string `yaml:"style,omitempty" json:"style,omitempty"`               // default: "default"
 }
 
+// TraceConfig controls per-request tracing (two-tier JSONL logging).
+// Enabled defaults to true. Retention and disk caps are enforced by
+// the background sweep goroutine in proxy.Handler.
+type TraceConfig struct {
+	Enabled    bool `yaml:"enabled" json:"enabled"`
+	RetainDays int  `yaml:"retainDays" json:"retainDays"`
+	MaxDiskMB  int  `yaml:"maxDiskMB" json:"maxDiskMB"`
+}
+
 // Config is the top-level configuration structure.
 type Config struct {
 	Port               int              `yaml:"port" json:"port"`
@@ -338,6 +347,7 @@ type Config struct {
 	Shortcuts          ShortcutsConfig  `yaml:"shortcuts,omitempty" json:"shortcuts,omitempty"`
 	ReviewPresets      []ReviewPreset   `yaml:"reviewPresets,omitempty" json:"reviewPresets,omitempty"`
 	AnySearch          AnySearchConfig  `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
+	Trace              TraceConfig      `yaml:"trace" json:"trace"`
 	ImageSaveDir       string           `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
 	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`

@@ -16,7 +16,7 @@ import (
 // Requests are viewable regardless of debug mode; the playground source is
 // routed to a dedicated pg ring. Memory is bounded by ring size × body
 // size; reqBody is truncated to 64KB, respBody to 512KB.
-func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string, sessionKey string) {
+func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string, sessionKey string, decision string, provenance string) {
 	entry := usage.Entry{
 		ID:            id,
 		Timestamp:     time.Now(),
@@ -36,6 +36,11 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		entry.Source = reqHeaders.Get("X-TinyRouter-Source")
 	}
 	entry.SessionKey = sessionKey
+
+	// Per-request log file (runtime toggle, mirrors debugMode).
+	if h.logRequests() {
+		h.writeRequestLog(id, provider, model, sel, status, latencyMs, ttftMs, inputTokens, outputTokens, errMsg, reqBody, respBody, respHeaders, respStatus, reqHeaders, upstreamURL, originalModel, sessionKey, decision, provenance)
+	}
 
 	// 分流与门控：
 	//   - source == "playground" 的请求写入独立的 pg ring（若已注入）；

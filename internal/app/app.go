@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/api"
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -20,7 +21,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/state"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 )
 
 // HostLoopFunc blocks until the host (console signal, tray, webview) requests
@@ -181,7 +181,14 @@ func (a *App) buildComponents() error {
 	// API router + UI handler. Shutdown is triggered by POST /api/shutdown.
 	a.apiRouter = api.New(a.reg, cfg, a.configPath, a.usageBuf, a.pgUsageBuf, a.quotaTracker, a.logger, a.proxyHandler, a.triggerShutdown, a.selector, a.comboRes, a.downloadMgr)
 	a.proxyHandler.SetDebugModeProvider(a.apiRouter.DebugMode)
+	a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)
+	a.proxyHandler.SetRequestLogDir(filepath.Join(a.configDir, "traces"))
 	a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)
+
+	// Start the trace retention sweep goroutine. It runs every hour
+	// and deletes trace files older than RetainDays, enforcing MaxDiskMB.
+	// The goroutine stops when the app shutdown context is cancelled.
+	go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)
 
 	// HTTP server (not started until Run).
 	a.sm = NewServerManager(a.apiRouter.Routes(a.proxyHandler), a.addr, a.logger, cfg.Server)

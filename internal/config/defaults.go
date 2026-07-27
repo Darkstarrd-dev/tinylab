@@ -52,6 +52,11 @@ func DefaultConfig() *Config {
 			StatePath:     "state.yaml",
 		},
 		EnablePlayground: true,
+		Trace: TraceConfig{
+			Enabled:    true,
+			RetainDays: 2,
+			MaxDiskMB:  500,
+		},
 		Providers:        []Provider{},
 		Combos:           []Combo{},
 		QuickSlots:       []QuickSlot{},
@@ -204,6 +209,24 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 	}
 	if cfg.Theme.Style == "" {
 		cfg.Theme.Style = "default"
+	}
+	// Trace defaults. If the `trace:` section is entirely absent from the
+	// config file (e.g. config created before this feature was added),
+	// default Enabled to true and RetainDays/MaxDiskMB to their defaults.
+	// If the section IS present, respect the user's settings (including
+	// an explicit enabled: false). Zero-valued RetainDays/MaxDiskMB
+	// are filled from defaults so a partial trace block keeps sane values.
+	hasTraceSection := bytes.Contains(raw, []byte("\ntrace:")) || bytes.HasPrefix(raw, []byte("trace:"))
+	if !hasTraceSection {
+		cfg.Trace.Enabled = true
+		cfg.Trace.RetainDays = 2
+		cfg.Trace.MaxDiskMB = 500
+	}
+	if cfg.Trace.RetainDays == 0 {
+		cfg.Trace.RetainDays = 2
+	}
+	if cfg.Trace.MaxDiskMB == 0 {
+		cfg.Trace.MaxDiskMB = 500
 	}
 	return cfg
 }

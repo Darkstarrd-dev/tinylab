@@ -51,6 +51,8 @@ type Deps struct {
 	DebugMode *atomic.Bool
 	// QuickSlotOnly reflects the live QuickSlot-only toggle from settings.
 	QuickSlotOnly *atomic.Bool
+	// LogRequests reflects the live log-requests toggle from settings.
+	LogRequests *atomic.Bool
 
 	// The following callbacks are configured after construction via setters.
 	RestartFn         func(string)

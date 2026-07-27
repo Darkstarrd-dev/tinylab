@@ -55,6 +55,10 @@ async function renderEndpoint(c) {
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '"><input type="checkbox" id="debug-mode-toggle"' + (s.debugMode ? ' checked' : '') + ' onchange="toggleDebugMode(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
         <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('requestTracingDesc')) + '">' + t('requestTracing') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('requestTracingDesc')) + '"><input type="checkbox" id="trace-toggle"' + (s.trace && s.trace.enabled ? ' checked' : '') + ' onchange="toggleTrace(this.checked)"><span class="toggle-slider"></span></label>\
+        </div>\
+        <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
@@ -180,7 +184,6 @@ function renderComboListInline(combos) {
     </div>';
   }).join('');
 }
-
 async function toggleDebugMode(enabled) {
   try {
     await apiPatch('/settings', { debugMode: enabled });
@@ -188,6 +191,17 @@ async function toggleDebugMode(enabled) {
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
     var toggle = document.getElementById('debug-mode-toggle');
+    if (toggle) toggle.checked = !enabled;
+  }
+}
+
+async function toggleTrace(enabled) {
+  try {
+    await apiPatch('/settings', { trace: { enabled: enabled } });
+    toast(enabled ? t('requestTracingOn') : t('requestTracingOff'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+    var toggle = document.getElementById('trace-toggle');
     if (toggle) toggle.checked = !enabled;
   }
 }

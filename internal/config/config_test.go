@@ -57,6 +57,15 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Combos) != 0 {
 		t.Fatalf("len(Combos) = %d, want 0", len(cfg.Combos))
 	}
+	if !cfg.Trace.Enabled {
+		t.Fatal("Trace.Enabled should be true")
+	}
+	if cfg.Trace.RetainDays != 2 {
+		t.Fatalf("Trace.RetainDays = %d, want 2", cfg.Trace.RetainDays)
+	}
+	if cfg.Trace.MaxDiskMB != 500 {
+		t.Fatalf("Trace.MaxDiskMB = %d, want 500", cfg.Trace.MaxDiskMB)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -96,6 +105,11 @@ func TestSaveAndLoad(t *testing.T) {
 		},
 		Combos: []Combo{
 			{ID: "fast", Name: "Fast Model", Strategy: "fallback", Models: []string{"deepseek-chat"}},
+		},
+		Trace: TraceConfig{
+			Enabled:    true,
+			RetainDays: 2,
+			MaxDiskMB:  500,
 		},
 	}
 
@@ -162,6 +176,15 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.Combos[0].ID != "fast" || loaded.Combos[0].Strategy != "fallback" {
 		t.Fatalf("Combo mismatch: %+v", loaded.Combos[0])
+	}
+	if !loaded.Trace.Enabled {
+		t.Fatal("Trace.Enabled should be true")
+	}
+	if loaded.Trace.RetainDays != 2 {
+		t.Fatalf("Trace.RetainDays = %d, want 2", loaded.Trace.RetainDays)
+	}
+	if loaded.Trace.MaxDiskMB != 500 {
+		t.Fatalf("Trace.MaxDiskMB = %d, want 500", loaded.Trace.MaxDiskMB)
 	}
 }
 
