@@ -465,6 +465,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     logModel: 'Model',
     logOriginalModel: 'Original model',
     logProvider: 'Provider',
+  },
+  cn: {
     requestTracing: '请求追踪',
     requestTracingDesc: '开启后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）都将以两层 JSONL 追踪文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏（保留末 4 位），base64 图片内容不保存。超过保留天数的文件自动删除，总量受磁盘上限约束。默认关闭。',
     requestTracingOn: '追踪开', requestTracingOff: '追踪关',
@@ -481,9 +483,6 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     debugSettings: '调试设置', debugMode: '调试模式',
     debugModeDesc: '开启后，请求/响应详情将缓存以供 Usage 页面查看。',
     debugModeOn: '开', debugModeOff: '关',
-    requestTracing: '请求追踪',
-    requestTracingDesc: '开启后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）都将以两层 JSONL 追踪文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏，base64 图片内容不保存。2 天前的记录自动删除。默认开启。',
-    requestTracingOn: '追踪开', requestTracingOff: '追踪关',
     quickSlotOnly: '仅 QuickSlot',
     quickSlotOnlyDesc: '开启后，/v1/models 仅返回 QuickSlot 中的模型。第三方客户端只能看到快捷槽中的模型。',
     quickSlotOnlyOn: '仅 QuickSlot 已开启', quickSlotOnlyOff: '仅 QuickSlot 已关闭',
