@@ -929,9 +929,22 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .ge-icon-toggle[data-archive="1"]{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
 .ge-title-center{flex:1;text-align:center}
 .ge-src-info{display:flex;flex-direction:column;gap:3px;padding:10px 14px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--text-secondary)}
-.ge-src-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.ge-src-row.ge-src-path{color:var(--text-muted);font-size:11px}
-.ge-src-row.ge-src-meta{color:var(--text-secondary);font-weight:500}
+.ge-src-row{white-space:nowrap;overflow:hidden;max-width:100%}
+.ge-src-row.ge-src-path{color:var(--text-muted);font-size:11px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+.ge-src-row.ge-src-path::-webkit-scrollbar{display:none}
+.ge-src-row.ge-src-meta{color:var(--text-secondary);font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0}
+.ge-src-filename{flex:1;min-width:0;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+.ge-src-filename::-webkit-scrollbar{display:none}
+.ge-src-meta-right{flex-shrink:0;text-align:right;white-space:nowrap;color:var(--text-secondary);font-size:11px;font-weight:400}
+#ge-img-section .gallery-edit-row > .gallery-edit-check:first-child,
+#ge-vid-dest-section .gallery-edit-row > .gallery-edit-check:first-child{width:130px;min-width:130px;flex-shrink:0;margin-right:0}
+#ge-vid-dest-section{margin-bottom:12px}
+#ge-vid-dest-section .gallery-edit-row:last-child{margin-bottom:0}
+#ge-img-uniform-digits{text-align:center;text-align-last:center;padding-left:0;padding-right:0}
+.ge-two-col-row{display:flex;align-items:center;gap:16px;width:100%}
+.ge-col-half{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.ge-col-half .gallery-edit-label{width:90px;min-width:90px;flex-shrink:0;margin:0;font-size:13px;color:var(--text-secondary)}
+.ge-col-half .pg-param-row-select,.ge-col-half select{flex:1;min-width:0}
 .gallery-edit-section input[type="text"]:disabled,.gallery-edit-section input[type="number"]:disabled,.gallery-edit-section select:disabled,#ge-browse-dir-btn:disabled{opacity:0.45;cursor:not-allowed}
 
 /* Trim bar (replaces video seeker in trim mode) */
