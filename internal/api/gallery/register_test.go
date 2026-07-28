@@ -4,8 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -211,4 +214,144 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return string(out)
+}
+
+// TestGalleryRoutes_ZipWriteback_EmptyEntriesNoOp exercises the edit/zip-writeback
+// endpoint's no-panic contract: an empty entries list must succeed and rewrite
+// the archive back to disk unchanged.
+func TestGalleryRoutes_ZipWriteback_EmptyEntriesNoOp(t *testing.T) {
+	h := newTestHandler(t)
+	r := chi.NewRouter()
+	h.Register(r)
+
+	zipBytes := buildTestZipBytes(t)
+	archivePath := filepath.Join(t.TempDir(), "archive.zip")
+	if err := os.WriteFile(archivePath, zipBytes, 0644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"archivePath": archivePath,
+		"entries":     []map[string]string{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/edit/zip-writeback", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /edit/zip-writeback (empty entries): want 200, got %d body=%q", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		OK   bool   `json:"ok"`
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK || resp.Path != archivePath {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	// The archive on disk is still a valid, openable zip with the original entry.
+	out, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read archive back: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(out), int64(len(out)))
+	if err != nil {
+		t.Fatalf("open rewritten zip: %v", err)
+	}
+	if len(zr.File) != 1 || zr.File[0].Name != "a.png" {
+		t.Fatalf("expected single a.png entry, got %+v", zr.File)
+	}
+}
+
+// TestGalleryRoutes_ZipWriteback_ReplacesEntry confirms a single replacement
+// lands in the on-disk archive and the supplied temp file is removed.
+func TestGalleryRoutes_ZipWriteback_ReplacesEntry(t *testing.T) {
+	h := newTestHandler(t)
+	r := chi.NewRouter()
+	h.Register(r)
+
+	// Build a zip with two image entries so we can prove only the named one
+	// changes and the other is byte-preserved.
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, spec := range []struct{ name, body string }{
+		{"a.png", "alpha-bytes"},
+		{"b.png", "beta-bytes"},
+	} {
+		w, err := zw.Create(spec.name)
+		if err != nil {
+			t.Fatalf("create %s: %v", spec.name, err)
+		}
+		if _, err := w.Write([]byte(spec.body)); err != nil {
+			t.Fatalf("write %s: %v", spec.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "pack.zip")
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	// Temp file holding the transcoded content for a.png.
+	repPath := filepath.Join(t.TempDir(), "a-converted.png")
+	if err := os.WriteFile(repPath, []byte("ALPHA-NEW"), 0644); err != nil {
+		t.Fatalf("write replacement: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"archivePath": archivePath,
+		"entries": []map[string]string{
+			{"zipPath": "a.png", "filePath": repPath},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/edit/zip-writeback", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /edit/zip-writeback: want 200, got %d body=%q", rec.Code, rec.Body.String())
+	}
+
+	// The temp converted file should be cleaned up.
+	if _, err := os.Stat(repPath); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file removed, stat err=%v", err)
+	}
+
+	out, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read archive back: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(out), int64(len(out)))
+	if err != nil {
+		t.Fatalf("open rewritten zip: %v", err)
+	}
+	if len(zr.File) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(zr.File))
+	}
+	readEntry := func(name string) string {
+		for _, f := range zr.File {
+			if f.Name == name {
+				rc, err := f.Open()
+				if err != nil {
+					t.Fatalf("open %s: %v", name, err)
+				}
+				defer rc.Close()
+				b, err := io.ReadAll(rc)
+				if err != nil {
+					t.Fatalf("read %s: %v", name, err)
+				}
+				return string(b)
+			}
+		}
+		t.Fatalf("entry %s not found", name)
+		return ""
+	}
+	if got := readEntry("a.png"); got != "ALPHA-NEW" {
+		t.Fatalf("a.png: want ALPHA-NEW got %q", got)
+	}
+	if got := readEntry("b.png"); got != "beta-bytes" {
+		t.Fatalf("b.png (untouched): want beta-bytes got %q", got)
+	}
 }

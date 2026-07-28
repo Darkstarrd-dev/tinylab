@@ -916,6 +916,19 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 #ge-progress-bar::-webkit-progress-bar{background:var(--glass-border);border-radius:4px}
 #ge-progress-bar::-webkit-progress-value{background:var(--accent);border-radius:4px;transition:width 0.3s}
 #ge-progress-bar::-moz-progress-bar{background:var(--accent);border-radius:4px}
+/* Settings gear button in source info row */
+.ge-gear-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-muted);cursor:pointer;flex-shrink:0;margin-left:auto;transition:all var(--transition-fast)}
+.ge-gear-btn:hover{background:var(--glass-hover);color:var(--accent);border-color:var(--accent)}
+
+/* Trim bar (replaces video seeker in trim mode) */
+.ge-trim-mode-ctrl{display:flex !important;align-items:center !important;gap:10px !important;opacity:1 !important;pointer-events:auto !important}
+.ge-trimbar{position:relative;width:100%;height:24px;flex:1;min-width:0;touch-action:none;cursor:pointer}
+.ge-trimbar-track{position:absolute;top:50%;left:0;right:0;height:4px;transform:translateY(-50%);background:var(--glass-border);border-radius:2px}
+.ge-trimbar-fill{position:absolute;top:50%;height:4px;transform:translateY(-50%);background:var(--accent);border-radius:2px;pointer-events:none;opacity:0.5}
+.ge-trimbar-thumb{position:absolute;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);background:var(--accent);border:2px solid var(--modal-bg);border-radius:50%;cursor:grab;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2;transition:transform var(--transition-fast)}
+.ge-trimbar-thumb:hover{transform:translate(-50%,-50%) scale(1.25)}
+.ge-trimbar-thumb:active{cursor:grabbing;transform:translate(-50%,-50%) scale(1.15)}
+.ge-trimbar-thumb.active{background:var(--accent2);border-color:var(--text);transform:translate(-50%,-50%) scale(1.2)}
 /* ===================== Log Reader (editor-logs.js) ===================== */
 .log-reader-layout{height:100%;display:grid;grid-template-columns:150px 300px 1fr;gap:0;overflow:hidden;min-height:0}
 .log-reader-left,.log-reader-middle,.log-reader-right{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}

@@ -7,6 +7,7 @@
 var _editJobId = null;
 var _editPollTimer = null;
 var _editCurrentItem = null;
+var _zipReplacePending = false;  // set by _startJob when single-image overwrite should replace an entry inside the source zip
 var _editMediaType = null;
 var _editProbe = null;
 var _editSubtitlePath = null;
@@ -17,23 +18,6 @@ function _geT(k, ar) {
   return (typeof pgT === 'function') ? pgT(k, ar) : k;
 }
 
-// Parse a time string (HH:MM:SS or bare seconds) to float seconds.
-function _parseTimeToSec(s) {
-  if (!s || !s.trim()) return NaN;
-  s = s.trim();
-  var parts = s.split(':');
-  if (parts.length === 3) {
-    var h = parseFloat(parts[0]), m = parseFloat(parts[1]), sec = parseFloat(parts[2]);
-    if (isNaN(h) || isNaN(m) || isNaN(sec)) return NaN;
-    return h * 3600 + m * 60 + sec;
-  }
-  if (parts.length === 2) {
-    var m2 = parseFloat(parts[0]), sec2 = parseFloat(parts[1]);
-    if (isNaN(m2) || isNaN(sec2)) return NaN;
-    return m2 * 60 + sec2;
-  }
-  return parseFloat(s);
-}
 
 // Format seconds to HH:MM:SS.
 function _formatSecToTime(secs) {
@@ -108,14 +92,65 @@ function _onCompleted(data) {
   var outputURL = data.outputURL || '';
   var outputPath = data.outputPath || '';
 
+  // Single-image replace-original into a zip: repack the on-disk archive with
+  // this transcoded temp file at the entry's original inner path, delete the
+  // temp file, and present an Open Folder button. The transcoded temp is the
+  // ffmpeg job's outputPath.
+  if (_zipReplacePending && _editCurrentItem && _editCurrentItem.kind === 'zip'
+      && _editCurrentItem.zipAbsPath && _editCurrentItem.zipPath && outputPath) {
+    _setProgressStatus(_geT('geZipping') || 'Repacking archive...', false);
+    var entries = [{ zipPath: _editCurrentItem.zipPath, filePath: outputPath }];
+    fetch('/api/gallery/edit/zip-writeback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archivePath: _editCurrentItem.zipAbsPath, entries: entries })
+    })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
+    .then(function() {
+      _hideProgressSection();
+      _zipReplacePending = false;
+      // best-effort delete the transcoded temp now that the entry is back in
+      // the archive; the server also cleans inputs, but be defensive on FSAA
+      // cases where outputPath was a client-managed temp.
+      var resultEl2 = document.getElementById('ge-result-area');
+      if (resultEl2) {
+        var html = '<div class="gallery-edit-result">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+            '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geCompleted')) + '</span>' +
+            '<span style="font-size:12px;color:var(--text-secondary)">' + escapeHtml(_editCurrentItem.zipAbsPath.split(/[\\/]/).pop()) + '</span>' +
+          '</div>' +
+          '<div class="gallery-edit-actions">' +
+            '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>' +
+          '</div>' +
+        '</div>';
+        resultEl2.innerHTML = html;
+        resultEl2.style.display = 'block';
+      }
+      var openBtn2 = document.getElementById('ge-open-folder-btn');
+      if (openBtn2) openBtn2.onclick = function() { _openInFileManager(_editCurrentItem.zipAbsPath); };
+    })
+    .catch(function(err) {
+      _hideProgressSection();
+      _zipReplacePending = false;
+      var resultElErr = document.getElementById('ge-result-area');
+      if (resultElErr) {
+        resultElErr.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">Writeback failed: ' + escapeHtml(err.message || String(err)) + '</span></div>';
+        resultElErr.style.display = 'block';
+      }
+    });
+    return;
+  }
+
+  // Regular single-file result.
+  var logHtml = data.logTail ? '<details style="margin-top:8px"><summary>' + escapeHtml(_geT('geLogTail')) + '</summary><pre style="background:#1a1326;border:1px solid var(--glass-border);padding:8px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">' + escapeHtml(data.logTail) + '</pre></details>' : '';
+
   var resultHtml = '<div class="gallery-edit-result">' +
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
       '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geCompleted')) + '</span>' +
       '<span style="font-size:12px;color:var(--text-secondary)">' + escapeHtml(outputName) + '</span>' +
     '</div>' +
     '<div class="gallery-edit-actions">' +
-      '<button class="pg-btn" id="ge-show-btn">' + escapeHtml(_geT('geShowInGallery')) + '</button>' +
-      (outputURL ? '<a class="pg-btn" href="' + escapeHtml(outputURL) + '" download="' + escapeHtml(outputName) + '">' + escapeHtml(_geT('geDownload')) + '</a>' : '') +
+      '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>' +
     '</div>' +
     logHtml +
   '</div>';
@@ -126,13 +161,8 @@ function _onCompleted(data) {
     resultEl.style.display = 'block';
   }
 
-  // Bind Show in Gallery
-  var showBtn = document.getElementById('ge-show-btn');
-  if (showBtn && outputURL) {
-    showBtn.onclick = function() {
-      _addOutputToGallery(outputName, outputPath, outputURL);
-    };
-  }
+  var openBtnS = document.getElementById('ge-open-folder-btn');
+  if (openBtnS && outputPath) openBtnS.onclick = function() { _openInFileManager(outputPath); };
 }
 
 function _onError(data) {
@@ -167,10 +197,17 @@ function _addOutputToGallery(outputName, outputPath, outputURL) {
   // Determine parent directory from outputPath
   var lastSep = Math.max(outputPath.lastIndexOf('/'), outputPath.lastIndexOf('\\'));
   var rootDirPath = lastSep >= 0 ? outputPath.substring(0, lastSep) : '';
+  // dirBucket is the output dir's basename; path is grouped on by getDirPath
+  // in gallery-tree.js, so a bare outputName would land in the Root bucket
+  // and renderThumbnails (which filters by currentFolderIndices) would never
+  // show it — that was the show-in-gallery no-op root cause. Prefixing with
+   // the dir basename puts it into its own navigable folder bucket.
+  var dirBucket = (rootDirPath || '').split(/[\\/]/).pop() || 'Output';
+  var itemPath = dirBucket + '/' + outputName;
   var isVideo = _editMediaType === 'video';
   var item = {
     name: outputName,
-    path: outputName,
+    path: itemPath,
     kind: 'backend',
     absPath: outputPath,
     rootDirPath: rootDirPath,
@@ -190,7 +227,15 @@ function _addOutputToGallery(outputName, outputPath, outputURL) {
   } else {
     if (typeof appendItems === 'function') {
       appendItems([item]);
-      if (typeof setActive === 'function') { setActive(galleryState.items.length - 1); }
+      var newIdx = galleryState.items.length - 1;
+      if (typeof setActive === 'function') { setActive(newIdx); }
+      // Re-derive currentFolderIndices for the new item's dir bucket and
+      // re-render the thumbnail strip so it actually appears. setActive alone
+      // only updates the big-image view; the strip stayed on the old (now
+      // stale) folder filter and the new item was invisible — that's the
+      // show-in-gallery bug.
+      if (typeof updateCurrentFolderItems === 'function') { updateCurrentFolderItems(newIdx); }
+      if (typeof renderTreePanel === 'function') { renderTreePanel(); }
     }
   }
   pgCloseModal();
@@ -207,12 +252,47 @@ function _cancelJob() {
 // ---------- start job -----------------------------------------------
 function _startJob(op, params, overwrite, outputDir) {
   if (!_editCurrentItem || !_editCurrentItem.absPath) return;
+  // "Replace original" needs a real source path: a kind:'backend' file/dir
+  // on disk, or a backend zip (handled below via zip-writeback). FSAA
+  // (kind:'fs'), FSAA-dropped zip (no zipAbsPath), and plain blobs have no
+  // writable original — overwriting their temp input would silently no-op.
+  var canReplace = _editCurrentItem.kind === 'backend'
+    || (_editCurrentItem.kind === 'zip' && !!_editCurrentItem.zipAbsPath && !!_editCurrentItem.zipPath);
+  if (overwrite && !canReplace) { showMsg(_geT('geNoDiskPath')); return; }
   _editJobId = null;
+  // Single-image "replace original" into a zip archive: transcode to a temp
+  // file first, then repost the bytes into the on-disk archive at the entry's
+  // original inner path via /edit/zip-writeback. We set a pending flag that
+  // _onCompleted honors (see below) so the api/start response's outputPath
+  // (the temp file) becomes the writeback input. FSAA zip (no zipAbsPath) and
+  // fs items cannot be replaced in place — guard and fall back to save-to-dir.
+  _zipReplacePending = !!(overwrite && _editCurrentItem.kind === 'zip' && _editCurrentItem.zipAbsPath
+                           && _editCurrentItem.zipPath);
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
   _showProgressSection();
-  var body = { inputPath: _editCurrentItem.absPath, operation: op, overwrite: !!overwrite, params: params };
-  if (outputDir && !overwrite) body.outputDir = outputDir;
+  // Carry the original filename so single-file save-to-dir (and zip-writeback
+  // temp naming) keeps the gallery item's name with only the new extension,
+  // instead of leaking the temp input name ("gallery-edit-upload-XXXX.mp4"
+  // etc.) into the saved output. Applies to every single-file operation that
+  // flows here: image_transcode, video_transcode, video_trim, video_subtitle.
+  // When the user typed a custom filename in the shared dest block ("Save to
+  // dir → rename"), prefer it over the original name — applies equally to
+  // single images and single videos (Rename parity). The server appends the
+  // format extension from buildArgs.
+  var customRename = '';
+  var renameEl = document.getElementById('ge-dest-rename');
+  if (renameEl) customRename = (renameEl.value || '').trim();
+  var origStem = customRename || _stripExt((_editCurrentItem.name || ( (_editCurrentItem.path||'').split('/').pop() )) || '');
+  var body = { inputPath: _editCurrentItem.absPath, operation: op, overwrite: _zipReplacePending ? false : !!overwrite, params: params };
+  if (_zipReplacePending) {
+    // Write to the server's temp dir; we read outputPath from job status and
+    // POST it to /edit/zip-writeback which repacks the archive in place.
+    body.outputDir = '';
+  } else if (outputDir && !overwrite) {
+    body.outputDir = outputDir;
+    if (origStem) body.outputName = origStem;
+  }
   fetch('/api/gallery/edit/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -247,20 +327,179 @@ function _uploadSubtitle(file, callback) {
 // ---------- batch mode helpers ----------------------------------------
 
 // _getSiblingImages returns all items in galleryState.items that share the
-// same directory as _editCurrentItem AND have an absPath.
+// same folder/archive as _editCurrentItem, regardless of how they were loaded
+// (backend native picker, File System Access API, drag-drop, or zip). The
+// grouping key is chosen per item kind so it mirrors the canonical node
+// matcher itemsInNode() in gallery-fullscreen.js:
+//   kind 'backend' → rootDirPath (fallback: directory of absPath)
+//   kind 'fs'      → rootDirHandle (top-level dir the handle was picked from)
+//   kind 'zip'     → zipAbsPath (on-disk archive) or sessionId (FSAA zip)
+//   kind 'plain'   → excluded (single blob, no shared folder)
+function _dirOfPath(p) {
+  if (!p) return '';
+  var sep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return sep >= 0 ? p.substring(0, sep) : '';
+}
+function _normDir(d) {
+  return d ? d.replace(/\\/g, '/').replace(/\/+$/, '') : '';
+}
 function _getSiblingImages() {
-  if (!_editCurrentItem || !_editCurrentItem.absPath) return [];
-  var lastSep = Math.max(_editCurrentItem.absPath.lastIndexOf('/'), _editCurrentItem.absPath.lastIndexOf('\\'));
-  var srcDir = lastSep >= 0 ? _editCurrentItem.absPath.substring(0, lastSep) : '';
-  var siblings = [];
+  if (!_editCurrentItem) return [];
+  var cur = _editCurrentItem;
   var items = galleryState.items || [];
-  for (var i = 0; i < items.length; i++) {
-    var it = items[i];
-    if (!it || !it.absPath) continue;
-    var itDir = it.absPath.substring(0, Math.max(it.absPath.lastIndexOf('/'), it.absPath.lastIndexOf('\\')));
-    if (itDir === srcDir) siblings.push(it);
+  var out = [];
+
+  if (cur.kind === 'zip') {
+    // Archive grouping: prefer the on-disk absolute path (backend folders),
+    // fall back to the in-memory session id (FSAA / drag-drop zips). Both are
+    // stable pack identifiers shared by every entry of the same archive.
+    var zipKey = cur.zipAbsPath || ('@sess:' + (cur.sessionId || ''));
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!it || it.kind !== 'zip') continue;
+      var k = it.zipAbsPath || ('@sess:' + (it.sessionId || ''));
+      if (k === zipKey) out.push(it);
+    }
+    return out;
   }
-  return siblings;
+
+  if (cur.kind === 'fs') {
+    // FSAA folder grouping: the top-level FileSystemDirectoryHandle saved by
+    // walkDir() is identity-equal across all files picked from the same dir.
+    var rootHandle = cur.rootDirHandle;
+    if (!rootHandle) return [];
+    for (var j = 0; j < items.length; j++) {
+      var it2 = items[j];
+      if (!it2 || it2.kind !== 'fs') continue;
+      if (it2.rootDirHandle === rootHandle) out.push(it2);
+    }
+    return out;
+  }
+
+  if (cur.kind === 'backend') {
+    var srcDir = cur.rootDirPath ? _normDir(cur.rootDirPath)
+                                 : (cur.absPath ? _normDir(_dirOfPath(cur.absPath)) : '');
+    if (!srcDir) return [];
+    for (var m = 0; m < items.length; m++) {
+      var it3 = items[m];
+      if (!it3 || it3.kind !== 'backend') continue;
+      var itDir = it3.rootDirPath ? _normDir(it3.rootDirPath)
+                                  : (it3.absPath ? _normDir(_dirOfPath(it3.absPath)) : '');
+      if (itDir === srcDir) out.push(it3);
+    }
+    return out;
+  }
+
+  // kind 'plain' (single pasted blob) and unknown kinds have no disk folder:
+  // batching applies to one's siblings, and a lone blob has none.
+}
+
+// _stripExt returns the name without its last extension ("a.b.png" → "a.b").
+function _stripExt(name) {
+  if (!name) return '';
+  var dot = name.lastIndexOf('.');
+  return dot > 0 ? name.substring(0, dot) : name;
+}
+
+// _batchOriginZipName derives the zipped-output filename from the current
+// edit item's source folder/archive, so the result keeps a recognisable name
+// instead of "converted_images.zip". Mirrors the grouping keys used by
+// _getSiblingImages: zip items → archive base name (or first path segment for
+// FSAA zips), fs items → root dir handle name, backend items → rootDirPath
+// base name. Output: "<origin>_converted.zip", base-only + .zip enforced
+// server-side to prevent path traversal.
+// Derives the output zip/folder name. If the rethink rename toggle is on,
+// it uses the custom name from `ge-img-rename-name`; otherwise falls back
+// to the original source folder/archive name. Always sanitised server-side
+// (filepath.Base + .zip forced).
+function _batchOriginZipName() {
+  var it = _editCurrentItem;
+  // Honour the explicit "Rename" input when present and filled.
+  var renameReq = '';
+  var ri = document.getElementById('ge-img-rename');
+  var rn = document.getElementById('ge-img-rename-name');
+  if (ri && ri.checked && rn) renameReq = (rn.value || '').trim();
+  if (_batchCfg && _batchCfg.renameName) renameReq = _batchCfg.renameName;
+  if (renameReq) {
+    return _stripExt(renameReq) || 'converted_images';
+  }
+  var stem = _batchOriginStem();
+  return stem + '_converted.zip';
+}
+
+// _refreshBatchUXVisibility toggles the visibility of the rename/normalise
+// rows according to the current checkbox/destination state. Rules:
+//  - rename row: batch mode AND "Compress to ZIP" on (the rename field sets
+//    the zip name; in uncompressed save-to-dir, individual names come from
+//    either sequential-rename or the original filename)
+//  - rename name input: only when the rename checkbox is also on
+//  - normalise row + opts: batch mode on (any destination). "Same Path"
+//    (overwrite) batch also accepts sequential rename because the server
+//    now honours OutputName in the same-path (non-OutputDir) branch too,
+//    placing e.g. "img001_converted.webp" next to the originals without
+//    overwriting them.
+function _refreshBatchUXVisibility() {
+  var batchCb = document.getElementById('ge-img-batch');
+  var compressCb = document.getElementById('ge-img-compress');
+  var renameCb = document.getElementById('ge-img-rename');
+  var renameNameInput = document.getElementById('ge-img-rename-name');
+  var renameRow = document.getElementById('ge-img-rename-row');
+  var renormRow = document.getElementById('ge-img-renorm-row');
+  var renormOpts = document.getElementById('ge-img-renorm-opts');
+  var batchOn = !!(batchCb && batchCb.checked);
+  var compressOn = !!(compressCb && compressCb.checked);
+  if (renameRow) renameRow.style.display = (batchOn && compressOn) ? '' : 'none';
+  if (renameNameInput) renameNameInput.style.display = (renameCb && renameCb.checked && renameRow && renameRow.style.display !== 'none') ? '' : 'none';
+  if (renormRow) renormRow.style.display = batchOn ? '' : 'none';
+  if (renormOpts) renormOpts.style.display = (renormRow && renormRow.style.display !== 'none' && document.getElementById('ge-img-renorm') && document.getElementById('ge-img-renorm').checked) ? '' : 'none';
+}
+function _padNum(n, digits) {
+  var s = String(n);
+  while (s.length < digits) s = '0' + s;
+  return s;
+}
+
+// _batchOriginStem returns the original folder/archive stem (no extension,
+// no trailing _converted) for use as the custom-name fallback and the
+// sequential-rename default folder/zip name.
+function _batchOriginStem() {
+  var it = _editCurrentItem;
+  if (!it) return 'converted_images';
+  var stem = '';
+  if (it.kind === 'zip') {
+    if (it.zipAbsPath) stem = it.zipAbsPath.split(/[\\/]/).pop();
+    else stem = (it.path || '').split('/')[0] || it.name || '';
+  } else if (it.kind === 'fs' && it.rootDirHandle && it.rootDirHandle.name) {
+    stem = it.rootDirHandle.name;
+  } else if (it.kind === 'backend' && it.rootDirPath) {
+    stem = it.rootDirPath.split(/[\\/]/).pop();
+  }
+  stem = _stripExt(stem) || 'converted_images';
+  return stem;
+}
+
+// _captureBatchCfg reads the current state of the rename / sequential-rename
+// controls so the result handler can honour them even after the controls reset.
+function _captureBatchCfg() {
+  var renormCb = document.getElementById('ge-img-renorm');
+  var renormOn = !!(renormCb && renormCb.checked);
+  var prefix = '';
+  var digits = 2;
+  if (renormOn) {
+    var pEl = document.getElementById('ge-img-renorm-prefix');
+    var dEl = document.getElementById('ge-img-renorm-digits');
+    prefix = (pEl && pEl.value) ? pEl.value.trim() : '';
+    digits = dEl ? (parseInt(dEl.value, 10) || 2) : 2;
+    if (digits < 1) digits = 1;
+    if (!prefix) prefix = _geT('geRenormPrefixPh');
+  }
+  var renameCb = document.getElementById('ge-img-rename');
+  var renameNameEl = document.getElementById('ge-img-rename-name');
+  var renameName = '';
+  if (renameCb && renameCb.checked && renameNameEl) {
+    renameName = (renameNameEl.value || '').trim();
+  }
+  return { renormalise: renormOn, prefix: prefix, digits: digits, renameName: renameName };
 }
 
 var _batchJobs = [];
@@ -269,8 +508,46 @@ var _batchDone = 0;
 var _batchDest = null;
 var _batchParams = null;
 var _batchOp = null;
+var _batchCompress = false;
+// Captured UX options at the moment the batch starts ({ renormalise, prefix,
+// digits, renameName }) so _onBatchComplete (which runs async after all jobs
+// finish and the controls may have been reset) can still honour them.
+var _batchCfg = null;
 
-function _startBatch(op, params, dest) {
+// _resolveBatchInput resolves the on-disk input path for a single batch item,
+// mirroring the per-item resolution triggerMediaEditor() already uses for
+// single-file editing. Backend items already carry absPath; FSAA/drag-drop
+// files are uploaded to a temp file (/edit/upload-temp) and zip entries are
+// extracted to a temp file (/edit/extract-zip-entry). Returns a promise that
+// resolves to an absolute path string, or rejects on failure.
+function _resolveBatchInput(it) {
+  if (it.absPath) return Promise.resolve(it.absPath);
+  if (it.kind === 'zip' && (it.zipAbsPath || it.sessionId)) {
+    var body = { zipPath: it.zipPath };
+    if (it.zipAbsPath) body.zipAbsPath = it.zipAbsPath;
+    else body.sessionId = it.sessionId;
+    return fetch('/api/gallery/edit/extract-zip-entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
+    }).then(function(d) { return d.tempPath; });
+  }
+  if (typeof it.getBlob === 'function') {
+    return it.getBlob().then(function(blob) {
+      return fetch('/api/gallery/edit/upload-temp?name=' + encodeURIComponent(it.name || 'file'), {
+        method: 'POST',
+        body: blob
+      });
+    }).then(function(r) {
+      return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
+    }).then(function(d) { return d.tempPath; });
+  }
+  return Promise.reject(new Error('no disk path'));
+}
+
+function _startBatch(op, params, dest, compress) {
   var siblings = _getSiblingImages();
   if (siblings.length === 0) { showMsg(_geT('geNoBatchItems')); return; }
   _batchJobs = [];
@@ -279,6 +556,23 @@ function _startBatch(op, params, dest) {
   _batchDest = dest;
   _batchParams = params;
   _batchOp = op;
+  _batchCompress = !!compress;
+
+  // Capture the user's UX choices once, so the async _onBatchComplete path
+  // (which runs after all polling finishes and the controls may have been
+  // reset by then) can still honour rename / sequential-rename.
+  _batchCfg = _captureBatchCfg();
+
+  // In compress mode, force save-to-dir (never overwrite) and use the
+  // download default dir when the user left the directory empty.
+  var batchDest = dest;
+  if (_batchCompress) {
+    batchDest = { overwrite: false, outputDir: dest.outputDir || _editDefaultDir || '' };
+  }
+
+  // Pre-compute each sibling's output stem (no extension; server appends the
+  // format extension). Sequential-rename overrides the per-item original name.
+  var digits = (_batchCfg && _batchCfg.renormalise) ? Math.max(1, parseInt(_batchCfg.digits, 10) || 2) : 0;
 
   _stopPolling();
   var resultEl = document.getElementById('ge-result-area');
@@ -288,26 +582,40 @@ function _startBatch(op, params, dest) {
 
   for (var i = 0; i < siblings.length; i++) {
     var it = siblings[i];
-    var body = { inputPath: it.absPath, operation: op, overwrite: !!dest.overwrite, params: params };
-    if (dest.outputDir && !dest.overwrite) body.outputDir = dest.outputDir;
-
-    var job = { item: it, jobId: null, done: false, error: null };
+    var job = { item: it, jobId: null, done: false, error: null, outStem: '' };
+    // Sequential renormalise → <prefix><NN..>; otherwise keep the original
+    // item name stem. Multi-segment zipPath-like names already include a
+    // directory prefix; we keep the basename only so the saved filename is a
+    // plain leaf ("p1.png" path "archive.zip/sub/x.png" → "x").
+    var baseName = it.name || (it.path || '').split('/').pop() || '';
+    job.outStem = digits > 0
+      ? (_batchCfg.prefix || _geT('geRenormPrefixPh')) + _padNum(i + 1, digits)
+      : _stripExt(baseName);
     _batchJobs.push(job);
 
-    (function(idx, reqBody) {
-      fetch('/api/gallery/edit/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqBody)
-      })
-      .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
-      .then(function(data) {
+    (function(idx, item, reqOp, reqParams, reqBatchDest, outStem) {
+      _resolveBatchInput(item).then(function(inputPath) {
+        var body = { inputPath: inputPath, operation: reqOp, overwrite: !!reqBatchDest.overwrite, params: reqParams };
+        if (reqBatchDest.outputDir && !reqBatchDest.overwrite) body.outputDir = reqBatchDest.outputDir;
+        // Send outputName whenever we computed a stem. Covers both
+        // "Save to dir" (outputDir+!overwrite → server appends new ext) and
+        // "Same Path" (overwrite, no outputDir → server appends _desc+ext).
+        // This lets sequential-rename in batch yield e.g. "img001_converted.webp"
+        // even in Same Path mode, next to the originals.
+        if (outStem) body.outputName = outStem;
+        return fetch('/api/gallery/edit/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function(r) {
+          return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
+        });
+      }).then(function(data) {
         var j = _batchJobs[idx];
         if (!j) return;
         j.jobId = data.jobId;
         _pollBatchJob(idx, data.jobId);
-      })
-      .catch(function(err) {
+      }).catch(function(err) {
         var j = _batchJobs[idx];
         if (!j) return;
         j.done = true;
@@ -316,7 +624,7 @@ function _startBatch(op, params, dest) {
         _setProgressStatus(_geT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
         if (_batchDone >= _batchTotal) _onBatchComplete();
       });
-    })(i, body);
+    })(i, it, op, params, batchDest, job.outStem);
   }
 }
 
@@ -353,39 +661,157 @@ function _pollBatchJob(idx, jobId) {
 
 function _onBatchComplete() {
   _editJobId = null;
-  _hideProgressSection();
   var ok = 0, fail = 0;
+  var outputPaths = [];
   for (var i = 0; i < _batchJobs.length; i++) {
-    if (_batchJobs[i].error) fail++;
-    else ok++;
+    if (_batchJobs[i].error) { fail++; continue; }
+    ok++;
+    if (_batchJobs[i].outputPath) outputPaths.push(_batchJobs[i].outputPath);
   }
+
+  // Replace-original on a backend zip (kind:'zip' with zipAbsPath): repack
+  // the on-disk archive in place, overwriting each image entry with its
+  // transcoded temp output at the same inner zip path. This must run BEFORE
+  // the compress branch (compress mode forces non-overwrite so they are
+  // mutually exclusive) and before the generic non-compress results.
+  if (_batchDest && _batchDest.overwrite && _editCurrentItem && _editCurrentItem.kind === 'zip' && _editCurrentItem.zipAbsPath) {
+    _zipWritebackBatch(_editCurrentItem.zipAbsPath, ok, fail);
+    return;
+  }
+
+  // If compress mode and we have outputs, create a zip.
+  if (_batchCompress && outputPaths.length > 0) {
+    _setProgressStatus(_geT('geZipping'), false);
+    var zipDest = _batchDest.outputDir || _editDefaultDir || '';
+    fetch('/api/gallery/edit/zip-outputs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: outputPaths, outputDir: zipDest, zipName: _batchOriginZipName(), cleanUp: true })
+    })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
+    .then(function(data) {
+      _hideProgressSection();
+      var resultEl = document.getElementById('ge-result-area');
+      if (resultEl) {
+        var html = '<div class="gallery-edit-result">';
+        html += '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
+        html += '<div class="gallery-edit-actions">';
+        html += '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>';
+        html += '</div></div>';
+        resultEl.innerHTML = html;
+        resultEl.style.display = 'block';
+      }
+      var openBtn = document.getElementById('ge-open-folder-btn');
+      if (openBtn && data.zipPath) {
+        openBtn.onclick = function() { _openInFileManager(data.zipPath); };
+      }
+      _batchJobs = [];
+    })
+    .catch(function(err) {
+      _hideProgressSection();
+      var resultEl = document.getElementById('ge-result-area');
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">Zip failed: ' + escapeHtml(err.message || String(err)) + '</span></div>';
+        resultEl.style.display = 'block';
+      }
+      _batchJobs = [];
+    });
+    return;
+  }
+
+  // Non-compress mode: show individual results.
+  _hideProgressSection();
   var resultEl = document.getElementById('ge-result-area');
   var html = '<div class="gallery-edit-result">';
-  html += '<span style="color:var(--accent2);font-weight:600">&#10004; ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
+  html += '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
   html += '<div class="gallery-edit-actions">';
-  html += '<button class="pg-btn" id="ge-show-batch-btn">' + escapeHtml(_geT('geShowInGallery')) + '</button>';
+  html += '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>';
   html += '</div></div>';
   if (resultEl) {
     resultEl.innerHTML = html;
     resultEl.style.display = 'block';
   }
-
-  var showBtn = document.getElementById('ge-show-batch-btn');
-  if (showBtn) {
-    showBtn.onclick = function() {
-      var added = false;
-      for (var i = 0; i < _batchJobs.length; i++) {
-        var j = _batchJobs[i];
-        if (!j.error && j.outputPath && j.outputURL) {
-          _addOutputToGallery(j.outputName, j.outputPath, j.outputURL);
-          added = true;
-        }
+  var openBtnN = document.getElementById('ge-open-folder-btn');
+  if (openBtnN) {
+    openBtnN.onclick = function() {
+      // Open the dir of the first successful output — all batch outputs go
+      // to the same OutputDir when not compressing.
+      for (var k = 0; k < _batchJobs.length; k++) {
+        if (!_batchJobs[k].error && _batchJobs[k].outputPath) { _openInFileManager(_batchJobs[k].outputPath); return; }
       }
-      if (added) pgCloseModal();
     };
   }
 
   _batchJobs = [];
+}
+
+// _zipWritebackBatch completes a replace-original convert-all flow against an
+// on-disk zip archive: it POSTs each successfully converted job's temp output
+// mapped to its inner zip path to /edit/zip-writeback, which repacks the
+// archive and atomically writes it back to archivePath. Renders the result
+// area with the same success markup as the non-compress branch plus an Open
+// Folder button.
+function _zipWritebackBatch(archivePath, ok, fail) {
+  var entries = [];
+  for (var i = 0; i < _batchJobs.length; i++) {
+    var j = _batchJobs[i];
+    if (!j.error && j.outputPath && j.item && j.item.zipPath) {
+      entries.push({ zipPath: j.item.zipPath, filePath: j.outputPath });
+    }
+  }
+
+  _setProgressStatus(_geT('geZipping') || 'Repacking archive...', false);
+  fetch('/api/gallery/edit/zip-writeback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archivePath: archivePath, entries: entries })
+  })
+  .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
+  .then(function() {
+    _hideProgressSection();
+    var resultEl = document.getElementById('ge-result-area');
+    if (resultEl) {
+      // Single action button: "Open Folder" if translation exists, else fall
+      // back to the "Show in Gallery" label (still wired to open the folder,
+      // since the archive is replaced in place, not added as a new entry).
+      var openLabel = _geT('geBatchOpenFolder') || _geT('geShowInGallery');
+      var html = '<div class="gallery-edit-result">';
+      html += '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
+      html += '<div class="gallery-edit-actions">';
+      html += '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(openLabel) + '</button>';
+      html += '</div></div>';
+      resultEl.innerHTML = html;
+      resultEl.style.display = 'block';
+    }
+    var openBtn = document.getElementById('ge-open-folder-btn');
+    if (openBtn) {
+      openBtn.onclick = function() { _openInFileManager(archivePath); };
+    }
+    _batchJobs = [];
+  })
+  .catch(function(err) {
+    _hideProgressSection();
+    var resultEl = document.getElementById('ge-result-area');
+    if (resultEl) {
+      resultEl.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">Writeback failed: ' + escapeHtml(err.message || String(err)) + '</span></div>';
+      resultEl.style.display = 'block';
+    }
+    _batchJobs = [];
+  });
+}
+
+// _openInFileManager asks the server to open a path's containing directory in
+// the OS file manager. On error it surfaces a message via geBatchOpenError.
+function _openInFileManager(path) {
+  fetch('/api/gallery/open-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path })
+  })
+  .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
+  .catch(function(err) {
+    showMsg((_geT('geBatchOpenError') || 'Failed to open folder') + ': ' + (err.message || err));
+  });
 }
 
 // ---------- modal render ---------------------------------------------
@@ -401,19 +827,37 @@ function _renderImageForm() {
 
   var html = '';
 
-  // Source info
-  html += '<div class="gallery-edit-info">';
-  html += '<span><strong>' + escapeHtml(_geT('geSourceInfo')) + ':</strong> ' + w + '\u00d7' + h;
-  var codecStr = probe.codec ? ', ' + probe.codec : '';
-  html += codecStr + '</span>';
-  html += '</div>';
-
-  // Batch mode
+  // Batch mode + compress toggle
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-check">';
   html += '<input type="checkbox" id="ge-img-batch"> ' + escapeHtml(_geT('geBatchConvert'));
   html += '</label>';
   html += '<span id="ge-batch-count" style="font-size:11px;color:var(--text-muted);margin-left:8px"></span>';
+  html += '</div>';
+  // Compress to ZIP (only visible in batch mode)
+  html += '<div class="gallery-edit-row" id="ge-img-compress-row" style="display:none;margin-left:24px">';
+  html += '<label class="gallery-edit-check">';
+  html += '<input type="checkbox" id="ge-img-compress"> ' + escapeHtml(_geT('geCompressZip'));
+  html += '</label>';
+  html += '</div>';
+  // Custom zip/folder name (only visible in batch + compress mode)
+  html += '<div class="gallery-edit-row" id="ge-img-rename-row" style="display:none;margin-left:24px">';
+  html += '<label class="gallery-edit-check">';
+  html += '<input type="checkbox" id="ge-img-rename"> ' + escapeHtml(_geT('geRenameZip'));
+  html += '</label>';
+  html += '<input type="text" id="ge-img-rename-name" style="flex:1;margin-left:8px" placeholder="' + escapeHtml(_geT('geRenamePlaceholder')) + '" title="' + escapeHtml(_geT('geRenameZipHint')) + '">';
+  html += '</div>';
+  // Sequential rename (only visible in batch mode, hidden when compress path forced in-place)
+  html += '<div class="gallery-edit-row" id="ge-img-renorm-row" style="display:none;margin-left:24px">';
+  html += '<label class="gallery-edit-check">';
+  html += '<input type="checkbox" id="ge-img-renorm"> ' + escapeHtml(_geT('geRenorm'));
+  html += '</label>';
+  html += '</div>';
+  html += '<div class="gallery-edit-row" id="ge-img-renorm-opts" style="display:none;margin-left:48px">';
+  html += '<label class="gallery-edit-label" style="width:auto">' + escapeHtml(_geT('geRenormPrefix')) + '</label>';
+  html += '<input type="text" id="ge-img-renorm-prefix" style="width:120px" value="' + escapeHtml(_geT('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(_geT('geRenormPrefixPh')) + '">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin-left:8px">' + escapeHtml(_geT('geRenormDigits')) + '</label>';
+  html += '<input type="number" id="ge-img-renorm-digits" min="1" max="9" value="2" style="width:60px">';
   html += '</div>';
 
   // Format select
@@ -439,10 +883,11 @@ function _renderImageForm() {
   html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + escapeHtml(_geT('geQualityHint')) + '</span>';
   html += '</div>';
 
-  // Scale percent
+  // Scale slider
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geScalePercent')) + '</label>';
-  html += '<input type="number" id="ge-img-scale" min="10" max="200" value="100" style="width:80px">';
+  html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="flex:1">';
+  html += '<span class="gallery-edit-val" id="ge-scale-val">100%</span>';
   html += '<span class="gallery-edit-val" id="ge-scale-dims">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
   html += '</div>';
 
@@ -495,10 +940,14 @@ function _renderVideoTranscodeForm() {
   html += '</select>';
   html += '</div>';
 
-  // Scale percent
+  // Scale percent (same range+value+dims pattern as the image form — the
+  // server clips to 10..200 regardless of input type, so changing the control
+  // here doesn't alter the server contract).
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geScalePercent')) + '</label>';
-  html += '<input type="number" id="ge-vid-scale" min="10" max="200" value="100" style="width:80px">';
+  html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="flex:1">';
+  html += '<span class="gallery-edit-val" id="ge-vid-scale-val">100%</span>';
+  html += '<span class="gallery-edit-val" id="ge-vid-scale-dims">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
   html += '</div>';
 
   // Audio codec
@@ -529,21 +978,14 @@ function _renderVideoTranscodeForm() {
 function _renderVideoTrimForm() {
   var html = '';
 
-  // Start time
+  // Select ranges button — switches to the video display with trim controls
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geTrimStart')) + '</label>';
-  html += '<input type="text" id="ge-trim-start" placeholder="' + escapeHtml(_geT('geTrimStartPlaceholder')) + '" style="width:140px">';
+  html += '<button type="button" class="btn btn-primary" id="ge-trim-select-btn" style="flex:1">' + escapeHtml(_geT('geTrimSelectRanges')) + '</button>';
   html += '</div>';
 
-  // Duration
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geTrimDuration')) + '</label>';
-  html += '<input type="text" id="ge-trim-duration" placeholder="' + escapeHtml(_geT('geTrimDurationPlaceholder')) + '" style="width:140px">';
-  html += '</div>';
-
-  // Preview hint
-  html += '<div class="gallery-edit-row">';
-  html += '<span class="gallery-edit-val" id="ge-trim-preview" style="font-size:12px;color:var(--text-muted)"></span>';
+  // Segment display
+  html += '<div class="gallery-edit-row" id="ge-trim-segments-display">';
+  html += '<span class="gallery-edit-val" id="ge-trim-segments-text" style="font-size:12px;color:var(--text-muted);flex:1">' + escapeHtml(_formatTrimSegments(_editTrimSegments)) + '</span>';
   html += '</div>';
 
   // Re-encode mode
@@ -554,6 +996,11 @@ function _renderVideoTrimForm() {
   html += '<label class="gallery-edit-check">';
   html += '<input type="radio" name="ge-trim-mode" value="reencode"> ' + escapeHtml(_geT('geAccurateEncode'));
   html += '</label>';
+  html += '</div>';
+
+  // Multi-segment re-encode hint
+  html += '<div class="gallery-edit-row" id="ge-trim-multi-hint" style="display:none">';
+  html += '<span style="font-size:11px;color:var(--text-muted)">' + escapeHtml(_geT('geTrimMultiReencodeHint')) + '</span>';
   html += '</div>';
 
   // Re-encode options
@@ -649,9 +1096,12 @@ function _buildModalHTML() {
   html += '<strong>' + escapeHtml(_geT('geFfmpegNA')) + '</strong>: ' + escapeHtml(_geT('geFfmpegNAHint'));
   html += '</div>';
 
-  // Source info line
+  // Source info line with settings gear button
   html += '<div class="gallery-edit-info" id="ge-source-info">';
   html += '<span>' + escapeHtml(_geT('geSourceInfo')) + ': <span id="ge-source-detail">Loading...</span></span>';
+  html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(_geT('geSettingsHint')) + '" title="' + escapeHtml(_geT('geSettings')) + '">';
+  html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+  html += '</button>';
   html += '</div>';
   // Destination section
   html += '<div class="gallery-edit-section">';
@@ -665,11 +1115,18 @@ function _buildModalHTML() {
   html += '</label>';
   html += '</div>';
   html += '<div class="gallery-edit-row" id="ge-dest-dir-row" style="display:none">';
-  html += '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn">';
+  html += '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" title="' + escapeHtml(_geT('geBrowseDir')) + '">';
   html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-  html += '<span>' + escapeHtml(_geT('geBrowseDir')) + '</span>';
   html += '</button>';
   html += '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(_geT('geDestDirPlaceholder')) + '">';
+  html += '</div>';
+  // Custom output filename (Save to dir mode only, image+video parity).
+  // Lets the user override the saved file's stem with their own; the server
+  // appends the format extension. Same Path keeps the original.
+  html += '<div class="gallery-edit-row" id="ge-dest-rename-row" style="display:none;margin-left:24px">';
+  html += '<label class="gallery-edit-label" style="width:auto">' + escapeHtml(_geT('geRenameZip')) + '</label>';
+  html += '<input type="text" id="ge-dest-rename" style="flex:1;margin-left:8px" placeholder="' + escapeHtml(_geT('geRenamePlaceholder')) + '">';
+  html += '</div>';
   html += '</div>';
   html += '</div>';
 
@@ -679,13 +1136,15 @@ function _buildModalHTML() {
     html += _renderImageForm();
     html += '</div>';
   } else {
-    // Video: tabbed
+    // Video: tabbed — wrap tab panels in a fixed-height container so the
+    // modal does not resize or jump position when switching tabs.
     html += '<div class="gallery-edit-tabs">';
     html += '<button class="gallery-edit-tab active" data-tab="transcode">' + escapeHtml(_geT('geTranscodeTab')) + '</button>';
     html += '<button class="gallery-edit-tab" data-tab="trim">' + escapeHtml(_geT('geTrimTab')) + '</button>';
     html += '<button class="gallery-edit-tab" data-tab="subtitle">' + escapeHtml(_geT('geSubtitleTab')) + '</button>';
     html += '</div>';
 
+    html += '<div class="gallery-edit-tab-panels">';
     html += '<div class="gallery-edit-section" id="ge-tab-transcode">';
     html += _renderVideoTranscodeForm();
     html += '</div>';
@@ -694,6 +1153,7 @@ function _buildModalHTML() {
     html += '</div>';
     html += '<div class="gallery-edit-section" id="ge-tab-subtitle" style="display:none">';
     html += _renderVideoSubtitleForm();
+    html += '</div>';
     html += '</div>';
   }
 
@@ -721,14 +1181,349 @@ function _buildModalHTML() {
   return html;
 }
 
+// ---------- ffmpeg status check ------------------------------------
+function _checkFfmpegStatus() {
+  fetch('/api/gallery/edit/ffmpeg-status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var warn = document.getElementById('ge-ffmpeg-warn');
+      var startBtn = document.getElementById('ge-start-btn');
+      if (!data.available) {
+        if (warn) warn.style.display = '';
+        if (startBtn) startBtn.disabled = true;
+      } else {
+        if (warn) warn.style.display = 'none';
+        if (startBtn && !_editJobId) startBtn.disabled = false;
+      }
+    })
+    .catch(function() {});
+}
+
+// ---------- trim mode (video display with multi-segment selector) ----
+var _editTrimSegments = [];     // confirmed segments: [{start, end}]
+var _editDefaultDir = '';       // cached default download dir
+var _trimMode = false;
+var _trimSegments = [];         // live segments in trim mode
+var _trimLastDragged = null;    // {segIdx, handle} last dragged handle
+var _trimDuration = 0;
+var _trimVidEl = null;
+var _trimSavedSeekerHTML = '';
+var _trimSavedCtrlCenterHTML = '';
+var _trimKeyHandler = null;
+
+function _trimPct(sec) {
+  if (_trimDuration <= 0) return 0;
+  return Math.max(0, Math.min(100, (sec / _trimDuration) * 100));
+}
+
+function _trimSecFromX(clientX) {
+  var bar = document.getElementById('ge-trimbar');
+  if (!bar) return 0;
+  var rect = bar.getBoundingClientRect();
+  var ratio = (clientX - rect.left) / rect.width;
+  return Math.max(0, Math.min(1, ratio)) * _trimDuration;
+}
+
+function _formatTrimSegments(segments) {
+  if (!segments || !segments.length) return _geT('geTrimNoSegments');
+  return segments.map(function(s) {
+    return _formatSecToTime(s.start) + ' \u2192 ' + _formatSecToTime(s.end);
+  }).join(', ');
+}
+
+function _updateTrimSegmentDisplay() {
+  var el = document.getElementById('ge-trim-segments-text');
+  if (el) el.textContent = _formatTrimSegments(_editTrimSegments);
+  var hint = document.getElementById('ge-trim-multi-hint');
+  if (hint) hint.style.display = (_editTrimSegments.length > 1) ? '' : 'none';
+}
+
+// Build the trim bar HTML that replaces the video seeker.
+function _buildTrimBarHTML() {
+  var html = '<div class="ge-trimbar" id="ge-trimbar">';
+  html += '<div class="ge-trimbar-track"></div>';
+  html += '</div>';
+  html += '<span id="ge-trimbar-time" class="gallery-video-time">00:00 / 00:00</span>';
+  return html;
+}
+
+// Build the 4 trim-mode buttons that replace the center controls.
+function _buildTrimButtonsHTML() {
+  var addIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  var removeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  var confirmIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  return '<button class="gallery-btn gallery-btn-icon" id="ge-tm-play" type="button" data-tooltip="' + escapeHtml(_geT('geTrimPlayPause')) + '">' + GALLERY_ICONS.play + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="ge-tm-add" type="button" data-tooltip="' + escapeHtml(_geT('geTrimAddSegment')) + '">' + addIcon + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="ge-tm-remove" type="button" data-tooltip="' + escapeHtml(_geT('geTrimRemoveSegment')) + '">' + removeIcon + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="ge-tm-confirm" type="button" data-tooltip="' + escapeHtml(_geT('geTrimConfirm')) + '">' + confirmIcon + '</button>';
+}
+
+// Re-render the trim bar fills and thumbs from _trimSegments.
+function _updateTrimBarUI() {
+  var bar = document.getElementById('ge-trimbar');
+  if (!bar) return;
+  var html = '<div class="ge-trimbar-track"></div>';
+  for (var i = 0; i < _trimSegments.length; i++) {
+    var seg = _trimSegments[i];
+    var sp = _trimPct(seg.start), ep = _trimPct(seg.end);
+    html += '<div class="ge-trimbar-fill" style="left:' + sp + '%;width:' + (ep - sp) + '%"></div>';
+    var startActive = (_trimLastDragged && _trimLastDragged.segIdx === i && _trimLastDragged.handle === 'start');
+    var endActive = (_trimLastDragged && _trimLastDragged.segIdx === i && _trimLastDragged.handle === 'end');
+    html += '<div class="ge-trimbar-thumb' + (startActive ? ' active' : '') + '" data-seg="' + i + '" data-handle="start" style="left:' + sp + '%"></div>';
+    html += '<div class="ge-trimbar-thumb' + (endActive ? ' active' : '') + '" data-seg="' + i + '" data-handle="end" style="left:' + ep + '%"></div>';
+  }
+  bar.innerHTML = html;
+}
+
+function _startTrimDrag(segIdx, handle) {
+  _trimLastDragged = {segIdx: segIdx, handle: handle};
+  var isStart = (handle === 'start');
+  function onMove(e) {
+    var sec = _trimSecFromX(e.clientX);
+    var seg = _trimSegments[segIdx];
+    if (!seg) return;
+    // Clamp so groups never overlap: a group's start may not cross the
+    // previous group's end, and its end may not cross the next group's start.
+    // (Min 0.1s width inside each group is still enforced.)
+    var prevEnd = segIdx > 0 ? _trimSegments[segIdx - 1].end : 0;
+    var nextStart = (segIdx + 1 < _trimSegments.length) ? _trimSegments[segIdx + 1].start : _trimDuration;
+    if (isStart) {
+      // start may not go past this group's end-0.1, nor before prev group's end
+      seg.start = Math.max(prevEnd, Math.min(sec, seg.end - 0.1));
+    } else {
+      // end may not go before this group's start+0.1, nor past next group's start
+      seg.end = Math.min(nextStart, Math.max(sec, seg.start + 0.1));
+    }
+    if (_trimVidEl) _trimVidEl.currentTime = isStart ? seg.start : seg.end;
+    _updateTrimBarUI();
+  }
+  function onUp() {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+  }
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+function _moveNearestHandle(sec) {
+  var bestIdx = 0, bestHandle = 'start', bestDist = Infinity;
+  for (var i = 0; i < _trimSegments.length; i++) {
+    var seg = _trimSegments[i];
+    var ds = Math.abs(sec - seg.start);
+    var de = Math.abs(sec - seg.end);
+    if (ds < bestDist) { bestDist = ds; bestIdx = i; bestHandle = 'start'; }
+    if (de < bestDist) { bestDist = de; bestIdx = i; bestHandle = 'end'; }
+  }
+  var seg = _trimSegments[bestIdx];
+  var prevEnd = bestIdx > 0 ? _trimSegments[bestIdx - 1].end : 0;
+  var nextStart = (bestIdx + 1 < _trimSegments.length) ? _trimSegments[bestIdx + 1].start : _trimDuration;
+  if (bestHandle === 'start') {
+    seg.start = Math.max(prevEnd, Math.min(sec, seg.end - 0.1));
+  } else {
+    seg.end = Math.min(nextStart, Math.max(sec, seg.start + 0.1));
+  }
+  _trimLastDragged = {segIdx: bestIdx, handle: bestHandle};
+  if (_trimVidEl) _trimVidEl.currentTime = (bestHandle === 'start') ? seg.start : seg.end;
+  _updateTrimBarUI();
+}
+
+function _trimPlayPause() {
+  if (!_trimVidEl) return;
+  if (_trimVidEl.paused) {
+    var startSec = 0;
+    if (_trimLastDragged) {
+      var seg = _trimSegments[_trimLastDragged.segIdx];
+      if (seg) {
+        if (_trimLastDragged.handle === 'start') {
+          startSec = seg.start;
+        } else {
+          // Right handle: jump to next group's left, or first group's left.
+          if (_trimLastDragged.segIdx < _trimSegments.length - 1) {
+            startSec = _trimSegments[_trimLastDragged.segIdx + 1].start;
+          } else {
+            startSec = _trimSegments[0].start;
+          }
+        }
+      }
+    } else {
+      startSec = _trimSegments[0] ? _trimSegments[0].start : 0;
+    }
+    _trimVidEl.currentTime = startSec;
+    _trimVidEl.play();
+  } else {
+    _trimVidEl.pause();
+  }
+}
+
+function _trimAddSegment() {
+  var lastSeg = _trimSegments[_trimSegments.length - 1];
+  var start = lastSeg ? lastSeg.end : 0;
+  if (start >= _trimDuration) return;
+  _trimSegments.push({start: start, end: _trimDuration});
+  _updateTrimBarUI();
+}
+
+function _trimRemoveSegment() {
+  if (_trimSegments.length <= 1) return;
+  _trimSegments.pop();
+  _trimLastDragged = null;
+  _updateTrimBarUI();
+}
+
+function _bindTrimModeEvents() {
+  var bar = document.getElementById('ge-trimbar');
+  if (bar) {
+    bar.addEventListener('pointerdown', function(e) {
+      var thumb = e.target.closest('.ge-trimbar-thumb');
+      if (thumb) {
+        e.preventDefault();
+        _startTrimDrag(parseInt(thumb.getAttribute('data-seg')), thumb.getAttribute('data-handle'));
+      } else if (e.target === bar || e.target.classList.contains('ge-trimbar-track')) {
+        _moveNearestHandle(_trimSecFromX(e.clientX));
+      }
+    });
+  }
+  if (_trimVidEl) {
+    _trimVidEl.ontimeupdate = function() {
+      var timeEl = document.getElementById('ge-trimbar-time');
+      if (timeEl) timeEl.textContent = formatTime(_trimVidEl.currentTime) + ' / ' + formatTime(_trimDuration);
+    };
+    _trimVidEl.onplay = function() {
+      var playBtn = document.getElementById('ge-tm-play');
+      if (playBtn) playBtn.innerHTML = GALLERY_ICONS.pause;
+    };
+    _trimVidEl.onpause = function() {
+      var playBtn = document.getElementById('ge-tm-play');
+      if (playBtn) playBtn.innerHTML = GALLERY_ICONS.play;
+    };
+  }
+  // Re-query buttons after innerHTML replacement in _enterTrimMode
+  setTimeout(function() {
+    var playBtn = document.getElementById('ge-tm-play');
+    if (playBtn) playBtn.onclick = _trimPlayPause;
+    var addBtn = document.getElementById('ge-tm-add');
+    if (addBtn) addBtn.onclick = _trimAddSegment;
+    var removeBtn = document.getElementById('ge-tm-remove');
+    if (removeBtn) removeBtn.onclick = _trimRemoveSegment;
+    var confirmBtn = document.getElementById('ge-tm-confirm');
+    if (confirmBtn) confirmBtn.onclick = function() { _exitTrimMode(true); };
+  }, 0);
+  _trimKeyHandler = function(e) { if (e.key === 'Escape') _exitTrimMode(false); };
+  document.addEventListener('keydown', _trimKeyHandler);
+}
+
+function _enterTrimMode() {
+  pgCloseModal();
+  setTimeout(function() {
+    _trimMode = true;
+    var vidEl = document.getElementById('gallery-main-video');
+    if (!vidEl) { _trimMode = false; return; }
+    _trimVidEl = vidEl;
+    vidEl.pause();
+    _trimDuration = vidEl.duration || (_editProbe && _editProbe.duration) || 0;
+    if (_editTrimSegments && _editTrimSegments.length > 0) {
+      _trimSegments = _editTrimSegments.map(function(s) { return {start: s.start, end: s.end}; });
+    } else {
+      _trimSegments = [{start: 0, end: _trimDuration}];
+    }
+    _trimLastDragged = null;
+    var hoverCtrl = document.getElementById('gallery-video-ctrl');
+    if (hoverCtrl) {
+      _trimSavedSeekerHTML = hoverCtrl.innerHTML;
+      hoverCtrl.innerHTML = _buildTrimBarHTML();
+      hoverCtrl.classList.add('ge-trim-mode-ctrl');
+    }
+    var vidPane = document.getElementById('gallery-pane-video');
+    var ctrlCenter = vidPane ? vidPane.querySelector('.gallery-ctrl-center') : document.querySelector('.gallery-ctrl-center');
+    if (ctrlCenter) {
+      _trimSavedCtrlCenterHTML = ctrlCenter.innerHTML;
+      ctrlCenter.innerHTML = _buildTrimButtonsHTML();
+    }
+    _bindTrimModeEvents();
+    _updateTrimBarUI();
+  }, 150);
+}
+
+function _exitTrimMode(save) {
+  if (save) {
+    _editTrimSegments = _trimSegments.map(function(s) { return {start: s.start, end: s.end}; });
+  }
+  _trimMode = false;
+  if (_trimKeyHandler) { document.removeEventListener('keydown', _trimKeyHandler); _trimKeyHandler = null; }
+  var hoverCtrl = document.getElementById('gallery-video-ctrl');
+  if (hoverCtrl && _trimSavedSeekerHTML) {
+    hoverCtrl.innerHTML = _trimSavedSeekerHTML;
+    hoverCtrl.classList.remove('ge-trim-mode-ctrl');
+  }
+  var vidPane = document.getElementById('gallery-pane-video');
+  var ctrlCenter = vidPane ? vidPane.querySelector('.gallery-ctrl-center') : document.querySelector('.gallery-ctrl-center');
+  if (ctrlCenter && _trimSavedCtrlCenterHTML) {
+    ctrlCenter.innerHTML = _trimSavedCtrlCenterHTML;
+  }
+  if (typeof bindVideoControls === 'function') bindVideoControls();
+  // Reopen edit modal using cached probe data.
+  var html = _buildModalHTML();
+  pgShowModal(html);
+  setTimeout(function() {
+    var modal = document.querySelector('#pg-modal-overlay .pg-modal');
+    if (modal) { modal.style.width = '520px'; modal.style.minWidth = '520px'; }
+  }, 0);
+  setTimeout(function() {
+    var destDir = document.getElementById('ge-dest-dir');
+    if (destDir && _editDefaultDir) destDir.value = _editDefaultDir;
+  }, 30);
+  _checkFfmpegStatus();
+  if (_editProbe) {
+    var detailEl = document.getElementById('ge-source-detail');
+    if (detailEl) {
+      var parts = [];
+      if (_editProbe.width && _editProbe.height) parts.push(_editProbe.width + '\u00d7' + _editProbe.height);
+      if (_editProbe.codec) parts.push(_editProbe.codec);
+      if (_editMediaType === 'video') {
+        if (_editProbe.duration != null && _editProbe.duration > 0) parts.push(formatTime(_editProbe.duration));
+        if (_editProbe.hasAudio === false) parts.push(_geT('geNoAudio'));
+      }
+      detailEl.textContent = parts.join(', ') || '-';
+    }
+    var scaleDims = document.getElementById('ge-scale-dims');
+    if (scaleDims && _editProbe.width && _editProbe.height) {
+      scaleDims.textContent = _geT('geOutputDims', [_editProbe.width, _editProbe.height]);
+    }
+  }
+  setTimeout(_bindModalEvents, 20);
+  setTimeout(function() {
+    var trimTab = document.querySelector('.gallery-edit-tab[data-tab="trim"]');
+    if (trimTab) trimTab.click();
+    _updateTrimSegmentDisplay();
+  }, 50);
+}
+
 // ---------- event binding -------------------------------------------
 function _bindModalEvents() {
-  // Destination directory browse button
+  // Settings gear button — opens the shared download settings modal
+  // (same as the download page) and re-checks ffmpeg status on close.
+  var gearBtn = document.getElementById('ge-settings-btn');
+  if (gearBtn) {
+    gearBtn.onclick = function() {
+      if (typeof openDownloadSettingsModal === 'function') {
+        openDownloadSettingsModal();
+        // Poll until the settings overlay is gone, then re-check ffmpeg.
+        var poll = setInterval(function() {
+          if (!document.getElementById('dl-settings-overlay')) {
+            clearInterval(poll);
+            _checkFfmpegStatus();
+          }
+        }, 300);
+      }
+    };
+  }
+
+  // Destination directory browse button (icon-only)
   var browseBtn = document.getElementById('ge-browse-dir-btn');
   var destInput = document.getElementById('ge-dest-dir');
   if (browseBtn && destInput) {
     browseBtn.onclick = function() {
-      fetch('/api/downloads/browse', {
+      fetch('/api/browse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'directory' })
@@ -747,14 +1542,20 @@ function _bindModalEvents() {
   // Destination radio toggle
   var destRadios = document.querySelectorAll('input[name="ge-dest"]');
   var destDirRow = document.getElementById('ge-dest-dir-row');
+  var destRenameRow = document.getElementById('ge-dest-rename-row');
   destRadios.forEach(function(r) {
     r.onchange = function() {
-      if (destDirRow) destDirRow.style.display = (this.value === 'dir') ? '' : 'none';
+      var saveToDir = (this.value === 'dir');
+      if (destDirRow) destDirRow.style.display = saveToDir ? '' : 'none';
+      // Custom output filename is meaningful only when saving to a directory
+      // (Same Path keeps the original name).
+      if (destRenameRow) destRenameRow.style.display = saveToDir ? '' : 'none';
     };
   });
 
-  // Batch checkbox — update count
+  // Batch checkbox — update count + toggle compress row
   var batchCb = document.getElementById('ge-img-batch');
+  var compressRow = document.getElementById('ge-img-compress-row');
   if (batchCb) {
     batchCb.onchange = function() {
       var countEl = document.getElementById('ge-batch-count');
@@ -766,6 +1567,33 @@ function _bindModalEvents() {
           countEl.textContent = '';
         }
       }
+      if (compressRow) compressRow.style.display = batchCb.checked ? '' : 'none';
+      _refreshBatchUXVisibility();
+    };
+  }
+  // Compress toggle — reveal "rename" sub-row only when compressing (the
+  // rename field sets the zip name; in non-compress batches the folder name
+  // comes from the source folder so rename is hidden there).
+  var compressCb = document.getElementById('ge-img-compress');
+  if (compressCb) {
+    compressCb.onchange = _refreshBatchUXVisibility;
+  }
+  // Rename toggle — surface the custom name input.
+  var renameCb = document.getElementById('ge-img-rename');
+  var renameNameInput = document.getElementById('ge-img-rename-name');
+  if (renameCb) {
+    renameCb.onchange = function() {
+      if (renameNameInput) renameNameInput.style.display = renameCb.checked ? '' : 'none';
+      _refreshBatchUXVisibility();
+    };
+  }
+  // Normalise toggle — surface prefix/digits.
+  var renormCb = document.getElementById('ge-img-renorm');
+  var renormOpts = document.getElementById('ge-img-renorm-opts');
+  if (renormCb) {
+    renormCb.onchange = function() {
+      if (renormOpts) renormOpts.style.display = renormCb.checked ? '' : 'none';
+      _refreshBatchUXVisibility();
     };
   }
   // ---- image events ----
@@ -792,12 +1620,14 @@ function _bindModalEvents() {
     qualitySlider.oninput = function() { qualityVal.textContent = qualitySlider.value; };
   }
 
+  var scaleVal = document.getElementById('ge-scale-val');
   if (scaleInput && scaleDims) {
     scaleInput.oninput = function() {
       var pct = parseFloat(scaleInput.value) || 100;
       var probe = _editProbe || {};
       var nw = Math.round((probe.width || 0) * pct / 100);
       var nh = Math.round((probe.height || 0) * pct / 100);
+      if (scaleVal) scaleVal.textContent = pct + '%';
       scaleDims.textContent = _geT('geOutputDims', [nw, nh]);
     };
   }
@@ -837,31 +1667,39 @@ function _bindModalEvents() {
 
   if (vidCodec) { vidCodec.onchange = _updateVidCodecUI; _updateVidCodecUI(); }
 
-  // ---- video trim events ----
-  var trimStart = document.getElementById('ge-trim-start');
-  var trimDuration = document.getElementById('ge-trim-duration');
-  var trimPreview = document.getElementById('ge-trim-preview');
-  function _updateTrimPreview() {
-    if (!trimPreview) return;
-    var s = _parseTimeToSec((trimStart && trimStart.value) || '');
-    var d = _parseTimeToSec((trimDuration && trimDuration.value) || '');
-    if (!isNaN(s) && !isNaN(d)) {
-      trimPreview.textContent = _geT('geTrimPreview', [_formatSecToTime(s), _formatSecToTime(s + d)]);
-    } else {
-      trimPreview.textContent = '';
-    }
+  // Video scale slider: live "%%" + output dims preview (mirrors the image
+  // scale binding above); the server gets the value via _startVideoTranscode.
+  var vidScaleInput = document.getElementById('ge-vid-scale');
+  var vidScaleVal = document.getElementById('ge-vid-scale-val');
+  var vidScaleDims = document.getElementById('ge-vid-scale-dims');
+  if (vidScaleInput && vidScaleDims) {
+    vidScaleInput.oninput = function() {
+      var pct = parseFloat(vidScaleInput.value) || 100;
+      var probe = _editProbe || {};
+      var nw = Math.round((probe.width || 0) * pct / 100);
+      var nh = Math.round((probe.height || 0) * pct / 100);
+      if (vidScaleVal) vidScaleVal.textContent = pct + '%';
+      vidScaleDims.textContent = _geT('geOutputDims', [nw, nh]);
+    };
   }
-  if (trimStart) { trimStart.oninput = _updateTrimPreview; }
-  if (trimDuration) { trimDuration.oninput = _updateTrimPreview; }
 
-  // Trim mode toggle
+  // ---- video trim events ----
+  var trimSelectBtn = document.getElementById('ge-trim-select-btn');
+  if (trimSelectBtn) {
+    trimSelectBtn.onclick = function() { _enterTrimMode(); };
+  }
+
+  // Trim mode radio toggle + multi-segment hint
   var trimModeRadios = document.querySelectorAll('input[name="ge-trim-mode"]');
   var trimReencodeOpts = document.getElementById('ge-trim-reencode-opts');
+  var trimMultiHint = document.getElementById('ge-trim-multi-hint');
   trimModeRadios.forEach(function(r) {
     r.onchange = function() {
       trimReencodeOpts.style.display = (this.value === 'reencode') ? '' : 'none';
     };
   });
+  // Show multi-segment re-encode hint when segments > 1
+  if (trimMultiHint) trimMultiHint.style.display = (_editTrimSegments.length > 1) ? '' : 'none';
 
   // ---- video subtitle events ----
   var subFile = document.getElementById('ge-sub-file');
@@ -896,7 +1734,7 @@ function _bindModalEvents() {
       var tabName = t.getAttribute('data-tab');
       tabs.forEach(function(tb) { tb.classList.remove('active'); });
       t.classList.add('active');
-      document.querySelectorAll('.gallery-edit-section[id^="ge-tab-"]').forEach(function(s) { s.style.display = 'none'; });
+      document.querySelectorAll('.gallery-edit-tab-panels > .gallery-edit-section').forEach(function(s) { s.style.display = 'none'; });
       var section = document.getElementById('ge-tab-' + tabName);
       if (section) section.style.display = '';
     };
@@ -925,11 +1763,14 @@ function _bindModalEvents() {
 
 // ---------- start operation helpers ---------------------------------
 function _getDestination() {
-  var radio = document.querySelector('input[name="ge-dest"]:checked');
-  if (!radio || radio.value === 'overwrite') return { overwrite: true, outputDir: null };
   var dirInput = document.getElementById('ge-dest-dir');
   var dir = dirInput ? dirInput.value.trim() : '';
-  return { overwrite: false, outputDir: dir || null };
+  // Custom output filename (rename). Lives in the shared dest block on the
+  // "Save to dir" path only. Stem only (no extension) — the server appends
+  // the format extension.
+  var renameInput = document.getElementById('ge-dest-rename');
+  var renameStem = renameInput ? (renameInput.value || '').trim() : '';
+  return { overwrite: false, outputDir: dir || null, renameStem: renameStem || null };
 }
 
 function _startImageTranscode() {
@@ -938,10 +1779,11 @@ function _startImageTranscode() {
   var scalePercent = parseInt(document.getElementById('ge-img-scale').value) || 100;
   var stripMetadata = document.getElementById('ge-img-strip').checked;
   var batch = document.getElementById('ge-img-batch').checked;
+  var compress = document.getElementById('ge-img-compress') && document.getElementById('ge-img-compress').checked;
   var dest = _getDestination();
   var params = { format: format, quality: quality, scalePercent: scalePercent, stripMetadata: stripMetadata };
   if (batch) {
-    _startBatch('image_transcode', params, dest);
+    _startBatch('image_transcode', params, dest, compress);
   } else {
     _startJob('image_transcode', params, dest.overwrite, dest.outputDir);
   }
@@ -970,13 +1812,10 @@ function _startVideoTranscode() {
 }
 
 function _startVideoTrim() {
-  var startStr = document.getElementById('ge-trim-start').value;
-  var durationStr = document.getElementById('ge-trim-duration').value;
-  if (!startStr || !durationStr) { showMsg('Start time and duration are required'); return; }
-  var start = _parseTimeToSec(startStr);
-  var duration = _parseTimeToSec(durationStr);
-  if (isNaN(start) || isNaN(duration)) { showMsg('Invalid time format'); return; }
-
+  if (!_editTrimSegments || !_editTrimSegments.length) {
+    showMsg(_geT('geTrimSelectFirst'));
+    return;
+  }
   var modeRadio = document.querySelector('input[name="ge-trim-mode"]:checked');
   var reencode = modeRadio ? modeRadio.value === 'reencode' : false;
   var codec = 'h264', qualityTier = 'medium';
@@ -986,10 +1825,23 @@ function _startVideoTrim() {
   }
 
   var dest = _getDestination();
-  _startJob('video_trim', {
-    start: String(start), duration: String(duration),
-    reencode: reencode, codec: codec, qualityTier: qualityTier
-  }, dest.overwrite, dest.outputDir);
+  var params = {
+    reencode: reencode, codec: codec, qualityTier: qualityTier,
+    hasAudio: (_editProbe && _editProbe.hasAudio !== false)
+  };
+  if (_editTrimSegments.length === 1) {
+    // Single segment: use backward-compatible start/duration.
+    var seg = _editTrimSegments[0];
+    params.start = String(seg.start);
+    params.duration = String(seg.end - seg.start);
+  } else {
+    // Multi-segment: force re-encode (filter_complex requires it).
+    params.reencode = true;
+    params.segments = _editTrimSegments.map(function(s) {
+      return { start: String(s.start), end: String(s.end) };
+    });
+  }
+  _startJob('video_trim', params, dest.overwrite, dest.outputDir);
 }
 
 function _startVideoSubtitle() {
@@ -1018,35 +1870,38 @@ window.openMediaEditor = function(item, mediaType) {
   _editJobId = null;
   _editSubtitlePath = null;
   _stopPolling();
+  _editTrimSegments = [];
 
   var html = _buildModalHTML();
   pgShowModal(html);
-  // Pre-fill destination directory from source file
+
+  // Set a fixed modal width so it does not change between tabs.
+  setTimeout(function() {
+    var modal = document.querySelector('#pg-modal-overlay .pg-modal');
+    if (modal) {
+      modal.style.width = '520px';
+      modal.style.minWidth = '520px';
+    }
+  }, 0);
+
+  // Pre-fill destination directory from the Default Download Dir (shared
+  // with the download page settings).
   setTimeout(function() {
     var destDir = document.getElementById('ge-dest-dir');
-    if (destDir && _editCurrentItem) {
-      // For zip-extracted items, prefer the zip file's directory over the temp dir.
-      var refPath = (_editCurrentItem._tempExtracted && _editCurrentItem.zipAbsPath)
-        ? _editCurrentItem.zipAbsPath : _editCurrentItem.absPath;
-      if (refPath) {
-        var lastSep = Math.max(refPath.lastIndexOf('/'), refPath.lastIndexOf('\\'));
-        if (lastSep >= 0) destDir.value = refPath.substring(0, lastSep);
-      }
+    if (destDir) {
+      fetch('/api/settings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var dl = (data && data.download) || {};
+          _editDefaultDir = dl.defaultDir || '';
+          if (dl.defaultDir) destDir.value = dl.defaultDir;
+        })
+        .catch(function() {});
     }
   }, 30);
 
-  // Check ffmpeg availability
-  fetch('/api/gallery/edit/ffmpeg-status')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (!data.available) {
-        var warn = document.getElementById('ge-ffmpeg-warn');
-        if (warn) warn.style.display = '';
-        var startBtn = document.getElementById('ge-start-btn');
-        if (startBtn) startBtn.disabled = true;
-      }
-    })
-    .catch(function() {});
+  // Check ffmpeg availability (disables Start if not found)
+  _checkFfmpegStatus();
 
   // Probe source
   fetch('/api/gallery/edit/probe', {
@@ -1062,14 +1917,20 @@ window.openMediaEditor = function(item, mediaType) {
       var parts = [];
       if (data.width && data.height) parts.push(data.width + '\u00d7' + data.height);
       if (data.codec) parts.push(data.codec);
-      if (data.duration != null) parts.push(formatTime(data.duration));
-      if (data.hasAudio === false) parts.push(_geT('geNoAudio'));
+      if (_editMediaType === 'video') {
+        if (data.duration != null && data.duration > 0) parts.push(formatTime(data.duration));
+        if (data.hasAudio === false) parts.push(_geT('geNoAudio'));
+      }
       detailEl.textContent = parts.join(', ') || '-';
     }
     // Update scale dimensions hint
     var scaleDims = document.getElementById('ge-scale-dims');
     if (scaleDims && data.width && data.height) {
       scaleDims.textContent = _geT('geOutputDims', [data.width, data.height]);
+    }
+    // Update trim segment display if on video mode
+    if (_editMediaType === 'video') {
+      _updateTrimSegmentDisplay();
     }
   })
   .catch(function(err) {

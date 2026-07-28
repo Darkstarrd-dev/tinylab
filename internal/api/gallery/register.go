@@ -2,6 +2,7 @@
 package gallery
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -20,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -468,6 +470,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/open-dir", h.galleryOpenDir)
 	r.Post("/list-dir", h.galleryListDir)
 	r.Get("/file", h.galleryServeFile)
+	r.Post("/open-folder", h.galleryOpenFolder)
 	r.Delete("/fs", h.galleryDeleteFs)
 	r.Post("/zip-from-path", h.galleryZipFromPath)
 	r.Post("/zip-writeback", h.galleryZipWriteback)
@@ -480,6 +483,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/edit/cancel/{jobId}", h.galleryEditCancel)
 	r.Post("/edit/extract-zip-entry", h.galleryEditExtractZipEntry)
 	r.Post("/edit/upload-temp", h.galleryEditUploadTemp)
+	r.Post("/edit/zip-outputs", h.galleryEditZipOutputs)
+	r.Post("/edit/zip-writeback", h.galleryEditZipWriteback)
 	r.Post("/paste-paths", h.galleryPastePaths)
 }
 
@@ -799,6 +804,25 @@ func (h *Handler) galleryPastePaths(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"paths": paths})
+}
+
+// galleryOpenFolder opens the file's containing directory (or the directory
+// itself) in the platform file manager, selecting the file when supported.
+// POST /api/gallery/open-folder { "path": "..." } → { "ok": true }
+func (h *Handler) galleryOpenFolder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing path")
+		return
+	}
+	if err := fsutil.OpenInFileManager(req.Path); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "open folder: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // galleryZipWriteback writes the current session zip bytes back to the
@@ -1516,4 +1540,219 @@ func (h *Handler) galleryEditExtractZipEntry(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]any{
 		"tempPath": tmpFile.Name(),
 	})
+}
+
+// galleryEditZipOutputs creates a zip archive containing the specified files
+// and optionally deletes the originals. Used by the batch convert + compress
+// feature to bundle multiple converted images into a single zip.
+// POST /api/gallery/edit/zip-outputs
+//
+//	{ "paths": ["abs/path1.png", ...], "outputDir": "...", "cleanUp": true }
+//
+// Returns { "zipPath": "...", "zipName": "...", "outputURL": "..." }.
+func (h *Handler) galleryEditZipOutputs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paths     []string `json:"paths"`
+		OutputDir string   `json:"outputDir"`
+		ZipName   string   `json:"zipName"`
+		CleanUp   bool     `json:"cleanUp"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Paths) == 0 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "no paths provided")
+		return
+	}
+
+	outputDir := req.OutputDir
+	if outputDir == "" {
+		outputDir = h.d.Reg.Config().Download.DefaultDir
+	}
+	if outputDir == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "no output directory")
+		return
+	}
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create output dir: "+err.Error())
+		return
+	}
+
+	// Build the zip name. Caller may request a specific name (e.g. the original
+	// folder/archive name), otherwise fall back to "converted_images". We only
+	// trust the base component and force a .zip suffix so a client cannot
+	// escape outputDir or produce a non-zip extension.
+	zipName := filepath.Base(req.ZipName)
+	if zipName == "" || zipName == "." || zipName == string(filepath.Separator) {
+		zipName = "converted_images.zip"
+	}
+	if strings.ToLower(filepath.Ext(zipName)) != ".zip" {
+		zipName = strings.TrimSuffix(zipName, filepath.Ext(zipName)) + ".zip"
+	}
+	zipPath := filepath.Join(outputDir, zipName)
+	if _, err := os.Stat(zipPath); err == nil {
+		stem := strings.TrimSuffix(zipName, filepath.Ext(zipName))
+		for i := 2; i < 1000; i++ {
+			candidate := filepath.Join(outputDir, fmt.Sprintf("%s_%d.zip", stem, i))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				zipPath = candidate
+				zipName = fmt.Sprintf("%s_%d.zip", stem, i)
+				break
+			}
+		}
+	}
+
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create zip: "+err.Error())
+		return
+	}
+
+	zipWriter := zip.NewWriter(zipFile)
+
+	for _, p := range req.Paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		info, err := f.Stat()
+		if err != nil {
+			f.Close()
+			continue
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		header.Name = filepath.Base(p)
+		header.Method = zip.Deflate
+
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		io.Copy(writer, f)
+		f.Close()
+	}
+
+	zipWriter.Close()
+	zipFile.Close()
+
+	if req.CleanUp {
+		for _, p := range req.Paths {
+			os.Remove(p)
+		}
+	}
+
+	zipURL := "/api/gallery/file?path=" + url.PathEscape(zipPath)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"zipPath":   zipPath,
+		"zipName":   zipName,
+		"outputURL": zipURL,
+	})
+}
+
+// galleryEditZipWriteback replaces image entries inside an on-disk zip archive
+// with their transcoded counterparts and writes the result atomically over the
+// original archive path. Used by the "replace original" batch convert flow when
+// the source is a backend zip (kind:'zip' with zipAbsPath): each completed
+// transcode job contributes its temp output file mapped back to the entry's
+// inner zip path, the archive is repacked preserving every untouched entry, and
+// the original .zip is replaced in place.
+//
+// POST /api/gallery/edit/zip-writeback
+//
+//	{
+//	  "archivePath": "<abs .zip path>",
+//	  "entries": [ { "zipPath": "...", "filePath": "<abs converted file on disk>" } ]
+//	}
+//
+// -> { "ok": true, "path": archivePath }
+//
+// An empty entries list is allowed and performs an in-place no-op repack (the
+// archive is read and rewritten byte-equivalently, then written back), so a
+// batch with zero successful jobs never panics. Each input filePath is
+// best-effort removed afterward so temp converted files do not accumulate.
+func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ArchivePath string `json:"archivePath"`
+		Entries     []struct {
+			ZipPath  string `json:"zipPath"`
+			FilePath string `json:"filePath"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ArchivePath == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing archivePath")
+		return
+	}
+
+	data, err := os.ReadFile(req.ArchivePath)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "read archive: "+err.Error())
+		return
+	}
+
+	// Build the replacements map. zipPath is normalized the same way gallery's
+	// cleanZipPath does (see internal/gallery/zip.go): collapse backslashes to
+	// forward slashes, drop a leading slash, path.Clean, drop a leading slash
+	// once more. filePath is read from disk on demand so an unreadable temp file
+	// surfaces as an explicit error rather than a silent skip.
+	replacements := make(map[string][]byte, len(req.Entries))
+	for _, e := range req.Entries {
+		if e.ZipPath == "" || e.FilePath == "" {
+			continue
+		}
+		key := cleanZipPathNormalize(e.ZipPath)
+		if key == "" || key == "." {
+			continue
+		}
+		b, err := os.ReadFile(e.FilePath)
+		if err != nil {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "read entry file "+e.FilePath+": "+err.Error())
+			return
+		}
+		replacements[key] = b
+	}
+
+	result, _, err := gallerylib.ReplaceZipEntries(data, replacements)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "repack zip: "+err.Error())
+		return
+	}
+
+	if err := fsutil.AtomicWrite(req.ArchivePath, result, 0644); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "writeback failed: "+err.Error())
+		return
+	}
+
+	// Defer-remove each input filePath best-effort so temp converted files do
+	// not accumulate. Failure to remove does not undo the writeback.
+	for _, e := range req.Entries {
+		if e.FilePath != "" {
+			os.Remove(e.FilePath)
+		}
+	}
+
+	h.d.Logger.Info("gallery: zip edit writeback %q (%d entries replaced)", req.ArchivePath, len(replacements))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "path": req.ArchivePath})
+}
+
+// cleanZipPathNormalize mirrors internal/gallery.cleanZipPath so handler-side
+// entry paths are normalized identically without depending on the package's
+// unexported helper.
+func cleanZipPathNormalize(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = strings.TrimPrefix(p, "/")
+	p = path.Clean(p)
+	p = strings.TrimPrefix(p, "/")
+	return p
 }
