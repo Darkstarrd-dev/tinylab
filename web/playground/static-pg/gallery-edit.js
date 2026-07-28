@@ -103,19 +103,19 @@ function _updateImageSourceInfo() {
   if (!it) { row1.textContent = '-'; row2.textContent = '-'; return; }
   if (_isArchiveMode()) {
     row1.textContent = _editContainerParentPath(it) || _editContainerPath(it, false) || _geT('geDragNoPathHint');
-    row2.textContent = (_batchOriginLabel() || '-') + ' \u00b7 ' + _getSiblingImages().length + ' ' + _geT('geImagesCount');
+    row2.innerHTML = '<div class="ge-src-filename">' + escapeHtml((_batchOriginLabel() || '-') + ' \u00b7 ' + _getSiblingImages().length + ' ' + _geT('geImagesCount')) + '</div>';
     return;
   }
   row1.textContent = _editContainerPath(it, true) || _geT('geDragNoPathHint');
   var probe = _editProbe || {};
-  var parts = [];
   var nm = it.name || (it.path || '').split('/').pop() || '';
-  if (nm) parts.push(nm);
-  if (probe.width && probe.height) parts.push(probe.width + '\u00d7' + probe.height);
-  if (it.size && it.size > 0) parts.push(_formatSize(it.size));
-  var ex = extOf(it.name);
-  if (ex) parts.push(ex.replace(/^\./, '').toUpperCase());
-  row2.textContent = parts.length ? parts.join(' \u00b7 ') : '-';
+  var metaParts = [];
+  if (probe.width && probe.height) metaParts.push(probe.width + '\u00d7' + probe.height);
+  if (it.size && it.size > 0) metaParts.push(_formatSize(it.size));
+  var metaRightStr = metaParts.join(' \u00b7 ');
+
+  row2.innerHTML = '<div class="ge-src-filename">' + escapeHtml(nm || '-') + '</div>'
+    + (metaRightStr ? '<div class="ge-src-meta-right">' + escapeHtml(metaRightStr) + '</div>' : '');
 }
 
 // _updateVideoSourceInfo populates the video dialog's two-row source info:
@@ -129,15 +129,17 @@ function _updateVideoSourceInfo() {
   if (!it) { row1.textContent = '-'; row2.textContent = '-'; return; }
   row1.textContent = _editVideoPath(it) || _geT('geDragNoPathHint');
   var probe = _editProbe || {};
-  var parts = [];
   var nm = it.name || (it.path || '').split('/').pop() || '';
-  if (nm) parts.push(nm);
-  if (probe.width && probe.height) parts.push(probe.width + '\u00d7' + probe.height);
-  if (probe.codec) parts.push(probe.codec);
-  if (probe.duration != null && probe.duration > 0) parts.push(formatTime(probe.duration));
-  if (probe.hasAudio === false) parts.push(_geT('geNoAudio'));
-  if (it.size && it.size > 0) parts.push(_formatSize(it.size));
-  row2.textContent = parts.length ? parts.join(' \u00b7 ') : '-';
+  var metaParts = [];
+  if (probe.width && probe.height) metaParts.push(probe.width + '×' + probe.height);
+  if (probe.codec) metaParts.push(probe.codec);
+  if (probe.duration != null && probe.duration > 0) metaParts.push(formatTime(probe.duration));
+  if (probe.hasAudio === false) metaParts.push(_geT('geNoAudio'));
+  if (it.size && it.size > 0) metaParts.push(_formatSize(it.size));
+  var metaRightStr = metaParts.join(' · ');
+
+  row2.innerHTML = '<div class="ge-src-filename">' + escapeHtml(nm || '-') + '</div>'
+    + (metaRightStr ? '<div class="ge-src-meta-right">' + escapeHtml(metaRightStr) + '</div>' : '');
 }
 
 // _editVideoPath returns the disk path of a video item for source-info row 1:
@@ -933,34 +935,33 @@ function _renderImageForm() {
   html += _renderSetPathRow();
   html += _renderSetNameRow();
 
-  // Uniform (sequential rename)
+  // Row 5: Uniform (sequential rename)
+  // img input flex:1 (stretches to fill available space), Digits select right-aligned with top output name input
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-uniform"> ' + escapeHtml(_geT('geUniform')) + '</label>';
-  html += '<input type="text" id="ge-img-uniform-prefix" style="width:120px" value="' + escapeHtml(_geT('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(_geT('geRenormPrefixPh')) + '" disabled>';
-  html += '<label class="gallery-edit-label" style="width:auto;margin-left:8px">' + escapeHtml(_geT('geRenormDigits')) + '</label>';
-  html += '<input type="number" id="ge-img-uniform-digits" min="1" max="9" value="2" style="width:60px" disabled>';
+  html += '<input type="text" id="ge-img-uniform-prefix" style="flex:1;min-width:0" value="' + escapeHtml(_geT('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(_geT('geRenormPrefixPh')) + '" disabled>';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0 4px 0 12px">' + escapeHtml(_geT('geRenormDigits')) + '</label>';
+  html += '<select class="pg-param-row-select" id="ge-img-uniform-digits" style="width:64px;flex:none;text-align:center;text-align-last:center" disabled>';
+  for (var d = 2; d <= 6; d++) {
+    html += '<option value="' + d + '"' + (d === 2 ? ' selected' : '') + '>' + d + '</option>';
+  }
+  html += '</select>';
   html += '</div>';
 
-  // Compress to Zip + Format
+  // Row 6: Compress (left-aligned, 130px) + Format (right of compress) + Quality (right-aligned)
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-compress"> ' + escapeHtml(_geT('geCompressZip')) + '</label>';
-  html += '<label class="gallery-edit-label" style="width:auto;margin-left:8px">' + escapeHtml(_geT('geFormat')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-img-format" style="flex:1">';
+  html += '<select class="pg-param-row-select" id="ge-img-format" style="width:95px;flex:none">';
   for (var i = 0; i < formatOptions.length; i++) {
     var f = formatOptions[i];
     html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
   }
   html += '</select>';
+  html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(_geT('geQuality')) + '</label>';
+  html += '<input type="range" id="ge-img-quality" min="0" max="100" value="85" style="width:130px">';
+  html += '<span class="gallery-edit-val" id="ge-quality-val" style="min-width:24px;text-align:right">85</span>';
   html += '</div>';
-
-  // Quality + Scale
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geQuality')) + '</label>';
-  html += '<input type="range" id="ge-img-quality" min="0" max="100" value="85" style="flex:1">';
-  html += '<span class="gallery-edit-val" id="ge-quality-val">85</span>';
-  html += '<label class="gallery-edit-label" style="width:auto;margin-left:12px">' + escapeHtml(_geT('geScalePercent')) + '</label>';
-  html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="flex:1">';
-  html += '<span class="gallery-edit-val" id="ge-scale-val">100%</span>';
   html += '</div>';
 
   // PNG lossless note
@@ -968,10 +969,13 @@ function _renderImageForm() {
   html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + escapeHtml(_geT('geQualityHint')) + '</span>';
   html += '</div>';
 
-  // Strip Metadata + Scale output dims
+  // Row 7: Scale (left aligned, no %) + Output Dims + Strip Metadata (right aligned)
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-strip"> ' + escapeHtml(_geT('geStripMetadata')) + '</label>';
-  html += '<span class="gallery-edit-val" id="ge-scale-dims" style="margin-left:auto">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(_geT('geScalePercent')) + '</label>';
+  html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="width:130px">';
+  html += '<span class="gallery-edit-val" id="ge-scale-val" style="min-width:36px">100%</span>';
+  html += '<span class="gallery-edit-val" id="ge-scale-dims" style="margin-left:4px;color:var(--text-muted)">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
+  html += '<label class="gallery-edit-check" style="margin-left:auto;margin-right:0"><input type="checkbox" id="ge-img-strip"> ' + escapeHtml(_geT('geStripMetadata')) + '</label>';
   html += '</div>';
 
   return html;
@@ -983,69 +987,66 @@ function _renderVideoTranscodeForm() {
 
   var html = '';
 
-  // Codec select
-  html += '<div class="gallery-edit-row">';
+  // Row 1: Codec + Container (two columns)
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geCodec')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-codec">';
   html += '<option value="h264">H.264</option><option value="h265">H.265/HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option><option value="copy">Copy (no re-encode)</option>';
   html += '</select>';
   html += '</div>';
-
-  // Container select
-  html += '<div class="gallery-edit-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geContainer')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-container">';
   html += '<option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option><option value="mov">MOV</option>';
   html += '</select>';
   html += '</div>';
+  html += '</div>';
 
-  // Quality tier
-  html += '<div class="gallery-edit-row" id="ge-vid-quality-row">';
+  // Row 2: Quality + Preset (two columns)
+  html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-quality-preset-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geQualityTier')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-quality">';
   html += '<option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option>';
   html += '</select>';
   html += '</div>';
-
-  // Preset
-  html += '<div class="gallery-edit-row" id="ge-vid-preset-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('gePreset')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-preset">';
   html += '<option value="ultrafast">ultrafast</option><option value="fast">fast</option><option value="medium" selected>medium</option><option value="slow">slow</option><option value="veryslow">veryslow</option>';
   html += '</select>';
   html += '</div>';
-
-  // Scale percent (same range+value+dims pattern as the image form — the
-  // server clips to 10..200 regardless of input type, so changing the control
-  // here doesn't alter the server contract).
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geScalePercent')) + '</label>';
-  html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="flex:1">';
-  html += '<span class="gallery-edit-val" id="ge-vid-scale-val">100%</span>';
-  html += '<span class="gallery-edit-val" id="ge-vid-scale-dims">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
   html += '</div>';
 
-  // Audio codec
-  html += '<div class="gallery-edit-row" id="ge-vid-audio-row">';
+  // Row 3: Audio Codec + Audio Bitrate (two columns)
+  html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-audio-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geAudioCodec')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-audio-codec">';
   html += '<option value="aac">AAC</option><option value="opus">Opus</option><option value="mp3">MP3</option><option value="copy">Copy</option><option value="none">None</option>';
   html += '</select>';
   html += '</div>';
-
-  // Audio bitrate
-  html += '<div class="gallery-edit-row" id="ge-vid-ab-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geAudioBitrate')) + '</label>';
-  html += '<input type="text" id="ge-vid-audio-bitrate" value="128k" style="width:80px">';
+  html += '<select class="pg-param-row-select" id="ge-vid-audio-bitrate">';
+  var bitrates = ['64k', '96k', '128k', '160k', '192k', '256k', '320k'];
+  for (var b = 0; b < bitrates.length; b++) {
+    var br = bitrates[b];
+    html += '<option value="' + br + '"' + (br === '128k' ? ' selected' : '') + '>' + br + '</option>';
+  }
+  html += '</select>';
+  html += '</div>';
   html += '</div>';
 
-  // Strip metadata
+  // Row 4: Scale + Dims + Strip metadata (last row)
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-vid-strip"> ' + escapeHtml(_geT('geStripMetadata'));
-  html += '</label>';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(_geT('geScalePercent')) + '</label>';
+  html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="width:130px">';
+  html += '<span class="gallery-edit-val" id="ge-vid-scale-val" style="min-width:36px">100%</span>';
+  html += '<span class="gallery-edit-val" id="ge-vid-scale-dims" style="margin-left:4px;color:var(--text-muted)">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
+  html += '<label class="gallery-edit-check" style="margin-left:auto;margin-right:0"><input type="checkbox" id="ge-vid-strip"> ' + escapeHtml(_geT('geStripMetadata')) + '</label>';
   html += '</div>';
-
 
   return html;
 }
@@ -1570,8 +1571,12 @@ function _exitTrimMode(save) {
   }
   setTimeout(_bindModalEvents, 20);
   setTimeout(function() {
-    var trimTab = document.querySelector('.gallery-edit-tab[data-tab="trim"]');
-    if (trimTab) trimTab.click();
+    var trimEnableCb = document.getElementById('ge-vid-trim-enable');
+    var trimBody = document.getElementById('ge-vid-trim-body');
+    if (_editTrimSegments && _editTrimSegments.length > 0) {
+      if (trimEnableCb) trimEnableCb.checked = true;
+      if (trimBody) trimBody.style.display = '';
+    }
     _updateTrimSegmentDisplay();
   }, 50);
 }
@@ -1688,20 +1693,16 @@ function _bindModalEvents() {
 
   // ---- video transcode events ----
   var vidCodec = document.getElementById('ge-vid-codec');
-  var vidQualityRow = document.getElementById('ge-vid-quality-row');
-  var vidPresetRow = document.getElementById('ge-vid-preset-row');
+  var vidQualityPresetRow = document.getElementById('ge-vid-quality-preset-row') || document.getElementById('ge-vid-quality-row');
   var vidAudioRow = document.getElementById('ge-vid-audio-row');
-  var vidAbRow = document.getElementById('ge-vid-ab-row');
   var vidContainer = document.getElementById('ge-vid-container');
 
   function _updateVidCodecUI() {
     if (!vidCodec) return;
     var c = vidCodec.value;
     var isCopy = (c === 'copy');
-    if (vidQualityRow) vidQualityRow.style.display = isCopy ? 'none' : '';
-    if (vidPresetRow) vidPresetRow.style.display = isCopy ? 'none' : '';
+    if (vidQualityPresetRow) vidQualityPresetRow.style.display = isCopy ? 'none' : '';
     if (vidAudioRow) vidAudioRow.style.display = isCopy ? 'none' : '';
-    if (vidAbRow) vidAbRow.style.display = isCopy ? 'none' : '';
     // Filter containers based on codec
     if (vidContainer) {
       var opts = vidContainer.querySelectorAll('option');
