@@ -341,7 +341,7 @@ function onGalleryKeyDown(e) {
       if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
     } else {
       // 在 review 模式下：切换删除/保留状态（toggle）
-      if (galleryState.reviewState.reviewMode) {
+      if (galleryState.reviewState.active) {
         toggleReviewItemMark();
       } else {
         deleteItemMark();
@@ -351,6 +351,38 @@ function onGalleryKeyDown(e) {
   }
 
   var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
+
+  // AI Review 模式下的方向键/空格键重定向
+  var isReviewNav = galleryState.reviewState.active &&
+    (galleryState.reviewState.status === 'running' || galleryState.reviewState.status === 'completed');
+
+  if (isReviewNav && !isVidActive) {
+    if (k === 'ArrowLeft') {
+      e.preventDefault(); e.stopPropagation();
+      if (typeof window.goReviewPrev === 'function') window.goReviewPrev();
+      return;
+    }
+    if (k === 'ArrowRight') {
+      e.preventDefault(); e.stopPropagation();
+      if (typeof window.goReviewNext === 'function') window.goReviewNext();
+      return;
+    }
+    if (k === 'ArrowUp') {
+      e.preventDefault(); e.stopPropagation();
+      if (typeof window.goReviewPrevNode === 'function') window.goReviewPrevNode();
+      return;
+    }
+    if (k === 'ArrowDown') {
+      e.preventDefault(); e.stopPropagation();
+      if (typeof window.goReviewNextNode === 'function') window.goReviewNextNode();
+      return;
+    }
+    if (k === ' ' || k === 'Spacebar') {
+      e.preventDefault(); e.stopPropagation();
+      toggleReviewItemMark();
+      return;
+    }
+  }
 
   if (isVidActive) {
     var vidEl = document.getElementById('gallery-main-video');

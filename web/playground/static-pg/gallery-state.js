@@ -194,6 +194,18 @@ var galleryState = {
     originalIndices: [],     // 审核前的完整索引列表（用于恢复）
     // 生成中标志
     generatingPrompt: false,  // 正在调用 gen-prompt
+    // 节点选择与多节点审核状态
+    selectMode: false,        // 是否处于节点选择模式（点击 AI Review 后）
+    selectedNodes: [],        // 选中的节点 dir key 列表
+    lastSelectedNode: null,   // 最后一次单击选中的节点 key（用于 Shift 范围选择）
+    reviewQueue: [],          // 待审核节点队列 [{dir, sessionId, entryIndices, itemIndices}]
+    reviewQueueIndex: -1,     // 当前审核到第几个节点
+    currentReviewNode: null,  // 当前正在审核的节点 dir key
+    nodeResults: {},          // dir -> [{index, path, isMatch, reason}] 每节点审核结果
+    nodeStatus: {},           // dir -> 'pending'|'running'|'completed'|'error'
+    reviewedNodes: [],        // 已审核/审核中且有匹配结果的节点 dir 列表（有序）
+    focusedReviewNode: '',    // 当前 focus 的审核节点 dir
+    allReviewMatchIndices: [] // 跨所有已审核节点的匹配 item indices（有序）
   }
 };
 

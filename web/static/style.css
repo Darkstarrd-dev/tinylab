@@ -2243,6 +2243,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gallery-review-result-item:hover{background:var(--glass-hover)}
 .gallery-review-row{display:flex;gap:4px;margin-bottom:4px}
 .gallery-review-row > div{flex:1}
+.gallery-tree-node.review-selected{background:rgba(108,92,231,0.18);border-left:2px solid var(--accent)}
+.tree-select-check{font-size:12px;margin-right:4px;color:var(--accent);flex-shrink:0;user-select:none}
+.gallery-review-start-active{background:var(--accent-glow) !important;border-color:var(--accent) !important;color:var(--accent) !important}
+.gallery-tree-node[data-review-node].active{background:rgba(108,92,231,0.22);border-left:3px solid var(--accent)}
 
 /* =====================================================================
    Shortcut Settings modal

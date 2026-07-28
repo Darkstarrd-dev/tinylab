@@ -311,6 +311,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     galleryReviewTotal: ' total',
     galleryReviewFailedCount: ' failed',
     galleryReviewShowMatched: 'Show matched only',
+    galleryReviewShowAll: 'Show All',
+    galleryReviewShowMatchedOnly: 'Show Matched',
     galleryReviewError: 'Error during review',
     galleryReviewReset: 'Reset Review',
     galleryReviewNoPreset: 'No preset selected',
@@ -333,6 +335,12 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     galleryReviewCancelled: 'Review cancelled',
     galleryReviewCancelFailed: 'Cancel failed: ',
     galleryReviewResetMsg: 'Review reset',
+    galleryReviewSelectAll: 'Select All',
+    galleryReviewDeselect: 'Deselect',
+    galleryReviewStartSelected: 'Start',
+    galleryReviewNoNodeSelected: 'Please select at least one node',
+    galleryReviewNoEntries: 'No reviewable entries in selected nodes',
+    galleryReviewConfirmDelete: 'Delete Marked',
     // Playground keys moved to pg-i18n.js
     // Shortcut Settings keys
     shortcutSettings: 'Shortcut Settings',
@@ -778,6 +786,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     galleryReviewTotal: ' 条总计',
     galleryReviewFailedCount: ' 条失败',
     galleryReviewShowMatched: '仅显示匹配项',
+    galleryReviewShowAll: '显示全部',
+    galleryReviewShowMatchedOnly: '仅显示符合结果',
     galleryReviewError: '审核过程出错',
     galleryReviewReset: '重置审核',
     galleryReviewNoPreset: '未选择预设',
@@ -800,6 +810,12 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     galleryReviewCancelled: '审核已取消',
     galleryReviewCancelFailed: '取消失败: ',
     galleryReviewResetMsg: '审核已重置',
+    galleryReviewSelectAll: '全选',
+    galleryReviewDeselect: '取消全选',
+    galleryReviewStartSelected: 'Start',
+    galleryReviewNoNodeSelected: '请至少选择一个节点',
+    galleryReviewNoEntries: '选中节点中没有可审核的内容',
+    galleryReviewConfirmDelete: '确认删除标记项',
     // Playground keys moved to pg-i18n.js
     // Shortcut Settings keys
     shortcutSettings: '快捷键设置',
