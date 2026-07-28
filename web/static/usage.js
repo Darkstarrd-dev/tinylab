@@ -749,6 +749,15 @@ function handleRequestDone(id, status, entry) {
     completeEntry.__streamingReasoning = inflightEntry.__streamingReasoning || '';
     completeEntry.__streamingAssistant = inflightEntry.__streamingAssistant || '';
     completeEntry.__streamingUsage = inflightEntry.__streamingUsage || '';
+    if (!completeEntry.reqPayload && inflightEntry.reqPayload) {
+      completeEntry.reqPayload = inflightEntry.reqPayload;
+    }
+    if (!completeEntry.reqHeaders && inflightEntry.reqHeaders) {
+      completeEntry.reqHeaders = inflightEntry.reqHeaders;
+    }
+    if (!completeEntry.upstreamUrl && inflightEntry.upstreamUrl) {
+      completeEntry.upstreamUrl = inflightEntry.upstreamUrl;
+    }
   }
   if (completeEntry) {
     if (status) completeEntry.status = status;
@@ -767,6 +776,29 @@ function handleRequestDone(id, status, entry) {
     currentInfoModalStreamingDone = true;
     if (completeEntry.respPayload) {
       updateStreamingModalResponse(completeEntry);
+    } else if (traceEnabled) {
+      // trace mode: ring entry has no payload; fetch final response from trace file.
+      // Remove streaming sections first so trace content replaces them.
+      var bodyEl = document.getElementById('info-modal-body');
+      if (bodyEl) {
+        var sr = bodyEl.querySelector('#streaming-reasoning-section');
+        if (sr) sr.remove();
+        var sa = bodyEl.querySelector('#streaming-assistant-section');
+        if (sa) sa.remove();
+        var su = bodyEl.querySelector('#streaming-usage-section');
+        if (su) su.remove();
+        var srb = bodyEl.querySelector('#streaming-response-body-section');
+        if (srb) srb.remove();
+        // Add a trace-loading placeholder if not present.
+        if (!bodyEl.querySelector('#trace-loading-section')) {
+          var ph = document.createElement('div');
+          ph.className = 'info-section';
+          ph.id = 'trace-loading-section';
+          ph.innerHTML = '<div class="info-section-title">Trace Detail</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">Loading trace…</pre></div></div>';
+          bodyEl.appendChild(ph);
+        }
+      }
+      loadTraceDetails(completeEntry);
     }
   }
 }
@@ -1554,7 +1586,8 @@ async function showUsageEntryInfoById(id) {
   // carries respPayload/respHeaders) from the API.
   if (!traceEnabled && (e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
     try {
-      var entries = usage.entries || [];
+      var resp = await apiGet('/usage?limit=500&offset=0');
+      var entries = (resp && resp.entries) || [];
       var ringEntry = entries.find(function(x) { return x.id === id; });
       if (ringEntry && ringEntry.status !== 'processing') {
         e = ringEntry;
