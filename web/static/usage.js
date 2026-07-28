@@ -8,6 +8,8 @@ var expandedModels = new Set();
 var lockCountdownTimerStarted = false;
 var lockCountdownInterval = null;
 var quotaBarItems = {};
+var keyDetailCache = {};          // key "provider/model" -> { data, ts }
+var KEY_DETAIL_TTL = 3000;         // reuse _lastPerKeyRefresh throttle window
 var lastQuotaSig = '';
 var usageDebugMode = false;
 var traceEnabled = false;
@@ -219,7 +221,7 @@ function renderUsageRow(e, sessionKey, hidden) {
 async function renderUsage(c) {
   try {
   var cachedEntries = lastUsageEntries.slice();
-  var quotaCardHtml = '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + t('quotaMonitor') + '</span><button type="button" class="btn btn-sm btn-ghost" onclick="resetQuotaTimers()">' + t('resetQuota') + '</button></div><div class="quota-section quota-section-scroll"></div></div>';
+  var quotaCardHtml = '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + t('quotaMonitor') + '</span><button type="button" class="btn btn-sm btn-ghost" onclick="resetQuotaTimers()">' + t('resetQuota') + '</button></div><div class="quota-section quota-section-scroll"><table class="usage-table quota-table"><thead><tr><th class="quota-th-chevron"></th><th>' + t('thProvider') + '</th><th>' + t('thModel') + '</th><th>' + t('thQuota') + '</th><th>' + t('thInput') + '</th><th>' + t('thOutput') + '</th><th>' + t('thLatency') + '</th><th>' + t('thAvgSpeed') + '</th></tr></thead><tbody id="quota-tbody"></tbody></table></div></div>';
   c.innerHTML = '\
     <div class="usage-header usage-fullscreen">\
       <div class="usage-body-grid">\
@@ -316,13 +318,9 @@ async function renderUsage(c) {
   var quotaBars = quotas.quotas || [];
   quotaBarItems = {};
   lastQuotaSig = '';
-  var section = document.querySelector('.quota-monitor-card > .card > .quota-section');
-  if (section) {
-    if (quotaBars.length === 0) {
-      section.innerHTML = emptyState(t('noQuota'));
-    } else {
-      buildQuotaBarItems(quotaBars, section);
-    }
+  var tbody = document.getElementById('quota-tbody');
+  if (tbody) {
+    updateQuotaTable(quotaBars);
   }
   updateUsageSummary(summary);
   updateRecentRequestsInline(lastUsageEntries);
@@ -663,11 +661,11 @@ async function refreshQuotaData() {
     sortEntriesByTimeDesc(merged);
     lastUsageEntries = merged;
     updateUsageSummary(summary);
-    updateQuotaBars(quotas.quotas || []);
+    updateQuotaTable(quotas.quotas || []);
     updateRecentRequestsModal();
     updateRecentRequestsInline(lastUsageEntries);
     ensureProcessingTimer();
-    maybeRefreshPerKeyDetails();
+    refreshAllKeyDetails();
   } catch(e) { console.warn('refreshQuotaData failed:', e); }
 }
 
@@ -949,17 +947,6 @@ function stopUsageRefresh() {
   stopProcessingTimer();
 }
 
-function computeQuotaSig(bars) {
-  if (!bars) return '';
-  try { return JSON.stringify(bars.map(function(b) { return b.provider + '|' + b.model + '|' + b.totalUsed + '|' + b.totalCapacity + '|' + (b.inFlightKeyNames ? b.inFlightKeyNames.join(',') : '') + '|' + (b.currentKeyName||'') + '|' + (b.currentKeyId||'') + '|' + b.successCount + '|' + b.errorCount + '|' + b.inputTokens + '|' + b.outputTokens + '|' + (b.hasQuota ? 1 : 0) + '|' + (b.perKeyLimit||''); })); } catch(e) { return ''; }
-}
-
-function setBarWidth(fillEl, pctStr) {
-  fillEl.style.transition = 'none';
-  fillEl.style.width = pctStr;
-  void fillEl.offsetWidth;
-  fillEl.style.transition = '';
-}
 
 function updateUsageSummary(summary) {
   var grid = document.querySelector('.stat-grid');
@@ -983,157 +970,282 @@ async function clearUsage() {
 
 var QUOTA_CHEVRON = '<svg class="quota-bar-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 
-function renderQuotaBarItem(bar) {
-  var color = getModelColor(bar.provider, bar.model);
-  var barDotClass = 'model-color-dot';
-  if (bar.inFlightKeyNames && bar.inFlightKeyNames.length > 0) {
-    barDotClass += ' model-color-dot-calling';
+// isMultiKeyProvider returns true when the provider has more than one key
+// configured. providersCache is populated by renderUsage; when not yet ready
+// we default to true so the chevron is not hidden on first paint.
+function isMultiKeyProvider(providerName) {
+  if (!providersCache) return true;
+  for (var i = 0; i < providersCache.length; i++) {
+    if (providersCache[i].name === providerName || providersCache[i].Name === providerName) {
+      var keys = providersCache[i].keys || providersCache[i].Keys || [];
+      return keys.length > 1;
+    }
   }
-  var itemId = 'qbi-' + sanitizeId(bar.provider) + '-' + sanitizeId(bar.model);
-  var toggleCall = "toggleModelDetail('" + escapeHtml(bar.provider).replace(/'/g, "\\'") + "','" + escapeHtml(bar.model).replace(/'/g, "\\'") + "')";
-  var currentKeyHtml = '';
-  if (bar.currentKeyName) {
-    currentKeyHtml = '<span class="current-key-tag" data-tooltip="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
-  } else {
-    currentKeyHtml = '<span class="current-key-tag current-key-tag-none">' + escapeHtml(t('noCurrentKey')) + '</span>';
+  return true;
+}
+
+function formatAvgSpeed(k) {
+  if (k.inFlight && k.inFlight > 0 && k.liveSpeed != null && k.liveSpeed > 0) {
+    return '<span class="model-key-metric metric-live">' + k.liveSpeed.toFixed(1) + ' tok/s</span>';
   }
-  var displayModel = bar.alias || bar.model;
-  var tokenInfo = ' <span class="quota-bar-tokens">' +
-    '<span style="color:var(--accent2);font-weight:700">' + bar.successCount + '</span>' +
-    '<span style="color:var(--text-muted);font-weight:400"> / </span>' +
-    '<span style="color:var(--danger);font-weight:700">' + bar.errorCount + '</span>' +
-    '<span style="color:var(--text-muted);margin:0 4px">|</span>' +
-    '<span style="color:var(--text-muted)">in:</span>' +
-    '<span style="color:var(--accent2);font-weight:600">' + formatCompactTokens(bar.inputTokens) + '</span>' +
-    '<span style="color:var(--text-muted);margin:0 4px">|</span>' +
-    '<span style="color:var(--text-muted)">out:</span>' +
-    '<span style="color:var(--accent);font-weight:600">' + formatCompactTokens(bar.outputTokens) + '</span>' +
-    '</span>';
-  if (bar.hasQuota) {
-    var pct = bar.totalCapacity > 0 ? (bar.totalUsed / bar.totalCapacity * 100) : 0;
-    var fillColor = pct < 50 ? 'var(--accent2)' : (pct < 80 ? 'var(--warn)' : 'var(--danger)');
-    var remain = bar.totalCapacity - bar.totalUsed;
-    return '<div class="quota-bar-item" id="' + itemId + '" onclick="' + toggleCall + '">' +
-      '<div class="quota-bar-header">' +
-        '<span class="quota-bar-model"><span class="' + barDotClass + '" style="background:' + color + '"></span>' + escapeHtml(bar.provider) + ' / ' + escapeHtml(displayModel) + ' (' + bar.perKeyLimit + ' per/day)' + currentKeyHtml + tokenInfo + '</span>' +
-        '<span class="quota-bar-right">' + QUOTA_CHEVRON + '</span>' +
-      '</div>' +
-      '<div class="quota-bar-row">' +
-        '<span class="quota-bar-numbers">' + bar.totalUsed + '/' + bar.totalCapacity + '</span>' +
-        '<div class="quota-bar-track" data-used="' + bar.totalUsed + '" data-total="' + bar.totalCapacity + '" data-remain="' + remain + '" data-perkey="' + bar.perKeyLimit + '">' +
-          '<div class="quota-bar-fill" style="width:' + pct + '%;background:' + fillColor + '"></div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="model-key-detail-wrap" id="detail-' + itemId + '"></div>' +
-    '</div>';
+  if (k.avgSpeed != null && k.avgSpeed > 0) {
+    return '<span class="model-key-metric">' + k.avgSpeed.toFixed(1) + ' tok/s</span>';
+  }
+  return '—';
+}
+
+function formatAvgLatency(k) {
+  if (k.avgTtftMs != null && k.avgTtftMs > 0) return formatLatency(k.avgTtftMs);
+  return '—';
+}
+
+// renderQuotaRow returns a top-level <tr> for a QuotaBar.
+function renderQuotaRow(bar) {
+  var itemId = 'qr-' + sanitizeId(bar.provider) + '-' + sanitizeId(bar.model);
+  var multi = isMultiKeyProvider(bar.provider);
+  var chevronHtml = multi
+    ? '<span class="quota-row-chevron">' + QUOTA_CHEVRON + '</span>'
+    : '';
+  var quotaStr = bar.hasQuota ? (bar.totalUsed + '/' + bar.totalCapacity) : '∞';
+  var rowHtml = '<tr class="quota-row" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
+  if (multi) {
+    var pEsc = escapeHtml(bar.provider).replace(/'/g, "\\'");
+    var mEsc = escapeHtml(bar.model).replace(/'/g, "\\'");
+    rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')" style="cursor:pointer"';
+  }
+  rowHtml += '>\
+    <td class="quota-td-chevron">' + chevronHtml + '</td>\
+    <td>' + escapeHtml(bar.provider) + '</td>\
+    <td>' + escapeHtml(displayModelName(bar.model, bar.alias || bar.model)) + '</td>\
+    <td class="quota-td-quota">' + quotaStr + '</td>\
+    <td>' + formatCompactTokens(bar.inputTokens) + '</td>\
+    <td>' + formatCompactTokens(bar.outputTokens) + '</td>\
+    <td class="quota-td-latency">—</td>\
+    <td class="quota-td-speed">—</td>\
+  </tr>';
+  return rowHtml;
+}
+
+// patchQuotaRow updates a top-level row's volatile cells (quota, tokens,
+// latency, speed, chevron rotation). Reuses the existing <tr> by id.
+function patchQuotaRow(el, bar) {
+  el.querySelector('.quota-td-quota').textContent = bar.hasQuota ? (bar.totalUsed + '/' + bar.totalCapacity) : '∞';
+  // tokens columns (4th and 5th data cells)
+  var tds = el.querySelectorAll('td');
+  tds[4].textContent = formatCompactTokens(bar.inputTokens);
+  tds[5].textContent = formatCompactTokens(bar.outputTokens);
+  // latency + speed filled by patchQuotaRowActiveMetrics when per-key data arrives
+}
+
+// findActiveKey resolves the key the rotation strategy would pick next,
+// mirroring currentKeyId/inUseKeyID. Returns null when none.
+function findActiveKey(data, bar) {
+  if (!data || !data.keys) return null;
+  for (var i = 0; i < data.keys.length; i++) {
+    var k = data.keys[i];
+    if (k.isActive && k.status === 'active' && !k.modelLock) {
+      if ((data.inUseKeyID && k.keyId === data.inUseKeyID) ||
+          (!data.inUseKeyID && data.inUseKeyName && k.keyName === data.inUseKeyName)) {
+        return k;
+      }
+    }
+  }
+  // fall back to matching bar.currentKeyId / currentKeyName
+  if (bar) {
+    for (var j = 0; j < data.keys.length; j++) {
+      var kk = data.keys[j];
+      if ((bar.currentKeyId && kk.keyId === bar.currentKeyId) ||
+          (!bar.currentKeyId && bar.currentKeyName && kk.keyName === bar.currentKeyName)) {
+        return kk;
+      }
+    }
+  }
+  return null;
+}
+
+// patchQuotaRowActiveMetrics fills the latency/speed cells of a top-level row
+// from the active key's per-key metrics once model-keys data is available.
+function patchQuotaRowActiveMetrics(provider, model, data) {
+  var itemId = 'qr-' + sanitizeId(provider) + '-' + sanitizeId(model);
+  var el = document.getElementById(itemId);
+  if (!el) return;
+  // find the corresponding QuotaBar to identify the active key
+  var bar = null;
+  for (var key in quotaBarItems) {
+    if (key === provider + '/' + model) {
+      bar = quotaBarItems[key]._bar;
+      break;
+    }
+  }
+  var ak = findActiveKey(data, bar);
+  var latCell = el.querySelector('.quota-td-latency');
+  var spdCell = el.querySelector('.quota-td-speed');
+  if (ak) {
+    latCell.innerHTML = formatAvgLatency(ak);
+    spdCell.innerHTML = formatAvgSpeed(ak);
   } else {
-    return '<div class="quota-bar-item" id="' + itemId + '" onclick="' + toggleCall + '">' +
-      '<div class="quota-bar-header">' +
-        '<span class="quota-bar-model"><span class="' + barDotClass + '" style="background:' + color + '"></span>' + escapeHtml(bar.provider) + ' / ' + escapeHtml(displayModel) + currentKeyHtml + tokenInfo + '</span>' +
-        '<span class="quota-bar-right">' + QUOTA_CHEVRON + '</span>' +
-      '</div>' +
-      '<div class="model-key-detail-wrap" id="detail-' + itemId + '"></div>' +
-    '</div>';
+    latCell.textContent = '—';
+    spdCell.textContent = '—';
   }
 }
 
-function buildQuotaBarItems(bars, section) {
-  if (!bars) return;
-  for (var i = 0; i < bars.length; i++) {
-    var bar = bars[i];
+// renderQuotaKeyRows builds per-key <tr> sub-rows inserted after a top row.
+function renderQuotaKeyRows(provider, model, data) {
+  var itemId = 'qr-' + sanitizeId(provider) + '-' + sanitizeId(model);
+  var setKey = JSON.stringify([provider, model]);
+  if (!expandedModels.has(setKey)) return;
+  var color = getModelColor(provider, model);
+  if (!data || !data.keys || data.keys.length === 0) {
+    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
+  }
+  var rows = '';
+  data.keys.forEach(function(k) {
+    var statusBadge = '';
+    if (data.hasQuota) {
+      if (k.hasQuota) {
+        if (k.modelRemaining === 0) {
+          statusBadge = '<span class="key-status-badge key-status-exhausted">' + t('exhausted') + '</span>';
+        } else {
+          statusBadge = '<span class="key-status-badge key-status-available">' + t('available') + '</span>';
+        }
+      } else {
+        statusBadge = '<span class="key-status-badge key-status-untested">' + t('untestedKey') + '</span>';
+      }
+    } else {
+      if (k.modelLock) {
+        if (k.status === 'locked') {
+          statusBadge = '<span class="key-status-badge key-status-locked">' + t('dailyLocked') + '</span>';
+        } else {
+          statusBadge = '<span class="key-status-badge key-status-cooldown">' + t('cooldown') + '</span>';
+        }
+      } else if (!k.isActive) {
+        statusBadge = '<span class="key-status-badge key-status-inactive">' + t('inactive') + '</span>';
+      } else {
+        statusBadge = '<span class="key-status-badge key-status-available">' + t('available') + '</span>';
+      }
+    }
+
+    var dotClass = 'model-color-dot';
+    if (k.inFlight && k.inFlight > 0) dotClass += ' model-color-dot-calling';
+
+    var rowClass = 'quota-key-row';
+    var usable = k.isActive && k.status === 'active' && !k.modelLock;
+    if (usable && ((data.inUseKeyID && k.keyId === data.inUseKeyID) || (!data.inUseKeyID && data.inUseKeyName && k.keyName === data.inUseKeyName))) {
+      dotClass += ' model-color-dot-in-use';
+      rowClass += ' quota-key-row-in-use';
+    } else if (!usable) {
+      rowClass += ' quota-key-row-disabled';
+    }
+
+    var timerHtml = '';
+    if (k.modelLock || k.status === 'cooldown' || k.status === 'locked') {
+      if (k.modelLock) {
+        var unlockMs = new Date(k.modelLock).getTime() - Date.now();
+        timerHtml = '<span class="model-key-timer model-key-timer-cooldown" data-type="cooldown" data-unlock="' + k.modelLock + '">' + formatMinutes(unlockMs) + '</span>';
+      }
+    } else if (k.lastUsedAt) {
+      var isCurrentlyInUse = (data.inUseKeyID && k.keyId === data.inUseKeyID) ||
+        (!data.inUseKeyID && data.inUseKeyName && k.keyName === data.inUseKeyName);
+      var isCurrentlyCalling = k.inFlight && k.inFlight > 0;
+      if (!isCurrentlyInUse && !isCurrentlyCalling) {
+        var idleMs = Date.now() - new Date(k.lastUsedAt).getTime();
+        timerHtml = '<span class="model-key-timer model-key-timer-idle" data-type="idle" data-used-at="' + k.lastUsedAt + '">' + formatMinutes(idleMs) + '</span>';
+      }
+    }
+    var leadHtml = timerHtml !== '' ? timerHtml : '<span class="' + dotClass + '" style="background:' + color + '"></span>';
+
+    var quotaStr = (data.hasQuota && k.hasQuota) ? ((k.modelLimit - k.modelRemaining) + '/' + k.modelLimit) : '∞';
+
+    rows += '<tr class="' + rowClass + '">\
+      <td></td>\
+      <td>' + leadHtml + '</td>\
+      <td>' + escapeHtml(k.keyName) + '</td>\
+      <td>' + quotaStr + '</td>\
+      <td colspan="2">' + statusBadge + '</td>\
+      <td>' + formatAvgLatency(k) + '</td>\
+      <td>' + formatAvgSpeed(k) + '</td>\
+    </tr>';
+  });
+  return rows;
+}
+
+// updateQuotaTable renders/updates the quota monitor table. Active (in-flight)
+// rows float to the top; the rest stay in provider/model letter order.
+function updateQuotaTable(bars) {
+  if (!bars) bars = [];
+  var tbody = document.getElementById('quota-tbody');
+  if (!tbody) return;
+  if (!lockCountdownTimerStarted) {
+    lockCountdownTimerStarted = true;
+    clearInterval(lockCountdownInterval);
+    lockCountdownInterval = setInterval(function() {
+      updateLockCountdowns();
+      updateKeyTimers();
+    }, 1000);
+  }
+  // sort: active first, then provider/model
+  var sorted = bars.slice().sort(function(a, b) {
+    var aActive = a.inFlightKeyNames && a.inFlightKeyNames.length > 0 ? 0 : 1;
+    var bActive = b.inFlightKeyNames && b.inFlightKeyNames.length > 0 ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    var ka = a.provider + '/' + a.model;
+    var kb = b.provider + '/' + b.model;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  var seen = {};
+  var orderedKeys = [];
+  for (var i = 0; i < sorted.length; i++) {
+    var bar = sorted[i];
     var key = bar.provider + '/' + bar.model;
-    var html = renderQuotaBarItem(bar);
-    var temp = document.createElement('div');
-    temp.innerHTML = html;
-    var el = temp.firstElementChild;
-    section.appendChild(el);
-    quotaBarItems[key] = el;
-    el._hasQuota = !!bar.hasQuota;
+    seen[key] = true;
+    orderedKeys.push(key);
+    var el = quotaBarItems[key];
+    if (el) {
+      patchQuotaRow(el, bar);
+      el._bar = bar;
+      // move into sorted position
+      tbody.appendChild(el);
+    } else {
+      var temp = document.createElement('tbody');
+      temp.innerHTML = renderQuotaRow(bar);
+      var newEl = temp.firstElementChild;
+      tbody.appendChild(newEl);
+      quotaBarItems[key] = newEl;
+      newEl._bar = bar;
+    }
+    // remove any existing sub-rows for this key before re-inserting if expanded
+    var sub = tbody.querySelectorAll('.quota-key-row[data-parent="' + key + '"]');
+    sub.forEach(function(s) { s.remove(); });
     var setKey = JSON.stringify([bar.provider, bar.model]);
     if (expandedModels.has(setKey)) {
-      toggleModelDetail(bar.provider, bar.model);
+      var parent = quotaBarItems[key];
+      var cache = keyDetailCache[key];
+      if (cache && cache.data) {
+        var html = renderQuotaKeyRows(bar.provider, bar.model, cache.data);
+        if (html) {
+          var tmp = document.createElement('tbody');
+          tmp.innerHTML = html;
+          while (tmp.firstElementChild) {
+            tmp.firstElementChild.setAttribute('data-parent', key);
+            parent.parentNode.insertBefore(tmp.firstElementChild, parent.nextSibling);
+            parent = tmp.firstElementChild;
+          }
+        }
+      }
     }
   }
-  attachQuotaBarHover();
-}
-
-function patchQuotaBarItem(el, bar) {
-  if (!!el._hasQuota !== !!bar.hasQuota) {
-    var key = bar.provider + '/' + bar.model;
-    var temp = document.createElement('div');
-    temp.innerHTML = renderQuotaBarItem(bar);
-    var newEl = temp.firstElementChild;
-    el.parentNode.replaceChild(newEl, el);
-    quotaBarItems[key] = newEl;
-    newEl._hasQuota = !!bar.hasQuota;
-    attachQuotaBarHover();
-    var setKey = JSON.stringify([bar.provider, bar.model]);
-    if (expandedModels.has(setKey)) {
-      toggleModelDetail(bar.provider, bar.model);
+  // remove rows no longer present
+  for (var key2 in quotaBarItems) {
+    if (!seen[key2]) {
+      var el2 = quotaBarItems[key2];
+      if (el2 && el2.parentNode) el2.parentNode.removeChild(el2);
+      delete quotaBarItems[key2];
     }
-    return;
   }
-  var dot = el.querySelector('.model-color-dot');
-  if (bar.inFlightKeyNames && bar.inFlightKeyNames.length > 0) {
-    dot.classList.add('model-color-dot-calling');
-  } else {
-    dot.classList.remove('model-color-dot-calling');
+  // empty state
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noQuota')) + '</td></tr>';
   }
-  var tokenInfo = ' <span class="quota-bar-tokens">' +
-    '<span style="color:var(--accent2);font-weight:700">' + bar.successCount + '</span>' +
-    '<span style="color:var(--text-muted);font-weight:400"> / </span>' +
-    '<span style="color:var(--danger);font-weight:700">' + bar.errorCount + '</span>' +
-    '<span style="color:var(--text-muted);margin:0 4px">|</span>' +
-    '<span style="color:var(--text-muted)">in:</span>' +
-    '<span style="color:var(--accent2);font-weight:600">' + formatCompactTokens(bar.inputTokens) + '</span>' +
-    '<span style="color:var(--text-muted);margin:0 4px">|</span>' +
-    '<span style="color:var(--text-muted)">out:</span>' +
-    '<span style="color:var(--accent);font-weight:600">' + formatCompactTokens(bar.outputTokens) + '</span>' +
-    '</span>';
-  var currentKeyHtml = '';
-  if (bar.currentKeyName) {
-    currentKeyHtml = '<span class="current-key-tag" data-tooltip="' + escapeHtml(t('currentKey')) + '" data-current-key-id="' + escapeHtml(bar.currentKeyId || '') + '"><span class="current-key-dot"></span>' + escapeHtml(bar.currentKeyName) + '</span>';
-  } else {
-    currentKeyHtml = '<span class="current-key-tag current-key-tag-none">' + escapeHtml(t('noCurrentKey')) + '</span>';
-  }
-  var modelSpan = el.querySelector('.quota-bar-model');
-  var displayModel = bar.alias || bar.model;
-  var modelPrefix = escapeHtml(bar.provider) + ' / ' + escapeHtml(displayModel);
-  if (bar.hasQuota) {
-    modelPrefix += ' (' + bar.perKeyLimit + ' per/day)';
-  }
-  modelSpan.innerHTML = '<span class="' + dot.className + '" style="background:' + getModelColor(bar.provider, bar.model) + '"></span>' + modelPrefix + currentKeyHtml + tokenInfo;
-  var numSpan = el.querySelector('.quota-bar-numbers');
-  var track = el.querySelector('.quota-bar-track');
-  var fill = track ? track.querySelector('.quota-bar-fill') : null;
-  if (bar.hasQuota) {
-    var pct = bar.totalCapacity > 0 ? (bar.totalUsed / bar.totalCapacity * 100) : 0;
-    var fillColor = pct < 50 ? 'var(--accent2)' : (pct < 80 ? 'var(--warn)' : 'var(--danger)');
-    if (numSpan) numSpan.textContent = bar.totalUsed + '/' + bar.totalCapacity;
-    if (track) {
-      var remain = bar.totalCapacity - bar.totalUsed;
-      track.setAttribute('data-used', bar.totalUsed);
-      track.setAttribute('data-total', bar.totalCapacity);
-      track.setAttribute('data-remain', remain);
-      track.setAttribute('data-perkey', bar.perKeyLimit);
-    }
-    if (fill) {
-      setBarWidth(fill, pct + '%');
-      fill.style.background = fillColor;
-    }
-  } else {
-    if (numSpan) numSpan.textContent = '';
-  }
-}
-
-function renderQuotaBars(bars) {
-  if (!bars || bars.length === 0) return '<div class="card"><div class="card-title">' + t('quotaMonitor') + '</div>' + emptyState(t('noQuota')) + '</div>';
-  var html = '<div class="card"><div class="card-title">' + t('quotaMonitor') + '</div><div class="quota-section quota-section-scroll">';
-  for (var i = 0; i < bars.length; i++) {
-    html += renderQuotaBarItem(bars[i]);
-  }
-  html += '</div></div>';
-  return html;
 }
 
 function formatRemaining(ms) {
@@ -1189,7 +1301,6 @@ function updateKeyTimers() {
       if (!unlock) continue;
       var remaining = new Date(unlock).getTime() - Date.now();
       if (remaining <= 0) {
-        // cooldown 结束：切换到 idle 正向计时
         el.classList.remove('model-key-timer-cooldown');
         el.classList.add('model-key-timer-idle');
         el.setAttribute('data-type', 'idle');
@@ -1197,20 +1308,13 @@ function updateKeyTimers() {
         var nowIso = new Date().toISOString();
         el.setAttribute('data-used-at', nowIso);
         el.textContent = '00';
-        // 同行 status badge: cooldown/locked -> available
-        var row = el.closest('.model-key-row');
+        var row = el.closest('.quota-key-row');
         if (row) {
           var badge = row.querySelector('.key-status-badge');
           if (badge && (badge.classList.contains('key-status-cooldown') || badge.classList.contains('key-status-locked'))) {
             badge.classList.remove('key-status-cooldown', 'key-status-locked');
             badge.classList.add('key-status-available');
             badge.textContent = t('available');
-          }
-          // 同行 error 清除
-          var errEl = row.querySelector('.model-key-error');
-          if (errEl) {
-            errEl.textContent = '';
-            errEl.removeAttribute('title');
           }
         }
       } else {
@@ -1226,126 +1330,43 @@ function updateKeyTimers() {
   }
 }
 
-function updateQuotaBars(bars) {
-  var section = document.querySelector('.quota-monitor-card > .card > .quota-section');
-  if (!section) return;
-  var sig = computeQuotaSig(bars);
-  if (sig === lastQuotaSig) return;
-  lastQuotaSig = sig;
-  if (!bars) bars = [];
-  if (!lockCountdownTimerStarted) {
-    lockCountdownTimerStarted = true;
-    clearInterval(lockCountdownInterval);
-    lockCountdownInterval = setInterval(function() {
-      updateLockCountdowns();
-      updateKeyTimers();
-    }, 1000);
-  }
-  var seen = {};
-  var keys = [];
-  for (var i = 0; i < bars.length; i++) {
-    var bar = bars[i];
-    var key = bar.provider + '/' + bar.model;
-    seen[key] = true;
-    keys.push(key);
-    var el = quotaBarItems[key];
-    if (el) {
-      patchQuotaBarItem(el, bar);
-    } else {
-      var temp = document.createElement('div');
-      temp.innerHTML = renderQuotaBarItem(bar);
-      var newEl = temp.firstElementChild;
-      var refEl = null;
-      for (var j = i + 1; j < bars.length; j++) {
-        if (quotaBarItems[bars[j].provider + '/' + bars[j].model]) {
-          refEl = quotaBarItems[bars[j].provider + '/' + bars[j].model];
-          break;
-        }
-      }
-      if (refEl) {
-        section.insertBefore(newEl, refEl);
-      } else {
-        section.appendChild(newEl);
-      }
-      quotaBarItems[key] = newEl;
-      newEl._hasQuota = !!bar.hasQuota;
-      attachQuotaBarHover();
-      var setKey = JSON.stringify([bar.provider, bar.model]);
-      if (expandedModels.has(setKey)) {
-        toggleModelDetail(bar.provider, bar.model);
-      }
-    }
-  }
-  for (var key in quotaBarItems) {
-    if (!seen[key]) {
-      var el = quotaBarItems[key];
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-      delete quotaBarItems[key];
-    }
-  }
-}
-
-function attachQuotaBarHover() {
-  var tracks = document.querySelectorAll('.quota-bar-track');
-  tracks.forEach(function(track) {
-    if (track._ttBound) return;
-    track._ttBound = true;
-    track.addEventListener('mouseenter', function() {
-      var used = track.getAttribute('data-used');
-      var total = track.getAttribute('data-total');
-      var remain = track.getAttribute('data-remain');
-      var perkey = track.getAttribute('data-perkey');
-      showQuotaTooltip(track, used, total, remain, perkey);
-    });
-    track.addEventListener('mouseleave', hideQuotaTooltip);
-  });
-}
-
-function showQuotaTooltip(track, used, total, remain, perkey) {
-  hideQuotaTooltip();
-  var tip = document.createElement('div');
-  tip.className = 'quota-tip';
-  tip.id = 'quota-tip';
-  tip.innerHTML =
-    '<div><span class="quota-tip-k">' + escapeHtml(t('quotaUsed')) + '</span><span class="quota-tip-v">' + used + '</span></div>' +
-    '<div><span class="quota-tip-k">' + escapeHtml(t('quotaRemain')) + '</span><span class="quota-tip-v">' + remain + '</span></div>' +
-    '<div><span class="quota-tip-k">' + escapeHtml(t('quotaTotal')) + '</span><span class="quota-tip-v">' + total + '</span></div>' +
-    '<div class="quota-tip-perkey">' + escapeHtml(t('perKeyLabel')) + ': ' + perkey + '</div>';
-  document.body.appendChild(tip);
-  var rect = track.getBoundingClientRect();
-  tip.style.left = rect.left + 'px';
-  tip.style.top = (rect.top - tip.offsetHeight - 6) + 'px';
-  // Flip below if not enough space above.
-  if (rect.top - tip.offsetHeight - 6 < 4) {
-    tip.style.top = (rect.bottom + 6) + 'px';
-  }
-}
-
-function hideQuotaTooltip() {
-  var existing = document.getElementById('quota-tip');
-  if (existing) existing.remove();
-}
-
-function toggleModelDetail(provider, model) {
-  var itemId = 'qbi-' + sanitizeId(provider) + '-' + sanitizeId(model);
-  var detailId = 'detail-' + itemId;
-  var wrap = document.getElementById(detailId);
-  if (!wrap) return;
-  var key = provider + '/' + model;
-  var item = document.getElementById(itemId);
-  var chevron = item ? item.querySelector('.quota-bar-chevron') : null;
-
+function toggleQuotaRowExpand(provider, model) {
+  var itemId = 'qr-' + sanitizeId(provider) + '-' + sanitizeId(model);
+  var el = document.getElementById(itemId);
+  if (!el) return;
   var setKey = JSON.stringify([provider, model]);
+  var chevron = el.querySelector('.quota-row-chevron');
   if (expandedModels.has(setKey)) {
     expandedModels.delete(setKey);
-    wrap.classList.remove('expanded');
     if (chevron) chevron.style.transform = '';
-    setTimeout(function() { if (!expandedModels.has(setKey)) wrap.innerHTML = ''; }, 300);
+    var key = provider + '/' + model;
+    var subs = el.parentNode.querySelectorAll('.quota-key-row[data-parent="' + key + '"]');
+    subs.forEach(function(s) { s.remove(); });
   } else {
     expandedModels.add(setKey);
-    wrap.classList.add('expanded');
     if (chevron) chevron.style.transform = 'rotate(180deg)';
-    wrap.innerHTML = '<div class="model-key-detail-loading">' + t('loading') + '...</div>';
+    var cache = keyDetailCache[provider + '/' + model];
+    if (cache && cache.data) {
+      var html = renderQuotaKeyRows(provider, model, cache.data);
+      if (html) {
+        var tmp = document.createElement('tbody');
+        tmp.innerHTML = html;
+        var key2 = provider + '/' + model;
+        var parent = el;
+        while (tmp.firstElementChild) {
+          tmp.firstElementChild.setAttribute('data-parent', key2);
+          parent.parentNode.insertBefore(tmp.firstElementChild, parent.nextSibling);
+          parent = tmp.firstElementChild;
+        }
+      }
+    } else {
+      // loading placeholder
+      var ph = document.createElement('tr');
+      ph.className = 'quota-key-row quota-key-row-loading';
+      ph.setAttribute('data-parent', provider + '/' + model);
+      ph.innerHTML = '<td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('loading')) + '...</td>';
+      el.parentNode.insertBefore(ph, el.nextSibling);
+    }
     fetchModelKeyDetail(provider, model);
   }
 }
@@ -1353,163 +1374,64 @@ function toggleModelDetail(provider, model) {
 async function fetchModelKeyDetail(provider, model) {
   try {
     var data = await apiGet('/usage/model-keys?provider=' + encodeURIComponent(provider) + '&model=' + encodeURIComponent(model));
-    renderModelKeyDetail(provider, model, data);
+    keyDetailCache[provider + '/' + model] = { data: data, ts: Date.now() };
+    patchQuotaRowActiveMetrics(provider, model, data);
+    var setKey = JSON.stringify([provider, model]);
+    if (expandedModels.has(setKey)) {
+      renderQuotaKeyRowsInto(provider, model, data);
+    }
   } catch(e) {
-    var itemId = 'qbi-' + sanitizeId(provider) + '-' + sanitizeId(model);
-    var wrap = document.getElementById('detail-' + itemId);
-    if (wrap) wrap.innerHTML = '<div class="model-key-detail-error">' + escapeHtml(t('failed').replace('{0}', e.message || '')) + '</div>';
+    var setKey2 = JSON.stringify([provider, model]);
+    if (expandedModels.has(setKey2)) {
+      var itemId = 'qr-' + sanitizeId(provider) + '-' + sanitizeId(model);
+      var el = document.getElementById(itemId);
+      if (el) {
+        var key = provider + '/' + model;
+        var subs = el.parentNode.querySelectorAll('.quota-key-row[data-parent="' + key + '"]');
+        subs.forEach(function(s) { s.remove(); });
+        var err = document.createElement('tr');
+        err.className = 'quota-key-row quota-key-row-error';
+        err.setAttribute('data-parent', key);
+        err.innerHTML = '<td colspan="8" style="color:var(--danger)">' + escapeHtml(t('failed').replace('{0}', e.message || '')) + '</td>';
+        el.parentNode.insertBefore(err, el.nextSibling);
+      }
+    }
   }
 }
 
-function renderModelKeyDetail(provider, model, data) {
-  var itemId = 'qbi-' + sanitizeId(provider) + '-' + sanitizeId(model);
-  var wrap = document.getElementById('detail-' + itemId);
-  if (!wrap) return;
-  var setKey = JSON.stringify([provider, model]);
-  if (!expandedModels.has(setKey)) return;
-  if (!data.keys || data.keys.length === 0) {
-    wrap.innerHTML = '<div class="model-key-detail-empty">' + escapeHtml(t('noKeysConfigured')) + '</div>';
-    return;
+// renderQuotaKeyRowsInto replaces the sub-rows under a top-level row with fresh
+// per-key <tr>s built from data.
+function renderQuotaKeyRowsInto(provider, model, data) {
+  var itemId = 'qr-' + sanitizeId(provider) + '-' + sanitizeId(model);
+  var el = document.getElementById(itemId);
+  if (!el) return;
+  var key = provider + '/' + model;
+  var subs = el.parentNode.querySelectorAll('.quota-key-row[data-parent="' + key + '"]');
+  subs.forEach(function(s) { s.remove(); });
+ var html = renderQuotaKeyRows(provider, model, data);
+  if (!html) return;
+  var tmp = document.createElement('tbody');
+  tmp.innerHTML = html;
+  var parent = el;
+  while (tmp.firstElementChild) {
+    tmp.firstElementChild.setAttribute('data-parent', key);
+    parent.parentNode.insertBefore(tmp.firstElementChild, parent.nextSibling);
+    parent = tmp.firstElementChild;
   }
-
-  var html = '<div class="model-key-detail">';
-  data.keys.forEach(function(k) {
-    var color = getModelColor(provider, model);
-    var statusBadge = '';
-    var quotaBar = '<span class="model-key-quota-bar">';
-
-    if (data.hasQuota) {
-      if (k.hasQuota) {
-        if (k.modelRemaining === 0) {
-          statusBadge = '<span class="key-status-badge key-status-exhausted">' + t('exhausted') + '</span>';
-        } else {
-          statusBadge = '<span class="key-status-badge key-status-available">' + t('available') + '</span>';
-        }
-        var pct = k.modelLimit > 0 ? ((k.modelLimit - k.modelRemaining) / k.modelLimit * 100) : 0;
-        var fillColor = pct < 50 ? 'var(--accent2)' : (pct < 80 ? 'var(--warn)' : 'var(--danger)');
-        quotaBar += '<div class="model-key-quota-fill" style="width:' + pct + '%;background:' + fillColor + '"></div>';
-      } else {
-        statusBadge = '<span class="key-status-badge key-status-untested">' + t('untestedKey') + '</span>';
-      }
-    } else {
-      if (k.modelLock) {
-        if (k.status === 'locked') {
-          statusBadge = '<span class="key-status-badge key-status-locked">' + t('dailyLocked') + '</span>';
-        } else {
-          statusBadge = '<span class="key-status-badge key-status-cooldown">' + t('cooldown') + '</span>';
-        }
-      } else if (!k.isActive) {
-        statusBadge = '<span class="key-status-badge key-status-inactive">' + t('inactive') + '</span>';
-      } else {
-        statusBadge = '<span class="key-status-badge key-status-available">' + t('available') + '</span>';
-      }
-    }
-
-    var errorInfo = '<span class="model-key-error"';
-    if (k.lastError) {
-      var errStr = k.lastError.length > 60 ? k.lastError.slice(0, 60) + '…' : k.lastError;
-      errorInfo += ' data-tooltip="' + escapeHtml(k.lastError) + '">' + escapeHtml(errStr);
-    } else {
-      errorInfo += '>';
-    }
-    errorInfo += '</span>';
-
-    var quotaInfo = '<span class="model-key-quota-numbers">';
-    if (data.hasQuota && k.hasQuota) {
-      quotaInfo += (k.modelLimit - k.modelRemaining) + '/' + k.modelLimit;
-    }
-    quotaInfo += '</span>';
-
-    // Dot state classes (calling + in-use are independent)
-    var dotClass = 'model-color-dot';
-    if (k.inFlight && k.inFlight > 0) {
-      dotClass += ' model-color-dot-calling';
-    }
-
-    // "In Use" badge removed; row highlighting + dot size indicate predicted next key
-    var rowClass = 'model-key-row';
-    var usable = k.isActive && k.status === 'active' && !k.modelLock;
-    if (usable && ((data.inUseKeyID && k.keyId === data.inUseKeyID) || (!data.inUseKeyID && data.inUseKeyName && k.keyName === data.inUseKeyName))) {
-      dotClass += ' model-color-dot-in-use';
-      rowClass = 'model-key-row model-key-row-in-use';
-    } else if (!usable) {
-      rowClass = 'model-key-row model-key-row-disabled';
-    }
-
-    // Timer: 2-digit circle left of dot; mutually exclusive display
-    var timerHtml = '';
-    if (k.modelLock || k.status === 'cooldown' || k.status === 'locked') {
-      if (k.modelLock) {
-        var unlockMs = new Date(k.modelLock).getTime() - Date.now();
-        timerHtml = '<span class="model-key-timer model-key-timer-cooldown" data-type="cooldown" data-unlock="' + k.modelLock + '">' + formatMinutes(unlockMs) + '</span>';
-      }
-    } else if (k.lastUsedAt) {
-      var isCurrentlyInUse = (data.inUseKeyID && k.keyId === data.inUseKeyID) ||
-       (!data.inUseKeyID && data.inUseKeyName && k.keyName === data.inUseKeyName);
-      var isCurrentlyCalling = k.inFlight && k.inFlight > 0;
-      if (!isCurrentlyInUse && !isCurrentlyCalling) {
-        var idleMs = Date.now() - new Date(k.lastUsedAt).getTime();
-        timerHtml = '<span class="model-key-timer model-key-timer-idle" data-type="idle" data-used-at="' + k.lastUsedAt + '">' + formatMinutes(idleMs) + '</span>';
-      }
-    }
-
-    var metricsHtml = '<span class="model-key-metrics">';
-    var hasMetrics = (k.successCount != null && k.successCount > 0) || (k.errorCount != null && k.errorCount > 0) || (k.avgTtftMs != null && k.avgTtftMs > 0) || (k.avgSpeed != null && k.avgSpeed > 0) || (k.liveSpeed != null && k.liveSpeed > 0);
-    if (hasMetrics) {
-      var metricsParts = [];
-      if (k.successCount != null || k.errorCount != null) {
-        metricsParts.push('<span class="model-key-metric model-key-succ">' + (k.successCount || 0) + '/<span class="model-key-err">' + (k.errorCount || 0) + '</span></span>');
-      }
-      if (k.avgTtftMs != null && k.avgTtftMs > 0) {
-        metricsParts.push('<span class="model-key-metric">' + (k.avgTtftMs / 1000).toFixed(1) + 's</span>');
-      }
-      if (k.inFlight && k.inFlight > 0 && k.liveSpeed != null && k.liveSpeed > 0) {
-        metricsParts.push('<span class="model-key-metric metric-live">' + k.liveSpeed.toFixed(1) + ' tok/s</span>');
-      } else if (k.avgSpeed != null && k.avgSpeed > 0) {
-        metricsParts.push('<span class="model-key-metric">' + k.avgSpeed.toFixed(1) + ' tok/s</span>');
-      }
-      metricsHtml += metricsParts.join('');
-    }
-    metricsHtml += '</span>';
-
-    quotaBar += '</span>';
-
-    var leadHtml = timerHtml !== '' ? timerHtml : '<span class="' + dotClass + '" style="background:' + color + '"></span>';
-    html += '<div class="' + rowClass + '">' +
-      leadHtml +
-      '<span class="model-key-name">' + escapeHtml(k.keyName) + '</span>' +
-      quotaInfo +
-      quotaBar +
-      statusBadge +
-      metricsHtml +
-      errorInfo +
-    '</div>';
-  });
-  html += '</div>';
-  wrap.innerHTML = html;
 }
 
-function reexpandModelDetails() {
-  expandedModels.forEach(function(setKey) {
-    var parts = JSON.parse(setKey);
-    var provider = parts[0];
-    var model = parts[1];
-    var itemId = 'qbi-' + sanitizeId(provider) + '-' + sanitizeId(model);
-    var wrap = document.getElementById('detail-' + itemId);
-    if (wrap) {
-      wrap.classList.add('expanded');
-      var chevron = document.querySelector('#' + itemId + ' .quota-bar-chevron');
-      if (chevron) chevron.style.transform = 'rotate(180deg)';
-      fetchModelKeyDetail(provider, model);
-    }
-  });
-}
-
-function maybeRefreshPerKeyDetails() {
+// refreshAllKeyDetails throttles per-key fetches for every quota bar and
+// backfills top-level latency/speed + expanded sub-rows.
+function refreshAllKeyDetails() {
   var now = Date.now();
-  if (now - _lastPerKeyRefresh < 3000) return;
+  if (now - _lastPerKeyRefresh < KEY_DETAIL_TTL) return;
   _lastPerKeyRefresh = now;
-  reexpandModelDetails();
+  for (var key in quotaBarItems) {
+    var el = quotaBarItems[key];
+    if (!el || !el._bar) continue;
+    var bar = el._bar;
+    fetchModelKeyDetail(bar.provider, bar.model);
+  }
 }
 
 // --- Recent Requests Modal ---
