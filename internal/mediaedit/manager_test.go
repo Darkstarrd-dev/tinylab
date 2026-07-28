@@ -259,3 +259,109 @@ func TestSnapshot(t *testing.T) {
 	}
 	// Ensure cancel is not copied (it would be nil anyway).
 }
+
+// TestManager_TranscodeImage_OutputName verifies that when OutputName is set
+// (the batch-convert path for FSAA/zip items whose inputPath is a temp file
+// like "gallery-edit-XXXX.png"), the saved output uses the requested original
+// stem with only the new format's extension — not the temp filename.
+func TestManager_TranscodeImage_OutputName(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFfmpeg(t)
+
+	srcDir := t.TempDir()
+	outDir := t.TempDir()
+	// Simulate a temp-resolved input with an opaque name (as upload-temp /
+	// extract-zip-entry produce).
+	imgPath := makeTestImage(t, ffmpegPath, srcDir, "gallery-edit-upload-1234567890.png")
+
+	m := NewManager()
+	params := ImageTranscodeParams{Format: "webp", Quality: 80}
+	raw, _ := json.Marshal(params)
+	req := StartRequest{
+		InputPath:  imgPath,
+		Operation:  "image_transcode",
+		Overwrite:  false,
+		OutputDir:  outDir,
+		OutputName: "vacation_photo", // original gallery item name w/o extension
+		Params:     raw,
+	}
+
+	job, err := m.Start(ffmpegPath, ffprobePath, req)
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	for range 150 {
+		time.Sleep(100 * time.Millisecond)
+		j, ok := m.Get(job.ID)
+		if !ok {
+			t.Fatal("job disappeared")
+		}
+		if j.Status == StatusCompleted || j.Status == StatusError || j.Status == StatusCancelled {
+			job = j
+			break
+		}
+	}
+	if job.Status != StatusCompleted {
+		t.Fatalf("expected completed, got %s: %s", job.Status, job.Error)
+	}
+	if job.OutputName != "vacation_photo.webp" {
+		t.Errorf("expected OutputName vacation_photo.webp, got %q (OutputPath=%s)", job.OutputName, job.OutputPath)
+	}
+	if filepath.Base(job.OutputPath) != "vacation_photo.webp" {
+		t.Errorf("expected output file vacation_photo.webp, got %q", filepath.Base(job.OutputPath))
+	}
+}
+
+// TestManager_TranscodeImage_OutputName_Dedup verifies the second conversion of
+// the same-named item lands on vacation_photo_2.webp rather than clobbering.
+func TestManager_TranscodeImage_OutputName_Dedup(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFfmpeg(t)
+
+	srcDir := t.TempDir()
+	outDir := t.TempDir()
+	imgPath := makeTestImage(t, ffmpegPath, srcDir, "gallery-edit-upload-1111111111.png")
+
+	m := NewManager()
+	params := ImageTranscodeParams{Format: "png", Quality: 100}
+	raw, _ := json.Marshal(params)
+	req := StartRequest{
+		InputPath:  imgPath,
+		Operation:  "image_transcode",
+		Overwrite:  false,
+		OutputDir:  outDir,
+		OutputName: "vacation_photo",
+		Params:     raw,
+	}
+	// Convert twice — identical requested stem, different opaque temp inputs;
+	// second conversion must land on <stem>_2 instead of clobbering.
+	for k := range 2 {
+		if k == 1 {
+			imgPath = makeTestImage(t, ffmpegPath, srcDir, "gallery-edit-upload-2222222222.png")
+			req.InputPath = imgPath
+		}
+		job, err := m.Start(ffmpegPath, ffprobePath, req)
+		if err != nil {
+			t.Fatalf("start[%d] failed: %v", k, err)
+		}
+		for range 150 {
+			time.Sleep(100 * time.Millisecond)
+			j, ok := m.Get(job.ID)
+			if !ok {
+				t.Fatal("job disappeared")
+			}
+			if j.Status == StatusCompleted || j.Status == StatusError || j.Status == StatusCancelled {
+				job = j
+				break
+			}
+		}
+		if job.Status != StatusCompleted {
+			t.Fatalf("expected completed, got %s: %s", job.Status, job.Error)
+		}
+		want := "vacation_photo.png"
+		if k == 1 {
+			want = "vacation_photo_2.png"
+		}
+		if filepath.Base(job.OutputPath) != want {
+			t.Errorf("pass %d: expected %s, got %q", k, want, filepath.Base(job.OutputPath))
+		}
+	}
+}

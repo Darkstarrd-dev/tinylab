@@ -216,13 +216,13 @@ func BuildVideoTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 // --- video_trim ---
 
 // BuildVideoTrimArgs returns the ffmpeg args for video_trim.
+// Supports single-segment (Start/Duration) and multi-segment (Segments)
+// trim. Multi-segment uses filter_complex with trim/atrim/concat filters
+// and always re-encodes.
 func BuildVideoTrimArgs(inputPath string, raw json.RawMessage) ([]string, string, string, error) {
 	var p VideoTrimParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, "", "", fmt.Errorf("invalid video_trim params: %w", err)
-	}
-	if p.Start == "" || p.Duration == "" {
-		return nil, "", "", fmt.Errorf("start and duration are required for video_trim")
 	}
 	if p.Codec == "" {
 		p.Codec = "h264"
@@ -234,6 +234,27 @@ func BuildVideoTrimArgs(inputPath string, raw json.RawMessage) ([]string, string
 	ext := filepath.Ext(inputPath)
 	if ext == "" {
 		ext = ".mp4"
+	}
+
+	// Multi-segment: use filter_complex with trim/atrim/concat.
+	if len(p.Segments) > 1 {
+		return buildMultiSegmentTrimArgs(inputPath, &p, ext)
+	}
+
+	// Single segment from Segments array: convert to Start/Duration.
+	if len(p.Segments) == 1 {
+		startSec, errS := strconv.ParseFloat(p.Segments[0].Start, 64)
+		endSec, errE := strconv.ParseFloat(p.Segments[0].End, 64)
+		if errS != nil || errE != nil || endSec <= startSec {
+			return nil, "", "", fmt.Errorf("invalid segment start/end times")
+		}
+		p.Start = p.Segments[0].Start
+		p.Duration = strconv.FormatFloat(endSec-startSec, 'f', -1, 64)
+	}
+
+	// Validate single-segment params.
+	if p.Start == "" || p.Duration == "" {
+		return nil, "", "", fmt.Errorf("start and duration are required for video_trim")
 	}
 
 	if !p.Reencode {
@@ -274,6 +295,83 @@ func BuildVideoTrimArgs(inputPath string, raw json.RawMessage) ([]string, string
 	}
 
 	desc := "trim_" + sanitizeTimestamp(p.Start)
+	return args, desc, ext, nil
+}
+
+// buildMultiSegmentTrimArgs constructs ffmpeg args for trimming and
+// concatenating multiple segments using filter_complex. Always re-encodes.
+func buildMultiSegmentTrimArgs(inputPath string, p *VideoTrimParams, ext string) ([]string, string, string, error) {
+	lib, ok := codecToLib[p.Codec]
+	if !ok {
+		return nil, "", "", fmt.Errorf("unknown codec: %s", p.Codec)
+	}
+	crf, ok := crfTable[p.Codec][p.QualityTier]
+	if !ok {
+		return nil, "", "", fmt.Errorf("unknown quality tier: %s for codec %s", p.QualityTier, p.Codec)
+	}
+
+	n := len(p.Segments)
+
+	// Build filter_complex graph.
+	var filters []string
+	for i, seg := range p.Segments {
+		startSec, errS := strconv.ParseFloat(seg.Start, 64)
+		endSec, errE := strconv.ParseFloat(seg.End, 64)
+		if errS != nil || errE != nil || endSec <= startSec {
+			return nil, "", "", fmt.Errorf("invalid segment %d start/end times", i)
+		}
+		filters = append(filters, fmt.Sprintf(
+			"[0:v]trim=start=%s:end=%s,setpts=PTS-STARTPTS[v%d]",
+			seg.Start, seg.End, i))
+		if p.HasAudio {
+			filters = append(filters, fmt.Sprintf(
+				"[0:a]atrim=start=%s:end=%s,asetpts=PTS-STARTPTS[a%d]",
+				seg.Start, seg.End, i))
+		}
+	}
+
+	// Concat filter.
+	var concatInputs string
+	for i := range n {
+		concatInputs += fmt.Sprintf("[v%d]", i)
+		if p.HasAudio {
+			concatInputs += fmt.Sprintf("[a%d]", i)
+		}
+	}
+	if p.HasAudio {
+		filters = append(filters, concatInputs+
+			fmt.Sprintf("concat=n=%d:v=1:a=1[v][a]", n))
+	} else {
+		filters = append(filters, concatInputs+
+			fmt.Sprintf("concat=n=%d:v=1:a=0[v]", n))
+	}
+
+	filterComplex := strings.Join(filters, ";")
+
+	args := []string{
+		"-i", inputPath,
+		"-filter_complex", filterComplex,
+	}
+
+	if p.HasAudio {
+		args = append(args, "-map", "[v]", "-map", "[a]")
+	} else {
+		args = append(args, "-map", "[v]")
+	}
+
+	args = append(args, "-c:v", lib, "-crf", strconv.Itoa(crf), "-preset", "medium")
+	if p.HasAudio {
+		args = append(args, "-c:a", "aac")
+	}
+
+	if p.Codec == "vp9" {
+		args = append(args, "-b:v", "0")
+	}
+	if p.Codec == "av1" {
+		args = append(args, "-cpu-used", "4")
+	}
+
+	desc := "trim_multi"
 	return args, desc, ext, nil
 }
 

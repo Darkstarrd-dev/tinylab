@@ -1102,6 +1102,7 @@ tbody tr:last-child td{border-bottom:none}
 .qs-modal-overlay.show .qs-modal {
   transform: scale(1) translateY(0);
 }
+#dl-settings-overlay{z-index:10001}
 .qs-modal-title {
   padding: 14px 18px 10px;
   font-weight: var(--font-weight-normal);

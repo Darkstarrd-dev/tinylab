@@ -74,7 +74,8 @@ type StartRequest struct {
 	Operation string          `json:"operation"`
 	Overwrite bool            `json:"overwrite"`
 	OutputDir string          `json:"outputDir,omitempty"` // optional; if set and !Overwrite, output goes to this dir
-	Params    json.RawMessage `json:"params"`              // operation-specific, parsed by args builder
+	OutputName string         `json:"outputName,omitempty"` // optional file stem (no extension); when set and !Overwrite, used as the output filename (buildArgs supplies the extension); avoids leaking the temp/upload filename (e.g. gallery-edit-XXXX) into saved batch outputs
+	Params    json.RawMessage `json:"params"`               // operation-specific, parsed by args builder
 }
 
 // ImageTranscodeParams holds options for the image_transcode operation.
@@ -97,13 +98,22 @@ type VideoTranscodeParams struct {
 	StripMetadata bool   `json:"stripMetadata"`
 }
 
+// TrimSegment represents a single trim range with start and end times
+// (seconds as strings, e.g. "90.5").
+type TrimSegment struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
 // VideoTrimParams holds options for the video_trim operation.
 type VideoTrimParams struct {
-	Start       string `json:"start"`       // "HH:MM:SS" or seconds string
-	Duration    string `json:"duration"`    // "HH:MM:SS" or seconds string
-	Reencode    bool   `json:"reencode"`
-	Codec       string `json:"codec"`       // used when Reencode; default "h264"
-	QualityTier string `json:"qualityTier"` // default "medium"
+	Start       string        `json:"start"`       // backward compat: single segment start (seconds string)
+	Duration    string        `json:"duration"`    // backward compat: single segment duration (seconds string)
+	Segments    []TrimSegment `json:"segments"`    // multi-segment; if non-empty, overrides Start/Duration
+	Reencode    bool          `json:"reencode"`
+	Codec       string        `json:"codec"`       // used when Reencode; default "h264"
+	QualityTier string        `json:"qualityTier"` // default "medium"
+	HasAudio    bool          `json:"hasAudio"`    // whether source has audio (for filter_complex)
 }
 
 // VideoSubtitleParams holds options for the video_subtitle operation.

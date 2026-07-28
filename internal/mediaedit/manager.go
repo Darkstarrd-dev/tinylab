@@ -43,10 +43,26 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 		return nil, fmt.Errorf("output path: %w", err)
 	}
 
-	// If OutputDir is specified and we are not overwriting, move the output
-	// to the specified directory while keeping the generated filename.
+	// If OutputDir is specified and we are not overwriting, place the output
+	// in the specified directory using the original filename (with the new
+	// extension) so the saved file keeps the same name as the source.
+	// OutputName (when provided) overrides the stem so batched/TEMP-input
+	// jobs do not leak the temp filename (e.g. "gallery-edit-XXXX") into the
+	// saved output; the extension always comes from buildArgs.
 	if req.OutputDir != "" && !req.Overwrite {
-		outputPath = relocateOutput(outputPath, req.OutputDir)
+		outStem := req.OutputName
+		if outStem == "" {
+			inputBase := filepath.Base(req.InputPath)
+			outStem = strings.TrimSuffix(inputBase, filepath.Ext(inputBase))
+		}
+		outputPath = relocateOutput(req.OutputDir, outStem+ext)
+	} else if req.OutputName != "" && !req.Overwrite {
+		// Same-path save (no OutputDir): BuildOutputPath already produced
+		// "<dir>/<inputBase>_<desc>.<ext>" in the source dir; honour an
+		// explicit OutputName by re-deriving in the same dir so e.g. batch
+		// sequential-rename in "Same Path" mode yields "img001_desc.webp"
+		// instead of the temp / original name.
+		outputPath = relocateOutput(filepath.Dir(req.InputPath), req.OutputName+"_"+desc+ext)
 	}
 
 	// Probe duration for progress tracking (video ops only).
@@ -189,16 +205,15 @@ func generateID() string {
 }
 
 
-// relocateOutput moves outputPath to directory destDir, preserving the
-// base name. If a file with the same name already exists, appends _2, _3, etc.
-func relocateOutput(outputPath, destDir string) string {
-	base := filepath.Base(outputPath)
-	candidate := filepath.Join(destDir, base)
+// relocateOutput builds a path inside destDir using the given baseName.
+// If a file with the same name already exists, appends _2, _3, etc.
+func relocateOutput(destDir, baseName string) string {
+	candidate := filepath.Join(destDir, baseName)
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		return candidate
 	}
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
+	ext := filepath.Ext(baseName)
+	name := strings.TrimSuffix(baseName, ext)
 	for i := 2; i < 1000; i++ {
 		candidate = filepath.Join(destDir, fmt.Sprintf("%s_%d%s", name, i, ext))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
