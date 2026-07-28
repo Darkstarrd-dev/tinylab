@@ -62,6 +62,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	var sseBuf bytes.Buffer
 	var contentCharsTotal int
 	var lastTokenBroadcast time.Time
+	var lastEntryRefresh time.Time
 
 	var clientDisconnected bool
 
@@ -183,6 +184,10 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				h.EntryTracker.UpdateTokens(reqID, -1, effectiveOutput)
 				h.broadcastTokens(reqID, inputTokens, effectiveOutput)
 			}
+		if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
+			h.EntryTracker.Refresh(reqID)
+			lastEntryRefresh = now
+		}
 		}
 		if clientDisconnected {
 			break
