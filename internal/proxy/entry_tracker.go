@@ -98,6 +98,18 @@ func (t *EntryTracker) UpdateTokens(id string, input, output int) {
 	}
 }
 
+// Refresh updates the entry's Timestamp to now, resetting the SweepStale
+// window. Called periodically during long streams so an active request
+// is not swept as a stale timeout.
+func (t *EntryTracker) Refresh(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if e, ok := t.entries[id]; ok {
+		e.Timestamp = time.Now()
+		t.entries[id] = e
+	}
+}
+
 // MarshalEntryJSON returns the JSON representation of an entry, or nil bytes
 // if marshalling fails.
 func MarshalEntryJSON(e usage.Entry) json.RawMessage {
