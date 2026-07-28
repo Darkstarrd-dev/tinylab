@@ -408,7 +408,6 @@ tbody tr:last-child td{border-bottom:none}
    --------------------------------------------------------------------- */
 .model-color-dot{display:inline-block;width:10px;height:10px;border-radius:var(--radius-xs);margin-right:6px;vertical-align:middle;flex-shrink:0}
 
-.quota-bar-right{display:flex;align-items:center;gap:6px}
 .quota-bar-chevron{transition:transform var(--transition-normal);color:var(--text-muted);flex-shrink:0}
 .model-key-detail-wrap{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(0.22, 1, 0.36, 1)}
 .model-key-detail-wrap.expanded{max-height:none;margin-top:10px}
@@ -530,6 +529,35 @@ tbody tr:last-child td{border-bottom:none}
 .quota-monitor-card .card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
 .quota-section-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:4px;scrollbar-width:none;-ms-overflow-style:none}
 .quota-section-scroll::-webkit-scrollbar{display:none}
+.quota-table th,.quota-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quota-table thead th{position:sticky;top:0;z-index:1;background:var(--option-bg)}
+.quota-table .quota-th-chevron{width:28px;min-width:28px;padding:6px 4px}
+.quota-table .quota-td-chevron{width:28px;min-width:28px;padding:6px 4px}
+.quota-table .quota-row-chevron{display:inline-flex;transition:transform var(--transition-normal);color:var(--text-muted)}
+.quota-table .quota-row{cursor:default}
+.quota-table .quota-row.expanded .quota-row-chevron{transform:rotate(180deg)}
+.quota-table .quota-td-quota{font-variant-numeric:tabular-nums;font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace}
+.quota-table .quota-td-latency,.quota-table .quota-td-speed{font-variant-numeric:tabular-nums}
+.quota-table .model-key-metric{font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-badge);font-variant-numeric:tabular-nums;white-space:nowrap}
+.quota-table .metric-live{color:var(--accent2);font-weight:700}
+/* Per-key expand sub-rows */
+.quota-key-row{background:var(--table-hover);font-size:var(--font-badge)}
+.quota-key-row td{border-bottom:1px solid var(--glass-border)}
+.quota-key-row .model-color-dot,.quota-key-row .model-key-timer{margin-right:0}
+.quota-key-row-in-use{background:rgba(79,195,247,0.08)}
+.quota-key-row-disabled{opacity:.55}
+.quota-key-row-empty,.quota-key-row-loading,.quota-key-row-error td{text-align:center;color:var(--text-muted)}
+.quota-key-row-error td{color:var(--danger)!important}
+/* Quota table column widths (override usage-table nth-child rules for 8-col quota layout) */
+.quota-table th:nth-child(1),.quota-table td:nth-child(1){width:28px;min-width:28px}
+.quota-table th:nth-child(2),.quota-table td:nth-child(2){width:96px}
+.quota-table th:nth-child(3),.quota-table td:nth-child(3){width:160px}
+.quota-table th:nth-child(4),.quota-table td:nth-child(4){width:84px}
+.quota-table th:nth-child(5),.quota-table td:nth-child(5){width:72px}
+.quota-table th:nth-child(6),.quota-table td:nth-child(6){width:72px}
+.quota-table th:nth-child(7),.quota-table td:nth-child(7){width:64px}
+.quota-table th:nth-child(8),.quota-table td:nth-child(8){width:96px}
+.quota-table td[colspan]{max-width:none}
 .recent-requests-section{min-height:0;display:flex;flex-direction:column;width:100%}
 .recent-requests-card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
 .recent-requests-card .card-title{margin-bottom:8px}
@@ -582,11 +610,6 @@ tbody tr:last-child td{border-bottom:none}
   .usage-left-col{border-right:1px solid var(--glass-border)}
 }
 
-.quota-tip{position:fixed;z-index:var(--z-tooltip,900);background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px 12px;font-size:var(--font-badge);pointer-events:none;box-shadow:var(--shadow-card-hover);white-space:nowrap;line-height:1.7}
-.quota-tip div{display:flex;justify-content:space-between;gap:14px}
-.quota-tip-k{color:var(--text-muted)}
-.quota-tip-v{color:var(--text);font-weight:var(--font-weight-normal);font-variant-numeric:tabular-nums}
-.quota-tip-perkey{margin-top:4px;padding-top:4px;border-top:1px solid var(--glass-border);color:var(--text-muted)!important;font-weight:400!important}
 
 /* ---------------------------------------------------------------------
    Model Note Popover (reusable hover tooltip)
