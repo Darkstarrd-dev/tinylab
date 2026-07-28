@@ -89,7 +89,16 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 		job.mu.Unlock()
 	}
 
-	err := RunFfmpeg(ctx, ffmpegPath, args, outputPath, sourceDuration, onProgress, stderrTail)
+	// If overwriting original file, run ffmpeg into a temp file first to prevent
+	// ffmpeg error "Output same as Input #0 - exiting".
+	runOutputPath := outputPath
+	isOverwrite := (outputPath == job.InputPath)
+	if isOverwrite {
+		ext := filepath.Ext(outputPath)
+		runOutputPath = outputPath + ".mediaedit_tmp" + ext
+	}
+
+	err := RunFfmpeg(ctx, ffmpegPath, args, runOutputPath, sourceDuration, onProgress, stderrTail)
 
 	job.mu.Lock()
 	defer job.mu.Unlock()
@@ -98,6 +107,9 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 	job.FinishedAt = time.Now()
 
 	if err != nil {
+		if isOverwrite {
+			_ = os.Remove(runOutputPath)
+		}
 		if err == ErrCancelled {
 			job.Status = StatusCancelled
 		} else {
@@ -105,6 +117,19 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 			job.Error = err.Error()
 		}
 		return
+	}
+
+	if isOverwrite {
+		if renameErr := os.Rename(runOutputPath, outputPath); renameErr != nil {
+			// Try removal of target file then rename as fallback on Windows.
+			_ = os.Remove(outputPath)
+			if renameErr2 := os.Rename(runOutputPath, outputPath); renameErr2 != nil {
+				_ = os.Remove(runOutputPath)
+				job.Status = StatusError
+				job.Error = fmt.Sprintf("replace original file failed: %v", renameErr2)
+				return
+			}
+		}
 	}
 
 	// Verify output file exists.
