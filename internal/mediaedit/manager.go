@@ -74,6 +74,13 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 		}
 		outputPath = relocateOutput(req.OutputDir, outStem+ext)
 	}
+	// Same-directory output with an explicit OutputName (Set Name / Uniform in
+	// "Set Path off" mode): place <dir>/<outputName><ext> next to the source
+	// instead of the BuildOutputPath "<name>_<desc>" default. relocateOutput
+	// avoids clobbering an existing same-named file.
+	if req.OutputDir == "" && !req.Overwrite && req.OutputName != "" {
+		outputPath = relocateOutput(filepath.Dir(req.InputPath), req.OutputName+ext)
+	}
 
 	// Probe duration for progress tracking (video ops only).
 	var sourceDuration float64
