@@ -665,6 +665,10 @@ function _buildModalHTML() {
   html += '</label>';
   html += '</div>';
   html += '<div class="gallery-edit-row" id="ge-dest-dir-row" style="display:none">';
+  html += '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn">';
+  html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+  html += '<span>' + escapeHtml(_geT('geBrowseDir')) + '</span>';
+  html += '</button>';
   html += '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(_geT('geDestDirPlaceholder')) + '">';
   html += '</div>';
   html += '</div>';
@@ -705,18 +709,41 @@ function _buildModalHTML() {
   // Result area
   html += '<div id="ge-result-area" style="display:none"></div>';
 
-  // Start button
-  html += '<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">';
-  html += '<button class="pg-btn" id="ge-start-btn" style="background:var(--accent);color:#000;border-color:var(--accent);font-weight:600">' + escapeHtml(_geT('geStart')) + '</button>';
-  html += '</div>';
-
   html += '</div>'; // pg-modal-body
+
+  // Modal footer with Cancel and Start buttons (matching Settings modal footer)
+  var cancelTxt = (typeof t === 'function') ? t('cancel') : '取消';
+  html += '<div class="pg-modal-footer">';
+  html += '<button type="button" class="btn btn-ghost" onclick="pgCloseModal()">' + escapeHtml(cancelTxt) + '</button>';
+  html += '<button type="button" class="btn btn-primary" id="ge-start-btn">' + escapeHtml(_geT('geStart')) + '</button>';
+  html += '</div>';
 
   return html;
 }
 
 // ---------- event binding -------------------------------------------
 function _bindModalEvents() {
+  // Destination directory browse button
+  var browseBtn = document.getElementById('ge-browse-dir-btn');
+  var destInput = document.getElementById('ge-dest-dir');
+  if (browseBtn && destInput) {
+    browseBtn.onclick = function() {
+      fetch('/api/downloads/browse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'directory' })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data && data.path) {
+          destInput.value = data.path;
+        }
+      })
+      .catch(function(err) {
+        console.warn('Browse directory error:', err);
+      });
+    };
+  }
   // Destination radio toggle
   var destRadios = document.querySelectorAll('input[name="ge-dest"]');
   var destDirRow = document.getElementById('ge-dest-dir-row');
