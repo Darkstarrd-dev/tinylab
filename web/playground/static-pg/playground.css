@@ -406,10 +406,10 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 /* Playground modal system */
 .pg-modal-overlay{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(var(--glass-blur-overlay,10px));-webkit-backdrop-filter:blur(var(--glass-blur-overlay,10px));opacity:0;pointer-events:none;transition:opacity var(--transition-slow)}
 .pg-modal-overlay.show{opacity:1;pointer-events:auto}
-.pg-modal{background:var(--modal-bg);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:0;min-width:460px;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:var(--shadow-modal);transform:scale(0.96) translateY(8px);transition:transform var(--transition-slow);overflow:hidden}
+.pg-modal{background:var(--modal-bg);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:0;min-width:540px;width:640px;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:var(--shadow-modal);transform:scale(0.96) translateY(8px);transition:transform var(--transition-slow);overflow:hidden}
 .pg-modal-overlay.show .pg-modal{transform:scale(1) translateY(0)}
 .pg-modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0;padding:18px 24px 14px 24px;flex-shrink:0;border-bottom:1px solid var(--glass-border)}
-.pg-modal-title{font-size:var(--font-h3,16px);font-weight:var(--font-weight-bold,700);color:var(--text);letter-spacing:var(--letter-spacing-heading,-0.3px)}
+.pg-modal-title{font-size:var(--font-h3,16px);font-weight:var(--font-weight-bold,700);color:var(--text);letter-spacing:var(--letter-spacing-heading,-0.3px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px}
 .pg-modal-close{width:28px;height:28px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);transition:all var(--transition-fast)}
 .pg-modal-close:hover{background:var(--glass-hover);color:var(--danger)}
 .pg-modal-body{flex:1;overflow-y:auto;min-height:0;padding:20px 24px}
@@ -882,7 +882,9 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 
 
 /* Gallery Media Editor modal */
-.gallery-edit-body{max-height:75vh;overflow-y:auto;scrollbar-width:thin;padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+.gallery-edit-body{max-height:75vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+.gallery-edit-block{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:12px}
+.gallery-edit-block-title{font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--glass-border)}
 .gallery-edit-info{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:14px;font-size:13px;color:var(--text-secondary);flex-wrap:wrap}
 .gallery-edit-info strong{color:var(--text);font-weight:600}
 .gallery-edit-row{display:flex;align-items:center;gap:12px;margin-bottom:12px;width:100%;min-width:0}

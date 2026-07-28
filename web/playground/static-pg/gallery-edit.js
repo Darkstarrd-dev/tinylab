@@ -1082,10 +1082,11 @@ function _buildModalHTML() {
   var isImage = _editMediaType === 'image';
   var title = isImage ? _geT('geEditImage') : _geT('geEditVideo');
   var itemName = _editCurrentItem ? escapeHtml(_editCurrentItem.name) : '';
+  var fullTitle = title + ': ' + itemName;
 
   var html = '';
   html += '<div class="pg-modal-header">';
-  html += '<span class="pg-modal-title">' + title + ': ' + itemName + '</span>';
+  html += '<span class="pg-modal-title" title="' + fullTitle + '">' + fullTitle + '</span>';
   html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
   html += '</div>';
 
@@ -1103,6 +1104,7 @@ function _buildModalHTML() {
   html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
   html += '</button>';
   html += '</div>';
+
   // Destination section
   html += '<div class="gallery-edit-section">';
   html += '<div class="gallery-edit-row"><span style="font-weight:600;font-size:13px;color:var(--text-secondary)">' + escapeHtml(_geT('geDest')) + '</span></div>';
@@ -1120,13 +1122,9 @@ function _buildModalHTML() {
   html += '</button>';
   html += '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(_geT('geDestDirPlaceholder')) + '">';
   html += '</div>';
-  // Custom output filename (Save to dir mode only, image+video parity).
-  // Lets the user override the saved file's stem with their own; the server
-  // appends the format extension. Same Path keeps the original.
   html += '<div class="gallery-edit-row" id="ge-dest-rename-row" style="display:none;margin-left:24px">';
   html += '<label class="gallery-edit-label" style="width:auto">' + escapeHtml(_geT('geRenameZip')) + '</label>';
   html += '<input type="text" id="ge-dest-rename" style="flex:1;margin-left:8px" placeholder="' + escapeHtml(_geT('geRenamePlaceholder')) + '">';
-  html += '</div>';
   html += '</div>';
   html += '</div>';
 
@@ -1136,24 +1134,46 @@ function _buildModalHTML() {
     html += _renderImageForm();
     html += '</div>';
   } else {
-    // Video: tabbed — wrap tab panels in a fixed-height container so the
-    // modal does not resize or jump position when switching tabs.
-    html += '<div class="gallery-edit-tabs">';
-    html += '<button class="gallery-edit-tab active" data-tab="transcode">' + escapeHtml(_geT('geTranscodeTab')) + '</button>';
-    html += '<button class="gallery-edit-tab" data-tab="trim">' + escapeHtml(_geT('geTrimTab')) + '</button>';
-    html += '<button class="gallery-edit-tab" data-tab="subtitle">' + escapeHtml(_geT('geSubtitleTab')) + '</button>';
+    // Video: unified single panel containing Transcode, Trim, Subtitle sections
+    html += '<div class="gallery-edit-section" id="ge-vid-section">';
+    
+    // Block 1: Transcode
+    html += '<div class="gallery-edit-block">';
+    html += '<div class="gallery-edit-block-title">';
+    html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>';
+    html += '<span>' + escapeHtml(_geT('geTranscodeTab') || '转码与格式') + '</span>';
     html += '</div>';
-
-    html += '<div class="gallery-edit-tab-panels">';
-    html += '<div class="gallery-edit-section" id="ge-tab-transcode">';
     html += _renderVideoTranscodeForm();
     html += '</div>';
-    html += '<div class="gallery-edit-section" id="ge-tab-trim" style="display:none">';
+
+    // Block 2: Trim (Optional section with toggle checkbox)
+    html += '<div class="gallery-edit-block">';
+    html += '<div class="gallery-edit-block-title">';
+    html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
+    html += '<input type="checkbox" id="ge-vid-trim-enable"> ';
+    html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><line x1="20" y1="4" x2="8.12" y2="15.88"></line><line x1="14.47" y1="14.48" x2="20" y2="20"></line><line x1="8.12" y1="8.12" x2="12" y2="12"></line></svg>';
+    html += '<span>' + escapeHtml(_geT('geTrimTab') || '视频裁剪') + '</span>';
+    html += '</label>';
+    html += '</div>';
+    html += '<div id="ge-vid-trim-body" style="display:none;margin-top:10px">';
     html += _renderVideoTrimForm();
     html += '</div>';
-    html += '<div class="gallery-edit-section" id="ge-tab-subtitle" style="display:none">';
+    html += '</div>';
+
+    // Block 3: Subtitle (Optional section with toggle checkbox)
+    html += '<div class="gallery-edit-block">';
+    html += '<div class="gallery-edit-block-title">';
+    html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
+    html += '<input type="checkbox" id="ge-vid-sub-enable"> ';
+    html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+    html += '<span>' + escapeHtml(_geT('geSubtitleTab') || '字幕处理') + '</span>';
+    html += '</label>';
+    html += '</div>';
+    html += '<div id="ge-vid-sub-body" style="display:none;margin-top:10px">';
     html += _renderVideoSubtitleForm();
     html += '</div>';
+    html += '</div>';
+
     html += '</div>';
   }
 
@@ -1727,18 +1747,23 @@ function _bindModalEvents() {
     };
   });
 
-  // ---- video tabs ----
-  var tabs = document.querySelectorAll('.gallery-edit-tab');
-  tabs.forEach(function(t) {
-    t.onclick = function() {
-      var tabName = t.getAttribute('data-tab');
-      tabs.forEach(function(tb) { tb.classList.remove('active'); });
-      t.classList.add('active');
-      document.querySelectorAll('.gallery-edit-tab-panels > .gallery-edit-section').forEach(function(s) { s.style.display = 'none'; });
-      var section = document.getElementById('ge-tab-' + tabName);
-      if (section) section.style.display = '';
+  // Video Trim enable checkbox toggle
+  var trimEnableCb = document.getElementById('ge-vid-trim-enable');
+  var trimBody = document.getElementById('ge-vid-trim-body');
+  if (trimEnableCb && trimBody) {
+    trimEnableCb.onchange = function() {
+      trimBody.style.display = trimEnableCb.checked ? '' : 'none';
     };
-  });
+  }
+
+  // Video Subtitle enable checkbox toggle
+  var subEnableCb = document.getElementById('ge-vid-sub-enable');
+  var subBody = document.getElementById('ge-vid-sub-body');
+  if (subEnableCb && subBody) {
+    subEnableCb.onchange = function() {
+      subBody.style.display = subEnableCb.checked ? '' : 'none';
+    };
+  }
 
   // ---- Start button ----
   var startBtn = document.getElementById('ge-start-btn');
@@ -1747,11 +1772,7 @@ function _bindModalEvents() {
       if (_editMediaType === 'image') {
         _startImageTranscode();
       } else {
-        var activeTab = document.querySelector('.gallery-edit-tab.active');
-        var tabName = activeTab ? activeTab.getAttribute('data-tab') : 'transcode';
-        if (tabName === 'transcode') _startVideoTranscode();
-        else if (tabName === 'trim') _startVideoTrim();
-        else if (tabName === 'subtitle') _startVideoSubtitle();
+        _startVideoJob();
       }
     };
   }
@@ -1786,6 +1807,18 @@ function _startImageTranscode() {
     _startBatch('image_transcode', params, dest, compress);
   } else {
     _startJob('image_transcode', params, dest.overwrite, dest.outputDir);
+  }
+}
+
+function _startVideoJob() {
+  var subCb = document.getElementById('ge-vid-sub-enable');
+  var trimCb = document.getElementById('ge-vid-trim-enable');
+  if (subCb && subCb.checked) {
+    _startVideoSubtitle();
+  } else if (trimCb && trimCb.checked) {
+    _startVideoTrim();
+  } else {
+    _startVideoTranscode();
   }
 }
 
