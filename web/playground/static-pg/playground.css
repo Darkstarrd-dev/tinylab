@@ -921,6 +921,18 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 /* Settings gear button in source info row */
 .ge-gear-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-muted);cursor:pointer;flex-shrink:0;margin-left:auto;transition:all var(--transition-fast)}
 .ge-gear-btn:hover{background:var(--glass-hover);color:var(--accent);border-color:var(--accent)}
+/* Image Convert dialog (header + always-visible toggle rows) */
+.ge-header-left{display:flex;align-items:center;gap:6px}
+.ge-header-left .ge-gear-btn{margin-left:0}
+.ge-icon-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-muted);cursor:pointer;flex-shrink:0;transition:all var(--transition-fast)}
+.ge-icon-toggle:hover{background:var(--glass-hover);color:var(--accent);border-color:var(--accent)}
+.ge-icon-toggle[data-archive="1"]{color:var(--accent);border-color:var(--accent);background:var(--accent-glow)}
+.ge-title-center{flex:1;text-align:center}
+.ge-src-info{display:flex;flex-direction:column;gap:3px;padding:10px 14px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--text-secondary)}
+.ge-src-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.ge-src-row.ge-src-path{color:var(--text-muted);font-size:11px}
+.ge-src-row.ge-src-meta{color:var(--text-secondary);font-weight:500}
+.gallery-edit-section input[type="text"]:disabled,.gallery-edit-section input[type="number"]:disabled,.gallery-edit-section select:disabled,#ge-browse-dir-btn:disabled{opacity:0.45;cursor:not-allowed}
 
 /* Trim bar (replaces video seeker in trim mode) */
 .ge-trim-mode-ctrl{display:flex !important;align-items:center !important;gap:10px !important;opacity:1 !important;pointer-events:auto !important}

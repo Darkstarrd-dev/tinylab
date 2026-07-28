@@ -1119,6 +1119,7 @@ function playVideo(taskId) {
       name: task.title || task.url || task.id,
       path: normalizedPath,
       kind: 'plain',
+      absPath: normalizedPath,
       mainURL: fileUrl,
       size: task.fileSize || 0
     };

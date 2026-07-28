@@ -7,15 +7,149 @@
 var _editJobId = null;
 var _editPollTimer = null;
 var _editCurrentItem = null;
-var _zipReplacePending = false;  // set by _startJob when single-image overwrite should replace an entry inside the source zip
 var _editMediaType = null;
 var _editProbe = null;
 var _editSubtitlePath = null;
+var _geGearSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+var _geImageSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
+var _geFolderSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+var _geBrowseSvg = _geFolderSvg;
 
 // ---------- helpers ------------------------------------------------
 
 function _geT(k, ar) {
   return (typeof pgT === 'function') ? pgT(k, ar) : k;
+}
+
+// ---------- image source-info + archive helpers --------------------
+// _isArchiveMode reports whether the image|archive header toggle is on
+// (convert all images in the folder/archive) vs single-image mode.
+function _isArchiveMode() {
+  var t = document.getElementById('ge-archive-toggle');
+  return !!(t && t.getAttribute('data-archive') === '1');
+}
+
+// _editContainerPath returns the disk path of the item's container (the
+// archive/folder the image belongs to) for source-info row 1 — the zip's full
+// path (+ " › inner folder" when includeInner), or the folder path. Returns ''
+// when no disk path is available (FSAA drag-drop: zip without zipAbsPath, or
+// kind 'fs' — the browser hides disk paths for dropped handles), so the caller
+// shows a "no path" hint instead of the file name.
+function _editContainerPath(it, includeInner) {
+  if (!it) return '';
+  if (it.kind === 'zip') {
+    if (!it.zipAbsPath) return '';
+    var base = it.zipAbsPath;
+    if (includeInner && it.zipPath) {
+      var segs = it.zipPath.split('/');
+      segs.pop();
+      var inner = segs.join('/');
+      if (inner) base += ' \u203a ' + inner;
+    }
+    return base;
+  }
+  if (it.kind === 'backend') return it.rootDirPath || (it.absPath ? it.absPath.replace(/[\\/][^\\/]*$/, '') : '') || '';
+  if (it.kind === 'fs') return '';
+  if (it.kind === 'plain') return (it.path ? it.path.replace(/[\\/][^\\/]*$/, '') : '') || '';
+  return it.path || it.name || '';
+}
+
+// _editContainerParentPath returns the parent directory of the item's
+// container (the zip file's folder, or a folder's parent) — what the user
+// wants in archive row1 (the "where it lives" directory; row2 carries the
+// container name, so row1+row2 reconstructs the container path). Includes a
+// trailing separator. Returns '' when no disk path is available (FSAA drag-
+// drop items), so the caller can fall back to the container identifier.
+function _editContainerParentPath(it) {
+  if (!it) return '';
+  var p = '';
+  if (it.kind === 'zip') p = it.zipAbsPath || '';
+  else if (it.kind === 'backend') p = it.rootDirPath || (it.absPath ? it.absPath.replace(/[\\/][^\\/]*$/, '') : '');
+  else if (it.kind === 'plain') p = (it.path ? it.path.replace(/[\\/][^\\/]*$/, '') : '');
+  if (!p) return '';
+  var idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  if (idx <= 0) return ''; // root — no parent
+  return p.substring(0, idx + 1); // keep the trailing separator
+}
+
+// _batchOriginLabel returns the folder/archive display name (archive mode).
+function _batchOriginLabel() {
+  var it = _editCurrentItem;
+  if (!it) return '';
+  if (it.kind === 'zip') {
+    return it.zipAbsPath ? it.zipAbsPath.split(/[\\/]/).pop() : ((it.path || '').split('/')[0] || it.name || '');
+  }
+  if (it.kind === 'fs' && it.rootDirHandle) return it.rootDirHandle.name || it.name || '';
+  if (it.kind === 'backend' && it.rootDirPath) return it.rootDirPath.split(/[\\/]/).pop() || it.name || '';
+  return it.name || it.path || '';
+}
+
+// _formatSize renders a byte count as B/KB/MB.
+function _formatSize(b) {
+  if (!b || b <= 0) return '';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+// _updateImageSourceInfo populates the two-row source-info block from the
+// current item + probe. In archive mode it shows the folder/archive path +
+// name + image count; in single mode the file path + name/dims/size/ext.
+function _updateImageSourceInfo() {
+  var row1 = document.getElementById('ge-img-src-row1');
+  var row2 = document.getElementById('ge-img-src-row2');
+  if (!row1 || !row2) return;
+  var it = _editCurrentItem;
+  if (!it) { row1.textContent = '-'; row2.textContent = '-'; return; }
+  if (_isArchiveMode()) {
+    row1.textContent = _editContainerParentPath(it) || _editContainerPath(it, false) || _geT('geDragNoPathHint');
+    row2.textContent = (_batchOriginLabel() || '-') + ' \u00b7 ' + _getSiblingImages().length + ' ' + _geT('geImagesCount');
+    return;
+  }
+  row1.textContent = _editContainerPath(it, true) || _geT('geDragNoPathHint');
+  var probe = _editProbe || {};
+  var parts = [];
+  var nm = it.name || (it.path || '').split('/').pop() || '';
+  if (nm) parts.push(nm);
+  if (probe.width && probe.height) parts.push(probe.width + '\u00d7' + probe.height);
+  if (it.size && it.size > 0) parts.push(_formatSize(it.size));
+  var ex = extOf(it.name);
+  if (ex) parts.push(ex.replace(/^\./, '').toUpperCase());
+  row2.textContent = parts.length ? parts.join(' \u00b7 ') : '-';
+}
+
+// _updateVideoSourceInfo populates the video dialog's two-row source info:
+// row1 = the file's disk path (or the "no disk path" hint for drag-dropped
+// items), row2 = name + resolution + codec + duration + (no audio) + size.
+function _updateVideoSourceInfo() {
+  var row1 = document.getElementById('ge-vid-src-row1');
+  var row2 = document.getElementById('ge-vid-src-row2');
+  if (!row1 || !row2) return;
+  var it = _editCurrentItem;
+  if (!it) { row1.textContent = '-'; row2.textContent = '-'; return; }
+  row1.textContent = _editVideoPath(it) || _geT('geDragNoPathHint');
+  var probe = _editProbe || {};
+  var parts = [];
+  var nm = it.name || (it.path || '').split('/').pop() || '';
+  if (nm) parts.push(nm);
+  if (probe.width && probe.height) parts.push(probe.width + '\u00d7' + probe.height);
+  if (probe.codec) parts.push(probe.codec);
+  if (probe.duration != null && probe.duration > 0) parts.push(formatTime(probe.duration));
+  if (probe.hasAudio === false) parts.push(_geT('geNoAudio'));
+  if (it.size && it.size > 0) parts.push(_formatSize(it.size));
+  row2.textContent = parts.length ? parts.join(' \u00b7 ') : '-';
+}
+
+// _editVideoPath returns the disk path of a video item for source-info row 1:
+// backend → its absolute path; plain (download) → its disk path; zip → the
+// archive path; fs (drag-drop) → '' (browser hides the path → hint shown).
+function _editVideoPath(it) {
+  if (!it) return '';
+  if (it.kind === 'zip') return it.zipAbsPath || '';
+  if (it.kind === 'backend') return it.absPath || it.rootDirPath || '';
+  if (it.kind === 'plain') return it.path || it.absPath || '';
+  if (it.kind === 'fs') return '';
+  return it.path || it.absPath || '';
 }
 
 
@@ -90,54 +224,6 @@ function _onCompleted(data) {
   var outputURL = data.outputURL || '';
   var outputPath = data.outputPath || '';
 
-  // Single-image replace-original into a zip: repack the on-disk archive with
-  // this transcoded temp file at the entry's original inner path, delete the
-  // temp file, and present an Open Folder button. The transcoded temp is the
-  // ffmpeg job's outputPath.
-  if (_zipReplacePending && _editCurrentItem && _editCurrentItem.kind === 'zip'
-      && _editCurrentItem.zipAbsPath && _editCurrentItem.zipPath && outputPath) {
-    _setProgressStatus(_geT('geZipping') || 'Repacking archive...', false);
-    var entries = [{ zipPath: _editCurrentItem.zipPath, filePath: outputPath }];
-    fetch('/api/gallery/edit/zip-writeback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archivePath: _editCurrentItem.zipAbsPath, entries: entries })
-    })
-    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
-    .then(function() {
-      _hideProgressSection();
-      _zipReplacePending = false;
-      // best-effort delete the transcoded temp now that the entry is back in
-      // the archive; the server also cleans inputs, but be defensive on FSAA
-      // cases where outputPath was a client-managed temp.
-      var resultEl2 = document.getElementById('ge-result-area');
-      if (resultEl2) {
-        var html = '<div class="gallery-edit-result">' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
-            '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geCompleted')) + '</span>' +
-            '<span style="font-size:12px;color:var(--text-secondary)">' + escapeHtml(_editCurrentItem.zipAbsPath.split(/[\\/]/).pop()) + '</span>' +
-          '</div>' +
-          '<div class="gallery-edit-actions">' +
-            '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>' +
-          '</div>' +
-        '</div>';
-        resultEl2.innerHTML = html;
-        resultEl2.style.display = 'block';
-      }
-      var openBtn2 = document.getElementById('ge-open-folder-btn');
-      if (openBtn2) openBtn2.onclick = function() { _openInFileManager(_editCurrentItem.zipAbsPath); };
-    })
-    .catch(function(err) {
-      _hideProgressSection();
-      _zipReplacePending = false;
-      var resultElErr = document.getElementById('ge-result-area');
-      if (resultElErr) {
-        resultElErr.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">Writeback failed: ' + escapeHtml(err.message || String(err)) + '</span></div>';
-        resultElErr.style.display = 'block';
-      }
-    });
-    return;
-  }
 
   // Regular single-file result.
   var logHtml = data.logTail ? '<details style="margin-top:8px"><summary>' + escapeHtml(_geT('geLogTail')) + '</summary><pre style="background:#1a1326;border:1px solid var(--glass-border);padding:8px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">' + escapeHtml(data.logTail) + '</pre></details>' : '';
@@ -250,47 +336,23 @@ function _cancelJob() {
 // ---------- start job -----------------------------------------------
 function _startJob(op, params, overwrite, outputDir) {
   if (!_editCurrentItem || !_editCurrentItem.absPath) return;
-  // "Replace original" needs a real source path: a kind:'backend' file/dir
-  // on disk, or a backend zip (handled below via zip-writeback). FSAA
-  // (kind:'fs'), FSAA-dropped zip (no zipAbsPath), and plain blobs have no
-  // writable original — overwriting their temp input would silently no-op.
-  var canReplace = _editCurrentItem.kind === 'backend'
-    || (_editCurrentItem.kind === 'zip' && !!_editCurrentItem.zipAbsPath && !!_editCurrentItem.zipPath);
-  if (overwrite && !canReplace) { showMsg(_geT('geNoDiskPath')); return; }
   _editJobId = null;
-  // Single-image "replace original" into a zip archive: transcode to a temp
-  // file first, then repost the bytes into the on-disk archive at the entry's
-  // original inner path via /edit/zip-writeback. We set a pending flag that
-  // _onCompleted honors (see below) so the api/start response's outputPath
-  // (the temp file) becomes the writeback input. FSAA zip (no zipAbsPath) and
-  // fs items cannot be replaced in place — guard and fall back to save-to-dir.
-  _zipReplacePending = !!(overwrite && _editCurrentItem.kind === 'zip' && _editCurrentItem.zipAbsPath
-                           && _editCurrentItem.zipPath);
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
   _showProgressSection();
-  // Carry the original filename so single-file save-to-dir (and zip-writeback
-  // temp naming) keeps the gallery item's name with only the new extension,
-  // instead of leaking the temp input name ("gallery-edit-upload-XXXX.mp4"
-  // etc.) into the saved output. Applies to every single-file operation that
-  // flows here: image_transcode, video_transcode, video_trim, video_subtitle.
-  // When the user typed a custom filename in the shared dest block ("Save to
-  // dir → rename"), prefer it over the original name — applies equally to
-  // single images and single videos (Rename parity). The server appends the
-  // format extension from buildArgs.
+  // Output filename: Set Name (when on) wins over the original name; the
+  // server appends the format extension from buildArgs. With Set Path off,
+  // the server's !Overwrite && OutputDir=="" && OutputName!="" branch places
+  // <dir>/<outputName><ext> next to the source (replace-original was removed,
+  // so overwrite is always false).
   var customRename = '';
-  var renameEl = document.getElementById('ge-dest-rename');
-  if (renameEl) customRename = (renameEl.value || '').trim();
-  var origStem = customRename || _stripExt((_editCurrentItem.name || ( (_editCurrentItem.path||'').split('/').pop() )) || '');
-  var body = { inputPath: _editCurrentItem.absPath, operation: op, overwrite: _zipReplacePending ? false : !!overwrite, params: params };
-  if (_zipReplacePending) {
-    // Write to the server's temp dir; we read outputPath from job status and
-    // POST it to /edit/zip-writeback which repacks the archive in place.
-    body.outputDir = '';
-  } else if (outputDir && !overwrite) {
-    body.outputDir = outputDir;
-    if (origStem) body.outputName = origStem;
-  }
+  var setNameCb = document.getElementById('ge-img-setname');
+  var setNameEl = document.getElementById('ge-img-setname-input');
+  if (setNameCb && setNameCb.checked && setNameEl) customRename = (setNameEl.value || '').trim();
+  var origStem = customRename || _stripExt((_editCurrentItem.name || ((_editCurrentItem.path || '').split('/').pop())) || '');
+  var body = { inputPath: _editCurrentItem.absPath, operation: op, overwrite: false, params: params };
+  if (outputDir) body.outputDir = outputDir;
+  if (origStem) body.outputName = origStem;
   fetch('/api/gallery/edit/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -407,18 +469,19 @@ function _stripExt(name) {
 // FSAA zips), fs items → root dir handle name, backend items → rootDirPath
 // base name. Output: "<origin>_converted.zip", base-only + .zip enforced
 // server-side to prevent path traversal.
-// Derives the output zip/folder name. If the rethink rename toggle is on,
-// it uses the custom name from `ge-img-rename-name`; otherwise falls back
-// to the original source folder/archive name. Always sanitised server-side
+// Derives the output zip/folder name. If the "Set Name" toggle is on, it
+// uses the custom name from `ge-img-setname-input`; otherwise falls back to
+// the original source folder/archive name. Always sanitised server-side
 // (filepath.Base + .zip forced).
 function _batchOriginZipName() {
-  var it = _editCurrentItem;
-  // Honour the explicit "Rename" input when present and filled.
+  // Honour the explicit "Set Name" input when present and filled.
   var renameReq = '';
-  var ri = document.getElementById('ge-img-rename');
-  var rn = document.getElementById('ge-img-rename-name');
-  if (ri && ri.checked && rn) renameReq = (rn.value || '').trim();
   if (_batchCfg && _batchCfg.renameName) renameReq = _batchCfg.renameName;
+  else {
+    var cb = document.getElementById('ge-img-setname');
+    var el = document.getElementById('ge-img-setname-input');
+    if (cb && cb.checked && el) renameReq = (el.value || '').trim();
+  }
   if (renameReq) {
     return _stripExt(renameReq) || 'converted_images';
   }
@@ -426,33 +489,32 @@ function _batchOriginZipName() {
   return stem + '_converted.zip';
 }
 
-// _refreshBatchUXVisibility toggles the visibility of the rename/normalise
-// rows according to the current checkbox/destination state. Rules:
-//  - rename row: batch mode AND "Compress to ZIP" on (the rename field sets
-//    the zip name; in uncompressed save-to-dir, individual names come from
-//    either sequential-rename or the original filename)
-//  - rename name input: only when the rename checkbox is also on
-//  - normalise row + opts: batch mode on (any destination). "Same Path"
-//    (overwrite) batch also accepts sequential rename because the server
-//    now honours OutputName in the same-path (non-OutputDir) branch too,
-//    placing e.g. "img001_converted.webp" next to the originals without
-//    overwriting them.
+// _refreshBatchUXVisibility syncs the image dialog's toggle-gated inputs:
 function _refreshBatchUXVisibility() {
-  var batchCb = document.getElementById('ge-img-batch');
-  var compressCb = document.getElementById('ge-img-compress');
-  var renameCb = document.getElementById('ge-img-rename');
-  var renameNameInput = document.getElementById('ge-img-rename-name');
-  var renameRow = document.getElementById('ge-img-rename-row');
-  var renormRow = document.getElementById('ge-img-renorm-row');
-  var renormOpts = document.getElementById('ge-img-renorm-opts');
-  var batchOn = !!(batchCb && batchCb.checked);
-  var compressOn = !!(compressCb && compressCb.checked);
-  var destRadio = document.querySelector('input[name="ge-dest"]:checked');
-  var samePath = !destRadio || destRadio.value === 'overwrite';
-  if (renameRow) renameRow.style.display = (batchOn && compressOn) ? '' : 'none';
-  if (renameNameInput) renameNameInput.style.display = (renameCb && renameCb.checked && renameRow && renameRow.style.display !== 'none') ? '' : 'none';
-  if (renormRow) renormRow.style.display = (batchOn && !samePath) ? '' : 'none';
-  if (renormOpts) renormOpts.style.display = (renormRow && renormRow.style.display !== 'none' && document.getElementById('ge-img-renorm') && document.getElementById('ge-img-renorm').checked) ? '' : 'none';
+  function _syncToggle(toggleId, inputIds) {
+    var cb = document.getElementById(toggleId);
+    if (!cb) return;
+    var on = !!cb.checked;
+    for (var i = 0; i < inputIds.length; i++) {
+      var el = document.getElementById(inputIds[i]);
+      if (el) el.disabled = !on;
+    }
+  }
+  _syncToggle('ge-img-setpath', ['ge-dest-dir', 'ge-browse-dir-btn']);
+  _syncToggle('ge-img-setname', ['ge-img-setname-input']);
+  // Uniform (sequential batch rename) is only meaningful in archive mode
+  // (renaming many images). In single mode the toggle itself is disabled so it
+  // cannot be turned on; when on (in archive mode) it enables the prefix/digits.
+  var archiveOn = _isArchiveMode();
+  var uniCb = document.getElementById('ge-img-uniform');
+  if (uniCb) {
+    uniCb.disabled = !archiveOn;
+    var uniOn = archiveOn && uniCb.checked;
+    var pEl = document.getElementById('ge-img-uniform-prefix');
+    var dEl = document.getElementById('ge-img-uniform-digits');
+    if (pEl) pEl.disabled = !uniOn;
+    if (dEl) dEl.disabled = !uniOn;
+  }
 }
 function _padNum(n, digits) {
   var s = String(n);
@@ -482,25 +544,22 @@ function _batchOriginStem() {
 // _captureBatchCfg reads the current state of the rename / sequential-rename
 // controls so the result handler can honour them even after the controls reset.
 function _captureBatchCfg() {
-  var renormCb = document.getElementById('ge-img-renorm');
-  var renormOn = !!(renormCb && renormCb.checked);
+  var uniCb = document.getElementById('ge-img-uniform');
+  var uniOn = !!(uniCb && uniCb.checked);
   var prefix = '';
   var digits = 2;
-  if (renormOn) {
-    var pEl = document.getElementById('ge-img-renorm-prefix');
-    var dEl = document.getElementById('ge-img-renorm-digits');
+  if (uniOn) {
+    var pEl = document.getElementById('ge-img-uniform-prefix');
+    var dEl = document.getElementById('ge-img-uniform-digits');
     prefix = (pEl && pEl.value) ? pEl.value.trim() : '';
     digits = dEl ? (parseInt(dEl.value, 10) || 2) : 2;
     if (digits < 1) digits = 1;
     if (!prefix) prefix = _geT('geRenormPrefixPh');
   }
-  var renameCb = document.getElementById('ge-img-rename');
-  var renameNameEl = document.getElementById('ge-img-rename-name');
-  var renameName = '';
-  if (renameCb && renameCb.checked && renameNameEl) {
-    renameName = (renameNameEl.value || '').trim();
-  }
-  return { renormalise: renormOn, prefix: prefix, digits: digits, renameName: renameName };
+  var setNameCb = document.getElementById('ge-img-setname');
+  var setNameEl = document.getElementById('ge-img-setname-input');
+  var renameName = (setNameCb && setNameCb.checked && setNameEl) ? (setNameEl.value || '').trim() : '';
+  return { renormalise: uniOn, prefix: prefix, digits: digits, renameName: renameName };
 }
 
 var _batchJobs = [];
@@ -548,13 +607,12 @@ function _resolveBatchInput(it) {
   return Promise.reject(new Error('no disk path'));
 }
 
-function _startBatch(op, params, dest, compress) {
-  var siblings = _getSiblingImages();
-  if (siblings.length === 0) { showMsg(_geT('geNoBatchItems')); return; }
-  if (dest.overwrite) {
-    var canReplace = _editCurrentItem && (_editCurrentItem.kind === 'backend'
-      || (_editCurrentItem.kind === 'zip' && !!_editCurrentItem.zipAbsPath && !!_editCurrentItem.zipPath));
-    if (!canReplace) { showMsg(_geT('geNoDiskPath')); return; }
+function _startBatch(op, params, dest, compress, targets) {
+  var siblings = (targets && targets.length) ? targets : _getSiblingImages();
+  if (siblings.length === 0) {
+    var re0 = document.getElementById('ge-result-area');
+    if (re0) { re0.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">' + escapeHtml(_geT('geNoBatchItems')) + '</span></div>'; re0.style.display = 'block'; }
+    return;
   }
   _batchJobs = [];
   _batchTotal = siblings.length;
@@ -589,14 +647,12 @@ function _startBatch(op, params, dest, compress) {
   for (var i = 0; i < siblings.length; i++) {
     var it = siblings[i];
     var job = { item: it, jobId: null, done: false, error: null, outStem: '' };
-    // Sequential renormalise → <prefix><NN..>; otherwise keep the original
-    // item name stem. Multi-segment zipPath-like names already include a
-    // directory prefix; we keep the basename only so the saved filename is a
-    // plain leaf ("p1.png" path "archive.zip/sub/x.png" → "x").
-    var baseName = it.name || (it.path || '').split('/').pop() || '';
+    // Uniform (sequential) → <prefix><NN..>; Set Name on a single target →
+    // that name; otherwise leave empty so the server falls back to its
+    // "<name>_<desc>.<ext>" default next to the source.
     job.outStem = digits > 0
       ? (_batchCfg.prefix || _geT('geRenormPrefixPh')) + _padNum(i + 1, digits)
-      : _stripExt(baseName);
+      : (_batchTotal === 1 && _batchCfg && _batchCfg.renameName ? _batchCfg.renameName : '');
     _batchJobs.push(job);
 
     (function(idx, item, reqOp, reqParams, reqBatchDest, outStem) {
@@ -729,10 +785,21 @@ function _onBatchComplete() {
   _hideProgressSection();
   var resultEl = document.getElementById('ge-result-area');
   var html = '<div class="gallery-edit-result">';
-  html += '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
-  html += '<div class="gallery-edit-actions">';
-  html += '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>';
-  html += '</div></div>';
+  if (fail > 0) {
+    // Surface the first error so a single-image failure is visible, not just a count.
+    var firstErr = '';
+    for (var e = 0; e < _batchJobs.length; e++) { if (_batchJobs[e].error) { firstErr = _batchJobs[e].error; break; } }
+    html += '<span style="color:var(--danger);font-weight:600">\u2718 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
+    if (firstErr) html += '<div style="font-size:12px;color:var(--danger);margin-top:4px;white-space:pre-wrap;word-break:break-all">' + escapeHtml(firstErr) + '</div>';
+  } else {
+    html += '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(_geT('geBatchDone', [String(ok), String(fail)])) + '</span>';
+  }
+  if (ok > 0) {
+    html += '<div class="gallery-edit-actions">';
+    html += '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(_geT('geBatchOpenFolder')) + '</button>';
+    html += '</div>';
+  }
+  html += '</div>';
   if (resultEl) {
     resultEl.innerHTML = html;
     resultEl.style.display = 'block';
@@ -819,66 +886,81 @@ function _openInFileManager(path) {
 
 // ---------- modal render ---------------------------------------------
 
+// _renderSourceInfoRows emits the two-row source-info block. `prefix` selects
+// the element ids ('img' for the image dialog, 'vid' for the video dialog) so
+// the two never collide (only one dialog is open at a time, but distinct ids
+// keep the updaters unambiguous). Row 1 = container path (or a "no disk path"
+// hint for drag-dropped items); row 2 = file name + metadata / count.
+function _renderSourceInfoRows(prefix) {
+  return '<div class="ge-src-info">'
+    + '<div class="ge-src-row ge-src-path" id="ge-' + prefix + '-src-row1">-</div>'
+    + '<div class="ge-src-row ge-src-meta" id="ge-' + prefix + '-src-row2">-</div>'
+    + '</div>';
+}
+
+// _renderSetPathRow / _renderSetNameRow emit the Set Path and Set Name rows
+// shared by the image and video dialogs (same element ids; only one dialog is
+// open at a time). Set Path toggles the output directory; Set Name the output
+// filename / archive name.
+function _renderSetPathRow() {
+  return '<div class="gallery-edit-row">'
+    + '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-setpath"> ' + escapeHtml(_geT('geSetPath')) + '</label>'
+    + '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" title="' + escapeHtml(_geT('geBrowseDir')) + '">' + _geBrowseSvg + '</button>'
+    + '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(_geT('geDestDirPlaceholder')) + '" disabled>'
+    + '</div>';
+}
+function _renderSetNameRow() {
+  return '<div class="gallery-edit-row">'
+    + '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-setname"> ' + escapeHtml(_geT('geSetName')) + '</label>'
+    + '<input type="text" id="ge-img-setname-input" style="flex:1" placeholder="' + escapeHtml(_geT('geNamePlaceholder')) + '" disabled>'
+    + '</div>';
+}
+
 function _renderImageForm() {
   var probe = _editProbe || {};
   var w = probe.width || 0, h = probe.height || 0;
-  var srcExt = _editCurrentItem ? (extOf(_editCurrentItem.name) || 'png').toLowerCase() : 'png';
+  var it = _editCurrentItem;
+  var srcExt = it ? (extOf(it.name) || 'png').toLowerCase() : 'png';
   var formatOptions = ['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif'];
-  var selectedFormat = srcExt;
-  if (formatOptions.indexOf(selectedFormat) < 0) selectedFormat = 'png';
-  if (selectedFormat === 'jpg') selectedFormat = 'jpeg';
+  if (srcExt === 'jpg') srcExt = 'jpeg';
+  if (formatOptions.indexOf(srcExt) < 0) srcExt = 'png';
 
   var html = '';
 
-  // Batch mode + compress toggle
+  // Source info (two rows; populated by _updateImageSourceInfo after probe).
+  html += _renderSourceInfoRows('img');
+  // Set Path + Set Name (shared with the video dialog).
+  html += _renderSetPathRow();
+  html += _renderSetNameRow();
+
+  // Uniform (sequential rename)
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-img-batch"> ' + escapeHtml(_geT('geBatchConvert'));
-  html += '</label>';
-  html += '<span id="ge-batch-count" style="font-size:11px;color:var(--text-muted);margin-left:8px"></span>';
-  html += '</div>';
-  // Compress to ZIP (only visible in batch mode)
-  html += '<div class="gallery-edit-row" id="ge-img-compress-row" style="display:none;margin-left:24px">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-img-compress"> ' + escapeHtml(_geT('geCompressZip'));
-  html += '</label>';
-  html += '</div>';
-  // Custom zip/folder name (only visible in batch + compress mode)
-  html += '<div class="gallery-edit-row" id="ge-img-rename-row" style="display:none;margin-left:24px">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-img-rename"> ' + escapeHtml(_geT('geRenameZip'));
-  html += '</label>';
-  html += '<input type="text" id="ge-img-rename-name" style="flex:1;margin-left:8px" placeholder="' + escapeHtml(_geT('geRenamePlaceholder')) + '" title="' + escapeHtml(_geT('geRenameZipHint')) + '">';
-  html += '</div>';
-  // Sequential rename (only visible in batch mode, hidden when compress path forced in-place)
-  html += '<div class="gallery-edit-row" id="ge-img-renorm-row" style="display:none;margin-left:24px">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-img-renorm"> ' + escapeHtml(_geT('geRenorm'));
-  html += '</label>';
-  html += '</div>';
-  html += '<div class="gallery-edit-row" id="ge-img-renorm-opts" style="display:none;margin-left:48px">';
-  html += '<label class="gallery-edit-label" style="width:auto">' + escapeHtml(_geT('geRenormPrefix')) + '</label>';
-  html += '<input type="text" id="ge-img-renorm-prefix" style="width:120px" value="' + escapeHtml(_geT('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(_geT('geRenormPrefixPh')) + '">';
+  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-uniform"> ' + escapeHtml(_geT('geUniform')) + '</label>';
+  html += '<input type="text" id="ge-img-uniform-prefix" style="width:120px" value="' + escapeHtml(_geT('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(_geT('geRenormPrefixPh')) + '" disabled>';
   html += '<label class="gallery-edit-label" style="width:auto;margin-left:8px">' + escapeHtml(_geT('geRenormDigits')) + '</label>';
-  html += '<input type="number" id="ge-img-renorm-digits" min="1" max="9" value="2" style="width:60px">';
+  html += '<input type="number" id="ge-img-uniform-digits" min="1" max="9" value="2" style="width:60px" disabled>';
   html += '</div>';
 
-  // Format select
+  // Compress to Zip + Format
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geFormat')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-img-format">';
+  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-compress"> ' + escapeHtml(_geT('geCompressZip')) + '</label>';
+  html += '<label class="gallery-edit-label" style="width:auto;margin-left:8px">' + escapeHtml(_geT('geFormat')) + '</label>';
+  html += '<select class="pg-param-row-select" id="ge-img-format" style="flex:1">';
   for (var i = 0; i < formatOptions.length; i++) {
     var f = formatOptions[i];
-    html += '<option value="' + f + '"' + (f === selectedFormat ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
+    html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
   }
   html += '</select>';
   html += '</div>';
 
-  // Quality slider (only for jpeg/webp)
-  html += '<div class="gallery-edit-row" id="ge-img-quality-row">';
+  // Quality + Scale
+  html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geQuality')) + '</label>';
   html += '<input type="range" id="ge-img-quality" min="0" max="100" value="85" style="flex:1">';
   html += '<span class="gallery-edit-val" id="ge-quality-val">85</span>';
+  html += '<label class="gallery-edit-label" style="width:auto;margin-left:12px">' + escapeHtml(_geT('geScalePercent')) + '</label>';
+  html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="flex:1">';
+  html += '<span class="gallery-edit-val" id="ge-scale-val">100%</span>';
   html += '</div>';
 
   // PNG lossless note
@@ -886,21 +968,11 @@ function _renderImageForm() {
   html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + escapeHtml(_geT('geQualityHint')) + '</span>';
   html += '</div>';
 
-  // Scale slider
+  // Strip Metadata + Scale output dims
   html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(_geT('geScalePercent')) + '</label>';
-  html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="flex:1">';
-  html += '<span class="gallery-edit-val" id="ge-scale-val">100%</span>';
-  html += '<span class="gallery-edit-val" id="ge-scale-dims">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
+  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-strip"> ' + escapeHtml(_geT('geStripMetadata')) + '</label>';
+  html += '<span class="gallery-edit-val" id="ge-scale-dims" style="margin-left:auto">' + escapeHtml(_geT('geOutputDims', [w, h])) + '</span>';
   html += '</div>';
-
-  // Strip metadata
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="checkbox" id="ge-img-strip"> ' + escapeHtml(_geT('geStripMetadata'));
-  html += '</label>';
-  html += '</div>';
-
 
   return html;
 }
@@ -1088,10 +1160,24 @@ function _buildModalHTML() {
   var fullTitle = title + ': ' + itemName;
 
   var html = '';
-  html += '<div class="pg-modal-header">';
-  html += '<span class="pg-modal-title" title="' + fullTitle + '">' + fullTitle + '</span>';
-  html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
-  html += '</div>';
+  if (isImage) {
+    html += '<div class="pg-modal-header">';
+    html += '<div class="ge-header-left">';
+    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(_geT('geSettingsHint')) + '" title="' + escapeHtml(_geT('geSettings')) + '">' + _geGearSvg + '</button>';
+    html += '<button type="button" id="ge-archive-toggle" class="ge-icon-toggle" data-archive="0" title="' + escapeHtml(_geT('geArchiveHint')) + '">' + _geImageSvg + '</button>';
+    html += '</div>';
+    html += '<span class="pg-modal-title ge-title-center">' + escapeHtml(_geT('geImageConvert')) + '</span>';
+    html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
+    html += '</div>';
+  } else {
+    html += '<div class="pg-modal-header">';
+    html += '<div class="ge-header-left">';
+    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(_geT('geSettingsHint')) + '" title="' + escapeHtml(_geT('geSettings')) + '">' + _geGearSvg + '</button>';
+    html += '</div>';
+    html += '<span class="pg-modal-title ge-title-center">' + escapeHtml(_geT('geVideoConvert')) + '</span>';
+    html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
+    html += '</div>';
+  }
 
   html += '<div class="pg-modal-body gallery-edit-body">';
 
@@ -1100,43 +1186,19 @@ function _buildModalHTML() {
   html += '<strong>' + escapeHtml(_geT('geFfmpegNA')) + '</strong>: ' + escapeHtml(_geT('geFfmpegNAHint'));
   html += '</div>';
 
-  // Source info line with settings gear button
-  html += '<div class="gallery-edit-info" id="ge-source-info">';
-  html += '<span>' + escapeHtml(_geT('geSourceInfo')) + ': <span id="ge-source-detail">Loading...</span></span>';
-  html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(_geT('geSettingsHint')) + '" title="' + escapeHtml(_geT('geSettings')) + '">';
-  html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
-  html += '</button>';
-  html += '</div>';
-
-  // Destination section
-  html += '<div class="gallery-edit-section">';
-  html += '<div class="gallery-edit-row"><span style="font-weight:600;font-size:13px;color:var(--text-secondary)">' + escapeHtml(_geT('geDest')) + '</span></div>';
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check" style="margin-right:16px">';
-  html += '<input type="radio" name="ge-dest" value="overwrite" checked> ' + escapeHtml(_geT('geReplaceOriginal'));
-  html += '</label>';
-  html += '<label class="gallery-edit-check">';
-  html += '<input type="radio" name="ge-dest" value="dir"> ' + escapeHtml(_geT('geSaveToDir'));
-  html += '</label>';
-  html += '</div>';
-  html += '<div class="gallery-edit-row" id="ge-dest-dir-row" style="display:none">';
-  html += '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" title="' + escapeHtml(_geT('geBrowseDir')) + '">';
-  html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-  html += '</button>';
-  html += '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(_geT('geDestDirPlaceholder')) + '">';
-  html += '</div>';
-  html += '<div class="gallery-edit-row" id="ge-dest-rename-row" style="display:none;margin-left:24px">';
-  html += '<label class="gallery-edit-label" style="width:auto">' + escapeHtml(_geT('geRenameZip')) + '</label>';
-  html += '<input type="text" id="ge-dest-rename" style="flex:1;margin-left:8px" placeholder="' + escapeHtml(_geT('geRenamePlaceholder')) + '">';
-  html += '</div>';
-  html += '</div>';
-
   if (isImage) {
-    // Image: simple form
+    // Image form (includes source info + Set Path; "Replace Original" removed)
     html += '<div class="gallery-edit-section" id="ge-img-section">';
     html += _renderImageForm();
     html += '</div>';
   } else {
+    // Video: two-row source info + Set Path + Set Name (shared rows; "Replace
+    // Original" removed, same model as the image dialog but no archive toggle).
+    html += '<div class="gallery-edit-section" id="ge-vid-dest-section">';
+    html += _renderSourceInfoRows('vid');
+    html += _renderSetPathRow();
+    html += _renderSetNameRow();
+    html += '</div>';
     // Video: unified single panel containing Transcode, Trim, Subtitle sections
     html += '<div class="gallery-edit-section" id="ge-vid-section">';
     
@@ -1494,20 +1556,13 @@ function _exitTrimMode(save) {
   setTimeout(function() {
     var destDir = document.getElementById('ge-dest-dir');
     if (destDir && _editDefaultDir) destDir.value = _editDefaultDir;
+    // Video: Set Path defaults ON, pre-filled with the download dir.
+    var sp = document.getElementById('ge-img-setpath');
+    if (sp) { sp.checked = true; _refreshBatchUXVisibility(); }
   }, 30);
   _checkFfmpegStatus();
   if (_editProbe) {
-    var detailEl = document.getElementById('ge-source-detail');
-    if (detailEl) {
-      var parts = [];
-      if (_editProbe.width && _editProbe.height) parts.push(_editProbe.width + '\u00d7' + _editProbe.height);
-      if (_editProbe.codec) parts.push(_editProbe.codec);
-      if (_editMediaType === 'video') {
-        if (_editProbe.duration != null && _editProbe.duration > 0) parts.push(formatTime(_editProbe.duration));
-        if (_editProbe.hasAudio === false) parts.push(_geT('geNoAudio'));
-      }
-      detailEl.textContent = parts.join(', ') || '-';
-    }
+    _updateVideoSourceInfo();
     var scaleDims = document.getElementById('ge-scale-dims');
     if (scaleDims && _editProbe.width && _editProbe.height) {
       scaleDims.textContent = _geT('geOutputDims', [_editProbe.width, _editProbe.height]);
@@ -1546,6 +1601,10 @@ function _bindModalEvents() {
   var destInput = document.getElementById('ge-dest-dir');
   if (browseBtn && destInput) {
     browseBtn.onclick = function() {
+      // Native folder picker is modal: refuse re-entry while one is open so
+      // the user cannot stack multiple file-manager dialogs.
+      if (browseBtn.disabled) return;
+      browseBtn.disabled = true;
       fetch('/api/browse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1559,84 +1618,55 @@ function _bindModalEvents() {
       })
       .catch(function(err) {
         console.warn('Browse directory error:', err);
+      })
+      .then(function() {
+        // Re-enable only if Set Path is still on (sync keeps it disabled otherwise).
+        if (document.getElementById('ge-img-setpath')) {
+          _refreshBatchUXVisibility();
+        } else {
+          browseBtn.disabled = false;
+        }
       });
     };
   }
-  // Destination radio toggle
-  var destRadios = document.querySelectorAll('input[name="ge-dest"]');
-  var destDirRow = document.getElementById('ge-dest-dir-row');
-  var destRenameRow = document.getElementById('ge-dest-rename-row');
-  destRadios.forEach(function(r) {
-    r.onchange = function() {
-      var saveToDir = (this.value === 'dir');
-      if (destDirRow) destDirRow.style.display = saveToDir ? '' : 'none';
-      // Custom output filename is meaningful only when saving to a directory
-      // (Same Path keeps the original name).
-      if (destRenameRow) destRenameRow.style.display = saveToDir ? '' : 'none';
-      _refreshBatchUXVisibility();
-    };
-  });
 
-  // Batch checkbox — update count + toggle compress row
-  var batchCb = document.getElementById('ge-img-batch');
-  var compressRow = document.getElementById('ge-img-compress-row');
-  if (batchCb) {
-    batchCb.onchange = function() {
-      var countEl = document.getElementById('ge-batch-count');
-      if (countEl) {
-        if (batchCb.checked) {
-          var sib = _getSiblingImages();
-          countEl.textContent = '(' + sib.length + ' ' + _geT('geBatchFiles') + ')';
-        } else {
-          countEl.textContent = '';
-        }
-      }
-      if (compressRow) compressRow.style.display = batchCb.checked ? '' : 'none';
+  // Image|archive header toggle — single ↔ convert-all-in-folder.
+  var archTog = document.getElementById('ge-archive-toggle');
+  if (archTog) {
+    archTog.onclick = function() {
+      var on = archTog.getAttribute('data-archive') === '1';
+      archTog.setAttribute('data-archive', on ? '0' : '1');
+      archTog.innerHTML = on ? _geImageSvg : _geFolderSvg;
+      archTog.title = on ? _geT('geArchiveHint') : _geT('geSingleHint');
+      // Uniform is archive-only; turning it off when leaving archive mode keeps
+      // _captureBatchCfg/outStem from applying batch renaming to a single image.
+      if (on) { var u = document.getElementById('ge-img-uniform'); if (u) u.checked = false; }
+      _updateImageSourceInfo();
       _refreshBatchUXVisibility();
     };
   }
-  // Compress toggle — reveal "rename" sub-row only when compressing (the
-  // rename field sets the zip name; in non-compress batches the folder name
-  // comes from the source folder so rename is hidden there).
+  // Set Path / Set Name / Uniform toggles — enable/disable their own inputs.
+  ['ge-img-setpath', 'ge-img-setname', 'ge-img-uniform'].forEach(function(id) {
+    var cb = document.getElementById(id);
+    if (cb) cb.onchange = _refreshBatchUXVisibility;
+  });
+  // Compress toggle (no input gating; the flag is read at start time).
   var compressCb = document.getElementById('ge-img-compress');
-  if (compressCb) {
-    compressCb.onchange = _refreshBatchUXVisibility;
-  }
-  // Rename toggle — surface the custom name input.
-  var renameCb = document.getElementById('ge-img-rename');
-  var renameNameInput = document.getElementById('ge-img-rename-name');
-  if (renameCb) {
-    renameCb.onchange = function() {
-      if (renameNameInput) renameNameInput.style.display = renameCb.checked ? '' : 'none';
-      _refreshBatchUXVisibility();
-    };
-  }
-  // Normalise toggle — surface prefix/digits.
-  var renormCb = document.getElementById('ge-img-renorm');
-  var renormOpts = document.getElementById('ge-img-renorm-opts');
-  if (renormCb) {
-    renormCb.onchange = function() {
-      if (renormOpts) renormOpts.style.display = renormCb.checked ? '' : 'none';
-      _refreshBatchUXVisibility();
-    };
-  }
+  if (compressCb) { compressCb.onchange = _refreshBatchUXVisibility; }
+
   // ---- image events ----
   var fmtSelect = document.getElementById('ge-img-format');
-  var qualityRow = document.getElementById('ge-img-quality-row');
   var losslessNote = document.getElementById('ge-img-lossless-note');
   var qualitySlider = document.getElementById('ge-img-quality');
   var qualityVal = document.getElementById('ge-quality-val');
   var scaleInput = document.getElementById('ge-img-scale');
   var scaleDims = document.getElementById('ge-scale-dims');
 
-  if (fmtSelect && qualityRow && losslessNote) {
+  if (fmtSelect && losslessNote) {
     fmtSelect.onchange = function() {
-      var v = fmtSelect.value;
-      var showQuality = (v === 'jpeg' || v === 'webp');
-      qualityRow.style.display = showQuality ? '' : 'none';
-      losslessNote.style.display = (v === 'png') ? '' : 'none';
+      // Quality is always visible; only the PNG lossless hint toggles.
+      losslessNote.style.display = (fmtSelect.value === 'png') ? '' : 'none';
     };
-    // Initial state
     fmtSelect.onchange();
   }
 
@@ -1787,17 +1817,15 @@ function _bindModalEvents() {
 }
 
 // ---------- start operation helpers ---------------------------------
-function _getDestination() {
-  var destRadio = document.querySelector('input[name="ge-dest"]:checked');
-  var samePath = !destRadio || destRadio.value === 'overwrite';
+// _getDestFromSetPath builds the output destination from the Set Path toggle
+// (shared by image and video): overwrite is always false (replace-original was
+// removed), outputDir comes from Set Path, the output filename (Set Name) is
+// read inside _startJob/_startBatch.
+function _getDestFromSetPath() {
+  var setPathOn = document.getElementById('ge-img-setpath').checked;
   var dirInput = document.getElementById('ge-dest-dir');
-  var dir = dirInput ? dirInput.value.trim() : '';
-  // Custom output filename (rename). Lives in the shared dest block on the
-  // "Save to dir" path only. Stem only (no extension) — the server appends
-  // the format extension.
-  var renameInput = document.getElementById('ge-dest-rename');
-  var renameStem = renameInput ? (renameInput.value || '').trim() : '';
-  return { overwrite: samePath, outputDir: samePath ? null : (dir || null), renameStem: renameStem || null };
+  var outputDir = setPathOn ? ((dirInput ? dirInput.value : '') || '').trim() : '';
+  return { overwrite: false, outputDir: outputDir || null };
 }
 
 function _startImageTranscode() {
@@ -1805,15 +1833,22 @@ function _startImageTranscode() {
   var quality = parseInt(document.getElementById('ge-img-quality').value) || 85;
   var scalePercent = parseInt(document.getElementById('ge-img-scale').value) || 100;
   var stripMetadata = document.getElementById('ge-img-strip').checked;
-  var batch = document.getElementById('ge-img-batch').checked;
+  var archiveOn = _isArchiveMode();
+  var setPathOn = document.getElementById('ge-img-setpath').checked;
+  var setNameOn = document.getElementById('ge-img-setname').checked;
+  var setName = setNameOn ? (document.getElementById('ge-img-setname-input').value || '').trim() : '';
   var compress = document.getElementById('ge-img-compress') && document.getElementById('ge-img-compress').checked;
-  var dest = _getDestination();
+  var dirInput = document.getElementById('ge-dest-dir');
+  var outputDir = setPathOn ? ((dirInput ? dirInput.value : '') || '').trim() : '';
   var params = { format: format, quality: quality, scalePercent: scalePercent, stripMetadata: stripMetadata };
-  if (batch) {
-    _startBatch('image_transcode', params, dest, compress);
-  } else {
-    _startJob('image_transcode', params, dest.overwrite, dest.outputDir);
+  var dest = { overwrite: false, outputDir: outputDir || null, renameStem: setName || null };
+  var targets = archiveOn ? _getSiblingImages() : [_editCurrentItem];
+  if (archiveOn && targets.length === 0) {
+    var re = document.getElementById('ge-result-area');
+    if (re) { re.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">' + escapeHtml(_geT('geNoBatchItems')) + '</span></div>'; re.style.display = 'block'; }
+    return;
   }
+  _startBatch('image_transcode', params, dest, compress, targets);
 }
 
 function _startVideoJob() {
@@ -1841,13 +1876,13 @@ function _startVideoTranscode() {
   // Hide preset if codec=copy
   if (codec === 'copy') preset = 'medium';
 
-  var dest = _getDestination();
+  var dest = _getDestFromSetPath();
   _startJob('video_transcode', {
     codec: codec, container: container, qualityTier: qualityTier,
     preset: preset, scalePercent: scalePercent,
     audioCodec: audioCodec, audioBitrate: audioBitrate,
     stripMetadata: stripMetadata
-  }, dest.overwrite, dest.outputDir);
+  }, false, dest.outputDir);
 }
 
 function _startVideoTrim() {
@@ -1863,7 +1898,7 @@ function _startVideoTrim() {
     qualityTier = document.getElementById('ge-trim-quality').value;
   }
 
-  var dest = _getDestination();
+  var dest = _getDestFromSetPath();
   var params = {
     reencode: reencode, codec: codec, qualityTier: qualityTier,
     hasAudio: (_editProbe && _editProbe.hasAudio !== false)
@@ -1880,7 +1915,7 @@ function _startVideoTrim() {
       return { start: String(s.start), end: String(s.end) };
     });
   }
-  _startJob('video_trim', params, dest.overwrite, dest.outputDir);
+  _startJob('video_trim', params, false, dest.outputDir);
 }
 
 function _startVideoSubtitle() {
@@ -1892,12 +1927,12 @@ function _startVideoSubtitle() {
   var fontName = document.getElementById('ge-sub-fontname').value || '';
   var container = document.getElementById('ge-sub-container').value;
 
-  var dest = _getDestination();
+  var dest = _getDestFromSetPath();
   _startJob('video_subtitle', {
     subtitlePath: _editSubtitlePath, mode: mode,
     language: lang, fontSize: fontSize,
     fontName: fontName, container: container
-  }, dest.overwrite, dest.outputDir);
+  }, false, dest.outputDir);
 }
 
 // ---------- entry point ---------------------------------------------
@@ -1926,16 +1961,21 @@ window.openMediaEditor = function(item, mediaType) {
   // Pre-fill destination directory from the Default Download Dir (shared
   // with the download page settings).
   setTimeout(function() {
-    var destDir = document.getElementById('ge-dest-dir');
-    if (destDir) {
-      fetch('/api/settings')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var dl = (data && data.download) || {};
-          _editDefaultDir = dl.defaultDir || '';
-          if (dl.defaultDir) destDir.value = dl.defaultDir;
-        })
-        .catch(function() {});
+    fetch('/api/settings')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var dl = (data && data.download) || {};
+        _editDefaultDir = dl.defaultDir || '';
+        var destDir = document.getElementById('ge-dest-dir');
+        if (destDir && dl.defaultDir) destDir.value = dl.defaultDir;
+      })
+      .catch(function() {});
+    // Set Path defaults ON (output → download dir by default) for both image
+    // and video; the user can toggle it off to save next to the source.
+    var sp = document.getElementById('ge-img-setpath');
+    if (sp) {
+      sp.checked = true;
+      _refreshBatchUXVisibility();
     }
   }, 30);
 
@@ -1951,30 +1991,30 @@ window.openMediaEditor = function(item, mediaType) {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     _editProbe = data;
-    var detailEl = document.getElementById('ge-source-detail');
-    if (detailEl) {
-      var parts = [];
-      if (data.width && data.height) parts.push(data.width + '\u00d7' + data.height);
-      if (data.codec) parts.push(data.codec);
-      if (_editMediaType === 'video') {
-        if (data.duration != null && data.duration > 0) parts.push(formatTime(data.duration));
-        if (data.hasAudio === false) parts.push(_geT('geNoAudio'));
+    if (_editMediaType === 'image') {
+      // Image: populate the two-row source info. For items without a known
+      // size (fs), fetch it best-effort (getFile() is metadata-only) then refresh.
+      _updateImageSourceInfo();
+      var it = _editCurrentItem;
+      if (it && (!it.size || it.size <= 0) && typeof it.getBlob === 'function') {
+        it.getBlob().then(function(b) { if (b && b.size) { it.size = b.size; _updateImageSourceInfo(); } }).catch(function() {});
       }
-      detailEl.textContent = parts.join(', ') || '-';
+    } else {
+      _updateVideoSourceInfo();
+      _updateTrimSegmentDisplay();
     }
-    // Update scale dimensions hint
+    // Update scale dimensions hint (shared by image + video scale sliders)
     var scaleDims = document.getElementById('ge-scale-dims');
     if (scaleDims && data.width && data.height) {
       scaleDims.textContent = _geT('geOutputDims', [data.width, data.height]);
     }
-    // Update trim segment display if on video mode
-    if (_editMediaType === 'video') {
-      _updateTrimSegmentDisplay();
-    }
   })
   .catch(function(err) {
-    var detailEl = document.getElementById('ge-source-detail');
-    if (detailEl) detailEl.textContent = 'Probe failed: ' + (err.message || err);
+    if (_editMediaType === 'image') {
+      _updateImageSourceInfo();
+    } else {
+      _updateVideoSourceInfo();
+    }
   });
 
   // Bind events after DOM is rendered
