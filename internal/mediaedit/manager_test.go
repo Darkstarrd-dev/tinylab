@@ -149,8 +149,15 @@ func TestManager_TranscodeImage_Overwrite(t *testing.T) {
 	if job.Status != StatusCompleted {
 		t.Fatalf("expected completed, got %s: %s", job.Status, job.Error)
 	}
-	if job.OutputPath != imgPath {
-		t.Errorf("expected outputPath = inputPath for overwrite, got %s", job.OutputPath)
+	// Cross-format overwrite ("replace original"): output lands at
+	// <dir>/<stem><newExt> and the original .png is removed on success,
+	// leaving the new-format file in its place.
+	wantPath := filepath.Join(dir, "source.webp")
+	if job.OutputPath != wantPath {
+		t.Errorf("expected outputPath = %s for cross-format overwrite, got %s", wantPath, job.OutputPath)
+	}
+	if _, err := os.Stat(imgPath); !os.IsNotExist(err) {
+		t.Errorf("expected original %s removed after cross-format overwrite, stat err=%v", imgPath, err)
 	}
 }
 
