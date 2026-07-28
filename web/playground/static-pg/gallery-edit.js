@@ -85,8 +85,6 @@ function _onCompleted(data) {
   var bar = document.getElementById('ge-progress-bar');
   if (bar) bar.value = 100;
 
-  // Build result block
-  var logHtml = data.logTail ? '<details style="margin-top:8px"><summary>' + escapeHtml(_geT('geLogTail')) + '</summary><pre style="background:#1a1326;border:1px solid var(--glass-border);padding:8px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">' + escapeHtml(data.logTail) + '</pre></details>' : '';
 
   var outputName = data.outputName || _geT('geEmptyName');
   var outputURL = data.outputURL || '';
@@ -392,6 +390,7 @@ function _getSiblingImages() {
 
   // kind 'plain' (single pasted blob) and unknown kinds have no disk folder:
   // batching applies to one's siblings, and a lone blob has none.
+  return [];
 }
 
 // _stripExt returns the name without its last extension ("a.b.png" → "a.b").
@@ -448,9 +447,11 @@ function _refreshBatchUXVisibility() {
   var renormOpts = document.getElementById('ge-img-renorm-opts');
   var batchOn = !!(batchCb && batchCb.checked);
   var compressOn = !!(compressCb && compressCb.checked);
+  var destRadio = document.querySelector('input[name="ge-dest"]:checked');
+  var samePath = !destRadio || destRadio.value === 'overwrite';
   if (renameRow) renameRow.style.display = (batchOn && compressOn) ? '' : 'none';
   if (renameNameInput) renameNameInput.style.display = (renameCb && renameCb.checked && renameRow && renameRow.style.display !== 'none') ? '' : 'none';
-  if (renormRow) renormRow.style.display = batchOn ? '' : 'none';
+  if (renormRow) renormRow.style.display = (batchOn && !samePath) ? '' : 'none';
   if (renormOpts) renormOpts.style.display = (renormRow && renormRow.style.display !== 'none' && document.getElementById('ge-img-renorm') && document.getElementById('ge-img-renorm').checked) ? '' : 'none';
 }
 function _padNum(n, digits) {
@@ -550,6 +551,11 @@ function _resolveBatchInput(it) {
 function _startBatch(op, params, dest, compress) {
   var siblings = _getSiblingImages();
   if (siblings.length === 0) { showMsg(_geT('geNoBatchItems')); return; }
+  if (dest.overwrite) {
+    var canReplace = _editCurrentItem && (_editCurrentItem.kind === 'backend'
+      || (_editCurrentItem.kind === 'zip' && !!_editCurrentItem.zipAbsPath && !!_editCurrentItem.zipPath));
+    if (!canReplace) { showMsg(_geT('geNoDiskPath')); return; }
+  }
   _batchJobs = [];
   _batchTotal = siblings.length;
   _batchDone = 0;
@@ -733,12 +739,9 @@ function _onBatchComplete() {
   }
   var openBtnN = document.getElementById('ge-open-folder-btn');
   if (openBtnN) {
+    var firstOutPath = outputPaths.length > 0 ? outputPaths[0] : '';
     openBtnN.onclick = function() {
-      // Open the dir of the first successful output — all batch outputs go
-      // to the same OutputDir when not compressing.
-      for (var k = 0; k < _batchJobs.length; k++) {
-        if (!_batchJobs[k].error && _batchJobs[k].outputPath) { _openInFileManager(_batchJobs[k].outputPath); return; }
-      }
+      if (firstOutPath) _openInFileManager(firstOutPath);
     };
   }
 
@@ -1570,6 +1573,7 @@ function _bindModalEvents() {
       // Custom output filename is meaningful only when saving to a directory
       // (Same Path keeps the original name).
       if (destRenameRow) destRenameRow.style.display = saveToDir ? '' : 'none';
+      _refreshBatchUXVisibility();
     };
   });
 
@@ -1784,6 +1788,8 @@ function _bindModalEvents() {
 
 // ---------- start operation helpers ---------------------------------
 function _getDestination() {
+  var destRadio = document.querySelector('input[name="ge-dest"]:checked');
+  var samePath = !destRadio || destRadio.value === 'overwrite';
   var dirInput = document.getElementById('ge-dest-dir');
   var dir = dirInput ? dirInput.value.trim() : '';
   // Custom output filename (rename). Lives in the shared dest block on the
@@ -1791,7 +1797,7 @@ function _getDestination() {
   // the format extension.
   var renameInput = document.getElementById('ge-dest-rename');
   var renameStem = renameInput ? (renameInput.value || '').trim() : '';
-  return { overwrite: false, outputDir: dir || null, renameStem: renameStem || null };
+  return { overwrite: samePath, outputDir: samePath ? null : (dir || null), renameStem: renameStem || null };
 }
 
 function _startImageTranscode() {
