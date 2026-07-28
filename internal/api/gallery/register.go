@@ -887,6 +887,9 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 	if req.Concurrency <= 0 {
 		req.Concurrency = 3
 	}
+	if req.Concurrency > 50 {
+		req.Concurrency = 50
+	}
 	if req.HeadSize <= 0 {
 		req.HeadSize = 5
 	}
@@ -1010,11 +1013,16 @@ func (h *Handler) galleryCancelReview(w http.ResponseWriter, r *http.Request) {
 	task := val.(*reviewTask)
 	task.cancel()
 
-	// Wait for the task to finish
-	<-task.done
+	// Wait for the task to finish with a 3s timeout guard
+	select {
+	case <-task.done:
+	case <-time.After(3 * time.Second):
+		h.d.Logger.Warn("gallery: review cancel timed out for session %s, forcing task cleanup", sessionID)
+	}
 
 	// Delete is idempotent
 	reviewTasks.Delete(sessionID)
+	gallerySessions.unpin(sessionID)
 
 	h.d.Logger.Info("gallery: cancelled AI review for session %s", sessionID)
 
@@ -1045,10 +1053,29 @@ func (h *Handler) runReview(ctx context.Context, task *reviewTask, zipData []byt
 	close(workCh)
 
 	var wg sync.WaitGroup
+	// 错开启动步长：每个 Worker 错开 120ms 启动，防止 WebView2 与 Windows 代理高并发时连接死锁与拒绝
+	staggerStep := 120 * time.Millisecond
+
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
+		workerID := i
 		go func() {
 			defer wg.Done()
+
+			// 第 workerID 个协程延迟 workerID * staggerStep 启动首个请求
+			if workerID > 0 {
+				delayTimer := time.NewTimer(time.Duration(workerID) * staggerStep)
+				select {
+				case <-delayTimer.C:
+				case <-ctx.Done():
+					delayTimer.Stop()
+					task.mu.Lock()
+					task.Status = gallerylib.ReviewStatusCancelled
+					task.mu.Unlock()
+					return
+				}
+			}
+
 			for entryIdx := range workCh {
 				select {
 				case <-ctx.Done():
@@ -1152,38 +1179,56 @@ func (h *Handler) sendVisionRequest(ctx context.Context, imgData []byte, mimeTyp
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Call the proxy handler via httptest
-	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-TinyRouter-Provenance", "gallery:review:image="+strconv.Itoa(entry.Index))
-	rec := httptest.NewRecorder()
+	var lastErr error
+	maxRetries := 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt*600) * time.Millisecond):
+			}
+		}
 
-	h.d.ProxyHandler.ChatCompletions(rec, req)
+		reqCtx, reqCancel := context.WithTimeout(ctx, 45*time.Second)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
+		req = req.WithContext(reqCtx)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-TinyRouter-Provenance", "gallery:review:image="+strconv.Itoa(entry.Index))
+		rec := httptest.NewRecorder()
 
-	resp := rec.Result()
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read proxy response: %w", err)
+		h.d.ProxyHandler.ChatCompletions(rec, req)
+		reqCancel()
+
+		resp := rec.Result()
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if err != nil {
+			lastErr = fmt.Errorf("read proxy response: %w", err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("proxy returned status %d: %s", resp.StatusCode, string(respBody))
+			continue
+		}
+
+		// Parse response
+		result, parseErr := gallerylib.ParseReviewResponse(respBody, matchField)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+
+		return &gallerylib.ReviewResult{
+			Index:   entry.Index,
+			Path:    entry.Path,
+			IsMatch: result.Match,
+			Reason:  result.Reason,
+		}, nil
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("proxy returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	// Parse response
-	result, err := gallerylib.ParseReviewResponse(respBody, matchField)
-	if err != nil {
-		return nil, err
-	}
-
-	return &gallerylib.ReviewResult{
-		Index:   entry.Index,
-		Path:    entry.Path,
-		IsMatch: result.Match,
-		Reason:  result.Reason,
-	}, nil
+	return nil, lastErr
 }
 
 // galleryGeneratePrompt generates a review prompt.

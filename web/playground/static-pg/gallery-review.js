@@ -159,60 +159,56 @@ function renderConfigPanel(rs) {
 function renderActivePanel(rs) {
   var html = '';
 
+  var totalProcessed = rs.processed;
+  var totalEntries = rs.total;
+  var totalFailed = rs.failed;
+  var totalMatched = 0;
+
+  for (var dir in rs.nodeResults) {
+    if (rs.nodeResults.hasOwnProperty(dir)) {
+      totalMatched += (rs.nodeResults[dir] || []).length;
+    }
+  }
+
   if (rs.status === 'running') {
-    // 进度
-    var pct = rs.total > 0 ? (rs.processed / rs.total * 100) : 0;
+    var queueLen = rs.reviewQueue.length;
+    var queueIdx = Math.min(rs.reviewQueueIndex + 1, queueLen);
+    var pct = totalEntries > 0 ? (totalProcessed / totalEntries * 100) : 0;
+
     html += '<div style="padding:4px 8px;font-size:11px">' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
-      '<span style="color:var(--text-secondary)">' + T('galleryReviewProcessing') + '</span>' +
-      '<span style="color:var(--text-muted)">' + rs.processed + '/' + rs.total + '</span>' +
+      '<span style="color:var(--text-secondary)">' + T('galleryReviewProcessing') +
+      (queueLen > 1 ? ' (' + queueIdx + '/' + queueLen + ')' : '') + '</span>' +
+      '<span style="color:var(--text-muted)">' + totalProcessed + '/' + totalEntries + '</span>' +
       '</div>';
-    if (rs.failed > 0) {
-      html += '<div style="color:var(--danger);font-size:10px;margin-bottom:2px">' + T('galleryReviewFailed') + rs.failed + '</div>';
+    if (totalFailed > 0) {
+      html += '<div style="color:var(--danger);font-size:10px;margin-bottom:2px">' + T('galleryReviewFailed') + totalFailed + '</div>';
     }
     html += '<div class="gallery-review-progress">' +
       '<div class="gallery-review-progress-bar" style="width:' + pct + '%"></div>' +
       '</div>' +
-      '<button class="gallery-review-btn" id="gallery-review-cancel-btn" style="margin-top:6px;width:100%">' + t('cancel') + '</button>' +
-      '</div>';
+      '<button class="gallery-review-btn" id="gallery-review-cancel-btn" style="margin-top:6px;width:100%">' + (T('cancel') || 'Cancel') + '</button>';
   } else if (rs.status === 'completed' || rs.status === 'error') {
-    // 完成 / 错误
-    var foundCount = rs.results.length;
     html += '<div style="padding:4px 8px;font-size:11px">' +
       '<div style="margin-bottom:6px">' +
-      '<span style="color:' + (foundCount > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';font-weight:600">' + foundCount + T('galleryReviewMatched') + '</span>' +
-      '<span style="color:var(--text-muted)"> / ' + rs.total + T('galleryReviewTotal') + '</span>';
-    if (rs.failed > 0) {
-      html += '<span style="color:var(--danger);font-size:10px;margin-left:4px">(' + rs.failed + T('galleryReviewFailedCount') + ')</span>';
-    }
-    html += '</div>';
+      '<span style="color:' + (totalMatched > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';font-weight:600">' + totalMatched + T('galleryReviewMatched') + '</span>' +
+      '</div>';
 
-    if (foundCount > 0) {
-      html += '<div class="gallery-review-result-list">';
-      for (var ri = 0; ri < rs.results.length; ri++) {
-        var r = rs.results[ri];
-        var shortPath = (r.path || '').split('/').pop();
-        html += '<div class="gallery-review-result-item" data-ri="' + ri + '">' +
-          '<span style="color:var(--danger);flex-shrink:0">\u26a0</span>' +
-          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" data-tooltip="' + escapeHtml(r.reason || '') + '">' + escapeHtml(shortPath) + '</span>' +
-          '</div>';
-      }
-      html += '</div>';
-
-      html += '<div style="margin-bottom:4px;font-size:10px;color:var(--text-muted)">' +
-        '<label style="display:flex;align-items:center;gap:4px;cursor:pointer">' +
-        '<input type="checkbox" id="gallery-review-mode-toggle" ' + (rs.reviewMode ? 'checked' : '') + '>' +
-        T('galleryReviewShowMatched') +
-        '</label></div>';
+    if (totalMatched > 0) {
+      html += '<button class="gallery-review-btn gallery-review-start-btn" id="gallery-review-confirm-delete-btn" style="width:100%;margin-bottom:6px">' + T('galleryReviewConfirmDelete') + '</button>';
     }
 
     if (rs.status === 'error') {
       html += '<div style="color:var(--danger);font-size:10px;margin-bottom:4px">' + T('galleryReviewError') + '</div>';
     }
 
-    html += '<button class="gallery-review-btn" id="gallery-review-reset-btn" style="width:100%">' + T('galleryReviewReset') + '</button>' +
-      '</div>';
+    html += '<button class="gallery-review-btn" id="gallery-review-reset-btn" style="width:100%">' + T('galleryReviewReset') + '</button>';
   }
+
+  // 全宽视图切换按钮（Cancel/Reset 按钮下方），显示按下后将切换到的目标状态
+  var toggleBtnText = (rs.reviewMode !== false) ? T('galleryReviewShowAll') : T('galleryReviewShowMatchedOnly');
+  html += '<button class="gallery-review-btn" id="gallery-review-toggle-mode-btn" style="margin-top:6px;width:100%">' + escapeHtml(toggleBtnText) + '</button>' +
+    '</div>';
 
   return html;
 }
@@ -321,7 +317,13 @@ function bindReviewEvents() {
   var concurrencyInput = document.getElementById('gallery-review-concurrency');
   if (concurrencyInput) {
     concurrencyInput.onchange = function() {
-      galleryState.reviewState.concurrency = parseInt(this.value, 10) || 3;
+      var val = parseInt(this.value, 10) || 3;
+      if (val > 50) {
+        val = 50;
+        this.value = 50;
+        showMsg('Max concurrency is capped at 50 to prevent overload');
+      }
+      galleryState.reviewState.concurrency = val;
     };
   }
 
@@ -373,27 +375,28 @@ function bindReviewEvents() {
     };
   }
 
-  // 审核模式切换
-  var modeToggle = document.getElementById('gallery-review-mode-toggle');
-  if (modeToggle) {
-    modeToggle.onchange = function() {
-      galleryState.reviewState.reviewMode = this.checked;
-      applyReviewFilter();
+  // 确认删除按钮（功能与 Ctrl+Del 相同）
+  var confirmDeleteBtn = document.getElementById('gallery-review-confirm-delete-btn');
+  if (confirmDeleteBtn) {
+    confirmDeleteBtn.onclick = function() {
+      if (typeof window.deleteItemPrompt === 'function') {
+        window.deleteItemPrompt();
+      }
     };
   }
 
-  // 审核结果项点击跳转
-  var resultItems = document.querySelectorAll('.gallery-review-result-item');
-  resultItems.forEach(function(el) {
-    el.onclick = function() {
-      var ri = parseInt(this.getAttribute('data-ri'), 10);
-      if (!isNaN(ri) && galleryState.reviewState.results[ri]) {
-        var entryIdx = galleryState.reviewState.results[ri].index;
-        var arrIdx = entryIndexToArrayIndex(entryIdx);
-        if (arrIdx >= 0) setActive(arrIdx);
+  // 全宽视图切换按钮（Show All / Show Matched）
+  var toggleModeBtn = document.getElementById('gallery-review-toggle-mode-btn');
+  if (toggleModeBtn) {
+    toggleModeBtn.onclick = function() {
+      var rs = galleryState.reviewState;
+      rs.reviewMode = (rs.reviewMode === false);
+      updateReviewThumbnailDisplay();
+      if (typeof renderTreePanel === 'function') {
+        renderTreePanel();
       }
     };
-  });
+  }
 }
 
 // ---------- preset management ----------------------------------------------
@@ -434,7 +437,6 @@ function selectPreset(presetId) {
 }
 
 function deletePreset(presetId) {
-  // 查找预设名展示在对话框中
   var rs = galleryState.reviewState;
   var presetName = presetId;
   for (var i = 0; i < rs.availablePresets.length; i++) {
@@ -447,8 +449,8 @@ function deletePreset(presetId) {
     '<div style="font-size:15px;margin-bottom:8px">' + T('galleryReviewDeletePresetTitle') + '</div>' +
     '<div style="font-size:12px;color:#888;margin-bottom:14px;word-break:break-all">' + escapeHtml(presetName) + '</div>' +
     '<div style="display:flex;justify-content:center;gap:8px">' +
-    '<button class="pg-btn" id="gallery-preset-del-ok" style="padding:6px 16px">' + t('delete') + '</button>' +
-    '<button class="pg-btn" id="gallery-preset-del-cancel" style="padding:6px 16px">' + t('cancel') + '</button>' +
+    '<button class="pg-btn" id="gallery-preset-del-ok" style="padding:6px 16px">' + (T('delete') || 'Delete') + '</button>' +
+    '<button class="pg-btn" id="gallery-preset-del-cancel" style="padding:6px 16px">' + (T('cancel') || 'Cancel') + '</button>' +
     '</div></div>';
   pgShowModal(html);
   document.getElementById('gallery-preset-del-ok').onclick = function() {
@@ -490,8 +492,8 @@ function savePreset() {
     '</div>' +
     '<div style="padding:0 8px"><div id="gallery-preset-name-container"></div></div>' +
     '<div style="display:flex;justify-content:center;gap:8px;padding:8px">' +
-    '<button class="pg-btn" id="gallery-preset-save-btn" style="padding:6px 16px">' + t('save') + '</button>' +
-    '<button class="pg-btn" id="gallery-preset-cancel-btn" style="padding:6px 16px">' + t('cancel') + '</button>' +
+    '<button class="pg-btn" id="gallery-preset-save-btn" style="padding:6px 16px">' + (T('save') || 'Save') + '</button>' +
+    '<button class="pg-btn" id="gallery-preset-cancel-btn" style="padding:6px 16px">' + (T('cancel') || 'Cancel') + '</button>' +
     '</div>';
 
   pgShowModal(html);
@@ -554,7 +556,6 @@ function generatePrompt() {
   rs.generatingPrompt = true;
   renderReviewPanel();
 
-  // 解析 provider/model 格式：prefix/model-id
   var slashIdx = rs.promptModelId.indexOf('/');
   var provider = '';
   var model = rs.promptModelId;
@@ -588,7 +589,41 @@ function generatePrompt() {
     });
 }
 
-// ---------- review execution -----------------------------------------------
+// ---------- review execution (Multi-Node Sequential) -----------------------
+
+function buildReviewQueue(selectedNodes) {
+  var queue = [];
+  var nodes = selectedNodes && selectedNodes.length ? selectedNodes : galleryState.dirPathList;
+  if (!nodes || !nodes.length) return queue;
+
+  for (var i = 0; i < nodes.length; i++) {
+    var dir = nodes[i];
+    var itemIndices = galleryState.dirMap[dir] || [];
+    if (!itemIndices.length) continue;
+
+    var sessionGroups = {};
+    for (var j = 0; j < itemIndices.length; j++) {
+      var item = galleryState.items[itemIndices[j]];
+      if (!item || item.kind !== 'zip') continue;
+      var sid = item.sessionId;
+      if (!sid) continue;
+      if (!sessionGroups[sid]) sessionGroups[sid] = [];
+      sessionGroups[sid].push(item.index);
+    }
+
+    for (var sid in sessionGroups) {
+      if (sessionGroups.hasOwnProperty(sid)) {
+        queue.push({
+          dir: dir,
+          sessionId: sid,
+          entryIndices: sessionGroups[sid],
+          itemIndices: itemIndices
+        });
+      }
+    }
+  }
+  return queue;
+}
 
 function startReview() {
   var rs = galleryState.reviewState;
@@ -602,13 +637,57 @@ function startReview() {
     return;
   }
 
-  var sessionId = galleryState.zipSessionId;
-  if (!sessionId) {
-    showMsg(T('galleryReviewNoSession'));
+  var queue = buildReviewQueue(rs.selectedNodes);
+  if (!queue.length) {
+    showMsg(T('galleryReviewNoEntries') || 'No reviewable entries in selected nodes');
     return;
   }
 
-  // 解析 provider/model
+  rs.reviewQueue = queue;
+  rs.reviewQueueIndex = 0;
+  rs.nodeResults = {};
+  rs.nodeStatus = {};
+  rs.reviewedNodes = [];
+  rs.allReviewMatchIndices = [];
+  rs.active = true;
+  rs.status = 'running';
+  rs.selectMode = false;
+  rs.focusedReviewNode = queue[0].dir;
+
+  for (var i = 0; i < queue.length; i++) {
+    rs.nodeStatus[queue[i].dir] = 'pending';
+  }
+
+  rs.originalIndices = galleryState.currentFolderIndices.slice();
+  galleryState.currentFolderIndices = [];
+  renderThumbnails();
+
+  renderReviewPanel();
+  if (typeof renderTreePanel === 'function') renderTreePanel();
+
+  reviewNextNode();
+}
+
+function reviewNextNode() {
+  var rs = galleryState.reviewState;
+  if (rs.reviewQueueIndex >= rs.reviewQueue.length) {
+    rs.status = 'completed';
+    renderReviewPanel();
+    if (typeof renderTreePanel === 'function') renderTreePanel();
+    return;
+  }
+
+  var node = rs.reviewQueue[rs.reviewQueueIndex];
+  rs.currentReviewNode = node.dir;
+  rs.nodeStatus[node.dir] = 'running';
+  rs.sessionId = node.sessionId;
+
+  rs.total = node.entryIndices.length;
+  rs.processed = 0;
+  rs.failed = 0;
+
+  if (typeof renderTreePanel === 'function') renderTreePanel();
+
   var slashIdx = rs.reviewModelId.indexOf('/');
   var provider = '';
   var model = rs.reviewModelId;
@@ -618,7 +697,7 @@ function startReview() {
   }
 
   var body = {
-    sessionId: sessionId,
+    sessionId: node.sessionId,
     provider: provider,
     model: model,
     systemPrompt: rs.systemPrompt,
@@ -628,9 +707,7 @@ function startReview() {
     tailSize: rs.tailSize,
     concurrency: rs.concurrency
   };
-  if (rs.userPrompt) {
-    body.userPrompt = rs.userPrompt;
-  }
+  if (rs.userPrompt) body.userPrompt = rs.userPrompt;
 
   fetch('/api/gallery/review/start', {
     method: 'POST',
@@ -642,57 +719,60 @@ function startReview() {
       return r.json();
     })
     .then(function(data) {
-      rs.active = true;
-      rs.status = 'running';
       rs.total = data.total;
-      rs.processed = 0;
-      rs.failed = 0;
-      rs.results = [];
-      rs.sessionId = sessionId;
-      rs.originalIndices = galleryState.currentFolderIndices.slice();
-      renderReviewPanel();
-      startPolling();
+      startNodePolling(node);
     })
     .catch(function(err) {
-      showMsg(T('galleryReviewStartFailed') + err.message);
+      rs.nodeStatus[node.dir] = 'error';
+      rs.reviewQueueIndex++;
+      if (typeof renderTreePanel === 'function') renderTreePanel();
+      reviewNextNode();
     });
 }
 
-// ---------- polling --------------------------------------------------------
+function startNodePolling(node) {
+  stopPolling();
 
-function startPolling() {
-  if (galleryState.reviewState.pollTimer) {
-    clearInterval(galleryState.reviewState.pollTimer);
-  }
   galleryState.reviewState.pollTimer = setInterval(function() {
-    var sid = galleryState.reviewState.sessionId;
-    if (!sid) return;
-    fetch('/api/gallery/review/status/' + encodeURIComponent(sid))
+    var rs = galleryState.reviewState;
+    fetch('/api/gallery/review/status/' + encodeURIComponent(node.sessionId))
       .then(function(r) {
         if (r.status === 404) {
-          return { status: 'completed', total: galleryState.reviewState.total,
-                   processed: galleryState.reviewState.total,
-                   failed: galleryState.reviewState.failed,
-                   results: galleryState.reviewState.results };
+          return {
+            status: 'completed',
+            total: rs.total,
+            processed: rs.total,
+            failed: rs.failed,
+            results: rs.nodeResults[node.dir] || []
+          };
         }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function(data) {
-        var rs = galleryState.reviewState;
-        rs.status = data.status;
-        rs.total = data.total;
+        var prevCount = (rs.nodeResults[node.dir] || []).length;
         rs.processed = data.processed;
         rs.failed = data.failed || 0;
-        rs.results = data.results || [];
+        rs.nodeResults[node.dir] = data.results || [];
+
+        if (rs.nodeResults[node.dir].length > prevCount) {
+          applyReviewFilterIncremental(node);
+        }
+
         renderReviewPanel();
 
-        if (data.status === 'completed') {
+        if (data.status === 'completed' || data.status === 'error') {
           stopPolling();
-          rs.reviewMode = true;
-          applyReviewFilter();
-        } else if (data.status === 'error' || data.status === 'cancelled') {
-          stopPolling();
+          rs.nodeStatus[node.dir] = (data.status === 'error' ? 'error' : 'completed');
+
+          if (rs.reviewedNodes.indexOf(node.dir) < 0 && (rs.nodeResults[node.dir] || []).length > 0) {
+            rs.reviewedNodes.push(node.dir);
+          }
+
+          if (typeof renderTreePanel === 'function') renderTreePanel();
+
+          rs.reviewQueueIndex++;
+          reviewNextNode();
         }
       })
       .catch(function(err) {
@@ -708,10 +788,190 @@ function stopPolling() {
   }
 }
 
-// Expose startPolling for gallery.js recovery
-window.startReviewPolling = startPolling;
-// Expose loadReviewPresets for gallery.js to trigger on page entry
+// ---------- incremental filter & node focus ---------------------------------
+
+function applyReviewFilterIncremental(node) {
+  var rs = galleryState.reviewState;
+  updateReviewMatchIndices();
+
+  var nodeResults = rs.nodeResults[node.dir] || [];
+  for (var i = 0; i < nodeResults.length; i++) {
+    var arrIdx = entryIndexToArrayIndex(nodeResults[i].index);
+    if (arrIdx >= 0) {
+      var item = galleryState.items[arrIdx];
+      if (item && !item._reviewMarked) {
+        item.markedForDeletion = true;
+        item._reviewMarked = true;
+      }
+    }
+  }
+
+  var focusDir = rs.focusedReviewNode || node.dir;
+  showReviewNodeThumbnails(focusDir);
+}
+
+function updateReviewMatchIndices() {
+  var rs = galleryState.reviewState;
+  var all = [];
+  for (var dir in rs.nodeResults) {
+    if (rs.nodeResults.hasOwnProperty(dir)) {
+      var results = rs.nodeResults[dir];
+      for (var i = 0; i < results.length; i++) {
+        var arrIdx = entryIndexToArrayIndex(results[i].index);
+        if (arrIdx >= 0 && all.indexOf(arrIdx) < 0) {
+          all.push(arrIdx);
+        }
+      }
+    }
+  }
+  all.sort(function(a, b) { return a - b; });
+  rs.allReviewMatchIndices = all;
+}
+
+function showReviewNodeThumbnails(dir) {
+  var rs = galleryState.reviewState;
+  rs.focusedReviewNode = dir;
+  updateReviewThumbnailDisplay();
+}
+
+function updateReviewThumbnailDisplay() {
+  var rs = galleryState.reviewState;
+  var focusDir = rs.focusedReviewNode || rs.currentReviewNode || galleryState.curDirPath;
+  if (!focusDir && galleryState.dirPathList.length > 0) {
+    focusDir = galleryState.dirPathList[0];
+  }
+  if (focusDir === undefined || focusDir === null) return;
+
+  var displayIndices = [];
+  if (rs.reviewMode !== false) {
+    // A) 仅显示符合结果 (Show matched only) — 默认
+    var nodeResults = rs.nodeResults[focusDir] || [];
+    for (var i = 0; i < nodeResults.length; i++) {
+      var arrIdx = entryIndexToArrayIndex(nodeResults[i].index);
+      if (arrIdx >= 0) displayIndices.push(arrIdx);
+    }
+  } else {
+    // B) 显示该节点的全部图片 (Show all items in the node)
+    var allIndices = galleryState.dirMap[focusDir] || [];
+    displayIndices = allIndices.slice();
+  }
+
+  galleryState.currentFolderIndices = displayIndices;
+  renderThumbnails();
+
+  if (displayIndices.length > 0 && displayIndices.indexOf(galleryState.index) < 0) {
+    setActive(displayIndices[0]);
+  }
+}
+
+// ---------- review navigation helpers --------------------------------------
+
+function getReviewedNodesWithMatches() {
+  var rs = galleryState.reviewState;
+  var result = [];
+  var seen = {};
+  for (var i = 0; i < rs.reviewQueue.length; i++) {
+    var dir = rs.reviewQueue[i].dir;
+    if (seen[dir]) continue;
+    seen[dir] = true;
+    var status = rs.nodeStatus[dir];
+    if ((status === 'running' || status === 'completed') &&
+        rs.nodeResults[dir] && rs.nodeResults[dir].length > 0) {
+      result.push(dir);
+    }
+  }
+  return result;
+}
+
+function getAdjacentReviewNode(delta) {
+  var rs = galleryState.reviewState;
+  var nodes = getReviewedNodesWithMatches();
+  if (!nodes.length) return null;
+
+  var curIdx = nodes.indexOf(rs.focusedReviewNode);
+  if (curIdx < 0) {
+    return delta > 0 ? nodes[0] : nodes[nodes.length - 1];
+  }
+  var target = curIdx + delta;
+  if (target < 0) target = nodes.length - 1;
+  if (target >= nodes.length) target = 0;
+  return nodes[target];
+}
+
+function goReviewPrev() {
+  var folderIndices = galleryState.currentFolderIndices || [];
+  if (!folderIndices.length) return;
+
+  var curPos = folderIndices.indexOf(galleryState.index);
+  if (curPos > 0) {
+    setActive(folderIndices[curPos - 1]);
+  } else {
+    var prevDir = getAdjacentReviewNode(-1);
+    if (prevDir) {
+      showReviewNodeThumbnails(prevDir);
+      var newIndices = galleryState.currentFolderIndices;
+      if (newIndices.length > 0) setActive(newIndices[newIndices.length - 1]);
+      if (typeof renderTreePanel === 'function') renderTreePanel();
+    }
+  }
+}
+
+function goReviewNext() {
+  var folderIndices = galleryState.currentFolderIndices || [];
+  if (!folderIndices.length) return;
+
+  var curPos = folderIndices.indexOf(galleryState.index);
+  if (curPos >= 0 && curPos < folderIndices.length - 1) {
+    setActive(folderIndices[curPos + 1]);
+  } else {
+    var nextDir = getAdjacentReviewNode(1);
+    if (nextDir) {
+      showReviewNodeThumbnails(nextDir);
+      var newIndices = galleryState.currentFolderIndices;
+      if (newIndices.length > 0) setActive(newIndices[0]);
+      if (typeof renderTreePanel === 'function') renderTreePanel();
+    }
+  }
+}
+
+function goReviewPrevNode() {
+  var prevDir = getAdjacentReviewNode(-1);
+  if (prevDir) {
+    showReviewNodeThumbnails(prevDir);
+    var newIndices = galleryState.currentFolderIndices;
+    if (newIndices.length > 0) setActive(newIndices[0]);
+    if (typeof renderTreePanel === 'function') renderTreePanel();
+  }
+}
+
+function goReviewNextNode() {
+  var nextDir = getAdjacentReviewNode(1);
+  if (nextDir) {
+    showReviewNodeThumbnails(nextDir);
+    var newIndices = galleryState.currentFolderIndices;
+    if (newIndices.length > 0) setActive(newIndices[0]);
+    if (typeof renderTreePanel === 'function') renderTreePanel();
+  }
+}
+
+function startReviewPolling() {
+  var rs = galleryState.reviewState;
+  if (!rs.active || rs.status !== 'running') return;
+  if (rs.reviewQueue && rs.reviewQueueIndex >= 0 && rs.reviewQueueIndex < rs.reviewQueue.length) {
+    var node = rs.reviewQueue[rs.reviewQueueIndex];
+    startNodePolling(node);
+  }
+}
+
+// Expose globals
+window.startReviewPolling = startReviewPolling;
 window.loadReviewPresets = loadReviewPresets;
+window.showReviewNodeThumbnails = showReviewNodeThumbnails;
+window.updateReviewThumbnailDisplay = updateReviewThumbnailDisplay;
+window.goReviewPrev = goReviewPrev;
+window.goReviewNext = goReviewNext;
+window.goReviewPrevNode = goReviewPrevNode;
+window.goReviewNextNode = goReviewNextNode;
 
 // ---------- cleanup --------------------------------------------------------
 
@@ -723,22 +983,15 @@ window.cleanupReview = function() {
 
 function cancelReview() {
   var sid = galleryState.reviewState.sessionId;
-  if (!sid) return;
-  fetch('/api/gallery/review/cancel/' + encodeURIComponent(sid), { method: 'POST' })
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function() {
-      stopPolling();
-      galleryState.reviewState.status = 'cancelled';
-      galleryState.reviewState.active = false;
-      renderReviewPanel();
-      showMsg(T('galleryReviewCancelled'));
-    })
-    .catch(function(err) {
-      showMsg(T('galleryReviewCancelFailed') + err.message);
-    });
+  if (sid) {
+    fetch('/api/gallery/review/cancel/' + encodeURIComponent(sid), { method: 'POST' }).catch(function() {});
+  }
+  stopPolling();
+  galleryState.reviewState.status = 'cancelled';
+  galleryState.reviewState.active = false;
+  renderReviewPanel();
+  if (typeof renderTreePanel === 'function') renderTreePanel();
+  showMsg(T('galleryReviewCancelled'));
 }
 
 function resetReview() {
@@ -752,49 +1005,29 @@ function resetReview() {
   rs.results = [];
   rs.sessionId = null;
   rs.reviewMode = false;
+  rs.selectMode = false;
+  rs.reviewQueue = [];
+  rs.reviewQueueIndex = -1;
+  rs.currentReviewNode = null;
+  rs.nodeResults = {};
+  rs.nodeStatus = {};
+  rs.reviewedNodes = [];
+  rs.focusedReviewNode = '';
+  rs.allReviewMatchIndices = [];
+
+  for (var i = 0; i < galleryState.items.length; i++) {
+    if (galleryState.items[i]) delete galleryState.items[i]._reviewMarked;
+  }
+
   galleryState.currentFolderIndices = rs.originalIndices.slice();
   rs.originalIndices = [];
   renderReviewPanel();
+  if (typeof renderTreePanel === 'function') renderTreePanel();
   renderThumbnails();
   showMsg(T('galleryReviewResetMsg'));
 }
 
-// ---------- filter ---------------------------------------------------------
-
-function applyReviewFilter() {
-  var rs = galleryState.reviewState;
-  if (!rs.reviewMode || !rs.results.length) {
-    updateDirStructure();
-    if (galleryState.index >= 0) setActive(galleryState.index);
-    renderThumbnails();
-    return;
-  }
-
-  var matchedArrayIndices = {};
-  for (var i = 0; i < rs.results.length; i++) {
-    var arrIdx = entryIndexToArrayIndex(rs.results[i].index);
-    if (arrIdx >= 0) matchedArrayIndices[arrIdx] = true;
-  }
-
-  var filtered = [];
-  for (var j = 0; j < galleryState.currentFolderIndices.length; j++) {
-    if (matchedArrayIndices[galleryState.currentFolderIndices[j]]) {
-      filtered.push(galleryState.currentFolderIndices[j]);
-    }
-  }
-
-  galleryState.currentFolderIndices = filtered;
-  if (filtered.indexOf(galleryState.index) === -1) {
-    if (filtered.length > 0) {
-      setActive(filtered[0]);
-    } else {
-      galleryState.index = -1;
-      renderActive(-1);
-    }
-  }
-  renderThumbnails();
-  renderTreePanel();
-}
+window.resetReview = resetReview;
 
 // ---------- auto-load presets on page ready --------------------------------
 // 在页面加载完成后自动加载预设列表

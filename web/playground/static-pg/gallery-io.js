@@ -741,31 +741,33 @@ async function onDrop(e) {
 }
 
 async function onPaste(e) {
-  var cd = e.clipboardData;
-  if (!cd || !cd.items) return;
-
-  // Check if clipboard has file items (not just text)
-  var hasFiles = false;
-  for (var fi = 0; fi < cd.items.length; fi++) {
-    if (cd.items[fi].kind === 'file') { hasFiles = true; break; }
-  }
-  if (!hasFiles) return;
-
-  // Try backend clipboard paths first (CF_HDROP on Windows — gives absolute
-  // paths for files copied in Explorer, enabling zero-dialog disk operations).
+  // 1. 优先尝试调后端 paste-paths 读取 Windows 系统剪贴板 (CF_HDROP) 路径
   try {
     var cpRes = await fetch('/api/gallery/paste-paths', { method: 'POST' });
     if (cpRes.ok) {
       var cpData = await cpRes.json();
       if (cpData.paths && cpData.paths.length) {
-        e.preventDefault();
+        if (e) e.preventDefault();
         await loadBackendPaths(cpData.paths);
         return;
       }
     }
   } catch (err) {
-    console.warn('paste-paths failed, falling back to FSAA:', err);
+    console.warn('paste-paths failed, falling back:', err);
   }
+
+  var cd = e.clipboardData;
+  if (!cd || !cd.items) return;
+
+  // 2. 检查前端剪贴板中是否有 file 元素或纯文本
+  var hasFiles = false;
+  for (var fi = 0; fi < cd.items.length; fi++) {
+    if (cd.items[fi].kind === 'file' || (cd.items[fi].kind === 'string' && cd.items[fi].type === 'text/plain')) {
+      hasFiles = true;
+      break;
+    }
+  }
+  if (!hasFiles) return;
 
   // Fallback: File System Access API (screenshots, non-Windows, etc.)
   // Modern path: File System Access API
@@ -967,6 +969,7 @@ async function onOpenDirBackend() {
 }
 
 // loadBackendPaths loads gallery items from absolute file/directory paths
+// loadBackendPaths handles array of absolute local file system paths
 // (obtained from clipboard CF_HDROP or other backend sources). Directories
 // are expanded via /api/gallery/list-dir; individual files are classified
 // by extension.
@@ -975,25 +978,30 @@ async function loadBackendPaths(paths) {
   var outVid = [];
   for (var i = 0; i < paths.length; i++) {
     var p = paths[i];
-    // Determine if path is a directory by trying list-dir
-    try {
-      var listRes = await fetch('/api/gallery/list-dir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dir: p })
-      });
-      if (listRes.ok) {
-        // It's a directory — use its listing
-        var listData = await listRes.json();
-        processBackendFileList(listData.files, listData.dirPath, out, outVid);
-        continue;
-      }
-    } catch (e) { /* not a directory, treat as file */ }
-
-    // Individual file — classify by extension
     var name = p.replace(/[\\\/]/g, '/').split('/').pop();
     var lower = name.toLowerCase();
-    if (lower.endsWith('.zip')) {
+    var isKnownFile = isSupportedExt(name) || isZipName(name);
+
+    if (!isKnownFile) {
+      // 路径不带图片/视频/ZIP后缀时，尝试作为目录调用 list-dir 展开
+      try {
+        var listRes = await fetch('/api/gallery/list-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir: p })
+        });
+        if (listRes.ok) {
+          var listData = await listRes.json();
+          if (listData.isDir !== false && listData.files && listData.files.length) {
+            await processBackendFileList(listData.files, listData.dirPath, out, outVid);
+            continue;
+          }
+        }
+      } catch (e) { /* not a directory, fall through to file classification */ }
+    }
+
+    // 单个文件分类处理
+    if (lower.endsWith('.zip') || isZipName(name)) {
       try {
         var zRes = await fetch('/api/gallery/zip-from-path', {
           method: 'POST',

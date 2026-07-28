@@ -64,10 +64,31 @@ function renderTreePanel() {
   if (!panel) panel = document.getElementById('gallery-tree-panel');
   if (!panel) return;
 
-  var headerHTML = '<div class="gallery-tree-header">' +
-    '<button class="gallery-tree-clear-btn" type="button" data-tooltip="' + T('galleryClearTitle') + '">' + T('galleryClear') + '</button>' +
-    (isVidActive ? '' : '<button class="gallery-tree-clear-btn' + (galleryState.reviewState.reviewOpen ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>') +
-    '</div>';
+  var rs = galleryState.reviewState;
+  var headerHTML = '';
+
+  if (!isVidActive && rs.selectMode) {
+    // 1. 节点选择模式 Header
+    var allSelected = galleryState.dirPathList.length > 0 && rs.selectedNodes.length >= galleryState.dirPathList.length;
+    var toggleLabel = allSelected ? (T('galleryReviewDeselect') || 'Deselect') : (T('galleryReviewSelectAll') || 'Select All');
+    headerHTML = '<div class="gallery-tree-header">' +
+      '<button class="gallery-tree-clear-btn" type="button" id="gallery-review-toggle-all-btn">' + escapeHtml(toggleLabel) + '</button>' +
+      '<button class="gallery-tree-clear-btn gallery-review-start-active" type="button" id="gallery-review-start-selected-btn">' + escapeHtml(T('galleryReviewStartSelected') || 'Start') + '</button>' +
+      '<button class="gallery-tree-clear-btn" type="button" id="gallery-review-cancel-select-btn">' + escapeHtml(T('cancel') || 'Cancel') + '</button>' +
+      '</div>';
+  } else if (!isVidActive && rs.active) {
+    // 2. 审核中/已完成 Header
+    headerHTML = '<div class="gallery-tree-header">' +
+      '<button class="gallery-tree-clear-btn" type="button" id="gallery-review-exit-btn" data-tooltip="' + escapeHtml(T('cancel') || 'Cancel') + '">' + escapeHtml(T('cancel') || 'Cancel') + '</button>' +
+      '</div>';
+  } else {
+    // 3. 标准 Header
+    headerHTML = '<div class="gallery-tree-header">' +
+      '<button class="gallery-tree-clear-btn" type="button" data-tooltip="' + T('galleryClearTitle') + '">' + T('galleryClear') + '</button>' +
+      (isVidActive ? '' : '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>') +
+      '</div>';
+  }
+
   var contentHTML = '';
   var needVideoNodeBinding = false;
   var needImageNodeBinding = false;
@@ -183,7 +204,6 @@ function renderTreePanel() {
         var tKey = treeOrder[t];
         var node = treeMap[tKey];
         var indent = node.level * 12 + 8;
-        var isActive = (tKey === galleryState.curDirPath) ? ' active' : '';
         var icon = '📁';
         if (isZipName(node.name) || tKey.indexOf('.zip/') !== -1 || isZipName(tKey)) {
           icon = '📦';
@@ -191,11 +211,43 @@ function renderTreePanel() {
           icon = '🖼';
         }
 
-        htmlImg += '<div class="gallery-tree-node' + isActive + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
-                     '<span class="tree-icon">' + icon + '</span>' +
-                     '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
-                     '<span class="tree-count">' + node.count + '</span>' +
-                   '</div>';
+        if (rs.selectMode) {
+          // A) 节点选择模式
+          var isSelected = rs.selectedNodes.indexOf(tKey) >= 0;
+          var checkIcon = isSelected ? '☑' : '☐';
+          htmlImg += '<div class="gallery-tree-node' + (isSelected ? ' review-selected' : '') + '" data-dir="' + escapeHtml(tKey) + '" data-select-node="true" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
+                       '<span class="tree-select-check">' + checkIcon + '</span>' +
+                       '<span class="tree-icon">' + icon + '</span>' +
+                       '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
+                       '<span class="tree-count">' + node.count + '</span>' +
+                     '</div>';
+        } else if (rs.active) {
+          // B) 审核模式（运行中/已完成）
+          var nStatus = rs.nodeStatus[tKey] || '';
+          var nMatches = (rs.nodeResults[tKey] || []).length;
+          var isFocusedNode = (tKey === rs.focusedReviewNode) ? ' active' : '';
+
+          var statusIcon = icon;
+          if (nStatus === 'running') statusIcon = '⏳';
+          else if (nStatus === 'completed') statusIcon = (nMatches > 0 ? '⚠️' : '✓');
+          else if (nStatus === 'pending') statusIcon = '⏸';
+
+          if (rs.selectedNodes.indexOf(tKey) >= 0 || nStatus) {
+            htmlImg += '<div class="gallery-tree-node' + isFocusedNode + '" data-dir="' + escapeHtml(tKey) + '" data-review-node="true" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
+                         '<span class="tree-icon">' + statusIcon + '</span>' +
+                         '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
+                         '<span class="tree-count">' + (nMatches > 0 ? nMatches : '') + '</span>' +
+                       '</div>';
+          }
+        } else {
+          // C) 标准模式
+          var isActive = (tKey === galleryState.curDirPath) ? ' active' : '';
+          htmlImg += '<div class="gallery-tree-node' + isActive + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
+                       '<span class="tree-icon">' + icon + '</span>' +
+                       '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
+                       '<span class="tree-count">' + node.count + '</span>' +
+                     '</div>';
+        }
       }
       contentHTML = htmlImg;
       needImageNodeBinding = true;
@@ -205,34 +257,85 @@ function renderTreePanel() {
   panel.innerHTML = headerHTML + contentHTML;
 
   // ---- AI Review Section ----
-  // 审核面板由 gallery-review.js 接管渲染，此处只暴露容器。
   if (typeof window.renderReviewPanel === 'function' && !isVidActive) {
     window.renderReviewPanel(panel);
     var reviewSection = document.getElementById('gallery-review-section');
     if (reviewSection) {
-      reviewSection.style.display = galleryState.reviewState.reviewOpen ? '' : 'none';
+      reviewSection.style.display = rs.reviewOpen ? '' : 'none';
     }
   }
 
-  // Bind Clear button
-  var clearBtn = panel.querySelector('.gallery-tree-clear-btn');
-  if (clearBtn) clearBtn.onclick = function(e) {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    clearActiveSideTree();
-  };
-
-  // Bind AI Review toggle button
-  var aiBtn = panel.querySelector('#gallery-ai-review-btn');
-  if (aiBtn) aiBtn.onclick = function(e) {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    var rs = galleryState.reviewState;
-    rs.reviewOpen = !rs.reviewOpen;
-    var section = document.getElementById('gallery-review-section');
-    if (section) {
-      section.style.display = rs.reviewOpen ? '' : 'none';
+  // 绑定 Header 按钮事件
+  if (!isVidActive && rs.selectMode) {
+    // 全选 / 取消全选
+    var toggleBtn = panel.querySelector('#gallery-review-toggle-all-btn');
+    if (toggleBtn) {
+      toggleBtn.onclick = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (rs.selectedNodes.length >= galleryState.dirPathList.length) {
+          rs.selectedNodes = [];
+        } else {
+          rs.selectedNodes = galleryState.dirPathList.slice();
+        }
+        rs.lastSelectedNode = null;
+        renderTreePanel();
+      };
     }
-    this.classList.toggle('active', rs.reviewOpen);
-  };
+    // Start -> 打开审核配置面板
+    var startSelBtn = panel.querySelector('#gallery-review-start-selected-btn');
+    if (startSelBtn) {
+      startSelBtn.onclick = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (!rs.selectedNodes.length) {
+          showMsg(T('galleryReviewNoNodeSelected') || 'Please select at least one node');
+          return;
+        }
+        rs.reviewOpen = true;
+        renderReviewPanel();
+      };
+    }
+    // Cancel -> 退出选择模式并收起面板
+    var cancelSelBtn = panel.querySelector('#gallery-review-cancel-select-btn');
+    if (cancelSelBtn) {
+      cancelSelBtn.onclick = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        rs.selectMode = false;
+        rs.reviewOpen = false;
+        rs.selectedNodes = [];
+        rs.lastSelectedNode = null;
+        renderTreePanel();
+      };
+    }
+  } else if (!isVidActive && rs.active) {
+    // 退出审核模式
+    var exitBtn = panel.querySelector('#gallery-review-exit-btn');
+    if (exitBtn) {
+      exitBtn.onclick = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (typeof window.resetReview === 'function') window.resetReview();
+      };
+    }
+  } else {
+    // 标准 Clear 按钮
+    var clearBtn = panel.querySelector('.gallery-tree-clear-btn');
+    if (clearBtn) clearBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      clearActiveSideTree();
+    };
+
+    // AI Review 按钮 -> 点击同时展开面板并进入节点选择模式
+    var aiBtn = panel.querySelector('#gallery-ai-review-btn');
+    if (aiBtn) aiBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      rs.selectMode = true;
+      rs.reviewOpen = true;
+      if (!rs.selectedNodes.length && galleryState.dirPathList.length) {
+        // 默认全选所有节点
+        rs.selectedNodes = galleryState.dirPathList.slice();
+      }
+      renderTreePanel();
+    };
+  }
 
   if (needVideoNodeBinding) {
     var vNodes = panel.querySelectorAll('[data-vid-idx]');
@@ -244,22 +347,70 @@ function renderTreePanel() {
       };
     });
   }
+
   if (needImageNodeBinding) {
-    var imgNodes = panel.querySelectorAll('[data-first-idx]');
-    imgNodes.forEach(function(node) {
-      node.onclick = function(e) {
-        if (e) { e.preventDefault(); e.stopPropagation(); }
-        var dir = node.getAttribute('data-dir');
-        var targetIdx = -1;
-        if (dir !== null && galleryState.dirMap[dir] && galleryState.dirMap[dir].length) {
-          targetIdx = galleryState.dirMap[dir][0];
-        } else {
-          var fIdx = parseInt(node.getAttribute('data-first-idx'), 10);
-          if (!isNaN(fIdx)) targetIdx = fIdx;
-        }
-        if (targetIdx >= 0) setActive(targetIdx);
-      };
-    });
+    if (rs.selectMode) {
+      // 节点选择模式下的点击事件
+      var selNodes = panel.querySelectorAll('[data-select-node]');
+      selNodes.forEach(function(node) {
+        node.onclick = function(e) {
+          if (e) { e.preventDefault(); e.stopPropagation(); }
+          var dir = node.getAttribute('data-dir');
+          if (dir === null) return;
+
+          if (e.shiftKey && rs.lastSelectedNode !== null) {
+            // Shift 范围选择
+            var startIdx = galleryState.dirPathList.indexOf(rs.lastSelectedNode);
+            var endIdx = galleryState.dirPathList.indexOf(dir);
+            if (startIdx >= 0 && endIdx >= 0) {
+              var lo = Math.min(startIdx, endIdx);
+              var hi = Math.max(startIdx, endIdx);
+              for (var s = lo; s <= hi; s++) {
+                var d = galleryState.dirPathList[s];
+                if (rs.selectedNodes.indexOf(d) < 0) rs.selectedNodes.push(d);
+              }
+            }
+          } else {
+            // 单击切换
+            var pos = rs.selectedNodes.indexOf(dir);
+            if (pos >= 0) rs.selectedNodes.splice(pos, 1);
+            else rs.selectedNodes.push(dir);
+            rs.lastSelectedNode = dir;
+          }
+          renderTreePanel();
+        };
+      });
+    } else if (rs.active) {
+      // 审核模式下的节点点击（切换显示该节点的匹配缩略图）
+      var revNodes = panel.querySelectorAll('[data-review-node]');
+      revNodes.forEach(function(node) {
+        node.onclick = function(e) {
+          if (e) { e.preventDefault(); e.stopPropagation(); }
+          var dir = node.getAttribute('data-dir');
+          if (dir !== null && typeof window.showReviewNodeThumbnails === 'function') {
+            window.showReviewNodeThumbnails(dir);
+            renderTreePanel();
+          }
+        };
+      });
+    } else {
+      // 标准模式节点点击
+      var imgNodes = panel.querySelectorAll('[data-first-idx]');
+      imgNodes.forEach(function(node) {
+        node.onclick = function(e) {
+          if (e) { e.preventDefault(); e.stopPropagation(); }
+          var dir = node.getAttribute('data-dir');
+          var targetIdx = -1;
+          if (dir !== null && galleryState.dirMap[dir] && galleryState.dirMap[dir].length) {
+            targetIdx = galleryState.dirMap[dir][0];
+          } else {
+            var fIdx = parseInt(node.getAttribute('data-first-idx'), 10);
+            if (!isNaN(fIdx)) targetIdx = fIdx;
+          }
+          if (targetIdx >= 0) setActive(targetIdx);
+        };
+      });
+    }
   }
 }
 
@@ -347,7 +498,9 @@ function clearActiveSideTree() {
 function updateCurrentFolderItems(index) {
   if (index < 0 || index >= galleryState.items.length) {
     galleryState.curDirPath = '';
-    galleryState.currentFolderIndices = [];
+    if (!galleryState.reviewState.active) {
+      galleryState.currentFolderIndices = [];
+    }
     galleryState.currentSubIndex = -1;
     return;
   }
@@ -355,12 +508,20 @@ function updateCurrentFolderItems(index) {
   var dir = getDirPath(item.path);
   var prevDir = galleryState.curDirPath;
   galleryState.curDirPath = dir;
-  var indices = galleryState.dirMap[dir] || [index];
-  galleryState.currentFolderIndices = indices;
-  galleryState.currentSubIndex = indices.indexOf(index);
 
-  if (prevDir !== dir) {
-    renderThumbnails();
+  if (galleryState.reviewState.active) {
+    // 审核模式：维持当前节点的匹配索引列表 currentFolderIndices 不被重置为全量文件
+    var revIndices = galleryState.currentFolderIndices || [];
+    galleryState.currentSubIndex = revIndices.indexOf(index);
+  } else {
+    // 标准模式：更新当前文件夹的包含项列表
+    var indices = galleryState.dirMap[dir] || [index];
+    galleryState.currentFolderIndices = indices;
+    galleryState.currentSubIndex = indices.indexOf(index);
+
+    if (prevDir !== dir) {
+      renderThumbnails();
+    }
   }
 
   var panel = document.getElementById('gallery-tree-panel');
