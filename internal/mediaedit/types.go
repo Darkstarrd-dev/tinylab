@@ -22,17 +22,19 @@ const (
 
 // Job represents a single media edit operation backed by an ffmpeg subprocess.
 type Job struct {
-	ID         string    `json:"id"`
-	Status     JobStatus `json:"status"`
-	Progress   int       `json:"progress"`   // 0-100
-	Operation  string    `json:"operation"`  // "image_transcode"|"video_transcode"|"video_trim"|"video_subtitle"
-	InputPath  string    `json:"inputPath"`
-	OutputPath string    `json:"outputPath"` // set on completion
-	OutputName string    `json:"outputName"` // basename, set on completion
-	Error      string    `json:"error"`      // set on error
-	LogTail    string    `json:"logTail"`    // last ~16KB of ffmpeg stderr+progress
-	StartedAt  time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
+	ID         string      `json:"id"`
+	Status     JobStatus   `json:"status"`
+	Progress   int         `json:"progress"`  // 0-100
+	Operation  string      `json:"operation"` // "image_transcode"|"video_transcode"|"video_trim"|"video_subtitle"
+	InputPath  string      `json:"inputPath"`
+	OutputPath string      `json:"outputPath"` // set on completion
+	OutputName string      `json:"outputName"` // basename, set on completion
+	Error      string      `json:"error"`      // set on error
+	LogTail    string      `json:"logTail"`    // last ~16KB of ffmpeg stderr+progress
+	Command    string      `json:"command"`    // ffmpeg full command line
+	logBuf     *tailBuffer // unexported, live log buffer reference (not serialized)
+	StartedAt  time.Time   `json:"startedAt"`
+	FinishedAt time.Time   `json:"finishedAt"`
 
 	cancel context.CancelFunc
 	mu     sync.RWMutex
@@ -42,7 +44,7 @@ type Job struct {
 func (j *Job) Snapshot() *Job {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	return &Job{
+	snap := &Job{
 		ID:         j.ID,
 		Status:     j.Status,
 		Progress:   j.Progress,
@@ -51,10 +53,16 @@ func (j *Job) Snapshot() *Job {
 		OutputPath: j.OutputPath,
 		OutputName: j.OutputName,
 		Error:      j.Error,
-		LogTail:    j.LogTail,
+		Command:    j.Command,
 		StartedAt:  j.StartedAt,
 		FinishedAt: j.FinishedAt,
 	}
+	if j.logBuf != nil {
+		snap.LogTail = j.logBuf.Read()
+	} else {
+		snap.LogTail = j.LogTail
+	}
+	return snap
 }
 
 // ProbeResult holds media metadata extracted by ffprobe.
@@ -62,7 +70,7 @@ type ProbeResult struct {
 	Width     int     `json:"width"`
 	Height    int     `json:"height"`
 	Codec     string  `json:"codec"`
-	Duration  float64 `json:"duration"`  // seconds; 0 for images
+	Duration  float64 `json:"duration"` // seconds; 0 for images
 	HasAudio  bool    `json:"hasAudio"`
 	FrameRate float64 `json:"frameRate"` // 0 for images
 	IsImage   bool    `json:"isImage"`
@@ -70,31 +78,31 @@ type ProbeResult struct {
 
 // StartRequest is the JSON body for starting an edit job.
 type StartRequest struct {
-	InputPath string          `json:"inputPath"`
-	Operation string          `json:"operation"`
-	Overwrite bool            `json:"overwrite"`
-	OutputDir string          `json:"outputDir,omitempty"` // optional; if set and !Overwrite, output goes to this dir
-	OutputName string         `json:"outputName,omitempty"` // optional file stem (no extension); when set and !Overwrite, used as the output filename (buildArgs supplies the extension); avoids leaking the temp/upload filename (e.g. gallery-edit-XXXX) into saved batch outputs
-	Params    json.RawMessage `json:"params"`               // operation-specific, parsed by args builder
+	InputPath  string          `json:"inputPath"`
+	Operation  string          `json:"operation"`
+	Overwrite  bool            `json:"overwrite"`
+	OutputDir  string          `json:"outputDir,omitempty"`  // optional; if set and !Overwrite, output goes to this dir
+	OutputName string          `json:"outputName,omitempty"` // optional file stem (no extension); when set and !Overwrite, used as the output filename (buildArgs supplies the extension); avoids leaking the temp/upload filename (e.g. gallery-edit-XXXX) into saved batch outputs
+	Params     json.RawMessage `json:"params"`               // operation-specific, parsed by args builder
 }
 
 // ImageTranscodeParams holds options for the image_transcode operation.
 type ImageTranscodeParams struct {
-	Format        string `json:"format"`        // "jpeg"|"png"|"webp"|"bmp"|"tiff"|"gif"
-	Quality       int    `json:"quality"`       // 0-100
-	ScalePercent  int    `json:"scalePercent"`  // 10-200; 100=original; 0 means 100
+	Format        string `json:"format"`       // "jpeg"|"png"|"webp"|"bmp"|"tiff"|"gif"
+	Quality       int    `json:"quality"`      // 0-100
+	ScalePercent  int    `json:"scalePercent"` // 10-200; 100=original; 0 means 100
 	StripMetadata bool   `json:"stripMetadata"`
 }
 
 // VideoTranscodeParams holds options for the video_transcode operation.
 type VideoTranscodeParams struct {
-	Codec         string `json:"codec"`         // "h264"|"h265"|"vp9"|"av1"|"copy"
-	Container     string `json:"container"`     // "mp4"|"mkv"|"webm"|"mov"
-	QualityTier   string `json:"qualityTier"`   // "high"|"medium"|"low"
-	Preset        string `json:"preset"`        // "ultrafast"|"fast"|"medium"|"slow"|"veryslow"
-	ScalePercent  int    `json:"scalePercent"`  // 100=original
-	AudioCodec    string `json:"audioCodec"`    // "aac"|"opus"|"mp3"|"copy"|"none"
-	AudioBitrate  string `json:"audioBitrate"`  // e.g. "128k"
+	Codec         string `json:"codec"`        // "h264"|"h265"|"vp9"|"av1"|"copy"
+	Container     string `json:"container"`    // "mp4"|"mkv"|"webm"|"mov"
+	QualityTier   string `json:"qualityTier"`  // "high"|"medium"|"low"
+	Preset        string `json:"preset"`       // "ultrafast"|"fast"|"medium"|"slow"|"veryslow"
+	ScalePercent  int    `json:"scalePercent"` // 100=original
+	AudioCodec    string `json:"audioCodec"`   // "aac"|"opus"|"mp3"|"copy"|"none"
+	AudioBitrate  string `json:"audioBitrate"` // e.g. "128k"
 	StripMetadata bool   `json:"stripMetadata"`
 }
 
@@ -107,9 +115,9 @@ type TrimSegment struct {
 
 // VideoTrimParams holds options for the video_trim operation.
 type VideoTrimParams struct {
-	Start       string        `json:"start"`       // backward compat: single segment start (seconds string)
-	Duration    string        `json:"duration"`    // backward compat: single segment duration (seconds string)
-	Segments    []TrimSegment `json:"segments"`    // multi-segment; if non-empty, overrides Start/Duration
+	Start       string        `json:"start"`    // backward compat: single segment start (seconds string)
+	Duration    string        `json:"duration"` // backward compat: single segment duration (seconds string)
+	Segments    []TrimSegment `json:"segments"` // multi-segment; if non-empty, overrides Start/Duration
 	Reencode    bool          `json:"reencode"`
 	Codec       string        `json:"codec"`       // used when Reencode; default "h264"
 	QualityTier string        `json:"qualityTier"` // default "medium"

@@ -190,6 +190,8 @@ func (h *Handler) galleryEditStatus(w http.ResponseWriter, r *http.Request) {
 		"outputName": job.OutputName,
 		"outputPath": job.OutputPath,
 		"error":      job.Error,
+		"logTail":    job.LogTail,
+		"command":    job.Command,
 	}
 	if job.Status == mediaedit.StatusCompleted && job.OutputPath != "" {
 		resp["outputURL"] = "/api/gallery/file?path=" + url.PathEscape(job.OutputPath)

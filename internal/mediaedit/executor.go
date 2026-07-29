@@ -15,11 +15,13 @@ import (
 
 // ErrCancelled is returned when a job is cancelled.
 var ErrCancelled = errors.New("cancelled")
+var ffmpegCommonFlags = []string{"-y", "-nostdin", "-hide_banner", "-progress", "pipe:1", "-nostats", "-loglevel", "error"}
 
 // --- tailBuffer ---
 
 // tailBuffer is a fixed-size ring buffer for the last N bytes of ffmpeg output.
 type tailBuffer struct {
+	mu       sync.Mutex
 	buf      []byte
 	maxBytes int
 }
@@ -33,6 +35,8 @@ func newTailBuffer(maxBytes int) *tailBuffer {
 
 // Append appends text to the tail buffer, discarding oldest content if over capacity.
 func (t *tailBuffer) Append(s string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.buf = append(t.buf, s...)
 	if len(t.buf) > t.maxBytes {
 		t.buf = t.buf[len(t.buf)-t.maxBytes:]
@@ -41,6 +45,8 @@ func (t *tailBuffer) Append(s string) {
 
 // Read returns a copy of the current buffer content.
 func (t *tailBuffer) Read() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return string(t.buf)
 }
 
@@ -53,12 +59,7 @@ func (t *tailBuffer) Read() string {
 // -nostats, -loglevel error) are prepended automatically. The caller supplies
 // the operation-specific args and output path.
 func RunFfmpeg(ctx context.Context, ffmpegPath string, args []string, outputPath string, sourceDuration float64, onProgress func(percent int), stderrTail *tailBuffer) error {
-	// Build full arg list: common flags + operation args + output path.
-	fullArgs := []string{
-		"-y", "-nostdin", "-hide_banner",
-		"-progress", "pipe:1",
-		"-nostats", "-loglevel", "error",
-	}
+	fullArgs := append([]string{}, ffmpegCommonFlags...)
 	fullArgs = append(fullArgs, args...)
 	fullArgs = append(fullArgs, outputPath)
 
@@ -87,17 +88,13 @@ func RunFfmpeg(ctx context.Context, ffmpegPath string, args []string, outputPath
 		return nil
 	}
 
-	var mu sync.Mutex
-
 	// Read stderr into tail buffer.
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
-			mu.Lock()
 			stderrTail.Append(line + "\n")
-			mu.Unlock()
 		}
 	}()
 
@@ -135,21 +132,24 @@ func RunFfmpeg(ctx context.Context, ffmpegPath string, args []string, outputPath
 		}
 
 		// Also capture stdout in the log tail for debugging.
-		mu.Lock()
 		stderrTail.Append(line + "\n")
-		mu.Unlock()
 	}
 
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() == context.Canceled {
 			return ErrCancelled
 		}
-		mu.Lock()
 		tail := stderrTail.Read()
-		mu.Unlock()
 		return fmt.Errorf("ffmpeg error: %s", strings.TrimSpace(tail))
 	}
 
 	return nil
 }
 
+// FfmpegCommandString returns a human-readable ffmpeg command line string
+// for display purposes (not executed).
+func FfmpegCommandString(ffmpegPath string, args []string, outputPath string) string {
+	full := append(append([]string{}, ffmpegCommonFlags...), args...)
+	full = append(full, outputPath)
+	return ffmpegPath + " " + strings.Join(full, " ")
+}

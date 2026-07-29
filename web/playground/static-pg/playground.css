@@ -1005,3 +1005,12 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .attempt-details[open]>summary{margin-bottom:4px}
 .log-detail-section .code,.attempt-details .code{display:block;background:#1a1326;border:1px solid var(--glass-border-hover);border-radius:var(--radius-sm);padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:var(--font-code);line-height:1.5;color:#e6def0;white-space:pre-wrap;word-break:break-all;word-wrap:break-word;overflow-x:auto;margin:4px 0}
 [data-theme="light"] .log-detail-section .code,[data-theme="light"] .attempt-details .code{background:#f5f7fa;color:#1a1a1a;border-color:rgba(0,0,0,0.12)}
+
+.ge-console-panel{width:520px;min-width:520px;max-width:46vw;max-height:92vh;padding:0;overflow:hidden}
+.ge-console-block{border-bottom:1px solid var(--glass-border)}
+.ge-console-block-head{padding:4px 12px;font-size:11px;color:var(--text-secondary);font-weight:600}
+.ge-console-block-cmd{padding:2px 12px 4px;font-family:monospace;font-size:10px;color:var(--text-muted);white-space:pre-wrap;word-break:break-all}
+.ge-console-block-log{margin:0;padding:8px 12px;font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto}
+.ge-console-log{display:flex;flex-direction:column;overflow-y:auto}
+.ge-console-block-single{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.ge-console-block-single .ge-console-block-log{max-height:none;flex:1 1 auto;min-height:0}

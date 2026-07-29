@@ -11,6 +11,9 @@ var _editCurrentItem = null;
 var _editMediaType = null;
 var _editProbe = null;
 var _editSubtitlePath = null;
+var _geActiveJob = null;            // tracks in-progress job so close/switch doesn't lose it (see _geResumeActive)
+var _geBatchPollingEnabled = false; // gates batch poll chains (false on page leave)
+var _geConsoleRO = null;            // ResizeObserver syncing console panel height → left modal
 var _geGearSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
 var _geImageSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>';
 var _geFolderSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
@@ -143,10 +146,56 @@ function _updateVideoSourceInfo() {
 function _editVideoPath(it) {
   if (!it) return '';
   if (it.kind === 'zip') return it.zipAbsPath || '';
-  if (it.kind === 'backend') return it.absPath || it.rootDirPath || '';
-  if (it.kind === 'plain') return it.path || it.absPath || '';
+  if (it.kind === 'backend') return it.rootDirPath || (it.absPath ? it.absPath.replace(/[\\/][^\\/]*$/, '') : '') || '';
+  if (it.kind === 'plain') return (it.path || it.absPath || '').replace(/[\\/][^\\/]*$/, '');
   if (it.kind === 'fs') return '';
-  return it.path || it.absPath || '';
+  return (it.path || it.absPath || '').replace(/[\\/][^\\/]*$/, '');
+}
+
+function _geConsoleBlock(jobId, label) {
+  var log = document.getElementById('ge-console-log');
+  if (!log) return null;
+  var block = log.querySelector('.ge-console-block[data-job="' + jobId + '"]');
+  if (!block) {
+    block = document.createElement('div');
+    block.className = 'ge-console-block';
+    block.setAttribute('data-job', jobId);
+    if (label) {
+      var head = document.createElement('div');
+      head.className = 'ge-console-block-head';
+      head.textContent = label;
+      block.appendChild(head);
+    }
+    var cmd = document.createElement('div');
+    cmd.className = 'ge-console-block-cmd';
+    block.appendChild(cmd);
+    var pre = document.createElement('pre');
+    pre.className = 'ge-console-block-log';
+    block.appendChild(pre);
+    log.appendChild(block);
+  }
+  return block;
+}
+
+function _geEnsureConsole() {
+  var overlay = document.getElementById('pg-modal-overlay');
+  if (!overlay || document.getElementById('ge-console-panel')) return;
+  var cp = document.createElement('div');
+  cp.id = 'ge-console-panel';
+  cp.className = 'pg-modal ge-console-panel';
+  cp.style.display = 'none';
+  cp.innerHTML = '<div class="pg-modal-header">'
+    + '<span class="pg-modal-title ge-title-center">' + escapeHtml(T('geConsole')) + '</span>'
+    + '<button class="pg-modal-close" id="ge-console-close-btn">\u2715</button>'
+    + '</div>'
+    + '<div class="pg-modal-body" style="padding:0;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div id="ge-console-cmd" style="padding:8px 12px;font-family:monospace;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--glass-border);white-space:pre-wrap;word-break:break-all;flex-shrink:0"></div>'
+    + '<pre id="ge-console-log" class="dl-detail-log ge-console-log" style="flex:1;border-left:none;min-height:0"></pre>'
+    + '</div>';
+  overlay.appendChild(cp);
+  var closeBtn = document.getElementById('ge-console-close-btn');
+  if (closeBtn) closeBtn.onclick = function() { cp.style.display = 'none'; };
+  _geWatchConsoleHeight();
 }
 
 
@@ -183,8 +232,14 @@ function _updateProgress(data) {
   var text = document.getElementById('ge-progress-text');
   if (bar) { bar.value = data.progress || 0; bar.textContent = (data.progress || 0) + '%'; }
   if (text) { text.textContent = T('geRunning') + ' (' + (data.progress || 0) + '%)'; }
-  var logEl = document.getElementById('ge-log-tail');
-  if (logEl && data.logTail) { logEl.textContent = data.logTail; }
+  var block = _geConsoleBlock(_editJobId, '');
+  if (block) block.classList.add('ge-console-block-single');
+  if (block) {
+    var cmdEl = block.querySelector('.ge-console-block-cmd');
+    if (cmdEl && data.command) cmdEl.textContent = '$ ' + data.command;
+    var logEl = block.querySelector('.ge-console-block-log');
+    if (logEl && data.logTail) { logEl.textContent = data.logTail; logEl.scrollTop = logEl.scrollHeight; }
+  }
 }
 
 function _showProgressSection() {
@@ -192,6 +247,9 @@ function _showProgressSection() {
   if (s) s.style.display = 'block';
   var startBtn = document.getElementById('ge-start-btn');
   if (startBtn) startBtn.disabled = true;
+  var cp = document.getElementById('ge-console-panel');
+  if (cp) { cp.style.display = 'flex'; var logEl = document.getElementById('ge-console-log'); if (logEl) logEl.textContent = ''; var cmdEl = document.getElementById('ge-console-cmd'); if (cmdEl) cmdEl.textContent = ''; }
+  requestAnimationFrame(_geSyncConsoleHeight);
 }
 
 function _hideProgressSection() {
@@ -199,6 +257,8 @@ function _hideProgressSection() {
   if (s) s.style.display = 'none';
   var startBtn = document.getElementById('ge-start-btn');
   if (startBtn) startBtn.disabled = false;
+  var cp = document.getElementById('ge-console-panel');
+  if (cp) cp.style.display = 'none';
 }
 
 function _setProgressStatus(text, isError) {
@@ -212,6 +272,7 @@ function _setProgressStatus(text, isError) {
 function _onCompleted(data) {
   _stopPolling();
   _editJobId = null;
+  _geActiveJob = null;
   _setProgressStatus(T('geCompleted'), false);
   var bar = document.getElementById('ge-progress-bar');
   if (bar) bar.value = 100;
@@ -223,8 +284,6 @@ function _onCompleted(data) {
 
 
   // Regular single-file result.
-  var logHtml = data.logTail ? '<details style="margin-top:8px"><summary>' + escapeHtml(T('geLogTail')) + '</summary><pre style="background:#1a1326;border:1px solid var(--glass-border);padding:8px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">' + escapeHtml(data.logTail) + '</pre></details>' : '';
-
   var resultHtml = '<div class="gallery-edit-result">' +
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
       '<span style="color:var(--accent2);font-weight:600">\u2714 ' + escapeHtml(T('geCompleted')) + '</span>' +
@@ -233,7 +292,6 @@ function _onCompleted(data) {
     '<div class="gallery-edit-actions">' +
       '<button class="pg-btn" id="ge-open-folder-btn">' + escapeHtml(T('geBatchOpenFolder')) + '</button>' +
     '</div>' +
-    logHtml +
   '</div>';
 
   var resultEl = document.getElementById('ge-result-area');
@@ -249,20 +307,20 @@ function _onCompleted(data) {
 function _onError(data) {
   _stopPolling();
   _editJobId = null;
+  _geActiveJob = null;
   _setProgressStatus(T('geFailed'), true);
   var msg = data.error || T('geFailed');
-  var logHtml = data.logTail ? '<details style="margin-top:8px"><summary>' + escapeHtml(T('geLogTail')) + '</summary><pre style="background:#1a1326;border:1px solid var(--danger);padding:8px;font-size:11px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:var(--danger)">' + escapeHtml(data.logTail) + '</pre></details>' : '';
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) {
-    resultEl.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">\u2718 ' + escapeHtml(msg) + '</span>' + logHtml + '</div>';
+    resultEl.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">\u2718 ' + escapeHtml(msg) + '</span></div>';
     resultEl.style.display = 'block';
   }
-  _hideProgressSection();
 }
 
 function _onCancelled() {
   _stopPolling();
   _editJobId = null;
+  _geActiveJob = null;
   _setProgressStatus(T('geCancelled'), false);
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) {
@@ -293,7 +351,7 @@ function _renderSourceInfoRows(prefix) {
 function _renderSetPathRow() {
   return '<div class="gallery-edit-row">'
     + '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-setpath"> ' + escapeHtml(T('geSetPath')) + '</label>'
-    + '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" title="' + escapeHtml(T('geBrowseDir')) + '">' + _geBrowseSvg + '</button>'
+    + '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" data-tooltip="' + escapeHtml(T('geBrowseDir')) + '">' + _geBrowseSvg + '</button>'
     + '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(T('geDestDirPlaceholder')) + '" disabled>'
     + '</div>';
 }
@@ -550,8 +608,8 @@ function _buildModalHTML() {
   if (isImage) {
     html += '<div class="pg-modal-header">';
     html += '<div class="ge-header-left">';
-    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(T('geSettingsHint')) + '" title="' + escapeHtml(T('geSettings')) + '">' + _geGearSvg + '</button>';
-    html += '<button type="button" id="ge-archive-toggle" class="ge-icon-toggle" data-archive="0" title="' + escapeHtml(T('geArchiveHint')) + '">' + _geImageSvg + '</button>';
+    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(T('geSettingsHint')) + '">' + _geGearSvg + '</button>';
+    html += '<button type="button" id="ge-archive-toggle" class="ge-icon-toggle" data-archive="0" data-tooltip="' + escapeHtml(T('geArchiveHint')) + '">' + _geImageSvg + '</button>';
     html += '</div>';
     html += '<span class="pg-modal-title ge-title-center">' + escapeHtml(T('geImageConvert')) + '</span>';
     html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
@@ -559,7 +617,7 @@ function _buildModalHTML() {
   } else {
     html += '<div class="pg-modal-header">';
     html += '<div class="ge-header-left">';
-    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(T('geSettingsHint')) + '" title="' + escapeHtml(T('geSettings')) + '">' + _geGearSvg + '</button>';
+    html += '<button type="button" id="ge-settings-btn" class="ge-gear-btn" data-tooltip="' + escapeHtml(T('geSettingsHint')) + '">' + _geGearSvg + '</button>';
     html += '</div>';
     html += '<span class="pg-modal-title ge-title-center">' + escapeHtml(T('geVideoConvert')) + '</span>';
     html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
@@ -593,7 +651,7 @@ function _buildModalHTML() {
     html += '<div class="gallery-edit-block">';
     html += '<div class="gallery-edit-block-title">';
     html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>';
-    html += '<span>' + escapeHtml(T('geTranscodeTab') || '转码与格式') + '</span>';
+    html += '<span>' + escapeHtml(T('geTranscodeTab')) + '</span>';
     html += '</div>';
     html += _renderVideoTranscodeForm();
     html += '</div>';
@@ -604,7 +662,7 @@ function _buildModalHTML() {
     html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
     html += '<input type="checkbox" id="ge-vid-trim-enable"> ';
     html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><line x1="20" y1="4" x2="8.12" y2="15.88"></line><line x1="14.47" y1="14.48" x2="20" y2="20"></line><line x1="8.12" y1="8.12" x2="12" y2="12"></line></svg>';
-    html += '<span>' + escapeHtml(T('geTrimTab') || '视频裁剪') + '</span>';
+    html += '<span>' + escapeHtml(T('geTrimTab')) + '</span>';
     html += '</label>';
     html += '</div>';
     html += '<div id="ge-vid-trim-body" style="display:none;margin-top:10px">';
@@ -618,7 +676,7 @@ function _buildModalHTML() {
     html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
     html += '<input type="checkbox" id="ge-vid-sub-enable"> ';
     html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
-    html += '<span>' + escapeHtml(T('geSubtitleTab') || '字幕处理') + '</span>';
+    html += '<span>' + escapeHtml(T('geSubtitleTab')) + '</span>';
     html += '</label>';
     html += '</div>';
     html += '<div id="ge-vid-sub-body" style="display:none;margin-top:10px">';
@@ -644,9 +702,8 @@ function _buildModalHTML() {
   html += '</div>'; // pg-modal-body
 
   // Modal footer with Cancel and Start buttons (matching Settings modal footer)
-  var cancelTxt = (typeof t === 'function') ? t('cancel') : '取消';
   html += '<div class="pg-modal-footer">';
-  html += '<button type="button" class="btn btn-ghost" onclick="pgCloseModal()">' + escapeHtml(cancelTxt) + '</button>';
+  html += '<button type="button" class="btn btn-ghost" onclick="pgCloseModal()">' + escapeHtml(T('geCancel')) + '</button>';
   html += '<button type="button" class="btn btn-primary" id="ge-start-btn">' + escapeHtml(T('geStart')) + '</button>';
   html += '</div>';
 
@@ -918,6 +975,7 @@ function _exitTrimMode(save) {
   // Reopen edit modal using cached probe data.
   var html = _buildModalHTML();
   pgShowModal(html);
+  _geEnsureConsole();
   setTimeout(function() {
     var modal = document.querySelector('#pg-modal-overlay .pg-modal');
     if (modal) { modal.style.width = '520px'; modal.style.minWidth = '520px'; }
@@ -1010,7 +1068,7 @@ function _bindModalEvents() {
       var on = archTog.getAttribute('data-archive') === '1';
       archTog.setAttribute('data-archive', on ? '0' : '1');
       archTog.innerHTML = on ? _geImageSvg : _geFolderSvg;
-      archTog.title = on ? T('geArchiveHint') : T('geSingleHint');
+      archTog.setAttribute('data-tooltip', on ? T('geArchiveHint') : T('geSingleHint'));
       // Uniform is archive-only; turning it off when leaving archive mode keeps
       // _captureBatchCfg/outStem from applying batch renaming to a single image.
       if (on) { var u = document.getElementById('ge-img-uniform'); if (u) u.checked = false; }
@@ -1185,9 +1243,78 @@ function _bindModalEvents() {
   if (cancelBtn) { cancelBtn.onclick = _cancelJob; }
 }
 
+// ---------- background-task persistence + console height sync --------
+// _geActiveJob tracks an in-progress edit job so closing the modal (or
+// switching pages) does NOT lose it: the backend goroutine keeps running,
+// and reopening the editor restores the in-progress task instead of
+// loading a new item. The lock releases on any terminal state — see
+// _onCompleted/_onError/_onCancelled/_onBatchComplete. While non-terminal,
+// openMediaEditor ignores the newly clicked item and re-shows the active
+// task via _geResumeActive.
+//   single: { kind:'single', jobId, item, mediaType, probe }
+//   batch:  { kind:'batch',  mediaType, item, probe }  (per-job state in _batchJobs)
+function _geSyncConsoleHeight() {
+  var ov = document.getElementById('pg-modal-overlay');
+  var cp = document.getElementById('ge-console-panel');
+  if (!ov || !cp || cp.style.display === 'none') return;
+  var left = ov.querySelector('.pg-modal:not(.ge-console-panel)');
+  if (left) cp.style.height = Math.round(left.getBoundingClientRect().height) + 'px';
+}
+
+function _geWatchConsoleHeight() {
+  var ov = document.getElementById('pg-modal-overlay');
+  if (!ov || typeof ResizeObserver === 'undefined') return;
+  var left = ov.querySelector('.pg-modal:not(.ge-console-panel)');
+  if (!left) return;
+  if (_geConsoleRO) { try { _geConsoleRO.disconnect(); } catch (e) {} }
+  _geConsoleRO = new ResizeObserver(function () { _geSyncConsoleHeight(); });
+  _geConsoleRO.observe(left);
+  _geSyncConsoleHeight();
+}
+
+function _geResumeActive() {
+  var ov = document.getElementById('pg-modal-overlay');
+  if (ov) ov.classList.add('show');
+  _editCurrentItem = _geActiveJob.item;
+  _editMediaType = _geActiveJob.mediaType;
+  _editProbe = _geActiveJob.probe;
+  if (_geActiveJob.kind === 'single') {
+    _editJobId = _geActiveJob.jobId;
+    _stopPolling();
+    _startPolling(_geActiveJob.jobId);
+  } else {
+    _geBatchPollingEnabled = true;
+    var ps = document.getElementById('ge-progress-section');
+    if (ps) ps.style.display = 'block';
+    var cp = document.getElementById('ge-console-panel');
+    if (cp) cp.style.display = 'flex';
+    var startBtn = document.getElementById('ge-start-btn');
+    if (startBtn) startBtn.disabled = true;
+    for (var i = 0; i < _batchJobs.length; i++) {
+      var j = _batchJobs[i];
+      if (j && !j.done && j.jobId) _pollBatchJob(i, j.jobId);
+    }
+  }
+  _geWatchConsoleHeight();
+  _geSyncConsoleHeight();
+}
+
 // ---------- entry point ---------------------------------------------
-window.openMediaEditor = function(item, mediaType) {
+window.openMediaEditor = async function(item, mediaType) {
   if (!item) return;
+  if (_geActiveJob) {
+    var stillActive = false;
+    if (_geActiveJob.kind === 'single') {
+      try {
+        var rs = await fetch('/api/gallery/edit/status/' + encodeURIComponent(_geActiveJob.jobId));
+        if (rs.ok) { var ds = await rs.json(); if (ds && ds.status === 'running') stillActive = true; }
+      } catch (e) {}
+      if (!stillActive) _geActiveJob = null;
+    } else {
+      if (_batchDone < _batchTotal && _batchJobs && _batchJobs.length) stillActive = true; else _geActiveJob = null;
+    }
+    if (stillActive) { _geResumeActive(); return; }
+  }
   _editCurrentItem = item;
   _editMediaType = mediaType;
   _editProbe = null;
@@ -1198,6 +1325,7 @@ window.openMediaEditor = function(item, mediaType) {
 
   var html = _buildModalHTML();
   pgShowModal(html);
+  _geEnsureConsole();
 
   // Set a fixed modal width so it does not change between tabs.
   setTimeout(function() {
@@ -1274,6 +1402,8 @@ window.openMediaEditor = function(item, mediaType) {
 window.cleanupMediaEditor = function() {
   _stopPolling();
   _editJobId = null;
+  _geBatchPollingEnabled = false;
+  if (_geConsoleRO) { try { _geConsoleRO.disconnect(); } catch (e) {} _geConsoleRO = null; }
 };
 
 window.triggerMediaEditor = function(mediaType) {
