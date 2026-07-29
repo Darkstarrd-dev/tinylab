@@ -54,6 +54,22 @@ function _addOutputToGallery(outputName, outputPath, outputURL) {
 
 // ---------- cancel job ----------------------------------------------
 function _cancelJob() {
+  if (_geActiveJob && _geActiveJob.kind === 'batch') {
+    _geBatchPollingEnabled = false;
+    if (_batchJobs && _batchJobs.length) {
+      for (var i = 0; i < _batchJobs.length; i++) {
+        var bj = _batchJobs[i];
+        if (bj && !bj.done && bj.jobId) {
+          bj.done = true; bj.error = 'cancelled';
+          fetch('/api/gallery/edit/cancel/' + encodeURIComponent(bj.jobId), { method: 'POST' }).catch(function () {});
+        }
+      }
+    }
+    _geActiveJob = null;
+    _batchJobs = []; _batchTotal = 0; _batchDone = 0;
+    _onCancelled();
+    return;
+  }
   if (!_editJobId) return;
   fetch('/api/gallery/edit/cancel/' + encodeURIComponent(_editJobId), { method: 'POST' })
     .catch(function(err) { console.warn('Cancel job error:', err); });
@@ -88,6 +104,7 @@ function _startJob(op, params, overwrite, outputDir) {
   .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
   .then(function(data) {
     _editJobId = data.jobId;
+    _geActiveJob = { kind: 'single', jobId: data.jobId, item: _editCurrentItem, mediaType: _editMediaType, probe: _editProbe };
     _startPolling(data.jobId);
   })
   .catch(function(err) {

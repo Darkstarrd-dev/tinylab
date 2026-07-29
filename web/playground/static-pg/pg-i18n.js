@@ -308,6 +308,7 @@ pgSaveSuccess: 'Markdown file saved successfully',
     geExtractFail: 'Extract failed',
     geImageConvert: 'Image Convert',
     geVideoConvert: 'Video Convert',
+    geConsole: 'Console',
     geSetPath: 'Set Path',
     geSetName: 'Set Name',
     geUniform: 'Uniform',
@@ -628,6 +629,7 @@ pgSaveSuccess: 'Markdown 文件已保存',
     geExtractFail: '提取失败',
     geImageConvert: '图片转换',
     geVideoConvert: '视频转换',
+    geConsole: '控制台',
     geSetPath: '设置路径',
     geSetName: '设置名称',
     geUniform: '统一命名',
@@ -644,6 +646,18 @@ pgSaveSuccess: 'Markdown 文件已保存',
 
 // Playground translation fallback. Uses host t() when available, else
 // returns the key verbatim. Shared by gallery-state.js and editor-state.js.
-function T(key) {
-  return (typeof t === 'function') ? t(key) : key;
+function T(key, ar) {
+  if (typeof window !== 'undefined' && window.PG_I18N) {
+    var lang = document.documentElement.getAttribute('data-lang') || (localStorage && localStorage.getItem('lang')) || 'en';
+    var dict = window.PG_I18N[lang] || window.PG_I18N['en'] || {};
+    var s = dict[key];
+    if (s != null) {
+      if (ar && ar.length) {
+        return s.replace(/\{(\d+)\}/g, function(_, i) { return ar[+i] != null ? ar[+i] : ''; });
+      }
+      return s;
+    }
+  }
+  if (typeof t === 'function') return t(key, ar);
+  return key;
 }

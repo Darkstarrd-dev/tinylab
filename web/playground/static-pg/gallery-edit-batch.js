@@ -239,6 +239,8 @@ function _startBatch(op, params, dest, compress, targets) {
   _batchParams = params;
   _batchOp = op;
   _batchCompress = !!compress;
+  _geActiveJob = { kind: 'batch', mediaType: _editMediaType, item: _editCurrentItem, probe: _editProbe };
+  _geBatchPollingEnabled = true;
 
   // Capture the user's UX choices once, so the async _onBatchComplete path
   // (which runs after all polling finishes and the controls may have been
@@ -309,13 +311,25 @@ function _startBatch(op, params, dest, compress, targets) {
 }
 
 function _pollBatchJob(idx, jobId) {
+  var j0 = _batchJobs[idx];
+  if (!j0 || j0.done) return;
+  if (j0.polling) return;
+  j0.polling = true;
   fetch('/api/gallery/edit/status/' + encodeURIComponent(jobId))
     .then(function(r) { return r.json(); })
     .then(function(data) {
       var j = _batchJobs[idx];
+      if (j) j.polling = false;
       if (!j) return;
       if (data.status === 'running') {
-        setTimeout(function() { _pollBatchJob(idx, jobId); }, 600);
+        var block = _geConsoleBlock(jobId, (j.item && j.item.name) || '');
+        if (block) {
+          var cmdEl = block.querySelector('.ge-console-block-cmd');
+          if (cmdEl && data.command) cmdEl.textContent = '$ ' + data.command;
+          var logEl = block.querySelector('.ge-console-block-log');
+          if (logEl && data.logTail) { logEl.textContent = data.logTail; logEl.scrollTop = logEl.scrollHeight; }
+        }
+        if (_geBatchPollingEnabled && !j.done) setTimeout(function() { _pollBatchJob(idx, jobId); }, 600);
       } else {
         j.done = true;
         if (data.status === 'completed') {
@@ -332,7 +346,7 @@ function _pollBatchJob(idx, jobId) {
     })
     .catch(function(err) {
       var j = _batchJobs[idx];
-      if (j) { j.done = true; j.error = err.message || String(err); }
+      if (j) { j.polling = false; j.done = true; j.error = err.message || String(err); }
       _batchDone++;
       _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
       if (_batchDone >= _batchTotal) _onBatchComplete();
@@ -341,6 +355,8 @@ function _pollBatchJob(idx, jobId) {
 
 function _onBatchComplete() {
   _editJobId = null;
+  _geActiveJob = null;
+  _geBatchPollingEnabled = false;
   var ok = 0, fail = 0;
   var outputPaths = [];
   for (var i = 0; i < _batchJobs.length; i++) {

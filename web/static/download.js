@@ -1116,7 +1116,7 @@ function playVideo(taskId) {
     var rawPath = task.filePath || task.savedFile || task.url || '';
     var normalizedPath = rawPath.replace(/\\/g, '/');
     return {
-      name: task.title || task.url || task.id,
+      name: task.title || (normalizedPath.split(/[\\/]/).pop()) || task.id,
       path: normalizedPath,
       kind: 'plain',
       absPath: normalizedPath,

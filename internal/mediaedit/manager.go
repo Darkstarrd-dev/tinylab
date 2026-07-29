@@ -131,12 +131,18 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 		runOutputPath = outputPath + ".mediaedit_tmp" + ext
 	}
 
+	job.mu.Lock()
+	job.logBuf = stderrTail
+	job.Command = FfmpegCommandString(ffmpegPath, args, runOutputPath)
+	job.mu.Unlock()
+
 	err := RunFfmpeg(ctx, ffmpegPath, args, runOutputPath, sourceDuration, onProgress, stderrTail)
 
 	job.mu.Lock()
 	defer job.mu.Unlock()
 
 	job.LogTail = stderrTail.Read()
+	job.logBuf = nil
 	job.FinishedAt = time.Now()
 
 	if err != nil {
@@ -224,7 +230,6 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-
 // relocateOutput builds a path inside destDir using the given baseName.
 // If a file with the same name already exists, appends _2, _3, etc.
 func relocateOutput(destDir, baseName string) string {
@@ -242,6 +247,7 @@ func relocateOutput(destDir, baseName string) string {
 	}
 	return candidate
 }
+
 // buildArgs dispatches to the correct arg builder based on operation.
 func buildArgs(inputPath, operation string, raw json.RawMessage) (args []string, desc, ext string, err error) {
 	switch operation {
