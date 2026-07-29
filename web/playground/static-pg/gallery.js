@@ -1,4 +1,5 @@
 // gallery.js — Gallery entry point and cleanup. Loaded last.
+// Backend: internal/api/gallery/fs_handlers.go + zip_handlers.go + register.go.
 
 'use strict';
 

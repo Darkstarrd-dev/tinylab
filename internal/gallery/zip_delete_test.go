@@ -413,7 +413,7 @@ func TestDeleteZipEntry_HugeContent(t *testing.T) {
 // openZipEntry opens a zip entry by name, returning the read closer.
 func openZipEntry(z *zip.Reader, name string) (io.ReadCloser, error) {
 	for _, f := range z.File {
-		if cleanZipPath(f.Name) == cleanZipPath(name) {
+		if CleanZipPath(f.Name) == CleanZipPath(name) {
 			return f.Open()
 		}
 	}

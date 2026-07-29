@@ -1,6 +1,7 @@
 // gallery-review.js — AI Review panel: preset management, prompt generation,
 // model selection, review execution, and result filtering.
 // This file is loaded after gallery-tree.js and provides window.renderReviewPanel().
+// Backend: internal/api/gallery/review_engine.go + review_handlers.go.
 
 'use strict';
 
@@ -97,8 +98,7 @@ function renderConfigPanel(rs) {
   // 3. 审核目标描述
   html += '<div class="gallery-review-field">' +
     '<label class="gallery-review-label">' + T('galleryReviewJudgeTarget') +
-    '<button class="gallery-review-expand-btn" id="gallery-review-expand-judge" type="button" data-tooltip="Expand">▼</button>' +
-    '</label>' +
+    '<button class="gallery-review-expand-btn" id="gallery-review-expand-judge" type="button" data-tooltip="' + T('galleryReviewExpand') + '">▼</button>' +
     '<textarea class="gallery-review-textarea" id="gallery-review-judge-target" placeholder="' + T('galleryReviewJudgeTargetPlaceholder') + '">' + escapeHtml(rs.judgeTarget) + '</textarea>' +
     '</div>';
 
@@ -111,8 +111,7 @@ function renderConfigPanel(rs) {
   // 5. 系统提示词
   html += '<div class="gallery-review-field">' +
     '<label class="gallery-review-label">' + T('galleryReviewSystemPrompt') +
-    '<button class="gallery-review-expand-btn" id="gallery-review-expand-system" type="button" data-tooltip="Expand">▼</button>' +
-    '</label>' +
+    '<button class="gallery-review-expand-btn" id="gallery-review-expand-system" type="button" data-tooltip="' + T('galleryReviewCollapse') + '">▼</button>' +
     '<textarea class="gallery-review-textarea" id="gallery-review-system-prompt" placeholder="' + T('galleryReviewSystemPromptPlaceholder') + '">' + escapeHtml(rs.systemPrompt) + '</textarea>' +
     '</div>';
 
@@ -321,9 +320,8 @@ function bindReviewEvents() {
       if (val > 50) {
         val = 50;
         this.value = 50;
-        showMsg('Max concurrency is capped at 50 to prevent overload');
+        showMsg(T('galleryReviewMaxConcurrency'));
       }
-      galleryState.reviewState.concurrency = val;
     };
   }
 
@@ -639,8 +637,7 @@ function startReview() {
 
   var queue = buildReviewQueue(rs.selectedNodes);
   if (!queue.length) {
-    showMsg(T('galleryReviewNoEntries') || 'No reviewable entries in selected nodes');
-    return;
+    showMsg(T('galleryReviewNoEntries'));
   }
 
   rs.reviewQueue = queue;

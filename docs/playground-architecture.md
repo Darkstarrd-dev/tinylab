@@ -16,6 +16,7 @@
 > **最后核对（2026-07-28 增补#14）：** Gallery 图片弹窗端侧反馈修正（接增补#13）：(1) **源信息 row1 改为「所属压缩包/文件夹的路径」**：原 `_editFilePath`（单图）返回临时抽取/上传路径、`_batchOriginPath`（archive）对 FSAA zip 仅返回压缩包名——合并为 `_editContainerPath(it, includeInner)`：zip → `zipAbsPath`（后端压缩包，磁盘路径）或 `zipFileHandle.name`/`path[0]`（FSAA 压缩包无磁盘路径，浏览器安全限制，以名为兜底），单图且 `includeInner` 时附 `› inner 文件夹`（不含文件名，文件名在 row2）；backend → `rootDirPath` 或 `dir(absPath)`；fs → `rootDirHandle.name`；plain → `dir(path)`。`_updateImageSourceInfo` 单图调 `_editContainerPath(it,true)`、archive 调 `_editContainerPath(it,false)`。即单图不再显示 `C:\...\Temp\gallery-edit-XXX.webp` 临时路径，archive 不再仅显示压缩包名（后端项显示完整磁盘路径，FSAA 项无路径则以名兜底）。(2) **Set Path 默认改为始终 ON 并预填默认下载目录**（原 backend OFF / 其余 ON），`openMediaEditor` 预填 setTimeout 中 `sp.checked = true`，所有输出默认进下载目录。(3) **Uniform 仅 archive 可启用**：`_refreshBatchUXVisibility` 对 `ge-img-uniform` 开关在单图模式 `disabled`（不可开启），archive 模式可开启后由开关再 gate prefix/digits 输入；archive→single 切换时强制 `ge-img-uniform.checked=false`（避免批量改名逻辑误用到单图）；Set Name 始终可用（单图=输出文件名，archive=压缩包名），与 Uniform 不冲突。(4) **浏览按钮防重入**：`ge-browse-dir-btn` 点击即 `disabled`，`/api/browse` 返回（成功/失败）后再经 `_refreshBatchUXVisibility` 按 Set Path 状态恢复，期间重复点击被拒（避免叠加多个原生文件管理器对话框）。涉及文件：`web/playground/static-pg/gallery-edit.js`。
 > **最后核对（2026-07-28 增补#15）：** Gallery 图片弹窗源信息 row1 路径拆分（接增补#14，端侧反馈）：单图 row1 = `_editContainerPath(it, true)`（所属压缩包/文件夹的**完整路径**：zip→`zipAbsPath`、backend→`rootDirPath`或`dir(absPath)`、fs→`rootDirHandle.name`、plain→`dir(path)`；zip 子目录条目附 `› inner 文件夹`，文件名在 row2）；archive row1 = `_editContainerParentPath(it)`（容器的**父目录**+尾部分隔符：zip→`dir(zipAbsPath)+sep` 如 `z:\img\`、backend 文件夹→`dir(rootDirPath)+sep`、plain→`dir(dir(path))+sep`），无磁盘路径时回退 `_editContainerPath(it,false)`。即后端来源（粘贴 CF_HDROP / 文件夹选择器）单图显示 `z:\img\Lycoris.zip`、archive 显示 `z:\img\`（row2=压缩包名+数量，row1+row2 还原完整路径）；**FSAA 拖放项无磁盘路径**（浏览器安全：`FileSystemFileHandle`/拖放 `File` 不暴露源盘路径），仅以名为兜底。涉及文件：`web/playground/static-pg/gallery-edit.js`。
 > **最后核对（2026-07-28 增补#16）：** 本轮图片+视频弹窗收尾重构——**(1) 图片拖放无路径提示**：`_editContainerPath` 对 `kind:'fs'` 或 `zip` 无 `zipAbsPath` 返回 `''`（不再兜底显示文件名），`_updateImageSourceInfo` 无法解析路径时显示 `geDragNoPathHint`（"拖放导入 — 浏览器不提供磁盘路径"）；`_editContainerParentPath` 返回容器父目录+尾部分隔符（archive row1），无路径时回退 hint。**(2) 视频弹窗重构**：标题改为 `[设置齿轮] Video Convert(居中) [关闭]`（`geVideoConvert`）；移除 `Replace Original File` 单选 → `overwrite` 恒 false；源信息改为双行 `_updateVideoSourceInfo`（row1=磁盘路径或 hint，row2=文件名·分辨率·编码·时长·audio·大小）+ `_editVideoPath`；输出改为 `Set Path`+`Set Name`（`_renderSetPathRow`/`_renderSetNameRow` 共享辅助函数，与图片弹窗共用元素 ID）。**(3) 共享输出行**：`_renderSourceInfoRows`/`_renderSetPathRow`/`_renderSetNameRow` 三函数被图片和视频弹窗复用（prefix 区分 'img'/'vid' source-info 元素 ID）。**(4) 目标流程统一**：`_getDestination` 替换为 `_getDestFromSetPath`（仅读 `ge-img-setpath` toggle，`overwrite:false`）；`_startVideoTranscode`/`_startVideoTrim`/`_startVideoSubtitle` 三个入口均调用 `_getDestFromSetPath`；`_startJob` 简化（移除 overwrite 逻辑、从 Set Name toggle 读 `customRename`、`body.overwrite` 恒 `false`）。**(5) 死代码清理**：移除 `_zipReplacePending`（声明+`_onCompleted` 内 zip-writeback 分支）、`_bindModalEvents` 中 `ge-dest` 单选绑定块。**(6) 下载视频项**：`download.js playVideo` 的 `videoObj` 新增 `absPath: normalizedPath`（`kind:'plain'` 视频项获得磁盘路径，使编辑/删除可操作）。**(7) Set Path 默认**：图片和视频的 `ge-img-setpath` 均默认 ON（`openMediaEditor` 预填 setTimeout），输出进下载目录。涉及文件：`web/playground/static-pg/gallery-edit.js`、`pg-i18n.js`（`geVideoConvert`/`geDragNoPathHint`）、`web/static/download.js`。
+> **最后核对（2026-07-29 增补#19）：** Gallery 模块 7 项重构——**(1) 后端拆分**：`internal/api/gallery/register.go`（原 ~1800 行）拆为 7 文件（register.go/session_store.go/fs_handlers.go/zip_handlers.go/review_engine.go/review_handlers.go/edit_handlers.go）。**(2) CleanZipPath 导出**：`internal/gallery/zip.go` 的 `cleanZipPath` 重命名为导出 `CleanZipPath`（带 doc comment），所有调用方更新；`edit_handlers.go` 中原重复的 `cleanZipPathNormalize` 已移除，改调 `gallerylib.CleanZipPath`。**(3) 状态注入**：Handler 新增 `sessions`/`reviews`/`media`/`proxy` 字段，原三个包全局变量（`gallerySessions`/`reviewTasks`/`mediaJobs`）全部移除。**(4) proxyCaller 接口**：`register.go` 定义 `proxyCaller` 接口（`ChatCompletions` 方法），`sendVisionRequest`/`galleryGeneratePrompt` 通过 `h.proxy.ChatCompletions` 调用而非直接引用 `*proxy.Handler`；`httptest.NewRequest` 替换为 `http.NewRequestWithContext`（含 45s 超时 Context）。**(5) 前端拆分**：`gallery-edit.js`（原 2108 行）拆为 3 文件（gallery-edit.js 壳 ~1362 行、gallery-edit-operations.js ~249 行、gallery-edit-batch.js ~502 行），共享全局作用域；加载顺序：gallery-edit.js → gallery-edit-operations.js → gallery-edit-batch.js。**(6) Editor 修复**：`editor.js` `edScrollIntoView` 用 mirror div 测量选择偏移替代原 crude 跳底行为；`T()` 统一替换 i18n 调用；`editor-state.js` 新增 `_findMatches`/`_findIdx` 默认字段。**(7) 可追溯性**：全部 7 个后端 Go 文件与 gallery-edit*.js/gallery-review.js/gallery.js 添加头部注释注明前后端对应关系；`gallery-review.js` 硬编码 UI 字符串迁移至 i18n（`T()` 包装）；`_geT` 统一替换：`_geT('x')` → `T('x')`，`_geT('x', args)` → `pgT('x', args)`（保留 {0} 插值）。涉及文件：`internal/api/gallery/`（7 文件）、`internal/gallery/zip.go`、`web/playground/static-pg/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`/`gallery-review.js`/`editor.js`/`editor-state.js`、`web/playground/static-pg/pg-i18n.js`、`web/static/i18n.js`、`internal/api/router.go`、`web/static/index.html`。
 
 > **最后核对（2026-07-26 增补#6）：** Gallery 媒体编辑器（ffmpeg 子进程）——新增 `internal/mediaedit/` leaf 包（types/binary/probe/args/executor/manager），通过 `internal/api/gallery/register.go` 的 6 个 edit handler（`/api/gallery/edit/*`）提供图片转码、视频转码/裁剪/字幕烧录能力。`gallery-edit.js` 前端模块加载于 `gallery-fullscreen.js` 之后、`gallery.js` 之前。复用 `DownloadConfig.FfmpegPath` 配置字段，经 `FFMPEG_PATH`/`FFPROBE_PATH` env fallback 解析二进制。文档：PROJECT_MAP §10.9a、playground-architecture.md §16。
 
@@ -172,7 +173,7 @@ Playground 后端相关职责只有三类：
 | 资源编译 | `web/embed*.go` | build tag 决定是否嵌入 |
 | UI 入口与静态路由 | `internal/api/router.go` | 选择 index、挂载静态文件 |
 | 运行时配置 | `internal/config/*`、`internal/api/settings.go` | 保存 `enablePlayground` |
-| Gallery 图片查看器后端 | `internal/api/gallery*.go`、`internal/gallery/*` | 仅随 `-tags playground` 编译可用；zip/tiff 解析与转码，会话驻内存 LRU |
+| Gallery 图片查看器后端 | `internal/api/gallery/`（7 文件子包）、`internal/gallery/*` | 仅随 `-tags playground` 编译可用；zip/tiff 解析与转码，会话驻内存 LRU，Handler 字段 `h.sessions`/`h.media`（状态注入，无包全局变量） |
 
 聊天、模型解析、轮转、冷却、重试、用量统计等均属于通用代理能力，不是 Playground 私有实现。Gallery（图片查看器分页）同理：仅在 `-tags playground` 编译时随 Playground 资产一起嵌入，无 tag 的二进制不含此功能。
 
@@ -771,7 +772,7 @@ zip、tiff 及文件系统操作需后端参与：
 - **POST `/api/gallery/zip-from-path`**：从磁盘路径直接创建 zip 会话（避免上传往返）。
 - **POST `/api/gallery/zip-writeback`**：将 zip 会话字节写回磁盘原文件（`fsutil.AtomicWrite`）。
 - **POST `/api/gallery/paste-paths`**：读取 Windows 剪贴板 CF_HDROP 格式文件路径（`fsutil.GetClipboardFilePaths()`）。
-- **POST `/api/gallery/zip`**：上 zip 二进制（500MB 上限覆盖 `/api` 1MB 组级限制），返回 `{sessionId, manifest:{entries:[{path,size,kind}], total}}`；zip bytes 缓存于进程内纯 LRU 会话（`galleryMaxSessions=128`，无 TTL；`internal/api/gallery/register.go` 的 `gallerySessionStore`）。容量从早期 32 上调到 128 以覆盖一次批量导入；驱逐不再致命——前端 `rehydrateZipSession` 在 404 时按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目。
+- **POST `/api/gallery/zip`**：上 zip 二进制（500MB 上限覆盖 `/api` 1MB 组级限制），返回 `{sessionId, manifest:{entries:[{path,size,kind}], total}}`；zip bytes 缓存于进程内纯 LRU 会话（`galleryMaxSessions=128`，无 TTL；`internal/api/gallery/session_store.go` 的 `h.sessions` Handler 字段）。容量从早期 32 上调到 128 以覆盖一次批量导入；驱逐不再致命——前端 `rehydrateZipSession` 在 404 时按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目。
 - **GET `/api/gallery/zip/{sessionId}/{entryPath:*}`**：从会话取 zip 内单张图二进制。`{entryPath:*}` 是 chi 通配匹配含 `/` 的路径；前端 `encodeURIComponent` 拼接。会话被 LRU 驱逐后返回 404，前端 `getZipEntryBlob` 触发 `rehydrateZipSession` 重传后重试一次。
 - **DELETE `/api/gallery/zip/{sessionId}`**：删除整个 zip 会话（`galleryDeleteZipSession`，204 No Content，幂等）。前端 `releaseZipSessions` 在清空/移除包时 fire-and-forget 调用，使后端立即回收内存而非等 LRU 驱逐。chi 以更具体的非通配路由优先，与 `DELETE /zip/{sessionId}/*`（条目删除）共存。
 - **POST `/api/gallery/zip/{sessionId}/touch`**：刷新会话 LRU 位置（`galleryTouchSession`，204；会话已驱逐则 404）。前端 `setActive` 在切到某包时 fire-and-forget 调用，使当前查看的会话不易被驱逐。
@@ -833,8 +834,7 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 - `web/playground/static-pg/gallery.js`（playground 静态资源，由 embed_playground.go 注入）
 - `web/playground/static-pg/gallery-review.js`（AI Review 独立面板模块）
 - `internal/gallery/{gallery,zip,tiff,review}.go` + 测试
-- `internal/api/gallery.go` + `gallery_session.go`
-- `internal/api/gallery_review.go`（审核启动/状态/取消/提示词生成处理器）
+- `internal/api/gallery/`（7 文件子包：register.go/session_store.go/fs_handlers.go/zip_handlers.go/review_engine.go/review_handlers.go/edit_handlers.go）
 - `internal/api/review_presets.go`（ReviewPreset HTTP CRUD）
 - `internal/registry/review_presets.go`（ReviewPreset CRUD 数据层）
 - `internal/api/router.go::Gallery` 路由块与 `pgJSFiles`
@@ -843,25 +843,24 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 ### 变更维护清单
 | 触发变更 | 涉及源码 |
 |---|---|
-| 修改拖拽/粘贴/打开交互 | `web/playground/static-pg/gallery-io.js`（`onOpenClick`/`onOpenDirBackend`/`onPaste`/`onDrop`/`loadBackendPaths`）、`internal/api/gallery_fs.go`（后端 Picker/列表/删除/剪贴板） |
-| 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery_fs.go`（`galleryDeleteFs`/`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
-| 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/register.go::galleryListZip`（500MB 上限） |
-| 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/register.go::galleryConvertTiff` |
-| 修改 zip 会话 LRU 容量/过期/驱逐 | `internal/api/gallery/register.go`（`galleryMaxSessions`、`gallerySessionStore.put`/`get`/`touch`/`pin`/`unpin`、`galleryDeleteZipSession`/`galleryTouchSession` 处理器） |
+| 修改拖拽/粘贴/打开交互 | `web/playground/static-pg/gallery-io.js`（`onOpenClick`/`onOpenDirBackend`/`onPaste`/`onDrop`/`loadBackendPaths`）、`internal/api/gallery/fs_handlers.go`（后端 Picker/列表/删除/剪贴板） |
+| 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery/fs_handlers.go`（`galleryDeleteFs`/`galleryZipWriteback`）+ `zip_handlers.go`（`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
+| 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/zip_handlers.go::galleryListZip`（500MB 上限） |
+| 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/zip_handlers.go::galleryConvertTiff` |
+| 修改 zip 会话 LRU 容量/过期/驱逐 | `internal/api/gallery/session_store.go`（`galleryMaxSessions`、`gallerySessionStore.put`/`get`/`touch`/`pin`/`unpin`、`galleryDeleteZipSession`/`galleryTouchSession` 处理器，现为 `h.sessions` Handler 字段） |
 | 修改 zip 会话重建/批量导入并发 | `web/playground/static-pg/gallery-io.js`（`rehydrateZipSession`/`getZipEntryBlob`/`runWithConcurrency`/`addZipBlob` 的 `zipFile` 保留）、`web/playground/static-pg/gallery-tree.js`（`setActive` 的 touch、`releaseZipSessions`） |
 | 修改自动播放档位 | `web/playground/static-pg/gallery.js::AUTOPLAY_INTERVALS` |
 | 修改全屏快捷键集 | `web/playground/static-pg/gallery.js::onFullscreenKey` |
 | 修改 Gallery i18n 文案 | `web/static/i18n.js` (`gallery*` 键) |
 | Gallery 不再随 playground 编译 | `internal/api/router.go::pgJSFiles` 移除 `gallery.js`、`web/embed_playground.go`、`web/static/index.html` |
-| 修改 AI Review 提示词逻辑 | `internal/gallery/review.go`（`ParseReviewResponse`/`PromptGenSystemPrompt`/`DefaultUserPrompt`）、`internal/api/gallery_review.go`（`galleryGeneratePrompt`/`analyzeImage`/`sendVisionRequest`） |
-| 修改审核策略/并发 | `internal/api/gallery_review.go`（`galleryStartReview`/`runReview`/`selectReviewIndices`/`selectHeadTailIndices`） |
+| 修改 AI Review 提示词逻辑 | `internal/gallery/review.go`（`ParseReviewResponse`/`PromptGenSystemPrompt`/`DefaultUserPrompt`）、`internal/api/gallery/review_engine.go`（`galleryGeneratePrompt`/`analyzeImage`/`sendVisionRequest`，经 `h.proxy.ChatCompletions` 调用） |
+| 修改审核策略/并发 | `internal/api/gallery/review_handlers.go`（`galleryStartReview`/`runReview`/`selectReviewIndices`/`selectHeadTailIndices`）+ `review_engine.go`（`reviewTask`/`runReview` 引擎核心） |
 | 修改审核前端交互 | `web/playground/static-pg/gallery-review.js`（`renderReviewPanel`/`startPolling`/`applyReviewFilter`）、`web/playground/static-pg/gallery-state.js`（`reviewState`）、`web/static/style.css`（`.gallery-review-*`） |
 | 修改审核预设 CRUD | `internal/api/review_presets.go`、`internal/registry/review_presets.go`、`internal/config/types.go`（`ReviewPreset`）、`internal/config/defaults.go`（内置预设） |
 
 ### Gallery 媒体编辑器（ffmpeg）
 
-Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 逐条解析临时磁盘路径再转码、`_resolveBatchInput` 复用 extract-zip-entry/upload-temp）。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/register.go` 的 9 个 edit handler。
-
+Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js` 三文件，`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 逐条解析临时磁盘路径再转码、`_resolveBatchInput` 复用 extract-zip-entry/upload-temp）。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/edit_handlers.go` 的 9 个 edit handler。
 #### API 端点（`/api/gallery/edit/*`）
 
 | 端点 | 方法 | 请求体 | 响应 |
@@ -902,30 +901,30 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 - `internal/mediaedit/args.go`：BuildImageTranscodeArgs/BuildVideoTranscodeArgs/BuildVideoTrimArgs/BuildVideoSubtitleArgs + BuildOutputPath
 - `internal/mediaedit/executor.go`：RunFfmpeg + tailBuffer
 - `internal/mediaedit/manager.go`：Manager.Start/Get/Cancel/ProbeMedia
-- `internal/api/gallery/register.go`：mediaJobs + resolveFfmpeg + 11 个 edit/gallery handler（edit：ffmpeg-status / probe / subtitle-upload / start / status / cancel / extract-zip-entry / upload-temp / zip-outputs / zip-writeback；gallery：open-folder）
+- `internal/api/gallery/edit_handlers.go`：`h.media`（`*mediaedit.Manager`） + `resolveFfmpeg` + 11 个 edit/gallery handler（edit：ffmpeg-status / probe / subtitle-upload / start / status / cancel / extract-zip-entry / upload-temp / zip-outputs / zip-writeback；gallery：open-folder）
 - `internal/gallery/zip_replace.go`：`ReplaceZipEntries(data, replacements map[string][]byte) ([]byte, Manifest, error)` — zip 条目替换/原位回写核心
 - `internal/fsutil`：`OpenInFileManager(path)` — 打开目录复用（非 gallery 包内）
-- `internal/api/router.go`：pgJSFiles 含 `gallery-edit.js`
-- `web/static/index.html`：`<script src="/gallery-edit.js">` 加载于 `gallery-fullscreen.js` 后、`gallery.js` 前
+- `internal/api/router.go`：pgJSFiles 含 `gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（加载顺序：gallery-edit.js → gallery-edit-operations.js → gallery-edit-batch.js，共享全局作用域，shell 声明共享变量，operations/batch 引用）
+- `web/static/index.html`：`<script src="/gallery-edit.js">` → `<script src="/gallery-edit-operations.js">` → `<script src="/gallery-edit-batch.js">` 加载于 `gallery-fullscreen.js` 后、`gallery.js` 前
 
 #### 变更维护清单
 
 | 触发变更 | 涉及源码 |
 |---|---|
-| 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/register.go`（manager.go 的 `buildArgs` switch） |
+| 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/edit_handlers.go`（manager.go 的 `buildArgs` switch） |
 | 修改质量/编码参数默认值 | `internal/mediaedit/args.go`（CRF 表/jpegQuality/clamp）+ `internal/mediaedit/args_test.go` |
 | 修改 ffmpeg 二进制解析 | `internal/mediaedit/binary.go` |
 | 修改 ffprobe 探针逻辑 | `internal/mediaedit/probe.go` |
 | 修改 job 生命周期/超时 | `internal/mediaedit/manager.go`（Start/runJob/cleanup） |
-| 修改 edit HTTP 端点 | `internal/api/gallery/register.go`（handler 方法 + Register 方法） |
-| 修改前端编辑器 UI | `web/playground/static-pg/gallery-edit.js` |
-| 修改加载顺序 | `internal/api/router.go`（pgJSFiles）+ `web/static/index.html` |
+| 修改 edit HTTP 端点 | `internal/api/gallery/edit_handlers.go`（handler 方法 + Register 方法） |
+| 修改前端编辑器 UI | `web/playground/static-pg/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（三文件共享全局作用域，gallery-edit.js 为壳 + 共享变量，operations/batch 分别承载单操作 UI 与批量流程） |
+| 修改加载顺序 | `internal/api/router.go`（pgJSFiles 三文件顺序）+ `web/static/index.html`（三 script 标签顺序） |
 | 修改批量转换兄弟匹配 | `web/playground/static-pg/gallery-edit.js`（`_getSiblingImages` 按 kind 分组：`backend`→`rootDirPath`/`fs`→`rootDirHandle`/`zip`→`zipAbsPath`/`sessionId`）+ `/edit/extract-zip-entry`+`/edit/upload-temp`（`_resolveBatchInput` 逐条解析临时磁盘路径） |
-| 修改输出文件名 / 压缩包命名 | `internal/mediaedit/types.go`（`StartRequest.OutputName`）+ `internal/mediaedit/manager.go`（OutputDir+OutputName+ext 分支）+ `internal/api/gallery/register.go`（`galleryEditZipOutputs` 的 `zipName` 经 `filepath.Base`+`.zip` 强制）+ `web/playground/static-pg/gallery-edit.js`（`_startBatch` 传 `outputName`、`_batchOriginZipName` 推导原文件夹/压缩包名、`_batchOriginStem`/`_captureBatchCfg` 读取 rename/normalise 开关、`_refreshBatchUXVisibility` 按开关+dest 切换行可见性）+ `web/playground/static-pg/pg-i18n.js`（`geRename*`/`geRenorm*`/`geBatchOpenFolder`/`geNoDiskPath` 等） |
+| 修改输出文件名 / 压缩包命名 | `internal/mediaedit/types.go`（`StartRequest.OutputName`）+ `internal/mediaedit/manager.go`（OutputDir+OutputName+ext 分支）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipOutputs` 的 `zipName` 经 `filepath.Base`+`.zip` 强制）+ `web/playground/static-pg/gallery-edit.js`（`_startBatch` 传 `outputName`、`_batchOriginZipName` 推导原文件夹/压缩包名、`_batchOriginStem`/`_captureBatchCfg` 读取 rename/normalise 开关、`_refreshBatchUXVisibility` 按开关+dest 切换行可见性）+ `web/playground/static-pg/pg-i18n.js`（`geRename*`/`geRenorm*`/`geBatchOpenFolder`/`geNoDiskPath` 等） |
 | 修改单文件输出名（视频/图片） | `web/playground/static-pg/gallery-edit.js` `_startJob` 现统一推导 `origStem = _stripExt(_editCurrentItem.name)` 并在 `outputDir && !overwrite` 分支送 `outputName`；`replace-original` 经 `_zipReplacePending` 走 zip-writeback；后端单文件 overwrite 仍由服务端写回真 `absPath`。服务端零改动（复用 `StartRequest.OutputName`） |
 | 修改视频缩放控件 | `web/playground/static-pg/gallery-edit.js`（`_renderVideoTranscodeForm` 的 `ge-vid-scale` 改 `<input type="range">` + `ge-vid-scale-val`/`ge-vid-scale-dims`；`_bindModalEvents` 新增 `vidScaleInput.oninput` 同步百分比+ `WxH`）；服务端 `internal/mediaedit/args.go` `BuildVideoTranscodeArgs` 的 `scalePercent` 仍 clip 10..200，契约不变 |
-| 修改 zip 原位回写 | `internal/gallery/zip_replace.go`（`ReplaceZipEntries`）+ `internal/api/gallery/register.go`（`galleryEditZipWriteback` 路由+handler、`cleanZipPathNormalize`）+ `internal/fsutil.AtomicWrite` + `web/playground/static-pg/gallery-edit.js`（`_zipReplacePending`、`_onCompleted` 单图 zip 分支、`_zipWritebackBatch` convert-all、`_openInFileManager`） |
-| 修改打开目录按钮 | `internal/api/gallery/register.go`（`galleryOpenFolder` handler + 路由）+ `internal/fsutil.OpenInFileManager` + `web/playground/static-pg/gallery-edit.js`（每个完成结果区按钮重新绑定到 `_openInFileManager(path)`）+ `pg-i18n.js`（`geBatchOpenFolder`/`geBatchOpenError`） |
+| 修改 zip 原位回写 | `internal/gallery/zip_replace.go`（`ReplaceZipEntries`）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipWriteback` 路由+handler、`gallerylib.CleanZipPath`）+ `internal/fsutil.AtomicWrite` + `web/playground/static-pg/gallery-edit.js`（`_zipReplacePending`、`_onCompleted` 单图 zip 分支、`_zipWritebackBatch` convert-all、`_openInFileManager`） |
+| 修改打开目录按钮 | `internal/api/gallery/fs_handlers.go`（`galleryOpenFolder` handler + 路由）+ `internal/fsutil.OpenInFileManager` + `web/playground/static-pg/gallery-edit.js`（每个完成结果区按钮重新绑定到 `_openInFileManager(path)`）+ `pg-i18n.js`（`geBatchOpenFolder`/`geBatchOpenError`） |
 修改 Set Path / Set Name / Uniform（图片弹窗） | `web/playground/static-pg/gallery-edit.js`（`_renderImageForm` 使用共享 `_renderSourceInfoRows`/`_renderSetPathRow`/`_renderSetNameRow`；`_refreshBatchUXVisibility` 按 toggle 启用/禁用输入；Uniform 仅 archive 可启用；`_captureBatchCfg` 读取 Set Name/Uniform；`_batchOriginZipName` 读取 Set Name）+ `pg-i18n.js`（`geSetPath`/`geSetName`/`geUniform`/`geArchiveHint`/`geSingleHint`/`geNamePlaceholder`/`geImagesCount`）+ `playground.css`（`.ge-header-left`/`.ge-icon-toggle`/`.ge-title-center`/`.ge-src-info`/`.ge-src-row`）+ `internal/mediaedit/manager.go`（`Start()` 新增 `!Overwrite && OutputDir=="" && OutputName!=""` → `relocateOutput` 分支） |
 修改源信息路径（图片弹窗） | `web/playground/static-pg/gallery-edit.js`（`_editContainerPath` 返回容器完整路径或 `''`；`_editContainerParentPath` 返回父目录+分隔符；`_updateImageSourceInfo` 无路径时显示 `geDragNoPathHint`；`_isArchiveMode`/`_batchOriginLabel`/`_formatSize`）+ `pg-i18n.js`（`geDragNoPathHint`） |
 修改视频弹窗 | `web/playground/static-pg/gallery-edit.js`（标题改 `Video Convert` 居中 + 设置齿轮；移除 `ge-dest` 单选 → `overwrite` 恒 false；`_updateVideoSourceInfo` 双行源信息 + `_editVideoPath`；`_getDestination` 替换为 `_getDestFromSetPath` 仅读 Set Path toggle；`_startJob` 简化移除 overwrite 逻辑，从 Set Name toggle 读 `customRename`；移除 `_zipReplacePending` 声明+`_onCompleted` zip-writeback 分支+`ge-dest` 单选绑定死代码）+ `pg-i18n.js`（`geVideoConvert`） |

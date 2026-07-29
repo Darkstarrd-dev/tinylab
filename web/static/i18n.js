@@ -341,6 +341,9 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     galleryReviewNoNodeSelected: 'Please select at least one node',
     galleryReviewNoEntries: 'No reviewable entries in selected nodes',
     galleryReviewConfirmDelete: 'Delete Marked',
+    galleryReviewExpand: 'Expand',
+    galleryReviewCollapse: 'Collapse',
+    galleryReviewMaxConcurrency: 'Max concurrency is capped at 50 to prevent overload',
     // Playground keys moved to pg-i18n.js
     // Shortcut Settings keys
     shortcutSettings: 'Shortcut Settings',
@@ -816,6 +819,9 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     galleryReviewNoNodeSelected: '请至少选择一个节点',
     galleryReviewNoEntries: '选中节点中没有可审核的内容',
     galleryReviewConfirmDelete: '确认删除标记项',
+    galleryReviewExpand: '展开',
+    galleryReviewCollapse: '折叠',
+    galleryReviewMaxConcurrency: '最大并发数限制为 50 以防止过载',
     // Playground keys moved to pg-i18n.js
     // Shortcut Settings keys
     shortcutSettings: '快捷键设置',

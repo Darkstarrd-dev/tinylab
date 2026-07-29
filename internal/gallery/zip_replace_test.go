@@ -65,7 +65,7 @@ func assertEntryContent(t *testing.T, z *zip.Reader, name, want string) {
 func findEntry(t *testing.T, z *zip.Reader, name string) *zip.File {
 	t.Helper()
 	for _, f := range z.File {
-		if cleanZipPath(f.Name) == cleanZipPath(name) {
+		if CleanZipPath(f.Name) == CleanZipPath(name) {
 			return f
 		}
 	}

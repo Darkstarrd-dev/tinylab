@@ -137,7 +137,7 @@ func hasZIP64Extra(extra []byte) bool {
 // findOriginalFile finds a zip.File by its cleaned name among a slice of files.
 func findOriginalFile(files []*zip.File, cleanName string) *zip.File {
 	for _, f := range files {
-		if cleanZipPath(f.Name) == cleanName {
+		if CleanZipPath(f.Name) == cleanName {
 			return f
 		}
 	}
@@ -170,9 +170,9 @@ func DeleteZipEntry(data []byte, identifier string) ([]byte, Manifest, error) {
 	if idx, pErr := strconv.Atoi(identifier); pErr == nil && idx >= 0 && idx < len(z.File) {
 		target = z.File[idx]
 	} else {
-		targetName := cleanZipPath(identifier)
+		targetName := CleanZipPath(identifier)
 		for _, f := range z.File {
-			if cleanZipPath(f.Name) == targetName {
+			if CleanZipPath(f.Name) == targetName {
 				target = f
 				break
 			}
@@ -229,11 +229,11 @@ func DeleteZipEntry(data []byte, identifier string) ([]byte, Manifest, error) {
 	// Build a map: cleaned filename -> cdEntry (for quick lookup)
 	cdByCleanName := make(map[string]cdEntry, len(cdEntries))
 	for _, ce := range cdEntries {
-		cdByCleanName[cleanZipPath(ce.filename)] = ce
+		cdByCleanName[CleanZipPath(ce.filename)] = ce
 	}
 
 	// Find the target's cdEntry
-	targetClean := cleanZipPath(target.Name)
+	targetClean := CleanZipPath(target.Name)
 	targetCD, ok := cdByCleanName[targetClean]
 	if !ok {
 		return nil, Manifest{}, fmt.Errorf("internal: target %q not found in central directory", target.Name)
@@ -339,7 +339,7 @@ func DeleteZipEntry(data []byte, identifier string) ([]byte, Manifest, error) {
 	}
 
 	for _, vf := range vz.File {
-		vfClean := cleanZipPath(vf.Name)
+		vfClean := CleanZipPath(vf.Name)
 		orig := findOriginalFile(z.File, vfClean)
 		if orig == nil {
 			return nil, Manifest{}, fmt.Errorf("verification failed: entry %q not found in original", vf.Name)
