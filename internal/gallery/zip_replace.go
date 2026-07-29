@@ -35,7 +35,7 @@ func ReplaceZipEntries(data []byte, replacements map[string][]byte) ([]byte, Man
 	}
 
 	for _, f := range zr.File {
-		name := cleanZipPath(f.Name)
+		name := CleanZipPath(f.Name)
 
 		if repl, ok := replacements[name]; ok {
 			// Keep the original Method (Store or Deflate) and timestamps by

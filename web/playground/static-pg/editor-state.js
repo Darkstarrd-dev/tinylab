@@ -60,7 +60,9 @@ var editorState = {
     regex: false,
     matches: 0,
     current: 0
-  }
+  },
+  _findMatches: [],
+  _findIdx: -1
 };
 
 // ---------- persistence -------------------------------------------

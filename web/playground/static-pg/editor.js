@@ -132,12 +132,12 @@ window.renderEditor = function(container) {
 
   var fileEditorBtn = document.createElement('button');
   fileEditorBtn.className = 'log-mode-btn' + (editorState.mode !== 'logReader' ? ' active' : '');
-  fileEditorBtn.textContent = t('logFileEditor');
+  fileEditorBtn.textContent = T('logFileEditor');
   fileEditorBtn.dataset.mode = 'fileEditor';
 
   var logReaderBtn = document.createElement('button');
   logReaderBtn.className = 'log-mode-btn' + (editorState.mode === 'logReader' ? ' active' : '');
-  logReaderBtn.textContent = t('logReader');
+  logReaderBtn.textContent = T('logReader');
   logReaderBtn.dataset.mode = 'logReader';
 
   modeSwitch.appendChild(fileEditorBtn);
@@ -1201,11 +1201,58 @@ function edFindPrev(idx) {
   if (countEl) countEl.textContent = (current + 1) + '/' + matches.length;
 }
 
+// edScrollIntoView scrolls the textarea so the current selection start sits
+// near the top third of the viewport, instead of the earlier crude "jump to
+// bottom" hack. It measures the pixel height of the text preceding the
+// selection via a hidden mirror div that mirrors the textarea's wrapping, so
+// it stays correct for auto-wrapped lines (no per-line-height constant needed).
 function edScrollIntoView(ta) {
-  // Ensure the selection is visible
-  try {
-    ta.scrollTop = ta.scrollHeight; // crude — but focus + setSelectionRange should make it visible
-  } catch (e) {}
+  var pos = ta.selectionStart;
+  if (pos == null || pos < 0) pos = 0;
+  // Build (or reuse) a hidden mirror of this textarea to measure text height.
+  var mirror = ta._edScrollMirror;
+  if (!mirror || mirror.ownerDocument !== ta.ownerDocument) {
+    mirror = ta.ownerDocument.createElement('div');
+    mirror.setAttribute('aria-hidden', 'true');
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.wordWrap = 'break-word';
+    mirror.style.overflow = 'hidden';
+    mirror.style.zIndex = '-1';
+    ta.ownerDocument.body.appendChild(mirror);
+    ta._edScrollMirror = mirror;
+  }
+  // Sync styles that affect wrapping/layout with the textarea.
+  var cs = (ta.ownerDocument.defaultView || window).getComputedStyle(ta);
+  mirror.style.font = cs.font;
+  mirror.style.fontFamily = cs.fontFamily;
+  mirror.style.fontSize = cs.fontSize;
+  mirror.style.fontWeight = cs.fontWeight;
+  mirror.style.lineHeight = cs.lineHeight;
+  mirror.style.letterSpacing = cs.letterSpacing;
+  mirror.style.tabSize = cs.tabSize;
+  mirror.style.boxSizing = cs.boxSizing;
+  mirror.style.paddingLeft = cs.paddingLeft;
+  mirror.style.paddingRight = cs.paddingRight;
+  mirror.style.width = ta.clientWidth + 'px';
+  // Measure the height of the text up to the selection start by rendering the
+  // prefix plus a zero-width marker line; the marker's offsetTop is the
+  // pixel offset of the selection within the (wrapped) content.
+  mirror.textContent = '';
+  var prefix = ta.value.slice(0, pos);
+  var textNode = ta.ownerDocument.createTextNode(prefix);
+  mirror.appendChild(textNode);
+  var marker = ta.ownerDocument.createElement('span');
+  marker.textContent = '\u200b';
+  mirror.appendChild(marker);
+  var offset = marker.offsetTop - mirror.offsetTop;
+  // Target: selection line at ~1/3 of the visible height, clamped to valid range.
+  var target = offset - Math.round(ta.clientHeight / 3);
+  var max = Math.max(0, ta.scrollHeight - ta.clientHeight);
+  ta.scrollTop = Math.max(0, Math.min(target, max));
+  // Also ensure keyboard focus is on the textarea so the caret is active.
+  try { ta.focus({ preventScroll: true }); } catch (e) { ta.focus(); }
 }
 
 function edFindReplace(idx) {

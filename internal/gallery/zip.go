@@ -20,7 +20,10 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrEntryNotFound)
 }
 
-func cleanZipPath(p string) string {
+// CleanZipPath normalizes a zip entry path: forward-slashes, strips a leading
+// "/", collapses "."/".." and duplicate slashes via path.Clean, then strips
+// any leading "/" Clean may have introduced (turning "foo/../.." into ".").
+func CleanZipPath(p string) string {
 	p = strings.ReplaceAll(p, "\\", "/")
 	p = strings.TrimPrefix(p, "/")
 	// Normalize ../ and ./ sequences. path.Clean also collapses double slashes.
@@ -46,7 +49,7 @@ func ListZipEntries(reader io.ReaderAt, size int64) (manifest Manifest, err erro
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		cleanName := cleanZipPath(decodeZipName(f.Name))
+		cleanName := CleanZipPath(decodeZipName(f.Name))
 		if !IsSupportedExt(cleanName) {
 			continue
 		}
@@ -69,8 +72,8 @@ func ListZipEntries(reader io.ReaderAt, size int64) (manifest Manifest, err erro
 }
 
 func naturalLess(s1, s2 string) bool {
-	segs1 := strings.Split(cleanZipPath(s1), "/")
-	segs2 := strings.Split(cleanZipPath(s2), "/")
+	segs1 := strings.Split(CleanZipPath(s1), "/")
+	segs2 := strings.Split(CleanZipPath(s2), "/")
 	minLen := len(segs1)
 	if len(segs2) < minLen {
 		minLen = len(segs2)
@@ -156,9 +159,9 @@ func GetZipEntry(reader io.ReaderAt, size int64, identifier string) (data []byte
 	if idx, pErr := strconv.Atoi(identifier); pErr == nil && idx >= 0 && idx < len(z.File) {
 		target = z.File[idx]
 	} else {
-		targetName := cleanZipPath(identifier)
+		targetName := CleanZipPath(identifier)
 		for _, f := range z.File {
-			if cleanZipPath(decodeZipName(f.Name)) == targetName {
+			if CleanZipPath(decodeZipName(f.Name)) == targetName {
 				target = f
 				break
 			}

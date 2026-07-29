@@ -245,7 +245,7 @@ pgSaveSuccess: 'Markdown file saved successfully',
     trS4Accept: 'Accept', trS4Reject: 'Reject', trS4Edit: 'Edit line',
     trS4ExportDone: 'Exported',
     textReview: 'Text Review',
-    // Media Editor (Gallery)
+    // Media Editor (Gallery) + AI Review — keys used by gallery-edit*.js and gallery-review.js. Backend: internal/api/gallery/.
     geEditImage: 'Edit Image', geEditVideo: 'Edit Video', geBtnEdit: 'Edit (ffmpeg)',
     geSourceInfo: 'Source Info', geDimensions: 'Dimensions', geDuration: 'Duration', geCodec: 'Codec', geNoAudio: 'No audio',
     geOperation: 'Operation', geFormat: 'Format', geQuality: 'Quality', geQualityHint: 'PNG is lossless — quality has no effect',
@@ -316,6 +316,9 @@ pgSaveSuccess: 'Markdown file saved successfully',
     geNamePlaceholder: 'output name (empty = original)',
     geImagesCount: 'images',
     geDragNoPathHint: 'Dragged import — browser does not expose its disk path',
+    galleryReviewExpand: 'Expand',
+    galleryReviewCollapse: 'Collapse',
+    galleryReviewMaxConcurrency: 'Max concurrency is capped at 50 to prevent overload',
   },
   cn: {
     pgSelectModel: '选择模型', pgNoModels: '未配置模型', pgSendMessage: '发送', pgStop: '停止', pgClear: '清空对话',
@@ -561,7 +564,7 @@ pgSaveSuccess: 'Markdown 文件已保存',
     trS4Accept: '接受', trS4Reject: '拒绝', trS4Edit: '编辑该行',
     trS4ExportDone: '已导出',
     textReview: '文本审校',
-    // Media Editor (Gallery)
+    // Media Editor (Gallery) + AI Review — keys used by gallery-edit*.js and gallery-review.js. Backend: internal/api/gallery/.
     geEditImage: '编辑图片', geEditVideo: '编辑视频', geBtnEdit: '编辑 (ffmpeg)',
     geSourceInfo: '源信息', geDimensions: '尺寸', geDuration: '时长', geCodec: '编码', geNoAudio: '无音频',
     geOperation: '操作', geFormat: '格式', geQuality: '质量', geQualityHint: 'PNG 为无损格式 — 质量设置无效',
@@ -633,6 +636,9 @@ pgSaveSuccess: 'Markdown 文件已保存',
     geNamePlaceholder: '输出名称（留空使用原名）',
     geImagesCount: '张图片',
     geDragNoPathHint: '拖放导入 — 浏览器不提供磁盘路径',
+    galleryReviewExpand: '展开',
+    galleryReviewCollapse: '折叠',
+    galleryReviewMaxConcurrency: '最大并发数限制为 50 以防止过载',
   }
 };
 
