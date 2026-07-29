@@ -317,9 +317,10 @@ function toggleQuotaRowExpand(provider, model) {
         var key2 = provider + '/' + model;
         var parent = el;
         while (tmp.firstElementChild) {
-          tmp.firstElementChild.setAttribute('data-parent', key2);
-          parent.parentNode.insertBefore(tmp.firstElementChild, parent.nextSibling);
-          parent = tmp.firstElementChild;
+          var node = tmp.firstElementChild;
+          node.setAttribute('data-parent', key2);
+          parent.parentNode.insertBefore(node, parent.nextSibling);
+          parent = node;
         }
       }
     } else {
@@ -377,13 +378,12 @@ function renderQuotaKeyRowsInto(provider, model, data) {
   tmp.innerHTML = html;
   var parent = el;
   while (tmp.firstElementChild) {
-    tmp.firstElementChild.setAttribute('data-parent', key);
-    parent.parentNode.insertBefore(tmp.firstElementChild, parent.nextSibling);
-    parent = tmp.firstElementChild;
+    var node = tmp.firstElementChild;
+    node.setAttribute('data-parent', key);
+    parent.parentNode.insertBefore(node, parent.nextSibling);
+    parent = node;
   }
 }
-
-// refreshAllKeyDetails throttles per-key fetches and backfills top-level
 // latency/speed + expanded sub-rows. It only fetches rows that are expanded
 // AND whose cached detail is stale, so a row just fetched (e.g. freshly
 // expanded via toggleQuotaRowExpand's direct fetch) is not re-requested on
