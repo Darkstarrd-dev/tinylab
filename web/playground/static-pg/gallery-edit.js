@@ -1014,8 +1014,8 @@ function _bindModalEvents() {
   var gearBtn = document.getElementById('ge-settings-btn');
   if (gearBtn) {
     gearBtn.onclick = function() {
-      if (typeof openDownloadSettingsModal === 'function') {
-        openDownloadSettingsModal();
+      if (typeof openPathSettingsModal === 'function') {
+        openPathSettingsModal({ sections: { defaultDir: true, ffmpegPath: true } });
         // Poll until the settings overlay is gone, then re-check ffmpeg.
         var poll = setInterval(function() {
           if (!document.getElementById('dl-settings-overlay')) {

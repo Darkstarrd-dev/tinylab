@@ -147,7 +147,7 @@ func (a *App) buildComponents() error {
 		FfmpegPath:          cfg.Download.FfmpegPath,
 		ConcurrentFragments: cfg.Download.ConcurrentFragments,
 		MaxConcurrent:       cfg.Download.MaxConcurrent,
-		Proxy:               cfg.Download.Proxy,
+		Proxy:               config.ResolveDownloadProxy(cfg),
 		BrowserCookies:      cfg.Download.BrowserCookies,
 		CookiesPath:         cfg.Download.CookiesPath,
 	}
@@ -182,7 +182,7 @@ func (a *App) buildComponents() error {
 	a.apiRouter = api.New(a.reg, cfg, a.configPath, a.usageBuf, a.pgUsageBuf, a.quotaTracker, a.logger, a.proxyHandler, a.triggerShutdown, a.selector, a.comboRes, a.downloadMgr)
 	a.proxyHandler.SetDebugModeProvider(a.apiRouter.DebugMode)
 	a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)
-	a.proxyHandler.SetRequestLogDir(filepath.Join(a.configDir, "traces"))
+	a.proxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, a.configDir))
 	a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)
 
 	// Start the trace retention sweep goroutine. It runs every hour

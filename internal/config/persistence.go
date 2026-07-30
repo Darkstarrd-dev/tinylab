@@ -62,12 +62,106 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	var cfg Config
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
+	migrated, err := decodeConfig(data, &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	return finalizeConfig(&cfg, data), nil
+	finalized := finalizeConfig(&cfg, data)
+	// Auto-migrate: if the on-disk YAML carried fields no longer in the
+	// schema (e.g. a removed download.proxy), the strict decoder fails and
+	// decodeConfig falls back to a lenient decode. Persist the normalized
+	// config back to disk so the deprecated fields are dropped and the next
+	// startup is clean. Best-effort: a write failure does not block loading.
+	if migrated {
+		_ = Save(path, finalized)
+	}
+	return finalized, nil
+}
+
+// deprecatedFieldPaths lists YAML field paths (each a sequence of map keys)
+// that have been removed from the current schema. When the strict decoder
+// rejects a config, Load strips these paths and retries so legacy config.yaml
+// files auto-migrate instead of blocking startup. A genuinely unknown field
+// (e.g. a typo like "portt") is not in this list, so the strict error surfaces
+// unchanged — preserving the typo-catching intent of KnownFields(true).
+var deprecatedFieldPaths = [][]string{
+	{"download", "proxy"},
+}
+
+// decodeConfig strictly decodes YAML data into cfg. If the strict decoder
+// rejects the data, it strips known-deprecated field paths, re-marshals, and
+// retries the strict decode. The migrated flag is true when a deprecated
+// field was stripped so the caller can persist the cleaned config. A strict
+// failure that is NOT explained by a deprecated field (e.g. a typo) returns
+// the original strict error.
+func decodeConfig(data []byte, cfg *Config) (migrated bool, err error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if derr := dec.Decode(cfg); derr == nil {
+		return false, nil
+	} else {
+		// Strict failed. Parse into a generic map (lenient) so we can strip
+		// deprecated fields without touching anything else.
+		var root map[string]any
+		ldec := yaml.NewDecoder(bytes.NewReader(data))
+		ldec.KnownFields(false)
+		if merr := ldec.Decode(&root); merr != nil {
+			return false, derr
+		}
+		if !stripPaths(root, deprecatedFieldPaths) {
+			// No deprecated field present — the strict error is a genuine
+			// mistake (typo); surface it unchanged.
+			return false, derr
+		}
+		cleaned, merr := yaml.Marshal(root)
+		if merr != nil {
+			return false, derr
+		}
+		sdec := yaml.NewDecoder(bytes.NewReader(cleaned))
+		sdec.KnownFields(true)
+		if serr := sdec.Decode(cfg); serr != nil {
+			// Still failing after stripping — a non-deprecated unknown field
+			// remains; surface that error.
+			return false, serr
+		}
+		return true, nil
+	}
+}
+
+// stripPaths removes each dot-path from root, returning whether any path was
+// present and removed.
+func stripPaths(root map[string]any, paths [][]string) bool {
+	changed := false
+	for _, p := range paths {
+		if stripPath(root, p) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// stripPath removes the leaf key identified by path from a nested map tree.
+func stripPath(root map[string]any, path []string) bool {
+	m := root
+	for i, k := range path {
+		if i == len(path)-1 {
+			if _, ok := m[k]; ok {
+				delete(m, k)
+				return true
+			}
+			return false
+		}
+		v, ok := m[k]
+		if !ok {
+			return false
+		}
+		mm, ok := v.(map[string]any)
+		if !ok {
+			return false
+		}
+		m = mm
+	}
+	return false
 }
 
 // Save writes config to path atomically (temp file + rename) via fsutil.AtomicWrite.

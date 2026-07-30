@@ -54,7 +54,7 @@ type Handler struct {
 	debugModeProvider     func() bool
 	quickSlotOnlyProvider func() bool
 	logRequestsProvider   func() bool
-	requestLogDir         string
+	requestLogDir         atomic.Value // string; settable at runtime via SetRequestLogDir
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete
@@ -287,14 +287,19 @@ func (h *Handler) logRequests() bool {
 }
 
 func (h *Handler) SetRequestLogDir(dir string) {
-	h.requestLogDir = dir
+	h.requestLogDir.Store(dir)
 }
 
 // TracesDir returns the directory where two-tier JSONL trace files are
 // written, or "" if tracing is not configured. Read-only access for the
-// trace reader API.
+// trace reader API. Safe for concurrent use; the value may be repointed
+// at runtime via SetRequestLogDir from the settings API.
 func (h *Handler) TracesDir() string {
-	return h.requestLogDir
+	v := h.requestLogDir.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(string)
 }
 
 // SetPgUsage 注入 Playground 来源请求专用的 usage ring。注入后，source ==

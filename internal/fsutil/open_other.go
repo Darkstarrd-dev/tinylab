@@ -40,8 +40,19 @@ func OpenInBrowser(url string) error {
 // is ignored on macOS (osascript does not support filters). Returns empty
 // string if the user cancelled.
 func OpenFilePicker(filter string) (string, error) {
+	return OpenFilePickerAt(filter, "")
+}
+
+// OpenFilePickerAt is like OpenFilePicker but starts the dialog in the given
+// directory. On macOS the initialDir is passed to "default location".
+func OpenFilePickerAt(filter, initialDir string) (string, error) {
 	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("osascript", "-e", "posix path of (choose file)").Output()
+		script := "posix path of (choose file"
+		if initialDir != "" {
+			script += " default location (POSIX file \"" + initialDir + "\")"
+		}
+		script += ")"
+		out, err := exec.Command("osascript", "-e", script).Output()
 		if err != nil {
 			return "", nil // user cancelled
 		}
@@ -54,8 +65,19 @@ func OpenFilePicker(filter string) (string, error) {
 // uses osascript; on Linux it returns ErrUnsupportedPlatform. Returns empty
 // string if the user cancelled.
 func OpenDirectoryPicker() (string, error) {
+	return OpenDirectoryPickerAt("")
+}
+
+// OpenDirectoryPickerAt is like OpenDirectoryPicker but starts the dialog in
+// the given directory.
+func OpenDirectoryPickerAt(initialDir string) (string, error) {
 	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("osascript", "-e", "posix path of (choose folder)").Output()
+		script := "posix path of (choose folder"
+		if initialDir != "" {
+			script += " default location (POSIX file \"" + initialDir + "\")"
+		}
+		script += ")"
+		out, err := exec.Command("osascript", "-e", script).Output()
 		if err != nil {
 			return "", nil // user cancelled
 		}
@@ -63,3 +85,4 @@ func OpenDirectoryPicker() (string, error) {
 	}
 	return "", ErrUnsupportedPlatform
 }
+
