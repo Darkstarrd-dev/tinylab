@@ -304,7 +304,8 @@ function pgSendImage(i, body, assistantIdx) {
     }
   }, imgTimeoutMs);
 
-  fetch('/v1/images/generations', {
+  var endpoint = w.config.imgEndpoint === 'edits' ? '/v1/images/edits' : '/v1/images/generations';
+  fetch(endpoint, {
     method: 'POST',
     headers: headers,
     body: JSON.stringify(body),

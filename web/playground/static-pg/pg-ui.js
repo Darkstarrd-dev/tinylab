@@ -466,10 +466,28 @@ function pgRenderSidebar() {
       winbarContent +
     '</div>';
 
-  // --- Model select ---
+  // --- Model select (image mode: dual native <select> protocol left / model right) ---
   var modelLabel = pgWin().config.model || pgT('pgSelectModel');
-  var modelPickerOpts = pgState.mode === 'image' ? { kindFilter: 'image' } : { kindFilter: 'text' };
+  var modelPickerOpts = { kindFilter: 'text' };
   var modelSel = '<button class="pg-btn pg-model-btn"' + (customMode ? ' disabled' : '') + ' onclick="pgOpenModelPicker(pgWin().config.model, function(v){ pgOnModelChange(v); pgRenderSidebar(); }, ' + JSON.stringify(modelPickerOpts).replace(/"/g, '&quot;') + ')" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(modelLabel) + ' <span style="float:right;opacity:0.5">▼</span></button>';
+  if (pgState.mode === 'image') {
+    var protos = pgImageProtocols();
+    var protoCur = cfg.imgProtocolFilter || 'all';
+    var protoOpts = protos.map(function(p) {
+      return '<option value="' + pgEscapeAttr(p) + '"' + (protoCur === p ? ' selected' : '') + '>' + pgEscapeHtml(p === 'all' ? pgT('pgImgProtocolAll') : p) + '</option>';
+    }).join('');
+    var protoSel = '<select class="pg-param-select" onchange="pgOnProtocolFilter(this.value)"' + (customMode ? ' disabled' : '') + ' style="flex:1">' + protoOpts + '</select>';
+    var mCur = cfg.model || '';
+    var availModels = (pgState.models || []).slice().filter(function(m) { return m.kind === 'image'; });
+    if (protoCur && protoCur !== 'all') {
+      availModels = availModels.filter(function(m) { return m.imgProtocol === protoCur; });
+    }
+    var mOpts = availModels.map(function(m) {
+      return '<option value="' + pgEscapeAttr(m.id) + '"' + (mCur === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>';
+    }).join('');
+    var mSel = '<select class="pg-param-select" onchange="pgOnModelChange(this.value); pgOnModelSelectBackfill(this.value); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar()"' + (customMode ? ' disabled' : '') + ' style="flex:3"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + mOpts + '</select>';
+    modelSel = '<div style="display:flex;gap:6px;align-items:stretch"><div style="flex:1;min-width:0">' + protoSel + '</div><div style="flex:3;min-width:0">' + mSel + '</div></div>';
+  }
 
   // --- Parameters ---
   function paramRow(key, label, min, max, step, isNum) {
@@ -618,10 +636,13 @@ function pgRenderSidebar() {
   ) : '';
 
   if (pgState.mode === 'image') {
-    var imgParams = pgRenderImageParams(cfg);
+    var effProto = pgEffectiveProtocol(cfg);
+    var imgParams = effProto !== null ? pgRenderImageParams(cfg, effProto) : '';
     side.innerHTML =
       winbar +
-      '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
+      '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
+      modelSel +
+      '</div>' +
       imgParams +
       '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
       '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -656,9 +677,57 @@ function pgGetModelInfo(modelId) {
   return null;
 }
 
+// pgGetImgProtocol returns the imgProtocol for a model (gpt/xai/modelscope),
+// defaulting to 'gpt' when the model is not an image kind or has no protocol.
+// Used by request construction (pg-stream.js).
 function pgGetImgProtocol(modelId) {
   var info = pgGetModelInfo(modelId);
   return (info && info.kind === 'image' && info.imgProtocol) ? info.imgProtocol : 'gpt';
+}
+// pgOnModelSelectBackfill sets the protocol filter to match the selected
+// model's imgProtocol so the protocol picker stays coherent with the model.
+// Called from the image-mode model <select> onchange after pgOnModelChange.
+function pgOnModelSelectBackfill(modelId) {
+  var w = pgWin();
+  if (!w) return;
+  if (!modelId) { w.config.imgProtocolFilter = 'all'; return; }
+  var info = pgGetModelInfo(modelId);
+  if (info && info.kind === 'image' && info.imgProtocol) {
+    w.config.imgProtocolFilter = info.imgProtocol;
+  } else {
+    w.config.imgProtocolFilter = 'all';
+  }
+}
+
+// pgEffectiveProtocol returns the protocol that governs the current image-mode
+// parameter panel.  It prefers an explicit protocol filter (imgProtocolFilter)
+// when one is active, then falls back to the selected model's imgProtocol,
+// and finally to null.  This helper drives UI visibility and is also passed
+// to pgRenderImageParams to determine which protocol's params panel to render.
+function pgEffectiveProtocol(cfg) {
+  // Prefer the selected model's imgProtocol first, then explicit filter.
+  if (cfg.model) {
+    var m = pgGetModelInfo(cfg.model);
+    if (m && m.kind === 'image' && m.imgProtocol) return m.imgProtocol;
+  }
+  if (cfg.imgProtocolFilter && cfg.imgProtocolFilter !== 'all') {
+    return cfg.imgProtocolFilter;
+  }
+  return null;
+}
+
+// pgImageProtocols returns the set of unique imgProtocol values among all
+// image-kind models in pgState.models, plus 'all'.  Used to populate the
+// protocol selector in image mode.
+function pgImageProtocols() {
+  var protos = { all: true };
+  var models = pgState.models || [];
+  for (var i = 0; i < models.length; i++) {
+    if (models[i].kind === 'image' && models[i].imgProtocol) {
+      protos[models[i].imgProtocol] = true;
+    }
+  }
+  return Object.keys(protos);
 }
 
 function pgImgParamSelect(key, labelKey, val, options) {
@@ -735,21 +804,26 @@ function pgImgListContains(opts, val) {
   return false;
 }
 
-function pgRenderImageParams(cfg) {
-  var proto = pgGetImgProtocol(cfg.model);
+function pgRenderImageParams(cfg, proto) {
   var html = '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImageParams')) + '</div>';
   if (proto === 'gpt') {
     html += pgImgParamSelectWithEdit('imgSize', 'gpt', cfg.model, cfg, [
+      {value: '', label: pgT('pgImgSizeDefault')},
+      {value: 'auto', label: 'auto'},
+      {value: '1:1', label: '1:1'},
+      {value: '16:9', label: '16:9'},
+      {value: '9:16', label: '9:16'},
+      {value: '3:1', label: '3:1'},
       {value: '1024x1024', label: '1024x1024 (1:1)'},
-      {value: '2560x3840', label: '2560x3840 (2:3)'},
-      {value: '3840x2560', label: '3840x2560 (3:2)'},
-      {value: '3840x2880', label: '3840x2880 (4:3)'},
-      {value: '2880x3840', label: '2880x3840 (3:4)'},
-      {value: '3840x2160', label: '3840x2160 (16:9)'},
-      {value: '2160x3840', label: '2160x3840 (9:16)'},
+      {value: '1200x675', label: '1200x675 (16:9)'},
+      {value: '928x1664', label: '928x1664 (9:16)'},
+      {value: '3000x1000', label: '3000x1000 (3:1)'},
     ]);
     html += pgImgParamSelect('imgQuality', 'pgImgQuality', cfg.imgQuality || '', [
       {value: '', label: pgT('pgImgQualityStandard')},
+      {value: 'auto', label: pgT('pgImgQualityAuto')},
+      {value: 'low', label: pgT('pgImgQualityLow')},
+      {value: 'medium', label: pgT('pgImgQualityMedium')},
       {value: 'high', label: pgT('pgImgQualityHigh')},
     ]);
     html += pgImgParamSelect('imgBackground', 'pgImgBackground', cfg.imgBackground || '', [
@@ -760,6 +834,29 @@ function pgRenderImageParams(cfg) {
       {value: '', label: pgT('pgImgModerationAuto')},
       {value: 'low', label: pgT('pgImgModerationLow')},
     ]);
+    // n constrained 1..5 for GPT
+    html += pgImgParamNumber('imgN', 'pgImgN', cfg.imgN || 1, 1, 5, 1);
+    // response_format
+    html += pgImgParamSelect('imgResponseFormat', 'pgImgResponseFormat', cfg.imgResponseFormat || '', [
+      {value: '', label: pgT('pgImgResponseFormatUrl')},
+      {value: 'b64_json', label: pgT('pgImgResponseFormatB64')},
+    ]);
+    // output_format
+    html += pgImgParamSelect('imgOutputFormat', 'pgImgOutputFormat', cfg.imgOutputFormat || '', [
+      {value: '', label: pgT('pgImgQualityStandard')},
+      {value: 'png', label: pgT('pgImgOutputFormatPng')},
+      {value: 'jpeg', label: pgT('pgImgOutputFormatJpeg')},
+      {value: 'webp', label: pgT('pgImgOutputFormatWebp')},
+    ]);
+    // output_compression (shown only when output_format is set)
+    html += '<div class="pg-param-row pg-img-output-compression-row"' + (cfg.imgOutputFormat && cfg.imgOutputFormat !== 'png' ? '' : ' style="display:none"') + '>' +
+      '<label>' + pgEscapeHtml(pgT('pgImgOutputCompression')) + '</label>' +
+      '<input type="number" min="0" max="100" step="1" value="' + (cfg.imgOutputCompression || 0) + '" onchange="pgOnParam(\'imgOutputCompression\', parseInt(this.value,10)||0)" style="flex:0 0 80px">' +
+    '</div>';
+    // user
+    html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgUser')) + '</label>' +
+      '<input type="text" value="' + pgEscapeAttr(cfg.imgUser || '') + '" oninput="pgOnParam(\'imgUser\', this.value)" style="flex:1">' +
+    '</div>';
   } else if (proto === 'xai') {
     html += pgImgParamSelect('imgAspectRatio', 'pgImgAspectRatio', cfg.imgAspectRatio || '1:1', [
       {value: '1:1', label: '1:1'},
@@ -802,6 +899,7 @@ function pgRenderImageBlock(customMode) {
   if (!w) return '';
   var cfg = w.config;
   var en = cfg.imageEnabled && !customMode;
+  var isImageMode = pgState.mode === 'image';
   var urls = cfg.imageUrls || [];
   var hintKey;
   if (customMode) hintKey = 'pgImageCustomDisabled';
@@ -818,11 +916,27 @@ function pgRenderImageBlock(customMode) {
       '</div>';
     });
   }
+  // Endpoint selector: image mode only, visible even when imageEnabled=false, disabled in customMode
+  var epSel = '';
+  if (isImageMode) {
+    var epVal = cfg.imgEndpoint || 'generations';
+    var epOpts = [
+      {value: 'generations', label: pgEscapeHtml(pgT('pgImgEndpointGenerations'))},
+      {value: 'edits', label: pgEscapeHtml(pgT('pgImgEndpointEdits'))},
+    ].map(function(o) {
+      return '<option value="' + pgEscapeAttr(o.value) + '"' + (epVal === o.value ? ' selected' : '') + '>' + o.label + '</option>';
+    }).join('');
+    epSel = '<div class="pg-param-row">' +
+      '<label>' + pgEscapeHtml(pgT('pgImgEndpoint')) + '</label>' +
+      '<select onchange="pgOnParam(\'imgEndpoint\', this.value)"' + (customMode ? ' disabled' : '') + ' style="flex:1">' + epOpts + '</select>' +
+    '</div>';
+  }
   return '<div class="pg-image-block' + (en ? '' : ' disabled') + '">' +
     '<div class="pg-switch"><input type="checkbox" id="pg-imgenable" ' + (cfg.imageEnabled ? 'checked' : '') + ' onchange="pgOnParam(\'imageEnabled\', this.checked); pgRenderSidebar()"' + (customMode ? ' disabled' : '') + '><label for="pg-imgenable">' + pgEscapeHtml(pgT('pgImageEnable')) + '</label>' +
       '<button class="pg-image-add" onclick="pgAddImageUrl()" ' + (en ? '' : 'disabled') + ' data-tooltip="' + pgEscapeHtml(pgT('pgImageAdd')) + '">+</button>' +
     '</div>' +
     (rows || '') +
+    epSel +
     '<div class="pg-image-hint">' + pgEscapeHtml(hintText) + '</div>' +
   '</div>';
 }
@@ -1209,6 +1323,26 @@ function pgApplyActiveQuickSlot(model) {
   pgUpdateInputBar();
 }
 function pgOnModelChange(v) { var w = pgWin(); if (w) { w.config.model = v; if (typeof qsClearActive === 'function') qsClearActive(); pgSave(); pgRenderPanes(); pgUpdateInputBar(); } }
+
+// pgOnProtocolFilter changes the protocol filter.  If the currently selected
+// model no longer matches the chosen protocol, it is cleared so the user
+// always has a coherent model+protocol pair.
+function pgOnProtocolFilter(v) {
+  var w = pgWin();
+  if (!w) return;
+  w.config.imgProtocolFilter = v;
+  // Clear model if it doesn't match the selected protocol
+  if (v && v !== 'all' && w.config.model) {
+    var info = pgGetModelInfo(w.config.model);
+    if (info && info.imgProtocol !== v) {
+      w.config.model = '';
+    }
+  }
+  pgSave();
+  pgRenderSidebar();
+  pgRenderPanes();
+  pgUpdateInputBar();
+}
 function pgOnParam(name, v) {
   var w = pgWin();
   if (!w) return;
