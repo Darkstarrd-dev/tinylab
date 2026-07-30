@@ -48,6 +48,15 @@ var PG_DEFAULT_CFG = {
   imgAspectRatio: '1:1',
   imgResolution: '2k',
   imgN: 1,
+  // Endpoint control: 'generations' (default) or 'edits'
+  imgEndpoint: 'generations',
+  // GPT/image response/output format fields
+  imgResponseFormat: '',
+  imgOutputFormat: '',
+  imgOutputCompression: 0,
+  imgUser: '',
+  // Protocol filter for image model selector
+  imgProtocolFilter: 'all',
   // ModelScope params
   imgNegativePrompt: '',
   imgSteps: 0,

@@ -462,12 +462,13 @@ function pgImgResolveModelID(displayId) {
 
 // pgImgBuiltinSizesFor returns the hardcoded default size list for a protocol
 // so the edit modal can prefill when no custom list is set yet.
+// GPT modal builtin concrete defaults only: exact four sizes.
+// xAI and ModelScope defaults are unchanged.
 function pgImgBuiltinSizesFor(proto) {
   if (proto === 'modelscope') {
     return ['1024x1024', '1280x720', '720x1280', '1024x768', '768x1024'];
   }
-  // gpt (default)
-  return ['1024x1024', '2560x3840', '3840x2560', '3840x2880', '2880x3840', '3840x2160', '2160x3840'];
+  return ['1024x1024', '1200x675', '928x1664', '3000x1000'];
 }
 
 // ----- Model picker modal (separate overlay, stacks on top) ---

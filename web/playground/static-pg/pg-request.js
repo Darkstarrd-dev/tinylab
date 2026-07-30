@@ -130,6 +130,21 @@ function pgBuildImageBody(i) {
     if (cfg.imgQuality) body.quality = cfg.imgQuality;
     if (cfg.imgBackground) body.background = cfg.imgBackground;
     if (cfg.imgModeration) body.moderation = cfg.imgModeration;
+    // n constrained 1..5 for GPT
+    if ((cfg.imgN || 1) !== 1) body.n = Math.min(5, Math.max(1, cfg.imgN || 1));
+    // response_format: url or b64_json
+    if (cfg.imgResponseFormat) body.response_format = cfg.imgResponseFormat;
+    // output_format: png, jpeg, or webp
+    if (cfg.imgOutputFormat) body.output_format = cfg.imgOutputFormat;
+    // output_compression: 0..100, only for jpeg/webp; preserve explicit 0
+    if (cfg.imgOutputFormat === 'jpeg' || cfg.imgOutputFormat === 'webp') {
+      var comp = cfg.imgOutputCompression;
+      if (typeof comp === 'number' && isFinite(comp)) {
+        body.output_compression = Math.min(100, Math.max(0, comp));
+      }
+    }
+    // user field
+    if (cfg.imgUser) body.user = cfg.imgUser;
   } else if (proto === 'xai') {
     body.n = cfg.imgN || 1;
     body.response_format = 'b64_json';
@@ -144,7 +159,7 @@ function pgBuildImageBody(i) {
   }
   // Input image(s) for image-edit / image-to-image models (e.g. ModelScope
   // FireRed-Image-Edit). Single image -> string; multiple -> array, matching
-  // the ModelScope /v1/images/generations `image_url` field.
+  // the ModelScope /v1/images/generations image_url field.
   if (cfg.imageEnabled && cfg.imageUrls) {
     var imgUrls = cfg.imageUrls.filter(function(u) { return u && u.trim(); });
     if (imgUrls.length > 0) {
