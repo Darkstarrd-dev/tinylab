@@ -9,7 +9,7 @@ var downloadTasksMap = {};
 // Map of task id -> rendered DOM element.
 var downloadTaskEls = {};
 // Persisted default download directory from the server settings.
-var downloadDefaultDir = '';
+var browsePickerOpen = false;
 
 // DL_STATUS_KEYS maps a raw TaskStatus to the i18n key for its label.
 var DL_STATUS_KEYS = {
@@ -57,7 +57,7 @@ function renderDownload(container) {
         </select>
         <input type="text" id="dl-url" class="input" placeholder="${escapeHtml(t('downloadUrlPlaceholder'))}" />
         <button class="btn btn-primary" id="dl-parse-btn" type="button" onclick="parseDownloadUrl()">${escapeHtml(t('parse'))}</button>
-        <button class="btn btn-ghost" type="button" onclick="openDownloadSettingsModal()">${escapeHtml(t('settings'))}</button>
+        <button class="btn btn-ghost" type="button" onclick="openPathSettingsModal({ sections: { defaultDir: true, ytDlpPath: true, ffmpegPath: true }, useProxy: true })">${escapeHtml(t('settings'))}</button>
         <button class="btn btn-ghost btn-icon" type="button" onclick="clearCompletedDownloads()" data-tooltip="${escapeHtml(t('clearCompleted'))}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <path d="M3 6h18"></path>
@@ -367,27 +367,44 @@ function openExternalUrl(url) {
 }
 
 // fasBrowsePicker requests native system file/directory picker from backend and sets full absolute path.
-async function fasBrowsePicker(inputEl, mode) {
-  if (!inputEl) return;
+// initialPath is optional; if given, the picker opens at that directory (or its parent, for file targets).
+// A global lock prevents multiple simultaneous native dialogs.
+async function fasBrowsePicker(inputEl, mode, initialPath) {
+  if (!inputEl || browsePickerOpen) return;
+  browsePickerOpen = true;
+  // Freeze other browse buttons and the overlay backdrop while the native
+  // dialog is open, so the user cannot open additional pickers or dismiss
+  // the modal by clicking outside.
+  var overlay = document.getElementById('dl-settings-overlay');
+  var btns = overlay ? overlay.querySelectorAll('.dl-browse-btn') : [];
+  btns.forEach(function(b) { b.disabled = true; });
+  if (overlay) overlay.style.pointerEvents = 'none';
   try {
-    var res = await apiPost('/browse', { mode: mode });
+    var body = { mode: mode };
+    if (initialPath) body.initialPath = initialPath;
+    var res = await apiPost('/browse', body);
     if (res && res.path) {
       inputEl.value = res.path;
     }
   } catch (e) {
-    // Backend picker unavailable; File System Access API cannot provide absolute
-    // paths (browser security), so we cannot offer a meaningful fallback here.
     console.warn('browse picker failed:', e);
+  } finally {
+    browsePickerOpen = false;
+    btns.forEach(function(b) { b.disabled = false; });
+    if (overlay) overlay.style.pointerEvents = '';
   }
 }
 
-// openDownloadSettingsModal shows a modal with the four download tool settings.
-async function openDownloadSettingsModal() {
+// openPathSettingsModal shows a modal with path/tool settings.
+// opts = { title?: string, sections: { defaultDir?, imageDir?, logDir?, ytDlpPath?, ffmpegPath? }, useProxy?: bool }
+async function openPathSettingsModal(opts) {
+  opts = opts || {};
+  var sections = opts.sections || {};
   if (document.getElementById('dl-settings-overlay')) return;
-
-  var dl = {};
   try {
-    var res = await apiGet('/settings');
+  var dl = {}, res = {};
+  try {
+    res = await apiGet('/settings');
     dl = (res && res.download) || {};
   } catch (e) {
     dl = {};
@@ -396,9 +413,8 @@ async function openDownloadSettingsModal() {
   var overlay = document.createElement('div');
   overlay.className = 'dl-settings-modal';
   overlay.id = 'dl-settings-overlay';
-
-  function browseRow(labelKey, inputId, value, placeholder, mode, getToolHtml) {
-    var browseBtn = '<button class="btn btn-ghost btn-sm dl-browse-btn" type="button" data-input="' + inputId + '" data-mode="' + mode + '">' + escapeHtml(t('browse')) + '</button>';
+  function browseRow(labelKey, inputId, value, placeholder, mode, getToolHtml, initialPath) {
+    var browseBtn = '<button class="btn btn-ghost btn-sm dl-browse-btn" type="button" data-input="' + inputId + '" data-mode="' + mode + '"' + (initialPath ? ' data-initial="' + escapeAttr(initialPath) + '"' : '') + '>' + escapeHtml(t('browse')) + '</button>';
     var headerHtml = '<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:calc(var(--font-base) - 1.5px); font-weight:500; color:var(--text-secondary);">' +
       '<span>' + escapeHtml(t(labelKey)) + '</span>' +
       (getToolHtml || '') +
@@ -412,20 +428,42 @@ async function openDownloadSettingsModal() {
       '</div>' +
     '</div>';
   }
+  var configDir = (res && res.configDir) || '';
+  var formRows = '';
+  if (sections.ytDlpPath) {
+    formRows += browseRow('ytDlpPath', 'modal-dl-ytdlp-path', dl.ytDlpPath || '', 'yt-dlp', 'file', '<button class="btn btn-ghost btn-sm" style="padding:0 6px; height:18px; font-size:10px; line-height:16px; border:1px solid var(--glass-border); text-transform:none; font-weight:normal;" type="button" onclick="openExternalUrl(\'https://github.com/yt-dlp/yt-dlp/releases\')">Get yt-dlp</button>', dl.ytDlpPath || '');
+  }
+  if (sections.ffmpegPath) {
+    formRows += browseRow('ffmpegPath', 'modal-dl-ffmpeg-path', dl.ffmpegPath || '', 'ffmpeg', 'file', '<button class="btn btn-ghost btn-sm" style="padding:0 6px; height:18px; font-size:10px; line-height:16px; border:1px solid var(--glass-border); text-transform:none; font-weight:normal;" type="button" onclick="openExternalUrl(\'https://www.ffmpeg.org/download.html\')">Get ffmpeg</button>', dl.ffmpegPath || '');
+  }
+  if (sections.defaultDir) {
+    formRows += browseRow('defaultDir', 'modal-dl-default-dir', dl.defaultDir || '', 'Downloads', 'directory', null, dl.defaultDir || '');
+  }
+  if (sections.imageDir) {
+    var imgVal = (res && res.imageSaveDir) || '';
+    var imgInit = imgVal || (configDir ? configDir + '/imgs' : '');
+    formRows += browseRow('imageDir', 'modal-dl-image-dir', imgVal, '', 'directory', null, imgInit);
+  }
+  if (sections.logDir) {
+    var logVal = (res && res.trace && res.trace.logDir) || '';
+    var logInit = logVal || (configDir ? configDir + '/traces' : '');
+    formRows += browseRow('logDir', 'modal-dl-log-dir', logVal, '', 'directory', null, logInit);
+  }
+  if (opts.useProxy) {
+    formRows += '<div class="dl-settings-field" style="margin-bottom:12px;">' +
+      '<div class="dl-settings-row" style="justify-content:space-between; align-items:center;">' +
+        '<span style="font-size:calc(var(--font-base) - 1.5px); font-weight:500; color:var(--text-secondary);">' + escapeHtml(t('useProxy')) + '</span>' +
+        '<label class="toggle-switch" style="margin:0;"><input type="checkbox" id="modal-dl-use-proxy"' + (dl.useProxy ? ' checked' : '') + '><span class="toggle-slider"></span></label>' +
+      '</div>' +
+      '<div style="margin-top:4px; font-size:calc(var(--font-base) - 2px); color:var(--text-tertiary);">' + escapeHtml(t('useProxyHint')) + '</div>' +
+    '</div>';
+  }
 
   overlay.innerHTML = '' +
     '<div class="dl-settings-card">' +
-      '<div class="dl-settings-modal-title">' + escapeHtml(t('downloadSettings')) + '</div>' +
+      '<div class="dl-settings-modal-title">' + escapeHtml(opts.title || t('downloadSettings')) + '</div>' +
       '<form class="dl-settings-form" id="dl-settings-form" onsubmit="return false;">' +
-        browseRow('ytDlpPath', 'modal-dl-ytdlp-path', dl.ytDlpPath || '', 'yt-dlp', 'file', '<button class="btn btn-ghost btn-sm" style="padding:0 6px; height:18px; font-size:10px; line-height:16px; border:1px solid var(--glass-border); text-transform:none; font-weight:normal;" type="button" onclick="openExternalUrl(\'https://github.com/yt-dlp/yt-dlp/releases\')">Get yt-dlp</button>') +
-        browseRow('ffmpegPath', 'modal-dl-ffmpeg-path', dl.ffmpegPath || '', 'ffmpeg', 'file', '<button class="btn btn-ghost btn-sm" style="padding:0 6px; height:18px; font-size:10px; line-height:16px; border:1px solid var(--glass-border); text-transform:none; font-weight:normal;" type="button" onclick="openExternalUrl(\'https://www.ffmpeg.org/download.html\')">Get ffmpeg</button>') +
-        browseRow('defaultDir', 'modal-dl-default-dir', dl.defaultDir || '', 'Downloads', 'directory') +
-        '<div class="dl-settings-field" style="margin-bottom:12px;">' +
-          '<div style="margin-bottom:6px; font-size:calc(var(--font-base) - 1.5px); font-weight:500; color:var(--text-secondary);">' + escapeHtml(t('downloadProxy')) + '</div>' +
-          '<div class="dl-settings-row">' +
-            '<input type="text" class="input" id="modal-dl-proxy" value="' + escapeAttr(dl.proxy || '') + '" placeholder="http://host:port" style="width:100%;" />' +
-          '</div>' +
-        '</div>' +
+        formRows +
       '</form>' +
       '<div class="dl-settings-modal-actions">' +
         '<button class="btn btn-ghost" type="button" id="dl-settings-cancel">' + escapeHtml(t('cancel')) + '</button>' +
@@ -436,21 +474,66 @@ async function openDownloadSettingsModal() {
   document.body.appendChild(overlay);
   requestAnimationFrame(function() { overlay.classList.add('show'); });
 
-  var keyHandler = null;
+  // Auto-focus the Save button so the user can dismiss immediately with Enter.
+  var saveBtn = document.getElementById('dl-settings-save');
+  if (saveBtn) {
+    saveBtn.focus();
+  }
+
+  // Trap keyboard events inside the modal. Capture phase ensures we see
+  // the event before any app-level handler (e.g. an app-wide Escape that
+  // closes other modals).
+  var trapHandler = function(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeModal();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var focusable = overlay.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first || !overlay.contains(document.activeElement)) {
+          last.focus();
+          return;
+        }
+      } else {
+        if (document.activeElement === last || !overlay.contains(document.activeElement)) {
+          first.focus();
+          return;
+        }
+      }
+    }
+  };
+  overlay.addEventListener('keydown', trapHandler, true);
+
   function closeModal() {
-    if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
+    overlay.removeEventListener('keydown', trapHandler, true);
     overlay.classList.remove('show');
     overlay.addEventListener('transitionend', function() { overlay.remove(); }, { once: true });
   }
 
   function save() {
-    var ytDlpPath = (document.getElementById('modal-dl-ytdlp-path') || {}).value || '';
-    var ffmpegPath = (document.getElementById('modal-dl-ffmpeg-path') || {}).value || '';
-    var defaultDir = (document.getElementById('modal-dl-default-dir') || {}).value || '';
-    var proxy = (document.getElementById('modal-dl-proxy') || {}).value || '';
-    apiPatch('/settings', { download: { ytDlpPath: ytDlpPath, ffmpegPath: ffmpegPath, defaultDir: defaultDir, proxy: proxy } })
+    var dlPayload = {};
+    if (sections.ytDlpPath) dlPayload.ytDlpPath = (document.getElementById('modal-dl-ytdlp-path') || {}).value || '';
+    if (sections.ffmpegPath) dlPayload.ffmpegPath = (document.getElementById('modal-dl-ffmpeg-path') || {}).value || '';
+    if (sections.defaultDir) dlPayload.defaultDir = (document.getElementById('modal-dl-default-dir') || {}).value || '';
+    if (opts.useProxy) dlPayload.useProxy = document.getElementById('modal-dl-use-proxy').checked;
+
+    var payload = {};
+    if (Object.keys(dlPayload).length) payload.download = dlPayload;
+    if (sections.imageDir) payload.imageSaveDir = (document.getElementById('modal-dl-image-dir') || {}).value || '';
+    if (sections.logDir) payload.trace = { logDir: (document.getElementById('modal-dl-log-dir') || {}).value || '' };
+
+    apiPatch('/settings', payload)
       .then(function() {
-        downloadDefaultDir = defaultDir;
+        if (sections.defaultDir) {
+          downloadDefaultDir = (document.getElementById('modal-dl-default-dir') || {}).value || '';
+        }
         toast(t('downloadSettingsSaved'), 'success');
         closeModal();
       })
@@ -465,16 +548,15 @@ async function openDownloadSettingsModal() {
   Array.prototype.forEach.call(overlay.querySelectorAll('.dl-browse-btn'), function(btn) {
     btn.addEventListener('click', function() {
       var target = document.getElementById(btn.getAttribute('data-input'));
-      fasBrowsePicker(target, btn.getAttribute('data-mode'));
+      fasBrowsePicker(target, btn.getAttribute('data-mode'), btn.getAttribute('data-initial') || '');
     });
   });
   overlay.addEventListener('click', function(e) {
     if (e.target === overlay) closeModal();
   });
-  keyHandler = function(e) {
-    if (e.key === 'Escape') closeModal();
-  };
-  document.addEventListener('keydown', keyHandler);
+  } catch (err) {
+    console.error('[Path] openPathSettingsModal error:', err);
+  }
 }
 
 // startDownload creates a single download task from the current options.

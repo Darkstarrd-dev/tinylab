@@ -57,14 +57,27 @@ func OpenInBrowser(url string) error {
 // (e.g. "Executables (*.exe)|*.exe|All Files (*.*)|*.*"). If filter is empty,
 // all files are shown. Returns empty string if the user cancelled.
 func OpenFilePicker(filter string) (string, error) {
-	return showCommonDialog(false, filter)
+	return OpenFilePickerAt(filter, "")
+}
+
+// OpenFilePickerAt is like OpenFilePicker but starts the dialog in the given
+// directory. If initialDir is empty, the dialog opens at the default location.
+func OpenFilePickerAt(filter, initialDir string) (string, error) {
+	return showCommonDialog(false, filter, initialDir)
 }
 
 // OpenDirectoryPicker shows the modern Windows Common Item Dialog
 // (IFileOpenDialog with FOS_PICKFOLDERS) for selecting a directory.
 // Returns empty string if the user cancelled.
 func OpenDirectoryPicker() (string, error) {
-	return showCommonDialog(true, "")
+	return OpenDirectoryPickerAt("")
+}
+
+// OpenDirectoryPickerAt is like OpenDirectoryPicker but starts the dialog in
+// the given directory. If initialDir is empty, the dialog opens at the default
+// location.
+func OpenDirectoryPickerAt(initialDir string) (string, error) {
+	return showCommonDialog(true, "", initialDir)
 }
 
 // ---------- Common Item Dialog (IFileOpenDialog) via raw COM ----------
@@ -91,27 +104,29 @@ type comdlgFilterSpec struct {
 }
 
 // IFileDialog vtable indices (after IUnknown: 0-2, IModalWindow: 3).
-const (
-	vtblShow         = 3
-	vtblSetOptions   = 9
-	vtblGetOptions   = 8
-	vtblSetFileTypes = 4
-	vtblGetResult    = 20
-)
-
-// IShellItem vtable indices (after IUnknown: 0-2).
-const (
-	vtblGetDisplayName = 5
-)
-
 // showCommonDialog displays the modern IFileOpenDialog COM dialog.
 // If pickFolder is true, the dialog selects directories instead of files.
-func showCommonDialog(pickFolder bool, filter string) (string, error) {
+// If initialDir is non-empty, the dialog starts in that directory.
+func showCommonDialog(pickFolder bool, filter string, initialDir string) (string, error) {
+	const (
+		vtblShow        = 3
+		vtblSetFileTypes = 4
+		vtblGetOptions   = 8
+		vtblSetOptions   = 9
+		vtblSetFolder    = 12
+		vtblGetResult    = 20
+	)
+	const (
+		vtblGetDisplayName = 5
+	)
+
 	ole32 := windows.NewLazySystemDLL("ole32.dll")
+	shell32 := windows.NewLazySystemDLL("shell32.dll")
 	procCoInit := ole32.NewProc("CoInitializeEx")
 	procCoUninit := ole32.NewProc("CoUninitialize")
 	procCoCreate := ole32.NewProc("CoCreateInstance")
 	procTaskMemFree := ole32.NewProc("CoTaskMemFree")
+	procSHCreateItem := shell32.NewProc("SHCreateItemFromParsingName")
 
 	// Initialize COM (STA).
 	hr, _, _ := procCoInit.Call(0, 2) // COINIT_APARTMENTTHREADED
@@ -133,6 +148,30 @@ func showCommonDialog(pickFolder bool, filter string) (string, error) {
 		return "", fmt.Errorf("CoCreateInstance(IFileOpenDialog) failed: 0x%08x", hr)
 	}
 	defer syscall.SyscallN(vtblRelease(dlgPtr), uintptr(dlgPtr))
+
+	// Set initial directory if provided. Resolve to absolute so
+	// SHCreateItemFromParsingName can create the shell item (it rejects
+	// relative paths like ".").
+	if initialDir != "" {
+		if abs, err := filepath.Abs(initialDir); err == nil {
+			initialDir = abs
+		}
+		path16, err := windows.UTF16PtrFromString(initialDir)
+		if err == nil {
+			var shellItemPtr unsafe.Pointer
+			hr, _, _ = procSHCreateItem.Call(
+				uintptr(unsafe.Pointer(path16)), // PCWSTR pszPath
+				0,                               // IBindCtx *pbc (NULL)
+				uintptr(unsafe.Pointer(&iidIShellItem)),
+				uintptr(unsafe.Pointer(&shellItemPtr)),
+			)
+			if hr == 0 && shellItemPtr != nil {
+				syscall.SyscallN(vtblMethod(dlgPtr, vtblSetFolder),
+					uintptr(dlgPtr), uintptr(shellItemPtr))
+				syscall.SyscallN(vtblRelease(shellItemPtr), uintptr(shellItemPtr))
+			}
+		}
+	}
 
 	// Get current options.
 	var opts uint32
@@ -178,6 +217,7 @@ func showCommonDialog(pickFolder bool, filter string) (string, error) {
 
 	return windows.UTF16PtrToString(pathPtr), nil
 }
+
 
 // vtblMethod returns the function pointer at the given vtable index for a COM object.
 func vtblMethod(obj unsafe.Pointer, index int) uintptr {

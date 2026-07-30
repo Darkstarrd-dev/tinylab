@@ -72,7 +72,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 		}
 	}()
 
-	if h.requestLogDir == "" || !h.logRequests() {
+	if h.TracesDir() == "" || !h.logRequests() {
 		return
 	}
 
@@ -97,7 +97,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 	}
 
 	// Ensure directories exist.
-	tracesDir := h.requestLogDir
+	tracesDir := h.TracesDir()
 	reqDir := filepath.Join(tracesDir, "req")
 	if err := os.MkdirAll(reqDir, 0o755); err != nil {
 		h.logger.Warn("writeRequestLog: failed to create req dir %s: %v", reqDir, err)
@@ -295,7 +295,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 		}
 	}()
 
-	if h.requestLogDir == "" || !h.logRequests() {
+	if h.TracesDir() == "" || !h.logRequests() {
 		return
 	}
 
@@ -308,7 +308,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	dateStr := now.Format("20060102")
 	sessionID := reqID
 
-	tracesDir := h.requestLogDir
+	tracesDir := h.TracesDir()
 	reqDir := filepath.Join(tracesDir, "req")
 	if err := os.MkdirAll(reqDir, 0o755); err != nil {
 		h.logger.Warn("TraceMgmtCall: failed to create req dir %s: %v", reqDir, err)
@@ -386,7 +386,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 // request files when the total traces/ dir size exceeds the cap. It runs
 // once immediately, then every hour until ctx is cancelled.
 func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
-	if h.requestLogDir == "" {
+	if h.TracesDir() == "" {
 		return
 	}
 
@@ -408,7 +408,7 @@ func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
 
 // sweepTracesOnce performs a single retention sweep pass.
 func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
-	tracesDir := h.requestLogDir
+	tracesDir := h.TracesDir()
 	now := time.Now()
 	cutoff := now.Add(-time.Duration(retainDays) * 24 * time.Hour)
 

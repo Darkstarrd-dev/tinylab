@@ -60,6 +60,10 @@ async function renderEndpoint(c) {
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openTraceModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('pathSettingsDesc')) + '">' + t('pathSettings') + '</span>\
+          <button type="button" class="btn btn-sm settings-row-btn" onclick="openPathModal()">' + t('settings') + '</button>\
+        </div>\
+        <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
@@ -533,6 +537,10 @@ function openProxyModal() {
   document.getElementById('settings-modal-save').onclick = function() {
     withLoading(this, function() { return saveProxyModal(); });
   };
+}
+
+function openPathModal() {
+  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, imageDir: true, logDir: true, ytDlpPath: true, ffmpegPath: true } });
 }
 
 function openRotationModal() {

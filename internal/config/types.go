@@ -241,7 +241,7 @@ type DownloadConfig struct {
 	FfmpegPath          string `yaml:"ffmpegPath,omitempty" json:"ffmpegPath,omitempty"`
 	ConcurrentFragments int    `yaml:"concurrentFragments,omitempty" json:"concurrentFragments,omitempty"`
 	MaxConcurrent       int    `yaml:"maxConcurrent,omitempty" json:"maxConcurrent,omitempty"`
-	Proxy               string `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	UseProxy            bool   `yaml:"useProxy,omitempty" json:"useProxy,omitempty"`
 	BrowserCookies      string `yaml:"browserCookies,omitempty" json:"browserCookies,omitempty"`
 	CookiesPath         string `yaml:"cookiesPath,omitempty" json:"cookiesPath,omitempty"`
 }
@@ -326,6 +326,11 @@ type TraceConfig struct {
 	Enabled    bool `yaml:"enabled" json:"enabled"`
 	RetainDays int  `yaml:"retainDays" json:"retainDays"`
 	MaxDiskMB  int  `yaml:"maxDiskMB" json:"maxDiskMB"`
+	// LogDir overrides the default trace log directory ({configDir}/traces
+	// when empty). A relative path is resolved against the config directory;
+	// an absolute path is used verbatim. Changing it at runtime via the
+	// settings API re-points the trace writer and reader immediately.
+	LogDir string `yaml:"logDir,omitempty" json:"logDir,omitempty"`
 }
 
 // Config is the top-level configuration structure.

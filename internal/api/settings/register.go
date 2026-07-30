@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := h.d.Reg.Config()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
+		"configDir":          filepath.Dir(h.d.ConfigPath),
 		"port":               cfg.Port,
 		"consoleLogMaxLines": cfg.ConsoleLogMaxLines,
 		"usageRingSize":      cfg.UsageRingSize,
@@ -52,11 +54,13 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			"enabled":    h.d.LogRequests.Load(),
 			"retainDays": cfg.Trace.RetainDays,
 			"maxDiskMB":  cfg.Trace.MaxDiskMB,
+			"logDir":     cfg.Trace.LogDir,
 		},
-		"proxy":              cfg.Proxy,
-		"server":             cfg.Server,
-		"download":           cfg.Download,
-		"shortcuts":          cfg.Shortcuts,
+		"proxy":        cfg.Proxy,
+		"server":       cfg.Server,
+		"imageSaveDir": cfg.ImageSaveDir,
+		"download":     cfg.Download,
+		"shortcuts":    cfg.Shortcuts,
 		"security": map[string]any{
 			"passwordEnabled": cfg.Security.PasswordEnabled,
 			"hasPassword":     cfg.Security.PasswordEncrypted != "",
@@ -71,23 +75,33 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var updates struct {
-		Port               *int                    `json:"port"`
-		ConsoleLogMaxLines *int                    `json:"consoleLogMaxLines"`
-		UsageRingSize      *int                    `json:"usageRingSize"`
-		Rotation           *config.RotationConfig  `json:"rotation"`
-		EnablePlayground   *bool                   `json:"enablePlayground"`
-		QuickSlotOnly      *bool                   `json:"quickSlotOnly"`
-		DebugMode          *bool                   `json:"debugMode"`
-		Trace *struct {
-			Enabled    *bool `json:"enabled"`
-			RetainDays *int  `json:"retainDays"`
-			MaxDiskMB  *int  `json:"maxDiskMB"`
+		Port               *int                   `json:"port"`
+		ConsoleLogMaxLines *int                   `json:"consoleLogMaxLines"`
+		UsageRingSize      *int                   `json:"usageRingSize"`
+		Rotation           *config.RotationConfig `json:"rotation"`
+		EnablePlayground   *bool                  `json:"enablePlayground"`
+		QuickSlotOnly      *bool                  `json:"quickSlotOnly"`
+		DebugMode          *bool                  `json:"debugMode"`
+		Trace              *struct {
+			Enabled    *bool   `json:"enabled"`
+			RetainDays *int    `json:"retainDays"`
+			MaxDiskMB  *int    `json:"maxDiskMB"`
+			LogDir     *string `json:"logDir"`
 		} `json:"trace"`
-		Proxy              *config.ProxyConfig     `json:"proxy"`
-		Server             *config.ServerConfig    `json:"server"`
-		Download           *config.DownloadConfig  `json:"download"`
-		Shortcuts          *config.ShortcutsConfig `json:"shortcuts"`
-		Security           *struct {
+		Proxy    *config.ProxyConfig  `json:"proxy"`
+		Server   *config.ServerConfig `json:"server"`
+		Download *struct {
+			YtDlpPath           *string `json:"ytDlpPath"`
+			FfmpegPath          *string `json:"ffmpegPath"`
+			DefaultDir          *string `json:"defaultDir"`
+			UseProxy            *bool   `json:"useProxy"`
+			BrowserCookies      *string `json:"browserCookies"`
+			CookiesPath         *string `json:"cookiesPath"`
+			ConcurrentFragments *int    `json:"concurrentFragments"`
+			MaxConcurrent       *int    `json:"maxConcurrent"`
+		} `json:"download"`
+		Shortcuts *config.ShortcutsConfig `json:"shortcuts"`
+		Security  *struct {
 			PasswordEnabled *bool  `json:"passwordEnabled"`
 			Password        string `json:"password"`
 		} `json:"security"`
@@ -95,7 +109,8 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			APIKey     *string `json:"apiKey"`
 			MaxResults *int    `json:"maxResults"`
 		} `json:"anySearch"`
-		Theme *config.ThemeConfig `json:"theme"`
+		Theme        *config.ThemeConfig `json:"theme"`
+		ImageSaveDir *string             `json:"imageSaveDir"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -150,6 +165,10 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		if updates.Trace.MaxDiskMB != nil {
 			cfg.Trace.MaxDiskMB = *updates.Trace.MaxDiskMB
 		}
+		if updates.Trace.LogDir != nil {
+			cfg.Trace.LogDir = *updates.Trace.LogDir
+			h.d.ProxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, filepath.Dir(h.d.ConfigPath)))
+		}
 	}
 	if updates.Security != nil {
 		if updates.Security.PasswordEnabled != nil {
@@ -186,6 +205,8 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Changing proxy may affect download proxy routing.
+	h.pushDownloadSettings(cfg)
 	if updates.Server != nil {
 		cfg.Server = *updates.Server
 		config.FinalizeServerConfig(&cfg.Server)
@@ -198,37 +219,31 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if updates.Download != nil {
-		// Merge partial download updates from the frontend. String fields are
-		// always copied (empty means "clear the override"). Numeric fields are
-		// only overwritten when non-zero so a partial update from the download
-		// page doesn't reset concurrentFragments/maxConcurrent/enabled.
-		cfg.Download.YtDlpPath = updates.Download.YtDlpPath
-		cfg.Download.FfmpegPath = updates.Download.FfmpegPath
-		cfg.Download.DefaultDir = updates.Download.DefaultDir
-		cfg.Download.Proxy = updates.Download.Proxy
-		cfg.Download.BrowserCookies = updates.Download.BrowserCookies
-		cfg.Download.CookiesPath = updates.Download.CookiesPath
-		if updates.Download.ConcurrentFragments > 0 {
-			cfg.Download.ConcurrentFragments = updates.Download.ConcurrentFragments
+		if updates.Download.YtDlpPath != nil {
+			cfg.Download.YtDlpPath = *updates.Download.YtDlpPath
 		}
-		if updates.Download.MaxConcurrent > 0 {
-			cfg.Download.MaxConcurrent = updates.Download.MaxConcurrent
+		if updates.Download.FfmpegPath != nil {
+			cfg.Download.FfmpegPath = *updates.Download.FfmpegPath
 		}
-		// Push the updated paths (and other download settings) to the running
-		// download manager so active and future downloads pick them up without
-		// an app restart.
-		if h.d.DownloadMgr != nil {
-			h.d.DownloadMgr.UpdateSettings(download.RuntimeSettings{
-				DownloadDir:         cfg.Download.DefaultDir,
-				YtDlpPath:           cfg.Download.YtDlpPath,
-				FfmpegPath:          cfg.Download.FfmpegPath,
-				ConcurrentFragments: cfg.Download.ConcurrentFragments,
-				MaxConcurrent:       cfg.Download.MaxConcurrent,
-				Proxy:               cfg.Download.Proxy,
-				BrowserCookies:      cfg.Download.BrowserCookies,
-				CookiesPath:         cfg.Download.CookiesPath,
-			})
+		if updates.Download.DefaultDir != nil {
+			cfg.Download.DefaultDir = *updates.Download.DefaultDir
 		}
+		if updates.Download.UseProxy != nil {
+			cfg.Download.UseProxy = *updates.Download.UseProxy
+		}
+		if updates.Download.BrowserCookies != nil {
+			cfg.Download.BrowserCookies = *updates.Download.BrowserCookies
+		}
+		if updates.Download.CookiesPath != nil {
+			cfg.Download.CookiesPath = *updates.Download.CookiesPath
+		}
+		if updates.Download.ConcurrentFragments != nil {
+			cfg.Download.ConcurrentFragments = *updates.Download.ConcurrentFragments
+		}
+		if updates.Download.MaxConcurrent != nil {
+			cfg.Download.MaxConcurrent = *updates.Download.MaxConcurrent
+		}
+		h.pushDownloadSettings(cfg)
 	}
 
 	// Shortcuts: replace the entire overrides map. The frontend always
@@ -260,6 +275,9 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		if updates.Theme.LightVariant != "" {
 			cfg.Theme.LightVariant = updates.Theme.LightVariant
 		}
+	}
+	if updates.ImageSaveDir != nil {
+		cfg.ImageSaveDir = *updates.ImageSaveDir
 	}
 
 	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
@@ -318,6 +336,25 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// pushDownloadSettings pushes the current download runtime settings to the
+// download manager, so active and future downloads pick up the latest config
+// without an app restart.
+func (h *Handler) pushDownloadSettings(cfg config.Config) {
+	if h.d.DownloadMgr == nil {
+		return
+	}
+	h.d.DownloadMgr.UpdateSettings(download.RuntimeSettings{
+		DownloadDir:         cfg.Download.DefaultDir,
+		YtDlpPath:           cfg.Download.YtDlpPath,
+		FfmpegPath:          cfg.Download.FfmpegPath,
+		ConcurrentFragments: cfg.Download.ConcurrentFragments,
+		MaxConcurrent:       cfg.Download.MaxConcurrent,
+		Proxy:               config.ResolveDownloadProxy(&cfg),
+		BrowserCookies:      cfg.Download.BrowserCookies,
+		CookiesPath:         cfg.Download.CookiesPath,
+	})
 }
 
 // validateProxyConfig checks that the proxy host and port are well-formed when

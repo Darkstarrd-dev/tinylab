@@ -2,6 +2,7 @@
 
 > **文档定位：** `internal/config/`、`internal/registry/`、`internal/state/` 三个包共同构成的 **配置定义 + 内存注册表 + 运行时状态持久化** 基础设施的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 > **最后核对：** 2026-07-25，仓库工作区（`main`）。**运行时状态类型抽离（keystate 包）**：per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 及其自带锁的纯方法（Inc/Dec/GetInFlight、Lock/Unlock、UpdateQuota/GetQuota）从 `internal/registry/state.go` 迁移到新包 `internal/keystate`（`state.go`）。`registry` 仍持有 `states map[string]*keystate.KeyRuntimeState` 并负责 `GetKeyState`/snapshot/restore/reload-merge/`ResetAllCooldowns`；`rotation` 不再 `import registry`，改为依赖 `keystate` 类型 + 新定义的 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）。`proxy.ModelResolver.GetKeyState` 返回类型随之改为 `*keystate.KeyRuntimeState`。行为不变（state.yaml 往返、冷却/退避/NIM/配额锁/快照恢复语义完全一致）。此前：API 子包拆分（Phase 3 完成）——`internal/api` 全部 21 个领域 handler 按领域拆分为独立子包，共享 `Deps` 通过 `internal/api/apibase` 传递。
+> **最后核对（2026-07-30 路径设置弹窗）：** Settings 侧栏新增 Path 行，复用 `download.js` 的共享弹窗 `openPathSettingsModal(opts)`（按 `sections` 条件渲染）。`TraceConfig` 新增 `LogDir`（空→`{configDir}/traces` 默认，相对路径拼 configDir，绝对原样）；`DownloadConfig` 删除 `Proxy` 改 `UseProxy`，经 `config/paths.go::ResolveDownloadProxy` 由全局 `Proxy`（Host:Port）解析为 yt-dlp `--proxy` URL。`api/settings/register.go` 的 `download` 更新改为指针字段子结构按需合并（Gallery 仅送 `defaultDir`+`ffmpegPath` 不再清空 `ytDlpPath`）；`trace.logDir` 运行时经 `ProxyHandler.SetRequestLogDir`（`requestLogDir` 改 `atomic.Value`）即时重指；新增顶层 `imageSaveDir` 持久化字段。**旧 config.yaml 自动迁移**：旧 `download.proxy` 字段已从结构体删除，`persistence.go::decodeConfig` 在 strict 解析失败时按 `deprecatedFieldPaths`（当前仅 `download.proxy`）剥离该字段、重新 strict 解析并回写迁移后的 config，使旧配置自动升级而非启动失败；真正的拼写错误（如 `portt`）仍按 strict 报错（`TestLoad_UnknownFieldStillErrors` 守护）。
 
 ## 1. 范围与结论
 
@@ -101,7 +102,7 @@ flowchart TD
 | `MonitorConfig` | types.go:157-161 | `Enabled` / `AllowedCommands` / `MaxLineLength` |
 | `ServerConfig` | types.go:175-180 | `ReadTimeoutSec` / `WriteTimeoutSec` / `IdleTimeoutSec` / `UpstreamTimeoutSec` |
 | `ProxyConfig` | types.go:184-188 | `Enabled` / `Host` / `Port` |
-| `DownloadConfig` | types.go:191-201 | `Enabled` / `DefaultDir` / `YtDlpPath` / `FfmpegPath` / `ConcurrentFragments` / `MaxConcurrent` / `Proxy` / `BrowserCookies` / `CookiesPath` |
+| `DownloadConfig` | types.go:191-201 | `Enabled` / `DefaultDir` / `YtDlpPath` / `FfmpegPath` / `ConcurrentFragments` / `MaxConcurrent` / `UseProxy`（替代旧 `Proxy` 字符串，引用全局上游代理）/ `BrowserCookies` / `CookiesPath` |
 | `ShortcutBinding` | types.go:248-257 | 一个用户覆盖的键盘绑定：`Key`（必填，如 `F6`/`Enter`/`m`/` ` — space）/ `CtrlOrCmd`（平台无关修饰，macOS 时 match `metaKey`，其它平台 match `ctrlKey`）/ `Alt` / `Shift`（均 `omitempty`）。仅记录被覆盖的项；与系统预设相等的绑定不写入磁盘 |
 | `ShortcutsConfig` | types.go:263 | `map[string]ShortcutBinding`，键为 action ID（如 `global.goto-usage`、`pg.send-message`、`gallery.toggle-split`），值为 `ShortcutBinding`。空（非 nil）map = 无覆盖；`finalizeConfig` 把 nil 归一为空 map 以保证 JSON 输出 `{}` 而非 `null` |
 | `Config` | types.go:266-281 | 顶层：上述所有子结构 + `Port` / `ConsoleLogMaxLines` / `UsageRingSize` / `EnablePlayground` / `QuickSlotOnly`（`bool`，`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）/ `Providers` / `Combos` / `QuickSlots` / `Shortcuts`（`ShortcutsConfig`，`yaml/json:"shortcuts,omitempty"`，仅存用户覆盖；未出现该段时回退前端系统预设） |

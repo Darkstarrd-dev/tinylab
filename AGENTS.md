@@ -27,7 +27,7 @@
 | 新增/修改 Combo 策略 | combo、proxy | `combo/resolver.go`、`proxy/forward.go`（`handleCombo`） |
 | 修改 Gemini 签名回填 | proxy | `proxy/signature_cache.go`+`forward.go`+`stream.go` |
 | 新增/修改配置字段 | config-registry-state | `config/types.go`+`defaults.go`+`persistence.go` |
-| 修改下载参数/任务 | download | `download/args.go`+`executor.go`+`manager.go` |
+| 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + 键盘陷阱 + 浏览锁）+ `internal/api/settings/register.go`（`getSettings` + `configDir` + `trace.logDir` + 指针字段按需合并）+ `internal/fsutil/open_windows.go`（`OpenFilePickerAt`+`SetFolder`） |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。
 

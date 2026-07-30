@@ -66,6 +66,17 @@ func (h *Handler) getDates(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(tracesDir)
 	if err != nil {
+		// A freshly configured (not-yet-created) traces directory is not an
+		// error: it is created on the first trace write. Return an empty date
+		// list with the configured dir so the log reader shows an empty state
+		// instead of a 500. Any other read failure is a real error.
+		if os.IsNotExist(err) {
+			json.NewEncoder(w).Encode(map[string]any{
+				"dates": []any{},
+				"dir":   tracesDir,
+			})
+			return
+		}
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to read traces directory")
 		return
 	}
