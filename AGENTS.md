@@ -54,7 +54,6 @@ TinyRouter 是一个轻量级 LLM API 代理与本地工具集，单二进制交
 | 来源 | 用途 | 仓库 |
 |---|---|---|
 | 9router | 代理核心业务逻辑参考（Key 选择、冷却退避、Combo、日志格式） | https://github.com/decolua/9router |
-| new-api | Playground 模块参考（多模型测试 UI 适配器契约） | https://github.com/QuantumNous/new-api |
 | VidBee | Download 模块参考（yt-dlp 任务管理与 SSE 进度） | https://github.com/nexmoe/VidBee |
 
 > 本地参考副本位于 `Z:\Playground\9router`，实施过程中作为业务逻辑参考。不要修改该目录。

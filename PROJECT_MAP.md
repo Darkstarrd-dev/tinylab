@@ -600,9 +600,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 ## 22. Gitignored 参考副本（非本项目模块）
 
-| 路径 | 说明 |
-| Combo 批量测速排序 | combo、proxy | `api/combo_speedtest.go`（`speedTestCombo` SSE handler + `probeComboModel`，复用 `urlutil.BuildUpstreamURL`/`sse.SSELineBuffer`/`sse.SSEDataPayloads`、`util.ExtractTokens`、`probe_common.go::extractContentFromSSE`、`providers_validate.go::firstActiveKey`、`proxy/handler.go::ManagementClient`）、`registry/combos.go`（`GetComboByID`）、`api/router.go`（路由注册）、`web/static/combos.js`（`runComboSpeedTest` + 编辑弹窗按钮 + `renderComboModelsList` 行 `data-fullid`/状态 span）、`web/static/i18n.js`（`comboSpeedTest*` 键） |
-| `new-api/` | vendored 的 "new-api" LLM gateway 副本（~600+ `.go` 文件）。`.gitignore` 排除、`go.mod` 不引用、`package main` 不引用。**仅作实现参考**，不参与编译，勿计入本项目模块。 |
+> 当前无。原 `new-api/`（QuantumNous/new-api 克隆，约 31 MB）参考副本已于 2026-07-31 移除，Playground 模块不再参考该项目。9router 参考副本位于仓库外 `Z:\Playground\9router`（见 AGENTS.md「参考来源」）。
 
 ---
 
