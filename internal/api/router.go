@@ -411,10 +411,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
 				"gallery-edit.js", "gallery-edit-operations.js", "gallery-edit-batch.js", "gallery.js", "editor-state.js", "editor.js", "editor-logs.js",
 				// AI Text Review (load order: split/diff/state first, then steps, then entry)
-				"tr-split.js", "tr-diff.js", "tr-state.js",
-				"text-review-step1.js", "text-review-step2.js",
-				"text-review-step3.js", "text-review-step4.js",
-				"text-review.js",
+				"editor_textreview_split.js", "editor_textreview_diff.js", "editor_textreview_state.js",
+				"editor_textreview_step1.js", "editor_textreview_step2.js",
+				"editor_textreview_step3.js", "editor_textreview_step4.js",
+				"editor_textreview.js",
 			}
 			for _, f := range pgJSFiles {
 				r.Get("/"+f, noCacheHandler)

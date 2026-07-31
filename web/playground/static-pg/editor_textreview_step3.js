@@ -1,4 +1,4 @@
-// text-review-step3.js — Step3 panel: AI 清理 (AI cleanup) — P6.
+// editor_textreview_step3.js — Step3 panel: AI 清理 (AI cleanup) — P6.
 // Exposes window.trRenderStep3(panel, state) + window.trCleanupStep3().
 //
 // Wires the processing-node pool selector (config form pre-run, live runtime
@@ -1076,7 +1076,7 @@ window.trS3HasCompleted = function () {
 /**
  * Close the SSE subscription only. Do NOT stop the backend session
  * (切页不丢: the task continues; re-entering Step3 re-subscribes via snapshot).
- * Called by text-review.js::cleanupTextReview on page leave.
+ * Called by editor_textreview.js::cleanupTextReview on page leave.
  */
 window.trCleanupStep3 = function () {
   if (trS3ReconnectTimer) { clearTimeout(trS3ReconnectTimer); trS3ReconnectTimer = null; }

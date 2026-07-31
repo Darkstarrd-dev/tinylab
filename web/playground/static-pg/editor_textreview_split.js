@@ -1,4 +1,4 @@
-// tr-split.js — 章节切分算法（移植自 novelhelper/frontend/src/utils/split.ts）。
+// editor_textreview_split.js — 章节切分算法（移植自 novelhelper/frontend/src/utils/split.ts）。
 // 纯 JS、无依赖、无构建。所有公共 API 挂到 window.TR.*。
 // 与 editor.js 同风格：顶层 'use strict' + function 声明 + 末尾 window.X = ... 赋值。
 

@@ -1,5 +1,5 @@
-// text-review.js — AI Text Review page entry point + 4-step wizard shell.
-// Loaded LAST among the text-review files, after tr-state.js + step1..4.js.
+// editor_textreview.js — AI Text Review page entry point + 4-step wizard shell.
+// Loaded LAST among the editor_textreview files, after editor_textreview_state.js + step1..4.js.
 //
 // Exposes window.renderTextReview(container) + window.cleanupTextReview().
 // Mirrors editor.js: top-level 'use strict' + function declarations + var.
