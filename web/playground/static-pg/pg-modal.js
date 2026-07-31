@@ -91,7 +91,7 @@ function pgSetDebugModalTab(winIdx, tab) {
   pgRenderDebugModalContent(winIdx);
 }
 
-function pgShowImageModal(url) {
+function pgShowImageModal(url, savedPath, savedFilename) {
   var html = '<div class="pg-modal-header">' +
     '<span class="pg-modal-title">&#x1F5BC; ' + pgEscapeHtml(pgT('pgImagePreview')) + '</span>' +
     '<span class="pg-modal-header-actions">' +
@@ -110,6 +110,8 @@ function pgShowImageModal(url) {
     '<span id="pg-img-meta-size">—</span>' +
     '<span class="pg-img-meta-sep">·</span>' +
     '<span id="pg-img-meta-fmt">—</span>' +
+    '<span class="pg-img-meta-sep" id="pg-img-meta-path-sep" style="display:none">·</span>' +
+    '<span id="pg-img-meta-path" style="display:none;opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px"></span>' +
   '</div>';
   pgShowModal(html);
   requestAnimationFrame(function() {
@@ -121,6 +123,7 @@ function pgShowImageModal(url) {
       modal.style.maxHeight = '95vh';
     }
     pgInitImageZoom();
+    pgRefreshImageModalMeta(url, savedPath, savedFilename);
   });
 }
 
@@ -255,42 +258,72 @@ function pgRemoveZoomListeners() {
 }
 
 function pgCopyImage(url, btn) {
-  if (url.indexOf('data:') === 0) {
-    // Convert data URL to blob and copy to clipboard
-    var parts = url.split(',');
-    if (parts.length < 2) return;
-    var mimeMatch = parts[0].match(/data:([^;]+)/);
-    var mime = mimeMatch ? mimeMatch[1] : 'image/png';
-    var byteStr = atob(parts[1]);
-    var arr = new Uint8Array(byteStr.length);
-    for (var i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
-    var blob = new Blob([arr], { type: mime });
+  var orig = btn ? btn.textContent : '';
+  if (btn) btn.textContent = '...';
+
+  function writePngBlob(blob) {
+    if (!blob) {
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+      return;
+    }
     try {
-      navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]).then(function() {
-        pgToast(pgT('pgCopied'), 'success');
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(function() {
+        if (btn) {
+          btn.textContent = pgT('pgCopied');
+          setTimeout(function() { btn.textContent = orig; }, 1500);
+        } else {
+          pgToast(pgT('pgCopied'), 'success');
+        }
       }).catch(function() {
-        pgCopyImageFallback(url, btn);
+        if (btn) btn.textContent = orig;
+        pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
       });
     } catch (e) {
-      pgCopyImageFallback(url, btn);
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
     }
-  } else {
-    // For external URLs, fetch through the same-origin backend proxy (avoids
-    // CORS failures when reading remote image bytes for the clipboard).
-    fetch(pgImageProxyURL(url)).then(function(r) {
-      if (!r.ok) throw new Error('fetch failed');
-      return r.blob();
-    }).then(function(blob) {
-      var mime = blob.type || 'image/png';
-      navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]).then(function() {
-        pgToast(pgT('pgCopied'), 'success');
-      }).catch(function() {
-        pgCopyImageFallback(url, btn);
-      });
-    }).catch(function() {
-      pgCopyImageFallback(url, btn);
-    });
   }
+
+  function drawToCanvasAndWrite(img) {
+    try {
+      var canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(writePngBlob, 'image/png');
+    } catch (e) {
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+    }
+  }
+
+  var imgModal = document.getElementById('pg-img-modal-img');
+  if (imgModal && imgModal.complete && imgModal.naturalWidth && (imgModal.dataset.url === url || imgModal.src === url)) {
+    drawToCanvasAndWrite(imgModal);
+    return;
+  }
+
+  var img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = function() { drawToCanvasAndWrite(img); };
+  img.onerror = function() {
+    if (url.indexOf('data:') === 0) {
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+    } else {
+      var proxyImg = new Image();
+      proxyImg.crossOrigin = 'anonymous';
+      proxyImg.onload = function() { drawToCanvasAndWrite(proxyImg); };
+      proxyImg.onerror = function() {
+        if (btn) btn.textContent = orig;
+        pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+      };
+      proxyImg.src = pgImageProxyURL(url);
+    }
+  };
+  img.src = url;
 }
 
 function pgImageProxyURL(url) {
@@ -341,6 +374,24 @@ function pgLoadImageMeta(url) {
   });
 }
 
+function pgRefreshImageModalMeta(url, savedPath, savedFilename) {
+  var pathEl = document.getElementById('pg-img-meta-path');
+  var sepEl = document.getElementById('pg-img-meta-path-sep');
+  var imgModal = document.getElementById('pg-img-modal-img');
+  if (!pathEl) return;
+  if (imgModal && imgModal.dataset.url !== url && imgModal.src !== url) return;
+  var displayPath = savedFilename || savedPath || '';
+  if (displayPath) {
+    if (sepEl) sepEl.style.display = 'inline';
+    pathEl.style.display = 'inline';
+    pathEl.textContent = '📁 ' + displayPath;
+    pathEl.setAttribute('data-tooltip', savedPath || displayPath);
+  } else {
+    if (sepEl) sepEl.style.display = 'none';
+    pathEl.style.display = 'none';
+  }
+}
+
 function pgCopyImageFallback(url, btn) {
   // Fallback: copy URL as text
   var orig = btn.textContent;
@@ -356,6 +407,7 @@ function pgSaveImage(url, btn) {
   pgApiPost('/save-image', { url: url }).then(function(res) {
     btn.textContent = orig;
     pgToast(pgT('pgImageSaved', [res.filename || res.path]), 'success');
+    pgRefreshImageModalMeta(url, res.path, res.filename);
   }).catch(function(err) {
     btn.textContent = orig;
     pgToast(pgT('pgImageSaveFailed'), 'error');

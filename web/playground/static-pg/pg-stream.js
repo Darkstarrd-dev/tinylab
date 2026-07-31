@@ -344,8 +344,9 @@ function pgSendImage(i, body, assistantIdx) {
           var revisedPrompt = item.revised_prompt || '';
           if (revisedPrompt) contentParts.push({ type: 'text', text: revisedPrompt });
           if (imgUrl) {
-            contentParts.push({ type: 'image_url', image_url: { url: imgUrl } });
-            pgAutoSaveImageArtifact(imgUrl);
+            var imgItem = { url: imgUrl };
+            contentParts.push({ type: 'image_url', image_url: imgItem });
+            pgAutoSaveImageArtifact(imgUrl, imgItem);
           }
         }
         msg.content = contentParts.length > 0 ? contentParts : '';
@@ -418,8 +419,9 @@ function pgPollModelScopeTask(i, taskId, model, assistantIdx, msg) {
             var msContent = [];
             for (var uIdx = 0; uIdx < imageUrls.length; uIdx++) {
               var targetUrl = imageUrls[uIdx];
-              msContent.push({ type: 'image_url', image_url: { url: targetUrl } });
-              pgAutoSaveImageArtifact(targetUrl);
+              var msItem = { url: targetUrl };
+              msContent.push({ type: 'image_url', image_url: msItem });
+              pgAutoSaveImageArtifact(targetUrl, msItem);
             }
             msg.content = msContent;
           } else {
@@ -445,9 +447,18 @@ function pgPollModelScopeTask(i, taskId, model, assistantIdx, msg) {
   setTimeout(poll, 2000);
 }
 
-function pgAutoSaveImageArtifact(url) {
+function pgAutoSaveImageArtifact(url, imgObj) {
   if (!url) return;
-  pgApiPost('/save-image', { url: url }).catch(function(err) {
+  pgApiPost('/save-image', { url: url }).then(function(res) {
+    if (res && res.path && imgObj) {
+      imgObj.savedPath = res.path;
+      imgObj.savedFilename = res.filename || res.path;
+      pgSave();
+      if (typeof pgRefreshImageModalMeta === 'function') {
+        pgRefreshImageModalMeta(url, res.path, res.filename);
+      }
+    }
+  }).catch(function(err) {
     console.warn('[Playground] Auto-save image artifact failed:', err);
   });
 }

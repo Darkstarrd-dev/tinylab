@@ -3,6 +3,7 @@
 package image
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -99,7 +100,16 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 			apibase.WriteAPIError(w, http.StatusForbidden, "image url resolves to a blocked address")
 			return
 		}
-		resp, err := h.d.TestClient.Get(req.URL)
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		reqUpstream, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
+		if err != nil {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "invalid image url request")
+			return
+		}
+		reqUpstream.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+		resp, err := h.d.TestClient.Do(reqUpstream)
 		if err != nil {
 			apibase.WriteAPIError(w, http.StatusBadGateway, "failed to fetch image: "+err.Error())
 			return

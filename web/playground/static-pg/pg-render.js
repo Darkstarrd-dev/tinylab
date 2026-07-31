@@ -370,11 +370,12 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
   var isError = msg.status === 'error';
   var cls = 'pg-bubble' + (isError ? ' pg-bubble-error' : '');
   var imgs = pgImageParts(msg.content);
-  if (imgs.length) {
     inner += '<div class="pg-image-row">' + imgs.map(function(p) {
-      return '<img class="pg-image-thumb" src="' + pgEscapeHtml(p.image_url.url) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(p.image_url.url) + '\')">';
+      var u = p.image_url.url;
+      var sp = p.image_url.savedPath || '';
+      var sf = p.image_url.savedFilename || '';
+      return '<img class="pg-image-thumb" src="' + pgEscapeHtml(u) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(u) + '\', \'' + pgEscapeAttr(sp) + '\', \'' + pgEscapeAttr(sf) + '\')">';
     }).join('') + '</div>';
-  }
   var bodyMd;
   if (isError) {
     bodyMd = msg.content ? pgRenderMarkdown(pgTextContent(msg.content), false) : '';
