@@ -58,3 +58,6 @@ tmp/
 .agents/
 .claude/
 skills-lock.json
+
+# Qoder IDE workspace state
+.qoder/
