@@ -437,47 +437,31 @@ async function saveProxy() {
 }
 
 async function togglePasswordProtection(enabled) {
-  if (!enabled) {
-    var ok = await confirmModal(t('confirmDisablePassword'));
-    if (!ok) {
-      var toggle = document.getElementById('password-toggle');
-      if (toggle) toggle.checked = true;
-      return;
-    }
-  }
-  try {
-    await apiPatch('/settings', { security: { passwordEnabled: enabled } });
-    toast(enabled ? t('passwordEnabled') : t('passwordDisabled'), 'success');
-    var pwSettings = document.getElementById('password-settings');
-    if (pwSettings) pwSettings.style.display = enabled ? 'block' : 'none';
-  } catch (e) {
-    toast(t('failed', [e.message]), 'error');
+  if (enabled) {
+    // Enabling requires setting a password — open the modal.
+    // Revert toggle; savePasswordModal checks it on success.
     var toggle = document.getElementById('password-toggle');
-    if (toggle) toggle.checked = !enabled;
+    if (toggle) toggle.checked = false;
+    openPasswordModal();
+    return;
   }
-}
-
-async function savePassword() {
-  var newPw = document.getElementById('new-password');
-  if (!newPw || !newPw.value) {
-    toast(t('enterPassword'), 'error');
+  // Disabling: confirm first.
+  var ok = await confirmModal(t('confirmDisablePassword'));
+  if (!ok) {
+    var toggle = document.getElementById('password-toggle');
+    if (toggle) toggle.checked = true;
     return;
   }
   try {
-    await apiPatch('/settings', { security: { password: newPw.value } });
-    toast(t('passwordSaved'), 'success');
-    newPw.value = '';
-    var settings = await apiGet('/settings');
-    var curPw = document.getElementById('current-password');
-    if (curPw && settings.security) curPw.value = settings.security.password || '';
-    var toggle = document.getElementById('password-toggle');
-    if (toggle) toggle.checked = true;
-    var pwSettings = document.getElementById('password-settings');
-    if (pwSettings) pwSettings.style.display = 'block';
+    await apiPatch('/settings', { security: { passwordEnabled: false } });
+    toast(t('passwordDisabled'), 'success');
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
+    var toggle = document.getElementById('password-toggle');
+    if (toggle) toggle.checked = true;
   }
 }
+
 
 // ===================== Settings Modal Functions =====================
 
@@ -600,19 +584,13 @@ function openServerTimeoutModal() {
 
 function openPasswordModal() {
   var s = window.__settings;
-  var pwEnabled = s.security && s.security.passwordEnabled;
+  var hasPassword = s.security && s.security.hasPassword;
+  var hint = hasPassword ? '<p class="muted">' + escapeHtml(t('passwordChangeHint')) + '</p>' : '<p class="muted">' + escapeHtml(t('passwordProtectionDesc')) + '</p>';
   openSettingsModal(t('passwordProtection'),
-    '<p class="muted">' + escapeHtml(t('passwordProtectionDesc')) + '</p>\
+    hint + '\
     <div class="form-group" style="margin-top:12px">\
-      <label>' + t('currentPassword') + '</label>\
-      <div style="display:flex;gap:8px;align-items:center">\
-        <input type="text" id="settings-modal-current-password" value="' + escapeHtml(s.security ? s.security.password : '') + '" readonly style="flex:1">\
-        <button type="button" class="btn btn-sm" onclick="copyToClipboard(document.getElementById(\'settings-modal-current-password\').value, t(\'password\'))">' + t('copy') + '</button>\
-      </div>\
-    </div>\
-    <div class="form-group">\
       <label>' + t('newPassword') + '</label>\
-      <input type="password" id="settings-modal-new-password" placeholder="' + t('newPasswordPlaceholder') + '">\
+      <input type="password" id="settings-modal-new-password" placeholder="' + t('newPasswordPlaceholder') + '" autofocus>\
     </div>'
   );
   document.getElementById('settings-modal-save').onclick = function() {
@@ -1059,24 +1037,23 @@ async function saveServerTimeoutModal() {
 }
 
 async function savePasswordModal() {
-  var enabled = document.getElementById('password-toggle').checked;
-  try {
-    await apiPatch('/settings', { security: { passwordEnabled: enabled } });
-  } catch (e) {
-    toast(t('failed', [e.message]), 'error');
+  var newPw = document.getElementById('settings-modal-new-password');
+  if (!newPw || !newPw.value) {
+    toast(t('enterPassword'), 'error');
     return;
   }
-  var newPw = document.getElementById('settings-modal-new-password');
-  if (newPw && newPw.value) {
-    try {
-      await apiPatch('/settings', { security: { password: newPw.value } });
-    } catch (e) {
-      toast(t('failed', [e.message]), 'error');
-      return;
-    }
+  try {
+    await apiPatch('/settings', { security: { password: newPw.value } });
+    toast(t('passwordSaved'), 'success');
+    closeModalOverlay();
+    // Update page toggle to reflect enabled state.
+    var toggle = document.getElementById('password-toggle');
+    if (toggle) toggle.checked = true;
+    // Refresh settings cache so hasPassword is updated.
+    window.__settings = await apiGet('/settings');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
   }
-  toast(enabled ? t('passwordEnabled') : t('passwordDisabled'), 'success');
-  closeModalOverlay();
 }
 
 async function toggleProxy(enabled) {

@@ -4,9 +4,16 @@ async function checkAuthStatus() {
   try {
     var resp = await fetch('/api/auth/status');
     var data = await resp.json();
-    return data;
+    var enabled = !!(data.passwordEnabled || data.authEnabled);
+    var authenticated = !!(data.authenticated || data.loggedIn);
+    return {
+      passwordEnabled: enabled,
+      authEnabled: enabled,
+      authenticated: authenticated,
+      loggedIn: authenticated
+    };
   } catch(e) {
-    return { passwordEnabled: false, authenticated: true };
+    return { passwordEnabled: false, authEnabled: false, authenticated: true, loggedIn: true };
   }
 }
 
@@ -82,14 +89,14 @@ async function handleLogin() {
     } else {
       showLoginError(t('wrongPassword'));
       if (btn) { btn.disabled = false; btn.textContent = t('login'); }
-      setTimeout(function() {
-        handleExitApp();
-      }, 2000);
+      input.value = '';
+      input.focus();
     }
   } catch(e) {
     showLoginError(t('wrongPassword'));
     if (btn) { btn.disabled = false; btn.textContent = t('login'); }
-    setTimeout(function() { handleExitApp(); }, 2000);
+    input.value = '';
+    input.focus();
   }
 }
 

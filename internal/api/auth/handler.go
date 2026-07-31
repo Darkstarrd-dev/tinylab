@@ -145,8 +145,10 @@ func (h *Handler) AuthStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{
-		"authEnabled": enabled,
-		"loggedIn":    loggedIn,
+		"authEnabled":     enabled,
+		"passwordEnabled": enabled,
+		"loggedIn":        loggedIn,
+		"authenticated":   loggedIn,
 	})
 }
 
@@ -166,13 +168,11 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		return
 	}
-	// Defensive: password protection is enabled but no password was ever saved
-	// (e.g., user toggled it on but didn't save a password, then restarted).
-	// Treat as not enabled to prevent permanent lockout.
+	// Defense-in-depth: password protection is enabled but no password was ever
+	// saved. finalizeConfig normalizes this to disabled on load, but if we
+	// somehow reach here, reject login instead of granting access.
 	if cfg.Security.PasswordEncrypted == "" || cfg.Security.EncryptionKey == "" {
-		SetSessionCookie(w, "")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "password protection is enabled but no password is configured; edit config.yaml to set passwordEnabled: false")
 		return
 	}
 	plaintext, err := config.Decrypt(cfg.Security.EncryptionKey, cfg.Security.PasswordEncrypted)

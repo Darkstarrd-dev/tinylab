@@ -140,6 +140,32 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 			cfg.Download.DefaultDir = filepath.Join(home, "Downloads")
 		}
 	}
+	// Security consistency: PasswordEnabled without a stored password is an
+	// inconsistent state (e.g., user toggled on without setting a password,
+	// or manually edited config.yaml). Normalize to disabled to prevent
+	// lockout and the LoginHandler defensive-bypass security hole.
+	if cfg.Security.PasswordEnabled && (cfg.Security.PasswordEncrypted == "" || cfg.Security.EncryptionKey == "") {
+		fmt.Fprintf(os.Stderr, "[config] warning: passwordEnabled is true but no password is set; disabling password protection\n")
+		cfg.Security.PasswordEnabled = false
+	}
+	if !cfg.Security.PasswordEnabled {
+		hasEncryptedKeys := false
+		for i := range cfg.Providers {
+			for j := range cfg.Providers[i].Keys {
+				if strings.HasPrefix(cfg.Providers[i].Keys[j].Key, "enc:") {
+					hasEncryptedKeys = true
+					break
+				}
+			}
+			if hasEncryptedKeys {
+				break
+			}
+		}
+		if hasEncryptedKeys {
+			fmt.Fprintf(os.Stderr, "[config] warning: encrypted API keys found but password protection is disabled; these keys cannot be decrypted and will not work\n")
+		}
+	}
+
 	// Decrypt API keys if password protection is enabled.
 	// Encrypted keys are prefixed with "enc:" in the YAML file.
 	if cfg.Security.PasswordEnabled && cfg.Security.EncryptionKey != "" {

@@ -1,8 +1,16 @@
 package auth
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/registry"
 )
 
 func TestGenerateToken_Uniqueness(t *testing.T) {
@@ -113,5 +121,59 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		<-done
+	}
+}
+
+func TestAuthStatusHandler_ResponseFormat(t *testing.T) {
+	req := httptest.NewRequest("GET", "/auth/status", nil)
+	w := httptest.NewRecorder()
+
+	// Create a dummy registry with password enabled
+	cfg := &config.Config{}
+	cfg.Security.PasswordEnabled = true
+	reg := registry.New(cfg)
+	d := &apibase.Deps{Reg: reg}
+	h := NewHandler(d)
+
+	h.AuthStatusHandler(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var data map[string]bool
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if !data["authEnabled"] || !data["passwordEnabled"] {
+		t.Errorf("expected authEnabled and passwordEnabled to be true, got %v", data)
+	}
+	if data["loggedIn"] || data["authenticated"] {
+		t.Errorf("expected loggedIn and authenticated to be false, got %v", data)
+	}
+}
+
+func TestLoginHandler_RejectsInconsistentState(t *testing.T) {
+	// LoginHandler must return 500 (not success) when PasswordEnabled=true
+	// but PasswordEncrypted="" — the defensive bypass is removed.
+	cfg := &config.Config{}
+	cfg.Security.PasswordEnabled = true
+	// PasswordEncrypted and EncryptionKey are intentionally left empty.
+	reg := registry.New(cfg)
+	d := &apibase.Deps{Reg: reg}
+	h := NewHandler(d)
+
+	body := `{"password":"anything"}`
+	req := httptest.NewRequest("POST", "/auth/login", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.LoginHandler(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 Internal Server Error, got %d", resp.StatusCode)
 	}
 }

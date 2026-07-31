@@ -21,7 +21,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initFontSize();
   initLang();
   var authStatus = await checkAuthStatus();
-  if (authStatus.passwordEnabled && !authStatus.authenticated) {
+  var enabled = authStatus.passwordEnabled || authStatus.authEnabled;
+  var authenticated = authStatus.authenticated || authStatus.loggedIn;
+  if (enabled && !authenticated) {
     renderLoginScreen();
   } else {
     initApp();

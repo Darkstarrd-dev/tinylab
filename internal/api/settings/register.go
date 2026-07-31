@@ -171,12 +171,16 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if updates.Security != nil {
-		if updates.Security.PasswordEnabled != nil {
-			cfg.Security.PasswordEnabled = *updates.Security.PasswordEnabled
-			if !*updates.Security.PasswordEnabled {
-				cfg.Security.PasswordEncrypted = ""
-				cfg.Security.EncryptionKey = ""
+		if updates.Security.PasswordEnabled != nil && *updates.Security.PasswordEnabled {
+			if updates.Security.Password == "" && cfg.Security.PasswordEncrypted == "" {
+				apibase.WriteAPIError(w, http.StatusBadRequest, "cannot enable password protection without setting a password")
+				return
 			}
+			cfg.Security.PasswordEnabled = true
+		} else if updates.Security.PasswordEnabled != nil && !*updates.Security.PasswordEnabled {
+			cfg.Security.PasswordEnabled = false
+			cfg.Security.PasswordEncrypted = ""
+			cfg.Security.EncryptionKey = ""
 		}
 		if updates.Security.Password != "" {
 			key, err := config.GenerateKey()

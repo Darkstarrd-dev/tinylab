@@ -653,3 +653,38 @@ func TestLoad_StaleTmpIsDiscarded(t *testing.T) {
 		t.Fatalf("stale .tmp should be removed: %v", err)
 	}
 }
+
+func TestFinalizeConfig_NormalizesPasswordEnabledWithoutPassword(t *testing.T) {
+	// PasswordEnabled=true with empty PasswordEncrypted should be normalized to false.
+	cfg := &Config{
+		Security: SecurityConfig{
+			PasswordEnabled:   true,
+			PasswordEncrypted: "",
+			EncryptionKey:     "",
+		},
+	}
+	stderr := captureStderr(t, func() {
+		finalizeConfig(cfg, nil)
+	})
+	if cfg.Security.PasswordEnabled {
+		t.Error("expected PasswordEnabled to be normalized to false")
+	}
+	if !strings.Contains(stderr, "passwordEnabled is true but no password is set") {
+		t.Error("expected stderr warning about passwordEnabled inconsistency")
+	}
+}
+
+func TestFinalizeConfig_KeepsPasswordEnabledWithPassword(t *testing.T) {
+	// PasswordEnabled=true with a non-empty PasswordEncrypted and EncryptionKey stays true.
+	cfg := &Config{
+		Security: SecurityConfig{
+			PasswordEnabled:   true,
+			PasswordEncrypted: "some-encrypted-value",
+			EncryptionKey:     "some-key",
+		},
+	}
+	finalizeConfig(cfg, nil)
+	if !cfg.Security.PasswordEnabled {
+		t.Error("expected PasswordEnabled to remain true when password is stored")
+	}
+}
