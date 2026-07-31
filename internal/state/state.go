@@ -61,6 +61,13 @@ type KeySnapshot struct {
 	NIMLastSendTime  time.Time         `yaml:"nim_last_send_time,omitempty"`
 	NIMCooldownLevel int               `yaml:"nim_cooldown_level,omitempty"`
 	NIMLast429Time   time.Time         `yaml:"nim_last_429_time,omitempty"`
+	// ExhaustedModelLimits persists the per-model limit for keys that were daily-
+	// quota-locked (ModelRemaining == 0) so that after a restart the provider-level
+	// aggregate "used/capacity" still counts the exhausted key's contribution.
+	// Map key is the model ID; value is ModelLimit. Only entries with Remaining==0
+	// are persisted — partial-usage snapshots are NOT persisted (they are re-fetched
+	// from upstream on the next probe/request).
+	ExhaustedModelLimits map[string]int `yaml:"exhausted_model_limits,omitempty"`
 }
 
 // ComboSnapshot holds the persistable subset of a combo's rotation state.

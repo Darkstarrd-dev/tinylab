@@ -98,6 +98,16 @@ func snapshotKeyState(ks *keystate.KeyRuntimeState) state.KeySnapshot {
 			s.ModelStatus[k] = v
 		}
 	}
+	if len(ks.ModelQuotas) > 0 {
+		for m, q := range ks.ModelQuotas {
+			if q != nil && q.ModelLimit > 0 && q.ModelRemaining == 0 {
+				if s.ExhaustedModelLimits == nil {
+					s.ExhaustedModelLimits = make(map[string]int, len(ks.ModelQuotas))
+				}
+				s.ExhaustedModelLimits[m] = q.ModelLimit
+			}
+		}
+	}
 	return s
 }
 
@@ -140,6 +150,22 @@ func (r *Registry) RestoreKeyState(providerID, keyID string, s state.KeySnapshot
 		}
 		for k, v := range s.ModelStatus {
 			state.ModelStatus[k] = v
+		}
+	}
+	if len(s.ExhaustedModelLimits) > 0 {
+		if state.ModelQuotas == nil {
+			state.ModelQuotas = make(map[string]*keystate.QuotaInfo, len(s.ExhaustedModelLimits))
+		}
+		for m, lim := range s.ExhaustedModelLimits {
+			// Only restore if not already present (a fresh probe during this session
+			// may have already populated a live ModelQuotas entry — don't clobber it).
+			if state.ModelQuotas[m] == nil {
+				state.ModelQuotas[m] = &keystate.QuotaInfo{
+					ModelLimit:     lim,
+					ModelRemaining: 0, // restored as exhausted
+					LastUpdated:    time.Time{}, // zero — signals "stale, from snapshot"
+				}
+			}
 		}
 	}
 	return nil

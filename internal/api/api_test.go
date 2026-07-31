@@ -476,6 +476,62 @@ func TestGetQuotas_CurrentKeyID_Name(t *testing.T) {
 	}
 }
 
+func TestGetQuotas_AggregationFromKeyStates(t *testing.T) {
+	srv, reg, _, rt := setupTestServer(t)
+	defer srv.Close()
+
+	// Create a provider with 2 active keys
+	prov := config.Provider{
+		ID: "agg-prov", Name: "AggProv", Prefix: "agg", BaseURL: "https://agg.com",
+		APIType: "openai-compatible", IsActive: true,
+		Keys: []config.Key{
+			{ID: "ak1", Key: "sk-a1", Name: "Key-A", Priority: 1, IsActive: true},
+			{ID: "ak2", Key: "sk-a2", Name: "Key-B", Priority: 2, IsActive: true},
+		},
+		Models: []config.ModelDef{{ID: "model-q"}},
+	}
+	reg.AddProvider(prov)
+
+	// Seed QuotaTracker so the bar appears in the API response
+	rt.quotaTracker.Update("AggProv", "model-q", "ak1", "Key-A", 100, 100, 2)
+
+	// Seed per-key ModelQuotas: ak1 exhausted, ak2 partial
+	reg.GetKeyState("agg-prov", "ak1").UpdateQuota("model-q", 100, 0, 0, 0)
+	reg.GetKeyState("agg-prov", "ak2").UpdateQuota("model-q", 100, 80, 0, 0)
+
+	// Fetch quotas
+	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var quotaBody map[string]any
+	json.Unmarshal([]byte(readBody(t, resp)), &quotaBody)
+	quotas := quotaBody["quotas"].([]any)
+
+	found := false
+	for _, q := range quotas {
+		bar := q.(map[string]any)
+		if bar["provider"] == "AggProv" && bar["model"] == "model-q" {
+			found = true
+			totalCap := int(bar["totalCapacity"].(float64))
+			totalUsed := int(bar["totalUsed"].(float64))
+			hasQuota := bar["hasQuota"].(bool)
+			if totalCap != 200 {
+				t.Errorf("expected TotalCapacity=200, got %d", totalCap)
+			}
+			if totalUsed != 120 {
+				t.Errorf("expected TotalUsed=120 (100 exhausted + 20 used), got %d", totalUsed)
+			}
+			if !hasQuota {
+				t.Error("expected hasQuota=true")
+			}
+		}
+	}
+	if !found {
+		t.Error("quota bar for AggProv/model-q not found")
+	}
+}
+
 // TestModelKeys_PerModelStatusIsolation guards against a bug where a key's
 // cooldown/error for one model leaked into the displayed status/error of the
 // same key under a different model (e.g. ModelScope model-a rate limited

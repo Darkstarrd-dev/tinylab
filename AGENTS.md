@@ -28,6 +28,8 @@
 | 修改 Gemini 签名回填 | proxy | `proxy/signature_cache.go`+`forward.go`+`stream.go` |
 | 新增/修改配置字段 | config-registry-state | `config/types.go`+`defaults.go`+`persistence.go` |
 | 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + 键盘陷阱 + 浏览锁）+ `internal/api/settings/register.go`（`getSettings` + `configDir` + `trace.logDir` + 指针字段按需合并）+ `internal/fsutil/open_windows.go`（`OpenFilePickerAt`+`SetFolder`） |
+| 修改运行时状态持久化 | config-registry-state | `state/manager.go`+`state.go`、`registry/state.go`（`KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`，持久化 `ModelRemaining==0` 的 model→limit 子集） |
+| 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/usage/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`）、`web/static/usage_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。
 
@@ -121,7 +123,7 @@ HTTP server 仅监听 localhost。任意 API Key 或无 Key 均可访问 `/v1/*`
 
 ### 2. 配置持久化用 YAML，不用数据库
 - `config.yaml` 存储 providers + combos + settings
-- `state.yaml` 存储 key/combo 运行时状态（冷却级别、模型锁、轮转索引），重启恢复
+- `state.yaml` 存储 key/combo 运行时状态（冷却级别、模型锁、轮转索引、exhausted key 配额上限），重启恢复
 - `state.yaml` 写入使用 500ms 去抖 + 临时文件 rename 保证原子性
 - Usage 和 console logs 仅存内存，重启清零
 - 所有文件写入均用临时文件 + rename 保证原子性

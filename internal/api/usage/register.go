@@ -240,6 +240,41 @@ func (h *Handler) getQuotas(w http.ResponseWriter, r *http.Request) {
 		bars[i].InFlightKeyIDs = ids
 	}
 
+	// Recompute TotalUsed/TotalCapacity from per-key runtime states so that
+	// exhausted keys (persisted via ExhaustedModelLimits and restored with
+	// ModelRemaining==0) are counted even after a restart when QuotaTracker is
+	// empty. This overwrites QuotaTracker's in-session aggregates with the
+	// authoritative key-state view.
+	for i := range bars {
+		totalCapacity := 0
+		totalUsed := 0
+		for _, p := range h.d.Reg.ListProviders() {
+			if p.Name != bars[i].Provider && p.ID != bars[i].Provider {
+				continue
+			}
+			for _, k := range p.Keys {
+				if !k.IsActive {
+					continue
+				}
+				st := h.d.Reg.GetKeyState(p.ID, k.ID)
+				if st == nil {
+					continue
+				}
+				q := st.GetQuota(bars[i].Model)
+				if q != nil && q.ModelLimit > 0 {
+					totalCapacity += q.ModelLimit
+					totalUsed += q.ModelLimit - q.ModelRemaining
+				}
+			}
+			break
+		}
+		if totalCapacity > 0 {
+			bars[i].TotalCapacity = totalCapacity
+			bars[i].TotalUsed = totalUsed
+			bars[i].HasQuota = true
+		}
+	}
+
 	// Sort by provider + model for stable ordering
 	sort.Slice(bars, func(i, j int) bool {
 		ki := bars[i].Provider + "/" + bars[i].Model

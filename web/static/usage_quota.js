@@ -1,5 +1,16 @@
 // ===== Quota Monitor table =====
 
+
+function formatQuotaCell(bar) {
+  var capacity = bar.hasQuota ? String(bar.totalCapacity) : '\u221e';
+  var html = '<span class="quota-success">' + (bar.successCount || 0) + '</span>' +
+    '<span class="quota-sep"> / </span>' +
+    '<span class="quota-capacity">' + capacity + '</span>';
+  if (bar.errorCount && bar.errorCount > 0) {
+    html += '<span class="quota-error-badge">' + bar.errorCount + '</span>';
+  }
+  return html;
+}
 // renderQuotaRow returns a top-level <tr> for a QuotaBar.
 function renderQuotaRow(bar) {
   var itemId = 'qr-' + sanitizeId(bar.provider) + '-' + sanitizeId(bar.model);
@@ -7,7 +18,7 @@ function renderQuotaRow(bar) {
   var chevronHtml = multi
     ? '<span class="quota-row-chevron">' + QUOTA_CHEVRON + '</span>'
     : '';
-  var quotaStr = bar.hasQuota ? (bar.totalUsed + '/' + bar.totalCapacity) : '∞';
+  var quotaHtml = formatQuotaCell(bar);
   var rowHtml = '<tr class="quota-row" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
   if (multi) {
     var pEsc = escapeHtml(bar.provider).replace(/'/g, "\\'");
@@ -18,7 +29,7 @@ function renderQuotaRow(bar) {
     <td class="quota-td-chevron">' + chevronHtml + '</td>\
     <td>' + escapeHtml(bar.provider) + '</td>\
     <td>' + escapeHtml(displayModelName(bar.model, bar.alias || bar.model)) + '</td>\
-    <td class="quota-td-quota">' + quotaStr + '</td>\
+    <td class="quota-td-quota">' + quotaHtml + '</td>\
     <td>' + formatCompactTokens(bar.inputTokens) + '</td>\
     <td>' + formatCompactTokens(bar.outputTokens) + '</td>\
     <td class="quota-td-latency">—</td>\
@@ -30,7 +41,7 @@ function renderQuotaRow(bar) {
 // patchQuotaRow updates a top-level row's volatile cells (quota, tokens,
 // latency, speed, chevron rotation). Reuses the existing <tr> by id.
 function patchQuotaRow(el, bar) {
-  el.querySelector('.quota-td-quota').textContent = bar.hasQuota ? (bar.totalUsed + '/' + bar.totalCapacity) : '∞';
+  el.querySelector('.quota-td-quota').innerHTML = formatQuotaCell(bar);
   // tokens columns (4th and 5th data cells)
   var tds = el.querySelectorAll('td');
   tds[4].textContent = formatCompactTokens(bar.inputTokens);
@@ -75,6 +86,9 @@ function renderQuotaKeyRows(provider, model, data) {
   }
   var rows = '';
   data.keys.forEach(function(k) {
+    if (data.hasQuota && k.hasQuota && k.modelRemaining === 0) {
+      return; // skip exhausted keys — they're counted in the provider-level aggregate, not shown per-key
+    }
     var statusBadge = '';
     if (data.hasQuota) {
       if (k.hasQuota) {
@@ -141,6 +155,9 @@ function renderQuotaKeyRows(provider, model, data) {
       <td>' + formatAvgSpeed(k) + '</td>\
     </tr>';
   });
+  if (rows === '') {
+    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
+  }
   return rows;
 }
 
