@@ -102,7 +102,7 @@ function pgShowImageModal(url, savedPath, savedFilename) {
     '</span>' +
   '</div>' +
   '<div class="pg-modal-body" id="pg-img-modal-body" style="display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;padding:0;cursor:default">' +
-    '<img src="' + pgEscapeHtml(url) + '" alt="image" id="pg-img-modal-img" data-url="' + pgEscapeAttr(url) + '" style="border-radius:4px;transform-origin:center center;display:block">' +
+    '<img src="' + pgEscapeHtml(url) + '" crossorigin="anonymous" alt="image" id="pg-img-modal-img" data-url="' + pgEscapeAttr(url) + '" style="border-radius:4px;transform-origin:center center;display:block">' +
   '</div>' +
   '<div class="pg-img-modal-footer" id="pg-img-footer">' +
     '<span id="pg-img-meta-res">—</span>' +
@@ -285,6 +285,45 @@ function pgCopyImage(url, btn) {
     }
   }
 
+  function fallbackViaProxy() {
+    if (url.indexOf('data:') === 0) {
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+      return;
+    }
+    fetch(pgImageProxyURL(url)).then(function(r) {
+      if (!r.ok) throw new Error('proxy fetch failed');
+      return r.blob();
+    }).then(function(blob) {
+      var blobUrl = URL.createObjectURL(blob);
+      var proxyImg = new Image();
+      proxyImg.onload = function() {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = proxyImg.naturalWidth || proxyImg.width;
+          canvas.height = proxyImg.naturalHeight || proxyImg.height;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(proxyImg, 0, 0);
+          canvas.toBlob(writePngBlob, 'image/png');
+        } catch (e) {
+          if (btn) btn.textContent = orig;
+          pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      };
+      proxyImg.onerror = function() {
+        URL.revokeObjectURL(blobUrl);
+        if (btn) btn.textContent = orig;
+        pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+      };
+      proxyImg.src = blobUrl;
+    }).catch(function() {
+      if (btn) btn.textContent = orig;
+      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+    });
+  }
+
   function drawToCanvasAndWrite(img) {
     try {
       var canvas = document.createElement('canvas');
@@ -292,10 +331,15 @@ function pgCopyImage(url, btn) {
       canvas.height = img.naturalHeight || img.height;
       var ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      canvas.toBlob(writePngBlob, 'image/png');
+      canvas.toBlob(function(blob) {
+        if (!blob) {
+          fallbackViaProxy();
+          return;
+        }
+        writePngBlob(blob);
+      }, 'image/png');
     } catch (e) {
-      if (btn) btn.textContent = orig;
-      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
+      fallbackViaProxy();
     }
   }
 
@@ -308,21 +352,7 @@ function pgCopyImage(url, btn) {
   var img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = function() { drawToCanvasAndWrite(img); };
-  img.onerror = function() {
-    if (url.indexOf('data:') === 0) {
-      if (btn) btn.textContent = orig;
-      pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
-    } else {
-      var proxyImg = new Image();
-      proxyImg.crossOrigin = 'anonymous';
-      proxyImg.onload = function() { drawToCanvasAndWrite(proxyImg); };
-      proxyImg.onerror = function() {
-        if (btn) btn.textContent = orig;
-        pgToast(pgT('pgImageCopyFailed') || 'Copy failed', 'error');
-      };
-      proxyImg.src = pgImageProxyURL(url);
-    }
-  };
+  img.onerror = function() { fallbackViaProxy(); };
   img.src = url;
 }
 

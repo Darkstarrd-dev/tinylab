@@ -35,6 +35,13 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
+func (h *Handler) httpClient() *http.Client {
+	if h.d != nil && h.d.TestClient != nil {
+		return h.d.TestClient
+	}
+	return http.DefaultClient
+}
+
 // Register adds the image routes to the given router.
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/save-image", h.saveImage)
@@ -109,7 +116,7 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 		}
 		reqUpstream.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-		resp, err := h.d.TestClient.Do(reqUpstream)
+		resp, err := h.httpClient().Do(reqUpstream)
 		if err != nil {
 			apibase.WriteAPIError(w, http.StatusBadGateway, "failed to fetch image: "+err.Error())
 			return
@@ -191,7 +198,16 @@ func (h *Handler) imageProxy(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusForbidden, "url resolves to a blocked address")
 		return
 	}
-	resp, err := h.d.TestClient.Get(u)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	reqUpstream, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid image url request")
+		return
+	}
+	reqUpstream.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := h.httpClient().Do(reqUpstream)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, "failed to fetch image: "+err.Error())
 		return
