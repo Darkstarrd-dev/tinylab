@@ -15,7 +15,7 @@
 //  - The Shortcut Settings UI mutates overrides in memory and the Save
 //    button persists the full overrides map via PATCH /api/settings.
 //
-// This file is loaded BEFORE endpoint.js (and before any module that
+// This file is loaded BEFORE settings.js (and before any module that
 // calls matchEvent), so Shortcuts is always available.
 
 // ----- System presets -----
