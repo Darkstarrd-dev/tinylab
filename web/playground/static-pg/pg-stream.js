@@ -334,13 +334,20 @@ function pgSendImage(i, body, assistantIdx) {
       msg.completedAt = Date.now();
       msg.durationMs = msg.completedAt - msg.startedAt;
       msg.status = 'complete';
-      var data = j.data && j.data[0];
-      if (data) {
-        var imgUrl = data.url || (data.b64_json ? 'data:image/png;base64,' + data.b64_json : '');
-        var revisedPrompt = data.revised_prompt || '';
+      var dataList = Array.isArray(j.data) ? j.data : (j.data ? [j.data] : []);
+      if (dataList.length > 0) {
         var contentParts = [];
-        if (revisedPrompt) contentParts.push({ type: 'text', text: revisedPrompt });
-        if (imgUrl) contentParts.push({ type: 'image_url', image_url: { url: imgUrl } });
+        for (var idx = 0; idx < dataList.length; idx++) {
+          var item = dataList[idx];
+          if (!item) continue;
+          var imgUrl = item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : '');
+          var revisedPrompt = item.revised_prompt || '';
+          if (revisedPrompt) contentParts.push({ type: 'text', text: revisedPrompt });
+          if (imgUrl) {
+            contentParts.push({ type: 'image_url', image_url: { url: imgUrl } });
+            pgAutoSaveImageArtifact(imgUrl);
+          }
+        }
         msg.content = contentParts.length > 0 ? contentParts : '';
       } else {
         msg.content = JSON.stringify(j);
@@ -386,21 +393,35 @@ function pgPollModelScopeTask(i, taskId, model, assistantIdx, msg) {
         pgRenderDebug();
         var status = (j.task_status || '').toUpperCase();
         if (status === 'SUCCEED' || status === 'SUCCESS' || status === 'COMPLETED') {
-          var imageUrl = '';
-          if (j.output_images && j.output_images[0]) {
-            imageUrl = j.output_images[0];
-          } else if (j.data && j.data[0]) {
-            imageUrl = j.data[0].url || (j.data[0].b64_json ? 'data:image/png;base64,' + j.data[0].b64_json : '');
-          } else if (j.output && j.output.images && j.output.images[0]) {
-            imageUrl = j.output.images[0].url || '';
+          var imageUrls = [];
+          if (Array.isArray(j.output_images) && j.output_images.length > 0) {
+            imageUrls = j.output_images;
+          } else if (Array.isArray(j.data) && j.data.length > 0) {
+            for (var dIdx = 0; dIdx < j.data.length; dIdx++) {
+              var dItem = j.data[dIdx];
+              if (!dItem) continue;
+              var u = dItem.url || (dItem.b64_json ? 'data:image/png;base64,' + dItem.b64_json : '');
+              if (u) imageUrls.push(u);
+            }
+          } else if (j.output && Array.isArray(j.output.images) && j.output.images.length > 0) {
+            for (var oIdx = 0; oIdx < j.output.images.length; oIdx++) {
+              var oUrl = j.output.images[oIdx].url || j.output.images[oIdx];
+              if (typeof oUrl === 'string' && oUrl) imageUrls.push(oUrl);
+            }
           } else if (j.image_url) {
-            imageUrl = j.image_url;
+            imageUrls = [j.image_url];
           }
           msg.completedAt = Date.now();
           msg.durationMs = msg.completedAt - msg.startedAt;
           msg.status = 'complete';
-          if (imageUrl) {
-            msg.content = [{ type: 'image_url', image_url: { url: imageUrl } }];
+          if (imageUrls.length > 0) {
+            var msContent = [];
+            for (var uIdx = 0; uIdx < imageUrls.length; uIdx++) {
+              var targetUrl = imageUrls[uIdx];
+              msContent.push({ type: 'image_url', image_url: { url: targetUrl } });
+              pgAutoSaveImageArtifact(targetUrl);
+            }
+            msg.content = msContent;
           } else {
             msg.content = JSON.stringify(j);
           }
@@ -422,6 +443,13 @@ function pgPollModelScopeTask(i, taskId, model, assistantIdx, msg) {
     });
   }
   setTimeout(poll, 2000);
+}
+
+function pgAutoSaveImageArtifact(url) {
+  if (!url) return;
+  pgApiPost('/save-image', { url: url }).catch(function(err) {
+    console.warn('[Playground] Auto-save image artifact failed:', err);
+  });
 }
 
 function pgFinish(i, assistantIdx) {

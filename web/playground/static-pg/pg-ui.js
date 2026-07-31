@@ -480,7 +480,10 @@ function pgRenderSidebar() {
     var mCur = cfg.model || '';
     var availModels = (pgState.models || []).slice().filter(function(m) { return m.kind === 'image'; });
     if (protoCur && protoCur !== 'all') {
-      availModels = availModels.filter(function(m) { return m.imgProtocol === protoCur; });
+      availModels = availModels.filter(function(m) {
+        var proto = m.imgProtocol || 'gpt';
+        return proto === protoCur;
+      });
     }
     var mOpts = availModels.map(function(m) {
       return '<option value="' + pgEscapeAttr(m.id) + '"' + (mCur === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>';
@@ -685,6 +688,7 @@ function pgGetImgProtocol(modelId) {
   return (info && info.kind === 'image' && info.imgProtocol) ? info.imgProtocol : 'gpt';
 }
 // pgOnModelSelectBackfill sets the protocol filter to match the selected
+// pgOnModelSelectBackfill sets the protocol filter to match the selected
 // model's imgProtocol so the protocol picker stays coherent with the model.
 // Called from the image-mode model <select> onchange after pgOnModelChange.
 function pgOnModelSelectBackfill(modelId) {
@@ -692,8 +696,8 @@ function pgOnModelSelectBackfill(modelId) {
   if (!w) return;
   if (!modelId) { w.config.imgProtocolFilter = 'all'; return; }
   var info = pgGetModelInfo(modelId);
-  if (info && info.kind === 'image' && info.imgProtocol) {
-    w.config.imgProtocolFilter = info.imgProtocol;
+  if (info && info.kind === 'image') {
+    w.config.imgProtocolFilter = info.imgProtocol || 'gpt';
   } else {
     w.config.imgProtocolFilter = 'all';
   }
@@ -708,7 +712,7 @@ function pgEffectiveProtocol(cfg) {
   // Prefer the selected model's imgProtocol first, then explicit filter.
   if (cfg.model) {
     var m = pgGetModelInfo(cfg.model);
-    if (m && m.kind === 'image' && m.imgProtocol) return m.imgProtocol;
+    if (m && m.kind === 'image') return m.imgProtocol || 'gpt';
   }
   if (cfg.imgProtocolFilter && cfg.imgProtocolFilter !== 'all') {
     return cfg.imgProtocolFilter;
@@ -716,18 +720,10 @@ function pgEffectiveProtocol(cfg) {
   return null;
 }
 
-// pgImageProtocols returns the set of unique imgProtocol values among all
-// image-kind models in pgState.models, plus 'all'.  Used to populate the
-// protocol selector in image mode.
+// pgImageProtocols returns the list of available image protocols for filtering.
+// Fixed to ['all', 'gpt', 'xai', 'modelscope'] so protocol filter options stay complete.
 function pgImageProtocols() {
-  var protos = { all: true };
-  var models = pgState.models || [];
-  for (var i = 0; i < models.length; i++) {
-    if (models[i].kind === 'image' && models[i].imgProtocol) {
-      protos[models[i].imgProtocol] = true;
-    }
-  }
-  return Object.keys(protos);
+  return ['all', 'gpt', 'xai', 'modelscope'];
 }
 
 function pgImgParamSelect(key, labelKey, val, options) {
@@ -1334,7 +1330,8 @@ function pgOnProtocolFilter(v) {
   // Clear model if it doesn't match the selected protocol
   if (v && v !== 'all' && w.config.model) {
     var info = pgGetModelInfo(w.config.model);
-    if (info && info.imgProtocol !== v) {
+    var proto = (info && info.kind === 'image') ? (info.imgProtocol || 'gpt') : '';
+    if (proto !== v) {
       w.config.model = '';
     }
   }

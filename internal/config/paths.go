@@ -28,3 +28,22 @@ func ResolveTraceDir(logDir, configDir string) string {
 	}
 	return filepath.Join(configDir, logDir)
 }
+
+// ResolveImageSaveDir resolves the image save directory. An empty imageSaveDir
+// falls back to {configDir}/imgs (or "imgs" if configDir is empty); a relative
+// path is joined with configDir; an absolute path is used verbatim.
+func ResolveImageSaveDir(imageSaveDir, configDir string) string {
+	if imageSaveDir == "" {
+		if configDir != "" {
+			return filepath.Join(configDir, "imgs")
+		}
+		return "imgs"
+	}
+	if filepath.IsAbs(imageSaveDir) {
+		return imageSaveDir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, imageSaveDir)
+	}
+	return imageSaveDir
+}

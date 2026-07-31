@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/config"
 )
 
 type saveImageRequest struct {
@@ -134,10 +135,8 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure imgs directory exists
-	imgsDir := h.d.Reg.Config().ImageSaveDir
-	if imgsDir == "" {
-		imgsDir = "imgs"
-	}
+	configDir := filepath.Dir(h.d.ConfigPath)
+	imgsDir := config.ResolveImageSaveDir(h.d.Reg.Config().ImageSaveDir, configDir)
 	if err := os.MkdirAll(imgsDir, 0755); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create imgs directory")
 		return

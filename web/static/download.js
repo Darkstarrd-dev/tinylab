@@ -442,12 +442,14 @@ async function openPathSettingsModal(opts) {
   if (sections.imageDir) {
     var imgVal = (res && res.imageSaveDir) || '';
     var imgInit = imgVal || (configDir ? configDir + '/imgs' : '');
-    formRows += browseRow('imageDir', 'modal-dl-image-dir', imgVal, '', 'directory', null, imgInit);
+    var imgPh = configDir ? configDir + '/imgs' : 'imgs';
+    formRows += browseRow('imageDir', 'modal-dl-image-dir', imgVal, imgPh, 'directory', null, imgInit);
   }
   if (sections.logDir) {
     var logVal = (res && res.trace && res.trace.logDir) || '';
     var logInit = logVal || (configDir ? configDir + '/traces' : '');
-    formRows += browseRow('logDir', 'modal-dl-log-dir', logVal, '', 'directory', null, logInit);
+    var logPh = configDir ? configDir + '/traces' : 'traces';
+    formRows += browseRow('logDir', 'modal-dl-log-dir', logVal, logPh, 'directory', null, logInit);
   }
   if (opts.useProxy) {
     formRows += '<div class="dl-settings-field" style="margin-bottom:12px;">' +
