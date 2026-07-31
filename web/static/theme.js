@@ -165,8 +165,6 @@ var ThemeSystem = (function() {
   function notifyModeChange(mode) {
     // Update header theme button icon.
     if (typeof updateThemeButton === 'function') updateThemeButton(mode);
-    // Terminal xterm theme.
-    if (typeof updateTerminalTheme === 'function') updateTerminalTheme();
   }
 
   // --- Theme Picker UI ---

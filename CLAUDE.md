@@ -12,7 +12,6 @@
 | `rotation-architecture.md` | Key 轮询：SelectKey 算法、三种策略、两套退避系统、配额锁 CST 00:05、NIM、错误分类 |
 | `download-architecture.md` | yt-dlp 下载：任务队列生命周期、参数构造、SSE 进度、与归档计划漂移 |
 | `combo-architecture.md` | Combo 解析：Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级 |
-| `terminal-monitor-architecture.md` | PTY 终端 + 白名单命令监控：调试门控、SSE 流、平台进程生成 |
 | `config-registry-state-architecture.md` | 基础设施：三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge |
 | `playground-architecture.md` | Playground 前后端：多模型测试、群聊、Director/Narrator |
 

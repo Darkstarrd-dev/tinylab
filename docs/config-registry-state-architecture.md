@@ -5,6 +5,7 @@
 > **最后核对（2026-07-31 增补#25 图片保存路径与路径弹窗默认值提示）：** (1) **图片生成产物落盘**：`internal/config/paths.go` 新增 `ResolveImageSaveDir(imageSaveDir, configDir string)` 函数，未设置 `imageSaveDir` 时自动回退到 `{configDir}/imgs`（或 `imgs` 相对路径）；`internal/api/image/register.go` 的 `saveImage` 接入路径解析并自动创建目录；Playground （`web/playground/static-pg/pg-stream.js`）在生成成功拿到图片时自动触发 `POST /api/save-image` 落盘。(2) **Path Settings 弹窗默认值提示**：`web/static/download.js` 的 `openPathSettingsModal` 为 `Default Image Dir` (`imageSaveDir`) 与 `Default Log Dir` (`trace.logDir`) 的输入框新增基于 `configDir` 的默认路径 Placeholder 提示。涉及文件：`internal/config/paths.go`、`internal/api/image/register.go`、`web/static/download.js`、`web/playground/static-pg/pg-stream.js`。
 > **最后核对（2026-07-31 增补#26 exhausted 配额轻量持久化 + getQuotas 聚合重算）：** (1) `KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`（yaml `exhausted_model_limits,omitempty`），持久化 `ModelQuotas` 中 `ModelRemaining==0` 的条目（model→ModelLimit），使重启后 provider 级 used/capacity 仍能计入已耗尽 key 的配额量。(2) `snapshotKeyState` 遍历 `ModelQuotas` 捕获 `ModelLimit>0 && ModelRemaining==0` 的条目写入 `ExhaustedModelLimits`；`RestoreKeyState` 将其恢复为 `Remaining=0` 的 `QuotaInfo`，但仅当 `ModelQuotas[m]==nil` 时不覆盖实时探测数据。(3) `getQuotas`（`internal/api/usage/register.go`）现从 per-key `KeyRuntimeState.ModelQuotas`（经 `GetQuota` 锁安全读取）重算 `TotalUsed`/`TotalCapacity`，覆盖 `QuotaTracker` 的纯会话聚合，使重启后 `QuotaTracker` 为空时 exhausted key 的配额贡献仍计入 provider 级总量。
 > **最后核对（2026-07-31 增补#27 密码保护一致性归一化与防御性绕过移除）：** (1) `internal/config/defaults.go` 的 `finalizeConfig` 新增 Security 一致性校验：当 `PasswordEnabled=true` 但 `PasswordEncrypted==""` 或 `EncryptionKey==""` 时，归一化为 `PasswordEnabled=false` 并输出 stderr 告警；另在保护关闭但存在 `enc:`-前缀 API Key 时输出不可解密告警。(2) `internal/api/auth/handler.go` 的 `LoginHandler` 移除防御性绕过（原逻辑在 `PasswordEncrypted==""` 时对任意密码放行），改为返回 HTTP 500 错误（finalizeConfig 归一化使此分支不应触发，作为深度防御）。(3) `internal/api/settings/register.go` 的 `updateSettings` 新增校验：当收到 `passwordEnabled=true` 但未附带密码且当前无已存密码时，返回 HTTP 400 拒绝。涉及文件：`internal/config/defaults.go`、`internal/api/auth/handler.go`、`internal/api/settings/register.go`、`web/static/endpoint.js`、`web/static/auth.js`、`web/static/i18n.js`。
+> **最后核对（2026-07-31 增补#28 terminal/monitor 功能移除 + MonitorConfig Pattern B 迁移）：** `internal/terminal/`、`internal/api/terminal/`、`internal/monitor/`、`internal/api/monitor/` 四个包整体删除。`MonitorConfig` struct 从 `config/types.go` 移除，`Config.Monitor` 字段移除。`config/defaults.go` 中 Monitor 默认值与 `monitor.enabled` 废弃告警移除。`persistence.go` 的 `deprecatedFieldPaths` 新增 `{"monitor"}`，使旧 config.yaml 中的 `monitor:` 段被 auto-migrate strip。`config_compat_test.go` 删除（测试的是已删除的 `MonitorConfig.Enabled`），其中 `TestLoad_UnknownFieldStillErrors` 迁移到新文件 `strict_test.go`。`router.go` 移除 monitor/terminal 路由注册与 `monitorMgr`/`terminalState` 字段。`apibase/deps.go` 移除 `MonitorMgr`/`TerminalState` 字段。go.mod 移除 `gorilla/websocket`、`go-pty`、`creack/pty` 三个依赖。前端 `monitor.js`/`terminal.js`/`xterm/` 目录删除，`console.js` 移除 monitor/terminal 子视图与 `consoleDebugMode`（Terminal 按钮门控）。
 
 ## 1. 范围与结论
 
@@ -101,7 +102,6 @@ flowchart TD
 | `Combo` | types.go:142-149 | `ID` / `Name` / `Strategy` / `Models` / `Disabled` / `DisabledModels` |
 | `QuickSlot` | types.go:152-160 | `ID` / `Name` / `Models` / `Disabled` / `DisabledModels` / `Order` / `SelectedIndex`。`SelectedIndex` 无 `omitempty`——0 值也会落盘/回传，保证选中第 1 个模型（index 0）在前端 round-trip 后不丢失 |
 | `SecurityConfig` | types.go:163-167 | `PasswordEnabled` / `PasswordEncrypted` / `EncryptionKey` |
-| `MonitorConfig` | types.go:157-161 | `Enabled` / `AllowedCommands` / `MaxLineLength` |
 | `ServerConfig` | types.go:175-180 | `ReadTimeoutSec` / `WriteTimeoutSec` / `IdleTimeoutSec` / `UpstreamTimeoutSec` |
 | `ProxyConfig` | types.go:184-188 | `Enabled` / `Host` / `Port` |
 | `DownloadConfig` | types.go:191-201 | `Enabled` / `DefaultDir` / `YtDlpPath` / `FfmpegPath` / `ConcurrentFragments` / `MaxConcurrent` / `UseProxy`（替代旧 `Proxy` 字符串，引用全局上游代理）/ `BrowserCookies` / `CookiesPath` |
@@ -149,7 +149,6 @@ flowchart TD
 - **server 超时回填**（95）：调 `FinalizeServerConfig(&cfg.Server)`。
 - **模型 QuotaType 默认（defaults.go:96-102）：** 空 `QuotaType` 填 “limited”。
 - **`validateProviders`（defaults.go:103）：** 尾调用校验（仅告警，见第 7 节）。
-- **Monitor 默认（104-109）：** `AllowedCommands` 为空时填一组白名单（含 `nvidia-smi`/`top`/`htop` 等）；`MaxLineLength` 零值填 4096。
 - **Download 区段探测（110-123）：** 仅当 `raw` 中**不存在** `download:` 段时才默认 `Enabled=true`；存在则尊重用户（含显式 `false`）。`ConcurrentFragments`/`MaxConcurrent` 零值填 4/3；`DefaultDir` 空时取用户主目录下的 “Downloads”。
 - **Security 一致性归一化（2026-07-31 新增）：** 在 API Key 解密之前，检查 `PasswordEnabled=true` 但 `PasswordEncrypted==""` 或 `EncryptionKey==""` 的不一致状态（如用户开启密码但未设密码、或手动编辑 config.yaml），归一化为 `PasswordEnabled=false` 并输出 stderr 告警。另在保护关闭时检测是否存在 `enc:`-前缀的 API Key（此时无法解密），输出告警。
 - **API Key 解密（130-144）：** 仅当 `Security.PasswordEnabled && EncryptionKey!=""` 时，遍历所有 provider/key，对以 “enc:” 前缀的 key 调 `Decrypt` 就地还原明文（内存态保持明文，见第 17 节）。
@@ -180,7 +179,7 @@ flowchart TD
 
 **端口范围校验：** `validatePort(port int) error`（validate.go:18）检查 `port` 在 1-65535 范围内，否则返回 error；在 `finalizeConfig`（defaults.go:75）填默认端口后调用，失败时仅 `fmt.Fprintf(os.Stderr, ...)` 告警，不阻断启动（与 `validateProviders` 一致的 best-effort 风格）。
 
-**废弃字段向后兼容：** `config.yaml` 用 `yaml.NewDecoder` + `dec.KnownFields(true)` strict 解析（persistence.go:39,65），目的是捕获字段拼写错误（如 `baseURL` 写成 `baseurl`），而非拒绝历史遗留字段。v1.8.0 删除了 `MonitorConfig.Enabled`（曾用于控制 Monitor 开关，但删除前从未被代码引用），保留 strict 会导致从 v1.7.x 升级的旧 config.yaml 含 `monitor.enabled` 时启动失败。修复策略：在 `MonitorConfig` struct 中**保留** `Enabled` 字段（types.go:200，标记 `deprecated, ignored`），让 strict 解析识别为已知字段从而通过；`finalizeConfig`（defaults.go:155-158）检测到 `cfg.Monitor.Enabled == true` 时向 stderr 输出废弃告警，引导用户删除该字段。此模式兼顾"strict 拼写检测"与"向后兼容"——未来若再有字段删除，按同模式加回 + 告警即可。回归测试见 `config_compat_test.go`。
+**废弃字段向后兼容：** `config.yaml` 用 `yaml.NewDecoder` + `dec.KnownFields(true)` strict 解析（persistence.go:65），目的是捕获字段拼写错误（如 `baseURL` 写成 `baseurl`），而非拒绝历史遗留字段。当字段被删除时采用 **Pattern B（auto-migrate strip）**：将已删除字段路径加入 `deprecatedFieldPaths`（persistence.go:87-93），`decodeConfig` 在 strict 解析失败时 lenient-decode 为 `map[string]any`、`stripPaths` 移除已废弃路径、re-marshal 后 strict 重新解析；成功则标记 `migrated=true` 由调用方 `Save` 回写清理后的 config。未匹配任何 deprecated 路径的 strict 失败（如拼写错误 `portt`）原样返回，保留拼写检测契约。当前已注册的废弃路径：`{"download","proxy"}`（download 代理字段被 `UseProxy` 替代）、`{"monitor"}`（MonitorConfig 随 terminal/monitor 功能整体移除）。回归测试见 `internal/config/strict_test.go`。
 
 ## 8. internal/config — AES-GCM 加密（crypto.go）
 
@@ -336,7 +335,7 @@ sequenceDiagram
     M->>IO: flushNowLocked -> Save 立即落盘
 ```
 
-**config.yaml vs state.yaml 分工：** 前者存**定义 + 全局设置**（providers/keys/models/combos/quickslots/security/monitor/proxy/server/download/rotation + port）；后者只存**可持久化的运行时子集**（key 的冷却/锁定/退避/NIM 计数、combo 的轮转索引）。`ModelErrors`/`InFlight`/`ModelQuotas` **两处都不持久化**（snapshotKeyState 排除 + KeySnapshot 无字段）。
+**config.yaml vs state.yaml 分工：** 前者存**定义 + 全局设置**（providers/keys/models/combos/quickslots/security/proxy/server/download/rotation + port）；后者只存**可持久化的运行时子集**（key 的冷却/锁定/退避/NIM 计数、combo 的轮转索引）。`ModelErrors`/`InFlight`/`ModelQuotas` **两处都不持久化**（snapshotKeyState 排除 + KeySnapshot 无字段）。
 
 **关闭路径：** 进程退出经 `FlushSync` 立即落盘并 `closed=true`，保证 debounce 窗口内的待写数据被强制写出。
 
@@ -384,7 +383,6 @@ flowchart LR
 | `NIMSettings` | config/types.go:121-126 | NIM 参数 |
 | `Combo` / `QuickSlot` | config/types.go:129-147 | 组合路由 / 快捷槽 |
 | `SecurityConfig` | config/types.go:150-154 | 密码 + `EncryptionKey` |
-| `MonitorConfig` | config/types.go:157-161 | Monitor 设置 |
 | `ServerConfig` | config/types.go:175-180 | HTTP 超时 |
 | `ProxyConfig` | config/types.go:184-188 | 上游代理 |
 | `DownloadConfig` | config/types.go:191-201 | 下载设置 |
@@ -492,8 +490,8 @@ go build -o tinyrouter .
 **internal/config：**
 
 - `config.go`：包文档（1-11），说明 types/defaults/persistence/validate/crypto 分工。
-- `types.go`：RotationConfig(11-19)、Key(22-29)、ModelDef(32-55，含 Protocols 50)+ModelNIMOverride(44-48)+UnmarshalYAML(38-51)+UnmarshalJSON(54-71)、Protocol 合法值常量(31-37)、Provider(74-96)、IsNIM(102-107)、IsGeminiOpenAICompat(113-117)、NIMSettings(121-126)、Combo(129-136)、QuickSlot(139-147)、SecurityConfig(150-154)、MonitorConfig(157-161)、ServerConfig(175-180)、ProxyConfig(184-188)、DownloadConfig(191-201)、Config(204-218)。
-- `defaults.go`：DefaultServerConfig(11-18)、FinalizeServerConfig(22-36)、DefaultConfig(39-64)、finalizeConfig(69-146：enablePlayground 探测 82-84、state_persist 探测 87-89、quota 默认 96-102、monitor 104-109、download 段探测 114-117、key 解密 130-144)。
+- `types.go`：RotationConfig(11-19)、Key(22-29)、ModelDef(32-55，含 Protocols 50)+ModelNIMOverride(44-48)+UnmarshalYAML(38-51)+UnmarshalJSON(54-71)、Protocol 合法值常量(31-37)、Provider(74-96)、IsNIM(102-107)、IsGeminiOpenAICompat(113-117)、NIMSettings(121-126)、Combo(129-136)、QuickSlot(139-147)、SecurityConfig(150-154)、ServerConfig(175-180)、ProxyConfig(184-188)、DownloadConfig(191-201)、Config(204-218)。
+- `defaults.go`：DefaultServerConfig(11-18)、FinalizeServerConfig(22-36)、DefaultConfig(39-64)、finalizeConfig(69-146：enablePlayground 探测 82-84、state_persist 探测 87-89、quota 默认 96-102、download 段探测 114-117、key 解密 130-144)。
 - `persistence.go`：Load(21-70，.tmp 恢复 22-51、首跑 54-60、严格解析 65)、Save(79-107，加密副本 80-83、rename 回退 92-104)。
 - `validate.go`：validateProviders(10-42)、validateModelDef(16-42，Protocols 合法值告警)、validProtocols(9-14)、splitModel(44-52)。
 - `crypto.go`：GenerateKey(13-19)、Encrypt(21-40)、Decrypt(42-69)、encryptKeysCopy(74-91)。

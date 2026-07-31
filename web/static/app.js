@@ -11,8 +11,6 @@ var navGen = 0;
 // Fallback: close all streams when the tab is closed.
 window.addEventListener('beforeunload', () => {
     if (typeof closeConsoleStream === 'function') closeConsoleStream();
-    if (typeof closeMonitorStream === 'function') closeMonitorStream();
-    if (typeof closeTerminalSession === 'function') closeTerminalSession();
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -36,7 +34,7 @@ function navigateTo(page) {
   if (page === 'gallery' || page === 'editor') sessionStorage.setItem('trGalView', page);
   var gen = ++navGen;
   currentProviderId = null;
-  stopUsageRefresh();
+  if (typeof stopUsageRefresh === 'function') stopUsageRefresh();
   // Cleanup playground streaming state when leaving the page.
   if (currentPage !== 'playground' && typeof cleanupPlayground === 'function') {
     cleanupPlayground();
@@ -54,11 +52,9 @@ function navigateTo(page) {
     downloadEventSource.close();
     downloadEventSource = null;
   }
-  // Close Console/Monitor/Terminal streams when leaving the usage page.
+  // Close Console stream when leaving the usage page.
   if (page !== 'usage') {
     if (typeof closeConsoleStream === 'function') closeConsoleStream();
-    if (typeof closeMonitorStream === 'function') closeMonitorStream();
-    if (typeof closeTerminalSession === 'function') closeTerminalSession();
   }
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page ||

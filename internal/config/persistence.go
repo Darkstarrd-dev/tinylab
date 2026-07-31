@@ -84,8 +84,12 @@ func Load(path string) (*Config, error) {
 // files auto-migrate instead of blocking startup. A genuinely unknown field
 // (e.g. a typo like "portt") is not in this list, so the strict error surfaces
 // unchanged — preserving the typo-catching intent of KnownFields(true).
+//
+// "monitor" was removed when the terminal/monitor features were deleted.
+// "download.proxy" was removed when the download proxy feature was deleted.
 var deprecatedFieldPaths = [][]string{
 	{"download", "proxy"},
+	{"monitor"},
 }
 
 // decodeConfig strictly decodes YAML data into cfg. If the strict decoder

@@ -236,7 +236,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`MonitorMgr`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`TerminalState`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `TerminalState`（`Mu sync.Mutex` + `Term *terminal.Session`）+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数 |
+| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数 |
 
 ### 10.2 `internal/api/auth/` — 鉴权
 
@@ -334,11 +334,6 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 |---|---|
 | `register.go` | `Handler` + `Register` + `listModels`（`/api/models`，返回 `prefix/alias` 或 `prefix/model_id`） |
 
-### 10.13 `internal/api/monitor/` — Monitor 命令状态
-
-| 文件 | 职责 |
-|---|---|
-| `register.go` | `Handler` + `Register` + `getMonitorStatus`/`startMonitor`/`stopMonitor`/`streamMonitor`（SSE，含 buffered replay + keepalive） |
 
 ### 10.14 `internal/api/probe/` — 模型协议探测
 
@@ -376,11 +371,6 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 |---|---|
 | `register.go` | `Handler` + `Register` + `streamUsageEvents`（`GET /api/usage/events`） |
 
-### 10.20 `internal/api/terminal/` — Terminal WebSocket
-
-| 文件 | 职责 |
-|---|---|
-| `register.go` | `Handler` + `Register`（`GET /terminal/ws`、`POST /terminal/stop`）+ `handleTerminalWS`（debug-mode 门 + 单会话守卫，状态经 `apibase.Deps.TerminalState`）+ `stopTerminal` + `upgrader` |
 
 ### 10.21 `internal/api/usage/` — 用量 / 配额 / 模型 key 状态
 
@@ -475,43 +465,16 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 
 ## 13c. `internal/procutil/` — 进程工具（跨平台进程组管理）
 
-跨平台进程组管理工具，从 `internal/download/kill_unix.go` 和 `internal/monitor/manager_unix.go` 中提取的重复代码统一为共享包。Unix 实现：SIGTERM → 2s grace → SIGKILL 兜底；Windows 实现：`taskkill /T /F`。无外部依赖（仅 stdlib）。
+跨平台进程组管理工具，从 `internal/download/kill_unix.go` 中提取的重复代码统一为共享包。Unix 实现：SIGTERM → 2s grace → SIGKILL 兜底；Windows 实现：`taskkill /T /F`。无外部依赖（仅 stdlib）。
 
 | 文件 | build tag | 职责 |
 |---|---|---|
 | `procutil_unix.go` | `!windows` | `KillProcessGroup(pid)` 先 SIGTERM 再 2s 后 SIGKILL；`SetProcessGroup(cmd)` 设 `Setpgid=true` |
 | `procutil_windows.go` | `windows` | `KillProcessGroup(pid)` 执行 `taskkill /PID /T /F`；`SetProcessGroup(cmd)` 设 `CREATE_NEW_PROCESS_GROUP\|createNoWindow` |
 
-`internal/download/` 和 `internal/monitor/` 的平台文件均委托此包实现进程组管理。
+`internal/download/` 的平台文件均委托此包实现进程组管理。
 ---
 
-## 14. `internal/terminal/` — 交互式终端
-
-Debug Mode 下的完整交互式终端（xterm.js + WebSocket + ConPTY/PTY），支持 vim、Ctrl+C、Tab 补全，会话持久保持。架构基线见 [`docs/terminal-monitor-architecture.md`](docs/terminal-monitor-architecture.md)（与 Monitor 合著，含会话模型、调试门控、单会话守卫、平台进程生成、源码锚点）。
-
-| 文件 | build tag | 职责 |
-|---|---|---|
-| `session.go` | — | PTY 会话（`go-pty` + `gorilla/websocket`）；`buildShellEnv()`（session.go:46）构建子进程 env |
-| `path.go` | — | `buildShellEnv`/`buildShellEnvWith`/`withAugmentedPath`：基于 `os.Environ()` 构建 shell env，Windows 上若继承 PATH 缺失注册表条目则用注册表 PATH 补齐，末尾附加 `TERM=xterm-256color` |
-| `path_windows.go` | `windows` | `mergedPathFromRegistry()`：读 HKLM 系统 PATH + HKCU 用户 PATH（REG_EXPAND_SZ 经 `os.ExpandEnv` 展开），合并返回；失败返回 "" 回落到继承 PATH |
-| `path_other.go` | `!windows` | `mergedPathFromRegistry()` no-op（返回 ""）；非 Windows 以 `os.Environ()` 为唯一来源 |
-| `path_test.go` | — | `withAugmentedPath`/`buildShellEnv` 合并逻辑测试（跨平台，单组件路径条目保证确定性） |
-| `process_windows.go` | `windows` | ConPTY 进程生成（`killProcessGroup` taskkill /T /F） |
-| `process_unix.go` | `!windows` | PTY 进程生成（`killProcessGroup` SIGKILL 进程组） |
-| `session_test.go` | — | 测试 |
-| `session_lifecycle_test.go` | — | Close 幂等、resize 解析、NewSession 失败清理、端到端 PTY 测试 |
----
-
-## 15. `internal/monitor/` — Monitor 命令
-
-实时流式运行白名单命令（如 `nvidia-smi -l 1`），输出内嵌 Console 页面。架构基线见 [`docs/terminal-monitor-architecture.md`](docs/terminal-monitor-architecture.md)（与 Terminal 合著，含 Manager、白名单、SSE 流、平台进程生成、源码锚点）。
-
-| 文件 | build tag | 职责 |
-|---|---|---|
-| `manager.go` | — | 单条 monitor 命令调度 + 输出流 |
-| `manager_windows.go` | `windows` | Windows 进程 spawn（委托 `internal/procutil`） |
-| `manager_unix.go` | `!windows` | Unix 进程 spawn（委托 `internal/procutil`） |
-| `manager_test.go` | — | 测试 |
 
 ---
 
@@ -584,7 +547,6 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | JS 模块 | `app.js`（TooltipSystem：hover+focus 委托统一主题 tooltip，消费 `data-tooltip` 属性，取代浏览器原生 `title=`；单共享节点 + 600ms 延迟 + 翻转/钳制定位；顺带键盘焦点路径恢复 sighted 键盘用户视觉 tooltip；输入框内键盘事件拦截防护：`!isInput` 防护避免方向键触发弹窗按钮切换，Tab 键全面覆盖弹窗内控件，`handleThemeModalKeyDown` 掌控外观弹窗 4 组键盘交互与 `closest()` 控件匹配）、`api.js`、`auth.js`、`i18n.js`、`theme.js`（ThemeSystem 双层主题注册表：Mode/Variant 管理 + localStorage + Settings API 持久化 + theme-card 原生 `<button>` 标签化重构 + `requestAnimationFrame` 焦点持久化）、`info_common.js`、`providers.js`（Batch Manage `Select All`/`Deselect All` 动态切换按键、`batchToggleModel`/`batchToggleSelectAll` 联动、Alias/Note/Quota 弹窗自动 focus 与 Quota 弹窗间距优化）、`combos.js`、`quickslots.js`、**Usage 模块拆为 6 文件**（`index.html`/`index-nopg.html` 加载顺序 state→io→quota→recent→modal→entry）：`usage.js`（Usage/Monitor 页入口 `renderUsage` + 刷新生命周期 `startUsageRefresh`/`stopUsageRefresh`/`ensureProcessingTimer`/`stopProcessingTimer`/`updateProcessingLatencyCells`/`resetQuotaTimers`/`refreshQuotaMonitor`/`clearUsage`）、`usage_state.js`（全局状态 + 常量 + 纯工具：`lastUsageEntries`/`inflightEntries`/`quotaBarItems`/`keyDetailCache`/`MAX_PROCESSING_MS`/`MAX_PRESERVED_TERMINAL` + `formatBody`/`sortEntriesByTimeDesc`/`sanitizeId`/`formatLatency`/`getModelColor`/趋势调色 `TREND_PALETTE`）、`usage_io.js`（REST/SSE 数据管线 + 条目合并 `mergeUsageEntries`/`refreshQuotaData`/`scheduleQuotaRefresh`/`applyUsageSSEHandlers`/`handleRequestStart`/`handleRequestDone`/`handleRequestChunk`/`handleRequestTTFT`/`handleRequestTokens`）、`usage_quota.js`（Quota Monitor 表格 `updateQuotaTable`/`patchQuotaRow`/`patchQuotaRowActiveMetrics`/`renderQuotaRow`/`renderQuotaKeyRows`/`renderQuotaKeyRowsInto`/`toggleQuotaRowExpand`/`fetchModelKeyDetail`/`refreshAllKeyDetails`/锁倒计时 `updateLockCountdowns`/`updateKeyTimers` + **2026-07-31：** `formatQuotaCell(bar)` 渲染 `success/capacity` + 可选 error badge；`renderQuotaKeyRows` 跳过 `modelRemaining===0` 的 exhausted key；`renderQuotaRow`/`patchQuotaRow` 以 innerHTML 消费 `formatQuotaCell`）、`usage_recent.js`（Recent Requests 列表 + 分页 + 按会话分组 + `renderUsageRow`/`updateRecentRequestsInline`/`renderRecentRows`/`renderRecentRowsGrouped`/`toggleSessionGroup`/`updateUsageSummary`）、`usage_modal.js`（Entry Info Modal + 流式 + Trace `showUsageEntryInfoById`/`showUsageEntryInfoWithData`/`loadTraceDetails`/`updateStreamingModalResponse`/`copyStreamingText`/`closeUsageEntry`）、`console.js`、`terminal.js`、`monitor.js`、`download.js`、`endpoint.js`（`openSettingsModal` 自动 focus 并选中首个可聚焦元素、`handleThemeModalKeyDown` 焦点选取与关闭) |
 | 样式 | `style.css`（`.tip` 统一 tooltip 类：消费 `--modal-bg`/`--glass-blur`/`--glass-border`/`--radius-sm`/`--shadow-card-hover`/`--z-tooltip` 令牌，跟随所有 mode/variant/style 切换，取代浏览器原生 title tooltip；Modal 基础容器限制 `max-height: calc(100vh - 40px)` 与 `.modal-body` `overflow-x: hidden; overflow-y: auto` 防止 1080P/不同 DPI 缩放下出现 Cutoff 及水平滚动条遮挡；Theme Modal 760px 横版左右并排 + `.style-swatch` 6px 内垫防裁剪 + `.modal-footer .btn:focus` 高对比度双重 Focus Ring 光环） |
 | 图标 | `logo.png`(1024 源)、`logo-sm.png`、`favicon.ico`(7 尺寸)、`favicon.png`、`icon-192.png`、`icon-512.png`、`apple-touch-icon.png`、`site.webmanifest` |
-| 终端模拟器 | `xterm/`：`xterm.js`、`xterm.css`、`xterm-addon-fit.js` |
 
 ### 18.3 `web/playground/` — Playground 模块（仅 `-tags playground` 内嵌）
 
@@ -607,7 +569,6 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | `docs/rotation-architecture.md` | **当前/权威** | Rotation Key 轮询架构基线（SelectKey 算法、三种策略、两套退避系统、配额锁 CST 00:05、NIM、错误分类、源码锚点） |
 | `docs/download-architecture.md` | **当前/权威** | Download 下载架构基线（任务队列生命周期、yt-dlp 参数构造、SSE 进度、与归档计划漂移、源码锚点） |
 | `docs/combo-architecture.md` | **当前/权威** | Combo 组合策略架构基线（Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级、状态持久化、源码锚点） |
-| `docs/terminal-monitor-architecture.md` | **当前/权威** | Terminal + Monitor 架构基线（PTY 会话、调试门控、白名单命令、SSE 流、平台进程生成、源码锚点） |
 | `docs/config-registry-state-architecture.md` | **当前/权威** | Config/Registry/State 基础设施架构基线（三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge、回调去抖、源码锚点） |
 | `docs/providerinfo.md` | 参考 | 各 Provider API 参考笔记（响应 schema、限速头、错误码） |
 | `docs/research/` | 参考 | 调研笔记（`request.md`、`respond.md` 等） |
@@ -679,7 +640,6 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改配额锁/冷却退避 | rotation | `rotation/cooldown.go`、`config/defaults.go`（`BackoffMaxSec`） |
 | 新增 Provider 限速头解析 | rotation | `rotation/ratelimit.go`（adapter）、`proxy/recorder.go` |
 | 修改下载参数/任务生命周期 | download | `download/args.go`+`executor.go`+`manager.go`、`api/download.go`、`web/static/download.js` |
-| 修改终端/监控 | terminal-monitor | `terminal/session.go`、`monitor/manager.go`、`api/terminal.go`+`monitor.go`、`web/static/terminal.js`+`monitor.js` |
 | 修改用量统计/在途跟踪/兜底清理 | proxy、config-registry-state | `proxy/recorder.go`（source 分流 + `captureDetails` 恒为 true 始终捕获，2026-07-26 与 debugMode 解耦；新增 `sessionKey string` 参数写入 `Entry.SessionKey`）+`entry_tracker.go`（`SetTTFT`/`UpdateTokens`/`SweepStale`）+`inflight.go`+`broadcaster.go`、`proxy/forward.go`（`broadcastTTFT`/`broadcastTokens`，`processingEntry.InputTokens` 粗估，**`sessionKeyFromMessages`** 会话连续性指纹：system+首条 user 内容各截 4096 rune 后 FNV-1a 64→8 hex，空=单发/未分组；**`reqLogTag`** 把 `|sess:<key>` 拼进 `[reqID]` 控制台标签）、`proxy/forward_request.go`（`handleProxy` 计算 sessionKey 并下传 `forwardWithRetry`/`handleCombo`）、`proxy/forward_retry.go`+`forward_combo.go`+`retry.go`（`logRequest`/`handleNetworkError`/`handle429`/`handleUpstreamError`/`streamResponse`/`passThroughResponse` 新增 `sessionKey` 参数一路下传至所有 `recordUsage` 调用点 + `[reqID|sess:<key>]` 日志标签）、`proxy/stream.go`（`contentCharsTotal` 累积 + token 进度广播 + `clientDisconnected` 断开路径补 recordUsage + `parseAndBroadcastChunk` 仍由 `debugMode()` 门控）、`api/sse_events.go`、`api/usage/register.go`（`getQuotas` 2026-07-31 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`，覆盖 `QuotaTracker` 纯会话聚合；`getUsage` 调用 SweepStale + `getPlaygroundUsage`；`Entry.SessionKey` 经 `/usage` JSON 自动暴露，无字段过滤）、`usage/ring.go`（`Entry.SessionKey string` 字段）、`web/static/usage` 模块（2026-07-29 拆 6 文件，见 §18.2；`usage_quota.js` 2026-07-31 新增 `formatQuotaCell` + `renderQuotaKeyRows` 跳过 exhausted key + `renderQuotaRow`/`patchQuotaRow` 以 innerHTML 消费；`style.css` 新增 `.quota-success`/`.quota-capacity`/`.quota-error-badge` 类、列 4 宽度 110px；原 `usage.js` 含 `handleRequestTTFT`/`handleRequestTokens` + 筛选 Tag + stale 超时停止 + 去重 + 兜底清理 + 分页 + **按会话分组开关**：`recentGroupBySession` + `renderRecentRows`/`renderRecentRowsGrouped`/`renderSessionGroupHeader`/`toggleRecentGroupBySession`/`toggleSessionGroup`，分页先于分组——对当前页切片分组，空 key 入"未分组"伪组置顶） |
 | 新增/修改 build tag | （AGENTS.md 构建变体）、PROJECT_MAP §1/§18 | `build.ps1`、`host_*.go`、`web/embed*.go`、`internal/app/browser_*.go` |
 | 修改前端页面/资产 | PROJECT_MAP §18 | `web/static/<page>.js`、`web/static/index.html`、`web/playground/static-pg/` |

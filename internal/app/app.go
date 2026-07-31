@@ -267,8 +267,8 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 }
 
 // Shutdown stops the HTTP server, flushes persisted state, cleans up the API
-// router (monitor / terminal / downloads), and releases the single-instance
-// lock. It is safe to call once.
+// router (downloads), and releases the single-instance lock. It is safe to
+// call once.
 //
 // Shutdown is "power-cut": the HTTP server is given at most a short drain
 // window, then forcibly closed (listener + all active connections dropped)

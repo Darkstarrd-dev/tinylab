@@ -540,7 +540,7 @@ go build -o tinyrouter .
 | 修改 API 端点 | api/download.go 各 handler + router.go 路由注册（291-302）+ AuthMiddleware 组（213-215）+ 1MB cap（201-206） |
 | 修改外部工具解析 | executor.go resolveYtDlpPath/resolveFfmpegPath（199-229）+ config YtDlpPath/FfmpegPath（types.go:194-195）+ args.go ffmpeg-location（124-127） |
 | 修改播放列表 | manager.go CreatePlaylistTask（298-343）+ SelectedIndices 过滤（308-320）+ args.go BuildPlaylistInfoArgs（250-255）+ api getPlaylistInfo（81-104） |
-| 修改进程树杀 | kill_windows.go（taskkill /T /F）+ kill_unix.go（SIGTERM → 2s grace → SIGKILL 兜底）+ executor.go cmd.Cancel（69-74、176-181）+ monitor/manager_unix.go（同形 SIGTERM → SIGKILL） |
+| 修改进程树杀 | kill_windows.go（taskkill /T /F）+ kill_unix.go（SIGTERM → 2s grace → SIGKILL 兜底）+ executor.go cmd.Cancel（69-74、176-181） |
 | 修改设置推送 | api/settings.go download 分支（137-168）+ manager.UpdateSettings（72-82）+ app.go 构造 RuntimeSettings（135-144） |
 | 修改前端 | web/static/download.js（renderDownload/doParse/左右分栏 taskListItemHtml+taskDetailHtml+selectTask+renderTaskDetail/resolveDownloadDir 不再读 DOM/SSE updateDownloadTask/retry/settings modal，浏览按钮调用后端 `POST /api/downloads/browse`）+ web/static/style.css（`.download-toolbar` 单行 sticky、`.dl-task-split`/`.dl-task-list`/`.dl-task-item`/`.dl-task-detail`/`.dl-detail-*`/`.dl-status-dot`、删除 `.dl-task-card`/`.dl-task-thumb`/`.progress-bar*`）+ web/static/i18n.js（`browse` key） |
 

@@ -12,18 +12,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/terminal"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
 
@@ -45,8 +42,6 @@ type Deps struct {
 
 	// TestClient is used by the batch key-probe handler.
 	TestClient *http.Client
-	// MonitorMgr drives the live monitor log stream.
-	MonitorMgr *monitor.Manager
 	// DebugMode reflects the live debug flag toggled from settings.
 	DebugMode *atomic.Bool
 	// QuickSlotOnly reflects the live QuickSlot-only toggle from settings.
@@ -59,18 +54,8 @@ type Deps struct {
 	ServerCfgFn       func(config.ServerConfig)
 	UpstreamTimeoutFn func(int)
 	StateSaveFn       func()
-
-	// TerminalState carries the websocket terminal session and its guard mutex.
-	// It is kept separate from the other fields because it is only touched by
-	// the terminal handler.
-	TerminalState *TerminalState
 }
 
-// TerminalState holds the websocket terminal session and its guard mutex.
-type TerminalState struct {
-	Mu   sync.Mutex
-	Term *terminal.Session
-}
 
 // SaveConfig persists the given config to disk via config.Save. It performs no
 // registry reload and is used by handlers whose in-memory changes do not need to

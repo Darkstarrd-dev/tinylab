@@ -114,12 +114,6 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 		}
 	}
 	validateProviders(cfg)
-	if len(cfg.Monitor.AllowedCommands) == 0 {
-		cfg.Monitor.AllowedCommands = []string{"nvidia-smi", "top", "htop", "btop", "systeminfo", "tasklist", "ipconfig", "ifconfig", "df", "free", "vmstat", "iostat", "lscpu", "lspci", "lsblk"}
-	}
-	if cfg.Monitor.MaxLineLength == 0 {
-		cfg.Monitor.MaxLineLength = 4096
-	}
 	// Download defaults. If the `download:` section is entirely absent from the
 	// config file (e.g., config created before this feature was added), default
 	// Enabled to true. If the section IS present, respect the user's settings
@@ -180,12 +174,6 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 				}
 			}
 		}
-	}
-	// Deprecated field warnings: v1.8.0 removed MonitorConfig.Enabled but keeps
-	// the struct field (above) so strict yaml parsing does not reject legacy
-	// config.yaml files. Surface a warning so the user knows to clean it up.
-	if cfg.Monitor.Enabled {
-		fmt.Fprintf(os.Stderr, "[config] warning: 'monitor.enabled' is deprecated and ignored; remove it from config.yaml\n")
 	}
 	// Normalize Shortcuts: a nil map becomes an empty map so the JSON API
 	// returns {} rather than null, and so callers can safely range over it.

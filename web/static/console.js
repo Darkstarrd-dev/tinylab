@@ -6,20 +6,12 @@ var consoleSearchQuery = '';
 var consoleAutoScroll = true;
 var consoleAllLines = [];
 var consoleSubView = 'logs';
-var consoleDebugMode = false;
 
 async function buildConsoleInto(c) {
   consoleAllLines = [];
   consoleAutoScroll = true;
   consoleSubView = 'logs';
 
-  // Fetch debug mode status to decide whether to show the Terminal button
-  try {
-    var settings = await apiGet('/settings');
-    consoleDebugMode = !!(settings && settings.debugMode);
-  } catch (e) {
-    consoleDebugMode = false;
-  }
 
   c.innerHTML =
     '<div class="console-layout">' +
@@ -30,17 +22,7 @@ async function buildConsoleInto(c) {
           '<button type="button" class="btn btn-sm btn-filter active" data-level="warn" onclick="toggleConsoleFilter(this,\'warn\')">WARN</button>' +
           '<button type="button" class="btn btn-sm btn-filter active" data-level="info" onclick="toggleConsoleFilter(this,\'info\')">INFO</button>' +
           '<button type="button" class="btn btn-sm btn-filter active" data-level="debug" onclick="toggleConsoleFilter(this,\'debug\')">DEBUG</button>' +
-          '<button type="button" class="btn btn-sm btn-toggle" id="btn-toggle-monitor" onclick="toggleMonitorView()">' + t('monitor') + '</button>' +
-          (consoleDebugMode ? '<button type="button" class="btn btn-sm btn-toggle btn-toggle-terminal" id="btn-toggle-terminal" onclick="toggleTerminalView()">' + t('terminal') + '</button>' : '') +
           '<input type="text" id="console-search" class="console-search" placeholder="' + t('searchLogs') + '" oninput="onConsoleSearch(this.value)">' +
-          '<span id="monitor-cmd-slot" style="display:none">' +
-            '<input type="text" id="monitor-command" class="monitor-input" placeholder="' + t('monitorCommandPlaceholder') + '" value="' + escapeHtml(getLastMonitorCommand()) + '" onkeydown="if(event.key===\'Enter\')startMonitorCommand()">' +
-            '<button type="button" class="btn btn-sm btn-primary" id="monitor-run-btn" onclick="startMonitorCommand()">' + t('run') + '</button>' +
-            '<button type="button" class="btn btn-sm btn-danger" id="monitor-stop-btn" onclick="stopMonitorCommand()" style="display:none">' + t('stop') + '</button>' +
-          '</span>' +
-          '<span id="terminal-cmd-slot" style="display:none">' +
-            '<button type="button" class="btn btn-sm btn-danger" onclick="stopTerminalSession()">' + t('stop') + ' ' + t('terminal') + '</button>' +
-          '</span>' +
         '</div>' +
         '<div class="flex" style="gap:8px">' +
           '<span class="muted" id="console-status">' + t('connecting') + '</span>' +
@@ -74,26 +56,10 @@ function initLogsView() {
 
 // ===================== View switching (toggle) =====================
 
-function toggleMonitorView() {
-  if (consoleSubView === 'monitor') {
-    switchConsoleTab('logs');
-  } else {
-    switchConsoleTab('monitor');
-  }
-}
 
-function toggleTerminalView() {
-  if (consoleSubView === 'terminal') {
-    switchConsoleTab('logs');
-  } else {
-    switchConsoleTab('terminal');
-  }
-}
 
 function switchConsoleTab(tab) {
-  // Cleanup previous tab
-  if (consoleSubView === 'monitor') cleanupMonitor();
-  if (consoleSubView === 'terminal') cleanupTerminal();
+  // Cleanup previous tab (if any)
   // Stop log SSE if leaving logs
   if (consoleSubView === 'logs' && tab !== 'logs') {
     if (consoleEventSource) { consoleEventSource.close(); consoleEventSource = null; }
@@ -103,17 +69,6 @@ function switchConsoleTab(tab) {
 
   consoleSubView = tab;
 
-  // Update toggle button states
-  var monitorBtn = document.getElementById('btn-toggle-monitor');
-  if (monitorBtn) monitorBtn.classList.toggle('active', tab === 'monitor');
-  var terminalBtn = document.getElementById('btn-toggle-terminal');
-  if (terminalBtn) terminalBtn.classList.toggle('active', tab === 'terminal');
-
-  // Show/hide monitor command input slot
-  var cmdSlot = document.getElementById('monitor-cmd-slot');
-  if (cmdSlot) cmdSlot.style.display = (tab === 'monitor') ? 'inline-flex' : 'none';
-  var termCmdSlot = document.getElementById('terminal-cmd-slot');
-  if (termCmdSlot) termCmdSlot.style.display = (tab === 'terminal') ? 'inline-flex' : 'none';
 
   // Show/hide search box (hide when not in logs mode to save space, but keep visible per user request)
   // Per user: search box stays visible. Leave it as-is.
@@ -127,19 +82,6 @@ function switchConsoleTab(tab) {
     startConsoleStream();
     var st = document.getElementById('console-status');
     if (st) st.textContent = t('connecting');
-  } else if (tab === 'monitor') {
-    subviewContainer.innerHTML = '';
-    renderMonitorView(subviewContainer);
-    startMonitorStream();
-    apiGet('/monitor/status').then(function(data) {
-      if (data && data.running) {
-        monitorRunning = true;
-        updateMonitorButtonState();
-      }
-    });
-  } else if (tab === 'terminal') {
-    subviewContainer.innerHTML = '';
-    renderTerminalView(subviewContainer);
   }
 }
 
@@ -148,10 +90,6 @@ function switchConsoleTab(tab) {
 function clearCurrentView() {
   if (consoleSubView === 'logs') {
     clearConsole();
-  } else if (consoleSubView === 'monitor') {
-    clearMonitorOutput();
-  } else if (consoleSubView === 'terminal') {
-    clearTerminalOutput();
   }
 }
 

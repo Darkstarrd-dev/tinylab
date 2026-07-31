@@ -25,14 +25,12 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
 	"github.com/tinyrouter/tinyrouter/internal/api/models"
-	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/api/providers"
 	"github.com/tinyrouter/tinyrouter/internal/api/quickslots"
 	"github.com/tinyrouter/tinyrouter/internal/api/review_presets"
 	"github.com/tinyrouter/tinyrouter/internal/api/settings"
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
-	apiterminal "github.com/tinyrouter/tinyrouter/internal/api/terminal"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
 	"github.com/tinyrouter/tinyrouter/internal/api/trace"
 	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
@@ -40,7 +38,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -67,8 +64,6 @@ type deps struct {
 
 	// testClient is used by the batch key-probe handler.
 	testClient *http.Client
-	// monitorMgr drives the live monitor log stream.
-	monitorMgr *monitor.Manager
 	// debugMode reflects the live debug flag toggled from settings.
 	debugMode atomic.Bool
 	// quickSlotOnly reflects the live QuickSlot-only toggle from settings.
@@ -81,8 +76,6 @@ type deps struct {
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
 
-	// terminalState is shared with the terminal sub-package via apibase.Deps.
-	terminalState *apibase.TerminalState
 }
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and
@@ -121,8 +114,6 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 					return nil
 				},
 			},
-			monitorMgr:    monitor.New(500, cfg.Monitor.MaxLineLength),
-			terminalState: &apibase.TerminalState{},
 		},
 	}
 	rt.deps.logRequests.Store(cfg.Trace.Enabled)
@@ -178,20 +169,9 @@ func (rt *Router) SetLogRequests(on bool) {
 	rt.deps.logRequests.Store(on)
 }
 
-// Cleanup stops the monitor manager and closes any active terminal session.
+// Cleanup stops the download manager.
 // This should be called during graceful shutdown.
 func (rt *Router) Cleanup() {
-	if err := rt.monitorMgr.Stop(); err != nil {
-		rt.logger.Warn("monitor cleanup: %v", err)
-	}
-	rt.terminalState.Mu.Lock()
-	term := rt.terminalState.Term
-	rt.terminalState.Term = nil
-	rt.terminalState.Mu.Unlock()
-
-	if term != nil {
-		term.Close()
-	}
 	if rt.downloadMgr != nil {
 		rt.downloadMgr.Stop()
 	}
@@ -293,7 +273,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		ServerCfgFn:       rt.serverCfgFn,
 		UpstreamTimeoutFn: rt.upstreamTimeoutFn,
 		StateSaveFn:       rt.stateSaveFunc,
-		TerminalState:     rt.terminalState,
 	}
 	authHandler := auth.NewHandler(apiDeps)
 	anysearchHandler := anysearch.NewHandler(apiDeps)
@@ -307,8 +286,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	modelsHandler := models.NewHandler(apiDeps)
 	quickslotsHandler := quickslots.NewHandler(apiDeps)
 	imageHandler := image.NewHandler(apiDeps)
-	monitorHandler := apimonitor.NewHandler(apiDeps)
-	terminalHandler := apiterminal.NewHandler(apiDeps)
 	settingsHandler := settings.NewHandler(apiDeps)
 	providersHandler := providers.NewHandler(apiDeps)
 	usageHandler := apiusage.NewHandler(apiDeps)
@@ -362,11 +339,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// Console logs
 			consoleLogsHandler.Register(r)
 
-			// Monitor
-			monitorHandler.Register(r)
-
-			// Terminal (debug-mode only)
-			terminalHandler.Register(r)
 			// Models
 			modelsHandler.Register(r)
 

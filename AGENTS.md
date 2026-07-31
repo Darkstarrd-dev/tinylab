@@ -12,7 +12,6 @@
 | `rotation-architecture.md` | Key 轮询：SelectKey 算法、三种策略、两套退避系统、配额锁 CST 00:05、NIM、错误分类 |
 | `download-architecture.md` | yt-dlp 下载：任务队列生命周期、参数构造、SSE 进度、与归档计划漂移 |
 | `combo-architecture.md` | Combo 解析：Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级 |
-| `terminal-monitor-architecture.md` | PTY 终端 + 白名单命令监控：调试门控、SSE 流、平台进程生成 |
 | `config-registry-state-architecture.md` | 基础设施：三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge |
 | `playground-architecture.md` | Playground 前后端：多模型测试、群聊、Director/Narrator |
 
@@ -47,7 +46,6 @@ TinyRouter 是一个轻量级 LLM API 代理与本地工具集，单二进制交
 | **Rotation** | Key 轮询引擎，三种策略（fill-first / round-robin / failover），指数退避冷却 + 429 日配额锁定，per-model 独立锁，NIM 限速适配 |
 | **Combo** | 模型组合解析，三种策略（fallback / round-robin / greedy-squirrel），按配额层级排序尝试 |
 | **Download** | 基于 yt-dlp 的视频/音频下载，任务队列、SSE 进度、播放列表、画质选择、代理、缩略图 |
-| **Terminal/Monitor** | PTY 交互式终端 + 白名单命令流式监控，Debug Mode 门控 |
 | **Playground** | 多模型同时请求测试 + 多模型群聊对比，Director/Narrator 模式 |
 | **Config/Registry/State** | 三层配置基础设施：YAML 持久化 + AES-GCM 加密 + 原子写入 + 双锁模型 + reload merge |
 
