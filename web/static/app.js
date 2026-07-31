@@ -53,7 +53,7 @@ function navigateTo(page) {
     downloadEventSource = null;
   }
   // Close Console stream when leaving the usage page.
-  if (page !== 'usage') {
+  if (page !== 'monitor') {
     if (typeof closeConsoleStream === 'function') closeConsoleStream();
   }
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -81,7 +81,7 @@ function navigateTo(page) {
       case 'providers': return renderProviders(container);
       case 'combos': return renderCombos(container);
       case 'playground': return renderPlayground(container);
-      case 'usage': return renderUsage(container);
+      case 'monitor': return renderUsage(container);
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
       case 'editor': return renderEditor(container);
@@ -620,7 +620,7 @@ document.addEventListener('keydown', function(e) {
   // ---- No modal: global shortcuts ----
   // F1-F6: page navigation (works even in inputs) — keys are configurable
   // via Settings > Shortcut Settings (action IDs global.goto-*).
-  if (Shortcuts.matchEvent('global.goto-usage', e))      { e.preventDefault(); navigateTo('usage'); return; }
+  if (Shortcuts.matchEvent('global.goto-monitor', e))      { e.preventDefault(); navigateTo('monitor'); return; }
   if (Shortcuts.matchEvent('global.goto-endpoint', e))   { e.preventDefault(); navigateTo('endpoint'); return; }
   if (Shortcuts.matchEvent('global.goto-playground', e)) { e.preventDefault(); var pgNav = document.querySelector('.nav-item[data-page="playground"]'); if (pgNav) navigateTo('playground'); return; }
   if (Shortcuts.matchEvent('global.goto-download', e))   { e.preventDefault(); navigateTo('download'); return; }

@@ -4,7 +4,7 @@
 //
 // Design:
 //  - SHORTCUT_PRESETS holds the system default bindings, grouped by region.
-//  - Each actionID (e.g. "global.goto-usage") maps to a default binding
+//  - Each actionID (e.g. "global.goto-monitor") maps to a default binding
 //    {key, ctrlOrCmd, alt, shift}. Modifiers are omitted when false.
 //  - User overrides live in a map<actionID, binding> loaded from
 //    /api/settings (config.yaml). Only actions the user explicitly
@@ -22,7 +22,7 @@
 
 var SHORTCUT_PRESETS = {
   global: {
-    'global.goto-usage':       { key: 'F1', label: 'Go to Monitor' },
+    'global.goto-monitor':     { key: 'F1', label: 'Go to Monitor' },
     'global.goto-endpoint':    { key: 'F2', label: 'Go to Settings' },
     'global.goto-playground':  { key: 'F3', label: 'Go to Playground' },
     'global.goto-download':    { key: 'F5', label: 'Go to Download' },

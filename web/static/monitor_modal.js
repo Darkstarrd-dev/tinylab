@@ -18,7 +18,7 @@ async function showUsageEntryInfoById(id) {
   // carries respPayload/respHeaders) from the API.
   if (!traceEnabled && (e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
     try {
-      var resp = await apiGet('/usage?limit=500&offset=0');
+      var resp = await apiGet('/monitor?limit=500&offset=0');
       var entries = (resp && resp.entries) || [];
       var ringEntry = entries.find(function(x) { return x.id === id; });
       if (ringEntry && ringEntry.status !== 'processing') {

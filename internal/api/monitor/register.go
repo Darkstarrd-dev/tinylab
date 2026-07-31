@@ -1,6 +1,6 @@
-// Package usage provides HTTP handlers for the usage management API
+// Package monitor provides HTTP handlers for the monitor management API
 // (usage ring, quotas, model-keys, reset-quota).
-package usage
+package monitor
 
 import (
 	"encoding/json"
@@ -16,7 +16,7 @@ import (
 	internalusage "github.com/tinyrouter/tinyrouter/internal/usage"
 )
 
-// Handler exposes the usage API endpoints.
+// Handler exposes the monitor API endpoints.
 type Handler struct {
 	d *apibase.Deps
 }
@@ -26,15 +26,15 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
-// Register registers usage routes on the given router.
+// Register registers monitor routes on the given router.
 func (h *Handler) Register(r chi.Router) {
-	r.Get("/usage", h.getUsage)
-	r.Get("/usage/playground", h.getPlaygroundUsage)
-	r.Get("/usage/summary", h.getUsageSummary)
-	r.Get("/usage/quotas", h.getQuotas)
-	r.Get("/usage/model-keys", h.getModelKeys)
-	r.Delete("/usage", h.clearUsage)
-	r.Post("/usage/reset-quota", h.resetQuota)
+	r.Get("/monitor", h.getUsage)
+	r.Get("/monitor/playground", h.getPlaygroundUsage)
+	r.Get("/monitor/summary", h.getUsageSummary)
+	r.Get("/monitor/quotas", h.getQuotas)
+	r.Get("/monitor/model-keys", h.getModelKeys)
+	r.Delete("/monitor", h.clearUsage)
+	r.Post("/monitor/reset-quota", h.resetQuota)
 }
 
 // getIntQuery reads an integer query parameter with a default fallback.
@@ -114,7 +114,7 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 // getPlaygroundUsage 返回 Playground 来源的请求列表（独立 ring + playground
-// 来源的在途条目），供 Playground 页面左侧列表消费。与 /api/usage 物理隔离。
+// 来源的在途条目），供 Playground 页面左侧列表消费。与 /api/monitor 物理隔离。
 func (h *Handler) getPlaygroundUsage(w http.ResponseWriter, r *http.Request) {
 	limit := getIntQuery(r, "limit", 50)
 	offset := getIntQuery(r, "offset", 0)

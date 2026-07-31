@@ -354,7 +354,7 @@ function toggleQuotaRowExpand(provider, model) {
 
 async function fetchModelKeyDetail(provider, model) {
   try {
-    var data = await apiGet('/usage/model-keys?provider=' + encodeURIComponent(provider) + '&model=' + encodeURIComponent(model));
+    var data = await apiGet('/monitor/model-keys?provider=' + encodeURIComponent(provider) + '&model=' + encodeURIComponent(model));
     keyDetailCache[provider + '/' + model] = { data: data, ts: Date.now() };
     patchQuotaRowActiveMetrics(provider, model, data);
     var setKey = JSON.stringify([provider, model]);

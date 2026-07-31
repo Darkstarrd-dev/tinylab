@@ -25,7 +25,7 @@ func NewHandler(d *apibase.Deps) *Handler {
 
 // Register adds the SSE routes to the given router.
 func (h *Handler) Register(r chi.Router) {
-	r.Get("/usage/events", h.streamUsageEvents)
+	r.Get("/monitor/events", h.streamUsageEvents)
 }
 
 // streamUsageEvents pushes the combined usage/inflight/request event streams to

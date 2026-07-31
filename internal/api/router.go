@@ -33,7 +33,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
 	"github.com/tinyrouter/tinyrouter/internal/api/trace"
-	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
+	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -288,7 +288,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	imageHandler := image.NewHandler(apiDeps)
 	settingsHandler := settings.NewHandler(apiDeps)
 	providersHandler := providers.NewHandler(apiDeps)
-	usageHandler := apiusage.NewHandler(apiDeps)
+	monitorHandler := apimonitor.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
 	traceHandler := trace.NewHandler(apiDeps)
@@ -329,8 +329,8 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// ReviewPresets
 			reviewPresetsHandler.Register(r)
 
-			// Usage
-			usageHandler.Register(r)
+			// Monitor
+			monitorHandler.Register(r)
 			sseHandler.Register(r)
 
 			// Image save + same-origin proxy (avoids CORS for browser-side reads)

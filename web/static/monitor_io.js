@@ -69,9 +69,9 @@ function scheduleQuotaRefresh() {
 async function refreshQuotaData() {
   try {
     const [summary, usage, quotas] = await Promise.all([
-      apiGet('/usage/summary'),
-      apiGet('/usage?limit=500'),
-      apiGet('/usage/quotas')
+      apiGet('/monitor/summary'),
+      apiGet('/monitor?limit=500'),
+      apiGet('/monitor/quotas')
     ]);
     mergeUsageEntries(usage.entries || []);
     updateUsageSummary(summary);
