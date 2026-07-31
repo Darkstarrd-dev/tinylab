@@ -404,12 +404,40 @@ function pgLoadImageMeta(url) {
   });
 }
 
+function pgFindSavedImageMeta(url) {
+  if (!url) return null;
+  var w = (typeof pgWin === 'function') ? pgWin() : null;
+  if (!w || !w.messages) return null;
+  for (var i = 0; i < w.messages.length; i++) {
+    var msg = w.messages[i];
+    if (msg && Array.isArray(msg.content)) {
+      for (var j = 0; j < msg.content.length; j++) {
+        var part = msg.content[j];
+        if (part && part.type === 'image_url' && part.image_url) {
+          if ((part.image_url.url === url || part.image_url.savedPath === url) && part.image_url.savedPath) {
+            return { savedPath: part.image_url.savedPath, savedFilename: part.image_url.savedFilename };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function pgRefreshImageModalMeta(url, savedPath, savedFilename) {
   var pathEl = document.getElementById('pg-img-meta-path');
   var sepEl = document.getElementById('pg-img-meta-path-sep');
   var imgModal = document.getElementById('pg-img-modal-img');
   if (!pathEl) return;
-  if (imgModal && imgModal.dataset.url !== url && imgModal.src !== url) return;
+  var modalUrl = imgModal ? (imgModal.dataset.url || imgModal.src) : '';
+  var targetUrl = url || modalUrl;
+  if (!savedPath || !savedFilename) {
+    var found = pgFindSavedImageMeta(targetUrl);
+    if (found) {
+      savedPath = savedPath || found.savedPath;
+      savedFilename = savedFilename || found.savedFilename;
+    }
+  }
   var displayPath = savedFilename || savedPath || '';
   if (displayPath) {
     if (sepEl) sepEl.style.display = 'inline';
@@ -437,6 +465,24 @@ function pgSaveImage(url, btn) {
   pgApiPost('/save-image', { url: url }).then(function(res) {
     btn.textContent = orig;
     pgToast(pgT('pgImageSaved', [res.filename || res.path]), 'success');
+    if (res && res.path) {
+      var w = (typeof pgWin === 'function') ? pgWin() : null;
+      if (w && w.messages) {
+        for (var i = 0; i < w.messages.length; i++) {
+          var msg = w.messages[i];
+          if (msg && Array.isArray(msg.content)) {
+            for (var j = 0; j < msg.content.length; j++) {
+              var part = msg.content[j];
+              if (part && part.type === 'image_url' && part.image_url && (part.image_url.url === url || part.image_url.savedPath === url)) {
+                part.image_url.savedPath = res.path;
+                part.image_url.savedFilename = res.filename || res.path;
+              }
+            }
+          }
+        }
+      }
+      pgSave();
+    }
     pgRefreshImageModalMeta(url, res.path, res.filename);
   }).catch(function(err) {
     btn.textContent = orig;
