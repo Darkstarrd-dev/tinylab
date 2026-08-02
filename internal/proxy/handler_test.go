@@ -164,6 +164,79 @@ func TestForwardUpstream_UserAgentForwarded(t *testing.T) {
 	}
 }
 
+// captureTransport records the upstream request and returns a canned 200,
+// letting cline-domain tests exercise header wiring without network I/O.
+type captureTransport struct {
+	lastReq *http.Request
+}
+
+func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.lastReq = req
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		Request:    req,
+	}, nil
+}
+
+func TestForwardUpstream_ClineClientTypeHeader(t *testing.T) {
+	tests := []struct {
+		name      string
+		baseURL   string
+		clientVal string // incoming x-client-type, "" = none
+		want      string // expected upstream x-client-type, "" = absent
+	}{
+		{name: "cline_domain_injects", baseURL: "https://api.cline.bot", clientVal: "", want: "cline-cli"},
+		{name: "cline_domain_replaces_client_value", baseURL: "https://api.cline.bot", clientVal: "vscode", want: "cline-cli"},
+		{name: "cline_path_bearing_base", baseURL: "https://api.cline.bot/api/v1", clientVal: "", want: "cline-cli"},
+		{name: "non_cline_absent", baseURL: "https://api.openai.com/v1", clientVal: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &captureTransport{}
+			h := newTestHandler(t)
+			h.client = &http.Client{Transport: tr}
+			sel := &rotation.SelectedKey{
+				Provider: config.Provider{ID: "test", Name: "Test Provider", Prefix: "test", BaseURL: tt.baseURL, IsActive: true},
+				Key:      config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
+				KeyName:  "Key Main",
+			}
+			headers := http.Header{}
+			if tt.clientVal != "" {
+				headers.Set("X-Client-Type", tt.clientVal)
+			}
+			resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"cline-free/glm-5.2"}`), headers, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+			if err != nil {
+				t.Fatalf("forwardUpstream failed: %v", err)
+			}
+			resp.Body.Close()
+			if got := tr.lastReq.Header.Get("X-Client-Type"); got != tt.want {
+				t.Fatalf("upstream x-client-type = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestForwardGetUpstream_ClineClientTypeHeader(t *testing.T) {
+	tr := &captureTransport{}
+	h := newTestHandler(t)
+	h.client = &http.Client{Transport: tr}
+	sel := &rotation.SelectedKey{
+		Provider: config.Provider{ID: "test", Name: "Test Provider", Prefix: "test", BaseURL: "https://api.cline.bot", IsActive: true},
+		Key:      config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
+		KeyName:  "Key Main",
+	}
+	resp, err := h.forwardGetUpstream(context.Background(), sel, "/v1/tasks/t1", nil)
+	if err != nil {
+		t.Fatalf("forwardGetUpstream failed: %v", err)
+	}
+	resp.Body.Close()
+	if got := tr.lastReq.Header.Get("X-Client-Type"); got != "cline-cli" {
+		t.Fatalf("upstream x-client-type = %q, want %q", got, "cline-cli")
+	}
+}
+
 func TestMaskURL(t *testing.T) {
 	tests := []struct {
 		url  string
