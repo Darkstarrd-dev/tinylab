@@ -594,7 +594,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 |---|---|
 | `build.ps1` | Windows 构建脚本，产出 13 个变体（default/tray/webview/debug × playground/strip） |
 | `build_mac.ps1` | Windows 交叉编译 macOS 双架构无签名、未压缩裸 Mach-O：`TinyRouter_Darwin_arm64` 与 `TinyRouter_Darwin_amd64`；不创建 `.app` Bundle |
-| `build-minimal-webview-pg.ps1` | Windows/Linux 极限体积构建（Darwin 目标由 `build_mac.ps1` 接管，避免 UPX 压缩 macOS 二进制） |
+| `build-minimal-webview-pg.ps1` | Windows/Linux 极限体积构建；默认不压缩 Windows PE（规避 `STATUS_INVALID_PAGE_PROTECTION (0xC0000045)`），仅传 `-Upx` 时使用 UPX（Darwin 目标由 `build_mac.ps1` 接管，避免 UPX 压缩 macOS 二进制） |
 | `gen-icon.ps1` | 从 `web/static/logo.png` 经 `rsrc` 生成多尺寸 `favicon.ico` |
 | `rsrc.manifest` | Windows exe 清单 |
 | `rsrc.syso` | 图标资源（`go:generate` 自动同步，gitignored） |

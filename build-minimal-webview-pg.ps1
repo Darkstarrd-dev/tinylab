@@ -1,17 +1,20 @@
 # build-minimal-webview-pg.ps1
 #
-# Extreme-size build of the Windows and Linux minimal binaries:
+# Minimal-size build of the Windows and Linux binaries:
 #   - TinyRouter_Win11.exe (Windows 11 amd64 / webview + tray + playground)
 #   - TinyRouter_Linux     (Linux amd64 / playground)
 #
 # macOS binaries are built by build_mac.ps1. They intentionally skip UPX so
 # the resulting Mach-O files remain suitable for later signing/notarization.
 #
-# Pipeline: CGO_ENABLED=0, -s -w -buildid=, -gcflags="all=-l", -trimpath + UPX compression
+# Pipeline: CGO_ENABLED=0, -s -w -buildid=, -gcflags="all=-l", -trimpath.
+# UPX is opt-in: packed PE files can be rejected by Windows with
+# STATUS_INVALID_PAGE_PROTECTION (0xC0000045).
+# Use -Upx only for a controlled, non-release size experiment.
 
 param(
     [string]$OutputDir = "dist",
-    [switch]$NoUpx,
+    [switch]$Upx,
     [switch]$ForceSyso
 )
 
@@ -88,7 +91,7 @@ foreach ($t in $targets) {
     $rawSize = (Get-Item $outPath).Length
     Write-Host ("Stripped: {0} ({1:N0} bytes / {2:N2} MB)" -f $outName, $rawSize, ($rawSize / 1MB))
 
-    if (-not $NoUpx) {
+    if ($Upx) {
         if (-not $UPX_EXE) {
             Write-Warning "UPX not found; skipping compression."
         } else {

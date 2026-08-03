@@ -34,6 +34,12 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 - **`-tags "tray,webview"`** = tray 基础上引入 `host_webview_windows.go` + `jchv/go-webview2`;托盘菜单多一项"打开独立窗口",在 Win10/11 上用 WebView2 Runtime 弹出原生窗口加载 admin UI;关闭窗口不退出进程,仍可再次打开
 - **`-tags playground`** = 切换到 `web/embed_playground.go`,内嵌 Playground 资产;无此 tag 用 `web/embed_playground_stub.go`
 
+
+## Windows/Linux 极限体积脚本
+
+`build-minimal-webview-pg.ps1` 仍使用 `CGO_ENABLED=0`、`-s -w -buildid=`、`-gcflags="all=-l"` 与 `-trimpath`，生成 `dist/TinyRouter_Win11.exe` 和 `dist/TinyRouter_Linux`。默认**不使用 UPX**：Windows 对部分 UPX 压缩 PE 的加载会返回 `STATUS_INVALID_PAGE_PROTECTION (0xC0000045)`，导致“应用程序无法正常启动”。
+
+如确实需要压缩，可显式执行 `./build-minimal-webview-pg.ps1 -Upx`；发布给 Windows 用户的产物应使用默认未压缩版本。
 ## macOS 双架构构建
 
 Windows 开发机可直接运行：
