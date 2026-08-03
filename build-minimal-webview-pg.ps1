@@ -1,9 +1,11 @@
 # build-minimal-webview-pg.ps1
 #
-# Extreme-size build of TinyRouter three-platform minimal binaries:
+# Extreme-size build of the Windows and Linux minimal binaries:
 #   - TinyRouter_Win11.exe (Windows 11 amd64 / webview + tray + playground)
-#   - TinyRouter_Darwin    (macOS arm64 / playground)
 #   - TinyRouter_Linux     (Linux amd64 / playground)
+#
+# macOS binaries are built by build_mac.ps1. They intentionally skip UPX so
+# the resulting Mach-O files remain suitable for later signing/notarization.
 #
 # Pipeline: CGO_ENABLED=0, -s -w -buildid=, -gcflags="all=-l", -trimpath + UPX compression
 
@@ -55,11 +57,10 @@ Invoke-EnsureSyso
 
 $targets = @(
     @{ Name = "TinyRouter_Win11.exe"; GOOS = "windows"; GOARCH = "amd64"; Tags = "tray,webview,playground"; LdFlags = "-H windowsgui -s -w -buildid="; UpxExtra = @() },
-    @{ Name = "TinyRouter_Darwin";    GOOS = "darwin";  GOARCH = "arm64"; Tags = "playground";                LdFlags = "-s -w -buildid=";                UpxExtra = @("--force-macos") },
     @{ Name = "TinyRouter_Linux";     GOOS = "linux";   GOARCH = "amd64"; Tags = "playground";                LdFlags = "-s -w -buildid=";                UpxExtra = @() }
 )
 
-Write-Host "=== Building Three-Platform Minimal Binaries into $OutputDir ==="
+Write-Host "=== Building Windows/Linux minimal binaries ==="
 
 foreach ($t in $targets) {
     $outName = $t.Name
@@ -92,7 +93,7 @@ foreach ($t in $targets) {
             Write-Warning "UPX not found; skipping compression."
         } else {
             $upxArgs = @("--best") + $t.UpxExtra + @($outPath)
-            Write-Host ("Packing $outName with UPX...")
+            Write-Host ("Packing {0} with UPX..." -f $outName)
             & $UPX_EXE @upxArgs | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 $packedSize = (Get-Item $outPath).Length
@@ -108,4 +109,3 @@ foreach ($t in $targets) {
 Write-Host "`n=== Final Artifacts Summary in $OutputDir ==="
 Get-ChildItem "$OutputDir/TinyRouter_*" | Sort-Object Name |
     ForEach-Object { "{0,-24} {1,11:N0} bytes ({2,6:N2} MB)" -f $_.Name, $_.Length, ($_.Length / 1MB) }
-

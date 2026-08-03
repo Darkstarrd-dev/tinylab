@@ -81,7 +81,8 @@ go test ./...
 # 交叉编译
 GOOS=linux GOARCH=amd64 go build -o tinyrouter-linux-amd64 .
 GOOS=windows GOARCH=amd64 go build -o tinyrouter-windows-amd64.exe .
-GOOS=darwin GOARCH=arm64 go build -o tinyrouter-darwin-arm64 .
+# macOS 双架构无签名、未压缩可执行文件（Windows PowerShell）
+./build_mac.ps1 -OutputDir dist
 ```
 
 ## 构建变体
@@ -102,10 +103,17 @@ TinyRouter 通过 build tag + 链接器 flag 提供 default / tray / webview / d
 # 直接构建（无 tag = console + 自动打开浏览器）
 go build -o tinyrouter .
 
-# 交叉编译
+# Linux 交叉编译
 GOOS=linux GOARCH=amd64 go build -o tinyrouter-linux-amd64 .
-GOOS=darwin GOARCH=arm64 go build -o tinyrouter-darwin-arm64 .
 ```
+
+### macOS 双架构（Windows 开发机）
+
+```powershell
+./build_mac.ps1 -OutputDir dist
+```
+
+生成未签名、未压缩的裸 Mach-O 文件：`dist/TinyRouter_Darwin_arm64`（Apple Silicon）和 `dist/TinyRouter_Darwin_amd64`（Intel，macOS 显示为 x86_64）。这两个文件不是 `.app` Bundle；不要仅修改扩展名。
 
 ## 代码结构
 

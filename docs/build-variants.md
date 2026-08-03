@@ -1,8 +1,8 @@
 # 构建变体 (Build Variants)
 
-> 最后核对：2026-07-19
+> 最后核对：2026-08-03
 
-TinyRouter 通过 build tag + 链接器 flag 组合，提供多个构建变体。Windows 下用 `build.ps1` 一键产出。
+TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
 
 ## build.ps1 参数
 
@@ -33,6 +33,23 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供多个构建变体�
 - **`-tags tray`** = 切换到 `host_tray_windows.go`,引入 `fyne.io/systray`;无此 tag 用 `host_console.go`
 - **`-tags "tray,webview"`** = tray 基础上引入 `host_webview_windows.go` + `jchv/go-webview2`;托盘菜单多一项"打开独立窗口",在 Win10/11 上用 WebView2 Runtime 弹出原生窗口加载 admin UI;关闭窗口不退出进程,仍可再次打开
 - **`-tags playground`** = 切换到 `web/embed_playground.go`,内嵌 Playground 资产;无此 tag 用 `web/embed_playground_stub.go`
+
+## macOS 双架构构建
+
+Windows 开发机可直接运行：
+
+```powershell
+./build_mac.ps1 -OutputDir dist
+```
+
+脚本固定使用 `CGO_ENABLED=0`、`playground` build tag、`-trimpath` 与 `-s -w -buildid=`，不使用 UPX、不签名、不创建 `.app` Bundle，生成两个可直接由 macOS 终端执行的裸 Mach-O 文件：
+
+| 文件 | macOS 架构 | 适用设备 |
+|---|---|---|
+| `dist/TinyRouter_Darwin_arm64` | arm64 | Apple Silicon |
+| `dist/TinyRouter_Darwin_amd64` | x86_64 | Intel Mac |
+
+下载后在 macOS 终端执行 `chmod +x TinyRouter_Darwin_*`。Finder 需要 `.app` 时，必须在 macOS 上另行创建 Bundle；不要仅修改文件扩展名。
 
 ## 13 产物矩阵 (实际体积,基于 1024×1024 logo.png 多尺寸 ICO)
 
