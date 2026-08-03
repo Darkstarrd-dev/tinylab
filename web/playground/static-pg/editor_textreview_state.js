@@ -1,4 +1,4 @@
-// tr-state.js — AI Text Review page state + sessionStorage persistence.
+// editor_textreview_state.js — AI Text Review page state + sessionStorage persistence.
 // Mirrors editor-state.js style: top-level 'use strict' + var/function.
 //
 // Only the lightweight fields are persisted to sessionStorage (key 'tr-session'):
@@ -93,7 +93,7 @@ function trLoad() {
     }
   }
   // chaptersMeta is informational only; we do NOT reconstruct chapters content
-  // from sessionStorage. The caller (text-review.js) will re-split from rawText
+  // from sessionStorage. The caller (editor_textreview.js) will re-split from rawText
   // if present, or prompt the user to re-import.
   return snap;
 }

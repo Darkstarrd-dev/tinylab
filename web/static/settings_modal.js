@@ -1,0 +1,327 @@
+// ===================== Settings Modal Functions =====================
+// All open*/save* settings modals (port / proxy / rotation / timeouts /
+// password / path / appearance) plus the shared modal shells and the
+// port-change restart polling flow. Split from endpoint.js (2026-07-31).
+
+function openSettingsModal(title, bodyHtml) {
+  var overlay = document.getElementById('modal-overlay');
+  overlay.innerHTML = '\
+    <div class="modal" style="min-width:400px;max-width:520px">\
+      <div class="modal-title">' + escapeHtml(title) + '</div>\
+      <div class="modal-body">' + bodyHtml + '</div>\
+      <div class="modal-footer">\
+        <button type="button" class="btn btn-ghost" onclick="closeModalOverlay()">' + t('cancel') + '</button>\
+        <button type="button" class="btn btn-primary" id="settings-modal-save">' + t('save') + '</button>\
+      </div>\
+    </div>';
+  requestAnimationFrame(function() {
+    overlay.classList.add('show');
+    var input = overlay.querySelector('input:not([type="hidden"]), textarea, select');
+    if (input) {
+      if (input.type === 'checkbox' || input.type === 'radio') {
+        var textInput = overlay.querySelector('input[type="text"], input[type="number"], textarea');
+        if (textInput) input = textInput;
+      }
+      input.focus();
+      if (typeof input.select === 'function' && input.tagName === 'INPUT' && (input.type === 'text' || input.type === 'number' || input.type === '' || !input.type)) {
+        input.select();
+      }
+    }
+  });
+}
+
+function openPortModal() {
+  var s = window.__settings;
+  openSettingsModal(t('listenPort'),
+    '<p class="muted">' + escapeHtml(t('listenPortDesc')) + '</p>\
+    <div class="form-group" style="margin-top:16px">\
+      <input type="number" id="settings-modal-port" value="' + s.port + '" style="max-width:160px">\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return savePortModal(); });
+  };
+}
+
+function openProxyModal() {
+  var s = window.__settings;
+  openSettingsModal(t('proxySettings'),
+    '<p class="muted">' + escapeHtml(t('proxyDesc')) + '</p>\
+    <div class="settings-form-grid" style="margin-top:12px">\
+      <div class="form-group"><label>' + t('proxyHost') + '</label>\
+        <input type="text" id="settings-modal-proxy-host" value="' + (s.proxy ? escapeHtml(s.proxy.host) : '') + '" placeholder="127.0.0.1">\
+      </div>\
+      <div class="form-group"><label>' + t('proxyPort') + '</label>\
+        <input type="text" id="settings-modal-proxy-port" value="' + (s.proxy ? escapeHtml(s.proxy.port) : '') + '" placeholder="2080">\
+      </div>\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return saveProxyModal(); });
+  };
+}
+
+function openPathModal() {
+  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, imageDir: true, logDir: true, ytDlpPath: true, ffmpegPath: true } });
+}
+
+function openRotationModal() {
+  var s = window.__settings;
+  openSettingsModal(t('rotationSettings'),
+    '<p class="muted">' + escapeHtml(t('rotationDesc')) + '</p>\
+    <div class="settings-form-grid" style="margin-top:12px">\
+      <div class="form-group"><label>' + t('strategy') + '</label>\
+        <select id="settings-modal-strategy">\
+          <option value="fill-first"' + (s.rotation && s.rotation.strategy === 'fill-first' ? ' selected' : '') + '>' + t('fillFirst') + '</option>\
+          <option value="round-robin"' + (s.rotation && s.rotation.strategy === 'round-robin' ? ' selected' : '') + '>' + t('roundRobin') + '</option>\
+          <option value="failover"' + (s.rotation && s.rotation.strategy === 'failover' ? ' selected' : '') + '>' + t('failover') + '</option>\
+        </select>\
+      </div>\
+      <div class="form-group"><label>' + t('stickyLimit') + '</label>\
+        <input type="number" id="settings-modal-stickyLimit" value="' + ((s.rotation && s.rotation.stickyLimit) || 3) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('maxRetries') + '</label>\
+        <input type="number" id="settings-modal-maxRetries" value="' + ((s.rotation && s.rotation.maxRetries) || 5) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('retryDelay') + '</label>\
+        <input type="number" id="settings-modal-retryDelaySec" value="' + ((s.rotation && s.rotation.retryDelaySec) || 5) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('backoffMax') + '</label>\
+        <input type="number" id="settings-modal-backoffMaxSec" value="' + ((s.rotation && s.rotation.backoffMaxSec) || 300) + '">\
+      </div>\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return saveRotationModal(); });
+  };
+}
+
+function openServerTimeoutModal() {
+  var s = window.__settings;
+  openSettingsModal(t('serverTimeoutSettings'),
+    '<p class="muted">' + escapeHtml(t('serverTimeoutDesc')) + '</p>\
+    <div class="settings-form-grid" style="margin-top:12px">\
+      <div class="form-group"><label>' + t('readTimeout') + '</label>\
+        <input type="number" id="settings-modal-readTimeoutSec" value="' + ((s.server && s.server.readTimeoutSec) || 300) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('writeTimeout') + '</label>\
+        <input type="number" id="settings-modal-writeTimeoutSec" value="' + ((s.server && s.server.writeTimeoutSec) || 300) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('idleTimeout') + '</label>\
+        <input type="number" id="settings-modal-idleTimeoutSec" value="' + ((s.server && s.server.idleTimeoutSec) || 120) + '">\
+      </div>\
+      <div class="form-group"><label>' + t('upstreamTimeout') + '</label>\
+        <input type="number" id="settings-modal-upstreamTimeoutSec" value="' + ((s.server && s.server.upstreamTimeoutSec) || 300) + '">\
+      </div>\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return saveServerTimeoutModal(); });
+  };
+}
+
+function openPasswordModal() {
+  var s = window.__settings;
+  var hasPassword = s.security && s.security.hasPassword;
+  var hint = hasPassword ? '<p class="muted">' + escapeHtml(t('passwordChangeHint')) + '</p>' : '<p class="muted">' + escapeHtml(t('passwordProtectionDesc')) + '</p>';
+  openSettingsModal(t('passwordProtection'),
+    hint + '\
+    <div class="form-group" style="margin-top:12px">\
+      <label>' + t('newPassword') + '</label>\
+      <input type="password" id="settings-modal-new-password" placeholder="' + t('newPasswordPlaceholder') + '" autofocus>\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return savePasswordModal(); });
+  };
+}
+
+// ===================== Theme Modal =====================
+
+function openThemeModal() {
+  var title = t('appearance');
+  var bodyHtml = '<div id="theme-modal-picker-container" class="theme-modal-picker"></div>'
+    + '<div class="style-modal-section"><div class="style-modal-title">' + t('themeStyle') + '</div>'
+    + '<div id="style-modal-picker-container"></div></div>';
+  openSettingsModal(title, bodyHtml);
+  var modalEl = document.querySelector('#modal-overlay .modal');
+  if (modalEl) {
+    modalEl.style.maxWidth = '760px';
+    modalEl.classList.add('modal-theme-dialog');
+  }
+  ThemeSystem.renderThemePicker('theme-modal-picker-container');
+  ThemeSystem.renderStylePicker('style-modal-picker-container');
+  var saveBtn = document.getElementById('settings-modal-save');
+  if (saveBtn) {
+    saveBtn.onclick = function() {
+      closeModalOverlay();
+    };
+  }
+  requestAnimationFrame(function() {
+    setTimeout(function() {
+      var initialFocus = document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card.active')
+        || document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card.selected')
+        || document.querySelector('#theme-modal-picker-container [data-group="dark"] .theme-card');
+      if (initialFocus) {
+        initialFocus.focus();
+      }
+    }, 60);
+  });
+}
+
+// ===================== Modal Save Functions =====================
+
+async function savePortModal() {
+  var port = parseInt(document.getElementById('settings-modal-port').value);
+  if (!port || port < 1 || port > 65535) {
+    toast(t('invalidPort'), 'error');
+    return;
+  }
+  var ok = await confirmModal(t('confirmRestart'));
+  if (!ok) return;
+  try {
+    var resp = await apiPatch('/settings', { port: port });
+    if (resp.error) {
+      toast(resp.error, 'error', 5000);
+      return;
+    }
+    closeModalOverlay();
+    if (resp.restart) {
+      showRestarting(port);
+      pollNewPort(port);
+    } else {
+      toast(t('portSaved'), 'success');
+    }
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+async function saveProxyModal() {
+  var host = document.getElementById('settings-modal-proxy-host').value.trim();
+  var port = document.getElementById('settings-modal-proxy-port').value.trim();
+  var enabled = document.getElementById('proxy-toggle').checked;
+  if (enabled) {
+    if (!host) {
+      toast(t('proxyHostRequired') || 'Proxy host is required', 'error');
+      return;
+    }
+    var portNum = parseInt(port, 10);
+    if (!port || isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      toast(t('invalidPort'), 'error');
+      return;
+    }
+  }
+  try {
+    await apiPatch('/settings', { proxy: { enabled: enabled, host: host, port: port } });
+    toast(t('proxySaved'), 'success');
+    closeModalOverlay();
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+async function saveRotationModal() {
+  var rotation = {
+    strategy: document.getElementById('settings-modal-strategy').value,
+    stickyLimit: parseInt(document.getElementById('settings-modal-stickyLimit').value),
+    maxRetries: parseInt(document.getElementById('settings-modal-maxRetries').value),
+    retryDelaySec: parseInt(document.getElementById('settings-modal-retryDelaySec').value),
+    backoffMaxSec: parseInt(document.getElementById('settings-modal-backoffMaxSec').value),
+  };
+  try {
+    await apiPatch('/settings', { rotation: rotation });
+    toast(t('rotationSaved'), 'success');
+    closeModalOverlay();
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+async function saveServerTimeoutModal() {
+  var server = {
+    readTimeoutSec: parseInt(document.getElementById('settings-modal-readTimeoutSec').value) || 300,
+    writeTimeoutSec: parseInt(document.getElementById('settings-modal-writeTimeoutSec').value) || 300,
+    idleTimeoutSec: parseInt(document.getElementById('settings-modal-idleTimeoutSec').value) || 120,
+    upstreamTimeoutSec: parseInt(document.getElementById('settings-modal-upstreamTimeoutSec').value) || 300,
+  };
+  try {
+    var resp = await apiPatch('/settings', { server: server });
+    closeModalOverlay();
+    if (resp.restart) {
+      showRestarting(resp.port);
+      pollNewPort(resp.port);
+    } else {
+      toast(t('serverTimeoutSaved'), 'success');
+    }
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+async function savePasswordModal() {
+  var newPw = document.getElementById('settings-modal-new-password');
+  if (!newPw || !newPw.value) {
+    toast(t('enterPassword'), 'error');
+    return;
+  }
+  try {
+    await apiPatch('/settings', { security: { password: newPw.value } });
+    toast(t('passwordSaved'), 'success');
+    closeModalOverlay();
+    // Update page toggle to reflect enabled state.
+    var toggle = document.getElementById('password-toggle');
+    if (toggle) toggle.checked = true;
+    // Refresh settings cache so hasPassword is updated.
+    window.__settings = await apiGet('/settings');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// ===================== Port-change restart flow =====================
+
+function showRestarting(newPort) {
+  var overlay = document.getElementById('modal-overlay');
+  overlay.innerHTML = '<div class="modal" style="text-align:center;min-width:280px">' +
+    '<div style="margin:16px auto;width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>' +
+    '<div class="modal-title">' + t('restarting') + '</div>' +
+    '<p class="muted mt-12">' + t('restartingDesc', [newPort]) + '</p>' +
+    '</div>';
+  overlay.classList.add('show');
+  overlay.onclick = null;
+}
+
+async function pollNewPort(newPort) {
+  var newBase = 'http://127.0.0.1:' + newPort;
+  var startTime = Date.now();
+  var timeout = 15000;
+  while (Date.now() - startTime < timeout) {
+    try {
+      await fetch(newBase + '/api/settings');
+      window.location.href = newBase + '/';
+      return;
+    } catch (e) {
+      await new Promise(function(r) { setTimeout(r, 500); });
+    }
+  }
+  var overlay = document.getElementById('modal-overlay');
+  overlay.innerHTML = '<div class="modal" style="text-align:center;min-width:280px">' +
+    '<div class="modal-title">' + t('restartFailed') + '</div>' +
+    '<p class="muted mt-12">' + t('restartFailedDesc') + '</p>' +
+    '<div class="modal-footer" style="justify-content:center;margin-top:16px"><button type="button" class="btn btn-primary" onclick="location.reload()">' + t('close') + '</button></div>' +
+    '</div>';
+}
+
+function openInfoModal(title, bodyHtml) {
+  var overlay = document.getElementById('modal-overlay');
+  overlay.innerHTML = '\
+    <div class="modal" style="min-width:400px;max-width:520px">\
+      <div class="modal-title">' + escapeHtml(title) + '</div>\
+      <div class="modal-body">' + bodyHtml + '</div>\
+      <div class="modal-footer" style="justify-content:center">\
+        <button type="button" class="btn btn-primary" onclick="closeModalOverlay()">' + t('close') + '</button>\
+      </div>\
+    </div>';
+  requestAnimationFrame(function() { overlay.classList.add('show'); });
+}

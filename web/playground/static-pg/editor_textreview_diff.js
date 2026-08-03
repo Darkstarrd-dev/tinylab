@@ -1,4 +1,4 @@
-// tr-diff.js — 行级决策应用（移植自 novelhelper/frontend/src/utils/alignedDiff.ts::applyLineDecisions）。
+// editor_textreview_diff.js — 行级决策应用（移植自 novelhelper/frontend/src/utils/alignedDiff.ts::applyLineDecisions）。
 // 纯 JS、无依赖、无构建。仅移植 applyLineDecisions；行对齐 diff 复用 editor.js 的 window.editorAlignedDiff。
 // 与 editor.js 同风格：顶层 'use strict' + function 声明 + 末尾 window.X = ... 赋值。
 

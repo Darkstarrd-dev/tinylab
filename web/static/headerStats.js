@@ -18,7 +18,7 @@ function initHeaderStats() {
 
 async function refreshHeaderStats() {
   try {
-    var summary = await apiGet('/usage/summary');
+    var summary = await apiGet('/monitor/summary');
     if (!summary || summary.error) return;
     var cards = document.querySelectorAll('#header-stat-grid .stat-value');
     if (cards.length >= 6) {
@@ -35,7 +35,7 @@ async function refreshHeaderStats() {
 function startHeaderStatsSSE() {
   stopHeaderStatsSSE();
   if (typeof EventSource === 'undefined') return;
-  headerStatsEventSource = new EventSource('/api/usage/events');
+  headerStatsEventSource = new EventSource('/api/monitor/events');
   headerStatsEventSource.onmessage = function(ev) {
     try {
       var data = JSON.parse(ev.data);

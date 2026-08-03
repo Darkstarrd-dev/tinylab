@@ -164,7 +164,7 @@ function onFullscreenKey(e) {
 
   // Allow global page navigation shortcuts (F1-F6 by default) to pass through seamlessly to app.js
   if (
-    Shortcuts.matchEvent('global.goto-usage', e) ||
+    Shortcuts.matchEvent('global.goto-monitor', e) ||
     Shortcuts.matchEvent('global.goto-endpoint', e) ||
     Shortcuts.matchEvent('global.goto-console', e) ||
     Shortcuts.matchEvent('global.goto-playground', e) ||

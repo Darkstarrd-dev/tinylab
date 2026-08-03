@@ -28,7 +28,7 @@
 | 新增/修改配置字段 | config-registry-state | `config/types.go`+`defaults.go`+`persistence.go` |
 | 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + 键盘陷阱 + 浏览锁）+ `internal/api/settings/register.go`（`getSettings` + `configDir` + `trace.logDir` + 指针字段按需合并）+ `internal/fsutil/open_windows.go`（`OpenFilePickerAt`+`SetFolder`） |
 | 修改运行时状态持久化 | config-registry-state | `state/manager.go`+`state.go`、`registry/state.go`（`KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`，持久化 `ModelRemaining==0` 的 model→limit 子集） |
-| 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/usage/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`）、`web/static/usage_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
+| 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/monitor/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`）、`web/static/monitor_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。
 
@@ -54,7 +54,6 @@ TinyRouter 是一个轻量级 LLM API 代理与本地工具集，单二进制交
 | 来源 | 用途 | 仓库 |
 |---|---|---|
 | 9router | 代理核心业务逻辑参考（Key 选择、冷却退避、Combo、日志格式） | https://github.com/decolua/9router |
-| new-api | Playground 模块参考（多模型测试 UI 适配器契约） | https://github.com/QuantumNous/new-api |
 | VidBee | Download 模块参考（yt-dlp 任务管理与 SSE 进度） | https://github.com/nexmoe/VidBee |
 
 > 本地参考副本位于 `Z:\Playground\9router`，实施过程中作为业务逻辑参考。不要修改该目录。

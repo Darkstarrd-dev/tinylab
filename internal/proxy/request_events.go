@@ -66,7 +66,7 @@ func encodeBase62(n int64) string {
 }
 
 // RequestEvent is the payload sent over the RequestUpdates broadcaster. The
-// frontend subscribes to GET /api/usage/events and receives typed chunks for
+// frontend subscribes to GET /api/monitor/events and receives typed chunks for
 // each stage of a request lifecycle.
 type RequestEvent struct {
 	Type    string          `json:"type"`

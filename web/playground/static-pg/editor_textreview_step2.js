@@ -1,4 +1,4 @@
-// text-review-step2.js — Step2 panel: 章节切分 (chapter splitting).
+// editor_textreview_step2.js — Step2 panel: 章节切分 (chapter splitting).
 // Exposes window.trRenderStep2(panel, state).
 // Uses window.TR.* (P4): pattern selector (dropdown from backend list + TR
 // .DEFAULT_SPLIT_PATTERNS, with an "edit patterns" drawer via pg-modal),

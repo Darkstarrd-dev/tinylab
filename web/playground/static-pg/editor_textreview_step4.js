@@ -1,4 +1,4 @@
-// text-review-step4.js — Step4 panel: 审校 (review) — P7.
+// editor_textreview_step4.js — Step4 panel: 审校 (review) — P7.
 // Exposes window.trRenderStep4(panel, state).
 //
 // Per-chapter two-column diff (window.editorAlignedDiff) with per-row

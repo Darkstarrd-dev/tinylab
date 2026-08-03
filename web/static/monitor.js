@@ -19,13 +19,13 @@ async function renderUsage(c) {
   var mainEl = document.querySelector('.main');
   if (mainEl) mainEl.classList.add('main-no-scroll');
   var results = await Promise.allSettled([
-    apiGet('/usage/summary'),
-    apiGet('/usage?limit=500'),
-    apiGet('/usage/quotas'),
+    apiGet('/monitor/summary'),
+    apiGet('/monitor?limit=500'),
+    apiGet('/monitor/quotas'),
     apiGet('/settings'),
     apiGet('/providers')
   ]);
-  if (currentPage !== 'usage') return;
+  if (currentPage !== 'monitor') return;
   var summary = results[0].status === 'fulfilled' ? results[0].value : {};
   var usage = results[1].status === 'fulfilled' ? results[1].value : {};
   var quotas = results[2].status === 'fulfilled' ? results[2].value : {};
@@ -81,7 +81,7 @@ function updateProcessingLatencyCells() {
 function ensureProcessingTimer() {
   if (processingTimer) return;
   processingTimer = setInterval(function() {
-    if (currentPage === 'usage' && hasProcessingEntries()) {
+    if (currentPage === 'monitor' && hasProcessingEntries()) {
       updateProcessingLatencyCells();
     } else {
       clearInterval(processingTimer);
@@ -99,14 +99,14 @@ function stopProcessingTimer() {
 
 function startUsageRefresh() {
   stopUsageRefresh();
-  usageEventSource = new EventSource('/api/usage/events');
+  usageEventSource = new EventSource('/api/monitor/events');
   applyUsageSSEHandlers(usageEventSource);
 
   usageVisibilityHandler = function() {
-    if (document.visibilityState === 'visible' && currentPage === 'usage') {
+    if (document.visibilityState === 'visible' && currentPage === 'monitor') {
       if (!usageEventSource || usageEventSource.readyState === EventSource.CLOSED) {
         if (usageEventSource) usageEventSource.close();
-        usageEventSource = new EventSource('/api/usage/events');
+        usageEventSource = new EventSource('/api/monitor/events');
         applyUsageSSEHandlers(usageEventSource);
       }
       refreshQuotaData();
@@ -115,7 +115,7 @@ function startUsageRefresh() {
   document.addEventListener('visibilitychange', usageVisibilityHandler);
 
   usagePeriodicTimer = setInterval(function() {
-    if (currentPage === 'usage') {
+    if (currentPage === 'monitor') {
       refreshQuotaData();
     }
   }, 5000);
@@ -143,7 +143,7 @@ function stopUsageRefresh() {
 }
 
 async function clearUsage() {
-  await apiDelete('/usage');
+  await apiDelete('/monitor');
   toast(t('usageCleared'), 'info');
   renderUsage(document.getElementById('page-content'));
 }
@@ -152,7 +152,7 @@ async function resetQuotaTimers() {
 	var ok = await confirmModal(t('confirmResetQuota'));
 	if (!ok) return;
 	try {
-		var resp = await apiPost('/usage/reset-quota', {});
+		var resp = await apiPost('/monitor/reset-quota', {});
 		if (resp && resp.ok) {
 			toast(t('quotaReset'), 'success');
 			refreshQuotaMonitor();

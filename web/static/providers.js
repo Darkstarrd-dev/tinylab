@@ -614,7 +614,7 @@ async function fetchModelDetailRow(pid, mid) {
   if (!wrap) return;
   try {
     var p = providerDetailCache;
-    var data = await apiGet('/usage/model-keys?provider=' + encodeURIComponent(p.name) + '&model=' + encodeURIComponent(mid));
+    var data = await apiGet('/monitor/model-keys?provider=' + encodeURIComponent(p.name) + '&model=' + encodeURIComponent(mid));
     renderModelKeyDetailRow(pid, mid, data);
   } catch (e) {
     wrap.innerHTML = '<div class="model-key-detail-empty">' + escapeHtml(e.message || String(e)) + '</div>';

@@ -284,6 +284,31 @@ func TestIsNIM(t *testing.T) {
 	}
 }
 
+func TestIsCline(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		want bool
+	}{
+		{name: "host_root", base: "https://api.cline.bot", want: true},
+		{name: "path_bearing", base: "https://api.cline.bot/api/v1", want: true},
+		{name: "case_insensitive", base: "https://API.CLINE.BOT", want: true},
+		{name: "subdomain_other", base: "https://www.cline.bot", want: false},
+		{name: "unrelated", base: "https://api.openai.com/v1", want: false},
+		{name: "empty", base: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Provider{BaseURL: tt.base}
+			got := p.IsCline()
+			if got != tt.want {
+				t.Errorf("IsCline() = %v, want %v (baseURL=%q)", got, tt.want, tt.base)
+			}
+		})
+	}
+}
+
 func TestEnablePlaygroundDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

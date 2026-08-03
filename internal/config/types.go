@@ -150,6 +150,14 @@ func (p Provider) IsGeminiOpenAICompat() bool {
 		strings.Contains(u, "/openai")
 }
 
+// IsCline reports whether this provider targets api.cline.bot, which gates
+// cline-free/* models behind an x-client-type product-surface header (see
+// upstream.go applyClineHeaders). Matches by BaseURL substring, consistent
+// with IsNIM/IsGeminiOpenAICompat auto-detection.
+func (p Provider) IsCline() bool {
+	return strings.Contains(strings.ToLower(p.BaseURL), "api.cline.bot")
+}
+
 // IsAnthropic reports whether this provider speaks the Anthropic Messages API
 // (used to switch auth header, upstream URL construction and entry-format filtering).
 func (p Provider) IsAnthropic() bool {

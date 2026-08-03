@@ -1013,7 +1013,7 @@ function pgStartReqLeftPolling() {
   pgReqLeftTimer = setInterval(pgFetchReqLeft, 10000);
   // SSE for real-time request-start/done events
   try {
-    pgReqLeftSSE = new EventSource('/api/usage/events');
+    pgReqLeftSSE = new EventSource('/api/monitor/events');
     pgReqLeftSSE.onmessage = function(ev) {
       try {
         var data = JSON.parse(ev.data);
@@ -1143,7 +1143,7 @@ function pgReqLeftRender() {
 
 function pgFetchReqLeft() {
   // 使用 Playground 专用端点，数据源已物理隔离（仅含 playground 来源）
-  pgApiGet('/usage/playground?limit=50').then(function(res) {
+  pgApiGet('/monitor/playground?limit=50').then(function(res) {
     var entries = (res && res.entries) || [];
     // 双保险：仍过滤一次，防止未来数据源变更引入污染
     entries = entries.filter(function(e) { return e.source === 'playground'; });

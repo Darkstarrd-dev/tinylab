@@ -1,4 +1,4 @@
-// text-review-step1.js — Step1 panel: 导入文本 (import text).
+// editor_textreview_step1.js — Step1 panel: 导入文本 (import text).
 // Exposes window.trRenderStep1(panel, state).
 // Two import paths: (a) "打开文件" -> POST /api/editor/open (native picker,
 // reused); (b) a paste-capable <textarea> with paste interception.

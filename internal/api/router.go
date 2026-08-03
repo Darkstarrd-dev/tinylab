@@ -33,7 +33,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
 	"github.com/tinyrouter/tinyrouter/internal/api/trace"
-	apiusage "github.com/tinyrouter/tinyrouter/internal/api/usage"
+	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -288,7 +288,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	imageHandler := image.NewHandler(apiDeps)
 	settingsHandler := settings.NewHandler(apiDeps)
 	providersHandler := providers.NewHandler(apiDeps)
-	usageHandler := apiusage.NewHandler(apiDeps)
+	monitorHandler := apimonitor.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
 	traceHandler := trace.NewHandler(apiDeps)
@@ -329,8 +329,8 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// ReviewPresets
 			reviewPresetsHandler.Register(r)
 
-			// Usage
-			usageHandler.Register(r)
+			// Monitor
+			monitorHandler.Register(r)
 			sseHandler.Register(r)
 
 			// Image save + same-origin proxy (avoids CORS for browser-side reads)
@@ -411,10 +411,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
 				"gallery-edit.js", "gallery-edit-operations.js", "gallery-edit-batch.js", "gallery.js", "editor-state.js", "editor.js", "editor-logs.js",
 				// AI Text Review (load order: split/diff/state first, then steps, then entry)
-				"tr-split.js", "tr-diff.js", "tr-state.js",
-				"text-review-step1.js", "text-review-step2.js",
-				"text-review-step3.js", "text-review-step4.js",
-				"text-review.js",
+				"editor_textreview_split.js", "editor_textreview_diff.js", "editor_textreview_state.js",
+				"editor_textreview_step1.js", "editor_textreview_step2.js",
+				"editor_textreview_step3.js", "editor_textreview_step4.js",
+				"editor_textreview.js",
 			}
 			for _, f := range pgJSFiles {
 				r.Get("/"+f, noCacheHandler)

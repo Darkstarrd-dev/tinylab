@@ -282,7 +282,7 @@ func TestUsage_Endpoints(t *testing.T) {
 	defer srv.Close()
 
 	// Get (empty)
-	resp := requestJSON(t, "GET", srv.URL+"/api/usage", "")
+	resp := requestJSON(t, "GET", srv.URL+"/api/monitor", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -293,13 +293,13 @@ func TestUsage_Endpoints(t *testing.T) {
 	}
 
 	// Summary
-	resp = requestJSON(t, "GET", srv.URL+"/api/usage/summary", "")
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/summary", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
 
 	// Clear
-	resp = requestJSON(t, "DELETE", srv.URL+"/api/usage", "")
+	resp = requestJSON(t, "DELETE", srv.URL+"/api/monitor", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -310,7 +310,7 @@ func TestUsage_Endpoints(t *testing.T) {
 	}
 
 	// Quotas — must not panic even with empty tracker (regression test for nil selector)
-	resp = requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/quotas", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -321,7 +321,7 @@ func TestUsage_Endpoints(t *testing.T) {
 	}
 
 	// Model keys — with provider/model from setupTestServer fixture
-	resp = requestJSON(t, "GET", srv.URL+"/api/usage/model-keys?provider=Test&model=model-a", "")
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/model-keys?provider=Test&model=model-a", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -478,7 +478,7 @@ func TestGetQuotas_CurrentKeyID_Name(t *testing.T) {
 	rt.quotaTracker.Update("DupProv", "model-x", "dk1", "Key-1", 100, 80, 2)
 
 	// Verify the quota API also populates currentKeyId
-	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	resp := requestJSON(t, "GET", srv.URL+"/api/monitor/quotas", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -530,7 +530,7 @@ func TestGetQuotas_AggregationFromKeyStates(t *testing.T) {
 	reg.GetKeyState("agg-prov", "ak2").UpdateQuota("model-q", 100, 80, 0, 0)
 
 	// Fetch quotas
-	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	resp := requestJSON(t, "GET", srv.URL+"/api/monitor/quotas", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -588,7 +588,7 @@ func TestModelKeys_PerModelStatusIsolation(t *testing.T) {
 	selector.MarkRateLimited("test-prov", "k1", "model-a", 60*time.Second)
 
 	// model-a should report cooldown + error.
-	respA := requestJSON(t, "GET", srv.URL+"/api/usage/model-keys?provider=Test&model=model-a", "")
+	respA := requestJSON(t, "GET", srv.URL+"/api/monitor/model-keys?provider=Test&model=model-a", "")
 	if respA.StatusCode != http.StatusOK {
 		t.Fatalf("model-a: expected 200, got %d", respA.StatusCode)
 	}
@@ -610,7 +610,7 @@ func TestModelKeys_PerModelStatusIsolation(t *testing.T) {
 	}
 
 	// model-b must remain active with no leaked error.
-	respB := requestJSON(t, "GET", srv.URL+"/api/usage/model-keys?provider=Test&model=model-b", "")
+	respB := requestJSON(t, "GET", srv.URL+"/api/monitor/model-keys?provider=Test&model=model-b", "")
 	if respB.StatusCode != http.StatusOK {
 		t.Fatalf("model-b: expected 200, got %d", respB.StatusCode)
 	}
