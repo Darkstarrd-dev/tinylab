@@ -395,6 +395,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 | `zip_replace.go` | `ReplaceZipEntries(data, replacements map[string][]byte) ([]byte, Manifest, error)`：zip 条目替换/原位回写核心——按已清洗 zipPath 替换命中条目内容、未命中条目字节级保留（含 Method/Modified/Extra/comment、归档注释），输出新归档字节 + 新 Manifest。被 `internal/api/gallery/zip_handlers.go` `galleryEditZipWriteback` 调用（replace-original convert-all/单图 zip 路径），支持 Store+Deflate（及任何 stdlib 支持的方法）。调用方负责 zipPath 清洗（handler 内调用 `gallerylib.CleanZipPath`，此前 `cleanZipPathNormalize` 重复函数已移除）。不依赖 `zip_delete.go` |
 | `zip_replace_test.go` | 测试：`TestReplaceZipEntries_Store_ReplacesAndPreserves` / `_Deflate_ReplacesAndPreserves`（验证 deflate 实际压缩：结果尺寸<裸总和）/ `_MissingKey_NoOp`（空映射/未知键字节等价于原）/ `_CleanedKeyContract`（调用方提供已清洗键的契约） |
 | `tiff.go` | `ConvertTIFFToJPEG(io.Reader,quality)` / `ConvertTIFFBlobToJPEG([]byte,quality)`：用 `golang.org/x/image/tiff` 解码后重编码为 JPEG（Chromium/WebView2 原生不支持 `<img>` 显示 TIFF） |
+| `dimensions.go` | 解码前尺寸预检（防解压炸弹）：`ImageDimensions` 解析 PNG IHDR / GIF 逻辑屏幕 / TIFF IFD / JPEG SOF / WebP（VP8/VP8L/VP8X）头部取宽高（不解码像素）；`CheckImageSize` 对 >16384×16384 报 “image too large”。`tiff.go` 与 gallery AI review `analyzeImage` 在 `image.Decode`/`tiff.Decode` 前调用 |
 | `gallery.go` | 包文档 + 支持扩展名集合：`SupportedExts`（webp/png/jpg/jpeg/bmp/tiff/tif）+ `IsSupportedExt`（“tif” 视同 “tiff”）+ `Entry`/`Manifest` 类型 |
 | `charset.go` | 非 UTF-8 zip 条目文件名的 CJK 编码探测还原：`decodeZipName` 按 ShiftJIS→GBK→EUCJP→Big5→EUCKR→GB18030 优先级解码 + round-trip 编码验证过滤错误解码器（日/中 Windows zip 工具常见） |
 | `review.go` | AI 审核共享类型：`ReviewStrategy`（all/head-tail）、`ReviewStatus`（running/completed/cancelled/error）、`ReviewResult`（index/path/isMatch/reason）、`ReviewResponse`、`ParseReviewResponse`（match 字段泛化）+ `PromptGenSystemPrompt`/`PromptGenUserPromptTemplate`/`DefaultUserPrompt` 常量 |
@@ -411,8 +412,7 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 | 文件 | 职责 |
 |---|---|
 | `register.go` | `Handler` + `Register`（路由注册 + 文档注释列出全部端点）+ 配置 CRUD handler（`listReviewNodes`/`upsertReviewNode`/`deleteReviewNode`/`listSplitPatterns`/`upsertSplitPattern`/`deleteSplitPattern`/`getPromptDefault`）+ `engineOnce` 懒构造 `*tr.Engine`（默认 `ProxyCleaner`，测试可经 `SetCleanerForTest` 注入 fake）+ 内置默认清理 system prompt 常量 |
-| `sessions.go` | 会话/调度 handler：`createSession`（POST `/sessions`）/`getSession`（GET `/sessions/{id}` 快照）/`streamSessionEvents`（GET `/sessions/{id}/events` SSE 实时流）/`pauseSession`/`resumeSession`/`stopSession`/`reprocessChapter`（POST `/sessions/{id}/chapters/{idx}/reprocess`） |
-| `nodepersister.go` | `registryPersister`：`tr.NodePersister` 生产实现，ramp-down 决策（`UpdateNodeConcurrency`/`DisableNode`）写回 registry + `SaveConfig` 持久化到 `config.yaml` |
+| `nodepersister.go` | `registryPersister`：`tr.NodePersister` 生产实现，ramp-down 决策（`UpdateNodeConcurrency`/`DisableNode`）经 `registry.UpdateTextReviewNodeFields` 做字段级合并（只改 Concurrency/Enabled，保留 ProviderID/ModelID/IntervalSec/BatchChars）+ `SaveConfig` 持久化到 `config.yaml` |
 | `routes_test.go` / `sessions_test.go` | 测试：路由注册契约 + 会话端点（含 fake Cleaner） |
 
 ## 11. `internal/state/` — `state.yaml` 运行时持久化

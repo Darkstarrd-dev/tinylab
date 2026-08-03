@@ -164,7 +164,7 @@ func (h *Handler) getVideoInfo(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	info, err := h.d.DownloadMgr.GetVideoInfo(req.URL)
+	info, err := h.d.DownloadMgr.GetVideoInfo(r.Context(), req.URL)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, fmt.Sprintf("query failed: %v", err))
 		return
@@ -193,7 +193,7 @@ func (h *Handler) getPlaylistInfo(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	info, err := h.d.DownloadMgr.GetPlaylistInfo(req.URL)
+	info, err := h.d.DownloadMgr.GetPlaylistInfo(r.Context(), req.URL)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, fmt.Sprintf("query failed: %v", err))
 		return
@@ -246,7 +246,7 @@ func (h *Handler) createPlaylistDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ids, title, err := h.d.DownloadMgr.CreatePlaylistTask(input)
+	ids, title, err := h.d.DownloadMgr.CreatePlaylistTask(r.Context(), input)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, fmt.Sprintf("playlist query failed: %v", err))
 		return

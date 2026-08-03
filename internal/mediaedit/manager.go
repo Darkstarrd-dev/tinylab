@@ -13,14 +13,59 @@ import (
 	"time"
 )
 
+// maxJobs bounds the in-memory job pool: finished jobs beyond this cap are
+// evicted so the map cannot grow unbounded across many edits.
+const maxJobs = 200
+
 // Manager manages a pool of in-memory ffmpeg edit jobs.
 type Manager struct {
 	jobs sync.Map // string → *Job
+
+	mu sync.Mutex
+	// order tracks job IDs in creation order for FIFO eviction. Guarded by mu.
+	order []string
 }
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
 	return &Manager{}
+}
+
+// trimBounds evicts finished jobs so the pool stays ≤ maxJobs entries,
+// preferring to keep running jobs (whose goroutines always complete — eviction
+// only drops the map entry). Lock order: mu → job.mu; runJob only ever takes
+// job.mu, so no cycle is possible.
+func (m *Manager) trimBounds() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.order) <= maxJobs {
+		return
+	}
+	over := len(m.order) - maxJobs
+	kept := m.order[:0]
+	for _, id := range m.order {
+		v, ok := m.jobs.Load(id)
+		if !ok {
+			continue
+		}
+		job := v.(*Job)
+		job.mu.Lock()
+		terminal := job.Status == StatusCompleted || job.Status == StatusCancelled || job.Status == StatusError
+		job.mu.Unlock()
+		if terminal && over > 0 {
+			m.jobs.Delete(id)
+			over--
+			continue
+		}
+		kept = append(kept, id)
+	}
+	// Pathological case: more than maxJobs concurrently running jobs. Drop the
+	// oldest entries rather than let the map grow without bound.
+	for len(kept) > maxJobs {
+		m.jobs.Delete(kept[0])
+		kept = kept[1:]
+	}
+	m.order = kept
 }
 
 // Start launches an ffmpeg edit job based on the request. Returns the job
@@ -104,11 +149,13 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 		StartedAt: time.Now(),
 		cancel:    cancel,
 	}
-
 	m.jobs.Store(id, job)
+	m.mu.Lock()
+	m.order = append(m.order, id)
+	m.mu.Unlock()
+	m.trimBounds()
 
 	go m.runJob(ctx, job, ffmpegPath, args, outputPath, sourceDuration, removeOnSuccess)
-
 	return job.Snapshot(), nil
 }
 

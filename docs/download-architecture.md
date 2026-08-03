@@ -247,7 +247,7 @@ type Executor struct {
 ### 5.4 尾部缓冲与文件路径提取
 
 - 两个 `tailBuffer`（各 64KB，executor.go:77-78），`newTailBuffer(64*1024)`（executor.go:464-487）。
-- `extractSavedFilePath`（executor.go:342-353）按优先级匹配：`Merging formats into "..."` → `Destination: "..."` → `[download] ... has already been downloaded`（正则 executor.go:330-334）。
+- `extractSavedFilePath`（executor.go:342-353）按优先级匹配：`Merging formats into "..."` → `Destination: [path]`（引号可选，`(?m)Destination:\s+"?([^"]+?)"?\s*$`，按行锚定以兼容音频提取/单文件下载的无引号输出，binary.go:49-55）→ `[download] ... has already been downloaded`。
 - 成功后 `os.Stat(filePath)` 校验存在且 `size > 0`，否则报 “downloaded file missing or empty”（executor.go:138-140）。
 
 ### 5.5 错误分类与信息查询

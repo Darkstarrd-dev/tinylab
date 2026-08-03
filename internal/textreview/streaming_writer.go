@@ -23,7 +23,6 @@ type streamingResponseWriter struct {
 	ctx        context.Context
 	header     http.Header
 	statusCode int
-	wroteHead  bool
 	mu         sync.Mutex
 	body       strings.Builder
 	chunks     chan []byte
@@ -43,10 +42,16 @@ func (w *streamingResponseWriter) Header() http.Header {
 	return w.header
 }
 
-// WriteHeader records the status code. Only the first call counts, matching
+// WriteHeader records the status code under w.mu so concurrent readers (the
+// classify path reads body/statusCode while the proxy goroutine may still be
+// writing) never observe a torn value. Only the first call counts, matching
 // net/http semantics.
 func (w *streamingResponseWriter) WriteHeader(code int) {
-	w.wroteHead = true
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.statusCode != 0 {
+		return
+	}
 	w.statusCode = code
 }
 

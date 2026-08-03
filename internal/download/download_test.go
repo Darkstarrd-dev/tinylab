@@ -197,6 +197,25 @@ func TestExtractSavedFilePath(t *testing.T) {
 		{`Destination: "/movie.mkv"`, "/movie.mkv"},
 		{`[download] /foo/bar.mp4 has already been downloaded`, "/foo/bar.mp4"},
 		{`no path here`, ""},
+		// 真实 yt-dlp 输出：单文件/音频提取（无 merge），Destination 不带引号，
+		// 且后面紧跟进度行 —— 必须按行锚定才能提取完整路径。
+		{
+			"[download] Destination: /home/user/Music/track.mp3\n" +
+				"[download] 100% of 5.00MiB in 00:00:01 at 5.00MiB/s",
+			"/home/user/Music/track.mp3",
+		},
+		{
+			"[download] Destination: /home/user/Videos/clip.webm\n" +
+				"[download] 100% of 20.00MiB in 00:00:02 at 10.00MiB/s\n" +
+				"[download] Merging formats into \"/home/user/Videos/clip.mp4\"",
+			"/home/user/Videos/clip.mp4",
+		},
+		// 带引号的 Destination（Windows 路径）仍应兼容。
+		{
+			"[download] Destination: \"C:\\Users\\me\\Videos\\out.mp4\"\n" +
+				"[download] 100% of 10.00MiB in 00:00:01 at 10.00MiB/s",
+			`C:\Users\me\Videos\out.mp4`,
+		},
 	}
 	for _, c := range cases {
 		if got := extractSavedFilePath(c.input); got != c.want {
@@ -207,6 +226,11 @@ func TestExtractSavedFilePath(t *testing.T) {
 	mixed := "Destination: \"/a.mp4\"\nMerging formats into \"/b.mp4\""
 	if got := extractSavedFilePath(mixed); got != "/b.mp4" {
 		t.Errorf("extractSavedFilePath priority = %q, want /b.mp4", got)
+	}
+	// 未加 (?m) 时，Destination 行在末尾之外会因 $ 锚定失败；这里显式验证多行尾部。
+	multiline := "[download] Destination: /out/unquoted.mp4\n[download] 100% of 1.00MiB in 00:00:00 at 1.00MiB/s\n"
+	if got := extractSavedFilePath(multiline); got != "/out/unquoted.mp4" {
+		t.Errorf("extractSavedFilePath multiline = %q, want /out/unquoted.mp4", got)
 	}
 }
 

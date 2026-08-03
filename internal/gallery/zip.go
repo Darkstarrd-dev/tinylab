@@ -15,6 +15,10 @@ import (
 // name exists in the archive.
 var ErrEntryNotFound = errors.New("entry not found")
 
+// maxZipEntrySize caps a single extracted zip entry (100 MiB) so a crafted
+// archive cannot balloon memory via one giant entry.
+const maxZipEntrySize = 100 << 20
+
 // IsNotFound reports whether err is (or wraps) ErrEntryNotFound.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ErrEntryNotFound)
@@ -178,10 +182,15 @@ func GetZipEntry(reader io.ReaderAt, size int64, identifier string) (data []byte
 	}
 	defer rc.Close()
 
-	limited := io.LimitReader(rc, 100<<20)
+	// Read up to limit+1 bytes so a truncated entry is detected: if the entry
+	// exceeds the cap we return an explicit error instead of a silent partial.
+	limited := io.LimitReader(rc, maxZipEntrySize+1)
 	data, err = io.ReadAll(limited)
 	if err != nil {
 		return nil, "", fmt.Errorf("read entry: %w", err)
+	}
+	if int64(len(data)) > maxZipEntrySize {
+		return nil, "", fmt.Errorf("entry %s exceeds size limit (%d bytes)", target.Name, maxZipEntrySize)
 	}
 
 	return data, contentTypeForExt(target.Name), nil

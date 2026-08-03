@@ -126,6 +126,13 @@ func (h *Handler) analyzeImage(ctx context.Context, zipData []byte, entry galler
 		return nil, fmt.Errorf("read entry %s: %w", entry.Path, err)
 	}
 
+	// Pre-check dimensions from the container header BEFORE decoding: a crafted
+	// small file declaring a huge canvas would otherwise allocate
+	// width×height×4 bytes during image.Decode (decompression bomb / OOM).
+	if err := gallerylib.CheckImageSize(imgData); err != nil {
+		return nil, err
+	}
+
 	// 2. Decode and resize to max 1024px
 	img, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {

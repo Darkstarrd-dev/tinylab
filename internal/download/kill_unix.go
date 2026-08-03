@@ -10,8 +10,7 @@ import (
 
 // killProcessTree terminates the process group by delegating to internal/procutil.
 func killProcessTree(pid int) error {
-	procutil.KillProcessGroup(pid)
-	return nil
+	return procutil.KillProcessGroup(pid)
 }
 
 // setupProcessGroup 让子进程成为独立进程组的组长（Unix），

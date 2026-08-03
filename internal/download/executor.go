@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/console"
 )
@@ -48,6 +49,9 @@ func (e *Executor) Execute(ctx context.Context, task *Task, progressCh chan<- Pr
 
 	cmd := exec.CommandContext(ctx, ytDlpPath, args...)
 	setupProcessGroup(cmd)
+	// Bound Wait: if Cancel kills the tree but a grandchild keeps a pipe open,
+	// Wait must not block forever after the 5s grace period.
+	cmd.WaitDelay = 5 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -194,6 +198,7 @@ func (e *Executor) ExecutePlaylistInfo(ctx context.Context, rawURL string) (*Pla
 func (e *Executor) runCapture(ctx context.Context, ytDlpPath string, args []string) ([]byte, string, error) {
 	cmd := exec.CommandContext(ctx, ytDlpPath, args...)
 	setupProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			return killProcessTree(cmd.Process.Pid)

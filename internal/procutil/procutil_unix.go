@@ -12,13 +12,15 @@ import (
 // escalating to SIGKILL after a 2-second grace period if the group is still
 // alive. This ensures stubborn child processes that ignore SIGTERM are
 // force-killed, preventing zombie processes.
-func KillProcessGroup(pid int) {
+func KillProcessGroup(pid int) error {
 	pgid, err := syscall.Getpgid(pid)
 	if err != nil {
-		return
+		return err
 	}
 	// Send SIGTERM to the entire process group.
-	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+		return err
+	}
 	// SIGKILL fallback: after the grace period, check if the group still
 	// exists and force-kill it if so.
 	go func() {
@@ -28,6 +30,7 @@ func KillProcessGroup(pid int) {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}
 	}()
+	return nil
 }
 
 // SetProcessGroup configures the command to become a new process group leader

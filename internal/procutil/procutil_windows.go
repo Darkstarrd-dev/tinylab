@@ -12,8 +12,8 @@ const createNoWindow = 0x08000000
 
 // KillProcessGroup terminates the process and its entire child process tree
 // (Windows) using taskkill /T /F.
-func KillProcessGroup(pid int) {
-	_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
+func KillProcessGroup(pid int) error {
+	return exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
 }
 
 // SetProcessGroup configures the command with CREATE_NEW_PROCESS_GROUP so that

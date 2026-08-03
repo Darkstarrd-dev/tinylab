@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
@@ -157,7 +158,9 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	// Bound each upstream request: a stalled LLM stream must not hang the
+	// session forever. 90s covers even slow reasoning models comfortably.
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	srw := newStreamingResponseWriter(ctx)
@@ -205,7 +208,9 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	// Bound each upstream request: a stalled LLM stream must not hang the
+	// session forever (see call).
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	srw := newStreamingResponseWriter(ctx)
@@ -474,24 +479,30 @@ func holdPrefix(s, sep string) (safe, hold string) {
 }
 
 // classify maps the recorded proxy status + captured body into a CleanResult.
+// body/statusCode are read under srw.mu: classify may run while the proxy
+// goroutine is still writing (ctx-cancel path), so the reads must be atomic
+// with respect to Write/WriteHeader.
 func (g defaultProxyCaller) classify(srw *streamingResponseWriter, sawDone bool) CleanResult {
+	srw.mu.Lock()
 	body := srw.body.String()
-	switch code := srw.statusCode; {
-	case code == 0:
+	status := srw.statusCode
+	srw.mu.Unlock()
+	switch {
+	case status == 0:
 		// Proxy never wrote a header (e.g. ctx canceled before any output).
 		return CleanResult{OK: false, ErrMsg: "stream interrupted"}
-	case code == 200:
+	case status == 200:
 		if sawDone {
 			return CleanResult{OK: true}
 		}
 		// 200 but no [DONE] and the stream ended — mid-stream disconnect.
 		return CleanResult{OK: false, ErrMsg: "stream interrupted"}
-	case code == 502:
+	case status == 502:
 		if strings.Contains(body, "all keys exhausted") || strings.Contains(body, "no available keys") {
 			return CleanResult{Exhausted: true, ErrMsg: body}
 		}
 		return CleanResult{ErrMsg: body}
-	case code >= 400 && code < 500:
+	case status >= 400 && status < 500:
 		return CleanResult{Passed4xx: true, ErrMsg: body}
 	default:
 		return CleanResult{ErrMsg: body}

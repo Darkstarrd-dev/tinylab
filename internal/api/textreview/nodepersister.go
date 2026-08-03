@@ -1,10 +1,8 @@
 package textreview
 
 import (
-	tr "github.com/tinyrouter/tinyrouter/internal/textreview"
-
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	tr "github.com/tinyrouter/tinyrouter/internal/textreview"
 )
 
 // registryPersister is the production NodePersister: it applies ramp-down
@@ -21,12 +19,14 @@ func NewRegistryPersister(d *apibase.Deps) tr.NodePersister {
 }
 
 // UpdateNodeConcurrency persists the new concurrency for the node, keeping it
-// enabled. Returns false if the node was not found.
+// enabled. Field-level merge: ProviderID/ModelID/IntervalSec/BatchChars are
+// preserved. Returns false if the node was not found.
 func (p *registryPersister) UpdateNodeConcurrency(id string, concurrency int) bool {
 	if p.d == nil || p.d.Reg == nil {
 		return false
 	}
-	if !p.d.Reg.UpdateTextReviewNode(id, config.TextReviewNode{Concurrency: concurrency, Enabled: true}) {
+	c, e := concurrency, true
+	if !p.d.Reg.UpdateTextReviewNodeFields(id, &c, &e) {
 		return false
 	}
 	cfg := p.d.Reg.Config()
@@ -34,13 +34,15 @@ func (p *registryPersister) UpdateNodeConcurrency(id string, concurrency int) bo
 	return true
 }
 
-// DisableNode marks the node disabled with concurrency 0 and persists. Returns
-// false if the node was not found.
+// DisableNode marks the node disabled with concurrency 0 and persists. Field-level
+// merge: ProviderID/ModelID/IntervalSec/BatchChars are preserved. Returns false if
+// the node was not found.
 func (p *registryPersister) DisableNode(id string) bool {
 	if p.d == nil || p.d.Reg == nil {
 		return false
 	}
-	if !p.d.Reg.UpdateTextReviewNode(id, config.TextReviewNode{Concurrency: 0, Enabled: false}) {
+	c, e := 0, false
+	if !p.d.Reg.UpdateTextReviewNodeFields(id, &c, &e) {
 		return false
 	}
 	cfg := p.d.Reg.Config()

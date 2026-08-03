@@ -231,8 +231,12 @@ func (h *Handler) galleryEditUploadTemp(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer tmpFile.Close()
+	// Cap the upload at 500MB (matches galleryListZip) so a huge body cannot
+	// exhaust disk/temp space.
+	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
 	if _, err := io.Copy(tmpFile, r.Body); err != nil {
-		apibase.WriteAPIError(w, http.StatusInternalServerError, "write: "+err.Error())
+		os.Remove(tmpFile.Name())
+		apibase.WriteAPIError(w, http.StatusBadRequest, "upload too large or write failed: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -265,7 +269,7 @@ func (h *Handler) galleryEditExtractZipEntry(w http.ResponseWriter, r *http.Requ
 	var zipData []byte
 	if req.ZipAbsPath != "" {
 		var err error
-		zipData, err = os.ReadFile(req.ZipAbsPath)
+		zipData, err = readZipFile(req.ZipAbsPath)
 		if err != nil {
 			apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())
 			return

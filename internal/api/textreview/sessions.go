@@ -134,6 +134,22 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 	writeOK(w)
 }
 
+// deleteSession cancels the session and removes it from the store so sessions
+// cannot grow unbounded.
+// DELETE /api/text-review/sessions/{id}
+func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if tr.GetSession(id) == nil {
+		apibase.WriteAPIError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if !tr.DeleteSession(id) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeOK(w)
+}
+
 // reprocessChapter resets a single chapter to pending and nudges the dispatcher.
 // POST /api/text-review/sessions/{id}/chapters/{idx}/reprocess
 func (h *Handler) reprocessChapter(w http.ResponseWriter, r *http.Request) {

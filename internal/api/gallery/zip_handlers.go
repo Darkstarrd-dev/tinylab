@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,6 +16,23 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
 )
+
+// maxZipDiskSize caps loading an on-disk zip archive into memory (1 GiB).
+// Larger archives must be opened entry-by-entry instead of wholesale.
+const maxZipDiskSize = 1 << 30
+
+// readZipFile reads an on-disk zip archive with a size cap so a huge file
+// cannot be slurped into memory unchecked.
+func readZipFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxZipDiskSize {
+		return nil, fmt.Errorf("zip too large: %d bytes (max %d)", info.Size(), maxZipDiskSize)
+	}
+	return os.ReadFile(path)
+}
 
 // galleryListZip receives a raw zip binary, caches it in an in-memory session,
 // and returns the image manifest plus the session id the frontend uses to
@@ -191,12 +209,7 @@ func (h *Handler) galleryZipFromPath(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "missing path")
-		return
-	}
-
-	data, err := os.ReadFile(req.Path)
+	data, err := readZipFile(req.Path)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())
 		return

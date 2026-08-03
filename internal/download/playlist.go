@@ -5,8 +5,11 @@ import "context"
 // CreatePlaylistTask 创建播放列表下载任务。
 // 先查询播放列表信息，然后为每个条目创建子任务。
 // 返回：所有创建的任务 ID 列表、播放列表标题、错误（如果有）。
-func (m *Manager) CreatePlaylistTask(input CreateTaskInput) ([]string, string, error) {
-	info, err := m.executor.ExecutePlaylistInfo(context.Background(), input.URL)
+// ctx 上的超时（infoQueryTimeout）防止上游卡死挂起请求。
+func (m *Manager) CreatePlaylistTask(ctx context.Context, input CreateTaskInput) ([]string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, infoQueryTimeout)
+	defer cancel()
+	info, err := m.executor.ExecutePlaylistInfo(ctx, input.URL)
 	if err != nil {
 		return nil, "", err
 	}

@@ -138,14 +138,22 @@ func (m *Manager) CreateTask(input CreateTaskInput) string {
 	return id
 }
 
+// infoQueryTimeout bounds metadata queries: a stalled upstream (network hang,
+// dead site) must not wedge the HTTP handler forever.
+const infoQueryTimeout = 60 * time.Second
+
 // GetVideoInfo 查询视频信息（不下载）。
-func (m *Manager) GetVideoInfo(rawURL string) (*VideoInfo, error) {
-	return m.executor.ExecuteInfo(context.Background(), rawURL)
+func (m *Manager) GetVideoInfo(ctx context.Context, rawURL string) (*VideoInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, infoQueryTimeout)
+	defer cancel()
+	return m.executor.ExecuteInfo(ctx, rawURL)
 }
 
 // GetPlaylistInfo 查询播放列表信息（不下载）。
-func (m *Manager) GetPlaylistInfo(rawURL string) (*PlaylistInfo, error) {
-	return m.executor.ExecutePlaylistInfo(context.Background(), rawURL)
+func (m *Manager) GetPlaylistInfo(ctx context.Context, rawURL string) (*PlaylistInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, infoQueryTimeout)
+	defer cancel()
+	return m.executor.ExecutePlaylistInfo(ctx, rawURL)
 }
 
 // ListTasks 返回所有任务（含已完成），按创建顺序。

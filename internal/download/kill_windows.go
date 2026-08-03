@@ -11,8 +11,7 @@ import (
 // killProcessTree 终止进程及其整个子进程树（Windows）。
 // 使用 taskkill /PID <pid> /T /F。
 func killProcessTree(pid int) error {
-	procutil.KillProcessGroup(pid)
-	return nil
+	return procutil.KillProcessGroup(pid)
 }
 
 // setupProcessGroup 在 Windows 上为子进程设置创建标志，避免弹出可见控制台窗口。

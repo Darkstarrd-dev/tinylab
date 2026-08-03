@@ -197,10 +197,12 @@ func (h *Handler) galleryCancelReview(w http.ResponseWriter, r *http.Request) {
 	task := val.(*reviewTask)
 	task.cancel()
 
-	// Wait for the task to finish with a 3s timeout guard
+	// Wait for the task to finish. A worker can be mid-LLM-call when cancel
+	// lands (the per-request budget is 45s); unpinning/deleting before done
+	// would orphan a worker still reading the session zip. 50s > 45s/req.
 	select {
 	case <-task.done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(50 * time.Second):
 		h.d.Logger.Warn("gallery: review cancel timed out for session %s, forcing task cleanup", sessionID)
 	}
 

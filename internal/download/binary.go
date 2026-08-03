@@ -47,8 +47,10 @@ func (e *Executor) resolveFfmpegPath() (string, error) {
 // --- 输出文件路径提取 ---
 
 var (
+	// (?m) 使 $ 匹配行尾：Destination 行之后通常还有进度行，必须按行锚定，
+	// 且 lazy 捕获只有锚定到行尾才能取到完整路径（否则最小匹配只取 1 个字符）。
 	mergeRe   = regexp.MustCompile(`Merging formats into "([^"]+)"`)
-	destRe    = regexp.MustCompile(`Destination:\s+"([^"]+)"`)
+	destRe    = regexp.MustCompile(`(?m)Destination:\s+"?([^"]+?)"?\s*$`)
 	alreadyRe = regexp.MustCompile(`\[download\]\s+(.+?)\s+has already been downloaded`)
 )
 

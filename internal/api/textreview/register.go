@@ -71,8 +71,8 @@ func (h *Handler) engineOnce() *tr.Engine {
 //	GET    /api/text-review/sessions/{id}/events SSE live stream (chunks + status)
 //	POST   /api/text-review/sessions/{id}/pause  pause the dispatcher
 //	POST   /api/text-review/sessions/{id}/resume resume the dispatcher
-//	POST   /api/text-review/sessions/{id}/stop   cancel the session
 //	POST   /api/text-review/sessions/{id}/chapters/{idx}/reprocess  re-clean one chapter
+//	DELETE /api/text-review/sessions/{id}   cancel + remove a session
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/review-nodes", h.listReviewNodes)
 	r.Post("/review-nodes", h.upsertReviewNode)
@@ -92,6 +92,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/sessions/{id}/resume", h.resumeSession)
 	r.Post("/sessions/{id}/stop", h.stopSession)
 	r.Post("/sessions/{id}/chapters/{idx}/reprocess", h.reprocessChapter)
+	r.Delete("/sessions/{id}", h.deleteSession)
 }
 
 // listReviewNodes returns the text-review processing-node pool.
