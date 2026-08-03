@@ -183,7 +183,7 @@ func (h *Handler) getQuotas(w http.ResponseWriter, r *http.Request) {
 		barMap[bars[i].Provider+"/"+bars[i].Model] = i
 	}
 
-	// Merge usage stats into quota bars; add non-quota models
+	// Merge usage stats into quota bars; add non-quota models.
 	for _, ms := range modelStats {
 		key := ms.Provider + "/" + ms.Model
 		if idx, ok := barMap[key]; ok {
@@ -202,6 +202,28 @@ func (h *Handler) getQuotas(w http.ResponseWriter, r *http.Request) {
 				OutputTokens: ms.OutputTokens,
 			}
 			bars = append(bars, newBar)
+			barMap[key] = len(bars) - 1
+		}
+	}
+
+	// Include models with only in-flight requests. Recent Requests already
+	// exposes these entries through EntryTracker, but completed usage has not
+	// reached the accumulator yet, so without this provisional bar the quota
+	// table stays empty until the first request finishes.
+	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
+		for _, entry := range h.d.ProxyHandler.EntryTracker.All() {
+			if entry.Source == "playground" || entry.Provider == "" || entry.Model == "" {
+				continue
+			}
+			key := entry.Provider + "/" + entry.Model
+			if _, ok := barMap[key]; ok {
+				continue
+			}
+			bars = append(bars, internalusage.QuotaBar{
+				Provider: entry.Provider,
+				Model:    entry.Model,
+				HasQuota: false,
+			})
 			barMap[key] = len(bars) - 1
 		}
 	}

@@ -44,6 +44,7 @@ async function renderUsage(c) {
   var tbody = document.getElementById('quota-tbody');
   if (tbody) {
     updateQuotaTable(quotaBars);
+    refreshAllKeyDetails();
   }
   updateUsageSummary(summary);
   updateRecentRequestsInline(lastUsageEntries);

@@ -401,10 +401,9 @@ function renderQuotaKeyRowsInto(provider, model, data) {
     parent = node;
   }
 }
-// latency/speed + expanded sub-rows. It only fetches rows that are expanded
-// AND whose cached detail is stale, so a row just fetched (e.g. freshly
-// expanded via toggleQuotaRowExpand's direct fetch) is not re-requested on
-// the next tick — avoiding duplicate hits to the same endpoint.
+// latency/speed + expanded sub-rows. It fetches every quota bar so the
+// top-level latency/speed cells are populated even before a row is expanded.
+// Sub-row rendering remains gated by expandedModels inside fetchModelKeyDetail.
 function refreshAllKeyDetails() {
   var now = Date.now();
   if (now - _lastPerKeyRefresh < KEY_DETAIL_TTL) return;
@@ -412,8 +411,6 @@ function refreshAllKeyDetails() {
   for (var key in quotaBarItems) {
     var el = quotaBarItems[key];
     if (!el || !el._bar) continue;
-    var setKey = JSON.stringify([el._bar.provider, el._bar.model]);
-    if (!expandedModels.has(setKey)) continue;          // skip collapsed rows
     var cache = keyDetailCache[key];
     if (cache && now - cache.ts < KEY_DETAIL_TTL) continue;  // still fresh
     fetchModelKeyDetail(el._bar.provider, el._bar.model);

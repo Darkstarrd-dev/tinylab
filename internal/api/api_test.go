@@ -327,6 +327,37 @@ func TestUsage_Endpoints(t *testing.T) {
 	}
 }
 
+func TestUsage_QuotasIncludeInflightModel(t *testing.T) {
+	srv, _, _, rt := setupTestServer(t)
+	defer srv.Close()
+
+	rt.deps.proxyHandler.EntryTracker.Register(usage.Entry{
+		ID:       "inflight-1",
+		Provider: "Test",
+		Model:    "model-a",
+		Status:   "processing",
+	})
+
+	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var body struct {
+		Quotas []struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"quotas"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(body.Quotas) != 1 || body.Quotas[0].Provider != "Test" || body.Quotas[0].Model != "model-a" {
+		t.Fatalf("expected provisional quota bar for Test/model-a, got %+v", body.Quotas)
+	}
+}
+
 func TestConsoleLogs_Endpoints(t *testing.T) {
 	srv, _, _, _ := setupTestServer(t)
 	defer srv.Close()
@@ -445,7 +476,6 @@ func TestGetQuotas_CurrentKeyID_Name(t *testing.T) {
 
 	// Seed quota data so the bar appears in the API response
 	rt.quotaTracker.Update("DupProv", "model-x", "dk1", "Key-1", 100, 80, 2)
-
 
 	// Verify the quota API also populates currentKeyId
 	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
