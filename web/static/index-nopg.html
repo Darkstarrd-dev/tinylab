@@ -68,6 +68,24 @@ window.__hasPlayground = false;
 </div>
 <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 <div id="modal-overlay" class="modal-overlay"></div>
+<div id="info-modal-overlay" class="info-modal-overlay">
+  <div class="info-modal">
+    <div class="info-modal-header">
+      <span class="info-modal-title" id="info-modal-title"></span>
+      <div class="info-modal-search" id="info-modal-search">
+        <input type="text" id="info-modal-search-input" placeholder="Search..." autocomplete="off">
+        <button type="button" id="info-modal-search-prev" data-tooltip="Previous" aria-label="Previous">&uarr;</button>
+        <button type="button" id="info-modal-search-next" data-tooltip="Next" aria-label="Next">&darr;</button>
+        <span id="info-modal-search-count"></span>
+      </div>
+      <span class="info-modal-header-actions">
+        <button class="info-copy-all-btn" id="info-modal-copy-all" onclick="copyAllInfo(this)">Copy All</button>
+        <button class="info-modal-close" onclick="closeInfoModal()">&times;</button>
+      </span>
+    </div>
+    <div class="info-modal-body" id="info-modal-body"></div>
+  </div>
+</div>
 <script src="/i18n.js"></script>
 <script src="/api.js"></script>
 <script src="/theme.js"></script>
@@ -78,6 +96,7 @@ window.__hasPlayground = false;
 <script src="/settings_trace.js"></script>
 <script src="/settings_modal.js"></script>
 <script src="/settings_shortcuts.js"></script>
+<script src="/info_common.js"></script>
 <script src="/providers.js"></script>
 <script src="/combos.js"></script>
 <script src="/quickslots.js"></script>

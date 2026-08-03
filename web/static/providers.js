@@ -38,7 +38,7 @@ function renderProviderList() {
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (p.isActive ? 'badge-active' : 'badge-inactive') + '">' + (p.isActive ? t('active') : t('inactive')) + '</span>\
-          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleProviderList(event, \'' + p.id + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleProviderList(event, \'' + escapeForJsString(p.id) + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
         </div>\
       </div>\
       <div class="provider-card-row mt-12">\
@@ -46,8 +46,8 @@ function renderProviderList() {
           <span class="muted">' + t('keys') + ' ' + (p.keys ? p.keys.length : 0) + ' | ' + t('models') + ' ' + (p.models ? p.models.length : 0) + '</span>\
         </div>\
         <div class="provider-card-actions">\
-          <button type="button" class="btn btn-sm provider-btn-col1" onclick="event.stopPropagation(); openProviderDetail(\'' + p.id + '\')">' + t('edit') + '</button>\
-          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteProviderFromList(event, \'' + p.id + '\')">' + t('delete') + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col1" onclick="event.stopPropagation(); openProviderDetail(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
+          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteProviderFromList(event, \'' + escapeForJsString(p.id) + '\')">' + t('delete') + '</button>\
         </div>\
       </div>\
     </div>';
@@ -213,10 +213,10 @@ async function renderProviderDetail(c, id) {
           <p class="muted" id="detail-info-summary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + t('prefix') + ' <span class="code">' + escapeHtml(p.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + baseUrlAttr + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" data-tooltip="' + t('clickToCopy') + '">' + baseUrlEsc + '</span></p>\
           <div class="flex" style="gap:8px;flex-shrink:0;align-items:center">\
             <button type="button" class="btn btn-sm" onclick="backToProviderList()">' + t('back') + '</button>\
-            <button type="button" class="btn btn-sm" onclick="showEditProvider(\'' + p.id + '\')">' + t('edit') + '</button>\
-            <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" onclick="toggleProvider(\'' + p.id + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
-            <button type="button" class="btn btn-sm btn-danger" onclick="deleteProvider(\'' + p.id + '\')">' + t('delete') + '</button>\
-            <input type="number" class="btn-order-input" id="provider-order-input" min="1" max="' + totalProviders + '" value="' + currentOrder + '" data-tooltip="' + escapeHtml(orderTitle) + '" onchange="changeProviderOrder(\'' + p.id + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)" onkeydown="if(event.key===\'Enter\') this.blur()"/>\
+            <button type="button" class="btn btn-sm" onclick="showEditProvider(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
+            <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" onclick="toggleProvider(\'' + escapeForJsString(p.id) + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
+            <button type="button" class="btn btn-sm btn-danger" onclick="deleteProvider(\'' + escapeForJsString(p.id) + '\')">' + t('delete') + '</button>\
+            <input type="number" class="btn-order-input" id="provider-order-input" min="1" max="' + totalProviders + '" value="' + currentOrder + '" data-tooltip="' + escapeHtml(orderTitle) + '" onchange="changeProviderOrder(\'' + escapeForJsString(p.id) + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)" onkeydown="if(event.key===\'Enter\') this.blur()"/>\
           </div>\
         </div>\
       </div>\
@@ -259,17 +259,17 @@ function renderDetailKeys(p) {
   el.innerHTML = '\
     <div class="detail-block">\
       <div class="section-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">\
-        <span style="cursor:' + (hasKeys ? 'pointer' : 'default') + ';user-select:none" onclick="' + (hasKeys ? 'toggleKeysTable(\'' + p.id + '\')' : '') + '">\
-          <span id="keys-chevron-' + p.id + '" style="display:' + (hasKeys ? 'inline-block' : 'none') + ';transition:transform .2s;margin-right:4px;font-size:10px">\u25B6</span>' +
+        <span style="cursor:' + (hasKeys ? 'pointer' : 'default') + ';user-select:none" onclick="' + (hasKeys ? 'toggleKeysTable(\'' + escapeForJsString(p.id) + '\')' : '') + '">\
+          <span id="keys-chevron-' + escapeAttr(p.id) + '" style="display:' + (hasKeys ? 'inline-block' : 'none') + ';transition:transform .2s;margin-right:4px;font-size:10px">\u25B6</span>' +
           t('keysTitle') + ' (' + keys.length + ')\
         </span>\
         <div class="flex" style="gap:8px">\
-          <button type="button" class="btn btn-sm btn-primary" onclick="showAddKeyDetail(\'' + p.id + '\')">' + t('addKey') + '</button>\
-          <button type="button" class="btn btn-sm" onclick="showBulkAddKeys(\'' + p.id + '\')">' + t('bulkAdd') + '</button>\
+          <button type="button" class="btn btn-sm btn-primary" onclick="showAddKeyDetail(\'' + escapeForJsString(p.id) + '\')">' + t('addKey') + '</button>\
+          <button type="button" class="btn btn-sm" onclick="showBulkAddKeys(\'' + escapeForJsString(p.id) + '\')">' + t('bulkAdd') + '</button>\
         </div>\
       </div>\
-      <div id="key-form-' + p.id + '"></div>\
-      <div id="keys-body-' + p.id + '" style="display:' + (hasKeys ? 'none' : '') + '">' +
+      <div id="key-form-' + escapeAttr(p.id) + '"></div>\
+      <div id="keys-body-' + escapeAttr(p.id) + '" style="display:' + (hasKeys ? 'none' : '') + '">' +
         (hasKeys ? '\
       <table>\
         <thead><tr><th>' + t('keyName') + '</th><th>' + t('actions') + '</th><th>' + t('key') + '</th><th>' + t('priority') + '</th><th>' + t('status') + '</th></tr></thead>\
@@ -278,9 +278,9 @@ function renderDetailKeys(p) {
             return '<tr>\
               <td>' + escapeHtml(k.name) + '</td>\
               <td>\
-                <button type="button" class="btn btn-sm" onclick="withLoading(this, () => testKeyDetail(\'' + p.id + '\',\'' + k.id + '\'))">' + t('test') + '</button>\
-                <button type="button" class="btn btn-sm" onclick="toggleKeyDetail(\'' + p.id + '\',\'' + k.id + '\',' + (!k.isActive) + ')">' + (k.isActive ? t('pause') : t('resume')) + '</button>\
-                <button type="button" class="btn btn-sm btn-danger" onclick="deleteKeyDetail(\'' + p.id + '\',\'' + k.id + '\')">' + t('delete') + '</button>\
+                <button type="button" class="btn btn-sm" onclick="withLoading(this, () => testKeyDetail(\'' + escapeForJsString(p.id) + '\',\'' + escapeForJsString(k.id) + '\'))">' + t('test') + '</button>\
+                <button type="button" class="btn btn-sm" onclick="toggleKeyDetail(\'' + escapeForJsString(p.id) + '\',\'' + escapeForJsString(k.id) + '\',' + (!k.isActive) + ')">' + (k.isActive ? t('pause') : t('resume')) + '</button>\
+                <button type="button" class="btn btn-sm btn-danger" onclick="deleteKeyDetail(\'' + escapeForJsString(p.id) + '\',\'' + escapeForJsString(k.id) + '\')">' + t('delete') + '</button>\
               </td>\
               <td><span class="code copyable" data-copy="' + escapeHtml(k.key) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'), \'' + escapeForJsString(k.name || 'key') + '\')" data-tooltip="' + t('clickToCopy') + '">' + maskKey(k.key) + '</span></td>\
               <td>' + k.priority + '</td>\
@@ -313,8 +313,8 @@ function showAddKeyDetail(providerId) {
       <div class="form-group"><label for="dk-key">' + t('apiKeyInput') + '</label><input type="password" id="dk-key" placeholder="sk-..."></div>\
       <div class="form-group"><label for="dk-priority">' + t('priorityLabel') + '</label><input type="number" id="dk-priority" value="1" style="max-width:120px"></div>\
       <div class="flex" style="gap:8px">\
-        <button type="button" class="btn btn-primary" onclick="withLoading(this, () => addKeyDetail(\'' + providerId + '\'))">' + t('create') + '</button>\
-        <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + providerId + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
+        <button type="button" class="btn btn-primary" onclick="withLoading(this, () => addKeyDetail(\'' + escapeForJsString(providerId) + '\'))">' + t('create') + '</button>\
+        <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + escapeForJsString(providerId) + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
       </div>\
     </div>';
 }
@@ -350,8 +350,8 @@ function showBulkAddKeys(providerId) {
       <div class="form-group mt-12"><textarea id="bk-textarea" rows="8" placeholder="Main|sk-aaa\nBackup|sk-bbb\nsk-ccc"></textarea></div>\
       <div class="form-group"><label for="bk-priority">' + t('defaultPriority') + '</label><input type="number" id="bk-priority" value="1" style="max-width:120px"></div>\
       <div class="flex" style="gap:8px">\
-        <button type="button" class="btn btn-primary" onclick="withLoading(this, () => bulkAddKeys(\'' + providerId + '\'))">' + t('addAll') + '</button>\
-        <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + providerId + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
+        <button type="button" class="btn btn-primary" onclick="withLoading(this, () => bulkAddKeys(\'' + escapeForJsString(providerId) + '\'))">' + t('addAll') + '</button>\
+        <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + escapeForJsString(providerId) + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
       </div>\
       <div id="bk-result" class="mt-12"></div>\
     </div>';
@@ -455,7 +455,7 @@ function renderDetailRotation(p) {
         <label for="r-sticky">' + t('stickyLabel') + '</label>\
         <input type="number" id="r-sticky" value="' + sticky + '" style="max-width:120px">\
       </div>\
-      <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveProviderRotation(\'' + p.id + '\'))">' + t('save') + '</button>\
+      <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveProviderRotation(\'' + escapeForJsString(p.id) + '\'))">' + t('save') + '</button>\
     </div>';
 }
 

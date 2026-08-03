@@ -787,7 +787,7 @@ window.deleteZipPrompt = function() {
   var html = '<div style="text-align:center;padding:8px">' +
     warn +
     '<div style="font-size:15px;margin-bottom:8px">删除' + label + '（' + fileCount + ' 个文件）？</div>' +
-    '<div style="font-size:12px;color:#888;margin-bottom:14px;word-break:break-all">' + curDir + '</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:14px;word-break:break-all">' + pgEscapeHtml(curDir) + '</div>' +
     '<button class="pg-btn" id="zip-del-list" style="margin:4px">从列表中移除</button>';
   var canDisk = canNodeDiskDelete(nodeType, item, rootHandle);
   if (canDisk) html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">从磁盘移除</button>';

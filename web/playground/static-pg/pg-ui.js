@@ -285,7 +285,7 @@ function pgRenderPanes() {
   var html = '';
   for (var i = 0; i < n; i++) {
     var w = pgWinAt(i);
-    var modelLabel = w && w.config && w.config.model ? w.config.model : pgEscapeHtml(pgT('pgSelectModel'));
+    var modelLabel = w && w.config && w.config.model ? pgEscapeHtml(w.config.model) : pgEscapeHtml(pgT('pgSelectModel'));
     if (modelLabel.length > 30) modelLabel = modelLabel.substring(0, 30) + '…';
     var paneLabel = (w && w.config.agentName) ? w.config.agentName : pgT('pgPaneName', [i + 1]);
     if (pgState.mode === 'search') {
@@ -1277,7 +1277,7 @@ function pgRenderInputBar() {
 function pgUpdateInputBar() { pgRenderInputBar(); }
 
 function pgEscapeAttr(s) {
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function pgRenderInputThumbs() {

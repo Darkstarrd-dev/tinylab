@@ -10,7 +10,7 @@ function renderUsageRow(e, sessionKey, hidden) {
   var dotHtml = '<span class="' + dotClass + '"></span>';
   var statusInner;
   if (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing' || traceEnabled) {
-    statusInner = '<button type="button" class="btn btn-sm btn-info" onclick="showUsageEntryInfoById(\'' + (e.id || '') + '\')">' + dotHtml + '</button>';
+    statusInner = '<button type="button" class="btn btn-sm btn-info" onclick="showUsageEntryInfoById(\'' + escapeForJsString(e.id || '') + '\')">' + dotHtml + '</button>';
   } else {
     statusInner = dotHtml;
   }
@@ -238,7 +238,7 @@ function renderSessionGroupHeader(sk, label, group, expanded) {
   var model = escapeHtml(displayModelName(first.model, first.originalModel));
   var cls = expanded ? 'session-group-header expanded' : 'session-group-header collapsed';
   var arrow = expanded ? '\u25BE' : '\u25B8';
-  return '<tr class="' + cls + '" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeHtml(sk) + '\')">' +
+  return '<tr class="' + cls + '" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeForJsString(sk) + '\')">' +
     '<td colspan="7" class="session-group-cell">' +
       '<div class="session-group-flex">' +
         '<span class="session-group-arrow">' + arrow + '</span>' +

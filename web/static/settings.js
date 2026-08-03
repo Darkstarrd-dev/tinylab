@@ -182,7 +182,7 @@ function renderComboListInline(combos) {
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (cb.disabled ? 'badge-inactive' : 'badge-active') + '">' + escapeHtml(cb.strategy) + '</span>\
-          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleComboDisabled(\'' + cb.id + '\')">' + (cb.disabled ? t('enable') : t('disable')) + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleComboDisabled(\'' + escapeForJsString(cb.id) + '\')">' + (cb.disabled ? t('enable') : t('disable')) + '</button>\
         </div>\
       </div>\
       <div class="provider-card-row mt-12">\
@@ -190,8 +190,8 @@ function renderComboListInline(combos) {
           <span class="muted card-left-models" data-tooltip="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
         </div>\
         <div class="provider-card-actions">\
-          <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + cb.id + '\')">' + t('edit') + '</button>\
-          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteCombo(\'' + cb.id + '\')">' + t('delete') + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + escapeForJsString(cb.id) + '\')">' + t('edit') + '</button>\
+          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteCombo(\'' + escapeForJsString(cb.id) + '\')">' + t('delete') + '</button>\
         </div>\
       </div>\
     </div>';

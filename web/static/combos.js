@@ -31,7 +31,7 @@ async function renderCombos(c) {
         </div>\
         <div class="provider-card-actions">\
           <span class="badge provider-btn-col1 ' + (cb.disabled ? 'badge-inactive' : 'badge-active') + '">' + escapeHtml(cb.strategy) + '</span>\
-          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleComboDisabled(\'' + escapeAttr(cb.id) + '\')">' + (cb.disabled ? t('enable') : t('disable')) + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleComboDisabled(\'' + escapeForJsString(cb.id) + '\')">' + (cb.disabled ? t('enable') : t('disable')) + '</button>\
         </div>\
       </div>\
       <div class="provider-card-row mt-12">\
@@ -39,8 +39,8 @@ async function renderCombos(c) {
           <span class="muted card-left-models" data-tooltip="' + escapeHtml(fullModelsText) + '">' + escapeHtml(fullModelsText) + '</span>\
         </div>\
         <div class="provider-card-actions">\
-          <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + escapeAttr(cb.id) + '\')">' + t('edit') + '</button>\
-          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteCombo(\'' + escapeAttr(cb.id) + '\')">' + t('delete') + '</button>\
+          <button type="button" class="btn btn-sm provider-btn-col1" onclick="showEditCombo(\'' + escapeForJsString(cb.id) + '\')">' + t('edit') + '</button>\
+          <button type="button" class="btn btn-sm btn-danger provider-btn-col2" onclick="deleteCombo(\'' + escapeForJsString(cb.id) + '\')">' + t('delete') + '</button>\
         </div>\
       </div>\
     </div>';
@@ -149,7 +149,7 @@ async function showEditCombo(id) {
     <div class="form-group"><label>' + t('comboModels') + '</label>\
       <div style="display:flex;gap:8px;margin-bottom:8px">\
         <button type="button" class="btn btn-sm" onclick="importModelsFromProvider(\'models\')">' + t('importFromProvider') + '</button>\
-        <button type="button" class="btn btn-sm" id="combo-speed-test-btn" onclick="runComboSpeedTest(\'' + escapeAttr(id) + '\')">' + t('comboSpeedTest') + '</button>\
+        <button type="button" class="btn btn-sm" id="combo-speed-test-btn" onclick="runComboSpeedTest(\'' + escapeForJsString(id) + '\')">' + t('comboSpeedTest') + '</button>\
         <span id="combo-speed-test-status" style="margin-left:8px;font-size:12px;"></span>\
       </div>\
       <div id="c-models-list"></div>\
@@ -159,7 +159,7 @@ async function showEditCombo(id) {
     </div>\
     <div class="modal-footer">\
       <button type="button" class="btn" onclick="closeModalOverlay()">' + t('cancel') + '</button>\
-      <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditCombo(\'' + escapeAttr(id) + '\'))">' + t('saveCombo') + '</button>\
+      <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditCombo(\'' + escapeForJsString(id) + '\'))">' + t('saveCombo') + '</button>\
     </div>\
   </div>';
   requestAnimationFrame(function() { overlay.classList.add('show'); });
@@ -280,7 +280,7 @@ function renderComboModelsList() {
         (isInMain ? '<button type="button" class="btn btn-sm ' + (isFirst ? 'disabled ' : '') + 'onclick="moveComboModel(' + mainIdx + ',' + (mainIdx - 1) + ')">' + t('moveUp') + '</button>' : '') +
         (isInMain ? '<button type="button" class="btn btn-sm ' + (isLast ? 'disabled ' : '') + 'onclick="moveComboModel(' + mainIdx + ',' + (mainIdx + 1) + ')">' + t('moveDown') + '</button>' : '') +
         (isInMain ? '<button type="button" class="btn btn-sm btn-danger" onclick="removeComboModel(' + mainIdx + ')">' + t('delete') + '</button>' : '') +
-        '<span class="model-id copyable" onclick="copyToClipboard(\'' + fullIdEsc + '\')" data-tooltip="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
+        '<span class="model-id copyable" onclick="copyToClipboard(\'' + escapeForJsString(fullId) + '\')" data-tooltip="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
       '</div>' +
       '<span class="combo-speed-status" data-fullid="' + fullIdEsc + '"></span>' +
     '</div>';

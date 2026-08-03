@@ -21,8 +21,8 @@ function renderQuotaRow(bar) {
   var quotaHtml = formatQuotaCell(bar);
   var rowHtml = '<tr class="quota-row" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
   if (multi) {
-    var pEsc = escapeHtml(bar.provider).replace(/'/g, "\\'");
-    var mEsc = escapeHtml(bar.model).replace(/'/g, "\\'");
+    var pEsc = escapeForJsString(bar.provider);
+    var mEsc = escapeForJsString(bar.model);
     rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')" style="cursor:pointer"';
   }
   rowHtml += '>\

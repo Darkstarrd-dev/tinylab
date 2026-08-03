@@ -163,7 +163,7 @@ function renderSinglePreview(cardId, url, info) {
         <div class="dl-playlist-actions-row">
           <div class="dl-playlist-actions-left"></div>
           <div class="dl-playlist-actions-right">
-            <button class="btn btn-primary btn-sm" type="button" onclick="startDownload('${cardId}', '${escapeAttr(url)}')">${escapeHtml(t('download'))}</button>
+            <button class="btn btn-primary btn-sm" type="button" onclick="startDownload('${cardId}', '${escapeForJsString(url)}')">${escapeHtml(t('download'))}</button>
           </div>
         </div>
       </div>
@@ -218,7 +218,7 @@ function renderPlaylistPreview(cardId, url, playlist) {
           </div>
           <div class="dl-playlist-actions-right">
             <span class="dl-playlist-count" id="dl-playlist-count">${escapeHtml(t('nSelected', [count]))}</span>
-            <button class="btn btn-primary btn-sm" type="button" onclick="startPlaylistDownload('${cardId}', '${escapeAttr(url)}')">${escapeHtml(t('download'))}</button>
+            <button class="btn btn-primary btn-sm" type="button" onclick="startPlaylistDownload('${cardId}', '${escapeForJsString(url)}')">${escapeHtml(t('download'))}</button>
           </div>
         </div>
       </div>
@@ -889,7 +889,7 @@ function taskListItemHtml(task) {
   }
 
   return '' +
-    '<div class="dl-task-item' + isSelected + '" id="dl-task-item-' + tid + '" data-task-id="' + tid + '" onclick="selectTask(event, \'' + tid + '\')">' +
+    '<div class="dl-task-item' + isSelected + '" id="dl-task-item-' + tid + '" data-task-id="' + tid + '" onclick="selectTask(event, \'' + escapeForJsString(task.id) + '\')">' +
       '<span class="dl-status-dot ' + escapeAttr('dl-status-' + status) + '"></span>' +
       '<span class="dl-task-item-title" data-tooltip="' + escapeAttr(title) + '">' + escapeHtml(title) + '</span>' +
       pctHtml +
@@ -1146,11 +1146,6 @@ function formatDuration(seconds) {
 function formatProgress(percent) {
   var pct = (percent || 0) * 100;
   return pct.toFixed(1) + '%';
-}
-
-// escapeAttr escapes a value for safe inclusion in a double-quoted attribute.
-function escapeAttr(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // togglePlaylistEntries expands or collapses the playlist list rows in preview.

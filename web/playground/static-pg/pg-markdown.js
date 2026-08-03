@@ -114,9 +114,8 @@ function pgRenderMarkdown(text, isUser) {
       pre = pgNormalizeDisplayMath(pre);
       var html = marked.parse(pre, { breaks: true, gfm: true });
       if (typeof DOMPurify !== 'undefined') {
-        html = DOMPurify.sanitize(html, PG_PURIFY_CONFIG);
+        return DOMPurify.sanitize(html, PG_PURIFY_CONFIG);
       }
-      return html;
     } catch (e) { /* fall through to escaping */ }
   }
   return '<p>' + pgEscapeHtml(text).replace(/\n/g, '<br>') + '</p>';
