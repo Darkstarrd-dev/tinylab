@@ -122,7 +122,7 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 			Title:   c.Title,
 			Content: c.Content,
 			Status:  StatusPending,
-	}
+		}
 	}
 	nodes := make([]NodeRuntime, 0, len(req.NodeIDs))
 	for _, id := range req.NodeIDs {

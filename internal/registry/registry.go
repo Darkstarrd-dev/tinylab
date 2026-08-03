@@ -48,7 +48,7 @@ func (r *Registry) reloadStatesLocked() {
 				newStates[key] = existing
 			} else {
 				// 新 key：初始化空状态
-			newStates[key] = &keystate.KeyRuntimeState{
+				newStates[key] = &keystate.KeyRuntimeState{
 					ModelLocks:  make(map[string]time.Time),
 					ModelStatus: make(map[string]string),
 					ModelErrors: make(map[string]string),

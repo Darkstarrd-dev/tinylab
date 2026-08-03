@@ -83,8 +83,8 @@ func TestReplaceZipEntries_Store_ReplacesAndPreserves(t *testing.T) {
 	data := buildZipMethod(t, zip.Store, files)
 
 	replacements := map[string][]byte{
-		"alpha.png":      []byte("alpha-NEW"),
-		"images/b.webp":   []byte("webp-NEW"),
+		"alpha.png":     []byte("alpha-NEW"),
+		"images/b.webp": []byte("webp-NEW"),
 		// images/sub/c.jpg left unchanged on purpose.
 	}
 	result, manifest, err := ReplaceZipEntries(data, replacements)

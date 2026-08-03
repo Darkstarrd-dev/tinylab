@@ -162,7 +162,7 @@ func (r *Registry) RestoreKeyState(providerID, keyID string, s state.KeySnapshot
 			if state.ModelQuotas[m] == nil {
 				state.ModelQuotas[m] = &keystate.QuotaInfo{
 					ModelLimit:     lim,
-					ModelRemaining: 0, // restored as exhausted
+					ModelRemaining: 0,           // restored as exhausted
 					LastUpdated:    time.Time{}, // zero — signals "stale, from snapshot"
 				}
 			}

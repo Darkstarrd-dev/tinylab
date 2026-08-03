@@ -85,4 +85,3 @@ func OpenDirectoryPickerAt(initialDir string) (string, error) {
 	}
 	return "", ErrUnsupportedPlatform
 }
-

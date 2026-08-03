@@ -43,10 +43,10 @@ func TestTruncStr(t *testing.T) {
 
 func TestExtractTokens(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantIn   int
-		wantOut  int
+		name    string
+		input   string
+		wantIn  int
+		wantOut int
 	}{
 		{
 			name:   "standard OpenAI",

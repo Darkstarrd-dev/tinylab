@@ -47,7 +47,6 @@ func serveProtoTest(t *testing.T, h *probe.Handler, providerID, model, proto str
 	return rec
 }
 
-
 // ---------------------------------------------------------------------------
 // Happy-path tests: each proto returns a single-probe result with the expected
 // protocol field and a 200 status.

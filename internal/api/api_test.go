@@ -338,7 +338,7 @@ func TestUsage_QuotasIncludeInflightModel(t *testing.T) {
 		Status:   "processing",
 	})
 
-	resp := requestJSON(t, "GET", srv.URL+"/api/usage/quotas", "")
+	resp := requestJSON(t, "GET", srv.URL+"/api/monitor/quotas", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
 	}

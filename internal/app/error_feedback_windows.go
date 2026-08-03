@@ -9,18 +9,18 @@ import (
 )
 
 var (
-	user32           = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW  = user32.NewProc("MessageBoxW")
-	procMessageBeep  = user32.NewProc("MessageBeep")
+	user32          = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW = user32.NewProc("MessageBoxW")
+	procMessageBeep = user32.NewProc("MessageBeep")
 )
 
 const (
-	mbOK        = 0x00000000
-	mbOKCancel  = 0x00000001
-	mbYesNo     = 0x00000004
-	mbIconError = 0x00000010
+	mbOK           = 0x00000000
+	mbOKCancel     = 0x00000001
+	mbYesNo        = 0x00000004
+	mbIconError    = 0x00000010
 	mbIconQuestion = 0x00000020
-	idYes       = 6
+	idYes          = 6
 )
 
 // messageBox wraps the Win32 MessageBoxW API.

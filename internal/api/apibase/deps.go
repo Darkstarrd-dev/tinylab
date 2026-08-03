@@ -56,7 +56,6 @@ type Deps struct {
 	StateSaveFn       func()
 }
 
-
 // SaveConfig persists the given config to disk via config.Save. It performs no
 // registry reload and is used by handlers whose in-memory changes do not need to
 // be re-applied to the running registry (e.g. plain CRUD persistence).

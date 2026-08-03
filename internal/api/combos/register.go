@@ -24,8 +24,8 @@ import (
 const (
 	speedTestPrompt    = "请写一篇约1000字的短篇小说"
 	speedTestMaxTokens = 1200
-	speedTestMinChunks = 60  // early-stop: enough chunks for a meaningful speed measurement
-	speedTestMaxSec    = 30   // early-stop: max streaming seconds per model
+	speedTestMinChunks = 60 // early-stop: enough chunks for a meaningful speed measurement
+	speedTestMaxSec    = 30 // early-stop: max streaming seconds per model
 )
 
 var comboSpeedCache = struct {
@@ -355,14 +355,14 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		h.d.Logger.Error("SPEED-TEST %s | %s", combo.Name, saveErr)
 		// Push a partial error event so the frontend knows the order was not saved.
 		if doneJSON, jErr := json.Marshal(map[string]any{
-			"ok":              okCount,
-			"fail":            failCount,
-			"total":           len(results),
-			"results":         results,
-			"newOrder":        fullSortedOrder(results),
-			"newModels":       newModels,
-			"newDisabled":     newDisabledModels,
-			"warning":         saveErr,
+			"ok":          okCount,
+			"fail":        failCount,
+			"total":       len(results),
+			"results":     results,
+			"newOrder":    fullSortedOrder(results),
+			"newModels":   newModels,
+			"newDisabled": newDisabledModels,
+			"warning":     saveErr,
 		}); jErr == nil {
 			fmt.Fprintf(w, "event: done\ndata: %s\n\n", doneJSON)
 			flusher.Flush()

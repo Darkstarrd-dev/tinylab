@@ -347,7 +347,6 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	var result struct {
 		Data []struct {
 			ID string `json:"id"`

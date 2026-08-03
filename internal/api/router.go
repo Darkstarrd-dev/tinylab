@@ -25,6 +25,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
 	"github.com/tinyrouter/tinyrouter/internal/api/models"
+	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/api/providers"
 	"github.com/tinyrouter/tinyrouter/internal/api/quickslots"
@@ -33,7 +34,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
 	"github.com/tinyrouter/tinyrouter/internal/api/trace"
-	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -75,7 +75,6 @@ type deps struct {
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
-
 }
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and

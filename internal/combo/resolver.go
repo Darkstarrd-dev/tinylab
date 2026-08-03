@@ -88,7 +88,7 @@ func (r *Resolver) Resolve(comboName string, entryFormat EntryFormat) (*ComboPla
 		// Resolve prefix to actual provider ID
 		provider, ok := r.reg.GetProviderByPrefix(prefix)
 		if !ok {
-		fmt.Fprintf(os.Stderr, "[combo] warning: combo %q model %q: provider prefix %q not found\n", comboName, m, prefix)
+			fmt.Fprintf(os.Stderr, "[combo] warning: combo %q model %q: provider prefix %q not found\n", comboName, m, prefix)
 			continue
 		}
 		mt := ModelTarget{ProviderID: provider.ID, Model: model}

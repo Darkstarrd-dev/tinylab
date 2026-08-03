@@ -163,4 +163,3 @@ func (r *Registry) ReorderProvider(id string, targetIndex int) error {
 	r.config.Providers = providers
 	return nil
 }
-

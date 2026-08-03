@@ -19,13 +19,13 @@ type probeOutput struct {
 }
 
 type probeStream struct {
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	CodecName   string `json:"codec_name"`
-	Duration    string `json:"duration"`
-	RFrameRate  string `json:"r_frame_rate"`
-	NbFrames    string `json:"nb_frames"`
-	CodecType   string `json:"codec_type"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	CodecName  string `json:"codec_name"`
+	Duration   string `json:"duration"`
+	RFrameRate string `json:"r_frame_rate"`
+	NbFrames   string `json:"nb_frames"`
+	CodecType  string `json:"codec_type"`
 }
 
 type probeFormat struct {

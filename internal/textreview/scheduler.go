@@ -279,22 +279,22 @@ func dequeueBatch(chapters []Chapter, maxChars int) []int {
 		if st != StatusPending && st != StatusNeedsReproc {
 			continue
 		}
-	if len(batch) == 0 {
+		if len(batch) == 0 {
+			batch = append(batch, i)
+			accChars += utf8.RuneCountInString(chapters[i].Content)
+			continue
+		}
+		if maxChars <= 0 {
+			break // no batching: one chapter only
+		}
+		if accChars >= maxChars {
+			break
+		}
+		if accChars+utf8.RuneCountInString(chapters[i].Content) > maxChars {
+			break
+		}
 		batch = append(batch, i)
 		accChars += utf8.RuneCountInString(chapters[i].Content)
-		continue
-	}
-	if maxChars <= 0 {
-		break // no batching: one chapter only
-	}
-	if accChars >= maxChars {
-		break
-	}
-	if accChars+utf8.RuneCountInString(chapters[i].Content) > maxChars {
-		break
-	}
-	batch = append(batch, i)
-	accChars += utf8.RuneCountInString(chapters[i].Content)
 	}
 	return batch
 }

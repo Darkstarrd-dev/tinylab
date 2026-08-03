@@ -184,10 +184,10 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				h.EntryTracker.UpdateTokens(reqID, -1, effectiveOutput)
 				h.broadcastTokens(reqID, inputTokens, effectiveOutput)
 			}
-		if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
-			h.EntryTracker.Refresh(reqID)
-			lastEntryRefresh = now
-		}
+			if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
+				h.EntryTracker.Refresh(reqID)
+				lastEntryRefresh = now
+			}
 		}
 		if clientDisconnected {
 			break

@@ -109,7 +109,7 @@ type comdlgFilterSpec struct {
 // If initialDir is non-empty, the dialog starts in that directory.
 func showCommonDialog(pickFolder bool, filter string, initialDir string) (string, error) {
 	const (
-		vtblShow        = 3
+		vtblShow         = 3
 		vtblSetFileTypes = 4
 		vtblGetOptions   = 8
 		vtblSetOptions   = 9
@@ -217,7 +217,6 @@ func showCommonDialog(pickFolder bool, filter string, initialDir string) (string
 
 	return windows.UTF16PtrToString(pathPtr), nil
 }
-
 
 // vtblMethod returns the function pointer at the given vtable index for a COM object.
 func vtblMethod(obj unsafe.Pointer, index int) uintptr {

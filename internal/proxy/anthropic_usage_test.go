@@ -126,11 +126,11 @@ func TestAnthropicSSE_UsageExtractedAndReported(t *testing.T) {
 // two relevant event shapes, plus a non-usage event.
 func TestParseAnthropicSSEUsage(t *testing.T) {
 	tests := []struct {
-		name          string
-		payload       string
-		wantIn        int
-		wantOut       int
-		wantOK        bool
+		name    string
+		payload string
+		wantIn  int
+		wantOut int
+		wantOK  bool
 	}{
 		{
 			name:    "message_start carries input_tokens",

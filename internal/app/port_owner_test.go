@@ -45,8 +45,8 @@ func TestPortOwner_IsTinyRouterDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-// Recalculate IsTinyRouter using the same logic as makeOwner
-		got := isTinyRouterName(tt.name) || isTinyRouterPath(tt.path)
+			// Recalculate IsTinyRouter using the same logic as makeOwner
+			got := isTinyRouterName(tt.name) || isTinyRouterPath(tt.path)
 			if got != tt.want {
 				t.Errorf("PortOwner{Name=%q, Path=%q}.IsTinyRouter = %v, want %v", tt.name, tt.path, got, tt.want)
 			}

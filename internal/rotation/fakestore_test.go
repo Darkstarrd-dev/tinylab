@@ -6,6 +6,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/keystate"
 )
+
 // fakeStore is a test double for the KeyStateProvider interface. It holds a
 // mutable config copy and a per-key runtime-state map, mirroring the subset
 // of *registry.Registry that the Selector exercises (GetProvider / GetKeyState,
