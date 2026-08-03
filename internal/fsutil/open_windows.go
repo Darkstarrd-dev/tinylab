@@ -103,20 +103,34 @@ type comdlgFilterSpec struct {
 	Spec *uint16
 }
 
-// IFileDialog vtable indices (after IUnknown: 0-2, IModalWindow: 3).
+// IFileDialog vtable layout (after IUnknown: 0 QueryInterface, 1 AddRef,
+// 2 Release; then IModalWindow: 3 Show). IFileDialog methods:
+//
+//	4 SetFileTypes, 5 SetFileTypeIndex, 6 GetFileTypeIndex, 7 Advise,
+//	8 Unadvise, 9 SetOptions, 10 GetOptions, 11 SetDefaultFolder,
+//	12 SetFolder, 13 GetFolder, 14 GetCurrentSelection, 15 SetFileName,
+//	16 GetFileName, 17 SetTitle, 18 SetOkButtonLabel, 19 SetFileNameLabel,
+//	20 GetResult, 21 AddPlace, ...
+//
+// GetOptions is index 10 (index 8 is Unadvise) — calling 8 with the GetOptions
+// signature would read the Unadvise slot's pointer and corrupt the dialog state.
+//
 // showCommonDialog displays the modern IFileOpenDialog COM dialog.
 // If pickFolder is true, the dialog selects directories instead of files.
 // If initialDir is non-empty, the dialog starts in that directory.
 func showCommonDialog(pickFolder bool, filter string, initialDir string) (string, error) {
 	const (
-		vtblShow         = 3
-		vtblSetFileTypes = 4
-		vtblGetOptions   = 8
-		vtblSetOptions   = 9
-		vtblSetFolder    = 12
-		vtblGetResult    = 20
+		vtblShow         = 3  // IModalWindow::Show
+		vtblSetFileTypes = 4  // IFileDialog::SetFileTypes
+		vtblGetOptions   = 10 // IFileDialog::GetOptions
+		vtblSetOptions   = 9  // IFileDialog::SetOptions
+		vtblSetFolder    = 12 // IFileDialog::SetFolder
+		vtblGetResult    = 20 // IFileDialog::GetResult
 	)
 	const (
+		// IShellItem::GetDisplayName — called on the IShellItem returned by
+		// GetResult, whose vtable is IUnknown(0-2), BindToHandler(3),
+		// GetParent(4), GetDisplayName(5), ...
 		vtblGetDisplayName = 5
 	)
 

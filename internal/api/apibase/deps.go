@@ -199,16 +199,17 @@ func ValidateBaseURL(baseURL string) error {
 }
 
 // IsBlockedSSRFHost reports whether the given host resolves to a private,
-// loopback, link-local, or unspecified IP address. Used to prevent SSRF via
-// the image proxy and save-image endpoints. If DNS resolution fails, the host
-// is blocked (fail-closed).
+// loopback, link-local (unicast or multicast), multicast, or unspecified IP
+// address. Used to prevent SSRF via the image proxy and save-image endpoints.
+// If DNS resolution fails, the host is blocked (fail-closed).
 func IsBlockedSSRFHost(host string) bool {
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return true
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 			return true
 		}
 	}

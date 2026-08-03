@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -71,7 +72,9 @@ func Decrypt(keyBase64, ciphertextBase64 string) (string, error) {
 // encryptKeysCopy returns a deep copy of cfg with all API key values encrypted.
 // The original cfg is not modified — in-memory keys stay plaintext.
 // Encrypted keys are prefixed with "enc:" so Load can distinguish them.
-func encryptKeysCopy(cfg *Config) *Config {
+// If any key cannot be encrypted (e.g. a corrupt EncryptionKey), an error is
+// returned so Save fails instead of silently writing plaintext keys to disk.
+func encryptKeysCopy(cfg *Config) (*Config, error) {
 	cp := *cfg
 	cp.Providers = make([]Provider, len(cfg.Providers))
 	for i := range cfg.Providers {
@@ -81,11 +84,13 @@ func encryptKeysCopy(cfg *Config) *Config {
 			cp.Providers[i].Keys[j] = cfg.Providers[i].Keys[j]
 			k := &cp.Providers[i].Keys[j]
 			if k.Key != "" && !strings.HasPrefix(k.Key, "enc:") {
-				if encrypted, err := Encrypt(cfg.Security.EncryptionKey, k.Key); err == nil {
-					k.Key = "enc:" + encrypted
+				encrypted, err := Encrypt(cfg.Security.EncryptionKey, k.Key)
+				if err != nil {
+					return nil, fmt.Errorf("encrypt key %s/%s: %w", cfg.Providers[i].ID, k.ID, err)
 				}
+				k.Key = "enc:" + encrypted
 			}
 		}
 	}
-	return &cp
+	return &cp, nil
 }

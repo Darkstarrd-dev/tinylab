@@ -94,3 +94,29 @@ func TestAtomicWrite_EmptyData(t *testing.T) {
 		t.Errorf("expected empty file, got %q", got)
 	}
 }
+
+// TestAtomicWrite_RenameFallbackKeepsTmp verifies that when the rename AND
+// the direct-write fallback both fail (here: path is a directory), AtomicWrite
+// returns an error and leaves the .tmp crash-recovery copy with the exact
+// pending data — the caller can apply it on the next startup via Load.
+func TestAtomicWrite_RenameFallbackKeepsTmp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target") // a directory: rename and write both fail
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("pending: data\n")
+
+	err := AtomicWrite(path, data, 0600)
+	if err == nil {
+		t.Fatal("AtomicWrite should fail when both rename and direct write fail")
+	}
+
+	got, readErr := os.ReadFile(path + ".tmp")
+	if readErr != nil {
+		t.Fatalf(".tmp crash-recovery copy missing after failed write: %v", readErr)
+	}
+	if string(got) != string(data) {
+		t.Errorf(".tmp content mismatch: got %q, want %q", got, data)
+	}
+}

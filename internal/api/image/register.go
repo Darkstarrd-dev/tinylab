@@ -35,11 +35,29 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
+// ssrfGuardedClient is the default HTTP client for outbound image fetches.
+// It re-checks the SSRF blocklist on every redirect hop so a redirect can
+// never escape to a blocked (private/loopback/link-local/multicast) address,
+// and bounds redirect chains. Tests inject a custom client via
+// apibase.Deps.TestClient.
+var ssrfGuardedClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		if apibase.IsBlockedSSRFHost(req.URL.Hostname()) {
+			return fmt.Errorf("redirect to blocked host: %s", req.URL.Hostname())
+		}
+		return nil
+	},
+}
+
 func (h *Handler) httpClient() *http.Client {
 	if h.d != nil && h.d.TestClient != nil {
 		return h.d.TestClient
 	}
-	return http.DefaultClient
+	return ssrfGuardedClient
 }
 
 // Register adds the image routes to the given router.
@@ -142,9 +160,12 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// allowedImageExts is the set of file extensions permitted for saved images.
+	// .svg is deliberately excluded: an attacker-supplied SVG can carry
+	// script content that executes when the saved file is opened in a browser
+	// (stored XSS via image save).
 	var allowedImageExts = map[string]bool{
 		".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
-		".webp": true, ".svg": true, ".bmp": true, ".tiff": true,
+		".webp": true, ".bmp": true, ".tiff": true,
 	}
 	if !allowedImageExts[ext] {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "unsupported image type")
@@ -239,9 +260,9 @@ func extensionFromContentType(ct string) string {
 	case "image/webp":
 		return ".webp"
 	case "image/svg+xml":
+		// Mapped so the caller rejects it via allowedImageExts (SVG is not
+		// permitted: stored-XSS vector) instead of mislabeling it as .png.
 		return ".svg"
-	case "image/bmp":
-		return ".bmp"
 	case "image/tiff":
 		return ".tiff"
 	default:

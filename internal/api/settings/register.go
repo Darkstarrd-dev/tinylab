@@ -75,13 +75,13 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var updates struct {
-		Port               *int                   `json:"port"`
-		ConsoleLogMaxLines *int                   `json:"consoleLogMaxLines"`
-		UsageRingSize      *int                   `json:"usageRingSize"`
-		Rotation           *config.RotationConfig `json:"rotation"`
-		EnablePlayground   *bool                  `json:"enablePlayground"`
-		QuickSlotOnly      *bool                  `json:"quickSlotOnly"`
-		DebugMode          *bool                  `json:"debugMode"`
+		Port               *int           `json:"port"`
+		ConsoleLogMaxLines *int           `json:"consoleLogMaxLines"`
+		UsageRingSize      *int           `json:"usageRingSize"`
+		Rotation           *rotationPatch `json:"rotation"`
+		EnablePlayground   *bool          `json:"enablePlayground"`
+		QuickSlotOnly      *bool          `json:"quickSlotOnly"`
+		DebugMode          *bool          `json:"debugMode"`
 		Trace              *struct {
 			Enabled    *bool   `json:"enabled"`
 			RetainDays *int    `json:"retainDays"`
@@ -142,7 +142,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.UsageRingSize = *updates.UsageRingSize
 	}
 	if updates.Rotation != nil {
-		cfg.Rotation = *updates.Rotation
+		applyRotationUpdates(&cfg, updates.Rotation)
 	}
 	if updates.EnablePlayground != nil {
 		cfg.EnablePlayground = *updates.EnablePlayground
@@ -340,6 +340,42 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// rotationPatch carries the presence-aware rotation fields accepted by the
+// settings PATCH endpoint. Pointer fields distinguish "field not sent" from
+// "zero value", so a partial update can never wipe RotationConfig fields the
+// frontend does not manage (StatePersist / StatePath are runtime-managed by
+// the app and must survive any rotation PATCH).
+type rotationPatch struct {
+	Strategy      *string `json:"strategy"`
+	StickyLimit   *int    `json:"stickyLimit"`
+	MaxRetries    *int    `json:"maxRetries"`
+	RetryDelaySec *int    `json:"retryDelaySec"`
+	BackoffMaxSec *int    `json:"backoffMaxSec"`
+}
+
+// applyRotationUpdates merges the presence-aware patch into cfg.Rotation.
+// Fields absent from the patch (nil pointer) are left untouched.
+func applyRotationUpdates(cfg *config.Config, patch *rotationPatch) {
+	if patch == nil {
+		return
+	}
+	if patch.Strategy != nil {
+		cfg.Rotation.Strategy = *patch.Strategy
+	}
+	if patch.StickyLimit != nil {
+		cfg.Rotation.StickyLimit = *patch.StickyLimit
+	}
+	if patch.MaxRetries != nil {
+		cfg.Rotation.MaxRetries = *patch.MaxRetries
+	}
+	if patch.RetryDelaySec != nil {
+		cfg.Rotation.RetryDelaySec = *patch.RetryDelaySec
+	}
+	if patch.BackoffMaxSec != nil {
+		cfg.Rotation.BackoffMaxSec = *patch.BackoffMaxSec
+	}
 }
 
 // pushDownloadSettings pushes the current download runtime settings to the

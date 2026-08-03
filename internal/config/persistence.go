@@ -11,71 +11,126 @@ import (
 
 // Load reads config from path, or creates a default config there if not found.
 //
-// If a pending .tmp file exists (from a previous Save whose rename failed),
-// Load attempts to apply it in order of preference:
-//  1. os.Rename(tmp → path)          — succeeds when the lock is gone.
-//  2. overwrite path with tmp data    — succeeds when the lock was transient.
-//  3. parse tmp data directly         — last resort so user's pending changes
-//     are visible in the running instance even if path is still locked.
-//
-// In case 3 the .tmp file is left on disk for the next restart to retry.
+// A .tmp file (path + ".tmp") is a crash-recovery source: fsutil.AtomicWrite
+// leaves one behind whenever a rename or the direct-write fallback cannot
+// complete, so it may hold the most recent saved config. Load uses it as
+// follows:
+//   - If path is missing or cannot be parsed, .tmp is tried FIRST, regardless
+//     of its mtime — a newer-but-corrupt path (e.g. a crash during the
+//     direct-write fallback) must never cause the complete .tmp copy to be
+//     discarded.
+//   - If path loads successfully but .tmp is newer, .tmp holds a pending save
+//     whose rename AND direct write both failed last time; it is applied in
+//     preference to path.
+//   - .tmp is deleted only after a successful load from path (when it is
+//     older residue from a completed direct-write fallback, or an abandoned
+//     write that has been superseded).
 func Load(path string) (*Config, error) {
 	tmp := path + ".tmp"
-	if tmpInfo, err := os.Stat(tmp); err == nil {
-		pathInfo, pathErr := os.Stat(path)
-		applyTmp := true
-		if pathErr == nil && pathInfo != nil && tmpInfo != nil {
-			// 只当 .tmp 比 path 更新时才恢复；否则 .tmp 为过期残留，删除它。
-			applyTmp = tmpInfo.ModTime().After(pathInfo.ModTime())
-		}
-		if applyTmp {
-			if renameErr := os.Rename(tmp, path); renameErr != nil {
-				tmpData, readErr := os.ReadFile(tmp)
-				if readErr == nil {
-					if writeErr := os.WriteFile(path, tmpData, 0600); writeErr == nil {
-						_ = os.Remove(tmp)
-					} else {
-						var cfg Config
-						dec := yaml.NewDecoder(bytes.NewReader(tmpData))
-						dec.KnownFields(true)
-						if err := dec.Decode(&cfg); err != nil {
-							return nil, fmt.Errorf("parse pending config (.tmp): %w", err)
-						}
-						return finalizeConfig(&cfg, tmpData), nil
-					}
-				}
-			}
-		} else {
-			// .tmp 比 path 旧，可能是过时残留，删除它。
-			_ = os.Remove(tmp)
-		}
-	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			cfg := DefaultConfig()
-			if saveErr := Save(path, cfg); saveErr != nil {
-				return nil, fmt.Errorf("create default config: %w", saveErr)
+		if !os.IsNotExist(err) {
+			// Path exists but cannot be read — .tmp is the only recovery source.
+			if recovered, ok := tryRecoverFromTmp(tmp, path); ok {
+				return recovered, nil
 			}
-			return cfg, nil
+			return nil, err
 		}
-		return nil, err
+		// Path does not exist; a leftover .tmp would be a pending first-ever save.
+		if recovered, ok := tryRecoverFromTmp(tmp, path); ok {
+			return recovered, nil
+		}
+		cfg := DefaultConfig()
+		if saveErr := Save(path, cfg); saveErr != nil {
+			return nil, fmt.Errorf("create default config: %w", saveErr)
+		}
+		return cfg, nil
+	}
+
+	var cfg Config
+	migrated, err := decodeConfig(data, &cfg)
+	if err != nil {
+		// Main path is corrupt — .tmp is a recovery source regardless of mtime.
+		if recovered, ok := tryRecoverFromTmp(tmp, path); ok {
+			return recovered, nil
+		}
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	finalized := finalizeConfig(&cfg, data)
+	if migrated {
+		_ = Save(path, finalized)
+	}
+
+	// Path loaded successfully; discard leftover .tmp — UNLESS it is newer
+	// than path, which means it holds a pending save whose rename AND direct
+	// write both failed last time; apply it in preference to path.
+	if tmpInfo, tmpErr := os.Stat(tmp); tmpErr == nil {
+		if pathInfo, pathErr := os.Stat(path); pathErr == nil && tmpInfo.ModTime().After(pathInfo.ModTime()) {
+			if recovered, ok := tryRecoverFromTmp(tmp, path); ok {
+				return recovered, nil
+			}
+		}
+		_ = os.Remove(tmp)
+	}
+	return finalized, nil
+}
+
+// tryRecoverFromTmp applies a leftover .tmp file over path and returns the
+// resulting config. Application order:
+//  1. os.Rename(tmp → path) — succeeds when the lock is gone.
+//  2. overwrite path with tmp data — succeeds when the lock was transient.
+//  3. parse tmp data directly — last resort so the user's pending changes
+//     are visible in the running instance even if path is still locked.
+//     In this case the .tmp file is left on disk for the next restart to retry.
+//
+// ok is false when there is no usable .tmp (absent, or neither apply nor
+// parse succeeded). After a successful rename or overwrite, the config is
+// parsed from path with the same strict decoder (incl. deprecated-field
+// migration) as a normal load.
+func tryRecoverFromTmp(tmp, path string) (*Config, bool) {
+	if _, err := os.Stat(tmp); err != nil {
+		return nil, false
+	}
+	if os.Rename(tmp, path) == nil {
+		return loadAfterTmpApply(path)
+	}
+	tmpData, readErr := os.ReadFile(tmp)
+	if readErr != nil {
+		return nil, false
+	}
+	if os.WriteFile(path, tmpData, 0600) == nil {
+		_ = os.Remove(tmp)
+		return loadAfterTmpApply(path)
+	}
+	// Both rename and direct write failed — parse the pending data directly.
+	var cfg Config
+	dec := yaml.NewDecoder(bytes.NewReader(tmpData))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, false
+	}
+	return finalizeConfig(&cfg, tmpData), true
+}
+
+// loadAfterTmpApply re-reads and parses path after .tmp has been applied to
+// it (via rename or direct write). It mirrors the strict-decode path used for
+// a normal Load.
+func loadAfterTmpApply(path string) (*Config, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
 	}
 	var cfg Config
 	migrated, err := decodeConfig(data, &cfg)
 	if err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, false
 	}
 	finalized := finalizeConfig(&cfg, data)
-	// Auto-migrate: if the on-disk YAML carried fields no longer in the
-	// schema (e.g. a removed download.proxy), the strict decoder fails and
-	// decodeConfig falls back to a lenient decode. Persist the normalized
-	// config back to disk so the deprecated fields are dropped and the next
-	// startup is clean. Best-effort: a write failure does not block loading.
 	if migrated {
 		_ = Save(path, finalized)
 	}
-	return finalized, nil
+	return finalized, true
 }
 
 // deprecatedFieldPaths lists YAML field paths (each a sequence of map keys)
@@ -172,12 +227,18 @@ func stripPath(root map[string]any, path []string) bool {
 //
 // On Windows the target file may be locked by another process or a stale
 // handle, causing os.Rename to fail. AtomicWrite then falls back to a direct
-// write; if that also fails the .tmp file remains on disk and will be applied
-// on the next startup via Load.
+// write; the .tmp crash-recovery copy is kept in both fallback outcomes and
+// applied on the next startup via Load (or discarded after a clean load).
+// If both rename and direct write fail, Save returns an error and the pending
+// changes live only in .tmp until Load applies them.
 func Save(path string, cfg *Config) error {
 	marshalCfg := cfg
 	if cfg.Security.PasswordEnabled && cfg.Security.EncryptionKey != "" {
-		marshalCfg = encryptKeysCopy(cfg)
+		var err error
+		marshalCfg, err = encryptKeysCopy(cfg)
+		if err != nil {
+			return err
+		}
 	}
 	data, err := yaml.Marshal(marshalCfg)
 	if err != nil {

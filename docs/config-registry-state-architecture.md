@@ -156,18 +156,20 @@ flowchart TD
 
 ## 6. internal/config — 原子持久化（persistence.go）
 
-### 6.1 Load（persistence.go:21-70）
+### 6.1 Load（persistence.go:28-77）
 
-1. **`.tmp` 恢复（22-51）：** 若存在 `path+".tmp"`，与 `path` 比较 `ModTime`——**仅当 .tmp 更新时**才视为 pending 改动并应用（`applyTmp`，28）。应用优先级：① `os.Rename(tmp→path)`；② 失败则 `os.WriteFile(path, tmpData)` 直接覆盖；③ 再失败则直接解析 `tmpData` 并返回（`.tmp` 保留供下次重试，50 之后不删除）。若 `.tmp` 比 `path` **旧**，视为过期残留直接删除（47-50）。
-2. **首跑生成（54-60）：** 目标文件不存在时 `DefaultConfig()` + `Save(path, cfg)`，返回该默认配置。
-3. **严格解码（63-69）：** `yaml.NewDecoder` + `KnownFields(true)`，未知字段报错；成功则 `finalizeConfig` 回填。
+1. **主路径优先（31-49）：** 先读 `path`。若 `path` **不存在或无法解析**（含 read 失败），立即把 `path+".tmp"` 作为恢复源尝试——**不比较 mtime**：一条比 `.tmp` 更“新”但已损坏的 `path`（如 AtomicWrite 直写回退途中崩溃截断）绝不能导致完整的 `.tmp` 副本被当作过期残留删除（2026-08-03 审计修复，旧逻辑按 mtime 直接删 `.tmp`）。`path` 不存在且无 `.tmp` 时走首跑生成（DefaultConfig + Save）。
+2. **`.tmp` 应用优先级（tryRecoverFromTmp，91-134）：** ① `os.Rename(tmp→path)`；② 失败则 `os.WriteFile(path, tmpData)` 直接覆盖（成功后删 `.tmp`）；③ 再失败则直接解析 `tmpData` 并返回（`.tmp` 保留供下次重启重试）。①② 成功后按正常严格解码路径（含 deprecated 字段迁移）重新读取 `path`。
+3. **路径成功加载后的清理（65-75）：** `path` 加载成功即删除残留 `.tmp`——**除非 `.tmp` 比 `path` 新**：此时 `.tmp` 持有上次 rename 与直写双失败的 pending 保存，优先应用之；否则为直写回退成功后的冗余副本（内容与 path 相同）或废弃残留，删除。`.tmp` 仅在从 `path` 成功加载后才被删除。
+4. **严格解码（52-59）：** `yaml.NewDecoder` + `KnownFields(true)`，未知字段报错；成功则 `finalizeConfig` 回填。
 
-### 6.2 Save（persistence.go:79-107）
+### 6.2 Save（persistence.go:234-247）
 
-1. **Key 加密副本（80-83）：** 若 `PasswordEnabled && EncryptionKey!=""`，`marshalCfg = encryptKeysCopy(cfg)`（内存态不变，落盘态加密，见第 17 节）。
-2. **委托 fsutil.AtomicWrite（89-104）：** `yaml.Marshal` 后调用 `fsutil.AtomicWrite(path, data, 0600)`，内部执行确定性 `.tmp` + `os.Rename` 原子写，失败回退直写（保留 `.tmp` 供下次 `Load` 恢复）。
+1. **Key 加密副本（235-242）：** 若 `PasswordEnabled && EncryptionKey!=""`，`marshalCfg = encryptKeysCopy(cfg)`（内存态不变，落盘态加密，见第 17 节）；**加密失败返回 error，Save 拒绝落盘**——绝不静默把明文 key 写进 config.yaml（2026-08-03 审计修复）。
+2. **委托 fsutil.AtomicWrite（243-249）：** `yaml.Marshal` 后调用 `fsutil.AtomicWrite(path, data, 0600)`，内部执行确定性 `.tmp` + `os.Rename` 原子写，失败回退直写；**`.tmp` 在两种回退结局下都保留**（直写非原子，崩溃可能损坏 path 而 `.tmp` 仍完整），下次 `Load` 应用或成功加载后清理。
 
-**原子写契约：** 正常路径 `tmp → rename → path`；锁冲突下 `.tmp` 不丢、留待下次 `Load` 应用（mtime 优先）。config 与 state 的 Save 共用 `fsutil.AtomicWrite` 同一 `.tmp + rename + 直写回退` 契约，但**错误处理语义不同**（见第 20 节 #4）。
+**原子写契约：** 正常路径 `tmp → rename → path`；锁冲突下 `.tmp` 不丢、留待下次 `Load` 恢复。config 与 state 的 Save 共用 `fsutil.AtomicWrite` 同一 `.tmp + rename + 直写回退` 契约，但**错误处理语义不同**（见第 20 节 #4）。
+
 
 ## 7. internal/config — 校验（validate.go）
 
@@ -187,9 +189,11 @@ flowchart TD
 - **`GenerateKey()`（crypto.go:13-19）：** 生成 32 字节随机数，base64 编码为字符串（即 AES-256 密钥材料）。
 - **`Encrypt(keyBase64, plaintext)`（crypto.go:21-40）：** base64 解码密钥 → `aes.NewCipher` → `cipher.NewGCM` → 生成 12 字节随机 nonce → `gcm.Seal(nonce, nonce, plaintext, nil)`（nonce 前置）→ base64 编码输出。
 - **`Decrypt(keyBase64, ciphertextBase64)`（crypto.go:42-69）：** 解码后校验长度 ≥ `NonceSize()`，切出 nonce 与密文，`gcm.Open` 还原明文；长度不足返回 “ciphertext too short”。
-- **`encryptKeysCopy(cfg)`（crypto.go:74-91）：** **深拷贝** `cfg`（含 `Providers`/`Keys` 切片），对非空且未带 “enc:” 前缀的 `Key` 调 `Encrypt` 并加 “enc:” 前缀；**原 `cfg` 不修改**（内存态 key 保持明文）。
+- **`encryptKeysCopy(cfg)`（crypto.go:77-96）：** **深拷贝** `cfg`（含 `Providers`/`Keys` 切片），对非空且未带 “enc:” 前缀的 `Key` 调 `Encrypt` 并加 “enc:” 前缀；**原 `cfg` 不修改**（内存态 key 保持明文）。**任一 key 加密失败（如 `EncryptionKey` 损坏）即返回 error，`Save` 拒绝落盘**——绝不静默把明文 API Key 写进 config.yaml（2026-08-03 审计修复）。
 
 **加密密钥存储的现实：** `SecurityConfig.EncryptionKey`（types.go:153）是**明文 base64 字符串，与密码、API Key 同文件存储 config.yaml**。无 KDF、无 OS keystore（`GenerateKey` 仅随机 + base64）。因此该机制的防护目标是“防止 config.yaml 被意外读取/备份时泄露明文 API Key”，**而非**抵御任何能读取 config.yaml 的人（见第 17、20 节）。
+
+**AnySearch 明文范围（2026-08-03 明确）：** `AnySearchConfig.APIKey`（types.go:303-306）为**明文存储于 config.yaml**——key-at-rest 加密（`encryptKeysCopy`）只覆盖 `Provider.Keys`，**不覆盖** AnySearch 的 key，也不覆盖下载 cookies（`DownloadConfig.BrowserCookies`/`CookiesPath` 指向的 cookies.txt 文件）。这是当前有意的边界（加密仅针对上游 provider 凭据）；本次仅记录范围，未扩展加密。
 
 ## 9. internal/registry — Registry 与双锁模型（registry.go）
 
@@ -373,6 +377,8 @@ flowchart LR
 - **共址风险：** 加密密钥 `EncryptionKey` 以明文 base64 与受它保护的明文（解密后）/密文（加密后）API Key **同文件存储**——能读到 config.yaml 的人即可解密任何 `enc:` key。该机制仅防“明文 key 被直接读取/备份泄露”，并非强访问控制（见第 20 节 #7）。
 - **会话 cookie 加固：** `setSessionCookie`（`api/auth.go:164-174`）与登出 cookie（`api/auth.go:151-162`）已设置 `Secure: true`（与 `HttpOnly`、`SameSite=Strict` 配合），`MaxAge` 从 `86400*30`（30 天）改为 `int(sessionMaxAge.Seconds())`（24h），与服务端 `sessionMaxAge` 一致，防止过期 cookie 被重放。
 
+**AnySearch/下载凭据不在加密范围内（2026-08-03 明确）：** 第 8 节所述 key-at-rest 加密仅覆盖 `Provider.Keys`；`AnySearchConfig.APIKey` 及下载 cookies（`DownloadConfig.BrowserCookies` 或 `CookiesPath` 指向的 cookies.txt）均以**明文**存储/使用。本次审计仅记录该边界，未扩展加密。
+
 ## 18. 状态模型总览
 
 | 结构体 | 位置 | 用途 |
@@ -442,14 +448,17 @@ flowchart LR
 | `TestEnablePlaygroundDefault` | 未显式写时默认 true（defaults.go:82-84） |
 | `TestLoad_EmptyQuotaTypeDefaulted` | 空 QuotaType 填 “limited”（defaults.go:96-102） |
 | `TestLoad_ModelDefScalar` | `ModelDef` 标量字符串解析（types.go:38-51） |
-| `TestSave_ReturnsNilAndLeavesTmpWhenPathLocked` | 锁定路径返回 error 且保留 `.tmp`（persistence.go:92-101） |
-| `TestLoad_PendingTmpApplied` | `.tmp` 较新时应用并清理（persistence.go:22-51） |
-| `TestLoad_PendingTmpFallbackDirectWrite` | rename 失败时回退直写（persistence.go:31-46） |
-| `TestLoad_StaleTmpIsDiscarded` | `.tmp` 较旧则丢弃（persistence.go:47-50） |
+| `TestSave_ReturnsNilAndLeavesTmpWhenPathLocked` | 锁定路径返回 error 且保留 `.tmp`（persistence.go:243-249） |
+| `TestLoad_PendingTmpApplied` | `.tmp` 较新时应用并清理（persistence.go:65-75） |
+| `TestLoad_PendingTmpFallbackDirectWrite` | rename 失败时回退直写（persistence.go:91-134） |
+| `TestLoad_StaleTmpIsDiscarded` | `.tmp` 较旧则丢弃、path 胜出（persistence.go:65-75） |
+| `TestLoad_RecoversFromTmpWhenPathCorrupt` | **2026-08-03 新增：** path 更新但损坏时仍从 `.tmp` 恢复（不比较 mtime） |
 
 ### 21.2 crypto_test.go
 
-`TestEncryptDecrypt_RoundTrip`（加解密往返）、`TestDecrypt_InvalidKey`（错密钥失败）、`TestDecrypt_InvalidCiphertext`（非法 base64）、`TestEncrypt_DifferentNonces`（随机 nonce 致密文不同）、`TestGenerateKey`、`TestDecrypt_EmptyKey`、`TestEncrypt_EmptyPlaintext`（空串往返）。覆盖 crypto.go:13-91 全部分支。
+
+`TestEncryptDecrypt_RoundTrip`（加解密往返）、`TestDecrypt_InvalidKey`（错密钥失败）、`TestDecrypt_InvalidCiphertext`（非法 base64）、`TestEncrypt_DifferentNonces`（随机 nonce 致密文不同）、`TestGenerateKey`、`TestDecrypt_EmptyKey`、`TestEncrypt_EmptyPlaintext`（空串往返）、`TestSave_RejectsBadEncryptionKey`/`TestSave_RejectsWrongLengthKey`（**2026-08-03 新增：** 损坏 EncryptionKey → Save 拒绝落盘，绝不静默写明文）。覆盖 crypto.go:13-96 全部分支。
+
 
 ### 21.3 registry CRUD / merge / state 测试
 
@@ -463,9 +472,14 @@ flowchart LR
 
 `TestLoadSaveRoundtrip`、`TestLoadMissingFile`、`TestLoadInvalidYAML`、`TestManagerNoop`（nil / 空 path 安全）、`TestManagerFlushSync`、`TestManagerScheduleWrite`（实测 500ms 去抖）、`TestRestoreRoundtrip`。覆盖 state.go:11-96 与 manager.go:36-200 全路径。
 
-### 21.5 已测 vs 未充分覆盖
+### 21.5 settings PATCH 测试（register_test.go，2026-08-03 新增）
 
-- **已测：** config 默认/往返/首跑/严格解析/`.tmp` 三类恢复；crypto 全分支；registry CRUD 副本隔离/并发/key-state 簿记/snapshot-restore/merge；state 往返/缺失/manager noop/flush/schedule/restore。
+`TestRotationPatchPreservesStatePersist`（rotation PATCH 的 5 个前端字段合并后 `StatePersist`/`StatePath` 保留，并验证 Save/Load 往返）、`TestRotationPatchPartialUpdate`（单字段 patch 不触碰其余字段——presence-aware 合并契约）。
+
+### 21.6 已测 vs 未充分覆盖
+
+
+- **已测：** config 默认/往返/首跑/严格解析/`.tmp` 三类恢复 + 损坏路径恢复（`TestLoad_RecoversFromTmpWhenPathCorrupt`）+ Save 拒绝损坏密钥（`TestSave_RejectsBadEncryptionKey`/`TestSave_RejectsWrongLengthKey`）；crypto 全分支；settings rotation PATCH presence-aware（`register_test.go`，`StatePersist`/`StatePath` 保留）；fsutil 直写回退保留 `.tmp`（`atomic_test.go` + `atomic_windows_test.go`）；registry CRUD 副本隔离/并发/key-state 簿记/snapshot-restore/merge；state 往返/缺失/manager noop/flush/schedule/restore。
 - **未充分覆盖（按源码锚点）：**
   - **`validate.go` 无独立单测：** `validateProviders`（10-42）仅告警、无任何测试验证去重/前缀校验触发。
   - **`finalizeConfig` 边角分支：** 如 “enablePlayground 探测”（82-84）、“state_persist 探测”（87-89）、“download 段探测”（114-117）、“API Key 解密”（130-144）无专门单测（测试经 `DefaultConfig`/`TestSaveAndLoad` 间接覆盖部分）。
@@ -474,7 +488,7 @@ flowchart LR
   - **`state.Save` 失败回退语义：** 与 config 不同（返回 nil），无测试验证“锁文件下静默丢状态”。
   - **`Manager.Restore` 跳过路径：** “::” 拆分失败 / 回调返回 error 的 `logger.Debug` 跳过分支（manager.go:180-188）无断言测试。
 
-### 21.6 建议验证命令
+### 21.7 建议验证命令
 
 ```powershell
 go test ./internal/config/...
@@ -491,11 +505,10 @@ go build -o tinyrouter .
 **internal/config：**
 
 - `config.go`：包文档（1-11），说明 types/defaults/persistence/validate/crypto 分工。
-- `types.go`：RotationConfig(11-19)、Key(22-29)、ModelDef(32-55，含 Protocols 50)+ModelNIMOverride(44-48)+UnmarshalYAML(38-51)+UnmarshalJSON(54-71)、Protocol 合法值常量(31-37)、Provider(74-96)、IsNIM(102-107)、IsGeminiOpenAICompat(113-117)、NIMSettings(121-126)、Combo(129-136)、QuickSlot(139-147)、SecurityConfig(150-154)、ServerConfig(175-180)、ProxyConfig(184-188)、DownloadConfig(191-201)、Config(204-218)。
+- `persistence.go`：Load(28-77，主路径优先 31-49、严格解码 52-59、成功加载后清理 65-75)、tryRecoverFromTmp(91-134)、loadAfterTmpApply(119-134)、Save(234-247，加密副本 235-242、rename 回退 243-249)。
 - `defaults.go`：DefaultServerConfig(11-18)、FinalizeServerConfig(22-36)、DefaultConfig(39-64)、finalizeConfig(69-146：enablePlayground 探测 82-84、state_persist 探测 87-89、quota 默认 96-102、download 段探测 114-117、key 解密 130-144)。
-- `persistence.go`：Load(21-70，.tmp 恢复 22-51、首跑 54-60、严格解析 65)、Save(79-107，加密副本 80-83、rename 回退 92-104)。
+- `crypto.go`：GenerateKey(13-19)、Encrypt(21-40)、Decrypt(42-69)、encryptKeysCopy(77-96，失败返回 error 阻断 Save)。
 - `validate.go`：validateProviders(10-42)、validateModelDef(16-42，Protocols 合法值告警)、validProtocols(9-14)、splitModel(44-52)。
-- `crypto.go`：GenerateKey(13-19)、Encrypt(21-40)、Decrypt(42-69)、encryptKeysCopy(74-91)。
 
 **internal/registry：**
 
@@ -512,7 +525,7 @@ go build -o tinyrouter .
 - `state.go`：QuotaInfo(17-24)、KeyRuntimeState(26-51，含 `mu`/`BackoffLevel`/`ModelLocks`/`ModelStatus`/`ModelErrors`/`LastUsedAt`/`ConsecCount`/`RotatedAt`/`ModelQuotas`/`InFlight`/NIM 四字段)、IncInFlight(54)、DecInFlight(57-63)、GetInFlight(66)、Lock(69)、Unlock(72)、UpdateQuota(75-88)、GetQuota(91-95)。**无 map、无 registry/rotation/config/state 依赖。**
 
 **internal/state：**
-
+- `manager.go`：Manager(14-32)、ManagerOption(33-35)、WithKeyStateProvider/WithComboStateProvider(36-51)、WithProbeStateProvider(53-59)、NewManager(63-73)、ScheduleWrite(77-92)、flushNow(95-104)、flushNowLocked(110-145，快照提取在 writeMu 内)、FlushSync(149-168)、Restore(170-240)、probeSnapshotFn/probeRestoreFn(22-23)。
 - `state.go`：CurrentVersion(11-14)、Snapshot(17-26，含 Probes map)、KeySnapshot(25-38)、ComboSnapshot(41-44)、ProbeDetail(29-37)、ProbeRecord(38-49)、Load(48-71)、Save(79-96)。
 - `manager.go`：Manager(14-30)、ManagerOption(33)、WithKeyStateProvider/WithComboStateProvider(36-49)、WithProbeStateProvider(53-55，注入 probe 快照/恢复回调，flushNow 纳入 Probes 125/162)、NewManager(53-63)、ScheduleWrite(67-82)、flushNow(85-119)、flushNowLocked(122-148)、FlushSync(152-170)、Restore(173-200)、probeSnapshotFn/probeRestoreFn(22-23)。
 
@@ -522,11 +535,11 @@ go build -o tinyrouter .
 |---|---|
 | 新增配置字段 | `types.go`（结构+tag）+ `defaults.go`：`DefaultConfig` + `finalizeConfig` 回填 + `persistence.go` 严格解析（KnownFields）。`ModelDef` 现含 `Alias`/`Note`/`NIMOver`/`Kind`/`ImgProtocol`/`ImgSizes` 六个可选字段；顶层 `Config` 新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 过滤行为）；新增字段还需同步 `api/settings.go`（`getSettings` 返回 + `updateSettings` 接收）+ `api/router.go`（`quickSlotOnly atomic.Bool`）+ `proxy/handler.go`（`quickSlotOnlyProvider`）+ `proxy/models.go`（`ListModels` 门控）+ `web/static/settings.js`（前端开关）+ `web/static/i18n.js`（翻译键）；新增图片尺寸字段还需同步 `UpdateModelImgSizes`（registry/models.go）+ `updateModelImgSizes`（api/providers_models_crud.go）+ `PATCH /providers/{id}/models/imgSizes` 路由（api/router.go）+ `/api/models` `modelInfo.ImgSizes` 回显（api/models.go） |
 | 修改默认值 | `defaults.go`：`DefaultConfig`(39-64) 与 `finalizeConfig`(69-146) 两处需一致 |
-| 修改持久化原子性 | `fsutil/atomic.go` AtomicWrite（统一实现）+ `persistence.go` Save(79-107) + `state.go` Save(79-96)（两者均委托 fsutil，注意错误语义不同，见第 20 节 #4） |
-| 修改加密 | `crypto.go`（GenerateKey/Encrypt/Decrypt/encryptKeysCopy）+ `defaults.go` 解密分支(130-144) + `types.go` SecurityConfig(150-154) |
+| 修改持久化原子性 | `fsutil/atomic.go` AtomicWrite（统一实现，`.tmp` fsync + 回退保留，见 §6）+ `persistence.go` Load(28-77)/Save(234-247) + `state.go` Save(79-96)（两者均委托 fsutil，注意错误语义不同，见第 20 节 #4） |
+| 修改加密 | `crypto.go`（GenerateKey/Encrypt/Decrypt/encryptKeysCopy(77-96，失败阻断 Save)）+ `defaults.go` 解密分支(130-144) + `types.go` SecurityConfig(150-154) |
 | 修改 `KeyRuntimeState` 字段 | `keystate/state.go` `KeyRuntimeState`（类型 + 自带锁方法）+ `registry/state.go` `snapshotKeyState`/`RestoreKeyState`（同步持久化子集）+ `state.go` `KeySnapshot`(25-38)（同步持久化子集）；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
 | 修改 reload merge | `registry.go` reloadStatesLocked(28-54) + `reload_merge_test.go`（TestReload_MergesStates） |
-| 修改去抖 | `manager.go` ScheduleWrite(67-82)/flushNow(85-119)/FlushSync(152-170) |
+| 修改去抖 | `manager.go` ScheduleWrite(77-92)/flushNow(95-104)/flushNowLocked(110-145)/FlushSync(149-168)（快照提取在 writeMu 内） |
 | 修改回调接线 | `app.go` WithKeyStateProvider/WithComboStateProvider(164-165) 与 registry/combo 的 Snapshot*/Restore* 实现 |
 | 修改校验 | `validate.go` validateProviders(10-42)（仅告警，注意重复 prefix 不阻断，第 20 节 #9）+ `validatePort`(18)（端口范围 1-65535 告警，defaults.go:75 finalizeConfig 调用） |
 | 新增 `ModelDef.Protocols` / 单协议探测 | `config/types.go` 新增 `Protocols` 字段(50-55)+`Protocol*` 常量(31-37)+`validate.go` `validateModelDef`(16-42)、`registry/models.go` `UpdateModelProtocols`(177-194)+`api/providers_models_crud.go` `updateModelProtocols`+`api/router.go` `PATCH /providers/{id}/models/protocols`(282)；运行态探测明细入 `state`：`state.go` `ProbeRecord`/`ProbeDetail`(29-49)+`Snapshot.Probes`(22)、`registry/state.go` `UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord`(80-114)、`state/manager.go` `WithProbeStateProvider`(53-55)+`app.go` 注入(166)；`api/probe_model.go` `testProviderModelProto` 单协议单次探测（**不持久化**，`POST /providers/{id}/models/test-proto`）+ `probe_common.go` `normalizeProbeBaseURL`+`buildProbeURL`/`buildAnthropicURL` 归一化修复；前端 providers.js/combos.js/quickslots.js 串行调用三次实现三协议探测，O/R/A mini badges 可点击打开单协议详情 modal |

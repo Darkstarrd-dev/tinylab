@@ -679,6 +679,38 @@ func TestLoad_StaleTmpIsDiscarded(t *testing.T) {
 	}
 }
 
+// TestLoad_RecoversFromTmpWhenPathCorrupt verifies that a .tmp recovery
+// source is applied even when path is NEWER but corrupt (e.g. a crash during
+// the AtomicWrite direct-write fallback truncated path). The old mtime-based
+// logic would have treated the older-but-complete .tmp as stale and deleted
+// it, losing the pending data.
+func TestLoad_RecoversFromTmpWhenPathCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	tmpPath := path + ".tmp"
+
+	// Corrupt path written first so its mtime is NEWER than .tmp.
+	if err := os.WriteFile(path, []byte(": : : invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(15 * time.Millisecond)
+
+	// Complete config in .tmp, then backdate it — the stale-mtime case.
+	if err := os.WriteFile(tmpPath, []byte("port: 4242\nenablePlayground: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-1 * time.Hour)
+	_ = os.Chtimes(tmpPath, past, past)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should recover from .tmp when path is corrupt: %v", err)
+	}
+	if cfg.Port != 4242 {
+		t.Fatalf("Port = %d, want 4242 (recovered from older .tmp)", cfg.Port)
+	}
+}
+
 func TestFinalizeConfig_NormalizesPasswordEnabledWithoutPassword(t *testing.T) {
 	// PasswordEnabled=true with empty PasswordEncrypted should be normalized to false.
 	cfg := &Config{

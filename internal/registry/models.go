@@ -271,15 +271,20 @@ func (r *Registry) UpdateModelImgSizes(providerID, modelID string, sizes []strin
 func (r *Registry) ResolveModelAlias(providerPrefix, aliasOrModelID string) (modelID string, found bool) {
 	r.cfgMu.RLock()
 	defer r.cfgMu.RUnlock()
-	p, ok := r.GetProviderByPrefix(providerPrefix)
-	if !ok {
-		return aliasOrModelID, false
-	}
-	cleanInput := sanitizeAlias(p.Prefix, p.ID, aliasOrModelID)
-	for _, m := range p.Models {
-		if m.Alias != "" && (m.Alias == aliasOrModelID || m.Alias == cleanInput) {
-			return m.ID, true
+	// The prefix lookup is inlined instead of calling GetProviderByPrefix,
+	// which would re-acquire cfgMu.RLock while it is already held.
+	for i := range r.config.Providers {
+		if r.config.Providers[i].Prefix != providerPrefix {
+			continue
 		}
+		p := &r.config.Providers[i]
+		cleanInput := sanitizeAlias(p.Prefix, p.ID, aliasOrModelID)
+		for _, m := range p.Models {
+			if m.Alias != "" && (m.Alias == aliasOrModelID || m.Alias == cleanInput) {
+				return m.ID, true
+			}
+		}
+		return aliasOrModelID, false
 	}
 	return aliasOrModelID, false
 }

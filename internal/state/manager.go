@@ -100,44 +100,17 @@ func (m *Manager) flushNow() {
 	}
 	m.pending = false
 	m.mu.Unlock()
-
-	snapshot := &Snapshot{
-		Version: CurrentVersion,
-		SavedAt: time.Now(),
-		Keys:    make(map[string]*KeySnapshot),
-		Combos:  make(map[string]*ComboSnapshot),
-	}
-
-	if m.keySnapshotFn != nil {
-		for k, v := range m.keySnapshotFn() {
-			ks := v
-			snapshot.Keys[k] = &ks
-		}
-	}
-	if m.comboSnapshotFn != nil {
-		for k, v := range m.comboSnapshotFn() {
-			cs := v
-			snapshot.Combos[k] = &cs
-		}
-	}
-	if m.probeSnapshotFn != nil {
-		if probes := m.probeSnapshotFn(); len(probes) > 0 {
-			snapshot.Probes = make(map[string]*ProbeRecord, len(probes))
-			for k, v := range probes {
-				snapshot.Probes[k] = v
-			}
-		}
-	}
-
-	m.writeMu.Lock()
-	if err := Save(m.path, snapshot); err != nil {
-		m.logger.Warn("failed to save state.yaml: %v", err)
-	}
-	m.writeMu.Unlock()
+	m.flushNowLocked()
 }
 
 // flushNowLocked is called directly from FlushSync without the pending guard.
+// Snapshot extraction happens UNDER writeMu so two concurrent writers can
+// never let an older snapshot (extracted before a newer one) be written last
+// and overwrite newer state.
 func (m *Manager) flushNowLocked() {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+
 	snapshot := &Snapshot{
 		Version: CurrentVersion,
 		SavedAt: time.Now(),
@@ -166,11 +139,9 @@ func (m *Manager) flushNowLocked() {
 		}
 	}
 
-	m.writeMu.Lock()
 	if err := Save(m.path, snapshot); err != nil {
 		m.logger.Warn("failed to save state.yaml: %v", err)
 	}
-	m.writeMu.Unlock()
 }
 
 // FlushSync immediately captures and writes state, stopping any pending timer.

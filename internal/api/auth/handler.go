@@ -18,6 +18,12 @@ import (
 const sessionCookieName = "tinyrouter_session"
 const sessionMaxAge = 24 * time.Hour
 
+// maxSessions caps the number of live sessions held in memory. Tokens are
+// only created by admin login / password re-enable, so a store at capacity
+// means repeated logins whose tokens never expired naturally; beyond the cap
+// the oldest session is evicted.
+const maxSessions = 1000
+
 // SessionStoreType is the thread-safe session token store.
 type SessionStoreType struct {
 	sync.RWMutex
@@ -34,8 +40,28 @@ func (s *SessionStoreType) ClearAll() {
 // StoreToken stores a token with the current timestamp.
 func (s *SessionStoreType) StoreToken(token string) {
 	s.Lock()
+	defer s.Unlock()
 	s.tokens[token] = time.Now()
-	s.Unlock()
+	// Keep the store bounded: lazily sweep expired tokens, then evict the
+	// oldest remaining session if the store is still over capacity.
+	if len(s.tokens) > maxSessions {
+		now := time.Now()
+		for tok, createdAt := range s.tokens {
+			if now.Sub(createdAt) > sessionMaxAge {
+				delete(s.tokens, tok)
+			}
+		}
+	}
+	for len(s.tokens) > maxSessions {
+		var oldest string
+		var oldestAt time.Time
+		for tok, createdAt := range s.tokens {
+			if oldest == "" || createdAt.Before(oldestAt) {
+				oldest, oldestAt = tok, createdAt
+			}
+		}
+		delete(s.tokens, oldest)
+	}
 }
 
 // SessionStore is the global session token store.
