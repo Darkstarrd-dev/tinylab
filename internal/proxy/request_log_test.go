@@ -95,17 +95,6 @@ func TestMaskSecret_NoSpace(t *testing.T) {
 	}
 }
 
-func TestSanitizeFilename(t *testing.T) {
-	result := sanitizeFilename("gpt-4o/mini model")
-	if result != "gpt-4o_mini_model" {
-		t.Errorf("expected 'gpt-4o_mini_model', got: %s", result)
-	}
-	result = sanitizeFilename(`model\with:slash*?<>|`)
-	if strings.ContainsAny(result, `\/:*?"<>| `) {
-		t.Errorf("sanitizeFilename still contains invalid chars: %s", result)
-	}
-}
-
 // --- JSONL format tests ---
 
 func newTestHandlerForTrace(t *testing.T) (*Handler, string) {

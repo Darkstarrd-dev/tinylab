@@ -13,6 +13,19 @@ import (
 func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, providerID, upstreamModel, path string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, logLabel, providerName string, entryFormat combo.EntryFormat, originalModel string, sessionKey string) (bool, string) {
 	state := &retryState{maxRetries: h.maxRetries()}
 
+	// Per-target working copy: combo fallback passes the SAME parsed map to
+	// every target's forwardWithRetry, and the loop below rewrites it
+	// (model, stream_options, tool_call ids, Gemini thought signatures).
+	// Without a copy those rewrites leak into the next target — e.g. a
+	// Gemini target's backfilled extra_content would be forwarded to a
+	// non-Gemini upstream. The copy is made once per forwardWithRetry call,
+	// so retries within this call share it (mutations persist across retries
+	// as before). A plain shallow copy would not suffice: the rewrites touch
+	// nested maps/slices inside messages.
+	if parsed != nil {
+		parsed = cloneJSONValue(parsed).(map[string]any)
+	}
+
 	// reqID is per-forwardWithRetry (shared across retries) so the console can
 	// correlate the REQUEST/SEND/PROXY/error lines of one client request, and the
 	// EntryTracker entry reuses the same id across retries.
@@ -133,7 +146,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			}
 			processingEntry.ReqPayload = append([]byte(nil), rb...)
 		}
-		processingEntry.ReqHeaders = r.Header.Clone()
+		processingEntry.ReqHeaders = maskHeaderMap(r.Header)
 		processingEntry.UpstreamURL = upstreamURL
 		h.EntryTracker.Register(processingEntry)
 		h.broadcastRequestStart(reqID, processingEntry)

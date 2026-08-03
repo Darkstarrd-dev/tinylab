@@ -185,7 +185,18 @@ func TestIsDailyQuota429(t *testing.T) {
 		model string
 		want  bool
 	}{
+		// Positive: genuine daily-quota bodies must lock until next CST 00:05.
 		{`{"error":{"message":"You have exceeded today's quota for model ZhipuAI/GLM-5.2, please try again tomorrow"}}`, "ZhipuAI/GLM-5.2", true},
+		{`{"error":{"message":"You have reached today's quota for model gpt-4o-mini"}}`, "gpt-4o-mini", true},
+		// Negative: transient rate-limit bodies name the model but must NOT
+		// trigger the daily-quota lock (the pre-fix bug: single-key providers
+		// went all-day 502 from one transient 429).
+		{`{"error":{"message":"Rate limit reached for gpt-4o-mini in organization org-abc on requests per day (RPD): Limit 10000, Used 9999, Requested 1. Please try again in 14h59m43s. See https://platform.openai.com/docs/guides/rate-limits"}}`, "gpt-4o-mini", false},
+		{`{"type":"error","error":{"type":"rate_limit_error","message":"rate limit reached for model: claude-sonnet-4-20250514 with max_tokens 8192, please retry after 2026-01-01T00:00:00Z"}}`, "claude-sonnet-4-20250514", false},
+		{`{"error":{"code":"1110","message":"Rate limit exceeded for model ZhipuAI/GLM-5.2, please try again later"}}`, "ZhipuAI/GLM-5.2", false},
+		// Negative: a quota-worded body with a duration retry hint is a
+		// transient window, not a daily wall.
+		{`{"error":{"message":"Quota exceeded for model gpt-4o, please try again in 20 seconds"}}`, "gpt-4o", false},
 		{`{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan"}}`, "ZhipuAI/GLM-5.2", false},
 		{"", "gpt-4", false},
 		{"rate limit exceeded", "", false},

@@ -97,7 +97,7 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		}
 		entry.RespStatus = respStatus
 		if len(reqHeaders) > 0 {
-			entry.ReqHeaders = reqHeaders.Clone()
+			entry.ReqHeaders = maskHeaderMap(reqHeaders)
 		}
 		entry.UpstreamURL = upstreamURL
 	}

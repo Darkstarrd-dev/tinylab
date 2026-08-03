@@ -133,6 +133,7 @@ func (a *App) buildComponents() error {
 	a.reg = registry.New(cfg)
 	a.selector = rotation.New(a.reg, &cfg.Rotation)
 	a.comboRes = combo.New(a.reg)
+	a.comboRes.SetLogger(a.logger)
 
 	a.proxyHandler = proxy.New(a.reg, a.selector, a.comboRes, a.usageBuf, a.quotaTracker, a.logger, cfg.Server.UpstreamTimeoutSec)
 	a.proxyHandler.SetPgUsage(a.pgUsageBuf)

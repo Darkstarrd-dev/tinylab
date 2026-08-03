@@ -50,6 +50,24 @@ func getIntQuery(r *http.Request, key string, defaultVal int) int {
 	return val
 }
 
+// decInFlightForKeyID decrements InFlight on the key runtime state whose ID
+// matches keyID. The usage entry only carries the key ID, not its provider,
+// so matching scans the providers' keys; key IDs are unique per provider in
+// practice, and DecInFlight clamps at 0, so an incidental cross-provider
+// collision can only under-count, never go negative.
+func (h *Handler) decInFlightForKeyID(keyID string) {
+	for _, p := range h.d.Reg.ListProviders() {
+		for _, k := range p.Keys {
+			if k.ID == keyID {
+				if st := h.d.Reg.GetKeyState(p.ID, k.ID); st != nil {
+					st.DecInFlight()
+				}
+				return
+			}
+		}
+	}
+}
+
 // --- Usage ---
 
 func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +78,14 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
 		staleEntries := h.d.ProxyHandler.EntryTracker.SweepStale(10 * time.Minute)
 		for _, e := range staleEntries {
+			// The normal completion path DecInFlights when a request finishes;
+			// a swept entry never completed, so release its key's in-flight
+			// slot here. Idempotent with the normal path: the entry has been
+			// removed from the tracker, so both paths cannot fire for the same
+			// request, and DecInFlight clamps at 0.
+			if e.KeyID != "" {
+				h.decInFlightForKeyID(e.KeyID)
+			}
 			e.Status = "error"
 			e.Error = "timeout"
 			e.LatencyMs = time.Since(e.Timestamp).Milliseconds()

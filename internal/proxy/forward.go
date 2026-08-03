@@ -101,6 +101,29 @@ func generateToolCallID() string {
 	return "call_" + hex.EncodeToString(buf[:])
 }
 
+// cloneJSONValue deep-copies a JSON value tree (map[string]any / []any /
+// scalars) without re-marshalling. Used to give each combo target an
+// independent request body so per-target rewrites do not leak. Scalars
+// (strings, numbers, bools, nil) are immutable and shared by reference.
+func cloneJSONValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, item := range val {
+			out[k] = cloneJSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // ensureToolCallIDs scans the parsed request body for tool-call messages
 // with empty identifiers and fills in random ones, ensuring that assistant
 // tool_calls[].id and the corresponding tool message's tool_call_id match.

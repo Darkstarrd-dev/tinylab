@@ -2,7 +2,7 @@ package combo
 
 import (
 	"fmt"
-	"os"
+
 	"sync"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
@@ -45,7 +45,19 @@ type Resolver struct {
 	state map[string]*comboState // combo name → rotation state
 
 	onStateChange func() // injected by main.go for state persistence
+	logger        Logger
 }
+
+// Logger is the minimal logging sink the resolver writes configuration
+// warnings to. *console.Logger satisfies it structurally (AGENTS.md: logging
+// must go through console.Logger, never os.Stderr).
+type Logger interface {
+	Warn(format string, args ...any)
+}
+
+// SetLogger injects the logging sink used for combo configuration warnings.
+// Without one, warnings are dropped silently.
+func (r *Resolver) SetLogger(l Logger) { r.logger = l }
 
 type comboState struct {
 	index       int
@@ -88,7 +100,9 @@ func (r *Resolver) Resolve(comboName string, entryFormat EntryFormat) (*ComboPla
 		// Resolve prefix to actual provider ID
 		provider, ok := r.reg.GetProviderByPrefix(prefix)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "[combo] warning: combo %q model %q: provider prefix %q not found\n", comboName, m, prefix)
+			if r.logger != nil {
+				r.logger.Warn("[combo] warning: combo %q model %q: provider prefix %q not found", comboName, m, prefix)
+			}
 			continue
 		}
 		mt := ModelTarget{ProviderID: provider.ID, Model: model}

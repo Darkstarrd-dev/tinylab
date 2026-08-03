@@ -1,17 +1,41 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 )
 
+// upstreamClientFor returns the non-streaming upstream client for sel: the
+// proxy-routed client when sel.Provider.UseProxy is set AND a proxy URL is
+// configured, else the direct client. See clientFor for the timeout handling.
+func (h *Handler) upstreamClientFor(sel *rotation.SelectedKey) *http.Client {
+	if sel.Provider.UseProxy {
+		if pu, _ := h.proxyURL.Load().(*url.URL); pu != nil {
+			return h.clientFor(h.proxyClient)
+		}
+	}
+	return h.clientFor(h.client)
+}
+
+// streamClientFor returns the streaming upstream client for sel (unbounded
+// timeout; connection lifecycle follows the request context).
+func (h *Handler) streamClientFor(sel *rotation.SelectedKey) *http.Client {
+	if sel.Provider.UseProxy {
+		if pu, _ := h.proxyURL.Load().(*url.URL); pu != nil {
+			return h.proxyStream
+		}
+	}
+	return h.streamClient
+}
+
 func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey, body []byte, headers http.Header, isStream bool, path string, entryFormat combo.EntryFormat) (*http.Response, error) {
+
 	var upstreamURL string
 	var req *http.Request
 	var err error
@@ -27,7 +51,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 		upstreamURL, req, err = buildUpstreamRequest(ctx, sel, body, "/v1/responses", true)
 	default:
 		upstreamURL = urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
-		req, err = http.NewRequestWithContext(ctx, "POST", upstreamURL, strings.NewReader(string(body)))
+		req, err = http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -59,23 +83,10 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	// client-supplied value with a known-good one).
 	applyClineHeaders(req, sel)
 
-	var httpClient *http.Client
-	if sel.Provider.UseProxy {
-		if pu, _ := h.proxyURL.Load().(*url.URL); pu != nil {
-			httpClient = h.proxyClient
-		} else {
-			httpClient = h.client
-		}
-	} else {
-		httpClient = h.client
-	}
 	if isStream {
-		if httpClient == h.proxyClient {
-			return h.proxyStream.Do(req)
-		}
-		return h.streamClient.Do(req)
+		return h.streamClientFor(sel).Do(req)
 	}
-	return httpClient.Do(req)
+	return h.upstreamClientFor(sel).Do(req)
 }
 
 // buildUpstreamRequest constructs an upstream POST request for a provider
@@ -86,7 +97,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 // anthropic-beta).
 func buildUpstreamRequest(ctx context.Context, sel *rotation.SelectedKey, body []byte, endpointPath string, authBearer bool) (string, *http.Request, error) {
 	upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, endpointPath)
-	req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		return "", nil, err
 	}
@@ -141,5 +152,5 @@ func (h *Handler) forwardGetUpstream(ctx context.Context, sel *rotation.Selected
 		req.Header.Set("X-Modelscope-Task-Type", tt)
 	}
 	applyClineHeaders(req, sel)
-	return h.client.Do(req)
+	return h.upstreamClientFor(sel).Do(req)
 }

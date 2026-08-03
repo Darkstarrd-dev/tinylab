@@ -7,38 +7,22 @@ import (
 )
 
 // requestIDCounter generates globally unique string IDs for inflight usage
-// entries. Format: "r<base62-nanos>-<6-char-random-hex>". The nanos prefix
-// (in base62 to keep IDs compact for JSON transport) gives a time-ordered
-// component while the random suffix guarantees uniqueness even for requests
-// that start within the same nanosecond.
+// entries. Format: "r<base62-nanos>-<base62-counter>". The nanos prefix (in
+// base62 to keep IDs compact for JSON transport) gives a time-ordered
+// component; the atomic counter folded into the suffix guarantees uniqueness
+// even for requests that start within the same nanosecond.
 var requestIDCounter int64
-var requestIDSeed [2]byte
-
-func init() {
-	// Seed the random suffix generator once at startup.
-	r := time.Now().UnixNano()
-	requestIDSeed[0] = byte(r >> 56)
-	requestIDSeed[1] = byte(r >> 48)
-}
 
 func generateRequestID() string {
-	// Use nanos as base62 prefix for compact, time-ordered IDs.
-	_ = atomic.AddInt64(&requestIDCounter, 1)
+	// Nanos as a base62 prefix for compact, time-ordered IDs; the atomic
+	// counter suffix disambiguates concurrent requests that share the same
+	// nanosecond (the pre-fix code discarded the counter and derived the
+	// "random" suffix from time.Now() alone, so two requests in the same
+	// nanosecond collided).
+	n := atomic.AddInt64(&requestIDCounter, 1)
 	ts := time.Now().UnixNano()
-	// Encode nanos in base62 (compact, alphanumeric, safe for JSON keys)
 	tsStr := encodeBase62(ts)
-	return "r" + tsStr + "-" + hexSuffix(requestIDSeed)
-}
-
-func hexSuffix(seed [2]byte) string {
-	const digits = "0123456789abcdef"
-	out := make([]byte, 6)
-	v := uint32(seed[0])<<24 | uint32(seed[1])<<16 | uint32(time.Now().UnixNano())>>16
-	for i := 5; i >= 0; i-- {
-		out[i] = digits[v%16]
-		v /= 16
-	}
-	return string(out)
+	return "r" + tsStr + "-" + encodeBase62(n)
 }
 
 func encodeBase62(n int64) string {

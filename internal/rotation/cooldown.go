@@ -140,7 +140,34 @@ func IsDailyQuota429(body string, model string) bool {
 	if body == "" || model == "" {
 		return false
 	}
-	return strings.Contains(strings.ToLower(body), strings.ToLower(model))
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, strings.ToLower(model)) {
+		return false
+	}
+	// The body must indicate actual daily-quota exhaustion, not a transient
+	// rate limit. A plain 429 whose body merely names the model (OpenAI
+	// "Rate limit reached for gpt-4o-mini ... Please try again in ...",
+	// Anthropic "rate_limit_error ... model: claude-...", Zhipu
+	// "rate limit exceeded for model ...") used to lock the key until the
+	// next CST 00:05, turning one transient 429 into an all-day 502 for
+	// single-key providers. Require a quota keyword plus a daily/exhaustion
+	// marker, and exclude duration-style retry hints.
+	if !strings.Contains(lower, "quota") {
+		return false
+	}
+	if !(strings.Contains(lower, "exceeded") || strings.Contains(lower, "daily") ||
+		strings.Contains(lower, "today") || strings.Contains(lower, "tomorrow")) {
+		return false
+	}
+	// "please try again in 14h59m43s" / "try again in 20s" names a transient
+	// window, not a daily wall. Deliberately do NOT exclude "please try
+	// again" on its own: Zhipu's genuine daily-quota body is "...exceeded
+	// today's quota ... please try again tomorrow", where "tomorrow" IS the
+	// daily marker and the quota keyword + markers already disambiguate.
+	if strings.Contains(lower, "try again in") {
+		return false
+	}
+	return true
 }
 
 func nextCSTMidnight05() time.Time {

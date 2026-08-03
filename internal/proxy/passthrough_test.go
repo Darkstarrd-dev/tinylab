@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +18,35 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
+
+// TestPassThrough_LargeBodyStreamsFully verifies the non-stream pass-through
+// no longer silently truncates responses at 64MB (H3): a body larger than the
+// old io.LimitReader cap must reach the client in full, while the
+// usage-capture copy passed to recordUsage stays bounded at 512KB.
+func TestPassThrough_LargeBodyStreamsFully(t *testing.T) {
+	h := newSingleKeyHandler(t, "", 0)
+	sel := &rotation.SelectedKey{
+		Provider: config.Provider{ID: "test", Name: "Test"},
+		Key:      config.Key{ID: "k1", Key: "sk-test", Name: "TestKey"},
+		KeyName:  "TestKey",
+	}
+	// Just past the old 64MB cap: the pre-fix code delivered only the first
+	// 64MB to the client and silently dropped the rest.
+	big := bytes.Repeat([]byte("a"), 64<<20+4096)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(big)),
+	}
+	w := httptest.NewRecorder()
+	h.passThroughResponse(w, resp, "gpt-4", sel, 5, nil, "req-large", nil, "http://upstream/v1/chat/completions", "gpt-4", "sess")
+	if w.Body.Len() != len(big) {
+		t.Fatalf("client received %d bytes, want %d (response was truncated)", w.Body.Len(), len(big))
+	}
+	if !bytes.Equal(w.Body.Bytes(), big) {
+		t.Fatal("client payload differs from upstream body")
+	}
+}
 
 // newSingleKeyHandler builds a Handler whose single-key provider points at the
 // given mock upstream URL. Shared by the pass-through / cooldown-wait tests.

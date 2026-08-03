@@ -55,6 +55,11 @@ type Handler struct {
 	quickSlotOnlyProvider func() bool
 	logRequestsProvider   func() bool
 	requestLogDir         atomic.Value // string; settable at runtime via SetRequestLogDir
+	// upstreamTimeoutSec holds the current non-streaming upstream timeout in
+	// seconds. It is atomic because SetUpstreamTimeout (settings PATCH) can
+	// run concurrently with in-flight requests; the pre-built clients' Timeout
+	// fields are immutable after construction (see clientFor).
+	upstreamTimeoutSec atomic.Int64
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete
@@ -96,6 +101,7 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 		// 不设 Timeout 以避免 300s 后强制中断长 SSE 流（P3.13）。
 		streamClient: &http.Client{},
 	}
+	h.upstreamTimeoutSec.Store(int64(upstreamTimeoutSec))
 	h.proxyURL.Store((*url.URL)(nil))
 	proxyTransport := &http.Transport{
 		Proxy: func(*http.Request) (*url.URL, error) {
@@ -172,16 +178,31 @@ func (h *Handler) SetProxy(enabled bool, host, port string) error {
 	return nil
 }
 
+// clientFor returns the non-streaming upstream client honoring the current
+// atomic upstream timeout. The base clients' Timeout fields are never mutated
+// after construction — http.Client.Do reads Timeout, so writing it from a
+// settings update while requests are in flight is a data race. When the
+// current timeout differs from the base client's, a shallow clone (same
+// Transport, current Timeout) is returned instead.
+func (h *Handler) clientFor(base *http.Client) *http.Client {
+	want := time.Duration(h.upstreamTimeoutSec.Load()) * time.Second
+	if base.Timeout == want {
+		return base
+	}
+	c := *base
+	c.Timeout = want
+	return &c
+}
+
 // SetUpstreamTimeout updates the timeout on the non-streaming upstream HTTP
-// clients. Streaming clients remain unbounded. Safe to call at any time;
-// http.Client.Timeout is read on each Do call.
+// clients. Streaming clients remain unbounded. Safe to call at any time:
+// the value is stored atomically and applied per request by clientFor, so a
+// settings change never races with http.Client.Do.
 func (h *Handler) SetUpstreamTimeout(sec int) {
 	if sec <= 0 {
 		sec = 300
 	}
-	d := time.Duration(sec) * time.Second
-	h.client.Timeout = d
-	h.proxyClient.Timeout = d
+	h.upstreamTimeoutSec.Store(int64(sec))
 }
 
 func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {

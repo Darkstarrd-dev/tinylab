@@ -13,6 +13,44 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/util"
 )
 
+// maxStreamCaptureBytes caps the SSE stream body captured for trace/debug.
+// The ring truncates respBody to 512KB from the FRONT; this keeps the TAIL,
+// which for a stream carries the final usage event. The full stream still
+// flows to the client — only the captured copy is bounded, so a multi-hour
+// stream cannot balloon memory.
+const maxStreamCaptureBytes = 512 * 1024
+
+// boundedSSEBuffer retains only the last maxStreamCaptureBytes of the streamed
+// SSE body, trimmed at a line boundary so the captured JSONL stays readable.
+// It compacts only when well over the cap so a long stream does not memmove
+// the whole tail on every chunk.
+type boundedSSEBuffer struct {
+	buf []byte
+}
+
+func (b *boundedSSEBuffer) WriteString(s string) {
+	b.append([]byte(s))
+}
+
+func (b *boundedSSEBuffer) WriteByte(c byte) error {
+	b.append([]byte{c})
+	return nil
+}
+
+func (b *boundedSSEBuffer) append(p []byte) {
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > 2*maxStreamCaptureBytes {
+		excess := len(b.buf) - maxStreamCaptureBytes
+		tail := b.buf[excess:]
+		if i := bytes.IndexByte(tail, '\n'); i >= 0 {
+			tail = tail[i+1:]
+		}
+		b.buf = append([]byte(nil), tail...)
+	}
+}
+
+func (b *boundedSSEBuffer) Bytes() []byte { return b.buf }
+
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel, sessionKey string) {
 	defer resp.Body.Close()
 
@@ -59,7 +97,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	inputTokens := 0
 	outputTokens := 0
 	sb := &sse.SSELineBuffer{}
-	var sseBuf bytes.Buffer
+	var sseBuf boundedSSEBuffer
 	var contentCharsTotal int
 	var lastTokenBroadcast time.Time
 	var lastEntryRefresh time.Time
@@ -284,7 +322,12 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	// Read the FULL upstream body and write it to the client unmodified: the
+	// old io.LimitReader(64MB) silently truncated large non-stream responses.
+	// Client disconnect is handled by the write error path / request context,
+	// NOT by pre-truncating the payload. Only the usage-capture copy below is
+	// capped (recordUsage bounds it to 512KB anyway).
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		h.logger.Error("failed to read upstream response: %v", err)
 		if sel != nil {
@@ -312,7 +355,13 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	captureDetails := h.logRequests() || isPlayground || h.debugMode()
 	var respBodyForEntry []byte
 	if captureDetails {
-		respBodyForEntry = bodyBytes
+		// Cap ONLY the usage-capture copy; the client write above is unbounded.
+		const maxPTRespBody = 512 * 1024
+		if len(bodyBytes) > maxPTRespBody {
+			respBodyForEntry = bodyBytes[:maxPTRespBody]
+		} else {
+			respBodyForEntry = bodyBytes
+		}
 	}
 	h.logger.Info("\U0001f4ca [response] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
 	h.logger.Info("\U0001f300 [RESPONSE] %s | %s | %dms | %d", sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases), latencyMs, resp.StatusCode)

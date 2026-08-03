@@ -31,11 +31,20 @@ func TestClassifyError_StatusCodeFallback(t *testing.T) {
 	}
 }
 
-func TestClassifyError_TransientFallback(t *testing.T) {
-	// Unrecognized 500 with no matching text -> ActionTransient.
-	r := ClassifyError(500, `{"error":"some unknown upstream failure"}`)
+func TestClassifyError_5xxUnmappedBackoff(t *testing.T) {
+	// Unrecognized 5xx with no matching text -> ActionBackoff (short backoff
+	// + switch), NOT the 30s ActionTransient cooldown that locked a healthy
+	// key for 30s on a transient upstream 5xx.
+	for _, code := range []int{500, 501, 503, 504, 599} {
+		r := ClassifyError(code, `{"error":"some unknown upstream failure"}`)
+		if r.Action != ActionBackoff {
+			t.Errorf("%d unknown -> action=%v, want ActionBackoff", code, r.Action)
+		}
+	}
+	// Unmapped 4xx still falls through to ActionTransient.
+	r := ClassifyError(418, `{"error":"teapot"}`)
 	if r.Action != ActionTransient {
-		t.Errorf("500 unknown -> action=%v, want ActionTransient", r.Action)
+		t.Errorf("418 -> action=%v, want ActionTransient", r.Action)
 	}
 }
 

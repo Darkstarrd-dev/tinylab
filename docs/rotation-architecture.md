@@ -3,6 +3,8 @@
 > **文档定位：** `internal/rotation/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
 > **最后核对：** 2026-07-25，仓库工作区（`main`）。**运行时状态类型抽离 + 反向依赖消除**：per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 迁移到新包 `internal/keystate`；`rotation` 不再 `import registry`，改为 `import keystate`（类型）+ 依赖本包新定义的 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足，由 `app.go` 组合根注入）。`Selector.reg` 字段类型由 `*registry.Registry` 改为 `KeyStateProvider`。`proxy.ModelResolver.GetKeyState` 返回类型随之改为 `*keystate.KeyRuntimeState`。行为不变。此前：test-proto 单协议 endpoint 替换复合探测 + URL 归一化修复。
+>
+> **最后核对（2026-08-03，审计修复）：** `IsDailyQuota429` 收紧（quota 关键字 + 日额度标记 + 排除 `try again in`，§8.5）；`DefaultErrorRules` 新增 5xx 区间规则 `{StatusMin:500, StatusMax:599, Action:ActionBackoff}`（error_rules.go:68-74）——未映射 5xx 从 `ActionTransient`（30s 锁健康 key）改为短退避切 key；`ErrorRule` 新增 `StatusMin`/`StatusMax` 区间字段；NIM 三个路径（`WaitNIMInterval`/`OnNIMRequestSuccess`/`MarkNIM429`）改为**先读配置（cfgMu RLock 释放）再锁 key state（ks.mu）**，消除与 `Reload`（cfgMu→stateMu）、`SnapshotKeyStates`（stateMu→ks.mu）构成的 cfgMu→stateMu→ks.mu→cfgMu 死锁环。
 
 > **2026-07-18 更新（软策略修正 + Responses 路由 + 多协议探测）：** (1) **移除 anthropic 入口的 target 过滤**——`Resolver.Resolve(name, entryFormat)` 不再对 `entryFormat == EntryFormatAnthropic` 做 `IsAnthropic()` 过滤（resolver.go:103-118 已删除），现对所有 `entryFormat` 返回同一 target 集合；`entryFormat` 参数保留但不再被消费（供未来扩展）。(2) **新增 OpenAI Responses 入口** `EntryFormatOpenAIResponses`（resolver.go:22-25），与 OpenAI Chat / Anthropic 并列。(3) **协议感知 usage 提取**——OpenAI Chat / Responses 入口走 `util.ExtractTokens`；Anthropic 入口走 `parseAnthropicSSEUsage`（`internal/proxy/stream.go:415-450`）提取 `message_start`/`message_delta` 的 input/output tokens 并复用 `recordUsage`。(4) **多协议探测**——`api/probe_model.go`+`probe_common.go` 三协议并发探测，结果写回 `config.ModelDef.Protocols` 与 `state.yaml` 的 `probes` map。rotation 仍对协议无感知，Key 轮询/冷却/退避对三入口完全复用同一套机制。详见 §4.4、§5（usage）、§17、§18。
 >
@@ -269,9 +271,9 @@ func BackoffSequence(n int) int {
 
 `unlock = now + duration`，设 `ModelLocks[model]`、`ModelStatus="cooldown"`（cooldown.go:194-196），**不**递增 `BackoffLevel`。用于 SenseNova rpm/tpm 429 这类按账户约 60s 滑动窗口的限流（cooldown.go:183-185）。
 
-### 8.5 IsDailyQuota429（cooldown.go:123-128）
+### 8.5 IsDailyQuota429（cooldown.go:139-171）
 
-`body==""` 或 `model==""` → `false`（cooldown.go:124-126）；否则 `strings.Contains(ToLower(body), ToLower(model))`（cooldown.go:127）。即**必须在 body 文本中能匹配到 model 字符串**才判定为每日配额 429。
+`body==""` 或 `model==""` → `false`；否则必须**同时**满足：(1) body 含 model 字符串；(2) body 含 quota 关键字 `quota`；(3) body 含日额度/耗尽标记之一 `exceeded`/`daily`/`today`/`tomorrow`；(4) body **不**含时长式重试提示 `try again in`（如 OpenAI RPD 的 "Please try again in 14h59m43s"）。即必须是真正的每日配额耗尽才锁到次日 CST 00:05——普通 429（OpenAI "Rate limit reached for model X"、Anthropic `rate_limit_error`、Zhipu "rate limit exceeded for model X"）只含 model 名、不含 quota 词汇，不再误锁（修复前单 key provider 一次瞬时 429 就全天 502）。注意 `please try again` 单独出现不排除：Zhipu 真实日配额 body 是 "...exceeded today's quota ... please try again tomorrow"，其中 `tomorrow` 本身即日额度标记。
 
 ## 9. 错误分类规则
 
@@ -287,7 +289,9 @@ const (
 )
 
 type ErrorRule struct {
-    StatusCode  int         // 0 表示不匹配（落入默认瞬态）
+    StatusCode  int         // 精确状态码；0 表示不匹配（落入默认瞬态）
+    StatusMin   int         // 状态码区间下界（含）；0 = 无区间匹配
+    StatusMax   int         // 状态码区间上界（含）；0 = 无区间匹配
     BodyMatch   string      // 对 body 的大小写不敏感子串匹配（空=跳过）
     Action      ErrorAction
     CooldownSec int         // ActionCooldown 用固定冷却秒
@@ -315,12 +319,13 @@ type ErrorRule struct {
 | 13 | status `403` | ActionCooldown | 120 |
 | 14 | status `404` | ActionCooldown | 120 |
 | 15 | status `429` | ActionBackoff | — |
+| 16 | status `500`-`599`（区间） | ActionBackoff | — |
 
 `DefaultTransientCooldownSec = 30`（error_rules.go:53）。
 
-### 9.3 ClassifyError（error_rules.go:58-74）
+### 9.3 ClassifyError（error_rules.go:80-105）
 
-先按 `DefaultErrorRules` 顺序做 body 子串匹配（error_rules.go:61-65），命中即返回；再按 `StatusCode` 匹配（error_rules.go:67-71）；都不命中返回 `ErrorRule{Action: ActionTransient, CooldownSec: DefaultTransientCooldownSec}`（error_rules.go:73）。匹配是**贪婪子串**（任意包含即命中，error_rules.go:62、68）。
+先按 `DefaultErrorRules` 顺序做 body 子串匹配（error_rules.go:86-90），命中即返回；再按**精确** `StatusCode` 匹配（error_rules.go:92-96）；然后按 `StatusMin`/`StatusMax` **区间**匹配（error_rules.go:98-102，目前仅 500-599 一条）；都不命中返回 `ErrorRule{Action: ActionTransient, CooldownSec: DefaultTransientCooldownSec}`（error_rules.go:104）。匹配是**贪婪子串**（任意包含即命中，error_rules.go:87、93）。
 
 ### 9.4 IsBalanceExhausted（error_rules.go:80-86）
 
@@ -341,12 +346,12 @@ NIM（NVIDIA）走独立路径，由 `Provider.IsNIM()`（config/types.go:102-10
 
 ### 10.2 最小间隔与成功计数
 
-- `WaitNIMInterval(providerID, keyID, model)`（nim.go:82-104）：读取 `NIMLastSendTime`，若 `elapsed < minIntervalMs` 返回剩余等待，否则 0；无前次发送返回 0。`minIntervalMs` 通过 `getEffectiveNIMSettings` 解析，支持 per-model 覆盖。
-- `OnNIMRequestSuccess`（nim.go:106-130）：`NIMRequestCount++`、`NIMLastSendTime=now`；达 `reqCount` 时计数清零并 `RotatedAt=now`（通过 `getEffectiveNIMSettings` 读取 `reqCount`），触发 `onStateChange`。
+- `WaitNIMInterval(providerID, keyID, model)`（nim.go:82-112）：**先读配置**（`getEffectiveNIMSettings`，cfgMu RLock 释放）**再锁 key state**（`ks.mu`）——锁序 cfgMu→ks.mu 无重叠，消除与 `Reload`/`SnapshotKeyStates` 的死锁环（2026-08-03）。读取 `NIMLastSendTime`，若 `elapsed < minIntervalMs` 返回剩余等待，否则 0；无前次发送返回 0。`minIntervalMs` 通过 `getEffectiveNIMSettings` 解析，支持 per-model 覆盖。
+- `OnNIMRequestSuccess`（nim.go:113-141）：`NIMRequestCount++`、`NIMLastSendTime=now`；达 `reqCount` 时计数清零并 `RotatedAt=now`（通过 `getEffectiveNIMSettings` 读取 `reqCount`），触发 `onStateChange`。同样先读配置再锁 state（锁序同 `WaitNIMInterval`）。
 
 ### 10.3 NIM 429 阶梯
 
-`MarkNIM429`（nim.go:132-172）：若距 `NIMLast429Time` 超过 24h 则 `NIMCooldownLevel` 归零；否则 `++`；按 `ladderMin[idx]` 取时长、`idx` 越界取末项；设 `ModelLocks[model]`、`ModelStatus="cooldown"`、`NIMLast429Time=now`、`RotatedAt=now`。`ladderMin` 通过 `getEffectiveNIMSettings` 解析（provider 的 `CooldownLadderMin` 或 model 覆盖的默认 `[15,30]` 分钟）。
+`MarkNIM429`（nim.go:142-176）：若距 `NIMLast429Time` 超过 24h 则 `NIMCooldownLevel` 归零；否则 `++`；按 `ladderMin[idx]` 取时长、`idx` 越界取末项；设 `ModelLocks[model]`、`ModelStatus="cooldown"`、`NIMLast429Time=now`、`RotatedAt=now`。`ladderMin` 通过 `getEffectiveNIMSettings` 解析（provider 的 `CooldownLadderMin` 或 model 覆盖的默认 `[15,30]` 分钟）。
 
 ### 10.4 候选过滤（key 计数轮转）
 

@@ -76,6 +76,15 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 		return
 	}
 
+	// Bound bodies before writing: trace files must not balloon past the ring
+	// capture caps (64KB req / 512KB resp), and base64 image payloads are
+	// replaced with placeholders so vision requests stay small on disk. The
+	// truncation happens HERE, not in the caller: recordUsage truncates only
+	// when it stores ring payloads, so the trace writer must not assume its
+	// inputs were already bounded.
+	reqBody = boundTraceBody(reqBody, 64*1024)
+	respBody = boundTraceBody(respBody, 512*1024)
+
 	// Compute source from headers and provenance.
 	source := reqHeaders.Get("X-TinyRouter-Source")
 	if source == "" {
@@ -260,15 +269,9 @@ func maskHeaderMap(h http.Header) map[string][]string {
 
 // attemptCounter tracks the number of recordUsage calls per reqID.
 // Used to number attempt lines and compute the attempts count in the index line.
+// Entries are removed by SweepTraces when the corresponding req file is
+// deleted, so the map does not grow unbounded across requests.
 var attemptCounter sync.Map // string (reqID) -> int
-
-func (h *Handler) getAttemptCount(reqID string) int {
-	v, _ := attemptCounter.Load(reqID)
-	if v == nil {
-		return 0
-	}
-	return v.(int)
-}
 
 func (h *Handler) incAttemptCount(reqID string) int {
 	v, _ := attemptCounter.LoadOrStore(reqID, 0)
@@ -307,6 +310,9 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	ts := now.Format(time.RFC3339Nano)
 	dateStr := now.Format("20060102")
 	sessionID := reqID
+
+	reqBody = boundTraceBody(reqBody, 64*1024)
+	respBody = boundTraceBody(respBody, 512*1024)
 
 	tracesDir := h.TracesDir()
 	reqDir := filepath.Join(tracesDir, "req")
@@ -412,7 +418,18 @@ func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
 	now := time.Now()
 	cutoff := now.Add(-time.Duration(retainDays) * 24 * time.Hour)
 
-	// Delete old index files.
+	type fileEntry struct {
+		path    string
+		modTime time.Time
+		size    int64
+		reqID   string // base file name for req files; used for attemptCounter cleanup
+	}
+
+	var allFiles []fileEntry
+	var totalSize int64
+
+	// Collect index files (age-delete here; disk-cap enforcement below covers
+	// them too, so MaxDiskMB bounds the whole traces/ tree, not just req/).
 	entries, err := os.ReadDir(tracesDir)
 	if err != nil {
 		return
@@ -429,27 +446,20 @@ func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
 		if err != nil {
 			continue
 		}
+		fe := fileEntry{path: filepath.Join(tracesDir, name), modTime: info.ModTime(), size: info.Size()}
+		allFiles = append(allFiles, fe)
+		totalSize += info.Size()
 		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(filepath.Join(tracesDir, name))
+			_ = os.Remove(fe.path)
 		}
 	}
 
-	// Delete old request files and enforce MaxDiskMB.
+	// Collect request files.
 	reqDir := filepath.Join(tracesDir, "req")
 	reqEntries, err := os.ReadDir(reqDir)
 	if err != nil {
 		return
 	}
-
-	// Collect request files with mod times for age-based deletion.
-	type fileEntry struct {
-		name    string
-		modTime time.Time
-		size    int64
-	}
-	var reqFiles []fileEntry
-	var totalSize int64
-
 	for _, e := range reqEntries {
 		if e.IsDir() {
 			continue
@@ -458,44 +468,35 @@ func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
 		if err != nil {
 			continue
 		}
-		totalSize += info.Size()
-		reqFiles = append(reqFiles, fileEntry{
-			name:    e.Name(),
+		fe := fileEntry{
+			path:    filepath.Join(reqDir, e.Name()),
 			modTime: info.ModTime(),
 			size:    info.Size(),
-		})
+			reqID:   strings.TrimSuffix(e.Name(), ".jsonl"),
+		}
+		allFiles = append(allFiles, fe)
+		totalSize += info.Size()
 	}
 
-	// Delete old request files (by modtime).
-	for _, fe := range reqFiles {
-		if fe.modTime.Before(cutoff) {
-			_ = os.Remove(filepath.Join(reqDir, fe.name))
+	// Delete old request files (by modtime), dropping their attempt counters.
+	for _, fe := range allFiles {
+		if fe.reqID != "" && fe.modTime.Before(cutoff) {
+			_ = os.Remove(fe.path)
+			attemptCounter.Delete(fe.reqID)
 		}
 	}
 
-	// Enforce MaxDiskMB: delete oldest request files until under cap.
+	// Enforce MaxDiskMB across req AND index files: delete the oldest files
+	// until the total traces/ size is under the cap.
 	if maxDiskMB > 0 && totalSize > int64(maxDiskMB)*1024*1024 {
-		// Re-scan after age-based deletions.
-		reqEntries2, err := os.ReadDir(reqDir)
-		if err != nil {
-			return
-		}
 		var remaining []fileEntry
 		var remainingSize int64
-		for _, e := range reqEntries2 {
-			if e.IsDir() {
-				continue
+		for _, fe := range allFiles {
+			if _, err := os.Stat(fe.path); err != nil {
+				continue // already removed by age-based deletion
 			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			remainingSize += info.Size()
-			remaining = append(remaining, fileEntry{
-				name:    e.Name(),
-				modTime: info.ModTime(),
-				size:    info.Size(),
-			})
+			remainingSize += fe.size
+			remaining = append(remaining, fe)
 		}
 
 		// Sort by modtime (oldest first).
@@ -507,24 +508,25 @@ func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
 			if remainingSize <= int64(maxDiskMB)*1024*1024 {
 				break
 			}
-			_ = os.Remove(filepath.Join(reqDir, fe.name))
+			_ = os.Remove(fe.path)
 			remainingSize -= fe.size
+			if fe.reqID != "" {
+				attemptCounter.Delete(fe.reqID)
+			}
 		}
 	}
 }
 
-// sanitizeFilename replaces characters that are invalid in filenames with _.
-func sanitizeFilename(s string) string {
-	invalid := `/ \ : * ? " < > |`
-	var sb strings.Builder
-	for _, r := range s {
-		if strings.ContainsRune(invalid, r) || r == ' ' {
-			sb.WriteRune('_')
-		} else {
-			sb.WriteRune(r)
-		}
+// boundTraceBody caps a body stored in trace JSONL files: base64 image
+// payloads are replaced with placeholders first (so a vision request cannot
+// bloat the file with megabytes of base64), then the body is truncated to
+// maxBytes. Mirrors the ring capture caps (64KB req / 512KB resp).
+func boundTraceBody(body []byte, maxBytes int) []byte {
+	body = stripBase64Images(body)
+	if len(body) > maxBytes {
+		body = body[:maxBytes]
 	}
-	return sb.String()
+	return body
 }
 
 // maskSecret masks a secret header value. If the value contains a space
@@ -551,26 +553,6 @@ func maskToken(t string) string {
 // should be masked in request logs.
 func isSecretHeader(key string) bool {
 	return strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "X-Api-Key")
-}
-
-// formatBody returns a pretty-printed JSON string if the body is valid JSON,
-// or the raw string representation otherwise. An empty/nil body returns "(empty)".
-func formatBody(body []byte) string {
-	if len(body) == 0 {
-		return "(empty)"
-	}
-	if !json.Valid(body) {
-		return string(body)
-	}
-	var obj any
-	if err := json.Unmarshal(body, &obj); err != nil {
-		return string(body)
-	}
-	out, err := json.MarshalIndent(obj, "", "  ")
-	if err != nil {
-		return string(body)
-	}
-	return string(out)
 }
 
 // stripBase64Images walks a JSON tree and replaces base64-encoded image

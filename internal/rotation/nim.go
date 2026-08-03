@@ -80,6 +80,14 @@ func (s *Selector) getNIMSettings(providerID string) (reqCount int, minIntervalM
 // this (key, model) pair to satisfy min_interval. Returns 0 if no wait is needed.
 // The model parameter is used to resolve per-model NIM override settings.
 func (s *Selector) WaitNIMInterval(providerID, keyID, model string) time.Duration {
+	// Read the effective NIM settings (cfgMu RLock, released) BEFORE taking
+	// the key-state lock. The NIM paths used to call getEffectiveNIMSettings
+	// while holding ks.mu, forming a lock cycle with Reload (cfgMu→stateMu)
+	// and SnapshotKeyStates (stateMu→ks.mu): cfgMu→stateMu→ks.mu→cfgMu.
+	// Ordering is now cfgMu (read, released) → stateMu (GetKeyState, read,
+	// released) → ks.mu, with no overlap.
+	_, minIntervalMs, _ := s.getEffectiveNIMSettings(providerID, model)
+
 	state := s.reg.GetKeyState(providerID, keyID)
 	if state == nil {
 		return 0
@@ -87,7 +95,6 @@ func (s *Selector) WaitNIMInterval(providerID, keyID, model string) time.Duratio
 	state.Lock()
 	defer state.Unlock()
 
-	_, minIntervalMs, _ := s.getEffectiveNIMSettings(providerID, model)
 	if state.NIMLastSendTime.IsZero() {
 		return 0
 	}
@@ -104,6 +111,10 @@ func (s *Selector) WaitNIMInterval(providerID, keyID, model string) time.Duratio
 // rotated to the back of the queue (count reset, RotatedAt = now).
 // The model parameter is used to resolve per-model NIM override settings.
 func (s *Selector) OnNIMRequestSuccess(providerID, keyID, model string) {
+	// Fetch config first, then lock state (see WaitNIMInterval for the
+	// lock-ordering rationale: never hold ks.mu while waiting on cfgMu).
+	reqCount, _, _ := s.getEffectiveNIMSettings(providerID, model)
+
 	state := s.reg.GetKeyState(providerID, keyID)
 	if state == nil {
 		return
@@ -114,7 +125,6 @@ func (s *Selector) OnNIMRequestSuccess(providerID, keyID, model string) {
 	state.NIMRequestCount++
 	state.NIMLastSendTime = time.Now()
 
-	reqCount, _, _ := s.getEffectiveNIMSettings(providerID, model)
 	if state.NIMRequestCount >= reqCount {
 		state.NIMRequestCount = 0
 		state.RotatedAt = time.Now()
@@ -130,14 +140,16 @@ func (s *Selector) OnNIMRequestSuccess(providerID, keyID, model string) {
 // 429 time for 24h level reset.
 // The model parameter is used to resolve per-model NIM override settings.
 func (s *Selector) MarkNIM429(providerID, keyID, model string) time.Time {
+	// Fetch config first, then lock state (see WaitNIMInterval for the
+	// lock-ordering rationale: never hold ks.mu while waiting on cfgMu).
+	_, _, ladderMin := s.getEffectiveNIMSettings(providerID, model)
+
 	state := s.reg.GetKeyState(providerID, keyID)
 	if state == nil {
 		return time.Time{}
 	}
 	state.Lock()
 	defer state.Unlock()
-
-	_, _, ladderMin := s.getEffectiveNIMSettings(providerID, model)
 
 	if state.NIMLast429Time.IsZero() || time.Since(state.NIMLast429Time) > 24*time.Hour {
 		state.NIMCooldownLevel = 0

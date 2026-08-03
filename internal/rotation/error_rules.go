@@ -18,6 +18,8 @@ const (
 // ErrorRule defines one error classification rule.
 type ErrorRule struct {
 	StatusCode  int         // HTTP status code; 0 matches nothing (falls through to default transient)
+	StatusMin   int         // inclusive lower bound of a status range; 0 = no range match
+	StatusMax   int         // inclusive upper bound of a status range; 0 = no range match
 	BodyMatch   string      // case-insensitive substring match on body (empty = skip)
 	Action      ErrorAction // action to take
 	CooldownSec int         // fixed cooldown seconds (for ActionCooldown)
@@ -63,6 +65,13 @@ var DefaultErrorRules = []ErrorRule{
 	{StatusCode: 400, Action: ActionPassThrough},
 	{StatusCode: 422, Action: ActionPassThrough},
 	{StatusCode: 429, Action: ActionBackoff},
+	// 5xx (unmapped): short backoff + switch, NOT the 30s transient cooldown.
+	// A bare 500/501/504 with no text match used to fall through to
+	// ActionTransient and MarkRateLimited(30s) — a single transient upstream
+	// 5xx then locked the healthy key for 30s and caused instant "no
+	// available keys" 502 bursts for concurrent requests. Exact status rules
+	// above win over this range (checked after them).
+	{StatusMin: 500, StatusMax: 599, Action: ActionBackoff},
 }
 
 // DefaultTransientCooldownSec is the default cooldown for unmatched errors.
@@ -81,7 +90,13 @@ func ClassifyError(statusCode int, body string) ErrorRule {
 	}
 
 	for _, rule := range DefaultErrorRules {
-		if rule.StatusCode == statusCode {
+		if rule.StatusCode != 0 && rule.StatusCode == statusCode {
+			return rule
+		}
+	}
+
+	for _, rule := range DefaultErrorRules {
+		if rule.StatusMin > 0 && statusCode >= rule.StatusMin && statusCode <= rule.StatusMax {
 			return rule
 		}
 	}
