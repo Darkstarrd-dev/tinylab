@@ -20,8 +20,10 @@ var usageFilters = { success: true, failure: true, processing: true };
 var recentPageSize = 30;
 var recentPage = 1;
 var recentFilteredCount = 0;
+var recentSearchQuery = '';
 var recentGroupBySession = false;
 var expandedSessions = {}; // sessionKey -> true when expanded; survives re-renders so periodic refresh won't re-collapse
+var _monitorTableFitFrame = null;
 var currentInfoModalRequestId = null;
 var currentInfoModalReasoningEl = null;
 var currentInfoModalAssistantEl = null;
@@ -93,15 +95,97 @@ function hasProcessingEntries() {
 
 var MAX_PROCESSING_MS = 10 * 60 * 1000; // 10 分钟，超时停止计时
 var MAX_PRESERVED_TERMINAL = 200; // 保留被 ring 驱逐的终态条目上限，避免无界增长
-
 function statusToFilter(status) {
   if (status === 'success') return 'success';
   if (status === 'processing') return 'processing';
   return 'failure';
 }
 
+
 function shouldShowUsageEntry(e) {
-  return usageFilters[statusToFilter(e.status)];
+  if (!usageFilters[statusToFilter(e.status)]) return false;
+  var query = recentSearchQuery.trim().toLowerCase();
+  if (!query) return true;
+  var provider = String(e.provider || '').toLowerCase();
+  var model = String(e.model || '').toLowerCase();
+  var originalModel = String(e.originalModel || '').toLowerCase();
+  var displayModel = String(displayModelName(e.model, e.originalModel) || '').toLowerCase();
+  return provider.indexOf(query) >= 0 || model.indexOf(query) >= 0 ||
+    originalModel.indexOf(query) >= 0 || displayModel.indexOf(query) >= 0;
+}
+
+function scheduleMonitorTableAutoFit() {
+  if (_monitorTableFitFrame !== null) return;
+  var schedule = window.requestAnimationFrame || function(fn) { return window.setTimeout(fn, 0); };
+  _monitorTableFitFrame = schedule(function() {
+    _monitorTableFitFrame = null;
+    autoFitMonitorTables();
+  });
+}
+
+function autoFitMonitorTables() {
+  var tables = document.querySelectorAll('.usage-header table.usage-table');
+  for (var i = 0; i < tables.length; i++) fitMonitorTable(tables[i]);
+}
+
+function fitMonitorTable(table) {
+  if (!table || !table.isConnected || !table.rows.length) return;
+  var measure = table.cloneNode(true);
+  measure.removeAttribute('id');
+  measure.querySelectorAll('[id]').forEach(function(el) { el.removeAttribute('id'); });
+  var oldMeasureColgroup = measure.querySelector(':scope > colgroup');
+  if (oldMeasureColgroup) oldMeasureColgroup.remove();
+  measure.style.cssText = 'position:absolute;left:-100000px;top:0;visibility:hidden;display:table;table-layout:auto;width:max-content;min-width:0;max-width:none;';
+  var measureCells = measure.querySelectorAll('th,td');
+  for (var i = 0; i < measureCells.length; i++) {
+    measureCells[i].style.width = 'auto';
+    measureCells[i].style.minWidth = '0';
+    measureCells[i].style.maxWidth = 'none';
+    measureCells[i].style.overflow = 'visible';
+    measureCells[i].style.textOverflow = 'clip';
+  }
+  document.body.appendChild(measure);
+  var header = measure.tHead && measure.tHead.rows.length ? measure.tHead.rows[0] : null;
+  var colCount = header ? header.cells.length : 0;
+  if (!colCount) {
+    document.body.removeChild(measure);
+    return;
+  }
+  var widths = [];
+  for (var c = 0; c < colCount; c++) widths[c] = 0;
+  var rows = measure.querySelectorAll('tr');
+  for (var r = 0; r < rows.length; r++) {
+    if (rows[r].style.display === 'none' || rows[r].hidden) continue;
+    var column = 0;
+    var cells = rows[r].cells;
+    for (var j = 0; j < cells.length && column < colCount; j++) {
+      var cell = cells[j];
+      var span = cell.colSpan || 1;
+      if (span === 1) widths[column] = Math.max(widths[column], Math.ceil(cell.getBoundingClientRect().width));
+      column += span;
+    }
+  }
+  document.body.removeChild(measure);
+  if (table.classList.contains('quota-table') && widths.length > 0) widths[0] = Math.max(widths[0], 28);
+  var total = widths.reduce(function(sum, width) { return sum + width; }, 0);
+  if (!total) return;
+  var colgroup = table.querySelector(':scope > colgroup');
+  if (!colgroup) {
+    colgroup = document.createElement('colgroup');
+    table.insertBefore(colgroup, table.firstChild);
+  }
+  while (colgroup.children.length < colCount) colgroup.appendChild(document.createElement('col'));
+  while (colgroup.children.length > colCount) colgroup.lastElementChild.remove();
+  for (var k = 0; k < colCount; k++) colgroup.children[k].style.width = widths[k] + 'px';
+  table.classList.add('monitor-auto-fit-table');
+  table.style.width = total + 'px';
+  table.style.minWidth = total + 'px';
+  table.style.tableLayout = 'fixed';
+}
+
+window.addEventListener('resize', scheduleMonitorTableAutoFit);
+if (typeof MutationObserver !== 'undefined') {
+  new MutationObserver(function() { scheduleMonitorTableAutoFit(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-font-size'] });
 }
 
 var TREND_PALETTE = ['#4fc3f7', '#10a37f', '#d97706', '#4285f4', '#a855f7', '#ff6a00', '#ec4899', '#14b8a6', '#f59e0b', '#84cc16', '#7c3aed', '#06b6d4', '#f97316', '#ef4444'];

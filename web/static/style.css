@@ -503,7 +503,7 @@ tbody tr:last-child td{border-bottom:none}
 
 .quota-monitor-card{min-height:0;display:flex;flex-direction:column;width:100%}
 .quota-monitor-card .card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
-.quota-section-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:4px;scrollbar-width:none;-ms-overflow-style:none}
+.quota-section-scroll{flex:1;overflow:auto;min-height:0;padding-right:4px;scrollbar-width:none;-ms-overflow-style:none}
 .quota-section-scroll::-webkit-scrollbar{display:none}
 .quota-table th,.quota-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .quota-table thead th{position:sticky;top:0;z-index:1;background:var(--option-bg)}
@@ -528,33 +528,21 @@ tbody tr:last-child td{border-bottom:none}
 .quota-key-row-disabled{opacity:.55}
 .quota-key-row-empty,.quota-key-row-loading,.quota-key-row-error td{text-align:center;color:var(--text-muted)}
 .quota-key-row-error td{color:var(--danger)!important}
-/* Quota table column widths (override usage-table nth-child rules for 8-col quota layout) */
-.quota-table th:nth-child(1),.quota-table td:nth-child(1){width:28px;min-width:28px}
-.quota-table th:nth-child(2),.quota-table td:nth-child(2){width:96px}
-.quota-table th:nth-child(3),.quota-table td:nth-child(3){width:160px}
-.quota-table th:nth-child(5),.quota-table td:nth-child(5){width:72px}
-.quota-table th:nth-child(6),.quota-table td:nth-child(6){width:72px}
-.quota-table th:nth-child(7),.quota-table td:nth-child(7){width:64px}
-.quota-table th:nth-child(8),.quota-table td:nth-child(8){width:96px}
-.quota-table th:nth-child(4),.quota-table td:nth-child(4){width:110px}
+/* Monitor table columns are measured from the longest visible cell by monitor_state.js. */
+.monitor-auto-fit-table{width:max-content;min-width:100%}
 .recent-requests-section{min-height:0;display:flex;flex-direction:column;width:100%}
 .recent-requests-card{flex:1;display:flex;flex-direction:column;min-height:0;margin-bottom:0}
 .recent-requests-card .card-title{margin-bottom:8px}
-.recent-requests-card .card-scroll{flex:1;overflow-y:auto;min-height:0;scrollbar-width:none;-ms-overflow-style:none}
+.recent-requests-card .card-scroll{flex:1;overflow:auto;min-height:0;scrollbar-width:none;-ms-overflow-style:none}
 .recent-requests-card .card-scroll::-webkit-scrollbar{display:none}
 .recent-count{font-size:var(--font-badge);color:var(--text-muted);font-weight:400;margin-left:8px}
+.recent-requests-card .console-search{width:180px;max-width:24vw;margin-left:4px}
 .usage-table{width:100%;border-collapse:collapse;font-size:var(--font-base);table-layout:fixed}
 .usage-table thead{position:sticky;top:0;z-index:1;background:var(--option-bg)}
 .usage-table th,.usage-table td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--glass-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .usage-table tbody tr:hover{background:var(--table-hover)}
-/* Fixed column widths: stable proportions, no reflow when session rows show/hide (header stays put). */
+/* Auto-fit sets the remaining column widths from the longest cell. */
 .usage-table th:nth-child(1),.usage-table td:nth-child(1){width:28px;min-width:28px}
-.usage-table th:nth-child(2){width:76px}
-.usage-table th:nth-child(3){width:88px}
-.usage-table th:nth-child(4){width:160px}
-.usage-table th:nth-child(5){width:120px}
-.usage-table th:nth-child(6){width:68px}
-.usage-table th:nth-child(7){width:88px}
 /* Colspan cells (session group headers) span all columns; neutralize per-cell max-width. */
 .usage-table td[colspan]{max-width:none}
 /* Session group header: structured flex layout with pre-allocated field widths so rows align. */

@@ -48,6 +48,7 @@ async function renderUsage(c) {
   }
   updateUsageSummary(summary);
   updateRecentRequestsInline(lastUsageEntries);
+  scheduleMonitorTableAutoFit();
   var consoleCol = document.getElementById('usage-console-col');
   if (consoleCol && typeof buildConsoleInto === 'function') {
     buildConsoleInto(consoleCol);

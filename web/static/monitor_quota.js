@@ -253,6 +253,7 @@ function updateQuotaTable(bars) {
   if (sorted.length === 0) {
     tbody.innerHTML = '<tr class="quota-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noQuota')) + '</td></tr>';
   }
+  scheduleMonitorTableAutoFit();
 }
 
 function updateLockCountdowns() {
@@ -400,6 +401,7 @@ function renderQuotaKeyRowsInto(provider, model, data) {
     parent.parentNode.insertBefore(node, parent.nextSibling);
     parent = node;
   }
+  scheduleMonitorTableAutoFit();
 }
 // latency/speed + expanded sub-rows. It fetches every quota bar so the
 // top-level latency/speed cells are populated even before a row is expanded.
@@ -415,4 +417,5 @@ function refreshAllKeyDetails() {
     if (cache && now - cache.ts < KEY_DETAIL_TTL) continue;  // still fresh
     fetchModelKeyDetail(el._bar.provider, el._bar.model);
   }
+  scheduleMonitorTableAutoFit();
 }

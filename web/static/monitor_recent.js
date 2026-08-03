@@ -127,29 +127,32 @@ function renderRecentRequestsInline(entries) {
       '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.failure ? ' active' : '') + '" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.processing ? ' active' : '') + '" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
       '<button type="button" class="btn btn-sm btn-filter' + (recentGroupBySession ? ' active' : '') + '" id="recent-group-toggle" onclick="toggleRecentGroupBySession()">' + t('groupBySession') + '</button>' +
+      '<input type="text" id="recent-search" class="console-search" value="' + escapeHtml(recentSearchQuery) + '" placeholder="' + escapeHtml(t('searchProviderModel')) + '" aria-label="' + escapeHtml(t('searchProviderModel')) + '" autocomplete="off" oninput="onRecentSearch(this.value)">' +
       pagerHtml +
     '</span>' +
   '</div>';
-  var body;
-  if (rows.length === 0) {
-    body = emptyState(t('noUsage'));
-  } else {
-    body = '<div class="recent-requests-scroll card-scroll">' +
-      '<table class="usage-table">' +
-        '<thead><tr>' +
-          '<th class="status-col-header"></th>' +
-          '<th>' + t('thTime') + '</th>' +
-          '<th>' + t('thProvider') + '</th>' +
-          '<th>' + t('thModel') + '</th>' +
-          '<th>' + t('thKey') + '</th>' +
-          '<th>' + t('thLatency') + '</th>' +
-          '<th>' + t('thTokens') + '</th>' +
-        '</tr></thead>' +
-        '<tbody id="recent-tbody">' + renderRecentRows(rows) + '</tbody>' +
-      '</table>' +
-    '</div>';
-  }
+  var emptyRow = '<tr class="recent-empty-row"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
+  var body = '<div class="recent-requests-scroll card-scroll">' +
+    '<table class="usage-table">' +
+      '<thead><tr>' +
+        '<th class="status-col-header"></th>' +
+        '<th>' + t('thTime') + '</th>' +
+        '<th>' + t('thProvider') + '</th>' +
+        '<th>' + t('thModel') + '</th>' +
+        '<th>' + t('thKey') + '</th>' +
+        '<th>' + t('thLatency') + '</th>' +
+        '<th>' + t('thTokens') + '</th>' +
+      '</tr></thead>' +
+      '<tbody id="recent-tbody">' + (rows.length > 0 ? renderRecentRows(rows) : emptyRow) + '</tbody>' +
+    '</table>' +
+  '</div>';
   return '<div class="card recent-requests-card">' + header + body + '</div>';
+}
+
+function onRecentSearch(value) {
+  recentSearchQuery = String(value || '');
+  recentPage = 1;
+  updateRecentRequestsInline(lastUsageEntries);
 }
 
 function updateRecentRequestsInline(entries) {
@@ -179,7 +182,10 @@ function updateRecentRequestsInline(entries) {
     }
     return;
   }
-  tbody.innerHTML = renderRecentRows(rows);
+  tbody.innerHTML = rows.length > 0
+    ? renderRecentRows(rows)
+    : '<tr class="recent-empty-row"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
+  scheduleMonitorTableAutoFit();
   var countEl = document.querySelector('.recent-requests-card .recent-count');
   if (countEl) countEl.textContent = String(filtered.length);
   updateRecentPagerState();
@@ -270,6 +276,7 @@ function toggleRecentGroupBySession() {
       if (f) b.classList.toggle('active', usageFilters[f]);
     });
     updateRecentPagerState();
+    scheduleMonitorTableAutoFit();
   } else {
     updateRecentRequestsInline(lastUsageEntries);
   }
@@ -289,6 +296,7 @@ function toggleSessionGroup(headerEl, sk) {
   for (var i = 0; i < rows.length; i++) rows[i].style.display = nowExpanded ? '' : 'none';
   var arrow = headerEl.querySelector('.session-group-arrow');
   if (arrow) arrow.textContent = nowExpanded ? '\u25BE' : '\u25B8';
+  scheduleMonitorTableAutoFit();
 }
 
 function toggleUsageFilter(btn, filter) {
