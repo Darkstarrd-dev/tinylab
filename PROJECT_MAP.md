@@ -336,6 +336,26 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 |---|---|
 | `register.go` | `Handler` + `Register` + `POST /api/comfyui/proxy`；固定转发到 `127.0.0.1:{port}`，仅允许 GET/POST，校验端口/路径/查询、限制重定向留在请求端口，并透传 ComfyUI JSON/图片响应 |
 | `register_test.go` | 代理请求校验与 JSON 响应转发测试 |
+### 10.13b `internal/imagebatch/` — Durable Playground Image Batch engine
+
+独立于 Manual Canvas 的后台图片项目引擎。`ProjectStore` 以 `config.ResolveImageSaveDir` 为根，按安全 slug 保存 `project.json` 与 `p####/v####.<ext>` 槽位；`.part` 临时文件 + rename 保证原子资产写入，`Reconcile` 只依据合法图片文件恢复成功槽位，不从无 Manifest 的旧目录猜测任务。`Manager`/`Scheduler` 固定单并发，提供 interval、retry/backoff、on-error、pause/resume、after-current/immediate stop、单 Variant retry、SSE 订阅和重启后的 snapshot/reconcile。`RemoteGenerator` 通过 proxy handler 的窄接口生成远程图片，`ComfyGenerator` 只访问本机 loopback ComfyUI 的 `/prompt`/`/history`/`/view`；Manifest 不写 API key、Authorization、Base64 或大响应。
+
+| 文件 | 职责 |
+|---|---|
+| `types.go` | Project/Prompt/Variant/Asset/Stats schema、Natural/Tag/JSON、seed/status/event、边界校验与 generator contracts |
+| `paths.go` | project slug、slot、asset ID 与相对路径安全校验 |
+| `project_store.go` | project.json 原子读写、asset `.part` 写入、JSON/YAML import/export、safe asset path |
+| `reconciler.go` | 文件系统扫描与 Manifest 槽位恢复 |
+| `manager.go` | Manager 生命周期、runtime、snapshot、controls、retry、subscriptions |
+| `scheduler.go` | 顺序调度、间隔、retry/backoff、seed、生成结果落盘、失败/中断状态 |
+| `remote_generator.go` | GPT/xAI/ModelScope proxy invocation、URL/base64 image validation、SSRF-safe fetch |
+| `comfy_generator.go` | loopback ComfyUI API workflow、history polling、image validation |
+| `generator.go` | remote/ComfyUI protocol dispatch |
+| `*_test.go` | schema, paths, storage, adapter contract tests |
+
+### 10.13c `internal/api/imagebatch/` — Image Batch HTTP API
+
+`/api/image-batches/*` 独立于 generic `/api` 组，沿用管理 session 鉴权并设置 32 MiB request limit。`register.go` 注册 plan/transform/create/list/import/snapshot/manifest/assets/events 与 pause/resume/stop/retry；planning/transform 通过既有 proxy handler 调 helper model 并要求严格 JSON；events 首先发送 snapshot，再发送 typed SSE events。
 
 ### 10.11 `internal/api/keys/` — Key 管理
 
@@ -568,23 +588,19 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 | 类别 | 文件 |
 |---|---|
-| 入口 | `index.html`、`index-nopg.html`（无 playground 变体；header navigation 使用可访问的 `nav[aria-label="Primary navigation"]`，no-playground shell 加 `.top-header-nav-minimal`） |
-| JS 模块 | `app.js`（TooltipSystem：hover+focus 委托统一主题 tooltip，消费 `data-tooltip` 属性，取代浏览器原生 `title=`；单共享节点 + 600ms 延迟 + 翻转/钳制定位；顺带键盘焦点路径恢复 sighted 键盘用户视觉 tooltip；输入框内键盘事件拦截防护：`!isInput` 防护避免方向键触发弹窗按钮切换，Tab 键全面覆盖弹窗内控件，`handleThemeModalKeyDown` 掌控外观弹窗 4 组键盘交互与 `closest()` 控件匹配）、`api.js`、`auth.js`、`i18n.js`、`theme.js`（ThemeSystem 双层主题注册表：Mode/Variant 管理 + localStorage + Settings API 持久化 + theme-card 原生 `<button>` 标签化重构 + `requestAnimationFrame` 焦点持久化）、`info_common.js`、`providers.js`（Batch Manage `Select All`/`Deselect All` 动态切换按键、`batchToggleModel`/`batchToggleSelectAll` 联动、Alias/Note/Quota 弹窗自动 focus 与 Quota 弹窗间距优化）、`combos.js`、`quickslots.js`、**Monitor 模块拆为 6 文件**（`index.html`/`index-nopg.html` 加载顺序 state→io→quota→recent→modal→entry）：`monitor_state.js`（状态、格式化、Recent provider/model search predicate、quota/recent 表格按最长可见内容自适应列宽及字号/resize 重算）、`monitor_io.js`（SSE、usage/quota refresh、inflight 合并）、`monitor_quota.js`（Quota Monitor 表格、per-key 展开与详情指标）、`monitor_recent.js`（Recent Requests 表格、状态筛选、会话分组、分页与标题栏搜索）、`monitor_modal.js`（详情弹窗）、`monitor.js`（Monitor 页面入口与生命周期））；`headerStats.js`、`console.js`、`download.js`… |
-> Header 导航行为仍由 `app.js` 维护：`data-page` active 联动不变；CSS 负责 3×2 reference control 的布局、5 个页面按钮 + 1 个 disabled 空按钮占位（Download 在下方中间、下方右侧留空）、两个中间装饰菱形、仅朝向 active cell 的单侧菱形照明、圆角轮廓裁切的亮度/透明度渐变 active contour、锐利描边文字 + 短距离 fog/glow 光晕与 focus 状态。
-| 样式 | `style.css`（`.top-header-nav` 3 列 × 2 行 reference control、`.top-header-nav-minimal` no-playground 两按钮行、两个 row-gap 小型旋转装饰菱形及仅朝向 active cell 的单侧照明、`.nav-item` 长条矩形单元格与继承圆角裁切的渐变 active contour、锐利 `-webkit-text-stroke` + restrained text-shadow、`.nav-placeholder` 空按钮；`--nav-*` 令牌跟随 dark/light mode 与 active page accent；导航 click 不再显示全局蓝色 focus outline；`.tip` 统一 tooltip 类：消费 `--modal-bg`/`--glass-blur`/`--glass-border`/`--radius-sm`/`--shadow-card-hover`/`--z-tooltip` 令牌，跟随所有 mode/variant/style 切换，取代浏览器原生 title tooltip；Modal 基础容器限制 `max-height: calc(100vh - 40px)` 与 `.modal-body` `overflow-x: hidden; overflow-y: auto` 防止 1080P/不同 DPI 缩放下出现 Cutoff 及水平滚动条遮挡；Theme Modal 760px 横版左右并排 + `.style-swatch` 6px 内垫防裁剪 + `.modal-footer .btn:focus` 高对比度双重 Focus Ring 光环） |
-> **2026-08-04 前端样式基础整改：** `style.css` 增加语义 surface/border/status/code/interactive Token 层，并补齐 `--error`/`--primary`/`--border`/`--bg-card`/`--bg-main`/`--bg-input`/`--bg-secondary`/`--text-primary`/`--font-mono`/`--font-body`/`--shadow-sm` 别名；`combos.js`、`download.js`、`monitor_recent.js`、`monitor_quota.js`、`providers.js`、`quickslots.js`、`settings.js`、`info_common.js`、`auth.js` 将语义状态样式迁移至 class，保留几何与进度 inline 值。主题样式通过真实生产 shell + HTTP 浏览器矩阵验证。
-> **2026-08-04 Header 导航移植：** `index.html` 与 `index-nopg.html` 的页面切换按钮统一使用可访问 `nav` 容器；含 Playground shell 使用 3 列 × 2 行的长条矩形 reference control，5 个页面按钮 + 1 个 disabled 空按钮占位（Download 在下方中间、下方右侧留空），并在行间相邻列之间显示两个小型主题化旋转菱形装饰；active cell 仅照亮菱形朝向该按钮的一侧，按钮使用圆角轮廓裁切的亮度/透明度渐变 active contour 与锐利 accent fog/glow 文字；no-playground shell 使用无装饰的 2 按钮单行布局。深浅主题与 active page accent 通过 `--nav-*` 语义令牌切换。
-| 图标 | `logo.png`(1024 源)、`logo-sm.png`、`favicon.ico`(7 尺寸)、`favicon.png`、`icon-192.png`、`icon-512.png`、`apple-touch-icon.png`、`site.webmanifest` |
+| 入口 | `index.html`、`index-nopg.html`（header navigation 使用可访问 `nav[aria-label="Primary navigation"]`） |
+| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`settings*.js`、`gallery/editor` 入口依赖 |
+| 样式 | `style.css` |
 
 ### 18.3 `web/playground/` — Playground 模块（仅 `-tags playground` 内嵌）
 
-  | 模块 JS | `pg-core`、`pg-state`、`pg-setup`、`pg-request`、`pg-stream`、`pg-comfyui`、`pg-render`、`pg-markdown`、`pg-modal`、`pg-ui`、`pg-lifecycle`、`pg-i18n`、`pg-director`、`pg-autochat`、`pg-search`、`gallery-state.js`、`gallery-io.js`、`gallery-layout.js`、`gallery-tree.js`、`gallery-review.js`、`gallery-video.js`、`gallery-fullscreen.js`、`gallery-edit.js`、`gallery-edit-operations.js`、`gallery-edit-batch.js`、`gallery.js`、`editor-state.js`、`editor.js`、`editor_textreview_split.js`、`editor_textreview_diff.js`、`editor_textreview_state.js`、`editor_textreview.js`、`editor_textreview_step1.js`、`editor_textreview_step2.js`、`editor_textreview_step3.js`、`editor_textreview_step4.js`、`editor-logs.js`、`playground.js` |
 | 类别 | 内容 |
 |---|---|
-| 文档 | `README.md` |
+| JS 加载顺序 | `pg-i18n.js` → `pg-core.js` → `pg-state.js` → `pg-markdown.js` → `pg-request.js` → `pg-stream.js` → `pg-comfyui.js` → `pg-image-model.js` → `pg-image-inspire.js` → `pg-image-batch.js` → `pg-autochat.js` → `pg-setup.js` → `pg-director.js` → `pg-search.js` → `pg-render.js` → `pg-ui.js` → `pg-modal.js` → `pg-lifecycle.js`，随后 Gallery、Editor、Text Review 脚本 |
+| 图片模块 | `pg-image-model.js`（Manual Canvas generation/asset history、remote/Comfy result normalization、regenerate/delete、generation-aware autosave）；`pg-image-inspire.js`（Natural/Tag/JSON helper modal）；`pg-image-batch.js`（three-step plan/transform/review、snapshot-first SSE、controls、Prompt × Variant viewer） |
+| 其他模块 | `pg-core.js`、`pg-state.js`、`pg-request.js`、`pg-stream.js`、`pg-comfyui.js`、`pg-render.js`、`pg-ui.js`、`pg-modal.js`、`pg-lifecycle.js`、`pg-autochat.js`、`pg-setup.js`、`pg-director.js`、`pg-search.js`、Gallery/Editor/Text Review 文件 |
 | vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2) |
-| 样式 | `playground.css` |
-
+| 样式 | `playground.css`（Manual Canvas、Inspire、Batch 与既有 Playground/Gallery/Text Review 样式） |
 ---
 
 ## 19. `docs/` — 文档

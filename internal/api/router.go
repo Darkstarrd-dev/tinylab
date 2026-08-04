@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/editor"
 	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
+	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
 	"github.com/tinyrouter/tinyrouter/internal/api/models"
 	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
@@ -39,6 +41,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	domainimagebatch "github.com/tinyrouter/tinyrouter/internal/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -236,6 +239,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	r.Post("/v1/completions", proxyHandler.Completions)
 	r.Get("/v1/models", proxyHandler.ListModels)
 	r.Post("/v1/images/generations", proxyHandler.ImagesGenerations)
+	r.Post("/v1/images/edits", proxyHandler.ImagesEdits)
 	r.Post("/v1/embeddings", proxyHandler.Embeddings)
 	// Proxy route (Anthropic protocol). Anthropic /v1/messages has no GET
 	// semantics, so only POST is registered. CORS is handled by the
@@ -292,6 +296,17 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	monitorHandler := apimonitor.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
+	imageBatchHandler := func() *apimagebatch.Handler {
+		root := config.ResolveImageSaveDir(rt.reg.Config().ImageSaveDir, filepath.Dir(rt.configPath))
+		store, err := domainimagebatch.NewProjectStore(root)
+		if err != nil {
+			return apimagebatch.NewHandler(apiDeps, nil)
+		}
+		remote := domainimagebatch.NewRemoteGenerator(rt.proxyHandler)
+		generator := domainimagebatch.NewProtocolGenerator(remote)
+		manager := domainimagebatch.NewManager(store, generator)
+		return apimagebatch.NewHandler(apiDeps, manager)
+	}()
 	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
 
@@ -398,6 +413,27 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		})
 		textReviewHandler.Register(r)
 	})
+	// Image Batch API: project manifests/imports can exceed the generic 1 MiB API limit.
+	r.Route("/api/image-batches", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				req.Body = http.MaxBytesReader(w, req.Body, 32<<20)
+				next.ServeHTTP(w, req)
+			})
+		})
+		imageBatchHandler.Register(r)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				req.Body = http.MaxBytesReader(w, req.Body, 32<<20)
+				next.ServeHTTP(w, req)
+			})
+		})
+		imageBatchHandler.RegisterRoot(r)
+	})
 
 	// Embedded UI (fallback to index.html)
 	// Playground static routes: only register when the playground module is
@@ -415,9 +451,8 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			pgJSFiles := []string{
 				"playground.js", "pg-i18n.js",
 				"pg-core.js", "pg-state.js", "pg-markdown.js",
-				"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-render.js",
-				"pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
-				"pg-autochat.js",
+				"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-image-model.js", "pg-image-inspire.js", "pg-image-batch.js", "pg-autochat.js",
+				"pg-render.js", "pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
 				"pg-setup.js", "pg-director.js", "pg-search.js",
 				"gallery-state.js", "gallery-io.js", "gallery-layout.js",
 				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",

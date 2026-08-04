@@ -40,7 +40,8 @@ var PG_DEFAULT_CFG = {
   agentName: '',
   contextLimit: 8000,
   thinkingBudget: 4096,
-  // Image generation params
+  // Manual Image Canvas prompt helper model (text model only)
+  imgPromptModel: '',
   imgSize: '',
   imgQuality: '',
   imgBackground: '',

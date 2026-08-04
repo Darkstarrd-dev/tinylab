@@ -61,9 +61,17 @@ function renderPlayground(container) {
     pgRenderPanes();
     pgUpdateInputBar();
   });
+  // Batch tasks are backend-owned. Re-entry snapshot-reconciles before SSE.
+  if (typeof pgImageBatchOnEnter === 'function' && pgState.mode === 'image') {
+    pgImageBatchOnEnter();
+  }
+
 }
 
 function cleanupPlayground() {
+  // Batch SSE is a page subscription, not the backend task. Closing it here
+  // preserves projectId/snapshot so a later render can recover snapshot-first.
+  if (typeof pgImageBatchCleanup === 'function') pgImageBatchCleanup();
   // In search mode: let requests continue in background. Only persist state.
   if (pgState.mode === 'search') {
     if (typeof pgSaveSearchHistory === 'function') pgSaveSearchHistory();

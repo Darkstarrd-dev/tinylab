@@ -21,14 +21,14 @@ function makeWin() {
     pendingSources: [],
     reasoningStartedAt: null,
     reasoningCompletedAt: null,
+    image: {
+      mode: 'manual', phase: 'empty', draftPrompt: '', submittedPrompt: '',
+      activeAssetIndex: -1, generations: [], activeRequestId: '', error: '',
+      abortCtrl: null, timer: null
+    },
     // Auto chat (group-chat) state
-    agentName: '',             // Agent nickname in group chat
-    inbox: [],                 // pending inbound messages [{sender, content, timestamp}]
-    replyCount: 0,             // how many replies this window has completed
-    autoChatDone: false,       // whether this window reached its iteration limit
-    autoChatPending: false,    // reply scheduled (waiting for delay timer)
-    autoChatDelayTimer: null,  // setTimeout id for random delay before reply
-    lastReadTimelineId: 0,     // highest timeline id this window has consumed
+    agentName: '', inbox: [], replyCount: 0, autoChatDone: false,
+    autoChatPending: false, autoChatDelayTimer: null, lastReadTimelineId: 0,
   };
 }
 
@@ -37,7 +37,7 @@ var PG_AUTOCHAT_KEY = 'tinyrouter.playground.autochat.v1';
 var PG_SCENARIO_KEY = 'tinyrouter.playground.scenario.v1';
 var PG_MODE_KEY = 'tinyrouter.playground.mode.v1';
 
-// Search history persistence keys.
+var PG_IMAGE_KEY = 'tinyrouter.playground.image.v1';
 var PG_SEARCH_HISTORY_KEY = 'tinyrouter.playground.search.history.v1';
 var PG_SEARCH_ACTIVE_KEY  = 'tinyrouter.playground.search.active.v1';
 var PG_SEARCH_MAX_ENTRIES = 50; // Max search history entries in localStorage
@@ -234,6 +234,13 @@ function pgLoad() {
       pgState.mode = rawMode;
     }
   } catch (e) { /* corrupt storage */ }
+  try {
+    var rawImage = localStorage.getItem(PG_IMAGE_KEY);
+    if (rawImage) {
+      var savedImage = JSON.parse(rawImage);
+      if (savedImage && typeof savedImage === 'object') w.image = Object.assign(w.image, savedImage);
+    }
+  } catch (e) { /* corrupt image history */ }
   // Load search history from localStorage (before messages are loaded)
   pgLoadSearchHistory();
   try {
@@ -269,6 +276,10 @@ function pgLoad() {
             return pgNormalizeLoadedMessage(copy);
           });
           w.messages = trimmedBySize;
+          if (w.image && Array.isArray(w.image.generations)) {
+            var latest = w.image.generations[w.image.generations.length - 1];
+            if (latest && latest.status === 'generating') { latest.status = 'canceled'; w.image.phase = 'canceled'; w.image.activeRequestId = ''; }
+          }
         }
       }
     } else if (pgState.mode === 'search') {
@@ -297,11 +308,11 @@ function pgEnsureWindows() {
 
 var pgSaveTimer = null;
 function pgSave() {
-  if (pgSaveTimer) clearTimeout(pgSaveTimer);
   pgSaveTimer = setTimeout(function() {
     var w = pgState.windows[0];
     try { localStorage.setItem(PG_CFG_KEY, JSON.stringify(w.config)); } catch (e) {}
     try { localStorage.setItem(PG_PARAM_KEY, JSON.stringify(w.parameterEnabled)); } catch (e) {}
+    try { localStorage.setItem(PG_IMAGE_KEY, JSON.stringify(w.image || {})); } catch (e) {}
     // In search mode, messages are per-search and in-memory only; don't overwrite normal-mode localStorage.
     if (pgState.mode !== 'search') {
       try {
@@ -324,6 +335,7 @@ function pgSaveMode() {
 function pgSaveSync() {
   var w = pgState.windows[0];
   if (!w) return;
+  try { localStorage.setItem(PG_IMAGE_KEY, JSON.stringify(w.image || {})); } catch (e) {}
   try { localStorage.setItem(PG_CFG_KEY, JSON.stringify(w.config)); } catch (e) {}
   try { localStorage.setItem(PG_PARAM_KEY, JSON.stringify(w.parameterEnabled)); } catch (e) {}
   if (pgState.mode !== 'search') {

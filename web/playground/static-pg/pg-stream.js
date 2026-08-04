@@ -447,20 +447,32 @@ function pgPollModelScopeTask(i, taskId, model, assistantIdx, msg) {
   setTimeout(poll, 2000);
 }
 
-function pgAutoSaveImageArtifact(url, imgObj) {
+function pgAutoSaveImageArtifact(url, imgObj, generationId, assetId) {
   if (!url) return;
   pgApiPost('/save-image', { url: url }).then(function(res) {
     if (res && res.path && imgObj) {
       imgObj.savedPath = res.path;
       imgObj.savedFilename = res.filename || res.path;
-      pgSave();
-      if (typeof pgRefreshImageModalMeta === 'function') {
-        pgRefreshImageModalMeta(url, res.path, res.filename);
+      if (generationId && assetId && typeof pgState !== 'undefined') {
+        for (var wi = 0; wi < pgState.windows.length; wi++) {
+          var st = pgState.windows[wi].image;
+          if (!st || !st.generations) continue;
+          for (var gi = 0; gi < st.generations.length; gi++) {
+            if (st.generations[gi].id !== generationId) continue;
+            for (var ai = 0; ai < st.generations[gi].assets.length; ai++) {
+              if (st.generations[gi].assets[ai].id === assetId) {
+                st.generations[gi].assets[ai].savedPath = res.path;
+                st.generations[gi].assets[ai].savedFilename = res.filename || res.path;
+              }
+            }
+          }
+        }
       }
+      pgSave();
+      if (typeof pgRefreshImageModalMeta === 'function') pgRefreshImageModalMeta(url, res.path, res.filename);
+      if (typeof pgImageRenderCanvas === 'function' && typeof pgState !== 'undefined' && pgState.mode === 'image') pgImageRenderCanvas(pgState.activeWin);
     }
-  }).catch(function(err) {
-    console.warn('[Playground] Auto-save image artifact failed:', err);
-  });
+  }).catch(function(err) { console.warn('[Playground] Auto-save image artifact failed:', err); });
 }
 
 function pgFinish(i, assistantIdx) {

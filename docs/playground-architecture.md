@@ -2,6 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
+> **最后核对（2026-08-04 Image Canvas/Batch）：** Image 模式现分为 Manual Canvas 与 Batch Project 两层。Manual 由 `pg-image-model.js`/`pg-image-inspire.js` 维护独立 generation/asset 历史、Prompt helper（仅 `kind:text`）、Natural/Tag/JSON Inspire、Stable asset autosave 与画框状态；`pg-ui.js` 在 Image 模式不再追加 chat/waiting bubble。Batch 由 `internal/imagebatch/` 后端 Manager/Scheduler/ProjectStore/Reconciler/RemoteGenerator/ComfyGenerator 按单并发顺序运行，持久化 `imgs/<slug>/project.json` 与 `p####/v####.<ext>`，`/api/image-batches/*` 为 auth-gated 32 MiB 路由组，支持 Plan/Transform、Snapshot-first SSE、Pause/Resume/Stop/Retry、原子槽位写入和文件系统 reconcile。前端 `pg-image-batch.js` 只保留项目 ID、Snapshot、SSE 和二维 viewer cursor；离开页面关闭 SSE，不取消后端任务。`ImagesEdits` 同时注册 `/v1/images/edits`，与 generations 共享代理轮转链路。`pg-image-*` 三个脚本加载在 `pg-comfyui.js` 后、`pg-autochat.js` 前，并同步 `pgJSFiles` 白名单。`comfyui` Batch adapter 仅访问 `127.0.0.1:{port}`，不依赖浏览器页面。`project.json` 不包含 API Key、Header、Base64 或完整 upstream body。`imgPromptModel` 仍只写 Playground localStorage。`
 > **最后核对（2026-08-04）：** Image 模式新增 `comfyui` 协议：端口输入连接本机 ComfyUI；`internal/api/comfyui/register.go` 提供 `POST /api/comfyui/proxy`（仅 `127.0.0.1:{port}`、GET/POST、响应透传与重定向端口约束）；`pg-comfyui.js` 通过 `/system_stats`、`/models/*`、`/object_info/KSampler`、`/history` 动态发现模型/历史工作流，解析 API 工作流生成参数控件，提交 `/prompt` 后轮询 `/history`，经 `/view` 转 base64 data URL 并复用 `/api/save-image`。浏览器不再直连 ComfyUI WebSocket，避免 Origin 校验差异。`
 > **最后核对（2026-08-03）：** 文档同步审计——`PROJECT_MAP.md` §18.3 的 `web/playground/static-pg/` 文件清单已与磁盘对齐（补齐 `editor_textreview_step2..4.js`/`editor-logs.js`/`playground.js`，`playground.css` 计入资产）；本文相关章节无内容变更。
 > **2026-08-04 Playground 主题与模式选择器样式：** `playground.css` 的消息气泡、错误/系统状态、代码块、Reasoning、Debug、SSE 区域继续使用 `style.css` 语义 surface/status/code/border Token；新增 `.pg-mode-toggle` 分段模式控件，沿用 `pgState.mode` / `pgSetMode()` 业务状态，视觉上改为保持原 28px 高度、无外部留白的横向凹陷长条按钮组。`style.css` 提供 `--pg-mode-*` dark/light Token，暗色保持金属渐变，选中按钮本体及其左右边缘单独受光且不使用散射 glow，亮色提供独立的浅色表面、文字和边缘；`style.css` 仍先加载，`playground.css` 后加载并保留 Playground 全屏布局契约。
@@ -187,14 +188,24 @@ Playground 后端相关职责只有三类：
 |---|---|---|---:|
 | `GET /api/models` | 侧栏模型选择器 | 管理 session；未启用密码时放行 | `/api` 统一 1 MiB（GET 无 body） |
 | `POST /v1/chat/completions` | 普通聊天、群聊、摘要、场景生成、导演和旁白 | 无应用层鉴权 | 32 MiB |
-| `POST /v1/images/generations` | Image 模式图片生成（GPT/xAI/ModelScope） | 无应用层鉴权 | 32 MiB |
-| `POST /v1/images/edits` | Image 模式编辑类图片生成（仅当本地 `imgEndpoint` 为 `edits` 时走此端点，否则 `/v1/images/generations`） | 无应用层鉴权 | 32 MiB |
+| `POST /v1/images/generations` | Manual Image 远程图片生成（GPT/xAI/ModelScope） | 无应用层鉴权 | 32 MiB |
+| `POST /v1/images/edits` | Manual Image 编辑类图片生成 | 无应用层鉴权 | 32 MiB |
 | `POST /v1/tasks/{taskId}` | ModelScope 异步任务轮询 | 无应用层鉴权 | 32 MiB |
+| `POST /api/save-image` | Manual 图片保存到 `ResolveImageSaveDir`；只接受受限图片类型与 SSRF-safe URL/data URL | 管理 session | 32 MiB |
+| `GET /api/image-proxy` | 同源代拉远程图片字节 | 管理 session | 32 MiB |
+| `POST /api/comfyui/proxy` | ComfyUI 同源代理：仅本机 `127.0.0.1:{port}`、GET/POST、校验路径/query/redirect | 管理 session | 32 MiB |
+| `POST /api/image-batches/plan` | Helper model 生成严格结构化 Natural prompt 计划 | 管理 session | 32 MiB |
+| `POST /api/image-batches/transform` | 将每条 Natural prompt 转 Natural/Tag/JSON；保留 Natural 原文 | 管理 session | 32 MiB |
+| `POST /api/image-batches` | 冻结 Prompt × Variant manifest 并启动后台顺序任务 | 管理 session | 32 MiB |
+| `GET /api/image-batches` | 项目列表 | 管理 session | 32 MiB |
+| `POST /api/image-batches/import` | JSON/YAML manifest 导入并持久化 | 管理 session | 32 MiB |
+| `GET /api/image-batches/{projectID}` | snapshot；重新进入页面时先取此快照并 reconcile | 管理 session | 32 MiB |
+| `GET /api/image-batches/{projectID}/events` | snapshot-first typed SSE | 管理 session | 32 MiB |
+| `GET /api/image-batches/{projectID}/manifest` | manifest 快照 | 管理 session | 32 MiB |
+| `GET /api/image-batches/{projectID}/assets/{assetID}` | 受路径校验保护的本地资产流 | 管理 session | 无 body |
+| `POST /api/image-batches/{projectID}/pause|resume|stop` | 调度控制；stop 支持 `after-current`/`immediate` | 管理 session | 32 MiB |
+| `POST /api/image-batches/{projectID}/retry/{promptID}/{variantID}` | 单 Variant retry | 管理 session | 32 MiB |
 | `GET/PATCH /api/settings` | 读取/修改 `enablePlayground` | 管理 session | 1 MiB |
-| `POST /api/save-image` | Image Preview 保存图片到 `imgs/` 目录 | 管理 session | 32 MiB |
-| `GET /api/image-proxy` | 同源代拉远程图片字节（供 Copy/footer 元数据，规避 CORS） | 管理 session | 32 MiB |
-| `POST /api/comfyui/proxy` | ComfyUI Image 协议同源代理：转发本机 `127.0.0.1:{port}` 的 GET/POST JSON/图片请求 | 管理 session | 32 MiB 请求 / 流式响应 |
-| `POST /api/anysearch/search` | Search 模式搜索代理 | 管理 session | 1 MiB |
 | `POST /api/anysearch/subdomains` | Search 模式子域查询 | 管理 session | 1 MiB |
 | `POST /api/anysearch/extract` | Search 模式 URL 内容提取 | 管理 session | 1 MiB |
 | `POST /api/editor/open` | Editor 原生文件选择器打开文本文件 | 管理 session | 32 MiB |
@@ -221,9 +232,9 @@ Playground 后端相关职责只有三类：
 | `GET /api/gallery/edit/status/{jobId}` | 查询 job 进度与结果（含 outputURL） | 管理 session | 无上限 |
 | `POST /api/gallery/edit/cancel/{jobId}` | 取消运行中 job（kill 进程树） | 管理 session | 无上限 |
 | `POST /api/gallery/edit/extract-zip-entry` | 从服务器端 zip 会话或磁盘归档解压单条图片到临时文件（批量转换用） | 管理 session | 无上限 |
-| `POST /api/gallery/edit/zip-outputs` | 将多个转换结果打包为 zip（可选 `zipName`），输出目录默认 `download.defaultDir` | 管理 session | 无上限 |
-| `POST /api/gallery/edit/zip-writeback` | replace-original convert-all/单图 zip：将转码后的多条临时文件以其原 zip 内路径替换回磁盘归档（`{archivePath, entries:[{zipPath, filePath}]}`），原子回写；命中条目替换、未命中字节级保留 | 管理 session | 无上限 |
-| `POST /api/gallery/open-folder` | 在系统文件管理器中打开路径所在目录（跨平台 explorer/xdg-open/reveal），供编辑完成后的"打开目录"按钮用 | 管理 session | 无上限 |
+| `POST /api/gallery/edit/zip-outputs` | 将多个转换结果打包为 zip（可选 `zipName`） | 管理 session | 无上限 |
+| `POST /api/gallery/edit/zip-writeback` | 原子回写压缩包中的转换结果 | 管理 session | 无上限 |
+| `POST /api/gallery/open-folder` | 打开系统文件管理器目录 | 管理 session | 无上限 |
 
 前端源码中的 `pgApiGet('/models')` 经宿主 `apiGet` 自动加 `/api`，实际请求是 `/api/models`。聊天相关代码直接 `fetch('/v1/chat/completions')`。
 
@@ -305,42 +316,34 @@ katex -> marked -> marked-katex-extension -> DOMPurify -> highlight.js -> mermai
 
 modules:
 pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
--> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui -> pg-modal
--> pg-lifecycle
--> editor_textreview_split -> editor_textreview_diff -> editor_textreview_state
--> editor_textreview_step1 -> editor_textreview_step2 -> editor_textreview_step3 -> editor_textreview_step4
--> text-review
+-> pg-comfyui -> pg-image-model -> pg-image-inspire -> pg-image-batch
+-> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui
+-> pg-modal -> pg-lifecycle
+-> gallery/editor/text-review modules
 ```
-
-全部模块使用浏览器全局函数/变量协作，没有 ES module、bundler、事件总线或响应式框架。
 
 ### 5.2 文件职责
 
 | 文件 | 职责 |
 |---|---|
 | `pg-core.js` | 默认配置、localStorage key、宿主适配、限制和公共常量 |
-| `pg-state.js` | 全局/窗口状态、加载保存、四窗初始化、模型目录 |
+| `pg-state.js` | 全局/窗口状态、Image generation history、Batch UI state、模型目录与持久化 |
 | `pg-request.js` | body、内容/图片、SSE 行和错误解析 |
-| `pg-stream.js` | 流式/非流式请求、chunk 聚合、完成/失败/停止 |
-| `pg-markdown.js` | Markdown、KaTeX、DOMPurify、reasoning 拆分 |
-| `pg-render.js` | 消息、来源、代码/Mermaid/HTML、debug 渲染 |
-| `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数/图片交互 |
+| `pg-stream.js` | 普通流式/非流式请求、图片旧路径兼容、generation-aware autosave |
+| `pg-image-model.js` | Manual Canvas adapter normalization、独立 generation/asset history、Comfy/remote generate、regenerate/delete/stop |
+| `pg-image-inspire.js` | 仅使用 text helper model 的 Natural/Tag/JSON Prompt Inspire modal |
+| `pg-image-batch.js` | Batch 三步 plan/transform/review、snapshot-first SSE、pause/resume/stop/retry、Prompt × Variant viewer |
+| `pg-comfyui.js` | 浏览器同源 ComfyUI proxy、workflow 参数与 history polling |
+| `pg-render.js` | Manual Canvas、消息、来源、代码/Mermaid/HTML、debug 渲染 |
+| `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数、Image mode routing |
 | `pg-modal.js` | 调试、图片预览（含 zoom/pan/copy/save/reset）、模型选择等 modal |
 | `pg-autochat.js` | 共享时间线、多 Agent 调度、摘要、群聊 modal |
 | `pg-setup.js` | 场景向导、ScenarioProfile、导入导出和应用 |
 | `pg-director.js` | Director 判断、Narrator 生成和生命周期 |
-| `pg-search.js` | Search 模式：3 步 AI 编排（分类→搜索→综合）、搜索设置面板、结果渲染 |
-| `pg-lifecycle.js` | `renderPlayground`（含 search 模式恢复后重新渲染） / `cleanupPlayground`（search 模式 early return 不 abort） |
-| `pg-i18n.js` | Playground 独立中英文字典 + 共享 `T()` 回退（`gallery-state.js`/`editor-state.js` 复用） |
-| `playground.css` | 全屏布局、消息、侧栏、modal、响应式样式 |
-| `editor_textreview_split.js` | AI Text Review 章节切分算法（移植自 novelhelper `split.ts`，按 `SplitPattern` 正则检测章节边界） |
-| `editor_textreview_diff.js` | AI Text Review 行级 diff 对比算法（原文 vs 清理后） |
-| `editor_textreview_state.js` | AI Text Review 会话状态 + 切页快照/重订阅（snapshot + re-subscribe，会话驻后端内存不丢失） |
-| `editor_textreview.js` | AI Text Review 入口：`renderTextReview`/`cleanupTextReview` + 4 步路由 |
-| `editor_textreview_step1.js` | step1 导入：粘贴/上传长文本原文 |
-| `editor_textreview_step2.js` | step2 切分：调整章节边界（用 `editor_textreview_split.js`） |
-| `editor_textreview_step3.js` | step3 AI 清理：选节点池 + prompt，SSE 订阅实时进度 |
-| `editor_textreview_step4.js` | step4 审校：`editor_textreview_diff.js` 行级 diff 逐章接受/拒绝/重处理 |
+| `pg-search.js` | Search 模式：3 步 AI 编排、搜索设置面板、结果渲染 |
+| `pg-lifecycle.js` | render/cleanup；Batch 离开页面只关闭 SSE，不取消后端任务 |
+| `pg-i18n.js` | Playground 独立中英文字典 + 共享 `T()` 回退 |
+| `playground.css` | 全屏布局、Manual Canvas、Batch、侧栏、modal 与既有模块样式 |
 
 ### 5.3 宿主适配契约
 
@@ -757,6 +760,9 @@ go build -tags playground -o tinyrouter-pg.exe .
 | 修改图片请求超时兜底 | `pg-stream.js` 的 `pgSendImage` 的 `imgTimer`（300s fetch 兜底 `pgFail`）、`pg-render.js` 的 `pgTickWaiting` 的 `pgSafetyNetMs`（300s loading 安全网）；改兜底阈值须同时调两侧并覆盖 4k 实际耗时上限；代理侧 keep-alive 见 `proxy-architecture.md` §8.7 的 `forward.go` keep-alive ticker 与 `compress.go` 绕过列表 |
 | 修改模式切换或左侧面板 | `pgSetMode`、`pgAutoChatToggle`、`pgRenderPanes` 布局类、`pgRenderReqLeft*`、`pgShowReqDetail`、`info-modal-overlay`/`info_common.js`（详情弹窗基础设施）、`.pg-req-left-mode` CSS；改来源过滤须同步 `pg-stream.js` 的 `X-TinyRouter-Source` 头与 `recordUsage` 的 `Entry.Source` 回填 + `Handler.SetPgUsage` 注入 + `api/monitor/register.go` `getPlaygroundUsage`；改详情弹窗须同步 `app.js` 的 `topOpenModal`/`dismissTopModal` 对 `pg-modal-overlay` 的 ESC 处理；改 Recent Requests 实时性须同步 SSE 事件处理与 `/api/monitor/events` 后端 |
 | 发布 Playground 变体 | 无 tag/tag 测试、资源 200、完整首页手测 |
+| 修改 Manual Image Canvas / Inspire | `pg-image-model.js`、`pg-image-inspire.js`、`pg-state.js`（`PG_IMAGE_KEY` 与 per-window generation/asset state）、`pg-render.js`（独立 Canvas 与 flattened history）、`pg-ui.js`（Image routing，不追加 chat bubble）、`pg-stream.js`（generationId+assetId autosave）、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/image/register.go` |
+| 修改 Image Batch Project | `internal/imagebatch/{types,paths,project_store,reconciler,manager,scheduler,remote_generator,comfy_generator,generator}.go`、`internal/api/imagebatch/*.go`、`internal/api/router.go`（auth + 32 MiB exact/root routes）、`pg-image-batch.js`、`pg-lifecycle.js`、`web/static/index.html`、`PROJECT_MAP.md` |
+ | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `pgJSFiles` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `pgJSFiles` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 修改 Search 状态持久化 | `pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支跳过 localStorage messages）、`pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后重新渲染）、`pg-search.js`（`pgSearchSend()` 即时保存、`pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查） |
 | 修改/新增 Editor 功能 | `editor-state.js`、`editor.js`、`playground.css`（`.ed-*`）、`internal/api/editor.go`、`internal/api/router.go`（路由 + pgJSFiles）、`web/static/app.js`（`gotoGalleryToggle`/`navigateTo`）、`web/static/auth.js`（nav-item toggle）、`web/static/i18n.js`（`editor*` 键）、`web/static/shortcuts.js`（F6 label）、`web/static/index.html`（脚本加载） |

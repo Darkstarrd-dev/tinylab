@@ -217,6 +217,12 @@ func (h *Handler) ImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	h.handleProxy(w, r, "/v1/images/generations", combo.EntryFormatOpenAI)
 }
 
+// ImagesEdits handles image-edit requests through the same provider/key/retry
+// pipeline as image generations. The request body remains protocol-native.
+func (h *Handler) ImagesEdits(w http.ResponseWriter, r *http.Request) {
+	h.handleProxy(w, r, "/v1/images/edits", combo.EntryFormatOpenAI)
+}
+
 func (h *Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	h.handleProxy(w, r, "/v1/embeddings", combo.EntryFormatOpenAI)
 }

@@ -117,62 +117,24 @@ function pgUserSend() {
   var text = ta.value.trim();
   if (!text) return;
 
-  // Auto chat mode: allow sending even while generating (messages go to inbox).
   if (pgState.autoChat.enabled) {
     ta.value = '';
-    if (pgState.autoChat.isRunning) {
-      pgAutoChatUserSend(text);
-    } else {
-      pgAutoChatStart(text);
-    }
+    if (pgState.autoChat.isRunning) pgAutoChatUserSend(text); else pgAutoChatStart(text);
     return;
   }
 
-  // Image mode
   if (pgState.mode === 'image') {
-    if (pgIsGenerating()) return;
-    if (!pgAnyWindowHasModel()) {
-      pgToast(pgT('pgSelectModel'), 'warning'); return;
-    }
-    var imgSkipped = [];
-    var imgNow = Date.now();
-    for (var imgI = 0; imgI < pgState.splitCount; imgI++) {
-      var imgW = pgWinAt(imgI);
-      if (!imgW.config.model) {
-        imgSkipped.push(imgI);
-        pgToast(pgT('pgNoModelWin', [imgI + 1]), 'warning');
-        continue;
-      }
-      var sentImgs = (imgW.config.imageEnabled && imgW.config.imageUrls)
-        ? imgW.config.imageUrls.filter(function(u) { return u && u.trim(); }) : [];
-      imgW.messages.push({ role: 'user', content: text, createdAt: imgNow, images: sentImgs });
-      imgW.messages.push({ role: 'assistant', content: '', status: 'loading', startedAt: imgNow });
-    }
-    ta.value = '';
-    for (var imgI2 = 0; imgI2 < pgState.splitCount; imgI2++) {
-      if (imgSkipped.indexOf(imgI2) >= 0) continue;
-      pgRenderMessages(imgI2);
-      var imgW2 = pgWinAt(imgI2);
-      // ComfyUI protocol: submit via the ComfyUI API (proxy + direct WS),
-      // not via the OpenAI-compatible /v1/images/generations endpoint.
-      if ((typeof pgEffectiveProtocol === 'function') && pgEffectiveProtocol(imgW2.config) === 'comfyui') {
-        pgSendComfyImage(imgI2, imgW2.messages.length - 1);
-        imgW2.config.imageUrls = [];
-        imgW2.config.imageEnabled = false;
-        continue;
-      }
-      var imgBody = pgBuildImageBody(imgI2);
-      if (!imgBody) {
-        pgFail(imgI2, imgW2.messages.length - 1, 'Failed to build image request');
-        continue;
-      }
-      pgSendImage(imgI2, imgBody, imgW2.messages.length - 1);
-      imgW2.config.imageUrls = [];
-      imgW2.config.imageEnabled = false;
-    }
-    pgRenderInputThumbs();
-    pgRenderSidebar();
-    pgSave();
+    var activeImageWin = pgWin();
+    var imageProtocol = activeImageWin && typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(activeImageWin.config) : null;
+    if (!activeImageWin) return;
+    if (imageProtocol !== 'comfyui' && !activeImageWin.config.model) { pgToast(pgT('pgSelectModel'), 'warning'); return; }
+    activeImageWin.image.draftPrompt = text;
+    pgImageGenerate(pgState.activeWin, text, { promptFormat: 'natural' }).then(function () {
+      ta.value = '';
+      activeImageWin.image.draftPrompt = '';
+      pgRenderInputBar();
+    }).catch(function () {});
+    pgRenderInputBar();
     return;
   }
 
@@ -474,30 +436,18 @@ function pgRenderSidebar() {
       winbarContent +
     '</div>';
 
-  // --- Model select (image mode: dual native <select> protocol left / model right) ---
+  // --- Model select (image mode: protocol and image model) ---
   var modelLabel = pgWin().config.model || pgT('pgSelectModel');
   var modelPickerOpts = { kindFilter: 'text' };
   var modelSel = '<button class="pg-btn pg-model-btn"' + (customMode ? ' disabled' : '') + ' onclick="pgOpenModelPicker(pgWin().config.model, function(v){ pgOnModelChange(v); pgRenderSidebar(); }, ' + JSON.stringify(modelPickerOpts).replace(/"/g, '&quot;') + ')" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(modelLabel) + ' <span style="float:right;opacity:0.5">▼</span></button>';
   if (pgState.mode === 'image') {
-    var protos = pgImageProtocols();
-    var protoCur = cfg.imgProtocolFilter || 'all';
-    var protoOpts = protos.map(function(p) {
-      return '<option value="' + pgEscapeAttr(p) + '"' + (protoCur === p ? ' selected' : '') + '>' + pgEscapeHtml(p === 'all' ? pgT('pgImgProtocolAll') : p) + '</option>';
-    }).join('');
+    var protos = pgImageProtocols(), protoCur = cfg.imgProtocolFilter || 'all';
+    var protoOpts = protos.map(function(p) { return '<option value="' + pgEscapeAttr(p) + '"' + (protoCur === p ? ' selected' : '') + '>' + pgEscapeHtml(p === 'all' ? pgT('pgImgProtocolAll') : p) + '</option>'; }).join('');
     var protoSel = '<select class="pg-param-select" onchange="pgOnProtocolFilter(this.value)"' + (customMode ? ' disabled' : '') + ' style="flex:1">' + protoOpts + '</select>';
-    var mCur = cfg.model || '';
-    var availModels = (pgState.models || []).slice().filter(function(m) { return m.kind === 'image'; });
-    if (protoCur && protoCur !== 'all') {
-      availModels = availModels.filter(function(m) {
-        var proto = m.imgProtocol || 'gpt';
-        return proto === protoCur;
-      });
-    }
-    var mOpts = availModels.map(function(m) {
-      return '<option value="' + pgEscapeAttr(m.id) + '"' + (mCur === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>';
-    }).join('');
-    var mSel = '<select class="pg-param-select" onchange="pgOnModelChange(this.value); pgOnModelSelectBackfill(this.value); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar()"' + (customMode ? ' disabled' : '') + ' style="flex:3"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + mOpts + '</select>';
-    modelSel = '<div style="display:flex;gap:6px;align-items:stretch"><div style="flex:1;min-width:0">' + protoSel + '</div><div style="flex:3;min-width:0">' + mSel + '</div></div>';
+    var mCur = cfg.model || '', availModels = (pgState.models || []).slice().filter(function(m) { return m.kind === 'image'; });
+    if (protoCur && protoCur !== 'all') availModels = availModels.filter(function(m) { return (m.imgProtocol || 'gpt') === protoCur; });
+    var mOpts = availModels.map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (mCur === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('');
+    modelSel = '<div style="display:flex;gap:6px;align-items:stretch"><div style="flex:1;min-width:0">' + protoSel + '</div><div style="flex:3;min-width:0"><select class="pg-param-select" onchange="pgOnModelChange(this.value); pgOnModelSelectBackfill(this.value); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar()"' + (customMode ? ' disabled' : '') + ' style="width:100%"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + mOpts + '</select></div></div>';
   }
 
   // --- Parameters ---
@@ -653,17 +603,19 @@ function pgRenderSidebar() {
       // the model selector (models come from ComfyUI, not /api/models).
       var comfyPanel = (typeof pgRenderComfyPanel === 'function') ? pgRenderComfyPanel(cfg) : '';
       side.innerHTML =
-        winbar +
-        comfyPanel +
+        winbar + comfyPanel +
+        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' +
+          '<label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' +
+          '<select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select>' +
+          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button><button class="pg-btn" onclick="typeof pgOpenImageBatch===\'function\' && pgOpenImageBatch()">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
     } else {
       var imgParams = effProto !== null ? pgRenderImageParams(cfg, effProto) : '';
       side.innerHTML =
         winbar +
-        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
-        modelSel +
-        '</div>' +
+        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
+        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label><select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select><div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button><button class="pg-btn" onclick="typeof pgBatchOpenCreateModal===\'function\' && pgBatchOpenCreateModal()">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -1242,8 +1194,10 @@ function pgShowReqDetail(idx) {
 function pgRenderInputBar() {
   var bar = document.getElementById('pg-inputbar');
   if (!bar) return;
-  var sendBtn;
-  if (pgIsGenerating() && !(pgState.autoChat.enabled && pgState.autoChat.isRunning)) {
+  var imageGenerating = pgState.mode === 'image' && pgWin() && pgWin().image && pgWin().image.phase === 'generating';
+  if (imageGenerating) {
+    sendBtn = '<button class="pg-send stop" onclick="pgImageStop(pgState.activeWin)">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
+  } else if (pgIsGenerating() && !(pgState.autoChat.enabled && pgState.autoChat.isRunning)) {
     sendBtn = '<button class="pg-send stop" onclick="pgStop()">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
   } else {
     var sendLabel = pgState.mode === 'image' ? pgT('pgGenerate') : (pgState.mode === 'search' ? pgT('pgSearchButton') : pgT('pgSendMessage'));
@@ -1251,9 +1205,8 @@ function pgRenderInputBar() {
   }
    bar.innerHTML =
     '<div class="pg-input-card">' +
-      '<div class="pg-input-thumbs" id="pg-input-thumbs"></div>' +
+        '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
       '<div class="pg-input-right">' +
-        '<textarea class="pg-input" id="pg-input" placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
         '<div class="pg-input-bar-toolbar"></div>' +
       '</div>' +
     '</div>' +
@@ -1325,6 +1278,7 @@ function pgRemoveInputImage(idx) {
 }
 
 // ----- Event handlers ----------------------------------------------
+function pgOnImagePromptModel(v) { var w = pgWin(); if (!w) return; w.config.imgPromptModel = v || ''; pgSave(); pgRenderSidebar(); }
 function pgApplyActiveQuickSlot(model) {
   if (!model) return;
   if (pgState.mode !== 'normal' && pgState.mode !== 'search') return;

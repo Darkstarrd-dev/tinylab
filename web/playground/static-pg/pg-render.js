@@ -542,6 +542,10 @@ function pgRenderMessages(i) {
   var w = pgWinAt(i);
   var box = document.getElementById('pg-messages-' + i);
   if (!box) return;
+  if (pgState.mode === 'image' && typeof pgImageRenderCanvas === 'function') {
+    pgImageRenderCanvas(i);
+    return;
+  }
   if (!w.messages.length) {
     box.innerHTML = '<div class="pg-pane-empty">' + pgEscapeHtml(pgT('pgEmptyState')) + '</div>';
     return;
@@ -552,15 +556,64 @@ function pgRenderMessages(i) {
     var errCls = msg.status === 'error' ? ' error' : '';
     html += '<div class="pg-msg ' + side + errCls + '" id="pg-msg-' + i + '-' + idx + '">';
     html += '<div class="pg-bubble-slot" id="pg-bubble-' + i + '-' + idx + '">' + pgMsgInnerHTML(i, idx, msg, !!msg.sourceVisible) + '</div>';
-    if (msg.role !== 'loading') {
-      html += '<div class="pg-msg-meta' + (msg.role === 'assistant' && idx === w.messages.length - 1 ? ' always-show' : '') + '">' + pgMsgMetaInnerHTML(i, idx, msg) + '</div>';
-    }
+    if (msg.role !== 'loading') html += '<div class="pg-msg-meta' + (msg.role === 'assistant' && idx === w.messages.length - 1 ? ' always-show' : '') + '">' + pgMsgMetaInnerHTML(i, idx, msg) + '</div>';
     html += '</div>';
   });
   box.innerHTML = html;
   w.messages.forEach(function(_, idx) { pgRenderBubble(i, idx); });
   pgScrollBottom(i);
 }
+
+function pgImageFlatAssets(st) {
+  var out = [];
+  if (!st || !Array.isArray(st.generations)) return out;
+  st.generations.forEach(function (generation, gi) {
+    (generation.assets || []).forEach(function (asset, ai) {
+      out.push({ generation: generation, asset: asset, gi: gi, ai: ai });
+    });
+  });
+  return out;
+}
+function pgImageCurrentEntry(st) {
+  var flat = pgImageFlatAssets(st);
+  if (!flat.length) return null;
+  var index = st.activeAssetIndex >= 0 && st.activeAssetIndex < flat.length ? st.activeAssetIndex : flat.length - 1;
+  return flat[index];
+}
+function pgImageCurrentGeneration(st) {
+  var entry = pgImageCurrentEntry(st);
+  return entry ? entry.generation : (st && st.generations && st.generations.length ? st.generations[st.generations.length - 1] : null);
+}
+function pgImageShowDetails(i, gi) {
+  var w = pgWinAt(i), st = w && pgImageState(w), g = st && st.generations[gi];
+  if (!g) return;
+  pgShowModal('<div class="pg-modal-header"><span class="pg-modal-title">' + pgEscapeHtml(pgT('pgImageDetails')) + '</span><button class="pg-modal-close" onclick="pgCloseModal()">✕</button></div><div class="pg-modal-body"><h4>' + pgEscapeHtml(pgT('pgImagePrompt')) + '</h4><pre class="pg-debug-pre">' + pgEscapeHtml(g.prompt || '') + '</pre><h4>' + pgEscapeHtml(pgT('pgImageParameters')) + '</h4><pre class="pg-debug-pre">' + pgEscapeHtml(JSON.stringify(g.params || {}, null, 2)) + '</pre></div>');
+}
+function pgImageRenderCanvas(i) {
+  var w = pgWinAt(i), box = document.getElementById('pg-messages-' + i), st = w && pgImageState(w);
+  if (!box || !st) return;
+  var entry = pgImageCurrentEntry(st), g = entry && entry.generation, asset = entry && entry.asset;
+  var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
+  if (asset && asset.url) {
+    html += '<div class="pg-image-stage"><img class="pg-image-result" src="' + pgEscapeHtml(asset.url) + '" alt="' + pgEscapeAttr(g.prompt || 'Generated image') + '" onclick="pgShowImageModal(\'' + pgEscapeAttr(asset.url) + '\',\'' + pgEscapeAttr(asset.savedPath || '') + '\',\'' + pgEscapeAttr(asset.savedFilename || '') + '\')">';
+    if (phase === 'generating') html += '<div class="pg-image-loading-overlay"><span class="pg-image-ring"></span><span>' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
+    html += '</div>';
+  } else if (phase === 'generating') html += '<div class="pg-image-empty pg-image-generating"><span class="pg-image-ring"></span><strong>' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
+  else if (phase === 'error') html += '<div class="pg-image-empty pg-image-error">' + pgEscapeHtml(st.error || pgT('pgError')) + '</div>';
+  else if (phase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
+  else html += '<div class="pg-image-empty"><div class="pg-empty-icon">✦</div><div>' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
+  if (phase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
+  var flat = pgImageFlatAssets(st);
+  if (entry && asset && asset.url) {
+    var index = flat.indexOf(entry), total = flat.length;
+    html += '<div class="pg-image-history-nav"><button class="pg-btn" onclick="pgImageSelectAsset(' + i + ',' + Math.max(0, index - 1) + ')" ' + (index <= 0 ? 'disabled' : '') + '>‹</button><span>' + (index + 1) + ' / ' + total + '</span><button class="pg-btn" onclick="pgImageSelectAsset(' + i + ',' + Math.min(total - 1, index + 1) + ')" ' + (index >= total - 1 ? 'disabled' : '') + '>›</button></div>';
+    html += '<div class="pg-image-footer"><span>' + pgEscapeHtml((asset.width && asset.height) ? asset.width + ' × ' + asset.height : '—') + '</span><span>' + pgEscapeHtml(asset.mime || 'image') + '</span><span>' + pgEscapeHtml(asset.savedPath || '') + '</span></div>';
+    html += '<div class="pg-image-actions"><button class="pg-btn" onclick="pgImageShowDetails(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgImagePromptParameters')) + '</button><button class="pg-btn" onclick="pgCopyImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgCopy')) + '</button><button class="pg-btn" onclick="pgSaveImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgSave')) + '</button><button class="pg-btn" onclick="pgImageRegenerate(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button><button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button></div>';
+  }
+  html += '</div>'; box.innerHTML = html;
+  if (phase === 'generating') { if (st.timer) clearInterval(st.timer); st.timer = setInterval(function () { var el = document.getElementById('pg-image-elapsed-' + i); if (!el || st.phase !== 'generating') { clearInterval(st.timer); st.timer = null; return; } var started = st.generations.length ? st.generations[st.generations.length - 1].createdAt : Date.now(); el.textContent = Math.floor((Date.now() - started) / 1000) + 's'; }, 1000); }
+}
+function pgImageSelectAsset(i, index) { var st = pgImageState(pgWinAt(i)), flat = pgImageFlatAssets(st); if (!flat.length || index < 0 || index >= flat.length) return; st.activeAssetIndex = index; pgImageRenderCanvas(i); }
 
 function pgActionCopy(i, idx) {
   var w = pgWinAt(i);
