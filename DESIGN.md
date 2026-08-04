@@ -155,6 +155,13 @@ Component-specific state and surface rules consume these aliases so a new mode o
 - Existing global baseline selectors are compatibility infrastructure. New modules must use a namespace prefix (`.pg-*`, `.dl-*`, `.ge-*`, `.tr-*`, or a feature-specific prefix) and declare their own form/table/heading styles instead of depending on new bare global selectors.
 - Style validation uses the production HTML shell over HTTP with an optional preview override loaded after production CSS; copied standalone HTML/CSS and `file://` are not valid equivalence tests.
 
+### Header navigation reference control
+
+- `.top-header-nav` is the production navigation shell: a theme-token-driven 3-column × 2-row recessed control with five long rectangular `.nav-item` cells and one disabled, empty sixth button slot; Download occupies the lower-middle slot and the lower-right slot remains empty.
+- `.top-header-nav::before` and `::after` are the two small non-interactive rotated square decorations centered in the tightened row gap between adjacent columns. Only the diamond edge facing the active cell receives the active color; `.top-header-nav-minimal` removes them and uses a single 2-cell row for the no-Playground shell.
+- Navigation order remains controlled by `data-page`/grid placement rules, while `app.js` continues to own active state and page navigation. Do not replace these buttons with radio inputs or move navigation behavior into CSS.
+- Dark and light appearances are controlled by `--nav-*` tokens in `style.css`; the active page selects its accent color for a rounded-contour-clipped, transparency/brightness-gradient outline, accent-colored bright fog/glow text with a crisp stroked fill and short restrained halo, and one-facing-edge diamond light. Navigation click focus does not add the global blue outline.
+
 ### Exceptions (intentionally hardcoded)
 
 - `border-radius: 100px` — pill badges (`.badge`, `.model-status`, `.model-quota`).
