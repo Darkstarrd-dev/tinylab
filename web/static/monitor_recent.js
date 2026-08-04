@@ -83,6 +83,8 @@ function recentPageSizeOptions() {
 
 function updateRecentPagerState() {
   var maxPage = recentMaxPage();
+  var atFirst = recentPage <= 1;
+  var atLast = recentPage >= maxPage;
   var ind = document.getElementById('recent-page-indicator');
   if (ind) ind.textContent = recentPage + ' / ' + maxPage;
   var sel = document.getElementById('recent-page-size');
@@ -94,7 +96,6 @@ function updateRecentPagerState() {
   }
   var next = document.getElementById('recent-next-page');
   if (next) {
-    var atLast = recentPage >= maxPage;
     next.disabled = atLast;
     next.classList.toggle('pager-disabled', atLast);
   }
