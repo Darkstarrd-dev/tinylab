@@ -90,6 +90,17 @@ var pgState = {
   // messages JSON, created_at INTEGER). Load on pgLoad(), insert on pgSearchSend().
   searchHistory: [],
   activeSearchId: null,  // id of the currently displayed search conversation
+  // ComfyUI protocol runtime state (in-memory; re-fetched on connect)
+  comfy: {
+    connected: false,
+    connecting: false,
+    error: '',
+    version: '',
+    models: {},        // { diffusion_models: [...], text_encoders: [...], vae: [...], checkpoints: [...] }
+    samplers: [],      // KSampler sampler_name combo options
+    schedulers: [],    // KSampler scheduler combo options
+    templates: [],     // [{ prompt_id, title, workflow }]
+  },
 };
 
 var pgSearchSavedSplit = 0;

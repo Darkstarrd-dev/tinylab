@@ -17,6 +17,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
 	"github.com/tinyrouter/tinyrouter/internal/api/combos"
+	"github.com/tinyrouter/tinyrouter/internal/api/comfyui"
 	"github.com/tinyrouter/tinyrouter/internal/api/compress"
 	"github.com/tinyrouter/tinyrouter/internal/api/console_logs"
 	apidownload "github.com/tinyrouter/tinyrouter/internal/api/download"
@@ -182,7 +183,7 @@ func securityHeaders(port int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(r.URL.Path, "/v1/") {
-				csp := fmt.Sprintf("default-src 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:%d", port)
+				csp := fmt.Sprintf("default-src 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:%d ws://127.0.0.1:*", port)
 				w.Header().Set("Content-Security-Policy", csp)
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
@@ -283,6 +284,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	reviewPresetsHandler := review_presets.NewHandler(apiDeps)
 	keysHandler := keys.NewHandler(apiDeps)
 	modelsHandler := models.NewHandler(apiDeps)
+	comfyuiHandler := comfyui.NewHandler(apiDeps)
 	quickslotsHandler := quickslots.NewHandler(apiDeps)
 	imageHandler := image.NewHandler(apiDeps)
 	settingsHandler := settings.NewHandler(apiDeps)
@@ -332,9 +334,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			monitorHandler.Register(r)
 			sseHandler.Register(r)
 
-			// Image save + same-origin proxy (avoids CORS for browser-side reads)
 			imageHandler.Register(r)
-
 			// Console logs
 			consoleLogsHandler.Register(r)
 
@@ -349,6 +349,19 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// Traces
 			r.Route("/traces", traceHandler.Register)
 		})
+	})
+
+	// ComfyUI workflow proxy: outside the 1 MiB /api group so large API-format
+	// workflows remain usable, but still protected by the same auth middleware.
+	r.Route("/api/comfyui", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
+		comfyuiHandler.Register(r)
 	})
 
 	// Gallery API routes: outside the /api group so they bypass the 1MB body
@@ -402,7 +415,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			pgJSFiles := []string{
 				"playground.js", "pg-i18n.js",
 				"pg-core.js", "pg-state.js", "pg-markdown.js",
-				"pg-request.js", "pg-stream.js", "pg-render.js",
+				"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-render.js",
 				"pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
 				"pg-autochat.js",
 				"pg-setup.js", "pg-director.js", "pg-search.js",

@@ -509,6 +509,15 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-param-row .pg-param-label-btn:hover{color:var(--accent);opacity:1;text-decoration:underline}
 .pg-param-row select,.pg-param-row input[type="number"],.pg-param-row input[type="text"]{box-sizing:border-box;background:var(--input-bg,var(--bg));border:1px solid var(--glass-border);border-radius:var(--radius-sm);color:var(--text);padding:3px 8px;font-size:13px;height:28px;line-height:20px;max-width:165px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pg-param-row select:focus,.pg-param-row input:focus{outline:none;border-color:var(--accent)}
+
+/* ComfyUI protocol */
+.pg-comfy-hint{font-size:var(--font-badge);color:var(--text-muted);margin-top:6px;line-height:1.35}
+.pg-comfy-error{font-size:var(--font-badge);color:var(--danger);margin-top:6px;line-height:1.35;word-break:break-word}
+.pg-comfy-group{margin:10px 0 6px;padding-top:7px;border-top:1px solid var(--glass-border);font-size:var(--font-badge);font-weight:600;color:var(--text-secondary);word-break:break-word}
+.pg-comfy-group:first-of-type{margin-top:0;border-top:0;padding-top:0}
+.pg-comfy-nodeid{font-weight:400;color:var(--text-muted);opacity:.7}
+.pg-comfy-paste{box-sizing:border-box;background:var(--input-bg,var(--bg));border:1px solid var(--glass-border);border-radius:var(--radius-sm);color:var(--text);padding:6px 8px;font:12px ui-monospace,Consolas,monospace;resize:vertical}
+.pg-comfy-paste:focus{outline:none;border-color:var(--accent)}
 .pg-mode-toggle .pg-mode-btn{flex:1}
 
 .pg-search-raw{cursor:pointer;overflow:hidden;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-sm);margin:4px 0}

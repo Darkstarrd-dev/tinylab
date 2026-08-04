@@ -62,6 +62,12 @@ var PG_DEFAULT_CFG = {
   imgSteps: 0,
   imgGuidance: 0,
   imgSeed: 0,
+  // ComfyUI protocol (Playground Image mode)
+  imgComfyPort: '8188',
+  imgComfyConnected: false,
+  imgComfyTemplateId: '',
+  imgComfyWorkflow: null,
+  imgComfyPasteJson: '',
 };
 
 // parameterEnabled mirrors new-api defaults: max_tokens + seed off.

@@ -153,6 +153,14 @@ function pgUserSend() {
       if (imgSkipped.indexOf(imgI2) >= 0) continue;
       pgRenderMessages(imgI2);
       var imgW2 = pgWinAt(imgI2);
+      // ComfyUI protocol: submit via the ComfyUI API (proxy + direct WS),
+      // not via the OpenAI-compatible /v1/images/generations endpoint.
+      if ((typeof pgEffectiveProtocol === 'function') && pgEffectiveProtocol(imgW2.config) === 'comfyui') {
+        pgSendComfyImage(imgI2, imgW2.messages.length - 1);
+        imgW2.config.imageUrls = [];
+        imgW2.config.imageEnabled = false;
+        continue;
+      }
       var imgBody = pgBuildImageBody(imgI2);
       if (!imgBody) {
         pgFail(imgI2, imgW2.messages.length - 1, 'Failed to build image request');
@@ -640,15 +648,26 @@ function pgRenderSidebar() {
 
   if (pgState.mode === 'image') {
     var effProto = pgEffectiveProtocol(cfg);
-    var imgParams = effProto !== null ? pgRenderImageParams(cfg, effProto) : '';
-    side.innerHTML =
-      winbar +
-      '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
-      modelSel +
-      '</div>' +
-      imgParams +
-      '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
-      '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
+    if (effProto === 'comfyui') {
+      // ComfyUI protocol: connection panel + dynamic workflow params replace
+      // the model selector (models come from ComfyUI, not /api/models).
+      var comfyPanel = (typeof pgRenderComfyPanel === 'function') ? pgRenderComfyPanel(cfg) : '';
+      side.innerHTML =
+        winbar +
+        comfyPanel +
+        '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
+        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
+    } else {
+      var imgParams = effProto !== null ? pgRenderImageParams(cfg, effProto) : '';
+      side.innerHTML =
+        winbar +
+        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
+        modelSel +
+        '</div>' +
+        imgParams +
+        '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
+        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
+    }
   } else if (pgState.mode === 'search') {
     var searchSettings = pgRenderSearchSettings(cfg);
     side.innerHTML =
@@ -720,10 +739,8 @@ function pgEffectiveProtocol(cfg) {
   return null;
 }
 
-// pgImageProtocols returns the list of available image protocols for filtering.
-// Fixed to ['all', 'gpt', 'xai', 'modelscope'] so protocol filter options stay complete.
 function pgImageProtocols() {
-  return ['all', 'gpt', 'xai', 'modelscope'];
+  return ['all', 'gpt', 'xai', 'modelscope', 'comfyui'];
 }
 
 function pgImgParamSelect(key, labelKey, val, options) {
@@ -1327,12 +1344,21 @@ function pgOnProtocolFilter(v) {
   var w = pgWin();
   if (!w) return;
   w.config.imgProtocolFilter = v;
-  // Clear model if it doesn't match the selected protocol
-  if (v && v !== 'all' && w.config.model) {
-    var info = pgGetModelInfo(w.config.model);
-    var proto = (info && info.kind === 'image') ? (info.imgProtocol || 'gpt') : '';
-    if (proto !== v) {
-      w.config.model = '';
+  if (v === 'comfyui') {
+    // ComfyUI has no entry in /api/models; '__comfyui__' is a placeholder that
+    // satisfies the "a model is selected" gate while the panel shows the
+    // ComfyUI connection + workflow UI instead of the model selector.
+    w.config.model = '__comfyui__';
+  } else if (v === 'all' || w.config.model === '__comfyui__') {
+    w.config.model = '';
+  } else {
+    // Clear model if it doesn't match the selected protocol
+    if (w.config.model) {
+      var info = pgGetModelInfo(w.config.model);
+      var proto = (info && info.kind === 'image') ? (info.imgProtocol || 'gpt') : '';
+      if (proto !== v) {
+        w.config.model = '';
+      }
     }
   }
   pgSave();
