@@ -86,6 +86,8 @@ function pgComfyConnect() {
     { p: '/models/checkpoints', key: 'checkpoints' },
     { p: '/object_info/KSampler', key: 'sampler' },
     { p: '/history', key: 'history' },
+    // Saved workflows in the ComfyUI user directory (user/default/workflows).
+    { p: '/userdata', key: 'saved_workflows', query: 'dir=workflows&recurse=true&split=false&full_info=true' },
   ];
   var results = {};
   var chain = Promise.resolve();
@@ -126,39 +128,68 @@ function pgComfyConnect() {
       if (rq.scheduler && rq.scheduler[0]) schedulers = rq.scheduler[0].slice();
     }
 
-    // Workflow templates = recently executed successful prompts from /history.
-    var templates = [];
+    // Workflow templates: saved workflows (user/default/workflows) first, then
+    // recently executed successful prompts from /history.
+    var histTemplates = [];
     var hist = results.history;
     if (hist && typeof hist === 'object') {
       Object.keys(hist).forEach(function(pid) {
         var h = hist[pid];
         if (!h || !h.prompt || !h.prompt[2]) return;
         if (h.status && h.status.status_str !== 'success') return;
-        templates.push({ prompt_id: pid, workflow: h.prompt[2], title: pgComfyTemplateTitle(h.prompt[2], pid) });
+        histTemplates.push({ prompt_id: pid, workflow: h.prompt[2], title: pgComfyTemplateTitle(h.prompt[2], pid) });
       });
     }
 
-    pgState.comfy = {
-      connected: true, connecting: false, error: '',
-      version: st.system.comfyui_version || '',
-      models: models, samplers: samplers, schedulers: schedulers, templates: templates,
-    };
-    cfg.imgComfyConnected = true;
+    function pgComfyFinalize(savedTemplates) {
+      var templates = savedTemplates.concat(histTemplates);
+      pgState.comfy = {
+        connected: true, connecting: false, error: '',
+        version: st.system.comfyui_version || '',
+        models: models, samplers: samplers, schedulers: schedulers, templates: templates,
+      };
+      cfg.imgComfyConnected = true;
 
-    // Auto-select the first template when nothing usable is selected yet.
-    if (!cfg.imgComfyWorkflow) {
-      if (templates.length > 0) {
-        cfg.imgComfyTemplateId = templates[0].prompt_id;
-        cfg.imgComfyWorkflow = pgComfyDeepCopy(templates[0].workflow);
-      } else {
-        cfg.imgComfyTemplateId = '';
-        cfg.imgComfyWorkflow = null;
+      // Auto-select the first template when nothing usable is selected yet.
+      if (!cfg.imgComfyWorkflow) {
+        if (templates.length > 0) {
+          cfg.imgComfyTemplateId = templates[0].prompt_id;
+          cfg.imgComfyWorkflow = pgComfyDeepCopy(templates[0].workflow);
+        } else {
+          cfg.imgComfyTemplateId = '';
+          cfg.imgComfyWorkflow = null;
+        }
       }
+      pgSave();
+      pgRenderSidebar();
+      var modelCount = Object.keys(models).reduce(function(n, k) { return n + models[k].length; }, 0);
+      pgToast(pgT('pgComfyConnectedInfo', [pgState.comfy.version, modelCount, templates.length]), 'success');
     }
-    pgSave();
-    pgRenderSidebar();
-    var modelCount = Object.keys(models).reduce(function(n, k) { return n + models[k].length; }, 0);
-    pgToast(pgT('pgComfyConnectedInfo', [pgState.comfy.version, modelCount, templates.length]), 'success');
+
+    // Load saved workflows from the ComfyUI user directory and convert the
+    // UI-format graphs to API-format prompts (subgraph nodes are expanded).
+    var savedList = results.saved_workflows;
+    var savedGraphs = [];
+    var loadChain = Promise.resolve();
+    if (Array.isArray(savedList)) {
+      savedList.forEach(function(entry) {
+        var path = entry && entry.path;
+        if (!path || path.slice(-5) !== '.json') return;
+        loadChain = loadChain.then(function() {
+          return pgComfyCall(cfg, 'GET', '/userdata/workflows%2F' + encodeURIComponent(path))
+            .then(function(resp) { return resp.json(); })
+            .then(function(g) { savedGraphs.push({ path: path, modified: entry.modified || 0, graph: g }); })
+            .catch(function(err) { console.warn('[pg-comfyui] load saved workflow failed:', path, err.message); });
+        });
+      });
+    }
+    loadChain
+      .then(function() { return pgComfySavedTemplates(cfg, savedGraphs); })
+      .then(function(savedTemplates) { pgComfyFinalize(savedTemplates); })
+      .catch(function(err) {
+        console.warn('[pg-comfyui] saved workflow import failed:', err && err.message);
+        pgComfyFinalize([]);
+      });
   });
 }
 
@@ -175,6 +206,213 @@ function pgComfyTemplateTitle(wf, pid) {
   }
   var base = prefix || firstText || ('workflow ' + pid.slice(0, 8));
   return base + ' [' + pid.slice(0, 8) + ']';
+}
+
+// ----- Saved-workflow import: UI graph -> API prompt -----------------------
+// ComfyUI saves workflows in the editor ("UI") format: { id, nodes[], links[],
+// definitions.subgraphs[] }. POST /prompt needs the API format
+// { nodeId: { class_type, inputs } }, so saved graphs are converted here:
+//  - widget values align to the node's widget order (control_after_generate
+//    occupies its own slot), filtered to real inputs via /object_info schemas;
+//  - link-connected inputs become [sourceNode, sourceSlot] refs (Reroute chains
+//    are resolved to their ultimate source);
+//  - subgraph nodes (UUID class types listed in definitions.subgraphs) are
+//    expanded recursively: their input ports inject the outer node's values
+//    into the inner targets and output ports rewire consumers to the inner
+//    producer.
+function pgComfyLinkMap(graph) {
+  var m = {};
+  (graph.links || []).forEach(function(l) {
+    if (Array.isArray(l)) m[l[0]] = { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] };
+    else m[l.id] = l;
+  });
+  return m;
+}
+
+// Collects the /object_info class names used by a saved graph (and any nested
+// subgraph definitions), skipping subgraph UUIDs and non-node types.
+function pgComfyCollectClasses(graph, classes, seen) {
+  var defs = (graph.definitions && Array.isArray(graph.definitions.subgraphs)) ? graph.definitions.subgraphs : [];
+  var defById = {};
+  defs.forEach(function(d) { defById[d.id] = d; });
+  function walk(nodes) {
+    (nodes || []).forEach(function(n) {
+      if (!n || !n.type) return;
+      var t = n.type;
+      if (t === 'Note' || t === 'MarkdownNote' || t === 'Reroute') return;
+      if (defById[t]) { walk(defById[t].nodes); return; }
+      if (!seen[t]) { seen[t] = true; classes.push(t); }
+    });
+  }
+  walk(graph.nodes);
+}
+
+// Loads /object_info schemas for the classes used by the saved graphs, converts
+// each graph to an API-format prompt, and returns the template list (newest
+// modified first). prompt_id uses a "file:" prefix so saved templates can never
+// collide with history prompt UUIDs.
+function pgComfySavedTemplates(cfg, graphs) {
+  var classes = [];
+  var seen = {};
+  graphs.forEach(function(item) { pgComfyCollectClasses(item.graph, classes, seen); });
+  var objInfo = {};
+  var chain = Promise.resolve();
+  classes.slice(0, 80).forEach(function(c) {
+    chain = chain.then(function() {
+      return pgComfyCall(cfg, 'GET', '/object_info/' + encodeURIComponent(c))
+        .then(function(resp) { return resp.json(); })
+        .then(function(j) {
+          var nd = j && j[c];
+          if (!nd || !nd.input) return;
+          var names = [], cag = {};
+          var req = nd.input.required || {}, opt = nd.input.optional || {};
+          Object.keys(req).forEach(function(k) {
+            names.push(k);
+            if (req[k] && req[k][1] && req[k][1].control_after_generate) cag[k] = true;
+          });
+          Object.keys(opt).forEach(function(k) {
+            names.push(k);
+            if (opt[k] && opt[k][1] && opt[k][1].control_after_generate) cag[k] = true;
+          });
+          objInfo[c] = { names: names, cag: cag };
+        })
+        .catch(function() {});
+    });
+  });
+  return chain.then(function() {
+    var out = [];
+    graphs.forEach(function(item) {
+      try {
+        out.push({
+          prompt_id: 'file:' + item.path,
+          title: item.path.slice(0, -5),
+          modified: item.modified,
+          workflow: pgComfyGraphToPrompt(item.graph, objInfo),
+        });
+      } catch (e) {
+        console.warn('[pg-comfyui] workflow convert failed:', item.path, e && e.message);
+      }
+    });
+    out.sort(function(a, b) { return (b.modified || 0) - (a.modified || 0); });
+    return out;
+  });
+}
+
+function pgComfyGraphToPrompt(graph, objInfo) {
+  var defs = (graph.definitions && Array.isArray(graph.definitions.subgraphs)) ? graph.definitions.subgraphs : [];
+  var defById = {};
+  defs.forEach(function(d) { defById[d.id] = d; });
+  var idState = { next: 1000000 };
+  return pgComfyConvertLevel(graph, { defById: defById, objInfo: objInfo || {} }, idState).prompt;
+}
+
+function pgComfyConvertLevel(graph, ctx, idState) {
+  var links = pgComfyLinkMap(graph);
+  var prompt = {};
+  var idMap = {};
+  var outMap = {};
+  var pending = [];
+  var rerouteIn = {};
+
+  (graph.nodes || []).forEach(function(n) {
+    if (n.type !== 'Reroute') return;
+    var inLink = null;
+    (n.inputs || []).forEach(function(i) { if (i.link != null) inLink = i.link; });
+    if (inLink != null) {
+      var l = links[inLink];
+      if (l) rerouteIn[n.id] = { src: l.origin_id, slot: l.origin_slot };
+    }
+  });
+  function resolveSrc(src, slot) {
+    var s = src, guard = 0;
+    while (rerouteIn[s] !== undefined && guard++ < 64) s = rerouteIn[s].src;
+    return [s, slot];
+  }
+
+  (graph.nodes || []).forEach(function(n) {
+    var t = n.type;
+    if (!t || t === 'Note' || t === 'MarkdownNote' || t === 'Reroute') return;
+    if (n.mode === 3 || n.mode === 4) return; // NEVER / BYPASS are not submitted
+    var nodeId = String(idState.next++);
+    idMap[n.id] = nodeId;
+
+    if (ctx.defById[t]) {
+      // Subgraph node: expand recursively, then rewire consumers via outMap.
+      var outerInputs = {};
+      var wv = Array.isArray(n.widgets_values) ? n.widgets_values : [];
+      var ptr = 0;
+      (n.inputs || []).forEach(function(inp) {
+        if (inp.link == null && inp.widget) {
+          if (ptr < wv.length) outerInputs[inp.name] = wv[ptr];
+          ptr++;
+        }
+      });
+      var def = ctx.defById[t];
+      var sub = pgComfyConvertLevel(def, {
+        links: pgComfyLinkMap(def),
+        ports: def.inputs || [],
+        outerInputs: outerInputs,
+        defById: ctx.defById,
+        objInfo: ctx.objInfo,
+      }, idState);
+      for (var k in sub.prompt) prompt[k] = sub.prompt[k];
+      var outL = pgComfyLinkMap(def);
+      (def.outputs || []).forEach(function(p, i) {
+        var mapped = null;
+        (p.linkIds || []).forEach(function(lid) {
+          if (mapped) return;
+          var l = outL[lid];
+          if (l && l.target_id === -20 && l.origin_id !== -10) {
+            var r = resolveSrc(l.origin_id, l.origin_slot);
+            var inner = sub.idMap[r[0]];
+            if (inner !== undefined) mapped = { id: inner, slot: r[1] };
+          }
+        });
+        if (mapped) outMap[nodeId + ':' + i] = mapped;
+      });
+      return;
+    }
+
+    // Classic node.
+    var schema = ctx.objInfo ? ctx.objInfo[t] : null;
+    var inputs = {};
+    var wv = Array.isArray(n.widgets_values) ? n.widgets_values : [];
+    var ptr = 0;
+    (n.inputs || []).forEach(function(inp) {
+      var nm = inp.name;
+      var inSchema = !schema || schema.names.indexOf(nm) >= 0;
+      if (inp.link != null) {
+        var l = links[inp.link];
+        if (l) {
+          if (l.origin_id === -10 && ctx.ports) {
+            // Port of the enclosing subgraph: inject the outer node's value.
+            var pname = ctx.ports[l.origin_slot] && ctx.ports[l.origin_slot].name;
+            if (pname !== undefined && ctx.outerInputs && ctx.outerInputs[pname] !== undefined) inputs[nm] = ctx.outerInputs[pname];
+          } else if (l.origin_id !== -10 && l.origin_id !== -20) {
+            pending.push([nodeId, nm, l.origin_id, l.origin_slot]);
+          }
+        }
+        // Link-connected widget inputs still occupy a widgets_values slot.
+        if (inp.widget) { ptr++; if (schema && schema.cag[nm]) ptr++; }
+      } else if (inp.widget) {
+        if (inSchema && ptr < wv.length) inputs[nm] = wv[ptr];
+        ptr++;
+        if (schema && schema.cag[nm]) ptr++;
+      }
+    });
+    prompt[nodeId] = { class_type: t, inputs: inputs };
+    if (n.title) prompt[nodeId]._meta = { title: n.title };
+  });
+
+  pending.forEach(function(p) {
+    var entry = prompt[p[0]];
+    if (!entry) return;
+    var r = resolveSrc(p[2], p[3]);
+    var sub = outMap[idMap[r[0]] + ':' + r[1]];
+    if (sub) entry.inputs[p[1]] = [sub.id, sub.slot];
+    else if (idMap[r[0]] !== undefined) entry.inputs[p[1]] = [idMap[r[0]], r[1]];
+  });
+  return { prompt: prompt, idMap: idMap, outMap: outMap };
 }
 
 // ----- Sidebar panel --------------------------------------------------------
