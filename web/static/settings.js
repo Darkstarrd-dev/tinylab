@@ -131,10 +131,8 @@ function applySettingsSectionCollapseState() {
     var chevron = el.querySelector('.settings-panel-title-chevron');
     if (collapsedSettingsSections.has(key)) {
       el.classList.add('collapsed');
-      if (chevron) chevron.style.transform = 'rotate(-90deg)';
     } else {
       el.classList.remove('collapsed');
-      if (chevron) chevron.style.transform = '';
     }
   });
   var splitEl = document.getElementById('settings-section-combos-quickslots');

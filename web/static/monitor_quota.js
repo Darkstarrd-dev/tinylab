@@ -19,11 +19,11 @@ function renderQuotaRow(bar) {
     ? '<span class="quota-row-chevron">' + QUOTA_CHEVRON + '</span>'
     : '';
   var quotaHtml = formatQuotaCell(bar);
-  var rowHtml = '<tr class="quota-row" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
+  var rowHtml = '<tr class="quota-row' + (multi ? ' quota-row-clickable' : '') + '" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
   if (multi) {
     var pEsc = escapeForJsString(bar.provider);
     var mEsc = escapeForJsString(bar.model);
-    rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')" style="cursor:pointer"';
+    rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')"';
   }
   rowHtml += '>\
     <td class="quota-td-chevron">' + chevronHtml + '</td>\
@@ -319,13 +319,15 @@ function toggleQuotaRowExpand(provider, model) {
   var chevron = el.querySelector('.quota-row-chevron');
   if (expandedModels.has(setKey)) {
     expandedModels.delete(setKey);
-    if (chevron) chevron.style.transform = '';
+    el.classList.remove('quota-row-expanded');
+    if (chevron) chevron.classList.remove('quota-chevron-expanded');
     var key = provider + '/' + model;
     var subs = el.parentNode.querySelectorAll('.quota-key-row[data-parent="' + key + '"]');
     subs.forEach(function(s) { s.remove(); });
   } else {
     expandedModels.add(setKey);
-    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    el.classList.add('quota-row-expanded');
+    if (chevron) chevron.classList.add('quota-chevron-expanded');
     var cache = keyDetailCache[provider + '/' + model];
     if (cache && cache.data) {
       var html = renderQuotaKeyRows(provider, model, cache.data);

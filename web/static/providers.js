@@ -180,10 +180,9 @@ function focusNewProviderCard(prefix) {
     if (codeEl && codeEl.textContent === prefix) {
       var card = cards[i];
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.style.transition = 'box-shadow 0.3s';
-      card.style.boxShadow = '0 0 0 3px var(--color-primary, #4f46e5)';
+      card.classList.add('provider-temp-highlight');
       (function(c) {
-        setTimeout(function() { c.style.boxShadow = ''; }, 2000);
+        setTimeout(function() { c.classList.remove('provider-temp-highlight'); }, 2000);
       })(card);
       break;
     }
@@ -258,18 +257,18 @@ function renderDetailKeys(p) {
   const hasKeys = keys.length > 0;
   el.innerHTML = '\
     <div class="detail-block">\
-      <div class="section-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">\
-        <span style="cursor:' + (hasKeys ? 'pointer' : 'default') + ';user-select:none" onclick="' + (hasKeys ? 'toggleKeysTable(\'' + escapeForJsString(p.id) + '\')' : '') + '">\
-          <span id="keys-chevron-' + escapeAttr(p.id) + '" style="display:' + (hasKeys ? 'inline-block' : 'none') + ';transition:transform .2s;margin-right:4px;font-size:10px">\u25B6</span>' +
+      <div class="section-title provider-keys-section-title">\
+        <span class="provider-keys-title' + (hasKeys ? ' provider-keys-title-clickable' : '') + '" onclick="' + (hasKeys ? 'toggleKeysTable(\'' + escapeForJsString(p.id) + '\')' : '') + '">\
+          <span id="keys-chevron-' + escapeAttr(p.id) + '" class="provider-keys-chevron' + (hasKeys ? '' : ' provider-keys-chevron-hidden') + '">\u25B6</span>' +
           t('keysTitle') + ' (' + keys.length + ')\
         </span>\
-        <div class="flex" style="gap:8px">\
+        <div class="flex provider-keys-actions">\
           <button type="button" class="btn btn-sm btn-primary" onclick="showAddKeyDetail(\'' + escapeForJsString(p.id) + '\')">' + t('addKey') + '</button>\
           <button type="button" class="btn btn-sm" onclick="showBulkAddKeys(\'' + escapeForJsString(p.id) + '\')">' + t('bulkAdd') + '</button>\
         </div>\
       </div>\
       <div id="key-form-' + escapeAttr(p.id) + '"></div>\
-      <div id="keys-body-' + escapeAttr(p.id) + '" style="display:' + (hasKeys ? 'none' : '') + '">' +
+      <div id="keys-body-' + escapeAttr(p.id) + '" class="' + (hasKeys ? 'provider-keys-hidden' : '') + '">' +
         (hasKeys ? '\
       <table>\
         <thead><tr><th>' + t('keyName') + '</th><th>' + t('actions') + '</th><th>' + t('key') + '</th><th>' + t('priority') + '</th><th>' + t('status') + '</th></tr></thead>\
@@ -297,11 +296,9 @@ function toggleKeysTable(pid) {
   var body = document.getElementById('keys-body-' + pid);
   var chevron = document.getElementById('keys-chevron-' + pid);
   if (!body) return;
-  var isHidden = body.style.display === 'none';
-  body.style.display = isHidden ? '' : 'none';
-  if (chevron) {
-    chevron.style.transform = isHidden ? 'rotate(90deg)' : '';
-  }
+  var isHidden = body.classList.contains('provider-keys-hidden');
+  body.classList.toggle('provider-keys-hidden', !isHidden);
+  if (chevron) chevron.classList.toggle('provider-keys-expanded', isHidden);
 }
 
 function showAddKeyDetail(providerId) {
@@ -597,12 +594,12 @@ function toggleModelDetailRow(e, pid, mid) {
   if (expandedModelDetails.has(key)) {
     expandedModelDetails.delete(key);
     wrap.classList.remove('expanded');
-    if (chevron) chevron.style.transform = '';
+    if (chevron) chevron.classList.remove('provider-model-chevron-expanded');
     setTimeout(function() { if (!expandedModelDetails.has(key)) wrap.innerHTML = ''; }, 300);
   } else {
     expandedModelDetails.add(key);
     wrap.classList.add('expanded');
-    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (chevron) chevron.classList.add('provider-model-chevron-expanded');
     wrap.innerHTML = '<div class="model-key-detail-loading">' + t('loading') + '...</div>';
     fetchModelDetailRow(pid, mid);
   }
@@ -868,7 +865,7 @@ function reexpandModelDetailRow(pid, mid) {
   var rowId = 'mrow-' + sanitizeId(pid) + '-' + sanitizeId(mid);
   var item = document.getElementById(rowId);
   var chevron = item ? item.querySelector('.model-row-chevron') : null;
-  if (chevron) chevron.style.transform = 'rotate(180deg)';
+  if (chevron) chevron.classList.add('provider-model-chevron-expanded');
   wrap.innerHTML = '<div class="model-key-detail-loading">' + t('loading') + '...</div>';
   fetchModelDetailRow(pid, mid);
 }
@@ -894,13 +891,13 @@ function updateModelRowStatus(pid, modelId) {
   var main = row.querySelector('.model-row-main');
   if (!main) return;
   var oldChevron = main.querySelector('.model-row-chevron');
-  var wasExpanded = oldChevron && oldChevron.style.transform === 'rotate(180deg)';
+  var wasExpanded = oldChevron && oldChevron.classList.contains('provider-model-chevron-expanded');
   main.outerHTML = buildModelRowMainInner(p, m);
   var newMain = row.querySelector('.model-row-main');
   if (!newMain) return;
   if (wasExpanded) {
     var newChevron = newMain.querySelector('.model-row-chevron');
-    if (newChevron) newChevron.style.transform = 'rotate(180deg)';
+    if (newChevron) newChevron.classList.add('provider-model-chevron-expanded');
   }
 }
 

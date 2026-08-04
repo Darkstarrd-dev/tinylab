@@ -305,19 +305,12 @@ function toggleParsedCard(cardId) {
   iconDown = cardEl.querySelector('.icon-chevron-down');
 
   if (entries) {
-    if (entries.style.display === 'none') {
-      entries.style.display = 'flex';
-      if (heading) heading.style.display = 'block';
-      if (iconUp) iconUp.style.display = 'block';
-      if (iconDown) iconDown.style.display = 'none';
-      cachedParsedFoldedMap[cardId] = false;
-    } else {
-      entries.style.display = 'none';
-      if (heading) heading.style.display = 'none';
-      if (iconUp) iconUp.style.display = 'none';
-      if (iconDown) iconDown.style.display = 'block';
-      cachedParsedFoldedMap[cardId] = true;
-    }
+    var folded = entries.classList.contains('dl-playlist-entries-folded');
+    entries.classList.toggle('dl-playlist-entries-folded', !folded);
+    if (heading) heading.classList.toggle('dl-playlist-heading-hidden', !folded);
+    if (iconUp) iconUp.classList.toggle('dl-chevron-hidden', !folded);
+    if (iconDown) iconDown.classList.toggle('dl-chevron-hidden', folded);
+    cachedParsedFoldedMap[cardId] = !folded;
   }
   checkPreviewVisibility();
 }

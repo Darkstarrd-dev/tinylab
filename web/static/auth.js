@@ -19,7 +19,7 @@ async function checkAuthStatus() {
 
 function renderLoginScreen() {
   var appDiv = document.querySelector('.app');
-  if (appDiv) appDiv.style.display = 'none';
+  if (appDiv) appDiv.classList.add('auth-app-hidden');
 
   var loginOverlay = document.getElementById('login-overlay');
   if (!loginOverlay) {
@@ -60,7 +60,7 @@ function showLoginError(msg) {
   var errEl = document.getElementById('login-error');
   if (errEl) {
     errEl.textContent = msg;
-    errEl.style.display = 'block';
+    errEl.classList.add('login-error-visible');
   }
 }
 
@@ -84,7 +84,7 @@ async function handleLogin() {
       var overlay = document.getElementById('login-overlay');
       if (overlay) overlay.remove();
       var appDiv = document.querySelector('.app');
-      if (appDiv) appDiv.style.display = '';
+      if (appDiv) appDiv.classList.remove('auth-app-hidden');
       initApp();
     } else {
       showLoginError(t('wrongPassword'));

@@ -616,14 +616,11 @@ async function openModelSelectorModal(opts) {
       var visibleCount = 0;
       for (var ii = 0; ii < items.length; ii++) {
         var val = items[ii].getAttribute('data-value') || '';
-        if (keyword === '' || val.toLowerCase().indexOf(keyword) >= 0) {
-          items[ii].style.display = '';
-          visibleCount++;
-        } else {
-          items[ii].style.display = 'none';
-        }
+        var hidden = !(keyword === '' || val.toLowerCase().indexOf(keyword) >= 0);
+        items[ii].classList.toggle('quickslot-item-hidden', hidden);
+        if (!hidden) visibleCount++;
       }
-      group.style.display = visibleCount > 0 ? '' : 'none';
+      group.classList.toggle('quickslot-group-hidden', visibleCount === 0);
     }
   };
 
@@ -685,16 +682,16 @@ function renderQuickSlotModelsList() {
     var disabledRowStyle = isDisabled ? ' style="opacity:0.5"' : '';
     var isFirst = i === 0;
     var isLast = i === qsEditingModels.length - 1;
-    var isCombo = slashIdx <= 0;
-    html += '<div class="model-row' + hasNoteCls + '" data-index="' + i + '" draggable="true"' + disabledRowStyle + '>' +
+    var disabledRowCls = isDisabled ? ' quickslot-model-disabled' : '';
+    html += '<div class="model-row' + hasNoteCls + disabledRowCls + '" data-index="' + i + '" draggable="true">' +
       '<div class="model-row-main"' + noteAttr + '>' +
         '<span class="drag-handle" data-tooltip="' + t('dragToReorder') + '" draggable="false">⠿</span>' +
         (isCombo ? '' : '<button type="button" class="btn btn-sm ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '" onclick="withLoading(this, () => testQuickSlotModel(' + i + '))">' + t('test') + '</button>') +
         (isCombo ? '' : buildMiniProtocolBadges(ts, modelId)) +
-        '<button type="button" class="btn btn-sm ' + (isFirst ? 'disabled ' : '') + 'onclick="moveQuickSlotModel(' + i + ',' + (i - 1) + ')">' + t('moveUp') + '</button>' +
-        '<button type="button" class="btn btn-sm ' + (isLast ? 'disabled ' : '') + 'onclick="moveQuickSlotModel(' + i + ',' + (i + 1) + ')">' + t('moveDown') + '</button>' +
+        '<button type="button" class="btn btn-sm ' + (isFirst ? 'disabled ' : '') + '" onclick="moveQuickSlotModel(' + i + ',' + (i - 1) + ')">' + t('moveUp') + '</button>' +
+        '<button type="button" class="btn btn-sm ' + (isLast ? 'disabled ' : '') + '" onclick="moveQuickSlotModel(' + i + ',' + (i + 1) + ')">' + t('moveDown') + '</button>' +
         '<button type="button" class="btn btn-sm btn-danger" onclick="removeQuickSlotModel(' + i + ')">' + t('delete') + '</button>' +
-        (isCombo ? '<span class="badge badge-combo" style="margin-right:6px">' + t('combo') + '</span>' : '') +
+        (isCombo ? '<span class="badge badge-combo">' + t('combo') + '</span>' : '') +
         '<span class="model-id copyable" onclick="copyToClipboard(\'' + escapeForJsString(fullId) + '\')" data-tooltip="' + t('clickToCopy') + '">' + fullIdEsc + '</span>' +
       '</div>' +
     '</div>';

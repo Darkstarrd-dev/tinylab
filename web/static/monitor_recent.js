@@ -38,11 +38,10 @@ function renderUsageRow(e, sessionKey, hidden) {
   var ttftAttr = (e.status === 'processing' && e.ttftMs && e.ttftMs > 0) ? ' data-ttft="1"' : '';
   var idAttr = e.id ? ' data-id="' + sanitizeId(e.id) + '"' : '';
   var inSession = sessionKey !== undefined;
-  var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row"' : '';
-  var firstCellStyle = inSession ? ' style="padding-left:18px"' : '';
-  var hiddenAttr = (inSession && hidden) ? ' style="display:none"' : '';
-  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + hiddenAttr + '>\
-    <td class="status-col-cell"' + firstCellStyle + '>' + statusInner + '</td>\
+  var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row' + (hidden ? ' session-row-hidden' : '') + '"' : '';
+  var firstCellClass = inSession ? 'status-col-cell session-row-indented' : 'status-col-cell';
+  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + '>\
+    <td class="' + firstCellClass + '">' + statusInner + '</td>\
     <td>' + new Date(e.timestamp).toLocaleTimeString() + '</td>\
     <td>' + escapeHtml(e.provider) + '</td>\
     <td>' + escapeHtml(displayModelName(e.model, e.originalModel)) + '</td>\
@@ -90,17 +89,14 @@ function updateRecentPagerState() {
   if (sel && String(sel.value) !== String(recentPageSize)) sel.value = String(recentPageSize);
   var prev = document.getElementById('recent-prev-page');
   if (prev) {
-    var atFirst = recentPage <= 1;
     prev.disabled = atFirst;
-    prev.style.opacity = atFirst ? '0.4' : '';
-    prev.style.cursor = atFirst ? 'not-allowed' : '';
+    prev.classList.toggle('pager-disabled', atFirst);
   }
   var next = document.getElementById('recent-next-page');
   if (next) {
     var atLast = recentPage >= maxPage;
     next.disabled = atLast;
-    next.style.opacity = atLast ? '0.4' : '';
-    next.style.cursor = atLast ? 'not-allowed' : '';
+    next.classList.toggle('pager-disabled', atLast);
   }
 }
 
@@ -293,7 +289,7 @@ function toggleSessionGroup(headerEl, sk) {
   var tbody = document.getElementById('recent-tbody');
   if (!tbody) return;
   var rows = tbody.querySelectorAll('tr.session-row[data-session="' + sk + '"]');
-  for (var i = 0; i < rows.length; i++) rows[i].style.display = nowExpanded ? '' : 'none';
+  for (var i = 0; i < rows.length; i++) rows[i].classList.toggle('session-row-hidden', !nowExpanded);
   var arrow = headerEl.querySelector('.session-group-arrow');
   if (arrow) arrow.textContent = nowExpanded ? '\u25BE' : '\u25B8';
   scheduleMonitorTableAutoFit();

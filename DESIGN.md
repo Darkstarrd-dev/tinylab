@@ -47,6 +47,18 @@
 | `--modal-bg` | rgba(26,26,36,0.96) | Modal surface |
 | `--toast-bg` | rgba(28,28,38,0.94) | Toast surface |
 
+### Semantic component aliases
+
+Component-specific state and surface rules consume these aliases so a new mode or variant changes a semantic role once rather than requiring selector-by-selector color overrides:
+
+| Token group | Examples | Purpose |
+|---|---|---|
+| Surface | `--surface-page`, `--surface-card`, `--surface-overlay`, `--surface-fullscreen` | Page, card, overlay, and media-canvas surfaces |
+| Border | `--border-subtle`, `--border-strong` | Normal and emphasized component boundaries |
+| Status | `--status-success-bg`, `--status-warning-bg`, `--status-danger-bg` | State backgrounds for dynamic rows, badges, and messages |
+| Code | `--code-surface`, `--code-text` | Code/debug/SSE rendering surfaces and text |
+| Interaction | `--interactive-active-text`, `--interactive-active-bg`, `--text-on-accent` | Selected, active, and accent-contrast states |
+
 ### Shape Tokens (controlled by Style dimension)
 
 | Token | Default | Sharp | Soft | Compact |
@@ -135,6 +147,13 @@
 - Don't hardcode `transition: ... 0.25s ...` — use motion tokens.
 - Don't apply style-dimension tokens to color properties (they're orthogonal).
 - Don't override `font-size` in style presets (that's the `data-font-size` dimension).
+
+## Frontend CSS maintenance contract
+
+- Semantic color aliases must be declared in the root token layer and consumed by component selectors; new components must not introduce bare hardcoded status/surface colors when an existing semantic token applies.
+- Dynamic visual state belongs to CSS classes (`is-error`, `is-selected`, `is-hidden`, `is-expanded`, or a module-prefixed equivalent). JavaScript may retain inline styles for computed geometry, coordinates, widths, and progress values only.
+- Existing global baseline selectors are compatibility infrastructure. New modules must use a namespace prefix (`.pg-*`, `.dl-*`, `.ge-*`, `.tr-*`, or a feature-specific prefix) and declare their own form/table/heading styles instead of depending on new bare global selectors.
+- Style validation uses the production HTML shell over HTTP with an optional preview override loaded after production CSS; copied standalone HTML/CSS and `file://` are not valid equivalence tests.
 
 ### Exceptions (intentionally hardcoded)
 

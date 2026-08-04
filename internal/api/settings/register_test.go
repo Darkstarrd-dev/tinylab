@@ -83,4 +83,25 @@ func TestRotationPatchPartialUpdate(t *testing.T) {
 	}
 }
 
+// TestThemePatchPersistsStyle verifies that a partial theme PATCH updates the
+// style dimension without wiping the other persisted theme preferences.
+func TestThemePatchPersistsStyle(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Theme.DarkVariant = "dracula"
+	cfg.Theme.LightVariant = "cream"
+	cfg.Theme.Style = "default"
+
+	applyThemeUpdates(cfg, &config.ThemeConfig{Style: "soft"})
+
+	if cfg.Theme.Style != "soft" {
+		t.Errorf("Style = %q, want soft", cfg.Theme.Style)
+	}
+	if cfg.Theme.DarkVariant != "dracula" {
+		t.Errorf("DarkVariant = %q, want dracula", cfg.Theme.DarkVariant)
+	}
+	if cfg.Theme.LightVariant != "cream" {
+		t.Errorf("LightVariant = %q, want cream", cfg.Theme.LightVariant)
+	}
+}
+
 func strPtr(s string) *string { return &s }

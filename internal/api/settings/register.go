@@ -273,12 +273,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if updates.Theme != nil {
-		if updates.Theme.DarkVariant != "" {
-			cfg.Theme.DarkVariant = updates.Theme.DarkVariant
-		}
-		if updates.Theme.LightVariant != "" {
-			cfg.Theme.LightVariant = updates.Theme.LightVariant
-		}
+		applyThemeUpdates(&cfg, updates.Theme)
 	}
 	if updates.ImageSaveDir != nil {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
@@ -385,6 +380,7 @@ func (h *Handler) pushDownloadSettings(cfg config.Config) {
 	if h.d.DownloadMgr == nil {
 		return
 	}
+
 	h.d.DownloadMgr.UpdateSettings(download.RuntimeSettings{
 		DownloadDir:         cfg.Download.DefaultDir,
 		YtDlpPath:           cfg.Download.YtDlpPath,
@@ -395,6 +391,24 @@ func (h *Handler) pushDownloadSettings(cfg config.Config) {
 		BrowserCookies:      cfg.Download.BrowserCookies,
 		CookiesPath:         cfg.Download.CookiesPath,
 	})
+}
+
+// applyThemeUpdates merges the non-empty theme fields from a settings PATCH.
+// Empty fields are treated as absent so partial updates preserve existing
+// mode variants and style preferences.
+func applyThemeUpdates(cfg *config.Config, patch *config.ThemeConfig) {
+	if patch == nil {
+		return
+	}
+	if patch.DarkVariant != "" {
+		cfg.Theme.DarkVariant = patch.DarkVariant
+	}
+	if patch.LightVariant != "" {
+		cfg.Theme.LightVariant = patch.LightVariant
+	}
+	if patch.Style != "" {
+		cfg.Theme.Style = patch.Style
+	}
 }
 
 // validateProxyConfig checks that the proxy host and port are well-formed when

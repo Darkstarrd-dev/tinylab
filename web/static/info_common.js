@@ -143,7 +143,7 @@ function buildSimpleField(key, prettyHtml, rawStr) {
     '</span>' +
     '<div class="info-field-value">' +
       '<div class="info-json info-json-pretty info-json-markdown" id="' + prettyId + '">' + renderedContent + '</div>' +
-      '<pre class="info-json info-json-raw" id="' + rawId + '" style="display:none" ' + rawAttr + '></pre>' +
+      '<pre class="info-json info-json-raw info-json-hidden" id="' + rawId + '" ' + rawAttr + '></pre>' +
     '</div>' +
   '</div>';
 }
@@ -178,7 +178,7 @@ function buildFieldWithSubFields(key, obj, rawStr) {
     previewHtml +
     '<div class="info-field-value">' +
       '<div class="info-json info-json-pretty info-json-markdown" id="' + prettyId + '">' + prettyHtml + '</div>' +
-      '<pre class="info-json info-json-raw" id="' + rawId + '" style="display:none" ' + rawAttr + '></pre>' +
+      '<pre class="info-json info-json-raw info-json-hidden" id="' + rawId + '" ' + rawAttr + '></pre>' +
     '</div>' +
   '</div>';
 }
@@ -212,11 +212,11 @@ function toggleInfoView(btn, view) {
   var prettyPre = field.querySelector('.info-json-pretty');
   var rawPre = field.querySelector('.info-json-raw');
   if (view === 'raw') {
-    if (prettyPre) prettyPre.style.display = 'none';
-    if (rawPre) rawPre.style.display = '';
+    if (prettyPre) prettyPre.classList.add('info-json-hidden');
+    if (rawPre) rawPre.classList.remove('info-json-hidden');
   } else {
-    if (prettyPre) prettyPre.style.display = '';
-    if (rawPre) rawPre.style.display = 'none';
+    if (prettyPre) prettyPre.classList.remove('info-json-hidden');
+    if (rawPre) rawPre.classList.add('info-json-hidden');
   }
 }
 
