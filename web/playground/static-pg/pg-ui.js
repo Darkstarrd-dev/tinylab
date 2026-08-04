@@ -427,10 +427,10 @@ function pgRenderSidebar() {
     '<div class="pg-panel pg-winbar">' +
       '<div class="pg-winbar-header">' +
         '<div class="pg-mode-toggle">' +
-          '<button class="pg-mode-btn' + (currentMode === 'normal' ? ' active' : '') + '" onclick="pgSetMode(\'normal\')">' + pgEscapeHtml(pgT('pgModeNormal')) + '</button>' +
-          '<button class="pg-mode-btn' + (currentMode === 'search' ? ' active' : '') + '" onclick="pgSetMode(\'search\')">' + pgEscapeHtml(pgT('pgModeSearch')) + '</button>' +
-          '<button class="pg-mode-btn' + (currentMode === 'image' ? ' active' : '') + '" onclick="pgSetMode(\'image\')">' + pgEscapeHtml(pgT('pgModeImage')) + '</button>' +
-          '<button class="pg-mode-btn' + (currentMode === 'autochat' ? ' active' : '') + '" onclick="pgSetMode(\'autochat\')">' + pgEscapeHtml(pgT('pgModeAutoChat')) + '</button>' +
+          '<button class="pg-mode-btn' + (currentMode === 'normal' ? ' active' : '') + '" data-mode="normal" onclick="pgSetMode(\'normal\')">' + pgEscapeHtml(pgT('pgModeNormal')) + '</button>' +
+          '<button class="pg-mode-btn' + (currentMode === 'search' ? ' active' : '') + '" data-mode="search" onclick="pgSetMode(\'search\')">' + pgEscapeHtml(pgT('pgModeSearch')) + '</button>' +
+          '<button class="pg-mode-btn' + (currentMode === 'image' ? ' active' : '') + '" data-mode="image" onclick="pgSetMode(\'image\')">' + pgEscapeHtml(pgT('pgModeImage')) + '</button>' +
+          '<button class="pg-mode-btn' + (currentMode === 'autochat' ? ' active' : '') + '" data-mode="autochat" onclick="pgSetMode(\'autochat\')">' + pgEscapeHtml(pgT('pgModeAutoChat')) + '</button>' +
         '</div>' +
       '</div>' +
       winbarContent +

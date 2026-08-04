@@ -355,13 +355,22 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 /* Mode selector: a flush, recessed segmented control. The outer frame
    replaces the old floating buttons while pgSetMode still owns state. */
 .pg-winbar{padding:0}
-.pg-mode-toggle{display:flex;gap:0;align-items:stretch;flex-shrink:0;width:100%;height:28px;padding:0;border:1px solid var(--pg-mode-frame-border);border-radius:0;background:var(--pg-mode-frame-bg);overflow:hidden;box-shadow:none}
-.pg-mode-btn{position:relative;flex:1;min-width:0;height:100%;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;border:0;border-top:1px solid var(--pg-mode-cell-border);border-right:1px solid var(--pg-mode-separator);border-radius:0;background:var(--pg-mode-cell-bg);color:var(--pg-mode-text);cursor:pointer;font-family:inherit;font-size:var(--font-base);font-weight:var(--font-weight-bold);letter-spacing:.02em;text-shadow:var(--pg-mode-text-shadow);transition:background var(--transition-fast),color var(--transition-fast),border-color var(--transition-fast);white-space:nowrap;text-align:center;box-shadow:none}
+.pg-mode-toggle{display:flex;gap:0;align-items:stretch;flex-shrink:0;width:100%;height:100%;padding:0;border:none;border-radius:0;background:var(--pg-mode-frame-bg);overflow:hidden;box-shadow:none}
+.pg-mode-toggle:has(.pg-mode-btn[data-mode="normal"].active){--pg-mode-active-color:var(--pg-mode-normal-color)}
+.pg-mode-toggle:has(.pg-mode-btn[data-mode="search"].active){--pg-mode-active-color:var(--pg-mode-search-color)}
+.pg-mode-toggle:has(.pg-mode-btn[data-mode="image"].active){--pg-mode-active-color:var(--pg-mode-image-color)}
+.pg-mode-toggle:has(.pg-mode-btn[data-mode="autochat"].active){--pg-mode-active-color:var(--pg-mode-autochat-color)}
+.pg-mode-btn{position:relative;flex:1;min-width:0;height:100%;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;border:0;border-top:1px solid var(--pg-mode-cell-border);border-right:1px solid var(--pg-mode-separator);border-radius:0;background:var(--pg-mode-cell-bg);color:var(--pg-mode-text);cursor:pointer;font-family:inherit;font-size:var(--font-base);font-weight:var(--font-weight-bold);letter-spacing:.02em;text-shadow:var(--pg-mode-text-shadow);transition:all var(--transition-fast);white-space:nowrap;text-align:center;box-shadow:none}
 .pg-mode-btn:first-child,.pg-mode-btn:last-child{border-radius:0}
-.pg-mode-btn:last-child{border-right:0}
-.pg-mode-btn.active{border-top-color:transparent;border-left:1px solid var(--pg-mode-active-edge);border-right:1px solid var(--pg-mode-active-edge);background:var(--pg-mode-cell-active-bg);color:var(--pg-mode-active-text);text-shadow:none;box-shadow:none}
+.pg-mode-btn:first-child,.pg-mode-btn:first-child.active{border-left:0}
+.pg-mode-btn:last-child,.pg-mode-btn:last-child.active{border-right:0}
+.pg-mode-btn.active{border-top-color:transparent;border-left:1px solid color-mix(in srgb,var(--pg-mode-active-color) 70%,transparent);border-right:1px solid color-mix(in srgb,var(--pg-mode-active-color) 70%,transparent);background:var(--pg-mode-cell-active-bg);color:var(--pg-mode-active-color);font-weight:800;text-shadow:0 0 12px color-mix(in srgb,var(--pg-mode-active-color) 85%,transparent),0 0 2px var(--pg-mode-active-color),0 1px 2px rgba(0,0,0,0.45);box-shadow:inset 0 0 10px color-mix(in srgb,var(--pg-mode-active-color) 15%,transparent)}
 .pg-mode-btn:hover:not(.active){background:var(--pg-mode-cell-hover-bg);color:var(--text)}
-.pg-mode-btn:focus-visible{outline:2px solid color-mix(in srgb,var(--pg-mode-active-edge) 70%,transparent);outline-offset:-2px}
+.pg-mode-btn:focus-visible{outline:2px solid color-mix(in srgb,var(--pg-mode-active-color) 70%,transparent);outline-offset:-2px}
+/* Light theme overrides for Playground mode toggle */
+[data-theme="light"] .pg-mode-btn.active{text-shadow:none;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);border-left:1px solid var(--pg-mode-cell-border);border-right:1px solid var(--pg-mode-cell-border)}
+[data-theme="light"] .pg-mode-btn:first-child.active{border-left:0}
+[data-theme="light"] .pg-mode-btn:last-child.active{border-right:0}
 
 /* Recent requests left panel (normal mode, single window) */
 .pg-req-left{display:none}
@@ -406,7 +415,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-pane .pg-messages{flex:1;overflow-y:auto}
 .pg-pane-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:var(--font-badge)}
 .pg-winbar{flex-shrink:0;padding:0}
-.pg-winbar-header{height:28px;box-sizing:border-box;padding:0;display:flex;align-items:center;border-bottom:1px solid var(--glass-border);background:var(--glass-bg)}
+.pg-winbar-header{height:38px;box-sizing:border-box;padding:0;display:flex;align-items:stretch;border-bottom:1px solid var(--glass-border);background:var(--glass-bg)}
 .pg-winbar-body{padding:11px 12px}
 .pg-winbar-row{display:flex;align-items:center;gap:8px;justify-content:space-between}
 .pg-winbar-btns{display:flex;gap:4px}
