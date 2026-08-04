@@ -121,6 +121,18 @@
   --nav-text-shadow:-1px -1px 1px rgba(224,224,224,0.12),0 2px 3px rgba(0,0,0,0.45);
   --nav-decoration-bg:var(--nav-diamond-bg);
   --nav-decoration-border:var(--nav-diamond-edge);
+  /* Playground mode selector: recessed segmented control tokens. */
+  --pg-mode-frame-bg:transparent;
+  --pg-mode-frame-border:var(--glass-border);
+  --pg-mode-cell-bg:linear-gradient(to bottom,#333333,#242323);
+  --pg-mode-cell-hover-bg:linear-gradient(to bottom,#3b3b3b,#2b2b2b);
+  --pg-mode-cell-active-bg:linear-gradient(to bottom,transparent 10%,rgba(202,226,253,0.12),transparent 90%),linear-gradient(to bottom,#1f2022,#18191b);
+  --pg-mode-cell-border:#4e4d4d;
+  --pg-mode-separator:rgba(0,0,0,0.72);
+  --pg-mode-active-edge:rgba(202,226,253,0.72);
+  --pg-mode-text:#17171b;
+  --pg-mode-active-text:#cae2fd;
+  --pg-mode-text-shadow:-1px -1px 1px rgba(224,224,224,0.10),0 2px 3px rgba(0,0,0,0.42);
   /* Semantic alias tokens — referenced by components that previously used
      undefined variables. These alias existing theme tokens so they
      automatically follow mode/variant/style switches. */
@@ -213,6 +225,17 @@
   --nav-diamond-bg:linear-gradient(135deg,#ffffff,#eef2f7);
   --nav-decoration-bg:var(--nav-diamond-bg);
   --nav-decoration-border:var(--nav-diamond-edge);
+  --pg-mode-frame-bg:transparent;
+  --pg-mode-frame-border:var(--glass-border);
+  --pg-mode-cell-bg:linear-gradient(to bottom,#ffffff,#edf2f7);
+  --pg-mode-cell-hover-bg:linear-gradient(to bottom,#ffffff,#e3ebf3);
+  --pg-mode-cell-active-bg:linear-gradient(to bottom,transparent 10%,rgba(14,165,233,0.12),transparent 90%),linear-gradient(to bottom,#edf8ff,#d9effc);
+  --pg-mode-cell-border:rgba(0,0,0,0.13);
+  --pg-mode-separator:rgba(0,0,0,0.16);
+  --pg-mode-active-edge:rgba(14,165,233,0.56);
+  --pg-mode-text:#334155;
+  --pg-mode-active-text:#075985;
+  --pg-mode-text-shadow:-1px -1px 1px rgba(255,255,255,0.76),0 2px 3px rgba(15,23,42,0.20);
   /* Light theme semantic alias overrides — only fixed-value tokens
      need explicit overrides; var()-aliased tokens follow automatically. */
   --shadow-sm:0 1px 4px rgba(0,0,0,0.05);

@@ -162,6 +162,13 @@ Component-specific state and surface rules consume these aliases so a new mode o
 - Navigation order remains controlled by `data-page`/grid placement rules, while `app.js` continues to own active state and page navigation. Do not replace these buttons with radio inputs or move navigation behavior into CSS.
 - Dark and light appearances are controlled by `--nav-*` tokens in `style.css`; the active page selects its accent color for a rounded-contour-clipped, transparency/brightness-gradient outline, accent-colored bright fog/glow text with a crisp stroked fill and short restrained halo, and one-facing-edge diamond light. Navigation click focus does not add the global blue outline.
 
+### Playground mode selector
+
+- `.pg-mode-toggle` is the Playground mode control: four long rectangular segments for `normal` / `search` / `image` / `autochat`, rendered as one flush, square-cornered frame without panel-level outer whitespace or extra vertical height.
+- `pg-ui.js::pgSetMode()` remains the sole owner of mode transitions; CSS only expresses `.pg-mode-btn.active`, hover, and keyboard focus. Do not replace the buttons with radio inputs or move mode state into CSS.
+- `--pg-mode-*` tokens in `style.css` own the frame, cell gradients, active text, separator, active side edges, and text shadow. Dark and light modes each define a complete token set; `playground.css` consumes those tokens and does not hardcode a second palette.
+- The active segment illuminates its own surface and left/right edges only. It has no diffuse text halo, drop shadow, or rounded corners; the surrounding `.pg-winbar` / `.pg-winbar-header` stays flush with the panel and preserves the original 28px control height.
+
 ### Exceptions (intentionally hardcoded)
 
 - `border-radius: 100px` — pill badges (`.badge`, `.model-status`, `.model-quota`).
