@@ -399,7 +399,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				next.ServeHTTP(w, req)
 			})
 		})
-		r.Post("/upload", fileTransferHandler.Upload)
+		r.Post("/path-info", fileTransferHandler.PathInfo)
 	})
 
 	// Editor API: text file open (native picker) + atomic save. Outside the

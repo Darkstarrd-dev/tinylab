@@ -97,13 +97,98 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type localPathInfo struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+// PathInfo reports sizes for local paths copied from the native clipboard.
+// Directories are measured recursively so the frontend can show an accurate
+// total before the upload request starts.
+func (h *Handler) PathInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path request: "+err.Error())
+		return
+	}
+	if len(req.Paths) > maxFiles {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many paths (max %d)", maxFiles))
+		return
+	}
+	infos := make([]localPathInfo, 0, len(req.Paths))
+	for _, rawPath := range req.Paths {
+		localPath := filepath.Clean(strings.TrimSpace(rawPath))
+		if localPath == "" {
+			continue
+		}
+		size, err := localPathSize(localPath)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		infos = append(infos, localPathInfo{
+			Path: localPath,
+			Name: filepath.Base(localPath),
+			Size: size,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"paths": infos})
+}
+
+func localPathSize(localPath string) (int64, error) {
+	info, err := os.Lstat(localPath)
+	if err != nil {
+		return 0, fmt.Errorf("stat %q: %w", localPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 0, fmt.Errorf("symbolic links are not supported: %q", localPath)
+	}
+	if !info.IsDir() {
+		if !info.Mode().IsRegular() {
+			return 0, nil
+		}
+		return info.Size(), nil
+	}
+	var total int64
+	err = filepath.WalkDir(localPath, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		entryInfo, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		if entryInfo.Mode().IsRegular() {
+			total += entryInfo.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("read %q: %w", localPath, err)
+	}
+	return total, nil
+}
+
 func collectParts(form *multipart.Form) ([]filePart, error) {
 	parts := make([]filePart, 0, len(form.File["files"]))
 	if len(form.File["files"]) > maxFiles {
 		return nil, fmt.Errorf("too many files (max %d)", maxFiles)
 	}
 	for _, header := range form.File["files"] {
-		if header == nil || header.Size <= 0 {
+		if header == nil {
 			continue
 		}
 		if header.Size > maxFileSize {

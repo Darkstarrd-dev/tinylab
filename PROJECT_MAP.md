@@ -213,11 +213,11 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 ---
 
 ## 10. `internal/api/` — 管理 REST API（chi 路由）
-<!-- last verified: 2026-08-04 -->
+<!-- last verified: 2026-08-05 -->
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`/api/filetransfer/upload`（600MB body 上限，认证保护，ZIP + 临时服务顺序回退）、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc` 回调`
+| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`/api/filetransfer/upload` 与 `/api/filetransfer/path-info`（认证保护，600MB body 上限；ZIP + 临时服务顺序回退 + 本机路径容量查询）、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc` 回调`
 | `helpers.go` | 根包辅助：`saveConfig`/`saveConfigAndReload`（config.Save→Reload 收敛点）、`writeAPIError`（JSON 错误信封）、`checkPortAvailable`、`getIntQuery`、`generateID`/`SyncIDCounter`（委托 `apibase` 单一计数器）、`firstActiveKey` |
 
 ### 10.10 `internal/api/trace/` — 追踪读取 API
@@ -510,11 +510,12 @@ Provider 级可选请求头配置与统一应用工具。配置为空或开关�
 | `customheaders_test.go` | 测试禁用/空配置 no-op、覆盖、CR/LF 拦截 |
 ## 13e. `internal/filetransfer/` — 临时文件中转
 
-Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任的本机剪贴板路径，使用 ZIP Deflate 打包后按服务顺序尝试匿名临时文件主机。
+Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任的本机剪贴板路径，提供本机路径递归容量查询，使用 ZIP Deflate 打包后按服务顺序尝试匿名临时文件主机。
 
 | 文件 | 职责 |
 |---|---|
-| `upload.go` | `Handler.Upload`、本地文件/目录收集、ZIP 打包、文件名清理与冲突改名、tfLink/tmpfiles.org/temp.sh/Filebin 顺序上传；单文件与归档均有大小/数量上限，符号链接拒绝 |
+| `upload.go` | `Handler.Upload`、`Handler.PathInfo`、本地文件/目录收集与容量统计、ZIP 打包、文件名清理与冲突改名、tfLink/tmpfiles.org/temp.sh/Filebin 顺序上传；单文件与归档均有大小/数量上限，符号链接拒绝 |
+| `upload_test.go` | ZIP 名称清理/去重、目录相对路径、容量统计与服务顺序回退测试 |
 
 ---
 ## 13d. `internal/procutil/` — 进程工具（跨平台进程组管理）
@@ -597,7 +598,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 文件 |
 |---|---|
 | 入口 | `index.html`、`index-nopg.html`（header navigation 使用可访问 `nav[aria-label="Primary navigation"]`） |
-| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`filetransfer.js`（Settings FileTransfer modal：任意文件拖拽/粘贴、确认后上传）、`settings*.js`、`gallery/editor` 入口依赖 |
+| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`filetransfer.js`（Settings FileTransfer modal：任意文件拖拽/粘贴、Clear 重置、上传进度与确认上传）、`settings*.js`、`gallery/editor` 入口依赖 |
 | 样式 | `style.css` |
 
 ### 18.3 `web/playground/` — Playground 模块（仅 `-tags playground` 内嵌）

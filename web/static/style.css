@@ -2822,11 +2822,12 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .log-index-row:hover{background:var(--glass-hover)}
 .log-row-selected{background:var(--glass-active)!important}
 .filetransfer-drop-zone{border:1px dashed var(--glass-border-hover);border-radius:var(--radius-md);padding:24px 16px;text-align:center;background:var(--input-bg);transition:all var(--transition-fast);cursor:pointer;margin-top:14px}
-.filetransfer-drop-zone:hover,.filetransfer-drop-zone.drag-active{border-color:var(--accent);background:var(--interactive-active-bg);box-shadow:0 0 0 2px var(--accent-glow)}
+.filetransfer-drop-zone:hover,.filetransfer-drop-zone.drag-active{border-color:var(--accent);background:var(--glass-active);box-shadow:0 0 0 2px var(--accent-glow)}
 .filetransfer-drop-zone.has-files{padding:16px}
 .filetransfer-drop-title{font-weight:var(--font-weight-bold);color:var(--text);font-size:var(--font-card-title)}
 .filetransfer-drop-hint{color:var(--text-secondary);font-size:var(--font-badge);margin:4px 0 12px}
 .filetransfer-summary{color:var(--text-secondary);font-size:var(--font-badge);margin-top:10px}
+.filetransfer-toolbar{display:flex;justify-content:flex-end;margin-top:8px}
 .filetransfer-file-list{max-height:190px;overflow:auto;margin-top:8px;border:1px solid var(--glass-border);border-radius:var(--radius-sm)}
 .filetransfer-file-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border);min-width:0}
 .filetransfer-file-row:last-child{border-bottom:none}
@@ -2834,6 +2835,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-file-size{flex:0 0 auto;color:var(--text-secondary);font-size:var(--font-badge);font-variant-numeric:tabular-nums}
 .filetransfer-remove{flex:0 0 auto;padding:2px 7px!important}
 .filetransfer-empty{padding:12px;text-align:center;color:var(--text-muted);font-size:var(--font-badge)}
+.filetransfer-progress-wrap{margin-top:10px}
+.filetransfer-progress-wrap[hidden]{display:none}
+.filetransfer-progress-head{display:flex;justify-content:space-between;color:var(--text-secondary);font-size:var(--font-badge);margin-bottom:4px}
+.filetransfer-progress-wrap progress{display:block;width:100%;height:7px;accent-color:var(--accent)}
 .filetransfer-status{min-height:20px;margin-top:10px;color:var(--accent2);font-size:var(--font-badge);overflow-wrap:anywhere}
 .filetransfer-status.error{color:var(--danger)}
 .filetransfer-result{margin-top:8px;overflow-wrap:anywhere}

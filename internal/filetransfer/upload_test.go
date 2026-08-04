@@ -58,6 +58,55 @@ func TestAppendLocalPathPreservesDirectoryRelativeNames(t *testing.T) {
 	}
 }
 
+func TestLocalPathSize(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "b.txt"), []byte("567890"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	size, err := localPathSize(dir)
+	if err != nil {
+		t.Fatalf("localPathSize: %v", err)
+	}
+	if size != 10 {
+		t.Fatalf("size = %d, want 10", size)
+	}
+}
+
+func TestPathInfo(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "payload.bin")
+	if err := os.WriteFile(file, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requestData, err := json.Marshal(map[string][]string{"paths": {file}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestBody := bytes.NewReader(requestData)
+	req := httptest.NewRequest(http.MethodPost, "/path-info", requestBody)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	NewHandler().PathInfo(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Paths []localPathInfo `json:"paths"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Paths) != 1 || result.Paths[0].Name != "payload.bin" || result.Paths[0].Size != 7 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestUploadTriesServicesInOrder(t *testing.T) {
 	original := services
 	t.Cleanup(func() { services = original })
