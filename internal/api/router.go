@@ -41,6 +41,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/filetransfer"
 	domainimagebatch "github.com/tinyrouter/tinyrouter/internal/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
@@ -296,6 +297,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	monitorHandler := apimonitor.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
 	galleryHandler := gallery.NewHandler(apiDeps)
+	fileTransferHandler := filetransfer.NewHandler()
 	imageBatchHandler := func() *apimagebatch.Handler {
 		root := config.ResolveImageSaveDir(rt.reg.Config().ImageSaveDir, filepath.Dir(rt.configPath))
 		store, err := domainimagebatch.NewProjectStore(root)
@@ -385,6 +387,19 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	r.Route("/api/gallery", func(r chi.Router) {
 		r.Use(authHandler.AuthMiddleware)
 		galleryHandler.Register(r)
+	})
+
+	// FileTransfer receives browser files and may create a large ZIP archive;
+	// keep it outside the generic 1 MiB API group while retaining auth.
+	r.Route("/api/filetransfer", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				req.Body = http.MaxBytesReader(w, req.Body, 600<<20)
+				next.ServeHTTP(w, req)
+			})
+		})
+		r.Post("/upload", fileTransferHandler.Upload)
 	})
 
 	// Editor API: text file open (native picker) + atomic save. Outside the

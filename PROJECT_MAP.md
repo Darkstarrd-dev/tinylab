@@ -213,11 +213,11 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 ---
 
 ## 10. `internal/api/` — 管理 REST API（chi 路由）
-<!-- last verified: 2026-08-03 -->
+<!-- last verified: 2026-08-04 -->
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc` 回调 |
+| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`/api/filetransfer/upload`（600MB body 上限，认证保护，ZIP + 临时服务顺序回退）、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc` 回调`
 | `helpers.go` | 根包辅助：`saveConfig`/`saveConfigAndReload`（config.Save→Reload 收敛点）、`writeAPIError`（JSON 错误信封）、`checkPortAvailable`、`getIntQuery`、`generateID`/`SyncIDCounter`（委托 `apibase` 单一计数器）、`firstActiveKey` |
 
 ### 10.10 `internal/api/trace/` — 追踪读取 API
@@ -499,6 +499,7 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 | `urlutil.go` | `BuildUpstreamURL`（统一端点 URL 拼接 + 启发式 A 版本段检测）、`normalizeBaseURL`（剥除已知 endpoint 后缀）、`isOllamaBaseURL`/`normalizeOllamaBaseURL`（Ollama 特例）、`isHostRoot`（路径检测） |
 | `urlutil_test.go` | 测试 |
 
+
 ## 13c. `internal/customheaders/` — Provider 自定义请求头
 
 Provider 级可选请求头配置与统一应用工具。配置为空或开关关闭时为 no-op；应用顺序保持现有认证、Content-Type、流式 Accept 与 Cline 硬编码头行为，其中 Cline 头最后覆盖同名自定义值。
@@ -507,6 +508,13 @@ Provider 级可选请求头配置与统一应用工具。配置为空或开关�
 |---|---|
 | `customheaders.go` | `Config` 与 `Apply`：对正常代理、GET 任务轮询、Provider 管理请求、多协议探测和 Combo 测速应用自定义请求头；跳过空名称及 CR/LF 注入 |
 | `customheaders_test.go` | 测试禁用/空配置 no-op、覆盖、CR/LF 拦截 |
+## 13e. `internal/filetransfer/` — 临时文件中转
+
+Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任的本机剪贴板路径，使用 ZIP Deflate 打包后按服务顺序尝试匿名临时文件主机。
+
+| 文件 | 职责 |
+|---|---|
+| `upload.go` | `Handler.Upload`、本地文件/目录收集、ZIP 打包、文件名清理与冲突改名、tfLink/tmpfiles.org/temp.sh/Filebin 顺序上传；单文件与归档均有大小/数量上限，符号链接拒绝 |
 
 ---
 ## 13d. `internal/procutil/` — 进程工具（跨平台进程组管理）
@@ -589,7 +597,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 文件 |
 |---|---|
 | 入口 | `index.html`、`index-nopg.html`（header navigation 使用可访问 `nav[aria-label="Primary navigation"]`） |
-| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`settings*.js`、`gallery/editor` 入口依赖 |
+| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`filetransfer.js`（Settings FileTransfer modal：任意文件拖拽/粘贴、确认后上传）、`settings*.js`、`gallery/editor` 入口依赖 |
 | 样式 | `style.css` |
 
 ### 18.3 `web/playground/` — Playground 模块（仅 `-tags playground` 内嵌）
@@ -666,7 +674,8 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 |---|---|---|
 | 新增/修改 Provider API 类型 | config-registry-state、proxy、rotation | `config/types.go`（`APIType`/`IsNIM`/`IsGeminiOpenAICompat`/`IsCline`）、`config/validate.go`、`rotation/nim.go`、`proxy/forward.go`、`proxy/upstream.go`（`applyClineHeaders` 域名特例请求头注入） |
 | 新增 Key 轮询策略 | rotation | `rotation/strategy.go`+`selector.go`、`config/types.go`（`RotationConfig`）、`proxy/forward.go`（`forwardWithRetry`） |
-| 修改重试/故障转移逻辑 | proxy、rotation | `proxy/retry.go`（`handleUpstreamError` 返回 `bool` + `ActionPassThrough` 分支原样转发 4xx + 中文后果 WARN）、`rotation/error_rules.go`（`ActionPassThrough` + 400/422 默认 + `upstream request failed` 文本规则）+`cooldown.go`（`SonestCooldown` + `CooldownInfo`）、`proxy/forward_retry.go`（`SelectKey` 失败冷却等待 + reqID/callerTag 贯穿）、`proxy/interfaces.go`（`CooldownManager.SonestCooldown`）、`proxy/forward.go`（`requestCallerTag`/`maskAuth`） |
+| 新增管理 API 端点 | （对应模块文档）、config-registry-state | `api/router.go`（挂载+鉴权边界）、`api/<域>.go`、`registry/<域>.go` |
+| FileTransfer 临时文件中转 | config-registry-state | `internal/filetransfer/upload.go`（multipart 文件/本机剪贴板路径收集、ZIP Deflate、tfLink → tmpfiles.org → temp.sh → Filebin 顺序回退）+ `internal/api/router.go`（`/api/filetransfer/upload`，认证与 600MB body 上限）+ `web/static/filetransfer.js`（Settings modal 任意文件拖拽/粘贴/确认与下载链接）+ `web/static/settings.js`（左侧入口）+ `web/static/index.html`/`index-nopg.html`（资产加载）+ `web/static/style.css`/`i18n.js`（样式与翻译）`
 | 新增/修改 Combo 策略 | combo、proxy | `combo/resolver.go`、`proxy/forward.go`（`handleCombo`）、`config/types.go`（`Combo`） |
 | Combo 批量测速排序 | combo、proxy | `api/combo_speedtest.go`（`speedTestCombo` SSE handler + `probeComboModel`，复用 `proxy.BuildUpstreamURL/SSELineBuffer/SSEDataPayloads`、`util.ExtractTokens`、`probe_common.go::extractContentFromSSE`、`providers_validate.go::firstActiveKey`、`proxy/handler.go::ManagementClient`）、`registry/combos.go`（`GetComboByID`）、`api/router.go`（路由注册）、`web/static/combos.js`（`runComboSpeedTest` + 编辑弹窗按钮 + `renderComboModelsList` 行 `data-fullid`/状态 span）、`web/static/i18n.js`（`comboSpeedTest*` 键） |
 | 修改 SSE 流式透传 | proxy | `proxy/stream.go`、`proxy/forward.go` |
@@ -686,6 +695,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改下载参数/任务生命周期 | download | `download/args.go`+`executor.go`+`manager.go`、`api/download.go`、`web/static/download.js` |
 | 修改用量统计/在途跟踪/兜底清理 | proxy、config-registry-state | `proxy/recorder.go`、`entry_tracker.go`、`inflight.go`、`broadcaster.go`、`proxy/forward_request.go`、`proxy/forward_retry.go`、`proxy/forward_combo.go`、`proxy/retry.go`、`proxy/stream.go`（usage/inflight/sessionKey/token broadcast）；`internal/api/monitor/register.go`（usage/quota API）；`web/static/monitor_state.js`（Recent provider/model predicate；quota/recent 表格按最长可见内容测量列宽，并在字号/窗口变化时重算）、`web/static/monitor_io.js`（SSE、merge/refresh）、`web/static/monitor_quota.js`（Quota Monitor 表格/per-key 详情）、`web/static/monitor_recent.js`（Recent Requests 状态筛选、会话分组、分页、provider/model 搜索）`
 | 修复 Quota Monitor latency/avg-speed 空白及首次加载空白 | proxy、config-registry-state | `web/static/monitor_quota.js::refreshAllKeyDetails` 为每个 quota bar 拉取 `monitor/model-keys` 以回填未展开主行指标；`internal/api/monitor/register.go::getQuotas` 把非 Playground `EntryTracker` 在途请求加入 provisional bar，避免请求完成前 quota 表为空；`docs/proxy-architecture.md` 记录两项修复 |
+| 修复 Monitor Recent Requests 分页状态 | proxy、config-registry-state | `web/static/monitor_recent.js::updateRecentPagerState` 计算 `atFirst`/`atLast` 后同步上一页/下一页 `disabled` 与 `pager-disabled` class，修复 `atFirst is not defined` 导致 Monitor 首次渲染失败；`docs/proxy-architecture.md` 记录修复 |
 | 新增/修改 build tag 或平台构建 | （AGENTS.md 构建变体）、`docs/build-variants.md` | `build.ps1`、`build_mac.ps1`、`build-minimal-webview-pg.ps1`、`host_*.go`、`web/embed*.go`、`internal/app/browser_*.go` |
 | 修改前端页面/资产 | PROJECT_MAP §18 | `web/static/<page>.js`、`web/static/index.html`、`web/playground/static-pg/` |
 | 修改 Header 页面切换按钮样式 | PROJECT_MAP §18.2、DESIGN.md | `web/static/index.html`/`index-nopg.html`（可访问 nav shell + no-playground minimal layout）、`web/static/style.css`（3×2 reference grid、中心装饰方块、长条矩形按钮、`--nav-*` dark/light tokens） |

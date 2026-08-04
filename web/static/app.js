@@ -421,6 +421,7 @@ function closeModalOverlay() {
     window.__confirmResolver = null;
     r(false);
   }
+  if (typeof cleanupFileTransferModal === 'function') cleanupFileTransferModal();
   overlay.classList.remove('show');
   overlay.innerHTML = '';
 }

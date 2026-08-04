@@ -72,6 +72,10 @@ async function renderEndpoint(c) {
           <button type="button" class="btn btn-sm settings-row-btn" onclick="openPathModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('fileTransferDesc')) + '">' + t('fileTransfer') + '</span>\
+          <button type="button" class="btn btn-sm settings-row-btn" onclick="openFileTransferModal()">' + t('open') + '</button>\
+        </div>\
+        <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
