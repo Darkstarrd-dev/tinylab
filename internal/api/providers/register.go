@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/customheaders"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 )
 
@@ -186,7 +187,7 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy)
+	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy, customheaders.Config{})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"valid":  valid,
@@ -197,7 +198,7 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 
 // probeUpstream tries GET /v1/models first, then falls back to POST /v1/chat/completions if modelId is provided.
 // Returns (valid, method, errorMessage).
-func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID string, useProxy bool) (bool, string, string) {
+func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID string, useProxy bool, custom customheaders.Config) (bool, string, string) {
 	modelsURL := urlutil.BuildUpstreamURL(baseURL, "/v1/models")
 
 	req, err := http.NewRequestWithContext(ctx, "GET", modelsURL, nil)
@@ -205,6 +206,7 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 		return false, "", "invalid URL: " + err.Error()
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	customheaders.Apply(req.Header, custom.Enabled, custom.Headers)
 
 	resp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(req)
 	if err != nil {
@@ -232,6 +234,7 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 		}
 		chatReq.Header.Set("Content-Type", "application/json")
 		chatReq.Header.Set("Authorization", "Bearer "+apiKey)
+		customheaders.Apply(chatReq.Header, custom.Enabled, custom.Headers)
 
 		chatResp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(chatReq)
 		if err != nil {
@@ -293,7 +296,7 @@ func (h *Handler) testProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, _, errMsg := h.probeUpstream(r.Context(), provider.BaseURL, key.Key, "", provider.UseProxy)
+	valid, _, errMsg := h.probeUpstream(r.Context(), provider.BaseURL, key.Key, "", provider.UseProxy, customheaders.Config{Enabled: provider.UseCustomHeaders, Headers: provider.CustomHeaders})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"valid": valid,
@@ -326,6 +329,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+key.Key)
+	customheaders.Apply(req.Header, provider.UseCustomHeaders, provider.CustomHeaders)
 
 	resp, err := h.d.ProxyHandler.ManagementClient(*provider).Do(req)
 	if err != nil {

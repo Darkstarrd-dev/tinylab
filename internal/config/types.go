@@ -127,6 +127,16 @@ type Provider struct {
 	// UseProxy routes this provider's upstream requests through the global
 	// upstream proxy (Config.Proxy) when enabled.
 	UseProxy bool `yaml:"useProxy,omitempty" json:"useProxy,omitempty"`
+	// UseCustomHeaders enables per-provider custom request headers
+	// (CustomHeaders) on every outbound provider request: normal proxy
+	// forwards, GET task polling, management probes, and combo speed tests.
+	UseCustomHeaders bool `yaml:"useCustomHeaders,omitempty" json:"useCustomHeaders,omitempty"`
+	// CustomHeaders are additional HTTP headers applied to outbound provider
+	// requests when UseCustomHeaders is enabled. Each entry is one header.
+	// Custom values augment generated auth/content-type headers and may
+	// override same-named ones, except the hardcoded Cline X-Client-Type
+	// override, which is applied last and stays authoritative.
+	CustomHeaders map[string]string `yaml:"customHeaders,omitempty" json:"customHeaders,omitempty"`
 }
 
 // IsNIM reports whether this provider should use the NIM-specific key rotation

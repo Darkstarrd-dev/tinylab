@@ -86,11 +86,12 @@
 
 | 文件 | 职责 |
 |---|---|
-| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`）；另含域名特例检测 `IsCline()`（BaseURL 含 `api.cline.bot`，驱动上游 `x-client-type` 请求头注入）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embedding"`；`Config` 顶层含 `AnySearch` 字段与 `ImageSaveDir` 字段（图片保存目录，默认 `"imgs"`）及 `Trace TraceConfig` 字段（trace 配置，yaml/json `trace`）；`TraceConfig` 结构体含 `Enabled bool`、`RetainDays int`、`MaxDiskMB int` 三个字段 |
+| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`），可选 `UseCustomHeaders`/`CustomHeaders`（`useCustomHeaders`/`customHeaders`）用于 Provider 额外请求头；另含域名特例检测 `IsCline()`（BaseURL 含 `api.cline.bot`，驱动上游 `x-client-type` 请求头注入）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embed…`
 | `paths.go` | 共享路径解析函数：`ResolveDownloadProxy(cfg)` 由 `DownloadConfig.UseProxy` + 全局 `Proxy`（Host:Port）合成 yt-dlp `--proxy` URL；`ResolveTraceDir(logDir, configDir)` 解析 `TraceConfig.LogDir`（空→`{configDir}/traces`，相对拼 configDir，绝对原样）。被 `app.go` 装配与 `api/settings/register.go` 运行时更新共用，避免 `app`→`api` 循环导入。 |
 | `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"`；`finalizeConfig` 在 `TextReview.SplitPatterns == nil`（首次启动）时注入内置章节检测模式（移植自 novelhelper `split.ts::DEFAULT_SPLIT_PATTERNS`，nil 判断避免用户清空 `[]` 后重新注入）；`DefaultConfig()` 中 `Trace` 字段默认值：`Enabled=false`、`RetainDays=2`、`MaxDiskMB=500` |
 | `persistence.go` | `Load`/`Save`：`.tmp` 崩溃恢复（path 缺失/损坏时**不比较 mtime** 优先恢复；成功加载后才清理）+ 原子写（委托 `fsutil.AtomicWrite`）；加密失败拒绝落盘（`encryptKeysCopy` 返回 error） |
 | `validate.go` | 尽力校验（API 类型、重复 ID/prefix、ModelDef.Protocols 值合法性），仅告警；anthropic provider 的 BaseURL 未以 `/v1/messages` 或 `*` 结尾时告警 |
+
 | `crypto.go` | AES-256-GCM：API Key 静态加密，`GenerateKey`/`encryptKeysCopy`（任一 key 加密失败 → Save 拒绝落盘，绝不静默写明文） |
 | `config.go` | 包文档 + 职责拆分说明 |
 | `config_test.go` / `crypto_test.go` / `text_review_test.go` | 测试（`text_review_test.go` 覆盖 TextReview 默认 split-pattern 注入与配置持久化往返） |
@@ -471,11 +472,17 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 | `urlutil.go` | `BuildUpstreamURL`（统一端点 URL 拼接 + 启发式 A 版本段检测）、`normalizeBaseURL`（剥除已知 endpoint 后缀）、`isOllamaBaseURL`/`normalizeOllamaBaseURL`（Ollama 特例）、`isHostRoot`（路径检测） |
 | `urlutil_test.go` | 测试 |
 
+## 13c. `internal/customheaders/` — Provider 自定义请求头
+
+Provider 级可选请求头配置与统一应用工具。配置为空或开关关闭时为 no-op；应用顺序保持现有认证、Content-Type、流式 Accept 与 Cline 硬编码头行为，其中 Cline 头最后覆盖同名自定义值。
+
+| 文件 | 职责 |
+|---|---|
+| `customheaders.go` | `Config` 与 `Apply`：对正常代理、GET 任务轮询、Provider 管理请求、多协议探测和 Combo 测速应用自定义请求头；跳过空名称及 CR/LF 注入 |
+| `customheaders_test.go` | 测试禁用/空配置 no-op、覆盖、CR/LF 拦截 |
+
 ---
-
-
-## 13c. `internal/procutil/` — 进程工具（跨平台进程组管理）
-
+## 13d. `internal/procutil/` — 进程工具（跨平台进程组管理）
 跨平台进程组管理工具，从 `internal/download/kill_unix.go` 中提取的重复代码统一为共享包。Unix 实现：SIGTERM → 2s grace → SIGKILL 兜底；Windows 实现：`taskkill /T /F`。无外部依赖（仅 stdlib）。
 
 | 文件 | build tag | 职责 |
@@ -556,6 +563,8 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 |---|---|
 | 入口 | `index.html`、`index-nopg.html`（无 playground 变体） |
 | JS 模块 | `app.js`（TooltipSystem：hover+focus 委托统一主题 tooltip，消费 `data-tooltip` 属性，取代浏览器原生 `title=`；单共享节点 + 600ms 延迟 + 翻转/钳制定位；顺带键盘焦点路径恢复 sighted 键盘用户视觉 tooltip；输入框内键盘事件拦截防护：`!isInput` 防护避免方向键触发弹窗按钮切换，Tab 键全面覆盖弹窗内控件，`handleThemeModalKeyDown` 掌控外观弹窗 4 组键盘交互与 `closest()` 控件匹配）、`api.js`、`auth.js`、`i18n.js`、`theme.js`（ThemeSystem 双层主题注册表：Mode/Variant 管理 + localStorage + Settings API 持久化 + theme-card 原生 `<button>` 标签化重构 + `requestAnimationFrame` 焦点持久化）、`info_common.js`、`providers.js`（Batch Manage `Select All`/`Deselect All` 动态切换按键、`batchToggleModel`/`batchToggleSelectAll` 联动、Alias/Note/Quota 弹窗自动 focus 与 Quota 弹窗间距优化）、`combos.js`、`quickslots.js`、**Monitor 模块拆为 6 文件**（`index.html`/`index-nopg.html` 加载顺序 state→io→quota→recent→modal→entry）：`monitor_state.js`（状态、格式化、Recent provider/model search predicate、quota/recent 表格按最长可见内容自适应列宽及字号/resize 重算）、`monitor_io.js`（SSE、usage/quota refresh、inflight 合并）、`monitor_quota.js`（Quota Monitor 表格、per-key 展开与详情指标）、`monitor_recent.js`（Recent Requests 表格、状态筛选、会话分组、分页与标题栏搜索）、`monitor_modal.js`（详情弹窗）、`monitor.js`（Monitor 页面入口与生命周期））；`headerStats.js`、`console.js`、`download.js`…
+> `providers.js` 的 Provider Detail Edit 表单支持 `useCustomHeaders` 开关与逐行 `Header: Value` 自定义请求头编辑；`i18n.js` 提供中英文标签、提示和占位符。
+
 | 样式 | `style.css`（`.tip` 统一 tooltip 类：消费 `--modal-bg`/`--glass-blur`/`--glass-border`/`--radius-sm`/`--shadow-card-hover`/`--z-tooltip` 令牌，跟随所有 mode/variant/style 切换，取代浏览器原生 title tooltip；Modal 基础容器限制 `max-height: calc(100vh - 40px)` 与 `.modal-body` `overflow-x: hidden; overflow-y: auto` 防止 1080P/不同 DPI 缩放下出现 Cutoff 及水平滚动条遮挡；Theme Modal 760px 横版左右并排 + `.style-swatch` 6px 内垫防裁剪 + `.modal-footer .btn:focus` 高对比度双重 Focus Ring 光环） |
 | 图标 | `logo.png`(1024 源)、`logo-sm.png`、`favicon.ico`(7 尺寸)、`favicon.png`、`icon-192.png`、`icon-512.png`、`apple-touch-icon.png`、`site.webmanifest` |
 
@@ -673,6 +682,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改文本审核批处理/节点参数 | proxy、playground | `internal/config/types.go`（`TextReviewNode.IntervalSec/BatchChars`）、`internal/config/defaults.go`、`internal/textreview/scheduler.go`（`acquireAndClaim` IntervalSec 门控+`dequeueBatch` 算法+`runBatch` 批处理）、`internal/textreview/session.go`（`RangeStart/RangeEnd`）、`web/playground/static-pg/editor_textreview_step3.js`（Settings modal 加 intervalSec/batchChars/篇章范围输入+StartClean 后隐藏配置区+紧凑卡片+右栏内容选中）、`web/playground/static-pg/editor.js`（`.ed-review-spacer`→`.ed-review-content`）、`web/playground/static-pg/editor_textreview_state.js`（`rangeStart/rangeEnd`）、`web/playground/static-pg/pg-i18n.js`（新键）、`web/playground/static-pg/playground.css`
 
 | 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + `Image Dir`/`Log Dir` 默认路径 Placeholder 提示 + `fasBrowsePicker` 初始目录 + `browsePickerOpen` 锁 + `trapHandler` 键盘陷阱）、`web/static/settings.js`（Settings 侧栏 Path 行）+`settings_modal.js`（`openPathModal`）、`web/static/i18n.js`（`pathSettings`/`imageDir`/`logDir`/`useProxyHint` 键）、`web/static/index-nopg.html`（补加载 `download.js`）、`web/playground/static-pg/gallery-edit.js`（齿轮按钮改调 `openPathSettingsModal`）、`web/playground/static-pg/pg-stream.js`（`pgAutoSaveImageArtifact` 自动回置 `savedPath`/`savedFilename` 并刷新 `pgRefreshImageModalMeta`）、`web/playground/static-pg/pg-modal.js`（`pgCopyImage` 经 `<canvas>` 转绘 PNG Blob 导出 `image/png` ClipboardItem + 跨域代理降级 `fallbackViaProxy`、`pgShowImageModal` Footer 支持展示 `📁 savedPath`）、`web/playground/static-pg/pg-render.js`（`pgShowImageModal` 调用透传 `savedPath`/`savedFilename`）、`internal/api/settings/register.go`（getSettings + `configDir` + `trace.logDir` + `imageSaveDir`）、`internal/api/download/register.go`（`browseSystemPath` + `initialPath` + `resolveBrowseInitialDir` `MkdirAll` 自动创建目录）、`internal/api/image/register.go`（`saveImage`/`imageProxy` 防御 `TestClient` nil 指针改用 `h.httpClient()` + 15s 超时 Context + `User-Agent`）、`internal/api/trace/register.go`（`getDates` 空目录优雅返回）、`internal/fsutil/open_windows.go`（`OpenFilePickerAt`/`OpenDirectoryPickerAt`）、`internal/fsutil/open_other.go`（macOS `osascript` `default location` stubs）、`internal/config/types.go`（`TraceConfig.LogDir`、`DownloadConfig.UseProxy`）、`internal/config/paths.go`（`ResolveDownloadProxy`/`ResolveTraceDir`/`ResolveImageSaveDir`）、`internal/config/persistence.go`（`decodeConfig` 自动迁移 `deprecatedFieldPaths`） |
+| Provider 自定义请求头 | config-registry-state、proxy | `config/types.go`（`Provider.UseCustomHeaders`/`CustomHeaders`）+ `registry/providers.go`（UpdateProvider）+ `internal/customheaders/customheaders.go`（统一应用）+ `proxy/upstream.go`（正常转发/GET 任务轮询，Cline 硬编码头保持最后覆盖）+ `api/providers/register.go`（管理探测/模型拉取）+ `api/probe/register.go`（多协议/多 Key 探测）+ `api/combos/register.go`（测速）+ `web/static/providers.js`/`i18n.js`（Provider Detail Edit UI）`
 ---
 
 ## 同步约束（重申）

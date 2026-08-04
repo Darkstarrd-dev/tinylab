@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/customheaders"
 	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 	"github.com/tinyrouter/tinyrouter/internal/util"
@@ -439,6 +440,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+input.key.Key)
 	httpReq.Header.Set("Accept", "text/event-stream")
+	customheaders.Apply(httpReq.Header, input.provider.UseCustomHeaders, input.provider.CustomHeaders)
 
 	h.d.Logger.Debug("SPEED-TEST SEND %s/%s | url=%s", input.provider.Name, input.modelId, chatURL)
 

@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
+	"github.com/tinyrouter/tinyrouter/internal/customheaders"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 )
@@ -78,6 +79,10 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	if isStream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
+	// Per-provider custom headers augment the generated headers above and may
+	// override same-named ones. applyClineHeaders below stays the final
+	// hardcoded override so api.cline.bot always gets the known-good value.
+	customheaders.Apply(req.Header, sel.Provider.UseCustomHeaders, sel.Provider.CustomHeaders)
 	// api.cline.bot gates cline-free/* models behind an x-client-type
 	// product-surface header; inject for matching providers (replaces any
 	// client-supplied value with a known-good one).
@@ -151,6 +156,10 @@ func (h *Handler) forwardGetUpstream(ctx context.Context, sel *rotation.Selected
 	if tt := headers.Get("X-Modelscope-Task-Type"); tt != "" {
 		req.Header.Set("X-Modelscope-Task-Type", tt)
 	}
+	// Per-provider custom headers augment the generated headers above and may
+	// override same-named ones. applyClineHeaders below stays the final
+	// hardcoded override so api.cline.bot always gets the known-good value.
+	customheaders.Apply(req.Header, sel.Provider.UseCustomHeaders, sel.Provider.CustomHeaders)
 	applyClineHeaders(req, sel)
 	return h.upstreamClientFor(sel).Do(req)
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/customheaders"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
@@ -145,16 +146,17 @@ func (h *Handler) probeModel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithOverallTimeout(r, 30*time.Second)
 	defer cancel()
 
+	custom := customheaders.Config{Enabled: provider.UseCustomHeaders, Headers: provider.CustomHeaders}
 	var res ProbeResult
 	switch req.Proto {
 	case config.ProtocolOpenAICompat:
-		res = h.ProbeOpenAICompat(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
+		res = h.ProbeOpenAICompat(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	case config.ProtocolOpenAIResponses:
-		res = h.ProbeOpenAIResponses(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
+		res = h.ProbeOpenAIResponses(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	case config.ProtocolAnthropic:
-		res = h.ProbeAnthropic(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
+		res = h.ProbeAnthropic(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	case config.ProtocolOpenAIEmbedding:
-		res = h.ProbeOpenAIEmbedding(ctx, client, provider.BaseURL, req.Model, key.Key, nil)
+		res = h.ProbeOpenAIEmbedding(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -233,6 +235,7 @@ func (h *Handler) probeKey(w http.ResponseWriter, r *http.Request) {
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+k.Key)
 		httpReq.Header.Set("Accept", "text/event-stream")
+		customheaders.Apply(httpReq.Header, provider.UseCustomHeaders, provider.CustomHeaders)
 
 		t0 := time.Now()
 		resp, err := h.d.TestClient.Do(httpReq)
@@ -396,6 +399,7 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+k.Key)
 	httpReq.Header.Set("Accept", "text/event-stream")
+	customheaders.Apply(httpReq.Header, provider.UseCustomHeaders, provider.CustomHeaders)
 
 	h.d.Logger.Debug("PROBE SEND %s/%s | Key=%s | url=%s | body=%s", provider.Name, model, k.Name, chatURL, util.TruncStr(string(bodyBytes), 200))
 
@@ -524,52 +528,52 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 
 // probeEndpoint is a generic probe helper that sends a JSON POST request to the
 // given endpoint path and returns a ProbeResult.
-func (h *Handler) probeEndpoint(ctx context.Context, client *http.Client, baseURL, model, apiKey, path string, body map[string]any, protocol string, authHeader, authVal string, onOK ProbeQuotaHook, extraHeaders ...string) ProbeResult {
+func (h *Handler) probeEndpoint(ctx context.Context, client *http.Client, baseURL, model, apiKey, path string, body map[string]any, protocol string, authHeader, authVal string, custom customheaders.Config, onOK ProbeQuotaHook, extraHeaders ...string) ProbeResult {
 	url := urlutil.BuildUpstreamURL(baseURL, path)
-	return doProbe(ctx, client, protocol, http.MethodPost, url, "application/json", authHeader, authVal, body, onOK, extraHeaders...)
+	return doProbe(ctx, client, protocol, http.MethodPost, url, "application/json", authHeader, authVal, body, custom, onOK, extraHeaders...)
 }
 
 // ProbeOpenAICompat sends an /v1/chat/completions probe request (OpenAI Chat
 // Completions compatible).
-func (h *Handler) ProbeOpenAICompat(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK ProbeQuotaHook) ProbeResult {
+func (h *Handler) ProbeOpenAICompat(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK ProbeQuotaHook) ProbeResult {
 	body := map[string]any{
 		"model":      model,
 		"messages":   []map[string]any{{"role": "user", "content": probeTestPrompt}},
 		"max_tokens": 150,
 		"stream":     false,
 	}
-	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/chat/completions", body, probeProtocolOpenAICompat, "Authorization", "Bearer "+apiKey, onOK)
+	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/chat/completions", body, probeProtocolOpenAICompat, "Authorization", "Bearer "+apiKey, custom, onOK)
 }
 
 // ProbeOpenAIResponses sends an /v1/responses probe request (OpenAI Responses API).
-func (h *Handler) ProbeOpenAIResponses(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK ProbeQuotaHook) ProbeResult {
+func (h *Handler) ProbeOpenAIResponses(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK ProbeQuotaHook) ProbeResult {
 	body := map[string]any{
 		"model":             model,
 		"input":             []map[string]any{{"role": "user", "content": probeTestPrompt}},
 		"max_output_tokens": 150,
 		"stream":            false,
 	}
-	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/responses", body, probeProtocolOpenAIResponses, "Authorization", "Bearer "+apiKey, onOK)
+	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/responses", body, probeProtocolOpenAIResponses, "Authorization", "Bearer "+apiKey, custom, onOK)
 }
 
 // ProbeAnthropic sends an /v1/messages probe request (Anthropic Messages API).
-func (h *Handler) ProbeAnthropic(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK ProbeQuotaHook) ProbeResult {
+func (h *Handler) ProbeAnthropic(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK ProbeQuotaHook) ProbeResult {
 	body := map[string]any{
 		"model":      model,
 		"max_tokens": 150,
 		"messages":   []map[string]any{{"role": "user", "content": probeTestPrompt}},
 		"stream":     false,
 	}
-	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/messages", body, probeProtocolAnthropic, "x-api-key", apiKey, onOK, "anthropic-version", "2023-06-01")
+	return h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/messages", body, probeProtocolAnthropic, "x-api-key", apiKey, custom, onOK, "anthropic-version", "2023-06-01")
 }
 
 // ProbeOpenAIEmbedding sends an /v1/embeddings probe request (OpenAI Embeddings API).
-func (h *Handler) ProbeOpenAIEmbedding(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK ProbeQuotaHook) ProbeResult {
+func (h *Handler) ProbeOpenAIEmbedding(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK ProbeQuotaHook) ProbeResult {
 	body := map[string]any{
 		"model": model,
 		"input": probeEmbeddingTestInput,
 	}
-	res := h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/embeddings", body, probeProtocolOpenAIEmbedding, "Authorization", "Bearer "+apiKey, onOK)
+	res := h.probeEndpoint(ctx, client, baseURL, model, apiKey, "/v1/embeddings", body, probeProtocolOpenAIEmbedding, "Authorization", "Bearer "+apiKey, custom, onOK)
 	if res.Ok {
 		dim, err := extractEmbeddingDim(res.ResponseBodyRaw)
 		if err != "" {
@@ -583,7 +587,7 @@ func (h *Handler) ProbeOpenAIEmbedding(ctx context.Context, client *http.Client,
 }
 
 // doProbe performs a single JSON POST probe and normalizes the result into a ProbeResult.
-func doProbe(ctx context.Context, client *http.Client, protocol, method, url, contentType, authKey, authVal string, body map[string]any, onOK ProbeQuotaHook, extraHeaders ...string) ProbeResult {
+func doProbe(ctx context.Context, client *http.Client, protocol, method, url, contentType, authKey, authVal string, body map[string]any, custom customheaders.Config, onOK ProbeQuotaHook, extraHeaders ...string) ProbeResult {
 	res := ProbeResult{Protocol: protocol}
 
 	rawBody, err := json.Marshal(body)
@@ -608,6 +612,9 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 	for i := 0; i+1 < len(extraHeaders); i += 2 {
 		req.Header.Set(extraHeaders[i], extraHeaders[i+1])
 	}
+	// Per-provider custom headers augment the generated auth/content-type
+	// headers and may override same-named ones.
+	customheaders.Apply(req.Header, custom.Enabled, custom.Headers)
 
 	start := time.Now()
 	resp, err := client.Do(req)

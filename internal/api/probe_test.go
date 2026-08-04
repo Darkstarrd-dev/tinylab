@@ -11,6 +11,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinyrouter/tinyrouter/internal/customheaders"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
@@ -53,10 +54,10 @@ func newTestProbeHandler() *probe.Handler {
 	return probe.NewHandler(nil)
 }
 
-func decodeProbeResult(t *testing.T, srv *httptest.Server, fn func(ctx context.Context, client *http.Client, baseURL, model, apiKey string, onOK probe.ProbeQuotaHook) probe.ProbeResult) (probe.ProbeResult, map[string]any) {
+func decodeProbeResult(t *testing.T, srv *httptest.Server, fn func(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK probe.ProbeQuotaHook) probe.ProbeResult) (probe.ProbeResult, map[string]any) {
 	t.Helper()
 	client := srv.Client()
-	res := fn(context.Background(), client, srv.URL, "model-x", "sk-test", nil)
+	res := fn(context.Background(), client, srv.URL, "model-x", "sk-test", customheaders.Config{}, nil)
 	reqMap, _ := res.Request["body"].(map[string]any)
 	return res, reqMap
 }
@@ -166,5 +167,52 @@ func TestProbe_OpenAICompat_Failure(t *testing.T) {
 	}
 	if !strings.Contains(res.Error, "500") {
 		t.Fatalf("error should mention status code, got %q", res.Error)
+	}
+}
+func TestProbe_CustomHeadersApplied(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Provider-Tag")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	h := newTestProbeHandler()
+	client := srv.Client()
+	custom := customheaders.Config{Enabled: true, Headers: map[string]string{
+		"X-Provider-Tag": "acme",
+		"Authorization":  "Bearer custom-secret",
+	}}
+	res := h.ProbeOpenAICompat(context.Background(), client, srv.URL, "model-x", "sk-test", custom, nil)
+	if !res.Ok {
+		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
+	}
+	if gotCustom != "acme" {
+		t.Errorf("X-Provider-Tag = %q, want acme", gotCustom)
+	}
+	if gotAuth != "Bearer custom-secret" {
+		t.Errorf("Authorization = %q, want custom override Bearer custom-secret", gotAuth)
+	}
+}
+
+func TestProbe_CustomHeadersDisabledNoOp(t *testing.T) {
+	var gotCustom string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Provider-Tag")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	h := newTestProbeHandler()
+	client := srv.Client()
+	res := h.ProbeOpenAICompat(context.Background(), client, srv.URL, "model-x", "sk-test", customheaders.Config{Enabled: true, Headers: nil}, nil)
+	if !res.Ok {
+		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
+	}
+	if gotCustom != "" {
+		t.Errorf("X-Provider-Tag = %q, want empty", gotCustom)
 	}
 }

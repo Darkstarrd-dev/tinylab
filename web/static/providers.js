@@ -1647,6 +1647,14 @@ function showEditProvider(id) {
         <label for="r-sticky">' + t('stickyLabel') + '</label>\
         <input type="number" id="r-sticky" value="' + sticky + '" style="max-width:120px">\
       </div>\
+      <div class="form-group mt-12">\
+        <label>' + t('useCustomHeader') + ' <span class="form-hint" style="display:inline;margin:0 0 0 8px">' + t('customHeadersHint') + '</span></label>\
+        <label class="toggle-switch" for="ep-customheaders">\
+          <input type="checkbox" id="ep-customheaders" ' + (p.useCustomHeaders ? 'checked' : '') + '>\
+          <span class="toggle-slider"></span>\
+        </label>\
+        <textarea id="ep-customheaders-text" rows="4" style="width:100%;margin-top:8px;resize:vertical" placeholder="' + t('customHeadersPlaceholder') + '">' + escapeHtml(providerHeadersToText(p)) + '</textarea>\
+      </div>\
       <div class="flex" style="gap:8px">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditProvider(\'' + id + '\'))">' + t('save') + '</button>\
         <button type="button" class="btn" onclick="cancelEditProvider()">' + t('cancel') + '</button>\
@@ -1661,6 +1669,8 @@ async function saveEditProvider(id) {
   p.prefix = document.getElementById('ep-prefix').value.trim();
   p.baseUrl = document.getElementById('ep-url').value.trim();
   p.useProxy = document.getElementById('ep-useproxy').checked;
+  p.useCustomHeaders = document.getElementById('ep-customheaders').checked;
+  p.customHeaders = parseCustomHeadersText(document.getElementById('ep-customheaders-text').value);
   p.rotationStrategy = document.getElementById('r-strategy').value;
   p.stickyLimit = parseInt(document.getElementById('r-sticky').value) || 0;
   if (!p.name || !p.prefix || !p.baseUrl) {
@@ -1699,6 +1709,37 @@ function cancelEditProvider() {
   var el = document.getElementById('detail-info');
   el.innerHTML = '';
 }
+// providerHeadersToText serializes the provider's custom headers map into one
+// "Name: Value" line per entry for the edit form textarea.
+function providerHeadersToText(p) {
+  var out = '';
+  var hdrs = p.customHeaders;
+  if (hdrs && typeof hdrs === 'object') {
+    Object.keys(hdrs).forEach(function(k) {
+      var v = hdrs[k];
+      if (v === null || v === undefined) v = '';
+      out += k + ': ' + v + '\n';
+    });
+  }
+  return out;
+}
+
+// parseCustomHeadersText parses one "Name: Value" pair per line, splitting at
+// the first colon and trimming both sides. Blank lines and malformed lines
+// (missing colon or empty name) are ignored. A null-prototype object is used
+// so a literal "__proto__" header name cannot pollute the prototype chain.
+function parseCustomHeadersText(text) {
+  var result = Object.create(null);
+  String(text || '').split('\n').forEach(function(line) {
+    var idx = line.indexOf(':');
+    if (idx <= 0) return;
+    var name = line.slice(0, idx).trim();
+    if (!name) return;
+    result[name] = line.slice(idx + 1).trim();
+  });
+  return result;
+}
+
 
 // ===================== Model Alias / Note / NIM Modals =====================
 

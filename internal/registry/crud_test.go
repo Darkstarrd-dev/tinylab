@@ -121,7 +121,9 @@ func TestUpdateProvider(t *testing.T) {
 		Name: "P1-New", Prefix: "p1", BaseURL: "https://new.example.com",
 		APIType: "openai-compatible", IsActive: false, RotationStrategy: "round-robin",
 		StickyLimit: 7, InjectStreamOpts: true, NormalizeStreamChunks: true,
-		UseProxy: true,
+		UseProxy:         true,
+		UseCustomHeaders: true,
+		CustomHeaders:    map[string]string{"X-Provider-Tag": "acme", "X-Other": "v2"},
 	}
 	if !r.UpdateProvider("p1", updates) {
 		t.Fatal("UpdateProvider(p1) should return true")
@@ -144,6 +146,12 @@ func TestUpdateProvider(t *testing.T) {
 	}
 	if !got.UseProxy {
 		t.Error("UseProxy should be true after UpdateProvider")
+	}
+	if !got.UseCustomHeaders {
+		t.Error("UseCustomHeaders should be true after UpdateProvider")
+	}
+	if got.CustomHeaders["X-Provider-Tag"] != "acme" || got.CustomHeaders["X-Other"] != "v2" {
+		t.Errorf("CustomHeaders = %v, want map with X-Provider-Tag=acme and X-Other=v2", got.CustomHeaders)
 	}
 
 	// Toggling UseProxy back to false must also persist.

@@ -745,3 +745,77 @@ func TestFinalizeConfig_KeepsPasswordEnabledWithPassword(t *testing.T) {
 		t.Error("expected PasswordEnabled to remain true when password is stored")
 	}
 }
+func TestProvider_CustomHeadersRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	orig := &Config{
+		Port:               20128,
+		ConsoleLogMaxLines: 100,
+		Providers: []Provider{
+			{
+				ID: "custom", Name: "Custom", Prefix: "cu",
+				BaseURL: "https://api.example.com", IsActive: true,
+				Keys:             []Key{{ID: "k1", Key: "sk-test", Name: "Key 1", Priority: 1, IsActive: true}},
+				UseCustomHeaders: true,
+				CustomHeaders:    map[string]string{"X-Provider-Tag": "acme", "X-Other": "v2"},
+			},
+		},
+	}
+	if err := Save(path, orig); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// The YAML must use the contract keys useCustomHeaders / customHeaders.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "useCustomHeaders: true") {
+		t.Errorf("saved YAML missing useCustomHeaders key:\n%s", string(data))
+	}
+	if !strings.Contains(string(data), "customHeaders:") {
+		t.Errorf("saved YAML missing customHeaders key:\n%s", string(data))
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := loaded.Providers[0]
+	if !p.UseCustomHeaders {
+		t.Error("UseCustomHeaders = false, want true after round trip")
+	}
+	if len(p.CustomHeaders) != 2 || p.CustomHeaders["X-Provider-Tag"] != "acme" || p.CustomHeaders["X-Other"] != "v2" {
+		t.Errorf("CustomHeaders = %v, want {X-Provider-Tag: acme, X-Other: v2}", p.CustomHeaders)
+	}
+}
+
+func TestProvider_CustomHeadersLegacyZeroValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.yaml")
+	legacy := []byte(`
+providers:
+  - id: legacy
+    name: Legacy
+    baseUrl: https://api.example.com
+    isActive: true
+    keys:
+      - id: k1
+        key: sk-test
+`)
+	if err := os.WriteFile(path, legacy, 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := cfg.Providers[0]
+	if p.UseCustomHeaders {
+		t.Error("legacy provider UseCustomHeaders = true, want false")
+	}
+	if p.CustomHeaders != nil {
+		t.Errorf("legacy provider CustomHeaders = %v, want nil", p.CustomHeaders)
+	}
+}
