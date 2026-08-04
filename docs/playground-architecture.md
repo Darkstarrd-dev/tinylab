@@ -3,6 +3,7 @@
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
 > **最后核对（2026-08-04 Image Canvas/Batch）：** Image 模式现分为 Manual Canvas 与 Batch Project 两层。Manual 由 `pg-image-model.js`/`pg-image-inspire.js` 维护独立 generation/asset 历史、Prompt helper（仅 `kind:text`）、Natural/Tag/JSON Inspire、Stable asset autosave 与画框状态；`pg-ui.js` 在 Image 模式不再追加 chat/waiting bubble。Batch 由 `internal/imagebatch/` 后端 Manager/Scheduler/ProjectStore/Reconciler/RemoteGenerator/ComfyGenerator 按单并发顺序运行，持久化 `imgs/<slug>/project.json` 与 `p####/v####.<ext>`，`/api/image-batches/*` 为 auth-gated 32 MiB 路由组，支持 Plan/Transform、Snapshot-first SSE、Pause/Resume/Stop/Retry、原子槽位写入和文件系统 reconcile。前端 `pg-image-batch.js` 只保留项目 ID、Snapshot、SSE 和二维 viewer cursor；离开页面关闭 SSE，不取消后端任务。`ImagesEdits` 同时注册 `/v1/images/edits`，与 generations 共享代理轮转链路。`pg-image-*` 三个脚本加载在 `pg-comfyui.js` 后、`pg-autochat.js` 前，并同步 `pgJSFiles` 白名单。`comfyui` Batch adapter 仅访问 `127.0.0.1:{port}`，不依赖浏览器页面。`project.json` 不包含 API Key、Header、Base64 或完整 upstream body。`imgPromptModel` 仍只写 Playground localStorage。`
+> **最后核对（2026-08-04 Gallery ZIP 粘贴）：** `POST /api/gallery/zip-from-path` 现在先解析并校验 JSON `{path}`，再从磁盘读取 ZIP；空路径或 malformed JSON 返回 400，避免 Windows CF_HDROP 粘贴 ZIP 因未解码请求体而以空路径触发 404。拖放仍走二进制 `POST /api/gallery/zip`。
 > **最后核对（2026-08-04）：** Image 模式新增 `comfyui` 协议：端口输入连接本机 ComfyUI；`internal/api/comfyui/register.go` 提供 `POST /api/comfyui/proxy`（仅 `127.0.0.1:{port}`、GET/POST、响应透传与重定向端口约束）；`pg-comfyui.js` 通过 `/system_stats`、`/models/*`、`/object_info/KSampler`、`/history` 动态发现模型/历史工作流，解析 API 工作流生成参数控件，提交 `/prompt` 后轮询 `/history`，经 `/view` 转 base64 data URL 并复用 `/api/save-image`。浏览器不再直连 ComfyUI WebSocket，避免 Origin 校验差异。`
 > **最后核对（2026-08-03）：** 文档同步审计——`PROJECT_MAP.md` §18.3 的 `web/playground/static-pg/` 文件清单已与磁盘对齐（补齐 `editor_textreview_step2..4.js`/`editor-logs.js`/`playground.js`，`playground.css` 计入资产）；本文相关章节无内容变更。
 > **2026-08-04 Playground 主题与模式选择器样式：** `playground.css` 的消息气泡、错误/系统状态、代码块、Reasoning、Debug、SSE 区域继续使用 `style.css` 语义 surface/status/code/border Token；新增 `.pg-mode-toggle` 分段模式控件，沿用 `pgState.mode` / `pgSetMode()` 业务状态，视觉上改为保持原 28px 高度、无外部留白的横向凹陷长条按钮组。`style.css` 提供 `--pg-mode-*` dark/light Token，暗色保持金属渐变，选中按钮本体及其左右边缘单独受光且不使用散射 glow，亮色提供独立的浅色表面、文字和边缘；`style.css` 仍先加载，`playground.css` 后加载并保留 Playground 全屏布局契约。
@@ -785,7 +786,7 @@ zip、tiff 及文件系统操作需后端参与：
 - **POST `/api/gallery/list-dir`**：按给定目录路径返回文件列表（用于粘贴路径展开目录）。
 - **GET `/api/gallery/file?path=`**：按绝对路径提供文件二进制（替代 FSAA `handle.getFile()`）。
 - **DELETE `/api/gallery/fs`**：按绝对路径删除文件/目录（`{path, recursive?}`），Go 后端 `os.Remove`/`os.RemoveAll`，零浏览器权限弹窗。
-- **POST `/api/gallery/zip-from-path`**：从磁盘路径直接创建 zip 会话（避免上传往返）。
+- **POST `/api/gallery/zip-from-path`**：请求体为 JSON `{path}`，先解析并校验非空路径，再从磁盘路径直接创建 zip 会话（避免上传往返）；请求体错误或缺少路径返回 400。
 - **POST `/api/gallery/zip-writeback`**：将 zip 会话字节写回磁盘原文件（`fsutil.AtomicWrite`）。
 - **POST `/api/gallery/paste-paths`**：读取 Windows 剪贴板 CF_HDROP 格式文件路径（`fsutil.GetClipboardFilePaths()`）。
 - **POST `/api/gallery/zip`**：上 zip 二进制（500MB 上限覆盖 `/api` 1MB 组级限制），返回 `{sessionId, manifest:{entries:[{path,size,kind}], total}}`；zip bytes 缓存于进程内纯 LRU 会话（`galleryMaxSessions=128`，无 TTL；`internal/api/gallery/session_store.go` 的 `h.sessions` Handler 字段）。容量从早期 32 上调到 128 以覆盖一次批量导入；驱逐不再致命——前端 `rehydrateZipSession` 在 404 时按包源（`zipAbsPath`/`zipFileHandle`/`zipFile`）重建会话并迁移同包条目。
@@ -859,7 +860,7 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 ### 变更维护清单
 | 触发变更 | 涉及源码 |
 |---|---|
-| 修改拖拽/粘贴/打开交互 | `web/playground/static-pg/gallery-io.js`（`onOpenClick`/`onOpenDirBackend`/`onPaste`/`onDrop`/`loadBackendPaths`）、`internal/api/gallery/fs_handlers.go`（后端 Picker/列表/删除/剪贴板） |
+| 修改 Gallery 后端 ZIP 路径导入 | `internal/api/gallery/zip_handlers.go::galleryZipFromPath`（解析/校验 `{path}` 后从磁盘创建会话）+ `internal/api/gallery/register_test.go`（成功、缺路径和 malformed JSON 回归测试）+ `web/playground/static-pg/gallery-io.js`（`onPaste`/`loadBackendPaths` 调用契约） |
 | 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery/fs_handlers.go`（`galleryDeleteFs`/`galleryZipWriteback`）+ `zip_handlers.go`（`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
 | 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/zip_handlers.go::galleryListZip`（500MB 上限） |
 | 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/zip_handlers.go::galleryConvertTiff` |

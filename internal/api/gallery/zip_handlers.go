@@ -209,6 +209,10 @@ func (h *Handler) galleryZipFromPath(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing path")
+		return
+	}
 	data, err := readZipFile(req.Path)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())

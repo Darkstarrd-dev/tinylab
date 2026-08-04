@@ -202,6 +202,71 @@ func TestGalleryRoutes_DeleteSessionAndTouch(t *testing.T) {
 	}
 }
 
+// TestGalleryRoutes_ZipFromPath verifies that the disk-path endpoint decodes
+// its JSON request and creates a usable zip session.
+func TestGalleryRoutes_ZipFromPath(t *testing.T) {
+	h := newTestHandler(t)
+	r := chi.NewRouter()
+	h.Register(r)
+
+	zipPath := filepath.Join(t.TempDir(), "images.zip")
+	if err := os.WriteFile(zipPath, buildTestZipBytes(t), 0644); err != nil {
+		t.Fatalf("write test zip: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]string{"path": zipPath})
+	if err != nil {
+		t.Fatalf("marshal zip path request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/zip-from-path", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /zip-from-path: want 200, got %d, body=%q", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		SessionID string `json:"sessionId"`
+		Manifest  struct {
+			Entries []struct {
+				Path string `json:"path"`
+			} `json:"entries"`
+		} `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode zip-from-path response: %v", err)
+	}
+	if resp.SessionID == "" || len(resp.Manifest.Entries) != 1 || resp.Manifest.Entries[0].Path != "a.png" {
+		t.Fatalf("unexpected zip-from-path response: %+v", resp)
+	}
+
+	entryReq := httptest.NewRequest(http.MethodGet, "/zip/"+resp.SessionID+"/a.png", nil)
+	entryRec := httptest.NewRecorder()
+	r.ServeHTTP(entryRec, entryReq)
+	if entryRec.Code != http.StatusOK || string(entryRec.Body.Bytes()) != "png-fake-bytes" {
+		t.Fatalf("GET recreated zip session entry: want 200 with original bytes, got %d body=%q", entryRec.Code, entryRec.Body.String())
+	}
+}
+
+// TestGalleryRoutes_ZipFromPathRejectsMissingPath verifies malformed or empty
+// requests fail before attempting to read an empty filesystem path.
+func TestGalleryRoutes_ZipFromPathRejectsMissingPath(t *testing.T) {
+	h := newTestHandler(t)
+	r := chi.NewRouter()
+	h.Register(r)
+
+	for _, body := range []string{"{}", "not-json"} {
+		req := httptest.NewRequest(http.MethodPost, "/zip-from-path", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /zip-from-path body %q: want 400, got %d", body, rec.Code)
+		}
+	}
+}
+
 // itoa is a tiny int->string helper used to build unique session ids in the
 // LRU fill loops without importing strconv.
 func itoa(i int) string {
