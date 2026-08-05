@@ -99,7 +99,7 @@ var pgState = {
     models: {},        // { diffusion_models: [...], text_encoders: [...], vae: [...], checkpoints: [...] }
     samplers: [],      // KSampler sampler_name combo options
     schedulers: [],    // KSampler scheduler combo options
-    templates: [],     // [{ prompt_id, title, workflow }]
+    templates: [],     // [{ prompt_id, title, workflow, workflowId, kind, source, signature }]
   },
 };
 

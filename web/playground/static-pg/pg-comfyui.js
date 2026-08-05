@@ -90,17 +90,24 @@ function pgComfyConnect() {
     { p: '/userdata', key: 'saved_workflows', query: 'dir=workflows&recurse=true&split=false&full_info=true' },
   ];
   var results = {};
+  var activeTabPromise = fetch('/api/comfyui/active', {
+    headers: { 'Accept': 'application/json' },
+  }).then(function(resp) {
+    if (!resp.ok) return null;
+    return resp.json();
+  }).catch(function() { return null; });
+
   var chain = Promise.resolve();
   calls.forEach(function(c) {
     chain = chain.then(function() {
-      return pgComfyCall(cfg, 'GET', c.p)
+      return pgComfyCall(cfg, 'GET', c.p, null, c.query)
         .then(function(resp) { return resp.json(); })
         .then(function(j) { results[c.key] = j; })
         .catch(function(err) { results[c.key] = { __error: err.message }; });
     });
   });
 
-  chain.then(function() {
+  chain.then(function() { return activeTabPromise; }).then(function(activeTab) {
     var st = results.stats;
     if (!st || !st.system) {
       pgState.comfy.connecting = false;
@@ -128,8 +135,8 @@ function pgComfyConnect() {
       if (rq.scheduler && rq.scheduler[0]) schedulers = rq.scheduler[0].slice();
     }
 
-    // Workflow templates: saved workflows (user/default/workflows) first, then
-    // recently executed successful prompts from /history.
+    // Tab Select candidates: saved workflows and history are merged by workflow
+    // id/signature; this prevents one option per generated image.
     var histTemplates = [];
     var hist = results.history;
     if (hist && typeof hist === 'object') {
@@ -137,40 +144,59 @@ function pgComfyConnect() {
         var h = hist[pid];
         if (!h || !h.prompt || !h.prompt[2]) return;
         if (h.status && h.status.status_str !== 'success') return;
-        histTemplates.push({ prompt_id: pid, workflow: h.prompt[2], title: pgComfyTemplateTitle(h.prompt[2], pid) });
+        var graph = h.prompt[3] && h.prompt[3].extra_pnginfo && h.prompt[3].extra_pnginfo.workflow;
+        histTemplates.push({
+          prompt_id: 'history:' + pid,
+          workflow: h.prompt[2],
+          workflowId: graph && graph.id ? String(graph.id) : '',
+          title: pgComfyTemplateTitle(h.prompt[2]),
+          kind: 'tab', source: 'history-fallback',
+          signature: pgComfyWorkflowSignature(h.prompt[2]),
+        });
       });
     }
 
-    function pgComfyFinalize(savedTemplates) {
-      var templates = savedTemplates.concat(histTemplates);
+    function pgComfyFinalize(savedTabs) {
+      // The Desktop bridge marks the currently open tab; keep it first so a
+      // fresh connection selects the same workflow the user is viewing.
+      var tabs = pgComfyDeduplicateTemplates(savedTabs.concat(histTemplates));
       pgState.comfy = {
         connected: true, connecting: false, error: '',
         version: st.system.comfyui_version || '',
-        models: models, samplers: samplers, schedulers: schedulers, templates: templates,
+        models: models, samplers: samplers, schedulers: schedulers, templates: tabs,
       };
       cfg.imgComfyConnected = true;
 
-      // Auto-select the first template when nothing usable is selected yet.
-      if (!cfg.imgComfyWorkflow) {
-        if (templates.length > 0) {
-          cfg.imgComfyTemplateId = templates[0].prompt_id;
-          cfg.imgComfyWorkflow = pgComfyDeepCopy(templates[0].workflow);
-        } else {
-          cfg.imgComfyTemplateId = '';
-          cfg.imgComfyWorkflow = null;
-        }
+      var active = tabs.filter(function(t) { return t.active; })[0];
+      var preferred = active || tabs[0];
+      if (preferred && (active || !cfg.imgComfyWorkflow)) {
+        cfg.imgComfyTemplateId = preferred.prompt_id;
+        cfg.imgComfyWorkflow = pgComfyDeepCopy(preferred.workflow);
+      } else if (!preferred && !cfg.imgComfyWorkflow) {
+        cfg.imgComfyTemplateId = '';
+        cfg.imgComfyWorkflow = null;
       }
       pgSave();
       pgRenderSidebar();
       var modelCount = Object.keys(models).reduce(function(n, k) { return n + models[k].length; }, 0);
-      pgToast(pgT('pgComfyConnectedInfo', [pgState.comfy.version, modelCount, templates.length]), 'success');
+      pgToast(pgT('pgComfyConnectedInfo', [pgState.comfy.version, modelCount, tabs.length]), 'success');
     }
 
     // Load saved workflows from the ComfyUI user directory and convert the
     // UI-format graphs to API-format prompts (subgraph nodes are expanded).
     var savedList = results.saved_workflows;
     var savedGraphs = [];
+    var activePath = activeTab && activeTab.path ? String(activeTab.path).replace(/\\/g, '/') : '';
+    var activeGraph = activeTab && activeTab.graph && typeof activeTab.graph === 'object' ? activeTab.graph : null;
     var loadChain = Promise.resolve();
+    if (activePath && !activeGraph) {
+      loadChain = loadChain.then(function() {
+        return pgComfyCall(cfg, 'GET', '/userdata/workflows%2F' + encodeURIComponent(activePath))
+          .then(function(resp) { return resp.json(); })
+          .then(function(g) { activeGraph = g; })
+          .catch(function(err) { console.warn('[pg-comfyui] active workflow load failed:', activePath, err.message); });
+      });
+    }
     if (Array.isArray(savedList)) {
       savedList.forEach(function(entry) {
         var path = entry && entry.path;
@@ -184,16 +210,76 @@ function pgComfyConnect() {
       });
     }
     loadChain
-      .then(function() { return pgComfySavedTemplates(cfg, savedGraphs); })
+      .then(function() {
+        if (activeGraph && activePath) {
+          savedGraphs = savedGraphs.filter(function(item) { return item.path !== activePath; });
+          savedGraphs.unshift({ path: activePath, modified: Date.now(), graph: activeGraph, active: true });
+        }
+        return pgComfySavedTemplates(cfg, savedGraphs);
+      })
       .then(function(savedTemplates) { pgComfyFinalize(savedTemplates); })
       .catch(function(err) {
         console.warn('[pg-comfyui] saved workflow import failed:', err && err.message);
         pgComfyFinalize([]);
       });
+
   });
 }
+// Normalize API-format workflow data for same-workflow grouping. Runtime values
+// such as seeds and filename prefixes may change on every execution; node
+// numbers and prompt IDs must not make equivalent tabs separate options.
+function pgComfyWorkflowSignature(workflow) {
+  var nodes = workflow && typeof workflow === 'object' ? workflow : {};
+  var ids = Object.keys(nodes).sort(function(a, b) { return Number(a) - Number(b) || a.localeCompare(b); });
+  var remap = {}, next = 0;
+  ids.forEach(function(id) { remap[id] = String(next++); });
+  var dynamicInputs = {
+    seed: true, noise_seed: true, random_seed: true, filename_prefix: true,
+  };
+  var normalized = ids.map(function(id) {
+    var node = nodes[id] || {};
+    var inputs = {};
+    Object.keys(node.inputs || {}).sort().forEach(function(name) {
+      if (dynamicInputs[name]) return;
+      var value = node.inputs[name];
+      if (Array.isArray(value) && value.length >= 2 && typeof value[0] !== 'object') {
+        var sourceId = String(value[0]);
+        value = [remap[sourceId] !== undefined ? remap[sourceId] : sourceId, value[1]];
+      }
+      inputs[name] = value;
+    });
+    return { class_type: node.class_type || '', inputs: inputs };
+  });
+  return JSON.stringify(normalized);
+}
 
-function pgComfyTemplateTitle(wf, pid) {
+function pgComfyDeduplicateTemplates(templates) {
+  var savedIds = {};
+  var seen = {};
+  var out = [];
+  (templates || []).forEach(function(item) {
+    var sig = item.signature || pgComfyWorkflowSignature(item.workflow);
+    var id = item.workflowId ? String(item.workflowId) : '';
+    var isSaved = item.source === 'saved' || item.source === 'active';
+    var key;
+    if (isSaved) {
+      if (item.active && seen['active-sig:' + sig]) return;
+      key = id ? 'saved:' + id + ':' + sig : 'sig:' + sig;
+      savedIds[id] = true;
+      if (item.active) seen['active-sig:' + sig] = true;
+    } else {
+      if (id && savedIds[id]) return;
+      key = id ? 'history:' + id : 'sig:' + sig;
+    }
+    if (seen[key]) return;
+    item.signature = sig;
+    seen[key] = true;
+    out.push(item);
+  });
+  return out;
+}
+
+function pgComfyTemplateTitle(wf) {
   var prefix = '';
   var firstText = '';
   for (var id in wf) {
@@ -204,33 +290,9 @@ function pgComfyTemplateTitle(wf, pid) {
       firstText = n.inputs.text.replace(/\s+/g, ' ').slice(0, 60);
     }
   }
-  var base = prefix || firstText || ('workflow ' + pid.slice(0, 8));
-  return base + ' [' + pid.slice(0, 8) + ']';
+  return prefix || firstText || pgT('pgComfyTabUntitled');
 }
-
-// ----- Saved-workflow import: UI graph -> API prompt -----------------------
-// ComfyUI saves workflows in the editor ("UI") format: { id, nodes[], links[],
-// definitions.subgraphs[] }. POST /prompt needs the API format
-// { nodeId: { class_type, inputs } }, so saved graphs are converted here:
-//  - widget values align to the node's widget order (control_after_generate
-//    occupies its own slot), filtered to real inputs via /object_info schemas;
-//  - link-connected inputs become [sourceNode, sourceSlot] refs (Reroute chains
-//    are resolved to their ultimate source);
-//  - subgraph nodes (UUID class types listed in definitions.subgraphs) are
-//    expanded recursively: their input ports inject the outer node's values
-//    into the inner targets and output ports rewire consumers to the inner
-//    producer.
-function pgComfyLinkMap(graph) {
-  var m = {};
-  (graph.links || []).forEach(function(l) {
-    if (Array.isArray(l)) m[l[0]] = { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] };
-    else m[l.id] = l;
-  });
-  return m;
-}
-
-// Collects the /object_info class names used by a saved graph (and any nested
-// subgraph definitions), skipping subgraph UUIDs and non-node types.
+// Collect /object_info classes from a saved graph and nested subgraphs.
 function pgComfyCollectClasses(graph, classes, seen) {
   var defs = (graph.definitions && Array.isArray(graph.definitions.subgraphs)) ? graph.definitions.subgraphs : [];
   var defById = {};
@@ -247,10 +309,9 @@ function pgComfyCollectClasses(graph, classes, seen) {
   walk(graph.nodes);
 }
 
-// Loads /object_info schemas for the classes used by the saved graphs, converts
-// each graph to an API-format prompt, and returns the template list (newest
-// modified first). prompt_id uses a "file:" prefix so saved templates can never
-// collide with history prompt UUIDs.
+
+// Loads /object_info schemas for saved graphs, converts UI graphs to API
+// prompts, and returns one option per distinct workflow signature.
 function pgComfySavedTemplates(cfg, graphs) {
   var classes = [];
   var seen = {};
@@ -283,19 +344,36 @@ function pgComfySavedTemplates(cfg, graphs) {
     var out = [];
     graphs.forEach(function(item) {
       try {
+        var workflow = pgComfyGraphToPrompt(item.graph, objInfo);
         out.push({
-          prompt_id: 'file:' + item.path,
-          title: item.path.slice(0, -5),
+          prompt_id: 'tab:' + item.path,
+          workflowId: item.graph && item.graph.id ? String(item.graph.id) : '',
+          title: item.active ? pgT('pgComfyCurrentTab') : item.path.replace(/\.json$/i, ''),
           modified: item.modified,
-          workflow: pgComfyGraphToPrompt(item.graph, objInfo),
+          workflow: workflow,
+          kind: 'tab', source: item.active ? 'active' : 'saved', active: !!item.active,
+          path: item.path,
+          signature: pgComfyWorkflowSignature(workflow),
         });
       } catch (e) {
         console.warn('[pg-comfyui] workflow convert failed:', item.path, e && e.message);
       }
     });
     out.sort(function(a, b) { return (b.modified || 0) - (a.modified || 0); });
-    return out;
+    return pgComfyDeduplicateTemplates(out);
   });
+}
+
+function pgComfyLinkMap(graph) {
+  var m = {};
+  (graph.links || []).forEach(function(l) {
+    if (Array.isArray(l)) {
+      m[l[0]] = { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] };
+    } else if (l && l.id != null) {
+      m[l.id] = l;
+    }
+  });
+  return m;
 }
 
 function pgComfyGraphToPrompt(graph, objInfo) {

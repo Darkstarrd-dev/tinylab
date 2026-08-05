@@ -77,3 +77,23 @@ func TestProxyForwardsToLocalComfyUI(t *testing.T) {
 		t.Fatalf("body = %s", got)
 	}
 }
+
+func TestActiveWorkflowRoute(t *testing.T) {
+	oldReader := activeWorkflowReader
+	activeWorkflowReader = func() (*activeWorkflow, error) {
+		return &activeWorkflow{Path: "Anima_Turbo.json", Workspace: "personal"}, nil
+	}
+	defer func() { activeWorkflowReader = oldReader }()
+
+	r := chi.NewRouter()
+	NewHandler(nil).Register(r)
+	req := httptest.NewRequest(http.MethodGet, "/active", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"path":"Anima_Turbo.json"`) || !strings.Contains(rec.Body.String(), `"workspaceId":"personal"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}

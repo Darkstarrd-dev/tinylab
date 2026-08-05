@@ -44,9 +44,22 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
-// Register adds the ComfyUI proxy routes to the given router.
+// Register adds the ComfyUI proxy and local Desktop-tab routes.
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/proxy", h.proxy)
+	r.Get("/active", h.active)
+}
+
+var activeWorkflowReader = readActiveWorkflow
+
+func (h *Handler) active(w http.ResponseWriter, r *http.Request) {
+	workflow, err := activeWorkflowReader()
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusNotFound, "active ComfyUI workflow not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(workflow)
 }
 
 // comfyClient bounds a single proxied call and rejects redirects that leave
