@@ -1141,6 +1141,227 @@ tbody tr:last-child td{border-bottom:none}
 [data-theme="light"] .import-model-item.selected{background:rgba(14,165,233,0.12)}
 [data-theme="light"] select option,[data-theme="light"] select optgroup{background:#fff;color:#1a1a1a}
 
+/* Modal & Form Controls: Inputs, Selects & Number Stepper (Theme System Integrated) */
+.input,
+.modal input[type="text"],
+.modal input[type="password"],
+.modal input[type="url"],
+.modal input[type="email"],
+.modal input.input,
+.dl-settings-modal input[type="text"],
+.dl-settings-card input[type="text"],
+.dl-settings-form .input,
+.modal select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 12px;
+  height: 36px;
+  font-family: inherit;
+  font-size: calc(var(--font-base) - 0.5px);
+  line-height: 1.4;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.input::placeholder,
+.modal input[type="text"]::placeholder,
+.modal input[type="password"]::placeholder,
+.modal input[type="url"]::placeholder,
+.modal input[type="email"]::placeholder,
+.modal input.input::placeholder,
+.dl-settings-modal input::placeholder,
+.dl-settings-card input::placeholder,
+.dl-settings-form .input::placeholder {
+  color: var(--text-muted);
+}
+
+.input:hover,
+.modal input[type="text"]:hover,
+.modal input[type="password"]:hover,
+.modal input[type="url"]:hover,
+.modal input[type="email"]:hover,
+.modal input.input:hover,
+.dl-settings-modal input:hover,
+.dl-settings-card input:hover,
+.dl-settings-form .input:hover,
+.modal select:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.input:focus,
+.modal input[type="text"]:focus,
+.modal input[type="password"]:focus,
+.modal input[type="url"]:focus,
+.modal input[type="email"]:focus,
+.modal input.input:focus,
+.dl-settings-modal input:focus,
+.dl-settings-card input:focus,
+.dl-settings-form .input:focus,
+.modal select:focus {
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-glow) !important;
+  background: var(--glass-active);
+}
+
+/* Form & Modal Custom Select Dropdown Override */
+.form-group .custom-select-wrapper,
+.settings-form-grid .custom-select-wrapper,
+.modal .custom-select-wrapper {
+  width: 100%;
+}
+
+.form-group .custom-select-trigger,
+.settings-form-grid .custom-select-trigger,
+.modal .custom-select-trigger {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 12px;
+  justify-content: flex-start;
+  text-align: left;
+  border-radius: var(--radius-md, 8px);
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  box-sizing: border-box;
+}
+
+.form-group .custom-select-trigger span,
+.settings-form-grid .custom-select-trigger span,
+.modal .custom-select-trigger span {
+  margin: 0;
+  text-align: left;
+}
+
+.form-group .custom-select-menu,
+.settings-form-grid .custom-select-menu,
+.modal .custom-select-menu {
+  width: 100%;
+  min-width: 100%;
+}
+
+/* Modal Select Dropdown (Styled native select fallback) */
+.modal select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888899' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+[data-theme="light"] .modal select option,
+[data-theme="light"] .modal select optgroup {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+[data-theme="dark"] .modal select option,
+[data-theme="dark"] .modal select optgroup {
+  background: #16162a;
+  color: #f0f0f5;
+}
+
+/* Stepper Number Input (Theme-controlled, matching screenshot with centered numbers) */
+.number-stepper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 36px;
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 8px);
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.number-stepper:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.number-stepper:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-glow) !important;
+  background: var(--glass-active);
+}
+
+.number-stepper .stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
+}
+
+.number-stepper .stepper-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+}
+
+.number-stepper .stepper-btn:active {
+  background: var(--glass-active);
+  color: var(--accent);
+}
+
+.number-stepper .stepper-minus {
+  border-right: 1px solid var(--glass-border);
+}
+
+.number-stepper .stepper-plus {
+  border-left: 1px solid var(--glass-border);
+}
+
+.number-stepper input.stepper-input,
+.number-stepper input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--text);
+  font-family: inherit;
+  font-size: calc(var(--font-base) - 0.5px);
+  font-weight: 600;
+  text-align: center !important;
+  padding: 0 4px;
+  -moz-appearance: textfield;
+}
+
+.number-stepper input.stepper-input::-webkit-outer-spin-button,
+.number-stepper input.stepper-input::-webkit-inner-spin-button,
+.number-stepper input[type="number"]::-webkit-outer-spin-button,
+.number-stepper input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.settings-form-grid label,
+.modal .form-group label {
+  display: block;
+  font-size: calc(var(--font-base) - 1.5px);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
 /* ---------------------------------------------------------------------
    Toast
    --------------------------------------------------------------------- */

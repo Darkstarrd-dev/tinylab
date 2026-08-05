@@ -51,17 +51,17 @@ function openTraceModal() {
   var md = trace.maxDiskMB || 500;
   openSettingsModal(t('requestTracing'),
     '<p class="muted">' + escapeHtml(t('traceModalDesc')) + '</p>\
-    <div class="form-group" style="margin-top:16px">\
-      <label class="form-label">' + escapeHtml(t('traceRetainDays')) + '</label>\
-      <input type="number" id="trace-modal-retain" value="' + rd + '" min="1" max="365" style="max-width:140px">\
-      <span class="muted" style="margin-left:8px">' + escapeHtml(t('traceRetainDaysUnit')) + '</span>\
+    <div class="settings-form-grid" style="margin-top:16px">\
+      <div class="form-group">\
+        <label>' + escapeHtml(t('traceRetainDays')) + ' (' + escapeHtml(t('traceRetainDaysUnit')) + ')</label>\
+        ' + renderStepperHtml('trace-modal-retain', rd, { min: 1, max: 365 }) + '\
+      </div>\
+      <div class="form-group">\
+        <label>' + escapeHtml(t('traceMaxDiskMB')) + ' (' + escapeHtml(t('traceMaxDiskMBUnit')) + ')</label>\
+        ' + renderStepperHtml('trace-modal-maxdisk', md, { min: 50, step: 50 }) + '\
+      </div>\
     </div>\
-    <div class="form-group" style="margin-top:12px">\
-      <label class="form-label">' + escapeHtml(t('traceMaxDiskMB')) + '</label>\
-      <input type="number" id="trace-modal-maxdisk" value="' + md + '" min="50" style="max-width:140px">\
-      <span class="muted" style="margin-left:8px">' + escapeHtml(t('traceMaxDiskMBUnit')) + '</span>\
-    </div>\
-    <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">\
+    <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">\
       <button type="button" class="btn btn-ghost btn-sm" onclick="traceResetDefaults()">' + escapeHtml(t('resetDefaults')) + '</button>\
       <button type="button" class="btn btn-danger btn-sm" onclick="confirmClearTraces()">' + escapeHtml(t('clearTraceData')) + '</button>\
     </div>'
