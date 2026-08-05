@@ -373,11 +373,17 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     shortcutSummaryCustom: '{0} shortcuts ({1} modified)',
     // Theme / Appearance
     appearance: 'Appearance',
-    appearanceDesc: 'Customize application theme mode and color schemes.',
+    appearanceDesc: 'Customize application theme mode, color schemes, language, and font size.',
     themeDark: 'Dark',
     themeLight: 'Light',
     themeDefault: 'Default',
     themeStyle: 'Style',
+    langAndFontSize: 'Language & Font Size',
+    language: 'Language',
+    fontSize: 'Font Size',
+    fontSmall: 'Small',
+    fontMedium: 'Medium',
+    fontLarge: 'Large',
     // Editor keys
     editor: 'Editor',
     editorEditMode: 'Edit', editorDiff: 'Diff', editorClean: 'Clean', editorDiffSource: 'Diff Source', editorSaveAll: 'Save All',
@@ -854,11 +860,17 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     shortcutSummaryCustom: '{0} 个快捷键（{1} 个已修改）',
     // Theme / Appearance
     appearance: '外观',
-    appearanceDesc: '自定义应用主题模式与色彩配色方案。',
+    appearanceDesc: '自定义应用主题模式、色彩配色方案、语言与字体大小。',
     themeDark: '暗色',
     themeLight: '亮色',
     themeDefault: '默认',
     themeStyle: '风格',
+    langAndFontSize: '语言与字号',
+    language: '界面语言',
+    fontSize: '字体大小',
+    fontSmall: '小 (S)',
+    fontMedium: '中 (M)',
+    fontLarge: '大 (L)',
     // Editor keys
     editor: '编辑器',
     editorEditMode: '编辑', editorDiff: '比较', editorClean: '清理', editorDiffSource: '比较来源', editorSaveAll: '全部保存',
@@ -997,19 +1009,35 @@ function currentLang() {
   return document.documentElement.getAttribute('data-lang') || 'en';
 }
 
-function toggleLang() {
-  var current = currentLang();
-  var next = current === 'en' ? 'cn' : 'en';
-  document.documentElement.setAttribute('data-lang', next);
-  localStorage.setItem('lang', next);
-  updateLangButton(next);
+function setLang(lang) {
+  if (lang !== 'en' && lang !== 'cn') lang = 'en';
+  document.documentElement.setAttribute('data-lang', lang);
+  localStorage.setItem('lang', lang);
+  updateLangButton(lang);
   updateSidebarNav();
   if (typeof applyHeaderStatLabels === 'function') applyHeaderStatLabels();
-  var page = currentPage;
-  if (currentProviderId) {
-    renderProviders(document.getElementById('page-content'));
-  } else {
+  updateThemeModalLabels();
+  var page = typeof currentPage !== 'undefined' ? currentPage : 'monitor';
+  if (typeof currentProviderId !== 'undefined' && currentProviderId) {
+    if (typeof renderProviders === 'function') renderProviders(document.getElementById('page-content'));
+  } else if (typeof navigateTo === 'function') {
     navigateTo(page);
+  }
+}
+
+function toggleLang() {
+  setLang(currentLang() === 'en' ? 'cn' : 'en');
+}
+
+function updateThemeModalLabels() {
+  var modalOverlay = document.getElementById('modal-overlay');
+  if (!modalOverlay || modalOverlay.style.display === 'none') return;
+  var modalTitle = modalOverlay.querySelector('.modal-header h3');
+  if (modalTitle) modalTitle.textContent = t('appearance');
+  var sectionTitles = modalOverlay.querySelectorAll('.style-modal-title');
+  if (sectionTitles && sectionTitles.length >= 2) {
+    sectionTitles[0].textContent = t('themeStyle');
+    sectionTitles[1].textContent = t('langAndFontSize');
   }
 }
 

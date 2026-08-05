@@ -142,7 +142,9 @@ function openThemeModal() {
   var title = t('appearance');
   var bodyHtml = '<div id="theme-modal-picker-container" class="theme-modal-picker"></div>'
     + '<div class="style-modal-section"><div class="style-modal-title">' + t('themeStyle') + '</div>'
-    + '<div id="style-modal-picker-container"></div></div>';
+    + '<div id="style-modal-picker-container"></div></div>'
+    + '<div class="style-modal-section"><div class="style-modal-title">' + t('langAndFontSize') + '</div>'
+    + '<div id="lang-font-modal-container"></div></div>';
   openSettingsModal(title, bodyHtml);
   var modalEl = document.querySelector('#modal-overlay .modal');
   if (modalEl) {
@@ -151,6 +153,7 @@ function openThemeModal() {
   }
   ThemeSystem.renderThemePicker('theme-modal-picker-container');
   ThemeSystem.renderStylePicker('style-modal-picker-container');
+  renderLangAndFontSizePicker('lang-font-modal-container');
   var saveBtn = document.getElementById('settings-modal-save');
   if (saveBtn) {
     saveBtn.onclick = function() {
@@ -167,6 +170,32 @@ function openThemeModal() {
       }
     }, 60);
   });
+}
+
+function renderLangAndFontSizePicker(containerId) {
+  var container = typeof containerId === 'string' ? document.getElementById(containerId) : containerId;
+  if (!container) return;
+  var currLang = typeof currentLang === 'function' ? currentLang() : 'en';
+  var currFont = document.documentElement.getAttribute('data-font-size') || 's';
+
+  container.innerHTML = '\
+    <div class="lang-font-row">\
+      <div class="lang-font-group">\
+        <span class="lang-font-label">' + t('language') + '</span>\
+        <div class="segmented-control">\
+          <button type="button" class="segmented-btn' + (currLang === 'en' ? ' active' : '') + '" onclick="setLang(\'en\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">English</button>\
+          <button type="button" class="segmented-btn' + (currLang === 'cn' ? ' active' : '') + '" onclick="setLang(\'cn\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">中文</button>\
+        </div>\
+      </div>\
+      <div class="lang-font-group">\
+        <span class="lang-font-label">' + t('fontSize') + '</span>\
+        <div class="segmented-control">\
+          <button type="button" class="segmented-btn' + (currFont === 's' ? ' active' : '') + '" onclick="setFontSize(\'s\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">' + t('fontSmall') + '</button>\
+          <button type="button" class="segmented-btn' + (currFont === 'm' ? ' active' : '') + '" onclick="setFontSize(\'m\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">' + t('fontMedium') + '</button>\
+          <button type="button" class="segmented-btn' + (currFont === 'l' ? ' active' : '') + '" onclick="setFontSize(\'l\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">' + t('fontLarge') + '</button>\
+        </div>\
+      </div>\
+    </div>';
 }
 
 // ===================== Modal Save Functions =====================

@@ -37,33 +37,115 @@ function renderDownload(container) {
     <div class="download-sections">
     <div class="card download-input-card">
       <div class="download-toolbar">
-        <select id="dl-type" class="select">
-          <option value="video">${escapeHtml(t('video'))}</option>
-          <option value="audio">${escapeHtml(t('audio'))}</option>
-        </select>
-        <select id="dl-quality" class="select">
-          <option value="best">${escapeHtml(t('qualityBest'))}</option>
-          <option value="good">1080p</option>
-          <option value="normal">720p</option>
-          <option value="bad">480p</option>
-          <option value="worst">360p</option>
-        </select>
-        <select id="dl-container" class="select">
-          <option value="auto">Auto (MP4/MKV)</option>
-          <option value="mp4">MP4</option>
-          <option value="mkv">MKV</option>
-          <option value="webm">WebM</option>
-          <option value="original">${escapeHtml(t('original'))}</option>
-        </select>
+        <div class="custom-select-wrapper" id="dl-type-wrap">
+          <div class="custom-select-trigger" onclick="toggleCustomSelect('dl-type-wrap', event)">
+            <span class="custom-select-label">${escapeHtml(t('video'))}</span>
+            <svg viewBox="0 0 360 360" xml:space="preserve" aria-hidden="true" focusable="false">
+              <path d="M325.607,79.393c-5.857-5.857-15.355-5.858-21.213,0.001l-139.39,139.393L25.607,79.393 c-5.857-5.857-15.355-5.858-21.213,0.001c-5.858,5.858-5.858,15.355,0,21.213l150.004,150c2.813,2.813,6.628,4.393,10.606,4.393 s7.794-1.581,10.606-4.394l149.996-150C331.465,94.749,331.465,85.251,325.607,79.393z"></path>
+            </svg>
+          </div>
+          <div class="custom-select-menu">
+            <div class="custom-select-option selected" data-value="video" onclick="selectCustomOption('dl-type-wrap', 'video', '${escapeHtml(t('video'))}')">
+              <span class="custom-select-option-link">${escapeHtml(t('video'))}</span>
+            </div>
+            <div class="custom-select-option" data-value="audio" onclick="selectCustomOption('dl-type-wrap', 'audio', '${escapeHtml(t('audio'))}')">
+              <span class="custom-select-option-link">${escapeHtml(t('audio'))}</span>
+            </div>
+          </div>
+          <select id="dl-type" class="select" style="display:none;">
+            <option value="video" selected>${escapeHtml(t('video'))}</option>
+            <option value="audio">${escapeHtml(t('audio'))}</option>
+          </select>
+        </div>
+
+        <div class="custom-select-wrapper" id="dl-quality-wrap">
+          <div class="custom-select-trigger" onclick="toggleCustomSelect('dl-quality-wrap', event)">
+            <span class="custom-select-label">${escapeHtml(t('qualityBest'))}</span>
+            <svg viewBox="0 0 360 360" xml:space="preserve" aria-hidden="true" focusable="false">
+              <path d="M325.607,79.393c-5.857-5.857-15.355-5.858-21.213,0.001l-139.39,139.393L25.607,79.393 c-5.857-5.857-15.355-5.858-21.213,0.001c-5.858,5.858-5.858,15.355,0,21.213l150.004,150c2.813,2.813,6.628,4.393,10.606,4.393 s7.794-1.581,10.606-4.394l149.996-150C331.465,94.749,331.465,85.251,325.607,79.393z"></path>
+            </svg>
+          </div>
+          <div class="custom-select-menu">
+            <div class="custom-select-option selected" data-value="best" onclick="selectCustomOption('dl-quality-wrap', 'best', '${escapeHtml(t('qualityBest'))}')">
+              <span class="custom-select-option-link">${escapeHtml(t('qualityBest'))}</span>
+            </div>
+            <div class="custom-select-option" data-value="good" onclick="selectCustomOption('dl-quality-wrap', 'good', '1080p')">
+              <span class="custom-select-option-link">1080p</span>
+            </div>
+            <div class="custom-select-option" data-value="normal" onclick="selectCustomOption('dl-quality-wrap', 'normal', '720p')">
+              <span class="custom-select-option-link">720p</span>
+            </div>
+            <div class="custom-select-option" data-value="bad" onclick="selectCustomOption('dl-quality-wrap', 'bad', '480p')">
+              <span class="custom-select-option-link">480p</span>
+            </div>
+            <div class="custom-select-option" data-value="worst" onclick="selectCustomOption('dl-quality-wrap', 'worst', '360p')">
+              <span class="custom-select-option-link">360p</span>
+            </div>
+          </div>
+          <select id="dl-quality" class="select" style="display:none;">
+            <option value="best" selected>${escapeHtml(t('qualityBest'))}</option>
+            <option value="good">1080p</option>
+            <option value="normal">720p</option>
+            <option value="bad">480p</option>
+            <option value="worst">360p</option>
+          </select>
+        </div>
+
+        <div class="custom-select-wrapper" id="dl-container-wrap">
+          <div class="custom-select-trigger" onclick="toggleCustomSelect('dl-container-wrap', event)">
+            <span class="custom-select-label">Auto (MP4/MKV)</span>
+            <svg viewBox="0 0 360 360" xml:space="preserve" aria-hidden="true" focusable="false">
+              <path d="M325.607,79.393c-5.857-5.857-15.355-5.858-21.213,0.001l-139.39,139.393L25.607,79.393 c-5.857-5.857-15.355-5.858-21.213,0.001c-5.858,5.858-5.858,15.355,0,21.213l150.004,150c2.813,2.813,6.628,4.393,10.606,4.393 s7.794-1.581,10.606-4.394l149.996-150C331.465,94.749,331.465,85.251,325.607,79.393z"></path>
+            </svg>
+          </div>
+          <div class="custom-select-menu">
+            <div class="custom-select-option selected" data-value="auto" onclick="selectCustomOption('dl-container-wrap', 'auto', 'Auto (MP4/MKV)')">
+              <span class="custom-select-option-link">Auto (MP4/MKV)</span>
+            </div>
+            <div class="custom-select-option" data-value="mp4" onclick="selectCustomOption('dl-container-wrap', 'mp4', 'MP4')">
+              <span class="custom-select-option-link">MP4</span>
+            </div>
+            <div class="custom-select-option" data-value="mkv" onclick="selectCustomOption('dl-container-wrap', 'mkv', 'MKV')">
+              <span class="custom-select-option-link">MKV</span>
+            </div>
+            <div class="custom-select-option" data-value="webm" onclick="selectCustomOption('dl-container-wrap', 'webm', 'WebM')">
+              <span class="custom-select-option-link">WebM</span>
+            </div>
+            <div class="custom-select-option" data-value="original" onclick="selectCustomOption('dl-container-wrap', 'original', '${escapeHtml(t('original'))}')">
+              <span class="custom-select-option-link">${escapeHtml(t('original'))}</span>
+            </div>
+          </div>
+          <select id="dl-container" class="select" style="display:none;">
+            <option value="auto" selected>Auto (MP4/MKV)</option>
+            <option value="mp4">MP4</option>
+            <option value="mkv">MKV</option>
+            <option value="webm">WebM</option>
+            <option value="original">${escapeHtml(t('original'))}</option>
+          </select>
+        </div>
         <input type="text" id="dl-url" class="input" placeholder="${escapeHtml(t('downloadUrlPlaceholder'))}" />
         <button class="btn btn-primary" id="dl-parse-btn" type="button" onclick="parseDownloadUrl()">${escapeHtml(t('parse'))}</button>
-        <button class="btn btn-ghost" type="button" onclick="openPathSettingsModal({ sections: { defaultDir: true, ytDlpPath: true, ffmpegPath: true }, useProxy: true })">${escapeHtml(t('settings'))}</button>
-        <button class="btn btn-ghost btn-icon" type="button" onclick="clearCompletedDownloads()" data-tooltip="${escapeHtml(t('clearCompleted'))}">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-            <path d="M3 6h18"></path>
-            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-            <path d="m9 14 2 2 4-4"></path>
+        <button class="btn btn-primary" id="dl-settings-btn" type="button" onclick="openPathSettingsModal({ sections: { defaultDir: true, ytDlpPath: true, ffmpegPath: true }, useProxy: true })">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 20 20" fill="none" class="dl-settings-svg-icon" aria-hidden="true" focusable="false">
+            <g stroke-width="1.5" stroke-linecap="round" stroke="currentColor">
+              <circle r="2.5" cy="10" cx="10"></circle>
+              <path fill-rule="evenodd" d="m8.39079 2.80235c.53842-1.51424 2.67991-1.51424 3.21831-.00001.3392.95358 1.4284 1.40477 2.3425.97027 1.4514-.68995 2.9657.82427 2.2758 2.27575-.4345.91407.0166 2.00334.9702 2.34248 1.5143.53842 1.5143 2.67996 0 3.21836-.9536.3391-1.4047 1.4284-.9702 2.3425.6899 1.4514-.8244 2.9656-2.2758 2.2757-.9141-.4345-2.0033.0167-2.3425.9703-.5384 1.5142-2.67989 1.5142-3.21831 0-.33914-.9536-1.4284-1.4048-2.34247-.9703-1.45148.6899-2.96571-.8243-2.27575-2.2757.43449-.9141-.01669-2.0034-.97028-2.3425-1.51422-.5384-1.51422-2.67994.00001-3.21836.95358-.33914 1.40476-1.42841.97027-2.34248-.68996-1.45148.82427-2.9657 2.27575-2.27575.91407.4345 2.00333-.01669 2.34247-.97026z" clip-rule="evenodd"></path>
+            </g>
+          </svg>
+          <span>${escapeHtml(t('settings'))}</span>
+        </button>
+        <button class="btn btn-ghost btn-icon bin-button" type="button" onclick="clearCompletedDownloads()" data-tooltip="${escapeHtml(t('clearCompleted'))}" aria-label="${escapeHtml(t('clearCompleted'))}">
+          <svg class="bin-top" viewBox="0 0 39 7" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <line y1="5" x2="39" y2="5" stroke="currentColor" stroke-width="4"></line>
+            <line x1="12" y1="1.5" x2="26.0357" y2="1.5" stroke="currentColor" stroke-width="3"></line>
+          </svg>
+          <svg class="bin-bottom" viewBox="0 0 33 39" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <mask id="dl-bin-mask" fill="white">
+              <path d="M0 0H33V35C33 37.2091 31.2091 39 29 39H4C1.79086 39 0 37.2091 0 35V0Z"></path>
+            </mask>
+            <path d="M0 0H33H0ZM37 35C37 39.4183 33.4183 43 29 43H4C-0.418278 43 -4 39.4183 -4 35H4H29H37ZM4 43C-0.418278 43 -4 39.4183 -4 35V0H4V35V43ZM37 0V35C37 39.4183 33.4183 43 29 43V35V0H37Z" fill="currentColor" mask="url(#dl-bin-mask)"></path>
+            <path d="M12 6L12 29" stroke="currentColor" stroke-width="4"></path>
+            <path d="M21 6V29" stroke="currentColor" stroke-width="4"></path>
           </svg>
         </button>
       </div>
@@ -1232,3 +1314,46 @@ function getResolutionLabel(quality) {
   };
   return map[quality] || '-';
 }
+
+// Custom dropdown interaction handlers for theme-integrated animated select menus.
+function toggleCustomSelect(wrapperId, event) {
+  if (event) event.stopPropagation();
+  var wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  var isOpen = wrapper.classList.contains('open');
+  closeAllCustomSelects();
+  if (!isOpen) {
+    wrapper.classList.add('open');
+  }
+}
+
+function selectCustomOption(wrapperId, value, labelText) {
+  var wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  var selectEl = wrapper.querySelector('select');
+  var labelEl = wrapper.querySelector('.custom-select-label');
+  if (selectEl) {
+    selectEl.value = value;
+    selectEl.dispatchEvent(new Event('change'));
+  }
+  if (labelEl) {
+    labelEl.textContent = labelText;
+  }
+  var options = wrapper.querySelectorAll('.custom-select-option');
+  options.forEach(function(opt) {
+    if (opt.dataset.value === value) {
+      opt.classList.add('selected');
+    } else {
+      opt.classList.remove('selected');
+    }
+  });
+  wrapper.classList.remove('open');
+}
+
+function closeAllCustomSelects() {
+  document.querySelectorAll('.custom-select-wrapper.open').forEach(function(el) {
+    el.classList.remove('open');
+  });
+}
+
+document.addEventListener('click', closeAllCustomSelects);

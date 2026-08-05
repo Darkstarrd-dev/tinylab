@@ -226,26 +226,52 @@ var TooltipSystem = (function() {
     currentEl = el;
     var t = ensureTip();
     t.textContent = content;          // textContent keeps us immune to HTML injection from data-tooltip values
+    t.classList.remove('visible');
     t.style.display = '';
     position(t, el);
+    void t.offsetWidth;               // force reflow to restart animation
+    t.classList.add('visible');
   }
 
   function position(t, el) {
     var rect = el.getBoundingClientRect();
-    var margin = 6;
-    var left = rect.left;
-    if (left + t.offsetWidth > window.innerWidth - 4) left = window.innerWidth - t.offsetWidth - 4;
-    if (left < 4) left = 4;
+    var margin = 8;
+    var rawLeft = rect.left + (rect.width / 2) - (t.offsetWidth / 2);
+    var left = rawLeft;
+    var arrowOffset = 0;
+    if (left + t.offsetWidth > window.innerWidth - 6) {
+      var clampedLeft = window.innerWidth - t.offsetWidth - 6;
+      arrowOffset = rawLeft - clampedLeft;
+      left = clampedLeft;
+    }
+    if (left < 6) {
+      var clampedLeft = 6;
+      arrowOffset = rawLeft - clampedLeft;
+      left = clampedLeft;
+    }
+
+    var isAbove = true;
     var top = rect.top - t.offsetHeight - margin;       // prefer above
-    if (top < 4) top = rect.bottom + margin;            // flip below if no room above
-    if (top + t.offsetHeight > window.innerHeight - 4) top = window.innerHeight - t.offsetHeight - 4;
+    if (top < 6) {
+      top = rect.bottom + margin;            // flip below if no room above
+      isAbove = false;
+    }
+    if (top + t.offsetHeight > window.innerHeight - 6) {
+      top = window.innerHeight - t.offsetHeight - 6;
+    }
+
+    t.setAttribute('data-placement', isAbove ? 'top' : 'bottom');
+    t.style.setProperty('--arrow-offset', arrowOffset + 'px');
     t.style.left = left + 'px';
     t.style.top = top + 'px';
   }
 
   function hide() {
     if (showTimer) { clearTimeout(showTimer); showTimer = null; }
-    if (tip) tip.style.display = 'none';
+    if (tip) {
+      tip.classList.remove('visible');
+      tip.style.display = 'none';
+    }
     currentEl = null;
   }
 
@@ -476,13 +502,18 @@ function updateSidebarNav() {
 }
 
 
+function setFontSize(size) {
+  if (size !== 's' && size !== 'm' && size !== 'l') size = 's';
+  document.documentElement.setAttribute('data-font-size', size);
+  localStorage.setItem('fontSize', size);
+  updateFontButton(size);
+}
+
 function toggleFontSize() {
   const current = document.documentElement.getAttribute('data-font-size') || 's';
   const order = { 's': 'm', 'm': 'l', 'l': 's' };
   const next = order[current] || 's';
-  document.documentElement.setAttribute('data-font-size', next);
-  localStorage.setItem('fontSize', next);
-  updateFontButton(next);
+  setFontSize(next);
 }
 
 function toggleTheme() {
