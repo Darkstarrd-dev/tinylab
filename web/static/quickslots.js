@@ -46,9 +46,9 @@ function showAddQuickSlot() {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newQuickSlot') + '</div>\
-    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" placeholder="' + t('name') + '"></div>\
+    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" placeholder="' + t('name') + '"></div>\
     <div class="form-group"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
-      <input type="number" id="qs-order" min="1" max="9" value="1">\
+      ' + renderStepperHtml('qs-order', 1, 1, 9, 1, 'max-width:140px;') + '\
       <p class="muted mt-12">' + t('quickSlotOrderHint') + '</p>\
     </div>\
     <div class="form-group"><label>' + t('quickSlotModels') + '</label>\
@@ -121,9 +121,9 @@ async function showEditQuickSlot(id) {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:70vw;width:70vw">\
     <div class="modal-title">' + t('quickSlotEdit') + '</div>\
-    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" value="' + escapeHtml(qs.name) + '"></div>\
+    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" value="' + escapeHtml(qs.name) + '"></div>\
     <div class="form-group"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
-      <input type="number" id="qs-order" min="1" max="9" value="' + (qs.order || 1) + '">\
+      ' + renderStepperHtml('qs-order', qs.order || 1, 1, 9, 1, 'max-width:140px;') + '\
       <p class="muted mt-12">' + t('quickSlotOrderHint') + '</p>\
     </div>\
     <div class="form-group"><label>' + t('quickSlotModels') + '</label>\

@@ -92,13 +92,13 @@ function showAddProvider() {
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newProvider') + '</div>\
     <div class="flex" style="gap:12px">\
-      <div class="form-group" style="flex:1"><label for="p-name">' + t('name') + '</label><input id="p-name" placeholder="DeepSeek"></div>\
-      <div class="form-group" style="flex:1"><label for="p-prefix">' + t('prefixLabel') + '</label><input id="p-prefix" placeholder="deepseek"></div>\
+      <div class="form-group" style="flex:1"><label for="p-name">' + t('name') + '</label><input id="p-name" class="input" placeholder="DeepSeek"></div>\
+      <div class="form-group" style="flex:1"><label for="p-prefix">' + t('prefixLabel') + '</label><input id="p-prefix" class="input" placeholder="deepseek"></div>\
     </div>\
-    <div class="form-group"><label for="p-url">' + t('baseUrlLabel') + '</label><input id="p-url" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai"></div>\
+    <div class="form-group"><label for="p-url">' + t('baseUrlLabel') + '</label><input id="p-url" class="input" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai"></div>\
     <div class="form-hint" style="margin-top:-6px;margin-bottom:12px">' + t('baseUrlHint') + '</div>\
-    <div class="form-group"><label for="p-apikey">' + t('apiKeyLabel') + '</label><input type="password" id="p-apikey" placeholder="sk-..."></div>\
-    <div class="form-group"><label for="p-modelid">' + t('modelIdLabel') + '</label><input id="p-modelid" placeholder="deepseek-chat"></div>\
+    <div class="form-group"><label for="p-apikey">' + t('apiKeyLabel') + '</label><input type="password" id="p-apikey" class="input" placeholder="sk-..."></div>\
+    <div class="form-group"><label for="p-modelid">' + t('modelIdLabel') + '</label><input id="p-modelid" class="input" placeholder="deepseek-chat"></div>\
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;margin-bottom:0">\
       <div>\
         <label style="margin-bottom:2px;display:block">' + t('useProxy') + '</label>\
@@ -215,7 +215,7 @@ async function renderProviderDetail(c, id) {
             <button type="button" class="btn btn-sm" onclick="showEditProvider(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
             <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" onclick="toggleProvider(\'' + escapeForJsString(p.id) + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
             <button type="button" class="btn btn-sm btn-danger" onclick="deleteProvider(\'' + escapeForJsString(p.id) + '\')">' + t('delete') + '</button>\
-            <input type="number" class="btn-order-input" id="provider-order-input" min="1" max="' + totalProviders + '" value="' + currentOrder + '" data-tooltip="' + escapeHtml(orderTitle) + '" onchange="changeProviderOrder(\'' + escapeForJsString(p.id) + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)" onkeydown="if(event.key===\'Enter\') this.blur()"/>\
+            ' + renderStepperHtml('provider-order-input', currentOrder, 1, totalProviders, 1, 'max-width:110px;display:inline-flex;', 'changeProviderOrder(\'' + escapeForJsString(p.id) + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)') + '\
           </div>\
         </div>\
       </div>\
@@ -306,9 +306,9 @@ function showAddKeyDetail(providerId) {
   el.innerHTML = '\
     <div class="card" style="background:var(--glass-bg)">\
       <div class="card-title">' + t('newKey') + '</div>\
-      <div class="form-group mt-12"><label for="dk-name">' + t('keyName') + '</label><input id="dk-name" placeholder="Main"></div>\
-      <div class="form-group"><label for="dk-key">' + t('apiKeyInput') + '</label><input type="password" id="dk-key" placeholder="sk-..."></div>\
-      <div class="form-group"><label for="dk-priority">' + t('priorityLabel') + '</label><input type="number" id="dk-priority" value="1" style="max-width:120px"></div>\
+      <div class="form-group mt-12"><label for="dk-name">' + t('keyName') + '</label><input id="dk-name" class="input" placeholder="Main"></div>\
+      <div class="form-group"><label for="dk-key">' + t('apiKeyInput') + '</label><input type="password" id="dk-key" class="input" placeholder="sk-..."></div>\
+      <div class="form-group"><label for="dk-priority">' + t('priorityLabel') + '</label>' + renderStepperHtml('dk-priority', 1, 1, 999, 1, 'max-width:140px;') + '</div>\
       <div class="flex" style="gap:8px">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => addKeyDetail(\'' + escapeForJsString(providerId) + '\'))">' + t('create') + '</button>\
         <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + escapeForJsString(providerId) + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
@@ -344,8 +344,8 @@ function showBulkAddKeys(providerId) {
     <div class="card" style="background:var(--glass-bg)">\
       <div class="card-title">' + t('bulkAddKeys') + '</div>\
       <p class="muted mt-12">' + t('bulkFormat') + '</p>\
-      <div class="form-group mt-12"><textarea id="bk-textarea" rows="8" placeholder="Main|sk-aaa\nBackup|sk-bbb\nsk-ccc"></textarea></div>\
-      <div class="form-group"><label for="bk-priority">' + t('defaultPriority') + '</label><input type="number" id="bk-priority" value="1" style="max-width:120px"></div>\
+      <div class="form-group mt-12"><textarea id="bk-textarea" class="input" rows="8" placeholder="Main|sk-aaa\nBackup|sk-bbb\nsk-ccc"></textarea></div>\
+      <div class="form-group"><label for="bk-priority">' + t('defaultPriority') + '</label>' + renderStepperHtml('bk-priority', 1, 1, 999, 1, 'max-width:140px;') + '</div>\
       <div class="flex" style="gap:8px">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => bulkAddKeys(\'' + escapeForJsString(providerId) + '\'))">' + t('addAll') + '</button>\
         <button type="button" class="btn" onclick="document.getElementById(\'key-form-' + escapeForJsString(providerId) + '\').innerHTML=\'\'">' + t('cancel') + '</button>\
@@ -439,18 +439,18 @@ function renderDetailRotation(p) {
     <div class="detail-block">\
       <div class="section-title">' + t('rotationSection') + '</div>\
       <p class="muted mb-12">' + t('rotationDesc') + '</p>\
-      <div class="form-group">\
+      <div class="form-group mb-16">\
         <label for="r-strategy">' + t('strategy') + '</label>\
-        <select id="r-strategy">\
-          <option value=""' + (strategy === '' ? ' selected' : '') + '>' + t('inheritGlobal') + '</option>\
-          <option value="fill-first"' + (strategy === 'fill-first' ? ' selected' : '') + '>' + t('fillFirst') + '</option>\
-          <option value="round-robin"' + (strategy === 'round-robin' ? ' selected' : '') + '>' + t('roundRobin') + '</option>\
-          <option value="failover"' + (strategy === 'failover' ? ' selected' : '') + '>' + t('failover') + '</option>\
-        </select>\
+        ' + renderCustomSelectHtml('pr-strategy-wrap', 'r-strategy', [
+          { value: '', label: t('inheritGlobal') },
+          { value: 'fill-first', label: t('fillFirst') },
+          { value: 'round-robin', label: t('roundRobin') },
+          { value: 'failover', label: t('failover') }
+        ], strategy || '') + '\
       </div>\
-      <div class="form-group">\
+      <div class="form-group mb-16">\
         <label for="r-sticky">' + t('stickyLabel') + '</label>\
-        <input type="number" id="r-sticky" value="' + sticky + '" style="max-width:120px">\
+        ' + renderStepperHtml('r-sticky', sticky, 0, 9999, 1, 'max-width:140px;') + '\
       </div>\
       <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveProviderRotation(\'' + escapeForJsString(p.id) + '\'))">' + t('save') + '</button>\
     </div>';
@@ -502,25 +502,38 @@ function buildModelRowMainInner(p, m) {
   var isCurrentBatchTesting = window.activeBatchTestState && window.activeBatchTestState.running && window.activeBatchTestState.pid === p.id && window.activeBatchTestState.currentModelId === m.id;
   var testBtnText = isCurrentBatchTesting ? getSpinnerHtml() : (ts && ts.speed != null ? String(ts.speed) : t('test'));
   var testBtnDisabled = isCurrentBatchTesting ? ' disabled' : '';
+
+  var mqWrapId = 'mq-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var mqSelId = 'mq-sel-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var quotaHtml = renderCustomSelectHtml(mqWrapId, mqSelId, [
+    { value: 'unlimited', label: t('unlimited') },
+    { value: 'limited', label: t('limited') },
+    { value: 'paid', label: t('paid') }
+  ], m.quotaType || 'limited', 'updateModelQuotaType(\'' + pidEsc + '\', this)', 'width:95px;display:inline-flex;flex-shrink:0;', 'class="model-quota-select" data-model="' + midEsc + '"');
+
+  var mkWrapId = 'mk-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var mkSelId = 'mk-sel-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var kindHtml = renderCustomSelectHtml(mkWrapId, mkSelId, [
+    { value: 'text', label: t('textModel') },
+    { value: 'image', label: t('imageModel') },
+    { value: 'embedding', label: t('embeddingModel') }
+  ], kindVal, 'updateModelKind(\'' + pidEsc + '\', this)', 'width:85px;display:inline-flex;flex-shrink:0;', 'class="model-quota-select model-kind-select" data-model="' + midEsc + '" data-tooltip="' + t('modelKind') + '"');
+
+  var mpWrapId = 'mp-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var mpSelId = 'mp-sel-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var protoHtml = renderCustomSelectHtml(mpWrapId, mpSelId, [
+    { value: 'gpt', label: 'GPT' },
+    { value: 'xai', label: 'xAI' },
+    { value: 'modelscope', label: 'ModelScope' }
+  ], protoVal, 'updateModelImgProtocol(\'' + pidEsc + '\', this)', 'width:105px;display:' + (protoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-protocol-select" data-model="' + midEsc + '" data-tooltip="' + t('imgProtocol') + '"');
+
   return '<div class="model-row-main" onclick="' + rowOnclick + '">' +
     chevronDown +
     '<button type="button" class="btn btn-sm btn-test-model ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '"' + testBtnDisabled + ' onclick="event.stopPropagation(); withLoading(this, () => { var kind = this.parentElement.querySelector(\'.model-kind-select\') ? this.parentElement.querySelector(\'.model-kind-select\').value : \'' + kindVal + '\'; testSingleModel(\'' + pidEsc + '\', \'' + midJs + '\', kind); })">' + testBtnText + '</button>' +
     buildMiniProtocolBadges(ts, m.id) +
-    '<select class="model-quota-select" onclick="event.stopPropagation()" onchange="updateModelQuotaType(\'' + pidEsc + '\', this)" data-model="' + midEsc + '">' +
-      '<option value="unlimited"' + (m.quotaType === 'unlimited' ? ' selected' : '') + '>' + t('unlimited') + '</option>' +
-      '<option value="limited"' + (m.quotaType === 'limited' || !m.quotaType ? ' selected' : '') + '>' + t('limited') + '</option>' +
-      '<option value="paid"' + (m.quotaType === 'paid' ? ' selected' : '') + '>' + t('paid') + '</option>' +
-    '</select>' +
-    '<select class="model-quota-select model-kind-select" onclick="event.stopPropagation()" onchange="updateModelKind(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" data-tooltip="' + t('modelKind') + '">' +
-      '<option value="text"' + (kindVal !== 'image' && kindVal !== 'embedding' ? ' selected' : '') + '>' + t('textModel') + '</option>' +
-      '<option value="image"' + (kindVal === 'image' ? ' selected' : '') + '>' + t('imageModel') + '</option>' +
-      '<option value="embedding"' + (kindVal === 'embedding' ? ' selected' : '') + '>' + t('embeddingModel') + '</option>' +
-    '</select>' +
-    '<select class="model-quota-select model-protocol-select" style="display:' + protoDisplay + '" onclick="event.stopPropagation()" onchange="updateModelImgProtocol(\'' + pidEsc + '\', this)" data-model="' + midEsc + '" data-tooltip="' + t('imgProtocol') + '">' +
-      '<option value="gpt"' + (protoVal === 'gpt' ? ' selected' : '') + '>GPT</option>' +
-      '<option value="xai"' + (protoVal === 'xai' ? ' selected' : '') + '>xAI</option>' +
-      '<option value="modelscope"' + (protoVal === 'modelscope' ? ' selected' : '') + '>ModelScope</option>' +
-    '</select>' +
+    quotaHtml +
+    kindHtml +
+    protoHtml +
     allBadge +
     '<span class="model-quota-numbers" style="display:none"></span>' +
     '<button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteModelDetail(\'' + pidEsc + '\', \'' + midJs + '\')">' + t('delete') + '</button>' +
@@ -551,7 +564,7 @@ function renderDetailModels(p) {
     <div class="detail-block">\
       <div class="flex mb-12 model-create-row" style="gap:10px;align-items:center">\
         <span class="models-title-inline" style="font-size:var(--font-section-title);font-weight:600;color:var(--text-secondary);white-space:nowrap">' + t('modelsTitle') + ' (' + models.length + ')</span>\
-        <input id="m-input" class="form-control model-create-input" placeholder="' + t('modelPlaceholder') + '">\
+        <input id="m-input" class="input model-create-input" placeholder="' + t('modelPlaceholder') + '">\
         <button type="button" class="btn btn-sm btn-create-action" onclick="withLoading(this, () => testModelDetail(\'' + escapeForJsString(p.id) + '\'))">' + t('test') + '</button>\
         <button type="button" class="btn btn-sm btn-primary btn-create-action" onclick="withLoading(this, () => addModelDetail(\'' + escapeForJsString(p.id) + '\'))">' + t('create') + '</button>\
       </div>\
@@ -560,7 +573,7 @@ function renderDetailModels(p) {
         <button type="button" class="btn btn-sm" id="batch-manage-btn" onclick="enterBatchManage(\'' + escapeForJsString(p.id) + '\')" style="display:' + (batchManageMode ? 'none' : '') + ';flex-shrink:0;white-space:nowrap">' + t('batchManage') + '</button>\
         <button type="button" class="' + batchBtnClass + '" id="batch-test-btn" onclick="batchTestModels(\'' + escapeForJsString(p.id) + '\', this)" style="display:' + (batchManageMode ? 'none' : '') + ';flex-shrink:0;white-space:nowrap">' + batchBtnText + '</button>\
         <div id="batch-actions" style="display:' + (batchManageMode ? 'inline-flex' : 'none') + ';gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap;flex-shrink:0">\
-          <input id="batch-filter-input" class="form-control" placeholder="' + t('filterModels') + '" style="width:130px;max-width:140px;height:28px;padding:3px 8px;font-size:calc(var(--font-base) - 1px);border-radius:var(--radius-sm);box-sizing:border-box;flex-shrink:0" oninput="filterBatchModels(this.value)">\
+          <input id="batch-filter-input" class="input" placeholder="' + t('filterModels') + '" style="width:130px;max-width:140px;height:28px;padding:3px 8px;font-size:calc(var(--font-base) - 1px);box-sizing:border-box;flex-shrink:0" oninput="filterBatchModels(this.value)">\
           <button type="button" class="btn btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="clearBatchFilter()">' + t('clear') + '</button>\
           <button type="button" class="btn btn-sm" id="batch-toggle-select-btn" style="flex-shrink:0;white-space:nowrap" onclick="batchToggleSelectAll()">' + ((models.length > 0 && batchSelectedModels.size === models.length) ? t('deselectAll') : t('selectAll')) + '</button>\
           <button type="button" class="btn btn-sm btn-primary" style="flex-shrink:0;white-space:nowrap" onclick="withLoading(this, () => batchKeepSelected(\'' + escapeForJsString(p.id) + '\'))">' + t('keepSelected') + '</button>\
@@ -1564,16 +1577,9 @@ async function updateModelKind(pid, selectEl) {
     var kindLabel = (kind === 'text' ? 'textModel' : (kind === 'image' ? 'imageModel' : 'embeddingModel'));
     toast(t('modelKind') + ' \u2192 ' + t(kindLabel), 'success');
     var row = selectEl.closest('.model-row-main');
-    var protoSelect = row ? row.querySelector('.model-protocol-select') : null;
-    if (protoSelect) {
-      if (kind === 'image') {
-        protoSelect.style.display = '';
-        if (!protoSelect.value) {
-          protoSelect.value = 'gpt';
-        }
-      } else {
-        protoSelect.style.display = 'none';
-      }
+    var protoWrap = row ? row.querySelector('[id^="mp-wrap-"]') : null;
+    if (protoWrap) {
+      protoWrap.style.display = (kind === 'image') ? 'inline-flex' : 'none';
     }
   } catch (e) {
     toast(e.message || t('failed'), 'error');
@@ -1617,42 +1623,50 @@ function showEditProvider(id) {
   if (summary) summary.style.display = 'none';
   var el = document.getElementById('detail-info');
   el.innerHTML = '\
-    <div class="card">\
-      <div class="card-title">' + t('editProvider') + '</div>\
-      <div class="flex" style="gap:12px">\
-        <div class="form-group" style="flex:1"><label for="ep-prefix">' + t('prefixLabel') + '</label><input id="ep-prefix" value="' + escapeHtml(p.prefix) + '"></div>\
-        <div class="form-group" style="flex:1"><label for="ep-name">' + t('name') + '</label><input id="ep-name" value="' + escapeHtml(p.name) + '"></div>\
+    <div class="card provider-edit-card mb-20">\
+      <div class="card-title mb-16">' + t('editProvider') + '</div>\
+      <div class="form-row-grid mb-16">\
+        <div class="form-group" style="margin-bottom:0"><label for="ep-prefix">' + t('prefixLabel') + '</label><input id="ep-prefix" class="input" value="' + escapeHtml(p.prefix) + '"></div>\
+        <div class="form-group" style="margin-bottom:0"><label for="ep-name">' + t('name') + '</label><input id="ep-name" class="input" value="' + escapeHtml(p.name) + '"></div>\
       </div>\
-      <div class="form-group"><label for="ep-url">' + t('baseUrlLabel') + ' <span class="form-hint" style="display:inline;margin:0 0 0 8px">' + t('baseUrlHint') + '</span></label><input id="ep-url" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai" value="' + escapeHtml(p.baseUrl) + '"></div>\
-      <div class="form-group mt-12">\
-        <label>' + t('useProxy') + ' <span class="form-hint" style="display:inline;margin:0 0 0 8px">' + t('useProxyDesc') + '</span></label>\
-        <label class="toggle-switch" for="ep-useproxy">\
+      <div class="form-group mb-16"><label for="ep-url">' + t('baseUrlLabel') + ' <span class="form-hint" style="display:inline;margin-left:8px">' + t('baseUrlHint') + '</span></label><input id="ep-url" class="input" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai" value="' + escapeHtml(p.baseUrl) + '"></div>\
+      <div class="form-group form-group-inline mb-16">\
+        <div class="form-group-label-wrap">\
+          <label style="margin:0">' + t('useProxy') + '</label>\
+          <span class="form-hint" style="margin:0">' + t('useProxyDesc') + '</span>\
+        </div>\
+        <label class="toggle-switch" for="ep-useproxy" style="flex-shrink:0">\
           <input type="checkbox" id="ep-useproxy" ' + (p.useProxy ? 'checked' : '') + '>\
           <span class="toggle-slider"></span>\
         </label>\
       </div>\
-      <div class="form-group mt-12">\
+      <div class="form-group mb-16">\
         <label for="r-strategy">' + t('strategy') + '</label>\
-        <select id="r-strategy">\
-          <option value=""' + (strategy === '' ? ' selected' : '') + '>' + t('inheritGlobal') + '</option>\
-          <option value="fill-first"' + (strategy === 'fill-first' ? ' selected' : '') + '>' + t('fillFirst') + '</option>\
-          <option value="round-robin"' + (strategy === 'round-robin' ? ' selected' : '') + '>' + t('roundRobin') + '</option>\
-          <option value="failover"' + (strategy === 'failover' ? ' selected' : '') + '>' + t('failover') + '</option>\
-        </select>\
+        ' + renderCustomSelectHtml('ep-strategy-wrap', 'r-strategy', [
+          { value: '', label: t('inheritGlobal') },
+          { value: 'fill-first', label: t('fillFirst') },
+          { value: 'round-robin', label: t('roundRobin') },
+          { value: 'failover', label: t('failover') }
+        ], strategy || '') + '\
       </div>\
-      <div class="form-group">\
+      <div class="form-group mb-16">\
         <label for="r-sticky">' + t('stickyLabel') + '</label>\
-        <input type="number" id="r-sticky" value="' + sticky + '" style="max-width:120px">\
+        ' + renderStepperHtml('r-sticky', sticky, 0, 9999, 1, 'max-width:140px;') + '\
       </div>\
-      <div class="form-group mt-12">\
-        <label>' + t('useCustomHeader') + ' <span class="form-hint" style="display:inline;margin:0 0 0 8px">' + t('customHeadersHint') + '</span></label>\
-        <label class="toggle-switch" for="ep-customheaders">\
-          <input type="checkbox" id="ep-customheaders" ' + (p.useCustomHeaders ? 'checked' : '') + '>\
-          <span class="toggle-slider"></span>\
-        </label>\
-        <textarea id="ep-customheaders-text" rows="4" style="width:100%;margin-top:8px;resize:vertical" placeholder="' + t('customHeadersPlaceholder') + '">' + escapeHtml(providerHeadersToText(p)) + '</textarea>\
+      <div class="form-group mb-20">\
+        <div class="form-group-inline mb-8">\
+          <div class="form-group-label-wrap">\
+            <label style="margin:0">' + t('useCustomHeader') + '</label>\
+            <span class="form-hint" style="margin:0">' + t('customHeadersHint') + '</span>\
+          </div>\
+          <label class="toggle-switch" for="ep-customheaders" style="flex-shrink:0">\
+            <input type="checkbox" id="ep-customheaders" ' + (p.useCustomHeaders ? 'checked' : '') + '>\
+            <span class="toggle-slider"></span>\
+          </label>\
+        </div>\
+        <textarea id="ep-customheaders-text" class="input mt-8" rows="4" style="width:100%;resize:vertical" placeholder="' + t('customHeadersPlaceholder') + '">' + escapeHtml(providerHeadersToText(p)) + '</textarea>\
       </div>\
-      <div class="flex" style="gap:8px">\
+      <div class="form-footer-actions">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditProvider(\'' + id + '\'))">' + t('save') + '</button>\
         <button type="button" class="btn" onclick="cancelEditProvider()">' + t('cancel') + '</button>\
       </div>\

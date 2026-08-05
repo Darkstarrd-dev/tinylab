@@ -66,13 +66,13 @@ function showAddCombo() {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newCombo') + '</div>\
-    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" placeholder="Fast + Smart"></div>\
+    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" placeholder="' + t('comboNamePlaceholder') + '"></div>\
     <div class="form-group"><label for="c-strategy">' + t('comboStrategy') + '</label>\
-      <select id="c-strategy">\
-        <option value="fallback">' + t('fallbackDesc') + '</option>\
-        <option value="round-robin">' + t('roundRobinDesc') + '</option>\
-        <option value="greedy-squirrel">' + t('greedySquirrelDesc') + '</option>\
-      </select>\
+      ' + renderCustomSelectHtml('c-strategy-wrap', 'c-strategy', [
+        { value: 'fallback', label: t('fallbackDesc') },
+        { value: 'round-robin', label: t('roundRobinDesc') },
+        { value: 'greedy-squirrel', label: t('greedySquirrelDesc') }
+      ], 'fallback') + '\
     </div>\
     <div class="form-group"><label>' + t('comboModels') + '</label>\
       <div style="display:flex;gap:8px;margin-bottom:8px">\
@@ -138,13 +138,13 @@ async function showEditCombo(id) {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:70vw;width:70vw">\
     <div class="modal-title">' + t('comboEdit') + '</div>\
-    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" value="' + escapeHtml(cb.name) + '"></div>\
+    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" value="' + escapeHtml(cb.name) + '"></div>\
     <div class="form-group"><label for="c-strategy">' + t('comboStrategy') + '</label>\
-      <select id="c-strategy">\
-        <option value="fallback"' + (cb.strategy === 'fallback' ? ' selected' : '') + '>' + t('fallbackDesc') + '</option>\
-        <option value="round-robin"' + (cb.strategy === 'round-robin' ? ' selected' : '') + '>' + t('roundRobinDesc') + '</option>\
-        <option value="greedy-squirrel"' + (cb.strategy === 'greedy-squirrel' ? ' selected' : '') + '>' + t('greedySquirrelDesc') + '</option>\
-      </select>\
+      ' + renderCustomSelectHtml('cb-edit-strategy-wrap', 'c-strategy', [
+        { value: 'fallback', label: t('fallbackDesc') },
+        { value: 'round-robin', label: t('roundRobinDesc') },
+        { value: 'greedy-squirrel', label: t('greedySquirrelDesc') }
+      ], cb.strategy || 'fallback') + '\
     </div>\
     <div class="form-group"><label>' + t('comboModels') + '</label>\
       <div style="display:flex;gap:8px;margin-bottom:8px">\

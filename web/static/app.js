@@ -898,3 +898,112 @@ function handleThemeModalKeyDown(e, modal) {
 
   return false;
 }
+
+// Global Custom Animated Dropdown Component (matching Download & Settings Modal)
+function renderCustomSelectHtml(wrapperId, selectId, options, selectedValue, onChangeHandler, extraStyle, extraSelectAttrs) {
+  var styleAttr = extraStyle ? ' style="' + extraStyle + '"' : '';
+  var selectedText = selectedValue;
+  var optionsHtml = options.map(function(opt) {
+    var val = typeof opt === 'object' ? opt.value : opt;
+    var label = typeof opt === 'object' ? opt.label : opt;
+    var isSel = String(val) === String(selectedValue);
+    if (isSel) selectedText = label;
+    return '<div class="custom-select-option' + (isSel ? ' selected' : '') + '" data-value="' + escapeAttr(val) + '" onclick="selectCustomOption(\'' + wrapperId + '\', \'' + escapeForJsString(val) + '\', \'' + escapeForJsString(label) + '\')">' +
+      '<span class="custom-select-option-link">' + escapeHtml(label) + '</span>' +
+      '</div>';
+  }).join('');
+
+  var selectOptionsHtml = options.map(function(opt) {
+    var val = typeof opt === 'object' ? opt.value : opt;
+    var label = typeof opt === 'object' ? opt.label : opt;
+    var isSel = String(val) === String(selectedValue);
+    return '<option value="' + escapeAttr(val) + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+  }).join('');
+
+  var onchangeAttr = onChangeHandler ? ' onchange="' + onChangeHandler + '"' : '';
+  var selectAttrs = extraSelectAttrs ? ' ' + extraSelectAttrs : '';
+
+  return '<div class="custom-select-wrapper" id="' + wrapperId + '"' + styleAttr + ' onclick="event.stopPropagation()">' +
+    '<div class="custom-select-trigger" onclick="toggleCustomSelect(\'' + wrapperId + '\', event)">' +
+      '<span class="custom-select-label">' + escapeHtml(selectedText) + '</span>' +
+      '<svg viewBox="0 0 512 512"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 77.7 160.3c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>' +
+    '</div>' +
+    '<div class="custom-select-menu">' +
+      optionsHtml +
+    '</div>' +
+    '<select id="' + selectId + '"' + onchangeAttr + selectAttrs + ' style="display:none;">' +
+      selectOptionsHtml +
+    '</select>' +
+  '</div>';
+}
+
+function toggleCustomSelect(wrapperId, event) {
+  if (event) event.stopPropagation();
+  var wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  var isOpen = wrapper.classList.contains('open');
+  closeAllCustomSelects();
+  if (!isOpen) {
+    wrapper.classList.add('open');
+  }
+}
+
+function selectCustomOption(wrapperId, value, labelText) {
+  var wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  var selectEl = wrapper.querySelector('select');
+  var labelEl = wrapper.querySelector('.custom-select-label');
+  if (selectEl) {
+    selectEl.value = value;
+    selectEl.dispatchEvent(new Event('change'));
+  }
+  if (labelEl) {
+    labelEl.textContent = labelText;
+  }
+  var options = wrapper.querySelectorAll('.custom-select-option');
+  options.forEach(function(opt) {
+    if (opt.dataset.value === value) {
+      opt.classList.add('selected');
+    } else {
+      opt.classList.remove('selected');
+    }
+  });
+  wrapper.classList.remove('open');
+}
+
+function closeAllCustomSelects() {
+  document.querySelectorAll('.custom-select-wrapper.open').forEach(function(el) {
+    el.classList.remove('open');
+  });
+}
+
+document.addEventListener('click', closeAllCustomSelects);
+
+// Global Number Stepper Component (matching Settings Modal)
+function renderStepperHtml(id, value, min, max, step, extraStyle, onchangeAttrStr) {
+  var minAttr = min !== undefined && min !== null ? ' min="' + min + '"' : '';
+  var maxAttr = max !== undefined && max !== null ? ' max="' + max + '"' : '';
+  var stepVal = step || 1;
+  var styleAttr = extraStyle ? ' style="' + extraStyle + '"' : '';
+  var onchangeStr = onchangeAttrStr ? ' onchange="' + onchangeAttrStr + '"' : '';
+  return '<div class="number-stepper"' + styleAttr + '>' +
+    '<button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'' + id + '\', -' + stepVal + ')">-</button>' +
+    '<input type="number" class="stepper-input" id="' + id + '" value="' + value + '"' + minAttr + maxAttr + onchangeStr + '>' +
+    '<button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'' + id + '\', ' + stepVal + ')">+</button>' +
+    '</div>';
+}
+
+function changeStepper(id, delta) {
+  var input = document.getElementById(id);
+  if (!input) return;
+  var val = parseInt(input.value, 10) || 0;
+  var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : -Infinity;
+  var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : Infinity;
+  var newVal = val + delta;
+  if (newVal < min) newVal = min;
+  if (newVal > max) newVal = max;
+  input.value = newVal;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+
