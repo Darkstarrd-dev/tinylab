@@ -261,8 +261,8 @@ function pgRenderPanes() {
     if (pgState.mode === 'search') {
       paneLabel = i === 0 ? pgT('pgSearchPaneLeft') : pgT('pgSearchPaneRight');
     }
-    html += '<div class="pg-pane" data-win="' + i + '">' +
-      '<div class="pg-pane-head">' +
+    html += '<div class="pg-pane' + (i === pgState.activeWin ? ' active' : '') + '" data-win="' + i + '">' +
+      '<div class="pg-pane-head" onclick="pgSetActiveWin(' + i + ')">' +
         '<span class="pg-pane-idx">' + pgEscapeHtml(paneLabel) +
           '<span class="pg-pane-typing" style="display:none"></span>' +
         '</span>' +
@@ -357,11 +357,17 @@ function pgSetMode(mode) {
 
 function pgSetSplitCount(n) {
   if (pgIsGenerating()) { pgToast(pgT('pgGenSwitchLock'), 'warning'); return; }
+  n = Math.max(1, Math.min(4, parseInt(n, 10) || 1));
   if (pgState.mode === 'autochat' && n < 2) n = 2;
   pgState.splitCount = n;
   if (pgState.modeSplitCounts) {
     pgState.modeSplitCounts[pgState.mode] = n;
   }
+  while (pgState.windows.length < n) {
+    if (typeof makeWin !== 'function') break;
+    pgState.windows.push(makeWin());
+  }
+  if (pgState.modeWindows) pgState.modeWindows[pgState.mode] = pgState.windows;
   if (pgState.activeWin >= n) pgState.activeWin = n - 1;
   pgRenderPanes();
   pgRenderSidebar();
@@ -369,8 +375,12 @@ function pgSetSplitCount(n) {
 
 function pgSetActiveWin(i) {
   if (pgIsGenerating()) return;
+  i = parseInt(i, 10);
+  if (!isFinite(i) || i < 0 || i >= pgState.splitCount || !pgWinAt(i)) return;
   pgState.activeWin = i;
+  pgRenderPanes();
   pgRenderSidebar();
+  pgRenderInputBar();
 }
 
 function pgResetSettings() {
@@ -395,6 +405,9 @@ function pgRenderSidebar() {
   var cfg = w.config;
   var customMode = cfg.useCustomBody;
   var dimCls = customMode ? ' disabled' : '';
+  var imageBatchDisabled = pgState.mode === 'image' && pgState.splitCount > 1;
+  var imageBatchTitle = imageBatchDisabled ? pgT('pgBatchSingleWindow') : pgT('pgBatchProject');
+  var imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
 
   // --- WinBar ---
   var generating = pgIsGenerating();
@@ -607,7 +620,7 @@ function pgRenderSidebar() {
         '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' +
           '<label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' +
           '<select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select>' +
-          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button><button class="pg-btn" onclick="typeof pgOpenImageBatch===\'function\' && pgOpenImageBatch()">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div>' +
+          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
     } else {
@@ -615,7 +628,7 @@ function pgRenderSidebar() {
       side.innerHTML =
         winbar +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
-        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label><select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select><div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button><button class="pg-btn" onclick="typeof pgBatchOpenCreateModal===\'function\' && pgBatchOpenCreateModal()">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
+        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label><select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select><div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';

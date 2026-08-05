@@ -63,6 +63,13 @@ function pgComfyBufToDataUrl(buf, mime) {
   return 'data:' + (mime || 'image/png') + ';base64,' + btoa(bin);
 }
 
+function pgComfyRuntime(w) {
+  w = w || (typeof pgWin === 'function' ? pgWin() : null);
+  if (!w) return (typeof pgState !== 'undefined' && pgState.comfy) || {};
+  if (!w.comfy) w.comfy = { connected: false, connecting: false, error: '', version: '', models: {}, samplers: [], schedulers: [], templates: [] };
+  return w.comfy;
+}
+
 // ----- Connection: probe ComfyUI and cache models/templates ----------------
 function pgComfyConnect() {
   var w = pgWin();
@@ -72,7 +79,7 @@ function pgComfyConnect() {
   if (!port || port < 1 || port > 65535) { pgToast(pgT('pgComfyPortInvalid'), 'warning'); return; }
   if (w.streaming) return;
 
-  pgState.comfy = {
+  w.comfy = {
     connected: false, connecting: true, error: '',
     version: '', models: {}, samplers: [], schedulers: [], templates: [],
   };
@@ -110,12 +117,12 @@ function pgComfyConnect() {
   chain.then(function() { return activeTabPromise; }).then(function(activeTab) {
     var st = results.stats;
     if (!st || !st.system) {
-      pgState.comfy.connecting = false;
-      pgState.comfy.connected = false;
-      pgState.comfy.error = pgT('pgComfyConnectFailed',
+      w.comfy.connecting = false;
+      w.comfy.connected = false;
+      w.comfy.error = pgT('pgComfyConnectFailed',
         [(results.stats && results.stats.__error) || 'no response']);
-      pgRenderSidebar();
-      pgToast(pgState.comfy.error, 'error');
+      if (pgWin() === w) pgRenderSidebar();
+      pgToast(w.comfy.error, 'error');
       return;
     }
 
@@ -160,7 +167,7 @@ function pgComfyConnect() {
       // The Desktop bridge marks the currently open tab; keep it first so a
       // fresh connection selects the same workflow the user is viewing.
       var tabs = pgComfyDeduplicateTemplates(savedTabs.concat(histTemplates));
-      pgState.comfy = {
+      w.comfy = {
         connected: true, connecting: false, error: '',
         version: st.system.comfyui_version || '',
         models: models, samplers: samplers, schedulers: schedulers, templates: tabs,
@@ -177,9 +184,9 @@ function pgComfyConnect() {
         cfg.imgComfyWorkflow = null;
       }
       pgSave();
-      pgRenderSidebar();
+      if (pgWin() === w) pgRenderSidebar();
       var modelCount = Object.keys(models).reduce(function(n, k) { return n + models[k].length; }, 0);
-      pgToast(pgT('pgComfyConnectedInfo', [pgState.comfy.version, modelCount, tabs.length]), 'success');
+      pgToast(pgT('pgComfyConnectedInfo', [w.comfy.version, modelCount, tabs.length]), 'success');
     }
 
     // Load saved workflows from the ComfyUI user directory and convert the
@@ -253,32 +260,27 @@ function pgComfyWorkflowSignature(workflow) {
   return JSON.stringify(normalized);
 }
 
+function pgComfyTemplateNameKey(item) {
+  var title = String(item && item.title || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  if (!title || title === String(pgT('pgComfyTabUntitled')).toLocaleLowerCase()) return '';
+  return title;
+}
+
 function pgComfyDeduplicateTemplates(templates) {
-  var savedIds = {};
-  var seen = {};
+  var seenNames = {};
+  var seenSignatures = {};
   var out = [];
   (templates || []).forEach(function(item) {
     var sig = item.signature || pgComfyWorkflowSignature(item.workflow);
-    var id = item.workflowId ? String(item.workflowId) : '';
-    var isSaved = item.source === 'saved' || item.source === 'active';
-    var key;
-    if (isSaved) {
-      if (item.active && seen['active-sig:' + sig]) return;
-      key = id ? 'saved:' + id + ':' + sig : 'sig:' + sig;
-      savedIds[id] = true;
-      if (item.active) seen['active-sig:' + sig] = true;
-    } else {
-      if (id && savedIds[id]) return;
-      key = id ? 'history:' + id : 'sig:' + sig;
-    }
-    if (seen[key]) return;
+    var nameKey = pgComfyTemplateNameKey(item);
+    if ((nameKey && seenNames[nameKey]) || (!nameKey && sig && seenSignatures[sig])) return;
     item.signature = sig;
-    seen[key] = true;
+    if (nameKey) seenNames[nameKey] = true;
+    if (sig) seenSignatures[sig] = true;
     out.push(item);
   });
   return out;
 }
-
 function pgComfyTemplateTitle(wf) {
   var prefix = '';
   var firstText = '';
@@ -495,8 +497,8 @@ function pgComfyConvertLevel(graph, ctx, idState) {
 
 // ----- Sidebar panel --------------------------------------------------------
 function pgRenderComfyPanel(cfg) {
-  var s = pgState.comfy || {};
-  var html = '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgComfyProtocol')) + '</div>';
+  var s = pgComfyRuntime(pgWin());
+  var html = '<div class="pg-panel"><div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('pgComfyProtocol')) + '</span><button class="pg-btn pg-comfy-back" type="button" onclick="pgComfyBackToProtocol()" title="' + pgEscapeAttr(pgT('pgComfyBack')) + '">← ' + pgEscapeHtml(pgT('pgComfyBack')) + '</button></div>';
   html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgComfyPort')) + '</label>' +
     '<input type="number" min="1" max="65535" value="' + pgEscapeAttr(cfg.imgComfyPort || '8188') + '" onchange="pgOnParam(\'imgComfyPort\', this.value)" style="flex:0 0 88px">' +
     '<button class="pg-btn" onclick="pgComfyConnect()"' + (s.connecting ? ' disabled' : '') + '>' +
@@ -546,7 +548,7 @@ function pgComfySelectTemplate(id) {
   w.config.imgComfyTemplateId = id;
   w.config.imgComfyWorkflow = null;
   if (id && id !== '__paste__') {
-    var s = pgState.comfy || {};
+    var s = pgComfyRuntime(w);
     for (var i = 0; i < s.templates.length; i++) {
       if (s.templates[i].prompt_id === id) {
         w.config.imgComfyWorkflow = pgComfyDeepCopy(s.templates[i].workflow);
@@ -571,12 +573,28 @@ function pgComfyApplyPaste() {
   pgRenderSidebar();
 }
 
+function pgComfyBackToProtocol() {
+  var w = pgWin();
+  if (!w) return;
+  w.comfy = { connected: false, connecting: false, error: '', version: '', models: {}, samplers: [], schedulers: [], templates: [] };
+  w.config.imgProtocolFilter = 'all';
+  w.config.model = '';
+  w.config.imgComfyConnected = false;
+  w.config.imgComfyTemplateId = '';
+  w.config.imgComfyWorkflow = null;
+  w.config.imgComfyPasteJson = '';
+  pgSave();
+  pgRenderSidebar();
+  pgRenderPanes();
+  pgUpdateInputBar();
+}
+
 // ----- Dynamic parameter panel generation ---------------------------------
 // Recognizes the built-in nodes commonly present in ComfyUI workflows and maps
 // their inputs to selects/numbers/text inputs. Unknown nodes keep their values.
 function pgRenderComfyWorkflowParams(cfg) {
   var wf = cfg.imgComfyWorkflow;
-  var s = pgState.comfy || {};
+  var s = pgComfyRuntime(pgWin());
   var html = '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgComfyParams')) + '</div>';
   var any = false;
   Object.keys(wf).forEach(function(nodeId) {
