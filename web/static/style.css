@@ -942,14 +942,36 @@ tbody tr:last-child td{border-bottom:none}
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+
+  scale: 0;
   opacity: 0;
-  transform-origin: center center;
-  transition: opacity 0.15s ease;
+  visibility: hidden;
+
+  transition: 
+    scale 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+    visibility 0s linear 0.4s;
 }
 
 .tip.visible {
+  scale: 1;
   opacity: 1;
-  animation: tipShake 0.45s cubic-bezier(0.23, 1, 0.32, 1) both;
+  visibility: visible;
+
+  transition: 
+    scale 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+    visibility 0s linear 0s;
+
+  animation: tipShake 0.5s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.tip[data-placement="top"] {
+  transform-origin: center bottom;
+}
+
+.tip[data-placement="bottom"] {
+  transform-origin: center top;
 }
 
 .tip::before {
@@ -979,22 +1001,23 @@ tbody tr:last-child td{border-bottom:none}
 
 @keyframes tipShake {
   0% {
-    opacity: 0;
-    transform: scale(0.25) rotate(0deg);
+    rotate: 0deg;
   }
-  35% {
-    opacity: 1;
-    transform: scale(1.08) rotate(2.5deg);
+
+  25% {
+    rotate: 7deg;
   }
-  60% {
-    transform: scale(0.96) rotate(-2deg);
+
+  50% {
+    rotate: -7deg;
   }
-  80% {
-    transform: scale(1.02) rotate(1deg);
+
+  75% {
+    rotate: 1deg;
   }
+
   100% {
-    opacity: 1;
-    transform: scale(1) rotate(0deg);
+    rotate: 0deg;
   }
 }
 
@@ -1592,14 +1615,10 @@ tbody tr:last-child td{border-bottom:none}
 .download-toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 10px;
   width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none; /* Hide scrollbar for cleaner look */
-}
-.download-toolbar::-webkit-scrollbar {
-  display: none;
+  overflow: visible !important;
 }
 
 .download-toolbar .input,
@@ -1651,6 +1670,11 @@ tbody tr:last-child td{border-bottom:none}
   user-select: none;
   font-size: 13px;
   flex-shrink: 0;
+  z-index: 10;
+}
+
+.custom-select-wrapper.open {
+  z-index: 1000;
 }
 
 #dl-type-wrap { width: 100px; }
@@ -2127,6 +2151,7 @@ tbody tr:last-child td{border-bottom:none}
   background: var(--glass-bg);
   box-shadow: none; /* Removed shadow */
   padding: 10px 14px;
+  overflow: visible !important;
 }
 .download-settings-card { border-radius: 0; margin-bottom: 0; }
 .download-queue { margin-top: 0; }
@@ -2536,9 +2561,7 @@ tbody tr:last-child td{border-bottom:none}
 /* ---------------------------------------------------------------------
    Reduced Motion
    --------------------------------------------------------------------- */
-@media (prefers-reduced-motion: reduce){
-  *,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important;scroll-behavior:auto!important}
-}
+/* Disabled global animation kill rule so UI animations are preserved */
 
 /* ---------------------------------------------------------------------
    Responsive

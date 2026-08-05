@@ -1,3 +1,66 @@
+// --- Global Autofill Suppression ---
+// Disable browser autofill / "Saved Information" popups globally across all input and form elements.
+(function disableGlobalAutofill() {
+  function applyAutofillOff(el) {
+    if (!el || !el.tagName) return;
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'input') {
+      var type = (el.type || 'text').toLowerCase();
+      if (type !== 'checkbox' && type !== 'radio' && type !== 'range' && type !== 'file' && type !== 'submit' && type !== 'button' && type !== 'color') {
+        if (!el.hasAttribute('autocomplete') || el.getAttribute('autocomplete') !== 'off') {
+          el.setAttribute('autocomplete', 'off');
+        }
+        if (!el.hasAttribute('autocorrect') || el.getAttribute('autocorrect') !== 'off') {
+          el.setAttribute('autocorrect', 'off');
+        }
+        if (!el.hasAttribute('autocapitalize') || el.getAttribute('autocapitalize') !== 'off') {
+          el.setAttribute('autocapitalize', 'off');
+        }
+        if (!el.hasAttribute('spellcheck') || el.getAttribute('spellcheck') !== 'false') {
+          el.setAttribute('spellcheck', 'false');
+        }
+      }
+    } else if (tag === 'form') {
+      if (!el.hasAttribute('autocomplete') || el.getAttribute('autocomplete') !== 'off') {
+        el.setAttribute('autocomplete', 'off');
+      }
+    }
+  }
+
+  function scanAndApply(root) {
+    var inputs = (root || document).querySelectorAll('input, form');
+    for (var i = 0; i < inputs.length; i++) {
+      applyAutofillOff(inputs[i]);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { scanAndApply(document); });
+  } else {
+    scanAndApply(document);
+  }
+
+  document.addEventListener('focusin', function(e) {
+    if (e.target) applyAutofillOff(e.target);
+  }, true);
+
+  if (window.MutationObserver) {
+    var observer = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var added = mutations[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var node = added[j];
+          if (node.nodeType === 1) {
+            applyAutofillOff(node);
+            scanAndApply(node);
+          }
+        }
+      }
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
+})();
+
 // --- State ---
 let currentPage = 'endpoint';
 let currentProviderId = null;
@@ -216,7 +279,6 @@ var TooltipSystem = (function() {
     tip.className = 'tip';
     tip.id = 'app-tooltip';
     tip.setAttribute('role', 'tooltip');
-    tip.style.display = 'none';
     document.body.appendChild(tip);
     return tip;
   }
@@ -226,11 +288,19 @@ var TooltipSystem = (function() {
     currentEl = el;
     var t = ensureTip();
     t.textContent = content;          // textContent keeps us immune to HTML injection from data-tooltip values
+    
+    // 1. 移除 visible，重置为 scale: 0
     t.classList.remove('visible');
-    t.style.display = '';
+    
+    // 2. 重新计算位置
     position(t, el);
-    void t.offsetWidth;               // force reflow to restart animation
-    t.classList.add('visible');
+    
+    // 3. 双重 rAF 确保浏览器渲染引擎与 GPU 合成器记录初始帧状态
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        t.classList.add('visible');
+      });
+    });
   }
 
   function position(t, el) {
@@ -270,7 +340,6 @@ var TooltipSystem = (function() {
     if (showTimer) { clearTimeout(showTimer); showTimer = null; }
     if (tip) {
       tip.classList.remove('visible');
-      tip.style.display = 'none';
     }
     currentEl = null;
   }
@@ -315,8 +384,8 @@ var TooltipSystem = (function() {
   });
 
   // Reposition / hide on scroll/resize so the tip never floats away from its anchor.
-  window.addEventListener('scroll', function() { if (currentEl && tip && tip.style.display !== 'none') position(tip, currentEl); }, true);
-  window.addEventListener('resize', function() { if (currentEl && tip && tip.style.display !== 'none') position(tip, currentEl); });
+  window.addEventListener('scroll', function() { if (currentEl && tip && tip.classList.contains('visible')) position(tip, currentEl); }, true);
+  window.addEventListener('resize', function() { if (currentEl && tip && tip.classList.contains('visible')) position(tip, currentEl); });
 
   return { showFor: showFor, hide: hide };
 })();
