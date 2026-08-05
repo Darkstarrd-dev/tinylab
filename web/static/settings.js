@@ -27,56 +27,46 @@ async function renderEndpoint(c) {
     <div class="settings-layout">\
       <div class="settings-panel-left">\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('listenPortDesc')) + '">' + t('listenPort') + '</span>\
-          <span class="code copyable settings-row-endpoint" onclick="copyToClipboard(this.dataset.url, this.dataset.url)" data-url="http://localhost:' + s.port + '/v1" data-tooltip="' + escapeHtml(t('clickToCopy')) + '">' + s.port + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openPortModal()">' + t('settings') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('proxyDesc')) + '">' + t('proxySettings') + '</span>\
-          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('proxyDesc')) + '"><input type="checkbox" id="proxy-toggle"' + (s.proxy && s.proxy.enabled ? ' checked' : '') + ' onchange="toggleProxy(this.checked)"><span class="toggle-slider"></span></label>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openProxyModal()">' + t('settings') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('rotationDesc')) + '">' + t('rotationSettings') + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openRotationModal()">' + t('settings') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('serverTimeoutDesc')) + '">' + t('serverTimeoutSettings') + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openServerTimeoutModal()">' + t('settings') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '">' + t('passwordProtection') + '</span>\
-          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '"><input type="checkbox" id="password-toggle"' + (s.security && s.security.passwordEnabled ? ' checked' : '') + ' onchange="togglePasswordProtection(this.checked)"><span class="toggle-slider"></span></label>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openPasswordModal()">' + t('settings') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + t('shortcutSettings') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('shortcutSettingsDesc')) + '" onclick="openShortcutsModal()">' + t('shortcutSettings') + '</span>\
           <span class="code settings-row-endpoint" id="shortcut-settings-summary" data-tooltip="' + escapeHtml(t('shortcutSettingsDesc')) + '">' + escapeHtml(getShortcutSettingsSummary()) + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openShortcutsModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('appearanceDesc')) + '">' + t('appearance') + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openThemeModal()">' + t('settings') + '</button>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('listenPortDesc')) + '" onclick="openPortModal()">' + t('listenPort') + '</span>\
+          <span class="code copyable settings-row-endpoint" onclick="copyToClipboard(this.dataset.url, this.dataset.url)" data-url="http://localhost:' + s.port + '/v1" data-tooltip="' + escapeHtml(t('clickToCopy')) + '">' + s.port + '</span>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '">' + t('debugMode') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('rotationDesc')) + '" onclick="openRotationModal()">' + t('rotationSettings') + '</span>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('serverTimeoutDesc')) + '" onclick="openServerTimeoutModal()">' + t('serverTimeoutSettings') + '</span>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('appearanceDesc')) + '" onclick="openThemeModal()">' + t('appearance') + '</span>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('pathSettingsDesc')) + '" onclick="openPathModal()">' + t('pathSettings') + '</span>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('fileTransferDesc')) + '" onclick="openFileTransferModal()">' + t('fileTransfer') + '</span>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('proxyDesc')) + '" onclick="openProxyModal()">' + t('proxySettings') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('proxyDesc')) + '"><input type="checkbox" id="proxy-toggle"' + (s.proxy && s.proxy.enabled ? ' checked' : '') + ' onchange="toggleProxy(this.checked)"><span class="toggle-slider"></span></label>\
+        </div>\
+        <div class="settings-row">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '" onclick="document.getElementById(\'debug-mode-toggle\').click()">' + t('debugMode') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('debugModeDesc')) + '"><input type="checkbox" id="debug-mode-toggle"' + (s.debugMode ? ' checked' : '') + ' onchange="toggleDebugMode(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('requestTracingDesc')) + '">' + t('requestTracing') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('requestTracingDesc')) + '" onclick="openTraceModal()">' + t('requestTracing') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('requestTracingDesc')) + '"><input type="checkbox" id="trace-toggle"' + (s.trace && s.trace.enabled ? ' checked' : '') + ' onchange="toggleTrace(this.checked)"><span class="toggle-slider"></span></label>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openTraceModal()">' + t('settings') + '</button>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('pathSettingsDesc')) + '">' + t('pathSettings') + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openPathModal()">' + t('settings') + '</button>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '" onclick="openPasswordModal()">' + t('passwordProtection') + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('passwordProtectionDesc')) + '"><input type="checkbox" id="password-toggle"' + (s.security && s.security.passwordEnabled ? ' checked' : '') + ' onchange="togglePasswordProtection(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('fileTransferDesc')) + '">' + t('fileTransfer') + '</span>\
-          <button type="button" class="btn btn-sm settings-row-btn" onclick="openFileTransferModal()">' + t('open') + '</button>\
-        </div>\
-        <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '">' + t('quickSlotOnly') + '</span>\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '" onclick="document.getElementById(\'quickslot-only-toggle\').click()">' + t('quickSlotOnly') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('quickSlotOnlyDesc')) + '"><input type="checkbox" id="quickslot-only-toggle"' + (s.quickSlotOnly ? ' checked' : '') + ' onchange="toggleQuickSlotOnly(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
       </div>\
