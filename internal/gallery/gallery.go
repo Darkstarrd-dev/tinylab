@@ -18,6 +18,7 @@ var SupportedExts = map[string]bool{
 	"jpg":  true,
 	"jpeg": true,
 	"bmp":  true,
+	"gif":  true,
 	"tiff": true,
 	"tif":  true,
 }

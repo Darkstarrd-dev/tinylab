@@ -20,7 +20,7 @@ var galleryImgExts = map[string]bool{
 	".bmp": true, ".tiff": true, ".tif": true, ".avif": true, ".gif": true,
 }
 var galleryVidExts = map[string]bool{
-	".mp4": true, ".webm": true, ".ogv": true,
+	".mp4": true, ".webm": true, ".ogv": true, ".gif": true, ".webp": true,
 }
 
 func isGalleryFile(name string) bool {

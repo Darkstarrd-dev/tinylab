@@ -11,6 +11,7 @@ var _editCurrentItem = null;
 var _editMediaType = null;
 var _editProbe = null;
 var _editSubtitlePath = null;
+var _geVidFormat = 'mp4';           // last selected video transcode format (mp4/mkv/webm/mov/gif/webp); persists across the trim-mode modal rebuild
 var _geActiveJob = null;            // tracks in-progress job so close/switch doesn't lose it (see _geResumeActive)
 var _geBatchPollingEnabled = false; // gates batch poll chains (false on page leave)
 var _geConsoleRO = null;            // ResizeObserver syncing console panel height → left modal
@@ -428,23 +429,41 @@ function _renderImageForm() {
 function _renderVideoTranscodeForm() {
   var probe = _editProbe || {};
   var w = probe.width || 0, h = probe.height || 0;
+  var fmt = _geVidFormat || 'mp4';
+  var isAnimFmt = (fmt === 'gif' || fmt === 'webp');
+  var codecColHide = isAnimFmt ? ' style="display:none"' : '';
+  var animBlockHide = isAnimFmt ? '' : ' style="display:none"';
+  var gifOptsHide = (fmt === 'gif') ? '' : ' style="display:none"';
+  var webpOptsHide = (fmt === 'webp') ? '' : ' style="display:none"';
 
   var html = '';
 
-  // Row 1: Codec + Container (two columns)
+  // Row 1: Codec + Format (two columns). GIF/WebP (animated) hide the
+  // video codec/preset/audio rows and reveal the animated-param block.
   html += '<div class="gallery-edit-row ge-two-col-row">';
-  html += '<div class="ge-col-half">';
+  html += '<div class="ge-col-half" id="ge-vid-codec-col"' + codecColHide + '>';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geCodec')) + '</label>';
   html += '<select class="pg-param-row-select" id="ge-vid-codec">';
   html += '<option value="h264">H.264</option><option value="h265">H.265/HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option><option value="copy">Copy (no re-encode)</option>';
   html += '</select>';
   html += '</div>';
   html += '<div class="ge-col-half">';
-  html += '<label class="gallery-edit-label">' + escapeHtml(T('geContainer')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-container">';
-  html += '<option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option><option value="mov">MOV</option>';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geFormat')) + '</label>';
+  html += '<select class="pg-param-row-select" id="ge-vid-format">';
+  var formats = [
+    { v: 'mp4', label: 'MP4' }, { v: 'mkv', label: 'MKV' }, { v: 'webm', label: 'WebM' }, { v: 'mov', label: 'MOV' },
+    { v: 'gif', label: T('geFormatGif') }, { v: 'webp', label: T('geFormatWebp') }
+  ];
+  for (var i = 0; i < formats.length; i++) {
+    html += '<option value="' + formats[i].v + '"' + (formats[i].v === fmt ? ' selected' : '') + '>' + escapeHtml(formats[i].label) + '</option>';
+  }
   html += '</select>';
   html += '</div>';
+  html += '</div>';
+
+  // Capability note: reason string when a format's encoder is unavailable.
+  html += '<div class="gallery-edit-row" id="ge-anim-cap-note-row" style="display:none">';
+  html += '<span style="font-size:11px;color:var(--danger)" id="ge-anim-cap-note"></span>';
   html += '</div>';
 
   // Row 2: Quality + Preset (two columns)
@@ -483,8 +502,8 @@ function _renderVideoTranscodeForm() {
   html += '</div>';
   html += '</div>';
 
-  // Row 4: Scale + Dims + Strip metadata (last row)
-  html += '<div class="gallery-edit-row">';
+  // Row 4: Scale + Dims + Strip metadata (video formats only)
+  html += '<div class="gallery-edit-row" id="ge-vid-scale-row">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
   html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="width:130px">';
   html += '<span class="gallery-edit-val" id="ge-vid-scale-val" style="min-width:36px">100%</span>';
@@ -492,11 +511,130 @@ function _renderVideoTranscodeForm() {
   html += '<label class="gallery-edit-check" style="margin-left:auto;margin-right:0"><input type="checkbox" id="ge-vid-strip"> ' + escapeHtml(T('geStripMetadata')) + '</label>';
   html += '</div>';
 
+  // Animated-format param block (GIF / animated WebP)
+  html += '<div id="ge-vid-anim-block"' + animBlockHide + '>';
+
+  // Start + Duration (seconds; empty = whole source)
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geTrimStart')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-start" min="0" step="0.1" placeholder="0">';
+  html += '</div>';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geTrimDuration')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-duration" min="0" step="0.1" placeholder="">';
+  html += '</div>';
+  html += '</div>';
+
+  // FPS + Loop
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geFps')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-fps" min="1" max="60" step="1" value="12">';
+  html += '</div>';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geLoop')) + '</label>';
+  html += '<span style="display:flex;flex:1;min-width:0">';
+  html += '<select class="pg-param-row-select" id="ge-vid-anim-loop-mode" style="flex:1;min-width:0">';
+  html += '<option value="infinite" selected>' + escapeHtml(T('geLoopInfinite')) + '</option>';
+  if (fmt === 'gif') html += '<option value="once">' + escapeHtml(T('geLoopOnce')) + '</option>';
+  html += '<option value="n">' + escapeHtml(T('geLoopRepeatN')) + '</option>';
+  html += '</select>';
+  html += '<input type="number" id="ge-vid-anim-loop-n" min="0" max="65535" step="1" value="1" style="width:56px;margin-left:6px;display:none">';
+  html += '</span>';
+  html += '</div>';
+  html += '</div>';
+
+  // Width + Height (0 = auto)
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geWidth')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-width" min="0" step="2" value="0" placeholder="0 = auto">';
+  html += '</div>';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geHeight')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-height" min="0" step="2" value="0" placeholder="0 = auto">';
+  html += '</div>';
+  html += '</div>';
+
+  // Crop T/B/L/R (pixels removed from each edge)
+  html += '<div class="gallery-edit-row" style="gap:6px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geCropTop')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-crop-top" min="0" step="1" value="0" style="width:52px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geCropBottom')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-crop-bottom" min="0" step="1" value="0" style="width:52px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geCropLeft')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-crop-left" min="0" step="1" value="0" style="width:52px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geCropRight')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-crop-right" min="0" step="1" value="0" style="width:52px">';
+  html += '</div>';
+
+  // Quality (1-100; GIF uses it as the default palette tier, WebP as encoder quality)
+  html += '<div class="gallery-edit-row">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geQuality')) + '</label>';
+  html += '<input type="range" id="ge-vid-anim-quality" min="1" max="100" value="80" style="width:130px">';
+  html += '<span class="gallery-edit-val" id="ge-vid-anim-quality-val" style="min-width:36px">80</span>';
+  html += '</div>';
+
+  // GIF-only options: palette colors + dither
+  html += '<div id="ge-vid-anim-gif-opts"' + gifOptsHide + '>';
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('gePaletteColors')) + '</label>';
+  html += '<input type="number" id="ge-vid-anim-palette" min="2" max="256" step="1" value="256">';
+  html += '</div>';
+  html += '<div class="ge-col-half">';
+  html += '<label class="gallery-edit-label">' + escapeHtml(T('geDither')) + '</label>';
+  html += '<select class="pg-param-row-select" id="ge-vid-anim-dither">';
+  html += '<option value="sierra2_4a" selected>sierra2_4a</option><option value="floyd_steinberg">floyd_steinberg</option><option value="bayer">bayer</option><option value="none">none</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // WebP-only option: lossless
+  html += '<div id="ge-vid-anim-webp-opts"' + webpOptsHide + '>';
+  html += '<div class="gallery-edit-row">';
+  html += '<label class="gallery-edit-check" style="margin-left:90px"><input type="checkbox" id="ge-vid-anim-lossless"> ' + escapeHtml(T('geLossless')) + '</label>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '</div>'; // ge-vid-anim-block
+
   return html;
 }
 
 function _renderVideoTrimForm() {
   var html = '';
+
+  // Animated GIF/WebP inputs cannot seek (<img> has no currentTime/duration),
+  // so they get a numeric Start/End segment panel instead of the draggable
+  // trim bar; the backend re-encodes the requested window (video_anim_trim).
+  var isAnim = (typeof isAnimatedImg === 'function') && isAnimatedImg(_editCurrentItem);
+
+  if (isAnim) {
+    html += '<div class="gallery-edit-row" style="font-size:11px;color:var(--text-muted)">' + escapeHtml(T('geTrimAnimHint')) + '</div>';
+    html += '<div class="gallery-edit-row ge-two-col-row">';
+    html += '<div class="ge-col-half">';
+    html += '<label class="gallery-edit-label">' + escapeHtml(T('geTrimStart')) + '</label>';
+    html += '<input type="number" id="ge-trim-anim-start" min="0" step="0.1" value="0">';
+    html += '</div>';
+    html += '<div class="ge-col-half">';
+    html += '<label class="gallery-edit-label">' + escapeHtml(T('geTrimEnd')) + '</label>';
+    html += '<input type="number" id="ge-trim-anim-end" min="0" step="0.1" value="">';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="gallery-edit-row">';
+    html += '<button type="button" class="btn btn-primary" id="ge-trim-anim-add">' + escapeHtml(T('geTrimAddSegment')) + '</button>';
+    html += '<button type="button" class="btn btn-ghost" id="ge-trim-anim-clear" style="margin-left:8px">' + escapeHtml(T('geTrimClear')) + '</button>';
+    html += '<span class="gallery-edit-val" id="ge-trim-segments-text" style="font-size:12px;color:var(--text-muted);flex:1;text-align:right">' + escapeHtml(_formatTrimSegments(_editTrimSegments)) + '</span>';
+    html += '</div>';
+    // Capability note (ffmpeg missing, or animated-WebP decoder missing)
+    html += '<div class="gallery-edit-row" id="ge-trim-anim-note-row" style="display:none">';
+    html += '<span style="font-size:11px;color:var(--danger)" id="ge-trim-anim-note"></span>';
+    html += '</div>';
+    return html;
+  }
 
   // Select ranges button — switches to the video display with trim controls
   html += '<div class="gallery-edit-row">';
@@ -538,7 +676,6 @@ function _renderVideoTrimForm() {
   html += '</select>';
   html += '</div>';
   html += '</div>';
-
 
   return html;
 }
@@ -747,6 +884,51 @@ function _updateTrimSegmentDisplay() {
   if (el) el.textContent = _formatTrimSegments(_editTrimSegments);
   var hint = document.getElementById('ge-trim-multi-hint');
   if (hint) hint.style.display = (_editTrimSegments.length > 1) ? '' : 'none';
+}
+
+// _normalizeAnimTrimSegments sorts segments by start, drops exact duplicates,
+// and rejects overlapping ranges (a later segment may not begin before the
+// previous one ends). Returns {segments} or {error}.
+function _normalizeAnimTrimSegments(segments) {
+  var out = (segments || []).map(function(s) {
+    return { start: s.start, end: s.end };
+  }).sort(function(a, b) { return a.start - b.start; });
+  var dedup = [];
+  for (var i = 0; i < out.length; i++) {
+    var s = out[i];
+    if (dedup.length && dedup[dedup.length - 1].start === s.start && dedup[dedup.length - 1].end === s.end) continue;
+    if (dedup.length && s.start < dedup[dedup.length - 1].end) {
+      return { error: T('geTrimOverlap') };
+    }
+    dedup.push(s);
+  }
+  return { segments: dedup };
+}
+
+// _animTrimAddSegment validates the numeric Start/End inputs and appends them
+// to the confirmed segment list (animated GIF/WebP trim path).
+function _animTrimAddSegment() {
+  var startInput = document.getElementById('ge-trim-anim-start');
+  var endInput = document.getElementById('ge-trim-anim-end');
+  if (!startInput || !endInput) return;
+  var start = parseFloat(startInput.value);
+  var end = parseFloat(endInput.value);
+  if (!isFinite(start) || !isFinite(end) || start < 0 || end <= start) {
+    showMsg(T('geTrimInvalidRange'));
+    return;
+  }
+  var duration = _editProbe && _editProbe.duration;
+  if (duration > 0 && end > duration) {
+    showMsg(pgT('geTrimEndTooLarge', [Math.round(duration * 100) / 100]));
+    return;
+  }
+  var segs = _editTrimSegments.slice();
+  segs.push({ start: start, end: end });
+  var norm = _normalizeAnimTrimSegments(segs);
+  if (norm.error) { showMsg(norm.error); return; }
+  _editTrimSegments = norm.segments;
+  _updateTrimSegmentDisplay();
+  endInput.value = '';
 }
 
 // Build the trim bar HTML that replaces the video seeker.
@@ -1119,34 +1301,77 @@ function _bindModalEvents() {
 
   // ---- video transcode events ----
   var vidCodec = document.getElementById('ge-vid-codec');
+  var vidFormat = document.getElementById('ge-vid-format');
+  var vidCodecCol = document.getElementById('ge-vid-codec-col');
   var vidQualityPresetRow = document.getElementById('ge-vid-quality-preset-row') || document.getElementById('ge-vid-quality-row');
   var vidAudioRow = document.getElementById('ge-vid-audio-row');
-  var vidContainer = document.getElementById('ge-vid-container');
+  var vidScaleRow = document.getElementById('ge-vid-scale-row');
+  var vidAnimBlock = document.getElementById('ge-vid-anim-block');
+  var vidAnimGifOpts = document.getElementById('ge-vid-anim-gif-opts');
+  var vidAnimWebpOpts = document.getElementById('ge-vid-anim-webp-opts');
+
+  function _isAnimFormat() {
+    return vidFormat && (vidFormat.value === 'gif' || vidFormat.value === 'webp');
+  }
+
+  // Visibility authority for the transcode form: animated formats hide the
+  // video codec/preset/audio/scale rows and show the animated-param block.
+  function _updateVidFormatUI() {
+    if (!vidFormat) return;
+    var isAnim = _isAnimFormat();
+    var c = vidCodec ? vidCodec.value : 'h264';
+    if (vidCodecCol) vidCodecCol.style.display = isAnim ? 'none' : '';
+    if (vidQualityPresetRow) vidQualityPresetRow.style.display = (isAnim || c === 'copy') ? 'none' : '';
+    if (vidAudioRow) vidAudioRow.style.display = (isAnim || c === 'copy') ? 'none' : '';
+    if (vidScaleRow) vidScaleRow.style.display = isAnim ? 'none' : '';
+    if (vidAnimBlock) vidAnimBlock.style.display = isAnim ? '' : 'none';
+    if (vidAnimGifOpts) vidAnimGifOpts.style.display = (vidFormat.value === 'gif') ? '' : 'none';
+    if (vidAnimWebpOpts) vidAnimWebpOpts.style.display = (vidFormat.value === 'webp') ? '' : 'none';
+    _syncAnimLoopOptions();
+  }
+
+  // Rebuild the loop-mode select for the current format: GIF may play once
+  // (muxer loop -1), WebP never offers "once" (muxer 0 = infinite, N = repeat).
+  function _syncAnimLoopOptions() {
+    var loopSel = document.getElementById('ge-vid-anim-loop-mode');
+    if (!loopSel) return;
+    var isGifFmt = vidFormat && vidFormat.value === 'gif';
+    var prevVal = loopSel.value || 'infinite';
+    var html = '<option value="infinite">' + escapeHtml(T('geLoopInfinite')) + '</option>';
+    if (isGifFmt) html += '<option value="once">' + escapeHtml(T('geLoopOnce')) + '</option>';
+    html += '<option value="n">' + escapeHtml(T('geLoopRepeatN')) + '</option>';
+    loopSel.innerHTML = html;
+    loopSel.value = (prevVal === 'once' && !isGifFmt) ? 'infinite' : prevVal;
+    if (loopN) loopN.style.display = (loopSel.value === 'n') ? '' : 'none';
+  }
 
   function _updateVidCodecUI() {
     if (!vidCodec) return;
     var c = vidCodec.value;
-    var isCopy = (c === 'copy');
-    if (vidQualityPresetRow) vidQualityPresetRow.style.display = isCopy ? 'none' : '';
-    if (vidAudioRow) vidAudioRow.style.display = isCopy ? 'none' : '';
-    // Filter containers based on codec
-    if (vidContainer) {
-      var opts = vidContainer.querySelectorAll('option');
+    // Filter video formats by codec; gif/webp are codec-independent and are
+    // never hidden (their availability is decided by _checkFfmpegStatus).
+    if (vidFormat) {
+      var opts = vidFormat.querySelectorAll('option');
       var allowed = (c === 'copy') ? null : ((c === 'h264' || c === 'h265') ? ['mp4','mkv','mov'] : ['webm','mkv']);
       for (var i = 0; i < opts.length; i++) {
-        if (!allowed || allowed.indexOf(opts[i].value) >= 0) {
-          opts[i].style.display = '';
-        } else {
-          opts[i].style.display = 'none';
-        }
+        var v = opts[i].value;
+        opts[i].style.display = (!allowed || allowed.indexOf(v) >= 0 || v === 'gif' || v === 'webp') ? '' : 'none';
       }
-      // Auto-select first allowed
-      var sel = vidContainer.value;
-      if (allowed && allowed.indexOf(sel) < 0) vidContainer.value = allowed[0];
+      // Auto-select first allowed video format
+      var sel = vidFormat.value;
+      if (sel !== 'gif' && sel !== 'webp' && allowed && allowed.indexOf(sel) < 0) {
+        vidFormat.value = allowed[0];
+      }
     }
+    _updateVidFormatUI();
   }
 
-  if (vidCodec) { vidCodec.onchange = _updateVidCodecUI; _updateVidCodecUI(); }
+  if (vidFormat) {
+    vidFormat.onchange = function() { _geVidFormat = vidFormat.value; _updateVidFormatUI(); };
+  }
+  if (vidCodec) { vidCodec.onchange = _updateVidCodecUI; }
+  _updateVidCodecUI();
+  _updateVidFormatUI();
 
   // Video scale slider: live "%%" + output dims preview (mirrors the image
   // scale binding above); the server gets the value via _startVideoTranscode.
@@ -1164,10 +1389,34 @@ function _bindModalEvents() {
     };
   }
 
+  // Animated-format param block: quality slider value + loop repeat input
+  var animQuality = document.getElementById('ge-vid-anim-quality');
+  var animQualityVal = document.getElementById('ge-vid-anim-quality-val');
+  if (animQuality && animQualityVal) {
+    animQuality.oninput = function() { animQualityVal.textContent = animQuality.value; };
+  }
+  var loopMode = document.getElementById('ge-vid-anim-loop-mode');
+  var loopN = document.getElementById('ge-vid-anim-loop-n');
+  if (loopMode && loopN) {
+    loopMode.onchange = function() { loopN.style.display = (loopMode.value === 'n') ? '' : 'none'; };
+  }
+
   // ---- video trim events ----
   var trimSelectBtn = document.getElementById('ge-trim-select-btn');
   if (trimSelectBtn) {
     trimSelectBtn.onclick = function() { _enterTrimMode(); };
+  }
+  // Animated input: numeric Start/End segment panel (no draggable bar)
+  var trimAnimAdd = document.getElementById('ge-trim-anim-add');
+  var trimAnimClear = document.getElementById('ge-trim-anim-clear');
+  if (trimAnimAdd) {
+    trimAnimAdd.onclick = _animTrimAddSegment;
+  }
+  if (trimAnimClear) {
+    trimAnimClear.onclick = function() {
+      _editTrimSegments = [];
+      _updateTrimSegmentDisplay();
+    };
   }
 
   // Trim mode radio toggle + multi-segment hint
@@ -1322,6 +1571,7 @@ window.openMediaEditor = async function(item, mediaType) {
   _editSubtitlePath = null;
   _stopPolling();
   _editTrimSegments = [];
+  _geVidFormat = 'mp4';
 
   var html = _buildModalHTML();
   pgShowModal(html);

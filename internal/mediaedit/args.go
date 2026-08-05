@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -511,4 +512,326 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// --- video_to_gif / video_to_webp / video_anim_trim ---
+
+// animDithers is the whitelist of paletteuse dither values accepted from user
+// input. Anything outside this set is rejected, never interpolated.
+var animDithers = map[string]bool{
+	"none":            true,
+	"bayer":           true,
+	"floyd_steinberg": true,
+	"sierra2_4a":      true,
+}
+
+// normalizeAnimParams fills in defaults (0 = unspecified) and validates the
+// numeric fields shared by the animated-image operations. Explicit
+// out-of-range values are rejected rather than silently clamped.
+func normalizeAnimParams(fps, quality, paletteColors int, dither string) (int, int, int, string, error) {
+	if fps == 0 {
+		fps = 12
+	}
+	if fps < 1 || fps > 60 {
+		return 0, 0, 0, "", fmt.Errorf("fps must be 1-60, got %d", fps)
+	}
+	if quality == 0 {
+		quality = 80
+	}
+	if quality < 1 || quality > 100 {
+		return 0, 0, 0, "", fmt.Errorf("quality must be 1-100, got %d", quality)
+	}
+	if paletteColors == 0 {
+		paletteColors = 256
+	}
+	if paletteColors < 2 || paletteColors > 256 {
+		return 0, 0, 0, "", fmt.Errorf("paletteColors must be 2-256, got %d", paletteColors)
+	}
+	if dither == "" {
+		dither = "sierra2_4a"
+	}
+	if !animDithers[dither] {
+		return 0, 0, 0, "", fmt.Errorf("unsupported dither %q (allowed: none, bayer, floyd_steinberg, sierra2_4a)", dither)
+	}
+	return fps, quality, paletteColors, dither, nil
+}
+
+// parseSeconds parses a seconds string and requires a non-negative, finite
+// value. The canonical decimal form is used downstream so exotic input forms
+// (scientific notation, hex floats) never reach the filter graph.
+func parseSeconds(s string) (float64, error) {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid seconds %q: %v", s, err)
+	}
+	if v < 0 || math.IsInf(v, 0) || math.IsNaN(v) {
+		return 0, fmt.Errorf("invalid seconds %q: must be non-negative", s)
+	}
+	return v, nil
+}
+
+// buildAnimTimeInputOptions validates Start/Duration ("" = omit) and returns
+// the input-side options placed before -i: -ss START and/or -t DURATION.
+func buildAnimTimeInputOptions(start, duration string) ([]string, error) {
+	var opts []string
+	if start != "" {
+		s, err := parseSeconds(start)
+		if err != nil {
+			return nil, fmt.Errorf("invalid start: %w", err)
+		}
+		opts = append(opts, "-ss", strconv.FormatFloat(s, 'f', -1, 64))
+	}
+	if duration != "" {
+		d, err := parseSeconds(duration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid duration: %w", err)
+		}
+		opts = append(opts, "-t", strconv.FormatFloat(d, 'f', -1, 64))
+	}
+	return opts, nil
+}
+
+// buildAnimVideoFilterChain builds the common fps/crop/scale filter chain for
+// the animated-image export operations. crop is emitted as
+// crop=iw-L-R:ih-T-B:L:T only when any edge is non-zero; scale is omitted when
+// both dimensions are 0 and preserves aspect ratio when only one is given.
+func buildAnimVideoFilterChain(fps, width, height, cropLeft, cropRight, cropTop, cropBottom int) (string, error) {
+	if fps < 1 || fps > 60 {
+		return "", fmt.Errorf("fps must be 1-60, got %d", fps)
+	}
+	if width < 0 || height < 0 {
+		return "", fmt.Errorf("width/height must be non-negative, got %dx%d", width, height)
+	}
+	if cropLeft < 0 || cropRight < 0 || cropTop < 0 || cropBottom < 0 {
+		return "", fmt.Errorf("crop values must be non-negative, got %d/%d/%d/%d", cropLeft, cropRight, cropTop, cropBottom)
+	}
+
+	parts := []string{fmt.Sprintf("fps=%d", fps)}
+	if cropLeft != 0 || cropRight != 0 || cropTop != 0 || cropBottom != 0 {
+		parts = append(parts, fmt.Sprintf("crop=iw-%d-%d:ih-%d-%d:%d:%d",
+			cropLeft, cropRight, cropTop, cropBottom, cropLeft, cropTop))
+	}
+	switch {
+	case width > 0 && height > 0:
+		parts = append(parts, fmt.Sprintf("scale=%d:%d", width, height))
+	case width > 0:
+		parts = append(parts, fmt.Sprintf("scale=%d:-2", width))
+	case height > 0:
+		parts = append(parts, fmt.Sprintf("scale=-2:%d", height))
+	}
+	return strings.Join(parts, ","), nil
+}
+
+// BuildVideoToGifArgs returns the ffmpeg args for video_to_gif. The GIF is
+// produced by a single-pass palettegraph (split → palettegen → paletteuse) so
+// the job runner needs only one ffmpeg invocation and no temporary palette
+// file. -loop is a GIF muxer option: -1 = no loop, 0 = infinite, positive =
+// repeat count (muxer range -1..65535).
+func BuildVideoToGifArgs(inputPath string, raw json.RawMessage) ([]string, string, string, error) {
+	var p VideoAnimParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, "", "", fmt.Errorf("invalid video_to_gif params: %w", err)
+	}
+	fps, _, paletteColors, dither, err := normalizeAnimParams(p.FPS, p.Quality, p.PaletteColors, p.Dither)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if p.LoopCount < -1 || p.LoopCount > 65535 {
+		return nil, "", "", fmt.Errorf("loopCount must be -1 (no loop), 0 (infinite) or 1-65535 (repeat count), got %d", p.LoopCount)
+	}
+	chain, err := buildAnimVideoFilterChain(fps, p.Width, p.Height, p.CropLeft, p.CropRight, p.CropTop, p.CropBottom)
+	if err != nil {
+		return nil, "", "", err
+	}
+	timeOpts, err := buildAnimTimeInputOptions(p.Start, p.Duration)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	filterComplex := fmt.Sprintf(
+		"[0:v]%s,split[a][b];[a]palettegen=stats_mode=diff:max_colors=%d[p];[b][p]paletteuse=dither=%s[v]",
+		chain, paletteColors, dither)
+
+	args := append([]string{}, timeOpts...)
+	args = append(args, "-i", inputPath, "-filter_complex", filterComplex, "-map", "[v]", "-loop", strconv.Itoa(p.LoopCount))
+	desc := fmt.Sprintf("gif_fps%d", fps)
+	return args, desc, ".gif", nil
+}
+
+// BuildVideoToWebpArgs returns the ffmpeg args for video_to_webp. The output
+// uses the libwebp_anim encoder (quality/lossless are its encoder options;
+// -loop is a WebP muxer option with range 0..65535 — -1 is rejected because
+// the WebP muxer has no "no loop" value).
+func BuildVideoToWebpArgs(inputPath string, raw json.RawMessage) ([]string, string, string, error) {
+	var p VideoAnimParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, "", "", fmt.Errorf("invalid video_to_webp params: %w", err)
+	}
+	fps, quality, _, _, err := normalizeAnimParams(p.FPS, p.Quality, p.PaletteColors, p.Dither)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if p.LoopCount < 0 || p.LoopCount > 65535 {
+		return nil, "", "", fmt.Errorf("webp loopCount must be 0 (infinite) or 1-65535 (repeat count), got %d", p.LoopCount)
+	}
+	chain, err := buildAnimVideoFilterChain(fps, p.Width, p.Height, p.CropLeft, p.CropRight, p.CropTop, p.CropBottom)
+	if err != nil {
+		return nil, "", "", err
+	}
+	timeOpts, err := buildAnimTimeInputOptions(p.Start, p.Duration)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	lossless := "0"
+	if p.Lossless {
+		lossless = "1"
+	}
+	args := append([]string{}, timeOpts...)
+	args = append(args, "-i", inputPath, "-vf", chain,
+		"-c:v", "libwebp_anim",
+		"-quality", strconv.Itoa(quality),
+		"-lossless", lossless,
+		"-loop", strconv.Itoa(p.LoopCount))
+	desc := fmt.Sprintf("webp_q%d", quality)
+	return args, desc, ".webp", nil
+}
+
+// BuildVideoAnimTrimArgs returns the ffmpeg args for video_anim_trim: precise
+// time-based trimming of an animated GIF or WebP, re-encoded into the SAME
+// container format as the input. Multi-segment trims use a trim/concat
+// filter_complex. Animated inputs must never fall through to the H.264
+// video_trim path, so any non-gif/webp input is rejected here.
+func BuildVideoAnimTrimArgs(inputPath string, raw json.RawMessage) ([]string, string, string, error) {
+	var p VideoAnimTrimParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, "", "", fmt.Errorf("invalid video_anim_trim params: %w", err)
+	}
+	ext := strings.ToLower(filepath.Ext(inputPath))
+	if ext != ".gif" && ext != ".webp" {
+		return nil, "", "", fmt.Errorf("video_anim_trim only supports .gif/.webp inputs, got %q", ext)
+	}
+
+	_, quality, paletteColors, dither, err := normalizeAnimParams(0, p.Quality, p.PaletteColors, p.Dither)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if p.LoopCount < -1 || p.LoopCount > 65535 {
+		return nil, "", "", fmt.Errorf("loopCount must be -1 (no loop), 0 (infinite) or 1-65535 (repeat count), got %d", p.LoopCount)
+	}
+	if ext == ".webp" && p.LoopCount < 0 {
+		return nil, "", "", fmt.Errorf("webp loopCount must be non-negative (0=infinite), got %d", p.LoopCount)
+	}
+	if len(p.Segments) > 0 {
+		return buildAnimTrimMultiSegmentArgs(inputPath, &p, ext, quality, paletteColors, dither)
+	}
+	if p.Start == "" && p.Duration == "" {
+		return nil, "", "", fmt.Errorf("start/duration or segments are required for video_anim_trim")
+	}
+	timeOpts, err := buildAnimTimeInputOptions(p.Start, p.Duration)
+	if err != nil {
+		return nil, "", "", err
+	}
+	desc := "trim_" + sanitizeTimestamp(p.Start)
+	if p.Start == "" {
+		desc = "trim_head"
+	}
+	// -ss/-t are placed AFTER -i as output options: the animated WebP demuxer
+	// cannot seek with input-side -ss (it yields zero frames and libwebp_anim
+	// fails), while output-side -ss decodes-and-discards and works for both
+	// GIF and WebP inputs.
+	var args []string
+	switch ext {
+	case ".gif":
+		args = append(args, "-i", inputPath)
+		args = append(args, timeOpts...)
+		args = append(args,
+			"-filter_complex", fmt.Sprintf("[0:v]split[a][b];[a]palettegen=stats_mode=diff:max_colors=%d[p];[b][p]paletteuse=dither=%s[v]",
+				paletteColors, dither),
+			"-map", "[v]", "-loop", strconv.Itoa(p.LoopCount))
+	case ".webp":
+		lossless := "0"
+		if p.Lossless {
+			lossless = "1"
+		}
+		args = append(args, "-i", inputPath)
+		args = append(args, timeOpts...)
+		args = append(args,
+			"-c:v", "libwebp_anim",
+			"-quality", strconv.Itoa(quality),
+			"-lossless", lossless,
+			"-loop", strconv.Itoa(p.LoopCount))
+	}
+	return args, desc, ext, nil
+}
+
+// buildAnimTrimMultiSegmentArgs trims multiple disjoint time ranges and
+// concatenates them into one animated image via filter_complex. Segments are
+// sorted by start time, exact duplicates removed, and empty or overlapping
+// ranges rejected (adjacent ranges are allowed). Animated images carry no
+// audio, so only the video stream is trimmed/concat'ed.
+func buildAnimTrimMultiSegmentArgs(inputPath string, p *VideoAnimTrimParams, ext string, quality, paletteColors int, dither string) ([]string, string, string, error) {
+	parsed := make([]TrimSegment, 0, len(p.Segments))
+	for i, seg := range p.Segments {
+		s, errS := parseSeconds(seg.Start)
+		e, errE := parseSeconds(seg.End)
+		if errS != nil || errE != nil {
+			return nil, "", "", fmt.Errorf("invalid segment %d start/end times", i)
+		}
+		if e <= s {
+			return nil, "", "", fmt.Errorf("invalid segment %d: end must be greater than start", i)
+		}
+		parsed = append(parsed, TrimSegment{
+			Start: strconv.FormatFloat(s, 'f', -1, 64),
+			End:   strconv.FormatFloat(e, 'f', -1, 64),
+		})
+	}
+
+	sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].Start < parsed[j].Start })
+	kept := parsed[:0]
+	for _, seg := range parsed {
+		if len(kept) > 0 && kept[len(kept)-1].Start == seg.Start && kept[len(kept)-1].End == seg.End {
+			continue // exact duplicate
+		}
+		if len(kept) > 0 {
+			prevEnd, _ := strconv.ParseFloat(kept[len(kept)-1].End, 64)
+			segStart, _ := strconv.ParseFloat(seg.Start, 64)
+			if segStart < prevEnd {
+				return nil, "", "", fmt.Errorf("segments must not overlap")
+			}
+		}
+		kept = append(kept, seg)
+	}
+
+	var filters []string
+	for i, seg := range kept {
+		filters = append(filters, fmt.Sprintf(
+			"[0:v]trim=start=%s:end=%s,setpts=PTS-STARTPTS[v%d]",
+			seg.Start, seg.End, i))
+	}
+	var concatInputs string
+	for i := range kept {
+		concatInputs += fmt.Sprintf("[v%d]", i)
+	}
+	filters = append(filters, fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vc]", concatInputs, len(kept)))
+	filterComplex := strings.Join(filters, ";")
+
+	var args []string
+	switch ext {
+	case ".gif":
+		filterComplex += fmt.Sprintf(";[vc]split[a][b];[a]palettegen=stats_mode=diff:max_colors=%d[p];[b][p]paletteuse=dither=%s[v]",
+			paletteColors, dither)
+		args = []string{"-i", inputPath, "-filter_complex", filterComplex, "-map", "[v]", "-loop", strconv.Itoa(p.LoopCount)}
+	case ".webp":
+		lossless := "0"
+		if p.Lossless {
+			lossless = "1"
+		}
+		args = []string{"-i", inputPath, "-filter_complex", filterComplex, "-map", "[vc]",
+			"-c:v", "libwebp_anim",
+			"-quality", strconv.Itoa(quality),
+			"-lossless", lossless,
+			"-loop", strconv.Itoa(p.LoopCount)}
+	}
+	return args, "trim_multi", ext, nil
 }

@@ -461,8 +461,26 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 				pgFSRoot.ServeHTTP(w, r)
 			})
+			// /vendor/*: serve the playground vendor dir first (katex, marked,
+			// mermaid, ...); fall back to the main static FS for vendors that only
+			// live there (gif.js/gifuct-js, loaded by the GIF editor SPA page).
+			vendorHandler := noCacheHandler
+			if mainStaticFS, err := fs.Sub(web.Static, "static"); err == nil {
+				vendorHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+					rel := strings.TrimPrefix(r.URL.Path, "/")
+					if f, ferr := pgStatic.Open(rel); ferr == nil {
+						f.Close()
+						pgFSRoot.ServeHTTP(w, r)
+						return
+					}
+					http.FileServer(http.FS(mainStaticFS)).ServeHTTP(w, r)
+				})
+			} else {
+				rt.logger.Warn("router: main static sub for /vendor/* fallback failed: %v", err)
+			}
 			r.Get("/playground.css", noCacheHandler)
-			r.Get("/vendor/*", noCacheHandler)
+			r.Get("/vendor/*", vendorHandler)
 			pgJSFiles := []string{
 				"playground.js", "pg-i18n.js",
 				"pg-core.js", "pg-state.js", "pg-markdown.js",

@@ -129,7 +129,8 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 
 	// Probe duration for progress tracking (video ops only).
 	var sourceDuration float64
-	if req.Operation == "video_transcode" || req.Operation == "video_trim" || req.Operation == "video_subtitle" {
+	if req.Operation == "video_transcode" || req.Operation == "video_trim" || req.Operation == "video_subtitle" ||
+		req.Operation == "video_to_gif" || req.Operation == "video_to_webp" || req.Operation == "video_anim_trim" {
 		if probe, probeErr := Probe(ffprobePath, req.InputPath); probeErr == nil {
 			sourceDuration = probe.Duration
 		}
@@ -306,6 +307,12 @@ func buildArgs(inputPath, operation string, raw json.RawMessage) (args []string,
 		args, desc, ext, err = BuildVideoTrimArgs(inputPath, raw)
 	case "video_subtitle":
 		args, desc, ext, err = BuildVideoSubtitleArgs(inputPath, raw)
+	case "video_to_gif":
+		args, desc, ext, err = BuildVideoToGifArgs(inputPath, raw)
+	case "video_to_webp":
+		args, desc, ext, err = BuildVideoToWebpArgs(inputPath, raw)
+	case "video_anim_trim":
+		args, desc, ext, err = BuildVideoAnimTrimArgs(inputPath, raw)
 	default:
 		return nil, "", "", fmt.Errorf("unknown operation: %s", operation)
 	}

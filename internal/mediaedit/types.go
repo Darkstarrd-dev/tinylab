@@ -25,7 +25,7 @@ type Job struct {
 	ID         string      `json:"id"`
 	Status     JobStatus   `json:"status"`
 	Progress   int         `json:"progress"`  // 0-100
-	Operation  string      `json:"operation"` // "image_transcode"|"video_transcode"|"video_trim"|"video_subtitle"
+	Operation  string      `json:"operation"` // "image_transcode"|"video_transcode"|"video_trim"|"video_subtitle"|"video_to_gif"|"video_to_webp"|"video_anim_trim"
 	InputPath  string      `json:"inputPath"`
 	OutputPath string      `json:"outputPath"` // set on completion
 	OutputName string      `json:"outputName"` // basename, set on completion
@@ -132,4 +132,39 @@ type VideoSubtitleParams struct {
 	FontSize     int    `json:"fontSize"`     // burn mode; default 24
 	FontName     string `json:"fontName"`     // burn mode; default ""
 	Container    string `json:"container"`    // "mp4"|"mkv"; default "mkv"
+}
+
+// VideoAnimParams holds options for the video_to_gif / video_to_webp
+// operations: a source video clip is re-encoded as an animated GIF or
+// animated WebP in a single ffmpeg invocation.
+type VideoAnimParams struct {
+	Start         string `json:"start"`    // seconds string; "" = from start
+	Duration      string `json:"duration"` // seconds string; "" = to end
+	FPS           int    `json:"fps"`      // 1-60, default 12
+	Width         int    `json:"width"`    // 0 = unspecified
+	Height        int    `json:"height"`   // 0 = unspecified
+	CropLeft      int    `json:"cropLeft"`
+	CropRight     int    `json:"cropRight"`
+	CropTop       int    `json:"cropTop"`
+	CropBottom    int    `json:"cropBottom"`
+	LoopCount     int    `json:"loopCount"`     // 0=infinite; GIF -1=no loop; WebP 0=infinite, positive=muxer semantics
+	Quality       int    `json:"quality"`       // 1-100; GIF default palette tier, WebP encoder quality
+	PaletteColors int    `json:"paletteColors"` // GIF 2-256, default 256
+	Dither        string `json:"dither"`        // none|bayer|floyd_steinberg|sierra2_4a
+	Lossless      bool   `json:"lossless"`      // WebP only
+}
+
+// VideoAnimTrimParams holds options for the video_anim_trim operation:
+// precise time-based trimming of an animated GIF or animated WebP, re-encoded
+// into the same container format. Segments (when non-empty) override the
+// single Start/Duration pair.
+type VideoAnimTrimParams struct {
+	Start         string        `json:"start"`
+	Duration      string        `json:"duration"`
+	Segments      []TrimSegment `json:"segments"` // non-empty overrides Start/Duration
+	Quality       int           `json:"quality"`
+	PaletteColors int           `json:"paletteColors"`
+	Dither        string        `json:"dither"`
+	Lossless      bool          `json:"lossless"`
+	LoopCount     int           `json:"loopCount"`
 }

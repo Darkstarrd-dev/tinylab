@@ -130,21 +130,82 @@ function _uploadSubtitle(file, callback) {
 
 
 // ---------- ffmpeg status check ------------------------------------
+// Capability bits from GET /api/gallery/edit/ffmpeg-status. The frontend uses
+// them for UX disabling only — the backend re-checks before starting a job.
+var _geFfmpegCaps = { available: false, gif: false, webpAnim: false, webpAnimDecode: false };
+
 function _checkFfmpegStatus() {
   fetch('/api/gallery/edit/ffmpeg-status')
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      _geFfmpegCaps = {
+        available: !!data.available,
+        gif: !!data.gif,
+        webpAnim: !!data.webpAnim,
+        webpAnimDecode: !!data.webpAnimDecode
+      };
       var warn = document.getElementById('ge-ffmpeg-warn');
       var startBtn = document.getElementById('ge-start-btn');
-      if (!data.available) {
+      if (!_geFfmpegCaps.available) {
         if (warn) warn.style.display = '';
         if (startBtn) startBtn.disabled = true;
       } else {
         if (warn) warn.style.display = 'none';
         if (startBtn && !_editJobId) startBtn.disabled = false;
       }
+      _applyFfmpegCapabilityUX();
     })
     .catch(function() {});
+}
+
+// _applyFfmpegCapabilityUX disables the GIF/WebP format options and the
+// animated trim controls according to the probed capability bits, showing a
+// reason string for each missing capability (UX only; backend re-checks).
+function _applyFfmpegCapabilityUX() {
+  // Transcode Format select: disable unavailable animated formats.
+  var fmt = document.getElementById('ge-vid-format');
+  if (fmt) {
+    var gifOpt = fmt.querySelector('option[value="gif"]');
+    var webpOpt = fmt.querySelector('option[value="webp"]');
+    if (gifOpt) gifOpt.disabled = !_geFfmpegCaps.gif;
+    if (webpOpt) webpOpt.disabled = !_geFfmpegCaps.webpAnim;
+    // Never leave an unavailable format selected (value would not dispatch).
+    if ((fmt.value === 'gif' && !_geFfmpegCaps.gif) || (fmt.value === 'webp' && !_geFfmpegCaps.webpAnim)) {
+      fmt.value = 'mp4';
+      _geVidFormat = 'mp4';
+      fmt.dispatchEvent(new Event('change'));
+    }
+    var notes = [];
+    if (!_geFfmpegCaps.gif) notes.push(T('geGifEncoderUnavailable'));
+    if (!_geFfmpegCaps.webpAnim) notes.push(T('geWebpAnimUnavailable'));
+    var noteRow = document.getElementById('ge-anim-cap-note-row');
+    var note = document.getElementById('ge-anim-cap-note');
+    if (noteRow && note) {
+      note.textContent = notes.join('; ');
+      noteRow.style.display = notes.length ? '' : 'none';
+    }
+  }
+
+  // Animated trim panel: needs ffmpeg at all; WebP input trim additionally
+  // needs the animated WebP decoder. GIF trim is unaffected by webpAnimDecode.
+  var addBtn = document.getElementById('ge-trim-anim-add');
+  var isAnim = (typeof isAnimatedImg === 'function') && isAnimatedImg(_editCurrentItem);
+  if (addBtn && isAnim) {
+    var isWebp = false;
+    var nm = _editCurrentItem && (_editCurrentItem.name || _editCurrentItem.path);
+    var dot = nm ? nm.lastIndexOf('.') : -1;
+    if (dot >= 0) isWebp = nm.slice(dot + 1).toLowerCase() === 'webp';
+    var reason = '';
+    if (!_geFfmpegCaps.available) reason = T('geAnimFfmpegUnavailable');
+    else if (isWebp && !_geFfmpegCaps.webpAnimDecode) reason = T('geTrimAnimWebpDecodeUnavailable');
+    addBtn.disabled = !!reason;
+    var noteRow = document.getElementById('ge-trim-anim-note-row');
+    var note = document.getElementById('ge-trim-anim-note');
+    if (noteRow && note) {
+      note.textContent = reason;
+      noteRow.style.display = reason ? '' : 'none';
+    }
+  }
 }
 
 // ---------- start operation helpers ---------------------------------
@@ -188,15 +249,30 @@ function _startVideoJob() {
   if (subCb && subCb.checked) {
     _startVideoSubtitle();
   } else if (trimCb && trimCb.checked) {
-    _startVideoTrim();
+    // Animated GIF/WebP inputs cannot use the draggable trim bar — route them
+    // to video_anim_trim (output ext = input ext); normal videos keep video_trim.
+    if (isAnimatedImg(_editCurrentItem)) {
+      _startVideoAnimTrim();
+    } else {
+      _startVideoTrim();
+    }
   } else {
-    _startVideoTranscode();
+    // Transcode dispatch: animated formats go to their own operations.
+    var fmt = document.getElementById('ge-vid-format');
+    var format = fmt ? fmt.value : '';
+    if (format === 'gif') {
+      _startVideoToGif();
+    } else if (format === 'webp') {
+      _startVideoToWebp();
+    } else {
+      _startVideoTranscode();
+    }
   }
 }
 
 function _startVideoTranscode() {
   var codec = document.getElementById('ge-vid-codec').value;
-  var container = document.getElementById('ge-vid-container').value;
+  var container = document.getElementById('ge-vid-format').value;
   var qualityTier = document.getElementById('ge-vid-quality').value;
   var preset = document.getElementById('ge-vid-preset').value;
   var scalePercent = parseInt(document.getElementById('ge-vid-scale').value) || 100;
@@ -247,6 +323,97 @@ function _startVideoTrim() {
     });
   }
   _startJob('video_trim', params, false, dest.outputDir);
+}
+
+// Video → GIF / animated WebP export (video_to_gif / video_to_webp). Params
+// are VideoAnimParams; the output extension comes from the operation.
+function _startVideoToGif() {
+  var dest = _getDestFromSetPath();
+  _startJob('video_to_gif', _collectVideoAnimParams(true), false, dest.outputDir);
+}
+
+function _startVideoToWebp() {
+  var dest = _getDestFromSetPath();
+  _startJob('video_to_webp', _collectVideoAnimParams(false), false, dest.outputDir);
+}
+
+// _collectVideoAnimParams reads the animated-format param block into a
+// VideoAnimParams body. `isGif` picks the format-specific options; the other
+// format's fields are omitted so the backend builder only sees its own.
+function _collectVideoAnimParams(isGif) {
+  function intVal(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el) return fallback;
+    var v = parseInt(el.value, 10);
+    return isFinite(v) ? v : fallback;
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  var startEl = document.getElementById('ge-vid-anim-start');
+  var durEl = document.getElementById('ge-vid-anim-duration');
+  var loopCount = 0;
+  var loopMode = document.getElementById('ge-vid-anim-loop-mode');
+  if (loopMode) {
+    if (loopMode.value === 'once') {
+      loopCount = -1; // GIF only; the WebP loop select never offers "once"
+    } else if (loopMode.value === 'n') {
+      loopCount = clamp(intVal('ge-vid-anim-loop-n', 1), 0, 65535);
+    }
+  }
+
+  var params = {
+    start: (startEl ? (startEl.value || '') : '').trim(),
+    duration: (durEl ? (durEl.value || '') : '').trim(),
+    fps: clamp(intVal('ge-vid-anim-fps', 12), 1, 60),
+    width: Math.max(0, intVal('ge-vid-anim-width', 0)),
+    height: Math.max(0, intVal('ge-vid-anim-height', 0)),
+    cropLeft: Math.max(0, intVal('ge-vid-anim-crop-left', 0)),
+    cropRight: Math.max(0, intVal('ge-vid-anim-crop-right', 0)),
+    cropTop: Math.max(0, intVal('ge-vid-anim-crop-top', 0)),
+    cropBottom: Math.max(0, intVal('ge-vid-anim-crop-bottom', 0)),
+    loopCount: loopCount,
+    quality: clamp(intVal('ge-vid-anim-quality', 80), 1, 100)
+  };
+  if (isGif) {
+    params.paletteColors = clamp(intVal('ge-vid-anim-palette', 256), 2, 256);
+    var dither = document.getElementById('ge-vid-anim-dither');
+    params.dither = dither ? dither.value : 'sierra2_4a';
+  } else {
+    var lossless = document.getElementById('ge-vid-anim-lossless');
+    params.lossless = !!(lossless && lossless.checked);
+  }
+  return params;
+}
+
+// Animated GIF/WebP trim (video_anim_trim): numeric segments only, output
+// extension = input extension. Single segment maps to start/duration;
+// multi-segment sends the sorted/deduped segment array.
+function _startVideoAnimTrim() {
+  if (!_editTrimSegments || !_editTrimSegments.length) {
+    showMsg(T('geTrimSelectFirst'));
+    return;
+  }
+  var norm = _normalizeAnimTrimSegments(_editTrimSegments);
+  if (norm.error) { showMsg(norm.error); return; }
+  var segs = norm.segments;
+
+  var params = {
+    quality: 80,
+    paletteColors: 256,
+    dither: '',
+    lossless: false,
+    loopCount: 0
+  };
+  if (segs.length === 1) {
+    params.start = String(segs[0].start);
+    params.duration = String(Math.round((segs[0].end - segs[0].start) * 100) / 100);
+  } else {
+    params.segments = segs.map(function(s) {
+      return { start: String(s.start), end: String(s.end) };
+    });
+  }
+  var dest = _getDestFromSetPath();
+  _startJob('video_anim_trim', params, false, dest.outputDir);
 }
 
 function _startVideoSubtitle() {

@@ -4,7 +4,16 @@
 
 // ---------- helpers ----------------------------------------------
 var SUPPORTED_IMG_EXTS = ['webp', 'png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif', 'avif', 'gif'];
-var SUPPORTED_VIDEO_EXTS = ['mp4', 'webm', 'ogv'];
+// GIF and WebP live in BOTH whitelists: they are images, but the video pane
+// plays them as <img> (browser-native animation, no Go transcoding).
+// Classification is video-first (isVideoExt wins) so a file never lands in
+// both the image and the video list.
+var SUPPORTED_VIDEO_EXTS = ['mp4', 'webm', 'ogv', 'gif', 'webp'];
+// ANIMATED_IMG_EXTS — extensions rendered as <img> inside the video pane.
+// GIF is always treated as animation (single-frame GIF has no side effect);
+// WebP is not parsed for VP8X — a static WebP simply shows a single frame
+// and an animated WebP auto-plays, so one unified <img> path is correct.
+var ANIMATED_IMG_EXTS = ['gif', 'webp'];
 var AUTOPLAY_INTERVALS = [1000, 2000, 3000, 5000, 10000, 15000, 30000, 60000, 120000]; // ms
 var AUTOPLAY_LABELS = ['1s', '2s', '3s', '5s', '10s', '15s', '30s', '60s', '120s'];
 var THUMB_SIZE = 300;
@@ -15,6 +24,13 @@ function isVideoExt(name) {
   if (dot < 0) return false;
   var ext = name.slice(dot + 1).toLowerCase();
   return SUPPORTED_VIDEO_EXTS.indexOf(ext) >= 0;
+}
+
+// isAnimatedImg reports whether the item is a browser-animated image (GIF or
+// WebP) shown via the video pane's <img id="gallery-main-anim"> element.
+function isAnimatedImg(item) {
+  var ext = extOf(item && (item.name || item.path));
+  return ANIMATED_IMG_EXTS.indexOf(ext) >= 0;
 }
 
 function isSupportedExt(name) {

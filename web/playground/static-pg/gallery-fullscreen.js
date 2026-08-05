@@ -219,59 +219,82 @@ function onFullscreenKey(e) {
 
   if (isVidActive) {
     var vidEl = document.getElementById('gallery-main-video');
-    // 1-9 media volume control — intentionally NOT customizable to avoid
-    // conflicting with the global quickslot-cycle 1-9 mappings.
-    if (k >= '1' && k <= '9') {
-      e.preventDefault(); e.stopPropagation();
-      var num = parseInt(k, 10);
-      var volPct = num * 11;
-      if (volPct > 100) volPct = 100;
-      if (vidEl) vidEl.volume = volPct / 100;
-      var volSlider = document.getElementById('gallery-vol-slider');
-      if (volSlider) volSlider.value = volPct;
-      showMsg('Volume: ' + volPct + '%');
-      return;
-    }
-    // Per-video scrubbing / volume controls below are intentionally NOT
-    // customizable: they share key space with gallery navigation and
-    // would conflict if rebound independently.
-    if (k === 'ArrowLeft') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 5);
-      return;
-    }
-    if (k === 'ArrowRight') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 5);
-      return;
-    }
-    if (k === 'ArrowUp') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) {
-        vidEl.volume = Math.min(1, vidEl.volume + 0.1);
-        var vs1 = document.getElementById('gallery-vol-slider');
-        if (vs1) vs1.value = Math.round(vidEl.volume * 100);
-        showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+    var curItem = galleryState.videoItems[galleryState.videoIndex];
+    var isAnimMode = !!(curItem && isAnimatedImg(curItem));
+    if (isAnimMode) {
+      // Animation mode (GIF/WebP): <img> offers no pause/seek/volume API, so
+      // volume (1-9, ↑↓) and seek (←/→) shortcuts are no-ops here. ↑/↓ keep
+      // switching items; Space replays; Stop (button) clears src.
+      if (k >= '1' && k <= '9') {
+        e.preventDefault(); e.stopPropagation(); return;
       }
-      return;
-    }
-    if (k === 'ArrowDown') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) {
-        vidEl.volume = Math.max(0, vidEl.volume - 0.1);
-        var vs2 = document.getElementById('gallery-vol-slider');
-        if (vs2) vs2.value = Math.round(vidEl.volume * 100);
-        showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+      if (k === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex - 1); return;
       }
-      return;
-    }
-    if (k === ' ' || k === 'Spacebar') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) {
-        if (vidEl.paused) vidEl.play();
-        else vidEl.pause();
+      if (k === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex + 1); return;
       }
-      return;
+      if (k === 'ArrowLeft' || k === 'ArrowRight') {
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      if (k === ' ' || k === 'Spacebar') {
+        e.preventDefault(); e.stopPropagation(); replayAnim(); return;
+      }
+    } else {
+      // 1-9 media volume control — intentionally NOT customizable to avoid
+      // conflicting with the global quickslot-cycle 1-9 mappings.
+      if (k >= '1' && k <= '9') {
+        e.preventDefault(); e.stopPropagation();
+        var num = parseInt(k, 10);
+        var volPct = num * 11;
+        if (volPct > 100) volPct = 100;
+        if (vidEl) vidEl.volume = volPct / 100;
+        var volSlider = document.getElementById('gallery-vol-slider');
+        if (volSlider) volSlider.value = volPct;
+        showMsg('Volume: ' + volPct + '%');
+        return;
+      }
+      // Per-video scrubbing / volume controls below are intentionally NOT
+      // customizable: they share key space with gallery navigation and
+      // would conflict if rebound independently.
+      if (k === 'ArrowLeft') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 5);
+        return;
+      }
+      if (k === 'ArrowRight') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 5);
+        return;
+      }
+      if (k === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) {
+          vidEl.volume = Math.min(1, vidEl.volume + 0.1);
+          var vs1 = document.getElementById('gallery-vol-slider');
+          if (vs1) vs1.value = Math.round(vidEl.volume * 100);
+          showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+        }
+        return;
+      }
+      if (k === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) {
+          vidEl.volume = Math.max(0, vidEl.volume - 0.1);
+          var vs2 = document.getElementById('gallery-vol-slider');
+          if (vs2) vs2.value = Math.round(vidEl.volume * 100);
+          showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+        }
+        return;
+      }
+      if (k === ' ' || k === 'Spacebar') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) {
+          if (vidEl.paused) vidEl.play();
+          else vidEl.pause();
+        }
+        return;
+      }
     }
   }
 
@@ -386,44 +409,67 @@ function onGalleryKeyDown(e) {
 
   if (isVidActive) {
     var vidEl = document.getElementById('gallery-main-video');
-    // 1-9 media volume — intentionally NOT customizable (shared with quickslot).
-    if (k >= '1' && k <= '9') {
-      e.preventDefault();
-      e.stopPropagation();
-      var num = parseInt(k, 10);
-      var volPct = num * 11;
-      if (volPct > 100) volPct = 100;
-      if (vidEl) vidEl.volume = volPct / 100;
-      var volSlider = document.getElementById('gallery-vol-slider');
-      if (volSlider) volSlider.value = volPct;
-      showMsg('Volume: ' + volPct + '%');
-      return;
-    }
-    // Per-video scrubbing controls below are NOT customizable (shared with
-    // gallery navigation keys).
-    if (k === 'ArrowUp') {
-      e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex - 1); return;
-    }
-    if (k === 'ArrowDown') {
-      e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex + 1); return;
-    }
-    if (k === 'ArrowLeft') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 10);
-      return;
-    }
-    if (k === 'ArrowRight') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 10);
-      return;
-    }
-    if (k === ' ' || k === 'Spacebar') {
-      e.preventDefault(); e.stopPropagation();
-      if (vidEl) {
-        if (vidEl.paused) vidEl.play();
-        else vidEl.pause();
+    var curItem = galleryState.videoItems[galleryState.videoIndex];
+    var isAnimMode = !!(curItem && isAnimatedImg(curItem));
+    if (isAnimMode) {
+      // Animation mode (GIF/WebP): <img> offers no pause/seek/volume API, so
+      // volume (1-9) and seek (←/→) are no-ops. ↑/↓ keep switching items;
+      // Space replays; Stop (button) clears src.
+      if (k >= '1' && k <= '9') {
+        e.preventDefault(); e.stopPropagation(); return;
       }
-      return;
+      if (k === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex - 1); return;
+      }
+      if (k === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex + 1); return;
+      }
+      if (k === 'ArrowLeft' || k === 'ArrowRight') {
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      if (k === ' ' || k === 'Spacebar') {
+        e.preventDefault(); e.stopPropagation(); replayAnim(); return;
+      }
+    } else {
+      // 1-9 media volume — intentionally NOT customizable (shared with quickslot).
+      if (k >= '1' && k <= '9') {
+        e.preventDefault();
+        e.stopPropagation();
+        var num = parseInt(k, 10);
+        var volPct = num * 11;
+        if (volPct > 100) volPct = 100;
+        if (vidEl) vidEl.volume = volPct / 100;
+        var volSlider = document.getElementById('gallery-vol-slider');
+        if (volSlider) volSlider.value = volPct;
+        showMsg('Volume: ' + volPct + '%');
+        return;
+      }
+      // Per-video scrubbing controls below are NOT customizable (shared with
+      // gallery navigation keys).
+      if (k === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex - 1); return;
+      }
+      if (k === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex + 1); return;
+      }
+      if (k === 'ArrowLeft') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 10);
+        return;
+      }
+      if (k === 'ArrowRight') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 10);
+        return;
+      }
+      if (k === ' ' || k === 'Spacebar') {
+        e.preventDefault(); e.stopPropagation();
+        if (vidEl) {
+          if (vidEl.paused) vidEl.play();
+          else vidEl.pause();
+        }
+        return;
+      }
     }
   }
 

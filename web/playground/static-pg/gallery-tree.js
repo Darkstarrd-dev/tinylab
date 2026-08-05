@@ -464,6 +464,8 @@ function clearActiveSideTree() {
       vidEl.removeAttribute('src');
       try { vidEl.load(); } catch (e3) {}
     }
+    var animEl = document.getElementById('gallery-main-anim');
+    if (animEl) animEl.removeAttribute('src');
     var vPath = document.getElementById('gallery-video-path') || document.getElementById('gallery-path');
     var vInfo = document.getElementById('gallery-video-info') || document.getElementById('gallery-info');
     if (vPath) { vPath.textContent = '-'; vPath.removeAttribute('data-tooltip'); }
@@ -867,6 +869,8 @@ function removeVideoItem(removedIndex) {
       vidEl.removeAttribute('src');
       try { vidEl.load(); } catch (e3) {}
     }
+    var animEl = document.getElementById('gallery-main-anim');
+    if (animEl) animEl.removeAttribute('src');
     renderActiveVideo(-1);
   } else {
     var ni = Math.max(0, Math.min(galleryState.videoIndex, galleryState.videoItems.length - 1));

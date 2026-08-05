@@ -110,6 +110,10 @@ function navigateTo(page) {
   if (currentPage !== 'editor' && typeof cleanupEditor === 'function') {
     cleanupEditor();
   }
+  // Cleanup GIF editor resources when leaving the page.
+  if (currentPage !== 'gif' && typeof cleanupGifEditor === 'function') {
+    cleanupGifEditor();
+  }
   // Close the download SSE stream when leaving the download page.
   if (page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
@@ -148,9 +152,10 @@ function navigateTo(page) {
       case 'download': return renderDownload(container);
       case 'gallery': return renderGallery(container);
       case 'editor': return renderEditor(container);
+      case 'gif': return renderGifEditor(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor') && mainEl) mainEl.classList.add('main-no-scroll');
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'gif') && mainEl) mainEl.classList.add('main-no-scroll');
   
   function restoreFullscreenState() {
     if (wasFullscreen) {

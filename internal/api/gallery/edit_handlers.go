@@ -38,23 +38,87 @@ func (h *Handler) resolveFfmpeg() (string, string, error) {
 
 // --- Media edit handlers ---
 
-// galleryEditFfmpegStatus reports whether ffmpeg is available.
+// galleryEditFfmpegStatus reports whether ffmpeg is available and which
+// animated-image codecs its build provides: {available, path, error, gif,
+// webpAnim, webpAnimDecode}. The frontend disables formats by capability;
+// galleryEditStart re-checks them server-side regardless.
 func (h *Handler) galleryEditFfmpegStatus(w http.ResponseWriter, r *http.Request) {
 	ffmpegPath, _, err := h.resolveFfmpeg()
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]any{
-			"available": false,
-			"path":      "",
-			"error":     err.Error(),
+			"available":      false,
+			"path":           "",
+			"error":          err.Error(),
+			"gif":            false,
+			"webpAnim":       false,
+			"webpAnimDecode": false,
+		})
+		return
+	}
+	caps, probeErr := mediaedit.ProbeFfmpegCaps(ffmpegPath)
+	if probeErr != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"available":      false,
+			"path":           ffmpegPath,
+			"error":          probeErr.Error(),
+			"gif":            false,
+			"webpAnim":       false,
+			"webpAnimDecode": false,
 		})
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{
-		"available": true,
-		"path":      ffmpegPath,
-		"error":     "",
+		"available":      true,
+		"path":           ffmpegPath,
+		"error":          "",
+		"gif":            caps.Gif,
+		"webpAnim":       caps.WebpAnim,
+		"webpAnimDecode": caps.WebpAnimDecode,
 	})
+}
+
+// checkAnimCapability verifies the configured ffmpeg provides the codecs the
+// requested animated-image operation needs. The backend never trusts the
+// frontend disable state: a missing encoder/decoder refuses the job with a
+// clear error before any output file is created or job is started.
+func (h *Handler) checkAnimCapability(req mediaedit.StartRequest, ffmpegPath, ffprobePath string) error {
+	caps, err := mediaedit.ProbeFfmpegCaps(ffmpegPath)
+	if err != nil {
+		return fmt.Errorf("ffmpeg capability probe failed: %w", err)
+	}
+	switch req.Operation {
+	case "video_to_gif":
+		if !caps.Gif {
+			return fmt.Errorf("video_to_gif requires the 'gif' encoder but the configured ffmpeg does not provide it")
+		}
+	case "video_to_webp":
+		if !caps.WebpAnim {
+			return fmt.Errorf("video_to_webp requires the 'libwebp_anim' encoder but the configured ffmpeg does not provide it")
+		}
+	case "video_anim_trim":
+		switch strings.ToLower(filepath.Ext(req.InputPath)) {
+		case ".gif":
+			if !caps.Gif {
+				return fmt.Errorf("video_anim_trim of a .gif input requires the 'gif' encoder but the configured ffmpeg does not provide it")
+			}
+		case ".webp":
+			if !caps.WebpAnim {
+				return fmt.Errorf("video_anim_trim of a .webp input requires the 'libwebp_anim' encoder but the configured ffmpeg does not provide it")
+			}
+			// Animated WebP input additionally needs the animated WebP
+			// decoder. A static WebP (probe duration 0) does not; when the
+			// input cannot be probed, fail closed and require the decoder.
+			animated := true
+			if probe, pErr := h.media.ProbeMedia(ffprobePath, req.InputPath); pErr == nil {
+				animated = probe.Duration > 0
+			}
+			if animated && !caps.WebpAnimDecode {
+				return fmt.Errorf("video_anim_trim of an animated .webp input requires the 'webp_anim' decoder but the configured ffmpeg does not provide it")
+			}
+		}
+	}
+	return nil
 }
 
 // probeRequest is the body for POST /edit/probe.
@@ -154,6 +218,13 @@ func (h *Handler) galleryEditStart(w http.ResponseWriter, r *http.Request) {
 	ffmpegPath, ffprobePath, err := h.resolveFfmpeg()
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "ffmpeg not available: "+err.Error())
+		return
+	}
+
+	// Backend never trusts the frontend disable state: re-check the required
+	// codec capabilities before any job starts (or output file is created).
+	if err := h.checkAnimCapability(req, ffmpegPath, ffprobePath); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

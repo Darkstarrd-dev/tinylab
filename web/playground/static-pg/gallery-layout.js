@@ -71,11 +71,22 @@ function autoBalanceFullscreenSplitRatio() {
 
   var imgEl = document.getElementById('gallery-main-img');
   var vidEl = document.getElementById('gallery-main-video');
+  var animEl = document.getElementById('gallery-main-anim');
 
   var rImg = (imgEl && imgEl.naturalWidth && imgEl.naturalHeight)
     ? (imgEl.naturalWidth / imgEl.naturalHeight) : 1.0;
-  var rVid = (vidEl && vidEl.videoWidth && vidEl.videoHeight)
-    ? (vidEl.videoWidth / vidEl.videoHeight) : 1.0;
+  var rVid = 1.0;
+  // Measure the ACTIVE video-pane media: an animated image reports its
+  // natural size, a real video its intrinsic video size. The img and video
+  // elements coexist, so pick by the current item's mode.
+  var vidItem = galleryState.videoItems[galleryState.videoIndex];
+  if (vidItem && isAnimatedImg(vidItem)) {
+    if (animEl && animEl.naturalWidth && animEl.naturalHeight) {
+      rVid = animEl.naturalWidth / animEl.naturalHeight;
+    }
+  } else if (vidEl && vidEl.videoWidth && vidEl.videoHeight) {
+    rVid = vidEl.videoWidth / vidEl.videoHeight;
+  }
 
   var containerW = window.innerWidth || document.documentElement.clientWidth || 1920;
   var containerH = window.innerHeight || document.documentElement.clientHeight || 1080;
@@ -167,6 +178,11 @@ function buildPanelHTML(type, isSplit) {
 
   var mainInner = isVid ?
     '<video class="gallery-main-video" id="gallery-main-video"></video>' +
+    // Animated images (GIF/WebP) play in the video pane through their own
+    // <img> node. It MUST NOT reuse the image pane's #gallery-main-img:
+    // split mode would then produce a duplicate DOM id (R9). It is hidden
+    // by default and revealed in animation mode.
+    '<img class="gallery-main-anim" id="gallery-main-anim" alt="" style="width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none;display:none">' +
     '<div class="gallery-video-hover-ctrl" id="gallery-video-ctrl">' +
       '<input type="range" class="gallery-video-seeker" id="gallery-video-seeker" value="0" min="0" max="100" step="0.1">' +
       '<span id="gallery-vid-time" class="gallery-video-time">00:00 / 00:00</span>' +

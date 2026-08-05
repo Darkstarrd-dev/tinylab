@@ -2,6 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
+> **最后核对（2026-08-05 GIF 编辑器与 Gallery 动画支持）：** 新增全局 GIF 编辑器页面（`web/static/gif-editor.js`，第 6 导航按钮 `data-page="gif"` 替代 `nav-placeholder`；vendor `web/static/vendor/gif.js/` + `web/static/vendor/gifuct-js/`，经 `/vendor/*` 的 `web.Static` 回退对 playground 构建同样可达——`internal/api/router.go` `vendorHandler`）。Gallery video 区现可播放 GIF/animated WebP：`SUPPORTED_VIDEO_EXTS` 增 gif/webp + `ANIMATED_IMG_EXTS`/`isAnimatedImg`（`gallery-state.js`）；video pane 唯一动画元素 `<img id="gallery-main-anim">`（`gallery-layout.js`）；`renderActiveVideo` 按 `isAnimatedImg` 分支 + 异步竞态守卫 + `applyVideoPaneMode`/`replayAnim`/`stopAnim`（`gallery-video.js`）；全屏动画模式短路 seek/音量、Space=重播（`gallery-fullscreen.js`）；树删除/切换清理 anim src（`gallery-tree.js`）。后端白名单同步：`galleryVidExts` 增 .gif/.webp（`fs_handlers.go`）、`SupportedExts` 增 gif（`internal/gallery/gallery.go`）、`contentTypeForExt` `.gif→image/gif`（`internal/gallery/zip.go`）。Gallery 媒体编辑新增 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation（`internal/mediaedit/types.go` `VideoAnimParams`/`VideoAnimTrimParams`、`args.go` 三 Build*Args + `normalizeAnimParams`/`parseSeconds`/`buildAnimTimeInputOptions`/`buildAnimVideoFilterChain`/`animDithers`）与 `ProbeFfmpegCaps` 能力探测（`binary.go` `FfmpegCaps`{gif,webpAnim,webpAnimDecode}，按绝对路径缓存）；`ffmpeg-status` 返回 6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`（`edit_handlers.go` `galleryEditFfmpegStatus`/`checkAnimCapability`）。实施入口：`gif_implented.md`。
 > **最后核对（2026-08-05 Image Protocol/Windows/Batch）：** `pg-comfyui.js` 的 ComfyUI 运行态按 Image 窗口隔离；ComfyUI 面板标题提供 `Back to protocol selection`，回退会清理当前窗口的占位模型、workflow、连接状态和粘贴 JSON。Tab Select 候选仍先合并已保存/活动 Tab 与成功历史，但 `pgComfyDeduplicateTemplates` 以规范化显示名称去重（无名项按 workflow signature），不会因不同 SHA/执行 prompt 产生同名选项。Image 模式支持 1–4 个独立窗口：`pgSetSplitCount` 补齐窗口对象，点击 pane header 或 WinBar 选择活动窗口，各窗口的 image/Comfy 配置独立；`Batch Project` 在多窗口时禁用，避免全局 Batch SSE/project 状态串线。
 > **最后核对（2026-08-05 Image Canvas/Batch）：** Image 模式现分为 Manual Canvas 与 Batch Project 两层。Manual 由 `pg-image-model.js`/`pg-image-inspire.js` 维护独立 generation/asset 历史、Prompt helper（仅 `kind:text`）、Natural/Tag/JSON Inspire、Stable asset autosave 与画框状态；`pg-ui.js` 在 Image 模式不再追加 chat/waiting bubble。Batch 由 `internal/imagebatch/` 后端 Manager/Scheduler/ProjectStore/Reconciler/RemoteGenerator/ComfyGenerator 按单并发顺序运行，持久化 `imgs/<slug>/project.json` 与 `p####/v####.<ext>`，`/api/image-batches/*` 为 auth-gated 32 MiB 路由组，支持 Plan/Transform、Snapshot-first SSE、Pause/Resume/Stop/Retry、原子槽位写入和文件系统 reconcile。前端 `pg-image-batch.js` 提供 refresh/pause/resume/stop/retry 导出；retry 按当前 Prompt/Variant 调用后端 retry 路由并刷新快照；多窗口 Image 模式禁用 Batch Project；离开页面关闭 SSE，不取消后端任务。`ImagesEdits` 同时注册 `/v1/images/edits`，与 generations 共享代理轮转链路。
 > **最后核对（2026-08-04 Gallery ZIP 粘贴）：** `POST /api/gallery/zip-from-path` 现在先解析并校验 JSON `{path}`，再从磁盘读取 ZIP；空路径或 malformed JSON 返回 400，避免 Windows CF_HDROP 粘贴 ZIP 因未解码请求体而以空路径触发 404。拖放仍走二进制 `POST /api/gallery/zip`。
@@ -159,7 +160,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 `internal/api/router.go` 在 `PlaygroundCompiled()` 为真时挂载：
 
 - `/playground.css`；
-- `/vendor/*`；
+- `/vendor/*`（playground vendor 目录优先，未命中回退 `web.Static` 主静态——gif.js/gifuct-js 位于 `web/static/vendor/`，见 `internal/api/router.go` `vendorHandler`）；
 - 显式白名单中的 `playground.js`、`pg-i18n.js`、所有 `pg-*.js`，以及 AI Text Review 的 `tr-*.js`（`editor_textreview_split`/`editor_textreview_diff`/`editor_textreview_state`）与 `editor_textreview*.js`（`editor_textreview.js` + `editor_textreview_step1..4.js`）——由 `internal/api/router.go` 的 `pgJSFiles` 列表显式枚举。
 
 新增或重命名前端模块时必须同时更新：
@@ -228,7 +229,7 @@ Playground 后端相关职责只有三类：
 | `POST /api/text-review/sessions/{id}/stop` | 取消会话（标记 cancelled） | 管理 session | 32 MiB |
 | `POST /api/text-review/sessions/{id}/chapters/{idx}/reprocess` | 单章重清理（必要时重启调度） | 管理 session | 32 MiB |
 | `DELETE /api/text-review/sessions/{id}` | 取消并删除会话（防会话无界增长） | 管理 session | 32 MiB |
-| `GET /api/gallery/edit/ffmpeg-status` | ffmpeg 可用性检测 | 管理 session | 无上限（`/api/gallery` 组） |
+| `GET /api/gallery/edit/ffmpeg-status` | ffmpeg 可用性与动画编解码能力检测（6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`） | 管理 session | 无上限（`/api/gallery` 组） |
 | `POST /api/gallery/edit/probe` | 媒体文件元数据探针（宽/高/编码/时长/IsImage） | 管理 session | 无上限 |
 | `POST /api/gallery/edit/subtitle-upload` | 字幕文件上传（.srt/.ass/.vtt，≤16MB） | 管理 session | 16 MiB |
 | `POST /api/gallery/edit/start` | 启动 ffmpeg 编辑 job（转码/裁剪/字幕烧录） | 管理 session | 无上限 |
@@ -780,7 +781,7 @@ Gallery 是 playground 构建变体（`-tags playground`）下的图片查看器
 - **“打开”**：优先调用后端 `POST /api/gallery/open-dir`（原生 COM IFileOpenDialog 目录选择器，返回绝对路径 + 递归文件列表，后续磁盘操作零弹窗）；后端不可用时降级 `showDirectoryPicker({mode:'readwrite'})` / `showOpenFilePicker({multiple:true, mode:'readwrite'})`，无 FS Access API 时降级 `<input type=file multiple webkitdirectory>`。
 
 ### 支持格式
-`webp png jpg jpeg bmp tiff`（`tif` 同 tiff）。目录/单图/多图全部前端 `FsApi.BlobTracker.create(blob)` + `<img>` 显示（浏览器原生 GPU 加速，BlobTracker 追踪防泄漏）。TIFF 因 Chromium/WebView2 原生不支持 `<img>` 显示，走后端 `POST /api/gallery/tiff` 解码转 JPEG 后再显示。
+`webp png jpg jpeg bmp tiff`（`tif` 同 tiff）。目录/单图/多图全部前端 `FsApi.BlobTracker.create(blob)` + `<img>` 显示（浏览器原生 GPU 加速，BlobTracker 追踪防泄漏）。TIFF 因 Chromium/WebView2 原生不支持 `<img>` 显示，走后端 `POST /api/gallery/tiff` 解码转 JPEG 后再显示。 video 区另支持 `mp4 webm ogv` 与 GIF/animated WebP（`gif`/`webp` 经 video pane 的 `<img id="gallery-main-anim">` 浏览器原生播放、不转码，见 §5.2 前后端白名单）。
 
 ### 后端协作
 zip、tiff 及文件系统操作需后端参与：
@@ -879,12 +880,12 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 
 ### Gallery 媒体编辑器（ffmpeg）
 
-Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js` 三文件，`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 逐条解析临时磁盘路径再转码、`_resolveBatchInput` 复用 extract-zip-entry/upload-temp）。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/edit_handlers.go` 的 9 个 edit handler。
+Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js` 三文件，`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 逐条解析临时磁盘路径再转码、`_resolveBatchInput` 复用 extract-zip-entry/upload-temp）。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/edit_handlers.go` 的 9 个 edit handler；动画输出与动画 trim 走 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation，FFmpeg 能力由 `ProbeFfmpegCaps` 分字段探测（`ffmpeg-status` 6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`），缺 encoder/decoder 只禁用对应能力，后端 Start 前再复核。
 #### API 端点（`/api/gallery/edit/*`）
 
 | 端点 | 方法 | 请求体 | 响应 |
 |---|---|---|---|
-| `/edit/ffmpeg-status` | GET | — | `{available:bool, path:string, error:string}` |
+| `/edit/ffmpeg-status` | GET | — | `{available, path, error, gif, webpAnim, webpAnimDecode}`（6 字段能力位，`gif`=GIF encoder、`webpAnim`=`libwebp_anim` encoder、`webpAnimDecode`=animated WebP decoder） |
 | `/edit/probe` | POST | `{path}` | `ProbeResult`（width/height/codec/duration/hasAudio/frameRate/isImage） |
 | `/edit/subtitle-upload` | POST | raw body + `?name=` query | `{subtitlePath}`（abs path，写入 `%TEMP%/tinyrouter-subs/`） |
 | `/edit/start` | POST | `StartRequest`（inputPath/operation/overwrite/**params/outputDir?/outputName?**） | `{jobId}` |
@@ -900,6 +901,9 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 - **video_transcode**：`VideoTranscodeParams{codec, container, qualityTier, preset, scalePercent, audioCodec, audioBitrate, stripMetadata}` — H264/H265/VP9/AV1 编码，含编码-容器兼容校验
 - **video_trim**：`VideoTrimParams{start, duration, reencode, codec, qualityTier}` — 无损裁剪（`-c copy`）或重编码裁剪
 - **video_subtitle**：`VideoSubtitleParams{subtitlePath, mode, language, fontSize, fontName, container}` — burn（烧录进视频，H.264+AAC 重编码）或 soft（作为独立字幕轨 mux，无损 remux）
+- **video_to_gif**：`VideoAnimParams{start, duration, fps, width, height, cropLeft/Right/Top/Bottom, loopCount, quality, paletteColors, dither}` — 视频→GIF，单次 `split→palettegen→paletteuse` filtergraph；`-loop` 为 GIF muxer 选项（-1=不循环/0=无限/正数=次数）
+- **video_to_webp**：`VideoAnimParams`（含 `lossless`）— 视频→animated WebP，`libwebp_anim` encoder；`-loop` 走 WebP muxer（0=无限/正数）
+- **video_anim_trim**：`VideoAnimTrimParams{start, duration, segments[], quality, paletteColors, dither, lossless, loopCount}` — 动画图片（GIF/WebP）数字时间裁剪，输出扩展名=输入扩展名；GIF 走 palettegraph、WebP 走 `libwebp_anim`，动画输入绝不落入 H.264 `video_trim` 分支
 
 #### 约束
 
@@ -915,12 +919,12 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 #### 源码锚点
 
 - `internal/mediaedit/types.go`：Job/ProbeResult/StartRequest/各操作 params 类型
-- `internal/mediaedit/binary.go`：ResolveFfmpeg/ResolveFfprobe
+- `internal/mediaedit/binary.go`：ResolveFfmpeg/ResolveFfprobe + `ProbeFfmpegCaps`（`FfmpegCaps`{gif,webpAnim,webpAnimDecode}，按绝对路径缓存 `ffmpegCapsCache`，`ffmpegListCodecs`/`parseCodecListOutput`）
 - `internal/mediaedit/probe.go`：Probe(ffprobePath, path)
-- `internal/mediaedit/args.go`：BuildImageTranscodeArgs/BuildVideoTranscodeArgs/BuildVideoTrimArgs/BuildVideoSubtitleArgs + BuildOutputPath
+- `internal/mediaedit/args.go`：BuildImageTranscodeArgs/BuildVideoTranscodeArgs/BuildVideoTrimArgs/BuildVideoSubtitleArgs + BuildOutputPath + BuildVideoToGifArgs/BuildVideoToWebpArgs/BuildVideoAnimTrimArgs（+ normalizeAnimParams/parseSeconds/buildAnimTimeInputOptions/buildAnimVideoFilterChain/animDithers）
 - `internal/mediaedit/executor.go`：RunFfmpeg + tailBuffer
 - `internal/mediaedit/manager.go`：Manager.Start/Get/Cancel/ProbeMedia
-- `internal/api/gallery/edit_handlers.go`：`h.media`（`*mediaedit.Manager`） + `resolveFfmpeg` + 11 个 edit/gallery handler（edit：ffmpeg-status / probe / subtitle-upload / start / status / cancel / extract-zip-entry / upload-temp / zip-outputs / zip-writeback；gallery：open-folder）
+- `internal/api/gallery/edit_handlers.go`：`h.media`（`*mediaedit.Manager`） + `resolveFfmpeg` + 11 个 edit/gallery handler（edit：ffmpeg-status / probe / subtitle-upload / start / status / cancel / extract-zip-entry / upload-temp / zip-outputs / zip-writeback；gallery：open-folder）；`galleryEditFfmpegStatus` 返回 6 字段能力位，`checkAnimCapability` 启动前复核动画能力
 - `internal/gallery/zip_replace.go`：`ReplaceZipEntries(data, replacements map[string][]byte) ([]byte, Manifest, error)` — zip 条目替换/原位回写核心
 - `internal/fsutil`：`OpenInFileManager(path)` — 打开目录复用（非 gallery 包内）
 - `internal/api/router.go`：pgJSFiles 含 `gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（加载顺序：gallery-edit.js → gallery-edit-operations.js → gallery-edit-batch.js，共享全局作用域，shell 声明共享变量，operations/batch 引用）
@@ -930,7 +934,8 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 
 | 触发变更 | 涉及源码 |
 |---|---|
-| 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/edit_handlers.go`（manager.go 的 `buildArgs` switch） |
+| 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/edit_handlers.go`（manager.go 的 `buildArgs` switch）（含 `video_to_gif`/`video_to_webp`/`video_anim_trim` 与 `ProbeFfmpegCaps` 能力门控） |
+| 修改 Gallery video 区动画播放 | `web/playground/static-pg/gallery-state.js`（`SUPPORTED_VIDEO_EXTS` 增 gif/webp、`ANIMATED_IMG_EXTS`/`isAnimatedImg`）+ `gallery-layout.js`（video pane 增 `<img id="gallery-main-anim">`）+ `gallery-video.js`（`renderActiveVideo`/`applyVideoPaneMode`/`replayAnim`/`stopAnim`）+ `gallery-fullscreen.js` + `gallery-tree.js` + `internal/api/gallery/fs_handlers.go`（`galleryVidExts`）+ `internal/gallery/gallery.go`（`SupportedExts`）+ `internal/gallery/zip.go`（`contentTypeForExt`） |
 | 修改质量/编码参数默认值 | `internal/mediaedit/args.go`（CRF 表/jpegQuality/clamp）+ `internal/mediaedit/args_test.go` |
 | 修改 ffmpeg 二进制解析 | `internal/mediaedit/binary.go` |
 | 修改 ffprobe 探针逻辑 | `internal/mediaedit/probe.go` |

@@ -208,6 +208,8 @@ func contentTypeForExt(name string) string {
 		return "image/jpeg"
 	case ".bmp":
 		return "image/bmp"
+	case ".gif":
+		return "image/gif"
 	case ".tiff", ".tif":
 		return "image/tiff"
 	default:
