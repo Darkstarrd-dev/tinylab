@@ -105,11 +105,86 @@ async function handleExitApp() {
   document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h2>TinyRouter</h2><p class="muted">Stopped</p></div></div>';
 }
 
+function setupHeaderResponsive() {
+  var header = document.querySelector('.top-header');
+  if (!header) return;
+
+  var brand = header.querySelector('.top-header-brand');
+  var nav = header.querySelector('.top-header-nav');
+  var quickslot = document.getElementById('quickslot-header') || header.querySelector('.top-header-stats');
+  var shutdown = header.querySelector('.top-header-shutdown');
+
+  function calculateAndApply() {
+    if (shutdown) shutdown.style.display = '';
+    if (brand) brand.style.display = '';
+    if (quickslot) quickslot.style.display = '';
+
+    var containerWidth = header.clientWidth;
+    var style = window.getComputedStyle(header);
+    var padLeft = parseFloat(style.paddingLeft) || 0;
+    var padRight = parseFloat(style.paddingRight) || 0;
+    var availWidth = containerWidth - padLeft - padRight;
+
+    var wNav = nav ? nav.offsetWidth : 0;
+    var wBrand = brand ? brand.offsetWidth : 0;
+    var wQuickslot = (quickslot && quickslot.children && quickslot.children.length > 0 && quickslot.offsetWidth > 0) ? quickslot.offsetWidth : 0;
+    var wShutdown = shutdown ? shutdown.offsetWidth : 0;
+
+    var gap = 12;
+
+    var count4 = (wNav > 0 ? 1 : 0) + (wBrand > 0 ? 1 : 0) + (wQuickslot > 0 ? 1 : 0) + (wShutdown > 0 ? 1 : 0);
+    var need4 = wNav + wBrand + wQuickslot + wShutdown + Math.max(0, count4 - 1) * gap;
+
+    if (availWidth >= need4) {
+      if (shutdown) shutdown.style.display = '';
+      if (brand) brand.style.display = '';
+      if (quickslot) quickslot.style.display = '';
+      return;
+    }
+
+    // Step 1: Hide Shutdown button
+    if (shutdown) shutdown.style.display = 'none';
+    var count3 = (wNav > 0 ? 1 : 0) + (wBrand > 0 ? 1 : 0) + (wQuickslot > 0 ? 1 : 0);
+    var need3 = wNav + wBrand + wQuickslot + Math.max(0, count3 - 1) * gap;
+
+    if (availWidth >= need3) {
+      if (brand) brand.style.display = '';
+      if (quickslot) quickslot.style.display = '';
+      return;
+    }
+
+    // Step 2: Hide Brand container (Logo + Title + theme btn)
+    if (brand) brand.style.display = 'none';
+    var count2 = (wNav > 0 ? 1 : 0) + (wQuickslot > 0 ? 1 : 0);
+    var need2 = wNav + wQuickslot + Math.max(0, count2 - 1) * gap;
+
+    if (availWidth >= need2) {
+      if (quickslot) quickslot.style.display = '';
+      return;
+    }
+
+    // Step 3: Hide Quickslot / Stats
+    if (quickslot) quickslot.style.display = 'none';
+  }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    var ro = new ResizeObserver(function() {
+      calculateAndApply();
+    });
+    ro.observe(header);
+  }
+  window.addEventListener('resize', calculateAndApply);
+  setTimeout(calculateAndApply, 50);
+  setTimeout(calculateAndApply, 300);
+  calculateAndApply();
+}
+
 function initApp() {
   initTheme();
   initFontSize();
   initLang();
   initHeaderStats();
+  setupHeaderResponsive();
   document.querySelectorAll('.nav-item').forEach(function(el) {
     el.addEventListener('click', function() {
       var page = el.dataset.page;
