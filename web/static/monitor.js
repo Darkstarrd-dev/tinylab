@@ -3,7 +3,7 @@
 async function renderUsage(c) {
   try {
   var cachedEntries = lastUsageEntries.slice();
-  var quotaCardHtml = '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + t('quotaMonitor') + '</span><button type="button" class="btn btn-sm btn-ghost" onclick="resetQuotaTimers()">' + t('resetQuota') + '</button></div><div class="quota-section quota-section-scroll"><table class="usage-table quota-table"><thead><tr><th class="quota-th-chevron"></th><th>' + t('thProvider') + '</th><th>' + t('thModel') + '</th><th>' + t('thQuota') + '</th><th>' + t('thInput') + '</th><th>' + t('thOutput') + '</th><th>' + t('thLatency') + '</th><th>' + t('thAvgSpeed') + '</th></tr></thead><tbody id="quota-tbody"></tbody></table></div></div>';
+  var quotaCardHtml = '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + t('quotaMonitor') + '</span><button type="button" class="btn btn-sm btn-ghost" onclick="resetQuotaTimers()">' + t('resetQuota') + '</button></div><div class="quota-section quota-section-scroll"><table class="usage-table quota-table"><thead><tr><th>' + t('thProvider') + '</th><th>' + t('thModel') + '</th><th>' + t('thQuota') + '</th><th>' + t('thInput') + '</th><th>' + t('thOutput') + '</th><th>' + t('thLatency') + '</th><th>' + t('thAvgSpeed') + '</th></tr></thead><tbody id="quota-tbody"></tbody></table></div></div>';
   c.innerHTML = '\
     <div class="usage-header usage-fullscreen">\
       <div class="usage-body-grid">\

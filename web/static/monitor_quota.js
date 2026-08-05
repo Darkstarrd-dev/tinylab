@@ -15,19 +15,20 @@ function formatQuotaCell(bar) {
 function renderQuotaRow(bar) {
   var itemId = 'qr-' + sanitizeId(bar.provider) + '-' + sanitizeId(bar.model);
   var multi = isMultiKeyProvider(bar.provider);
+  var setKey = JSON.stringify([bar.provider, bar.model]);
+  var isExpanded = expandedModels.has(setKey);
   var chevronHtml = multi
-    ? '<span class="quota-row-chevron">' + QUOTA_CHEVRON + '</span>'
+    ? '<span class="quota-row-chevron' + (isExpanded ? ' quota-chevron-expanded' : '') + '" style="margin-right:6px;vertical-align:middle">' + QUOTA_CHEVRON + '</span>'
     : '';
   var quotaHtml = formatQuotaCell(bar);
-  var rowHtml = '<tr class="quota-row' + (multi ? ' quota-row-clickable' : '') + '" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
+  var rowHtml = '<tr class="quota-row' + (multi ? ' quota-row-clickable' : '') + (isExpanded ? ' quota-row-expanded' : '') + '" id="' + itemId + '" data-key="' + escapeHtml(bar.provider + '/' + bar.model) + '"';
   if (multi) {
     var pEsc = escapeForJsString(bar.provider);
     var mEsc = escapeForJsString(bar.model);
     rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')"';
   }
   rowHtml += '>\
-    <td class="quota-td-chevron">' + chevronHtml + '</td>\
-    <td>' + escapeHtml(bar.provider) + '</td>\
+    <td>' + chevronHtml + escapeHtml(bar.provider) + '</td>\
     <td>' + escapeHtml(displayModelName(bar.model, bar.alias || bar.model)) + '</td>\
     <td class="quota-td-quota">' + quotaHtml + '</td>\
     <td>' + formatCompactTokens(bar.inputTokens) + '</td>\
@@ -42,11 +43,12 @@ function renderQuotaRow(bar) {
 // latency, speed, chevron rotation). Reuses the existing <tr> by id.
 function patchQuotaRow(el, bar) {
   el.querySelector('.quota-td-quota').innerHTML = formatQuotaCell(bar);
-  // tokens columns (4th and 5th data cells)
+  // tokens columns (4th and 5th data cells in 0-indexed: index 3 is input, index 4 is output)
   var tds = el.querySelectorAll('td');
-  tds[4].textContent = formatCompactTokens(bar.inputTokens);
-  tds[5].textContent = formatCompactTokens(bar.outputTokens);
-  // latency + speed filled by patchQuotaRowActiveMetrics when per-key data arrives
+  if (tds.length >= 5) {
+    tds[3].textContent = formatCompactTokens(bar.inputTokens);
+    tds[4].textContent = formatCompactTokens(bar.outputTokens);
+  }
 }
 
 // patchQuotaRowActiveMetrics fills the latency/speed cells of a top-level row
@@ -82,7 +84,7 @@ function renderQuotaKeyRows(provider, model, data) {
   if (!expandedModels.has(setKey)) return;
   var color = getModelColor(provider, model);
   if (!data || !data.keys || data.keys.length === 0) {
-    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
+    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
   }
   var rows = '';
   data.keys.forEach(function(k) {
@@ -146,8 +148,7 @@ function renderQuotaKeyRows(provider, model, data) {
     var quotaStr = (data.hasQuota && k.hasQuota) ? ((k.modelLimit - k.modelRemaining) + '/' + k.modelLimit) : '∞';
 
     rows += '<tr class="' + rowClass + '">\
-      <td></td>\
-      <td>' + leadHtml + '</td>\
+      <td style="padding-left:22px">' + leadHtml + '</td>\
       <td>' + escapeHtml(k.keyName) + '</td>\
       <td>' + quotaStr + '</td>\
       <td colspan="2">' + statusBadge + '</td>\
@@ -156,7 +157,7 @@ function renderQuotaKeyRows(provider, model, data) {
     </tr>';
   });
   if (rows === '') {
-    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
+    return '<tr class="quota-key-row quota-key-row-empty"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noKeysConfigured')) + '</td></tr>';
   }
   return rows;
 }
@@ -348,7 +349,7 @@ function toggleQuotaRowExpand(provider, model) {
       var ph = document.createElement('tr');
       ph.className = 'quota-key-row quota-key-row-loading';
       ph.setAttribute('data-parent', provider + '/' + model);
-      ph.innerHTML = '<td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('loading')) + '...</td>';
+      ph.innerHTML = '<td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('loading')) + '...</td>';
       el.parentNode.insertBefore(ph, el.nextSibling);
     }
     fetchModelKeyDetail(provider, model);

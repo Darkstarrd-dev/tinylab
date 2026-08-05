@@ -166,7 +166,6 @@ function fitMonitorTable(table) {
     }
   }
   document.body.removeChild(measure);
-  if (table.classList.contains('quota-table') && widths.length > 0) widths[0] = Math.max(widths[0], 28);
   var total = widths.reduce(function(sum, width) { return sum + width; }, 0);
   if (!total) return;
   var colgroup = table.querySelector(':scope > colgroup');
@@ -176,10 +175,22 @@ function fitMonitorTable(table) {
   }
   while (colgroup.children.length < colCount) colgroup.appendChild(document.createElement('col'));
   while (colgroup.children.length > colCount) colgroup.lastElementChild.remove();
-  for (var k = 0; k < colCount; k++) colgroup.children[k].style.width = widths[k] + 'px';
   table.classList.add('monitor-auto-fit-table');
-  table.style.width = total + 'px';
-  table.style.minWidth = total + 'px';
+  var containerWidth = table.parentElement ? table.parentElement.clientWidth : 0;
+  if (containerWidth > 0 && containerWidth >= total) {
+    table.style.width = '100%';
+    table.style.minWidth = '100%';
+    for (var k = 0; k < colCount; k++) {
+      var pct = (widths[k] / total * 100).toFixed(2) + '%';
+      colgroup.children[k].style.width = pct;
+    }
+  } else {
+    table.style.width = total + 'px';
+    table.style.minWidth = total + 'px';
+    for (var k = 0; k < colCount; k++) {
+      colgroup.children[k].style.width = widths[k] + 'px';
+    }
+  }
   table.style.tableLayout = 'fixed';
 }
 

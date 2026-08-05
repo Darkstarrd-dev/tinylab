@@ -101,6 +101,11 @@ function updateRecentPagerState() {
   }
 }
 
+var ICON_STATUS_SUCCESS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+var ICON_STATUS_FAILURE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+var ICON_STATUS_PROCESSING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+var ICON_STATUS_SESSION = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
 function renderRecentRequestsInline(entries) {
   var filtered = entries.filter(shouldShowUsageEntry);
   recentFilteredCount = filtered.length;
@@ -117,13 +122,15 @@ function renderRecentRequestsInline(entries) {
       '<span id="recent-page-indicator" style="font-size:var(--font-badge);color:var(--text-muted);min-width:52px;text-align:center">' + recentPage + ' / ' + maxPage + '</span>' +
       '<button type="button" class="btn btn-sm btn-filter" id="recent-next-page" onclick="recentNextPage()">\u2192</button>' +
     '</span>';
-  var header = '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">' +
-    '<span>' + t('recentRequests') + '<span class="recent-count">' + filtered.length + '</span></span>' +
-    '<span class="console-controls" style="gap:4px">' +
-      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.success ? ' active' : '') + '" data-filter="success" onclick="toggleUsageFilter(this,\'success\')">' + t('filterSuccess') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.failure ? ' active' : '') + '" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')">' + t('filterFailure') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.processing ? ' active' : '') + '" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')">' + t('filterProcessing') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-filter' + (recentGroupBySession ? ' active' : '') + '" id="recent-group-toggle" onclick="toggleRecentGroupBySession()">' + t('groupBySession') + '</button>' +
+  var header = '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:6px">' +
+    '<span style="white-space:nowrap;flex-shrink:0">' + t('recentRequests') + '<span class="recent-count">' + filtered.length + '</span></span>' +
+    '<span class="console-controls" style="gap:6px">' +
+      '<div class="btn-filter-group">' +
+        '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.success ? ' active' : '') + '" data-filter="success" onclick="toggleUsageFilter(this,\'success\')" data-tooltip="' + escapeHtml(t('filterSuccess')) + '" aria-label="' + escapeHtml(t('filterSuccess')) + '">' + ICON_STATUS_SUCCESS + '</button>' +
+        '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.failure ? ' active' : '') + '" data-filter="failure" onclick="toggleUsageFilter(this,\'failure\')" data-tooltip="' + escapeHtml(t('filterFailure')) + '" aria-label="' + escapeHtml(t('filterFailure')) + '">' + ICON_STATUS_FAILURE + '</button>' +
+        '<button type="button" class="btn btn-sm btn-filter' + (usageFilters.processing ? ' active' : '') + '" data-filter="processing" onclick="toggleUsageFilter(this,\'processing\')" data-tooltip="' + escapeHtml(t('filterProcessing')) + '" aria-label="' + escapeHtml(t('filterProcessing')) + '">' + ICON_STATUS_PROCESSING + '</button>' +
+        '<button type="button" class="btn btn-sm btn-filter' + (recentGroupBySession ? ' active' : '') + '" id="recent-group-toggle" onclick="toggleRecentGroupBySession()" data-tooltip="' + escapeHtml(t('groupBySession')) + '" aria-label="' + escapeHtml(t('groupBySession')) + '">' + ICON_STATUS_SESSION + '</button>' +
+      '</div>' +
       '<input type="text" id="recent-search" class="console-search" value="' + escapeHtml(recentSearchQuery) + '" placeholder="' + escapeHtml(t('searchProviderModel')) + '" aria-label="' + escapeHtml(t('searchProviderModel')) + '" autocomplete="off" oninput="onRecentSearch(this.value)">' +
       pagerHtml +
     '</span>' +
