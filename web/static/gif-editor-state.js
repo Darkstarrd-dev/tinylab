@@ -179,6 +179,7 @@
   }
 
   function showSpinner(msg) {
+    state.isExtracting = true;
     var overlay = dom.spinnerOverlay || byId('loading-spinner');
     var textEl = dom.spinnerText || byId('spinner-text');
     if (overlay) overlay.style.display = 'flex';
@@ -186,9 +187,24 @@
   }
 
   function hideSpinner() {
+    state.isExtracting = false;
     var overlay = dom.spinnerOverlay || byId('loading-spinner');
     if (overlay) overlay.style.display = 'none';
   }
+
+  // Lock keyboard events during extracting/processing state
+  function blockKeyDuringExtracting(e) {
+    if (state.isExtracting) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') {
+        e.stopImmediatePropagation();
+      }
+      return false;
+    }
+  }
+  window.addEventListener('keydown', blockKeyDuringExtracting, true);
+  window.addEventListener('keyup', blockKeyDuringExtracting, true);
 
   window.GifEditorCore = {
     constants: {

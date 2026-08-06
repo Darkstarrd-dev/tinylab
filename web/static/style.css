@@ -3951,11 +3951,12 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 /* =====================================================================
    GIF Editor page (web/static/gif-editor.js) — all selectors gif- prefixed
    ===================================================================== */
+.main.main-no-scroll #page-content{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .gif-app{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;color:var(--text)}
 .gif-header{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:0 14px;height:42px;background:var(--modal-bg);border-bottom:1px solid var(--glass-border)}
 .gif-title{font-size:var(--font-h3);font-weight:var(--font-weight-bold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
 .gif-title-sub{color:var(--accent);font-size:var(--font-badge);margin-left:6px;font-weight:var(--font-weight-normal)}
-.gif-workspace{flex:1;min-height:0;display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr auto;overflow:hidden}
+.gif-workspace{flex:1;min-height:0;height:100%;display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr auto;overflow:hidden}
 @media (max-width:768px){
   .gif-workspace{display:flex;flex-direction:column;height:100%}
   .gif-stage-area{flex:1;min-height:35vh;order:1}
@@ -3963,7 +3964,8 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   .gif-sidebar{height:38vh;flex-shrink:0;order:3;width:100%;border-right:none;border-top:1px solid var(--glass-border)}
   .gif-title-sub{display:none}
 }
-.gif-sidebar{grid-row:1/-1;background:var(--glass-bg);border-right:1px solid var(--glass-border);overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.gif-sidebar{grid-row:1/-1;background:var(--glass-bg);border-right:1px solid var(--glass-border);overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0;height:100%;max-height:100%}
+.gif-group-title-row{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--glass-border);padding-bottom:5px;margin-bottom:8px}
 .gif-group-title{font-size:var(--font-card-title);color:var(--text-secondary);font-weight:var(--font-weight-bold);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--glass-border);padding-bottom:5px}
 .gif-group-title.gif-mt{margin-top:10px}
 .gif-control-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
@@ -4001,7 +4003,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-layer-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .gif-layer-remove{color:var(--danger);flex-shrink:0;padding:0 4px;cursor:pointer}
 .gif-stage-area{grid-column:2;grid-row:1;background-color:#050505;background-image:linear-gradient(45deg,#111 25%,transparent 25%),linear-gradient(-45deg,#111 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#111 75%),linear-gradient(-45deg,transparent 75%,#111 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;position:relative;overflow:hidden;display:block;touch-action:none;min-width:0;min-height:0}
-.gif-canvas-wrapper{transform-origin:0 0;transition:transform 0.05s ease-out;box-shadow:0 0 50px rgba(0,0,0,0.8);line-height:0;position:absolute;top:0;left:0}
+.gif-canvas-wrapper{transform-origin:center center;transition:transform 0.05s ease-out;box-shadow:0 0 50px rgba(0,0,0,0.8);line-height:0;position:absolute;top:0;left:0}
 .gif-stage-overlay-text{position:absolute;top:10px;left:10px;background:var(--option-bg);padding:4px 8px;border-radius:var(--radius-xs);font-size:var(--font-badge);pointer-events:none;border:1px solid var(--glass-border);color:var(--text-secondary);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gif-stage-controls{position:absolute;bottom:20px;right:20px;background:rgba(0,0,0,0.8);padding:5px;border-radius:var(--radius-sm);display:flex;gap:5px;border:1px solid var(--glass-border);z-index:10}
 .gif-icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#fff;width:36px;height:36px;border-radius:var(--radius-xs);cursor:pointer;display:flex;justify-content:center;align-items:center;font-size:1.2rem;padding:0}
@@ -4122,27 +4124,65 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   font-weight: var(--font-weight-bold);
   color: var(--accent);
 }
+.gif-import-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gif-import-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.gif-import-three-col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.gif-import-three-col.gif-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gif-import-field-vert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gif-import-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.gif-import-modal input[type="number"]::-webkit-inner-spin-button,
+.gif-import-modal input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.gif-import-modal input[type="number"] {
+  -moz-appearance: textfield;
+}
 .gif-import-range {
   position: relative;
   height: 28px;
   display: flex;
   align-items: center;
-  background: var(--input-bg);
+  background: transparent;
   border-radius: var(--radius-xs);
-  padding: 0 4px;
+  padding: 0;
 }
 .gif-import-range-track {
   position: absolute;
-  left: 0; right: 0;
+  left: 8px; right: 8px;
   height: 6px;
   background: var(--glass-border);
-  border-radius: var(--radius-xs);
+  border-radius: 3px;
 }
 .gif-import-range-selected {
   position: absolute;
   height: 6px;
   background: var(--accent);
-  border-radius: var(--radius-xs);
+  border-radius: 3px;
   pointer-events: none;
 }
 .gif-import-range input[type="range"] {
@@ -4152,6 +4192,22 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.gif-import-range input[type="range"]:focus,
+.gif-import-range input[type="range"]:focus-visible,
+.gif-import-range input[type="range"]:active,
+.gif-import-modal input[type="range"]:focus,
+.gif-import-modal input[type="range"]:focus-visible,
+.gif-import-modal input[type="range"]:active,
+.gif-workspace input[type="range"]:focus,
+.gif-workspace input[type="range"]:focus-visible,
+.gif-workspace input[type="range"]:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 .gif-import-range input[type="range"]::-webkit-slider-thumb {
   pointer-events: auto;
@@ -4160,6 +4216,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
 }
 .gif-import-range input[type="range"]::-moz-range-thumb {
   pointer-events: auto;
@@ -4168,6 +4225,8 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
 }
 .gif-import-divider {
   border: 0;
@@ -4186,7 +4245,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   align-items: stretch;
   gap: 0;
   min-width: 0;
-  min-height: 190px;
+  height: 155px;
+  min-height: 155px;
+  max-height: 155px;
+  flex-shrink: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -4194,8 +4256,8 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 10px;
-  min-height: 140px;
+  padding: 6px 10px 2px 10px;
+  min-height: 0;
   touch-action: pan-x;
 }
 .gif-timeline-scroll::-webkit-scrollbar {
@@ -4279,9 +4341,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-timeline-info{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:3px 6px;font-size:var(--font-badge);color:var(--text-secondary);min-width:0}
 .gif-timeline-info span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gif-timeline-item input.gif-delay-input{height:28px;min-height:28px;width:50px;margin:0;padding:2px 4px;text-align:center;font-size:var(--font-badge);font-family:var(--font-mono);color:var(--text);border-radius:var(--radius-xs)}
-.gif-timeline-item-actions{position:absolute;top:4px;right:4px;z-index:2;display:flex;flex-direction:column;gap:4px;padding:2px;background:rgba(0,0,0,0.6);border:1px solid var(--glass-border);border-radius:var(--radius-xs)}
-.btn-copy-slice,.btn-del-slice{width:28px;height:28px;min-width:28px;min-height:28px;display:inline-flex;align-items:center;justify-content:center;background:var(--btn-secondary-bg);border:1px solid var(--btn-secondary-border);color:var(--btn-secondary-text);border-radius:var(--radius-xs);cursor:pointer;font-size:0.85rem;padding:0;transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast)}
-.btn-copy-slice:hover,.btn-del-slice:hover{background:var(--btn-secondary-bg-hover);border-color:var(--accent);color:var(--accent)}
-.btn-del-slice:hover{border-color:var(--danger);color:var(--danger)}
-.btn-copy-slice:focus-visible,.btn-del-slice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gif-timeline-item-actions{position:absolute;top:2px;right:2px;z-index:2;display:flex;flex-direction:row;gap:2px;padding:2px;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);border:1px solid var(--glass-border);border-radius:var(--radius-xs);opacity:0.85;transition:opacity var(--transition-fast)}
+.gif-timeline-item:hover .gif-timeline-item-actions{opacity:1}
+.btn-copy-slice,.btn-del-slice{width:18px;height:18px;min-width:18px;min-height:18px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--btn-secondary-text);border-radius:var(--radius-xs);cursor:pointer;font-size:0.65rem;padding:0;transition:all var(--transition-fast)}
+.btn-copy-slice:hover,.btn-del-slice:hover{background:var(--glass-hover);color:var(--accent)}
+.btn-del-slice:hover{color:var(--danger)}
+.btn-copy-slice:focus-visible,.btn-del-slice:focus-visible{outline:none}
 .login-error-visible{display:block}

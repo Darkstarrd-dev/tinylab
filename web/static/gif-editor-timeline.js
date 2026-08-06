@@ -259,13 +259,13 @@
   function updateZoomDisplay() {
     var zoomRange = document.getElementById('gif-timeline-zoom-range');
     var zoomVal = document.getElementById('gif-timeline-zoom-value');
-    var zoom = getZoom();
+    var scale = core.state.scale || 1;
 
-    if (zoomRange && parseFloat(zoomRange.value) !== zoom) {
-      zoomRange.value = zoom;
+    if (zoomRange && Math.abs(parseFloat(zoomRange.value) - scale) > 0.001) {
+      zoomRange.value = scale;
     }
     if (zoomVal) {
-      zoomVal.textContent = Math.round(zoom * 100) + '%';
+      zoomVal.textContent = Math.round(scale * 100) + '%';
     }
   }
 
@@ -431,7 +431,11 @@
     }
     if (zoomRange) {
       zoomRange.addEventListener('input', function () {
-        setZoom(zoomRange.value);
+        var val = parseFloat(zoomRange.value);
+        if (!isNaN(val) && val > 0) {
+          core.state.scale = val;
+          if (core.commands.updateTransform) core.commands.updateTransform();
+        }
       });
     }
   }

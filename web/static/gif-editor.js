@@ -159,7 +159,8 @@
     dom.cols = core.byId('cols');
     dom.sliceBtn = core.byId('slice-btn');
 
-    dom.panelStep2 = core.byId('panel-step2');
+    dom.panelStep2 = core.byId('gif-panel-step2') || core.byId('panel-step2');
+    dom.panelStep3 = core.byId('gif-panel-step3') || core.byId('panel-step3');
     dom.frameIndicator = core.byId('frame-indicator');
     dom.startGlobalCropBtn = core.byId('start-global-crop-btn');
     dom.cropPanel = core.byId('crop-panel');
@@ -221,6 +222,9 @@
     core.commands.resetView = function () {
       resetView();
     };
+    core.commands.updateTransform = function () {
+      updateTransform();
+    };
     core.commands.updateSourcePanels = function (kind) {
       updateSourcePanels(kind);
     };
@@ -281,6 +285,9 @@
     var hasSlices = (core.state.slices || []).length > 0;
     if (dom.panelStep2) {
       dom.panelStep2.classList.toggle('gif-edit-blocked', !hasSlices);
+    }
+    if (dom.panelStep3) {
+      dom.panelStep3.classList.toggle('gif-edit-blocked', !hasSlices);
     }
     if (dom.frameIndicator) {
       var idx = (index >= 0) ? index : core.state.selectedSliceIdx;
@@ -1077,15 +1084,42 @@
         drawGizmo(core.state.cropRect, '#ef4444', true);
       }
     }
+
+    updateStageOverlay();
+  }
+
+  function updateStageOverlay() {
+    if (!dom.stageOverlayText) return;
+    if (core.state.pickColorMode) return;
+    var slices = core.state.slices || [];
+    var hasContent = (slices.length > 0) || !!core.state.processedImg;
+    if (hasContent) {
+      dom.stageOverlayText.style.display = 'none';
+    } else {
+      dom.stageOverlayText.style.display = 'block';
+      dom.stageOverlayText.textContent = t('gifEditorStageIdle', 'Waiting for upload...');
+    }
   }
 
   // ------------------------------------------------------------------
   // Stage transform (fit on reset, zoom/pan around)
   // ------------------------------------------------------------------
 
+  function getEffectiveDimensions() {
+    var slices = core.state.slices || [];
+    var idx = core.state.selectedSliceIdx;
+    if (core.state.mode === 'source' && core.state.processedImg) {
+      return { w: core.state.processedImg.width, h: core.state.processedImg.height };
+    } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
+      return { w: slices[idx].canvas.width, h: slices[idx].canvas.height };
+    }
+    return { w: canvas ? canvas.width : 0, h: canvas ? canvas.height : 0 };
+  }
+
   function resetView() {
-    var w = canvas ? canvas.width : 0;
-    var h = canvas ? canvas.height : 0;
+    var dims = getEffectiveDimensions();
+    var w = dims.w;
+    var h = dims.h;
     if (!w || !h) {
       core.state.scale = 1;
       core.state.panX = 0;
@@ -1095,9 +1129,13 @@
     }
     var cw = dom.stage ? dom.stage.clientWidth : 800;
     var ch = dom.stage ? dom.stage.clientHeight : 600;
-    core.state.scale = Math.min((cw - 40) / w, (ch - 40) / h);
-    core.state.panX = (cw - w * core.state.scale) / 2;
-    core.state.panY = (ch - h * core.state.scale) / 2;
+    if (cw <= 0) cw = 800;
+    if (ch <= 0) ch = 600;
+
+    var fitScale = Math.min((cw - 40) / w, (ch - 40) / h);
+    core.state.scale = Math.max(0.05, Math.min(1.0, fitScale));
+    core.state.panX = (cw - w) / 2;
+    core.state.panY = (ch - h) / 2;
     updateTransform();
   }
 
@@ -1105,6 +1143,14 @@
     if (dom.canvasWrapper) {
       dom.canvasWrapper.style.transform =
         'translate(' + core.state.panX + 'px, ' + core.state.panY + 'px) scale(' + core.state.scale + ')';
+    }
+    var zoomRange = document.getElementById('gif-timeline-zoom-range');
+    var zoomVal = document.getElementById('gif-timeline-zoom-value');
+    if (zoomRange && Math.abs(parseFloat(zoomRange.value) - core.state.scale) > 0.001) {
+      zoomRange.value = core.state.scale;
+    }
+    if (zoomVal) {
+      zoomVal.textContent = Math.round(core.state.scale * 100) + '%';
     }
   }
 
@@ -1130,37 +1176,100 @@
     return { start: s - 1, end: e - 1 };
   }
 
+  function showConfirmModal(opts) {
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay) {
+      if (opts && opts.onConfirm) opts.onConfirm();
+      return;
+    }
+    opts = opts || {};
+    var title = opts.title || t('confirmTitle', 'Confirm');
+    var message = opts.message || '';
+    var confirmText = opts.confirmText || t('gifEditorConfirmBtn', 'Confirm');
+    var cancelText = opts.cancelText || t('cancel', 'Cancel');
+
+    var html = '' +
+      '<div class="modal" style="max-width: 420px; animation: modalFadeIn 0.15s ease-out;">' +
+      '  <div class="modal-title">' + core.escapeHtml(title) + '</div>' +
+      '  <div class="modal-body" style="padding: 14px 0;">' +
+      '    <p style="margin: 0; color: var(--text-secondary); line-height: 1.5; font-size: var(--font-card-title);">' + core.escapeHtml(message) + '</p>' +
+      '  </div>' +
+      '  <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">' +
+      '    <button type="button" class="btn btn-ghost" id="gif-custom-cancel-btn">' + core.escapeHtml(cancelText) + '</button>' +
+      '    <button type="button" class="btn btn-primary" id="gif-custom-confirm-btn">' + core.escapeHtml(confirmText) + '</button>' +
+      '  </div>' +
+      '</div>';
+
+    overlay.innerHTML = html;
+    overlay.classList.add('show');
+
+    function closeSelf() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+
+    var cancelBtn = document.getElementById('gif-custom-cancel-btn');
+    var confirmBtn = document.getElementById('gif-custom-confirm-btn');
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function () {
+        closeSelf();
+        if (opts.onCancel) opts.onCancel();
+      });
+    }
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        closeSelf();
+        if (opts.onConfirm) opts.onConfirm();
+      });
+    }
+  }
+
   function deleteRange() {
     var range = getBatchRange();
     if (!range) return;
-    if (!confirm(t('gifEditorConfirmDeleteRange', ['Delete frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?']))) return;
-    var slices = core.state.slices || [];
-    if (range.start >= slices.length) return;
-    slices.splice(range.start, Math.min(range.end, slices.length - 1) - range.start + 1);
-    core.state.selectedSliceIdx = Math.max(0, slices.length - 1);
-    if (core.timeline) core.timeline.clearThumbCache();
-    if (core.timeline && core.timeline.render) core.timeline.render();
-    if (slices.length > 0 && core.commands.focusFrame) core.commands.focusFrame(0);
-    else if (slices.length > 0) { core.state.selectedSliceIdx = 0; draw(); }
-    else { core.state.mode = 'source'; draw(); }
+    showConfirmModal({
+      title: t('gifEditorDeleteTitle', 'Delete Frames'),
+      message: t('gifEditorConfirmDeleteRange', 'Delete frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
+      confirmText: t('gifEditorDeleteConfirmBtn', 'Delete'),
+      cancelText: t('cancel', 'Cancel'),
+      onConfirm: function () {
+        var slices = core.state.slices || [];
+        if (range.start >= slices.length) return;
+        slices.splice(range.start, Math.min(range.end, slices.length - 1) - range.start + 1);
+        core.state.selectedSliceIdx = Math.max(0, slices.length - 1);
+        if (core.timeline) core.timeline.clearThumbCache();
+        if (core.timeline && core.timeline.render) core.timeline.render();
+        if (slices.length > 0 && core.commands.focusFrame) core.commands.focusFrame(0);
+        else if (slices.length > 0) { core.state.selectedSliceIdx = 0; draw(); }
+        else { core.state.mode = 'source'; draw(); }
+      }
+    });
   }
 
   function keepRange() {
     var range = getBatchRange();
     if (!range) return;
-    if (!confirm(t('gifEditorConfirmKeepRange', ['Keep frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?']))) return;
-    var slices = core.state.slices || [];
-    var newSlices = slices.slice(range.start, range.end + 1);
-    if (!newSlices.length) {
-      alert(t('gifEditorAlertRangeEmpty'));
-      return;
-    }
-    core.state.slices = newSlices;
-    core.state.selectedSliceIdx = 0;
-    if (core.timeline) core.timeline.clearThumbCache();
-    if (core.timeline && core.timeline.render) core.timeline.render();
-    if (core.commands.focusFrame) core.commands.focusFrame(0);
-    else { core.state.selectedSliceIdx = 0; draw(); }
+    showConfirmModal({
+      title: t('gifEditorKeepTitle', 'Keep Frames'),
+      message: t('gifEditorConfirmKeepRange', 'Keep frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
+      confirmText: t('gifEditorKeepConfirmBtn', 'Keep'),
+      cancelText: t('cancel', 'Cancel'),
+      onConfirm: function () {
+        var slices = core.state.slices || [];
+        var newSlices = slices.slice(range.start, range.end + 1);
+        if (!newSlices.length) {
+          alert(t('gifEditorAlertRangeEmpty'));
+          return;
+        }
+        core.state.slices = newSlices;
+        core.state.selectedSliceIdx = 0;
+        if (core.timeline) core.timeline.clearThumbCache();
+        if (core.timeline && core.timeline.render) core.timeline.render();
+        if (core.commands.focusFrame) core.commands.focusFrame(0);
+        else { core.state.selectedSliceIdx = 0; draw(); }
+      }
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1390,17 +1499,23 @@
     // Reload (reset workspace in place)
     if (dom.reloadBtn) {
       dom.reloadBtn.addEventListener('click', function () {
-        if (confirm(t('gifEditorConfirmReset', 'Reset workspace?'))) {
-          core.resetSlices();
-          core.releaseSource();
-          updateSourcePanels(null);
-          updateSelectionUI(-1);
-          if (core.timeline && core.timeline.render) core.timeline.render();
-          if (core.playback && core.playback.updateButtons) core.playback.updateButtons();
-          core.hideSpinner();
-          draw();
-          resetView();
-        }
+        showConfirmModal({
+          title: t('gifEditorResetTitle', 'Reset Workspace'),
+          message: t('gifEditorConfirmReset', 'Are you sure you want to reset the workspace? All unexported edits will be cleared.'),
+          confirmText: t('gifEditorResetConfirmBtn', 'Reset'),
+          cancelText: t('cancel', 'Cancel'),
+          onConfirm: function () {
+            core.resetSlices();
+            core.releaseSource();
+            updateSourcePanels(null);
+            updateSelectionUI(-1);
+            if (core.timeline && core.timeline.render) core.timeline.render();
+            if (core.playback && core.playback.updateButtons) core.playback.updateButtons();
+            core.hideSpinner();
+            draw();
+            resetView();
+          }
+        });
       });
     }
 
@@ -1423,19 +1538,16 @@
     return '' +
       '<div class="gif-workspace">' +
       '  <aside class="gif-sidebar">' +
-      '    <div class="gif-sidebar-title">' +
-      '      <h3><span data-i18n="gifEditorAppTitle">喵喵切切乐</span> <small data-i18n="gifEditorAppTitleSub">Pro Max</small></h3>' +
-      '      <button type="button" class="btn btn-ghost btn-sm" id="gif-reload-btn" data-i18n="gifEditorReload">重置</button>' +
-      '    </div>' +
-
       '    <div id="gif-panel-step1">' +
-      '      <div class="gif-group-title" data-i18n="gifEditorStep1">1. 导入素材</div>' +
+      '      <div class="gif-group-title-row">' +
+      '        <div class="gif-group-title" data-i18n="gifEditorStep1">1. 导入素材</div>' +
+      '        <button type="button" class="btn btn-ghost btn-sm" id="gif-reload-btn" data-i18n="gifEditorReload">重置</button>' +
+      '      </div>' +
       '      <div class="gif-drop-zone" id="gif-drop-zone">' +
       '        <div style="font-size: var(--font-h3); margin-bottom: 4px;">📂</div>' +
       '        <div data-i18n="gifEditorDropHint">选择 / 拖放 / 粘贴文件</div>' +
       '        <input type="file" id="gif-file-input" style="display:none;" accept="image/*,video/*,.gif">' +
       '      </div>' +
-
       '      <div id="gif-transparency-wrapper">' +
       '        <label class="gif-check-label"><input type="checkbox" id="gif-enable-trans"> <span data-i18n="gifEditorEnableTrans">色键透明</span></label>' +
       '        <div id="gif-trans-panel" class="gif-trans-panel">' +
@@ -1451,7 +1563,6 @@
       '          <button type="button" class="gif-btn gif-btn-danger gif-full-width gif-mt-sm" id="gif-disable-trans-btn" data-i18n="gifEditorDisableTrans">取消透明</button>' +
       '        </div>' +
       '      </div>' +
-
       '      <div id="gif-image-tools" class="gif-hidden">' +
       '        <div class="gif-group-title gif-mt" data-i18n="gifEditorEdgeFix">边缘裁剪</div>' +
       '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorTop', '上') + '</span><input type="range" id="gif-slider-t" value="0"><input type="number" id="gif-crop-t" value="0" class="gif-crop-num"></div>' +
@@ -1466,96 +1577,93 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-slice-btn" data-i18n="gifEditorSliceBtn">开始切片</button>' +
       '      </div>' +
       '    </div>' +
-
       '    <div class="gif-panel-sep gif-edit-blocked" id="gif-panel-step2">' +
-      '      <div class="gif-group-title" data-i18n="gifEditorStep2">2. 元素编辑 <span id="gif-frame-indicator" class="gif-frame-indicator"></span></div>' +
-      '      <button type="button" class="gif-btn gif-btn-accent gif-full-width gif-mb" id="gif-start-global-crop-btn" data-i18n="gifEditorGlobalCrop">✂️ 全局裁剪</button>' +
-      '      <div id="gif-crop-panel" class="gif-crop-panel">' +
-      '        <div class="gif-crop-title" data-i18n="gifEditorCropAdjust">拖动调整裁剪区域</div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">X</span><input type="range" id="gif-crop-slide-x"><input type="number" id="gif-crop-num-x" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">Y</span><input type="range" id="gif-crop-slide-y"><input type="number" id="gif-crop-num-y" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">W</span><input type="range" id="gif-crop-slide-w"><input type="number" id="gif-crop-num-w" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">H</span><input type="range" id="gif-crop-slide-h"><input type="number" id="gif-crop-num-h" class="gif-crop-num"></div>' +
-      '        <div class="gif-control-row gif-mt">' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-cancel-crop-btn" data-i18n="gifEditorCancel">取消</button>' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">应用裁剪</button>' +
+      '      <div class="gif-group-title" data-i18n="gifEditorStep2">2. 单帧编辑</div>' +
+      '      <button type="button" class="gif-btn gif-btn-accent gif-full-width gif-mb" id="gif-global-crop-btn" data-i18n="gifEditorGlobalCrop">✂️ 全局裁剪 (框选画布)</button>' +
+      '      <div class="gif-scope-box">' +
+      '        <span class="gif-axis-label" data-i18n="gifEditorScope">作用:</span>' +
+      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">当前帧</span></label>' +
+      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="all"> <span data-i18n="gifEditorScopeAll">全部帧</span></label>' +
+      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="range"> <span data-i18n="gifEditorScopeRange">范围</span></label>' +
+      '        <div class="gif-control-row gif-range-input" id="gif-crop-range-inputs">' +
+      '          <input type="number" id="gif-crop-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
+      '          <input type="number" id="gif-crop-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
       '        </div>' +
       '      </div>' +
-      '      <div class="gif-scope-box">' +
-      '        <span data-i18n="gifEditorScope">作用范围:</span>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-layer-scope" value="current" checked> ' + t('gifEditorScopeCurrent', '当前') + '</label>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-layer-scope" value="all"> ' + t('gifEditorScopeAll', '全部') + '</label>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-layer-scope" value="range"> ' + t('gifEditorScopeRange', '范围') + '</label>' +
-      '        <input type="text" id="gif-range-input" class="gif-range-input" placeholder="' + t('gifEditorRangePlaceholder', '如 1-3,5,8') + '">' +
-      '      </div>' +
       '      <div class="gif-control-row">' +
-      '        <input type="text" id="gif-add-text-input" placeholder="' + t('gifEditorAddTextPlaceholder', '输入文字') + '">' +
-      '        <button type="button" class="gif-btn gif-nowrap" id="gif-add-text-btn" data-i18n="gifEditorAddText">添加文字</button>' +
+      '        <input type="text" id="gif-text-input" placeholder="' + t('gifEditorTextInput', '输入文字...') + '" class="gif-flex-1">' +
+      '        <button type="button" class="gif-btn gif-btn-primary" id="gif-add-text-btn" data-i18n="gifEditorAddText">+ 文字</button>' +
       '      </div>' +
       '      <div class="gif-style-toolbar">' +
-      '        <input type="color" id="gif-add-text-color" value="#ffffff" class="gif-style-color">' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-bold" title="Bold">B</button>' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-italic" title="Italic">I</button>' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-underline" title="Underline">U</button>' +
-      '        <label class="gif-btn gif-style-image-label" data-i18n="gifEditorAddImage">添加图片' +
-      '          <input type="file" id="gif-add-image-input" accept="image/*" style="display:none;">' +
+      '        <button type="button" class="gif-style-btn" id="gif-btn-bold" title="' + t('gifEditorBold', '加粗') + '">B</button>' +
+      '        <button type="button" class="gif-style-btn" id="gif-btn-italic" title="' + t('gifEditorItalic', '斜体') + '">I</button>' +
+      '        <button type="button" class="gif-style-btn" id="gif-btn-underline" title="' + t('gifEditorUnderline', '下划线') + '">U</button>' +
+      '        <label class="gif-style-btn gif-style-image-label" title="' + t('gifEditorAddImage', '添加贴图') + '">' +
+      '          📷' +
+      '          <input type="file" id="gif-add-image-input" style="display:none" accept="image/*">' +
       '        </label>' +
       '      </div>' +
-      '      <div id="gif-selected-layer-tools" class="gif-selected-layer-tools">' +
-      '        <button type="button" class="gif-btn gif-btn-accent gif-full-width gif-sm-btn" id="gif-sync-layer-btn" data-i18n="gifEditorSyncLayer">同步图层</button>' +
+      '      <div class="gif-group-title" data-i18n="gifEditorLayerList">图层列表</div>' +
+      '      <div class="gif-layer-list" id="gif-layer-list"></div>' +
+      '      <div class="gif-selected-layer-tools" id="gif-selected-layer-tools">' +
+      '        <div class="gif-control-row">' +
+      '          <span class="gif-muted-label" data-i18n="gifEditorColor">颜色</span>' +
+      '          <input type="color" id="gif-text-color" value="#ffffff" class="gif-style-color">' +
+      '          <span class="gif-muted-label" data-i18n="gifEditorStroke">描边</span>' +
+      '          <input type="color" id="gif-text-stroke-color" value="#000000" class="gif-style-color">' +
+      '        </div>' +
+      '        <div class="gif-control-row">' +
+      '          <span class="gif-muted-label" data-i18n="gifEditorScale">缩放</span>' +
+      '          <input type="range" id="gif-layer-scale" min="0.2" max="3" step="0.1" value="1" class="gif-flex-1">' +
+      '          <button type="button" class="gif-btn gif-btn-danger gif-sm-btn" id="gif-delete-layer-btn" data-i18n="gifEditorDeleteLayer">删除</button>' +
+      '        </div>' +
       '      </div>' +
-      '      <div class="gif-group-title gif-mt" data-i18n="gifEditorLayerList">图层列表</div>' +
-      '      <div id="gif-layer-list" class="gif-layer-list"></div>' +
       '    </div>' +
-
-      '    <div class="gif-output-sep">' +
+      '    <div class="gif-panel-sep gif-edit-blocked" id="gif-panel-step3">' +
       '      <div class="gif-group-title" data-i18n="gifEditorStep3">3. 输出设置</div>' +
-      '      <div class="gif-control-row gif-mb">' +
-      '        <input type="number" id="gif-batch-delay-input" value="100" min="0" placeholder="' + t('gifEditorBatchDelayPlaceholder', '帧延迟(ms)') + '" title="' + t('gifEditorDelayTitle', 'Frame delay (ms)') + '">' +
-      '        <button type="button" class="gif-btn gif-nowrap" id="gif-batch-delay-btn" data-i18n="gifEditorBatchDelayBtn">统一延迟</button>' +
+      '      <div class="gif-control-row">' +
+      '        <input type="number" id="gif-scale-percent" value="100" min="10" max="300">' +
+      '        <button type="button" class="gif-btn gif-btn-primary" id="gif-apply-scale-btn" data-i18n="gifEditorApplyAll">⚡ 应用到全部</button>' +
       '      </div>' +
       '      <div class="gif-control-row">' +
-      '        <input type="number" id="gif-out-w" class="input input-sm" placeholder="' + t('gifEditorWidth', '宽') + '" data-i18n-placeholder="gifEditorWidth" style="width:50%;">' +
-      '        <input type="number" id="gif-out-h" class="input input-sm" placeholder="' + t('gifEditorHeight', '高') + '" data-i18n-placeholder="gifEditorHeight" style="width:50%;">' +
+      '        <input type="number" id="gif-output-width" placeholder="' + t('gifEditorWidth', '宽度') + '">' +
+      '        <input type="number" id="gif-output-height" placeholder="' + t('gifEditorHeight', '高度') + '">' +
       '      </div>' +
       '      <div class="gif-range-wrap">' +
-      '        <span class="gif-scale-label" data-i18n="gifEditorScale">缩放</span>' +
-      '        <input type="range" id="gif-out-scale-slider" min="0.1" max="2.0" step="0.1" value="1.0" class="gif-flex-1">' +
-      '        <span id="gif-out-scale-val" class="gif-scale-val">1.0x</span>' +
+      '        <span class="gif-scale-label" data-i18n="gifEditorScaleLabel">缩放</span>' +
+      '        <input type="range" id="gif-output-scale-slider" min="10" max="300" value="100" class="gif-flex-1">' +
+      '        <span class="gif-scale-val" id="gif-output-scale-val">1.0x</span>' +
       '      </div>' +
-      '      <div class="gif-group-title gif-quality-title">' + t('gifEditorQuality', '质量') + ' <span class="gif-quality-range">' + t('gifEditorQualityRange', '1-10') + '</span></div>' +
-      '      <div class="gif-range-wrap">' +
-      '        <input type="range" id="gif-quality-slider" min="1" max="10" value="10" step="1" class="gif-flex-1">' +
-      '        <input type="number" id="gif-quality" value="10" min="1" max="10" class="gif-crop-num" title="' + t('gifEditorQualityTitle', 'Quality') + '">' +
+      '      <div class="gif-group-title gif-quality-title" data-i18n="gifEditorQualityTitle">GIF 质量 (采样间隔)' +
+      '        <span class="gif-quality-range" data-i18n="gifEditorQualityHint">1: 最佳 - 10: 最快</span>' +
       '      </div>' +
-      '      <div style="display:flex; flex-direction:column; gap:6px;">' +
-      '        <button type="button" class="btn btn-primary" id="gif-export-gif" disabled data-i18n="gifEditorExportGif">👁️ 预览 (导出GIF)</button>' +
-      '        <button type="button" class="btn btn-ghost" id="gif-export-zip" disabled data-i18n="gifEditorExportZip">📦 导出序列帧 (ZIP)</button>' +
-      '        <button type="button" class="btn btn-ghost" id="gif-export-sprite" disabled data-i18n="gifEditorSpriteSheet">导出拼图 Sheet</button>' +
+      '      <div class="gif-control-row">' +
+      '        <input type="range" id="gif-sample-interval" min="1" max="10" value="10" class="gif-flex-1">' +
+      '        <span id="gif-quality-val" style="width: 20px; text-align: right;">10</span>' +
       '      </div>' +
+      '      <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt" id="gif-export-gif-btn" data-i18n="gifEditorExportGif">⚡ 预览 (导出 GIF)</button>' +
+      '      <div class="gif-control-row gif-mt-sm">' +
+      '        <label class="gif-radio-label"><input type="radio" name="gif-export-fmt" value="zip" checked> <span data-i18n="gifEditorExportZip">导出帧图 (ZIP)</span></label>' +
+      '      </div>' +
+      '      <button type="button" class="gif-btn gif-full-width gif-mt-sm" id="gif-export-frames-btn" data-i18n="gifEditorExportFrames">导出帧图 (ZIP)</button>' +
       '      <div class="gif-output-sep-inner">' +
       '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">批量删除帧</div>' +
       '        <div class="gif-control-row">' +
-      '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorDelStart', '起') + '" min="1">' +
-      '          <span class="gif-muted-label">-</span>' +
-      '          <input type="number" id="gif-del-end" placeholder="' + t('gifEditorDelEnd', '止') + '" min="1">' +
+      '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
+      '          <input type="number" id="gif-del-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
       '        </div>' +
       '        <div class="gif-control-row">' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1 gif-sm-btn" id="gif-btn-del-range" data-i18n="gifEditorDelRange">删除范围</button>' +
-      '          <button type="button" class="gif-btn gif-btn-accent gif-flex-1 gif-sm-btn" id="gif-btn-keep-range" data-i18n="gifEditorKeepRange">仅保留范围</button>' +
+      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-delete-range-btn" data-i18n="gifEditorDeleteRange">🗑️ 删除指定</button>' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">保留指定</button>' +
       '        </div>' +
-      '      </div>' +
-      '      <div class="gif-output-sep-inner">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorSpriteSheet">拼图 Sheet</div>' +
+      '        <div class="gif-group-title gif-mt" data-i18n="gifEditorExportSprite">导出拼图 (Sprite Sheet)</div>' +
       '        <div class="gif-control-row">' +
       '          <input type="number" id="gif-sprite-rows" value="1" min="1" placeholder="' + t('gifEditorSpriteRows', '行') + '">' +
-      '          <span class="gif-muted-label">x</span>' +
       '          <input type="number" id="gif-sprite-cols" value="5" min="1" placeholder="' + t('gifEditorSpriteCols', '列') + '">' +
       '        </div>' +
       '      </div>' +
       '    </div>' +
       '  </aside>' +
-
       '  <main class="gif-stage-area" id="gif-stage-container">' +
       '    <div class="gif-stage-overlay-text" id="gif-stage-overlay-text">' + t('gifEditorStageIdle', 'Stage') + '</div>' +
       '    <div class="gif-canvas-wrapper" id="gif-canvas-wrapper">' +
@@ -1567,15 +1675,14 @@
       '      <button type="button" class="gif-icon-btn" id="gif-zoom-in-btn" title="' + t('gifEditorZoomIn', '放大') + '">+</button>' +
       '    </div>' +
       '  </main>' +
-
       '  <section class="gif-timeline-area" aria-label="GIF timeline">' +
       '    <div class="gif-timeline-scroll" id="gif-timeline-scroll">' +
       '      <div class="gif-timeline-track" id="gif-timeline"></div>' +
       '    </div>' +
       '    <div class="gif-timeline-toolbar" id="gif-timeline-toolbar">' +
       '      <div class="gif-timeline-zoom">' +
-      '        <span class="gif-muted-label" id="gif-timeline-zoom-label" data-i18n="gifTimelineZoom">倍率:</span>' +
-      '        <input type="range" id="gif-timeline-zoom-range" min="0.5" max="2" step="0.1" value="1">' +
+      '        <span class="gif-muted-label" id="gif-timeline-zoom-label" data-i18n="gifTimelineZoom">Zoom:</span>' +
+      '        <input type="range" id="gif-timeline-zoom-range" min="0.1" max="3" step="0.05" value="1">' +
       '        <span id="gif-timeline-zoom-value">100%</span>' +
       '      </div>' +
       '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +

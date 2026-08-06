@@ -155,7 +155,10 @@ function navigateTo(page) {
       case 'gif': return renderGifEditor(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'gif') && mainEl) mainEl.classList.add('main-no-scroll');
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'gif') && mainEl) {
+    mainEl.classList.add('main-no-scroll');
+    if (page === 'gif') container.style.height = '100%';
+  }
   
   function restoreFullscreenState() {
     if (wasFullscreen) {

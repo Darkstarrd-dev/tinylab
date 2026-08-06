@@ -5,7 +5,22 @@
   'use strict';
 
   var core = window.GifEditorCore;
-  if (!core) return;
+  if (typeof window.changeStepper !== 'function') {
+    window.changeStepper = function (id, delta) {
+      var input = document.getElementById(id);
+      if (!input) return;
+      var curVal = parseInt(input.value, 10);
+      if (isNaN(curVal)) curVal = 0;
+      var newVal = curVal + delta;
+      var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : null;
+      var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : null;
+      if (min !== null && !isNaN(min) && newVal < min) newVal = min;
+      if (max !== null && !isNaN(max) && newVal > max) newVal = max;
+      input.value = newVal;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+  }
 
   function t(key, fallback) {
     if (typeof window.t === 'function') {
@@ -337,17 +352,39 @@
       '        <span class="gif-import-value" id="gif-import-source-res">' + draft.sourceWidth + ' × ' + draft.sourceHeight + '</span>' +
       '      </div>' +
 
-      '      <div class="gif-import-row">' +
-      '        <label for="gif-import-scale" class="gif-import-label">' + t('gifImportScaleRatio', 'Import Scale:') + '</label>' +
-      '        <div class="gif-import-input-group">' +
-      '          <input type="number" id="gif-import-scale" class="input input-sm" min="10" max="300" value="' + draft.scalePercent + '" style="width: 80px;">' +
-      '          <span>%</span>' +
+      '      <div class="gif-import-col">' +
+      '        <div class="gif-import-label-row">' +
+      '          <label for="gif-import-scale" class="gif-import-label">Scale</label>' +
+      '          <span class="gif-import-value" id="gif-import-scale-display">' + draft.scalePercent + '%</span>' +
       '        </div>' +
+      '        <input type="range" id="gif-import-scale" min="10" max="100" step="5" value="' + Math.min(100, draft.scalePercent) + '">' +
       '      </div>' +
 
-      '      <div class="gif-import-row' + (isSingleFrame ? ' gif-disabled' : '') + '">' +
-      '        <label for="gif-import-fps" class="gif-import-label">' + t('gifImportFps', 'Import FPS:') + '</label>' +
-      '        <input type="number" id="gif-import-fps" class="input input-sm" min="1" max="60" value="' + draft.fps + '" ' + (isSingleFrame ? 'disabled' : '') + ' style="width: 80px;">' +
+      '      <div class="gif-import-three-col' + (isSingleFrame ? ' gif-disabled' : '') + '">' +
+      '        <div class="gif-import-field-vert">' +
+      '          <label for="gif-import-fps" class="gif-import-label">' + t('gifImportFps', 'Import FPS:') + '</label>' +
+      '          <div class="number-stepper">' +
+      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', -1)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
+      '            <input type="number" class="stepper-input" id="gif-import-fps" min="1" max="60" value="' + draft.fps + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
+      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', 1)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
+      '          </div>' +
+      '        </div>' +
+      '        <div class="gif-import-field-vert">' +
+      '          <label for="gif-import-start-ms" class="gif-import-label">' + t('gifImportStartMs', 'Start (ms):') + '</label>' +
+      '          <div class="number-stepper">' +
+      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', -100)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
+      '            <input type="number" class="stepper-input" id="gif-import-start-ms" min="0" max="' + maxMs + '" value="' + draft.startMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
+      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', 100)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
+      '          </div>' +
+      '        </div>' +
+      '        <div class="gif-import-field-vert">' +
+      '          <label for="gif-import-end-ms" class="gif-import-label">' + t('gifImportEndMs', 'End (ms):') + '</label>' +
+      '          <div class="number-stepper">' +
+      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', -100)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
+      '            <input type="number" class="stepper-input" id="gif-import-end-ms" min="0" max="' + maxMs + '" value="' + draft.endMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
+      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', 100)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
+      '          </div>' +
+      '        </div>' +
       '      </div>' +
 
       '      <div class="gif-import-row' + (isSingleFrame ? ' gif-disabled' : '') + '" style="flex-direction: column; align-items: stretch; gap: 4px;">' +
@@ -363,23 +400,17 @@
       '        </div>' +
       '      </div>' +
 
-      '      <div class="gif-import-row' + (isSingleFrame ? ' gif-disabled' : '') + '">' +
-      '        <label for="gif-import-start-ms" class="gif-import-label">' + t('gifImportStartMs', 'Start (ms):') + '</label>' +
-      '        <input type="number" id="gif-import-start-ms" class="input input-sm" min="0" max="' + maxMs + '" value="' + draft.startMs + '" ' + (isSingleFrame ? 'disabled' : '') + ' style="width: 100px;">' +
-      '        <label for="gif-import-end-ms" class="gif-import-label" style="margin-left: 12px;">' + t('gifImportEndMs', 'End (ms):') + '</label>' +
-      '        <input type="number" id="gif-import-end-ms" class="input input-sm" min="0" max="' + maxMs + '" value="' + draft.endMs + '" ' + (isSingleFrame ? 'disabled' : '') + ' style="width: 100px;">' +
-      '      </div>' +
-
       '      <hr class="gif-import-divider">' +
 
-      '      <div class="gif-import-row">' +
-      '        <span class="gif-import-label">' + t('gifImportActualFrames', 'Actual Frames:') + '</span>' +
-      '        <span class="gif-import-summary-val" id="gif-import-actual-frames">1</span>' +
-      '      </div>' +
-
-      '      <div class="gif-import-row">' +
-      '        <span class="gif-import-label">' + t('gifImportDuration', 'Duration:') + '</span>' +
-      '        <span class="gif-import-summary-val" id="gif-import-duration">00:00:00.000</span>' +
+      '      <div class="gif-import-summary-row">' +
+      '        <div>' +
+      '          <span class="gif-import-label">' + t('gifImportActualFrames', 'Actual Frames:') + ' </span>' +
+      '          <span class="gif-import-summary-val" id="gif-import-actual-frames">1</span>' +
+      '        </div>' +
+      '        <div>' +
+      '          <span class="gif-import-label">' + t('gifImportDuration', 'Duration:') + ' </span>' +
+      '          <span class="gif-import-summary-val" id="gif-import-duration">00:00:00.000</span>' +
+      '        </div>' +
       '      </div>' +
       '    </div>' +
       '  </div>' +
@@ -419,7 +450,7 @@
         if (!draft) return;
         var val = parseInt(scaleInput.value, 10);
         if (isNaN(val) || val < 1) val = 100;
-        draft.scalePercent = Math.max(10, Math.min(300, val));
+        draft.scalePercent = Math.max(10, Math.min(100, val));
         updateImportSummary();
         triggerPreviewDebounced();
       });
@@ -541,10 +572,11 @@
     }
 
     if (rangeSelected && draft.sourceDurationMs > 0) {
-      var left = (draft.startMs / draft.sourceDurationMs) * 100;
-      var width = ((draft.endMs - draft.startMs) / draft.sourceDurationMs) * 100;
-      rangeSelected.style.left = left + '%';
-      rangeSelected.style.width = Math.max(0, width) + '%';
+      var startRatio = Math.max(0, Math.min(1, draft.startMs / draft.sourceDurationMs));
+      var endRatio = Math.max(0, Math.min(1, draft.endMs / draft.sourceDurationMs));
+      var spanRatio = Math.max(0, endRatio - startRatio);
+      rangeSelected.style.left = 'calc(8px + (100% - 16px) * ' + startRatio + ')';
+      rangeSelected.style.width = 'calc((100% - 16px) * ' + spanRatio + ')';
     }
   }
 
@@ -570,8 +602,25 @@
   function updateImportSummary() {
     if (!draft) return;
 
+    var sourceResEl = document.getElementById('gif-import-source-res');
+    var scaleDisplayEl = document.getElementById('gif-import-scale-display');
     var actualFramesEl = document.getElementById('gif-import-actual-frames');
     var durationEl = document.getElementById('gif-import-duration');
+
+    if (sourceResEl) {
+      var origText = draft.sourceWidth + ' × ' + draft.sourceHeight;
+      if (draft.scalePercent !== 100) {
+        var scaledW = Math.max(1, Math.round(draft.sourceWidth * draft.scalePercent / 100));
+        var scaledH = Math.max(1, Math.round(draft.sourceHeight * draft.scalePercent / 100));
+        sourceResEl.textContent = origText + ' -> ' + scaledW + ' × ' + scaledH;
+      } else {
+        sourceResEl.textContent = origText;
+      }
+    }
+
+    if (scaleDisplayEl) {
+      scaleDisplayEl.textContent = draft.scalePercent + '%';
+    }
 
     var frameCount = estimateFrameCount();
     var durationMs = draft.kind === 'image' ? 0 : Math.max(1, draft.endMs - draft.startMs);
@@ -718,7 +767,11 @@
       if (core.timeline && core.timeline.render) core.timeline.render();
       if (core.commands.focusFrame) core.commands.focusFrame(0);
       if (core.commands.redrawSelection) core.commands.redrawSelection(0);
+      if (core.commands.updateSelectionUI) core.commands.updateSelectionUI(0);
       if (core.commands.resetView) core.commands.resetView();
+      setTimeout(function () {
+        if (core.commands.resetView) core.commands.resetView();
+      }, 60);
     }).catch(function (err) {
       if (gen !== commitGeneration) return; // stale failure: stay silent
       core.hideSpinner();
