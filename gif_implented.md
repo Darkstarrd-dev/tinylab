@@ -4,11 +4,11 @@
 >
 > **文档名说明：** 文件名 `gif_implented.md` 为用户指定（原文拼写）；文档内标题使用规范拼写 "implemented"。
 >
-> **最后核对：** 2026-08-06（P0–P3 已全部落地，P4 联调与收尾进行中；2026-08-06 追加"大规模输入 + 虚拟化时间轴"两阶段：`MAX_PIXEL_FRAMES` 像素帧硬拒绝移除、时间轴窗口化。源码行号仍仅作定位提示，以函数/接口为准）。
+> **最后核对：** 2026-08-06（按修复后最终工作树逐文件核对，全部 `node --check` 通过）。**已落地**：模块拆分（`gif-editor-state.js`/`import.js`/`timeline.js`/`playback.js`/`export.js`/`gif-editor.js`，两 HTML 入口加载顺序一致）、Import Modal（比例/FPS/双手柄起止/实际帧数与时长统计/取消保留旧工程）、虚拟化时间线（50%–200% 倍率、复制/删除/拖拽排序/delay 输入、`.gif-timeline-item` 全套 CSS）、底栏 First/Prev/Play/Pause/Next/Last 与键盘播放控制、**旧页面 1:1 功能已还原**（色键透明、边缘裁剪+网格切片、全局裁剪+gizmo、图层、批量延迟/删帧/范围保留、输出缩放/质量、拼图 Sheet 参数）与三条导出路径。**修复合入（2026-08-06 下午）**：ZIP 导出改走 `POST /api/archive/assets`（逐帧注册）→ `POST /api/archive/pack {assetIds,format:'zip'}` → 受控 URL + MediaBridge 登记（Archive 缺失时回退 upload-temp+zip-outputs）；结果弹窗统一 `.active` 类；GIF delay 按 ms 直用（gifuct-js 已是 ms，不再 ×10）；`focusFrame` 每次 render 由 playback `bindEvents` 重注册 + 入口兜底；模板 `[data-i18n]` 每 render 应用（`applyPageI18n`）+ 结果弹窗 i18n 键接线；`resetSlices`/`releaseSource` 释放帧 canvas 与 source objectURL；`tinyrouter:modal-close` 监听具名并在 cleanup 移除。**验证**：`node --check` 六模块、`go build ./...`、`go test ./...` 全量 37 包均通过。**仍开放**：P4 浏览器全流程冒烟（含 1280×736×63 高帧用例），见 §7/§10.2。
 
 > **已落地（2026-08-05）：** P0–P3 全部完成，P4 收尾进行中。P0 路线确认 gifuct-js esbuild 自包含浏览器 bundle（`web/static/vendor/gifuct-js/gifuct-js.js`，MIT，LICENSE 随附）；P1 GIF 编辑器落地为全局 SPA 页（`web/static/gif-editor.js` + `vendor/gif.js/`，第 6 导航按钮 `data-page="gif"`）；P2 Gallery video 区播放 GIF/animated WebP（`#gallery-main-anim` + `ANIMATED_IMG_EXTS`/`isAnimatedImg`，前后端白名单补齐）；P3 后端新增 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation 与 `ProbeFfmpegCaps` 能力探测（`ffmpeg-status` 6 字段），前端 Format GIF/WebP + 动画数字 trim。详见 §7 勾选状态与 §9.2 文件清单（落地细节以实际源码为准）。
 >
-> **已落地（2026-08-06，追加）：** 大规模输入与虚拟化时间轴两阶段已合入 `web/static/gif-editor.js` / `i18n.js` / `style.css`（仅前端）：(1) 移除 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝（图片/GIF/视频三条导入路径均不再被像素帧预算拒绝），保留 `MAX_FILE_BYTES=200MB` 的 GIF/视频单文件上限与 `EXPORT_MEM_LIMIT=1.5GB` 导出峰值 confirm 警告（`exportMemCheck`，GIF/ZIP/精灵图三条导出路径）；(2) 时间轴改为水平虚拟化轨道：窗口化 DOM（可见帧 + `TL_BUFFER=4` 缓冲）、节点绝对定位、交互全部在容器上委托、缩略图为 ≤96×72 小预览且有界缓存（FIFO 256）。验证：`node --check`（gif-editor.js、i18n.js）通过；确定性窗口化检查通过（1/5/63/64/10000 帧 × 6 个滚动位置，有界/clamp/覆盖滚动帧/尾部 clamp）；**精确高帧用例（1280×736×63）的浏览器冒烟未完成**——本机 ffmpeg GIF palette 编码挂起（详见 §7 实施状态）。
+> **已落地（2026-08-06，升级重构）：** 按照 `gif_upgrade.md` 方案落地受控模块拆分与 Import Modal / Timeline Toolbar 升级：(1) 在 `web/static/` 拆分为 `gif-editor-state.js`、`gif-editor-import.js`、`gif-editor-timeline.js`、`gif-editor-playback.js`、`gif-editor-export.js` 以及 `gif-editor.js` 入口；(2) 文件选择/拖放/粘贴统一进入 Import Modal（支持比例、FPS、双手柄起止时间范围、实际帧数与播放时长精确统计联动，取消不影响现有工程）；(3) 时间线独立横向滚动区，支持 50%–200% 动态缩放；(4) 底部新增 First/Prev/Play/Pause/Next/Last 帧焦点与按 delay 自动播放控制，全套 Modal & Toolbar 主题响应式支持；(5) 两个 HTML 入口脚本引入顺序、i18n、style.css 及文档全部同步完成。
 ---
 
 ## 0. 需求来源（用户原始要求）
@@ -107,12 +107,12 @@
 ### 2.1 需求 1：GIF 编辑器页面（导航第 6 按钮）
 
 **验收**：
-- [x] header 第 6 个按钮（原 `nav-placeholder`）变为可点击页面按钮（建议 `data-page="gif"`，文案走 i18n），点击进入 GIF 编辑器，`navigateTo` 正常高亮/切页/返回，快捷键体系不冲突。
-- [x] 原单页功能 1:1 还原：图片/GIF/视频三类输入、网格切片、时间轴（排序/复制/删除/延迟/键盘导航）、全局裁剪、图层（文字/贴图/范围/同步）、色键透明、导出 GIF / 序列帧 ZIP / PNG 精灵图。
-- [x] 无外部 CDN 依赖（gif.js/worker 与 P0 验证通过的 decoder vendor 进 embed；若采用 fallback，则 omggif 及其 LICENSE 进 embed），离线可用。
-- [x] 源缺陷修复（§1.1 清单 5 项）。
-- [x] 大输入防护（§4.6，2026-08-06 修订）：原 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝已移除（图片/GIF/视频普通提取均不再被像素帧预算拒绝）；保留 GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`，导入 alert 拒绝）与导出前 1.5GB 峰值内存 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`，仅导出时提示，非输入门禁）。
-- [x] 页面样式遵循主题 token，class/id 带 `gif-` 前缀，不与现有全局样式冲突。
+- [x] header 第 6 个按钮（原 `nav-placeholder`）变为可点击页面按钮（`data-page="gif"`，文案走 i18n），点击进入 GIF 编辑器，`navigateTo` 正常高亮/切页/返回，快捷键体系不冲突。
+- [x] 原单页功能 1:1 还原（**2026-08-06 下午修复后成立**）：图片/GIF/视频三类输入（Import Modal）、网格切片（`gif-rows`/`gif-cols`/`gif-slice-btn`）、时间轴（选中/复制/删除/延迟/拖拽排序/键盘导航）、全局裁剪（`gif-start-global-crop-btn` + crop-panel + gizmo）、图层（文字/贴图/范围/同步）、色键透明（`gif-enable-trans` + 取色/容差）、批量延迟/删帧/范围保留、导出 GIF / 序列帧 ZIP / PNG 精灵图（含输出宽高/缩放/质量参数）。
+- [x] 无外部 CDN 依赖（gif.js/worker 与 P0 验证通过的 decoder vendor 进 embed），离线可用。
+- [x] 源缺陷修复（§1.1 清单 5 项）：disposal 1/2/3 合成（上一帧 disposal 在绘制当前帧前应用 + disposal-3 绘制前快照）、`composeFrame` 共享抽取、图层按 id 同步、GIF delay 按 ms 直用；`cx` bug 随重构重写自然消除。
+- [x] 大输入防护（§4.6，2026-08-06 修订）：原 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝已移除（图片/GIF/视频普通提取均不再被像素帧预算拒绝）；保留 GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`，导入 alert 拒绝）与导出前 1.5GB 峰值 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`，仅导出时提示，非输入门禁）。
+- [x] 页面样式遵循主题 token，class/id 带 `gif-` 前缀，不与现有全局样式冲突（时间线 `.gif-timeline-item` 等规则已补，见 style.css「GIF Editor Upgrade Styles」）。
 
 ### 2.2 需求 2：Gallery video 区播放 GIF / animated WebP
 
@@ -236,17 +236,20 @@ flowchart LR
 
 ### 4.5 输出链路
 
-| 输出 | 方案 | 细节 |
+| 输出 | 方案（当前工作树实现） | 细节 |
 |---|---|---|
-| GIF | gif.js 编码（同原） | `workers: 4`、quality 1-10、透明 matte `#FF00FF`；预览 `<img src=objectURL>` + anchor download（同 2773-2780）。**2026-08-06：** 结果 modal 新增「Open in Gallery」按钮——导出 blob 同时登记为 MediaBridge 资产（`lastResultAsset`，`kind:'image'`/`format:'gif'`），`openResultInGallery()` 等待（可能仍在途的）`MediaBridge.register()` 完成后 `openGallery`；不触碰 `galleryState` |
-| 序列帧 ZIP | **后端 zip-outputs**（替代 JSZip） | 帧 PNG `toBlob` → `upload-temp?name=frame_NNN.png`（500MB 上限）→ `zip-outputs {paths, cleanUp:true}` → `outputURL` 下载。帧数 >200 时分批（每批 50）防并发上传过载；导出前仅经 `exportMemCheck` 峰值 confirm 警告，无像素帧硬限额（§4.6）。**2026-08-06：** pack 结果以受控 `url`（`zip.outputURL`）登记 MediaBridge 资产（`kind:'archive'`/`format:'zip'`），同样可「Open in Gallery」（Gallery 侧 `galleryImportAssets` 复用 zip 会话流展开）；不再创建下载 `<a>` click |
-| 精灵图 | 前端 canvas 合成 | 同原 2867-2950，`toDataURL('image/png')` 下载；row-major 排列，空位跳过。**2026-08-06：** 改 `toBlob` 单次编码复用（预览 objectURL + MediaBridge 交接，`kind:'image'`/`format:'png'`）+「Open in Gallery」 |
+| GIF | gif.js 编码（`gif-editor-export.js::exportGif`） | `ensureGifJs` 确保 vendor 就绪（60s 兜底超时）；`new GIF({workers: 4, quality: clamp(1..10), width, height, workerScript: GIF_WORKER_URL})`；quality 读 `#gif-quality`（模板滑块联动，默认 10）；色键透明开启且 `transparencyReady` 时设 `transparent: MATTE_NUM`（`#FF00FF` matte）；逐帧 `renderCompositedFrame(…, {applyTransparency, matte})` + `delay = max(1, round(slice.delay))`；finished → `showResultModal(blob, 'Slice_<ts>.gif', 'image/gif', 'gif')`（结果弹窗 = 预览 `<img>` + Download anchor + 「Open in Gallery」） |
+| 序列帧 ZIP | **Archive 主路线 + legacy 回退**（`gif-editor-export.js::exportZip`） | 先经 `MediaBridge.archiveStatus()` 探测：Archive 可用 → `exportZipViaArchive`：逐帧 `POST /api/archive/assets?name=frame_NNN.png`（原始 PNG body，每批 50 串行）→ `POST /api/archive/pack` JSON `{assetIds, format:'zip', name}` → 返回 `{assetId}` → 结果以受控 URL `/api/archive/assets/{id}` 展示并 `MediaBridge.register({kind:'archive', format:'zip', url})`；pack 后 best-effort `POST /api/archive/release/{id}` 释放帧 asset。Archive 缺失 → `exportZipLegacy`：`POST /api/gallery/edit/upload-temp?name=` → `POST /api/gallery/edit/zip-outputs {paths, cleanUp:true}` 走 Gallery 会话流 |
+| 精灵图 | 前端 canvas 合成（`gif-editor-export.js::exportSprite`） | rows×cols 读 `#gif-sprite-rows`/`#gif-sprite-cols`（模板默认 1×5，均 ≥1）；`renderCompositedFrame` 逐格绘制 → 单次 `toBlob('image/png')` → `showResultModal(blob, 'SpriteSheet_<ts>.png', 'image/png', 'png')` |
+
+> 三条导出路径共用 `showResultModal(blob, filename, mime, format, url)`：结果弹窗（`#gif-result-overlay`，激活类 `.active`）对 blob 建 objectURL、对 ZIP 用服务端受控 URL；统一 `MediaBridge.register({name, mime, kind, format, blob|url})`（`kind` 按 mime：`image`/`archive`），「Open in Gallery」经 `openResultInGallery()` 等待在途 register 后 `MediaBridge.openGallery(assetId)`；不触碰 `galleryState`、不传绝对路径。弹窗文案走 i18n（`gifEditorResultTitle`/`gifEditorDownloadGif`/`gifEditorOpenGallery`/`gifEditorClose`）。
+
 
 ### 4.6 输入限额与内存保护（2026-08-06 修订；原页面无防护，移植时新增）
 
 - **像素帧硬限额已移除**：`MAX_PIXEL_FRAMES=20,000,000`（原 `width × height × frameCount` 硬拒绝）已删除——普通图片/GIF/视频提取不再被像素帧预算拒绝（与源页面行为对齐）；该常量与"帧预算"相关文案已从 `gif-editor.js`/`i18n.js` 清除。
 - 单文件上限（保留）：GIF/视频 ≤ 200 MB（`MAX_FILE_BYTES`，导入时 `file.size` 快速检查，超限 `alert` 并拒绝）。
-- **导出内存警告（保留为 export-time confirm，非输入门禁）**：`exportMemCheck` 估计峰值内存（`frames × outW × outH × 4 × 3`），超过 1.5 GB（`EXPORT_MEM_LIMIT`）时 `confirm` 提示降帧率/尺寸，用户可继续或取消；GIF/ZIP/精灵图三条导出路径均调用——仍是真实 OOM 兜底。
+- **导出内存警告（保留为 export-time confirm，非输入门禁）**：`checkExportMemory(outW, outH, factor)` 估算峰值内存（`frames × outW × outH × 4 × factor`，GIF/ZIP 传 3、精灵图传 1，默认 3），超过 1.5 GB（`EXPORT_MEM_LIMIT`）时 `confirm` 提示降帧率/尺寸，用户可继续或取消；三条导出路径均调用——仍是真实 OOM 兜底。
 - **时间轴虚拟化（新增）**：水平窗口化轨道——仅可见帧 + `TL_BUFFER=4` 缓冲渲染 DOM，节点绝对定位，交互全部委托在容器（§4.3）；缩略图为 ≤96×72 小预览、惰性生成、FIFO 有界缓存（`THUMB_CACHE_MAX=256`），替代原"每帧全尺寸 `toDataURL`"。
 - 内存模型：本轮帧仍以完整 canvas 驻留 `state.slices[]`（4 B/px）；未引入 IndexedDB/后端持久化（见 §8 ADR）。
 
@@ -435,7 +438,7 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 
 ## 7. 实施阶段计划（执行顺序与验证）
 
-> **实施状态（2026-08-05）：** P0–P3 已全部落地（仓库中已有对应源码与测试，勾选见下）；P4 联调与收尾进行中。每阶段完成后再按源码实际变更范围更新 `PROJECT_MAP.md` 与受影响架构文档。后端阶段至少执行 `go build ./...`、`go vet ./...`、相关 `go test`；Playground 阶段执行 `go build -tags playground` 并用浏览器驱动验证。
+> **实施状态（2026-08-05，历史记录）：** P0–P3 曾全部落地（仓库中已有对应源码与测试）；P4 联调与收尾进行中。**2026-08-06 重构后以当前工作树为准**：P1 的页面层并非 1:1（网格切片/全局裁剪/图层/色键透明 UI 未还原，ZIP 导出契约待修，见 §10）；P2/P3 的 Gallery 动画播放与 FFmpeg 动画输出不受重构影响。
 >
 > **实施状态（2026-08-06，追加）：** "大规模输入 + 虚拟化时间轴"两阶段已合入 `web/static/gif-editor.js`/`i18n.js`/`style.css`（仅前端，见文件头 `已落地（2026-08-06，追加）`）。验证：`node --check`（gif-editor.js、i18n.js）通过；确定性窗口化检查通过（从源码抽取真实 `timelineWindow` 逻辑，对帧数 1/5/63/64/10000 × 6 个滚动位置验证：窗口有界、scrollLeft clamp、覆盖滚动所在帧、尾部 clamp）；**精确高帧用例（1280×736×63 = 59,351,040 像素帧）的浏览器冒烟未完成**——本机 ffmpeg GIF palette 编码挂起，测试 mp4（721KB，`%TEMP%\tr-smoke\big.mp4`）已生成但未走完整浏览器验证。
 
@@ -447,11 +450,10 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 - [x] 明确 `ffmpeg-status` capability schema 及缓存失效规则；FFmpeg/FFprobe 未解析或执行失败时，Gallery GIF/WebP 输出和动画 trim 均关闭。
 - [x] 用有限输入（文件或显式有限时长 filter source）实际跑 GIF 单次 palettegraph；无限输入必须先施加 `-t`/帧数上限，避免 `palettegen` 等待 EOF 导致 smoke/test 卡住。
 ### P1：需求 1 — GIF 编辑器页面
-- [x] 导航接入（§4.1）：`index.html`/`index-nopg.html`、`app.js` switch、cleanup、i18n。
-- [x] 核心逻辑移植：状态/输入/GIF 解码/视频抽帧/网格/时间轴/裁剪/透明/图层，修复 §1.1 五项缺陷。
-- [x] 导出链路：GIF（gif.js 同源 worker）、序列帧 ZIP（upload-temp + zip-outputs）、PNG 精灵图；不依赖 Gallery FFmpeg 能力位。
-- [x] 输入/导出防护与时间轴虚拟化（2026-08-06 修订）：200MB 单文件上限（`MAX_FILE_BYTES`）、导出峰值 1.5GB confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`）、窗口化时间轴 + 有界缩略图缓存、objectURL/canvas cleanup（原 `MAX_PIXEL_FRAMES` 像素帧硬限额已移除）。
-- [x] 浏览器全流程冒烟：导入图片/GIF/视频 → 编辑 → 三种导出；核对 disposal 2/3、delay、图层同步和源页面缺陷修复。
+- [x] 核心逻辑移植（2026-08-06 修复后 1:1）：状态/输入/GIF 解码（disposal 1/2/3）/视频抽帧/网格切片/时间线/全局裁剪/色键透明/图层全部还原并接线（见 §2.1）。
+- [x] 导出链路（2026-08-06 修复后）：GIF（gif.js 同源 worker）、序列帧 ZIP（Archive `assets→pack` 主路线 + upload-temp/zip-outputs 回退）、PNG 精灵图；不依赖 Gallery FFmpeg 能力位。
+- [x] 输入/导出防护与时间轴虚拟化（2026-08-06 修订）：200MB 单文件上限（`MAX_FILE_BYTES`）、导出峰值 1.5GB confirm 警告（`EXPORT_MEM_LIMIT`/`checkExportMemory`，factor 3/1）、窗口化时间轴 + 有界缩略图缓存（`THUMB_CACHE_MAX=256`）、`resetSlices`/`releaseSource` 释放帧 canvas 与 source objectURL（原 `MAX_PIXEL_FRAMES` 像素帧硬限额已移除）。
+- [~] 浏览器全流程冒烟：导入图片/GIF/视频 → 编辑 → 三种导出**未完成**（§7 P4 仍开放，代码已修复但未跑完整浏览器驱动验证）。
 - [x] 实施完成后同步 `PROJECT_MAP.md` §18.2/§24；仅导航模块变化才更新相关架构文档。
 
 ### P2：需求 2 — Gallery video 区动画播放
@@ -470,7 +472,8 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 
 ### P4：联调与收尾（进行中）
 - [ ] 交叉验证：GIF 编辑器产物 → Gallery video 播放 → Gallery video edit 再转码/trim；同时验证无 FFmpeg 时 GIF 编辑器浏览器导出仍可用。
-- [ ] `go test ./...` 全量 + 浏览器全页面冒烟（Monitor/Settings/Playground/Gallery/Download/GIF）。
+- [x] `go test ./...` 全量（37 包，2026-08-06 通过）。
+- [ ] 浏览器全页面冒烟（Monitor/Settings/Playground/Gallery/Download/GIF）。
 - [ ] 本文更新源码锚点、已落地清单和 ADR；确认 AGENTS.md 要求的文档同步全部满足。
 
 ---
@@ -493,7 +496,7 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 **已记录决策（ADR）**：
 1. 页面放 `web/static/`（全局 embed，所有 build variant 可用），不依赖 playground tag——导航是全局 UI，测试期最简。
 2. GIF 编辑器不建独立 HTML，作为 SPA 模块注入（与 endpoint/providers 等同级）。
-3. 序列帧 ZIP 走后端 zip-outputs，前端零打包依赖。
+3. 序列帧 ZIP 前端零打包依赖（原计划走后端 `zip-outputs`；2026-08-06 归档体系落地后正确路线为 MediaBridge/`/api/archive`：逐帧注册 asset → `pack {assetIds, format:'zip'}` → `getAssetBlob`，见 §4.5/§10——当前前端仍直发 multipart，契约未对齐）。
 4. WebP 动画播放不在前端做容器解析，静态/动画统一按 `<img>` 渲染。
 5. 三参考项目只借鉴参数集/状态机/交互语义，全部自行实现。
 6. GIF 编辑器页面的 GIF 导出使用浏览器 gif.js；Gallery video edit 的 GIF/WebP 输出和动画 trim 必须使用 FFmpeg，不提供浏览器编码兜底。
@@ -529,9 +532,16 @@ ffmpeg -y -i anim.gif -c:v libx264 -pix_fmt yuv420p out.mp4
 
 | 动作 | 文件 |
 |---|---|
-| 新增 | `web/static/gif-editor.js`（页面模块，§4.3 结构） |
-| 新增 | `web/static/vendor/gif.js/gif.js`、`gif.worker.js`、LICENSE（MIT） |
-| 新增 | `web/static/vendor/gifuct-js/`（仅 P0 验证通过的自包含浏览器产物；失败则新增 `omggif` vendor 及 LICENSE，补 disposal=3） |
+| 新增 | `web/static/gif-editor-state.js`（`window.GifEditorCore`：constants/state/dom/modules/commands/cleanupFns + `registerModule`/`cleanupModules`/`resetSlices`/`releaseSource`/`formatDurationMs`） |
+| 新增 | `web/static/gif-editor-import.js`（Import Modal：`openFromFile`/`bindEvents`/`cancel`/`cleanup`） |
+| 新增 | `web/static/gif-editor-timeline.js`（虚拟化时间线：`render`/`updateWindow`/`setZoom`/`ensureVisible`/拖拽排序/复制/删除/delay） |
+| 新增 | `web/static/gif-editor-playback.js`（播放状态机 + `core.commands.focusFrame` + 键盘） |
+| 新增 | `web/static/gif-editor-export.js`（GIF/ZIP/精灵图三导出 + `showResultModal`/`openResultInGallery`/MediaBridge 登记） |
+| 新增 | `web/static/gif-editor.js`（页面入口 `renderGifEditor`/`cleanupGifEditor` + 模板/cacheDom/`registerCoreCommands`/画布绘制，§4.3 结构） |
+| 新增 | `web/static/vendor/gif.js/gif.js`、`gif.worker.js`、LICENSE（MIT；`gif.worker.js` 为 gif.js 运行时 workerScript，见 `GIF_WORKER_URL`） |
+| 新增 | `web/static/vendor/gifuct-js/gifuct-js.js`、LICENSE（MIT，esbuild 自包含 bundle，`parseGIF`/`decompressFrames` 全局导出） |
+| 新增 | `web/static/media-bridge.js`（导出结果登记 + 「Open in Gallery」交接通道） |
+| 修改 | `internal/feature/feature.go`（GIF feature `StaticFiles` 清单：6 模块 + 3 vendor 文件） |
 | 修改 | `web/static/index.html`、`index-nopg.html`（第 6 按钮与 GIF 页面脚本） |
 | 修改 | `web/static/app.js`（switch + cleanup） |
 | 修改 | `web/static/i18n.js`（GIF 页面 + gifEditor* 键） |
@@ -564,3 +574,30 @@ ffmpeg -y -i anim.gif -c:v libx264 -pix_fmt yuv420p out.mp4
 - Gallery `isVideoExt` 白名单前后端同步：`gallery-state.js`、`fs_handlers.go`；ZIP 内图片 manifest 另由 `internal/gallery/gallery.go` 的 `SupportedExts` 维护。
 - 动画 Trim 使用 `video_anim_trim`，普通视频 Trim 继续使用 `video_trim`；动画输入不能进入 H.264 codec 分支。
 - GIF 编辑器浏览器 gif.js 导出与 Gallery FFmpeg status 解耦；没有 FFmpeg 时前者仍可用，后者 GIF/WebP 输出与动画 Trim 均关闭。
+
+---
+
+## 10. 当前实现状态与已知缺口（2026-08-06 工作树核对）
+
+> 本节以**修复后最终工作树**为准逐条核对（GIF 页面六个模块 + style.css + i18n.js，全部 `node --check` 通过）。与 §2.1/§4.5 历史勾选不一致处，一律以本节为准。
+
+### 10.1 已实现（核对通过）
+
+- **模块拆分与加载顺序**：`gif-editor-state.js`（`window.GifEditorCore` 注册表 + `resetSlices`/`releaseSource`/`showSpinner`/`hideSpinner`）→ `gif-editor-import.js` → `gif-editor-timeline.js` → `gif-editor-playback.js` → `gif-editor-export.js` → `gif-editor.js`（入口 `renderGifEditor`/`cleanupGifEditor` + 模板/cacheDom/`applyPageI18n`/`registerCoreCommands`），`index.html` 与 `index-nopg.html` 顺序一致；`media-bridge.js` 先于生产者加载。
+- **Import Modal**：文件选择/拖放/粘贴统一入口；GIF 用 gifuct-js `parseGIF`+`decompressFrames` + disposal 1/2/3 合成（上一帧 disposal 先应用、disposal-3 绘制前快照）；**delay 按 ms 直用（gifuct-js 已是 ms）**；`fpsChanged` 前默认保留源帧 delay；视频 seek 抽帧；比例（10–300%）、FPS（1–60）、双手柄起止滑块 + 毫秒输入联动、实际帧数/时长统计、120ms 去抖预览；commit 事务 + `commitGeneration` 防陈旧提交；取消保留旧工程；200MB 单文件上限。
+- **时间线**：虚拟化窗口（`TL_BUFFER=4`、FIFO 缩略图缓存 `THUMB_CACHE_MAX=256`、rAF 节流）、50%–200% 倍率、容器委托的选中/复制/删除/delay 输入/拖拽排序；style.css「GIF Editor Upgrade Styles」含 `.gif-timeline-item`/`.gif-thumb-wrapper`/`.gif-timeline-info`/`.gif-timeline-item-actions`/`.btn-copy-slice`/`.btn-del-slice` 全套规则。
+- **播放控制**：First/Prev/Play/Pause/Next/Last + ←/→/PgUp/PgDn/Home/End/Space 键盘；generation 守卫播放状态机按帧 delay 推进；按钮禁用态/aria 同步；**`core.commands.focusFrame` 每次 render 由 `bindEvents` 重注册 + 入口兜底（`cleanupModules` 清空命令的设计配合重注册）**。
+- **1:1 编辑功能（还原）**：色键透明（取色/容差/取消）、边缘裁剪 + 网格切片（`gif-slice-btn`→`runSlice`）、全局裁剪（crop-panel + gizmo）、图层（文字/贴图/作用范围/同步/删除）、批量延迟、删帧/仅保留范围、输出宽高/缩放（`gif-out-scale-slider`）/质量（1-10 滑块联动）、拼图 Sheet 行/列参数；导出按钮初始 disabled、导入后启用。
+- **导出**：GIF（gif.js `workers:4`、quality clamp 1-10、色键开启时 matte `#FF00FF`、`GIF_WORKER_URL` 同源 worker、`ensureGifJs` 60s 兜底）、序列帧 ZIP（Archive `assets→pack→受控 URL` 主路线 + upload-temp/zip-outputs 回退）、PNG 精灵图；结果弹窗（`.active` 类）含预览/Download/「Open in Gallery」。
+- **MediaBridge/Archive 交接**：`showResultModal` 统一 `MediaBridge.register({name, mime, kind, format, blob|url})`，`openResultInGallery` 等待在途 register 后 `openGallery`；导出峰值 1.5GB confirm 警告（`checkExportMemory` factor 3/1）；`resetSlices`/`releaseSource` 释放帧 canvas 与 source objectURL（页面离开/reset 均调用）；`tinyrouter:modal-close` 监听具名并在 cleanup 移除。
+- **i18n**：模板 `[data-i18n]`/`[data-i18n-placeholder]` 每 render 由 `applyPageI18n` 应用；结果弹窗文案走 `gifEditorResultTitle`/`gifEditorDownloadGif`/`gifEditorOpenGallery`/`gifEditorClose`；13 个缺失键（`gifEditorNoLayer`/`gifEditorConfirmReset`/`gifEditorAlert*` 等）已补 en/cn。
+
+### 10.2 仍开放（未完成项，勿误标完成）
+
+1. **P4 浏览器全流程冒烟未跑**：导入图片/GIF/视频 → 编辑（切片/裁剪/图层/透明）→ 三种导出的浏览器驱动验证未完成；**精确高帧用例（1280×736×63 = 59,351,040 像素帧）未走完整浏览器验证**（本机 ffmpeg GIF palette 编码曾挂起，测试 mp4 已生成）。静态/单测验证已通过（`node --check` 六个模块 + `go build ./...` + `go test ./...` 全量 37 包，2026-08-06），但浏览器驱动冒烟（运行时行为）仍未执行，不等同于运行时证明。
+2. **`go test ./...` 全量已通过**：37 个包于 2026-08-06 验证通过（原 §7 P4 的"全量未跑"项已勾除）。
+3. 低优先级遗留（审计 L 级，未逐一修复）：Firefox 拖拽未 `setData`（dragstart 可能不发起）；delay 输入无 60000ms 上界钳制且接受小数；播放到末帧停止而非循环；时间线条目在放大 ≥1.5 时高度可超 130px 轨道（`overflow-y:hidden` 裁剪）；移动端时间线高度（`min-height:190px`）在小视口下仍可能偏紧。这些不影响主流程。
+
+### 10.3 与 Gallery 动画/FFmpeg 的关系
+
+GIF 编辑器页面是纯浏览器能力（gif.js 编码、gifuct-js 解码），与 Gallery video 区的 FFmpeg 动画输出（`video_to_gif`/`video_to_webp`/`video_anim_trim`，能力位 `ffmpeg-status` 6 字段）完全解耦：无 FFmpeg 时 GIF 编辑器仍可用，Gallery 动画输出/trim 关闭。P2/P3 的实现（`SUPPORTED_VIDEO_EXTS`、`#gallery-main-anim`、动画控制降级、数字 trim）不受 §10.2 影响。

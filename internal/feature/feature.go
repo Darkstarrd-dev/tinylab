@@ -187,13 +187,23 @@ func registerDefaults() {
 	})
 	register(Feature{
 		ID: GIF, Name: "GIF",
-		Description: "Standalone GIF editor page (web/static/gif-editor.js + gif.js/gifuct-js vendors).",
+		Description: "Standalone GIF editor page (web/static/gif-editor*.js + gif.js/gifuct-js vendors).",
 		DependsOn:   []ID{Archive},
 		StaticRoot:  RootStatic,
+		// Script load order in index.html/index-nopg.html: gif.js ->
+		// gifuct-js -> state -> import -> timeline -> playback -> export ->
+		// gif-editor.js. gif.worker.js is not a <script> tag but the
+		// runtime workerScript of gif.js (GIF_WORKER_URL), served same-origin.
 		StaticFiles: []string{
-			"gif-editor.js",
 			"vendor/gif.js/gif.js",
+			"vendor/gif.js/gif.worker.js",
 			"vendor/gifuct-js/gifuct-js.js",
+			"gif-editor-state.js",
+			"gif-editor-import.js",
+			"gif-editor-timeline.js",
+			"gif-editor-playback.js",
+			"gif-editor-export.js",
+			"gif-editor.js",
 		},
 	})
 	register(Feature{

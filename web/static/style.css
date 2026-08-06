@@ -3955,11 +3955,11 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-header{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:0 14px;height:42px;background:var(--modal-bg);border-bottom:1px solid var(--glass-border)}
 .gif-title{font-size:var(--font-h3);font-weight:var(--font-weight-bold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
 .gif-title-sub{color:var(--accent);font-size:var(--font-badge);margin-left:6px;font-weight:var(--font-weight-normal)}
-.gif-workspace{flex:1;min-height:0;display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr 190px;overflow:hidden}
+.gif-workspace{flex:1;min-height:0;display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr auto;overflow:hidden}
 @media (max-width:768px){
   .gif-workspace{display:flex;flex-direction:column;height:100%}
   .gif-stage-area{flex:1;min-height:35vh;order:1}
-  .gif-timeline-area{height:100px;flex-shrink:0;order:2;border-bottom:1px solid var(--glass-border)}
+  .gif-timeline-area{min-height:190px;height:auto;flex-shrink:0;order:2;border-bottom:1px solid var(--glass-border)}
   .gif-sidebar{height:38vh;flex-shrink:0;order:3;width:100%;border-right:none;border-top:1px solid var(--glass-border)}
   .gif-title-sub{display:none}
 }
@@ -4006,26 +4006,13 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-stage-controls{position:absolute;bottom:20px;right:20px;background:rgba(0,0,0,0.8);padding:5px;border-radius:var(--radius-sm);display:flex;gap:5px;border:1px solid var(--glass-border);z-index:10}
 .gif-icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#fff;width:36px;height:36px;border-radius:var(--radius-xs);cursor:pointer;display:flex;justify-content:center;align-items:center;font-size:1.2rem;padding:0}
 .gif-icon-btn:hover{border-color:var(--accent);color:var(--accent)}
-.gif-timeline-area{grid-column:2;grid-row:2;background:var(--glass-bg);border-top:1px solid var(--glass-border);padding:10px;overflow-x:auto;display:flex;gap:10px;align-items:center;min-width:0}
-.gif-timeline-area::-webkit-scrollbar{height:4px}
-.gif-timeline-area::-webkit-scrollbar-thumb{background:var(--glass-border);border-radius:var(--radius-xs)}
+/* .gif-timeline-area layout is redefined in "GIF Editor Upgrade Styles" below
+   (.gif-timeline-scroll owns horizontal scrolling; the area itself clips). */
 .gif-timeline-empty{color:var(--text-muted);margin:auto;font-size:var(--font-card-title);white-space:nowrap}
-.gif-slice-item{min-width:100px;width:100px;height:130px;background:var(--glass-bg);border:2px solid transparent;border-radius:var(--radius-sm);display:flex;flex-direction:column;overflow:hidden;position:relative;cursor:grab;flex-shrink:0;transition:transform var(--transition-fast),box-shadow var(--transition-fast),opacity var(--transition-fast)}
-.gif-slice-item:active{cursor:grabbing}
-.gif-slice-item.selected{border-color:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
-.gif-slice-item.dragging{opacity:0.5;transform:scale(0.95);border-color:var(--accent2)}
-.gif-slice-item.drag-over{border-left:4px solid var(--accent2)}
-.gif-timeline-track{position:relative;height:130px;flex-shrink:0}
-.gif-timeline-track .gif-slice-item{position:absolute;top:0}
-/* .gif-timeline-track height must track .gif-slice-item height (130px) */
-.gif-slice-img-box{flex:1;background:#000;display:flex;justify-content:center;align-items:center;overflow:hidden;pointer-events:none;min-height:0}
-.gif-slice-img-box img{max-width:100%;max-height:100%;object-fit:contain}
-.gif-slice-tools{padding:4px;background:rgba(255,255,255,0.03);font-size:var(--font-badge)}
-.gif-slice-tools-row{display:flex;justify-content:space-between;align-items:center}
-.gif-slice-num{font-weight:var(--font-weight-bold);font-size:var(--font-badge)}
-.gif-slice-action{cursor:pointer;margin-right:8px;font-size:var(--font-card-title)}
-.gif-slice-action:hover{color:var(--accent)}
-.gif-slice-action-del{color:var(--danger);margin-right:0}
+/* Legacy .gif-slice-* timeline rules removed: the virtualized timeline
+   (gif-editor-timeline.js) emits .gif-timeline-item/.gif-thumb-wrapper/
+   .gif-timeline-info/.gif-timeline-item-actions/.btn-copy-slice/.btn-del-slice
+   — see "GIF Editor Upgrade Styles" below for the current timeline styles. */
 .gif-crop-panel{background:var(--glass-hover);border:1px solid var(--accent);padding:10px;border-radius:var(--radius-sm);margin-bottom:15px;display:none}
 .gif-crop-panel.active{display:block}
 .gif-crop-title{text-align:center;color:var(--text);font-weight:var(--font-weight-bold);margin-bottom:10px}
@@ -4052,6 +4039,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-spinner{width:40px;height:40px;border:4px solid var(--glass-border);border-top-color:var(--accent);border-radius:50%;animation:gif-spin 1s linear infinite;margin-bottom:10px}
 @keyframes gif-spin{to{transform:rotate(360deg)}}
 .gif-result-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:100;display:none;justify-content:center;align-items:center}
+.gif-result-overlay.show{display:flex}
 .gif-result-overlay.active{display:flex}
 .gif-result-box{background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur-sm));-webkit-backdrop-filter:blur(var(--glass-blur-sm));padding:20px;border-radius:var(--radius-xl);border:1px solid var(--glass-border);text-align:center;max-width:90vw;max-height:90vh;overflow-y:auto}
 .gif-result-title{font-size:var(--font-h3);font-weight:var(--font-weight-bold);margin:0 0 6px}
@@ -4078,4 +4066,222 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .info-view-raw .info-raw-view,.info-view-pretty .info-pretty-view{display:block}
 .download-card-folded .download-card-body,.dl-playlist-entries-folded,.dl-playlist-heading-hidden,.dl-chevron-hidden{display:none}
 .download-card-expanded .download-card-body,.download-preview-visible,.download-list-visible{display:block}
+
+/* --- GIF Editor Upgrade Styles (Import Modal & Timeline Controls) --- */
+.modal.gif-import-modal {
+  width: min(900px, calc(100vw - 32px));
+  max-width: 900px;
+}
+.gif-import-modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+@media (max-width: 768px) {
+  .gif-import-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+.gif-import-preview-wrapper {
+  background: #050505;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 240px;
+  overflow: hidden;
+}
+.gif-import-preview-canvas {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.gif-import-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gif-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gif-import-row.gif-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gif-import-label {
+  font-size: var(--font-badge);
+  color: var(--text-secondary);
+}
+.gif-import-value, .gif-import-summary-val {
+  font-weight: var(--font-weight-bold);
+  color: var(--accent);
+}
+.gif-import-range {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  background: var(--input-bg);
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+}
+.gif-import-range-track {
+  position: absolute;
+  left: 0; right: 0;
+  height: 6px;
+  background: var(--glass-border);
+  border-radius: var(--radius-xs);
+}
+.gif-import-range-selected {
+  position: absolute;
+  height: 6px;
+  background: var(--accent);
+  border-radius: var(--radius-xs);
+  pointer-events: none;
+}
+.gif-import-range input[type="range"] {
+  position: absolute;
+  width: 100%;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.gif-import-range input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.gif-import-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.gif-import-divider {
+  border: 0;
+  border-top: 1px dashed var(--glass-border);
+  margin: 4px 0;
+}
+
+/* Timeline Layout Adjustments */
+.gif-timeline-area {
+  grid-column: 2;
+  grid-row: 2;
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  min-height: 190px;
+  padding: 0;
+  overflow: hidden;
+}
+.gif-timeline-scroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 10px;
+  min-height: 140px;
+  touch-action: pan-x;
+}
+.gif-timeline-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.gif-timeline-scroll::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: var(--radius-xs);
+}
+.gif-timeline-toolbar {
+  height: auto;
+  min-height: 40px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  border-top: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  gap: 12px;
+  font-size: var(--font-badge);
+}
+.gif-timeline-zoom {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gif-timeline-zoom input[type="range"]{flex:1 1 90px;min-width:70px;max-width:130px}
+.gif-timeline-count {
+  font-weight: var(--font-weight-bold);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.gif-timeline-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gif-timeline-control {
+  background: var(--btn-secondary-bg);
+  border: 1px solid var(--btn-secondary-border);
+  color: var(--btn-secondary-text);
+  border-radius: var(--radius-xs);
+  min-width: 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0;
+}
+.gif-timeline-control:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gif-timeline-control:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.gif-timeline-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* --- Virtualized timeline item (emitted by gif-editor-timeline.js) --- */
+.gif-timeline-track{position:relative;flex-shrink:0;min-width:0}
+.gif-timeline-item{position:absolute;top:0;left:0;box-sizing:border-box;display:flex;flex-direction:column;background:var(--glass-bg);border:2px solid transparent;border-radius:var(--radius-sm);overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;transition:transform var(--transition-fast),box-shadow var(--transition-fast),opacity var(--transition-fast),border-color var(--transition-fast)}
+.gif-timeline-item:active{cursor:grabbing}
+.gif-timeline-item:hover{border-color:var(--glass-border)}
+.gif-timeline-item.active{border-color:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
+.gif-timeline-item.dragging{opacity:0.5;transform:scale(0.95);border-color:var(--accent2)}
+.gif-thumb-wrapper{flex:0 0 auto;display:flex;justify-content:center;align-items:center;overflow:hidden;background:#000;border-radius:var(--radius-xs) var(--radius-xs) 0 0;min-width:0}
+.gif-thumb-wrapper img{display:block;max-width:100%;max-height:100%;object-fit:contain;pointer-events:none}
+.gif-timeline-info{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:3px 6px;font-size:var(--font-badge);color:var(--text-secondary);min-width:0}
+.gif-timeline-info span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gif-timeline-item input.gif-delay-input{height:28px;min-height:28px;width:50px;margin:0;padding:2px 4px;text-align:center;font-size:var(--font-badge);font-family:var(--font-mono);color:var(--text);border-radius:var(--radius-xs)}
+.gif-timeline-item-actions{position:absolute;top:4px;right:4px;z-index:2;display:flex;flex-direction:column;gap:4px;padding:2px;background:rgba(0,0,0,0.6);border:1px solid var(--glass-border);border-radius:var(--radius-xs)}
+.btn-copy-slice,.btn-del-slice{width:28px;height:28px;min-width:28px;min-height:28px;display:inline-flex;align-items:center;justify-content:center;background:var(--btn-secondary-bg);border:1px solid var(--btn-secondary-border);color:var(--btn-secondary-text);border-radius:var(--radius-xs);cursor:pointer;font-size:0.85rem;padding:0;transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast)}
+.btn-copy-slice:hover,.btn-del-slice:hover{background:var(--btn-secondary-bg-hover);border-color:var(--accent);color:var(--accent)}
+.btn-del-slice:hover{border-color:var(--danger);color:var(--danger)}
+.btn-copy-slice:focus-visible,.btn-del-slice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .login-error-visible{display:block}

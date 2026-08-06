@@ -515,6 +515,7 @@ function confirmModal(message) {
 }
 
 function closeModalOverlay() {
+  document.dispatchEvent(new CustomEvent('tinyrouter:modal-close'));
   var overlay = document.getElementById('modal-overlay');
   if (typeof window.__confirmResolver === 'function') {
     var r = window.__confirmResolver;
