@@ -39,8 +39,11 @@ type reviewTask struct {
 }
 
 // runReview is the review engine core, using a worker pool for concurrent processing.
-// indices are 0-based positions in the sorted manifest.Entries slice.
-func (h *Handler) runReview(ctx context.Context, task *reviewTask, zipData []byte, entries []gallerylib.Entry, indices []int, provider, model string, concurrency int) {
+// indices are 0-based positions in the sorted entries slice. readEntry resolves
+// one entry's bytes: the legacy zip-session flow reads from the in-memory
+// session bytes, the archive flow (sourceId) reads through the /api/archive
+// bridge by strict entry path.
+func (h *Handler) runReview(ctx context.Context, task *reviewTask, entries []gallerylib.Entry, indices []int, readEntry func(context.Context, string) ([]byte, error), provider, model string, concurrency int) {
 	defer func() {
 		task.mu.Lock()
 		if task.Status == gallerylib.ReviewStatusRunning {
@@ -101,7 +104,7 @@ func (h *Handler) runReview(ctx context.Context, task *reviewTask, zipData []byt
 				}
 
 				entry := entries[entryIdx]
-				result, err := h.analyzeImage(ctx, zipData, entry, provider, model, task.SystemPrompt, task.UserPrompt, task.MatchField)
+				result, err := h.analyzeImage(ctx, readEntry, entry, provider, model, task.SystemPrompt, task.UserPrompt, task.MatchField)
 				task.mu.Lock()
 				task.Processed++
 				if err != nil {
@@ -117,11 +120,11 @@ func (h *Handler) runReview(ctx context.Context, task *reviewTask, zipData []byt
 	wg.Wait()
 }
 
-// analyzeImage analyzes a single image using a vision model.
-func (h *Handler) analyzeImage(ctx context.Context, zipData []byte, entry gallerylib.Entry, provider, model string, systemPrompt, userPrompt, matchField string) (*gallerylib.ReviewResult, error) {
-	// 1. Read image data from ZIP
-	reader := bytes.NewReader(zipData)
-	imgData, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), entry.Path)
+// analyzeImage analyzes a single image using a vision model. readEntry
+// resolves the entry's bytes (zip session or archive source).
+func (h *Handler) analyzeImage(ctx context.Context, readEntry func(context.Context, string) ([]byte, error), entry gallerylib.Entry, provider, model string, systemPrompt, userPrompt, matchField string) (*gallerylib.ReviewResult, error) {
+	// 1. Read image data
+	imgData, err := readEntry(ctx, entry.Path)
 	if err != nil {
 		return nil, fmt.Errorf("read entry %s: %w", entry.Path, err)
 	}

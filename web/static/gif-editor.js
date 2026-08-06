@@ -69,6 +69,8 @@ var GifEditor = (function () {
   var ctx = null;      // preview 2d context
   var videoUrl = null;
   var resultUrl = null;
+  var lastResultAsset = null;          // MediaBridge payload of the newest export
+  var lastResultAssetPromise = null;   // in-flight register() so Open→Gallery is race-free
   var rendered = false;
   // Virtualized timeline state (window + bounded thumbnail cache).
   var timelineWin = null;   // last rendered window {start, end}
@@ -165,7 +167,7 @@ var GifEditor = (function () {
     dom.resultOverlay = byId('result-overlay');
     dom.resultImg = byId('result-img');
     dom.dlLink = byId('dl-link');
-    dom.resultClose = byId('result-close');
+    dom.resultOpenGallery = byId('result-open-gallery');
     dom.reloadBtn = byId('reload-btn');
 
     dom.dropZone = byId('drop-zone');
@@ -249,7 +251,25 @@ var GifEditor = (function () {
     dom.resultOverlay.classList.remove('active');
     if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
     dom.resultImg.removeAttribute('src');
+    dom.resultImg.style.display = '';
     dom.dlLink.removeAttribute('href');
+  }
+
+  // Open the latest export in the Gallery page through the MediaBridge.
+  // register() may still be uploading/mirroring the asset server-side, so we
+  // await the (possibly in-flight) registration before opening — the token is
+  // then guaranteed resolvable. No galleryState is touched from here.
+  function openResultInGallery() {
+    if (!lastResultAsset || typeof window.MediaBridge === 'undefined' ||
+        typeof window.MediaBridge.register !== 'function') return;
+    var p = lastResultAssetPromise ||
+      (lastResultAssetPromise = window.MediaBridge.register(lastResultAsset));
+    p.then(function (assetId) {
+      if (assetId) window.MediaBridge.openGallery(assetId);
+    }).catch(function (err) {
+      console.error('MediaBridge register failed:', err);
+      alert(t('gifEditorZipPackFail', [err && err.message ? err.message : String(err)]));
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1608,9 +1628,20 @@ var GifEditor = (function () {
             var u = URL.createObjectURL(blob);
             if (resultUrl) URL.revokeObjectURL(resultUrl);
             resultUrl = u;
+            dom.resultImg.style.display = '';
             dom.resultImg.src = u;
             dom.dlLink.href = u;
             dom.dlLink.download = 'Slice_' + Date.now() + '.gif';
+            // Hand the export to the MediaBridge so "Open in Gallery" can
+            // import it without passing temp paths or touching galleryState.
+            lastResultAsset = {
+              name: 'Slice_' + Date.now() + '.gif',
+              mime: 'image/gif',
+              kind: 'image',
+              format: 'gif',
+              blob: blob
+            };
+            lastResultAssetPromise = null;
             hideSpinner();
             dom.resultOverlay.classList.add('active');
             restoreExportBtn();
@@ -1661,6 +1692,12 @@ var GifEditor = (function () {
     });
   }
 
+  // exportZip — packs the frame PNGs. Path A (Archive API present, gated by
+  // MediaBridge.archiveStatus): every frame is registered as a server asset
+  // (POST /api/archive/assets), packed via POST /api/archive/pack, and the
+  // packed archive is handed to the bridge as {kind:'archive', url} — no temp
+  // path ever crosses the bridge. Path B (Archive API absent): legacy
+  // upload-temp + zip-outputs contract, unchanged.
   function exportZip() {
     if (state.slices.length === 0) { alert(t('gifEditorAlertNoContent')); return; }
     var size = outputSize();
@@ -1669,42 +1706,146 @@ var GifEditor = (function () {
     showSpinner(t('gifEditorPackingFrames'));
 
     (async function () {
-      var paths = [];
       try {
-        var total = state.slices.length;
-        for (var start = 0; start < total; start += 50) {
-          var end = Math.min(start + 50, total);
-          var chunk = [];
-          for (var i = start; i < end; i++) {
-            var name = 'frame_' + String(i + 1).padStart(3, '0') + '.png';
-            var frame = composeFrame(state.slices[i].canvas, state.slices[i].layers, outW, outH);
-            chunk.push({ name: name, frame: frame });
-          }
-          var results = await Promise.all(chunk.map(function (item) {
-            return uploadFramePng(item.frame, item.name);
-          }));
-          for (var j = 0; j < results.length; j++) {
-            if (results[j].error) throw new Error(results[j].error);
-            paths.push(results[j].tempPath);
-          }
-          dom.spinnerText.innerText = t('gifEditorPackingFrames') + ' (' + end + '/' + total + ')';
+        var zipName = 'Frames_' + Date.now() + '.zip';
+        var caps = (window.MediaBridge && typeof window.MediaBridge.archiveStatus === 'function')
+          ? await window.MediaBridge.archiveStatus()
+          : false;
+        if (caps) {
+          await exportZipViaArchive(state.slices.length, outW, outH, zipName);
+        } else {
+          await exportZipLegacy(state.slices.length, outW, outH, zipName);
         }
-        var zip = await apiPost('/gallery/edit/zip-outputs', { paths: paths, cleanUp: true });
-        if (zip.error) throw new Error(zip.error);
-        var link = document.createElement('a');
-        link.href = zip.outputURL;
-        link.download = zip.zipName || ('Frames_' + Date.now() + '.zip');
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        hideSpinner();
-        if (typeof toast === 'function') toast(t('gifEditorZipDone'), 'success');
       } catch (err) {
         console.error(err);
         hideSpinner();
         alert(t('gifEditorZipPackFail', [err.message]));
       }
     })();
+  }
+
+  // uploadFrameAsset registers one composed frame PNG as a server asset via
+  // the MediaBridge (which mirrors blobs to POST /api/archive/assets when the
+  // capability is present). Resolves to the bridge assetId.
+  function uploadFrameAsset(canvasSrc, name) {
+    return new Promise(function (resolve, reject) {
+      canvasSrc.toBlob(function (blob) {
+        if (!blob) { reject(new Error('PNG encode failed')); return; }
+        window.MediaBridge.register({
+          name: name,
+          mime: 'image/png',
+          kind: 'image',
+          format: 'png',
+          blob: blob
+        }).then(resolve).catch(reject);
+      }, 'image/png');
+    });
+  }
+
+  // Path A: frames -> /api/archive/assets -> /api/archive/pack -> asset URL.
+  async function exportZipViaArchive(total, outW, outH, zipName) {
+    var frameIds = [];
+    for (var start = 0; start < total; start += 50) {
+      var end = Math.min(start + 50, total);
+      var chunk = [];
+      for (var i = start; i < end; i++) {
+        var name = 'frame_' + String(i + 1).padStart(3, '0') + '.png';
+        var frame = composeFrame(state.slices[i].canvas, state.slices[i].layers, outW, outH);
+        chunk.push({ name: name, frame: frame });
+      }
+      var ids = await Promise.all(chunk.map(function (item) {
+        return uploadFrameAsset(item.frame, item.name);
+      }));
+      for (var j = 0; j < ids.length; j++) frameIds.push(ids[j]);
+      dom.spinnerText.innerText = t('gifEditorPackingFrames') + ' (' + end + '/' + total + ')';
+    }
+    // Map bridge ids to the server assetIds the pack endpoint consumes.
+    var serverIds = [];
+    for (var k = 0; k < frameIds.length; k++) {
+      var meta = window.MediaBridge.getAsset(frameIds[k]);
+      if (!meta || !meta.serverAssetId) {
+        throw new Error('frame asset was not mirrored server-side');
+      }
+      serverIds.push(meta.serverAssetId);
+    }
+    var pack = await fetch('/api/archive/pack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetIds: serverIds, format: 'zip', name: zipName })
+    }).then(function (r) {
+      return r.json().catch(function () { return { error: 'HTTP ' + r.status }; });
+    });
+    if (!pack || !pack.assetId) {
+      throw new Error((pack && pack.error) || 'archive pack failed');
+    }
+    // Frames are consumed into the pack — release server copies and bridge
+    // tokens (best-effort; TempStore TTL is the cleanup backstop).
+    for (var m = 0; m < frameIds.length; m++) {
+      var frameMeta = window.MediaBridge.getAsset(frameIds[m]);
+      window.MediaBridge.consume(frameIds[m]);
+      if (frameMeta && frameMeta.serverAssetId) {
+        fetch('/api/archive/release/' + encodeURIComponent(frameMeta.serverAssetId), { method: 'POST' })
+          .catch(function () {});
+      }
+    }
+    var resultUrl = '/api/archive/assets/' + encodeURIComponent(pack.assetId);
+    var archiveAsset = {
+      name: zipName,
+      mime: 'application/zip',
+      kind: 'archive',
+      format: 'zip',
+      url: resultUrl
+    };
+    lastResultAsset = archiveAsset;
+    lastResultAssetPromise = window.MediaBridge.register(archiveAsset);
+    dom.resultImg.style.display = 'none';
+    dom.resultImg.removeAttribute('src');
+    dom.dlLink.href = resultUrl;
+    dom.dlLink.download = zipName;
+    hideSpinner();
+    dom.resultOverlay.classList.add('active');
+    if (typeof toast === 'function') toast(t('gifEditorZipDone'), 'success');
+  }
+
+  // Path B: legacy upload-temp + zip-outputs (existing backend contract).
+  async function exportZipLegacy(total, outW, outH, zipName) {
+    var paths = [];
+    for (var start = 0; start < total; start += 50) {
+      var end = Math.min(start + 50, total);
+      var chunk = [];
+      for (var i = start; i < end; i++) {
+        var name = 'frame_' + String(i + 1).padStart(3, '0') + '.png';
+        var frame = composeFrame(state.slices[i].canvas, state.slices[i].layers, outW, outH);
+        chunk.push({ name: name, frame: frame });
+      }
+      var results = await Promise.all(chunk.map(function (item) {
+        return uploadFramePng(item.frame, item.name);
+      }));
+      for (var j = 0; j < results.length; j++) {
+        if (results[j].error) throw new Error(results[j].error);
+        paths.push(results[j].tempPath);
+      }
+      dom.spinnerText.innerText = t('gifEditorPackingFrames') + ' (' + end + '/' + total + ')';
+    }
+    var zip = await apiPost('/gallery/edit/zip-outputs', { paths: paths, cleanUp: true });
+    if (zip.error) throw new Error(zip.error);
+    // The pack is served from a controlled server URL — no temp path crosses
+    // the MediaBridge. cleanUp already removed the frame temps.
+    lastResultAsset = {
+      name: zip.zipName || zipName,
+      mime: 'application/zip',
+      kind: 'archive',
+      format: 'zip',
+      url: zip.outputURL
+    };
+    lastResultAssetPromise = null;
+    dom.resultImg.style.display = 'none';
+    dom.resultImg.removeAttribute('src');
+    dom.dlLink.href = zip.outputURL;
+    dom.dlLink.download = zip.zipName || zipName;
+    hideSpinner();
+    dom.resultOverlay.classList.add('active');
+    if (typeof toast === 'function') toast(t('gifEditorZipDone'), 'success');
   }
 
   function exportSprite() {
@@ -1731,14 +1872,29 @@ var GifEditor = (function () {
             sctx.drawImage(frame, c * itemW, r * itemH);
           }
         }
-        var url = sheet.toDataURL('image/png');
-        var link = document.createElement('a');
-        link.download = 'SpriteSheet_' + Date.now() + '.png';
-        link.href = url;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        hideSpinner();
+        var name = 'SpriteSheet_' + Date.now() + '.png';
+        // Encode to a PNG Blob once and reuse it for the preview object URL
+        // and the MediaBridge handoff (single in-memory copy).
+        sheet.toBlob(function (blob) {
+          if (!blob) { hideSpinner(); alert(t('gifEditorRenderFail')); return; }
+          var u = URL.createObjectURL(blob);
+          if (resultUrl) URL.revokeObjectURL(resultUrl);
+          resultUrl = u;
+          dom.resultImg.style.display = '';
+          dom.resultImg.src = u;
+          dom.dlLink.href = u;
+          dom.dlLink.download = name;
+          lastResultAsset = {
+            name: name,
+            mime: 'image/png',
+            kind: 'image',
+            format: 'png',
+            blob: blob
+          };
+          lastResultAssetPromise = null;
+          hideSpinner();
+          dom.resultOverlay.classList.add('active');
+        }, 'image/png');
       } catch (err) {
         console.error(err);
         hideSpinner();
@@ -1968,7 +2124,9 @@ var GifEditor = (function () {
         draw();
       }
     });
-    var scopeRadios = document.querySelectorAll('input[name="gif-layer-scope"]');
+    dom.resultClose.addEventListener('click', closeResultModal);
+    dom.resultOpenGallery.addEventListener('click', openResultInGallery);
+    dom.reloadBtn.addEventListener('click', function () { location.reload(); });
     for (var i = 0; i < scopeRadios.length; i++) {
       scopeRadios[i].addEventListener('change', function (e) {
         dom.rangeInput.style.display = e.target.value === 'range' ? 'block' : 'none';
@@ -2155,7 +2313,6 @@ var GifEditor = (function () {
       '      </div>' +
       '    </aside>' +
       '    <div class="gif-stage-area" id="gif-stage-container">' +
-      '      <div class="gif-canvas-wrapper" id="gif-canvas-wrapper">' +
       '        <canvas id="gif-preview-canvas"></canvas>' +
       '      </div>' +
       '      <div class="gif-stage-controls">' +
@@ -2173,6 +2330,7 @@ var GifEditor = (function () {
       '      <img id="gif-result-img" class="gif-result-img" alt="">' +
       '      <div class="gif-result-actions">' +
       '        <a id="gif-dl-link" class="gif-btn gif-btn-primary" download>' + t('gifEditorDownloadGif') + '</a>' +
+      '        <button class="gif-btn" id="gif-result-open-gallery">' + t('gifEditorOpenGallery') + '</button>' +
       '        <button class="gif-btn" id="gif-result-close">' + t('gifEditorClose') + '</button>' +
       '      </div>' +
       '    </div>' +

@@ -47,3 +47,24 @@ func ResolveImageSaveDir(imageSaveDir, configDir string) string {
 	}
 	return imageSaveDir
 }
+
+// ResolveArchiveTempDir resolves the archive private workspace directory. An
+// empty tempDir falls back to {configDir}/archives; a relative path is joined
+// with configDir; an absolute path is used verbatim. The caller is
+// responsible for creating the directory (0700) and failing closed when it
+// cannot be created (archive capability disabled, core features unaffected).
+func ResolveArchiveTempDir(tempDir, configDir string) string {
+	if tempDir == "" {
+		if configDir != "" {
+			return filepath.Join(configDir, "archives")
+		}
+		return "archives"
+	}
+	if filepath.IsAbs(tempDir) {
+		return tempDir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, tempDir)
+	}
+	return tempDir
+}

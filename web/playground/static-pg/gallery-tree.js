@@ -205,7 +205,8 @@ function renderTreePanel() {
         var node = treeMap[tKey];
         var indent = node.level * 12 + 8;
         var icon = '📁';
-        if (isZipName(node.name) || tKey.indexOf('.zip/') !== -1 || isZipName(tKey)) {
+        if (isArchiveName(node.name) || tKey.indexOf('.zip/') !== -1 || isArchiveName(tKey) ||
+            tKey.indexOf('.7z/') !== -1 || tKey.indexOf('.rar/') !== -1) {
           icon = '📦';
         } else if (tKey === '') {
           icon = '🖼';
@@ -414,27 +415,38 @@ function renderTreePanel() {
   }
 }
 
-// releaseZipSessions fires best-effort DELETE /api/gallery/zip/{sessionId} for
-// every distinct zip session referenced by removedItems, skipping any session
-// still referenced by a surviving item (so sibling entries of the same pack
-// keep their session alive). Fire-and-forget: errors are swallowed (the
-// session may already be evicted) and the UI never blocks on this.
+// releaseZipSessions fires best-effort DELETE for every distinct archive
+// source (sourceId → /api/archive/sources) and zip session (sessionId →
+// /api/gallery/zip) referenced by removedItems, skipping any id still
+// referenced by a surviving item (so sibling entries of the same pack keep
+// their source alive). Fire-and-forget: errors are swallowed (the source may
+// already be expired) and the UI never blocks on this.
 function releaseZipSessions(removedItems) {
   if (!removedItems || !removedItems.length) return;
+  var srcIds = {};
   var sids = {};
   for (var i = 0; i < removedItems.length; i++) {
     var it = removedItems[i];
-    if (it && it.kind === 'zip' && it.sessionId) sids[it.sessionId] = true;
+    if (!it || it.kind !== 'zip') continue;
+    if (it.sourceId) srcIds[it.sourceId] = true;
+    else if (it.sessionId) sids[it.sessionId] = true;
   }
-  if (!Object.keys(sids).length) return;
-  var alive = {};
   var survivors = (galleryState.items || []).concat(galleryState.videoItems || []);
+  var aliveSrc = {};
+  var aliveSess = {};
   for (var j = 0; j < survivors.length; j++) {
     var s = survivors[j];
-    if (s && s.kind === 'zip' && s.sessionId) alive[s.sessionId] = true;
+    if (!s || s.kind !== 'zip') continue;
+    if (s.sourceId) aliveSrc[s.sourceId] = true;
+    else if (s.sessionId) aliveSess[s.sessionId] = true;
+  }
+  for (var srcId in srcIds) {
+    if (aliveSrc[srcId]) continue;
+    fetch('/api/archive/sources/' + encodeURIComponent(srcId), { method: 'DELETE' })
+      .catch(function() { /* already expired */ });
   }
   for (var sid in sids) {
-    if (alive[sid]) continue;
+    if (aliveSess[sid]) continue;
     var url = '/api/gallery/zip/' + encodeURIComponent(sid);
     fetch(url, { method: 'DELETE' }).catch(function() { /* already evicted */ });
   }
@@ -676,24 +688,15 @@ function updateInfo(item, info, countStr) {
 
 function setActive(index) {
   if (!galleryState.items.length) return;
-  if (index < 0) index = galleryState.items.length - 1;
-  if (index >= galleryState.items.length) index = 0;
-  // Revoke previous item's mainURL to prevent blob URL leaks during autoplay
-  var prevIndex = galleryState.index;
-  if (prevIndex >= 0 && prevIndex < galleryState.items.length) {
-    var prev = galleryState.items[prevIndex];
-    if (prev && prev.mainURL && prev.mainURL.indexOf('blob:') === 0) {
-      FsApi.BlobTracker.revoke(prev.mainURL);
-      prev.mainURL = null;
-    }
-  }
   galleryState.index = index;
   // Point the shared zipSessionId at the currently-viewed pack (AI Review and
   // the getItemBlob fallback read it) and bump the session's LRU position so
-  // the viewed pack resists eviction. Fire-and-forget the touch; a 404 just
-  // means rehydrateZipSession will recreate it on next entry fetch.
+  // the viewed pack resists eviction. Archive-source items (sourceId) are
+  // managed by the server TTL and have no LRU touch endpoint; only legacy
+  // in-memory zip sessions are touched. Fire-and-forget; a 404 just means
+  // rehydrateZipSession will recreate it on next entry fetch.
   var cur = galleryState.items[index];
-  if (cur && cur.kind === 'zip' && cur.sessionId) {
+  if (cur && cur.kind === 'zip' && cur.sessionId && !cur.sourceId) {
     galleryState.zipSessionId = cur.sessionId;
     fetch('/api/gallery/zip/' + encodeURIComponent(cur.sessionId) + '/touch', { method: 'POST' }).catch(function() {});
   }

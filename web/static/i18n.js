@@ -557,6 +557,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     gifEditorNoFrames: 'No frames yet',
     gifEditorResultTitle: 'Preview',
     gifEditorDownloadGif: '⬇️ Download GIF',
+    gifEditorOpenGallery: 'Open in Gallery',
     gifEditorClose: 'Close',
     gifEditorRendering: 'Rendering...',
     gifEditorDuplicate: 'Duplicate',
@@ -588,6 +589,9 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     gifEditorZipUploadFail: 'Frame upload failed: {0}',
     gifEditorZipPackFail: 'ZIP packaging failed: {0}',
     gifEditorZipDone: 'ZIP exported',
+    mediaBridgeImported: 'Imported {0} item(s) into Gallery',
+    mediaBridgeGalleryUnavailable: 'Gallery is not available in this build',
+    mediaBridgeAssetExpired: 'Media asset has expired or is unavailable',
   },
   cn: {
     requestTracing: '请求追踪',
@@ -1147,6 +1151,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     gifEditorNoFrames: '暂无帧序列',
     gifEditorResultTitle: '效果预览',
     gifEditorDownloadGif: '⬇️ 下载 GIF',
+    gifEditorOpenGallery: '在画廊中打开',
     gifEditorClose: '关闭',
     gifEditorRendering: '渲染中...',
     gifEditorDuplicate: '复制',
@@ -1178,6 +1183,9 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     gifEditorZipUploadFail: '帧上传失败：{0}',
     gifEditorZipPackFail: 'ZIP 打包失败：{0}',
     gifEditorZipDone: 'ZIP 导出成功',
+    mediaBridgeImported: '已将 {0} 个项目导入画廊',
+    mediaBridgeGalleryUnavailable: '当前构建不包含画廊功能',
+    mediaBridgeAssetExpired: '媒体资产已过期或不可用',
   }
 };
 

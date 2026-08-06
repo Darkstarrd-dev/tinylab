@@ -338,6 +338,19 @@ type TraceConfig struct {
 	LogDir string `yaml:"logDir,omitempty" json:"logDir,omitempty"`
 }
 
+// ArchiveConfig controls the shared archive capability (ZIP/7z/RAR) used by
+// Gallery, GIF export and pack endpoints. All fields are optional: an empty
+// tool path falls back to the SEVENZIP_PATH / RAR_PATH environment variables
+// and then to PATH lookup at runtime. Paths are resolved lazily — a missing
+// tool never blocks startup, it only disables the corresponding capability.
+// TempDir overrides the default private workspace ({configDir}/archives when
+// empty); a relative path is resolved against the config directory.
+type ArchiveConfig struct {
+	SevenZipPath string `yaml:"sevenZipPath,omitempty" json:"sevenZipPath,omitempty"`
+	RarPath      string `yaml:"rarPath,omitempty" json:"rarPath,omitempty"`
+	TempDir      string `yaml:"tempDir,omitempty" json:"tempDir,omitempty"`
+}
+
 // Config is the top-level configuration structure.
 type Config struct {
 	Port               int              `yaml:"port" json:"port"`
@@ -360,4 +373,5 @@ type Config struct {
 	ImageSaveDir       string           `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
 	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
+	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`
 }

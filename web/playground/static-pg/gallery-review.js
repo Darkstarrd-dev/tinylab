@@ -599,24 +599,29 @@ function buildReviewQueue(selectedNodes) {
     var itemIndices = galleryState.dirMap[dir] || [];
     if (!itemIndices.length) continue;
 
+    // Group zip items by pack: archive-source packs key on sourceId, legacy
+    // in-memory sessions on sessionId. The review backend accepts either.
     var sessionGroups = {};
     for (var j = 0; j < itemIndices.length; j++) {
       var item = galleryState.items[itemIndices[j]];
       if (!item || item.kind !== 'zip') continue;
-      var sid = item.sessionId;
-      if (!sid) continue;
-      if (!sessionGroups[sid]) sessionGroups[sid] = [];
-      sessionGroups[sid].push(item.index);
+      var packId = item.sourceId || item.sessionId;
+      if (!packId) continue;
+      if (!sessionGroups[packId]) sessionGroups[packId] = { sourceId: item.sourceId || '', sessionId: item.sessionId || '', indices: [] };
+      sessionGroups[packId].indices.push(item.index);
     }
 
-    for (var sid in sessionGroups) {
-      if (sessionGroups.hasOwnProperty(sid)) {
-        queue.push({
+    for (var packKey in sessionGroups) {
+      if (sessionGroups.hasOwnProperty(packKey)) {
+        var grp = sessionGroups[packKey];
+        var node = {
           dir: dir,
-          sessionId: sid,
-          entryIndices: sessionGroups[sid],
+          entryIndices: grp.indices,
           itemIndices: itemIndices
-        });
+        };
+        if (grp.sourceId) node.sourceId = grp.sourceId;
+        else node.sessionId = grp.sessionId;
+        queue.push(node);
       }
     }
   }
@@ -677,7 +682,9 @@ function reviewNextNode() {
   var node = rs.reviewQueue[rs.reviewQueueIndex];
   rs.currentReviewNode = node.dir;
   rs.nodeStatus[node.dir] = 'running';
-  rs.sessionId = node.sessionId;
+  // The poll key is the review task id: sourceId for archive-source packs,
+  // sessionId for legacy in-memory zip sessions.
+  rs.sessionId = node.sourceId || node.sessionId;
 
   rs.total = node.entryIndices.length;
   rs.processed = 0;
@@ -694,7 +701,6 @@ function reviewNextNode() {
   }
 
   var body = {
-    sessionId: node.sessionId,
     provider: provider,
     model: model,
     systemPrompt: rs.systemPrompt,
@@ -704,6 +710,8 @@ function reviewNextNode() {
     tailSize: rs.tailSize,
     concurrency: rs.concurrency
   };
+  if (node.sourceId) body.sourceId = node.sourceId;
+  else body.sessionId = node.sessionId;
   if (rs.userPrompt) body.userPrompt = rs.userPrompt;
 
   fetch('/api/gallery/review/start', {
@@ -732,7 +740,11 @@ function startNodePolling(node) {
 
   galleryState.reviewState.pollTimer = setInterval(function() {
     var rs = galleryState.reviewState;
-    fetch('/api/gallery/review/status/' + encodeURIComponent(node.sessionId))
+    // Poll key = the review task id: sourceId for archive-source packs,
+    // sessionId for legacy in-memory zip sessions (same key reviewNextNode
+    // used to start the task).
+    var pollKey = node.sourceId || node.sessionId;
+    fetch('/api/gallery/review/status/' + encodeURIComponent(pollKey))
       .then(function(r) {
         if (r.status === 404) {
           return {

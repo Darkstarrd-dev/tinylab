@@ -495,6 +495,43 @@ function onGalleryKeyDown(e) {
   }
 }
 
+// ---------- archive-source deletion helpers (P3 migration) ----------
+
+// _packId returns the stable pack identifier of a zip item: the archive
+// sourceId for /api/archive-registered packs, else the legacy in-memory zip
+// sessionId. Both are server-issued tokens — never browser-supplied paths.
+function _packId(it) {
+  return it ? (it.sourceId || it.sessionId || '') : '';
+}
+
+// _zipReplaceDeleteEntries deletes entry paths from an archive source via
+// POST /api/archive/zip-replace (sourceId + deletes, no replacements) and
+// returns the rewritten archive bytes fetched through the controlled
+// /api/archive/assets/{assetId} endpoint. Only archive-registered zip groups
+// use this; legacy in-memory sessions keep the per-entry DELETE + writeback.
+async function _zipReplaceDeleteEntries(sourceId, entryPaths) {
+  var res = await fetch('/api/archive/zip-replace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceId: sourceId, deletes: entryPaths })
+  });
+  var data = await res.json();
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  if (!data.assetId) throw new Error('zip-replace returned no assetId');
+  var ab = await fetch('/api/archive/assets/' + encodeURIComponent(data.assetId));
+  if (!ab.ok) throw new Error('asset http ' + ab.status);
+  return ab.arrayBuffer();
+}
+
+// _writePackBytesToHandle persists rewritten archive bytes to the browser-held
+// FileSystemFileHandle (FSAA zips) — the only disk target archive-source packs
+// have, since the server copy lives in the archive temp store.
+async function _writePackBytesToHandle(handle, bytes) {
+  if (!handle) return;
+  var writable = await handle.createWritable();
+  await writable.write(bytes);
+  await writable.close();
+}
 // ---------- deletion: batch prompt & disk delete (Ctrl+Del) ----------
 window.deleteItemPrompt = function() {
   // Ctrl+Del 对视频无效
@@ -531,21 +568,30 @@ window.deleteItemPrompt = function() {
     };
   }
 };
-
 // deleteMarkedFromDisk removes all marked items from disk. Supports three
-// item kinds: backend (absolute path → Go os.Remove), zip (DELETE API +
+// item kinds: backend (absolute path → Go os.Remove), zip (archive-source
+// groups via /api/archive/zip-replace, legacy sessions via DELETE API +
 // writeback), and fs (FSAA handle.remove()).
 async function deleteMarkedFromDisk(marked) {
-  // 分组：zip 按 sessionId 分组；backend/fs 单独处理；plain 无磁盘能力跳过
-  var zipGroups = {};  // sessionId -> { items: [], handle, zipAbsPath }
+  // 分组：archive-source zip 按 sourceId 分组；legacy zip 按 sessionId 分组；
+  // backend/fs 单独处理；plain 无磁盘能力跳过
+  var zipSrcGroups = {};   // sourceId -> { items: [], handle }
+  var zipSessGroups = {};  // sessionId -> { items: [], handle, zipAbsPath }
   var backendItems = [];
   var fsItems = [];
   var plainCount = 0;
   for (var i = 0; i < marked.length; i++) {
     var it = marked[i];
     if (it.kind === 'zip' && (it.zipFileHandle || it.zipAbsPath)) {
-      if (!zipGroups[it.sessionId]) zipGroups[it.sessionId] = { items: [], handle: it.zipFileHandle, zipAbsPath: it.zipAbsPath || null };
-      zipGroups[it.sessionId].items.push(it);
+      if (it.sourceId) {
+        if (!zipSrcGroups[it.sourceId]) zipSrcGroups[it.sourceId] = { items: [], handle: it.zipFileHandle || null };
+        zipSrcGroups[it.sourceId].items.push(it);
+      } else if (it.sessionId) {
+        if (!zipSessGroups[it.sessionId]) zipSessGroups[it.sessionId] = { items: [], handle: it.zipFileHandle, zipAbsPath: it.zipAbsPath || null };
+        zipSessGroups[it.sessionId].items.push(it);
+      } else {
+        plainCount++;
+      }
     } else if (it.kind === 'backend' && it.absPath) {
       backendItems.push(it);
     } else if (it.kind === 'fs' && it.handle) {
@@ -555,10 +601,26 @@ async function deleteMarkedFromDisk(marked) {
     }
   }
   var errors = [];
-  // 处理每个 zip session：逐个 DELETE，最后一次性写回
-  for (var sid in zipGroups) {
-    if (!zipGroups.hasOwnProperty(sid)) continue;
-    var grp = zipGroups[sid];
+  // Archive-source groups: ONE atomic zip-replace per source dropping every
+  // marked entry, then persist the rewritten bytes to the FSAA handle.
+  for (var srcId in zipSrcGroups) {
+    if (!zipSrcGroups.hasOwnProperty(srcId)) continue;
+    var sg = zipSrcGroups[srcId];
+    var delPaths = [];
+    for (var m = 0; m < sg.items.length; m++) {
+      if (sg.items[m].zipPath) delPaths.push(sg.items[m].zipPath);
+    }
+    try {
+      var newBytes = await _zipReplaceDeleteEntries(srcId, delPaths);
+      await _writePackBytesToHandle(sg.handle, newBytes);
+    } catch (e) {
+      errors.push('zip-replace ' + srcId + ': ' + e.message);
+    }
+  }
+  // Legacy in-memory session groups: 逐个 DELETE，最后一次性写回
+  for (var sid in zipSessGroups) {
+    if (!zipSessGroups.hasOwnProperty(sid)) continue;
+    var grp = zipSessGroups[sid];
     var lastBytes = null;
     var allOk = true;
     for (var j = 0; j < grp.items.length; j++) {
@@ -618,15 +680,14 @@ async function deleteMarkedFromDisk(marked) {
   removeItemsByFilter(function(it) { return it.markedForDeletion; });
   // 提示
   if (errors.length) {
-    showMsg('部分删除失败（' + errors.length + '项），已从列表移除');
+    showMsg('部分删除失败: ' + errors[0]);
     console.warn('deleteMarkedFromDisk errors:', errors);
   } else if (plainCount > 0) {
-    showMsg('已处理（' + plainCount + ' 张无法从磁盘移除，仅移除列表）');
+    showMsg('已从磁盘移除（' + plainCount + ' 个无磁盘能力项仅从列表移除）');
   } else {
-    showMsg('已从磁盘移除 ' + marked.length + ' 张');
+    showMsg('已从磁盘移除');
   }
 }
-
 // toggleReviewItemMark toggles the deletion mark for the current item and
 // advances to the next item after a brief delay (used in review mode with
 // IsMatch results, where Delete toggles rather than merely marks).
@@ -641,39 +702,27 @@ function toggleReviewItemMark() {
   if (item.thumbDivEl) {
     item.thumbDivEl.classList.toggle('thumb-marked-for-deletion', item.markedForDeletion);
   }
-  // 切换后自动前进到过滤后的下一张（与 deleteItemMark 一致的行为）。
-  var folderIndices = galleryState.currentFolderIndices || [];
-  var curPos = folderIndices.indexOf(idx);
-  if (curPos >= 0 && curPos < folderIndices.length - 1) {
-    var nextIdx = folderIndices[curPos + 1];
-    galleryState._markAdvanceTimer = setTimeout(function() {
-      galleryState._markAdvanceTimer = null;
-      if (galleryState.index === idx) setActive(nextIdx);
-    }, 300);
-  }
 }
-
-// ---------- helper functions for node-level deletion ----------------
-
-// isParentNode checks whether curDir contains subdirectories (i.e. it is a
-// parent node whose deletion would remove child items as well).
+// isParentNode reports whether the current directory node has subdirectories
+// (a parent node whose deletion would remove child items as well).
 function isParentNode(curDir) {
   var dirList = galleryState.dirPathList || [];
   if (curDir === 'Root') {
-    return dirList.some(function(p) { return p !== 'Root' && p.indexOf('/') < 0 && !isZipName(p); });
+    return dirList.some(function(p) { return p !== 'Root' && p.indexOf('/') < 0 && !isArchiveName(p); });
   }
   return dirList.some(function(p) { return p !== curDir && p.startsWith(curDir + '/'); });
 }
 
 // itemsInNode returns all items in galleryState.items that belong to the
 // given node (zip root, zip subdirectory, disk root, or disk subdirectory).
-function itemsInNode(curDir, item, nodeType, sessionId, rootHandle) {
+// packId matches either an archive sourceId or a legacy zip sessionId.
+function itemsInNode(curDir, item, nodeType, packId, rootHandle) {
   var items = galleryState.items;
   if (nodeType === 'zip-root') {
-    return items.filter(function(it) { return it.kind === 'zip' && it.sessionId === sessionId; });
+    return items.filter(function(it) { return it.kind === 'zip' && _packId(it) === packId; });
   }
   if (nodeType === 'zip-subdir') {
-    return items.filter(function(it) { return it.kind === 'zip' && it.sessionId === sessionId && it.path.startsWith(curDir + '/'); });
+    return items.filter(function(it) { return it.kind === 'zip' && _packId(it) === packId && it.path.startsWith(curDir + '/'); });
   }
   if (nodeType === 'disk-root') {
     return items.filter(function(it) { return it.kind === 'fs' && it.rootDirHandle === rootHandle; });
@@ -803,17 +852,18 @@ window.deleteZipPrompt = function() {
   if (!item) return;
   var curDir = galleryState.curDirPath || getDirPath(item.path);
 
-  // Determine node type
-  var nodeType, sessionId = null, zipSubPrefix = null, rootHandle = null;
-  if (isZipName(curDir)) {
+  // Determine node type. packId is the zip item's archive sourceId OR legacy
+  // sessionId — a server-issued token, never a browser-supplied path.
+  var nodeType, packId = null, zipSubPrefix = null, rootHandle = null;
+  if (isArchiveName(curDir)) {
     nodeType = 'zip-root';
-    sessionId = item.sessionId;
+    packId = _packId(item);
   } else if (curDir === 'Root') {
     nodeType = 'disk-root';
     rootHandle = item.rootDirHandle || null;
   } else if (item.kind === 'zip') {
     nodeType = 'zip-subdir';
-    sessionId = item.sessionId;
+    packId = _packId(item);
     zipSubPrefix = curDir;
   } else {
     nodeType = 'disk-subdir';
@@ -824,7 +874,7 @@ window.deleteZipPrompt = function() {
   var isParent = isParentNode(curDir);
 
   // Enumerate items in this node
-  var nodeItems = itemsInNode(curDir, item, nodeType, sessionId, rootHandle);
+  var nodeItems = itemsInNode(curDir, item, nodeType, packId, rootHandle);
   var fileCount = nodeItems.length;
 
   // Show modal
@@ -849,19 +899,22 @@ window.deleteZipPrompt = function() {
   if (canDisk) {
     document.getElementById('zip-del-disk').onclick = function() {
       pgCloseModal();
-      deleteNodeFromDisk(nodeType, item, curDir, sessionId, rootHandle, nodeItems);
+      deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, nodeItems);
     };
   }
 };
 
+
 // deleteNodeFromDisk removes the given node from disk based on its type.
 // For zip-root: removes the entire zip file via zipFileHandle.remove().
-// For zip-subdir: deletes each entry in the subdirectory via the DELETE API,
-//   then writes back the final zip bytes once via createWritable.
+// For zip-subdir: archive-source packs drop the subdirectory entries with one
+//   atomic /api/archive/zip-replace (sourceId + deletes) then persist the
+//   rewritten bytes to the FSAA handle; legacy sessions delete each entry via
+//   the DELETE API and write back the final zip bytes once via createWritable.
 // For disk-root: removes the top-level directory recursively.
 // For disk-subdir: resolves the subdirectory handle from rootDirHandle and
 //   removes it recursively.
-async function deleteNodeFromDisk(nodeType, item, curDir, sessionId, rootHandle, nodeItems) {
+async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, nodeItems) {
   var errors = [];
   try {
     if (nodeType === 'zip-root') {
@@ -879,35 +932,49 @@ async function deleteNodeFromDisk(nodeType, item, curDir, sessionId, rootHandle,
         showMsg('此节点无法从磁盘移除'); return;
       }
     } else if (nodeType === 'zip-subdir') {
-      // Delete zip entries in this subdirectory one by one via the DELETE API,
-      // then write back the final zip bytes once
       var subItems = nodeItems.filter(function(it) { return it.kind === 'zip'; });
-      var lastBytes = null;
-      var ok = true;
-      for (var i = 0; i < subItems.length; i++) {
-        var zPath = subItems[i].zipPath || '';
-        var identifier = zPath.split('/').map(encodeURIComponent).join('/');
-        var url = '/api/gallery/zip/' + encodeURIComponent(sessionId) + '/' + identifier;
-        try {
-          var res = await fetch(url, { method: 'DELETE' });
-          if (!res.ok) { errors.push('entry ' + zPath + ': HTTP ' + res.status); ok = false; break; }
-          lastBytes = await res.arrayBuffer();
-        } catch (e) { errors.push('entry ' + zPath + ': ' + e.message); ok = false; break; }
+      var subPaths = [];
+      for (var q = 0; q < subItems.length; q++) {
+        if (subItems[q].zipPath) subPaths.push(subItems[q].zipPath);
       }
-      if (ok && lastBytes) {
+      if (item.sourceId) {
+        // Archive-source pack: one atomic zip-replace dropping the whole
+        // subdirectory, then persist the rewritten bytes to the FSAA handle.
+        if (!subPaths.length) { showMsg('此节点无法从磁盘移除'); return; }
         try {
-          if (item.zipAbsPath) {
-            await fetch('/api/gallery/zip-writeback', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionId: sessionId, path: item.zipAbsPath })
-            });
-          } else if (item.zipFileHandle) {
-            var writable = await item.zipFileHandle.createWritable();
-            await writable.write(lastBytes);
-            await writable.close();
-          }
-        } catch (e) { errors.push('writeback: ' + e.message); }
+          var newBytes = await _zipReplaceDeleteEntries(item.sourceId, subPaths);
+          await _writePackBytesToHandle(item.zipFileHandle, newBytes);
+        } catch (e) { errors.push('zip-replace: ' + e.message); }
+      } else {
+        // Legacy session pack: delete each entry via the DELETE API, then
+        // write back the final zip bytes once.
+        var lastBytes = null;
+        var ok = true;
+        for (var i = 0; i < subItems.length; i++) {
+          var zPath = subItems[i].zipPath || '';
+          var identifier = zPath.split('/').map(encodeURIComponent).join('/');
+          var url = '/api/gallery/zip/' + encodeURIComponent(packId) + '/' + identifier;
+          try {
+            var res = await fetch(url, { method: 'DELETE' });
+            if (!res.ok) { errors.push('entry ' + zPath + ': HTTP ' + res.status); ok = false; break; }
+            lastBytes = await res.arrayBuffer();
+          } catch (e) { errors.push('entry ' + zPath + ': ' + e.message); ok = false; break; }
+        }
+        if (ok && lastBytes) {
+          try {
+            if (item.zipAbsPath) {
+              await fetch('/api/gallery/zip-writeback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: packId, path: item.zipAbsPath })
+              });
+            } else if (item.zipFileHandle) {
+              var writable = await item.zipFileHandle.createWritable();
+              await writable.write(lastBytes);
+              await writable.close();
+            }
+          } catch (e) { errors.push('writeback: ' + e.message); }
+        }
       }
     } else if (nodeType === 'disk-root') {
       // Delete the entire top-level directory recursively

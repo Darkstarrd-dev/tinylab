@@ -47,6 +47,16 @@ function isZipName(name) {
   return lower.endsWith('.zip');
 }
 
+// isArchiveName reports whether the name is a browsable archive (.zip/.7z/.rar).
+// The /api/archive migration registers any of these as an archive source; 7z
+// and RAR require the configured external tools, so the backend may report a
+// diagnostic error when they are missing.
+function isArchiveName(name) {
+  if (!name) return false;
+  var lower = name.toLowerCase();
+  return lower.endsWith('.zip') || lower.endsWith('.7z') || lower.endsWith('.rar');
+}
+
 function extOf(name) {
   if (!name) return '';
   var dot = name.lastIndexOf('.');

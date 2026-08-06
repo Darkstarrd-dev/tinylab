@@ -6,6 +6,7 @@
 > **最后核对（2026-07-30 路径设置弹窗重构）：** `openDownloadSettingsModal()` 重构为 `openPathSettingsModal({title, sections, useProxy})`——按 `sections` 条件渲染行（Settings 页全 5 项 defaultDir/imageDir/logDir/ytDlpPath/ffmpegPath；Download 页 defaultDir+ytDlpPath+ffmpegPath + UseProxy 开关；Gallery Edit 仅 defaultDir+ffmpegPath）。Download 页删除自由文本 proxy 输入，改为 UseProxy toggle 引用 Settings 上游代理；`index-nopg.html` 补加载 `download.js`（Settings Path 行依赖该全局函数）。overlay id `dl-settings-overlay` 保留不变（Gallery 轮询依赖）。
 > **2026-08-04 Download 前端样式整改：** `web/static/download.js` 将 playlist entries/header/chevron 折叠状态迁移至 `dl-*` class，保留浏览锁、指针事件和动态布局控制；`style.css` 统一提供 class 状态规则。
 > **2026-08-05 Download Clear Completed 按钮图标重构：** `web/static/download.js` 清除已完成任务按钮替换为 bin-top 与 bin-bottom 双层 SVG 图标，`style.css` 添加 `.bin-button:hover .bin-top` 旋转（`rotate(45deg)`）盖子打开动画，图标色彩继承 `currentColor` 保持原有按钮主题配色与透明背景不变。
+> **最后核对（2026-08-06 MediaBridge 交接）：** `playVideo(taskId)` 不再直写 `galleryState`、不再点击 Gallery 导航按钮——完成任务的输出注册为 MediaAsset（`kind:'video'` + `/api/downloads/{id}/file` 受控 URL，无绝对路径），`MediaBridge.register` 全部成功后 `MediaBridge.openGallery(ids)`；桥接不可用 toast 报错。详见 §9.1 与 [`docs/archive-architecture.md`](archive-architecture.md) §7/§8。
 > **2026-08-05 Download 工具栏 Theme 系统集成与动画下拉框：** `web/static/download.js` 及 `style.css` 将输入框 `#dl-url` 与三个下拉菜单纳入 Theme 变量（`var(--glass-bg)`/`var(--text)`/`var(--accent)`等）；下拉框采用点击展开/点击关闭/点击外部收回的动画菜单组，提供 `translateY` 弹出与 `.custom-select-option-link::before` 划过 `scaleX(1)` 展开过渡，底层原生 `<select>` 保持同步维持接口兼容。
 >
 > **Download 包文件拆分（2026-07-25，行为不变）**：`internal/download/` 三个超大文件按职责拆分为 12 个文件——`manager.go`→`manager.go`+`worker.go`+`events.go`+`playlist.go`+`lifecycle.go`；`executor.go`→`executor.go`+`progress.go`+`binary.go`+`parse.go`；`args.go`→`args.go`+`formats.go`+`network.go`。所有导出符号名/签名不变，同包内未导出符号跨新文件可达，build/vet/test 全绿。下文内联的旧 `file:line` 锚点（如 `executor.go:199`、`args.go:258`）已随拆分迁移，请以 §13.4 的文件→符号映射为准。
@@ -413,6 +414,15 @@ PATCH `/settings` 的 `download` 段：字符串字段总是覆盖（含空串�
 | `viewLog` | 755-809 | `fetch('/api/downloads/{id}/log')` 弹出日志 modal（响应首行为完整 yt-dlp 命令行，见 §3.4 / 改动1） |
 
 > 前端通过 `t(key)`（i18n）渲染状态文案，`DL_STATUS_KEYS`（download.js:15-22）把原始 `TaskStatus` 映射到 i18n key。重试调用 `POST /downloads/{id}/retry` 原地重试（服务端 `RetryTask` 复用 task ID），列表条目为独立任务（与 §1 #3 一致）。任务卡片已重构为**左右分栏**：左侧 `.dl-task-list` 紧凑列表（2 份），右侧 `.dl-task-detail` sticky 详情（3 份），小屏（max-width:760px）上下堆叠（style.css `.dl-task-split` flex-direction:column）。旧的 `.dl-task-card`/`.dl-task-thumb`/`.progress-bar*` 样式与 `taskCardHtml` 已删除。
+
+### 9.1 完成视频交接（MediaBridge，2026-08-06）
+
+`playVideo(taskId)` 从"直写 `galleryState` 并点击 Gallery 导航按钮"重构为 **MediaBridge 交接**（契约见 [`docs/archive-architecture.md`](archive-architecture.md) §7/§8）：
+
+- 每个完成任务的输出注册为 `MediaAsset`：`{name: task.title || 文件名末段 || task.id, mime: mimeFromDownloadName(name), kind: 'video', format: 扩展名, url: '/api/downloads/{id}/file', size}`——**无绝对路径**，字节由受控下载端点流式提供。
+- `Promise.all(assets.map(MediaBridge.register))` 全部成功后再 `MediaBridge.openGallery(ids)`；桥接不可用时 toast `MediaBridge unavailable` 并 return（不再静默写 `galleryState`）。
+- Gallery 侧由 `gallery-io.js::galleryImportAssets` 的 video 分支消费（`buildBridgeVideoItem` 转 `kind:'plain'` + `mainURL` 受控 URL 项）。
+- 删除的旧行为：直接改写 `galleryState.mediaType/focus/videoPlayingState/videoItems/videoIndex`、`renderTreePanel`/`updateLayoutMode`/`setVideoActive` 调用链、`button[data-page="gallery"]` click。
 
 ## 10. 并发模型
 

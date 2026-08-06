@@ -3,11 +3,13 @@
 package gallery
 
 import (
+	"context"
 	"net/http"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/archive"
 	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
 
 	// Register all image format decoders so image.Decode works for PNG/GIF/WebP/BMP/TIFF.
@@ -17,6 +19,22 @@ import (
 	_ "image/gif"
 	_ "image/png"
 )
+
+// archiveBridge is the /api/archive surface the gallery handlers consume for
+// sourceId-based flows (zip entry extraction for editing, AI review over a
+// registered archive source). It is implemented by *archiveapi.Handler and
+// injected via SetArchive by the router; a nil bridge keeps every gallery
+// flow on the legacy in-memory zip sessions (compatibility boundary).
+type archiveBridge interface {
+	// ResolveSource returns the registered source for a sourceId, or false
+	// when the source is unknown or expired.
+	ResolveSource(id string) (archive.Source, bool)
+	// List returns the strict-validated manifest of a source.
+	List(ctx context.Context, src archive.Source, b archive.Budget) (archive.Manifest, error)
+	// ReadEntry returns the bytes + content-type of one entry, addressed by
+	// decimal index or strict relative archive path.
+	ReadEntry(ctx context.Context, src archive.Source, identifier string, b archive.Budget) ([]byte, string, error)
+}
 
 // proxyCaller is the subset of the proxy handler the gallery subsystem needs.
 // *proxy.Handler satisfies it (ChatCompletions); tests may substitute a fake.
@@ -38,6 +56,7 @@ type Handler struct {
 	reviews  sync.Map // map[string]*reviewTask
 	media    *mediaedit.Manager
 	proxy    proxyCaller
+	archive  archiveBridge // nil = legacy in-memory zip sessions only
 }
 
 // NewHandler creates a new gallery Handler with per-instance state.
@@ -48,6 +67,15 @@ func NewHandler(d *apibase.Deps) *Handler {
 		media:    mediaedit.NewManager(),
 		proxy:    d.ProxyHandler,
 	}
+}
+
+// SetArchive wires the /api/archive bridge so sourceId-based gallery items
+// (archive-registered zip sources) can be extracted and reviewed through the
+// shared archive capability instead of the legacy in-memory zip sessions. The
+// router calls this after constructing both handlers; nil is a valid value
+// (keeps the legacy flows when the archive runner is unavailable).
+func (h *Handler) SetArchive(b archiveBridge) {
+	h.archive = b
 }
 
 // Register registers the gallery routes on the given router.

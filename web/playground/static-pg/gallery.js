@@ -40,6 +40,13 @@ window.renderGallery = function(container) {
         typeof window.loadReviewPresets === 'function') {
       window.loadReviewPresets();
     }
+
+    // Flush any MediaBridge handoff queue (GIF export / Download "Play" →
+    // Gallery). The bridge holds tokens until consumed or TTL, so switching
+    // away and back re-delivers only handoffs that were never imported.
+    if (window.MediaBridge && typeof window.MediaBridge.deliverPendingImports === 'function') {
+      window.MediaBridge.deliverPendingImports();
+    }
   } catch (e) {
     console.warn('renderGallery failed:', e);
   }

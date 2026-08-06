@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tinyrouter/tinyrouter/internal/api/anysearch"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	archiveapi "github.com/tinyrouter/tinyrouter/internal/api/archive"
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
 	"github.com/tinyrouter/tinyrouter/internal/api/combos"
 	"github.com/tinyrouter/tinyrouter/internal/api/comfyui"
@@ -41,6 +42,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/feature"
 	"github.com/tinyrouter/tinyrouter/internal/filetransfer"
 	domainimagebatch "github.com/tinyrouter/tinyrouter/internal/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
@@ -76,6 +78,11 @@ type deps struct {
 	// logRequests reflects the live trace toggle from settings.
 	logRequests atomic.Bool
 	restartFn   func(string)
+
+	// archiveRunner is the shared archive capability (ZIP/7z/RAR) wired by the
+	// app after construction; nil disables the /api/archive endpoints with a
+	// diagnostic 503.
+	archiveRunner apibase.ArchiveRunner
 
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
@@ -149,6 +156,13 @@ func (rt *Router) SetStateSaveFunc(fn func()) {
 	rt.stateSaveFunc = fn
 }
 
+// SetArchiveRunner wires the archive runner built by the app. It must be
+// called before Routes() so the /api/archive handlers and the settings
+// runtime callback are populated.
+func (rt *Router) SetArchiveRunner(runner apibase.ArchiveRunner) {
+	rt.archiveRunner = runner
+}
+
 func (rt *Router) DebugMode() bool {
 	return rt.debugMode.Load()
 }
@@ -211,6 +225,13 @@ func isLocalhostOrigin(origin string) bool {
 }
 
 func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
+	// Sync the one genuinely tag-gated surface (the `playground` static embed)
+	// into the feature manifest. Every other feature is registered compiled by
+	// default because no feature_* build tags exist yet — their Go packages
+	// compile unconditionally. The gates below are the single drop point where
+	// future feature_* tags flip the manifest (archive_compatibility_plan.md
+	// §11/P5); in the default build every gate passes, so no route changes.
+	feature.SetCompiled(feature.Playground, web.PlaygroundCompiled())
 	r := chi.NewRouter()
 
 	// Middleware
@@ -259,25 +280,30 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 	// Build the shared Deps for sub-packages.
 	apiDeps := &apibase.Deps{
-		Reg:           rt.reg,
-		ConfigPath:    rt.configPath,
-		Usage:         rt.usage,
-		PgUsage:       rt.pgUsage,
-		QuotaTracker:  rt.quotaTracker,
-		Logger:        rt.logger,
-		ProxyHandler:  rt.proxyHandler,
-		Selector:      rt.selector,
-		ComboRes:      rt.comboRes,
-		DownloadMgr:   rt.downloadMgr,
-		Shutdown:      rt.shutdown,
-		DebugMode:     &rt.debugMode,
-		QuickSlotOnly: &rt.quickSlotOnly,
-		LogRequests:   &rt.deps.logRequests,
-
+		Reg:               rt.reg,
+		ConfigPath:        rt.configPath,
+		Usage:             rt.usage,
+		PgUsage:           rt.pgUsage,
+		QuotaTracker:      rt.quotaTracker,
+		Logger:            rt.logger,
+		ProxyHandler:      rt.proxyHandler,
+		Selector:          rt.selector,
+		ComboRes:          rt.comboRes,
+		DownloadMgr:       rt.downloadMgr,
+		Shutdown:          rt.shutdown,
+		TestClient:        rt.testClient,
+		DebugMode:         &rt.debugMode,
+		QuickSlotOnly:     &rt.quickSlotOnly,
+		LogRequests:       &rt.logRequests,
 		RestartFn:         rt.restartFn,
 		ServerCfgFn:       rt.serverCfgFn,
 		UpstreamTimeoutFn: rt.upstreamTimeoutFn,
 		StateSaveFn:       rt.stateSaveFunc,
+		ArchiveSettingsFn: func(cfg config.ArchiveConfig) {
+			if rt.archiveRunner != nil {
+				rt.archiveRunner.UpdateSettings(cfg)
+			}
+		},
 	}
 	authHandler := auth.NewHandler(apiDeps)
 	anysearchHandler := anysearch.NewHandler(apiDeps)
@@ -311,6 +337,13 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	}()
 	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
+	archiveHandler := archiveapi.NewHandler(apiDeps, rt.archiveRunner)
+	// Gallery resolves registered archive sources through the /api/archive
+	// bridge (sourceId-based items); nil bridge keeps the legacy in-memory
+	// zip session flow working.
+	if rt.archiveRunner != nil {
+		galleryHandler.SetArchive(archiveHandler)
+	}
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -358,18 +391,24 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// Models
 			modelsHandler.Register(r)
 
-			// Downloads
-			downloadHandler.Register(r)
+			// Downloads (feature_download)
+			if feature.Enabled(feature.Download) {
+				downloadHandler.Register(r)
+			}
 
-			// AnySearch
+			// AnySearch (Playground Search backend). Its Go package compiles
+			// unconditionally today — no feature_* tag exists yet (P5 blocker),
+			// so this registration is intentionally NOT gated on Playground:
+			// gating it would drop the routes from default builds.
 			anysearchHandler.Register(r)
 			// Traces
 			r.Route("/traces", traceHandler.Register)
 		})
 	})
-
 	// ComfyUI workflow proxy: outside the 1 MiB /api group so large API-format
 	// workflows remain usable, but still protected by the same auth middleware.
+	// Playground-attached backend: compiles unconditionally today (P5 blocker),
+	// so the group is intentionally NOT gated on the Playground feature.
 	r.Route("/api/comfyui", func(r chi.Router) {
 		r.Use(authHandler.AuthMiddleware)
 		r.Use(func(next http.Handler) http.Handler {
@@ -386,7 +425,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// the protected /api/* authorization boundary.
 	r.Route("/api/gallery", func(r chi.Router) {
 		r.Use(authHandler.AuthMiddleware)
-		galleryHandler.Register(r)
+		if feature.Enabled(feature.Gallery) {
+			galleryHandler.Register(r)
+		}
 	})
 
 	// FileTransfer receives browser files and may create a large ZIP archive;
@@ -399,7 +440,19 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				next.ServeHTTP(w, req)
 			})
 		})
-		r.Post("/path-info", fileTransferHandler.PathInfo)
+		if feature.Enabled(feature.FileTransfer) {
+			r.Post("/path-info", fileTransferHandler.PathInfo)
+		}
+	})
+
+	r.Route("/api/archive", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		// Per-route body caps (500 MiB sources / 200 MiB assets) are applied
+		// inside the handlers; this group deliberately bypasses the generic
+		// 1 MiB /api limit, mirroring /api/gallery.
+		if feature.Enabled(feature.Archive) {
+			archiveHandler.Register(r)
+		}
 	})
 
 	// Editor API: text file open (native picker) + atomic save. Outside the
@@ -412,7 +465,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 			})
 		})
-		editorHandler.Register(r)
+		if feature.Enabled(feature.Editor) {
+			editorHandler.Register(r)
+		}
 	})
 
 	// Text-review API: AI text-review config + sessions. Outside the /api
@@ -426,9 +481,14 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 			})
 		})
-		textReviewHandler.Register(r)
+		// AI Text Review ships with the editor feature (feature_editor).
+		if feature.Enabled(feature.Editor) {
+			textReviewHandler.Register(r)
+		}
 	})
 	// Image Batch API: project manifests/imports can exceed the generic 1 MiB API limit.
+	// Playground-attached backend: compiles unconditionally today (P5 blocker),
+	// so the group is intentionally NOT gated on the Playground feature.
 	r.Route("/api/image-batches", func(r chi.Router) {
 		r.Use(authHandler.AuthMiddleware)
 		r.Use(func(next http.Handler) http.Handler {
@@ -451,10 +511,12 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	})
 
 	// Embedded UI (fallback to index.html)
-	// Playground static routes: only register when the playground module is
-	// compiled into the binary (build tag `playground`). At runtime the flag
-	// is a no-op when the binary lacks playground resources.
-	if web.PlaygroundCompiled() {
+	// Playground static routes: only register when the playground feature is
+	// compiled into the binary. Its compiled state is derived from the real
+	// `playground` build tag signal (web.PlaygroundCompiled, reported into the
+	// feature manifest at the top of Routes). At runtime the flag is a no-op
+	// when the binary lacks playground resources.
+	if feature.Enabled(feature.Playground) {
 		if pgStatic, err := fs.Sub(web.PlaygroundStatic, "playground/static-pg"); err == nil {
 			pgFSRoot := http.FileServer(http.FS(pgStatic))
 			noCacheHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -481,21 +543,12 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			}
 			r.Get("/playground.css", noCacheHandler)
 			r.Get("/vendor/*", vendorHandler)
-			pgJSFiles := []string{
-				"playground.js", "pg-i18n.js",
-				"pg-core.js", "pg-state.js", "pg-markdown.js",
-				"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-image-model.js", "pg-image-inspire.js", "pg-image-batch.js", "pg-autochat.js",
-				"pg-render.js", "pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
-				"pg-setup.js", "pg-director.js", "pg-search.js",
-				"gallery-state.js", "gallery-io.js", "gallery-layout.js",
-				"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
-				"gallery-edit.js", "gallery-edit-operations.js", "gallery-edit-batch.js", "gallery.js", "editor-state.js", "editor.js", "editor-logs.js",
-				// AI Text Review (load order: split/diff/state first, then steps, then entry)
-				"editor_textreview_split.js", "editor_textreview_diff.js", "editor_textreview_state.js",
-				"editor_textreview_step1.js", "editor_textreview_step2.js",
-				"editor_textreview_step3.js", "editor_textreview_step4.js",
-				"editor_textreview.js",
-			}
+			// Static-file route list is owned by the feature manifest: every
+			// enabled feature whose assets live under web/playground/static-pg
+			// contributes its scripts here (playground, gallery, editor). The
+			// order follows feature registration order, preserving the
+			// historical playground → gallery → editor load order.
+			pgJSFiles := feature.Assets(feature.RootPlaygroundPG)
 			for _, f := range pgJSFiles {
 				r.Get("/"+f, noCacheHandler)
 			}

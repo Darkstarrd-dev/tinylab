@@ -2,6 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
+> **最后核对（2026-08-06 MediaBridge 交接与归档基础层）：** 新增 `web/static/media-bridge.js`（MediaBridge，计划 `archive_compatibility_plan.md` §9.2 冻结契约：`register`/`openGallery`/`consume`/`deliverPendingImports`/`getAssetBlob`/`archiveStatus`，零依赖），`index.html` 与 `index-nopg.html` 均最先加载（生产者 download.js/gif-editor.js 之前）。Download `playVideo` 重构为 MediaAsset 注册（`kind:'video'` + `/api/downloads/{id}/file` 受控 URL）→ `MediaBridge.openGallery`，删除直写 `galleryState` 的旧路径；GIF 编辑器三条导出路径（GIF blob/PNG Sprite/ZIP pack）记录 `lastResultAsset`，结果 modal 新增「Open in Gallery」按钮（`openResultInGallery` 等待在途 register 完成再 openGallery）；Gallery 新增唯一桥接导入入口 `galleryImportAssets`（`gallery-io.js`，按 kind 分流 video/archive/image，`_bridgeImported` 去重），`renderGallery` 调 `deliverPendingImports` 补投递切页遗留 handoff。后端归档基础层见 [`docs/archive-architecture.md`](archive-architecture.md)（`internal/archive` P0/P1 + `internal/archivetool` P2 + `internal/api/archive` 表面 + `Config.Archive`/Settings presence-aware PATCH）。i18n 新增 `mediaBridgeImported`/`mediaBridgeGalleryUnavailable`/`mediaBridgeAssetExpired`/`gifEditorOpenGallery`（en/cn）。
 > **最后核对（2026-08-06 GIF 编辑器大规模输入与虚拟化时间轴）：** `web/static/gif-editor.js`/`i18n.js`/`style.css` 完成两阶段改造（仅前端，GIF 编辑器页属 `web/static` 全局 SPA，非 playground tag 资产）：(1) 移除 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝——普通图片/GIF/视频提取不再被像素帧预算拒绝；保留 GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`，导入 `alert` 拒绝）与导出前 1.5GB 峰值 confirm 警告（`exportMemCheck`/`EXPORT_MEM_LIMIT`，GIF/ZIP/精灵图三条导出路径），即导出防护仍是真实 OOM 兜底而非输入门禁。(2) 时间轴改水平虚拟化轨道：`.gif-timeline-track` 宽 `N×TL_ITEM_PITCH`、节点绝对定位，仅可见窗口 + `TL_BUFFER=4` 缓冲渲染 DOM（1 万帧 → ~19 节点），点击/复制/删除/delay/拖放/触摸排序全部在容器上委托（无逐帧监听）；缩略图 ≤96×72 惰性小预览 + FIFO 有界缓存（`THUMB_CACHE_MAX=256`）；键盘导航、批量 delay、选择居中均保留。帧仍以完整 canvas 驻留 `state.slices[]`（4 B/px），未引入 IndexedDB/后端持久化。验证：`node --check`（gif-editor.js、i18n.js）与确定性窗口化检查（1/5/63/64/10000 帧 × 6 滚动位置，有界/clamp/尾部 clamp）通过；精确高帧用例（1280×736×63）浏览器冒烟未完成——本机 ffmpeg GIF palette 编码挂起。
 > **最后核对（2026-08-05 GIF 编辑器与 Gallery 动画支持）：** 新增全局 GIF 编辑器页面（`web/static/gif-editor.js`，第 6 导航按钮 `data-page="gif"` 替代 `nav-placeholder`；vendor `web/static/vendor/gif.js/` + `web/static/vendor/gifuct-js/`，经 `/vendor/*` 的 `web.Static` 回退对 playground 构建同样可达——`internal/api/router.go` `vendorHandler`）。Gallery video 区现可播放 GIF/animated WebP：`SUPPORTED_VIDEO_EXTS` 增 gif/webp + `ANIMATED_IMG_EXTS`/`isAnimatedImg`（`gallery-state.js`）；video pane 唯一动画元素 `<img id="gallery-main-anim">`（`gallery-layout.js`）；`renderActiveVideo` 按 `isAnimatedImg` 分支 + 异步竞态守卫 + `applyVideoPaneMode`/`replayAnim`/`stopAnim`（`gallery-video.js`）；全屏动画模式短路 seek/音量、Space=重播（`gallery-fullscreen.js`）；树删除/切换清理 anim src（`gallery-tree.js`）。后端白名单同步：`galleryVidExts` 增 .gif/.webp（`fs_handlers.go`）、`SupportedExts` 增 gif（`internal/gallery/gallery.go`）、`contentTypeForExt` `.gif→image/gif`（`internal/gallery/zip.go`）。Gallery 媒体编辑新增 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation（`internal/mediaedit/types.go` `VideoAnimParams`/`VideoAnimTrimParams`、`args.go` 三 Build*Args + `normalizeAnimParams`/`parseSeconds`/`buildAnimTimeInputOptions`/`buildAnimVideoFilterChain`/`animDithers`）与 `ProbeFfmpegCaps` 能力探测（`binary.go` `FfmpegCaps`{gif,webpAnim,webpAnimDecode}，按绝对路径缓存）；`ffmpeg-status` 返回 6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`（`edit_handlers.go` `galleryEditFfmpegStatus`/`checkAnimCapability`）。实施入口：`gif_implented.md`。
 > **最后核对（2026-08-05 Image Protocol/Windows/Batch）：** `pg-comfyui.js` 的 ComfyUI 运行态按 Image 窗口隔离；ComfyUI 面板标题提供 `Back to protocol selection`，回退会清理当前窗口的占位模型、workflow、连接状态和粘贴 JSON。Tab Select 候选仍先合并已保存/活动 Tab 与成功历史，但 `pgComfyDeduplicateTemplates` 以规范化显示名称去重（无名项按 workflow signature），不会因不同 SHA/执行 prompt 产生同名选项。Image 模式支持 1–4 个独立窗口：`pgSetSplitCount` 补齐窗口对象，点击 pane header 或 WinBar 选择活动窗口，各窗口的 image/Comfy 配置独立；`Batch Project` 在多窗口时禁用，避免全局 Batch SSE/project 状态串线。
@@ -183,9 +184,9 @@ Playground 后端相关职责只有三类：
 | 资源编译 | `web/embed*.go` | build tag 决定是否嵌入 |
 | UI 入口与静态路由 | `internal/api/router.go` | 选择 index、挂载静态文件 |
 | 运行时配置 | `internal/config/*`、`internal/api/settings.go` | 保存 `enablePlayground` |
-| Gallery 图片查看器后端 | `internal/api/gallery/`（7 文件子包）、`internal/gallery/*` | 仅随 `-tags playground` 编译可用；zip/tiff 解析与转码，会话驻内存 LRU，Handler 字段 `h.sessions`/`h.media`（状态注入，无包全局变量） |
+| Gallery 图片查看器后端 | `internal/api/gallery/`（7 文件子包）、`internal/gallery/*`、`internal/mediaedit/` | **Go 包无条件编译、路由无条件注册**（`internal/api/router.go` `/api/gallery` 路由块与 `/api/gallery/edit/*`）；仅**前端静态资产**（`web/playground/static-pg/gallery*.js`）随 `-tags playground` 内嵌。zip/tiff 解析与转码，会话驻内存 LRU，Handler 字段 `h.sessions`/`h.media`（状态注入，无包全局变量） |
 
-聊天、模型解析、轮转、冷却、重试、用量统计等均属于通用代理能力，不是 Playground 私有实现。Gallery（图片查看器分页）同理：仅在 `-tags playground` 编译时随 Playground 资产一起嵌入，无 tag 的二进制不含此功能。
+聊天、模型解析、轮转、冷却、重试、用量统计等均属于通用代理能力，不是 Playground 私有实现。Gallery 的**前端**同理：仅 `-tags playground` 构建内嵌其静态资产（无 tag 二进制经 `index-nopg.html` 不加载 Gallery 脚本）；但 Gallery/Editor/AI Review 的 **Go handler 无条件编译且路由无条件注册**（`internal/api/gallery`、`internal/api/editor`、`internal/api/textreview` 等），`-tags playground` 只裁剪前端资产、不裁剪后端 Go 包——feature 级编译裁剪属计划 §11（P5）未实施项，见 [`docs/archive-architecture.md`](archive-architecture.md) §9/§12 与 `docs/build-variants.md`。
 
 ### 4.2 Playground 使用的 HTTP 接口
 
@@ -852,6 +853,28 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 - `web/static/style.css` 末尾追加 `.gallery-*` 段（约 35 行）
 - `go.mod` 新增直接依赖 `golang.org/x/image v0.44.0`
 
+### 媒体交接（MediaBridge，2026-08-06）
+
+Gallery 是媒体交接链路的**消费者端**。生产端（Download `playVideo`、GIF 编辑器导出、未来 Archive pack 输出）统一经 `web/static/media-bridge.js`（`MediaBridge`）登记资产并请求打开 Gallery；Gallery **唯一**的外部导入入口是 `gallery-io.js::galleryImportAssets(assets)`——外部代码不再直接写 `galleryState`、不再传绝对临时路径。契约与生产端细节见 [`docs/archive-architecture.md`](archive-architecture.md) §7/§8；本节只记录 Gallery 侧的消费实现：
+
+- **导入分流**（`gallery-io.js::galleryImportAssets`）：`kind==='video'` 或 `video/*` mime → `buildBridgeVideoItem`（`kind:'plain'` 项带 `assetId` + `mainURL` 受控 URL，video 区直接播放）；`kind==='archive'` 或 zip mime → `importBridgeArchiveAsset`（`MediaBridge.getAssetBlob` 取 pack 字节 → 复用既有 zip 会话流 `addZipBlob` 展开 manifest）；其余按图片 → `importBridgeImageAsset`（`getAssetBlob` 取 blob 为普通项）。`_bridgeImported` 按 assetId 去重（失败回滚 claim，允许重试）；导入计数 toast `mediaBridgeImported`。
+- **投递触发**（`gallery.js::renderGallery`）：渲染完成后调 `MediaBridge.deliverPendingImports()`——pendingImports 队列不被 `cleanupGallery` 清空，切走再切回仍补投递未消费 handoff。
+- **加载顺序**：`web/static/index.html` 与 `index-nopg.html` 都在其他脚本之前加载 `<script src="/media-bridge.js">`；Gallery 脚本（`web/playground/static-pg/gallery*.js`）只存在于 index.html（playground 变体），桥接对无 playground 构建的 Download/GIF 仍可用。
+- **i18n**：`mediaBridgeImported`/`mediaBridgeGalleryUnavailable`/`mediaBridgeAssetExpired`（en/cn，`web/static/i18n.js`）。
+
+### 归档源条目（`sourceId`，P3 部分落地）
+
+Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径，2026-08-06）：
+
+- **archive-source 条目**（`item.sourceId`，经 `POST /api/archive/sources` 登记）：读取走 `GET /api/archive/sources/{id}/entries/{path...}`（`gallery-io.js::getZipEntryBlob` sourceId 分支；404 = 源 TTL 过期 → `rehydrateZipSession` 以原包源重登记后重试）；删除按 sourceId 分组（`gallery-tree.js`：`DELETE /api/archive/sources/{id}` 释放整源、`gallery-fullscreen.js::_zipReplaceDeleteEntries` 经 `POST /api/archive/zip-replace` 原子写回删除条目 + `GET /api/archive/assets/{id}` 取结果）；AI Review 以 `sourceId` 启动/轮询（`gallery-review.js`，后端任务键 = sourceId）；媒体编辑 `_resolveBatchInput`/extract 送 `body.sourceId`（`gallery-edit.js`/`gallery-edit-batch.js`）。导入过滤用 `_ARCHIVE_IMG_EXTS`（镜像后端 `SupportedExts` 图片白名单——archive manifest 列出**全部**条目，过滤必须保持图片集与 legacy 会话 manifest 一致）。
+- **legacy 会话条目**（`item.sessionId` / `zipAbsPath`，FSAA 拖放、目录选择、`zip-from-path` 粘贴、`/api/gallery/zip` 上传产生）：**完整保留**——读取 `GET /api/gallery/zip/{sid}/{entryPath}`、touch `POST /api/gallery/zip/{sid}/touch`、释放 `DELETE /api/gallery/zip/{sid}`、`zip-from-path`/`/api/gallery/zip` 上传（`gallery-io.js` 四处调用）、编辑 `/edit/extract-zip-entry`（zipAbsPath/sessionId 分支）/`upload-temp`/`zip-outputs`/`zip-writeback`。**旧专用端点未删除**（计划 §7.2"迁移完成后删除"未执行，两套并存，无 shim）；`gallery.js` 的 `zipSessionId` touch 只对 legacy 条目生效。
+
+边界：**没有新增浏览器任意路径 API**——sourceId/sessionId 都是服务端签发的 token；`/edit/extract-zip-entry` 的 sourceId 分支经 `archiveBridge`（`internal/api/gallery/register.go`，router `SetArchive` 注入，nil 时全部流程回 legacy）严格校验后读取。
+
+**已知缺口（P3 未覆盖，勿误标完成）：**
+- **原生 picker 不含 .7z/.rar**：`gallery-layout.js:15` `input.accept = 'image/*,video/*,.zip'`——文件选择器无法选中 .7z/.rar。
+- **用户导入 7z/RAR 无前端路径**：`gallery-state.js::isArchiveName` 已识别 `.7z`/`.rar`，但 `gallery-io.js` 的导入分类把一切 `isArchiveName` 命中都归为 `'zipfile'` 走 `/api/gallery/zip` zip-only 上传（`.7z/.rar` 上传会失败或产生垃圾条目）。7z/RAR 的 list/read 能力只在 `/api/archive` API 层可用（`/api/archive/sources` 可登记 7z/RAR 并返回 manifest），前端浏览器导入路径未接外部工具——计划 §8.2 的 "gallery-layout 文件 picker 同步 .7z/.rar" 与 §P3 的 7z/RAR 浏览**未实施**。
+
 ### 源码锚点
 - `web/playground/static-pg/gallery.js`（playground 静态资源，由 embed_playground.go 注入）
 - `web/playground/static-pg/gallery-review.js`（AI Review 独立面板模块）
@@ -870,6 +893,7 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 | 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/zip_handlers.go::galleryListZip`（500MB 上限） |
 | 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/zip_handlers.go::galleryConvertTiff` |
 | 修改 zip 会话 LRU 容量/过期/驱逐 | `internal/api/gallery/session_store.go`（`galleryMaxSessions`、`gallerySessionStore.put`/`get`/`touch`/`pin`/`unpin`、`galleryDeleteZipSession`/`galleryTouchSession` 处理器，现为 `h.sessions` Handler 字段） |
+| 修改归档源条目（sourceId）双路径 | `web/playground/static-pg/gallery-io.js`（`getZipEntryBlob`/`rehydrateZipSession` sourceId 分支 + `_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除/释放）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries`/`_zipDeleteEntryGroup`）、`gallery-review.js`（sourceId 启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 sourceId）、`internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`）、`internal/api/archive/register.go::zipReplace`；**legacy 调用方保留勿删**（见 `docs/archive-architecture.md` §5.1/§12） |
 | 修改 zip 会话重建/批量导入并发 | `web/playground/static-pg/gallery-io.js`（`rehydrateZipSession`/`getZipEntryBlob`/`runWithConcurrency`/`addZipBlob` 的 `zipFile` 保留）、`web/playground/static-pg/gallery-tree.js`（`setActive` 的 touch、`releaseZipSessions`） |
 | 修改自动播放档位 | `web/playground/static-pg/gallery.js::AUTOPLAY_INTERVALS` |
 | 修改全屏快捷键集 | `web/playground/static-pg/gallery.js::onFullscreenKey` |

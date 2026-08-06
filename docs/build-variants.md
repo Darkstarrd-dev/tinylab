@@ -1,8 +1,27 @@
 # 构建变体 (Build Variants)
 
-> 最后核对：2026-08-03
+> 最后核对：2026-08-06（新增 P5 feature manifest 边界，见下文"编译裁剪边界"）
 
 TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
+
+## 编译裁剪边界（P5 feature manifest，2026-08-06 落地）
+
+计划 [`archive_compatibility_plan.md`](../archive_compatibility_plan.md) §11/P5 的**第一阶段**已落地：`internal/feature`（leaf 包，零依赖）是编译期功能面的唯一 honest manifest——每个 feature 声明 ID、依赖、归属静态资产与 `Compiled` 状态；`internal/api/router.go` 的路由注册与 `internal/app/app.go` 的组件构造都通过 `feature.Enabled(...)` 门控，`web/playground/static-pg` 的按文件静态路由列表改由 `feature.Assets(feature.RootPlaygroundPG)` 派生（取代硬编码 pgJSFiles 列表，顺序与旧列表完全一致）。
+
+**当前事实（不虚假声明裁剪）：**
+
+- 除 `playground` 静态 embed 外，**没有任何 feature build tag**。Gallery/Download/MediaEdit/FileTransfer/TextReview/Archive/Archivetool 及其 API 包今天仍无条件编译；manifest 中这些 feature 的 `Compiled` 恒为 true，默认构建全部启用，路由与组件行为与改动前逐字节一致（`go build ./...` + 全量测试验证）。
+- 唯一真实编译信号是 `playground` tag：`internal/api/router.go::Routes` 顶部 `feature.SetCompiled(feature.Playground, web.PlaygroundCompiled())`，`feature.Enabled(feature.Playground)` 取代原 `web.PlaygroundCompiled()` 检查，语义等价。
+- ComfyUI / Image Batch / AnySearch 是 Playground 附属后端，但**今天无条件编译**，其路由组故意不挂在 `feature.Playground` 门控下（挂上会在无 playground 的默认构建中丢失路由）；代码注释已标明 P5 blocker。
+
+**尚未实施（精确阻塞清单，做到这些之前不得宣称可裁剪）：**
+
+1. `feature_*` build tag + 每包 stub 文件（`archive_compatibility_plan.md` §11.2 表）。
+2. 给包本身打 tag（`internal/gallery`、`internal/download`、`internal/mediaedit`、`internal/filetransfer`、`internal/textreview`、`internal/archive`、`internal/archivetool`、`internal/api/*`），使 router.go/app.go 的 import 与注册真正条件化。
+3. 按 feature 拆分 `go:embed`（当前 `web/embed.go` 嵌入 `all:static`）+ `index.html`/`index-nopg.html` 脚本列表改由 manifest 生成（页面目前无条件加载全部脚本）。
+4. `build.ps1`/`build_mac.ps1` 增加 `-Features` 参数——**在 tag 落地前加此参数是虚假声明**，故本阶段刻意不改脚本。
+
+切到真实裁剪时的翻转点：`internal/feature` manifest 的 `Compiled` 字段 + router/app 的 `feature.Enabled(...)` 门控；`internal/feature` 测试（`internal/feature/feature_test.go`）在默认构建下锁定"全部启用 + 资产列表与旧路由一致"合同。
 
 ## build.ps1 参数
 

@@ -28,14 +28,15 @@ function _getSiblingImages() {
   var out = [];
 
   if (cur.kind === 'zip') {
-    // Archive grouping: prefer the on-disk absolute path (backend folders),
-    // fall back to the in-memory session id (FSAA / drag-drop zips). Both are
+    // Archive grouping: prefer the archive sourceId (/api/archive-registered
+    // packs), then the on-disk absolute path (backend folders), then the
+    // in-memory session id (legacy FSAA / drag-drop zips). All three are
     // stable pack identifiers shared by every entry of the same archive.
-    var zipKey = cur.zipAbsPath || ('@sess:' + (cur.sessionId || ''));
+    var zipKey = cur.sourceId || cur.zipAbsPath || ('@sess:' + (cur.sessionId || ''));
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       if (!it || it.kind !== 'zip') continue;
-      var k = it.zipAbsPath || ('@sess:' + (it.sessionId || ''));
+      var k = it.sourceId || it.zipAbsPath || ('@sess:' + (it.sessionId || ''));
       if (k === zipKey) out.push(it);
     }
     return out;
@@ -195,14 +196,17 @@ var _batchCfg = null;
 // _resolveBatchInput resolves the on-disk input path for a single batch item,
 // mirroring the per-item resolution triggerMediaEditor() already uses for
 // single-file editing. Backend items already carry absPath; FSAA/drag-drop
-// files are uploaded to a temp file (/edit/upload-temp) and zip entries are
-// extracted to a temp file (/edit/extract-zip-entry). Returns a promise that
-// resolves to an absolute path string, or rejects on failure.
+// files are uploaded to a temp file (/edit/upload-temp); zip entries are
+// extracted to a temp file (/edit/extract-zip-entry) — archive-source items
+// via sourceId, legacy sessions/on-disk zips via sessionId/zipAbsPath.
+// Returns a promise that resolves to an absolute path string, or rejects on
+// failure.
 function _resolveBatchInput(it) {
   if (it.absPath) return Promise.resolve(it.absPath);
-  if (it.kind === 'zip' && (it.zipAbsPath || it.sessionId)) {
+  if (it.kind === 'zip' && (it.zipAbsPath || it.sessionId || it.sourceId)) {
     var body = { zipPath: it.zipPath };
-    if (it.zipAbsPath) body.zipAbsPath = it.zipAbsPath;
+    if (it.sourceId) body.sourceId = it.sourceId;
+    else if (it.zipAbsPath) body.zipAbsPath = it.zipAbsPath;
     else body.sessionId = it.sessionId;
     return fetch('/api/gallery/edit/extract-zip-entry', {
       method: 'POST',

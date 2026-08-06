@@ -21,18 +21,42 @@ function getItemBlob(item) {
   }
   return Promise.resolve(null);
 }
+// _isArchiveImageExt mirrors the backend's gallery image whitelist
+// (internal/gallery SupportedExts): the /api/archive manifest lists ALL
+// entries, so the import filter must keep the same image-only set the legacy
+// zip session manifest used (no videos, no documents, no avif).
+var _ARCHIVE_IMG_EXTS = ['webp', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'tiff', 'tif'];
+function _isArchiveImageExt(name) {
+  if (!name) return false;
+  var dot = name.lastIndexOf('.');
+  if (dot < 0) return false;
+  return _ARCHIVE_IMG_EXTS.indexOf(name.slice(dot + 1).toLowerCase()) >= 0;
+}
 
-// getZipEntryBlob fetches a single zip entry image, rehydrating the backend
-// session on a 404 (the session was evicted by the LRU) by re-uploading the
-// pack from its original source, then retrying the fetch once. The retry uses
-// the fresh session id stored back onto the item (and onto every sibling item
-// of the same pack) so a single re-upload revives the whole pack.
+// getZipEntryBlob fetches a single zip entry image. Archive-source items
+// (sourceId, registered through POST /api/archive/sources) read through the
+// /api/archive entries endpoint, re-registering the source on a 404 (TTL
+// expiry). Legacy session items keep the in-memory gallery zip session URL.
 function getZipEntryBlob(item) {
-  var sid = item.sessionId || galleryState.zipSessionId;
-  var zPath = item.zipPath || item.path || '';
-  // Use zipPath (path stable after deletion; index is renumbered by DELETE
-  // and would become stale — zipPath is unique per entry and never changes).
+  var zPath = item.zipPath || item.entryPath || item.path || '';
   var identifier = zPath.split('/').map(encodeURIComponent).join('/');
+  if (item.sourceId) {
+    var aurl = '/api/archive/sources/' + encodeURIComponent(item.sourceId) + '/entries/' + identifier;
+    return fetch(aurl).then(function(r) {
+      if (r.ok) return r.blob();
+      if (r.status !== 404) throw new Error('archive entry http ' + r.status);
+      // Source expired (TTL) — re-register from the pack's source and retry.
+      return rehydrateZipSession(item).then(function(newSourceId) {
+        if (!newSourceId) throw new Error('archive source rehydrate failed');
+        var nurl = '/api/archive/sources/' + encodeURIComponent(item.sourceId) + '/entries/' + identifier;
+        return fetch(nurl).then(function(r2) {
+          if (!r2.ok) throw new Error('archive entry http ' + r2.status);
+          return r2.blob();
+        });
+      });
+    });
+  }
+  var sid = item.sessionId || galleryState.zipSessionId;
   var url = '/api/gallery/zip/' + encodeURIComponent(sid) + '/' + identifier;
   return fetch(url).then(function(r) {
     if (r.ok) return r.blob();
@@ -48,18 +72,50 @@ function getZipEntryBlob(item) {
     });
   });
 }
-
-// rehydrateZipSession re-creates an evicted backend zip session from the
-// pack's original source and migrates every item of the same pack to the new
-// session id. Deduped per old session id so concurrent 404s for the same pack
-// share a single re-upload. Returns the new session id, or null on failure.
-var _rehydrateInFlight = {}; // oldSessionId -> Promise<newSessionId|null>
+// rehydrateZipSession re-creates an evicted/expired backend zip session or
+// archive source from the pack's original source and migrates every item of
+// the same pack to the fresh id. Archive-source items re-register through
+// POST /api/archive/sources; legacy session items re-use zip-from-path (on
+// disk) or the /api/gallery/zip upload. Deduped per old id so concurrent 404s
+// for the same pack share a single re-upload. Returns the new id, or null on
+// failure.
+var _rehydrateInFlight = {}; // oldId -> Promise<newId|null>
 function rehydrateZipSession(item) {
-  var oldSid = item.sessionId;
-  if (oldSid && _rehydrateInFlight[oldSid]) return _rehydrateInFlight[oldSid];
+  var oldId = item.sourceId || item.sessionId;
+  if (oldId && _rehydrateInFlight[oldId]) return _rehydrateInFlight[oldId];
   var p = (async function() {
     try {
-      var newSid = null;
+      var newId = null;
+      if (item.sourceId) {
+        // Archive-source packs re-register from the browser-held bytes (FSAA
+        // handle or pasted blob). On-disk packs keep the legacy zip session
+        // model and never carry a sourceId.
+        var blob = null;
+        if (item.zipFileHandle) {
+          blob = await item.zipFileHandle.getFile();
+        } else if (item.zipFile) {
+          blob = item.zipFile;
+        }
+        if (!blob) return null;
+        var buf = await blob.arrayBuffer();
+        var aName = item.archiveName || 'archive.zip';
+        var aRes = await fetch('/api/archive/sources?name=' + encodeURIComponent(aName), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: buf
+        });
+        if (!aRes.ok) return null;
+        var aData = await aRes.json();
+        newId = aData.sourceId;
+        if (newId && oldId) {
+          // Migrate all items of the expired pack to the fresh source.
+          for (var a = 0; a < galleryState.items.length; a++) {
+            var ait = galleryState.items[a];
+            if (ait && ait.kind === 'zip' && ait.sourceId === oldId) ait.sourceId = newId;
+          }
+        }
+        return newId;
+      }
       if (item.zipAbsPath) {
         // Backend-path packs re-create from the on-disk path (no upload).
         var res = await fetch('/api/gallery/zip-from-path', {
@@ -69,42 +125,42 @@ function rehydrateZipSession(item) {
         });
         if (!res.ok) return null;
         var d = await res.json();
-        newSid = d.sessionId;
+        newId = d.sessionId;
       } else {
         // FS Access API or pasted blob packs re-upload the zip bytes.
-        var blob = null;
+        var zblob = null;
         if (item.zipFileHandle) {
-          blob = await item.zipFileHandle.getFile();
+          zblob = await item.zipFileHandle.getFile();
         } else if (item.zipFile) {
-          blob = item.zipFile;
+          zblob = item.zipFile;
         }
-        if (!blob) return null;
-        var buf = await blob.arrayBuffer();
-        var res = await fetch('/api/gallery/zip', {
+        if (!zblob) return null;
+        var zbuf = await zblob.arrayBuffer();
+        var zres = await fetch('/api/gallery/zip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/zip' },
-          body: buf
+          body: zbuf
         });
-        if (!res.ok) return null;
-        var d = await res.json();
-        newSid = d.sessionId;
+        if (!zres.ok) return null;
+        var zd = await zres.json();
+        newId = zd.sessionId;
       }
-      if (newSid && oldSid) {
+      if (newId && oldId) {
         // Migrate all items of the evicted pack to the fresh session.
         for (var i = 0; i < galleryState.items.length; i++) {
           var it = galleryState.items[i];
-          if (it && it.kind === 'zip' && it.sessionId === oldSid) it.sessionId = newSid;
+          if (it && it.kind === 'zip' && it.sessionId === oldId) it.sessionId = newId;
         }
       }
-      return newSid;
+      return newId;
     } catch (e) {
       console.warn('rehydrateZipSession failed:', e);
       return null;
     } finally {
-      if (oldSid) delete _rehydrateInFlight[oldSid];
+      if (oldId) delete _rehydrateInFlight[oldId];
     }
   })();
-  if (oldSid) _rehydrateInFlight[oldSid] = p;
+  if (oldId) _rehydrateInFlight[oldId] = p;
   return p;
 }
 
@@ -184,11 +240,11 @@ async function walkDir(dirHandle, prefix, out, outVid) {
       if (ent.kind === 'directory') {
         queue.push({ handle: ent, prefix: rel });
       } else if (ent.kind === 'file') {
-        if (isZipName(ent.name)) {
+        if (isArchiveName(ent.name)) {
           // Upload zip to server and create proper zip items with handle
           try {
             var ff = await ent.getFile();
-            await addZipBlob(ff, out, ent);
+            await addArchive(ff, out, ent);
           } catch (e) {
             console.warn('walkDir zip failed:', e);
           }
@@ -227,9 +283,9 @@ function readEntryRecursive(entry, prefix) {
     if (entry.isFile) {
       entry.file(function(file) {
         var name = file.name || entry.name || '';
-        if (file && file.size > 0 && (isSupportedExt(name) || isZipName(name))) {
+        if (file && file.size > 0 && (isSupportedExt(name) || isArchiveName(name))) {
           var rel = prefix ? prefix + '/' + name : name;
-          resolve([{ kind: isZipName(name) ? 'zipfile' : 'plain', file: file, path: rel }]);
+          resolve([{ kind: isArchiveName(name) ? 'zipfile' : 'plain', file: file, path: rel }]);
         } else {
           resolve([]);
         }
@@ -270,7 +326,7 @@ async function loadNextZipChunk() {
   galleryState.loadingZip = true;
   var nextZip = galleryState.pendingZipQueue.shift();
   var newItems = [];
-  await addZipBlob(nextZip, newItems);
+  await addArchive(nextZip, newItems);
   galleryState.loadingZip = false;
   if (newItems.length) {
     appendNewItems(newItems);
@@ -353,7 +409,7 @@ async function processCollectedEntries(collected) {
     // fetched (the "first N packs fail" bug). Capping at 6 keeps the working
     // set within the session store and avoids a thundering-herd upload burst.
     await runWithConcurrency(zipFiles, 6, function(zf) {
-      return addZipBlob(zf.file, outImg, zf.zipFileHandle);
+      return addArchive(zf.file, outImg, zf.zipFileHandle);
     });
   }
 
@@ -390,7 +446,7 @@ async function processHandles(handles, leaves) {
       await walkDir(h.handle, '', collected);
     } else if (h.kind === 'file' && h.handle) {
       var name = h.handle.name;
-      if (isZipName(name)) {
+      if (isArchiveName(name)) {
         try {
           var file = await h.handle.getFile();
           collected.push({ kind: 'zipfile', file: file, zipFileHandle: h.handle });
@@ -428,7 +484,7 @@ function processFiles(files) {
   var collected = [];
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
-    if (isZipName(f.name)) collected.push({ kind: 'zipfile', file: f });
+    if (isArchiveName(f.name)) collected.push({ kind: 'zipfile', file: f });
     else if (isSupportedExt(f.name) && f.size > 0) collected.push({ kind: 'plain', file: f, path: f.name });
   }
   processCollectedEntries(collected);
@@ -438,7 +494,7 @@ function processBlobs(blobs) {
   var collected = [];
   for (var i = 0; i < blobs.length; i++) {
     var b = blobs[i];
-    if (b.type === 'application/zip' || isZipName(b.name)) collected.push({ kind: 'zipfile', file: b });
+    if (b.type === 'application/zip' || isArchiveName(b.name)) collected.push({ kind: 'zipfile', file: b });
     else if (isSupportedExt(b.name) || (b.type && (b.type.startsWith('image/') || b.type.startsWith('video/')))) {
       if (b.size > 0) collected.push({ kind: 'plain', file: b, path: b.name || ('paste' + (b.type.startsWith('video/') ? '.mp4' : extOf(b.type))) });
     }
@@ -456,57 +512,67 @@ function makePlainItem(file) {
   };
 }
 
-async function addZipBlob(file, out, zipFileHandle) {
+async function addArchive(file, out, zipFileHandle) {
   try {
     var buf = await file.arrayBuffer();
-    var res = await fetch('/api/gallery/zip', {
+    var zipName = file.path || file.name || 'archive.zip';
+    var res = await fetch('/api/archive/sources?name=' + encodeURIComponent(zipName), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/zip' },
+      headers: { 'Content-Type': 'application/octet-stream' },
       body: buf
     });
     if (!res.ok) {
-      showMsg('zip http ' + res.status);
-      console.warn('zip upload failed:', res.status);
+      showMsg('archive http ' + res.status);
+      console.warn('archive upload failed:', res.status);
       return;
     }
     var data = await res.json();
-    var sessionId = data.sessionId;
-    // Do not stomp the global zipSessionId here: under bounded-concurrency
-    // bulk import, every addZipBlob would race and the global would end up
-    // pointing at the last-imported pack, breaking AI Review (which previously
-    // read this global). Each item carries its own sessionId (below), and
-    // setActive now updates the global to the currently-viewed pack's session.
-    var entries = (data.manifest && data.manifest.entries) || [];
-    var zipName = file.path || file.name || 'archive.zip';
+    var sourceId = data.sourceId;
+    var format = data.format || 'zip';
+    // The archive manifest lists ALL entries (directories and non-images
+    // included); filter to the image entries the gallery serves so the item
+    // list matches the legacy zip session manifest exactly.
+    var all = (data.manifest && (data.manifest.Entries || data.manifest.entries)) || [];
+    var imgs = [];
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      var ePath = e.Path || e.path || '';
+      if (e.IsDir || e.isDir) continue;
+      if (!_isArchiveImageExt(ePath)) continue;
+      imgs.push(e);
+    }
     // zipFileHandle: FileSystemFileHandle|null — null means the zip cannot be
     // written back to disk (e.g. pasted blob, legacy drop). UI will degrade
     // delete/overwrite actions accordingly.
     var handle = zipFileHandle || null;
-    // Retain the original Blob only when there is no FS handle and no on-disk
-    // path to re-create the session from — those cases (pasted/legacy-drop
-    // zips) need it for rehydrateZipSession on a 404. FS-handle and backend-
-    // path packs rehydrate via handle.getFile() / zip-from-path respectively.
+    // Retain the original Blob only when there is no FS handle to re-create
+    // the source from — those cases (pasted/legacy-drop zips) need it for
+    // rehydrateZipSession on a source TTL expiry. FS-handle packs rehydrate
+    // via handle.getFile().
     var rehydrateBlob = handle ? null : file;
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
-      var nm = e.path.split('/').pop();
-      var displayPath = zipName + '/' + e.path;
+    for (var j = 0; j < imgs.length; j++) {
+      var en = imgs[j];
+      var p = en.Path || en.path;
       out.push({
-        name: nm,
-        path: displayPath,
+        name: p.split('/').pop(),
+        path: zipName + '/' + p,
         kind: 'zip',
-        index: (typeof e.index === 'number' ? e.index : i),
-        zipPath: e.path,
-        sessionId: sessionId,
-        size: e.size || 0,
+        // Position in the filtered image list — the same ordering the review
+        // backend uses for archive sources, so review results map back.
+        index: j,
+        zipPath: p,
+        sourceId: sourceId,
+        archiveFormat: format,
+        archiveName: zipName,
+        size: en.Size || en.size || 0,
         getBlob: null,
         zipFileHandle: handle,
         zipFile: rehydrateBlob
       });
     }
   } catch (e) {
-    showMsg('zip error');
-    console.warn('addZipBlob failed:', e);
+    showMsg('archive error');
+    console.warn('addArchive failed:', e);
   }
 }
 
@@ -558,6 +624,110 @@ function appendVideoItems(outVid) {
   } else {
     renderTreePanel();
   }
+}
+
+// ---------- MediaBridge import entry --------------------------------
+// The ONLY sanctioned way for external producers (GIF editor exports,
+// Download "Play", future Archive pack outputs) to push media into Gallery.
+// Gallery owns its own state: this function is the sole writer of
+// galleryState on behalf of a handoff — callers register a MediaAsset via
+// MediaBridge.register() and call MediaBridge.openGallery(assetId); they must
+// NOT touch galleryState or hand absolute temp paths.
+var _bridgeImported = {}; // assetId -> true; dedupe across handoffs
+
+function buildBridgeVideoItem(a) {
+  return {
+    name: a.name,
+    path: a.name,
+    kind: 'plain',
+    mainURL: a.url || null,
+    size: a.size || 0,
+    assetId: a.assetId
+  };
+}
+
+function importBridgeImageAsset(a, out) {
+  return window.MediaBridge.getAssetBlob(a.assetId).then(function(blob) {
+    if (!blob) return;
+    out.push({
+      name: a.name,
+      path: a.name,
+      kind: 'plain',
+      file: blob,
+      size: blob.size || a.size || 0,
+      assetId: a.assetId
+    });
+  });
+}
+
+function importBridgeArchiveAsset(a, out) {
+  return window.MediaBridge.getAssetBlob(a.assetId).then(function(blob) {
+    if (!blob) return;
+    // Register the pack bytes as an archive source (/api/archive/sources) and
+    // let addArchive expand the manifest into Gallery items (deduped by
+    // assetId). The source is server-side; no absolute path crosses the bridge.
+    var f = new File([blob], a.name || 'archive.zip', { type: a.mime || 'application/zip' });
+    return addArchive(f, out, null);
+  });
+}
+
+/**
+ * galleryImportAssets(assets) — import a batch of MediaBridge assets into
+ * Gallery. `assets` entries: {assetId, name, mime, kind, format?, url?,
+ * serverAssetId?}. Images are added as plain items (their bytes are resolved
+ * through MediaBridge.getAssetBlob so the bridge may release its copy after
+ * import); videos stream straight from the asset's controlled server URL;
+ * archives (kind 'archive' or zip mime) are registered as archive sources
+ * through /api/archive/sources and expanded by addArchive (deduped by
+ * assetId). Duplicate assetIds are skipped. Returns a Promise resolving to
+ * the number of items appended.
+ */
+function galleryImportAssets(assets) {
+  if (!assets || !assets.length) return Promise.resolve(0);
+  var out = [];
+  var outVid = [];
+  var tasks = [];
+  var pending = [];
+  for (var i = 0; i < assets.length; i++) {
+    var a = assets[i];
+    if (!a || !a.assetId || _bridgeImported[a.assetId]) continue;
+    _bridgeImported[a.assetId] = true; // claim first; rolled back on failure
+    pending.push(a.assetId);
+    if (a.kind === 'video' || (a.mime && a.mime.indexOf('video/') === 0)) {
+      outVid.push(buildBridgeVideoItem(a));
+    } else if (a.kind === 'archive' || (a.mime && a.mime.indexOf('zip') >= 0)) {
+      tasks.push(importBridgeArchiveAsset(a, out));
+    } else {
+      tasks.push(importBridgeImageAsset(a, out));
+    }
+  }
+  if (!pending.length) return Promise.resolve(0);
+  return Promise.all(tasks).then(function() {
+    var base = galleryState.items.length;
+    appendItems(out);
+    var vbase = galleryState.videoItems.length;
+    appendVideoItems(outVid);
+    if (out.length && outVid.length === 0 && galleryState.items.length > base) {
+      setActive(base); // jump to the first newly imported image
+    }
+    if (outVid.length && galleryState.videoItems.length > vbase) {
+      if (galleryState.mediaType !== 'video') {
+        galleryState.mediaType = 'video';
+        if (typeof updateLayoutMode === 'function') updateLayoutMode();
+      }
+      setVideoActive(vbase); // play the first newly imported video
+    }
+    var count = out.length + outVid.length;
+    if (count > 0 && typeof toast === 'function') {
+      toast(t('mediaBridgeImported', [String(count)]), 'success');
+    }
+    return count;
+  }).catch(function(err) {
+    // Roll back claims so a later retry can re-attempt the failed assets.
+    pending.forEach(function(id) { delete _bridgeImported[id]; });
+    console.warn('galleryImportAssets failed:', err);
+    return 0;
+  });
 }
 
 // ---------- event handlers ---------------------------------------
@@ -667,10 +837,10 @@ async function onDrop(e) {
             console.warn('walkDir drop failed:', err);
           }
         } else if (h.kind === 'file') {
-          if (isZipName(h.name)) {
+          if (isArchiveName(h.name)) {
             try {
               var ff = await h.getFile();
-              await addZipBlob(ff, out, h);
+              await addArchive(ff, out, h);
             } catch (err) {
               console.warn('drop zip handle failed:', err);
             }
@@ -724,7 +894,7 @@ async function onDrop(e) {
     }
     var f = item.getAsFile();
     if (f && f.size > 0) {
-      if (isZipName(f.name)) promises.push(Promise.resolve([{ kind: 'zipfile', file: f, path: f.name }]));
+      if (isArchiveName(f.name)) promises.push(Promise.resolve([{ kind: 'zipfile', file: f, path: f.name }]));
       else if (isSupportedExt(f.name)) promises.push(Promise.resolve([{ kind: 'plain', file: f, path: f.name }]));
     }
   }
@@ -797,10 +967,10 @@ async function onPaste(e) {
             console.warn('walkDir paste failed:', err);
           }
         } else if (h.kind === 'file') {
-          if (isZipName(h.name)) {
+          if (isArchiveName(h.name)) {
             try {
               var ff = await h.getFile();
-              await addZipBlob(ff, out, h);
+              await addArchive(ff, out, h);
             } catch (err) {
               console.warn('paste zip handle failed:', err);
             }
@@ -855,7 +1025,7 @@ async function onPaste(e) {
     var blob = it.getAsFile();
     if (blob && blob.size > 0) {
       var nm = blob.name || '';
-      if (isZipName(nm)) promises.push(Promise.resolve([{ kind: 'zipfile', file: blob, path: nm }]));
+      if (isArchiveName(nm)) promises.push(Promise.resolve([{ kind: 'zipfile', file: blob, path: nm }]));
       else if (isSupportedExt(nm) || (blob.type && blob.type.startsWith('image/'))) {
         promises.push(Promise.resolve([{ kind: 'plain', file: blob, path: nm || ('paste' + extOf(blob.type)) }]));
       }
@@ -1111,7 +1281,7 @@ async function onOpenFiles() {
     if (h.kind === 'directory') {
       await walkDir(h.handle, '', fsHandles);
     } else {
-      if (isZipName(h.name)) blobs.push({ kind: 'ziphandle', handle: h });
+      if (isArchiveName(h.name)) blobs.push({ kind: 'ziphandle', handle: h });
       else fsHandles.push({ kind: 'file', handle: h });
     }
   }

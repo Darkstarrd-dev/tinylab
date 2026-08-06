@@ -54,7 +54,7 @@
 
 | 文件 | build tag | 职责 |
 |---|---|---|
-| `app.go` | — | `New()` 装配全部运行时组件（`buildComponents`），owns 生命周期与 graceful shutdown；绑定 `a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)`、`a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)`、`a.proxyHandler.SetRequestLogDir(filepath.Join(a.configDir, "request-logs"))`；从 `cfg.Trace` 加载 `TraceConfig`（`Enabled`/`RetainDays`/`MaxDiskMB`）并注入 `apibase.Deps.Trace`；`app.go:191` 启动 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)` 后台保留清理 goroutine |
+| `app.go` | — | `New()` 装配全部运行时组件（`buildComponents`），owns 生命周期与 graceful shutdown；绑定 `a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)`、`a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)`、`a.proxyHandler.SetRequestLogDir(filepath.Join(a.configDir, "request-logs"))`；从 `cfg.Trace` 加载 `TraceConfig`（`Enabled`/`RetainDays`/`MaxDiskMB`）并注入 `apibase.Deps.Trace`；`app.go:191` 启动 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)` 后台保留清理 goroutine。**2026-08-06：** `buildComponents` 创建归档 runner（`config.ResolveArchiveTempDir` + `archivetool.NewRunner`，workspace 失败只禁用归档能力并 `Warn`，7z/rar 缺失不阻塞启动）+ 启动 `Scavenge(time.Now())` 回收过期资产/崩溃遗留，经 `a.apiRouter.SetArchiveRunner` 注入 router，`Shutdown` 时 `archiveRunner.Close()` |
 | `host.go` | — | `HostContext`：把 logger / ConsoleURL / ServerManager / Quit 传递给 host 循环 |
 | `server_manager.go` | — | `ServerManager`：HTTP 服务器优雅重启，端口热切换无需重启进程；`net.Listen` + `Serve` 模式，集成端口冲突检测与解决 |
 | `version.go` | — | `Version` 常量（项目版本号唯一来源） |
@@ -88,6 +88,8 @@
 |---|---|
 | `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`），可选 `UseCustomHeaders`/`CustomHeaders`（`useCustomHeaders`/`customHeaders`）用于 Provider 额外请求头；另含域名特例检测 `IsCline()`（BaseURL 含 `api.cline.bot`，驱动上游 `x-client-type` 请求头注入）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embed…`
 | `paths.go` | 共享路径解析函数：`ResolveDownloadProxy(cfg)` 由 `DownloadConfig.UseProxy` + 全局 `Proxy`（Host:Port）合成 yt-dlp `--proxy` URL；`ResolveTraceDir(logDir, configDir)` 解析 `TraceConfig.LogDir`（空→`{configDir}/traces`，相对拼 configDir，绝对原样）。被 `app.go` 装配与 `api/settings/register.go` 运行时更新共用，避免 `app`→`api` 循环导入。 |
+| `types.go` 的 `Config.Archive` | **2026-08-06 新增** `ArchiveConfig{SevenZipPath,RarPath,TempDir}`（`yaml/json:"archive,omitempty"`）：全可选，空工具路径运行时回退 `SEVENZIP_PATH`/`RAR_PATH` env → PATH；缺失工具不阻塞启动，只禁用对应归档能力 |
+| `paths.go` 的 `ResolveArchiveTempDir` | **2026-08-06 新增**：归档私有 workspace 解析（空→`{configDir}/archives`、相对拼 configDir、绝对原样）；创建 0700 workspace 由调用方负责，失败 fail-closed（归档能力关闭，核心功能照常） |
 | `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"`；`finalizeConfig` 在 `TextReview.SplitPatterns == nil`（首次启动）时注入内置章节检测模式（移植自 novelhelper `split.ts::DEFAULT_SPLIT_PATTERNS`，nil 判断避免用户清空 `[]` 后重新注入）；`DefaultConfig()` 中 `Trace` 字段默认值：`Enabled=false`、`RetainDays=2`、`MaxDiskMB=500` |
 | `persistence.go` | `Load`/`Save`：`.tmp` 崩溃恢复（path 缺失/损坏时**不比较 mtime** 优先恢复；成功加载后才清理）+ 原子写（委托 `fsutil.AtomicWrite`）；加密失败拒绝落盘（`encryptKeysCopy` 返回 error） |
 | `validate.go` | 尽力校验（API 类型、重复 ID/prefix、ModelDef.Protocols 值合法性），仅告警；anthropic provider 的 BaseURL 未以 `/v1/messages` 或 `*` 结尾时告警 |
@@ -217,7 +219,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`/api/filetransfer/upload` 与 `/api/filetransfer/path-info`（认证保护，600MB body 上限；ZIP + 临时服务顺序回退 + 本机路径容量查询）、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc` 回调`
+| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`/api/filetransfer/upload` 与 `/api/filetransfer/path-info`（认证保护，600MB body 上限；ZIP + 临时服务顺序回退 + 本机路径容量查询）、**2026-08-06：`/api/archive` 路由组**（`archiveapi.NewHandler(apiDeps, rt.archiveRunner)` + auth 中间件，绕过 1MiB 组级上限，逐路由 body cap 在 handler 内；`SetArchiveRunner` 注入；`apiDeps.ArchiveSettingsFn` 闭包推 `UpdateSettings`）`、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`QuickSlotOnly`/`LogRequests` 原子开关 + `SetRestartFunc`/`SetServerConfigFunc`/`SetUpstreamTimeoutFunc`/`SetStateSaveFunc`/`SetArchiveRunner` 回调`
 | `helpers.go` | 根包辅助：`saveConfig`/`saveConfigAndReload`（config.Save→Reload 收敛点）、`writeAPIError`（JSON 错误信封）、`checkPortAvailable`、`getIntQuery`、`generateID`/`SyncIDCounter`（委托 `apibase` 单一计数器）、`firstActiveKey` |
 
 ### 10.10 `internal/api/trace/` — 追踪读取 API
@@ -232,7 +234,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `getSettings`/`updateSettings`。GET 返回 `trace` 字段：`{"trace":{"enabled":<live>,"retainDays":<cfg>,"maxDiskMB":<cfg>}}`；PATCH 接受 `{"trace":{"enabled?","retainDays?","maxDiskMB?"}}`（部分更新，持久化到 `cfg.Trace`），同时更新运行时原子镜像 `apibase.Deps.LogRequests`。**rotation 为 presence-aware 合并**（`rotationPatch` 指针字段：`strategy?/stickyLimit?/maxRetries?/retryDelaySec?/backoffMaxSec?`，经 `applyRotationUpdates` 逐字段合并）——前端只发 5 个管理字段，绝不触碰 `StatePersist`/`StatePath`（2026-08-03 审计修复） |
+| `register.go` | `Handler` + `Register` + `getSettings`/`updateSettings`。GET 返回 `trace` 字段：`{"trace":{"enabled":<live>,"retainDays":<cfg>,"maxDiskMB":<cfg>}}`；PATCH 接受 `{"trace":{"enabled?","retainDays?","maxDiskMB?"}}`（部分更新，持久化到 `cfg.Trace`），同时更新运行时原子镜像 `apibase.Deps.LogRequests`。**rotation 为 presence-aware 合并**（`rotationPatch` 指针字段：`strategy?/stickyLimit?/maxRetries?/retryDelaySec?/backoffMaxSec?`，经 `applyRotationUpdates` 逐字段合并）——前端只发 5 个管理字段，绝不触碰 `StatePersist`/`StatePath`（2026-08-03 审计修复）。**2026-08-06 archive 同为 presence-aware**：GET 返回 `archive:{sevenZipPath,rarPath,tempDir}`；PATCH 接受 `archivePatch` 全指针字段（未发送不覆盖、空串=显式清除回 env/PATH），经 `applyArchiveUpdates` 合并后调 `ArchiveSettingsFn(cfg.Archive)` 推给 runner（换配置 + 失效 probe 缓存） |
 | `register_test.go` | 2026-08-03 新增：`TestRotationPatchPreservesStatePersist`/`TestRotationPatchPartialUpdate`（rotation PATCH 不抹掉 StatePersist/StatePath，Save/Load 往返验证） |
 
 | `api_test.go` | API 集成测试 |
@@ -244,7 +246,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 为 `internal/api` 子包提供共享类型和辅助函数，避免父包与子包间的循环导入。
 
 | 文件 | 职责 |
-| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数（`IsBlockedSSRFHost` 现含 `IsLinkLocalMulticast`/`IsMulticast`，2026-08-03 审计修复） |
+| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数（`IsBlockedSSRFHost` 现含 `IsLinkLocalMulticast`/`IsMulticast`，2026-08-03 审计修复）。**2026-08-06：** `ArchiveRunner` 接口（`Store`/`Status`/`List`/`ReadEntry`/`Pack`，由 `*archivetool.Runner` 实现，router 经接口注入免 import 工具包）+ `ArchiveSettingsFn func(config.ArchiveConfig)` 回调字段（可为 nil；settings handler 判空调用） |
 
 ### 10.2 `internal/api/auth/` — 鉴权
 
@@ -296,7 +298,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` 结构体（字段 `d`/`sessions`/`reviews`/`media`/`proxy`）+ `NewHandler` + `Register` + 空白图片格式 decoder import + `proxyCaller` 接口 |
+| `register.go` | `Handler` 结构体（字段 `d`/`sessions`/`reviews`/`media`/`proxy`）+ `NewHandler` + `Register` + 空白图片格式 decoder import + `proxyCaller` 接口。**2026-08-06：** 新增 `archiveBridge` 接口（`ResolveSource`/`List`/`ReadEntry`，由 `*api/archive.Handler` 实现）+ `SetArchive` 注入——nil 桥接时全部 Gallery 流程走 legacy 内存 zip 会话（兼容边界）；`galleryEditExtractZipEntry` 接受 `sourceId` 作为第三种输入（严格路径 + `DefaultBudget`） |
 | `session_store.go` | 内存 zip 会话 LRU 存储（`gallerySessionStore`/`zipSession`/`newGallerySessionID`），Handler 字段 `h.sessions` |
 | `fs_handlers.go` | Gallery 文件系统 handlers + 辅助（`isGalleryFile`/`isGalleryZip`/`galleryFsEntry`/`listGalleryFiles`/`galleryOpenDir`/`ListDir`/`ServeFile`/`DeleteFs`/`OpenFolder`/`PastePaths`） |
 | `zip_handlers.go` | 内存 zip 会话 handlers（`galleryListZip`/`GetZipEntry`/`DeleteZipSession`/`TouchSession`/`ConvertTiff`/`DeleteZipEntry`/`ZipFromPath`/`ZipWriteback`）；`ZipFromPath` 解析并校验 JSON `{path}` 后读取磁盘 ZIP，空路径或 malformed JSON 返回 400 |
@@ -443,6 +445,15 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 | `nodepersister.go` | `registryPersister`：`tr.NodePersister` 生产实现，ramp-down 决策（`UpdateNodeConcurrency`/`DisableNode`）经 `registry.UpdateTextReviewNodeFields` 做字段级合并（只改 Concurrency/Enabled，保留 ProviderID/ModelID/IntervalSec/BatchChars）+ `SaveConfig` 持久化到 `config.yaml` |
 | `routes_test.go` / `sessions_test.go` | 测试：路由注册契约 + 会话端点（含 fake Cleaner） |
 
+
+### 10.24 `internal/api/archive/` — 归档能力 HTTP 表面（P2）
+
+共享归档能力（ZIP/7z/RAR）的 HTTP 层：能力状态、source 登记（上传 ZIP/7z/RAR）、单条 entry 读取、asset 登记/释放、pack。薄翻译层——source/asset 都存于 `archivetool.Runner` 的 TempStore（服务端路径不出进程），每条 entry 路径经 foundation `StrictArchivePath` 再校验。挂载于 `/api/archive`（auth 中间件 + 绕过 1MiB 组级上限，逐路由 body cap 在 handler 内）；runner 经 `Router.SetArchiveRunner` 注入，nil 时全部端点返回诊断性 503 `archive.unavailable`。架构基线：[`docs/archive-architecture.md`](docs/archive-architecture.md) §5。
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler`/`NewHandler(d, runner)` + `Register`（9 路由：`GET /status`、`POST /sources`、`GET /sources/{id}/entries/*`、`DELETE /sources/{id}`、`POST /assets`、`GET /assets/{id}`、`POST /pack`、`POST /release/{id}`、**`POST /zip-replace`**（P3：已登记 ZIP source 原子写回——replacements+deletes、严格路径、非 ZIP/只读 403、并发写回 409 `archive.busy`））+ 错误映射 `writeRunError`（ToolMissing→503、ToolTimeout→504、ReadOnly→403、Encrypted/MultiVolume/Corrupt→422、其余→502，稳定机器码）+ `detectFormat`（扩展名→magic 兜底）+ `mimeForName`/`kindForName` |
+
 ## 11. `internal/state/` — `state.yaml` 运行时持久化
 
 架构基线见 [`docs/config-registry-state-architecture.md`](docs/config-registry-state-architecture.md)（与 config/registry 合著，含 Snapshot 格式、500ms 去抖、回调模式破除循环依赖、源码锚点）。
@@ -527,6 +538,48 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 | `procutil_windows.go` | `windows` | `KillProcessGroup(pid)` 执行 `taskkill /PID /T /F`；`SetProcessGroup(cmd)` 设 `CREATE_NEW_PROCESS_GROUP\|createNoWindow` |
 
 `internal/download/` 的平台文件均委托此包实现进程组管理。
+
+## 13e. `internal/archive/` — ArchiveCore 归档基础能力（P0/P1）
+
+按 `archive_compatibility_plan.md` §3/§4 落地的 leaf 包（不依赖 Gallery/GIF/Download/API）。合同：`Format`/`Source`/`SourceRef`/`AssetRef`/`MediaAsset`/`Entry`/`Manifest`/`Budget` + `Reader`/`Writer` 接口；严格路径校验 + 碰撞检测 + 预算计数 + 文件型 `TempStore` + 保留 Gallery ZIP 语义的 ZIP adapter。外部工具（7z/RAR）见 `internal/archivetool/`（§13f），HTTP 表面见 `internal/api/archive/`（§10.24）。架构基线：[`docs/archive-architecture.md`](docs/archive-architecture.md)。
+
+| 文件 | 职责 |
+|---|---|
+| `types.go` | 合同类型 + `Format.Valid` + 哨兵错误（`ErrEntryNotFound`/`ErrUnsafePath`/`ErrPathCollision`/`ErrUnsupportedFormat`/`ErrUnsupportedWriteback`/`ErrClosed`）+ `BudgetError`/`IsBudgetExceeded` |
+| `path.go` | `StrictArchivePath`（归一化前拒绝 NUL/C0、绝对路径、盘符、UNC/`\\?\`、`.`/`..` 段、ADS、尾随点/空格、Windows 保留设备名；仅验证通过后 `\`→`/`）+ `ValidateEntryPaths`（全条目碰撞 map：精确/Windows 等价/文件即目录前缀）+ `IsDirEntry` |
+| `budget.go` | 计划 §4.3 默认预算常量 + `DefaultBudget` + `Tracker`（条目数/单条/总展开/压缩比）+ `CapReader`/`ReadCapped`（limit+1 探测，同 gallery）+ `CountingWriter`（输出上限） |
+| `charset.go` | `decodeZipName` CJK 探测还原（与 `internal/gallery/charset.go` 同行为，P3 去重） |
+| `zip_adapter.go` | `ZIP{}` 实现 `Reader`：`List`（全条目、自然排序、严格校验全部条目、预算）+ `ReadEntry`（索引或严格路径、100 MiB 单条、content-type）；核心 `Replace`（保留原 header/comment/attributes 的原子回写语义 + 严格键） |
+| `zip_writer.go` | `NewZIPWriter(store)` 实现 `Writer`：`ReplaceZIP`（输出新 asset，源文件不动）+ `Pack`（仅 zip；7z/rar → `ErrUnsupportedWriteback`；≤2000 文件） |
+| `tempstore.go` | 文件型 `TempStore`：`<root>/<owner>/<job>/<id>_<name>` 布局、crypto/rand ID、名称净化、TTL/`Scavenge`/`ReleaseOwner`/幂等 `Release`/`Close` 清根 |
+| `*_test.go` | `path_test`（strict+collision 表驱动）、`budget_test`（各维度上限）、`zip_adapter_test`（List/Read/Replace 语义+安全+预算）、`zip_writer_test`（Writer 合同）、`tempstore_test`（生命周期/TTL/owner 隔离） |
+
+## 13f. `internal/archivetool/` — 归档外部工具层（P2）
+
+`internal/archive` 的兄弟包（只 import foundation 合同 + `config.ArchiveConfig`）：7z/7zz/unrar/rar 可执行文件解析、能力探测、机器输出 list/read、pack，以及把工具 + foundation TempStore 装配成 API 消费的 `Runner`（deadline、进程组取消、有界 stdout/stderr、并发信号量）。架构基线：[`docs/archive-architecture.md`](docs/archive-architecture.md) §4。
+
+| 文件 | 职责 |
+|---|---|
+| `tool.go` | `Resolver`（配置→`SEVENZIP_PATH`/`RAR_PATH`→PATH，30s probe 缓存，`UpdateSettings` 失效）+ `ToolError` 稳定机器码（Missing/Timeout/ReadOnly/Encrypted/MultiVolume/Corrupt）+ `parseToolVersion` |
+| `status.go` | `Status`/`ToolStatus`：`/api/archive/status` 响应形状 `{zip,sevenZip,rar}` |
+| `builders.go` | 7z/rar argv 构造（`l -slt -sccUTF-8 -p- --` / `x -so` / `lb -p- -idq` / `p -inul`；pack `a -t7z -mx=5` / `a -idq`）+ list 64MiB/pack 1MiB 输出上限 + pack MIME |
+| `exec.go` | `runTool`/`runToolDir`：`exec.CommandContext` 无 shell + `procutil` 进程组整树 kill + 有界 stdout（超限 kill 子进程并报 budget err）/stderr 16KiB tail + 退出码启发式分类 |
+| `parse.go` | `parseSevenZipSLT`/`parseRarLB`（机器格式）+ `buildManifest`（对工具输出**再走** foundation 严格校验 + collision + 预算 + 自然排序） |
+| `external.go` | `NewExternalReader`/`NewExternalWriter`（7z/RAR List/ReadEntry/Pack，并发信号量 2；`ReplaceZIP` 恒 `ErrUnsupportedWriteback`；通配符元字符拒绝；输入 staging 私有 job 目录防绝对路径泄漏） |
+| `runner.go` | `Runner`：`NewRunner(root, cfg)`（0700 workspace，失败只禁用归档能力）、`Store`/`Status`/`UpdateSettings`/`List`/`ReadEntry`/`Pack`（按格式分派 ZIP→stdlib、7z/RAR→外部工具）、`Scavenge`/`sweepOrphans`（2×TTL 清崩溃遗留）、`Close`/`IsClosed`、`ErrNoRunner` |
+
+## 13g. `internal/feature/` — 编译期功能清单（P5 第一阶段）
+
+计划 [`archive_compatibility_plan.md`](archive_compatibility_plan.md) §11/P5 的 registrar/asset-manifest 拆分落地：leaf 包（零依赖，仅 stdlib）声明 TinyRouter 编译期功能面——`ID`（`core`/`playground`/`download`/`archive`/`archive_external`/`gallery`/`gif`/`editor`/`filetransfer`，镜像计划 §11.2）、`DependsOn`（如 `gallery`/`gif`/`archive_external` → `archive`）、`StaticRoot`（`static` 或 `playground/static-pg`）与 `StaticFiles` 资产清单；`Enabled(id)` 是路由/组件门控的唯一检查点（依赖传播：禁用 `archive` 连带禁用 `gallery`/`gif`/`archive_external`），`Assets(root)` 按 feature 注册序返回启用 feature 的资产列表。
+
+接线（默认构建全启用，行为与改动前一致）：`internal/api/router.go::Routes` 顶部 `feature.SetCompiled(feature.Playground, web.PlaygroundCompiled())`（唯一真实编译信号），download/gallery/filetransfer/archive/editor(+text-review) 路由组经 `feature.Enabled(...)` 门控，`web/playground/static-pg` 按文件静态路由列表改由 `feature.Assets(feature.RootPlaygroundPG)` 派生（与旧硬编码 pgJSFiles 列表逐项同序，`internal/feature` 测试锁定）；`internal/app/app.go::buildComponents` 的 download manager 与 archive runner 构造经 `feature.Enabled(...)` 门控（禁用时 nil：router 不注册对应路由、`Router.Cleanup`/`Shutdown` 均判空）。
+
+**诚实边界（不虚假声明裁剪）：** 除 playground 静态 embed 外**尚无 feature build tag**——上述包今天全部无条件编译，manifest 中 `Compiled` 恒 true；ComfyUI/Image Batch/AnySearch 是 Playground 附属后端但无条件编译，路由组刻意不门控（注释标明 P5 blocker）。真实裁剪的剩余阻塞（tag 化包本身、按 feature 拆 embed、index.html 脚本清单 manifest 化、build.ps1 `-Features`）见 [`docs/build-variants.md`](docs/build-variants.md)「编译裁剪边界」。
+
+| 文件 | 职责 |
+|---|---|
+| `feature.go` | `Feature` 描述符 + `Register`/`SetCompiled`/`Enabled`/`Get`/`All`/`Assets` + 默认 manifest（sync.Once 注册） |
+| `feature_test.go` | 默认全启用、ID 唯一、依赖闭包/传播、资产存在性与 pg 资产列表逐项同序合同、Register 替换 |
 ---
 
 
@@ -598,7 +651,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 文件 |
 |---|---|
 | 入口 | `index.html`、`index-nopg.html`（header navigation 使用可访问 `nav[aria-label="Primary navigation"]`，第 6 个按钮 `data-page="gif"` 替代原 `nav-placeholder`） |
-| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`filetransfer.js`（Settings FileTransfer modal：任意文件拖拽/粘贴、Clear 重置、上传进度与确认上传）、`settings*.js`、`gallery/editor` 入口依赖、`gif-editor.js`（GIF 帧编辑器 SPA 页面模块：`renderGifEditor(container)`/`cleanupGifEditor()`，在 `download.js` 之后加载，`navigateTo` switch `case 'gif'` 分发，`app.js` cleanup 段回收；2026-08-06 起：无像素帧硬限额（`MAX_PIXEL_FRAMES` 已移除），GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`）+ 导出 1.5GB 峰值 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`）保留，时间轴为水平虚拟化轨道（窗口化 DOM + 容器委托交互 + 有界小缩略图缓存），帧以完整 canvas 驻留内存） |
+| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块、`console.js`、`download.js`、`filetransfer.js`（Settings FileTransfer modal：任意文件拖拽/粘贴、Clear 重置、上传进度与确认上传）、`settings*.js`、`gallery/editor` 入口依赖、`gif-editor.js`（GIF 帧编辑器 SPA 页面模块：`renderGifEditor(container)`/`cleanupGifEditor()`，在 `download.js` 之后加载，`navigateTo` switch `case 'gif'` 分发，`app.js` cleanup 段回收；2026-08-06 起：无像素帧硬限额（`MAX_PIXEL_FRAMES` 已移除），GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`）+ 导出 1.5GB 峰值 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`）保留，时间轴为水平虚拟化轨道（窗口化 DOM + 容器委托交互 + 有界小缩略图缓存），帧以完整 canvas 驻留内存；导出结果 modal 新增「Open in Gallery」按钮，经 MediaBridge 交接）、`media-bridge.js`（**2026-08-06 新增**，MediaBridge 交接契约：`register`/`openGallery`/`consume`/`deliverPendingImports`/`getAssetBlob`/`archiveStatus`；两个 index 变体均最先加载；配套 `media-bridge.test.js`） |
 | vendor | `vendor/gif.js/`（`gif.js` + `gif.worker.js` + LICENSE，MIT GIF 编码器）、`vendor/gifuct-js/`（`gifuct-js.js` + LICENSE，MIT GIF 解码器 esbuild bundle）——GIF 编辑器页加载；playground 构建经 `/vendor/*` handler 的主静态回退同样可达（见 §18.3） |
 | 样式 | `style.css` |
 
@@ -618,6 +671,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 路径 | 状态 | 内容 |
 |---|---|---|
 | `archive_compatibility_plan.md`（根目录） | **当前/实施计划** | ZIP/7z/RAR 统一归档能力、Gallery/GIF/Download MediaBridge 交接、路径与资源安全、feature build profiles 的实施前冻结方案 |
+| `docs/archive-architecture.md` | **当前/权威** | 归档基础层（ArchiveCore）架构基线：`internal/archive`（P0/P1 合同/严格路径/预算/ZIP adapter/TempStore）、`internal/archivetool`（P2 外部工具层）、`internal/api/archive`（HTTP 表面）、`Config.Archive`/Settings、MediaBridge 交接契约、与冻结计划的偏差、P3-P6 未实施项 |
 | `docs/playground-architecture.md` | **当前/权威** | Playground 前后端架构基线（共享时间线群聊模型、Director/Narrator、场景、源锚点） |
 | `docs/proxy-architecture.md` | **当前/权威** | Proxy 代理核心架构基线（调用链、重试/故障转移状态机、SSE 透传、Gemini 签名回填、在途跟踪、源码锚点） |
 | `docs/rotation-architecture.md` | **当前/权威** | Rotation Key 轮询架构基线（SelectKey 算法、三种策略、两套退避系统、配额锁 CST 00:05、NIM、错误分类、源码锚点） |
@@ -664,7 +718,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 > 以下为已冻结但尚未实施的功能计划。实施完成后，必须把对应模块、源码锚点和构建边界移入上文，并删除或更新本条目。
 
-- `archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles；当前仅有 ZIP 实现，7z/RAR 与桥接尚未落地。
+- `archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles。**P0/P1 已落地**（`internal/archive/` §13e）；**P2 已落地**（`internal/archivetool/` §13f + `internal/api/archive/` §10.24 + `Config.Archive`/Settings presence-aware PATCH + `web/static/media-bridge.js` 交接契约）；**P3 部分落地**：Gallery 后端桥接（`archiveBridge` + `zip-replace`）+ 前端 sourceId 双路径（读取/删除/审核/编辑），**旧 `/api/gallery/zip*` 与 `/edit/zip-outputs|zip-writeback|extract-zip-entry|upload-temp` 端点保留、前端 legacy 调用方未删**（FSAA/拖放/粘贴仍走 zip 会话；计划 §7.2"迁移完成后删除"未执行；**原生 picker `accept` 仍只含 `.zip`**——`gallery-layout.js:15`，.7z/.rar 用户文件导入无前端路径，`isArchiveName` 识别后仍走 zip-only 上传）；**P5 第一阶段已落地**（`internal/feature` §13g manifest + `feature.Enabled` 门控，feature_* tags 未实施）；**未实施：P4**（GIF 导出格式选择 + 帧 asset 化全量迁移）、**P5 tags/profiles**、**P6**（7z/RAR 原文件替换）。
 
 ---
 
@@ -678,6 +732,9 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 新增 Key 轮询策略 | rotation | `rotation/strategy.go`+`selector.go`、`config/types.go`（`RotationConfig`）、`proxy/forward.go`（`forwardWithRetry`） |
 | 新增管理 API 端点 | （对应模块文档）、config-registry-state | `api/router.go`（挂载+鉴权边界）、`api/<域>.go`、`registry/<域>.go` |
 | FileTransfer 临时文件中转 | config-registry-state | `internal/filetransfer/upload.go`（multipart 文件/本机剪贴板路径收集、ZIP Deflate、tfLink → tmpfiles.org → temp.sh → Filebin 顺序回退）+ `internal/api/router.go`（`/api/filetransfer/upload`，认证与 600MB body 上限）+ `web/static/filetransfer.js`（Settings modal 任意文件拖拽/粘贴/确认与下载链接）+ `web/static/settings.js`（左侧入口）+ `web/static/index.html`/`index-nopg.html`（资产加载）+ `web/static/style.css`/`i18n.js`（样式与翻译）`
+| 新增/修改归档能力（ZIP/7z/RAR） | docs/archive-architecture.md、config-registry-state | `internal/archive/`（§13e：合同/严格路径/预算/ZIP adapter/TempStore）、`internal/archivetool/`（§13f：Resolver/Runner/exec/parse/builders）、`internal/api/archive/register.go`（§10.24 端点，含 **P3 `POST /zip-replace`**）、`internal/api/router.go`（`/api/archive` 路由组 + `SetArchiveRunner` + `ArchiveSettingsFn` 闭包 + **`galleryHandler.SetArchive(archiveHandler)`**）、`internal/app/app.go`（buildComponents 创建 runner + Scavenge + Shutdown Close）、`internal/config/types.go`（`ArchiveConfig`）+ `paths.go`（`ResolveArchiveTempDir`）、`internal/api/settings/register.go`（GET `archive` 对象 + `archivePatch` presence-aware PATCH）、`internal/api/apibase/deps.go`（`ArchiveRunner` 接口 + `ArchiveSettingsFn`）、`internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`） |
+| 修改媒体交接（MediaBridge） | docs/archive-architecture.md §7/§8、playground | `web/static/media-bridge.js`（`register`/`openGallery`/`consume`/`deliverPendingImports`/`getAssetBlob`/`archiveStatus`）+ `media-bridge.test.js`；生产者：`web/static/download.js::playVideo`（MediaAsset 注册 + 受控 URL）、`web/static/gif-editor.js`（`openResultInGallery`/`lastResultAsset` + 「Open in Gallery」）；消费者：`web/playground/static-pg/gallery-io.js::galleryImportAssets`（唯一写 `galleryState` 入口）、`gallery.js::renderGallery`（`deliverPendingImports`）；加载顺序：`index.html`/`index-nopg.html` 最先加载；i18n：`mediaBridge*` 键 |
+| 修改 Gallery 归档源条目（sourceId，P3 双路径） | docs/playground-architecture.md §16、docs/archive-architecture.md §5.1/§12 | 前端：`web/playground/static-pg/gallery-io.js`（`getZipEntryBlob` sourceId 分支读 `/api/archive/sources/{id}/entries/*`、`rehydrateZipSession` 双路径重登记、`_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除 `DELETE /api/archive/sources/{id}`）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries` 经 `/api/archive/zip-replace` + `/api/archive/assets/{id}`）、`gallery-review.js`（sourceId 审核启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 `body.sourceId`）；后端：`internal/api/gallery/register.go`（`archiveBridge`/`SetArchive`）、`edit_handlers.go::galleryEditExtractZipEntry`（sourceId 分支）、`review_handlers.go`/`review_engine.go`（sourceId + `readEntry` 闭包）、`internal/api/archive/register.go::zipReplace`。**legacy 调用方保留**（`/api/gallery/zip/{sid}*`、`zip-from-path`、`/api/gallery/zip`、`/edit/extract-zip-entry|upload-temp|zip-outputs|zip-writeback`）；**.7z/.rar 用户导入缺口**：picker `accept` 仅 `.zip`（`gallery-layout.js:15`），`isArchiveName` 识别 .7z/.rar 后仍走 zip-only 上传 |
 | 新增/修改 Combo 策略 | combo、proxy | `combo/resolver.go`、`proxy/forward.go`（`handleCombo`）、`config/types.go`（`Combo`） |
 | Combo 批量测速排序 | combo、proxy | `api/combo_speedtest.go`（`speedTestCombo` SSE handler + `probeComboModel`，复用 `proxy.BuildUpstreamURL/SSELineBuffer/SSEDataPayloads`、`util.ExtractTokens`、`probe_common.go::extractContentFromSSE`、`providers_validate.go::firstActiveKey`、`proxy/handler.go::ManagementClient`）、`registry/combos.go`（`GetComboByID`）、`api/router.go`（路由注册）、`web/static/combos.js`（`runComboSpeedTest` + 编辑弹窗按钮 + `renderComboModelsList` 行 `data-fullid`/状态 span）、`web/static/i18n.js`（`comboSpeedTest*` 键） |
 | 修改 SSE 流式透传 | proxy | `proxy/stream.go`、`proxy/forward.go` |
@@ -699,6 +756,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修复 Quota Monitor latency/avg-speed 空白及首次加载空白 | proxy、config-registry-state | `web/static/monitor_quota.js::refreshAllKeyDetails` 为每个 quota bar 拉取 `monitor/model-keys` 以回填未展开主行指标；`internal/api/monitor/register.go::getQuotas` 把非 Playground `EntryTracker` 在途请求加入 provisional bar，避免请求完成前 quota 表为空；`docs/proxy-architecture.md` 记录两项修复 |
 | 修复 Monitor Recent Requests 分页状态 | proxy、config-registry-state | `web/static/monitor_recent.js::updateRecentPagerState` 计算 `atFirst`/`atLast` 后同步上一页/下一页 `disabled` 与 `pager-disabled` class，修复 `atFirst is not defined` 导致 Monitor 首次渲染失败；`docs/proxy-architecture.md` 记录修复 |
 | 新增/修改 build tag 或平台构建 | （AGENTS.md 构建变体）、`docs/build-variants.md` | `build.ps1`、`build_mac.ps1`、`build-minimal-webview-pg.ps1`、`host_*.go`、`web/embed*.go`、`internal/app/browser_*.go` |
+| 新增/修改 feature tag 或构建 profile（P5） | docs/build-variants.md「编译裁剪边界」、docs/archive-architecture.md §1/§12、archive_compatibility_plan.md §11、PROJECT_MAP §13g | **第一阶段已落地**：`internal/feature` manifest（`Register`/`SetCompiled`/`Enabled`/`Assets`）+ `internal/api/router.go` 路由门控（download/gallery/filetransfer/archive/editor/text-review；pg 静态路由经 `feature.Enabled(Playground)` + `feature.Assets(RootPlaygroundPG)` 派生）+ `internal/app/app.go::buildComponents` 组件门控（download manager / archive runner；默认构建全启用，行为不变）。**feature_* build tags 未实施**——真裁剪剩余阻塞：tag 化包本身（gallery/download/mediaedit/filetransfer/textreview/archive/archivetool/api/*）、按 feature 拆 go:embed、index.html/index-nopg.html 脚本清单 manifest 化、`build.ps1`/`build_mac.ps1` 增 `-Features`（minimal/media/portable/full）；`internal/feature/feature_test.go` 锁定默认全启用 + 资产列表同序合同 |
 | 修改前端页面/资产 | PROJECT_MAP §18 | `web/static/<page>.js`、`web/static/index.html`、`web/playground/static-pg/` |
 | 修改 Header 页面切换按钮样式与 Header Brand Logo | PROJECT_MAP §18.2、DESIGN.md | `web/static/index.html`/`index-nopg.html`（可访问 nav shell + Logo 保持比例自适应与 nav 按钮容器等高、Title 40px flex 居中与右侧 nav 按钮文字垂直对齐、.theme-switch 40px 等高底对齐日夜交替动画切换控件）、`web/static/style.css`（`h1` 40px 容器 `display:flex; align-items:center` 垂直居中对齐 nav 按钮文字；.theme-switch `--toggle-size: 16px` 保持 2.25 宽高比下 40px 高度；`.sidebar-brand-content` padding:0 与 `.header-controls` margin-bottom:0 实现底对齐）、`web/static/app.js`（`updateThemeButton` 同步 `#theme-switch-checkbox` 状态） |
 | CSS/HTML 样式移植与验证 | css_implement_tips.md、PROJECT_MAP §18.2、DESIGN.md | `css_implement_tips.md`（参考代码拆解、TinyRouter shell/theme/embed 约束、结构→效果流程、视觉验证清单与失败模式） |

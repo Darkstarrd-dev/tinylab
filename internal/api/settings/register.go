@@ -70,6 +70,11 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			"maxResults": cfg.AnySearch.MaxResults,
 		},
 		"theme": cfg.Theme,
+		"archive": map[string]any{
+			"sevenZipPath": cfg.Archive.SevenZipPath,
+			"rarPath":      cfg.Archive.RarPath,
+			"tempDir":      cfg.Archive.TempDir,
+		},
 	})
 }
 
@@ -111,6 +116,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		} `json:"anySearch"`
 		Theme        *config.ThemeConfig `json:"theme"`
 		ImageSaveDir *string             `json:"imageSaveDir"`
+		Archive      *archivePatch       `json:"archive"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -279,11 +285,18 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
 	}
 
+	if updates.Archive != nil {
+		applyArchiveUpdates(&cfg, updates.Archive)
+	}
+
 	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
 	h.d.Selector.UpdateSettings(cfg.Rotation)
+	if h.d.ArchiveSettingsFn != nil {
+		h.d.ArchiveSettingsFn(cfg.Archive)
+	}
 
 	// If password protection was just enabled or a new password was set,
 	// issue a session token to the current client so it stays authenticated.
@@ -408,6 +421,36 @@ func applyThemeUpdates(cfg *config.Config, patch *config.ThemeConfig) {
 	}
 	if patch.Style != "" {
 		cfg.Theme.Style = patch.Style
+	}
+}
+
+// archivePatch carries the presence-aware archive fields accepted by the
+// settings PATCH endpoint. Pointer fields distinguish "field not sent" from
+// "explicitly cleared", so a partial update can never wipe fields the
+// frontend does not manage, while an empty string is honored as an explicit
+// clear back to environment/PATH tool resolution.
+type archivePatch struct {
+	SevenZipPath *string `json:"sevenZipPath"`
+	RarPath      *string `json:"rarPath"`
+	TempDir      *string `json:"tempDir"`
+}
+
+// applyArchiveUpdates merges the presence-aware patch into cfg.Archive.
+// Fields absent from the patch (nil pointer) are left untouched; an explicit
+// empty string clears the field back to its zero value (environment/PATH
+// resolution at runtime).
+func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
+	if patch == nil {
+		return
+	}
+	if patch.SevenZipPath != nil {
+		cfg.Archive.SevenZipPath = *patch.SevenZipPath
+	}
+	if patch.RarPath != nil {
+		cfg.Archive.RarPath = *patch.RarPath
+	}
+	if patch.TempDir != nil {
+		cfg.Archive.TempDir = *patch.TempDir
 	}
 }
 

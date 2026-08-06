@@ -1673,11 +1673,14 @@ window.triggerMediaEditor = function(mediaType) {
     return;
   }
 
-  // Zip items: extract to temp file via backend, then open editor.
-  if (item.kind === 'zip' && (item.zipAbsPath || item.sessionId)) {
+  // Zip items: extract to temp file via backend, then open editor. Archive-
+  // source items (sourceId) resolve through the /api/archive bridge; legacy
+  // sessions/on-disk zips keep zipAbsPath/sessionId.
+  if (item.kind === 'zip' && (item.zipAbsPath || item.sessionId || item.sourceId)) {
     showMsg(T('geExtracting') || 'Extracting from archive...');
     var body = { zipPath: item.zipPath };
-    if (item.zipAbsPath) body.zipAbsPath = item.zipAbsPath;
+    if (item.sourceId) body.sourceId = item.sourceId;
+    else if (item.zipAbsPath) body.zipAbsPath = item.zipAbsPath;
     else body.sessionId = item.sessionId;
 
     fetch('/api/gallery/edit/extract-zip-entry', {

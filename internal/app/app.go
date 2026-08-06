@@ -12,10 +12,12 @@ import (
 
 	"github.com/tinyrouter/tinyrouter/internal/api"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/archivetool"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/feature"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -39,19 +41,20 @@ type App struct {
 	configDir  string
 	addr       string
 
-	logger       *console.Logger
-	usageBuf     *usage.RingBuffer
-	pgUsageBuf   *usage.RingBuffer // Playground 来源请求专用 ring
-	quotaTracker *usage.QuotaTracker
-	reg          *registry.Registry
-	selector     *rotation.Selector
-	comboRes     *combo.Resolver
-	proxyHandler *proxy.Handler
-	downloadMgr  *download.Manager
-	apiRouter    *api.Router
-	stateManager *state.Manager
-	statePath    string
-	sm           *ServerManager
+	logger        *console.Logger
+	usageBuf      *usage.RingBuffer
+	pgUsageBuf    *usage.RingBuffer // Playground 来源请求专用 ring
+	quotaTracker  *usage.QuotaTracker
+	reg           *registry.Registry
+	selector      *rotation.Selector
+	comboRes      *combo.Resolver
+	proxyHandler  *proxy.Handler
+	downloadMgr   *download.Manager
+	apiRouter     *api.Router
+	archiveRunner *archivetool.Runner
+	stateManager  *state.Manager
+	statePath     string
+	sm            *ServerManager
 
 	// shutdownCtx is cancelled by the API layer (POST /api/shutdown) and by the
 	// host loop, signalling the app to begin graceful shutdown.
@@ -140,27 +143,35 @@ func (a *App) buildComponents() error {
 	if err := a.proxyHandler.SetProxy(cfg.Proxy.Enabled, cfg.Proxy.Host, cfg.Proxy.Port); err != nil {
 		a.logger.Warn("invalid upstream proxy config: %v", err)
 	}
-
-	// Download manager.
-	downloadSettings := download.RuntimeSettings{
-		DownloadDir:         cfg.Download.DefaultDir,
-		YtDlpPath:           cfg.Download.YtDlpPath,
-		FfmpegPath:          cfg.Download.FfmpegPath,
-		ConcurrentFragments: cfg.Download.ConcurrentFragments,
-		MaxConcurrent:       cfg.Download.MaxConcurrent,
-		Proxy:               config.ResolveDownloadProxy(cfg),
-		BrowserCookies:      cfg.Download.BrowserCookies,
-		CookiesPath:         cfg.Download.CookiesPath,
+	// Download manager (feature_download). In the default build the feature is
+	// always compiled, so the manager is constructed exactly as before; a
+	// future feature_* build profile that disables it skips construction and
+	// the router leaves /api/downloads unregistered (Router.Cleanup already
+	// nil-checks the manager, and apidownload handlers are gated on the same
+	// manifest entry).
+	if feature.Enabled(feature.Download) {
+		downloadSettings := download.RuntimeSettings{
+			DownloadDir:         cfg.Download.DefaultDir,
+			YtDlpPath:           cfg.Download.YtDlpPath,
+			FfmpegPath:          cfg.Download.FfmpegPath,
+			ConcurrentFragments: cfg.Download.ConcurrentFragments,
+			MaxConcurrent:       cfg.Download.MaxConcurrent,
+			Proxy:               config.ResolveDownloadProxy(cfg),
+			BrowserCookies:      cfg.Download.BrowserCookies,
+			CookiesPath:         cfg.Download.CookiesPath,
+		}
+		a.downloadMgr = download.NewManager(downloadSettings, a.logger)
+		// Always start the download manager. The HTTP routes for /api/downloads are
+		// unconditionally registered, so returning 503 from createDownload when
+		// download.enabled is false (or absent and defaulted) is confusing. If a
+		// future need arises to truly disable downloads, the route registration in
+		// internal/api/router.go should be made conditional instead.
+		a.downloadMgr.Start()
+		a.logger.Info("download manager started (concurrent=%d, fragments=%d)",
+			cfg.Download.MaxConcurrent, cfg.Download.ConcurrentFragments)
+	} else {
+		a.logger.Info("download feature disabled (feature manifest); /api/downloads not registered")
 	}
-	a.downloadMgr = download.NewManager(downloadSettings, a.logger)
-	// Always start the download manager. The HTTP routes for /api/downloads are
-	// unconditionally registered, so returning 503 from createDownload when
-	// download.enabled is false (or absent and defaulted) is confusing. If a
-	// future need arises to truly disable downloads, the route registration in
-	// internal/api/router.go should be made conditional instead.
-	a.downloadMgr.Start()
-	a.logger.Info("download manager started (concurrent=%d, fragments=%d)",
-		cfg.Download.MaxConcurrent, cfg.Download.ConcurrentFragments)
 
 	// State persistence setup. Restore is performed at the start of Run, before
 	// the HTTP server is started, so the runtime state (key/combo cooldowns and
@@ -179,8 +190,35 @@ func (a *App) buildComponents() error {
 		a.comboRes.SetStateHook(a.stateManager.ScheduleWrite)
 	}
 
+	// Archive runner: shared ZIP/7z/RAR capability (Gallery/GIF/pack), gated on
+	// the archive feature (feature_archive; always compiled in the default
+	// build, so this constructs exactly as before). It is always constructed
+	// when the temp workspace can be created; a missing 7z/rar tool never
+	// blocks startup — the /api/archive status reports the capability gaps. A
+	// failing workspace disables the feature (nil runner) while
+	// Proxy/Monitor/Settings/Download keep running. A manifest-disabled build
+	// skips construction entirely: the router's nil runner degrades /api/archive
+	// to a diagnostic 503 and Shutdown's nil check skips Close.
+	if feature.Enabled(feature.Archive) {
+		archiveRoot := config.ResolveArchiveTempDir(cfg.Archive.TempDir, a.configDir)
+		runner, err := archivetool.NewRunner(archiveRoot, cfg.Archive)
+		if err != nil {
+			a.logger.Warn("archive runner disabled: %v", err)
+		} else {
+			a.archiveRunner = runner
+			// Startup scavenger: reclaim expired assets and crash leftovers.
+			a.archiveRunner.Scavenge(time.Now())
+		}
+	} else {
+		a.logger.Info("archive feature disabled (feature manifest); /api/archive not registered")
+	}
+
 	// API router + UI handler. Shutdown is triggered by POST /api/shutdown.
 	a.apiRouter = api.New(a.reg, cfg, a.configPath, a.usageBuf, a.pgUsageBuf, a.quotaTracker, a.logger, a.proxyHandler, a.triggerShutdown, a.selector, a.comboRes, a.downloadMgr)
+	// Wire the archive runner (and its settings callback) into the router
+	// before Routes() so /api/archive handlers and the settings PATCH hook are
+	// populated.
+	a.apiRouter.SetArchiveRunner(a.archiveRunner)
 	a.proxyHandler.SetDebugModeProvider(a.apiRouter.DebugMode)
 	a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)
 	a.proxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, a.configDir))
@@ -294,13 +332,16 @@ func (a *App) Shutdown(_ context.Context) error {
 	if a.apiRouter != nil {
 		a.apiRouter.Cleanup()
 	}
-	a.logger.Info("stopped")
-
 	if a.lockFile != nil {
 		a.lockFile.Close()
 		_ = os.Remove(a.lockPath)
 	}
-
+	if a.archiveRunner != nil {
+		if err := a.archiveRunner.Close(); err != nil {
+			a.logger.Warn("failed to close archive runner: %v", err)
+		}
+	}
+	a.logger.Info("stopped")
 	// Tray/webview builds force-exit to prevent zombie processes (message
 	// loops can resist termination); the default console host returns normally.
 	forceExitIfNeeded()

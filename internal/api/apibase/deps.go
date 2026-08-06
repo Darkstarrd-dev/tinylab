@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/tinyrouter/tinyrouter/internal/archive"
+	"github.com/tinyrouter/tinyrouter/internal/archivetool"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -54,6 +56,26 @@ type Deps struct {
 	ServerCfgFn       func(config.ServerConfig)
 	UpstreamTimeoutFn func(int)
 	StateSaveFn       func()
+	// ArchiveSettingsFn is invoked after an archive settings PATCH to push the
+	// merged local config to the archive runner (tool path re-resolution and
+	// status cache invalidation). It may be nil when the archive runner is not
+	// wired (tests, minimal builds); the settings handler checks before calling.
+	ArchiveSettingsFn func(config.ArchiveConfig)
+}
+
+// ArchiveRunner is the runtime surface the /api/archive handlers consume. It
+// is implemented by *archivetool.Runner; the interface lives here (the shared
+// API leaf) so the router can inject the runner without importing the tool
+// package directly.
+type ArchiveRunner interface {
+	Store() *archive.TempStore
+	Status(ctx context.Context) archivetool.Status
+	List(ctx context.Context, src archive.Source, b archive.Budget) (archive.Manifest, error)
+	ReadEntry(ctx context.Context, src archive.Source, identifier string, b archive.Budget) ([]byte, string, error)
+	Pack(ctx context.Context, format archive.Format, assets []archive.AssetRef, name string, b archive.Budget) (archive.AssetRef, error)
+	ReplaceZIP(ctx context.Context, src archive.Source, replacements map[string]archive.AssetRef, b archive.Budget) (archive.AssetRef, error)
+	ReplaceZIPDeleting(ctx context.Context, src archive.Source, replacements map[string]archive.AssetRef, deletes []string, b archive.Budget) (archive.AssetRef, error)
+	UpdateSettings(cfg config.ArchiveConfig)
 }
 
 // SaveConfig persists the given config to disk via config.Save. It performs no

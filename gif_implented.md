@@ -232,14 +232,15 @@ flowchart LR
 - worker 加载：`new GIF({workerScript: 'static/vendor/gif.js/gif.worker.js'})`（相对路径按实际静态前缀 `./vendor/gif.js/gif.worker.js` 计算）——同源 URL，CSP `script-src 'self'` 允许，**禁止**原页面的 `blob:` importScripts 包装写法（CSP 不含 blob:）。
 - 许可合规：MIT 库 vendor 时在 `web/static/vendor/` 内保留原 LICENSE 文件与版权头（项目 LICENSE 为 MIT，兼容）。
 - 字体：不 vendor（§0）。
+- **MediaBridge（2026-08-06 新增依赖）**：`web/static/media-bridge.js`（零依赖全局契约，`register`/`openGallery`/`consume`/`deliverPendingImports`/`getAssetBlob`/`archiveStatus`，见 `docs/archive-architecture.md` §7）在 `index.html` 与 `index-nopg.html` 中均先于 `gif-editor.js` 加载；GIF 编辑器是桥接生产者（导出登记为 MediaAsset + 「Open in Gallery」），**不直接写 `galleryState`、不传绝对临时路径**。i18n 键 `gifEditorOpenGallery`（en/cn）。
 
 ### 4.5 输出链路
 
 | 输出 | 方案 | 细节 |
 |---|---|---|
-| GIF | gif.js 编码（同原） | `workers: 4`、quality 1-10、透明 matte `#FF00FF`；预览 `<img src=objectURL>` + anchor download（同 2773-2780） |
-| 序列帧 ZIP | **后端 zip-outputs**（替代 JSZip） | 帧 PNG `toBlob` → `upload-temp?name=frame_NNN.png`（500MB 上限）→ `zip-outputs {paths, cleanUp:true}` → `outputURL` 下载。帧数 >200 时分批（每批 50）防并发上传过载；导出前仅经 `exportMemCheck` 峰值 confirm 警告，无像素帧硬限额（§4.6） |
-| 精灵图 | 前端 canvas 合成 | 同原 2867-2950，`toDataURL('image/png')` 下载；row-major 排列，空位跳过 |
+| GIF | gif.js 编码（同原） | `workers: 4`、quality 1-10、透明 matte `#FF00FF`；预览 `<img src=objectURL>` + anchor download（同 2773-2780）。**2026-08-06：** 结果 modal 新增「Open in Gallery」按钮——导出 blob 同时登记为 MediaBridge 资产（`lastResultAsset`，`kind:'image'`/`format:'gif'`），`openResultInGallery()` 等待（可能仍在途的）`MediaBridge.register()` 完成后 `openGallery`；不触碰 `galleryState` |
+| 序列帧 ZIP | **后端 zip-outputs**（替代 JSZip） | 帧 PNG `toBlob` → `upload-temp?name=frame_NNN.png`（500MB 上限）→ `zip-outputs {paths, cleanUp:true}` → `outputURL` 下载。帧数 >200 时分批（每批 50）防并发上传过载；导出前仅经 `exportMemCheck` 峰值 confirm 警告，无像素帧硬限额（§4.6）。**2026-08-06：** pack 结果以受控 `url`（`zip.outputURL`）登记 MediaBridge 资产（`kind:'archive'`/`format:'zip'`），同样可「Open in Gallery」（Gallery 侧 `galleryImportAssets` 复用 zip 会话流展开）；不再创建下载 `<a>` click |
+| 精灵图 | 前端 canvas 合成 | 同原 2867-2950，`toDataURL('image/png')` 下载；row-major 排列，空位跳过。**2026-08-06：** 改 `toBlob` 单次编码复用（预览 objectURL + MediaBridge 交接，`kind:'image'`/`format:'png'`）+「Open in Gallery」 |
 
 ### 4.6 输入限额与内存保护（2026-08-06 修订；原页面无防护，移植时新增）
 

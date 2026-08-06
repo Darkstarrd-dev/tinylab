@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/archive"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
@@ -320,49 +321,84 @@ func (h *Handler) galleryEditUploadTemp(w http.ResponseWriter, r *http.Request) 
 //
 //	{ "zipAbsPath": "...", "zipPath": "entry/inside/zip.png" }
 //	or { "sessionId": "...", "zipPath": "entry/inside/zip.png" }
+//	or { "sourceId": "...", "zipPath": "entry/inside/zip.png" }
 //
+// sourceId references a source registered through POST /api/archive/sources
+// (the /api/archive migration path); the server resolves the entry from the
+// registered source instead of trusting a browser-submitted absolute path.
 // Returns { "tempPath": "..." }.
 func (h *Handler) galleryEditExtractZipEntry(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ZipAbsPath string `json:"zipAbsPath"`
 		SessionID  string `json:"sessionId"`
+		SourceID   string `json:"sourceId"`
 		ZipPath    string `json:"zipPath"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ZipPath == "" {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "zipPath is required")
 		return
 	}
-	if req.ZipAbsPath == "" && req.SessionID == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "zipAbsPath or sessionId is required")
+	if req.ZipAbsPath == "" && req.SessionID == "" && req.SourceID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "zipAbsPath, sessionId, or sourceId is required")
 		return
 	}
 
-	var zipData []byte
-	if req.ZipAbsPath != "" {
-		var err error
-		zipData, err = readZipFile(req.ZipAbsPath)
+	var entry []byte
+	switch {
+	case req.SourceID != "":
+		if h.archive == nil {
+			apibase.WriteAPIError(w, http.StatusServiceUnavailable, "archive source lookup is unavailable")
+			return
+		}
+		src, ok := h.archive.ResolveSource(req.SourceID)
+		if !ok {
+			apibase.WriteAPIError(w, http.StatusNotFound, "archive source not found or expired")
+			return
+		}
+		data, _, err := h.archive.ReadEntry(r.Context(), src, req.ZipPath, archive.DefaultBudget())
+		if err != nil {
+			if archive.IsNotFound(err) {
+				apibase.WriteAPIError(w, http.StatusNotFound, "entry not found in source")
+				return
+			}
+			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to read entry: "+err.Error())
+			return
+		}
+		entry = data
+	case req.ZipAbsPath != "":
+		zipData, err := readZipFile(req.ZipAbsPath)
 		if err != nil {
 			apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())
 			return
 		}
-	} else {
-		data, ok := h.sessions.get(req.SessionID)
+		reader := bytes.NewReader(zipData)
+		data, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), req.ZipPath)
+		if err != nil {
+			if gallerylib.IsNotFound(err) {
+				apibase.WriteAPIError(w, http.StatusNotFound, "entry not found in zip")
+				return
+			}
+			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to read entry: "+err.Error())
+			return
+		}
+		entry = data
+	default:
+		zipData, ok := h.sessions.get(req.SessionID)
 		if !ok {
 			apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 			return
 		}
-		zipData = data
-	}
-
-	reader := bytes.NewReader(zipData)
-	entry, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), req.ZipPath)
-	if err != nil {
-		if gallerylib.IsNotFound(err) {
-			apibase.WriteAPIError(w, http.StatusNotFound, "entry not found in zip")
+		reader := bytes.NewReader(zipData)
+		data, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), req.ZipPath)
+		if err != nil {
+			if gallerylib.IsNotFound(err) {
+				apibase.WriteAPIError(w, http.StatusNotFound, "entry not found in zip")
+				return
+			}
+			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to read entry: "+err.Error())
 			return
 		}
-		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to read entry: "+err.Error())
-		return
+		entry = data
 	}
 
 	// Write to temp file preserving the original extension.

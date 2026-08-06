@@ -13,12 +13,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/archive"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
 )
 
 // startReviewRequest is the request body for starting a review.
 type startReviewRequest struct {
 	SessionID    string `json:"sessionId"`
+	SourceID     string `json:"sourceId"`
 	Provider     string `json:"provider"`
 	Model        string `json:"model"`
 	SystemPrompt string `json:"systemPrompt"`
@@ -43,7 +45,8 @@ type genPromptRequest struct {
 // Content-Type: application/json
 //
 //	{
-//	    "sessionId": "abc123",
+//	    "sessionId": "abc123",        // legacy in-memory zip session
+//	    "sourceId": "src-...",        // OR a source registered via /api/archive/sources
 //	    "provider": "openai",
 //	    "model": "gpt-4o",
 //	    "systemPrompt": "...",
@@ -61,8 +64,8 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.SessionID == "" || req.Provider == "" || req.Model == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "sessionId, provider, and model are required")
+	if (req.SessionID == "" && req.SourceID == "") || req.Provider == "" || req.Model == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "sessionId or sourceId, provider, and model are required")
 		return
 	}
 	if req.Strategy == "" {
@@ -84,39 +87,93 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 		req.UserPrompt = gallerylib.DefaultUserPrompt
 	}
 
+	// Task key: source-based reviews are keyed by sourceId so status/cancel
+	// polling can reuse the same URL shape as session-based reviews.
+	taskKey := req.SessionID
+	if taskKey == "" {
+		taskKey = req.SourceID
+	}
+
 	// Check if a review is already in progress
-	if _, loaded := h.reviews.Load(req.SessionID); loaded {
+	if _, loaded := h.reviews.Load(taskKey); loaded {
 		apibase.WriteAPIError(w, http.StatusConflict, "review already in progress for this session")
 		return
 	}
 
-	// Get ZIP session data and pin to prevent eviction
-	zipData, ok := h.sessions.get(req.SessionID)
-	if !ok {
-		apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
-		return
-	}
-	h.sessions.pin(req.SessionID)
+	var (
+		entries   []gallerylib.Entry
+		readEntry func(context.Context, string) ([]byte, error)
+	)
 
-	// Parse manifest to get entry list
-	reader := bytes.NewReader(zipData)
-	manifest, err := gallerylib.ListZipEntries(reader, int64(len(zipData)))
-	if err != nil {
-		h.sessions.unpin(req.SessionID)
-		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to list zip entries: "+err.Error())
-		return
-	}
+	if req.SourceID != "" {
+		// Archive-source review: resolve the registered source through the
+		// /api/archive bridge and read every entry by strict path. No zip
+		// session bytes are materialized in the gallery handler.
+		if h.archive == nil {
+			apibase.WriteAPIError(w, http.StatusServiceUnavailable, "archive source lookup is unavailable")
+			return
+		}
+		src, ok := h.archive.ResolveSource(req.SourceID)
+		if !ok {
+			apibase.WriteAPIError(w, http.StatusNotFound, "archive source not found or expired")
+			return
+		}
+		manifest, err := h.archive.List(r.Context(), src, archive.DefaultBudget())
+		if err != nil {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to list archive source: "+err.Error())
+			return
+		}
+		// The archive manifest contains ALL entries; filter to the image
+		// entries the gallery serves, mirroring gallerylib.ListZipEntries so
+		// entry indices stay consistent with the frontend's item list.
+		for _, e := range manifest.Entries {
+			if e.IsDir || !gallerylib.IsSupportedExt(e.Path) {
+				continue
+			}
+			entries = append(entries, gallerylib.Entry{Index: len(entries), Path: e.Path, Size: e.Size})
+		}
+		if len(entries) == 0 {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "no image entries found in source")
+			return
+		}
+		readEntry = func(ctx context.Context, entryPath string) ([]byte, error) {
+			data, _, err := h.archive.ReadEntry(ctx, src, entryPath, archive.DefaultBudget())
+			return data, err
+		}
+	} else {
+		// Legacy flow: in-memory zip session bytes (pinned against LRU
+		// eviction while the review runs).
+		zipData, ok := h.sessions.get(req.SessionID)
+		if !ok {
+			apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
+			return
+		}
+		h.sessions.pin(req.SessionID)
 
-	if manifest.Total == 0 {
-		h.sessions.unpin(req.SessionID)
-		apibase.WriteAPIError(w, http.StatusBadRequest, "no image entries found in zip")
-		return
+		reader := bytes.NewReader(zipData)
+		manifest, err := gallerylib.ListZipEntries(reader, int64(len(zipData)))
+		if err != nil {
+			h.sessions.unpin(req.SessionID)
+			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to list zip entries: "+err.Error())
+			return
+		}
+		entries = manifest.Entries
+		if len(entries) == 0 {
+			h.sessions.unpin(req.SessionID)
+			apibase.WriteAPIError(w, http.StatusBadRequest, "no image entries found in zip")
+			return
+		}
+		readEntry = func(_ context.Context, entryPath string) ([]byte, error) {
+			reader := bytes.NewReader(zipData)
+			data, _, err := gallerylib.GetZipEntry(reader, int64(len(zipData)), entryPath)
+			return data, err
+		}
 	}
 
 	// Select entries to review based on strategy
-	indices := selectReviewIndices(manifest.Total, req.Strategy, req.HeadSize, req.TailSize)
+	indices := selectReviewIndices(len(entries), req.Strategy, req.HeadSize, req.TailSize)
 	if len(indices) == 0 {
-		h.sessions.unpin(req.SessionID)
+		h.sessions.unpin(taskKey)
 		apibase.WriteAPIError(w, http.StatusBadRequest, "no entries selected for review")
 		return
 	}
@@ -124,7 +181,7 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 	// Create review task
 	ctx, cancel := context.WithCancel(context.Background())
 	task := &reviewTask{
-		SessionID:    req.SessionID,
+		SessionID:    taskKey,
 		Status:       gallerylib.ReviewStatusRunning,
 		Total:        len(indices),
 		Results:      make([]gallerylib.ReviewResult, 0),
@@ -135,13 +192,13 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 		done:         make(chan struct{}),
 	}
 
-	h.reviews.Store(req.SessionID, task)
+	h.reviews.Store(taskKey, task)
 
 	// Start review goroutine
-	go h.runReview(ctx, task, zipData, manifest.Entries, indices, req.Provider, req.Model, req.Concurrency)
+	go h.runReview(ctx, task, entries, indices, readEntry, req.Provider, req.Model, req.Concurrency)
 
-	h.d.Logger.Info("gallery: started AI review for session %s, %d entries, strategy=%s, provider=%s, model=%s",
-		req.SessionID, len(indices), req.Strategy, req.Provider, req.Model)
+	h.d.Logger.Info("gallery: started AI review for %s, %d entries, strategy=%s, provider=%s, model=%s",
+		taskKey, len(indices), req.Strategy, req.Provider, req.Model)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{

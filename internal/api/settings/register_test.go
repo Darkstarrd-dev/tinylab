@@ -105,3 +105,79 @@ func TestThemePatchPersistsStyle(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestArchivePatchPresenceAware verifies the archive settings PATCH contract:
+// partial updates leave untouched fields at their existing values, an explicit
+// empty string clears a field back to zero (environment/PATH resolution), and
+// Save/Load round-trips the archive block.
+func TestArchivePatchPresenceAware(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Download.YtDlpPath = "/keep/yt-dlp"
+	cfg.Trace.RetainDays = 9
+	cfg.Archive.SevenZipPath = "/keep/7z"
+	cfg.Archive.TempDir = "/keep/tmp"
+
+	// Partial patch: only rarPath sent. Other archive fields (and unrelated
+	// config sections) must survive untouched.
+	var partial struct {
+		Archive *archivePatch `json:"archive"`
+	}
+	if err := json.Unmarshal([]byte(`{"archive":{"rarPath":"C:\\tools\\unrar.exe"}}`), &partial); err != nil {
+		t.Fatalf("decode partial archive patch: %v", err)
+	}
+	applyArchiveUpdates(cfg, partial.Archive)
+	if cfg.Archive.RarPath != `C:\tools\unrar.exe` {
+		t.Errorf("RarPath = %q, want C:\\tools\\unrar.exe", cfg.Archive.RarPath)
+	}
+	if cfg.Archive.SevenZipPath != "/keep/7z" {
+		t.Errorf("SevenZipPath = %q, want /keep/7z (wiped by partial patch)", cfg.Archive.SevenZipPath)
+	}
+	if cfg.Archive.TempDir != "/keep/tmp" {
+		t.Errorf("TempDir = %q, want /keep/tmp (wiped by partial patch)", cfg.Archive.TempDir)
+	}
+	if cfg.Download.YtDlpPath != "/keep/yt-dlp" || cfg.Trace.RetainDays != 9 {
+		t.Error("unrelated config sections wiped by archive patch")
+	}
+
+	// Explicit clear: empty string resets the field to zero value.
+	var clear struct {
+		Archive *archivePatch `json:"archive"`
+	}
+	if err := json.Unmarshal([]byte(`{"archive":{"sevenZipPath":""}}`), &clear); err != nil {
+		t.Fatalf("decode clear archive patch: %v", err)
+	}
+	applyArchiveUpdates(cfg, clear.Archive)
+	if cfg.Archive.SevenZipPath != "" {
+		t.Errorf("SevenZipPath = %q after explicit clear, want empty", cfg.Archive.SevenZipPath)
+	}
+	if cfg.Archive.RarPath != `C:\tools\unrar.exe` {
+		t.Errorf("RarPath = %q, want preserved after clearing sevenZipPath", cfg.Archive.RarPath)
+	}
+
+	// Persistence round-trip keeps the archive block on disk.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Archive.RarPath != `C:\tools\unrar.exe` {
+		t.Errorf("RarPath = %q after round-trip, want C:\\tools\\unrar.exe", loaded.Archive.RarPath)
+	}
+	if loaded.Archive.TempDir != "/keep/tmp" {
+		t.Errorf("TempDir = %q after round-trip, want /keep/tmp", loaded.Archive.TempDir)
+	}
+}
+
+// TestArchivePatchNilLeavesConfig verifies a nil archive block in a PATCH
+// payload never touches cfg.Archive.
+func TestArchivePatchNilLeavesConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Archive.SevenZipPath = "/keep/7z"
+	applyArchiveUpdates(cfg, nil)
+	if cfg.Archive.SevenZipPath != "/keep/7z" {
+		t.Errorf("SevenZipPath = %q, want /keep/7z (nil patch mutated config)", cfg.Archive.SevenZipPath)
+	}
+}

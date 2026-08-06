@@ -1248,7 +1248,11 @@ function togglePlaylistEntries() {
   }
 }
 
-// playVideo - triggers single or multi video playback in Gallery module.
+// playVideo - hands completed download outputs to the Gallery through the
+// MediaBridge. No direct galleryState writes and no absolute paths: each
+// output is registered as a MediaAsset whose bytes are served by the
+// controlled /api/downloads/{id}/file endpoint; Gallery imports through its
+// own galleryImportAssets entry point.
 function playVideo(taskId) {
   if (taskId && selectedTaskIds.indexOf(taskId) < 0) {
     selectedTaskIds.push(taskId);
@@ -1265,42 +1269,53 @@ function playVideo(taskId) {
     return;
   }
 
-  var videoObjs = completedTasks.map(function(task) {
-    var fileUrl = '/api/downloads/' + encodeURIComponent(task.id) + '/file';
+  var assets = completedTasks.map(function(task) {
     var rawPath = task.filePath || task.savedFile || task.url || '';
     var normalizedPath = rawPath.replace(/\\/g, '/');
+    var name = task.title || normalizedPath.split('/').pop() || task.id;
     return {
-      name: task.title || (normalizedPath.split(/[\\/]/).pop()) || task.id,
-      path: normalizedPath,
-      kind: 'plain',
-      absPath: normalizedPath,
-      mainURL: fileUrl,
+      name: name,
+      mime: mimeFromDownloadName(name),
+      kind: 'video',
+      format: (name.split('.').pop() || '').toLowerCase(),
+      url: '/api/downloads/' + encodeURIComponent(task.id) + '/file',
       size: task.fileSize || 0
     };
   });
 
-  if (typeof galleryState !== 'undefined') {
-    galleryState.mediaType = 'video';
-    galleryState.focus = 'video';
-    galleryState.videoPlayingState = true;
-    galleryState.videoItems = videoObjs;
-    galleryState.videoIndex = 0;
-    if (typeof updateVideoDirStructure === 'function') updateVideoDirStructure();
-    if (typeof renderTreePanel === 'function') renderTreePanel();
-    if (typeof updateLayoutMode === 'function') updateLayoutMode();
-    if (typeof setVideoActive === 'function') setVideoActive(0);
+  if (typeof window.MediaBridge === 'undefined' ||
+      typeof window.MediaBridge.register !== 'function' ||
+      typeof window.MediaBridge.openGallery !== 'function') {
+    toast('MediaBridge unavailable', 'error');
+    return;
   }
 
-  // Redirect to Gallery page and play
-  var playMsg = videoObjs.length > 1
-    ? 'Playing ' + videoObjs.length + ' videos... (Switching to Gallery)'
-    : 'Playing ' + videoObjs[0].name + '... (Switching to Gallery)';
+  var playMsg = assets.length > 1
+    ? 'Playing ' + assets.length + ' videos... (Switching to Gallery)'
+    : 'Playing ' + assets[0].name + '... (Switching to Gallery)';
   toast(playMsg, 'success');
 
-  var galleryBtn = document.querySelector('button[data-page="gallery"]');
-  if (galleryBtn) {
-    galleryBtn.click();
-  }
+  Promise.all(assets.map(function(a) { return window.MediaBridge.register(a); }))
+    .then(function(ids) {
+      window.MediaBridge.openGallery(ids);
+    })
+    .catch(function(err) {
+      console.error('MediaBridge register failed:', err);
+      toast('Failed to open in Gallery', 'error');
+    });
+}
+
+// mimeFromDownloadName maps a downloaded file's extension to a MIME type for
+// MediaAsset registration (informational — the bridge classifies by kind).
+function mimeFromDownloadName(name) {
+  var ext = (name.split('.').pop() || '').toLowerCase();
+  var map = {
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    mkv: 'video/x-matroska', avi: 'video/x-msvideo', m4v: 'video/x-m4v',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg',
+    oga: 'audio/ogg', flac: 'audio/flac', opus: 'audio/opus'
+  };
+  return map[ext] || 'application/octet-stream';
 }
 
 // getResolutionLabel maps quality preset to display resolution labels.
