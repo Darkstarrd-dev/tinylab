@@ -617,7 +617,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 | 路径 | 状态 | 内容 |
 |---|---|---|
-| `css_implement_tips.md`（根目录） | **当前/实施指南** | CSS/HTML 样式移植经验、TinyRouter 主题与 embed 约束、结构到视觉的实施流程、浏览器验证清单与常见失败模式 |
+| `archive_compatibility_plan.md`（根目录） | **当前/实施计划** | ZIP/7z/RAR 统一归档能力、Gallery/GIF/Download MediaBridge 交接、路径与资源安全、feature build profiles 的实施前冻结方案 |
 | `docs/playground-architecture.md` | **当前/权威** | Playground 前后端架构基线（共享时间线群聊模型、Director/Narrator、场景、源锚点） |
 | `docs/proxy-architecture.md` | **当前/权威** | Proxy 代理核心架构基线（调用链、重试/故障转移状态机、SSE 透传、Gemini 签名回填、在途跟踪、源码锚点） |
 | `docs/rotation-architecture.md` | **当前/权威** | Rotation Key 轮询架构基线（SelectKey 算法、三种策略、两套退避系统、配额锁 CST 00:05、NIM、错误分类、源码锚点） |
@@ -662,9 +662,9 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 ## 23. 规划中 / 暂未实现（占位）
 
-> 以下为本文件预留的占位区。随项目推进新增"已规划但未落地"的模块时，在此登记占位；落地后移入上文对应章节并在此标注"已落地"。当前无未实现的占位项。
+> 以下为已冻结但尚未实施的功能计划。实施完成后，必须把对应模块、源码锚点和构建边界移入上文，并删除或更新本条目。
 
-- _（暂无）_
+- `archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles；当前仅有 ZIP 实现，7z/RAR 与桥接尚未落地。
 
 ---
 
@@ -727,6 +727,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 整改 Settings 侧边栏弹窗控件与 Theme Stepper 数字输入框 | config-registry-state | `web/static/settings_modal.js`（`changeStepper` + `renderStepperHtml` + `renderCustomSelectHtml` 控件生成器，`openPortModal`/`openProxyModal`/`openRotationModal`/`openServerTimeoutModal`/`openPasswordModal` 全量使用 class `input` 统一面板文本框、`custom-select-wrapper` 带动画展开与 hover 滑块的 Theme 下拉菜单及 Stepper 数字输入框）、`web/static/settings_trace.js`（`openTraceModal` 引入 Stepper + `settings-form-grid` 双列布局）、`web/static/style.css`（`.number-stepper` 36px 居中数字 `[-] [ N ] [+]` 控件与 `:focus-within` 轮廓光圈，`.input` 与全部 `.modal`/`.dl-settings-modal` 文本框全量应用圆角/阴影/主题 Tokens，`.custom-select-wrapper` 表单重置）、`docs/config-registry-state-architecture.md` |
 | 修复 Settings 页面 Provider/Combo/QuickSlot 卡片布局与按钮样式 | config-registry-state | `web/static/style.css`（恢复 `.provider-card .card-title` `var(--accent2)` 绿字高亮、恢复 `.card-row`/`.provider-card-row` 上下 flex 布局、提升 `.btn-primary`/`.btn-danger` 层叠层级解决 `.btn` 基础样式覆盖问题并恢复 `.btn-primary` 紫粉渐变高亮、为 `.settings-card-grid` 追加 `align-items: start` 避免卡片纵向拉伸与巨大空白） |
 | 规范化 Provider/Combo/QuickSlot 弹窗与 Form 控件 | config-registry-state | `web/static/providers.js`+`combos.js`+`quickslots.js`（Edit Provider/New Provider/QuickSlot 弹窗与 Model 列表行全量引入 Download 页面同款 `renderCustomSelectHtml` 0.48s 动画下拉菜单，所有 Sticky Limit/Order/Priority 等数字输入框全量换为 Settings 左侧弹窗同款 `renderStepperHtml` `[-] [ N ] [+]` Stepper 控件，重构 `Edit Provider` 表单采用 `form-row-grid` 与 `form-group-inline` 弹性布局，消除了元素贴连杂乱）、`web/static/app.js`（全站挂载 `renderCustomSelectHtml`/`toggleCustomSelect`/`selectCustomOption` 及 `renderStepperHtml`/`changeStepper` 全局组件交互句柄）、`web/static/style.css`（全局 `.form-group input` / `.detail-block input` 显式排除 `checkbox`/`radio` 避免覆盖 Toggle 开关 slider 尺寸，修复 `.model-row .custom-select-wrapper` 避免在 Flex 行中过度撑宽拉伸溢出边框，设置 `.provider-keys-section-title` 为 `display:flex` 使 `+ Add Key` 与 `Bulk Add` 按钮和 `► Keys (N)` 标题并排同行显示，补充 `.form-row-grid`、`.form-group-inline` 与 `.form-footer-actions` 间距样式） |
+| 按钮主题系统全量解耦与颜色控制整改 | config-registry-state | `web/static/style.css`（在 `:root` 与 `[data-theme="light"]` 中建立统一的主题按钮设计 Token，如 `--btn-primary-*`、`--btn-secondary-*`、`--btn-danger-*`、`--btn-ghost-*`、`--btn-accent-*`；全量消除散落在 `.btn-primary` 和 `.gif-btn-*` 中的硬编码紫色渐变/硬编码颜色；把全站页面/弹窗（Providers, Combos, QuickSlots, Download, FileTransfer, GIF Frame Editor, Monitor, Settings Modal）中的按钮统一步调接入共用按钮样式与 Theme 颜色控制） |
 ---
 
 ## 同步约束（重申）
