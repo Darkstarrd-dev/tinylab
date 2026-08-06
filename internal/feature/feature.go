@@ -139,10 +139,11 @@ func registerDefaults() {
 		StaticFiles: []string{
 			"api.js", "app.js", "auth.js", "combos.js", "console.js",
 			"fs-api.js", "headerStats.js", "i18n.js", "info_common.js",
-			"monitor.js", "monitor_io.js", "monitor_modal.js", "monitor_quota.js",
-			"monitor_recent.js", "monitor_state.js", "providers.js", "quickslots.js",
-			"settings.js", "settings_modal.js", "settings_shortcuts.js",
-			"settings_trace.js", "shortcuts.js", "theme.js",
+			"monitor/monitor.js", "monitor/monitor_io.js", "monitor/monitor_modal.js",
+			"monitor/monitor_quota.js", "monitor/monitor_recent.js", "monitor/monitor_state.js",
+			"providers.js", "quickslots.js",
+			"settings/settings.js", "settings/settings_modal.js", "settings/settings_shortcuts.js",
+			"settings/settings_trace.js", "shortcuts.js", "theme.js",
 		},
 	})
 	register(Feature{
@@ -150,11 +151,11 @@ func registerDefaults() {
 		Description: "Playground SPA + attached backends (comfyui proxy, image batch, anysearch). Static assets only with the playground build tag.",
 		StaticRoot:  RootPlaygroundPG,
 		StaticFiles: []string{
-			"playground.js", "pg-i18n.js",
-			"pg-core.js", "pg-state.js", "pg-markdown.js",
-			"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-image-model.js", "pg-image-inspire.js", "pg-image-batch.js", "pg-autochat.js",
-			"pg-render.js", "pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
-			"pg-setup.js", "pg-director.js", "pg-search.js",
+			"playground/playground.js", "playground/pg-i18n.js",
+			"playground/pg-core.js", "playground/pg-state.js", "playground/pg-markdown.js",
+			"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
+			"playground/pg-render.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
+			"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
 		},
 	})
 	register(Feature{
@@ -180,9 +181,9 @@ func registerDefaults() {
 		DependsOn:   []ID{Archive},
 		StaticRoot:  RootPlaygroundPG,
 		StaticFiles: []string{
-			"gallery-state.js", "gallery-io.js", "gallery-layout.js",
-			"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
-			"gallery-edit.js", "gallery-edit-operations.js", "gallery-edit-batch.js", "gallery.js",
+			"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",
+			"gallery/gallery-tree.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
+			"gallery/gallery-edit.js", "gallery/gallery-edit-operations.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
 		},
 	})
 	register(Feature{
@@ -198,12 +199,12 @@ func registerDefaults() {
 			"vendor/gif.js/gif.js",
 			"vendor/gif.js/gif.worker.js",
 			"vendor/gifuct-js/gifuct-js.js",
-			"gif-editor-state.js",
-			"gif-editor-import.js",
-			"gif-editor-timeline.js",
-			"gif-editor-playback.js",
-			"gif-editor-export.js",
-			"gif-editor.js",
+			"gif-editor/gif-editor-state.js",
+			"gif-editor/gif-editor-import.js",
+			"gif-editor/gif-editor-timeline.js",
+			"gif-editor/gif-editor-playback.js",
+			"gif-editor/gif-editor-export.js",
+			"gif-editor/gif-editor.js",
 		},
 	})
 	register(Feature{
@@ -211,12 +212,12 @@ func registerDefaults() {
 		Description: "Text editor + AI Text Review (editor.js + editor_textreview*).",
 		StaticRoot:  RootPlaygroundPG,
 		StaticFiles: []string{
-			"editor-state.js", "editor.js", "editor-logs.js",
+			"editor/editor-state.js", "editor/editor.js", "editor/editor-logs.js",
 			// AI Text Review (load order: split/diff/state first, then steps, then entry).
-			"editor_textreview_split.js", "editor_textreview_diff.js", "editor_textreview_state.js",
-			"editor_textreview_step1.js", "editor_textreview_step2.js",
-			"editor_textreview_step3.js", "editor_textreview_step4.js",
-			"editor_textreview.js",
+			"editor/editor_textreview_split.js", "editor/editor_textreview_diff.js", "editor/editor_textreview_state.js",
+			"editor/editor_textreview_step1.js", "editor/editor_textreview_step2.js",
+			"editor/editor_textreview_step3.js", "editor/editor_textreview_step4.js",
+			"editor/editor_textreview.js",
 		},
 	})
 	register(Feature{

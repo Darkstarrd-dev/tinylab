@@ -370,7 +370,7 @@
   }
 
   // ------------------------------------------------------------------
-  // Test/diagnostics seam (used by web/static/media-bridge.test.js)
+  // Test/diagnostics seam (used by web/media-bridge.test.js)
   // ------------------------------------------------------------------
   function reset() {
     Object.keys(registry).forEach(function (id) { registry[id].blob = null; });

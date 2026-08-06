@@ -170,7 +170,7 @@ Core (proxy/config/registry/rotation/usage)
 
 - `go build ./...` 与 `go vet ./...` 全绿（默认无 tag 构建，47 个 internal 包 + 新增 archive/archivetool/api-archive 全部编译）。
 - `go test ./internal/archive/...` 通过；`internal/archivetool` 暂无独立测试文件（行为经 runner/API 层覆盖，待 P3 补）。
-- `node --check web/static/media-bridge.js` / `media-bridge.test.js` 通过。
+- `node --check web/static/media-bridge.js` / `web/media-bridge.test.js` 通过。
 - 计划 §13 的完整验收矩阵（构建矩阵、跨格式行为、安全用例）以计划文档为准，P3/P4 完成后执行。
 
 ## 11. 源码锚点
@@ -197,7 +197,7 @@ Core (proxy/config/registry/rotation/usage)
 | `internal/config/paths.go` | `ResolveArchiveTempDir` |
 | `internal/api/settings/register.go` | GET `archive` 对象 + presence-aware `archivePatch` + `applyArchiveUpdates` + `ArchiveSettingsFn` 推送 |
 | `web/static/media-bridge.js` | MediaBridge 契约（register/openGallery/consume/deliverPendingImports/getAssetBlob/archiveStatus） |
-| `web/static/media-bridge.test.js` | 桥接单元测试 seam（reset/setTtl/setNow/_internals） |
+| `web/media-bridge.test.js` | 桥接单元测试 seam（reset/setTtl/setNow/_internals；置于 embed 目录之外，不进入生产静态树） |
 | `web/playground/static-pg/gallery-io.js` | `galleryImportAssets`（唯一桥接写入口）+ `buildBridgeVideoItem`/`importBridgeImageAsset`/`importBridgeArchiveAsset` |
 | `web/playground/static-pg/gallery.js` | `renderGallery` 调 `deliverPendingImports` |
 | `web/static/download.js` | `playVideo` 经 MediaBridge 交接（`kind:'video'` + 受控 URL） |
@@ -220,6 +220,6 @@ Core (proxy/config/registry/rotation/usage)
 | 修改 7z/RAR 输出解析 | `internal/archivetool/parse.go`（`-slt`/`lb` 机器格式） |
 | 修改归档 API 端点 | `internal/api/archive/register.go` + `internal/api/router.go`（挂载）/`internal/app/app.go`（runner 装配） |
 | 修改归档配置/设置 | `internal/config/types.go`（ArchiveConfig）+ `paths.go`（ResolveArchiveTempDir）+ `internal/api/settings/register.go`（archivePatch presence-aware）+ `apibase/deps.go`（ArchiveSettingsFn） |
-| 修改 MediaBridge 契约 | `web/static/media-bridge.js` + `media-bridge.test.js` + `i18n.js`（mediaBridge* 键）；加载顺序：两个 index.html 最先加载 |
+| 修改 MediaBridge 契约 | `web/static/media-bridge.js` + `web/media-bridge.test.js` + `i18n.js`（mediaBridge* 键）；加载顺序：两个 index.html 最先加载 |
 | Gallery 归档迁移（P3，部分落地） | **已落地：** `internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`）、`edit_handlers.go::galleryEditExtractZipEntry`（sourceId 分支）、`review_handlers.go`/`review_engine.go`（sourceId review + `readEntry` 闭包）、`internal/api/archive/register.go::zipReplace`（`POST /api/archive/zip-replace`）、router `galleryHandler.SetArchive(archiveHandler)`；前端 `gallery-io.js`（`getZipEntryBlob`/`rehydrateZipSession` sourceId 分支 + `_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除/释放）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries`）、`gallery-review.js`（sourceId 审核启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 sourceId）。**保留的 legacy 调用方（勿删）**：`/api/gallery/zip/{sid}*`（GET/DELETE/touch）、`zip-from-path`、`/api/gallery/zip` 上传、`/edit/extract-zip-entry`（zipAbsPath/sessionId 分支）、`/edit/upload-temp`、`/edit/zip-outputs`、`/edit/zip-writeback`、`/api/gallery/zip-writeback`——FSAA/拖放/粘贴导入与 `kind:'zip'` on-disk 包仍走会话流；旧端点删除属计划 §7.2 后续（P3 收尾），**未执行** |
 | Feature tags / build profiles（P5） | **第一阶段已落地**：`internal/feature` manifest + router/app `feature.Enabled` 门控 + `feature.Assets` 派生 static-pg 路由列表（`docs/build-variants.md`「编译裁剪边界」）。**feature_* tags 未实施**——真裁剪前置：tag 化 `internal/archive`/`archivetool`/`api/archive` 包本身 + 按 feature 拆 embed + index.html 脚本清单 manifest 化 + `build.ps1`/`build_mac.ps1` `-Features`；`internal/feature/feature_test.go` 锁定默认全启用合同 |

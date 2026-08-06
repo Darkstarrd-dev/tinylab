@@ -158,21 +158,21 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 	pg := Assets(RootPlaygroundPG)
 	static := Assets(RootStatic)
 
-	for _, want := range []string{"playground.js", "pg-comfyui.js"} {
+	for _, want := range []string{"playground/playground.js", "playground/pg-comfyui.js"} {
 		if !contains(pg, want) {
 			t.Errorf("Assets(playground/static-pg) missing %q", want)
 		}
 	}
 	for _, want := range []string{
-		"gallery-state.js", "gallery-edit-batch.js", "gallery.js",
-		"editor.js", "editor_textreview_step3.js", "editor_textreview.js",
+		"gallery/gallery-state.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
+		"editor/editor.js", "editor/editor_textreview_step3.js", "editor/editor_textreview.js",
 	} {
 		if !contains(pg, want) {
 			t.Errorf("Assets(playground/static-pg) missing %q", want)
 		}
 	}
 	for _, want := range []string{
-		"download.js", "media-bridge.js", "gif-editor.js", "filetransfer.js",
+		"download.js", "media-bridge.js", "gif-editor/gif-editor.js", "filetransfer.js",
 		"vendor/gif.js/gif.js", "vendor/gifuct-js/gifuct-js.js",
 	} {
 		if !contains(static, want) {
@@ -200,19 +200,19 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 // manifest reordering or asset list change here breaks served script paths.
 func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 	want := []string{
-		"playground.js", "pg-i18n.js",
-		"pg-core.js", "pg-state.js", "pg-markdown.js",
-		"pg-request.js", "pg-stream.js", "pg-comfyui.js", "pg-image-model.js", "pg-image-inspire.js", "pg-image-batch.js", "pg-autochat.js",
-		"pg-render.js", "pg-ui.js", "pg-modal.js", "pg-lifecycle.js",
-		"pg-setup.js", "pg-director.js", "pg-search.js",
-		"gallery-state.js", "gallery-io.js", "gallery-layout.js",
-		"gallery-tree.js", "gallery-review.js", "gallery-video.js", "gallery-fullscreen.js",
-		"gallery-edit.js", "gallery-edit-operations.js", "gallery-edit-batch.js", "gallery.js",
-		"editor-state.js", "editor.js", "editor-logs.js",
-		"editor_textreview_split.js", "editor_textreview_diff.js", "editor_textreview_state.js",
-		"editor_textreview_step1.js", "editor_textreview_step2.js",
-		"editor_textreview_step3.js", "editor_textreview_step4.js",
-		"editor_textreview.js",
+		"playground/playground.js", "playground/pg-i18n.js",
+		"playground/pg-core.js", "playground/pg-state.js", "playground/pg-markdown.js",
+		"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
+		"playground/pg-render.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
+		"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
+		"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",
+		"gallery/gallery-tree.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
+		"gallery/gallery-edit.js", "gallery/gallery-edit-operations.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
+		"editor/editor-state.js", "editor/editor.js", "editor/editor-logs.js",
+		"editor/editor_textreview_split.js", "editor/editor_textreview_diff.js", "editor/editor_textreview_state.js",
+		"editor/editor_textreview_step1.js", "editor/editor_textreview_step2.js",
+		"editor/editor_textreview_step3.js", "editor/editor_textreview_step4.js",
+		"editor/editor_textreview.js",
 	}
 	got := Assets(RootPlaygroundPG)
 	if !reflect.DeepEqual(got, want) {

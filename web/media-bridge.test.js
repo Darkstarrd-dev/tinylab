@@ -1,9 +1,9 @@
-// web/static/media-bridge.test.js
+// web/media-bridge.test.js
 // Zero-dependency Node smoke test for the MediaBridge contract
 // (web/static/media-bridge.js). Loads the module in a sandboxed VM with
 // stubbed browser globals and drives the public API end to end.
 //
-// Run:  node web/static/media-bridge.test.js
+// Run:  node web/media-bridge.test.js
 //
 // Covered contracts (archive_compatibility_plan.md §9.2):
 //   register(blob|url) -> assetId; openGallery(assetId|assetId[]);
@@ -95,7 +95,7 @@ function makeEnv(opts) {
 }
 
 function loadBridge(sandbox) {
-  const src = fs.readFileSync(path.join(__dirname, 'media-bridge.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, 'static', 'media-bridge.js'), 'utf8');
   vm.runInNewContext(src, sandbox, { filename: 'media-bridge.js' });
   return sandbox.MediaBridge;
 }

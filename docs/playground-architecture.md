@@ -1,5 +1,6 @@
 # TinyRouter Playground 架构
 
+> **最后核对（2026-08-06 前端目录与 CSS 维护）：** 核心与 Playground 前端模块已按 feature 子目录整理；Playground 静态路由由 internal/feature/feature.go 的 StaticFiles 经 feature.Assets 派生；Log Reader 专属样式归属 playground.css，style.css 保留共享样式。
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。后�> **最后核对（2026-08-06 GIF 编辑器 步骤面板 DOM ID 绑定修复与功能解锁）：** 修复了导入完成后步骤 2 (Frame Editing) 和步骤 3 (Output Settings) 面板无法解锁的 Bug：(1) 修正 DOM ID 绑定规则 `dom.panelStep2 = core.byId('gif-panel-step2')` 和 `dom.panelStep3 = core.byId('gif-panel-step3')`（原先缺少 `gif-` 前缀且缺少 `panelStep3` 的抓取导致拿到 `null`）；(2) 在 `updateSelectionUI()` 中同步切换 `dom.panelStep2` 与 `dom.panelStep3` 的 `gif-edit-blocked` CSS 类（消除 `pointer-events: none` 禁用状态）；(3) 在素材提交 `commitDraft` 时显式触发 `updateSelectionUI(0)`，确保素材导入成功后全套编辑与导出功能即刻完全激活可交互。
 > **最后核对（2026-08-06 GIF 编辑器 Stage Overlay 与 Custom Reset Modal）：** 完成 2 项体验优化：(1) 主舞台浮动提示框 `#gif-stage-overlay-text` 增加了 `updateStageOverlay()` 联动，当素材载入/导入完成且存在切片帧或已处理图片时自动隐藏 (`display: none`)，重置工作区/无素材时恢复显示 `Waiting for upload...`；(2) 替换掉重置工作区、批量删除/保留帧时的原生 `confirm()` 对话框，封装为项目标准样式自定义 Modal 确认框 `showConfirmModal`，支持模糊背景、精致卡片、提示文本与确定/取消按键联动。
 > **最后核对（2026-08-06 GIF 编辑器页面 UI 细化与中心缩放重构）：** 按照用户反馈完成 5 项微调修复：(1) 导入 Modal 弹窗中的数字输入框统一替换为 Settings 同款 `.number-stepper` (+/- 步进控件)；(2) 移除 Time Range 滑条的外层灰色背景框（设为 transparent），调整 `rangeSelected` 计算公式 (`calc(8px + (100% - 16px) * ratio)`) 消除 0ms 边缘手柄圆点与轨道的错位包边；(3) 强制消除 Scale 和 Time Range 滑条被激活/focus 时的矩形外高亮框（`outline: none !important; border: none !important`）；(4) 将 Timeline 缩略图中的 Copy/Delete 操作按钮缩小为 18x18px 微型内嵌图标组（横向排列于右上角），避免遮挡与破环布局；(5) 将预览画布 `.gif-canvas-wrapper` 的 CSS 变换原点重构为 `transform-origin: center center`，并对齐 `resetView()` 居中公式 (`panX = (cw - w) / 2; panY = (ch - h) / 2`)，实现基于画板中心向四周等比放射缩放。
@@ -165,15 +166,15 @@ go build -tags playground -o tinyrouter-pg.exe .
 
 - `/playground.css`；
 - `/vendor/*`（playground vendor 目录优先，未命中回退 `web.Static` 主静态——gif.js/gifuct-js 位于 `web/static/vendor/`，见 `internal/api/router.go` `vendorHandler`）；
-- 显式白名单中的 `playground.js`、`pg-i18n.js`、所有 `pg-*.js`，以及 AI Text Review 的 `tr-*.js`（`editor_textreview_split`/`editor_textreview_diff`/`editor_textreview_state`）与 `editor_textreview*.js`（`editor_textreview.js` + `editor_textreview_step1..4.js`）——由 `internal/api/router.go` 的 `pgJSFiles` 列表显式枚举。
+- 模块子目录脚本（`playground/`、`gallery/`、`editor/` 三个子目录，见 §5.1）——路由清单由 `internal/feature/feature.go` 的 `StaticFiles` manifest 经 `feature.Assets(RootPlaygroundPG)` 派生（`internal/api/router.go`），无硬编码 `pgJSFiles` 列表；URL 路径与子目录相对路径一致（如 `/playground/pg-core.js`、`/gallery/gallery.js`、`/editor/editor.js`）。
 
 新增或重命名前端模块时必须同时更新：
 
-1. `web/playground/static-pg/` 中的文件；
-2. `internal/api/router.go` 的 `pgJSFiles`；
+1. `web/playground/static-pg/` 对应子目录（`playground/`、`gallery/`、`editor/`）中的文件；
+2. `internal/feature/feature.go` 对应 feature 的 `StaticFiles` manifest（路由由 `feature.Assets` 派生）；
 3. `web/static/index.html` 的加载顺序。
 
-`playground.js` 当前只有兼容说明，不承载实现。
+`playground/playground.js` 当前只有兼容说明，不承载实现。
 
 ## 4. 后端架构
 
@@ -330,7 +331,11 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 -> gallery/editor/text-review modules
 ```
 
+模块文件位于 `static-pg` 下三个子目录：`playground/`（pg-*）、`gallery/`（gallery-*）、`editor/`（editor* 与 editor_textreview*）。
+
 ### 5.2 文件职责
+
+> 表中 `pg-*.js` 均位于 `web/playground/static-pg/playground/`；Gallery/Editor 模块分别在 `gallery/`、`editor/` 子目录。
 
 | 文件 | 职责 |
 |---|---|
@@ -658,7 +663,7 @@ Director 和 Narrator 模型可以独立配置；空值回退第一个有模型�
 2. **多窗口持久化不对称。** 只有 window 0 是普通聊天 reload 后的事实源；window 1–3 是临时态。
 3. **运行时开关不是安全边界。** 它只切换入口 HTML，不撤销已编译资源，也不关闭 `/v1/*`。
 4. **配置能力与编译能力可能不一致。** Lite 构建中 `enablePlayground` 仍可为 true，Settings API 也不暴露 `PlaygroundCompiled()` 能力位。
-5. **显式路由清单易漂移。** 新增 JS 时漏改 `pgJSFiles` 会产生运行时 404，目前无自动完整性测试。
+5. **路由清单漂移风险已收敛。** 路由清单由 `internal/feature/feature.go` manifest 派生，`internal/feature/feature_test.go`（`TestAssetsPlaygroundPGExactOrder` + `TestAssetsExistOnDisk`）锁定顺序与磁盘存在性；新增 JS 时仍须同步 manifest 与 `index.html`。
 6. **Custom body 有隐式结构要求。** 缺少 `messages` 会在后续发送链触发前端异常。
 7. **SSE 支持是 OpenAI 常用子集。** 不支持完整 SSE 多行/命名事件语义。
 8. **群聊不恢复。** timeline、在途状态和多窗消息刷新后丢失。
@@ -708,7 +713,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 - `internal/api/settings.go`：运行时开关 API；
 - `internal/config/types.go`、`internal/config/defaults.go`：配置结构和默认值；
 - `internal/proxy/forward.go`、`internal/proxy/upstream.go`、`internal/proxy/stream.go`：代理契约；
-- `internal/api/comfyui/register.go`：固定 loopback 的 ComfyUI JSON/图片代理与重定向端口约束；`internal/api/router.go`：受保护路由挂载、`pgJSFiles` 静态白名单和 loopback WebSocket CSP。
+- `internal/api/comfyui/register.go`：固定 loopback 的 ComfyUI JSON/图片代理与重定向端口约束；`internal/api/router.go`：受保护路由挂载、`feature.Assets` 派生的静态白名单路由和 loopback WebSocket CSP。
 - `build.ps1`：Windows 构建矩阵。
 - `internal/textreview/`：AI 文本清理会话引擎（`session.go`/`scheduler.go`/`cleaner.go`/`proxy_call.go`/`streaming_writer.go`/`events.go`，详见 §18）；
 - `internal/api/textreview/`：`/api/text-review/*` HTTP handler + ramp-down 落盘 `nodepersister.go`；
@@ -754,13 +759,13 @@ go build -tags playground -o tinyrouter-pg.exe .
 
 | 变更类型 | 必查位置 |
 |---|---|
-| 新增/删除前端模块 | `static-pg/`、`pgJSFiles`、`index.html`、本文模块表 |
+| 新增/删除前端模块 | `static-pg/` 子目录、`internal/feature/feature.go`（StaticFiles manifest）、`index.html`、本文模块表 |
 | 修改入口或运行时开关 | 两个 index、`serveUI`、Settings、路由矩阵测试 |
 | 修改请求字段 | `pg-request.js`、`pg-stream.js`、proxy 透传/改写规则；改 Custom Endpoint 须同步 `pg-stream.js` 的 `pgStream`/`pgSendNonStream` fetch URL/headers 与 `pg-core.js` 的 `PG_DEFAULT_CFG` |
 | 修改群聊 | timeline schema、视角映射、终止守卫、Director hooks |
 | 修改场景档案 | schema/version、导入迁移、localStorage、应用映射 |
 | 修改持久化 | localStorage key/version、容量限制、多窗口语义 |
-| 修改 ComfyUI Image 协议 | `web/playground/static-pg/pg-comfyui.js`、`pg-ui.js`、`pg-core.js`、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/comfyui/register.go`、`internal/api/router.go`（路由、静态白名单、CSP） |
+| 修改 ComfyUI Image 协议 | `web/playground/static-pg/playground/pg-comfyui.js`、`pg-ui.js`、`pg-core.js`、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/comfyui/register.go`、`internal/api/router.go`（路由、静态白名单、CSP） |
 | 修改渲染 | DOMPurify、URL 协议、iframe sandbox、Mermaid security；改 reasoning 渲染须同步 `pg-render.js` 的 `pgMsgInnerHTML`/`pgRenderBubble` 与 `playground.css` 的 `.pg-thinking-body` |
 | 修改图片功能 | `pg-modal.js` 的 `pgShowImageModal`/`pgInitImageZoom`/`pgCopyImage`、`pg-render.js` 的 `pgMsgInnerHTML`（气泡缩略图 onclick、空文本气泡剔除、loading 秒级计数）、`playground.css` 的 `.pg-img-btn`/`.pg-image-row`；改保存或同源代理须同步 `internal/api/image.go` 的 `saveImage`/`imageProxy` 端点与 `/api/save-image`/`/api/image-proxy` 路由 |
 | 修改 Image 模式或图片参数 | `pg-ui.js` 的 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect`、`pg-request.js` 的 `pgBuildImageBody`、`pg-stream.js` 的 `pgSendImage`/`pgPollModelScopeTask`、`pg-core.js` 的 `PG_DEFAULT_CFG` 图片参数 + `pgApiPatch` 桥接、`pg-i18n.js` 图片 i18n key + `pgImgEditSizes`/`pgImgCustomSize` 系列、`proxy/handler.go` 的 `ImagesGenerations`/`PollTask` 及通用代理（`/v1/images/edits` 走同一代理链路）、`proxy/upstream.go` 的 `X-Modelscope-Async-Mode` header 转发、`api/router.go` 的 `/v1/images/generations`、`/v1/tasks/{taskId}`、`/api/image-proxy` 路由 + `PATCH /providers/{id}/models/imgSizes`、`internal/api/image.go` 的 `imageProxy` 端点 |
@@ -770,15 +775,15 @@ go build -tags playground -o tinyrouter-pg.exe .
 | 发布 Playground 变体 | 无 tag/tag 测试、资源 200、完整首页手测 |
 | 修改 Manual Image Canvas / Inspire | `pg-image-model.js`、`pg-image-inspire.js`、`pg-state.js`（`PG_IMAGE_KEY` 与 per-window generation/asset state）、`pg-render.js`（独立 Canvas 与 flattened history）、`pg-ui.js`（Image routing，不追加 chat bubble）、`pg-stream.js`（generationId+assetId autosave）、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/image/register.go` |
 | 修改 Image Batch Project | `internal/imagebatch/{types,paths,project_store,reconciler,manager,scheduler,remote_generator,comfy_generator,generator}.go`、`internal/api/imagebatch/*.go`、`internal/api/router.go`（auth + 32 MiB exact/root routes）、`pg-image-batch.js`、`pg-lifecycle.js`、`web/static/index.html`、`PROJECT_MAP.md` |
- | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `pgJSFiles` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
-| 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `pgJSFiles` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
+ | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `feature.go StaticFiles manifest` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
+| 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `feature.go StaticFiles manifest` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 修改 Search 状态持久化 | `pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支跳过 localStorage messages）、`pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后重新渲染）、`pg-search.js`（`pgSearchSend()` 即时保存、`pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查） |
-| 修改/新增 Editor 功能 | `editor-state.js`、`editor.js`、`playground.css`（`.ed-*`）、`internal/api/editor.go`、`internal/api/router.go`（路由 + pgJSFiles）、`web/static/app.js`（`gotoGalleryToggle`/`navigateTo`）、`web/static/auth.js`（nav-item toggle）、`web/static/i18n.js`（`editor*` 键）、`web/static/shortcuts.js`（F6 label）、`web/static/index.html`（脚本加载） |
-| 新增/修改 GIF 编辑器页面（`web/static` 全局 SPA 页） | `gif_implented.md`（实施入口，§4.3/§4.5/§4.6/§7/§8/§10 与 ADR 10-11）、`web/static/gif-editor-state.js`（`window.GifEditorCore`：constants/state/dom/modules/commands/cleanupFns + `registerModule`/`cleanupModules`/`resetSlices`/`releaseSource`）、`gif-editor-import.js`（Import Modal：`openFromFile`/`bindEvents`/`cancel`/`cleanup`）、`gif-editor-timeline.js`（虚拟化窗口 `timelineWindow`/`thumbCache`/`THUMB_CACHE_MAX`，容器委托交互 + `render`/`updateWindow`/`ensureVisible`/`setZoom`）、`gif-editor-playback.js`（播放状态机 + `core.commands.focusFrame` 每 render 重注册 + `first`/`previous`/`play`/`pause`/`toggle`/`next`/`last`/`updateButtons`）、`gif-editor-export.js`（GIF/ZIP/精灵图三导出 + `showResultModal`/`openResultInGallery`/MediaBridge 登记，ZIP 走 Archive `assets→pack` + legacy 回退）、`gif-editor.js`（入口 `renderGifEditor`/`cleanupGifEditor` + 模板/cacheDom/`applyPageI18n`/`registerCoreCommands`/画布绘制；常量 `MAX_FILE_BYTES`/`EXPORT_MEM_LIMIT` 与 `checkExportMemory`）、`web/static/i18n.js`（`gifEditor*` 键）、`web/static/style.css`（`gif-*` 样式，`.gif-timeline-item` 绝对定位 + `.gif-result-overlay.active`）、`web/static/{index.html,index-nopg.html}`（第 6 按钮 + gif.js→gifuct-js→state→import→timeline→playback→export→editor 脚本序）、`web/static/app.js`（`case 'gif'` + cleanup）、`internal/feature/feature.go`（GIF `StaticFiles` 清单：6 模块 + 3 vendor）、`web/static/media-bridge.js`（导出结果登记生产者）、PROJECT_MAP §18.2/§24。`go test ./...` 全量（37 包）已通过；**未完成项（勿标完成）见 `gif_implented.md` §10.2**（P4 浏览器冒烟未跑） |
+| 修改/新增 Editor 功能 | `editor-state.js`、`editor.js`、`playground.css`（`.ed-*`）、`internal/api/editor.go`、`internal/api/router.go`（路由，脚本清单经 `feature.Assets` 派生）、`web/static/app.js`（`gotoGalleryToggle`/`navigateTo`）、`web/static/auth.js`（nav-item toggle）、`web/static/i18n.js`（`editor*` 键）、`web/static/shortcuts.js`（F6 label）、`web/static/index.html`（脚本加载） |
+| 新增/修改 GIF 编辑器页面（`web/static` 全局 SPA 页） | `gif_implented.md`（实施入口，§4.3/§4.5/§4.6/§7/§8/§10 与 ADR 10-11）、`web/static/gif-editor/gif-editor-state.js`（`window.GifEditorCore`：constants/state/dom/modules/commands/cleanupFns + `registerModule`/`cleanupModules`/`resetSlices`/`releaseSource`）、`gif-editor-import.js`（Import Modal：`openFromFile`/`bindEvents`/`cancel`/`cleanup`）、`gif-editor-timeline.js`（虚拟化窗口 `timelineWindow`/`thumbCache`/`THUMB_CACHE_MAX`，容器委托交互 + `render`/`updateWindow`/`ensureVisible`/`setZoom`）、`gif-editor-playback.js`（播放状态机 + `core.commands.focusFrame` 每 render 重注册 + `first`/`previous`/`play`/`pause`/`toggle`/`next`/`last`/`updateButtons`）、`gif-editor-export.js`（GIF/ZIP/精灵图三导出 + `showResultModal`/`openResultInGallery`/MediaBridge 登记，ZIP 走 Archive `assets→pack` + legacy 回退）、`gif-editor.js`（入口 `renderGifEditor`/`cleanupGifEditor` + 模板/cacheDom/`applyPageI18n`/`registerCoreCommands`/画布绘制；常量 `MAX_FILE_BYTES`/`EXPORT_MEM_LIMIT` 与 `checkExportMemory`）、`web/static/i18n.js`（`gifEditor*` 键）、`web/static/style.css`（`gif-*` 样式，`.gif-timeline-item` 绝对定位 + `.gif-result-overlay.active`）、`web/static/{index.html,index-nopg.html}`（第 6 按钮 + gif.js→gifuct-js→state→import→timeline→playback→export→editor 脚本序）、`web/static/app.js`（`case 'gif'` + cleanup）、`internal/feature/feature.go`（GIF `StaticFiles` 清单：6 模块 + 3 vendor）、`web/static/media-bridge.js`（导出结果登记生产者）、PROJECT_MAP §18.2/§24。`go test ./...` 全量（37 包）已通过；**未完成项（勿标完成）见 `gif_implented.md` §10.2**（P4 浏览器冒烟未跑） |
 
 ## 16. Gallery 模块（图片查看器分页）
 
-Gallery 是 playground 构建变体（`-tags playground`）下的图片查看器分页，绑定 F4 快捷键，UI 由 `web/playground/static-pg/gallery.js` 实现（约 827 行 vanilla JS，IIFE + `window.renderGallery`/`window.cleanupGallery` 入口）。
+Gallery 是 playground 构建变体（`-tags playground`）下的图片查看器分页，绑定 F4 快捷键，UI 由 `web/playground/static-pg/gallery/gallery.js` 实现（约 827 行 vanilla JS，IIFE + `window.renderGallery`/`window.cleanupGallery` 入口）。
 
 ### 交互方式
 - **拖拽**：drop 事件读 `DataTransferItem.getAsFileSystemHandle()` 拿 `FileSystemDirectoryHandle`/`FileSystemFileHandle`，立即调用 `requestPermission({mode:'readwrite'})` 前置授权（一次性系统弹窗，之后所有磁盘操作免确认），递归 BFS 遍历目录；不支持 FS Access API 时降级 `DataTransfer.files` blob。
@@ -808,7 +813,7 @@ zip、tiff 及文件系统操作需后端参与：
 
 > 2026-07-19：除 1-9（间隔档位，全屏内仍硬编码不可自定义）外的所有全屏键已切到 `web/static/shortcuts.js` 注册中心。`onFullscreenKey` 与 `onGalleryKeyDown` 改用 `Shortcuts.matchEvent('gallery.<actionID>', e)`：`gallery.prev`/`gallery.next`/`gallery.prev-folder`/`gallery.next-folder`/`gallery.toggle-autoplay`/`gallery.toggle-fullscreen`/`gallery.toggle-tree`/`gallery.exit-fullscreen`/`gallery.toggle-split`/`gallery.toggle-media`/`gallery.switch-focus`。视频激活时 `ArrowLeft/Right/Up/Down/Space/1-9`（媒体控制：倒退 10 秒、上一/下一视频、音量、暂停）仍保持硬编码，**刻意不纳入自定义**以避免与全局 quickslot 1-9（弹出模型选择 modal）产生跨区域冲突；`Space`/`PageUp`/`PageDown` 仍走通用导览分支作为快捷的同义键。详见 §16.x（快捷键注册中心）与 §23“变更维护清单”。
 
-> 2026-07-26：Gallery & Usage UI 矩形无缝化重构与交互优化：(1) 移除 Usage 和 Gallery 页面所有容器间隙 (`gap: 0`)、内边距 (`padding: 0`) 与圆角 (`border-radius: 0`)，采用 1px `--glass-border` 分割网格，Usage 页 `repeat(2, minmax(0, 1fr))` 解决分辨率/DPI 切换时 50/50 破坏并重绘趋势图（SVG 堆叠柱）；(2) 视频 hover 控制栏精简为单行，进度条在非全屏模式下贴底常驻；(3) 在 `gallery-io.js` 调用 File System Access API 发起 `requestPermission` 之前前置弹出居中提示模态框 (`showPermissionNoticeModal`)，说明读写权限用途；(4) 全屏模式下，`.gallery-bottom` 控制栏取消死板的 `height: 42px` 限制，改为 `height: auto` 动态包裹 104px 缩略图与 42px 操作栏，避免操作控件溢出屏幕下方，且仅当鼠标滑入底部热区时进度条与操作栏合体联动 Overlay 浮现。涉及 `web/static/style.css`、`web/static/monitor.js`、`web/playground/static-pg/gallery-layout.js`、`web/playground/static-pg/gallery-video.js`、`web/playground/static-pg/gallery-io.js`。
+> 2026-07-26：Gallery & Usage UI 矩形无缝化重构与交互优化：(1) 移除 Usage 和 Gallery 页面所有容器间隙 (`gap: 0`)、内边距 (`padding: 0`) 与圆角 (`border-radius: 0`)，采用 1px `--glass-border` 分割网格，Usage 页 `repeat(2, minmax(0, 1fr))` 解决分辨率/DPI 切换时 50/50 破坏并重绘趋势图（SVG 堆叠柱）；(2) 视频 hover 控制栏精简为单行，进度条在非全屏模式下贴底常驻；(3) 在 `gallery-io.js` 调用 File System Access API 发起 `requestPermission` 之前前置弹出居中提示模态框 (`showPermissionNoticeModal`)，说明读写权限用途；(4) 全屏模式下，`.gallery-bottom` 控制栏取消死板的 `height: 42px` 限制，改为 `height: auto` 动态包裹 104px 缩略图与 42px 操作栏，避免操作控件溢出屏幕下方，且仅当鼠标滑入底部热区时进度条与操作栏合体联动 Overlay 浮现。涉及 `web/static/style.css`、`web/static/monitor.js`、`web/playground/static-pg/gallery/gallery-layout.js`、`web/playground/static-pg/gallery/gallery-video.js`、`web/playground/static-pg/gallery/gallery-io.js`。
 
 ### 缩略图
 前端懒生成：IntersectionObserver 触发 → `createImageBitmap(blob)` + `OffscreenCanvas(THUMB_SIZE=300)` 等比例缩放 → `convertToBlob('image/jpeg',0.8)` → `FsApi.BlobTracker.create`；失败回退原 blob。
@@ -829,11 +834,11 @@ AI Review 从硬编码"广告审核"（`is_ad` 字段）泛化为通用二值判
 
 #### 前端架构
 
-- **`web/playground/static-pg/gallery-review.js`**（757 行，独立 IIFE 模块）：提供 `window.renderReviewPanel`（渲染审核面板）、`window.startReviewPolling`（800ms 轮询审核进度）、`window.loadReviewPresets`（加载预设列表）、`window.cleanupReview`（停止轮询）四个全局钩子。面板分配置态（预设选择、提示词生成模型选择、审核目标描述、生成提示词、审核模型选择、策略/并发/首尾参数、启动按钮、保存预设）和运行态（进度条、取消按钮、结果列表、过滤模式切换、重置按钮）。
-- **`web/playground/static-pg/gallery-state.js:170-194`**：`reviewState` 对象包含 `active`/`status`/`total`/`processed`/`failed`/`results`/`sessionId`/`promptModelId`/`reviewModelId`/`judgeTarget`/`systemPrompt`/`userPrompt`/`matchField`/`availablePresets`/`selectedPresetId`/`strategy`/`headSize`/`tailSize`/`concurrency`/`reviewMode`/`pollTimer`/`originalIndices`。
-- **`web/playground/static-pg/gallery-tree.js:189-192`**：审核面板渲染由 `gallery-review.js` 接管，此处只暴露容器（`<div id="gallery-review-section">`）并调用 `window.renderReviewPanel`。
-- **`web/playground/static-pg/gallery.js:30-40,76-77`**：初始化时恢复运行中审核的轮询、加载预设；`cleanupGallery` 时调用 `window.cleanupReview`。
-- **`web/playground/static-pg/gallery-fullscreen.js:471-474`**：`toggleReviewItemMark` 在全屏 review 模式下切换当前项的删除标记并前进。
+- **`web/playground/static-pg/gallery/gallery-review.js`**（757 行，独立 IIFE 模块）：提供 `window.renderReviewPanel`（渲染审核面板）、`window.startReviewPolling`（800ms 轮询审核进度）、`window.loadReviewPresets`（加载预设列表）、`window.cleanupReview`（停止轮询）四个全局钩子。面板分配置态（预设选择、提示词生成模型选择、审核目标描述、生成提示词、审核模型选择、策略/并发/首尾参数、启动按钮、保存预设）和运行态（进度条、取消按钮、结果列表、过滤模式切换、重置按钮）。
+- **`web/playground/static-pg/gallery/gallery-state.js:170-194`**：`reviewState` 对象包含 `active`/`status`/`total`/`processed`/`failed`/`results`/`sessionId`/`promptModelId`/`reviewModelId`/`judgeTarget`/`systemPrompt`/`userPrompt`/`matchField`/`availablePresets`/`selectedPresetId`/`strategy`/`headSize`/`tailSize`/`concurrency`/`reviewMode`/`pollTimer`/`originalIndices`。
+- **`web/playground/static-pg/gallery/gallery-tree.js:189-192`**：审核面板渲染由 `gallery-review.js` 接管，此处只暴露容器（`<div id="gallery-review-section">`）并调用 `window.renderReviewPanel`。
+- **`web/playground/static-pg/gallery/gallery.js:30-40,76-77`**：初始化时恢复运行中审核的轮询、加载预设；`cleanupGallery` 时调用 `window.cleanupReview`。
+- **`web/playground/static-pg/gallery/gallery-fullscreen.js:471-474`**：`toggleReviewItemMark` 在全屏 review 模式下切换当前项的删除标记并前进。
 - **`web/static/style.css:1996-2021`**：`.gallery-review-*` 样式类（按钮、输入框、选择框、进度条、结果列表、标签、字段、行等）。
 - **`web/static/index.html:137`**：在 `gallery-tree.js` 后插入 `<script src="/gallery-review.js">`。
 
@@ -878,8 +883,8 @@ Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径
 - **用户导入 7z/RAR 无前端路径**：`gallery-state.js::isArchiveName` 已识别 `.7z`/`.rar`，但 `gallery-io.js` 的导入分类把一切 `isArchiveName` 命中都归为 `'zipfile'` 走 `/api/gallery/zip` zip-only 上传（`.7z/.rar` 上传会失败或产生垃圾条目）。7z/RAR 的 list/read 能力只在 `/api/archive` API 层可用（`/api/archive/sources` 可登记 7z/RAR 并返回 manifest），前端浏览器导入路径未接外部工具——计划 §8.2 的 "gallery-layout 文件 picker 同步 .7z/.rar" 与 §P3 的 7z/RAR 浏览**未实施**。
 
 ### 源码锚点
-- `web/playground/static-pg/gallery.js`（playground 静态资源，由 embed_playground.go 注入）
-- `web/playground/static-pg/gallery-review.js`（AI Review 独立面板模块）
+- `web/playground/static-pg/gallery/gallery.js`（playground 静态资源，由 embed_playground.go 注入）
+- `web/playground/static-pg/gallery/gallery-review.js`（AI Review 独立面板模块）
 - `internal/gallery/{gallery,zip,tiff,review}.go` + 测试
 - `internal/api/gallery/`（7 文件子包：register.go/session_store.go/fs_handlers.go/zip_handlers.go/review_engine.go/review_handlers.go/edit_handlers.go）
 - `internal/api/review_presets.go`（ReviewPreset HTTP CRUD）
@@ -890,20 +895,20 @@ Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径
 ### 变更维护清单
 | 触发变更 | 涉及源码 |
 |---|---|
-| 修改 Gallery 后端 ZIP 路径导入 | `internal/api/gallery/zip_handlers.go::galleryZipFromPath`（解析/校验 `{path}` 后从磁盘创建会话）+ `internal/api/gallery/register_test.go`（成功、缺路径和 malformed JSON 回归测试）+ `web/playground/static-pg/gallery-io.js`（`onPaste`/`loadBackendPaths` 调用契约） |
-| 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery/fs_handlers.go`（`galleryDeleteFs`/`galleryZipWriteback`）+ `zip_handlers.go`（`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
+| 修改 Gallery 后端 ZIP 路径导入 | `internal/api/gallery/zip_handlers.go::galleryZipFromPath`（解析/校验 `{path}` 后从磁盘创建会话）+ `internal/api/gallery/register_test.go`（成功、缺路径和 malformed JSON 回归测试）+ `web/playground/static-pg/gallery/gallery-io.js`（`onPaste`/`loadBackendPaths` 调用契约） |
+| 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery/fs_handlers.go`（`galleryDeleteFs`/`galleryZipWriteback`）+ `zip_handlers.go`（`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
 | 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/zip_handlers.go::galleryListZip`（500MB 上限） |
 | 修改 TIFF 转码质量或格式 | `internal/gallery/tiff.go`、`internal/api/gallery/zip_handlers.go::galleryConvertTiff` |
 | 修改 zip 会话 LRU 容量/过期/驱逐 | `internal/api/gallery/session_store.go`（`galleryMaxSessions`、`gallerySessionStore.put`/`get`/`touch`/`pin`/`unpin`、`galleryDeleteZipSession`/`galleryTouchSession` 处理器，现为 `h.sessions` Handler 字段） |
-| 修改归档源条目（sourceId）双路径 | `web/playground/static-pg/gallery-io.js`（`getZipEntryBlob`/`rehydrateZipSession` sourceId 分支 + `_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除/释放）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries`/`_zipDeleteEntryGroup`）、`gallery-review.js`（sourceId 启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 sourceId）、`internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`）、`internal/api/archive/register.go::zipReplace`；**legacy 调用方保留勿删**（见 `docs/archive-architecture.md` §5.1/§12） |
-| 修改 zip 会话重建/批量导入并发 | `web/playground/static-pg/gallery-io.js`（`rehydrateZipSession`/`getZipEntryBlob`/`runWithConcurrency`/`addZipBlob` 的 `zipFile` 保留）、`web/playground/static-pg/gallery-tree.js`（`setActive` 的 touch、`releaseZipSessions`） |
-| 修改自动播放档位 | `web/playground/static-pg/gallery.js::AUTOPLAY_INTERVALS` |
-| 修改全屏快捷键集 | `web/playground/static-pg/gallery.js::onFullscreenKey` |
+| 修改归档源条目（sourceId）双路径 | `web/playground/static-pg/gallery/gallery-io.js`（`getZipEntryBlob`/`rehydrateZipSession` sourceId 分支 + `_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除/释放）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries`/`_zipDeleteEntryGroup`）、`gallery-review.js`（sourceId 启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 sourceId）、`internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`）、`internal/api/archive/register.go::zipReplace`；**legacy 调用方保留勿删**（见 `docs/archive-architecture.md` §5.1/§12） |
+| 修改 zip 会话重建/批量导入并发 | `web/playground/static-pg/gallery/gallery-io.js`（`rehydrateZipSession`/`getZipEntryBlob`/`runWithConcurrency`/`addZipBlob` 的 `zipFile` 保留）、`web/playground/static-pg/gallery/gallery-tree.js`（`setActive` 的 touch、`releaseZipSessions`） |
+| 修改自动播放档位 | `web/playground/static-pg/gallery/gallery.js::AUTOPLAY_INTERVALS` |
+| 修改全屏快捷键集 | `web/playground/static-pg/gallery/gallery.js::onFullscreenKey` |
 | 修改 Gallery i18n 文案 | `web/static/i18n.js` (`gallery*` 键) |
 | Gallery 不再随 playground 编译 | `internal/api/router.go::pgJSFiles` 移除 `gallery.js`、`web/embed_playground.go`、`web/static/index.html` |
 | 修改 AI Review 提示词逻辑 | `internal/gallery/review.go`（`ParseReviewResponse`/`PromptGenSystemPrompt`/`DefaultUserPrompt`）、`internal/api/gallery/review_engine.go`（`galleryGeneratePrompt`/`analyzeImage`/`sendVisionRequest`，经 `h.proxy.ChatCompletions` 调用） |
 | 修改审核策略/并发 | `internal/api/gallery/review_handlers.go`（`galleryStartReview`/`runReview`/`selectReviewIndices`/`selectHeadTailIndices`）+ `review_engine.go`（`reviewTask`/`runReview` 引擎核心） |
-| 修改审核前端交互 | `web/playground/static-pg/gallery-review.js`（`renderReviewPanel`/`startPolling`/`applyReviewFilter`）、`web/playground/static-pg/gallery-state.js`（`reviewState`）、`web/static/style.css`（`.gallery-review-*`） |
+| 修改审核前端交互 | `web/playground/static-pg/gallery/gallery-review.js`（`renderReviewPanel`/`startPolling`/`applyReviewFilter`）、`web/playground/static-pg/gallery/gallery-state.js`（`reviewState`）、`web/static/style.css`（`.gallery-review-*`） |
 | 修改审核预设 CRUD | `internal/api/review_presets.go`、`internal/registry/review_presets.go`、`internal/config/types.go`（`ReviewPreset`）、`internal/config/defaults.go`（内置预设） |
 
 ### Gallery 媒体编辑器（ffmpeg）
@@ -963,29 +968,29 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 | 触发变更 | 涉及源码 |
 |---|---|
 | 新增/修改操作类型 | `internal/mediaedit/args.go`（新 Build*Args）+ `internal/mediaedit/types.go`（新 params）+ `internal/api/gallery/edit_handlers.go`（manager.go 的 `buildArgs` switch）（含 `video_to_gif`/`video_to_webp`/`video_anim_trim` 与 `ProbeFfmpegCaps` 能力门控） |
-| 修改 Gallery video 区动画播放 | `web/playground/static-pg/gallery-state.js`（`SUPPORTED_VIDEO_EXTS` 增 gif/webp、`ANIMATED_IMG_EXTS`/`isAnimatedImg`）+ `gallery-layout.js`（video pane 增 `<img id="gallery-main-anim">`）+ `gallery-video.js`（`renderActiveVideo`/`applyVideoPaneMode`/`replayAnim`/`stopAnim`）+ `gallery-fullscreen.js` + `gallery-tree.js` + `internal/api/gallery/fs_handlers.go`（`galleryVidExts`）+ `internal/gallery/gallery.go`（`SupportedExts`）+ `internal/gallery/zip.go`（`contentTypeForExt`） |
+| 修改 Gallery video 区动画播放 | `web/playground/static-pg/gallery/gallery-state.js`（`SUPPORTED_VIDEO_EXTS` 增 gif/webp、`ANIMATED_IMG_EXTS`/`isAnimatedImg`）+ `gallery-layout.js`（video pane 增 `<img id="gallery-main-anim">`）+ `gallery-video.js`（`renderActiveVideo`/`applyVideoPaneMode`/`replayAnim`/`stopAnim`）+ `gallery-fullscreen.js` + `gallery-tree.js` + `internal/api/gallery/fs_handlers.go`（`galleryVidExts`）+ `internal/gallery/gallery.go`（`SupportedExts`）+ `internal/gallery/zip.go`（`contentTypeForExt`） |
 | 修改质量/编码参数默认值 | `internal/mediaedit/args.go`（CRF 表/jpegQuality/clamp）+ `internal/mediaedit/args_test.go` |
 | 修改 ffmpeg 二进制解析 | `internal/mediaedit/binary.go` |
 | 修改 ffprobe 探针逻辑 | `internal/mediaedit/probe.go` |
 | 修改 job 生命周期/超时 | `internal/mediaedit/manager.go`（Start/runJob/cleanup） |
 | 修改 edit HTTP 端点 | `internal/api/gallery/edit_handlers.go`（handler 方法 + Register 方法） |
-| 修改前端编辑器 UI | `web/playground/static-pg/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（三文件共享全局作用域，gallery-edit.js 为壳 + 共享变量，operations/batch 分别承载单操作 UI 与批量流程） |
+| 修改前端编辑器 UI | `web/playground/static-pg/gallery/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（三文件共享全局作用域，gallery-edit.js 为壳 + 共享变量，operations/batch 分别承载单操作 UI 与批量流程） |
 | 修改加载顺序 | `internal/api/router.go`（pgJSFiles 三文件顺序）+ `web/static/index.html`（三 script 标签顺序） |
-| 修改批量转换兄弟匹配 | `web/playground/static-pg/gallery-edit.js`（`_getSiblingImages` 按 kind 分组：`backend`→`rootDirPath`/`fs`→`rootDirHandle`/`zip`→`zipAbsPath`/`sessionId`）+ `/edit/extract-zip-entry`+`/edit/upload-temp`（`_resolveBatchInput` 逐条解析临时磁盘路径） |
-| 修改输出文件名 / 压缩包命名 | `internal/mediaedit/types.go`（`StartRequest.OutputName`）+ `internal/mediaedit/manager.go`（OutputDir+OutputName+ext 分支）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipOutputs` 的 `zipName` 经 `filepath.Base`+`.zip` 强制）+ `web/playground/static-pg/gallery-edit.js`（`_startBatch` 传 `outputName`、`_batchOriginZipName` 推导原文件夹/压缩包名、`_batchOriginStem`/`_captureBatchCfg` 读取 rename/normalise 开关、`_refreshBatchUXVisibility` 按开关+dest 切换行可见性）+ `web/playground/static-pg/pg-i18n.js`（`geRename*`/`geRenorm*`/`geBatchOpenFolder`/`geNoDiskPath` 等） |
-| 修改单文件输出名（视频/图片） | `web/playground/static-pg/gallery-edit.js` `_startJob` 现统一推导 `origStem = _stripExt(_editCurrentItem.name)` 并在 `outputDir && !overwrite` 分支送 `outputName`；`replace-original` 经 `_zipReplacePending` 走 zip-writeback；后端单文件 overwrite 仍由服务端写回真 `absPath`。服务端零改动（复用 `StartRequest.OutputName`） |
-| 修改视频缩放控件 | `web/playground/static-pg/gallery-edit.js`（`_renderVideoTranscodeForm` 的 `ge-vid-scale` 改 `<input type="range">` + `ge-vid-scale-val`/`ge-vid-scale-dims`；`_bindModalEvents` 新增 `vidScaleInput.oninput` 同步百分比+ `WxH`）；服务端 `internal/mediaedit/args.go` `BuildVideoTranscodeArgs` 的 `scalePercent` 仍 clip 10..200，契约不变 |
-| 修改 zip 原位回写 | `internal/gallery/zip_replace.go`（`ReplaceZipEntries`）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipWriteback` 路由+handler、`gallerylib.CleanZipPath`）+ `internal/fsutil.AtomicWrite` + `web/playground/static-pg/gallery-edit.js`（`_zipReplacePending`、`_onCompleted` 单图 zip 分支、`_zipWritebackBatch` convert-all、`_openInFileManager`） |
-| 修改打开目录按钮 | `internal/api/gallery/fs_handlers.go`（`galleryOpenFolder` handler + 路由）+ `internal/fsutil.OpenInFileManager` + `web/playground/static-pg/gallery-edit.js`（每个完成结果区按钮重新绑定到 `_openInFileManager(path)`）+ `pg-i18n.js`（`geBatchOpenFolder`/`geBatchOpenError`） |
-修改 Set Path / Set Name / Uniform（图片弹窗） | `web/playground/static-pg/gallery-edit.js`（`_renderImageForm` 使用共享 `_renderSourceInfoRows`/`_renderSetPathRow`/`_renderSetNameRow`；`_refreshBatchUXVisibility` 按 toggle 启用/禁用输入；Uniform 仅 archive 可启用；`_captureBatchCfg` 读取 Set Name/Uniform；`_batchOriginZipName` 读取 Set Name）+ `pg-i18n.js`（`geSetPath`/`geSetName`/`geUniform`/`geArchiveHint`/`geSingleHint`/`geNamePlaceholder`/`geImagesCount`）+ `playground.css`（`.ge-header-left`/`.ge-icon-toggle`/`.ge-title-center`/`.ge-src-info`/`.ge-src-row`）+ `internal/mediaedit/manager.go`（`Start()` 新增 `!Overwrite && OutputDir=="" && OutputName!=""` → `relocateOutput` 分支） |
-修改源信息路径（图片弹窗） | `web/playground/static-pg/gallery-edit.js`（`_editContainerPath` 返回容器完整路径或 `''`；`_editContainerParentPath` 返回父目录+分隔符；`_updateImageSourceInfo` 无路径时显示 `geDragNoPathHint`；`_isArchiveMode`/`_batchOriginLabel`/`_formatSize`）+ `pg-i18n.js`（`geDragNoPathHint`） |
-修改视频弹窗 | `web/playground/static-pg/gallery-edit.js`（标题改 `Video Convert` 居中 + 设置齿轮；移除 `ge-dest` 单选 → `overwrite` 恒 false；`_updateVideoSourceInfo` 双行源信息 + `_editVideoPath`；`_getDestination` 替换为 `_getDestFromSetPath` 仅读 Set Path toggle；`_startJob` 简化移除 overwrite 逻辑，从 Set Name toggle 读 `customRename`；移除 `_zipReplacePending` 声明+`_onCompleted` zip-writeback 分支+`ge-dest` 单选绑定死代码）+ `pg-i18n.js`（`geVideoConvert`） |
+| 修改批量转换兄弟匹配 | `web/playground/static-pg/gallery/gallery-edit.js`（`_getSiblingImages` 按 kind 分组：`backend`→`rootDirPath`/`fs`→`rootDirHandle`/`zip`→`zipAbsPath`/`sessionId`）+ `/edit/extract-zip-entry`+`/edit/upload-temp`（`_resolveBatchInput` 逐条解析临时磁盘路径） |
+| 修改输出文件名 / 压缩包命名 | `internal/mediaedit/types.go`（`StartRequest.OutputName`）+ `internal/mediaedit/manager.go`（OutputDir+OutputName+ext 分支）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipOutputs` 的 `zipName` 经 `filepath.Base`+`.zip` 强制）+ `web/playground/static-pg/gallery/gallery-edit.js`（`_startBatch` 传 `outputName`、`_batchOriginZipName` 推导原文件夹/压缩包名、`_batchOriginStem`/`_captureBatchCfg` 读取 rename/normalise 开关、`_refreshBatchUXVisibility` 按开关+dest 切换行可见性）+ `web/playground/static-pg/pg-i18n.js`（`geRename*`/`geRenorm*`/`geBatchOpenFolder`/`geNoDiskPath` 等） |
+| 修改单文件输出名（视频/图片） | `web/playground/static-pg/gallery/gallery-edit.js` `_startJob` 现统一推导 `origStem = _stripExt(_editCurrentItem.name)` 并在 `outputDir && !overwrite` 分支送 `outputName`；`replace-original` 经 `_zipReplacePending` 走 zip-writeback；后端单文件 overwrite 仍由服务端写回真 `absPath`。服务端零改动（复用 `StartRequest.OutputName`） |
+| 修改视频缩放控件 | `web/playground/static-pg/gallery/gallery-edit.js`（`_renderVideoTranscodeForm` 的 `ge-vid-scale` 改 `<input type="range">` + `ge-vid-scale-val`/`ge-vid-scale-dims`；`_bindModalEvents` 新增 `vidScaleInput.oninput` 同步百分比+ `WxH`）；服务端 `internal/mediaedit/args.go` `BuildVideoTranscodeArgs` 的 `scalePercent` 仍 clip 10..200，契约不变 |
+| 修改 zip 原位回写 | `internal/gallery/zip_replace.go`（`ReplaceZipEntries`）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipWriteback` 路由+handler、`gallerylib.CleanZipPath`）+ `internal/fsutil.AtomicWrite` + `web/playground/static-pg/gallery/gallery-edit.js`（`_zipReplacePending`、`_onCompleted` 单图 zip 分支、`_zipWritebackBatch` convert-all、`_openInFileManager`） |
+| 修改打开目录按钮 | `internal/api/gallery/fs_handlers.go`（`galleryOpenFolder` handler + 路由）+ `internal/fsutil.OpenInFileManager` + `web/playground/static-pg/gallery/gallery-edit.js`（每个完成结果区按钮重新绑定到 `_openInFileManager(path)`）+ `pg-i18n.js`（`geBatchOpenFolder`/`geBatchOpenError`） |
+修改 Set Path / Set Name / Uniform（图片弹窗） | `web/playground/static-pg/gallery/gallery-edit.js`（`_renderImageForm` 使用共享 `_renderSourceInfoRows`/`_renderSetPathRow`/`_renderSetNameRow`；`_refreshBatchUXVisibility` 按 toggle 启用/禁用输入；Uniform 仅 archive 可启用；`_captureBatchCfg` 读取 Set Name/Uniform；`_batchOriginZipName` 读取 Set Name）+ `pg-i18n.js`（`geSetPath`/`geSetName`/`geUniform`/`geArchiveHint`/`geSingleHint`/`geNamePlaceholder`/`geImagesCount`）+ `playground.css`（`.ge-header-left`/`.ge-icon-toggle`/`.ge-title-center`/`.ge-src-info`/`.ge-src-row`）+ `internal/mediaedit/manager.go`（`Start()` 新增 `!Overwrite && OutputDir=="" && OutputName!=""` → `relocateOutput` 分支） |
+修改源信息路径（图片弹窗） | `web/playground/static-pg/gallery/gallery-edit.js`（`_editContainerPath` 返回容器完整路径或 `''`；`_editContainerParentPath` 返回父目录+分隔符；`_updateImageSourceInfo` 无路径时显示 `geDragNoPathHint`；`_isArchiveMode`/`_batchOriginLabel`/`_formatSize`）+ `pg-i18n.js`（`geDragNoPathHint`） |
+修改视频弹窗 | `web/playground/static-pg/gallery/gallery-edit.js`（标题改 `Video Convert` 居中 + 设置齿轮；移除 `ge-dest` 单选 → `overwrite` 恒 false；`_updateVideoSourceInfo` 双行源信息 + `_editVideoPath`；`_getDestination` 替换为 `_getDestFromSetPath` 仅读 Set Path toggle；`_startJob` 简化移除 overwrite 逻辑，从 Set Name toggle 读 `customRename`；移除 `_zipReplacePending` 声明+`_onCompleted` zip-writeback 分支+`ge-dest` 单选绑定死代码）+ `pg-i18n.js`（`geVideoConvert`） |
 修改下载视频项 | `web/static/download.js`（`playVideo` 的 `videoObj` 新增 `absPath: normalizedPath`，使 `kind:'plain'` 视频项获得磁盘路径，编辑/删除可操作） |
-修改 trim 片段拖动约束 | `web/playground/static-pg/gallery-edit.js`（`_startTrimDrag.onMove` + `_moveNearestHandle` 新增 prevEnd/nextStart 跨片段约束） |
+修改 trim 片段拖动约束 | `web/playground/static-pg/gallery/gallery-edit.js`（`_startTrimDrag.onMove` + `_moveNearestHandle` 新增 prevEnd/nextStart 跨片段约束） |
 
 ## 17. Editor 模块（双栏文本编辑器）
 
-Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编辑器，与 Gallery 共享同一个导航按钮（第 1 次点击 → Gallery，第 2 次 → Editor，循环 toggle）。UI 由 `web/playground/static-pg/editor.js` + `editor-state.js` 实现（vanilla JS，`window.renderEditor`/`window.cleanupEditor` 入口）。
+Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编辑器，与 Gallery 共享同一个导航按钮（第 1 次点击 → Gallery，第 2 次 → Editor，循环 toggle）。UI 由 `web/playground/static-pg/editor/editor.js` + `editor-state.js` 实现（vanilla JS，`window.renderEditor`/`window.cleanupEditor` 入口）。
 
 ### 核心功能
 - **双栏编辑**：左右两个独立编辑面板，每面板有独立的文件名、脏标记、打开/保存、原始/预览视图切换、自动换行切换。
@@ -1014,8 +1019,8 @@ Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编�
 - 复用 playground 已有 vendor：`marked.min.js`、`highlight.min.js`、`katex.min.js`、`marked-katex-extension`、`purify.min.js`
 
 ### 源码锚点
-- `web/playground/static-pg/editor-state.js`：状态对象 + 常量 + 辅助函数
-- `web/playground/static-pg/editor.js`：`renderEditor`/`cleanupEditor` + `editorAlignedDiff` + 全部编辑、diff、查找替换逻辑
+- `web/playground/static-pg/editor/editor-state.js`：状态对象 + 常量 + 辅助函数
+- `web/playground/static-pg/editor/editor.js`：`renderEditor`/`cleanupEditor` + `editorAlignedDiff` + 全部编辑、diff、查找替换逻辑
 - `web/playground/static-pg/playground.css`：Editor/Diff 样式（`.ed-*` 前缀）
 - `internal/api/editor.go`：后端 handlers `editorOpen`/`editorSave`（由另一 worker 创建）
 - `internal/api/router.go`：`/api/editor/*` 路由注册 + `pgJSFiles` 含 `editor-state.js`、`editor.js`
@@ -1077,10 +1082,10 @@ flowchart LR
 ### 源码锚点
 
 - `web/playground/static-pg/editor_textreview.js`：`renderTextReview`/`cleanupTextReview` 入口 + 4 步路由
-- `web/playground/static-pg/editor_textreview_step1..4.js`：导入/切分/AI 清理/审校四步 UI
-- `web/playground/static-pg/editor_textreview_state.js`：会话状态 + 切页快照/重订阅
-- `web/playground/static-pg/editor_textreview_split.js`：章节切分算法（移植自 novelhelper `split.ts`）
-- `web/playground/static-pg/editor_textreview_diff.js`：行级 diff 对比算法
+- `web/playground/static-pg/editor/editor_textreview_step1..4.js`：导入/切分/AI 清理/审校四步 UI
+- `web/playground/static-pg/editor/editor_textreview_state.js`：会话状态 + 切页快照/重订阅
+- `web/playground/static-pg/editor/editor_textreview_split.js`：章节切分算法（移植自 novelhelper `split.ts`）
+- `web/playground/static-pg/editor/editor_textreview_diff.js`：行级 diff 对比算法
 - `internal/textreview/{session,scheduler,cleaner,proxy_call,streaming_writer,events}.go`：会话引擎
 - `internal/api/textreview/{register,sessions,nodepersister}.go`：HTTP handler + ramp-down 落盘
 - `internal/registry/text_review.go`：节点池/切分模式 CRUD
@@ -1100,4 +1105,4 @@ flowchart LR
 | 修改会话端点/SSE | `internal/api/textreview/sessions.go`、`internal/textreview/events.go`、`internal/api/router.go`（路由组） |
 | 修改节点池/切分模式 CRUD | `internal/registry/text_review.go`、`internal/api/textreview/register.go`、`internal/config/types.go` |
 | 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_state.js`、`playground.css`（`.tr-s3`/`.tr-s4`）、`web/static/i18n.js` |
-| 修改导航（Gallery↔Editor 2-way） | `web/static/app.js`（`gotoGalleryToggle` 2-way + `sessionStorage.trGalView` 持久化）、`web/static/auth.js`、`web/static/shortcuts.js`（F6 label）、`web/playground/static-pg/editor.js`（Clean mode）、`web/playground/static-pg/editor-state.js`（`edSaveState`/`edLoadState`） |
+| 修改导航（Gallery↔Editor 2-way） | `web/static/app.js`（`gotoGalleryToggle` 2-way + `sessionStorage.trGalView` 持久化）、`web/static/auth.js`、`web/static/shortcuts.js`（F6 label）、`web/playground/static-pg/editor/editor.js`（Clean mode）、`web/playground/static-pg/editor/editor-state.js`（`edSaveState`/`edLoadState`） |
