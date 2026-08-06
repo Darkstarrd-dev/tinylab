@@ -3944,6 +3944,9 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-slice-item.selected{border-color:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
 .gif-slice-item.dragging{opacity:0.5;transform:scale(0.95);border-color:var(--accent2)}
 .gif-slice-item.drag-over{border-left:4px solid var(--accent2)}
+.gif-timeline-track{position:relative;height:130px;flex-shrink:0}
+.gif-timeline-track .gif-slice-item{position:absolute;top:0}
+/* .gif-timeline-track height must track .gif-slice-item height (130px) */
 .gif-slice-img-box{flex:1;background:#000;display:flex;justify-content:center;align-items:center;overflow:hidden;pointer-events:none;min-height:0}
 .gif-slice-img-box img{max-width:100%;max-height:100%;object-fit:contain}
 .gif-slice-tools{padding:4px;background:rgba(255,255,255,0.03);font-size:var(--font-badge)}

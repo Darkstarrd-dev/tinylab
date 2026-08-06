@@ -4,9 +4,11 @@
 >
 > **文档名说明：** 文件名 `gif_implented.md` 为用户指定（原文拼写）；文档内标题使用规范拼写 "implemented"。
 >
-> **最后核对：** 2026-08-05（P0–P3 已全部落地，P4 联调与收尾进行中；源码行号仍仅作定位提示，以函数/接口为准）。
+> **最后核对：** 2026-08-06（P0–P3 已全部落地，P4 联调与收尾进行中；2026-08-06 追加"大规模输入 + 虚拟化时间轴"两阶段：`MAX_PIXEL_FRAMES` 像素帧硬拒绝移除、时间轴窗口化。源码行号仍仅作定位提示，以函数/接口为准）。
 
 > **已落地（2026-08-05）：** P0–P3 全部完成，P4 收尾进行中。P0 路线确认 gifuct-js esbuild 自包含浏览器 bundle（`web/static/vendor/gifuct-js/gifuct-js.js`，MIT，LICENSE 随附）；P1 GIF 编辑器落地为全局 SPA 页（`web/static/gif-editor.js` + `vendor/gif.js/`，第 6 导航按钮 `data-page="gif"`）；P2 Gallery video 区播放 GIF/animated WebP（`#gallery-main-anim` + `ANIMATED_IMG_EXTS`/`isAnimatedImg`，前后端白名单补齐）；P3 后端新增 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation 与 `ProbeFfmpegCaps` 能力探测（`ffmpeg-status` 6 字段），前端 Format GIF/WebP + 动画数字 trim。详见 §7 勾选状态与 §9.2 文件清单（落地细节以实际源码为准）。
+>
+> **已落地（2026-08-06，追加）：** 大规模输入与虚拟化时间轴两阶段已合入 `web/static/gif-editor.js` / `i18n.js` / `style.css`（仅前端）：(1) 移除 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝（图片/GIF/视频三条导入路径均不再被像素帧预算拒绝），保留 `MAX_FILE_BYTES=200MB` 的 GIF/视频单文件上限与 `EXPORT_MEM_LIMIT=1.5GB` 导出峰值 confirm 警告（`exportMemCheck`，GIF/ZIP/精灵图三条导出路径）；(2) 时间轴改为水平虚拟化轨道：窗口化 DOM（可见帧 + `TL_BUFFER=4` 缓冲）、节点绝对定位、交互全部在容器上委托、缩略图为 ≤96×72 小预览且有界缓存（FIFO 256）。验证：`node --check`（gif-editor.js、i18n.js）通过；确定性窗口化检查通过（1/5/63/64/10000 帧 × 6 个滚动位置，有界/clamp/覆盖滚动帧/尾部 clamp）；**精确高帧用例（1280×736×63）的浏览器冒烟未完成**——本机 ffmpeg GIF palette 编码挂起（详见 §7 实施状态）。
 ---
 
 ## 0. 需求来源（用户原始要求）
@@ -65,7 +67,7 @@
 4. 图层"同步到所有帧"按文本内容/图片对象引用匹配，重复文字误同步（2605-2625）→ 按图层 id 匹配。
 5. 三段导出重复复制图层绘制逻辑（2710-2757 / 2810-2835 / 2900-2928）→ 抽共享 `composeFrame()`。
 
-**内存模型（硬约束）**：每完整 RGBA 帧 ≈ `4×W×H` 字节；GIF 导入同时存在 frameCanvas+tempCvs+finalCvs（3×），时间轴每帧 `toDataURL()` 缩略图，导出每帧中间 canvas + gif.js 4 worker。100 帧 512×512 ≈ 100 MB 起步。**必须加输入限额**（见 §4.6）。
+**内存模型（硬约束）**：每完整 RGBA 帧 ≈ `4×W×H` 字节；GIF 导入同时存在 frameCanvas+tempCvs+finalCvs（3×），导出每帧中间 canvas + gif.js 4 worker。100 帧 512×512 ≈ 100 MB 起步。**2026-08-06 起：帧仍以完整 canvas 驻留内存（本轮未引入 IndexedDB/后端持久化），输入不再设像素帧硬限额**——`MAX_PIXEL_FRAMES=20,000,000` 硬拒绝已移除（与源页面行为对齐）；保留的防护是 GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`）与导出前 1.5GB 峰值 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`）；时间轴缩略图已由"每帧 `toDataURL()`"改为窗口化 DOM + 有界小缩略图缓存（见 §4.3/§4.6）。
 
 ### 1.2 TinyRouter 相关现状
 
@@ -109,7 +111,7 @@
 - [x] 原单页功能 1:1 还原：图片/GIF/视频三类输入、网格切片、时间轴（排序/复制/删除/延迟/键盘导航）、全局裁剪、图层（文字/贴图/范围/同步）、色键透明、导出 GIF / 序列帧 ZIP / PNG 精灵图。
 - [x] 无外部 CDN 依赖（gif.js/worker 与 P0 验证通过的 decoder vendor 进 embed；若采用 fallback，则 omggif 及其 LICENSE 进 embed），离线可用。
 - [x] 源缺陷修复（§1.1 清单 5 项）。
-- [x] 大输入有硬限额与明确报错（§4.6）。
+- [x] 大输入防护（§4.6，2026-08-06 修订）：原 `MAX_PIXEL_FRAMES=20,000,000` 像素帧硬拒绝已移除（图片/GIF/视频普通提取均不再被像素帧预算拒绝）；保留 GIF/视频 200MB 单文件上限（`MAX_FILE_BYTES`，导入 alert 拒绝）与导出前 1.5GB 峰值内存 confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`，仅导出时提示，非输入门禁）。
 - [x] 页面样式遵循主题 token，class/id 带 `gif-` 前缀，不与现有全局样式冲突。
 
 ### 2.2 需求 2：Gallery video 区播放 GIF / animated WebP
@@ -210,7 +212,7 @@ flowchart LR
 | 视频抽帧 | 1571-1620 | 保留 HTMLVideoElement seek 循环（浏览器解码能力最强）；加 `duration===Infinity` 报错（原有） |
 | 网格切片 | 1622-1668 | 保留；`sw/sh` 改 `Math.round`；边缘裁剪参数不变 |
 | 全局裁剪 | 1704-1766 | 保留；图层坐标偏移逻辑不变 |
-| 时间轴 | 1773-2007 | 保留；缩略图 `toDataURL` 保留但**懒生成**（IntersectionObserver，避免全量重绘；ScreenToGif 缩略图缓存思路） |
+| 时间轴 | 1773-2007 | **2026-08-06 起为水平虚拟化轨道**：仅可见窗口内帧 + `TL_BUFFER=4` 缓冲渲染 DOM 节点，节点绝对定位在 `N×TL_ITEM_PITCH` 宽的轨道内（保持原生横向滚动几何）；点击/复制/删除/delay/拖放/触摸排序全部在容器上委托（无逐帧监听）；缩略图为 ≤96×72 小预览，惰性生成并有界缓存（`THUMB_CACHE_MAX=256`，FIFO 淘汰） |
 | 键盘/取色/透明 | 2009-2290 | 保留；修复 `cx` bug（见 §1.1 #1） |
 | 图层 | 2287-2688 | 保留；同步匹配改 id；抽 `composeFrame(canvas, layers, outW, outH)` 共享函数 |
 | 导出 | 2689-2950 | GIF：gif.js（同源 worker）；ZIP：走后端（§4.5）；精灵图：保留 canvas 合成 |
@@ -236,19 +238,20 @@ flowchart LR
 | 输出 | 方案 | 细节 |
 |---|---|---|
 | GIF | gif.js 编码（同原） | `workers: 4`、quality 1-10、透明 matte `#FF00FF`；预览 `<img src=objectURL>` + anchor download（同 2773-2780） |
-| 序列帧 ZIP | **后端 zip-outputs**（替代 JSZip） | 帧 PNG `toBlob` → `upload-temp?name=frame_NNN.png`（500MB 上限）→ `zip-outputs {paths, cleanUp:true}` → `outputURL` 下载。帧数 >200 时分批（每批 50）防并发上传过载；上传前按 §4.6 限额校验总像素 |
+| 序列帧 ZIP | **后端 zip-outputs**（替代 JSZip） | 帧 PNG `toBlob` → `upload-temp?name=frame_NNN.png`（500MB 上限）→ `zip-outputs {paths, cleanUp:true}` → `outputURL` 下载。帧数 >200 时分批（每批 50）防并发上传过载；导出前仅经 `exportMemCheck` 峰值 confirm 警告，无像素帧硬限额（§4.6） |
 | 精灵图 | 前端 canvas 合成 | 同原 2867-2950，`toDataURL('image/png')` 下载；row-major 排列，空位跳过 |
 
-### 4.6 输入限额与内存保护（新增，原页面无）
+### 4.6 输入限额与内存保护（2026-08-06 修订；原页面无防护，移植时新增）
 
-- 总像素帧当量上限：`width × height × frameCount ≤ 20,000,000`（约 100 帧 512×512）；超出在导入时提示并拒绝（消息含实际值）。
-- 单文件上限：GIF/视频 ≤ 200 MB（浏览器 FileReader/视频解码前的快速检查 `file.size`）。
-- 时间轴缩略图懒加载（IntersectionObserver）替代全量 `toDataURL`（§4.3 时间轴）。
-- 导出前检查：估计峰值内存（`frames × outW × outH × 4 × 3`），超过 1.5 GB 提示降帧率/尺寸后继续或取消。
+- **像素帧硬限额已移除**：`MAX_PIXEL_FRAMES=20,000,000`（原 `width × height × frameCount` 硬拒绝）已删除——普通图片/GIF/视频提取不再被像素帧预算拒绝（与源页面行为对齐）；该常量与"帧预算"相关文案已从 `gif-editor.js`/`i18n.js` 清除。
+- 单文件上限（保留）：GIF/视频 ≤ 200 MB（`MAX_FILE_BYTES`，导入时 `file.size` 快速检查，超限 `alert` 并拒绝）。
+- **导出内存警告（保留为 export-time confirm，非输入门禁）**：`exportMemCheck` 估计峰值内存（`frames × outW × outH × 4 × 3`），超过 1.5 GB（`EXPORT_MEM_LIMIT`）时 `confirm` 提示降帧率/尺寸，用户可继续或取消；GIF/ZIP/精灵图三条导出路径均调用——仍是真实 OOM 兜底。
+- **时间轴虚拟化（新增）**：水平窗口化轨道——仅可见帧 + `TL_BUFFER=4` 缓冲渲染 DOM，节点绝对定位，交互全部委托在容器（§4.3）；缩略图为 ≤96×72 小预览、惰性生成、FIFO 有界缓存（`THUMB_CACHE_MAX=256`），替代原"每帧全尺寸 `toDataURL`"。
+- 内存模型：本轮帧仍以完整 canvas 驻留 `state.slices[]`（4 B/px）；未引入 IndexedDB/后端持久化（见 §8 ADR）。
 
 ### 4.7 交互与体验（参考 Piskel 时间轴、ScreenToGif 帧管理）
 
-- 时间轴保留原交互（点击选中/双击可编辑 delay 输入/复制/删除/拖拽排序/触摸排序/键盘导航）。
+- 时间轴保留原交互（点击选中/双击可编辑 delay 输入/复制/删除/拖拽排序/触摸排序/键盘导航），并在虚拟化窗口化 DOM 下通过容器委托实现（§4.3/§4.6），交互语义与源页面一致。
 - 帧指示器 `#N/M` 保留；键盘 Home/End/PgUp/PgDn/←/→ 保留。
 - 新增（低成本高价值）：帧数/总时长显示条；导出按钮禁用态与"渲染中…"状态保留。
 - 精灵图导出弹窗参数沿用原（rows×cols），对齐 Piskel 的"列数优先"交互但保持原布局。
@@ -432,6 +435,8 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 ## 7. 实施阶段计划（执行顺序与验证）
 
 > **实施状态（2026-08-05）：** P0–P3 已全部落地（仓库中已有对应源码与测试，勾选见下）；P4 联调与收尾进行中。每阶段完成后再按源码实际变更范围更新 `PROJECT_MAP.md` 与受影响架构文档。后端阶段至少执行 `go build ./...`、`go vet ./...`、相关 `go test`；Playground 阶段执行 `go build -tags playground` 并用浏览器驱动验证。
+>
+> **实施状态（2026-08-06，追加）：** "大规模输入 + 虚拟化时间轴"两阶段已合入 `web/static/gif-editor.js`/`i18n.js`/`style.css`（仅前端，见文件头 `已落地（2026-08-06，追加）`）。验证：`node --check`（gif-editor.js、i18n.js）通过；确定性窗口化检查通过（从源码抽取真实 `timelineWindow` 逻辑，对帧数 1/5/63/64/10000 × 6 个滚动位置验证：窗口有界、scrollLeft clamp、覆盖滚动所在帧、尾部 clamp）；**精确高帧用例（1280×736×63 = 59,351,040 像素帧）的浏览器冒烟未完成**——本机 ffmpeg GIF palette 编码挂起，测试 mp4（721KB，`%TEMP%\tr-smoke\big.mp4`）已生成但未走完整浏览器验证。
 
 ### P0：文档、依赖与能力前置
 - [x] 重新按函数/接口核对源码；行号只作导航，不作为实现契约。
@@ -444,7 +449,7 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 - [x] 导航接入（§4.1）：`index.html`/`index-nopg.html`、`app.js` switch、cleanup、i18n。
 - [x] 核心逻辑移植：状态/输入/GIF 解码/视频抽帧/网格/时间轴/裁剪/透明/图层，修复 §1.1 五项缺陷。
 - [x] 导出链路：GIF（gif.js 同源 worker）、序列帧 ZIP（upload-temp + zip-outputs）、PNG 精灵图；不依赖 Gallery FFmpeg 能力位。
-- [x] 限额、懒加载缩略图、objectURL/canvas cleanup。
+- [x] 输入/导出防护与时间轴虚拟化（2026-08-06 修订）：200MB 单文件上限（`MAX_FILE_BYTES`）、导出峰值 1.5GB confirm 警告（`EXPORT_MEM_LIMIT`/`exportMemCheck`）、窗口化时间轴 + 有界缩略图缓存、objectURL/canvas cleanup（原 `MAX_PIXEL_FRAMES` 像素帧硬限额已移除）。
 - [x] 浏览器全流程冒烟：导入图片/GIF/视频 → 编辑 → 三种导出；核对 disposal 2/3、delay、图层同步和源页面缺陷修复。
 - [x] 实施完成后同步 `PROJECT_MAP.md` §18.2/§24；仅导航模块变化才更新相关架构文档。
 
@@ -477,7 +482,7 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 | R2 | GIF/WebP `<img>` 无法暂停/seek/音量 | 需求 2 控制条与 video 不一致 | §5.4 明确重播/清空 src，隐藏 seeker/音量；不伪造暂停 | 已决策 |
 | R3 | FFmpeg 未安装/未解析或 FFprobe 不可用 | Gallery 动画输出和 trim 不可用 | `available=false`，前端禁用并显示可读原因；GIF 编辑器浏览器导出不受影响 | 已决策 |
 | R4 | FFmpeg 缺 GIF encoder 或 `libwebp_anim` | 单一输出格式不可用 | capability 分字段；只禁用缺失格式，后端 Start 再复核 | 已决策 |
-| R5 | 大帧数浏览器 OOM | GIF 编辑器稳定性 | §4.6 像素帧硬限额、缩略图懒加载、导出峰值提示 | 已决策 |
+| R5 | 大帧数浏览器 OOM | GIF 编辑器稳定性 | **2026-08-06 修订**：像素帧硬限额已移除（改由用户自行权衡，与源页面行为一致）；保留 200MB 单文件上限（`MAX_FILE_BYTES`）与导出 1.5GB 峰值 confirm 警告（`EXPORT_MEM_LIMIT`）；时间轴窗口化 + 有界缩略图缓存（§4.6）降低 DOM/缩略图压力；帧仍以完整 canvas 驻留内存 | 已决策 → 已落地（精确高帧浏览器冒烟未完成，见 §7） |
 | R6 | 原页面 CSS 与全局样式冲突 | 页面观感/功能损坏 | 全量 `gif-` 前缀 + 主题 token | 已决策 |
 | R7 | GIF palettegraph 耗时长、进度粒度粗 | Gallery 动画导出 UX | 单次 filtergraph；复用 `out_time_us`，UI 显示“GIF palette 合成中” | 已决策 |
 | R8 | loop/滤镜选项随 FFmpeg 版本差异 | 命令失败或播放次数错误 | P0/P3 以实际 `-h` 输出和产物 smoke test 固化；格式分别映射 loop | 待 P3 |
@@ -494,6 +499,8 @@ ffmpeg -y [-ss START] [-t DURATION] -i input \
 7. FFmpeg capability 按 `available`、GIF encoder、`libwebp_anim` encoder、animated WebP decoder 分字段探测；缺 FFmpeg/FFprobe 时关闭 Gallery 动画输出/trim，缺单个 encoder 或 decoder 时只关闭对应能力。
 8. Gallery video pane 的 GIF/WebP 播放使用唯一 `<img>` 节点；控制条隐藏 seeker、时间和音量，重播/清空 src 是明确降级语义。
 9. Gallery video trim 按输入类型分流：普通视频可拖动定位；GIF/animated WebP 只能使用数字时间输入，由 FFmpeg 后端执行 trim。
+10. 输入像素帧预算 `MAX_PIXEL_FRAMES=20,000,000` 硬拒绝已移除（2026-08-06）：普通图片/GIF/视频提取不再被像素帧预算拒绝；`MAX_FILE_BYTES=200MB` 单文件上限与 `EXPORT_MEM_LIMIT=1.5GB` 导出峰值 confirm 警告保留——导出防护（`exportMemCheck`）仍是真实 OOM 兜底，且不是输入门禁。
+11. 时间轴采用水平虚拟化轨道（2026-08-06）：仅可见帧 + `TL_BUFFER=4` 缓冲生成 DOM 节点、节点绝对定位、交互在容器委托、缩略图为有界小预览（`THUMB_CACHE_MAX=256`）——替代逐帧节点 + 逐帧监听 + 全尺寸 `toDataURL`；帧数据本轮仍以完整 canvas 驻留内存，未引入 IndexedDB/后端持久化。
 
 
 ## 9. 附录

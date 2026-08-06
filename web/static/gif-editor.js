@@ -2,7 +2,7 @@
 // GIF / frame editor page for TinyRouter (header nav 6th button, data-page="gif").
 // Ported 1:1 from the "喵喵切切乐 Pro Max" single-page app
 // (C:/Users/Houpy/Desktop/Zed/# OnePageApps/Pages/07_gif_slicer.html), with the
-// five documented source fixes plus the new input/memory limits:
+// five documented source fixes plus the memory/scale fixes:
 //   #1 draw() layer branch used undefined `cx` (now `ctx`).
 //   #2 GIF decode now uses the vendored gifuct-js bundle (parseGIF +
 //      decompressFrames with buildPatches=true) with correct disposal 1/2/3
@@ -13,9 +13,10 @@
 //      text content / image object identity (duplicate text over-synced).
 //   #5 The three export paths share one compositor (composeFrame) instead of
 //      three duplicated layer-drawing blocks.
-//   + Input caps: width*height*frameCount <= 20,000,000; GIF/video file size
-//     <= 200 MB; export peak-memory estimate check before rendering.
-//   + Timeline thumbnails are generated lazily via IntersectionObserver.
+  //   + GIF/video file size gate <= 200 MB; the export peak-memory estimate
+  //     is a confirmable warning, not an input cap (no pixel-frame budget).
+  //   + Timeline is virtualized: windowed DOM + delegated interactions + small
+  //     lazily generated thumbnails (bounded cache) for large frame counts.
 // Vendors: gif.js (encoder, same-origin worker) + gifuct-js (decoder) under
 // web/static/vendor/. No external CDN. All DOM ids/classes are gif- prefixed.
 
@@ -23,11 +24,10 @@ var GifEditor = (function () {
   'use strict';
 
   // ------------------------------------------------------------------
-  // Constants (input limits, plan §4.6)
+  // Constants (file-size gate + export memory warning; timeline geometry)
   // ------------------------------------------------------------------
-  var MAX_PIXEL_FRAMES = 20000000;            // width * height * frameCount
   var MAX_FILE_BYTES = 200 * 1024 * 1024;     // GIF / video single-file cap
-  var EXPORT_MEM_LIMIT = 1.5 * 1024 * 1024 * 1024; // export peak estimate cap
+  var EXPORT_MEM_LIMIT = 1.5 * 1024 * 1024 * 1024; // export peak estimate warning threshold
   var GIF_VENDOR_URL = '/vendor/gif.js/gif.js';
   var GIF_WORKER_URL = '/vendor/gif.js/gif.worker.js';
   var MATTE_HEX = '#FF00FF';
@@ -57,6 +57,7 @@ var GifEditor = (function () {
     cropRect: { x: 0, y: 0, w: 100, h: 100 },
     textStyle: { bold: false, italic: false, underline: false },
     dragSrcIndex: null,
+    dragItemEl: null,
     pickColorMode: false,
     transparencyReady: false,
     touchDragItem: null,
@@ -66,10 +67,14 @@ var GifEditor = (function () {
   var dom = {};        // cached element refs (gif- prefix stripped)
   var canvas = null;   // preview canvas element
   var ctx = null;      // preview 2d context
-  var thumbObserver = null;
   var videoUrl = null;
   var resultUrl = null;
   var rendered = false;
+  // Virtualized timeline state (window + bounded thumbnail cache).
+  var timelineWin = null;   // last rendered window {start, end}
+  var thumbCache = {};      // slice.id -> small thumbnail data URL
+  var thumbKeys = [];       // FIFO order of thumbCache entries
+  var thumbRaf = null;      // pending rAF for timeline window updates
 
   function byId(name) { return document.getElementById('gif-' + name); }
   function freshId() { return Date.now() + Math.random(); }
@@ -111,8 +116,24 @@ var GifEditor = (function () {
       window.removeEventListener('touchmove', onPointerMove);
       window.removeEventListener('mouseup', onPointerUp);
       window.removeEventListener('touchend', onPointerUp);
+      window.removeEventListener('resize', onWindowResize);
+      if (dom.timeline) {
+        dom.timeline.removeEventListener('click', onTimelineClick);
+        dom.timeline.removeEventListener('change', onTimelineDelayChange);
+        dom.timeline.removeEventListener('dragstart', onTimelineDragStart);
+        dom.timeline.removeEventListener('dragover', onTimelineDragOver);
+        dom.timeline.removeEventListener('dragenter', onTimelineDragEnter);
+        dom.timeline.removeEventListener('dragleave', onTimelineDragLeave);
+        dom.timeline.removeEventListener('drop', onTimelineDrop);
+        dom.timeline.removeEventListener('dragend', onTimelineDragEnd);
+        dom.timeline.removeEventListener('touchstart', onTimelineTouchStart);
+        dom.timeline.removeEventListener('touchmove', onTimelineTouchMove);
+        dom.timeline.removeEventListener('touchend', onTimelineTouchEnd);
+        dom.timeline.removeEventListener('scroll', onTimelineScroll);
+      }
     }
-    if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
+    if (thumbRaf) { cancelAnimationFrame(thumbRaf); thumbRaf = null; }
+    clearThumbCache();
     if (videoUrl) { URL.revokeObjectURL(videoUrl); videoUrl = null; }
     if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
     if (state.srcVideo) {
@@ -304,11 +325,6 @@ var GifEditor = (function () {
     reader.onload = function (evt) {
       var img = new Image();
       img.onload = function () {
-        var total = img.width * img.height;
-        if (total > MAX_PIXEL_FRAMES) {
-          alert(t('gifEditorAlertTooLarge', [img.width, img.height, 1, total]));
-          return;
-        }
         state.srcImg = img;
         state.mode = 'source';
         dom.outW.value = img.width;
@@ -376,12 +392,6 @@ var GifEditor = (function () {
     decodeGifFile(file).then(function (frames) {
       var w = frames.length ? frames[0].canvas.width : 0;
       var h = frames.length ? frames[0].canvas.height : 0;
-      var total = w * h * frames.length;
-      if (total > MAX_PIXEL_FRAMES) {
-        hideSpinner();
-        alert(t('gifEditorAlertTooLarge', [w, h, frames.length, total]));
-        return;
-      }
       state.slices = frames.map(function (f) {
         return { id: freshId(), canvas: f.canvas, delay: f.delay, layers: [] };
       });
@@ -464,12 +474,6 @@ var GifEditor = (function () {
       return;
     }
     var frameInterval = 1 / fps;
-    var frameCount = Math.ceil(duration / frameInterval);
-    var total = video.videoWidth * video.videoHeight * frameCount;
-    if (total > MAX_PIXEL_FRAMES) {
-      alert(t('gifEditorAlertTooLarge', [video.videoWidth, video.videoHeight, frameCount, total]));
-      return;
-    }
     showSpinner(t('gifEditorExtractingFrames'));
     (async function () {
       state.slices = [];
@@ -607,6 +611,7 @@ var GifEditor = (function () {
       dom.outH.value = Math.round(r.h);
       dom.cropPanel.classList.remove('active');
       dom.startGlobalCropBtn.style.display = 'block';
+      clearThumbCache(); // slice canvases were replaced; cached previews are stale
       renderTimeline();
       selectSlice(state.selectedSliceIdx);
       hideSpinner();
@@ -614,98 +619,282 @@ var GifEditor = (function () {
   }
 
   // ------------------------------------------------------------------
-  // Timeline (lazy thumbnails, reorder/duplicate/delete, per-frame delay)
+  // Timeline: virtualized horizontal strip. Only frames inside the current
+  // scroll window (plus a buffer) get DOM nodes; each item is absolutely
+  // positioned inside a track sized to N*PITCH so the browser keeps native
+  // horizontal scroll geometry. Every interaction (select / duplicate /
+  // delete / delay / drag & drop / touch reorder) is delegated on the
+  // container — no per-frame listeners. Thumbnails are small previews
+  // generated lazily for windowed items and held in a bounded cache.
   // ------------------------------------------------------------------
-  function onThumbIntersect(entries) {
-    entries.forEach(function (en) {
-      if (!en.isIntersecting) return;
-      var img = en.target;
-      if (img.getAttribute('src')) return;
-      var idx = parseInt(img.getAttribute('data-frame'), 10);
-      var s = state.slices[idx];
-      if (!s) return;
-      img.src = s.canvas.toDataURL();
-    });
+  var TL_ITEM_W = 100;          // matches .gif-slice-item width (style.css)
+  var TL_ITEM_GAP = 10;         // matches .gif-timeline-area gap
+  var TL_ITEM_PITCH = TL_ITEM_W + TL_ITEM_GAP; // 110 px per frame slot
+  var TL_BUFFER = 4;            // extra items rendered beyond the viewport
+  var THUMB_CACHE_MAX = 256;    // bounded thumbnail cache entries
+
+  function clearThumbCache() {
+    for (var i = 0; i < thumbKeys.length; i++) {
+      delete thumbCache[thumbKeys[i]];
+    }
+    thumbKeys.length = 0;
+  }
+
+  // Small bounded preview at ~thumbnail-box size (never a full-frame payload).
+  function thumbForSlice(s) {
+    var cached = thumbCache[s.id];
+    if (cached) return cached;
+    var src = s.canvas;
+    var TW = 96, TH = 72; // ~ the .gif-slice-img-box drawable area
+    var scale = Math.min(TW / src.width, TH / src.height, 1);
+    var w = Math.max(1, Math.round(src.width * scale));
+    var h = Math.max(1, Math.round(src.height * scale));
+    var tc = document.createElement('canvas');
+    tc.width = w; tc.height = h;
+    tc.getContext('2d').drawImage(src, 0, 0, w, h);
+    var url = tc.toDataURL('image/png');
+    thumbCache[s.id] = url;
+    thumbKeys.push(s.id);
+    if (thumbKeys.length > THUMB_CACHE_MAX) {
+      delete thumbCache[thumbKeys.shift()];
+    }
+    return url;
+  }
+
+  function timelineWindow() {
+    var tl = dom.timeline;
+    var count = state.slices.length;
+    if (!count) return null;
+    var viewW = tl.clientWidth || 800;
+    // The container clamps scrollLeft itself, but guard defensively so an
+    // out-of-range scroll can never yield an empty/inverted window.
+    var maxScroll = Math.max(0, count * TL_ITEM_PITCH - TL_ITEM_GAP - viewW);
+    var scroll = Math.max(0, Math.min(tl.scrollLeft || 0, maxScroll));
+    var start = Math.max(0, Math.floor(scroll / TL_ITEM_PITCH) - TL_BUFFER);
+    var visible = Math.ceil(viewW / TL_ITEM_PITCH) + TL_BUFFER * 2;
+    return { start: start, end: Math.min(count, start + visible) };
+  }
+
+  function buildSliceItem(i) {
+    var s = state.slices[i];
+    var el = document.createElement('div');
+    el.className = 'gif-slice-item' + (i === state.selectedSliceIdx ? ' selected' : '');
+    el.draggable = true;
+    el.dataset.index = i;
+    el.style.left = (i * TL_ITEM_PITCH) + 'px';
+
+    var img = document.createElement('img');
+    img.alt = '';
+    img.src = thumbForSlice(s);
+    var imgBox = document.createElement('div');
+    imgBox.className = 'gif-slice-img-box';
+    imgBox.appendChild(img);
+
+    var tools = document.createElement('div');
+    tools.className = 'gif-slice-tools';
+    tools.innerHTML =
+      '<div class="gif-slice-tools-row">' +
+      '<span class="gif-slice-num">#' + (i + 1) + '</span>' +
+      '<span class="gif-slice-action" data-action="duplicate" title="' + t('gifEditorDuplicate') + '">📑</span>' +
+      '<span class="gif-slice-action gif-slice-action-del" data-action="delete" title="' + t('gifEditorDelete') + '">🗑️</span>' +
+      '</div>';
+    var delayInput = document.createElement('input');
+    delayInput.type = 'number';
+    delayInput.className = 'gif-delay-input';
+    delayInput.value = s.delay;
+    delayInput.title = t('gifEditorDelayTitle');
+    tools.appendChild(delayInput);
+
+    el.appendChild(imgBox);
+    el.appendChild(tools);
+    return el;
   }
 
   function renderTimeline() {
     var tl = dom.timeline;
+    if (!tl) return;
+    // Structural change: drop the previous window, keep the horizontal position.
+    timelineWin = null;
+    var keepScroll = tl.scrollLeft || 0;
     tl.innerHTML = '';
     if (state.slices.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'gif-timeline-empty';
       empty.innerText = t('gifEditorNoFrames');
       tl.appendChild(empty);
+      clearThumbCache();
       return;
     }
-    if (thumbObserver) thumbObserver.disconnect();
-    thumbObserver = new IntersectionObserver(onThumbIntersect, { root: tl, rootMargin: '200px 0px' });
+    if (state.selectedSliceIdx >= state.slices.length) {
+      state.selectedSliceIdx = state.slices.length - 1;
+    }
+    var track = document.createElement('div');
+    track.className = 'gif-timeline-track';
+    track.style.width = (state.slices.length * TL_ITEM_PITCH - TL_ITEM_GAP) + 'px';
+    tl.appendChild(track);
+    tl.scrollLeft = keepScroll; // clamps to the new max scroll
+    updateTimelineWindow();
+  }
 
-    state.slices.forEach(function (s, i) {
-      var el = document.createElement('div');
-      el.className = 'gif-slice-item' + (i === state.selectedSliceIdx ? ' selected' : '');
-      el.draggable = true;
-      el.dataset.index = i;
+  function updateTimelineWindow() {
+    var tl = dom.timeline;
+    if (!tl || state.slices.length === 0) return;
+    var track = tl.querySelector('.gif-timeline-track');
+    if (!track) return;
+    var win = timelineWindow();
+    if (timelineWin && timelineWin.start === win.start && timelineWin.end === win.end) {
+      patchTimelineSelection(tl);
+      return;
+    }
+    timelineWin = win;
+    track.innerHTML = '';
+    for (var i = win.start; i < win.end; i++) {
+      track.appendChild(buildSliceItem(i));
+    }
+    patchTimelineSelection(tl);
+  }
 
-      var img = document.createElement('img');
-      img.setAttribute('data-frame', i);
-      img.setAttribute('alt', '');
-      var imgBox = document.createElement('div');
-      imgBox.className = 'gif-slice-img-box';
-      imgBox.appendChild(img);
+  function patchTimelineSelection(tl) {
+    var idx = state.selectedSliceIdx;
+    var items = tl.querySelectorAll('.gif-slice-item');
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle('selected', parseInt(items[i].dataset.index, 10) === idx);
+    }
+  }
 
-      var tools = document.createElement('div');
-      tools.className = 'gif-slice-tools';
-      tools.innerHTML =
-        '<div class="gif-slice-tools-row">' +
-        '<span class="gif-slice-num">#' + (i + 1) + '</span>' +
-        '<span class="gif-slice-action" data-action="duplicate" title="' + t('gifEditorDuplicate') + '">📑</span>' +
-        '<span class="gif-slice-action gif-slice-action-del" data-action="delete" title="' + t('gifEditorDelete') + '">🗑️</span>' +
-        '</div>';
-      var delayInput = document.createElement('input');
-      delayInput.type = 'number';
-      delayInput.className = 'gif-delay-input';
-      delayInput.value = s.delay;
-      delayInput.title = t('gifEditorDelayTitle');
-      delayInput.addEventListener('click', function (ev) { ev.stopPropagation(); });
-      delayInput.addEventListener('change', (function (slice) {
-        return function () {
-          var v = parseInt(this.value, 10);
-          slice.delay = (isNaN(v) || v < 0) ? 0 : v;
-        };
-      })(s));
-      tools.appendChild(delayInput);
+  // Center the frame in the scroll viewport (matches the old
+  // scrollIntoView({ inline: 'center' }) behavior without needing a DOM node).
+  function centerTimelineOn(idx) {
+    var tl = dom.timeline;
+    if (!tl) return;
+    var viewW = tl.clientWidth || 0;
+    var targetLeft = idx * TL_ITEM_PITCH;
+    var center = Math.max(0, targetLeft - (viewW - TL_ITEM_W) / 2);
+    if (center !== (tl.scrollLeft || 0)) {
+      tl.scrollTo({ left: center, behavior: 'smooth' });
+    }
+  }
 
-      el.appendChild(imgBox);
-      el.appendChild(tools);
-
-      el.addEventListener('click', (function (idx) {
-        return function (ev) {
-          if (ev.target.closest('.gif-slice-action') || ev.target.closest('input')) return;
-          selectSlice(idx);
-        };
-      })(i));
-
-      tools.querySelector('[data-action="duplicate"]')
-        .addEventListener('click', function (ev) { ev.stopPropagation(); duplicateSlice(i); });
-      tools.querySelector('[data-action="delete"]')
-        .addEventListener('click', function (ev) { ev.stopPropagation(); deleteSlice(i); });
-
-      // Desktop drag & drop reorder
-      el.addEventListener('dragstart', handleDragStart);
-      el.addEventListener('dragover', handleDragOver);
-      el.addEventListener('dragenter', handleDragEnter);
-      el.addEventListener('dragleave', handleDragLeave);
-      el.addEventListener('drop', handleDrop);
-      el.addEventListener('dragend', handleDragEnd);
-      // Touch reorder
-      el.addEventListener('touchstart', handleTouchStart, { passive: false });
-      el.addEventListener('touchmove', handleTouchMove, { passive: false });
-      el.addEventListener('touchend', handleTouchEnd);
-
-      tl.appendChild(el);
-      thumbObserver.observe(img);
+  function onTimelineScroll() { scheduleTimelineUpdate(); }
+  function onWindowResize() { scheduleTimelineUpdate(); }
+  function scheduleTimelineUpdate() {
+    if (thumbRaf) return;
+    thumbRaf = requestAnimationFrame(function () {
+      thumbRaf = null;
+      updateTimelineWindow();
     });
+  }
+
+  // --- Delegated timeline interactions --------------------------------
+  function onTimelineClick(e) {
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (!item) return;
+    var idx = parseInt(item.dataset.index, 10);
+    if (isNaN(idx)) return;
+    var actionEl = e.target.closest('.gif-slice-action');
+    if (actionEl) {
+      if (actionEl.dataset.action === 'duplicate') duplicateSlice(idx);
+      else if (actionEl.dataset.action === 'delete') deleteSlice(idx);
+      return;
+    }
+    if (e.target.closest('input')) return; // delay input clicks never select
+    selectSlice(idx);
+  }
+
+  function onTimelineDelayChange(e) {
+    var input = e.target;
+    if (!input || input.tagName !== 'INPUT' || !input.classList.contains('gif-delay-input')) return;
+    var item = input.closest('.gif-slice-item');
+    if (!item) return;
+    var s = state.slices[parseInt(item.dataset.index, 10)];
+    if (!s) return;
+    var v = parseInt(input.value, 10);
+    s.delay = (isNaN(v) || v < 0) ? 0 : v;
+  }
+
+  function onTimelineDragStart(e) {
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (!item) return;
+    var idx = parseInt(item.dataset.index, 10);
+    if (isNaN(idx)) return;
+    state.dragSrcIndex = idx;
+    state.dragItemEl = item;
+    item.classList.add('dragging');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+    }
+  }
+  function onTimelineDragOver(e) {
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (!item) return;
+    if (e.preventDefault) e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+  }
+  function onTimelineDragEnter(e) {
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (item) item.classList.add('drag-over');
+  }
+  function onTimelineDragLeave(e) {
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (!item) return;
+    var rel = e.relatedTarget;
+    if (rel && rel.closest && rel.closest('.gif-slice-item') === item) return;
+    item.classList.remove('drag-over');
+  }
+  function onTimelineDrop(e) {
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    var item = e.target && e.target.closest ? e.target.closest('.gif-slice-item') : null;
+    if (!item) return;
+    var srcIdx = state.dragSrcIndex;
+    var targetIdx = parseInt(item.dataset.index, 10);
+    if (srcIdx !== null && srcIdx !== undefined && !isNaN(targetIdx) && srcIdx !== targetIdx) {
+      performReorder(srcIdx, targetIdx);
+    }
+    return false;
+  }
+  function onTimelineDragEnd() {
+    if (state.dragItemEl) state.dragItemEl.classList.remove('dragging');
+    state.dragItemEl = null;
+    state.dragSrcIndex = null;
+    clearDragOverClasses();
+  }
+
+  function onTimelineTouchStart(e) {
+    if (e.target.tagName === 'INPUT' || e.target.onclick) return;
+    var item = e.target.closest('.gif-slice-item');
+    if (!item) return;
+    state.touchDragItem = item;
+    state.touchStartIndex = parseInt(item.dataset.index, 10);
+  }
+  function onTimelineTouchMove(e) {
+    if (!state.touchDragItem) return;
+    e.preventDefault();
+    var touch = e.touches[0];
+    var under = document.elementFromPoint(touch.clientX, touch.clientY);
+    var targetItem = under ? under.closest('.gif-slice-item') : null;
+    clearDragOverClasses();
+    if (targetItem && targetItem !== state.touchDragItem) targetItem.classList.add('drag-over');
+  }
+  function onTimelineTouchEnd(e) {
+    if (!state.touchDragItem) return;
+    var touch = e.changedTouches[0];
+    var under = document.elementFromPoint(touch.clientX, touch.clientY);
+    var targetItem = under ? under.closest('.gif-slice-item') : null;
+    if (targetItem && targetItem !== state.touchDragItem) {
+      performReorder(state.touchStartIndex, parseInt(targetItem.dataset.index, 10));
+    }
+    clearDragOverClasses();
+    state.touchDragItem = null;
+    state.touchStartIndex = null;
+  }
+
+  function clearDragOverClasses() {
+    if (!dom.timeline) return;
+    var items = dom.timeline.querySelectorAll('.gif-slice-item');
+    for (var i = 0; i < items.length; i++) items[i].classList.remove('drag-over');
   }
 
   function duplicateSlice(i) {
@@ -727,63 +916,6 @@ var GifEditor = (function () {
     renderTimeline();
     if (state.slices.length > 0) selectSlice(state.selectedSliceIdx);
     else { state.mode = 'source'; draw(); }
-  }
-
-  function handleDragStart(e) {
-    state.dragSrcIndex = parseInt(this.dataset.index, 10);
-    this.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(state.dragSrcIndex));
-  }
-  function handleDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    return false;
-  }
-  function handleDragEnter(e) { this.classList.add('drag-over'); }
-  function handleDragLeave(e) { this.classList.remove('drag-over'); }
-  function handleDrop(e) {
-    if (e.stopPropagation) e.stopPropagation();
-    var srcIdx = state.dragSrcIndex;
-    var targetIdx = parseInt(this.dataset.index, 10);
-    if (srcIdx !== targetIdx && srcIdx !== null && !isNaN(srcIdx)) {
-      performReorder(srcIdx, targetIdx);
-    }
-    return false;
-  }
-  function handleDragEnd() {
-    this.classList.remove('dragging');
-    var items = document.querySelectorAll('.gif-slice-item');
-    for (var i = 0; i < items.length; i++) items[i].classList.remove('drag-over');
-  }
-
-  function handleTouchStart(e) {
-    if (e.target.tagName === 'INPUT' || e.target.onclick) return;
-    state.touchDragItem = this;
-    state.touchStartIndex = parseInt(this.dataset.index, 10);
-  }
-  function handleTouchMove(e) {
-    if (!state.touchDragItem) return;
-    e.preventDefault();
-    var touch = e.touches[0];
-    var elementUnderFinger = document.elementFromPoint(touch.clientX, touch.clientY);
-    var targetItem = elementUnderFinger ? elementUnderFinger.closest('.gif-slice-item') : null;
-    var items = document.querySelectorAll('.gif-slice-item');
-    for (var i = 0; i < items.length; i++) items[i].classList.remove('drag-over');
-    if (targetItem && targetItem !== state.touchDragItem) targetItem.classList.add('drag-over');
-  }
-  function handleTouchEnd(e) {
-    if (!state.touchDragItem) return;
-    var touch = e.changedTouches[0];
-    var elementUnderFinger = document.elementFromPoint(touch.clientX, touch.clientY);
-    var targetItem = elementUnderFinger ? elementUnderFinger.closest('.gif-slice-item') : null;
-    if (targetItem && targetItem !== state.touchDragItem) {
-      performReorder(state.touchStartIndex, parseInt(targetItem.dataset.index, 10));
-    }
-    var items = document.querySelectorAll('.gif-slice-item');
-    for (var i = 0; i < items.length; i++) items[i].classList.remove('drag-over');
-    state.touchDragItem = null;
-    state.touchStartIndex = null;
   }
 
   function performReorder(fromIndex, toIndex) {
@@ -808,12 +940,8 @@ var GifEditor = (function () {
     dom.panelStep2.classList.remove('gif-edit-blocked');
     dom.frameIndicator.innerText = t('gifEditorFrameIndicator', [idx + 1]);
     dom.stageOverlayText.innerText = t('gifEditorEditMode', [idx + 1]);
-    var children = dom.timeline.children;
-    for (var i = 0; i < children.length; i++) {
-      children[i].classList.toggle('selected', i === idx);
-    }
-    var tEl = children[idx];
-    if (tEl) tEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    centerTimelineOn(idx);
+    updateTimelineWindow();
     updateUIForSelection();
     draw();
   }
@@ -1404,7 +1532,7 @@ var GifEditor = (function () {
   }
 
   // ------------------------------------------------------------------
-  // Output size / memory pre-check (plan §4.6)
+  // Output size + export-time memory warning (never rejects input)
   // ------------------------------------------------------------------
   function outputSize() {
     var w = parseInt(dom.outW.value, 10), h = parseInt(dom.outH.value, 10);
@@ -1700,9 +1828,7 @@ var GifEditor = (function () {
     var total = state.slices.length;
     var timeline = dom.timeline;
     var getPageSize = function () {
-      if (!timeline.firstElementChild) return 1;
-      var itemWidth = timeline.firstElementChild.offsetWidth + 10;
-      return Math.floor(timeline.clientWidth / itemWidth) || 1;
+      return Math.floor(timeline.clientWidth / TL_ITEM_PITCH) || 1;
     };
     switch (e.key) {
       case 'ArrowLeft': newIdx--; break;
@@ -1793,7 +1919,9 @@ var GifEditor = (function () {
       if (isNaN(val) || val < 0) { alert(t('gifEditorAlertDelayInvalid')); return; }
       if (state.slices.length === 0) { alert(t('gifEditorAlertNoFrames')); return; }
       state.slices.forEach(function (s) { s.delay = val; });
-      renderTimeline();
+      // Refresh only the delay inputs currently rendered (windowed DOM).
+      var inputs = dom.timeline.querySelectorAll('.gif-delay-input');
+      for (var i = 0; i < inputs.length; i++) inputs[i].value = val;
     });
 
     dom.sliceBtn.addEventListener('click', runSlice);
@@ -1860,6 +1988,22 @@ var GifEditor = (function () {
     // Result modal
     dom.resultClose.addEventListener('click', closeResultModal);
     dom.reloadBtn.addEventListener('click', function () { location.reload(); });
+
+    // Timeline: per-frame interactions are delegated on the container so the
+    // windowed DOM never needs per-node listeners.
+    dom.timeline.addEventListener('click', onTimelineClick);
+    dom.timeline.addEventListener('change', onTimelineDelayChange);
+    dom.timeline.addEventListener('dragstart', onTimelineDragStart);
+    dom.timeline.addEventListener('dragover', onTimelineDragOver);
+    dom.timeline.addEventListener('dragenter', onTimelineDragEnter);
+    dom.timeline.addEventListener('dragleave', onTimelineDragLeave);
+    dom.timeline.addEventListener('drop', onTimelineDrop);
+    dom.timeline.addEventListener('dragend', onTimelineDragEnd);
+    dom.timeline.addEventListener('touchstart', onTimelineTouchStart);
+    dom.timeline.addEventListener('touchmove', onTimelineTouchMove, { passive: false });
+    dom.timeline.addEventListener('touchend', onTimelineTouchEnd);
+    dom.timeline.addEventListener('scroll', onTimelineScroll, { passive: true });
+    window.addEventListener('resize', onWindowResize);
 
     // Keyboard (capture phase: Escape interception + timeline navigation)
     document.addEventListener('keydown', onKeyDown, true);
