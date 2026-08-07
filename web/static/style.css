@@ -4283,3 +4283,51 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .btn-del-slice:hover{color:var(--danger)}
 .btn-copy-slice:focus-visible,.btn-del-slice:focus-visible{outline:none}
 .login-error-visible{display:block}
+
+/* --- GIF Editor Export Modal Styles --- */
+.gif-export-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-width: 560px;
+}
+.gif-export-preview-container {
+  width: 100%;
+  min-height: 180px;
+  max-height: 280px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.25);
+  background-image: linear-gradient(45deg, var(--glass-border) 25%, transparent 25%),
+                    linear-gradient(-45deg, var(--glass-border) 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, var(--glass-border) 75%),
+                    linear-gradient(-45deg, transparent 75%, var(--glass-border) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  padding: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.gif-export-preview-img {
+  max-width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+  margin: 0 auto;
+  display: block;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.gif-input-with-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.gif-input-with-label .gif-axis-label {
+  font-weight: bold;
+  color: var(--accent);
+  min-width: 18px;
+  text-align: center;
+}

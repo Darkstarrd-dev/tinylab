@@ -33,6 +33,7 @@
   var draft = null;
   var previewDebounceTimer = null;
   var commitGeneration = 0;   // bumped on cancel/open/cleanup; stale commits abort silently
+  var splitDrag = null;         // active split-line drag on the import preview canvas: { axis, index, canvas, pointerId }
 
   // ------------------------------------------------------------------
   // Helper functions
@@ -129,6 +130,11 @@
       fpsChanged: false,      // GIF keeps original delays until the user edits FPS
       startMs: 0,
       endMs: 0,
+      splitCols: 3,           // sprite-sheet grid defaults (mirror the modal input fallbacks)
+      splitRows: 3,
+      innerGap: 0,
+      outerMargin: 0,
+      enableOuterGap: false,
 
       image: null,
       video: null,
@@ -360,45 +366,92 @@
       '        <input type="range" id="gif-import-scale" min="10" max="100" step="5" value="' + Math.min(100, draft.scalePercent) + '">' +
       '      </div>' +
 
-      '      <div class="gif-import-three-col' + (isSingleFrame ? ' gif-disabled' : '') + '">' +
-      '        <div class="gif-import-field-vert">' +
-      '          <label for="gif-import-fps" class="gif-import-label">' + t('gifImportFps', 'Import FPS:') + '</label>' +
-      '          <div class="number-stepper">' +
-      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', -1)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
-      '            <input type="number" class="stepper-input" id="gif-import-fps" min="1" max="60" value="' + draft.fps + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
-      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', 1)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
-      '          </div>' +
-      '        </div>' +
-      '        <div class="gif-import-field-vert">' +
-      '          <label for="gif-import-start-ms" class="gif-import-label">' + t('gifImportStartMs', 'Start (ms):') + '</label>' +
-      '          <div class="number-stepper">' +
-      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', -100)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
-      '            <input type="number" class="stepper-input" id="gif-import-start-ms" min="0" max="' + maxMs + '" value="' + draft.startMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
-      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', 100)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
-      '          </div>' +
-      '        </div>' +
-      '        <div class="gif-import-field-vert">' +
-      '          <label for="gif-import-end-ms" class="gif-import-label">' + t('gifImportEndMs', 'End (ms):') + '</label>' +
-      '          <div class="number-stepper">' +
-      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', -100)" ' + (isSingleFrame ? 'disabled' : '') + '>-</button>' +
-      '            <input type="number" class="stepper-input" id="gif-import-end-ms" min="0" max="' + maxMs + '" value="' + draft.endMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
-      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', 100)" ' + (isSingleFrame ? 'disabled' : '') + '>+</button>' +
-      '          </div>' +
-      '        </div>' +
-      '      </div>' +
+      (isSingleFrame ? (
+        '      <div class="gif-import-split-panel" style="border-top: 1px dashed var(--glass-border); padding-top: 8px; margin-top: 4px;">' +
+        '        <div class="gif-import-row" style="margin-bottom: 6px;">' +
+        '          <span class="gif-import-label" style="font-weight: bold; color: var(--accent-color);">Sprite Sheet Grid Split</span>' +
+        '        </div>' +
+        '        <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
+        '          <div class="gif-import-field-vert">' +
+        '            <label for="gif-import-cols" class="gif-import-label">X (Horizontal Split):</label>' +
+        '            <div class="number-stepper">' +
+        '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-cols\', -1)">-</button>' +
+        '              <input type="number" class="stepper-input" id="gif-import-cols" min="1" max="100" value="' + (draft.splitCols || 3) + '">' +
+        '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-cols\', 1)">+</button>' +
+        '            </div>' +
+        '          </div>' +
+        '          <div class="gif-import-field-vert">' +
+        '            <label for="gif-import-rows" class="gif-import-label">Y (Vertical Split):</label>' +
+        '            <div class="number-stepper">' +
+        '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-rows\', -1)">-</button>' +
+        '              <input type="number" class="stepper-input" id="gif-import-rows" min="1" max="100" value="' + (draft.splitRows || 3) + '">' +
+        '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-rows\', 1)">+</button>' +
+        '            </div>' +
+        '          </div>' +
+        '        </div>' +
+        '        <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
+        '          <div class="gif-import-field-vert">' +
+        '            <label for="gif-import-inner-gap" class="gif-import-label">Center Gap (px):</label>' +
+        '            <div class="number-stepper">' +
+        '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-inner-gap\', -1)">-</button>' +
+        '              <input type="number" class="stepper-input" id="gif-import-inner-gap" min="0" max="500" value="' + (draft.innerGap || 0) + '">' +
+        '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-inner-gap\', 1)">+</button>' +
+        '            </div>' +
+        '          </div>' +
+        '          <div class="gif-import-field-vert">' +
+        '            <label for="gif-import-outer-margin" class="gif-import-label">Outer Margin (px):</label>' +
+        '            <div class="number-stepper">' +
+        '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-outer-margin\', -1)">-</button>' +
+        '              <input type="number" class="stepper-input" id="gif-import-outer-margin" min="0" max="500" value="' + (draft.outerMargin || 0) + '">' +
+        '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-outer-margin\', 1)">+</button>' +
+        '            </div>' +
+        '          </div>' +
+        '        </div>' +
+        '        <div class="gif-import-row" style="margin-bottom: 6px;">' +
+        '          <label class="gif-check-label"><input type="checkbox" id="gif-import-enable-outer" ' + (draft.enableOuterGap ? 'checked' : '') + '> <span>Enable outer border gap</span></label>' +
+        '        </div>' +
+        '      </div>'
+      ) : (
+        '      <div class="gif-import-three-col">' +
+        '        <div class="gif-import-field-vert">' +
+        '          <label for="gif-import-fps" class="gif-import-label">' + t('gifImportFps', 'Import FPS:') + '</label>' +
+        '          <div class="number-stepper">' +
+        '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', -1)">-</button>' +
+        '            <input type="number" class="stepper-input" id="gif-import-fps" min="1" max="60" value="' + draft.fps + '">' +
+        '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-fps\', 1)">+</button>' +
+        '          </div>' +
+        '        </div>' +
+        '        <div class="gif-import-field-vert">' +
+        '          <label for="gif-import-start-ms" class="gif-import-label">' + t('gifImportStartMs', 'Start (ms):') + '</label>' +
+        '          <div class="number-stepper">' +
+        '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', -100)">-</button>' +
+        '            <input type="number" class="stepper-input" id="gif-import-start-ms" min="0" max="' + maxMs + '" value="' + draft.startMs + '">' +
+        '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-start-ms\', 100)">+</button>' +
+        '          </div>' +
+        '        </div>' +
+        '        <div class="gif-import-field-vert">' +
+        '          <label for="gif-import-end-ms" class="gif-import-label">' + t('gifImportEndMs', 'End (ms):') + '</label>' +
+        '          <div class="number-stepper">' +
+        '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', -100)">-</button>' +
+        '            <input type="number" class="stepper-input" id="gif-import-end-ms" min="0" max="' + maxMs + '" value="' + draft.endMs + '">' +
+        '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-end-ms\', 100)">+</button>' +
+        '          </div>' +
+        '        </div>' +
+        '      </div>' +
 
-      '      <div class="gif-import-row' + (isSingleFrame ? ' gif-disabled' : '') + '" style="flex-direction: column; align-items: stretch; gap: 4px;">' +
-      '        <div style="display:flex; justify-content:space-between;">' +
-      '          <span class="gif-import-label">' + t('gifImportTimeRange', 'Time Range:') + '</span>' +
-      '          <span class="gif-import-value" id="gif-import-time-display">0.00s - ' + (draft.sourceDurationMs / 1000).toFixed(2) + 's</span>' +
-      '        </div>' +
-      '        <div class="gif-import-range" id="gif-import-range">' +
-      '          <div class="gif-import-range-track"></div>' +
-      '          <div class="gif-import-range-selected" id="gif-import-range-selected"></div>' +
-      '          <input type="range" id="gif-import-start-range" min="0" max="' + maxMs + '" value="' + draft.startMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
-      '          <input type="range" id="gif-import-end-range" min="0" max="' + maxMs + '" value="' + draft.endMs + '" ' + (isSingleFrame ? 'disabled' : '') + '>' +
-      '        </div>' +
-      '      </div>' +
+        '      <div class="gif-import-row" style="flex-direction: column; align-items: stretch; gap: 4px;">' +
+        '        <div style="display:flex; justify-content:space-between;">' +
+        '          <span class="gif-import-label">' + t('gifImportTimeRange', 'Time Range:') + '</span>' +
+        '          <span class="gif-import-value" id="gif-import-time-display">0.00s - ' + (draft.sourceDurationMs / 1000).toFixed(2) + 's</span>' +
+        '        </div>' +
+        '        <div class="gif-import-range" id="gif-import-range">' +
+        '          <div class="gif-import-range-track"></div>' +
+        '          <div class="gif-import-range-selected" id="gif-import-range-selected"></div>' +
+        '          <input type="range" id="gif-import-start-range" min="0" max="' + maxMs + '" value="' + draft.startMs + '">' +
+        '          <input type="range" id="gif-import-end-range" min="0" max="' + maxMs + '" value="' + draft.endMs + '">' +
+        '        </div>' +
+        '      </div>'
+      )) +
 
       '      <hr class="gif-import-divider">' +
 
@@ -424,6 +477,7 @@
     overlay.classList.add('show');
 
     bindModalEvents();
+    syncInputs();
     updateImportSummary();
     triggerPreviewDebounced();
   }
@@ -453,6 +507,91 @@
         draft.scalePercent = Math.max(10, Math.min(100, val));
         updateImportSummary();
         triggerPreviewDebounced();
+      });
+    }
+
+    var colsInput = document.getElementById('gif-import-cols');
+    var rowsInput = document.getElementById('gif-import-rows');
+    var innerGapInput = document.getElementById('gif-import-inner-gap');
+    var outerMarginInput = document.getElementById('gif-import-outer-margin');
+    var enableOuterCheck = document.getElementById('gif-import-enable-outer');
+
+    var onSplitChange = function () {
+      if (!draft) return;
+      if (colsInput) draft.splitCols = Math.max(1, parseInt(colsInput.value, 10) || 1);
+      if (rowsInput) draft.splitRows = Math.max(1, parseInt(rowsInput.value, 10) || 1);
+      if (innerGapInput) draft.innerGap = Math.max(0, parseInt(innerGapInput.value, 10) || 0);
+      if (outerMarginInput) draft.outerMargin = Math.max(0, parseInt(outerMarginInput.value, 10) || 0);
+      if (enableOuterCheck) draft.enableOuterGap = !!enableOuterCheck.checked;
+      updateImportSummary();
+      triggerPreviewDebounced();
+    };
+
+    if (colsInput) { colsInput.addEventListener('input', onSplitChange); colsInput.addEventListener('change', onSplitChange); }
+    if (rowsInput) { rowsInput.addEventListener('input', onSplitChange); rowsInput.addEventListener('change', onSplitChange); }
+    if (innerGapInput) { innerGapInput.addEventListener('input', onSplitChange); innerGapInput.addEventListener('change', onSplitChange); }
+    if (outerMarginInput) { outerMarginInput.addEventListener('input', onSplitChange); outerMarginInput.addEventListener('change', onSplitChange); }
+    if (enableOuterCheck) { enableOuterCheck.addEventListener('change', onSplitChange); }
+    // Manual drag of sprite-sheet split lines on the preview canvas (image drafts
+    // only; the canvas is rebuilt on every showImportModal, so these listeners die
+    // with the old DOM — no accumulation across open/close cycles).
+    var previewCanvas = document.getElementById('gif-import-preview-canvas');
+    if (previewCanvas) {
+      previewCanvas.addEventListener('pointerdown', function (e) {
+        if (!draft || draft.kind !== 'image') return;
+        var hit = hitTestSplitLine(previewCanvas, e);
+        if (!hit) return;
+        e.preventDefault();
+        if (splitDrag) endSplitDrag();
+        splitDrag = { axis: hit.axis, index: hit.index, canvas: previewCanvas, pointerId: e.pointerId };
+        try { previewCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+        previewCanvas.style.cursor = 'grabbing';
+        previewCanvas.style.touchAction = 'none';
+      });
+      previewCanvas.addEventListener('pointermove', function (e) {
+        if (splitDrag) {
+          if (e.pointerId !== splitDrag.pointerId) return;
+          if (!draft || draft.kind !== 'image') { endSplitDrag(); return; }
+          var g = splitGridGeom();
+          if (!g || g.availW <= 0 || g.availH <= 0) return;
+          var rect = previewCanvas.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          var px = (e.clientX - rect.left) * (previewCanvas.width / rect.width);
+          var py = (e.clientY - rect.top) * (previewCanvas.height / rect.height);
+          if (splitDrag.axis === 'v') {
+            // Column count for which the grabbed line (index k) would sit at the
+            // pointer under the uniform-pitch reflow: k+1 pitches from the left,
+            // pitch = (W + innerGap) / cols. Dragging right shrinks the count,
+            // dragging left grows it; whole steps only, clamped to [1, 100].
+            var newCols = Math.max(1, Math.min(100, Math.round(
+              (splitDrag.index + 1) * (g.targetW - 2 * g.outerMargin + g.innerGap) /
+              (px - g.outerMargin + g.innerGap / 2))));
+            if (colsInput && newCols !== (draft.splitCols || 1)) {
+              colsInput.value = newCols;
+              onSplitChange();
+            }
+          } else {
+            var newRows = Math.max(1, Math.min(100, Math.round(
+              (splitDrag.index + 1) * (g.targetH - 2 * g.outerMargin + g.innerGap) /
+              (py - g.outerMargin + g.innerGap / 2))));
+            if (rowsInput && newRows !== (draft.splitRows || 1)) {
+              rowsInput.value = newRows;
+              onSplitChange();
+            }
+          }
+          return;
+        }
+        // Hover affordance (image draft only; video/GIF keep the canvas for the
+        // time-range preview and must not get a grab cursor).
+        if (!draft || draft.kind !== 'image') return;
+        var hover = hitTestSplitLine(previewCanvas, e);
+        previewCanvas.style.cursor = hover ? 'grab' : '';
+      });
+      previewCanvas.addEventListener('pointerup', function (e) {
+        if (splitDrag && e.pointerId === splitDrag.pointerId) endSplitDrag();
+      });
+      previewCanvas.addEventListener('pointercancel', function (e) {
+        if (splitDrag && e.pointerId === splitDrag.pointerId) endSplitDrag();
       });
     }
 
@@ -515,6 +654,71 @@
         triggerPreviewDebounced();
       });
     }
+  }
+  // ------------------------------------------------------------------
+  // Split-line drag: geometry, hit-testing and lifecycle
+  // ------------------------------------------------------------------
+
+  // Mirrors the grid math inside updateImportPreview() (scaled to canvas px).
+  function splitGridGeom() {
+    if (!draft || draft.kind !== 'image') return null;
+    var targetW = Math.max(1, Math.round(draft.sourceWidth * draft.scalePercent / 100));
+    var targetH = Math.max(1, Math.round(draft.sourceHeight * draft.scalePercent / 100));
+    var cols = Math.max(1, draft.splitCols || 1);
+    var rows = Math.max(1, draft.splitRows || 1);
+    var innerGap = Math.round((draft.innerGap || 0) * (draft.scalePercent / 100));
+    var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100)) : 0;
+    var availW = Math.max(0, targetW - outerMargin * 2 - innerGap * (cols - 1));
+    var availH = Math.max(0, targetH - outerMargin * 2 - innerGap * (rows - 1));
+    return {
+      targetW: targetW, targetH: targetH,
+      cols: cols, rows: rows,
+      innerGap: innerGap, outerMargin: outerMargin,
+      availW: availW, availH: availH,
+      cellW: availW / cols, cellH: availH / rows
+    };
+  }
+
+  // Nearest interior split line within grab tolerance (~7 screen px), or null.
+  // Interior only: the outer border is deliberately not grabbable.
+  function hitTestSplitLine(canvas, e) {
+    var g = splitGridGeom();
+    if (!g || g.availW <= 0 || g.availH <= 0 || !canvas) return null;
+    var rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    var px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    var py = (e.clientY - rect.top) * (canvas.height / rect.height);
+    var tolX = 7 * (canvas.width / rect.width);     // screen-constant tolerance
+    var tolY = 7 * (canvas.height / rect.height);
+    var best = null;
+    var c, r, xLine, yLine, d;
+    for (c = 0; c < g.cols - 1; c++) {
+      xLine = g.outerMargin + (c + 1) * (g.cellW + g.innerGap) - g.innerGap / 2;
+      d = Math.abs(px - xLine) / tolX;
+      if (d <= 1 && (!best || d < best.d)) best = { axis: 'v', index: c, d: d };
+    }
+    for (r = 0; r < g.rows - 1; r++) {
+      yLine = g.outerMargin + (r + 1) * (g.cellH + g.innerGap) - g.innerGap / 2;
+      d = Math.abs(py - yLine) / tolY;
+      if (d <= 1 && (!best || d < best.d)) best = { axis: 'h', index: r, d: d };
+    }
+    return best;
+  }
+
+  // Idempotent drag teardown: release pointer capture, reset cursor/touch-action.
+  // Called on pointerup/pointercancel and from closeModal()/cancelDraft() so an
+  // in-flight drag can never outlive the modal or the draft.
+  function endSplitDrag() {
+    var d = splitDrag;
+    splitDrag = null;
+    if (!d || !d.canvas) return;
+    try {
+      if (d.canvas.hasPointerCapture && d.canvas.hasPointerCapture(d.pointerId)) {
+        d.canvas.releasePointerCapture(d.pointerId);
+      }
+    } catch (e) {}
+    d.canvas.style.cursor = '';
+    d.canvas.style.touchAction = '';
   }
 
   // Clamp start/end to [0, maxMs], preserve at least a one-frame span, and
@@ -653,6 +857,43 @@
 
     if (draft.kind === 'image' && draft.image) {
       ctx.drawImage(draft.image, 0, 0, targetW, targetH);
+
+      // Draw Grid Split Overlay for Sprite Sheet mode
+      var cols = Math.max(1, draft.splitCols || 1);
+      var rows = Math.max(1, draft.splitRows || 1);
+      var innerGap = Math.round((draft.innerGap || 0) * (draft.scalePercent / 100));
+      var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100)) : 0;
+
+      var availW = Math.max(0, targetW - outerMargin * 2 - innerGap * (cols - 1));
+      var availH = Math.max(0, targetH - outerMargin * 2 - innerGap * (rows - 1));
+      var cellW = availW / cols;
+      var cellH = availH / rows;
+
+      ctx.save();
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          var x = outerMargin + c * (cellW + innerGap);
+          var y = outerMargin + r * (cellH + innerGap);
+
+          // Dark outer stroke for high contrast
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(x, y, cellW, cellH);
+
+          // Neon accent inner stroke
+          ctx.strokeStyle = '#00ffaa';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(x, y, cellW, cellH);
+
+          // Corner node indicators
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(x - 2, y - 2, 5, 5);
+          ctx.fillRect(x + cellW - 2, y - 2, 5, 5);
+          ctx.fillRect(x - 2, y + cellH - 2, 5, 5);
+          ctx.fillRect(x + cellW - 2, y + cellH - 2, 5, 5);
+        }
+      }
+      ctx.restore();
     } else if (draft.kind === 'gif' && draft.gifFrames && draft.gifFrames.length) {
       var foundIndex = frameIndexAt(draft.gifFrames, draft.startMs);
       var snap = draft.gifFrames[foundIndex].canvas;
@@ -693,6 +934,7 @@
   }
 
   function closeModal() {
+    endSplitDrag();
     var overlay = document.getElementById('modal-overlay');
     if (overlay) {
       overlay.classList.remove('show');
@@ -787,18 +1029,41 @@
 
   function commitImageDraft(width, height) {
     return new Promise(function (resolve) {
-      var frame = document.createElement('canvas');
-      frame.width = width;
-      frame.height = height;
-      var ctx = frame.getContext('2d');
-      ctx.drawImage(draft.image, 0, 0, width, height);
+      var cols = Math.max(1, draft.splitCols || 1);
+      var rows = Math.max(1, draft.splitRows || 1);
+      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * (draft.scalePercent / 100)));
+      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100))) : 0;
 
-      resolve([{
-        id: core.freshId(),
-        canvas: frame,
-        delay: 100,
-        layers: []
-      }]);
+      var availW = Math.max(1, width - outerMargin * 2 - innerGap * (cols - 1));
+      var availH = Math.max(1, height - outerMargin * 2 - innerGap * (rows - 1));
+      var cellW = Math.max(1, Math.floor(availW / cols));
+      var cellH = Math.max(1, Math.floor(availH / rows));
+
+      var scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = width;
+      scaledCanvas.height = height;
+      var sCtx = scaledCanvas.getContext('2d');
+      sCtx.drawImage(draft.image, 0, 0, width, height);
+
+      var nextSlices = [];
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          var srcX = outerMargin + c * (cellW + innerGap);
+          var srcY = outerMargin + r * (cellH + innerGap);
+          var frame = document.createElement('canvas');
+          frame.width = cellW;
+          frame.height = cellH;
+          frame.getContext('2d').drawImage(scaledCanvas, srcX, srcY, cellW, cellH, 0, 0, cellW, cellH);
+          nextSlices.push({
+            id: core.freshId(),
+            canvas: frame,
+            delay: 200,
+            layers: []
+          });
+        }
+      }
+
+      resolve(nextSlices);
     });
   }
 
@@ -937,6 +1202,7 @@
   // ------------------------------------------------------------------
 
   function cancelDraft() {
+    endSplitDrag();
     commitGeneration++; // abort any in-flight commit
     if (previewDebounceTimer) {
       clearTimeout(previewDebounceTimer);

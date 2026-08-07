@@ -82,7 +82,17 @@
     bindEvents();
     rendered = true;
 
-    if (core.timeline && core.timeline.render) core.timeline.render();
+    // Restore workspace state from memory if returning from another tab
+    if ((core.state.slices || []).length > 0) {
+      if (core.commands.updateSourcePanels) core.commands.updateSourcePanels(core.state.source.kind);
+      if (core.timeline && core.timeline.render) core.timeline.render();
+      if (core.playback && core.playback.updateButtons) core.playback.updateButtons();
+      var selectedIdx = core.state.selectedSliceIdx >= 0 ? core.state.selectedSliceIdx : 0;
+      updateSelectionUI(selectedIdx);
+    } else {
+      updateSelectionUI(-1);
+    }
+
     draw();
     resetView();
     return container;
@@ -107,12 +117,13 @@
       if (dom.stage) {
         dom.stage.removeEventListener('mousedown', handlePointerDown);
         dom.stage.removeEventListener('touchstart', handlePointerDown);
+        dom.stage.removeEventListener('wheel', handleWheel);
       }
     }
     if (core) {
       core.cleanupModules();   // import (draft), timeline, playback, export cleanups
-      core.resetSlices();      // release frame canvases
-      core.releaseSource();    // revoke committed object URLs + media refs
+      // Note: core.resetSlices() and core.releaseSource() are NOT called on tab leave
+      // so that state is preserved in memory when switching back to GIF editor.
     }
     dom = {};
     canvas = null;
@@ -135,11 +146,10 @@
     dom.stageOverlayText = core.byId('stage-overlay-text');
     dom.spinnerOverlay = core.byId('loading-spinner');
     dom.spinnerText = core.byId('spinner-text');
-    dom.resultOverlay = core.byId('result-overlay');
-    dom.resultImg = core.byId('result-img');
-    dom.dlLink = core.byId('dl-link');
-    dom.resultOpenGallery = core.byId('result-open-gallery');
     dom.reloadBtn = core.byId('reload-btn');
+    dom.dropZoneContainer = core.byId('drop-zone-container');
+    dom.sidebarEditorContent = core.byId('sidebar-editor-content');
+    dom.openExportBtn = core.byId('open-export-btn');
 
     dom.dropZone = core.byId('drop-zone');
     dom.fileInput = core.byId('file-input');
@@ -181,6 +191,7 @@
     dom.btnItalic = core.byId('btn-italic');
     dom.btnUnderline = core.byId('btn-underline');
     dom.selectedLayerTools = core.byId('selected-layer-tools');
+    dom.layerApplyAll = core.byId('layer-apply-all');
     dom.strokeColor = core.byId('text-stroke-color');
     dom.layerScale = core.byId('layer-scale');
     dom.deleteLayerBtn = core.byId('delete-layer-btn');
@@ -236,7 +247,27 @@
     };
   }
 
-  // ------------------------------------------------------------------
+  function updateSelectionUI(index) {
+    var hasSlices = (core.state.slices || []).length > 0;
+    if (dom.sidebarEditorContent) {
+      dom.sidebarEditorContent.style.display = hasSlices ? 'block' : 'none';
+    }
+    if (dom.panelStep2) {
+      dom.panelStep2.classList.toggle('gif-edit-blocked', !hasSlices);
+    }
+    if (dom.panelStep3) {
+      dom.panelStep3.classList.toggle('gif-edit-blocked', !hasSlices);
+    }
+    if (dom.dropZoneContainer) {
+      dom.dropZoneContainer.style.display = hasSlices ? 'none' : 'block';
+    }
+    if (dom.frameIndicator) {
+      var idx = (index >= 0) ? index : core.state.selectedSliceIdx;
+      dom.frameIndicator.textContent = (idx >= 0 && hasSlices) ? ((idx + 1) + ' / ' + (core.state.slices.length)) : '';
+    }
+    updateExportEnabled();
+    renderLayerList();
+  } // ------------------------------------------------------------------
   // Canvas Rendering & Composition
   // ------------------------------------------------------------------
 
@@ -293,27 +324,14 @@
     tx.drawImage(cc, 0, 0, targetCanvas.width, targetCanvas.height);
   }
 
-  function updateSelectionUI(index) {
-    var hasSlices = (core.state.slices || []).length > 0;
-    if (dom.panelStep2) {
-      dom.panelStep2.classList.toggle('gif-edit-blocked', !hasSlices);
-    }
-    if (dom.panelStep3) {
-      dom.panelStep3.classList.toggle('gif-edit-blocked', !hasSlices);
-    }
-    if (dom.frameIndicator) {
-      var idx = (index >= 0) ? index : core.state.selectedSliceIdx;
-      dom.frameIndicator.textContent = (idx >= 0 && hasSlices) ? ((idx + 1) + ' / ' + (core.state.slices.length)) : '';
-    }
-    updateExportEnabled();
-    renderLayerList();
-  }
+
 
   function updateExportEnabled() {
     var has = (core.state.slices || []).length > 0;
     if (dom.exportBtn) dom.exportBtn.disabled = !has;
     if (dom.exportZipBtn) dom.exportZipBtn.disabled = !has;
     if (dom.exportPngBtn) dom.exportPngBtn.disabled = !has;
+    if (dom.openExportBtn) dom.openExportBtn.disabled = !has;
   }
 
   function renderLayerList() {
@@ -880,6 +898,15 @@
     }
     startPan(e);
   }
+  // Stage wheel zoom (scoped to the stage, so app-shell keys/clicks are untouched).
+  function handleWheel(e) {
+    if (!core.state.slices || !core.state.slices.length) return;
+    e.preventDefault();
+    var delta = e.deltaY < 0 ? 0.08 : -0.08;
+    var newScale = Math.max(0.1, Math.min(3.0, core.state.scale * (1 + delta)));
+    core.state.scale = newScale;
+    updateTransform();
+  }
 
   function onPointerMove(e) {
     if (core.state.isDraggingStage) {
@@ -933,6 +960,45 @@
     var t = core.state.mode === 'crop' ? core.state.cropRect : core.state.activeLayer;
     var s = core.state.startLayerState;
     if (!t) return;
+
+    if (core.state.mode === 'crop') {
+      var dims = getEffectiveDimensions();
+      var imgW = dims.w;
+      var imgH = dims.h;
+      var minW = 10, minH = 10;
+
+      if (core.state.interactionMode === 'move') {
+        t.x = Math.max(0, Math.min(imgW - s.w, s.x + dx));
+        t.y = Math.max(0, Math.min(imgH - s.h, s.y + dy));
+      } else {
+        var mode = core.state.interactionMode;
+        var nx = s.x, ny = s.y, nw = s.w, nh = s.h;
+
+        if (mode.indexOf('r') >= 0) {
+          nw = Math.max(minW, Math.min(imgW - s.x, s.w + dx));
+        }
+        if (mode.indexOf('b') >= 0) {
+          nh = Math.max(minH, Math.min(imgH - s.y, s.h + dy));
+        }
+        if (mode.indexOf('l') >= 0) {
+          nx = Math.max(0, Math.min(s.x + s.w - minW, s.x + dx));
+          nw = s.x + s.w - nx;
+        }
+        if (mode.indexOf('t') >= 0) {
+          ny = Math.max(0, Math.min(s.y + s.h - minH, s.y + dy));
+          nh = s.y + s.h - ny;
+        }
+
+        t.x = nx;
+        t.y = ny;
+        t.w = nw;
+        t.h = nh;
+      }
+      syncCropSlidersFromRect();
+      draw();
+      return;
+    }
+
     if (core.state.interactionMode === 'move') {
       t.x = s.x + dx;
       t.y = s.y + dy;
@@ -949,11 +1015,37 @@
         if (nw > 5 && nh > 5) { t.x = nx; t.y = ny; t.w = nw; t.h = nh; }
       }
     }
-    if (core.state.mode === 'crop') syncCropSlidersFromRect();
+
+    var applyAll = dom.layerApplyAll ? dom.layerApplyAll.checked : true;
+    if (applyAll && t.groupId) {
+      var slices = core.state.slices || [];
+      for (var sIdx = 0; sIdx < slices.length; sIdx++) {
+        var layers = slices[sIdx].layers || [];
+        for (var lIdx = 0; lIdx < layers.length; lIdx++) {
+          var l = layers[lIdx];
+          if (l && l.groupId === t.groupId && l !== t) {
+            if (core.state.interactionMode === 'move') {
+              l.x = t.x;
+              l.y = t.y;
+            } else {
+              l.x = t.x;
+              l.y = t.y;
+              if (l.type === 'text') {
+                l.size = t.size;
+              } else {
+                l.w = t.w;
+                l.h = t.h;
+              }
+            }
+          }
+        }
+      }
+    }
+
     draw();
   }
 
-  function drawGizmo(o, c, isCrop) {
+  function drawGizmo(o, defaultColor, isCrop) {
     var x, y, w, h;
     if (o.type === 'text') {
       ctx.font = (o.italic ? 'italic ' : '') + (o.bold ? 'bold ' : '') + (o.size || 24) + 'px ' + (o.font || 'sans-serif');
@@ -963,17 +1055,47 @@
       x = o.x || 0; y = o.y || 0; w = o.w || 0; h = o.h || 0;
     }
     ctx.save();
-    ctx.strokeStyle = c;
+
+    var primaryColor = defaultColor || '#3b82f6';
+    if (isCrop) {
+      try {
+        var computedStyle = getComputedStyle(document.documentElement);
+        var themeAccent = computedStyle.getPropertyValue('--accent-color').trim() ||
+                          computedStyle.getPropertyValue('--accent').trim() ||
+                          computedStyle.getPropertyValue('--primary-color').trim();
+        if (themeAccent) primaryColor = themeAccent;
+      } catch (e) {}
+      if (!primaryColor || primaryColor === '#ef4444') primaryColor = '#a855f7';
+    }
+
+    ctx.strokeStyle = primaryColor;
     ctx.lineWidth = 2;
-    if (isCrop) ctx.setLineDash([5, 5]);
-    ctx.strokeRect(x, y, w, h);
-    ctx.setLineDash([]);
-    ctx.fillStyle = 'white';
-    var hs = 10;
+    if (isCrop) {
+      ctx.strokeRect(x, y, w, h);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2));
+    } else {
+      ctx.strokeRect(x, y, w, h);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 2;
+    var hs = isCrop ? 7 : 6;
+
     var dH = function (hx, hy) {
-      ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
-      ctx.strokeRect(hx - hs, hy - hs, hs * 2, hs * 2);
+      ctx.beginPath();
+      var hx0 = hx - hs, hy0 = hy - hs, hs2 = hs * 2;
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(hx0, hy0, hs2, hs2, 3);
+      } else {
+        ctx.rect(hx0, hy0, hs2, hs2);
+      }
+      ctx.fill();
+      ctx.stroke();
     };
+
     dH(x, y);
     dH(x + w, y);
     dH(x, y + h);
@@ -1263,7 +1385,7 @@
   }
 
   // ------------------------------------------------------------------
-  // Keyboard (capture-phase: Escape for pick-color / result modal)
+  // Keyboard (capture-phase: Escape for pick-color)
   // ------------------------------------------------------------------
 
   function onKeyDown(e) {
@@ -1271,11 +1393,6 @@
     if (core.state.pickColorMode) {
       e.stopPropagation();
       cancelPickColor();
-    }
-    if (dom.resultOverlay && dom.resultOverlay.classList.contains('active')) {
-      e.stopPropagation();
-      if (core.export && core.export.closeResult) core.export.closeResult();
-      return;
     }
   }
 
@@ -1464,11 +1581,11 @@
     if (dom.disableTransBtn) {
       dom.disableTransBtn.addEventListener('click', function () { if (dom.enableTrans) dom.enableTrans.click(); });
     }
-
     // Stage pointer (crop / layer gizmo / pan / color pick)
     if (dom.stage) {
       dom.stage.addEventListener('mousedown', handlePointerDown);
       dom.stage.addEventListener('touchstart', handlePointerDown, { passive: false });
+      dom.stage.addEventListener('wheel', handleWheel, { passive: false });
     }
     window.addEventListener('mousemove', onPointerMove);
     window.addEventListener('touchmove', onPointerMove, { passive: false });
@@ -1476,9 +1593,20 @@
     window.addEventListener('touchend', onPointerUp);
 
     // Zoom
-    if (dom.zoomInBtn) dom.zoomInBtn.addEventListener('click', function () { core.state.scale = Math.min(5, core.state.scale * 1.2); updateTransform(); });
+    if (dom.zoomInBtn) dom.zoomInBtn.addEventListener('click', function () { core.state.scale = Math.min(3, core.state.scale * 1.2); updateTransform(); });
     if (dom.zoomOutBtn) dom.zoomOutBtn.addEventListener('click', function () { core.state.scale = Math.max(0.2, core.state.scale * 0.8); updateTransform(); });
     if (dom.resetViewBtn) dom.resetViewBtn.addEventListener('click', resetView);
+
+    var zoomRange = document.getElementById('gif-timeline-zoom-range');
+    if (zoomRange) {
+      zoomRange.addEventListener('input', function (e) {
+        var val = parseFloat(e.target.value);
+        if (!isNaN(val) && val > 0) {
+          core.state.scale = val;
+          updateTransform();
+        }
+      });
+    }
 
     // Layers
     if (dom.addTextBtn) dom.addTextBtn.addEventListener('click', addText);
@@ -1572,6 +1700,12 @@
       });
     }
 
+    if (dom.openExportBtn) {
+      dom.openExportBtn.addEventListener('click', function () {
+        if (core.export && core.export.openExportModal) core.export.openExportModal();
+      });
+    }
+
     // Sub-module event binders
     if (core.import) core.import.bindEvents();
     if (core.timeline) core.timeline.bindEvents();
@@ -1593,15 +1727,25 @@
       '  <aside class="gif-sidebar">' +
       '    <div id="gif-panel-step1">' +
       '      <div class="gif-group-title-row">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorStep1">1. 导入素材</div>' +
+      '        <div class="gif-group-title" data-i18n="gifEditorStep1">Import</div>' +
       '        <button type="button" class="btn btn-ghost btn-sm" id="gif-reload-btn" data-i18n="gifEditorReload">重置</button>' +
       '      </div>' +
-      '      <div class="gif-drop-zone" id="gif-drop-zone">' +
-      '        <div style="font-size: var(--font-h3); margin-bottom: 4px;">📂</div>' +
-      '        <div data-i18n="gifEditorDropHint">选择 / 拖放 / 粘贴文件</div>' +
-      '        <input type="file" id="gif-file-input" style="display:none;" accept="image/*,video/*,.gif">' +
+      '      <div id="gif-drop-zone-container">' +
+      '        <div class="gif-drop-zone" id="gif-drop-zone">' +
+      '          <div style="font-size: var(--font-h3); margin-bottom: 4px;">📂</div>' +
+      '          <div data-i18n="gifEditorDropHint">选择 / 拖放 / 粘贴文件</div>' +
+      '          <input type="file" id="gif-file-input" style="display:none;" accept="image/*,video/*,.gif">' +
+      '        </div>' +
       '      </div>' +
-      '      <div id="gif-transparency-wrapper">' +
+      '    </div>' +
+      '    <div id="gif-sidebar-editor-content" style="display:none;">' +
+      '      <div class="gif-group-title-row gif-mt-sm" style="margin-top: 12px; margin-bottom: 8px;">' +
+      '        <div class="gif-group-title" data-i18n="gifEditorExportTitle">Export</div>' +
+      '        <button type="button" class="btn btn-primary btn-sm" id="gif-open-export-btn" title="Export settings" style="display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;">' +
+      '          💾' +
+      '        </button>' +
+      '      </div>' +
+      '      <div id="gif-transparency-wrapper" style="margin-top: 10px;">' +
       '        <label class="gif-check-label"><input type="checkbox" id="gif-enable-trans"> <span data-i18n="gifEditorEnableTrans">色键透明</span></label>' +
       '        <div id="gif-trans-panel" class="gif-trans-panel">' +
       '          <div class="gif-control-row">' +
@@ -1629,22 +1773,19 @@
       '        </div>' +
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-slice-btn" data-i18n="gifEditorSliceBtn">开始切片</button>' +
       '      </div>' +
-      '    </div>' +
-      '    <div class="gif-panel-sep gif-edit-blocked" id="gif-panel-step2">' +
-      '      <div class="gif-group-title" data-i18n="gifEditorStep2">2. 单帧编辑</div>' +
-      '      <button type="button" class="gif-btn gif-btn-accent gif-full-width gif-mb" id="gif-global-crop-btn" data-i18n="gifEditorGlobalCrop">✂️ 全局裁剪 (框选画布)</button>' +
+      '      <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-global-crop-btn" data-i18n="gifEditorGlobalCrop">' + t('gifEditorGlobalCrop', '全局裁剪') + '</button>' +
       '      <div class="gif-crop-panel" id="gif-crop-panel">' +
-      '        <div class="gif-crop-title" data-i18n="gifEditorCropAdjust">裁剪区域微调</div>' +
+      '        <div class="gif-group-title" data-i18n="gifEditorCropAdjust">裁剪区域微调</div>' +
       '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropX', 'X') + '</span><input type="range" id="gif-crop-slide-x" value="0"><input type="number" id="gif-crop-num-x" value="0" class="gif-crop-num"></div>' +
       '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropY', 'Y') + '</span><input type="range" id="gif-crop-slide-y" value="0"><input type="number" id="gif-crop-num-y" value="0" class="gif-crop-num"></div>' +
       '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropW', 'W') + '</span><input type="range" id="gif-crop-slide-w" value="0"><input type="number" id="gif-crop-num-w" value="0" class="gif-crop-num"></div>' +
       '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropH', 'H') + '</span><input type="range" id="gif-crop-slide-h" value="0"><input type="number" id="gif-crop-num-h" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-control-row">' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">✅ 确认裁剪</button>' +
-      '          <button type="button" class="gif-btn gif-flex-1" id="gif-cancel-crop-btn" data-i18n="gifEditorCancelCrop">取消裁剪</button>' +
-      '        </div>' +
+      '        <div class="gif-control-row" style="margin-top: 10px;">' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">' + t('gifEditorApplyCrop', '确认裁剪') + '</button>' +
+      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-cancel-crop-btn" data-i18n="gifEditorCancelCrop">' + t('gifEditorCancelCrop', '取消裁剪') + '</button>' +
       '      </div>' +
-      '      <div class="gif-scope-box">' +
+      '      </div>' +
+      '      <div class="gif-scope-box" style="margin-top: 10px;">' +
       '        <span class="gif-axis-label" data-i18n="gifEditorScope">作用:</span>' +
       '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">当前帧</span></label>' +
       '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="all"> <span data-i18n="gifEditorScopeAll">全部帧</span></label>' +
@@ -1654,7 +1795,7 @@
       '          <input type="number" id="gif-crop-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
       '        </div>' +
       '      </div>' +
-      '      <div class="gif-control-row">' +
+      '      <div class="gif-control-row" style="margin-top: 8px;">' +
       '        <input type="text" id="gif-text-input" placeholder="' + t('gifEditorTextInput', '输入文字...') + '" class="gif-flex-1">' +
       '        <button type="button" class="gif-btn gif-btn-primary" id="gif-add-text-btn" data-i18n="gifEditorAddText">+ 文字</button>' +
       '      </div>' +
@@ -1670,6 +1811,7 @@
       '      <div class="gif-group-title" data-i18n="gifEditorLayerList">图层列表</div>' +
       '      <div class="gif-layer-list" id="gif-layer-list"></div>' +
       '      <div class="gif-selected-layer-tools" id="gif-selected-layer-tools">' +
+      '        <label class="gif-check-label" style="margin-bottom: 6px;"><input type="checkbox" id="gif-layer-apply-all" checked> <span data-i18n="gifEditorLayerApplyAll">Apply movement to all frames</span></label>' +
       '        <div class="gif-control-row">' +
       '          <span class="gif-muted-label" data-i18n="gifEditorColor">颜色</span>' +
       '          <input type="color" id="gif-text-color" value="#ffffff" class="gif-style-color">' +
@@ -1682,32 +1824,7 @@
       '          <button type="button" class="gif-btn gif-btn-danger gif-sm-btn" id="gif-delete-layer-btn" data-i18n="gifEditorDeleteLayer">删除</button>' +
       '        </div>' +
       '      </div>' +
-      '    </div>' +
-      '    <div class="gif-panel-sep gif-edit-blocked" id="gif-panel-step3">' +
-      '      <div class="gif-group-title" data-i18n="gifEditorStep3">3. 输出设置</div>' +
-      '      <div class="gif-control-row">' +
-      '        <input type="number" id="gif-scale-percent" value="100" min="10" max="300">' +
-      '        <button type="button" class="gif-btn gif-btn-primary" id="gif-apply-scale-btn" data-i18n="gifEditorApplyAll">⚡ 应用到全部</button>' +
-      '      </div>' +
-      '      <div class="gif-control-row">' +
-      '        <input type="number" id="gif-output-width" placeholder="' + t('gifEditorWidth', '宽度') + '">' +
-      '        <input type="number" id="gif-output-height" placeholder="' + t('gifEditorHeight', '高度') + '">' +
-      '      </div>' +
-      '      <div class="gif-range-wrap">' +
-      '        <span class="gif-scale-label" data-i18n="gifEditorScaleLabel">缩放</span>' +
-      '        <input type="range" id="gif-output-scale-slider" min="10" max="300" value="100" class="gif-flex-1">' +
-      '        <span class="gif-scale-val" id="gif-output-scale-val">1.0x</span>' +
-      '      </div>' +
-      '      <div class="gif-group-title gif-quality-title" data-i18n="gifEditorQualityTitle">GIF 质量 (采样间隔)' +
-      '        <span class="gif-quality-range" data-i18n="gifEditorQualityHint">1: 最佳 - 10: 最快</span>' +
-      '      </div>' +
-      '      <div class="gif-control-row">' +
-      '        <input type="range" id="gif-sample-interval" min="1" max="10" value="10" class="gif-flex-1">' +
-      '        <span id="gif-quality-val" style="width: 20px; text-align: right;">10</span>' +
-      '      </div>' +
-      '      <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt" id="gif-export-gif-btn" data-i18n="gifEditorExportGif">⚡ 预览 (导出 GIF)</button>' +
-      '      <button type="button" class="gif-btn gif-full-width gif-mt-sm" id="gif-export-frames-btn" data-i18n="gifEditorExportFrames">导出帧图 (ZIP)</button>' +
-      '      <div class="gif-output-sep-inner">' +
+      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
       '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">批量删除帧</div>' +
       '        <div class="gif-control-row">' +
       '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
@@ -1717,12 +1834,6 @@
       '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-delete-range-btn" data-i18n="gifEditorDeleteRange">🗑️ 删除指定</button>' +
       '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">保留指定</button>' +
       '        </div>' +
-      '        <div class="gif-group-title gif-mt" data-i18n="gifEditorExportSprite">导出拼图 (Sprite Sheet)</div>' +
-      '        <div class="gif-control-row">' +
-      '          <input type="number" id="gif-sprite-rows" value="1" min="1" placeholder="' + t('gifEditorSpriteRows', '行') + '">' +
-      '          <input type="number" id="gif-sprite-cols" value="5" min="1" placeholder="' + t('gifEditorSpriteCols', '列') + '">' +
-      '        </div>' +
-      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-export-sprite-btn" data-i18n="gifEditorExportSprite">导出拼图 (Sprite Sheet)</button>' +
       '      </div>' +
       '    </div>' +
       '  </aside>' +
@@ -1763,17 +1874,6 @@
       '    <div id="gif-spinner-text" style="color:#fff;">' + t('gifEditorProcessing', 'Processing...') + '</div>' +
       '  </div>' +
 
-      '  <div class="gif-result-overlay" id="gif-result-overlay">' +
-      '    <div class="gif-result-box">' +
-      '      <div class="gif-result-title">' + t('gifEditorResultTitle', 'Export Complete') + '</div>' +
-      '      <img id="gif-result-img" class="gif-result-img" alt="Result">' +
-      '      <div class="gif-result-actions">' +
-      '        <a id="gif-dl-link" class="btn btn-primary" download>' + t('gifEditorDownloadGif', 'Download') + '</a>' +
-      '        <button type="button" id="gif-result-open-gallery" class="btn btn-ghost">' + t('gifEditorOpenGallery', 'Open in Gallery') + '</button>' +
-      '        <button type="button" id="gif-result-close" class="btn btn-ghost">' + t('gifEditorClose', 'Close') + '</button>' +
-      '      </div>' +
-      '    </div>' +
-      '  </div>' +
       '</div>';
   }
 
