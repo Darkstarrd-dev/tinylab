@@ -184,7 +184,7 @@ Component-specific state and surface rules consume these aliases so a new mode o
 ## Accessibility Constraints
 
 - All interactive elements must have `:focus-visible` outline (2px solid var(--accent)).
-- `@media (prefers-reduced-motion: reduce)` disables all animation/transition via universal selector.
+- `prefers-reduced-motion` is handled per-component, not by a universal kill-switch: the global `@media (prefers-reduced-motion: reduce)` rule that forced 0.01ms transitions was removed (2026-08) to restore Header theme-switch, gear rotation, tooltip, and site animations; scoped reduce blocks remain where infinite motion matters (e.g. `playground.css` disables `.pg-image-generating` shimmer and `.pg-image-ring` spinner under reduce). New components must add a scoped reduce block for any infinite/large-motion animation instead of relying on a global rule.
 - Minimum touch target: 24×24px (WCAG 2.5.8 AA). All interactive elements comply.
 - Style presets do NOT alter color contrast ratios (color is orthogonal).
 - Compact mode minimum button height: ~31px (font-base × line-height + 2 × btn-padding-y).

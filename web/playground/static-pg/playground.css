@@ -118,11 +118,11 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-bubble hr{border:none;height:1px;background:linear-gradient(to right,transparent,var(--glass-border),transparent);margin:18px 0}
 .pg-bubble blockquote{border-left:2px solid var(--accent);padding-left:10px;margin:8px 0;color:var(--text-secondary)}
 .pg-bubble img{max-width:100%;height:auto;border-radius:8px;margin:6px 0}
-.pg-bubble kbd{background:var(--glass-hover);border:1px solid var(--glass-border);border-radius:4px;padding:1px 5px;font-family:ui-monospace,Consolas,monospace;font-size:.85em}
-.pg-bubble details{border:1px solid var(--glass-border);border-radius:6px;padding:8px 12px;margin:8px 0}
+.pg-bubble kbd{background:var(--glass-hover);border:1px solid var(--glass-border);border-radius:var(--radius-xs);padding:1px 5px;font-family:ui-monospace,Consolas,monospace;font-size:.85em}
+.pg-bubble details{border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:8px 12px;margin:8px 0}
 .pg-bubble summary{cursor:pointer;font-weight:600;color:var(--accent)}
 /* inline code */
-.pg-bubble code{font-family:ui-monospace,Consolas,monospace;font-size:var(--font-code);background:var(--status-warning-bg);border:1px solid var(--border-strong);color:var(--code-text);padding:1px 5px;border-radius:4px}
+.pg-bubble code{font-family:ui-monospace,Consolas,monospace;font-size:var(--font-code);background:var(--status-warning-bg);border:1px solid var(--border-strong);color:var(--code-text);padding:1px 5px;border-radius:var(--radius-xs)}
 /* 亮色主题: user bubble 在浅色背景下需要深色文字 + 更明显 background, 否则白色看不清 */
 [data-theme="light"] .pg-msg.user .pg-bubble{background:var(--interactive-active-bg) !important;border:1px solid var(--border-strong) !important;color:var(--text) !important}
 [data-theme="light"] .pg-msg.user .pg-bubble,
@@ -355,7 +355,6 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 
 /* Mode selector: a flush, recessed segmented control. The outer frame
    replaces the old floating buttons while pgSetMode still owns state. */
-.pg-winbar{padding:0}
 .pg-mode-toggle{display:flex;gap:0;align-items:stretch;flex-shrink:0;width:100%;height:100%;padding:0;border:none;border-radius:0;background:var(--pg-mode-frame-bg);overflow:hidden;box-shadow:none}
 .pg-mode-toggle:has(.pg-mode-btn[data-mode="normal"].active){--pg-mode-active-color:var(--pg-mode-normal-color)}
 .pg-mode-toggle:has(.pg-mode-btn[data-mode="search"].active){--pg-mode-active-color:var(--pg-mode-search-color)}
@@ -460,16 +459,14 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-input-thumb-wrap{position:relative;width:48px;height:48px;flex-shrink:0}
 .pg-input-thumb{width:48px;height:48px;object-fit:cover;border-radius:var(--radius-xs);border:1px solid var(--glass-border);cursor:pointer;transition:transform .15s,border-color .15s}
 .pg-input-thumb:hover{transform:scale(1.05);border-color:var(--accent)}
-.pg-input-thumb-del{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:var(--danger);color:#fff;border:none;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.pg-input-thumb-del{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:var(--danger);color:var(--text-contrast);border:none;cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .pg-input-thumb-del:hover{background:var(--danger);transform:scale(1.15)}
 
 /* Auto Chat panel */
 .pg-autochat-panel{border:1px solid rgba(255,255,255,0.1)}
 .pg-autochat-config{margin-top:8px;display:flex;flex-direction:column;gap:8px}
-.pg-param-row{display:flex;align-items:center;gap:8px;font-size:var(--font-badge);color:var(--text-secondary)}
-.pg-param-row label{flex:1;user-select:none}
+.pg-param-row{font-size:var(--font-badge);color:var(--text-secondary)}
 .pg-param-row input[type=number],.pg-param-row input[type=text]{width:90px;padding:4px 6px;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-badge)}
-.pg-param-row input:focus{outline:none;border-color:var(--accent)}
 .pg-param-row .pg-img-edit-btn{flex:0 0 auto;padding:3px 8px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;font-size:var(--font-badge);transition:all var(--transition-fast)}
 .pg-param-row .pg-img-edit-btn:hover{background:var(--glass-hover);border-color:var(--accent);color:var(--text)}
 .pg-param-row .pg-img-edit-btn:disabled{opacity:.5;cursor:default}
@@ -511,7 +508,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 @keyframes pg-dots{0%{content:''}33%{content:'.'}66%{content:'..'}100%{content:'...'}}
 
 /* New messages button */
-.pg-gc-new-msgs{position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;padding:4px 12px;border-radius:12px;font-size:12px;cursor:pointer;display:none;z-index:10}
+.pg-gc-new-msgs{position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--text-contrast);padding:4px 12px;border-radius:12px;font-size:12px;cursor:pointer;display:none;z-index:10}
 
 /* System message in group chat */
 .pg-gc-msg.system{align-self:center;max-width:90%}
@@ -536,7 +533,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 /* Model picker */
 .pg-model-picker-item{padding:8px 12px;cursor:pointer;border-radius:var(--radius-sm);border:1px solid transparent;font-size:13px;transition:background var(--transition-fast)}
 .pg-model-picker-item:hover{background:var(--glass-hover)}
-.pg-model-picker-item.selected{background:var(--accent);color:#fff;border-color:var(--accent)}
+.pg-model-picker-item.selected{background:var(--accent);color:var(--text-contrast);border-color:var(--accent)}
 
 /* Image mode params */
 .pg-param-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:28px}
@@ -609,7 +606,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-search-history-num{flex-shrink:0;width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--glass-border);font-size:10px;color:var(--text-muted)}
 .pg-search-history-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .pg-search-history-time{flex-shrink:0;font-size:10px;color:var(--text-muted);opacity:0.7}
-.pg-search-history-del{width:18px;height:18px;border-radius:50%;background:var(--danger);color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;margin-left:4px;opacity:0.6;transition:all var(--transition-fast)}
+.pg-search-history-del{width:18px;height:18px;border-radius:50%;background:var(--danger);color:var(--text-contrast);border:none;cursor:pointer;font-size:10px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;margin-left:4px;opacity:0.6;transition:all var(--transition-fast)}
 .pg-search-history-del:hover{opacity:1;transform:scale(1.1);box-shadow:0 1px 4px rgba(239,68,68,0.4)}
 
 /* Search mode prompt input states */
@@ -1005,7 +1002,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .log-mode-switch{display:flex;gap:0;margin-bottom:8px;border:1px solid var(--glass-border);border-radius:var(--radius-md);overflow:hidden;background:var(--glass-bg)}
 .log-mode-btn{flex:1;padding:6px 14px;border:none;background:transparent;color:var(--text-secondary);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:all var(--transition-fast)}
 .log-mode-btn:hover{background:var(--glass-hover);color:var(--text)}
-.log-mode-btn.active{background:var(--accent);color:#fff}
+.log-mode-btn.active{background:var(--accent);color:var(--text-contrast)}
 
 .log-reader-layout{height:100%;display:grid;grid-template-columns:150px 300px 1fr;gap:0;overflow:hidden;min-height:0}
 .log-reader-left,.log-reader-middle,.log-reader-right{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}

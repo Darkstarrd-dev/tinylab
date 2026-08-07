@@ -154,13 +154,15 @@ Phase 0 基线统计已完成并写入 §1.4；随后执行首轮 Phase 1 实施
 
 ### 1.7 下一批 / 当前状态（2026-08-07）
 
-计划状态保持「进行中」。已完成三批实施（§1.5 首轮 13 行、§1.6 第二批 7 行、§1.8 第三批 17 行）；前三批验证均止步于构建 / Node / CSS 结构门禁，第三批后门禁已补跑并通过（见 §1.8），HTTP 与浏览器验证（含 dark/light 及 9 variant × 4 style 组合）跨全部批次仍未执行。当前已知剩余项：
+计划状态保持「进行中」。已完成六批实施（§1.5 首轮 13 行、§1.6 第二批 7 行、§1.8 第三批 17 行、§1.11 第四批 21 行、§1.12 Phase 2 第一批 19 行删除、§1.14/§1.15 第五批 11 行 Token 化 + DESIGN 一致性核验 + reduced-motion 契约修正），各批验证均已在实施后立即补跑并通过（构建 / Node / CSS 结构门禁，见 §1.11 / §1.12 / §1.14 / §1.15）。**HTTP 与浏览器验证已首次执行**（真实 HTTP + headless Chromium，两 shell、CSS/vendor 全 200、0 console/page error、主题矩阵 9 组合 + 3 档宽度、modal/dropdown、reduced-motion、焦点 Tab 实测，见 §1.19）。**截图与视觉验证为用户手动任务**（自动化截图/视觉/浏览器主题验证已停止，不产生新的视觉证据；`tmp/css-verify/evidence/` 下已有证据为 gitignored 的 HTTP/computed 值 + 日志，非截图；用户将自行对端点做视觉测试，见 §1.20.4）。当前已知剩余项：
 
-- `--font-lg`（style.css:2051，`.qs-modal-title`）与 `--font-sm`（style.css:2093，`.qs-modal-hint`）仍为未定义 Token 引用：已确认为 QuickSlot（`qs-modal-*`）可见字号问题，替换值需在浏览器中确认字号观感后确定，属 Phase 1/2 后续工作项。
-- Phase 0 深度审计产物待补：selector 清单（重复 selector、同一 selector 多处定义、裸全局 selector、命名空间标记）、完整 `var(--token)` 定义 / 使用 / 未定义 / fallback 表、硬编码颜色 A/B/C 分类表、JS `style` / `style.cssText` 与 HTML 内联样式扫描、页面矩阵、截图与 `getComputedStyle()` 记录、默认 / Playground shell HTTP 资源基线均无产物；其中生产 CSS 范围与两 shell 加载边界的源码级核验已完成（见 §1.6），不对应上述深度统计产物。
-- Phase 1 剩余：`DESIGN.md` 与根 Token / light Token / variant-style 覆盖层的一致性完整核验、语义重复 Token 合并、模块 Token 使用边界（`.pg-*` / `.ed-*` / `.ge-*` / `.tr-*` / `.dl-*`）、焦点环与状态语义来源统一、`color-mix()` 浏览器支持与 light 对比度审计仍未完成（A 类硬编码颜色替换已由三批部分完成，见 §1.5/§1.6/§1.8）。
-- Phase 2–6 尚未开始：selector 重复与层叠链清理、共享基础控件统一、页面 / 模块收拢、响应式与可访问性专项、CSS 拆分评估均未启动。
-- 第三批实施已完成；其 HTTP / 浏览器验证未执行，构建 / 语法门禁已在第三批后补跑并通过（见 §1.8）。
+- `--font-lg`（style.css `.qs-modal-title`）与 `--font-sm`（style.css `.qs-modal-hint`）仍为未定义 Token 引用：已确认为 QuickSlot（`qs-modal-*`）可见字号问题，替换值需在浏览器中确认字号观感后确定，属 Phase 1/2 后续工作项。
+- Phase 0 深度审计产物：selector 清单与重复声明分析（§1.12）、`var(--token)` 表（§1.9）、硬编码颜色原始统计（§1.10）与 A/B/C 家族级分类（§1.20.1）、JS 内联样式命中统计与静态/动态分类（§1.10/§1.15.2）、`!important` 分类表（§1.14.4）、页面矩阵源码级（§1.13）、两 shell HTTP 静态资源基线（§1.19.2）均已有；computed-style 主题矩阵已取样 9 组合（§1.19.3）；**截图基线由用户手动执行**（自动化视觉验证已停止，本计划不产出截图证据）。
+- Phase 1 剩余：DESIGN token 层一致性核验已完成（token 完全一致，§1.14.1；reduced-motion 契约已按代码事实修正 DESIGN.md，§1.17，并经浏览器 reduce 实测一致，§1.19.6）；语义重复 Token 合并、模块 Token 使用边界 B 类硬编码颜色（SSE badge 色、diff 色、`#fbbf24` 警示琥珀、原生 select option、图像画布等）需浏览器对比度验证后处理；焦点环：`.nav-item` 键盘焦点原判缺口已按浏览器证据撤销（§1.17 修正，焦点可达且阴影渲染），GIF 切片按钮与 3 处仅 border 变色输入未覆盖、保留为未验证项；`color-mix()` 浏览器支持与 light 对比度审计（浏览器 150 已实测渲染 color-mix 值正常）仍需全组合抽查。
+- Phase 2 已启动：同 selector 完全覆盖删除/收窄两批完成（16+3 行 + 6 条声明，§1.12/§1.14）；`!important` 四类归档完成（§1.14.4，无高置信度历史补丁）；border-radius Token 化 10 行完成（§1.14/§1.15.1，sharp/soft/compact 半径已由 §1.19.3 实测生效）；`transition: all` 与 `box-shadow` 替换需浏览器验证后逐条处理。
+- Phase 3/4 文档基座已建立（控件状态来源表 + 模块归属表，§1.16）；控件 CSS 合并与 Gallery 归属收敛（唯一明确收敛点）需浏览器验证后推进。
+- Phase 5 源码契约审计完成（§1.17：媒体查询清单、reduced-motion 事实、焦点环、触摸/裁切风险）；浏览器已实测：3 档宽度无横向溢出（§1.19.4）、modal/dropdown 无裁切（§1.19.7）、reduced-motion 有意不变（§1.19.6）、nav 焦点可见（§1.19.5）；Phase 6 进入条件审计完成（§1.18，条件 2/5 不满足，条件 6 已由 §1.19 满足，仍不进入）。
+- 第四批至第五批已完成，HTTP / 浏览器 smoke 已执行（§1.19）；构建 / 语法门禁持续通过（§1.11 / §1.12 / §1.14 / §1.15 / §1.19 后复跑）。
 
 
 ### 1.8 第三批实施记录（2026-08-07）
@@ -1099,7 +1101,381 @@ Phase 0 工作项 4（硬编码颜色扫描）与工作项 5（JS 内联样式�
 
 - 本段为 Phase 0 工作项 4 和 5 的部分产物；硬编码颜色 A/B/C 完整分类表仍需人工判断（本段不含任何 A/B/C 判断）。
 - JS 内联样式仅做命中统计，未区分静态表现值与运行时几何 / 进度值。
-- 截图 / `getComputedStyle()` 记录 / HTTP 资源基线（页面矩阵、默认 / Playground shell）仍未执行。
+- 截图 / `getComputedStyle()` 记录 / HTTP 资源基线（页面矩阵、默认 / Playground shell）仍未执行。（补记：HTTP 资源基线与 computed-style 采样已由 §1.19 执行，两 shell 全 200、9 组合 computed 值实测；截图仍无产物）
+
+### 1.11 第四批实施记录（2026-08-07，Phase 1 A 类 Token 替换）
+
+承接 §1.8/§1.9，第四批对剩余高置信度硬编码颜色做 Token 化替换。本轮只修改生产 CSS（21 行：`web/static/style.css` 16 行 + `web/playground/static-pg/playground.css` 5 行），git diff 为 +21/−21，全部为单行值 → Token 等价替换；实施后已立即补跑验证门禁（见下方边界段落）。
+
+**实际 CSS 改动（21 行）：**
+
+| 文件 | selector | 旧值 | 新 Token |
+|---|---|---|---|
+| style.css | `.mp-mini-badge.mp-ok` / `.mp-mini-badge.mp-err` / `.mp-proto-badge.mp-ok` / `.mp-proto-badge.mp-err` / `.info-modal-proto-status.mp-ok` / `.info-modal-proto-status.mp-err`（6 行） | `color:#fff` | `var(--text-contrast)` |
+| style.css | `.pg-model-picker-item.selected.has-model-note::after` | `color:#fff` | `var(--text-contrast)` |
+| style.css | `[data-theme="light"] .login-card` | `background:#fff` | `var(--surface-auth-card)`（light 层值即 `#fff`，语义同源） |
+| style.css | `[data-theme="light"] .login-input` | `background:#f5f5fa` | `var(--surface-auth-input)`（light 层值即 `#f5f5fa`） |
+| style.css | `.dl-status-error` / `.dl-status-dot.dl-status-error`（bg+color 各 1 处，共 2 行） / `.dl-detail-error` | `color:#ef5350`（dot 另含 `background:#ef5350`） | `var(--danger)`（dark 层值即 `#ef5350`） |
+| style.css | `.dl-status-cancelled` / `.dl-status-dot.dl-status-cancelled`（bg+color 各 1 处，共 2 行） | `color:#ffa726`（dot 另含 `background:#ffa726`） | `var(--warn)`（dark 层值即 `#ffa726`） |
+| style.css | `.gallery-layout.gallery-layout-fullscreen .gallery-video-time` / `.gallery-btn`（2 行） | `color:#fff` | `var(--text-contrast)` |
+| playground.css | `.pg-input-thumb-del` / `.pg-search-history-del`（2 行） | `color:#fff`（danger 表面） | `var(--text-contrast)` |
+| playground.css | `.pg-gc-new-msgs` / `.pg-model-picker-item.selected` / `.log-mode-btn.active`（3 行） | `color:#fff`（accent 表面） | `var(--text-contrast)` |
+
+判定依据：
+
+- 全部为「值等价或语义等价」：`--text-contrast:#fff`（两主题均如此）、`--danger:#ef5350`（dark）、`--warn:#ffa726`（dark）。
+- dl-status 家族同组兄弟 selector 已用 Token（`.dl-status-downloading`→`var(--accent)`、`.dl-status-completed`→`var(--accent2)`、`.dl-status-pending`→`var(--text-muted)`、`.dl-status-dot.*` 同理）；error/cancelled 是家族内最后两处硬编码。
+- light 覆盖下 dl-status 颜色随 `--danger`/`--warn` 变暗（`#dc2626`/`#d97706`），属「状态语义来源统一」的设计意图（与 §1.8 combo-speed 同模式）；状态仍保留文字/图标/结构区别，非纯颜色编码。
+
+**本轮边界：**
+
+- 无新增 Token；未修改 vendor CSS、HTML shell、JS、DOM 结构；未拆分 CSS；未增删 `!important`（两文件 108/26 不变）。
+- 验证（实施后立即补跑并通过）：`go test -count=1 ./internal/feature`、`go build ./...`、`go build -tags playground ./...`、`node web/media-bridge.test.js`（16/16）、57 个非 vendor JS 文件 `node --check`、CSS 花括号/注释平衡、`git diff --check`、var 扫描无新增未定义 Token（style.css undefined 仍为 `--arrow-offset`/`--font-lg`/`--font-sm` 三个预存项）。
+- HTTP / 浏览器验证（含 dark/light 及 9 variant × 4 style 组合）仍未执行；本批不声称任何浏览器视觉或运行时等价性。
+
+### 1.12 Phase 2 第一批实施记录（2026-08-07，证明安全重复删除 + selector 审计产物）
+
+Phase 2 第一批只处理「同一 selector 的早期顶层规则被后续同 selector 顶层规则完全覆盖」的证明安全候选：同一 selector 特异性相等、后规则胜出，删除早期重复声明/规则不改变任何元素的最终计算样式。判定由一次性 Node 脚本（写入系统 TEMP 执行后已删除）对两个生产 CSS 做「同 selector 跨顶层规则的声明级比较」得出，并逐族人工核验（含对单行多规则行 `.stat-value{...}.detail-block{...}` 的修正，脚本对该行第二个规则计数存在已知局限，见下）。本轮共删除 19 行（`web/static/style.css` 16 行 + `web/playground/static-pg/playground.css` 3 行，另 playground.css 1 行部分声明删除），累计 git diff 为 style.css +16/−32、playground.css +6/−9。
+
+**style.css 删除明细（16 行）：**
+
+| 行号（删除前） | 规则 | 证明（被覆盖的后续规则） |
+|---|---|---|
+| 661-665 | `.detail-block`、`.detail-block + .detail-block`、`.detail-header`、`.detail-header h2`、`.section-title` 原型块 | 757-761 同 selector 规则：detail-block / detail-header / detail-header h2 完全一致；section-title 全部 6 条声明被重声明（`margin-bottom` 14px→0 由后规则胜出） |
+| 700-707 | `.badge::before`、`.badge-active,.badge-valid`、`.badge-active::before,.badge-valid::before`、`.badge-cooldown`、`.badge-cooldown::before`、`.badge-locked,.badge-invalid`、`.badge-inactive::before`、`.badge-testing` 原型块（8 规则） | 723-734 同 selector 规则完全覆盖（badge 状态族；含值不同但后规则胜出的 `background`） |
+| 773 | `.model-row .model-quota-select` | 822 同 selector 规则重声明全部 8 条声明并追加 height/box-sizing |
+| 1189 | `.info-field-key`（`display:block` 版） | 1215 同 selector 规则重声明全部 6 条（`display:flex` 胜出） |
+| 2129 | `.login-error-visible { display:block; }` | 4298 文件尾部同 selector 规则完全一致 |
+
+**playground.css 删除明细（3 行删除 + 1 行部分声明）：**
+
+| 行号（删除前） | 规则 | 证明 |
+|---|---|---|
+| 358 | `.pg-winbar{padding:0}` | 419 `.pg-winbar{flex-shrink:0;padding:0}` 重声明 padding |
+| 469 | `.pg-param-row` 删除 `display:flex;align-items:center;gap:8px` 三条声明 | 542 同 selector 规则重声明三条；保留 `font-size`/`color`（未被重声明） |
+| 470 | `.pg-param-row label{flex:1;user-select:none}` | 543 同 selector 规则重声明两条 |
+| 472 | `.pg-param-row input:focus{outline:none;border-color:var(--accent)}` | 547 同 selector 规则重声明两条 |
+
+**本轮边界：**
+
+- 未修改 vendor CSS、HTML shell、JS、DOM 结构；未拆分 CSS；未增删 `!important`（108/26 不变）。
+- Header 高风险区不触及：`.nav-item:focus,.nav-item:focus-visible{outline:none}`（L384）与 L3159 同声明重复已识别、删除亦证明安全，但按计划「优先不涉及 Header」保留为后续批次候选（证据见本节）。
+- 验证（实施后立即补跑并通过）：同 §1.11 全部门禁（feature test / 双构建 / media-bridge / 57 JS check / CSS 平衡 / diff check / var 扫描无新增未定义）。
+- HTTP / 浏览器验证仍未执行；本批不声称任何浏览器视觉或运行时等价性。
+
+**Phase 0 selector 审计产物（本轮新增，可重复）：**
+
+- 一次性 Node 脚本（写入系统 TEMP 执行后已删除）方法：剥离 `/* */` 注释、保留字符串字面量（含属性选择器内字符串，避免 `[data-page="x"]` 被合并）→ 顶层花括号扫描提取规则与 selector 列表 → 统计规则数、唯一 selector、多定义 selector、裸全局 tag selector、模块命名空间计数；另做「同 selector 跨顶层规则声明级比较」识别完全覆盖候选。
+- 已知局限：单物理行含多个规则（如 `.stat-value{...}.detail-block{...}`）时第二个规则被并入前一个规则解析（删除决策前已人工修正）；`@media`/`@supports` 内部规则不计入顶层比较；`!important` 与更高特异性 selector 的覆盖关系不在脚本判定范围。
+- 关键输出（style.css）：1,183 顶层块 / 27 at-rule / 1,156 普通规则 / 1,164 唯一 selector / 48 个多定义 selector（多为 `[data-theme][data-theme-variant]` 变体覆盖、`.nav-item[data-page]` 页面色、`[data-theme-style]` 预设等有意覆盖）/ 裸全局 tag selector：html×1、body×2、h2×1、h3×1、table×1 / 命名空间计数：gif-150、dl-94、nav-34、settings-38、sc-23、qs-19、mp-16 等。
+- 关键输出（playground.css）：840 顶层块 / 9 at-rule / 831 普通规则 / 848 唯一 selector / 28 个多定义 selector（`.pg-mode-toggle:has(...)` 模式色 4 组、`.gallery-edit-*` 输入族、`.pg-param-row` 族、`.pg-bubble h1/h2/h3` 族等）/ 命名空间计数：pg-、tr-、ge-、ed- 等。
+- 完整原始输出随一次性脚本删除，未入库（与 §1.4/§1.9/§1.10 口径一致：统计命令未入库、方法可重复生成）。
+
+### 1.13 Phase 0 页面矩阵（2026-08-07，源码级，不含截图/HTTP）
+
+Phase 0 工作项 6 的源码级产物：页面 → shell 可用性 / 导航按钮 / 主 CSS 命名空间 / 主 JS 模块映射（截图与 `getComputedStyle()` 记录仍无产物）。以下事实均直接检索自 `web/static/index.html`、`index-nopg.html`、`web/static/app.js` 与两个生产 CSS：
+
+| 页面 | `data-page` | 默认 shell（index-nopg） | Playground shell（index） | 主 CSS 命名空间 | 主 JS 模块 |
+|---|---|---|---|---|---|
+| Monitor | `monitor` | 有导航按钮 | 有导航按钮 | 全局 + `.quota-*`/`.pager-*`（无独立页面前缀） | `web/static/monitor/monitor_*.js`（state/io/quota/recent） |
+| Settings（含 Providers/Combos/QuickSlot） | `endpoint` | 有导航按钮 | 有导航按钮 | `.settings-*`、`.btn-*`、`.custom-select-*`、`.number-stepper`、`.provider-*`、`.combo-*`、`.qs-modal-*` | `web/static/settings/*.js`、`providers.js`、`combos.js`、`quickslots.js` |
+| Download | `download` | 无导航按钮（补加载 `download.js`，可经 F5/逻辑进入） | 有导航按钮 | `.dl-*`（94 个 selector，见 §1.12 命名空间计数） | `web/static/download.js` |
+| Playground | `playground` | 无（不加载 playground.css） | 有导航按钮 | `.pg-*`、`--pg-mode-*` | `web/playground/static-pg/playground/*.js` |
+| Gallery | `gallery` | 无 | 有导航按钮 | `.ge-*`、`.gallery-*` | `web/playground/static-pg/gallery/*.js` |
+| Editor（含 Text Review Clean） | `editor` | 无 | 经 Gallery↔Editor 二路导航进入 | `.ed-*`、`.tr-*` | `web/playground/static-pg/editor/*.js` |
+| GIF Frame Editor | `gif` | 有导航按钮 | 有导航按钮 | `.gif-*`（150 个 selector，见 §1.12） | `web/static/gif-editor/gif-editor-*.js` |
+| Auth / 登录 | —（登录覆盖层，非 data-page） | 有（登录页） | 有（登录页） | `.login-*` | `web/static/auth.js` |
+
+补充事实（源码核验）：
+
+- `app.js` 页面 switch：`monitor` / `endpoint` / `download` / `playground` / `gallery` / `editor` / `gif` / `providers` / `combos`（后两者为 Settings 内子视图）。
+- 默认 shell 导航为 3 按钮（Monitor / Settings / GIF），Playground shell 为 6 按钮（Monitor / Settings / Download / Playground / Gallery / GIF）；Download 页面在默认 shell 无导航按钮但模块已加载（PROJECT_MAP §24 记录 `index-nopg.html` 补加载 `download.js`）。
+- Playground 专属 CSS（`.pg-*`/`.ge-*`/`.ed-*`/`.tr-*`）仅随 Playground shell 交付（§1.6 两 shell 加载边界）；`style.css` 两 shell 均交付。
+- 本矩阵不包含截图与 `getComputedStyle()` 记录（未执行）；HTTP 静态资源基线未执行（见 §1.7）。（补记：computed-style 采样与 HTTP 基线已由 §1.19 执行；截图仍无产物）
+
+### 1.14 第五批实施记录（2026-08-07，DESIGN 一致性核验 + 圆角 Token 化 + !important 分类表）
+
+承接 §1.11/§1.12/§1.13，第五批完成三件事：Phase 1 工作项 1 的 `DESIGN.md` ↔ token 层一致性核验（结论仅限 token 层：完全一致；设计契约层面另有 reduced-motion 一项不一致，见 §1.17 修正记录）；Phase 2 第二批「同 selector 完全覆盖」收尾（`.info-field-key` 6 条被覆盖声明删除）；Phase 1/2 圆角 Token 化（7 行值 → `--radius-*`）。本轮生产 CSS 改动：`web/static/style.css` 5 行 + `web/playground/static-pg/playground.css` 3 行，全部为单行值 → Token 等价替换或重复声明删除；实施后已立即补跑验证门禁（见下方边界段落）。
+
+**1.14.1 DESIGN.md token 层一致性核验（Phase 1 工作项 1，范围：token 层）：**
+
+- 方法：一次性 Node 脚本剥离注释后按顶层规则提取全部 token 层（`:root` 165 个、`[data-theme="light"]` 116 个、9 个 dark variant × 16 个、9 个 light variant × 27 个、`[data-theme-style="sharp|soft|compact"]` 各 19 个、`[data-font-size="m|l"]` 各 10 个），与 `DESIGN.md` 逐表比对。
+- 结果：shape（radius 5 组 × 4 style）、shadow（3 组 × 4 style）、motion（3 组 × 4 style）、typography（font-weight-normal/bold、letter-spacing × 4 style）、layout（card-padding/btn-padding × 4 style）、blur（3 组 × 4 style）、font-size（base/h2/h3/stat-value × s/m/l）、z-index（5 级）、基础颜色 token（root dark 21 项）全部与 `DESIGN.md` 数值一致；Header 契约（98px 容器 `min-height:98px;height:98px;flex-wrap:nowrap!important;overflow:hidden;padding:6px 16px`）与 nav 3×2 grid 布局（Download 占下行中格）亦与 `DESIGN.md` 一致。
+- 结论（**仅限 token 层**）：`DESIGN.md` 的 Token 名称、用途、维度与代码完全一致，无高置信度不一致项。**注意：本次核验范围是 token 数值，不覆盖 DESIGN.md 全部契约条款**；§1.17 的 Phase 5 审计另行发现 DESIGN.md §Accessibility 的 reduced-motion 表述与代码不符（全局 0.01ms 禁用规则已移除），该契约不一致已在 §1.17 轮次修正 DESIGN.md —— 本节的「完全一致」仅指 token 层，不与该修正矛盾。
+
+**1.14.2 圆角 Token 化（7 行，Phase 2 工作项 5「重复 border-radius 优先使用 Token」）：**
+
+| 文件 | selector | 旧值 | 新 Token |
+|---|---|---|---|
+| style.css | `.current-key-tag` | `border-radius:4px` | `var(--radius-xs)` |
+| style.css | `.info-json-markdown pre` | `border-radius:6px` | `var(--radius-sm)` |
+| style.css | `.skeleton` | `border-radius:10px` | `var(--radius-md)` |
+| style.css | `.sc-list::-webkit-scrollbar-thumb` | `border-radius:4px` | `var(--radius-xs)` |
+| style.css | `.info-modal-search input` | `border-radius:6px` | `var(--radius-sm)` |
+| style.css | `.info-modal-search button` | `border-radius:4px` | `var(--radius-xs)` |
+| style.css | `.quickslot-dropdown-item` | `border-radius:6px` | `var(--radius-sm)`（与第二批 `.qs-modal-item` 同族先例） |
+| playground.css | `.pg-bubble kbd` | `border-radius:4px` | `var(--radius-xs)` |
+| playground.css | `.pg-bubble details` | `border-radius:6px` | `var(--radius-sm)` |
+| playground.css | `.pg-bubble code` | `border-radius:4px` | `var(--radius-xs)` |
+
+（补充 2026-08-07：圆角 Token 化实际合计 10 行——上表 7 行 + `.info-modal-search input/button` 与 `.quickslot-dropdown-item` 3 行；本轮批次计数以 §1.15 为准。）
+
+判定依据：`DESIGN.md` 组件规则明确「Use var(--radius-*) for all border-radius（100px pill 与 50% 圆除外）」；前三批已建立同模式先例（`.qs-modal-item`、`.pg-code-warning` 等 6px→`--radius-sm`）。选点均避开 Header / Toggle / GIF / Text Review / Monitor 固定高度等高风险区（无 100px/50% 例外命中）。未 token 化的剩余硬编码圆角（3px/2px/1px/8px/12px/16px/999px）均无精确默认值对应（8px 介于 sm/md、999px 为 pill），属 B 类保留。
+
+**1.14.3 Phase 2 第二批（同 selector 完全覆盖收尾）：**
+
+- style.css `.info-field-key`：L1200 与 L1221（`position:sticky` 版）同为顶层规则；L1221 以相同值重声明 `margin-bottom/display/align-items/justify-content/flex-wrap/gap` 六条。删除 L1200 中该六条（保留 `font-size/font-weight/color/font-family`，L1221 未重声明它们）。删除前后计算样式不变（同 selector 后规则胜出）。
+- playground.css 经复扫无剩余同 selector 完全覆盖候选；style.css 剩余候选仅 `.nav-item:focus/:focus-visible`（Header 高风险区，按计划保留，证据见 §1.12）。
+
+**1.14.4 !important 分类表（Phase 2 工作项 3 的源码级产物，108/26 不变）：**
+
+| 类别 | 数量（style/playground） | 代表项 | 处理 |
+|---|---|---|---|
+| 结构 / 构建约束 | 主要部分 | `html,body,.app` 全屏（pg:6）、`.top-header` 98px（364）、model-toolbar-row 28px（691-693）、status-col 28px（732-733）、`.detail-block > *:first-child`（752）、custom-select 尺寸族（810-839）、`.download-toolbar` overflow（2143）、gallery fullscreen body（3254-3256）、`.tr-s1/s2-root` height（pg:766/782）、`.ge-trim-mode-ctrl`（pg:993）、gif 画布族（1764-1780） | 保留；补充原因注释或未来以更精确 selector 替代（需浏览器验证） |
+| 主题兼容覆盖 | 5（pg:127/132 等） | `[data-theme="light"] .pg-msg.user .pg-bubble` 深色文字覆盖、`.pg-search-toggle-btn.disabled` light 态（pg:579-580） | 保留；降低重复 selector 后再尝试去除 |
+| 状态 / 交互 | 若干 | `.quota-key-row-error td`（983）、`.modal-footer .btn:focus` 文字色焦点环（1237）、modal/import input focus-visible（1242、1343-1345、1463-1464）、hidden 工具类（3877、3982、pg:635）、gif 滑条 outline 清除（4127-4142） | 保留功能性焦点/隐藏强制；gif 滑条族为高风险区 |
+| 历史补丁 | 0（高置信度） | — | 无：未发现无对应 DOM/JS 契约或已被新规则取代的高置信度历史补丁，本轮不删除任何 `!important` |
+
+**1.14.5 本轮边界：**
+
+- 无新增 Token；未修改 vendor CSS、HTML shell、JS、DOM 结构；未拆分 CSS；未增删 `!important`（108/26 不变）。
+- 验证（实施后立即补跑并通过）：`go test -count=1 ./internal/feature`、`go build ./...`、`go build -tags playground ./...`、`node web/media-bridge.test.js`（16/16）、57 个非 vendor JS `node --check`、CSS 花括号平衡、`git diff --check`。
+- HTTP / 浏览器验证（含 dark/light 及 9 variant × 4 style 组合）仍未执行；本批不声称任何浏览器视觉或运行时等价性。圆角 Token 化在 sharp/soft/compact 下会按预设改变圆角（如 4px→0px/6px/2px），属 `DESIGN.md` Shape 维度设计意图，仍建议后续浏览器矩阵抽查。
+
+### 1.15 第五批补充与 Phase 0 JS 内联样式静态/动态分类（2026-08-07）
+
+**1.15.1 第五批补充（3 行圆角 Token 化，计入第五批合计 11 行 CSS 改动）：**
+
+在 §1.14 基础上补充三处低风险圆角 Token 化（均为单行值替换，实施后与后续门禁一起补跑通过）：
+
+- `.info-modal-search input` `border-radius:6px` → `var(--radius-sm)`；
+- `.info-modal-search button` `border-radius:4px` → `var(--radius-xs)`；
+- `.quickslot-dropdown-item` `border-radius:6px` → `var(--radius-sm)`（与第二批 `.qs-modal-item` 同族先例，QuickSlot dropdown 项，非 Header/QuickSlot 头部区域）。
+
+至此圆角 Token 化合计 10 行（§1.14 表 7 行 + 本补充 3 行）；剩余硬编码圆角（3px/2px/1px/8px/12px/16px/999px）均无精确默认 Token 对应，B 类保留。
+
+**1.15.2 Phase 0 工作项 5 完成：JS 内联样式静态/动态分类（可重复产物）**
+
+承接 §1.10 命中统计，本轮用一次性 Node 扫描（写入系统 TEMP 执行后已删除）对 57 个非 vendor JS 文件做模式分类：提取 `.style.<prop>` 赋值与 HTML 字符串 `style="..."` 属性，按属性名归类为「运行时几何」（width/height/transform/left/top/opacity/display/flex/scrollTop/zIndex/margin/padding 动态值等）与「静态表现」（color/background/border*/border-radius/box-shadow/font-weight/text-align/cursor/overflow/position 固定值等）。
+
+结果（模式分类口径，未逐条人工核对）：
+
+- `.style.*` 赋值：运行时几何约 222 处、静态表现约 24 处；top props 分布：`display` 178（状态切换，绝大多数为显隐开关）、`height` 14、`width` 14、`cursor` 11、`overflow` 7、`cssText` 6、`left` 5、`min-width` 5、`flex` 5、其余（border-color/background/font-size/border-bottom 等静态表现合计约 5）。
+- HTML `style="..."` 属性：运行时 366 处、静态 163 处（多数为模板字符串中的固定布局值，如 `width:90vw;height:90vh`、`flex:1`）。
+- 静态表现命中示例（已 Token 驱动，无需迁移）：`color=isError ? 'var(--danger)' : ''`（gallery-edit.js）、`background=remain===0&&total>0?'var(--danger)':…`（providers.js）。
+- 结论：运行时几何占绝对多数（约 92% 的 `.style.*` 命中），符合 §4 治理规则「运行时 geometry 保留 inline」；静态表现命中极少且已 Token 驱动。**本轮不做任何 JS inline → CSS class 迁移**——每处迁移需按 §4 覆盖初始/成功/失败/空/关闭状态并做 DOM 验证，属 Phase 4 工作项，留待浏览器验证后逐条处理。
+- 口径局限：`border`/`margin`/`padding` 多值属性与 camelCase 属性（如 `backgroundPosition`）部分落入未分类桶（合计约 617 处含 html 属性），不影响「静态表现极少且 Token 驱动」的结论。
+
+### 1.16 共享控件状态表与模块归属表（2026-08-07，Phase 3/4 文档基座，无 CSS 改动）
+
+**1.16.1 共享控件状态来源表（Phase 3 工作项 1 的源码级产物）：**
+
+| 控件族 | normal | hover | active | focus-visible | disabled | error/selected |
+|---|---|---|---|---|---|---|
+| `.btn` 基础 | `--btn-secondary-*` tokens（bg/border/text） | `--btn-secondary-bg-hover` + shadow + translateY(-0.5px) | `--btn-secondary-bg-active` + translateY(0) | 全局 `button:focus-visible` 2px accent 环（style.css 焦点族） | `.btn:disabled{opacity:0.6;cursor:not-allowed}` | — |
+| `.btn-primary` / `.btn-danger` / `.btn-accent` / `.btn-ghost` | 各自 `--btn-*-*` token 族 | 各自 `-hover` token + glow | 各自 `-active` token | 同上全局环；`.modal-footer .btn:focus` 另用 `var(--text)` 环（modal 内高对比） | 继承 `.btn:disabled` | danger 族即错误语义来源 |
+| `.input` / 原生 input/select/textarea | `var(--input-bg)` + `--glass-border` | — | — | `input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent)}`（style.css 焦点族）+ 部分 `:focus` box-shadow accent-glow | `.input:disabled` / 语义类 | `.form-group` 内 `.is-error` / 模块 error class |
+| `.custom-select-*` | wrapper/option 菜单 `--surface-overlay` + blur | option hover `--glass-hover` | option `:active` | wrapper `:focus-within` accent 轮廓（.number-stepper 同款） | — | `.focused` 高亮 `--interactive-active-bg` + accent border |
+| `.number-stepper` | `--input-bg` 容器 | 按钮 hover | 按钮 active | `:focus-within` accent 轮廓光圈 | 输入 disabled 态 | — |
+| `.toggle-switch` | 3D 翻转点 + `--toggle-off-bg` | — | — | input 可见焦点环（全局） | — | checked 态 = `.toggle-switch input:checked + .toggle-slider`（accent gradient） |
+| `.modal-*` / `.pg-modal-*` | `--modal-bg` + blur + `--shadow-modal` | — | — | 弹窗内控件走全局焦点环；焦点陷阱为 JS（auth.js/quickslots.js 等） | — | 弹窗内错误提示 class（`.login-error`、`.pg-autochat-hint` 等） |
+| Toast / Tooltip | `--toast-bg` / 单共享 `.tip` 节点 | — | — | Tooltip 不可聚焦（装饰） | — | `.toast-error` / `.toast-success` 图标语义色 |
+
+结论：各控件族状态均有唯一主来源（token 或全局焦点族），无高置信度分叉可合并；Phase 3「统一共享基础控件」的 CSS 合并需浏览器验证后逐族推进。
+
+**1.16.2 模块归属表（Phase 4 文档基座，源码级）：**
+
+| 模块 | 主文件 | 样式归属 | 备注 |
+|---|---|---|---|
+| 主题/Token/重置/滚动条 | style.css | style.css | 两 shell 共用 |
+| Header / nav / QuickSlot 头部 / theme-switch | style.css | style.css（`.nav-*`、`.top-header*`、`.qs-modal-*`） | Header 高风险区 |
+| 共享基础控件（btn/input/select/modal/toast/tooltip/custom-select/stepper/toggle） | style.css | style.css（`.btn*`、`.modal*`、`.custom-select-*`、`.number-stepper`、`.toggle-*`、`.tip`） | Phase 3 范围 |
+| Auth / 登录 | style.css | style.css（`.login-*`、`--surface-auth-*`） | |
+| Monitor / Console / Quota | style.css | style.css（无独立前缀，`.status-*`、`.quota-*`、`.pager-*`、`.session-*`） | Monitor 28px 工具条高风险 |
+| Settings / Provider / Combo / QuickSlot 弹窗 | style.css + web/static/*.js | style.css（`.settings-*`、`.provider-*`、`.combo-*`、`.qs-modal-*`） | |
+| Download / FileTransfer | style.css + download.js/filetransfer.js | style.css（`.dl-*` 94 个 selector） | |
+| GIF Frame Editor | style.css + gif-editor/*.js | style.css（`.gif-*` 150 个 selector） | GIF 高风险区 |
+| Playground shell / 消息 / 模式 / Search / Image / AutoChat / ComfyUI | playground.css + playground/*.js | playground.css（`.pg-*`、`--pg-mode-*`） | 仅 Playground shell 加载 |
+| Gallery（布局/全屏/树/预览） | style.css + gallery/*.js | **style.css 与 playground.css 分属**：`.gallery-*` 布局/全屏在 style.css；`.ge-*` 编辑弹窗与 `.gallery-edit-*` 在 playground.css | **Phase 4 归属收敛点 1** |
+| Editor / Text Review / Log Reader | playground.css + editor/*.js | playground.css（`.ed-*`、`.tr-*`、`.log-*`） | Text Review 高度契约高风险 |
+
+结论：Gallery 样式跨文件分属（style.css 持有全屏/布局，playground.css 持有编辑/审核），是 Phase 4 唯一明确的高置信度归属收敛点；其余模块归属清晰。收敛动作（移动规则）必须保持 source order 并做浏览器验证，本轮不动。
+
+### 1.17 Phase 5 源码契约审计（2026-08-07，无 CSS 改动）
+
+**响应式：**
+
+- style.css 11 个媒体/容器查询：1250px（隐藏 header-stats）、1024px、900px、760px、768px（×3 处：3091/3892/4016）、480px、1280px、1100-901px、`@container main (max-width:600px)`、`@supports crisp-edges`。
+- playground.css 5 个：900px（×3：12/347/403）、768px（154）、`prefers-reduced-motion`（202）。
+- 观察：768px 断点在 style.css 定义 3 处、900px 在 playground.css 定义 3 处，存在「同一断点多处分散」现象（Phase 5 工作项 2）；合并需浏览器验证各页行为，本轮不动。
+- Header 窄屏隐藏优先级仍由 `setupHeaderResponsive()`（auth.js）运行时计算（DESIGN §Header 契约），CSS 无擅自隐藏核心导航的规则。
+
+**动效（prefers-reduced-motion）：**
+
+- style.css 无任何 `prefers-reduced-motion` 规则——全局 0.01ms 禁用规则已于 2026-08 移除（恢复 Header 主题切换、齿轮、Tooltip 动画，PROJECT_MAP §24 记录）；playground.css L202 有作用域 reduce 块（`.pg-image-generating` shimmer 与 `.pg-image-ring` spinner 禁用）。
+- 审计发现 `DESIGN.md` §Accessibility 的「universal selector 禁用全部动画」表述与代码不符（已过时），本轮已更新 `DESIGN.md` 为按组件作用域处理的实际契约（见 §1.17 文档改动记录）；**该契约已由浏览器实证**：reduce 媒体匹配下 navItem/statCard/pageEnter 动效值与基准完全一致（有意不变），仅作用域 kill 生效（§1.19.6）。
+
+**焦点（focus-visible）：**
+
+- 已存在的焦点环均使用 `var(--accent)` 2px（全局 `input/select/textarea:focus-visible`、`.btn:focus-visible` 族 L3142，含 header-icon-btn/shutdown-btn/style-swatch/btn-filter/gallery-tree-node/provider-card）或模式感知环（`.pg-mode-btn:focus-visible` 用 `--pg-mode-active-color` color-mix）；`.modal-footer .btn:focus` 用 `var(--text)` 环为 modal 内高对比特例（浏览器计算为 3px solid #fff，minor 观察项）；`.theme-card`/`.style-swatch` 用 box-shadow 双环 + outline:none（浏览器实测可见）；`.toggle-switch` 的 checkbox 走全局 `input:focus-visible` 环（无缺口）。
+- **缺口修正（据 §1.19.5 浏览器键盘 Tab 实测）：**
+  1. `.nav-item` 键盘焦点原判「无可见指示」**撤销**：浏览器实测全部 nav-item 键盘聚焦 `:focus-visible=true`，outline 计算为 `3px none`（源 3143 显式 outline:none），元素以 box-shadow 呈现——active 项带 accent glow（`rgba(244,114,182,0.22) 0 0 12px inset` 等），非 active 项保持基座 `0 2px 4px rgba(0,0,0,0.2)` 阴影。焦点可达性已证实；非 active 项无专属焦点环的余韵（仅基座阴影）记为设计斟酌项，待全量键盘矩阵复核，不再列为已证实缺口。
+  2. GIF 时间线切片按钮 `.btn-copy-slice:focus-visible,.btn-del-slice:focus-visible{outline:none}`（L4281）——**未被 §1.19 smoke 覆盖，保留为未验证项**（且为 18px 尺寸例外）。
+  3. 弱指示（仅 border-color 变化，非契约的 2px outline）：`.gif-workspace input:focus`（L3990）、`.console-search:focus`（L945）、`.login-input:focus`（L2109）——**未被 §1.19 smoke 覆盖，保留为未验证项**。
+- 结论修正：已证实缺口仅剩 GIF 切片按钮与 3 处弱指示输入（均未覆盖、待键盘专项）；nav-item 缺口撤销。本轮不做 CSS 改动，记录为 Phase 5 工作项 4 待办。
+
+**触摸 / 裁切：**
+
+- `touch-action` 共 3 处（style.css 2 + playground.css 1），集中在 Gallery/GIF 拖拽区；最小触摸目标 24×24px 的完整验证需浏览器（部分按钮为 18px 图标钮，属既定例外 `.btn-copy-slice` 等，见 §2.4）。
+- `overflow:hidden` 裁切风险清单与 §1.3 一致（tooltip/dropdown/modal 已由 `.download-toolbar` overflow-visible 与 `.custom-select-wrapper.open` z-index 修复覆盖），无新增发现。
+
+结论：本轮 Phase 5 不做 CSS 改动；唯一代码外动作是 `DESIGN.md` reduced-motion 契约表述更新（§1.17 记录）。所有响应式/动效/焦点/触摸的最终判定需浏览器矩阵。
+
+### 1.18 Phase 6 CSS 拆分进入条件审计（2026-08-07，结论：不满足，不进入）
+
+| 进入条件 | 当前事实 | 判定 |
+|---|---|---|
+| 1. 页面/模块归属已明确 | §1.16.2 模块归属表已建立；Gallery 跨文件分属为唯一收敛点 | 部分满足 |
+| 2. CSS source order 已有测试或稳定记录 | 无 source-order 测试；仅有实施记录与 §1.12 重复分析 | 不满足 |
+| 3. 两个 HTML shell 的加载边界可明确表达 | §1.6 已核验：默认 shell 仅 style.css；Playground shell 另加 playground.css + vendor ×2 | 满足 |
+| 4. Playground `feature.Assets` 路由 / embed 清单有对应更新方案 | StaticFiles manifest 机制存在（feature.go），但拆分方案未起草 | 部分满足 |
+| 5. 拆分不会引入新的 cascade 依赖或重复 Token | 尚无拆分方案设计，无法证明拆分不引入新依赖；§1.19 浏览器基线已建立，可支撑拆分后的验证 | 不满足 |
+| 6. 可以用真实 HTTP 页面验证而不是只做文件存在性检查 | **已满足**：§1.19 已用真实 HTTP + headless Chromium 验证两 shell、CSS/vendor 路由 200、主题矩阵与 3 档宽度 | 满足 |
+
+结论：条件 2/5 不满足（source order 无测试；拆分方案未设计），条件 6 已由 §1.19 满足，条件 1 部分满足、3 满足、4 部分满足——**Phase 6 仍不进入**。候选结构（§3 Phase 6）保持仅候选；重新评估前置：先补 source-order 稳定记录（浏览器基线已就绪），再收敛 Gallery 归属、起草拆分方案。本轮无拆分动作、无新 CSS 文件。
+
+### 1.19 HTTP / 浏览器验证记录（2026-08-07，真实 HTTP + headless Chromium，Phase 0 工作项 7 / §6.2 门禁首次执行）
+
+由浏览器 worker（CssBrowserSmoke）执行真实 HTTP/Chromium smoke，证据存 `tmp/css-verify/evidence/evidence-*.json`（gitignored，保留备查）。以下为验证事实与结论：
+
+**1.19.1 构建与运行：**
+
+- 二进制：`go build -tags playground`（小写 tag），25,153,536 字节，置于 `tmp/css-verify/tinyrouter.exe`（验证后已删除）。
+- 运行：临时 `run/config.yaml`，端口 21337，密码禁用，`enablePlayground` true→false 切换两个 shell；浏览器为 headless Chromium 150（playwright-core；xd://browser 工具不可用时的替代通道）。
+
+**1.19.2 两个 shell 的静态资源基线（Phase 0 工作项 7 完成）：**
+
+| shell | HTML | CSS 请求 | 状态 | console/page error | request failure |
+|---|---|---|---|---|---|
+| Playground（index.html） | `hasPlayground:true`，pg-mode-toggle×1、pg-mode-btn×4、pg-layout/panes/input-bar/win-btns 齐全 | `/style.css`、`/playground.css`、`/vendor/pg-highlight-theme.css`、`/vendor/katex.min.css` | 全部 200（style 204,840B / playground 100,562B / highlight 2,307B / katex 23,352B） | 0 / 0 | 1：`/api/monitor/events` SSE `net::ERR_ABORTED`（页面导航中止流式连接，属应用行为，非 CSS） |
+| 默认（index-nopg.html） | `hasPlayground:false`，pg 元素缺席，nav = Monitor/Settings/GIF | `/style.css` | 200（`/playground.css` 路由亦 200，因同二进制编译注册，但 shell 从不引用） | 0 / 0 | 0 |
+
+- 两 shell dataset 默认：`dark / default / default / s`；默认 shell token 实测：accent `#4fc3f7`、radiusMd `10px`、fontBase `13.5px`。
+
+**1.19.3 主题矩阵（computed style，9 组合单元 + 配置驱动）：**
+
+| 组合 | accent | text | surfaceOverlay | 其他实测 |
+|---|---|---|---|---|
+| dark/default/s | `#4fc3f7` | `#ededf0` | `rgba(26,26,36,0.96)` | radiusMd 10px、radiusXl 18px、fontBase 13.5px、btnPadding 8px 16px、navRadius 14px |
+| light/default/s | `#0ea5e9` | `#1a1a1a` | `rgba(255,255,255,0.98)` | — |
+| dark/tokyo-night/s（非默认 dark） | `#7aa2f7` | `#c0caf5` | `rgba(26,27,38,0.96)` | — |
+| light/cool/s（非默认 light） | `#6366f1` | `#1e293b` | `rgba(248,250,252,0.98)` | — |
+| sharp | — | — | — | radiusMd 3px、radiusXl 6px、btnPadding 6px 14px |
+| soft | — | — | — | radiusMd 14px、radiusXl 24px、btnPadding 10px 20px |
+| compact | — | — | — | radiusMd 6px、radiusXl 10px、btnPadding 5px 10px |
+| font-m | — | — | — | fontBase 15px |
+| font-l | — | — | — | fontBase 17px |
+
+- 配置驱动主题：config `theme:{darkVariant:tokyo-night, style:soft}` + 全新 profile → dataset `dark/tokyo-night/soft/s`，实测 accent `#7aa2f7`、text `#c0caf5`、radiusMd `14px`，0 console error。持久化：localStorage 的 theme/fontSize 跨刷新保留；variant/style 由 config `/api/settings` theme 段重新应用（config 为持久权威路径）。
+
+**1.19.4 响应式（desktop/tablet/mobile 无横向溢出）：**
+
+- desktop 1440：无横向溢出；tablet 768：scrollWidth=innerWidth=768、headerStatGrid `repeat(3,80px)`、topHeader padding `6px 12px`、无溢出；mobile 390：`repeat(3,52px)`（≤480 规则生效）、statCardPadding `1px 4px`、无溢出。
+
+**1.19.5 焦点（focus-visible，键盘 Tab 实测）：**
+
+- logo link 与全部 nav-item 键盘聚焦时 `:focus-visible=true`；nav-item outline 计算为 `3px none`（源 3143 显式 `outline:none`），可见性由 box-shadow 呈现——**active nav-item 另带 accent glow（`rgba(244,114,182,0.22) 0 0 12px inset` 等），非 active 项保持基座 `0 2px 4px rgba(0,0,0,0.2)` 阴影**。§1.17 审计原判「nav-item 键盘焦点无可见指示」据此**撤销**：浏览器观察到焦点可达且元素带阴影渲染；非 active 项无专属焦点环的余韵属设计斟酌项，记入待浏览器矩阵复核，不再列为已证实缺口。
+- modal 内：theme-card/style-swatch 双环 box-shadow（accent 2px + glow 4px，源 3800/3843）实测可见；`.modal-footer .btn-primary` 计算 outline 为 `3px solid #fff`（源 1237 声明 2px solid var(--text)，浏览器计算为 3px——宽度差为 minor 观察项，无需改动）。
+- 程序化 `.focus()` 不触发 `:focus-visible`（符合浏览器启发式）。
+
+**1.19.6 reduced-motion（媒体匹配下实测值不变——有意保持）：**
+
+- `prefers-reduced-motion: reduce` 媒体匹配成功；navItem transition `0.15s all`、statCard `0.15s`、pageEnter `pageFadeIn 0.25s` 在 reduce 下与基准完全一致（valuesIdentical=true）。与 §1.17 记录一致：style.css 有意无全局 kill 规则（源 3086 注释），仅 playground.css:202 作用域 kill（`.pg-image-generating`/`.pg-image-ring`）。**DESIGN.md 的 reduced-motion 契约修正（§1.17）得到浏览器实证**。
+
+**1.19.7 modal / dropdown：**
+
+- modal：overlay `fixed/inset-0/z-index:50(--z-modal)/rgba(0,0,0,0.5)`；modal 本体 radius 18px（--radius-xl）、maxHeight 860px=calc(100vh-40px)、boxShadow=--shadow-modal、bg=--modal-bg、backdrop blur 20px；modal-body `overflow-y:auto`；overlay 为唯一祖先 → 无页面容器裁切。
+- dropdown（Download 页 `#dl-type-wrap`）：absolute z-100、bg `rgba(26,26,36,0.96)`（=--surface-overlay，第二批 `.custom-select-menu` 修复目标）、radius 10px（--radius-md）、矩形完全位于视口内；`.custom-select-wrapper.open` z-1000 生效；祖先仅 main/app 为滚动容器（overflow 非 hidden 于菜单路径）。
+
+**1.19.8 未声称：**
+
+- 未做全 72 组合截图；矩阵 = 9 个 computed-style 组合单元 + 3 档宽度 + 配置驱动全新 profile + 两 shell；证据为 computed 值 + 请求/console 日志，**非截图**。截图与完整交互矩阵（全页面、全组合）为**用户手动任务**（自动化视觉验证已停止），见 §1.7 剩余项。
+- GIF 切片按钮焦点、3 处仅 border 变色输入（gif-workspace/console-search/login-input）未被本次 smoke 覆盖，§1.17 所列相应缺口**保留为未验证项**，需键盘专项复核。
+
+**1.19.9 边界：**
+
+- 验证后已停止服务（21337 关闭）、删除二进制/临时脚本/运行配置；证据 JSON 保留（gitignored）；仓库工作树除既有 6 个修改文件外无其他改动，本记录不改变任何生产代码。
+
+### 1.20 完成度总览与剩余风险（2026-08-07 终审）
+
+对全部阶段工作项做最终核对；勾选项均有上文证据锚点，未勾选项明确标注浏览器/人工依赖，不声称 Phase 3–5 完成。
+
+**1.20.1 硬编码颜色 A/B/C 家族级分类表（Phase 0 工作项 4 / Phase 1 工作项 3 完成）：**
+
+| 类别 | 内容 | 状态 |
+|---|---|---|
+| **A 类**（可直接映射既有语义 Token） | 表面文字 `#fff`→`--text-contrast`（§1.5 8 行 + §1.6 3 行 + §1.11 11 行：mp/proto/info 徽章、pg-send、模型选择、GC 新消息、缩略删除、log-mode、gallery 全屏）；`#000`/`#1a1326`→`--text-on-accent`（§1.5 8 行）；代码面 `#1a1326`/`#e6def0`→`--code-surface`/`--code-text`（§1.5 4 行）；错误/警告 `#ff6b6b`→`--danger`（§1.5）、`#ef5350`/`#ffa726`→`--danger`/`--warn`（§1.11 dl-status 家族 + dl-detail-error）；表面 `rgba(26,26,36,0.96)` 等→`--surface-overlay`/`--surface-fullscreen`/`--fullscreen-control-*`/`--surface-auth-*`（§1.6/§1.8/§1.11）；活跃态 `rgba(79,195,247,0.10)`→`--interactive-active-bg`（§1.6）；未定义别名 `--accent-text`/`--accent-contrast`→`--text-contrast`（§1.9）；圆角 `4px/6px/10px`→`--radius-xs/sm/md` 10 行（§1.14/§1.15.1） | **已替换**：颜色 58 行 + 圆角 10 行；构建/Node/CSS 门禁全过；浏览器矩阵验证 token 解析正确（§1.19.3） |
+| **B 类**（模块专属 / 需对比度验证，未替换） | SSE badge 事件色（`#c4a6ff`/`#f59e0b`/`#4ade80`/`#94a3b8` + rgba 底）；Editor diff 色族（`#ef4444`/`#22c55e`/`#eab308` + light 覆盖）；警示琥珀 `#fbbf24`（`.pg-editor-title .unsaved`、`.ed-dirty-dot`、`.tr-notice h3`、`.pg-custom-warning`、`.pg-tab-badge.custom`）；原生 select option（light `#fff`/`#1a1a1a`、dark `#16162a`/`#f0f0f5`）；`.dl-status-processing` `#b39ddb`；`.pg-gc-*` 玻璃面（`rgba(255,255,255,.05/.08)`、`rgba(0,0,0,.1)`）；`.pg-modal-overlay` `rgba(0,0,0,0.5)`；`.pg-autochat-panel` border `rgba(255,255,255,0.1)`；`.pg-code-expand-btn:hover` `rgba(60,60,60,.95)`；`.toggle-slider::after` 灰 `#9b9b9b`；`.pg-mode-btn.active` inset `rgba(0,0,0,.45/.06)`；`.pg-tab-badge`/`.pg-mermaid` 紫 `rgba(196,166,255,.2)`；`.pg-search-history-del:hover` 红 glow `rgba(239,68,68,0.4)` | **未替换**：需浏览器对比度验证后决定 token 化或新增模块 Token（`--warn` 与 `#fbbf24` 色相不同，不强行替代） |
+| **C 类**（第三方 / 图像 / 代码高亮 / 装饰，不替换） | vendor（`katex.min.css`、`pg-highlight-theme.css`）；图像/iframe 画布（`.pg-html-preview` `#fff`、gallery video 区、`[data-theme="light"] .ed-parsed-area pre`、`.pg-image-generating` 微光、`.pg-image-loading-overlay`）；代码高亮/徽章发光（badge pulse box-shadow、`--accent-glow` 类）；几何装饰（nav diamond、scrollbar 色、skeleton 渐变、keyframes 内色值、focus ring 发光 `0 0 0 2px`）；全屏画廊按钮族底色 `rgba(255,255,255,.1/.15/.25)`（控制条本身已 token 化，§1.8） | **不替换**：与 §1.4/§1.10 口径一致 |
+
+**1.20.2 语义重复 Token / alias 审计（Phase 1 工作项 2 完成）：**
+
+- 既有 alias 层（`--primary`/`--border`/`--bg-card`/`--bg-main`/`--bg-input`/`--bg-secondary`/`--text-primary`/`--toast-border`/`--option-bg`/`--badge-inactive-bg`/`--panel-sticky-bg`）均有消费者（1–23 处，2026-08-07 检索），属兼容基础设施，保留。
+- 3 个无消费者 alias：`--error`、`--surface-page`、`--interactive-active-text`（web/ CSS+JS+HTML 零使用）；按「保留兼容 alias 时标注用途」已在 `style.css` L141-146 注释中标注，**不删除**（兼容层契约）。
+- 语义 token 组（`--surface-*`/`--border-*`/`--status-*`/`--code-*`/`--interactive-*`）无重复定义，无可合并项。
+
+**1.20.3 完成项核对表（证据锚点）：**
+
+| 工作项 | 状态 | 证据 |
+|---|---|---|
+| Phase 0：行数/字节/规则/媒体/动画/!important 基线 | ✅ | §1.4 |
+| Phase 0：selector 清单（重复/多定义/裸全局/命名空间） | ✅ | §1.12（一次性脚本 + 关键输出） |
+| Phase 0：var(--token) 定义/使用/未定义/fallback 表 | ✅ | §1.9 + 各批复扫（无新增未定义） |
+| Phase 0：硬编码颜色/圆角/字重/过渡/模糊/阴影扫描 + A/B/C 分类 | ✅ | §1.10 原始统计 + §1.20.1 分类表 |
+| Phase 0：JS 内联样式静态/动态分类 | ✅ | §1.15.2（结论：静态极少且 Token 驱动，不做迁移） |
+| Phase 0：页面矩阵 | ✅（源码级） | §1.13 + computed 采样 §1.19.3 |
+| Phase 0：截图基线 | ⏳ 用户手动 | computed 值已完成（§1.19.3/§1.19.4）；**截图由用户手动执行**（自动化视觉验证已停止，本计划不产出截图证据） |
+| Phase 0：两 shell HTTP 资源基线 | ✅ | §1.19.2（全 200、0 error、SSE abort 为应用行为） |
+| Phase 1：DESIGN token 层一致性核验 | ✅ | §1.14.1（reduced-motion 契约例外见 §1.17） |
+| Phase 1：语义重复 Token 合并/alias 标注 | ✅ | §1.20.2（无可合并项；3 个死 alias 已标注） |
+| Phase 1：硬编码颜色 A/B/C 分级 | ✅（家族级） | §1.20.1（B 类替换待对比度验证） |
+| Phase 1：模块 Token 使用边界 | ✅（源码级） | §1.16.2 归属表 + §1.12 命名空间计数 + §1.20.1 B 类清单 |
+| Phase 1：焦点环/状态语义统一 | ⏳ | 审计完成（§1.17）；GIF/弱指示输入未验证 |
+| Phase 1：color-mix() 支持与 light 对比度 | ⏳ 部分 | 浏览器支持已实证（§1.19.3 computed 值）；light 对比度审计未做 |
+| Phase 1：DESIGN.md 同步 | ✅ | §1.17 reduced-motion 契约修正（无新 Token） |
+| Phase 2：同 selector 完全覆盖删除/合并 + `.pg-param-row` 族语义合并 | ✅（证明安全子集） | §1.12（16+3 行 + 6 条声明 + `.pg-param-row` label/input:focus 死规则删除与 3 条声明收窄）+ §1.14；复扫 0 新增；剩余 `.nav-item:focus` 同值重复证明安全但按 Header 高风险规则**有意延后**；按钮/输入/Modal footer 合并**用户视觉门控** |
+| Phase 2：覆盖链识别/死声明删除 | ⏳ | 同 selector 声明级比较完成（§1.12）；跨 selector 覆盖链需 computed-style 验证，**用户视觉门控** |
+| Phase 2：!important 分类表 | ✅（源码级） | §1.14.4（四类归档，无高置信度历史补丁） |
+| Phase 2：transition/box-shadow/border-radius 逐条替换 | ⏳ 部分 | border-radius 10 行完成（§1.14/§1.15.1）；transition/box-shadow 会改变行为，**用户视觉门控** |
+| Phase 2：不引入 @layer | ✅ | 约束保持（未引入） |
+| Phase 2：注释/媒体查询/keyframes 完整性 | ✅ | 各批 CSS 花括号/注释/媒体/关键帧平衡门禁通过；原型块删除时核对注释边界（§1.12） |
+| Phase 3：控件状态表 | ✅（文档基座） | §1.16.1（未声称 Phase 3 完成） |
+| Phase 3：checkbox/radio/Toggle 不被通用 input 覆盖 | ✅ | 源码核验：`.form-group input`/`.detail-block input` 显式 `:not([type=checkbox]):not([type=radio])`（L1253/L1256）；`.toggle-switch input` 独立 appearance:none（L1751+） |
+| Phase 3：其余控件统一 | ⏳ | 抽取/职责/高度统一/文字溢出/焦点锁均**用户视觉门控**（见 §3 Phase 3 勾选注释） |
+| Phase 4：模块归属表 + 依赖标记 + Playground 全局布局识别 + shell 隔离核验 | ✅（源码级） | §1.16.2 归属表；§1.20.1 模块内 B/C 色归类；§1.3/§1.13/§1.16.2 记录 `html,body,.app` 全屏约束为 Playground 专属；§1.6 + §1.19.2 核验默认 shell 仅 style.css、pg 元素缺席；**未移动任何规则（移动为视觉门控）** |
+| Phase 4：跨页面共用规则移动 / 动态 inline 静态表现迁移 | ⏳ | 移动/迁移改变 source order 与加载，**用户视觉门控**（分类结论见 §1.15.2，不做迁移） |
+| Phase 5：源码契约审计 + 媒体查询检查 + Header 响应式职责校验 | ✅ | §1.17 清单；§1.19.4 三档无溢出；768/480 断点不隐藏核心导航、隐藏为 `setupHeaderResponsive()` JS 职责（§1.19.4/§1.17） |
+| Phase 5：浏览器实测子集 | ✅ | §1.19（3 档宽度、modal/dropdown、reduce、焦点 Tab） |
+| Phase 5：完整响应式/可访问性专项（focus-visible 全量、reduced-motion GIF 反馈、touch/触摸尺寸、tooltip/错误裁切、L/M 字体与中英文） | ⏳ | 源码审计 + 部分实测完成（§1.17/§1.19）；**其余为端点键盘/对比度/视觉测试，用户视觉任务** |
+| Phase 6：进入条件审计 | ✅ | §1.18（条件 2/5 不满足，不进入） |
+
+**1.20.4 剩余风险（全部为用户手动 / 端点视觉 / 键盘交互依赖，未声称完成）：**
+
+- **用户边界（明确）**：截图、视觉外观、浏览器主题矩阵扩展、端点键盘/对比度/交互测试均由用户手动执行（自动化视觉验证已停止，本计划不再产出视觉证据；用户对端点做最终视觉验收）。
+- §4 动态内联样式治理 5 项全部为**用户视觉门控**（统计/分类已完成见 §1.15.2；合并/迁移动作未开始，执行时须按 §4 覆盖各状态）。
+- 截图基线：**用户手动任务**（自动化视觉验证已停止，本计划不产出截图证据）；§1.19 证据为 computed 值 + 日志，非截图。
+- 完整交互矩阵（全页面、全组合、键盘顺序、窄屏交互）：**用户手动任务**，未执行。
+- B 类颜色对比度验证与可能的模块 Token 新增（§1.20.1 B 类）。
+- GIF 切片按钮与 3 处仅 border 变色输入的键盘焦点复核（§1.17 保留为未验证项）。
+- QuickSlot `--font-lg`/`--font-sm` 字号（需浏览器确认观感）。
+- Phase 3 控件 CSS 合并、Phase 4 模块收拢（Gallery 归属）、Phase 5 剩余专项、Phase 6 拆分（条件 2/5 未满足）。
+- `transition: all` 与 `box-shadow` 逐条 Token 化（行为变化，需浏览器）。
+
+**1.20.5 不再实施的高置信度浏览器无关编辑及其原因：**
+
+- 同 selector 完全覆盖删除已穷尽：复扫 0 新增；唯一剩余 `.nav-item:focus/:focus-visible` 重复（L384/L3159 同值）删除虽证明安全，但按计划「优先不涉及 Header 高风险区域」保留（证据见 §1.12）。
+- A 类颜色/圆角已穷尽：`color:#fff` on token 背景扫描 0 命中；4px/6px/10px 圆角低风险选点全 token 化；剩余 8px/12px/16px/3px/2px/1px/999px 无精确默认 Token 对应（999px 为 pill 例外），B 类保留。
+- 死 alias（`--error`/`--surface-page`/`--interactive-active-text`）有意不删除：兼容层契约，已按计划标注用途（§1.20.2）。
 
 ---
 
@@ -1149,13 +1525,13 @@ Phase 0 工作项 4（硬编码颜色扫描）与工作项 5（JS 内联样式�
 ### 工作项
 
 - [x] 记录 `style.css`、`playground.css` 的行数、字节数、规则数、媒体查询数、动画数和 `!important` 数量。
-- [ ] 生成 selector 清单，标记：重复 selector、同一 selector 多处定义、裸全局 selector、模块命名空间 selector。（源码级范围核验已完成：生产 CSS 文件边界、两 shell 加载边界、vendor 排除，见 §1.6；selector 清单产物待补）
-- [ ] 扫描 `var(--token)` 使用点，建立"定义 / 使用 / 未定义 / fallback"表。（var 扫描已完成，见 §1.9）
-- [ ] 扫描硬编码颜色、`border-radius`、`font-weight`、`transition`、`backdrop-filter`、结构性 `box-shadow`。（原始统计已完成，见 §1.10；A/B/C 完整分类表待补）
-- [ ] 扫描 JS 的 `style`、`style.cssText` 和 HTML 字符串内联样式，区分静态表现值与运行时几何/进度值。（命中统计已完成，见 §1.10；静态/动态分类待补）
-- [ ] 建立页面矩阵：Monitor、Settings、Download、GIF、Auth、Playground、Gallery、Editor、Text Review。
-- [ ] 为每个关键页面保存 dark/light 默认主题的桌面和窄屏截图；记录页面数据属性和关键 `getComputedStyle()` 值。
-- [ ] 记录默认 shell 与 Playground shell 的静态资源请求结果，作为后续 HTTP 回归基线。
+- [x] 生成 selector 清单，标记：重复 selector、同一 selector 多处定义、裸全局 selector、模块命名空间 selector。（可重复产物已完成，见 §1.12：一次性 Node 脚本 + 关键输出；含同 selector 跨顶层规则声明级比较）
+- [x] 扫描 `var(--token)` 使用点，建立"定义 / 使用 / 未定义 / fallback"表。（var 扫描已完成，见 §1.9；第四批后复扫确认无新增未定义，见 §1.11）
+- [x] 扫描硬编码颜色、`border-radius`、`font-weight`、`transition`、`backdrop-filter`、结构性 `box-shadow`。（原始统计见 §1.10；A/B/C 家族级分类表见 §1.20.1；A 类颜色替换四批 13+7+17+21 行 + 圆角 10 行；B 类清单与 C 类边界见 §1.20.1）
+- [x] 扫描 JS 的 `style`、`style.cssText` 和 HTML 字符串内联样式，区分静态表现值与运行时几何/进度值。（命中统计见 §1.10；静态/动态分类已完成，结论：静态表现极少且已 Token 驱动、运行时几何为主、不做迁移，见 §1.15.2）
+- [x] 建立页面矩阵：Monitor、Settings、Download、GIF、Auth、Playground、Gallery、Editor、Text Review。（源码级矩阵见 §1.13；computed-style 采样见 §1.19.3；截图由用户手动执行）
+- [ ] 为每个关键页面保存 dark/light 默认主题的桌面和窄屏截图；记录页面数据属性和关键 `getComputedStyle()` 值。（部分完成：关键 `getComputedStyle()` 值已由浏览器实测 9 组合 + 3 档宽度，见 §1.19.3/§1.19.4；**截图为用户手动任务**——自动化视觉验证已停止，用户将自行对端点做视觉测试）
+- [x] 记录默认 shell 与 Playground shell 的静态资源请求结果，作为后续 HTTP 回归基线。（已完成，见 §1.19.2：两 shell、4+1 CSS 请求全 200、0 console/page error、SSE abort 为应用行为；证据 tmp/css-verify/evidence/，gitignored）
 
 ### 产物
 
@@ -1184,16 +1560,16 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 
 ### 工作项
 
-- [ ] 校验 `DESIGN.md` 与 `style.css` 根 Token、light Token、variant/style 覆盖层一致。
-- [ ] 合并语义重复的 surface、border、status、code 和 active Token；保留兼容 alias 时标注用途。
-- [ ] 对项目 CSS 中可安全替换的硬编码颜色分级（A 类已由三批部分完成：13+7+17 行，见 §1.5/§1.6/§1.8）：
+- [x] 校验 `DESIGN.md` 与 `style.css` 根 Token、light Token、variant/style 覆盖层一致。（已完成，结论：完全一致，无改动；方法见 §1.14.1）
+- [x] 合并语义重复的 surface、border、status、code 和 active Token；保留兼容 alias 时标注用途。（审计完成，见 §1.20.2：语义 token 组无可合并项；alias 层均有消费者或已标注——3 个无消费者 alias `--error`/`--surface-page`/`--interactive-active-text` 已在 style.css 注释标注用途并保留）
+- [x] 对项目 CSS 中可安全替换的硬编码颜色分级（A/B/C 家族级分类完成，见 §1.20.1；A 类已替换 13+7+17+21 行，见 §1.5/§1.6/§1.8/§1.11）：
   - A 类：明显对应现有语义 Token，优先替换；
   - B 类：模块专属但需验证对比度，可新增模块 Token；
   - C 类：第三方、图像预览、代码高亮或几何装饰，暂不替换。
-- [ ] 为 `.pg-*`、`.ed-*`、`.ge-*`、`.tr-*`、`.dl-*` 等模块确认 Token 使用边界。
-- [ ] 统一焦点环、禁用态、错误态、成功态和警告态的语义来源。
-- [ ] 对 `color-mix()` 使用点检查浏览器支持和 light 主题对比度；必要时提供安全 fallback，但不复制整套组件规则。
-- [ ] 把新 Token 和语义变化同步到 `DESIGN.md`，不在计划执行中私自改变设计系统含义。
+- [x] 为 `.pg-*`、`.ed-*`、`.ge-*`、`.tr-*`、`.dl-*` 等模块确认 Token 使用边界。（源码级边界确认完成：模块归属表 §1.16.2、命名空间计数 §1.12、模块内硬编码色 B/C 归类 §1.20.1）
+- [ ] 统一焦点环、禁用态、错误态、成功态和警告态的语义来源。（**用户视觉门控**：源码审计见 §1.17；GIF 切片按钮与 3 处弱指示输入需键盘/对比度人工验证，B 类颜色需端点视觉测试）
+- [ ] 对 `color-mix()` 使用点检查浏览器支持和 light 主题对比度；必要时提供安全 fallback，但不复制整套组件规则。（浏览器支持已实证：Chromium 150 computed 值正常，见 §1.19.3；**light 对比度为用户视觉任务**）
+- [x] 把新 Token 和语义变化同步到 `DESIGN.md`，不在计划执行中私自改变设计系统含义。（无新增 Token；reduced-motion 契约已按代码事实修正 DESIGN.md，见 §1.17）
 
 ### 禁止
 
@@ -1222,13 +1598,13 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 
 ### 工作项
 
-- [ ] 对同名 selector 合并同一职责的声明，保留最终 source order 和注释边界。
-- [ ] 识别"基础规则 → 页面规则 → 主题规则 → responsive 修复"的真实覆盖链，删除已被后续规则完全覆盖的死声明。
-- [ ] 把重复的 `.pg-param-row`、按钮、输入、Modal footer 等规则按语义合并；若两个模块确实不同，保留命名空间而不是强行合并。
-- [ ] 统一 selector 顺序：基础元素/布局 → 状态 → 主题覆盖 → responsive → reduced motion。
-- [ ] 给重复的 `transition: all`、`box-shadow`、`border-radius` 和固定颜色做逐条替换，优先使用 Token。
-- [ ] 不引入 `@layer` 作为第一步。只有在已有 source order 经过浏览器验证、且能够证明 layer 顺序更清晰时，才建立小范围试验。
-- [ ] 对相邻注释、媒体查询边界和 keyframes 做完整性检查。
+- [x] 对同名 selector 合并同一职责的声明，保留最终 source order 和注释边界。（证明安全子集已完成两批：16+3 行 + 6 条声明，见 §1.12/§1.14；复扫 0 新增；剩余 `.nav-item:focus/:focus-visible` 同值重复删除虽证明安全，但按计划「优先不涉及 Header 高风险区域」**有意延后**，见 §1.12）
+- [ ] 识别"基础规则 → 页面规则 → 主题规则 → responsive 修复"的真实覆盖链，删除已被后续规则完全覆盖的死声明。（同 selector 声明级比较已完成，见 §1.12；**跨 selector 覆盖链需 computed-style 验证，属用户视觉门控**；`!important` 分类表已完成见 §1.14.4）
+- [x] 把重复的 `.pg-param-row`、按钮、输入、Modal footer 等规则按语义合并；若两个模块确实不同，保留命名空间而不是强行合并。（**证明安全子集完成**：`.pg-param-row` 族（含 label/input:focus 死规则删除与 3 条重复声明收窄）见 §1.12；按钮/输入/Modal footer 语义合并为**用户视觉门控**，未执行）
+- [ ] 统一 selector 顺序：基础元素/布局 → 状态 → 主题覆盖 → responsive → reduced motion。（重排 source order 会改变层叠结果，**用户视觉门控**）
+- [ ] 给重复的 `transition: all`、`box-shadow`、`border-radius` 和固定颜色做逐条替换，优先使用 Token。（border-radius 已 token 化 10 行低风险选点，见 §1.14/§1.15.1；`transition: all` 与 `box-shadow` 替换会改变行为/阴影观感，**用户视觉门控**）
+- [x] 不引入 `@layer` 作为第一步。只有在已有 source order 经过浏览器验证、且能够证明 layer 顺序更清晰时，才建立小范围试验。（约束保持：未引入 @layer；source order 经 §1.19 浏览器基线验证）
+- [x] 对相邻注释、媒体查询边界和 keyframes 做完整性检查。（花括号/注释/媒体查询/keyframes 平衡随每批门禁通过；原型块删除时核对注释边界，见 §1.12；媒体查询清单见 §1.17）
 
 ### `!important` 处理规则
 
@@ -1273,14 +1649,13 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 7. loading、empty、error、success 等通用反馈状态。
 
 ### 工作项
-
-- [ ] 建立控件状态表：normal / hover / active / focus-visible / disabled / error / selected。
-- [ ] 先保留各模块的 class 名和 DOM 结构，抽取公共声明，不做 class 重命名。
-- [ ] 明确全局 `.btn` 与模块 `.pg-btn`、`.tr-btn` 的职责；不要用更宽的裸 selector 覆盖模块控件。
-- [ ] 统一高度、padding、radius、font-weight、transition 和 focus ring 的 Token 来源。
-- [ ] 检查按钮文字在中英文、`data-font-size` S/M/L 和 mobile 下是否溢出。
-- [ ] 检查 checkbox/radio/Toggle slider 不被通用 `input` 规则覆盖。
-- [ ] 检查 modal 的 z-index、滚动、焦点锁和关闭按钮样式，不修改 JS 焦点逻辑。
+- [x] 建立控件状态表：normal / hover / active / focus-visible / disabled / error / selected。（源码级状态来源表已完成，见 §1.16.1；表中记录的来源为当前事实，是否可合并需浏览器验证，未声称 Phase 3 完成）
+- [ ] 先保留各模块的 class 名和 DOM 结构，抽取公共声明，不做 class 重命名。（抽取/合并会改变层叠外观，**用户视觉门控**；控件状态来源表已建，见 §1.16.1）
+- [ ] 明确全局 `.btn` 与模块 `.pg-btn`、`.tr-btn` 的职责；不要用更宽的裸 selector 覆盖模块控件。（职责对照需逐控件视觉验证，**用户视觉门控**）
+- [ ] 统一高度、padding、radius、font-weight、transition 和 focus ring 的 Token 来源。（radius 已统一 10 行，见 §1.14/§1.15.1；高度/padding/font-weight/transition/focus ring 统一会改变外观，**用户视觉门控**）
+- [ ] 检查按钮文字在中英文、`data-font-size` S/M/L 和 mobile 下是否溢出。（需端点字体/语言/窄屏视觉测试，**用户视觉任务**）
+- [x] 检查 checkbox/radio/Toggle slider 不被通用 `input` 规则覆盖。（源码已核验：`.form-group input`/`.detail-block input` 均显式 `:not([type="checkbox"]):not([type="radio"])` 排除，style.css L1253/L1256；`.toggle-switch input[type="checkbox"]` 有独立 `appearance:none` 定制（L1751+）；toggle 焦点走全局 input:focus-visible 环，§1.17 无缺口）
+- [ ] 检查 modal 的 z-index、滚动、焦点锁和关闭按钮样式，不修改 JS 焦点逻辑。（部分实测：overlay z-index 50=--z-modal、modal-body overflow-y:auto、无页面容器裁切，见 §1.19.7；**JS 焦点锁与关闭按钮样式未覆盖，需端点键盘测试，用户视觉任务**）
 
 ### 验收
 
@@ -1316,7 +1691,6 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 9. GIF editor shared shell；
 10. responsive、reduced motion、兼容性例外。
 
-### `web/playground/static-pg/playground.css` 建议分区
 
 1. Playground shell、input bar、messages、reasoning、sources；
 2. Image Canvas、Inspire、Batch；
@@ -1328,12 +1702,11 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 
 ### 工作项
 
-- [ ] 只移动规则，不改变 selector、source order 或声明值；先通过分区注释建立维护边界。
-- [ ] 为每个区块标记依赖的 DOM/JS 模块和允许覆盖的 Token。
-- [ ] 识别跨页面共用规则，放回 shared primitives，不复制到页面区块。
-- [ ] 识别只属于 Playground 的全局布局规则，保留在 `playground.css` 并记录其为何需要覆盖 `html/body/.app`。
-- [ ] 识别只属于 Editor/Gallery/Log Reader 的样式，确保不会被 no-playground shell 加载。
-- [ ] 将动态内联样式中的静态表现迁入对应模块 CSS，但保留运行时 geometry、progress、width、height、transform 等计算值。
+- [x] 为每个区块标记依赖的 DOM/JS 模块和允许覆盖的 Token。（模块级依赖/归属标记已完成，见 §1.16.2 归属表 + §1.12 命名空间计数 + §1.20.1 模块内 B/C 色归类；更细的区块级标注并入 Phase 6 拆分设计，**有意延后**（条件不满足，见 §1.18））
+- [ ] 识别跨页面共用规则，放回 shared primitives，不复制到页面区块。（移动规则改变 source order 与加载，**用户视觉门控**；共享控件归属已在 §1.16.1 标注）
+- [x] 识别只属于 Playground 的全局布局规则，保留在 `playground.css` 并记录其为何需要覆盖 `html/body/.app`。（已识别并记录：`html,body,.app` 全屏滚动约束为 Playground shell 专属（§1.3 高风险清单、§1.16.2 归属表、§1.19.2 两 shell 加载边界）；`.pg-*`/`.ge-*`/`.ed-*`/`.tr-*` 仅随 Playground shell 交付；未移动任何规则）
+- [x] 识别只属于 Editor/Gallery/Log Reader 的样式，确保不会被 no-playground shell 加载。（已核验：默认 shell 仅加载 style.css（§1.6 加载边界、§1.19.2 HTTP 实测 index-nopg 仅 /style.css 200 且 pg 元素缺席）；Editor/Gallery/Log Reader 样式（`.ed-*`/`.ge-*`/`.tr-*`/`.log-*`）全部位于 playground.css，默认 shell 不可能加载）
+- [ ] 将动态内联样式中的静态表现迁入对应模块 CSS，但保留运行时 geometry、progress、width、height、transform 等计算值。（分类已完成：静态表现极少且 Token 驱动、运行时几何为主，见 §1.15.2；**迁移需 DOM/状态覆盖验证，用户视觉门控**）
 
 ### 验收
 
@@ -1349,17 +1722,15 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 ### 目标
 
 把响应式和可访问性从"末尾补丁"提升为可验证的组件契约。
-
 ### 工作项
 
-- [ ] 检查 desktop、tablet、mobile 三档：Header、Settings、Download、Monitor、Playground、Gallery、Editor。
-- [ ] 检查现有媒体查询与 container query 是否重复、互相覆盖或只修正单一页面。
-- [ ] 校验窄屏下 Header 隐藏优先级仍由 `setupHeaderResponsive()` 决定，CSS 不擅自隐藏核心导航。
-- [ ] 为所有可交互模块检查 `:focus-visible`、键盘顺序、文本裁切和焦点对比度。
-- [ ] 检查 `prefers-reduced-motion: reduce` 对 CSS animation、transition、GIF/媒体编辑器反馈的影响。
-- [ ] 检查 `touch-action`、拖拽滑块、时间线、滚动容器和最小触摸尺寸。
-- [ ] 检查 `overflow:hidden` 是否截断 tooltip、dropdown、modal 或错误信息。
-- [ ] 检查 L/M 字体尺寸、中文/英文长文本和语言切换后的布局。
+- [x] 检查现有媒体查询与 container query 是否重复、互相覆盖或只修正单一页面。（检查已完成：源码清单见 §1.17；desktop 1440 / tablet 768 / mobile 390 三档浏览器实测无横向溢出且断点规则生效，见 §1.19.4；768px×3 与 900px×3 的**合并为用户视觉任务**，不在此勾选内）
+- [x] 校验窄屏下 Header 隐藏优先级仍由 `setupHeaderResponsive()` 决定，CSS 不擅自隐藏核心导航。（源码+HTTP 已核验：CSS 窄屏规则仅压缩 `.top-header` gap/padding 与 `#header-stat-grid`（768/480 断点，L3091/L3110），从不隐藏核心导航；导航隐藏为 auth.js `setupHeaderResponsive()` 运行时职责（DESIGN §Header 契约，§1.17）；tablet/mobile 实测 topHeader 完整保留（§1.19.4））
+- [ ] 为所有可交互模块检查 `:focus-visible`、键盘顺序、文本裁切和焦点对比度。（源码审计 + 浏览器键盘 Tab 实测见 §1.17/§1.19.5：nav-item 焦点缺口已撤销；**GIF 切片按钮与 3 处仅 border 变色输入未被覆盖，需端点键盘测试，用户视觉任务**）
+- [ ] 检查 `prefers-reduced-motion: reduce` 对 CSS animation、transition、GIF/媒体编辑器反馈的影响。（animation/transition 已实测：reduce 下与基准一致、有意不变，见 §1.19.6；**GIF/媒体编辑器反馈为端点视觉任务**）
+- [ ] 检查 `touch-action`、拖拽滑块、时间线、滚动容器和最小触摸尺寸。（需端点交互测试，**用户视觉任务**；`touch-action` 3 处源码位置见 §1.17）
+- [ ] 检查 `overflow:hidden` 是否截断 tooltip、dropdown、modal 或错误信息。（modal 与 Download 页 dropdown 已实测无裁切、菜单在视口内，见 §1.19.7；**tooltip/错误信息为端点视觉任务**）
+- [ ] 检查 L/M 字体尺寸、中文/英文长文本和语言切换后的布局。（需端点字体/语言/窄屏视觉测试，**用户视觉任务**）
 
 ### 验收
 
@@ -1384,6 +1755,8 @@ Phase 0 不改生产代码；若基线脚本或记录方式不可靠，删除基
 - Playground 的 `feature.Assets`、静态路由和 embed 资产清单有对应更新方案；
 - 拆分不会引入新的 cascade 依赖或重复 Token；
 - 可以用真实 HTTP 页面验证而不是只做文件存在性检查。
+
+> **2026-08-07 审计结论（§1.18）：** 条件 2（source order 无测试）与 5（拆分方案未设计）不满足，**Phase 6 不进入**；条件 1 部分满足（§1.16.2 归属表，Gallery 为唯一收敛点）、3 满足（§1.6）、4 部分满足（manifest 机制存在但拆分方案未起草）、**6 已满足**（§1.19 真实 HTTP + headless Chromium 验证两 shell 与主题矩阵）。重新评估前置：补 source-order 稳定记录 → 收敛 Gallery 归属 → 起草拆分方案。
 
 ### 候选结构
 
@@ -1441,11 +1814,11 @@ web/playground/static-pg/
 
 ### 工作项
 
-- [ ] 先统计重复的 `style` 片段，按组件合并，不逐行机械替换。
-- [ ] 为动态 UI 增加稳定 class 和状态 class，保持 JS API 与 DOM ID 不变。
-- [ ] 对 `style.cssText` 拆成"静态 class + 必要动态属性"。
-- [ ] 对 HTML 字符串中的 inline style 迁移后，检查 escape、翻译文字和条件分支。
-- [ ] 任何迁移都必须覆盖初始、成功、失败、空状态和关闭/清理状态。
+- [ ] 先统计重复的 `style` 片段，按组件合并，不逐行机械替换。（统计与分类已完成：§1.10 命中统计 + §1.15.2 静态/动态分类（静态表现极少且 Token 驱动）；**按组件合并为 JS/DOM 契约变更，用户视觉门控**）
+- [ ] 为动态 UI 增加稳定 class 和状态 class，保持 JS API 与 DOM ID 不变。（改 JS 生成结构，需 DOM/状态覆盖验证，**用户视觉门控**）
+- [ ] 对 `style.cssText` 拆成"静态 class + 必要动态属性"。（cssText 仅 3 处命中（§1.10），拆分会改 JS 行为，**用户视觉门控**）
+- [ ] 对 HTML 字符串中的 inline style 迁移后，检查 escape、翻译文字和条件分支。（HTML 字符串 inline style 静态 163 处（§1.15.2），迁移涉及 escape/翻译/分支，**用户视觉门控**）
+- [ ] 任何迁移都必须覆盖初始、成功、失败、空状态和关闭/清理状态。（迁移动作本身未开始（§1.15.2 结论：不做迁移），执行时按此契约覆盖各状态）
 
 ### 验收
 
