@@ -24,8 +24,8 @@
   // ------------------------------------------------------------------
 
   function getOutputDimensions() {
-    var outWInput = document.getElementById('gif-out-w');
-    var outHInput = document.getElementById('gif-out-h');
+    var outWInput = document.getElementById('gif-output-width');
+    var outHInput = document.getElementById('gif-output-height');
 
     var slices = core.state.slices || [];
     var baseW = (slices.length && slices[0].canvas) ? slices[0].canvas.width : 400;
@@ -96,7 +96,7 @@
     if (!checkExportMemory(dims.outW, dims.outH, 3)) return;
 
     core.showSpinner(t('gifEditorCompositing', 'Compositing...'));
-    var exportBtn = document.getElementById('gif-export-gif');
+    var exportBtn = document.getElementById('gif-export-gif-btn');
     if (exportBtn) {
       exportBtn.disabled = true;
       exportBtn.innerHTML = t('gifEditorRendering', 'Rendering...');
@@ -111,8 +111,8 @@
     ensureGifJs().then(function () {
       setTimeout(function () {
         try {
-          var qualityInput = document.getElementById('gif-quality');
-          var quality = qualityInput ? (parseInt(qualityInput.value, 10) || 10) : 10;
+          var qualityInput = document.getElementById('gif-quality-val');
+          var quality = qualityInput ? (parseInt(qualityInput.textContent, 10) || 10) : 10;
 
           var gifOptions = {
             workers: 4,
@@ -513,9 +513,9 @@
   }
 
   function bindEvents() {
-    var exportGifBtn = document.getElementById('gif-export-gif');
-    var exportZipBtn = document.getElementById('gif-export-zip');
-    var exportSpriteBtn = document.getElementById('gif-export-sprite');
+    var exportGifBtn = document.getElementById('gif-export-gif-btn');
+    var exportZipBtn = document.getElementById('gif-export-frames-btn');
+    var exportSpriteBtn = document.getElementById('gif-export-sprite-btn');
     var closeResultBtn = document.getElementById('gif-result-close');
     var openGalleryBtn = document.getElementById('gif-result-open-gallery');
 

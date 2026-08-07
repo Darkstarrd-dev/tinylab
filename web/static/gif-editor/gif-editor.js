@@ -60,6 +60,7 @@
   var canvas = null;
   var ctx = null;
   var rendered = false;
+  var layerBase = null; // baseline size of the active layer (layer-scale slider)
 
   // ------------------------------------------------------------------
   // Lifecycle: render & cleanup (repeated enter/leave must be safe)
@@ -162,7 +163,7 @@
     dom.panelStep2 = core.byId('gif-panel-step2') || core.byId('panel-step2');
     dom.panelStep3 = core.byId('gif-panel-step3') || core.byId('panel-step3');
     dom.frameIndicator = core.byId('frame-indicator');
-    dom.startGlobalCropBtn = core.byId('start-global-crop-btn');
+    dom.startGlobalCropBtn = core.byId('global-crop-btn');
     dom.cropPanel = core.byId('crop-panel');
     dom.cropSlideX = core.byId('crop-slide-x'); dom.cropNumX = core.byId('crop-num-x');
     dom.cropSlideY = core.byId('crop-slide-y'); dom.cropNumY = core.byId('crop-num-y');
@@ -170,34 +171,39 @@
     dom.cropSlideH = core.byId('crop-slide-h'); dom.cropNumH = core.byId('crop-num-h');
     dom.cancelCropBtn = core.byId('cancel-crop-btn');
     dom.applyCropBtn = core.byId('apply-crop-btn');
-    dom.rangeInput = core.byId('range-input');
-    dom.addTextInput = core.byId('add-text-input');
+    dom.rangeStart = core.byId('crop-start');
+    dom.rangeEnd = core.byId('crop-end');
+    dom.addTextInput = core.byId('text-input');
     dom.addTextBtn = core.byId('add-text-btn');
-    dom.addTextColor = core.byId('add-text-color');
+    dom.addTextColor = core.byId('text-color');
     dom.addImageInput = core.byId('add-image-input');
     dom.btnBold = core.byId('btn-bold');
     dom.btnItalic = core.byId('btn-italic');
     dom.btnUnderline = core.byId('btn-underline');
     dom.selectedLayerTools = core.byId('selected-layer-tools');
-    dom.syncLayerBtn = core.byId('sync-layer-btn');
+    dom.strokeColor = core.byId('text-stroke-color');
+    dom.layerScale = core.byId('layer-scale');
+    dom.deleteLayerBtn = core.byId('delete-layer-btn');
     dom.layerList = core.byId('layer-list');
 
     dom.batchDelayInput = core.byId('batch-delay-input');
     dom.batchDelayBtn = core.byId('batch-delay-btn');
-    dom.outW = core.byId('out-w');
-    dom.outH = core.byId('out-h');
-    dom.outScaleSlider = core.byId('out-scale-slider');
-    dom.outScaleVal = core.byId('out-scale-val');
-    dom.qualitySlider = core.byId('quality-slider');
-    dom.quality = core.byId('quality');
-    dom.exportBtn = core.byId('export-gif');
-    dom.exportZipBtn = core.byId('export-zip');
-    dom.exportPngBtn = core.byId('export-sprite');
+    dom.outW = core.byId('output-width');
+    dom.outH = core.byId('output-height');
+    dom.outScaleSlider = core.byId('output-scale-slider');
+    dom.outScaleVal = core.byId('output-scale-val');
+    dom.scalePercent = core.byId('scale-percent');
+    dom.applyScaleBtn = core.byId('apply-scale-btn');
+    dom.qualitySlider = core.byId('sample-interval');
+    dom.quality = core.byId('quality-val');
+    dom.exportBtn = core.byId('export-gif-btn');
+    dom.exportZipBtn = core.byId('export-frames-btn');
+    dom.exportPngBtn = core.byId('export-sprite-btn');
 
     dom.delStart = core.byId('del-start');
     dom.delEnd = core.byId('del-end');
-    dom.btnDelRange = core.byId('btn-del-range');
-    dom.btnKeepRange = core.byId('btn-keep-range');
+    dom.btnDelRange = core.byId('delete-range-btn');
+    dom.btnKeepRange = core.byId('keep-range-btn');
     dom.spriteRows = core.byId('sprite-rows');
     dom.spriteCols = core.byId('sprite-cols');
 
@@ -243,6 +249,12 @@
         targetCtx.font = (l.italic ? 'italic ' : '') + (l.bold ? 'bold ' : '') + (l.size || 24) + 'px ' + (l.font || 'sans-serif');
         targetCtx.fillStyle = l.color || '#ffffff';
         targetCtx.textBaseline = 'top';
+        if (l.strokeColor) {
+          targetCtx.strokeStyle = l.strokeColor;
+          targetCtx.lineWidth = Math.max(1, (l.size || 24) / 12);
+          targetCtx.lineJoin = 'round';
+          targetCtx.strokeText(l.content || '', l.x || 0, l.y || 0);
+        }
         targetCtx.fillText(l.content || '', l.x || 0, l.y || 0);
         if (l.underline) {
           var mt = targetCtx.measureText(l.content || '');
@@ -605,8 +617,8 @@
     if (dom.cropSlideW) dom.cropSlideW.max = cur.width;
     if (dom.cropSlideY) dom.cropSlideY.max = cur.height;
     if (dom.cropSlideH) dom.cropSlideH.max = cur.height;
-    syncCropSlidersFromRect();
     core.state.mode = 'crop';
+    syncCropSlidersFromRect();
     if (dom.cropPanel) dom.cropPanel.classList.add('active');
     if (dom.startGlobalCropBtn) dom.startGlobalCropBtn.style.display = 'none';
     draw();
@@ -655,7 +667,7 @@
   // ------------------------------------------------------------------
 
   function getTargetIndices() {
-    var scopeEl = document.querySelector('input[name="gif-layer-scope"]:checked');
+    var scopeEl = document.querySelector('input[name="gif-scope"]:checked');
     if (!scopeEl) return [];
     var scope = scopeEl.value;
     var slices = core.state.slices || [];
@@ -669,25 +681,16 @@
       for (var i = 0; i < slices.length; i++) all.push(i);
       return all;
     }
-    var pts = dom.rangeInput.value.split(/[,，]/);
+    var s = parseInt(dom.rangeStart ? dom.rangeStart.value : '', 10);
+    var e = parseInt(dom.rangeEnd ? dom.rangeEnd.value : '', 10);
+    if (isNaN(s) || isNaN(e)) { alert(t('gifEditorAlertRangeInvalid')); return []; }
+    if (s < 1 || e < 1) { alert(t('gifEditorAlertRangeMin')); return []; }
+    if (s > e) { alert(t('gifEditorAlertRangeOrder')); return []; }
     var idxs = [];
-    for (var p = 0; p < pts.length; p++) {
-      var token = pts[p].trim();
-      if (!token) continue;
-      if (token.indexOf('-') >= 0) {
-        var parts = token.split('-');
-        var s = parseInt(parts[0], 10), e = parseInt(parts[1], 10);
-        if (isNaN(s) || isNaN(e)) continue;
-        for (var k = s; k <= e; k++) idxs.push(k - 1);
-      } else {
-        idxs.push(parseInt(token, 10) - 1);
-      }
+    for (var k = s - 1; k <= e - 1 && k < slices.length; k++) {
+      if (k >= 0) idxs.push(k);
     }
-    var filtered = [];
-    for (var f = 0; f < idxs.length; f++) {
-      if (idxs[f] >= 0 && idxs[f] < slices.length) filtered.push(idxs[f]);
-    }
-    return filtered;
+    return idxs;
   }
 
   function addText() {
@@ -703,6 +706,7 @@
         type: 'text',
         content: txt,
         color: dom.addTextColor.value,
+        strokeColor: dom.strokeColor ? dom.strokeColor.value : '#000000',
         font: 'sans-serif',
         size: ref.canvas.height / 5,
         x: ref.canvas.width / 2,
@@ -756,26 +760,6 @@
     }
   }
 
-  function syncLayer() {
-    if (!core.state.activeLayer || core.state.selectedSliceIdx < 0) return;
-    var src = core.state.activeLayer;
-    if (!src.groupId) src.groupId = src.id;
-    var slices = core.state.slices || [];
-    for (var i = 0; i < slices.length; i++) {
-      if (i === core.state.selectedSliceIdx) continue;
-      var f = null;
-      for (var j = 0; j < slices[i].layers.length; j++) {
-        if (slices[i].layers[j].groupId === src.groupId) { f = slices[i].layers[j]; break; }
-      }
-      if (f) {
-        Object.assign(f, src);
-        f.id = core.freshId();
-      } else {
-        slices[i].layers.push(Object.assign({}, src, { id: core.freshId() }));
-      }
-    }
-    alert(t('gifEditorSyncDone'));
-  }
 
   function removeLayer(i) {
     var slices = core.state.slices || [];
@@ -807,7 +791,10 @@
       if (dom.btnItalic) dom.btnItalic.classList.toggle('active', !!layer.italic);
       if (dom.btnUnderline) dom.btnUnderline.classList.toggle('active', !!layer.underline);
       if (dom.addTextColor) dom.addTextColor.value = layer.color || '#ffffff';
+      if (dom.strokeColor) dom.strokeColor.value = layer.strokeColor || '#000000';
     }
+    layerBase = { size: layer.size, w: layer.w, h: layer.h };
+    if (dom.layerScale) dom.layerScale.value = 1;
     updateSelectionUI(core.state.selectedSliceIdx);
     draw();
   }
@@ -875,7 +862,10 @@
           if (dom.btnItalic) dom.btnItalic.classList.toggle('active', !!hit.italic);
           if (dom.btnUnderline) dom.btnUnderline.classList.toggle('active', !!hit.underline);
           if (dom.addTextColor) dom.addTextColor.value = hit.color || '#ffffff';
+          if (dom.strokeColor) dom.strokeColor.value = hit.strokeColor || '#000000';
         }
+        layerBase = { size: hit.size, w: hit.w, h: hit.h };
+        if (dom.layerScale) dom.layerScale.value = 1;
         startInteraction(e, 'move', hit);
         updateSelectionUI(core.state.selectedSliceIdx);
       } else {
@@ -1379,27 +1369,53 @@
     if (dom.cols) dom.cols.addEventListener('input', draw);
     if (dom.sliceBtn) dom.sliceBtn.addEventListener('click', runSlice);
 
-    // Quality sync
+    // Quality sync (#gif-sample-interval slider + read-only #gif-quality-val span)
     if (dom.quality) {
       dom.quality.addEventListener('change', function () {
-        var v = parseInt(dom.quality.value, 10);
+        var v = parseInt(dom.quality.textContent, 10);
         if (isNaN(v)) v = 10;
         v = Math.max(1, Math.min(10, v));
-        dom.quality.value = v;
+        dom.quality.textContent = v;
         dom.qualitySlider.value = v;
       });
     }
     if (dom.qualitySlider) {
       dom.qualitySlider.addEventListener('input', function () {
-        dom.quality.value = dom.qualitySlider.value;
+        if (dom.quality) dom.quality.textContent = dom.qualitySlider.value;
       });
     }
 
     // Output scale
     if (dom.outScaleSlider) {
       dom.outScaleSlider.addEventListener('input', function (e) {
-        var s = parseFloat(e.target.value);
+        var s = parseFloat(e.target.value) / 100;
         if (isNaN(s)) s = 1;
+        if (dom.outScaleVal) dom.outScaleVal.innerText = s.toFixed(1) + 'x';
+        var baseW, baseH;
+        var slices = core.state.slices || [];
+        if (slices.length > 0 && slices[0]) {
+          baseW = slices[0].canvas.width;
+          baseH = slices[0].canvas.height;
+        } else if (core.state.processedImg) {
+          baseW = core.state.processedImg.width;
+          baseH = core.state.processedImg.height;
+        }
+        if (baseW && baseH) {
+          dom.outW.value = Math.max(1, Math.round(baseW * s));
+          dom.outH.value = Math.max(1, Math.round(baseH * s));
+        }
+      });
+    }
+
+    // Apply scale percent (#gif-scale-percent + #gif-apply-scale-btn) -> output dims
+    if (dom.applyScaleBtn && dom.scalePercent) {
+      dom.applyScaleBtn.addEventListener('click', function () {
+        var p = parseInt(dom.scalePercent.value, 10);
+        if (isNaN(p)) p = 100;
+        p = Math.max(10, Math.min(300, p));
+        dom.scalePercent.value = p;
+        var s = p / 100;
+        if (dom.outScaleSlider) dom.outScaleSlider.value = p;
         if (dom.outScaleVal) dom.outScaleVal.innerText = s.toFixed(1) + 'x';
         var baseW, baseH;
         var slices = core.state.slices || [];
@@ -1483,12 +1499,49 @@
         }
       });
     }
-    if (dom.syncLayerBtn) dom.syncLayerBtn.addEventListener('click', syncLayer);
+    if (dom.strokeColor) {
+      dom.strokeColor.addEventListener('input', function (e) {
+        if (core.state.activeLayer && core.state.activeLayer.type === 'text') {
+          core.state.activeLayer.strokeColor = e.target.value;
+          draw();
+        }
+      });
+    }
+    if (dom.deleteLayerBtn) {
+      dom.deleteLayerBtn.addEventListener('click', function () {
+        var slices = core.state.slices || [];
+        var idx = core.state.selectedSliceIdx;
+        if (!core.state.activeLayer || idx < 0 || idx >= slices.length) return;
+        var layers = slices[idx].layers || [];
+        for (var i = 0; i < layers.length; i++) {
+          if (layers[i] === core.state.activeLayer) {
+            removeLayer(i);
+            return;
+          }
+        }
+      });
+    }
+    if (dom.layerScale) {
+      dom.layerScale.addEventListener('input', function (e) {
+        var l = core.state.activeLayer;
+        if (!l) return;
+        var f = parseFloat(e.target.value);
+        if (isNaN(f)) return;
+        if (l.type === 'text') {
+          l.size = Math.max(8, ((layerBase && layerBase.size) || l.size) * f);
+        } else if (l.img) {
+          l.w = ((layerBase && layerBase.w) || l.w) * f;
+          l.h = ((layerBase && layerBase.h) || l.h) * f;
+        }
+        draw();
+      });
+    }
     if (dom.layerList) dom.layerList.addEventListener('click', onLayerListClick);
-    var scopeRadios = document.querySelectorAll('input[name="gif-layer-scope"]');
+    var scopeRadios = document.querySelectorAll('input[name="gif-scope"]');
     for (var i = 0; i < scopeRadios.length; i++) {
       scopeRadios[i].addEventListener('change', function (e) {
-        if (dom.rangeInput) dom.rangeInput.style.display = e.target.value === 'range' ? 'block' : 'none';
+        var ri = core.byId('crop-range-inputs');
+        if (ri) ri.style.display = e.target.value === 'range' ? 'flex' : 'none';
       });
     }
 
@@ -1580,6 +1633,17 @@
       '    <div class="gif-panel-sep gif-edit-blocked" id="gif-panel-step2">' +
       '      <div class="gif-group-title" data-i18n="gifEditorStep2">2. 单帧编辑</div>' +
       '      <button type="button" class="gif-btn gif-btn-accent gif-full-width gif-mb" id="gif-global-crop-btn" data-i18n="gifEditorGlobalCrop">✂️ 全局裁剪 (框选画布)</button>' +
+      '      <div class="gif-crop-panel" id="gif-crop-panel">' +
+      '        <div class="gif-crop-title" data-i18n="gifEditorCropAdjust">裁剪区域微调</div>' +
+      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropX', 'X') + '</span><input type="range" id="gif-crop-slide-x" value="0"><input type="number" id="gif-crop-num-x" value="0" class="gif-crop-num"></div>' +
+      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropY', 'Y') + '</span><input type="range" id="gif-crop-slide-y" value="0"><input type="number" id="gif-crop-num-y" value="0" class="gif-crop-num"></div>' +
+      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropW', 'W') + '</span><input type="range" id="gif-crop-slide-w" value="0"><input type="number" id="gif-crop-num-w" value="0" class="gif-crop-num"></div>' +
+      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropH', 'H') + '</span><input type="range" id="gif-crop-slide-h" value="0"><input type="number" id="gif-crop-num-h" value="0" class="gif-crop-num"></div>' +
+      '        <div class="gif-control-row">' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">✅ 确认裁剪</button>' +
+      '          <button type="button" class="gif-btn gif-flex-1" id="gif-cancel-crop-btn" data-i18n="gifEditorCancelCrop">取消裁剪</button>' +
+      '        </div>' +
+      '      </div>' +
       '      <div class="gif-scope-box">' +
       '        <span class="gif-axis-label" data-i18n="gifEditorScope">作用:</span>' +
       '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">当前帧</span></label>' +
@@ -1642,9 +1706,6 @@
       '        <span id="gif-quality-val" style="width: 20px; text-align: right;">10</span>' +
       '      </div>' +
       '      <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt" id="gif-export-gif-btn" data-i18n="gifEditorExportGif">⚡ 预览 (导出 GIF)</button>' +
-      '      <div class="gif-control-row gif-mt-sm">' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-export-fmt" value="zip" checked> <span data-i18n="gifEditorExportZip">导出帧图 (ZIP)</span></label>' +
-      '      </div>' +
       '      <button type="button" class="gif-btn gif-full-width gif-mt-sm" id="gif-export-frames-btn" data-i18n="gifEditorExportFrames">导出帧图 (ZIP)</button>' +
       '      <div class="gif-output-sep-inner">' +
       '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">批量删除帧</div>' +
@@ -1661,6 +1722,7 @@
       '          <input type="number" id="gif-sprite-rows" value="1" min="1" placeholder="' + t('gifEditorSpriteRows', '行') + '">' +
       '          <input type="number" id="gif-sprite-cols" value="5" min="1" placeholder="' + t('gifEditorSpriteCols', '列') + '">' +
       '        </div>' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-export-sprite-btn" data-i18n="gifEditorExportSprite">导出拼图 (Sprite Sheet)</button>' +
       '      </div>' +
       '    </div>' +
       '  </aside>' +
