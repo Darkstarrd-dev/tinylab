@@ -222,6 +222,23 @@
     dom.resetViewBtn = core.byId('reset-view-btn');
     dom.zoomInBtn = core.byId('zoom-in-btn');
 
+    dom.splitSheetContainer = core.byId('split-sheet-container');
+    dom.splitSheetToggleBtn = core.byId('split-sheet-toggle-btn');
+    dom.splitSheetPanel = core.byId('split-sheet-panel');
+    dom.splitSourceRes = core.byId('split-source-res');
+    dom.splitScale = core.byId('split-scale');
+    dom.splitScaleDisplay = core.byId('split-scale-display');
+    dom.splitCols = core.byId('split-cols');
+    dom.splitRows = core.byId('split-rows');
+    dom.splitInnerGap = core.byId('split-inner-gap');
+    dom.splitOuterMargin = core.byId('split-outer-margin');
+    dom.splitEnableOuter = core.byId('split-enable-outer');
+    dom.splitActualFrames = core.byId('split-actual-frames');
+    dom.splitDuration = core.byId('split-duration');
+    dom.splitApplyBtn = core.byId('split-apply-btn');
+
+    dom.batchDeleteContainer = core.byId('batch-delete-container');
+
     // Link references to GifEditorCore.dom
     Object.assign(core.dom, dom);
   }
@@ -377,6 +394,8 @@
 
   function updateSourcePanels(kind) {
     if (dom.imageTools) dom.imageTools.classList.toggle('gif-hidden', kind !== 'image');
+    if (dom.splitSheetContainer) dom.splitSheetContainer.style.display = (kind === 'image' ? 'block' : 'none');
+    if (dom.batchDeleteContainer) dom.batchDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
     if (dom.enableTrans) dom.enableTrans.checked = false;
     if (dom.transPanel) dom.transPanel.style.display = 'none';
     core.state.transparencyReady = false;
@@ -1180,6 +1199,7 @@
       }
       drawLayers(ctx, s.layers);
       if (isImageUnsliced()) drawEdgeCropGrid(w, h);
+      if (core.state.source && core.state.source.kind === 'image') drawSplitGridOverlay(w, h);
       if (core.state.mode === 'editor' && core.state.activeLayer) drawGizmo(core.state.activeLayer, '#3b82f6');
       if (core.state.mode === 'crop') {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -1198,6 +1218,44 @@
     }
 
     updateStageOverlay();
+  }
+
+  function drawSplitGridOverlay(w, h) {
+    if (!dom.splitSheetPanel || dom.splitSheetPanel.style.display === 'none') return;
+    if (!dom.splitCols || !dom.splitRows) return;
+    var cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
+    var rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
+    var scale = (parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100;
+    var innerGap = Math.round((parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0) * scale);
+    var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.round((parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) * scale) : 0;
+
+    var availW = Math.max(0, w - outerMargin * 2 - innerGap * (cols - 1));
+    var availH = Math.max(0, h - outerMargin * 2 - innerGap * (rows - 1));
+    var cellW = availW / cols;
+    var cellH = availH / rows;
+
+    ctx.save();
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var x = outerMargin + c * (cellW + innerGap);
+        var y = outerMargin + r * (cellH + innerGap);
+
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, cellW, cellH);
+
+        ctx.strokeStyle = '#00ffaa';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x, y, cellW, cellH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x - 2, y - 2, 5, 5);
+        ctx.fillRect(x + cellW - 2, y - 2, 5, 5);
+        ctx.fillRect(x - 2, y + cellH - 2, 5, 5);
+        ctx.fillRect(x + cellW - 2, y + cellH - 2, 5, 5);
+      }
+    }
+    ctx.restore();
   }
 
   function updateStageOverlay() {
@@ -1245,7 +1303,7 @@
     if (ch <= 0) ch = 600;
 
     var fitScale = Math.min((cw - 40) / w, (ch - 40) / h);
-    core.state.scale = Math.max(0.05, Math.min(1.0, fitScale));
+    core.state.scale = Math.max(0.05, fitScale);
     core.state.panX = (cw - w) / 2;
     core.state.panY = (ch - h) / 2;
     updateTransform();
@@ -1706,6 +1764,72 @@
       });
     }
 
+    function updateSplitSummary() {
+      if (!dom.splitCols || !dom.splitRows) return;
+      var cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
+      var rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
+      var totalFrames = cols * rows;
+      if (dom.splitActualFrames) dom.splitActualFrames.textContent = totalFrames;
+
+      var scale = parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100;
+      if (dom.splitScaleDisplay) dom.splitScaleDisplay.textContent = scale + '%';
+
+      var srcCanvas = (core.state.source && (core.state.source.rawImage || core.state.source.image)) || core.state.processedImg;
+      if (srcCanvas && dom.splitSourceRes) {
+        var origW = srcCanvas.width || srcCanvas.naturalWidth || 800;
+        var origH = srcCanvas.height || srcCanvas.naturalHeight || 600;
+        var origText = origW + ' × ' + origH;
+        if (scale !== 100) {
+          var scaledW = Math.max(1, Math.round(origW * scale / 100));
+          var scaledH = Math.max(1, Math.round(origH * scale / 100));
+          dom.splitSourceRes.textContent = origText + ' -> ' + scaledW + ' × ' + scaledH;
+        } else {
+          dom.splitSourceRes.textContent = origText;
+        }
+      }
+    }
+
+    if (dom.splitSheetToggleBtn && dom.splitSheetPanel) {
+      dom.splitSheetToggleBtn.addEventListener('click', function () {
+        var isHidden = dom.splitSheetPanel.style.display === 'none' || !dom.splitSheetPanel.style.display;
+        dom.splitSheetPanel.style.display = isHidden ? 'block' : 'none';
+        updateSplitSummary();
+        draw();
+      });
+    }
+
+    var onSplitUIChange = function () {
+      updateSplitSummary();
+      draw();
+    };
+
+    if (dom.splitScale) dom.splitScale.addEventListener('input', onSplitUIChange);
+    if (dom.splitCols) { dom.splitCols.addEventListener('input', onSplitUIChange); dom.splitCols.addEventListener('change', onSplitUIChange); }
+    if (dom.splitRows) { dom.splitRows.addEventListener('input', onSplitUIChange); dom.splitRows.addEventListener('change', onSplitUIChange); }
+    if (dom.splitInnerGap) { dom.splitInnerGap.addEventListener('input', onSplitUIChange); dom.splitInnerGap.addEventListener('change', onSplitUIChange); }
+    if (dom.splitOuterMargin) { dom.splitOuterMargin.addEventListener('input', onSplitUIChange); dom.splitOuterMargin.addEventListener('change', onSplitUIChange); }
+    if (dom.splitEnableOuter) dom.splitEnableOuter.addEventListener('change', onSplitUIChange);
+
+    if (dom.splitApplyBtn) {
+      dom.splitApplyBtn.addEventListener('click', function () {
+        if (!core.import || !core.import.splitImage) return;
+        var opts = {
+          cols: parseInt(dom.splitCols ? dom.splitCols.value : 3, 10) || 1,
+          rows: parseInt(dom.splitRows ? dom.splitRows.value : 3, 10) || 1,
+          innerGap: parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0,
+          outerMargin: parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0,
+          enableOuterGap: dom.splitEnableOuter ? !!dom.splitEnableOuter.checked : false,
+          scalePercent: parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100
+        };
+        core.import.splitImage(opts).then(function () {
+          if (dom.splitSheetPanel) dom.splitSheetPanel.style.display = 'none';
+          draw();
+        }).catch(function (err) {
+          console.error('Split sheet failed:', err);
+        });
+      });
+    }
+
     // Sub-module event binders
     if (core.import) core.import.bindEvents();
     if (core.timeline) core.timeline.bindEvents();
@@ -1744,6 +1868,75 @@
       '        <button type="button" class="btn btn-primary btn-sm" id="gif-open-export-btn" title="Export settings" style="display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;">' +
       '          💾' +
       '        </button>' +
+      '      </div>' +
+      '      <div id="gif-split-sheet-container" style="margin-top: 10px; margin-bottom: 10px;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-sheet-toggle-btn" style="display:flex; align-items:center; justify-content:center; gap:6px;">' +
+      '          <span>✂️</span> <span>SplitSheet</span>' +
+      '        </button>' +
+      '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel" style="display:none; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-import-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 6px;">' +
+      '            <span class="gif-import-label" style="color:var(--text-muted);">Source Resolution:</span>' +
+      '            <span class="gif-import-value" id="gif-split-source-res" style="font-weight:bold; color:var(--accent-color);">2048 × 2048</span>' +
+      '          </div>' +
+      '          <div class="gif-import-col" style="margin-bottom: 8px;">' +
+      '            <div class="gif-import-label-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">' +
+      '              <label for="gif-split-scale" class="gif-import-label" style="color:var(--text-muted);">Scale</label>' +
+      '              <span class="gif-import-value" id="gif-split-scale-display" style="font-weight:bold;">100%</span>' +
+      '            </div>' +
+      '            <input type="range" id="gif-split-scale" min="10" max="100" step="5" value="100" style="width:100%;">' +
+      '          </div>' +
+      '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);">Sprite Sheet Grid Split</div>' +
+      '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-split-cols" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">X (Horizontal Split):</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-cols\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-split-cols" min="1" max="100" value="3">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-cols\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-split-rows" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Y (Vertical Split):</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-rows\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-split-rows" min="1" max="100" value="3">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-rows\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-split-inner-gap" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Center Gap (px):</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-inner-gap\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-split-inner-gap" min="0" max="500" value="0">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-inner-gap\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-split-outer-margin" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Outer Margin (px):</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-outer-margin\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-split-outer-margin" min="0" max="500" value="0">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-outer-margin\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-import-row" style="margin-bottom: 8px;">' +
+      '            <label class="gif-check-label" style="font-size:12px;"><input type="checkbox" id="gif-split-enable-outer"> <span>Enable outer border gap</span></label>' +
+      '          </div>' +
+      '          <div class="gif-import-summary-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 8px; border-top: 1px dashed var(--glass-border); padding-top: 6px;">' +
+      '            <div>' +
+      '              <span class="gif-import-label">Actual Frames: </span>' +
+      '              <span class="gif-import-summary-val" id="gif-split-actual-frames" style="font-weight:bold;">9</span>' +
+      '            </div>' +
+      '            <div>' +
+      '              <span class="gif-import-label">Duration: </span>' +
+      '              <span class="gif-import-summary-val" id="gif-split-duration">00:00:00.000</span>' +
+      '            </div>' +
+      '          </div>' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-apply-btn" style="margin-top: 4px;">Split</button>' +
+      '        </div>' +
       '      </div>' +
       '      <div id="gif-transparency-wrapper" style="margin-top: 10px;">' +
       '        <label class="gif-check-label"><input type="checkbox" id="gif-enable-trans"> <span data-i18n="gifEditorEnableTrans">色键透明</span></label>' +
@@ -1824,7 +2017,7 @@
       '          <button type="button" class="gif-btn gif-btn-danger gif-sm-btn" id="gif-delete-layer-btn" data-i18n="gifEditorDeleteLayer">删除</button>' +
       '        </div>' +
       '      </div>' +
-      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
+      '      <div class="gif-output-sep-inner" id="gif-batch-delete-container" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
       '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">批量删除帧</div>' +
       '        <div class="gif-control-row">' +
       '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +

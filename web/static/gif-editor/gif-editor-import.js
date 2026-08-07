@@ -164,7 +164,14 @@
       draft.sourceHeight = img.naturalHeight || img.height;
       draft.sourceDurationMs = 0;
       draft.endMs = 0;
-      showImportModal();
+      draft.splitCols = 1;
+      draft.splitRows = 1;
+      draft.innerGap = 0;
+      draft.outerMargin = 0;
+      draft.enableOuterGap = false;
+      draft.scalePercent = 100;
+      // Direct import for single image without modal
+      commitImportDraft();
     };
     img.onerror = function () {
       alert(t('gifEditorAlertLoadImageFailed', 'Failed to load image metadata.'));
@@ -989,6 +996,14 @@
 
       if (currentDraft.kind === 'image' && nextSlices[0]) {
         core.state.processedImg = nextSlices[0].canvas;
+        if (currentDraft.image) {
+          var backupCanvas = document.createElement('canvas');
+          backupCanvas.width = currentDraft.sourceWidth;
+          backupCanvas.height = currentDraft.sourceHeight;
+          backupCanvas.getContext('2d').drawImage(currentDraft.image, 0, 0);
+          core.state.source.rawImage = backupCanvas;
+          core.state.source.image = backupCanvas;
+        }
       }
 
       // Frames are independent canvases now: the draft media resources (video
@@ -1240,11 +1255,76 @@
     cancelDraft();
   }
 
+  function splitImage(opts) {
+    opts = opts || {};
+    var srcCanvas = (core.state.source && (core.state.source.rawImage || core.state.source.image)) || core.state.processedImg;
+    if (!srcCanvas) return Promise.reject(new Error('No image source available'));
+
+    var sourceWidth = srcCanvas.width || srcCanvas.naturalWidth || 800;
+    var sourceHeight = srcCanvas.height || srcCanvas.naturalHeight || 600;
+
+    var scale = Math.max(0.1, Math.min(1.0, (opts.scalePercent || 100) / 100));
+    var importWidth = Math.max(1, Math.round(sourceWidth * scale));
+    var importHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    var cols = Math.max(1, parseInt(opts.cols, 10) || 1);
+    var rows = Math.max(1, parseInt(opts.rows, 10) || 1);
+    var innerGap = Math.max(0, Math.round((opts.innerGap || 0) * scale));
+    var outerMargin = opts.enableOuterGap ? Math.max(0, Math.round((opts.outerMargin || 0) * scale)) : 0;
+
+    var availW = Math.max(1, importWidth - outerMargin * 2 - innerGap * (cols - 1));
+    var availH = Math.max(1, importHeight - outerMargin * 2 - innerGap * (rows - 1));
+    var cellW = Math.max(1, Math.floor(availW / cols));
+    var cellH = Math.max(1, Math.floor(availH / rows));
+
+    var scaledCanvas = document.createElement('canvas');
+    scaledCanvas.width = importWidth;
+    scaledCanvas.height = importHeight;
+    var sCtx = scaledCanvas.getContext('2d');
+    sCtx.drawImage(srcCanvas, 0, 0, importWidth, importHeight);
+
+    var nextSlices = [];
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var srcX = outerMargin + c * (cellW + innerGap);
+        var srcY = outerMargin + r * (cellH + innerGap);
+        var frame = document.createElement('canvas');
+        frame.width = cellW;
+        frame.height = cellH;
+        frame.getContext('2d').drawImage(scaledCanvas, srcX, srcY, cellW, cellH, 0, 0, cellW, cellH);
+        nextSlices.push({
+          id: core.freshId(),
+          canvas: frame,
+          delay: 200,
+          layers: []
+        });
+      }
+    }
+
+    core.resetSlices();
+    core.state.slices = nextSlices;
+    core.state.source.width = importWidth;
+    core.state.source.height = importHeight;
+    core.state.source.gridSliced = true;
+    if (nextSlices[0]) {
+      core.state.processedImg = nextSlices[0].canvas;
+    }
+
+    if (core.timeline && core.timeline.render) core.timeline.render();
+    if (core.commands.focusFrame) core.commands.focusFrame(0);
+    if (core.commands.redrawSelection) core.commands.redrawSelection(0);
+    if (core.commands.updateSelectionUI) core.commands.updateSelectionUI(0);
+    if (core.commands.resetView) core.commands.resetView();
+
+    return Promise.resolve(nextSlices);
+  }
+
   var importApi = {
     openFromFile: openFromFile,
     bindEvents: bindEvents,
     cancel: cancelDraft,
-    cleanup: cleanup
+    cleanup: cleanup,
+    splitImage: splitImage
   };
 
   core.registerModule('import', importApi);
