@@ -1,6 +1,5 @@
 # TinyRouter Playground 架构
-
-> **最后核对（2026-08-07 GIF 编辑器 X/Y 标签更名、Sprite 导出预览与高对比度拆分线改造）：** (1) 将所有 Sprite Sheet 相关的 Cols / Rows 统一更名为 **X (Horizontal Split)** 与 **Y (Vertical Split)** 指示标签；(2) 彻底移除了导出拼图时弹出的老版本 `showResultModal`，现在点击 `Export Sprite Sheet` 后直接在 Export Modal 主预览大图中刷新渲染拼接成果，并同步直接弹窗 Native `showSaveFilePicker` 保存 PNG 文件；(3) 增强了图片导入时网格拆分线的视觉表现：双重暗阴影+荧光绿线框+四角 Handle 节点指示器，在任何暗色或繁复图像上均极清晰醒目，并修复了 `Actual Frames` 统计随 X/Y 变化的即时刷新。`node --check` 语法与 `go test ./...` 校验全过。
+> **最后核对（2026-08-08 Markdown URL 渲染回归修复）：** Playground 使用 marked@18.0.5，其 `renderer.link` 回调改为接收单个 Link token；共享 `pg-markdown.js` 已兼容 token 与旧三参数签名，使用 token.href/text/tokens 渲染并统一将链接限制为 `http:`/`https:`，避免 URL 被拼接为 `[object Object]`。该共享 marked 实例也服务管理端 `info_common.js` 的 request/debug pretty 字段；Raw 视图仍保留原始字符串。回归覆盖裸 URL、Markdown 链接、安全协议降级与 Search Pretty/Raw 语义。
 >
 >
 > **最后核对（2026-08-06 前端目录与 CSS 维护）：** 核心与 Playground 前端模块已按 feature 子目录整理；Playground 静态路由由 internal/feature/feature.go 的 StaticFiles 经 feature.Assets 派生；Log Reader 专属样式归属 playground.css，style.css 保留共享样式。

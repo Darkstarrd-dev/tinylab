@@ -9,15 +9,43 @@ function pgInitMarker() {
   }
   marked.use({
     renderer: {
-      link: function(href, title, text) {
-        var out = '<a href="' + href + '" target="_blank" rel="noopener noreferrer">';
-        if (title) out += ' data-tooltip="' + title + '"';
-        out += (text || href) + '</a>';
-        return out;
+      // marked@18 passes one Link token; older marked releases passed
+      // (href, title, text). Accept both shapes so the shared renderer
+      // remains compatible with either bundle.
+      link: function(tokenOrHref, oldTitle, oldText) {
+        var token = tokenOrHref && typeof tokenOrHref === 'object' ? tokenOrHref : null;
+        var href = token ? token.href : tokenOrHref;
+        var title = token ? token.title : oldTitle;
+        var text = token ? token.text : oldText;
+        var safeHref = pgMarkdownSafeHref(href);
+        var label = token && this.parser && typeof this.parser.parseInline === 'function' && token.tokens
+          ? this.parser.parseInline(token.tokens)
+          : (text || href || '');
+        var out = '<a href="' + pgMarkdownEscapeHtml(safeHref) + '" target="_blank" rel="noopener noreferrer">';
+        if (title) out += ' data-tooltip="' + pgMarkdownEscapeHtml(title) + '"';
+        out += token ? label : (label || safeHref);
+        return out + '</a>';
       }
     }
   });
   pgMarkerReady = true;
+}
+
+function pgMarkdownEscapeHtml(value) {
+  if (typeof pgEscapeHtml === 'function') return pgEscapeHtml(value == null ? '' : String(value));
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function pgMarkdownSafeHref(rawHref) {
+  var href = rawHref == null ? '' : String(rawHref);
+  try {
+    var origin = (typeof window !== 'undefined' && window.location && window.location.origin) || 'http://localhost';
+    var parsed = new URL(href, origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+  } catch (e) {}
+  return '#';
 }
 
 // DOMPurify config that allows KaTeX output (SVG/MathML + presentation attrs).

@@ -741,6 +741,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改 SSE 流式透传 | proxy | `proxy/stream.go`、`proxy/forward.go` |
 | 修改非流式 keep-alive 刷新 / 图片长响应超时 | proxy | `proxy/forward_retry.go`（原 `forwardWithRetry` 内 keep-alive ticker 已于 H-8 修复中移除——见 §8.7；非流式不再提前提交 200，全 key 耗尽恢复 502）、`internal/api/compress/compress.go`（`/v1/images/*` 绕过列表，历史遗留，现 keep-alive 已无）、`proxy/stream.go`（`passThroughResponse` `headersFlushed` 参数已移除，恒写头 + `WriteHeader(resp.StatusCode)`）；前端 `pg-stream.js`（`pgSendImage` imgTimer）、`pg-render.js`（`pgTickWaiting` 安全网） |
 | 修改上游 URL/body 改写 | proxy | `proxy/upstream.go`、`proxy/forward.go` |
+| 修复 Playground Markdown URL 渲染 | playground | `web/playground/static-pg/playground/pg-markdown.js`（marked@18 Link token 兼容、http/https 安全 URL 渲染）+ `web/playground-markdown.test.js`（Pretty/Raw URL 回归）+ `docs/playground-architecture.md` |
 | Provider 列表顺序调整与避让 | config-registry-state | `registry/providers.go`（`ReorderProvider`）、`internal/api/providers/register.go`（`reorderProvider`）、`api/router.go`（`PUT /providers/{id}/reorder`）、`web/static/providers.js`（`renderProviderDetail` 顶栏排序输入框 + `changeProviderOrder`）、`web/static/style.css`（`.btn-order-input`）、`web/static/i18n.js`（`providerOrder*`/`invalidOrderRange` 翻译键） |
 | 修改 Gemini thought_signature 回填 | proxy | `proxy/signature_cache.go`+`forward.go`+`stream.go`、`config/types.go`（`IsGeminiOpenAICompat`） |
 | 新增管理 API 端点 | （对应模块文档）、config-registry-state | `api/router.go`（挂载+鉴权边界）、`api/<域>.go`、`registry/<域>.go` |
