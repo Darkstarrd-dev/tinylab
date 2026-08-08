@@ -527,22 +527,102 @@
     });
   }
 
+  var editorSessionImages = [];
+  var editorImageSeq = 1;
+
+  function compressToWebp70(fileOrBlob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var img = new Image();
+        img.onload = function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(function (blob) {
+            if (blob) resolve(blob);
+            else reject(new Error('Canvas compression failed'));
+          }, 'image/webp', 0.70);
+        };
+        img.onerror = function (err) { reject(err); };
+        img.src = e.target.result;
+      };
+      reader.onerror = function (err) { reject(err); };
+      reader.readAsDataURL(fileOrBlob);
+    });
+  }
+
+  function addSessionImage(fileOrBlob) {
+    return compressToWebp70(fileOrBlob).then(function (webpBlob) {
+      var numStr = String(editorImageSeq++).padStart(3, '0') + '.webp';
+      var objectUrl = URL.createObjectURL(webpBlob);
+      var item = { id: numStr, blob: webpBlob, objectUrl: objectUrl };
+      editorSessionImages.push(item);
+      return item;
+    });
+  }
+
+  function flushSessionImagesForSave(targetPath, currentValue) {
+    if (!targetPath || !currentValue || !editorSessionImages.length) return Promise.resolve(currentValue);
+    var referenced = editorSessionImages.filter(function (it) {
+      return currentValue.indexOf(it.objectUrl) >= 0;
+    });
+    if (referenced.length === 0) return Promise.resolve(currentValue);
+
+    var filename = targetPath.replace(/\\/g, '/').split('/').pop() || 'document.md';
+    var baseName = filename.replace(/\.[^/.]+$/, '').replace(/[^\w-]/g, '_') || 'doc';
+    var imgsSubdir = baseName + '_imgs';
+
+    var formData = new FormData();
+    formData.append('targetPath', targetPath);
+    formData.append('imgsSubdir', imgsSubdir);
+    referenced.forEach(function (it) {
+      formData.append('files', it.blob, it.id);
+    });
+
+    return fetch('/api/editor/save-session-images', {
+      method: 'POST',
+      body: formData
+    }).then(function (res) {
+      return res.json();
+    }).then(function (data) {
+      if (data && data.ok) {
+        var updatedValue = currentValue;
+        referenced.forEach(function (it) {
+          var relPath = './' + imgsSubdir + '/' + it.id;
+          updatedValue = updatedValue.split(it.objectUrl).join(relPath);
+        });
+        return updatedValue;
+      }
+      return currentValue;
+    }).catch(function (err) {
+      console.warn('[Flush Session Images Failed]', err);
+      return currentValue;
+    });
+  }
+
   function saveWorkspace() {
     var input = currentInput();
     if (!input || !shellState.currentId) return Promise.resolve(false);
     var value = input.value;
 
     function doSavePath(targetPath) {
-      return fetch('/api/editor/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: targetPath, content: value })
-      }).then(function (response) {
-        return response.json().then(function (data) {
-          if (!response.ok || !data || !data.ok) return false;
-          return global.EditorWorkspace.updateNode(shellState.currentId, { content: value, meta: { externalPath: targetPath } }).then(function (node) { return !!node; });
-        });
-      }).catch(function () { return false; });
+      return flushSessionImagesForSave(targetPath, value).then(function (finalValue) {
+        value = finalValue;
+        input.value = finalValue;
+        return fetch('/api/editor/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: targetPath, content: value })
+        }).then(function (response) {
+          return response.json().then(function (data) {
+            if (!response.ok || !data || !data.ok) return false;
+            return global.EditorWorkspace.updateNode(shellState.currentId, { content: value, meta: { externalPath: targetPath } }).then(function (node) { return !!node; });
+          });
+        }).catch(function () { return false; });
+      });
     }
 
     var targetPath = shellState.currentNode && shellState.currentNode.externalPath;
@@ -667,30 +747,18 @@
   function uploadAndInsertImage(file, altText) {
     var input = currentInput();
     if (!input) return;
-    var formData = new FormData();
-    formData.append('file', file, file.name || 'image.png');
-    toast('Uploading image...', 'info');
+    toast('Compressing WebP...', 'info');
 
-    fetch('/api/editor/upload-image', {
-      method: 'POST',
-      body: formData
-    }).then(function(res) {
-      if (!res.ok) throw new Error('Upload failed');
-      return res.json();
-    }).then(function(data) {
-      if (data && data.url) {
-        if (global.EditorCommands) {
-          global.EditorCommands.insertImage(input, altText || 'image', data.url);
-          updateGutter();
-          redraw();
-          toast('Image uploaded and inserted', 'success');
-        }
-      } else {
-        throw new Error('Invalid upload response');
+    addSessionImage(file).then(function (item) {
+      if (global.EditorCommands) {
+        global.EditorCommands.insertImage(input, altText || 'image', item.objectUrl);
+        updateGutter();
+        redraw();
+        toast('Image loaded into session (' + item.id + ')', 'success');
       }
-    }).catch(function(err) {
-      console.error('[Upload Image]', err);
-      toast('Image upload failed: ' + (err.message || 'Error'), 'error');
+    }).catch(function (err) {
+      console.error('[Session Image]', err);
+      toast('Image process failed: ' + (err.message || 'Error'), 'error');
     });
   }
 

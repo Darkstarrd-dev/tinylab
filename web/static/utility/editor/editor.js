@@ -717,12 +717,26 @@ function edRenderParsed(idx) {
       else if (typeof marked !== 'undefined' && typeof marked.parse === 'function') html = marked.parse(content);
     } catch (e) { html = ''; }
     if (html) {
-      html = html.replace(/src=["'](\.?\/imgs\/[^"']+)["']/gi, function(match, p1) {
+      html = html.replace(/src=["'](\.?[\\/][^"']+)["']/gi, function(match, p1) {
+        if (/^blob:/i.test(p1) || /^data:/i.test(p1) || /^https?:\/\//i.test(p1)) return match;
         return 'src="/api/editor/image?path=' + encodeURIComponent(p1) + '"';
       });
     }
     if (!html) html = '<pre>' + edEscapeHtml(content) + '</pre>';
     area.innerHTML = '<div class="pg-bubble pg-bubble-slot">' + edSanitizeHtml(html) + '</div>';
+    edHighlight(area);
+  } else if (edIsHtmlExt(ext)) {
+    var parsedHtml = '';
+    try {
+      if (typeof window !== 'undefined' && typeof window.DOMPurify !== 'undefined') {
+        parsedHtml = window.DOMPurify.sanitize(content, { WHOLE_DOCUMENT: false, ADD_TAGS: ['style'], ADD_ATTR: ['target'] });
+      } else {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(content, 'text/html');
+        parsedHtml = doc.body ? doc.body.innerHTML : content;
+      }
+    } catch (e) { parsedHtml = edEscapeHtml(content); }
+    area.innerHTML = '<div class="ed-html-rendered-container" style="padding:16px;">' + parsedHtml + '</div>';
     edHighlight(area);
   } else if (edIsCodeExt(ext)) {
     var pre = document.createElement('pre');

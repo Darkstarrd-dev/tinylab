@@ -38,6 +38,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/open", h.editorOpen)
 	r.Post("/save", h.editorSave)
 	r.Post("/upload-image", h.editorUploadImage)
+	r.Post("/save-session-images", h.editorSaveSessionImages)
 	r.Get("/image", h.editorServeImage)
 }
 
@@ -284,4 +285,54 @@ func (h *Handler) editorServeImage(w http.ResponseWriter, r *http.Request) {
 	cleanRel := filepath.Clean(relPath)
 	fullPath := filepath.Join(docDir, cleanRel)
 	http.ServeFile(w, r, fullPath)
+}
+
+// editorSaveSessionImages accepts multipart form with targetPath, imgsSubdir, and image files,
+// saving them into targetFile's parent directory + imgsSubdir.
+func (h *Handler) editorSaveSessionImages(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(32 << 20)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to parse multipart form")
+		return
+	}
+
+	targetPath := r.FormValue("targetPath")
+	imgsSubdir := r.FormValue("imgsSubdir")
+	if targetPath == "" || imgsSubdir == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "targetPath and imgsSubdir required")
+		return
+	}
+
+	dir := filepath.Dir(targetPath)
+	targetImgDir := filepath.Join(dir, imgsSubdir)
+	_ = os.MkdirAll(targetImgDir, 0755)
+
+	files := r.MultipartForm.File
+	for fieldName, fileHeaders := range files {
+		if fieldName == "targetPath" || fieldName == "imgsSubdir" {
+			continue
+		}
+		for _, header := range fileHeaders {
+			f, err := header.Open()
+			if err != nil {
+				continue
+			}
+			dstPath := filepath.Join(targetImgDir, header.Filename)
+			out, err := os.Create(dstPath)
+			if err != nil {
+				f.Close()
+				continue
+			}
+			_, _ = io.Copy(out, f)
+			out.Close()
+			f.Close()
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":         true,
+		"targetDir":  targetImgDir,
+		"imgsSubdir": imgsSubdir,
+	})
 }
