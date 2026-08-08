@@ -129,15 +129,24 @@
     var content = input ? input.value : '';
     var preview = shellRoot.querySelector('#ed-main-preview');
     var stats = global.EditorMarkdown.getStats(content, preview ? preview.innerHTML : '');
-    var before = input ? content.slice(0, input.selectionStart || 0) : '';
+    var selStart = input ? (input.selectionStart || 0) : 0;
+    var selEnd = input ? (input.selectionEnd || 0) : 0;
+    var before = input ? content.slice(0, selStart) : '';
     var line = before ? before.split(/\r?\n/).length : 1;
     var column = before ? before.length - before.lastIndexOf('\n') : 0;
     var dirty = content !== shellState.original;
     shellState.dirty = dirty;
+    var textSel = selStart !== selEnd;
     global.EditorLayout.updateTitle(shellRoot, shellState.currentNode && shellState.currentNode.name, dirty);
     global.EditorLayout.updateStatus(shellRoot, {
-      left: 'Markdown · ' + stats.bytes + ' bytes · ' + stats.words + ' words · ' + stats.lines + ' lines',
-      right: 'HTML · ' + stats.chars + ' chars · ' + stats.paragraphs + ' paragraphs · Ln ' + line + ', Col ' + column
+      textSelection: textSel,
+      bytes: stats.bytes,
+      words: stats.words,
+      lines: stats.lines,
+      line: line,
+      column: column,
+      chars: stats.chars,
+      paragraphs: stats.paragraphs
     });
   }
   function shellFindRefresh() {
