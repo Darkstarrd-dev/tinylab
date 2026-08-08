@@ -120,7 +120,9 @@
     var content = currentText();
     var ext = shellState.currentNode ? edFileExt(shellState.currentNode.name) : 'md';
 
-    if (shellState.htmlRender || edIsHtmlExt(ext)) {
+    var isHtml = typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
+
+    if (shellState.htmlRender || isHtml) {
       preview.innerHTML = '';
       var iframe = document.createElement('iframe');
       iframe.className = 'ed-iframe-preview';

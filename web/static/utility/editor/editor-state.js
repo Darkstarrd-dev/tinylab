@@ -35,6 +35,10 @@ function edIsMdExt(ext) {
   return ext === 'md' || ext === 'markdown';
 }
 
+function edIsHtmlExt(ext) {
+  return ext === 'html' || ext === 'htm';
+}
+
 function edLangForExt(ext) {
   // Map extensions to highlight.js language classes
   var map = {
