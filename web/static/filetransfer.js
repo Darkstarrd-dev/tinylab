@@ -2,7 +2,19 @@
 // upload through the backend's ordered temporary-host fallback.
 'use strict';
 
-var fileTransferState = { items: [], busy: false, pasteHandler: null, dragGuard: null };
+var fileTransferState = {
+  items: [], busy: false, pasteHandler: null, dragGuard: null,
+  root: null, actionButton: null, cancelButton: null
+};
+
+function fileTransferElement(id) {
+  var root = fileTransferState.root;
+  if (root && root.querySelector) {
+    var scoped = root.querySelector('#' + id);
+    if (scoped) return scoped;
+  }
+  return document.getElementById(id);
+}
 
 function fileTransferFormatSize(size) {
   size = Number(size) || 0;
@@ -13,9 +25,9 @@ function fileTransferFormatSize(size) {
 }
 
 function fileTransferRenderList() {
-  var list = document.getElementById('filetransfer-file-list');
-  var summary = document.getElementById('filetransfer-summary');
-  var zone = document.getElementById('filetransfer-drop-zone');
+  var list = fileTransferElement('filetransfer-file-list');
+  var summary = fileTransferElement('filetransfer-summary');
+  var zone = fileTransferElement('filetransfer-drop-zone');
   if (!list || !summary || !zone) return;
   if (!fileTransferState.items.length) {
     list.innerHTML = '<div class="filetransfer-empty">' + escapeHtml(t('fileTransferNoFiles')) + '</div>';
@@ -94,7 +106,7 @@ async function fileTransferCollectDataTransfer(dt) {
 }
 
 async function fileTransferPaste(e) {
-  if (fileTransferState.busy || !document.getElementById('filetransfer-drop-zone')) return;
+  if (fileTransferState.busy || !fileTransferElement('filetransfer-drop-zone')) return;
   e.preventDefault();
   try {
     var pathResponse = await fetch('/api/gallery/paste-paths', { method: 'POST' });
@@ -143,12 +155,12 @@ async function fileTransferPaste(e) {
 function fileTransferDragOver(e) {
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-  var zone = document.getElementById('filetransfer-drop-zone');
+  var zone = fileTransferElement('filetransfer-drop-zone');
   if (zone) zone.classList.add('drag-active');
 }
 
 function fileTransferDragLeave() {
-  var zone = document.getElementById('filetransfer-drop-zone');
+  var zone = fileTransferElement('filetransfer-drop-zone');
   if (zone) zone.classList.remove('drag-active');
 }
 
@@ -161,7 +173,7 @@ async function fileTransferDrop(e) {
 
 function fileTransferInstallDragGuard() {
   var guard = function(e) {
-    var zone = document.getElementById('filetransfer-drop-zone');
+    var zone = fileTransferElement('filetransfer-drop-zone');
     if (zone && zone.contains(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -180,18 +192,22 @@ function fileTransferRemove(index) {
     fileTransferRenderList();
   }
 }
+function fileTransferCancelButton() {
+  if (fileTransferState.cancelButton) return fileTransferState.cancelButton;
+  return document.querySelector('#modal-overlay .modal-footer .btn-ghost');
+}
 
 function fileTransferSetStatus(message, isError) {
-  var status = document.getElementById('filetransfer-status');
+  var status = fileTransferElement('filetransfer-status');
   if (!status) return;
   status.textContent = message || '';
   status.className = 'filetransfer-status' + (isError ? ' error' : '');
 }
 
 function fileTransferSetProgress(percent, visible) {
-  var wrap = document.getElementById('filetransfer-progress-wrap');
-  var bar = document.getElementById('filetransfer-progress');
-  var label = document.getElementById('filetransfer-progress-label');
+  var wrap = fileTransferElement('filetransfer-progress-wrap');
+  var bar = fileTransferElement('filetransfer-progress');
+  var label = fileTransferElement('filetransfer-progress-label');
   if (!wrap || !bar || !label) return;
   if (!visible) {
     wrap.hidden = true;
@@ -222,17 +238,17 @@ function fileTransferResetView() {
   fileTransferState.items = [];
   fileTransferSetStatus('', false);
   fileTransferSetProgress(0, false);
-  var result = document.getElementById('filetransfer-result');
+  var result = fileTransferElement('filetransfer-result');
   if (result) result.innerHTML = '';
-  var saveButton = document.getElementById('settings-modal-save');
+  var saveButton = fileTransferState.actionButton || fileTransferElement('settings-modal-save');
   if (saveButton) {
     saveButton.textContent = t('fileTransferConfirm');
     saveButton.style.display = '';
     saveButton.disabled = false;
   }
-  var clearButton = document.getElementById('filetransfer-clear');
+  var clearButton = fileTransferElement('filetransfer-clear');
   if (clearButton) clearButton.disabled = false;
-  var cancel = document.querySelector('#modal-overlay .modal-footer .btn-ghost');
+  var cancel = fileTransferCancelButton();
   if (cancel) cancel.textContent = t('cancel');
   fileTransferRenderList();
 }
@@ -249,8 +265,8 @@ async function fileTransferUpload() {
     return;
   }
   fileTransferState.busy = true;
-  var saveButton = document.getElementById('settings-modal-save');
-  var clearButton = document.getElementById('filetransfer-clear');
+  var saveButton = fileTransferState.actionButton || fileTransferElement('settings-modal-save');
+  var clearButton = fileTransferElement('filetransfer-clear');
   if (saveButton) saveButton.disabled = true;
   if (clearButton) clearButton.disabled = true;
   fileTransferSetStatus(t('fileTransferPacking'), false);
@@ -283,12 +299,12 @@ async function fileTransferUpload() {
     });
     fileTransferSetProgress(100, true);
     fileTransferSetStatus(t('fileTransferSuccess', [data.service || '']), false);
-    var result = document.getElementById('filetransfer-result');
+    var result = fileTransferElement('filetransfer-result');
     if (result) {
       var url = escapeHtml(data.url);
       result.innerHTML = '<a class="filetransfer-result-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
     }
-    var cancel = document.querySelector('#modal-overlay .modal-footer .btn-ghost');
+    var cancel = fileTransferCancelButton();
     if (cancel) cancel.textContent = t('close');
     if (saveButton) saveButton.style.display = 'none';
   } catch (err) {
@@ -301,7 +317,7 @@ async function fileTransferUpload() {
   }
 }
 
-function cleanupFileTransferModal() {
+function fileTransferRemoveGlobalListeners() {
   if (fileTransferState.pasteHandler) {
     document.removeEventListener('paste', fileTransferState.pasteHandler);
     fileTransferState.pasteHandler = null;
@@ -312,9 +328,108 @@ function cleanupFileTransferModal() {
     document.removeEventListener('drop', fileTransferState.dragGuard, true);
     fileTransferState.dragGuard = null;
   }
+}
+
+function fileTransferBind(root, actionButton, cancelButton) {
+  if (!root) return;
+  fileTransferState.root = root;
+  fileTransferState.actionButton = actionButton || null;
+  fileTransferState.cancelButton = cancelButton || null;
+  var zone = fileTransferElement('filetransfer-drop-zone');
+  var input = fileTransferElement('filetransfer-input');
+  var browse = fileTransferElement('filetransfer-browse');
+  var clearButton = fileTransferElement('filetransfer-clear');
+  if (!zone || !input || !browse) return;
+  if (fileTransferState.boundRoot !== root) {
+    zone.addEventListener('dragover', fileTransferDragOver);
+    zone.addEventListener('dragleave', fileTransferDragLeave);
+    zone.addEventListener('drop', fileTransferDrop);
+    zone.addEventListener('click', function(e) { if (e.target !== browse) input.click(); });
+    browse.onclick = function(e) { e.stopPropagation(); input.click(); };
+    if (clearButton) clearButton.onclick = fileTransferClear;
+    input.onchange = function() {
+      fileTransferAddPlainFiles(Array.prototype.slice.call(input.files || []));
+      input.value = '';
+    };
+    var list = fileTransferElement('filetransfer-file-list');
+    if (list) list.addEventListener('click', function(e) {
+      var button = e.target.closest('.filetransfer-remove');
+      if (button) fileTransferRemove(parseInt(button.dataset.index, 10));
+    });
+    fileTransferState.boundRoot = root;
+  }
+  fileTransferState.pasteHandler = function(e) {
+    if (fileTransferElement('filetransfer-drop-zone')) fileTransferPaste(e);
+  };
+  document.addEventListener('paste', fileTransferState.pasteHandler);
+  fileTransferInstallDragGuard();
+  requestAnimationFrame(function() { zone.focus(); });
+  fileTransferRenderList();
+}
+
+function cleanupFileTransferModal() {
+  fileTransferRemoveGlobalListeners();
   fileTransferState.items = [];
   fileTransferState.busy = false;
+  fileTransferState.root = null;
+  fileTransferState.actionButton = null;
+  fileTransferState.cancelButton = null;
+  fileTransferState.boundRoot = null;
 }
+
+function suspendFileTransfer() {
+  fileTransferRemoveGlobalListeners();
+}
+
+function resumeFileTransfer() {
+  var root = fileTransferState.root;
+  if (!root) return;
+  fileTransferState.pasteHandler = function(e) {
+    if (fileTransferElement('filetransfer-drop-zone')) fileTransferPaste(e);
+  };
+  document.addEventListener('paste', fileTransferState.pasteHandler);
+  fileTransferInstallDragGuard();
+}
+
+function cleanupFileTransfer() {
+  cleanupFileTransferModal();
+}
+
+function renderUtilityFileTransfer(container) {
+  if (!container) return null;
+  suspendFileTransfer();
+  fileTransferState.boundRoot = null;
+  fileTransferState.root = container;
+  container.innerHTML =
+    '<div class="filetransfer-utility">' +
+      '<p class="muted">' + escapeHtml(t('fileTransferDesc')) + '</p>' +
+      '<div id="filetransfer-drop-zone" class="filetransfer-drop-zone" tabindex="0">' +
+        '<input id="filetransfer-input" type="file" multiple style="display:none">' +
+        '<div class="filetransfer-drop-title">' + escapeHtml(t('fileTransferDropHere')) + '</div>' +
+        '<div class="filetransfer-drop-hint">' + escapeHtml(t('fileTransferPasteHint')) + '</div>' +
+        '<button type="button" class="btn btn-sm btn-primary" id="filetransfer-browse">' + escapeHtml(t('fileTransferBrowse')) + '</button>' +
+      '</div>' +
+      '<div id="filetransfer-summary" class="filetransfer-summary"></div>' +
+      '<div class="filetransfer-toolbar"><button type="button" class="btn btn-sm btn-ghost" id="filetransfer-clear">' + escapeHtml(t('fileTransferClear')) + '</button></div>' +
+      '<div id="filetransfer-file-list" class="filetransfer-file-list"></div>' +
+      '<div id="filetransfer-progress-wrap" class="filetransfer-progress-wrap" hidden><div class="filetransfer-progress-head"><span>' + escapeHtml(t('fileTransferProgress')) + '</span><span id="filetransfer-progress-label"></span></div><progress id="filetransfer-progress" max="100" value="0"></progress></div>' +
+      '<div id="filetransfer-result" class="filetransfer-result"></div>' +
+      '<div id="filetransfer-status" class="filetransfer-status"></div>' +
+      '<div class="filetransfer-actions"><button type="button" class="btn btn-ghost" id="filetransfer-cancel">' + escapeHtml(t('cancel')) + '</button><button type="button" class="btn btn-primary" id="filetransfer-action">' + escapeHtml(t('fileTransferConfirm')) + '</button></div>' +
+    '</div>';
+  var action = fileTransferElement('filetransfer-action');
+  var cancel = fileTransferElement('filetransfer-cancel');
+  if (action) action.onclick = function() { withLoading(this, fileTransferUpload); };
+  if (cancel) cancel.onclick = function() { suspendFileTransfer(); container.innerHTML = ''; };
+  fileTransferState.boundRoot = null;
+  fileTransferBind(container, action, cancel);
+  return container;
+}
+
+window.renderUtilityFileTransfer = renderUtilityFileTransfer;
+window.suspendFileTransfer = suspendFileTransfer;
+window.resumeFileTransfer = resumeFileTransfer;
+window.cleanupFileTransfer = cleanupFileTransfer;
 
 function openFileTransferModal() {
   cleanupFileTransferModal();

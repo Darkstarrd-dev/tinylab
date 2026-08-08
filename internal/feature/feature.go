@@ -210,14 +210,20 @@ func registerDefaults() {
 	register(Feature{
 		ID: Editor, Name: "Editor",
 		Description: "Text editor + AI Text Review (editor.js + editor_textreview*).",
-		StaticRoot:  RootPlaygroundPG,
+		StaticRoot:  RootStatic,
 		StaticFiles: []string{
-			"editor/editor-state.js", "editor/editor.js", "editor/editor-logs.js",
+			// Utility Editor vendor dependencies (load order: markdown-it -> Prism -> diff-match-patch -> Turndown -> DOMPurify).
+			"vendor/utility-editor/markdown-it/markdown-it.min.js",
+			"vendor/utility-editor/prism/prism.js",
+			"vendor/utility-editor/diff-match-patch/diff-match-patch.js",
+			"vendor/utility-editor/turndown/turndown.js",
+			"vendor/utility-editor/dompurify/purify.min.js",
+			"utility/editor/editor-state.js", "utility/editor/editor.js", "utility/editor/editor-logs.js",
 			// AI Text Review (load order: split/diff/state first, then steps, then entry).
-			"editor/editor_textreview_split.js", "editor/editor_textreview_diff.js", "editor/editor_textreview_state.js",
-			"editor/editor_textreview_step1.js", "editor/editor_textreview_step2.js",
-			"editor/editor_textreview_step3.js", "editor/editor_textreview_step4.js",
-			"editor/editor_textreview.js",
+			"utility/editor/editor_textreview_split.js", "utility/editor/editor_textreview_diff.js", "utility/editor/editor_textreview_state.js",
+			"utility/editor/editor_textreview_step1.js", "utility/editor/editor_textreview_step2.js",
+			"utility/editor/editor_textreview_step3.js", "utility/editor/editor_textreview_step4.js",
+			"utility/editor/editor_textreview.js", "utility/editor/review.js",
 		},
 	})
 	register(Feature{

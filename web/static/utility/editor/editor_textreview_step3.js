@@ -25,7 +25,7 @@ var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id fie
 var trS3ModelNames = {};        // "providerId/modelId" -> alias (from /api/models); keyed by providerId to avoid collision when multiple providers carry the same realModelId
 var trS3NodeNumbers = {};       // nodeId -> 1-based display number
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
-var trS3ModalModel = null;      // {providerId, modelId, label} selected via pgOpenModelPicker in Settings modal
+var trS3ModalModel = null;      // {providerId, modelId, label} selected in the local model prompt
 window.trS3NodeNumbers = trS3NodeNumbers;
 
 function trS3NodeBadge(nodeId) {
@@ -421,50 +421,30 @@ function trStep3RenderSettingsModal() {
   });
 }
 
-/**
- * Open the playground's model picker (pgOpenModelPicker) to select a model.
- * Ensures pgState.models is loaded first (pgLoadModels), since the Editor Clean
- * mode may not have triggered the playground's normal model load.
- */
+/** Select a text model without requiring Playground globals. */
 function trStep3PickModel() {
-  if (typeof pgOpenModelPicker !== 'function') {
-    trToast(trT('trPatternEditorUnavailable'), 'warning');
-    return;
-  }
-  var doPick = function () {
-    var current = trS3ModalModel ? trS3ModalModel.modelId : '';
-    pgOpenModelPicker(current, function (v) {
-      // v is the full model id (e.g. "sn/sensenova-6.7-flash-lite").
-      // Look it up in the cached /api/models response to get providerId + alias.
-      var all = window._trS3ModalModels || pgState.models || [];
-      var found = null;
-      for (var i = 0; i < all.length; i++) {
-        if (all[i].type === 'provider' && (all[i].id === v || all[i].realModelId === v)) {
-          found = all[i]; break;
-        }
-      }
-      if (found) {
-        trS3ModalModel = {
-          providerId: found.providerId,
-          modelId: found.realModelId || found.id,
-          label: found.alias || found.name || found.id
-        };
-      } else if (v) {
-        trS3ModalModel = { providerId: '', modelId: v, label: v };
-      }
-      var btn = document.getElementById('tr-s3-modal-model-btn');
-      if (btn && trS3ModalModel) {
-        btn.innerHTML = trEscapeHtml(trS3ModalModel.label) + ' <span style="float:right;opacity:0.5">▼</span>';
-      }
-    }, { kindFilter: 'text' });
-  };
-  if (pgState && pgState.models && pgState.models.length) {
-    doPick();
-  } else if (typeof pgLoadModels === 'function') {
-    pgLoadModels().then(function () { doPick(); });
-  } else {
-    doPick();
-  }
+  var current = trS3ModalModel ? trS3ModalModel.modelId : '';
+  trApiGet('/models').then(function (res) {
+    var all = res && Array.isArray(res.models) ? res.models : (Array.isArray(res) ? res : []);
+    var choices = [];
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i];
+      if (m && (m.type === 'provider' || m.providerId || m.realModelId || m.id)) choices.push(m);
+    }
+    var labels = choices.map(function (m, n) { return (n + 1) + ': ' + (m.alias || m.name || m.realModelId || m.id); });
+    var answer = window.prompt(labels.length ? labels.join('\n') + '\n\n' + trT('trSelectModel') : trT('trSelectModel'), current || '');
+    if (answer === null) return;
+    var selected = choices[parseInt(answer, 10) - 1] || null;
+    var id = selected ? (selected.realModelId || selected.id) : answer.trim();
+    if (!id) return;
+    trS3ModalModel = {
+      providerId: selected ? (selected.providerId || '') : '',
+      modelId: id,
+      label: selected ? (selected.alias || selected.name || id) : id
+    };
+    var btn = document.getElementById('tr-s3-modal-model-btn');
+    if (btn) btn.textContent = trS3ModalModel.label;
+  }, function () { trToast(trT('trNodesLoadFailed'), 'warning'); });
 }
 function trStep3AddNode() {
   if (!trS3ModalModel || !trS3ModalModel.providerId) {

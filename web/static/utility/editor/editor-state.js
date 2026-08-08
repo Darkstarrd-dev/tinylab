@@ -46,8 +46,8 @@ function edLangForExt(ext) {
 // ---------- state ------------------------------------------------
 var editorState = {
   panes: [
-    { name: '', path: null, original: '', view: 'raw', wrap: true },
-    { name: '', path: null, original: '', view: 'raw', wrap: true }
+    { name: '', path: null, original: '', value: '', view: 'raw', wrap: true, scrollTop: 0, scrollLeft: 0, dirty: false },
+    { name: '', path: null, original: '', value: '', view: 'raw', wrap: true, scrollTop: 0, scrollLeft: 0, dirty: false }
   ],
   mode: 'edit',          // 'edit' | 'diff' | 'clean'
   diffSource: 'left-after',    // 'left-after' | 'right-after' | 'left-vs-right'
@@ -77,7 +77,7 @@ function edSaveState() {
   };
   for (var i = 0; i < editorState.panes.length; i++) {
     var p = editorState.panes[i];
-    saved.panes.push({ name: p.name, path: p.path, original: p.original, view: p.view, wrap: p.wrap });
+    saved.panes.push({ name: p.name, path: p.path, original: p.original, value: p.value, view: p.view, wrap: p.wrap, scrollTop: p.scrollTop, scrollLeft: p.scrollLeft, dirty: p.dirty });
   }
   try { sessionStorage.setItem(ED_STATE_KEY, JSON.stringify(saved)); } catch (e) {}
 }
@@ -99,8 +99,12 @@ function edLoadState() {
             if (typeof sp.name === 'string') dp.name = sp.name;
             if (sp.path === null || typeof sp.path === 'string') dp.path = sp.path;
             if (typeof sp.original === 'string') dp.original = sp.original;
+            if (typeof sp.value === 'string') dp.value = sp.value;
             if (typeof sp.view === 'string') dp.view = sp.view;
             if (typeof sp.wrap === 'boolean') dp.wrap = sp.wrap;
+            if (typeof sp.scrollTop === 'number') dp.scrollTop = sp.scrollTop;
+            if (typeof sp.scrollLeft === 'number') dp.scrollLeft = sp.scrollLeft;
+            if (typeof sp.dirty === 'boolean') dp.dirty = sp.dirty;
           }
         }
       }

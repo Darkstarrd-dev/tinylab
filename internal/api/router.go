@@ -441,6 +441,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			})
 		})
 		if feature.Enabled(feature.FileTransfer) {
+			r.Post("/upload", fileTransferHandler.Upload)
 			r.Post("/path-info", fileTransferHandler.PathInfo)
 		}
 	})

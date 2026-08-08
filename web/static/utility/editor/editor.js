@@ -126,53 +126,13 @@ window.renderEditor = function(container) {
   container.style.overflow = 'hidden';
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
-  // Mode switch: File Editor | Log Reader
-  var modeSwitch = document.createElement('div');
-  modeSwitch.className = 'log-mode-switch';
-
-  var fileEditorBtn = document.createElement('button');
-  fileEditorBtn.className = 'log-mode-btn' + (editorState.mode !== 'logReader' ? ' active' : '');
-  fileEditorBtn.textContent = T('logFileEditor');
-  fileEditorBtn.dataset.mode = 'fileEditor';
-
-  var logReaderBtn = document.createElement('button');
-  logReaderBtn.className = 'log-mode-btn' + (editorState.mode === 'logReader' ? ' active' : '');
-  logReaderBtn.textContent = T('logReader');
-  logReaderBtn.dataset.mode = 'logReader';
-
-  modeSwitch.appendChild(fileEditorBtn);
-  modeSwitch.appendChild(logReaderBtn);
-  container.appendChild(modeSwitch);
-
-  // Content container for either log reader or file editor UI
-  fileEditorBtn.addEventListener('click', function() {
-    editorState.mode = 'edit';
-    if (typeof window.cleanupEditorLogs === 'function') {
-      window.cleanupEditorLogs();
-    }
-    window.renderEditor(container);
-  });
-  logReaderBtn.addEventListener('click', function() {
-    editorState.mode = 'logReader';
-    if (typeof window.renderLogReader === 'function') {
-      window.renderLogReader(contentContainer);
-    }
-  });
+  // File Editor owns this page. Log Reader and Review are separate Utility tools.
   var contentContainer = document.createElement('div');
-  contentContainer.className = 'log-reader-content';
+  contentContainer.className = 'ed-content';
   contentContainer.style.flex = '1';
   contentContainer.style.minHeight = '0';
   container.appendChild(contentContainer);
-
-  // If Log Reader mode, render log reader into content container and stop here
-  if (editorState.mode === 'logReader') {
-    if (typeof window.renderLogReader === 'function') {
-      window.renderLogReader(contentContainer);
-    }
-    return;
-  }
-
-  // File Editor mode: render the existing editor UI below the mode switch
+  if (editorState.mode !== 'diff') editorState.mode = 'edit';
 
   // Build layout
   var layout = document.createElement('div');
@@ -186,7 +146,7 @@ window.renderEditor = function(container) {
   toolbar.id = 'ed-toolbar';
   layout.appendChild(toolbar);
 
-  // Mode toggle
+  // Edit/Diff are the only File Editor modes. Review is a separate Utility tool.
   var modeGroup = document.createElement('div');
   modeGroup.className = 'ed-toolbar-group';
   var modeEditBtn = document.createElement('button');
@@ -199,11 +159,6 @@ window.renderEditor = function(container) {
   modeDiffBtn.dataset.mode = 'diff';
   modeGroup.appendChild(modeEditBtn);
   modeGroup.appendChild(modeDiffBtn);
-  var modeCleanBtn = document.createElement('button');
-  modeCleanBtn.className = 'ed-btn ed-btn-sm' + (editorState.mode === 'clean' ? ' active' : '');
-  modeCleanBtn.textContent = T('editorClean');
-  modeCleanBtn.dataset.mode = 'clean';
-  modeGroup.appendChild(modeCleanBtn);
   toolbar.appendChild(modeGroup);
 
   // Diff source selector (hidden in edit mode)
@@ -233,18 +188,20 @@ window.renderEditor = function(container) {
   diffSourceGroup.appendChild(dsSelect);
   toolbar.appendChild(diffSourceGroup);
 
-  // Spacer
   var spacer = document.createElement('div');
   spacer.className = 'ed-toolbar-spacer';
   toolbar.appendChild(spacer);
 
-  // Save All button
   var saveAllBtn = document.createElement('button');
   saveAllBtn.className = 'ed-btn ed-btn-sm';
   saveAllBtn.id = 'ed-save-all';
   saveAllBtn.textContent = T('editorSaveAll');
   toolbar.appendChild(saveAllBtn);
-
+  var findBtn = document.createElement('button');
+  findBtn.className = 'ed-btn ed-btn-sm';
+  findBtn.textContent = T('editorFind') || 'Search';
+  findBtn.id = 'ed-find-toggle';
+  toolbar.appendChild(findBtn);
   // Panes container
   var panesContainer = document.createElement('div');
   panesContainer.className = 'ed-panes';
@@ -339,9 +296,11 @@ window.renderEditor = function(container) {
     var textarea = document.createElement('textarea');
     textarea.className = 'ed-input' + (editorState.panes[pi].wrap ? ' ed-wrap' : '');
     textarea.id = 'ed-input-' + pi;
-    textarea.value = editorState.panes[pi].original;
+    textarea.value = typeof editorState.panes[pi].value === 'string' ? editorState.panes[pi].value : editorState.panes[pi].original;
     textarea.spellcheck = false;
     editArea.appendChild(textarea);
+    textarea.scrollTop = editorState.panes[pi].scrollTop || 0;
+    textarea.scrollLeft = editorState.panes[pi].scrollLeft || 0;
     body.appendChild(editArea);
 
     // Parsed view area
@@ -360,35 +319,20 @@ window.renderEditor = function(container) {
   diffArea.id = 'ed-diff-area';
   layout.appendChild(diffArea);
 
-  // Review area wrapper (Clean mode — hosts AI Text Review wizard in left pane)
-  var reviewWrap = document.createElement('div');
-  reviewWrap.className = 'ed-review-wrap' + (editorState.mode === 'clean' ? '' : ' ed-hidden');
-  reviewWrap.id = 'ed-review-wrap';
-
-  var reviewArea = document.createElement('div');
-  reviewArea.className = 'ed-review-area';
-  reviewArea.id = 'ed-review-area';
-  reviewWrap.appendChild(reviewArea);
-
-  var reviewContent = document.createElement('pre');
-  reviewContent.className = 'ed-review-content';
-  reviewContent.id = 'ed-review-content';
-  reviewWrap.appendChild(reviewContent);
-
-  layout.appendChild(reviewWrap);
-
+  var statusBar = document.createElement('div');
+  statusBar.className = 'ed-statusbar';
+  statusBar.id = 'ed-statusbar';
+  layout.appendChild(statusBar);
   // ===================== Bind events =====================
-
-  // Mode toggle
   modeEditBtn.addEventListener('click', function() { edSetMode('edit'); });
   modeDiffBtn.addEventListener('click', function() { edSetMode('diff'); });
-  modeCleanBtn.addEventListener('click', function() { edSetMode('clean'); });
 
   // Diff source
   dsSelect.addEventListener('change', function() {
     editorState.diffSource = this.value;
     edRenderDiff();
   });
+  findBtn.addEventListener('click', function() { edToggleFind(false); });
 
   // Save all
   saveAllBtn.addEventListener('click', function() { edSaveAll(); });
@@ -410,10 +354,12 @@ window.renderEditor = function(container) {
       var ta = document.getElementById('ed-input-' + idx);
       if (!ta) return;
       ta.addEventListener('input', function() { edOnInput(idx); });
-      ta.addEventListener('scroll', function() { edSyncGutter(idx); });
+      ta.addEventListener('scroll', function() { edSyncGutter(idx); edSyncParsedScroll(idx); });
       ta.addEventListener('keydown', function(e) { edTextareaKeydown(e, idx); });
       ta.addEventListener('focus', function() { edFocusPane(idx); });
       ta.addEventListener('click', function() { edFocusPane(idx); });
+      var parsed = document.getElementById('ed-parsed-area-' + idx);
+      if (parsed) parsed.addEventListener('scroll', function() { edSyncRawScroll(idx); });
     })(ti);
   }
 
@@ -497,21 +443,13 @@ window.renderEditor = function(container) {
   };
   document.addEventListener('keydown', edKeyHandler);
 
-  // Render parsed views if needed
+  // Render parsed views if needed.
   for (var rpi = 0; rpi < 2; rpi++) {
-    if (editorState.panes[rpi].view === 'parsed') {
-      edRenderParsed(rpi);
-    }
+    if (editorState.panes[rpi].view === 'parsed') edRenderParsed(rpi);
   }
-
-  // Initial gutter update
   edUpdateGutters();
-
-  if (editorState.mode === 'clean') {
-    edSetMode('clean');
-  } else {
-    edRenderDiff();
-  }
+  edUpdateStatus();
+  edRenderDiff();
 };
 
 // ===================== cleanup =====================
@@ -521,17 +459,11 @@ window.cleanupEditor = function() {
     document.removeEventListener('keydown', edKeyHandler);
     edKeyHandler = null;
   }
-  if (editorState.mode === 'clean' && typeof window.cleanupTextReview === 'function') {
-    window.cleanupTextReview();
-  }
   for (var i = 0; i < edGutterTimers.length; i++) {
     if (edGutterTimers[i]) clearTimeout(edGutterTimers[i]);
   }
   edGutterTimers = [];
   edContainer = null;
-  if (typeof window.cleanupEditorLogs === 'function') {
-    window.cleanupEditorLogs();
-  }
 };
 // ===================== state helpers =====================
 
@@ -543,59 +475,34 @@ function edIsDirty(idx) {
   var p = editorState.panes[idx];
   if (!p) return false;
   var ta = document.getElementById('ed-input-' + idx);
-  var current = ta ? ta.value : p.original;
-  return current !== p.original;
+  var current = ta ? ta.value : (typeof p.value === 'string' ? p.value : p.original);
+  p.value = current;
+  p.dirty = current !== p.original;
+  return p.dirty;
 }
 
 function edGetContent(idx) {
   var ta = document.getElementById('ed-input-' + idx);
-  return ta ? ta.value : editorState.panes[idx].original;
+  var p = editorState.panes[idx];
+  var value = ta ? ta.value : (p && typeof p.value === 'string' ? p.value : (p ? p.original : ''));
+  if (p) p.value = value;
+  return value;
 }
-
 // ===================== mode / view toggles =====================
 
 function edSetMode(mode) {
-  var prev = editorState.mode;
-  editorState.mode = mode;
-
-  // Active state on all three mode buttons
+  editorState.mode = mode === 'diff' ? 'diff' : 'edit';
   var editBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="edit"]');
   var diffBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="diff"]');
-  var cleanBtn = document.querySelector('#ed-toolbar .ed-btn[data-mode="clean"]');
-  if (editBtn) editBtn.classList.toggle('active', mode === 'edit');
-  if (diffBtn) diffBtn.classList.toggle('active', mode === 'diff');
-  if (cleanBtn) cleanBtn.classList.toggle('active', mode === 'clean');
-
+  if (editBtn) editBtn.classList.toggle('active', editorState.mode === 'edit');
+  if (diffBtn) diffBtn.classList.toggle('active', editorState.mode === 'diff');
   var diffSourceGroup = document.getElementById('ed-diff-source-group');
-  if (diffSourceGroup) diffSourceGroup.style.display = mode === 'diff' ? '' : 'none';
-
+  if (diffSourceGroup) diffSourceGroup.style.display = editorState.mode === 'diff' ? '' : 'none';
   var panes = document.getElementById('ed-panes');
   var diffArea = document.getElementById('ed-diff-area');
-  var reviewWrap = document.getElementById('ed-review-wrap');
-  var reviewArea = document.getElementById('ed-review-area');
-
-  // Leaving clean mode
-  if (prev === 'clean' && mode !== 'clean') {
-    if (typeof window.cleanupTextReview === 'function') window.cleanupTextReview();
-    if (reviewArea) reviewArea.innerHTML = '';
-  }
-
-  if (mode === 'clean') {
-    if (panes) panes.style.display = 'none';
-    if (diffArea) diffArea.classList.add('ed-hidden');
-    if (reviewWrap) {
-      reviewWrap.classList.remove('ed-hidden');
-      if (reviewArea && reviewArea.children.length === 0 && typeof window.renderTextReview === 'function') {
-        window.renderTextReview(reviewArea);
-      }
-    }
-  } else {
-    // edit or diff
-    if (reviewWrap) reviewWrap.classList.add('ed-hidden');
-    if (panes) panes.style.display = mode === 'edit' ? '' : 'none';
-    if (mode === 'diff') edRenderDiff();
-  }
-
+  if (panes) panes.style.display = editorState.mode === 'edit' ? '' : 'none';
+  if (diffArea) diffArea.classList.toggle('ed-hidden', editorState.mode !== 'diff');
+  if (editorState.mode === 'diff') edRenderDiff();
   edSaveState();
 }
 
@@ -635,11 +542,15 @@ function edFocusPane(idx) {
   }
 }
 
-// ===================== input handling =====================
-
 function edOnInput(idx) {
+  var p = editorState.panes[idx];
+  if (p) p.value = edGetContent(idx);
   edUpdateDirty(idx);
   edUpdateGutters();
+  if (p && p.view === 'parsed') edRenderParsed(idx);
+  edSaveState();
+  edUpdateGutters();
+  edUpdateStatus();
 }
 
 function edUpdateDirty(idx) {
@@ -651,6 +562,17 @@ function edUpdateDirty(idx) {
     saveBtn.disabled = !dirty;
     saveBtn.classList.toggle('ed-btn-disabled', !dirty);
   }
+}
+function edUpdateStatus() {
+  var bar = document.getElementById('ed-statusbar');
+  if (!bar) return;
+  var idx = edFocusedPaneIndex();
+  var p = editorState.panes[idx] || {};
+  var text = edGetContent(idx);
+  var dirty = edIsDirty(idx);
+  var lines = text ? text.split(/\r?\n/).length : 1;
+  var chars = text.length;
+  bar.textContent = (dirty ? '● Dirty' : 'Saved') + '  |  ' + chars + ' chars  |  ' + lines + ' lines  |  ' + (p.name || 'Untitled');
 }
 
 function edUpdateGutters() {
@@ -665,13 +587,8 @@ function edRenderGutter(idx) {
   if (!ta || !gutter) return;
   var lines = ta.value.split('\n');
   var html = '';
-  for (var i = 1; i <= lines.length; i++) {
-    html += '<span>' + i + '</span>\n';
-  }
-  // Ensure at least one line when empty
-  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
-    html = '<span>1</span>\n';
-  }
+  for (var i = 1; i <= lines.length; i++) html += '<span>' + i + '</span>\n';
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) html = '<span>1</span>\n';
   gutter.innerHTML = html;
 }
 
@@ -680,33 +597,32 @@ function edSyncGutter(idx) {
   var gutter = document.getElementById('ed-gutter-' + idx);
   if (!ta || !gutter) return;
   gutter.scrollTop = ta.scrollTop;
+  if (editorState.panes[idx]) {
+    editorState.panes[idx].scrollTop = ta.scrollTop;
+    editorState.panes[idx].scrollLeft = ta.scrollLeft;
+    editorState.panes[idx].value = ta.value;
+  }
+  edSaveState();
 }
 
 function edInsertTab(ta, shift) {
   var start = ta.selectionStart;
   var end = ta.selectionEnd;
   var val = ta.value;
-
   if (shift) {
-    // Outdent: remove up to 2 leading spaces from current line(s)
     var lineStart = val.lastIndexOf('\n', start - 1);
-    if (lineStart < 0) lineStart = 0;
-    else lineStart += 1;
-
+    if (lineStart < 0) lineStart = 0; else lineStart += 1;
     var before = val.substring(0, lineStart);
     var afterLine = val.substring(lineStart);
     var lineEnd = afterLine.indexOf('\n');
     var lineText = lineEnd >= 0 ? afterLine.substring(0, lineEnd) : afterLine;
     var indent = 0;
     while (indent < 2 && indent < lineText.length && lineText[indent] === ' ') indent++;
-    var newText = before + lineText.substring(indent) + (lineEnd >= 0 ? afterLine.substring(lineEnd) : '');
-    ta.value = newText;
-    var newPos = start - indent;
-    if (newPos < lineStart) newPos = lineStart;
+    ta.value = before + lineText.substring(indent) + (lineEnd >= 0 ? afterLine.substring(lineEnd) : '');
+    var newPos = Math.max(lineStart, start - indent);
     ta.selectionStart = newPos;
     ta.selectionEnd = newPos;
   } else {
-    // Tab → 2 spaces
     ta.value = val.substring(0, start) + '  ' + val.substring(end);
     ta.selectionStart = start + 2;
     ta.selectionEnd = start + 2;
@@ -750,57 +666,80 @@ function edTextareaKeydown(e, idx) {
 
 // ===================== parsed rendering =====================
 
+function edSanitizeHtml(html) {
+  if (typeof DOMPurify !== 'undefined' && typeof DOMPurify.sanitize === 'function') {
+    return DOMPurify.sanitize(String(html), {
+      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+      FORBID_ATTR: ['style', 'onerror', 'onclick', 'onload'],
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[\/#]|\.{0,2}\/|[^:]+$)/i
+    });
+  }
+  var parser = document.createElement('template');
+  parser.innerHTML = String(html);
+  var nodes = parser.content.querySelectorAll('script,style,iframe,object,embed');
+  for (var i = nodes.length - 1; i >= 0; i--) nodes[i].remove();
+  parser.content.querySelectorAll('*').forEach(function(el) {
+    for (var ai = el.attributes.length - 1; ai >= 0; ai--) {
+      var attr = el.attributes[ai];
+      if (/^on/i.test(attr.name) || (attr.name === 'href' || attr.name === 'src') && /^\s*javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
+    }
+  });
+  return parser.innerHTML;
+}
+
 function edRenderParsed(idx) {
   var area = document.getElementById('ed-parsed-area-' + idx);
   if (!area) return;
   var p = editorState.panes[idx];
   var content = edGetContent(idx);
+  var ta = document.getElementById('ed-input-' + idx);
   var ext = edFileExt(p.name);
-
   area.innerHTML = '';
-
   if (edIsMdExt(ext)) {
-    // Markdown rendering via existing playground pipeline
-    var html;
-    if (typeof pgRenderMarkdown === 'function') {
-      html = pgRenderMarkdown(content, false);
-    } else if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-      try {
-        html = DOMPurify.sanitize(marked.parse(content));
-      } catch (e) {
-        html = '<pre>' + edEscapeHtml(content) + '</pre>';
-      }
-    } else {
-      html = '<pre>' + edEscapeHtml(content) + '</pre>';
-    }
-    area.innerHTML = '<div class="pg-bubble pg-bubble-slot">' + html + '</div>';
-    // Highlight code blocks
-    if (typeof pgHighlight === 'function') {
-      pgHighlight(area);
-    } else if (typeof hljs !== 'undefined') {
-      area.querySelectorAll('pre code').forEach(function(block) {
-        hljs.highlightElement(block);
-      });
-    }
+    var html = '';
+    try {
+      if (typeof pgRenderMarkdown === 'function') html = pgRenderMarkdown(content, false);
+      else if (typeof window.markdownit === 'function') html = window.markdownit({ html: true, breaks: true, linkify: true }).render(content);
+      else if (typeof marked !== 'undefined' && typeof marked.parse === 'function') html = marked.parse(content);
+    } catch (e) { html = ''; }
+    if (!html) html = '<pre>' + edEscapeHtml(content) + '</pre>';
+    area.innerHTML = '<div class="pg-bubble pg-bubble-slot">' + edSanitizeHtml(html) + '</div>';
+    if (typeof pgHighlight === 'function') pgHighlight(area);
+    else if (typeof hljs !== 'undefined') area.querySelectorAll('pre code').forEach(function(block) { try { hljs.highlightElement(block); } catch (e) {} });
   } else if (edIsCodeExt(ext)) {
-    var lang = edLangForExt(ext);
-    var el = document.createElement('div');
     var pre = document.createElement('pre');
     var code = document.createElement('code');
-    code.className = 'language-' + lang;
+    code.className = 'language-' + edLangForExt(ext);
     code.textContent = content;
     pre.appendChild(code);
-    el.appendChild(pre);
-    area.appendChild(el);
-    if (typeof hljs !== 'undefined') {
-      try { hljs.highlightElement(code); } catch (e) { code.textContent = content; }
-    }
+    area.appendChild(pre);
+    if (typeof hljs !== 'undefined') { try { hljs.highlightElement(code); } catch (e) {} }
   } else {
-    // Plain text
     var pre2 = document.createElement('pre');
     pre2.textContent = content;
     area.appendChild(pre2);
   }
+  if (ta) area.scrollTop = ta.scrollTop;
+}
+
+function edSyncParsedScroll(idx) {
+  var ta = document.getElementById('ed-input-' + idx);
+  var area = document.getElementById('ed-parsed-area-' + idx);
+  if (!ta || !area || editorState.panes[idx].view !== 'parsed') return;
+  var maxTa = Math.max(1, ta.scrollHeight - ta.clientHeight);
+  var maxArea = Math.max(1, area.scrollHeight - area.clientHeight);
+  area.scrollTop = ta.scrollTop / maxTa * maxArea;
+}
+
+function edSyncRawScroll(idx) {
+  var ta = document.getElementById('ed-input-' + idx);
+  var area = document.getElementById('ed-parsed-area-' + idx);
+  if (!ta || !area || editorState.panes[idx].view !== 'parsed') return;
+  var maxTa = Math.max(1, ta.scrollHeight - ta.clientHeight);
+  var maxArea = Math.max(1, area.scrollHeight - area.clientHeight);
+  ta.scrollTop = area.scrollTop / maxArea * maxTa;
+  editorState.panes[idx].scrollTop = ta.scrollTop;
+  edSyncGutter(idx);
 }
 
 // ===================== diff rendering =====================
@@ -950,6 +889,8 @@ function edOpenFile(idx) {
       editorState.panes[idx].path = data.path;
       editorState.panes[idx].name = data.name || '';
       editorState.panes[idx].original = data.content;
+      editorState.panes[idx].value = data.content;
+      editorState.panes[idx].dirty = false;
       var ta = document.getElementById('ed-input-' + idx);
       if (ta) ta.value = data.content;
       var title = document.getElementById('ed-pane-title-' + idx);
@@ -979,6 +920,8 @@ function edOpenFallback(idx) {
       editorState.panes[idx].path = null;
       editorState.panes[idx].name = file.name;
       editorState.panes[idx].original = text;
+      editorState.panes[idx].value = text;
+      editorState.panes[idx].dirty = false;
       var ta = document.getElementById('ed-input-' + idx);
       if (ta) ta.value = text;
       var title = document.getElementById('ed-pane-title-' + idx);
@@ -999,6 +942,7 @@ function edSaveFile(idx) {
   if (!ta) return;
   var content = ta.value;
   var p = editorState.panes[idx];
+  p.value = content;
 
   if (p.path) {
     fetch('/api/editor/save', {

@@ -1,4 +1,6 @@
+
 # TinyRouter Download 下载功能架构
+> **最后核对（2026-08-08，Utility 子工具与 Download 生命周期）：** Download 前端当前由 Utility 菜单的 `download` 子工具承载，入口仍为 `web/static/download.js`，后端 API 路径保持 `/api/downloads/*` 不变。`web/static/app.js` 在 Utility 子工具切换时调用 `suspendDownload`/`resumeDownload`，离开时关闭 SSE 并执行 cleanup；任务队列、SSE 事件与服务端执行语义未因导航重组改变。FileTransfer 是并列的 Utility `fileTransfer` 子工具，其上传路由事实记录于 `docs/config-registry-state-architecture.md`。
 
 > **文档定位：** `internal/download/` 包、`internal/api/download/`（子包，原 `internal/api/download.go`）与前端 `web/static/download.js` 实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
@@ -385,9 +387,9 @@ type Executor struct {
 
 ### 8.3 Settings 推送（settings.go:137-168）
 
-PATCH `/settings` 的 `download` 段：字符串字段总是覆盖（含空串表示清除），数值字段仅在 >0 时覆盖（避免部分更新把 `concurrentFragments`/`maxConcurrent` 清零，settings.go:148-153），随后 `downloadMgr.UpdateSettings(...)` 把新 `RuntimeSettings` 推入运行中的管理器（settings.go:157-168）。
-
 ## 9. 前端模块（web/static/download.js）
+
+Download 是 Utility 菜单的 `download` 子工具；入口脚本仍是 `web/static/download.js`，模块级状态（`downloadEventSource`、`downloadTasksMap`、`downloadTaskEls`、`downloadDefaultDir`、`selectedTaskId`）仍按本节描述。`web/static/app.js` 负责跨 Utility 子工具导航：进入时调用 `resumeDownload`，离开时调用 `suspendDownload`，并关闭 SSE/执行 cleanup；这只是前端生命周期编排，不改变 `/api/downloads/*` API 或服务端任务状态模型。
 
 原生 vanilla JS（无框架），模块级状态（`download.js:6-12`）：`downloadEventSource`（SSE 连接）、`downloadTasksMap`（id→task 协调 REST 与 SSE）、`downloadTaskEls`（id→DOM 元素）、`downloadDefaultDir`（持久化默认目录）、`selectedTaskId`（当前右侧详情面板选中的任务，download.js:24-25）。
 

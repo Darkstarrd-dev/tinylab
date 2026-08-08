@@ -80,13 +80,22 @@ function logsAbortFetch() {
 
 // ===================== cleanup =====================
 
+window.suspendEditorLogs = function() {
+  logsAbortFetch();
+  if (elLogs) elLogs.innerHTML = '';
+  elLogs = null;
+};
+
 window.cleanupEditorLogs = function() {
   logsAbortFetch();
+  if (elLogs) elLogs.innerHTML = '';
   elLogs = null;
   logsDate = null;
   logsOffset = 0;
   logsTotal = 0;
   logsAllLines = [];
+  logsFilterStatus = '';
+  logsFilterQ = '';
   logsSelectedReq = null;
 };
 
@@ -187,8 +196,9 @@ window.renderLogReader = function(container) {
   rightContent.id = 'log-detail';
   rightPane.appendChild(rightContent);
 
-  // ===================== load dates =====================
-  logsLoadDates(leftList);
+  logsLoadDates(leftList, function() {
+    logsRestoreView(leftList, midList, loadMoreBtn, statusSelect, searchInput);
+  });
 
   // ===================== filter events =====================
   statusSelect.addEventListener('change', function() {
@@ -227,8 +237,7 @@ window.renderLogReader = function(container) {
 };
 
 // ===================== load dates =====================
-
-function logsLoadDates(listEl) {
+function logsLoadDates(listEl, onLoaded) {
   logsAbortFetch();
   logsAbort = new AbortController();
   listEl.innerHTML = '<div class="log-loading">' + t('logLoading') + '</div>';
@@ -264,11 +273,49 @@ function logsLoadDates(listEl) {
         listEl.appendChild(item);
       })(dates[i]);
     }
+    if (typeof onLoaded === 'function') onLoaded();
   }).catch(function(err) {
     logsAbort = null;
     if (err.name === 'AbortError') return;
     listEl.innerHTML = emptyState(t('logDatesError'));
   });
+}
+
+function logsRestoreView(leftList, midList, loadMoreBtn, statusSelect, searchInput) {
+  if (statusSelect) statusSelect.value = logsFilterStatus;
+  if (searchInput) searchInput.value = logsFilterQ;
+
+  var dateItems = leftList.querySelectorAll('.log-date-item');
+  for (var di = 0; di < dateItems.length; di++) {
+    dateItems[di].classList.toggle('log-date-selected', dateItems[di].dataset.date === logsDate);
+  }
+
+  if (!logsDate) return;
+  if (midList) {
+    midList.innerHTML = '';
+    for (var li = 0; li < logsAllLines.length; li++) {
+      logsRenderIndexRow(midList, logsAllLines[li]);
+    }
+    if (logsAllLines.length === 0 && logsTotal === 0) {
+      logsLoadIndex(midList, loadMoreBtn);
+    } else if (logsAllLines.length === 0) {
+      midList.innerHTML = emptyState(t('logNoRequests'));
+    }
+  }
+  if (loadMoreBtn) loadMoreBtn.style.display = (logsAllLines.length < logsTotal) ? '' : 'none';
+
+  var selectedID = logsSelectedReq && logsSelectedReq.reqID;
+  if (!selectedID) return;
+  var selectedIndex = null;
+  for (var si = 0; si < logsAllLines.length; si++) {
+    if (logsAllLines[si].reqID === selectedID) selectedIndex = logsAllLines[si];
+  }
+  var rows = midList ? midList.querySelectorAll('.log-index-row') : [];
+  for (var ri = 0; ri < rows.length; ri++) {
+    rows[ri].classList.toggle('log-row-selected', rows[ri].dataset.reqId === selectedID);
+  }
+  var detail = document.getElementById('log-detail');
+  if (detail) logsRenderDetail(detail, logsSelectedReq, selectedIndex);
 }
 
 // ===================== select date =====================

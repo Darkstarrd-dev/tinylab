@@ -165,7 +165,6 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 	}
 	for _, want := range []string{
 		"gallery/gallery-state.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
-		"editor/editor.js", "editor/editor_textreview_step3.js", "editor/editor_textreview.js",
 	} {
 		if !contains(pg, want) {
 			t.Errorf("Assets(playground/static-pg) missing %q", want)
@@ -174,6 +173,10 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 	for _, want := range []string{
 		"download.js", "media-bridge.js", "gif-editor/gif-editor.js", "filetransfer.js",
 		"vendor/gif.js/gif.js", "vendor/gifuct-js/gifuct-js.js",
+		"vendor/utility-editor/markdown-it/markdown-it.min.js", "vendor/utility-editor/prism/prism.js",
+		"vendor/utility-editor/diff-match-patch/diff-match-patch.js", "vendor/utility-editor/turndown/turndown.js",
+		"vendor/utility-editor/dompurify/purify.min.js",
+		"utility/editor/editor.js", "utility/editor/editor_textreview_step3.js", "utility/editor/editor_textreview.js", "utility/editor/review.js",
 	} {
 		if !contains(static, want) {
 			t.Errorf("Assets(static) missing %q", want)
@@ -193,11 +196,25 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 	}
 }
 
-// TestAssetsPlaygroundPGExactOrder locks the router contract: the per-file
-// static routes served from web/playground/static-pg must be exactly the
-// historical hard-coded list, in the historical order (playground → gallery →
-// editor). The router derives this list from Assets(RootPlaygroundPG), so any
-// manifest reordering or asset list change here breaks served script paths.
+func TestEditorReviewAssetLoadsLast(t *testing.T) {
+	f, ok := Get(Editor)
+	if !ok {
+		t.Fatal("Editor feature missing from default manifest")
+	}
+	if len(f.StaticFiles) < 2 {
+		t.Fatalf("Editor StaticFiles unexpectedly short: %v", f.StaticFiles)
+	}
+	got := f.StaticFiles
+	if got[len(got)-1] != "utility/editor/review.js" {
+		t.Errorf("review.js must be the final Editor asset, got %q", got[len(got)-1])
+	}
+	if got[len(got)-2] != "utility/editor/editor_textreview.js" {
+		t.Errorf("review.js must load after textreview entry, previous asset is %q", got[len(got)-2])
+	}
+}
+
+// TestAssetsPlaygroundPGExactOrder locks the router contract for playground-only assets.
+// Editor assets are rooted in web/static/utility/editor and are intentionally absent.
 func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 	want := []string{
 		"playground/playground.js", "playground/pg-i18n.js",
@@ -208,11 +225,6 @@ func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 		"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",
 		"gallery/gallery-tree.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
 		"gallery/gallery-edit.js", "gallery/gallery-edit-operations.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
-		"editor/editor-state.js", "editor/editor.js", "editor/editor-logs.js",
-		"editor/editor_textreview_split.js", "editor/editor_textreview_diff.js", "editor/editor_textreview_state.js",
-		"editor/editor_textreview_step1.js", "editor/editor_textreview_step2.js",
-		"editor/editor_textreview_step3.js", "editor/editor_textreview_step4.js",
-		"editor/editor_textreview.js",
 	}
 	got := Assets(RootPlaygroundPG)
 	if !reflect.DeepEqual(got, want) {

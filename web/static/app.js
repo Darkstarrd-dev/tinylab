@@ -62,7 +62,7 @@
 })();
 
 // --- State ---
-let currentPage = 'endpoint';
+let currentPage = 'utility';
 let currentProviderId = null;
 let providersCache = [];
 let providerDetailCache = null;
@@ -70,13 +70,116 @@ let modelTestStatus = {};
 let importTarget = 'models';
 var usageEventSource = null;
 var navGen = 0;
+var utilityActiveTool = null;
+var utilityMenuOpen = false;
 
+var UTILITY_TOOLS = [
+  { id: 'editor', labelKey: 'logFileEditor', requiresPlayground: true },
+  { id: 'logReader', labelKey: 'logReader', requiresPlayground: true },
+  { id: 'review', labelKey: 'utilityReview', requiresPlayground: true },
+  { id: 'gif', labelKey: 'gif' },
+  { id: 'download', labelKey: 'download' },
+  { id: 'fileTransfer', labelKey: 'fileTransfer' }
+];
+function isUtilityTool(id) {
+  return UTILITY_TOOLS.some(function(tool) { return tool.id === id; });
+}
+function utilityHasTool(id) {
+  var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
+  if (!item || (item.requiresPlayground && window.__hasPlayground === false)) return false;
+  if (id === 'editor') return typeof renderEditor === 'function';
+  if (id === 'logReader') return typeof renderLogReader === 'function';
+  if (id === 'review') return typeof window.renderReview === 'function';
+  if (id === 'gif') return typeof renderGifEditor === 'function';
+  if (id === 'download') return typeof renderDownload === 'function';
+  if (id === 'fileTransfer') return typeof window.renderUtilityFileTransfer === 'function';
+  return false;
+}
+
+function renderUtilityReview(container) {
+  return window.renderReview(container);
+}
+
+function updateUtilityNavLabel() {
+  var button = document.querySelector('.nav-item[data-page="utility"]');
+  if (!button) return;
+  var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === utilityActiveTool; })[0];
+  button.textContent = item ? t(item.labelKey) : t('utility');
+}
+
+function updateUtilityMenuState() {
+  var menu = document.getElementById('utility-menu');
+  if (!menu) return;
+  menu.querySelectorAll('[data-utility-tool]').forEach(function(item) {
+    item.setAttribute('aria-current', item.dataset.utilityTool === utilityActiveTool ? 'page' : 'false');
+  });
+}
+function utilityToolLifecycle(id, phase) {
+  var hooks = {
+    editor: { suspend: 'cleanupEditor' },
+    logReader: { suspend: 'suspendEditorLogs' },
+    review: { suspend: 'cleanupReview' },
+    gif: { suspend: 'suspendGifEditor', resume: 'resumeGifEditor' },
+    download: { suspend: 'suspendDownload', resume: 'resumeDownload' },
+    fileTransfer: { suspend: 'suspendFileTransfer', resume: 'resumeFileTransfer' }
+  };
+  var hook = hooks[id] && hooks[id][phase];
+  if (hook && typeof window[hook] === 'function') window[hook]();
+}
+
+function closeUtilityMenu() {
+  utilityMenuOpen = false;
+  var menu = document.getElementById('utility-menu');
+  var button = document.querySelector('.nav-item[data-page="utility"]');
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+
+function openUtilityMenu() {
+  var menu = document.getElementById('utility-menu');
+  var button = document.querySelector('.nav-item[data-page="utility"]');
+  if (!menu || !button) return;
+  utilityMenuOpen = true;
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  updateUtilityMenuState();
+  var selected = menu.querySelector('[aria-current="page"]') || menu.querySelector('button:not([disabled])');
+  if (selected) selected.focus();
+}
+
+function toggleUtilityMenu() {
+  if (utilityMenuOpen) closeUtilityMenu(); else openUtilityMenu();
+}
+
+function selectUtilityTool(id) {
+  var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
+  if (!item || !utilityHasTool(id)) return;
+  utilityActiveTool = id;
+  updateUtilityNavLabel();
+  updateUtilityMenuState();
+  closeUtilityMenu();
+  navigateTo(id);
+}
+
+function renderUtility(container) {
+  if (utilityActiveTool && utilityHasTool(utilityActiveTool)) {
+    if (utilityActiveTool === 'editor') return renderEditor(container);
+    if (utilityActiveTool === 'logReader') return renderLogReader(container);
+    if (utilityActiveTool === 'review') return renderUtilityReview(container);
+    if (utilityActiveTool === 'gif') return renderGifEditor(container);
+    if (utilityActiveTool === 'download') return renderDownload(container);
+    if (utilityActiveTool === 'fileTransfer') return window.renderUtilityFileTransfer(container);
+  }
+  utilityActiveTool = null;
+  updateUtilityNavLabel();
+  updateUtilityMenuState();
+  container.innerHTML = '<section class="card utility-landing"><h2>' + escapeHtml(t('utility')) + '</h2><p class="muted">' + escapeHtml(t('utilityDesc')) + '</p></section>';
+}
 // Fallback: close all streams when the tab is closed.
 window.addEventListener('beforeunload', () => {
     if (typeof closeConsoleStream === 'function') closeConsoleStream();
 });
-
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', async function() {
   initTheme();
   ThemeSystem.init();
   initFontSize();
@@ -84,82 +187,73 @@ document.addEventListener('DOMContentLoaded', async () => {
   var authStatus = await checkAuthStatus();
   var enabled = authStatus.passwordEnabled || authStatus.authEnabled;
   var authenticated = authStatus.authenticated || authStatus.loggedIn;
-  if (enabled && !authenticated) {
-    renderLoginScreen();
-  } else {
-    initApp();
-  }
+  if (enabled && !authenticated) renderLoginScreen();
+  else initApp();
 });
 
 function navigateTo(page) {
+  var previousPage = currentPage;
+  var previousIsUtilityTool = isUtilityTool(previousPage);
+  var preserveUtilityState = previousIsUtilityTool || utilityHasTool(utilityActiveTool);
   var wasFullscreen = document.body.classList.contains('gallery-fullscreen-active') || (typeof isFullscreen === 'function' && isFullscreen());
+  if (previousIsUtilityTool && previousPage !== page) utilityToolLifecycle(previousPage, 'suspend');
   currentPage = page;
-  if (page === 'gallery' || page === 'editor') sessionStorage.setItem('trGalView', page);
+  if (isUtilityTool(page)) utilityActiveTool = page;
+  updateUtilityNavLabel();
+  updateUtilityMenuState();
   var gen = ++navGen;
   currentProviderId = null;
   if (typeof stopUsageRefresh === 'function') stopUsageRefresh();
-  // Cleanup playground streaming state when leaving the page.
-  if (currentPage !== 'playground' && typeof cleanupPlayground === 'function') {
-    cleanupPlayground();
+  if (page !== 'playground' && typeof cleanupPlayground === 'function') cleanupPlayground();
+  if (page !== 'gallery' && typeof cleanupGallery === 'function') cleanupGallery();
+  if (!preserveUtilityState) {
+    if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
+    if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
+    if (page !== 'gif' && typeof cleanupGifEditor === 'function') cleanupGifEditor();
+    if (page !== 'fileTransfer' && typeof cleanupFileTransfer === 'function') cleanupFileTransfer();
   }
-  // Cleanup gallery resources when leaving the page.
-  if (currentPage !== 'gallery' && typeof cleanupGallery === 'function') {
-    cleanupGallery();
-  }
-  // Cleanup editor resources when leaving the page.
-  if (currentPage !== 'editor' && typeof cleanupEditor === 'function') {
-    cleanupEditor();
-  }
-  // Cleanup GIF editor resources when leaving the page.
-  if (currentPage !== 'gif' && typeof cleanupGifEditor === 'function') {
-    cleanupGifEditor();
-  }
-  // Close the download SSE stream when leaving the download page.
-  if (page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
+  if (!preserveUtilityState && page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
     downloadEventSource = null;
   }
-  // Close Console stream when leaving the usage page.
-  if (page !== 'monitor') {
-    if (typeof closeConsoleStream === 'function') closeConsoleStream();
-  }
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page ||
-      (page === 'editor' && el.dataset.page === 'gallery'));
+  if (page !== 'monitor' && typeof closeConsoleStream === 'function') closeConsoleStream();
+  document.querySelectorAll('.nav-item').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility'));
   });
-  // Gallery nav button label toggle (2-way: Gallery / Editor)
   var galBtn = document.querySelector('.nav-item[data-page="gallery"]');
-  if (galBtn) {
-    var label = (page === 'editor') ? t('editor') : t('gallery');
-    galBtn.textContent = label;
-  }
-  const container = document.getElementById('page-content');
-  // Remove any per-page main modifier classes before rendering the new page.
-  const mainEl = document.querySelector('.main');
+  if (galBtn) galBtn.textContent = t('gallery');
+  var container = document.getElementById('page-content');
+  var mainEl = document.querySelector('.main');
   if (mainEl) mainEl.classList.remove('main-no-scroll');
-  // Clear any inline styles left by previous page (e.g., playground sets height/overflow).
   container.style.height = '';
   container.style.overflow = '';
   container.innerHTML = '';
   container.classList.remove('page-enter');
-  const p = (() => {
+  var p = (function() {
     switch (page) {
       case 'endpoint': return renderEndpoint(container);
       case 'providers': return renderProviders(container);
       case 'combos': return renderCombos(container);
       case 'playground': return renderPlayground(container);
       case 'monitor': return renderUsage(container);
-      case 'download': return renderDownload(container);
+      case 'utility': return renderUtility(container);
+      case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gallery': return renderGallery(container);
-      case 'editor': return renderEditor(container);
-      case 'gif': return renderGifEditor(container);
+      case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
+      case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
+      case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);
+      case 'gif': utilityActiveTool = 'gif'; updateUtilityNavLabel(); return renderUtility(container);
+      case 'fileTransfer': utilityActiveTool = 'fileTransfer'; updateUtilityNavLabel(); return renderUtility(container);
     }
   })();
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'gif') && mainEl) {
+  // renderUtility is the resume boundary for retained tools: each renderer
+  // rebuilds its DOM and binds exactly once (Download opens SSE, FileTransfer
+  // binds its root, and GIF rebuilds its editor). Do not call resume hooks
+  // before or after this render, which would duplicate those bindings.
+  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif') && mainEl) {
     mainEl.classList.add('main-no-scroll');
     if (page === 'gif') container.style.height = '100%';
   }
-  
   function restoreFullscreenState() {
     if (wasFullscreen) {
       document.body.classList.add('gallery-fullscreen-active');
@@ -168,31 +262,14 @@ function navigateTo(page) {
       }
     }
   }
-
   if (p && p.then) {
-    p.then(() => { if (gen === navGen) container.classList.add('page-enter'); })
-     .catch((e) => {
-       if (gen === navGen) {
-         container.innerHTML = emptyState('Load failed');
-         container.classList.add('page-enter');
-       }
-       console.warn('navigateTo render failed:', e);
-     })
-     .then(function() {
-       restoreFullscreenState();
-     });
+    p.then(function() { if (gen === navGen) container.classList.add('page-enter'); }).catch(function(e) {
+      if (gen === navGen) { container.innerHTML = emptyState('Load failed'); container.classList.add('page-enter'); }
+      console.warn('navigateTo render failed:', e);
+    }).then(restoreFullscreenState);
   } else {
-    // Sync render: restore fullscreen state immediately.
     restoreFullscreenState();
   }
-}
-
-function gotoGalleryToggle() {
-  // 2-way toggle: Gallery <-> Editor. Persisted via sessionStorage so the
-  // toggle returns to the last-used page on initial load.
-  if (currentPage === 'gallery') navigateTo('editor');
-  else if (currentPage === 'editor') navigateTo('gallery');
-  else { var last = sessionStorage.getItem('trGalView') || 'gallery'; navigateTo(last); }
 }
 
 function escapeHtml(s) {
@@ -561,14 +638,7 @@ function initLang() {
 function updateSidebarNav() {
   document.querySelectorAll('.nav-item').forEach(function(el) {
     var page = el.dataset.page;
-    if (page) {
-      // Gallery nav button reflects current page
-      if (page === 'gallery') {
-        el.textContent = currentPage === 'editor' ? t('editor') : t('gallery');
-      } else {
-        el.textContent = t(page);
-      }
-    }
+    if (page) el.textContent = t(page);
   });
   var shutdownBtn = document.querySelector('.shutdown-btn');
   if (shutdownBtn) {
@@ -732,8 +802,13 @@ document.addEventListener('keydown', function(e) {
   if (Shortcuts.matchEvent('global.goto-monitor', e))      { e.preventDefault(); navigateTo('monitor'); return; }
   if (Shortcuts.matchEvent('global.goto-endpoint', e))   { e.preventDefault(); navigateTo('endpoint'); return; }
   if (Shortcuts.matchEvent('global.goto-playground', e)) { e.preventDefault(); var pgNav = document.querySelector('.nav-item[data-page="playground"]'); if (pgNav) navigateTo('playground'); return; }
-  if (Shortcuts.matchEvent('global.goto-download', e))   { e.preventDefault(); navigateTo('download'); return; }
-  if (Shortcuts.matchEvent('global.goto-gallery', e))    { e.preventDefault(); var galNav = document.querySelector('.nav-item[data-page="gallery"]'); if (galNav) gotoGalleryToggle(); return; }
+  if (Shortcuts.matchEvent('global.goto-download', e)) {
+    e.preventDefault();
+    if (currentPage === 'utility' || UTILITY_TOOLS.some(function(tool) { return tool.id === currentPage; })) toggleUtilityMenu();
+    else { navigateTo('utility'); openUtilityMenu(); }
+    return;
+  }
+  if (Shortcuts.matchEvent('global.goto-gallery', e)) { e.preventDefault(); navigateTo('gallery'); return; }
 
   // F: toggle fullscreen (ignore when typing in any input field)
   if (Shortcuts.matchEvent('global.toggle-fullscreen', e)) {

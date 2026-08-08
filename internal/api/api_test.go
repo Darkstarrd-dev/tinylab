@@ -419,6 +419,24 @@ func TestProxyRoutes_AnthropicMessages(t *testing.T) {
 	resp.Body.Close()
 }
 
+// TestFileTransferRoutes_Upload verifies POST /api/filetransfer/upload is
+// registered. An invalid multipart body exercises the handler without creating
+// an archive or contacting any temporary file service; an unregistered route
+// would return 404 before reaching validation.
+func TestFileTransferRoutes_Upload(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	resp := requestJSON(t, "POST", srv.URL+"/api/filetransfer/upload", "{}")
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatalf("expected /api/filetransfer/upload to be registered, got 404: %s", readBody(t, resp))
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid upload body to return 400, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+}
+
 // TestProxyRoutes_OPTIONSCORS verifies the CORS preflight handler answers for
 // the /v1/messages path via the path-prefix `/v1/*` OPTIONS route.
 func TestProxyRoutes_OPTIONSCORS(t *testing.T) {

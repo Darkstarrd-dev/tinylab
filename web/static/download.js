@@ -4,6 +4,8 @@
 // app.js (t/escapeHtml/emptyState/toast/confirmModal).
 
 var downloadEventSource = null;
+var downloadReconnectTimer = null;
+var downloadActivePredicate = null;
 // Map of task id -> task object, used to reconcile SSE updates and the REST list.
 var downloadTasksMap = {};
 // Map of task id -> rendered DOM element.
@@ -172,7 +174,7 @@ function renderDownload(container) {
 
   selectedTaskId = '';
   loadDownloadTasks();
-  connectDownloadSSE();
+  resumeDownload();
   loadDownloadSettings();
 }
 
@@ -783,28 +785,71 @@ async function loadDownloadTasks() {
   }
 }
 
+function isDownloadActive() {
+  if (typeof downloadActivePredicate === 'function') return !!downloadActivePredicate();
+  if (typeof window !== 'undefined' && typeof window.utilityIsToolActive === 'function') {
+    return !!window.utilityIsToolActive('download');
+  }
+  return true;
+}
+
+function scheduleDownloadReconnect() {
+  if (downloadReconnectTimer || !isDownloadActive()) return;
+  downloadReconnectTimer = setTimeout(function () {
+    downloadReconnectTimer = null;
+    if (isDownloadActive()) connectDownloadSSE();
+  }, 3000);
+}
+
 // connectDownloadSSE subscribes to the download event stream with auto-reconnect.
 function connectDownloadSSE() {
+  if (!isDownloadActive()) return;
+  if (downloadReconnectTimer) {
+    clearTimeout(downloadReconnectTimer);
+    downloadReconnectTimer = null;
+  }
   if (downloadEventSource) { downloadEventSource.close(); downloadEventSource = null; }
+  var source;
   try {
-    downloadEventSource = new EventSource('/api/downloads/stream');
+    source = new EventSource('/api/downloads/stream');
+    downloadEventSource = source;
   } catch (e) {
-    setTimeout(connectDownloadSSE, 3000);
+    scheduleDownloadReconnect();
     return;
   }
-  downloadEventSource.onmessage = function(event) {
-    if (!event || !event.data) return;
+  source.onmessage = function(event) {
+    if (source !== downloadEventSource || !event || !event.data || !isDownloadActive()) return;
     var evt;
     try { evt = JSON.parse(event.data); } catch (e) { return; }
-    if (evt && evt.type === 'task-updated' && evt.task) {
-      updateDownloadTask(evt.task);
-    }
+    if (evt && evt.type === 'task-updated' && evt.task) updateDownloadTask(evt.task);
   };
-  downloadEventSource.onerror = function() {
-    if (downloadEventSource) { downloadEventSource.close(); downloadEventSource = null; }
-    setTimeout(connectDownloadSSE, 3000);
+  source.onerror = function() {
+    if (source !== downloadEventSource) return;
+    source.close();
+    downloadEventSource = null;
+    scheduleDownloadReconnect();
   };
 }
+
+function suspendDownload() {
+  if (downloadReconnectTimer) {
+    clearTimeout(downloadReconnectTimer);
+    downloadReconnectTimer = null;
+  }
+  if (downloadEventSource) { downloadEventSource.close(); downloadEventSource = null; }
+}
+
+function resumeDownload() {
+  if (isDownloadActive()) connectDownloadSSE();
+}
+
+function setDownloadActivePredicate(predicate) {
+  downloadActivePredicate = typeof predicate === 'function' ? predicate : null;
+}
+
+window.suspendDownload = suspendDownload;
+window.resumeDownload = resumeDownload;
+window.setDownloadActivePredicate = setDownloadActivePredicate;
 
 // renderDownloadTask creates (or replaces) the left-side list item for a task
 // and, if the task is the selected one, refreshes the detail panel. When the

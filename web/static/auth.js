@@ -180,6 +180,12 @@ function setupHeaderResponsive() {
 }
 
 function initApp() {
+  if (window.__tinyRouterAppInitialized) return;
+  window.__tinyRouterAppInitialized = true;
+  // A browser reload starts on the Utility landing page. Active utility state
+  // is intentionally memory-only; never restore a stale sessionStorage tool.
+  sessionStorage.removeItem('trUtilityTool');
+  if (typeof utilityActiveTool !== 'undefined') utilityActiveTool = null;
   initTheme();
   initFontSize();
   initLang();
@@ -188,12 +194,42 @@ function initApp() {
   document.querySelectorAll('.nav-item').forEach(function(el) {
     el.addEventListener('click', function() {
       var page = el.dataset.page;
-      if (page === 'gallery') {
-        gotoGalleryToggle();
-      } else if (page) {
-        navigateTo(page);
+      if (page === 'utility') {
+        if (currentPage !== 'utility' && !isUtilityTool(currentPage)) {
+          navigateTo('utility');
+          openUtilityMenu();
+        } else {
+          toggleUtilityMenu();
+        }
+        return;
       }
+      if (page === 'gallery') { navigateTo('gallery'); return; }
+      if (page) navigateTo(page);
     });
   });
-  navigateTo('endpoint');
+  var menu = document.getElementById('utility-menu');
+  if (menu) {
+    menu.addEventListener('click', function(e) {
+      var item = e.target.closest('[data-utility-tool]');
+      if (item && !item.disabled) selectUtilityTool(item.dataset.utilityTool);
+    });
+    menu.addEventListener('keydown', function(e) {
+      var items = Array.prototype.slice.call(menu.querySelectorAll('[data-utility-tool]:not([disabled])'));
+      var index = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (items.length) items[(index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+      } else if (e.key === 'Enter' && index >= 0) {
+        e.preventDefault(); selectUtilityTool(items[index].dataset.utilityTool);
+      } else if (e.key === 'Escape') {
+        e.preventDefault(); closeUtilityMenu();
+        var button = document.querySelector('.nav-item[data-page="utility"]');
+        if (button) button.focus();
+      }
+    });
+  }
+  document.addEventListener('click', function(e) {
+    if (utilityMenuOpen && !e.target.closest('.utility-nav-wrap')) closeUtilityMenu();
+  });
+  navigateTo('utility');
 }

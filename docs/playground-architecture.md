@@ -1,4 +1,6 @@
+
 # TinyRouter Playground 架构
+> **最后核对（2026-08-08，Utility 入口/Editor 资产与局部 Markdown 移植）：** 当前管理 UI 顶层 Download/GIF 不再是独立顶层导航，而由 Utility 菜单承载；Utility active header label 显示当前工具，子工具为 `editor`、`logReader`、`review`、`gif`、`download`、`fileTransfer`；fresh init 只显示 Utility landing，不预选工具。Editor、Log Reader、Text Review 资产位于 `web/static/utility/editor/`，由 `RootStatic` 提供给默认与 Playground 构建；`web/playground/static-pg/editor` 不再是当前资产根。Editor 是 File Editor only：双 pane raw/parsed、sanitized Markdown preview、toolbar/status/find/diff，工具栏只有 Edit/Diff；Log Reader 是独立 `logReader` Utility tool，Text Review 是独立 `review` Utility tool，由 `review.js` wrapper 调用 `editor_textreview_*` wizard，二者都不是 Editor tabs。Editor 使用 `web/static/vendor/utility-editor/` 的 `markdown-it`、`Prism`、`diff-match-patch`、`Turndown`、`DOMPurify`，各依赖目录带许可证文件。这是官方 StackEdit 的局部移植边界，不代表完整 StackEdit/cledit/PageDown，也未移植 StackEdit 远程服务。F5 打开 Utility menu，F4 直达 Gallery；无旧 Gallery↔Editor toggle。Download/FileTransfer 后端 API 路径不变，并由 `app.js` 调度 Download/FileTransfer 的 suspend/resume 生命周期 hooks。
 > **最后核对（2026-08-08 Markdown URL 渲染回归修复）：** Playground 使用 marked@18.0.5，其 `renderer.link` 回调改为接收单个 Link token；共享 `pg-markdown.js` 已兼容 token 与旧三参数签名，使用 token.href/text/tokens 渲染并统一将链接限制为 `http:`/`https:`，避免 URL 被拼接为 `[object Object]`。该共享 marked 实例也服务管理端 `info_common.js` 的 request/debug pretty 字段；Raw 视图仍保留原始字符串。回归覆盖裸 URL、Markdown 链接、安全协议降级与 Search Pretty/Raw 语义。
 >
 >
@@ -45,6 +47,7 @@
 
 > **最后核对（2026-07-26 增补#2）：** P1-P5 Editor/Clean-mode refactor：**(1)** Top-level nav simplified to 2-way Gallery↔Editor（persisted via `sessionStorage.trGalView`）；AI Text Review wizard is now Editor's **Clean** mode（3rd toolbar button alongside Edit/Diff）— `gotoGalleryToggle` 2-way，`navigateTo` `case 'textreview'` removed。**(2)** Editor state（mode + panes）persisted to `sessionStorage.trEditor`；`edSaveState()`/`edLoadState()` added in `editor-state.js`。**(3)** Step1 large-text performance：chunked preview（2000 lines/65536 chars first chunk）+ Load-more button + paste interception + Abandon button；layout reworked（centered title row + Next/Abandon right，flex body fills height）。**(4)** Step2 layout reworked（Back/centered Split/Next header，single-row controls1，4 evenly-distributed buttons in controls2，flex preview）；auto-detect runs on fresh entry（no chapters）。**(5)** Step3 Node Pool Settings modal（pg-modal with add-node form + provider/model dropdowns from `/api/models` + delete per node）+ System Prompt default-collapsed（`trState.promptCollapsed` persisted）。**(6)** Clean mode wizard constrained to left 50% pane（`.ed-review-wrap` horizontal flex + spacer）。详情见 Phases P1-P5。
 
+> **当前导航覆盖（2026-08-08）：** 后续 Utility 重组已将顶层 Download/GIF 收入 Utility；F5 打开 Utility 菜单，F4 直达 Gallery。下方 2026-07-26 导航条目保留为历史叙述，不代表当前入口。
 > **最后核对（2026-07-26 增补#3）：** 导航栏与 Monitor 页面重构——**(1)** 移除 Console 独立页面与导航按钮，内容并入 Monitor（原 Usage）页右栏；(2) 导航按钮重排：Row1=Monitor(原Usage)/Settings/Playground，Row2=Gallery/Download；(3) 快捷键重映射：F1→Monitor, F2→Settings, F3→Playground, F4→Gallery, F5→Download，F6 移除；(4) `goto-console` shortcut 预设移除；`renderConsole` 替换为 `buildConsoleInto(container)`；(5) 移除 6H Request Trend 图表及全部趋势相关代码（`renderTrendChart`/`initTrendChart`/`updateTrendChart`/`buildTrendChartSVG`/`buildTrendData`/`attachTrendHover` 等）。涉及文件：`web/static/app.js`、`shortcuts.js`、`monitor.js`、`console.js`、`i18n.js`、`theme.js`、`style.css`、`index.html`、`index-nopg.html`。`internal/proxy/`、`internal/usage/` 无变化（用量数据为共享环形缓冲，趋势完全由前端派生）。
 
 
@@ -59,6 +62,7 @@
 > - **后端会话引擎：** `internal/textreview`（`session.go`/`scheduler.go`/`cleaner.go`/`proxy_call.go`/`streaming_writer.go`/`events.go`）+ 3 个测试（`dequeue_batch_test`/`batch_splitter_test`/`batch_run_test`）—— 调度器 `acquireAndClaim` 按节点 IntervalSec/Active<Target/Enabled 选节点后从范围内 pending 章 `dequeueBatch` 取批次（首章无条件取，按 BatchChars 累积）；`runBatch` 单章走原单章 Clean，多章经 `BatchCleaner.CleanBatch` 以 `CHAPTER_SEP`+`===CHAPTER_ID:K===` 头合并发送、流式按分隔符增量拆回各章；<10字质量门控仅多章批次；支持 pause/resume/stop 与单章 reprocess；502-exhausted 时按批次 ramp-down 节点并发（`NodePersister` 落盘到 `config.yaml`）；会话仅驻内存（无 `state.yaml`）。
 > - **HTTP 端点：** `internal/api/textreview`（`register.go`/`sessions.go`/`nodepersister.go`）注册 `/api/text-review/*`（review-nodes / split-patterns / prompt-default CRUD + sessions / sessions/{id}/events SSE / pause / resume / stop / chapters/{idx}/reprocess），独立于 `/api` 组以绕过 1MB 上限（32 MiB），仍经 `AuthMiddleware`。
 > - **配置：** `internal/config` 新增 `TextReviewConfig`（`Nodes`/`SplitPatterns`/`DefaultPromptPresetID`）+ `TextReviewNode`（`ID`/`ProviderID`/`ModelID`/`Concurrency`/`Enabled`/`IntervalSec`/`BatchChars`）+`SplitPattern` 类型；`finalizeConfig` 首启注入内置章节检测 split-pattern（nil 判断，用户清空为 `[]` 不再注入）；`internal/registry/text_review.go` 提供线程安全 CRUD。
+> **历史与当前边界（2026-08-08）：** 上述 2026-07-26 Editor/Clean-mode 记录仅保留迁移背景；Clean tab、Gallery↔Editor toggle、旧 F6 入口均不是当前契约。当前 Text Review 由独立 Utility `review` tool + `web/static/utility/editor/review.js` wrapper 提供，当前 Editor 仅为 File Editor 的 Edit/Diff 双 pane。
 
 > **2026-07-22 更新（Search 模式 UI/UX 优化）：**
 > - **双窗口左右并列布局与交互：** `pgState.mode === 'search'` 时强制使用 2 窗口布局（`splitCount = 2`，`1fr 1fr`），左侧窗口显示 Search Strategy 与 Raw Search Results 视图，右侧窗口专门渲染 Synthesized 最终回复；问句留在 `#pg-input` 并呈灰色锁定态（`pg-input-search-locked`）；打字时恢复亮色编辑。
@@ -169,19 +173,20 @@ go build -tags playground -o tinyrouter-pg.exe .
 
 `build.ps1` 将 `-Playground` 转为 `playground` tag，并和 `tray`、`webview` tag 合并。`debug` 变体明确忽略 Playground。Playground 资产当前约增加 4 MiB，主要来自 vendor 库。
 
-### 3.3 静态路由
-
 `internal/api/router.go` 在 `PlaygroundCompiled()` 为真时挂载：
 
 - `/playground.css`；
-- `/vendor/*`（playground vendor 目录优先，未命中回退 `web.Static` 主静态——gif.js/gifuct-js 位于 `web/static/vendor/`，见 `internal/api/router.go` `vendorHandler`）；
-- 模块子目录脚本（`playground/`、`gallery/`、`editor/` 三个子目录，见 §5.1）——路由清单由 `internal/feature/feature.go` 的 `StaticFiles` manifest 经 `feature.Assets(RootPlaygroundPG)` 派生（`internal/api/router.go`），无硬编码 `pgJSFiles` 列表；URL 路径与子目录相对路径一致（如 `/playground/pg-core.js`、`/gallery/gallery.js`、`/editor/editor.js`）。
+- `/vendor/*`（playground vendor 目录优先，未命中回退 `web.Static` 主静态）；
+- Playground 模块子目录脚本（`playground/`、`gallery/`）由 `feature.Assets(RootPlaygroundPG)` 派生；
+- Utility 的 Editor/Log Reader/Text Review 脚本不属于 Playground 静态路由，统一由 `RootStatic` 的 `/utility/editor/*` 提供，默认与 `-tags playground` 构建均可用；`review.js` 是独立 Utility Review wrapper，Editor 不承载 Log Reader/Text Review tabs。
 
-新增或重命名前端模块时必须同时更新：
+新增或重命名 Playground 模块时必须同时更新：
 
-1. `web/playground/static-pg/` 对应子目录（`playground/`、`gallery/`、`editor/`）中的文件；
+1. `web/playground/static-pg/` 对应子目录（当前为 `playground/`、`gallery/`）；
 2. `internal/feature/feature.go` 对应 feature 的 `StaticFiles` manifest（路由由 `feature.Assets` 派生）；
 3. `web/static/index.html` 的加载顺序。
+
+Utility Editor/Log Reader/Review 资产变更则更新 `web/static/utility/editor/`、Editor manifest 的 `RootStatic` 条目及 `index.html`/`index-nopg.html` 两个入口；新增或变更 `review.js` 与 `editor_textreview_*` 时同时核对独立 `review` Utility tool。
 
 `playground/playground.js` 当前只有兼容说明，不承载实现。
 
@@ -337,14 +342,14 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 -> pg-comfyui -> pg-image-model -> pg-image-inspire -> pg-image-batch
 -> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui
 -> pg-modal -> pg-lifecycle
--> gallery/editor/text-review modules
-```
+-> gallery modules
 
-模块文件位于 `static-pg` 下三个子目录：`playground/`（pg-*）、`gallery/`（gallery-*）、`editor/`（editor* 与 editor_textreview*）。
+```
+模块文件位于 `static-pg` 下两个实现子目录：`playground/`（pg-*）与 `gallery/`（gallery-*）。Utility 的 File Editor、Log Reader、Text Review 位于 `web/static/utility/editor/`，不属于 Playground 静态资产；`review.js` 由 RootStatic 提供。
 
 ### 5.2 文件职责
 
-> 表中 `pg-*.js` 均位于 `web/playground/static-pg/playground/`；Gallery/Editor 模块分别在 `gallery/`、`editor/` 子目录。
+> 表中 `pg-*.js` 均位于 `web/playground/static-pg/playground/`；Gallery 模块在 `gallery/` 子目录。Utility Editor/Log Reader/Review 模块不在本节清单内，见 §17.1。
 
 | 文件 | 职责 |
 |---|---|
@@ -757,12 +762,12 @@ go build -tags playground -o tinyrouter-pg.exe .
 - `internal/api/anysearch.go`：3 个 Search 模式 HTTP handler（`POST /api/anysearch/search`、`/subdomains`、`/extract`）；
 - `internal/config/types.go` 中的 `AnySearchConfig` 结构体（`APIKey`/`MaxResults` 字段）+ `Config.AnySearch` 字段；
 - `internal/config/defaults.go` 中的 `AnySearch.MaxResults` 默认值 5 回填。
-- `web/playground/static-pg/editor_textreview.js`：AI Text Review 入口（`renderTextReview`/`cleanupTextReview` + 4 步路由）；
-- `web/playground/static-pg/editor_textreview_step1..4.js`：导入/切分/AI 清理/审校四步 UI；
-- `web/playground/static-pg/editor_textreview_state.js`：会话状态 + 切页快照/重订阅；
-- `web/playground/static-pg/editor_textreview_split.js`/`editor_textreview_diff.js`：章节切分与 diff 算法（移植自 novelhelper `m1-import`）；
-- `web/static/app.js` 中的 `gotoGalleryToggle`（3-way Gallery→Editor→TextReview）+ `navigateTo` `case 'textreview'` + cleanup guard；
-- `web/static/i18n.js` 中的 `textReview` 及相关 UI 字符串。
+- `web/static/utility/editor/editor.js` + `editor-state.js`：File Editor（双 pane raw/parsed、sanitized Markdown preview、Edit/Diff、toolbar/status/find）；
+- `web/static/utility/editor/editor-logs.js`：独立 Log Reader Utility tool；
+- `web/static/utility/editor/review.js` + `editor_textreview_*`：独立 Text Review Utility wrapper 与 4 步 wizard；
+- `web/static/app.js`：Utility tool selection、active header label、fresh-init landing 与 lifecycle hooks；
+- `web/static/index.html`/`index-nopg.html`：RootStatic Utility Editor/Log Reader/Review script load order；
+- `web/static/i18n.js`：Editor/Log Reader/Review 相关 UI 字符串。
 
 ## 15. 变更维护清单
 
@@ -997,58 +1002,55 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 修改下载视频项 | `web/static/download.js`（`playVideo` 的 `videoObj` 新增 `absPath: normalizedPath`，使 `kind:'plain'` 视频项获得磁盘路径，编辑/删除可操作） |
 修改 trim 片段拖动约束 | `web/playground/static-pg/gallery/gallery-edit.js`（`_startTrimDrag.onMove` + `_moveNearestHandle` 新增 prevEnd/nextStart 跨片段约束） |
 
-## 17. Editor 模块（双栏文本编辑器）
+## 17. Editor 模块（File Editor）
 
-Editor 是 playground 构建变体（`-tags playground`）下的双栏文本编辑器，与 Gallery 共享同一个导航按钮（第 1 次点击 → Gallery，第 2 次 → Editor，循环 toggle）。UI 由 `web/playground/static-pg/editor/editor.js` + `editor-state.js` 实现（vanilla JS，`window.renderEditor`/`window.cleanupEditor` 入口）。
+历史 Editor 实现曾位于 Playground；当前 File Editor 由 `web/static/utility/editor/editor.js` + `editor-state.js` 提供，作为独立 Utility `editor` tool 渲染（`window.renderEditor`/`window.cleanupEditor`）。当前 Editor 不包含 Log Reader 或 Text Review tabs。
 
 ### 核心功能
-- **双栏编辑**：左右两个独立编辑面板，每面板有独立的文件名、脏标记、打开/保存、原始/预览视图切换、自动换行切换。
-- **原始/预览视图**：`raw` 模式显示带行号的 textarea（等宽字体、Tab=2空格、Enter 自动缩进）；`parsed` 模式基于文件扩展名渲染——`.md` 用 `marked` + `DOMPurify`（复用 playground 的 `pgRenderMarkdown`/`pgHighlight`），代码扩展名用 `highlight.js`，其余用 `<pre>` 纯文本。
-- **Diff 对比**：`mode: 'diff'` 切换为双栏对齐的对比视图，基于 vendored `diff` 库（`window.Diff.diffLines`/`diffChars`）。支持 `Before→After`（左→右或右→左）方向选择。行类型：`context`/`del`/`add`/`mod`（mod 行有字符级高亮）。头部统计：删除/新增/修改行数 + 字符保留率。自动滚动到首个差异行。纯查看，无接受/拒绝/编辑按钮。
-- **查找替换**：Ctrl+F 切换查找栏（大小写敏感、正则、匹配计数 `current/total`、前一/后一、替换、全部替换）。Ctrl+H 快速切换到替换模式。Esc 关闭。F3/Enter 下一匹配；Shift+F3/Shift+Enter 上一匹配。
-- **跳转到行**：Ctrl+G 弹出 prompt 跳转到指定行。
-- **文件 IO**：`POST /api/editor/open` 后端原生文件选择器（失败回退 `FsApi.pickFiles`）；`POST /api/editor/save` 后端原子写（无 path 时回退浏览器下载）。Ctrl+S 保存当前面板；Ctrl+Shift+S 全部保存。
-- **脏追踪**：`content !== original` 时显示黄色脏点 `.ed-dirty-dot`，启用保存按钮。
-- **无持久化**：状态在内存中保持（同 `galleryState`），页面切换不丢失。
+- **双 pane 编辑**：左右两个独立文件 pane，维护文件名、脏标记、打开/保存、换行和 pane 状态。
+- **Raw/parsed 与 Markdown preview**：每个 pane 可在 raw 与 parsed 视图间切换；Markdown 使用 `markdown-it` 渲染并经 `DOMPurify` sanitization，代码使用 `Prism`，结果为 sanitized Markdown preview。这里的 parsed/preview 是局部 StackEdit 能力，不是完整 StackEdit/cledit/PageDown。
+- **Diff 对比**：Edit/Diff 工具栏仅保留这两个模式；Diff 使用 `diff-match-patch` 与本地 diff 逻辑提供双 pane 对比。
+- **Toolbar/status/find**：提供 toolbar、状态信息、查找/替换与差异统计等 File Editor 操作。
+- **文件 IO**：`POST /api/editor/open` 打开文本文件，`POST /api/editor/save` 原子写保存；无可用路径时可回退浏览器下载。
 
-### 导航 toggle 逻辑
-- Gallery 导航按钮和 F4 快捷键共享 `gotoGalleryToggle()`：Gallery → Editor → Gallery 循环。Gallery 页面时按钮显示 t('gallery')，Editor 页面时按钮显示 t('editor')。高亮始终在 Gallery 按钮上。
-- 注册于 `web/static/app.js`（`navigateTo` switch、`currentPage` guard、`main-no-scroll`）、`web/static/auth.js`（nav-item click 事件绑定额外判断 `gotoGalleryToggle()`）、`web/static/shortcuts.js`（F4 label 改为 "Toggle Gallery / Editor"）。
+### 导航
+Editor 不再与 Gallery 通过旧 toggle 互换，也不承载 Log Reader/Clean/Review tabs。Utility 菜单独立提供 `editor`、`logReader`、`review` 工具；fresh init 只显示 landing，选中工具后 active header label 显示当前工具。
 
 ### HTTP 接口
 | 接口 | 用途 | 鉴权 | Body 上限 |
 |---|---|---|---:|
-| `POST /api/editor/open` | 原生文件选择器打开文本文件，返回 `{path,name,size,content}` 或 `{cancelled:true}` 或 `{unsupported:true}` | 管理 session | 32 MiB |
-| `POST /api/editor/save` | 原子写保存 `{path,content}`，返回 `{ok:true,path}` | 管理 session | 32 MiB |
+| `POST /api/editor/open` | 原生文件选择器打开文本文件，返回 `{path,name,size,content}` 或取消/不支持状态 | 管理 session | 32 MiB |
+| `POST /api/editor/save` | 原子写保存 `{path,content}` | 管理 session | 32 MiB |
 
-原生文件选择器复用 `internal/fsutil/open_windows.go` 的 COM `IFileOpenDialog`；取消路径此前可正常返回 `{cancelled:true}`，确认路径因 `IFileDialog::GetResult` 的 vtable 索引错误触发访问违例并闪退，2026-07-25 已修正（索引 26→20）。
+### 依赖与源码锚点
+- `web/static/vendor/utility-editor/`：`markdown-it`、`Prism`、`diff-match-patch`、`Turndown`、`DOMPurify`，每个依赖目录带许可证；官方 StackEdit 的远程服务仍未移植。
+- **历史源码锚点（仅迁移背景）：** `web/playground/static-pg/editor/editor-state.js`、`editor.js`、`playground.css` 与旧 `pgJSFiles`/Gallery toggle 入口。
+- **当前源码锚点：** `web/static/utility/editor/editor-state.js`、`editor.js`（File Editor）、`editor-logs.js`（独立 Log Reader）、`editor_textreview_*` + `review.js`（独立 Text Review Utility wrapper）；`internal/api/editor` 的 `/api/editor/*` handlers；`internal/api/router.go` 的 Editor/Text Review routes；`web/static/app.js` 的 Utility `renderUtility`/`utilityToolLifecycle`；`web/static/auth.js` 的 Utility menu；`web/static/index.html`/`index-nopg.html` 的 `/utility/editor/*` script tags。
+  
+`web/static/i18n.js` 提供 Editor 与 Utility 字符串；`web/static/shortcuts.js` 提供 F4/F5 binding label。
 
-### 依赖
-- `diff.min.js`（vendored 至 `vendor/diff.min.js`，暴露 `window.Diff`）
-- 复用 playground 已有 vendor：`marked.min.js`、`highlight.min.js`、`katex.min.js`、`marked-katex-extension`、`purify.min.js`
 
-### 源码锚点
-- `web/playground/static-pg/editor/editor-state.js`：状态对象 + 常量 + 辅助函数
-- `web/playground/static-pg/editor/editor.js`：`renderEditor`/`cleanupEditor` + `editorAlignedDiff` + 全部编辑、diff、查找替换逻辑
-- `web/playground/static-pg/playground.css`：Editor/Diff 样式（`.ed-*` 前缀）
-- `internal/api/editor.go`：后端 handlers `editorOpen`/`editorSave`（由另一 worker 创建）
-- `internal/api/router.go`：`/api/editor/*` 路由注册 + `pgJSFiles` 含 `editor-state.js`、`editor.js`
-- `web/static/app.js`：`gotoGalleryToggle()`、`navigateTo` switch 新增 `case 'editor'`、cleanup guard、active toggle、main-no-scroll
-- `web/static/auth.js`：Gallery nav-item click 改调 `gotoGalleryToggle()`
-- `web/static/i18n.js`：`editor` 及所有 Editor UI 字符串
-- `web/static/shortcuts.js`：`global.goto-gallery` label 更新
-- `web/static/index.html`：`diff.min.js` + `editor-state.js` + `editor.js` 脚本
+### 17.1 当前 Utility Editor/Log Reader/Review 资产与导航（2026-08-08）
 
-## 18. AI Text Review 模块（4 步文本清理向导）
+`web/static/utility/editor/` 的 `editor-state.js` 与 `editor.js` 是 File Editor；`editor-logs.js` 是独立 Log Reader；`editor_textreview_*` 实现 Text Review wizard，`review.js` 是独立 Utility Review wrapper。它们全部属于 `RootStatic`，并在 `index.html`/`index-nopg.html` 中以 `/utility/editor/*` 顺序加载；不再依赖 `web/playground/static-pg/editor`。
 
-AI Text Review 是 playground 构建变体（`-tags playground`）下的长文本 AI 清理分页，与 Gallery/Editor 共享同一导航按钮的 3-way toggle（Gallery → Editor → TextReview → Gallery，复用 F6 `global.goto-gallery`）。UI 由 `web/playground/static-pg/editor_textreview.js` + `editor_textreview_step1..4.js` + `editor_textreview_state.js` + `editor_textreview_split.js`/`editor_textreview_diff.js` 实现（vanilla JS，`window.renderTextReview`/`window.cleanupTextReview` 入口，移植自 novelhelper `frontend/src/pages/m1-import`）。
+File Editor 当前为双 pane raw/parsed 工作区，提供 sanitized Markdown preview、toolbar/status/find/diff，且工具栏只有 Edit/Diff；使用 `markdown-it`、`Prism`、`diff-match-patch`、`Turndown`、`DOMPurify` 等 `utility-editor` vendor。这里记录的是官方 StackEdit 的局部移植边界，不声称完整 StackEdit/cledit/PageDown，也不声称 StackEdit 远程服务已移植。
 
-### 4 步向导
+Utility 导航由 `web/static/app.js`/`auth.js` 管理：顶层 Utility 菜单列出 `editor`、`logReader`、`review`、`gif`、`download`、`fileTransfer`；fresh init 只显示 landing，不预选工具；选中工具后 active header label 显示当前工具；F5 打开菜单，F4 直达 Gallery。旧的 Gallery↔Editor toggle 与旧 F6 Editor/TextReview 快捷键不再是当前契约。`app.js` 在 Download/FileTransfer 子工具切换时调用 `suspendDownload`/`resumeDownload`、`suspendFileTransfer`/`resumeFileTransfer`，离开时执行 cleanup。
+
+当前后端 API 路径保持不变：`POST /api/editor/open`、`POST /api/editor/save`、`/api/text-review/*`、`/api/downloads/*` 以及 `/api/filetransfer/*`。FileTransfer 的上传入口为 `POST /api/filetransfer/upload`，路径容量查询为 `POST /api/filetransfer/path-info`。
+## 18. AI Text Review 模块（独立 Utility Review）
+
+以下段落记录 AI Text Review 的后端会话与历史迁移背景；当前前端入口是独立 Utility `review` 工具，由 `web/static/utility/editor/review.js` wrapper 调用 `editor_textreview_*` wizard，不属于 File Editor 的 tabs。当前导航与资产事实见 §17.1。
+
+AI Text Review 原为 playground 构建变体（`-tags playground`）下的长文本 AI 清理分页，与 Gallery/Editor 共享 3-way toggle。历史 UI 由 `web/playground/static-pg/editor_textreview.js` + `editor_textreview_step1..4.js` + `editor_textreview_state.js` + `editor_textreview_split.js`/`editor_textreview_diff.js` 实现；这些路径仅作迁移背景。
+
+### 4 步向导（历史）
 
 1. **导入（step1）**：粘贴/上传长文本原文。
-2. **切分（step2）**：按 `SplitPattern` 正则（默认内置"第X章/回/卷/节"等，移植自 `split.ts`）检测章节边界；`editor_textreview_split.js` 提供切分算法，用户可调整。
-3. **AI 清理（step3）**：选处理节点池 + system prompt，发起会话；后端逐章流式清理，前端 SSE 订阅实时显示每章增量。
-4. **审校（step4）**：`editor_textreview_diff.js` 行级 diff 对比原文/清理后，逐章接受/拒绝/重处理。
+2. **切分（step2）**：按 `SplitPattern` 正则检测章节边界；用户可调整。
+3. **AI 清理（step3）**：选择处理节点池与 system prompt，发起会话并通过 SSE 显示增量。
+4. **审校（step4）**：行级 diff 对比原文/清理后，逐章接受/拒绝/重处理。
 
 ### 后端会话引擎
 
@@ -1088,21 +1090,16 @@ flowchart LR
 
 `internal/config.TextReviewConfig`（`Nodes`/`SplitPatterns`/`DefaultPromptPresetID`）持久化于 `config.yaml`；`finalizeConfig` 首启注入内置 split-pattern（nil 判断，用户清空为 `[]` 不再注入）；`internal/registry/text_review.go` 提供线程安全 CRUD；`internal/api/textreview/nodepersister.go` 在 ramp-down 时写回。
 
-### 源码锚点
-
-- `web/playground/static-pg/editor_textreview.js`：`renderTextReview`/`cleanupTextReview` 入口 + 4 步路由
-- `web/playground/static-pg/editor/editor_textreview_step1..4.js`：导入/切分/AI 清理/审校四步 UI
-- `web/playground/static-pg/editor/editor_textreview_state.js`：会话状态 + 切页快照/重订阅
-- `web/playground/static-pg/editor/editor_textreview_split.js`：章节切分算法（移植自 novelhelper `split.ts`）
-- `web/playground/static-pg/editor/editor_textreview_diff.js`：行级 diff 对比算法
+- **历史前端锚点（迁移前）：** `web/playground/static-pg/editor_textreview.js`、`editor/editor_textreview_step1..4.js`、`editor/editor_textreview_state.js`、`editor/editor_textreview_split.js`、`editor/editor_textreview_diff.js`；旧 `pgJSFiles`/独立导航仅作背景。
+- **当前前端锚点：** `web/static/utility/editor/editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_state.js`、`editor_textreview_split.js`、`editor_textreview_diff.js`，由 `RootStatic` 的 `/utility/editor/*` 脚本加载。
 - `internal/textreview/{session,scheduler,cleaner,proxy_call,streaming_writer,events}.go`：会话引擎
 - `internal/api/textreview/{register,sessions,nodepersister}.go`：HTTP handler + ramp-down 落盘
 - `internal/registry/text_review.go`：节点池/切分模式 CRUD
 - `internal/config/types.go`（`TextReviewConfig`/`TextReviewNode`/`SplitPattern`）+ `defaults.go`（内置 split-pattern 注入）
-- `internal/api/router.go`：`/api/text-review/*` 路由组 + `pgJSFiles` 含 `tr-*`/`text-review*`
-- `web/static/app.js`：`gotoGalleryToggle` 3-way + `navigateTo` `case 'textreview'` + cleanup guard
+- `internal/api/router.go`：`/api/text-review/*` 路由组（API 路径保持不变）
+- `web/static/app.js`：Utility `renderUtility`/`utilityToolLifecycle` 与 cleanup
 - `web/static/i18n.js`：`textReview` 及相关 UI 字符串
-- `web/static/index.html`：`tr-*.js` + `editor_textreview*.js` 脚本加载
+- `web/static/index.html`/`index-nopg.html`：`/utility/editor/*` 脚本加载
 
 ### 变更维护清单
 
@@ -1114,4 +1111,4 @@ flowchart LR
 | 修改会话端点/SSE | `internal/api/textreview/sessions.go`、`internal/textreview/events.go`、`internal/api/router.go`（路由组） |
 | 修改节点池/切分模式 CRUD | `internal/registry/text_review.go`、`internal/api/textreview/register.go`、`internal/config/types.go` |
 | 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_state.js`、`playground.css`（`.tr-s3`/`.tr-s4`）、`web/static/i18n.js` |
-| 修改导航（Gallery↔Editor 2-way） | `web/static/app.js`（`gotoGalleryToggle` 2-way + `sessionStorage.trGalView` 持久化）、`web/static/auth.js`、`web/static/shortcuts.js`（F6 label）、`web/playground/static-pg/editor/editor.js`（Clean mode）、`web/playground/static-pg/editor/editor-state.js`（`edSaveState`/`edLoadState`） |
+| 修改导航（历史 Gallery↔Editor 2-way） | `web/static/app.js`、`web/static/auth.js`、`web/static/shortcuts.js`、旧 `web/playground/static-pg/editor/*`（仅迁移背景）；当前 Utility 导航维护见 §17.1 与 `web/static/utility/editor/*` |

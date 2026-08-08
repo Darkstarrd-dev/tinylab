@@ -66,10 +66,19 @@ window.__hasPlayground = true;
 <nav class="top-header-nav" aria-label="Primary navigation">
 <button class="nav-item active" type="button" data-page="monitor">Monitor</button>
 <button class="nav-item" type="button" data-page="endpoint">Settings</button>
-<button class="nav-item" type="button" data-page="download">Download</button>
+<div class="utility-nav-wrap">
+<button class="nav-item" type="button" data-page="utility" aria-haspopup="menu" aria-expanded="false">Utility</button>
+<div id="utility-menu" class="utility-menu" role="menu" hidden>
+<button type="button" role="menuitem" data-utility-tool="editor">Editor</button>
+<button type="button" role="menuitem" data-utility-tool="logReader">Log Reader</button>
+<button type="button" role="menuitem" data-utility-tool="review">Text Review</button>
+<button type="button" role="menuitem" data-utility-tool="gif">GIF</button>
+<button type="button" role="menuitem" data-utility-tool="download">Download</button>
+<button type="button" role="menuitem" data-utility-tool="fileTransfer">FileTransfer</button>
+</div></div>
 <button class="nav-item" type="button" data-page="playground">Playground</button>
 <button class="nav-item" type="button" data-page="gallery">Gallery</button>
-<button class="nav-item" type="button" data-page="gif" data-i18n="gif">GIF</button>
+<span class="nav-placeholder" aria-hidden="true"></span>
 </nav>
 <div id="quickslot-header" class="quickslot-header"></div>
 <div class="top-header-stats">
@@ -151,6 +160,12 @@ window.__hasPlayground = true;
 <script src="/vendor/highlight.min.js"></script>
 <script src="/vendor/mermaid.min.js"></script>
 <script>if (window.mermaid) { window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', themeVariables: { background: '#1a1326', primaryColor: '#c4a6ff', primaryTextColor: '#e6def0', lineColor: '#a89bd6', secondaryColor: '#2a1f3d', tertiaryColor: '#3a2c5e' } }); }</script>
+<!-- Utility Editor vendor deps (load before diff/editor modules) -->
+<script src="/vendor/utility-editor/markdown-it/markdown-it.min.js"></script>
+<script src="/vendor/utility-editor/prism/prism.js"></script>
+<script src="/vendor/utility-editor/diff-match-patch/diff-match-patch.js"></script>
+<script src="/vendor/utility-editor/turndown/turndown.js"></script>
+<script src="/vendor/utility-editor/dompurify/purify.min.js"></script>
 <script src="/vendor/diff.min.js"></script>
 <!-- Unified File System API (BlobTracker, pickers, save, drag/drop collector) -->
 <script src="/fs-api.js"></script>
@@ -185,17 +200,18 @@ window.__hasPlayground = true;
 <script src="/gallery/gallery-edit-operations.js"></script>
 <script src="/gallery/gallery-edit-batch.js"></script>
 <script src="/gallery/gallery.js"></script>
-<script src="/editor/editor-state.js"></script>
-<script src="/editor/editor.js"></script>
-<script src="/editor/editor-logs.js"></script>
+<script src="/utility/editor/editor-state.js"></script>
+<script src="/utility/editor/editor.js"></script>
+<script src="/utility/editor/editor-logs.js"></script>
 <!-- AI Text Review (load order: split/diff/state first, then steps, then entry) -->
-<script src="/editor/editor_textreview_split.js"></script>
-<script src="/editor/editor_textreview_diff.js"></script>
-<script src="/editor/editor_textreview_state.js"></script>
-<script src="/editor/editor_textreview_step1.js"></script>
-<script src="/editor/editor_textreview_step2.js"></script>
-<script src="/editor/editor_textreview_step3.js"></script>
-<script src="/editor/editor_textreview_step4.js"></script>
-<script src="/editor/editor_textreview.js"></script>
+<script src="/utility/editor/editor_textreview_split.js"></script>
+<script src="/utility/editor/editor_textreview_diff.js"></script>
+<script src="/utility/editor/editor_textreview_state.js"></script>
+<script src="/utility/editor/editor_textreview_step1.js"></script>
+<script src="/utility/editor/editor_textreview_step2.js"></script>
+<script src="/utility/editor/editor_textreview_step3.js"></script>
+<script src="/utility/editor/editor_textreview_step4.js"></script>
+<script src="/utility/editor/editor_textreview.js"></script>
+<script src="/utility/editor/review.js"></script>
 </body>
 </html>

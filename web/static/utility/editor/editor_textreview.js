@@ -2,25 +2,28 @@
 // Loaded LAST among the editor_textreview files, after editor_textreview_state.js + step1..4.js.
 //
 // Exposes window.renderTextReview(container) + window.cleanupTextReview().
-// Mirrors editor.js: top-level 'use strict' + function declarations + var.
-// Reuses host adapter (window.PG_HOST / pgApiGet / pgEscapeHtml / pgT / toast).
+// Uses only editor/page globals; every optional host service has a safe fallback.
 
 'use strict';
 
-// ===================== shared helpers =====================
-
-// Host adapter shim: prefer PG_HOST, else fall back to the global host.
-function trApiGet(p)        { return (window.PG_HOST && PG_HOST.apiGet) ? PG_HOST.apiGet(p) : apiGet(p); }
-function trApiPost(p, b)    { return (window.PG_HOST && PG_HOST.apiPost) ? PG_HOST.apiPost(p, b) : apiPost(p, b); }
-function trApiDelete(p)     { return (window.PG_HOST && PG_HOST.apiDelete) ? PG_HOST.apiDelete(p) : apiDelete(p); }
-function trEscapeHtml(s)    { return (window.PG_HOST && PG_HOST.escapeHtml) ? PG_HOST.escapeHtml(s) : escapeHtml(s); }
-function trToast(m, ty)     { if (window.PG_HOST && PG_HOST.toast) return PG_HOST.toast(m, ty); if (typeof toast === 'function') return toast(m, ty); }
-// i18n: prefer host t() (which merges PG_I18N), else pgT, else verbatim key.
-function trT(k, ar) {
-  if (typeof t === 'function') return t(k, ar);
-  if (typeof pgT === 'function') return pgT(k, ar);
-  return k;
+function trApiGet(p) {
+  if (typeof apiGet === 'function') return apiGet(p);
+  return fetch('/api' + p).then(function (r) { return r.json(); });
 }
+function trApiPost(p, b) {
+  if (typeof apiPost === 'function') return apiPost(p, b);
+  return fetch('/api' + p, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b || {}) }).then(function (r) { return r.json(); });
+}
+function trApiDelete(p) {
+  if (typeof apiDelete === 'function') return apiDelete(p);
+  return fetch('/api' + p, { method:'DELETE' }).then(function (r) { return r.json(); });
+}
+function trEscapeHtml(s) {
+  if (typeof escapeHtml === 'function') return escapeHtml(s);
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function trToast(m, ty) { if (typeof toast === 'function') toast(m, ty); }
+function trT(k, ar) { return typeof t === 'function' ? t(k, ar) : k; }
 
 // ===================== page-level refs (cleanup) =====================
 

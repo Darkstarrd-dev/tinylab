@@ -60,6 +60,8 @@
   var canvas = null;
   var ctx = null;
   var rendered = false;
+  var renderContainer = null;
+  var suspended = false;
   var layerBase = null; // baseline size of the active layer (layer-scale slider)
 
   // ------------------------------------------------------------------
@@ -69,6 +71,9 @@
   function render(container) {
     teardown();
     if (!container) container = document.getElementById('page-content');
+    if (!container) return null;
+    renderContainer = container;
+    suspended = false;
     container.style.height = '100%';
     container.style.overflow = 'hidden';
     container.innerHTML = pageTemplate();
@@ -98,8 +103,33 @@
     return container;
   }
 
+  function suspend() {
+    if (!rendered && !core.state.playback.playing) {
+      suspended = true;
+      return;
+    }
+    teardown();
+    suspended = true;
+  }
+
+  function resume() {
+    if (!suspended && rendered) return renderContainer;
+    var pageContent = document.getElementById('page-content');
+    var target = pageContent || renderContainer;
+    if (!target) return null;
+    return render(target);
+  }
+
   function cleanup() {
     teardown();
+    // cleanupGifEditor remains the full teardown path for legacy callers.
+    // Utility navigation must call suspend() instead to retain this project.
+    if (core) {
+      core.resetSlices();
+      core.releaseSource();
+    }
+    renderContainer = null;
+    suspended = false;
   }
 
   function teardown() {
@@ -121,9 +151,7 @@
       }
     }
     if (core) {
-      core.cleanupModules();   // import (draft), timeline, playback, export cleanups
-      // Note: core.resetSlices() and core.releaseSource() are NOT called on tab leave
-      // so that state is preserved in memory when switching back to GIF editor.
+      core.cleanupModules();
     }
     dom = {};
     canvas = null;
@@ -2045,12 +2073,6 @@
       '    <div class="gif-timeline-scroll" id="gif-timeline-scroll">' +
       '      <div class="gif-timeline-track" id="gif-timeline"></div>' +
       '    </div>' +
-      '    <div class="gif-timeline-toolbar" id="gif-timeline-toolbar">' +
-      '      <div class="gif-timeline-zoom">' +
-      '        <span class="gif-muted-label" id="gif-timeline-zoom-label" data-i18n="gifTimelineZoom">Zoom:</span>' +
-      '        <input type="range" id="gif-timeline-zoom-range" min="0.1" max="3" step="0.05" value="1">' +
-      '        <span id="gif-timeline-zoom-value">100%</span>' +
-      '      </div>' +
       '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +
       '      <div class="gif-timeline-nav" role="group">' +
       '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" title="' + t('gifTimelineFirst', '第一帧') + '">|&lt;</button>' +
@@ -2070,11 +2092,15 @@
       '</div>';
   }
 
-  // Export entry points globally
+  // Export entry points globally. cleanup remains destructive for legacy page-leave callers.
   window.renderGifEditor = render;
   window.cleanupGifEditor = cleanup;
+  window.suspendGifEditor = suspend;
+  window.resumeGifEditor = resume;
   window.GifEditor = {
     render: render,
-    cleanup: cleanup
+    cleanup: cleanup,
+    suspend: suspend,
+    resume: resume
   };
 })();

@@ -1,7 +1,7 @@
 // ===================== Translation System =====================
 const L = {
   en: {
-    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', textReview: 'Text Review',
+    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', textReview: 'Text Review', utilityReview: 'Text Review',
     shutdown: 'Shutdown',
     debugSettings: 'Debug Settings', debugMode: 'Debug Mode',
     debugModeDesc: 'When enabled, request/response details are cached for inspection in the Usage page.',
@@ -93,10 +93,9 @@ const L = {
     quotaMonitor: 'Quota Monitor', noQuota: 'No quota data',
 resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quota locks? This will make all keys immediately available.', quotaReset: 'All cooldowns and quota locks cleared.',
     thTime: 'Time', thProvider: 'Provider', thModel: 'Model', thKey: 'Key', thStatus: 'Status', thLatency: 'Latency', thTokens: 'Tokens',
-    thQuota: 'Quota', thInput: 'Input', thOutput: 'Output', thAvgSpeed: 'Avg Speed', thAvailability: 'Avail',
-    filterSuccess: 'Success', filterFailure: 'Failure', filterProcessing: 'Processing', groupBySession: 'Group by Session', ungrouped: 'Ungrouped',
-    loading: 'Loading', untestedKey: 'Untested', available: 'Available', exhausted: 'Exhausted',
-    cooldown: 'Cooldown', dailyLocked: 'Daily Locked', unlockAt: 'Unlock at', noKeysConfigured: 'No keys configured.',
+    monitor: 'Monitor', endpoint: 'Settings', utility: 'Utility', utilityDesc: 'Choose a utility to open.',
+    download: 'Download',
+    downloadQueue: 'Download Queue',
     inUse: 'In Use', currentKey: 'Current', quotaUsed: 'Used', quotaRemain: 'Remain', quotaTotal: 'Total', noCurrentKey: 'No active key', perKeyLabel: 'per key/day',
     connecting: 'Connecting...', connected: 'Connected', disconnected: 'Disconnected. Reconnecting...',
     consoleCleared: 'Console cleared', usageCleared: 'Usage data cleared',
@@ -651,7 +650,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     clearTraceDone: '已清除 {0} 个追踪文件',
     traceEnableConfirm: '开启请求追踪后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）将以一个约 1MB 的 JSONL 文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏（保留末 4 位）；base64 图片内容不保存。超过保留天数的文件自动删除，总量受磁盘上限约束。是否继续？',
     saved: '已保存',
-    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校',
+    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校',
     shutdown: '关闭',
     debugSettings: '调试设置', debugMode: '调试模式',
     debugModeDesc: '开启后，请求/响应详情将缓存以供 Usage 页面查看。',
@@ -732,10 +731,9 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     quotaMonitor: '配额监控', noQuota: '无配额数据',
 resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和配额锁定？这将使所有密钥立即可用。', quotaReset: '所有冷却和配额锁定已清除。',
     thTime: '时间', thProvider: '服务商', thModel: '模型', thKey: '密钥', thStatus: '状态', thLatency: '延迟', thTokens: 'Tokens',
-    thQuota: '额度', thInput: '输入', thOutput: '输出', thAvgSpeed: '平均速度', thAvailability: '可用性',
-    filterSuccess: '成功', filterFailure: '失败', filterProcessing: '进行中', groupBySession: '按会话分组', ungrouped: '未分组',
-    loading: '加载中', untestedKey: '未测试', available: '可用', exhausted: '已耗尽',
-    cooldown: '冷却中', dailyLocked: '日配额锁定', unlockAt: '解锁时间', noKeysConfigured: '无配置密钥。',
+    monitor: '监控', endpoint: '设置', utility: '工具', utilityDesc: '选择要打开的工具。',
+    download: '下载',
+    downloadQueue: '下载队列',
     inUse: '使用中', currentKey: '当前', quotaUsed: '已用', quotaRemain: '剩余', quotaTotal: '总量', noCurrentKey: '无可用密钥', perKeyLabel: '每密钥/天',
     connecting: '连接中...', connected: '已连接', disconnected: '已断开，重连中...',
     consoleCleared: '控制台已清空', usageCleared: '用量数据已清空',
@@ -1321,12 +1319,13 @@ function setLang(lang) {
   updateSidebarNav();
   if (typeof applyHeaderStatLabels === 'function') applyHeaderStatLabels();
   updateThemeModalLabels();
-  var page = typeof currentPage !== 'undefined' ? currentPage : 'monitor';
   if (typeof currentProviderId !== 'undefined' && currentProviderId) {
     if (typeof renderProviders === 'function') renderProviders(document.getElementById('page-content'));
   } else if (typeof navigateTo === 'function') {
     navigateTo(page);
   }
+  if (typeof updateUtilityNavLabel === 'function') updateUtilityNavLabel();
+  if (typeof updateUtilityMenuState === 'function') updateUtilityMenuState();
 }
 
 function toggleLang() {
