@@ -87,100 +87,106 @@
     return source;
   }
 
+  function pgEscapeBrackets(text) {
+    var pattern = /(```[\s\S]*?```|`[^`]*`)|\\\[([\s\S]*?[^\\])\\\]|\\\((.*?)\\\)/g;
+    return text.replace(pattern, function(m, code, sq, rd) {
+      if (code) return code;
+      if (sq !== undefined) return '$$' + sq + '$$';
+      if (rd !== undefined) return '$' + rd + '$';
+      return m;
+    });
+  }
+
+  function pgNormalizeDisplayMath(text) {
+    var parts = [];
+    var last = 0;
+    var fence = /```[\s\S]*?```/g;
+    var m;
+    while ((m = fence.exec(text)) !== null) {
+      var chunk = text.slice(last, m.index);
+      parts.push(pgNormalizeInChunk(chunk));
+      parts.push(m[0]);
+      last = m.index + m[0].length;
+    }
+    parts.push(pgNormalizeInChunk(text.slice(last)));
+    return parts.join('');
+  }
+
+  function pgNormalizeInChunk(chunk) {
+    chunk = chunk.replace(/\$\$([^\n$]+?)\$\$/g, function(_, inner) {
+      return '\n$$\n' + inner.trim() + '\n$$\n';
+    });
+    chunk = chunk.replace(/\$\$(?!\n)([\s\S]*?)\$\$/g, function(_, inner) {
+      return '\n$$\n' + inner.trim() + '\n$$\n';
+    });
+    return chunk;
+  }
+
   function sanitize(html) {
     var source = asText(html);
     var purifier = root.DOMPurify;
     if (purifier && typeof purifier.sanitize === 'function') {
       try {
-        source = purifier.sanitize(source, {
-          FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'form'],
-          FORBID_ATTR: ['style'],
+        var mathTags = ['math','semantics','annotation','annotation-xml','mrow','mi','mo','mn',
+          'msup','msub','msubsup','mfrac','mtable','mtr','mtd','mtext','mspace','menclose',
+          'mstyle','merror','msqrt','mroot','mfenced','mover','munder','munderover','mpadded',
+          'mphantom','maligngroup','malignmark','maction','mfrac','mlongdiv','mscarries','mscarry',
+          'msgroup','mstack','msline','msrow'];
+        var mathAttrs = ['aria-hidden','class','style','encoding','stretchy','fence','separator',
+          'movablelimits','symmetric','maxsize','minsize','largeop','scriptlevel','displaystyle',
+          'columnalign','rowalign','columnspacing','rowspacing','columnlines','rowlines','frame',
+          'framespacing','mathbackground','mathcolor','notation','lspace','rspace','depth','height',
+          'width','voffset','role','crossout','location','form','linethickness','accent',
+          'accentunder','align','stackalign','link','href','stretchy','symmetric','lquote',
+          'rquote','xlink:href','xref','columnspan','rowspan','bevelled','close','open','separators',
+          'selection','side','decimalpoint','shift','position','href','target','d','viewBox',
+          'preserveAspectRatio','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin',
+          'transform','cx','cy','r','rx','ry','x','y','x1','x2','y1','y2','xlink:title','xmlns',
+          'xmlns:xlink','textContent','mathvariant'];
+        return purifier.sanitize(source, {
+          ADD_TAGS: mathTags.concat(['svg','g','path','line','rect','circle','ellipse','polygon',
+            'polyline','defs','use','clippath','clipPath','text','tspan','title','desc','symbol','marker','foreignobject','use']),
+          ADD_ATTR: mathAttrs,
           ALLOW_UNKNOWN_PROTOCOLS: false,
-          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[\/#]|\.{0,2}\/|[^:]+$)/i
+          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|blob|data):|[\/#]|\.{0,2}\/|[^:]+$)/i
         });
       } catch (e) {
         return fallbackSanitize(source);
       }
-      var doc = getDocument();
-      if (doc && doc.createElement) {
-        try {
-          var wrapper = doc.createElement('div');
-          wrapper.innerHTML = source;
-          var all = wrapper.querySelectorAll('*');
-          for (var i = 0; i < all.length; i++) {
-            var element = all[i];
-            for (var ai = element.attributes.length - 1; ai >= 0; ai--) {
-              var attr = element.attributes[ai];
-              var name = attr.name.toLowerCase();
-              if (/^on/i.test(name) || (URI_ATTRS[name] && !uriIsSafe(attr.value))) element.removeAttribute(attr.name);
-            }
-          }
-          decorateLinks(wrapper);
-          source = wrapper.innerHTML;
-        } catch (e2) { /* DOMPurify output is still safe */ }
-      }
-      return source;
     }
     return fallbackSanitize(source);
   }
 
-  function prismLanguage(name) {
-    var prism = root.Prism;
-    if (!prism || !prism.languages) return null;
-    var language = asText(name).toLowerCase().replace(/[^a-z0-9_+-]/g, '');
-    if (!language) return null;
-    if (prism.languages[language]) return prism.languages[language];
-    var aliases = { js: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby', sh: 'bash', shell: 'bash', html: 'markup', xml: 'markup', md: 'markdown' };
-    return prism.languages[aliases[language]] || null;
-  }
-
   function renderMarkdown(text, options) {
     var source = asText(text);
-    var opts = options && typeof options === 'object' ? options : {};
-    var markdownFactory = root.markdownit;
-    if (typeof markdownFactory !== 'function') return '<pre>' + escapeHtml(source) + '</pre>';
+    if (!source) return '';
 
-    var md;
-    var mdOptions = {
-      html: opts.html !== false,
-      breaks: opts.breaks !== false,
-      linkify: opts.linkify !== false,
-      typographer: opts.typographer !== false
-    };
-    try {
-      md = markdownFactory(mdOptions);
-    } catch (e) {
-      try { md = markdownFactory({}); } catch (e2) { md = null; }
-    }
-    if (!md || !md.render) return '<pre>' + escapeHtml(source) + '</pre>';
-
-    if (md.renderer && md.renderer.rules) {
-      var originalFence = md.renderer.rules.fence;
-      md.renderer.rules.fence = function (tokens, idx, renderingOptions, env, self) {
-        var token = tokens[idx];
-        var info = asText(token.info).trim().split(/\s+/)[0] || '';
-        var className = info.replace(/[^a-zA-Z0-9_-]/g, '');
-        var language = prismLanguage(info);
-        var code = asText(token.content);
-        var highlighted = escapeHtml(code);
-        var prism = root.Prism;
-        if (language && prism && typeof prism.highlight === 'function') {
-          try { highlighted = prism.highlight(code, language, info); } catch (e) { highlighted = escapeHtml(code); }
-        }
-        return '<pre><code' + (className ? ' class="language-' + className + '"' : '') + '>' + highlighted + '</code></pre>\n';
-      };
+    if (typeof root.marked !== 'undefined' && typeof root.marked.parse === 'function') {
       try {
-        return sanitize(md.render(source));
-      } catch (e3) {
-        if (originalFence) md.renderer.rules.fence = originalFence;
-      }
+        if (typeof root.markedKatex !== 'undefined' && !root.__edMarkedKatexInit) {
+          try { root.marked.use(root.markedKatex({ throwOnError: false, nonStandard: true })); } catch (e) {}
+          root.__edMarkedKatexInit = true;
+        }
+        var pre = pgEscapeBrackets(source);
+        pre = pgNormalizeDisplayMath(pre);
+        var html = root.marked.parse(pre, { breaks: true, gfm: true });
+        return sanitize(html);
+      } catch (e) {}
     }
-    try { return sanitize(md.render(source)); } catch (e4) { return '<pre>' + escapeHtml(source) + '</pre>'; }
+
+    var markdownFactory = root.markdownit;
+    if (typeof markdownFactory === 'function') {
+      try {
+        var md = markdownFactory({ html: true, breaks: true, linkify: true });
+        return sanitize(md.render(source));
+      } catch (e2) {}
+    }
+    return '<pre>' + escapeHtml(source) + '</pre>';
   }
+
   function slugify(value) {
     var slug = asText(value).replace(/^\s+|\s+$/g, '').toLowerCase();
     try { slug = slug.normalize('NFKD'); } catch (e) {}
-    // Keep non-ASCII letters usable in ids while removing punctuation.
     slug = slug.replace(/[^\w\u0080-\uFFFF\s-]/g, '')
       .replace(/[\s_-]+/g, '-')
       .replace(/^-+|-+$/g, '');
@@ -259,16 +265,45 @@
   }
 
   function highlightCode(rootElement) {
-    var prism = root.Prism;
-    if (!rootElement || !prism) return rootElement;
-    var blocks = rootElement.querySelectorAll ? rootElement.querySelectorAll('pre code') : [];
-    for (var i = 0; i < blocks.length; i++) {
-      var block = blocks[i];
-      var match = (block.className || '').match(/(?:language|lang)-([\w+-]+)/i);
-      var language = prismLanguage(match ? match[1] : '');
-      if (!language || typeof prism.highlight !== 'function') continue;
-      try { block.innerHTML = prism.highlight(block.textContent || '', language, match[1]); } catch (e) {}
+    if (!rootElement || !rootElement.querySelectorAll) return rootElement;
+
+    if (typeof root.hljs !== 'undefined') {
+      var blocks = rootElement.querySelectorAll('pre code');
+      blocks.forEach(function (block) {
+        if (block.dataset.edHl === '1') return;
+        block.dataset.edHl = '1';
+        try { root.hljs.highlightElement(block); } catch (e) {}
+      });
     }
+
+    if (typeof root.mermaid !== 'undefined') {
+      var pres = rootElement.querySelectorAll('pre');
+      pres.forEach(function (pre) {
+        if (pre.dataset.edMmd === '1') return;
+        var codeEl = pre.querySelector('code');
+        if (!codeEl) return;
+        var cls = codeEl.className || '';
+        var langMatch = cls.match(/(?:language|lang)-([\w-]+)/i);
+        var lang = langMatch ? langMatch[1].toLowerCase() : '';
+        if (lang === 'mermaid') {
+          pre.dataset.edMmd = '1';
+          var raw = codeEl.textContent || '';
+          var placeholder = root.document.createElement('div');
+          placeholder.className = 'ed-mermaid';
+          placeholder.style.cssText = 'padding:12px; border:1px solid var(--glass-border-hover, rgba(255,255,255,0.1)); border-radius:6px; background:rgba(0,0,0,0.15); margin:8px 0; overflow:auto;';
+          placeholder.textContent = raw;
+          pre.parentNode.insertBefore(placeholder, pre.nextSibling);
+          pre.style.display = 'none';
+          try {
+            root.mermaid.run({ nodes: [placeholder], suppressErrors: true });
+          } catch (err) {
+            placeholder.className += ' mermaid-error';
+            placeholder.textContent = '[mermaid] ' + (err && err.message ? err.message : String(err));
+          }
+        }
+      });
+    }
+
     return rootElement;
   }
 

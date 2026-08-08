@@ -384,6 +384,30 @@
       console.warn('[Editor] syncDocDirTree error:', err);
       return null;
     });
+  }  function saveDraft(id, content) {
+    if (!id) return;
+    try {
+      var drafts = JSON.parse(localStorage.getItem('tr_editor_drafts') || '{}');
+      drafts[id] = { content: content, time: Date.now() };
+      localStorage.setItem('tr_editor_drafts', JSON.stringify(drafts));
+    } catch (e) {}
+  }
+
+  function getDraft(id) {
+    if (!id) return null;
+    try {
+      var drafts = JSON.parse(localStorage.getItem('tr_editor_drafts') || '{}');
+      return drafts[id] ? drafts[id].content : null;
+    } catch (e) { return null; }
+  }
+
+  function removeDraft(id) {
+    if (!id) return;
+    try {
+      var drafts = JSON.parse(localStorage.getItem('tr_editor_drafts') || '{}');
+      delete drafts[id];
+      localStorage.setItem('tr_editor_drafts', JSON.stringify(drafts));
+    } catch (e) {}
   }
 
   function loadFile(id) {
@@ -416,12 +440,19 @@
         shellState.currentNode = node;
         shellState.original = text(content);
         var input = currentInput();
-        if (input) input.value = shellState.original;
+        var draft = getDraft(id);
+        if (draft !== null && draft !== shellState.original) {
+          if (input) input.value = draft;
+          shellState.dirty = true;
+        } else {
+          if (input) input.value = shellState.original;
+          shellState.dirty = false;
+        }
         global.EditorWorkspace.setCurrentFile(id);
-        if (global.EditorCommands) global.EditorCommands.record(input);
-        updateGutter();
-        shellState.mode = 'edit';
+        if (global.EditorCommands) global.EditorCommands.clear(input);
+        updateStatus();
         redraw();
+        refreshTree();
         if (input) input.focus();
         return true;
       });
@@ -639,6 +670,7 @@
 
     return savePromise.then(function (saved) {
       if (!saved) { toast(tr('editorSaveFailed', 'Save failed'), 'error'); return false; }
+      removeDraft(shellState.currentId);
       shellState.original = value;
       shellState.dirty = false;
       updateStatus();
@@ -1031,7 +1063,7 @@
     if (!shellRoot || !input) return;
     var hooks = shellHooks();
     input.addEventListener('paste', handlePasteImage);
-    var onInput = function () { if (global.EditorCommands) global.EditorCommands.record(input); updateGutter(); renderPreview(); };
+    var onInput = function () { if (global.EditorCommands) global.EditorCommands.record(input); saveDraft(shellState.currentId, input.value); updateGutter(); renderPreview(); };
     var onScroll = function () {
       updateGutter();
       if (!shellState.sync || !shellRoot) return;
