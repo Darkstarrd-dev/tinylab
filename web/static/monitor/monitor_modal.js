@@ -16,7 +16,7 @@ async function showUsageEntryInfoById(id) {
   // entry (which lacks payloads) because the SSE event's entry field was
   // missing or incomplete. In both cases, try to fetch the ring entry (which
   // carries respPayload/respHeaders) from the API.
-  if (!traceEnabled && (e.status === 'processing' || (!e.respPayload && !e.respHeaders)) && !inflightEntries[id]) {
+  if (!traceEnabled && (e.status === 'processing' || (!infoHasValue(e.respPayload) && !infoHasValue(e.respHeaders))) && !inflightEntries[id]) {
     try {
       var resp = await apiGet('/monitor?limit=500&offset=0');
       var entries = (resp && resp.entries) || [];
@@ -27,6 +27,60 @@ async function showUsageEntryInfoById(id) {
     } catch(ex) { /* fall through to the entry we have */ }
   }
   showUsageEntryInfoWithData(e);
+}
+
+function monitorSectionOptions(sectionId, rawData, withViewControls) {
+  return {
+    monitor: true,
+    collapsible: true,
+    defaultCollapsed: true,
+    sectionView: withViewControls !== false,
+    sectionCopy: withViewControls !== false,
+    sectionId: sectionId,
+    rawData: rawData
+  };
+}
+
+function monitorRenderDataSection(title, value, sectionId) {
+  if (!infoHasValue(value)) return '';
+  if (typeof value === 'object' && value !== null) {
+    return renderInfoSection(title, value, null, monitorSectionOptions(sectionId, value, true));
+  }
+  var formatted = formatBody(value);
+  return renderInfoSection(title, { Body: formatted }, { Body: value }, monitorSectionOptions(sectionId, value, true));
+}
+
+function monitorRenderStatusSection(status, sectionId) {
+  if (!infoHasValue(status)) return '';
+  return '<div class="info-section info-section-monitor info-section-collapsed" id="' + escapeHtml(sectionId) + '">' +
+    '<div class="info-section-title">' +
+      '<button type="button" class="info-section-toggle" onclick="toggleInfoSection(this)" aria-expanded="false" aria-controls="' + escapeHtml(sectionId) + '-content">' +
+        '<span class="info-section-chevron" aria-hidden="true">&#9656;</span>' +
+        '<span class="info-section-title-text">' + escapeHtml(t('infoStatus')) + '</span>' +
+      '</button>' +
+    '</div>' +
+    '<div class="info-section-content" id="' + escapeHtml(sectionId) + '-content" hidden>' +
+      '<div class="info-status-value">' + escapeHtml(String(status)) + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function monitorRenderTextSection(title, sectionId, textId, initialText, copyEnabled, initiallyHidden) {
+  var copy = copyEnabled ? '<span class="info-section-actions"><button type="button" class="info-copy-btn" onclick="copyStreamingTextById(this,\'' + escapeForJsString(textId) + '\')">' + escapeHtml(t('infoCopy')) + '</button></span>' : '';
+  return '<div class="info-section info-section-monitor info-section-collapsed" id="' + escapeHtml(sectionId) + '"' + (initiallyHidden ? ' style="display:none"' : '') + '>' +
+    '<div class="info-section-title">' +
+      '<button type="button" class="info-section-toggle" onclick="toggleInfoSection(this)" aria-expanded="false" aria-controls="' + escapeHtml(sectionId) + '-content">' +
+        '<span class="info-section-chevron" aria-hidden="true">&#9656;</span>' +
+        '<span class="info-section-title-text">' + escapeHtml(title) + '</span>' +
+      '</button>' + copy +
+    '</div>' +
+    '<div class="info-section-content" id="' + escapeHtml(sectionId) + '-content" hidden>' +
+      '<div class="info-field">' +
+        '<span class="info-field-key"><span class="info-field-key-name">' + escapeHtml(t('infoContent')) + '</span></span>' +
+        '<div class="info-field-value"><pre class="info-json" id="' + escapeHtml(textId) + '" style="white-space:pre-wrap;min-height:20px">' + escapeHtml(initialText == null ? '' : initialText) + '</pre></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
 }
 
 async function loadTraceDetails(e) {
@@ -41,25 +95,19 @@ async function loadTraceDetails(e) {
       var reqLine = data.lines.find(function(l) { return l.type === 'request'; });
       var attemptLines = data.lines.filter(function(l) { return l.type === 'attempt'; });
       var lastAttempt = attemptLines.length > 0 ? attemptLines[attemptLines.length - 1] : null;
-      if (reqLine && reqLine.reqBody) {
-        var rb = (typeof reqLine.reqBody === 'object') ? reqLine.reqBody : { Body: formatBody(reqLine.reqBody) };
-        traceHtml += renderInfoSection(t('infoRequestBody'), rb);
-      }
-      if (reqLine && reqLine.reqHeaders) traceHtml += renderInfoSection(t('infoRequestHeaders'), reqLine.reqHeaders);
+      if (reqLine && infoHasValue(reqLine.reqBody)) traceHtml += monitorRenderDataSection(t('infoRequestBody'), reqLine.reqBody, 'monitor-request');
+      if (reqLine && infoHasValue(reqLine.reqHeaders)) traceHtml += monitorRenderDataSection(t('infoRequestHeaders'), reqLine.reqHeaders, 'monitor-request-headers');
       if (lastAttempt) {
-        if (lastAttempt.respHeaders) traceHtml += renderInfoSection(t('infoResponseHeaders'), lastAttempt.respHeaders);
-        if (lastAttempt.respStatus) traceHtml += '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoStatus')) + ': ' + escapeHtml(String(lastAttempt.respStatus)) + '</div></div>';
-        if (lastAttempt.respBody) {
-          var pb = (typeof lastAttempt.respBody === 'object') ? lastAttempt.respBody : { Body: formatBody(lastAttempt.respBody) };
-          traceHtml += renderInfoSection(t('infoResponseBody'), pb);
-        }
+        if (infoHasValue(lastAttempt.respHeaders)) traceHtml += monitorRenderDataSection(t('infoResponseHeaders'), lastAttempt.respHeaders, 'monitor-response-headers');
+        if (infoHasValue(lastAttempt.respStatus)) traceHtml += monitorRenderStatusSection(lastAttempt.respStatus, 'monitor-status');
+        if (infoHasValue(lastAttempt.respBody)) traceHtml += monitorRenderDataSection(t('infoResponseBody'), lastAttempt.respBody, 'monitor-response-body');
       }
     }
-    if (!traceHtml) traceHtml = '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoTraceDetail')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">' + escapeHtml(t('infoTraceNA')) + '</pre></div></div></div>';
+    if (!traceHtml) traceHtml = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoTraceNA'), false, false);
     loadingEl.outerHTML = traceHtml;
   } catch (ex) {
     if (currentInfoModalRequestId !== e.id) return;
-    loadingEl.outerHTML = '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoTraceDetail')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">' + escapeHtml(t('infoTraceNA')) + '</pre></div></div></div>';
+    loadingEl.outerHTML = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoTraceNA'), false, false);
   }
 }
 
@@ -67,8 +115,10 @@ function showUsageEntryInfoWithData(e) {
   var overlay = document.getElementById('info-modal-overlay');
   var titleEl = document.getElementById('info-modal-title');
   var bodyEl = document.getElementById('info-modal-body');
-  titleEl.textContent = e.provider + ' / ' + e.model + ' \u2014 ' + (e.status || 'unknown') + ' (' + formatLatency(e.latencyMs || 0) + ')';
+  titleEl.textContent = (e.provider || '') + ' / ' + (e.model || '') + ' \u2014 ' + (e.status || 'unknown') + ' (' + formatLatency(e.latencyMs || 0) + ')';
+  bodyEl.classList.add('info-modal-monitor');
   __infoModalSections = [];
+  __rawFieldMap = {};
   currentInfoModalRequestId = e.id || null;
   currentInfoModalReasoningEl = null;
   currentInfoModalAssistantEl = null;
@@ -76,109 +126,46 @@ function showUsageEntryInfoWithData(e) {
   currentInfoModalStreamingDone = false;
   var html = '';
   var summaryData = {};
-  if (e.id) summaryData['ID'] = e.id;
-  if (e.timestamp) summaryData['Timestamp'] = e.timestamp;
-  if (e.provider) summaryData['Provider'] = e.provider;
-  if (e.model) summaryData['Model'] = e.model;
-  if (e.keyName) summaryData['Key'] = e.keyName;
-  if (e.status) summaryData['Status'] = e.status;
-  if (e.latencyMs !== undefined && e.latencyMs !== null) summaryData['Latency'] = formatLatency(e.latencyMs);
-  if (e.ttftMs) summaryData['TTFT'] = e.ttftMs + 'ms';
-  if (e.inputTokens) summaryData['Input Tokens'] = e.inputTokens;
-  if (e.outputTokens) summaryData['Output Tokens'] = e.outputTokens;
-  if (e.error) summaryData['Error'] = e.error;
-  if (e.upstreamUrl) summaryData['Upstream URL'] = e.upstreamUrl;
-  if (e.respStatus) summaryData['Response Status'] = e.respStatus;
-  if (Object.keys(summaryData).length > 0) {
-    html += renderInfoSection(t('infoRequestInfo'), summaryData);
-  }
-  if (e.reqPayload) {
-    html += renderInfoSection(t('infoRequestBody'), e.reqPayload);
-  }
-  if (e.reqHeaders) {
-    html += renderInfoSection(t('infoRequestHeaders'), e.reqHeaders);
-  }
+  if (infoHasValue(e.id)) summaryData['ID'] = e.id;
+  if (infoHasValue(e.timestamp)) summaryData['Timestamp'] = e.timestamp;
+  if (infoHasValue(e.provider)) summaryData['Provider'] = e.provider;
+  if (infoHasValue(e.model)) summaryData['Model'] = e.model;
+  if (infoHasValue(e.keyName)) summaryData['Key'] = e.keyName;
+  if (infoHasValue(e.status)) summaryData['Status'] = e.status;
+  if (infoHasValue(e.latencyMs)) summaryData['Latency'] = formatLatency(e.latencyMs);
+  if (infoHasValue(e.ttftMs)) summaryData['TTFT'] = e.ttftMs + 'ms';
+  if (infoHasValue(e.inputTokens)) summaryData['Input Tokens'] = e.inputTokens;
+  if (infoHasValue(e.outputTokens)) summaryData['Output Tokens'] = e.outputTokens;
+  if (infoHasValue(e.error)) summaryData['Error'] = e.error;
+  if (infoHasValue(e.upstreamUrl)) summaryData['Upstream URL'] = e.upstreamUrl;
+  if (infoHasValue(e.respStatus)) summaryData['Response Status'] = e.respStatus;
+  if (Object.keys(summaryData).length > 0) html += renderInfoSection(t('infoRequestInfo'), summaryData, null, monitorSectionOptions('monitor-request-info', summaryData, true));
+  if (infoHasValue(e.reqPayload)) html += monitorRenderDataSection(t('infoRequestBody'), e.reqPayload, 'monitor-request');
+  if (infoHasValue(e.reqHeaders)) html += monitorRenderDataSection(t('infoRequestHeaders'), e.reqHeaders, 'monitor-request-headers');
   if (e.status === 'processing' && usageDebugMode) {
-    html += '<div class="info-section" id="streaming-reasoning-section">' +
-      '<div class="info-section-title">' + escapeHtml(t('infoReasoning')) + '</div>' +
-      '<div class="info-field">' +
-        '<span class="info-field-key">' +
-          '<span class="info-field-key-name">' + escapeHtml(t('infoContent')) + '</span>' +
-          '<span class="info-field-actions">' +
-            '<button type="button" class="info-copy-btn" onclick="copyStreamingText(this)">' + escapeHtml(t('infoCopy')) + '</button>' +
-          '</span>' +
-        '</span>' +
-        '<div class="info-field-value">' +
-          '<pre class="info-json" id="streaming-reasoning-text" style="white-space:pre-wrap;min-height:20px;color:var(--text-muted)">' + escapeHtml(t('infoThinking')) + '</pre>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-    html += '<div class="info-section" id="streaming-assistant-section">' +
-      '<div class="info-section-title">' + escapeHtml(t('infoAssistantMsg')) + '</div>' +
-      '<div class="info-field">' +
-        '<span class="info-field-key">' +
-          '<span class="info-field-key-name">' + escapeHtml(t('infoContent')) + '</span>' +
-          '<span class="info-field-actions">' +
-            '<button type="button" class="info-copy-btn" onclick="copyStreamingText(this)">' + escapeHtml(t('infoCopy')) + '</button>' +
-          '</span>' +
-        '</span>' +
-        '<div class="info-field-value">' +
-          '<pre class="info-json" id="streaming-assistant-text" style="white-space:pre-wrap;min-height:20px"> </pre>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-    html += '<div class="info-section" id="streaming-usage-section" style="display:none">' +
-      '<div class="info-section-title">' + escapeHtml(t('infoUsage')) + '</div>' +
-      '<div class="info-field">' +
-        '<span class="info-field-key">' +
-          '<span class="info-field-key-name">' + escapeHtml(t('infoTokenStats')) + '</span>' +
-          '<span class="info-field-actions">' +
-            '<button type="button" class="info-copy-btn" onclick="copyStreamingText(this)">' + escapeHtml(t('infoCopy')) + '</button>' +
-          '</span>' +
-        '</span>' +
-        '<div class="info-field-value">' +
-          '<pre class="info-json" id="streaming-usage-text" style="white-space:pre-wrap;min-height:20px;color:var(--text-muted)">' + escapeHtml(t('infoWaiting')) + '</pre>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
+    html += monitorRenderTextSection(t('infoReasoning'), 'streaming-reasoning-section', 'streaming-reasoning-text', t('infoThinking'), true, false);
+    html += monitorRenderTextSection(t('infoAssistantMsg'), 'streaming-assistant-section', 'streaming-assistant-text', '', true, false);
+    html += monitorRenderTextSection(t('infoUsage'), 'streaming-usage-section', 'streaming-usage-text', t('infoWaiting'), true, true);
   } else {
-    if (e.respHeaders) {
-      html += renderInfoSection(t('infoResponseHeaders'), e.respHeaders);
-    }
-    if (e.respStatus) {
-      html += '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoStatus')) + ': ' + escapeHtml(e.respStatus) + '</div></div>';
-    }
-    if (e.respPayload) {
-      html += renderInfoSection(t('infoResponseBody'), e.respPayload);
-    }
-    if (e.__streamingReasoning) {
-      html += '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoReasoning')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap">' + escapeHtml(e.__streamingReasoning) + '</pre></div></div></div>';
-    }
-    if (e.__streamingAssistant) {
-      html += '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoAssistantMsg')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap">' + escapeHtml(e.__streamingAssistant) + '</pre></div></div></div>';
-    }
+    if (infoHasValue(e.respHeaders)) html += monitorRenderDataSection(t('infoResponseHeaders'), e.respHeaders, 'monitor-response-headers');
+    if (infoHasValue(e.respStatus)) html += monitorRenderStatusSection(e.respStatus, 'monitor-status');
+    if (infoHasValue(e.respPayload)) html += monitorRenderDataSection(t('infoResponseBody'), e.respPayload, 'monitor-response-body');
+    if (infoHasValue(e.__streamingReasoning)) html += monitorRenderTextSection(t('infoReasoning'), 'streaming-reasoning-section', 'streaming-reasoning-text', e.__streamingReasoning, false, false);
+    if (infoHasValue(e.__streamingAssistant)) html += monitorRenderTextSection(t('infoAssistantMsg'), 'streaming-assistant-section', 'streaming-assistant-text', e.__streamingAssistant, false, false);
   }
-  if (traceEnabled && e.status !== 'processing' && !e.reqPayload && !e.respPayload && !e.reqHeaders && !e.respHeaders) {
-    html += '<div class="info-section" id="trace-loading-section"><div class="info-section-title">' + escapeHtml(t('infoTraceDetail')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">' + escapeHtml(t('infoLoadingTrace')) + '</pre></div></div></div>';
-  }
-  bodyEl.innerHTML = html || '<div class="info-section">' + t('noData') + '</div>';
-  postProcessRawFields();
-  if (traceEnabled && e.status !== 'processing' && !e.reqPayload && !e.respPayload && !e.reqHeaders && !e.respHeaders) {
-    loadTraceDetails(e);
-  }
+  var noPayload = !infoHasValue(e.reqPayload) && !infoHasValue(e.respPayload) && !infoHasValue(e.reqHeaders) && !infoHasValue(e.respHeaders);
+  if (traceEnabled && e.status !== 'processing' && noPayload) html += monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoLoadingTrace'), false, false);
+  bodyEl.innerHTML = html || '<div class="info-section info-section-monitor"><div class="info-section-title"><span class="info-section-title-text">' + escapeHtml(t('noData')) + '</span></div></div>';
+  if (traceEnabled && e.status !== 'processing' && noPayload) loadTraceDetails(e);
   if (e.status === 'processing' && usageDebugMode) {
     currentInfoModalReasoningEl = document.getElementById('streaming-reasoning-text');
     currentInfoModalAssistantEl = document.getElementById('streaming-assistant-text');
     currentInfoModalUsageEl = document.getElementById('streaming-usage-text');
     var inflight = inflightEntries[e.id];
     if (inflight) {
-      if (currentInfoModalReasoningEl && inflight.__streamingReasoning) {
-        currentInfoModalReasoningEl.textContent = inflight.__streamingReasoning;
-      }
-      if (currentInfoModalAssistantEl && inflight.__streamingAssistant) {
-        currentInfoModalAssistantEl.textContent = inflight.__streamingAssistant;
-      }
-      if (currentInfoModalUsageEl && inflight.__streamingUsage) {
+      if (currentInfoModalReasoningEl && infoHasValue(inflight.__streamingReasoning)) currentInfoModalReasoningEl.textContent = inflight.__streamingReasoning;
+      if (currentInfoModalAssistantEl && infoHasValue(inflight.__streamingAssistant)) currentInfoModalAssistantEl.textContent = inflight.__streamingAssistant;
+      if (currentInfoModalUsageEl && infoHasValue(inflight.__streamingUsage)) {
         currentInfoModalUsageEl.textContent = inflight.__streamingUsage;
         var usageSection = document.getElementById('streaming-usage-section');
         if (usageSection) usageSection.style.display = '';
@@ -191,17 +178,19 @@ function showUsageEntryInfoWithData(e) {
   document.addEventListener('keydown', usageInfoModalEscapeHandler);
 }
 
+
+function copyStreamingTextById(btn, textId) {
+  var pre = document.getElementById(textId);
+  if (!pre) return;
+  navigator.clipboard.writeText(pre.textContent || '').then(function() { infoCopyFeedback(btn); });
+}
+
 function copyStreamingText(btn) {
   var field = btn.closest('.info-field');
   if (!field) return;
   var pre = field.querySelector('.info-json');
   if (!pre) return;
-  var text = pre.textContent || '';
-  navigator.clipboard.writeText(text).then(function() {
-    var orig = btn.textContent;
-      btn.textContent = t('infoCopied');
-    setTimeout(function() { btn.textContent = orig; }, 1500);
-  });
+  navigator.clipboard.writeText(pre.textContent || '').then(function() { infoCopyFeedback(btn); });
 }
 
 function usageInfoModalEscapeHandler(e) {
@@ -210,7 +199,9 @@ function usageInfoModalEscapeHandler(e) {
 
 function closeUsageEntryInfo() {
   var overlay = document.getElementById('info-modal-overlay');
+  var bodyEl = document.getElementById('info-modal-body');
   overlay.classList.remove('show');
+  if (bodyEl) bodyEl.classList.remove('info-modal-monitor');
   document.removeEventListener('keydown', usageInfoModalEscapeHandler);
   currentInfoModalRequestId = null;
   currentInfoModalReasoningEl = null;
@@ -221,30 +212,29 @@ function closeUsageEntryInfo() {
 
 function updateStreamingModalResponse(entry) {
   var bodyEl = document.getElementById('info-modal-body');
-  if (!bodyEl) return;
-  var existingRespSection = bodyEl.querySelector('#streaming-response-body-section');
-  if (existingRespSection) existingRespSection.remove();
-  if (entry.respPayload) {
-    var html = renderInfoSection(t('infoResponseBody'), entry.respPayload);
-    var temp = document.createElement('div');
-    temp.innerHTML = html;
-    var sectionEl = temp.firstElementChild;
-    sectionEl.id = 'streaming-response-body-section';
-    bodyEl.appendChild(sectionEl);
+  if (!bodyEl || !bodyEl.classList.contains('info-modal-monitor')) return;
+  var responseBody = document.getElementById('monitor-response-body');
+  var responseHeaders = document.getElementById('monitor-response-headers');
+  var status = document.getElementById('monitor-status');
+  if (responseBody) responseBody.remove();
+  if (responseHeaders) responseHeaders.remove();
+  if (status) status.remove();
+  if (infoHasValue(entry.respHeaders)) {
+    var headersHtml = monitorRenderDataSection(t('infoResponseHeaders'), entry.respHeaders, 'monitor-response-headers');
+    var headersTemp = document.createElement('div');
+    headersTemp.innerHTML = headersHtml;
+    bodyEl.appendChild(headersTemp.firstElementChild);
   }
-  if (entry.respHeaders) {
-    var html = renderInfoSection(t('infoResponseHeaders'), entry.respHeaders);
-    var temp = document.createElement('div');
-    temp.innerHTML = html;
-    var sectionEl = temp.firstElementChild;
-    bodyEl.appendChild(sectionEl);
+  if (infoHasValue(entry.respStatus)) {
+    var statusHtml = monitorRenderStatusSection(entry.respStatus, 'monitor-status');
+    var statusTemp = document.createElement('div');
+    statusTemp.innerHTML = statusHtml;
+    bodyEl.appendChild(statusTemp.firstElementChild);
   }
-  if (entry.respStatus) {
-    var html = '<div class="info-section"><div class="info-section-title">' + escapeHtml(t('infoStatus')) + ': ' + escapeHtml(entry.respStatus) + '</div></div>';
-    var temp = document.createElement('div');
-    temp.innerHTML = html;
-    var sectionEl = temp.firstElementChild;
-    bodyEl.appendChild(sectionEl);
+  if (infoHasValue(entry.respPayload)) {
+    var bodyHtml = monitorRenderDataSection(t('infoResponseBody'), entry.respPayload, 'monitor-response-body');
+    var bodyTemp = document.createElement('div');
+    bodyTemp.innerHTML = bodyHtml;
+    bodyEl.appendChild(bodyTemp.firstElementChild);
   }
-  postProcessRawFields();
 }

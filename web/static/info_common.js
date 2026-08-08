@@ -32,59 +32,119 @@ function renderMarkdown(s) {
   return str.replace(/\n/g, '<br>');
 }
 
-function postProcessRawFields() {
-  var elements = document.querySelectorAll('.info-json-raw');
-  for (var i = 0; i < elements.length; i++) {
-    var id = elements[i].getAttribute('data-raw-id');
-    if (id && __rawFieldMap[id] !== undefined) {
-      elements[i].textContent = String(__rawFieldMap[id]);
-    }
+// Kept as a compatibility hook for callers that render shared modal content.
+// Raw values are now written directly into the DOM, so no second pass is needed.
+function postProcessRawFields() {}
+
+function infoRawString(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
   }
+  return String(value);
 }
 
-function renderInfoSection(title, data, rawOverrides) {
-  __infoModalSections.push({title: title, data: data});
+function infoHasValue(value) {
+  return value !== undefined && value !== null;
+}
+
+function renderInfoSection(title, data, rawOverrides, options) {
+  options = options || {};
+  var isMonitor = options.monitor === true;
+  var collapsible = options.collapsible === true;
+  var sectionView = options.sectionView === true;
+  var sectionCopy = options.sectionCopy === true;
+  var collapsed = collapsible && options.defaultCollapsed === true;
+  var sectionIndex = __infoModalSections.length;
+  var sectionId = options.sectionId || ('info-section-' + Math.random().toString(36).slice(2, 8));
+  if (options.sectionId) {
+    __infoModalSections = __infoModalSections.filter(function(section) { return section.sectionId !== sectionId; });
+    sectionIndex = __infoModalSections.length;
+  }
+  var contentId = sectionId + '-content';
+  __infoModalSections.push({
+    title: title,
+    data: data,
+    rawOverrides: rawOverrides || null,
+    rawData: Object.prototype.hasOwnProperty.call(options, 'rawData') ? options.rawData : data,
+    sectionId: sectionId
+  });
+
   var content = '';
-  if (data === null || data === undefined) {
-    content = '<pre class="info-json">' + t('noData') + '</pre>';
+  if (!infoHasValue(data)) {
+    content = '<pre class="info-json">' + escapeHtml(t('noData')) + '</pre>';
   } else {
     var keys = [];
-    for (var k in data) {
-      if (k === 'bodyRaw' || k === 'responseBodyRaw') continue;
-      keys.push(k);
+    if (typeof data === 'object') {
+      for (var k in data) {
+        if (k === 'bodyRaw' || k === 'responseBodyRaw') continue;
+        keys.push(k);
+      }
+    } else {
+      keys.push('Value');
     }
     for (var ki = 0; ki < keys.length; ki++) {
-      var k = keys[ki];
-      var v = data[k];
-      var rawOverride = (rawOverrides && rawOverrides[k] != null) ? rawOverrides[k] : null;
-      content += buildInfoField(k, v, rawOverride);
+      var key = keys[ki];
+      var value = typeof data === 'object' ? data[key] : data;
+      var rawOverride = (rawOverrides && Object.prototype.hasOwnProperty.call(rawOverrides, key)) ? rawOverrides[key] : null;
+      content += buildInfoField(key, value, rawOverride);
     }
   }
-  return '<div class="info-section"><div class="info-section-title">' + escapeHtml(title) + '</div>' + content + '</div>';
+
+  var classes = 'info-section' + (isMonitor ? ' info-section-monitor' : '') + (collapsed ? ' info-section-collapsed' : '');
+  var titleInner = '';
+  if (collapsible) {
+    titleInner += '<button type="button" class="info-section-toggle" onclick="toggleInfoSection(this)" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-controls="' + escapeHtml(contentId) + '">' +
+      '<span class="info-section-chevron" aria-hidden="true">' + (collapsed ? '&#9656;' : '&#9662;') + '</span>' +
+      '<span class="info-section-title-text">' + escapeHtml(title) + '</span>' +
+    '</button>';
+  } else {
+    titleInner += '<span class="info-section-title-text">' + escapeHtml(title) + '</span>';
+  }
+  var actions = '';
+  if (sectionView) {
+    actions += '<span class="info-toggle-view info-section-view" role="group" aria-label="' + escapeHtml(title) + '">' +
+      '<button type="button" class="info-toggle-btn info-section-view-btn info-toggle-btn-active" data-view="pretty" onclick="toggleInfoSectionView(this,\'pretty\')">' + t('pretty') + '</button>' +
+      '<button type="button" class="info-toggle-btn info-section-view-btn" data-view="raw" onclick="toggleInfoSectionView(this,\'raw\')">' + t('raw') + '</button>' +
+    '</span>';
+  }
+  if (sectionCopy) {
+    actions += '<button type="button" class="info-copy-btn info-section-copy-btn" onclick="copyInfoSection(this)">' + t('copy') + '</button>';
+  }
+  return '<div class="' + classes + '" id="' + escapeHtml(sectionId) + '" data-info-section-index="' + sectionIndex + '">' +
+    '<div class="info-section-title">' + titleInner + (actions ? '<span class="info-section-actions">' + actions + '</span>' : '') + '</div>' +
+    '<div class="info-section-content" id="' + escapeHtml(contentId) + '"' + (collapsed ? ' hidden' : '') + '>' + content + '</div>' +
+  '</div>';
+}
+
+function removeInfoSectionRecord(sectionId) {
+  __infoModalSections = __infoModalSections.filter(function(section) { return section.sectionId !== sectionId; });
 }
 
 function buildInfoField(key, value, rawOverride) {
   if (value === null) {
-    var raw = rawOverride != null ? rawOverride : 'null';
+    var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : 'null';
     return buildSimpleField(key, 'null', raw);
   }
   if (typeof value === 'string') {
     try {
       var parsed = JSON.parse(value);
       if (parsed !== null && typeof parsed === 'object') {
-        var rawStr = rawOverride != null ? rawOverride : value;
+        var rawStr = rawOverride !== undefined && rawOverride !== null ? rawOverride : value;
         return buildFieldWithSubFields(key, parsed, rawStr);
       }
     } catch (e) {}
-    var raw = rawOverride != null ? rawOverride : value;
+    var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : value;
     return buildSimpleField(key, value, raw);
   }
   if (typeof value === 'object') {
     var pretty = JSON.stringify(value, null, 2);
-    var raw = rawOverride != null ? rawOverride : pretty;
+    var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : pretty;
     return buildFieldWithSubFields(key, value, raw);
   }
-  var raw = rawOverride != null ? rawOverride : String(value);
+  var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : String(value);
   return buildSimpleField(key, String(value), raw);
 }
 
@@ -125,11 +185,8 @@ function truncateString(s) {
 }
 
 function buildSimpleField(key, prettyHtml, rawStr) {
-  var prettyId = 'ip-' + Math.random().toString(36).slice(2, 8);
-  var rawId = 'ir-' + Math.random().toString(36).slice(2, 8);
-  var rawAttr = 'data-raw-id="' + rawId + '"';
-  __rawFieldMap[rawId] = rawStr || '';
   var renderedContent = renderMarkdown(prettyHtml);
+  var rawText = infoRawString(rawStr);
   return '<div class="info-field">' +
     '<span class="info-field-key">' +
       '<span class="info-field-key-name">' + escapeHtml(key) + '</span>' +
@@ -142,8 +199,8 @@ function buildSimpleField(key, prettyHtml, rawStr) {
       '</span>' +
     '</span>' +
     '<div class="info-field-value">' +
-      '<div class="info-json info-json-pretty info-json-markdown" id="' + prettyId + '">' + renderedContent + '</div>' +
-      '<pre class="info-json info-json-raw info-json-hidden" id="' + rawId + '" ' + rawAttr + '></pre>' +
+      '<div class="info-json info-json-pretty info-json-markdown">' + renderedContent + '</div>' +
+      '<pre class="info-json info-json-raw info-json-hidden">' + escapeHtml(rawText) + '</pre>' +
     '</div>' +
   '</div>';
 }
@@ -159,10 +216,7 @@ function buildFieldWithSubFields(key, obj, rawStr) {
     previewHtml = '<div class="info-field-preview"><span class="info-preview-count">(' + n + ')</span> ' + buildPreview(obj) + '</div>';
   }
   var prettyHtml = renderMarkdown(JSON.stringify(obj, null, 2));
-  var prettyId = 'ip-' + Math.random().toString(36).slice(2, 8);
-  var rawId = 'ir-' + Math.random().toString(36).slice(2, 8);
-  var rawAttr = 'data-raw-id="' + rawId + '"';
-  __rawFieldMap[rawId] = rawStr || '';
+  var rawText = infoRawString(rawStr);
   return '<div class="info-field' + (needsCollapse ? ' collapsed' : '') + '">' +
     '<span class="info-field-key">' +
       '<span class="info-field-key-name">' + escapeHtml(key) + '</span>' +
@@ -177,38 +231,42 @@ function buildFieldWithSubFields(key, obj, rawStr) {
     '</span>' +
     previewHtml +
     '<div class="info-field-value">' +
-      '<div class="info-json info-json-pretty info-json-markdown" id="' + prettyId + '">' + prettyHtml + '</div>' +
-      '<pre class="info-json info-json-raw info-json-hidden" id="' + rawId + '" ' + rawAttr + '></pre>' +
+      '<div class="info-json info-json-pretty info-json-markdown">' + prettyHtml + '</div>' +
+      '<pre class="info-json info-json-raw info-json-hidden">' + escapeHtml(rawText) + '</pre>' +
     '</div>' +
   '</div>';
 }
 
-function toggleInfoCollapse(btn) {
-  var field = btn.closest('.info-field');
-  if (!field) return;
-  field.classList.toggle('collapsed');
-  var isCollapsed = field.classList.contains('collapsed');
-  var label = isCollapsed ? t('expand') : t('collapse');
-  btn.setAttribute('data-tooltip', label);
-  btn.setAttribute('aria-label', label);
-  var svg = btn.querySelector('svg polygon');
-  if (svg) {
-    if (isCollapsed) {
-      svg.setAttribute('points', '2,2 8,5 2,8');
-    } else {
-      svg.setAttribute('points', '2,2 8,2 5,8');
-    }
-  }
+
+function toggleInfoSection(btn) {
+  var section = btn.closest('.info-section');
+  if (!section) return;
+  var content = section.querySelector('.info-section-content');
+  var expanded = !section.classList.contains('info-section-collapsed');
+  section.classList.toggle('info-section-collapsed', expanded);
+  if (content) content.hidden = expanded;
+  btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  var chevron = btn.querySelector('.info-section-chevron');
+  if (chevron) chevron.innerHTML = expanded ? '&#9656;' : '&#9662;';
 }
 
+function toggleInfoSectionView(btn, view) {
+  var section = btn.closest('.info-section');
+  if (!section) return;
+  var sectionBtns = section.querySelectorAll('.info-section-view-btn');
+  for (var i = 0; i < sectionBtns.length; i++) {
+    sectionBtns[i].classList.toggle('info-toggle-btn-active', sectionBtns[i] === btn);
+  }
+  var fieldBtns = section.querySelectorAll('.info-field .info-toggle-btn[data-view="' + view + '"]');
+  for (var j = 0; j < fieldBtns.length; j++) toggleInfoView(fieldBtns[j], view);
+}
 function toggleInfoView(btn, view) {
   var field = btn.closest('.info-field');
   if (!field) return;
-  var toggleBtns = field.querySelectorAll('.info-toggle-btn');
+  var toggleBtns = field.querySelectorAll('.info-toggle-btn[data-view]');
   for (var i = 0; i < toggleBtns.length; i++) {
-    toggleBtns[i].classList.remove('info-toggle-btn-active');
+    toggleBtns[i].classList.toggle('info-toggle-btn-active', toggleBtns[i] === btn);
   }
-  btn.classList.add('info-toggle-btn-active');
   var prettyPre = field.querySelector('.info-json-pretty');
   var rawPre = field.querySelector('.info-json-raw');
   if (view === 'raw') {
@@ -220,10 +278,26 @@ function toggleInfoView(btn, view) {
   }
 }
 
+function infoCopyFeedback(btn) {
+  var orig = btn.textContent;
+  btn.textContent = t('copied');
+  setTimeout(function() { btn.textContent = orig; }, 1500);
+}
+
+function copyInfoSection(btn) {
+  var sectionEl = btn.closest('.info-section');
+  if (!sectionEl) return;
+  var sectionId = sectionEl.id;
+  var section = __infoModalSections.find(function(item) { return item.sectionId === sectionId; });
+  if (!section) return;
+  var text = infoRawString(section.rawData !== undefined ? section.rawData : section.data);
+  navigator.clipboard.writeText(text).then(function() { infoCopyFeedback(btn); });
+}
+
 function copyInfoText(btn) {
   var field = btn.closest('.info-field');
   if (!field) return;
-  var activeBtn = field.querySelector('.info-toggle-btn-active');
+  var activeBtn = field.querySelector('.info-toggle-btn-active[data-view]');
   var view = activeBtn ? activeBtn.getAttribute('data-view') : null;
   var pre;
   if (view === 'pretty') {
@@ -233,12 +307,8 @@ function copyInfoText(btn) {
   } else {
     pre = field.querySelector('.info-json');
   }
-  var text = pre ? pre.innerText : '';
-  navigator.clipboard.writeText(text).then(function() {
-    var orig = btn.textContent;
-    btn.textContent = t('copied');
-    setTimeout(function() { btn.textContent = orig; }, 1500);
-  });
+  var text = pre ? pre.textContent : '';
+  navigator.clipboard.writeText(text).then(function() { infoCopyFeedback(btn); });
 }
 
 function copyAllInfo(btn) {
@@ -258,9 +328,5 @@ function copyAllInfo(btn) {
     }
   }
   var text = JSON.stringify(obj, null, 2);
-  navigator.clipboard.writeText(text).then(function() {
-    var orig = btn.textContent;
-    btn.textContent = t('copied');
-    setTimeout(function() { btn.textContent = orig; }, 1500);
-  });
+  navigator.clipboard.writeText(text).then(function() { infoCopyFeedback(btn); });
 }

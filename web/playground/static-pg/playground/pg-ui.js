@@ -1162,7 +1162,9 @@ function pgShowReqDetail(idx) {
 
   titleEl.textContent = (e.provider || '?') + ' / ' + (e.model || '?') + ' \u2014 ' + (e.status || 'unknown') + ' (' + formatLatency(e.latencyMs || 0) + ')';
 
+  bodyEl.classList.remove('info-modal-monitor');
   __infoModalSections = [];
+  __rawFieldMap = {};
   var html = '';
 
   var summaryData = {};

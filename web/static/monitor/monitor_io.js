@@ -185,7 +185,7 @@ function handleRequestDone(id, status, entry) {
   if (!hasProcessingEntries()) stopProcessingTimer();
   if (currentInfoModalRequestId === id) {
     currentInfoModalStreamingDone = true;
-    if (completeEntry.respPayload) {
+    if (infoHasValue(completeEntry.respPayload)) {
       updateStreamingModalResponse(completeEntry);
     } else if (traceEnabled) {
       // trace mode: ring entry has no payload; fetch final response from trace file.
@@ -200,13 +200,11 @@ function handleRequestDone(id, status, entry) {
         if (su) su.remove();
         var srb = bodyEl.querySelector('#streaming-response-body-section');
         if (srb) srb.remove();
-        // Add a trace-loading placeholder if not present.
+        // Add the same collapsible monitor trace placeholder used by the modal renderer.
         if (!bodyEl.querySelector('#trace-loading-section')) {
           var ph = document.createElement('div');
-          ph.className = 'info-section';
-          ph.id = 'trace-loading-section';
-          ph.innerHTML = '<div class="info-section-title">' + escapeHtml(t('infoTraceDetail')) + '</div><div class="info-field"><div class="info-field-value"><pre class="info-json" style="white-space:pre-wrap;color:var(--text-muted)">' + escapeHtml(t('infoLoadingTrace')) + '</pre></div></div>';
-          bodyEl.appendChild(ph);
+          ph.innerHTML = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoLoadingTrace'), false, false);
+          bodyEl.appendChild(ph.firstElementChild);
         }
       }
       loadTraceDetails(completeEntry);

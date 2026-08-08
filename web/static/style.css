@@ -1227,6 +1227,95 @@ tbody tr:last-child td{border-bottom:none}
    --------------------------------------------------------------------- */
 .info-field-key{position:sticky;top:0;z-index:2;background:var(--modal-bg);padding:4px 0;margin-bottom:3px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px}
 .info-field-key::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(to right,transparent,var(--glass-border),transparent);z-index:-1}
+/* ---------------------------------------------------------------------
+   Monitor Info Modal Sections
+   --------------------------------------------------------------------- */
+.info-modal-body.info-modal-monitor{
+  --info-section-sticky-height:34px;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  background:var(--modal-bg);
+}
+.info-modal-monitor .info-section-monitor{
+  position:relative;
+  min-width:0;
+  margin-bottom:16px;
+}
+.info-modal-monitor .info-section-monitor:last-child{margin-bottom:0}
+.info-modal-monitor .info-section-monitor>.info-section-title{
+  position:sticky;
+  top:0;
+  z-index:4;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  box-sizing:border-box;
+  min-height:var(--info-section-sticky-height);
+  height:var(--info-section-sticky-height);
+  margin:0;
+  padding:5px 8px;
+  background:var(--modal-bg);
+  border-bottom:1px solid var(--glass-border);
+  box-shadow:0 1px 0 var(--modal-bg);
+}
+.info-modal-monitor .info-section-toggle{
+  display:inline-flex;
+  align-items:center;
+  min-width:0;
+  flex:1 1 auto;
+  gap:6px;
+  height:100%;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:var(--accent);
+  font:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+.info-modal-monitor .info-section-toggle:hover{color:var(--text)}
+.info-modal-monitor .info-section-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.info-modal-monitor .info-section-chevron{display:inline-block;flex:0 0 12px;font-size:11px;line-height:1;text-align:center}
+.info-modal-monitor .info-section-title-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.info-modal-monitor .info-section-actions{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0;flex:0 0 auto}
+.info-modal-monitor .info-section-view{margin-right:0}
+.info-modal-monitor .info-section-copy-btn{margin-right:0;white-space:nowrap}
+.info-modal-monitor .info-section-content{min-width:0;overflow:visible}
+.info-modal-monitor .info-section-content[hidden],
+.info-modal-monitor .info-section-collapsed>.info-section-content{display:none!important}
+.info-modal-monitor .info-field-key{
+  top:var(--info-section-sticky-height,34px);
+  z-index:3;
+  background:var(--modal-bg);
+  box-shadow:0 1px 0 var(--modal-bg);
+}
+.info-modal-monitor .info-json,
+.info-modal-monitor .info-json-markdown,
+.info-modal-monitor .info-json-markdown pre,
+.info-modal-monitor .info-field-preview{
+  overflow:visible;
+  max-width:100%;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+@media (max-width:600px){
+  .info-modal-body.info-modal-monitor{--info-section-sticky-height:38px;padding-left:12px;padding-right:12px}
+  .info-modal-monitor .info-section-monitor>.info-section-title{padding-left:6px;padding-right:6px}
+  .info-modal-monitor .info-section-actions{gap:2px}
+  .info-modal-monitor .info-toggle-btn{padding-left:5px;padding-right:5px}
+  .info-modal-monitor .info-copy-btn{padding-left:6px;padding-right:6px}
+  .info-modal-monitor .info-field-key{gap:3px}
+}
+@media (max-width:380px){
+  .info-modal-body.info-modal-monitor{--info-section-sticky-height:42px;padding-left:8px;padding-right:8px}
+  .info-modal-monitor .info-section-monitor>.info-section-title{padding-top:4px;padding-bottom:4px}
+  .info-modal-monitor .info-section-title-text{font-size:var(--font-code)}
+  .info-modal-monitor .info-section-actions{flex-wrap:nowrap}
+}
 
 /* =====================================================================
    Modal, Toast & Skeleton

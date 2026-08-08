@@ -1200,7 +1200,7 @@ function showProtoDetail(modelId, protoKey) {
   var overlay = document.getElementById('info-modal-overlay');
   var titleEl = document.getElementById('info-modal-title');
   var bodyEl = document.getElementById('info-modal-body');
-
+  bodyEl.classList.remove('info-modal-monitor');
   var nameMap = {
     openaiCompat: 'protoOpenAICompat',
     openaiResponses: 'protoOpenAIResponses',
@@ -1212,9 +1212,11 @@ function showProtoDetail(modelId, protoKey) {
 
   if (!r) {
     __infoModalSections = [];
+    __rawFieldMap = {};
     bodyEl.innerHTML = '<div class="info-section"><div class="info-section-title">' + t('noData') + '</div><pre class="info-json">' + t('untested') + '</pre></div>';
   } else {
     __infoModalSections = [];
+    __rawFieldMap = {};
     bodyEl.innerHTML = renderProtocolSection(protoKey, r);
   }
 
@@ -1270,11 +1272,16 @@ function renderProtocolSection(key, r) {
 
   return '<div class="info-modal-proto-section">' + header + metaHtml + detailHtml + '</div>';
 }
-
 function closeInfoModal() {
   var overlay = document.getElementById('info-modal-overlay');
+  var bodyEl = document.getElementById('info-modal-body');
   overlay.classList.remove('show');
+  if (bodyEl) bodyEl.classList.remove('info-modal-monitor');
   document.removeEventListener('keydown', infoModalEscapeHandler);
+  if (typeof usageInfoModalEscapeHandler === 'function') {
+    document.removeEventListener('keydown', usageInfoModalEscapeHandler);
+  }
+  if (typeof currentInfoModalRequestId !== 'undefined') currentInfoModalRequestId = null;
 }
 
 function infoModalEscapeHandler(e) {
