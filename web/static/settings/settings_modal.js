@@ -249,8 +249,8 @@ function renderLangAndFontSizePicker(containerId) {
       <div class="lang-font-group">\
         <span class="lang-font-label">' + t('language') + '</span>\
         <div class="segmented-control">\
-          <button type="button" class="segmented-btn' + (currLang === 'en' ? ' active' : '') + '" onclick="setLang(\'en\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">English</button>\
-          <button type="button" class="segmented-btn' + (currLang === 'cn' ? ' active' : '') + '" onclick="setLang(\'cn\'); renderLangAndFontSizePicker(\'lang-font-modal-container\');">中文</button>\
+          <button type="button" class="segmented-btn' + (currLang === 'en' ? ' active' : '') + '" onclick="setLang(\'en\');">English</button>\
+          <button type="button" class="segmented-btn' + (currLang === 'cn' ? ' active' : '') + '" onclick="setLang(\'cn\');">中文</button>\
         </div>\
       </div>\
       <div class="lang-font-group">\

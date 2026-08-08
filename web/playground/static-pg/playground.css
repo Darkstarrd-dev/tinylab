@@ -13,9 +13,11 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-side{grid-row:1 / span 2;grid-column:2;display:flex;flex-direction:column;gap:0;overflow-y:auto;min-height:0;min-width:0;padding-left:0;border-left:1px solid var(--glass-border)}
 .pg-input-bar{grid-row:2;grid-column:1;display:flex;gap:0;align-items:stretch;flex-shrink:0;padding-top:0;width:100%}
 .pg-input-card{
+  position:relative;
   flex:1;
   display:flex;
   flex-direction:row;
+  align-items:stretch;
   background:var(--glass-bg);
   border:1px solid var(--glass-border);
   border-radius:0;
@@ -26,22 +28,112 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   border-color:var(--accent);
   box-shadow:0 0 0 2px rgba(79,195,247,0.08);
 }
-.pg-input-bar-toolbar{
-  border-top:1px solid var(--glass-border);
-  padding:8px 10px;
-  background:rgba(0,0,0,.15);
-  backdrop-filter:blur(8px);
-  min-height:8px;
-}
 .pg-input-bar .pg-input{
+  flex:1;
+  width:100%;
+  min-width:0;
   border:none;
   border-radius:0;
   background:transparent;
   box-shadow:none;
-  padding:12px 16px;
-  text-align:center;
+  padding:12px 40px 12px 16px;
+  text-align:left;
+  resize:none;
+  outline:none;
 }
 .pg-input-bar .pg-input:focus{border:none;box-shadow:none;}
+
+.pg-input-expand-btn{
+  position:absolute;
+  top:6px;
+  right:8px;
+  z-index:5;
+  width:26px;
+  height:26px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:1px solid transparent;
+  background:transparent;
+  color:var(--text-muted);
+  border-radius:var(--radius-xs,4px);
+  cursor:pointer;
+  transition:all var(--transition-fast,0.15s);
+}
+.pg-input-expand-btn:hover{
+  background:var(--glass-hover,rgba(255,255,255,0.08));
+  color:var(--text);
+  border-color:var(--glass-border);
+}
+.pg-input-expand-btn.active{
+  background:rgba(79,195,247,0.15);
+  color:var(--accent);
+  border-color:var(--accent);
+}
+
+/* Maximized Prompt Editor in main area */
+.pg-max-editor-wrapper{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  height:100%;
+  min-height:0;
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-md,8px);
+  overflow:hidden;
+  box-sizing:border-box;
+}
+.pg-max-editor-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 16px;
+  border-bottom:1px solid var(--glass-border);
+  background:rgba(0,0,0,0.12);
+}
+.pg-max-editor-title{
+  font-size:var(--font-badge,13px);
+  font-weight:600;
+  color:var(--text-secondary);
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.pg-max-editor-restore-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-sm,4px);
+  background:var(--glass-bg);
+  color:var(--text);
+  font-size:var(--font-badge,12px);
+  cursor:pointer;
+  transition:all var(--transition-fast,0.15s);
+}
+.pg-max-editor-restore-btn:hover{
+  background:var(--glass-hover);
+  border-color:var(--accent);
+  color:var(--accent);
+}
+.pg-max-editor-textarea{
+  flex:1;
+  width:100%;
+  min-height:0;
+  border:none;
+  outline:none;
+  background:transparent;
+  color:var(--text);
+  padding:16px 20px;
+  font-family:inherit;
+  font-size:14px;
+  line-height:1.6;
+  resize:none;
+  box-sizing:border-box;
+}
 .pg-input-bar .pg-send{
   align-self:stretch;
   height:36px;

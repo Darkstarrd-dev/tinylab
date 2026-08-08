@@ -61,6 +61,7 @@ var pgState = {
   windows: [],
   models: [],
   mode: 'normal',  // 'normal' | 'autochat' | 'image' | 'search'
+  inputMaximized: false,
   // Auto chat (group-chat) mode
   autoChat: {
     enabled: false,        // auto chat switch (not persisted; off after reload)

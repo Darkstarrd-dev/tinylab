@@ -7,9 +7,13 @@ package editor
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
@@ -33,6 +37,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/docs", h.editorTree)
 	r.Post("/open", h.editorOpen)
 	r.Post("/save", h.editorSave)
+	r.Post("/upload-image", h.editorUploadImage)
+	r.Get("/image", h.editorServeImage)
 }
 
 // DocFileItem represents a file or directory inside the docDir.
@@ -197,4 +203,85 @@ func (h *Handler) editorSave(w http.ResponseWriter, r *http.Request) {
 		"ok":   true,
 		"path": req.Path,
 	})
+}
+
+// editorUploadImage saves an uploaded image file into docDir/imgs/
+// and returns relative and API URLs for rendering in Markdown.
+func (h *Handler) editorUploadImage(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(32 << 20) // 32MB max
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "failed to parse multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing image file parameter")
+		return
+	}
+	defer file.Close()
+
+	docDir := "docs"
+	if h != nil && h.d != nil {
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		docDir = config.ResolveDocDir(cfg.DocDir, configDir)
+	}
+
+	imgsDir := filepath.Join(docDir, "imgs")
+	_ = os.MkdirAll(imgsDir, 0755)
+
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = ".png"
+	}
+	filename := fmt.Sprintf("img_%d%s", time.Now().UnixNano()/1e6, ext)
+	dstPath := filepath.Join(imgsDir, filename)
+
+	out, err := os.Create(dstPath)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create image file")
+		return
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, file); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to write image file")
+		return
+	}
+
+	relUrl := "./imgs/" + filename
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"url":     relUrl,
+		"apiPath": "/api/editor/image?path=" + url.QueryEscape(relUrl),
+		"name":    filename,
+	})
+}
+
+// editorServeImage serves images saved under docDir.
+func (h *Handler) editorServeImage(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	docDir := "docs"
+	if h != nil && h.d != nil {
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		docDir = config.ResolveDocDir(cfg.DocDir, configDir)
+	}
+
+	cleanRel := filepath.Clean(relPath)
+	fullPath := filepath.Join(docDir, cleanRel)
+	http.ServeFile(w, r, fullPath)
 }

@@ -112,6 +112,10 @@ function pgEditPromptForError(i, idx) {
 
 // ----- Module: New message send (broadcast) -------------------------
 function pgUserSend() {
+  if (pgState.inputMaximized) {
+    pgState.inputMaximized = false;
+    pgSyncInputMaximizedState();
+  }
   var ta = document.getElementById('pg-input');
   if (!ta) return;
   var text = ta.value.trim();
@@ -1205,11 +1209,71 @@ function pgShowReqDetail(idx) {
   bodyEl.focus();
 }
 
-// ----- Input bar (send/stop + clear) --------------------------------
+// ----- Input bar (send/stop + clear + maximize) -----------------------
+function pgToggleInputMaximize() {
+  pgState.inputMaximized = !pgState.inputMaximized;
+  pgSyncInputMaximizedState();
+}
+
+function pgSyncInputMaximizedState() {
+  var isMax = !!pgState.inputMaximized;
+  var panesEl = document.getElementById('pg-panes');
+  var wrapperEl = document.getElementById('pg-max-editor-wrapper');
+  var ta = document.getElementById('pg-input');
+
+  if (isMax) {
+    if (panesEl) panesEl.style.display = 'none';
+    if (wrapperEl) {
+      wrapperEl.style.display = 'flex';
+      var currentVal = ta ? ta.value : '';
+      wrapperEl.innerHTML =
+        '<div class="pg-max-editor-header">' +
+          '<span class="pg-max-editor-title">' + pgEscapeHtml(pgT('pgMaxEditorTitle')) + '</span>' +
+          '<button type="button" class="pg-max-editor-restore-btn" onclick="pgToggleInputMaximize()">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>' +
+            '<span>' + pgEscapeHtml(pgT('pgRestoreDefaultView')) + '</span>' +
+          '</button>' +
+        '</div>' +
+        '<textarea class="pg-max-editor-textarea" id="pg-max-editor-textarea" placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '">' + pgEscapeHtml(currentVal) + '</textarea>';
+
+      var maxTa = document.getElementById('pg-max-editor-textarea');
+      if (maxTa) {
+        maxTa.focus();
+        maxTa.selectionStart = maxTa.selectionEnd = maxTa.value.length;
+        maxTa.addEventListener('input', function() {
+          if (ta) ta.value = maxTa.value;
+        });
+        maxTa.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            pgUserSend();
+          }
+        });
+      }
+    }
+  } else {
+    if (panesEl) panesEl.style.display = '';
+    if (wrapperEl) wrapperEl.style.display = 'none';
+    if (ta) ta.focus();
+  }
+
+  var expandBtn = document.getElementById('pg-input-expand-btn');
+  if (expandBtn) {
+    var expandTooltip = isMax ? pgT('pgRestoreInput') : pgT('pgMaximizeInput');
+    expandBtn.setAttribute('data-tooltip', expandTooltip);
+    expandBtn.setAttribute('aria-label', expandTooltip);
+    expandBtn.classList.toggle('active', isMax);
+    expandBtn.innerHTML = isMax
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+  }
+}
+
 function pgRenderInputBar() {
   var bar = document.getElementById('pg-inputbar');
   if (!bar) return;
   var imageGenerating = pgState.mode === 'image' && pgWin() && pgWin().image && pgWin().image.phase === 'generating';
+  var sendBtn = '';
   if (imageGenerating) {
     sendBtn = '<button class="pg-send stop" onclick="pgImageStop(pgState.activeWin)">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
   } else if (pgIsGenerating() && !(pgState.autoChat.enabled && pgState.autoChat.isRunning)) {
@@ -1218,12 +1282,19 @@ function pgRenderInputBar() {
     var sendLabel = pgState.mode === 'image' ? pgT('pgGenerate') : (pgState.mode === 'search' ? pgT('pgSearchButton') : pgT('pgSendMessage'));
     sendBtn = '<button class="pg-send" onclick="pgUserSend()" ' + (!pgAnyWindowHasModel() ? 'disabled' : '') + '>' + pgEscapeHtml(sendLabel) + '</button>';
   }
-   bar.innerHTML =
-    '<div class="pg-input-card">' +
-        '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
-      '<div class="pg-input-right">' +
-        '<div class="pg-input-bar-toolbar"></div>' +
-      '</div>' +
+  var isMax = !!pgState.inputMaximized;
+  var expandTooltip = isMax ? pgT('pgRestoreInput') : pgT('pgMaximizeInput');
+  var expandBtnHtml = '<button type="button" class="pg-input-expand-btn' + (isMax ? ' active' : '') + '" id="pg-input-expand-btn" onclick="pgToggleInputMaximize()" data-tooltip="' + pgEscapeHtml(expandTooltip) + '" aria-label="' + pgEscapeHtml(expandTooltip) + '">'
+    + (isMax
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>')
+    + '</button>';
+
+  bar.innerHTML =
+    '<div class="pg-input-card' + (isMax ? ' pg-input-card-maximized' : '') + '">' +
+      '<div class="pg-input-thumbs" id="pg-input-thumbs"></div>' +
+      '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
+      expandBtnHtml +
     '</div>' +
     '<div class="pg-input-actions">' +
       sendBtn +
@@ -1234,9 +1305,14 @@ function pgRenderInputBar() {
         '<button class="pg-btn danger" onclick="pgClear()">' + pgEscapeHtml(pgT('pgClear')) + '</button>' +
       '</div>' +
     '</div>';
+
   var ta = document.getElementById('pg-input');
   if (ta) {
     ta.addEventListener('paste', pgPasteImage);
+    ta.addEventListener('input', function() {
+      var maxTa = document.getElementById('pg-max-editor-textarea');
+      if (maxTa && pgState.inputMaximized) maxTa.value = ta.value;
+    });
     if (pgState.mode === 'search') {
       var activeSearch = typeof pgActiveSearch === 'function' ? pgActiveSearch() : null;
       if (activeSearch && activeSearch.query) {
@@ -1258,6 +1334,7 @@ function pgRenderInputBar() {
     }
   }
   pgRenderInputThumbs();
+  pgSyncInputMaximizedState();
 }
 function pgUpdateInputBar() { pgRenderInputBar(); }
 

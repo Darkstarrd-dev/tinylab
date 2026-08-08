@@ -28,6 +28,7 @@ function renderPlayground(container) {
       '<div class="pg-main">' +
         '<div class="pg-main-inner" id="pg-main-inner">' +
           '<div class="pg-panes" id="pg-panes"></div>' +
+          '<div class="pg-max-editor-wrapper" id="pg-max-editor-wrapper" style="display:none"></div>' +
         '</div>' +
       '</div>' +
       '<div class="pg-input-bar" id="pg-inputbar"></div>' +

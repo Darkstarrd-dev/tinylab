@@ -1344,7 +1344,7 @@ function setLang(lang) {
   if (typeof currentProviderId !== 'undefined' && currentProviderId) {
     if (typeof renderProviders === 'function') renderProviders(document.getElementById('page-content'));
   } else if (typeof navigateTo === 'function') {
-    navigateTo(page);
+    navigateTo(typeof currentPage !== 'undefined' ? currentPage : 'endpoint');
   }
   if (typeof updateUtilityNavLabel === 'function') updateUtilityNavLabel();
   if (typeof updateUtilityMenuState === 'function') updateUtilityMenuState();
@@ -1363,6 +1363,13 @@ function updateThemeModalLabels() {
   if (sectionTitles && sectionTitles.length >= 2) {
     sectionTitles[0].textContent = t('themeStyle');
     sectionTitles[1].textContent = t('langAndFontSize');
+  }
+  if (typeof ThemeSystem !== 'undefined') {
+    if (typeof ThemeSystem.renderThemePicker === 'function') ThemeSystem.renderThemePicker('theme-modal-picker-container');
+    if (typeof ThemeSystem.renderStylePicker === 'function') ThemeSystem.renderStylePicker('style-modal-picker-container');
+  }
+  if (typeof renderLangAndFontSizePicker === 'function') {
+    renderLangAndFontSizePicker('lang-font-modal-container');
   }
 }
 
