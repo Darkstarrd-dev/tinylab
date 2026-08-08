@@ -37,6 +37,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/docs", h.editorTree)
 	r.Post("/open", h.editorOpen)
 	r.Post("/save", h.editorSave)
+	r.Post("/delete", h.editorDeleteFile)
 	r.Post("/upload-image", h.editorUploadImage)
 	r.Post("/save-session-images", h.editorSaveSessionImages)
 	r.Get("/image", h.editorServeImage)
@@ -334,5 +335,37 @@ func (h *Handler) editorSaveSessionImages(w http.ResponseWriter, r *http.Request
 		"ok":         true,
 		"targetDir":  targetImgDir,
 		"imgsSubdir": imgsSubdir,
+	})
+}
+
+// editorDeleteFile deletes a physical file and its accompanying imgs directory if present.
+func (h *Handler) editorDeleteFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Path == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "path required")
+		return
+	}
+
+	_ = os.Remove(req.Path)
+
+	baseName := filepath.Base(req.Path)
+	ext := filepath.Ext(baseName)
+	if len(baseName) > len(ext) {
+		rawName := baseName[:len(baseName)-len(ext)]
+		imgsDir := filepath.Join(filepath.Dir(req.Path), rawName+"_imgs")
+		_ = os.RemoveAll(imgsDir)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":   true,
+		"path": req.Path,
 	})
 }

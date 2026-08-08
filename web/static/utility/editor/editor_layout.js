@@ -39,6 +39,7 @@
     'sync': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 3L5 6.99h3V14h2V6.99h3L9 3zm7 14.01V10h-2v7.01h-3L15 21l4-3.99h-3z"/></svg>',
     'toc': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/></svg>',
     'ai': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L14.39 7.61L20 10L14.39 12.39L12 18L9.61 12.39L4 10L9.61 7.61L12 2ZM6 15l1.19 2.81L10 19l-2.81 1.19L6 23l-1.19-2.81L2 19l2.81-1.19L6 15z"/></svg>',
+    'html-iframe': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm0 14H5V8h14v10zm-7-1h5v-4h-5v4z"/></svg>',
     'sidebar-collapse': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm6 3l-3 3 3 3V9z"/></svg>',
     'sidebar-expand': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm-3 3l3 3-3 3V9z"/></svg>'
   };
@@ -77,7 +78,8 @@
     'focus': 'focus',
     'sync': 'sync',
     'toc': 'toc',
-    'ai': 'ai'
+    'ai': 'ai',
+    'html-iframe': 'html-iframe'
   };
 
   var SHORTCUT_HINTS = {
@@ -162,7 +164,7 @@
     'undo':'editorUndo', 'redo':'editorRedo', 'bold':'editorBold', 'italic':'editorItalic', 'heading':'editorHeading',
     'strike':'editorStrike', 'ul':'editorUnorderedList', 'ol':'editorOrderedList', 'checklist':'editorTaskList',
     'quote':'editorQuote', 'code':'editorCode', 'table':'editorTable', 'link':'editorLink', 'image':'editorImage',
-    'find':'editorFind', 'reader':'editorReader', 'ai':'editorAI',
+    'find':'editorFind', 'reader':'editorReader', 'ai':'editorAI', 'html-iframe':'editorHtmlIframe',
     'focus':'editorFocus', 'preview':'editorPreview', 'sync':'editorScrollSync', 'toc':'editorTableOfContents', 'open':'editorOpen',
     'save':'editorSave', 'edit':'editorEditMode', 'diff':'editorDiff', 'toggle':'editorToggle'
   };
@@ -344,6 +346,7 @@
     var togglesGroup = make('div', 'ed-toolbar-section ed-toggles-group');
     togglesGroup.appendChild(make('span', 'ed-toolbar-divider', ''));
     appendButtons(togglesGroup, [
+      ['html-iframe', 'HTML IFrame Preview', { 'data-toggle': 'html-iframe' }, { icon: 'html-iframe', hideLabel: true }],
       ['sync', 'Scroll Sync', { 'data-toggle': 'sync' }, { icon: 'sync', hideLabel: true }],
       ['focus', 'Focus Mode', { 'data-toggle': 'focus' }, { icon: 'focus', hideLabel: true }],
       ['toc', 'Table of Contents', { 'data-toggle': 'toc' }, { icon: 'toc', hideLabel: true }]

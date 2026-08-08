@@ -407,7 +407,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     editorUnorderedList: 'Bulleted List', editorOrderedList: 'Numbered List', editorTaskList: 'Task List',
     editorHorizontalRule: 'Horizontal Rule', editorImport: 'Import', editorExport: 'Export', editorPrint: 'Print',
     editorWorkspace: 'Workspace', editorLocalSaved: 'Local saved', editorExternalFile: 'External file', editorDirty: 'Unsaved changes',
-    editorDelete: 'Delete', editorToggle: 'Toggle', editorTable: 'Table', editorAI: 'AI Assistant',
+    editorDelete: 'Delete', editorToggle: 'Toggle', editorTable: 'Table', editorAI: 'AI Assistant', editorHtmlIframe: 'HTML IFrame Preview',
     editorExportHtml: 'HTML',
     // Text Review (AI 文本审校) keys
     trStepImport: 'Import', trStepSplit: 'Split', trStepClean: 'AI Clean', trStepReview: 'Review',

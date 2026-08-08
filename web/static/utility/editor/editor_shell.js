@@ -27,6 +27,7 @@
     sync: true,
     toc: true,
     explorer: true,
+    htmlRender: false,
     expanded: []
   };
   var shellFind = { visible: false, query: '', replace: '', index: 0, matches: [] };
@@ -116,7 +117,21 @@
     if (!shellRoot) return;
     var preview = shellRoot.querySelector('#ed-main-preview');
     if (!preview) return;
-    var html = global.EditorMarkdown.renderMarkdown(currentText());
+    var content = currentText();
+    var ext = shellState.currentNode ? edFileExt(shellState.currentNode.name) : 'md';
+
+    if (shellState.htmlRender || edIsHtmlExt(ext)) {
+      preview.innerHTML = '';
+      var iframe = document.createElement('iframe');
+      iframe.className = 'ed-iframe-preview';
+      iframe.style.cssText = 'width:100%; height:100%; min-height:400px; border:none; background:#ffffff; border-radius:6px;';
+      iframe.srcdoc = content;
+      preview.appendChild(iframe);
+      updateStatus();
+      return;
+    }
+
+    var html = global.EditorMarkdown.renderMarkdown(content);
     preview.innerHTML = html;
     global.EditorMarkdown.highlightCode(preview);
     renderToc(preview);
@@ -256,32 +271,6 @@
     queryInput.focus();
     shellFindRefresh();
   }
-  function saveWorkspace() {
-    var input = currentInput();
-    if (!input || !shellState.currentId) return Promise.resolve(false);
-    var value = input.value;
-    var savePromise;
-    if (shellState.currentNode && shellState.currentNode.externalPath) {
-      savePromise = fetch('/api/editor/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: shellState.currentNode.externalPath, content: value })
-      }).then(function (response) { return response.json(); }).then(function (data) {
-        if (!data || !data.ok) return false;
-        return global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
-      });
-    } else {
-      savePromise = global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
-    }
-    return savePromise.then(function (saved) {
-      if (!saved) { toast(tr('editorSaveFailed', 'Save failed'), 'error'); return false; }
-      shellState.original = value;
-      shellState.dirty = false;
-      updateStatus();
-      toast(tr('editorSaved', 'File saved'), 'success');
-      return true;
-    });
-  }
 
   function renderDiff() {
     if (!shellRoot) return;
@@ -303,6 +292,10 @@
     return text(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  function escapeAttr(value) {
+    return text(value).replace(/"/g, '&quot;');
+  }
+
   function redraw() {
     if (!shellRoot) return;
     global.EditorLayout.setMode(shellRoot, shellState.mode);
@@ -313,35 +306,6 @@
     global.EditorLayout.setSync(shellRoot, shellState.sync);
     if (global.EditorLayout.updateExplorerToggleIcon) global.EditorLayout.updateExplorerToggleIcon(shellRoot, shellState.explorer !== false);
     if (shellState.mode === 'diff') renderDiff(); else renderPreview();
-  }
-
-  function saveWorkspace() {
-    var input = currentInput();
-    if (!input || !shellState.currentId) return Promise.resolve(false);
-    var value = input.value;
-    var savePromise;
-    if (shellState.currentNode && shellState.currentNode.externalPath) {
-      savePromise = fetch('/api/editor/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: shellState.currentNode.externalPath, content: value })
-      }).then(function (response) {
-        return response.json().then(function (data) {
-          if (!response.ok || !data || !data.ok) return false;
-          return global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
-        });
-      }).catch(function () { return false; });
-    } else {
-      savePromise = global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
-    }
-    return savePromise.then(function (saved) {
-      if (!saved) { toast(tr('editorSaveFailed', 'Save failed'), 'error'); return false; }
-      shellState.original = value;
-      shellState.dirty = false;
-      updateStatus();
-      toast(tr('editorSaved', 'File saved'), 'success');
-      return true;
-    });
   }
 
   function syncDocDirTree() {
@@ -384,7 +348,8 @@
       console.warn('[Editor] syncDocDirTree error:', err);
       return null;
     });
-  }  function saveDraft(id, content) {
+  }
+  function saveDraft(id, content) {
     if (!id) return;
     try {
       var drafts = JSON.parse(localStorage.getItem('tr_editor_drafts') || '{}');
@@ -524,38 +489,116 @@
     if (!targetId || !targetNode) return;
     promptDialog(tr('editorRename', 'Rename'), targetNode.name).then(function (name) {
       if (!name || name === targetNode.name) return;
-      global.EditorWorkspace.updateNode(targetId, { name: name }).then(function (node) {
+      var updates = { name: name };
+
+      if (targetNode.externalPath) {
+        var oldPath = targetNode.externalPath.replace(/\\/g, '/');
+        var dir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+        var newPath = dir ? (dir + '/' + name) : name;
+        updates.meta = { externalPath: newPath };
+        targetNode.externalPath = newPath;
+      }
+
+      global.EditorWorkspace.updateNode(targetId, updates).then(function (node) {
         if (!node) return;
         shellState.selectedNode = node;
         if (shellState.currentId === targetId) shellState.currentNode = node;
+
+        if (node.externalPath) {
+          fetch('/api/editor/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: node.externalPath, content: currentInput() ? currentInput().value : (node.content || '') })
+          }).catch(function() {});
+        }
+
         refreshTree();
         updateStatus();
+        toast('Renamed to ' + name, 'success');
       });
     });
   }
 
   function deleteCurrent() {
-    var targetId = shellState.selectedId || shellState.currentId;
-    var targetNode = shellState.selectedNode || shellState.currentNode;
-    if (!targetId || !targetNode) return;
-    global.EditorWorkspace.deleteNode(targetId).then(function () { return global.EditorWorkspace.getCurrentFileId(); }).then(function (id) {
-      shellState.selectedId = null;
-      shellState.selectedNode = null;
-      return refreshTree().then(function (nodes) {
-        var nextId = id;
-        if (!nextId && nodes && nodes.length) {
-          var firstFile = nodes.find(function (n) { return n && n.type === 'file'; });
-          if (firstFile) nextId = firstFile.id;
-        }
-        if (nextId) loadFile(nextId);
-        else {
-          var input = currentInput();
-          if (input) input.value = '';
-          shellState.original = '';
-          redraw();
-        }
+    var id = shellState.selectedId || shellState.currentId;
+    var node = shellState.selectedNode || shellState.currentNode;
+    if (!id || !node) return;
+
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay) return;
+
+    var fileName = node.name || 'file';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:480px;">' +
+        '<div class="modal-title" style="color:var(--danger, #ef4444); display:flex; align-items:center; gap:8px;">' +
+          '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>' +
+          '<span>删除文件 / Delete File</span>' +
+        '</div>' +
+        '<div class="modal-body" style="margin-top:12px; font-size:13px; opacity:0.9; line-height:1.6;">' +
+          '请选择对文件 <strong>' + escapeHtml(fileName) + '</strong> 的删除处理方式：' +
+        '</div>' +
+        '<div class="modal-footer" style="margin-top:20px; display:flex; flex-direction:column; gap:8px;">' +
+          '<button type="button" class="btn btn-danger" id="del-disk-btn" style="width:100%; justify-content:center;">' +
+            '🗑️ 删除磁盘文件并从 Explorer 移除 (Delete File & Remove)' +
+          '</button>' +
+          '<button type="button" class="btn btn-outline" id="del-discard-btn" style="width:100%; justify-content:center;">' +
+            '放弃本地修改并仅从 Explorer 移除 (Discard & Remove)' +
+          '</button>' +
+          '<button type="button" class="btn btn-ghost" id="del-cancel-btn" style="width:100%; justify-content:center;">' +
+            '取消 (Cancel)' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+
+    overlay.classList.add('show');
+
+    function close() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+
+    document.getElementById('del-cancel-btn').onclick = close;
+
+    function finishDelete() {
+      removeDraft(id);
+      global.EditorWorkspace.deleteNode(id).then(function () { return global.EditorWorkspace.getCurrentFileId(); }).then(function (nextId) {
+        shellState.selectedId = null;
+        shellState.selectedNode = null;
+        return refreshTree().then(function (nodes) {
+          var targetNextId = nextId;
+          if (!targetNextId && nodes && nodes.length) {
+            var firstFile = nodes.find(function (n) { return n && n.type === 'file'; });
+            if (firstFile) targetNextId = firstFile.id;
+          }
+          if (targetNextId) loadFile(targetNextId);
+          else {
+            var input = currentInput();
+            if (input) input.value = '';
+            shellState.original = '';
+            redraw();
+          }
+        });
       });
-    });
+    }
+
+    document.getElementById('del-disk-btn').onclick = function() {
+      close();
+      if (node.externalPath) {
+        fetch('/api/editor/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: node.externalPath })
+        }).catch(function() {});
+      }
+      toast('已从磁盘物理删除文件', 'info');
+      finishDelete();
+    };
+
+    document.getElementById('del-discard-btn').onclick = function() {
+      close();
+      toast('已放弃本地修改并从 Explorer 移除记录', 'info');
+      finishDelete();
+    };
   }
 
   var editorSessionImages = [];
@@ -686,16 +729,23 @@
     });
   }
 
+  var isOpenModalBusy = false;
+
   function openLocalFile() {
+    if (isOpenModalBusy) return Promise.resolve(false);
+    isOpenModalBusy = true;
+
     return fetch('/api/editor/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (response) { return response.json(); })
       .then(function (data) {
+        isOpenModalBusy = false;
         if (data && data.path !== undefined && data.content !== undefined) {
           return importWorkspaceFile(data.name || 'untitled.md', data.content, { externalPath: data.path, imported: true });
         }
         return false;
       })
       .catch(function (err) {
+        isOpenModalBusy = false;
         console.warn('[Editor] openLocalFile failed:', err);
         return false;
       });
@@ -1046,6 +1096,7 @@
         else if (name === 'preview') shellState.preview = !shellState.preview;
         else if (name === 'sync') shellState.sync = !shellState.sync;
         else if (name === 'toc') shellState.toc = !shellState.toc;
+        else if (name === 'html-iframe') shellState.htmlRender = !shellState.htmlRender;
         else if (name === 'explorer') shellState.explorer = !shellState.explorer;
         if (name === 'toc' && shellRoot) { var toc = shellRoot.querySelector('.ed-toc'); if (toc) toc.hidden = !shellState.toc; }
         redraw();
