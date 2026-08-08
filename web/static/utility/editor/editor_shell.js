@@ -100,7 +100,17 @@
     var list = shellRoot.querySelector('.ed-toc-list');
     if (!list) return;
     list.innerHTML = '';
-    var toc = global.EditorMarkdown.buildToc(preview);
+    var toc = [];
+    var iframe = preview.querySelector('iframe');
+    if (iframe) {
+      try {
+        if (iframe.contentDocument && iframe.contentDocument.body) {
+          toc = global.EditorMarkdown.buildToc(iframe.contentDocument.body);
+        }
+      } catch (e) {}
+    } else {
+      toc = global.EditorMarkdown.buildToc(preview);
+    }
     toc.forEach(function (entry) {
       var li = global.document.createElement('li');
       li.className = 'ed-toc-item ed-toc-level-' + entry.level;
@@ -122,19 +132,34 @@
 
     var isHtml = typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
 
-    if (shellState.htmlRender) {
+    if (shellState.htmlRender || isHtml) {
       preview.innerHTML = '';
+      preview.classList.add('is-html-iframe-mode');
       var iframe = document.createElement('iframe');
       iframe.className = 'ed-iframe-preview';
-      iframe.style.cssText = 'width:100%; height:100%; min-height:400px; border:none; background:transparent; border-radius:6px;';
-      var themedDoc = content;
-      if (content && content.indexOf('<body') < 0 && content.indexOf('<html') < 0) {
-        themedDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{color:var(--text-main, #e2e8f0); font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; margin:16px; background:transparent;}</style></head><body>' + content + '</body></html>';
+      iframe.setAttribute('allowtransparency', 'true');
+      iframe.style.cssText = 'width:100%; height:100%; border:none; background:transparent; display:block;';
+
+      var themedDoc = content || '';
+      if (themedDoc.indexOf('<html') < 0 && themedDoc.indexOf('<body') < 0) {
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+                     document.body.classList.contains('dark-theme');
+        themedDoc = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+          '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:16px;color:' + (isDark ? '#e2e8f0' : '#1e293b') + ';background:transparent;}</style>' +
+          '</head><body>' + themedDoc + '</body></html>';
       }
+
+      iframe.onload = function () {
+        renderToc(preview);
+      };
+
       iframe.srcdoc = themedDoc;
       preview.appendChild(iframe);
+      renderToc(preview);
       updateStatus();
       return;
+    } else {
+      preview.classList.remove('is-html-iframe-mode');
     }
 
     var html = global.EditorMarkdown.renderMarkdown(content);
@@ -381,27 +406,44 @@
     } catch (e) {}
   }
 
-  function loadFile(id) {
+  function loadFile(id, overrideContent) {
     if (!id) return Promise.resolve(false);
     shellState.htmlRender = false;
+    console.log('[Editor] loadFile called:', id, 'hasOverride:', typeof overrideContent === 'string', 'overrideLen:', typeof overrideContent === 'string' ? overrideContent.length : -1);
     return global.EditorWorkspace.getNode(id).then(function (node) {
-      if (!node || node.type !== 'file') return false;
+      if (!node || node.type !== 'file') {
+        console.warn('[Editor] loadFile: node not found or not file:', id);
+        return false;
+      }
+      console.log('[Editor] loadFile node:', node.name, 'externalPath:', node.externalPath || '(none)');
       var contentPromise;
-      if (node.externalPath) {
+      if (typeof overrideContent === 'string') {
+        // 调用方直接提供了文件内容，直接使用，无需再次请求后端
+        global.EditorWorkspace.updateNode(id, { content: overrideContent });
+        contentPromise = Promise.resolve(overrideContent);
+      } else if (node.externalPath) {
+        // 有外部磁盘路径，从后端读取最新内容
         contentPromise = fetch('/api/editor/open', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: node.externalPath })
         }).then(function (res) {
-          if (!res.ok) return global.EditorWorkspace.getContent(id);
+          console.log('[Editor] loadFile fetch status:', res.status, 'ok:', res.ok, 'path:', node.externalPath);
+          if (!res.ok) {
+            console.warn('[Editor] loadFile fetch not ok, falling back to IndexedDB');
+            return global.EditorWorkspace.getContent(id);
+          }
           return res.json().then(function (data) {
+            console.log('[Editor] loadFile fetch data:', data ? 'has data' : 'null', 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT', 'type:', data && typeof data.content);
             if (data && typeof data.content === 'string') {
               global.EditorWorkspace.updateNode(id, { content: data.content });
               return data.content;
             }
+            console.warn('[Editor] loadFile: backend returned no string content, falling back to IndexedDB');
             return global.EditorWorkspace.getContent(id);
           });
-        }).catch(function () {
+        }).catch(function (err) {
+          console.warn('[Editor] loadFile fetch error:', err);
           return global.EditorWorkspace.getContent(id);
         });
       } else {
@@ -409,36 +451,63 @@
       }
 
       return contentPromise.then(function (content) {
-        shellState.selectedId = id;
-        shellState.selectedNode = node;
-        shellState.currentId = id;
-        shellState.currentNode = node;
-        var loadedText = text(content);
-        shellState.original = loadedText;
-        var input = currentInput();
-        var draft = getDraft(id);
+        console.log('[Editor] loadFile resolved content length:', typeof content === 'string' ? content.length : 'NOT_STRING');
 
-        if (node.externalPath) {
-          if (input) input.value = loadedText;
-          shellState.dirty = false;
-          removeDraft(id);
-        } else if (draft !== null && draft !== shellState.original) {
-          if (input) input.value = draft;
-          shellState.dirty = true;
-        } else {
-          if (input) input.value = loadedText;
-          shellState.dirty = false;
+        // 防御性兜底：如果 content 为空但有外部路径且没有 overrideContent，最后一次尝试重新读取
+        if ((content === '' || content === null || content === undefined) && node.externalPath && typeof overrideContent !== 'string') {
+          console.warn('[Editor] loadFile: content is empty with externalPath set, retrying backend read...');
+          return fetch('/api/editor/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: node.externalPath })
+          }).then(function (r) {
+            console.log('[Editor] loadFile retry status:', r.status);
+            return r.ok ? r.json() : null;
+          }).then(function (d) {
+            var retryContent = d && typeof d.content === 'string' ? d.content : '';
+            return applyContent(id, node, retryContent, overrideContent);
+          }).catch(function () {
+            return applyContent(id, node, '', overrideContent);
+          });
         }
 
-        global.EditorWorkspace.setCurrentFile(id);
-        if (global.EditorCommands) global.EditorCommands.clear(input);
-        updateStatus();
-        redraw();
-        refreshTree();
-        if (input) input.focus();
-        return true;
+        return applyContent(id, node, content, overrideContent);
       });
     });
+  }
+
+  // applyContent：将解析出的文件内容填入编辑器区域并触发渲染
+  function applyContent(id, node, content, overrideContent) {
+    var loadedText = text(content);
+    shellState.selectedId = id;
+    shellState.selectedNode = node;
+    shellState.currentId = id;
+    shellState.currentNode = node;
+    shellState.original = loadedText;
+    var input = currentInput();
+    var draft = getDraft(id);
+
+    if (typeof overrideContent === 'string' || node.externalPath) {
+      if (input) {
+        input.value = loadedText;
+      }
+      shellState.dirty = false;
+      removeDraft(id);
+    } else if (draft !== null && draft !== shellState.original) {
+      if (input) input.value = draft;
+      shellState.dirty = true;
+    } else {
+      if (input) input.value = loadedText;
+      shellState.dirty = false;
+    }
+
+    global.EditorWorkspace.setCurrentFile(id);
+    if (global.EditorCommands) global.EditorCommands.clear(input);
+    updateStatus();
+    redraw();
+    refreshTree();
+    if (input) input.focus();
+    return true;
   }
 
   function refreshTree() {
@@ -740,19 +809,34 @@
   }
 
   function importWorkspaceFile(name, content, meta) {
+    console.log('[Editor] importWorkspaceFile:', name, 'contentLen:', typeof content === 'string' ? content.length : 'NOT_STRING', 'meta:', JSON.stringify(meta));
     return global.EditorWorkspace.listNodes().then(function (nodes) {
       var existing = (nodes || []).find(function (n) {
         return n && n.type === 'file' && n.name.toLowerCase() === name.toLowerCase();
       });
+      console.log('[Editor] importWorkspaceFile existing node:', existing ? existing.id + '(' + existing.name + ')' : 'none');
       if (existing) {
         removeDraft(existing.id);
-        return global.EditorWorkspace.updateNode(existing.id, { content: content, meta: meta || {} }).then(function (node) {
-          return refreshTree().then(function () { return loadFile(existing.id); });
+        return global.EditorWorkspace.updateNode(existing.id, { content: content, meta: meta || {} }).then(function (updatedNode) {
+          console.log('[Editor] importWorkspaceFile updateNode result:', updatedNode ? 'ok' : 'null/fail');
+          return refreshTree().then(function () { return loadFile(existing.id, content); });
         });
       }
       return global.EditorWorkspace.putFile(name, content, null, meta || { imported: true }).then(function (node) {
-        if (!node) return false;
-        return refreshTree().then(function () { return loadFile(node.id); });
+        console.log('[Editor] importWorkspaceFile putFile result:', node ? node.id : 'null/fail');
+        if (!node) {
+          // putFile 失败（同名冲突），直接用 name 查找最近创建的节点并强制写入内容
+          console.warn('[Editor] importWorkspaceFile putFile returned null, searching by name as fallback...');
+          return global.EditorWorkspace.listNodes().then(function (freshNodes) {
+            var found = (freshNodes || []).find(function (n) { return n && n.type === 'file' && n.name.toLowerCase() === name.toLowerCase(); });
+            if (!found) { console.error('[Editor] importWorkspaceFile fallback: node not found!'); return false; }
+            console.log('[Editor] importWorkspaceFile fallback found:', found.id);
+            return global.EditorWorkspace.updateNode(found.id, { content: content, meta: meta || {} }).then(function () {
+              return refreshTree().then(function () { return loadFile(found.id, content); });
+            });
+          });
+        }
+        return refreshTree().then(function () { return loadFile(node.id, content); });
       });
     });
   }
@@ -762,11 +846,13 @@
   function openLocalFile() {
     if (isOpenModalBusy) return Promise.resolve(false);
     isOpenModalBusy = true;
+    console.log('[Editor] openLocalFile: opening file picker...');
 
     return fetch('/api/editor/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (response) { return response.json(); })
       .then(function (data) {
         isOpenModalBusy = false;
+        console.log('[Editor] openLocalFile response:', data ? 'ok' : 'null', 'cancelled:', !!(data && data.cancelled), 'unsupported:', !!(data && data.unsupported), 'path:', data && data.path, 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT');
         if (data && data.path !== undefined && data.content !== undefined) {
           return importWorkspaceFile(data.name || 'untitled.md', data.content, { externalPath: data.path, imported: true });
         }
@@ -1168,6 +1254,41 @@
     input.addEventListener('keydown', onKey);
     var preview = shellRoot.querySelector('#ed-main-preview');
     if (preview) preview.addEventListener('click', onClick);
+
+    var tocList = shellRoot.querySelector('.ed-toc-list');
+    if (tocList) {
+      tocList.onclick = function (e) {
+        var link = e.target && e.target.closest ? e.target.closest('a[data-toc-id], a[href]') : null;
+        if (!link) return;
+        e.preventDefault();
+        var tocId = link.dataset.tocId || (link.getAttribute('href') || '').replace(/^#/, '');
+        if (!tocId) return;
+
+        var prevNode = shellRoot.querySelector('#ed-main-preview');
+        if (!prevNode) return;
+
+        var iframe = prevNode.querySelector('iframe');
+        if (iframe && iframe.contentDocument) {
+          try {
+            var targetInIframe = iframe.contentDocument.getElementById(tocId) ||
+                                 iframe.contentDocument.querySelector('[id="' + tocId + '"]');
+            if (targetInIframe) {
+              targetInIframe.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              return;
+            }
+          } catch (err) {}
+        }
+
+        try {
+          var targetEl = prevNode.querySelector('#' + CSS.escape(tocId)) ||
+                         prevNode.querySelector('[id="' + tocId + '"]');
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        } catch (err2) {}
+      };
+    }
+
     shellHandlers = { input: onInput, scroll: onScroll, keydown: onKey, previewClick: onClick, preview: preview, inputNode: input };
     var titleNode = shellRoot.querySelector('#ed-title');
     if (titleNode) {

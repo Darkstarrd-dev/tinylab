@@ -408,7 +408,17 @@
 
   function clear(ta) {
     if (!isTextarea(ta)) return false;
-    return mutate(ta, '', 0, 0);
+    if (hasWeakMap) {
+      histories.delete(ta);
+    } else {
+      for (var i = 0; i < histories.length; i++) {
+        if (histories[i].ta === ta) {
+          histories.splice(i, 1);
+          break;
+        }
+      }
+    }
+    return true;
   }
 
   function insertLink(ta, linkText, url) {

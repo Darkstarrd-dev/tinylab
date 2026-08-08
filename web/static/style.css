@@ -4834,11 +4834,8 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   overflow: hidden;
   border-right: 1px solid var(--glass-border);
 }
-.ed-editor-surface {
+.ed-editor-surface, .ed-preview-surface {
   background: var(--bg);
-}
-.ed-preview-surface {
-  background: var(--panel-bg, var(--bg));
 }
 .ed-line-gutter {
   flex: 0 0 42px;
@@ -4879,6 +4876,18 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   color: var(--text);
   line-height: 1.6;
 }
+.ed-preview-content.is-html-iframe-mode {
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+.ed-preview-content.is-html-iframe-mode .ed-iframe-preview {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  display: block !important;
+}
 .ed-toc {
   flex: 0 0 220px;
   min-width: 160px;
@@ -4900,8 +4909,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   justify-content: space-between;
   box-sizing: border-box;
   border-top: 1px solid var(--glass-border);
-  background: rgba(15, 18, 26, 0.95);
-  color: var(--text-muted, #94a3b8);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-muted);
   font: 11px/1.4 var(--font-mono, monospace);
   white-space: nowrap;
   overflow: hidden;
@@ -4915,21 +4926,21 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 }
 .ed-status-tag {
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text);
   letter-spacing: 0.3px;
 }
 .ed-status-badge {
   display: inline-block;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
   font-size: 10px;
   text-transform: uppercase;
   font-weight: 600;
 }
 .ed-status-sep {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--glass-border);
 }
 
 /* Mode layout controls */
