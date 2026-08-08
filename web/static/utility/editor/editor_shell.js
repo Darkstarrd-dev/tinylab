@@ -122,12 +122,16 @@
 
     var isHtml = typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
 
-    if (shellState.htmlRender || isHtml) {
+    if (shellState.htmlRender) {
       preview.innerHTML = '';
       var iframe = document.createElement('iframe');
       iframe.className = 'ed-iframe-preview';
-      iframe.style.cssText = 'width:100%; height:100%; min-height:400px; border:none; background:#ffffff; border-radius:6px;';
-      iframe.srcdoc = content;
+      iframe.style.cssText = 'width:100%; height:100%; min-height:400px; border:none; background:transparent; border-radius:6px;';
+      var themedDoc = content;
+      if (content && content.indexOf('<body') < 0 && content.indexOf('<html') < 0) {
+        themedDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{color:var(--text-main, #e2e8f0); font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; margin:16px; background:transparent;}</style></head><body>' + content + '</body></html>';
+      }
+      iframe.srcdoc = themedDoc;
       preview.appendChild(iframe);
       updateStatus();
       return;
@@ -379,6 +383,7 @@
 
   function loadFile(id) {
     if (!id) return Promise.resolve(false);
+    shellState.htmlRender = false;
     return global.EditorWorkspace.getNode(id).then(function (node) {
       if (!node || node.type !== 'file') return false;
       var contentPromise;
@@ -387,12 +392,15 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: node.externalPath })
-        }).then(function (res) { return res.json(); }).then(function (data) {
-          if (data && typeof data.content === 'string') {
-            global.EditorWorkspace.updateNode(id, { content: data.content });
-            return data.content;
-          }
-          return global.EditorWorkspace.getContent(id);
+        }).then(function (res) {
+          if (!res.ok) return global.EditorWorkspace.getContent(id);
+          return res.json().then(function (data) {
+            if (data && typeof data.content === 'string') {
+              global.EditorWorkspace.updateNode(id, { content: data.content });
+              return data.content;
+            }
+            return global.EditorWorkspace.getContent(id);
+          });
         }).catch(function () {
           return global.EditorWorkspace.getContent(id);
         });

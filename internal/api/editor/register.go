@@ -154,6 +154,12 @@ func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 
 	fi, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]any{"error": "file not found", "not_found": true})
+			return
+		}
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "stat failed: "+err.Error())
 		return
 	}
@@ -194,6 +200,8 @@ func (h *Handler) editorSave(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "path required")
 		return
 	}
+
+	_ = os.MkdirAll(filepath.Dir(req.Path), 0755)
 
 	if err := fsutil.AtomicWrite(req.Path, []byte(req.Content), 0644); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
