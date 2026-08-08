@@ -66,22 +66,23 @@ function showAddCombo() {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newCombo') + '</div>\
-    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" placeholder="' + t('comboNamePlaceholder') + '"></div>\
-    <div class="form-group"><label for="c-strategy">' + t('comboStrategy') + '</label>\
+    <div class="form-group" style="margin-bottom:14px"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" placeholder="' + t('comboNamePlaceholder') + '"></div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="c-strategy">' + t('comboStrategy') + '</label>\
       ' + renderCustomSelectHtml('c-strategy-wrap', 'c-strategy', [
         { value: 'fallback', label: t('fallbackDesc') },
         { value: 'round-robin', label: t('roundRobinDesc') },
         { value: 'greedy-squirrel', label: t('greedySquirrelDesc') }
       ], 'fallback') + '\
     </div>\
-    <div class="form-group"><label>' + t('comboModels') + '</label>\
-      <div style="display:flex;gap:8px;margin-bottom:8px">\
+    <div class="form-group" style="margin-bottom:14px">\
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">\
+        <label style="margin-bottom:0">' + t('comboModels') + '</label>\
         <button type="button" class="btn btn-sm" onclick="importModelsFromProvider(\'models\')">' + t('importFromProvider') + '</button>\
       </div>\
       <div id="c-models-list"></div>\
     </div>\
-    <div id="greedy-squirrel-hint" class="form-group" style="display:none">\
-      <p class="muted">' + t('greedySquirrelHint') + '</p>\
+    <div id="greedy-squirrel-hint" class="form-group" style="display:none;margin-bottom:14px">\
+      <div class="form-hint" style="margin-top:0;margin-bottom:0">' + t('greedySquirrelHint') + '</div>\
     </div>\
     <div class="modal-footer">\
       <button type="button" class="btn" onclick="closeModalOverlay()">' + t('cancel') + '</button>\
@@ -138,24 +139,27 @@ async function showEditCombo(id) {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:70vw;width:70vw">\
     <div class="modal-title">' + t('comboEdit') + '</div>\
-    <div class="form-group"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" value="' + escapeHtml(cb.name) + '"></div>\
-    <div class="form-group"><label for="c-strategy">' + t('comboStrategy') + '</label>\
+    <div class="form-group" style="margin-bottom:14px"><label for="c-name">' + t('name') + '</label><input id="c-name" class="input" value="' + escapeHtml(cb.name) + '"></div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="c-strategy">' + t('comboStrategy') + '</label>\
       ' + renderCustomSelectHtml('cb-edit-strategy-wrap', 'c-strategy', [
         { value: 'fallback', label: t('fallbackDesc') },
         { value: 'round-robin', label: t('roundRobinDesc') },
         { value: 'greedy-squirrel', label: t('greedySquirrelDesc') }
       ], cb.strategy || 'fallback') + '\
     </div>\
-    <div class="form-group"><label>' + t('comboModels') + '</label>\
-      <div style="display:flex;gap:8px;margin-bottom:8px">\
-        <button type="button" class="btn btn-sm" onclick="importModelsFromProvider(\'models\')">' + t('importFromProvider') + '</button>\
-        <button type="button" class="btn btn-sm" id="combo-speed-test-btn" onclick="runComboSpeedTest(\'' + escapeForJsString(id) + '\')">' + t('comboSpeedTest') + '</button>\
-        <span id="combo-speed-test-status" style="margin-left:8px;font-size:12px;"></span>\
+    <div class="form-group" style="margin-bottom:14px">\
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">\
+        <label style="margin-bottom:0">' + t('comboModels') + '</label>\
+        <div style="display:flex;gap:8px;align-items:center">\
+          <button type="button" class="btn btn-sm" onclick="importModelsFromProvider(\'models\')">' + t('importFromProvider') + '</button>\
+          <button type="button" class="btn btn-sm" id="combo-speed-test-btn" onclick="runComboSpeedTest(\'' + escapeForJsString(id) + '\')">' + t('comboSpeedTest') + '</button>\
+          <span id="combo-speed-test-status" style="margin-left:8px;font-size:12px;"></span>\
+        </div>\
       </div>\
       <div id="c-models-list"></div>\
     </div>\
-    <div id="greedy-squirrel-hint" class="form-group" style="display:none">\
-      <p class="muted">' + t('greedySquirrelHint') + '</p>\
+    <div id="greedy-squirrel-hint" class="form-group" style="display:none;margin-bottom:14px">\
+      <div class="form-hint" style="margin-top:0;margin-bottom:0">' + t('greedySquirrelHint') + '</div>\
     </div>\
     <div class="modal-footer">\
       <button type="button" class="btn" onclick="closeModalOverlay()">' + t('cancel') + '</button>\

@@ -25,7 +25,7 @@ function renderQuickSlotListInline(quickslots) {
           <span class="card-title copyable" data-name="' + escapeHtml(qs.name) + '" onclick="copyToClipboard(this.dataset.name, this.dataset.name)" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(qs.name) + '</span>\
         </div>\
         <div class="provider-card-actions">\
-          <span class="badge provider-btn-col1 ' + (qs.disabled ? 'badge-inactive' : 'badge-active') + '">order: ' + (qs.order || 0) + '</span>\
+          <span class="badge provider-btn-col1 ' + (qs.disabled ? 'badge-inactive' : 'badge-active') + '">ID: ' + (qs.order || 0) + '</span>\
           <button type="button" class="btn btn-sm provider-btn-col2" onclick="toggleQuickSlotDisabled(\'' + escapeForJsString(qs.id) + '\')">' + (qs.disabled ? t('enable') : t('disable')) + '</button>\
         </div>\
       </div>\
@@ -46,13 +46,14 @@ function showAddQuickSlot() {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newQuickSlot') + '</div>\
-    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" placeholder="' + t('name') + '"></div>\
-    <div class="form-group"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
+    <div class="form-group" style="margin-bottom:14px"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" placeholder="' + t('name') + '"></div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
       ' + renderStepperHtml('qs-order', 1, 1, 9, 1, 'max-width:140px;') + '\
-      <p class="muted mt-12">' + t('quickSlotOrderHint') + '</p>\
+      <div class="form-hint" style="margin-top:6px;margin-bottom:0">' + t('quickSlotOrderHint') + '</div>\
     </div>\
-    <div class="form-group"><label>' + t('quickSlotModels') + '</label>\
-      <div style="display:flex;gap:8px;margin-bottom:8px">\
+    <div class="form-group" style="margin-bottom:14px">\
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">\
+        <label style="margin-bottom:0">' + t('quickSlotModels') + '</label>\
         <button type="button" class="btn btn-sm" onclick="importModelsForQuickSlot()">' + t('importFromProvider') + '</button>\
       </div>\
       <div id="qs-models-list"></div>\
@@ -121,13 +122,14 @@ async function showEditQuickSlot(id) {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:70vw;width:70vw">\
     <div class="modal-title">' + t('quickSlotEdit') + '</div>\
-    <div class="form-group"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" value="' + escapeHtml(qs.name) + '"></div>\
-    <div class="form-group"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
+    <div class="form-group" style="margin-bottom:14px"><label for="qs-name">' + t('name') + '</label><input id="qs-name" class="input" value="' + escapeHtml(qs.name) + '"></div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="qs-order">' + t('quickSlotOrder') + '</label>\
       ' + renderStepperHtml('qs-order', qs.order || 1, 1, 9, 1, 'max-width:140px;') + '\
-      <p class="muted mt-12">' + t('quickSlotOrderHint') + '</p>\
+      <div class="form-hint" style="margin-top:6px;margin-bottom:0">' + t('quickSlotOrderHint') + '</div>\
     </div>\
-    <div class="form-group"><label>' + t('quickSlotModels') + '</label>\
-      <div style="display:flex;gap:8px;margin-bottom:8px">\
+    <div class="form-group" style="margin-bottom:14px">\
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">\
+        <label style="margin-bottom:0">' + t('quickSlotModels') + '</label>\
         <button type="button" class="btn btn-sm" onclick="importModelsForQuickSlot()">' + t('importFromProvider') + '</button>\
       </div>\
       <div id="qs-models-list"></div>\

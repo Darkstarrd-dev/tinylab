@@ -36,10 +36,13 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   border-radius:0;
   background:transparent;
   box-shadow:none;
-  padding:12px 40px 12px 16px;
-  text-align:left;
+  padding:12px 40px;
+  text-align:center;
   resize:none;
   outline:none;
+}
+.pg-input-bar .pg-input::placeholder{
+  text-align:center;
 }
 .pg-input-bar .pg-input:focus{border:none;box-shadow:none;}
 
@@ -133,6 +136,10 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   line-height:1.6;
   resize:none;
   box-sizing:border-box;
+  text-align:center;
+}
+.pg-max-editor-textarea::placeholder{
+  text-align:center;
 }
 .pg-input-bar .pg-send{
   align-self:stretch;
@@ -311,7 +318,8 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-editor-title .saved{color:var(--text-muted)}
 
 /* Input bar */
-.pg-input{flex:1;min-height:48px;max-height:160px;padding:10px 12px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-base);font-family:inherit;resize:none}
+.pg-input{flex:1;min-height:48px;max-height:160px;padding:10px 12px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-base);font-family:inherit;resize:none;text-align:center}
+.pg-input::placeholder{text-align:center}
 .pg-input:focus{outline:none;border-color:var(--accent)}
 .pg-send{padding:0 18px;border-radius:var(--radius-md);border:none;background:var(--accent-gradient);color:var(--text-contrast);font-weight:600;cursor:pointer;align-self:stretch;display:flex;align-items:center;gap:6px;transition:opacity var(--transition-fast)}
 .pg-send:hover{opacity:.9;box-shadow:0 2px 8px rgba(79,195,247,0.15)}
@@ -588,7 +596,8 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-gc-content{padding:8px 12px;border-radius:var(--radius-md);background:rgba(255,255,255,0.05);font-size:13px;line-height:1.5}
 .pg-gc-msg.user .pg-gc-content{background:rgba(100,130,255,0.15)}
 .pg-gc-input-bar{display:flex;gap:8px;padding:12px;border-top:1px solid var(--glass-border)}
-.pg-gc-input{flex:1;resize:none;height:60px;padding:8px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);color:inherit;font-size:13px}
+.pg-gc-input{flex:1;resize:none;height:60px;padding:8px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);color:inherit;font-size:13px;text-align:center}
+.pg-gc-input::placeholder{text-align:center}
 .pg-gc-input:focus{outline:none;border-color:var(--accent)}
 
 /* Typing indicator in pane header */

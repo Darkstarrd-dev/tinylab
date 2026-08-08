@@ -91,18 +91,18 @@ function showAddProvider() {
   var overlay = document.getElementById('modal-overlay');
   overlay.innerHTML = '<div class="modal" style="max-width:520px">\
     <div class="modal-title">' + t('newProvider') + '</div>\
-    <div class="flex" style="gap:12px">\
-      <div class="form-group" style="flex:1"><label for="p-name">' + t('name') + '</label><input id="p-name" class="input" placeholder="DeepSeek"></div>\
-      <div class="form-group" style="flex:1"><label for="p-prefix">' + t('prefixLabel') + '</label><input id="p-prefix" class="input" placeholder="deepseek"></div>\
+    <div class="form-row-grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">\
+      <div class="form-group" style="margin-bottom:0"><label for="p-name">' + t('name') + '</label><input id="p-name" class="input" placeholder="DeepSeek"></div>\
+      <div class="form-group" style="margin-bottom:0"><label for="p-prefix">' + t('prefixLabel') + '</label><input id="p-prefix" class="input" placeholder="deepseek"></div>\
     </div>\
-    <div class="form-group"><label for="p-url">' + t('baseUrlLabel') + '</label><input id="p-url" class="input" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai"></div>\
-    <div class="form-hint" style="margin-top:-6px;margin-bottom:12px">' + t('baseUrlHint') + '</div>\
-    <div class="form-group"><label for="p-apikey">' + t('apiKeyLabel') + '</label><input type="password" id="p-apikey" class="input" placeholder="sk-..."></div>\
-    <div class="form-group"><label for="p-modelid">' + t('modelIdLabel') + '</label><input id="p-modelid" class="input" placeholder="deepseek-chat"></div>\
+    <div class="form-group" style="margin-bottom:4px"><label for="p-url">' + t('baseUrlLabel') + '</label><input id="p-url" class="input" placeholder="https://api.deepseek.com  或  https://host/v1beta/openai"></div>\
+    <div class="form-hint" style="margin-bottom:14px;margin-top:4px">' + t('baseUrlHint') + '</div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="p-apikey">' + t('apiKeyLabel') + '</label><input type="password" id="p-apikey" class="input" placeholder="sk-..."></div>\
+    <div class="form-group" style="margin-bottom:14px"><label for="p-modelid">' + t('modelIdLabel') + '</label><input id="p-modelid" class="input" placeholder="deepseek-chat"></div>\
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;margin-bottom:0">\
       <div>\
         <label style="margin-bottom:2px;display:block">' + t('useProxy') + '</label>\
-        <div class="form-hint" style="margin-top:2px">' + t('useProxyDesc') + '</div>\
+        <div class="form-hint" style="margin-top:2px;margin-bottom:0">' + t('useProxyDesc') + '</div>\
       </div>\
       <label class="toggle-switch" for="p-useproxy" style="flex-shrink:0;margin-left:16px">\
         <input type="checkbox" id="p-useproxy">\
@@ -210,11 +210,11 @@ async function renderProviderDetail(c, id) {
         <div style="display:flex;align-items:baseline;gap:10px;min-width:0;flex:1;flex-wrap:wrap">\
           <h2>' + escapeHtml(p.name) + '</h2>\
           <p class="muted" id="detail-info-summary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + t('prefix') + ' <span class="code">' + escapeHtml(p.prefix) + '</span> | ' + t('baseUrl') + ' <span class="code copyable" data-copy="' + baseUrlAttr + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'))" data-tooltip="' + t('clickToCopy') + '">' + baseUrlEsc + '</span></p>\
-          <div class="flex" style="gap:8px;flex-shrink:0;align-items:center">\
-            <button type="button" class="btn btn-sm" onclick="backToProviderList()">' + t('back') + '</button>\
-            <button type="button" class="btn btn-sm" onclick="showEditProvider(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
-            <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" onclick="toggleProvider(\'' + escapeForJsString(p.id) + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
-            <button type="button" class="btn btn-sm btn-danger" onclick="deleteProvider(\'' + escapeForJsString(p.id) + '\')">' + t('delete') + '</button>\
+          <div class="flex" style="gap:8px;flex-shrink:0;align-items:center;white-space:nowrap">\
+            <button type="button" class="btn btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="backToProviderList()">' + t('back') + '</button>\
+            <button type="button" class="btn btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="showEditProvider(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
+            <button type="button" class="btn btn-sm ' + (p.isActive ? '' : 'btn-primary') + '" style="white-space:nowrap;flex-shrink:0" onclick="toggleProvider(\'' + escapeForJsString(p.id) + '\',' + (!p.isActive) + ')">' + (p.isActive ? t('disable') : t('enable')) + '</button>\
+            <button type="button" class="btn btn-sm btn-danger" style="white-space:nowrap;flex-shrink:0" onclick="deleteProvider(\'' + escapeForJsString(p.id) + '\')">' + t('delete') + '</button>\
             ' + renderStepperHtml('provider-order-input', currentOrder, 1, totalProviders, 1, 'max-width:110px;display:inline-flex;', 'changeProviderOrder(\'' + escapeForJsString(p.id) + '\', ' + currentOrder + ', ' + totalProviders + ', this.value)') + '\
           </div>\
         </div>\
@@ -562,11 +562,11 @@ function renderDetailModels(p) {
   var batchBtnClass = isBatchRunning ? 'btn btn-sm btn-danger' : 'btn btn-sm';
   el.innerHTML = '\
     <div class="detail-block">\
-      <div class="flex mb-12 model-create-row" style="gap:10px;align-items:center">\
+      <div class="flex mb-12 model-create-row" style="gap:8px;align-items:center">\
         <span class="models-title-inline" style="font-size:var(--font-section-title);font-weight:600;color:var(--text-secondary);white-space:nowrap">' + t('modelsTitle') + ' (' + models.length + ')</span>\
-        <input id="m-input" class="input model-create-input" placeholder="' + t('modelPlaceholder') + '">\
+        <button type="button" class="btn btn-sm btn-primary btn-create-action" onclick="withLoading(this, () => addModelDetail(\'' + escapeForJsString(p.id) + '\'))">' + t('add') + '</button>\
         <button type="button" class="btn btn-sm btn-create-action" onclick="withLoading(this, () => testModelDetail(\'' + escapeForJsString(p.id) + '\'))">' + t('test') + '</button>\
-        <button type="button" class="btn btn-sm btn-primary btn-create-action" onclick="withLoading(this, () => addModelDetail(\'' + escapeForJsString(p.id) + '\'))">' + t('create') + '</button>\
+        <input id="m-input" class="input model-create-input" placeholder="' + t('modelPlaceholder') + '" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var btn=this.parentElement.querySelector(\'.btn-primary\');if(btn)btn.click();}">\
       </div>\
       <div class="model-toolbar-row">\
         <button type="button" class="btn btn-sm" style="flex-shrink:0;white-space:nowrap" onclick="withLoading(this, () => importModels(\'' + escapeForJsString(p.id) + '\'))">' + t('importModels') + '</button>\
