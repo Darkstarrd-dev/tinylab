@@ -151,11 +151,11 @@ window.renderEditor = function(container) {
   modeGroup.className = 'ed-toolbar-group';
   var modeEditBtn = document.createElement('button');
   modeEditBtn.className = 'ed-btn ed-btn-sm' + (editorState.mode === 'edit' ? ' active' : '');
-  modeEditBtn.textContent = T('editorEditMode');
+  modeEditBtn.textContent = edT('editorEditMode');
   modeEditBtn.dataset.mode = 'edit';
   var modeDiffBtn = document.createElement('button');
   modeDiffBtn.className = 'ed-btn ed-btn-sm' + (editorState.mode === 'diff' ? ' active' : '');
-  modeDiffBtn.textContent = T('editorDiff');
+  modeDiffBtn.textContent = edT('editorDiff');
   modeDiffBtn.dataset.mode = 'diff';
   modeGroup.appendChild(modeEditBtn);
   modeGroup.appendChild(modeDiffBtn);
@@ -168,15 +168,15 @@ window.renderEditor = function(container) {
   diffSourceGroup.style.display = editorState.mode === 'diff' ? '' : 'none';
   var dsLabel = document.createElement('span');
   dsLabel.className = 'ed-toolbar-label';
-  dsLabel.textContent = T('editorDiffSource') + ':';
+  dsLabel.textContent = edT('editorDiffSource') + ':';
   diffSourceGroup.appendChild(dsLabel);
   var dsSelect = document.createElement('select');
   dsSelect.className = 'ed-select';
   dsSelect.id = 'ed-diff-source';
   var dsOpts = [
-    { value:'left-after', label:T('editorLeftBeforeAfter') },
-    { value:'right-after', label:T('editorRightBeforeAfter') },
-    { value:'left-vs-right', label:T('editorLeftVsRight') }
+    { value:'left-after', label:edT('editorLeftBeforeAfter') },
+    { value:'right-after', label:edT('editorRightBeforeAfter') },
+    { value:'left-vs-right', label:edT('editorLeftVsRight') }
   ];
   for (var dsi = 0; dsi < dsOpts.length; dsi++) {
     var opt = document.createElement('option');
@@ -195,11 +195,11 @@ window.renderEditor = function(container) {
   var saveAllBtn = document.createElement('button');
   saveAllBtn.className = 'ed-btn ed-btn-sm';
   saveAllBtn.id = 'ed-save-all';
-  saveAllBtn.textContent = T('editorSaveAll');
+  saveAllBtn.textContent = edT('editorSaveAll');
   toolbar.appendChild(saveAllBtn);
   var findBtn = document.createElement('button');
   findBtn.className = 'ed-btn ed-btn-sm';
-  findBtn.textContent = T('editorFind') || 'Search';
+  findBtn.textContent = edT('editorFind') || 'Search';
   findBtn.id = 'ed-find-toggle';
   toolbar.appendChild(findBtn);
   // Panes container
@@ -221,7 +221,7 @@ window.renderEditor = function(container) {
 
     var titleSpan = document.createElement('span');
     titleSpan.className = 'ed-pane-title';
-    var paneName = editorState.panes[pi].name || T('editorUntitled');
+    var paneName = editorState.panes[pi].name || edT('editorUntitled');
     titleSpan.textContent = paneName;
     titleSpan.id = 'ed-pane-title-' + pi;
 
@@ -239,32 +239,32 @@ window.renderEditor = function(container) {
 
     var openBtn = document.createElement('button');
     openBtn.className = 'ed-btn ed-btn-xs';
-    openBtn.textContent = T('editorOpen');
+    openBtn.textContent = edT('editorOpen');
     openBtn.id = 'ed-open-' + pi;
     headerBtns.appendChild(openBtn);
 
     var saveBtn = document.createElement('button');
     saveBtn.className = 'ed-btn ed-btn-xs' + (edIsDirty(pi) ? '' : ' ed-btn-disabled');
-    saveBtn.textContent = T('editorSave');
+    saveBtn.textContent = edT('editorSave');
     saveBtn.id = 'ed-save-' + pi;
     saveBtn.disabled = !edIsDirty(pi);
     headerBtns.appendChild(saveBtn);
 
     var rawBtn = document.createElement('button');
     rawBtn.className = 'ed-btn ed-btn-xs' + (editorState.panes[pi].view === 'raw' ? ' active' : '');
-    rawBtn.textContent = T('editorRaw');
+    rawBtn.textContent = edT('editorRaw');
     rawBtn.id = 'ed-raw-' + pi;
     headerBtns.appendChild(rawBtn);
 
     var parsedBtn = document.createElement('button');
     parsedBtn.className = 'ed-btn ed-btn-xs' + (editorState.panes[pi].view === 'parsed' ? ' active' : '');
-    parsedBtn.textContent = T('editorParsed');
+    parsedBtn.textContent = edT('editorParsed');
     parsedBtn.id = 'ed-parsed-' + pi;
     headerBtns.appendChild(parsedBtn);
 
     var wrapBtn = document.createElement('button');
     wrapBtn.className = 'ed-btn ed-btn-xs' + (editorState.panes[pi].wrap ? ' active' : '');
-    wrapBtn.textContent = T('editorWrap');
+    wrapBtn.textContent = edT('editorWrap');
     wrapBtn.id = 'ed-wrap-' + pi;
     headerBtns.appendChild(wrapBtn);
 
@@ -455,16 +455,23 @@ window.renderEditor = function(container) {
 // ===================== cleanup =====================
 
 window.cleanupEditor = function() {
+  window.suspendEditor();
+  for (var i = 0; i < edGutterTimers.length; i++) clearTimeout(edGutterTimers[i]);
+  edGutterTimers = [];
+  edContainer = null;
+};
+
+// Suspend only the document-level shortcuts; renderEditor owns DOM bindings.
+window.suspendEditor = function() {
   if (edKeyHandler) {
     document.removeEventListener('keydown', edKeyHandler);
     edKeyHandler = null;
   }
-  for (var i = 0; i < edGutterTimers.length; i++) {
-    if (edGutterTimers[i]) clearTimeout(edGutterTimers[i]);
-  }
-  edGutterTimers = [];
-  edContainer = null;
+  if (typeof edSaveState === 'function') edSaveState();
 };
+
+// Rendering is the rebuild boundary, so resume never adds duplicate bindings.
+window.resumeEditor = function() {};
 // ===================== state helpers =====================
 
 function edFocusedPaneIndex() {
@@ -667,8 +674,8 @@ function edTextareaKeydown(e, idx) {
 // ===================== parsed rendering =====================
 
 function edSanitizeHtml(html) {
-  if (typeof DOMPurify !== 'undefined' && typeof DOMPurify.sanitize === 'function') {
-    return DOMPurify.sanitize(String(html), {
+  if (typeof window !== 'undefined' && window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+    return window.DOMPurify.sanitize(String(html), {
       FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
       FORBID_ATTR: ['style', 'onerror', 'onclick', 'onload'],
       ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[\/#]|\.{0,2}\/|[^:]+$)/i
@@ -687,6 +694,14 @@ function edSanitizeHtml(html) {
   return parser.innerHTML;
 }
 
+function edHighlight(area) {
+  var prism = typeof window !== 'undefined' ? window.Prism : null;
+  if (!prism || typeof prism.highlightElement !== 'function') return;
+  area.querySelectorAll('pre code').forEach(function(block) {
+    try { prism.highlightElement(block); } catch (e) {}
+  });
+}
+
 function edRenderParsed(idx) {
   var area = document.getElementById('ed-parsed-area-' + idx);
   if (!area) return;
@@ -698,14 +713,12 @@ function edRenderParsed(idx) {
   if (edIsMdExt(ext)) {
     var html = '';
     try {
-      if (typeof pgRenderMarkdown === 'function') html = pgRenderMarkdown(content, false);
-      else if (typeof window.markdownit === 'function') html = window.markdownit({ html: true, breaks: true, linkify: true }).render(content);
+      if (typeof window !== 'undefined' && typeof window.markdownit === 'function') html = window.markdownit({ html: true, breaks: true, linkify: true }).render(content);
       else if (typeof marked !== 'undefined' && typeof marked.parse === 'function') html = marked.parse(content);
     } catch (e) { html = ''; }
     if (!html) html = '<pre>' + edEscapeHtml(content) + '</pre>';
     area.innerHTML = '<div class="pg-bubble pg-bubble-slot">' + edSanitizeHtml(html) + '</div>';
-    if (typeof pgHighlight === 'function') pgHighlight(area);
-    else if (typeof hljs !== 'undefined') area.querySelectorAll('pre code').forEach(function(block) { try { hljs.highlightElement(block); } catch (e) {} });
+    edHighlight(area);
   } else if (edIsCodeExt(ext)) {
     var pre = document.createElement('pre');
     var code = document.createElement('code');
@@ -713,7 +726,7 @@ function edRenderParsed(idx) {
     code.textContent = content;
     pre.appendChild(code);
     area.appendChild(pre);
-    if (typeof hljs !== 'undefined') { try { hljs.highlightElement(code); } catch (e) {} }
+    edHighlight(area);
   } else {
     var pre2 = document.createElement('pre');
     pre2.textContent = content;
@@ -721,6 +734,7 @@ function edRenderParsed(idx) {
   }
   if (ta) area.scrollTop = ta.scrollTop;
 }
+
 
 function edSyncParsedScroll(idx) {
   var ta = document.getElementById('ed-input-' + idx);
@@ -764,7 +778,7 @@ function edRenderDiff() {
   }
 
   if (!leftText && !rightText) {
-    area.innerHTML = '<div class="ed-diff-empty">' + T('editorNoFile') + '</div>';
+    area.innerHTML = '<div class="ed-diff-empty">' + edT('editorNoFile') + '</div>';
     return;
   }
 
@@ -779,10 +793,10 @@ function edRenderDiff() {
   var statsDiv = document.createElement('div');
   statsDiv.className = 'ed-diff-stats';
   statsDiv.innerHTML =
-    '<span class="ed-diff-stat-del">' + T('editorDeleted') + ' ' + stats.del + ' ' + T('editorLines') + '</span>' +
-    '<span class="ed-diff-stat-add">' + T('editorAdded') + ' ' + stats.add + ' ' + T('editorLines') + '</span>' +
-    '<span class="ed-diff-stat-mod">' + T('editorModified') + ' ' + stats.mod + ' ' + T('editorLines') + '</span>' +
-    '<span class="ed-diff-stat-rate">' + T('editorCharRetention') + ' ' + rate.toFixed(1) + '%</span>';
+    '<span class="ed-diff-stat-del">' + edT('editorDeleted') + ' ' + stats.del + ' ' + edT('editorLines') + '</span>' +
+    '<span class="ed-diff-stat-add">' + edT('editorAdded') + ' ' + stats.add + ' ' + edT('editorLines') + '</span>' +
+    '<span class="ed-diff-stat-mod">' + edT('editorModified') + ' ' + stats.mod + ' ' + edT('editorLines') + '</span>' +
+    '<span class="ed-diff-stat-rate">' + edT('editorCharRetention') + ' ' + rate.toFixed(1) + '%</span>';
   area.appendChild(statsDiv);
 
   // Table
@@ -894,7 +908,7 @@ function edOpenFile(idx) {
       var ta = document.getElementById('ed-input-' + idx);
       if (ta) ta.value = data.content;
       var title = document.getElementById('ed-pane-title-' + idx);
-      if (title) title.textContent = data.name || T('editorUntitled');
+      if (title) title.textContent = data.name || edT('editorUntitled');
       edSetPaneView(idx, 'raw');
       edUpdateDirty(idx);
       edUpdateGutters();
@@ -910,7 +924,7 @@ function edOpenFile(idx) {
 
 function edOpenFallback(idx) {
   if (typeof FsApi === 'undefined' || !FsApi.pickFiles) {
-    if (typeof toast === 'function') toast(T('editorCancelled'), 'error');
+    if (typeof toast === 'function') toast(edT('editorCancelled'), 'error');
     return;
   }
   FsApi.pickFiles({ multiple: false }).then(function(files) {
@@ -925,7 +939,7 @@ function edOpenFallback(idx) {
       var ta = document.getElementById('ed-input-' + idx);
       if (ta) ta.value = text;
       var title = document.getElementById('ed-pane-title-' + idx);
-      if (title) title.textContent = file.name || T('editorUntitled');
+      if (title) title.textContent = file.name || edT('editorUntitled');
       edSetPaneView(idx, 'raw');
       edUpdateDirty(idx);
       edUpdateGutters();
@@ -956,13 +970,13 @@ function edSaveFile(idx) {
         p.original = content;
         edUpdateDirty(idx);
         edSaveState();
-        if (typeof toast === 'function') toast(T('editorSaved'), 'success');
+        if (typeof toast === 'function') toast(edT('editorSaved'), 'success');
       } else {
-        if (typeof toast === 'function') toast(T('editorSaveFailed'), 'error');
+        if (typeof toast === 'function') toast(edT('editorSaveFailed'), 'error');
       }
     })
     .catch(function() {
-      if (typeof toast === 'function') toast(T('editorSaveFailed'), 'error');
+      if (typeof toast === 'function') toast(edT('editorSaveFailed'), 'error');
     });
   } else {
     // No path → browser save-as
@@ -998,17 +1012,17 @@ function edSaveAll() {
 function edBuildFindBar(container, idx) {
   container.innerHTML =
     '<div class="ed-find-row">' +
-      '<input type="text" class="ed-find-input" id="ed-find-input-' + idx + '" placeholder="' + T('editorFind') + '..." />' +
-      '<button class="ed-btn ed-btn-xs ed-find-prev" id="ed-find-prev-' + idx + '" data-tooltip="' + T('editorPrev') + '">&larr;</button>' +
-      '<button class="ed-btn ed-btn-xs ed-find-next" id="ed-find-next-' + idx + '" data-tooltip="' + T('editorNext') + '">&rarr;</button>' +
+      '<input type="text" class="ed-find-input" id="ed-find-input-' + idx + '" placeholder="' + edT('editorFind') + '..." />' +
+      '<button class="ed-btn ed-btn-xs ed-find-prev" id="ed-find-prev-' + idx + '" data-tooltip="' + edT('editorPrev') + '">&larr;</button>' +
+      '<button class="ed-btn ed-btn-xs ed-find-next" id="ed-find-next-' + idx + '" data-tooltip="' + edT('editorNext') + '">&rarr;</button>' +
       '<span class="ed-find-count" id="ed-find-count-' + idx + '"></span>' +
-      '<label class="ed-find-label"><input type="checkbox" class="ed-find-case" id="ed-find-case-' + idx + '" /> ' + T('editorCaseSensitive') + '</label>' +
+      '<label class="ed-find-label"><input type="checkbox" class="ed-find-case" id="ed-find-case-' + idx + '" /> ' + edT('editorCaseSensitive') + '</label>' +
       '<label class="ed-find-label"><input type="checkbox" class="ed-find-regex" id="ed-find-regex-' + idx + '" /> Regex</label>' +
     '</div>' +
     '<div class="ed-find-replace-row">' +
-      '<input type="text" class="ed-find-replace" id="ed-find-replace-' + idx + '" placeholder="' + T('editorReplace') + '..." />' +
-      '<button class="ed-btn ed-btn-xs ed-find-replace-one" id="ed-find-replace-one-' + idx + '">' + T('editorReplace') + '</button>' +
-      '<button class="ed-btn ed-btn-xs ed-find-replace-all" id="ed-find-replace-all-' + idx + '">' + T('editorReplaceAll') + '</button>' +
+      '<input type="text" class="ed-find-replace" id="ed-find-replace-' + idx + '" placeholder="' + edT('editorReplace') + '..." />' +
+      '<button class="ed-btn ed-btn-xs ed-find-replace-one" id="ed-find-replace-one-' + idx + '">' + edT('editorReplace') + '</button>' +
+      '<button class="ed-btn ed-btn-xs ed-find-replace-all" id="ed-find-replace-all-' + idx + '">' + edT('editorReplaceAll') + '</button>' +
     '</div>';
 
   // Bind events
@@ -1242,7 +1256,7 @@ function edFindReplaceAll(idx) {
 // ===================== go to line =====================
 
 function edGoToLine() {
-  var lineStr = window.prompt(T('editorGoToLinePrompt'));
+  var lineStr = window.prompt(edT('editorGoToLinePrompt'));
   if (!lineStr) return;
   var lineNum = parseInt(lineStr, 10);
   if (isNaN(lineNum) || lineNum < 1) return;

@@ -2,6 +2,12 @@
 
 'use strict';
 
+// Editor-local translation adapter. Utility Editor is available without Playground.
+function edT(key, args) {
+  var translate = typeof window !== 'undefined' && typeof window.t === 'function' ? window.t : (typeof t === 'function' ? t : null);
+  if (!translate) return key;
+  try { return translate(key, args); } catch (e) { return key; }
+}
 // ---------- helpers ----------------------------------------------
 var CODE_EXTS = {
   js:1, ts:1, go:1, json:1, yaml:1, yml:1, html:1, css:1, xml:1,

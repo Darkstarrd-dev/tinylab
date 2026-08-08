@@ -74,7 +74,7 @@ var utilityActiveTool = null;
 var utilityMenuOpen = false;
 
 var UTILITY_TOOLS = [
-  { id: 'editor', labelKey: 'logFileEditor', requiresPlayground: true },
+  { id: 'editor', labelKey: 'logFileEditor' },
   { id: 'logReader', labelKey: 'logReader', requiresPlayground: true },
   { id: 'review', labelKey: 'utilityReview', requiresPlayground: true },
   { id: 'gif', labelKey: 'gif' },
@@ -116,7 +116,7 @@ function updateUtilityMenuState() {
 }
 function utilityToolLifecycle(id, phase) {
   var hooks = {
-    editor: { suspend: 'cleanupEditor' },
+    editor: { suspend: 'suspendEditor', resume: 'resumeEditor' },
     logReader: { suspend: 'suspendEditorLogs' },
     review: { suspend: 'cleanupReview' },
     gif: { suspend: 'suspendGifEditor', resume: 'resumeGifEditor' },

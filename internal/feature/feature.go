@@ -209,7 +209,7 @@ func registerDefaults() {
 	})
 	register(Feature{
 		ID: Editor, Name: "Editor",
-		Description: "Text editor + AI Text Review (editor.js + editor_textreview*).",
+		Description: "Text editor + AI Text Review (editor-state/workspace/commands/markdown/layout/editor/editor-shell + editor-logs + editor_textreview*).",
 		StaticRoot:  RootStatic,
 		StaticFiles: []string{
 			// Utility Editor vendor dependencies (load order: markdown-it -> Prism -> diff-match-patch -> Turndown -> DOMPurify).
@@ -218,7 +218,10 @@ func registerDefaults() {
 			"vendor/utility-editor/diff-match-patch/diff-match-patch.js",
 			"vendor/utility-editor/turndown/turndown.js",
 			"vendor/utility-editor/dompurify/purify.min.js",
-			"utility/editor/editor-state.js", "utility/editor/editor.js", "utility/editor/editor-logs.js",
+			// Utility Editor modules (state -> workspace -> commands -> markdown -> layout -> editor -> shell -> logs).
+			"utility/editor/editor-state.js", "utility/editor/editor_workspace.js", "utility/editor/editor_commands.js",
+			"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor.js",
+			"utility/editor/editor_shell.js", "utility/editor/editor-logs.js",
 			// AI Text Review (load order: split/diff/state first, then steps, then entry).
 			"utility/editor/editor_textreview_split.js", "utility/editor/editor_textreview_diff.js", "utility/editor/editor_textreview_state.js",
 			"utility/editor/editor_textreview_step1.js", "utility/editor/editor_textreview_step2.js",

@@ -4425,6 +4425,20 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   text-align: center;
 }
 /* StackEdit-style Utility File Editor workspace. */
+.ed-workspace{display:flex;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;background:var(--bg);color:var(--text)}
+.ed-explorer{display:flex;flex:0 0 240px;min-width:180px;flex-direction:column;overflow:hidden;border-right:1px solid var(--glass-border);background:var(--panel-bg,var(--glass-bg))}
+.ed-editor-main{display:flex;flex:1 1 auto;min-width:0;min-height:0;flex-direction:column;overflow:hidden}
+.ed-navigation{display:flex;align-items:center;gap:6px;min-height:38px;padding:6px 10px;border-bottom:1px solid var(--glass-border);background:var(--glass-bg)}
+.ed-content-split{display:flex;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden}
+.ed-control-bar{display:flex;align-items:center;gap:6px;min-height:36px;padding:5px 8px;border-bottom:1px solid var(--glass-border);background:var(--glass-bg);flex-wrap:wrap}
+.ed-toc{flex:0 0 220px;min-width:160px;overflow:auto;padding:10px;border-left:1px solid var(--glass-border);background:var(--panel-bg,var(--glass-bg));color:var(--text-secondary);font-size:var(--font-badge)}
+.ed-file-tree{flex:1 1 auto;min-height:0;overflow:auto;padding:8px;color:var(--text-secondary);font-size:var(--font-badge)}
+.ed-status-left{display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ed-status-right{display:flex;align-items:center;gap:8px;margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ed-reader-mode .ed-edit-area,.ed-reader-mode .ed-gutter{display:none}
+.ed-reader-mode .ed-parsed-area{display:block;flex:1 1 auto}
+.ed-focus-mode .ed-explorer,.ed-focus-mode .ed-toc{display:none}
+.ed-focus-mode .ed-editor-main{flex:1 1 auto}
 .ed-layout{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden;background:var(--bg)}
 .ed-toolbar{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 10px;background:var(--panel-bg,var(--glass-bg));border-bottom:1px solid var(--glass-border);box-sizing:border-box}
 .ed-toolbar-group{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
@@ -4459,4 +4473,19 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .ed-review-content{display:none}
 .utility-empty-state{padding:32px;color:var(--text-muted);text-align:center}
 .ed-statusbar{flex:0 0 26px;min-height:26px;padding:5px 10px;box-sizing:border-box;border-top:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-muted);font:11px/1.4 'Cascadia Code','JetBrains Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:800px){.ed-explorer{flex-basis:180px}.ed-toc{display:none}.ed-content-split{flex-direction:column}.ed-workspace{min-width:0}}
 @media (max-width:800px){.ed-panes{flex-direction:column}.ed-pane{min-height:240px}.ed-toolbar{flex-wrap:wrap}}
+.ed-navigation-actions,.ed-control-bar,.ed-view-actions,.ed-explorer-header,.ed-explorer-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.ed-navigation-actions{margin-left:auto}.ed-explorer-header{justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--glass-border)}
+.ed-explorer-header h2,.ed-toc h2{margin:0;font-size:var(--font-section-title);font-weight:600;color:var(--text)}
+.ed-button{border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-secondary);border-radius:var(--radius-xs);cursor:pointer;padding:4px 7px;font-size:var(--font-badge);line-height:1.2;white-space:nowrap}
+.ed-button:hover,.ed-button:focus-visible,.ed-button.is-active{background:var(--glass-hover);border-color:var(--accent);color:var(--text);outline:none}
+.ed-editor-surface,.ed-preview-surface{position:relative;display:flex;flex:1 1 0;min-width:0;min-height:0;overflow:hidden;border-right:1px solid var(--glass-border)}
+.ed-editor-surface{background:var(--bg)}.ed-preview-surface{background:var(--panel-bg,var(--bg))}.ed-preview-content{flex:1 1 auto;min-width:0;min-height:0;overflow:auto;padding:18px 22px}
+.ed-line-gutter{flex:0 0 38px;overflow:hidden;padding:10px 6px 10px 0;text-align:right;background:var(--glass-bg);border-right:1px solid var(--glass-border);color:var(--text-muted);font:var(--font-code)/1.5 var(--font-mono);user-select:none}
+.ed-line-number{display:block}.ed-main-input{flex:1 1 auto;width:0;min-width:0;min-height:0;padding:10px;border:0;outline:0;resize:none;background:transparent;color:var(--text);font:var(--font-code)/1.5 var(--font-mono);tab-size:2;white-space:pre-wrap;overflow:auto}
+.ed-content-split .ed-toc{flex-basis:190px}.ed-toc-list{margin:8px 0 0;padding-left:18px;list-style:none}.ed-toc-item{margin:4px 0}.ed-toc-item a{color:var(--text-secondary);text-decoration:none}.ed-toc-item a:hover{color:var(--accent)}
+.ed-toc-level-2{padding-left:8px}.ed-toc-level-3{padding-left:16px}.ed-toc-level-4{padding-left:24px}.ed-toc-level-5{padding-left:32px}.ed-toc-level-6{padding-left:40px}
+.ed-workspace.is-preview .ed-editor-surface{display:flex}.ed-workspace.is-preview .ed-preview-surface{display:flex}.ed-workspace:not(.is-preview) .ed-preview-surface{display:none}.ed-workspace.is-reader .ed-editor-surface{display:none}.ed-workspace.is-reader .ed-preview-surface{display:flex}.ed-workspace.is-focused .ed-toc{display:none}.ed-workspace.is-explorer-hidden .ed-explorer{display:none}.ed-workspace.is-syncing .ed-preview-content{scroll-behavior:auto}
+@media (max-width:800px){.ed-explorer{flex-basis:190px}.ed-content-split{flex-direction:column}.ed-editor-surface,.ed-preview-surface{flex-basis:50%;border-right:0;border-bottom:1px solid var(--glass-border)}.ed-content-split .ed-toc{display:none}.ed-navigation{min-height:42px;overflow:auto}.ed-control-bar{max-height:96px;overflow:auto}}
+.ed-shell-find{display:flex;align-items:center;gap:5px;padding:5px 8px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border);flex-wrap:wrap}.ed-shell-find input{min-width:120px;padding:4px 6px;border:1px solid var(--glass-border);border-radius:var(--radius-xs);background:var(--input-bg);color:var(--text);font:var(--font-badge)/1.2 inherit}.ed-shell-find span{color:var(--text-muted);font-size:var(--font-badge)}.ed-shell-find button{padding:4px 7px;border:1px solid var(--glass-border);border-radius:var(--radius-xs);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;font-size:var(--font-badge)}.ed-shell-find button:hover{border-color:var(--accent);color:var(--text)}
