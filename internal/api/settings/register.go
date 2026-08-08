@@ -59,6 +59,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"proxy":        cfg.Proxy,
 		"server":       cfg.Server,
 		"imageSaveDir": cfg.ImageSaveDir,
+		"docDir":       cfg.DocDir,
 		"download":     cfg.Download,
 		"shortcuts":    cfg.Shortcuts,
 		"security": map[string]any{
@@ -116,6 +117,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		} `json:"anySearch"`
 		Theme        *config.ThemeConfig `json:"theme"`
 		ImageSaveDir *string             `json:"imageSaveDir"`
+		DocDir       *string             `json:"docDir"`
 		Archive      *archivePatch       `json:"archive"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
@@ -283,6 +285,9 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.ImageSaveDir != nil {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
+	}
+	if updates.DocDir != nil {
+		cfg.DocDir = *updates.DocDir
 	}
 
 	if updates.Archive != nil {

@@ -411,6 +411,37 @@
     return mutate(ta, '', 0, 0);
   }
 
+  function insertLink(ta, linkText, url) {
+    if (!isTextarea(ta)) return false;
+    var picked = selected(ta);
+    var text = linkText !== undefined && linkText !== null ? String(linkText) : (picked.text || 'link text');
+    var targetUrl = url !== undefined && url !== null ? String(url) : 'https://';
+    var md = '[' + text + '](' + targetUrl + ')';
+    var value = picked.state.value.slice(0, picked.state.start) + md + picked.state.value.slice(picked.state.end);
+    var caret = picked.state.start + md.length;
+    return mutate(ta, value, caret, caret);
+  }
+
+  function insertImage(ta, altText, url) {
+    if (!isTextarea(ta)) return false;
+    var picked = selected(ta);
+    var alt = altText !== undefined && altText !== null ? String(altText) : (picked.text || 'image alt');
+    var targetUrl = url !== undefined && url !== null ? String(url) : 'https://';
+    var md = '![' + alt + '](' + targetUrl + ')';
+    var value = picked.state.value.slice(0, picked.state.start) + md + picked.state.value.slice(picked.state.end);
+    var caret = picked.state.start + md.length;
+    return mutate(ta, value, caret, caret);
+  }
+
+  function replaceSelection(ta, text) {
+    if (!isTextarea(ta)) return false;
+    text = String(text == null ? '' : text);
+    var picked = selected(ta);
+    var value = picked.state.value.slice(0, picked.state.start) + text + picked.state.value.slice(picked.state.end);
+    var caret = picked.state.start + text.length;
+    return mutate(ta, value, caret, caret);
+  }
+
   var api = {
     wrapSelection: wrapSelection,
     toggleLinePrefix: toggleLinePrefix,
@@ -420,6 +451,7 @@
     },
     insertLink: insertLink,
     insertImage: insertImage,
+    replaceSelection: replaceSelection,
     insertTable: insertTable,
     record: record,
     undo: undo,

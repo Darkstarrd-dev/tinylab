@@ -239,6 +239,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     pathSettingsDesc: 'Configure default directories and tool paths (yt-dlp, ffmpeg).',
     fileTransfer: 'FileTransfer', fileTransferDesc: 'Collect any files, confirm, and package them into a ZIP for temporary sharing.', fileTransferDropHere: 'Drop files here', fileTransferPasteHint: 'You can also paste files or clipboard file paths.', fileTransferBrowse: 'Browse Files', fileTransferClear: 'Clear', fileTransferProgress: 'Upload progress', fileTransferSelectHint: 'No files selected', fileTransferNoFiles: 'No files selected yet.', fileTransferSelected: '{0} file(s), {1}', fileTransferRemove: 'Remove file', fileTransferConfirm: 'Package and upload', fileTransferPacking: 'Creating ZIP and trying temporary hosts...', fileTransferSuccess: 'Uploaded via {0}', fileTransferReadFailed: 'Could not read selected file', fileTransferNetworkFailed: 'Upload connection failed', open: 'Open',
     imageDir: 'Default Image Dir',
+    docDir: 'Default Doc Path',
     logDir: 'Default Log Dir',
     useProxyHint: 'Uses the Upstream Proxy from Settings.',
     ytDlpPath: 'yt-dlp Path',
@@ -406,7 +407,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     editorUnorderedList: 'Bulleted List', editorOrderedList: 'Numbered List', editorTaskList: 'Task List',
     editorHorizontalRule: 'Horizontal Rule', editorImport: 'Import', editorExport: 'Export', editorPrint: 'Print',
     editorWorkspace: 'Workspace', editorLocalSaved: 'Local saved', editorExternalFile: 'External file', editorDirty: 'Unsaved changes',
-    editorDelete: 'Delete', editorToggle: 'Toggle', editorTable: 'Table',
+    editorDelete: 'Delete', editorToggle: 'Toggle', editorTable: 'Table', editorAI: 'AI Assistant',
     editorExportHtml: 'HTML',
     // Text Review (AI 文本审校) keys
     trStepImport: 'Import', trStepSplit: 'Split', trStepClean: 'AI Clean', trStepReview: 'Review',
@@ -887,6 +888,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     pathSettingsDesc: '配置默认目录与工具路径（yt-dlp、ffmpeg）。',
     fileTransfer: 'FileTransfer', fileTransferDesc: '收集任意文件，确认后打包为 ZIP，并上传到临时分享服务。', fileTransferDropHere: '将文件拖到这里', fileTransferPasteHint: '也可以直接粘贴文件或剪贴板中的文件路径。', fileTransferBrowse: '浏览文件', fileTransferClear: '清空', fileTransferProgress: '上传进度', fileTransferSelectHint: '尚未选择文件', fileTransferNoFiles: '还没有选择文件。', fileTransferSelected: '{0} 个文件，{1}', fileTransferRemove: '移除文件', fileTransferConfirm: '打包并上传', fileTransferPacking: '正在创建 ZIP 并依次尝试临时服务...', fileTransferSuccess: '已通过 {0} 上传', fileTransferReadFailed: '无法读取所选文件', fileTransferNetworkFailed: '上传连接失败', open: '打开',
     imageDir: '默认图片目录',
+    docDir: '默认文档目录',
     logDir: '默认日志目录',
     useProxyHint: '使用设置页面的上游代理。',
     ytDlpPath: 'yt-dlp 路径',
@@ -1053,7 +1055,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     editorHeading: '标题', editorQuote: '引用', editorCode: '代码', editorLink: '链接', editorImage: '图片',
     editorUnorderedList: '无序列表', editorOrderedList: '有序列表', editorTaskList: '任务列表',
     editorHorizontalRule: '分隔线', editorImport: '导入', editorExport: '导出', editorPrint: '打印',
-    editorDelete: '删除', editorToggle: '切换', editorTable: '表格',
+    editorDelete: '删除', editorToggle: '切换', editorTable: '表格', editorAI: 'AI 助手',
     editorExportHtml: 'HTML',
     editorWorkspace: '工作区', editorLocalSaved: '本地已保存', editorExternalFile: '外部文件', editorDirty: '有未保存的更改',
     // Text Review (AI 文本审校) keys

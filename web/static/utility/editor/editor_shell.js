@@ -311,6 +311,7 @@
     global.EditorLayout.setPreview(shellRoot, shellState.preview);
     global.EditorLayout.setExplorer(shellRoot, shellState.explorer);
     global.EditorLayout.setSync(shellRoot, shellState.sync);
+    if (global.EditorLayout.updateExplorerToggleIcon) global.EditorLayout.updateExplorerToggleIcon(shellRoot, shellState.explorer !== false);
     if (shellState.mode === 'diff') renderDiff(); else renderPreview();
   }
 
@@ -343,23 +344,87 @@
     });
   }
 
+  function syncDocDirTree() {
+    return fetch('/api/editor/tree').then(function (res) {
+      if (!res.ok) return null;
+      return res.json();
+    }).then(function (data) {
+      if (!data || !Array.isArray(data.files)) return null;
+      var files = data.files;
+      if (!files.length) return data;
+      var tasks = [];
+      var folderIds = [];
+      files.forEach(function (item) {
+        var relPath = item.relPath;
+        var parts = relPath.split('/');
+        var parentId = parts.length > 1 ? 'docdir:' + parts.slice(0, parts.length - 1).join('/') : null;
+        if (item.isDir) {
+          var dirId = 'docdir:' + relPath;
+          folderIds.push(dirId);
+          tasks.push(global.EditorWorkspace.putFolder(item.name, parentId).catch(function () {}));
+        } else {
+          var fileId = 'doc:' + relPath;
+          tasks.push(global.EditorWorkspace.putFile(item.name, '', parentId, { externalPath: item.path, isDoc: true }).then(function (node) {
+            if (!node) {
+              global.EditorWorkspace.updateNode(fileId, { meta: { externalPath: item.path, isDoc: true } });
+            }
+          }));
+        }
+      });
+      return Promise.all(tasks).then(function () {
+        if (folderIds.length) {
+          global.EditorWorkspace.getExpandedIds().then(function (exp) {
+            var combined = (exp || []).concat(folderIds).filter(function (v, i, a) { return a.indexOf(v) === i; });
+            global.EditorWorkspace.setExpandedIds(combined);
+          });
+        }
+        return data;
+      });
+    }).catch(function (err) {
+      console.warn('[Editor] syncDocDirTree error:', err);
+      return null;
+    });
+  }
+
   function loadFile(id) {
-    return Promise.all([global.EditorWorkspace.getNode(id), global.EditorWorkspace.getContent(id)]).then(function (values) {
-      if (!values[0] || values[0].type !== 'file') return false;
-      shellState.selectedId = id;
-      shellState.selectedNode = values[0];
-      shellState.currentId = id;
-      shellState.currentNode = values[0];
-      shellState.original = text(values[1]);
-      var input = currentInput();
-      if (input) input.value = shellState.original;
-      global.EditorWorkspace.setCurrentFile(id);
-      if (global.EditorCommands) global.EditorCommands.record(input);
-      updateGutter();
-      shellState.mode = 'edit';
-      redraw();
-      if (input) input.focus();
-      return true;
+    if (!id) return Promise.resolve(false);
+    return global.EditorWorkspace.getNode(id).then(function (node) {
+      if (!node || node.type !== 'file') return false;
+      var contentPromise;
+      if (node.externalPath) {
+        contentPromise = fetch('/api/editor/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: node.externalPath })
+        }).then(function (res) { return res.json(); }).then(function (data) {
+          if (data && typeof data.content === 'string') {
+            global.EditorWorkspace.updateNode(id, { content: data.content });
+            return data.content;
+          }
+          return global.EditorWorkspace.getContent(id);
+        }).catch(function () {
+          return global.EditorWorkspace.getContent(id);
+        });
+      } else {
+        contentPromise = global.EditorWorkspace.getContent(id);
+      }
+
+      return contentPromise.then(function (content) {
+        shellState.selectedId = id;
+        shellState.selectedNode = node;
+        shellState.currentId = id;
+        shellState.currentNode = node;
+        shellState.original = text(content);
+        var input = currentInput();
+        if (input) input.value = shellState.original;
+        global.EditorWorkspace.setCurrentFile(id);
+        if (global.EditorCommands) global.EditorCommands.record(input);
+        updateGutter();
+        shellState.mode = 'edit';
+        redraw();
+        if (input) input.focus();
+        return true;
+      });
     });
   }
 
@@ -376,38 +441,129 @@
   }
 
 
+  function promptDialog(message, defaultValue, placeholder) {
+    if (typeof global.promptModal === 'function') {
+      return global.promptModal(message, defaultValue, placeholder);
+    }
+    return Promise.resolve(global.prompt(message, defaultValue));
+  }
+
+  function fetchDocDir() {
+    return fetch('/api/editor/tree').then(function (res) {
+      if (!res.ok) return '';
+      return res.json();
+    }).then(function (data) {
+      return (data && data.docDir) || '';
+    }).catch(function () { return ''; });
+  }
+
   function createFile() {
-    var name = global.prompt(tr('editorNewFile', 'New file'), 'untitled.md');
-    if (!name) return;
-    global.EditorWorkspace.putFile(name, '', selectedParent()).then(function (node) { if (node) { refreshTree().then(function () { loadFile(node.id); }); } else toast('A file with that name already exists', 'warning'); });
+    promptDialog(tr('editorNewFile', 'New file'), 'untitled.md').then(function (name) {
+      if (!name) return;
+      fetchDocDir().then(function (docDir) {
+        var extPath = docDir ? docDir.replace(/[\\/]+$/, '') + '/' + name : '';
+        var parent = selectedParent();
+        global.EditorWorkspace.putFile(name, '', parent, extPath ? { externalPath: extPath } : null).then(function (node) {
+          if (!node) { toast('A file with that name already exists', 'warning'); return; }
+          if (extPath) {
+            fetch('/api/editor/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: extPath, content: '' })
+            }).catch(function () {});
+          }
+          refreshTree().then(function () { loadFile(node.id); });
+        });
+      });
+    });
   }
+
   function createFolder() {
-    var name = global.prompt(tr('editorNewFolder', 'New folder'), 'New folder');
-    if (!name) return;
-    global.EditorWorkspace.putFolder(name, selectedParent()).then(function (node) { if (node) refreshTree(); else toast('A folder with that name already exists', 'warning'); });
+    promptDialog(tr('editorNewFolder', 'New folder'), 'New folder').then(function (name) {
+      if (!name) return;
+      global.EditorWorkspace.putFolder(name, selectedParent()).then(function (node) {
+        if (node) refreshTree(); else toast('A folder with that name already exists', 'warning');
+      });
+    });
   }
+
   function renameCurrent() {
     var targetId = shellState.selectedId || shellState.currentId;
     var targetNode = shellState.selectedNode || shellState.currentNode;
-    if (!targetId || !targetNode || targetNode.system) return;
-    var name = global.prompt(tr('editorRename', 'Rename'), targetNode.name);
-    if (!name || name === targetNode.name) return;
-    global.EditorWorkspace.updateNode(targetId, { name: name }).then(function (node) {
-      if (!node) return;
-      shellState.selectedNode = node;
-      if (shellState.currentId === targetId) shellState.currentNode = node;
-      refreshTree();
-      updateStatus();
+    if (!targetId || !targetNode) return;
+    promptDialog(tr('editorRename', 'Rename'), targetNode.name).then(function (name) {
+      if (!name || name === targetNode.name) return;
+      global.EditorWorkspace.updateNode(targetId, { name: name }).then(function (node) {
+        if (!node) return;
+        shellState.selectedNode = node;
+        if (shellState.currentId === targetId) shellState.currentNode = node;
+        refreshTree();
+        updateStatus();
+      });
     });
   }
+
   function deleteCurrent() {
     var targetId = shellState.selectedId || shellState.currentId;
     var targetNode = shellState.selectedNode || shellState.currentNode;
-    if (!targetId || !targetNode || targetNode.system) return;
+    if (!targetId || !targetNode) return;
     global.EditorWorkspace.deleteNode(targetId).then(function () { return global.EditorWorkspace.getCurrentFileId(); }).then(function (id) {
       shellState.selectedId = null;
       shellState.selectedNode = null;
-      return refreshTree().then(function () { return loadFile(id || 'file:welcome'); });
+      return refreshTree().then(function (nodes) {
+        var nextId = id;
+        if (!nextId && nodes && nodes.length) {
+          var firstFile = nodes.find(function (n) { return n && n.type === 'file'; });
+          if (firstFile) nextId = firstFile.id;
+        }
+        if (nextId) loadFile(nextId);
+        else {
+          var input = currentInput();
+          if (input) input.value = '';
+          shellState.original = '';
+          redraw();
+        }
+      });
+    });
+  }
+
+  function saveWorkspace() {
+    var input = currentInput();
+    if (!input || !shellState.currentId) return Promise.resolve(false);
+    var value = input.value;
+
+    function doSavePath(targetPath) {
+      return fetch('/api/editor/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: targetPath, content: value })
+      }).then(function (response) {
+        return response.json().then(function (data) {
+          if (!response.ok || !data || !data.ok) return false;
+          return global.EditorWorkspace.updateNode(shellState.currentId, { content: value, meta: { externalPath: targetPath } }).then(function (node) { return !!node; });
+        });
+      }).catch(function () { return false; });
+    }
+
+    var targetPath = shellState.currentNode && shellState.currentNode.externalPath;
+    var savePromise;
+    if (targetPath) {
+      savePromise = doSavePath(targetPath);
+    } else {
+      savePromise = fetchDocDir().then(function (docDir) {
+        var fallbackPath = docDir ? docDir.replace(/[\\/]+$/, '') + '/' + ((shellState.currentNode && shellState.currentNode.name) || 'untitled.md') : '';
+        if (fallbackPath) return doSavePath(fallbackPath);
+        return global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
+      });
+    }
+
+    return savePromise.then(function (saved) {
+      if (!saved) { toast(tr('editorSaveFailed', 'Save failed'), 'error'); return false; }
+      shellState.original = value;
+      shellState.dirty = false;
+      updateStatus();
+      toast(tr('editorSaved', 'File saved'), 'success');
+      return true;
     });
   }
 
@@ -422,51 +578,332 @@
     return fetch('/api/editor/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (response) { return response.json(); })
       .then(function (data) {
-        if (data && data.path !== undefined && data.content !== undefined) return importWorkspaceFile(data.name || 'untitled.md', data.content, { externalPath: data.path, imported: true });
-        if (data && !data.unsupported && !data.cancelled) return false;
-        var picker = global.FsApi && global.FsApi.pickFiles ? global.FsApi.pickFiles({ multiple: false }) : Promise.resolve([]);
-        return picker.then(function (entries) {
-          if (!entries || !entries.length) return false;
-          var entry = entries[0];
-          var filePromise = entry.file ? Promise.resolve(entry.file) : (entry.handle && entry.handle.getFile ? entry.handle.getFile() : Promise.resolve(null));
-          return filePromise.then(function (file) { return file ? file.text().then(function (content) { return importWorkspaceFile(file.name, content); }) : false; });
-        });
+        if (data && data.path !== undefined && data.content !== undefined) {
+          return importWorkspaceFile(data.name || 'untitled.md', data.content, { externalPath: data.path, imported: true });
+        }
+        return false;
       })
-      .catch(function () {
-        var picker = global.FsApi && global.FsApi.pickFiles ? global.FsApi.pickFiles({ multiple: false }) : Promise.resolve([]);
-        return picker.then(function (entries) {
-          if (!entries || !entries.length) return false;
-          var entry = entries[0];
-          var filePromise = entry.file ? Promise.resolve(entry.file) : (entry.handle && entry.handle.getFile ? entry.handle.getFile() : Promise.resolve(null));
-          return filePromise.then(function (file) { return file ? file.text().then(function (content) { return importWorkspaceFile(file.name, content); }) : false; });
-        });
+      .catch(function (err) {
+        console.warn('[Editor] openLocalFile failed:', err);
+        return false;
       });
   }
 
-  function importFile() {
-    var picker = global.FsApi && global.FsApi.pickFiles ? global.FsApi.pickFiles({ multiple: false, accept: { 'text/plain': ['.md', '.markdown', '.txt'], 'text/html': ['.html', '.htm'] } }) : Promise.resolve([]);
-    return picker.then(function (entries) {
-      if (!entries || !entries.length) return false;
-      var entry = entries[0];
-      var filePromise = entry.file ? Promise.resolve(entry.file) : (entry.handle && entry.handle.getFile ? entry.handle.getFile() : Promise.resolve(null));
-      return filePromise.then(function (file) {
-        if (!file) return false;
-        return file.text().then(function (content) {
-          var isHtml = /\.html?$/i.test(file.name || '');
-          if (isHtml && typeof global.TurndownService === 'function') {
-            try { content = new global.TurndownService().turndown(content); } catch (e) {}
-          }
-          return importWorkspaceFile(file.name.replace(/\.html?$/i, isHtml ? '.md' : ''), content);
-        });
-      });
-    });
+  function triggerUndo() {
+    var input = currentInput();
+    if (!input) return;
+    input.focus();
+    try {
+      if (typeof document.execCommand === 'function') {
+        var ok = document.execCommand('undo');
+        if (ok) { updateGutter(); redraw(); return; }
+      }
+    } catch (e) {}
+    if (global.EditorCommands) global.EditorCommands.undo(input);
+    updateGutter();
+    redraw();
   }
-  function exportFile(kind) {
-    var content = currentText();
-    var name = (shellState.currentNode && shellState.currentNode.name) || 'untitled.md';
-    if (kind === 'html') content = global.EditorMarkdown.toHtmlDocument(content, name);
-    var filename = kind === 'html' ? name.replace(/\.[^.]*$/, '') + '.html' : name;
-    return global.FsApi && global.FsApi.saveFile ? global.FsApi.saveFile(content, filename, kind === 'html' ? 'text/html' : 'text/markdown') : Promise.resolve(false);
+
+  function triggerRedo() {
+    var input = currentInput();
+    if (!input) return;
+    input.focus();
+    try {
+      if (typeof document.execCommand === 'function') {
+        var ok = document.execCommand('redo');
+        if (ok) { updateGutter(); redraw(); return; }
+      }
+    } catch (e) {}
+    if (global.EditorCommands) global.EditorCommands.redo(input);
+    updateGutter();
+    redraw();
+  }
+
+  function showLinkModal() {
+    var input = currentInput();
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay || !input) return;
+    var selStart = input.selectionStart || 0;
+    var selEnd = input.selectionEnd || 0;
+    var selectedText = input.value.slice(selStart, selEnd);
+
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:440px;">' +
+        '<div class="modal-title">' + escapeHtml(tr('editorLink', 'Insert Link')) + '</div>' +
+        '<div class="modal-body" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">' +
+          '<label style="font-size:12px; opacity:0.8;">Text</label>' +
+          '<input type="text" class="input" id="link-text-input" value="' + escapeAttr(selectedText || 'link text') + '" style="width:100%; box-sizing:border-box;" />' +
+          '<label style="font-size:12px; opacity:0.8;">URL</label>' +
+          '<input type="text" class="input" id="link-url-input" value="https://" style="width:100%; box-sizing:border-box;" />' +
+        '</div>' +
+        '<div class="modal-footer" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-ghost" id="link-cancel">' + tr('cancel', 'Cancel') + '</button>' +
+          '<button type="button" class="btn btn-primary" id="link-confirm">' + tr('confirm', 'Confirm') + '</button>' +
+        '</div>' +
+      '</div>';
+    overlay.classList.add('show');
+    var urlInput = document.getElementById('link-url-input');
+    if (urlInput) {
+      setTimeout(function() { urlInput.focus(); urlInput.select(); }, 50);
+    }
+    function close() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+    document.getElementById('link-cancel').onclick = close;
+    document.getElementById('link-confirm').onclick = function() {
+      var tInput = document.getElementById('link-text-input');
+      var uInput = document.getElementById('link-url-input');
+      var textVal = tInput ? tInput.value.trim() : 'link text';
+      var urlVal = uInput ? uInput.value.trim() : 'https://';
+      close();
+      input.focus();
+      if (global.EditorCommands) global.EditorCommands.insertLink(input, textVal, urlVal);
+      updateGutter();
+      redraw();
+    };
+  }
+
+  function showImageModal() {
+    var input = currentInput();
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay || !input) return;
+    var selStart = input.selectionStart || 0;
+    var selEnd = input.selectionEnd || 0;
+    var selectedText = input.value.slice(selStart, selEnd);
+
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:460px;">' +
+        '<div class="modal-title">' + escapeHtml(tr('editorImage', 'Insert Image')) + '</div>' +
+        '<div class="modal-body" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">' +
+          '<label style="font-size:12px; opacity:0.8;">Alt Description</label>' +
+          '<input type="text" class="input" id="img-alt-input" value="' + escapeAttr(selectedText || 'image alt') + '" style="width:100%; box-sizing:border-box;" />' +
+          '<label style="font-size:12px; opacity:0.8;">Image URL / File</label>' +
+          '<div style="display:flex; gap:8px;">' +
+            '<input type="text" class="input" id="img-url-input" placeholder="https://... or select local file" value="" style="flex:1; box-sizing:border-box;" />' +
+            '<button type="button" class="btn btn-ghost" id="img-browse-btn" style="white-space:nowrap;">Browse...</button>' +
+          '</div>' +
+          '<input type="file" id="img-file-picker" accept="image/*" style="display:none;" />' +
+        '</div>' +
+        '<div class="modal-footer" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-ghost" id="img-cancel">' + tr('cancel', 'Cancel') + '</button>' +
+          '<button type="button" class="btn btn-primary" id="img-confirm">' + tr('confirm', 'Confirm') + '</button>' +
+        '</div>' +
+      '</div>';
+    overlay.classList.add('show');
+    var urlInput = document.getElementById('img-url-input');
+    var filePicker = document.getElementById('img-file-picker');
+    var browseBtn = document.getElementById('img-browse-btn');
+
+    if (urlInput) {
+      setTimeout(function() { urlInput.focus(); }, 50);
+    }
+    if (browseBtn && filePicker) {
+      browseBtn.onclick = function() { filePicker.click(); };
+      filePicker.onchange = function() {
+        if (filePicker.files && filePicker.files[0]) {
+          var file = filePicker.files[0];
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            if (urlInput) urlInput.value = e.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+    }
+    function close() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+    document.getElementById('img-cancel').onclick = close;
+    document.getElementById('img-confirm').onclick = function() {
+      var aInput = document.getElementById('img-alt-input');
+      var uInput = document.getElementById('img-url-input');
+      var altVal = aInput ? aInput.value.trim() : 'image alt';
+      var urlVal = uInput ? uInput.value.trim() : '';
+      if (!urlVal) { toast('Please enter image URL or select a local image', 'warning'); return; }
+      close();
+      input.focus();
+      if (global.EditorCommands) global.EditorCommands.insertImage(input, altVal, urlVal);
+      updateGutter();
+      redraw();
+    };
+  }
+
+  function handlePasteImage(e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image/') !== -1) {
+        var file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          var reader = new FileReader();
+          reader.onload = function(evt) {
+            var input = currentInput();
+            if (input && global.EditorCommands) {
+              global.EditorCommands.insertImage(input, 'pasted_image', evt.target.result);
+              updateGutter();
+              redraw();
+              toast('Pasted image inserted', 'success');
+            }
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    }
+  }
+
+  function showAiModal() {
+    var input = currentInput();
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay || !input) return;
+
+    var selStart = input.selectionStart || 0;
+    var selEnd = input.selectionEnd || 0;
+    var selectedText = input.value.slice(selStart, selEnd).trim();
+    var isSelectionMode = !!selectedText;
+
+    var titleText = isSelectionMode ? 'AI 润色 / 修改选中文本' : 'AI 智能辅助写作';
+    var storedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
+
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:500px; width:90%;">' +
+        '<div class="modal-title" style="display:flex; align-items:center; gap:8px;">' +
+          '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2L14.39 7.61L20 10L14.39 12.39L12 18L9.61 12.39L4 10L9.61 7.61L12 2ZM6 15l1.19 2.81L10 19l-2.81 1.19L6 23l-1.19-2.81L2 19l2.81-1.19L6 15z"/></svg>' +
+          '<span>' + escapeHtml(titleText) + '</span>' +
+        '</div>' +
+        '<div class="modal-body" style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">' +
+          '<div>' +
+            '<label style="font-size:12px; opacity:0.8; display:block; margin-bottom:4px;">选择 AI 模型 (Model)</label>' +
+            '<select class="input" id="ai-model-select" style="width:100%; box-sizing:border-box;"></select>' +
+          '</div>' +
+          (isSelectionMode ?
+            '<div>' +
+              '<label style="font-size:12px; opacity:0.8; display:block; margin-bottom:4px;">选中的目标文本 (Selected Text)</label>' +
+              '<div style="max-height:100px; overflow-y:auto; padding:8px; background:rgba(0,0,0,0.2); border-radius:6px; font-size:12px; color:var(--text-muted, #999); word-break:break-all;">' + escapeHtml(selectedText) + '</div>' +
+            '</div>' : '') +
+          '<div>' +
+            '<label style="font-size:12px; opacity:0.8; display:block; margin-bottom:4px;">输入指令与要求 (Prompt)</label>' +
+            '<textarea class="input" id="ai-prompt-input" rows="3" placeholder="' + (isSelectionMode ? '如：帮我修正错别字并进行语句润色...' : '如：根据上下文生成一段相关内容...') + '" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>' +
+          '</div>' +
+          '<div id="ai-status-msg" style="font-size:12px; color:var(--accent-color, #4f46e5); display:none;">处理中，请稍候...</div>' +
+        '</div>' +
+        '<div class="modal-footer" style="margin-top:16px;">' +
+          '<button type="button" class="btn btn-ghost" id="ai-cancel">取消</button>' +
+          '<button type="button" class="btn btn-primary" id="ai-submit">提交执行</button>' +
+        '</div>' +
+      '</div>';
+
+    overlay.classList.add('show');
+    var modelSelect = document.getElementById('ai-model-select');
+    var promptInput = document.getElementById('ai-prompt-input');
+    var submitBtn = document.getElementById('ai-submit');
+    var cancelBtn = document.getElementById('ai-cancel');
+    var statusMsg = document.getElementById('ai-status-msg');
+
+    fetch('/api/models').then(function(res) { return res.json(); }).then(function(data) {
+      if (!modelSelect) return;
+      modelSelect.innerHTML = '';
+      var defaultOpt = document.createElement('option');
+      defaultOpt.value = '';
+      defaultOpt.textContent = '-- 请选择模型 --';
+      modelSelect.appendChild(defaultOpt);
+
+      if (data && Array.isArray(data.combos)) {
+        var comboGroup = document.createElement('optgroup');
+        comboGroup.label = 'Combos (组合策略)';
+        data.combos.forEach(function(c) {
+          var opt = document.createElement('option');
+          opt.value = 'combo:' + c.name;
+          opt.textContent = '⚡ combo:' + c.name;
+          comboGroup.appendChild(opt);
+        });
+        modelSelect.appendChild(comboGroup);
+      }
+
+      if (data && Array.isArray(data.providers)) {
+        data.providers.forEach(function(p) {
+          if (p && Array.isArray(p.models) && p.models.length) {
+            var group = document.createElement('optgroup');
+            group.label = p.name || p.id;
+            p.models.forEach(function(m) {
+              var opt = document.createElement('option');
+              var val = p.id + '/' + (m.id || m.name);
+              opt.value = val;
+              opt.textContent = m.name || m.id;
+              group.appendChild(opt);
+            });
+            modelSelect.appendChild(group);
+          }
+        });
+      }
+
+      if (storedModel) modelSelect.value = storedModel;
+      if (!modelSelect.value && modelSelect.options.length > 1) {
+        modelSelect.selectedIndex = 1;
+      }
+    }).catch(function() {});
+
+    if (promptInput) setTimeout(function() { promptInput.focus(); }, 50);
+
+    function close() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+    cancelBtn.onclick = close;
+
+    submitBtn.onclick = function() {
+      var selectedModel = modelSelect ? modelSelect.value : '';
+      var userPrompt = promptInput ? promptInput.value.trim() : '';
+      if (!selectedModel) { toast('请先选择一个 AI 模型', 'warning'); return; }
+      if (!userPrompt) { toast('请输入提示词要求', 'warning'); return; }
+
+      localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+      submitBtn.disabled = true;
+      submitBtn.textContent = '生成中...';
+      if (statusMsg) statusMsg.style.display = 'block';
+
+      var messages = [];
+      if (isSelectionMode) {
+        messages.push({ role: 'system', content: '你是一个专业的写作与编辑助手。请根据用户的要求修改给出的【选中文本】。只输出修改后的最终内容，不要添加任何额外的解释或对话说明。' });
+        messages.push({ role: 'user', content: '【用户要求】:\n' + userPrompt + '\n\n【选中文本】:\n' + selectedText });
+      } else {
+        messages.push({ role: 'system', content: '你是一个智能写作助手。请根据用户的要求生成相应的文本。只输出生成的文本正文。' });
+        messages.push({ role: 'user', content: userPrompt });
+      }
+
+      fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: messages,
+          stream: false
+        })
+      }).then(function(res) {
+        if (!res.ok) throw new Error('API request failed');
+        return res.json();
+      }).then(function(data) {
+        var reply = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!reply) throw new Error('No content returned from AI');
+        close();
+        input.focus();
+        if (global.EditorCommands) {
+          global.EditorCommands.replaceSelection(input, reply);
+          toast(isSelectionMode ? '已用 AI 生成结果替换选中文本' : 'AI 生成结果已插入当前位置', 'success');
+        }
+        updateGutter();
+        redraw();
+      }).catch(function(err) {
+        console.error('[Editor AI]', err);
+        toast('AI 请求失败: ' + (err.message || '网络错误'), 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '提交执行';
+        if (statusMsg) statusMsg.style.display = 'none';
+      });
+    };
   }
 
   function shellHooks() {
@@ -476,9 +913,12 @@
         else if (action === 'new-folder') createFolder();
         else if (action === 'delete') deleteCurrent();
         else if (action === 'rename') renameCurrent();
-        else if (action === 'undo') { global.EditorCommands.undo(currentInput()); updateGutter(); redraw(); }
-        else if (action === 'redo') { global.EditorCommands.redo(currentInput()); updateGutter(); redraw(); }
-        else if (['bold','italic','heading','strike','ul','ol','checklist','quote','code','table','link','image'].indexOf(action) >= 0) { global.EditorCommands.format(currentInput(), action); }
+        else if (action === 'undo') triggerUndo();
+        else if (action === 'redo') triggerRedo();
+        else if (action === 'link') showLinkModal();
+        else if (action === 'image') showImageModal();
+        else if (action === 'ai') showAiModal();
+        else if (['bold','italic','heading','strike','ul','ol','checklist','quote','code','table'].indexOf(action) >= 0) { global.EditorCommands.format(currentInput(), action); }
         else if (action === 'find') shellFindToggle();
         else if (action === 'edit') { shellState.mode = 'edit'; redraw(); }
         else if (action === 'diff') { shellState.mode = 'diff'; redraw(); }
@@ -493,9 +933,6 @@
       },
       open: openLocalFile,
       save: saveWorkspace,
-      import: importFile,
-      export: exportFile,
-      print: function () { if (typeof global.print === 'function') global.print(); else if (global.window && typeof global.window.print === 'function') global.window.print(); },
       rename: renameCurrent,
       toggle: function (name) {
         if (name === 'reader') shellState.reader = !shellState.reader;
@@ -519,6 +956,7 @@
     var input = currentInput();
     if (!shellRoot || !input) return;
     var hooks = shellHooks();
+    input.addEventListener('paste', handlePasteImage);
     var onInput = function () { if (global.EditorCommands) global.EditorCommands.record(input); updateGutter(); renderPreview(); };
     var onScroll = function () {
       updateGutter();
@@ -531,8 +969,8 @@
     var onKey = function (event) {
       var mod = event.ctrlKey || event.metaKey;
       if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); saveWorkspace(); }
-      else if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) global.EditorCommands.redo(input); else global.EditorCommands.undo(input); redraw(); }
-      else if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); global.EditorCommands.redo(input); redraw(); }
+      else if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) triggerRedo(); else triggerUndo(); }
+      else if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); triggerRedo(); }
       else if (mod && event.key.toLowerCase() === 'f') { event.preventDefault(); shellFindToggle(); }
       else if (event.key === 'Tab') { event.preventDefault(); var start = input.selectionStart; input.value = input.value.slice(0, start) + '  ' + input.value.slice(input.selectionEnd); input.setSelectionRange(start + 2, start + 2); onInput(); }
     };
@@ -546,6 +984,11 @@
     var preview = shellRoot.querySelector('#ed-main-preview');
     if (preview) preview.addEventListener('click', onClick);
     shellHandlers = { input: onInput, scroll: onScroll, keydown: onKey, previewClick: onClick, preview: preview, inputNode: input };
+    var titleNode = shellRoot.querySelector('#ed-title');
+    if (titleNode) {
+      titleNode.setAttribute('data-tooltip', tr('editorRename', 'Click to rename'));
+      titleNode.onclick = function () { renameCurrent(); };
+    }
     global.EditorLayout.bind(shellRoot, hooks);
   }
 

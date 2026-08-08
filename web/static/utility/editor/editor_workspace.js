@@ -52,12 +52,15 @@
   }
 
   function seedMemory() {
-    if (!memory.nodes[TRASH_ID]) memory.nodes[TRASH_ID] = makeNode(TRASH_ID, 'Trash', 'folder', null, { system: 'trash' });
-    if (!memory.nodes[TEMP_ID]) memory.nodes[TEMP_ID] = makeNode(TEMP_ID, 'Temp', 'folder', null, { system: 'temp' });
-    if (!memory.nodes[WELCOME_ID]) memory.nodes[WELCOME_ID] = makeNode(WELCOME_ID, 'Welcome.md', 'file', null, { system: 'welcome' });
-    if (!Object.prototype.hasOwnProperty.call(memory.contents, WELCOME_ID)) memory.contents[WELCOME_ID] = WELCOME_TEXT;
-    if (!Array.isArray(memory.meta.expandedIds)) memory.meta.expandedIds = [TEMP_ID];
-    if (!Object.prototype.hasOwnProperty.call(memory.meta, 'currentFileId')) memory.meta.currentFileId = WELCOME_ID;
+    Object.keys(memory.nodes).forEach(function (id) {
+      var n = memory.nodes[id];
+      if (n && (n.system || id === TRASH_ID || id === TEMP_ID || id === WELCOME_ID || n.name === 'Trash' || n.name === 'Temp' || n.name === 'Welcome.md')) {
+        delete memory.nodes[id];
+        delete memory.contents[id];
+      }
+    });
+    if (!Array.isArray(memory.meta.expandedIds)) memory.meta.expandedIds = [];
+    if (memory.meta.currentFileId === WELCOME_ID) memory.meta.currentFileId = null;
   }
 
   function requestResult(request) {

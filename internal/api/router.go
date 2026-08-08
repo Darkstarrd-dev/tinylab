@@ -310,7 +310,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	combosHandler := combos.NewHandler(apiDeps)
 	sseHandler := sse.NewHandler(apiDeps)
 	consoleLogsHandler := console_logs.NewHandler(apiDeps)
-	editorHandler := editor.NewHandler()
+	editorHandler := editor.NewHandler(apiDeps)
 	textReviewHandler := textreview.NewHandler(apiDeps)
 	reviewPresetsHandler := review_presets.NewHandler(apiDeps)
 	keysHandler := keys.NewHandler(apiDeps)

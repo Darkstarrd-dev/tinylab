@@ -344,9 +344,16 @@ function fileTransferBind(root, actionButton, cancelButton) {
     zone.addEventListener('dragover', fileTransferDragOver);
     zone.addEventListener('dragleave', fileTransferDragLeave);
     zone.addEventListener('drop', fileTransferDrop);
-    zone.addEventListener('click', function(e) { if (e.target !== browse) input.click(); });
+    zone.addEventListener('click', function(e) {
+      if (e.target !== browse && !e.target.closest('#filetransfer-clear')) input.click();
+    });
     browse.onclick = function(e) { e.stopPropagation(); input.click(); };
-    if (clearButton) clearButton.onclick = fileTransferClear;
+    if (clearButton) {
+      clearButton.onclick = function(e) {
+        e.stopPropagation();
+        fileTransferClear();
+      };
+    }
     input.onchange = function() {
       fileTransferAddPlainFiles(Array.prototype.slice.call(input.files || []));
       input.value = '';
@@ -407,10 +414,14 @@ function renderUtilityFileTransfer(container) {
         '<input id="filetransfer-input" type="file" multiple style="display:none">' +
         '<div class="filetransfer-drop-title">' + escapeHtml(t('fileTransferDropHere')) + '</div>' +
         '<div class="filetransfer-drop-hint">' + escapeHtml(t('fileTransferPasteHint')) + '</div>' +
-        '<button type="button" class="btn btn-sm btn-primary" id="filetransfer-browse">' + escapeHtml(t('fileTransferBrowse')) + '</button>' +
+        '<div class="filetransfer-drop-actions">' +
+          '<button type="button" class="btn btn-sm btn-primary" id="filetransfer-browse">' + escapeHtml(t('fileTransferBrowse')) + '</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost filetransfer-clear-btn" id="filetransfer-clear" title="' + escapeHtml(t('fileTransferClear')) + '" aria-label="' + escapeHtml(t('fileTransferClear')) + '">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>' +
+          '</button>' +
+        '</div>' +
       '</div>' +
       '<div id="filetransfer-summary" class="filetransfer-summary"></div>' +
-      '<div class="filetransfer-toolbar"><button type="button" class="btn btn-sm btn-ghost" id="filetransfer-clear">' + escapeHtml(t('fileTransferClear')) + '</button></div>' +
       '<div id="filetransfer-file-list" class="filetransfer-file-list"></div>' +
       '<div id="filetransfer-progress-wrap" class="filetransfer-progress-wrap" hidden><div class="filetransfer-progress-head"><span>' + escapeHtml(t('fileTransferProgress')) + '</span><span id="filetransfer-progress-label"></span></div><progress id="filetransfer-progress" max="100" value="0"></progress></div>' +
       '<div id="filetransfer-result" class="filetransfer-result"></div>' +
@@ -439,12 +450,14 @@ function openFileTransferModal() {
       '<input id="filetransfer-input" type="file" multiple style="display:none">' +
       '<div class="filetransfer-drop-title">' + escapeHtml(t('fileTransferDropHere')) + '</div>' +
       '<div class="filetransfer-drop-hint">' + escapeHtml(t('fileTransferPasteHint')) + '</div>' +
-      '<button type="button" class="btn btn-sm btn-primary" id="filetransfer-browse">' + escapeHtml(t('fileTransferBrowse')) + '</button>' +
+      '<div class="filetransfer-drop-actions">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="filetransfer-browse">' + escapeHtml(t('fileTransferBrowse')) + '</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost filetransfer-clear-btn" id="filetransfer-clear" title="' + escapeHtml(t('fileTransferClear')) + '" aria-label="' + escapeHtml(t('fileTransferClear')) + '">' +
+          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>' +
+        '</button>' +
+      '</div>' +
     '</div>' +
     '<div id="filetransfer-summary" class="filetransfer-summary">' + escapeHtml(t('fileTransferSelectHint')) + '</div>' +
-    '<div class="filetransfer-toolbar">' +
-      '<button type="button" class="btn btn-sm btn-ghost" id="filetransfer-clear">' + escapeHtml(t('fileTransferClear')) + '</button>' +
-    '</div>' +
     '<div id="filetransfer-file-list" class="filetransfer-file-list"><div class="filetransfer-empty">' + escapeHtml(t('fileTransferNoFiles')) + '</div></div>' +
     '<div id="filetransfer-progress-wrap" class="filetransfer-progress-wrap" hidden>' +
       '<div class="filetransfer-progress-head"><span>' + escapeHtml(t('fileTransferProgress')) + '</span><span id="filetransfer-progress-label"></span></div>' +
@@ -466,9 +479,9 @@ function openFileTransferModal() {
   zone.addEventListener('dragover', fileTransferDragOver);
   zone.addEventListener('dragleave', fileTransferDragLeave);
   zone.addEventListener('drop', fileTransferDrop);
-  zone.addEventListener('click', function(e) { if (e.target !== browse) input.click(); });
+  zone.addEventListener('click', function(e) { if (e.target !== browse && !e.target.closest('#filetransfer-clear')) input.click(); });
   browse.onclick = function(e) { e.stopPropagation(); input.click(); };
-  if (clearButton) clearButton.onclick = fileTransferClear;
+  if (clearButton) clearButton.onclick = function(e) { e.stopPropagation(); fileTransferClear(); };
   input.onchange = function() {
     fileTransferAddPlainFiles(Array.prototype.slice.call(input.files || []));
     input.value = '';

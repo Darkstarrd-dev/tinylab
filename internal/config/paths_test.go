@@ -47,3 +47,46 @@ func TestResolveImageSaveDir(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveDocDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		docDir    string
+		configDir string
+		want      string
+	}{
+		{
+			name:      "empty docDir and empty configDir",
+			docDir:    "",
+			configDir: "",
+			want:      "docs",
+		},
+		{
+			name:      "empty docDir with configDir",
+			docDir:    "",
+			configDir: "/app/config",
+			want:      filepath.Join("/app/config", "docs"),
+		},
+		{
+			name:      "relative docDir with configDir",
+			docDir:    "custom_docs",
+			configDir: "/app/config",
+			want:      filepath.Join("/app/config", "custom_docs"),
+		},
+		{
+			name:      "absolute docDir",
+			docDir:    filepath.FromSlash("C:/data/docs"),
+			configDir: filepath.FromSlash("C:/app/config"),
+			want:      filepath.FromSlash("C:/data/docs"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveDocDir(tt.docDir, tt.configDir)
+			if got != tt.want {
+				t.Errorf("ResolveDocDir(%q, %q) = %q; want %q", tt.docDir, tt.configDir, got, tt.want)
+			}
+		})
+	}
+}

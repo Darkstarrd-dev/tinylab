@@ -32,16 +32,15 @@
     'find': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>',
     'open': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>',
     'save': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>',
-    'import': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>',
-    'export': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-    'export-html': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>',
-    'print': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>',
     'edit': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
     'side-preview': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16h-6V5h6v14z"/></svg>',
     'reader': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
     'focus': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/></svg>',
     'sync': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 3L5 6.99h3V14h2V6.99h3L9 3zm7 14.01V10h-2v7.01h-3L15 21l4-3.99h-3z"/></svg>',
-    'toc': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/></svg>'
+    'toc': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/></svg>',
+    'ai': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L14.39 7.61L20 10L14.39 12.39L12 18L9.61 12.39L4 10L9.61 7.61L12 2ZM6 15l1.19 2.81L10 19l-2.81 1.19L6 23l-1.19-2.81L2 19l2.81-1.19L6 15z"/></svg>',
+    'sidebar-collapse': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm6 3l-3 3 3 3V9z"/></svg>',
+    'sidebar-expand': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm-3 3l3 3-3 3V9z"/></svg>'
   };
 
   var ACTION_ICONS = {
@@ -49,7 +48,7 @@
     'new-folder': 'folder-plus',
     'delete': 'delete',
     'rename': 'pen',
-    'toggle-explorer': 'close',
+    'toggle-explorer': 'sidebar-collapse',
     'undo': 'undo',
     'redo': 'redo',
     'bold': 'bold',
@@ -77,10 +76,13 @@
     'reader': 'reader',
     'focus': 'focus',
     'sync': 'sync',
-    'toc': 'toc'
+    'toc': 'toc',
+    'ai': 'ai'
   };
 
   var SHORTCUT_HINTS = {
+    'save': 'Ctrl+S',
+    'open': 'Ctrl+O',
     'bold': 'Ctrl+B',
     'italic': 'Ctrl+I',
     'heading': 'Ctrl+H',
@@ -120,12 +122,15 @@
     b.type = 'button';
     b.setAttribute('data-action', action);
 
-    var tooltip = label;
+    var textKey = ACTION_LABEL_KEYS[action];
+    var labelText = textKey ? layoutText(textKey, label) : label;
+
+    var tooltip = labelText;
     if (SHORTCUT_HINTS[action]) {
       tooltip += ' (' + SHORTCUT_HINTS[action] + ')';
     }
     b.setAttribute('aria-label', tooltip);
-    b.title = tooltip;
+    b.setAttribute('data-tooltip', tooltip);
 
     if (iconName && SVG_ICONS[iconName]) {
       var iconSpan = make('span', 'ed-button-icon');
@@ -133,8 +138,8 @@
       b.appendChild(iconSpan);
     }
 
-    if (!hideLabel && showLabel && label) {
-      var labelSpan = make('span', 'ed-button-label', label);
+    if (!hideLabel && showLabel && labelText) {
+      var labelSpan = make('span', 'ed-button-label', labelText);
       b.appendChild(labelSpan);
     }
 
@@ -148,6 +153,7 @@
         if (Object.prototype.hasOwnProperty.call(attrs, key)) b.setAttribute(key, attrs[key]);
       }
     }
+
     return b;
   }
 
@@ -156,7 +162,7 @@
     'undo':'editorUndo', 'redo':'editorRedo', 'bold':'editorBold', 'italic':'editorItalic', 'heading':'editorHeading',
     'strike':'editorStrike', 'ul':'editorUnorderedList', 'ol':'editorOrderedList', 'checklist':'editorTaskList',
     'quote':'editorQuote', 'code':'editorCode', 'table':'editorTable', 'link':'editorLink', 'image':'editorImage',
-    'find':'editorFind', 'import':'editorImport', 'export':'editorExport', 'export-html':'editorExportHtml', 'print':'editorPrint', 'reader':'editorReader',
+    'find':'editorFind', 'reader':'editorReader', 'ai':'editorAI',
     'focus':'editorFocus', 'preview':'editorPreview', 'sync':'editorScrollSync', 'toc':'editorTableOfContents', 'open':'editorOpen',
     'save':'editorSave', 'edit':'editorEditMode', 'diff':'editorDiff', 'toggle':'editorToggle'
   };
@@ -243,13 +249,28 @@
     var explorerHeader = make('div', 'ed-explorer-header');
     
     var explorerActions = make('div', 'ed-explorer-actions');
-    appendButtons(explorerActions, [
-      ['new-file', 'New file'],
-      ['new-folder', 'New folder'],
-      ['delete', 'Delete'],
-      ['rename', 'Rename'],
-      ['toggle-explorer', 'Close Explorer', { 'data-toggle': 'explorer' }, { icon: 'close', hideLabel: true }]
+
+    var groupLeft = make('div', 'ed-explorer-group group-left');
+    appendButtons(groupLeft, [
+      ['open', 'Open'],
+      ['save', 'Save']
     ], { hideLabel: true });
+
+    var groupCenter = make('div', 'ed-explorer-group group-center');
+    appendButtons(groupCenter, [
+      ['new-file', 'New file'],
+      ['new-folder', 'New folder']
+    ], { hideLabel: true });
+
+    var groupRight = make('div', 'ed-explorer-group group-right');
+    appendButtons(groupRight, [
+      ['delete', 'Delete'],
+      ['rename', 'Rename']
+    ], { hideLabel: true });
+
+    explorerActions.appendChild(groupLeft);
+    explorerActions.appendChild(groupCenter);
+    explorerActions.appendChild(groupRight);
     explorerHeader.appendChild(explorerActions);
     explorer.appendChild(explorerHeader);
     var tree = make('ul', 'ed-file-tree');
@@ -266,7 +287,7 @@
     navigation.id = 'ed-navigation';
 
     var navLeft = make('div', 'ed-navigation-left');
-    var toggleExpBtn = button('toggle-explorer', 'Toggle Explorer', { 'data-toggle': 'explorer' }, { icon: 'folder', hideLabel: true });
+    var toggleExpBtn = button('toggle-explorer', 'Toggle Explorer', { 'data-toggle': 'explorer' }, { icon: 'sidebar-collapse', hideLabel: true });
     toggleExpBtn.className += ' ed-nav-explorer-toggle';
     navLeft.appendChild(toggleExpBtn);
 
@@ -277,14 +298,6 @@
     navigation.appendChild(navLeft);
 
     var navActions = make('div', 'ed-navigation-actions');
-    appendButtons(navActions, [
-      ['open', 'Open'],
-      ['save', 'Save'],
-      ['import', 'Import'],
-      ['export', 'Export', { 'data-kind': 'markdown' }],
-      ['export-html', 'HTML', { 'data-kind': 'html' }],
-      ['print', 'Print']
-    ], { showLabel: true });
     navigation.appendChild(navActions);
     main.appendChild(navigation);
 
@@ -306,11 +319,7 @@
     ], { hideLabel: true });
     formatGroup.appendChild(make('span', 'ed-toolbar-divider', ''));
     appendButtons(formatGroup, [
-      ['quote', 'Quote'], ['code', 'Code'], ['table', 'Table']
-    ], { hideLabel: true });
-    formatGroup.appendChild(make('span', 'ed-toolbar-divider', ''));
-    appendButtons(formatGroup, [
-      ['link', 'Link'], ['image', 'Image']
+      ['quote', 'Quote'], ['code', 'Code'], ['table', 'Table'], ['link', 'Link'], ['image', 'Image'], ['ai', 'AI Assistant']
     ], { hideLabel: true });
     formatGroup.appendChild(make('span', 'ed-toolbar-divider', ''));
     appendButtons(formatGroup, [
@@ -431,9 +440,6 @@
         safeCall(hooks.action, hooks, [action, event]);
         if (action === 'open') safeCall(hooks.open, hooks);
         else if (action === 'save') safeCall(hooks.save, hooks);
-        else if (action === 'import') safeCall(hooks.import, hooks);
-        else if (action === 'export' || action === 'export-html') safeCall(hooks.export, hooks, [actionNode.getAttribute('data-kind') || (action === 'export-html' ? 'html' : 'markdown')]);
-        else if (action === 'print') safeCall(hooks.print, hooks);
         if (actionNode.hasAttribute('data-toggle')) safeCall(hooks.toggle, hooks, [actionNode.getAttribute('data-toggle')]);
         if (action === 'toggle' && actionNode.hasAttribute('data-tree-node-id')) {
           safeCall(hooks.toggleTree, hooks, [actionNode.getAttribute('data-tree-node-id'), event]);
@@ -579,6 +585,18 @@
     return null;
   }
 
+  function updateExplorerToggleIcon(root, isExpanded) {
+    if (!root) return;
+    var btn = root.querySelector('.ed-action-toggle-explorer');
+    if (!btn) return;
+    var iconName = isExpanded ? 'sidebar-collapse' : 'sidebar-expand';
+    var labelText = isExpanded ? 'Collapse Explorer' : 'Expand Explorer';
+    btn.setAttribute('data-tooltip', labelText);
+    btn.setAttribute('aria-label', labelText);
+    var iconSpan = btn.querySelector('.ed-button-icon');
+    if (iconSpan && SVG_ICONS[iconName]) iconSpan.innerHTML = SVG_ICONS[iconName];
+  }
+
   global.EditorLayout = {
     create: create,
     bind: bind,
@@ -592,6 +610,7 @@
     setPreview: setPreview,
     setExplorer: setExplorer,
     setSync: setSync,
+    updateExplorerToggleIcon: updateExplorerToggleIcon,
     destroy: destroy
   };
 }(typeof window !== 'undefined' ? window : this));

@@ -522,6 +522,12 @@ async function openPathSettingsModal(opts) {
     var imgPh = configDir ? configDir + '/imgs' : 'imgs';
     formRows += browseRow('imageDir', 'modal-dl-image-dir', imgVal, imgPh, 'directory', null, imgInit);
   }
+  if (sections.docDir) {
+    var docVal = (res && res.docDir) || '';
+    var docInit = docVal || (configDir ? configDir + '/docs' : '');
+    var docPh = configDir ? configDir + '/docs' : 'docs';
+    formRows += browseRow('docDir', 'modal-dl-doc-dir', docVal, docPh, 'directory', null, docInit);
+  }
   if (sections.logDir) {
     var logVal = (res && res.trace && res.trace.logDir) || '';
     var logInit = logVal || (configDir ? configDir + '/traces' : '');
@@ -606,6 +612,7 @@ async function openPathSettingsModal(opts) {
     var payload = {};
     if (Object.keys(dlPayload).length) payload.download = dlPayload;
     if (sections.imageDir) payload.imageSaveDir = (document.getElementById('modal-dl-image-dir') || {}).value || '';
+    if (sections.docDir) payload.docDir = (document.getElementById('modal-dl-doc-dir') || {}).value || '';
     if (sections.logDir) payload.trace = { logDir: (document.getElementById('modal-dl-log-dir') || {}).value || '' };
 
     apiPatch('/settings', payload)

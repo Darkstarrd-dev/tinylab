@@ -1,6 +1,7 @@
 // Package editor implements the Editor page's text-file open/save handlers:
-// editorOpen uses a native file picker + os.ReadFile, and editorSave uses
-// atomic file writes (fsutil.AtomicWrite). Both speak JSON.
+// editorOpen uses a native file picker + os.ReadFile (or reads path from JSON body),
+// editorSave uses atomic file writes (fsutil.AtomicWrite), and editorTree lists
+// docDir files.
 package editor
 
 import (
@@ -12,51 +13,135 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 )
 
 // Handler provides HTTP handlers for the editor page.
-type Handler struct{}
+type Handler struct {
+	d *apibase.Deps
+}
 
 // NewHandler creates a new editor Handler.
-func NewHandler() *Handler {
-	return &Handler{}
+func NewHandler(d *apibase.Deps) *Handler {
+	return &Handler{d: d}
 }
 
 // Register wires up the editor routes on the given router.
 func (h *Handler) Register(r chi.Router) {
+	r.Get("/tree", h.editorTree)
+	r.Get("/docs", h.editorTree)
 	r.Post("/open", h.editorOpen)
 	r.Post("/save", h.editorSave)
 }
 
-// editorOpen shows a native file picker and returns the selected file's text
-// content. POST /api/editor/open (empty body or {}). Returns:
-//
-//	{ "cancelled": true }              — user cancelled the picker
-//	{ "unsupported": true }            — platform without a native picker
-//	{ "path": "...", "name": "...", "size": 1234, "content": "..." }
-//
-// On read error: 500 { "error": "..." }.
+// DocFileItem represents a file or directory inside the docDir.
+type DocFileItem struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	RelPath string `json:"relPath"`
+	IsDir   bool   `json:"isDir"`
+	Size    int64  `json:"size,omitempty"`
+}
+
+// editorTree returns the list of files in the configured docDir.
+func (h *Handler) editorTree(w http.ResponseWriter, r *http.Request) {
+	docDir := "docs"
+	if h != nil && h.d != nil {
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		docDir = config.ResolveDocDir(cfg.DocDir, configDir)
+	}
+	_ = os.MkdirAll(docDir, 0755)
+
+	absDocDir, err := filepath.Abs(docDir)
+	if err != nil {
+		absDocDir = docDir
+	}
+
+	var files []DocFileItem
+	_ = filepath.WalkDir(absDocDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == absDocDir {
+			return nil
+		}
+		rel, relErr := filepath.Rel(absDocDir, p)
+		if relErr != nil {
+			rel = filepath.Base(p)
+		}
+		relPath := filepath.ToSlash(rel)
+
+		info, infoErr := d.Info()
+		var size int64
+		if infoErr == nil && !d.IsDir() {
+			size = info.Size()
+		}
+
+		files = append(files, DocFileItem{
+			Name:    d.Name(),
+			Path:    p,
+			RelPath: relPath,
+			IsDir:   d.IsDir(),
+			Size:    size,
+		})
+		return nil
+	})
+
+	if files == nil {
+		files = []DocFileItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"docDir": absDocDir,
+		"files":  files,
+	})
+}
+
+// editorOpen shows a native file picker (or reads path if specified in JSON body)
+// and returns the selected file's text content. POST /api/editor/open.
 func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 	const maxSize int64 = 16 * 1024 * 1024 // 16 MiB
 
-	filter := "Text & Code (*.txt;*.md;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.html;*.css;*.xml;*.csv;*.log;*.py;*.sh;*.sql;*.lua)|*.txt;*.md;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.html;*.css;*.xml;*.csv;*.log;*.py;*.sh;*.sql;*.lua|All Files (*.*)|*.*"
+	var req struct {
+		Path string `json:"path"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
 
-	path, err := fsutil.OpenFilePicker(filter)
-	if err != nil {
-		if errors.Is(err, fsutil.ErrUnsupportedPlatform) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"unsupported": true})
+	path := req.Path
+	if path == "" {
+		filter := "Markdown & HTML & Text (*.md;*.html;*.htm;*.markdown;*.txt;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.css;*.xml)|*.md;*.html;*.htm;*.markdown;*.txt;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.css;*.xml|All Files (*.*)|*.*"
+
+		docDir := "docs"
+		if h != nil && h.d != nil {
+			cfg := h.d.Reg.Config()
+			configDir := ""
+			if h.d.ConfigPath != "" {
+				configDir = filepath.Dir(h.d.ConfigPath)
+			}
+			docDir = config.ResolveDocDir(cfg.DocDir, configDir)
+		}
+
+		var err error
+		path, err = fsutil.OpenFilePickerAt(filter, docDir)
+		if err != nil {
+			if errors.Is(err, fsutil.ErrUnsupportedPlatform) {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"unsupported": true})
+				return
+			}
+			apibase.WriteAPIError(w, http.StatusInternalServerError, "picker failed: "+err.Error())
 			return
 		}
-		apibase.WriteAPIError(w, http.StatusInternalServerError, "picker failed: "+err.Error())
-		return
-	}
-	if path == "" {
-		// User cancelled.
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
-		return
+		if path == "" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+			return
+		}
 	}
 
 	fi, err := os.Stat(path)

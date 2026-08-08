@@ -622,6 +622,55 @@ function confirmModal(message) {
   });
 }
 
+function promptModal(title, defaultValue, placeholder) {
+  return new Promise(function(resolve) {
+    var overlay = document.getElementById('modal-overlay');
+    if (!overlay) { resolve(null); return; }
+    if (overlay.classList.contains('show') || overlay.children.length > 0) { resolve(null); return; }
+    var val = defaultValue || '';
+    var ph = placeholder || '';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:440px;">' +
+        '<div class="modal-title">' + escapeHtml(title || t('inputPromptTitle')) + '</div>' +
+        '<div class="modal-body" style="margin-top:12px;">' +
+          '<input type="text" class="input" id="prompt-input" value="' + escapeAttr(val) + '" placeholder="' + escapeAttr(ph) + '" style="width:100%; box-sizing:border-box;" />' +
+        '</div>' +
+        '<div class="modal-footer">' +
+          '<button type="button" class="btn btn-ghost" id="prompt-cancel">' + t('cancel') + '</button>' +
+          '<button type="button" class="btn btn-primary" id="prompt-confirm">' + t('confirm') + '</button>' +
+        '</div>' +
+      '</div>';
+    overlay.classList.add('show');
+    var input = document.getElementById('prompt-input');
+    if (input) {
+      setTimeout(function() {
+        input.focus();
+        input.select();
+      }, 50);
+      input.onkeydown = function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          close(input.value.trim());
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          close(null);
+        }
+      };
+    }
+    function close(result) {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+      resolve(result);
+    }
+    document.getElementById('prompt-cancel').onclick = function() { close(null); };
+    document.getElementById('prompt-confirm').onclick = function() {
+      var inp = document.getElementById('prompt-input');
+      close(inp ? inp.value.trim() : null);
+    };
+  });
+}
+window.promptModal = promptModal;
+
 function closeModalOverlay() {
   document.dispatchEvent(new CustomEvent('tinyrouter:modal-close'));
   var overlay = document.getElementById('modal-overlay');

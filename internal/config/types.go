@@ -371,6 +371,7 @@ type Config struct {
 	AnySearch          AnySearchConfig  `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
 	Trace              TraceConfig      `yaml:"trace" json:"trace"`
 	ImageSaveDir       string           `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
+	DocDir             string           `yaml:"docDir,omitempty" json:"docDir,omitempty"`
 	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
 	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`

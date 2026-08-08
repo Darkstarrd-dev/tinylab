@@ -68,3 +68,23 @@ func ResolveArchiveTempDir(tempDir, configDir string) string {
 	}
 	return tempDir
 }
+
+// ResolveDocDir resolves the document directory. An empty docDir falls back to
+// {configDir}/docs (or "docs" if configDir is empty); a relative path is joined
+// with configDir; an absolute path is used verbatim.
+func ResolveDocDir(docDir, configDir string) string {
+	if docDir == "" {
+		if configDir != "" {
+			return filepath.Join(configDir, "docs")
+		}
+		return "docs"
+	}
+	if filepath.IsAbs(docDir) {
+		return docDir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, docDir)
+	}
+	return docDir
+}
+

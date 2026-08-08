@@ -47,9 +47,6 @@ async function renderEndpoint(c) {
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('pathSettingsDesc')) + '" onclick="openPathModal()">' + t('pathSettings') + '</span>\
         </div>\
         <div class="settings-row">\
-          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('fileTransferDesc')) + '" onclick="openFileTransferModal()">' + t('fileTransfer') + '</span>\
-        </div>\
-        <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('proxyDesc')) + '" onclick="openProxyModal()">' + t('proxySettings') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('proxyDesc')) + '"><input type="checkbox" id="proxy-toggle"' + (s.proxy && s.proxy.enabled ? ' checked' : '') + ' onchange="toggleProxy(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
