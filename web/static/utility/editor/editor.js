@@ -716,6 +716,11 @@ function edRenderParsed(idx) {
       if (typeof window !== 'undefined' && typeof window.markdownit === 'function') html = window.markdownit({ html: true, breaks: true, linkify: true }).render(content);
       else if (typeof marked !== 'undefined' && typeof marked.parse === 'function') html = marked.parse(content);
     } catch (e) { html = ''; }
+    if (html) {
+      html = html.replace(/src=["'](\.?\/imgs\/[^"']+)["']/gi, function(match, p1) {
+        return 'src="/api/editor/image?path=' + encodeURIComponent(p1) + '"';
+      });
+    }
     if (!html) html = '<pre>' + edEscapeHtml(content) + '</pre>';
     area.innerHTML = '<div class="pg-bubble pg-bubble-slot">' + edSanitizeHtml(html) + '</div>';
     edHighlight(area);

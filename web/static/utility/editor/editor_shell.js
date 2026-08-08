@@ -664,6 +664,36 @@
     };
   }
 
+  function uploadAndInsertImage(file, altText) {
+    var input = currentInput();
+    if (!input) return;
+    var formData = new FormData();
+    formData.append('file', file, file.name || 'image.png');
+    toast('Uploading image...', 'info');
+
+    fetch('/api/editor/upload-image', {
+      method: 'POST',
+      body: formData
+    }).then(function(res) {
+      if (!res.ok) throw new Error('Upload failed');
+      return res.json();
+    }).then(function(data) {
+      if (data && data.url) {
+        if (global.EditorCommands) {
+          global.EditorCommands.insertImage(input, altText || 'image', data.url);
+          updateGutter();
+          redraw();
+          toast('Image uploaded and inserted', 'success');
+        }
+      } else {
+        throw new Error('Invalid upload response');
+      }
+    }).catch(function(err) {
+      console.error('[Upload Image]', err);
+      toast('Image upload failed: ' + (err.message || 'Error'), 'error');
+    });
+  }
+
   function showImageModal() {
     var input = currentInput();
     var overlay = document.getElementById('modal-overlay');
@@ -671,6 +701,7 @@
     var selStart = input.selectionStart || 0;
     var selEnd = input.selectionEnd || 0;
     var selectedText = input.value.slice(selStart, selEnd);
+    var pendingFile = null;
 
     overlay.innerHTML =
       '<div class="modal" style="max-width:460px;">' +
@@ -678,7 +709,7 @@
         '<div class="modal-body" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">' +
           '<label style="font-size:12px; opacity:0.8;">Alt Description</label>' +
           '<input type="text" class="input" id="img-alt-input" value="' + escapeAttr(selectedText || 'image alt') + '" style="width:100%; box-sizing:border-box;" />' +
-          '<label style="font-size:12px; opacity:0.8;">Image URL / File</label>' +
+          '<label style="font-size:12px; opacity:0.8;">Image URL / Local File</label>' +
           '<div style="display:flex; gap:8px;">' +
             '<input type="text" class="input" id="img-url-input" placeholder="https://... or select local file" value="" style="flex:1; box-sizing:border-box;" />' +
             '<button type="button" class="btn btn-ghost" id="img-browse-btn" style="white-space:nowrap;">Browse...</button>' +
@@ -702,12 +733,8 @@
       browseBtn.onclick = function() { filePicker.click(); };
       filePicker.onchange = function() {
         if (filePicker.files && filePicker.files[0]) {
-          var file = filePicker.files[0];
-          var reader = new FileReader();
-          reader.onload = function(e) {
-            if (urlInput) urlInput.value = e.target.result;
-          };
-          reader.readAsDataURL(file);
+          pendingFile = filePicker.files[0];
+          if (urlInput) urlInput.value = pendingFile.name;
         }
       };
     }
@@ -721,7 +748,14 @@
       var uInput = document.getElementById('img-url-input');
       var altVal = aInput ? aInput.value.trim() : 'image alt';
       var urlVal = uInput ? uInput.value.trim() : '';
-      if (!urlVal) { toast('Please enter image URL or select a local image', 'warning'); return; }
+
+      if (pendingFile) {
+        close();
+        uploadAndInsertImage(pendingFile, altVal);
+        return;
+      }
+
+      if (!urlVal) { toast('Please enter image URL or select a local image file', 'warning'); return; }
       close();
       input.focus();
       if (global.EditorCommands) global.EditorCommands.insertImage(input, altVal, urlVal);
@@ -738,17 +772,7 @@
         var file = items[i].getAsFile();
         if (file) {
           e.preventDefault();
-          var reader = new FileReader();
-          reader.onload = function(evt) {
-            var input = currentInput();
-            if (input && global.EditorCommands) {
-              global.EditorCommands.insertImage(input, 'pasted_image', evt.target.result);
-              updateGutter();
-              redraw();
-              toast('Pasted image inserted', 'success');
-            }
-          };
-          reader.readAsDataURL(file);
+          uploadAndInsertImage(file, 'pasted_image');
           break;
         }
       }
@@ -766,7 +790,7 @@
     var isSelectionMode = !!selectedText;
 
     var titleText = isSelectionMode ? 'AI 润色 / 修改选中文本' : 'AI 智能辅助写作';
-    var storedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
+    var selectedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
 
     overlay.innerHTML =
       '<div class="modal" style="max-width:500px; width:90%;">' +
@@ -777,7 +801,10 @@
         '<div class="modal-body" style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">' +
           '<div>' +
             '<label style="font-size:12px; opacity:0.8; display:block; margin-bottom:4px;">选择 AI 模型 (Model)</label>' +
-            '<select class="input" id="ai-model-select" style="width:100%; box-sizing:border-box;"></select>' +
+            '<button type="button" class="btn btn-outline" id="ai-model-picker-btn" style="width:100%; text-align:left; justify-content:space-between; display:flex; align-items:center; min-height:36px; padding:6px 12px; background:var(--input-bg, rgba(0,0,0,0.2)); border:1px solid var(--border-color, rgba(255,255,255,0.15)); border-radius:6px; color:var(--text);">' +
+              '<span id="ai-model-label" style="font-weight:500;">' + escapeHtml(selectedModel || '-- 点击选择 AI 模型 --') + '</span>' +
+              '<span style="opacity:0.6; font-size:10px;">▼</span>' +
+            '</button>' +
           '</div>' +
           (isSelectionMode ?
             '<div>' +
@@ -797,54 +824,34 @@
       '</div>';
 
     overlay.classList.add('show');
-    var modelSelect = document.getElementById('ai-model-select');
+    var modelPickerBtn = document.getElementById('ai-model-picker-btn');
+    var modelLabel = document.getElementById('ai-model-label');
     var promptInput = document.getElementById('ai-prompt-input');
     var submitBtn = document.getElementById('ai-submit');
     var cancelBtn = document.getElementById('ai-cancel');
     var statusMsg = document.getElementById('ai-status-msg');
 
-    fetch('/api/models').then(function(res) { return res.json(); }).then(function(data) {
-      if (!modelSelect) return;
-      modelSelect.innerHTML = '';
-      var defaultOpt = document.createElement('option');
-      defaultOpt.value = '';
-      defaultOpt.textContent = '-- 请选择模型 --';
-      modelSelect.appendChild(defaultOpt);
-
-      if (data && Array.isArray(data.combos)) {
-        var comboGroup = document.createElement('optgroup');
-        comboGroup.label = 'Combos (组合策略)';
-        data.combos.forEach(function(c) {
-          var opt = document.createElement('option');
-          opt.value = 'combo:' + c.name;
-          opt.textContent = '⚡ combo:' + c.name;
-          comboGroup.appendChild(opt);
-        });
-        modelSelect.appendChild(comboGroup);
-      }
-
-      if (data && Array.isArray(data.providers)) {
-        data.providers.forEach(function(p) {
-          if (p && Array.isArray(p.models) && p.models.length) {
-            var group = document.createElement('optgroup');
-            group.label = p.name || p.id;
-            p.models.forEach(function(m) {
-              var opt = document.createElement('option');
-              var val = p.id + '/' + (m.id || m.name);
-              opt.value = val;
-              opt.textContent = m.name || m.id;
-              group.appendChild(opt);
-            });
-            modelSelect.appendChild(group);
-          }
-        });
-      }
-
-      if (storedModel) modelSelect.value = storedModel;
-      if (!modelSelect.value && modelSelect.options.length > 1) {
-        modelSelect.selectedIndex = 1;
-      }
-    }).catch(function() {});
+    if (modelPickerBtn) {
+      modelPickerBtn.onclick = function() {
+        if (typeof window.openModelPickerModal === 'function') {
+          window.openModelPickerModal(selectedModel, function(newModel) {
+            if (newModel) {
+              selectedModel = newModel;
+              if (modelLabel) modelLabel.textContent = selectedModel;
+              localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+            }
+          });
+        } else if (typeof window.pgOpenModelPicker === 'function') {
+          window.pgOpenModelPicker(selectedModel, function(newModel) {
+            if (newModel) {
+              selectedModel = newModel;
+              if (modelLabel) modelLabel.textContent = selectedModel;
+              localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+            }
+          });
+        }
+      };
+    }
 
     if (promptInput) setTimeout(function() { promptInput.focus(); }, 50);
 
@@ -855,7 +862,6 @@
     cancelBtn.onclick = close;
 
     submitBtn.onclick = function() {
-      var selectedModel = modelSelect ? modelSelect.value : '';
       var userPrompt = promptInput ? promptInput.value.trim() : '';
       if (!selectedModel) { toast('请先选择一个 AI 模型', 'warning'); return; }
       if (!userPrompt) { toast('请输入提示词要求', 'warning'); return; }

@@ -671,6 +671,104 @@ function promptModal(title, defaultValue, placeholder) {
 }
 window.promptModal = promptModal;
 
+function openModelPickerModal(currentValue, onSelect) {
+  if (typeof pgOpenModelPicker === 'function') {
+    pgOpenModelPicker(currentValue, onSelect);
+    return;
+  }
+  var overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  fetch('/api/models').then(function(r) { return r.json(); }).then(function(data) {
+    var items = [];
+    if (data && Array.isArray(data.combos)) {
+      data.combos.forEach(function(c) {
+        items.push({ id: 'combo:' + c.name, name: '⚡ combo:' + c.name });
+      });
+    }
+    if (data && Array.isArray(data.providers)) {
+      data.providers.forEach(function(p) {
+        if (p && Array.isArray(p.models)) {
+          p.models.forEach(function(m) {
+            items.push({ id: p.id + '/' + (m.id || m.name), name: (p.name || p.id) + ' / ' + (m.name || m.id) });
+          });
+        }
+      });
+    }
+    renderPicker(items);
+  }).catch(function() {
+    renderPicker([]);
+  });
+
+  function renderPicker(items) {
+    var selectedVal = currentValue || '';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:480px; width:90%; max-height:80vh; display:flex; flex-direction:column;">' +
+        '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<span>选择 AI 模型 (Model)</span>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="picker-close" style="padding:2px 8px;">✕</button>' +
+        '</div>' +
+        '<div style="margin-top:10px;">' +
+          '<input type="text" class="input" id="picker-filter" placeholder="搜索过滤模型 (Filter models)..." style="width:100%; box-sizing:border-box;" />' +
+        '</div>' +
+        '<div id="picker-list" style="margin-top:10px; flex:1; overflow-y:auto; max-height:360px; display:flex; flex-direction:column; gap:4px; padding-right:4px;">' +
+        '</div>' +
+        '<div class="modal-footer" style="margin-top:12px;">' +
+          '<button type="button" class="btn btn-ghost" id="picker-cancel">取消</button>' +
+          '<button type="button" class="btn btn-primary" id="picker-confirm">确定</button>' +
+        '</div>' +
+      '</div>';
+    overlay.classList.add('show');
+    var listEl = document.getElementById('picker-list');
+    var filterEl = document.getElementById('picker-filter');
+    var confirmBtn = document.getElementById('picker-confirm');
+    var cancelBtn = document.getElementById('picker-cancel');
+    var closeBtn = document.getElementById('picker-close');
+
+    function updateList(filterText) {
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      var query = (filterText || '').toLowerCase();
+      var filtered = items.filter(function(it) {
+        return !query || it.id.toLowerCase().indexOf(query) >= 0 || it.name.toLowerCase().indexOf(query) >= 0;
+      });
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div style="padding:16px; text-align:center; opacity:0.6; font-size:13px;">无匹配模型</div>';
+        return;
+      }
+      filtered.forEach(function(it) {
+        var itemDiv = document.createElement('div');
+        var isSel = it.id === selectedVal;
+        itemDiv.className = 'model-picker-item' + (isSel ? ' active' : '');
+        itemDiv.style.cssText = 'padding:8px 12px; border-radius:6px; cursor:pointer; font-size:13px; display:flex; justify-content:space-between; align-items:center; background:' + (isSel ? 'var(--accent-color-transparent, rgba(79, 70, 229, 0.15))' : 'rgba(255,255,255,0.03)') + '; border:1px solid ' + (isSel ? 'var(--accent-color, #4f46e5)' : 'transparent') + '; transition:background 0.15s;';
+        itemDiv.innerHTML = '<span>' + escapeHtml(it.name) + '</span>' + (isSel ? '<span style="color:var(--accent-color, #4f46e5); font-weight:bold;">✓</span>' : '');
+        itemDiv.onclick = function() {
+          selectedVal = it.id;
+          updateList(filterEl ? filterEl.value : '');
+        };
+        listEl.appendChild(itemDiv);
+      });
+    }
+
+    updateList('');
+    if (filterEl) {
+      setTimeout(function() { filterEl.focus(); }, 50);
+      filterEl.oninput = function() { updateList(filterEl.value); };
+    }
+    function close() {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+    cancelBtn.onclick = close;
+    closeBtn.onclick = close;
+    confirmBtn.onclick = function() {
+      close();
+      if (typeof onSelect === 'function') onSelect(selectedVal);
+    };
+  }
+}
+window.promptModal = promptModal;
+window.openModelPickerModal = openModelPickerModal;
+
 function closeModalOverlay() {
   document.dispatchEvent(new CustomEvent('tinyrouter:modal-close'));
   var overlay = document.getElementById('modal-overlay');
