@@ -853,6 +853,7 @@ async function renderHeaderQuickSlots() {
     if (quickslots.length === 0) {
       container.innerHTML = '';
       container.style.gridTemplateColumns = '';
+      window.dispatchEvent(new Event('resize'));
       return;
     }
     var cols = quickslots.length <= 3 ? quickslots.length : Math.ceil(quickslots.length / 2);
@@ -892,6 +893,7 @@ async function renderHeaderQuickSlots() {
     }
     container.innerHTML = html;
     _qsUpdateActiveClass();
+    window.dispatchEvent(new Event('resize'));
   } catch (e) {
     // ignore render errors (e.g. not yet on settings page)
   }

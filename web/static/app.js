@@ -62,7 +62,7 @@
 })();
 
 // --- State ---
-let currentPage = 'utility';
+let currentPage = 'monitor';
 let currentProviderId = null;
 let providersCache = [];
 let providerDetailCache = null;
@@ -110,8 +110,9 @@ function updateUtilityNavLabel() {
 function updateUtilityMenuState() {
   var menu = document.getElementById('utility-menu');
   if (!menu) return;
+  var toolToMark = utilityActiveTool || 'editor';
   menu.querySelectorAll('[data-utility-tool]').forEach(function(item) {
-    item.setAttribute('aria-current', item.dataset.utilityTool === utilityActiveTool ? 'page' : 'false');
+    item.setAttribute('aria-current', item.dataset.utilityTool === toolToMark ? 'page' : 'false');
   });
 }
 function utilityToolLifecycle(id, phase) {
@@ -131,8 +132,23 @@ function closeUtilityMenu() {
   utilityMenuOpen = false;
   var menu = document.getElementById('utility-menu');
   var button = document.querySelector('.nav-item[data-page="utility"]');
-  if (menu) menu.hidden = true;
+  if (menu) {
+    menu.classList.remove('open');
+    setTimeout(function() {
+      if (!utilityMenuOpen) menu.hidden = true;
+    }, 480);
+  }
   if (button) button.setAttribute('aria-expanded', 'false');
+}
+
+function focusUtilityMenuSelected() {
+  var menu = document.getElementById('utility-menu');
+  if (!menu || menu.hidden) return;
+  var toolToMark = utilityActiveTool || 'editor';
+  var selected = menu.querySelector('button[data-utility-tool="' + toolToMark + '"]') ||
+                 menu.querySelector('[aria-current="page"]') ||
+                 menu.querySelector('button:not([disabled])');
+  if (selected) selected.focus();
 }
 
 function openUtilityMenu() {
@@ -143,8 +159,14 @@ function openUtilityMenu() {
   menu.hidden = false;
   button.setAttribute('aria-expanded', 'true');
   updateUtilityMenuState();
-  var selected = menu.querySelector('[aria-current="page"]') || menu.querySelector('button:not([disabled])');
-  if (selected) selected.focus();
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      menu.classList.add('open');
+      focusUtilityMenuSelected();
+      setTimeout(focusUtilityMenuSelected, 50);
+      setTimeout(focusUtilityMenuSelected, 120);
+    });
+  });
 }
 
 function toggleUtilityMenu() {
@@ -162,6 +184,9 @@ function selectUtilityTool(id) {
 }
 
 function renderUtility(container) {
+  if (!utilityActiveTool || !utilityHasTool(utilityActiveTool)) {
+    utilityActiveTool = 'editor';
+  }
   if (utilityActiveTool && utilityHasTool(utilityActiveTool)) {
     if (utilityActiveTool === 'editor') return renderEditor(container);
     if (utilityActiveTool === 'logReader') return renderLogReader(container);
@@ -170,10 +195,10 @@ function renderUtility(container) {
     if (utilityActiveTool === 'download') return renderDownload(container);
     if (utilityActiveTool === 'fileTransfer') return window.renderUtilityFileTransfer(container);
   }
-  utilityActiveTool = null;
+  utilityActiveTool = 'editor';
   updateUtilityNavLabel();
   updateUtilityMenuState();
-  container.innerHTML = '<section class="card utility-landing"><h2>' + escapeHtml(t('utility')) + '</h2><p class="muted">' + escapeHtml(t('utilityDesc')) + '</p></section>';
+  return renderEditor(container);
 }
 // Fallback: close all streams when the tab is closed.
 window.addEventListener('beforeunload', () => {
@@ -192,6 +217,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 function navigateTo(page) {
+  if (utilityMenuOpen) closeUtilityMenu();
   var previousPage = currentPage;
   var previousIsUtilityTool = isUtilityTool(previousPage);
   var preserveUtilityState = previousIsUtilityTool || utilityHasTool(utilityActiveTool);
@@ -250,9 +276,11 @@ function navigateTo(page) {
   // rebuilds its DOM and binds exactly once (Download opens SSE, FileTransfer
   // binds its root, and GIF rebuilds its editor). Do not call resume hooks
   // before or after this render, which would duplicate those bindings.
-  if ((page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif') && mainEl) {
+  var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility');
+  if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
-    if (page === 'gif') container.style.height = '100%';
+    if (page === 'gif' || activeTool === 'gif') container.style.height = '100%';
   }
   function restoreFullscreenState() {
     if (wasFullscreen) {
@@ -805,7 +833,7 @@ document.addEventListener('keydown', function(e) {
   if (Shortcuts.matchEvent('global.goto-download', e)) {
     e.preventDefault();
     if (currentPage === 'utility' || UTILITY_TOOLS.some(function(tool) { return tool.id === currentPage; })) toggleUtilityMenu();
-    else { navigateTo('utility'); openUtilityMenu(); }
+    else { navigateTo('utility'); }
     return;
   }
   if (Shortcuts.matchEvent('global.goto-gallery', e)) { e.preventDefault(); navigateTo('gallery'); return; }
@@ -851,7 +879,14 @@ document.addEventListener('keydown', function(e) {
       if (matchedQuickslot) return;
     }
   }
-  // ESC: shutdown (only when no modal is open — modal case handled above)
+  // ESC: close utility menu if open, otherwise shutdown server (when no modal is open)
+  if (utilityMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {
+    e.preventDefault();
+    closeUtilityMenu();
+    var utBtn = document.querySelector('.nav-item[data-page="utility"]');
+    if (utBtn) utBtn.focus();
+    return;
+  }
   if (Shortcuts.matchEvent('global.shutdown-server', e)) {
     e.preventDefault();
     shutdownServer();

@@ -182,8 +182,7 @@ function setupHeaderResponsive() {
 function initApp() {
   if (window.__tinyRouterAppInitialized) return;
   window.__tinyRouterAppInitialized = true;
-  // A browser reload starts on the Utility landing page. Active utility state
-  // is intentionally memory-only; never restore a stale sessionStorage tool.
+  // Active utility state is intentionally memory-only; default to editor.
   sessionStorage.removeItem('trUtilityTool');
   if (typeof utilityActiveTool !== 'undefined') utilityActiveTool = null;
   initTheme();
@@ -191,13 +190,15 @@ function initApp() {
   initLang();
   initHeaderStats();
   setupHeaderResponsive();
+  if (typeof renderHeaderQuickSlots === 'function') {
+    renderHeaderQuickSlots();
+  }
   document.querySelectorAll('.nav-item').forEach(function(el) {
     el.addEventListener('click', function() {
       var page = el.dataset.page;
       if (page === 'utility') {
         if (currentPage !== 'utility' && !isUtilityTool(currentPage)) {
           navigateTo('utility');
-          openUtilityMenu();
         } else {
           toggleUtilityMenu();
         }
@@ -218,7 +219,14 @@ function initApp() {
       var index = items.indexOf(document.activeElement);
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        if (items.length) items[(index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+        if (items.length) {
+          if (index < 0) {
+            var activeItem = menu.querySelector('[aria-current="page"]') || items[0];
+            activeItem.focus();
+          } else {
+            items[(index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+          }
+        }
       } else if (e.key === 'Enter' && index >= 0) {
         e.preventDefault(); selectUtilityTool(items[index].dataset.utilityTool);
       } else if (e.key === 'Escape') {
@@ -231,5 +239,5 @@ function initApp() {
   document.addEventListener('click', function(e) {
     if (utilityMenuOpen && !e.target.closest('.utility-nav-wrap')) closeUtilityMenu();
   });
-  navigateTo('utility');
+  navigateTo('monitor');
 }
