@@ -1316,6 +1316,12 @@ tbody tr:last-child td{border-bottom:none}
   .info-modal-monitor .info-section-title-text{font-size:var(--font-code)}
   .info-modal-monitor .info-section-actions{flex-wrap:nowrap}
 }
+.info-modal-monitor .info-section-pretty-content{display:block}
+.info-modal-monitor .info-section-raw-content{display:none;box-sizing:border-box;width:100%;margin:0;padding:10px 12px;background:var(--code-bg);border-radius:8px;color:var(--text);font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-code);line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+.info-modal-monitor .info-section-view-raw .info-section-pretty-content{display:none}
+.info-modal-monitor .info-section-view-raw .info-section-raw-content{display:block}
+.info-modal-monitor .info-section-status>.info-section-title{justify-content:space-between}
+.info-modal-monitor .info-status-value{color:var(--text);font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-code);font-weight:var(--font-weight-normal)}
 
 /* =====================================================================
    Modal, Toast & Skeleton

@@ -52,15 +52,10 @@ function monitorRenderDataSection(title, value, sectionId) {
 
 function monitorRenderStatusSection(status, sectionId) {
   if (!infoHasValue(status)) return '';
-  return '<div class="info-section info-section-monitor info-section-collapsed" id="' + escapeHtml(sectionId) + '">' +
+  return '<div class="info-section info-section-monitor info-section-status" id="' + escapeHtml(sectionId) + '">' +
     '<div class="info-section-title">' +
-      '<button type="button" class="info-section-toggle" onclick="toggleInfoSection(this)" aria-expanded="false" aria-controls="' + escapeHtml(sectionId) + '-content">' +
-        '<span class="info-section-chevron" aria-hidden="true">&#9656;</span>' +
-        '<span class="info-section-title-text">' + escapeHtml(t('infoStatus')) + '</span>' +
-      '</button>' +
-    '</div>' +
-    '<div class="info-section-content" id="' + escapeHtml(sectionId) + '-content" hidden>' +
-      '<div class="info-status-value">' + escapeHtml(String(status)) + '</div>' +
+      '<span class="info-section-title-text">' + escapeHtml(t('infoStatus')) + '</span>' +
+      '<span class="info-status-value">' + escapeHtml(String(status)) + '</span>' +
     '</div>' +
   '</div>';
 }

@@ -41,7 +41,7 @@ function infoRawString(value) {
   if (value === undefined) return '';
   if (typeof value === 'string') return value;
   if (typeof value === 'object') {
-    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+    try { return JSON.stringify(value); } catch (e) { return String(value); }
   }
   return String(value);
 }
@@ -113,9 +113,10 @@ function renderInfoSection(title, data, rawOverrides, options) {
   if (sectionCopy) {
     actions += '<button type="button" class="info-copy-btn info-section-copy-btn" onclick="copyInfoSection(this)">' + t('copy') + '</button>';
   }
+  var rawSectionText = infoRawString(Object.prototype.hasOwnProperty.call(options, 'rawData') ? options.rawData : data);
   return '<div class="' + classes + '" id="' + escapeHtml(sectionId) + '" data-info-section-index="' + sectionIndex + '">' +
     '<div class="info-section-title">' + titleInner + (actions ? '<span class="info-section-actions">' + actions + '</span>' : '') + '</div>' +
-    '<div class="info-section-content" id="' + escapeHtml(contentId) + '"' + (collapsed ? ' hidden' : '') + '>' + content + '</div>' +
+    '<div class="info-section-content" id="' + escapeHtml(contentId) + '"' + (collapsed ? ' hidden' : '') + '><div class="info-section-pretty-content">' + content + '</div><pre class="info-section-raw-content">' + escapeHtml(rawSectionText) + '</pre></div>' +
   '</div>';
 }
 
@@ -141,7 +142,7 @@ function buildInfoField(key, value, rawOverride) {
   }
   if (typeof value === 'object') {
     var pretty = JSON.stringify(value, null, 2);
-    var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : pretty;
+    var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : JSON.stringify(value);
     return buildFieldWithSubFields(key, value, raw);
   }
   var raw = rawOverride !== undefined && rawOverride !== null ? rawOverride : String(value);
@@ -249,7 +250,6 @@ function toggleInfoSection(btn) {
   var chevron = btn.querySelector('.info-section-chevron');
   if (chevron) chevron.innerHTML = expanded ? '&#9656;' : '&#9662;';
 }
-
 function toggleInfoSectionView(btn, view) {
   var section = btn.closest('.info-section');
   if (!section) return;
@@ -257,8 +257,7 @@ function toggleInfoSectionView(btn, view) {
   for (var i = 0; i < sectionBtns.length; i++) {
     sectionBtns[i].classList.toggle('info-toggle-btn-active', sectionBtns[i] === btn);
   }
-  var fieldBtns = section.querySelectorAll('.info-field .info-toggle-btn[data-view="' + view + '"]');
-  for (var j = 0; j < fieldBtns.length; j++) toggleInfoView(fieldBtns[j], view);
+  section.classList.toggle('info-section-view-raw', view === 'raw');
 }
 function toggleInfoView(btn, view) {
   var field = btn.closest('.info-field');
