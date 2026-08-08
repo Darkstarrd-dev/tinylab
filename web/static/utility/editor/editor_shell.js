@@ -413,16 +413,23 @@
         shellState.selectedNode = node;
         shellState.currentId = id;
         shellState.currentNode = node;
-        shellState.original = text(content);
+        var loadedText = text(content);
+        shellState.original = loadedText;
         var input = currentInput();
         var draft = getDraft(id);
-        if (draft !== null && draft !== shellState.original) {
+
+        if (node.externalPath) {
+          if (input) input.value = loadedText;
+          shellState.dirty = false;
+          removeDraft(id);
+        } else if (draft !== null && draft !== shellState.original) {
           if (input) input.value = draft;
           shellState.dirty = true;
         } else {
-          if (input) input.value = shellState.original;
+          if (input) input.value = loadedText;
           shellState.dirty = false;
         }
+
         global.EditorWorkspace.setCurrentFile(id);
         if (global.EditorCommands) global.EditorCommands.clear(input);
         updateStatus();
@@ -733,9 +740,20 @@
   }
 
   function importWorkspaceFile(name, content, meta) {
-    return global.EditorWorkspace.putFile(name, content, null, meta || { imported: true }).then(function (node) {
-      if (!node) { toast('A file with that name already exists', 'warning'); return false; }
-      return refreshTree().then(function () { return loadFile(node.id); });
+    return global.EditorWorkspace.listNodes().then(function (nodes) {
+      var existing = (nodes || []).find(function (n) {
+        return n && n.type === 'file' && n.name.toLowerCase() === name.toLowerCase();
+      });
+      if (existing) {
+        removeDraft(existing.id);
+        return global.EditorWorkspace.updateNode(existing.id, { content: content, meta: meta || {} }).then(function (node) {
+          return refreshTree().then(function () { return loadFile(existing.id); });
+        });
+      }
+      return global.EditorWorkspace.putFile(name, content, null, meta || { imported: true }).then(function (node) {
+        if (!node) return false;
+        return refreshTree().then(function () { return loadFile(node.id); });
+      });
     });
   }
 
