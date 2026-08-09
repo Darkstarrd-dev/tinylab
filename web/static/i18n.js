@@ -267,10 +267,6 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     wrongPassword: 'Wrong password.',
     login: 'Login',
     exitApp: 'Exit',
-    setupRequiredDesc: 'First run: set a password to protect the management interface.',
-    confirmPassword: 'Confirm password',
-    passwordMismatch: 'Passwords do not match.',
-    setupSubmit: 'Set Password',
     security: 'Security',
     password: 'Password',
     // Gallery keys
@@ -920,10 +916,6 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     wrongPassword: '密码错误。',
     login: '进入',
     exitApp: '退出',
-    setupRequiredDesc: '首次启动：设置一个密码以保护管理界面。',
-    confirmPassword: '确认密码',
-    passwordMismatch: '两次输入的密码不一致。',
-    setupSubmit: '设置密码',
     security: '安全',
     password: '密码',
     // Gallery keys

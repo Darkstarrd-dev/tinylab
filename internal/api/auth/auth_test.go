@@ -288,7 +288,7 @@ func TestAuthStatusHandler_ResponseFormat(t *testing.T) {
 	}
 }
 
-func TestAuthStatusHandler_SetupRequired(t *testing.T) {
+func TestAuthStatusHandler_DisabledProtection(t *testing.T) {
 	h := newTestHandler(t, false)
 	req := httptest.NewRequest("GET", "/auth/status", nil)
 	w := httptest.NewRecorder()
@@ -299,35 +299,28 @@ func TestAuthStatusHandler_SetupRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	if data["authEnabled"] != false || data["passwordEnabled"] != false {
-		t.Errorf("expected auth disabled in setup-required state, got %v", data)
+		t.Errorf("expected password protection disabled, got %v", data)
 	}
-	if data["setupRequired"] != true {
-		t.Errorf("expected setupRequired true, got %v", data["setupRequired"])
+	if data["setupRequired"] != false {
+		t.Errorf("disabled protection must not require setup, got %v", data["setupRequired"])
+	}
+	if data["loggedIn"] != true || data["authenticated"] != true {
+		t.Errorf("disabled protection must report access as authenticated, got %v", data)
 	}
 }
 
-// --- Middleware: setup-required boundary (F-04) ---
+// --- Middleware: optional password protection ---
 
-func TestAuthMiddleware_SetupRequiredBlocksManagement(t *testing.T) {
+func TestAuthMiddleware_DisabledProtectionAllowsManagement(t *testing.T) {
 	h := newTestHandler(t, false)
-	// Even a validly stored session must not pass: in setup-required state no
-	// management route is reachable.
-	token, _, err := SessionStore.NewSession("test")
-	if err != nil {
-		t.Fatal(err)
-	}
 	req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	w := httptest.NewRecorder()
 	h.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})).ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 in setup-required state, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "setup_required") {
-		t.Fatalf("expected setup_required error body, got %q", w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected management access without password, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -572,23 +565,23 @@ func TestLoginFlow_ConcurrentLogins(t *testing.T) {
 	}
 }
 
-// --- Setup endpoint (F-04 setup-required bootstrap) ---
+// --- Setup endpoint (optional password bootstrap) ---
 
-func TestSetupHandler_InitializesProtection(t *testing.T) {
+func TestSetupHandler_EnablesProtectionOnDemand(t *testing.T) {
 	srv, _ := newTestRouter(t, false)
 
-	// Management API is locked in setup-required state.
+	// No-password mode is immediately usable and is not setup-required.
 	resp := doJSON(t, "GET", srv.URL+"/api/auth/status", "", nil)
 	var status map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if status["setupRequired"] != true {
-		t.Fatalf("expected setupRequired before setup, got %v", status)
+	if status["setupRequired"] != false || status["authenticated"] != true {
+		t.Fatalf("expected optional setup status, got %v", status)
 	}
 
-	// Setup with a password unlocks the app and mints a session + CSRF.
+	// The explicit setup endpoint can still enable protection on demand.
 	resp = doJSON(t, "POST", srv.URL+"/api/auth/setup", `{"password":"`+testPassword+`"}`, map[string]string{
 		"Content-Type": "application/json",
 		"Origin":       srv.URL,

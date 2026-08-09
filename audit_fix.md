@@ -118,12 +118,12 @@ govulncheck ./...                      本机未安装，未完成 Go 漏洞数�
 
 推荐目标：
 
-- `/api/*` 管理面始终有认证状态；
-- 首次启动可以保留“用户尚未设置密码”的 UI 流程，但在完成初始化前只能访问状态和设置密码所需的最小 bootstrap endpoint，不能访问 Provider、Key、Settings 敏感字段、FileTransfer、Gallery、Editor、Archive 等能力；
-- 现有 `PasswordEnabled=false` 配置迁移为 `setup-required`，而不是继续无条件放行全部管理路由；
-- `/v1/*` 是否保持无应用层认证必须作为显式兼容决策。推荐保持现有本地代理语义，但绝不允许 `/v1` 获得配置修改能力，也不把 `/v1` 误称为管理认证。
+- `/api/*` 管理面是否启用密码保护由 `Security.PasswordEnabled` 决定；关闭时管理路由直接放行，首次启动和关闭保护均不得强制 setup 弹窗。
+- 仅当 `PasswordEnabled=true` 时，进入管理 UI 需要有效 session；状态变更请求还需 session-bound CSRF、Origin/Referer 和 JSON/multipart Content-Type。
+- `PasswordEnabled=false` 配置保持开放管理语义，不迁移为 setup-required；`POST /api/auth/setup` 仅作为用户主动启用密码的可选 bootstrap。
+- `/v1/*` 是否保持无应用层认证必须作为显式兼容决策。保持本地代理语义，但不允许 `/v1` 获得配置修改能力，也不把 `/v1` 误称为管理认证。
 
-如果产品最终决定继续允许完全无密码管理 API，必须单独记录为明确的“不提供本地进程隔离”的产品决策；该决策不能标记本方案的安全门禁为通过。
+该产品决策接受“关闭密码时不提供本地管理面进程隔离”的风险；密码开启后仍由 session/CSRF 门禁保护管理接口。
 
 ### 3.2 CSRF 目标
 
@@ -242,19 +242,17 @@ govulncheck ./...                      本机未安装，未完成 Go 漏洞数�
 
 实施：
 
-1. 增加明确的 `setup-required` 状态，区分：
-   - 未初始化；
-   - 已设置密码且已保护；
-   - 迁移旧配置但无密码。
-2. 除 `/auth/status`、登录和最小 bootstrap 外，所有 `/api` 管理路由必须有 session。
-3. 旧配置 `PasswordEnabled=false` 不得继续无条件访问 Provider/Key/Settings/FileTransfer/Gallery/Editor/Archive。
+1. 保留三种可观察状态：开放管理（未启用密码）、已设置密码且已保护、配置不一致（由 `finalizeConfig` 归一化并告警）。
+2. `PasswordEnabled=false` 时所有管理路由直接访问；`PasswordEnabled=true` 时除公开 auth status/login/setup 外，管理路由必须有 session。
+3. 关闭密码保护清除 `PasswordEncrypted`/`EncryptionKey`，随后页面切换与刷新仍保持开放管理，不得重新触发 setup-required。
 4. session token 保持密码学随机；增加 session 生命周期、注销、清空和必要的 session owner 信息。
-5. `/v1` 是否加认证不在 A-1 中偷偷改变。默认方案保持兼容，但在 API 文档中明确“这是代理入口，不是管理认证”；若产品要求密码阻止本地程序使用 Key，另开兼容变更启用 `/v1` token/session gate。
+5. `/v1` 是否加认证不在 A-1 中偷偷改变。保持协议兼容并明确“这是代理入口，不是管理认证”；若产品要求密码阻止本地程序使用 Key，另开兼容变更启用 `/v1` token/session gate。
 
 验收：
 
-- 未初始化时 `/api/providers`、`/api/keys`、`/api/settings` 返回 `401` 或明确 `setup_required`，不返回任何 Provider/Key 数据；
-- 密码正确登录后可访问；错误/过期/注销 session 全部拒绝；
+- 开放管理模式下 `/api/providers`、`/api/keys`、`/api/settings` 可直接访问，`/api/auth/status` 返回 `setupRequired:false` 和已认证状态，不返回强制 setup 弹窗信号；
+- 显式启用密码后，正确登录可访问；错误/过期/注销 session 全部拒绝；
+- 关闭密码保护后清除密码密文和加密密钥，页面切换/刷新仍可访问管理路由；
 - 旧 config migration 不丢 Provider/Key，但不再直接泄露；
 - `/v1` 行为与最终产品决策一致，并有测试固定。
 
@@ -709,14 +707,11 @@ type AssetRef struct {
 
 必须在实施前冻结以下决定：
 
-- `/v1` 是否继续无应用层认证；推荐保持协议兼容，但文档明确其只能代表本地代理，不代表管理认证；
-- 首次无密码配置是否迁移为 setup-required；推荐迁移；
+- `/v1` 是否继续无应用层认证；保持协议兼容，但文档明确其只能代表本地代理，不代表管理认证；
+- 无密码配置是否保持开放管理；本次按产品要求不迁移为 setup-required，只有显式开启密码保护才进入登录门禁；
 - 是否继续支持任意用户选择的本地目录；推荐支持 picker/grant，而不是任意路径 API；
 - Download 是否允许公共 URL 重定向；必须以受控 SSRF fixture 的结果决定；
 - 7z/RAR 只读和 ZIP writeback 的能力边界；继续继承现有 Archive 计划。
-
----
-
 ## 6. 测试和验收矩阵
 
 ### 6.1 安全单元测试
@@ -731,7 +726,7 @@ type AssetRef struct {
 | Path | `../`、编码 traversal、绝对路径、盘符、UNC、NUL、ADS、设备名、符号链接、root sibling |
 | Grants | grant TTL、owner/session 隔离、operation read/write/delete/export、重复消费 |
 | Gallery | file/list-dir/zip-from-path/zip-writeback/edit 全部拒绝任意 path |
-| FileTransfer | 只能消费登记 grant，不能直接读取配置/SSH/其他目录 |
+| Auth | 开放管理模式、主动 setup、密码登录、session 过期、注销、错误密码、malformed body 限速、并发登录 |
 | SSRF | loopback/private/link-local/multicast、redirect、DNS rebinding、userinfo、异常 scheme |
 | ffprobe | http/https/rtmp/tcp input 拒绝，file-only 通过 |
 | Tools | 工具路径校验、argv、timeout、process group、Windows/macOS/Linux |
@@ -829,7 +824,7 @@ node --check <所有受影响 JS>
 - `/v1` 是否需要认证；
 - 私有 Provider 是否允许连接 localhost；
 - Download 是否允许跟随公共 URL 到私网；
-- 首次启动是否强制 setup-required；
+- 关闭密码时是否允许开放管理；本次产品决策为允许，且必须覆盖启动、关闭保护后页面切换和刷新；
 - Mermaid 升级造成的渲染兼容性。
 
 这些决策必须记录影响、替代方案、验证证据和责任人；不能用“localhost only”或“管理员可操作”作为无证据的风险豁免。
@@ -946,14 +941,12 @@ node --check <所有受影响 JS>
 | F-01 | fixed | 2bc4637，Phase B | `internal/filetransfer/upload_test.go`；`Upload`/`collectParts` 只接受 multipart 或 `pathGrantId`（`h.grants.Resolve(owner, id, OpExport)`），raw `paths` 400/410；`/paste` 剪贴板→export grants；`path-info` 仅查已登记 grant；上限 500MiB/2000 文件/1GiB/深 32/30s | | 见 `internal/filetransfer/upload.go` 包文档（F-01/B-2 合同） |
 | F-02 | fixed | 2bc4637，Phase B | `internal/api/editor/register_test.go`（traversal/410/grant）；`resolveDocFile`（`pathgrant.StrictRel`+`realPathWithin` 符号链接包含）、`openTarget`/`saveTarget`/`deleteTarget` 仅 `fileId`/`pathGrantId`，raw `path`→410；`maxOpenSize` 16MiB；`/upload-image` 白名单+服务端文件名 | | 前端 `editor_shell.js`/`editor.js` 已同步 fileId/pathGrantId |
 | F-03 | fixed | 2bc4637，Phase B | 后端：`fs_handlers.go`/`zip_handlers.go`/`edit_handlers.go` 全部端点 grantId/assetId/sourceId，raw path→410（`register_grant_test.go`/`edit_handlers_test.go`）；**前端已迁移**：`gallery-edit-operations.js::_startJob` 发 `{inputAssetId | inputGrantId+inputRel, operation, subtitleAssetId, outputName}`、`zip-outputs`→`{assetIds,zipName,cleanUp}`、`edit/zip-writeback`→`{sessionId,grantId,entries}`、`/fs` 删除与 `/file` 读取→`grantId+rel`、`zip-replace`→`{sourceId,deletes}`；无活跃旧合同请求（剩余 `zipAbsPath`/`rootDirPath` 引用为**永不赋值的死分支**）；**GIF 编辑器导出合同亦已迁移（2026-08-09）：** `web/static/gif-editor/gif-editor-export.js` ZIP 导出改为 上传帧→`assetId` → `POST /api/archive/pack`（或 legacy `zip-outputs` `{assetIds}`）→ 经受控 `/api/gallery/file?assetId=` 下载（不再读 `tempPath`/`paths`）；`web/gif-editor-export-contract.test.js`（零依赖 Node VM 合同测试：upload-temp→assetId、zip-outputs body 无 `paths` 键、assetId 下载）PASS | | 残留功能缺陷（非安全）：`gallery-edit.js` 单 zip 条目 extract→edit 仍读已移除的 `data.tempPath`（后端只回 `assetId`）→ 该流程 probe 拿不到输入（`gallery-edit-batch.js:340` 的批量流与 GIF 导出已正确用 `data.assetId`）；登记为待修 |
-| F-04 | fixed | 2bc4637，Phase A | `internal/api/api_test.go::TestSetupRequired_BlocksManagementRoutes`（providers/settings/keys/monitor/filetransfer/archive/editor/gallery/comfyui 401+泄漏扫描）、`TestSecretMinimizedDTOs`、`TestSettings_AnySearchHasApiKeyOnly`；auth 包 26 测试 | | setup-required 状态机；`ProviderDTO`/`KeyDTO`/`MaskKey`/`hasApiKey` |
-| F-05 | fixed | 2bc4637，Phase A | `api_test.go::TestCSRF_BlocksSimplePOST`（PATCH 无 token→403）；`auth_test.go`（Origin/Content-Type/会话生命周期）；`web/static/auth.js` 全局 fetch 注入 `X-CSRF-Token` | | session-bound token + Origin/Referer + JSON/multipart；GET/SSE 不受限 |
+| F-04 | fixed | 2bc4637，Phase A + optional-protection correction | `internal/api/api_test.go::TestNoPassword_AllowsManagementRoutes`/`TestDisablePassword_RemainsOpenForNavigation`；`auth_test.go::TestAuthStatusHandler_DisabledProtection`/`TestAuthMiddleware_DisabledProtectionAllowsManagement`/`TestSetupHandler_EnablesProtectionOnDemand`；Provider/Key DTO 泄漏扫描 | | `PasswordEnabled=false` 时管理路由直接放行、状态不返回 setup-required；显式 setup 或 Settings 密码弹窗才开启保护 |
+| F-05 | fixed | 2bc4637，Phase A + optional-protection correction | `api_test.go::TestCSRF_BlocksSimplePOST`（PATCH 无 token→403）；`auth_test.go`（Origin/Content-Type/会话生命周期）；`web/static/auth.js` 全局 fetch 注入 `X-CSRF-Token` | | 仅保护开启时执行 session-bound token + Origin/Referer + JSON/multipart；开放管理模式不触发登录/设置密码弹窗 |
 | F-06 | fixed | 2bc4637，Phase C | `internal/outbound/outbound_test.go`（7 测试：结构/IP 矩阵/DNS rebinding/重定向）；`probe_proto_test.go`；`Deps.ManagementClient` + `Provider.AllowPrivateNetwork`；providers `maxModelsResponseBytes` 8MiB 有界 | | probe/combos/image/download/imagebatch 统一 outbound 策略 |
 | F-07 | fixed | 2bc4637，Phase C | `internal/mediaedit/mediaedit_security_test.go`（6 测试）；`validateLocalMediaInput`/`validateSubtitleInput` + `-protocol_whitelist file`（probe/executor） | | ffprobe 不再接受网络 URL |
 | F-08 | fixed | 2bc4637，Phase C | `internal/procutil/toolpath_test.go`（2）+ `internal/archivetool/tool_test.go`（7：MissingPath/DirectoryRejected/TempDirRejected/ControlCharsRejected/ValidExecutable 等）；`archivetool/tool.go::validateTool` 已迁移 `procutil.ValidateExecutable`（F-08 合同注释）；settings Download 路径 PATCH、`download/binary.go::resolveConfiguredTool`、`mediaedit/binary.go::validateResolvedTool` 均已接入；`go test ./internal/archivetool/ ./internal/procutil/ ./internal/download/` ok | | 工具路径校验点全部迁移完成 |
 | F-09 | fixed | 2bc4637，Phase C | `internal/fsutil/open_other_test.go`（`TestOSAPickerScriptIsParameterized`/`TestOSAPickerKindIsFixed`，`!windows`）；`pickerEnvVar="TR_PICKER_INITIAL_DIR"` 环境传递，脚本字节级固定 | | 恶意 initialDir 无法注入 AppleScript |
-| F-10 | fixed | 2bc4637，Phase C | `editor_shell.js` `iframe.setAttribute('sandbox','')`（零权限，不执行脚本/表单/弹窗/同源）；TOC 由父页 DOMParser 构建；`node --check editor_shell.js` PASS | | 预览 .html 无法 fetch `/api/*` 或读 `parent.document`；Markdown 预览仍 DOMPurify |
-| F-11 | fixed | 2bc4637，Phase B | `internal/archive/tempstore_test.go`（owner 隔离/配额/cross-session）、`zip_writer_test.go`/`zip_adapter_test.go`（owner 签名）；`TempStore` 全部 owner 参数化 + `Source.Owner`/`ErrOwnership` | | 配额：每 owner 数量/字节、每 job、全局 |
 | F-12 | decision-required | —（决策已记录） | `internal/api/router.go`：`/v1/*` 仍位于 `AuthMiddleware` 之外；无应用层认证、无配置修改能力 | | 决策：保持本地代理入口语义（Phase A 报告 + `docs/proxy-architecture.md` §3 同步）；若需密码阻止本地程序用 Key，另开兼容变更 |
 | F-13 | fixed | 2bc4637，Phase D | `internal/archivetool/parse_test.go`：`TestParseSevenZipSLT`（含绝对路径 header fixture）/`_HeaderOnly`/`_NoEntryMetaBlock`/`_EmptyPathBlock`；`go test ./internal/archivetool/` ok | | header block 不再转 rawEntry，绝对归档路径不进 `ValidateEntryPaths` |
 | F-14 | fixed | 2bc4637，Phase D | `internal/sse/sse_test.go`（3 预算测试）；`internal/proxy` 全量 ok（44s，含 `TestPassThrough_LargeBodyStreamsFully` 64MiB < 256MiB cap）；probe/combos/providers 有界读取 | | `passThroughResponse` 256MiB 预算+受控 502；SSE 1MiB/行 8MiB 总缓冲；usage 捕获预算分离 |

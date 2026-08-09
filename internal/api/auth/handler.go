@@ -174,14 +174,12 @@ func NewHandler(d *apibase.Deps) *Handler {
 }
 
 // Register registers auth routes and returns the auth middleware for use
-// by other domains. The returned middleware enforces the full management
-// boundary: setup-required state, session validity, and CSRF/origin/content
-// type on state-changing requests.
+// by other domains. The returned middleware enforces sessions and CSRF only
+// when password protection is enabled.
 func (h *Handler) Register(r chi.Router) func(http.Handler) http.Handler {
 	loginLimiter := newLoginRateLimiter()
 
-	// Public bootstrap endpoints: auth status, login, and the minimal
-	// setup-password endpoint reachable only while setup-required.
+	// Auth status, login, and optional password setup remain public routes.
 	r.Get("/auth/status", h.AuthStatusHandler)
 	r.Post("/auth/login", loginLimiter.Wrap(h.LoginHandler))
 	r.Post("/auth/setup", h.SetupHandler)
@@ -201,24 +199,14 @@ func (h *Handler) isAuthEnabled() bool {
 	return cfg.Security.PasswordEnabled
 }
 
-// AuthMiddleware is the management API gate. It enforces, in order:
-//
-//  1. setup-required: when no password is configured the management API is
-//     locked (401 setup_required) until POST /api/auth/setup initializes
-//     password protection. Legacy PasswordEnabled=false configs migrate to
-//     this state instead of open access.
-//  2. a valid session cookie must be present.
-//  3. state-changing requests (POST/PUT/PATCH/DELETE) must additionally pass
-//     the CSRF contract: a session-bound X-CSRF-Token, a local Origin/Referer
-//     when present, and a JSON or multipart Content-Type when present.
+// AuthMiddleware is the management API gate. When password protection is
+// disabled, management routes remain directly accessible. When enabled, a
+// valid session is required and state-changing requests additionally pass the
+// CSRF/origin/content-type checks.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !h.isAuthEnabled() {
-			// Setup-required: no password configured yet. Only the public
-			// bootstrap endpoints (/api/auth/status, /api/auth/login,
-			// /api/auth/setup) are reachable; every management route stays
-			// locked until password protection is initialized.
-			apibase.WriteAPIError(w, http.StatusUnauthorized, "setup_required")
+			next.ServeHTTP(w, r)
 			return
 		}
 
@@ -237,9 +225,9 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 // csrfChecksPass enforces the CSRF contract for state-changing requests:
-// a session-bound X-CSRF-Token, a local Origin/Referer, and a JSON or
-// multipart Content-Type. It writes the error response and returns false
-// when any check fails.
+// a session-bound X-CSRF-Token, a local Origin, and a JSON or multipart
+// Content-Type. It writes the error response and returns false when any
+// check fails.
 func (h *Handler) csrfChecksPass(w http.ResponseWriter, r *http.Request, sessionToken string) bool {
 	// 1. Session-bound CSRF token. A session whose RNG failed carries an
 	// empty token and rejects everything (fail-closed).
@@ -312,12 +300,12 @@ func originAllowed(r *http.Request, port int) bool {
 	return port == 80
 }
 
-// AuthStatusHandler returns the current auth status (enabled/disabled +
-// logged in + setup-required) and, when logged in, the session-bound CSRF
-// token the UI must echo on state-changing requests.
+// AuthStatusHandler returns the current auth status. Disabled password
+// protection is an intentional open-management mode, so it is reported as
+// authenticated and never as setup-required.
 func (h *Handler) AuthStatusHandler(w http.ResponseWriter, r *http.Request) {
 	enabled := h.isAuthEnabled()
-	loggedIn := false
+	loggedIn := !enabled
 	csrf := ""
 	if enabled {
 		if cookie, err := r.Cookie(sessionCookieName); err == nil {
@@ -331,7 +319,7 @@ func (h *Handler) AuthStatusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"authEnabled":     enabled,
 		"passwordEnabled": enabled,
-		"setupRequired":   !enabled,
+		"setupRequired":   false,
 		"loggedIn":        loggedIn,
 		"authenticated":   loggedIn,
 		"csrfToken":       csrf,
@@ -352,7 +340,8 @@ func requireJSONBody(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// LoginHandler handles password-based login.
+// LoginHandler handles password-based login. Login is only meaningful when
+// password protection is enabled; disabled protection is already open.
 func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if !requireJSONBody(w, r) {
 		return
@@ -366,16 +355,14 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := h.d.Reg.Config()
 	if !cfg.Security.PasswordEnabled {
-		// Setup-required: login is not the bootstrap path; the UI must use
-		// POST /api/auth/setup to initialize password protection.
-		apibase.WriteAPIError(w, http.StatusUnauthorized, "setup_required")
+		apibase.WriteAPIError(w, http.StatusUnauthorized, "password protection is disabled")
 		return
 	}
 	// Defense-in-depth: password protection is enabled but no password was ever
 	// saved. finalizeConfig normalizes this to disabled on load, but if we
 	// somehow reach here, reject login instead of granting access.
 	if cfg.Security.PasswordEncrypted == "" || cfg.Security.EncryptionKey == "" {
-		apibase.WriteAPIError(w, http.StatusInternalServerError, "password protection is enabled but no password is configured; run setup via the setup screen")
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "password protection is enabled but no password is configured")
 		return
 	}
 	plaintext, err := config.Decrypt(cfg.Security.EncryptionKey, cfg.Security.PasswordEncrypted)
@@ -404,9 +391,8 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"success": true, "csrfToken": csrf})
 }
 
-// SetupHandler initializes password protection from the setup-required state
-// (no password configured). It is the minimal public bootstrap endpoint: it
-// sets a password, persists the config, clears stale sessions and mints the
+// SetupHandler optionally enables password protection from the open mode. It
+// sets a password, persists the config, clears stale sessions, and mints the
 // caller a fresh session + CSRF token. When protection is already enabled the
 // endpoint rejects with 409.
 func (h *Handler) SetupHandler(w http.ResponseWriter, r *http.Request) {

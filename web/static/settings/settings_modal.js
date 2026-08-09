@@ -361,7 +361,8 @@ async function savePasswordModal() {
     return;
   }
   try {
-    await apiPatch('/settings', { security: { password: newPw.value } });
+    var result = await apiPatch('/settings', { security: { password: newPw.value } });
+    if (result && result.csrfToken) window.__setCsrfToken(result.csrfToken);
     toast(t('passwordSaved'), 'success');
     closeModalOverlay();
     // Update page toggle to reflect enabled state.

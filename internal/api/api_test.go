@@ -772,11 +772,11 @@ func TestModelKeys_PerModelStatusIsolation(t *testing.T) {
 	}
 }
 
-// TestSetupRequired_BlocksManagementRoutes verifies F-04: with no password
-// configured (legacy PasswordEnabled=false), every management surface —
-// including the route groups outside the generic /api group — returns 401
-// setup_required and no provider/key data.
-func TestSetupRequired_BlocksManagementRoutes(t *testing.T) {
+// TestNoPassword_AllowsManagementRoutes verifies that PasswordEnabled=false
+// keeps the optional password protection disabled: management routes remain
+// usable, status does not advertise setup-required, and secret-minimized DTOs
+// still do not expose plaintext provider keys.
+func TestNoPassword_AllowsManagementRoutes(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Providers = []config.Provider{
 		{
@@ -796,54 +796,71 @@ func TestSetupRequired_BlocksManagementRoutes(t *testing.T) {
 	srv := httptest.NewServer(apiRouter.Routes(proxyHandler))
 	defer srv.Close()
 
-	// Public bootstrap endpoints stay reachable.
 	resp, err := http.Get(srv.URL + "/api/auth/status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, resp)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"setupRequired":true`) {
-		t.Fatalf("expected setupRequired status, got %d %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"setupRequired":false`) || !strings.Contains(body, `"authenticated":true`) {
+		t.Fatalf("expected optional no-password status, got %d %s", resp.StatusCode, body)
 	}
 
-	check := func(method, path, reqBody string) {
-		t.Helper()
-		var r io.Reader
-		if reqBody != "" {
-			r = strings.NewReader(reqBody)
-		}
-		req, err := http.NewRequest(method, srv.URL+path, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if reqBody != "" {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := readBody(t, resp)
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Errorf("%s %s: expected 401 setup_required, got %d (%s)", method, path, resp.StatusCode, body)
-		}
-		if !strings.Contains(body, "setup_required") {
-			t.Errorf("%s %s: expected setup_required error body, got %q", method, path, body)
-		}
-		if strings.Contains(body, "sk-secret-value") {
-			t.Errorf("%s %s: response leaked plaintext key", method, path)
-		}
+	resp, err = http.Get(srv.URL + "/api/providers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = readBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("management route should be accessible without password, got %d %s", resp.StatusCode, body)
+	}
+	if strings.Contains(body, "sk-secret-value") {
+		t.Fatal("provider response leaked plaintext key")
 	}
 
-	check("GET", "/api/providers", "")
-	check("GET", "/api/settings", "")
-	check("GET", "/api/providers/seed-prov/keys", "")
-	check("GET", "/api/monitor", "")
-	check("POST", "/api/filetransfer/upload", "{}")
-	check("POST", "/api/archive/sources?name=x.zip", "{}")
-	check("POST", "/api/editor/open", "{}")
-	check("POST", "/api/gallery/fs", `{"path":"C:\\x"}`)
-	check("POST", "/api/comfyui/proxy", `{}`)
+	resp, err = http.Get(srv.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("settings route should be accessible without password, got %d", resp.StatusCode)
+	}
+	readBody(t, resp)
+}
+
+// TestDisablePassword_RemainsOpenForNavigation verifies the user-visible
+// regression: after disabling protection, a subsequent status/settings page
+// request remains accessible and never returns setup-required.
+func TestDisablePassword_RemainsOpenForNavigation(t *testing.T) {
+	srv, reg, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	resp := requestJSON(t, http.MethodPatch, srv.URL+"/api/settings", `{"security":{"passwordEnabled":false}}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disable password: expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	readBody(t, resp)
+
+	if cfg := reg.Config(); cfg.Security.PasswordEnabled || cfg.Security.PasswordEncrypted != "" || cfg.Security.EncryptionKey != "" {
+		t.Fatalf("password protection was not fully disabled: %+v", cfg.Security)
+	}
+
+	s := sessionFor(t, srv.URL)
+	resp, err := s.client.Get(srv.URL + "/api/auth/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusBody := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(statusBody, `"setupRequired":false`) || !strings.Contains(statusBody, `"authenticated":true`) {
+		t.Fatalf("post-disable auth status = %d %s", resp.StatusCode, statusBody)
+	}
+
+	resp, err = s.client.Get(srv.URL + "/api/providers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := readBody(t, resp); resp.StatusCode != http.StatusOK {
+		t.Fatalf("post-disable page navigation was blocked: %d %s", resp.StatusCode, body)
+	}
 }
 
 // TestSecretMinimizedDTOs verifies F-04/A-2: provider and key API responses
