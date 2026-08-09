@@ -48,7 +48,6 @@
     'new-file': 'file-plus',
     'new-folder': 'folder-plus',
     'delete': 'delete',
-    'rename': 'pen',
     'toggle-explorer': 'sidebar-collapse',
     'undo': 'undo',
     'redo': 'redo',
@@ -160,7 +159,7 @@
   }
 
   var ACTION_LABEL_KEYS = {
-    'new-file':'editorNewFile', 'new-folder':'editorNewFolder', 'delete':'editorDelete', 'rename':'editorRename',
+    'new-file':'editorNewFile', 'new-folder':'editorNewFolder', 'delete':'editorDelete',
     'undo':'editorUndo', 'redo':'editorRedo', 'bold':'editorBold', 'italic':'editorItalic', 'heading':'editorHeading',
     'strike':'editorStrike', 'ul':'editorUnorderedList', 'ol':'editorOrderedList', 'checklist':'editorTaskList',
     'quote':'editorQuote', 'code':'editorCode', 'table':'editorTable', 'link':'editorLink', 'image':'editorImage',
@@ -264,17 +263,11 @@
       ['new-folder', 'New folder']
     ], { hideLabel: true });
 
-    var groupRight = make('div', 'ed-explorer-group group-right');
-    appendButtons(groupRight, [
-      ['delete', 'Delete'],
-      ['rename', 'Rename']
-    ], { hideLabel: true });
-
     explorerActions.appendChild(groupLeft);
     explorerActions.appendChild(groupCenter);
-    explorerActions.appendChild(groupRight);
     explorerHeader.appendChild(explorerActions);
     explorer.appendChild(explorerHeader);
+
     var tree = make('ul', 'ed-file-tree');
     tree.id = 'ed-file-tree';
     explorer.appendChild(tree);

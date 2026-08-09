@@ -870,6 +870,38 @@ function showSkeleton(container, count) {
   container.replaceChildren.apply(container, cards);
 }
 
+// Native OS file/directory dialogs must make the entire app modal. The page
+// remains alive while the backend waits for the native dialog, so block both
+// pointer and keyboard events until the picker returns.
+function beginNativePickerLock(kind) {
+  if (window.__nativePickerBusy) return false;
+  window.__nativePickerBusy = true;
+  window.__nativePickerKind = kind || 'file';
+  var blocker = document.createElement('div');
+  blocker.id = 'native-picker-blocker';
+  blocker.setAttribute('aria-hidden', 'true');
+  blocker.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:transparent;cursor:wait;pointer-events:auto;';
+  document.body.appendChild(blocker);
+  return true;
+}
+
+function endNativePickerLock() {
+  window.__nativePickerBusy = false;
+  window.__nativePickerKind = '';
+  var blocker = document.getElementById('native-picker-blocker');
+  if (blocker) blocker.remove();
+}
+
+function blockNativePickerEvent(event) {
+  if (!window.__nativePickerBusy) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'contextmenu', 'dragstart', 'focusin', 'keydown', 'keyup', 'keypress'].forEach(function (type) {
+  document.addEventListener(type, blockNativePickerEvent, true);
+});
+
 // ===================== Global Modal & Keyboard =====================
 // Returns the topmost currently-open modal overlay (.modal-overlay or .info-modal-overlay).
 function topOpenModal() {
@@ -912,6 +944,11 @@ document.addEventListener('contextmenu', function(e) {
 });
 
 document.addEventListener('keydown', function(e) {
+  if (window.__nativePickerBusy || window.__editorFilePickerBusy) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
   var tag = document.activeElement ? document.activeElement.tagName : '';
   var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
   var modal = topOpenModal();

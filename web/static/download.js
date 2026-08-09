@@ -448,6 +448,7 @@ function openExternalUrl(url) {
 // A global lock prevents multiple simultaneous native dialogs.
 async function fasBrowsePicker(inputEl, mode, initialPath) {
   if (!inputEl || browsePickerOpen) return;
+  if (typeof beginNativePickerLock === 'function' && !beginNativePickerLock(mode)) return;
   browsePickerOpen = true;
   // Freeze other browse buttons and the overlay backdrop while the native
   // dialog is open, so the user cannot open additional pickers or dismiss
@@ -460,15 +461,14 @@ async function fasBrowsePicker(inputEl, mode, initialPath) {
     var body = { mode: mode };
     if (initialPath) body.initialPath = initialPath;
     var res = await apiPost('/browse', body);
-    if (res && res.path) {
-      inputEl.value = res.path;
-    }
+    if (res && res.path) inputEl.value = res.path;
   } catch (e) {
     console.warn('browse picker failed:', e);
   } finally {
     browsePickerOpen = false;
     btns.forEach(function(b) { b.disabled = false; });
     if (overlay) overlay.style.pointerEvents = '';
+    if (typeof endNativePickerLock === 'function') endNativePickerLock();
   }
 }
 

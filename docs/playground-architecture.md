@@ -1,5 +1,7 @@
 
 # TinyRouter Playground 架构
+> **最后核对（2026-08-09，Editor 原生选择器全局锁与 docs 目录启动同步）：** Download/Settings 的目录选择器与 Editor 的文件选择器共用 `beginNativePickerLock`/`endNativePickerLock`；原生文件管理器打开期间，透明全屏 blocker 捕获并阻断点击、焦点、右键、拖拽及键盘事件，直到 picker 请求返回。Editor 首次进入时以 `/api/editor/tree` 返回的配置 `docDir` 内容重建 Explorer，不读取上次 IndexedDB 的 current/expanded 状态；同一 app 会话后续切回 Editor 才保留工作区状态。Editor 成功路径不再输出调试 `console.log`。
+
 > **最后核对（2026-08-09，密码保护可选性修复）：** 管理面认证为可选模式：`PasswordEnabled=false` 时 `/api/*` 管理路由直接放行，`AuthStatusHandler` 返回 `setupRequired:false`，前端不显示强制设置密码弹窗；仅开启密码保护后要求 session-bound `X-CSRF-Token`、本地 Origin/Referer 与 JSON/multipart Content-Type。`web/static/auth.js` 的全局 fetch 仍自动注入 CSRF token，`app.js`/`api.js` 仅在保护开启且无有效会话时显示登录屏。`POST /api/auth/setup` 保留为用户主动启用密码的可选 bootstrap。`/v1/*` 与 Playground 静态文件仍不经 AuthMiddleware。
 > **最后核对（2026-08-09 Playground Prompt 输入框文字与 Placeholder 居中）：** 将 Playground 页面 Prompt 输入框（`.pg-input-bar .pg-input`、`.pg-input`、`.pg-max-editor-textarea`、`.pg-gc-input`）及其 `::placeholder` 的文本对齐方式重构为 `text-align: center`，并调整内边距 `padding: 12px 40px` 实现对齐，使提示文字、输入内容和光标位置全量水平居中。
 > **最后核对（2026-08-08 语言切换与 Playground 输入框体验优化）：** 修复 Settings 外观弹窗中语言切换及 Playground 输入框 2 项关键问题：(1) **语言切换立刻生效与作用域全量更新**：修复 `setLang` 误将 `currentPage` 写为未定义的 `page` 导致 `navigateTo(undefined)` 清空页面与抛出 Exception 的 Bug；`updateThemeModalLabels` 补充 `ThemePicker` / `StylePicker` / `LangAndFontSizePicker` 重绘，使外观弹窗与后台各模块 DOM 文字立竿见影全局更新，无需 Ctrl+F5。(2) **Playground 移除废弃卡片遮挡**：从 `pgRenderInputBar` 彻底移除占据 prompt 输入框右半边的废弃 `<div class="pg-input-right">` 空 DOM，`.pg-input` 调整为 `flex: 1; width: 100%` 铺满输入区。(3) **Playground 输入框最大化/恢复状态**：输入框右上角新增 `.pg-input-expand-btn` 切换按钮（⤢ / ↙）；最大化时在 main 区域显示大尺寸沉浸式 Prompt 编辑器（`#pg-max-editor-wrapper`），主文本框与底栏即时双向同步；发送消息时（或点击恢复按钮）自动恢复为默认视图，无缝呈现回复面板。涉及文件：`web/static/i18n.js`、`web/static/settings/settings_modal.js`、`web/playground/static-pg/playground/pg-i18n.js`、`pg-state.js`、`pg-ui.js`、`pg-lifecycle.js`、`playground.css`。
@@ -234,8 +236,8 @@ Playground 后端相关职责只有三类：
 | `POST /api/image-batches/{projectID}/retry/{promptID}/{variantID}` | 单 Variant retry | 管理 session | 32 MiB |
 | `GET/PATCH /api/settings` | 读取/修改 `enablePlayground` | 管理 session | 1 MiB |
 | `POST /api/anysearch/subdomains` | Search 模式子域查询 | 管理 session | 1 MiB |
-| `POST /api/anysearch/extract` | Search 模式 URL 内容提取 | 管理 session | 1 MiB |
 | `POST /api/editor/open` | Editor 原生文件选择器打开文本文件 | 管理 session | 32 MiB |
+| `POST /api/editor/rename` | Editor 原子重命名物理文件名 | 管理 session | 32 MiB |
 | `POST /api/editor/save` | Editor 原子写保存文本文件 | 管理 session | 32 MiB |
 | `GET /api/text-review/review-nodes` | AI 文本审核节点池列表 | 管理 session | 32 MiB（`/api/text-review/*` 独立组） |
 | `POST /api/text-review/review-nodes` | 新增/更新节点（无 ID 创建、有 ID 更新） | 管理 session | 32 MiB |
@@ -783,6 +785,8 @@ go build -tags playground -o tinyrouter-pg.exe .
 | 修改 ComfyUI Image 协议 | `web/playground/static-pg/playground/pg-comfyui.js`、`pg-ui.js`、`pg-core.js`、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/comfyui/register.go`、`internal/api/router.go`（路由、静态白名单、CSP） |
 | 修改渲染 | DOMPurify、URL 协议、iframe sandbox、Mermaid security；改 reasoning 渲染须同步 `pg-render.js` 的 `pgMsgInnerHTML`/`pgRenderBubble` 与 `playground.css` 的 `.pg-thinking-body` |
 | 修改图片功能 | `pg-modal.js` 的 `pgShowImageModal`/`pgInitImageZoom`/`pgCopyImage`、`pg-render.js` 的 `pgMsgInnerHTML`（气泡缩略图 onclick、空文本气泡剔除、loading 秒级计数）、`playground.css` 的 `.pg-img-btn`/`.pg-image-row`；改保存或同源代理须同步 `internal/api/image.go` 的 `saveImage`/`imageProxy` 端点与 `/api/save-image`/`/api/image-proxy` 路由 |
+| 修改 Editor 文件标题重命名 | `web/static/utility/editor/editor_shell.js::renameCurrent`（先调用 `/api/editor/rename`，成功后更新工作区节点与标题；本地-only 节点仅更新 IndexedDB）+ `internal/api/editor/register.go::editorRename`（docDir-relative `fileId` / owner-bound `pathGrantId`，安全文件名校验、冲突检查、原子 `os.Rename`）+ `internal/pathgrant/pathgrant.go::Store.Rebind` + `internal/api/editor/register_test.go`（物理改名、冲突/路径名校验、grant 重绑定与改名后 Save） |
+| 修改 Editor 文件选择、标题重命名与 HTML 预览安全边界 | `web/static/utility/editor/editor_shell.js`（`#ed-title` 唯一重命名入口、`pathGrantId` 优先、`__editorFilePickerBusy` 捕获层按键锁、HTML `srcdoc` 脚本/inline handler 清理）+ `web/static/app.js`（全局快捷键 busy guard）+ `web/static/utility/editor/editor_layout.js`（移除独立 `ed-action-rename`）+ `internal/api/editor/register.go`（picker grant 权威身份、rename/save 目标优先级）+ `internal/api/editor/register_test.go`（混合身份回归） |
 | 修改 Image 模式或图片参数 | `pg-ui.js` 的 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect`、`pg-request.js` 的 `pgBuildImageBody`、`pg-stream.js` 的 `pgSendImage`/`pgPollModelScopeTask`、`pg-core.js` 的 `PG_DEFAULT_CFG` 图片参数 + `pgApiPatch` 桥接、`pg-i18n.js` 图片 i18n key + `pgImgEditSizes`/`pgImgCustomSize` 系列、`proxy/handler.go` 的 `ImagesGenerations`/`PollTask` 及通用代理（`/v1/images/edits` 走同一代理链路）、`proxy/upstream.go` 的 `X-Modelscope-Async-Mode` header 转发、`api/router.go` 的 `/v1/images/generations`、`/v1/tasks/{taskId}`、`/api/image-proxy` 路由 + `PATCH /providers/{id}/models/imgSizes`、`internal/api/image.go` 的 `imageProxy` 端点 |
 | 修改图片尺寸列表 | `pg-modal.js` 的 `pgOpenImgSizesModal`/`pgSaveImgSizesModal`/`pgResetImgSizesTextarea`/`pgImgBuiltinSizesFor`（弹窗编辑+保存）+ `pg-ui.js` 的 `pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect`（下拉渲染+自定义输入）+ `internal/api/providers_models_crud.go` 的 `updateModelImgSizes`（PATCH 端点）+ `internal/registry/models.go` 的 `UpdateModelImgSizes`（写入 `ModelDef.ImgSizes`）+ `internal/config/types.go` 的 `ModelDef.ImgSizes` 字段 + `internal/api/models.go` 的 `modelInfo.ImgSizes`/`providerId`/`realModelId` 回显 + `playground.css` 的 `.pg-img-edit-btn`/`.pg-img-custom-row` 样式 |
 | 修改图片请求超时兜底 | `pg-stream.js` 的 `pgSendImage` 的 `imgTimer`（300s fetch 兜底 `pgFail`）、`pg-render.js` 的 `pgTickWaiting` 的 `pgSafetyNetMs`（300s loading 安全网）；改兜底阈值须同时调两侧并覆盖 4k 实际耗时上限；代理侧 keep-alive 见 `proxy-architecture.md` §8.7 的 `forward.go` keep-alive ticker 与 `compress.go` 绕过列表 |
@@ -1009,33 +1013,30 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 历史 Editor 实现曾位于 Playground；当前 Editor 由 `web/static/utility/editor/` 的 RootStatic 模块提供，作为独立 Utility `editor` tool 渲染（`window.renderEditor`/`window.cleanupEditor`）。当前 Editor 不包含 Log Reader 或 Text Review tabs；旧两 pane raw/parsed、Clean/Review tab 及 Playground 资产路径仅在历史段落中保留。
 
 ### 核心功能
-- **本地工作区**：`editor_workspace.js` 以 IndexedDB 持久化工作区，不可用时回退 in-memory；内置 `Welcome`、`Trash`、`Temp`，支持文件 CRUD、move、restore、current file、expanded metadata 与文件夹展开集合持久化。
+- **本地工作区**：`editor_workspace.js` 以 IndexedDB 持久化工作区，不可用时回退 in-memory；Editor 首次启动通过 `replaceDocTree` 以配置 `docDir` 的 `/api/editor/tree` 结果重建节点与目录展开集合，避免 Explorer 显示过期的 saved current/expanded 状态；后续会话内仍支持文件 CRUD、move、restore、current file、expanded metadata。
 - **StackEdit-inspired shell**：`editor_layout.js`/`editor_shell.js` 提供 Explorer、导航/格式控件、单一主 textarea 与 Markdown preview、TOC/status/control toggles、查找/替换；这是本地 shell 合同，不是完整 StackEdit/cledit/PageDown。
 - **本地 commands 与 IO**：`editor_commands.js` 提供编辑、撤销/重做与格式化命令；`editor_shell.js` 提供本地 Markdown import、Markdown/HTML 导出、打印与本地查找/替换；`editor_markdown.js` 负责 Markdown preview、TOC 与 sanitization。当前无 cloud/sync/accounts/comments/PDF/Pandoc，数学公式未在 Editor 中单独启用 KaTeX。
 - **与独立工具的边界**：`editor-logs.js` 是独立 Log Reader Utility tool；`review.js` + `editor_textreview_*` 是独立 Text Review Utility tool，不是 Editor tabs。
-- **生命周期**：`suspendEditor`/`resumeEditor` 是 Utility 切换的生命周期边界；`cleanupEditor` 在离开时释放 Editor 绑定与状态。
-- **后端 IO**：`POST /api/editor/open` 与 `POST /api/editor/save` 保持既有契约；本地工作区命令不替换这两个后端端点。
+- **后端 IO**：`POST /api/editor/open`、`POST /api/editor/rename` 与 `POST /api/editor/save` 分别负责打开、物理重命名和原子写内容；标题重命名先完成磁盘改名，再同步本地工作区，Save 不再承担改名职责。native picker 若返回 `pathGrantId`，该授权身份优先于同路径可能产生的 `fileId`。
 
 ### 导航
 Editor 通过 Utility 菜单独立提供，默认与 no-Playground 构建均可用；fresh init 只显示 landing，选中工具后 active header label 显示当前工具。Editor/Log Reader/Review 仍是三个独立 Utility tools，不与 Gallery 互换，也不共享 tabs。
 
 ### HTTP 接口
-| 接口 | 用途 | 鉴权 | Body 上限 |
-|---|---|---|---:|
-| `POST /api/editor/open` | 原生文件选择器打开文本文件，返回 `{path,name,size,content}` 或取消/不支持状态 | 管理 session | 32 MiB |
-| `POST /api/editor/save` | 原子写保存 `{path,content}` | 管理 session | 32 MiB |
+| `POST /api/editor/open` | 原生文件选择器打开文本文件，返回 `{fileId?,pathGrantId?,name,size,content}`；native picker 的 `pathGrantId` 为权威身份 | 管理 session | 32 MiB |
+| `POST /api/editor/rename` | 原子重命名 `{fileId?,pathGrantId?,newName}`；`pathGrantId` 优先，返回新身份 | 管理 session | 32 MiB |
+| `POST /api/editor/save` | 原子写保存 `{fileId?,pathGrantId?,content}`；`pathGrantId` 优先 | 管理 session | 32 MiB |
 
 ### 依赖与源码锚点
 - `web/static/vendor/utility-editor/`：`markdown-it`、`Prism`、`diff-match-patch`、`Turndown`、`DOMPurify`，每个依赖目录带许可证；仅使用本地 Markdown preview/sanitization 能力，未移植 StackEdit 远程服务。
 - **历史源码锚点（仅迁移背景）：** `web/playground/static-pg/editor/editor-state.js`、`editor.js`、`playground.css` 与旧 `pgJSFiles`/Gallery toggle 入口；旧两 pane/Clean/Playground 叙述不得改写为当前事实。
 - **当前源码锚点与加载顺序：** `web/static/utility/editor/editor-state.js` → `editor_workspace.js` → `editor_commands.js` → `editor_markdown.js` → `editor_layout.js` → `editor.js` → `editor_shell.js` → `editor-logs.js`，随后 `editor_textreview_*` 与 `review.js`；这些脚本全部由 RootStatic 的 `/utility/editor/*` 提供，`index.html` 与 `index-nopg.html` 均加载。
-- `web/static/app.js`：Utility `renderUtility`/`utilityToolLifecycle`、`suspendEditor`/`resumeEditor` 与 cleanup；`web/static/auth.js`：Utility menu；`web/static/i18n.js`：Editor/Review 字符串。
-- `internal/api/editor` 与 `internal/api/router.go`：`/api/editor/open`、`/api/editor/save` 后端 handler 与路由，契约不变。
+- `internal/api/editor/register.go` 与 `internal/api/router.go`：`/api/editor/open`、`/api/editor/rename`、`/api/editor/save` 后端 handler 与路由；`pathgrant.Store.Rebind` 在物理改名后更新外部文件 grant 的服务端目标。
 
 ### 17.1 当前 Utility Editor/Log Reader/Review 资产与导航（2026-08-08）
-`web/static/utility/editor/` 全部属于 RootStatic。Editor 模块依次为 `editor-state.js`、`editor_workspace.js`、`editor_commands.js`、`editor_markdown.js`、`editor_layout.js`、`editor.js`、`editor_shell.js`、`editor-logs.js`；其后是独立 Text Review 的 `editor_textreview_*` 与 `review.js`。Editor 在 no-Playground 与 Playground 构建中均可用，使用 IndexedDB local workspace（memory fallback）与 StackEdit-inspired Explorer/navigation/editor-preview/TOC/status shell。Utility 切换通过 `suspendEditor`/`resumeEditor`；不提供 cloud/sync/accounts/comments/PDF/Pandoc、KaTeX 或 HTML export。
+`web/static/utility/editor/` 全部属于 RootStatic。Editor 模块依次为 `editor-state.js`、`editor_workspace.js`、`editor_commands.js`、`editor_markdown.js`、`editor_layout.js`、`editor.js`、`editor_shell.js`、`editor-logs.js`；其后是独立 Text Review 的 `editor_textreview_*` 与 `review.js`。Editor 在 no-Playground 与 Playground 构建中均可用，使用 IndexedDB 工作区（memory fallback）与 StackEdit-inspired Explorer/navigation/editor-preview/TOC/status shell。Utility 切换通过 `suspendEditor`/`resumeEditor`；不提供 cloud/sync/accounts/comments/PDF/Pandoc、KaTeX 或 HTML export。
 
-Utility 导航由 `web/static/app.js`/`auth.js` 管理：顶层 Utility 菜单列出 `editor`、`logReader`、`review`、`gif`、`download`、`fileTransfer`；旧 Gallery↔Editor toggle、旧 F6 Editor/TextReview 快捷键以及历史 Clean tab 仍仅作迁移背景。当前后端路径保持 `POST /api/editor/open`、`POST /api/editor/save`、`/api/text-review/*`、`/api/downloads/*` 与 `/api/filetransfer/*`。
+Utility 导航由 `web/static/app.js`/`auth.js` 管理：顶层 Utility 菜单列出 `editor`、`logReader`、`review`、`gif`、`download`、`fileTransfer`；旧 Gallery↔Editor toggle、旧 F6 Editor/TextReview 快捷键以及历史 Clean tab 仍仅作迁移背景。当前 Editor 后端路径为 `POST /api/editor/open`、`POST /api/editor/rename`、`POST /api/editor/save`；重命名先物理改名并更新工作区，Save 只写内容。
 ## 18. AI Text Review 模块（独立 Utility Review）
 
 以下段落记录 AI Text Review 的后端会话与历史迁移背景；当前前端入口是独立 Utility `review` 工具，由 `web/static/utility/editor/review.js` wrapper 调用 `editor_textreview_*` wizard，不属于 File Editor 的 tabs。当前导航与资产事实见 §17.1。

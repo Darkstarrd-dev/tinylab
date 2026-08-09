@@ -32,6 +32,20 @@
   };
   var shellFind = { visible: false, query: '', replace: '', index: 0, matches: [] };
 
+  function installFilePickerKeyLock() {
+    if (global.__editorFilePickerKeyLockInstalled) return;
+    var block = function (event) {
+      if (!global.__editorFilePickerBusy) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    global.addEventListener('keydown', block, true);
+    global.addEventListener('keyup', block, true);
+    global.addEventListener('keypress', block, true);
+    global.__editorFilePickerKeyLockInstalled = true;
+  }
+  installFilePickerKeyLock();
+
   function text(value) { return value == null ? '' : String(value); }
   function tr(key, fallback) {
     try { return typeof global.edT === 'function' ? (global.edT(key) || fallback) : fallback; } catch (e) { return fallback; }
@@ -134,7 +148,6 @@
     if (!preview) return;
     var content = currentText();
     var ext = shellState.currentNode ? edFileExt(shellState.currentNode.name) : 'md';
-
     var isHtml = typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
 
     if (shellState.htmlRender || isHtml) {
@@ -142,11 +155,8 @@
       preview.classList.add('is-html-iframe-mode');
       var iframe = document.createElement('iframe');
       iframe.className = 'ed-iframe-preview';
-      // Zero-permission sandbox: no scripts, no forms, no popups, no
-      // same-origin access. The embedded HTML can never execute JS against
-      // the management origin (fetch /api/..., parent.document), so a
-      // previewed .html file cannot read or modify the admin UI. Markdown
-      // previews stay DOMPurify-sanitized and do not use this iframe.
+      // Keep the iframe zero-permissioned and remove executable elements from
+      // srcdoc. This avoids the sandbox warning while preserving the visual DOM.
       iframe.setAttribute('sandbox', '');
       iframe.setAttribute('allowtransparency', 'true');
       iframe.style.cssText = 'width:100%; height:100%; border:none; background:transparent; display:block;';
@@ -159,20 +169,18 @@
           '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:16px;color:' + (isDark ? '#e2e8f0' : '#1e293b') + ';background:transparent;}</style>' +
           '</head><body>' + themedDoc + '</body></html>';
       }
-
-      iframe.onload = function () {
-        renderToc(preview);
-      };
-
+      themedDoc = themedDoc.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+        .replace(/<script\b[^>]*\/?>/gi, '')
+        .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+      iframe.onload = function () { renderToc(preview); };
       iframe.srcdoc = themedDoc;
       preview.appendChild(iframe);
       renderToc(preview);
       updateStatus();
       return;
-    } else {
-      preview.classList.remove('is-html-iframe-mode');
     }
 
+    preview.classList.remove('is-html-iframe-mode');
     var html = global.EditorMarkdown.renderMarkdown(content);
     preview.innerHTML = html;
     global.EditorMarkdown.highlightCode(preview);
@@ -356,41 +364,15 @@
       return res.json();
     }).then(function (data) {
       if (!data || !Array.isArray(data.files)) return null;
-      var files = data.files;
-      if (!files.length) return data;
-      var tasks = [];
-      var folderIds = [];
-      files.forEach(function (item) {
-        var relPath = item.relPath;
-        var parts = relPath.split('/');
-        var parentId = parts.length > 1 ? 'docdir:' + parts.slice(0, parts.length - 1).join('/') : null;
-        if (item.isDir) {
-          var dirId = 'docdir:' + relPath;
-          folderIds.push(dirId);
-          tasks.push(global.EditorWorkspace.putFolder(item.name, parentId).catch(function () {}));
-        } else {
-          var fileId = 'doc:' + relPath;
-          tasks.push(global.EditorWorkspace.putFile(item.name, '', parentId, { fileId: item.fileId, isDoc: true }).then(function (node) {
-            if (!node) {
-              global.EditorWorkspace.updateNode(fileId, { meta: { fileId: item.fileId, isDoc: true } });
-            }
-          }));
-        }
-      });
-      return Promise.all(tasks).then(function () {
-        if (folderIds.length) {
-          global.EditorWorkspace.getExpandedIds().then(function (exp) {
-            var combined = (exp || []).concat(folderIds).filter(function (v, i, a) { return a.indexOf(v) === i; });
-            global.EditorWorkspace.setExpandedIds(combined);
-          });
-        }
-        return data;
-      });
-    }).catch(function (err) {
-      console.warn('[Editor] syncDocDirTree error:', err);
+      if (typeof global.EditorWorkspace.replaceDocTree === 'function') {
+        return global.EditorWorkspace.replaceDocTree(data.files).then(function () { return data; });
+      }
+      return data;
+    }).catch(function () {
       return null;
     });
   }
+  var editorBootstrapped = false;
   function saveDraft(id, content) {
     if (!id) return;
     try {
@@ -422,50 +404,39 @@
   // local-only nodes by null (audit F-02: never a raw path).
   function editorTargetBody(node) {
     if (!node) return null;
-    if (node.fileId) return { fileId: node.fileId };
+    // A native picker grant is authoritative. This matters when WebView2
+    // selects a file located inside docDir: the grant still owns the selected
+    // physical file and must be used for open/save/rename.
     if (node.pathGrantId) return { pathGrantId: node.pathGrantId };
+    if (node.fileId) return { fileId: node.fileId };
     return null;
   }
 
   function loadFile(id, overrideContent) {
     if (!id) return Promise.resolve(false);
     shellState.htmlRender = false;
-    console.log('[Editor] loadFile called:', id, 'hasOverride:', typeof overrideContent === 'string', 'overrideLen:', typeof overrideContent === 'string' ? overrideContent.length : -1);
     return global.EditorWorkspace.getNode(id).then(function (node) {
-      if (!node || node.type !== 'file') {
-        console.warn('[Editor] loadFile: node not found or not file:', id);
-        return false;
-      }
+      if (!node || node.type !== 'file') return false;
       var target = editorTargetBody(node);
-      console.log('[Editor] loadFile node:', node.name, 'target:', target ? JSON.stringify(target) : '(local)');
       var contentPromise;
       if (typeof overrideContent === 'string') {
-        // 调用方直接提供了文件内容，直接使用，无需再次请求后端
         global.EditorWorkspace.updateNode(id, { content: overrideContent });
         contentPromise = Promise.resolve(overrideContent);
       } else if (target) {
-        // 有服务端资源身份（fileId/pathGrantId），从后端读取最新内容
         contentPromise = fetch('/api/editor/open', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(target)
         }).then(function (res) {
-          console.log('[Editor] loadFile fetch status:', res.status, 'ok:', res.ok, 'target:', JSON.stringify(target));
-          if (!res.ok) {
-            console.warn('[Editor] loadFile fetch not ok, falling back to IndexedDB');
-            return global.EditorWorkspace.getContent(id);
-          }
+          if (!res.ok) return global.EditorWorkspace.getContent(id);
           return res.json().then(function (data) {
-            console.log('[Editor] loadFile fetch data:', data ? 'has data' : 'null', 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT', 'type:', data && typeof data.content);
             if (data && typeof data.content === 'string') {
               global.EditorWorkspace.updateNode(id, { content: data.content });
               return data.content;
             }
-            console.warn('[Editor] loadFile: backend returned no string content, falling back to IndexedDB');
             return global.EditorWorkspace.getContent(id);
           });
-        }).catch(function (err) {
-          console.warn('[Editor] loadFile fetch error:', err);
+        }).catch(function () {
           return global.EditorWorkspace.getContent(id);
         });
       } else {
@@ -473,26 +444,19 @@
       }
 
       return contentPromise.then(function (content) {
-        console.log('[Editor] loadFile resolved content length:', typeof content === 'string' ? content.length : 'NOT_STRING');
-
-        // 防御性兜底：如果 content 为空但有服务端身份（fileId/pathGrantId）且没有 overrideContent，最后一次尝试重新读取
         if ((content === '' || content === null || content === undefined) && target && typeof overrideContent !== 'string') {
-          console.warn('[Editor] loadFile: content is empty with server identity, retrying backend read...');
           return fetch('/api/editor/open', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(target)
-          }).then(function (r) {
-            console.log('[Editor] loadFile retry status:', r.status);
-            return r.ok ? r.json() : null;
-          }).then(function (d) {
-            var retryContent = d && typeof d.content === 'string' ? d.content : '';
-            return applyContent(id, node, retryContent, overrideContent);
-          }).catch(function () {
-            return applyContent(id, node, '', overrideContent);
-          });
+          }).then(function (res) { return res.ok ? res.json() : null; })
+            .then(function (data) {
+              var retryContent = data && typeof data.content === 'string' ? data.content : '';
+              return applyContent(id, node, retryContent, overrideContent);
+            }).catch(function () {
+              return applyContent(id, node, '', overrideContent);
+            });
         }
-
         return applyContent(id, node, content, overrideContent);
       });
     });
@@ -591,36 +555,55 @@
     var targetNode = shellState.selectedNode || shellState.currentNode;
     if (!targetId || !targetNode) return;
     promptDialog(tr('editorRename', 'Rename'), targetNode.name).then(function (name) {
+      name = typeof name === 'string' ? name.trim() : '';
       if (!name || name === targetNode.name) return;
-      var updates = { name: name };
 
       var renameTarget = editorTargetBody(targetNode);
-      if (renameTarget && renameTarget.fileId) {
-        var oldId = renameTarget.fileId;
-        var dir = oldId.indexOf('/') >= 0 ? oldId.substring(0, oldId.lastIndexOf('/')) : '';
-        var newFileId = dir ? (dir + '/' + name) : name;
-        updates.meta = { fileId: newFileId, isDoc: true };
-        targetNode.fileId = newFileId;
-        targetNode.pathGrantId = null;
+      if (!renameTarget) {
+        global.EditorWorkspace.updateNode(targetId, { name: name }).then(function (node) {
+          if (!node) { toast('A file with that name already exists', 'warning'); return; }
+          shellState.selectedNode = node;
+          if (shellState.currentId === targetId) shellState.currentNode = node;
+          refreshTree();
+          updateStatus();
+          toast('Renamed to ' + name, 'success');
+        });
+        return;
       }
 
-      global.EditorWorkspace.updateNode(targetId, updates).then(function (node) {
-        if (!node) return;
-        shellState.selectedNode = node;
-        if (shellState.currentId === targetId) shellState.currentNode = node;
-
-        var saveTarget = editorTargetBody(node);
-        if (saveTarget) {
-          fetch('/api/editor/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: currentInput() ? currentInput().value : (node.content || ''), fileId: saveTarget.fileId, pathGrantId: saveTarget.pathGrantId })
-          }).catch(function() {});
+      fetch('/api/editor/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: renameTarget.fileId, pathGrantId: renameTarget.pathGrantId, newName: name })
+      }).then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (data) {
+          if (!response.ok || !data || !data.ok) {
+            var error = new Error((data && (data.error || data.message)) || 'Rename failed');
+            error.status = response.status;
+            throw error;
+          }
+          return data;
+        });
+      }).then(function (data) {
+        var identity = {};
+        if (data.fileId) {
+          identity.fileId = data.fileId;
+          identity.pathGrantId = null;
+          identity.isDoc = true;
+        } else if (data.pathGrantId) {
+          identity.pathGrantId = data.pathGrantId;
+          identity.fileId = null;
         }
-
-        refreshTree();
-        updateStatus();
-        toast('Renamed to ' + name, 'success');
+        return global.EditorWorkspace.updateNode(targetId, { name: name, meta: identity }).then(function (node) {
+          if (!node) throw new Error('A file with that name already exists');
+          shellState.selectedNode = node;
+          if (shellState.currentId === targetId) shellState.currentNode = node;
+          refreshTree();
+          updateStatus();
+          toast('Renamed to ' + name, 'success');
+        });
+      }).catch(function (error) {
+        toast(error && error.message ? error.message : 'Rename failed', 'error');
       });
     });
   }
@@ -832,28 +815,21 @@
   }
 
   function importWorkspaceFile(name, content, meta) {
-    console.log('[Editor] importWorkspaceFile:', name, 'contentLen:', typeof content === 'string' ? content.length : 'NOT_STRING', 'meta:', JSON.stringify(meta));
     return global.EditorWorkspace.listNodes().then(function (nodes) {
       var existing = (nodes || []).find(function (n) {
         return n && n.type === 'file' && n.name.toLowerCase() === name.toLowerCase();
       });
-      console.log('[Editor] importWorkspaceFile existing node:', existing ? existing.id + '(' + existing.name + ')' : 'none');
       if (existing) {
         removeDraft(existing.id);
-        return global.EditorWorkspace.updateNode(existing.id, { content: content, meta: meta || {} }).then(function (updatedNode) {
-          console.log('[Editor] importWorkspaceFile updateNode result:', updatedNode ? 'ok' : 'null/fail');
+        return global.EditorWorkspace.updateNode(existing.id, { content: content, meta: meta || {} }).then(function () {
           return refreshTree().then(function () { return loadFile(existing.id, content); });
         });
       }
       return global.EditorWorkspace.putFile(name, content, null, meta || { imported: true }).then(function (node) {
-        console.log('[Editor] importWorkspaceFile putFile result:', node ? node.id : 'null/fail');
         if (!node) {
-          // putFile 失败（同名冲突），直接用 name 查找最近创建的节点并强制写入内容
-          console.warn('[Editor] importWorkspaceFile putFile returned null, searching by name as fallback...');
           return global.EditorWorkspace.listNodes().then(function (freshNodes) {
             var found = (freshNodes || []).find(function (n) { return n && n.type === 'file' && n.name.toLowerCase() === name.toLowerCase(); });
-            if (!found) { console.error('[Editor] importWorkspaceFile fallback: node not found!'); return false; }
-            console.log('[Editor] importWorkspaceFile fallback found:', found.id);
+            if (!found) return false;
             return global.EditorWorkspace.updateNode(found.id, { content: content, meta: meta || {} }).then(function () {
               return refreshTree().then(function () { return loadFile(found.id, content); });
             });
@@ -866,25 +842,37 @@
 
   var isOpenModalBusy = false;
 
+  function setFilePickerBusy(value) {
+    if (value) {
+      if (typeof global.beginNativePickerLock === 'function' && !global.beginNativePickerLock('file')) return false;
+      global.__editorFilePickerBusy = true;
+      return true;
+    }
+    global.__editorFilePickerBusy = false;
+    if (typeof global.endNativePickerLock === 'function') global.endNativePickerLock();
+    return true;
+  }
+
   function openLocalFile() {
     if (isOpenModalBusy) return Promise.resolve(false);
     isOpenModalBusy = true;
-    console.log('[Editor] openLocalFile: opening file picker...');
-
+    if (!setFilePickerBusy(true)) {
+      isOpenModalBusy = false;
+      return Promise.resolve(false);
+    }
     return fetch('/api/editor/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (response) { return response.json(); })
       .then(function (data) {
-        isOpenModalBusy = false;
-        console.log('[Editor] openLocalFile response:', data ? 'ok' : 'null', 'cancelled:', !!(data && data.cancelled), 'unsupported:', !!(data && data.unsupported), 'fileId:', data && data.fileId, 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT');
         if (data && data.content !== undefined) {
           return importWorkspaceFile(data.name || 'untitled.md', data.content, { fileId: data.fileId || '', pathGrantId: data.pathGrantId || '', imported: true });
         }
         return false;
       })
-      .catch(function (err) {
+      .catch(function () { return false; })
+      .then(function (result) {
         isOpenModalBusy = false;
-        console.warn('[Editor] openLocalFile failed:', err);
-        return false;
+        setFilePickerBusy(false);
+        return result;
       });
   }
 
@@ -902,7 +890,6 @@
     updateGutter();
     redraw();
   }
-
   function triggerRedo() {
     var input = currentInput();
     if (!input) return;
@@ -1205,7 +1192,6 @@
         if (action === 'new-file') createFile();
         else if (action === 'new-folder') createFolder();
         else if (action === 'delete') deleteCurrent();
-        else if (action === 'rename') renameCurrent();
         else if (action === 'undo') triggerUndo();
         else if (action === 'redo') triggerRedo();
         else if (action === 'link') showLinkModal();
@@ -1226,7 +1212,6 @@
       },
       open: openLocalFile,
       save: saveWorkspace,
-      rename: renameCurrent,
       toggle: function (name) {
         if (name === 'reader') shellState.reader = !shellState.reader;
         else if (name === 'focus') shellState.focus = !shellState.focus;
@@ -1335,22 +1320,29 @@
   function renderEditor(container) {
     shellContainer = container;
     shellState.mode = 'edit';
+    var bootstrap = !editorBootstrapped;
+    editorBootstrapped = true;
     return global.EditorWorkspace.init().then(function () {
+      return bootstrap ? syncDocDirTree() : null;
+    }).then(function () {
       return Promise.all([global.EditorWorkspace.listNodes(), global.EditorWorkspace.getCurrentFileId(), global.EditorWorkspace.getExpandedIds()]);
     }).then(function (values) {
       var nodes = values[0] || [];
       shellState.expanded = values[2] || [];
       var currentId = values[1];
-      if (!currentId) { currentId = 'file:welcome'; }
+      if (!currentId) {
+        var firstFile = nodes.find(function (node) { return node && node.type === 'file' && node.isDoc; });
+        currentId = firstFile ? firstFile.id : null;
+      }
       shellState.currentId = currentId;
       shellRoot = global.EditorLayout.create(container, { nodes: buildTree(nodes), selectedId: currentId }, shellHooks());
-      return loadFile(currentId).then(function (loaded) {
-        if (!loaded && currentId !== 'file:welcome') return loadFile('file:welcome');
+      return loadFile(currentId).then(function () {
         bindShell();
         refreshTree();
         return shellRoot;
       });
     });
+
   }
 
   function suspendEditor() {

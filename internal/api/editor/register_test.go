@@ -206,6 +206,150 @@ func TestEditorOpenSaveDelete_FileID(t *testing.T) {
 	}
 }
 
+func TestEditorRenameFileID_PhysicalAndAtomic(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	oldPath := filepath.Join(docDir, "notes", "old.md")
+	if err := os.MkdirAll(filepath.Dir(oldPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, []byte("keep unsaved content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSON(t, h, http.MethodPost, "/rename", map[string]any{"fileId": "notes/old.md", "newName": "renamed.md"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["fileId"] != "notes/renamed.md" || result["name"] != "renamed.md" {
+		t.Fatalf("rename result = %+v", result)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old file still exists: %v", err)
+	}
+	newPath := filepath.Join(docDir, "notes", "renamed.md")
+	content, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "keep unsaved content" {
+		t.Fatalf("renamed content = %q", content)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/save", map[string]any{"fileId": "notes/renamed.md", "content": "saved after rename"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save after rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	content, err = os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "saved after rename" {
+		t.Fatalf("saved renamed content = %q", content)
+	}
+
+	rec = doJSON(t, h, http.MethodPost, "/rename", map[string]any{"fileId": "notes/renamed.md", "newName": "other.md"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEditorRenameFileID_RejectsConflictAndUnsafeName(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(docDir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := doJSON(t, h, http.MethodPost, "/rename", map[string]any{"fileId": "a.md", "newName": "b.md"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, want 409", rec.Code)
+	}
+	for _, name := range []string{"../escape.md", "nested/name.md", "bad?.md", "trailing."} {
+		rec = doJSON(t, h, http.MethodPost, "/rename", map[string]any{"fileId": "a.md", "newName": name})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("unsafe name %q: status = %d, want 400", name, rec.Code)
+		}
+	}
+	rec = doJSON(t, h, http.MethodPost, "/rename", map[string]any{"path": "/etc/passwd", "newName": "renamed.md"})
+	if rec.Code != http.StatusGone {
+		t.Fatalf("rename path: status = %d, want 410", rec.Code)
+	}
+}
+
+func TestEditorRenameGrant_RebindsPhysicalPath(t *testing.T) {
+	h, _ := newTestHandler(t)
+	outside := filepath.Join(t.TempDir(), "external.md")
+	if err := os.WriteFile(outside, []byte("external"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/rename", bytes.NewReader(nil))
+	stamped := stampOwner(t, req)
+	ownerID := owner.From(stamped.Context())
+	g, err := h.grants.Grant(ownerID, []pathgrant.Operation{pathgrant.OpRead, pathgrant.OpWrite}, outside, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSONCtx(t, h, http.MethodPost, "/rename", map[string]any{"pathGrantId": g.ID, "newName": "renamed.md"}, stamped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("grant rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	newPath := filepath.Join(filepath.Dir(outside), "renamed.md")
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("grant old file still exists: %v", err)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("grant renamed file missing: %v", err)
+	}
+	rec = doJSONCtx(t, h, http.MethodPost, "/save", map[string]any{"pathGrantId": g.ID, "content": "updated"}, stamped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save after grant rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	content, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "updated" {
+		t.Fatalf("grant renamed content = %q", content)
+	}
+}
+
+func TestEditorRenameGrantTakesPrecedenceOverFileID(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	selected := filepath.Join(docDir, "selected.md")
+	other := filepath.Join(docDir, "other.md")
+	if err := os.WriteFile(selected, []byte("selected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("other"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/rename", bytes.NewReader(nil))
+	stamped := stampOwner(t, req)
+	ownerID := owner.From(stamped.Context())
+	g, err := h.grants.Grant(ownerID, []pathgrant.Operation{pathgrant.OpRead, pathgrant.OpWrite}, selected, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSONCtx(t, h, http.MethodPost, "/rename", map[string]any{
+		"fileId":      "other.md",
+		"pathGrantId": g.ID,
+		"newName":     "selected-renamed.md",
+	}, stamped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mixed identity rename status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(docDir, "selected-renamed.md")); err != nil {
+		t.Fatalf("grant target was not renamed: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("fileId target was unexpectedly changed: %v", err)
+	}
+}
+
 func TestEditorRejectsTraversalFileIDs(t *testing.T) {
 	h, docDir := newTestHandler(t)
 	secret := filepath.Join(filepath.Dir(docDir), "secret.txt")

@@ -174,6 +174,36 @@ func (s *Store) Resolve(owner, id string, op Operation) (string, error) {
 	return g.Path, nil
 }
 
+// Rebind updates a non-directory grant's canonical path after the owning
+// handler has atomically renamed the granted file. The owner and write
+// capability are rechecked so stale or foreign grants cannot be rebound.
+func (s *Store) Rebind(owner, id, path string) error {
+	if owner == "" || id == "" || path == "" {
+		return ErrDenied
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ErrDenied
+	}
+	fi, err := os.Lstat(abs)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		return ErrDenied
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return ErrDenied
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.validLocked(owner, id, OpWrite)
+	if !ok || g.Dir {
+		return ErrDenied
+	}
+	g.Path = real
+	return nil
+}
+
 // ResolveChild resolves rel (a strict relative slash path) under a directory
 // grant to its canonical on-disk path. The resolved path must stay inside the
 // granted root after symlink resolution; a non-existent leaf is allowed only

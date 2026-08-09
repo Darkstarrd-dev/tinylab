@@ -366,6 +366,39 @@
       return persistMemory().then(function () { return list.slice(); });
     });
   }
+  function replaceDocTree(files) {
+    return withReady(function () {
+      var nextNodes = Object.create(null);
+      var nextContents = Object.create(null);
+      var folderByRel = Object.create(null);
+      (files || []).forEach(function (item) {
+        if (!item || !item.relPath) return;
+        var rel = String(item.relPath).replace(/\\/g, '/');
+        var parts = rel.split('/');
+        var parentId = null;
+        var folderCount = item.isDir ? parts.length : parts.length - 1;
+        for (var i = 0; i < folderCount; i++) {
+          var folderRel = parts.slice(0, i + 1).join('/');
+          var folderId = 'docdir:' + folderRel;
+          if (!folderByRel[folderRel]) {
+            folderByRel[folderRel] = folderId;
+            nextNodes[folderId] = makeNode(folderId, parts[i], 'folder', parentId, { isDoc: true, docRelPath: folderRel });
+          }
+          parentId = folderId;
+        }
+        if (!item.isDir) {
+          var fileId = 'doc:' + rel;
+          nextNodes[fileId] = makeNode(fileId, parts[parts.length - 1], 'file', parentId, { fileId: rel, isDoc: true });
+          nextContents[fileId] = '';
+        }
+      });
+      memory.nodes = nextNodes;
+      memory.contents = nextContents;
+      memory.meta.currentFileId = null;
+      memory.meta.expandedIds = Object.keys(folderByRel).map(function (rel) { return folderByRel[rel]; });
+      return persistMemory().then(function () { return allNodes().map(copyNode); });
+    });
+  }
 
   global.EditorWorkspace = {
     init: initialize,
@@ -381,6 +414,7 @@
     setCurrentFile: setCurrentFile,
     getCurrentFileId: getCurrentFileId,
     getExpandedIds: getExpandedIds,
-    setExpandedIds: setExpandedIds
+    setExpandedIds: setExpandedIds,
+    replaceDocTree: replaceDocTree
   };
 }(window));

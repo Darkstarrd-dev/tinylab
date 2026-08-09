@@ -64,6 +64,7 @@ func (h *Handler) Register(r chiRouter) {
 	r.Get("/docs", h.editorTree)
 	r.Post("/open", h.editorOpen)
 	r.Post("/save", h.editorSave)
+	r.Post("/rename", h.editorRename)
 	r.Post("/delete", h.editorDeleteFile)
 	r.Post("/upload-image", h.editorUploadImage)
 	r.Post("/save-session-images", h.editorSaveSessionImages)
@@ -253,22 +254,19 @@ func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 		"content": string(content),
 	}
 	if grantID != "" {
+		// A picker grant is authoritative even when the selected file happens
+		// to be inside docDir. Returning only the grant prevents WebView/native
+		// picker imports from accidentally switching to the docDir identity.
 		resp["pathGrantId"] = grantID
+		resp["fileId"] = ""
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
-// openTarget resolves the read target for editorOpen: a fileId (docDir
-// containment), a pathGrantId (read grant), or the native picker (a fresh
-// read+write grant). Returns the server path and, when a grant was issued,
-// its id.
 func (h *Handler) openTarget(r *http.Request, fileID, grantID string) (string, string, error) {
 	ownerID := owner.From(r.Context())
 	switch {
-	case fileID != "":
-		p, err := h.resolveDocFile(fileID)
-		return p, "", err
 	case grantID != "":
 		if ownerID == "" {
 			return "", "", errors.New("request has no owner identity")
@@ -278,6 +276,9 @@ func (h *Handler) openTarget(r *http.Request, fileID, grantID string) (string, s
 			return "", "", errors.New("path grant denied or expired; re-select the file")
 		}
 		return p, grantID, nil
+	case fileID != "":
+		p, err := h.resolveDocFile(fileID)
+		return p, "", err
 	}
 
 	filter := "Markdown & HTML & Text (*.md;*.html;*.htm;*.markdown;*.txt;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.css;*.xml)|*.md;*.html;*.htm;*.markdown;*.txt;*.json;*.yaml;*.yml;*.js;*.ts;*.go;*.css;*.xml|All Files (*.*)|*.*"
@@ -334,9 +335,6 @@ func (h *Handler) editorSave(w http.ResponseWriter, r *http.Request) {
 
 // saveTarget resolves the write target: a docDir fileId or a write grant.
 func (h *Handler) saveTarget(r *http.Request, fileID, grantID string) (string, error) {
-	if fileID != "" {
-		return h.resolveDocFile(fileID)
-	}
 	if grantID != "" {
 		ownerID := owner.From(r.Context())
 		if ownerID == "" {
@@ -348,7 +346,132 @@ func (h *Handler) saveTarget(r *http.Request, fileID, grantID string) (string, e
 		}
 		return p, nil
 	}
+	if fileID != "" {
+		return h.resolveDocFile(fileID)
+	}
 	return "", errors.New("fileId or pathGrantId is required")
+}
+
+// editorRename atomically renames a file while preserving the editor's
+// path-capability identity. The browser sends only a docDir-relative fileId
+// or an owner-bound pathGrantId plus a single new filename.
+// POST /api/editor/rename { "fileId": "old.md", "newName": "new.md" }
+func (h *Handler) editorRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path        string `json:"path"` // legacy raw-path contract: rejected
+		FileID      string `json:"fileId"`
+		PathGrantID string `json:"pathGrantId"`
+		NewName     string `json:"newName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Path != "" {
+		apibase.WriteAPIError(w, http.StatusGone, "raw paths are no longer accepted; use fileId or pathGrantId")
+		return
+	}
+	name, err := validateRenameName(req.NewName)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	target, err := h.renameTarget(r, req.FileID, req.PathGrantID)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "rename target must be a regular file")
+		return
+	}
+
+	oldName := filepath.Base(target)
+	newPath := filepath.Join(filepath.Dir(target), name)
+	if oldName == name {
+		writeRenameResponse(w, req.FileID, req.PathGrantID, name)
+		return
+	}
+	if _, err := os.Lstat(newPath); err == nil {
+		apibase.WriteAPIError(w, http.StatusConflict, "a file with that name already exists")
+		return
+	} else if !os.IsNotExist(err) {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "rename destination check failed: "+err.Error())
+		return
+	}
+	if err := os.Rename(target, newPath); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "rename failed: "+err.Error())
+		return
+	}
+
+	if req.PathGrantID != "" {
+		ownerID := owner.From(r.Context())
+		if err := h.grants.Rebind(ownerID, req.PathGrantID, newPath); err != nil {
+			_ = os.Rename(newPath, target)
+			apibase.WriteAPIError(w, http.StatusInternalServerError, "rename authorization update failed")
+			return
+		}
+	}
+
+	newFileID := req.FileID
+	if req.FileID != "" {
+		dir := filepath.Dir(filepath.ToSlash(req.FileID))
+		if dir == "." {
+			newFileID = name
+		} else {
+			newFileID = filepath.ToSlash(filepath.Join(filepath.FromSlash(dir), name))
+		}
+	}
+	writeRenameResponse(w, newFileID, req.PathGrantID, name)
+}
+
+func validateRenameName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\\:*?"<>|`) {
+		return "", errors.New("invalid filename")
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return "", errors.New("invalid filename")
+		}
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return "", errors.New("invalid filename")
+	}
+	return name, nil
+}
+
+func (h *Handler) renameTarget(r *http.Request, fileID, grantID string) (string, error) {
+	if grantID != "" {
+		ownerID := owner.From(r.Context())
+		if ownerID == "" {
+			return "", errors.New("request has no owner identity")
+		}
+		target, err := h.grants.Resolve(ownerID, grantID, pathgrant.OpWrite)
+		if err != nil {
+			return "", errors.New("path grant denied or expired; re-select the file")
+		}
+		return target, nil
+	}
+	if fileID != "" {
+		return h.resolveDocFile(fileID)
+	}
+	return "", errors.New("fileId or pathGrantId is required")
+}
+
+func writeRenameResponse(w http.ResponseWriter, fileID, grantID, name string) {
+	if grantID != "" {
+		fileID = ""
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":          true,
+		"name":        name,
+		"fileId":      fileID,
+		"pathGrantId": grantID,
+	})
 }
 
 // editorUploadImage saves an uploaded image file into docDir/imgs/ and
