@@ -16,6 +16,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
 
 // Handler exposes the settings API endpoints.
@@ -67,7 +68,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			"hasPassword":     cfg.Security.PasswordEncrypted != "",
 		},
 		"anySearch": map[string]any{
-			"apiKey":     cfg.AnySearch.APIKey,
+			"hasApiKey":  cfg.AnySearch.APIKey != "",
 			"maxResults": cfg.AnySearch.MaxResults,
 		},
 		"theme": cfg.Theme,
@@ -157,14 +158,12 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.QuickSlotOnly != nil {
 		cfg.QuickSlotOnly = *updates.QuickSlotOnly
-		h.d.QuickSlotOnly.Store(*updates.QuickSlotOnly)
 	}
 	if updates.DebugMode != nil {
 		h.d.DebugMode.Store(*updates.DebugMode)
 	}
 	if updates.Trace != nil {
 		if updates.Trace.Enabled != nil {
-			h.d.LogRequests.Store(*updates.Trace.Enabled)
 			cfg.Trace.Enabled = *updates.Trace.Enabled
 		}
 		if updates.Trace.RetainDays != nil {
@@ -175,7 +174,6 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if updates.Trace.LogDir != nil {
 			cfg.Trace.LogDir = *updates.Trace.LogDir
-			h.d.ProxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, filepath.Dir(h.d.ConfigPath)))
 		}
 	}
 	if updates.Security != nil {
@@ -212,29 +210,29 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.Proxy = *updates.Proxy
-		if err := h.d.ProxyHandler.SetProxy(cfg.Proxy.Enabled, cfg.Proxy.Host, cfg.Proxy.Port); err != nil {
-			apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 	}
-	// Changing proxy may affect download proxy routing.
-	h.pushDownloadSettings(cfg)
 	if updates.Server != nil {
 		cfg.Server = *updates.Server
 		config.FinalizeServerConfig(&cfg.Server)
 		serverChanged = true
-		if h.d.ServerCfgFn != nil {
-			h.d.ServerCfgFn(cfg.Server)
-		}
-		if h.d.UpstreamTimeoutFn != nil {
-			h.d.UpstreamTimeoutFn(cfg.Server.UpstreamTimeoutSec)
-		}
 	}
 	if updates.Download != nil {
 		if updates.Download.YtDlpPath != nil {
+			if *updates.Download.YtDlpPath != "" {
+				if _, err := procutil.ValidateExecutable(*updates.Download.YtDlpPath); err != nil {
+					apibase.WriteAPIError(w, http.StatusBadRequest, "invalid ytDlpPath: "+err.Error())
+					return
+				}
+			}
 			cfg.Download.YtDlpPath = *updates.Download.YtDlpPath
 		}
 		if updates.Download.FfmpegPath != nil {
+			if *updates.Download.FfmpegPath != "" {
+				if _, err := procutil.ValidateExecutable(*updates.Download.FfmpegPath); err != nil {
+					apibase.WriteAPIError(w, http.StatusBadRequest, "invalid ffmpegPath: "+err.Error())
+					return
+				}
+			}
 			cfg.Download.FfmpegPath = *updates.Download.FfmpegPath
 		}
 		if updates.Download.DefaultDir != nil {
@@ -255,7 +253,6 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		if updates.Download.MaxConcurrent != nil {
 			cfg.Download.MaxConcurrent = *updates.Download.MaxConcurrent
 		}
-		h.pushDownloadSettings(cfg)
 	}
 
 	// Shortcuts: replace the entire overrides map. The frontend always
@@ -279,9 +276,11 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			cfg.AnySearch.MaxResults = *updates.AnySearch.MaxResults
 		}
 	}
-
 	if updates.Theme != nil {
 		applyThemeUpdates(&cfg, updates.Theme)
+	}
+	if updates.Archive != nil {
+		applyArchiveUpdates(&cfg, updates.Archive)
 	}
 	if updates.ImageSaveDir != nil {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
@@ -290,32 +289,27 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.DocDir = *updates.DocDir
 	}
 
-	if updates.Archive != nil {
-		applyArchiveUpdates(&cfg, updates.Archive)
-	}
-
 	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
-	h.d.Selector.UpdateSettings(cfg.Rotation)
-	if h.d.ArchiveSettingsFn != nil {
-		h.d.ArchiveSettingsFn(cfg.Archive)
-	}
-
+	h.convergeRuntime(cfg)
 	// If password protection was just enabled or a new password was set,
-	// issue a session token to the current client so it stays authenticated.
-	// Without this, enabling password protection would immediately lock out
-	// the current session (AuthMiddleware activates on Reload), making the
-	// subsequent "save password" request fail with 401.
+	// issue a session token (with its bound CSRF token) to the current client
+	// so it stays authenticated. Without this, enabling password protection
+	// would immediately lock out the current session (AuthMiddleware
+	// activates on Reload), making the subsequent "save password" request
+	// fail with 401. The new CSRF token is returned so the UI can replace the
+	// one bound to the old (now cleared) session.
+	newCSRFToken := ""
 	if updates.Security != nil {
 		justEnabled := updates.Security.PasswordEnabled != nil && *updates.Security.PasswordEnabled
 		passwordSet := updates.Security.Password != ""
 		passwordChanged := justEnabled || passwordSet
 		if passwordChanged {
 			auth.SessionStore.ClearAll()
-			if token, err := auth.GenerateToken(); err == nil {
-				auth.SessionStore.StoreToken(token)
+			if token, csrf, err := auth.SessionStore.NewSession(r.RemoteAddr); err == nil {
+				newCSRFToken = csrf
 				auth.SetSessionCookie(w, token)
 			}
 		}
@@ -324,9 +318,10 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if portChanged && h.d.RestartFn != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"ok":      true,
-			"restart": true,
-			"port":    cfg.Port,
+			"ok":        true,
+			"restart":   true,
+			"port":      cfg.Port,
+			"csrfToken": newCSRFToken,
 		})
 		newAddr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 		go func() {
@@ -339,9 +334,10 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if serverChanged && !portChanged && h.d.RestartFn != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"ok":      true,
-			"restart": true,
-			"port":    cfg.Port,
+			"ok":        true,
+			"restart":   true,
+			"port":      cfg.Port,
+			"csrfToken": newCSRFToken,
 		})
 		newAddr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 		go func() {
@@ -352,7 +348,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "csrfToken": newCSRFToken})
 }
 
 // rotationPatch carries the presence-aware rotation fields accepted by the
@@ -411,6 +407,42 @@ func (h *Handler) pushDownloadSettings(cfg config.Config) {
 	})
 }
 
+// convergeRuntime pushes the given config into every runtime component so
+// disk config, in-memory registry, live runtime state and the API GET
+// response all agree. It is the single convergence point shared by the
+// settings PATCH handler and POST /api/reload — a config change must never
+// reach only one of them (E-1: reload full propagation).
+func (h *Handler) convergeRuntime(cfg config.Config) {
+	h.d.QuickSlotOnly.Store(cfg.QuickSlotOnly)
+	h.d.LogRequests.Store(cfg.Trace.Enabled)
+	if h.d.ProxyHandler != nil {
+		h.d.ProxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, filepath.Dir(h.d.ConfigPath)))
+	}
+	if err := validateProxyConfig(cfg.Proxy); err != nil {
+		// The PATCH path validates before saving and the reload path validates
+		// before applying; reaching here with an invalid proxy means the
+		// config was already applied. Keep the runtime consistent with the
+		// invalid value being refused by disabling proxying instead of
+		// silently diverging from disk.
+		h.d.Logger.Warn("settings: invalid proxy config in effect (%v); proxy runtime disabled", err)
+	} else {
+		if err := h.d.ProxyHandler.SetProxy(cfg.Proxy.Enabled, cfg.Proxy.Host, cfg.Proxy.Port); err != nil {
+			h.d.Logger.Warn("settings: failed to apply proxy runtime settings: %v", err)
+		}
+	}
+	if h.d.ServerCfgFn != nil {
+		h.d.ServerCfgFn(cfg.Server)
+	}
+	if h.d.UpstreamTimeoutFn != nil {
+		h.d.UpstreamTimeoutFn(cfg.Server.UpstreamTimeoutSec)
+	}
+	h.d.Selector.UpdateSettings(cfg.Rotation)
+	h.pushDownloadSettings(cfg)
+	if h.d.ArchiveSettingsFn != nil {
+		h.d.ArchiveSettingsFn(cfg.Archive)
+	}
+}
+
 // applyThemeUpdates merges the non-empty theme fields from a settings PATCH.
 // Empty fields are treated as absent so partial updates preserve existing
 // mode variants and style preferences.
@@ -440,10 +472,6 @@ type archivePatch struct {
 	TempDir      *string `json:"tempDir"`
 }
 
-// applyArchiveUpdates merges the presence-aware patch into cfg.Archive.
-// Fields absent from the patch (nil pointer) are left untouched; an explicit
-// empty string clears the field back to its zero value (environment/PATH
-// resolution at runtime).
 func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 	if patch == nil {
 		return
@@ -485,8 +513,17 @@ func (h *Handler) reload(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to reload config")
 		return
 	}
+	// Validate the parts that can be refused before applying anything, so a
+	// bad file cannot leave the registry reloaded but the runtime divergent.
+	if err := validateProxyConfig(cfg.Proxy); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid proxy config in file: "+err.Error())
+		return
+	}
 	h.d.Reg.Reload(cfg)
-	h.d.Selector.UpdateSettings(cfg.Rotation)
+	// Same convergence function as the settings PATCH: proxy, trace dir and
+	// logging flag, server timeouts, rotation settings, download manager and
+	// archive runner all follow the reloaded config (E-1).
+	h.convergeRuntime(*cfg)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

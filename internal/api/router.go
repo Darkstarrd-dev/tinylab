@@ -425,6 +425,13 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// the protected /api/* authorization boundary.
 	r.Route("/api/gallery", func(r chi.Router) {
 		r.Use(authHandler.AuthMiddleware)
+		// Owner middleware + routes live in the handler's Register, so every
+		// gallery resource (zip sessions, assets, grants, archive source
+		// lookups) is bound to the requesting session at exactly one boundary
+		// (internal/owner, F-29) — mirroring /api/archive, /api/editor, and
+		// /api/filetransfer. Mounting it here AND in Register would stamp two
+		// different owner values per request (duplicate Set-Cookie + owner
+		// drift between requests).
 		if feature.Enabled(feature.Gallery) {
 			galleryHandler.Register(r)
 		}
@@ -441,8 +448,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			})
 		})
 		if feature.Enabled(feature.FileTransfer) {
-			r.Post("/upload", fileTransferHandler.Upload)
-			r.Post("/path-info", fileTransferHandler.PathInfo)
+			// Owner middleware + routes live in the handler's Register so the
+			// path-grant contract (F-01) is bound to the requesting session.
+			fileTransferHandler.Register(r)
 		}
 	})
 

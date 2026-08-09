@@ -21,7 +21,14 @@ func sampleConfig(baseURL string) *config.Config {
 			{
 				ID:      "p1",
 				Name:    "Prov1",
+				Prefix:  "p1",
 				BaseURL: baseURL,
+				// The mock upstream is a loopback httptest server; the outbound
+				// SSRF policy requires the explicit authenticated capability
+				// flag for private/loopback targets.
+				AllowPrivateNetwork: true,
+				APIType:             "openai-compatible",
+				IsActive:            true,
 				Keys: []config.Key{
 					{ID: "k1", Name: "Key1", Key: "sk-test", IsActive: true},
 				},

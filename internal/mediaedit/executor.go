@@ -15,7 +15,13 @@ import (
 
 // ErrCancelled is returned when a job is cancelled.
 var ErrCancelled = errors.New("cancelled")
-var ffmpegCommonFlags = []string{"-y", "-nostdin", "-hide_banner", "-progress", "pipe:1", "-nostats", "-loglevel", "error"}
+
+// ffmpegCommonFlags are prepended to every ffmpeg invocation. The protocol
+// whitelist restricts inputs and outputs to local files plus the stdout
+// progress pipe (-progress pipe:1): network URLs (http/https/rtmp/tcp/...)
+// are refused by ffmpeg itself, closing the ffmpeg SSRF vector even if a
+// hostile path reaches the command line.
+var ffmpegCommonFlags = []string{"-y", "-nostdin", "-hide_banner", "-progress", "pipe:1", "-nostats", "-loglevel", "error", "-protocol_whitelist", "file,pipe"}
 
 // --- tailBuffer ---
 
@@ -66,6 +72,20 @@ func RunFfmpeg(ctx context.Context, ffmpegPath string, args []string, outputPath
 	cmd := exec.CommandContext(ctx, ffmpegPath, fullArgs...)
 	_ = procutil.SetProcessGroup(cmd)
 
+	// Cancel kills the entire process tree. It must be installed before Start:
+	// CommandContext already sets a default Cancel, and Start launches the
+	// watchCtx goroutine that reads cmd.Cancel (os/exec Start -> watchCtx), so a
+	// post-Start assignment races with that read and leaves a window where the
+	// default single-process kill can fire instead of the tree kill. watchCtx
+	// only invokes Cancel after Start has set cmd.Process, so the nil check is
+	// for defensive completeness.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			procutil.KillProcessGroup(cmd.Process.Pid)
+		}
+		return nil
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
@@ -76,16 +96,14 @@ func RunFfmpeg(ctx context.Context, ffmpegPath string, args []string, outputPath
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start ffmpeg: %w", err)
-	}
-
-	// Cancel kills the entire process tree.
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			procutil.KillProcessGroup(cmd.Process.Pid)
-			return nil
+		// A cancel that lands before the process starts is a cancellation, not
+		// a failure: exec.CommandContext reports "exec: context canceled".
+		// Classify it as ErrCancelled so callers surface StatusCancelled and
+		// the job is never mislabeled as an ffmpeg error.
+		if ctx.Err() == context.Canceled {
+			return ErrCancelled
 		}
-		return nil
+		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
 	// Read stderr into tail buffer.

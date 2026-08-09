@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
 
 // toolInfo is the result of resolving and probing one external tool.
@@ -196,10 +197,16 @@ func (r *Resolver) candidates(configured, envName string, names ...string) []str
 	return out
 }
 
-// validateTool turns a candidate into an absolute path to a regular file.
+// validateTool turns a candidate into an absolute path to a safe executable.
 // Configured paths that are not found are a diagnostic error (the API reports
 // them); they never silently fall through to PATH resolution, so a typo is
 // visible instead of being masked by a different tool.
+//
+// The candidate passes through procutil.ValidateExecutable (F-08 contract):
+// absolute path, no control characters, existing regular file, executable
+// extension/bit, and NOT inside the OS temp directory or a world-writable
+// directory (a local attacker could otherwise swap the binary for an
+// arbitrary program).
 func (r *Resolver) validateTool(c string) (string, error) {
 	path := c
 	if !filepath.IsAbs(path) {
@@ -214,17 +221,15 @@ func (r *Resolver) validateTool(c string) (string, error) {
 			return "", err
 		}
 	}
-	fi, err := os.Stat(path)
+	canonical, err := procutil.ValidateExecutable(path)
 	if err != nil {
-		// A missing/unreadable candidate is the "tool missing" case, not an
-		// internal error: wrap it so the API maps it to 503 archive.tool-missing
-		// (docs §5) and the status endpoint surfaces the same diagnostic.
+		// A missing/unreadable/unsafe candidate is the "tool missing" case,
+		// not an internal error: wrap it so the API maps it to 503
+		// archive.tool-missing (docs §5) and the status endpoint surfaces the
+		// same diagnostic.
 		return "", &ToolError{Kind: ErrToolMissing, Tool: path, Detail: err.Error(), Err: err}
 	}
-	if !fi.Mode().IsRegular() {
-		return "", errNotRegular(path)
-	}
-	return path, nil
+	return canonical, nil
 }
 
 // probe runs the tool bare and parses its banner. 7z/7zz/rar/unrar all print
@@ -254,10 +259,6 @@ const probeMaxBytes = 4 << 10
 
 func missingToolError(candidates []string, tool string) error {
 	return &ToolError{Kind: ErrToolMissing, Tool: tool, Detail: "no usable " + tool + " executable (configured path, env, or PATH)"}
-}
-
-func errNotRegular(path string) error {
-	return &ToolError{Kind: ErrToolMissing, Tool: path, Detail: "not a regular executable file"}
 }
 
 func execLookPath(file string) (string, error) {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -332,7 +333,104 @@ func TestHTTPEmptyChapters(t *testing.T) {
 	}
 }
 
-// TestHTTPEventsSSE verifies /events streams SSE-formatted events.
+// lockedRecorder is a concurrency-safe stand-in for httptest.ResponseRecorder
+// for the SSE test, where the handler writes from its own goroutine while the
+// test reads the accumulated body. httptest.ResponseRecorder's body is a plain
+// bytes.Buffer, so concurrent read/write is a data race (reported by -race);
+// this type guards header/body/status with a mutex and signals on Flush.
+type lockedRecorder struct {
+	mu      sync.Mutex
+	header  http.Header
+	body    bytes.Buffer
+	code    int
+	flushed chan struct{} // closed on the first Flush (response headers sent)
+}
+
+func newLockedRecorder() *lockedRecorder {
+	return &lockedRecorder{header: make(http.Header), code: http.StatusOK, flushed: make(chan struct{})}
+}
+
+func (r *lockedRecorder) Header() http.Header {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.header
+}
+
+func (r *lockedRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.Write(p)
+}
+
+func (r *lockedRecorder) WriteHeader(code int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.code = code
+}
+
+// Flush implements http.Flusher. The first flush marks the response headers as
+// sent; per-event flushes afterwards only need the write visibility the mutex
+// already provides.
+func (r *lockedRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	select {
+	case <-r.flushed:
+	default:
+		close(r.flushed)
+	}
+}
+
+// BodyString returns the accumulated body, safe to call while the handler is
+// still writing.
+func (r *lockedRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
+}
+
+// HeaderGet returns a header value, safe to call while the handler is still
+// writing.
+func (r *lockedRecorder) HeaderGet(key string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.header.Get(key)
+}
+
+// sseFrame is one parsed "event: <type>\ndata: <json>" frame.
+type sseFrame struct {
+	event string
+	data  string
+}
+
+// parseSSEFrames splits an SSE body into frames on blank-line boundaries.
+func parseSSEFrames(body string) []sseFrame {
+	var frames []sseFrame
+	var ev, data string
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case line == "":
+			if ev != "" || data != "" {
+				frames = append(frames, sseFrame{event: ev, data: data})
+				ev, data = "", ""
+			}
+		case strings.HasPrefix(line, "event: "):
+			ev = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data += strings.TrimPrefix(line, "data: ")
+		}
+	}
+	if ev != "" || data != "" {
+		frames = append(frames, sseFrame{event: ev, data: data})
+	}
+	return frames
+}
+
+// TestHTTPEventsSSE verifies /events streams SSE-formatted events in wire
+// order. A reprocess is used as the event trigger: the initial run is waited
+// out to completion first, so the reprocess broadcast burst arrives entirely
+// after the SSE handler has subscribed and has a fixed, documented order
+// (chapter pending precedes session running; chunk precedes completion).
 func TestHTTPEventsSSE(t *testing.T) {
 	cleaner := &httpFakeCleaner{results: map[string]tr.CleanResult{"default": {OK: true}}}
 	nodes := []config.TextReviewNode{{ID: "n1", ProviderID: "p1", ModelID: "m1", Concurrency: 1, Enabled: true}}
@@ -348,23 +446,54 @@ func TestHTTPEventsSSE(t *testing.T) {
 	}
 	json.Unmarshal(rec.Body.Bytes(), &create)
 
-	// Subscribe to the SSE stream with a short timeout context; collect a few
-	// events then cancel. We use httptest with a cancelable context.
+	// Wait for the initial run to settle (session completed) so the session is
+	// idle; the reprocess below then triggers a fresh, deterministic burst.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		gr := doJSON(t, mux, "GET", "/api/text-review/sessions/"+create.SessionID, nil)
+		var snap struct {
+			Status   string `json:"status"`
+			Chapters []struct {
+				Status string `json:"status"`
+			} `json:"chapters"`
+		}
+		json.Unmarshal(gr.Body.Bytes(), &snap)
+		if snap.Status == tr.SessionCompleted && len(snap.Chapters) > 0 && snap.Chapters[0].Status == tr.StatusCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Subscribe to the SSE stream with a cancelable context. The handler runs
+	// in its own goroutine and writes into the concurrency-safe recorder.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := httptest.NewRequest("GET", "/api/text-review/sessions/"+create.SessionID+"/events", nil).WithContext(ctx)
-	rec2 := httptest.NewRecorder()
+	rec2 := newLockedRecorder()
 	done := make(chan struct{})
 	go func() {
 		mux.ServeHTTP(rec2, req)
 		close(done)
 	}()
 
-	// Wait until we see at least one "data:" line, then cancel.
-	deadline := time.Now().Add(2 * time.Second)
+	// The handler flushes the response headers before subscribing. Waiting for
+	// that flush before triggering the burst guarantees the subscriber is live
+	// when the reprocess broadcasts fire: SSE is forward-only, so events
+	// broadcast before subscribe are dropped by design (snapshot compensates).
+	select {
+	case <-rec2.flushed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SSE handler did not start streaming")
+	}
+	rr := doJSON(t, mux, "POST", "/api/text-review/sessions/"+create.SessionID+"/chapters/0/reprocess", map[string]any{})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reprocess: expected 200, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Wait until the burst's terminal event (session completed) arrives.
+	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := rec2.Body.String()
-		if strings.Count(body, "data: ") > 0 {
+		if strings.Contains(rec2.BodyString(), `data: {"type":"status","status":"completed"}`) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -372,14 +501,88 @@ func TestHTTPEventsSSE(t *testing.T) {
 	cancel()
 	<-done
 
-	body := rec2.Body.String()
-	if !strings.Contains(body, "data: ") {
-		t.Fatalf("expected SSE data lines, got: %q", body)
+	body := rec2.BodyString()
+	frames := parseSSEFrames(body)
+	if len(frames) == 0 {
+		t.Fatalf("expected SSE frames, got: %q", body)
 	}
-	if rec2.Header().Get("Content-Type") != "text/event-stream" {
-		t.Errorf("expected text/event-stream, got %q", rec2.Header().Get("Content-Type"))
+	// Every frame must be well-formed: "event: <type>" naming the same type
+	// the JSON payload carries.
+	for i, f := range frames {
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(f.data), &ev); err != nil {
+			t.Fatalf("frame %d: data is not JSON: %q (frame %+v)", i, f.data, f)
+		}
+		if ev.Type != f.event {
+			t.Errorf("frame %d: event %q does not match payload type %q", i, f.event, ev.Type)
+		}
 	}
-	if rec2.Header().Get("Cache-Control") != "no-cache" {
-		t.Errorf("expected no-cache, got %q", rec2.Header().Get("Cache-Control"))
+
+	// The reprocess burst has a fixed wire order (documented contract):
+	// chapter pending precedes session running; chunk precedes completion.
+	type wantFrame struct {
+		typ    string
+		status string // for status frames; "" otherwise
+		chIdx  int    // chapter index for chapter-level frames; -1 for session-level
+		delta  string // for chunk frames
+	}
+	want := []wantFrame{
+		{typ: tr.EventStatus, status: tr.StatusPending, chIdx: 0},
+		{typ: tr.EventStatus, status: tr.SessionRunning, chIdx: -1},
+		{typ: tr.EventStatus, status: tr.StatusProcessing, chIdx: 0},
+		{typ: tr.EventNode},
+		{typ: tr.EventChunk, chIdx: 0, delta: "cleaned:n1"},
+		{typ: tr.EventNode},
+		{typ: tr.EventStatus, status: tr.StatusCompleted, chIdx: 0},
+		{typ: tr.EventStatus, status: tr.SessionCompleted, chIdx: -1},
+	}
+	if len(frames) != len(want) {
+		t.Fatalf("expected %d SSE frames, got %d:\n%s", len(want), len(frames), body)
+	}
+	for i, w := range want {
+		var ev struct {
+			Type       string `json:"type"`
+			ChapterIdx int    `json:"chapterIdx"`
+			Status     string `json:"status"`
+			Delta      string `json:"delta"`
+			Nodes      []struct {
+				ID string `json:"id"`
+			} `json:"nodes"`
+		}
+		if err := json.Unmarshal([]byte(frames[i].data), &ev); err != nil {
+			t.Fatalf("frame %d: decode: %v", i, err)
+		}
+		if ev.Type != w.typ {
+			t.Errorf("frame %d: type = %q, want %q", i, ev.Type, w.typ)
+		}
+		if w.status != "" && ev.Status != w.status {
+			t.Errorf("frame %d: status = %q, want %q", i, ev.Status, w.status)
+		}
+		switch w.typ {
+		case tr.EventChunk:
+			if ev.ChapterIdx != w.chIdx || ev.Delta != w.delta {
+				t.Errorf("frame %d: chunk = idx %d delta %q, want idx %d delta %q", i, ev.ChapterIdx, ev.Delta, w.chIdx, w.delta)
+			}
+		case tr.EventStatus:
+			if w.chIdx >= 0 && ev.ChapterIdx != w.chIdx {
+				t.Errorf("frame %d: chapterIdx = %d, want %d", i, ev.ChapterIdx, w.chIdx)
+			}
+		case tr.EventNode:
+			if len(ev.Nodes) != 1 || ev.Nodes[0].ID != "n1" {
+				t.Errorf("frame %d: nodes = %+v, want [n1]", i, ev.Nodes)
+			}
+		}
+	}
+
+	if got := rec2.HeaderGet("Content-Type"); got != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %q", got)
+	}
+	if got := rec2.HeaderGet("Cache-Control"); got != "no-cache" {
+		t.Errorf("expected no-cache, got %q", got)
+	}
+	if got := rec2.HeaderGet("Connection"); got != "keep-alive" {
+		t.Errorf("expected keep-alive, got %q", got)
 	}
 }

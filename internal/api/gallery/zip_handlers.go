@@ -15,6 +15,8 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
 )
 
 // maxZipDiskSize caps loading an on-disk zip archive into memory (1 GiB).
@@ -38,6 +40,17 @@ func readZipFile(path string) ([]byte, error) {
 // and returns the image manifest plus the session id the frontend uses to
 // fetch individual entries.
 func (h *Handler) galleryListZip(w http.ResponseWriter, r *http.Request) {
+	// Cap concurrent uploads being read into memory (F-15): bulk imports fire
+	// several requests back-to-back; a bounded semaphore keeps the resident
+	// spike flat and returns a stable 429 instead of silently dropping bytes.
+	select {
+	case h.uploadSem <- struct{}{}:
+		defer func() { <-h.uploadSem }()
+	default:
+		apibase.WriteAPIError(w, http.StatusTooManyRequests, "too many concurrent zip uploads")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -61,7 +74,10 @@ func (h *Handler) galleryListZip(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.sessions.put(sessionID, body)
+	if err := h.sessions.put(owner.From(r.Context()), sessionID, body); err != nil {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
 
 	h.d.Logger.Info("gallery: received zip, %d image entries (session %s)", manifest.Total, sessionID)
 
@@ -86,7 +102,7 @@ func (h *Handler) galleryGetZipEntry(w http.ResponseWriter, r *http.Request) {
 		entryPath = unescaped
 	}
 
-	data, ok := h.sessions.get(sessionID)
+	data, ok := h.sessions.get(owner.From(r.Context()), sessionID)
 	if !ok {
 		apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 		return
@@ -114,7 +130,7 @@ func (h *Handler) galleryGetZipEntry(w http.ResponseWriter, r *http.Request) {
 // a missing session is not an error (the store may have evicted it already).
 func (h *Handler) galleryDeleteZipSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
-	h.sessions.remove(sessionID)
+	h.sessions.remove(owner.From(r.Context()), sessionID)
 	h.d.Logger.Info("gallery: dropped zip session %s", sessionID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -126,7 +142,7 @@ func (h *Handler) galleryDeleteZipSession(w http.ResponseWriter, r *http.Request
 // evicted; the frontend then rehydrates the entry via rehydrateZipSession.
 func (h *Handler) galleryTouchSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
-	if !h.sessions.touch(sessionID) {
+	if !h.sessions.touch(owner.From(r.Context()), sessionID) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 		return
 	}
@@ -170,7 +186,7 @@ func (h *Handler) galleryDeleteZipEntry(w http.ResponseWriter, r *http.Request) 
 		entryPath = unescaped
 	}
 
-	data, ok := h.sessions.get(sessionID)
+	data, ok := h.sessions.get(owner.From(r.Context()), sessionID)
 	if !ok {
 		apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 		return
@@ -189,7 +205,12 @@ func (h *Handler) galleryDeleteZipEntry(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !h.sessions.update(sessionID, newData) {
+	ok, err = h.sessions.update(owner.From(r.Context()), sessionID, newData)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if !ok {
 		apibase.WriteAPIError(w, http.StatusNotFound, "zip session expired during deletion")
 		return
 	}
@@ -202,18 +223,41 @@ func (h *Handler) galleryDeleteZipEntry(w http.ResponseWriter, r *http.Request) 
 	w.Write(newData)
 }
 
-// galleryZipFromPath creates a zip session from a file already on disk (avoids
-// re-uploading the zip over HTTP).
-// POST /api/gallery/zip-from-path { "path": "..." } → { sessionId, manifest }
+// galleryZipFromPath creates a zip session from a granted on-disk zip file
+// (avoids re-uploading the zip over HTTP). The grant is registered by the
+// server (open-dir / paste-paths); the browser only sends the grant id.
+// POST /api/gallery/zip-from-path { "grantId": "..." } → { sessionId, manifest }
 func (h *Handler) galleryZipFromPath(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Path string `json:"path"`
+		Path    string `json:"path"` // legacy: rejected
+		GrantID string `json:"grantId"`
+		Rel     string `json:"rel"` // zip inside a directory grant
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "missing path")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing grantId")
 		return
 	}
-	data, err := readZipFile(req.Path)
+	if req.Path != "" {
+		apibase.WriteAPIError(w, http.StatusGone, "raw paths are no longer accepted; use grantId")
+		return
+	}
+	if req.GrantID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing grantId")
+		return
+	}
+	ownerID := owner.From(r.Context())
+	var grantedPath string
+	var err error
+	if req.Rel != "" {
+		grantedPath, err = h.grants.ResolveChild(ownerID, req.GrantID, req.Rel, pathgrant.OpRead)
+	} else {
+		grantedPath, err = h.grants.Resolve(ownerID, req.GrantID, pathgrant.OpRead)
+	}
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusForbidden, "grant denied or expired; re-open the folder")
+		return
+	}
+	data, err := readZipFile(grantedPath)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusNotFound, "cannot read zip: "+err.Error())
 		return
@@ -231,9 +275,12 @@ func (h *Handler) galleryZipFromPath(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.sessions.put(sessionID, data)
+	if err := h.sessions.put(owner.From(r.Context()), sessionID, data); err != nil {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
 
-	h.d.Logger.Info("gallery: zip-from-path %q, %d entries (session %s)", req.Path, manifest.Total, sessionID)
+	h.d.Logger.Info("gallery: zip-from-path, %d entries (session %s, grant %s)", manifest.Total, sessionID, req.GrantID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
@@ -243,29 +290,41 @@ func (h *Handler) galleryZipFromPath(w http.ResponseWriter, r *http.Request) {
 }
 
 // galleryZipWriteback writes the current session zip bytes back to the
-// original file on disk. Called after zip entry deletions to persist changes.
-// POST /api/gallery/zip-writeback { "sessionId": "...", "path": "..." }
+// granted on-disk zip (write operation). Called after zip entry deletions to
+// persist changes.
+// POST /api/gallery/zip-writeback { "sessionId": "...", "grantId": "..." }
 func (h *Handler) galleryZipWriteback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID string `json:"sessionId"`
-		Path      string `json:"path"`
+		Path      string `json:"path"` // legacy: rejected
+		GrantID   string `json:"grantId"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" || req.Path == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "missing sessionId or path")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "missing sessionId")
+		return
+	}
+	if req.Path != "" {
+		apibase.WriteAPIError(w, http.StatusGone, "raw paths are no longer accepted; use grantId")
+		return
+	}
+	ownerID := owner.From(r.Context())
+	target, err := h.grants.Resolve(ownerID, req.GrantID, pathgrant.OpWrite)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusForbidden, "write grant denied or expired; re-open the folder")
 		return
 	}
 
-	data, ok := h.sessions.get(req.SessionID)
+	data, ok := h.sessions.get(owner.From(r.Context()), req.SessionID)
 	if !ok {
 		apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 		return
 	}
 
-	if err := fsutil.AtomicWrite(req.Path, data, 0644); err != nil {
+	if err := fsutil.AtomicWrite(target, data, 0644); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "writeback failed: "+err.Error())
 		return
 	}
-	h.d.Logger.Info("gallery: zip writeback %q (session %s, %d bytes)", req.Path, req.SessionID, len(data))
+	h.d.Logger.Info("gallery: zip writeback (session %s, %d bytes, grant %s)", req.SessionID, len(data), req.GrantID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

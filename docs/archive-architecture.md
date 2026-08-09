@@ -1,6 +1,7 @@
 # TinyRouter 归档架构（ArchiveCore）
 
 > **最后核对（2026-08-06 P3 Gallery 迁移落地）：** Gallery **后端桥接 + 前端 sourceId 双路径**已落地——`internal/api/gallery` 新增 `archiveBridge` 接口（`SetArchive` 注入，nil 时全部 Gallery 流程走 legacy 内存 zip 会话）；`/edit/extract-zip-entry` 与 review start 接受 `sourceId`（严格路径 + `DefaultBudget` 经 `/api/archive` 读取）；`POST /api/archive/zip-replace` 提供 sourceId 原子写回（replacements+deletes，并发冲突 409 `archive.busy`）；前端 `gallery-io/tree/fullscreen/review/edit` 全部支持 archive-source 条目（`/api/archive/sources/{id}/entries/...` 读取、TTL 后重登记、按 sourceId 分组删除/审核/编辑），**同时完整保留 legacy 调用方**（`/api/gallery/zip/{sid}*`、`zip-from-path`、`zip` 上传、`/edit/extract-zip-entry|upload-temp|zip-outputs|zip-writeback`——FSAA/拖放/粘贴路径仍走会话）。旧专用端点**未删除**（计划 §7.2"迁移完成后删除"未执行）；无浏览器任意路径 API 新增。`go build ./...`/`go vet ./...` 全绿。**P4/P6 未实施；P5 第一阶段（`internal/feature` manifest）已落地，feature_* tags 未实施**（见 §1/§12）。
+> **最后核对（2026-08-09，audit_fix.md Phase B/D 落地）：** (1) **owner/session 绑定（F-11/F-29）**：`internal/archive/tempstore.go` 全部访问 owner 参数化——`Create(ctx, owner, jobID, ...)`/`Open(owner, id)`/`Path(owner, id)`/`Stat(owner, id)`/`Release(owner, id)`/`ReleaseOwner(owner)`；`types.go` 新增 `Source.Owner`、`AssetRef.Owner/JobID/ExpiresAt`、哨兵 `ErrOwnership`（`IsOwnership`）；`zip_writer.go` owner 线程化（`replace` job 精确尺寸上限）。`internal/api/archive/register.go` 挂 `owner.Middleware`，`ResolveSource(ownerID, id)`/`sourceFor(ownerID, id)` 校验 owner（未知/过期/他人 → 404/403 `archive.forbidden`，`deleteSource` 未知 204 幂等）；`register_test.go` 覆盖 owner cookie jar + 跨会话拒绝。**Gallery zip 内存会话亦 owner 绑定**（`session_store.go` 全部方法带 `owner` 校验）。(2) **配额与 scavenger（F-15）**：TempStore `checkQuota(owner, jobID, size)`——每 owner 数量/字节、每 job 字节、全局字节上限（`DefaultMaxAssetsPerOwner`/`DefaultMaxBytesPerOwner`/`DefaultMaxBytesPerJob`/`DefaultMaxBytesGlobal`），超限 `*BudgetError`；`scavengeLoop` 周期 goroutine（TTL/4，1min–6h 夹取）+ app.go 启动 `Scavenge` + `Close` 停止。(3) **7z SLT 解析（F-13）**：`internal/archivetool/parse.go::parseSevenZipSLT` 只把携带 entry 元数据（Folder/Size/Packed Size/Attributes）的 block 转为 `rawEntry`——archive header block（`Path = C:\...` + Type/Physical Size/...）被丢弃，绝对归档路径永不进入 `ValidateEntryPaths`；`parse_test.go` 新增 4 个 SLT 测试。(4) **外部工具进程**：`archivetool/exec.go` 用 `procutil.SetProcessGroup`/`KillProcessGroup`；`tool.go::validateTool` 已于同日迁移 `procutil.ValidateExecutable`（F-08 完成，`tool_test.go` 7 测试）。**前端迁移已于 2026-08-09 完成**（`_startJob`/`zip-outputs`/`edit/zip-writeback`/`/fs`/`/file` 全走 grantId/assetId/sourceId）；残留非安全功能缺陷：单 zip extract→edit 读已移除的 `data.tempPath`（应读 `data.assetId`）。
 > **与计划的关系：** 本文件是 [`archive_compatibility_plan.md`](../archive_compatibility_plan.md)（实施计划，非事实来源）的落地基线。计划 §1.3 冻结决策"先统一 API 和资产清单，再添加 build tags"仍然有效；feature build profiles（计划 §11/P5）**尚未实施**，本层无 build tag，无条件编译。
 
 ## 1. 范围与结论
@@ -66,10 +67,10 @@ Core (proxy/config/registry/rotation/usage)
 ### 3.5 TempStore（`tempstore.go`）
 
 文件型、owner/job 绑定临时资产库：`<root>/<owner>/<job>/<id>_<name>`，客户端只见随机 asset ID。
-
 - `NewTempStore(root, ttl)`：0700 私有 workspace；`ttl<=0` 选 `DefaultTempTTL=24h`。
 - `Create(ctx, owner, jobID, name, mime, r, maxBytes)`：name 经 `sanitizeAssetName` 安全化；`Open`/`Path`（服务端专用，绝不返回浏览器）/`Stat`；`Release`（幂等）/`ReleaseOwner`；`Scavenge(now)`（过期资产回收，并发安全）；`Close`（整树删除，之后 `Create` 返回 `ErrClosed`）。
 - 过期资产在 `Open` 时视同缺失（由 scavenger 回收文件）。
+- **2026-08-09（audit F-11/F-15/F-29）：** 全部访问 **owner 参数化**——`Open(owner, id)`/`Path(owner, id)`/`Stat(owner, id)`/`Release(owner, id)`/`ReleaseOwner(owner)`（原无 owner 形参的签名已删除）；配额 `checkQuota(owner, jobID, size)`：每 owner 数量/字节、每 job 字节、全局字节上限（`DefaultMaxAssetsPerOwner`/`DefaultMaxBytesPerOwner`/`DefaultMaxBytesPerJob`/`DefaultMaxBytesGlobal`），任何维度超限 → `*BudgetError`（Create 在任何字节写入前检查）；`scavengeLoop` 周期 goroutine（间隔 TTL/4，夹取 1min–6h）随 `Close` 停止。
 
 ### 3.6 非 UTF-8 条目名（`charset.go`）
 
@@ -100,8 +101,8 @@ Core (proxy/config/registry/rotation/usage)
 ### 4.3 外部 adapter（`external.go` + `parse.go`）
 
 - `NewExternalReader(res)`：实现 `archive.Reader`（7z/RAR List/ReadEntry）；`externalConcurrency=2` 信号量；`entrySelector` 拒绝外部工具视为通配符的元字符（`*`/`?` 等）；十进制索引经 `resolveRarIndex` 先用 bare listing 映射为严格名。
-- `NewExternalWriter(res, store)`：`archive.Writer` 的 7z/RAR `Pack`——输入按去重 basename 暂存进私有 job 目录，`cmd.Dir`=staging；`ReplaceZIP` 恒返回 `ErrUnsupportedWriteback`。
 - 解析：`parseSevenZipSLT`（`l -slt` key/value，按块取末次出现）、`parseRarLB`（`lb` 每行一条）；`buildManifest` 对原始工具条目**再走 foundation 严格校验 + collision + 预算 + 自然排序**，目录条目标记 `IsDir` 并归一化尾分隔符。
+- **2026-08-09（audit F-13）：** `parseSevenZipSLT` 只把携带 entry 元数据（`Folder`/`Size`/`Packed Size`/`Attributes`）的 block 转为 `rawEntry`——`-slt` 输出开头的 archive header block（`Path = C:\archive.7z` + `Type`/`Physical Size`/`Headers Size`/`Method`/`Solid`/`Blocks`）被丢弃，绝对归档路径永不进入 `ValidateEntryPaths`；无元数据/损坏 block 丢弃、空 `Path` block 保留交严格校验器拒绝。测试：`parse_test.go` 的 `TestParseSevenZipSLT`（含绝对路径 header fixture）/`_HeaderOnly`/`_NoEntryMetaBlock`/`_EmptyPathBlock`。
 - 超时：`opTimeout(budget, def)` 让预算值覆盖默认（list 15s/read 60s/pack 5min）。
 
 ### 4.4 Runner（`runner.go`）
@@ -125,9 +126,7 @@ Core (proxy/config/registry/rotation/usage)
 | POST | `/api/archive/zip-replace` | **P3 新增**：原子写回已登记 ZIP source——`{sourceId, replacements:[{entryPath,assetId}], deletes:[entryPath]}`；严格路径校验、非 ZIP/只读源 403、同源并发写回 409 `archive.busy`（`h.replacing` 标志，所有退出路径清除）、输出经 TempStore 注册为新 asset 后由 handler 原子换源。对应计划 §7.2 `zip-replace` 合同 |
 
 ### 5.1 Gallery 桥接（`archiveBridge`，P3）
-
-`internal/api/gallery/register.go` 定义 `archiveBridge` 接口（`ResolveSource(id)`/`List(ctx,src,b)`/`ReadEntry(ctx,src,id,b)`），由 `*internal/api/archive.Handler` 实现，router 经 `galleryHandler.SetArchive(archiveHandler)` 注入（`internal/api/router.go` Routes）。**nil 桥接 = 全部 Gallery 流程走 legacy 内存 zip 会话**（兼容边界，无归档 runner 时 Gallery 不回归）。消费点：
-
+`internal/api/gallery/register.go` 定义 `archiveBridge` 接口（`ResolveSource(ownerID, id)`/`List(ctx,src,b)`/`ReadEntry(ctx,src,id,b)`——**2026-08-09：** `ResolveSource` 增加 `ownerID` 形参（owner 绑定，F-29），由 `*internal/api/archive.Handler` 实现），router 经 `galleryHandler.SetArchive(archiveHandler)` 注入（`internal/api/router.go` Routes）。**nil 桥接 = 全部 Gallery 流程走 legacy 内存 zip 会话**（兼容边界，无归档 runner 时 Gallery 不回归）。消费点：
 - `/edit/extract-zip-entry`：`sourceId` 作为 `zipAbsPath`/`sessionId` 之外的第三种输入，经 `ResolveSource` + `ReadEntry`（严格路径 + `DefaultBudget`）读取，不再信任浏览器提交的任意绝对路径。
 - AI Review（`galleryStartReview`）：`sourceId` 替代 `sessionId` 启动（任务键 = sourceId）；`runReview`/`analyzeImage` 重构为 `readEntry func(ctx, path)` 闭包，legacy 会话流与 archive 源流共用同一引擎。
 - 前端 sourceId 条目读取：`GET /api/archive/sources/{id}/entries/{path...}`（gallery-io.js `getZipEntryBlob`，404 = 源 TTL 过期 → 重登记后重试）；按 sourceId 分组删除（`DELETE /api/archive/sources/{id}`）、审核（review start 带 sourceId）、编辑（extract 带 sourceId）；删除条目经 `POST /api/archive/zip-replace`（`gallery-fullscreen.js::_zipReplaceDeleteEntries`）。
@@ -222,4 +221,7 @@ Core (proxy/config/registry/rotation/usage)
 | 修改归档配置/设置 | `internal/config/types.go`（ArchiveConfig）+ `paths.go`（ResolveArchiveTempDir）+ `internal/api/settings/register.go`（archivePatch presence-aware）+ `apibase/deps.go`（ArchiveSettingsFn） |
 | 修改 MediaBridge 契约 | `web/static/media-bridge.js` + `web/media-bridge.test.js` + `i18n.js`（mediaBridge* 键）；加载顺序：两个 index.html 最先加载 |
 | Gallery 归档迁移（P3，部分落地） | **已落地：** `internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`）、`edit_handlers.go::galleryEditExtractZipEntry`（sourceId 分支）、`review_handlers.go`/`review_engine.go`（sourceId review + `readEntry` 闭包）、`internal/api/archive/register.go::zipReplace`（`POST /api/archive/zip-replace`）、router `galleryHandler.SetArchive(archiveHandler)`；前端 `gallery-io.js`（`getZipEntryBlob`/`rehydrateZipSession` sourceId 分支 + `_ARCHIVE_IMG_EXTS` 图片过滤）、`gallery-tree.js`（source 分组删除/释放）、`gallery-fullscreen.js`（`_zipReplaceDeleteEntries`）、`gallery-review.js`（sourceId 审核启动/轮询）、`gallery-edit.js`/`gallery-edit-batch.js`（extract 送 sourceId）。**保留的 legacy 调用方（勿删）**：`/api/gallery/zip/{sid}*`（GET/DELETE/touch）、`zip-from-path`、`/api/gallery/zip` 上传、`/edit/extract-zip-entry`（zipAbsPath/sessionId 分支）、`/edit/upload-temp`、`/edit/zip-outputs`、`/edit/zip-writeback`、`/api/gallery/zip-writeback`——FSAA/拖放/粘贴导入与 `kind:'zip'` on-disk 包仍走会话流；旧端点删除属计划 §7.2 后续（P3 收尾），**未执行** |
+| 修改 TempStore owner/配额/scavenger（audit F-11/F-15/F-29） | `internal/archive/tempstore.go`（`Create(ctx, owner, jobID, ...)`/`Open(owner, id)`/`Path(owner, id)`/`Stat(owner, id)`/`Release(owner, id)`/`ReleaseOwner(owner)`/`checkQuota`/`scavengeLoop`）+ `types.go`（`Source.Owner`/`AssetRef.Owner,JobID,ExpiresAt`/`ErrOwnership`）+ `zip_writer.go`（owner 线程化）+ `tempstore_test.go`（owner 隔离/配额/cross-session） |
+| 修改 7z SLT 解析（audit F-13） | `internal/archivetool/parse.go::parseSevenZipSLT`（entry 元数据门控）+ `parse_test.go`（`TestParseSevenZipSLT` 系列）；改解析必须保证 archive header 的绝对 `Path` 不进 `ValidateEntryPaths` |
+| 修改归档 API owner 校验（audit F-29） | `internal/api/archive/register.go`（`owner.Middleware` + `ResolveSource(ownerID,id)`/`sourceFor(ownerID,id)` + 各 handler owner 检查 + `archive.forbidden`）+ `register_test.go`（owner cookie jar）；跨会话 source/asset 使用必须 403/404 |
 | Feature tags / build profiles（P5） | **第一阶段已落地**：`internal/feature` manifest + router/app `feature.Enabled` 门控 + `feature.Assets` 派生 static-pg 路由列表（`docs/build-variants.md`「编译裁剪边界」）。**feature_* tags 未实施**——真裁剪前置：tag 化 `internal/archive`/`archivetool`/`api/archive` 包本身 + 按 feature 拆 embed + index.html 脚本清单 manifest 化 + `build.ps1`/`build_mac.ps1` `-Features`；`internal/feature/feature_test.go` 锁定默认全启用合同 |

@@ -170,6 +170,13 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 					encrypted := strings.TrimPrefix(k.Key, "enc:")
 					if decrypted, err := Decrypt(cfg.Security.EncryptionKey, encrypted); err == nil {
 						k.Key = decrypted
+					} else {
+						// 解密失败：记录可审计错误并把 Key 标记不可用。绝不能把 "enc:"
+						// 密文当作真实凭证发给上游（rotation 会跳过 IsActive=false 的
+						// key）。保留 enc: 原值不覆盖，避免下一次 Save 丢失密文导致
+						// 用户在修正密码后无法恢复。
+						fmt.Fprintf(os.Stderr, "[config] error: failed to decrypt key %s/%s: %v; marking key inactive\n", cfg.Providers[i].ID, k.ID, err)
+						k.IsActive = false
 					}
 				}
 			}

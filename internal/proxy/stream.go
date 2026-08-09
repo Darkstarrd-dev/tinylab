@@ -96,20 +96,29 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	totalOutput := 0
 	inputTokens := 0
 	outputTokens := 0
-	sb := &sse.SSELineBuffer{}
+	sb := sse.NewSSELineBuffer(0, 0)
 	var sseBuf boundedSSEBuffer
 	var contentCharsTotal int
 	var lastTokenBroadcast time.Time
 	var lastEntryRefresh time.Time
 
 	var clientDisconnected bool
-
+	// streamAborted records a controlled abort caused by an over-budget SSE
+	// line (F-14): the upstream is emitting garbage beyond the line/buffer
+	// cap, so the stream is closed and usage is recorded with an error.
+	var streamAborted bool
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			var contentChars int
 			if normalize {
-				for _, line := range sb.Feed(buf[:n]) {
+				lines, ferr := sb.Feed(buf[:n])
+				if ferr != nil {
+					h.logger.Error("SSE stream aborted: %v", ferr)
+					streamAborted = true
+					break
+				}
+				for _, line := range lines {
 					out := sse.NormalizeSSEChunk(line)
 					if _, werr := w.Write([]byte(out + "\n")); werr != nil {
 						h.logger.Debug("client disconnected during SSE stream: %v", werr)
@@ -159,7 +168,13 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					clientDisconnected = true
 					break
 				}
-				for _, line := range sb.Feed(buf[:n]) {
+				lines, ferr := sb.Feed(buf[:n])
+				if ferr != nil {
+					h.logger.Error("SSE stream aborted: %v", ferr)
+					streamAborted = true
+					break
+				}
+				for _, line := range lines {
 					line = strings.TrimSpace(line)
 					if strings.HasPrefix(line, "data:") {
 						payload := strings.TrimSpace(line[5:])
@@ -301,19 +316,60 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	}
 	status := "success"
 	errMsg := ""
-	if clientDisconnected {
+	if streamAborted {
+		status = "error"
+		errMsg = "SSE stream exceeded line buffer budget"
+	} else if clientDisconnected {
 		status = "error"
 		errMsg = "client disconnected"
 	}
 	streamDecision := "success"
-	if status == "error" {
+	switch {
+	case streamAborted:
+		streamDecision = "line buffer exceeded"
+	case status == "error":
 		streamDecision = "client disconnected"
 	}
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, inputTokens, outputTokens, errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
 }
 
+// maxPassThroughBodyBytes caps a non-streaming upstream response buffered for
+// pass-through. Unlike the old io.LimitReader (which silently truncated), an
+// over-budget response is refused with a controlled 502 error before any
+// header is committed, so the client never receives a corrupt partial body.
+// The usage/trace capture copy stays independently bounded (512KB, see
+// recordUsage) — the two budgets are deliberately separate (F-14).
+const maxPassThroughBodyBytes = 256 << 20
+
 func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, originalModel, sessionKey string) {
 	defer resp.Body.Close()
+
+	// Read the FULL upstream body with an explicit budget, and only commit
+	// the upstream status AFTER the read succeeds: an over-budget or failed
+	// read must surface as a controlled error instead of an empty/truncated
+	// response body. The old io.LimitReader silently truncated large bodies;
+	// the client-facing budget errors out instead (F-14).
+	budget := h.maxPassThroughBody
+	if budget <= 0 {
+		budget = maxPassThroughBodyBytes
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, budget+1))
+	if err != nil {
+		h.logger.Error("failed to read upstream response: %v", err)
+		if sel != nil {
+			h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, err.Error(), reqBody, nil, nil, 0, reqHeaders, upstreamURL, originalModel, sessionKey, "network error", "")
+		}
+		writeError(w, http.StatusBadGateway, "failed to read upstream response")
+		return
+	}
+	if int64(len(bodyBytes)) > budget {
+		h.logger.Error("upstream response exceeds %d bytes, refusing pass-through", budget)
+		if sel != nil {
+			h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, "upstream response exceeds maximum size", reqBody, nil, nil, 0, reqHeaders, upstreamURL, originalModel, sessionKey, "response too large", "")
+		}
+		writeError(w, http.StatusBadGateway, "upstream response exceeds maximum size")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if sel != nil {
@@ -321,20 +377,6 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 		w.Header().Set("X-TinyRouter-Key", sel.KeyName)
 	}
 	w.WriteHeader(resp.StatusCode)
-
-	// Read the FULL upstream body and write it to the client unmodified: the
-	// old io.LimitReader(64MB) silently truncated large non-stream responses.
-	// Client disconnect is handled by the write error path / request context,
-	// NOT by pre-truncating the payload. Only the usage-capture copy below is
-	// capped (recordUsage bounds it to 512KB anyway).
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		h.logger.Error("failed to read upstream response: %v", err)
-		if sel != nil {
-			h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, err.Error(), reqBody, nil, nil, 0, reqHeaders, upstreamURL, originalModel, sessionKey, "network error", "")
-		}
-		return
-	}
 
 	_, werr := w.Write(bodyBytes)
 
@@ -355,7 +397,8 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	captureDetails := h.logRequests() || isPlayground || h.debugMode()
 	var respBodyForEntry []byte
 	if captureDetails {
-		// Cap ONLY the usage-capture copy; the client write above is unbounded.
+		// Cap ONLY the usage-capture copy; the client write above is the full
+		// (budget-bounded) body.
 		const maxPTRespBody = 512 * 1024
 		if len(bodyBytes) > maxPTRespBody {
 			respBodyForEntry = bodyBytes[:maxPTRespBody]

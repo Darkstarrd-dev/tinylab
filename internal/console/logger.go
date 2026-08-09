@@ -2,6 +2,7 @@ package console
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,6 +33,40 @@ func (l *Logger) timestamp() string {
 	return time.Now().Format("2006-01-02 15:04:05")
 }
 
+// sanitize renders control characters in a log line as visible escapes so
+// that message content can never forge additional lines (CR/LF) or inject
+// terminal escape sequences (ESC/C0 controls). Every C0 control character
+// and DEL is replaced with a short textual escape (\n, \r, \t, or \xNN);
+// ordinary Unicode (valid UTF-8) passes through untouched.
+func sanitize(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			b.WriteString(fmt.Sprintf(`\x%02x`, r))
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// emit delivers one fully formatted log line to stdout, the ring buffer, and
+// every SSE subscriber. It is the single choke point every log line passes
+// through: sanitize runs here, so no caller can bypass it.
+func (l *Logger) emit(line string) {
+	line = sanitize(line)
+	fmt.Println(line)
+	l.write(line)
+}
+
 func (l *Logger) write(line string) {
 	l.mu.Lock()
 
@@ -57,9 +92,7 @@ func (l *Logger) write(line string) {
 
 // Log writes a log line at info level.
 func (l *Logger) Log(format string, args ...any) {
-	line := fmt.Sprintf("[%s] %s", l.timestamp(), fmt.Sprintf(format, args...))
-	fmt.Println(line)
-	l.write(line)
+	l.emit(fmt.Sprintf("[%s] %s", l.timestamp(), fmt.Sprintf(format, args...)))
 }
 
 // Info writes an info-level log line.
@@ -69,23 +102,17 @@ func (l *Logger) Info(format string, args ...any) {
 
 // Warn writes a warning-level log line.
 func (l *Logger) Warn(format string, args ...any) {
-	line := fmt.Sprintf("[%s] ⚠ %s", l.timestamp(), fmt.Sprintf(format, args...))
-	fmt.Println(line)
-	l.write(line)
+	l.emit(fmt.Sprintf("[%s] ⚠ %s", l.timestamp(), fmt.Sprintf(format, args...)))
 }
 
 // Error writes an error-level log line.
 func (l *Logger) Error(format string, args ...any) {
-	line := fmt.Sprintf("[%s] [ERROR] %s", l.timestamp(), fmt.Sprintf(format, args...))
-	fmt.Println(line)
-	l.write(line)
+	l.emit(fmt.Sprintf("[%s] [ERROR] %s", l.timestamp(), fmt.Sprintf(format, args...)))
 }
 
 // Debug writes a debug-level log line.
 func (l *Logger) Debug(format string, args ...any) {
-	line := fmt.Sprintf("[%s] [DEBUG] %s", l.timestamp(), fmt.Sprintf(format, args...))
-	fmt.Println(line)
-	l.write(line)
+	l.emit(fmt.Sprintf("[%s] [DEBUG] %s", l.timestamp(), fmt.Sprintf(format, args...)))
 }
 
 // AllLines returns all buffered lines in chronological order.

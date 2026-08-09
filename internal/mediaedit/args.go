@@ -6,10 +6,21 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+// fontNameRe restricts burn-mode font names to characters that are safe
+// inside an ffmpeg filter graph force_style value. Anything outside this
+// charset is rejected, never interpolated, so a hostile fontName cannot
+// inject filter syntax.
+var fontNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._()\-#]*$`)
+
+// languageRe restricts subtitle language tags to ISO 639 style: a 2-3 letter
+// primary subtag with optional 1-8 character region/variant subtags.
+var languageRe = regexp.MustCompile(`^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$`)
 
 // --- Operation arg builders ---
 
@@ -398,6 +409,12 @@ func BuildVideoSubtitleArgs(inputPath string, raw json.RawMessage) ([]string, st
 	if p.Language == "" {
 		p.Language = "und"
 	}
+	if p.Language != "" && !languageRe.MatchString(p.Language) {
+		return nil, "", "", fmt.Errorf("invalid language tag: %q", p.Language)
+	}
+	if p.FontName != "" && !fontNameRe.MatchString(p.FontName) {
+		return nil, "", "", fmt.Errorf("invalid fontName: only letters, digits, spaces and ._()- are allowed")
+	}
 	if p.FontSize == 0 {
 		p.FontSize = 24
 	}
@@ -420,9 +437,10 @@ func BuildVideoSubtitleArgs(inputPath string, raw json.RawMessage) ([]string, st
 		if len(noDrive) >= 2 && noDrive[1] == ':' {
 			noDrive = noDrive[2:]
 		}
-		// Use forward slashes and escape backslashes for filter graph safety.
+		// Use forward slashes and escape filter-graph metacharacters so the
+		// subtitle path can never alter the filter graph structure.
 		noDrive = strings.ReplaceAll(noDrive, "\\", "/")
-		vf := fmt.Sprintf("subtitles=%s:force_style='%s'", noDrive, style)
+		vf := fmt.Sprintf("subtitles=%s:force_style='%s'", escapeFilterPath(noDrive), style)
 		args := []string{
 			"-i", inputPath,
 			"-vf", vf,

@@ -9,7 +9,26 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
+
+// validateResolvedTool canonicalizes a candidate tool path and verifies it is
+// a safe regular executable (absolute, symlink-canonicalized, executable
+// bit/extension, outside temp/world-writable dirs). A relative value (bare
+// name) is resolved through PATH first so legacy configs keep working.
+func validateResolvedTool(candidate, name string) (string, error) {
+	if !filepath.IsAbs(candidate) {
+		if lp, err := exec.LookPath(candidate); err == nil {
+			candidate = lp
+		}
+	}
+	path, err := procutil.ValidateExecutable(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%s not usable: %w", name, err)
+	}
+	return path, nil
+}
 
 // ResolveFfmpeg resolves the ffmpeg binary path:
 //  1. configuredPath (from config Download.FfmpegPath)
@@ -17,16 +36,16 @@ import (
 //  3. PATH lookup ("ffmpeg")
 func ResolveFfmpeg(configuredPath string) (string, error) {
 	if configuredPath != "" {
-		return configuredPath, nil
+		return validateResolvedTool(configuredPath, "ffmpeg")
 	}
 	if env := os.Getenv("FFMPEG_PATH"); env != "" {
-		return env, nil
+		return validateResolvedTool(env, "ffmpeg")
 	}
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return "", fmt.Errorf("ffmpeg not found (set download.ffmpegPath, FFMPEG_PATH, or put ffmpeg in PATH)")
 	}
-	return path, nil
+	return validateResolvedTool(path, "ffmpeg")
 }
 
 // ResolveFfprobe resolves the ffprobe binary path:
@@ -36,7 +55,7 @@ func ResolveFfmpeg(configuredPath string) (string, error) {
 //  3. fall back to PATH lookup ("ffprobe")
 func ResolveFfprobe(ffmpegPath string) (string, error) {
 	if env := os.Getenv("FFPROBE_PATH"); env != "" {
-		return env, nil
+		return validateResolvedTool(env, "ffprobe")
 	}
 
 	// Derive from ffmpeg path: same directory, replace ffmpeg→ffprobe.
@@ -45,14 +64,14 @@ func ResolveFfprobe(ffmpegPath string) (string, error) {
 	base = strings.Replace(base, "ffmpeg", "ffprobe", 1)
 	candidate := filepath.Join(dir, base)
 	if _, err := os.Stat(candidate); err == nil {
-		return candidate, nil
+		return validateResolvedTool(candidate, "ffprobe")
 	}
 
 	path, err := exec.LookPath("ffprobe")
 	if err != nil {
 		return "", fmt.Errorf("ffprobe not found (set FFPROBE_PATH, place ffprobe next to ffmpeg, or put ffprobe in PATH)")
 	}
-	return path, nil
+	return validateResolvedTool(path, "ffprobe")
 }
 
 // --- FFmpeg capability probe ---

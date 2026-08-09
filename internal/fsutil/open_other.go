@@ -3,11 +3,43 @@
 package fsutil
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+// pickerEnvVar carries the initial picker directory to osascript. The value
+// travels through the environment, never through the AppleScript source, so a
+// hostile initialDir (quotes, backslashes, newlines, AppleScript tokens)
+// cannot inject script.
+const pickerEnvVar = "TR_PICKER_INITIAL_DIR"
+
+// osascriptPickerScript returns the AppleScript source for a file/folder
+// picker. kind must be one of the fixed strings "file" or "folder". The
+// initial directory is read from the environment at runtime, so no caller
+// input is ever interpolated into the script text.
+func osascriptPickerScript(kind string) string {
+	return "set initialDir to (system attribute \"" + pickerEnvVar + "\")\n" +
+		"if initialDir is not \"\" then\n" +
+		"\treturn posix path of (choose " + kind + " default location (POSIX file initialDir))\n" +
+		"end if\n" +
+		"return posix path of (choose " + kind + ")"
+}
+
+// runOSAPicker executes the parameterized osascript picker for the given kind
+// ("file" or "folder"), passing initialDir through the environment. Returns
+// empty string if the user cancelled.
+func runOSAPicker(kind, initialDir string) (string, error) {
+	cmd := exec.Command("osascript", "-e", osascriptPickerScript(kind))
+	cmd.Env = append(os.Environ(), pickerEnvVar+"="+initialDir)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", nil // user cancelled
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
 // OpenInFileManager opens path in the platform's file manager. On macOS it
 // uses `open -R` to reveal the file in Finder. On Linux it opens the parent
@@ -47,16 +79,7 @@ func OpenFilePicker(filter string) (string, error) {
 // directory. On macOS the initialDir is passed to "default location".
 func OpenFilePickerAt(filter, initialDir string) (string, error) {
 	if runtime.GOOS == "darwin" {
-		script := "posix path of (choose file"
-		if initialDir != "" {
-			script += " default location (POSIX file \"" + initialDir + "\")"
-		}
-		script += ")"
-		out, err := exec.Command("osascript", "-e", script).Output()
-		if err != nil {
-			return "", nil // user cancelled
-		}
-		return strings.TrimSpace(string(out)), nil
+		return runOSAPicker("file", initialDir)
 	}
 	return "", ErrUnsupportedPlatform
 }
@@ -72,16 +95,7 @@ func OpenDirectoryPicker() (string, error) {
 // the given directory.
 func OpenDirectoryPickerAt(initialDir string) (string, error) {
 	if runtime.GOOS == "darwin" {
-		script := "posix path of (choose folder"
-		if initialDir != "" {
-			script += " default location (POSIX file \"" + initialDir + "\")"
-		}
-		script += ")"
-		out, err := exec.Command("osascript", "-e", script).Output()
-		if err != nil {
-			return "", nil // user cancelled
-		}
-		return strings.TrimSpace(string(out)), nil
+		return runOSAPicker("folder", initialDir)
 	}
 	return "", ErrUnsupportedPlatform
 }

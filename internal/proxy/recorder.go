@@ -17,6 +17,9 @@ import (
 // routed to a dedicated pg ring. Memory is bounded by ring size × body
 // size; reqBody is truncated to 64KB, respBody to 512KB.
 func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string, sessionKey string, decision string, provenance string) {
+	// Redact credentials embedded in the upstream URL before any capture
+	// surface (trace JSONL, usage ring, request-start SSE event) sees it.
+	upstreamURL = redactURL(upstreamURL)
 	entry := usage.Entry{
 		ID:            id,
 		Timestamp:     time.Now(),
@@ -93,11 +96,11 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 			entry.RespPayload = append([]byte(nil), respBody...)
 		}
 		if len(respHeaders) > 0 {
-			entry.RespHeaders = respHeaders.Clone()
+			entry.RespHeaders = h.maskHeaderMap(respHeaders)
 		}
 		entry.RespStatus = respStatus
 		if len(reqHeaders) > 0 {
-			entry.ReqHeaders = maskHeaderMap(reqHeaders)
+			entry.ReqHeaders = h.maskHeaderMap(reqHeaders)
 		}
 		entry.UpstreamURL = upstreamURL
 	}

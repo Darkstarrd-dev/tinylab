@@ -137,6 +137,14 @@ type Provider struct {
 	// override same-named ones, except the hardcoded Cline X-Client-Type
 	// override, which is applied last and stays authoritative.
 	CustomHeaders map[string]string `yaml:"customHeaders,omitempty" json:"customHeaders,omitempty"`
+	// AllowPrivateNetwork explicitly opts this provider into private/loopback
+	// outbound targets (e.g. a local Ollama instance on localhost:11434).
+	// Provider registration and modification are protected by management
+	// authentication, so this is an explicit authenticated capability:
+	// anonymous callers can never enable private-target probing. Without it,
+	// management probes and model fetches reject private targets via the
+	// outbound SSRF policy.
+	AllowPrivateNetwork bool `yaml:"allowPrivateNetwork,omitempty" json:"allowPrivateNetwork,omitempty"`
 }
 
 // IsNIM reports whether this provider should use the NIM-specific key rotation

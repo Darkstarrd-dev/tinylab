@@ -60,6 +60,11 @@ type Handler struct {
 	// run concurrently with in-flight requests; the pre-built clients' Timeout
 	// fields are immutable after construction (see clientFor).
 	upstreamTimeoutSec atomic.Int64
+	// maxPassThroughBody caps a non-streaming upstream response buffered for
+	// pass-through. Zero means the default (maxPassThroughBodyBytes); tests
+	// shrink it to verify the controlled over-budget error without a huge
+	// allocation.
+	maxPassThroughBody int64
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete

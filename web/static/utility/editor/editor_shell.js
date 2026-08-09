@@ -103,9 +103,14 @@
     var toc = [];
     var iframe = preview.querySelector('iframe');
     if (iframe) {
+      // The preview iframe is zero-permission sandboxed (opaque origin), so
+      // contentDocument is not readable. Parse the raw HTML in the parent
+      // with DOMParser instead — it executes no scripts — and build the TOC
+      // from the parsed body.
       try {
-        if (iframe.contentDocument && iframe.contentDocument.body) {
-          toc = global.EditorMarkdown.buildToc(iframe.contentDocument.body);
+        var doc = new DOMParser().parseFromString(currentText(), 'text/html');
+        if (doc && doc.body) {
+          toc = global.EditorMarkdown.buildToc(doc.body);
         }
       } catch (e) {}
     } else {
@@ -137,6 +142,12 @@
       preview.classList.add('is-html-iframe-mode');
       var iframe = document.createElement('iframe');
       iframe.className = 'ed-iframe-preview';
+      // Zero-permission sandbox: no scripts, no forms, no popups, no
+      // same-origin access. The embedded HTML can never execute JS against
+      // the management origin (fetch /api/..., parent.document), so a
+      // previewed .html file cannot read or modify the admin UI. Markdown
+      // previews stay DOMPurify-sanitized and do not use this iframe.
+      iframe.setAttribute('sandbox', '');
       iframe.setAttribute('allowtransparency', 'true');
       iframe.style.cssText = 'width:100%; height:100%; border:none; background:transparent; display:block;';
 
@@ -359,9 +370,9 @@
           tasks.push(global.EditorWorkspace.putFolder(item.name, parentId).catch(function () {}));
         } else {
           var fileId = 'doc:' + relPath;
-          tasks.push(global.EditorWorkspace.putFile(item.name, '', parentId, { externalPath: item.path, isDoc: true }).then(function (node) {
+          tasks.push(global.EditorWorkspace.putFile(item.name, '', parentId, { fileId: item.fileId, isDoc: true }).then(function (node) {
             if (!node) {
-              global.EditorWorkspace.updateNode(fileId, { meta: { externalPath: item.path, isDoc: true } });
+              global.EditorWorkspace.updateNode(fileId, { meta: { fileId: item.fileId, isDoc: true } });
             }
           }));
         }
@@ -406,6 +417,16 @@
     } catch (e) {}
   }
 
+  // editorTargetBody maps a workspace node to the backend's path-capability
+  // identity: docDir files by fileId, picker-imported files by pathGrantId,
+  // local-only nodes by null (audit F-02: never a raw path).
+  function editorTargetBody(node) {
+    if (!node) return null;
+    if (node.fileId) return { fileId: node.fileId };
+    if (node.pathGrantId) return { pathGrantId: node.pathGrantId };
+    return null;
+  }
+
   function loadFile(id, overrideContent) {
     if (!id) return Promise.resolve(false);
     shellState.htmlRender = false;
@@ -415,20 +436,21 @@
         console.warn('[Editor] loadFile: node not found or not file:', id);
         return false;
       }
-      console.log('[Editor] loadFile node:', node.name, 'externalPath:', node.externalPath || '(none)');
+      var target = editorTargetBody(node);
+      console.log('[Editor] loadFile node:', node.name, 'target:', target ? JSON.stringify(target) : '(local)');
       var contentPromise;
       if (typeof overrideContent === 'string') {
         // 调用方直接提供了文件内容，直接使用，无需再次请求后端
         global.EditorWorkspace.updateNode(id, { content: overrideContent });
         contentPromise = Promise.resolve(overrideContent);
-      } else if (node.externalPath) {
-        // 有外部磁盘路径，从后端读取最新内容
+      } else if (target) {
+        // 有服务端资源身份（fileId/pathGrantId），从后端读取最新内容
         contentPromise = fetch('/api/editor/open', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: node.externalPath })
+          body: JSON.stringify(target)
         }).then(function (res) {
-          console.log('[Editor] loadFile fetch status:', res.status, 'ok:', res.ok, 'path:', node.externalPath);
+          console.log('[Editor] loadFile fetch status:', res.status, 'ok:', res.ok, 'target:', JSON.stringify(target));
           if (!res.ok) {
             console.warn('[Editor] loadFile fetch not ok, falling back to IndexedDB');
             return global.EditorWorkspace.getContent(id);
@@ -453,13 +475,13 @@
       return contentPromise.then(function (content) {
         console.log('[Editor] loadFile resolved content length:', typeof content === 'string' ? content.length : 'NOT_STRING');
 
-        // 防御性兜底：如果 content 为空但有外部路径且没有 overrideContent，最后一次尝试重新读取
-        if ((content === '' || content === null || content === undefined) && node.externalPath && typeof overrideContent !== 'string') {
-          console.warn('[Editor] loadFile: content is empty with externalPath set, retrying backend read...');
+        // 防御性兜底：如果 content 为空但有服务端身份（fileId/pathGrantId）且没有 overrideContent，最后一次尝试重新读取
+        if ((content === '' || content === null || content === undefined) && target && typeof overrideContent !== 'string') {
+          console.warn('[Editor] loadFile: content is empty with server identity, retrying backend read...');
           return fetch('/api/editor/open', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: node.externalPath })
+            body: JSON.stringify(target)
           }).then(function (r) {
             console.log('[Editor] loadFile retry status:', r.status);
             return r.ok ? r.json() : null;
@@ -487,7 +509,7 @@
     var input = currentInput();
     var draft = getDraft(id);
 
-    if (typeof overrideContent === 'string' || node.externalPath) {
+    if (typeof overrideContent === 'string' || editorTargetBody(node)) {
       if (input) {
         input.value = loadedText;
       }
@@ -530,32 +552,27 @@
     return Promise.resolve(global.prompt(message, defaultValue));
   }
 
-  function fetchDocDir() {
-    return fetch('/api/editor/tree').then(function (res) {
-      if (!res.ok) return '';
-      return res.json();
-    }).then(function (data) {
-      return (data && data.docDir) || '';
-    }).catch(function () { return ''; });
-  }
-
   function createFile() {
     promptDialog(tr('editorNewFile', 'New file'), 'untitled.md').then(function (name) {
       if (!name) return;
-      fetchDocDir().then(function (docDir) {
-        var extPath = docDir ? docDir.replace(/[\\/]+$/, '') + '/' + name : '';
-        var parent = selectedParent();
-        global.EditorWorkspace.putFile(name, '', parent, extPath ? { externalPath: extPath } : null).then(function (node) {
-          if (!node) { toast('A file with that name already exists', 'warning'); return; }
-          if (extPath) {
-            fetch('/api/editor/save', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: extPath, content: '' })
-            }).catch(function () {});
-          }
-          refreshTree().then(function () { loadFile(node.id); });
-        });
+      var parent = selectedParent();
+      // A file created at the docDir root or under a docDir folder gets a
+      // docDir-relative fileId; local-only folders keep the node local.
+      var parentRel = null;
+      if (parent && parent.indexOf('docdir:') === 0) parentRel = parent.slice('docdir:'.length);
+      else if (!parent) parentRel = '';
+      var fileId = parentRel === null ? null : (parentRel ? parentRel + '/' + name : name);
+      var meta = fileId !== null ? { fileId: fileId, isDoc: true } : null;
+      global.EditorWorkspace.putFile(name, '', parent, meta).then(function (node) {
+        if (!node) { toast('A file with that name already exists', 'warning'); return; }
+        if (meta) {
+          fetch('/api/editor/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId: fileId, content: '' })
+          }).catch(function () {});
+        }
+        refreshTree().then(function () { loadFile(node.id); });
       });
     });
   }
@@ -577,12 +594,14 @@
       if (!name || name === targetNode.name) return;
       var updates = { name: name };
 
-      if (targetNode.externalPath) {
-        var oldPath = targetNode.externalPath.replace(/\\/g, '/');
-        var dir = oldPath.substring(0, oldPath.lastIndexOf('/'));
-        var newPath = dir ? (dir + '/' + name) : name;
-        updates.meta = { externalPath: newPath };
-        targetNode.externalPath = newPath;
+      var renameTarget = editorTargetBody(targetNode);
+      if (renameTarget && renameTarget.fileId) {
+        var oldId = renameTarget.fileId;
+        var dir = oldId.indexOf('/') >= 0 ? oldId.substring(0, oldId.lastIndexOf('/')) : '';
+        var newFileId = dir ? (dir + '/' + name) : name;
+        updates.meta = { fileId: newFileId, isDoc: true };
+        targetNode.fileId = newFileId;
+        targetNode.pathGrantId = null;
       }
 
       global.EditorWorkspace.updateNode(targetId, updates).then(function (node) {
@@ -590,11 +609,12 @@
         shellState.selectedNode = node;
         if (shellState.currentId === targetId) shellState.currentNode = node;
 
-        if (node.externalPath) {
+        var saveTarget = editorTargetBody(node);
+        if (saveTarget) {
           fetch('/api/editor/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: node.externalPath, content: currentInput() ? currentInput().value : (node.content || '') })
+            body: JSON.stringify({ content: currentInput() ? currentInput().value : (node.content || ''), fileId: saveTarget.fileId, pathGrantId: saveTarget.pathGrantId })
           }).catch(function() {});
         }
 
@@ -669,11 +689,12 @@
 
     document.getElementById('del-disk-btn').onclick = function() {
       close();
-      if (node.externalPath) {
+      var delTarget = editorTargetBody(node);
+      if (delTarget) {
         fetch('/api/editor/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: node.externalPath })
+          body: JSON.stringify(delTarget)
         }).catch(function() {});
       }
       toast('已从磁盘物理删除文件', 'info');
@@ -724,19 +745,20 @@
     });
   }
 
-  function flushSessionImagesForSave(targetPath, currentValue) {
-    if (!targetPath || !currentValue || !editorSessionImages.length) return Promise.resolve(currentValue);
+  function flushSessionImagesForSave(target, currentValue) {
+    if (!target || !currentValue || !editorSessionImages.length) return Promise.resolve(currentValue);
     var referenced = editorSessionImages.filter(function (it) {
       return currentValue.indexOf(it.objectUrl) >= 0;
     });
     if (referenced.length === 0) return Promise.resolve(currentValue);
 
-    var filename = targetPath.replace(/\\/g, '/').split('/').pop() || 'document.md';
+    var filename = (target.fileId || target.pathGrantId || 'document').split('/').pop() || 'document.md';
     var baseName = filename.replace(/\.[^/.]+$/, '').replace(/[^\w-]/g, '_') || 'doc';
     var imgsSubdir = baseName + '_imgs';
 
     var formData = new FormData();
-    formData.append('targetPath', targetPath);
+    if (target.fileId) formData.append('fileId', target.fileId);
+    if (target.pathGrantId) formData.append('pathGrantId', target.pathGrantId);
     formData.append('imgsSubdir', imgsSubdir);
     referenced.forEach(function (it) {
       formData.append('files', it.blob, it.id);
@@ -768,33 +790,34 @@
     if (!input || !shellState.currentId) return Promise.resolve(false);
     var value = input.value;
 
-    function doSavePath(targetPath) {
-      return flushSessionImagesForSave(targetPath, value).then(function (finalValue) {
+    function doSaveTarget(target) {
+      return flushSessionImagesForSave(target, value).then(function (finalValue) {
         value = finalValue;
         input.value = finalValue;
         return fetch('/api/editor/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: targetPath, content: value })
+          body: JSON.stringify({ content: value, fileId: target.fileId, pathGrantId: target.pathGrantId })
         }).then(function (response) {
           return response.json().then(function (data) {
             if (!response.ok || !data || !data.ok) return false;
-            return global.EditorWorkspace.updateNode(shellState.currentId, { content: value, meta: { externalPath: targetPath } }).then(function (node) { return !!node; });
+            var meta = Object.assign({}, (shellState.currentNode && shellState.currentNode.meta) || {});
+            if (target.fileId) { meta.fileId = target.fileId; delete meta.pathGrantId; }
+            if (target.pathGrantId) { meta.pathGrantId = target.pathGrantId; delete meta.fileId; }
+            return global.EditorWorkspace.updateNode(shellState.currentId, { content: value, meta: meta }).then(function (node) { return !!node; });
           });
         }).catch(function () { return false; });
       });
     }
 
-    var targetPath = shellState.currentNode && shellState.currentNode.externalPath;
+    var target = editorTargetBody(shellState.currentNode);
     var savePromise;
-    if (targetPath) {
-      savePromise = doSavePath(targetPath);
+    if (target) {
+      savePromise = doSaveTarget(target);
     } else {
-      savePromise = fetchDocDir().then(function (docDir) {
-        var fallbackPath = docDir ? docDir.replace(/[\\/]+$/, '') + '/' + ((shellState.currentNode && shellState.currentNode.name) || 'untitled.md') : '';
-        if (fallbackPath) return doSavePath(fallbackPath);
-        return global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
-      });
+      // Local-only node (no server identity): persist to the IndexedDB
+      // workspace without a backend write.
+      savePromise = global.EditorWorkspace.updateNode(shellState.currentId, { content: value }).then(function (node) { return !!node; });
     }
 
     return savePromise.then(function (saved) {
@@ -852,9 +875,9 @@
       .then(function (response) { return response.json(); })
       .then(function (data) {
         isOpenModalBusy = false;
-        console.log('[Editor] openLocalFile response:', data ? 'ok' : 'null', 'cancelled:', !!(data && data.cancelled), 'unsupported:', !!(data && data.unsupported), 'path:', data && data.path, 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT');
-        if (data && data.path !== undefined && data.content !== undefined) {
-          return importWorkspaceFile(data.name || 'untitled.md', data.content, { externalPath: data.path, imported: true });
+        console.log('[Editor] openLocalFile response:', data ? 'ok' : 'null', 'cancelled:', !!(data && data.cancelled), 'unsupported:', !!(data && data.unsupported), 'fileId:', data && data.fileId, 'contentLen:', data && typeof data.content === 'string' ? data.content.length : 'NO_CONTENT');
+        if (data && data.content !== undefined) {
+          return importWorkspaceFile(data.name || 'untitled.md', data.content, { fileId: data.fileId || '', pathGrantId: data.pathGrantId || '', imported: true });
         }
         return false;
       })
@@ -1268,7 +1291,10 @@
         if (!prevNode) return;
 
         var iframe = prevNode.querySelector('iframe');
-        if (iframe && iframe.contentDocument) {
+        if (iframe) {
+          // Sandboxed (opaque origin): contentDocument is unreadable, so
+          // in-iframe scrolling is not possible; fall through to scrolling
+          // the preview container.
           try {
             var targetInIframe = iframe.contentDocument.getElementById(tocId) ||
                                  iframe.contentDocument.querySelector('[id="' + tocId + '"]');

@@ -2,8 +2,10 @@ module github.com/tinyrouter/tinyrouter
 
 go 1.25.0
 
+toolchain go1.26.5
+
 require (
-	github.com/go-chi/chi/v5 v5.2.1
+	github.com/go-chi/chi/v5 v5.2.2
 	golang.org/x/image v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )

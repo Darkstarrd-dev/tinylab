@@ -404,6 +404,8 @@ stateDiagram-v2
 - 启动时清理超过 TTL 的 workspace；进程退出尽力清理，崩溃后由下次启动 scavenger 回收。
 - ZIP 可先保留现有内存 session 作为 P0 兼容实现；泛化到 `ArchiveSessionStore` 时加入总字节上限、TTL 和 pinned 预算，不允许全部 pin 无上限增长。
 
+> **执行状态（2026-08-09，audit_fix Phase B 落地）：** §7.1 的 owner/session 合同已按计划落实——`internal/archive/tempstore.go` 记录 `{owner, jobId, path, name, mime, size, createdAt, expiresAt}`（`Create(ctx, owner, jobID, ...)`，`Open/Stat/Path/Release(owner, id)`），配额（每 owner 数量/字节、每 job 字节、全局字节）+ `scavengeLoop` 周期运行 + 启动 scavenger（app.go）；`types.go` 增加 `Source.Owner`/`AssetRef.Owner,JobID,ExpiresAt`/`ErrOwnership`。§7.1 末条"ZIP 内存 session 泛化"已落地：`gallerySessionStore` 加入总字节（2GiB）/24h TTL/pin 预算（4GiB）且**已 owner 绑定**（`put/touch/get/update/remove/pin/unpin` 全带 `owner` 校验）。
+
 ### 7.2 新 API 语义
 
 推荐以 `/api/archive` 作为新能力的唯一入口，并迁移所有内部调用者：
@@ -420,6 +422,8 @@ stateDiagram-v2
 | POST | `/api/archive/release/{assetId}` | 主动释放临时输出 |
 
 现有 `/api/gallery/zip*`、`/api/gallery/edit/zip-*`、`zip-outputs` 的所有前端调用迁移完成后删除旧专用实现/别名；不要同时维护两套 session、路径校验和预算逻辑。若需要外部客户端兼容，必须在实现评审中单独批准兼容期限，而不是默默留下永久 shim。
+
+> **执行状态（2026-08-09）：** `/api/archive` 语义（§7.2 表）全部落地且**所有 handler owner 绑定**（`owner.Middleware` + `ResolveSource(ownerID, id)`，跨会话 403/404）。旧 `/api/gallery/*` 路径端点**后端已迁移**：`zip-from-path`/`zip-writeback`/`file`/`list-dir`/`fs`/`open-folder`/`edit/*` 现只接受 `grantId`/`assetId`/`sourceId`，raw `path`/`paths`/`outputDir`/`zipAbsPath` 一律 410；**前端 `web/playground/static-pg/gallery/*.js` 已迁移（2026-08-09）**（`_startJob`/`zip-outputs`/`edit/zip-writeback`/`/fs`/`/file` 全走 grantId/assetId/sourceId，raw path 调用为零），§7.2"迁移完成后删除旧专用实现"后端+前端均实质完成；残留非安全功能缺陷：单 zip extract→edit 读已移除的 `data.tempPath`。
 
 ### 7.3 目录与授权
 
@@ -441,6 +445,8 @@ stateDiagram-v2
 5. 批量转换完成后，ZIP 通过 `zip-replace` 原子写回；7z/RAR 显示“外部归档只读”，可把结果 pack 成新的 ZIP/7z（工具有 write capability 时）但不删除源。
 6. `zip-outputs` 改为 `archive/pack`，从登记的 asset/job output 读取，严格限制文件数、总大小和输出目录。
 7. FFmpeg 的 GIF/WebP capability 继续由 `mediaedit.ProbeFfmpegCaps` 负责，不能与 Archive status 混成一个 resolver。
+
+> **执行状态（2026-08-09）：** §8.1 后端迁移已完成——`archiveBridge`（`ResolveSource(ownerID, id)`）+ `galleryEditExtractZipEntry` sourceId 分支 + `zip-replace` + edit 输入/输出全部 `assetId`/`grantId`（`resolveMediaInput`），`galleryEditZipOutputs` 只收 `{assetIds, zipName}`。§8.2 前端迁移**已完成（2026-08-09）**（`gallery-io.js`/`gallery-edit.js`/`gallery-edit-batch.js`/`gallery-fullscreen.js`/`gallery-edit-operations.js` 已按 `grantId`/`assetId`/`sourceId` 合同工作；`gallery-layout.js` picker accept 仍仅 `.zip`——7z/RAR 浏览器导入缺口保持，见 §2/§7.2 执行状态）。
 
 ### 8.2 前端
 
@@ -612,12 +618,16 @@ flowchart TD
 - 为现有 ZIP 增加 traversal、collision、条目数/总展开/重复读取和 writeback 权限测试。
 - 先收紧新路径，不在 P0 继续扩大任意 path API。
 
+> **执行状态（2026-08-09）：P0 已落地**——owner/job token（`internal/owner` + `TempStore` owner 参数化）、严格路径/collision/预算（`internal/archive/path.go`/`budget.go`）、writeback 权限测试齐备；任意 path API 已在后端收紧（见 §7.2 执行状态）。
+
 ### P1：ArchiveCore + ZIP adapter
 
 - 新增 `internal/archive` contracts 和 ZIP adapter。
 - 把 Gallery ZIP list/read/replace 迁移到 adapter，所有内部调用改用 ArchiveCore。
 - 引入 file-backed `TempStore`，先让 GIF `zip-outputs` 使用 assetId。
 - 浏览器行为必须保持 ZIP 浏览、删除、编辑、ZIP 原位回写。
+
+> **执行状态（2026-08-09）：P1 已落地**——`internal/archive` contracts + ZIP adapter + file-backed `TempStore`（owner 绑定 + 配额 + scavenger）；GIF `zip-outputs` 已改 `assetIds` 合同。
 
 ### P2：外部工具 runner 与配置
 
@@ -626,12 +636,16 @@ flowchart TD
 - 实现 RAR read adapter；区分 `unrar` read 与 `rar` write。
 - 加入 process group、deadline、stderr tail、并发 semaphore、workspace scavenger。
 
+> **执行状态（2026-08-09）：P2 已落地**——`Config.Archive`/Settings presence-aware PATCH、7z `-slt` list（含 F-13 header 修复）、RAR read adapter、process group/deadline/stderr tail/semaphore/workspace scavenger；`archivetool/tool.go::validateTool` 已于同日迁移 `procutil.ValidateExecutable`（F-08 完成，`tool_test.go` 7 测试，见 audit 附录 B）。
+
 ### P3：统一 Archive API 与 Gallery
 
 - 将 ZIP/7z/RAR 前端输入统一为 Archive item/sourceId。
 - 新 API 替换 `/api/gallery/zip*`、`extract-zip-entry`、`zip-outputs` 等专用入口。
 - 迁移 Gallery 目录/拖放/粘贴/rehydrate、主图、缩略图、视频/GIF、Edit 输入。
 - 7z/RAR 明确只读；ZIP writeback 使用登记 source + asset replacement。
+
+> **执行状态（2026-08-09）：P3 后端+前端均已落地**——`/api/archive` 统一 API + Gallery 后端迁移（§7.2/§8.1 执行状态）；前端 `gallery-*` 已迁移（§8.2 执行状态；残留非安全功能缺陷：单 zip extract→edit 的 `data.tempPath` 读）。
 
 ### P4：GIF 与 MediaBridge
 

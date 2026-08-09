@@ -21,6 +21,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/archive"
 	"github.com/tinyrouter/tinyrouter/internal/archivetool"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
 )
 
 // newTestServer wires a real runner (zip works without external tools) and the
@@ -68,6 +69,42 @@ func makeZIP(t *testing.T, entries map[string]string) []byte {
 	return buf.Bytes()
 }
 
+// testOwner is one fixed owner identity shared by every request in a test:
+// the owner middleware accepts any well-formed owner cookie (the value is an
+// opaque capability), so a single test session keeps one owner and its
+// registered resources stay visible across requests (F-29 session model).
+const testOwner = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+// ownerTransport injects the shared owner cookie on every request.
+type ownerTransport struct{}
+
+func (ownerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.AddCookie(&http.Cookie{Name: owner.CookieName, Value: testOwner})
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+var ownerClient = &http.Client{Transport: ownerTransport{}}
+
+// get is http.Get with the shared owner cookie attached.
+func get(url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return ownerClient.Do(req)
+}
+
+// post is http.Post with the shared owner cookie attached.
+func post(url, contentType string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	return ownerClient.Do(req)
+}
+
 func decodeJSON(t *testing.T, body io.Reader, into any) {
 	t.Helper()
 	if err := json.NewDecoder(body).Decode(into); err != nil {
@@ -79,7 +116,7 @@ func TestZipSourceFlow(t *testing.T) {
 	srv := newTestServer(t)
 	zipData := makeZIP(t, map[string]string{"a.png": "AAA", "b.png": "BBB"})
 
-	resp, err := http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -104,7 +141,7 @@ func TestZipSourceFlow(t *testing.T) {
 	}
 
 	// Entry read by strict path.
-	resp, err = http.Get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
+	resp, err = get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
 	if err != nil {
 		t.Fatalf("GET entry: %v", err)
 	}
@@ -115,7 +152,7 @@ func TestZipSourceFlow(t *testing.T) {
 	}
 
 	// Malformed path: traversal rejected before any matching.
-	resp, err = http.Get(srv.URL + "/sources/" + created.SourceID + "/entries/../evil.txt")
+	resp, err = get(srv.URL + "/sources/" + created.SourceID + "/entries/../evil.txt")
 	if err != nil {
 		t.Fatalf("GET traversal: %v", err)
 	}
@@ -125,7 +162,7 @@ func TestZipSourceFlow(t *testing.T) {
 	}
 
 	// Missing entry -> 404.
-	resp, err = http.Get(srv.URL + "/sources/" + created.SourceID + "/entries/missing.png")
+	resp, err = get(srv.URL + "/sources/" + created.SourceID + "/entries/missing.png")
 	if err != nil {
 		t.Fatalf("GET missing: %v", err)
 	}
@@ -136,7 +173,7 @@ func TestZipSourceFlow(t *testing.T) {
 
 	// Delete releases the source.
 	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/sources/"+created.SourceID, nil)
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = ownerClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE source: %v", err)
 	}
@@ -146,7 +183,7 @@ func TestZipSourceFlow(t *testing.T) {
 	}
 
 	// Entries after release -> 404.
-	resp, err = http.Get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
+	resp, err = get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
 	if err != nil {
 		t.Fatalf("GET after delete: %v", err)
 	}
@@ -160,7 +197,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 	srv := newTestServer(t)
 	zipData := makeZIP(t, map[string]string{"a.png": "OLD", "b.png": "BBB"})
 
-	resp, err := http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -171,7 +208,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 	resp.Body.Close()
 
 	// Register the replacement asset.
-	resp, err = http.Post(srv.URL+"/assets?name=a.png", "image/png", strings.NewReader("NEW"))
+	resp, err = post(srv.URL+"/assets?name=a.png", "image/png", strings.NewReader("NEW"))
 	if err != nil {
 		t.Fatalf("POST asset: %v", err)
 	}
@@ -186,7 +223,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 
 	// zip-replace swaps a.png content.
 	payload := fmt.Sprintf(`{"sourceId":%q,"replacements":[{"entryPath":"a.png","assetId":%q}]}`, created.SourceID, asset.AssetID)
-	resp, err = http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err = post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST zip-replace: %v", err)
 	}
@@ -205,7 +242,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 	}
 
 	// The registered source now serves the replacement content.
-	resp, err = http.Get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
+	resp, err = get(srv.URL + "/sources/" + created.SourceID + "/entries/a.png")
 	if err != nil {
 		t.Fatalf("GET replaced entry: %v", err)
 	}
@@ -216,7 +253,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 	}
 
 	// Owner binding: the source-owned output asset cannot be released by id.
-	resp, err = http.Post(srv.URL+"/release/"+replaced.AssetID, "application/json", nil)
+	resp, err = post(srv.URL+"/release/"+replaced.AssetID, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST release: %v", err)
 	}
@@ -226,7 +263,7 @@ func TestZipReplaceEndToEnd(t *testing.T) {
 	}
 
 	// Releasing an unknown id is idempotent.
-	resp, err = http.Post(srv.URL+"/release/does-not-exist", "application/json", nil)
+	resp, err = post(srv.URL+"/release/does-not-exist", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST release unknown: %v", err)
 	}
@@ -241,7 +278,7 @@ func TestZipReplaceRejectsBadInput(t *testing.T) {
 
 	// Unknown sourceId -> 404.
 	payload := `{"sourceId":"nope","replacements":[{"entryPath":"a.png","assetId":"x"}]}`
-	resp, err := http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err := post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST zip-replace: %v", err)
 	}
@@ -252,7 +289,7 @@ func TestZipReplaceRejectsBadInput(t *testing.T) {
 
 	// Unsafe entry path -> 400 before any asset resolution.
 	zipData := makeZIP(t, map[string]string{"a.png": "A"})
-	resp, err = http.Post(srv.URL+"/sources?name=t.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err = post(srv.URL+"/sources?name=t.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -262,7 +299,7 @@ func TestZipReplaceRejectsBadInput(t *testing.T) {
 	decodeJSON(t, resp.Body, &created)
 	resp.Body.Close()
 	payload = fmt.Sprintf(`{"sourceId":%q,"replacements":[{"entryPath":"../evil","assetId":"x"}]}`, created.SourceID)
-	resp, err = http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err = post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST zip-replace unsafe: %v", err)
 	}
@@ -273,7 +310,7 @@ func TestZipReplaceRejectsBadInput(t *testing.T) {
 
 	// Missing replacement asset -> 404.
 	payload = fmt.Sprintf(`{"sourceId":%q,"replacements":[{"entryPath":"a.png","assetId":"missing"}]}`, created.SourceID)
-	resp, err = http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err = post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST zip-replace missing asset: %v", err)
 	}
@@ -287,7 +324,7 @@ func TestPackZip(t *testing.T) {
 	srv := newTestServer(t)
 	ids := make([]string, 0, 2)
 	for _, n := range []string{"x.png", "y.txt"} {
-		resp, err := http.Post(srv.URL+"/assets?name="+n, "application/octet-stream", strings.NewReader("content-"+n))
+		resp, err := post(srv.URL+"/assets?name="+n, "application/octet-stream", strings.NewReader("content-"+n))
 		if err != nil {
 			t.Fatalf("POST asset %s: %v", n, err)
 		}
@@ -299,7 +336,7 @@ func TestPackZip(t *testing.T) {
 		ids = append(ids, a.AssetID)
 	}
 	payload := fmt.Sprintf(`{"assetIds":[%q,%q],"format":"zip","name":"out.zip"}`, ids[0], ids[1])
-	resp, err := http.Post(srv.URL+"/pack", "application/json", strings.NewReader(payload))
+	resp, err := post(srv.URL+"/pack", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST pack: %v", err)
 	}
@@ -314,7 +351,7 @@ func TestPackZip(t *testing.T) {
 	decodeJSON(t, resp.Body, &packed)
 	resp.Body.Close()
 
-	resp, err = http.Get(srv.URL + "/assets/" + packed.AssetID)
+	resp, err = get(srv.URL + "/assets/" + packed.AssetID)
 	if err != nil {
 		t.Fatalf("GET packed asset: %v", err)
 	}
@@ -333,7 +370,7 @@ func TestCreateSourceRejectsMislabeledUpload(t *testing.T) {
 	srv := newTestServer(t)
 	// 7z magic bytes mislabeled as .zip must be rejected, not fed to the tool.
 	body := append([]byte{0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c}, bytes.Repeat([]byte{0}, 64)...)
-	resp, err := http.Post(srv.URL+"/sources?name=evil.zip", "application/octet-stream", bytes.NewReader(body))
+	resp, err := post(srv.URL+"/sources?name=evil.zip", "application/octet-stream", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -345,7 +382,7 @@ func TestCreateSourceRejectsMislabeledUpload(t *testing.T) {
 
 func TestStatusEndpoint(t *testing.T) {
 	srv := newTestServer(t)
-	resp, err := http.Get(srv.URL + "/status")
+	resp, err := get(srv.URL + "/status")
 	if err != nil {
 		t.Fatalf("GET status: %v", err)
 	}
@@ -403,7 +440,7 @@ func TestRunnerUnavailable503(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewRequest %s %s: %v", tc.method, tc.path, err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := ownerClient.Do(req)
 		if err != nil {
 			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
 		}
@@ -426,7 +463,7 @@ func TestCreateSourceRejectsBadRequests(t *testing.T) {
 	zipData := makeZIP(t, map[string]string{"a.png": "AAA"})
 
 	// Missing name query parameter.
-	resp, err := http.Post(srv.URL+"/sources", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -436,7 +473,7 @@ func TestCreateSourceRejectsBadRequests(t *testing.T) {
 	}
 
 	// Unknown extension (not .zip/.7z/.rar).
-	resp, err = http.Post(srv.URL+"/sources?name=notes.txt", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err = post(srv.URL+"/sources?name=notes.txt", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -450,7 +487,7 @@ func TestCreateSourceRejectsBadRequests(t *testing.T) {
 	}
 
 	// Mislabeled: zip magic named .rar must be sniffed and rejected.
-	resp, err = http.Post(srv.URL+"/sources?name=evil.rar", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err = post(srv.URL+"/sources?name=evil.rar", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -472,7 +509,7 @@ func TestCreateSourceRejectsBadRequests(t *testing.T) {
 		"empty.zip":     {},
 	}
 	for name, body := range corrupt {
-		resp, err = http.Post(srv.URL+"/sources?name="+name, "application/octet-stream", bytes.NewReader(body))
+		resp, err = post(srv.URL+"/sources?name="+name, "application/octet-stream", bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("POST sources %s: %v", name, err)
 		}
@@ -493,7 +530,7 @@ func TestCreateSourceRejectsBadRequests(t *testing.T) {
 func TestSourceManifestDeterministic(t *testing.T) {
 	srv := newTestServer(t)
 	zipData := makeZIP(t, map[string]string{"b.png": "BBB", "a.png": "AAA", "dir/x.txt": "X"})
-	resp, err := http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -552,7 +589,7 @@ func TestSourceManifestDeterministic(t *testing.T) {
 func TestEntryReadRejectsUnsafePaths(t *testing.T) {
 	srv := newTestServer(t)
 	zipData := makeZIP(t, map[string]string{"a.png": "AAA"})
-	resp, err := http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -569,7 +606,7 @@ func TestEntryReadRejectsUnsafePaths(t *testing.T) {
 		"C:%5CWindows%5Cx", // drive letter (encoded backslashes)
 	}
 	for _, p := range unsafe {
-		resp, err = http.Get(srv.URL + "/sources/" + id + "/entries/" + p)
+		resp, err = get(srv.URL + "/sources/" + id + "/entries/" + p)
 		if err != nil {
 			t.Fatalf("GET entry %q: %v", p, err)
 		}
@@ -586,7 +623,7 @@ func TestEntryReadRejectsUnsafePaths(t *testing.T) {
 	// URL-encoded traversal is routed on chi's RawPath, so the handler sees
 	// the literal name "..%2Fevil.txt" (never decoded): it is safe (no path
 	// segment ever reaches the reader) and simply misses the archive -> 404.
-	resp, err = http.Get(srv.URL + "/sources/" + id + "/entries/..%2Fevil.txt")
+	resp, err = get(srv.URL + "/sources/" + id + "/entries/..%2Fevil.txt")
 	if err != nil {
 		t.Fatalf("GET encoded traversal: %v", err)
 	}
@@ -600,7 +637,7 @@ func TestEntryReadRejectsUnsafePaths(t *testing.T) {
 	}
 
 	// Unknown source id -> 404, not a fallthrough read.
-	resp, err = http.Get(srv.URL + "/sources/deadbeef/entries/a.png")
+	resp, err = get(srv.URL + "/sources/deadbeef/entries/a.png")
 	if err != nil {
 		t.Fatalf("GET unknown source: %v", err)
 	}
@@ -620,9 +657,9 @@ func TestEntryReadRejectsUnsafePaths(t *testing.T) {
 // SevenZipPath is a nonexistent file, which never falls back to PATH).
 func TestPackValidation(t *testing.T) {
 	srv := newTestServer(t)
-	post := func(payload string) (int, string) {
+	packPost := func(payload string) (int, string) {
 		t.Helper()
-		resp, err := http.Post(srv.URL+"/pack", "application/json", strings.NewReader(payload))
+		resp, err := post(srv.URL+"/pack", "application/json", strings.NewReader(payload))
 		if err != nil {
 			t.Fatalf("POST pack: %v", err)
 		}
@@ -634,13 +671,13 @@ func TestPackValidation(t *testing.T) {
 		return resp.StatusCode, body.Code
 	}
 
-	if code, got := post(`{"assetIds":["x"],"format":"gzip","name":"o.zip"}`); code != http.StatusBadRequest || got != "archive.unsupported-format" {
+	if code, got := packPost(`{"assetIds":["x"],"format":"gzip","name":"o.zip"}`); code != http.StatusBadRequest || got != "archive.unsupported-format" {
 		t.Errorf("unknown format = %d %q, want 400 archive.unsupported-format", code, got)
 	}
-	if code, got := post(`{"assetIds":[],"format":"zip","name":"o.zip"}`); code != http.StatusBadRequest || got != "archive.bad-request" {
+	if code, got := packPost(`{"assetIds":[],"format":"zip","name":"o.zip"}`); code != http.StatusBadRequest || got != "archive.bad-request" {
 		t.Errorf("empty assetIds = %d %q, want 400 archive.bad-request", code, got)
 	}
-	if code, got := post(`{"assetIds":["nope"],"format":"zip","name":"o.zip"}`); code != http.StatusNotFound || got != "archive.not-found" {
+	if code, got := packPost(`{"assetIds":["nope"],"format":"zip","name":"o.zip"}`); code != http.StatusNotFound || got != "archive.not-found" {
 		t.Errorf("missing asset = %d %q, want 404 archive.not-found", code, got)
 	}
 
@@ -648,7 +685,7 @@ func TestPackValidation(t *testing.T) {
 	noTool := filepath.Join(t.TempDir(), "no-7z.exe")
 	h, srv2 := newHandlerServer(t, config.ArchiveConfig{SevenZipPath: noTool})
 	_ = h
-	resp, err := http.Post(srv2.URL+"/assets?name=a.png", "image/png", strings.NewReader("AAA"))
+	resp, err := post(srv2.URL+"/assets?name=a.png", "image/png", strings.NewReader("AAA"))
 	if err != nil {
 		t.Fatalf("POST asset: %v", err)
 	}
@@ -658,7 +695,7 @@ func TestPackValidation(t *testing.T) {
 	decodeJSON(t, resp.Body, &asset)
 	resp.Body.Close()
 	payload := fmt.Sprintf(`{"assetIds":[%q],"format":"7z","name":"o.7z"}`, asset.AssetID)
-	resp, err = http.Post(srv2.URL+"/pack", "application/json", strings.NewReader(payload))
+	resp, err = post(srv2.URL+"/pack", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST pack 7z: %v", err)
 	}
@@ -680,7 +717,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	h, srv := newHandlerServer(t, config.ArchiveConfig{})
 
 	// Plain uploaded asset.
-	resp, err := http.Post(srv.URL+"/assets?name=p.png", "image/png", strings.NewReader("PNG"))
+	resp, err := post(srv.URL+"/assets?name=p.png", "image/png", strings.NewReader("PNG"))
 	if err != nil {
 		t.Fatalf("POST asset: %v", err)
 	}
@@ -690,7 +727,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	decodeJSON(t, resp.Body, &asset)
 	resp.Body.Close()
 
-	resp, err = http.Get(srv.URL + "/assets/" + asset.AssetID)
+	resp, err = get(srv.URL + "/assets/" + asset.AssetID)
 	if err != nil {
 		t.Fatalf("GET asset: %v", err)
 	}
@@ -699,7 +736,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 		t.Fatalf("GET asset = %d, want 200", resp.StatusCode)
 	}
 
-	resp, err = http.Post(srv.URL+"/release/"+asset.AssetID, "application/json", nil)
+	resp, err = post(srv.URL+"/release/"+asset.AssetID, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST release: %v", err)
 	}
@@ -707,7 +744,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("release asset = %d, want 200", resp.StatusCode)
 	}
-	resp, err = http.Get(srv.URL + "/assets/" + asset.AssetID)
+	resp, err = get(srv.URL + "/assets/" + asset.AssetID)
 	if err != nil {
 		t.Fatalf("GET released asset: %v", err)
 	}
@@ -715,7 +752,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET released asset = %d, want 404", resp.StatusCode)
 	}
-	resp, err = http.Post(srv.URL+"/release/"+asset.AssetID, "application/json", nil)
+	resp, err = post(srv.URL+"/release/"+asset.AssetID, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST double release: %v", err)
 	}
@@ -727,7 +764,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	// A registered source's own temp asset is source-owned: releasing it by
 	// id must 409 and the source must remain usable.
 	zipData := makeZIP(t, map[string]string{"a.png": "AAA"})
-	resp, err = http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err = post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -742,7 +779,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	if refID == "" {
 		t.Fatal("source has no registered refID")
 	}
-	resp, err = http.Post(srv.URL+"/release/"+refID, "application/json", nil)
+	resp, err = post(srv.URL+"/release/"+refID, "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST release source-owned: %v", err)
 	}
@@ -754,7 +791,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict || owned.Code != "archive.source-owned" {
 		t.Errorf("release source-owned = %d code=%q, want 409 archive.source-owned", resp.StatusCode, owned.Code)
 	}
-	resp, err = http.Get(srv.URL + "/sources/" + src.SourceID + "/entries/a.png")
+	resp, err = get(srv.URL + "/sources/" + src.SourceID + "/entries/a.png")
 	if err != nil {
 		t.Fatalf("GET entry after failed release: %v", err)
 	}
@@ -766,7 +803,7 @@ func TestReleaseAssetLifecycle(t *testing.T) {
 
 	// Unknown source delete is idempotent 204.
 	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/sources/does-not-exist", nil)
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = ownerClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE unknown source: %v", err)
 	}
@@ -783,14 +820,15 @@ func TestZipReplaceReadOnlySource(t *testing.T) {
 	h, srv := newHandlerServer(t, config.ArchiveConfig{})
 	h.mu.Lock()
 	h.sources["ro7z"] = &sourceEntry{
-		src:       archive.Source{ID: "ro7z", Format: archive.Format7Z, Name: "x.7z", Path: "unused", Writable: false},
+		owner:     testOwner,
+		src:       archive.Source{ID: "ro7z", Owner: testOwner, Format: archive.Format7Z, Name: "x.7z", Path: "unused", Writable: false},
 		refID:     "ref7z",
 		createdAt: time.Now(),
 	}
 	h.mu.Unlock()
 
 	payload := `{"sourceId":"ro7z","replacements":[{"entryPath":"a.png","assetId":"whatever"}]}`
-	resp, err := http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err := post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST zip-replace: %v", err)
 	}
@@ -837,7 +875,7 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 	srv := httptest.NewServer(rr)
 	t.Cleanup(srv.Close)
 	zipData := makeZIP(t, map[string]string{"a.png": "OLD"})
-	resp, err := http.Post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
+	resp, err := post(srv.URL+"/sources?name=test.zip", "application/octet-stream", bytes.NewReader(zipData))
 	if err != nil {
 		t.Fatalf("POST sources: %v", err)
 	}
@@ -846,7 +884,7 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 	}
 	decodeJSON(t, resp.Body, &src)
 	resp.Body.Close()
-	resp, err = http.Post(srv.URL+"/assets?name=a.png", "image/png", strings.NewReader("NEW"))
+	resp, err = post(srv.URL+"/assets?name=a.png", "image/png", strings.NewReader("NEW"))
 	if err != nil {
 		t.Fatalf("POST asset: %v", err)
 	}
@@ -859,7 +897,7 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 	payload := fmt.Sprintf(`{"sourceId":%q,"replacements":[{"entryPath":"a.png","assetId":%q}]}`, src.SourceID, asset.AssetID)
 	first := make(chan int, 1)
 	go func() {
-		r, err := http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+		r, err := post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 		if err != nil {
 			first <- 0
 			return
@@ -870,7 +908,7 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 
 	// Wait until the first writeback is inside the runner (busy flag set).
 	<-br.entered
-	resp, err = http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err = post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST concurrent zip-replace: %v", err)
 	}
@@ -889,12 +927,64 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 	}
 
 	// Busy flag cleared: the same source accepts a follow-up writeback.
-	resp, err = http.Post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
+	resp, err = post(srv.URL+"/zip-replace", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST follow-up zip-replace: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("follow-up zip-replace = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestWriteStoreError_BudgetMaps422 pins the HTTP mapping of TempStore quota
+// failures: any budget dimension surfaces as a stable 422 with the
+// "archive.budget" machine code (audit_fix.md F-15 controlled error at the
+// archive workspace budget).
+func TestWriteStoreError_BudgetMaps422(t *testing.T) {
+	for name, err := range map[string]error{
+		"owner-assets": &archive.BudgetError{Dimension: "owner-assets", Limit: 512, Actual: 513},
+		"owner-bytes":  &archive.BudgetError{Dimension: "owner-bytes", Limit: 10, Actual: 11},
+		"job-bytes":    &archive.BudgetError{Dimension: "job-bytes", Limit: 10, Actual: 11},
+		"global-bytes": &archive.BudgetError{Dimension: "global-bytes", Limit: 10, Actual: 11},
+	} {
+		rr := httptest.NewRecorder()
+		h := NewHandler(&apibase.Deps{}, nil)
+		h.writeStoreError(rr, err)
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: writeStoreError status = %d, want 422", name, rr.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: decode body: %v", name, err)
+		}
+		if body["code"] != "archive.budget" {
+			t.Errorf("%s: code = %q, want archive.budget", name, body["code"])
+		}
+
+		// writeRunError (the pack/entry-read path) maps the same sentinel.
+		rr2 := httptest.NewRecorder()
+		h.writeRunError(rr2, err)
+		if rr2.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: writeRunError status = %d, want 422", name, rr2.Code)
+		}
+	}
+}
+
+// TestWriteStoreError_Closed503 pins the ErrClosed mapping: an operation
+// against a closed (unavailable) temp store is a 503, not a 500.
+func TestWriteStoreError_Closed503(t *testing.T) {
+	rr := httptest.NewRecorder()
+	h := NewHandler(&apibase.Deps{}, nil)
+	h.writeStoreError(rr, archive.ErrClosed)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("writeStoreError(ErrClosed) status = %d, want 503", rr.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != "archive.unavailable" {
+		t.Fatalf("code = %q, want archive.unavailable", body["code"])
 	}
 }

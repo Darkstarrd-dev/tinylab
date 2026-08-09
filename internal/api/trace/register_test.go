@@ -1,12 +1,14 @@
 package trace
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -545,5 +547,370 @@ func TestSanitizePathParam(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("sanitizePathParam(%q) = %v, want %v", tc.input, got, tc.expected)
 		}
+	}
+}
+
+// TestTraceIndex_LargeFileStreaming verifies the two-pass streaming reader
+// over a large index file: only the requested page is returned (newest-first),
+// the full file is never loaded into memory, and the DTO whitelist drops
+// credential-adjacent raw fields.
+func TestTraceIndex_LargeFileStreaming(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	const totalLines = 20000
+	var lines []string
+	for i := range totalLines {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "index", "ts": "2026-07-27T10:00:00Z", "reqID": "req-" + strconv.Itoa(i),
+			"model": "gpt-4", "provider": "openai", "status": "success",
+			"finalKey": "sk-should-never-leak", "upstreamURL": "https://user:pass@example.com/v1",
+		}))
+	}
+	writeIndexFile(t, tracesDir, "20260727", lines)
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date=20260727&limit=50&offset=0", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if f64(resp, "total") != totalLines {
+		t.Errorf("expected total %d, got %v", totalLines, resp["total"])
+	}
+	page, ok := resp["lines"].([]any)
+	if !ok {
+		t.Fatal("expected lines array")
+	}
+	if len(page) != 50 {
+		t.Fatalf("expected 50 lines, got %d", len(page))
+	}
+	// Newest first: the last-written line must be first.
+	if s(page[0].(map[string]any), "reqID") != "req-19999" {
+		t.Errorf("expected newest line req-19999 first, got %v", page[0])
+	}
+	// DTO whitelist: credential-adjacent raw fields must not be exposed.
+	first := page[0].(map[string]any)
+	for _, banned := range []string{"finalKey", "finalKeyName", "upstreamURL", "upstreamURLBase"} {
+		if _, ok := first[banned]; ok {
+			t.Errorf("DTO leaked %q field", banned)
+		}
+	}
+
+	// A window deep into the file (offset near total) returns the matching
+	// oldest lines reversed.
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date=20260727&limit=50&offset=19950", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	page = resp["lines"].([]any)
+	if len(page) != 50 {
+		t.Fatalf("expected 50 lines at offset 19950, got %d", len(page))
+	}
+	if s(page[0].(map[string]any), "reqID") != "req-49" {
+		t.Errorf("expected req-49 first at offset 19950, got %v", page[0])
+	}
+}
+
+// TestTraceIndex_PaginationBoundaries pins the offset/limit edge semantics:
+// first/last page, offset at or beyond total (empty page), and invalid limit
+// values falling back to the default.
+func TestTraceIndex_PaginationBoundaries(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	var lines []string
+	for i := range 5 {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "index", "ts": "2026-07-27T10:00:00Z", "reqID": strconv.Itoa(i),
+			"model": "gpt-4", "status": "success",
+		}))
+	}
+	writeIndexFile(t, tracesDir, "20260727", lines)
+
+	cases := []struct {
+		query     string
+		wantFirst string // first returned reqID; "" means an empty page
+		wantCount int
+	}{
+		{"date=20260727&limit=2&offset=0", "4", 2},
+		{"date=20260727&limit=2&offset=2", "2", 2},
+		{"date=20260727&limit=2&offset=4", "0", 1}, // short page: offset+limit > total
+		{"date=20260727&limit=2&offset=5", "", 0},  // offset == total
+		{"date=20260727&limit=2&offset=9", "", 0},  // offset > total
+		{"date=20260727&limit=1000&offset=0", "4", 5},
+		{"date=20260727&limit=0", "4", 5},   // invalid limit -> default
+		{"date=20260727&limit=-1", "4", 5},  // negative limit -> default
+		{"date=20260727&limit=abc", "4", 5}, // non-numeric limit -> default
+		{"date=20260727&offset=abc", "4", 5},
+	}
+	for _, tc := range cases {
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?"+tc.query, nil))
+		if rr.Code != http.StatusOK {
+			t.Errorf("query %q: expected 200, got %d", tc.query, rr.Code)
+			continue
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Errorf("query %q: invalid JSON: %v", tc.query, err)
+			continue
+		}
+		if f64(resp, "total") != 5 {
+			t.Errorf("query %q: expected total 5, got %v", tc.query, resp["total"])
+			continue
+		}
+		page, ok := resp["lines"].([]any)
+		if !ok {
+			t.Errorf("query %q: expected lines array", tc.query)
+			continue
+		}
+		if len(page) != tc.wantCount {
+			t.Errorf("query %q: expected %d lines, got %d", tc.query, tc.wantCount, len(page))
+			continue
+		}
+		if tc.wantFirst == "" {
+			continue
+		}
+		if s(page[0].(map[string]any), "reqID") != tc.wantFirst {
+			t.Errorf("query %q: expected first reqID %s, got %v", tc.query, tc.wantFirst, page[0])
+		}
+	}
+}
+
+func TestTraceIndex_QFilterTooLong(t *testing.T) {
+	_, r := setupTraceTest(t)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date=20260727&q="+strings.Repeat("a", maxQFilterLen+1), nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized q, got %d", rr.Code)
+	}
+}
+
+func TestTraceIndex_ImpossibleDate(t *testing.T) {
+	_, r := setupTraceTest(t)
+	for _, date := range []string{"2026-13-99", "20260230"} {
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date="+date, nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for date %q, got %d", date, rr.Code)
+		}
+	}
+}
+
+func TestTraceReq_ReqIDTooLong(t *testing.T) {
+	_, r := setupTraceTest(t)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/req/"+strings.Repeat("a", maxReqIDLen+1), nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized reqID, got %d", rr.Code)
+	}
+}
+
+// TestTraceReq_LargeFileTruncation verifies the line cap on per-request trace
+// files: a file with more than maxReqDetailLines lines returns the first
+// maxReqDetailLines lines in chronological order and flags truncated.
+func TestTraceReq_LargeFileTruncation(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	reqID := "big-req"
+	var lines []string
+	for i := range maxReqDetailLines * 3 {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "attempt", "reqID": reqID, "n": i + 1, "status": "success", "model": "gpt-4",
+		}))
+	}
+	writeReqFile(t, tracesDir, reqID, lines)
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/req/"+reqID, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	page, ok := resp["lines"].([]any)
+	if !ok {
+		t.Fatal("expected lines array")
+	}
+	if len(page) != maxReqDetailLines {
+		t.Errorf("expected %d lines, got %d", maxReqDetailLines, len(page))
+	}
+	if tr, ok := resp["truncated"].(bool); !ok || !tr {
+		t.Errorf("expected truncated=true, got %v", resp["truncated"])
+	}
+	// Chronological order preserved: first line is attempt 1.
+	if f64(page[0].(map[string]any), "n") != 1 {
+		t.Errorf("expected first line n=1, got %v", page[0])
+	}
+}
+
+// TestTraceReq_ResponseByteBudget verifies the response byte cap: large bodies
+// must stop collection well before the line cap and the wire response must
+// stay bounded.
+func TestTraceReq_ResponseByteBudget(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	reqID := "big-body-req"
+	big := strings.Repeat("x", 512*1024)
+	var lines []string
+	for i := range 40 {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "attempt", "reqID": reqID, "n": i + 1, "status": "success", "respBody": big,
+		}))
+	}
+	writeReqFile(t, tracesDir, reqID, lines)
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/req/"+reqID, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	page, ok := resp["lines"].([]any)
+	if !ok {
+		t.Fatal("expected lines array")
+	}
+	if len(page) == 0 {
+		t.Fatal("expected at least one line")
+	}
+	if len(page) == 40 {
+		t.Fatal("expected the byte budget to truncate the page")
+	}
+	if tr, ok := resp["truncated"].(bool); !ok || !tr {
+		t.Errorf("expected truncated=true, got %v", resp["truncated"])
+	}
+	// The wire response stays bounded by the budget (plus envelope slack).
+	if rr.Body.Len() > maxTraceResponseBytes+4096 {
+		t.Errorf("response too large: %d bytes", rr.Body.Len())
+	}
+}
+
+// TestTraceReq_SecretSafeDTO verifies the DTO whitelist and header re-masking:
+// raw credential values, upstream URLs, and finalKey fields never reach the
+// response, while already-masked values pass through unchanged.
+func TestTraceReq_SecretSafeDTO(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	reqID := "secret-req"
+	const secret = "sk-test-super-secret-value-123456"
+	const userinfo = "https://user:sekrit@api.example.com/v1/chat/completions"
+	writeReqFile(t, tracesDir, reqID, []string{
+		mustJSON(map[string]any{
+			"type": "request", "reqID": reqID,
+			"reqHeaders": map[string]any{
+				"Authorization": []any{"Bearer " + secret},
+				"X-Api-Key":     []any{"plain-key-value"},
+				"X-Custom":      []any{"ok"},
+				"X-Masked":      []any{"***abcd"},
+			},
+			"upstreamURL": userinfo,
+		}),
+		mustJSON(map[string]any{
+			"type": "attempt", "reqID": reqID, "n": 1, "status": "success",
+			"finalKey": secret, "finalKeyName": secret, "upstreamURL": userinfo,
+		}),
+	})
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/req/"+reqID, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, secret) {
+		t.Error("response leaked the raw secret value")
+	}
+	if strings.Contains(body, "sekrit") {
+		t.Error("response leaked upstream URL userinfo")
+	}
+	if strings.Contains(body, "finalKey") {
+		t.Error("response leaked the finalKey field")
+	}
+	if strings.Contains(body, "upstreamURL") {
+		t.Error("response leaked the upstreamURL field")
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	page, ok := resp["lines"].([]any)
+	if !ok || len(page) != 2 {
+		t.Fatalf("expected 2 lines, got %v", resp["lines"])
+	}
+	headers, ok := page[0].(map[string]any)["reqHeaders"].(map[string]any)
+	if !ok {
+		t.Fatal("expected reqHeaders object")
+	}
+	headerVal := func(name string) string {
+		vals, ok := headers[name].([]any)
+		if !ok || len(vals) == 0 {
+			return ""
+		}
+		s, _ := vals[0].(string)
+		return s
+	}
+	if got := headerVal("Authorization"); got != "Bearer ***3456" {
+		t.Errorf("Authorization not masked, got %q", got)
+	}
+	if got := headerVal("X-Api-Key"); got != "***alue" {
+		t.Errorf("X-Api-Key not masked, got %q", got)
+	}
+	if got := headerVal("X-Custom"); got != "ok" {
+		t.Errorf("non-secret header should pass through, got %q", got)
+	}
+	if got := headerVal("X-Masked"); got != "***abcd" {
+		t.Errorf("already-masked header should pass through unchanged, got %q", got)
+	}
+}
+
+// TestTraceIndex_ContextCancellation verifies a canceled request aborts the
+// read before scanning the file or writing a response.
+func TestTraceIndex_ContextCancellation(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	var lines []string
+	for i := range 5000 {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "index", "ts": "2026-07-27T10:00:00Z", "reqID": strconv.Itoa(i), "status": "success",
+		}))
+	}
+	writeIndexFile(t, tracesDir, "20260727", lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/index?date=20260727", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Body.Len() != 0 {
+		t.Errorf("expected no response body after cancellation, got %d bytes", rr.Body.Len())
+	}
+}
+
+func TestTraceReq_ContextCancellation(t *testing.T) {
+	tracesDir, r := setupTraceTest(t)
+	reqID := "cancel-req"
+	var lines []string
+	for i := range 5000 {
+		lines = append(lines, mustJSON(map[string]any{
+			"type": "attempt", "reqID": reqID, "n": i + 1, "status": "success",
+		}))
+	}
+	writeReqFile(t, tracesDir, reqID, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/req/"+reqID, nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Body.Len() != 0 {
+		t.Errorf("expected no response body after cancellation, got %d bytes", rr.Body.Len())
 	}
 }

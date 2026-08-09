@@ -19,17 +19,27 @@ type rawEntry struct {
 // locale-independent). Each entry block starts with a "Path = ..." line and
 // repeats; blocks are separated by blank lines. Values are taken from the
 // last occurrence of each key within a block.
+//
+// The output opens with an archive header block whose "Path =" line is the
+// archive file's own path (possibly absolute, e.g. "C:\archive.7z") followed
+// by archive-level keys (Type / Physical Size / Headers Size / Method / Solid
+// / Blocks). It is NOT an entry: a block only becomes a rawEntry when it
+// carries real entry metadata (Folder / Size / Packed Size / Attributes), so
+// the archive path never reaches strict path validation and absolute header
+// paths cannot fail the whole listing.
 func parseSevenZipSLT(out []byte) []rawEntry {
 	var entries []rawEntry
 	var cur *rawEntry
+	var hasEntryMeta bool
 	flush := func() {
-		if cur != nil {
+		if cur != nil && hasEntryMeta {
 			if cur.CompressedSize == 0 {
 				cur.CompressedSize = -1
 			}
 			entries = append(entries, *cur)
-			cur = nil
 		}
+		cur = nil
+		hasEntryMeta = false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSuffix(line, "\r")
@@ -43,21 +53,26 @@ func parseSevenZipSLT(out []byte) []rawEntry {
 		}
 		switch key {
 		case "Path":
-			if cur != nil {
-				flush()
-			}
+			flush()
 			cur = &rawEntry{Path: val, CompressedSize: -1}
 		case "Folder":
+			hasEntryMeta = true
 			if cur != nil {
 				cur.IsDir = strings.TrimSpace(val) == "+"
 			}
+		case "Attributes":
+			// Entry blocks always carry Attributes (D_/A_...); the header
+			// block never does, so it doubles as entry metadata.
+			hasEntryMeta = true
 		case "Size":
+			hasEntryMeta = true
 			if cur != nil {
 				if n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64); err == nil {
 					cur.Size = n
 				}
 			}
 		case "Packed Size":
+			hasEntryMeta = true
 			if cur != nil {
 				if n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64); err == nil {
 					cur.CompressedSize = n

@@ -232,10 +232,20 @@ func (w *externalWriter) Pack(ctx context.Context, format archive.Format, assets
 	if len(assets) == 0 {
 		return archive.AssetRef{}, errors.New("pack requires at least one asset")
 	}
+	// Pack inputs must belong to one owner; the output inherits that owner so
+	// a cross-session pack is impossible even with known asset IDs.
+	owner := assets[0].Owner
+	if owner == "" {
+		return archive.AssetRef{}, errors.New("pack asset has no owner")
+	}
+	for _, a := range assets {
+		if a.Owner != owner {
+			return archive.AssetRef{}, fmt.Errorf("pack assets belong to different owners (asset %s)", a.ID)
+		}
+	}
 	if b.MaxEntries > 0 && len(assets) > b.MaxEntries {
 		return archive.AssetRef{}, &archive.BudgetError{Dimension: "entries", Limit: int64(b.MaxEntries), Actual: int64(len(assets))}
 	}
-
 	// Stage inputs with deduplicated basenames in a private job directory.
 	staging, err := os.MkdirTemp(filepath.Join(w.store.Root(), "packs"), "job-*")
 	if err != nil {
@@ -300,7 +310,7 @@ func (w *externalWriter) Pack(ctx context.Context, format archive.Format, assets
 		return archive.AssetRef{}, err
 	}
 	defer f.Close()
-	ref, err := w.store.Create(ctx, ownerPack, jobPack, outName, packMIME(format), f, fi.Size())
+	ref, err := w.store.Create(ctx, owner, jobPack, outName, packMIME(format), f, fi.Size())
 	if err != nil {
 		return archive.AssetRef{}, err
 	}

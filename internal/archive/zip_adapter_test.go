@@ -54,7 +54,7 @@ func writeSource(t *testing.T, data []byte) Source {
 	if err := os.WriteFile(p, data, 0o600); err != nil {
 		t.Fatalf("write test zip: %v", err)
 	}
-	return Source{ID: "test-source", Format: FormatZIP, Name: "test.zip", Path: p, Size: int64(len(data)), Writable: true}
+	return Source{ID: "test-source", Owner: "test-owner", Format: FormatZIP, Name: "test.zip", Path: p, Size: int64(len(data)), Writable: true}
 }
 
 func TestZIP_List_AllEntriesStrictPaths(t *testing.T) {

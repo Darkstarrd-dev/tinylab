@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -89,17 +90,44 @@ func (l *loginRateLimiter) RecordSuccess(ip string) {
 	delete(l.attempts, ip)
 }
 
+// loginGuard carries the limiter and the resolved client IP to the wrapped
+// handler so a successful login is recorded explicitly — never inferred from
+// a response status code or an implicit 200 Write. This closes the
+// malformed-JSON (400) and implicit-Write paths that previously reset the
+// failure counter and let an attacker bypass the brute-force threshold (F-26).
+type loginGuard struct {
+	limiter *loginRateLimiter
+	ip      string
+}
+
+// Success clears the failure counter for this client after a genuine
+// successful login. It is called only by LoginHandler on the correct-password
+// path.
+func (g *loginGuard) Success() {
+	g.limiter.RecordSuccess(g.ip)
+}
+
+type loginGuardCtxKey struct{}
+
+func loginGuardFrom(ctx context.Context) (*loginGuard, bool) {
+	g, ok := ctx.Value(loginGuardCtxKey{}).(*loginGuard)
+	return g, ok
+}
+
 type loginResponseWriter struct {
 	http.ResponseWriter
 	limiter *loginRateLimiter
 	ip      string
 }
 
+// WriteHeader records failures for every non-success status. Success is never
+// inferred here: the implicit-200 path (handler writes a body without calling
+// WriteHeader) bypasses this override entirely and therefore never resets the
+// counter, and the only way to reset it is LoginHandler's explicit
+// loginGuard.Success call.
 func (w *loginResponseWriter) WriteHeader(code int) {
-	if code == http.StatusUnauthorized {
+	if code >= http.StatusBadRequest {
 		w.limiter.RecordFailure(w.ip)
-	} else {
-		w.limiter.RecordSuccess(w.ip)
 	}
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -107,15 +135,24 @@ func (w *loginResponseWriter) WriteHeader(code int) {
 func (l *loginRateLimiter) Wrap(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		l.cleanup()
-		ip := r.RemoteAddr
-		if idx := strings.LastIndex(ip, ":"); idx >= 0 {
-			ip = ip[:idx]
-		}
+		ip := clientIP(r)
 		if l.IsBlocked(ip) {
 			http.Error(w, "too many login attempts", http.StatusTooManyRequests)
 			return
 		}
 		lw := &loginResponseWriter{ResponseWriter: w, limiter: l, ip: ip}
-		next(lw, r)
+		g := &loginGuard{limiter: l, ip: ip}
+		ctx := context.WithValue(r.Context(), loginGuardCtxKey{}, g)
+		next(lw, r.WithContext(ctx))
 	}
+}
+
+// clientIP strips the port from r.RemoteAddr. All management traffic is local
+// (127.0.0.1 / ::1 / localhost), so this yields a stable per-client key.
+func clientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx >= 0 {
+		ip = ip[:idx]
+	}
+	return ip
 }

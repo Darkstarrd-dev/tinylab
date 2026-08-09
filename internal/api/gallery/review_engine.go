@@ -24,6 +24,7 @@ import (
 // reviewTask manages a single AI review task.
 type reviewTask struct {
 	SessionID    string
+	Owner        string
 	Status       gallerylib.ReviewStatus
 	Total        int
 	Processed    int
@@ -51,7 +52,7 @@ func (h *Handler) runReview(ctx context.Context, task *reviewTask, entries []gal
 		}
 		task.mu.Unlock()
 		h.reviews.Delete(task.SessionID)
-		h.sessions.unpin(task.SessionID)
+		h.sessions.unpin(task.Owner, task.SessionID)
 		close(task.done)
 	}()
 

@@ -22,6 +22,40 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
+// KeyDTO is the public, secret-minimized representation of a provider key.
+// The plaintext value is never serialized; maskedKey is irreversible.
+type KeyDTO struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Account   string `json:"account"`
+	Priority  int    `json:"priority"`
+	IsActive  bool   `json:"isActive"`
+	MaskedKey string `json:"maskedKey"`
+}
+
+// MaskKey produces an irreversible display form of an API key: keys of 8
+// characters or fewer collapse to "***", longer keys keep only the last four
+// characters. The result cannot be used to reconstruct the original value.
+func MaskKey(key string) string {
+	if len(key) <= 8 {
+		return "***"
+	}
+	return "****" + key[len(key)-4:]
+}
+
+// toKeyDTO converts a config.Key to its public DTO, replacing the plaintext
+// value with an irreversible mask.
+func toKeyDTO(k config.Key) KeyDTO {
+	return KeyDTO{
+		ID:        k.ID,
+		Name:      k.Name,
+		Account:   k.Account,
+		Priority:  k.Priority,
+		IsActive:  k.IsActive,
+		MaskedKey: MaskKey(k.Key),
+	}
+}
+
 // Register registers the key routes on the given router.
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/providers/{id}/keys", h.listKeys)
@@ -41,8 +75,12 @@ func (h *Handler) listKeys(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
 		return
 	}
+	keys := make([]KeyDTO, 0, len(provider.Keys))
+	for _, k := range provider.Keys {
+		keys = append(keys, toKeyDTO(k))
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"keys": provider.Keys})
+	json.NewEncoder(w).Encode(map[string]any{"keys": keys})
 }
 
 // createKey creates a new key for a provider.
@@ -74,7 +112,7 @@ func (h *Handler) createKey(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(k)
+		json.NewEncoder(w).Encode(toKeyDTO(k))
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
 	}

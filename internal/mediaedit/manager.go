@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,15 @@ import (
 
 // maxJobs bounds the in-memory job pool: finished jobs beyond this cap are
 // evicted so the map cannot grow unbounded across many edits.
+// maxConcurrentJobs caps the number of ffmpeg/ffprobe processes running at
+// once. A burst of edits cannot exhaust CPU or disk; Start rejects excess
+// jobs with ErrTooManyJobs (the API maps it to 429) (audit_fix.md F-15).
+const maxConcurrentJobs = 4
+
+// ErrTooManyJobs is returned by Start when the ffmpeg concurrency limit is
+// reached. The caller maps it to HTTP 429 Too Many Requests.
+var ErrTooManyJobs = errors.New("too many concurrent media jobs")
+
 const maxJobs = 200
 
 // Manager manages a pool of in-memory ffmpeg edit jobs.
@@ -24,11 +34,14 @@ type Manager struct {
 	mu sync.Mutex
 	// order tracks job IDs in creation order for FIFO eviction. Guarded by mu.
 	order []string
+	// sem bounds concurrently running ffmpeg jobs; acquired in Start, released
+	// by runJob when the job finishes (success, error, or cancel).
+	sem chan struct{}
 }
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
-	return &Manager{}
+	return &Manager{sem: make(chan struct{}, maxConcurrentJobs)}
 }
 
 // trimBounds evicts finished jobs so the pool stays ≤ maxJobs entries,
@@ -71,9 +84,23 @@ func (m *Manager) trimBounds() {
 // Start launches an ffmpeg edit job based on the request. Returns the job
 // snapshot immediately; the job runs in a background goroutine.
 func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job, error) {
-	// Validate input path.
-	if _, err := os.Stat(req.InputPath); err != nil {
-		return nil, fmt.Errorf("input file not found: %s", req.InputPath)
+	// Validate input path: must be an existing regular local file (URLs,
+	// pipes and directories are rejected — SSRF via ffmpeg/ffprobe).
+	if err := validateLocalMediaInput(req.InputPath); err != nil {
+		return nil, err
+	}
+	// Subtitle inputs must be server-uploaded files inside the subtitle
+	// workspace, never an arbitrary client-chosen path.
+	if req.Operation == "video_subtitle" {
+		var sp VideoSubtitleParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &sp); err != nil {
+				return nil, fmt.Errorf("invalid video_subtitle params: %w", err)
+			}
+		}
+		if err := validateSubtitleInput(sp.SubtitlePath); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build operation args.
@@ -138,9 +165,18 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 	}
 
 	// Generate job ID.
-	id := generateID()
+
+	// Acquire an ffmpeg slot. Non-blocking: an overloaded server rejects the
+	// new job with ErrTooManyJobs instead of queueing unboundedly. The slot is
+	// released by runJob when the job reaches a terminal state.
+	select {
+	case m.sem <- struct{}{}:
+	default:
+		return nil, ErrTooManyJobs
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	id := generateID()
 
 	job := &Job{
 		ID:        id,
@@ -162,6 +198,9 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 
 // runJob is the background goroutine that executes ffmpeg and updates the job.
 func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args []string, outputPath string, sourceDuration float64, removeOnSuccess string) {
+	// Release the ffmpeg slot regardless of how the job ended.
+	defer func() { <-m.sem }()
+
 	stderrTail := newTailBuffer(16 * 1024) // 16KB
 
 	onProgress := func(pct int) {

@@ -46,6 +46,14 @@ func (e *Executor) Execute(ctx context.Context, task *Task, progressCh chan<- Pr
 
 	args := BuildDownloadArgs(task.URL, task.Type, task.Quality, task.Container,
 		task.DownloadDir, e.settings.ConcurrentFragments, e.settings)
+	// Route yt-dlp through the SSRF-enforcing proxy (or the user's own
+	// download proxy when configured) so every redirect/DNS hop is
+	// revalidated — the initial pre-flight alone is not sufficient.
+	args, stopProxy, err := e.ensureProxyArg(args)
+	if err != nil {
+		return "", "", err
+	}
+	defer stopProxy()
 
 	cmd := exec.CommandContext(ctx, ytDlpPath, args...)
 	setupProcessGroup(cmd)
@@ -196,6 +204,13 @@ func (e *Executor) ExecutePlaylistInfo(ctx context.Context, rawURL string) (*Pla
 
 // runCapture 运行 yt-dlp 并捕获全部 stdout 与 stderr。
 func (e *Executor) runCapture(ctx context.Context, ytDlpPath string, args []string) ([]byte, string, error) {
+	// Same per-hop SSRF enforcement as Execute: route info queries through
+	// the effective proxy.
+	args, stopProxy, err := e.ensureProxyArg(args)
+	if err != nil {
+		return nil, "", err
+	}
+	defer stopProxy()
 	cmd := exec.CommandContext(ctx, ytDlpPath, args...)
 	setupProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second

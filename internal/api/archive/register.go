@@ -30,6 +30,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/archive"
 	"github.com/tinyrouter/tinyrouter/internal/archivetool"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
 )
 
 // Body caps (archive_compatibility_plan.md §4.3).
@@ -39,8 +40,11 @@ const (
 )
 
 // sourceEntry is one registered archive source: the server-side temp asset
-// plus its validated manifest.
+// plus its validated manifest. owner binds the source to the browser session
+// that registered it (F-11/F-29: sourceId/assetId must never be usable
+// across sessions, even when the random ID is known).
 type sourceEntry struct {
+	owner     string
 	src       archive.Source
 	refID     string // TempStore asset id (release target)
 	manifest  archive.Manifest
@@ -71,6 +75,9 @@ func NewHandler(d *apibase.Deps, runner apibase.ArchiveRunner) *Handler {
 // 1 MiB /api body group (uploads are up to 500 MiB) but behind the same auth
 // middleware; per-route body caps are applied inside the handlers.
 func (h *Handler) Register(r chi.Router) {
+	// Every archive resource is bound to the requesting browser session via
+	// the owner middleware; handlers re-verify ownership on every access.
+	r.Use(owner.Middleware)
 	r.Get("/status", h.status)
 	r.Post("/sources", h.createSource)
 	r.Get("/sources/{id}/entries/*", h.getSourceEntry)
@@ -87,10 +94,11 @@ func (h *Handler) Register(r chi.Router) {
 // gallery.archiveBridge (SetArchive). These methods expose the registered
 // source lookup + list/read operations without handing the browser paths.
 
-// ResolveSource returns the registered source for a sourceId, or false when
-// the source is unknown or expired (TTL). It mirrors the lookup used by
-// getSourceEntry so the gallery bridge sees the same lifecycle.
-func (h *Handler) ResolveSource(id string) (archive.Source, bool) {
+// ResolveSource returns the registered source for a sourceId when the caller
+// is the owner that registered it, or false when the source is unknown,
+// expired, or owned by another session. It mirrors the lookup used by
+// getSourceEntry so the gallery bridge sees the same lifecycle and boundary.
+func (h *Handler) ResolveSource(ownerID, id string) (archive.Source, bool) {
 	if h.runner == nil {
 		return archive.Source{}, false
 	}
@@ -101,10 +109,27 @@ func (h *Handler) ResolveSource(id string) (archive.Source, bool) {
 		se = nil
 	}
 	h.mu.Unlock()
-	if se == nil {
+	if se == nil || se.owner != ownerID {
 		return archive.Source{}, false
 	}
 	return se.src, true
+}
+
+// sourceFor resolves a registered source for the calling owner, applying TTL
+// expiry. Returns nil when the source is unknown, expired, or owned by
+// another session.
+func (h *Handler) sourceFor(ownerID, id string) *sourceEntry {
+	h.mu.Lock()
+	se := h.sources[id]
+	if se != nil && time.Since(se.createdAt) > h.runner.Store().TTL() {
+		delete(h.sources, id)
+		se = nil
+	}
+	h.mu.Unlock()
+	if se == nil || se.owner != ownerID {
+		return nil
+	}
+	return se
 }
 
 // List returns the strict-validated manifest of a registered source.
@@ -170,8 +195,13 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err)
 		return
 	}
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "request has no owner identity")
+		return
+	}
 	ctx := r.Context()
-	ref, err := h.runner.Store().Create(ctx, "src", id, name, mimeForName(name), io.MultiReader(bytes.NewReader(prefix), body), sourceUploadCap)
+	ref, err := h.runner.Store().Create(ctx, ownerID, id, name, mimeForName(name), io.MultiReader(bytes.NewReader(prefix), body), sourceUploadCap)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return
@@ -179,6 +209,7 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 
 	src := archive.Source{
 		ID:       id,
+		Owner:    ownerID,
 		Format:   format,
 		Name:     name,
 		Path:     ref.Path,
@@ -187,13 +218,13 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 	}
 	manifest, err := h.runner.List(ctx, src, archive.DefaultBudget())
 	if err != nil {
-		_ = h.runner.Store().Release(ref.ID)
+		_ = h.runner.Store().Release(ownerID, ref.ID)
 		h.writeRunError(w, err)
 		return
 	}
 
 	h.mu.Lock()
-	h.sources[id] = &sourceEntry{src: src, refID: ref.ID, manifest: manifest, createdAt: time.Now()}
+	h.sources[id] = &sourceEntry{owner: ownerID, src: src, refID: ref.ID, manifest: manifest, createdAt: time.Now()}
 	h.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -214,13 +245,7 @@ func (h *Handler) getSourceEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	entryPath := chi.URLParam(r, "*")
-	h.mu.Lock()
-	se := h.sources[id]
-	if se != nil && time.Since(se.createdAt) > h.runner.Store().TTL() {
-		delete(h.sources, id)
-		se = nil
-	}
-	h.mu.Unlock()
+	se := h.sourceFor(owner.From(r.Context()), id)
 	if se == nil {
 		h.writeError(w, http.StatusNotFound, "archive.not-found", "source not found or expired")
 		return
@@ -245,15 +270,30 @@ func (h *Handler) deleteSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	ownerID := owner.From(r.Context())
 	h.mu.Lock()
 	se := h.sources[id]
-	delete(h.sources, id)
+	if se != nil && time.Since(se.createdAt) > h.runner.Store().TTL() {
+		delete(h.sources, id)
+		se = nil
+	}
 	h.mu.Unlock()
 	if se == nil {
-		w.WriteHeader(http.StatusNoContent) // idempotent release
+		// Unknown id: idempotent release (204), indistinguishable from an
+		// already-released source.
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_ = h.runner.Store().Release(se.refID)
+	if se.owner != ownerID {
+		// Known but foreign: explicit 403 (audit B-5: cross-session use is
+		// denied even when the random id is known).
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "resource is owned by another session")
+		return
+	}
+	h.mu.Lock()
+	delete(h.sources, id)
+	h.mu.Unlock()
+	_ = h.runner.Store().Release(ownerID, se.refID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -263,7 +303,7 @@ func (h *Handler) getAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	rc, ref, err := h.runner.Store().Open(id)
+	rc, ref, err := h.runner.Store().Open(owner.From(r.Context()), id)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return
@@ -289,8 +329,13 @@ func (h *Handler) createAsset(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "archive.bad-request", "missing name query parameter")
 		return
 	}
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "request has no owner identity")
+		return
+	}
 	body := http.MaxBytesReader(w, r.Body, assetUploadCap)
-	ref, err := h.runner.Store().Create(r.Context(), "asset", "upload", name, mimeForName(name), body, assetUploadCap)
+	ref, err := h.runner.Store().Create(r.Context(), ownerID, "upload", name, mimeForName(name), body, assetUploadCap)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return
@@ -330,9 +375,14 @@ func (h *Handler) pack(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "archive.bad-request", "assetIds must not be empty")
 		return
 	}
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "request has no owner identity")
+		return
+	}
 	assets := make([]archive.AssetRef, 0, len(req.AssetIDs))
 	for _, id := range req.AssetIDs {
-		ref, err := h.runner.Store().Stat(id)
+		ref, err := h.runner.Store().Stat(ownerID, id)
 		if err != nil {
 			h.writeStoreError(w, fmt.Errorf("asset %s: %w", id, err))
 			return
@@ -379,13 +429,12 @@ func (h *Handler) zipReplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	se := h.sources[req.SourceID]
-	if se != nil && time.Since(se.createdAt) > h.runner.Store().TTL() {
-		delete(h.sources, req.SourceID)
-		se = nil
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "request has no owner identity")
+		return
 	}
-	h.mu.Unlock()
+	se := h.sourceFor(ownerID, req.SourceID)
 	if se == nil {
 		h.writeError(w, http.StatusNotFound, "archive.not-found", "source not found or expired")
 		return
@@ -422,7 +471,7 @@ func (h *Handler) zipReplace(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusBadRequest, "archive.unsafe-path", "duplicate replacement entry: "+clean)
 			return
 		}
-		ref, err := h.runner.Store().Stat(rep.AssetID)
+		ref, err := h.runner.Store().Stat(ownerID, rep.AssetID)
 		if err != nil {
 			h.writeStoreError(w, fmt.Errorf("asset %s: %w", rep.AssetID, err))
 			return
@@ -473,7 +522,7 @@ func (h *Handler) zipReplace(w http.ResponseWriter, r *http.Request) {
 		cur.refID = newRef.ID
 		cur.manifest = newManifest
 		h.mu.Unlock()
-		_ = h.runner.Store().Release(oldRef) // idempotent; old file removed
+		_ = h.runner.Store().Release(ownerID, oldRef) // idempotent; old file removed
 	} else {
 		h.mu.Unlock()
 	}
@@ -487,6 +536,11 @@ func (h *Handler) release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "request has no owner identity")
+		return
+	}
 	// Owner binding: source-owned assets are released through
 	// DELETE /api/archive/sources/{id} so a registered source is never
 	// orphaned by a stray release call.
@@ -499,7 +553,7 @@ func (h *Handler) release(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mu.Unlock()
-	if err := h.runner.Store().Release(id); err != nil {
+	if err := h.runner.Store().Release(ownerID, id); err != nil {
 		h.writeStoreError(w, err)
 		return
 	}
@@ -519,6 +573,10 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, msg string
 func (h *Handler) writeStoreError(w http.ResponseWriter, err error) {
 	if archive.IsNotFound(err) {
 		h.writeError(w, http.StatusNotFound, "archive.not-found", err.Error())
+		return
+	}
+	if archive.IsOwnership(err) {
+		h.writeError(w, http.StatusForbidden, "archive.forbidden", "resource is owned by another session")
 		return
 	}
 	if archive.IsBudgetExceeded(err) {

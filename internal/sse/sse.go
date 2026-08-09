@@ -8,20 +8,63 @@ package sse
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
+// Budget defaults for SSELineBuffer. A single SSE line (the "data: ..."
+// payload) can legally be large, but an unbounded no-newline stream must not
+// grow memory without limit: the buffer errors out once a line exceeds
+// maxLine or the total buffered bytes exceed maxTotal.
+const (
+	DefaultMaxLineBytes   = 1 << 20 // 1 MiB per line
+	DefaultMaxBufferBytes = 8 << 20 // 8 MiB total buffered bytes
+)
+
+// ErrLineTooLong is returned by Feed when a complete line exceeds the
+// configured single-line budget. The offending data is discarded.
+var ErrLineTooLong = errors.New("sse: line exceeds maximum length")
+
+// ErrBufferOverflow is returned by Feed when a partial line keeps growing
+// past the total buffer budget (no newline in sight). The buffered data is
+// discarded so the stream cannot wedge in an error loop.
+var ErrBufferOverflow = errors.New("sse: line buffer exceeded")
+
 // SSELineBuffer buffers raw SSE bytes and splits them into complete lines.
 // It handles the common case where a single Read() call returns a partial
-// SSE line (e.g. a "data:" payload split across two TCP segments).
+// SSE line (e.g. a "data:" payload split across two TCP segments). A
+// maxLine/maxTotal budget bounds memory on hostile or broken streams; use
+// NewSSELineBuffer to pick non-default budgets.
 type SSELineBuffer struct {
-	buf []byte
+	buf      []byte
+	maxLine  int
+	maxTotal int
+}
+
+// NewSSELineBuffer returns a line buffer with the given single-line and total
+// byte budgets. Non-positive values select the package defaults.
+func NewSSELineBuffer(maxLine, maxTotal int) *SSELineBuffer {
+	if maxLine <= 0 {
+		maxLine = DefaultMaxLineBytes
+	}
+	if maxTotal <= 0 {
+		maxTotal = DefaultMaxBufferBytes
+	}
+	return &SSELineBuffer{maxLine: maxLine, maxTotal: maxTotal}
 }
 
 // Feed appends data to the internal buffer and returns all complete lines
-// that have been accumulated so far (separated by '\n'). Partial lines remain
-// in the buffer for the next call.
-func (b *SSELineBuffer) Feed(data []byte) []string {
+// that have been accumulated so far (separated by '\n'), plus an error when a
+// budget is exceeded. Partial lines remain in the buffer for the next call;
+// on error the offending data is dropped and the caller should abort the
+func (b *SSELineBuffer) Feed(data []byte) ([]string, error) {
+	maxLine, maxTotal := b.maxLine, b.maxTotal
+	if maxLine <= 0 {
+		maxLine = DefaultMaxLineBytes
+	}
+	if maxTotal <= 0 {
+		maxTotal = DefaultMaxBufferBytes
+	}
 	b.buf = append(b.buf, data...)
 	var lines []string
 	for {
@@ -29,10 +72,18 @@ func (b *SSELineBuffer) Feed(data []byte) []string {
 		if idx < 0 {
 			break
 		}
+		if idx > maxLine {
+			b.buf = nil
+			return lines, ErrLineTooLong
+		}
 		lines = append(lines, string(b.buf[:idx]))
 		b.buf = b.buf[idx+1:]
 	}
-	return lines
+	if len(b.buf) > maxTotal {
+		b.buf = nil
+		return lines, ErrBufferOverflow
+	}
+	return lines, nil
 }
 
 // Remaining returns any buffered data that has not yet been split by a '\n',

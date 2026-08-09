@@ -116,12 +116,12 @@ function rehydrateZipSession(item) {
         }
         return newId;
       }
-      if (item.zipAbsPath) {
-        // Backend-path packs re-create from the on-disk path (no upload).
+      if (item.grantId) {
+        // Grant-based packs re-create from the granted on-disk zip (no upload).
         var res = await fetch('/api/gallery/zip-from-path', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: item.zipAbsPath })
+          body: JSON.stringify({ grantId: item.grantId, rel: item.zipRel || '' })
         });
         if (!res.ok) return null;
         var d = await res.json();
@@ -916,9 +916,9 @@ async function onPaste(e) {
     var cpRes = await fetch('/api/gallery/paste-paths', { method: 'POST' });
     if (cpRes.ok) {
       var cpData = await cpRes.json();
-      if (cpData.paths && cpData.paths.length) {
+      if (cpData.grants && cpData.grants.length) {
         if (e) e.preventDefault();
-        await loadBackendPaths(cpData.paths);
+        await loadBackendGrants(cpData.grants);
         return;
       }
     }
@@ -1067,19 +1067,20 @@ async function onOpenDirBackend() {
   var res = await fetch('/api/gallery/open-dir', { method: 'POST' });
   if (!res.ok) throw new Error('open-dir http ' + res.status);
   var data = await res.json();
-  if (!data.dirPath || !data.files || !data.files.length) return;
+  if (!data.grantId || !data.files || !data.files.length) return;
+  var grantId = data.grantId;
 
   var out = [];
   var outVid = [];
   for (var i = 0; i < data.files.length; i++) {
     var f = data.files[i];
     if (f.kind === 'zip') {
-      // Create zip session from disk path (no upload needed)
+      // Create zip session from the granted on-disk zip (no upload needed).
       try {
         var zRes = await fetch('/api/gallery/zip-from-path', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: f.path })
+          body: JSON.stringify({ grantId: grantId, rel: f.rel })
         });
         if (!zRes.ok) continue;
         var zData = await zRes.json();
@@ -1096,7 +1097,8 @@ async function onOpenDirBackend() {
             size: e.size || 0,
             getBlob: null,
             zipFileHandle: null,
-            zipAbsPath: f.path // absolute path for backend writeback/delete
+            grantId: grantId,
+            zipRel: f.rel
           });
         }
       } catch (e) {
@@ -1107,14 +1109,14 @@ async function onOpenDirBackend() {
         name: f.name,
         path: f.rel,
         kind: 'backend',
-        absPath: f.path,
-        rootDirPath: data.dirPath,
-        getBlob: function(p) { return function() {
-          return fetch('/api/gallery/file?path=' + encodeURIComponent(p)).then(function(r) {
+        grantId: grantId,
+        rel: f.rel,
+        getBlob: function(gid, rel) { return function() {
+          return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid) + '&rel=' + encodeURIComponent(rel)).then(function(r) {
             if (!r.ok) throw new Error('file http ' + r.status);
             return r.blob();
           });
-        }; }(f.path),
+        }; }(grantId, f.rel),
         size: f.size
       });
     } else {
@@ -1122,14 +1124,14 @@ async function onOpenDirBackend() {
         name: f.name,
         path: f.rel,
         kind: 'backend',
-        absPath: f.path,
-        rootDirPath: data.dirPath,
-        getBlob: function(p) { return function() {
-          return fetch('/api/gallery/file?path=' + encodeURIComponent(p)).then(function(r) {
+        grantId: grantId,
+        rel: f.rel,
+        getBlob: function(gid, rel) { return function() {
+          return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid) + '&rel=' + encodeURIComponent(rel)).then(function(r) {
             if (!r.ok) throw new Error('file http ' + r.status);
             return r.blob();
           });
-        }; }(f.path),
+        }; }(grantId, f.rel),
         size: f.size
       });
     }
@@ -1143,40 +1145,40 @@ async function onOpenDirBackend() {
 // (obtained from clipboard CF_HDROP or other backend sources). Directories
 // are expanded via /api/gallery/list-dir; individual files are classified
 // by extension.
-async function loadBackendPaths(paths) {
+async function loadBackendGrants(grants) {
   var out = [];
   var outVid = [];
-  for (var i = 0; i < paths.length; i++) {
-    var p = paths[i];
-    var name = p.replace(/[\\\/]/g, '/').split('/').pop();
-    var lower = name.toLowerCase();
-    var isKnownFile = isSupportedExt(name) || isZipName(name);
+  for (var i = 0; i < grants.length; i++) {
+    var g = grants[i];
+    var grantId = g.pathGrantId;
+    var name = g.name || 'file';
+    if (!grantId) continue;
 
-    if (!isKnownFile) {
-      // 路径不带图片/视频/ZIP后缀时，尝试作为目录调用 list-dir 展开
+    if (g.isDir) {
+      // Directory grant: expand via list-dir (same grant id).
       try {
         var listRes = await fetch('/api/gallery/list-dir', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dir: p })
+          body: JSON.stringify({ grantId: grantId })
         });
         if (listRes.ok) {
           var listData = await listRes.json();
-          if (listData.isDir !== false && listData.files && listData.files.length) {
-            await processBackendFileList(listData.files, listData.dirPath, out, outVid);
+          if (listData.files && listData.files.length) {
+            await processBackendFileList(listData.files, grantId, out, outVid);
             continue;
           }
         }
-      } catch (e) { /* not a directory, fall through to file classification */ }
+      } catch (e) { console.warn('list-dir failed:', e); }
     }
 
     // 单个文件分类处理
-    if (lower.endsWith('.zip') || isZipName(name)) {
+    if (g.kind === 'zip' || isZipName(name)) {
       try {
         var zRes = await fetch('/api/gallery/zip-from-path', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: p })
+          body: JSON.stringify({ grantId: grantId })
         });
         if (zRes.ok) {
           var zData = await zRes.json();
@@ -1187,22 +1189,23 @@ async function loadBackendPaths(paths) {
               path: name + '/' + ze.path,
               kind: 'zip', index: ze.index, zipPath: ze.path,
               sessionId: zData.sessionId, size: ze.size || 0,
-              getBlob: null, zipFileHandle: null, zipAbsPath: p
+              getBlob: null, zipFileHandle: null,
+              grantId: grantId, zipRel: ''
             });
           }
         }
       } catch (e) { console.warn('paste zip-from-path failed:', e); }
     } else if (isSupportedExt(name)) {
       var item = {
-        name: name, path: name, kind: 'backend', absPath: p,
-        rootDirPath: null,
-        getBlob: function(ap) { return function() {
-          return fetch('/api/gallery/file?path=' + encodeURIComponent(ap)).then(function(r) {
+        name: name, path: name, kind: 'backend',
+        grantId: grantId, rel: '',
+        getBlob: function(gid) { return function() {
+          return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid)).then(function(r) {
             if (!r.ok) throw new Error('file http ' + r.status);
             return r.blob();
           });
-        }; }(p),
-        size: 0
+        }; }(grantId),
+        size: g.size || 0
       };
       if (isVideoExt(name)) { outVid.push(item); } else { out.push(item); }
     }
@@ -1212,7 +1215,7 @@ async function loadBackendPaths(paths) {
 }
 
 // processBackendFileList converts a backend file listing into gallery items.
-async function processBackendFileList(files, dirPath, out, outVid) {
+async function processBackendFileList(files, grantId, out, outVid) {
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
     if (f.kind === 'zip') {
@@ -1220,7 +1223,7 @@ async function processBackendFileList(files, dirPath, out, outVid) {
         var zRes = await fetch('/api/gallery/zip-from-path', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: f.path })
+          body: JSON.stringify({ grantId: grantId, rel: f.rel })
         });
         if (!zRes.ok) continue;
         var zData = await zRes.json();
@@ -1231,32 +1234,33 @@ async function processBackendFileList(files, dirPath, out, outVid) {
             path: f.rel + '/' + e.path,
             kind: 'zip', index: e.index, zipPath: e.path,
             sessionId: zData.sessionId, size: e.size || 0,
-            getBlob: null, zipFileHandle: null, zipAbsPath: f.path
+            getBlob: null, zipFileHandle: null,
+            grantId: grantId, zipRel: f.rel
           });
         }
       } catch (e) { console.warn('zip-from-path failed:', e); }
     } else if (f.kind === 'video') {
       outVid.push({
-        name: f.name, path: f.rel, kind: 'backend', absPath: f.path,
-        rootDirPath: dirPath,
-        getBlob: function(p) { return function() {
-          return fetch('/api/gallery/file?path=' + encodeURIComponent(p)).then(function(r) {
+        name: f.name, path: f.rel, kind: 'backend',
+        grantId: grantId, rel: f.rel,
+        getBlob: function(gid, rel) { return function() {
+          return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid) + '&rel=' + encodeURIComponent(rel)).then(function(r) {
             if (!r.ok) throw new Error('file http ' + r.status);
             return r.blob();
           });
-        }; }(f.path),
+        }; }(grantId, f.rel),
         size: f.size
       });
     } else {
       out.push({
-        name: f.name, path: f.rel, kind: 'backend', absPath: f.path,
-        rootDirPath: dirPath,
-        getBlob: function(p) { return function() {
-          return fetch('/api/gallery/file?path=' + encodeURIComponent(p)).then(function(r) {
+        name: f.name, path: f.rel, kind: 'backend',
+        grantId: grantId, rel: f.rel,
+        getBlob: function(gid, rel) { return function() {
+          return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid) + '&rel=' + encodeURIComponent(rel)).then(function(r) {
             if (!r.ok) throw new Error('file http ' + r.status);
             return r.blob();
           });
-        }; }(f.path),
+        }; }(grantId, f.rel),
         size: f.size
       });
     }

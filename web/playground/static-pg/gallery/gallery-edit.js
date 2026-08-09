@@ -1610,11 +1610,12 @@ window.openMediaEditor = async function(item, mediaType) {
   // Check ffmpeg availability (disables Start if not found)
   _checkFfmpegStatus();
 
-  // Probe source
+  // Probe source (server-resolved asset/grant input; never a raw path)
+  var probeBody = item.assetId ? { assetId: item.assetId } : (item.grantId ? { grantId: item.grantId, rel: item.rel || '' } : null);
   fetch('/api/gallery/edit/probe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: item.absPath })
+    body: JSON.stringify(probeBody)
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -1690,10 +1691,12 @@ window.triggerMediaEditor = function(mediaType) {
     })
     .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
     .then(function(data) {
-      // Create a shallow clone with absPath pointing to the temp file.
+      // Create a shallow clone carrying the extracted entry's assetId. The
+      // editor probes and starts jobs server-side by assetId — the backend
+      // no longer returns a tempPath (audit F-03/F-28 contract).
       var resolved = {};
       for (var k in item) { if (item.hasOwnProperty(k)) resolved[k] = item[k]; }
-      resolved.absPath = data.tempPath;
+      resolved.assetId = data.assetId;
       resolved._tempExtracted = true;
       if (typeof window.openMediaEditor === 'function') {
         window.openMediaEditor(resolved, mediaType);
@@ -1723,7 +1726,7 @@ window.triggerMediaEditor = function(mediaType) {
     .then(function(data) {
       var resolved = {};
       for (var k in item) { if (item.hasOwnProperty(k)) resolved[k] = item[k]; }
-      resolved.absPath = data.tempPath;
+      resolved.assetId = data.assetId;
       resolved._tempExtracted = true;
       if (typeof window.openMediaEditor === 'function') {
         window.openMediaEditor(resolved, mediaType);

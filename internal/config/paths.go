@@ -87,4 +87,3 @@ func ResolveDocDir(docDir, configDir string) string {
 	}
 	return docDir
 }
-

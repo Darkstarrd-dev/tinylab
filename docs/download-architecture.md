@@ -1,6 +1,7 @@
 
 # TinyRouter Download 下载功能架构
 > **最后核对（2026-08-08，Utility 子工具与 Download 生命周期）：** Download 前端当前由 Utility 菜单的 `download` 子工具承载，入口仍为 `web/static/download.js`，后端 API 路径保持 `/api/downloads/*` 不变。`web/static/app.js` 在 Utility 子工具切换时调用 `suspendDownload`/`resumeDownload`，离开时关闭 SSE 并执行 cleanup；任务队列、SSE 事件与服务端执行语义未因导航重组改变。FileTransfer 是并列的 Utility `fileTransfer` 子工具，其上传路由事实记录于 `docs/config-registry-state-architecture.md`。
+> **最后核对（2026-08-09，audit_fix.md F-08/F-16 落地）：** (1) **下载 URL SSRF（F-16，2026-08-09 完整落地）**：两层防线——`internal/api/download/register.go::validateDownloadURL` 用 `internal/outbound.ValidateURL` + `outbound.Policy.CheckHost` 做初始 URL 预检（scheme 仅 http/https、拒绝 userinfo、异常端口黑名单、DNS 解析后全部 IP fail-closed，`createDownload`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload` 全部入口，`url_policy_test.go` 3 测试）；**本地 SSRF 代理** `internal/download/ssrfproxy.go`（`newSSRFProxy`/`handlePlain`/`handleConnect`/`injectProxy`/`ensureProxyArg`）——yt-dlp 经 `--proxy` 指向该代理，初始 URL、**每个重定向跳、每个媒体分片**都在建连前逐跳重校验（DNS 逐跳解析 + 已校验 IP 字面量固定拨号防 rebinding，CONNECT 隧道同），public→private 重定向拒绝（`ssrfproxy_test.go` 7 测试含 `TestSSRFProxyRejectsRedirectToPrivate`/`TestSSRFProxyConnectBlocksPrivateTarget`）；用户自配 `DownloadConfig.Proxy` 时显式 opt-out（不装本地代理）。审计 §8.2 决策项"Download 是否允许公共 URL 重定向"由实现定案：公共重定向放行但逐跳受控、私网目标拒绝。(2) **外部工具路径校验（F-08）**：Settings PATCH `YtDlpPath`/`FfmpegPath` 经 `internal/procutil.ValidateExecutable` 校验（绝对路径、regular file、Windows 可执行扩展名、拒绝临时/其它用户可写目录）；`internal/download/binary.go::resolveConfiguredTool` 对配置/env/PATH 候选同样校验（裸名先 `exec.LookPath`）。(3) 其余生命周期/参数/SSE 语义未变（本文 §4–§13 保持）。
 
 > **文档定位：** `internal/download/` 包、`internal/api/download/`（子包，原 `internal/api/download.go`）与前端 `web/static/download.js` 实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
@@ -552,11 +553,11 @@ go build -o tinyrouter .
 | 修改错误分类 | executor.go classifyExitError（372-380）+ classifyPatterns（357-369） |
 | 修改并发 | manager.go worker 池（97-100、123-136）+ NewManager maxConcurrent 回退（51-54）+ UpdateSettings（72-82） |
 | 修改文件路径提取 | executor.go extractSavedFilePath（342-353）+ mergeRe/destRe/alreadyRe（330-334）+ processTask 大小校验（138-140、190-194） |
-| 修改 API 端点 | api/download.go 各 handler + router.go 路由注册（291-302）+ AuthMiddleware 组（213-215）+ 1MB cap（201-206） |
-| 修改外部工具解析 | executor.go resolveYtDlpPath/resolveFfmpegPath（199-229）+ config YtDlpPath/FfmpegPath（types.go:194-195）+ args.go ffmpeg-location（124-127） |
+| 修改外部工具解析 | executor.go resolveYtDlpPath/resolveFfmpegPath（199-229）+ `binary.go::resolveConfiguredTool`（**2026-08-09：** 经 `procutil.ValidateExecutable` 校验）+ config YtDlpPath/FfmpegPath（types.go:194-195）+ settings PATCH 校验（`internal/api/settings/register.go`，F-08）+ args.go ffmpeg-location（124-127） |
 | 修改播放列表 | manager.go CreatePlaylistTask（298-343）+ SelectedIndices 过滤（308-320）+ args.go BuildPlaylistInfoArgs（250-255）+ api getPlaylistInfo（81-104） |
 | 修改进程树杀 | kill_windows.go（taskkill /T /F）+ kill_unix.go（SIGTERM → 2s grace → SIGKILL 兜底）+ executor.go cmd.Cancel（69-74、176-181） |
 | 修改设置推送 | api/settings.go download 分支（137-168）+ manager.UpdateSettings（72-82）+ app.go 构造 RuntimeSettings（135-144） |
+| 修改下载 URL 校验（F-16） | `internal/api/download/register.go::validateDownloadURL`（`outbound.ValidateURL` + `outbound.Policy.CheckHost` 预检）+ `internal/download/ssrfproxy.go`（`newSSRFProxy`/`ensureProxyArg`/`injectProxy` 本地正向代理逐跳重校验；`executor.go::Execute`/`ExecuteInfo` 接入）+ `internal/outbound/outbound.go`（策略）+ `url_policy_test.go`/`ssrfproxy_test.go`；自配下载代理 = 显式 opt-out |
 | 修改前端 | web/static/download.js（renderDownload/doParse/左右分栏 taskListItemHtml+taskDetailHtml+selectTask+renderTaskDetail/resolveDownloadDir 不再读 DOM/SSE updateDownloadTask/retry/settings modal，浏览按钮调用后端 `POST /api/downloads/browse`）+ web/static/style.css（`.download-toolbar` 单行 sticky、`.dl-task-split`/`.dl-task-list`/`.dl-task-item`/`.dl-task-detail`/`.dl-detail-*`/`.dl-status-dot`、删除 `.dl-task-card`/`.dl-task-thumb`/`.progress-bar*`）+ web/static/i18n.js（`browse` key） |
 
 ## 16. 已知 UI 改动（本轮，2026-07-19）

@@ -1,4 +1,36 @@
-// ===================== Auth / Login =====================
+// ===================== Auth / Login / Setup =====================
+
+// Session-bound CSRF token store + automatic injection. The token is set from
+// /api/auth/status (boot / page refresh), the login response, the setup
+// response, or a settings password-change response. Every same-origin
+// state-changing fetch then carries X-CSRF-Token automatically — including
+// the ~100 direct fetch() call sites across the SPA that bypass the api.js
+// helpers (gallery uploads, editor saves, archive packs, SSE job starts).
+(function installCsrfFetchWrapper() {
+  var origFetch = window.fetch;
+  var csrfToken = '';
+  window.__setCsrfToken = function(t) { csrfToken = t || ''; };
+  window.__getCsrfToken = function() { return csrfToken; };
+  window.fetch = function(input, init) {
+    init = init || {};
+    var method = (init.method || 'GET').toUpperCase();
+    var isStateChanging = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+    if (!csrfToken || !isStateChanging) return origFetch(input, init);
+    var url = (typeof input === 'string') ? input : (input && input.url) || '';
+    var sameOrigin = url.indexOf('://') < 0 || url.indexOf(location.origin) === 0;
+    if (!sameOrigin) return origFetch(input, init);
+    var headers = init.headers || {};
+    if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+      if (!headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', csrfToken);
+    } else if (Array.isArray(headers)) {
+      headers.push(['X-CSRF-Token', csrfToken]);
+    } else {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    init.headers = headers;
+    return origFetch(input, init);
+  };
+})();
 
 async function checkAuthStatus() {
   try {
@@ -6,16 +38,19 @@ async function checkAuthStatus() {
     var data = await resp.json();
     var enabled = !!(data.passwordEnabled || data.authEnabled);
     var authenticated = !!(data.authenticated || data.loggedIn);
+    if (data.csrfToken) window.__setCsrfToken(data.csrfToken);
     return {
       passwordEnabled: enabled,
       authEnabled: enabled,
+      setupRequired: !!data.setupRequired,
       authenticated: authenticated,
       loggedIn: authenticated
     };
   } catch(e) {
-    return { passwordEnabled: false, authEnabled: false, authenticated: true, loggedIn: true };
+    return { passwordEnabled: false, authEnabled: false, setupRequired: false, authenticated: true, loggedIn: true };
   }
 }
+
 
 function renderLoginScreen() {
   var appDiv = document.querySelector('.app');
@@ -81,6 +116,7 @@ async function handleLogin() {
     });
     var data = await resp.json();
     if (data.success) {
+      if (data.csrfToken) window.__setCsrfToken(data.csrfToken);
       var overlay = document.getElementById('login-overlay');
       if (overlay) overlay.remove();
       var appDiv = document.querySelector('.app');
@@ -97,6 +133,87 @@ async function handleLogin() {
     if (btn) { btn.disabled = false; btn.textContent = t('login'); }
     input.value = '';
     input.focus();
+  }
+}
+
+// renderSetupScreen shows the first-run bootstrap: no password is configured
+// yet, so the management API is locked (setup-required) and the user must
+// create the initial password before anything else works.
+function renderSetupScreen() {
+  var appDiv = document.querySelector('.app');
+  if (appDiv) appDiv.classList.add('auth-app-hidden');
+
+  var overlay = document.getElementById('login-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'login-overlay';
+    overlay.className = 'login-overlay';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = '\
+    <div class="login-card">\
+      <div class="login-logo">\
+        <img src="/logo-sm.png" alt="TinyRouter" width="48" height="48">\
+        <h2>TinyRouter</h2>\
+      </div>\
+      <div class="login-form">\
+        <p class="muted" style="text-align:center;margin-bottom:12px">' + t('setupRequiredDesc') + '</p>\
+        <input type="password" id="setup-password" class="login-input" placeholder="' + t('newPassword') + '" autocomplete="new-password">\
+        <input type="password" id="setup-password2" class="login-input" placeholder="' + t('confirmPassword') + '" autocomplete="new-password">\
+        <div class="login-actions">\
+          <button type="button" class="btn btn-primary login-submit-btn" id="setup-submit" onclick="handleSetup()">' + t('setupSubmit') + '</button>\
+        </div>\
+        <div class="login-error" id="login-error"></div>\
+      </div>\
+    </div>';
+
+  setTimeout(function() {
+    var input = document.getElementById('setup-password');
+    if (input) {
+      input.focus();
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') handleSetup();
+      });
+      var input2 = document.getElementById('setup-password2');
+      if (input2) input2.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') handleSetup();
+      });
+    }
+  }, 100);
+}
+
+async function handleSetup() {
+  var pw = document.getElementById('setup-password');
+  var pw2 = document.getElementById('setup-password2');
+  if (!pw || !pw2) return;
+  if (!pw.value) { showLoginError(t('enterPassword')); return; }
+  if (pw.value !== pw2.value) { showLoginError(t('passwordMismatch')); return; }
+
+  var btn = document.getElementById('setup-submit');
+  if (btn) { btn.disabled = true; btn.innerHTML = typeof getSpinnerHtml === 'function' ? getSpinnerHtml() : '<span class="btn-spinner"></span>'; }
+
+  try {
+    var resp = await fetch('/api/auth/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw.value })
+    });
+    var data = await resp.json();
+    if (data.success) {
+      if (data.csrfToken) window.__setCsrfToken(data.csrfToken);
+      var overlay = document.getElementById('login-overlay');
+      if (overlay) overlay.remove();
+      var appDiv = document.querySelector('.app');
+      if (appDiv) appDiv.classList.remove('auth-app-hidden');
+      initApp();
+    } else {
+      showLoginError(data.error || t('failed', ['setup']));
+      if (btn) { btn.disabled = false; btn.textContent = t('setupSubmit'); }
+    }
+  } catch(e) {
+    showLoginError(t('failed', [e.message || 'setup']));
+    if (btn) { btn.disabled = false; btn.textContent = t('setupSubmit'); }
   }
 }
 

@@ -8,7 +8,16 @@ import (
 )
 
 func TestParseSevenZipSLT(t *testing.T) {
-	out := `Listing archive: sample.7z
+	out := `Listing archive: C:\archive.7z
+
+--
+Path = C:\archive.7z
+Type = 7z
+Physical Size = 12345
+Headers Size = 200
+Method = LZMA2:24
+Solid = -
+Blocks = 1
 
 Path = dir/
 Folder = +
@@ -37,7 +46,7 @@ Attributes = A_........
 `
 	entries := parseSevenZipSLT([]byte(out))
 	if len(entries) != 4 {
-		t.Fatalf("got %d entries, want 4", len(entries))
+		t.Fatalf("got %d entries, want 4 (archive header block must not be an entry)", len(entries))
 	}
 	first := entries[0]
 	if first.Path != "dir/" || !first.IsDir {
@@ -51,6 +60,59 @@ Attributes = A_........
 	}
 }
 
+// TestParseSevenZipSLT_HeaderOnly verifies an archive whose SLT output is
+// ONLY the header block (no entries) parses to zero entries instead of
+// treating the archive's own absolute path as an entry (F-13).
+func TestParseSevenZipSLT_HeaderOnly(t *testing.T) {
+	out := `Listing archive: C:\archive.7z
+
+--
+Path = C:\archive.7z
+Type = 7z
+Physical Size = 513
+Headers Size = 185
+Method = LZMA2:24
+Solid = -
+Blocks = 1
+
+`
+	entries := parseSevenZipSLT([]byte(out))
+	if len(entries) != 0 {
+		t.Fatalf("got %d entries, want 0 (header block misparsed as entry)", len(entries))
+	}
+}
+
+// TestParseSevenZipSLT_NoEntryMetaBlock verifies a block carrying a Path but
+// no entry metadata (corrupt or non-standard output) is dropped, never
+// reaching path validation.
+func TestParseSevenZipSLT_NoEntryMetaBlock(t *testing.T) {
+	out := `Path = C:\weird.txt
+OnlyArchiveKey = 1
+
+Path = ok.png
+Folder = -
+Size = 5
+Attributes = A_........
+`
+	entries := parseSevenZipSLT([]byte(out))
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1 (metadata-less block must be dropped)", len(entries))
+	}
+	if entries[0].Path != "ok.png" {
+		t.Errorf("entry = %+v, want ok.png", entries[0])
+	}
+}
+
+// TestParseSevenZipSLT_EmptyPathBlock captures a corrupt block whose Path is
+// empty; the parser keeps it as a raw entry (with metadata) so the strict
+// validator can reject it explicitly instead of the tool output being
+// silently dropped.
+func TestParseSevenZipSLT_EmptyPathBlock(t *testing.T) {
+	entries := parseSevenZipSLT([]byte("Path = \nFolder = -\nSize = 3\n"))
+	if len(entries) != 1 || entries[0].Path != "" {
+		t.Fatalf("got %+v, want one raw entry with empty Path for the validator to reject", entries)
+	}
+}
 func TestParseSevenZipSLT_EmptyBlocks(t *testing.T) {
 	entries := parseSevenZipSLT([]byte("Path = a.txt\nSize = 1\n\n\nPath = b.txt\nFolder = -\n"))
 	if len(entries) != 2 {

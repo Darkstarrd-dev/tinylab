@@ -17,16 +17,20 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/customheaders"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 	"github.com/tinyrouter/tinyrouter/internal/util"
 )
 
 const (
-	speedTestPrompt    = "请写一篇约1000字的短篇小说"
-	speedTestMaxTokens = 1200
-	speedTestMinChunks = 60 // early-stop: enough chunks for a meaningful speed measurement
-	speedTestMaxSec    = 30 // early-stop: max streaming seconds per model
+	speedTestPrompt        = "请写一篇约1000字的短篇小说"
+	speedTestMaxTokens     = 1200
+	speedTestMinChunks     = 60 // early-stop: enough chunks for a meaningful speed measurement
+	speedTestMaxSec        = 30 // early-stop: max streaming seconds per model
+	speedTestTotalMaxSec   = 60 // overall budget: the whole test cannot run longer (audit_fix.md F-15)
+	speedTestMaxModels     = 50 // cap: refuse absurdly large combos instead of probing hundreds of models
+	speedTestMaxConcurrent = 8  // semaphore: at most this many probes run at once
 )
 
 var comboSpeedCache = struct {
@@ -163,6 +167,11 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "combo has no models to test")
 		return
 	}
+	if len(allModels) > speedTestMaxModels {
+		apibase.WriteAPIError(w, http.StatusBadRequest,
+			fmt.Sprintf("combo has too many models to speed-test (max %d)", speedTestMaxModels))
+		return
+	}
 
 	// Resolve each model string to a probe input.
 	inputs := make([]comboSpeedTestInput, 0, len(allModels))
@@ -241,9 +250,10 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// All models are probed concurrently. Use a timeout context so no single
-	// slow model can hold the stream open indefinitely.
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	// All models are probed concurrently, bounded by speedTestMaxConcurrent.
+	// A timeout context guarantees no single slow model (or slow network)
+	// can hold the stream open beyond the overall speedTestTotalMaxSec budget.
+	ctx, cancel := context.WithTimeout(r.Context(), speedTestTotalMaxSec*time.Second)
 	defer cancel()
 
 	type resultWithIndex struct {
@@ -253,6 +263,7 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 	ch := make(chan resultWithIndex, len(inputs))
 
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, speedTestMaxConcurrent)
 	for i, in := range inputs {
 		if in.provider == nil || in.key == nil {
 			// No provider or no key — immediate failure.
@@ -268,6 +279,8 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(idx int, input comboSpeedTestInput) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			chatURL := urlutil.BuildUpstreamURL(input.provider.BaseURL, "/v1/chat/completions")
 			res := probeComboModel(ctx, h, input, chatURL)
 			ch <- resultWithIndex{idx: idx, result: res}
@@ -431,6 +444,15 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 		"stream":     true,
 	}
 	bodyBytes, _ := json.Marshal(bodyMap)
+	if u, err := outbound.ValidateURL(chatURL); err != nil {
+		res.Error = "blocked url: " + err.Error()
+		return res
+	} else if !input.provider.UseProxy {
+		if err := (outbound.Policy{AllowPrivate: input.provider.AllowPrivateNetwork}).CheckHost(ctx, u.Hostname()); err != nil {
+			res.Error = "blocked url: " + err.Error()
+			return res
+		}
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", chatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -445,7 +467,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 	h.d.Logger.Debug("SPEED-TEST SEND %s/%s | url=%s", input.provider.Name, input.modelId, chatURL)
 
 	t0 := time.Now()
-	resp, err := h.d.ProxyHandler.ManagementClient(*input.provider).Do(httpReq)
+	resp, err := h.d.ManagementClient(*input.provider).Do(httpReq)
 	if err != nil {
 		h.d.Logger.Error("SPEED-TEST ERR %s/%s | %v", input.provider.Name, input.modelId, err)
 		res.Error = err.Error()
@@ -475,7 +497,7 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 	var contentChunks int
 	var contentBuf strings.Builder
 	buf := make([]byte, 32*1024)
-	sb := &sse.SSELineBuffer{}
+	sb := sse.NewSSELineBuffer(0, 0)
 
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -484,7 +506,17 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 				ttftMs = time.Since(t0).Milliseconds()
 				h.d.Logger.Debug("SPEED-TEST STREAM %s/%s | TTFT=%dms", input.provider.Name, input.modelId, ttftMs)
 			}
-			for _, payload := range sse.SSEDataPayloads(sb.Feed(buf[:n])) {
+			lines, ferr := sb.Feed(buf[:n])
+			if ferr != nil {
+				res.Ok = false
+				res.Status = resp.StatusCode
+				res.Error = "upstream SSE exceeded line buffer budget: " + ferr.Error()
+				res.LatencyMs = time.Since(t0).Milliseconds()
+				resp.Body.Close()
+				h.d.ProxyHandler.TraceMgmtCall("probe:combo:provider="+input.provider.ID+":model="+input.modelId+":key="+input.key.ID, "probe", "probe", input.modelId, input.provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, res.Error, time.Since(t0).Milliseconds())
+				return res
+			}
+			for _, payload := range sse.SSEDataPayloads(lines) {
 				if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
 					inputTokens = in
 					outputTokens = out

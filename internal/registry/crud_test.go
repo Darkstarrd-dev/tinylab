@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/state"
 )
 
 func crudTestConfig() *config.Config {
@@ -290,16 +291,29 @@ func TestSnapshotAndRestoreKeyStates(t *testing.T) {
 	ks.Unlock()
 
 	snap := r.SnapshotKeyStates()
-	// Snapshot keys use the "providerID::keyID" format (convertKey).
-	if _, ok := snap["p1::k1"]; !ok {
-		t.Fatal("snapshot missing p1::k1")
+	// Snapshot entries carry structured ProviderID/KeyID fields and use the
+	// length-prefixed key encoding (state.EncodeSnapshotKey); look the entry
+	// up by identity, not by a delimiter-joined key string.
+	var snapKey string
+	var snapVal state.KeySnapshot
+	found := false
+	for k, v := range snap {
+		if v.ProviderID == "p1" && v.KeyID == "k1" {
+			snapKey, snapVal = k, v
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("snapshot missing p1/k1 entry, got: %v", snap)
 	}
 
 	// Restore into a fresh registry.
 	r2 := New(crudTestConfig())
-	if err := r2.RestoreKeyState("p1", "k1", snap["p1::k1"]); err != nil {
+	if err := r2.RestoreKeyState("p1", "k1", snapVal); err != nil {
 		t.Fatalf("RestoreKeyState error: %v", err)
 	}
+	_ = snapKey
 	ks2 := r2.GetKeyState("p1", "k1")
 	if ks2 == nil {
 		t.Fatal("restored key state nil")

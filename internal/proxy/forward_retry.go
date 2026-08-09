@@ -146,8 +146,8 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			}
 			processingEntry.ReqPayload = append([]byte(nil), rb...)
 		}
-		processingEntry.ReqHeaders = maskHeaderMap(r.Header)
-		processingEntry.UpstreamURL = upstreamURL
+		processingEntry.ReqHeaders = h.maskHeaderMap(r.Header)
+		processingEntry.UpstreamURL = redactURL(upstreamURL)
 		h.EntryTracker.Register(processingEntry)
 		h.broadcastRequestStart(reqID, processingEntry)
 

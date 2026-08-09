@@ -173,13 +173,25 @@ func (m *Manager) Restore(snapshot *Snapshot) error {
 	}
 
 	for key, ks := range snapshot.Keys {
-		parts := strings.SplitN(key, "::", 2)
-		if len(parts) != 2 {
-			m.logger.Debug("invalid key snapshot key (expected 'providerID::keyID'): %s", key)
-			continue
+		providerID, keyID := ks.ProviderID, ks.KeyID
+		if providerID == "" || keyID == "" {
+			// Legacy snapshot: no structured identity fields on the value.
+			// Try the length-prefixed key encoding, then the historical
+			// "providerID::keyID" split (ambiguous for IDs containing '/' or
+			// '::' — best-effort migration for files written by older builds).
+			var ok bool
+			providerID, keyID, ok = decodeSnapshotKey(key)
+			if !ok {
+				parts := strings.SplitN(key, "::", 2)
+				if len(parts) != 2 {
+					m.logger.Debug("invalid key snapshot key (expected 'providerID::keyID'): %s", key)
+					continue
+				}
+				providerID, keyID = parts[0], parts[1]
+			}
 		}
 		if m.keyRestoreFn != nil {
-			if err := m.keyRestoreFn(parts[0], parts[1], *ks); err != nil {
+			if err := m.keyRestoreFn(providerID, keyID, *ks); err != nil {
 				m.logger.Debug("skip restoring key %s: %v", key, err)
 			}
 		}
@@ -194,13 +206,23 @@ func (m *Manager) Restore(snapshot *Snapshot) error {
 	}
 
 	for key, pr := range snapshot.Probes {
-		parts := strings.SplitN(key, "::", 2)
-		if len(parts) != 2 {
-			m.logger.Debug("invalid probe snapshot key (expected 'providerID::modelID'): %s", key)
-			continue
+		providerID, modelID := pr.ProviderID, pr.ModelID
+		if providerID == "" || modelID == "" {
+			// Legacy snapshot: fall back to the length-prefixed key encoding,
+			// then the historical "providerID::modelID" split.
+			var ok bool
+			providerID, modelID, ok = decodeSnapshotKey(key)
+			if !ok {
+				parts := strings.SplitN(key, "::", 2)
+				if len(parts) != 2 {
+					m.logger.Debug("invalid probe snapshot key (expected 'providerID::modelID'): %s", key)
+					continue
+				}
+				providerID, modelID = parts[0], parts[1]
+			}
 		}
 		if m.probeRestoreFn != nil {
-			if err := m.probeRestoreFn(parts[0], parts[1], *pr); err != nil {
+			if err := m.probeRestoreFn(providerID, modelID, *pr); err != nil {
 				m.logger.Debug("skip restoring probe %s: %v", key, err)
 			}
 		}

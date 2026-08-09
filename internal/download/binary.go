@@ -4,9 +4,28 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
+
+// resolveConfiguredTool canonicalizes a configured/external tool path and
+// verifies it is a safe regular executable. A relative value (bare name) is
+// resolved through PATH first so legacy configs keep working, then validated.
+func resolveConfiguredTool(candidate, name string) (string, error) {
+	if !filepath.IsAbs(candidate) {
+		if lp, err := exec.LookPath(candidate); err == nil {
+			candidate = lp
+		}
+	}
+	path, err := procutil.ValidateExecutable(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%s not usable: %w", name, err)
+	}
+	return path, nil
+}
 
 // resolveYtDlpPath 解析 yt-dlp 二进制路径：
 // 1. 配置 settings.YtDlpPath
@@ -14,16 +33,16 @@ import (
 // 3. PATH 中的 yt-dlp
 func (e *Executor) resolveYtDlpPath() (string, error) {
 	if e.settings.YtDlpPath != "" {
-		return e.settings.YtDlpPath, nil
+		return resolveConfiguredTool(e.settings.YtDlpPath, "yt-dlp")
 	}
 	if env := os.Getenv("YTDLP_PATH"); env != "" {
-		return env, nil
+		return resolveConfiguredTool(env, "yt-dlp")
 	}
 	path, err := exec.LookPath("yt-dlp")
 	if err != nil {
 		return "", fmt.Errorf("yt-dlp not found (set download.ytDlpPath, YTDLP_PATH, or put yt-dlp in PATH)")
 	}
-	return path, nil
+	return resolveConfiguredTool(path, "yt-dlp")
 }
 
 // resolveFfmpegPath 解析 ffmpeg 二进制路径：
@@ -32,16 +51,16 @@ func (e *Executor) resolveYtDlpPath() (string, error) {
 // 3. PATH 中的 ffmpeg
 func (e *Executor) resolveFfmpegPath() (string, error) {
 	if e.settings.FfmpegPath != "" {
-		return e.settings.FfmpegPath, nil
+		return resolveConfiguredTool(e.settings.FfmpegPath, "ffmpeg")
 	}
 	if env := os.Getenv("FFMPEG_PATH"); env != "" {
-		return env, nil
+		return resolveConfiguredTool(env, "ffmpeg")
 	}
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return "", fmt.Errorf("ffmpeg not found (set download.ffmpegPath, FFMPEG_PATH, or put ffmpeg in PATH)")
 	}
-	return path, nil
+	return resolveConfiguredTool(path, "ffmpeg")
 }
 
 // --- 输出文件路径提取 ---

@@ -1,12 +1,14 @@
 package gallery
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -81,19 +83,104 @@ func writeFakeFFmpeg(t *testing.T, encoders, decoders []string) string {
 	if runtime.GOOS == "windows" {
 		name += ".bat"
 	}
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(fakeToolDir(t), name)
 	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return path
 }
 
+// fakeToolDir returns a private, non-temp directory for test tool binaries:
+// procutil.ValidateExecutable rejects tool paths inside the OS temp dir
+// (binary-swap defense), so fakes must live elsewhere. The dir is removed
+// when the test finishes.
 // fakeFFmpegPath returns an absolute path to a nonexistent ffmpeg binary:
-// resolution succeeds (configured path is trusted), but the capability probe
-// fails, which exercises the all-false/error capability path.
+// resolution fails, which exercises the available=false/error status path.
 func fakeFFmpegPath(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "no-such-ffmpeg.exe")
+}
+
+// fakeToolDir returns a private, non-temp directory for test tool binaries:
+// procutil.ValidateExecutable rejects tool paths inside the OS temp dir
+// (binary-swap defense), so fakes must live elsewhere. The dir is removed
+// when the test finishes.
+func fakeToolDir(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	dir := filepath.Join(cwd, ".testbin-"+strconv.Itoa(os.Getpid())+"-"+strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ' ' {
+			return '_'
+		}
+		return r
+	}, t.Name()))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir testbin: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// fakeFFmpegBrokenProbe returns a path to an existing executable that always
+// exits non-zero, so ResolveFfmpeg succeeds (existing regular file outside
+// the temp dir) while the capability probe fails — the "capability probe
+// failed" path.
+func fakeFFmpegBrokenProbe(t *testing.T) string {
+	t.Helper()
+	le := "\n"
+	if runtime.GOOS == "windows" {
+		le = "\r\n"
+	}
+	content := "@echo off" + le + "exit /b 1" + le
+	if runtime.GOOS != "windows" {
+		content = "#!/bin/sh\nexit 1\n"
+	}
+	name := "broken-ffmpeg"
+	if runtime.GOOS == "windows" {
+		name += ".bat"
+	}
+	path := filepath.Join(fakeToolDir(t), name)
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		t.Fatalf("write broken ffmpeg: %v", err)
+	}
+	return path
+}
+
+// registerTestInput registers a temp input asset whose backing file is then
+// removed: resolveMediaInput succeeds (registration lookup) while
+// mediaedit.Start's os.Stat input validation fails, preserving the legacy
+// "input file not found" gate-ordering tests under the asset contract.
+func registerTestInput(t *testing.T, h *Handler, name string) string {
+	t.Helper()
+	st, err := h.assetStore()
+	if err != nil {
+		t.Fatalf("asset store: %v", err)
+	}
+	ref, err := st.Create(t.Context(), testOwner, "test", name, "application/octet-stream", strings.NewReader("garbage"), 0)
+	if err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	if err := os.Remove(ref.Path); err != nil {
+		t.Fatalf("remove backing file: %v", err)
+	}
+	return ref.ID
+}
+
+// startEdit posts an edit/start request with the shared owner cookie.
+func startEdit(t *testing.T, srv *httptest.Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	resp, err := post(srv.URL+"/edit/start", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /edit/start: %v", err)
+	}
+	defer resp.Body.Close()
+	rec := httptest.NewRecorder()
+	rec.Code = resp.StatusCode
+	rec.Body.Write(readBody(t, resp))
+	return rec
 }
 
 // TestGalleryEditFfmpegStatus_Fields pins the §9.3 contract: the response has
@@ -172,26 +259,25 @@ func TestGalleryEditFfmpegStatus_RealCapabilities(t *testing.T) {
 // fails (fake path), every animated-image operation is refused with a clear
 // error and no job is created.
 func TestGalleryEditStart_RejectsMissingCapability(t *testing.T) {
-	h := newEditTestHandler(t, fakeFFmpegPath(t))
+	h := newEditTestHandler(t, fakeFFmpegBrokenProbe(t))
 	r := chi.NewRouter()
 	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
 
 	for _, tc := range []struct {
 		name      string
 		operation string
-		input     string
 	}{
-		{"video_to_gif", "video_to_gif", "C:/videos/clip.mp4"},
-		{"video_to_webp", "video_to_webp", "C:/videos/clip.mp4"},
-		{"gif anim trim", "video_anim_trim", "C:/anims/clip.gif"},
-		{"webp anim trim", "video_anim_trim", "C:/anims/clip.webp"},
+		{"video_to_gif", "video_to_gif"},
+		{"video_to_webp", "video_to_webp"},
+		{"gif anim trim", "video_anim_trim"},
+		{"webp anim trim", "video_anim_trim"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := `{"inputPath":"` + tc.input + `","operation":"` + tc.operation + `","params":{}}`
-			req := httptest.NewRequest(http.MethodPost, "/edit/start", strings.NewReader(body))
-			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, req)
-
+			assetID := registerTestInput(t, h, "clip.mp4")
+			body := "{\"inputAssetId\":\"" + assetID + "\",\"operation\":\"" + tc.operation + "\",\"params\":{}}"
+			rec := startEdit(t, srv, body)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 			}
@@ -214,17 +300,12 @@ func TestGalleryEditStart_EncoderGates(t *testing.T) {
 	h := newEditTestHandler(t, ff)
 	r := chi.NewRouter()
 	h.Register(r)
-
-	start := func(t *testing.T, body string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/edit/start", strings.NewReader(body))
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, req)
-		return rec
-	}
+	srv := httptest.NewServer(r)
+	defer srv.Close()
 
 	t.Run("video_to_webp refused without libwebp_anim", func(t *testing.T) {
-		rec := start(t, `{"inputPath":"C:/videos/clip.mp4","operation":"video_to_webp","params":{}}`)
+		assetID := registerTestInput(t, h, "clip.mp4")
+		rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_to_webp\",\"params\":{}}")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 		}
@@ -237,7 +318,8 @@ func TestGalleryEditStart_EncoderGates(t *testing.T) {
 	})
 
 	t.Run("webp anim trim refused without libwebp_anim", func(t *testing.T) {
-		rec := start(t, `{"inputPath":"C:/anims/clip.webp","operation":"video_anim_trim","params":{"start":"0","duration":"1"}}`)
+		assetID := registerTestInput(t, h, "clip.webp")
+		rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_anim_trim\",\"params\":{\"start\":\"0\",\"duration\":\"1\"}}")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 		}
@@ -247,7 +329,8 @@ func TestGalleryEditStart_EncoderGates(t *testing.T) {
 	})
 
 	t.Run("video_to_gif passes gate then fails input validation", func(t *testing.T) {
-		rec := start(t, `{"inputPath":"C:/videos/does-not-exist.mp4","operation":"video_to_gif","params":{}}`)
+		assetID := registerTestInput(t, h, "clip.mp4")
+		rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_to_gif\",\"params\":{}}")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 		}
@@ -266,13 +349,12 @@ func TestGalleryEditStart_WebpDecoderGate(t *testing.T) {
 	h := newEditTestHandler(t, ff)
 	r := chi.NewRouter()
 	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
 
 	t.Run("animated webp trim refused without webp_anim decoder", func(t *testing.T) {
-		body := `{"inputPath":"C:/anims/clip.webp","operation":"video_anim_trim","params":{"start":"0","duration":"1"}}`
-		req := httptest.NewRequest(http.MethodPost, "/edit/start", strings.NewReader(body))
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, req)
-
+		assetID := registerTestInput(t, h, "clip.webp")
+		rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_anim_trim\",\"params\":{\"start\":\"0\",\"duration\":\"1\"}}")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 		}
@@ -285,11 +367,8 @@ func TestGalleryEditStart_WebpDecoderGate(t *testing.T) {
 	})
 
 	t.Run("gif trim passes gate then fails input validation", func(t *testing.T) {
-		body := `{"inputPath":"C:/anims/does-not-exist.gif","operation":"video_anim_trim","params":{"start":"0","duration":"1"}}`
-		req := httptest.NewRequest(http.MethodPost, "/edit/start", strings.NewReader(body))
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, req)
-
+		assetID := registerTestInput(t, h, "clip.gif")
+		rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_anim_trim\",\"params\":{\"start\":\"0\",\"duration\":\"1\"}}")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d (body=%q)", rec.Code, rec.Body.String())
 		}
@@ -302,7 +381,7 @@ func TestGalleryEditStart_WebpDecoderGate(t *testing.T) {
 // TestGalleryEditStart_PassesCapabilityCheckForRealFfmpeg verifies the
 // capability check is permissive when the required encoder exists on the real
 // machine ffmpeg: video_to_gif proceeds past the capability gate and fails
-// only at input validation (nonexistent input file).
+// only at input validation (registered asset whose file was removed).
 func TestGalleryEditStart_PassesCapabilityCheckForRealFfmpeg(t *testing.T) {
 	ff, err := mediaedit.ResolveFfmpeg("")
 	if err != nil {
@@ -315,12 +394,11 @@ func TestGalleryEditStart_PassesCapabilityCheckForRealFfmpeg(t *testing.T) {
 	h := newEditTestHandler(t, ff)
 	r := chi.NewRouter()
 	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
 
-	input := filepath.ToSlash(filepath.Join(t.TempDir(), "does-not-exist.mp4"))
-	body := `{"inputPath":"` + input + `","operation":"video_to_gif","params":{}}`
-	req := httptest.NewRequest(http.MethodPost, "/edit/start", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	assetID := registerTestInput(t, h, "clip.mp4")
+	rec := startEdit(t, srv, "{\"inputAssetId\":\""+assetID+"\",\"operation\":\"video_to_gif\",\"params\":{}}")
 
 	// Capability gate passed; the job fails later at input validation.
 	if rec.Code != http.StatusBadRequest {
@@ -328,5 +406,99 @@ func TestGalleryEditStart_PassesCapabilityCheckForRealFfmpeg(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "input file not found") {
 		t.Errorf("expected input validation error, body=%q", rec.Body.String())
+	}
+}
+
+// TestGalleryEditExtractZipEntry_ReturnsAssetId pins the JS/backend contract
+// for the single-zip extract-to-edit flow (audit F-03/F-28): the response
+// body is exactly { "assetId": "..." }. The frontend resolves the edit by
+// assetId and must never read a tempPath.
+func TestGalleryEditExtractZipEntry_ReturnsAssetId(t *testing.T) {
+	h := newEditTestHandler(t, fakeFFmpegPath(t))
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Register an in-memory zip session (the flow the single-edit UI uses for
+	// FSAA/drag-drop zips).
+	upResp, err := post(srv.URL+"/zip", "application/zip", bytes.NewReader(buildTestZipBytes(t)))
+	if err != nil {
+		t.Fatalf("POST /zip: %v", err)
+	}
+	defer upResp.Body.Close()
+	if upResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /zip: want 200, got %d", upResp.StatusCode)
+	}
+	var up struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.NewDecoder(upResp.Body).Decode(&up); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if up.SessionID == "" {
+		t.Fatal("expected non-empty sessionId")
+	}
+
+	body, err := json.Marshal(map[string]string{"sessionId": up.SessionID, "zipPath": "a.png"})
+	if err != nil {
+		t.Fatalf("marshal extract request: %v", err)
+	}
+	resp, err := post(srv.URL+"/edit/extract-zip-entry", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST extract-zip-entry: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("extract-zip-entry: want 200, got %d (body=%q)", resp.StatusCode, readBody(t, resp))
+	}
+	var out map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode extract response: %v", err)
+	}
+	var assetID string
+	raw, ok := out["assetId"]
+	if !ok {
+		t.Fatal("extract-zip-entry response must contain assetId")
+	}
+	if err := json.Unmarshal(raw, &assetID); err != nil || assetID == "" {
+		t.Fatalf("extract-zip-entry assetId must be non-empty, got %q", assetID)
+	}
+	if _, ok := out["tempPath"]; ok {
+		t.Fatal("extract-zip-entry response must not contain tempPath (frontend resolves by assetId)")
+	}
+}
+
+// TestGalleryEditUploadTemp_ReturnsAssetId pins the same assetId-only contract
+// for upload-temp, which materializes FSAA/drag-drop inputs for editing.
+func TestGalleryEditUploadTemp_ReturnsAssetId(t *testing.T) {
+	h := newEditTestHandler(t, fakeFFmpegPath(t))
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := post(srv.URL+"/edit/upload-temp?name=a.png", "image/png", strings.NewReader("png-bytes"))
+	if err != nil {
+		t.Fatalf("POST upload-temp: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload-temp: want 200, got %d (body=%q)", resp.StatusCode, readBody(t, resp))
+	}
+	var out map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode upload-temp response: %v", err)
+	}
+	raw, ok := out["assetId"]
+	if !ok {
+		t.Fatal("upload-temp response must contain assetId")
+	}
+	var assetID string
+	if err := json.Unmarshal(raw, &assetID); err != nil || assetID == "" {
+		t.Fatalf("upload-temp assetId must be non-empty, got %q", assetID)
+	}
+	if _, ok := out["tempPath"]; ok {
+		t.Fatal("upload-temp response must not contain tempPath")
 	}
 }

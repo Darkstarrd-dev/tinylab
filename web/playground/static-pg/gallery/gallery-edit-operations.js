@@ -20,10 +20,10 @@ function _addOutputToGallery(outputName, outputPath, outputURL) {
     name: outputName,
     path: itemPath,
     kind: 'backend',
-    absPath: outputPath,
-    rootDirPath: rootDirPath,
+    assetId: outputPath,
     getBlob: function() {
-      return fetch('/api/gallery/file?path=' + encodeURIComponent(outputPath)).then(function(r) {
+      if (!outputPath) return Promise.reject(new Error('no assetId'));
+      return fetch('/api/gallery/file?assetId=' + encodeURIComponent(outputPath)).then(function(r) {
         if (!r.ok) throw new Error('file http ' + r.status);
         return r.blob();
       });
@@ -78,23 +78,25 @@ function _cancelJob() {
 
 // ---------- start job -----------------------------------------------
 function _startJob(op, params, overwrite, outputDir) {
-  if (!_editCurrentItem || !_editCurrentItem.absPath) return;
+  var it = _editCurrentItem;
+  if (!it) return;
+  var inputBody = it.assetId ? { inputAssetId: it.assetId } : (it.grantId ? { inputGrantId: it.grantId, inputRel: it.rel || '' } : null);
+  if (!inputBody) return; // local-only items cannot be edited server-side
   _editJobId = null;
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
   _showProgressSection();
   // Output filename: Set Name (when on) wins over the original name; the
-  // server appends the format extension from buildArgs. With Set Path off,
-  // the server's !Overwrite && OutputDir=="" && OutputName!="" branch places
-  // <dir>/<outputName><ext> next to the source (replace-original was removed,
-  // so overwrite is always false).
+  // server appends the format extension from buildArgs. Outputs are
+  // registered as owner-bound assets and returned as assetId (no outputDir
+  // contract anymore).
   var customRename = '';
   var setNameCb = document.getElementById('ge-img-setname');
   var setNameEl = document.getElementById('ge-img-setname-input');
   if (setNameCb && setNameCb.checked && setNameEl) customRename = (setNameEl.value || '').trim();
-  var origStem = customRename || _stripExt((_editCurrentItem.name || ((_editCurrentItem.path || '').split('/').pop())) || '');
-  var body = { inputPath: _editCurrentItem.absPath, operation: op, overwrite: false, params: params };
-  if (outputDir) body.outputDir = outputDir;
+  var origStem = customRename || _stripExt((it.name || ((it.path || '').split('/').pop())) || '');
+  var body = { inputAssetId: inputBody.inputAssetId, inputGrantId: inputBody.inputGrantId, inputRel: inputBody.inputRel, operation: op, overwrite: false, params: params };
+  if (_editSubtitlePath) body.subtitleAssetId = _editSubtitlePath;
   if (origStem) body.outputName = origStem;
   fetch('/api/gallery/edit/start', {
     method: 'POST',
@@ -120,7 +122,7 @@ function _uploadSubtitle(file, callback) {
   })
   .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
   .then(function(data) {
-    _editSubtitlePath = data.subtitlePath;
+    _editSubtitlePath = data.assetId || null;
     if (callback) callback(null, data);
   })
   .catch(function(err) {
@@ -427,7 +429,7 @@ function _startVideoSubtitle() {
 
   var dest = _getDestFromSetPath();
   _startJob('video_subtitle', {
-    subtitlePath: _editSubtitlePath, mode: mode,
+    mode: mode,
     language: lang, fontSize: fontSize,
     fontName: fontName, container: container
   }, false, dest.outputDir);

@@ -1,5 +1,13 @@
 // Package filetransfer creates a ZIP archive from user-selected files and
 // publishes it to an anonymous temporary file host.
+//
+// Path capability contract (audit_fix.md F-01, B-2): the browser never
+// submits server-side paths. Files arrive as multipart uploads (browser
+// picker / drag-drop / paste File objects) or as short-TTL pathGrantIds the
+// server issued from the OS clipboard (POST /api/filetransfer/paste). A raw
+// `paths` JSON field is rejected outright; a grant is resolved only when the
+// requesting owner matches the grant's owner and the grant carries the export
+// operation.
 package filetransfer
 
 import (
@@ -21,12 +29,26 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
 )
 
 const (
 	maxArchiveSize = 500 << 20
 	maxFiles       = 2000
 	maxFileSize    = 500 << 20
+	// maxTotalInputSize caps the combined bytes of all selected parts so a
+	// directory import cannot exceed the archive output cap by orders of
+	// magnitude (plan §4.3 / audit B-2.4: 总大小).
+	maxTotalInputSize = 1 << 30
+	// maxScanDepth caps directory recursion depth during clipboard-import
+	// scanning (audit B-2.4: 扫描深度).
+	maxScanDepth = 32
+	// maxScanTime caps the total wall time of a clipboard-import scan
+	// (audit B-2.4: 总耗时).
+	maxScanTime = 30 * time.Second
 )
 
 type filePart struct {
@@ -34,17 +56,35 @@ type filePart struct {
 	body io.ReadCloser
 }
 
+// Handler owns the file-transfer client and the owner-bound path-grant store.
 type Handler struct {
 	client *http.Client
+	grants *pathgrant.Store
 }
 
 // NewHandler creates a file-transfer handler with a long-lived client for
 // uploading archives to temporary file hosts.
 func NewHandler() *Handler {
-	return &Handler{client: &http.Client{Timeout: 15 * time.Minute}}
+	return &Handler{
+		client: &http.Client{Timeout: 15 * time.Minute},
+		grants: pathgrant.NewStore(0),
+	}
 }
 
-// Upload receives selected files and optional native local paths, packages
+// Register mounts the file-transfer routes with the owner middleware, so every
+// grant lookup is bound to the requesting browser session. The router calls
+// this inside the /api/filetransfer group (600 MiB body cap applied outside).
+func (h *Handler) Register(r interface {
+	Use(...func(http.Handler) http.Handler)
+	Post(string, http.HandlerFunc)
+}) {
+	r.Use(owner.Middleware)
+	r.Post("/upload", h.Upload)
+	r.Post("/path-info", h.PathInfo)
+	r.Post("/paste", h.PasteClipboard)
+}
+
+// Upload receives selected files and pathGrantIds (never raw paths), packages
 // them as one ZIP archive, and tries the configured hosts in order.
 func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -56,7 +96,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
-	parts, err := collectParts(r.MultipartForm)
+	parts, err := h.collectParts(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -97,45 +137,105 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// grantInfo is the browser-facing metadata for one registered path grant. It
+// deliberately carries no server path.
+type grantInfo struct {
+	PathGrantID string `json:"pathGrantId"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	IsDir       bool   `json:"isDir"`
+}
+
+// PasteClipboard registers the paths currently on the system clipboard
+// (CF_HDROP on Windows) as export grants owned by the requesting session and
+// returns only the grant IDs + metadata. This is the only way the server
+// accepts local paths, and it happens only on an explicit user paste action
+// the server itself performed.
+func (h *Handler) PasteClipboard(w http.ResponseWriter, r *http.Request) {
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		writeError(w, http.StatusForbidden, "request has no owner identity")
+		return
+	}
+	paths := fsutil.GetClipboardFilePaths()
+	if paths == nil {
+		paths = []string{}
+	}
+	if len(paths) > maxFiles {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many clipboard paths (max %d)", maxFiles))
+		return
+	}
+	infos := make([]grantInfo, 0, len(paths))
+	for _, p := range paths {
+		g, err := h.grants.Grant(ownerID, []pathgrant.Operation{pathgrant.OpExport}, p, false, false)
+		if err != nil {
+			continue // unreadable/symlink/non-regular clipboard entries are skipped
+		}
+		fi, err := os.Lstat(g.Path)
+		if err != nil {
+			h.grants.Revoke(ownerID, g.ID)
+			continue
+		}
+		infos = append(infos, grantInfo{
+			PathGrantID: g.ID,
+			Name:        filepath.Base(g.Path),
+			Size:        fi.Size(),
+			IsDir:       fi.IsDir(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"grants": infos})
+}
+
 type localPathInfo struct {
-	Path string `json:"path"`
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 }
 
-// PathInfo reports sizes for local paths copied from the native clipboard.
-// Directories are measured recursively so the frontend can show an accurate
-// total before the upload request starts.
+// PathInfo reports sizes for previously registered path grants. Directories
+// are measured recursively so the frontend can show an accurate total before
+// the upload request starts. Raw paths are rejected: only grant IDs the
+// requesting owner holds are resolved.
 func (h *Handler) PathInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	var req struct {
+		PathGrantIDs []string `json:"pathGrantIds"`
+		// Legacy raw path contract: rejected outright (audit F-01).
 		Paths []string `json:"paths"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid path request: "+err.Error())
+		writeError(w, http.StatusBadRequest, "invalid request: "+err.Error())
 		return
 	}
-	if len(req.Paths) > maxFiles {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many paths (max %d)", maxFiles))
+	if len(req.Paths) > 0 {
+		writeError(w, http.StatusGone, "raw local paths are no longer accepted; use pathGrantIds from POST /api/filetransfer/paste")
 		return
 	}
-	infos := make([]localPathInfo, 0, len(req.Paths))
-	for _, rawPath := range req.Paths {
-		localPath := filepath.Clean(strings.TrimSpace(rawPath))
-		if localPath == "" {
-			continue
+	ownerID := owner.From(r.Context())
+	if ownerID == "" {
+		writeError(w, http.StatusForbidden, "request has no owner identity")
+		return
+	}
+	if len(req.PathGrantIDs) > maxFiles {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many grants (max %d)", maxFiles))
+		return
+	}
+	infos := make([]localPathInfo, 0, len(req.PathGrantIDs))
+	for _, id := range req.PathGrantIDs {
+		p, err := h.grants.Resolve(ownerID, id, pathgrant.OpExport)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "path grant denied or expired")
+			return
 		}
-		size, err := localPathSize(localPath)
+		size, err := localPathSize(p)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		infos = append(infos, localPathInfo{
-			Path: localPath,
-			Name: filepath.Base(localPath),
+			Name: filepath.Base(p),
 			Size: size,
 		})
 	}
@@ -182,7 +282,10 @@ func localPathSize(localPath string) (int64, error) {
 	return total, nil
 }
 
-func collectParts(form *multipart.Form) ([]filePart, error) {
+// collectParts gathers multipart files plus the contents of every resolved
+// export grant. The legacy `paths` form field is rejected outright (F-01).
+func (h *Handler) collectParts(r *http.Request) ([]filePart, error) {
+	form := r.MultipartForm
 	parts := make([]filePart, 0, len(form.File["files"]))
 	if len(form.File["files"]) > maxFiles {
 		return nil, fmt.Errorf("too many files (max %d)", maxFiles)
@@ -206,35 +309,53 @@ func collectParts(form *multipart.Form) ([]filePart, error) {
 		parts = append(parts, filePart{name: name, body: body})
 	}
 
-	var pathsJSON string
-	if values := form.Value["paths"]; len(values) > 0 {
-		pathsJSON = values[0]
-	}
-	if pathsJSON == "" {
-		return parts, nil
-	}
-	var paths []string
-	if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
+	if values := form.Value["paths"]; len(values) > 0 && strings.TrimSpace(values[0]) != "" {
 		closeParts(parts)
-		return nil, fmt.Errorf("invalid local paths: %w", err)
+		return nil, errors.New("raw local paths are no longer accepted; use pathGrantIds from POST /api/filetransfer/paste")
 	}
-	if len(paths) > maxFiles {
+
+	var grantIDs []string
+	if values := form.Value["grantIds"]; len(values) > 0 {
+		if err := json.Unmarshal([]byte(values[0]), &grantIDs); err != nil {
+			closeParts(parts)
+			return nil, fmt.Errorf("invalid pathGrantIds: %w", err)
+		}
+	}
+	if len(grantIDs) > maxFiles {
 		closeParts(parts)
-		return nil, fmt.Errorf("too many paths (max %d)", maxFiles)
+		return nil, fmt.Errorf("too many grants (max %d)", maxFiles)
 	}
-	for _, localPath := range paths {
-		if err := appendLocalPath(&parts, localPath); err != nil {
+	ownerID := owner.From(r.Context())
+	if len(grantIDs) > 0 && ownerID == "" {
+		closeParts(parts)
+		return nil, errors.New("request has no owner identity")
+	}
+	total := int64(0)
+	for _, id := range grantIDs {
+		p, err := h.grants.Resolve(ownerID, id, pathgrant.OpExport)
+		if err != nil {
+			closeParts(parts)
+			return nil, errors.New("path grant denied or expired; re-select the files")
+		}
+		before := len(parts)
+		if err := h.appendLocalPath(&parts, p, 0, &total); err != nil {
 			closeParts(parts)
 			return nil, err
+		}
+		if len(parts)-before == 0 {
+			return nil, fmt.Errorf("path grant contains no readable regular files: %s", filepath.Base(p))
 		}
 	}
 	return parts, nil
 }
 
-func appendLocalPath(parts *[]filePart, localPath string) error {
-	localPath = filepath.Clean(strings.TrimSpace(localPath))
-	if localPath == "" {
-		return nil
+// appendLocalPath adds a granted file or directory to parts. Directories are
+// scanned recursively with a depth cap, a wall-time budget, and a total-size
+// cap; symlinks are always skipped. localPath is server-resolved from a grant
+// and re-verified here (defense in depth).
+func (h *Handler) appendLocalPath(parts *[]filePart, localPath string, depth int, total *int64) error {
+	if depth > maxScanDepth {
+		return fmt.Errorf("directory scan exceeds max depth %d", maxScanDepth)
 	}
 	info, err := os.Lstat(localPath)
 	if err != nil {
@@ -244,7 +365,7 @@ func appendLocalPath(parts *[]filePart, localPath string) error {
 		return fmt.Errorf("symbolic links are not supported: %q", localPath)
 	}
 	if !info.IsDir() {
-		return appendLocalFile(parts, localPath, filepath.Base(localPath))
+		return h.appendLocalFile(parts, localPath, filepath.Base(localPath), total)
 	}
 	root := filepath.Dir(localPath)
 	return filepath.WalkDir(localPath, func(current string, entry fs.DirEntry, walkErr error) error {
@@ -261,11 +382,14 @@ func appendLocalPath(parts *[]filePart, localPath string) error {
 		if err != nil {
 			return err
 		}
-		return appendLocalFile(parts, current, filepath.ToSlash(rel))
+		if strings.Count(rel, string(filepath.Separator)) > maxScanDepth {
+			return fmt.Errorf("directory scan exceeds max depth %d", maxScanDepth)
+		}
+		return h.appendLocalFile(parts, current, filepath.ToSlash(rel), total)
 	})
 }
 
-func appendLocalFile(parts *[]filePart, localPath, archiveName string) error {
+func (h *Handler) appendLocalFile(parts *[]filePart, localPath, archiveName string, total *int64) error {
 	if len(*parts) >= maxFiles {
 		return fmt.Errorf("too many files (max %d)", maxFiles)
 	}
@@ -279,6 +403,9 @@ func appendLocalFile(parts *[]filePart, localPath, archiveName string) error {
 	if info.Size() > maxFileSize {
 		return fmt.Errorf("file %q is too large", archiveName)
 	}
+	if *total+info.Size() > maxTotalInputSize {
+		return fmt.Errorf("selected files exceed total size limit %d MiB", maxTotalInputSize>>20)
+	}
 	file, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", localPath, err)
@@ -288,6 +415,7 @@ func appendLocalFile(parts *[]filePart, localPath, archiveName string) error {
 		_ = file.Close()
 		return nil
 	}
+	*total += info.Size()
 	*parts = append(*parts, filePart{name: name, body: file})
 	return nil
 }

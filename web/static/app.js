@@ -212,7 +212,8 @@ document.addEventListener('DOMContentLoaded', async function() {
   var authStatus = await checkAuthStatus();
   var enabled = authStatus.passwordEnabled || authStatus.authEnabled;
   var authenticated = authStatus.authenticated || authStatus.loggedIn;
-  if (enabled && !authenticated) renderLoginScreen();
+  if (authStatus.setupRequired && typeof renderSetupScreen === 'function') renderSetupScreen();
+  else if (enabled && !authenticated) renderLoginScreen();
   else initApp();
 });
 

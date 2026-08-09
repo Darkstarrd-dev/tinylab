@@ -80,8 +80,5 @@ func packMIME(format archive.Format) string {
 	}
 }
 
-// TempStore owners used by the runner.
-const (
-	ownerPack = "pack"
-	jobPack   = "out"
-)
+// Default job segment for pack outputs in the TempStore workspace.
+const jobPack = "out"

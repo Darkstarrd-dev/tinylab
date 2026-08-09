@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 type saveImageRequest struct {
@@ -35,29 +35,18 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
-// ssrfGuardedClient is the default HTTP client for outbound image fetches.
-// It re-checks the SSRF blocklist on every redirect hop so a redirect can
-// never escape to a blocked (private/loopback/link-local/multicast) address,
-// and bounds redirect chains. Tests inject a custom client via
+// ssrfPolicy is the default outbound policy for image fetches: http/https
+// only, no private/loopback/link-local/multicast targets, DNS-rebinding-safe
+// dialing (connection pinned to the validated IP), and per-redirect
+// revalidation with a bounded hop count. Tests inject a custom client via
 // apibase.Deps.TestClient.
-var ssrfGuardedClient = &http.Client{
-	Timeout: 30 * time.Second,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return fmt.Errorf("too many redirects")
-		}
-		if apibase.IsBlockedSSRFHost(req.URL.Hostname()) {
-			return fmt.Errorf("redirect to blocked host: %s", req.URL.Hostname())
-		}
-		return nil
-	},
-}
+var ssrfPolicy = outbound.Policy{Timeout: 30 * time.Second}
 
 func (h *Handler) httpClient() *http.Client {
 	if h.d != nil && h.d.TestClient != nil {
 		return h.d.TestClient
 	}
-	return ssrfGuardedClient
+	return ssrfPolicy.Client()
 }
 
 // Register adds the image routes to the given router.
@@ -115,13 +104,13 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if strings.HasPrefix(req.URL, "http://") || strings.HasPrefix(req.URL, "https://") {
-		// Fetch the external URL
-		parsedURL, err := url.Parse(req.URL)
+		// Fetch the external URL under the outbound SSRF policy.
+		parsedURL, err := outbound.ValidateURL(req.URL)
 		if err != nil {
-			apibase.WriteAPIError(w, http.StatusBadRequest, "invalid image url")
+			apibase.WriteAPIError(w, http.StatusBadRequest, "invalid image url: "+err.Error())
 			return
 		}
-		if apibase.IsBlockedSSRFHost(parsedURL.Hostname()) {
+		if err := ssrfPolicy.CheckHost(r.Context(), parsedURL.Hostname()); err != nil {
 			apibase.WriteAPIError(w, http.StatusForbidden, "image url resolves to a blocked address")
 			return
 		}
@@ -210,12 +199,12 @@ func (h *Handler) imageProxy(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "only http(s) urls supported")
 		return
 	}
-	parsedURL, err := url.Parse(u)
+	parsedURL, err := outbound.ValidateURL(u)
 	if err != nil {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url")
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err.Error())
 		return
 	}
-	if apibase.IsBlockedSSRFHost(parsedURL.Hostname()) {
+	if err := ssrfPolicy.CheckHost(r.Context(), parsedURL.Hostname()); err != nil {
 		apibase.WriteAPIError(w, http.StatusForbidden, "url resolves to a blocked address")
 		return
 	}

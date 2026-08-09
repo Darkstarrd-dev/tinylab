@@ -542,8 +542,8 @@ window.deleteItemPrompt = function() {
   if (marked.length === 0) return;  // 无标注，不响应
   // 判断是否有“从磁盘移除”能力：任一标注图片可删磁盘则显示该选项
   var anyDiskCapable = marked.some(function(it) {
-    return (it.kind === 'zip' && (it.zipFileHandle || it.zipAbsPath)) ||
-           (it.kind === 'backend' && !!it.absPath) ||
+    return (it.kind === 'zip' && (it.zipFileHandle || it.grantId)) ||
+           (it.kind === 'backend' && !!it.grantId) ||
            (it.kind === 'fs' && !!it.handle);
   });
   var html = '<div style="text-align:center;padding:8px">' +
@@ -576,23 +576,23 @@ async function deleteMarkedFromDisk(marked) {
   // 分组：archive-source zip 按 sourceId 分组；legacy zip 按 sessionId 分组；
   // backend/fs 单独处理；plain 无磁盘能力跳过
   var zipSrcGroups = {};   // sourceId -> { items: [], handle }
-  var zipSessGroups = {};  // sessionId -> { items: [], handle, zipAbsPath }
+  var zipSessGroups = {};  // sessionId -> { items: [], handle, grantId }
   var backendItems = [];
   var fsItems = [];
   var plainCount = 0;
   for (var i = 0; i < marked.length; i++) {
     var it = marked[i];
-    if (it.kind === 'zip' && (it.zipFileHandle || it.zipAbsPath)) {
+    if (it.kind === 'zip' && (it.zipFileHandle || it.grantId)) {
       if (it.sourceId) {
         if (!zipSrcGroups[it.sourceId]) zipSrcGroups[it.sourceId] = { items: [], handle: it.zipFileHandle || null };
         zipSrcGroups[it.sourceId].items.push(it);
       } else if (it.sessionId) {
-        if (!zipSessGroups[it.sessionId]) zipSessGroups[it.sessionId] = { items: [], handle: it.zipFileHandle, zipAbsPath: it.zipAbsPath || null };
+        if (!zipSessGroups[it.sessionId]) zipSessGroups[it.sessionId] = { items: [], handle: it.zipFileHandle, grantId: it.grantId || null };
         zipSessGroups[it.sessionId].items.push(it);
       } else {
         plainCount++;
       }
-    } else if (it.kind === 'backend' && it.absPath) {
+    } else if (it.kind === 'backend' && it.grantId) {
       backendItems.push(it);
     } else if (it.kind === 'fs' && it.handle) {
       fsItems.push(it);
@@ -638,12 +638,12 @@ async function deleteMarkedFromDisk(marked) {
     }
     if (allOk && lastBytes) {
       try {
-        if (grp.zipAbsPath) {
-          // Backend writeback: Go writes session bytes to disk directly
+        if (grp.grantId) {
+          // Backend writeback: Go writes session bytes to the granted zip
           await fetch('/api/gallery/zip-writeback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId: sid, path: grp.zipAbsPath })
+            body: JSON.stringify({ sessionId: sid, grantId: grp.grantId })
           });
         } else if (grp.handle) {
           var writable = await grp.handle.createWritable();
@@ -661,7 +661,7 @@ async function deleteMarkedFromDisk(marked) {
       var dRes = await fetch('/api/gallery/fs', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: backendItems[bi].absPath })
+        body: JSON.stringify({ grantId: backendItems[bi].grantId, rel: backendItems[bi].rel || '' })
       });
       if (!dRes.ok) errors.push('backend ' + (backendItems[bi].path||'') + ': HTTP ' + dRes.status);
     } catch (e) {
@@ -737,7 +737,7 @@ function itemsInNode(curDir, item, nodeType, packId, rootHandle) {
 // disk (has a zipFileHandle/zipAbsPath or rootDirHandle/rootDirPath).
 function canNodeDiskDelete(nodeType, item, rootHandle) {
   if (nodeType === 'zip-root' || nodeType === 'zip-subdir') {
-    return !!(item.zipFileHandle || item.zipAbsPath);
+    return !!(item.zipFileHandle || item.grantId);
   }
   if (nodeType === 'disk-root' || nodeType === 'disk-subdir') {
     // FSAA handle or backend absolute path
@@ -814,11 +814,11 @@ function deleteCurrentVideo() {
       (async function() {
         try {
           var delItem = (inItems && item) ? item : vItem;
-          if (delItem.kind === 'backend' && delItem.absPath) {
+          if (delItem.kind === 'backend' && delItem.grantId) {
             var dRes = await fetch('/api/gallery/fs', {
               method: 'DELETE',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: delItem.absPath })
+              body: JSON.stringify({ grantId: delItem.grantId, rel: delItem.rel || '' })
             });
             if (!dRes.ok) throw new Error('HTTP ' + dRes.status);
           } else if (delItem.handle) {
@@ -919,11 +919,11 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
   try {
     if (nodeType === 'zip-root') {
       // Delete the entire zip file from disk
-      if (item.zipAbsPath) {
+      if (item.grantId) {
         var zr = await fetch('/api/gallery/fs', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: item.zipAbsPath })
+          body: JSON.stringify({ grantId: item.grantId, rel: item.zipRel || '' })
         });
         if (!zr.ok) throw new Error('HTTP ' + zr.status);
       } else if (item.zipFileHandle) {

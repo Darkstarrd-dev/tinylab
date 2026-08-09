@@ -2,6 +2,7 @@
 package download
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/download"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 // Handler implements HTTP handlers for the download API.
@@ -81,18 +83,17 @@ func validateDownloadDir(dir, defaultDir string) error {
 	return nil
 }
 
-// validateDownloadURL validates that a download URL uses an allowed scheme
-// (http/https) and does not target a private/loopback address (SSRF).
+// validateDownloadURL validates a download URL under the outbound SSRF
+// policy: http/https only, no userinfo credentials, no blocked ports, and the
+// host must not resolve to a private/loopback/link-local/multicast address
+// (fail-closed). This pre-flights the initial URL before yt-dlp is spawned;
+// redirect hops are delegated to yt-dlp after this initial check.
 func validateDownloadURL(rawURL string) error {
-	u, err := url.Parse(rawURL)
+	u, err := outbound.ValidateURL(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
+		return err
 	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("only http/https urls are supported, got: %s", scheme)
-	}
-	if apibase.IsBlockedSSRFHost(u.Hostname()) {
+	if err := (outbound.Policy{}).CheckHost(context.Background(), u.Hostname()); err != nil {
 		return fmt.Errorf("url host resolves to a blocked address")
 	}
 	return nil

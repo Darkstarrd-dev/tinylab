@@ -43,14 +43,18 @@ func TestUpdateProbeRecord_RoundTrip(t *testing.T) {
 		t.Fatalf("protocols mismatch: %+v", got.Protocols)
 	}
 
-	// Snapshot should include the record under the "provider::model" key.
+	// Snapshot should include the record with structured identity fields.
 	snap := r.SnapshotProbeRecords()
 	if len(snap) != 1 {
 		t.Fatalf("SnapshotProbeRecords len = %d, want 1", len(snap))
 	}
-	sk, ok := snap["p1::m1"]
-	if !ok || !sk.Anthropic.Ok {
-		t.Fatalf("snapshot key/value mismatch: %+v", snap)
+	var rec1 *state.ProbeRecord
+	for _, pr := range snap {
+		rec1 = pr
+		break
+	}
+	if rec1 == nil || rec1.ProviderID != "p1" || rec1.ModelID != "m1" || !rec1.Anthropic.Ok {
+		t.Fatalf("snapshot value mismatch: %+v", snap)
 	}
 
 	// Missing record returns nil.

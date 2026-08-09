@@ -918,8 +918,9 @@ function edOpenFile(idx) {
       edOpenFallback(idx);
       return;
     }
-    if (data.path !== undefined && data.content !== undefined) {
-      editorState.panes[idx].path = data.path;
+    if (data.content !== undefined) {
+      editorState.panes[idx].fileId = data.fileId || '';
+      editorState.panes[idx].pathGrantId = data.pathGrantId || '';
       editorState.panes[idx].name = data.name || '';
       editorState.panes[idx].original = data.content;
       editorState.panes[idx].value = data.content;
@@ -950,7 +951,8 @@ function edOpenFallback(idx) {
     if (!files || files.length === 0) return;
     var file = files[0];
     file.text().then(function(text) {
-      editorState.panes[idx].path = null;
+      editorState.panes[idx].fileId = null;
+      editorState.panes[idx].pathGrantId = null;
       editorState.panes[idx].name = file.name;
       editorState.panes[idx].original = text;
       editorState.panes[idx].value = text;
@@ -977,11 +979,12 @@ function edSaveFile(idx) {
   var p = editorState.panes[idx];
   p.value = content;
 
-  if (p.path) {
+  var saveTarget = p.fileId ? { fileId: p.fileId } : (p.pathGrantId ? { pathGrantId: p.pathGrantId } : null);
+  if (saveTarget) {
     fetch('/api/editor/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: p.path, content: content })
+      body: JSON.stringify({ content: content, fileId: saveTarget.fileId, pathGrantId: saveTarget.pathGrantId })
     })
     .then(function(resp) { return resp.json(); })
     .then(function(data) {

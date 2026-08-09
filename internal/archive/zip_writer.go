@@ -63,7 +63,7 @@ func (w *zipWriter) replaceZIP(ctx context.Context, src Source, replacements map
 		if err := checkCtx(ctx); err != nil {
 			return AssetRef{}, err
 		}
-		rc, ref, err := w.store.Open(asset.ID)
+		rc, ref, err := w.store.Open(src.Owner, asset.ID)
 		if err != nil {
 			return AssetRef{}, fmt.Errorf("resolve replacement %q: %w", key, err)
 		}
@@ -83,7 +83,12 @@ func (w *zipWriter) replaceZIP(ctx context.Context, src Source, replacements map
 	if err != nil {
 		return AssetRef{}, err
 	}
-	ref, err := w.store.Create(ctx, src.ID, "replace", src.Name, "application/zip", bytes.NewReader(out), b.MaxOutputBytes)
+	// The output is registered under the source owner in a dedicated
+	// "replace" job: the source asset itself lives under job src.ID, so a
+	// worst-case output estimate must not collide with the source's own
+	// per-job quota. The exact output size is known in memory, so it is the
+	// Create cap (and therefore the quota reservation).
+	ref, err := w.store.Create(ctx, src.Owner, "replace", src.Name, "application/zip", bytes.NewReader(out), int64(len(out)))
 	if err != nil {
 		return AssetRef{}, fmt.Errorf("register replaced zip: %w", err)
 	}
@@ -113,6 +118,12 @@ func (w *zipWriter) Pack(ctx context.Context, format Format, assets []AssetRef, 
 	if len(assets) > maxFiles {
 		return AssetRef{}, &BudgetError{Dimension: "entries", Limit: int64(maxFiles), Actual: int64(len(assets))}
 	}
+	// Pack inputs must belong to one owner; the output inherits that owner so
+	// a cross-session pack is impossible even with known asset IDs.
+	owner, err := commonAssetOwner(assets)
+	if err != nil {
+		return AssetRef{}, err
+	}
 
 	entryLimit := entryLimit(b)
 	tracker := NewTracker(b)
@@ -130,7 +141,7 @@ func (w *zipWriter) Pack(ctx context.Context, format Format, assets []AssetRef, 
 			zw.Close()
 			return AssetRef{}, fmt.Errorf("pack asset %d name %q: %w", i, assets[i].Name, err)
 		}
-		rc, ref, err := w.store.Open(assets[i].ID)
+		rc, ref, err := w.store.Open(owner, assets[i].ID)
 		if err != nil {
 			zw.Close()
 			return AssetRef{}, fmt.Errorf("resolve pack asset %d: %w", i, err)
@@ -166,11 +177,29 @@ func (w *zipWriter) Pack(ctx context.Context, format Format, assets []AssetRef, 
 		return AssetRef{}, fmt.Errorf("close pack writer: %w", err)
 	}
 
-	ref, err := w.store.Create(ctx, "pack", "pack", name, "application/zip", bytes.NewReader(out.Bytes()), b.MaxOutputBytes)
+	ref, err := w.store.Create(ctx, owner, "pack", name, "application/zip", bytes.NewReader(out.Bytes()), int64(out.Len()))
 	if err != nil {
 		return AssetRef{}, fmt.Errorf("register pack output: %w", err)
 	}
 	return *ref, nil
+}
+
+// commonAssetOwner returns the single owner shared by every asset, rejecting
+// empty and mixed-owner input sets.
+func commonAssetOwner(assets []AssetRef) (string, error) {
+	if len(assets) == 0 {
+		return "", errors.New("pack requires at least one asset")
+	}
+	owner := assets[0].Owner
+	if owner == "" {
+		return "", errors.New("pack asset has no owner")
+	}
+	for _, a := range assets {
+		if a.Owner != owner {
+			return "", fmt.Errorf("pack assets belong to different owners (asset %s)", a.ID)
+		}
+	}
+	return owner, nil
 }
 
 // entryLimit resolves the per-entry cap, defaulting to the plan value.

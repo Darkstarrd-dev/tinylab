@@ -95,8 +95,10 @@
   //   2. POST /api/archive/pack   JSON { assetIds, format: "zip", name }
   //        -> { assetId }
   //   3. GET  /api/archive/assets/{assetId}            serves the packed zip
-  // When the Archive API is absent, falls back to the legacy
-  // upload-temp + zip-outputs gallery contract.
+  // When the Archive API is absent, falls back to the gallery asset
+  // contract (audit F-28): upload-temp registers each frame as an owner
+  // asset ({ assetId }), and zip-outputs packs { assetIds } into a
+  // registered zip served through the controlled /api/gallery/file URL.
   // ------------------------------------------------------------------
 
   function uploadFrameAsset(canvasSrc, name) {
@@ -173,15 +175,15 @@
         }).then(function (r) {
           return r.json().catch(function () { return { error: 'HTTP ' + r.status }; });
         }).then(function (data) {
-          if (data.error) reject(new Error(data.error));
-          else resolve(data.tempPath);
+          if (data.error || !data.assetId) reject(new Error(data.error || 'asset registration failed'));
+          else resolve(data.assetId);
         }).catch(reject);
       }, 'image/png');
     });
   }
 
   function exportZipLegacy(total, outW, outH, zipName, spinnerText) {
-    var paths = [];
+    var assetIds = [];
     function uploadChunk(start, end) {
       var chunk = [];
       for (var i = start; i < end; i++) {
@@ -192,8 +194,8 @@
         renderCompositedFrame(i, frame);
         chunk.push(uploadLegacyFramePng(frame, name));
       }
-      return Promise.all(chunk).then(function (ps) {
-        for (var j = 0; j < ps.length; j++) paths.push(ps[j]);
+      return Promise.all(chunk).then(function (ids) {
+        for (var j = 0; j < ids.length; j++) assetIds.push(ids[j]);
         if (spinnerText) spinnerText.textContent = t('gifEditorPackingFrames', 'Packing frames...') + ' (' + end + '/' + total + ')';
       });
     }
@@ -208,12 +210,13 @@
       return fetch('/api/gallery/edit/zip-outputs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: paths, cleanUp: true })
+        body: JSON.stringify({ assetIds: assetIds, zipName: zipName, cleanUp: true })
       }).then(function (r) {
         return r.json().catch(function () { return { error: 'HTTP ' + r.status }; });
       }).then(function (zip) {
-        if (zip.error) throw new Error(zip.error);
-        return { url: zip.outputURL, name: zip.zipName || zipName };
+        if (zip.error || !zip.assetId) throw new Error(zip.error || 'zip pack failed');
+        // Serve the registered zip through the controlled asset URL; never a path.
+        return { url: '/api/gallery/file?assetId=' + encodeURIComponent(zip.assetId), name: zip.name || zipName };
       });
     });
   }

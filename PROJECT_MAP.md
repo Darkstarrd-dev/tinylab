@@ -12,6 +12,7 @@
 > - 新增 / 移除 `docs/` 下的事实基线文档
 >
 > 不得让本文件与代码现状脱节。`AGENTS.md` / `CLAUDE.md` 中的模块说明已下放至此，两者仅保留约束与设计决策并引用本文件；若与本文件冲突，**以本文件为准**。
+> **最后核对（2026-08-09，audit_fix.md 全库安全修复 Phase A–F 落地）：** 未提交 worktree（HEAD `f251bc5`，`go build ./...`/`go vet ./...`/聚焦测试全绿）。(1) **新增三个安全包**：`internal/owner`（`owner.Middleware` HttpOnly cookie `tinyrouter_owner`、256-bit hex、`owner.From(ctx)`，会话隔离能力命名空间）、`internal/pathgrant`（`pathgrant.Store`：`Grant`/`Resolve`/`ResolveChild`/`Revoke`/`Scavenge`，`OpRead|OpWrite|OpDelete|OpExport`，TTL 30min、每 owner 256 上限、`StrictRel` 严格相对路径校验）、`internal/outbound`（`outbound.Policy`：`ValidateURL`/`CheckIP`/`CheckHost`/`DialContext`（DNS rebinding 固定）/`CheckRedirect`（逐跳重校验 5 跳）/`Client`，按场景 SSRF 策略）。(2) **管理面认证**：`internal/api/auth/handler.go` `AuthMiddleware` 强制 setup-required（未设置密码 → 401 `setup_required`）+ 会话绑定 `X-CSRF-Token`（`csrfChecksPass`）+ Origin/Content-Type 校验（`originAllowed`/`requireJSONBody`）；`POST /api/auth/setup` bootstrap（`SetupHandler`）；`rate_limit.go` `loginGuard.Success()` 显式成功记账（F-26）；`ProviderDTO`/`KeyDTO`/`MaskKey`/`hasApiKey` 凭证最小化（providers/keys/settings）。(3) **路径能力合同**：Editor（`fileId`/`pathGrantId`，`resolveDocFile` docDir 严格包含 + 符号链接，raw `path`→410）、Gallery（`open-dir`→grantId、`list-dir`/`file`/`fs`/`open-folder`/`zip-from-path`/`zip-writeback` 全 grant/asset/sourceId，raw path→410，响应无绝对路径；**zip 内存会话亦 owner 绑定**——`session_store.go` `put/touch/get/update/remove/pin/unpin` 全带 `owner` 校验）、FileTransfer（multipart + grantId，`POST /paste` 剪贴板→export grant，扫描上限）、Archive（`owner.Middleware` + owner 绑定 source/asset，`ResolveSource(ownerID,id)`，403 `archive.forbidden`）。(4) **SSRF/外部工具**：mediaedit ffprobe `-protocol_whitelist file` + `validateLocalMediaInput`/`validateSubtitleInput`（F-07）；`procutil.ValidateExecutable`（toolpath.go）接入 settings Download 路径/download binary/mediaedit binary（F-08 全部迁移，含 archivetool validateTool）；`fsutil/open_other.go` AppleScript 参数化（env `TR_PICKER_INITIAL_DIR`，F-09）；editor_shell.js HTML iframe `sandbox=""` 零权限 + DOMParser TOC（F-10）；download `validateDownloadURL` outbound 预检 + **本地 SSRF 代理**（`internal/download/ssrfproxy.go`，yt-dlp 经 `--proxy` 逐跳重校验，F-16）。(5) **Proxy/SSE 预算**：`passThroughResponse` 256MiB 上限 + 受控 502、`SSELineBuffer` 1MiB/行 8MiB 总缓冲（`ErrLineTooLong`/`ErrBufferOverflow`）、probe/combos/providers 有界读取（F-14）；mediaedit ffmpeg 信号量 `maxConcurrentJobs=4` + combos speed-test 上限（F-15）；**trace API DTO + 两遍流式分页（F-22）**——`traceIndexDTO`/`traceDetailDTO` 秘密安全投影、`countIndexMatches`/`collectIndexPage` 流式、16MiB 响应预算（§10.10）。(6) **配置/状态**：`settings.convergeRuntime` 统一 reload 收敛（F-17）、`registry.Config()` JSON 深拷贝（F-18）、combo `effectiveStickyLimit`（F-19）、解密失败 `IsActive=false`（F-20）、state 结构化+长度前缀 key 编码（F-21）、`request_log.go` 集中 `sensitiveHeaderNames`+`maskHeaderMap`+`redactURL`（F-23）。(7) **依赖**：DOMPurify 3.4.13（两份 bundle）、Mermaid 11.16.1（`static-pg/vendor/README.md` + LICENSE）（F-24/F-25）。(8) **归档**：`archivetool/parse.go` 7z SLT header 不再作为 entry（F-13）；Gallery temp 注册表 + 会话 TTL/字节上限/pin 预算/上传信号量（F-15/F-27）。已知未完成：Gallery 单 zip 条目 extract→edit 的 `data.tempPath` 残留读（非安全功能缺陷，前端主体已迁移）；F-15 压力测试证据缺失（保持 partial）；跨平台构建（GOOS=darwin/windows 交叉编译）与浏览器 smoke 未执行。**门禁补充（2026-08-09）：** `go test -race ./...` 全量通过（38 包 ok；修复 textreview 测试 harness 同步 + mediaedit `cmd.Cancel` 先于 `cmd.Start` 设置）；`govulncheck v1.6.0` 零漏洞（0 affected/0 called；chi v5.2.2 + toolchain go1.26.5 升级后）；**F-29 已修复并复核**（owner 中间件双挂载 + session purge 缺陷由 `owner-isolation-fix` 修复，新增 `session_owner_test.go` 等隔离测试全绿）；**F-23 控制台日志消毒已补**（`console/logger.go::sanitize`+`emit` 出口）；**F-15 确定性预算测试已补**（session 413/429/pin/TTL、tempstore 配额、archive 422/503，持续全绿）；真实 HTTP 压力 harness 被工具文件系统 split-brain 阻塞（bash 与 node/write 对 `%TEMP%` 看到不同文件系统，hub spawn 构建产物 ENOENT）未跑成，F-15 保持 partial；**GIF 编辑器导出合同已迁移 assetId**（`gif-editor-export.js` + 合同测试）。详见 `audit_fix.md` 附录 B 状态表。
 > **最后核对（2026-08-09，HTML 文件原始设计忠实渲染、Preview Surface Theme 统一与 WebView TOC 跳转）：** (1) 忠实保留 HTML 原始设计：移除 `renderPreview` 对完整 HTML 文档 (`<html>`/`<body>`) 强制注入暗色 CSS 强改颜色的行为，解决网页内部卡片被强行毁坏变黑及暗黑模式下白底白字不可读的严重 Bug，直接以 `iframe.srcdoc = content` 100% 忠实还原 HTML 文件自身的排版与配色设计；(2) Preview Surface 统一与无缝边缘：将 `.ed-preview-surface` 背景统一为 `var(--bg)`，在 HTML Iframe 预览模式下应用 `.is-html-iframe-mode` 消除外层 18px 24px 边距与双重滚动条；(3) WebView TOC 跳转与平滑滚动：在 `renderToc` 与点击处理中直接调用 `scrollIntoView({ behavior: 'smooth', block: 'start' })` 精确定位 HTML / Markdown 中的标题锚点，解决 WebView2 环境下点击目录无响应的问题。
 > **最后核对（2026-08-08，Open 500 容错处理、深色 Theme 主题与 iframe 模式智能重置）：** (1) 后端 Open 接口 500 修复：在 `register.go` 中针对外部文件不存在增设 404 `not_found` 防御拦截，并在保存时增加自动父级目录创建 (`MkdirAll`)；前端 `loadFile` 遇到 404/500/网络故障时无缝退回至 IndexedDB 本地内容，保证编辑器正文绝不丢失显示；(2) 纯白屏与 CSS 解析对齐：彻底移除 iframe 预览区硬编码 `#ffffff` 纯白背景，采用 `background:transparent` 并注入与 Chrome/WebView 深浅色 Theme 主题 100% 融合的基准 CSS 样式；(3) 智能状态重置：切换或新建文件时自动将 `shellState.htmlRender` 模式重置为 `false`，解决切换至 `.md` 文件时残留白块的异常。
 > **最后核对（2026-08-08，Open 防重锁、Title 重命名同步物理路径、HTML IFrame 显式预览与三选项删除 Modal）：** (1) Open 按钮排他互斥锁：设置 `isOpenModalBusy` 标志位，在弹窗确认/取消关闭前阻断二次点击，彻底解决无限多窗口问题；(2) Title 重命名与 Save 路径同步：重命名时自动使用新文件名刷新 `node.externalPath` 并同步创建/更改物理保存目标，后续 Save 绝对物理落盘为新文件名；(3) HTML IFrame 显式预览模式：在视图工具栏中增加 `HTML IFrame Preview` 显式切换按钮（及 `<iframe>` 原生网页排版支撑），无需单独另存或打开 `.html` 文件，即可将左侧正文在右侧 Preview 区域无缝直呈真实网页效果；(4) 3 选项 Delete Modal 弹窗：点击删除时弹出受 Theme 调谐的 3 选项 Modal 窗口（选项1: 🗑️ 删除磁盘物理文件与 `_imgs` 目录并移除；选项2: 仅放弃修改并从 Explorer 视图移除记录；选项3: 取消）。
@@ -35,7 +36,7 @@
 | 项 | 值 |
 |---|---|
 | 模块路径 | `github.com/tinyrouter/tinyrouter` |
-| Go 版本 | 1.25.0（见 `go.mod`） |
+| Go 版本 | `go 1.25.0` + **`toolchain go1.26.5`**（见 `go.mod`；2026-08-09 依赖升级，修复 GO-2026-5856 crypto/tls ECH；GOTOOLCHAIN=auto 自动解析） |
 | 项目版本 | 见 `internal/app/version.go` 的 `Version` 常量（唯一来源） |
 | HTTP 路由 | `github.com/go-chi/chi/v5` |
 | 配置 | `gopkg.in/yaml.v3` → `config.yaml` / `state.yaml` |
@@ -102,11 +103,11 @@
 
 | 文件 | 职责 |
 |---|---|
-| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`），可选 `UseCustomHeaders`/`CustomHeaders`（`useCustomHeaders`/`customHeaders`）用于 Provider 额外请求头；另含域名特例检测 `IsCline()`（BaseURL 含 `api.cline.bot`，驱动上游 `x-client-type` 请求头注入）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；`ModelDef.Kind` 支持 `"text"`（默认）/`"image"`/`"embed…`
+| `types.go` | 配置结构体（`Config`/`Provider`/`Key`/`Combo`/`RotationConfig`/`SecurityConfig`/`AnySearchConfig`/`ThemeConfig` 等）+ YAML/JSON tag；`Config` 顶层新增 `QuickSlotOnly bool`（`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）；`AnySearchConfig` 含 `APIKey`/`MaxResults` 字段；`ThemeConfig` 含 `DarkVariant`/`LightVariant`/`Style` 字段（双层主题 Mode/Variant + 独立风格维度持久化）；`Provider` 新增 `AnthropicVersion`/`AnthropicBeta` 字段与 `IsAnthropic()` 方法（`APIType=="anthropic"`），可选 `UseCustomHeaders`/`CustomHeaders`（`useCustomHeaders`/`customHeaders`）用于 Provider 额外请求头；另含域名特例检测 `IsCline()`（BaseURL 含 `api.cline.bot`，驱动上游 `x-client-type` 请求头注入）；`ModelDef` 新增 `Protocols []string` 字段（yaml/json `protocols,omitempty`，记录多协议探测结果）+ `ProtocolOpenAICompat`/`ProtocolOpenAIResponses`/`ProtocolAnthropic`/`ProtocolOpenAIEmbedding` 常量；**2026-08-09（audit F-06）：** `Provider` 新增 `AllowPrivateNetwork bool`（yaml/json `allowPrivateNetwork,omitempty`）——显式 opt-in 允许该 Provider 连接私网/loopback（`internal/outbound.Policy` 的唯一私网例外），默认拒绝 |
 | `paths.go` | 共享路径解析函数：`ResolveDownloadProxy(cfg)` 由 `DownloadConfig.UseProxy` + 全局 `Proxy`（Host:Port）合成 yt-dlp `--proxy` URL；`ResolveTraceDir(logDir, configDir)` 解析 `TraceConfig.LogDir`（空→`{configDir}/traces`，相对拼 configDir，绝对原样）。被 `app.go` 装配与 `api/settings/register.go` 运行时更新共用，避免 `app`→`api` 循环导入。 |
 | `types.go` 的 `Config.Archive` | **2026-08-06 新增** `ArchiveConfig{SevenZipPath,RarPath,TempDir}`（`yaml/json:"archive,omitempty"`）：全可选，空工具路径运行时回退 `SEVENZIP_PATH`/`RAR_PATH` env → PATH；缺失工具不阻塞启动，只禁用对应归档能力 |
 | `paths.go` 的 `ResolveArchiveTempDir` | **2026-08-06 新增**：归档私有 workspace 解析（空→`{configDir}/archives`、相对拼 configDir、绝对原样）；创建 0700 workspace 由调用方负责，失败 fail-closed（归档能力关闭，核心功能照常） |
-| `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"`；`finalizeConfig` 在 `TextReview.SplitPatterns == nil`（首次启动）时注入内置章节检测模式（移植自 novelhelper `split.ts::DEFAULT_SPLIT_PATTERNS`，nil 判断避免用户清空 `[]` 后重新注入）；`DefaultConfig()` 中 `Trace` 字段默认值：`Enabled=false`、`RetainDays=2`、`MaxDiskMB=500` |
+| `defaults.go` | 默认配置构造 + `Finalize*` 零值回填；`finalizeConfig` 为 anthropic provider 回填 `AnthropicVersion="2023-06-01"`；`finalizeConfig` 回填 `AnySearch.MaxResults` 默认值 5；`finalizeConfig` 回填 `Theme.DarkVariant`/`Theme.LightVariant`/`Theme.Style` 默认值 `"default"`；`finalizeConfig` 在 `TextReview.SplitPatterns == nil`（首次启动）时注入内置章节检测模式（移植自 novelhelper `split.ts::DEFAULT_SPLIT_PATTERNS`，nil 判断避免用户清空 `[]` 后重新注入）；`DefaultConfig()` 中 `Trace` 字段默认值：`Enabled=false`、`RetainDays=2`、`MaxDiskMB=500`；**2026-08-09（audit F-20）：** `finalizeConfig` 解密失败分支——`Decrypt` 错误时输出可审计 stderr 告警并把该 Key `IsActive=false`（rotation 跳过非活跃 Key，`enc:` 密文绝不作为真实凭证发给上游；保留 `enc:` 原值不覆盖以便恢复） |
 | `persistence.go` | `Load`/`Save`：`.tmp` 崩溃恢复（path 缺失/损坏时**不比较 mtime** 优先恢复；成功加载后才清理）+ 原子写（委托 `fsutil.AtomicWrite`）；加密失败拒绝落盘（`encryptKeysCopy` 返回 error） |
 | `validate.go` | 尽力校验（API 类型、重复 ID/prefix、ModelDef.Protocols 值合法性），仅告警；anthropic provider 的 BaseURL 未以 `/v1/messages` 或 `*` 结尾时告警 |
 
@@ -122,13 +123,13 @@
 
 | 文件 | 职责 |
 |---|---|
-| `registry.go` | `Registry` 结构：`sync.RWMutex` 保护的 config + 运行时 key-state map；`New`/`Config`/`Reload` |
+| `registry.go` | `Registry` 结构：`sync.RWMutex` 保护的 config + 运行时 key-state map；`New`/`Config`/`Reload`；**2026-08-09（audit F-18）：** `Config()` 返回 `cloneConfig(*r.config)`——JSON round-trip 深拷贝（handler 拿到独立副本，不再共享切片）；新增 `RotationSettings()` 访问器（combo 侧读取 stickyLimit，F-19） |
 | `providers.go` | Provider CRUD |
 | `keys.go` | Key CRUD（provider 内） |
 | `models.go` | Provider 自定义模型列表（`ListModels`、`AddModel`、`DeleteModel`、`UpdateModelQuotaType`、`UpdateModelAlias` [含前缀自动剥离 `sanitizeAlias`]、`UpdateModelNote`、`UpdateModelNIMOverride`、`ResolveModelAlias` [含容错剥离；前缀查找内联于已持有 RLock 内，避免嵌套加锁]、`GetModelByAliasOrID`） |
 | `combos.go` | Combo CRUD；新增 `GetComboByID`(id) 方法供 combo 测速排序 handler 使用 |
 | `quickslots.go` | QuickSlot（预设模型切换槽）CRUD（含 `sanitizeQuickSlotModels` 自动化简 `prefix/prefix/model` 条目） |
-| `state.go` | per-key 运行时状态**访问**：`GetKeyState`（返回 `*keystate.KeyRuntimeState`）、`SnapshotKeyStates`/`snapshotKeyState`/`RestoreKeyState`/`ResetAllCooldowns`、probe records（`UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord`）。**类型定义已迁出**至 `internal/keystate`。**2026-07-31：** `KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`（持久化 `ModelQuotas` 中 `ModelRemaining==0` 的 model→limit 子集），`snapshotKeyState`/`RestoreKeyState` 同步此字段。 |
+| `state.go` | per-key 运行时状态**访问**：`GetKeyState`（返回 `*keystate.KeyRuntimeState`）、`SnapshotKeyStates`/`snapshotKeyState`/`RestoreKeyState`/`ResetAllCooldowns`、probe records（`UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord`）。**类型定义已迁出**至 `internal/keystate`。**2026-07-31：** `KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`（持久化 `ModelQuotas` 中 `ModelRemaining==0` 的 model→limit 子集），`snapshotKeyState`/`RestoreKeyState` 同步此字段。**2026-08-09（audit F-21）：** `SnapshotKeyStates` 改用结构化 `ProviderID`/`KeyID` 字段 + `state.EncodeSnapshotKey` 长度前缀编码（原 `convertKey` 的 `providerID::keyID` 拼接已删除），`probeRecordKey` 同迁；`cfgMu → stateMu` 锁顺序显式化 |
 | `crud_test.go` / `reload_merge_test.go` / `state_test.go` | 测试 |
 | `models_protocols_test.go` / `probe_records_test.go` | 新增 ModelDef.Protocols CRUD 与 probeRecords 运行时状态测试 |
 | `review_presets.go` | Gallery AI 审核预设 CRUD：`ListReviewPresets`/`AddReviewPreset`/`UpdateReviewPreset`/`DeleteReviewPreset`（线程安全，`cfgMu` 保护） |
@@ -167,7 +168,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `resolver.go` | `Resolver` + `ComboPlan`/`ModelTarget`：按策略将 combo 解析为有序 provider+model 目标列表（greedy-squirrel 按配额层级排序） |
+| `resolver.go` | `Resolver` + `ComboPlan`/`ModelTarget`：按策略将 combo 解析为有序 provider+model 目标列表（greedy-squirrel 按配额层级排序）；**2026-08-09（audit F-19）：** 轮转 sticky 上限改用 `effectiveStickyLimit()`（读 `registry.RotationSettings()` 配置值，≤0 回退 3），不再硬编码 3 |
 | `resolver_test.go` | 测试 |
 
 策略：`fallback`（顺序尝试）/ `round-robin`（轮转）/ `greedy-squirrel`（按配额层级排序后 fallback）。
@@ -187,14 +188,14 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 | `forward_combo.go` | `(h *Handler) handleCombo`：combo/quickslot 策略路由（`fallback`/`round-robin`/`greedy-squirrel` 三分支逐目标调 `forwardWithRetry`，全失败回 502） |
 | `forward_retry.go` | `(h *Handler) forwardWithRetry`：重试循环 + body 改写（替换 `model` 字段、注入 `stream_options`、调 `backfillThoughtSignatures`）；**入口对 `parsed` 做深度拷贝**（`forward.go::cloneJSONValue`）——combo fallback 各目标共享同一 map，逐目标改写（model/stream_options/tool_call id/Gemini 签名）不得泄漏到下个目标；`processingEntry.ReqHeaders` 经 `maskHeaderMap` 遮蔽 Authorization/X-Api-Key 后才广播；**reqID 提至循环顶部生成一次**（跨重试共享，关联 REQUEST/SEND/PROXY/错误行 + EntryTracker 条目）+ `callerTag`（`requestCallerTag(r)`）贯穿日志；**Part B 冷却等待**：`SelectKey` 失败时先调 `cooldown.SonestCooldown` 查最近 `ModelLock` 到期，有则 `select{Context|time.After(wait)}`（上限 30s）等待后重试一次 `SelectKey`，避免冷却窗口内并发请求即时 502 突发；仍返回 502 于真正耗尽；**非流式不再 keep-alive 刷新**（H-8，见前）；+ `broadcastRequestStart`/`broadcastTTFT`/`broadcastTokens` 三个事件广播辅助 |
 | `upstream.go` | 委托 `internal/urlutil` 的 `BuildUpstreamURL`/`normalizeBaseURL`/`isOllamaBaseURL`/`normalizeOllamaBaseURL` 进行 URL 构造；`forwardUpstream` 按 `entryFormat` 三分支（OpenAI Chat / Anthropic / OpenAI Responses）；**统一上游请求构造器** `buildUpstreamRequest(ctx, sel, body, endpointPath, authBearer bool)`（upstream.go:84）：URL 由 `urlutil.BuildUpstreamURL` 统一构造；`authBearer=true` 时设 `Authorization: Bearer <key>`（OpenAI Chat / Responses 入口），`authBearer=false` 时调 `setAnthropicHeaders`（`x-api-key`+`anthropic-version`+可选 `anthropic-beta`，绝不设 `Authorization`，Anthropic 入口）；原 `buildAnthropicUpstreamRequest`/`buildResponsesUpstreamRequest` 两个独立函数已于 Phase 2 合并为单一 `buildUpstreamRequest` + `authBearer` 开关；`applyClineHeaders`（122-128，api.cline.bot 域名特例无条件注入 `x-client-type: cline-cli`）；body 用 `bytes.NewReader` 直传（不再 `string(body)` 拷贝）；客户端选择抽为 `upstreamClientFor`/`streamClientFor`（UseProxy+proxyURL 生效），`forwardGetUpstream` 同样按 UseProxy 选择代理/直连客户端；非流式客户端经 `handler.go::clientFor` 按原子超时（`upstreamTimeoutSec`）克隆（超时变更不再与 `http.Client.Do` 竞争写 `Timeout` 字段）i`，常量 `clineClientTypeHeaderValue` 117-120，调用点 forwardUpstream 57-60 / forwardGetUpstream 143） |
-| `stream.go` | SSE 流式 / 非流式 I/O 透传循环：`(h *Handler) streamResponse`（`http.Flusher` 逐 chunk 转发 + 客户端断开保护）与 `(h *Handler) passThroughResponse`（非流式整段读取透传上游状态码，不再 `io.LimitReader` 64MB 截断——完整写客户端，仅 usage 捕获副本截 512KB）；流式捕获缓冲 `boundedSSEBuffer` 只保留末尾 512KB（H1b，长流不再撑爆内存）；委托 `internal/sse` 的 `SSELineBuffer`/`NormalizeSSEChunk` 行帧缓冲与 chunk 规范化；`entryFormat` 控制 anthropic 走 `parseAnthropicSSEUsage`、OpenAI Chat/Responses 走 `util.ExtractTokens`；客户端断开 → `clientDisconnected` 标志 → `break` → `recordUsage(status="error")` |
+| `stream.go` | SSE 流式 / 非流式 I/O 透传循环：`(h *Handler) streamResponse`（`http.Flusher` 逐 chunk 转发 + 客户端断开保护）与 `(h *Handler) passThroughResponse`；**2026-08-09（audit F-14）：** 非流式改为显式响应预算——`maxPassThroughBodyBytes=256MiB`（测试可经 `h.maxPassThroughBody` 缩小），先完整读入预算内 body、读成功后才 `WriteHeader`，超预算 → 受控 502 + `recordUsage` 错误（不再无上限 `io.ReadAll`、不再静默截断）；流式侧 `streamResponse` 用 `sse.NewSSELineBuffer` 预算化行缓冲，`Feed` 失败 → 受控中断（`SSE stream exceeded line buffer budget`）；流式捕获缓冲 `boundedSSEBuffer` 只保留末尾 512KB（`maxStreamCaptureBytes`）；usage 捕获预算（512KB）与客户端传输预算分离；委托 `internal/sse` 的 `SSELineBuffer`/`NormalizeSSEChunk` 行帧缓冲与 chunk 规范化；`entryFormat` 控制 anthropic 走 `parseAnthropicSSEUsage`、OpenAI Chat/Responses 走 `util.ExtractTokens`；客户端断开 → `clientDisconnected` 标志 → `break` → `recordUsage(status="error")` |
 | `stream_usage.go` | OpenAI 格式 token/usage 解析：`sseContentLength`（content 字段字节扫描）、`parseSSEChunkDelta`+`chunkDelta`、`formatTokenDelta`/`itoa`（usage chunk 摘要格式化） |
 | `stream_anthropic.go` | Anthropic 专用 usage 解析：`parseAnthropicSSEUsage`（读 `message_start`/`message_delta` 的 input/output tokens） |
 | `stream_debug.go` | 调试态 SSE chunk 广播：`(h *Handler) parseAndBroadcastChunk`（`entryFormat == EntryFormatOpenAI` 时经 `RequestUpdates.Broadcast` 发 `request-chunk` 事件） |
 | `retry.go` | 跨 key/combo 故障转移的重试状态机；`handleUpstreamError` 改返回 `bool`（true=4xx 请求格式错误已 `ActionPassThrough` 原样写客户端 + 停止重试，false=继续切 key），新增 pass-through 分支（不调 `OnKeyFailure`/`MarkRateLimited`/不排除 key，转发上游原始 body+状态码）；各动作新增中文后果 WARN（指数退避/冷却 Ns/锁至次日 CST 00:05）；`logRequest`/`handleNetworkError`/`handle429`/`handleUpstreamError` 新增 `sessionKey string` 参数贯穿 `[reqID|sess:<key>]` 控制台标签（`forward.go::reqLogTag`，空 key 退化为 `[reqID]`）+ callerTag + 网络错误 WARN，并下传至各 `recordUsage` 调用点 |
 | `models.go` | 模型列表/解析辅助；`ListModels` 新增 `quickSlotOnly()` 门控——开启时仅返回 QuickSlot 模型，跳过 provider/combo |
 | `recorder.go` | `recordUsage`：按 source 分流写入 Recent Requests ring 或 Playground ring；payload/headers 捕获门控为 `captureDetails := isPlayground || (h.debugMode() && !h.logRequests())`——playground 始终捕获，非 playground 仅 debug 开且追踪关时存 payload/headers（追踪开时完整 body 已落盘 JSONL，ring 退化为轻量表）；reqBody 截断 64KB、respBody 截断 512KB；内存开销由 ring 容量（`config.UsageRingSize`，默认 500）× 单条 body 大小封顶；新增 `decision string`、`provenance string` 参数写入 `usage.Entry`（会话连续性指纹由 `forward.go::sessionKeyFromMessages` 在 `handleProxy` 计算后经 `forwardWithRetry`/`handleCombo`/`retry.go` handlers/`stream.go` 一路下传至所有 `recordUsage` 调用点）；`writeRequestLog` hook 在 body 截断前调用（完整 body 写入追踪由 `request_log.go::boundTraceBody` 自行截断 64KB/512KB + 剥离 base64 图像，见 proxy-architecture.md 2026-08-03 更新），受 `h.logRequests()` 运行时原子开关（加载自持久化 `cfg.Trace.Enabled`）控制；
-| `request_log.go` | 两层 JSONL 追踪日志系统（`traceLine` 结构体为 JSONL 行 schema）：`writeRequestLog` 写入 `traces/index-YYYYMMDD.jsonl`（每日轮转）+ `traces/req/<reqID>.jsonl`（追加，仅首次调用写 request 行，后续每次调用写 attempt 行）；body 落盘前经 `boundTraceBody` 截断（reqBody 64KB / respBody 512KB）并剥离 base64 图像；`TraceMgmtCall` 方法捕获 ManagementClient 路径（probe/combo-speedtest/providers-probe）的调用，attempt n=1，decision="management probe"；`SweepTraces(ctx, retainDays, maxDiskMB)` + `sweepTracesOnce` 后台保留清理（按 modifyTime 删除过期 index+req 文件，MaxDiskMB 上限覆盖整个 traces/ 目录含 index 文件，按最旧优先删除；删 req 文件时同步清理 `attemptCounter` 条目防泄漏），在 `app.go:191` 以 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)` 启动，立即执行一次后每小时运行，shutdown ctx 停止；`TracesDir() string` getter 返回 `h.requestLogDir`；敏感请求头（`Authorization`/`X-Api-Key`）遮蔽为 `***`+末 4 字符（保留 scheme 前缀），base64 图像数据（data URLs、`b64_json`、Anthropic `{type:base64,data:}`）剥离；`maskSecret`/`maskToken`/`isSecretHeader`/`stripBase64Images`/`stripBase64InMap`/`boundTraceBody` 辅助函数（已测试） |
+| `request_log.go` | 两层 JSONL 追踪日志系统（`traceLine` 结构体为 JSONL 行 schema）：`writeRequestLog` 写入 `traces/index-YYYYMMDD.jsonl`（每日轮转）+ `traces/req/<reqID>.jsonl`（追加，仅首次调用写 request 行，后续每次调用写 attempt 行）；body 落盘前经 `boundTraceBody` 截断（reqBody 64KB / respBody 512KB）并剥离 base64 图像；`TraceMgmtCall` 方法捕获 ManagementClient 路径（probe/combo-speedtest/providers-probe）的调用，attempt n=1，decision="management probe"；`SweepTraces(ctx, retainDays, maxDiskMB)` + `sweepTracesOnce` 后台保留清理（按 modifyTime 删除过期 index+req 文件，MaxDiskMB 上限覆盖整个 traces/ 目录含 index 文件，按最旧优先删除；删 req 文件时同步清理 `attemptCounter` 条目防泄漏），在 `app.go` 以 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)` 启动，立即执行一次后每小时运行，shutdown ctx 停止；`TracesDir() string` getter 返回 `h.requestLogDir`；**2026-08-09（audit F-23）：** 敏感头集中化——`sensitiveHeaderNames` 集合（Authorization/X-Api-Key/Cookie/Set-Cookie/Proxy-Authorization/WWW-Authenticate/X-Goog-Api-Key 等）+ `isSecretHeader` 查询 + `maskHeaderMap`（`*Handler` 方法，含 `isCustomSecretHeader` 覆盖 per-provider CustomHeaders）+ `redactURL`（剥离 userinfo 与 `sensitiveQueryParams` 中的 key/token/secret/password/signature 参数）；`recorder.go` 响应头与 `forward_retry.go` 请求头均改经 `maskHeaderMap` 掩码后记录，`upstreamURL` 入口即 `redactURL` |
 | `request_events.go` | 生成全局唯一 request ID（`r<base62-nanos>-<base62-counter>`：纳秒 base62 前缀 + 原子计数器后缀，同纳秒并发不再碰撞） |
 | `entry_tracker.go` | `EntryTracker`：在途（processing）usage 条目并发 map；`Register`/`Remove`/`Get`/`All`/`Exists`/`SetTTFT`/`UpdateTokens`；`SweepStale(maxAge)` 兜底清理超时条目（返回并删除，由 caller 写 error 记录到 RingBuffer + 广播 request-done）；monitor `getUsage` 清扫时按 `KeyID` 同步 `DecInFlight`（正常完成路径的幂等对应） |
 | `inflight.go` | `inflightEntry`：单条在途流式请求的实时输出 |
@@ -223,7 +224,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `logger.go` | `Logger`：环形缓冲应用日志捕获 + 广播到 SSE 订阅者 |
+| `logger.go` | `Logger`：环形缓冲应用日志捕获 + 广播到 SSE 订阅者；**2026-08-09（audit F-23/E-4）：** `sanitize`（C0 0x00–0x1F + DEL → 可见转义）+ `Logger.emit` 单一出口（Log/Info/Warn/Error/Debug 全经此，先消毒再 stdout/ring/SSE，防日志伪造） |
 | `logger_test.go` | 测试 |
 
 日志格式与 9router 一致（详见 AGENTS.md "日志格式"）。
@@ -235,7 +236,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks）、`/api` 组（auth 中间件 + 1MB body 上限）、`/api/gallery`、`/api/editor`、`/api/text-review`（32MB body 例外组）、`POST /api/filetransfer/upload` 与 `POST /api/filetransfer/path-info`（认证保护，600MB body 上限；上传由 handler 打包 ZIP 后尝试临时服务，失败时返回错误，不保证外部服务成功；path-info 提供本机路径容量查询）、**2026-08-06：`/api/archive` 路由组**（`archiveapi.NewHandler(apiDeps, rt.archiveRunner)` + auth 中间件，绕过 1MiB 组级上限，逐路由 body cap 在 handler 内；`SetArchiveRunner` 注入；`apiDeps.ArchiveSettingsFn` 闭包推 `UpdateSettings`）`、playground 静态文件服务（`pgJSFiles` 清单 + `/playground.css`）、`serveUI` 兜底；`DebugMode`/`Qu…`
+| `router.go` | `Router` 结构 + `New`（注入 `reg`/`cfg`/`configPath`/usage 双 ring/`quotaTracker`/`logger`/`proxyHandler`/`shutdown`/`selector`/`comboRes`/`downloadMgr`）+ `Routes(proxyHandler)` chi 路由装配：`/v1/*` 代理路由（chat/completions/models/images/embeddings/messages/responses/tasks，**位于 AuthMiddleware 之外**——审计 F-12 显式兼容决策：`/v1` 是本地代理入口，无应用层认证，也无配置修改能力）、`/api` 组（`authHandler.AuthMiddleware` + 1MB body 上限）、`/api/comfyui`/`/api/image-batches`（32MB 例外组，auth 保护）、`/api/gallery`（auth + **`owner.Middleware`** + 500MB 级 body 例外）、`/api/filetransfer`（auth + 600MB body 上限，`fileTransferHandler.Register` 内含 owner 中间件与路由）、`/api/archive`（auth + `owner.Middleware`，逐路由 body cap）、`/api/editor`/`/api/text-review`（auth + 32MB body 例外组）、**2026-08-06：`/api/archive` 路由组**（`archiveapi.NewHandler(apiDeps, rt.archiveRunner)`；`SetArchiveRunner` 注入；`apiDeps.ArchiveSettingsFn` 闭包推 `UpdateSettings`；`galleryHandler.SetArchive(archiveHandler)` 桥接）、playground 静态文件服务（`pgJSFiles` 清单由 `feature.Assets(RootPlaygroundPG)` 派生） |
 | `helpers.go` | 根包辅助：`saveConfig`/`saveConfigAndReload`（config.Save→Reload 收敛点）、`writeAPIError`（JSON 错误信封）、`checkPortAvailable`、`getIntQuery`、`generateID`/`SyncIDCounter`（委托 `apibase` 单一计数器）、`firstActiveKey` |
 
 ### 10.10 `internal/api/trace/` — 追踪读取 API
@@ -244,13 +245,13 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + 三个 GET 路由：`GET /api/traces/dates` → `{"dates":[{"date","count","sizeBytes"}],"dir"}`（按日期降序）；`GET /api/traces/index?date=YYYYMMDD&limit=200&offset=0&status=&q=` → `{"lines":[...],"total":N}`（ newest-first， filtered+paginated）；`GET /api/traces/req/{reqID}` → `{"reqID","lines":[...]}`（ chronological: request line + attempt lines）。`sanitizePathParam` 路径穿越防护（拒绝 `/`、`\`、`..`、null 字节）。 |
+| `register.go` | `Handler` + `Register` + 三个 GET 路由：`GET /api/traces/dates` → `{"dates":[{"date","count","sizeBytes"}],"dir"}`（按日期降序）；`GET /api/traces/index?date=YYYYMMDD&limit=200&offset=0&status=&q=` → `{"lines":[...],"total":N}`（ newest-first， filtered+paginated）；`GET /api/traces/req/{reqID}` → `{"reqID","lines":[...]}`（ chronological: request line + attempt lines）。`sanitizePathParam` 路径穿越防护（拒绝 `/`、`\`、`..`、null 字节）。**2026-08-09（audit F-22 落地）：** `traceIndexDTO`/`traceDetailDTO` 秘密安全投影（排除 `finalKey`/`finalKeyName`/`upstreamURL`/`upstreamURLBase`）+ `maskHeaderMap`/`maskHeaderValue`/`maskToken` 幂等重掩码 + `normalizeTraceDate`（日历合法）+ `matchIndexFilters` + `newTraceScanner`（1MiB 行上限）+ `countIndexMatches`/`collectIndexPage` 两遍流式分页 + `writeIndexEnvelope`/`writeReqEnvelope` 增量输出；上限：`limit` 默认 200 最大 1000、`maxReqDetailLines` 1000、`maxTraceResponseBytes` 16MiB、`maxQFilterLen`/`maxReqIDLen` 256；超限 `"truncated":true`、ctx 取消不输出 |
 
 ### 10.20 `internal/api/settings/` — Settings / 生命周期
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `getSettings`/`updateSettings`。GET 返回 `trace` 字段：`{"trace":{"enabled":<live>,"retainDays":<cfg>,"maxDiskMB":<cfg>}}`；PATCH 接受 `{"trace":{"enabled?","retainDays?","maxDiskMB?"}}`（部分更新，持久化到 `cfg.Trace`），同时更新运行时原子镜像 `apibase.Deps.LogRequests`。**rotation 为 presence-aware 合并**（`rotationPatch` 指针字段：`strategy?/stickyLimit?/maxRetries?/retryDelaySec?/backoffMaxSec?`，经 `applyRotationUpdates` 逐字段合并）——前端只发 5 个管理字段，绝不触碰 `StatePersist`/`StatePath`（2026-08-03 审计修复）。**2026-08-06 archive 同为 presence-aware**：GET 返回 `archive:{sevenZipPath,rarPath,tempDir}`；PATCH 接受 `archivePatch` 全指针字段（未发送不覆盖、空串=显式清除回 env/PATH），经 `applyArchiveUpdates` 合并后调 `ArchiveSettingsFn(cfg.Archive)` 推给 runner（换配置 + 失效 probe 缓存） |
+| `register.go` | `Handler` + `Register` + `getSettings`/`updateSettings`/`reload`/`handleShutdown`。GET 返回 `trace` 字段：`{"trace":{"enabled":<live>,"retainDays":<cfg>,"maxDiskMB":<cfg>}}`；PATCH 接受 `{"trace":{"enabled?","retainDays?","maxDiskMB?"}}`（部分更新，持久化到 `cfg.Trace`），同时更新运行时原子镜像 `apibase.Deps.LogRequests`。**rotation 为 presence-aware 合并**（`rotationPatch` 指针字段：`strategy?/stickyLimit?/maxRetries?/retryDelaySec?/backoffMaxSec?`，经 `applyRotationUpdates` 逐字段合并）——前端只发 5 个管理字段，绝不触碰 `StatePersist`/`StatePath`（2026-08-03 审计修复）。**2026-08-06 archive 同为 presence-aware**：GET 返回 `archive:{sevenZipPath,rarPath,tempDir}`；PATCH 接受 `archivePatch` 全指针字段（未发送不覆盖、空串=显式清除回 env/PATH），经 `applyArchiveUpdates` 合并后调 `ArchiveSettingsFn(cfg.Archive)` 推给 runner（换配置 + 失效 probe 缓存）。**2026-08-09（audit F-04/F-17）：** GET `anySearch` 只返回 `hasApiKey`（不再回传完整 APIKey）；密码变更/设置响应携带 `csrfToken`；新增 `convergeRuntime(cfg)` 单一运行时收敛点（QuickSlotOnly/LogRequests 原子、`ProxyHandler.SetRequestLogDir`、`validateProxyConfig`+`SetProxy`、`ServerCfgFn`/`UpstreamTimeoutFn`、`Selector.UpdateSettings`、`pushDownloadSettings`、`ArchiveSettingsFn`）——`reload` 先校验代理再 `Reg.Reload(cfg)`+`convergeRuntime(cfg)`，`updateSettings` 亦委托之（F-17）；Download `YtDlpPath`/`FfmpegPath` PATCH 经 `procutil.ValidateExecutable` 校验（F-08，`archivePatch` 保持原 void 合同） |
 | `register_test.go` | 2026-08-03 新增：`TestRotationPatchPreservesStatePersist`/`TestRotationPatchPartialUpdate`（rotation PATCH 不抹掉 StatePersist/StatePath，Save/Load 往返验证） |
 
 | `api_test.go` | API 集成测试 |
@@ -262,14 +263,14 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 为 `internal/api` 子包提供共享类型和辅助函数，避免父包与子包间的循环导入。
 
 | 文件 | 职责 |
-| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数（`IsBlockedSSRFHost` 现含 `IsLinkLocalMulticast`/`IsMulticast`，2026-08-03 审计修复）。**2026-08-06：** `ArchiveRunner` 接口（`Store`/`Status`/`List`/`ReadEntry`/`Pack`，由 `*archivetool.Runner` 实现，router 经接口注入免 import 工具包）+ `ArchiveSettingsFn func(config.ArchiveConfig)` 回调字段（可为 nil；settings handler 判空调用） |
+| `deps.go` | `Deps` 结构体（`Reg`/`ConfigPath`/`Usage`/`PgUsage`/`QuotaTracker`/`Logger`/`ProxyHandler`/`Selector`/`ComboRes`/`DownloadMgr`/`Shutdown`/`TestClient`/`DebugMode`/`QuickSlotOnly`/`LogRequests`/`RestartFn`/`ServerCfgFn`/`UpstreamTimeoutFn`/`StateSaveFn`/`Trace`（`TraceConfig`，含 `Enabled`/`RetainDays`/`MaxDiskMB`））+ `SaveConfig`/`SaveConfigAndReload` 方法 + `WriteAPIError`/`GenerateID`/`SyncIDCounter`/`CheckPortAvailable`/`ValidateBaseURL`/`IsBlockedSSRFHost` 函数（`IsBlockedSSRFHost` 现含 `IsLinkLocalMulticast`/`IsMulticast`，2026-08-03 审计修复）。**2026-08-06：** `ArchiveRunner` 接口（`Store`/`Status`/`List`/`ReadEntry`/`Pack`，由 `*archivetool.Runner` 实现，router 经接口注入免 import 工具包）+ `ArchiveSettingsFn func(config.ArchiveConfig)` 回调字段（可为 nil；settings handler 判空调用）。**2026-08-09（audit F-06）：** 新增 `ManagementClient(p config.Provider) *http.Client`——Provider 管理探测统一走 `internal/outbound.Policy`（`AllowPrivate: p.AllowPrivateNetwork`、15s 超时、DNS-rebinding 安全拨号 + 逐跳重定向重校验）；proxy 路径委托 `ProxyHandler.ManagementClient` |
 
 ### 10.2 `internal/api/auth/` — 鉴权
 
 | 文件 | 职责 |
 |---|---|
-| `handler.go` | `Handler` 结构体 + `Register`/`AuthMiddleware`/`AuthStatusHandler`（返回 `authEnabled`/`passwordEnabled` 与 `loggedIn`/`authenticated` 归一字段）/`LoginHandler`/`LogoutHandler` + `SessionStore`/`GenerateToken`/`IsValidSession`/`SetSessionCookie`；`SessionStore` 有界（`maxSessions=1000`：惰性清扫过期 token + 超限逐出最旧，2026-08-03 审计修复） |
-| `rate_limit.go` | 登录速率限制（`loginRateLimiter`） |
+| `handler.go` | `Handler` 结构体 + `Register`/`AuthMiddleware`/`AuthStatusHandler`（返回 `setupRequired` + `loggedIn`/`authenticated` + `csrfToken`）/`LoginHandler`/`LogoutHandler`/`SetupHandler`（`POST /api/auth/setup` bootstrap：未保护时设置密码并签发会话；已保护 409、空密码 400）+ `SessionStore`/`GenerateToken`/`IsValidSession`/`SetSessionCookie`；`SessionStore` 有界（`maxSessions=1000`：惰性清扫过期 token + 超限逐出最旧，2026-08-03 审计修复）。**2026-08-09（audit F-04/F-05/F-12）：** `AuthMiddleware` 强制 **setup-required** 状态机——未设置密码（含旧 `PasswordEnabled=false` 配置）时所有管理路由 401 `setup_required`（不再无条件放行）；会话为密码学随机 token + **session-bound CSRF token**（`NewSession(owner)`）；对 POST/PUT/PATCH/DELETE 额外校验 `X-CSRF-Token`（`csrfChecksPass`，constant-time 比较）、Origin/Referer（`originAllowed`：`http(s)://(127.0.0.1|localhost|::1):<port>`，缺失时仅 token 绑定非浏览器客户端）、Content-Type（`requireJSONBody`：`application/json` 或 `multipart/form-data`）；GET/SSE 不受 CSRF 约束。`/v1/*` 保持无应用层认证（F-12 显式兼容决策，见 router §10） |
+| `rate_limit.go` | 登录速率限制（`loginRateLimiter` + `loginGuard`/`loginResponseWriter`）：**2026-08-09（audit F-26）** 失败计数只在 `WriteHeader(≥400)` 记录、成功只在 `LoginHandler` 显式调 `loginGuard.Success()` 记账——malformed JSON（400）与隐式 200 `Write` 均不能重置失败计数 |
 | `auth_test.go` | 测试 |
 
 ### 10.3 `internal/api/anysearch/` — AnySearch 搜索代理
@@ -282,7 +283,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `listCombos`/`createCombo`/`updateCombo`/`reorderCombo`/`deleteCombo`/`getCombo` + `comboSpeedTest`（SSE 流式测速，`comboSpeedCache` 进程内缓存）+ 辅助 `fullSortedOrder`/`probeComboModel`/`firstActiveKey`/`extractContentFromSSE` |
+| `register.go` | `Handler` + `Register` + `listCombos`/`createCombo`/`updateCombo`/`reorderCombo`/`deleteCombo`/`getCombo` + `comboSpeedTest`（SSE 流式测速，`comboSpeedCache` 进程内缓存；**2026-08-09（audit F-15）：** 上限 `speedTestMaxModels=50`/`speedTestMaxConcurrent=8`（信号量）/`speedTestMaxSec=30` 每模型/`speedTestTotalMaxSec=60` 总预算）+ 辅助 `fullSortedOrder`/`probeComboModel`/`firstActiveKey`/`extractContentFromSSE` |
 
 ### 10.5 `internal/api/compress/` — 响应压缩中间件
 
@@ -300,13 +301,13 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `createDownload`/`listDownloads`/`getDownload`/`cancelDownload`/`removeDownload`/`clearCompletedDownloads`/`streamDownloadEvents`/`getDownloadLog`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload`/`playDownloadFile`/`openDownloadDir`/`retryDownloadTask`/`openExternalURL`/`browseSystemPath` + `validateDownloadURL`/`validateDownloadDir` 辅助（SSRF 拦截经 `apibase.IsBlockedSSRFHost`） |
+| `register.go` | `Handler` + `Register` + `createDownload`/`listDownloads`/`getDownload`/`cancelDownload`/`removeDownload`/`clearCompletedDownloads`/`streamDownloadEvents`/`getDownloadLog`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload`/`playDownloadFile`/`openDownloadDir`/`retryDownloadTask`/`openExternalURL`/`browseSystemPath` + `validateDownloadURL`/`validateDownloadDir` 辅助（**2026-08-09，audit F-16：** `validateDownloadURL` 用 `outbound.ValidateURL`+`Policy.CheckHost` 初始预检；重定向/媒体分片逐跳重校验由本地 SSRF 代理 `internal/download/ssrfproxy.go`（`newSSRFProxy`/`ensureProxyArg`，yt-dlp `--proxy` 指向，public→private 拒绝，`TestSSRFProxyRejectsRedirectToPrivate`）承担；用户自配 `DownloadConfig.Proxy` 时显式 opt-out） |
 
 ### 10.8 `internal/api/editor/` — 编辑器后端
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `editorOpen`/`editorSave`。`/api/editor/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB） |
+| `register.go` | `Handler` + `Register` + `editorOpen`/`editorSave`/`editorDeleteFile`/`editorUploadImage`/`editorSaveSessionImages`/`editorServeImage`/`editorTree`。`/api/editor/*` 独立于 `/api` 组外以绕过 1MB body 上限（最大 32MB）。**2026-08-09（audit F-02/B-3）：** 浏览器不再提交物理路径——docDir 内文件用 docDir 相对 `fileId`（`resolveDocFile`：`pathgrant.StrictRel` + `realPathWithin` 符号链接包含校验），docDir 外文件用服务端 picker 签发的一次性 `pathGrantId`（`openTarget`/`saveTarget`/`deleteTarget`）；raw `path` 字段 → 410 Gone；`/tree`/`/docs` 返回 `fileId`（`DocFileItem` 无绝对路径）；`/upload-image` 落盘 `docDir/imgs/`（服务端生成文件名 + 扩展名白名单）；`/image?path=` 仅 docDir 相对；`maxOpenSize` 16MiB |
 
 ### 10.9 `internal/api/gallery/` — Gallery HTTP handler
 
@@ -314,13 +315,13 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` 结构体（字段 `d`/`sessions`/`reviews`/`media`/`proxy`）+ `NewHandler` + `Register` + 空白图片格式 decoder import + `proxyCaller` 接口。**2026-08-06：** 新增 `archiveBridge` 接口（`ResolveSource`/`List`/`ReadEntry`，由 `*api/archive.Handler` 实现）+ `SetArchive` 注入——nil 桥接时全部 Gallery 流程走 legacy 内存 zip 会话（兼容边界）；`galleryEditExtractZipEntry` 接受 `sourceId` 作为第三种输入（严格路径 + `DefaultBudget`） |
-| `session_store.go` | 内存 zip 会话 LRU 存储（`gallerySessionStore`/`zipSession`/`newGallerySessionID`），Handler 字段 `h.sessions` |
-| `fs_handlers.go` | Gallery 文件系统 handlers + 辅助（`isGalleryFile`/`isGalleryZip`/`galleryFsEntry`/`listGalleryFiles`/`galleryOpenDir`/`ListDir`/`ServeFile`/`DeleteFs`/`OpenFolder`/`PastePaths`） |
-| `zip_handlers.go` | 内存 zip 会话 handlers（`galleryListZip`/`GetZipEntry`/`DeleteZipSession`/`TouchSession`/`ConvertTiff`/`DeleteZipEntry`/`ZipFromPath`/`ZipWriteback`）；`ZipFromPath` 解析并校验 JSON `{path}` 后读取磁盘 ZIP，空路径或 malformed JSON 返回 400 |
+| `register.go` | `Handler` 结构体（字段 `d`/`sessions`/`reviews`/`media`/`proxy`/`archive`/`grants`（`*pathgrant.Store`）/`uploadSem`/`tempFiles`（`*tempRegistry`）/`assets`（`*archive.TempStore`））+ `NewHandler` + `Register`（`r.Use(owner.Middleware)`）+ `proxyCaller` 接口 + `assetStore()` 懒建 owner 私有临时资产库。**2026-08-06：** 新增 `archiveBridge` 接口（`ResolveSource(ownerID, id)`/`List`/`ReadEntry`，由 `*api/archive.Handler` 实现）+ `SetArchive` 注入——nil 桥接时全部 Gallery 流程走 legacy 内存 zip 会话（兼容边界）。**2026-08-09（audit F-03/F-28/F-29/F-30）：** 全部文件/zip/编辑端点迁移到 grant/asset/sourceId 合同（见 fs_handlers/zip_handlers/edit_handlers），raw path → 410 |
+| `session_store.go` | 内存 zip 会话 LRU 存储（`gallerySessionStore`/`zipSession`/`newGallerySessionID`），Handler 字段 `h.sessions`；**2026-08-09（audit F-15/F-29）：** 会话 **owner 绑定**——`put/touch/get/update/remove/pin/unpin` 全带 `owner` 校验（跨会话 sessionId → 404/拒绝）；24h 惰性 TTL、总字节 2GiB 上限 + LRU 逐出（`galleryMaxSessionBytes`）、pin 预算 4GiB（`galleryMaxPinnedBytes`，`pin()` 超限拒绝）、上传信号量 2（`galleryMaxConcurrentUploads`）→ 413/429 |
+| `fs_handlers.go` | Gallery 文件系统 handlers + 辅助（`isGalleryFile`/`isGalleryZip`/`galleryFsEntry{Name,Rel,Size,Kind}`（无绝对路径）/`listGalleryFiles`（仅相对 rel）/`galleryOpenDir`（原生 picker → owner 目录 grant）/`galleryListDir`（`{grantId}`，raw `{dir}` → 410）/`galleryServeFile`（`assetId` | `sourceId+entryPath` | `grantId+rel`，raw `?path=` → 410）/`galleryDeleteFs`（grantId+rel，raw path → 410）/`galleryOpenFolder`/`galleryPastePaths`（剪贴板 CF_HDROP → grants）） |
+| `zip_handlers.go` | 内存 zip 会话 handlers（`galleryListZip`/`GetZipEntry`/`DeleteZipSession`/`TouchSession`/`ConvertTiff`/`DeleteZipEntry`/`ZipFromPath`/`ZipWriteback`）；**2026-08-09（audit F-03）：** `zip-from-path` 接收 `{grantId}`（raw `{path}` → 410，`OpRead` 解析）、`zip-writeback` 接收 `{sessionId, grantId}`（`OpWrite`）；`maxZipDiskSize` 1GiB 读取上限 |
 | `review_engine.go` | AI 审核引擎核心（`reviewTask`/`runReview`/`analyzeImage`/`sendVisionRequest`/`mimeTypeForEntry`/`resizeImage`/`selectReviewIndices`/`selectHeadTailIndices`） |
 | `review_handlers.go` | AI 审核 HTTP handlers（`startReviewRequest`/`genPromptRequest`/`galleryStartReview`/`ReviewStatus`/`CancelReview`/`GeneratePrompt`） |
-| `edit_handlers.go` | Gallery 媒体编辑（ffmpeg）handlers（`resolveFfmpeg`/`probeRequest`/`galleryEditFfmpegStatus`/`Probe`/`SubtitleUpload`/`Start`/`Status`/`Cancel`/`ExtractZipEntry`/`UploadTemp`/`ZipOutputs`/`ZipWriteback`）；Handler 字段 `h.media`（`*mediaedit.Manager`） |
+| `edit_handlers.go` | Gallery 媒体编辑（ffmpeg）handlers（`resolveFfmpeg`/`probeRequest`/`galleryEditFfmpegStatus`/`Probe`/`SubtitleUpload`/`Start`/`Status`/`Cancel`/`ExtractZipEntry`/`UploadTemp`/`ZipOutputs`/`ZipWriteback`）；Handler 字段 `h.media`（`*mediaedit.Manager`）。**2026-08-09（audit F-07/F-28）：** `resolveMediaInput(r, assetID, grantID, rel, op)` 统一输入解析（asset/grant，owner 绑定）；subtitle 上传注册为 asset（`validateSubtitleInput` 仅服务端上传文件）；`zip-outputs` 接收 `{assetIds, zipName}`（raw paths/outputDir → 410）、`zip-writeback` 接收 `{sessionId, grantId, entries:[{zipPath, assetId}]}`（`OpWrite`）；输出经 `assetStore` 登记为 asset（`jobOutputs` jobID→assetID）；`sanitizeOutputStem` 安全 basename |
 | `register_test.go` | 测试：`gallerySessionStore` LRU 驱逐契约（容量 128，最早会话先驱逐）、`touch` MRU 提升、`remove` 幂等；HTTP 层 `DELETE /zip/{sessionId}`（204）与 `POST /zip/{sessionId}/touch`（204/404），`POST /zip-from-path` 成功/缺路径/malformed JSON，并验证 chi 区分 `DELETE /zip/{sessionId}`（会话删除）与 `DELETE /zip/{sessionId}/*`（条目删除） |
 
 
@@ -331,11 +332,10 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 | 文件 | 职责 |
 |---|---|
 | `types.go` | `Job`/`JobStatus`/`ProbeResult`/`StartRequest`（含可选 `OutputName`——无扩展名 stem，OutputDir 非覆盖分支优先用作输出文件名 + `buildArgs` 的 `ext`，避免临时输入名泄漏到保存的文件/zip 条目名）+ per-operation params 类型（`ImageTranscodeParams`/`VideoTranscodeParams`/`VideoTrimParams`/`VideoSubtitleParams`） |
-| `binary.go` | `ResolveFfmpeg`（config → `FFMPEG_PATH` env → `exec.LookPath`）+ `ResolveFfprobe`（`FFPROBE_PATH` env → 同目录派生 → `exec.LookPath`） |
-| `probe.go` | `Probe(ffprobePath, path)`：`ffprobe -v error -select_streams ... -of json` → `ProbeResult`（宽/高/编码/时长/帧率/IsImage/HasAudio），含 15s 超时与 `procutil.SetProcessGroup` |
-| `args.go` | 四种操作的 ffmpeg 参数构造器（`BuildImageTranscodeArgs`/`BuildVideoTranscodeArgs`/`BuildVideoTrimArgs`/`BuildVideoSubtitleArgs`）→ `(args, desc, ext, error)`；含编码-容器兼容校验、质量映射（JPEG `-q:v`/PNG `-compression_level`/H264-H265-VP9-AV1 CRF）、`BuildOutputPath`（非覆盖时追加 `_desc` 后缀并去重） |
-| `executor.go` | `RunFfmpeg`：`exec.CommandContext` + `procutil.SetProcessGroup`/`KillProcessGroup` + StdoutPipe（progress 解析 `out_time_us`→百分比）+ StderrPipe（`tailBuffer` 16KB）+ `ErrCancelled`；`tailBuffer` 定长环形缓冲 |
-| `manager.go` | `Manager`（`sync.Map` 存 job）：`Start`（验证输入→构建 args→探测时长→选输出路径：覆盖同格式→原文件（`runJob` temp+rename 覆盖）、覆盖跨格式→`<dir>/<stem><newExt>`（ffmpeg 按输出扩展名选编码器）+ 成功后 `removeOnSuccess` 删原文件、非覆盖无 OutputDir→同目录 `{base}_{desc}.{ext}` 去重、非覆盖有 OutputDir→`relocateOutput(OutputDir, outStem+ext)`，`outStem` 优先 `req.OutputName` 否则 `InputPath` stem →`generateID`→后台 `runJob(…, removeOnSuccess)`）/`Get`/`Cancel`/`ProbeMedia` |
+| `binary.go` | `ResolveFfmpeg`（config → `FFMPEG_PATH` env → `exec.LookPath`）+ `ResolveFfprobe`（`FFPROBE_PATH` env → 同目录派生 → `exec.LookPath`）；**2026-08-09（audit F-08）：** 解析结果经 `procutil.ValidateExecutable` 校验（`validateResolvedTool`，含派生 ffprobe 候选） |
+| `probe.go` | `Probe(ffprobePath, path)`：`ffprobe -v error -select_streams ... -of json` → `ProbeResult`（宽/高/编码/时长/帧率/IsImage/HasAudio），含 15s 超时与 `procutil.SetProcessGroup`；**2026-08-09（audit F-07）：** `validateLocalMediaInput`（仅 regular file，拒绝 URL/目录）+ `validateSubtitleInput`（仅服务端上传字幕工作区）+ `-protocol_whitelist file`（`ffprobeProtocolWhitelist`） |
+| `args.go` | 四种操作的 ffmpeg 参数构造器（`BuildImageTranscodeArgs`/`BuildVideoTranscodeArgs`/`BuildVideoTrimArgs`/`BuildVideoSubtitleArgs`）→ `(args, desc, ext, error)`；含编码-容器兼容校验、质量映射（JPEG `-q:v`/PNG `-compression_level`/H264-H265-VP9-AV1 CRF）、`BuildOutputPath`（非覆盖时追加 `_desc` 后缀并去重）；**2026-08-09（audit F-07/C-2）：** `FontName`（`fontNameRe`）/`Language`（`languageRe`）白名单字符集校验 + `escapeFilterPath` 过滤图转义（禁止 filter graph 注入） |
+| `manager.go` | `Manager`（`sync.Map` 存 job）：`Start`（验证输入→构建 args→探测时长→选输出路径：覆盖同格式→原文件（`runJob` temp+rename 覆盖）、覆盖跨格式→`<dir>/<stem><newExt>`（ffmpeg 按输出扩展名选编码器）+ 成功后 `removeOnSuccess` 删原文件、非覆盖无 OutputDir→同目录 `{base}_{desc}.{ext}` 去重、非覆盖有 OutputDir→`relocateOutput(OutputDir, outStem+ext)`，`outStem` 优先 `req.OutputName` 否则 `InputPath` stem →`generateID`→后台 `runJob(…, removeOnSuccess)`）/`Get`/`Cancel`/`ProbeMedia`；**2026-08-09（audit F-15/F-07）：** ffmpeg 并发信号量 `sem`（`maxConcurrentJobs=4`，超限 `ErrTooManyJobs`），输入必须为 regular file（`validateLocalMediaInput`）、字幕须服务端上传（`validateSubtitleInput`） |
 | `args_test.go` | 参数构建器测试（格式/质量/缩放/裁剪/字幕/兼容性校验/输出路径去重） |
 | `manager_test.go` | 集成测试（需 ffmpeg，否则 skip）：探针、图片转码、跨格式覆盖模式（`TestManager_TranscodeImage_Overwrite`——png→webp 验证 outputPath=`source.webp` + 原 `source.png` 删除）、取消、job snapshot、`OutputName` 命名（`TestManager_TranscodeImage_OutputName`/`_Dedup`——构造 `gallery-edit-upload-XXXX.png` 临时输入 + `OutputName="vacation_photo"` → `vacation_photo.webp`，二次同 stem → `_2`） |
 > Gallery HTTP handler（`internal/api/gallery/edit_handlers.go`）通过 `h.media`（`*Manager`）与 `resolveFfmpeg` 助手调用此包。路由挂载于 `/api/gallery/edit/*`（`/api/gallery` 组，绕过 1MB body 上限，auth-gated）。
@@ -392,13 +392,13 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register`（`POST /providers/{id}/models/test-proto`、`POST /providers/{id}/models/test-all`）+ `probeModel`/`probeKey` + 通用 `probeEndpoint`（4 协议：`openai-compat`/`openai-responses`/`anthropic`/`openai-embedding`）+ `ProbeResult` 类型 + 协议常量与测试 prompt |
+| `register.go` | `Handler` + `Register`（`POST /providers/{id}/models/test-proto`、`POST /providers/{id}/models/test-all`）+ `probeModel`/`probeKey` + 通用 `probeEndpoint`（4 协议：`openai-compat`/`openai-responses`/`anthropic`/`openai-embedding`）+ `ProbeResult` 类型 + 协议常量与测试 prompt。**2026-08-09（audit F-06/F-14）：** 探测客户端改经 `Deps.ManagementClient(*provider)`（outbound 策略）；`errBody` 512KiB、`contentBuf` 64KiB、`doProbe` 显示副本 8MiB 有界读取；上游 body 不回显 |
 
 ### 10.15 `internal/api/providers/` — Provider CRUD / 校验 / 模型管理
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register`（17 路由：provider CRUD 6 + test 1 + model 10）+ `listProviders`/`createProvider`/`validateProvider`/`updateProvider`/`reorderProvider`/`deleteProvider`/`testProviderKey`/`fetchProviderModels`/`addProviderModel`/`updateModelQuota`/`updateModelAlias`/`updateModelNote`/`updateModelNIM`/`updateModelKind`/`updateModelImgProtocol`/`updateModelImgSizes`/`updateModelProtocols`/`deleteProviderModel`（BaseURL 校验经 `apibase.ValidateBaseURL`） |
+| `register.go` | `Handler` + `Register`（17 路由：provider CRUD 6 + test 1 + model 10）+ `listProviders`/`createProvider`/`validateProvider`/`updateProvider`/`reorderProvider`/`deleteProvider`/`testProviderKey`/`fetchProviderModels`/`addProviderModel`/`updateModelQuota`/`updateModelAlias`/`updateModelNote`/`updateModelNIM`/`updateModelKind`/`updateModelImgProtocol`/`updateModelImgSizes`/`updateModelProtocols`/`deleteProviderModel`（BaseURL 校验经 `apibase.ValidateBaseURL`）。**2026-08-09（audit F-04/F-06）：** `ProviderDTO`（`id/name/prefix/baseUrl/apiType/models/keyCount/hasKey`，**不含 Keys 数组**）+ `toProviderDTO`——list/create/update 只回 DTO；`probeUpstream`/`fetchProviderModels` 走 `ManagementClient`（outbound 策略）+ `maxModelsResponseBytes` 8MiB 有界读取（超限受控 502），错误不回传完整上游 body |
 
 ### 10.16 `internal/api/quickslots/` — QuickSlot 管理
 
@@ -468,7 +468,7 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler`/`NewHandler(d, runner)` + `Register`（9 路由：`GET /status`、`POST /sources`、`GET /sources/{id}/entries/*`、`DELETE /sources/{id}`、`POST /assets`、`GET /assets/{id}`、`POST /pack`、`POST /release/{id}`、**`POST /zip-replace`**（P3：已登记 ZIP source 原子写回——replacements+deletes、严格路径、非 ZIP/只读 403、并发写回 409 `archive.busy`））+ 错误映射 `writeRunError`（ToolMissing→503、ToolTimeout→504、ReadOnly→403、Encrypted/MultiVolume/Corrupt→422、其余→502，稳定机器码）+ `detectFormat`（扩展名→magic 兜底）+ `mimeForName`/`kindForName` |
+| `register.go` | `Handler`/`NewHandler(d, runner)` + `Register`（9 路由：`GET /status`、`POST /sources`、`GET /sources/{id}/entries/*`、`DELETE /sources/{id}`、`POST /assets`、`GET /assets/{id}`、`POST /pack`、`POST /release/{id}`、**`POST /zip-replace`**（P3：已登记 ZIP source 原子写回——replacements+deletes、严格路径、非 ZIP/只读 403、并发写回 409 `archive.busy`））+ 错误映射 `writeRunError`（ToolMissing→503、ToolTimeout→504、ReadOnly→403、Encrypted/MultiVolume/Corrupt→422、其余→502，稳定机器码）+ `detectFormat`（扩展名→magic 兜底）+ `mimeForName`/`kindForName`。**2026-08-09（audit F-11/F-29）：** `Register` 内 `r.Use(owner.Middleware)`；`sourceEntry` 携带 `owner`；`ResolveSource(ownerID, id)`/`sourceFor(ownerID, id)` 校验 owner（未知/过期/他人 → false/nil，404/403）；`getSourceEntry`/`deleteSource`（未知 204 幂等、他人 403 `archive.forbidden`）/`getAsset`/`createAsset`/`pack`/`zipReplace`/`release` 全部 owner 校验；`sourceUploadCap` 500MiB / `assetUploadCap` 200MiB |
 
 ## 11. `internal/state/` — `state.yaml` 运行时持久化
 
@@ -476,8 +476,8 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 
 | 文件 | 职责 |
 |---|---|
-| `state.go` | `Snapshot`/`KeySnapshot`/`ComboSnapshot`/`ProbeRecord`/`ProbeDetail` 类型 + YAML 序列化；`CurrentVersion=1`；`Snapshot.Probes map[string]*ProbeRecord`（精简明细，不含请求/响应 body）；`Save` 委托 `fsutil.AtomicWrite` 原子写入 |
-| `manager.go` | `Manager`：500ms 去抖 + 定时器 + 原子写（经回调快照，避免 import cycle）；快照提取在 `writeMu` 内，防并发 FlushSync 让旧快照覆盖新快照 |
+| `state.go` | `Snapshot`/`KeySnapshot`/`ComboSnapshot`/`ProbeRecord`/`ProbeDetail` 类型 + YAML 序列化；`CurrentVersion=1`；`Snapshot.Probes map[string]*ProbeRecord`（精简明细，不含请求/响应 body）；`Save` 委托 `fsutil.AtomicWrite` 原子写入。**2026-08-09（audit F-21）：** `KeySnapshot` 新增结构化 `ProviderID`/`KeyID` 字段 + `EncodeSnapshotKey`（长度前缀编码，替代 `providerID::keyID` 拼接）；私有 `decodeSnapshotKey` 兼容回读 |
+| `manager.go` | `Manager`：500ms 去抖 + 定时器 + 原子写（经回调快照，避免 import cycle）；快照提取在 `writeMu` 内，防并发 FlushSync 让旧快照覆盖新快照。**2026-08-09（audit F-21）：** `Restore` 解析顺序 结构化 → 长度前缀 → legacy `::` 拆分（key 与 probe 记录同迁） |
 | `state_test.go` | 测试 |
 
 ---
@@ -491,7 +491,7 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 | `atomic.go` | — | `AtomicWrite(path, data, perm)`：确定性 `.tmp` + `os.Rename` 原子写（`.tmp` 先 `f.Sync` 保证崩溃后副本完整），失败回退直写；**直写回退成功也保留 `.tmp`** 作崩溃恢复源（下次 Load 成功加载后清理） |
 | `open.go` | — | `ErrUnsupportedPlatform` 共享错误变量 |
 | `open_windows.go` | `windows` | `OpenInFileManager`（ShellExecute + `/select,`）、`OpenInBrowser`（rundll32）、`OpenFilePicker`/`OpenDirectoryPicker`（原生 COM IFileOpenDialog，现代 Windows 10/11 对话框，返回绝对路径）；2026-07-25 修正 `IFileDialog::GetResult` vtable 索引 26→20；2026-08-03 修正 `GetOptions` vtable 索引 8→10（8 为 Unadvise），并注释 IFileDialog 完整 vtable 顺序 |
-| `open_other.go` | `!windows` | macOS（`open -R`/`osascript`）、Linux（`xdg-open`）实现；文件/目录选择器 Linux 返回 `ErrUnsupportedPlatform` |
+| `open_other.go` | `!windows` | macOS（`open -R`/`osascript`）、Linux（`xdg-open`）实现；文件/目录选择器 Linux 返回 `ErrUnsupportedPlatform`。**2026-08-09（audit F-09）：** AppleScript 参数化——`pickerEnvVar="TR_PICKER_INITIAL_DIR"` 经环境变量传 initialDir（`osascriptPickerScript` 用 `system attribute` 运行时读取），调用方输入绝不插值进脚本文本；`open_other_test.go`（`!windows`）注入恶意值（引号/反斜杠/换行/AppleScript token）验证脚本字节级固定 |
 | `clipboard_windows.go` | `windows` | `GetClipboardFilePaths()`：读取 Windows 剪贴板 CF_HDROP 格式文件路径（OpenClipboard + DragQueryFileW） |
 | `clipboard_other.go` | `!windows` | `GetClipboardFilePaths()` 返回 nil（非 Windows 平台不支持） |
 | `atomic_test.go` | — | 测试（`TestAtomicWrite_RenameFallbackKeepsTmp` 2026-08-03 新增：rename+直写双失败保留 `.tmp`） |
@@ -512,7 +512,7 @@ AI 文本审核（Text Review）4 步向导的 HTTP 路由层：处理节点池/
 
 | 文件 | 职责 |
 |---|---|
-| `sse.go` | `SSELineBuffer`（行帧缓冲 + Feed/Remaining）、`SSEDataPayloads`（提取 data payload）、`NormalizeSSEChunk`（choices:null → [] 规范化） |
+| `sse.go` | `SSELineBuffer`（行帧缓冲 + Feed/Remaining）、`SSEDataPayloads`（提取 data payload）、`NormalizeSSEChunk`（choices:null → [] 规范化）。**2026-08-09（audit F-14）：** `NewSSELineBuffer(maxLine, maxTotal)` 预算化构造；`Feed` 返回 `([]string, error)`——超单行上限（默认 1MiB）→ `ErrLineTooLong`、总缓冲超限（默认 8MiB）→ `ErrBufferOverflow`；零值仍保持旧默认 |
 | `sse_test.go` | 测试 |
 
 ---
@@ -541,7 +541,7 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 
 | 文件 | 职责 |
 |---|---|
-| `upload.go` | `Handler.Upload`（`POST /api/filetransfer/upload` 组装 ZIP 并按顺序尝试临时服务；外部服务失败时返回错误，不保证上传成功）、`Handler.PathInfo`、本地文件/目录收集与容量统计、ZIP 打包、文件名清理与冲突改名；单文件与归档均有大小/数量上限，符号链接拒绝 |
+| `upload.go` | `Handler.Upload`（`POST /api/filetransfer/upload` 组装 ZIP 并按顺序尝试临时服务；外部服务失败时返回错误，不保证上传成功）、`Handler.PathInfo`、`Handler.PasteClipboard`（`POST /api/filetransfer/paste`：服务端读系统剪贴板 CF_HDROP → 注册 owner 绑定 export grants，只回 `pathGrantId`/`name`/`size`/`isDir`）。**2026-08-09（audit F-01/B-2）：** 路径能力合同——浏览器只提交 multipart 文件或 `pathGrantId`（`collectParts` 经 `h.grants.Resolve(ownerID, id, pathgrant.OpExport)` 解析），raw `paths` JSON 字段 400/410 拒绝；`path-info` 只接受已登记 grant；上限：归档 500MiB、单文件 500MiB、总输入 1GiB、文件数 2000、扫描深度 32、扫描总耗时 30s；符号链接拒绝；响应不含本机绝对路径 |
 | `upload_test.go` | ZIP 名称清理/去重、目录相对路径、容量统计与服务顺序回退测试 |
 
 ---
@@ -553,7 +553,7 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 | `procutil_unix.go` | `!windows` | `KillProcessGroup(pid)` 先 SIGTERM 再 2s 后 SIGKILL；`SetProcessGroup(cmd)` 设 `Setpgid=true` |
 | `procutil_windows.go` | `windows` | `KillProcessGroup(pid)` 执行 `taskkill /PID /T /F`；`SetProcessGroup(cmd)` 设 `CREATE_NEW_PROCESS_GROUP\|createNoWindow` |
 
-`internal/download/` 的平台文件均委托此包实现进程组管理。
+`internal/download/` 的平台文件均委托此包实现进程组管理。**2026-08-09（audit F-08）：** 新增 `toolpath.go` `ValidateExecutable(path)`——外部工具路径校验：绝对路径、无控制字符、EvalSymlinks 后为 regular file、Windows 可执行扩展名（.exe/.com/.bat/.cmd）、Unix/macOS 可执行位、拒绝 OS 临时目录与其它用户可写目录（防二进制替换）；`toolpath_test.go` 覆盖。接入点：`internal/api/settings/register.go`（Download `YtDlpPath`/`FfmpegPath` PATCH）、`internal/download/binary.go::resolveConfiguredTool`、`internal/mediaedit/binary.go::validateResolvedTool`（ffmpeg/ffprobe + 派生候选）、**`internal/archivetool/tool.go::validateTool`**（2026-08-09 迁移完成，`tool_test.go` 7 测试：MissingPath/DirectoryRejected/TempDirRejected/ControlCharsRejected/ValidExecutable 等） |
 
 ## 13e. `internal/archive/` — ArchiveCore 归档基础能力（P0/P1）
 
@@ -561,13 +561,13 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 
 | 文件 | 职责 |
 |---|---|
-| `types.go` | 合同类型 + `Format.Valid` + 哨兵错误（`ErrEntryNotFound`/`ErrUnsafePath`/`ErrPathCollision`/`ErrUnsupportedFormat`/`ErrUnsupportedWriteback`/`ErrClosed`）+ `BudgetError`/`IsBudgetExceeded` |
+| `types.go` | 合同类型 + `Format.Valid` + 哨兵错误（`ErrEntryNotFound`/`ErrUnsafePath`/`ErrPathCollision`/`ErrUnsupportedFormat`/`ErrUnsupportedWriteback`/`ErrClosed`/`ErrOwnership`（`IsOwnership`））+ `BudgetError`/`IsBudgetExceeded`。**2026-08-09（audit F-11）：** `Source` 新增 `Owner` 字段；`AssetRef` 新增 `Owner`/`JobID`/`ExpiresAt` |
 | `path.go` | `StrictArchivePath`（归一化前拒绝 NUL/C0、绝对路径、盘符、UNC/`\\?\`、`.`/`..` 段、ADS、尾随点/空格、Windows 保留设备名；仅验证通过后 `\`→`/`）+ `ValidateEntryPaths`（全条目碰撞 map：精确/Windows 等价/文件即目录前缀）+ `IsDirEntry` |
 | `budget.go` | 计划 §4.3 默认预算常量 + `DefaultBudget` + `Tracker`（条目数/单条/总展开/压缩比）+ `CapReader`/`ReadCapped`（limit+1 探测，同 gallery）+ `CountingWriter`（输出上限） |
 | `charset.go` | `decodeZipName` CJK 探测还原（与 `internal/gallery/charset.go` 同行为，P3 去重） |
 | `zip_adapter.go` | `ZIP{}` 实现 `Reader`：`List`（全条目、自然排序、严格校验全部条目、预算）+ `ReadEntry`（索引或严格路径、100 MiB 单条、content-type）；核心 `Replace`（保留原 header/comment/attributes 的原子回写语义 + 严格键） |
-| `zip_writer.go` | `NewZIPWriter(store)` 实现 `Writer`：`ReplaceZIP`（输出新 asset，源文件不动）+ `Pack`（仅 zip；7z/rar → `ErrUnsupportedWriteback`；≤2000 文件） |
-| `tempstore.go` | 文件型 `TempStore`：`<root>/<owner>/<job>/<id>_<name>` 布局、crypto/rand ID、名称净化、TTL/`Scavenge`/`ReleaseOwner`/幂等 `Release`/`Close` 清根 |
+| `zip_writer.go` | `NewZIPWriter(store)` 实现 `Writer`：`ReplaceZIP`（输出新 asset，源文件不动）+ `Pack`（仅 zip；7z/rar → `ErrUnsupportedWriteback`；≤2000 文件）；**2026-08-09（audit F-11/F-28）：** owner 线程化（job 上下文贯穿），`replace` job 精确尺寸上限 |
+| `tempstore.go` | 文件型 `TempStore`：`<root>/<owner>/<job>/<id>_<name>` 布局、crypto/rand ID、名称净化、TTL/`Scavenge`/`ReleaseOwner`/幂等 `Release`/`Close` 清根。**2026-08-09（audit F-11/F-15/F-29）：** 全部访问 owner 参数化——`Create(ctx, owner, jobID, ...)`/`Open(owner, id)`/`Path(owner, id)`/`Stat(owner, id)`/`Release(owner, id)`/`ReleaseOwner(owner)`；配额 `checkQuota(owner, jobID, size)`：每 owner 数量/字节、每 job 字节、全局字节上限（`DefaultMaxAssetsPerOwner`/`DefaultMaxBytesPerOwner`/`DefaultMaxBytesPerJob`/`DefaultMaxBytesGlobal`），超限 `*BudgetError`；`scavengeLoop` 周期 goroutine（TTL/4，1min–6h 夹取）+ 启动 `Scavenge`（app.go）+ `Close` 停止 |
 | `*_test.go` | `path_test`（strict+collision 表驱动）、`budget_test`（各维度上限）、`zip_adapter_test`（List/Read/Replace 语义+安全+预算）、`zip_writer_test`（Writer 合同）、`tempstore_test`（生命周期/TTL/owner 隔离） |
 
 ## 13f. `internal/archivetool/` — 归档外部工具层（P2）
@@ -576,12 +576,12 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 
 | 文件 | 职责 |
 |---|---|
-| `tool.go` | `Resolver`（配置→`SEVENZIP_PATH`/`RAR_PATH`→PATH，30s probe 缓存，`UpdateSettings` 失效）+ `ToolError` 稳定机器码（Missing/Timeout/ReadOnly/Encrypted/MultiVolume/Corrupt）+ `parseToolVersion` |
+| `tool.go` | `Resolver`（配置→`SEVENZIP_PATH`/`RAR_PATH`→PATH，30s probe 缓存，`UpdateSettings` 失效）+ `ToolError` 稳定机器码（Missing/Timeout/ReadOnly/Encrypted/MultiVolume/Corrupt）+ `parseToolVersion`；**2026-08-09（audit F-08）：** `validateTool` 迁移 `procutil.ValidateExecutable`（绝对/无控制字符/regular/可执行扩展名与位/拒绝临时及他人可写目录），`tool_test.go` 7 测试 |
 | `status.go` | `Status`/`ToolStatus`：`/api/archive/status` 响应形状 `{zip,sevenZip,rar}` |
 | `builders.go` | 7z/rar argv 构造（`l -slt -sccUTF-8 -p- --` / `x -so` / `lb -p- -idq` / `p -inul`；pack `a -t7z -mx=5` / `a -idq`）+ list 64MiB/pack 1MiB 输出上限 + pack MIME |
 | `exec.go` | `runTool`/`runToolDir`：`exec.CommandContext` 无 shell + `procutil` 进程组整树 kill + 有界 stdout（超限 kill 子进程并报 budget err）/stderr 16KiB tail + 退出码启发式分类 |
-| `parse.go` | `parseSevenZipSLT`/`parseRarLB`（机器格式）+ `buildManifest`（对工具输出**再走** foundation 严格校验 + collision + 预算 + 自然排序） |
-| `external.go` | `NewExternalReader`/`NewExternalWriter`（7z/RAR List/ReadEntry/Pack，并发信号量 2；`ReplaceZIP` 恒 `ErrUnsupportedWriteback`；通配符元字符拒绝；输入 staging 私有 job 目录防绝对路径泄漏） |
+| `parse.go` | `parseSevenZipSLT`/`parseRarLB`（机器格式）+ `buildManifest`（对工具输出**再走** foundation 严格校验 + collision + 预算 + 自然排序）。**2026-08-09（audit F-13）：** `parseSevenZipSLT` 只把携带 entry 元数据（Folder/Size/Packed Size/Attributes）的 block 转为 `rawEntry`——7z `-slt` 开头的 archive header block（`Path = C:\archive.7z` + Type/Physical Size/...）被丢弃，绝对归档路径永不进入 `ValidateEntryPaths`；`parse_test.go` 新增 `TestParseSevenZipSLT`/`_HeaderOnly`/`_NoEntryMetaBlock`/`_EmptyPathBlock` |
+| `external.go` | `NewExternalReader`/`NewExternalWriter`（7z/RAR List/ReadEntry/Pack，并发信号量 2；`ReplaceZIP` 恒 `ErrUnsupportedWriteback`；通配符元字符拒绝；输入 staging 私有 job 目录防绝对路径泄漏）；**2026-08-09（audit F-11/F-29）：** pack 输入 owner 一致性校验（common-owner pack） |
 | `runner.go` | `Runner`：`NewRunner(root, cfg)`（0700 workspace，失败只禁用归档能力）、`Store`/`Status`/`UpdateSettings`/`List`/`ReadEntry`/`Pack`（按格式分派 ZIP→stdlib、7z/RAR→外部工具）、`Scavenge`/`sweepOrphans`（2×TTL 清崩溃遗留）、`Close`/`IsClosed`、`ErrNoRunner` |
 
 ## 13g. `internal/feature/` — 编译期功能清单（P5 第一阶段）
@@ -596,7 +596,34 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 |---|---|
 | `feature.go` | `Feature` 描述符 + `Register`/`SetCompiled`/`Enabled`/`Get`/`All`/`Assets` + 默认 manifest（sync.Once 注册） |
 | `feature_test.go` | 默认全启用、ID 唯一、依赖闭包/传播、资产存在性与 pg 资产列表逐项同序合同、Register 替换 |
----
+
+## 13h. `internal/owner/` — 会话 owner 身份（2026-08-09 新增，audit F-29）
+
+每请求 owner 身份能力命名空间（leaf 包，仅 stdlib）。`owner.Middleware` 惰性签发 HttpOnly cookie `tinyrouter_owner`（256-bit crypto/rand hex，30 天 MaxAge，SameSite=Lax）；`owner.From(ctx)` 取回身份；`Valid` 仅做结构校验。中间件从不拒绝请求——匿名调用方获得自己的隔离命名空间。所有临时资源（path grants、archive assets/assets、editor/gallery 文件能力）以此绑定到创建它们的浏览器会话：跨会话即使知道资源 ID 也 403/404。
+
+| 文件 | 职责 |
+|---|---|
+| `owner.go` | `Middleware`/`From`/`Valid`/`CookieName`（`tinyrouter_owner`） |
+| `owner_test.go` | 中间件签发/复用、结构校验测试 |
+
+## 13i. `internal/pathgrant/` — 短 TTL 路径能力（2026-08-09 新增，audit B-1/B-2/B-3/B-4）
+
+服务端路径 grant 注册表（leaf 包，仅 stdlib）：为特定本机路径授予 read/write/delete/export 能力的短 TTL、owner 绑定令牌，浏览器只持有 `grantId`，物理路径永不出进程。路径只能由服务端自己执行的显式用户动作注册（原生 picker、剪贴板读取）；每次解析重验 owner/operation/TTL，目录 grant 做 canonical root containment（含符号链接逃逸检查）。`OpRead`/`OpWrite`/`OpDelete`/`OpExport` 四种能力，`DefaultTTL=30min`，`maxGrantsPerOwner=256`，`ErrDenied`（不区分具体原因）/`ErrUnsafePath`，`StrictRel` 严格相对路径校验（供 Editor `resolveDocFile` 等复用）。
+
+| 文件 | 职责 |
+|---|---|
+| `pathgrant.go` | `Store.Grant`/`Resolve`/`ResolveChild`/`Revoke`/`Scavenge` + `Operation` 常量 + `StrictRel` |
+| `pathgrant_test.go` | TTL/owner/操作隔离、one-shot 消费、目录 root containment、StrictRel 矩阵 |
+
+## 13j. `internal/outbound/` — 出站 SSRF 策略（2026-08-09 新增，audit C-1/F-06）
+
+按场景出站的网络策略（leaf 包，仅 stdlib，无外部依赖）：`Policy` 零值即最严场景（http/https、无 userinfo、禁私网/loopback、5 跳重定向、无客户端超时）；`ValidateURL`（结构校验：scheme/host/端口黑名单——SSH/SMTP/DNS/SMB/数据库/Redis/Docker/ES/Memcached/Mongo 等内网服务端口）；`CheckIP`/`CheckHost`（DNS 解析后全部 IP fail-closed，CGNAT/基准/协议保留网段恒禁）；`DialContext`（已校验 IP 字面量固定连接，防 DNS rebinding）；`CheckRedirect`（每跳重校验 + 跳数上限）；`Client()`（拨号 + 重定向双重执行的 `*http.Client`）。消费方：`apibase.Deps.ManagementClient`（Provider 管理探测，`AllowPrivate: p.AllowPrivateNetwork`）、`internal/api/image/register.go`（`ssrfPolicy` 30s 超时）、`internal/api/download/register.go::validateDownloadURL`（预检）、`internal/imagebatch/remote_generator.go`（fetchImage 预检 + 策略 client）。
+
+| 文件 | 职责 |
+|---|---|
+| `outbound.go` | `Policy`/`ValidateURL`/`CheckIP`/`CheckHost`/`DialContext`/`CheckRedirect`/`Client` + `blockedPorts` + `extraBlockedNets` |
+| `outbound_test.go` | 7 测试：结构校验、IP/网段矩阵、DNS rebinding fixture、重定向策略 |
+
 
 
 ---
@@ -618,7 +645,7 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 | `playlist.go` | — | 播放列表展开：CreatePlaylistTask |
 | `executor.go` | — | Executor 核心：ErrCancelled/Executor/NewExecutor/Execute/ExecuteInfo/ExecutePlaylistInfo/runCapture |
 | `progress.go` | — | 进度解析与尾部缓冲：progressRe/parseProgressLine/parseSize/parseSpeed/parseETA/processingPatterns/hasPostprocessSignal/tailBuffer |
-| `binary.go` | — | yt-dlp/ffmpeg 路径解析与输出文件提取：resolveYtDlpPath/resolveFfmpegPath/extractSavedFilePath |
+| `binary.go` | — | yt-dlp/ffmpeg 路径解析与输出文件提取：resolveYtDlpPath/resolveFfmpegPath/extractSavedFilePath；**2026-08-09（audit F-08）：** `resolveConfiguredTool` 对配置/env/PATH 候选经 `procutil.ValidateExecutable` 校验（裸名先 `exec.LookPath`） |
 | `parse.go` | — | 错误分类与 JSON 解析：classifyExitError/wrapInfoError/parseVideoInfoJSON/parsePlaylistInfoJSON |
 | `kill_windows.go` | `windows` | 进程终止（委托 `internal/procutil`） |
 | `kill_unix.go` | `!windows` | 进程终止（委托 `internal/procutil`） |
@@ -667,8 +694,8 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 文件 |
 |---|---|
 | 入口 | `index.html`、`index-nopg.html`（可访问 `nav[aria-label="Primary navigation"]`；顶层 Download/GIF 已收纳到 Utility 菜单，active header label 显示当前工具；Utility 子工具为 `editor`/`logReader`/`review`/`gif`/`download`/`fileTransfer`；fresh init 只显示 landing，不预选工具；F5 打开 Utility 菜单，F4 直达 Gallery，无旧 Gallery↔Editor toggle） |
-| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`（共享 info modal 的 section/field Pretty/Raw/Copy、直接 Raw 文本与兼容边界）、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块（`web/static/monitor/`，其中 `monitor_modal.js` 固定六个 Recent Requests 详情 section，Status 为静态行，其余 section 默认折叠并提供 section/字段级 Pretty/Raw/Copy、两级 sticky header）、`console.js`、`download.js`、`filetransfer.js`（Utility FileTransfer：任意文件拖拽/粘贴、Clear、上传进度与确认上传）、Settings 拆分模块（`web/static/settings/`）、`utility/editor/`（File Editor、Log Reader、Text Review）与 `gif-editor/`（GIF 页面 state/import/timeline/playback/export/editor）`
-| vendor | `vendor/gif.js/`、`vendor/gifuct-js/`（各含 LICENSE）；`vendor/utility-editor/`（`diff-match-patch`、`markdown-it`、`dompurify`、`turndown`、`prism`，各含 LICENSE）。Editor 的 Markdown preview 使用 `markdown-it` + sanitization；StackEdit-inspired shell 仅是本地能力边界，不是完整 StackEdit/cledit/PageDown，也未移植远程服务。 |
+| JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`（共享 info modal 的 section/field Pretty/Raw/Copy、直接 Raw 文本与兼容边界）、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块（`web/static/monitor/`，其中 `monitor_modal.js` 固定六个 Recent Requests 详情 section，Status 为静态行，其余 section 默认折叠并提供 section/字段级 Pretty/Raw/Copy、两级 sticky header）、`console.js`、`download.js`、`filetransfer.js`（Utility FileTransfer：任意文件拖拽/粘贴、Clear、上传进度与确认上传；**2026-08-09（audit F-01）：** 上传/容量查询改走 `pathGrantId` 合同）、Settings 拆分模块（`web/static/settings/`）、`utility/editor/`（File Editor、Log Reader、Text Review）与 `gif-editor/`（GIF 页面 state/import/timeline/playback/export/editor）`。**2026-08-09（audit F-03 证据）：** `gif-editor-export.js` ZIP 导出迁移到 assetId 合同（上传帧→assetId → `POST /api/archive/pack` 或 legacy `zip-outputs {assetIds}` → 经受控 `/api/gallery/file?assetId=` 下载），配套 `web/gif-editor-export-contract.test.js` 零依赖 Node 合同测试（PASS）。**2026-08-09（audit F-04/F-05/F-10）：** `auth.js` 全局 fetch 包装自动注入 `X-CSRF-Token`（同源状态变更请求，覆盖 ~100 个直连 fetch 调用点）+ setup 向导（`handleSetup`）+ `setupRequired` 启动分支；`api.js` 401/403 → 登录/setup/CSRF 刷新；`app.js` boot `setupRequired` → setup 屏；`providers.js` Provider 卡片用 `keyCount`、详情页 keys 走 masked DTO（`loadDetailKeys`）；`utility/editor/editor_shell.js` HTML 预览 iframe `sandbox=""` 零权限（不执行脚本/表单/弹窗/同源访问，预览的 .html 无法 fetch `/api/*` 或触碰 `parent.document`），TOC 改由父页 DOMParser 解析原始内容构建（无 contentDocument 读写） |
+| vendor | `vendor/gif.js/`、`vendor/gifuct-js/`（各含 LICENSE）；`vendor/utility-editor/`（`diff-match-patch`、`markdown-it`、`dompurify`、`turndown`、`prism`，各含 LICENSE）。Editor 的 Markdown preview 使用 `markdown-it` + sanitization；StackEdit-inspired shell 仅是本地能力边界，不是完整 StackEdit/cledit/PageDown，也未移植远程服务。**2026-08-09（audit F-24）：** `vendor/utility-editor/dompurify/purify.min.js` 升级 **3.4.13**（README 记录来源 + SHA-256 `9ab3d44d…`） |
 | 样式 | `style.css` |
 
 > **当前入口与资产契约（2026-08-08）：** `internal/feature/feature.go` 的 Editor manifest 使用 `RootStatic`，路径为 `utility/editor/*`；同一资产根提供 Editor、Log Reader、Text Review 的脚本与 `review.js`。`feature.Assets(RootStatic)` 同时包含 Download、GIF、FileTransfer 与 Utility 资产，`web/embed.go`/`web/embed_playground.go` 均从 `web/static` 提供这些文件。`index.html` 与 `index-nopg.html` 的 Utility 相关脚本均按 `/utility/editor/*` 加载；Playground 专属 `web/playground/static-pg/` 不再承载 Editor/Log Reader/Text Review 资产。
@@ -684,7 +711,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | JS 加载顺序 | `playground/` 子目录：`pg-i18n.js` → `pg-core.js` → `pg-state.js` → `pg-markdown.js` → `pg-request.js` → `pg-stream.js` → `pg-comfyui.js` → `pg-image-model.js` → `pg-image-inspire.js` → `pg-image-batch.js` → `pg-autochat.js` → `pg-setup.js` → `pg-director.js` → `pg-search.js` → `pg-render.js` → `pg-ui.js` → `pg-modal.js` → `pg-lifecycle.js`，随后 `gallery/` 脚本；Utility 的 Editor/Log Reader/Text Review 不属于 Playground 静态路由 |
 | 图片模块 | `playground/`：`pg-image-model.js`（Manual Canvas generation/asset history、remote/Comfy result normalization、regenerate/delete、generation-aware autosave）；`pg-image-inspire.js`（Natural/Tag/JSON helper modal）；`pg-image-batch.js`（three-step plan/transform/review、snapshot-first SSE、refresh/pause/resume/stop controls、Prompt × Variant viewer；多窗口 Image 模式禁用 Batch Project） |
 | 其他模块 | `playground/`：`pg-core.js`、`pg-state.js`、`pg-request.js`、`pg-stream.js`、`pg-comfyui.js`（每窗口 Comfy runtime、协议回退、按名称去重 Tab Select）、`pg-render.js`、`pg-ui.js`（Image 多窗口独立设置与 pane 选择）、`pg-modal.js`、`pg-lifecycle.js`、`pg-autochat.js`、`pg-setup.js`、`pg-director.js`、`pg-search.js`；`gallery/` 子目录文件。Utility 的 Editor/Log Reader/Text Review 不在 `static-pg` |
-| vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2)；另有 `web/static/vendor/`（gif.js/gifuct-js）由 `/vendor/*` handler 的主静态回退提供（`internal/api/router.go` `vendorHandler` 先查 playground vendor 目录，未命中回退 `web.Static` 主静态） |
+| vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2)；另有 `web/static/vendor/`（gif.js/gifuct-js）由 `/vendor/*` handler 的主静态回退提供（`internal/api/router.go` `vendorHandler` 先查 playground vendor 目录，未命中回退 `web.Static` 主静态）。**2026-08-09（audit F-24/F-25）：** `purify.min.js` 升级 **DOMPurify 3.4.13**、`mermaid.min.js` 升级 **11.16.1**（esbuild UMD 自包含，`securityLevel:'strict'` 初始化）；来源/SHA-256 记录于 `static-pg/vendor/README.md`（新增）+ `LICENSE.mermaid`（新增） |
 | 样式 | `playground.css`（Manual Canvas、Inspire、Batch 与既有 Playground/Gallery 样式）；Utility Editor/Log Reader/Review 样式由 `web/static/style.css` 与 Utility 资产自身 class 使用 |
 | 静态路由 | `static-pg` 按文件路由由 `internal/feature/feature.go` 的 `StaticFiles` manifest 经 `feature.Assets(RootPlaygroundPG)` 派生（`internal/api/router.go`），当前仅承载 `playground/` 与 `gallery/` 子目录；无硬编码 `pgJSFiles` 列表；URL 路径 = 子目录相对路径（如 `/playground/pg-core.js`、`/gallery/gallery.js`），不提供 Utility Editor/Log Reader/Review 路径 |
 ---
@@ -693,7 +720,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 | 路径 | 状态 | 内容 |
 |---|---|---|
-| `archive_compatibility_plan.md`（根目录） | **当前/实施计划** | ZIP/7z/RAR 统一归档能力、Gallery/GIF/Download MediaBridge 交接、路径与资源安全、feature build profiles 的实施前冻结方案 |
+| `audit_fix.md`（根目录） | **当前/执行中** | 发布前全库安全审核修复方案：F-01..F-30 问题清单、Phase A–F 分阶段实施、验收矩阵、门禁与附录 B 状态表（2026-08-09 执行后按证据更新） |
 | `docs/archive-architecture.md` | **当前/权威** | 归档基础层（ArchiveCore）架构基线：`internal/archive`（P0/P1 合同/严格路径/预算/ZIP adapter/TempStore）、`internal/archivetool`（P2 外部工具层）、`internal/api/archive`（HTTP 表面）、`Config.Archive`/Settings、MediaBridge 交接契约、与冻结计划的偏差、P3-P6 未实施项 |
 | `docs/playground-architecture.md` | **当前/权威** | Playground 前后端架构基线（共享时间线群聊模型、Director/Narrator、场景、源锚点） |
 | `docs/proxy-architecture.md` | **当前/权威** | Proxy 代理核心架构基线（调用链、重试/故障转移状态机、SSE 透传、Gemini 签名回填、在途跟踪、源码锚点） |
@@ -741,7 +768,7 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 > 以下为已冻结但尚未实施的功能计划。实施完成后，必须把对应模块、源码锚点和构建边界移入上文，并删除或更新本条目。
 
-- `archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles。**P0/P1 已落地**（`internal/archive/` §13e）；**P2 已落地**（`internal/archivetool/` §13f + `internal/api/archive/` §10.24 + `Config.Archive`/Settings presence-aware PATCH + `web/static/media-bridge.js` 交接契约）；**P3 部分落地**：Gallery 后端桥接（`archiveBridge` + `zip-replace`）+ 前端 sourceId 双路径（读取/删除/审核/编辑），**旧 `/api/gallery/zip*` 与 `/edit/zip-outputs|zip-writeback|extract-zip-entry|upload-temp` 端点保留、前端 legacy 调用方未删**（FSAA/拖放/粘贴仍走 zip 会话；计划 §7.2"迁移完成后删除"未执行；**原生 picker `accept` 仍只含 `.zip`**——`gallery-layout.js:15`，.7z/.rar 用户文件导入无前端路径，`isArchiveName` 识别后仍走 zip-only 上传）；**P5 第一阶段已落地**（`internal/feature` §13g manifest + `feature.Enabled` 门控，feature_* tags 未实施）；**未实施：P4**（GIF 导出格式选择 + 帧 asset 化全量迁移）、**P5 tags/profiles**、**P6**（7z/RAR 原文件替换）。
+- `archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles。**P0/P1 已落地**（`internal/archive/` §13e）；**P2 已落地**（`internal/archivetool/` §13f + `internal/api/archive/` §10.24 + `Config.Archive`/Settings presence-aware PATCH + `web/static/media-bridge.js` 交接契约）；**P3 部分落地**：Gallery 后端桥接（`archiveBridge` + `zip-replace`）+ 前端 sourceId 双路径（读取/删除/审核/编辑），**旧 `/api/gallery/zip*` 与 `/edit/zip-outputs|zip-writeback|extract-zip-entry|upload-temp` 端点保留、前端 legacy 调用方未删**（FSAA/拖放/粘贴仍走 zip 会话；计划 §7.2"迁移完成后删除"未执行；**原生 picker `accept` 仍只含 `.zip`**——`gallery-layout.js:15`，.7z/.rar 用户文件导入无前端路径，`isArchiveName` 识别后仍走 zip-only 上传）；**P5 第一阶段已落地**（`internal/feature` §13g manifest + `feature.Enabled` 门控，feature_* tags 未实…）。**2026-08-09（audit_fix 执行后）：** 上述 legacy 端点**后端已全部迁移到 grant/asset/sourceId 合同并 410 拒绝 raw path**（§10.9）——前端 `web/playground/static-pg/gallery/*.js` 已于 2026-08-09 迁移到新合同（`inputAssetId`/`inputGrantId`/`sourceId`/`grantId+rel`，见 `audit_fix.md` 附录 B F-03；仅存永不赋值的 `zipAbsPath`/`rootDirPath` 死分支与单 zip extract→edit 的 `data.tempPath` 残留读——非安全功能缺陷，待修）；`audit_fix.md` 本身为执行中用户文档（见 §19 表新增行）
 
 ---
 
@@ -771,7 +798,10 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 修改全局快捷键/键映射 | PROJECT_MAP §18.2 | `web/static/shortcuts.js`（`SHORTCUT_PRESETS` 系统预设 + `Shortcuts` API）、`web/static/app.js`（全局 keydown 改 `Shortcuts.matchEvent`）、`web/playground/static-pg/playground/pg-ui.js`+`pg-autochat.js`+`gallery-fullscreen.js`（按区域改 `matchEvent`）、`web/static/settings/settings_shortcuts.js`（`openShortcutsModal` + `getShortcutSettingsSummary`/`updateShortcutSettingsSummary` 动态摘要 + `closeShortcutsModal` 取消恢复）、`internal/api/settings/register.go`（`shortcuts` 字段流转）、`internal/config/types.go`（`ShortcutsConfig`） |
 | 修改 QuickSlot 头部交互 / Active 联动 | PROJECT_MAP §18.2 | `web/static/quickslots.js`（`openModelSelectorModal` 统一抽取全站模型选择模态框 + `openQuickSlotModalByOrder`/`openQuickSlotModalById`/`_qsModal*` modal 系统 + import... 尾项 + `+` 快捷键 + capture 阶段键盘处理 + 1s 自动关闭门限 + Del 删除 + `setupImportModalKeyboardAndFocus` + `attachModalFocusTrap` 导入 modal 焦点/Tab 锁/上下键/PgUpPgDn/Space/Enter 交互 + `_qsActiveId`/`qsSetActive`/`qsClearActive`/`qsGetActiveModel`/`_qsUpdateActiveClass` active 联动）、`web/static/combos.js`（`importModelsFromProvider` 复用 `openModelSelectorModal`）、`web/static/app.js`（1-9 改调 `openQuickSlotModalByOrder(n, true)`，移除旧 Alt/Ctrl+1-9）、`web/static/shortcuts.js`（移除旧 quickslot-import/delete 预设）、`web/static/style.css`（`.quickslot-header` 优先级高于 `.top-header-stats` + `.import-model-item.focused` 高亮 + `outline-offset: -1px` 修复焦点轮廓线截断）、`web/static/i18n.js`（`qsModalHint` + `import` 翻译键） |
 | 修改下载参数/任务生命周期 | download | `internal/download/args.go`+`executor.go`+`manager.go`、`internal/api/download/register.go`、`web/static/download.js`（Utility 的 Download 子工具；`suspendDownload`/`resumeDownload` 与导航切换生命周期） |
-| 修改本地密码/鉴权 | config-registry-state | `config/defaults.go`（`finalizeConfig` Security 一致性归一化）、`config/crypto.go`、`internal/api/auth/handler.go`+`rate_limit.go`+`auth_test.go`（LoginHandler 移除防御性绕过）、`internal/api/settings/register.go`（`updateSettings` 拒绝无密码开启保护）、`config/types.go`（`SecurityConfig`）、`web/static/settings/settings.js`（`togglePasswordProtection` 打开 modal 而非直接 PATCH）、`web/static/auth.js`（登录失败允许重试而非退出）、`web/static/i18n.js`（`passwordChangeHint` 键） |
+| 修改本地密码/鉴权 | config-registry-state | `config/defaults.go`（`finalizeConfig` Security 一致性归一化）、`config/crypto.go`、`internal/api/auth/handler.go`+`rate_limit.go`+`auth_test.go`（LoginHandler 移除防御性绕过）、`internal/api/settings/register.go`（`updateSettings` 拒绝无密码开启保护）、`config/types.go`（`SecurityConfig`）、`web/static/settings/settings.js`（`togglePasswordProtection` 打开 modal 而非直接 PATCH）、`web/static/auth.js`（登录失败允许重试而非退出）、`web/static/i18n.js`（`passwordChangeHint` 键）。**2026-08-09（audit F-04/F-05/F-26）：** setup-required 状态机（未设密码 → 401 `setup_required`，`POST /api/auth/setup` bootstrap）、会话绑定 CSRF（`AuthMiddleware`/`csrfChecksPass`/`originAllowed`/`requireJSONBody`）、`loginGuard.Success()` 显式成功记账；Provider/Key 凭证最小化 DTO（`ProviderDTO`/`KeyDTO`/`MaskKey`/`hasApiKey`）；`web/static/auth.js` 全局 fetch 注入 `X-CSRF-Token` + setup 向导 |
+| 新增/修改管理面认证或 CSRF | config-registry-state、proxy | `internal/api/auth/handler.go`（`AuthMiddleware`/`AuthStatusHandler`/`SetupHandler`/`SessionStore`/`CSRFToken`）+ `rate_limit.go`（`loginGuard`）+ `internal/api/router.go`（`authHandler.AuthMiddleware` 包裹全部 `/api/*` 组）+ `web/static/auth.js`（fetch 包装 + setup 屏）+ `web/static/api.js`（401/403 处理）+ `internal/config/types.go`（`SecurityConfig`） |
+| 新增/修改出站 SSRF 策略 | proxy、config-registry-state、download | `internal/outbound/outbound.go`（`Policy`/`ValidateURL`/`CheckIP`/`CheckHost`/`DialContext`/`CheckRedirect`/`Client`）+ `internal/api/apibase/deps.go`（`ManagementClient`）+ `internal/api/image/register.go`（`ssrfPolicy`）+ `internal/api/download/register.go`（`validateDownloadURL`）+ `internal/imagebatch/remote_generator.go`（fetchImage 预检）+ `internal/config/types.go`（`Provider.AllowPrivateNetwork`）+ `internal/mediaedit/probe.go`/`executor.go`（`-protocol_whitelist file`） |
+| 新增/修改路径能力合同（grant/asset/owner） | archive、playground、config-registry-state | `internal/owner/owner.go`（`Middleware`/`From`）+ `internal/pathgrant/pathgrant.go`（`Store.Grant`/`Resolve`/`ResolveChild`/`StrictRel`）+ `internal/api/editor/register.go`（`fileId`/`pathGrantId`）+ `internal/api/gallery/*`（grant/asset/sourceId 合同）+ `internal/filetransfer/upload.go`（grantId 上传）+ `internal/archive/tempstore.go`（owner 参数化 + 配额）+ `internal/api/archive/register.go`（`ResolveSource(ownerID,id)`） |
 | 修改 NIM 限速 | rotation | `rotation/nim.go`+`selector.go`（`IsNIMEnabled`）、`config/types.go`（`NIMSettings`+`ModelNIMOverride`）、`proxy/retry.go`（429 分发）、`proxy/interfaces.go`（`KeyProvider`）、`proxy/forward.go`（NIM 门控） |
 | 修改配额锁/冷却退避 | rotation | `rotation/cooldown.go`、`config/defaults.go`（`BackoffMaxSec`） |
 | 新增 Provider 限速头解析 | rotation | `rotation/ratelimit.go`（adapter）、`proxy/recorder.go` |

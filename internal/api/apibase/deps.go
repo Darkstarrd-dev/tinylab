@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/archive"
 	"github.com/tinyrouter/tinyrouter/internal/archivetool"
@@ -20,6 +21,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -102,6 +104,20 @@ func WriteAPIError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// ManagementClient returns the HTTP client used for provider management
+// probes (validate/test/probe/model fetch/combo speed test). Direct
+// connections enforce the outbound SSRF policy — per-hop redirect
+// revalidation and DNS-rebinding-safe dialing — and honour the provider's
+// explicit AllowPrivateNetwork capability for private/loopback targets.
+// Proxied connections are delegated to the configured upstream proxy after
+// the caller's pre-flight URL/host checks.
+func (d *Deps) ManagementClient(p config.Provider) *http.Client {
+	if p.UseProxy {
+		return d.ProxyHandler.ManagementClient(p)
+	}
+	return outbound.Policy{AllowPrivate: p.AllowPrivateNetwork, Timeout: 15 * time.Second}.Client()
 }
 
 // CheckPortAvailable tests whether a TCP port can be bound on 127.0.0.1.

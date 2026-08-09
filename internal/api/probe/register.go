@@ -141,7 +141,7 @@ func (h *Handler) probeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := h.d.ProxyHandler.ManagementClient(*provider)
+	client := h.d.ManagementClient(*provider)
 
 	ctx, cancel := contextWithOverallTimeout(r, 30*time.Second)
 	defer cancel()
@@ -248,13 +248,12 @@ func (h *Handler) probeKey(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			errBody, _ := io.ReadAll(resp.Body)
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 			resp.Body.Close()
 			errMsg := strings.TrimSpace(string(errBody))
 			if len(errMsg) > 500 {
 				errMsg = errMsg[:500]
 			}
-			result.Ok = false
 			result.Status = resp.StatusCode
 			result.Error = errMsg
 			result.LatencyMs = time.Since(t0).Milliseconds()
@@ -265,8 +264,9 @@ func (h *Handler) probeKey(w http.ResponseWriter, r *http.Request) {
 		var ttftMs int64
 		inputTokens := 0
 		outputTokens := 0
+		aborted := false
 		buf := make([]byte, 32*1024)
-		sb := &sse.SSELineBuffer{}
+		sb := sse.NewSSELineBuffer(0, 0)
 
 		for {
 			n, readErr := resp.Body.Read(buf)
@@ -274,7 +274,15 @@ func (h *Handler) probeKey(w http.ResponseWriter, r *http.Request) {
 				if ttftMs == 0 {
 					ttftMs = time.Since(t0).Milliseconds()
 				}
-				for _, payload := range sse.SSEDataPayloads(sb.Feed(buf[:n])) {
+				lines, ferr := sb.Feed(buf[:n])
+				if ferr != nil {
+					result.Ok = false
+					result.Status = resp.StatusCode
+					result.Error = "upstream SSE exceeded line buffer budget: " + ferr.Error()
+					aborted = true
+					break
+				}
+				for _, payload := range sse.SSEDataPayloads(lines) {
 					if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
 						inputTokens = in
 						outputTokens = out
@@ -309,13 +317,15 @@ func (h *Handler) probeKey(w http.ResponseWriter, r *http.Request) {
 			h.d.QuotaTracker.Update(provider.Name, req.Model, k.ID, k.Name, snap.ModelLimit, snap.ModelRemaining, activeKeyCount)
 		}
 
-		result.Ok = true
-		result.Status = 200
-		result.TTFTMs = ttftMs
-		result.LatencyMs = totalMs
-		result.InputTokens = inputTokens
-		result.OutputTokens = outputTokens
-		result.TokensPerSec = tokensPerSec
+		if !aborted {
+			result.Ok = true
+			result.Status = 200
+			result.TTFTMs = ttftMs
+			result.LatencyMs = totalMs
+			result.InputTokens = inputTokens
+			result.OutputTokens = outputTokens
+			result.TokensPerSec = tokensPerSec
+		}
 
 		results = append(results, result)
 	}
@@ -404,18 +414,17 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 	h.d.Logger.Debug("PROBE SEND %s/%s | Key=%s | url=%s | body=%s", provider.Name, model, k.Name, chatURL, util.TruncStr(string(bodyBytes), 200))
 
 	t0 := time.Now()
-	resp, err := h.d.ProxyHandler.ManagementClient(*provider).Do(httpReq)
+	resp, err := h.d.ManagementClient(*provider).Do(httpReq)
 	if err != nil {
 		h.d.Logger.Error("PROBE ERR %s/%s | Key=%s | %v", provider.Name, model, k.Name, err)
 		result.Ok = false
 		result.Error = err.Error()
 		result.LatencyMs = time.Since(t0).Milliseconds()
-		h.d.ProxyHandler.TraceMgmtCall("probe:singlekey:provider="+providerID+":model="+model+":key="+k.ID, "probe", "probe", model, provider.Name, chatURL, httpReq.Header, bodyBytes, 0, nil, nil, err.Error(), time.Since(t0).Milliseconds())
 		return result
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 		resp.Body.Close()
 		errMsg := strings.TrimSpace(string(errBody))
 		if len(errMsg) > 500 {
@@ -436,7 +445,7 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 	var contentChunks int
 	var contentBuf strings.Builder
 	buf := make([]byte, 32*1024)
-	sb := &sse.SSELineBuffer{}
+	sb := sse.NewSSELineBuffer(0, 0)
 
 	const minChunks = 10
 	const maxStreamSec = 8
@@ -448,14 +457,22 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 				ttftMs = time.Since(t0).Milliseconds()
 				h.d.Logger.Debug("PROBE STREAM %s/%s | Key=%s | TTFT=%dms", provider.Name, model, k.Name, ttftMs)
 			}
-			for _, payload := range sse.SSEDataPayloads(sb.Feed(buf[:n])) {
+			lines, ferr := sb.Feed(buf[:n])
+			if ferr != nil {
+				result.Ok = false
+				result.Status = resp.StatusCode
+				result.Error = "upstream SSE exceeded line buffer budget: " + ferr.Error()
+			}
+			for _, payload := range sse.SSEDataPayloads(lines) {
 				if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
 					inputTokens = in
 					outputTokens = out
 				}
 				if text := extractContentFromSSE([]byte(payload)); text != "" {
 					contentChunks++
-					contentBuf.WriteString(text)
+					if contentBuf.Len() < 64<<10 {
+						contentBuf.WriteString(text)
+					}
 				}
 			}
 			if contentChunks >= minChunks || time.Since(t0).Seconds() > maxStreamSec {
@@ -470,7 +487,9 @@ func (h *Handler) probeSingleKey(ctx context.Context, providerID string, provide
 				}
 				if text := extractContentFromSSE([]byte(payload)); text != "" {
 					contentChunks++
-					contentBuf.WriteString(text)
+					if contentBuf.Len() < 64<<10 {
+						contentBuf.WriteString(text)
+					}
 				}
 			}
 			break
@@ -634,7 +653,10 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	// Bound the probe display copy: an over-limit upstream body is truncated
+	// for the probe result view (this is a debug surface, not a pass-through;
+	// F-14 keeps the client-facing path separate).
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	raw := string(respBody)
 	var parsedResp any = raw
 	if j := map[string]any{}; json.Unmarshal(respBody, &j) == nil {

@@ -84,6 +84,81 @@ func TestResolve_RoundRobin_Sticky(t *testing.T) {
 	}
 }
 
+// TestResolve_RoundRobin_UsesConfiguredStickyLimit guards F-19: round-robin
+// target rotation must honor the configured rotation.stickyLimit instead of a
+// hardcoded 3. With stickyLimit=2 the first target must be reused for exactly
+// 2 calls and rotate on the 3rd.
+func TestResolve_RoundRobin_UsesConfiguredStickyLimit(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "p1", Prefix: "provA", Name: "A"},
+		{ID: "p2", Prefix: "provB", Name: "B"},
+	}
+	c := config.Combo{
+		ID: "c1", Name: "rr", Strategy: "round-robin",
+		Models: []string{"provA/model-a", "provB/model-b"},
+	}
+	cfg := &config.Config{
+		Rotation:  config.RotationConfig{StickyLimit: 2},
+		Providers: providers,
+		Combos:    []config.Combo{c},
+	}
+	r := New(registry.New(cfg))
+
+	for i := 0; i < 2; i++ {
+		plan, err := r.Resolve("rr", EntryFormatOpenAI)
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if plan.Targets[0].ProviderID != "p1" {
+			t.Fatalf("call %d: expected p1 (sticky), got %s", i, plan.Targets[0].ProviderID)
+		}
+	}
+	plan, err := r.Resolve("rr", EntryFormatOpenAI)
+	if err != nil {
+		t.Fatalf("call 3: %v", err)
+	}
+	if plan.Targets[0].ProviderID != "p2" {
+		t.Errorf("call 3: expected rotation to p2 after stickyLimit=2 uses, got %s", plan.Targets[0].ProviderID)
+	}
+}
+
+// TestResolve_RoundRobin_ZeroStickyLimitFallsBackToDefault guards F-19: a
+// zero/negative configured stickyLimit falls back to the historical default
+// of 3 (rotation on the 4th call).
+func TestResolve_RoundRobin_ZeroStickyLimitFallsBackToDefault(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "p1", Prefix: "provA", Name: "A"},
+		{ID: "p2", Prefix: "provB", Name: "B"},
+	}
+	c := config.Combo{
+		ID: "c1", Name: "rr", Strategy: "round-robin",
+		Models: []string{"provA/model-a", "provB/model-b"},
+	}
+	cfg := &config.Config{
+		Rotation:  config.RotationConfig{StickyLimit: 0},
+		Providers: providers,
+		Combos:    []config.Combo{c},
+	}
+	r := New(registry.New(cfg))
+
+	for i := 0; i < 3; i++ {
+		plan, err := r.Resolve("rr", EntryFormatOpenAI)
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if plan.Targets[0].ProviderID != "p1" {
+			t.Fatalf("call %d: expected p1 (sticky), got %s", i, plan.Targets[0].ProviderID)
+		}
+	}
+	plan, err := r.Resolve("rr", EntryFormatOpenAI)
+	if err != nil {
+		t.Fatalf("call 4: %v", err)
+	}
+	if plan.Targets[0].ProviderID != "p2" {
+		t.Errorf("call 4: expected rotation to p2 after default stickyLimit=3, got %s", plan.Targets[0].ProviderID)
+	}
+}
+
 func TestResolve_RoundRobin_Rotate(t *testing.T) {
 	providers := []config.Provider{
 		{ID: "p1", Prefix: "provA", Name: "A"},

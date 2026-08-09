@@ -109,39 +109,22 @@ async function fileTransferPaste(e) {
   if (fileTransferState.busy || !fileTransferElement('filetransfer-drop-zone')) return;
   e.preventDefault();
   try {
-    var pathResponse = await fetch('/api/gallery/paste-paths', { method: 'POST' });
+    // Path capability contract (audit F-01/B-2): the server reads the OS
+    // clipboard and registers short-TTL export grants; the browser only ever
+    // holds pathGrantIds, never local paths.
+    var pathResponse = await fetch('/api/filetransfer/paste', { method: 'POST' });
     if (pathResponse.ok) {
       var pathData = await pathResponse.json();
-      if (pathData.paths && pathData.paths.length) {
-        var paths = pathData.paths;
-        try {
-          var infoResponse = await fetch('/api/filetransfer/path-info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paths: paths })
-          });
-          if (infoResponse.ok) {
-            var infoData = await infoResponse.json();
-            if (infoData.paths && infoData.paths.length) {
-              for (var i = 0; i < infoData.paths.length; i++) {
-                var info = infoData.paths[i];
-                fileTransferAddItem({ name: info.name, size: Number(info.size) || 0, localPath: info.path });
-              }
-              return;
-            }
-          }
-        } catch (infoErr) {
-          console.warn('FileTransfer clipboard path sizes failed:', infoErr);
-        }
-        for (var j = 0; j < paths.length; j++) {
-          var fallbackPath = paths[j];
-          fileTransferAddItem({ name: fallbackPath.replace(/[\\/]/g, '/').split('/').pop(), size: 0, localPath: fallbackPath });
+      if (pathData.grants && pathData.grants.length) {
+        for (var i = 0; i < pathData.grants.length; i++) {
+          var g = pathData.grants[i];
+          fileTransferAddItem({ name: g.name || 'unnamed', size: Number(g.size) || 0, grantId: g.pathGrantId });
         }
         return;
       }
     }
   } catch (err) {
-    console.warn('FileTransfer clipboard paths failed:', err);
+    console.warn('FileTransfer clipboard grants failed:', err);
   }
   if (e.clipboardData && e.clipboardData.items && e.clipboardData.items.length) {
     var hasFile = false;
@@ -223,14 +206,14 @@ function fileTransferSetProgress(percent, visible) {
 
 function fileTransferBuildFormData() {
   var form = new FormData();
-  var paths = [];
+  var grantIds = [];
   for (var i = 0; i < fileTransferState.items.length; i++) {
     var item = fileTransferState.items[i];
-    if (item.localPath) paths.push(item.localPath);
+    if (item.grantId) grantIds.push(item.grantId);
     else if (item.file) form.append('files', item.file, item.name || item.file.name || 'file');
     else throw new Error(t('fileTransferReadFailed'));
   }
-  if (paths.length) form.append('paths', JSON.stringify(paths));
+  if (grantIds.length) form.append('grantIds', JSON.stringify(grantIds));
   return form;
 }
 

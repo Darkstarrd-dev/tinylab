@@ -24,7 +24,7 @@ func TestZIPWriter_ReplaceZIP(t *testing.T) {
 	}, "keep-comment")
 	src := writeSource(t, data)
 
-	replAsset, err := store.Create(t.Context(), "editor", "job-1", "new-alpha.png", "image/png", strings.NewReader("alpha-new"), 0)
+	replAsset, err := store.Create(t.Context(), "test-owner", "job-1", "new-alpha.png", "image/png", strings.NewReader("alpha-new"), 0)
 	if err != nil {
 		t.Fatalf("Create replacement: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestZIPWriter_ReplaceZIP(t *testing.T) {
 		t.Fatalf("output name = %q, want test.zip", out.Name)
 	}
 
-	rc, _, err := store.Open(out.ID)
+	rc, _, err := store.Open("test-owner", out.ID)
 	if err != nil {
 		t.Fatalf("Open output: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestZIPWriter_ReplaceZIP_SourcePathUnchanged(t *testing.T) {
 	store, w := newWriterStore(t)
 	data := buildZIPBytes(t, []zipSpec{{"a.png", []byte("orig"), false}}, "")
 	src := writeSource(t, data)
-	repl, err := store.Create(t.Context(), "e", "j", "a.png", "", strings.NewReader("new"), 0)
+	repl, err := store.Create(t.Context(), "test-owner", "j", "a.png", "", strings.NewReader("new"), 0)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestZIPWriter_ReplaceZIPDeleting(t *testing.T) {
 	}, "keep-comment")
 	src := writeSource(t, data)
 
-	replAsset, err := store.Create(t.Context(), "editor", "job-1", "alpha.png", "image/png", strings.NewReader("alpha-new"), 0)
+	replAsset, err := store.Create(t.Context(), "test-owner", "job-1", "alpha.png", "image/png", strings.NewReader("alpha-new"), 0)
 	if err != nil {
 		t.Fatalf("Create replacement: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestZIPWriter_ReplaceZIPDeleting(t *testing.T) {
 		t.Fatalf("output asset incomplete: %+v", out)
 	}
 
-	rc, _, err := store.Open(out.ID)
+	rc, _, err := store.Open("test-owner", out.ID)
 	if err != nil {
 		t.Fatalf("Open output: %v", err)
 	}
@@ -192,11 +192,11 @@ func TestZIPWriter_ReplaceZIPDeleting_UnsupportedFormat(t *testing.T) {
 
 func TestZIPWriter_Pack(t *testing.T) {
 	store, w := newWriterStore(t)
-	a, err := store.Create(t.Context(), "gif", "job-1", "frame_01.png", "image/png", strings.NewReader("frame-1"), 0)
+	a, err := store.Create(t.Context(), "test-owner", "job-1", "frame_01.png", "image/png", strings.NewReader("frame-1"), 0)
 	if err != nil {
 		t.Fatalf("Create a: %v", err)
 	}
-	b, err := store.Create(t.Context(), "gif", "job-1", "frame_02.png", "image/png", strings.NewReader("frame-2"), 0)
+	b, err := store.Create(t.Context(), "test-owner", "job-1", "frame_02.png", "image/png", strings.NewReader("frame-2"), 0)
 	if err != nil {
 		t.Fatalf("Create b: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestZIPWriter_Pack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
-	rc, _, err := store.Open(out.ID)
+	rc, _, err := store.Open("test-owner", out.ID)
 	if err != nil {
 		t.Fatalf("Open pack: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestZIPWriter_Pack_UnsupportedFormat(t *testing.T) {
 
 func TestZIPWriter_Pack_UnsafeAssetName(t *testing.T) {
 	store, w := newWriterStore(t)
-	asset, err := store.Create(t.Context(), "gif", "j", "..", "", strings.NewReader("x"), 0)
+	asset, err := store.Create(t.Context(), "test-owner", "j", "..", "", strings.NewReader("x"), 0)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestZIPWriter_Pack_FileCountCap(t *testing.T) {
 	store, w := newWriterStore(t)
 	assets := make([]AssetRef, 3)
 	for i := range assets {
-		ref, err := store.Create(t.Context(), "o", "j", "f.png", "", strings.NewReader("x"), 0)
+		ref, err := store.Create(t.Context(), "test-owner", "j", "f.png", "", strings.NewReader("x"), 0)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestZIPWriter_Pack_FileCountCap(t *testing.T) {
 
 func TestZIPWriter_Pack_MissingAsset(t *testing.T) {
 	_, w := newWriterStore(t)
-	_, err := w.Pack(context.Background(), FormatZIP, []AssetRef{{ID: "deadbeef", Name: "x.png"}}, "out.zip", DefaultBudget())
+	_, err := w.Pack(context.Background(), FormatZIP, []AssetRef{{ID: "deadbeef", Owner: "test-owner", Name: "x.png"}}, "out.zip", DefaultBudget())
 	if !IsNotFound(err) {
 		t.Fatalf("expected ErrEntryNotFound, got %v", err)
 	}

@@ -1,0 +1,343 @@
+package editor
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinyrouter/tinyrouter/internal/registry"
+)
+
+// newTestHandler builds a Handler whose docDir is a fresh temp directory.
+func newTestHandler(t *testing.T) (*Handler, string) {
+	t.Helper()
+	docDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.DocDir = docDir
+	h := NewHandler(&apibase.Deps{Reg: registry.New(cfg), ConfigPath: filepath.Join(t.TempDir(), "config.yaml")})
+	return h, docDir
+}
+
+// stampOwner runs req through the owner middleware and returns the stamped
+// request (the middleware also writes the owner cookie to rec).
+func stampOwner(t *testing.T, req *http.Request) *http.Request {
+	t.Helper()
+	var stamped *http.Request
+	mw := owner.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stamped = r
+	}))
+	mw.ServeHTTP(httptest.NewRecorder(), req)
+	if stamped == nil {
+		t.Fatal("owner middleware did not stamp the request")
+	}
+	return stamped
+}
+
+// doJSON runs one request through a fresh owner session.
+func doJSON(t *testing.T, h *Handler, method, target string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	req := buildRequest(t, method, target, body)
+	return doJSONReq(t, h, stampOwner(t, req))
+}
+
+// doJSONCtx is doJSON but reusing an already-stamped owner context, so grant
+// lookups stay within one browser session.
+func doJSONCtx(t *testing.T, h *Handler, method, target string, body any, stamped *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	req := buildRequest(t, method, target, body)
+	return doJSONReq(t, h, req.WithContext(stamped.Context()))
+}
+
+func buildRequest(t *testing.T, method, target string, body any) *http.Request {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(b)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, target, reader)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func doJSONReq(t *testing.T, h *Handler, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.serve(rec, req)
+	return rec
+}
+
+// serve routes one request through the handler's chi-like mux.
+func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
+	h.dummyMux().ServeHTTP(w, r)
+}
+
+// dummyMux is a minimal router implementing the editor's chiRouter surface.
+func (h *Handler) dummyMux() *tinyMux {
+	m := &tinyMux{}
+	h.Register(m)
+	return m
+}
+
+type route struct {
+	method  string
+	pattern string
+	handler http.HandlerFunc
+}
+
+type tinyMux struct {
+	routes []route
+}
+
+func (m *tinyMux) Use(_ ...func(http.Handler) http.Handler) {}
+
+func (m *tinyMux) Get(pattern string, h http.HandlerFunc) {
+	m.routes = append(m.routes, route{"GET", pattern, h})
+}
+
+func (m *tinyMux) Post(pattern string, h http.HandlerFunc) {
+	m.routes = append(m.routes, route{"POST", pattern, h})
+}
+
+func (m *tinyMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, rt := range m.routes {
+		if rt.method == r.Method && matchPattern(rt.pattern, r.URL.Path) {
+			rt.handler(w, r)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+func matchPattern(pattern, path string) bool {
+	if pattern == path {
+		return true
+	}
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(path, prefix)
+	}
+	return false
+}
+
+func TestEditorTree_NoAbsolutePaths(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	if err := os.MkdirAll(filepath.Join(docDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docDir, "sub", "a.md"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, h, http.MethodGet, "/tree", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Files []DocFileItem `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 2 {
+		t.Fatalf("files = %+v, want dir + file", result.Files)
+	}
+	var fileItem *DocFileItem
+	for i := range result.Files {
+		if result.Files[i].FileID == "sub/a.md" {
+			fileItem = &result.Files[i]
+		}
+	}
+	if fileItem == nil || fileItem.Name != "a.md" || fileItem.Size != 2 {
+		t.Fatalf("file node missing or wrong: %+v", result.Files)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, docDir) || strings.Contains(body, "C:") {
+		t.Fatalf("tree response leaks absolute paths: %s", body)
+	}
+}
+
+func TestEditorOpenSaveDelete_FileID(t *testing.T) {
+	h, docDir := newTestHandler(t)
+
+	// Save via fileId (new file inside docDir).
+	rec := doJSON(t, h, http.MethodPost, "/save", map[string]any{"fileId": "notes/hello.md", "content": "hello world"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	saved := filepath.Join(docDir, "notes", "hello.md")
+	if _, err := os.Stat(saved); err != nil {
+		t.Fatalf("saved file missing: %v", err)
+	}
+
+	// Open via fileId.
+	rec = doJSON(t, h, http.MethodPost, "/open", map[string]any{"fileId": "notes/hello.md"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("open status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var opened map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened["content"] != "hello world" || opened["fileId"] != "notes/hello.md" {
+		t.Fatalf("open result = %+v", opened)
+	}
+
+	// Delete via fileId.
+	rec = doJSON(t, h, http.MethodPost, "/delete", map[string]any{"fileId": "notes/hello.md"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(saved); !os.IsNotExist(err) {
+		t.Fatalf("deleted file still exists")
+	}
+}
+
+func TestEditorRejectsTraversalFileIDs(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	secret := filepath.Join(filepath.Dir(docDir), "secret.txt")
+	if err := os.WriteFile(secret, []byte("top-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attacks := []string{
+		"../secret.txt",
+		"..\\secret.txt",
+		"../../secret.txt",
+		"/etc/passwd",
+		"\\etc\\passwd",
+		"C:/Windows/win.ini",
+		"C:\\Windows\\win.ini",
+		"\\\\server\\share\\x",
+		"sub/../../secret.txt",
+		"a/..",
+	}
+	for _, attack := range attacks {
+		rec := doJSON(t, h, http.MethodPost, "/open", map[string]any{"fileId": attack})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("open fileId %q: status = %d, want 400; body = %s", attack, rec.Code, rec.Body.String())
+		}
+		rec = doJSON(t, h, http.MethodPost, "/save", map[string]any{"fileId": attack, "content": "x"})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("save fileId %q: status = %d, want 400", attack, rec.Code)
+		}
+		rec = doJSON(t, h, http.MethodPost, "/delete", map[string]any{"fileId": attack})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("delete fileId %q: status = %d, want 400", attack, rec.Code)
+		}
+	}
+}
+
+func TestEditorRejectsLegacyRawPaths(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doJSON(t, h, http.MethodPost, "/open", map[string]any{"path": "C:\\Users\\evil\\secret.txt"})
+	if rec.Code != http.StatusGone {
+		t.Fatalf("open path: status = %d, want 410", rec.Code)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/save", map[string]any{"path": "/etc/passwd", "content": "x"})
+	if rec.Code != http.StatusGone {
+		t.Fatalf("save path: status = %d, want 410", rec.Code)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/delete", map[string]any{"path": "/etc/passwd"})
+	if rec.Code != http.StatusGone {
+		t.Fatalf("delete path: status = %d, want 410", rec.Code)
+	}
+}
+
+func TestEditorServeImage_Containment(t *testing.T) {
+	h, docDir := newTestHandler(t)
+	imgs := filepath.Join(docDir, "imgs")
+	if err := os.MkdirAll(imgs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(imgs, "a.webp"), []byte("img"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(filepath.Dir(docDir), "secret.txt")
+	if err := os.WriteFile(secret, []byte("top-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSON(t, h, http.MethodGet, "/image?path=./imgs/a.webp", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("serve image: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	for _, attack := range []string{"../secret.txt", "../../config.yaml", "C:/Windows/win.ini", "\\\\srv\\x"} {
+		rec = doJSON(t, h, http.MethodGet, "/image?path="+attack, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("image path %q: status = %d, want 400", attack, rec.Code)
+		}
+	}
+}
+
+func TestEditorOpenSaveViaGrant(t *testing.T) {
+	h, _ := newTestHandler(t)
+	outside := filepath.Join(t.TempDir(), "external.md")
+	if err := os.WriteFile(outside, []byte("external content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register a read+write grant under the stamped owner.
+	req := httptest.NewRequest(http.MethodPost, "/open", bytes.NewReader(nil))
+	stamped := stampOwner(t, req)
+	ownerID := owner.From(stamped.Context())
+	g, err := h.grants.Grant(ownerID, []pathgrant.Operation{pathgrant.OpRead, pathgrant.OpWrite}, outside, false, false)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Open via the grant, reusing the stamped owner session.
+	rec := doJSONCtx(t, h, http.MethodPost, "/open", map[string]any{"pathGrantId": g.ID}, stamped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("grant open: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var opened map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened["content"] != "external content" {
+		t.Fatalf("grant open content = %+v", opened)
+	}
+
+	// Save back through the grant.
+	rec = doJSONCtx(t, h, http.MethodPost, "/save", map[string]any{"pathGrantId": g.ID, "content": "updated"}, stamped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("grant save: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	b, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "updated" {
+		t.Fatalf("grant save wrote %q", b)
+	}
+}
+
+func TestEditorForeignGrantDenied(t *testing.T) {
+	h, _ := newTestHandler(t)
+	outside := filepath.Join(t.TempDir(), "foreign.md")
+	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Grant owned by a DIFFERENT owner than the request.
+	g, err := h.grants.Grant("someone-else", []pathgrant.Operation{pathgrant.OpRead}, outside, false, false)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	rec := doJSON(t, h, http.MethodPost, "/open", map[string]any{"pathGrantId": g.ID})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("foreign grant open: status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+}

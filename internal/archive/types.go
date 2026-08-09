@@ -47,9 +47,11 @@ func (f Format) Valid() bool {
 
 // Source is a server-side registered archive source. Path is server-internal
 // only and must never be returned to the browser; clients address the source
-// by ID.
+// by ID. Owner binds the source to the browser session that registered it:
+// every read/rewrite/release of the source re-verifies the caller's owner.
 type Source struct {
 	ID       string
+	Owner    string // server-issued owner identity (see internal/owner)
 	Format   Format
 	Name     string
 	Path     string // server-side only; never a client contract
@@ -58,13 +60,17 @@ type Source struct {
 }
 
 // AssetRef references a server-side temporary asset (extracted entry, job
-// output, or pack result). Path is server-side only.
+// output, or pack result). Path is server-side only; Owner/JobID/ExpiresAt
+// are the resource lifecycle metadata used for authorization and reaping.
 type AssetRef struct {
-	ID   string
-	Name string
-	MIME string
-	Path string // server-side only
-	Size int64
+	ID        string
+	Owner     string
+	JobID     string
+	Name      string
+	MIME      string
+	Path      string // server-side only
+	Size      int64
+	ExpiresAt time.Time
 }
 
 // SourceRef is the client-facing reference to one entry inside a registered
@@ -161,7 +167,16 @@ var (
 	ErrUnsupportedWriteback = errors.New("archive writeback not supported for format")
 	// ErrClosed is returned by TempStore operations after Close.
 	ErrClosed = errors.New("temp store is closed")
+	// ErrOwnership is returned when an asset/source operation is attempted
+	// by an owner that did not register the resource. The registry never
+	// confirms the resource exists to a foreign owner.
+	ErrOwnership = errors.New("archive resource owned by another session")
 )
+
+// IsOwnership reports whether err is (or wraps) ErrOwnership.
+func IsOwnership(err error) bool {
+	return errors.Is(err, ErrOwnership)
+}
 
 // IsNotFound reports whether err is (or wraps) ErrEntryNotFound.
 func IsNotFound(err error) bool {

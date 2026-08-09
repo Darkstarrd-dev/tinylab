@@ -570,8 +570,8 @@ ffmpeg -y -i anim.gif -c:v libx264 -pix_fmt yuv420p out.mp4
 ### 9.3 关键接口契约（实施时必须保持）
 
 - `mediaedit.StartRequest` / `Job` 顶层结构不变；新 operation 只增加 `Params` JSON 分支，`Job.Operation` 注释与快照字段同步。
-- `/api/gallery/edit/zip-outputs` 请求体 `{paths: [], outputDir: "", cleanUp: bool}`，返回 `{zipPath, zipName, outputURL}`。
-- `/api/gallery/edit/upload-temp?name=` 返回 `{tempPath}`，沿用现有 500MB 上限。
+- `/api/gallery/edit/zip-outputs` 请求体 `{assetIds: [], zipName: "", cleanUp: bool}`（原始 `paths`/`outputDir` 已 410），返回 `{assetId, name, size}`；前端经受控 URL `/api/gallery/file?assetId=` 下载，不再持有 `outputURL`/`zipPath`。
+- `/api/gallery/edit/upload-temp?name=` 返回 `{assetId}`（不再返回 `tempPath`，audit F-28），沿用现有 500MB 上限。
 - `GET /api/gallery/edit/ffmpeg-status` 响应为 `{available, path, error, gif, webpAnim, webpAnimDecode}`；`available` 表示 FFmpeg 与 FFprobe 均可解析/执行，能力位表示 GIF encoder、animated WebP encoder 与 animated WebP decoder。前端按能力位禁用，后端 Start 必须复核。
 - Gallery `isVideoExt` 白名单前后端同步：`gallery-state.js`、`fs_handlers.go`；ZIP 内图片 manifest 另由 `internal/gallery/gallery.go` 的 `SupportedExts` 维护。
 - 动画 Trim 使用 `video_anim_trim`，普通视频 Trim 继续使用 `video_trim`；动画输入不能进入 H.264 codec 分支。

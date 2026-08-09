@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -63,11 +64,31 @@ func stateKey(providerID, keyID string) string {
 	return providerID + "/" + keyID
 }
 
-// Config returns a copy of the current configuration.
+// Config returns a full deep copy of the current configuration. Every slice
+// and map (Providers/Keys/Models, Combos, QuickSlots, Shortcuts, custom
+// headers, NIM overrides, text-review nodes/patterns, ...) is independent of
+// the registry-owned copy, so a handler can hold the result and marshal or
+// mutate it without racing concurrent CRUD/Reload writers.
 func (r *Registry) Config() config.Config {
 	r.cfgMu.RLock()
 	defer r.cfgMu.RUnlock()
-	return *r.config
+	return cloneConfig(*r.config)
+}
+
+// cloneConfig deep-copies a Config via a JSON round trip. All Config fields
+// carry json tags and every nested type is JSON-marshalable, so the round trip
+// is lossless and automatically covers newly added config fields. A JSON
+// round trip cannot fail for config values; the fallback (shallow copy) is
+// unreachable in practice and kept only to avoid a panic.
+func cloneConfig(cfg config.Config) config.Config {
+	data, err := json.Marshal(&cfg)
+	if err == nil {
+		var out config.Config
+		if err := json.Unmarshal(data, &out); err == nil {
+			return out
+		}
+	}
+	return cfg
 }
 
 // Reload replaces the config and reinitializes runtime states.
@@ -76,4 +97,13 @@ func (r *Registry) Reload(cfg *config.Config) {
 	defer r.cfgMu.Unlock()
 	r.config = cfg
 	r.reloadStatesLocked()
+}
+
+// RotationSettings returns a value copy of the current global rotation
+// settings. The struct contains no slice/map contents, so a plain copy is
+// safe to hand out without cloning.
+func (r *Registry) RotationSettings() config.RotationConfig {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	return r.config.Rotation
 }

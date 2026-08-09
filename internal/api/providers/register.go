@@ -13,6 +13,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/customheaders"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 )
 
@@ -24,6 +25,60 @@ type Handler struct {
 // NewHandler creates a new providers Handler.
 func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
+}
+
+// ProviderDTO is the public, secret-minimized representation of a provider.
+// Keys are never embedded in provider responses — the list carries only
+// keyCount/hasKey, and the key values themselves are listed via
+// GET /api/providers/{id}/keys with masked values only (see internal/api/keys).
+// The non-secret editable fields are preserved so the frontend's whole-object
+// PUT round-trip does not zero them in Registry.UpdateProvider.
+type ProviderDTO struct {
+	ID                    string              `json:"id"`
+	Name                  string              `json:"name"`
+	Prefix                string              `json:"prefix"`
+	BaseURL               string              `json:"baseUrl"`
+	APIType               string              `json:"apiType"`
+	AnthropicVersion      string              `json:"anthropicVersion,omitempty"`
+	AnthropicBeta         string              `json:"anthropicBeta,omitempty"`
+	IsActive              bool                `json:"isActive"`
+	Models                []config.ModelDef   `json:"models,omitempty"`
+	KeyCount              int                 `json:"keyCount"`
+	HasKey                bool                `json:"hasKey"`
+	RotationStrategy      string              `json:"rotationStrategy,omitempty"`
+	StickyLimit           int                 `json:"stickyLimit,omitempty"`
+	InjectStreamOpts      bool                `json:"injectStreamOptions,omitempty"`
+	NormalizeStreamChunks bool                `json:"normalizeStreamChunks,omitempty"`
+	NIMConfig             *config.NIMSettings `json:"nim,omitempty"`
+	UseProxy              bool                `json:"useProxy,omitempty"`
+	UseCustomHeaders      bool                `json:"useCustomHeaders,omitempty"`
+	CustomHeaders         map[string]string   `json:"customHeaders,omitempty"`
+}
+
+// toProviderDTO converts a config.Provider to its public DTO, dropping all
+// key material.
+func toProviderDTO(p config.Provider) ProviderDTO {
+	return ProviderDTO{
+		ID:                    p.ID,
+		Name:                  p.Name,
+		Prefix:                p.Prefix,
+		BaseURL:               p.BaseURL,
+		APIType:               p.APIType,
+		AnthropicVersion:      p.AnthropicVersion,
+		AnthropicBeta:         p.AnthropicBeta,
+		IsActive:              p.IsActive,
+		Models:                p.Models,
+		KeyCount:              len(p.Keys),
+		HasKey:                len(p.Keys) > 0,
+		RotationStrategy:      p.RotationStrategy,
+		StickyLimit:           p.StickyLimit,
+		InjectStreamOpts:      p.InjectStreamOpts,
+		NormalizeStreamChunks: p.NormalizeStreamChunks,
+		NIMConfig:             p.NIMConfig,
+		UseProxy:              p.UseProxy,
+		UseCustomHeaders:      p.UseCustomHeaders,
+		CustomHeaders:         p.CustomHeaders,
+	}
 }
 
 // Register registers the provider routes on the given router.
@@ -57,8 +112,12 @@ func (h *Handler) Register(r chi.Router) {
 
 func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 	providers := h.d.Reg.ListProviders()
+	dtos := make([]ProviderDTO, 0, len(providers))
+	for _, p := range providers {
+		dtos = append(dtos, toProviderDTO(p))
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"providers": providers})
+	json.NewEncoder(w).Encode(map[string]any{"providers": dtos})
 }
 
 func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +147,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(p)
+	json.NewEncoder(w).Encode(toProviderDTO(p))
 }
 
 func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +177,7 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request) {
 
 		p, _ := h.d.Reg.GetProvider(id)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(p)
+		json.NewEncoder(w).Encode(toProviderDTO(*p))
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
 	}
@@ -187,7 +246,7 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy, customheaders.Config{})
+	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy, customheaders.Config{}, false)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"valid":  valid,
@@ -198,9 +257,17 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 
 // probeUpstream tries GET /v1/models first, then falls back to POST /v1/chat/completions if modelId is provided.
 // Returns (valid, method, errorMessage).
-func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID string, useProxy bool, custom customheaders.Config) (bool, string, string) {
+// allowPrivate gates private/loopback targets: it is only ever true for a
+// registered provider whose explicit AllowPrivateNetwork capability is set.
+func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID string, useProxy bool, custom customheaders.Config, allowPrivate bool) (bool, string, string) {
 	modelsURL := urlutil.BuildUpstreamURL(baseURL, "/v1/models")
-
+	if u, err := outbound.ValidateURL(modelsURL); err != nil {
+		return false, "", "blocked baseUrl: " + err.Error()
+	} else if !useProxy {
+		if err := (outbound.Policy{AllowPrivate: allowPrivate}).CheckHost(ctx, u.Hostname()); err != nil {
+			return false, "", "blocked baseUrl: " + err.Error()
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", modelsURL, nil)
 	if err != nil {
 		return false, "", "invalid URL: " + err.Error()
@@ -208,7 +275,7 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	customheaders.Apply(req.Header, custom.Enabled, custom.Headers)
 
-	resp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(req)
+	resp, err := h.d.ManagementClient(config.Provider{UseProxy: useProxy, AllowPrivateNetwork: allowPrivate}).Do(req)
 	if err != nil {
 		h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", modelsURL, req.Header, nil, 0, nil, nil, err.Error(), 0)
 		return false, "", "request failed: " + err.Error()
@@ -236,7 +303,7 @@ func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID st
 		chatReq.Header.Set("Authorization", "Bearer "+apiKey)
 		customheaders.Apply(chatReq.Header, custom.Enabled, custom.Headers)
 
-		chatResp, err := h.d.ProxyHandler.ManagementClient(config.Provider{UseProxy: useProxy}).Do(chatReq)
+		chatResp, err := h.d.ManagementClient(config.Provider{UseProxy: useProxy, AllowPrivateNetwork: allowPrivate}).Do(chatReq)
 		if err != nil {
 			h.d.ProxyHandler.TraceMgmtCall("probe:upstream:provider="+req.URL.Host+":model="+modelID, "probe", "probe", modelID, "upstream", chatURL, chatReq.Header, nil, 0, nil, nil, err.Error(), 0)
 			return false, "", "chat request failed: " + err.Error()
@@ -296,7 +363,7 @@ func (h *Handler) testProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, _, errMsg := h.probeUpstream(r.Context(), provider.BaseURL, key.Key, "", provider.UseProxy, customheaders.Config{Enabled: provider.UseCustomHeaders, Headers: provider.CustomHeaders})
+	valid, _, errMsg := h.probeUpstream(r.Context(), provider.BaseURL, key.Key, "", provider.UseProxy, customheaders.Config{Enabled: provider.UseCustomHeaders, Headers: provider.CustomHeaders}, provider.AllowPrivateNetwork)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"valid": valid,
@@ -323,6 +390,15 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelsURL := urlutil.BuildUpstreamURL(provider.BaseURL, "/v1/models")
+	if u, err := outbound.ValidateURL(modelsURL); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "blocked baseUrl: "+err.Error())
+		return
+	} else if !provider.UseProxy {
+		if err := (outbound.Policy{AllowPrivate: provider.AllowPrivateNetwork}).CheckHost(r.Context(), u.Hostname()); err != nil {
+			apibase.WriteAPIError(w, http.StatusForbidden, "blocked baseUrl: "+err.Error())
+			return
+		}
+	}
 	req, err := http.NewRequestWithContext(r.Context(), "GET", modelsURL, nil)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid base URL")
@@ -331,7 +407,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+key.Key)
 	customheaders.Apply(req.Header, provider.UseCustomHeaders, provider.CustomHeaders)
 
-	resp, err := h.d.ProxyHandler.ManagementClient(*provider).Do(req)
+	resp, err := h.d.ManagementClient(*provider).Do(req)
 	if err != nil {
 		h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, 0, nil, nil, err.Error(), 0)
 		apibase.WriteAPIError(w, http.StatusBadGateway, "request failed: "+err.Error())
@@ -339,15 +415,25 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Bound the upstream response: an unbounded ReadAll lets a hostile or
+	// misbehaving upstream force unbounded memory growth in the management
+	// process. 8 MiB is far beyond any real /v1/models payload.
+	const maxModelsResponseBytes = 8 << 20
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxModelsResponseBytes+1))
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, "failed to read response: "+err.Error())
 		return
 	}
+	if len(respBody) > maxModelsResponseBytes {
+		apibase.WriteAPIError(w, http.StatusBadGateway, "models response exceeds the 8 MiB limit")
+		return
+	}
 
 	if resp.StatusCode != 200 {
-		h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, resp.StatusCode, resp.Header, respBody, "upstream returned "+http.StatusText(resp.StatusCode)+": "+string(respBody), 0)
-		apibase.WriteAPIError(w, http.StatusBadGateway, "upstream returned "+http.StatusText(resp.StatusCode)+": "+string(respBody))
+		h.d.ProxyHandler.TraceMgmtCall("probe:models:provider="+providerID, "probe", "probe", "", provider.Name, modelsURL, req.Header, nil, resp.StatusCode, resp.Header, respBody, "upstream returned "+http.StatusText(resp.StatusCode), 0)
+		// Never echo the full upstream error body to the client: it can
+		// contain internal details of a target the caller must not scan.
+		apibase.WriteAPIError(w, http.StatusBadGateway, "upstream returned "+http.StatusText(resp.StatusCode))
 		return
 	}
 

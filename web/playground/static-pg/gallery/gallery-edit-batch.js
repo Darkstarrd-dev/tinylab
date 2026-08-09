@@ -32,11 +32,11 @@ function _getSiblingImages() {
     // packs), then the on-disk absolute path (backend folders), then the
     // in-memory session id (legacy FSAA / drag-drop zips). All three are
     // stable pack identifiers shared by every entry of the same archive.
-    var zipKey = cur.sourceId || cur.zipAbsPath || ('@sess:' + (cur.sessionId || ''));
+    var zipKey = cur.sourceId || cur.grantId || ('@sess:' + (cur.sessionId || ''));
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       if (!it || it.kind !== 'zip') continue;
-      var k = it.sourceId || it.zipAbsPath || ('@sess:' + (it.sessionId || ''));
+      var k = it.sourceId || it.grantId || ('@sess:' + (it.sessionId || ''));
       if (k === zipKey) out.push(it);
     }
     return out;
@@ -149,12 +149,12 @@ function _batchOriginStem() {
   if (!it) return 'converted_images';
   var stem = '';
   if (it.kind === 'zip') {
-    if (it.zipAbsPath) stem = it.zipAbsPath.split(/[\\/]/).pop();
+    if (it.grantId) stem = (it.zipRel || it.name || 'archive.zip').split(/[\\/]/).pop();
     else stem = (it.path || '').split('/')[0] || it.name || '';
   } else if (it.kind === 'fs' && it.rootDirHandle && it.rootDirHandle.name) {
     stem = it.rootDirHandle.name;
-  } else if (it.kind === 'backend' && it.rootDirPath) {
-    stem = it.rootDirPath.split(/[\\/]/).pop();
+  } else if (it.kind === 'backend' && it.grantId) {
+    stem = (it.rel || it.name || 'output').split(/[\\/]/).pop();
   }
   stem = _stripExt(stem) || 'converted_images';
   return stem;
@@ -193,20 +193,25 @@ var _batchCompress = false;
 // finish and the controls may have been reset) can still honour them.
 var _batchCfg = null;
 
-// _resolveBatchInput resolves the on-disk input path for a single batch item,
-// mirroring the per-item resolution triggerMediaEditor() already uses for
-// single-file editing. Backend items already carry absPath; FSAA/drag-drop
-// files are uploaded to a temp file (/edit/upload-temp); zip entries are
-// extracted to a temp file (/edit/extract-zip-entry) — archive-source items
-// via sourceId, legacy sessions/on-disk zips via sessionId/zipAbsPath.
-// Returns a promise that resolves to an absolute path string, or rejects on
+// _resolveBatchInput resolves the server-side input descriptor for a single
+// batch item, mirroring the per-item resolution triggerMediaEditor() already
+// uses for single-file editing. Items that already carry an assetId or a
+// grantId pass through directly; FSAA/drag-drop files are uploaded to a
+// registered asset (/edit/upload-temp); zip entries are extracted to a
+// registered asset (/edit/extract-zip-entry) — archive-source items via
+// sourceId, legacy sessions/on-disk zips via sessionId/zipAbsPath. Both
+// endpoints return { assetId } (no tempPath anymore), which /edit/start
+// resolves server-side.
+// Returns a promise that resolves to an input descriptor
+// { inputAssetId | inputGrantId+inputRel } for /edit/start, or rejects on
 // failure.
 function _resolveBatchInput(it) {
-  if (it.absPath) return Promise.resolve(it.absPath);
-  if (it.kind === 'zip' && (it.zipAbsPath || it.sessionId || it.sourceId)) {
+  if (it.assetId) return Promise.resolve({ inputAssetId: it.assetId });
+  if (it.grantId && it.kind !== 'zip') return Promise.resolve({ inputGrantId: it.grantId, inputRel: it.rel || '' });
+  if (it.kind === 'zip' && (it.grantId || it.sessionId || it.sourceId)) {
     var body = { zipPath: it.zipPath };
     if (it.sourceId) body.sourceId = it.sourceId;
-    else if (it.zipAbsPath) body.zipAbsPath = it.zipAbsPath;
+    else if (it.grantId) body.grantId = it.grantId;
     else body.sessionId = it.sessionId;
     return fetch('/api/gallery/edit/extract-zip-entry', {
       method: 'POST',
@@ -214,17 +219,17 @@ function _resolveBatchInput(it) {
       body: JSON.stringify(body)
     }).then(function(r) {
       return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
-    }).then(function(d) { return d.tempPath; });
+    }).then(function(d) { return { inputAssetId: d.assetId }; });
   }
   if (typeof it.getBlob === 'function') {
     return it.getBlob().then(function(blob) {
       return fetch('/api/gallery/edit/upload-temp?name=' + encodeURIComponent(it.name || 'file'), {
         method: 'POST',
         body: blob
-      });
-    }).then(function(r) {
-      return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
-    }).then(function(d) { return d.tempPath; });
+      }).then(function(r) {
+        return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
+      }).then(function(d) { return { inputAssetId: d.assetId }; });
+    });
   }
   return Promise.reject(new Error('no disk path'));
 }
@@ -281,8 +286,7 @@ function _startBatch(op, params, dest, compress, targets) {
 
     (function(idx, item, reqOp, reqParams, reqBatchDest, outStem) {
       _resolveBatchInput(item).then(function(inputPath) {
-        var body = { inputPath: inputPath, operation: reqOp, overwrite: !!reqBatchDest.overwrite, params: reqParams };
-        if (reqBatchDest.outputDir && !reqBatchDest.overwrite) body.outputDir = reqBatchDest.outputDir;
+        var body = { inputAssetId: inputPath.inputAssetId, inputGrantId: inputPath.inputGrantId, inputRel: inputPath.inputRel, operation: reqOp, overwrite: false, params: reqParams };
         // Send outputName whenever we computed a stem. Covers both
         // "Save to dir" (outputDir+!overwrite → server appends new ext) and
         // "Same Path" (overwrite, no outputDir → server appends _desc+ext).
@@ -337,9 +341,8 @@ function _pollBatchJob(idx, jobId) {
       } else {
         j.done = true;
         if (data.status === 'completed') {
-          j.outputPath = data.outputPath;
+          j.assetId = data.assetId;
           j.outputName = data.outputName;
-          j.outputURL = data.outputURL;
         } else {
           j.error = data.error || data.status;
         }
@@ -366,7 +369,7 @@ function _onBatchComplete() {
   for (var i = 0; i < _batchJobs.length; i++) {
     if (_batchJobs[i].error) { fail++; continue; }
     ok++;
-    if (_batchJobs[i].outputPath) outputPaths.push(_batchJobs[i].outputPath);
+    if (_batchJobs[i].assetId) outputPaths.push(_batchJobs[i].assetId);
   }
 
   // Replace-original on a backend zip (kind:'zip' with zipAbsPath): repack
@@ -374,8 +377,8 @@ function _onBatchComplete() {
   // transcoded temp output at the same inner zip path. This must run BEFORE
   // the compress branch (compress mode forces non-overwrite so they are
   // mutually exclusive) and before the generic non-compress results.
-  if (_batchDest && _batchDest.overwrite && _editCurrentItem && _editCurrentItem.kind === 'zip' && _editCurrentItem.zipAbsPath) {
-    _zipWritebackBatch(_editCurrentItem.zipAbsPath, ok, fail);
+  if (_batchDest && _batchDest.overwrite && _editCurrentItem && _editCurrentItem.kind === 'zip' && _editCurrentItem.grantId) {
+    _zipWritebackBatch(_editCurrentItem.grantId, _editCurrentItem.sessionId || '', ok, fail);
     return;
   }
 
@@ -386,7 +389,7 @@ function _onBatchComplete() {
     fetch('/api/gallery/edit/zip-outputs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: outputPaths, outputDir: zipDest, zipName: _batchOriginZipName(), cleanUp: true })
+      body: JSON.stringify({ assetIds: outputPaths, zipName: _batchOriginZipName(), cleanUp: true })
     })
     .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
     .then(function(data) {
@@ -402,8 +405,8 @@ function _onBatchComplete() {
         resultEl.style.display = 'block';
       }
       var openBtn = document.getElementById('ge-open-folder-btn');
-      if (openBtn && data.zipPath) {
-        openBtn.onclick = function() { _openInFileManager(data.zipPath); };
+      if (openBtn && data.assetId) {
+        openBtn.onclick = function() { window.open('/api/gallery/file?assetId=' + encodeURIComponent(data.assetId), '_blank'); };
       }
       _batchJobs = [];
     })
@@ -444,9 +447,9 @@ function _onBatchComplete() {
   }
   var openBtnN = document.getElementById('ge-open-folder-btn');
   if (openBtnN) {
-    var firstOutPath = outputPaths.length > 0 ? outputPaths[0] : '';
+    var firstOutId = outputPaths.length > 0 ? outputPaths[0] : '';
     openBtnN.onclick = function() {
-      if (firstOutPath) _openInFileManager(firstOutPath);
+      if (firstOutId) window.open('/api/gallery/file?assetId=' + encodeURIComponent(firstOutId), '_blank');
     };
   }
 
@@ -459,12 +462,12 @@ function _onBatchComplete() {
 // archive and atomically writes it back to archivePath. Renders the result
 // area with the same success markup as the non-compress branch plus an Open
 // Folder button.
-function _zipWritebackBatch(archivePath, ok, fail) {
+function _zipWritebackBatch(grantId, sessionId, ok, fail) {
   var entries = [];
   for (var i = 0; i < _batchJobs.length; i++) {
     var j = _batchJobs[i];
-    if (!j.error && j.outputPath && j.item && j.item.zipPath) {
-      entries.push({ zipPath: j.item.zipPath, filePath: j.outputPath });
+    if (!j.error && j.assetId && j.item && j.item.zipPath) {
+      entries.push({ zipPath: j.item.zipPath, assetId: j.assetId });
     }
   }
 
@@ -472,7 +475,7 @@ function _zipWritebackBatch(archivePath, ok, fail) {
   fetch('/api/gallery/edit/zip-writeback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ archivePath: archivePath, entries: entries })
+    body: JSON.stringify({ sessionId: sessionId, grantId: grantId, entries: entries })
   })
   .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
   .then(function() {
@@ -492,8 +495,8 @@ function _zipWritebackBatch(archivePath, ok, fail) {
       resultEl.style.display = 'block';
     }
     var openBtn = document.getElementById('ge-open-folder-btn');
-    if (openBtn) {
-      openBtn.onclick = function() { _openInFileManager(archivePath); };
+    if (openBtn && grantId) {
+      openBtn.onclick = function() { _openInFileManager(grantId, _editCurrentItem.zipRel || ''); };
     }
     _batchJobs = [];
   })
@@ -510,11 +513,11 @@ function _zipWritebackBatch(archivePath, ok, fail) {
 
 // _openInFileManager asks the server to open a path's containing directory in
 // the OS file manager. On error it surfaces a message via geBatchOpenError.
-function _openInFileManager(path) {
+function _openInFileManager(grantId, rel) {
   fetch('/api/gallery/open-folder', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: path })
+    body: JSON.stringify({ grantId: grantId, rel: rel || '' })
   })
   .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); })
   .catch(function(err) {

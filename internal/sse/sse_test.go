@@ -6,8 +6,11 @@ import (
 )
 
 func TestSSELineBuffer_Normal(t *testing.T) {
-	sb := &SSELineBuffer{}
-	lines := sb.Feed([]byte("line1\nline2\nline3\n"))
+	sb := NewSSELineBuffer(0, 0)
+	lines, err := sb.Feed([]byte("line1\nline2\nline3\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d: %v", len(lines), lines)
 	}
@@ -16,17 +19,72 @@ func TestSSELineBuffer_Normal(t *testing.T) {
 	}
 }
 
+// TestSSELineBuffer_LineBudget verifies a single oversized line is rejected
+// with ErrLineTooLong (F-14: no-newline SSE beyond the line cap must close
+// the request instead of growing memory).
+func TestSSELineBuffer_LineBudget(t *testing.T) {
+	sb := NewSSELineBuffer(16, 0)
+	lines, err := sb.Feed([]byte("data: " + strings.Repeat("x", 64) + "\n"))
+	if err != ErrLineTooLong {
+		t.Fatalf("got err %v, want ErrLineTooLong", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("got %d lines, want 0", len(lines))
+	}
+	// Buffer was cleared: a subsequent valid feed must not wedge.
+	lines, err = sb.Feed([]byte("ok\n"))
+	if err != nil || len(lines) != 1 || lines[0] != "ok" {
+		t.Fatalf("after overflow: lines=%v err=%v, want [ok] nil", lines, err)
+	}
+}
+
+// TestSSELineBuffer_TotalBudget verifies a partial line growing past the
+// total buffer budget is rejected with ErrBufferOverflow.
+func TestSSELineBuffer_TotalBudget(t *testing.T) {
+	sb := NewSSELineBuffer(0, 32)
+	half := strings.Repeat("x", 16)
+	if _, err := sb.Feed([]byte(half)); err != nil {
+		t.Fatalf("first half errored: %v", err)
+	}
+	lines, err := sb.Feed([]byte(strings.Repeat("x", 32)))
+	if err != ErrBufferOverflow {
+		t.Fatalf("got err %v, want ErrBufferOverflow", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("got %d lines, want 0", len(lines))
+	}
+}
+
+// TestSSELineBuffer_LinesBeforeBudgetError verifies lines completed before a
+// budget error are still returned so callers can process them before aborting.
+func TestSSELineBuffer_LinesBeforeBudgetError(t *testing.T) {
+	sb := NewSSELineBuffer(8, 0)
+	lines, err := sb.Feed([]byte("ok\n" + strings.Repeat("x", 32) + "\n"))
+	if err != ErrLineTooLong {
+		t.Fatalf("got err %v, want ErrLineTooLong", err)
+	}
+	if len(lines) != 1 || lines[0] != "ok" {
+		t.Fatalf("got lines %v, want [ok]", lines)
+	}
+}
+
 func TestSSELineBuffer_CrossChunk(t *testing.T) {
-	sb := &SSELineBuffer{}
+	sb := NewSSELineBuffer(0, 0)
 
 	// Feed first part - incomplete line
-	lines := sb.Feed([]byte("line"))
+	lines, err := sb.Feed([]byte("line"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) != 0 {
 		t.Fatalf("expected 0 lines from incomplete chunk, got %d", len(lines))
 	}
 
 	// Feed rest - completes the first line and adds second
-	lines = sb.Feed([]byte("1 end\nline2\n"))
+	lines, err = sb.Feed([]byte("1 end\nline2\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %d: %v", len(lines), lines)
 	}
@@ -36,11 +94,14 @@ func TestSSELineBuffer_CrossChunk(t *testing.T) {
 }
 
 func TestSSELineBuffer_DataAcrossChunks(t *testing.T) {
-	sb := &SSELineBuffer{}
+	sb := NewSSELineBuffer(0, 0)
 
 	// Simulate a data: line split across reads (real SSE scenario)
 	chunk1 := `data: {"id":"abc","usage":{"prompt_tokens":123`
-	lines := sb.Feed([]byte(chunk1))
+	lines, err := sb.Feed([]byte(chunk1))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) != 0 {
 		t.Fatalf("expected 0 lines from partial chunk, got %d", len(lines))
 	}
@@ -51,7 +112,10 @@ data: [DONE]
 
 `
 
-	lines = sb.Feed([]byte(chunk2))
+	lines, err = sb.Feed([]byte(chunk2))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) < 1 {
 		t.Fatalf("expected at least 1 line, got %d: %v", len(lines), lines)
 	}
@@ -69,9 +133,11 @@ data: [DONE]
 }
 
 func TestSSELineBuffer_Remaining(t *testing.T) {
-	sb := &SSELineBuffer{}
+	sb := NewSSELineBuffer(0, 0)
 
-	sb.Feed([]byte("line1\nline"))
+	if _, err := sb.Feed([]byte("line1\nline")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	rem := sb.Remaining()
 	if rem != "line" {
 		t.Fatalf("expected remaining 'line', got %q", rem)
@@ -85,8 +151,11 @@ func TestSSELineBuffer_Remaining(t *testing.T) {
 }
 
 func TestSSELineBuffer_Empty(t *testing.T) {
-	sb := &SSELineBuffer{}
-	lines := sb.Feed([]byte{})
+	sb := NewSSELineBuffer(0, 0)
+	lines, err := sb.Feed([]byte{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(lines) != 0 {
 		t.Fatalf("expected 0 lines, got %d", len(lines))
 	}

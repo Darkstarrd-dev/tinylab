@@ -43,7 +43,7 @@ function renderProviderList() {
       </div>\
       <div class="provider-card-row mt-12">\
         <div class="provider-card-left">\
-          <span class="muted">' + t('keys') + ' ' + (p.keys ? p.keys.length : 0) + ' | ' + t('models') + ' ' + (p.models ? p.models.length : 0) + '</span>\
+          <span class="muted">' + t('keys') + ' ' + (p.keyCount != null ? p.keyCount : (p.keys ? p.keys.length : 0)) + ' | ' + t('models') + ' ' + (p.models ? p.models.length : 0) + '</span>\
         </div>\
         <div class="provider-card-actions">\
           <button type="button" class="btn btn-sm provider-btn-col1" onclick="event.stopPropagation(); openProviderDetail(\'' + escapeForJsString(p.id) + '\')">' + t('edit') + '</button>\
@@ -198,6 +198,9 @@ async function renderProviderDetail(c, id) {
     c.innerHTML = emptyState(t('providerNotFound'));
     return;
   }
+  // The provider list no longer embeds keys (secret-minimized DTO): fetch the
+  // masked key list separately for the detail view.
+  await loadDetailKeys(p);
   providerDetailCache = p;
   var totalProviders = allProviders.length;
   var currentOrder = allProviders.findIndex(function(x) { return x.id === id; }) + 1;
@@ -228,6 +231,20 @@ async function renderProviderDetail(c, id) {
     </div>';
   renderDetailKeys(p);
   renderDetailModels(p);
+}
+
+// loadDetailKeys fetches the masked key list for a provider detail view. The
+// provider list API returns only keyCount/hasKey (F-04 secret-minimized DTO),
+// so the key table is populated from GET /providers/{id}/keys.
+async function loadDetailKeys(p) {
+  if (!p || !p.id) return p;
+  try {
+    const data = await apiGet('/providers/' + encodeURIComponent(p.id) + '/keys');
+    p.keys = (data && data.keys) || [];
+  } catch (e) {
+    p.keys = [];
+  }
+  return p;
 }
 
 async function changeProviderOrder(id, oldOrder, totalCount, valStr) {

@@ -157,7 +157,7 @@ func (r *Resolver) rotateTargets(comboName string, targets []ModelTarget) []Mode
 	}
 
 	st.consecCount++
-	if st.consecCount > 3 { // stickyLimit=3
+	if st.consecCount > r.effectiveStickyLimit() {
 		st.index = (st.index + 1) % len(targets)
 		st.consecCount = 1
 	}
@@ -172,6 +172,18 @@ func (r *Resolver) rotateTargets(comboName string, targets []ModelTarget) []Mode
 		result[i] = targets[(st.index+i)%len(targets)]
 	}
 	return result
+}
+
+// effectiveStickyLimit returns the configured rotation sticky limit used to
+// decide when a round-robin combo advances to the next target. It honors the
+// global rotation.stickyLimit setting; zero/negative values fall back to the
+// historical default of 3 so an unset config behaves exactly as before.
+func (r *Resolver) effectiveStickyLimit() int {
+	limit := r.reg.RotationSettings().StickyLimit
+	if limit <= 0 {
+		limit = 3
+	}
+	return limit
 }
 
 // SetStateHook sets a callback that is called when combo rotation state changes.

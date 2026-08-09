@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -25,6 +30,22 @@ import (
 func setupTestServer(t *testing.T) (*httptest.Server, *registry.Registry, string, *Router) {
 	t.Helper()
 	cfg := config.DefaultConfig()
+	// Every management route is auth-gated (F-04). The test harness enables
+	// password protection so the full login → session → CSRF flow applies,
+	// exactly like a real protected deployment.
+	key, err := config.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := config.Encrypt(key, testAPIPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Security = config.SecurityConfig{
+		PasswordEnabled:   true,
+		EncryptionKey:     key,
+		PasswordEncrypted: enc,
+	}
 	cfg.Providers = []config.Provider{
 		{
 			ID: "test-prov", Name: "Test", Prefix: "test", BaseURL: "https://api.test.com",
@@ -44,11 +65,103 @@ func setupTestServer(t *testing.T) (*httptest.Server, *registry.Registry, string
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
 	apiRouter := New(reg, cfg, tmpFile, usageBuf, usage.New(50), usage.NewQuotaTracker(), logger, proxyHandler, context.CancelFunc(func() {}), selector, comboRes, download.NewManager(download.RuntimeSettings{}, logger))
 	handler := apiRouter.Routes(proxyHandler)
-	return httptest.NewServer(handler), reg, tmpFile, apiRouter
+	srv := httptest.NewServer(handler)
+	// The CSRF Origin check validates against the configured management port,
+	// which must equal the port the test server actually listens on.
+	alignServerPort(t, reg, srv)
+	return srv, reg, tmpFile, apiRouter
+}
+
+// alignServerPort sets the registry config port to the test server's real
+// port so the AuthMiddleware Origin check accepts the test origin.
+func alignServerPort(t *testing.T, reg *registry.Registry, srv *httptest.Server) {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := reg.Config()
+	cfg.Port = port
+	reg.Reload(&cfg)
+}
+
+// testAPIPassword is the password the setupTestServer harness configures.
+const testAPIPassword = "test-password"
+
+// testSession carries an authenticated HTTP client (session cookie jar) and
+// the session-bound CSRF token for one test server.
+type testSession struct {
+	client *http.Client
+	csrf   string
+}
+
+var (
+	testSessionMu sync.Mutex
+	testSessions  = make(map[string]*testSession)
+)
+
+// sessionFor lazily authenticates once per test server URL: POST
+// /api/auth/login with the harness password, capture the session cookie jar
+// and the session-bound CSRF token, and reuse them for every subsequent
+// requestJSON call in this process. Tests never see auth plumbing.
+func sessionFor(t *testing.T, serverURL string) *testSession {
+	t.Helper()
+	testSessionMu.Lock()
+	defer testSessionMu.Unlock()
+	if s, ok := testSessions[serverURL]; ok {
+		return s
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	req, err := http.NewRequest("POST", serverURL+"/api/auth/login", strings.NewReader(`{"password":"`+testAPIPassword+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", serverURL)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test login failed: %d %s", resp.StatusCode, data)
+	}
+	var login struct {
+		Success   bool   `json:"success"`
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&login); err != nil {
+		t.Fatal(err)
+	}
+	if !login.Success || login.CSRFToken == "" {
+		t.Fatalf("test login response missing success/csrfToken: %+v", login)
+	}
+	s := &testSession{client: client, csrf: login.CSRFToken}
+	testSessions[serverURL] = s
+	return s
+}
+
+// serverURLOf reduces a full request URL to its scheme://host origin.
+func serverURLOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func requestJSON(t *testing.T, method, url, body string) *http.Response {
 	t.Helper()
+	s := sessionFor(t, serverURLOf(url))
 	var r io.Reader
 	if body != "" {
 		r = strings.NewReader(body)
@@ -60,7 +173,12 @@ func requestJSON(t *testing.T, method, url, body string) *http.Response {
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	switch method {
+	case "POST", "PUT", "PATCH", "DELETE":
+		req.Header.Set("X-CSRF-Token", s.csrf)
+		req.Header.Set("Origin", serverURLOf(url))
+	}
+	resp, err := s.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +207,12 @@ func TestSettings_Get(t *testing.T) {
 	if err := json.Unmarshal([]byte(readBody(t, resp)), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["port"] != float64(20128) {
-		t.Errorf("expected port 20128, got %v", body["port"])
+	// The harness aligns the registry port with the actual test server port
+	// (the CSRF Origin check validates against it), so assert dynamically.
+	u, _ := url.Parse(srv.URL)
+	wantPort, _ := strconv.Atoi(u.Port())
+	if body["port"] != float64(wantPort) {
+		t.Errorf("expected port %d, got %v", wantPort, body["port"])
 	}
 	rot := body["rotation"].(map[string]any)
 	if rot["strategy"] != "fill-first" {
@@ -647,5 +769,269 @@ func TestModelKeys_PerModelStatusIsolation(t *testing.T) {
 	}
 	if keyB["lastError"] != "" {
 		t.Errorf("model-b: expected empty lastError, got %q (bug: leaked from model-a)", keyB["lastError"])
+	}
+}
+
+// TestSetupRequired_BlocksManagementRoutes verifies F-04: with no password
+// configured (legacy PasswordEnabled=false), every management surface —
+// including the route groups outside the generic /api group — returns 401
+// setup_required and no provider/key data.
+func TestSetupRequired_BlocksManagementRoutes(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers = []config.Provider{
+		{
+			ID: "seed-prov", Name: "Seed", Prefix: "seed", BaseURL: "https://seed.example.com",
+			APIType: "openai-compatible", IsActive: true,
+			Keys: []config.Key{{ID: "sk1", Key: "sk-secret-value", Name: "Main", Priority: 1, IsActive: true}},
+		},
+	}
+	reg := registry.New(cfg)
+	logger := console.New(100)
+	usageBuf := usage.New(100)
+	selector := rotation.New(reg, &cfg.Rotation)
+	comboRes := combo.New(reg)
+	proxyHandler := proxy.New(reg, selector, comboRes, usageBuf, usage.NewQuotaTracker(), logger, 0)
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	apiRouter := New(reg, cfg, tmpFile, usageBuf, usage.New(50), usage.NewQuotaTracker(), logger, proxyHandler, context.CancelFunc(func() {}), selector, comboRes, download.NewManager(download.RuntimeSettings{}, logger))
+	srv := httptest.NewServer(apiRouter.Routes(proxyHandler))
+	defer srv.Close()
+
+	// Public bootstrap endpoints stay reachable.
+	resp, err := http.Get(srv.URL + "/api/auth/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"setupRequired":true`) {
+		t.Fatalf("expected setupRequired status, got %d %s", resp.StatusCode, body)
+	}
+
+	check := func(method, path, reqBody string) {
+		t.Helper()
+		var r io.Reader
+		if reqBody != "" {
+			r = strings.NewReader(reqBody)
+		}
+		req, err := http.NewRequest(method, srv.URL+path, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reqBody != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := readBody(t, resp)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s %s: expected 401 setup_required, got %d (%s)", method, path, resp.StatusCode, body)
+		}
+		if !strings.Contains(body, "setup_required") {
+			t.Errorf("%s %s: expected setup_required error body, got %q", method, path, body)
+		}
+		if strings.Contains(body, "sk-secret-value") {
+			t.Errorf("%s %s: response leaked plaintext key", method, path)
+		}
+	}
+
+	check("GET", "/api/providers", "")
+	check("GET", "/api/settings", "")
+	check("GET", "/api/providers/seed-prov/keys", "")
+	check("GET", "/api/monitor", "")
+	check("POST", "/api/filetransfer/upload", "{}")
+	check("POST", "/api/archive/sources?name=x.zip", "{}")
+	check("POST", "/api/editor/open", "{}")
+	check("POST", "/api/gallery/fs", `{"path":"C:\\x"}`)
+	check("POST", "/api/comfyui/proxy", `{}`)
+}
+
+// TestSecretMinimizedDTOs verifies F-04/A-2: provider and key API responses
+// never contain the plaintext key value; key material is replaced by an
+// irreversible maskedKey and keyCount/hasKey.
+func TestSecretMinimizedDTOs(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	// Provider list: no plaintext, no embedded keys, but keyCount/hasKey set.
+	resp := requestJSON(t, "GET", srv.URL+"/api/providers", "")
+	listBody := readBody(t, resp)
+	if strings.Contains(listBody, "sk-test") {
+		t.Fatal("provider list leaked plaintext key")
+	}
+	var list struct {
+		Providers []struct {
+			ID       string `json:"id"`
+			KeyCount int    `json:"keyCount"`
+			HasKey   bool   `json:"hasKey"`
+			Keys     []any  `json:"keys"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal([]byte(listBody), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Providers) != 1 || !list.Providers[0].HasKey || list.Providers[0].KeyCount != 1 {
+		t.Fatalf("expected keyCount/hasKey on provider DTO, got %+v", list.Providers)
+	}
+	if list.Providers[0].Keys != nil {
+		t.Fatal("provider DTO must not embed the keys array")
+	}
+
+	// Key list: maskedKey only, no plaintext field.
+	resp = requestJSON(t, "GET", srv.URL+"/api/providers/test-prov/keys", "")
+	keysBody := readBody(t, resp)
+	if strings.Contains(keysBody, "sk-test") {
+		t.Fatal("key list leaked plaintext key")
+	}
+	var keys struct {
+		Keys []struct {
+			ID        string `json:"id"`
+			MaskedKey string `json:"maskedKey"`
+			Key       string `json:"key"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal([]byte(keysBody), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys.Keys) != 1 || keys.Keys[0].MaskedKey == "" || keys.Keys[0].Key != "" {
+		t.Fatalf("expected masked key DTO, got %+v", keys.Keys)
+	}
+
+	// Create-key response must not echo the plaintext.
+	resp = requestJSON(t, "POST", srv.URL+"/api/providers/test-prov/keys", `{"key":"sk-secret-new","name":"New"}`)
+	createBody := readBody(t, resp)
+	if strings.Contains(createBody, "sk-secret-new") {
+		t.Fatal("create-key response leaked plaintext")
+	}
+	if !strings.Contains(createBody, "maskedKey") {
+		t.Fatalf("expected maskedKey in create-key response, got %s", createBody)
+	}
+
+	// Create-provider response must not embed keys either.
+	resp = requestJSON(t, "POST", srv.URL+"/api/providers", `{"id":"p2","name":"P2","prefix":"p2","baseUrl":"https://p2.com","keys":[{"key":"sk-embedded"}]}`)
+	provBody := readBody(t, resp)
+	if strings.Contains(provBody, "sk-embedded") {
+		t.Fatal("create-provider response leaked key material")
+	}
+}
+
+// TestSettings_AnySearchHasApiKeyOnly verifies the AnySearch API key is never
+// returned by GET /api/settings — only a hasApiKey boolean.
+func TestSettings_AnySearchHasApiKeyOnly(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	resp := requestJSON(t, "PATCH", srv.URL+"/api/settings", `{"anySearch":{"apiKey":"as-secret-key","maxResults":7}}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("settings PATCH failed: %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp = requestJSON(t, "GET", srv.URL+"/api/settings", "")
+	body := readBody(t, resp)
+	if strings.Contains(body, "as-secret-key") {
+		t.Fatal("GET /api/settings leaked the AnySearch API key")
+	}
+	var settings struct {
+		AnySearch struct {
+			HasApiKey  bool   `json:"hasApiKey"`
+			APIKey     string `json:"apiKey"`
+			MaxResults int    `json:"maxResults"`
+		} `json:"anySearch"`
+	}
+	if err := json.Unmarshal([]byte(body), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !settings.AnySearch.HasApiKey || settings.AnySearch.APIKey != "" || settings.AnySearch.MaxResults != 7 {
+		t.Fatalf("expected hasApiKey-only anySearch DTO, got %+v", settings.AnySearch)
+	}
+}
+
+// TestCSRF_BlocksSimplePOST verifies F-05 end-to-end: a same-origin request
+// carrying the session cookie but no CSRF token cannot mutate settings.
+func TestCSRF_BlocksSimplePOST(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	// Login with a plain client to obtain only the cookie (no CSRF token).
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	loginResp, err := client.Post(srv.URL+"/api/auth/login", "application/json", strings.NewReader(`{"password":"`+testAPIPassword+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginResp.Body.Close()
+
+	// Cookie-bearing PATCH without X-CSRF-Token must be rejected with 403.
+	req, err := http.NewRequest("PATCH", srv.URL+"/api/settings", strings.NewReader(`{"port":12345}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", srv.URL)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for cookie-only POST, got %d (%s)", resp.StatusCode, body)
+	}
+
+	// External-origin PATCH with the (stolen) cookie is also rejected.
+	req, err = http.NewRequest("PATCH", srv.URL+"/api/settings", strings.NewReader(`{"port":12345}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://evil.example.com")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = readBody(t, resp)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for external Origin, got %d (%s)", resp.StatusCode, body)
+	}
+}
+
+// TestGallery_OwnerCookieIssuedOnce pins the F-29 wiring contract: the owner
+// middleware has exactly one mount point on the gallery boundary (inside the
+// gallery handler's Register, like archive/editor/filetransfer — NOT also on
+// the /api/gallery route group). A gallery request with no owner cookie must
+// receive exactly one tinyrouter_owner Set-Cookie. Regression: the middleware
+// was mounted twice (route group + Register), emitting two Set-Cookie headers
+// with different owner values so the browser's stored owner drifted from the
+// owner stamped on the request context (session owner mismatch).
+func TestGallery_OwnerCookieIssuedOnce(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+	s := sessionFor(t, srv.URL)
+
+	// Valid session, no owner cookie yet. The handler 404s (no such zip
+	// session), but the owner middleware must have stamped exactly one
+	// owner cookie before the handler ran.
+	resp, err := s.client.Get(srv.URL + "/api/gallery/zip/not-a-session/a.png")
+	if err != nil {
+		t.Fatalf("gallery request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	setCookies := resp.Header.Values("Set-Cookie")
+	var ownerCookies int
+	for _, sc := range setCookies {
+		if strings.HasPrefix(sc, owner.CookieName+"=") {
+			ownerCookies++
+		}
+	}
+	if len(setCookies) != 1 || ownerCookies != 1 {
+		t.Fatalf("want exactly 1 %s Set-Cookie, got %d header(s), %d owner cookie(s): %q",
+			owner.CookieName, len(setCookies), ownerCookies, setCookies)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == owner.CookieName && !owner.Valid(c.Value) {
+			t.Fatalf("issued owner cookie %q is not a valid owner value", c.Value)
+		}
 	}
 }

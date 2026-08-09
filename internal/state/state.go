@@ -2,6 +2,8 @@ package state
 
 import (
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
@@ -49,6 +51,12 @@ type ProbeRecord struct {
 
 // KeySnapshot holds the persistable subset of a key's runtime state.
 type KeySnapshot struct {
+	// ProviderID/KeyID are the structured identity of the owning key. Older
+	// state.yaml files do not carry them (the map key alone encoded the
+	// identity); restore prefers these fields when present and falls back to
+	// parsing the map key otherwise.
+	ProviderID   string               `yaml:"provider_id,omitempty"`
+	KeyID        string               `yaml:"key_id,omitempty"`
 	BackoffLevel int                  `yaml:"backoff_level"`
 	ModelLocks   map[string]time.Time `yaml:"model_locks,omitempty"`
 	// ModelStatus persists per-model cooldown/lock status so the lock type
@@ -68,6 +76,34 @@ type KeySnapshot struct {
 	// are persisted — partial-usage snapshots are NOT persisted (they are re-fetched
 	// from upstream on the next probe/request).
 	ExhaustedModelLimits map[string]int `yaml:"exhausted_model_limits,omitempty"`
+}
+
+// EncodeSnapshotKey builds a collision-free map key for a provider/entity
+// pair in persisted snapshots (keys, probes). Length-prefixing the provider
+// ID keeps the key unambiguous even when provider or entity IDs contain '/'
+// or '::' — the historical "providerID::entityID" ReplaceAll encoding could
+// collide (e.g. provider "a/b"+key "c" vs provider "a"+key "b/c" both became
+// "a::b::c") and could not be split back reliably. New snapshots also carry
+// structured provider_id/entity_id fields on the value; the map key only
+// provides uniqueness.
+func EncodeSnapshotKey(providerID, entityID string) string {
+	return strconv.Itoa(len(providerID)) + ":" + providerID + entityID
+}
+
+// decodeSnapshotKey splits a length-prefixed snapshot key back into its two
+// components. It returns ok=false for keys that do not match the format (e.g.
+// legacy "a::b" keys written by older builds), letting callers fall back to
+// the historical "::" split.
+func decodeSnapshotKey(key string) (providerID, entityID string, ok bool) {
+	colon := strings.IndexByte(key, ':')
+	if colon <= 0 || colon+1 >= len(key) {
+		return "", "", false
+	}
+	n, err := strconv.Atoi(key[:colon])
+	if err != nil || n < 0 || colon+1+n > len(key) {
+		return "", "", false
+	}
+	return key[colon+1 : colon+1+n], key[colon+1+n:], true
 }
 
 // ComboSnapshot holds the persistable subset of a combo's rotation state.

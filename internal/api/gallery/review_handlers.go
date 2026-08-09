@@ -15,6 +15,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/archive"
 	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
+	"github.com/tinyrouter/tinyrouter/internal/owner"
 )
 
 // startReviewRequest is the request body for starting a review.
@@ -113,7 +114,7 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 			apibase.WriteAPIError(w, http.StatusServiceUnavailable, "archive source lookup is unavailable")
 			return
 		}
-		src, ok := h.archive.ResolveSource(req.SourceID)
+		src, ok := h.archive.ResolveSource(owner.From(r.Context()), req.SourceID)
 		if !ok {
 			apibase.WriteAPIError(w, http.StatusNotFound, "archive source not found or expired")
 			return
@@ -143,23 +144,23 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Legacy flow: in-memory zip session bytes (pinned against LRU
 		// eviction while the review runs).
-		zipData, ok := h.sessions.get(req.SessionID)
+		zipData, ok := h.sessions.get(owner.From(r.Context()), req.SessionID)
 		if !ok {
 			apibase.WriteAPIError(w, http.StatusNotFound, "zip session not found")
 			return
 		}
-		h.sessions.pin(req.SessionID)
+		h.sessions.pin(owner.From(r.Context()), req.SessionID)
 
 		reader := bytes.NewReader(zipData)
 		manifest, err := gallerylib.ListZipEntries(reader, int64(len(zipData)))
 		if err != nil {
-			h.sessions.unpin(req.SessionID)
+			h.sessions.unpin(owner.From(r.Context()), req.SessionID)
 			apibase.WriteAPIError(w, http.StatusBadRequest, "failed to list zip entries: "+err.Error())
 			return
 		}
 		entries = manifest.Entries
 		if len(entries) == 0 {
-			h.sessions.unpin(req.SessionID)
+			h.sessions.unpin(owner.From(r.Context()), req.SessionID)
 			apibase.WriteAPIError(w, http.StatusBadRequest, "no image entries found in zip")
 			return
 		}
@@ -173,7 +174,7 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 	// Select entries to review based on strategy
 	indices := selectReviewIndices(len(entries), req.Strategy, req.HeadSize, req.TailSize)
 	if len(indices) == 0 {
-		h.sessions.unpin(taskKey)
+		h.sessions.unpin(owner.From(r.Context()), taskKey)
 		apibase.WriteAPIError(w, http.StatusBadRequest, "no entries selected for review")
 		return
 	}
@@ -182,6 +183,7 @@ func (h *Handler) galleryStartReview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	task := &reviewTask{
 		SessionID:    taskKey,
+		Owner:        owner.From(r.Context()),
 		Status:       gallerylib.ReviewStatusRunning,
 		Total:        len(indices),
 		Results:      make([]gallerylib.ReviewResult, 0),
@@ -265,7 +267,7 @@ func (h *Handler) galleryCancelReview(w http.ResponseWriter, r *http.Request) {
 
 	// Delete is idempotent
 	h.reviews.Delete(sessionID)
-	h.sessions.unpin(sessionID)
+	h.sessions.unpin(owner.From(r.Context()), sessionID)
 
 	h.d.Logger.Info("gallery: cancelled AI review for session %s", sessionID)
 

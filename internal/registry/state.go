@@ -2,7 +2,6 @@ package registry
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/keystate"
@@ -16,9 +15,12 @@ func (r *Registry) GetKeyState(providerID, keyID string) *keystate.KeyRuntimeSta
 	return r.states[stateKey(providerID, keyID)]
 }
 
-// probeRecordKey builds the in-memory probe record map key "providerID::modelID".
+// probeRecordKey builds the in-memory probe record map key for a
+// provider/model pair. It uses the same collision-free length-prefixed
+// encoding as persisted snapshot keys so provider/model IDs containing '/'
+// or '::' can never alias.
 func probeRecordKey(providerID, modelID string) string {
-	return providerID + "::" + modelID
+	return state.EncodeSnapshotKey(providerID, modelID)
 }
 
 // UpdateProbeRecord stores (or replaces) the latest probe record for a model.
@@ -59,16 +61,28 @@ func (r *Registry) RestoreProbeRecord(providerID, modelID string, rec state.Prob
 }
 
 // SnapshotKeyStates returns a map of key snapshot data for all known keys.
-// The map key is "providerID::keyID".
+// Each snapshot carries structured ProviderID/KeyID fields and the map key is
+// a collision-free length-prefixed encoding (see encodeSnapshotKey), so
+// restore never has to re-parse an ambiguous delimiter. Lock order is
+// cfgMu.RLock → stateMu.RLock (outer → inner, matching the CRUD discipline).
 func (r *Registry) SnapshotKeyStates() map[string]state.KeySnapshot {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
 
-	result := make(map[string]state.KeySnapshot, len(r.states))
-	for sk, ks := range r.states {
-		s := snapshotKeyState(ks)
-		// Convert internal key format "providerID/keyID" to "providerID::keyID"
-		result[convertKey(sk)] = s
+	result := make(map[string]state.KeySnapshot)
+	for _, p := range r.config.Providers {
+		for _, k := range p.Keys {
+			ks, ok := r.states[stateKey(p.ID, k.ID)]
+			if !ok {
+				continue
+			}
+			s := snapshotKeyState(ks)
+			s.ProviderID = p.ID
+			s.KeyID = k.ID
+			result[state.EncodeSnapshotKey(p.ID, k.ID)] = s
+		}
 	}
 	return result
 }
@@ -109,13 +123,6 @@ func snapshotKeyState(ks *keystate.KeyRuntimeState) state.KeySnapshot {
 		}
 	}
 	return s
-}
-
-// convertKey converts registry internal key format "a/b" to "a::b".
-// All "/" are replaced with "::" to avoid ambiguity when provider or key
-// IDs contain "/".
-func convertKey(internal string) string {
-	return strings.ReplaceAll(internal, "/", "::")
 }
 
 // RestoreKeyState restores a key's runtime state from a snapshot. Returns an

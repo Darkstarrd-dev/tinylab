@@ -13,12 +13,13 @@ import (
 	_ "image/png"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 // ImageProxyCaller is the deliberately narrow interface used to invoke the
@@ -40,6 +41,9 @@ func WithRemoteHTTPClient(c *http.Client) RemoteGeneratorOption {
 	return func(g *RemoteGenerator) {
 		if c != nil {
 			g.client = c
+			// A custom client is responsible for its own outbound behavior;
+			// skip the SSRF pre-check so tests on loopback servers work.
+			g.enforcePolicy = false
 		}
 	}
 }
@@ -56,10 +60,21 @@ type RemoteGenerator struct {
 	caller   ImageProxyCaller
 	client   *http.Client
 	maxBytes int64
+	policy   outbound.Policy
+	// enforcePolicy applies the SSRF policy in fetchImage before the request
+	// (fail-fast). It is disabled only when a custom client was injected via
+	// WithRemoteHTTPClient, which takes responsibility for its own dialing.
+	enforcePolicy bool
 }
 
 func NewRemoteGenerator(caller ImageProxyCaller, opts ...RemoteGeneratorOption) *RemoteGenerator {
-	g := &RemoteGenerator{caller: caller, client: safeImageClient(), maxBytes: 32 << 20}
+	g := &RemoteGenerator{
+		caller:        caller,
+		client:        safeImageClient(),
+		maxBytes:      32 << 20,
+		policy:        outbound.Policy{Timeout: 60 * time.Second},
+		enforcePolicy: true,
+	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(g)
@@ -230,12 +245,14 @@ func (g *RemoteGenerator) pollTask(ctx context.Context, caller ImageTaskCaller, 
 }
 
 func (g *RemoteGenerator) fetchImage(ctx context.Context, raw string) ([]byte, string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+	u, err := outbound.ValidateURL(raw)
+	if err != nil || u.Hostname() == "" {
 		return nil, "", errors.New("invalid image URL")
 	}
-	if blockedHost(u.Hostname()) {
-		return nil, "", errors.New("image URL target is not allowed")
+	if g.enforcePolicy {
+		if err := g.policy.CheckHost(ctx, u.Hostname()); err != nil {
+			return nil, "", errors.New("image URL target is not allowed")
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -279,24 +296,11 @@ func validateImageBytes(b []byte, contentType string, max int64) (GeneratedAsset
 }
 
 func safeImageClient() *http.Client {
-	return &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return errors.New("too many redirects")
-		}
-		if blockedHost(r.URL.Hostname()) {
-			return errors.New("redirect target is not allowed")
-		}
-		return nil
-	}}
+	// Outbound SSRF policy: no private/loopback targets, DNS-rebinding-safe
+	// dialing, per-redirect revalidation with a bounded hop count.
+	return outbound.Policy{Timeout: 60 * time.Second}.Client()
 }
-func blockedHost(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	if h == "localhost" || strings.HasSuffix(h, ".localhost") || h == "0.0.0.0" || h == "::" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast())
-}
+
 func protocolProvider(p string) string {
 	switch strings.ToLower(p) {
 	case "xai":
