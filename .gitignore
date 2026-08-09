@@ -61,3 +61,7 @@ skills-lock.json
 
 # Qoder IDE workspace state
 .qoder/
+
+
+# Large local model files must not enter project history
+Qwen3.6-27B-DSpark.gguf
