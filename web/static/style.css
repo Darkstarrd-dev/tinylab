@@ -2483,9 +2483,9 @@ select.select,
   flex-direction: column;
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
-  width: 100%;
-  min-width: max-content;
+  right: 0;
+  left: auto;
+  min-width: 100%;
   background: var(--surface-overlay);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -2520,9 +2520,10 @@ select.select,
   display: block;
   padding: 8px 14px;
   width: 100%;
-  position: relative;
+  position: relative !important;
+  z-index: 1 !important;
   text-align: left;
-  color: var(--text-secondary);
+  color: var(--text, #e2e8f0);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -2530,10 +2531,16 @@ select.select,
   box-sizing: border-box;
   text-decoration: none;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-select-option.selected {
+  background: rgba(16, 185, 129, 0.2);
 }
 
 .custom-select-option.selected .custom-select-option-link {
-  color: var(--text);
+  color: var(--accent, #10b981) !important;
   font-weight: 600;
 }
 
@@ -2558,7 +2565,7 @@ select.select,
 }
 
 .custom-select-option-link:hover {
-  color: var(--text-contrast, #ffffff);
+  color: var(--text-contrast, #ffffff) !important;
 }
 
 #dl-parse-btn,

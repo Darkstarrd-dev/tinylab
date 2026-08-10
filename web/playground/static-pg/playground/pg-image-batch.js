@@ -52,7 +52,10 @@
   function models(kind) {
     var all = Array.isArray(root.pgState && pgState.models) ? pgState.models : [];
     return all.filter(function (m) {
-      if (kind === 'text') return String(m.kind || '').toLowerCase() === 'text';
+      if (kind === 'text') {
+        var k = String(m.kind || '').toLowerCase();
+        return k !== 'image' && k !== 'embedding';
+      }
       if (kind === 'image') return String(m.kind || '').toLowerCase() === 'image' || !!m.imgProtocol || String(m.protocol || '').toLowerCase() === 'comfyui';
       return true;
     });

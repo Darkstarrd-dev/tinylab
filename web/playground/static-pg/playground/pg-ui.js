@@ -422,11 +422,13 @@ function pgRenderSidebar() {
     var isDisabled = (k >= pgState.splitCount || generating) ? ' disabled' : '';
     winBtns += '<button class="pg-win-btn' + isActive + '" onclick="pgSetActiveWin(' + k + ')"' + (isDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(pgT('pgWinBtnTitle', [k + 1])) + '">' + (k + 1) + '</button>';
   }
-  var splitOpts = '';
   var startSplit = (pgState.mode === 'autochat') ? 2 : 1;
+  var splitOptsList = [];
   for (var s = startSplit; s <= 4; s++) {
-    splitOpts += '<option value="' + s + '"' + (pgState.splitCount === s ? ' selected' : '') + '>' + s + '</option>';
+    splitOptsList.push({ value: s, label: String(s) });
   }
+  var splitSelHtml = pgRenderCustomSelect('pg-split-wrap', 'pg-split-sel', splitOptsList, pgState.splitCount, 'pgSetSplitCount(parseInt(this.value,10))', 'width:60px');
+
   var winbarRow = pgState.mode === 'search' ? '' : (
     '<div class="pg-panel-title" style="margin-bottom:8px">' + pgEscapeHtml(pgT('pgWinBarTitle')) + '</div>' +
     '<div class="pg-winbar-row">' +
@@ -434,7 +436,7 @@ function pgRenderSidebar() {
         winBtns +
         '<button class="pg-win-btn pg-reset-btn" onclick="pgResetSettings()"' + (generating ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(pgT('pgResetCfg')) + '">' + PG_ICON_RESET + '</button>' +
       '</div>' +
-      '<select onchange="pgSetSplitCount(parseInt(this.value,10))"' + (generating ? ' disabled' : '') + '>' + splitOpts + '</select>' +
+      splitSelHtml +
     '</div>'
   );
 
@@ -625,7 +627,11 @@ function pgRenderSidebar() {
 
   if (pgState.mode === 'image') {
     var effProto = pgEffectiveProtocol(cfg);
-    var helperModels = (pgState.models || []).filter(function(m) { return m.kind === 'text'; });
+    var helperModels = (pgState.models || []).filter(function(m) {
+      if (!m) return false;
+      var k = String(m.kind || '').toLowerCase();
+      return k !== 'image' && k !== 'embedding';
+    });
     var helperOptsList = [{ value: '', label: pgT('pgSelectModel') }].concat(
       helperModels.map(function(m) { return { value: m.id, label: m.id }; })
     );
@@ -640,7 +646,7 @@ function pgRenderSidebar() {
         winbar + comfyPanel +
         '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' +
           promptHelperRow +
-          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div>' +
+          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button>' + imageBatchBtn + '</div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
     } else {
@@ -648,7 +654,7 @@ function pgRenderSidebar() {
       side.innerHTML =
         winbar +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
-        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' + promptHelperRow + '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
+        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' + promptHelperRow + '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button>' + imageBatchBtn + '</div></div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -1326,7 +1332,11 @@ function pgSyncInputMaximizedState() {
 function pgRenderInputBar() {
   var bar = document.getElementById('pg-inputbar');
   if (!bar) return;
-  var imageGenerating = pgState.mode === 'image' && pgWin() && pgWin().image && pgWin().image.phase === 'generating';
+  var existingTa = document.getElementById('pg-input');
+  var w = pgWin();
+  var savedVal = existingTa ? existingTa.value : (w && w.config && w.config.prompt ? w.config.prompt : '');
+
+  var imageGenerating = pgState.mode === 'image' && w && w.image && w.image.phase === 'generating';
   var sendBtn = '';
   if (imageGenerating) {
     sendBtn = '<button class="pg-send stop" onclick="pgImageStop(pgState.activeWin)">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
@@ -1344,11 +1354,22 @@ function pgRenderInputBar() {
         : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>')
     + '</button>';
 
+  var infinitySvgHtml =
+    '<div class="pg-infinity-loader" id="pg-main-input-loader">' +
+      '<svg preserveAspectRatio="xMidYMid meet" viewBox="0 0 187.3 93.7" style="width:140px;height:70px">' +
+        '<path d="M93.9,46.4c9.3,9.5,13.8,17.9,23.5,17.9s17.5-7.8,17.5-17.5s-7.8-17.6-17.5-17.5c-9.7,0.1-13.3,7.2-22.1,17.1 c-8.9,8.8-15.7,17.9-25.4,17.9s-17.5-7.8-17.5-17.5s7.8-17.5,17.5-17.5S86.2,38.6,93.9,46.4z" stroke-miterlimit="10" stroke-linejoin="round" stroke-linecap="round" stroke-width="5" fill="none" id="outline" stroke="var(--accent, #10b981)"></path>' +
+        '<path d="M93.9,46.4c9.3,9.5,13.8,17.9,23.5,17.9s17.5-7.8,17.5-17.5s-7.8-17.6-17.5-17.5c-9.7,0.1-13.3,7.2-22.1,17.1 c-8.9,8.8-15.7,17.9-25.4,17.9s-17.5-7.8-17.5-17.5s7.8-17.5,17.5-17.5S86.2,38.6,93.9,46.4z" stroke-miterlimit="10" stroke-linejoin="round" stroke-linecap="round" stroke-width="5" stroke="var(--accent, #10b981)" fill="none" opacity="0.15" id="outline-bg"></path>' +
+      '</svg>' +
+    '</div>';
+
+  var wandSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 4 2 2M18 13l-1.5-1.5M10.5 4.5 9 3M19 8l2-2M2 22l10-10"/><path d="M12 2v2M12 8v2M8 4.5l-1.5-1.5M14.5 4.5l1.5-1.5"/></svg>';
+
   bar.innerHTML =
     '<div class="pg-input-card' + (isMax ? ' pg-input-card-maximized' : '') + '">' +
       '<div class="pg-input-thumbs" id="pg-input-thumbs"></div>' +
       '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
       expandBtnHtml +
+      infinitySvgHtml +
     '</div>' +
     '<div class="pg-input-actions">' +
       sendBtn +
@@ -1356,14 +1377,19 @@ function pgRenderInputBar() {
         (pgState.autoChat.enabled && pgState.autoChat.isRunning
           ? '<button class="pg-btn danger" onclick="pgAutoChatStop()" data-tooltip="' + pgEscapeHtml(pgT('pgAutoChatStop')) + '">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>'
           : '') +
-        '<button class="pg-btn danger" onclick="pgClear()">' + pgEscapeHtml(pgT('pgClear')) + '</button>' +
+        (pgState.mode === 'image'
+          ? '<button class="pg-btn pg-btn-wand" onclick="pgImageInspireQuick()" data-tooltip="一键提示词灵感生成">' + wandSvg + '</button><button class="pg-btn pg-btn-inspire" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>'
+          : '<button class="pg-btn danger" onclick="pgClear()">' + pgEscapeHtml(pgT('pgClear')) + '</button>') +
       '</div>' +
     '</div>';
 
   var ta = document.getElementById('pg-input');
   if (ta) {
+    if (savedVal) ta.value = savedVal;
     ta.addEventListener('paste', pgPasteImage);
     ta.addEventListener('input', function() {
+      var w2 = pgWin();
+      if (w2 && w2.config) w2.config.prompt = ta.value;
       var maxTa = document.getElementById('pg-max-editor-textarea');
       if (maxTa && pgState.inputMaximized) maxTa.value = ta.value;
     });
