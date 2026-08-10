@@ -506,6 +506,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     // --- GIF editor page ---
     gifEditorStep1: 'Import', gifEditorReload: 'Reset',
     gif: 'GIF',
+    gifEditor: 'GIF EDITOR',
     gifEditorAppTitle: 'GIF Frame Editor', gifEditorAppTitleSub: 'Pro Max',
     gifImportModalTitleVideo: 'Import Frames from Video',
     gifImportModalTitleGif: 'Import Frames from GIF',
@@ -1162,6 +1163,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     // --- GIF editor page ---
     gifEditorStep1: '资源导入', gifEditorReload: '重置',
     gif: 'GIF',
+    gifEditor: 'GIF EDITOR',
     gifEditorAppTitle: '喵喵切切乐', gifEditorAppTitleSub: 'Pro Max',
     gifImportModalTitleVideo: '从视频导入帧',
     gifImportModalTitleGif: '从 GIF 导入帧',

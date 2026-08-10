@@ -227,6 +227,16 @@
 
     dom.batchDelayInput = core.byId('batch-delay-input');
     dom.batchDelayBtn = core.byId('batch-delay-btn');
+
+    // 全局缩放 DOM
+    dom.resizeKeepRatio = core.byId('resize-keep-ratio');
+    dom.resizeWidth = core.byId('resize-width');
+    dom.resizeHeight = core.byId('resize-height');
+    dom.resizeApplyBtn = core.byId('resize-apply-btn');
+
+    // 间隔删除 DOM
+    dom.intervalDeleteVal = core.byId('interval-delete-val');
+    dom.intervalDeleteBtn = core.byId('interval-delete-btn');
     dom.outW = core.byId('output-width');
     dom.outH = core.byId('output-height');
     dom.outScaleSlider = core.byId('output-scale-slider');
@@ -1763,6 +1773,152 @@
     if (dom.btnDelRange) dom.btnDelRange.addEventListener('click', deleteRange);
     if (dom.btnKeepRange) dom.btnKeepRange.addEventListener('click', keepRange);
 
+    // 全局缩放：保持比例联动
+    if (dom.resizeKeepRatio && dom.resizeWidth && dom.resizeHeight) {
+      dom.resizeWidth.addEventListener('input', function () {
+        if (!dom.resizeKeepRatio.checked) return;
+        var slices = core.state.slices || [];
+        if (!slices.length || !slices[0].canvas) return;
+        var origW = slices[0].canvas.width;
+        var origH = slices[0].canvas.height;
+        var w = parseInt(dom.resizeWidth.value, 10);
+        if (w > 0 && origW > 0) dom.resizeHeight.value = Math.round(origH * w / origW);
+      });
+      dom.resizeHeight.addEventListener('input', function () {
+        if (!dom.resizeKeepRatio.checked) return;
+        var slices = core.state.slices || [];
+        if (!slices.length || !slices[0].canvas) return;
+        var origW = slices[0].canvas.width;
+        var origH = slices[0].canvas.height;
+        var h = parseInt(dom.resizeHeight.value, 10);
+        if (h > 0 && origH > 0) dom.resizeWidth.value = Math.round(origW * h / origH);
+      });
+    }
+    // 全局缩放：应用
+    if (dom.resizeApplyBtn) {
+      dom.resizeApplyBtn.addEventListener('click', function () {
+        var slices = core.state.slices || [];
+        if (!slices.length) { alert(t('gifEditorAlertNoFrames', '没有帧可操作')); return; }
+        var keepRatio = dom.resizeKeepRatio && dom.resizeKeepRatio.checked;
+        var targetW = parseInt(dom.resizeWidth.value, 10);
+        var targetH = parseInt(dom.resizeHeight.value, 10);
+        var origW = slices[0].canvas.width;
+        var origH = slices[0].canvas.height;
+        if (keepRatio) {
+          if (targetW && !targetH) targetH = Math.round(origH * targetW / origW);
+          else if (targetH && !targetW) targetW = Math.round(origW * targetH / origH);
+          else if (!targetW && !targetH) { alert(t('gifEditorAlertResizeEmpty', '请输入宽度或高度')); return; }
+        } else {
+          if (!targetW) targetW = origW;
+          if (!targetH) targetH = origH;
+        }
+        targetW = Math.max(1, targetW);
+        targetH = Math.max(1, targetH);
+        showConfirmModal({
+          title: t('gifEditorResizeTitle', '全局缩放'),
+          message: t('gifEditorResizeConfirm', '将所有帧从 ' + origW + '×' + origH + ' 缩放到 ' + targetW + '×' + targetH + '？此操作不可撤销。'),
+          confirmText: t('gifEditorResizeBtn', '确认缩放'),
+          cancelText: t('cancel', '取消'),
+          onConfirm: function () {
+            for (var i = 0; i < slices.length; i++) {
+              var src = slices[i].canvas;
+              var dst = document.createElement('canvas');
+              dst.width = targetW;
+              dst.height = targetH;
+              dst.getContext('2d').drawImage(src, 0, 0, targetW, targetH);
+              slices[i].canvas = dst;
+            }
+            core.state.processedImg = slices[core.state.selectedSliceIdx >= 0 ? core.state.selectedSliceIdx : 0].canvas;
+            if (core.timeline) core.timeline.clearThumbCache();
+            if (core.timeline && core.timeline.render) core.timeline.render();
+            draw();
+            resetView();
+          }
+        });
+      });
+    }
+
+    // 间隔删除
+    if (dom.intervalDeleteBtn) {
+      dom.intervalDeleteBtn.addEventListener('click', function () {
+        var slices = core.state.slices || [];
+        if (!slices.length) { alert(t('gifEditorAlertNoFrames', '没有帧可操作')); return; }
+        var interval = parseInt(dom.intervalDeleteVal.value, 10);
+        if (isNaN(interval) || interval < 1) { alert(t('gifEditorAlertIntervalInvalid', '请输入有效的间隔值（≥1）')); return; }
+        // 计算删除前总时长
+        var totalDuration = 0;
+        for (var i = 0; i < slices.length; i++) totalDuration += (slices[i].delay || 100);
+        // 执行间隔删除：每隔 interval 帧删除 1 帧
+        var kept = [];
+        for (var i = 0; i < slices.length; i++) {
+          if ((i + 1) % (interval + 1) !== 0) kept.push(slices[i]);
+        }
+        if (!kept.length) { alert(t('gifEditorAlertAllDeleted', '所有帧都会被删除，操作取消')); return; }
+        var deletedCount = slices.length - kept.length;
+        showConfirmModal({
+          title: t('gifEditorIntervalDeleteTitle', '间隔删除'),
+          message: t('gifEditorIntervalDeleteConfirm', '将每隔 ' + interval + ' 帧删除 1 帧，共删除 ' + deletedCount + ' 帧（' + slices.length + ' → ' + kept.length + '），自动调整延迟保持总时长。'),
+          confirmText: t('gifEditorDeleteConfirmBtn', '确认删除'),
+          cancelText: t('cancel', '取消'),
+          onConfirm: function () {
+            // 重新分配 delay 保持总时长不变
+            var newDelay = Math.max(1, Math.round(totalDuration / kept.length));
+            for (var j = 0; j < kept.length; j++) kept[j].delay = newDelay;
+            core.state.slices = kept;
+            core.state.selectedSliceIdx = Math.min(core.state.selectedSliceIdx, kept.length - 1);
+            if (core.state.selectedSliceIdx < 0) core.state.selectedSliceIdx = 0;
+            if (core.timeline) core.timeline.clearThumbCache();
+            if (core.timeline && core.timeline.render) core.timeline.render();
+            if (core.commands.focusFrame) core.commands.focusFrame(core.state.selectedSliceIdx);
+            else draw();
+          }
+        });
+      });
+    }
+
+    // 右键复制当前帧到剪贴板
+    if (dom.stage) {
+      dom.stage.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        var slices = core.state.slices || [];
+        var idx = core.state.selectedSliceIdx;
+        if (idx < 0 || idx >= slices.length || !slices[idx].canvas) return;
+        var src = slices[idx].canvas;
+        // 创建临时 canvas 用于合成（含图层）
+        var tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = src.width;
+        tmpCanvas.height = src.height;
+        if (core.commands && core.commands.composeFrame) {
+          core.commands.composeFrame(idx, tmpCanvas, {});
+        } else {
+          tmpCanvas.getContext('2d').drawImage(src, 0, 0);
+        }
+        tmpCanvas.toBlob(function (blob) {
+          if (!blob) return;
+          try {
+            navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]).then(function () {
+              // 短暂提示
+              if (dom.stageOverlayText) {
+                var origText = dom.stageOverlayText.textContent;
+                dom.stageOverlayText.textContent = '✅ ' + t('gifEditorCopiedToClipboard', '已复制到剪贴板');
+                setTimeout(function () {
+                  dom.stageOverlayText.textContent = origText;
+                }, 1500);
+              }
+            }).catch(function (err) {
+              console.error('Copy to clipboard failed:', err);
+              alert(t('gifEditorCopyFailed', '复制失败，请检查浏览器权限'));
+            });
+          } catch (err) {
+            console.error('Clipboard API not available:', err);
+            alert(t('gifEditorCopyFailed', '复制失败，浏览器不支持剪贴板 API'));
+          }
+        }, 'image/png');
+      });
+    }
+
     // Reload (reset workspace in place)
     if (dom.reloadBtn) {
       dom.reloadBtn.addEventListener('click', function () {
@@ -2045,15 +2201,44 @@
       '          <button type="button" class="gif-btn gif-btn-danger gif-sm-btn" id="gif-delete-layer-btn" data-i18n="gifEditorDeleteLayer">删除</button>' +
       '        </div>' +
       '      </div>' +
+      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
+      '        <div class="gif-group-title" data-i18n="gifEditorGlobalDelay">' + t('gifEditorGlobalDelay', '全局帧延迟 (ms)') + '</div>' +
+      '        <div class="gif-control-row">' +
+      '          <input type="number" id="gif-batch-delay-input" placeholder="100" min="0" value="100" class="gif-flex-1">' +
+      '          <button type="button" class="gif-btn gif-btn-primary" id="gif-batch-delay-btn" data-i18n="gifEditorApplyDelay">' + t('gifEditorApplyDelay', '应用') + '</button>' +
+      '        </div>' +
+      '      </div>' +
+      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
+      '        <div class="gif-group-title" data-i18n="gifEditorGlobalResize">' + t('gifEditorGlobalResize', '全局缩放') + '</div>' +
+      '        <div class="gif-control-row">' +
+      '          <label class="gif-check-label" style="margin-bottom: 0;"><input type="checkbox" id="gif-resize-keep-ratio" checked> <span data-i18n="gifEditorKeepRatio">' + t('gifEditorKeepRatio', '保持比例') + '</span></label>' +
+      '        </div>' +
+      '        <div class="gif-control-row">' +
+      '          <span class="gif-muted-label">W</span>' +
+      '          <input type="number" id="gif-resize-width" placeholder="' + t('gifEditorWidth', '宽度') + '" min="1" class="gif-flex-1">' +
+      '          <span class="gif-muted-label">H</span>' +
+      '          <input type="number" id="gif-resize-height" placeholder="' + t('gifEditorHeight', '高度') + '" min="1" class="gif-flex-1">' +
+      '        </div>' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-resize-apply-btn" data-i18n="gifEditorApplyResize">' + t('gifEditorApplyResize', '应用缩放') + '</button>' +
+      '      </div>' +
       '      <div class="gif-output-sep-inner" id="gif-batch-delete-container" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">批量删除帧</div>' +
+      '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">' + t('gifEditorBatchDelete', '批量删除帧') + '</div>' +
       '        <div class="gif-control-row">' +
       '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
       '          <input type="number" id="gif-del-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
       '        </div>' +
       '        <div class="gif-control-row">' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-delete-range-btn" data-i18n="gifEditorDeleteRange">🗑️ 删除指定</button>' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">保留指定</button>' +
+      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-delete-range-btn" data-i18n="gifEditorDeleteRange">🗑️ ' + t('gifEditorDeleteRange', '删除指定') + '</button>' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">' + t('gifEditorKeepRange', '保留指定') + '</button>' +
+      '        </div>' +
+      '        <div style="margin-top: 8px; border-top: 1px dashed var(--glass-border); padding-top: 8px;">' +
+      '          <div class="gif-group-title" data-i18n="gifEditorIntervalDelete">' + t('gifEditorIntervalDelete', '间隔删除') + '</div>' +
+      '          <div class="gif-control-row">' +
+      '            <span class="gif-muted-label" data-i18n="gifEditorInterval">' + t('gifEditorInterval', '间隔') + '</span>' +
+      '            <input type="number" id="gif-interval-delete-val" min="1" value="1" class="gif-flex-1" placeholder="N">' +
+      '            <button type="button" class="gif-btn gif-btn-danger" id="gif-interval-delete-btn" data-i18n="gifEditorIntervalDeleteBtn">' + t('gifEditorIntervalDeleteBtn', '间隔删除') + '</button>' +
+      '          </div>' +
+      '          <div class="gif-muted-hint" data-i18n="gifEditorIntervalDeleteHint" style="margin-top: 4px;">' + t('gifEditorIntervalDeleteHint', '每隔 N 帧删除 1 帧，自动调整延迟保持总时长') + '</div>' +
       '        </div>' +
       '      </div>' +
       '    </div>' +

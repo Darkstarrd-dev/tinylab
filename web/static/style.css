@@ -4425,9 +4425,9 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   align-items: stretch;
   gap: 0;
   min-width: 0;
-  height: 155px;
-  min-height: 155px;
-  max-height: 155px;
+  height: 180px;
+  min-height: 180px;
+  max-height: 180px;
   flex-shrink: 0;
   padding: 0;
   overflow: hidden;
@@ -4436,7 +4436,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 6px 10px 2px 10px;
+  padding: 6px 10px 6px 10px;
   min-height: 0;
   touch-action: pan-x;
 }

@@ -77,7 +77,7 @@ var UTILITY_TOOLS = [
   { id: 'editor', labelKey: 'logFileEditor' },
   { id: 'logReader', labelKey: 'logReader', requiresPlayground: true },
   { id: 'review', labelKey: 'utilityReview', requiresPlayground: true },
-  { id: 'gif', labelKey: 'gif' },
+  { id: 'gif', labelKey: 'gifEditor' },
   { id: 'download', labelKey: 'download' },
   { id: 'fileTransfer', labelKey: 'fileTransfer' }
 ];
