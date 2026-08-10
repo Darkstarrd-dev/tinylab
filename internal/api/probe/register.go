@@ -16,6 +16,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/customheaders"
+	"github.com/tinyrouter/tinyrouter/internal/logredact"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/sse"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
@@ -615,15 +616,21 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 		return res
 	}
 	rawStr := string(rawBody)
+	credential := authVal
+	if idx := strings.IndexAny(credential, " \t"); idx > 0 {
+		credential = credential[idx+1:]
+	}
+	maskedURL := logredact.MaskURL(url, credential)
+	maskedRaw := logredact.MaskString(rawStr, credential)
 
-	var parsedReqBody any = rawStr
-	if j := map[string]any{}; json.Unmarshal(rawBody, &j) == nil {
+	var parsedReqBody any = maskedRaw
+	if j := map[string]any{}; json.Unmarshal([]byte(maskedRaw), &j) == nil {
 		parsedReqBody = j
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, strings.NewReader(rawStr))
 	if err != nil {
-		res.Error = "invalid URL: " + err.Error()
+		res.Error = logredact.MaskString("invalid URL: "+err.Error(), credential)
 		return res
 	}
 	req.Header.Set("Content-Type", contentType)
@@ -639,15 +646,15 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 	resp, err := client.Do(req)
 	res.LatencyMs = time.Since(start).Milliseconds()
 	if err != nil {
-		res.Error = err.Error()
+		res.Error = logredact.MaskString(err.Error(), credential)
 		res.Status = 0
-		safe := redactAuth(req.Header)
+		safe := redactAuth(req.Header, credential)
 		res.Request = map[string]any{
 			"method":  method,
-			"url":     url,
+			"url":     maskedURL,
 			"headers": headerToMap(safe),
 			"body":    parsedReqBody,
-			"bodyRaw": rawStr,
+			"bodyRaw": maskedRaw,
 		}
 		return res
 	}
@@ -658,14 +665,15 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 	// F-14 keeps the client-facing path separate).
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	raw := string(respBody)
-	var parsedResp any = raw
-	if j := map[string]any{}; json.Unmarshal(respBody, &j) == nil {
+	maskedRespRaw := logredact.MaskString(raw, credential)
+	var parsedResp any = maskedRespRaw
+	if j := map[string]any{}; json.Unmarshal([]byte(maskedRespRaw), &j) == nil {
 		parsedResp = j
 	}
 	res.Status = resp.StatusCode
-	res.ResponseHeaders = headerToMap(resp.Header)
+	res.ResponseHeaders = headerToMap(logredact.MaskHTTPHeaders(resp.Header, credential))
 	res.ResponseBody = parsedResp
-	res.ResponseBodyRaw = raw
+	res.ResponseBodyRaw = maskedRespRaw
 
 	var errMsg string
 	statusText := http.StatusText(resp.StatusCode)
@@ -684,7 +692,7 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 		}
 	}
 	res.Ok = ok
-	res.Error = errMsg
+	res.Error = logredact.MaskString(errMsg, credential)
 
 	if ok {
 		res.OutputTokens = extractOutputTokens(raw)
@@ -696,13 +704,13 @@ func doProbe(ctx context.Context, client *http.Client, protocol, method, url, co
 		}
 	}
 
-	safe := redactAuth(req.Header)
+	safe := redactAuth(req.Header, credential)
 	res.Request = map[string]any{
 		"method":  method,
-		"url":     url,
+		"url":     maskedURL,
 		"headers": headerToMap(safe),
 		"body":    parsedReqBody,
-		"bodyRaw": rawStr,
+		"bodyRaw": maskedRaw,
 	}
 	return res
 }
@@ -724,13 +732,9 @@ func extractErrorMsg(raw string) string {
 	return ""
 }
 
-// redactAuth returns a clone of h with the auth headers removed before logging.
-func redactAuth(h http.Header) http.Header {
-	safe := h.Clone()
-	safe.Del("Authorization")
-	safe.Del("X-Api-Key")
-	safe.Del("x-api-key")
-	return safe
+// redactAuth returns a copy of h with only credential values masked.
+func redactAuth(h http.Header, credential string) http.Header {
+	return logredact.MaskHTTPHeaders(h, credential)
 }
 
 // extractOutputTokens parses output token count from an upstream response body.

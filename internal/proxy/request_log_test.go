@@ -13,85 +13,24 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 )
 
-func TestStripBase64Images_DataURL(t *testing.T) {
-	input := `{"image": "data:image/png;base64,` + strings.Repeat("A", 200) + `"}`
-	result := stripBase64Images([]byte(input))
-	if !json.Valid(result) {
-		t.Fatalf("result is not valid JSON: %s", result)
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(result, &obj); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	img := obj["image"].(string)
-	if !strings.Contains(img, "[truncated: 200 bytes]") {
-		t.Errorf("expected truncation placeholder, got: %s", img)
-	}
-	if !strings.HasPrefix(img, "data:image/png;base64,") {
-		t.Errorf("expected data URL prefix preserved, got: %s", img)
-	}
-}
-
-func TestStripBase64Images_b64_json(t *testing.T) {
-	input := `{"b64_json": "` + strings.Repeat("B", 200) + `"}`
-	result := stripBase64Images([]byte(input))
-	var obj map[string]any
-	json.Unmarshal(result, &obj)
-	b64 := obj["b64_json"].(string)
-	if !strings.Contains(b64, "[truncated: 200 bytes]") {
-		t.Errorf("expected truncation placeholder for b64_json, got: %s", b64)
-	}
-}
-
-func TestStripBase64Images_AnthropicBase64(t *testing.T) {
-	input := `{"source": {"type": "base64", "data": "` + strings.Repeat("C", 200) + `"}}`
-	result := stripBase64Images([]byte(input))
-	var obj map[string]any
-	json.Unmarshal(result, &obj)
-	source := obj["source"].(map[string]any)
-	data := source["data"].(string)
-	if !strings.Contains(data, "[truncated: 200 bytes]") {
-		t.Errorf("expected truncation placeholder for Anthropic data, got: %s", data)
-	}
-}
-
-func TestStripBase64Images_ShortStringUntouched(t *testing.T) {
-	input := `{"short": "data:image/png;base64,abc"}`
-	result := stripBase64Images([]byte(input))
-	var obj map[string]any
-	json.Unmarshal(result, &obj)
-	short := obj["short"].(string)
-	if short != "data:image/png;base64,abc" {
-		t.Errorf("expected short string untouched, got: %s", short)
-	}
-}
-
-func TestStripBase64Images_NonJSON(t *testing.T) {
-	input := []byte("not json at all")
-	result := stripBase64Images(input)
-	if string(result) != "not json at all" {
-		t.Errorf("expected non-JSON input returned unchanged")
-	}
-}
-
 func TestMaskSecret_Bearer(t *testing.T) {
 	result := maskSecret("Bearer sk-abcdefghijklmnopqrstuvwxyz")
-	if result != "Bearer ***wxyz" {
-		t.Errorf("expected 'Bearer ***wxyz', got: %s", result)
+	if result != "Bearer ******" {
+		t.Errorf("expected 'Bearer ******', got: %s", result)
 	}
 }
 
 func TestMaskSecret_ShortToken(t *testing.T) {
 	result := maskSecret("sk-short")
-	if result != "***" {
-		t.Errorf("expected '***' for short token, got: %s", result)
+	if result != "******" {
+		t.Errorf("expected '******' for short token, got: %s", result)
 	}
 }
 
 func TestMaskSecret_NoSpace(t *testing.T) {
 	result := maskSecret("sk-abcdefghijklmnopqrstuvwxyz")
-	if result != "***wxyz" {
-		t.Errorf("expected '***wxyz', got: %s", result)
+	if result != "******" {
+		t.Errorf("expected '******', got: %s", result)
 	}
 }
 
@@ -253,7 +192,7 @@ func TestWriteRequestLog_JSONL(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Authorization to be []any, got: %T", reqHeadersRaw["Authorization"])
 	}
-	if len(authRaw) != 1 || authRaw[0] != "Bearer ***wxyz" {
+	if len(authRaw) != 1 || authRaw[0] != "Bearer ******" {
 		t.Errorf("expected masked Authorization header, got: %v", authRaw)
 	}
 	ctRaw, ok := reqHeadersRaw["Content-Type"].([]any)
@@ -284,6 +223,37 @@ func TestWriteRequestLog_JSONL(t *testing.T) {
 	}
 	if respBodyOut["id"] != "chatcmpl-123" {
 		t.Errorf("expected respBody.id=chatcmpl-123, got: %v", respBodyOut["id"])
+	}
+}
+
+func TestWriteRequestLog_PreservesFullBodies(t *testing.T) {
+	h, tmpDir := newTestHandlerForTrace(t)
+	sel := &rotation.SelectedKey{
+		Provider: config.Provider{ID: "test", Name: "Test Provider"},
+		Key:      config.Key{ID: "key1", Key: "sk-real", Name: "K1"},
+		KeyName:  "K1",
+	}
+	large := strings.Repeat("A", 200)
+	reqBody := []byte(`{"model":"gpt-4","image":"data:image/png;base64,` + large + `"}`)
+	respBody := []byte(`{"b64_json":"` + large + `"}`)
+	h.writeRequestLog("req-full", "provider", "gpt-4", sel, "success", 1, 0, 1, 1, "", reqBody, respBody, nil, 200, nil, "https://upstream/v1", "gpt-4", "sess", "success", "")
+
+	reqLines, err := readJSONLLines(filepath.Join(tmpDir, "req", "req-full.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqLines) != 2 {
+		t.Fatalf("expected request and attempt lines, got %d", len(reqLines))
+	}
+	data, err := json.Marshal(reqLines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), large) {
+		t.Fatal("trace body was truncated")
+	}
+	if strings.Contains(string(data), "[truncated:") {
+		t.Fatal("trace body contains a truncation placeholder")
 	}
 }
 

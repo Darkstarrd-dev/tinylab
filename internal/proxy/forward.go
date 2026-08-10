@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/tinyrouter/tinyrouter/internal/logredact"
 )
 
 // resolveDisplayModel returns the best display name for console logs:
@@ -53,28 +55,14 @@ func requestCallerTag(r *http.Request) string {
 	return tag
 }
 
-// maskAuth returns a log-safe rendering of an Authorization header value: the
-// first 4 and last 4 characters separated by "…" (e.g. "sk-x…yz"). The common
-// "Bearer " scheme prefix is stripped before masking so only the key itself is
-// masked. If the key is too short to mask without revealing the whole thing
-// (<=8 chars), "<len>chars" is returned instead. The full credential is never
-// returned.
+// maskAuth returns an Authorization header with its credential replaced by the
+// fixed log mask while preserving the authentication scheme.
 func maskAuth(auth string) string {
 	v := strings.TrimSpace(auth)
-	// Strip a "Bearer" scheme prefix (case-insensitive). Trimming first means a
-	// "Bearer " with trailing space collapses to "Bearer", so match the 6-char
-	// scheme and trim any whitespace that followed it.
-	if len(v) >= 6 && strings.EqualFold(v[:6], "bearer") {
-		v = strings.TrimSpace(v[6:])
+	if idx := strings.IndexAny(v, " \t"); idx > 0 {
+		return v[:idx+1] + logredact.MaskedValue
 	}
-	if v == "" {
-		return "0chars"
-	}
-	n := len(v)
-	if n <= 8 {
-		return fmt.Sprintf("%dchars", n)
-	}
-	return v[:4] + "…" + v[n-4:]
+	return logredact.MaskedValue
 }
 
 // clipStr shortens s to at most n runes, appending "…" if truncated.

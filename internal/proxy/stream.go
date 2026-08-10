@@ -13,51 +13,8 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/util"
 )
 
-// maxStreamCaptureBytes caps the SSE stream body captured for trace/debug.
-// The ring truncates respBody to 512KB from the FRONT; this keeps the TAIL,
-// which for a stream carries the final usage event. The full stream still
-// flows to the client — only the captured copy is bounded, so a multi-hour
-// stream cannot balloon memory.
-const maxStreamCaptureBytes = 512 * 1024
-
-// boundedSSEBuffer retains only the last maxStreamCaptureBytes of the streamed
-// SSE body, trimmed at a line boundary so the captured JSONL stays readable.
-// It compacts only when well over the cap so a long stream does not memmove
-// the whole tail on every chunk.
-type boundedSSEBuffer struct {
-	buf []byte
-}
-
-func (b *boundedSSEBuffer) WriteString(s string) {
-	b.append([]byte(s))
-}
-
-func (b *boundedSSEBuffer) WriteByte(c byte) error {
-	b.append([]byte{c})
-	return nil
-}
-
-func (b *boundedSSEBuffer) append(p []byte) {
-	b.buf = append(b.buf, p...)
-	if len(b.buf) > 2*maxStreamCaptureBytes {
-		excess := len(b.buf) - maxStreamCaptureBytes
-		tail := b.buf[excess:]
-		if i := bytes.IndexByte(tail, '\n'); i >= 0 {
-			tail = tail[i+1:]
-		}
-		b.buf = append([]byte(nil), tail...)
-	}
-}
-
-func (b *boundedSSEBuffer) Bytes() []byte { return b.buf }
-
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel, sessionKey string) {
 	defer resp.Body.Close()
-
-	// 任一消费者需要即累积 SSE 全量：追踪（logRequests，落盘 JSONL）/ debug ring（非 playground）/
-	// playground（始终）。追踪的响应体捕获由此独立于 debug 模式。SSE 仍照常转发给客户端。
-	isPlayground := reqHeaders != nil && reqHeaders.Get("X-TinyRouter-Source") == "playground"
-	captureDetails := h.logRequests() || isPlayground || h.debugMode()
 
 	streamStart := time.Now()
 	var inflightID int64
@@ -97,7 +54,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	inputTokens := 0
 	outputTokens := 0
 	sb := sse.NewSSELineBuffer(0, 0)
-	var sseBuf boundedSSEBuffer
+	var sseBuf bytes.Buffer
 	var contentCharsTotal int
 	var lastTokenBroadcast time.Time
 	var lastEntryRefresh time.Time
@@ -110,6 +67,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			_, _ = sseBuf.Write(buf[:n])
 			var contentChars int
 			if normalize {
 				lines, ferr := sb.Feed(buf[:n])
@@ -157,10 +115,6 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					if h.debugMode() && reqID != "" && entryFormat == combo.EntryFormatOpenAI {
 						h.parseAndBroadcastChunk(reqID, line, sb)
 					}
-					if captureDetails {
-						sseBuf.WriteString(line)
-						sseBuf.WriteByte('\n')
-					}
 				}
 			} else {
 				if _, err := w.Write(buf[:n]); err != nil {
@@ -206,10 +160,6 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					}
 					if h.debugMode() && reqID != "" && entryFormat == combo.EntryFormatOpenAI {
 						h.parseAndBroadcastChunk(reqID, line, sb)
-					}
-					if captureDetails {
-						sseBuf.WriteString(line)
-						sseBuf.WriteByte('\n')
 					}
 				}
 			}
@@ -292,10 +242,6 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				if h.debugMode() && reqID != "" && entryFormat == combo.EntryFormatOpenAI {
 					h.parseAndBroadcastChunk(reqID, line, sb)
 				}
-				if captureDetails {
-					sseBuf.WriteString(line)
-					sseBuf.WriteByte('\n')
-				}
 			}
 			break
 		}
@@ -309,11 +255,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
 	dspModel := resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases)
 	h.logger.Info("\U0001f300 [STREAM] %s | %s | %dms | %d", sel.Provider.Name, dspModel, totalLatencyMs, resp.StatusCode)
-	// 非捕获模式下传 nil，recordUsage 内部 respBody 为空即不写 RespPayload
-	var sseBody []byte
-	if captureDetails {
-		sseBody = sseBuf.Bytes()
-	}
+	sseBody := sseBuf.Bytes()
 	status := "success"
 	errMsg := ""
 	if streamAborted {
@@ -337,8 +279,8 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 // pass-through. Unlike the old io.LimitReader (which silently truncated), an
 // over-budget response is refused with a controlled 502 error before any
 // header is committed, so the client never receives a corrupt partial body.
-// The usage/trace capture copy stays independently bounded (512KB, see
-// recordUsage) — the two budgets are deliberately separate (F-14).
+// The usage/trace capture copy contains the complete response; the client
+// transport budget remains separate (F-14).
 const maxPassThroughBodyBytes = 256 << 20
 
 func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, originalModel, sessionKey string) {
@@ -392,20 +334,7 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 		errMsg = "client disconnected: " + werr.Error()
 		h.logger.Warn("client disconnected during pass-through: %v", werr)
 	}
-	// 任一消费者需要即把 body 传给 recordUsage（追踪 / debug ring / playground），见 streamResponse 同门。
-	isPlayground := reqHeaders != nil && reqHeaders.Get("X-TinyRouter-Source") == "playground"
-	captureDetails := h.logRequests() || isPlayground || h.debugMode()
-	var respBodyForEntry []byte
-	if captureDetails {
-		// Cap ONLY the usage-capture copy; the client write above is the full
-		// (budget-bounded) body.
-		const maxPTRespBody = 512 * 1024
-		if len(bodyBytes) > maxPTRespBody {
-			respBodyForEntry = bodyBytes[:maxPTRespBody]
-		} else {
-			respBodyForEntry = bodyBytes
-		}
-	}
+	respBodyForEntry := bodyBytes
 	h.logger.Info("\U0001f4ca [response] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
 	h.logger.Info("\U0001f300 [RESPONSE] %s | %s | %dms | %d", sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases), latencyMs, resp.StatusCode)
 	ptDecision := "success"

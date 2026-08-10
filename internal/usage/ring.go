@@ -28,6 +28,8 @@ type Entry struct {
 	RespStatus    int             `json:"respStatus,omitempty"`
 	ReqHeaders    http.Header     `json:"reqHeaders,omitempty"`
 	UpstreamURL   string          `json:"upstreamUrl,omitempty"`
+	Decision      string          `json:"decision,omitempty"`
+	Provenance    string          `json:"provenance,omitempty"`
 	Source        string          `json:"source,omitempty"`     // origin tag, e.g. "playground"
 	SessionKey    string          `json:"sessionKey,omitempty"` // inferred conversation root hash; empty = single-shot/ungrouped
 }

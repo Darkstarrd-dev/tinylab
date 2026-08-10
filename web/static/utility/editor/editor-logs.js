@@ -536,9 +536,17 @@ function logsRenderDetail(container, data, indexLine) {
     { label: t('logModel'), value: ix.model || '\u2014' },
     { label: t('logOriginalModel'), value: ix.originalModel || '\u2014' },
     { label: t('logProvider'), value: ix.provider || '\u2014' },
+    { label: t('logUpstreamURL'), value: ix.upstreamURLBase || '\u2014' },
+    { label: t('logFinalKey'), value: ix.finalKey || '\u2014' },
+    { label: t('logFinalKeyName'), value: ix.finalKeyName || '\u2014' },
     { label: t('logStatus'), value: ix.status || '\u2014' },
+    { label: t('logHTTPStatus'), value: (ix.httpStatus != null ? ix.httpStatus : '\u2014') },
     { label: t('logLatency'), value: (ix.latencyMs != null ? ix.latencyMs + 'ms' : '\u2014') },
-    { label: t('logAttempts'), value: (ix.attempts != null ? ix.attempts : '\u2014') }
+    { label: t('logTTFT'), value: (ix.ttftMs != null ? ix.ttftMs + 'ms' : '\u2014') },
+    { label: t('logAttempts'), value: (ix.attempts != null ? ix.attempts : '\u2014') },
+    { label: t('logInputTokens'), value: (ix.inputTokens != null ? ix.inputTokens : '\u2014') },
+    { label: t('logOutputTokens'), value: (ix.outputTokens != null ? ix.outputTokens : '\u2014') },
+    { label: t('logDecision'), value: ix.decision || '\u2014' }
   ];
 
   for (var i = 0; i < fields.length; i++) {
@@ -644,8 +652,14 @@ function logsRenderAttemptCard(container, attempt) {
   // Key / keyName
   var keyInfo = document.createElement('div');
   keyInfo.className = 'attempt-meta';
-  var keyText = attempt.key || attempt.keyName || '\u2014';
-  keyInfo.innerHTML = '<span class="muted">' + t('logKey') + ':</span> ' + logsEscapeHtml(keyText);
+  var keyText = attempt.key || '\u2014';
+  keyInfo.innerHTML = '<span class="muted">' + t('logFinalKey') + ':</span> ' + logsEscapeHtml(keyText);
+  if (attempt.keyName) {
+    keyInfo.innerHTML += ' <span class="muted">| ' + t('logFinalKeyName') + ': ' + logsEscapeHtml(attempt.keyName) + '</span>';
+  }
+  if (attempt.upstreamURL) {
+    keyInfo.innerHTML += ' <span class="muted">| ' + t('logUpstreamURL') + ': ' + logsEscapeHtml(attempt.upstreamURL) + '</span>';
+  }
   if (attempt.latencyMs != null) {
     keyInfo.innerHTML += ' <span class="muted">| ' + t('logLatency') + ': ' + attempt.latencyMs + 'ms</span>';
   }

@@ -22,7 +22,7 @@ import (
 // TestPassThrough_LargeBodyStreamsFully verifies the non-stream pass-through
 // no longer silently truncates responses at 64MB (H3): a body larger than the
 // old io.LimitReader cap must reach the client in full, while the
-// usage-capture copy passed to recordUsage stays bounded at 512KB.
+// usage-capture copy passed to recordUsage remains complete as well.
 func TestPassThrough_LargeBodyStreamsFully(t *testing.T) {
 	h := newSingleKeyHandler(t, "", 0)
 	sel := &rotation.SelectedKey{

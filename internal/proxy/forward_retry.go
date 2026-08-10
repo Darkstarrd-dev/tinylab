@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
+	"github.com/tinyrouter/tinyrouter/internal/logredact"
 	"github.com/tinyrouter/tinyrouter/internal/urlutil"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
@@ -139,15 +140,16 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			InputTokens:   len(bodyBytes) / 4, // rough estimate for live UI
 		}
 		upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
+		credential := sel.Key.Key
 		if len(bodyBytes) > 0 {
-			rb := bodyBytes
+			rb := []byte(logredact.MaskString(string(bodyBytes), credential))
 			if !json.Valid(rb) {
 				rb, _ = json.Marshal(map[string]string{"raw": string(rb)})
 			}
 			processingEntry.ReqPayload = append([]byte(nil), rb...)
 		}
-		processingEntry.ReqHeaders = h.maskHeaderMap(r.Header)
-		processingEntry.UpstreamURL = redactURL(upstreamURL)
+		processingEntry.ReqHeaders = http.Header(h.maskHeaderMap(r.Header, credential))
+		processingEntry.UpstreamURL = redactURL(upstreamURL, credential)
 		h.EntryTracker.Register(processingEntry)
 		h.broadcastRequestStart(reqID, processingEntry)
 
@@ -217,7 +219,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			h.nim.OnNIMRequestSuccess(providerID, sel.Key.ID, upstreamModel)
 		}
 
-		maskedURL := maskURL(sel.Provider.BaseURL)
+		maskedURL := logredact.MaskURL(sel.Provider.BaseURL, sel.Key.Key)
 		dspModel := resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases)
 		h.logger.Info("[%s] PROXY %s | %s | conn=%s | url=%s", logTag, sel.Provider.Name, dspModel, sel.KeyName, maskedURL)
 

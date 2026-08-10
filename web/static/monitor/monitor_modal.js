@@ -125,6 +125,10 @@ function showUsageEntryInfoWithData(e) {
   if (infoHasValue(e.timestamp)) summaryData['Timestamp'] = e.timestamp;
   if (infoHasValue(e.provider)) summaryData['Provider'] = e.provider;
   if (infoHasValue(e.model)) summaryData['Model'] = e.model;
+  if (infoHasValue(e.originalModel)) summaryData['Original Model'] = e.originalModel;
+  if (infoHasValue(e.source)) summaryData['Source'] = e.source;
+  if (infoHasValue(e.sessionKey)) summaryData['Session'] = e.sessionKey;
+  if (infoHasValue(e.keyId)) summaryData['Key ID'] = e.keyId;
   if (infoHasValue(e.keyName)) summaryData['Key'] = e.keyName;
   if (infoHasValue(e.status)) summaryData['Status'] = e.status;
   if (infoHasValue(e.latencyMs)) summaryData['Latency'] = formatLatency(e.latencyMs);
@@ -132,6 +136,8 @@ function showUsageEntryInfoWithData(e) {
   if (infoHasValue(e.inputTokens)) summaryData['Input Tokens'] = e.inputTokens;
   if (infoHasValue(e.outputTokens)) summaryData['Output Tokens'] = e.outputTokens;
   if (infoHasValue(e.error)) summaryData['Error'] = e.error;
+  if (infoHasValue(e.decision)) summaryData['Decision'] = e.decision;
+  if (infoHasValue(e.provenance)) summaryData['Provenance'] = e.provenance;
   if (infoHasValue(e.upstreamUrl)) summaryData['Upstream URL'] = e.upstreamUrl;
   if (infoHasValue(e.respStatus)) summaryData['Response Status'] = e.respStatus;
   if (Object.keys(summaryData).length > 0) html += renderInfoSection(t('infoRequestInfo'), summaryData, null, monitorSectionOptions('monitor-request-info', summaryData, true));

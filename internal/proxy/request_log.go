@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tinyrouter/tinyrouter/internal/logredact"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 )
 
@@ -77,14 +76,13 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 		return
 	}
 
-	// Bound bodies before writing: trace files must not balloon past the ring
-	// capture caps (64KB req / 512KB resp), and base64 image payloads are
-	// replaced with placeholders so vision requests stay small on disk. The
-	// truncation happens HERE, not in the caller: recordUsage truncates only
-	// when it stores ring payloads, so the trace writer must not assume its
-	// inputs were already bounded.
-	reqBody = boundTraceBody(reqBody, 64*1024)
-	respBody = boundTraceBody(respBody, 512*1024)
+	credential := ""
+	if sel != nil {
+		credential = sel.Key.Key
+	}
+	reqBody = []byte(logredact.MaskString(string(reqBody), credential))
+	respBody = []byte(logredact.MaskString(string(respBody), credential))
+	upstreamURL = redactURL(upstreamURL, credential)
 
 	// Compute source from headers and provenance.
 	source := reqHeaders.Get("X-TinyRouter-Source")
@@ -153,9 +151,9 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 	reqFilePath := filepath.Join(reqDir, reqID+".jsonl")
 	if _, err := os.Stat(reqFilePath); os.IsNotExist(err) {
 		// Build masked request headers.
-		maskedReqHeaders := h.maskHeaderMap(reqHeaders)
+		maskedReqHeaders := h.maskHeaderMap(reqHeaders, credential)
 
-		// Build request body (stripped of base64 images).
+		// Build the complete request body.
 
 		requestLine := traceLine{
 			Type:            "request",
@@ -182,7 +180,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 	}
 
 	// Build attempt line.
-	maskedRespHeaders := h.maskHeaderMap(respHeaders)
+	maskedRespHeaders := h.maskHeaderMap(respHeaders, credential)
 
 	attemptLine := traceLine{
 		Type:          "attempt",
@@ -248,111 +246,30 @@ func parseBodyForJSON(body []byte) any {
 	return string(body)
 }
 
-// sensitiveHeaderNames is the centralized set of header names whose values are
-// treated as credentials and masked on EVERY capture surface: trace JSONL
-// files, the usage ring (Monitor Recent Requests), and the request-start SSE
-// event. Names are lowercase; lookups are case-insensitive. Add new
-// credential-style headers here, not at individual call sites.
-var sensitiveHeaderNames = map[string]struct{}{
-	"authorization":        {},
-	"proxy-authorization":  {},
-	"x-api-key":            {},
-	"api-key":              {},
-	"x-auth-token":         {},
-	"x-access-token":       {},
-	"x-token":              {},
-	"token":                {},
-	"x-goog-api-key":       {},
-	"x-rapidapi-key":       {},
-	"x-amz-security-token": {},
-	"x-amz-credential":     {},
-	"x-claude-api-key":     {},
-	"anthropic-api-key":    {},
-	"cookie":               {},
-	"set-cookie":           {},
+// maskHeaderMap returns a copy of headers with credential values masked while
+// preserving ordinary headers and custom-header values.
+func (h *Handler) maskHeaderMap(headers http.Header, credential string) map[string][]string {
+	return logredact.MaskHeaderMap(headers, credential)
 }
 
-// sensitiveQueryParams are URL query parameter names whose values are
-// stripped from URLs before they are persisted to traces or usage entries
-// (e.g. signed upload URLs).
-var sensitiveQueryParams = map[string]struct{}{
-	"key":          {},
-	"apikey":       {},
-	"api_key":      {},
-	"token":        {},
-	"access_token": {},
-	"auth":         {},
-	"secret":       {},
-	"password":     {},
-	"signature":    {},
-	"sig":          {},
+func redactURL(raw, credential string) string {
+	return logredact.MaskURL(raw, credential)
 }
 
-// maskHeaderMap returns a copy of headers with sensitive header values
-// masked. The sensitive set is the centralized sensitiveHeaderNames map plus
-// every header name declared in any provider's CustomHeaders config
-// (user-declared credential carriers).
-func (h *Handler) maskHeaderMap(headers http.Header) map[string][]string {
-	if headers == nil {
-		return nil
-	}
-	out := make(map[string][]string, len(headers))
-	for key, values := range headers {
-		if isSecretHeader(key) || h.isCustomSecretHeader(key) {
-			masked := make([]string, len(values))
-			for i, v := range values {
-				masked[i] = maskSecret(v)
-			}
-			out[key] = masked
-		} else {
-			out[key] = values
+func credentialFromHeaders(headers http.Header) string {
+	for name, values := range headers {
+		if !logredact.IsKeyHeader(name) || len(values) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(values[0])
+		if idx := strings.IndexAny(value, " \t"); idx > 0 {
+			value = strings.TrimSpace(value[idx+1:])
+		}
+		if value != "" && value != logredact.MaskedValue && !strings.HasPrefix(value, "***") {
+			return value
 		}
 	}
-	return out
-}
-
-// isCustomSecretHeader reports whether the header name appears in any
-// provider's CustomHeaders configuration.
-func (h *Handler) isCustomSecretHeader(key string) bool {
-	if h.providers == nil {
-		return false
-	}
-	lower := strings.ToLower(strings.TrimSpace(key))
-	for _, p := range h.providers.ListProviders() {
-		for name := range p.CustomHeaders {
-			if strings.ToLower(strings.TrimSpace(name)) == lower {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// redactURL strips userinfo and sensitive query parameters from a URL so
-// credentials embedded in upstream URLs (user:pass@host or ?key=...&sig=...)
-// never reach traces, the usage ring, or the request-start SSE event.
-func redactURL(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		// Not a parseable URL: truncate like maskURL rather than leak.
-		return maskURL(raw)
-	}
-	if u.User != nil {
-		u.User = url.User(u.User.Username())
-	}
-	if len(u.Query()) > 0 {
-		q := u.Query()
-		for name := range q {
-			if _, ok := sensitiveQueryParams[strings.ToLower(name)]; ok {
-				q.Set(name, "***")
-			}
-		}
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
+	return ""
 }
 
 // attemptCounter tracks the number of recordUsage calls per reqID.
@@ -390,8 +307,6 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 		return
 	}
 
-	// Strip userinfo and sensitive query params before persisting.
-	upstreamURL = redactURL(upstreamURL)
 	// Generate a clean filesystem-safe unique id for the filename; the
 	// caller's descriptive label (may contain colons) is preserved as the
 	// provenance field, not used as the filename.
@@ -400,9 +315,12 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	ts := now.Format(time.RFC3339Nano)
 	dateStr := now.Format("20060102")
 	sessionID := reqID
-
-	reqBody = boundTraceBody(reqBody, 64*1024)
-	respBody = boundTraceBody(respBody, 512*1024)
+	credential := credentialFromHeaders(reqHeaders)
+	errMsg = logredact.MaskString(errMsg, credential)
+	label = logredact.MaskString(label, credential)
+	reqBody = []byte(logredact.MaskString(string(reqBody), credential))
+	respBody = []byte(logredact.MaskString(string(respBody), credential))
+	upstreamURL = redactURL(upstreamURL, credential)
 
 	tracesDir := h.TracesDir()
 	reqDir := filepath.Join(tracesDir, "req")
@@ -435,7 +353,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	_ = appendJSONLine(indexPath, indexLine)
 
 	// Request line.
-	maskedReqHeaders := h.maskHeaderMap(reqHeaders)
+	maskedReqHeaders := h.maskHeaderMap(reqHeaders, credential)
 	requestLine := traceLine{
 		Type:            "request",
 		TS:              ts,
@@ -453,7 +371,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	_ = appendJSONLine(reqFilePath, requestLine)
 
 	// Attempt line.
-	maskedRespHeaders := h.maskHeaderMap(respHeaders)
+	maskedRespHeaders := h.maskHeaderMap(respHeaders, credential)
 	attemptLine := traceLine{
 		Type:        "attempt",
 		TS:          ts,
@@ -606,105 +524,12 @@ func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
 	}
 }
 
-// boundTraceBody caps a body stored in trace JSONL files: base64 image
-// payloads are replaced with placeholders first (so a vision request cannot
-// bloat the file with megabytes of base64), then the body is truncated to
-// maxBytes. Mirrors the ring capture caps (64KB req / 512KB resp).
-func boundTraceBody(body []byte, maxBytes int) []byte {
-	body = stripBase64Images(body)
-	if len(body) > maxBytes {
-		body = body[:maxBytes]
-	}
-	return body
-}
-
 // maskSecret masks a secret header value. If the value contains a space
 // (e.g. "Bearer <token>"), the scheme is preserved and only the token is
 // masked. Otherwise the whole value is masked.
 func maskSecret(v string) string {
-	if strings.Contains(v, " ") {
-		parts := strings.SplitN(v, " ", 2)
-		return parts[0] + " " + maskToken(parts[1])
+	if idx := strings.IndexAny(v, " \t"); idx > 0 {
+		return v[:idx+1] + logredact.MaskedValue
 	}
-	return maskToken(v)
-}
-
-// maskToken masks a token, showing only the last 4 characters for
-// debuggability. Tokens of 8 or fewer characters are fully masked.
-func maskToken(t string) string {
-	if len(t) <= 8 {
-		return "***"
-	}
-	return "***" + t[len(t)-4:]
-}
-
-// isSecretHeader reports whether the header key is a credential header that
-// must be masked in request/response captures. The authoritative set is
-// sensitiveHeaderNames; per-provider CustomHeaders names are handled
-// separately by maskHeaderMap via isCustomSecretHeader.
-func isSecretHeader(key string) bool {
-	_, ok := sensitiveHeaderNames[strings.ToLower(strings.TrimSpace(key))]
-	return ok
-}
-
-//   - data URLs (data:image/...;base64,<payload>)
-//   - b64_json fields
-//   - Anthropic image inputs ({"type":"base64","data":"..."})
-//
-// Only strings longer than 100 bytes are replaced, to avoid touching tiny
-// non-image strings. Non-JSON input is returned unchanged.
-func stripBase64Images(data []byte) []byte {
-	if !json.Valid(data) {
-		return data
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return data
-	}
-	stripBase64InMap(obj)
-	out, err := json.MarshalIndent(obj, "", "  ")
-	if err != nil {
-		return data
-	}
-	return out
-}
-
-// stripBase64InMap recursively walks a JSON value tree and replaces
-// base64 image payloads with truncation placeholders.
-func stripBase64InMap(m map[string]any) {
-	for k, v := range m {
-		switch val := v.(type) {
-		case string:
-			// b64_json key with string value.
-			if k == "b64_json" && len(val) > 100 {
-				m[k] = "[truncated: " + strconv.Itoa(len(val)) + " bytes]"
-				continue
-			}
-			// Anthropic image input: {"type":"base64","data":"..."}
-			// When we encounter a "data" key with a long string value,
-			// check if the same map has "type" == "base64".
-			if k == "data" && len(val) > 100 {
-				if t, ok := m["type"].(string); ok && t == "base64" {
-					m[k] = "[truncated: " + strconv.Itoa(len(val)) + " bytes]"
-					continue
-				}
-			}
-			// Data URL pattern: data:<mediatype>;base64,<payload>
-			if idx := strings.Index(val, ";base64,"); idx > 0 {
-				prefix := val[:idx+len(";base64,")]
-				payload := val[idx+len(";base64,"):]
-				if len(payload) > 100 {
-					m[k] = prefix + "[truncated: " + strconv.Itoa(len(payload)) + " bytes]"
-				}
-			}
-		case map[string]any:
-			stripBase64InMap(val)
-		case []any:
-			for _, item := range val {
-				if nested, ok := item.(map[string]any); ok {
-					stripBase64InMap(nested)
-				}
-			}
-		}
-	}
+	return logredact.MaskedValue
 }

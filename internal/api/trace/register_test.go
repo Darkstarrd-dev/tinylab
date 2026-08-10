@@ -552,8 +552,8 @@ func TestSanitizePathParam(t *testing.T) {
 
 // TestTraceIndex_LargeFileStreaming verifies the two-pass streaming reader
 // over a large index file: only the requested page is returned (newest-first),
-// the full file is never loaded into memory, and the DTO whitelist drops
-// credential-adjacent raw fields.
+// the full file is never loaded into memory, and all trace fields survive the
+// read projection.
 func TestTraceIndex_LargeFileStreaming(t *testing.T) {
 	tracesDir, r := setupTraceTest(t)
 	const totalLines = 20000
@@ -562,7 +562,8 @@ func TestTraceIndex_LargeFileStreaming(t *testing.T) {
 		lines = append(lines, mustJSON(map[string]any{
 			"type": "index", "ts": "2026-07-27T10:00:00Z", "reqID": "req-" + strconv.Itoa(i),
 			"model": "gpt-4", "provider": "openai", "status": "success",
-			"finalKey": "sk-should-never-leak", "upstreamURL": "https://user:pass@example.com/v1",
+			"finalKey": "key-" + strconv.Itoa(i), "finalKeyName": "Key-" + strconv.Itoa(i),
+			"upstreamURL": "https://user:pass@example.com/v1",
 		}))
 	}
 	writeIndexFile(t, tracesDir, "20260727", lines)
@@ -590,12 +591,16 @@ func TestTraceIndex_LargeFileStreaming(t *testing.T) {
 	if s(page[0].(map[string]any), "reqID") != "req-19999" {
 		t.Errorf("expected newest line req-19999 first, got %v", page[0])
 	}
-	// DTO whitelist: credential-adjacent raw fields must not be exposed.
+	// Trace metadata remains available while URL userinfo is masked.
 	first := page[0].(map[string]any)
-	for _, banned := range []string{"finalKey", "finalKeyName", "upstreamURL", "upstreamURLBase"} {
-		if _, ok := first[banned]; ok {
-			t.Errorf("DTO leaked %q field", banned)
-		}
+	if s(first, "finalKey") != "key-19999" {
+		t.Errorf("expected finalKey key-19999, got %v", first["finalKey"])
+	}
+	if s(first, "finalKeyName") != "Key-19999" {
+		t.Errorf("expected finalKeyName Key-19999, got %v", first["finalKeyName"])
+	}
+	if got := s(first, "upstreamURL"); got != "https://user:******@example.com/v1" {
+		t.Errorf("expected masked upstream URL, got %q", got)
 	}
 
 	// A window deep into the file (offset near total) returns the matching
@@ -790,10 +795,9 @@ func TestTraceReq_ResponseByteBudget(t *testing.T) {
 	}
 }
 
-// TestTraceReq_SecretSafeDTO verifies the DTO whitelist and header re-masking:
-// raw credential values, upstream URLs, and finalKey fields never reach the
-// response, while already-masked values pass through unchanged.
-func TestTraceReq_SecretSafeDTO(t *testing.T) {
+// TestTraceReq_TransparentRecord verifies that trace fields remain visible and
+// only credential values are masked at the read boundary.
+func TestTraceReq_TransparentRecord(t *testing.T) {
 	tracesDir, r := setupTraceTest(t)
 	reqID := "secret-req"
 	const secret = "sk-test-super-secret-value-123456"
@@ -804,14 +808,16 @@ func TestTraceReq_SecretSafeDTO(t *testing.T) {
 			"reqHeaders": map[string]any{
 				"Authorization": []any{"Bearer " + secret},
 				"X-Api-Key":     []any{"plain-key-value"},
+				"Cookie":        []any{"session=visible"},
 				"X-Custom":      []any{"ok"},
 				"X-Masked":      []any{"***abcd"},
 			},
 			"upstreamURL": userinfo,
+			"newField":    "must remain visible",
 		}),
 		mustJSON(map[string]any{
 			"type": "attempt", "reqID": reqID, "n": 1, "status": "success",
-			"finalKey": secret, "finalKeyName": secret, "upstreamURL": userinfo,
+			"finalKey": "key-1", "finalKeyName": "Key-1", "upstreamURL": userinfo,
 		}),
 	})
 
@@ -827,11 +833,11 @@ func TestTraceReq_SecretSafeDTO(t *testing.T) {
 	if strings.Contains(body, "sekrit") {
 		t.Error("response leaked upstream URL userinfo")
 	}
-	if strings.Contains(body, "finalKey") {
-		t.Error("response leaked the finalKey field")
+	if !strings.Contains(body, "finalKey") || !strings.Contains(body, "key-1") {
+		t.Error("response omitted finalKey metadata")
 	}
-	if strings.Contains(body, "upstreamURL") {
-		t.Error("response leaked the upstreamURL field")
+	if !strings.Contains(body, "upstreamURL") || !strings.Contains(body, "newField") {
+		t.Error("response omitted transparent trace fields")
 	}
 
 	var resp map[string]any
@@ -854,11 +860,14 @@ func TestTraceReq_SecretSafeDTO(t *testing.T) {
 		s, _ := vals[0].(string)
 		return s
 	}
-	if got := headerVal("Authorization"); got != "Bearer ***3456" {
+	if got := headerVal("Authorization"); got != "Bearer ******" {
 		t.Errorf("Authorization not masked, got %q", got)
 	}
-	if got := headerVal("X-Api-Key"); got != "***alue" {
+	if got := headerVal("X-Api-Key"); got != "******" {
 		t.Errorf("X-Api-Key not masked, got %q", got)
+	}
+	if got := headerVal("Cookie"); got != "session=visible" {
+		t.Errorf("ordinary Cookie header should pass through, got %q", got)
 	}
 	if got := headerVal("X-Custom"); got != "ok" {
 		t.Errorf("non-secret header should pass through, got %q", got)

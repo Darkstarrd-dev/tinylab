@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// TestRequestCallerTag_Masking verifies that a full API key is NEVER present in
-// the tag — only the masked first-4 + last-4 form — and that the "Bearer "
-// prefix is stripped before masking.
+// TestRequestCallerTag_Masking verifies that a full API key is never present in
+// the tag and that the authentication scheme remains visible.
 func TestRequestCallerTag_Masking(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
 	req.Header.Set("Authorization", "Bearer sk-secret-key-1234567890-abcd")
@@ -24,9 +23,8 @@ func TestRequestCallerTag_Masking(t *testing.T) {
 	if !strings.Contains(tag, "auth=") {
 		t.Fatalf("expected auth= field in tag: %q", tag)
 	}
-	// Masked form: first 4 + … + last 4 of the key (Bearer stripped).
-	if !strings.Contains(tag, "sk-s…abcd") {
-		t.Fatalf("expected masked 'sk-s…abcd' in tag: %q", tag)
+	if !strings.Contains(tag, "auth=Bearer ******") {
+		t.Fatalf("expected masked bearer credential in tag: %q", tag)
 	}
 	if !strings.Contains(tag, "src=playground") {
 		t.Fatalf("expected src=playground in tag: %q", tag)
@@ -62,11 +60,11 @@ func TestRequestCallerTag_EmptyFieldsOmitted(t *testing.T) {
 	}
 }
 
-// TestRequestCallerTag_ShortKeyRevealsNothing verifies a too-short credential is
-// rendered as "<n>chars" and never reveals the raw value.
+// TestRequestCallerTag_ShortKeyRevealsNothing verifies a short credential is
+// rendered with the same fixed mask as every other credential.
 func TestRequestCallerTag_ShortKeyRevealsNothing(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
-	req.Header.Set("Authorization", "abc123") // 6 chars, <=8 → "<n>chars"
+	req.Header.Set("Authorization", "abc123")
 	req.RemoteAddr = "1.2.3.4:9"
 
 	tag := requestCallerTag(req)
@@ -74,8 +72,8 @@ func TestRequestCallerTag_ShortKeyRevealsNothing(t *testing.T) {
 	if strings.Contains(tag, "abc123") {
 		t.Fatalf("short key leaked into tag: %q", tag)
 	}
-	if !strings.Contains(tag, "auth=6chars") {
-		t.Fatalf("expected auth=6chars for 6-char key: %q", tag)
+	if !strings.Contains(tag, "auth=******") {
+		t.Fatalf("expected fixed credential mask: %q", tag)
 	}
 }
 
@@ -108,13 +106,13 @@ func TestMaskAuth(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"bearer prefix stripped", "Bearer sk-1234567890-wxyz", "sk-1…wxyz"},
-		{"plain key", "sk-abcdefghijklmnop", "sk-a…mnop"},
-		{"too short", "abc", "3chars"},
-		{"exactly 8 stays masked", "12345678", "8chars"},
-		{"9 chars masks", "123456789", "1234…6789"},
-		{"empty bearer", "Bearer ", "0chars"},
-		{"empty", "", "0chars"},
+		{"bearer prefix preserved", "Bearer sk-1234567890-wxyz", "Bearer ******"},
+		{"plain key", "sk-abcdefghijklmnop", "******"},
+		{"too short", "abc", "******"},
+		{"exactly 8 stays masked", "12345678", "******"},
+		{"9 chars masks", "123456789", "******"},
+		{"empty bearer", "Bearer ", "******"},
+		{"empty", "", "******"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

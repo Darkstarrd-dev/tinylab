@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/logredact"
 )
 
 // Handler wires the trace HTTP handlers to the shared dependencies.
@@ -39,13 +40,12 @@ func (h *Handler) Register(r chi.Router) {
 
 // Trace read bounds (F-22). Trace files are append-only and unbounded on disk;
 // every read path below streams lines instead of loading a file, caps the
-// number of lines and the total DTO bytes per response, and stops early on
-// request cancellation.
+// number of lines and total response bytes, and stops early on cancellation.
 const (
 	defaultIndexLimit     = 200
 	maxIndexLimit         = 1000
 	maxReqDetailLines     = 1000
-	maxTraceResponseBytes = 16 << 20 // 16 MiB of DTO payload per response
+	maxTraceResponseBytes = 16 << 20 // 16 MiB of trace payload per response
 	maxTraceLineBytes     = 1 << 20  // per-line scanner cap
 	maxQFilterLen         = 256
 	maxReqIDLen           = 256
@@ -86,150 +86,100 @@ func normalizeTraceDate(date string) (string, bool) {
 	return fileDate, true
 }
 
-// traceIndexDTO is the secret-safe projection of an index-*.jsonl line. It is
-// a deliberate field whitelist: fields added to the on-disk traceLine schema
-// later (e.g. finalKey/finalKeyName, upstream URLs) are NOT exposed to the API
-// until explicitly added here.
-type traceIndexDTO struct {
-	ReqID         string `json:"reqID"`
-	TS            string `json:"ts"`
-	Session       string `json:"session"`
-	Provenance    string `json:"provenance"`
-	Source        string `json:"source"`
-	Model         string `json:"model"`
-	OriginalModel string `json:"originalModel"`
-	Provider      string `json:"provider"`
-	Status        string `json:"status"`
-	HTTPStatus    int    `json:"httpStatus"`
-	LatencyMs     int64  `json:"latencyMs"`
-	TTFTms        int64  `json:"ttftMs"`
-	Attempts      int    `json:"attempts"`
-	InputTokens   int    `json:"inputTokens"`
-	OutputTokens  int    `json:"outputTokens"`
-	Error         string `json:"error"`
-	Decision      string `json:"decision"`
-}
-
-// traceDetailDTO is the secret-safe projection of a req/*.jsonl line.
-// UpstreamURL/UpstreamURLBase are deliberately excluded: the API never returns
-// raw upstream URLs, even though the on-disk attempt lines carry them
-// (redacted by the writer, but the DTO must not depend on that).
-type traceDetailDTO struct {
-	Type          string              `json:"type"`
-	TS            string              `json:"ts"`
-	ReqID         string              `json:"reqID"`
-	Session       string              `json:"session"`
-	Provenance    string              `json:"provenance"`
-	Source        string              `json:"source"`
-	Model         string              `json:"model"`
-	OriginalModel string              `json:"originalModel"`
-	Provider      string              `json:"provider"`
-	ReqHeaders    map[string][]string `json:"reqHeaders,omitempty"`
-	ReqBody       any                 `json:"reqBody,omitempty"`
-	SentAt        string              `json:"sentAt,omitempty"`
-	RespStatus    int                 `json:"respStatus,omitempty"`
-	RespHeaders   map[string][]string `json:"respHeaders,omitempty"`
-	RespBody      any                 `json:"respBody,omitempty"`
-	Error         string              `json:"error,omitempty"`
-	Decision      string              `json:"decision,omitempty"`
-	LatencyMs     int64               `json:"latencyMs,omitempty"`
-	TTFTms        int64               `json:"ttftMs,omitempty"`
-	InputTokens   int                 `json:"inputTokens,omitempty"`
-	OutputTokens  int                 `json:"outputTokens,omitempty"`
-	N             int                 `json:"n,omitempty"`
-	Key           string              `json:"key,omitempty"`
-	KeyName       string              `json:"keyName,omitempty"`
-}
-
-// sensitiveHeaderNames mirrors internal/proxy's centralized credential header
-// set (F-23) so the trace reader re-masks credential headers even when a trace
-// file predates write-time masking. Names are lowercase; lookups are
-// case-insensitive.
-var sensitiveHeaderNames = map[string]struct{}{
-	"authorization":        {},
-	"proxy-authorization":  {},
-	"x-api-key":            {},
-	"api-key":              {},
-	"x-auth-token":         {},
-	"x-access-token":       {},
-	"x-token":              {},
-	"token":                {},
-	"x-goog-api-key":       {},
-	"x-rapidapi-key":       {},
-	"x-amz-security-token": {},
-	"x-amz-credential":     {},
-	"x-claude-api-key":     {},
-	"anthropic-api-key":    {},
-	"cookie":               {},
-	"set-cookie":           {},
-}
-
-func isSecretHeader(key string) bool {
-	_, ok := sensitiveHeaderNames[strings.ToLower(strings.TrimSpace(key))]
-	return ok
-}
-
-// maskHeaderMap returns a copy of the header map with credential values
-// masked. Values already masked by the writer (masked values start with
-// "***") pass through unchanged so the last-4 debuggability hint survives.
-func maskHeaderMap(headers map[string][]string) map[string][]string {
-	if len(headers) == 0 {
-		return headers
-	}
-	out := make(map[string][]string, len(headers))
-	for key, values := range headers {
-		if !isSecretHeader(key) {
-			out[key] = values
-			continue
-		}
-		masked := make([]string, len(values))
-		for i, v := range values {
-			masked[i] = maskHeaderValue(v)
-		}
-		out[key] = masked
-	}
-	return out
-}
-
-// maskHeaderValue masks a single header value unless it was already masked.
-func maskHeaderValue(v string) string {
-	if strings.HasPrefix(v, "***") {
-		return v
-	}
-	if strings.Contains(v, " ") {
-		parts := strings.SplitN(v, " ", 2)
-		return parts[0] + " " + maskToken(parts[1])
-	}
-	return maskToken(v)
-}
-
-// maskToken masks a token, showing only the last 4 characters. Tokens of 8 or
-// fewer characters are fully masked. Mirrors internal/proxy.maskToken.
-func maskToken(t string) string {
-	if len(t) <= 8 {
-		return "***"
-	}
-	return "***" + t[len(t)-4:]
-}
-
 // matchIndexFilters applies the status and q filters to an index line. q is a
 // case-insensitive substring match over the same fields the log reader UI
 // displays.
-func matchIndexFilters(dto *traceIndexDTO, statusFilter, qLower string) bool {
-	if statusFilter != "" && dto.Status != statusFilter {
+func matchIndexFilters(record map[string]any, statusFilter, qLower string) bool {
+	if statusFilter != "" && stringField(record, "status") != statusFilter {
 		return false
 	}
 	if qLower != "" {
-		if !containsFold(dto.Model, qLower) &&
-			!containsFold(dto.Provider, qLower) &&
-			!containsFold(dto.Provenance, qLower) &&
-			!containsFold(dto.Error, qLower) &&
-			!containsFold(dto.ReqID, qLower) &&
-			!containsFold(dto.Session, qLower) {
+		if !containsFold(stringField(record, "model"), qLower) &&
+			!containsFold(stringField(record, "provider"), qLower) &&
+			!containsFold(stringField(record, "provenance"), qLower) &&
+			!containsFold(stringField(record, "error"), qLower) &&
+			!containsFold(stringField(record, "reqID"), qLower) &&
+			!containsFold(stringField(record, "session"), qLower) {
 			return false
 		}
 	}
 	return true
+}
+
+func stringField(record map[string]any, key string) string {
+	value, _ := record[key].(string)
+	return value
+}
+
+func (h *Handler) normalizeTraceRecord(record map[string]any) map[string]any {
+	credentials := h.traceCredentials()
+	if masked, ok := maskTraceValue(record, credentials).(map[string]any); ok {
+		record = masked
+	}
+	for _, field := range []string{"reqHeaders", "respHeaders"} {
+		if headers, ok := record[field].(map[string]any); ok {
+			record[field] = normalizeHeaderRecord(headers)
+		}
+	}
+	for _, field := range []string{"upstreamURL", "upstreamURLBase"} {
+		if raw, ok := record[field].(string); ok {
+			record[field] = logredact.MaskURL(raw, "")
+		}
+	}
+	return record
+}
+
+func (h *Handler) traceCredentials() []string {
+	if h.d == nil || h.d.Reg == nil {
+		return nil
+	}
+	cfg := h.d.Reg.Config()
+	var credentials []string
+	for _, provider := range cfg.Providers {
+		for _, key := range provider.Keys {
+			if key.Key != "" {
+				credentials = append(credentials, key.Key)
+			}
+		}
+	}
+	return credentials
+}
+
+func maskTraceValue(value any, credentials []string) any {
+	switch typed := value.(type) {
+	case string:
+		for _, credential := range credentials {
+			typed = logredact.MaskString(typed, credential)
+		}
+		return typed
+	case map[string]any:
+		for key, nested := range typed {
+			typed[key] = maskTraceValue(nested, credentials)
+		}
+	case []any:
+		for i, nested := range typed {
+			typed[i] = maskTraceValue(nested, credentials)
+		}
+	}
+	return value
+}
+
+func normalizeHeaderRecord(headers map[string]any) map[string][]string {
+	result := make(map[string][]string, len(headers))
+	for name, rawValues := range headers {
+		values, ok := rawValues.([]any)
+		if !ok {
+			result[name] = []string{fmt.Sprint(rawValues)}
+			continue
+		}
+		stringsValues := make([]string, len(values))
+		for i, raw := range values {
+			stringsValues[i] = fmt.Sprint(raw)
+		}
+		masked := logredact.MaskHeaderMap(map[string][]string{name: stringsValues}, "")
+		result[name] = masked[name]
+	}
+	return result
 }
 
 func containsFold(s, substr string) bool {
@@ -453,12 +403,12 @@ func (h *Handler) countIndexMatches(ctx context.Context, f *os.File, statusFilte
 		if line == "" {
 			continue
 		}
-		var dto traceIndexDTO
-		if err := json.Unmarshal([]byte(line), &dto); err != nil {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			h.d.Logger.Warn("trace index: skipping malformed line: %v", err)
 			continue
 		}
-		if matchIndexFilters(&dto, statusFilter, qLower) {
+		if matchIndexFilters(record, statusFilter, qLower) {
 			total++
 		}
 	}
@@ -469,7 +419,7 @@ func (h *Handler) countIndexMatches(ctx context.Context, f *os.File, statusFilte
 }
 
 // collectIndexPage streams the index file a second time and returns the
-// marshaled DTOs whose 1-based match position falls in [lo, hi], stopping
+// complete trace records whose 1-based match position falls in [lo, hi], stopping
 // early once the window is passed or a response cap is hit. The returned
 // pages are in file order (oldest first).
 func (h *Handler) collectIndexPage(ctx context.Context, f *os.File, statusFilter, qLower string, lo, hi int) ([][]byte, bool, error) {
@@ -489,12 +439,12 @@ func (h *Handler) collectIndexPage(ctx context.Context, f *os.File, statusFilter
 		if line == "" {
 			continue
 		}
-		var dto traceIndexDTO
-		if err := json.Unmarshal([]byte(line), &dto); err != nil {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			h.d.Logger.Warn("trace index: skipping malformed line: %v", err)
 			continue
 		}
-		if !matchIndexFilters(&dto, statusFilter, qLower) {
+		if !matchIndexFilters(record, statusFilter, qLower) {
 			continue
 		}
 		m++
@@ -504,7 +454,7 @@ func (h *Handler) collectIndexPage(ctx context.Context, f *os.File, statusFilter
 		if m < lo {
 			continue
 		}
-		b, err := json.Marshal(&dto)
+		b, err := json.Marshal(h.normalizeTraceRecord(record))
 		if err != nil {
 			h.d.Logger.Warn("trace index: skipping unmarshalable line: %v", err)
 			continue
@@ -585,8 +535,8 @@ func (h *Handler) getReq(w http.ResponseWriter, r *http.Request) {
 	writeReqEnvelope(w, reqID, page, truncated)
 }
 
-// collectDetailPage streams a per-request trace file, returning marshaled DTOs
-// in file order. Collection stops early on request cancellation, on the line
+// collectDetailPage streams a per-request trace file, returning complete
+// records in file order. Collection stops early on request cancellation, on the line
 // cap, or on the response byte budget (setting truncated).
 func (h *Handler) collectDetailPage(ctx context.Context, reqID string, f *os.File) ([][]byte, bool, error) {
 	var page [][]byte
@@ -601,16 +551,12 @@ func (h *Handler) collectDetailPage(ctx context.Context, reqID string, f *os.Fil
 		if line == "" {
 			continue
 		}
-		var dto traceDetailDTO
-		if err := json.Unmarshal([]byte(line), &dto); err != nil {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			h.d.Logger.Warn("trace req %s: skipping malformed line: %v", reqID, err)
 			continue
 		}
-		// Defense-in-depth: re-mask credential headers even if the on-disk
-		// file predates write-time masking.
-		dto.ReqHeaders = maskHeaderMap(dto.ReqHeaders)
-		dto.RespHeaders = maskHeaderMap(dto.RespHeaders)
-		b, err := json.Marshal(&dto)
+		b, err := json.Marshal(h.normalizeTraceRecord(record))
 		if err != nil {
 			h.d.Logger.Warn("trace req %s: skipping unmarshalable line: %v", reqID, err)
 			continue
