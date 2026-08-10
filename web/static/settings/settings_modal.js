@@ -46,52 +46,6 @@ function changeStepper(inputId, delta) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function renderStepperHtml(id, value, opts) {
-  opts = opts || {};
-  var minAttr = opts.min !== undefined ? ' min="' + opts.min + '"' : '';
-  var maxAttr = opts.max !== undefined ? ' max="' + opts.max + '"' : '';
-  var step = opts.step || 1;
-  var styleAttr = opts.style ? ' style="' + opts.style + '"' : '';
-  return '<div class="number-stepper"' + styleAttr + '>' +
-    '<button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'' + id + '\', -' + step + ')">-</button>' +
-    '<input type="number" class="stepper-input" id="' + id + '" value="' + value + '"' + minAttr + maxAttr + '>' +
-    '<button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'' + id + '\', ' + step + ')">+</button>' +
-    '</div>';
-}
-
-function renderCustomSelectHtml(wrapperId, selectId, options, selectedValue) {
-  var selectedText = selectedValue;
-  var optionsHtml = options.map(function(opt) {
-    var val = typeof opt === 'object' ? opt.value : opt;
-    var label = typeof opt === 'object' ? opt.label : opt;
-    var isSel = String(val) === String(selectedValue);
-    if (isSel) selectedText = label;
-    return '<div class="custom-select-option' + (isSel ? ' selected' : '') + '" data-value="' + escapeAttr(val) + '" onclick="selectCustomOption(\'' + wrapperId + '\', \'' + escapeForJsString(val) + '\', \'' + escapeForJsString(label) + '\')">' +
-      '<span class="custom-select-option-link">' + escapeHtml(label) + '</span>' +
-      '</div>';
-  }).join('');
-
-  var selectOptionsHtml = options.map(function(opt) {
-    var val = typeof opt === 'object' ? opt.value : opt;
-    var label = typeof opt === 'object' ? opt.label : opt;
-    var isSel = String(val) === String(selectedValue);
-    return '<option value="' + escapeAttr(val) + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
-  }).join('');
-
-  return '<div class="custom-select-wrapper" id="' + wrapperId + '" style="width:100%;">' +
-    '<div class="custom-select-trigger" onclick="toggleCustomSelect(\'' + wrapperId + '\', event)">' +
-      '<span class="custom-select-label">' + escapeHtml(selectedText) + '</span>' +
-      '<svg viewBox="0 0 512 512"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 77.7 160.3c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>' +
-    '</div>' +
-    '<div class="custom-select-menu">' +
-      optionsHtml +
-    '</div>' +
-    '<select id="' + selectId + '" style="display:none;">' +
-      selectOptionsHtml +
-    '</select>' +
-  '</div>';
-}
-
 function openPortModal() {
   var s = window.__settings;
   openSettingsModal(t('listenPort'),

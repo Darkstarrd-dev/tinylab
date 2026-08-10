@@ -1283,7 +1283,18 @@ function closeAllCustomSelects() {
 document.addEventListener('click', closeAllCustomSelects);
 
 // Global Number Stepper Component (matching Settings Modal)
+// Accepts both the positional form (id, value, min, max, step, extraStyle,
+// onchange) used by provider/quick-slot forms AND the legacy opts-object form
+// (id, value, {min, max, step, style}) used by the settings/trace modals, so a
+// single global component serves every caller.
 function renderStepperHtml(id, value, min, max, step, extraStyle, onchangeAttrStr) {
+  if (min && typeof min === 'object') {
+    var opts = min;
+    min = opts.min;
+    max = opts.max;
+    step = opts.step;
+    extraStyle = opts.style;
+  }
   var minAttr = min !== undefined && min !== null ? ' min="' + min + '"' : '';
   var maxAttr = max !== undefined && max !== null ? ' max="' + max + '"' : '';
   var stepVal = step || 1;
