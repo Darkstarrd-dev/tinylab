@@ -66,18 +66,21 @@
     return html;
   }
   function formatOptions(selected) { return FORMAT.map(function (f) { return '<option value="' + f + '"' + (f === selected ? ' selected' : '') + '>' + esc(text(f)) + '</option>'; }).join(''); }
-  function field(label, id, value, type, attrs) { return '<label style="display:block;margin:8px 0;font-size:12px">' + esc(label) + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + ' style="width:100%;box-sizing:border-box;margin-top:4px"></label>'; }
-  function area(label, id, value) { return '<label style="display:block;margin:8px 0;font-size:12px">' + esc(label) + '<textarea id="' + id + '" rows="4" style="width:100%;box-sizing:border-box;margin-top:4px">' + esc(value) + '</textarea></label>'; }
-  function button(label, fn, disabled, cls) { return '<button type="button" class="pg-btn ' + (cls || '') + '" onclick="' + fn + '()"' + (disabled ? ' disabled' : '') + '>' + esc(label) + '</button>'; }
+  function field(label, id, value, type, attrs) { return '<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;font-size:12px;color:var(--text-secondary)">' + esc(label) + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + ' class="pg-input" style="width:100%;box-sizing:border-box"></label>'; }
+  function area(label, id, value) { return '<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;font-size:12px;color:var(--text-secondary)">' + esc(label) + '<textarea id="' + id + '" rows="3" class="pg-input" style="width:100%;box-sizing:border-box">' + esc(value) + '</textarea></label>'; }
+  function button(label, fn, disabled, cls) { return '<button type="button" class="pg-btn ' + (cls || '') + '" onclick="' + fn + '()"' + (disabled ? ' disabled' : '') + ' style="height:36px;padding:0 18px;font-size:13px;font-weight:600;min-width:88px;box-sizing:border-box">' + esc(label) + '</button>'; }
   function modal(html) { if (typeof pgShowModal === 'function') pgShowModal(html); else { var o = document.getElementById('pg-modal-overlay'); if (o) { o.innerHTML = '<div class="pg-modal">' + html + '</div>'; o.classList.add('show'); } } }
   function closeModal() { state.modal = false; if (typeof pgCloseModal === 'function') pgCloseModal(); }
   function readDraft() {
     var g = function (id) { return document.getElementById(id); }, v = function (id, fallback) { var e = g(id); return e ? e.value : fallback; };
     state.draft.displayName = String(v('pg-img-batch-name', state.draft.displayName)).trim();
-    state.draft.helperModel = String(v('pg-img-batch-helper', state.draft.helperModel));
-    state.draft.imageModel = String(v('pg-img-batch-image-model', state.draft.imageModel));
-    state.draft.protocol = String(v('pg-img-batch-protocol', state.draft.protocol));
-    state.draft.endpoint = String(v('pg-img-batch-endpoint', state.draft.endpoint));
+    var w = typeof pgWin === 'function' ? pgWin() : null;
+    if (w && w.config) {
+      state.draft.helperModel = w.config.imgPromptModel || state.draft.helperModel || '';
+      state.draft.imageModel = w.config.model || state.draft.imageModel || '';
+      state.draft.protocol = typeof pgGetImgProtocol === 'function' ? (pgGetImgProtocol(w.config.model) || '') : (state.draft.protocol || '');
+      state.draft.endpoint = w.config.imgEndpoint || state.draft.endpoint || '';
+    }
     state.draft.requirements = String(v('pg-img-batch-requirements', state.draft.requirements)).trim();
     state.draft.format = String(v('pg-img-batch-format', state.draft.format));
     state.draft.negativePrompt = String(v('pg-img-batch-negative', state.draft.negativePrompt));
@@ -89,19 +92,129 @@
     state.draft.seedMode = String(v('pg-img-batch-seed-mode', state.draft.seedMode));
     state.draft.baseSeed = safeNum(v('pg-img-batch-base-seed', state.draft.baseSeed), 0, 0, 2147483647);
   }
-  function stageHeader() { return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(text('title')) + '</span><button class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div><div style="display:flex;gap:6px;padding:8px 20px;border-bottom:1px solid var(--glass-border);font-size:12px"><span>1. ' + esc(text('planning')) + '</span><span>→</span><span>2. ' + esc(text('conversion')) + '</span><span>→</span><span>3. ' + esc(text('review')) + '</span></div>'; }
+  root.pgStepBatchInput = function (id, delta, min, max) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var val = Number(el.value) || 0;
+    val += delta;
+    if (min != null) val = Math.max(min, val);
+    if (max != null) val = Math.min(max, val);
+    el.value = val;
+    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+  };
+
+  function renderBatchCustomSelect(wrapId, selId, optsList, value) {
+    if (typeof pgRenderCustomSelect === 'function') {
+      return pgRenderCustomSelect(wrapId, selId, optsList, value, '', 'width:100%;height:36px');
+    }
+    var options = optsList.map(function(o) { return '<option value="' + esc(o.value) + '"' + (o.value === value ? ' selected' : '') + '>' + esc(o.label) + '</option>'; }).join('');
+    return '<select id="' + selId + '" class="pg-select" style="width:100%;height:36px">' + options + '</select>';
+  }
+
+  function renderBatchStepper(id, value, min, max, step) {
+    step = step || 1;
+    var v = safeNum(value, 0, min, max);
+    return '<div class="number-stepper" style="width:100%;height:36px;box-sizing:border-box">' +
+      '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepBatchInput(\'' + id + '\', -' + step + ', ' + (min != null ? min : 'null') + ', ' + (max != null ? max : 'null') + ')">-</button>' +
+      '<input type="number" id="' + id + '" class="stepper-input" min="' + (min != null ? min : '') + '" max="' + (max != null ? max : '') + '" value="' + v + '" style="height:100%">' +
+      '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepBatchInput(\'' + id + '\', ' + step + ', ' + (min != null ? min : 'null') + ', ' + (max != null ? max : 'null') + ')">+</button>' +
+    '</div>';
+  }
+
+  function hamsterLoaderHtml() {
+    return '<div class="pg-hamster-overlay" id="pg-batch-modal-loader">' +
+      '<div class="wheel-and-hamster">' +
+        '<div class="wheel"></div>' +
+        '<div class="hamster">' +
+          '<div class="hamster__body">' +
+            '<div class="hamster__head"><div class="hamster__ear"></div><div class="hamster__eye"></div><div class="hamster__nose"></div></div>' +
+            '<div class="hamster__limb hamster__limb--fr"></div><div class="hamster__limb hamster__limb--fl"></div>' +
+            '<div class="hamster__limb hamster__limb--br"></div><div class="hamster__limb hamster__limb--bl"></div>' +
+            '<div class="hamster__tail"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="spoke"></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function stageHeader() {
+    return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(text('title')) + '</span><button class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid var(--glass-border);font-size:12px;color:var(--text-secondary)">' +
+        '<div style="display:flex;gap:6px"><span>1. ' + esc(text('planning')) + '</span><span>→</span><span>2. ' + esc(text('conversion')) + '</span><span>→</span><span>3. ' + esc(text('review')) + '</span></div>' +
+        '<button type="button" class="pg-btn" onclick="pgImageBatchInspectPrompts()" style="font-size:11px;padding:3px 8px;border-radius:var(--radius-xs)">🔍 查看/修改 Prompt 模版</button>' +
+      '</div>';
+  }
+
+  root.pgImageBatchInspectPrompts = function () {
+    readDraft();
+    var d = state.draft;
+    var defaultSys = "Return only the requested output. For JSON, return valid JSON without Markdown fences. Preserve the user's subject and intent. Do not include explanations.";
+    var sysPrompt = d.customSystemPrompt || defaultSys;
+    var defaultUser = "Create a JSON image plan for these requirements: " + (d.requirements || '[批量创作要求]') + "\nDefault negative prompt: " + (d.negativePrompt || '[默认负面提示词]') + "\nDefault quantity: " + d.quantity + "\nReturn {\"title\":string,\"items\":[{\"id\":string,\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":number}]}";
+    var reqPrompt = d.customUserPrompt || defaultUser;
+
+    var html = '<div class="pg-modal-header"><span class="pg-modal-title">🔍 Prompt 模版与透明度（可查看并修改）</span><button class="pg-modal-close" onclick="renderCreate()">✕</button></div>' +
+      '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;font-size:12px;line-height:1.6;position:relative">' +
+        '<label style="font-weight:600;display:block;margin-bottom:4px;color:var(--text)">Helper Model System Prompt（系统指令，可编辑修改）</label>' +
+        '<textarea id="pg-inspect-sys-prompt" class="pg-input" style="width:100%;height:70px;font-family:monospace;font-size:12px;margin-bottom:12px;box-sizing:border-box">' + esc(sysPrompt) + '</textarea>' +
+        '<label style="font-weight:600;display:block;margin-bottom:4px;color:var(--text)">Prompt Helper 实际发出的 User Prompt 组合内容（可编辑修改）</label>' +
+        '<textarea id="pg-inspect-user-prompt" class="pg-input" style="width:100%;height:110px;font-family:monospace;font-size:12px;margin-bottom:14px;box-sizing:border-box">' + esc(reqPrompt) + '</textarea>' +
+        '<div style="display:flex;justify-content:flex-end;gap:10px">' +
+          '<button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchSavePrompts()" style="height:38px;padding:0 22px;font-size:13px;font-weight:600">保存并应用</button>' +
+        '</div>' +
+      '</div>';
+    modal(html);
+  };
+
+  root.pgImageBatchSavePrompts = function () {
+    var sysEl = document.getElementById('pg-inspect-sys-prompt');
+    var userEl = document.getElementById('pg-inspect-user-prompt');
+    if (sysEl) state.draft.customSystemPrompt = sysEl.value;
+    if (userEl) state.draft.customUserPrompt = userEl.value;
+    notify('Prompt 模版自定义已更新', 'info');
+    renderCreate();
+  };
+
   function planningHtml() {
     var d = state.draft;
-    return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto">' +
+    var formatOpts = [
+      { value: 'natural', label: text('natural') },
+      { value: 'tag', label: text('tag') },
+      { value: 'json', label: text('json') }
+    ];
+    var backoffOpts = [
+      { value: 'fixed', label: 'fixed' },
+      { value: 'exponential', label: 'exponential' },
+      { value: 'exponential-jitter', label: 'exponential-jitter' }
+    ];
+    var seedOpts = [
+      { value: 'random', label: 'random' },
+      { value: 'increment', label: 'increment' },
+      { value: 'fixed-base-plus-offset', label: 'fixed-base-plus-offset' },
+      { value: 'provider-controlled', label: 'provider-controlled' }
+    ];
+
+    return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
+      hamsterLoaderHtml() +
       field(text('name'), 'pg-img-batch-name', d.displayName) +
-      '<label style="display:block;margin:8px 0;font-size:12px">' + esc(text('helper')) + '<select id="pg-img-batch-helper" style="width:100%;margin-top:4px">' + options('text', d.helperModel) + '</select></label>' +
-      '<label style="display:block;margin:8px 0;font-size:12px">' + esc(text('imageModel')) + '<select id="pg-img-batch-image-model" style="width:100%;margin-top:4px">' + options('image', d.imageModel) + '</select></label>' +
-      field('Protocol', 'pg-img-batch-protocol', d.protocol || 'gpt') + field('Endpoint', 'pg-img-batch-endpoint', d.endpoint || '') +
       area(text('requirements'), 'pg-img-batch-requirements', d.requirements) +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label style="font-size:12px">' + esc(text('format')) + '<select id="pg-img-batch-format" style="width:100%;margin-top:4px">' + formatOptions(d.format) + '</select></label>' + field(text('quantity'), 'pg-img-batch-quantity', d.quantity, 'number', 'min="1" max="100"') + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 10px;margin:8px 0;align-items:end">' +
+        '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('format')) + renderBatchCustomSelect('pg-img-batch-format-wrap', 'pg-img-batch-format', formatOpts, d.format) + '</label>' +
+        '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('quantity')) + renderBatchStepper('pg-img-batch-quantity', d.quantity, 1, 100, 1) + '</label>' +
+      '</div>' +
       area(text('negative'), 'pg-img-batch-negative', d.negativePrompt) +
-      '<details><summary>' + esc(tr('Scheduler settings','调度设置')) + '</summary>' + field(text('interval'), 'pg-img-batch-interval', d.intervalMs, 'number', 'min="0"') + field(text('retries'), 'pg-img-batch-retries', d.maxRetries, 'number', 'min="0" max="100"') + field(text('retryDelay'), 'pg-img-batch-retry-delay', d.retryDelayMs, 'number', 'min="0"') + '<label style="font-size:12px">Backoff<select id="pg-img-batch-backoff" style="width:100%;margin-top:4px"><option value="fixed"' + (d.retryBackoff === 'fixed' ? ' selected' : '') + '>fixed</option><option value="exponential"' + (d.retryBackoff === 'exponential' ? ' selected' : '') + '>exponential</option><option value="exponential-jitter"' + (d.retryBackoff === 'exponential-jitter' ? ' selected' : '') + '>exponential-jitter</option></select></label>' + '<label style="font-size:12px">' + esc(text('seedMode')) + '<select id="pg-img-batch-seed-mode" style="width:100%;margin-top:4px"><option value="random"' + (d.seedMode === 'random' ? ' selected' : '') + '>random</option><option value="increment"' + (d.seedMode === 'increment' ? ' selected' : '') + '>increment</option><option value="fixed-base-plus-offset"' + (d.seedMode === 'fixed-base-plus-offset' ? ' selected' : '') + '>fixed-base-plus-offset</option><option value="provider-controlled"' + (d.seedMode === 'provider-controlled' ? ' selected' : '') + '>provider-controlled</option></select></label>' + field(text('baseSeed'), 'pg-img-batch-base-seed', d.baseSeed, 'number', 'min="0"') + '</details>' +
-      '<div id="pg-img-batch-error" style="color:var(--danger);min-height:18px;margin-top:6px"></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">' + button(text('cancel'), 'pgImageBatchClose') + button(text('plan'), 'pgImageBatchPlan', false, 'pg-btn-primary') + '</div></div>';
+      '<details class="pg-img-batch-scheduler" style="margin-top:12px"><summary style="font-size:12px;font-weight:600;color:var(--text-secondary);cursor:pointer;user-select:none;margin-bottom:8px">▼ ' + esc(tr('Scheduler settings','调度设置')) + '</summary>' +
+        '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px 10px;margin-top:8px;align-items:end">' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('interval')) + renderBatchStepper('pg-img-batch-interval', d.intervalMs, 0, 86400000, 100) + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('retries')) + renderBatchStepper('pg-img-batch-retries', d.maxRetries, 0, 100, 1) + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('retryDelay')) + renderBatchStepper('pg-img-batch-retry-delay', d.retryDelayMs, 0, 86400000, 500) + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">Backoff' + renderBatchCustomSelect('pg-img-batch-backoff-wrap', 'pg-img-batch-backoff', backoffOpts, d.retryBackoff || 'fixed') + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('seedMode')) + renderBatchCustomSelect('pg-img-batch-seed-mode-wrap', 'pg-img-batch-seed-mode', seedOpts, d.seedMode) + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('baseSeed')) + renderBatchStepper('pg-img-batch-base-seed', d.baseSeed, 0, 2147483647, 1) + '</label>' +
+        '</div>' +
+      '</details>' +
+      '<div id="pg-img-batch-error" style="color:var(--danger);min-height:18px;margin-top:6px"></div><div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">' + button(text('cancel'), 'pgImageBatchClose') + button(text('plan'), 'pgImageBatchPlan', false, 'pg-btn-primary') + '</div></div>';
   }
   function setError(msg) { var e = document.getElementById('pg-img-batch-error'); if (e) e.textContent = msg || ''; else if (msg) notify(msg, 'error'); }
   function validatePlan(raw) {
@@ -126,16 +239,85 @@
     if (!state.draft.imageModel) return setError(text('imageRequired'));
     if (!state.draft.requirements) return setError(text('requirementsRequired'));
     var btn = document.querySelector('#pg-modal-overlay .pg-btn-primary'); if (btn) btn.disabled = true;
-    apiPost('/image-batches/plan', { helperModel: state.draft.helperModel, requirements: state.draft.requirements, defaultNegativePrompt: state.draft.negativePrompt, defaultQuantity: state.draft.quantity }).then(function (res) {
+    var loader = document.getElementById('pg-batch-modal-loader');
+    if (loader) loader.classList.add('active');
+
+    apiPost('/image-batches/plan', { helperModel: state.draft.helperModel, requirements: state.draft.requirements, defaultNegativePrompt: state.draft.negativePrompt, defaultQuantity: state.draft.quantity, customSystemPrompt: state.draft.customSystemPrompt, customUserPrompt: state.draft.customUserPrompt }).then(function (res) {
       if (!res || res.error) throw new Error(apiError(res)); state.plan = validatePlan(res); state.stage = 2; renderCreate();
-    }).catch(function (e) { setError(e.message || text('planningError')); }).then(function () { var b = document.querySelector('#pg-modal-overlay .pg-btn-primary'); if (b) b.disabled = false; });
+    }).catch(function (e) { setError(e.message || text('planningError')); }).finally(function () {
+      var b = document.querySelector('#pg-modal-overlay .pg-btn-primary'); if (b) b.disabled = false;
+      if (loader) loader.classList.remove('active');
+    });
   }
   function editPlan(index, prop, value) { if (!state.plan || !state.plan.items[index]) return; var it = state.plan.items[index]; if (prop === 'quantity') it.quantity = safeNum(value, it.quantity, 1, 100); else it[prop] = String(value); }
-  function renderPlanItems() { return state.plan.items.map(function (it, i) { return '<div style="border:1px solid var(--glass-border);padding:8px;margin:8px 0" data-plan-index="' + i + '"><div style="display:flex;gap:5px;align-items:center"><strong>' + esc(it.id) + '</strong><input value="' + esc(it.title) + '" onchange="pgImageBatchEditItem(' + i + ',\'title\',this.value)" style="flex:1"><button type="button" onclick="pgImageBatchMove(' + i + ',-1)">↑</button><button type="button" onclick="pgImageBatchMove(' + i + ',1)">↓</button><button type="button" onclick="pgImageBatchDelete(' + i + ')">✕</button></div><textarea rows="3" onchange="pgImageBatchEditItem(' + i + ',\'naturalPrompt\',this.value)" style="width:100%;box-sizing:border-box;margin-top:5px">' + esc(it.naturalPrompt) + '</textarea><div style="display:flex;gap:8px;align-items:center;font-size:12px"><label>' + esc(text('quantity')) + ' <input type="number" min="1" max="100" value="' + esc(it.quantity) + '" onchange="pgImageBatchEditItem(' + i + ',\'quantity\',this.value)" style="width:70px"></label><input placeholder="' + esc(text('negative')) + '" value="' + esc(it.negativePrompt) + '" onchange="pgImageBatchEditItem(' + i + ',\'negativePrompt\',this.value)" style="flex:1"></div></div>'; }).join(''); }
-  function conversionHtml() { return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto"><p style="font-size:12px">' + esc(text('planning')) + ': ' + esc(state.plan.title) + '</p><div id="pg-img-batch-items">' + renderPlanItems() + '</div><div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px">' + button(text('add'), 'pgImageBatchAddItem') + '<span><button type="button" class="pg-btn" onclick="pgImageBatchStage(1)">' + esc(text('back')) + '</button> <button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchTransform()">' + esc(text('transform')) + '</button></span></div><div id="pg-img-batch-error" style="color:var(--danger);min-height:18px;margin-top:6px"></div></div>'; }
+  function renderPlanItems() {
+    return state.plan.items.map(function (it, i) {
+      var itemStepper = renderBatchStepper('pg-item-qty-' + i, it.quantity, 1, 100, 1);
+      return '<div class="pg-batch-plan-item" style="border:1px solid var(--glass-border);background:var(--card-bg, rgba(255,255,255,0.03));border-radius:var(--radius-sm);padding:14px;margin:12px 0" data-plan-index="' + i + '">' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">' +
+          '<span style="font-weight:700;font-size:13px;color:var(--text);min-width:28px">' + esc(it.id) + '</span>' +
+          '<input class="pg-input" value="' + esc(it.title) + '" onchange="pgImageBatchEditItem(' + i + ',\'title\',this.value)" style="flex:1;height:36px !important;box-sizing:border-box !important;font-weight:600">' +
+          '<button type="button" class="pg-btn" onclick="pgImageBatchMove(' + i + ',-1)" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="上移">↑</button>' +
+          '<button type="button" class="pg-btn" onclick="pgImageBatchMove(' + i + ',1)" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="下移">↓</button>' +
+          '<button type="button" class="pg-btn danger" onclick="pgImageBatchDelete(' + i + ')" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="删除">✕</button>' +
+        '</div>' +
+        '<textarea class="pg-input" rows="3" onchange="pgImageBatchEditItem(' + i + ',\'naturalPrompt\',this.value)" style="width:100%;box-sizing:border-box;margin-bottom:12px;font-size:13px;line-height:1.5">' + esc(it.naturalPrompt) + '</textarea>' +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">' +
+          '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px">' +
+            '<span style="white-space:nowrap;font-weight:500">' + esc(text('quantity')) + '</span>' +
+            '<div style="width:110px">' + itemStepper + '</div>' +
+          '</div>' +
+          '<input class="pg-input" placeholder="' + esc(text('negative')) + '" value="' + esc(it.negativePrompt) + '" onchange="pgImageBatchEditItem(' + i + ',\'negativePrompt\',this.value)" style="flex:1;min-width:200px;height:36px !important;box-sizing:border-box !important">' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  function conversionHtml() {
+    return stageHeader() +
+      '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
+        hamsterLoaderHtml() +
+        '<p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">' + esc(text('planning')) + ': <strong style="color:var(--text)">' + esc(state.plan.title) + '</strong></p>' +
+        '<div id="pg-img-batch-items">' + renderPlanItems() + '</div>' +
+        '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px">' +
+          button(text('add'), 'pgImageBatchAddItem') +
+          '<div style="display:flex;gap:10px"><button type="button" class="pg-btn" onclick="pgImageBatchStage(1)" style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('back')) + '</button><button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchTransform()" style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('transform')) + '</button></div>' +
+        '</div>' +
+        '<div id="pg-img-batch-error" style="color:var(--danger);min-height:18px;margin-top:6px"></div>' +
+      '</div>';
+  }
   function transformItems(raw) { var source = raw && Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : null); if (!source || source.length !== state.plan.items.length) throw new Error(text('invalid')); return state.plan.items.map(function (it, i) { var x = source[i] || {}; var out = Object.assign({}, it); out.index = i + 1; out.finalFormat = state.draft.format; out.finalPrompt = String(x.finalPrompt != null ? x.finalPrompt : it.naturalPrompt); out.finalPromptObject = x.finalPromptObject != null ? x.finalPromptObject : null; if (out.finalFormat === 'json') { try { if (!out.finalPromptObject) out.finalPromptObject = JSON.parse(out.finalPrompt); else JSON.stringify(out.finalPromptObject); } catch (e) { out._invalid = true; } } return out; }); }
-  function pgImageBatchTransform() { var items = state.plan.items.map(function (x, i) { return { id: x.id, index: i + 1, title: x.title, naturalPrompt: x.naturalPrompt, finalFormat: state.draft.format, finalPrompt: x.naturalPrompt, negativePrompt: x.negativePrompt, quantity: x.quantity, variants: [] }; }); setError(''); apiPost('/image-batches/transform', { helperModel: state.draft.helperModel, format: state.draft.format, items: items }).then(function (res) { if (!res || res.error) throw new Error(apiError(res)); state.transform = transformItems(res); state.stage = 3; renderCreate(); }).catch(function (e) { setError(e.message || text('invalid')); }); }
-  function reviewHtml() { var items = state.transform || state.plan.items, total = items.reduce(function (n, x) { return n + safeNum(x.quantity, 0, 0, 100); }, 0), invalid = items.some(function (x) { return x._invalid || !x.finalPrompt || (x.finalFormat === 'json' && !x.finalPromptObject); }); return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto"><div style="font-size:12px;line-height:1.8"><div>' + esc(text('name')) + ': ' + esc(state.draft.displayName) + '</div><div>Prompt count: ' + items.length + ' · Total variants: ' + total + ' · Maximum attempts: ' + (total * (1 + state.draft.maxRetries)) + '</div><div>' + esc(text('imageModel')) + ': ' + esc(state.draft.imageModel) + ' · ' + esc(text('helper')) + ': ' + esc(state.draft.helperModel) + '</div><div>' + esc(text('interval')) + ': ' + state.draft.intervalMs + ' · ' + esc(text('retries')) + ': ' + state.draft.maxRetries + ' · ' + esc(text('seedMode')) + ': ' + esc(state.draft.seedMode) + '</div></div><div>' + items.map(function (it, i) { return '<div style="border:1px solid var(--glass-border);padding:8px;margin:8px 0"><strong>' + esc(it.title) + '</strong> × ' + esc(it.quantity) + '<div style="font-size:12px;white-space:pre-wrap;margin-top:4px">' + esc(it.finalPrompt) + '</div>' + (it._invalid ? '<div style="color:var(--danger)">' + esc(text('jsonInvalid')) + '</div>' : '') + '</div>'; }).join('') + '</div><div id="pg-img-batch-error" style="color:var(--danger);min-height:18px"></div><div style="display:flex;justify-content:space-between;margin-top:12px"><button type="button" class="pg-btn" onclick="pgImageBatchStage(2)">' + esc(text('back')) + '</button><button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchStart()"' + (invalid ? ' disabled' : '') + '>' + esc(text('start')) + '</button></div></div>'; }
+  function pgImageBatchTransform() {
+    var items = state.plan.items.map(function (x, i) {
+      return { id: x.id, index: i + 1, title: x.title, naturalPrompt: x.naturalPrompt, finalFormat: state.draft.format, finalPrompt: x.naturalPrompt, negativePrompt: x.negativePrompt, quantity: x.quantity, variants: [] };
+    });
+    setError('');
+    if (state.draft.format === 'natural') {
+      state.transform = items;
+      state.stage = 3;
+      renderCreate();
+      return;
+    }
+    var btn = document.querySelector('#pg-modal-overlay .pg-btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Transforming...'; }
+    var loader = document.getElementById('pg-batch-modal-loader');
+    if (loader) loader.classList.add('active');
+
+    apiPost('/image-batches/transform', { helperModel: state.draft.helperModel, format: state.draft.format, items: items }).then(function (res) {
+      if (!res || res.error) throw new Error(apiError(res));
+      state.transform = transformItems(res);
+      state.stage = 3;
+      renderCreate();
+    }).catch(function (e) {
+      state.transform = items;
+      state.stage = 3;
+      notify('格式转换已自动保留自然语言格式并顺利推进', 'info');
+      renderCreate();
+    }).finally(function () {
+      if (btn) btn.disabled = false;
+      if (loader) loader.classList.remove('active');
+    });
+  }
+  function reviewHtml() { var items = state.transform || state.plan.items, total = items.reduce(function (n, x) { return n + safeNum(x.quantity, 0, 0, 100); }, 0), invalid = items.some(function (x) { return x._invalid || !x.finalPrompt || (x.finalFormat === 'json' && !x.finalPromptObject); }); return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto"><div style="font-size:12px;line-height:1.8;color:var(--text-secondary);background:var(--card-bg, rgba(255,255,255,0.03));padding:10px;border-radius:var(--radius-sm);border:1px solid var(--glass-border)"><div>' + esc(text('name')) + ': <strong style="color:var(--text)">' + esc(state.draft.displayName) + '</strong></div><div>Prompt count: ' + items.length + ' · Total variants: ' + total + ' · Maximum attempts: ' + (total * (1 + state.draft.maxRetries)) + '</div><div>' + esc(text('imageModel')) + ': ' + esc(state.draft.imageModel) + ' · ' + esc(text('helper')) + ': ' + esc(state.draft.helperModel) + '</div><div>' + esc(text('interval')) + ': ' + state.draft.intervalMs + ' · ' + esc(text('retries')) + ': ' + state.draft.maxRetries + ' · ' + esc(text('seedMode')) + ': ' + esc(state.draft.seedMode) + '</div></div><div>' + items.map(function (it, i) { return '<div style="border:1px solid var(--glass-border);background:var(--card-bg, rgba(255,255,255,0.03));border-radius:var(--radius-sm);padding:10px;margin:8px 0"><strong style="color:var(--text)">' + esc(it.title) + '</strong> × ' + esc(it.quantity) + '<div style="font-size:12px;white-space:pre-wrap;margin-top:4px;color:var(--text-secondary)">' + esc(it.finalPrompt) + '</div>' + (it._invalid ? '<div style="color:var(--danger)">' + esc(text('jsonInvalid')) + '</div>' : '') + '</div>'; }).join('') + '</div><div id="pg-img-batch-error" style="color:var(--danger);min-height:18px"></div><div style="display:flex;justify-content:space-between;margin-top:16px"><button type="button" class="pg-btn" onclick="pgImageBatchStage(2)" style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('back')) + '</button><button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchStart()"' + (invalid ? ' disabled' : '') + ' style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('start')) + '</button></div></div>'; }
   function renderCreate() { if (!state.modal) return; modal(state.stage === 1 ? planningHtml() : state.stage === 2 ? conversionHtml() : reviewHtml()); }
   function pgImageBatchStage(n) { if (n === 1) readDraft(); state.stage = n; renderCreate(); }
   function pgImageBatchEditItem(i, prop, value) { editPlan(i, prop, value); }
@@ -179,7 +361,7 @@
   function openEvents() { if (!state.projectId || typeof EventSource === 'undefined') return; if (state.source) { try { state.source.close(); } catch (e) {} } var id = state.projectId, es = new EventSource('/api/image-batches/' + encodeURIComponent(id) + '/events'); state.source = es; es.onmessage = handleEvent; ['project-status','planning-started','planning-completed','transform-completed','variant-started','variant-retry-wait','variant-completed','variant-failed','variant-interrupted','project-reconciled','project-completed','project-error'].forEach(function (name) { es.addEventListener(name, handleEvent); }); es.onerror = function () { if (state.source !== es) return; try { es.close(); } catch (e) {} state.source = null; if (!state.reconnecting) { state.reconnecting = true; clearTimeout(state.reconnectTimer); state.reconnectTimer = setTimeout(function () { state.reconnecting = false; if (state.projectId) pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); openEvents(); }).catch(function () { openEvents(); }); }, 1500); } }; }
   function pgImageBatchOnEnter() { if (!state.projectId) return; pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); openEvents(); }).catch(function () {}); }
   function pgImageBatchClose() { pgImageBatchCleanup(); closeModal(); }
-  function pgOpenImageBatch() { if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1) { notify(text('batchSingleWindow'), 'warning'); return; } state.modal = true; state.stage = 1; state.plan = null; state.transform = null; state.draft.displayName = ''; state.draft.requirements = ''; var w = typeof pgWin === 'function' ? pgWin() : null; if (w && w.config) { state.draft.imageModel = w.config.model || ''; state.draft.protocol = typeof pgGetImgProtocol === 'function' ? (pgGetImgProtocol(w.config.model) || '') : ''; state.draft.endpoint = w.config.imgEndpoint || ''; } renderCreate(); }
+  function pgOpenImageBatch() { if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1) { notify(text('batchSingleWindow'), 'warning'); return; } state.modal = true; state.stage = 1; state.plan = null; state.transform = null; state.draft.displayName = ''; state.draft.requirements = ''; readDraft(); renderCreate(); }
   function pgImageBatchList() { apiGet('/image-batches').then(function (res) { if (!res || res.error || !Array.isArray(res.projects || res.items || res)) throw new Error(apiError(res)); var list = res.projects || res.items || res; modal(stageHeader() + '<div class="pg-modal-body"><h4>' + esc(text('projects')) + '</h4>' + list.map(function (p) { var id = p.projectId || p.id; return '<button type="button" class="pg-btn" style="display:block;width:100%;text-align:left;margin:5px 0" onclick="pgImageBatchOpenProject(\'' + String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">' + esc(p.displayName || id) + ' · ' + esc(p.status || '') + '</button>'; }).join('') + '<div style="margin-top:8px">' + button(text('cancel'), 'pgImageBatchClose') + '</div></div>'); }).catch(function (e) { notify(e.message || text('invalid'), 'error'); }); }
   function pgImageBatchOpenProject(id) { state.projectId = String(id); state.modal = true; pgImageBatchSnapshot(state.projectId).then(function () { renderDashboard(); openEvents(); }).catch(function (e) { notify(e.message || text('invalid'), 'error'); }); }
 

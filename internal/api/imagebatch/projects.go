@@ -26,7 +26,7 @@ func (h *Handler) transform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(in.Items)
-	text, err := h.callHelper(r.Context(), in.HelperModel, "Convert each prompt to format "+in.Format+". Preserve naturalPrompt exactly. Input: "+string(b))
+	text, err := h.callHelper(r.Context(), in.HelperModel, helperSystemPrompt, "Convert each prompt to format "+in.Format+". Preserve naturalPrompt exactly. Input: "+string(b))
 	if err != nil {
 		errJSON(w, 502, "helper model request failed")
 		return

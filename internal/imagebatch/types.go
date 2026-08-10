@@ -269,6 +269,8 @@ type PlanInput struct {
 	Requirements          string `json:"requirements"`
 	DefaultNegativePrompt string `json:"defaultNegativePrompt,omitempty"`
 	DefaultQuantity       int    `json:"defaultQuantity"`
+	CustomSystemPrompt    string `json:"customSystemPrompt,omitempty"`
+	CustomUserPrompt      string `json:"customUserPrompt,omitempty"`
 }
 type PlanItem struct {
 	ID             string `json:"id"`

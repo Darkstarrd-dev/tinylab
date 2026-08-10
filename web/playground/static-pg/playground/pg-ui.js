@@ -412,7 +412,7 @@ function pgRenderSidebar() {
   var dimCls = customMode ? ' disabled' : '';
   var imageBatchDisabled = pgState.mode === 'image' && pgState.splitCount > 1;
   var imageBatchTitle = imageBatchDisabled ? pgT('pgBatchSingleWindow') : pgT('pgBatchProject');
-  var imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
+  var imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="width:100%">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
 
   // --- WinBar ---
   var generating = pgIsGenerating();
@@ -644,17 +644,21 @@ function pgRenderSidebar() {
       var comfyPanel = (typeof pgRenderComfyPanel === 'function') ? pgRenderComfyPanel(cfg) : '';
       side.innerHTML =
         winbar + comfyPanel +
-        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' +
+        '<div class="pg-panel pg-image-actions-panel">' +
           promptHelperRow +
-          '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button>' + imageBatchBtn + '</div>' +
+          '<div class="pg-btn-row" style="margin-top:8px">' + imageBatchBtn + '</div>' +
+        '</div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
     } else {
       var imgParams = effProto !== null ? pgRenderImageParams(cfg, effProto) : '';
       side.innerHTML =
         winbar +
-        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
-        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' + promptHelperRow + '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button>' + imageBatchBtn + '</div></div>' +
+        '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
+          modelSel +
+          promptHelperRow +
+          '<div class="pg-btn-row" style="margin-top:8px">' + imageBatchBtn + '</div>' +
+        '</div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -962,15 +966,22 @@ function pgRenderImageBlock(customMode) {
   var epSel = '';
   if (isImageMode) {
     var epVal = cfg.imgEndpoint || 'generations';
-    var epOpts = [
-      {value: 'generations', label: pgEscapeHtml(pgT('pgImgEndpointGenerations'))},
-      {value: 'edits', label: pgEscapeHtml(pgT('pgImgEndpointEdits'))},
-    ].map(function(o) {
-      return '<option value="' + pgEscapeAttr(o.value) + '"' + (epVal === o.value ? ' selected' : '') + '>' + o.label + '</option>';
-    }).join('');
+    var epOptsList = [
+      { value: 'generations', label: 'generations' },
+      { value: 'edits', label: 'edits' },
+      { value: 'chat', label: 'chat' }
+    ];
+    var customEpSelect = pgRenderCustomSelect(
+      'pg-img-endpoint-wrap',
+      'pg-img-endpoint-sel',
+      epOptsList,
+      epVal,
+      'pgOnParam(\'imgEndpoint\', this.value); pgSave()',
+      'flex:1;min-width:0'
+    );
     epSel = '<div class="pg-param-row">' +
       '<label>' + pgEscapeHtml(pgT('pgImgEndpoint')) + '</label>' +
-      '<select onchange="pgOnParam(\'imgEndpoint\', this.value)"' + (customMode ? ' disabled' : '') + ' style="flex:1">' + epOpts + '</select>' +
+      customEpSelect +
     '</div>';
   }
   return '<div class="pg-image-block' + (en ? '' : ' disabled') + '">' +

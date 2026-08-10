@@ -42,7 +42,14 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := fmt.Sprintf("Create a JSON image plan for these requirements: %s\nDefault negative prompt: %s\nDefault quantity: %d\nReturn {\"title\":string,\"items\":[{\"id\":string,\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":number}]}", in.Requirements, in.DefaultNegativePrompt, in.DefaultQuantity)
-	text, err := h.callHelper(r.Context(), in.HelperModel, prompt)
+	if strings.TrimSpace(in.CustomUserPrompt) != "" {
+		prompt = strings.TrimSpace(in.CustomUserPrompt)
+	}
+	sys := helperSystemPrompt
+	if strings.TrimSpace(in.CustomSystemPrompt) != "" {
+		sys = strings.TrimSpace(in.CustomSystemPrompt)
+	}
+	text, err := h.callHelper(r.Context(), in.HelperModel, sys, prompt)
 	if err != nil {
 		errJSON(w, http.StatusBadGateway, "helper model request failed")
 		return
@@ -54,8 +61,11 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-func (h *Handler) callHelper(ctx context.Context, model, prompt string) (string, error) {
-	body, _ := json.Marshal(helperChatRequest{Model: model, Messages: []map[string]string{{"role": "system", "content": helperSystemPrompt}, {"role": "user", "content": prompt}}})
+func (h *Handler) callHelper(ctx context.Context, model, sysPrompt, prompt string) (string, error) {
+	if sysPrompt == "" {
+		sysPrompt = helperSystemPrompt
+	}
+	body, _ := json.Marshal(helperChatRequest{Model: model, Messages: []map[string]string{{"role": "system", "content": sysPrompt}, {"role": "user", "content": prompt}}})
 	u, _ := url.Parse("http://in-process/v1/chat/completions")
 	req := &http.Request{Method: http.MethodPost, URL: u, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}
 	req = req.WithContext(ctx)
@@ -76,16 +86,24 @@ func (h *Handler) callHelper(ctx context.Context, model, prompt string) (string,
 func decodeStrictContent(content string, dst any) error {
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
-		return fmt.Errorf("markdown fence")
+		lines := strings.Split(content, "\n")
+		if len(lines) >= 2 {
+			if strings.HasPrefix(lines[0], "```") {
+				lines = lines[1:]
+			}
+			if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+				lines = lines[:len(lines)-1]
+			}
+			content = strings.TrimSpace(strings.Join(lines, "\n"))
+		}
 	}
-	dec := json.NewDecoder(strings.NewReader(content))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		content = content[start : end+1]
+	}
+	if err := json.Unmarshal([]byte(content), dst); err != nil {
 		return err
-	}
-	var extra any
-	if err := dec.Decode(&extra); err == nil {
-		return fmt.Errorf("trailing JSON")
 	}
 	return nil
 }
