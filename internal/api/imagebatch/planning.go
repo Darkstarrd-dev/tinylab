@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,18 +50,23 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.CustomSystemPrompt) != "" {
 		sys = strings.TrimSpace(in.CustomSystemPrompt)
 	}
-	text, err := h.callHelper(r.Context(), in.HelperModel, sys, prompt)
+	content, err := h.callHelper(r.Context(), in.HelperModel, sys, prompt)
 	if err != nil {
-		errJSON(w, http.StatusBadGateway, "helper model request failed")
+		errJSON(w, http.StatusBadGateway, "helper model request failed: "+err.Error())
 		return
 	}
 	var out domain.PlanOutput
-	if err := decodeStrictContent(text, &out); err != nil || out.Validate() != nil {
-		errJSON(w, http.StatusBadGateway, "helper model returned invalid plan")
+	if err := decodeStrictContent(content, &out); err != nil {
+		errJSON(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
+		return
+	}
+	if err := out.Validate(); err != nil {
+		errJSON(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
 func (h *Handler) callHelper(ctx context.Context, model, sysPrompt, prompt string) (string, error) {
 	if sysPrompt == "" {
 		sysPrompt = helperSystemPrompt
@@ -75,14 +81,19 @@ func (h *Handler) callHelper(ctx context.Context, model, sysPrompt, prompt strin
 	rec := newResponseRecorder()
 	h.d.ProxyHandler.ChatCompletions(rec, req)
 	if rec.code < 200 || rec.code >= 300 {
-		return "", fmt.Errorf("helper status")
+		detail := helperErrorDetail(rec.body)
+		if detail != "" {
+			return "", fmt.Errorf("status %d: %s", rec.code, detail)
+		}
+		return "", fmt.Errorf("status %d", rec.code)
 	}
 	var out helperChatResponse
 	if err := json.Unmarshal(rec.body, &out); err != nil || len(out.Choices) == 0 {
-		return "", fmt.Errorf("invalid helper response")
+		return "", errors.New("invalid helper response")
 	}
 	return out.Choices[0].Message.Content, nil
 }
+
 func decodeStrictContent(content string, dst any) error {
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
@@ -102,10 +113,36 @@ func decodeStrictContent(content string, dst any) error {
 	if start >= 0 && end > start {
 		content = content[start : end+1]
 	}
-	if err := json.Unmarshal([]byte(content), dst); err != nil {
-		return err
+	return json.Unmarshal([]byte(content), dst)
+}
+
+func helperErrorDetail(body []byte) string {
+	var envelope struct {
+		Error any `json:"error"`
 	}
-	return nil
+	if json.Unmarshal(body, &envelope) != nil {
+		return ""
+	}
+	switch v := envelope.Error.(type) {
+	case string:
+		return clipHelperError(v)
+	case map[string]any:
+		if msg, ok := v["message"].(string); ok {
+			return clipHelperError(msg)
+		}
+		if code, ok := v["code"].(string); ok {
+			return clipHelperError(code)
+		}
+	}
+	return ""
+}
+
+func clipHelperError(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 512 {
+		return s[:512] + "…"
+	}
+	return s
 }
 
 type responseRecorder struct {

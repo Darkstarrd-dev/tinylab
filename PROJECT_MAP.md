@@ -16,6 +16,7 @@
 > **最后核对（2026-08-10，Playground Prompt Inspire 体验重构与对齐修补）：** (1) 亮色主题下 Eye Loader 眼睛背景色与纯白背景区分：引入 `--pg-eye-bg` / `--pg-eye-border`，在亮色模式下眼白自动切换为高级淡灰 `#e2e8f0` 并辅以柔和衬边。(2) 莫比乌斯无限环 ∞ SVG 动画：在 Prompt Inspire 弹窗输入框与主界面输入框加载时呈现莫比乌斯环动画，动画中轴线与 Eye Loader 眼睛垂直中轴 100% 精确居中对齐。(3) 仙女棒一键生成与底栏平分布局：底栏发送区右下角新增正方形仙女棒快捷生成按钮 (`.pg-btn-wand`)，后台直接生成与回填 Prompt；`Generate` 与 `Inspire` 按钮垂直平分 50% 高度且在非 Image 模式下 `Clear Chat` 100% 填满两端对齐。(4) 下拉菜单防剪裁与层级提升：`.custom-select-menu` 提高至 `z-index: 9999` 且宽度 100% 精准匹配触发按钮，解决左侧越界剪裁与选中项文字变黑不见问题。(5) 修复 Prompt Helper 模型筛选与 Inspire 404 报错：筛选条件更正为 `k !== 'image' && k !== 'embedding'` 避免遗漏默认文本模型；Inspire 生成请求纠正为 `/v1/chat/completions` 并补充状态重绘前输入框 `v.config.prompt` 值恢复保护。涉及文件：`web/playground/static-pg/playground/pg-ui.js`、`pg-image-inspire.js`、`pg-image-batch.js`、`playground.css`、`web/static/style.css`。
 > **最后核对（2026-08-09，Editor 原生选择器全局锁、docs 目录启动同步与日志清理）：** Download/Settings 的目录选择器与 Editor 文件选择器共用 `beginNativePickerLock`/`endNativePickerLock`；原生文件管理器打开期间，透明全屏 blocker 捕获并阻断点击、焦点、右键、拖拽及键盘事件，直到 picker 请求返回。Editor 首次进入时以 `/api/editor/tree` 返回的配置 `docDir` 内容通过 `replaceDocTree` 重建 Explorer，不读取上次 IndexedDB 的 current/expanded 状态；同一 app 会话后续切回 Editor 才保留工作区状态。Editor 成功路径不再输出调试 `console.log`。
 > **最后核对（2026-08-10，本地日志可观测性恢复）：** `internal/logredact` 统一所有请求记录、Trace、Monitor、Probe 的凭证替换为固定 `******`；Trace API 保留原始记录字段与未来新增字段，仅在 Header/URL 凭证值处替换；Recent Requests 对所有来源始终捕获完整请求/响应体、Header、上游 URL，并补充 `decision`/`provenance`。
+> **最后核对（2026-08-10，Image Batch 弹窗与执行诊断）：** `pg-image-batch.js` 的模板检查弹窗关闭入口已导出，计划数量步进器会回写状态；Batch 专用字段、选择器、步进器、卡片和动作键使用统一高度。Transform/create 错误保留在当前步骤，运行 dashboard 显示 `lastError` 和最近 typed SSE 事件；`scheduler.go` 区分 `completed_with_errors`/`failed`，远程代理错误保留有界响应详情，ComfyUI workflow 与 Image 参数随 manifest 冻结。
 > **最后核对（2026-08-10，PNG tEXt 元数据注入与 Gallery 元数据浮层）：** (1) 非 ComfyUI 图片保存注入 ComfyUI 同款 `prompt` tEXt——新 leaf 包 `internal/image`（§13k，纯 stdlib）：`AsciiJSON` 全 ASCII 转义（astral 平面按 UTF-16 代理对，等价 Python `json.dumps(ensure_ascii=True)`，PIL 以 latin-1 读 tEXt，raw UTF-8 会乱码）、`InjectPNGText` 在 IHDR 后插 chunk 并剔除同名 tEXt/zTXt/iTXt；`internal/api/image/register.go::saveImage` 在 `Metadata!=nil && ext==".png"` 时写入、出错回退原字节（保存永不失败）；`pg-image-model.js` 生成资产附 `asset.meta`、`pg-stream.js`/`pg-modal.js` 自动保存转发 `metadata`。(2) Gallery 元数据浮层 `gallery-meta.js`：`gallery-layout.js` 建 `#gallery-meta-btn`/`#gallery-meta-overlay` + 200ms hover 计时（中心 400px 方块）、`gallery-state.js` 增 `metaOverlayEnabled/Visible/metaCache`、`gallery-fullscreen.js` 加全屏 ESC 分支；客户端解析 PNG tEXt（重复 key 保留首个）与 MP4 `moov→udta→meta`（`keys` 偏移 -8 + `ilst` 1-based 映射），TinyRouter 记录 / ComfyUI 图 / `<pre>` 三种渲染且值全部 `escapeHtml`。(3) ESC capture 阶段修复：`onMetaOverlayKeyDown` 对 ESC `stopImmediatePropagation`——只关浮层并阻断 app.js 关机与退出全屏两个旧处理，浮层隐藏或有 modal 时原样放行。
 > **最后核对（2026-08-10，Gallery 元数据浮层修正）：** (1) ComfyUI 提示词提取改为 `_comfyPrompts` 三阶段：sampler/guider 输入链接（`inputs.positive/negative[0]`）→ `_meta.title` 关键词 → 无 CLIPTextEncode 时取最长 `inputs.prompt`（MiniMax H3 等自定义节点）；正/负向提示词分开全量显示，其余内容折叠进 `<details class="gm-more">` 展开；框体最大为媒体区 60%、可滚动无滚动条。(2) `_extractPromptMeta` 把同文件 `workflow` 键存为 `__workflow_graph`，浮层 Workflow 显示真实 Yes/No。(3) `#gallery-meta-btn` 补上 `gallery-meta-btn` class 并改实心 accent `.active`（含全屏覆盖），开启状态清晰可见。(4) 移除 200ms hover 计时（进入中心方块立即显示）及 `onMetaMouseLeave`/`_metaHoverTimer`。
 > **最后核对（2026-08-10，Gallery 元数据改为右侧侧边栏）：** 元数据显示从 hover 弹窗改为固定右侧 1/3 宽侧边栏（`#gallery-meta-overlay` 替换为 `#gallery-meta-sidebar`，flex 子项 `flex:0 0 33.333%`）：`toggleMetaOverlay` 切换 `#gallery-main` 的 `.gallery-meta-open` 类（CSS 驱动显隐），媒体元素收缩到左侧 2/3 并 `object-fit:contain` 等比缩放；删除 `onMetaMouseMove`/`showMetaOverlay`/`hideMetaOverlay`/`_metaOverlayEl`/`metaOverlayVisible`（无 hover 触发）；新增 `renderMetaSidebar(paneIsVideo)` 按 pane 渲染，`renderActive`/`renderActiveVideo` 末尾挂钩、布局重建后 `bindEventsForCurrentLayout` 重应用开合状态；ESC（capture 阶段）与按钮再次点击关闭。
@@ -370,8 +371,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 | `register.go` | `Handler` + `Register` + `POST /api/comfyui/proxy`；固定转发到 `127.0.0.1:{port}`，仅允许 GET/POST，校验端口/路径/查询、限制重定向留在请求端口，并透传 ComfyUI JSON/图片响应 |
 | `register_test.go` | 代理请求校验与 JSON 响应转发测试 |
 ### 10.13b `internal/imagebatch/` — Durable Playground Image Batch engine
-
-独立于 Manual Canvas 的后台图片项目引擎。`ProjectStore` 以 `config.ResolveImageSaveDir` 为根，按安全 slug 保存 `project.json` 与 `p####/v####.<ext>` 槽位；`.part` 临时文件 + rename 保证原子资产写入，`Reconcile` 只依据合法图片文件恢复成功槽位，不从无 Manifest 的旧目录猜测任务。`Manager`/`Scheduler` 固定单并发，提供 interval、retry/backoff、on-error、pause/resume、after-current/immediate stop、单 Variant retry、SSE 订阅和重启后的 snapshot/reconcile。`RemoteGenerator` 通过 proxy handler 的窄接口生成远程图片，`ComfyGenerator` 只访问本机 loopback ComfyUI 的 `/prompt`/`/history`/`/view`；Manifest 不写 API key、Authorization、Base64 或大响应。
+独立于 Manual Canvas 的后台图片项目引擎。`ProjectStore` 以 `config.ResolveImageSaveDir` 为根，按安全 slug 保存 `project.json` 与 `p####/v####.<ext>` 槽位；`.part` 临时文件 + rename 保证原子资产写入，`Reconcile` 只依据合法图片文件恢复成功槽位，不从无 Manifest 的旧目录猜测任务。`Manager`/`Scheduler` 固定单并发，提供 interval、retry/backoff、on-error、pause/resume、after-current/immediate stop、单 Variant retry、SSE 订阅和重启后的 snapshot/reconcile；失败 Variant 与项目均持久化 `lastError`，终态区分 `completed_with_errors` 与 `failed`。`RemoteGenerator` 通过 proxy handler 的窄接口生成远程图片并保留有界上游错误详情，`ComfyGenerator` 只访问本机 loopback ComfyUI 的 `/prompt`/`/history`/`/view`；Manifest 不写 API key、Authorization、Base64 或大响应。
 
 | 文件 | 职责 |
 |---|---|
@@ -380,15 +380,15 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 | `project_store.go` | project.json 原子读写、asset `.part` 写入、JSON/YAML import/export、safe asset path |
 | `reconciler.go` | 文件系统扫描与 Manifest 槽位恢复 |
 | `manager.go` | Manager 生命周期、runtime、snapshot、controls、retry、subscriptions |
-| `scheduler.go` | 顺序调度、间隔、retry/backoff、seed、生成结果落盘、失败/中断状态 |
-| `remote_generator.go` | GPT/xAI/ModelScope proxy invocation、URL/base64 image validation、SSRF-safe fetch |
+| `scheduler.go` | 顺序调度、间隔、retry/backoff、seed、生成结果落盘、失败/中断状态与终态错误分类 |
+| `remote_generator.go` | GPT/xAI/ModelScope proxy invocation、edits/generations dispatch、有界上游错误详情、URL/base64 image validation、SSRF-safe fetch |
 | `comfy_generator.go` | loopback ComfyUI API workflow、history polling、image validation |
-| `generator.go` | remote/ComfyUI protocol dispatch |
+| `generator.go` | remote/ComfyUI protocol dispatch，以及冻结的 Image 参数/Comfy workflow 传递 |
 | `*_test.go` | schema, paths, storage, adapter contract tests |
 
 ### 10.13c `internal/api/imagebatch/` — Image Batch HTTP API
 
-`/api/image-batches/*` 独立于 generic `/api` 组，沿用管理 session 鉴权并设置 32 MiB request limit。`register.go` 注册 plan/transform/create/list/import/snapshot/manifest/assets/events 与 pause/resume/stop/retry；planning/transform 通过既有 proxy handler 调 helper model 并要求严格 JSON；events 首先发送 snapshot，再发送 typed SSE events。
+`/api/image-batches/*` 独立于 generic `/api` 组，沿用管理 session 鉴权并设置 32 MiB request limit。`register.go` 注册 plan/transform/create/list/import/snapshot/manifest/assets/events 与 pause/resume/stop/retry；planning/transform 通过既有 proxy handler 调 helper model 并把有界错误详情返回给当前步骤；create 是 plan 完成后的实际执行入口；events 首先发送 snapshot，再发送 typed SSE events，前端保存最近事件与 `lastError` 供 dashboard 调试。
 
 ### 10.11 `internal/api/keys/` — Key 管理
 

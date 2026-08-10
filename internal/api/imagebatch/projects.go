@@ -2,6 +2,7 @@ package imagebatch
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -26,14 +27,21 @@ func (h *Handler) transform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(in.Items)
-	text, err := h.callHelper(r.Context(), in.HelperModel, helperSystemPrompt, "Convert each prompt to format "+in.Format+". Preserve naturalPrompt exactly. Input: "+string(b))
+	content, err := h.callHelper(r.Context(), in.HelperModel, helperSystemPrompt, "Convert each prompt to format "+in.Format+". Preserve naturalPrompt exactly. Input: "+string(b))
 	if err != nil {
-		errJSON(w, 502, "helper model request failed")
+		errJSON(w, 502, "helper model request failed: "+err.Error())
 		return
 	}
 	var out domain.TransformOutput
-	if err := decodeStrictContent(text, &out); err != nil || out.Validate() != nil || out.Format != in.Format || len(out.Items) != len(in.Items) {
-		errJSON(w, 502, "helper model returned invalid transform")
+	if err := decodeStrictContent(content, &out); err != nil {
+		errJSON(w, 502, "helper model returned invalid transform: "+err.Error())
+		return
+	}
+	if err := out.Validate(); err != nil || out.Format != in.Format || len(out.Items) != len(in.Items) {
+		if err == nil {
+			err = fmt.Errorf("format or item count mismatch")
+		}
+		errJSON(w, 502, "helper model returned invalid transform: "+err.Error())
 		return
 	}
 	for i := range out.Items {

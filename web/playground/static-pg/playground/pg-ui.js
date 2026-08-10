@@ -646,7 +646,7 @@ function pgRenderSidebar() {
         winbar + comfyPanel +
         '<div class="pg-panel pg-image-actions-panel">' +
           promptHelperRow +
-          '<div class="pg-btn-row" style="margin-top:8px">' + imageBatchBtn + '</div>' +
+          '<div class="pg-btn-row" style="margin-top:8px"><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' + imageBatchBtn + '</div>' +
         '</div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -657,7 +657,7 @@ function pgRenderSidebar() {
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
           modelSel +
           promptHelperRow +
-          '<div class="pg-btn-row" style="margin-top:8px">' + imageBatchBtn + '</div>' +
+          '<div class="pg-btn-row" style="margin-top:8px"><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' + imageBatchBtn + '</div>' +
         '</div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +

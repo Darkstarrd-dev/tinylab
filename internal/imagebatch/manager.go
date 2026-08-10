@@ -296,11 +296,25 @@ func (m *Manager) Stop(ctx context.Context, id, mode string) (*Project, error) {
 	}
 	r.mu.Lock()
 	r.stop = mode
-	r.project.Status = ProjectStopping
 	cancel := r.cancel
+	if cancel == nil {
+		if mode == "immediate" {
+			r.project.Status = ProjectCanceled
+		} else {
+			r.project.Stats.Recompute(r.project.Prompts)
+			r.project.Status = terminalStatus(r.project.Stats)
+		}
+		p := cloneProject(&r.project)
+		r.mu.Unlock()
+		if e = m.store.Save(ctx, *p); e != nil {
+			return nil, e
+		}
+		return p, nil
+	}
+	r.project.Status = ProjectStopping
 	p := cloneProject(&r.project)
 	r.mu.Unlock()
-	if mode == "immediate" && cancel != nil {
+	if mode == "immediate" {
 		cancel()
 	}
 	select {

@@ -28,6 +28,10 @@ type ImageProxyCaller interface {
 	ImagesGenerations(http.ResponseWriter, *http.Request)
 }
 
+type ImageEditsCaller interface {
+	ImagesEdits(http.ResponseWriter, *http.Request)
+}
+
 // ImageTaskCaller is optional support for providers which return an async task.
 // The normal proxy does not need to implement it; callers that support task
 // polling may expose it alongside ImageProxyCaller.
@@ -109,7 +113,10 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 		return ImageGenerationResult{}, fmt.Errorf("marshal image request: %w", err)
 	}
 	path := req.Endpoint
-	if path == "" || !strings.HasPrefix(path, "/") {
+	isEdit := path == "edits" || path == "/edits" || strings.HasSuffix(path, "/images/edits")
+	if isEdit {
+		path = "/v1/images/edits"
+	} else {
 		path = "/v1/images/generations"
 	}
 	in := httptest.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(raw))
@@ -118,7 +125,18 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 	in.Header.Set("X-TinyRouter-Provenance", "playground-batch:project="+clipID(req.ProjectID)+":prompt="+clipID(req.PromptID)+":variant="+clipID(req.VariantID))
 	rec := httptest.NewRecorder()
 	proxyDone := make(chan struct{})
-	go func() { g.caller.ImagesGenerations(rec, in); close(proxyDone) }()
+	go func() {
+		if isEdit {
+			if editCaller, ok := g.caller.(ImageEditsCaller); ok {
+				editCaller.ImagesEdits(rec, in)
+			} else {
+				http.Error(rec, "image edit proxy unavailable", http.StatusNotImplemented)
+			}
+		} else {
+			g.caller.ImagesGenerations(rec, in)
+		}
+		close(proxyDone)
+	}()
 	select {
 	case <-ctx.Done():
 		return ImageGenerationResult{}, ctx.Err()
@@ -134,6 +152,10 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 		return ImageGenerationResult{}, fmt.Errorf("read image proxy response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail := compactErrorBody(payload)
+		if detail != "" {
+			return ImageGenerationResult{}, fmt.Errorf("image proxy returned %s: %s", resp.Status, detail)
+		}
 		return ImageGenerationResult{}, fmt.Errorf("image proxy returned %s", resp.Status)
 	}
 	var envelope remoteResponse
@@ -203,6 +225,41 @@ type remoteResponse struct {
 	ID      string          `json:"id"`
 	Output  json.RawMessage `json:"output"`
 	Status  string          `json:"status"`
+}
+
+func compactErrorBody(payload []byte) string {
+	const maxDetail = 512
+	var envelope struct {
+		Error   any    `json:"error"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(payload, &envelope) == nil {
+		switch v := envelope.Error.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				return clipError(v, maxDetail)
+			}
+		case map[string]any:
+			if msg, ok := v["message"].(string); ok && strings.TrimSpace(msg) != "" {
+				return clipError(msg, maxDetail)
+			}
+			if code, ok := v["code"].(string); ok && strings.TrimSpace(code) != "" {
+				return clipError(code, maxDetail)
+			}
+		}
+		if strings.TrimSpace(envelope.Message) != "" {
+			return clipError(envelope.Message, maxDetail)
+		}
+	}
+	return clipError(string(payload), maxDetail)
+}
+
+func clipError(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
 }
 
 func (g *RemoteGenerator) pollTask(ctx context.Context, caller ImageTaskCaller, id string, req ImageGenerationRequest) (remoteResponse, error) {

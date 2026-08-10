@@ -36,7 +36,8 @@ func (s Scheduler) Run(ctx context.Context, r *runtime) {
 			}
 		}
 		if r.stop == "after-current" {
-			r.project.Status = ProjectCompleted
+			r.project.Stats.Recompute(r.project.Prompts)
+			r.project.Status = terminalStatus(r.project.Stats)
 			p := r.project
 			r.mu.Unlock()
 			_ = m.store.Save(context.Background(), p)
@@ -44,12 +45,12 @@ func (s Scheduler) Run(ctx context.Context, r *runtime) {
 		}
 		pi, vi := findNextVariant(&r.project)
 		if pi < 0 {
-			r.project.Status = ProjectCompleted
 			r.project.Stats.Recompute(r.project.Prompts)
+			r.project.Status = terminalStatus(r.project.Stats)
 			p := r.project
 			r.mu.Unlock()
 			_ = m.store.Save(context.Background(), p)
-			r.emit(Event{Type: EventProjectCompleted, ProjectID: p.ProjectID, At: time.Now().UTC()})
+			r.emit(Event{Type: EventProjectCompleted, ProjectID: p.ProjectID, At: time.Now().UTC(), Data: p.Status})
 			return
 		}
 		prompt := r.project.Prompts[pi]
@@ -111,21 +112,28 @@ func (s Scheduler) Run(ctx context.Context, r *runtime) {
 			if interrupted {
 				return
 			}
-			r.mu.Lock()
-			stopOnError := r.project.BatchConfig.OnError == OnErrorStop
-			r.mu.Unlock()
-			if stopOnError {
+			if s.onErrorStop(r) {
+				s.markProjectFailed(r, genErr)
 				return
 			}
 			continue
 		}
 		if len(result.Assets) == 0 {
-			s.finishError(r, prompt.ID, variant.ID, errors.New("generator returned no assets"), false)
+			err := errors.New("generator returned no assets")
+			s.finishError(r, prompt.ID, variant.ID, err, false)
+			if s.onErrorStop(r) {
+				s.markProjectFailed(r, err)
+				return
+			}
 			continue
 		}
 		asset, writeErr := m.store.WriteAsset(context.Background(), project, prompt.Index, variant.Index, result.Assets[0])
 		if writeErr != nil {
 			s.finishError(r, prompt.ID, variant.ID, writeErr, false)
+			if s.onErrorStop(r) {
+				s.markProjectFailed(r, writeErr)
+				return
+			}
 			continue
 		}
 
@@ -157,6 +165,29 @@ func (s Scheduler) Run(ctx context.Context, r *runtime) {
 	}
 }
 
+func terminalStatus(stats Stats) ProjectStatus {
+	if stats.Failed > 0 || stats.Interrupted > 0 {
+		return ProjectCompletedWithErrors
+	}
+	return ProjectCompleted
+}
+
+func (s Scheduler) onErrorStop(r *runtime) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.project.BatchConfig.OnError == OnErrorStop
+}
+
+func (s Scheduler) markProjectFailed(r *runtime, err error) {
+	r.mu.Lock()
+	r.project.Status = ProjectFailed
+	r.project.LastError = err.Error()
+	p := r.project
+	r.mu.Unlock()
+	_ = s.manager.store.Save(context.Background(), p)
+	r.emit(Event{Type: EventProjectError, ProjectID: p.ProjectID, At: time.Now().UTC(), Data: err.Error()})
+}
+
 func (s Scheduler) interrupt(r *runtime) {
 	r.mu.Lock()
 	var promptID, variantID string
@@ -185,16 +216,18 @@ func (s Scheduler) finishError(r *runtime, promptID, variantID string, err error
 		}
 		for vi := range r.project.Prompts[pi].Variants {
 			v := &r.project.Prompts[pi].Variants[vi]
-			if v.ID == variantID {
-				if interrupted {
-					v.Status = VariantInterrupted
-				} else {
-					v.Status = VariantFailed
-				}
-				v.LastError = err.Error()
+			if v.ID != variantID {
+				continue
 			}
+			if interrupted {
+				v.Status = VariantInterrupted
+			} else {
+				v.Status = VariantFailed
+			}
+			v.LastError = err.Error()
 		}
 	}
+	r.project.LastError = err.Error()
 	r.project.Stats.Recompute(r.project.Prompts)
 	p := r.project
 	r.mu.Unlock()

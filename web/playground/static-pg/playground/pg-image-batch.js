@@ -15,11 +15,12 @@
     reconnecting: false,
     modal: false,
     stage: 1,
-    draft: { displayName: '', helperModel: '', imageModel: '', protocol: '', endpoint: '', requirements: '', format: 'natural', negativePrompt: '', quantity: 4, intervalMs: 0, maxRetries: 1, retryDelayMs: 1000, retryBackoff: 'fixed', onError: 'continue', seedMode: 'provider-controlled', baseSeed: 0, params: {} },
+    draft: { displayName: '', helperModel: '', imageModel: '', protocol: '', endpoint: '', requirements: '', format: 'natural', negativePrompt: '', quantity: 4, intervalMs: 0, maxRetries: 1, retryDelayMs: 1000, retryBackoff: 'fixed', onError: 'continue', seedMode: 'provider-controlled', baseSeed: 0, params: {}, customSystemPrompt: '', customUserPrompt: '', error: '', starting: false },
     reconcileTimer: null,
     plan: null,
     transform: null,
-    viewer: { prompt: 0, variant: 0 }
+    viewer: { prompt: 0, variant: 0 },
+    events: []
   };
   if (root.pgState && typeof root.pgState === 'object') root.pgState.imageBatch = state;
   root.pgImageBatch = state;
@@ -66,27 +67,38 @@
     return html;
   }
   function formatOptions(selected) { return FORMAT.map(function (f) { return '<option value="' + f + '"' + (f === selected ? ' selected' : '') + '>' + esc(text(f)) + '</option>'; }).join(''); }
-  function field(label, id, value, type, attrs) { return '<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;font-size:12px;color:var(--text-secondary)">' + esc(label) + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + ' class="pg-input" style="width:100%;box-sizing:border-box"></label>'; }
-  function area(label, id, value) { return '<label style="display:flex;flex-direction:column;gap:4px;margin:8px 0;font-size:12px;color:var(--text-secondary)">' + esc(label) + '<textarea id="' + id + '" rows="3" class="pg-input" style="width:100%;box-sizing:border-box">' + esc(value) + '</textarea></label>'; }
-  function button(label, fn, disabled, cls) { return '<button type="button" class="pg-btn ' + (cls || '') + '" onclick="' + fn + '()"' + (disabled ? ' disabled' : '') + ' style="height:36px;padding:0 18px;font-size:13px;font-weight:600;min-width:88px;box-sizing:border-box">' + esc(label) + '</button>'; }
+  function field(label, id, value, type, attrs) { return '<label class="pg-batch-field"><span>' + esc(label) + '</span><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + ' class="pg-input pg-batch-text-input"></label>'; }
+  function area(label, id, value) { return '<label class="pg-batch-field pg-batch-area-field"><span>' + esc(label) + '</span><textarea id="' + id + '" rows="3" class="pg-input pg-batch-area-input">' + esc(value) + '</textarea></label>'; }
+  function button(label, fn, disabled, cls) { return '<button type="button" class="pg-btn pg-batch-action-btn ' + (cls || '') + '" onclick="' + fn + '()"' + (disabled ? ' disabled' : '') + '>' + esc(label) + '</button>'; }
   function modal(html) { if (typeof pgShowModal === 'function') pgShowModal(html); else { var o = document.getElementById('pg-modal-overlay'); if (o) { o.innerHTML = '<div class="pg-modal">' + html + '</div>'; o.classList.add('show'); } } }
   function closeModal() { state.modal = false; if (typeof pgCloseModal === 'function') pgCloseModal(); }
+  function restoreCreateModal() { state.modal = true; renderCreate(); }
   function readDraft() {
     var g = function (id) { return document.getElementById(id); }, v = function (id, fallback) { var e = g(id); return e ? e.value : fallback; };
     state.draft.displayName = String(v('pg-img-batch-name', state.draft.displayName)).trim();
     var w = typeof pgWin === 'function' ? pgWin() : null;
     if (w && w.config) {
       state.draft.helperModel = w.config.imgPromptModel || state.draft.helperModel || '';
-      state.draft.imageModel = w.config.model || state.draft.imageModel || '';
-      state.draft.protocol = typeof pgGetImgProtocol === 'function' ? (pgGetImgProtocol(w.config.model) || '') : (state.draft.protocol || '');
-      state.draft.endpoint = w.config.imgEndpoint || state.draft.endpoint || '';
+      var effectiveProtocol = typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(w.config) : '';
+      state.draft.protocol = effectiveProtocol || (typeof pgGetImgProtocol === 'function' ? (pgGetImgProtocol(w.config.model) || '') : (state.draft.protocol || ''));
+      state.draft.imageModel = w.config.model || (state.draft.protocol === 'comfyui' ? 'comfyui' : state.draft.imageModel || '');
+      state.draft.endpoint = state.draft.protocol === 'comfyui' ? 'comfyui' : (w.config.imgEndpoint || state.draft.endpoint || '');
+      state.draft.params = {};
+      var paramMap = { imgSize: 'size', imgQuality: 'quality', imgBackground: 'background', imgModeration: 'moderation', imgAspectRatio: 'aspect_ratio', imgResolution: 'resolution', imgN: 'n', imgResponseFormat: 'response_format', imgOutputFormat: 'output_format', imgOutputCompression: 'output_compression', imgUser: 'user', imgNegativePrompt: 'negative_prompt', imgSteps: 'steps', imgGuidance: 'guidance', imgSeed: 'seed' };
+      Object.keys(paramMap).forEach(function (key) {
+        if (w.config[key] !== '' && w.config[key] !== 0 && w.config[key] != null) state.draft.params[paramMap[key]] = w.config[key];
+      });
+      if (state.draft.protocol === 'comfyui') {
+        state.draft.params.port = parseInt(w.config.imgComfyPort, 10) || 8188;
+        if (w.config.imgComfyWorkflow && typeof w.config.imgComfyWorkflow === 'object') state.draft.params.workflow = w.config.imgComfyWorkflow;
+      }
     }
     state.draft.requirements = String(v('pg-img-batch-requirements', state.draft.requirements)).trim();
     state.draft.format = String(v('pg-img-batch-format', state.draft.format));
     state.draft.negativePrompt = String(v('pg-img-batch-negative', state.draft.negativePrompt));
     state.draft.quantity = safeNum(v('pg-img-batch-quantity', state.draft.quantity), 4, 1, 100);
     state.draft.intervalMs = safeNum(v('pg-img-batch-interval', state.draft.intervalMs), 0, 0, 86400000);
-    state.draft.maxRetries = safeNum(v('pg-img-batch-retries', state.draft.maxRetries), 1, 0, 100);
+    state.draft.maxRetries = safeNum(v('pg-img-batch-retries', state.draft.maxRetries), 1, 0, 20);
     state.draft.retryDelayMs = safeNum(v('pg-img-batch-retry-delay', state.draft.retryDelayMs), 1000, 0, 86400000);
     state.draft.retryBackoff = String(v('pg-img-batch-backoff', state.draft.retryBackoff || 'fixed'));
     state.draft.seedMode = String(v('pg-img-batch-seed-mode', state.draft.seedMode));
@@ -111,12 +123,13 @@
     return '<select id="' + selId + '" class="pg-select" style="width:100%;height:36px">' + options + '</select>';
   }
 
-  function renderBatchStepper(id, value, min, max, step) {
+  function renderBatchStepper(id, value, min, max, step, onchange) {
     step = step || 1;
     var v = safeNum(value, 0, min, max);
-    return '<div class="number-stepper" style="width:100%;height:36px;box-sizing:border-box">' +
+    var changeAttr = onchange ? ' onchange="' + onchange + '"' : '';
+    return '<div class="number-stepper pg-batch-stepper" style="width:100%;height:36px;box-sizing:border-box">' +
       '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepBatchInput(\'' + id + '\', -' + step + ', ' + (min != null ? min : 'null') + ', ' + (max != null ? max : 'null') + ')">-</button>' +
-      '<input type="number" id="' + id + '" class="stepper-input" min="' + (min != null ? min : '') + '" max="' + (max != null ? max : '') + '" value="' + v + '" style="height:100%">' +
+      '<input type="number" id="' + id + '" class="stepper-input" min="' + (min != null ? min : '') + '" max="' + (max != null ? max : '') + '" value="' + v + '"' + changeAttr + ' style="height:100%">' +
       '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepBatchInput(\'' + id + '\', ' + step + ', ' + (min != null ? min : 'null') + ', ' + (max != null ? max : 'null') + ')">+</button>' +
     '</div>';
   }
@@ -138,11 +151,11 @@
     '</div>';
   }
 
-  function stageHeader() {
-    return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(text('title')) + '</span><button class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div>' +
+  function stageHeader(includeInspect) {
+    return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(text('title')) + '</span><button type="button" class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid var(--glass-border);font-size:12px;color:var(--text-secondary)">' +
         '<div style="display:flex;gap:6px"><span>1. ' + esc(text('planning')) + '</span><span>→</span><span>2. ' + esc(text('conversion')) + '</span><span>→</span><span>3. ' + esc(text('review')) + '</span></div>' +
-        '<button type="button" class="pg-btn" onclick="pgImageBatchInspectPrompts()" style="font-size:11px;padding:3px 8px;border-radius:var(--radius-xs)">🔍 查看/修改 Prompt 模版</button>' +
+        (includeInspect ? '<button type="button" class="pg-btn" onclick="pgImageBatchInspectPrompts()" style="font-size:11px;padding:3px 8px;border-radius:var(--radius-xs)">🔍 查看/修改 Prompt 模版</button>' : '') +
       '</div>';
   }
 
@@ -154,7 +167,7 @@
     var defaultUser = "Create a JSON image plan for these requirements: " + (d.requirements || '[批量创作要求]') + "\nDefault negative prompt: " + (d.negativePrompt || '[默认负面提示词]') + "\nDefault quantity: " + d.quantity + "\nReturn {\"title\":string,\"items\":[{\"id\":string,\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":number}]}";
     var reqPrompt = d.customUserPrompt || defaultUser;
 
-    var html = '<div class="pg-modal-header"><span class="pg-modal-title">🔍 Prompt 模版与透明度（可查看并修改）</span><button class="pg-modal-close" onclick="renderCreate()">✕</button></div>' +
+    var html = '<div class="pg-modal-header"><span class="pg-modal-title">🔍 Prompt 模版与透明度（可查看并修改）</span><button type="button" class="pg-modal-close" onclick="pgImageBatchRestoreCreateModal()">✕</button></div>' +
       '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;font-size:12px;line-height:1.6;position:relative">' +
         '<label style="font-weight:600;display:block;margin-bottom:4px;color:var(--text)">Helper Model System Prompt（系统指令，可编辑修改）</label>' +
         '<textarea id="pg-inspect-sys-prompt" class="pg-input" style="width:100%;height:70px;font-family:monospace;font-size:12px;margin-bottom:12px;box-sizing:border-box">' + esc(sysPrompt) + '</textarea>' +
@@ -195,7 +208,7 @@
       { value: 'provider-controlled', label: 'provider-controlled' }
     ];
 
-    return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
+    return stageHeader(true) + '<div class="pg-modal-body pg-batch-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
       hamsterLoaderHtml() +
       field(text('name'), 'pg-img-batch-name', d.displayName) +
       area(text('requirements'), 'pg-img-batch-requirements', d.requirements) +
@@ -207,7 +220,7 @@
       '<details class="pg-img-batch-scheduler" style="margin-top:12px"><summary style="font-size:12px;font-weight:600;color:var(--text-secondary);cursor:pointer;user-select:none;margin-bottom:8px">▼ ' + esc(tr('Scheduler settings','调度设置')) + '</summary>' +
         '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px 10px;margin-top:8px;align-items:end">' +
           '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('interval')) + renderBatchStepper('pg-img-batch-interval', d.intervalMs, 0, 86400000, 100) + '</label>' +
-          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('retries')) + renderBatchStepper('pg-img-batch-retries', d.maxRetries, 0, 100, 1) + '</label>' +
+          '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('retries')) + renderBatchStepper('pg-img-batch-retries', d.maxRetries, 0, 20, 1) + '</label>' +
           '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('retryDelay')) + renderBatchStepper('pg-img-batch-retry-delay', d.retryDelayMs, 0, 86400000, 500) + '</label>' +
           '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">Backoff' + renderBatchCustomSelect('pg-img-batch-backoff-wrap', 'pg-img-batch-backoff', backoffOpts, d.retryBackoff || 'fixed') + '</label>' +
           '<label style="font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--text-secondary)">' + esc(text('seedMode')) + renderBatchCustomSelect('pg-img-batch-seed-mode-wrap', 'pg-img-batch-seed-mode', seedOpts, d.seedMode) + '</label>' +
@@ -252,29 +265,26 @@
   function editPlan(index, prop, value) { if (!state.plan || !state.plan.items[index]) return; var it = state.plan.items[index]; if (prop === 'quantity') it.quantity = safeNum(value, it.quantity, 1, 100); else it[prop] = String(value); }
   function renderPlanItems() {
     return state.plan.items.map(function (it, i) {
-      var itemStepper = renderBatchStepper('pg-item-qty-' + i, it.quantity, 1, 100, 1);
-      return '<div class="pg-batch-plan-item" style="border:1px solid var(--glass-border);background:var(--card-bg, rgba(255,255,255,0.03));border-radius:var(--radius-sm);padding:14px;margin:12px 0" data-plan-index="' + i + '">' +
-        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">' +
-          '<span style="font-weight:700;font-size:13px;color:var(--text);min-width:28px">' + esc(it.id) + '</span>' +
-          '<input class="pg-input" value="' + esc(it.title) + '" onchange="pgImageBatchEditItem(' + i + ',\'title\',this.value)" style="flex:1;height:36px !important;box-sizing:border-box !important;font-weight:600">' +
-          '<button type="button" class="pg-btn" onclick="pgImageBatchMove(' + i + ',-1)" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="上移">↑</button>' +
-          '<button type="button" class="pg-btn" onclick="pgImageBatchMove(' + i + ',1)" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="下移">↓</button>' +
-          '<button type="button" class="pg-btn danger" onclick="pgImageBatchDelete(' + i + ')" style="width:36px !important;height:36px !important;padding:0 !important;box-sizing:border-box !important;display:inline-flex;align-items:center;justify-content:center" data-tooltip="删除">✕</button>' +
+      var itemStepper = renderBatchStepper('pg-item-qty-' + i, it.quantity, 1, 100, 1, 'pgImageBatchEditItem(' + i + ',\'quantity\',this.value)');
+      return '<div class="pg-batch-plan-item" data-plan-index="' + i + '">' +
+        '<div class="pg-batch-plan-head">' +
+          '<span class="pg-batch-plan-id">' + esc(it.id) + '</span>' +
+          '<input class="pg-input pg-batch-title-input" value="' + esc(it.title) + '" onchange="pgImageBatchEditItem(' + i + ',\'title\',this.value)">' +
+          '<button type="button" class="pg-btn pg-batch-icon-btn" onclick="pgImageBatchMove(' + i + ',-1)" data-tooltip="上移">↑</button>' +
+          '<button type="button" class="pg-btn pg-batch-icon-btn" onclick="pgImageBatchMove(' + i + ',1)" data-tooltip="下移">↓</button>' +
+          '<button type="button" class="pg-btn danger pg-batch-icon-btn" onclick="pgImageBatchDelete(' + i + ')" data-tooltip="删除">✕</button>' +
         '</div>' +
-        '<textarea class="pg-input" rows="3" onchange="pgImageBatchEditItem(' + i + ',\'naturalPrompt\',this.value)" style="width:100%;box-sizing:border-box;margin-bottom:12px;font-size:13px;line-height:1.5">' + esc(it.naturalPrompt) + '</textarea>' +
-        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">' +
-          '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px">' +
-            '<span style="white-space:nowrap;font-weight:500">' + esc(text('quantity')) + '</span>' +
-            '<div style="width:110px">' + itemStepper + '</div>' +
-          '</div>' +
-          '<input class="pg-input" placeholder="' + esc(text('negative')) + '" value="' + esc(it.negativePrompt) + '" onchange="pgImageBatchEditItem(' + i + ',\'negativePrompt\',this.value)" style="flex:1;min-width:200px;height:36px !important;box-sizing:border-box !important">' +
+        '<textarea class="pg-input pg-batch-prompt-input" rows="3" onchange="pgImageBatchEditItem(' + i + ',\'naturalPrompt\',this.value)">' + esc(it.naturalPrompt) + '</textarea>' +
+        '<div class="pg-batch-plan-foot">' +
+          '<div class="pg-batch-quantity-field"><span>' + esc(text('quantity')) + '</span><div class="pg-batch-quantity-stepper">' + itemStepper + '</div></div>' +
+          '<input class="pg-input pg-batch-negative-input" placeholder="' + esc(text('negative')) + '" value="' + esc(it.negativePrompt) + '" onchange="pgImageBatchEditItem(' + i + ',\'negativePrompt\',this.value)">' +
         '</div>' +
       '</div>';
     }).join('');
   }
   function conversionHtml() {
-    return stageHeader() +
-      '<div class="pg-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
+    return stageHeader(true) +
+      '<div class="pg-modal-body pg-batch-modal-body" style="max-height:72vh;overflow:auto;position:relative">' +
         hamsterLoaderHtml() +
         '<p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">' + esc(text('planning')) + ': <strong style="color:var(--text)">' + esc(state.plan.title) + '</strong></p>' +
         '<div id="pg-img-batch-items">' + renderPlanItems() + '</div>' +
@@ -287,6 +297,7 @@
   }
   function transformItems(raw) { var source = raw && Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : null); if (!source || source.length !== state.plan.items.length) throw new Error(text('invalid')); return state.plan.items.map(function (it, i) { var x = source[i] || {}; var out = Object.assign({}, it); out.index = i + 1; out.finalFormat = state.draft.format; out.finalPrompt = String(x.finalPrompt != null ? x.finalPrompt : it.naturalPrompt); out.finalPromptObject = x.finalPromptObject != null ? x.finalPromptObject : null; if (out.finalFormat === 'json') { try { if (!out.finalPromptObject) out.finalPromptObject = JSON.parse(out.finalPrompt); else JSON.stringify(out.finalPromptObject); } catch (e) { out._invalid = true; } } return out; }); }
   function pgImageBatchTransform() {
+    readDraft();
     var items = state.plan.items.map(function (x, i) {
       return { id: x.id, index: i + 1, title: x.title, naturalPrompt: x.naturalPrompt, finalFormat: state.draft.format, finalPrompt: x.naturalPrompt, negativePrompt: x.negativePrompt, quantity: x.quantity, variants: [] };
     });
@@ -301,30 +312,88 @@
     if (btn) { btn.disabled = true; btn.textContent = 'Transforming...'; }
     var loader = document.getElementById('pg-batch-modal-loader');
     if (loader) loader.classList.add('active');
-
     apiPost('/image-batches/transform', { helperModel: state.draft.helperModel, format: state.draft.format, items: items }).then(function (res) {
       if (!res || res.error) throw new Error(apiError(res));
       state.transform = transformItems(res);
+      state.draft.error = '';
       state.stage = 3;
       renderCreate();
     }).catch(function (e) {
-      state.transform = items;
-      state.stage = 3;
-      notify('格式转换已自动保留自然语言格式并顺利推进', 'info');
-      renderCreate();
+      setError(e.message || text('invalid'));
     }).finally(function () {
-      if (btn) btn.disabled = false;
+      var currentBtn = document.querySelector('#pg-modal-overlay .pg-btn-primary');
+      if (currentBtn) currentBtn.disabled = false;
       if (loader) loader.classList.remove('active');
     });
   }
-  function reviewHtml() { var items = state.transform || state.plan.items, total = items.reduce(function (n, x) { return n + safeNum(x.quantity, 0, 0, 100); }, 0), invalid = items.some(function (x) { return x._invalid || !x.finalPrompt || (x.finalFormat === 'json' && !x.finalPromptObject); }); return stageHeader() + '<div class="pg-modal-body" style="max-height:72vh;overflow:auto"><div style="font-size:12px;line-height:1.8;color:var(--text-secondary);background:var(--card-bg, rgba(255,255,255,0.03));padding:10px;border-radius:var(--radius-sm);border:1px solid var(--glass-border)"><div>' + esc(text('name')) + ': <strong style="color:var(--text)">' + esc(state.draft.displayName) + '</strong></div><div>Prompt count: ' + items.length + ' · Total variants: ' + total + ' · Maximum attempts: ' + (total * (1 + state.draft.maxRetries)) + '</div><div>' + esc(text('imageModel')) + ': ' + esc(state.draft.imageModel) + ' · ' + esc(text('helper')) + ': ' + esc(state.draft.helperModel) + '</div><div>' + esc(text('interval')) + ': ' + state.draft.intervalMs + ' · ' + esc(text('retries')) + ': ' + state.draft.maxRetries + ' · ' + esc(text('seedMode')) + ': ' + esc(state.draft.seedMode) + '</div></div><div>' + items.map(function (it, i) { return '<div style="border:1px solid var(--glass-border);background:var(--card-bg, rgba(255,255,255,0.03));border-radius:var(--radius-sm);padding:10px;margin:8px 0"><strong style="color:var(--text)">' + esc(it.title) + '</strong> × ' + esc(it.quantity) + '<div style="font-size:12px;white-space:pre-wrap;margin-top:4px;color:var(--text-secondary)">' + esc(it.finalPrompt) + '</div>' + (it._invalid ? '<div style="color:var(--danger)">' + esc(text('jsonInvalid')) + '</div>' : '') + '</div>'; }).join('') + '</div><div id="pg-img-batch-error" style="color:var(--danger);min-height:18px"></div><div style="display:flex;justify-content:space-between;margin-top:16px"><button type="button" class="pg-btn" onclick="pgImageBatchStage(2)" style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('back')) + '</button><button type="button" class="pg-btn pg-btn-primary" onclick="pgImageBatchStart()"' + (invalid ? ' disabled' : '') + ' style="height:38px;padding:0 20px;font-size:13px;font-weight:600;min-width:88px">' + esc(text('start')) + '</button></div></div>'; }
+  function reviewHtml() {
+    var items = state.transform || state.plan.items;
+    var total = items.reduce(function (n, x) { return n + safeNum(x.quantity, 0, 0, 100); }, 0);
+    var invalid = items.some(function (x) { return x._invalid || !x.finalPrompt || (x.finalFormat === 'json' && !x.finalPromptObject); });
+    var err = state.draft.error || '';
+    return stageHeader(true) + '<div class="pg-modal-body pg-batch-modal-body" style="max-height:72vh;overflow:auto">' +
+      '<div class="pg-batch-summary"><div>' + esc(text('name')) + ': <strong>' + esc(state.draft.displayName) + '</strong></div><div>Prompt count: ' + items.length + ' · Total variants: ' + total + ' · Maximum attempts: ' + (total * (1 + state.draft.maxRetries)) + '</div><div>' + esc(text('imageModel')) + ': ' + esc(state.draft.imageModel) + ' · ' + esc(text('helper')) + ': ' + esc(state.draft.helperModel) + '</div><div>' + esc(text('interval')) + ': ' + state.draft.intervalMs + ' · ' + esc(text('retries')) + ': ' + state.draft.maxRetries + ' · ' + esc(text('seedMode')) + ': ' + esc(state.draft.seedMode) + '</div></div>' +
+      '<div class="pg-batch-review-items">' + items.map(function (it) { return '<div class="pg-batch-review-item"><strong>' + esc(it.title) + '</strong> × ' + esc(it.quantity) + '<div>' + esc(it.finalPrompt) + '</div>' + (it._invalid ? '<div class="pg-batch-error">' + esc(text('jsonInvalid')) + '</div>' : '') + '</div>'; }).join('') + '</div>' +
+      (err ? '<div class="pg-batch-error pg-batch-error-box">' + esc(err) + '</div>' : '<div class="pg-batch-error-box"></div>') +
+      '<div class="pg-batch-footer"><button type="button" class="pg-btn pg-batch-action-btn" onclick="pgImageBatchStage(2)">' + esc(text('back')) + '</button><button type="button" class="pg-btn pg-btn-primary pg-batch-action-btn" onclick="pgImageBatchStart()"' + (invalid || state.draft.starting ? ' disabled' : '') + '>' + esc(state.draft.starting ? 'Starting…' : text('start')) + '</button></div>' +
+      '</div>';
+  }
   function renderCreate() { if (!state.modal) return; modal(state.stage === 1 ? planningHtml() : state.stage === 2 ? conversionHtml() : reviewHtml()); }
   function pgImageBatchStage(n) { if (n === 1) readDraft(); state.stage = n; renderCreate(); }
   function pgImageBatchEditItem(i, prop, value) { editPlan(i, prop, value); }
   function pgImageBatchMove(i, delta) { if (!state.plan || i + delta < 0 || i + delta >= state.plan.items.length) return; var a = state.plan.items; var x = a.splice(i, 1)[0]; a.splice(i + delta, 0, x); a.forEach(function (v, n) { v.index = n; }); renderCreate(); }
   function pgImageBatchDelete(i) { if (state.plan.items.length <= 1) return; state.plan.items.splice(i, 1); renderCreate(); }
   function pgImageBatchAddItem() { state.plan.items.push({ id: 'p' + String(state.plan.items.length + 1).padStart(4, '0'), index: state.plan.items.length, title: 'New item', naturalPrompt: '', negativePrompt: state.draft.negativePrompt, finalFormat: state.draft.format, finalPrompt: '', finalPromptObject: null, quantity: state.draft.quantity, variants: [] }); renderCreate(); }
-  function pgImageBatchStart() { readDraft(); var items = (state.transform || state.plan.items).map(function (it, i) { var x = Object.assign({}, it); delete x._invalid; x.index = i + 1; x.finalFormat = x.finalFormat || state.draft.format; x.finalPrompt = x.finalPrompt || x.naturalPrompt; x.variants = []; return x; }); var slug = state.draft.displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'image-batch'; var body = { schemaVersion: 1, displayName: state.draft.displayName, slug: slug, promptPlan: { helperModel: state.draft.helperModel, sourceRequirement: state.draft.requirements, outputFormat: state.draft.format, planVersion: 1 }, prompts: items, imageConfig: { model: state.draft.imageModel, protocol: state.draft.protocol || 'gpt', endpoint: state.draft.endpoint, params: state.draft.params }, batchConfig: { intervalMs: state.draft.intervalMs, maxRetries: state.draft.maxRetries, retryDelayMs: state.draft.retryDelayMs, retryBackoff: state.draft.retryBackoff, onError: state.draft.onError, seedMode: state.draft.seedMode, baseSeed: state.draft.baseSeed } }; apiPost('/image-batches', body).then(function (res) { if (!res || res.error || !res.projectId) throw new Error(apiError(res)); state.projectId = String(res.projectId); state.snapshot = res.snapshot || null; closeModal(); return state.snapshot ? Promise.resolve(state.snapshot) : pgImageBatchSnapshot(state.projectId); }).then(function (snap) { if (snap) { applySnapshot(snap); state.modal = false; renderDashboard(); openEvents(); } }).catch(function (e) { state.modal = true; setError(e.message || text('invalid')); renderCreate(); }); }
+  function pgImageBatchStart() {
+    if (state.draft.starting) return;
+    readDraft();
+    state.draft.error = '';
+    var source = state.transform || state.plan.items;
+    var items = source.map(function (it, i) {
+      var x = Object.assign({}, it);
+      delete x._invalid;
+      x.index = i + 1;
+      x.finalFormat = x.finalFormat || state.draft.format;
+      x.finalPrompt = x.finalPrompt || x.naturalPrompt;
+      x.variants = [];
+      return x;
+    });
+    if (!items.length || items.some(function (x) { return !String(x.finalPrompt || '').trim(); })) {
+      state.draft.error = 'Every prompt must contain a final prompt.';
+      renderCreate();
+      return;
+    }
+    var slugBase = state.draft.displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'image-batch';
+    var slug = slugBase + '-' + Date.now().toString(36);
+    var body = {
+      schemaVersion: 1,
+      displayName: state.draft.displayName,
+      slug: slug,
+      promptPlan: { helperModel: state.draft.helperModel, sourceRequirement: state.draft.requirements, outputFormat: state.draft.format, planVersion: 1 },
+      prompts: items,
+      imageConfig: { model: state.draft.imageModel, protocol: state.draft.protocol || 'gpt', endpoint: state.draft.endpoint, params: state.draft.params },
+      batchConfig: { intervalMs: state.draft.intervalMs, maxRetries: state.draft.maxRetries, retryDelayMs: state.draft.retryDelayMs, retryBackoff: state.draft.retryBackoff, onError: state.draft.onError, seedMode: state.draft.seedMode, baseSeed: state.draft.baseSeed }
+    };
+    state.draft.starting = true;
+    renderCreate();
+    apiPost('/image-batches', body).then(function (res) {
+      if (!res || res.error || !res.projectId) throw new Error(apiError(res));
+      state.projectId = String(res.projectId);
+      state.snapshot = res.snapshot || null;
+      return state.snapshot ? Promise.resolve(state.snapshot) : pgImageBatchSnapshot(state.projectId);
+    }).then(function (snap) {
+      if (!snap) throw new Error(text('invalid'));
+      applySnapshot(snap);
+      state.draft.starting = false;
+      closeModal();
+      renderDashboard();
+      openEvents();
+    }).catch(function (e) {
+      state.draft.starting = false;
+      state.draft.error = e.message || text('invalid');
+      renderCreate();
+    });
+  }
   function normalizeSnapshot(raw) { var s = raw && raw.snapshot ? raw.snapshot : raw; if (!s || typeof s !== 'object' || !Array.isArray(s.prompts || s.items || [])) throw new Error(text('invalid')); if (!s.prompts) s.prompts = s.items; s.prompts = s.prompts.map(function (p, i) { p = Object.assign({}, p); p.id = String(p.id || ('p' + String(i + 1).padStart(4, '0'))); p.variants = Array.isArray(p.variants) ? p.variants : []; p.quantity = safeNum(p.quantity, p.variants.length || 1, 1, 100); p.variants = p.variants.map(function (v, n) { v = Object.assign({}, v); v.id = String(v.id || ('v' + String(n + 1).padStart(4, '0'))); v.status = VARIANT_STATUS.indexOf(v.status) >= 0 ? v.status : 'pending'; return v; }); return p; }); s.status = STATUS.indexOf(s.status) >= 0 ? s.status : String(s.status || 'draft'); s.stats = s.stats && typeof s.stats === 'object' ? s.stats : {}; s.schedulerCursor = s.schedulerCursor || null; return s; }
   function applySnapshot(raw) { try { state.snapshot = normalizeSnapshot(raw); if (state.snapshot.projectId) state.projectId = String(state.snapshot.projectId); } catch (e) { notify(e.message || text('invalid'), 'error'); } }
   function pgImageBatchSnapshot(id) { return apiGet('/image-batches/' + encodeURIComponent(id)).then(function (res) { if (!res || res.error) throw new Error(apiError(res)); var s = normalizeSnapshot(res); applySnapshot(s); return s; }); }
@@ -347,12 +416,17 @@
   function projectStatus(s) { return s && s.status ? s.status : 'draft'; }
   function progress(s) { var st = s && s.stats || {}, done = Number(st.completed != null ? st.completed : st.succeeded != null ? st.succeeded : 0), total = Number(st.total != null ? st.total : 0); if (!total && s && s.prompts) total = s.prompts.reduce(function (n, p) { return n + Number(p.quantity || (p.variants || []).length || 0); }, 0); return { done: isFinite(done) ? done : 0, total: isFinite(total) ? total : 0 }; }
   function assetUrl(p, v) { var a = v && (v.asset || v.assets && v.assets[0]); var id = v && (v.assetId || v.id && a && a.id); if (id && state.projectId) return '/api/image-batches/' + encodeURIComponent(state.projectId) + '/assets/' + encodeURIComponent(id); var u = a && (a.url || a.path); if (typeof u === 'string' && (/^\/api\//.test(u) || /^https?:\/\//.test(u))) return u; return ''; }
+  function rememberEvent(d) {
+    if (!d || !d.type) return;
+    state.events.push({ type: String(d.type), at: d.at || new Date().toISOString(), promptId: d.promptId || '', variantId: d.variantId || '', data: d.data == null ? '' : String(typeof d.data === 'string' ? d.data : JSON.stringify(d.data)) });
+    if (state.events.length > 100) state.events.shift();
+  }
   function viewerItem(s) { var ps = s && s.prompts || []; if (!ps.length) return null; state.viewer.prompt = Math.max(0, Math.min(state.viewer.prompt, ps.length - 1)); var p = ps[state.viewer.prompt]; var vs = p.variants || []; state.viewer.variant = Math.max(0, Math.min(state.viewer.variant, Math.max(0, vs.length - 1))); return { p: p, v: vs[state.viewer.variant] || null, pi: state.viewer.prompt, vi: state.viewer.variant, pn: ps.length, vn: vs.length }; }
-  function dashboardHtml(s) { var pr = progress(s), item = viewerItem(s), ps = s.prompts || []; var controls = projectStatus(s) === 'paused' ? button(text('resume'), 'pgImageBatchResume') : (projectStatus(s) === 'running' || projectStatus(s) === 'queued' ? button(text('pause'), 'pgImageBatchPause') : ''); if (projectStatus(s) === 'running' || projectStatus(s) === 'queued' || projectStatus(s) === 'paused') controls += button(text('stop'), 'pgImageBatchStop'); var th = ps.map(function (p, i) { return '<button type="button" class="pg-btn" onclick="pgImageBatchViewPrompt(' + i + ')">' + esc(p.title || p.id) + '</button>'; }).join(''); var img = item && item.v ? assetUrl(item.p, item.v) : ''; return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(s.displayName || s.projectId || text('title')) + '</span><button class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div><div class="pg-modal-body" style="max-height:78vh;overflow:auto"><div style="font-size:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>' + esc(text('status')) + ': <strong>' + esc(projectStatus(s)) + '</strong></span><span>' + esc(text('progress')) + ': ' + pr.done + ' / ' + pr.total + '</span><span>' + esc(text('directory')) + ': ' + esc(s.projectDir || s.directory || s.slug || '') + '</span></div><div style="display:flex;gap:8px;margin:10px 0">' + controls + button(text('refresh'), 'pgImageBatchRefresh') + '</div><div style="display:flex;gap:5px;overflow:auto;padding:4px 0">' + th + '</div><div style="border:1px solid var(--glass-border);min-height:220px;display:flex;align-items:center;justify-content:center;position:relative;margin-top:8px">' + (img ? '<img src="' + esc(img) + '" alt="batch result" style="max-width:100%;max-height:45vh;object-fit:contain">' : '<span style="opacity:.65">' + esc(text('noImage')) + '</span>') + '</div><div style="display:flex;justify-content:center;gap:12px;align-items:center;margin:8px 0"><button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(-1)">←</button><span>' + (item ? ('Prompt ' + (item.pi + 1) + ' / ' + item.pn + ' · Variant ' + (item.vi + 1) + ' / ' + Math.max(1, item.vn)) : '') + '</span><button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(1)">→</button></div>' + (item && item.p ? '<div style="font-size:12px;white-space:pre-wrap"><strong>' + esc(item.p.title || item.p.id) + '</strong><br>' + esc(item.p.finalPrompt || item.p.naturalPrompt || '') + (item.v ? '<br><span style="opacity:.7">' + esc(item.v.status || '') + (item.v.seed != null ? ' · seed ' + item.v.seed : '') + '</span>' + (item.v.status === 'failed' || item.v.status === 'interrupted' ? ' ' + button(text('retry'), 'pgImageBatchRetry', false) : '') : '') + '</div>' : '') + '</div>'; }
+  function dashboardHtml(s) { var pr = progress(s), item = viewerItem(s), ps = s.prompts || [], status = projectStatus(s), controls = status === 'paused' ? button(text('resume'), 'pgImageBatchResume') : (status === 'running' || status === 'queued' ? button(text('pause'), 'pgImageBatchPause') : ''); if (status === 'running' || status === 'queued' || status === 'paused') controls += button(text('stop'), 'pgImageBatchStop'); var th = ps.map(function (p, i) { return '<button type="button" class="pg-btn pg-batch-prompt-tab" onclick="pgImageBatchViewPrompt(' + i + ')">' + esc(p.title || p.id) + '</button>'; }).join(''); var img = item && item.v ? assetUrl(item.p, item.v) : ''; var lastError = (item && item.v && item.v.lastError) || s.lastError || ''; var eventRows = state.events.slice(-12).reverse().map(function (ev) { return '<div class="pg-batch-event-row"><span>' + esc(ev.type) + '</span><span>' + esc(ev.promptId || ev.variantId || '') + '</span><span>' + esc(ev.data || '') + '</span></div>'; }).join(''); return '<div class="pg-modal-header"><span class="pg-modal-title">' + esc(s.displayName || s.projectId || text('title')) + '</span><button type="button" class="pg-modal-close" onclick="pgImageBatchClose()">✕</button></div><div class="pg-modal-body pg-batch-modal-body" style="max-height:78vh;overflow:auto"><div class="pg-batch-dashboard-meta"><span>' + esc(text('status')) + ': <strong>' + esc(status) + '</strong></span><span>' + esc(text('progress')) + ': ' + pr.done + ' / ' + pr.total + '</span><span>' + esc(text('directory')) + ': ' + esc(s.projectDir || s.directory || s.slug || '') + '</span></div>' + (lastError ? '<div class="pg-batch-error pg-batch-error-box">' + esc(lastError) + '</div>' : '') + '<div class="pg-batch-dashboard-actions">' + controls + button(text('refresh'), 'pgImageBatchRefresh') + '</div><div class="pg-batch-prompt-tabs">' + th + '</div><div class="pg-batch-viewer">' + (img ? '<img src="' + esc(img) + '" alt="batch result">' : '<span>' + esc(text('noImage')) + '</span>') + '</div><div class="pg-batch-viewer-nav"><button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(-1)">←</button><span>' + (item ? ('Prompt ' + (item.pi + 1) + ' / ' + item.pn + ' · Variant ' + (item.vi + 1) + ' / ' + Math.max(1, item.vn)) : '') + '</span><button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(1)">→</button></div>' + (item && item.p ? '<div class="pg-batch-current-prompt"><strong>' + esc(item.p.title || item.p.id) + '</strong><br>' + esc(item.p.finalPrompt || item.p.naturalPrompt || '') + (item.v ? '<br><span>' + esc(item.v.status || '') + (item.v.seed != null ? ' · seed ' + item.v.seed : '') + '</span>' + (item.v.status === 'failed' || item.v.status === 'interrupted' ? ' ' + button(text('retry'), 'pgImageBatchRetry') : '') : '') + '</div>' : '') + '<details class="pg-batch-debug"><summary>Execution details (' + state.events.length + ' events)</summary><div class="pg-batch-event-list">' + (eventRows || '<span>No events received yet.</span>') + '</div></details></div>'; }
   function renderDashboard() { if (!state.snapshot) return; state.modal = true; modal(dashboardHtml(state.snapshot)); }
   function pgImageBatchViewPrompt(i) { if (!state.snapshot || i < 0 || i >= state.snapshot.prompts.length) return; state.viewer.prompt = i; state.viewer.variant = 0; renderDashboard(); }
   function pgImageBatchViewVariant(delta) { var item = viewerItem(state.snapshot); if (!item) return; var n = item.vi + delta; if (n < 0 || n >= item.vn) return; state.viewer.variant = n; renderDashboard(); }
-  function handleEvent(evt) { var raw = evt && evt.data; if (!raw) return; try { var d = JSON.parse(raw); var s = d.snapshot || d.project || (d.type === 'snapshot' && d.data) || (d.data && (d.data.snapshot || d.data.project)); if (s) applySnapshot(s); else if (d.prompts || d.status) applySnapshot(d); else if (d.type && state.projectId && !state.reconcileTimer) { state.reconcileTimer = setTimeout(function () { state.reconcileTimer = null; if (state.projectId) pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); }).catch(function () {}); }, 250); } if (state.snapshot && state.modal) renderDashboard(); } catch (e) {} }
+  function handleEvent(evt) { var raw = evt && evt.data; if (!raw) return; try { var d = JSON.parse(raw); rememberEvent(d); var s = d.snapshot || d.project || (d.type === 'snapshot' && d.data) || (d.data && (d.data.snapshot || d.data.project)); if (s) applySnapshot(s); else if (d.prompts || d.status) applySnapshot(d); else if (d.type && state.projectId && !state.reconcileTimer) { state.reconcileTimer = setTimeout(function () { state.reconcileTimer = null; if (state.projectId) pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); }).catch(function () {}); }, 250); } if (state.snapshot && state.modal) renderDashboard(); } catch (e) { state.events.push({ type: 'client-parse-error', at: new Date().toISOString(), data: e.message || String(e) }); } }
   function pgImageBatchResume() { control('resume'); }
   function pgImageBatchPause() { control('pause'); }
   function pgImageBatchStop() { control('stop', { mode: 'after-current' }); }
@@ -361,9 +435,9 @@
   function openEvents() { if (!state.projectId || typeof EventSource === 'undefined') return; if (state.source) { try { state.source.close(); } catch (e) {} } var id = state.projectId, es = new EventSource('/api/image-batches/' + encodeURIComponent(id) + '/events'); state.source = es; es.onmessage = handleEvent; ['project-status','planning-started','planning-completed','transform-completed','variant-started','variant-retry-wait','variant-completed','variant-failed','variant-interrupted','project-reconciled','project-completed','project-error'].forEach(function (name) { es.addEventListener(name, handleEvent); }); es.onerror = function () { if (state.source !== es) return; try { es.close(); } catch (e) {} state.source = null; if (!state.reconnecting) { state.reconnecting = true; clearTimeout(state.reconnectTimer); state.reconnectTimer = setTimeout(function () { state.reconnecting = false; if (state.projectId) pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); openEvents(); }).catch(function () { openEvents(); }); }, 1500); } }; }
   function pgImageBatchOnEnter() { if (!state.projectId) return; pgImageBatchSnapshot(state.projectId).then(function () { if (state.modal) renderDashboard(); openEvents(); }).catch(function () {}); }
   function pgImageBatchClose() { pgImageBatchCleanup(); closeModal(); }
-  function pgOpenImageBatch() { if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1) { notify(text('batchSingleWindow'), 'warning'); return; } state.modal = true; state.stage = 1; state.plan = null; state.transform = null; state.draft.displayName = ''; state.draft.requirements = ''; readDraft(); renderCreate(); }
-  function pgImageBatchList() { apiGet('/image-batches').then(function (res) { if (!res || res.error || !Array.isArray(res.projects || res.items || res)) throw new Error(apiError(res)); var list = res.projects || res.items || res; modal(stageHeader() + '<div class="pg-modal-body"><h4>' + esc(text('projects')) + '</h4>' + list.map(function (p) { var id = p.projectId || p.id; return '<button type="button" class="pg-btn" style="display:block;width:100%;text-align:left;margin:5px 0" onclick="pgImageBatchOpenProject(\'' + String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">' + esc(p.displayName || id) + ' · ' + esc(p.status || '') + '</button>'; }).join('') + '<div style="margin-top:8px">' + button(text('cancel'), 'pgImageBatchClose') + '</div></div>'); }).catch(function (e) { notify(e.message || text('invalid'), 'error'); }); }
+  function pgOpenImageBatch() { if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1) { notify(text('batchSingleWindow'), 'warning'); return; } state.modal = true; state.stage = 1; state.plan = null; state.transform = null; state.events = []; state.draft.displayName = ''; state.draft.requirements = ''; state.draft.error = ''; state.draft.starting = false; readDraft(); renderCreate(); }
+  function pgImageBatchList() { apiGet('/image-batches').then(function (res) { if (!res || res.error || !Array.isArray(res.projects || res.items || res)) throw new Error(apiError(res)); var list = res.projects || res.items || res; modal(stageHeader(false) + '<div class="pg-modal-body"><h4>' + esc(text('projects')) + '</h4>' + list.map(function (p) { var id = p.projectId || p.id; return '<button type="button" class="pg-btn" style="display:block;width:100%;text-align:left;margin:5px 0" onclick="pgImageBatchOpenProject(\'' + String(id).replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">' + esc(p.displayName || id) + ' · ' + esc(p.status || '') + '</button>'; }).join('') + '<div style="margin-top:8px">' + button(text('cancel'), 'pgImageBatchClose') + '</div></div>'); }).catch(function (e) { notify(e.message || text('invalid'), 'error'); }); }
   function pgImageBatchOpenProject(id) { state.projectId = String(id); state.modal = true; pgImageBatchSnapshot(state.projectId).then(function () { renderDashboard(); openEvents(); }).catch(function (e) { notify(e.message || text('invalid'), 'error'); }); }
 
-  root.pgOpenImageBatch = pgOpenImageBatch; root.pgImageBatchOpen = pgOpenImageBatch; root.pgImageBatchPlan = pgImageBatchPlan; root.pgImageBatchTransform = pgImageBatchTransform; root.pgImageBatchStage = pgImageBatchStage; root.pgImageBatchEditItem = pgImageBatchEditItem; root.pgImageBatchMove = pgImageBatchMove; root.pgImageBatchDelete = pgImageBatchDelete; root.pgImageBatchAddItem = pgImageBatchAddItem; root.pgImageBatchStart = pgImageBatchStart; root.pgImageBatchClose = pgImageBatchClose; root.pgImageBatchSnapshot = pgImageBatchSnapshot; root.pgImageBatchRefresh = pgImageBatchRefresh; root.pgImageBatchPause = pgImageBatchPause; root.pgImageBatchResume = pgImageBatchResume; root.pgImageBatchStop = pgImageBatchStop; root.pgImageBatchRetry = pgImageBatchRetry; root.pgImageBatchViewPrompt = pgImageBatchViewPrompt; root.pgImageBatchViewVariant = pgImageBatchViewVariant; root.pgImageBatchCleanup = pgImageBatchCleanup; root.pgImageBatchOnEnter = pgImageBatchOnEnter; root.pgImageBatchList = pgImageBatchList; root.pgImageBatchOpenProject = pgImageBatchOpenProject;
+  root.pgOpenImageBatch = pgOpenImageBatch; root.pgImageBatchOpen = pgOpenImageBatch; root.pgImageBatchPlan = pgImageBatchPlan; root.pgImageBatchTransform = pgImageBatchTransform; root.pgImageBatchStage = pgImageBatchStage; root.pgImageBatchEditItem = pgImageBatchEditItem; root.pgImageBatchMove = pgImageBatchMove; root.pgImageBatchDelete = pgImageBatchDelete; root.pgImageBatchAddItem = pgImageBatchAddItem; root.pgImageBatchStart = pgImageBatchStart; root.pgImageBatchClose = pgImageBatchClose; root.pgImageBatchRestoreCreateModal = restoreCreateModal; root.pgImageBatchSnapshot = pgImageBatchSnapshot; root.pgImageBatchRefresh = pgImageBatchRefresh; root.pgImageBatchPause = pgImageBatchPause; root.pgImageBatchResume = pgImageBatchResume; root.pgImageBatchStop = pgImageBatchStop; root.pgImageBatchRetry = pgImageBatchRetry; root.pgImageBatchViewPrompt = pgImageBatchViewPrompt; root.pgImageBatchViewVariant = pgImageBatchViewVariant; root.pgImageBatchCleanup = pgImageBatchCleanup; root.pgImageBatchOnEnter = pgImageBatchOnEnter; root.pgImageBatchList = pgImageBatchList; root.pgImageBatchOpenProject = pgImageBatchOpenProject;
 })(typeof window !== 'undefined' ? window : this);
