@@ -613,7 +613,16 @@ function pgImageRenderCanvas(i) {
     if (phase === 'generating') html += '<div class="pg-image-loading-overlay"><span class="pg-image-ring"></span><span>' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
     html += '</div>';
   } else if (phase === 'generating') html += '<div class="pg-image-empty pg-image-generating"><span class="pg-image-ring"></span><strong>' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
-  else if (phase === 'error') html += '<div class="pg-image-empty pg-image-error">' + pgEscapeHtml(st.error || pgT('pgError')) + '</div>';
+  else if (phase === 'error') {
+    var errTxt = st.error || pgT('pgError');
+    html += '<div class="pg-image-error-card">' +
+      '<div class="pg-image-error-title">⚠️ ' + pgEscapeHtml(pgT('pgImgGenerationError')) + '</div>' +
+      '<div class="pg-image-error-detail">' + pgEscapeHtml(errTxt) + '</div>' +
+      '<div class="pg-image-error-actions">' +
+        '<button class="pg-btn" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgRetry')) + '</button>' +
+      '</div>' +
+    '</div>';
+  }
   else if (phase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
   else html += '<div class="pg-image-empty"><div class="pg-empty-icon">✦</div><div>' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
   if (phase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
@@ -632,11 +641,20 @@ function pgImageRenderCanvas(i) {
       metaEl.title = metaText;
     }
     if (navEl) {
-      navEl.textContent = (idxVal + 1) + ' / ' + totVal;
+      if (totVal > 0) {
+        navEl.style.display = 'inline-flex';
+        navEl.textContent = (idxVal + 1) + ' / ' + totVal;
+      } else {
+        navEl.style.display = 'none';
+        navEl.textContent = '';
+      }
     }
   } else {
     if (metaEl) metaEl.textContent = '';
-    if (navEl) navEl.textContent = '';
+    if (navEl) {
+      navEl.style.display = 'none';
+      navEl.textContent = '';
+    }
   }
   if (phase === 'generating') { if (st.timer) clearInterval(st.timer); st.timer = setInterval(function () { var el = document.getElementById('pg-image-elapsed-' + i); if (!el || st.phase !== 'generating') { clearInterval(st.timer); st.timer = null; return; } var started = st.generations.length ? st.generations[st.generations.length - 1].createdAt : Date.now(); el.textContent = Math.floor((Date.now() - started) / 1000) + 's'; }, 1000); }
 }

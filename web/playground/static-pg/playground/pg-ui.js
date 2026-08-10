@@ -460,8 +460,9 @@ function pgRenderSidebar() {
   var modelSel = '<button class="pg-btn pg-model-btn"' + (customMode ? ' disabled' : '') + ' onclick="pgOpenModelPicker(pgWin().config.model, function(v){ pgOnModelChange(v); pgRenderSidebar(); }, ' + JSON.stringify(modelPickerOpts).replace(/"/g, '&quot;') + ')" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(modelLabel) + ' <span style="float:right;opacity:0.5">▼</span></button>';
   if (pgState.mode === 'image') {
     var protos = pgImageProtocols(), protoCur = cfg.imgProtocolFilter || 'all';
+    var protoLabels = { all: pgT('pgImgProtocolAll'), gpt: 'GPT', xai: 'Xai', modelscope: 'ModelScope', comfyui: 'ComfyUI' };
     var protoOptsList = protos.map(function(p) {
-      return { value: p, label: p === 'all' ? pgT('pgImgProtocolAll') : p };
+      return { value: p, label: protoLabels[p] || p };
     });
     var protoSelHtml = pgRenderCustomSelect('pg-proto-wrap', 'pg-proto-sel', protoOptsList, protoCur, 'pgOnProtocolFilter(this.value)', 'flex:1;min-width:0');
 

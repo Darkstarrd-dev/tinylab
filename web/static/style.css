@@ -1392,15 +1392,26 @@ tbody tr:last-child td{border-bottom:none}
   background:var(--modal-bg);
   box-shadow:0 1px 0 var(--modal-bg);
 }
-.info-modal-monitor .info-json,
-.info-modal-monitor .info-json-markdown,
-.info-modal-monitor .info-json-markdown pre,
-.info-modal-monitor .info-field-preview{
-  overflow:visible;
-  max-width:100%;
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  word-break:break-word;
+.info-modal-body .info-json,
+.info-modal-body .info-json-markdown,
+.info-modal-body .info-json-markdown pre,
+.info-modal-body .info-field-preview,
+.info-modal-body .info-section-raw-content,
+.info-modal-body .info-field,
+.info-modal-body .info-field-content,
+.info-modal-body pre,
+.info-modal-body code,
+.pg-modal .info-json,
+.pg-modal .info-json-markdown,
+.pg-modal .info-json-markdown pre,
+.pg-modal .info-field-preview,
+.pg-modal .info-section-raw-content {
+  overflow: visible;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
 }
 
 @media (max-width:600px){
