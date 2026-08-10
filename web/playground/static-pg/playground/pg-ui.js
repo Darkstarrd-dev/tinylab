@@ -271,6 +271,7 @@ function pgRenderPanes() {
           '<span class="pg-pane-typing" style="display:none"></span>' +
         '</span>' +
         '<span class="pg-pane-model">' + modelLabel + '</span>' +
+        (pgState.mode === 'image' ? '<span class="pg-pane-img-meta" id="pg-pane-img-meta-' + i + '"></span><span class="pg-pane-img-nav" id="pg-pane-img-nav-' + i + '"></span>' : '') +
         (pgState.mode !== 'search' ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
         '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' +
       '</div>' +
@@ -459,12 +460,20 @@ function pgRenderSidebar() {
   var modelSel = '<button class="pg-btn pg-model-btn"' + (customMode ? ' disabled' : '') + ' onclick="pgOpenModelPicker(pgWin().config.model, function(v){ pgOnModelChange(v); pgRenderSidebar(); }, ' + JSON.stringify(modelPickerOpts).replace(/"/g, '&quot;') + ')" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(modelLabel) + ' <span style="float:right;opacity:0.5">▼</span></button>';
   if (pgState.mode === 'image') {
     var protos = pgImageProtocols(), protoCur = cfg.imgProtocolFilter || 'all';
-    var protoOpts = protos.map(function(p) { return '<option value="' + pgEscapeAttr(p) + '"' + (protoCur === p ? ' selected' : '') + '>' + pgEscapeHtml(p === 'all' ? pgT('pgImgProtocolAll') : p) + '</option>'; }).join('');
-    var protoSel = '<select class="pg-param-select" onchange="pgOnProtocolFilter(this.value)"' + (customMode ? ' disabled' : '') + ' style="flex:1">' + protoOpts + '</select>';
+    var protoOptsList = protos.map(function(p) {
+      return { value: p, label: p === 'all' ? pgT('pgImgProtocolAll') : p };
+    });
+    var protoSelHtml = pgRenderCustomSelect('pg-proto-wrap', 'pg-proto-sel', protoOptsList, protoCur, 'pgOnProtocolFilter(this.value)', 'flex:1;min-width:0');
+
     var mCur = cfg.model || '', availModels = (pgState.models || []).slice().filter(function(m) { return m.kind === 'image'; });
     if (protoCur && protoCur !== 'all') availModels = availModels.filter(function(m) { return (m.imgProtocol || 'gpt') === protoCur; });
-    var mOpts = availModels.map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (mCur === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('');
-    modelSel = '<div style="display:flex;gap:6px;align-items:stretch"><div style="flex:1;min-width:0">' + protoSel + '</div><div style="flex:3;min-width:0"><select class="pg-param-select" onchange="pgOnModelChange(this.value); pgOnModelSelectBackfill(this.value); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar()"' + (customMode ? ' disabled' : '') + ' style="width:100%"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + mOpts + '</select></div></div>';
+    var modelOptsList = [{ value: '', label: pgT('pgSelectModel') }].concat(
+      availModels.map(function(m) { return { value: m.id, label: m.id }; })
+    );
+    var modelSelHtml = pgRenderCustomSelect('pg-imgmodel-wrap', 'pg-imgmodel-sel', modelOptsList, mCur, 'pgOnModelChange(this.value); pgOnModelSelectBackfill(this.value); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar()', 'flex:1;min-width:0');
+
+    modelSel = '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgProtocol')) + '</label>' + protoSelHtml + '</div>' +
+               '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgModel')) + '</label>' + modelSelHtml + '</div>';
   }
 
   // --- Parameters ---
@@ -615,6 +624,13 @@ function pgRenderSidebar() {
 
   if (pgState.mode === 'image') {
     var effProto = pgEffectiveProtocol(cfg);
+    var helperModels = (pgState.models || []).filter(function(m) { return m.kind === 'text'; });
+    var helperOptsList = [{ value: '', label: pgT('pgSelectModel') }].concat(
+      helperModels.map(function(m) { return { value: m.id, label: m.id }; })
+    );
+    var helperSelHtml = pgRenderCustomSelect('pg-prompt-helper-wrap', 'pg-prompt-helper-sel', helperOptsList, cfg.imgPromptModel || '', 'pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()', 'flex:1;min-width:0');
+    var promptHelperRow = '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' + helperSelHtml + '</div>';
+
     if (effProto === 'comfyui') {
       // ComfyUI protocol: connection panel + dynamic workflow params replace
       // the model selector (models come from ComfyUI, not /api/models).
@@ -622,8 +638,7 @@ function pgRenderSidebar() {
       side.innerHTML =
         winbar + comfyPanel +
         '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' +
-          '<label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' +
-          '<select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select>' +
+          promptHelperRow +
           '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -632,7 +647,7 @@ function pgRenderSidebar() {
       side.innerHTML =
         winbar +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
-        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label><select class="pg-param-select" onchange="pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()"><option value="">' + pgEscapeHtml(pgT('pgSelectModel')) + '</option>' + (pgState.models || []).filter(function(m) { return m.kind === 'text'; }).map(function(m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (cfg.imgPromptModel === m.id ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('') + '</select><div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
+        '<div class="pg-panel pg-image-actions-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgManualCanvas')) + '</div>' + promptHelperRow + '<div class="pg-btn-row"><button class="pg-btn active" onclick="pgUserSend()">' + pgEscapeHtml(pgT('pgGenerate')) + '</button><button class="pg-btn" onclick="pgOpenImageInspire()">' + pgEscapeHtml(pgT('pgInspire')) + '</button>' + imageBatchBtn + '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button></div></div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -712,20 +727,55 @@ function pgImageProtocols() {
   return ['all', 'gpt', 'xai', 'modelscope', 'comfyui'];
 }
 
-function pgImgParamSelect(key, labelKey, val, options) {
+function pgRenderCustomSelect(wrapperId, selectId, options, selectedValue, onChangeCode, extraStyle) {
+  if (typeof renderCustomSelectHtml === 'function') {
+    return renderCustomSelectHtml(wrapperId, selectId, options, selectedValue, onChangeCode, extraStyle || 'flex:1;min-width:0');
+  }
   var opts = options.map(function(o) {
-    return '<option value="' + pgEscapeAttr(o.value) + '"' + (val === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
+    var val = typeof o === 'object' ? o.value : o;
+    var label = typeof o === 'object' ? o.label : o;
+    var isSel = String(val) === String(selectedValue);
+    return '<option value="' + pgEscapeAttr(val) + '"' + (isSel ? ' selected' : '') + '>' + pgEscapeHtml(label) + '</option>';
   }).join('');
+  return '<select id="' + selectId + '" class="pg-param-select" onchange="' + onChangeCode + '" style="' + (extraStyle || 'flex:1;min-width:0') + '">' + opts + '</select>';
+}
+
+function pgStepParam(key, delta, min, max, isFloat) {
+  var w = pgWin();
+  if (!w) return;
+  var cur = isFloat ? (parseFloat(w.config[key]) || 0) : (parseInt(w.config[key], 10) || 0);
+  var next = cur + delta;
+  if (min != null && next < min) next = min;
+  if (max != null && next > max) next = max;
+  if (isFloat) next = Math.round(next * 100) / 100;
+  w.config[key] = next;
+  pgSave();
+  pgRenderSidebar();
+}
+
+function pgImgParamSelect(key, labelKey, val, options) {
+  var wrapId = 'pg-selwrap-' + key;
+  var selId = 'pg-sel-' + key;
+  var opts = options.map(function(o) {
+    return { value: o.value, label: o.label };
+  });
   return '<div class="pg-param-row">' +
     '<label>' + pgEscapeHtml(pgT(labelKey)) + '</label>' +
-    '<select onchange="pgOnParam(\'' + key + '\', this.value)">' + opts + '</select>' +
+    pgRenderCustomSelect(wrapId, selId, opts, val || '', 'pgOnParam(\'' + key + '\', this.value)', 'flex:1;min-width:0') +
   '</div>';
 }
 
-function pgImgParamNumber(key, labelKey, val, min, max, step) {
+function pgImgParamNumber(key, labelKey, val, min, max, step, isFloat) {
+  var v = val != null ? val : (min || 0);
+  var stp = step || 1;
+  var flt = !!isFloat;
   return '<div class="pg-param-row">' +
     '<label>' + pgEscapeHtml(pgT(labelKey)) + '</label>' +
-    '<input type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" onchange="pgOnParam(\'' + key + '\', parseInt(this.value,10)||1)" style="flex:0 0 80px">' +
+    '<div class="number-stepper" style="flex:1;min-width:0">' +
+      '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepParam(\'' + key + '\', -' + stp + ', ' + min + ', ' + max + ', ' + flt + ')">-</button>' +
+      '<input type="number" class="stepper-input" min="' + min + '" max="' + max + '" step="' + stp + '" value="' + v + '" onchange="pgOnParam(\'' + key + '\', ' + (flt ? 'parseFloat(this.value)||0' : 'parseInt(this.value,10)||0') + ')">' +
+      '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepParam(\'' + key + '\', ' + stp + ', ' + min + ', ' + max + ', ' + flt + ')">+</button>' +
+    '</div>' +
   '</div>';
 }
 
@@ -762,19 +812,18 @@ function pgImgParamSelectWithEdit(key, proto, modelId, cfg, builtinOpts) {
   // Sentinel '__custom' — selecting it reveals the custom input without
   // disturbing any saved list entry the user may have picked before.
   arr.push({value: '__custom', label: pgT('pgImgCustomSize') + '...'});
-  var opts = arr.map(function(o) {
-    return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg[key] === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
-  }).join('');
+  var wrapId = 'pg-selwrap-size-' + proto;
+  var selId = 'pg-sel-size-' + proto;
   var labelBtn = '<button type="button" class="pg-param-label-btn" onclick="pgOpenImgSizesModal()" data-tooltip="' + pgEscapeAttr(pgT('pgImgEditSizesTitle')) + '">' + sel + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.65;margin-left:3px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>';
   var html = '<div class="pg-param-row">' +
     labelBtn +
-    '<select onchange="pgOnImgSizeSelect(this.value)">' + opts + '</select>' +
+    pgRenderCustomSelect(wrapId, selId, arr, cfg[key] || '', 'pgOnImgSizeSelect(this.value)', 'flex:1;min-width:0') +
   '</div>';
   var isCustom = cfg[key] && cfg[key] !== '__custom' && !pgImgListContains(sizeOpts, cfg[key]);
   var showCustom = (cfg[key] === '__custom') || isCustom;
   html += '<div class="pg-param-row pg-img-custom-row"' + (showCustom ? '' : ' style="display:none"') + '>' +
     '<label>' + pgEscapeHtml(pgT('pgImgCustomSize')) + '</label>' +
-    '<input type="text" value="' + pgEscapeAttr(isCustom ? cfg[key] : '') + '" placeholder="' + pgEscapeAttr(pgT('pgImgCustomSizePlaceholder')) + '" oninput="pgOnParam(\'' + key + '\', this.value)" style="flex:0 0 120px">' +
+    '<input type="text" value="' + pgEscapeAttr(isCustom ? cfg[key] : '') + '" placeholder="' + pgEscapeAttr(pgT('pgImgCustomSizePlaceholder')) + '" oninput="pgOnParam(\'' + key + '\', this.value)" style="flex:1">' +
   '</div>';
   return html;
 }
@@ -833,7 +882,11 @@ function pgRenderImageParams(cfg, proto) {
     // output_compression (shown only when output_format is set)
     html += '<div class="pg-param-row pg-img-output-compression-row"' + (cfg.imgOutputFormat && cfg.imgOutputFormat !== 'png' ? '' : ' style="display:none"') + '>' +
       '<label>' + pgEscapeHtml(pgT('pgImgOutputCompression')) + '</label>' +
-      '<input type="number" min="0" max="100" step="1" value="' + (cfg.imgOutputCompression || 0) + '" onchange="pgOnParam(\'imgOutputCompression\', parseInt(this.value,10)||0)" style="flex:0 0 80px">' +
+      '<div class="number-stepper" style="flex:1;min-width:0">' +
+        '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepParam(\'imgOutputCompression\', -1, 0, 100, false)">-</button>' +
+        '<input type="number" class="stepper-input" min="0" max="100" step="1" value="' + (cfg.imgOutputCompression || 0) + '" onchange="pgOnParam(\'imgOutputCompression\', parseInt(this.value,10)||0)">' +
+        '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepParam(\'imgOutputCompression\', 1, 0, 100, false)">+</button>' +
+      '</div>' +
     '</div>';
     // user
     html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgUser')) + '</label>' +
@@ -868,9 +921,9 @@ function pgRenderImageParams(cfg, proto) {
       {value: '768x1024', label: '768x1024'},
     ]);
     html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgNegativePrompt')) + '</label><input type="text" value="' + pgEscapeAttr(cfg.imgNegativePrompt || '') + '" oninput="pgOnParam(\'imgNegativePrompt\', this.value)" style="flex:1"></div>';
-    html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgSteps')) + '</label><input type="number" min="0" max="100" step="1" value="' + (cfg.imgSteps || 0) + '" onchange="pgOnParam(\'imgSteps\', parseInt(this.value,10)||0)" style="flex:0 0 80px"></div>';
-    html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgGuidance')) + '</label><input type="number" min="0" max="20" step="0.5" value="' + (cfg.imgGuidance || 0) + '" oninput="pgOnParam(\'imgGuidance\', parseFloat(this.value)||0)" style="flex:0 0 80px"></div>';
-    html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgImgSeed')) + '</label><input type="number" min="0" max="999999" step="1" value="' + (cfg.imgSeed || 0) + '" onchange="pgOnParam(\'imgSeed\', parseInt(this.value,10)||0)" style="flex:0 0 80px"></div>';
+    html += pgImgParamNumber('imgSteps', 'pgImgSteps', cfg.imgSteps || 0, 0, 100, 1, false);
+    html += pgImgParamNumber('imgGuidance', 'pgImgGuidance', cfg.imgGuidance || 0, 0, 20, 0.5, true);
+    html += pgImgParamNumber('imgSeed', 'pgImgSeed', cfg.imgSeed || 0, 0, 999999, 1, false);
   }
   html += '</div>';
   return html;

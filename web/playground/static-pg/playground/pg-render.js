@@ -594,8 +594,22 @@ function pgImageRenderCanvas(i) {
   if (!box || !st) return;
   var entry = pgImageCurrentEntry(st), g = entry && entry.generation, asset = entry && entry.asset;
   var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
+  var flat = pgImageFlatAssets(st);
   if (asset && asset.url) {
-    html += '<div class="pg-image-stage"><img class="pg-image-result" src="' + pgEscapeHtml(asset.url) + '" alt="' + pgEscapeAttr(g.prompt || 'Generated image') + '" onclick="pgShowImageModal(\'' + pgEscapeAttr(asset.url) + '\',\'' + pgEscapeAttr(asset.savedPath || '') + '\',\'' + pgEscapeAttr(asset.savedFilename || '') + '\')">';
+    var index = flat.indexOf(entry), total = flat.length;
+    html += '<div class="pg-image-stage">';
+    html += '<img class="pg-image-result" src="' + pgEscapeHtml(asset.url) + '" alt="' + pgEscapeAttr(g.prompt || 'Generated image') + '" onclick="pgShowImageModal(\'' + pgEscapeAttr(asset.url) + '\',\'' + pgEscapeAttr(asset.savedPath || '') + '\',\'' + pgEscapeAttr(asset.savedFilename || '') + '\')">';
+    if (total > 1) {
+      html += '<button class="pg-image-nav-btn pg-image-nav-prev" onclick="pgImageSelectAsset(' + i + ',' + Math.max(0, index - 1) + ')" ' + (index <= 0 ? 'disabled' : '') + '>‹</button>';
+      html += '<button class="pg-image-nav-btn pg-image-nav-next" onclick="pgImageSelectAsset(' + i + ',' + Math.min(total - 1, index + 1) + ')" ' + (index >= total - 1 ? 'disabled' : '') + '>›</button>';
+    }
+    html += '<div class="pg-image-actions">';
+    html += '<button class="pg-btn" onclick="pgImageShowDetails(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgImagePromptParameters')) + '</button>';
+    html += '<button class="pg-btn" onclick="pgCopyImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgCopy')) + '</button>';
+    html += '<button class="pg-btn" onclick="pgSaveImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgSave')) + '</button>';
+    html += '<button class="pg-btn" onclick="pgImageRegenerate(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button>';
+    html += '<button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button>';
+    html += '</div>';
     if (phase === 'generating') html += '<div class="pg-image-loading-overlay"><span class="pg-image-ring"></span><span>' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
     html += '</div>';
   } else if (phase === 'generating') html += '<div class="pg-image-empty pg-image-generating"><span class="pg-image-ring"></span><strong>' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
@@ -603,14 +617,27 @@ function pgImageRenderCanvas(i) {
   else if (phase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
   else html += '<div class="pg-image-empty"><div class="pg-empty-icon">✦</div><div>' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
   if (phase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
-  var flat = pgImageFlatAssets(st);
-  if (entry && asset && asset.url) {
-    var index = flat.indexOf(entry), total = flat.length;
-    html += '<div class="pg-image-history-nav"><button class="pg-btn" onclick="pgImageSelectAsset(' + i + ',' + Math.max(0, index - 1) + ')" ' + (index <= 0 ? 'disabled' : '') + '>‹</button><span>' + (index + 1) + ' / ' + total + '</span><button class="pg-btn" onclick="pgImageSelectAsset(' + i + ',' + Math.min(total - 1, index + 1) + ')" ' + (index >= total - 1 ? 'disabled' : '') + '>›</button></div>';
-    html += '<div class="pg-image-footer"><span>' + pgEscapeHtml((asset.width && asset.height) ? asset.width + ' × ' + asset.height : '—') + '</span><span>' + pgEscapeHtml(asset.mime || 'image') + '</span><span>' + pgEscapeHtml(asset.savedPath || '') + '</span></div>';
-    html += '<div class="pg-image-actions"><button class="pg-btn" onclick="pgImageShowDetails(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgImagePromptParameters')) + '</button><button class="pg-btn" onclick="pgCopyImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgCopy')) + '</button><button class="pg-btn" onclick="pgSaveImage(\'' + pgEscapeAttr(asset.url) + '\',this)">' + pgEscapeHtml(pgT('pgSave')) + '</button><button class="pg-btn" onclick="pgImageRegenerate(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button><button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button></div>';
-  }
   html += '</div>'; box.innerHTML = html;
+  var metaEl = document.getElementById('pg-pane-img-meta-' + i);
+  var navEl = document.getElementById('pg-pane-img-nav-' + i);
+  if (entry && asset && asset.url) {
+    var idxVal = flat.indexOf(entry), totVal = flat.length;
+    var parts = [];
+    if (asset.width && asset.height) parts.push(asset.width + ' × ' + asset.height);
+    if (asset.mime) parts.push(asset.mime);
+    if (asset.savedPath) parts.push(asset.savedPath);
+    var metaText = parts.length ? parts.join(' · ') : '';
+    if (metaEl) {
+      metaEl.textContent = metaText ? (' — ' + metaText) : '';
+      metaEl.title = metaText;
+    }
+    if (navEl) {
+      navEl.textContent = (idxVal + 1) + ' / ' + totVal;
+    }
+  } else {
+    if (metaEl) metaEl.textContent = '';
+    if (navEl) navEl.textContent = '';
+  }
   if (phase === 'generating') { if (st.timer) clearInterval(st.timer); st.timer = setInterval(function () { var el = document.getElementById('pg-image-elapsed-' + i); if (!el || st.phase !== 'generating') { clearInterval(st.timer); st.timer = null; return; } var started = st.generations.length ? st.generations[st.generations.length - 1].createdAt : Date.now(); el.textContent = Math.floor((Date.now() - started) / 1000) + 's'; }, 1000); }
 }
 function pgImageSelectAsset(i, index) { var st = pgImageState(pgWinAt(i)), flat = pgImageFlatAssets(st); if (!flat.length || index < 0 || index >= flat.length) return; st.activeAssetIndex = index; pgImageRenderCanvas(i); }
