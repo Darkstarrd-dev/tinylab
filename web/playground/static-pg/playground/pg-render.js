@@ -592,11 +592,12 @@ function pgImageShowDetails(i, gi) {
 function pgImageRenderCanvas(i) {
   var w = pgWinAt(i), box = document.getElementById('pg-messages-' + i), st = w && pgImageState(w);
   if (!box || !st) return;
-  var entry = pgImageCurrentEntry(st), g = entry && entry.generation, asset = entry && entry.asset;
-  var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
   var flat = pgImageFlatAssets(st);
+  var index = (st.activeAssetIndex >= 0 && st.activeAssetIndex < flat.length) ? st.activeAssetIndex : (flat.length ? flat.length - 1 : 0);
+  var entry = flat[index], g = entry && entry.generation, asset = entry && entry.asset;
+  var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
   if (asset && asset.url) {
-    var index = flat.indexOf(entry), total = flat.length;
+    var total = flat.length;
     html += '<div class="pg-image-stage">';
     html += '<img class="pg-image-result" src="' + pgEscapeHtml(asset.url) + '" alt="' + pgEscapeAttr(g.prompt || 'Generated image') + '" onclick="pgShowImageModal(\'' + pgEscapeAttr(asset.url) + '\',\'' + pgEscapeAttr(asset.savedPath || '') + '\',\'' + pgEscapeAttr(asset.savedFilename || '') + '\')">';
     if (total > 1) {
@@ -610,10 +611,48 @@ function pgImageRenderCanvas(i) {
     html += '<button class="pg-btn" onclick="pgImageRegenerate(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button>';
     html += '<button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button>';
     html += '</div>';
-    if (phase === 'generating') html += '<div class="pg-image-loading-overlay"><span class="pg-image-ring"></span><span>' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
+    var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
+      '<div class="wheel"></div>' +
+      '<div class="hamster">' +
+        '<div class="hamster__body">' +
+          '<div class="hamster__head">' +
+            '<div class="hamster__ear"></div>' +
+            '<div class="hamster__eye"></div>' +
+            '<div class="hamster__nose"></div>' +
+          '</div>' +
+          '<div class="hamster__limb hamster__limb--fr"></div>' +
+          '<div class="hamster__limb hamster__limb--fl"></div>' +
+          '<div class="hamster__limb hamster__limb--br"></div>' +
+          '<div class="hamster__limb hamster__limb--bl"></div>' +
+          '<div class="hamster__tail"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="spoke"></div>' +
+    '</div>';
+
+    if (phase === 'generating') html += '<div class="pg-image-loading-overlay">' + hamsterHtml + '<span style="margin-top:16px;font-size:16px;font-weight:500">' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
     html += '</div>';
-  } else if (phase === 'generating') html += '<div class="pg-image-empty pg-image-generating"><span class="pg-image-ring"></span><strong>' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
-  else if (phase === 'error') {
+  } else if (phase === 'generating') {
+    var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
+      '<div class="wheel"></div>' +
+      '<div class="hamster">' +
+        '<div class="hamster__body">' +
+          '<div class="hamster__head">' +
+            '<div class="hamster__ear"></div>' +
+            '<div class="hamster__eye"></div>' +
+            '<div class="hamster__nose"></div>' +
+          '</div>' +
+          '<div class="hamster__limb hamster__limb--fr"></div>' +
+          '<div class="hamster__limb hamster__limb--fl"></div>' +
+          '<div class="hamster__limb hamster__limb--br"></div>' +
+          '<div class="hamster__limb hamster__limb--bl"></div>' +
+          '<div class="hamster__tail"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="spoke"></div>' +
+    '</div>';
+    html += '<div class="pg-image-empty pg-image-generating">' + hamsterHtml + '<strong style="margin-top:20px;font-size:16px;font-weight:500;color:var(--text)">' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
+  } else if (phase === 'error') {
     var errTxt = st.error || pgT('pgError');
     html += '<div class="pg-image-error-card">' +
       '<div class="pg-image-error-title">⚠️ ' + pgEscapeHtml(pgT('pgImgGenerationError')) + '</div>' +
@@ -624,13 +663,13 @@ function pgImageRenderCanvas(i) {
     '</div>';
   }
   else if (phase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
-  else html += '<div class="pg-image-empty"><div class="pg-empty-icon">✦</div><div>' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
+  else html += '<div class="pg-image-empty"><span class="pg-eye-loader"></span><div style="margin-top:36px;font-size:16px;font-weight:500;color:var(--text-secondary);letter-spacing:0.02em">' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
   if (phase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
   html += '</div>'; box.innerHTML = html;
   var metaEl = document.getElementById('pg-pane-img-meta-' + i);
   var navEl = document.getElementById('pg-pane-img-nav-' + i);
   if (entry && asset && asset.url) {
-    var idxVal = flat.indexOf(entry), totVal = flat.length;
+    var idxVal = index, totVal = flat.length;
     var parts = [];
     if (asset.width && asset.height) parts.push(asset.width + ' × ' + asset.height);
     if (asset.mime) parts.push(asset.mime);
