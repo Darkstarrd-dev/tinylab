@@ -87,6 +87,8 @@ function renderActiveVideo(index) {
     }
     autoBalanceFullscreenSplitRatio();
   }).catch(function(e) { console.warn('renderActiveVideo failed:', e); });
+  // Keep the metadata sidebar in sync with the rendered item.
+  renderMetaSidebar(true);
 }
 
 // ---------- animation-mode helpers ------------------------------------

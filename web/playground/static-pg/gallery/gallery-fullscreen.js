@@ -162,6 +162,11 @@ function onFullscreenKey(e) {
   var _pgOv = document.getElementById('pg-modal-overlay');
   if (_pgOv && _pgOv.classList.contains('show')) return;
 
+  // ESC closes the open metadata sidebar before anything else
+  if (e.key === 'Escape' && galleryState.metaOverlayEnabled) {
+    e.preventDefault(); e.stopPropagation(); toggleMetaOverlay(); return;
+  }
+
   // Allow global page navigation shortcuts (F1-F6 by default) to pass through seamlessly to app.js
   if (
     Shortcuts.matchEvent('global.goto-monitor', e) ||
@@ -330,6 +335,11 @@ function onGalleryKeyDown(e) {
   // When any modal is open, yield all key handling to the global modal
   // handler in app.js (focus trap: Tab/Arrow/Enter/Esc stay in the modal).
   if (typeof topOpenModal === 'function' && topOpenModal()) return;
+
+  // ESC closes the open metadata sidebar before anything else
+  if (e.key === 'Escape' && galleryState.metaOverlayEnabled) {
+    e.preventDefault(); e.stopPropagation(); toggleMetaOverlay(); return;
+  }
 
   var tag = document.activeElement ? document.activeElement.tagName : '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable)) {

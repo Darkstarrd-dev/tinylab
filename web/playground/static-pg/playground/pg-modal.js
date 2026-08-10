@@ -461,8 +461,26 @@ function pgCopyImageFallback(url, btn) {
 
 function pgSaveImage(url, btn) {
   var orig = btn.textContent;
-  btn.textContent = '...';
-  pgApiPost('/save-image', { url: url }).then(function(res) {
+  var meta = null;
+  if (typeof pgState !== 'undefined') {
+    outer: for (var wi = 0; wi < pgState.windows.length; wi++) {
+      var st = pgState.windows[wi].image;
+      if (!st || !st.generations) continue;
+      for (var gi = 0; gi < st.generations.length; gi++) {
+        var gens = st.generations[gi];
+        if (!gens || !gens.assets) continue;
+        for (var ai = 0; ai < gens.assets.length; ai++) {
+          if (gens.assets[ai].url === url && gens.assets[ai].meta) {
+            meta = gens.assets[ai].meta;
+            break outer;
+          }
+        }
+      }
+    }
+  }
+  var body = { url: url };
+  if (meta) body.metadata = meta;
+  pgApiPost('/save-image', body).then(function(res) {
     btn.textContent = orig;
     pgToast(pgT('pgImageSaved', [res.filename || res.path]), 'success');
     if (res && res.path) {

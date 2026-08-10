@@ -14,6 +14,10 @@
 > 不得让本文件与代码现状脱节。`AGENTS.md` / `CLAUDE.md` 中的模块说明已下放至此，两者仅保留约束与设计决策并引用本文件；若与本文件冲突，**以本文件为准**。
 > **最后核对（2026-08-09，Editor 原生选择器全局锁、docs 目录启动同步与日志清理）：** Download/Settings 的目录选择器与 Editor 文件选择器共用 `beginNativePickerLock`/`endNativePickerLock`；原生文件管理器打开期间，透明全屏 blocker 捕获并阻断点击、焦点、右键、拖拽及键盘事件，直到 picker 请求返回。Editor 首次进入时以 `/api/editor/tree` 返回的配置 `docDir` 内容通过 `replaceDocTree` 重建 Explorer，不读取上次 IndexedDB 的 current/expanded 状态；同一 app 会话后续切回 Editor 才保留工作区状态。Editor 成功路径不再输出调试 `console.log`。
 > **最后核对（2026-08-10，本地日志可观测性恢复）：** `internal/logredact` 统一所有请求记录、Trace、Monitor、Probe 的凭证替换为固定 `******`；Trace API 保留原始记录字段与未来新增字段，仅在 Header/URL 凭证值处替换；Recent Requests 对所有来源始终捕获完整请求/响应体、Header、上游 URL，并补充 `decision`/`provenance`。
+> **最后核对（2026-08-10，PNG tEXt 元数据注入与 Gallery 元数据浮层）：** (1) 非 ComfyUI 图片保存注入 ComfyUI 同款 `prompt` tEXt——新 leaf 包 `internal/image`（§13k，纯 stdlib）：`AsciiJSON` 全 ASCII 转义（astral 平面按 UTF-16 代理对，等价 Python `json.dumps(ensure_ascii=True)`，PIL 以 latin-1 读 tEXt，raw UTF-8 会乱码）、`InjectPNGText` 在 IHDR 后插 chunk 并剔除同名 tEXt/zTXt/iTXt；`internal/api/image/register.go::saveImage` 在 `Metadata!=nil && ext==".png"` 时写入、出错回退原字节（保存永不失败）；`pg-image-model.js` 生成资产附 `asset.meta`、`pg-stream.js`/`pg-modal.js` 自动保存转发 `metadata`。(2) Gallery 元数据浮层 `gallery-meta.js`：`gallery-layout.js` 建 `#gallery-meta-btn`/`#gallery-meta-overlay` + 200ms hover 计时（中心 400px 方块）、`gallery-state.js` 增 `metaOverlayEnabled/Visible/metaCache`、`gallery-fullscreen.js` 加全屏 ESC 分支；客户端解析 PNG tEXt（重复 key 保留首个）与 MP4 `moov→udta→meta`（`keys` 偏移 -8 + `ilst` 1-based 映射），TinyRouter 记录 / ComfyUI 图 / `<pre>` 三种渲染且值全部 `escapeHtml`。(3) ESC capture 阶段修复：`onMetaOverlayKeyDown` 对 ESC `stopImmediatePropagation`——只关浮层并阻断 app.js 关机与退出全屏两个旧处理，浮层隐藏或有 modal 时原样放行。
+> **最后核对（2026-08-10，Gallery 元数据浮层修正）：** (1) ComfyUI 提示词提取改为 `_comfyPrompts` 三阶段：sampler/guider 输入链接（`inputs.positive/negative[0]`）→ `_meta.title` 关键词 → 无 CLIPTextEncode 时取最长 `inputs.prompt`（MiniMax H3 等自定义节点）；正/负向提示词分开全量显示，其余内容折叠进 `<details class="gm-more">` 展开；框体最大为媒体区 60%、可滚动无滚动条。(2) `_extractPromptMeta` 把同文件 `workflow` 键存为 `__workflow_graph`，浮层 Workflow 显示真实 Yes/No。(3) `#gallery-meta-btn` 补上 `gallery-meta-btn` class 并改实心 accent `.active`（含全屏覆盖），开启状态清晰可见。(4) 移除 200ms hover 计时（进入中心方块立即显示）及 `onMetaMouseLeave`/`_metaHoverTimer`。
+> **最后核对（2026-08-10，Gallery 元数据改为右侧侧边栏）：** 元数据显示从 hover 弹窗改为固定右侧 1/3 宽侧边栏（`#gallery-meta-overlay` 替换为 `#gallery-meta-sidebar`，flex 子项 `flex:0 0 33.333%`）：`toggleMetaOverlay` 切换 `#gallery-main` 的 `.gallery-meta-open` 类（CSS 驱动显隐），媒体元素收缩到左侧 2/3 并 `object-fit:contain` 等比缩放；删除 `onMetaMouseMove`/`showMetaOverlay`/`hideMetaOverlay`/`_metaOverlayEl`/`metaOverlayVisible`（无 hover 触发）；新增 `renderMetaSidebar(paneIsVideo)` 按 pane 渲染，`renderActive`/`renderActiveVideo` 末尾挂钩、布局重建后 `bindEventsForCurrentLayout` 重应用开合状态；ESC（capture 阶段）与按钮再次点击关闭。
+> **最后核对（2026-08-10，元数据侧边栏 Prompt 点击复制）：** 侧边栏 Prompt/Negative Prompt 值加 `gm-copy` class，document 级 click 委托 `onMetaCopyClick`（`e.target.closest('.gm-copy')` + `textContent` 取原文，无 XSS 面），复用 app.js 全局 `copyToClipboard`（clipboard API + execCommand 兜底 + toast 反馈，行 label 作 toast 标签，无新 i18n 键）；`.gm-prompt` 加 `cursor:pointer` + hover 背景。
 
 > **最后核对（2026-08-09，密码保护可选性修复）：** `PasswordEnabled=false` 时 `AuthMiddleware` 直接放行管理路由，`AuthStatusHandler` 返回 `setupRequired:false` 与已认证状态；前端 `app.js`/`api.js` 不再把无密码状态显示为强制设置密码，只有开启保护且无有效 session 时才显示登录屏。`POST /api/auth/setup` 保留为用户主动启用密码的可选 bootstrap；设置密码后的 PATCH 响应返回新 CSRF token，`settings_modal.js` 立即更新 token。
 > **最后核对（2026-08-09，audit_fix.md 与密码保护可选性修复）：** 既有 owner/grant、SSRF、凭证最小化、CSRF、资源预算与审计修复保持不变；管理认证改为可选保护——`PasswordEnabled=false` 时管理路由直接放行且不返回 `setupRequired`，仅开启密码保护后要求 session/CSRF。无密码启动、主动 setup、关闭保护后页面切换与刷新均由 `internal/api/auth/auth_test.go`、`internal/api/api_test.go` 覆盖。
@@ -350,7 +354,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `saveImage`（`POST /api/save-image`，下载图片到 `ImageSaveDir`）+ `imageProxy`（`GET /api/image-proxy`，同源代理避免 CORS）+ `saveImageRequest` 类型 + `extensionFromContentType` 辅助（SSRF 拦截经 `apibase.IsBlockedSSRFHost`，`ssrfGuardedClient` 每跳重检 + 5 跳上限；**`.svg` 已从 allowedImageExts 移除**——存储型 XSS 载体，2026-08-03 审计修复） |
+| `register.go` | `Handler` + `Register` + `saveImage`（`POST /api/save-image`，下载图片到 `ImageSaveDir`）+ `imageProxy`（`GET /api/image-proxy`，同源代理避免 CORS）+ `saveImageRequest` 类型 + `extensionFromContentType` 辅助（SSRF 拦截经 `apibase.IsBlockedSSRFHost`，`ssrfGuardedClient` 每跳重检 + 5 跳上限；**`.svg` 已从 allowedImageExts 移除**——存储型 XSS 载体，2026-08-03 审计修复；**2026-08-10：** `saveImageRequest` 新增 `Metadata *imageMetadata`（Prompt/Model/Protocol/Params/RevisedPrompt/CreatedAt/DurationMs/Provider/Generator），`saveImage` 在 `Metadata!=nil && ext==".png"` 时经 `internal/image`（`AsciiJSON`→`InjectPNGText`，见 §13k）写 ComfyUI 同款 `prompt` tEXt，出错回退原字节——保存永不失败） |
 
 ### 10.13a `internal/api/comfyui/` — 本机 ComfyUI 协议代理
 
@@ -608,7 +612,7 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 
 | 文件 | 职责 |
 |---|---|
-| `feature.go` | `Feature` 描述符 + `Register`/`SetCompiled`/`Enabled`/`Get`/`All`/`Assets` + 默认 manifest（sync.Once 注册） |
+| `feature.go` | `Feature` 描述符 + `Register`/`SetCompiled`/`Enabled`/`Get`/`All`/`Assets` + 默认 manifest（sync.Once 注册）；**2026-08-10：** Gallery `StaticFiles` 清单加 `gallery/gallery-meta.js`（位于 gallery-fullscreen.js 之后、gallery-edit.js 之前，`feature_test.go` 同序合同同步） |
 | `feature_test.go` | 默认全启用、ID 唯一、依赖闭包/传播、资产存在性与 pg 资产列表逐项同序合同、Register 替换 |
 
 ## 13h. `internal/owner/` — 会话 owner 身份（2026-08-09 新增，audit F-29）
@@ -637,6 +641,15 @@ Settings FileTransfer 的后端：接收浏览器 multipart 文件与受信任�
 |---|---|
 | `outbound.go` | `Policy`/`ValidateURL`/`CheckIP`/`CheckHost`/`DialContext`/`CheckRedirect`/`Client` + `blockedPorts` + `extraBlockedNets` |
 | `outbound_test.go` | 7 测试：结构校验、IP/网段矩阵、DNS rebinding fixture、重定向策略 |
+
+## 13k. `internal/image/` — PNG tEXt 元数据写入（2026-08-10 新增）
+
+PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 ComfyUI 同款 `prompt` tEXt chunk 写入能力——`AsciiJSON` 将任意值 JSON 序列化后把所有非 ASCII rune 转义为 `\uXXXX`（astral 平面按 UTF-16 代理对，等价 Python `json.dumps(ensure_ascii=True)`；PIL 以 latin-1 读 tEXt，raw UTF-8 会乱码）；`InjectPNGText` 在 IHDR 后插入 `prompt` tEXt（先剔除同名 tEXt/zTXt/iTXt，长度不含 4 类型字节，CRC32 IEEE），非 PNG/截断输入原样返回。
+
+| 文件 | 职责 |
+|---|---|
+| `pngmeta.go` | `AsciiJSON`/`InjectPNGText` + `isTextChunk`/`textKeyword`/`writeTextChunk` 辅助 |
+| `pngmeta_test.go` | AsciiJSON（CJK+astral、纯 ASCII 输出、round-trip）、InjectPNGText（1×1 PNG round-trip、重复 key 替换、非 PNG 原样、插入位置在 IHDR 后） |
 
 
 
@@ -707,10 +720,10 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 
 | 类别 | 文件 |
 |---|---|
-| 入口 | `index.html`、`index-nopg.html`（可访问 `nav[aria-label="Primary navigation"]`；顶层 Download/GIF 已收纳到 Utility 菜单，active header label 显示当前工具；Utility 子工具为 `editor`/`logReader`/`review`/`gif`/`download`/`fileTransfer`；fresh init 只显示 landing，不预选工具；F5 打开 Utility 菜单，F4 直达 Gallery，无旧 Gallery↔Editor toggle） |
+| 入口 | `index.html`、`index-nopg.html`（可访问 `nav[aria-label="Primary navigation"]`；顶层 Download/GIF 已收纳到 Utility 菜单，active header label 显示当前工具；Utility 子工具为 `editor`/`logReader`/`review`/`gif`/`download`/`fileTransfer`；fresh init 只显示 landing，不预选工具；F5 打开 Utility 菜单，F4 直达 Gallery，无旧 Gallery↔Editor toggle；**2026-08-10** `index.html` 在 gallery-fullscreen.js 与 gallery-edit.js 之间加载 `<script src="/gallery/gallery-meta.js">`，index-nopg.html 不加载 Gallery 脚本） |
 | JS 模块 | `app.js`、`api.js`、`auth.js`、`i18n.js`、`theme.js`、`info_common.js`（共享 info modal 的 section/field Pretty/Raw/Copy、直接 Raw 文本与兼容边界）、`providers.js`、`combos.js`、`quickslots.js`、`headerStats.js`、Monitor 拆分模块（`web/static/monitor/`，其中 `monitor_modal.js` 固定六个 Recent Requests 详情 section，Status 为静态行，其余 section 默认折叠并提供 section/字段级 Pretty/Raw/Copy、两级 sticky header）、`console.js`、`download.js`、`filetransfer.js`（Utility FileTransfer：任意文件拖拽/粘贴、Clear、上传进度与确认上传；**2026-08-09（audit F-01）：** 上传/容量查询改走 `pathGrantId` 合同）、Settings 拆分模块（`web/static/settings/`）、`utility/editor/`（File Editor、Log Reader、Text Review）与 `gif-editor/`（GIF 页面 state/import/timeline/playback/export/editor）`。**2026-08-09（audit F-03 证据）：** `gif-editor-export.js` ZIP 导出迁移到 assetId 合同（上传帧→assetId → `POST /api/archive/pack` 或 legacy `zip-outputs {assetIds}` → 经受控 `/api/gallery/file?assetId=` 下载），配套 `web/gif-editor-export-contract.test.js` 零依赖 Node 合同测试（PASS）。**2026-08-09（audit F-04/F-05/F-10）：** `auth.js` 全局 fetch 包装自动注入 `X-CSRF-Token`（同源状态变更请求，覆盖 ~100 个直连 fetch 调用点）+ setup 向导（`handleSetup`）+ `setupRequired` 启动分支；`api.js` 401/403 → 登录/setup/CSRF 刷新；`app.js` boot `setupRequired` → setup 屏；`providers.js` Provider 卡片用 `keyCount`、详情页 keys 走 masked DTO（`loadDetailKeys`）；`utility/editor/editor_shell.js` HTML 预览 iframe `sandbox=""` 零权限（不执行脚本/表单/弹窗/同源访问，预览的 .html 无法 fetch `/api/*` 或触碰 `parent.document`），TOC 改由父页 DOMParser 解析原始内容构建（无 contentDocument 读写） |
 | vendor | `vendor/gif.js/`、`vendor/gifuct-js/`（各含 LICENSE）；`vendor/utility-editor/`（`diff-match-patch`、`markdown-it`、`dompurify`、`turndown`、`prism`，各含 LICENSE）。Editor 的 Markdown preview 使用 `markdown-it` + sanitization；StackEdit-inspired shell 仅是本地能力边界，不是完整 StackEdit/cledit/PageDown，也未移植远程服务。**2026-08-09（audit F-24）：** `vendor/utility-editor/dompurify/purify.min.js` 升级 **3.4.13**（README 记录来源 + SHA-256 `9ab3d44d…`） |
-| 样式 | `style.css` |
+| 样式 | `style.css`（**2026-08-10** 增 `.gallery-meta-overlay` 等 7 条规则，z-index:10——位于 `.gallery-delete-overlay`(5) 之上、`.gallery-video-hover-ctrl`(20) 之下，主题 token 复用） |
 
 > **当前入口与资产契约（2026-08-08）：** `internal/feature/feature.go` 的 Editor manifest 使用 `RootStatic`，路径为 `utility/editor/*`；同一资产根提供 Editor、Log Reader、Text Review 的脚本与 `review.js`。`feature.Assets(RootStatic)` 同时包含 Download、GIF、FileTransfer 与 Utility 资产，`web/embed.go`/`web/embed_playground.go` 均从 `web/static` 提供这些文件。`index.html` 与 `index-nopg.html` 的 Utility 相关脚本均按 `/utility/editor/*` 加载；Playground 专属 `web/playground/static-pg/` 不再承载 Editor/Log Reader/Text Review 资产。
 >
@@ -723,8 +736,8 @@ AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
 | 类别 | 内容 |
 |---|---|
 | JS 加载顺序 | `playground/` 子目录：`pg-i18n.js` → `pg-core.js` → `pg-state.js` → `pg-markdown.js` → `pg-request.js` → `pg-stream.js` → `pg-comfyui.js` → `pg-image-model.js` → `pg-image-inspire.js` → `pg-image-batch.js` → `pg-autochat.js` → `pg-setup.js` → `pg-director.js` → `pg-search.js` → `pg-render.js` → `pg-ui.js` → `pg-modal.js` → `pg-lifecycle.js`，随后 `gallery/` 脚本；Utility 的 Editor/Log Reader/Text Review 不属于 Playground 静态路由 |
-| 图片模块 | `playground/`：`pg-image-model.js`（Manual Canvas generation/asset history、remote/Comfy result normalization、regenerate/delete、generation-aware autosave）；`pg-image-inspire.js`（Natural/Tag/JSON helper modal）；`pg-image-batch.js`（three-step plan/transform/review、snapshot-first SSE、refresh/pause/resume/stop controls、Prompt × Variant viewer；多窗口 Image 模式禁用 Batch Project） |
-| 其他模块 | `playground/`：`pg-core.js`、`pg-state.js`、`pg-request.js`、`pg-stream.js`、`pg-comfyui.js`（每窗口 Comfy runtime、协议回退、按名称去重 Tab Select）、`pg-render.js`、`pg-ui.js`（Image 多窗口独立设置与 pane 选择）、`pg-modal.js`、`pg-lifecycle.js`、`pg-autochat.js`、`pg-setup.js`、`pg-director.js`、`pg-search.js`；`gallery/` 子目录文件。Utility 的 Editor/Log Reader/Text Review 不在 `static-pg` |
+| 图片模块 | `playground/`：`pg-image-model.js`（Manual Canvas generation/asset history、remote/Comfy result normalization、regenerate/delete、generation-aware autosave；**2026-08-10** 非 ComfyUI 资产自动保存前附 `asset.meta`：prompt/model/protocol/params/revised_prompt/created_at/duration_ms/provider/generator）；`pg-image-inspire.js`（Natural/Tag/JSON helper modal）；`pg-image-batch.js`（three-step plan/transform/review、snapshot-first SSE、refresh/pause/resume/stop controls、Prompt × Variant viewer；多窗口 Image 模式禁用 Batch Project） |
+| 其他模块 | `playground/`：`pg-core.js`、`pg-state.js`、`pg-request.js`、`pg-stream.js`、`pg-comfyui.js`（每窗口 Comfy runtime、协议回退、按名称去重 Tab Select）、`pg-render.js`、`pg-ui.js`（Image 多窗口独立设置与 pane 选择）、`pg-modal.js`、`pg-lifecycle.js`、`pg-autochat.js`、`pg-setup.js`、`pg-director.js`、`pg-search.js`（**2026-08-10：** `pg-stream.js`/`pg-modal.js` 自动保存转发 `metadata`、`pg-i18n.js` 增 `gm*` 元数据浮层键）；`gallery/` 子目录文件（**2026-08-10** 新增 `gallery-meta.js` 元数据浮层：toggle 按钮 + 中心 hover 区 200ms 显示、客户端解析 PNG tEXt / MP4 元数据；`gallery-state.js` 增 `metaOverlayEnabled`/`metaOverlayVisible`/`metaCache`、`gallery-layout.js` 建 `#gallery-meta-btn`/`#gallery-meta-overlay`、`gallery-fullscreen.js` 加全屏 ESC 分支）。Utility 的 Editor/Log Reader/Text Review 不在 `static-pg` |
 | vendor | `marked.min.js`、`marked-katex-extension`、`katex.min.js`/`.css`、`mermaid.min.js`、`highlight.min.js`、`purify.min.js`、`diff.min.js`、`pg-highlight-theme.css`、`fonts/`(KaTeX woff2)；另有 `web/static/vendor/`（gif.js/gifuct-js）由 `/vendor/*` handler 的主静态回退提供（`internal/api/router.go` `vendorHandler` 先查 playground vendor 目录，未命中回退 `web.Static` 主静态）。**2026-08-09（audit F-24/F-25）：** `purify.min.js` 升级 **DOMPurify 3.4.13**、`mermaid.min.js` 升级 **11.16.1**（esbuild UMD 自包含，`securityLevel:'strict'` 初始化）；来源/SHA-256 记录于 `static-pg/vendor/README.md`（新增）+ `LICENSE.mermaid`（新增） |
 | 样式 | `playground.css`（Manual Canvas、Inspire、Batch 与既有 Playground/Gallery 样式）；Utility Editor/Log Reader/Review 样式由 `web/static/style.css` 与 Utility 资产自身 class 使用 |
 | 静态路由 | `static-pg` 按文件路由由 `internal/feature/feature.go` 的 `StaticFiles` manifest 经 `feature.Assets(RootPlaygroundPG)` 派生（`internal/api/router.go`），当前仅承载 `playground/` 与 `gallery/` 子目录；无硬编码 `pgJSFiles` 列表；URL 路径 = 子目录相对路径（如 `/playground/pg-core.js`、`/gallery/gallery.js`），不提供 Utility Editor/Log Reader/Review 路径 |

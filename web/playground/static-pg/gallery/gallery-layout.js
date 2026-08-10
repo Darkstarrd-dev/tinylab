@@ -186,14 +186,16 @@ function buildPanelHTML(type, isSplit) {
     '<div class="gallery-video-hover-ctrl" id="gallery-video-ctrl">' +
       '<input type="range" class="gallery-video-seeker" id="gallery-video-seeker" value="0" min="0" max="100" step="0.1">' +
       '<span id="gallery-vid-time" class="gallery-video-time">00:00 / 00:00</span>' +
-    '</div>'
+    '</div>' +
+    '<div class="gallery-meta-sidebar" id="gallery-meta-sidebar"></div>'
     :
     '<img class="gallery-main-img" id="gallery-main-img" alt="">' +
     '<div class="gallery-empty" id="gallery-empty" style="display:none">' +
       '<div class="gallery-empty-icon">⬚</div>' +
       '<div class="gallery-empty-hint">' + escapeHtml(T('Drop/Paste/Open') || 'Drop / Paste / Open') + '</div>' +
     '</div>' +
-    '<div class="gallery-delete-overlay" id="gallery-delete-overlay"></div>';
+    '<div class="gallery-delete-overlay" id="gallery-delete-overlay"></div>' +
+    '<div class="gallery-meta-sidebar" id="gallery-meta-sidebar"></div>'
 
   var treeId = isVid ? 'gallery-video-tree-panel' : 'gallery-tree-panel';
   var pathId = isVid ? 'gallery-video-path' : 'gallery-path';
@@ -216,6 +218,7 @@ function buildPanelHTML(type, isSplit) {
                  '<div class="gallery-ctrl-right">' +
                    extraRight +
                    '<span class="gallery-info" id="' + infoId + '">0 / 0</span>' +
+                  '<button class="gallery-btn gallery-btn-icon gallery-meta-btn" id="gallery-meta-btn" type="button" data-tooltip="' + escapeHtml(T('gmMetaToggle') || 'Metadata (I)') + '">' + GALLERY_ICONS.metaInfo + '</button>' +
                    '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" data-tooltip="' + splitBtnTitle + '">' + splitIcon + '</button>' +
                    modeBtnHTML +
                    '<button class="gallery-btn gallery-btn-icon" id="gallery-edit-btn" type="button" data-tooltip="' + editBtnTitle + '">' + GALLERY_ICONS.edit + '</button>' +
@@ -250,6 +253,8 @@ function updateLayoutMode() {
     layout.className = 'gallery-layout';
     layout.innerHTML = buildPanelHTML(galleryState.mediaType, false);
   }
+  // The layout rebuild recreates the pane DOM (sidebar hidden by CSS);
+  // bindEventsForCurrentLayout re-applies the open state afterwards.
 
   layout.addEventListener('dragover', onDragOver);
   layout.addEventListener('dragenter', onDragEnter);
@@ -359,6 +364,23 @@ function bindEventsForCurrentLayout() {
       }
     };
   });
+
+  // Metadata toggle — opens/closes the right-side metadata sidebar
+  var metaBtns = document.querySelectorAll('#gallery-meta-btn');
+  metaBtns.forEach(function(b) {
+    b.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      toggleMetaOverlay();
+    };
+    b.classList.toggle('active', galleryState.metaOverlayEnabled);
+  });
+
+  // Metadata sidebar: re-apply the open state after a layout rebuild.
+  if (galleryState.metaOverlayEnabled) {
+    document.querySelectorAll('#gallery-main').forEach(function(m) { m.classList.add('gallery-meta-open'); });
+    renderMetaSidebar(false);
+    renderMetaSidebar(true);
+  }
 
   var empty = document.getElementById('gallery-empty');
   if (empty) empty.onclick = onOpenClick;

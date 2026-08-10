@@ -667,6 +667,8 @@ function renderActive(index) {
     updateInfo(item, info, countStr);
     autoBalanceFullscreenSplitRatio();
   }).catch(function(e) { console.warn('renderActive failed:', e); });
+  // Keep the metadata sidebar in sync with the rendered item.
+  renderMetaSidebar(false);
 }
 
 function updateInfo(item, info, countStr) {

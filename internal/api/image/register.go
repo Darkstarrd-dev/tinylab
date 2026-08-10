@@ -18,11 +18,27 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/image"
 	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 type saveImageRequest struct {
-	URL string `json:"url"`
+	URL      string         `json:"url"`
+	Metadata *imageMetadata `json:"metadata,omitempty"`
+}
+
+// imageMetadata carries ComfyUI-style generation info that is injected into
+// saved PNG files as a tEXt chunk under the "prompt" keyword.
+type imageMetadata struct {
+	Prompt        string                 `json:"prompt"`
+	Model         string                 `json:"model"`
+	Protocol      string                 `json:"protocol"`
+	Params        map[string]interface{} `json:"params,omitempty"`
+	RevisedPrompt string                 `json:"revised_prompt,omitempty"`
+	CreatedAt     int64                  `json:"created_at"`
+	DurationMs    int64                  `json:"duration_ms,omitempty"`
+	Provider      string                 `json:"provider,omitempty"`
+	Generator     string                 `json:"generator,omitempty"`
 }
 
 // Handler wires up the image save and proxy endpoints.
@@ -173,6 +189,16 @@ func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {
 	ts := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("%s_%d%s", ts, time.Now().UnixNano()%100000, ext)
 	filePath := filepath.Join(imgsDir, filename)
+	// Inject ComfyUI-compatible prompt metadata into PNG saves. The tEXt value
+	// is ASCII-safe JSON (PIL reads tEXt as latin-1); on any injection error we
+	// fall through and write the original bytes rather than failing the save.
+	if req.Metadata != nil && ext == ".png" {
+		if jsonStr, err := image.AsciiJSON(req.Metadata); err == nil {
+			if injected, ierr := image.InjectPNGText(rawData, "prompt", jsonStr); ierr == nil {
+				rawData = injected
+			}
+		}
+	}
 
 	if err := os.WriteFile(filePath, rawData, 0644); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save image")

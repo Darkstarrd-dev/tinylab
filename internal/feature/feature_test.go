@@ -227,6 +227,7 @@ func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 		"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
 		"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",
 		"gallery/gallery-tree.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
+		"gallery/gallery-meta.js",
 		"gallery/gallery-edit.js", "gallery/gallery-edit-operations.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
 	}
 	got := Assets(RootPlaygroundPG)
