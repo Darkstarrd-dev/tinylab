@@ -245,7 +245,17 @@ function pgPasteImage(e) {
 function pgRenderPanes() {
   var panes = document.getElementById('pg-panes');
   if (!panes) return;
-  if (pgState.mode === 'search') {
+  var isBatchActive = pgState.mode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle';
+  if (isBatchActive) {
+    if (pgState.imageBatch.uiMode === 'executing') {
+      pgState.splitCount = 1;
+    } else {
+      pgState.splitCount = 2;
+      while (pgState.windows.length < 2) {
+        if (typeof makeWin === 'function') pgState.windows.push(makeWin());
+      }
+    }
+  } else if (pgState.mode === 'search') {
     pgState.splitCount = 2;
     while (pgState.windows.length < 2) {
       pgState.windows.push(makeWin());
@@ -264,16 +274,22 @@ function pgRenderPanes() {
     var paneLabel = (w && w.config.agentName) ? w.config.agentName : pgT('pgPaneName', [i + 1]);
     if (pgState.mode === 'search') {
       paneLabel = i === 0 ? pgT('pgSearchPaneLeft') : pgT('pgSearchPaneRight');
+    } else if (isBatchActive) {
+      var stg = pgState.imageBatch.stage;
+      if (stg === 1) paneLabel = i === 0 ? '1. Planning Form' : 'Plan Request Log';
+      else if (stg === 2) paneLabel = i === 0 ? 'Plan Request Log' : '2. Format Conversion';
+      else if (stg === 3) paneLabel = i === 0 ? 'Conversion Items' : '3. Review & Start';
+      else if (stg === 4) paneLabel = 'Batch Execution Viewer';
     }
     html += '<div class="pg-pane' + (i === pgState.activeWin ? ' active' : '') + '" data-win="' + i + '">' +
       '<div class="pg-pane-head" onclick="pgSetActiveWin(' + i + ')">' +
         '<span class="pg-pane-idx">' + pgEscapeHtml(paneLabel) +
           '<span class="pg-pane-typing" style="display:none"></span>' +
         '</span>' +
-        '<span class="pg-pane-model">' + modelLabel + '</span>' +
-        (pgState.mode === 'image' ? '<span class="pg-pane-img-meta" id="pg-pane-img-meta-' + i + '"></span><span class="pg-pane-img-nav" id="pg-pane-img-nav-' + i + '"></span>' : '') +
-        (pgState.mode !== 'search' ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
-        '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' +
+        (!isBatchActive ? '<span class="pg-pane-model">' + modelLabel + '</span>' : '') +
+        (pgState.mode === 'image' && !isBatchActive ? '<span class="pg-pane-img-meta" id="pg-pane-img-meta-' + i + '"></span><span class="pg-pane-img-nav" id="pg-pane-img-nav-' + i + '"></span>' : '') +
+        (pgState.mode !== 'search' && !isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
+        (!isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' : '') +
       '</div>' +
       '<div class="pg-messages" id="pg-messages-' + i + '"></div>' +
     '</div>';
@@ -344,6 +360,12 @@ function pgSetMode(mode) {
   }
 
   // 4. Mode-specific lifecycle actions
+  if (oldMode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle') {
+    if (typeof root.pgImageBatchExitUI === 'function') {
+      root.pgImageBatchExitUI({ preserveProject: true });
+    }
+  }
+
   if (mode === 'autochat') {
     pgAutoChatToggle(true);
   } else {
@@ -361,6 +383,9 @@ function pgSetMode(mode) {
 }
 
 function pgSetSplitCount(n) {
+  if (pgState.mode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle') {
+    return;
+  }
   if (pgIsGenerating()) { pgToast(pgT('pgGenSwitchLock'), 'warning'); return; }
   n = Math.max(1, Math.min(4, parseInt(n, 10) || 1));
   if (pgState.mode === 'autochat' && n < 2) n = 2;
@@ -404,6 +429,12 @@ function pgResetSettings() {
 function pgRenderSidebar() {
   var side = document.getElementById('pg-side');
   if (!side) return;
+  if (pgState.mode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode === 'executing') {
+    if (typeof root.pgImageBatchRenderSidebar === 'function') {
+      side.innerHTML = root.pgImageBatchRenderSidebar();
+    }
+    return;
+  }
   var w = pgWin();
   if (!w) return;
   var en = w.parameterEnabled;

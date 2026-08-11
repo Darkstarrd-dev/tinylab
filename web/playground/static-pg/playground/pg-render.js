@@ -542,6 +542,15 @@ function pgRenderMessages(i) {
   var w = pgWinAt(i);
   var box = document.getElementById('pg-messages-' + i);
   if (!box) return;
+  if (pgState.mode === 'image' &&
+      pgState.imageBatch &&
+      pgState.imageBatch.uiMode !== 'idle') {
+    var batchHTML = pgState.imageBatch.uiMode === 'executing'
+      ? (typeof pgImageBatchRenderCanvas === 'function' ? pgImageBatchRenderCanvas(i) : '')
+      : (typeof pgImageBatchRenderPane === 'function' ? pgImageBatchRenderPane(i) : '');
+    box.innerHTML = batchHTML || '';
+    return;
+  }
   if (pgState.mode === 'image' && typeof pgImageRenderCanvas === 'function') {
     pgImageRenderCanvas(i);
     return;
