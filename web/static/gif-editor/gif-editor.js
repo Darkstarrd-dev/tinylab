@@ -210,6 +210,7 @@
     dom.cancelCropBtn = core.byId('cancel-crop-btn');
     dom.applyCropBtn = core.byId('apply-crop-btn');
     dom.rangeStart = core.byId('crop-start');
+    dom.rangeEnd = core.byId('crop-end');
     dom.addTextInput = core.byId('text-input');
     dom.addTextBtn = core.byId('add-text-btn');
     dom.addTextColor = core.byId('text-color');
@@ -269,6 +270,9 @@
     dom.splitScaleDisplay = core.byId('split-scale-display');
     dom.splitCols = core.byId('split-cols');
     dom.splitRows = core.byId('split-rows');
+    dom.splitColsLabel = core.byId('split-cols-label');
+    dom.splitRowsLabel = core.byId('split-rows-label');
+    dom.splitModeToggle = core.byId('split-mode-toggle');
     dom.splitInnerGap = core.byId('split-inner-gap');
     dom.splitOuterMargin = core.byId('split-outer-margin');
     dom.splitEnableOuter = core.byId('split-enable-outer');
@@ -1315,16 +1319,24 @@
   function drawSplitGridOverlay(w, h) {
     if (!dom.splitSheetPanel || dom.splitSheetPanel.style.display === 'none') return;
     if (!dom.splitCols || !dom.splitRows) return;
-    var cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
-    var rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
     var scale = (parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100;
     var innerGap = Math.round((parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0) * scale);
     var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.round((parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) * scale) : 0;
+    var cols, rows, cellW, cellH;
 
-    var availW = Math.max(0, w - outerMargin * 2 - innerGap * (cols - 1));
-    var availH = Math.max(0, h - outerMargin * 2 - innerGap * (rows - 1));
-    var cellW = availW / cols;
-    var cellH = availH / rows;
+    if (core.state.splitMode === 'uneven') {
+      cellW = Math.max(1, Math.round((parseInt(dom.splitCols.value, 10) || 64) * scale));
+      cellH = Math.max(1, Math.round((parseInt(dom.splitRows.value, 10) || 64) * scale));
+      cols = Math.max(1, Math.floor((w - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+      rows = Math.max(1, Math.floor((h - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+    } else {
+      cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
+      rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
+      var availW = Math.max(0, w - outerMargin * 2 - innerGap * (cols - 1));
+      var availH = Math.max(0, h - outerMargin * 2 - innerGap * (rows - 1));
+      cellW = availW / cols;
+      cellH = availH / rows;
+    }
 
     ctx.save();
     for (var r = 0; r < rows; r++) {
@@ -2099,22 +2111,34 @@
 
     function updateSplitSummary() {
       if (!dom.splitCols || !dom.splitRows) return;
-      var cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
-      var rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
-      var totalFrames = cols * rows;
-      if (dom.splitActualFrames) dom.splitActualFrames.textContent = totalFrames;
-
-      var scale = parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100;
-      if (dom.splitScaleDisplay) dom.splitScaleDisplay.textContent = scale + '%';
-
+      var scale = (parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100;
       var srcCanvas = (core.state.source && (core.state.source.rawImage || core.state.source.image)) || core.state.processedImg;
+      var origW = srcCanvas ? (srcCanvas.width || srcCanvas.naturalWidth || 800) : 800;
+      var origH = srcCanvas ? (srcCanvas.height || srcCanvas.naturalHeight || 600) : 600;
+      var scaledW = Math.max(1, Math.round(origW * scale));
+      var scaledH = Math.max(1, Math.round(origH * scale));
+
+      var totalFrames;
+      if (core.state.splitMode === 'uneven') {
+        var cellW = Math.max(1, Math.round((parseInt(dom.splitCols.value, 10) || 64) * scale));
+        var cellH = Math.max(1, Math.round((parseInt(dom.splitRows.value, 10) || 64) * scale));
+        var innerGap = Math.round((parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0) * scale);
+        var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.round((parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) * scale) : 0;
+        var cols = Math.max(1, Math.floor((scaledW - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+        var rows = Math.max(1, Math.floor((scaledH - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+        totalFrames = cols * rows;
+      } else {
+        var cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
+        var rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
+        totalFrames = cols * rows;
+      }
+
+      if (dom.splitActualFrames) dom.splitActualFrames.textContent = totalFrames;
+      if (dom.splitScaleDisplay) dom.splitScaleDisplay.textContent = Math.round(scale * 100) + '%';
+
       if (srcCanvas && dom.splitSourceRes) {
-        var origW = srcCanvas.width || srcCanvas.naturalWidth || 800;
-        var origH = srcCanvas.height || srcCanvas.naturalHeight || 600;
         var origText = origW + ' × ' + origH;
-        if (scale !== 100) {
-          var scaledW = Math.max(1, Math.round(origW * scale / 100));
-          var scaledH = Math.max(1, Math.round(origH * scale / 100));
+        if (scale !== 1) {
           dom.splitSourceRes.textContent = origText + ' -> ' + scaledW + ' × ' + scaledH;
         } else {
           dom.splitSourceRes.textContent = origText;
@@ -2128,6 +2152,33 @@
         dom.splitSheetPanel.style.display = isHidden ? 'block' : 'none';
         updateSplitSummary();
         draw();
+      });
+    }
+
+    var updateSplitLabels = function (mode) {
+      if (dom.splitColsLabel) dom.splitColsLabel.textContent = mode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):';
+      if (dom.splitRowsLabel) dom.splitRowsLabel.textContent = mode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):';
+      if (dom.splitCols) dom.splitCols.max = mode === 'uneven' ? '9999' : '100';
+      if (dom.splitRows) dom.splitRows.max = mode === 'uneven' ? '9999' : '100';
+    };
+
+    if (dom.splitModeToggle) {
+      dom.splitModeToggle.addEventListener('click', function (e) {
+        var btn = e.target.closest('.gif-split-mode-btn');
+        if (!btn) return;
+        var mode = btn.dataset.mode;
+        var btns = dom.splitModeToggle.querySelectorAll('.gif-split-mode-btn');
+        for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i] === btn);
+        core.state.splitMode = mode;
+        updateSplitLabels(mode);
+        if (mode === 'uneven') {
+          if (dom.splitCols && parseInt(dom.splitCols.value, 10) < 10) dom.splitCols.value = 64;
+          if (dom.splitRows && parseInt(dom.splitRows.value, 10) < 10) dom.splitRows.value = 64;
+        } else {
+          if (dom.splitCols && parseInt(dom.splitCols.value, 10) > 100) dom.splitCols.value = 3;
+          if (dom.splitRows && parseInt(dom.splitRows.value, 10) > 100) dom.splitRows.value = 3;
+        }
+        onSplitUIChange();
       });
     }
 
@@ -2148,6 +2199,7 @@
       dom.splitApplyBtn.addEventListener('click', function () {
         if (!core.import || !core.import.splitImage) return;
         var opts = {
+          mode: core.state.splitMode || 'even',
           cols: parseInt(dom.splitCols ? dom.splitCols.value : 3, 10) || 1,
           rows: parseInt(dom.splitRows ? dom.splitRows.value : 3, 10) || 1,
           innerGap: parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0,
@@ -2291,10 +2343,16 @@
       '            </div>' +
       '            <input type="range" id="gif-split-scale" min="10" max="100" step="5" value="100" style="width:100%;">' +
       '          </div>' +
-      '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);">Sprite Sheet Grid Split</div>' +
+      '          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">' +
+      '            <div class="gif-group-title" style="font-weight:bold; font-size:12px; color:var(--accent-color);">Sprite Sheet Grid Split</div>' +
+      '            <div class="gif-split-mode-toggle" id="gif-split-mode-toggle">' +
+      '              <button type="button" class="gif-split-mode-btn active" data-mode="even">Even</button>' +
+      '              <button type="button" class="gif-split-mode-btn" data-mode="uneven">Uneven</button>' +
+      '            </div>' +
+      '          </div>' +
       '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-cols" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">X (Horizontal Split):</label>' +
+      '              <label for="gif-split-cols" class="gif-import-label" id="gif-split-cols-label" style="font-size:11px; display:block; margin-bottom:2px;">X (Horizontal Split):</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-cols\', -1)">-</button>' +
       '                <input type="number" class="stepper-input" id="gif-split-cols" min="1" max="100" value="3">' +
@@ -2302,7 +2360,7 @@
       '              </div>' +
       '            </div>' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-rows" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Y (Vertical Split):</label>' +
+      '              <label for="gif-split-rows" class="gif-import-label" id="gif-split-rows-label" style="font-size:11px; display:block; margin-bottom:2px;">Y (Vertical Split):</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-rows\', -1)">-</button>' +
       '                <input type="number" class="stepper-input" id="gif-split-rows" min="1" max="100" value="3">' +
@@ -2410,7 +2468,17 @@
       '          <span data-i18n="gifEditorOverlay">' + t('gifEditorOverlay', 'Overlay') + '</span>' +
       '        </button>' +
       '        <div id="gif-overlay-panel" class="gif-overlay-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
-      '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddTextTitle">' + t('gifEditorAddTextTitle', 'Add Text / Subtitle') + '</div>' +
+      '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorApplyTo">' + t('gifEditorApplyTo', 'Apply To') + '</div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:10px; align-items:center; margin-bottom:8px; font-size:12px;">' +
+      '            <label class="gif-check-label" style="display:flex; align-items:center; gap:3px; cursor:pointer;"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">' + t('gifEditorScopeCurrent', 'Current') + '</span></label>' +
+      '            <label class="gif-check-label" style="display:flex; align-items:center; gap:3px; cursor:pointer;"><input type="radio" name="gif-scope" value="all"> <span data-i18n="gifEditorScopeAll">' + t('gifEditorScopeAll', 'All') + '</span></label>' +
+      '            <label class="gif-check-label" style="display:flex; align-items:center; gap:3px; cursor:pointer;"><input type="radio" name="gif-scope" value="range"> <span data-i18n="gifEditorScopeRange">' + t('gifEditorScopeRange', 'Range') + '</span></label>' +
+      '          </div>' +
+      '          <div id="gif-crop-range-inputs" style="display:none; gap:8px; align-items:center; margin-bottom:8px;">' +
+      '            <input type="number" id="gif-crop-start" placeholder="' + t('gifEditorStartFrame', 'Start') + '" min="1" style="width:50%; box-sizing:border-box; padding:4px 6px; font-size:12px;">' +
+      '            <input type="number" id="gif-crop-end" placeholder="' + t('gifEditorEndFrame', 'End') + '" min="1" style="width:50%; box-sizing:border-box; padding:4px 6px; font-size:12px;">' +
+      '          </div>' +
+      '          <div class="gif-group-title" style="margin-top:8px; margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddTextTitle">' + t('gifEditorAddTextTitle', 'Add Text / Subtitle') + '</div>' +
       '          <div class="gif-control-row" style="margin-bottom:6px;">' +
       '            <input type="text" id="gif-text-input" placeholder="Enter text..." style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12px;">' +
       '          </div>' +

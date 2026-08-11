@@ -132,6 +132,7 @@
       endMs: 0,
       splitCols: 3,           // sprite-sheet grid defaults (mirror the modal input fallbacks)
       splitRows: 3,
+      splitMode: 'even',
       innerGap: 0,
       outerMargin: 0,
       enableOuterGap: false,
@@ -375,23 +376,27 @@
 
       (isSingleFrame ? (
         '      <div class="gif-import-split-panel" style="border-top: 1px dashed var(--glass-border); padding-top: 8px; margin-top: 4px;">' +
-        '        <div class="gif-import-row" style="margin-bottom: 6px;">' +
+        '        <div class="gif-import-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">' +
         '          <span class="gif-import-label" style="font-weight: bold; color: var(--accent-color);">Sprite Sheet Grid Split</span>' +
+        '          <div class="gif-split-mode-toggle" id="gif-import-split-mode-toggle">' +
+        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode !== 'uneven' ? 'active' : '') + '" data-mode="even">Even</button>' +
+        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode === 'uneven' ? 'active' : '') + '" data-mode="uneven">Uneven</button>' +
+        '          </div>' +
         '        </div>' +
         '        <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-cols" class="gif-import-label">X (Horizontal Split):</label>' +
+        '            <label for="gif-import-cols" class="gif-import-label" id="gif-import-cols-label">' + (draft.splitMode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):') + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-cols\', -1)">-</button>' +
-        '              <input type="number" class="stepper-input" id="gif-import-cols" min="1" max="100" value="' + (draft.splitCols || 3) + '">' +
+        '              <input type="number" class="stepper-input" id="gif-import-cols" min="1" max="' + (draft.splitMode === 'uneven' ? '9999' : '100') + '" value="' + (draft.splitCols || (draft.splitMode === 'uneven' ? 64 : 3)) + '">' +
         '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-cols\', 1)">+</button>' +
         '            </div>' +
         '          </div>' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-rows" class="gif-import-label">Y (Vertical Split):</label>' +
+        '            <label for="gif-import-rows" class="gif-import-label" id="gif-import-rows-label">' + (draft.splitMode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):') + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-rows\', -1)">-</button>' +
-        '              <input type="number" class="stepper-input" id="gif-import-rows" min="1" max="100" value="' + (draft.splitRows || 3) + '">' +
+        '              <input type="number" class="stepper-input" id="gif-import-rows" min="1" max="' + (draft.splitMode === 'uneven' ? '9999' : '100') + '" value="' + (draft.splitRows || (draft.splitMode === 'uneven' ? 64 : 3)) + '">' +
         '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-import-rows\', 1)">+</button>' +
         '            </div>' +
         '          </div>' +
@@ -519,9 +524,39 @@
 
     var colsInput = document.getElementById('gif-import-cols');
     var rowsInput = document.getElementById('gif-import-rows');
+    var colsLabel = document.getElementById('gif-import-cols-label');
+    var rowsLabel = document.getElementById('gif-import-rows-label');
     var innerGapInput = document.getElementById('gif-import-inner-gap');
     var outerMarginInput = document.getElementById('gif-import-outer-margin');
     var enableOuterCheck = document.getElementById('gif-import-enable-outer');
+    var modeToggle = document.getElementById('gif-import-split-mode-toggle');
+
+    var updateImportSplitLabels = function (mode) {
+      if (colsLabel) colsLabel.textContent = mode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):';
+      if (rowsLabel) rowsLabel.textContent = mode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):';
+      if (colsInput) colsInput.max = mode === 'uneven' ? '9999' : '100';
+      if (rowsInput) rowsInput.max = mode === 'uneven' ? '9999' : '100';
+    };
+
+    if (modeToggle) {
+      modeToggle.addEventListener('click', function (e) {
+        var btn = e.target.closest('.gif-split-mode-btn');
+        if (!btn || !draft) return;
+        var mode = btn.dataset.mode;
+        var btns = modeToggle.querySelectorAll('.gif-split-mode-btn');
+        for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i] === btn);
+        draft.splitMode = mode;
+        updateImportSplitLabels(mode);
+        if (mode === 'uneven') {
+          if (colsInput && parseInt(colsInput.value, 10) < 10) colsInput.value = 64;
+          if (rowsInput && parseInt(rowsInput.value, 10) < 10) rowsInput.value = 64;
+        } else {
+          if (colsInput && parseInt(colsInput.value, 10) > 100) colsInput.value = 3;
+          if (rowsInput && parseInt(rowsInput.value, 10) > 100) rowsInput.value = 3;
+        }
+        onSplitChange();
+      });
+    }
 
     var onSplitChange = function () {
       if (!draft) return;
@@ -796,7 +831,24 @@
   // 30 FPS -> 121 frames, duration 4000ms).
   function estimateFrameCount() {
     if (!draft) return 1;
-    if (draft.kind === 'image') return 1;
+    if (draft.kind === 'image') {
+      var scale = (draft.scalePercent || 100) / 100;
+      var w = Math.max(1, Math.round(draft.sourceWidth * scale));
+      var h = Math.max(1, Math.round(draft.sourceHeight * scale));
+      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * scale));
+      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * scale)) : 0;
+      var cols, rows;
+      if (draft.splitMode === 'uneven') {
+        var cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
+        var cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        cols = Math.max(1, Math.floor((w - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+        rows = Math.max(1, Math.floor((h - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+      } else {
+        cols = Math.max(1, draft.splitCols || 1);
+        rows = Math.max(1, draft.splitRows || 1);
+      }
+      return cols * rows;
+    }
     var spanMs = Math.max(1, draft.endMs - draft.startMs);
     if (draft.kind === 'gif' && !draft.fpsChanged) {
       // Original-delay GIF import: count source frames overlapping the range.
@@ -866,15 +918,24 @@
       ctx.drawImage(draft.image, 0, 0, targetW, targetH);
 
       // Draw Grid Split Overlay for Sprite Sheet mode
-      var cols = Math.max(1, draft.splitCols || 1);
-      var rows = Math.max(1, draft.splitRows || 1);
-      var innerGap = Math.round((draft.innerGap || 0) * (draft.scalePercent / 100));
-      var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100)) : 0;
+      var scale = (draft.scalePercent || 100) / 100;
+      var innerGap = Math.round((draft.innerGap || 0) * scale);
+      var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * scale) : 0;
+      var cols, rows, cellW, cellH;
 
-      var availW = Math.max(0, targetW - outerMargin * 2 - innerGap * (cols - 1));
-      var availH = Math.max(0, targetH - outerMargin * 2 - innerGap * (rows - 1));
-      var cellW = availW / cols;
-      var cellH = availH / rows;
+      if (draft.splitMode === 'uneven') {
+        cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
+        cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        cols = Math.max(1, Math.floor((targetW - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+        rows = Math.max(1, Math.floor((targetH - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+      } else {
+        cols = Math.max(1, draft.splitCols || 1);
+        rows = Math.max(1, draft.splitRows || 1);
+        var availW = Math.max(0, targetW - outerMargin * 2 - innerGap * (cols - 1));
+        var availH = Math.max(0, targetH - outerMargin * 2 - innerGap * (rows - 1));
+        cellW = availW / cols;
+        cellH = availH / rows;
+      }
 
       ctx.save();
       for (var r = 0; r < rows; r++) {
@@ -1044,15 +1105,24 @@
 
   function commitImageDraft(width, height) {
     return new Promise(function (resolve) {
-      var cols = Math.max(1, draft.splitCols || 1);
-      var rows = Math.max(1, draft.splitRows || 1);
-      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * (draft.scalePercent / 100)));
-      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100))) : 0;
+      var scale = (draft.scalePercent || 100) / 100;
+      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * scale));
+      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * scale)) : 0;
+      var cols, rows, cellW, cellH;
 
-      var availW = Math.max(1, width - outerMargin * 2 - innerGap * (cols - 1));
-      var availH = Math.max(1, height - outerMargin * 2 - innerGap * (rows - 1));
-      var cellW = Math.max(1, Math.floor(availW / cols));
-      var cellH = Math.max(1, Math.floor(availH / rows));
+      if (draft.splitMode === 'uneven') {
+        cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
+        cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        cols = Math.max(1, Math.floor((width - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+        rows = Math.max(1, Math.floor((height - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+      } else {
+        cols = Math.max(1, draft.splitCols || 1);
+        rows = Math.max(1, draft.splitRows || 1);
+        var availW = Math.max(1, width - outerMargin * 2 - innerGap * (cols - 1));
+        var availH = Math.max(1, height - outerMargin * 2 - innerGap * (rows - 1));
+        cellW = Math.max(1, Math.floor(availW / cols));
+        cellH = Math.max(1, Math.floor(availH / rows));
+      }
 
       var scaledCanvas = document.createElement('canvas');
       scaledCanvas.width = width;
@@ -1267,15 +1337,23 @@
     var importWidth = Math.max(1, Math.round(sourceWidth * scale));
     var importHeight = Math.max(1, Math.round(sourceHeight * scale));
 
-    var cols = Math.max(1, parseInt(opts.cols, 10) || 1);
-    var rows = Math.max(1, parseInt(opts.rows, 10) || 1);
     var innerGap = Math.max(0, Math.round((opts.innerGap || 0) * scale));
     var outerMargin = opts.enableOuterGap ? Math.max(0, Math.round((opts.outerMargin || 0) * scale)) : 0;
+    var cols, rows, cellW, cellH;
 
-    var availW = Math.max(1, importWidth - outerMargin * 2 - innerGap * (cols - 1));
-    var availH = Math.max(1, importHeight - outerMargin * 2 - innerGap * (rows - 1));
-    var cellW = Math.max(1, Math.floor(availW / cols));
-    var cellH = Math.max(1, Math.floor(availH / rows));
+    if (opts.mode === 'uneven') {
+      cellW = Math.max(1, Math.round((parseInt(opts.cols, 10) || 64) * scale));
+      cellH = Math.max(1, Math.round((parseInt(opts.rows, 10) || 64) * scale));
+      cols = Math.max(1, Math.floor((importWidth - outerMargin * 2 + innerGap) / (cellW + innerGap)));
+      rows = Math.max(1, Math.floor((importHeight - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+    } else {
+      cols = Math.max(1, parseInt(opts.cols, 10) || 1);
+      rows = Math.max(1, parseInt(opts.rows, 10) || 1);
+      var availW = Math.max(1, importWidth - outerMargin * 2 - innerGap * (cols - 1));
+      var availH = Math.max(1, importHeight - outerMargin * 2 - innerGap * (rows - 1));
+      cellW = Math.max(1, Math.floor(availW / cols));
+      cellH = Math.max(1, Math.floor(availH / rows));
+    }
 
     var scaledCanvas = document.createElement('canvas');
     scaledCanvas.width = importWidth;
