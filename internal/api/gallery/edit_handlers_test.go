@@ -1,8 +1,10 @@
 package gallery
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -500,5 +502,143 @@ func TestGalleryEditUploadTemp_ReturnsAssetId(t *testing.T) {
 	}
 	if _, ok := out["tempPath"]; ok {
 		t.Fatal("upload-temp response must not contain tempPath")
+	}
+}
+
+// TestGalleryEditUploadTemp_ZipPreservesFrameNames pins the legacy ZIP
+// contract for the GIF editor: frame basenames requested via ?name= must
+// survive upload-temp AND zip-outputs (frame_001.png stays frame_001.png
+// instead of collapsing to "upload.png"), and cleanUp releases the packed
+// input assets on success.
+func TestGalleryEditUploadTemp_ZipPreservesFrameNames(t *testing.T) {
+	h := newEditTestHandler(t, fakeFFmpegPath(t))
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	var ids []string
+	for _, name := range []string{"frame_001.png", "frame_002.png"} {
+		resp, err := post(srv.URL+"/edit/upload-temp?name="+name, "image/png", strings.NewReader("png-"+name))
+		if err != nil {
+			t.Fatalf("POST upload-temp %s: %v", name, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("upload-temp %s: want 200, got %d (body=%q)", name, resp.StatusCode, readBody(t, resp))
+		}
+		var out struct {
+			AssetID string `json:"assetId"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			resp.Body.Close()
+			t.Fatalf("decode upload-temp %s: %v", name, err)
+		}
+		resp.Body.Close()
+		if out.AssetID == "" {
+			t.Fatalf("upload-temp %s: missing assetId", name)
+		}
+		ids = append(ids, out.AssetID)
+	}
+
+	body, err := json.Marshal(map[string]any{"assetIds": ids, "zipName": "frames", "cleanUp": true})
+	if err != nil {
+		t.Fatalf("marshal zip-outputs body: %v", err)
+	}
+	resp, err := post(srv.URL+"/edit/zip-outputs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST zip-outputs: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("zip-outputs: want 200, got %d (body=%q)", resp.StatusCode, readBody(t, resp))
+	}
+	var zout struct {
+		AssetID string `json:"assetId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&zout); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode zip-outputs: %v", err)
+	}
+	resp.Body.Close()
+	if zout.AssetID == "" {
+		t.Fatal("zip-outputs: missing assetId")
+	}
+
+	// The packed zip must keep the requested frame basenames.
+	st, err := h.assetStore()
+	if err != nil {
+		t.Fatalf("asset store: %v", err)
+	}
+	rc, _, err := st.Open(testOwner, zout.AssetID)
+	if err != nil {
+		t.Fatalf("open packed zip asset: %v", err)
+	}
+	data, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil {
+		t.Fatalf("read packed zip: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("parse packed zip: %v", err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	want := []string{"frame_001.png", "frame_002.png"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("zip entry names = %v, want %v", names, want)
+	}
+
+	// cleanUp:true must release the input frame assets on success.
+	for _, id := range ids {
+		if _, _, err := st.Open(testOwner, id); !archiveIsNotFound(err) {
+			t.Fatalf("frame asset %s must be released after pack, got %v", id, err)
+		}
+	}
+}
+
+// TestGalleryEditZipOutputs_ReleasesOnPackFailure verifies cleanUp:true
+// releases the registered input assets even when the pack fails partway (an
+// unknown assetId), so a failed pack never leaks the frames until TTL.
+func TestGalleryEditZipOutputs_ReleasesOnPackFailure(t *testing.T) {
+	h := newEditTestHandler(t, fakeFFmpegPath(t))
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	resp, err := post(srv.URL+"/edit/upload-temp?name=frame_001.png", "image/png", strings.NewReader("png-bytes"))
+	if err != nil {
+		t.Fatalf("POST upload-temp: %v", err)
+	}
+	var up struct {
+		AssetID string `json:"assetId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode upload-temp: %v", err)
+	}
+	resp.Body.Close()
+
+	body, err := json.Marshal(map[string]any{"assetIds": []string{up.AssetID, "bogus-id"}, "zipName": "frames", "cleanUp": true})
+	if err != nil {
+		t.Fatalf("marshal zip-outputs body: %v", err)
+	}
+	resp, err = post(srv.URL+"/edit/zip-outputs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST zip-outputs: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("zip-outputs with bogus id: want 404, got %d (body=%q)", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+
+	st, err := h.assetStore()
+	if err != nil {
+		t.Fatalf("asset store: %v", err)
+	}
+	if _, _, err := st.Open(testOwner, up.AssetID); !archiveIsNotFound(err) {
+		t.Fatalf("frame asset must be released after failed pack, got %v", err)
 	}
 }

@@ -27,6 +27,7 @@
     importDraft: null,     // Temporary draft during Import Modal
     slices: [],            // { id, canvas, delay, layers[] }
     processedImg: null,    // image source canvas used by edge-crop / grid slice
+    splitMode: 'even',       // Split Sheet grid mode (even | uneven)
     scale: 1,
     panX: 0,
     panY: 0,
@@ -118,6 +119,10 @@
   }
 
   function cleanupModules() {
+    // The cleanup registry is persistent: every registered module cleanup is
+    // idempotent and must run on EVERY teardown/re-render (not just the first
+    // render) so document/window listeners, timers and draft handlers never
+    // accumulate or go stale across repeated enter/leave cycles.
     for (var i = 0; i < cleanupFns.length; i++) {
       try {
         cleanupFns[i]();
@@ -125,7 +130,8 @@
         console.error('[GifEditorCore] Error in cleanup callback', e);
       }
     }
-    cleanupFns = [];
+    // Commands/modules are re-registered on every render; the cleanup list
+    // itself is intentionally NOT cleared here.
     modules = {};
     commands = {};
   }
@@ -161,6 +167,7 @@
     }
     state.source.file = null;
     state.source.image = null;
+    state.source.rawImage = null;
     if (state.source.video) {
       try {
         state.source.video.removeAttribute('src');
@@ -203,8 +210,25 @@
       return false;
     }
   }
-  window.addEventListener('keydown', blockKeyDuringExtracting, true);
-  window.addEventListener('keyup', blockKeyDuringExtracting, true);
+  var stateBound = false;
+
+  // Window-level key blocking is lifecycle-bound: added on render, removed on
+  // teardown, so no stale global keyboard handler survives page leave.
+  function bindStateEvents() {
+    if (stateBound) return;
+    stateBound = true;
+    window.addEventListener('keydown', blockKeyDuringExtracting, true);
+    window.addEventListener('keyup', blockKeyDuringExtracting, true);
+  }
+
+  function cleanupStateEvents() {
+    stateBound = false;
+    window.removeEventListener('keydown', blockKeyDuringExtracting, true);
+    window.removeEventListener('keyup', blockKeyDuringExtracting, true);
+    // Never let a stale extracting flag or spinner survive page leave.
+    state.isExtracting = false;
+    hideSpinner();
+  }
 
   window.GifEditorCore = {
     constants: {
@@ -229,6 +253,11 @@
     resetSlices: resetSlices,
     releaseSource: releaseSource,
     showSpinner: showSpinner,
-    hideSpinner: hideSpinner
+    hideSpinner: hideSpinner,
+    bindStateEvents: bindStateEvents
   };
+
+  // Lifecycle cleanup for the state module itself (window key block, spinner
+  // state). Runs on every teardown via the persistent cleanup registry.
+  window.GifEditorCore.registerModule('state', { cleanup: cleanupStateEvents });
 })();

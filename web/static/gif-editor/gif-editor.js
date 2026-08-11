@@ -14,11 +14,14 @@
 
   var core = window.GifEditorCore;
 
-  function t(key, fallback) {
+  function t(key, args, fallback) {
     if (typeof window.t === 'function') {
-      var res = window.t(key);
+      // Global t(key, args) substitutes {0}/{1}/... placeholders (escaped);
+      // pass the array through so parameterized messages render correctly.
+      var res = window.t(key, Array.isArray(args) ? args : undefined);
       if (res && res !== key) return res;
     }
+    if (typeof args === 'string') return args;
     return fallback || key;
   }
 
@@ -441,7 +444,7 @@
   }
 
   function updateSourcePanels(kind) {
-    if (dom.imageTools) dom.imageTools.classList.toggle('gif-hidden', kind !== 'image');
+    if (dom.imageTools) dom.imageTools.style.display = (kind === 'image' ? 'block' : 'none');
     if (dom.splitSheetContainer) dom.splitSheetContainer.style.display = (kind === 'image' ? 'block' : 'none');
     if (dom.globalDelayContainer) dom.globalDelayContainer.style.display = 'block';
     if (dom.batchDeleteContainer) dom.batchDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
@@ -787,6 +790,12 @@
           layers[j].x -= r.x;
           layers[j].y -= r.y;
         }
+      }
+      // The cropped frame is now the canonical image source: refresh
+      // processedImg so a subsequent Split Sheet uses the crop, not a stale
+      // pre-crop canvas.
+      if (core.state.source && core.state.source.kind === 'image') {
+        core.state.processedImg = slices[core.state.selectedSliceIdx >= 0 ? core.state.selectedSliceIdx : 0].canvas;
       }
       core.state.mode = 'editor';
       if (dom.outW) dom.outW.value = Math.round(r.w);
@@ -1459,14 +1468,9 @@
       dom.canvasWrapper.style.transform =
         'translate(' + core.state.panX + 'px, ' + core.state.panY + 'px) scale(' + core.state.scale + ')';
     }
-    var zoomRange = document.getElementById('gif-timeline-zoom-range');
-    var zoomVal = document.getElementById('gif-timeline-zoom-value');
-    if (zoomRange && Math.abs(parseFloat(zoomRange.value) - core.state.scale) > 0.001) {
-      zoomRange.value = core.state.scale;
-    }
-    if (zoomVal) {
-      zoomVal.textContent = Math.round(core.state.scale * 100) + '%';
-    }
+    // Stage zoom is separate from the timeline zoom control: the timeline
+    // module owns #gif-timeline-zoom-range/#gif-timeline-zoom-value and its
+    // own timeline.zoom display, so nothing is written here.
   }
 
   // ------------------------------------------------------------------
@@ -1545,7 +1549,7 @@
     if (!range) return;
     showConfirmModal({
       title: t('gifEditorDeleteTitle', 'Delete Frames'),
-      message: t('gifEditorConfirmDeleteRange', 'Delete frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
+      message: t('gifEditorConfirmDeleteRange', [String(range.start + 1), String(range.end + 1)], 'Delete frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
       confirmText: t('gifEditorDeleteConfirmBtn', 'Delete'),
       cancelText: t('cancel', 'Cancel'),
       onConfirm: function () {
@@ -1569,7 +1573,7 @@
     if (!range) return;
     showConfirmModal({
       title: t('gifEditorKeepTitle', 'Keep Frames'),
-      message: t('gifEditorConfirmKeepRange', 'Keep frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
+      message: t('gifEditorConfirmKeepRange', [String(range.start + 1), String(range.end + 1)], 'Keep frames ' + (range.start + 1) + ' - ' + (range.end + 1) + '?'),
       confirmText: t('gifEditorKeepConfirmBtn', 'Keep'),
       cancelText: t('cancel', 'Cancel'),
       onConfirm: function () {
@@ -1692,6 +1696,14 @@
     if (dom.rows) dom.rows.addEventListener('input', draw);
     if (dom.cols) dom.cols.addEventListener('input', draw);
     if (dom.sliceBtn) dom.sliceBtn.addEventListener('click', runSlice);
+    // Image tools panel toggle (edge crop + grid slice section)
+    var imageToolsToggleBtn = core.byId('image-tools-toggle-btn');
+    var imageToolsPanel = core.byId('image-tools-panel');
+    if (imageToolsToggleBtn && imageToolsPanel) {
+      imageToolsToggleBtn.addEventListener('click', function () {
+        imageToolsPanel.style.display = imageToolsPanel.style.display === 'block' ? 'none' : 'block';
+      });
+    }
 
     // Quality sync (#gif-sample-interval slider + read-only #gif-quality-val span)
     if (dom.quality) {
@@ -1897,16 +1909,6 @@
     if (dom.zoomOutBtn) dom.zoomOutBtn.addEventListener('click', function () { core.state.scale = Math.max(0.2, core.state.scale * 0.8); updateTransform(); });
     if (dom.resetViewBtn) dom.resetViewBtn.addEventListener('click', resetView);
 
-    var zoomRange = document.getElementById('gif-timeline-zoom-range');
-    if (zoomRange) {
-      zoomRange.addEventListener('input', function (e) {
-        var val = parseFloat(e.target.value);
-        if (!isNaN(val) && val > 0) {
-          core.state.scale = val;
-          updateTransform();
-        }
-      });
-    }
 
     // Layers
     if (dom.addTextBtn) dom.addTextBtn.addEventListener('click', addText);
@@ -2020,7 +2022,7 @@
         targetH = Math.max(1, targetH);
         showConfirmModal({
           title: t('gifEditorResizeTitle', '全局缩放'),
-          message: t('gifEditorResizeConfirm', '将所有帧从 ' + origW + '×' + origH + ' 缩放到 ' + targetW + '×' + targetH + '？此操作不可撤销。'),
+          message: t('gifEditorResizeConfirm', [String(origW), String(origH), String(targetW), String(targetH)], '将所有帧从 ' + origW + '×' + origH + ' 缩放到 ' + targetW + '×' + targetH + '？此操作不可撤销。'),
           confirmText: t('gifEditorResizeBtn', '确认缩放'),
           cancelText: t('cancel', '取消'),
           onConfirm: function () {
@@ -2061,7 +2063,7 @@
         var deletedCount = slices.length - kept.length;
         showConfirmModal({
           title: t('gifEditorIntervalDeleteTitle', '间隔删除'),
-          message: t('gifEditorIntervalDeleteConfirm', '将每隔 ' + interval + ' 帧删除 1 帧，共删除 ' + deletedCount + ' 帧（' + slices.length + ' → ' + kept.length + '），自动调整延迟保持总时长。'),
+          message: t('gifEditorIntervalDeleteConfirm', [String(interval), String(deletedCount), String(slices.length), String(kept.length)], '将每隔 ' + interval + ' 帧删除 1 帧，共删除 ' + deletedCount + ' 帧（' + slices.length + ' → ' + kept.length + '），自动调整延迟保持总时长。'),
           confirmText: t('gifEditorDeleteConfirmBtn', '确认删除'),
           cancelText: t('cancel', '取消'),
           onConfirm: function () {
@@ -2157,7 +2159,9 @@
     function updateSplitSummary() {
       if (!dom.splitCols || !dom.splitRows) return;
       var scale = (parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100;
-      var srcCanvas = (core.state.source && (core.state.source.rawImage || core.state.source.image)) || core.state.processedImg;
+      var srcCanvas = core.state.processedImg ||
+        ((core.state.slices && core.state.slices[0] && core.state.slices[0].canvas) || null) ||
+        (core.state.source && (core.state.source.rawImage || core.state.source.image));
       var origW = srcCanvas ? (srcCanvas.width || srcCanvas.naturalWidth || 800) : 800;
       var origH = srcCanvas ? (srcCanvas.height || srcCanvas.naturalHeight || 600) : 600;
       var scaledW = Math.max(1, Math.round(origW * scale));
@@ -2201,8 +2205,8 @@
     }
 
     var updateSplitLabels = function (mode) {
-      if (dom.splitColsLabel) dom.splitColsLabel.textContent = mode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):';
-      if (dom.splitRowsLabel) dom.splitRowsLabel.textContent = mode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):';
+      if (dom.splitColsLabel) dom.splitColsLabel.textContent = t(mode === 'uneven' ? 'gifEditorCellWidth' : 'gifEditorSplitX', mode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):');
+      if (dom.splitRowsLabel) dom.splitRowsLabel.textContent = t(mode === 'uneven' ? 'gifEditorCellHeight' : 'gifEditorSplitY', mode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):');
       if (dom.splitCols) dom.splitCols.max = mode === 'uneven' ? '9999' : '100';
       if (dom.splitRows) dom.splitRows.max = mode === 'uneven' ? '9999' : '100';
     };
@@ -2260,7 +2264,8 @@
       });
     }
 
-    // Sub-module event binders
+    // Sub-module event binders (state first: window-level key blocking)
+    if (core.bindStateEvents) core.bindStateEvents();
     if (core.import) core.import.bindEvents();
     if (core.timeline) core.timeline.bindEvents();
     if (core.playback) core.playback.bindEvents();
@@ -2276,6 +2281,8 @@
   // ------------------------------------------------------------------
 
   function pageTemplate() {
+    // Split Sheet grid mode persists in state across re-render/re-entry.
+    var splitMode = core.state.splitMode === 'uneven' ? 'uneven' : 'even';
     return '' +
       '<div class="gif-workspace">' +
       '  <aside class="gif-sidebar">' +
@@ -2291,10 +2298,10 @@
       '    </div>' +
       '    <div id="gif-sidebar-editor-content" style="display:none;">' +
       '      <div class="gif-action-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; margin-bottom: 12px; width: 100%; box-sizing: border-box;">' +
-      '        <button type="button" class="btn btn-primary" id="gif-open-export-btn" title="Export settings" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+'        <button type="button" class="btn btn-primary" id="gif-open-export-btn" title="' + t('gifEditorExportSettingsTitle', 'Export settings') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorExportTitle">Export</span>' +
       '        </button>' +
-      '        <button type="button" class="btn btn-ghost gif-reset-btn" id="gif-reload-btn" title="Reset workspace" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+'        <button type="button" class="btn btn-ghost gif-reset-btn" id="gif-reload-btn" title="' + t('gifEditorResetWorkspace', 'Reset workspace') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorReload">Reset</span>' +
       '        </button>' +
       '      </div>' +
@@ -2377,44 +2384,44 @@
       '        </button>' +
       '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
       '          <div class="gif-import-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 6px;">' +
-      '            <span class="gif-import-label" style="color:var(--text-muted);">Source Resolution:</span>' +
+      '            <span class="gif-import-label" style="color:var(--text-muted);">' + t('gifImportSourceResolution', 'Source Resolution:') + '</span>' +
       '            <span class="gif-import-value" id="gif-split-source-res" style="font-weight:bold; color:var(--accent-color);">2048 × 2048</span>' +
       '          </div>' +
       '          <div class="gif-import-col" style="margin-bottom: 8px;">' +
       '            <div class="gif-import-label-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">' +
-      '              <label for="gif-split-scale" class="gif-import-label" style="color:var(--text-muted);">Scale</label>' +
+      '              <label for="gif-split-scale" class="gif-import-label" style="color:var(--text-muted);">' + t('gifEditorScale', 'Scale') + '</label>' +
       '              <span class="gif-import-value" id="gif-split-scale-display" style="font-weight:bold;">100%</span>' +
       '            </div>' +
       '            <input type="range" id="gif-split-scale" min="10" max="100" step="5" value="100" style="width:100%;">' +
       '          </div>' +
       '          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">' +
-      '            <div class="gif-group-title" style="font-weight:bold; font-size:12px; color:var(--accent-color);">Sprite Sheet Grid Split</div>' +
+      '            <div class="gif-group-title" style="font-weight:bold; font-size:12px; color:var(--accent-color);">' + t('gifEditorGridSplitTitle', 'Sprite Sheet Grid Split') + '</div>' +
       '            <div class="gif-split-mode-toggle" id="gif-split-mode-toggle">' +
-      '              <button type="button" class="gif-split-mode-btn active" data-mode="even">Even</button>' +
-      '              <button type="button" class="gif-split-mode-btn" data-mode="uneven">Uneven</button>' +
+      '              <button type="button" class="gif-split-mode-btn' + (splitMode === 'even' ? ' active' : '') + '" data-mode="even">' + t('gifEditorEven', 'Even') + '</button>' +
+      '              <button type="button" class="gif-split-mode-btn' + (splitMode === 'uneven' ? ' active' : '') + '" data-mode="uneven">' + t('gifEditorUneven', 'Uneven') + '</button>' +
       '            </div>' +
       '          </div>' +
       '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-cols" class="gif-import-label" id="gif-split-cols-label" style="font-size:11px; display:block; margin-bottom:2px;">X (Horizontal Split):</label>' +
+      '              <label for="gif-split-cols" class="gif-import-label" id="gif-split-cols-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t(splitMode === 'uneven' ? 'gifEditorCellWidth' : 'gifEditorSplitX', splitMode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):') + '</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-cols\', -1)">-</button>' +
-      '                <input type="number" class="stepper-input" id="gif-split-cols" min="1" max="100" value="3">' +
+      '                <input type="number" class="stepper-input" id="gif-split-cols" min="1" max="' + (splitMode === 'uneven' ? '9999' : '100') + '" value="' + (splitMode === 'uneven' ? 64 : 3) + '">' +
       '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-cols\', 1)">+</button>' +
       '              </div>' +
       '            </div>' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-rows" class="gif-import-label" id="gif-split-rows-label" style="font-size:11px; display:block; margin-bottom:2px;">Y (Vertical Split):</label>' +
+      '              <label for="gif-split-rows" class="gif-import-label" id="gif-split-rows-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t(splitMode === 'uneven' ? 'gifEditorCellHeight' : 'gifEditorSplitY', splitMode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):') + '</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-rows\', -1)">-</button>' +
-      '                <input type="number" class="stepper-input" id="gif-split-rows" min="1" max="100" value="3">' +
+      '                <input type="number" class="stepper-input" id="gif-split-rows" min="1" max="' + (splitMode === 'uneven' ? '9999' : '100') + '" value="' + (splitMode === 'uneven' ? 64 : 3) + '">' +
       '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-split-rows\', 1)">+</button>' +
       '              </div>' +
       '            </div>' +
       '          </div>' +
       '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-inner-gap" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Center Gap (px):</label>' +
+      '              <label for="gif-split-inner-gap" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t('gifEditorCenterGap', 'Center Gap (px):') + '</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-inner-gap\', -1)">-</button>' +
       '                <input type="number" class="stepper-input" id="gif-split-inner-gap" min="0" max="500" value="0">' +
@@ -2422,7 +2429,7 @@
       '              </div>' +
       '            </div>' +
       '            <div class="gif-import-field-vert">' +
-      '              <label for="gif-split-outer-margin" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">Outer Margin (px):</label>' +
+      '              <label for="gif-split-outer-margin" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t('gifEditorOuterMargin', 'Outer Margin (px):') + '</label>' +
       '              <div class="number-stepper">' +
       '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-split-outer-margin\', -1)">-</button>' +
       '                <input type="number" class="stepper-input" id="gif-split-outer-margin" min="0" max="500" value="0">' +
@@ -2431,19 +2438,67 @@
       '            </div>' +
       '          </div>' +
       '          <div class="gif-import-row" style="margin-bottom: 8px;">' +
-      '            <label class="gif-check-label" style="font-size:12px;"><input type="checkbox" id="gif-split-enable-outer"> <span>Enable outer border gap</span></label>' +
+      '            <label class="gif-check-label" style="font-size:12px;"><input type="checkbox" id="gif-split-enable-outer"> <span>' + t('gifEditorEnableOuterGap', 'Enable outer border gap') + '</span></label>' +
       '          </div>' +
       '          <div class="gif-import-summary-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 8px; border-top: 1px dashed var(--glass-border); padding-top: 6px;">' +
       '            <div>' +
-      '              <span class="gif-import-label">Actual Frames: </span>' +
+      '              <span class="gif-import-label">' + t('gifImportActualFrames', 'Actual Frames:') + ' </span>' +
       '              <span class="gif-import-summary-val" id="gif-split-actual-frames" style="font-weight:bold;">9</span>' +
       '            </div>' +
       '            <div>' +
-      '              <span class="gif-import-label">Duration: </span>' +
+      '              <span class="gif-import-label">' + t('gifImportDuration', 'Duration:') + ' </span>' +
       '              <span class="gif-import-summary-val" id="gif-split-duration">00:00:00.000</span>' +
       '            </div>' +
       '          </div>' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-apply-btn" style="margin-top: 4px;">Split</button>' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-apply-btn" style="margin-top: 4px;">' + t('gifEditorSplitBtn', 'Split') + '</button>' +
+      '        </div>' +
+      '      </div>' +
+      '      <!-- Image tools: edge crop + grid slice (image source) -->' +
+      '      <div id="gif-image-tools" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-image-tools-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorImageTools">' + t('gifEditorImageTools', 'Edge Crop & Grid Slice') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-image-tools-panel" class="gif-image-tools-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-group-title" style="margin-bottom: 8px; font-weight: bold; font-size: 12px; color: var(--accent-color);" data-i18n="gifEditorEdgeCropTitle">' + t('gifEditorEdgeCropTitle', 'Edge Crop') + '</div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; gap:8px; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-t" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropTop">' + t('gifEditorCropTop', 'Top:') + '</label>' +
+      '            <input type="range" id="gif-slider-t" min="0" max="100" value="0" style="flex:1;">' +
+      '            <input type="number" id="gif-crop-t" min="0" value="0" style="width:64px;">' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; gap:8px; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-b" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropBottom">' + t('gifEditorCropBottom', 'Bottom:') + '</label>' +
+      '            <input type="range" id="gif-slider-b" min="0" max="100" value="0" style="flex:1;">' +
+      '            <input type="number" id="gif-crop-b" min="0" value="0" style="width:64px;">' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; gap:8px; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-l" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropLeft">' + t('gifEditorCropLeft', 'Left:') + '</label>' +
+      '            <input type="range" id="gif-slider-l" min="0" max="100" value="0" style="flex:1;">' +
+      '            <input type="number" id="gif-crop-l" min="0" value="0" style="width:64px;">' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; gap:8px; width:100%; margin-bottom:8px;">' +
+      '            <label for="gif-crop-r" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropRight">' + t('gifEditorCropRight', 'Right:') + '</label>' +
+      '            <input type="range" id="gif-slider-r" min="0" max="100" value="0" style="flex:1;">' +
+      '            <input type="number" id="gif-crop-r" min="0" value="0" style="width:64px;">' +
+      '          </div>' +
+      '          <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 6px;">' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-cols" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t('gifEditorGridCols', 'Cols:') + '</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-cols\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-cols" min="1" max="100" value="1">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-cols\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '            <div class="gif-import-field-vert">' +
+      '              <label for="gif-rows" class="gif-import-label" style="font-size:11px; display:block; margin-bottom:2px;">' + t('gifEditorGridRows', 'Rows:') + '</label>' +
+      '              <div class="number-stepper">' +
+      '                <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-rows\', -1)">-</button>' +
+      '                <input type="number" class="stepper-input" id="gif-rows" min="1" max="100" value="1">' +
+      '                <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-rows\', 1)">+</button>' +
+      '              </div>' +
+      '            </div>' +
+      '          </div>' +
+      '          <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-slice-btn" style="margin-top: 4px;" data-i18n="gifEditorSliceBtn">' + t('gifEditorSliceBtn', 'Slice Grid') + '</button>' +
       '        </div>' +
       '      </div>' +
 
@@ -2524,14 +2579,14 @@
       '          </div>' +
       '          <div class="gif-group-title" style="margin-top:8px; margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddTextTitle">' + t('gifEditorAddTextTitle', 'Add Text / Subtitle') + '</div>' +
       '          <div class="gif-control-row" style="margin-bottom:6px;">' +
-      '            <input type="text" id="gif-text-input" placeholder="Enter text..." style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12px;">' +
+      '            <input type="text" id="gif-text-input" placeholder="' + t('gifEditorAddTextPlaceholder', 'Enter text...') + '" style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12px;">' +
       '          </div>' +
       '          <div class="gif-control-row" style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">' +
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-bold" style="font-weight:bold; width:30px; height:30px; padding:0;">B</button>' +
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-italic" style="font-style:italic; width:30px; height:30px; padding:0;">I</button>' +
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-underline" style="text-decoration:underline; width:30px; height:30px; padding:0;">U</button>' +
-      '            <input type="color" id="gif-text-color" value="#ffffff" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="Text Color">' +
-      '            <input type="color" id="gif-text-stroke-color" value="#000000" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="Stroke Color">' +
+      '            <input type="color" id="gif-text-color" value="#ffffff" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="' + t('gifEditorTextColor', 'Text Color') + '">' +
+      '            <input type="color" id="gif-text-stroke-color" value="#000000" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="' + t('gifEditorStrokeColor', 'Stroke Color') + '">' +
       '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-add-text-btn" style="height:30px; padding:0 8px; font-size:12px;" data-i18n="gifEditorAddTextBtn">' + t('gifEditorAddTextBtn', '+ Add Text') + '</button>' +
       '          </div>' +
       '          <div class="gif-group-title" style="margin-top:10px; margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddImageTitle">' + t('gifEditorAddImageTitle', 'Add Image / Watermark') + '</div>' +
@@ -2568,14 +2623,14 @@
       '      <button type="button" class="gif-icon-btn" id="gif-zoom-in-btn" title="' + t('gifEditorZoomIn', '放大') + '">+</button>' +
       '    </div>' +
       '  </main>' +
-      '  <section class="gif-timeline-area" aria-label="GIF timeline">' +
+      '  <section class="gif-timeline-area" aria-label="' + t('gifEditorTimelineAria', 'GIF timeline') + '">' +
       '    <div class="gif-timeline-scroll" id="gif-timeline-scroll">' +
       '      <div class="gif-timeline-track" id="gif-timeline"></div>' +
       '    </div>' +
       '    <div class="gif-timeline-toolbar">' +
       '      <div class="gif-timeline-zoom-control">' +
       '        <span class="gif-zoom-label" style="font-size:12px; color:var(--text-muted);">🔍</span>' +
-      '        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" title="Zoom">' +
+'        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" title="' + t('gifTimelineZoom', 'Zoom') + '">' +
       '        <span id="gif-timeline-zoom-value" style="font-size:11px; color:var(--text-muted); min-width:35px;">100%</span>' +
       '      </div>' +
       '      <div class="gif-timeline-nav" role="group">' +

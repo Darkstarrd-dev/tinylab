@@ -13,6 +13,8 @@
 > **实施原则：** 先完成模块边界和导入状态隔离，再实现 Import Modal；先迁移现有时间线行为，再增加底部控制和播放；每个阶段都必须保持现有图片/GIF/视频编辑及三种导出能力可回归验证。
 >
 > **实施增补（2026-08-07，侧栏接线修复）：** 模板恢复的步骤 2/3 控件以新 ID 渲染，入口 `cacheDom()`/`bindEvents()`/`getTargetIndices()` 与导出模块已按模板 ID 对齐（原 ID 失效导致控件静默无响应）；模板补齐全局裁剪微调面板（crop-panel 滑条/数值 + apply/cancel）与精灵图导出按钮，删除无处理单选；`syncLayer`（同步到所有帧）被模板的删除图层按钮取代后移除，图层缩放/描边/百分比应用等新控件接线完成。详见 `gif_implented.md` 顶部「最后核对（2026-08-07）」。
+>
+> **实施增补（2026-08-11，GIF 修复轮）：** 时间线 zoom 范围从本方案的 50%–200% 扩为 **20%–300%**（`gif-editor-timeline.js::setZoom` clamp 0.2–3.0），且时间线 zoom（`core.state.timeline.zoom`）与舞台 zoom（`core.state.scale`/`updateTransform`）彻底解耦——时间线滚动区 Ctrl/Meta+滚轮只调时间线 zoom（§3.x 模板 `#gif-timeline-zoom-range` 相应改为 `min="0.2" max="3"`）。导出路径由旧结果 overlay 改为**导出弹窗（export modal）**（`previewCache` 按格式/config key 隔离、`setHandoff` 惰性 MediaBridge 登记、「Open in Gallery」按钮在弹窗 footer），ZIP 帧资产在失败与成功路径均释放、打包结果归 MediaBridge token，legacy `upload-temp` 保留 `frame_NNN.png` basename；导入侧新增 `draftGeneration` 事务代数（见 `gif_implented.md` 顶部最后核对）。本增补不改变 §3 固定设计决策（classic script / `GifEditorCore` / Import Modal 容器 / 草稿隔离 / 视频采样语义）。
 
 ---
 
@@ -1075,7 +1077,7 @@ for (var i = 0; i < frameCount; i++) {
   <div class="gif-timeline-toolbar" id="gif-timeline-toolbar">
     <div class="gif-timeline-zoom">
       <span class="gif-muted-label" id="gif-timeline-zoom-label"></span>
-      <input type="range" id="gif-timeline-zoom-range" min="0.5" max="2" step="0.1" value="1">
+      <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.1" value="1">
       <span id="gif-timeline-zoom-value">100%</span>
     </div>
     <span class="gif-timeline-count" id="gif-timeline-count"></span>
@@ -1125,7 +1127,7 @@ itemPitch = itemWidth + itemGap;
 倍率范围：
 
 ```text
-50%–200%
+20%–300%
 ```
 
 倍率只影响：
@@ -1522,7 +1524,7 @@ web/static/vendor/gifuct-js/*
 2. 迁移当前虚拟化窗口和有界缩略图缓存；
 3. 将时间线 DOM 改为 scroll viewport + track + toolbar；
 4. 保持复制、删除、delay、排序行为；
-5. 增加 50%–200% zoom；
+5. 增加 20%–300% zoom；
 6. 保持选中帧可见；
 7. 处理空帧和 10000 帧几何边界。
 

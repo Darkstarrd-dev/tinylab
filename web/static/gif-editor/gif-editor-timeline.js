@@ -245,7 +245,7 @@
   function setZoom(value) {
     var val = parseFloat(value);
     if (isNaN(val)) val = 1;
-    val = Math.max(0.5, Math.min(2.0, val));
+    val = Math.max(0.2, Math.min(3.0, val));
     if (!core.state.timeline) core.state.timeline = {};
     core.state.timeline.zoom = val;
 
@@ -259,13 +259,13 @@
   function updateZoomDisplay() {
     var zoomRange = document.getElementById('gif-timeline-zoom-range');
     var zoomVal = document.getElementById('gif-timeline-zoom-value');
-    var scale = core.state.scale || 1;
+    var zoom = getZoom();
 
-    if (zoomRange && Math.abs(parseFloat(zoomRange.value) - scale) > 0.001) {
-      zoomRange.value = scale;
+    if (zoomRange && Math.abs(parseFloat(zoomRange.value) - zoom) > 0.001) {
+      zoomRange.value = zoom;
     }
     if (zoomVal) {
-      zoomVal.textContent = Math.round(scale * 100) + '%';
+      zoomVal.textContent = Math.round(zoom * 100) + '%';
     }
   }
 
@@ -414,11 +414,11 @@
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       var delta = e.deltaY < 0 ? 0.1 : -0.1;
-      var curScale = core.state.scale || 1;
-      var newScale = Math.max(0.2, Math.min(3, Math.round((curScale + delta) * 100) / 100));
-      core.state.scale = newScale;
-      if (core.commands.updateTransform) core.commands.updateTransform();
-      updateZoomDisplay();
+      // Ctrl/Meta-wheel over the timeline scroll area adjusts the timeline
+      // zoom only (timeline.zoom via setZoom). The stage zoom
+      // (core.state.scale / updateTransform) is owned by the stage wheel
+      // listener in gif-editor.js and must never be touched from here.
+      setZoom(getZoom() + delta);
     }
   }
 
@@ -445,10 +445,7 @@
     if (zoomRange) {
       zoomRange.addEventListener('input', function () {
         var val = parseFloat(zoomRange.value);
-        if (!isNaN(val) && val > 0) {
-          core.state.scale = val;
-          if (core.commands.updateTransform) core.commands.updateTransform();
-        }
+        if (!isNaN(val)) setZoom(val);
       });
     }
   }

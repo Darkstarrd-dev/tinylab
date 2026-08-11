@@ -449,15 +449,20 @@ func (h *Handler) galleryEditCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // galleryEditUploadTemp accepts a raw file body (with optional ?name= query
-// param for extension detection) and registers it as an owner-bound asset,
-// returning { assetId }. Used by the frontend to materialize FSAA/drag-drop
+// param) and registers it as an owner-bound asset, returning { assetId }. The
+// requested basename is preserved (sanitized to a safe basename by the asset
+// store) so a later zip-outputs pack keeps frame_001.png-style entry names
+// instead of collapsing every frame to "upload.png"; the extension still
+// drives mime detection. Used by the frontend to materialize FSAA/drag-drop
 // items that lack a disk path.
 // POST /api/gallery/edit/upload-temp?name=video.mp4
 func (h *Handler) galleryEditUploadTemp(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
-	ext := strings.ToLower(filepath.Ext(name))
-	if ext == "" {
-		ext = ".bin"
+	if name == "" {
+		name = "upload"
+	}
+	if strings.ToLower(filepath.Ext(name)) == "" {
+		name += ".bin"
 	}
 	ownerID := owner.From(r.Context())
 	st, err := h.assetStore()
@@ -467,7 +472,7 @@ func (h *Handler) galleryEditUploadTemp(w http.ResponseWriter, r *http.Request) 
 	}
 	// Cap the upload at 500MB (matches galleryListZip) so a huge body cannot
 	// exhaust disk/temp space.
-	ref, err := st.Create(r.Context(), ownerID, "upload", "upload"+ext, mimeForGallery("x"+ext), http.MaxBytesReader(w, r.Body, 500<<20), 500<<20)
+	ref, err := st.Create(r.Context(), ownerID, "upload", name, mimeForGallery(name), http.MaxBytesReader(w, r.Body, 500<<20), 500<<20)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "upload too large or write failed: "+err.Error())
 		return
@@ -597,11 +602,13 @@ func (h *Handler) galleryEditExtractZipEntry(w http.ResponseWriter, r *http.Requ
 // galleryEditZipOutputs creates a zip archive from the given registered
 // assets and registers it as a new asset. Used by the batch convert +
 // compress feature to bundle multiple converted images into a single zip.
-// POST /api/gallery/edit/zip-outputs
 //
 //	{ "assetIds": ["..."], "zipName": "converted", "cleanUp": true }
 //
-// Returns { "assetId": "...", "name": "...", "size": N }.
+// Returns { "assetId": "...", "name": "...", "size": N }. With cleanUp:true
+// the packed input assets are released on success AND on every failure path:
+// the frames were consumed into the zip either way, so a failed pack must not
+// leak registered assets until TTL.
 func (h *Handler) galleryEditZipOutputs(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Paths     []string `json:"paths"`     // legacy: rejected
@@ -629,6 +636,15 @@ func (h *Handler) galleryEditZipOutputs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if req.CleanUp {
+		// Release the packed input assets on every exit path (success or any
+		// pack failure) — they are consumed into the zip either way.
+		defer func() {
+			for _, id := range req.AssetIDs {
+				_ = st.Release(ownerID, id)
+			}
+		}()
+	}
 	zipName := filepath.Base(req.ZipName)
 	if zipName == "" || zipName == "." || zipName == string(filepath.Separator) {
 		zipName = "converted_images"
@@ -680,12 +696,6 @@ func (h *Handler) galleryEditZipOutputs(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "register zip asset: "+err.Error())
 		return
-	}
-
-	if req.CleanUp {
-		for _, id := range req.AssetIDs {
-			_ = st.Release(ownerID, id)
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

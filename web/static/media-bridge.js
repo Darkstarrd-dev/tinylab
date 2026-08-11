@@ -298,9 +298,16 @@
   /**
    * deliverPendingImports() — called by Gallery's own renderGallery after the
    * page is (re)rendered. Hands every queued asset to gallery-io.js
-   * galleryImportAssets (Gallery's own state writer) and consumes the tokens
-   * on success. The queue is NOT cleared by cleanupGallery, so switching away
-   * and back re-delivers pending handoffs.
+   * galleryImportAssets (Gallery's own state writer). Assets are delivered
+   * one at a time so acceptance is per-id:
+   *   - a call that resolves with importedCount > 0 means the asset was
+   *     explicitly accepted — its token is consumed;
+   *   - a rejected call (gallery rolled back its claim) or a skipped asset
+   *     (importedCount === 0, bytes unresolvable) stays queued and is retried
+   *     on the next delivery.
+   * The queue is NOT cleared by cleanupGallery, so switching away and back
+   * re-delivers pending handoffs; the bridge TTL sweep is the safety valve
+   * for tokens that never get accepted.
    */
   function deliverPendingImports() {
     if (!pendingImports.length) return Promise.resolve(0);
@@ -312,22 +319,35 @@
       return Promise.resolve(0);
     }
     var ids = pendingImports.slice();
-    var assets = [];
+    pendingImports.length = 0; // drain in place — _internals holds the reference
+    var total = 0;
+    var chain = Promise.resolve();
     ids.forEach(function (id) {
-      var rec = registry[id];
-      if (rec && !rec.consumed) assets.push(toAssetMetadata(rec));
-    });
-    pendingImports = [];
-    return Promise.resolve()
-      .then(function () { return galleryImportAssets(assets); })
-      .then(function (importedCount) {
-        ids.forEach(function (id) { consume(id); });
-        return importedCount || 0;
-      })
-      .catch(function (err) {
-        console.warn('MediaBridge deliverPendingImports failed:', err);
-        return 0;
+      chain = chain.then(function () {
+        var rec = registry[id];
+        if (!rec || rec.consumed) return; // released or expired meanwhile
+        return galleryImportAssets([toAssetMetadata(rec)]).then(function (importedCount) {
+          if (importedCount > 0) {
+            total += importedCount;
+            consume(id); // explicitly accepted
+          }
+          // importedCount === 0: skipped; stays queued for a later retry.
+        }, function () {
+          // Rejected: gallery rolled back its claim, so stay queued and let
+          // the next renderGallery delivery retry this asset.
+        });
       });
+    });
+    return chain.then(function () {
+      // Re-queue everything that was not consumed: failed/partial imports
+      // must leave undelivered tokens queued, never lost.
+      ids.forEach(function (id) {
+        var rec = registry[id];
+        if (!rec || rec.consumed) return;
+        if (pendingImports.indexOf(id) < 0) pendingImports.push(id);
+      });
+      return total;
+    });
   }
 
   /**
@@ -375,7 +395,7 @@
   function reset() {
     Object.keys(registry).forEach(function (id) { registry[id].blob = null; });
     Object.keys(registry).forEach(function (id) { delete registry[id]; });
-    pendingImports = [];
+    pendingImports.length = 0;
     archiveApi = null;
     unavailableNotified = false;
     if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }

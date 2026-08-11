@@ -100,6 +100,12 @@
   // contract (audit F-28): upload-temp registers each frame as an owner
   // asset ({ assetId }), and zip-outputs packs { assetIds } into a
   // registered zip served through the controlled /api/gallery/file URL.
+  //
+  // Frame assets are released on upload failure, pack failure AND success:
+  // fulfilled ids are tracked individually (a partially-rejected batch must
+  // not orphan the successfully registered frames), and the packed result
+  // asset is never released here — the MediaBridge token owns it until the
+  // Gallery imports it or the server TTL expires.
   // ------------------------------------------------------------------
 
   function uploadFrameAsset(canvasSrc, name) {
@@ -125,7 +131,12 @@
   }
 
   function exportZipViaArchive(total, outW, outH, zipName, spinnerText) {
-    var assetIds = [];
+    var registered = [];
+    function releaseRegistered() {
+      var ids = registered.slice();
+      registered = [];
+      for (var i = 0; i < ids.length; i++) releaseAsset(ids[i]);
+    }
     function uploadChunk(start, end) {
       var chunk = [];
       for (var i = start; i < end; i++) {
@@ -136,8 +147,22 @@
         renderCompositedFrame(i, frame);
         chunk.push(uploadFrameAsset(frame, name));
       }
-      return Promise.all(chunk).then(function (ids) {
-        for (var j = 0; j < ids.length; j++) assetIds.push(ids[j]);
+      // Settle every upload individually so fulfilled ids are tracked even
+      // when the batch partially rejects: a failed frame must never orphan
+      // the successfully registered ones.
+      return Promise.all(chunk.map(function (p) {
+        return p.then(function (id) {
+          registered.push(id);
+          return { ok: true };
+        }, function (err) {
+          return { ok: false, err: err };
+        });
+      })).then(function (results) {
+        var failed = results.filter(function (r) { return !r.ok; });
+        if (failed.length) {
+          var first = failed[0].err;
+          throw new Error((first && first.message) ? first.message : String(first));
+        }
         if (spinnerText) spinnerText.textContent = t('gifEditorPackingFrames', 'Packing frames...') + ' (' + end + '/' + total + ')';
       });
     }
@@ -152,17 +177,22 @@
       return fetch('/api/archive/pack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetIds: assetIds, format: 'zip', name: zipName })
+        body: JSON.stringify({ assetIds: registered.slice(), format: 'zip', name: zipName })
       }).then(function (r) {
         return r.json().catch(function () { return { error: 'HTTP ' + r.status }; });
       }).then(function (pack) {
         if (!pack || !pack.assetId) {
           throw new Error((pack && pack.error) || 'archive pack failed');
         }
-        // Frames are consumed into the pack — release server copies best-effort.
-        for (var i = 0; i < assetIds.length; i++) releaseAsset(assetIds[i]);
+        // Frames are consumed into the pack — release the server copies.
+        // The packed result asset is NOT released here.
+        releaseRegistered();
         return '/api/archive/assets/' + encodeURIComponent(pack.assetId);
       });
+    }).catch(function (err) {
+      // Upload or pack failure: release every successfully registered frame.
+      releaseRegistered();
+      throw err;
     });
   }
 
@@ -184,7 +214,7 @@
   }
 
   function exportZipLegacy(total, outW, outH, zipName, spinnerText) {
-    var assetIds = [];
+    var registered = [];
     function uploadChunk(start, end) {
       var chunk = [];
       for (var i = start; i < end; i++) {
@@ -195,8 +225,22 @@
         renderCompositedFrame(i, frame);
         chunk.push(uploadLegacyFramePng(frame, name));
       }
-      return Promise.all(chunk).then(function (ids) {
-        for (var j = 0; j < ids.length; j++) assetIds.push(ids[j]);
+      // Same settle-all discipline as the archive path: fulfilled uploads are
+      // tracked so a partially-rejected batch never loses track of the frames
+      // already registered server-side.
+      return Promise.all(chunk.map(function (p) {
+        return p.then(function (id) {
+          registered.push(id);
+          return { ok: true };
+        }, function (err) {
+          return { ok: false, err: err };
+        });
+      })).then(function (results) {
+        var failed = results.filter(function (r) { return !r.ok; });
+        if (failed.length) {
+          var first = failed[0].err;
+          throw new Error((first && first.message) ? first.message : String(first));
+        }
         if (spinnerText) spinnerText.textContent = t('gifEditorPackingFrames', 'Packing frames...') + ' (' + end + '/' + total + ')';
       });
     }
@@ -211,14 +255,22 @@
       return fetch('/api/gallery/edit/zip-outputs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetIds: assetIds, zipName: zipName, cleanUp: true })
+        body: JSON.stringify({ assetIds: registered.slice(), zipName: zipName, cleanUp: true })
       }).then(function (r) {
         return r.json().catch(function () { return { error: 'HTTP ' + r.status }; });
       }).then(function (zip) {
         if (zip.error || !zip.assetId) throw new Error(zip.error || 'zip pack failed');
-        // Serve the registered zip through the controlled asset URL; never a path.
+        // Server released the frame assets via cleanUp (success path); the
+        // packed zip asset stays registered — serve it through the
+        // controlled asset URL; never a path.
+        registered = [];
         return { url: '/api/gallery/file?assetId=' + encodeURIComponent(zip.assetId), name: zip.name || zipName };
       });
+    }).catch(function (err) {
+      // Pack failure: the server's cleanUp release (galleryEditZipOutputs)
+      // frees the registered frame assets. Upload-failure temps have no
+      // frontend release endpoint — the server TTL reclaims them.
+      throw err;
     });
   }
 
@@ -227,17 +279,10 @@
   // ------------------------------------------------------------------
 
   function exportSprite() {
-    var rowsInput = document.getElementById('gif-modal-sprite-rows');
-    var colsInput = document.getElementById('gif-modal-sprite-cols');
-    var startInput = document.getElementById('gif-modal-sprite-start-frame');
-
-    var rows = rowsInput ? (parseInt(rowsInput.value, 10) || 1) : 1;
-    var cols = colsInput ? (parseInt(colsInput.value, 10) || 1) : 1;
-    var startFrame = startInput ? (parseInt(startInput.value, 10) || 0) : 0;
-
-    rows = Math.max(1, rows);
-    cols = Math.max(1, cols);
-    startFrame = Math.max(0, startFrame);
+    var params = readSpriteParams();
+    var rows = params.rows;
+    var cols = params.cols;
+    var startFrame = params.startFrame;
 
     var dims = getOutputDimensions();
     var sheetW = dims.outW * cols;
@@ -282,17 +327,16 @@
             return;
           }
           core.hideSpinner();
-          modalPreviewBlob = blob;
-          modalPreviewMime = 'image/png';
-          modalPreviewFilename = 'SpriteSheet_' + Date.now() + '.png';
-
-          var previewImg = document.getElementById('gif-modal-preview-img');
-          if (previewImg) {
-            if (previewImg.src && previewImg.src.startsWith('blob:')) {
-              URL.revokeObjectURL(previewImg.src);
-            }
-            previewImg.src = URL.createObjectURL(blob);
-          }
+          if (!modalOpen) return; // modal closed while compositing
+          var filename = 'SpriteSheet_' + Date.now() + '.png';
+          previewCache.png = {
+            blob: blob,
+            filename: filename,
+            mime: 'image/png',
+            configKey: spriteConfigKey(dims.outW, dims.outH, rows, cols, startFrame)
+          };
+          setPreviewImage(blob);
+          setHandoff({ name: filename, mime: 'image/png', kind: 'image', format: 'png', blob: blob });
 
           var saveSpriteBtn = document.getElementById('gif-modal-save-sprite-btn');
           if (saveSpriteBtn) saveSpriteBtn.style.display = 'inline-flex';
@@ -363,12 +407,102 @@
   }
 
   // ------------------------------------------------------------------
-  // Export Modal & Dimension Coupling (W / H / Scale 3-way sync)
+  // Result state: per-format preview caches, Gallery handoff, lifecycle.
+  //
+  // GIF and Sprite Sheet previews live in SEPARATE caches keyed by the exact
+  // render settings that produced them. Save always re-checks format (MIME)
+  // and config key before reusing a cached result — never save PNG bytes as
+  // .gif or GIF bytes as .png, and never reuse a preview rendered under
+  // different W/H/quality/sprite settings.
   // ------------------------------------------------------------------
 
-  var modalPreviewBlob = null;
-  var modalPreviewMime = 'image/png';
-  var modalPreviewFilename = '';
+  var previewCache = {
+    gif: null, // { blob, filename, mime, configKey }
+    png: null  // { blob, filename, mime, configKey }
+  };
+  // handoff: { asset: MediaAsset, assetId, registerPromise } for the last
+  // successfully rendered result; consumed by the "Open in Gallery" button.
+  var handoff = null;
+  var modalOpen = false;
+  var currentEncoder = null;   // in-flight gif.js encoder (abortable)
+  var gifRenderTimeout = null; // 60s fail-safe timer for the GIF render
+  var previewObjectUrl = null; // blob: URL shown in the modal preview <img>
+
+  function gifConfigKey(outW, outH, quality, transEnabled) {
+    var slices = core.state.slices || [];
+    return [outW, outH, quality, transEnabled ? 1 : 0, slices.length].join('x');
+  }
+
+  function spriteConfigKey(outW, outH, rows, cols, startFrame) {
+    var slices = core.state.slices || [];
+    return [outW, outH, rows, cols, startFrame, slices.length].join('x');
+  }
+
+  function gifCacheFor(outW, outH, quality, transEnabled) {
+    var c = previewCache.gif;
+    if (c && c.mime === 'image/gif' && c.configKey === gifConfigKey(outW, outH, quality, transEnabled)) return c;
+    return null;
+  }
+
+  function pngCacheFor(outW, outH, rows, cols, startFrame) {
+    var c = previewCache.png;
+    if (c && c.mime === 'image/png' && c.configKey === spriteConfigKey(outW, outH, rows, cols, startFrame)) return c;
+    return null;
+  }
+
+  function readSpriteParams() {
+    var rowsInput = document.getElementById('gif-modal-sprite-rows');
+    var colsInput = document.getElementById('gif-modal-sprite-cols');
+    var startInput = document.getElementById('gif-modal-sprite-start-frame');
+    return {
+      rows: Math.max(1, rowsInput ? (parseInt(rowsInput.value, 10) || 1) : 1),
+      cols: Math.max(1, colsInput ? (parseInt(colsInput.value, 10) || 1) : 1),
+      startFrame: Math.max(0, startInput ? (parseInt(startInput.value, 10) || 0) : 0)
+    };
+  }
+
+  function setPreviewImage(blob) {
+    var previewImg = document.getElementById('gif-modal-preview-img');
+    if (!previewImg) return;
+    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = URL.createObjectURL(blob);
+    previewImg.src = previewObjectUrl;
+  }
+
+  function revokePreviewUrl() {
+    if (previewObjectUrl) {
+      URL.revokeObjectURL(previewObjectUrl);
+      previewObjectUrl = null;
+    }
+    var previewImg = document.getElementById('gif-modal-preview-img');
+    if (previewImg) previewImg.removeAttribute('src');
+  }
+
+  function setHandoff(asset) {
+    handoff = asset ? { asset: asset, assetId: null, registerPromise: null } : null;
+    var btn = document.getElementById('gif-modal-open-gallery-btn');
+    if (btn) btn.disabled = !asset;
+  }
+
+  // Open the last rendered result in Gallery through MediaBridge (the only
+  // sanctioned handoff channel). Registration is lazy: it happens on the
+  // first click so previewing never mirrors bytes server-side unless the
+  // user actually asks for the handoff.
+  function openResultInGallery() {
+    if (!handoff || !window.MediaBridge || !window.MediaBridge.register) return;
+    if (!handoff.registerPromise) {
+      handoff.registerPromise = window.MediaBridge.register(handoff.asset)
+        .then(function (assetId) {
+          handoff.assetId = assetId || null;
+          return handoff.assetId;
+        })
+        .catch(function () { handoff.assetId = null; return null; });
+    }
+    handoff.registerPromise.then(function (assetId) {
+      if (assetId && window.MediaBridge.openGallery) window.MediaBridge.openGallery(assetId);
+    });
+  }
+
 
   function openExportModal() {
     var slices = core.state.slices || [];
@@ -390,16 +524,17 @@
     var isMultiFrame = (slices.length > 1);
     var spriteSectionDisplay = isMultiFrame ? 'display: block;' : 'display: none;';
 
-    modalPreviewBlob = null;
-    modalPreviewMime = 'image/png';
-    modalPreviewFilename = '';
+    modalOpen = true;
+    previewCache.gif = null;
+    previewCache.png = null;
+    setHandoff(null);
 
     var html = '' +
       '<div class="modal gif-export-modal">' +
       '  <div class="modal-title" data-i18n="gifEditorExportModalTitle">' + t('gifEditorExportModalTitle', 'Export GIF & Frame Settings') + '</div>' +
       '  <div class="modal-body">' +
       '    <div class="gif-export-preview-container" style="text-align: center; margin-bottom: 16px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px;">' +
-      '      <img id="gif-modal-preview-img" class="gif-export-preview-img" style="max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 4px;" alt="Export preview">' +
+'      <img id="gif-modal-preview-img" class="gif-export-preview-img" style="max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 4px;" alt="' + t('gifEditorExportPreviewAlt', 'Export preview') + '">' +
       '    </div>' +
       '    <div class="gif-control-row" style="margin-bottom: 12px; gap: 12px;">' +
       '      <div class="gif-input-with-label">' +
@@ -466,12 +601,15 @@
       '    </div>' +
       '  </div>' +
       '  <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">' +
-      '    <button type="button" class="btn btn-ghost" id="gif-modal-preview-btn">Preview</button>' +
+'    <button type="button" class="btn btn-ghost" id="gif-modal-preview-btn" data-i18n="gifEditorPreviewBtn">' + t('gifEditorPreviewBtn', 'Preview') + '</button>' +
       '    <div style="display: flex; gap: 8px;">' +
       '      <button type="button" class="btn btn-ghost" id="gif-modal-save-zip-btn" data-i18n="gifEditorSaveAsZip">' + t('gifEditorSaveAsZip', '📦 Save as ZIP') + '</button>' +
       '      <button type="button" class="btn btn-primary" id="gif-modal-save-gif-btn" data-i18n="gifEditorSaveAsGif">' + t('gifEditorSaveAsGif', '💾 Save as GIF') + '</button>' +
       '    </div>' +
-      '    <button type="button" class="btn btn-ghost" id="gif-modal-close-btn" data-i18n="gifEditorClose">' + t('gifEditorClose', 'Close') + '</button>' +
+      '    <div style="display: flex; gap: 8px;">' +
+      '      <button type="button" class="btn btn-ghost" id="gif-modal-open-gallery-btn" disabled data-i18n="gifEditorOpenGallery">' + t('gifEditorOpenGallery', 'Open in Gallery') + '</button>' +
+      '      <button type="button" class="btn btn-ghost" id="gif-modal-close-btn" data-i18n="gifEditorClose">' + t('gifEditorClose', 'Close') + '</button>' +
+      '    </div>' +
       '  </div>' +
       '</div>';
 
@@ -572,14 +710,7 @@
       previewBtn.addEventListener('click', function () {
         renderGifBlobFromModal(function (blob) {
           if (!blob) return;
-          modalPreviewBlob = blob;
-          var previewImg = document.getElementById('gif-modal-preview-img');
-          if (previewImg) {
-            if (previewImg.src && previewImg.src.startsWith('blob:')) {
-              URL.revokeObjectURL(previewImg.src);
-            }
-            previewImg.src = URL.createObjectURL(blob);
-          }
+          setPreviewImage(blob);
         });
       });
     }
@@ -593,9 +724,12 @@
     }
     if (saveSpriteBtn) {
       saveSpriteBtn.addEventListener('click', function () {
-        var filename = modalPreviewFilename || ('SpriteSheet_' + Date.now() + '.png');
-        if (modalPreviewBlob) {
-          triggerSaveFileWithPicker(modalPreviewBlob, filename, 'image/png');
+        var filename = 'SpriteSheet_' + Date.now() + '.png';
+        var dims = getOutputDimensions();
+        var params = readSpriteParams();
+        var cached = pngCacheFor(dims.outW, dims.outH, params.rows, params.cols, params.startFrame);
+        if (cached && cached.blob && cached.mime === 'image/png') {
+          triggerSaveFileWithPicker(cached.blob, filename, 'image/png');
         } else {
           exportSprite();
         }
@@ -605,8 +739,15 @@
     if (saveGifBtn) {
       saveGifBtn.addEventListener('click', function () {
         var filename = 'Slice_' + Date.now() + '.gif';
-        if (modalPreviewBlob) {
-          triggerSaveFileWithPicker(modalPreviewBlob, filename, 'image/gif');
+        var wInput = document.getElementById('gif-modal-w');
+        var hInput = document.getElementById('gif-modal-h');
+        var qualityInput = document.getElementById('gif-modal-quality-slider');
+        var outW = wInput ? (parseInt(wInput.value, 10) || 400) : 400;
+        var outH = hInput ? (parseInt(hInput.value, 10) || 300) : 300;
+        var quality = qualityInput ? (parseInt(qualityInput.value, 10) || 10) : 10;
+        var cached = gifCacheFor(outW, outH, quality, isTransparencyEnabled());
+        if (cached && cached.blob && cached.mime === 'image/gif') {
+          triggerSaveFileWithPicker(cached.blob, filename, 'image/gif');
         } else {
           renderGifBlobFromModal(function (blob) {
             if (blob) triggerSaveFileWithPicker(blob, filename, 'image/gif');
@@ -626,14 +767,11 @@
     }
 
     if (closeBtn) {
-      closeBtn.addEventListener('click', function () {
-        var overlay = document.getElementById('modal-overlay');
-        if (overlay) {
-          overlay.classList.remove('show');
-          overlay.innerHTML = '';
-        }
-      });
+      closeBtn.addEventListener('click', closeExportModal);
     }
+
+    var openGalleryBtn = document.getElementById('gif-modal-open-gallery-btn');
+    if (openGalleryBtn) openGalleryBtn.addEventListener('click', openResultInGallery);
   }
 
   function renderGifBlobFromModal(callback) {
@@ -666,6 +804,7 @@
           if (transEnabled) gifOptions.transparent = core.constants.MATTE_NUM;
 
           var encoder = new GIF(gifOptions);
+          currentEncoder = encoder;
           var tmpCanvas = document.createElement('canvas');
           tmpCanvas.width = outW;
           tmpCanvas.height = outH;
@@ -682,32 +821,51 @@
           }
 
           var settled = false;
+          var settle = function () {
+            if (settled) return;
+            settled = true;
+            if (gifRenderTimeout) { clearTimeout(gifRenderTimeout); gifRenderTimeout = null; }
+            currentEncoder = null;
+          };
           encoder.on('progress', function (p) {
             core.showSpinner(t('gifEditorExtractingPct', 'Extracting: {0}%').replace('{0}', Math.round(p * 100)));
           });
           encoder.on('finished', function (blob) {
-            if (settled) return;
-            settled = true;
+            settle();
             core.hideSpinner();
+            if (!modalOpen) return; // modal closed mid-render: drop the result
+            var filename = 'Slice_' + Date.now() + '.gif';
+            previewCache.gif = {
+              blob: blob,
+              filename: filename,
+              mime: 'image/gif',
+              configKey: gifConfigKey(outW, outH, quality, transEnabled)
+            };
+            setHandoff({ name: filename, mime: 'image/gif', kind: 'image', format: 'gif', blob: blob });
             if (callback) callback(blob);
           });
           encoder.on('abort', function () {
-            if (settled) return;
-            settled = true;
+            settle();
             core.hideSpinner();
-            alert(t('gifEditorRenderFail', 'GIF render failed.'));
+            // Intentional close-abort or a real failure: only surface an
+            // alert while the modal is still open so the UI stays usable.
+            if (modalOpen) alert(t('gifEditorRenderFail', 'GIF render failed.'));
           });
           encoder.render();
 
-          setTimeout(function () {
-            if (!settled) {
-              settled = true;
-              core.hideSpinner();
-              alert(t('gifEditorRenderFail', 'GIF render failed.'));
+          // Fail-safe: if the worker never reports back, abort and recover.
+          gifRenderTimeout = setTimeout(function () {
+            if (settled) return;
+            if (currentEncoder && typeof currentEncoder.abort === 'function') {
+              try { currentEncoder.abort(); } catch (e) {}
             }
+            settle();
+            core.hideSpinner();
+            if (modalOpen) alert(t('gifEditorRenderFail', 'GIF render failed.'));
           }, 60000);
         } catch (err) {
           console.error(err);
+          currentEncoder = null;
           core.hideSpinner();
           alert(t('gifEditorRenderFail', 'GIF render failed.'));
         }
@@ -741,8 +899,10 @@
       });
     })().then(function (result) {
       core.hideSpinner();
+      if (!modalOpen) return; // modal closed while packing: drop the handoff
       var url = (typeof result === 'string') ? result : result.url;
       var name = (typeof result === 'string') ? zipName : result.name;
+      setHandoff({ name: name, mime: 'application/zip', kind: 'archive', format: 'zip', url: url });
       triggerSaveFileWithPicker(url, name, 'application/zip');
     }).catch(function (err) {
       core.hideSpinner();
@@ -751,18 +911,56 @@
     });
   }
 
+  function handleModalCloseEvent() {
+    if (modalOpen) closeExportModal();
+  }
+
+  function closeExportModal() {
+    // Stop any in-flight encoder first (its 'abort' handler checks modalOpen
+    // and suppresses the failure alert), then release the preview URL and
+    // drop the result caches so nothing outlives the modal.
+    modalOpen = false;
+    if (currentEncoder && typeof currentEncoder.abort === 'function') {
+      try { currentEncoder.abort(); } catch (e) {}
+    }
+    currentEncoder = null;
+    if (gifRenderTimeout) { clearTimeout(gifRenderTimeout); gifRenderTimeout = null; }
+    revokePreviewUrl();
+    previewCache.gif = null;
+    previewCache.png = null;
+    setHandoff(null);
+    var overlay = document.getElementById('modal-overlay');
+    if (overlay) {
+      overlay.classList.remove('show');
+      overlay.innerHTML = '';
+    }
+  }
+
   function bindEvents() {
     var openExportBtn = document.getElementById('gif-open-export-btn');
     if (openExportBtn) openExportBtn.addEventListener('click', openExportModal);
+    document.addEventListener('tinyrouter:modal-close', handleModalCloseEvent);
   }
 
   function cleanup() {
-    // Result-overlay teardown was removed with the overlay (M2).
+    document.removeEventListener('tinyrouter:modal-close', handleModalCloseEvent);
+    if (currentEncoder && typeof currentEncoder.abort === 'function') {
+      try { currentEncoder.abort(); } catch (e) {}
+    }
+    currentEncoder = null;
+    if (gifRenderTimeout) { clearTimeout(gifRenderTimeout); gifRenderTimeout = null; }
+    revokePreviewUrl();
+    previewCache.gif = null;
+    previewCache.png = null;
+    setHandoff(null);
+    modalOpen = false;
   }
 
   var exportApi = {
     sprite: exportSprite,
     openExportModal: openExportModal,
+    openResultInGallery: openResultInGallery,
+    closeResult: closeExportModal,
     bindEvents: bindEvents,
     cleanup: cleanup
   };

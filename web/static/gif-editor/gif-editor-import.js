@@ -34,6 +34,7 @@
   var previewDebounceTimer = null;
   var commitGeneration = 0;   // bumped on cancel/open/cleanup; stale commits abort silently
   var splitDrag = null;         // active split-line drag on the import preview canvas: { axis, index, canvas, pointerId }
+  var draftGeneration = 0;  // bumped on cancel/open/cleanup; stale metadata reads abort silently
 
   // ------------------------------------------------------------------
   // Helper functions
@@ -147,19 +148,23 @@
     };
     core.state.importDraft = draft;
 
+    // Capture the current draft generation: every async metadata read below
+    // verifies it before touching module state (cancel/open bumps it).
+    var gen = draftGeneration;
+
     if (kind === 'image') {
-      readImageMetadata();
+      readImageMetadata(gen);
     } else if (kind === 'gif') {
-      readGifMetadata();
+      readGifMetadata(gen);
     } else if (kind === 'video') {
-      readVideoMetadata();
+      readVideoMetadata(gen);
     }
   }
 
-  function readImageMetadata() {
+  function readImageMetadata(gen) {
     var img = new Image();
     img.onload = function () {
-      if (!draft || draft.objectUrl !== img.src) return;
+      if (gen !== draftGeneration || !draft || draft.objectUrl !== img.src) return;
       draft.image = img;
       draft.sourceWidth = img.naturalWidth || img.width;
       draft.sourceHeight = img.naturalHeight || img.height;
@@ -175,6 +180,7 @@
       commitImportDraft();
     };
     img.onerror = function () {
+      if (gen !== draftGeneration || !draft) return;
       alert(t('gifEditorAlertLoadImageFailed', 'Failed to load image metadata.'));
       cancelDraft();
     };
@@ -255,10 +261,10 @@
     return composited;
   }
 
-  function readGifMetadata() {
+  function readGifMetadata(gen) {
     var reader = new FileReader();
     reader.onload = function (e) {
-      if (!draft) return;
+      if (gen !== draftGeneration || !draft) return;
       try {
         var buffer = e.target.result;
         var gif = parseGIF(buffer);
@@ -295,13 +301,14 @@
       }
     };
     reader.onerror = function () {
+      if (gen !== draftGeneration || !draft) return;
       alert(t('gifEditorAlertReadGifFailed', 'Failed to read GIF file.'));
       cancelDraft();
     };
     reader.readAsArrayBuffer(draft.file);
   }
 
-  function readVideoMetadata() {
+  function readVideoMetadata(gen) {
     var video = document.createElement('video');
     video.preload = 'metadata';
     video.src = draft.objectUrl;
@@ -309,7 +316,7 @@
     video.playsInline = true;
 
     video.onloadedmetadata = function () {
-      if (!draft || draft.objectUrl !== video.src) return;
+      if (gen !== draftGeneration || !draft || draft.objectUrl !== video.src) return;
       var duration = video.duration;
       if (!duration || isNaN(duration) || duration === Infinity || duration <= 0) {
         alert(t('gifEditorAlertVideoUnsupported', 'Video duration could not be determined.'));
@@ -330,6 +337,7 @@
     };
 
     video.onerror = function () {
+      if (gen !== draftGeneration || !draft) return;
       alert(t('gifEditorAlertVideoLoadFailed', 'Failed to load video file.'));
       cancelDraft();
     };
@@ -368,7 +376,7 @@
 
       '      <div class="gif-import-col">' +
       '        <div class="gif-import-label-row">' +
-      '          <label for="gif-import-scale" class="gif-import-label">Scale</label>' +
+      '          <label for="gif-import-scale" class="gif-import-label">' + t('gifEditorScale', 'Scale') + '</label>' +
       '          <span class="gif-import-value" id="gif-import-scale-display">' + draft.scalePercent + '%</span>' +
       '        </div>' +
       '        <input type="range" id="gif-import-scale" min="10" max="100" step="5" value="' + Math.min(100, draft.scalePercent) + '">' +
@@ -377,15 +385,15 @@
       (isSingleFrame ? (
         '      <div class="gif-import-split-panel" style="border-top: 1px dashed var(--glass-border); padding-top: 8px; margin-top: 4px;">' +
         '        <div class="gif-import-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">' +
-        '          <span class="gif-import-label" style="font-weight: bold; color: var(--accent-color);">Sprite Sheet Grid Split</span>' +
+      '          <span class="gif-import-label" style="font-weight: bold; color: var(--accent-color);">' + t('gifEditorGridSplitTitle', 'Sprite Sheet Grid Split') + '</span>' +
         '          <div class="gif-split-mode-toggle" id="gif-import-split-mode-toggle">' +
-        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode !== 'uneven' ? 'active' : '') + '" data-mode="even">Even</button>' +
-        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode === 'uneven' ? 'active' : '') + '" data-mode="uneven">Uneven</button>' +
+        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode !== 'uneven' ? 'active' : '') + '" data-mode="even">' + t('gifEditorEven', 'Even') + '</button>' +
+        '            <button type="button" class="gif-split-mode-btn ' + (draft.splitMode === 'uneven' ? 'active' : '') + '" data-mode="uneven">' + t('gifEditorUneven', 'Uneven') + '</button>' +
         '          </div>' +
         '        </div>' +
         '        <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-cols" class="gif-import-label" id="gif-import-cols-label">' + (draft.splitMode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):') + '</label>' +
+        '            <label for="gif-import-cols" class="gif-import-label" id="gif-import-cols-label">' + (draft.splitMode === 'uneven' ? t('gifEditorCellWidth', 'Cell Width (px):') : t('gifEditorSplitX', 'X (Horizontal Split):')) + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-cols\', -1)">-</button>' +
         '              <input type="number" class="stepper-input" id="gif-import-cols" min="1" max="' + (draft.splitMode === 'uneven' ? '9999' : '100') + '" value="' + (draft.splitCols || (draft.splitMode === 'uneven' ? 64 : 3)) + '">' +
@@ -393,7 +401,7 @@
         '            </div>' +
         '          </div>' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-rows" class="gif-import-label" id="gif-import-rows-label">' + (draft.splitMode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):') + '</label>' +
+        '            <label for="gif-import-rows" class="gif-import-label" id="gif-import-rows-label">' + (draft.splitMode === 'uneven' ? t('gifEditorCellHeight', 'Cell Height (px):') : t('gifEditorSplitY', 'Y (Vertical Split):')) + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-rows\', -1)">-</button>' +
         '              <input type="number" class="stepper-input" id="gif-import-rows" min="1" max="' + (draft.splitMode === 'uneven' ? '9999' : '100') + '" value="' + (draft.splitRows || (draft.splitMode === 'uneven' ? 64 : 3)) + '">' +
@@ -403,7 +411,7 @@
         '        </div>' +
         '        <div class="gif-import-control-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-inner-gap" class="gif-import-label">Center Gap (px):</label>' +
+      '            <label for="gif-import-inner-gap" class="gif-import-label">' + t('gifEditorCenterGap', 'Center Gap (px):') + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-inner-gap\', -1)">-</button>' +
         '              <input type="number" class="stepper-input" id="gif-import-inner-gap" min="0" max="500" value="' + (draft.innerGap || 0) + '">' +
@@ -411,7 +419,7 @@
         '            </div>' +
         '          </div>' +
         '          <div class="gif-import-field-vert">' +
-        '            <label for="gif-import-outer-margin" class="gif-import-label">Outer Margin (px):</label>' +
+      '            <label for="gif-import-outer-margin" class="gif-import-label">' + t('gifEditorOuterMargin', 'Outer Margin (px):') + '</label>' +
         '            <div class="number-stepper">' +
         '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-import-outer-margin\', -1)">-</button>' +
         '              <input type="number" class="stepper-input" id="gif-import-outer-margin" min="0" max="500" value="' + (draft.outerMargin || 0) + '">' +
@@ -420,7 +428,7 @@
         '          </div>' +
         '        </div>' +
         '        <div class="gif-import-row" style="margin-bottom: 6px;">' +
-        '          <label class="gif-check-label"><input type="checkbox" id="gif-import-enable-outer" ' + (draft.enableOuterGap ? 'checked' : '') + '> <span>Enable outer border gap</span></label>' +
+      '          <label class="gif-check-label"><input type="checkbox" id="gif-import-enable-outer" ' + (draft.enableOuterGap ? 'checked' : '') + '> <span>' + t('gifEditorEnableOuterGap', 'Enable outer border gap') + '</span></label>' +
         '        </div>' +
         '      </div>'
       ) : (
@@ -532,8 +540,8 @@
     var modeToggle = document.getElementById('gif-import-split-mode-toggle');
 
     var updateImportSplitLabels = function (mode) {
-      if (colsLabel) colsLabel.textContent = mode === 'uneven' ? 'Cell Width (px):' : 'X (Horizontal Split):';
-      if (rowsLabel) rowsLabel.textContent = mode === 'uneven' ? 'Cell Height (px):' : 'Y (Vertical Split):';
+      if (colsLabel) colsLabel.textContent = mode === 'uneven' ? t('gifEditorCellWidth', 'Cell Width (px):') : t('gifEditorSplitX', 'X (Horizontal Split):');
+      if (rowsLabel) rowsLabel.textContent = mode === 'uneven' ? t('gifEditorCellHeight', 'Cell Height (px):') : t('gifEditorSplitY', 'Y (Vertical Split):');
       if (colsInput) colsInput.max = mode === 'uneven' ? '9999' : '100';
       if (rowsInput) rowsInput.max = mode === 'uneven' ? '9999' : '100';
     };
@@ -708,8 +716,11 @@
     var targetH = Math.max(1, Math.round(draft.sourceHeight * draft.scalePercent / 100));
     var cols = Math.max(1, draft.splitCols || 1);
     var rows = Math.max(1, draft.splitRows || 1);
-    var innerGap = Math.round((draft.innerGap || 0) * (draft.scalePercent / 100));
-    var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * (draft.scalePercent / 100)) : 0;
+    // Gap/margin are OUTPUT pixels: the preview canvas and the commit math
+    // both apply them unscaled to the scaled target, so the drag geometry
+    // must match (no extra scalePercent multiplication here).
+    var innerGap = Math.max(0, parseInt(draft.innerGap || 0, 10) || 0);
+    var outerMargin = draft.enableOuterGap ? Math.max(0, parseInt(draft.outerMargin || 0, 10) || 0) : 0;
     var availW = Math.max(0, targetW - outerMargin * 2 - innerGap * (cols - 1));
     var availH = Math.max(0, targetH - outerMargin * 2 - innerGap * (rows - 1));
     return {
@@ -1041,8 +1052,8 @@
     }
 
     commitPromise.then(function (nextSlices) {
-      if (gen !== commitGeneration) return; // stale: cancelled / replaced
       core.hideSpinner();
+      if (gen !== commitGeneration) return; // stale: cancelled / replaced
       if (!nextSlices || !nextSlices.length) {
         handleCommitError(gen, new Error('No frames extracted.'));
         return;
@@ -1058,6 +1069,10 @@
       core.state.source.durationMs = (currentDraft.endMs - currentDraft.startMs);
       core.state.source.sourceFps = currentDraft.fps;
       core.state.source.gridSliced = false;
+      // Drop any image backup left over from a previous image project so a
+      // later Split Sheet can never roll back to a stale rawImage.
+      core.state.source.image = null;
+      core.state.source.rawImage = null;
 
       if (currentDraft.kind === 'image' && nextSlices[0]) {
         core.state.processedImg = nextSlices[0].canvas;
@@ -1094,8 +1109,8 @@
         if (core.commands.resetView) core.commands.resetView();
       }, 60);
     }).catch(function (err) {
-      if (gen !== commitGeneration) return; // stale failure: stay silent
       core.hideSpinner();
+      if (gen !== commitGeneration) return; // stale failure: stay silent
       handleCommitError(gen, err);
     });
   }
@@ -1181,10 +1196,20 @@
         for (var i = 0; i < frames.length; i++) {
           var g = frames[i];
           if (g.endMs > startMs && g.startMs < endMs) {
+            // gifuct-js delays are already milliseconds. When the selected
+            // range cuts into a frame (first/last), trim its delay to the
+            // overlapping span so the committed playback duration equals
+            // endMs - startMs; interior frames keep their full delay.
+            var frameDelay = g.delay;
+            var frameStart = Math.max(g.startMs, startMs);
+            var frameEnd = Math.min(g.endMs, endMs);
+            if (frameStart > g.startMs || frameEnd < g.endMs) {
+              frameDelay = Math.max(1, Math.round(frameEnd - frameStart));
+            }
             nextSlices.push({
               id: core.freshId(),
               canvas: scaleCanvas(g.canvas),
-              delay: g.delay,
+              delay: frameDelay,
               layers: []
             });
             included++;
@@ -1290,7 +1315,8 @@
 
   function cancelDraft() {
     endSplitDrag();
-    commitGeneration++; // abort any in-flight commit
+    commitGeneration++;  // abort any in-flight commit
+    draftGeneration++;   // abort any in-flight metadata read (FileReader/img/video)
     if (previewDebounceTimer) {
       clearTimeout(previewDebounceTimer);
       previewDebounceTimer = null;
@@ -1309,6 +1335,9 @@
       draft = null;
     }
     core.state.importDraft = null;
+    // Cancel must never leave the extracting flag / spinner behind: a stale
+    // true here would block keyboard input app-wide after page leave.
+    core.hideSpinner();
   }
 
   // Named so cleanup() can remove it (no listener accumulation across renders).
@@ -1329,7 +1358,12 @@
 
   function splitImage(opts) {
     opts = opts || {};
-    var srcCanvas = (core.state.source && (core.state.source.rawImage || core.state.source.image)) || core.state.processedImg;
+    // Canonical input is the CURRENT edited frame (transparency / crop /
+    // resize all refresh processedImg), not a stale import-time rawImage
+    // backup. Fall back to the first slice, then the source backup.
+    var srcCanvas = core.state.processedImg ||
+      ((core.state.slices && core.state.slices[0] && core.state.slices[0].canvas) || null) ||
+      (core.state.source && (core.state.source.rawImage || core.state.source.image));
     if (!srcCanvas) return Promise.reject(new Error('No image source available'));
 
     var sourceWidth = srcCanvas.width || srcCanvas.naturalWidth || 800;

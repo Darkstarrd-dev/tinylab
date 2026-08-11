@@ -213,10 +213,12 @@ async function main() {
     assert.strictEqual(opened, true);
     assert.strictEqual(calls.navigateTo, 'gallery');
     await bridge.deliverPendingImports();
-    assert.strictEqual(calls.galleryImports.length, 1);
+    // Delivery is per-asset so acceptance can be tracked per id; both calls
+    // resolve with a full accept here.
+    assert.strictEqual(calls.galleryImports.length, 2, 'one delivery call per asset');
     // NOTE: the sandbox realm has its own Array.prototype, so compare by
     // membership instead of deepStrictEqual (which is prototype-sensitive).
-    const gotIds = calls.galleryImports[0].map((x) => x.assetId);
+    const gotIds = calls.galleryImports.map((x) => x[0].assetId);
     assert.strictEqual(gotIds.length, 2);
     assert(gotIds.indexOf(a) >= 0 && gotIds.indexOf(b) >= 0, 'both assets delivered');
     assert.strictEqual(bridge.getAsset(a), null);
@@ -241,10 +243,12 @@ async function main() {
     const bridge = loadBridge(sandbox);
     const id = await bridge.register({ name: 'out.gif', mime: 'image/gif', kind: 'image', blob: gifBlob });
     bridge.openGallery(id);
+    assert.strictEqual(bridge._internals.pendingImports.length, 1, 'queued once');
+    // Re-opening the same asset while already on the Gallery page flushes
+    // the queue; the queue-time dedupe prevents double delivery.
     bridge.openGallery(id);
-    assert.strictEqual(bridge._internals.pendingImports.length, 1);
-    await bridge.deliverPendingImports();
-    assert.strictEqual(calls.galleryImports.length, 1);
+    await new Promise((r) => setImmediate(r)); // let the on-page delivery run
+    assert.strictEqual(calls.galleryImports.length, 1, 'delivered once despite repeated open');
     // A second deliver (page re-render) must not re-import consumed tokens.
     await bridge.deliverPendingImports();
     assert.strictEqual(calls.galleryImports.length, 1);
@@ -323,6 +327,49 @@ async function main() {
     const count = await bridge.deliverPendingImports();
     assert.strictEqual(count, 0);
     assert.strictEqual(calls.galleryImports.length, 0);
+  });
+
+  // ---- 15. failed delivery retries: token stays queued -----------------
+  await check('rejected gallery import leaves the token queued and retries later', async () => {
+    const { sandbox, calls } = makeEnv({ statusOk: false });
+    const bridge = loadBridge(sandbox);
+    const id = await bridge.register({ name: 'out.gif', mime: 'image/gif', kind: 'image', format: 'gif', blob: gifBlob });
+    let fails = 1;
+    sandbox.galleryImportAssets = function (assets) {
+      calls.galleryImports.push(assets);
+      if (fails > 0) {
+        fails--;
+        return Promise.reject(new Error('gallery boom'));
+      }
+      return Promise.resolve(assets.length);
+    };
+    bridge.openGallery(id);
+    const count = await bridge.deliverPendingImports();
+    assert.strictEqual(count, 0);
+    assert(bridge.getAsset(id) !== null, 'failed token survives');
+    assert(bridge._internals.pendingImports.indexOf(id) >= 0, 'failed token re-queued');
+    const again = await bridge.deliverPendingImports();
+    assert.strictEqual(again, 1);
+    assert.strictEqual(bridge.getAsset(id), null, 'retry consumed the token');
+  });
+  // ---- 16. partial import: only explicitly accepted ids are consumed ---
+  await check('partial import consumes only accepted ids, skipped stays queued', async () => {
+    const { sandbox, calls } = makeEnv({ statusOk: false });
+    const bridge = loadBridge(sandbox);
+    const ok = await bridge.register({ name: 'ok.gif', mime: 'image/gif', kind: 'image', format: 'gif', blob: gifBlob });
+    const skip = await bridge.register({ name: 'skip.png', mime: 'image/png', kind: 'image', format: 'png', blob: gifBlob });
+    // The gallery accepts the first asset but cannot resolve bytes for the
+    // second (importedCount 0 = skipped).
+    sandbox.galleryImportAssets = function (assets) {
+      calls.galleryImports.push(assets);
+      return assets[0].assetId === ok ? Promise.resolve(1) : Promise.resolve(0);
+    };
+    bridge.openGallery([ok, skip]);
+    const count = await bridge.deliverPendingImports();
+    assert.strictEqual(count, 1);
+    assert.strictEqual(bridge.getAsset(ok), null, 'accepted token consumed');
+    assert(bridge.getAsset(skip) !== null, 'skipped token survives');
+    assert(bridge._internals.pendingImports.indexOf(skip) >= 0, 'skipped token stays queued');
   });
 
   console.log(failures === 0 ? '\nmedia-bridge.test.js: all checks passed' : '\nmedia-bridge.test.js: ' + failures + ' check(s) failed');
