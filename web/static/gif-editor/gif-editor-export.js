@@ -39,10 +39,11 @@
     return { outW: Math.max(1, Math.round(outW)), outH: Math.max(1, Math.round(outH)) };
   }
 
-  function checkExportMemory(outW, outH, factor) {
+  function checkExportMemory(outW, outH, factor, isSingleSheet) {
     var slices = core.state.slices || [];
     if (!slices.length) return true;
-    var bytes = slices.length * outW * outH * 4 * (factor || 3);
+    var frameCount = isSingleSheet ? 1 : slices.length;
+    var bytes = frameCount * outW * outH * 4 * (factor || 3);
     if (bytes > core.constants.EXPORT_MEM_LIMIT) {
       var msg = t('gifEditorExportWarn', 'Estimated peak export memory is {0}MB. Continue?').replace('{0}', Math.round(bytes / 1048576));
       return confirm(msg);
@@ -228,16 +229,21 @@
   function exportSprite() {
     var rowsInput = document.getElementById('gif-modal-sprite-rows');
     var colsInput = document.getElementById('gif-modal-sprite-cols');
+    var startInput = document.getElementById('gif-modal-sprite-start-frame');
+
     var rows = rowsInput ? (parseInt(rowsInput.value, 10) || 1) : 1;
     var cols = colsInput ? (parseInt(colsInput.value, 10) || 1) : 1;
+    var startFrame = startInput ? (parseInt(startInput.value, 10) || 0) : 0;
+
     rows = Math.max(1, rows);
     cols = Math.max(1, cols);
+    startFrame = Math.max(0, startFrame);
 
     var dims = getOutputDimensions();
     var sheetW = dims.outW * cols;
     var sheetH = dims.outH * rows;
 
-    if (!checkExportMemory(sheetW, sheetH, 1)) return;
+    if (!checkExportMemory(sheetW, sheetH, 1, true)) return;
 
     core.showSpinner(t('gifEditorGeneratingSheet', 'Generating sprite sheet...'));
 
@@ -247,17 +253,26 @@
         sheetCanvas.width = sheetW;
         sheetCanvas.height = sheetH;
         var sCtx = sheetCanvas.getContext('2d');
+        sCtx.clearRect(0, 0, sheetW, sheetH);
 
         var tmpCanvas = document.createElement('canvas');
         tmpCanvas.width = dims.outW;
         tmpCanvas.height = dims.outH;
 
-        for (var i = 0; i < slices.length; i++) {
-          var r = Math.floor(i / cols);
-          var c = i % cols;
+        var totalCells = cols * rows;
+        var slices = core.state.slices || [];
+
+        for (var k = 0; k < totalCells; k++) {
+          var r = Math.floor(k / cols);
+          var c = k % cols;
           if (r >= rows) break;
-          renderCompositedFrame(i, tmpCanvas);
-          sCtx.drawImage(tmpCanvas, c * dims.outW, r * dims.outH, dims.outW, dims.outH);
+
+          var frameIdx = startFrame + k;
+          if (frameIdx < slices.length && slices[frameIdx]) {
+            renderCompositedFrame(frameIdx, tmpCanvas);
+            sCtx.drawImage(tmpCanvas, c * dims.outW, r * dims.outH, dims.outW, dims.outH);
+          }
+          // If frameIdx >= slices.length, grid cell is left empty (transparent)
         }
 
         sheetCanvas.toBlob(function (blob) {
@@ -267,7 +282,10 @@
             return;
           }
           core.hideSpinner();
-          var name = 'SpriteSheet_' + Date.now() + '.png';
+          modalPreviewBlob = blob;
+          modalPreviewMime = 'image/png';
+          modalPreviewFilename = 'SpriteSheet_' + Date.now() + '.png';
+
           var previewImg = document.getElementById('gif-modal-preview-img');
           if (previewImg) {
             if (previewImg.src && previewImg.src.startsWith('blob:')) {
@@ -275,7 +293,9 @@
             }
             previewImg.src = URL.createObjectURL(blob);
           }
-          triggerSaveFileWithPicker(blob, name, 'image/png');
+
+          var saveSpriteBtn = document.getElementById('gif-modal-save-sprite-btn');
+          if (saveSpriteBtn) saveSpriteBtn.style.display = 'inline-flex';
         }, 'image/png');
       } catch (err) {
         console.error(err);
@@ -347,6 +367,8 @@
   // ------------------------------------------------------------------
 
   var modalPreviewBlob = null;
+  var modalPreviewMime = 'image/png';
+  var modalPreviewFilename = '';
 
   function openExportModal() {
     var slices = core.state.slices || [];
@@ -365,15 +387,19 @@
     var curW = outWInput ? (parseInt(outWInput.value, 10) || baseW) : baseW;
     var curH = outHInput ? (parseInt(outHInput.value, 10) || baseH) : baseH;
     var initialScale = Math.round((curW / baseW) * 100) || 100;
+    var isMultiFrame = (slices.length > 1);
+    var spriteSectionDisplay = isMultiFrame ? 'display: block;' : 'display: none;';
 
     modalPreviewBlob = null;
+    modalPreviewMime = 'image/png';
+    modalPreviewFilename = '';
 
     var html = '' +
       '<div class="modal gif-export-modal">' +
       '  <div class="modal-title" data-i18n="gifEditorExportModalTitle">' + t('gifEditorExportModalTitle', 'Export GIF & Frame Settings') + '</div>' +
       '  <div class="modal-body">' +
-      '    <div class="gif-export-preview-container">' +
-      '      <img id="gif-modal-preview-img" class="gif-export-preview-img" alt="Preview">' +
+      '    <div class="gif-export-preview-container" style="text-align: center; margin-bottom: 16px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px;">' +
+      '      <img id="gif-modal-preview-img" class="gif-export-preview-img" style="max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 4px;" alt="Export preview">' +
       '    </div>' +
       '    <div class="gif-control-row" style="margin-bottom: 12px; gap: 12px;">' +
       '      <div class="gif-input-with-label">' +
@@ -393,8 +419,8 @@
       '        </div>' +
       '      </div>' +
       '    </div>' +
-      '    <div class="gif-range-wrap" style="margin-bottom: 12px;">' +
-      '      <span class="gif-scale-label" data-i18n="gifEditorScale">' + t('gifEditorScale', 'Scale') + '</span>' +
+      '    <div class="gif-control-row" style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center;">' +
+      '      <span class="gif-muted-label" data-i18n="gifEditorScale">' + t('gifEditorScale', 'Scale') + '</span>' +
       '      <input type="range" id="gif-modal-scale-slider" min="10" max="300" value="' + initialScale + '" class="gif-flex-1">' +
       '      <span class="gif-scale-val" id="gif-modal-scale-val">' + (initialScale / 100).toFixed(1) + 'x</span>' +
       '    </div>' +
@@ -405,11 +431,19 @@
       '      <input type="range" id="gif-modal-quality-slider" min="1" max="10" value="10" class="gif-flex-1">' +
       '      <span id="gif-modal-quality-val" style="width: 24px; text-align: right; font-weight: bold;">10</span>' +
       '    </div>' +
-      '    <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
+      '    <div class="gif-output-sep-inner" id="gif-modal-sprite-container" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px; ' + spriteSectionDisplay + '">' +
       '      <div class="gif-group-title" data-i18n="gifEditorExportSprite" style="margin-bottom: 8px; font-weight: bold;">Export Sprite Sheet</div>' +
-      '      <div class="gif-control-row" style="margin-bottom: 8px; gap: 12px;">' +
+      '      <div class="gif-control-row" style="margin-bottom: 8px; gap: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr;">' +
       '        <div class="gif-input-with-label">' +
-      '          <span class="gif-axis-label">X</span>' +
+      '          <span class="gif-axis-label" style="font-size:11px;" data-i18n="gifEditorStartFrame">' + t('gifEditorStartFrame', 'Start') + '</span>' +
+      '          <div class="number-stepper" style="flex: 1;">' +
+      '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-modal-sprite-start-frame\', -1)">-</button>' +
+      '            <input type="number" class="stepper-input" id="gif-modal-sprite-start-frame" value="0" min="0">' +
+      '            <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-modal-sprite-start-frame\', 1)">+</button>' +
+      '          </div>' +
+      '        </div>' +
+      '        <div class="gif-input-with-label">' +
+      '          <span class="gif-axis-label" style="font-size:11px;">X</span>' +
       '          <div class="number-stepper" style="flex: 1;">' +
       '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-modal-sprite-cols\', -1)">-</button>' +
       '            <input type="number" class="stepper-input" id="gif-modal-sprite-cols" value="5" min="1">' +
@@ -417,7 +451,7 @@
       '          </div>' +
       '        </div>' +
       '        <div class="gif-input-with-label">' +
-      '          <span class="gif-axis-label">Y</span>' +
+      '          <span class="gif-axis-label" style="font-size:11px;">Y</span>' +
       '          <div class="number-stepper" style="flex: 1;">' +
       '            <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-modal-sprite-rows\', -1)">-</button>' +
       '            <input type="number" class="stepper-input" id="gif-modal-sprite-rows" value="1" min="1">' +
@@ -425,7 +459,10 @@
       '          </div>' +
       '        </div>' +
       '      </div>' +
-      '      <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-modal-export-sprite-btn" data-i18n="gifEditorExportSprite">Export Sprite Sheet</button>' +
+      '      <div style="display: flex; gap: 8px; margin-top: 8px;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-modal-export-sprite-btn" data-i18n="gifEditorExportSprite">' + t('gifEditorExportSprite', 'Export Sprite Sheet') + '</button>' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-modal-save-sprite-btn" style="display: none;" data-i18n="gifEditorSaveSprite">' + t('gifEditorSaveSprite', '💾 Save Sprite Sheet') + '</button>' +
+      '      </div>' +
       '    </div>' +
       '  </div>' +
       '  <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">' +
@@ -548,13 +585,20 @@
     }
 
     var spriteBtn = document.getElementById('gif-modal-export-sprite-btn');
+    var saveSpriteBtn = document.getElementById('gif-modal-save-sprite-btn');
     if (spriteBtn) {
       spriteBtn.addEventListener('click', function () {
-        var rowsInput = document.getElementById('gif-modal-sprite-rows');
-        var colsInput = document.getElementById('gif-modal-sprite-cols');
-        var rows = rowsInput ? (parseInt(rowsInput.value, 10) || 1) : 1;
-        var cols = colsInput ? (parseInt(colsInput.value, 10) || 1) : 1;
         exportSprite();
+      });
+    }
+    if (saveSpriteBtn) {
+      saveSpriteBtn.addEventListener('click', function () {
+        var filename = modalPreviewFilename || ('SpriteSheet_' + Date.now() + '.png');
+        if (modalPreviewBlob) {
+          triggerSaveFileWithPicker(modalPreviewBlob, filename, 'image/png');
+        } else {
+          exportSprite();
+        }
       });
     }
 

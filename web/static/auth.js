@@ -250,6 +250,12 @@ function initApp() {
       var item = e.target.closest('[data-utility-tool]');
       if (item && !item.disabled) selectUtilityTool(item.dataset.utilityTool);
     });
+    menu.addEventListener('mousemove', function(e) {
+      var item = e.target.closest('[data-utility-tool]:not([disabled])');
+      if (item && document.activeElement !== item) {
+        item.focus({ preventScroll: true });
+      }
+    });
     menu.addEventListener('keydown', function(e) {
       var items = Array.prototype.slice.call(menu.querySelectorAll('[data-utility-tool]:not([disabled])'));
       var index = items.indexOf(document.activeElement);

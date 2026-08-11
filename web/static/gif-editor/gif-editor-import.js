@@ -957,6 +957,7 @@
     var currentDraft = draft;
     var gen = commitGeneration;
 
+    closeModal();
     core.showSpinner(t('gifEditorProcessing', 'Processing...'));
 
     var scale = currentDraft.scalePercent / 100;
@@ -1016,7 +1017,6 @@
       currentDraft.video = null;
       currentDraft.gifFrames = null;
 
-      closeModal();
       draft = null;
       core.state.importDraft = null;
 

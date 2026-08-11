@@ -203,14 +203,13 @@
     dom.frameIndicator = core.byId('frame-indicator');
     dom.startGlobalCropBtn = core.byId('global-crop-btn');
     dom.cropPanel = core.byId('crop-panel');
-    dom.cropSlideX = core.byId('crop-slide-x'); dom.cropNumX = core.byId('crop-num-x');
-    dom.cropSlideY = core.byId('crop-slide-y'); dom.cropNumY = core.byId('crop-num-y');
-    dom.cropSlideW = core.byId('crop-slide-w'); dom.cropNumW = core.byId('crop-num-w');
-    dom.cropSlideH = core.byId('crop-slide-h'); dom.cropNumH = core.byId('crop-num-h');
+    dom.cropNumL = core.byId('crop-num-l');
+    dom.cropNumR = core.byId('crop-num-r');
+    dom.cropNumT = core.byId('crop-num-t');
+    dom.cropNumB = core.byId('crop-num-b');
     dom.cancelCropBtn = core.byId('cancel-crop-btn');
     dom.applyCropBtn = core.byId('apply-crop-btn');
     dom.rangeStart = core.byId('crop-start');
-    dom.rangeEnd = core.byId('crop-end');
     dom.addTextInput = core.byId('text-input');
     dom.addTextBtn = core.byId('add-text-btn');
     dom.addTextColor = core.byId('text-color');
@@ -225,8 +224,10 @@
     dom.deleteLayerBtn = core.byId('delete-layer-btn');
     dom.layerList = core.byId('layer-list');
 
-    dom.batchDelayInput = core.byId('batch-delay-input');
-    dom.batchDelayBtn = core.byId('batch-delay-btn');
+    dom.overlayContainer = core.byId('overlay-container');
+    dom.globalDelayContainer = core.byId('global-delay-container');
+    dom.batchDeleteContainer = core.byId('batch-delete-container');
+    dom.intervalDeleteContainer = core.byId('interval-delete-container');
 
     // 全局缩放 DOM
     dom.resizeKeepRatio = core.byId('resize-keep-ratio');
@@ -312,6 +313,9 @@
     }
     if (dom.panelStep3) {
       dom.panelStep3.classList.toggle('gif-edit-blocked', !hasSlices);
+    }
+    if (dom.dropZone) {
+      dom.dropZone.style.display = hasSlices ? 'none' : 'flex';
     }
     if (dom.dropZoneContainer) {
       dom.dropZoneContainer.style.display = hasSlices ? 'none' : 'block';
@@ -433,7 +437,10 @@
   function updateSourcePanels(kind) {
     if (dom.imageTools) dom.imageTools.classList.toggle('gif-hidden', kind !== 'image');
     if (dom.splitSheetContainer) dom.splitSheetContainer.style.display = (kind === 'image' ? 'block' : 'none');
+    if (dom.globalDelayContainer) dom.globalDelayContainer.style.display = 'block';
     if (dom.batchDeleteContainer) dom.batchDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
+    if (dom.intervalDeleteContainer) dom.intervalDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
+    if (dom.overlayContainer) dom.overlayContainer.style.display = (kind === 'image' ? 'none' : 'block');
     if (dom.enableTrans) dom.enableTrans.checked = false;
     if (dom.transPanel) dom.transPanel.style.display = 'none';
     core.state.transparencyReady = false;
@@ -553,10 +560,10 @@
   }
 
   function edgeCropValues(w, h) {
-    var tVal = parseInt(dom.cropT.value, 10) || 0,
-        bVal = parseInt(dom.cropB.value, 10) || 0,
-        lVal = parseInt(dom.cropL.value, 10) || 0,
-        rVal = parseInt(dom.cropR.value, 10) || 0;
+    var tVal = (dom.cropT && parseInt(dom.cropT.value, 10)) || 0,
+        bVal = (dom.cropB && parseInt(dom.cropB.value, 10)) || 0,
+        lVal = (dom.cropL && parseInt(dom.cropL.value, 10)) || 0,
+        rVal = (dom.cropR && parseInt(dom.cropR.value, 10)) || 0;
     var maxT = Math.max(0, h - 1), maxL = Math.max(0, w - 1);
     tVal = Math.max(0, Math.min(maxT, tVal));
     bVal = Math.max(0, Math.min(maxT, bVal));
@@ -567,6 +574,7 @@
 
   // Grid preview overlay (dimmed edges + row/col lines).
   function drawEdgeCropGrid(w, h) {
+    if (!dom.cropT || !dom.cropB || !dom.cropL || !dom.cropR) return;
     var c = edgeCropValues(w, h);
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, w, c.t);
@@ -639,44 +647,84 @@
   // ------------------------------------------------------------------
 
   function setupCropSliders() {
-    var props = ['X', 'Y', 'W', 'H'];
-    for (var p = 0; p < props.length; p++) {
-      (function (prop) {
-        var slider = core.byId('crop-slide-' + prop.toLowerCase());
-        var num = core.byId('crop-num-' + prop.toLowerCase());
-        if (!slider || !num) return;
-        var update = function () {
-          var val = parseInt(slider.value, 10);
-          if (isNaN(val)) val = 0;
-          num.value = val;
-          core.state.cropRect[prop.toLowerCase()] = val;
-          draw();
-        };
-        slider.addEventListener('input', update);
-        num.addEventListener('change', function () {
-          var val = parseInt(num.value, 10);
-          if (isNaN(val)) val = 0;
-          var max = parseInt(slider.max, 10);
-          if (!isNaN(max)) val = Math.max(0, Math.min(max, val));
-          slider.value = val;
-          num.value = val;
-          update();
-        });
-      })(props[p]);
+    dom.cropNumL = core.byId('crop-num-l');
+    dom.cropNumR = core.byId('crop-num-r');
+    dom.cropNumT = core.byId('crop-num-t');
+    dom.cropNumB = core.byId('crop-num-b');
+
+    var getCanvasDims = function () {
+      var slices = core.state.slices || [];
+      if (core.state.selectedSliceIdx >= 0 && slices[core.state.selectedSliceIdx]) {
+        var c = slices[core.state.selectedSliceIdx].canvas;
+        return { width: c.width, height: c.height };
+      }
+      if (core.state.processedImg) {
+        return { width: core.state.processedImg.width, height: core.state.processedImg.height };
+      }
+      return { width: 800, height: 600 };
+    };
+
+    var updateFromEdgeInputs = function () {
+      var dims = getCanvasDims();
+      var l = parseInt(dom.cropNumL ? dom.cropNumL.value : 0, 10);
+      var r = parseInt(dom.cropNumR ? dom.cropNumR.value : 0, 10);
+      var t = parseInt(dom.cropNumT ? dom.cropNumT.value : 0, 10);
+      var b = parseInt(dom.cropNumB ? dom.cropNumB.value : 0, 10);
+
+      if (isNaN(l)) l = 0;
+      if (isNaN(r)) r = 0;
+      if (isNaN(t)) t = 0;
+      if (isNaN(b)) b = 0;
+
+      l = Math.max(0, Math.min(dims.width - 1, l));
+      r = Math.max(0, Math.min(dims.width - l - 1, r));
+      t = Math.max(0, Math.min(dims.height - 1, t));
+      b = Math.max(0, Math.min(dims.height - t - 1, b));
+
+      if (dom.cropNumL) dom.cropNumL.value = l;
+      if (dom.cropNumR) dom.cropNumR.value = r;
+      if (dom.cropNumT) dom.cropNumT.value = t;
+      if (dom.cropNumB) dom.cropNumB.value = b;
+
+      core.state.cropRect = {
+        x: l,
+        y: t,
+        w: Math.max(1, dims.width - l - r),
+        h: Math.max(1, dims.height - t - b)
+      };
+      draw();
+    };
+
+    var inputs = [dom.cropNumL, dom.cropNumR, dom.cropNumT, dom.cropNumB];
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i]) {
+        inputs[i].addEventListener('input', updateFromEdgeInputs);
+        inputs[i].addEventListener('change', updateFromEdgeInputs);
+      }
     }
   }
 
   function syncCropSlidersFromRect() {
     if (core.state.mode !== 'crop') return;
     var r = core.state.cropRect;
-    if (dom.cropSlideX) dom.cropSlideX.value = r.x;
-    if (dom.cropNumX) dom.cropNumX.value = Math.round(r.x);
-    if (dom.cropSlideY) dom.cropSlideY.value = r.y;
-    if (dom.cropNumY) dom.cropNumY.value = Math.round(r.y);
-    if (dom.cropSlideW) dom.cropSlideW.value = r.w;
-    if (dom.cropNumW) dom.cropNumW.value = Math.round(r.w);
-    if (dom.cropSlideH) dom.cropSlideH.value = r.h;
-    if (dom.cropNumH) dom.cropNumH.value = Math.round(r.h);
+    var slices = core.state.slices || [];
+    var dims = { width: 800, height: 600 };
+    if (core.state.selectedSliceIdx >= 0 && slices[core.state.selectedSliceIdx]) {
+      var c = slices[core.state.selectedSliceIdx].canvas;
+      dims = { width: c.width, height: c.height };
+    } else if (core.state.processedImg) {
+      dims = { width: core.state.processedImg.width, height: core.state.processedImg.height };
+    }
+
+    var leftVal = Math.max(0, Math.round(r.x));
+    var topVal = Math.max(0, Math.round(r.y));
+    var rightVal = Math.max(0, Math.round(dims.width - (r.x + r.w)));
+    var bottomVal = Math.max(0, Math.round(dims.height - (r.y + r.h)));
+
+    if (dom.cropNumL) { dom.cropNumL.max = dims.width; dom.cropNumL.value = leftVal; }
+    if (dom.cropNumR) { dom.cropNumR.max = dims.width; dom.cropNumR.value = rightVal; }
+    if (dom.cropNumT) { dom.cropNumT.max = dims.height; dom.cropNumT.value = topVal; }
+    if (dom.cropNumB) { dom.cropNumB.max = dims.height; dom.cropNumB.value = bottomVal; }
   }
 
   function startGlobalCrop() {
@@ -688,21 +736,25 @@
     var cur = slices[core.state.selectedSliceIdx].canvas;
     var pW = cur.width * 0.1, pH = cur.height * 0.1;
     core.state.cropRect = { x: pW, y: pH, w: cur.width - pW * 2, h: cur.height - pH * 2 };
-    if (dom.cropSlideX) dom.cropSlideX.max = cur.width;
-    if (dom.cropSlideW) dom.cropSlideW.max = cur.width;
-    if (dom.cropSlideY) dom.cropSlideY.max = cur.height;
-    if (dom.cropSlideH) dom.cropSlideH.max = cur.height;
+    if (dom.cropNumX) dom.cropNumX.max = cur.width;
+    if (dom.cropNumW) dom.cropNumW.max = cur.width;
+    if (dom.cropNumY) dom.cropNumY.max = cur.height;
+    if (dom.cropNumH) dom.cropNumH.max = cur.height;
     core.state.mode = 'crop';
     syncCropSlidersFromRect();
-    if (dom.cropPanel) dom.cropPanel.classList.add('active');
-    if (dom.startGlobalCropBtn) dom.startGlobalCropBtn.style.display = 'none';
+    if (dom.cropPanel) {
+      dom.cropPanel.classList.add('active');
+      dom.cropPanel.style.display = 'block';
+    }
     draw();
   }
 
   function cancelCrop() {
     core.state.mode = 'editor';
-    if (dom.cropPanel) dom.cropPanel.classList.remove('active');
-    if (dom.startGlobalCropBtn) dom.startGlobalCropBtn.style.display = 'block';
+    if (dom.cropPanel) {
+      dom.cropPanel.classList.remove('active');
+      dom.cropPanel.style.display = 'none';
+    }
     draw();
   }
 
@@ -728,7 +780,6 @@
       if (dom.outW) dom.outW.value = Math.round(r.w);
       if (dom.outH) dom.outH.value = Math.round(r.h);
       if (dom.cropPanel) dom.cropPanel.classList.remove('active');
-      if (dom.startGlobalCropBtn) dom.startGlobalCropBtn.style.display = 'block';
       if (core.timeline) core.timeline.clearThumbCache(); // slice canvases replaced
       if (core.timeline && core.timeline.render) core.timeline.render();
       if (core.commands.focusFrame) core.commands.focusFrame(core.state.selectedSliceIdx);
@@ -1207,19 +1258,22 @@
     var idx = core.state.selectedSliceIdx;
     var w = 300, h = 300;
 
+    var isSplitOpen = dom.splitSheetPanel && dom.splitSheetPanel.style.display !== 'none' && core.state.source && core.state.source.kind === 'image';
+    var splitScaleRatio = isSplitOpen ? ((parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100) : 1;
+
     if (core.state.mode === 'source' && core.state.processedImg) {
-      w = core.state.processedImg.width;
-      h = core.state.processedImg.height;
+      w = Math.max(1, Math.round(core.state.processedImg.width * splitScaleRatio));
+      h = Math.max(1, Math.round(core.state.processedImg.height * splitScaleRatio));
     } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
-      w = slices[idx].canvas.width;
-      h = slices[idx].canvas.height;
+      w = Math.max(1, Math.round(slices[idx].canvas.width * splitScaleRatio));
+      h = Math.max(1, Math.round(slices[idx].canvas.height * splitScaleRatio));
     }
     if (canvas.width !== w) canvas.width = w;
     if (canvas.height !== h) canvas.height = h;
     ctx.clearRect(0, 0, w, h);
 
     if (core.state.mode === 'source' && core.state.processedImg) {
-      ctx.drawImage(core.state.processedImg, 0, 0);
+      ctx.drawImage(core.state.processedImg, 0, 0, core.state.processedImg.width, core.state.processedImg.height, 0, 0, w, h);
       if (isImageUnsliced()) drawEdgeCropGrid(w, h);
     } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
       var s = slices[idx];
@@ -1231,9 +1285,9 @@
         var tCtx = tempC.getContext('2d');
         tCtx.drawImage(s.canvas, 0, 0);
         applyTransparencyToCtx(tCtx, tempC.width, tempC.height);
-        ctx.drawImage(tempC, 0, 0);
+        ctx.drawImage(tempC, 0, 0, tempC.width, tempC.height, 0, 0, w, h);
       } else {
-        ctx.drawImage(s.canvas, 0, 0);
+        ctx.drawImage(s.canvas, 0, 0, s.canvas.width, s.canvas.height, 0, 0, w, h);
       }
       drawLayers(ctx, s.layers);
       if (isImageUnsliced()) drawEdgeCropGrid(w, h);
@@ -1314,6 +1368,9 @@
   // ------------------------------------------------------------------
 
   function getEffectiveDimensions() {
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      return { w: canvas.width, h: canvas.height };
+    }
     var slices = core.state.slices || [];
     var idx = core.state.selectedSliceIdx;
     if (core.state.mode === 'source' && core.state.processedImg) {
@@ -1321,7 +1378,7 @@
     } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
       return { w: slices[idx].canvas.width, h: slices[idx].canvas.height };
     }
-    return { w: canvas ? canvas.width : 0, h: canvas ? canvas.height : 0 };
+    return { w: 0, h: 0 };
   }
 
   function resetView() {
@@ -1448,6 +1505,8 @@
         core.state.selectedSliceIdx = Math.max(0, slices.length - 1);
         if (core.timeline) core.timeline.clearThumbCache();
         if (core.timeline && core.timeline.render) core.timeline.render();
+        var panel = core.byId('batch-delete-panel');
+        if (panel) panel.style.display = 'none';
         if (slices.length > 0 && core.commands.focusFrame) core.commands.focusFrame(0);
         else if (slices.length > 0) { core.state.selectedSliceIdx = 0; draw(); }
         else { core.state.mode = 'source'; draw(); }
@@ -1472,6 +1531,8 @@
         }
         core.state.slices = newSlices;
         core.state.selectedSliceIdx = 0;
+        var panel = core.byId('batch-delete-panel');
+        if (panel) panel.style.display = 'none';
         if (core.timeline) core.timeline.clearThumbCache();
         if (core.timeline && core.timeline.render) core.timeline.render();
         if (core.commands.focusFrame) core.commands.focusFrame(0);
@@ -1561,7 +1622,7 @@
     document.addEventListener('keydown', onKeyDown, true);
 
     // Edge crop sliders + grid params (image source)
-    var edgeSync = function (slider, num) {
+    function edgeSync(slider, num) {
       if (!slider || !num) return;
       slider.addEventListener('input', function () { num.value = slider.value; draw(); });
       num.addEventListener('change', function () {
@@ -1646,36 +1707,122 @@
       });
     }
 
-    // Batch delay
-    if (dom.batchDelayBtn) {
-      dom.batchDelayBtn.addEventListener('click', function () {
-        var val = parseInt(dom.batchDelayInput.value, 10);
-        if (isNaN(val) || val < 0) { alert(t('gifEditorAlertDelayInvalid')); return; }
-        var slices = core.state.slices || [];
-        if (!slices.length) { alert(t('gifEditorAlertNoFrames')); return; }
-        for (var i = 0; i < slices.length; i++) slices[i].delay = val;
-        // Refresh only the delay inputs currently rendered (windowed DOM).
-        var track = dom.timeline;
-        if (track) {
-          var inputs = track.querySelectorAll('.gif-delay-input');
-          for (var j = 0; j < inputs.length; j++) inputs[j].value = val;
+    // 1. Crop
+    dom.startGlobalCropBtn = core.byId('global-crop-btn');
+    dom.cropPanel = core.byId('crop-panel');
+    dom.cancelCropBtn = core.byId('cancel-crop-btn');
+    dom.applyCropBtn = core.byId('apply-crop-btn');
+    if (dom.startGlobalCropBtn) {
+      dom.startGlobalCropBtn.addEventListener('click', function () {
+        if (dom.cropPanel && dom.cropPanel.style.display === 'block') {
+          cancelCrop();
+        } else {
+          startGlobalCrop();
         }
       });
     }
-
-    // Global crop
-    if (dom.startGlobalCropBtn) dom.startGlobalCropBtn.addEventListener('click', startGlobalCrop);
     if (dom.cancelCropBtn) dom.cancelCropBtn.addEventListener('click', cancelCrop);
     if (dom.applyCropBtn) dom.applyCropBtn.addEventListener('click', applyCrop);
     setupCropSliders();
 
-    // Transparency
+    // 2. Transparency (Set Transparency)
+    dom.magicWandBtn = core.byId('magic-wand-btn');
+    dom.applyTransBtn = core.byId('apply-trans-btn');
+    dom.cancelTransBtn = core.byId('cancel-trans-btn');
+
+    if (dom.magicWandBtn) {
+      dom.magicWandBtn.addEventListener('click', function () {
+        if (dom.transPanel) {
+          var isExpanded = dom.transPanel.style.display === 'block';
+          dom.transPanel.style.display = isExpanded ? 'none' : 'block';
+        }
+      });
+    }
     if (dom.enableTrans) dom.enableTrans.addEventListener('change', toggleTransPanel);
     if (dom.keyColor) dom.keyColor.addEventListener('input', transParamChanged);
     if (dom.fuzziness) dom.fuzziness.addEventListener('input', transParamChanged);
     if (dom.pickColorBtn) dom.pickColorBtn.addEventListener('click', pickColorClick);
-    if (dom.disableTransBtn) {
-      dom.disableTransBtn.addEventListener('click', function () { if (dom.enableTrans) dom.enableTrans.click(); });
+    if (dom.applyTransBtn) {
+      dom.applyTransBtn.addEventListener('click', function () {
+        if (dom.enableTrans) dom.enableTrans.checked = true;
+        core.state.transparencyReady = true;
+        rebakeImageFrame();
+        draw();
+        if (dom.transPanel) dom.transPanel.style.display = 'none';
+      });
+    }
+    if (dom.cancelTransBtn) {
+      dom.cancelTransBtn.addEventListener('click', function () {
+        if (dom.enableTrans) dom.enableTrans.checked = false;
+        rebakeImageFrame();
+        draw();
+        if (dom.transPanel) dom.transPanel.style.display = 'none';
+      });
+    }
+
+    // 4. Set Latency
+    var delayToggleBtn = core.byId('delay-toggle-btn');
+    var delayPanel = core.byId('delay-panel');
+    var cancelDelayBtn = core.byId('cancel-delay-btn');
+    if (delayToggleBtn) {
+      delayToggleBtn.addEventListener('click', function () {
+        if (delayPanel) {
+          var isExp = delayPanel.style.display === 'block';
+          delayPanel.style.display = isExp ? 'none' : 'block';
+        }
+      });
+    }
+    if (dom.batchDelayBtn) {
+      dom.batchDelayBtn.addEventListener('click', function () {
+        var slices = core.state.slices || [];
+        if (!slices.length) return;
+        var val = parseInt(dom.batchDelayInput ? dom.batchDelayInput.value : 100, 10);
+        if (isNaN(val) || val < 0) val = 100;
+        for (var i = 0; i < slices.length; i++) slices[i].delay = val;
+        if (core.timeline && core.timeline.render) core.timeline.render();
+        if (delayPanel) delayPanel.style.display = 'none';
+      });
+    }
+    if (cancelDelayBtn) {
+      cancelDelayBtn.addEventListener('click', function () {
+        if (delayPanel) delayPanel.style.display = 'none';
+      });
+    }
+
+    // 5. Batch Frame Delete toggle
+    var batchDelToggleBtn = core.byId('batch-delete-toggle-btn');
+    var batchDelPanel = core.byId('batch-delete-panel');
+    if (batchDelToggleBtn) {
+      batchDelToggleBtn.addEventListener('click', function () {
+        if (batchDelPanel) {
+          var isExp = batchDelPanel.style.display === 'block';
+          batchDelPanel.style.display = isExp ? 'none' : 'block';
+        }
+      });
+    }
+
+    // 6. Reduce Frame toggle
+    var intervalDelToggleBtn = core.byId('interval-delete-toggle-btn');
+    var intervalDelPanel = core.byId('interval-delete-panel');
+    if (intervalDelToggleBtn) {
+      intervalDelToggleBtn.addEventListener('click', function () {
+        if (intervalDelPanel) {
+          var isExp = intervalDelPanel.style.display === 'block';
+          intervalDelPanel.style.display = isExp ? 'none' : 'block';
+        }
+      });
+    }
+
+    // 7. Overlay toggle
+    var overlayToggleBtn = core.byId('overlay-toggle-btn');
+    var overlayPanel = core.byId('overlay-panel');
+    if (overlayToggleBtn) {
+      overlayToggleBtn.addEventListener('click', function () {
+        if (overlayPanel) {
+          var isExp = overlayPanel.style.display === 'block';
+          overlayPanel.style.display = isExp ? 'none' : 'block';
+        }
+      });
     }
     // Stage pointer (crop / layer gizmo / pan / color pick)
     if (dom.stage) {
@@ -1869,6 +2016,8 @@
             if (core.state.selectedSliceIdx < 0) core.state.selectedSliceIdx = 0;
             if (core.timeline) core.timeline.clearThumbCache();
             if (core.timeline && core.timeline.render) core.timeline.render();
+            var panel = core.byId('interval-delete-panel');
+            if (panel) panel.style.display = 'none';
             if (core.commands.focusFrame) core.commands.focusFrame(core.state.selectedSliceIdx);
             else draw();
           }
@@ -1985,6 +2134,7 @@
     var onSplitUIChange = function () {
       updateSplitSummary();
       draw();
+      resetView();
     };
 
     if (dom.splitScale) dom.splitScale.addEventListener('input', onSplitUIChange);
@@ -2034,30 +2184,102 @@
       '<div class="gif-workspace">' +
       '  <aside class="gif-sidebar">' +
       '    <div id="gif-panel-step1">' +
-      '      <div class="gif-group-title-row">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorStep1">Import</div>' +
-      '        <button type="button" class="btn btn-ghost btn-sm" id="gif-reload-btn" data-i18n="gifEditorReload">重置</button>' +
-      '      </div>' +
       '      <div id="gif-drop-zone-container">' +
       '        <div class="gif-drop-zone" id="gif-drop-zone">' +
-      '          <div style="font-size: var(--font-h3); margin-bottom: 4px;">📂</div>' +
-      '          <div data-i18n="gifEditorDropHint">选择 / 拖放 / 粘贴文件</div>' +
+      '          <div class="gif-drop-zone-icon">📁</div>' +
+      '          <div class="gif-drop-zone-title" data-i18n="gifEditorDropTitle">点击选择或拖入文件</div>' +
+      '          <div class="gif-drop-zone-desc" data-i18n="gifEditorDropDesc">支持 Image / GIF / Video，可直接粘贴</div>' +
       '          <input type="file" id="gif-file-input" style="display:none;" accept="image/*,video/*,.gif">' +
       '        </div>' +
       '      </div>' +
       '    </div>' +
       '    <div id="gif-sidebar-editor-content" style="display:none;">' +
-      '      <div class="gif-group-title-row gif-mt-sm" style="margin-top: 12px; margin-bottom: 8px;">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorExportTitle">Export</div>' +
-      '        <button type="button" class="btn btn-primary btn-sm" id="gif-open-export-btn" title="Export settings" style="display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;">' +
-      '          💾' +
+      '      <div class="gif-action-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; margin-bottom: 12px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="btn btn-primary" id="gif-open-export-btn" title="Export settings" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorExportTitle">Export</span>' +
+      '        </button>' +
+      '        <button type="button" class="btn btn-ghost gif-reset-btn" id="gif-reload-btn" title="Reset workspace" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorReload">Reset</span>' +
       '        </button>' +
       '      </div>' +
-      '      <div id="gif-split-sheet-container" style="margin-top: 10px; margin-bottom: 10px;">' +
-      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-sheet-toggle-btn" style="display:flex; align-items:center; justify-content:center; gap:6px;">' +
-      '          <span>✂️</span> <span>SplitSheet</span>' +
+
+      '      <!-- 1. Crop -->' +
+      '      <div id="gif-crop-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-global-crop-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorGlobalCrop">' + t('gifEditorGlobalCrop', 'Crop') + '</span>' +
       '        </button>' +
-      '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel" style="display:none; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div class="gif-crop-panel" id="gif-crop-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-group-title" style="margin-bottom: 8px; font-weight: bold; font-size: 12px; color: var(--accent-color);" data-i18n="gifEditorCropAdjust">' + t('gifEditorCropAdjust', 'Crop area fine-tune') + '</div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-num-l" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropLeft">' + t('gifEditorCropLeft', 'Left:') + '</label>' +
+      '            <div class="number-stepper" style="flex:1;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-l\', -1)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-crop-num-l" min="0" value="0">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-l\', 1)">+</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-num-r" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropRight">' + t('gifEditorCropRight', 'Right:') + '</label>' +
+      '            <div class="number-stepper" style="flex:1;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-r\', -1)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-crop-num-r" min="0" value="0">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-r\', 1)">+</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-bottom:6px;">' +
+      '            <label for="gif-crop-num-t" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropTop">' + t('gifEditorCropTop', 'Top:') + '</label>' +
+      '            <div class="number-stepper" style="flex:1;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-t\', -1)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-crop-num-t" min="0" value="0">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-t\', 1)">+</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-import-field-row" style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-bottom:8px;">' +
+      '            <label for="gif-crop-num-b" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropBottom">' + t('gifEditorCropBottom', 'Bottom:') + '</label>' +
+      '            <div class="number-stepper" style="flex:1;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-b\', -1)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-crop-num-b" min="0" value="0">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-crop-num-b\', 1)">+</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">' + t('gifEditorApplyCrop', 'Apply') + '</button>' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-cancel-crop-btn" data-i18n="gifEditorCancelCrop">' + t('gifEditorCancelCrop', 'Cancel') + '</button>' +
+      '          </div>' +
+      '        </div>' +
+      '      </div>' +
+
+      '      <!-- 2. Set Transparency -->' +
+      '      <div id="gif-transparency-wrapper" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <input type="checkbox" id="gif-enable-trans" style="display:none;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-magic-wand-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorMagicWandTitle">' + t('gifEditorMagicWandTitle', 'Set Transparency') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-trans-panel" class="gif-trans-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
+      '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '              <span data-i18n="gifEditorPickColor">' + t('gifEditorPickColor', 'Pick Color') + '</span>' +
+      '            </button>' +
+      '          </div>' +
+      '          <div class="gif-trans-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.3;" data-i18n="gifEditorPickColorHint">' + t('gifEditorPickColorHint', '* After clicking Pick Color, click background color on canvas') + '</div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
+      '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorFuzziness">' + t('gifEditorFuzziness', 'Tolerance:') + '</span>' +
+      '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" title="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-apply-trans-btn" data-i18n="gifEditorApplyTrans">' + t('gifEditorApplyTrans', 'Apply') + '</button>' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-cancel-trans-btn" data-i18n="gifEditorCancelTrans">' + t('gifEditorCancelTrans', 'Cancel') + '</button>' +
+      '          </div>' +
+      '        </div>' +
+      '      </div>' +
+
+      '      <!-- 3. Split Sheet -->' +
+      '      <div id="gif-split-sheet-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-sheet-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorSplitSheet">Split Sheet</span>' +
+      '        </button>' +
+      '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
       '          <div class="gif-import-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 6px;">' +
       '            <span class="gif-import-label" style="color:var(--text-muted);">Source Resolution:</span>' +
       '            <span class="gif-import-value" id="gif-split-source-res" style="font-weight:bold; color:var(--accent-color);">2048 × 2048</span>' +
@@ -2122,125 +2344,105 @@
       '          <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-apply-btn" style="margin-top: 4px;">Split</button>' +
       '        </div>' +
       '      </div>' +
-      '      <div id="gif-transparency-wrapper" style="margin-top: 10px;">' +
-      '        <label class="gif-check-label"><input type="checkbox" id="gif-enable-trans"> <span data-i18n="gifEditorEnableTrans">色键透明</span></label>' +
-      '        <div id="gif-trans-panel" class="gif-trans-panel">' +
-      '          <div class="gif-control-row">' +
-      '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
-      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' + t('gifEditorPickColor', '取色') + '</button>' +
+
+      '      <!-- 4. Set Latency -->' +
+      '      <div id="gif-global-delay-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-delay-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorGlobalDelay">' + t('gifEditorGlobalDelay', 'Set Latency') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-delay-panel" class="gif-delay-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-import-field-vert" style="width: 100%; margin-bottom: 8px;">' +
+      '            <label for="gif-batch-delay-input" class="gif-import-label" style="font-size: 11px; display: block; margin-bottom: 2px;" data-i18n="gifEditorDelayLabel">' + t('gifEditorDelayLabel', 'Frame Latency (ms):') + '</label>' +
+      '            <div class="number-stepper" style="width: 100%;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-batch-delay-input\', -10)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-batch-delay-input" min="0" value="100" placeholder="100">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-batch-delay-input\', 10)">+</button>' +
+      '            </div>' +
       '          </div>' +
-      '          <div class="gif-trans-hint" data-i18n="gifEditorPickColorHint">选择要变为透明的颜色</div>' +
-      '          <div class="gif-control-row">' +
-      '            <span class="gif-muted-label" data-i18n="gifEditorFuzziness">容差</span>' +
-      '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" title="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
+      '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-batch-delay-btn" data-i18n="gifEditorApplyDelay">' + t('gifEditorApplyDelay', 'Apply') + '</button>' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-cancel-delay-btn" data-i18n="gifEditorCancelDelay">' + t('gifEditorCancelDelay', 'Cancel') + '</button>' +
       '          </div>' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-full-width gif-mt-sm" id="gif-disable-trans-btn" data-i18n="gifEditorDisableTrans">取消透明</button>' +
       '        </div>' +
       '      </div>' +
-      '      <div id="gif-image-tools" class="gif-hidden">' +
-      '        <div class="gif-group-title gif-mt" data-i18n="gifEditorEdgeFix">边缘裁剪</div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorTop', '上') + '</span><input type="range" id="gif-slider-t" value="0"><input type="number" id="gif-crop-t" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorBottom', '下') + '</span><input type="range" id="gif-slider-b" value="0"><input type="number" id="gif-crop-b" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorLeft', '左') + '</span><input type="range" id="gif-slider-l" value="0"><input type="number" id="gif-crop-l" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorRight', '右') + '</span><input type="range" id="gif-slider-r" value="0"><input type="number" id="gif-crop-r" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-group-title gif-mt" data-i18n="gifEditorGridSlice">网格切片</div>' +
-      '        <div class="gif-control-row">' +
-      '          <input type="number" id="gif-rows" value="3" min="1" placeholder="' + t('gifEditorRows', '行') + '">' +
-      '          <input type="number" id="gif-cols" value="3" min="1" placeholder="' + t('gifEditorCols', '列') + '">' +
-      '        </div>' +
-      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-slice-btn" data-i18n="gifEditorSliceBtn">开始切片</button>' +
-      '      </div>' +
-      '      <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-global-crop-btn" data-i18n="gifEditorGlobalCrop">' + t('gifEditorGlobalCrop', '全局裁剪') + '</button>' +
-      '      <div class="gif-crop-panel" id="gif-crop-panel">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorCropAdjust">裁剪区域微调</div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropX', 'X') + '</span><input type="range" id="gif-crop-slide-x" value="0"><input type="number" id="gif-crop-num-x" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropY', 'Y') + '</span><input type="range" id="gif-crop-slide-y" value="0"><input type="number" id="gif-crop-num-y" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropW', 'W') + '</span><input type="range" id="gif-crop-slide-w" value="0"><input type="number" id="gif-crop-num-w" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-range-wrap"><span class="gif-axis-label">' + t('gifEditorCropH', 'H') + '</span><input type="range" id="gif-crop-slide-h" value="0"><input type="number" id="gif-crop-num-h" value="0" class="gif-crop-num"></div>' +
-      '        <div class="gif-control-row" style="margin-top: 10px;">' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-apply-crop-btn" data-i18n="gifEditorApplyCrop">' + t('gifEditorApplyCrop', '确认裁剪') + '</button>' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-cancel-crop-btn" data-i18n="gifEditorCancelCrop">' + t('gifEditorCancelCrop', '取消裁剪') + '</button>' +
-      '      </div>' +
-      '      </div>' +
-      '      <div class="gif-scope-box" style="margin-top: 10px;">' +
-      '        <span class="gif-axis-label" data-i18n="gifEditorScope">作用:</span>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">当前帧</span></label>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="all"> <span data-i18n="gifEditorScopeAll">全部帧</span></label>' +
-      '        <label class="gif-radio-label"><input type="radio" name="gif-scope" value="range"> <span data-i18n="gifEditorScopeRange">范围</span></label>' +
-      '        <div class="gif-control-row gif-range-input" id="gif-crop-range-inputs">' +
-      '          <input type="number" id="gif-crop-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
-      '          <input type="number" id="gif-crop-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
-      '        </div>' +
-      '      </div>' +
-      '      <div class="gif-control-row" style="margin-top: 8px;">' +
-      '        <input type="text" id="gif-text-input" placeholder="' + t('gifEditorTextInput', '输入文字...') + '" class="gif-flex-1">' +
-      '        <button type="button" class="gif-btn gif-btn-primary" id="gif-add-text-btn" data-i18n="gifEditorAddText">+ 文字</button>' +
-      '      </div>' +
-      '      <div class="gif-style-toolbar">' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-bold" title="' + t('gifEditorBold', '加粗') + '">B</button>' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-italic" title="' + t('gifEditorItalic', '斜体') + '">I</button>' +
-      '        <button type="button" class="gif-style-btn" id="gif-btn-underline" title="' + t('gifEditorUnderline', '下划线') + '">U</button>' +
-      '        <label class="gif-style-btn gif-style-image-label" title="' + t('gifEditorAddImage', '添加贴图') + '">' +
-      '          📷' +
-      '          <input type="file" id="gif-add-image-input" style="display:none" accept="image/*">' +
-      '        </label>' +
-      '      </div>' +
-      '      <div class="gif-group-title" data-i18n="gifEditorLayerList">图层列表</div>' +
-      '      <div class="gif-layer-list" id="gif-layer-list"></div>' +
-      '      <div class="gif-selected-layer-tools" id="gif-selected-layer-tools">' +
-      '        <label class="gif-check-label" style="margin-bottom: 6px;"><input type="checkbox" id="gif-layer-apply-all" checked> <span data-i18n="gifEditorLayerApplyAll">Apply movement to all frames</span></label>' +
-      '        <div class="gif-control-row">' +
-      '          <span class="gif-muted-label" data-i18n="gifEditorColor">颜色</span>' +
-      '          <input type="color" id="gif-text-color" value="#ffffff" class="gif-style-color">' +
-      '          <span class="gif-muted-label" data-i18n="gifEditorStroke">描边</span>' +
-      '          <input type="color" id="gif-text-stroke-color" value="#000000" class="gif-style-color">' +
-      '        </div>' +
-      '        <div class="gif-control-row">' +
-      '          <span class="gif-muted-label" data-i18n="gifEditorScale">缩放</span>' +
-      '          <input type="range" id="gif-layer-scale" min="0.2" max="3" step="0.1" value="1" class="gif-flex-1">' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-sm-btn" id="gif-delete-layer-btn" data-i18n="gifEditorDeleteLayer">删除</button>' +
-      '        </div>' +
-      '      </div>' +
-      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorGlobalDelay">' + t('gifEditorGlobalDelay', '全局帧延迟 (ms)') + '</div>' +
-      '        <div class="gif-control-row">' +
-      '          <input type="number" id="gif-batch-delay-input" placeholder="100" min="0" value="100" class="gif-flex-1">' +
-      '          <button type="button" class="gif-btn gif-btn-primary" id="gif-batch-delay-btn" data-i18n="gifEditorApplyDelay">' + t('gifEditorApplyDelay', '应用') + '</button>' +
-      '        </div>' +
-      '      </div>' +
-      '      <div class="gif-output-sep-inner" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorGlobalResize">' + t('gifEditorGlobalResize', '全局缩放') + '</div>' +
-      '        <div class="gif-control-row">' +
-      '          <label class="gif-check-label" style="margin-bottom: 0;"><input type="checkbox" id="gif-resize-keep-ratio" checked> <span data-i18n="gifEditorKeepRatio">' + t('gifEditorKeepRatio', '保持比例') + '</span></label>' +
-      '        </div>' +
-      '        <div class="gif-control-row">' +
-      '          <span class="gif-muted-label">W</span>' +
-      '          <input type="number" id="gif-resize-width" placeholder="' + t('gifEditorWidth', '宽度') + '" min="1" class="gif-flex-1">' +
-      '          <span class="gif-muted-label">H</span>' +
-      '          <input type="number" id="gif-resize-height" placeholder="' + t('gifEditorHeight', '高度') + '" min="1" class="gif-flex-1">' +
-      '        </div>' +
-      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width gif-mt-sm" id="gif-resize-apply-btn" data-i18n="gifEditorApplyResize">' + t('gifEditorApplyResize', '应用缩放') + '</button>' +
-      '      </div>' +
-      '      <div class="gif-output-sep-inner" id="gif-batch-delete-container" style="margin-top: 12px; border-top: 1px dashed var(--glass-border); padding-top: 10px;">' +
-      '        <div class="gif-group-title" data-i18n="gifEditorBatchDelete">' + t('gifEditorBatchDelete', '批量删除帧') + '</div>' +
-      '        <div class="gif-control-row">' +
-      '          <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', '起始帧') + '">' +
-      '          <input type="number" id="gif-del-end" placeholder="' + t('gifEditorEndFrame', '结束帧') + '">' +
-      '        </div>' +
-      '        <div class="gif-control-row">' +
-      '          <button type="button" class="gif-btn gif-btn-danger gif-flex-1" id="gif-delete-range-btn" data-i18n="gifEditorDeleteRange">🗑️ ' + t('gifEditorDeleteRange', '删除指定') + '</button>' +
-      '          <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">' + t('gifEditorKeepRange', '保留指定') + '</button>' +
-      '        </div>' +
-      '        <div style="margin-top: 8px; border-top: 1px dashed var(--glass-border); padding-top: 8px;">' +
-      '          <div class="gif-group-title" data-i18n="gifEditorIntervalDelete">' + t('gifEditorIntervalDelete', '间隔删除') + '</div>' +
-      '          <div class="gif-control-row">' +
-      '            <span class="gif-muted-label" data-i18n="gifEditorInterval">' + t('gifEditorInterval', '间隔') + '</span>' +
-      '            <input type="number" id="gif-interval-delete-val" min="1" value="1" class="gif-flex-1" placeholder="N">' +
-      '            <button type="button" class="gif-btn gif-btn-danger" id="gif-interval-delete-btn" data-i18n="gifEditorIntervalDeleteBtn">' + t('gifEditorIntervalDeleteBtn', '间隔删除') + '</button>' +
+
+      '      <!-- 5. Batch Frame Delete -->' +
+      '      <div id="gif-batch-delete-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-batch-delete-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorBatchDelete">' + t('gifEditorBatchDelete', 'Batch Frame Delete') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-batch-delete-panel" class="gif-batch-delete-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">' +
+      '            <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', 'Start') + '" min="1" style="width:100%; box-sizing:border-box;">' +
+      '            <input type="number" id="gif-del-end" placeholder="' + t('gifEditorEndFrame', 'End') + '" min="1" style="width:100%; box-sizing:border-box;">' +
       '          </div>' +
-      '          <div class="gif-muted-hint" data-i18n="gifEditorIntervalDeleteHint" style="margin-top: 4px;">' + t('gifEditorIntervalDeleteHint', '每隔 N 帧删除 1 帧，自动调整延迟保持总时长') + '</div>' +
+      '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-delete-range-btn" data-i18n="gifEditorDelRange">' + t('gifEditorDelRange', 'Delete Range') + '</button>' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-keep-range-btn" data-i18n="gifEditorKeepRange">' + t('gifEditorKeepRange', 'Keep Range') + '</button>' +
+      '          </div>' +
       '        </div>' +
       '      </div>' +
+
+      '      <!-- 6. Reduce Frame -->' +
+      '      <div id="gif-interval-delete-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-interval-delete-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorReduceFrame">' + t('gifEditorReduceFrame', 'Reduce Frame') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-interval-delete-panel" class="gif-interval-delete-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-import-field-vert" style="width: 100%; margin-bottom: 8px;">' +
+      '            <label for="gif-interval-delete-val" class="gif-import-label" style="font-size: 11px; display: block; margin-bottom: 2px;" data-i18n="gifEditorInterval">' + t('gifEditorInterval', 'Interval (N):') + '</label>' +
+      '            <div class="number-stepper" style="width: 100%;">' +
+      '              <button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'gif-interval-delete-val\', -1)">-</button>' +
+      '              <input type="number" class="stepper-input" id="gif-interval-delete-val" min="1" value="1" placeholder="1">' +
+      '              <button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'gif-interval-delete-val\', 1)">+</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div class="gif-muted-hint" data-i18n="gifEditorIntervalDeleteHint" style="font-size:11px; color:var(--text-muted); margin-bottom:10px; line-height:1.3;">' + t('gifEditorIntervalDeleteHint', '* Delete 1 frame every N frames, automatically adjusting delay to preserve total duration') + '</div>' +
+      '          <div class="gif-control-row" style="margin-top: 10px;">' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-interval-delete-btn" style="width:100%;" data-i18n="gifEditorIntervalDeleteBtn">' + t('gifEditorIntervalDeleteBtn', 'Apply') + '</button>' +
+      '          </div>' +
+      '        </div>' +
+      '      </div>' +
+
+      '      <!-- 7. Overlay -->' +
+      '      <div id="gif-overlay-container" style="margin-top: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">' +
+      '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-overlay-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
+      '          <span data-i18n="gifEditorOverlay">' + t('gifEditorOverlay', 'Overlay') + '</span>' +
+      '        </button>' +
+      '        <div id="gif-overlay-panel" class="gif-overlay-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddTextTitle">' + t('gifEditorAddTextTitle', 'Add Text / Subtitle') + '</div>' +
+      '          <div class="gif-control-row" style="margin-bottom:6px;">' +
+      '            <input type="text" id="gif-text-input" placeholder="Enter text..." style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:12px;">' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">' +
+      '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-bold" style="font-weight:bold; width:30px; height:30px; padding:0;">B</button>' +
+      '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-italic" style="font-style:italic; width:30px; height:30px; padding:0;">I</button>' +
+      '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-underline" style="text-decoration:underline; width:30px; height:30px; padding:0;">U</button>' +
+      '            <input type="color" id="gif-text-color" value="#ffffff" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="Text Color">' +
+      '            <input type="color" id="gif-text-stroke-color" value="#000000" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="Stroke Color">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-add-text-btn" style="height:30px; padding:0 8px; font-size:12px;" data-i18n="gifEditorAddTextBtn">' + t('gifEditorAddTextBtn', '+ Add Text') + '</button>' +
+      '          </div>' +
+      '          <div class="gif-group-title" style="margin-top:10px; margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddImageTitle">' + t('gifEditorAddImageTitle', 'Add Image / Watermark') + '</div>' +
+      '          <div class="gif-control-row" style="margin-bottom:8px;">' +
+      '            <label class="gif-btn gif-btn-primary gif-full-width" style="display:flex; align-items:center; justify-content:center; height:32px; font-size:12px; cursor:pointer; width:100%; box-sizing:border-box;">' +
+      '              <span data-i18n="gifEditorAddImageBtn">' + t('gifEditorAddImageBtn', '📷 Add Image / Watermark') + '</span>' +
+      '              <input type="file" id="gif-add-image-input" accept="image/*" style="display:none;">' +
+      '            </label>' +
+      '          </div>' +
+      '          <div id="gif-selected-layer-tools" style="margin-top:10px; border-top:1px dashed var(--glass-border); padding-top:8px;">' +
+      '            <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:11px; color:var(--text-muted);" data-i18n="gifEditorLayerTools">' + t('gifEditorLayerTools', 'Layer Options') + '</div>' +
+      '            <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">' +
+      '              <span style="font-size:11px; color:var(--text-muted);" data-i18n="gifEditorLayerScale">' + t('gifEditorLayerScale', 'Scale:') + '</span>' +
+      '              <input type="range" id="gif-layer-scale" min="0.2" max="3" step="0.05" value="1" style="flex:1;">' +
+      '            </div>' +
+      '            <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">' +
+      '              <button type="button" class="gif-btn gif-btn-danger gif-full-width" id="gif-delete-layer-btn" style="height:28px; font-size:11px;" data-i18n="gifEditorDeleteLayer">' + t('gifEditorDeleteLayer', 'Delete Layer') + '</button>' +
+      '            </div>' +
+      '          </div>' +
+      '          <div id="gif-layer-list" style="margin-top:8px; max-height:100px; overflow-y:auto; font-size:11px;"></div>' +
+      '        </div>' +
+      '      </div>' +
+
       '    </div>' +
       '  </aside>' +
       '  <main class="gif-stage-area" id="gif-stage-container">' +
@@ -2258,7 +2460,12 @@
       '    <div class="gif-timeline-scroll" id="gif-timeline-scroll">' +
       '      <div class="gif-timeline-track" id="gif-timeline"></div>' +
       '    </div>' +
-      '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +
+      '    <div class="gif-timeline-toolbar">' +
+      '      <div class="gif-timeline-zoom-control">' +
+      '        <span class="gif-zoom-label" style="font-size:12px; color:var(--text-muted);">🔍</span>' +
+      '        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" title="Zoom">' +
+      '        <span id="gif-timeline-zoom-value" style="font-size:11px; color:var(--text-muted); min-width:35px;">100%</span>' +
+      '      </div>' +
       '      <div class="gif-timeline-nav" role="group">' +
       '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" title="' + t('gifTimelineFirst', '第一帧') + '">|&lt;</button>' +
       '        <button type="button" class="gif-timeline-control" id="gif-timeline-prev" title="' + t('gifTimelinePrev', '上一帧') + '">&lt;</button>' +
@@ -2266,6 +2473,7 @@
       '        <button type="button" class="gif-timeline-control" id="gif-timeline-next" title="' + t('gifTimelineNext', '下一帧') + '">&gt;</button>' +
       '        <button type="button" class="gif-timeline-control" id="gif-timeline-last" title="' + t('gifTimelineLast', '最后一帧') + '">&gt;|</button>' +
       '      </div>' +
+      '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +
       '    </div>' +
       '  </section>' +
 

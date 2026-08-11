@@ -410,6 +410,18 @@
     }
   }
 
+  function onWheel(e) {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      var delta = e.deltaY < 0 ? 0.1 : -0.1;
+      var curScale = core.state.scale || 1;
+      var newScale = Math.max(0.2, Math.min(3, Math.round((curScale + delta) * 100) / 100));
+      core.state.scale = newScale;
+      if (core.commands.updateTransform) core.commands.updateTransform();
+      updateZoomDisplay();
+    }
+  }
+
   function bindEvents() {
     if (bound) return; // no listener accumulation across repeated renders
     bound = true;
@@ -420,6 +432,7 @@
 
     if (scrollEl) {
       scrollEl.addEventListener('scroll', onScroll, { passive: true });
+      scrollEl.addEventListener('wheel', onWheel, { passive: false });
     }
     if (track) {
       track.addEventListener('click', onTrackClick);
