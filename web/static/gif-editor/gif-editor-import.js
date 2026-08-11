@@ -913,6 +913,10 @@
     canvas.width = targetW;
     canvas.height = targetH;
     var ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    if ('webkitImageSmoothingEnabled' in ctx) ctx.webkitImageSmoothingEnabled = false;
+    if ('mozImageSmoothingEnabled' in ctx) ctx.mozImageSmoothingEnabled = false;
+    if ('msImageSmoothingEnabled' in ctx) ctx.msImageSmoothingEnabled = false;
 
     if (draft.kind === 'image' && draft.image) {
       ctx.drawImage(draft.image, 0, 0, targetW, targetH);

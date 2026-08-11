@@ -451,17 +451,23 @@
     core.state.pickColorMode = false;
     if (dom.canvasWrapper) dom.canvasWrapper.style.cursor = 'default';
 
-    if (kind === 'image' && dom.sliderT) {
+    if (kind === 'image' && (dom.cropNumL || dom.sliderT)) {
       var s0 = (core.state.slices || [])[0];
       if (s0 && s0.canvas) {
-        dom.sliderT.max = Math.floor(s0.canvas.height / 2);
-        dom.sliderB.max = Math.floor(s0.canvas.height / 2);
-        dom.sliderL.max = Math.floor(s0.canvas.width / 2);
-        dom.sliderR.max = Math.floor(s0.canvas.width / 2);
-        dom.sliderT.value = 0; dom.cropT.value = 0;
-        dom.sliderB.value = 0; dom.cropB.value = 0;
-        dom.sliderL.value = 0; dom.cropL.value = 0;
-        dom.sliderR.value = 0; dom.cropR.value = 0;
+        if (dom.cropNumT) dom.cropNumT.value = 0;
+        if (dom.cropNumB) dom.cropNumB.value = 0;
+        if (dom.cropNumL) dom.cropNumL.value = 0;
+        if (dom.cropNumR) dom.cropNumR.value = 0;
+        if (dom.sliderT) {
+          dom.sliderT.max = Math.floor(s0.canvas.height / 2);
+          dom.sliderB.max = Math.floor(s0.canvas.height / 2);
+          dom.sliderL.max = Math.floor(s0.canvas.width / 2);
+          dom.sliderR.max = Math.floor(s0.canvas.width / 2);
+          dom.sliderT.value = 0; if (dom.cropT) dom.cropT.value = 0;
+          dom.sliderB.value = 0; if (dom.cropB) dom.cropB.value = 0;
+          dom.sliderL.value = 0; if (dom.cropL) dom.cropL.value = 0;
+          dom.sliderR.value = 0; if (dom.cropR) dom.cropR.value = 0;
+        }
       }
     }
   }
@@ -738,8 +744,8 @@
       return;
     }
     var cur = slices[core.state.selectedSliceIdx].canvas;
-    var pW = cur.width * 0.1, pH = cur.height * 0.1;
-    core.state.cropRect = { x: pW, y: pH, w: cur.width - pW * 2, h: cur.height - pH * 2 };
+    var pW = 0, pH = 0;
+    core.state.cropRect = { x: 0, y: 0, w: cur.width, h: cur.height };
     if (dom.cropNumX) dom.cropNumX.max = cur.width;
     if (dom.cropNumW) dom.cropNumW.max = cur.width;
     if (dom.cropNumY) dom.cropNumY.max = cur.height;
@@ -1258,59 +1264,82 @@
 
   function draw() {
     if (!canvas || !ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    if ('webkitImageSmoothingEnabled' in ctx) ctx.webkitImageSmoothingEnabled = false;
+    if ('mozImageSmoothingEnabled' in ctx) ctx.mozImageSmoothingEnabled = false;
+    if ('msImageSmoothingEnabled' in ctx) ctx.msImageSmoothingEnabled = false;
+
     var slices = core.state.slices || [];
     var idx = core.state.selectedSliceIdx;
-    var w = 300, h = 300;
+
+    var rawCanvas = null;
+    if (core.state.mode === 'source' && core.state.processedImg) {
+      rawCanvas = core.state.processedImg;
+    } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
+      rawCanvas = slices[idx].canvas;
+    }
+
+    if (!rawCanvas) return;
+
+    var origW = rawCanvas.width || 800;
+    var origH = rawCanvas.height || 600;
+
+    if (canvas.width !== origW) canvas.width = origW;
+    if (canvas.height !== origH) canvas.height = origH;
+    ctx.clearRect(0, 0, origW, origH);
 
     var isSplitOpen = dom.splitSheetPanel && dom.splitSheetPanel.style.display !== 'none' && core.state.source && core.state.source.kind === 'image';
     var splitScaleRatio = isSplitOpen ? ((parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100) : 1;
 
-    if (core.state.mode === 'source' && core.state.processedImg) {
-      w = Math.max(1, Math.round(core.state.processedImg.width * splitScaleRatio));
-      h = Math.max(1, Math.round(core.state.processedImg.height * splitScaleRatio));
-    } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
-      w = Math.max(1, Math.round(slices[idx].canvas.width * splitScaleRatio));
-      h = Math.max(1, Math.round(slices[idx].canvas.height * splitScaleRatio));
+    // Source / Frame image draw with crisp pixel scaling if scale < 1
+    var sourceDrawImg = rawCanvas;
+    if (dom.enableTrans && dom.enableTrans.checked && core.state.transparencyReady && slices[idx]) {
+      var tempC = document.createElement('canvas');
+      tempC.width = origW;
+      tempC.height = origH;
+      var tCtx = tempC.getContext('2d');
+      tCtx.drawImage(rawCanvas, 0, 0);
+      applyTransparencyToCtx(tCtx, origW, origH);
+      sourceDrawImg = tempC;
     }
-    if (canvas.width !== w) canvas.width = w;
-    if (canvas.height !== h) canvas.height = h;
-    ctx.clearRect(0, 0, w, h);
 
-    if (core.state.mode === 'source' && core.state.processedImg) {
-      ctx.drawImage(core.state.processedImg, 0, 0, core.state.processedImg.width, core.state.processedImg.height, 0, 0, w, h);
-      if (isImageUnsliced()) drawEdgeCropGrid(w, h);
-    } else if (idx >= 0 && slices[idx] && slices[idx].canvas) {
-      var s = slices[idx];
-      // Preview transparency (video/GIF-derived frames).
-      if (!core.state.srcImg && dom.enableTrans && dom.enableTrans.checked && core.state.transparencyReady) {
-        var tempC = document.createElement('canvas');
-        tempC.width = s.canvas.width;
-        tempC.height = s.canvas.height;
-        var tCtx = tempC.getContext('2d');
-        tCtx.drawImage(s.canvas, 0, 0);
-        applyTransparencyToCtx(tCtx, tempC.width, tempC.height);
-        ctx.drawImage(tempC, 0, 0, tempC.width, tempC.height, 0, 0, w, h);
-      } else {
-        ctx.drawImage(s.canvas, 0, 0, s.canvas.width, s.canvas.height, 0, 0, w, h);
-      }
-      drawLayers(ctx, s.layers);
-      if (isImageUnsliced()) drawEdgeCropGrid(w, h);
-      if (core.state.source && core.state.source.kind === 'image') drawSplitGridOverlay(w, h);
-      if (core.state.mode === 'editor' && core.state.activeLayer) drawGizmo(core.state.activeLayer, '#3b82f6');
-      if (core.state.mode === 'crop') {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(0, 0, w, h);
-        var cr = core.state.cropRect;
-        ctx.clearRect(cr.x, cr.y, cr.w, cr.h);
-        ctx.drawImage(s.canvas, cr.x, cr.y, cr.w, cr.h, cr.x, cr.y, cr.w, cr.h);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(cr.x, cr.y, cr.w, cr.h);
-        ctx.clip();
-        drawLayers(ctx, s.layers);
-        ctx.restore();
-        drawGizmo(core.state.cropRect, '#ef4444', true);
-      }
+    if (splitScaleRatio < 1.0) {
+      // Offscreen crisp downsampling for pixelated preview
+      var scaledW = Math.max(1, Math.round(origW * splitScaleRatio));
+      var scaledH = Math.max(1, Math.round(origH * splitScaleRatio));
+      var offCanvas = document.createElement('canvas');
+      offCanvas.width = scaledW;
+      offCanvas.height = scaledH;
+      var offCtx = offCanvas.getContext('2d');
+      offCtx.imageSmoothingEnabled = false;
+      if ('webkitImageSmoothingEnabled' in offCtx) offCtx.webkitImageSmoothingEnabled = false;
+      if ('mozImageSmoothingEnabled' in offCtx) offCtx.mozImageSmoothingEnabled = false;
+      offCtx.drawImage(sourceDrawImg, 0, 0, origW, origH, 0, 0, scaledW, scaledH);
+
+      // Render back to full stage canvas with sharp pixelated edges
+      ctx.drawImage(offCanvas, 0, 0, scaledW, scaledH, 0, 0, origW, origH);
+    } else {
+      ctx.drawImage(sourceDrawImg, 0, 0, origW, origH);
+    }
+
+    if (slices[idx]) drawLayers(ctx, slices[idx].layers);
+    if (isImageUnsliced()) drawEdgeCropGrid(origW, origH);
+    if (core.state.source && core.state.source.kind === 'image') drawSplitGridOverlay(origW, origH);
+    if (core.state.mode === 'editor' && core.state.activeLayer) drawGizmo(core.state.activeLayer, '#3b82f6');
+    if (core.state.mode === 'crop') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, origW, origH);
+      var cr = core.state.cropRect;
+      ctx.clearRect(cr.x, cr.y, cr.w, cr.h);
+      if (slices[idx]) ctx.drawImage(slices[idx].canvas, cr.x, cr.y, cr.w, cr.h, cr.x, cr.y, cr.w, cr.h);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cr.x, cr.y, cr.w, cr.h);
+      ctx.clip();
+      if (slices[idx]) drawLayers(ctx, slices[idx].layers);
+      ctx.restore();
+      drawGizmo(core.state.cropRect, '#ef4444', true);
+    }
     }
 
     updateStageOverlay();
@@ -2185,7 +2214,6 @@
     var onSplitUIChange = function () {
       updateSplitSummary();
       draw();
-      resetView();
     };
 
     if (dom.splitScale) dom.splitScale.addEventListener('input', onSplitUIChange);

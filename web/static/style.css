@@ -5087,3 +5087,11 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-split-mode-btn:hover:not(.active) {
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* Pixel-perfect non-interpolated crisp rendering for GIF Editor stage & import previews */
+#gif-preview-canvas, #gif-import-preview-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
+}

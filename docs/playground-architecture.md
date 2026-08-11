@@ -1,6 +1,7 @@
 
 # TinyRouter Playground 架构
-> **最后核对（2026-08-11，GIF Editor Overlay 修复与 Split Sheet Uneven 模式）：** (1) 修复视频导入时 Overlay 不生效问题：在 Overlay 面板（`#gif-overlay-panel`）中补全 `Apply To` 帧作用域单选框 `input[name="gif-scope"]` (Current/All/Range) 与范围输入框（`crop-start`/`crop-end`），并补全 `cacheDom()` 中的 `dom.rangeEnd` 绑定，使 `getTargetIndices()` 能正确获取目标帧列表；(2) Split Sheet 增加 Even/Uneven 切换开关：在 Sidebar Split Sheet 面板与 Import Modal 分割面板标题行加入 Segmented Switch 按钮组（`gif-split-mode-toggle`），Uneven 模式下 X/Y 输入项从分割数量切换为单元格像素分辨率（Cell Width / Cell Height），支持按任意单元格像素 + Gap 切割，超出图片边界的部分被自动丢弃；`updateSplitSummary()`、`drawSplitGridOverlay()`、`commitImageDraft()`、`estimateFrameCount()` 及 `splitImage()` 全流程联动更新。涉及文件：`web/static/gif-editor/gif-editor.js`、`web/static/gif-editor/gif-editor-import.js`、`web/static/style.css`。
+> **最后核对（2026-08-11，Crop 默认边距归零、画质无插值点阵呈现与 Scale 平滑无抖居中）：** (1) 修复 Crop 打开默认非零 Bug：`startGlobalCrop()` 初始边距置零（`pW=0, pH=0`），`updateSourcePanels()` 重置重构后的 `#gif-crop-num-*` 边距输入框，打开 Crop 时四个方向初始边距为 0；(2) 禁用插值平滑实现真实像素点阵感：2D Canvas 绘制显式禁用 `imageSmoothingEnabled = false`，CSS 给 stage 与 import 预览 Canvas 添加 `image-rendering: pixelated / crisp-edges`，缩放降采样真实呈现方块点阵；(3) 修复 Scale 拖动抖动与几何偏位：`draw()` 维护稳定原图视口基准，Scale<1 时通过离屏无插值采样再等比还原呈现，移除 `onSplitUIChange` 中高频重设的 `resetView()`，画面始终锁定视口几何中心且滑动零抖动。涉及文件：`web/static/gif-editor/gif-editor.js`、`web/static/gif-editor/gif-editor-import.js`、`web/static/style.css`。
+> **最后核对（2026-08-11，Image Batch 三格式提示词契约与异步 Provider 修复）：** Batch Planning system/user prompt 明确 raw JSON、id/quantity/negative 默认继承约束；Transform 明确 `{"format","items"}` Schema、natural/tag/json 规则（tag 固定 Booru 风格；json 为结构化对象 + 编译后的自然语言 `finalPrompt`，不把裸 JSON 发给图片 API）；`TransformOutput.Validate` 增加空输出、tag 非 JSON 单行、json `finalPromptObject.subject` 校验，manifest 记录 `transformVersion`。RemoteGenerator 对 ModelScope 设置 `X-Modelscope-Async-Mode`、不强制 `n:1`，兼容 `output.results`/`output_images`/嵌套 task_id，使用 `GET /v1/tasks/{id}?model=...` + `X-Modelscope-Task-Type: image_generation` 轮询（60×2s、单次 10s）；proxy Handler 的 `ImageTask` 委托 `TaskGet`，只有取得真实图片资产才进入下一 Variant；adapter/proxy 回归测试覆盖提交、轮询、失败、同步结果和非 ModelScope 默认值。
 > **最后核对（2026-08-10，Batch Project 弹窗与执行可观测性修复）：** Prompt 模版弹窗关闭按钮改为调用已导出的恢复入口；批量表单与 Prompt×Variant 卡片使用局部 `.pg-batch-*` 样式，文本框、步进器、图标键和底部动作键按行统一高度，数量步进器变更会写回计划状态。Transform/创建失败不再伪成功或清空错误，返回的后端错误会留在当前步骤；dashboard 显示 `lastError`、失败 Variant 错误和最近 typed SSE 事件。Scheduler 结束态按失败统计区分 `completed_with_errors`/`failed`，远程图片代理错误保留有界响应详情；Batch 同时正确冻结当前 Image 参数及 ComfyUI workflow，并把 edits endpoint 分派到图片编辑代理。
 > **最后核对（2026-08-10，Playground Batch Project 容错、透明度与排版全量整改）：** (1) 后端 JSON 容错与自定义 Prompt 接入：扩展 `internal/imagebatch/types.go` 的 `PlanInput` 增加 `CustomSystemPrompt` 与 `CustomUserPrompt`，升级 `decodeStrictContent` 自动识别剥离 Markdown ` ```json ` 包裹块与提取 JSON，解决导致秒回 `invalid JSON` 的暗雷。(2) Prompt 模版与透明度弹窗解锁编辑与草稿恢复：点击模版弹窗前先调用 `readDraft()` 锁定草稿数据，退出切回页面时 100% 完整还原表单文字；弹窗 `textarea` 支持可编辑，修改后的系统指令与用户提示词在 Go 后端 LLM 调用时真实生效。(3) 仓鼠跑轮加载动画：在 Generate Plan 与 Transform 时，弹窗中央浮现 `.wheel-and-hamster` 跑轮 CSS 飞奔加载动效。(4) 卡片高度三行与底栏按键统一：标题框与右上 `↑`/`↓`/`✕` 按钮统一 `36px !important` 零错位平齐，第三行步进器与 Negative Prompt 统一 `36px`；底部操作按钮统一为 `38px` 大规格视觉按键。涉及文件：`internal/api/imagebatch/planning.go`、`projects.go`、`internal/imagebatch/types.go`、`web/playground/static-pg/playground/pg-image-batch.js`、`web/playground/static-pg/playground.css`、`web/playground/static-pg/playground/pg-ui.js`。
 > **最后核对（2026-08-10，Playground Prompt Inspire 体验重构与对齐修补）：** (1) 亮色主题下 Eye Loader 眼睛背景色与纯白背景区分：引入 `--pg-eye-bg` / `--pg-eye-border`，在亮色模式下眼白自动切换为高级淡灰 `#e2e8f0` 并辅以柔和衬边。(2) 莫比乌斯无限环 ∞ SVG 动画：在 Prompt Inspire 弹窗输入框与主界面输入框加载时呈现莫比乌斯环动画，动画中轴线与 Eye Loader 眼睛垂直中轴 100% 精确居中对齐。(3) 仙女棒一键生成与底栏平分布局：底栏发送区右下角新增正方形仙女棒快捷生成按钮 (`.pg-btn-wand`)，后台直接生成与回填 Prompt；`Generate` 与 `Inspire` 按钮垂直平分 50% 高度且在非 Image 模式下 `Clear Chat` 100% 填满两端对齐。(4) 下拉菜单防剪裁与层级提升：`.custom-select-menu` 提高至 `z-index: 9999` 且宽度 100% 精准匹配触发按钮，解决左侧越界剪裁与选中项文字变黑不见问题。(5) 修复 Prompt Helper 模型筛选与 Inspire 404 报错：筛选条件更正为 `k !== 'image' && k !== 'embedding'` 避免遗漏默认文本模型；Inspire 生成请求纠正为 `/v1/chat/completions` 并补充状态重绘前输入框 `v.config.prompt` 值恢复保护。涉及文件：`web/playground/static-pg/playground/pg-ui.js`、`pg-image-inspire.js`、`pg-image-batch.js`、`playground.css`、`web/static/style.css`。
@@ -229,8 +230,7 @@ Playground 后端相关职责只有三类：
 | `POST /v1/chat/completions` | 普通聊天、群聊、摘要、场景生成、导演和旁白 | 无应用层鉴权 | 32 MiB |
 | `POST /v1/images/generations` | Manual Image 远程图片生成（GPT/xAI/ModelScope） | 无应用层鉴权 | 32 MiB |
 | `POST /v1/images/edits` | Manual Image 编辑类图片生成 | 无应用层鉴权 | 32 MiB |
-| `POST /v1/tasks/{taskId}` | ModelScope 异步任务轮询 | 无应用层鉴权 | 32 MiB |
-| `POST /api/save-image` | Manual 图片保存到 `ResolveImageSaveDir`；只接受受限图片类型与 SSRF-safe URL/data URL；**2026-08-10** 请求体可带 `metadata`——`ext==".png"` 时经 `internal/image`（`AsciiJSON`→`InjectPNGText`）注入 ComfyUI 同款 `prompt` tEXt chunk | 管理 session | 32 MiB |
+| `GET /v1/tasks/{taskId}` / `POST /v1/tasks/{taskId}` | ModelScope 异步任务轮询（GET 为 Manual/Batch 查询，POST 为兼容入口） | 无应用层鉴权 | 32 MiB |
 | `GET /api/image-proxy` | 同源代拉远程图片字节 | 管理 session | 32 MiB |
 | `POST /api/comfyui/proxy` | ComfyUI 同源代理：仅本机 `127.0.0.1:{port}`、GET/POST、校验路径/query/redirect | 管理 session | 32 MiB |
 | `POST /api/image-batches/plan` | Helper model 生成严格结构化 Natural prompt 计划 | 管理 session | 32 MiB |
@@ -373,7 +373,7 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 | `pg-stream.js` | 普通流式/非流式请求、图片旧路径兼容、generation-aware autosave |
 | `pg-image-model.js` | Manual Canvas adapter normalization、独立 generation/asset history、Comfy/remote generate、regenerate/delete/stop |
 | `pg-image-inspire.js` | 仅使用 text helper model 的 Natural/Tag/JSON Prompt Inspire modal |
-| `pg-image-batch.js` | Batch 三步 plan/transform/review、snapshot-first SSE、pause/resume/stop/retry、Prompt × Variant viewer |
+| `pg-image-batch.js` | Batch 三步 plan/transform/review、natural/tag/json 选择与提示词编译、snapshot-first SSE、pause/resume/stop/retry、Prompt × Variant viewer |
 | `pg-comfyui.js` | 浏览器同源 ComfyUI proxy、workflow 参数与 history polling |
 | `pg-render.js` | Manual Canvas、消息、来源、代码/Mermaid/HTML、debug 渲染 |
 | `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数、Image mode routing |
@@ -434,6 +434,16 @@ Playground 侧栏顶部的"窗口设置"面板标题右侧有四个模式按钮�
 
 切换入口为 `pgSetMode(mode)`，接收字符串参数，内部调用 `pgAutoChatToggle`。`pgAutoChatToggle` 在修改状态后同时调用 `pgRenderSidebar()` 和 `pgRenderPanes()`，后者负责布局切换和左侧面板的启停。
 
+
+#### Image Batch Project 运行契约
+
+Image Batch 与 Manual Canvas 分离：Step 1 Planning 生成结构化 prompt 计划，Step 2 Transform 按 `natural`/`tag`/`json` 生成可校验的最终提示词，Step 3 Review & Start 冻结 Prompt × Variant manifest，随后由后端 Scheduler 单并发执行。三种格式的语义固定为：natural 是描述句；tag 是不拆分子格式的 Booru 风格逗号标签（人物数量/主体/动作/环境/风格/质量，复合词使用下划线）；json 是结构化 `finalPromptObject` 加编译后的自然语言 `finalPrompt`，生成请求只发送后者，不把裸 JSON 直接发往图片 Provider。
+
+Transform 返回必须保持输入条数、顺序及每条 `naturalPrompt` 原文；后端校验 `format`、非空 `finalPrompt`，tag 不得为 JSON/多行，json 必须有对象形式的 `finalPromptObject.subject`。manifest 的 `promptPlan.transformVersion` 标记转换模板版本。
+
+Remote ModelScope 批量生成先提交 `X-Modelscope-Async-Mode: true`（该协议不强制补 `n:1`），提交结果支持 OpenAI `data[]` 与 ModelScope 的嵌套 `task_id`、`output.results`/`output_images`。只有拿到实际图片资产后才完成当前 Variant 并继续下一张；若仅返回 task id，后台通过 `GET /v1/tasks/{taskId}?model={provider/model}`，携带 `X-Modelscope-Task-Type: image_generation`，按 60 次、2 秒间隔、单次 10 秒超时轮询。`proxy.Handler.ImageTask` 委托已有 `TaskGet`，复用 Provider/Key 选择和请求头透传。
+
+验证基线：`internal/imagebatch/adapters_test.go` 覆盖异步提交→轮询→资产、失败状态、同步 `output.results`、非 ModelScope 默认值；`internal/proxy/handler_test.go` 覆盖 GET task 路由、Provider/Key 转发和 `X-Modelscope-Task-Type` 透传。
 ### 6.2 Recent Requests 左侧面板
 
 在**普通模式 + 单窗口**（`splitCount === 1`）时，布局自动切换为三列：
@@ -804,7 +814,7 @@ go build -tags playground -o tinyrouter-pg.exe .
 | 修改 Recent Requests 详情弹窗 | `pgShowReqDetail` 与 `web/static/monitor/monitor_modal.js`（六个固定 section、默认折叠、Status 仅折叠、其余 section 级与字段级 Pretty/Raw/Copy、Raw 原始字符串保持、两级 sticky header）+ `web/static/info_common.js`（`renderInfoSection`/`buildInfoField` 共享兼容边界，Playground 与其他调用方默认语义不变）+ `info-modal-overlay`/`style.css` |
 | 发布 Playground 变体 | 无 tag/tag 测试、资源 200、完整首页手测 |
 | 修改 Manual Image Canvas / Inspire | `pg-image-model.js`、`pg-image-inspire.js`、`pg-state.js`（`PG_IMAGE_KEY` 与 per-window generation/asset state）、`pg-render.js`（独立 Canvas 与 flattened history）、`pg-ui.js`（Image routing，不追加 chat bubble）、`pg-stream.js`（generationId+assetId autosave）、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/image/register.go` |
-| 修改 Image Batch Project | `internal/imagebatch/{types,paths,project_store,reconciler,manager,scheduler,remote_generator,comfy_generator,generator}.go`、`internal/api/imagebatch/*.go`、`internal/api/router.go`（auth + 32 MiB exact/root routes）、`pg-image-batch.js`、`pg-lifecycle.js`、`web/static/index.html`、`PROJECT_MAP.md` |
+| 修改 Image Batch Project | `internal/imagebatch/{types,paths,project_store,reconciler,manager,scheduler,remote_generator,comfy_generator,generator}.go`、`internal/imagebatch/*_test.go`、`internal/api/imagebatch/*.go`、`internal/api/router.go`（auth + 32 MiB exact/root routes）、`internal/proxy/handler.go`/`handler_test.go`（异步 ImageTask GET 委托）、`pg-image-batch.js`、`pg-lifecycle.js`、`web/static/index.html`、`PROJECT_MAP.md`、本文 Image Batch 运行契约 |
  | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `feature.go StaticFiles manifest` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 新增/修改 Search 模式 | `pg-search.js`（3 步 AI 编排）、`pg-ui.js`（`pgSetMode` search 分支 + 搜索设置面板 + `pgSearchSend`）、`pg-state.js`（`pgState.mode` `'search'` + `pgState.search`）、`pg-render.js`（search loading 状态 + 折叠渲染）、`pg-i18n.js`（search 键）、`playground.css`（`.pg-search-*` 样式）、`internal/anysearch/client.go`（JSON-RPC 客户端）、`internal/api/anysearch.go`（3 个 handler）、`internal/api/settings.go`（`anySearch` 字段流转）、`internal/api/router.go`（路由注册 + `feature.go StaticFiles manifest` 含 `pg-search.js`）、`internal/config/types.go`（`AnySearchConfig`）+`defaults.go`（`MaxResults` 默认值 5） |
 | 修改 Search 状态持久化 | `pg-state.js`（`pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()`、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES`、`pgLoad()` search 分支跳过 localStorage messages）、`pg-lifecycle.js`（`cleanupPlayground()` search early return、`renderPlayground()` 恢复后重新渲染）、`pg-search.js`（`pgSearchSend()` 即时保存、`pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查） |
