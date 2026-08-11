@@ -378,10 +378,9 @@ function pgSetMode(mode) {
     }
   }
 
-  // Re-enter Batch UI when returning to Image mode with an active project.
-  if (mode === 'image' && typeof pgImageBatchOnEnter === 'function') {
-    pgImageBatchOnEnter();
-  }
+  // Batch UI is only entered by an explicit user action (the sidebar
+  // Batch Project / Return button). It is never re-entered automatically
+  // from persisted state when returning to Image mode.
 
   pgSaveMode();
   pgRenderSidebar();
@@ -446,10 +445,26 @@ function pgRenderSidebar() {
   var cfg = w.config;
   var customMode = cfg.useCustomBody;
   var dimCls = customMode ? ' disabled' : '';
-  var imageBatchDisabled = pgState.mode === 'image' && pgState.splitCount > 1;
-  var imageBatchTitle = imageBatchDisabled ? pgT('pgBatchSingleWindow') : pgT('pgBatchProject');
-  var imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="width:100%">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
-
+  // Batch Project / Return toggle: while Batch UI is active the button becomes
+  // a clickable Return that exits to the normal Image layout (preserving the
+  // draft/plan/transform/project; the backend task keeps running). The numeric
+  // input to its right is the Manual Canvas per-submission image count (see
+  // pgGetImageSubmitCount / pgOnImageSubmitCount) — it never touches the Batch
+  // Planning quantity.
+  var batchActive = pgState.mode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle';
+  var imageBatchDisabled = pgState.mode === 'image' && pgState.splitCount > 1 && !batchActive;
+  var imageBatchBtn;
+  if (batchActive) {
+    imageBatchBtn = '<button class="pg-btn" onclick="if(typeof pgImageBatchCloseUI===\'function\') pgImageBatchCloseUI()" data-tooltip="' + pgEscapeHtml(pgT('pgBatchReturnTip')) + '" style="flex:1;min-width:0;width:auto">' + pgEscapeHtml(pgT('pgBatchReturn')) + '</button>';
+  } else {
+    var imageBatchTitle = imageBatchDisabled ? pgT('pgBatchSingleWindow') : pgT('pgBatchProject');
+    imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="flex:1;min-width:0;width:auto">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
+  }
+  var submitCountInput = '<input type="number" class="pg-image-submit-count" min="1" max="99" step="1" value="' + pgGetImageSubmitCount() + '" onchange="pgOnImageSubmitCount(this.value)" title="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" data-tooltip="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" aria-label="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">';
+  var batchEntryHtml = '<div class="pg-batch-entry"' + (batchActive ? ' style="grid-column:1 / -1"' : '') + '>' + imageBatchBtn + submitCountInput + '</div>';
+  // Clear Chat is hidden while Batch UI is active (it has no effect there);
+  // the ordinary Image Clear stays in normal Image mode.
+  var imageActionsRow = '<div class="pg-btn-row" style="margin-top:8px">' + (!batchActive ? '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' : '') + batchEntryHtml + '</div>';
   // --- WinBar ---
   var generating = pgIsGenerating();
   var winBtns = '';
@@ -682,7 +697,7 @@ function pgRenderSidebar() {
         winbar + comfyPanel +
         '<div class="pg-panel pg-image-actions-panel">' +
           promptHelperRow +
-          '<div class="pg-btn-row" style="margin-top:8px"><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' + imageBatchBtn + '</div>' +
+          imageActionsRow +
         '</div>' +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgDebug')) + '</div>' + debug + '</div>';
@@ -693,7 +708,7 @@ function pgRenderSidebar() {
         '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' +
           modelSel +
           promptHelperRow +
-          '<div class="pg-btn-row" style="margin-top:8px"><button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' + imageBatchBtn + '</div>' +
+          imageActionsRow +
         '</div>' +
         imgParams +
         '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
@@ -1546,6 +1561,29 @@ function pgOnParam(name, v) {
   var valEl = document.getElementById('pg-val-' + name);
   if (valEl) valEl.textContent = typeof v === 'number' ? v.toFixed(2) : v;
   pgSave();
+}
+// Manual Canvas per-submission image count. Value/state seam for the
+// multi-generation loop worker: read pgGetImageSubmitCount() at submission
+// time (clamped int >= 1). It lives in w.config.imgSubmitCount (default 1),
+// is persisted by pgSave(), is never part of the API body (distinct from
+// imgN / the Batch Planning quantity which stays default 4).
+function pgGetImageSubmitCount() {
+  var w = pgWin();
+  var raw = (w && w.config && w.config.imgSubmitCount != null) ? w.config.imgSubmitCount : 1;
+  var n = parseInt(raw, 10);
+  if (!isFinite(n) || n < 1) n = 1;
+  if (n > 99) n = 99;
+  return n;
+}
+function pgOnImageSubmitCount(v) {
+  var w = pgWin();
+  if (!w) return;
+  var n = parseInt(v, 10);
+  if (!isFinite(n) || n < 1) n = 1;
+  if (n > 99) n = 99;
+  w.config.imgSubmitCount = n;
+  pgSave();
+  pgRenderSidebar();
 }
 // pgOnImgSizeSelect handles the size <select> in image mode. Selecting the
 // '__custom' sentinel reveals the Custom Size text input below (without

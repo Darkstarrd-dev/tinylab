@@ -55,13 +55,13 @@
     return { body: body, protocol: proto, params: params, endpoint: snapshot && snapshot.endpoint || (cfg.imgEndpoint === 'edits' ? 'edits' : 'generations') };
   }
 
-  function comfyResult(w, prompt, signal, snapshot) {
+  function comfyResult(w, prompt, signal, snapshot, seedOverride) {
     var cfg = Object.assign({}, w.config || {}), params = snapshot && snapshot.params || {};
     if (params.port != null) cfg.imgComfyPort = params.port;
     if (params.workflow) cfg.imgComfyWorkflow = params.workflow;
     var workflow = cfg.imgComfyWorkflow;
     if (!workflow || typeof pgComfyCall !== 'function' || typeof pgComfyWaitHistory !== 'function') return Promise.reject(new Error(pgT('pgComfyNoWorkflow')));
-    var runWorkflow = typeof pgComfyWorkflowForPrompt === 'function' ? pgComfyWorkflowForPrompt(workflow, prompt) : workflow;
+    var runWorkflow = typeof pgComfyWorkflowForPrompt === 'function' ? pgComfyWorkflowForPrompt(workflow, prompt, seedOverride) : workflow;
     var clientID = typeof pgComfyUuid === 'function' ? pgComfyUuid() : uid('client');
     return pgComfyCall(cfg, 'POST', '/prompt', { prompt: runWorkflow, client_id: clientID }).then(function (resp) { return resp.json(); }).then(function (queued) {
       if (queued && queued.error) throw new Error(pgT('pgComfyPromptError', [JSON.stringify(queued.error).slice(0, 300)]));
@@ -183,49 +183,42 @@
     return attempt();
   }
 
-  window.pgImageGenerate = function (i, prompt, snapshot) {
-    var w = pgWinAt(i), st = w && imageState(w);
-    if (!w || !prompt || (st && st.phase === 'generating')) return Promise.reject(new Error(pgT('pgSelectModel')));
-    var cfg = w.config || {}, protocol = snapshot && snapshot.protocol || (typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(cfg) : '');
-    var isComfy = protocol === 'comfyui';
-    if (!isComfy && !cfg.model && !(snapshot && snapshot.model)) return Promise.reject(new Error(pgT('pgSelectModel')));
-    var req = isComfy ? { body: null, protocol: 'comfyui', params: Object.assign({}, snapshot && snapshot.params || cfgParams(cfg), { port: snapshot && snapshot.params && snapshot.params.port || cfg.imgComfyPort, workflow: snapshot && snapshot.params && snapshot.params.workflow || cfg.imgComfyWorkflow }), endpoint: 'comfyui' } : imageBody(w, prompt, snapshot);
-    var generation = { id: uid('generation'), status: 'generating', prompt: prompt, promptFormat: snapshot && snapshot.promptFormat || 'natural', promptObject: snapshot && snapshot.promptObject || null, revisedPrompt: '', createdAt: Date.now(), completedAt: null, durationMs: 0, model: snapshot && snapshot.model || cfg.model || 'comfyui', protocol: req.protocol, endpoint: req.endpoint, params: req.params, assets: [] };
-    st.phase = 'generating'; st.error = ''; st.submittedPrompt = prompt; st.activeRequestId = generation.id; st.generations.push(generation); st.activeAssetIndex = -1; st.abortCtrl = new AbortController();
-    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
-    var started = generation.createdAt;
-    var request;
-    if (isComfy) {
-      request = comfyResult(w, prompt, st.abortCtrl.signal, generation);
-    } else {
-      var reqHeaders = { 'Content-Type': 'application/json', 'X-TinyRouter-Source': 'playground' };
-      // ModelScope submits image tasks asynchronously; the header tells the
-      // upstream to return task_id immediately instead of blocking for the
-      // whole generation (the old pgSendImage flow did the same).
-      if (req.protocol === 'modelscope') reqHeaders['X-Modelscope-Async-Mode'] = 'true';
-      request = fetch(req.endpoint === 'edits' ? '/v1/images/edits' : '/v1/images/generations', { method: 'POST', headers: reqHeaders, body: JSON.stringify(req.body), signal: st.abortCtrl.signal })
-        .then(function (resp) { return resp.json().then(function (json) { if (!resp.ok || (json && json.error)) throw new Error((json && json.error && (json.error.message || json.error)) || 'HTTP ' + resp.status); return json; }); })
-        .then(function (json) {
-          // ModelScope async: a 2xx submit response carries only a task id —
-          // poll /v1/tasks/{id} until the poll status says done (or failed)
-          // and return the completed payload so the normalize path shows the
-          // images; a submit that already carries results is used directly.
-          if (req.protocol === 'modelscope' && json) {
-            var taskId = json.task_id || (json.output && json.output.task_id) || (json.result && json.result.task_id) || json.request_id || (json.data && json.data[0] && json.data[0].task_id) || '';
-            var canon = modelscopeCanonical(json);
-            if (taskId && !canon) return modelscopePoll(taskId, generation.model, st.abortCtrl.signal);
-            if (canon) return canon;
-          }
-          return json;
+  // imageSeedBase returns the base seed for a sequential multi-image
+  // submission (ModelScope body seed / ComfyUI sampler seed). With a user-set
+  // base seed (imgSeed > 0) it is used as-is, mirroring the Batch seedMode
+  // "increment" convention; without one a random base is drawn once per
+  // submission so the N images still differ. The base is drawn a single time
+  // per submission — per-image seeds are base + index (0-based), so the first
+  // image of a user-seeded run keeps exactly the base seed.
+  function imageSeedBase(params) {
+    return (params && params.imgSeed > 0) ? params.imgSeed : (Math.floor(Math.random() * 2147483646) + 1);
+  }
+
+  // pgImageRunSequence runs runFn(k) for k in 0..count-1 strictly one at a
+  // time. The shared abort signal is checked between runs so a stop lands as
+  // an AbortError instead of starting further requests. Resolves with the
+  // normalized results accumulated in `collected`; rejects on the first
+  // failing run (already-collected runs stay in `collected` for the caller's
+  // partial-success handling).
+  function pgImageRunSequence(runFn, count, signal, collected) {
+    var chain = Promise.resolve();
+    for (var k = 0; k < count; k++) {
+      (function (index) {
+        chain = chain.then(function () {
+          if (signal && signal.aborted) { var e = new Error(pgT('pgCanceled')); e.name = 'AbortError'; throw e; }
+          return runFn(index).then(function (norm) { collected.push(norm); return norm; });
         });
+      })(k);
     }
-    return request.then(function (payload) {
-      if (st.activeRequestId !== generation.id) return generation;
-      var norm = window.pgImageNormalizeResult(payload, req.protocol);
-      generation.assets = norm.assets; generation.revisedPrompt = norm.revisedPrompt; generation.status = norm.assets.length ? 'ready' : 'error'; generation.completedAt = Date.now(); generation.durationMs = generation.completedAt - started; generation.provider = norm.provider; generation.key = norm.key;
-      st.phase = generation.status; st.activeAssetIndex = generation.assets.length ? (st.generations.reduce(function (n, item) { return n + (item.assets ? item.assets.length : 0); }, 0) - generation.assets.length) : -1; st.activeRequestId = ''; st.abortCtrl = null; if (!norm.assets.length) st.error = pgT('pgImgNoResult');
+    return chain.then(function () { return collected; });
+  }
+
+  // finalizeImageAssets attaches the per-asset metadata (non-ComfyUI) and
+  // autosaves the assets; shared by the success tail and the partial-success
+  // catch path so both behave like the existing single-request lifecycle.
+  function finalizeImageAssets(assets, generation, isComfy) {
     if (!isComfy) {
-      norm.assets.forEach(function (asset) {
+      assets.forEach(function (asset) {
         asset.meta = {
           prompt: generation.prompt,
           model: generation.model,
@@ -239,12 +232,131 @@
         };
       });
     }
-      norm.assets.forEach(function (asset) { if (typeof pgAutoSaveImageArtifact === 'function') pgAutoSaveImageArtifact(asset.url, asset, generation.id, asset.id); });
+    assets.forEach(function (asset) { if (typeof pgAutoSaveImageArtifact === 'function') pgAutoSaveImageArtifact(asset.url, asset, generation.id, asset.id); });
+  }
+
+  // remoteSubmit performs one remote image request (the pre-existing single
+  // path): POST /v1/images/{generations|edits}, then for ModelScope an async
+  // submit is polled via /v1/tasks/{id} until the images are ready. Resolves
+  // with the canonical payload the normalize path understands.
+  function remoteSubmit(body, signal, req, generation) {
+    var reqHeaders = { 'Content-Type': 'application/json', 'X-TinyRouter-Source': 'playground' };
+    // ModelScope submits image tasks asynchronously; the header tells the
+    // upstream to return task_id immediately instead of blocking for the
+    // whole generation (the old pgSendImage flow did the same).
+    if (req.protocol === 'modelscope') reqHeaders['X-Modelscope-Async-Mode'] = 'true';
+    return fetch(req.endpoint === 'edits' ? '/v1/images/edits' : '/v1/images/generations', { method: 'POST', headers: reqHeaders, body: JSON.stringify(body), signal: signal })
+      .then(function (resp) { return resp.json().then(function (json) { if (!resp.ok || (json && json.error)) throw new Error((json && json.error && (json.error.message || json.error)) || 'HTTP ' + resp.status); return json; }); })
+      .then(function (json) {
+        // ModelScope async: a 2xx submit response carries only a task id —
+        // poll /v1/tasks/{id} until the poll status says done (or failed)
+        // and return the completed payload so the normalize path shows the
+        // images; a submit that already carries results is used directly.
+        if (req.protocol === 'modelscope' && json) {
+          var taskId = json.task_id || (json.output && json.output.task_id) || (json.result && json.result.task_id) || json.request_id || (json.data && json.data[0] && json.data[0].task_id) || '';
+          var canon = modelscopeCanonical(json);
+          if (taskId && !canon) return modelscopePoll(taskId, generation.model, signal);
+          if (canon) return canon;
+        }
+        return json;
+      });
+  }
+
+  window.pgImageGenerate = function (i, prompt, snapshot) {
+    var w = pgWinAt(i), st = w && imageState(w);
+    if (!w || !prompt || (st && st.phase === 'generating')) return Promise.reject(new Error(pgT('pgSelectModel')));
+    var cfg = w.config || {}, protocol = snapshot && snapshot.protocol || (typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(cfg) : '');
+    var isComfy = protocol === 'comfyui';
+    if (!isComfy && !cfg.model && !(snapshot && snapshot.model)) return Promise.reject(new Error(pgT('pgSelectModel')));
+    var req = isComfy ? { body: null, protocol: 'comfyui', params: Object.assign({}, snapshot && snapshot.params || cfgParams(cfg), { port: snapshot && snapshot.params && snapshot.params.port || cfg.imgComfyPort, workflow: snapshot && snapshot.params && snapshot.params.workflow || cfg.imgComfyWorkflow }), endpoint: 'comfyui' } : imageBody(w, prompt, snapshot);
+    // Count (imgSubmitCount, default 1): one ordinary Image prompt submission
+    // may generate N images from the same prompt. The value comes from the
+    // sidebar count input via pgGetImageSubmitCount() (pg-ui.js), is recorded
+    // in generation.params so Regenerate replays it, and is never part of the
+    // API body — it is unrelated to Batch Project planning quantity (default
+    // stays 4) and to the per-protocol imgN `n` control. count=1 must produce
+    // byte-for-byte today's single-request behavior.
+    var count = Math.max(1, Math.min(99, (snapshot && snapshot.params && snapshot.params.imgSubmitCount) || (typeof pgGetImageSubmitCount === 'function' ? pgGetImageSubmitCount() : 1)));
+    // Record the count on the params snapshot so Regenerate replays it; the
+    // key is not mapped into any request body.
+    req.params = Object.assign({}, req.params, { imgSubmitCount: count });
+    // Per-image seed base for sequential protocols (ModelScope/ComfyUI); drawn
+    // once per submission so the run seeds are base, base+1, ... and
+    // regenerate with a user seed reproduces the same images.
+    var seedBase = imageSeedBase(req.params);
+    var generation = { id: uid('generation'), status: 'generating', prompt: prompt, promptFormat: snapshot && snapshot.promptFormat || 'natural', promptObject: snapshot && snapshot.promptObject || null, revisedPrompt: '', createdAt: Date.now(), completedAt: null, durationMs: 0, model: snapshot && snapshot.model || cfg.model || 'comfyui', protocol: req.protocol, endpoint: req.endpoint, params: req.params, assets: [] };
+    st.phase = 'generating'; st.error = ''; st.submittedPrompt = prompt; st.activeRequestId = generation.id; st.generations.push(generation); st.activeAssetIndex = -1; st.abortCtrl = new AbortController();
+    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+    var started = generation.createdAt;
+    var collected = [];
+    var request;
+    if (isComfy) {
+      if (count > 1) {
+        request = pgImageRunSequence(function (index) {
+          return comfyResult(w, prompt, st.abortCtrl.signal, generation, seedBase + index).then(function (payload) {
+            return window.pgImageNormalizeResult(payload, req.protocol);
+          });
+        }, count, st.abortCtrl.signal, collected);
+      } else {
+        request = comfyResult(w, prompt, st.abortCtrl.signal, generation);
+      }
+    } else if (count > 1 && (req.protocol === 'gpt' || req.protocol === 'xai')) {
+      // GPT/xAI generate N images in one request via the provider's `n` field
+      // (the provider assigns per-image seeds — the images API has no seed
+      // field, so no seed override is invented). The count is clamped to the
+      // provider's n cap (GPT 5 / xAI 10); larger counts split into sequential
+      // requests, each carrying the remaining n.
+      var nCap = req.protocol === 'gpt' ? 5 : 10;
+      var nRuns = Math.ceil(count / nCap);
+      request = pgImageRunSequence(function (index) {
+        var runBody = Object.assign({}, req.body);
+        runBody.n = Math.min(nCap, count - index * nCap);
+        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
+          return window.pgImageNormalizeResult(payload, req.protocol);
+        });
+      }, nRuns, st.abortCtrl.signal, collected);
+    } else if (count > 1 && req.protocol === 'modelscope') {
+      request = pgImageRunSequence(function (index) {
+        var runBody = Object.assign({}, req.body);
+        // Sequential multi-image runs: exactly one image per request — drop
+        // any `n` a regenerated snapshot may have carried, and pin a distinct
+        // per-image seed.
+        delete runBody.n;
+        runBody.seed = seedBase + index;
+        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
+          return window.pgImageNormalizeResult(payload, req.protocol);
+        });
+      }, count, st.abortCtrl.signal, collected);
+    } else {
+      request = remoteSubmit(req.body, st.abortCtrl.signal, req, generation);
+    }
+    return request.then(function (result) {
+      if (st.activeRequestId !== generation.id) return generation;
+      var norms = Array.isArray(result) ? result : [window.pgImageNormalizeResult(result, req.protocol)];
+      var assets = [], revised = '', provider = '', key = '';
+      norms.forEach(function (norm) {
+        if (!norm) return;
+        if (norm.assets) assets = assets.concat(norm.assets);
+        if (!revised && norm.revisedPrompt) revised = norm.revisedPrompt;
+        if (!provider && norm.provider) provider = norm.provider;
+        if (!key && norm.key) key = norm.key;
+      });
+      generation.assets = assets; generation.revisedPrompt = revised; generation.status = assets.length ? 'ready' : 'error'; generation.completedAt = Date.now(); generation.durationMs = generation.completedAt - started; generation.provider = provider; generation.key = key;
+      st.phase = generation.status; st.activeAssetIndex = generation.assets.length ? (st.generations.reduce(function (n, item) { return n + (item.assets ? item.assets.length : 0); }, 0) - generation.assets.length) : -1; st.activeRequestId = ''; st.abortCtrl = null; if (!assets.length) st.error = pgT('pgImgNoResult');
+      finalizeImageAssets(assets, generation, isComfy);
       if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave(); return generation;
     }).catch(function (err) {
       if (st.activeRequestId !== generation.id) return generation;
       var canceled = (err && err.name === 'AbortError') || (st.abortCtrl && st.abortCtrl.signal.aborted);
       generation.status = canceled ? 'canceled' : 'error'; st.phase = generation.status; st.error = canceled ? '' : (err.message || String(err)); st.activeRequestId = ''; st.abortCtrl = null; generation.completedAt = Date.now(); generation.durationMs = generation.completedAt - started;
+      // Partial success: runs that completed before a stop/failure keep their
+      // assets (meta + autosave), mirroring how a finished generation's assets
+      // remain visible in the canvas after a later failure/delete.
+      if (collected.length) {
+        var partial = [];
+        collected.forEach(function (norm) { if (norm && norm.assets) partial = partial.concat(norm.assets); });
+        if (partial.length) { generation.assets = partial; finalizeImageAssets(partial, generation, isComfy); }
+      }
       if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave(); if (canceled) return generation; throw err;
     });
   };

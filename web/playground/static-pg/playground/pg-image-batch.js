@@ -918,53 +918,104 @@
     };
   }
 
-  function pgImageBatchOnEnter() {
-    if (state.projectId) {
-      pgImageBatchSnapshot(state.projectId).then(function () {
-        state.uiMode = 'executing';
-        state.stage = 4;
-        pgImageBatchSetLayout(1);
-        openEvents();
-      }).catch(function () {});
-      return;
-    }
+  function draftHasContent() {
+    var d = state.draft || {};
+    return !!(d.displayName || d.requirements || d.imageModel || d.helperModel ||
+              d.negativePrompt || d.customSystemPrompt || d.customUserPrompt);
+  }
 
+  function enterExecuting(id) {
+    state.projectId = String(id);
+    state.uiMode = 'executing';
+    state.stage = 4;
+    pgImageBatchSetLayout(1);
+    pgImageBatchSnapshot(state.projectId).then(function () {
+      saveActiveProject();
+      if (typeof root.pgRenderPanes === 'function') root.pgRenderPanes();
+      if (typeof root.pgRenderSidebar === 'function') root.pgRenderSidebar();
+      openEvents();
+    }).catch(function (e) {
+      // Stale project reference: drop it and stay on the normal Image layout.
+      state.projectId = null;
+      state.snapshot = null;
+      clearActiveProject();
+      if (typeof root.pgRenderSidebar === 'function') root.pgRenderSidebar();
+      notify(e && e.message ? e.message : text('invalid'), 'error');
+    });
+  }
+
+  function restorePlanningStage() {
+    // Capture the current normal Image layout before switching to the 2-pane
+    // planning layout. This runs only while uiMode==='idle' (an earlier
+    // ExitUI consumed the previous capture), so the panes show the ordinary
+    // Image layout here — never a Batch layout. Without this, a second Return
+    // finds previousLayout === null, keeps splitCount 2 and disables the
+    // Batch Project button, locking the user out.
+    if (!state.previousLayout && root.pgState) {
+      state.previousLayout = {
+        splitCount: root.pgState.splitCount,
+        activeWin: root.pgState.activeWin,
+        windows: root.pgState.windows,
+        modeWindowsImage: root.pgState.modeWindows && root.pgState.modeWindows.image,
+        modeSplitCountImage: root.pgState.modeSplitCounts && root.pgState.modeSplitCounts.image,
+        inputMaximized: !!root.pgState.inputMaximized
+      };
+    }
+    if (state.stage === 2 || state.stage === 3) {
+      state.uiMode = state.stage === 2 ? 'conversion' : 'review';
+    } else {
+      state.stage = 1;
+      state.uiMode = 'planning';
+    }
+    pgImageBatchSetLayout(2);
+  }
+
+  function restoreDraft(data) {
+    state.draftRestored = true;
+    state.stage = data.stage || 1;
+    state.uiMode = data.uiMode || 'planning';
+    state.draft = data.draft || createDraft();
+    state.plan = data.plan || null;
+    state.transform = data.transform || null;
+    if (!state.previousLayout && root.pgState) {
+      state.previousLayout = {
+        splitCount: root.pgState.splitCount,
+        activeWin: root.pgState.activeWin,
+        windows: root.pgState.windows,
+        modeWindowsImage: root.pgState.modeWindows && root.pgState.modeWindows.image,
+        modeSplitCountImage: root.pgState.modeSplitCounts && root.pgState.modeSplitCounts.image,
+        inputMaximized: !!root.pgState.inputMaximized
+      };
+    }
+    pgImageBatchSetLayout(2);
+  }
+
+  // Restores a previously preserved Batch session: in-memory executing project,
+  // in-memory planning-stage state, then the persisted active-project
+  // reference and Stage 1-3 draft. Invoked only by an explicit user action
+  // (the sidebar Batch Project button) — Batch UI is never entered
+  // automatically from persisted state.
+  function pgImageBatchRestore() {
+    if (state.uiMode !== 'idle') return true;
+    if (state.projectId) {
+      enterExecuting(state.projectId);
+      return true;
+    }
+    if (state.plan || state.transform || state.stage !== 1 || state.draftRestored || draftHasContent()) {
+      restorePlanningStage();
+      return true;
+    }
     var active = loadActiveProject();
     if (active && active.projectId) {
-      state.projectId = String(active.projectId);
-      pgImageBatchSnapshot(state.projectId).then(function () {
-        state.uiMode = 'executing';
-        state.stage = 4;
-        pgImageBatchSetLayout(1);
-        openEvents();
-      }).catch(function () {
-        // Backend no longer knows this project; drop the stale reference.
-        state.projectId = null;
-        clearActiveProject();
-      });
-      return;
+      enterExecuting(active.projectId);
+      return true;
     }
-
     var draftData = loadBatchDraft();
-    if (draftData && !state.draftRestored) {
-      state.draftRestored = true;
-      state.stage = draftData.stage || 1;
-      state.uiMode = draftData.uiMode || 'planning';
-      state.draft = draftData.draft || createDraft();
-      state.plan = draftData.plan || null;
-      state.transform = draftData.transform || null;
-      if (!state.previousLayout && root.pgState) {
-        state.previousLayout = {
-          splitCount: root.pgState.splitCount,
-          activeWin: root.pgState.activeWin,
-          windows: root.pgState.windows,
-          modeWindowsImage: root.pgState.modeWindows && root.pgState.modeWindows.image,
-          modeSplitCountImage: root.pgState.modeSplitCounts && root.pgState.modeSplitCounts.image,
-          inputMaximized: !!root.pgState.inputMaximized
-        };
-      }
-      pgImageBatchSetLayout(2);
+    if (draftData) {
+      restoreDraft(draftData);
+      return true;
     }
+    return false;
   }
 
   // Unified close entry: cleanup SSE/timers, then exit the Batch UI while
@@ -979,10 +1030,19 @@
   }
 
   function pgOpenImageBatch() {
-    if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1 && state.uiMode === 'idle') {
+    // The sidebar button renders as Return while Batch UI is active; this
+    // guard keeps a stale handler from starting a second project.
+    if (state.uiMode !== 'idle') {
+      pgImageBatchCloseUI();
+      return;
+    }
+    if (typeof pgState !== 'undefined' && pgState.mode === 'image' && pgState.splitCount > 1) {
       notify(text('batchSingleWindow'), 'warning');
       return;
     }
+    // Explicit entry: first try to restore a previously preserved session
+    // (in-memory or persisted); only otherwise start a new project.
+    if (pgImageBatchRestore()) return;
     // Starting a genuinely new project: close any previous SSE/timers and
     // clear stale project references so recovery cannot cross projects.
     pgImageBatchCleanup();
@@ -1080,7 +1140,7 @@
   root.pgImageBatchViewPrompt = pgImageBatchViewPrompt;
   root.pgImageBatchViewVariant = pgImageBatchViewVariant;
   root.pgImageBatchCleanup = pgImageBatchCleanup;
-  root.pgImageBatchOnEnter = pgImageBatchOnEnter;
+  root.pgImageBatchRestore = pgImageBatchRestore;
   root.pgImageBatchList = pgImageBatchList;
   root.pgImageBatchOpenProject = pgImageBatchOpenProject;
   root.pgImageBatchRenderPane = pgImageBatchRenderPane;

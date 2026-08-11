@@ -1,7 +1,7 @@
 # Image Batch Project 流程审核文稿
 
 > 审核对象：Playground Image 模式「批量项目」（Batch Project）完整流程
-> 依据：最近提交 `06101fa`（2026-08-04 初始实现）→ `a2933c5`（08-05 retry export 修复）→ `09ee6dc`（08-10 JSON 容错/模板可编辑/仓鼠加载）→ `0a0028d`（08-11 工作流修复）及当前代码事实基线（2026-08-11 inline 双 Pane & Request Trace 交互架构重构 + 生命周期审计修正：执行项目引用持久化与 snapshot-first 重入、统一 Close SSE cleanup、模式切换时序、显式 stop immediate/after-current、Prompt×Variant 导航、`responseRawBody` 脱敏，见 §15.4）
+> 依据：最近提交 `06101fa`（2026-08-04 初始实现）→ `a2933c5`（08-05 retry export 修复）→ `09ee6dc`（08-10 JSON 容错/模板可编辑/仓鼠加载）→ `0a0028d`（08-11 工作流修复）及当前代码事实基线（2026-08-11 inline 双 Pane & Request Trace 交互架构重构 + 生命周期审计修正：执行项目引用持久化与**显式点击恢复（无自动重入）**、统一 Close SSE cleanup、模式切换时序、显式 stop immediate/after-current、Prompt×Variant 导航、`responseRawBody` 脱敏、Batch Project↔Return 显式进出与手动生成计数缝，见 §15.4/§15.5）
 > 本文描述流程、提示词、交互规范与结果契约。
 
 ---
@@ -471,7 +471,7 @@ flowchart TD
 依据 `image_batch_project_redesign_plan.md` 审核结论（P0-1~P0-4、P1-1~P1-4）修正，后端 `/api/image-batches` 协议、SSE 事件名与 manifest schema 未变：
 
 - **P0-1 全局引用修复**：`pg-ui.js` 不再引用未定义的 `root`，改以全局函数存在性守卫或显式 `window.*` 引用，模式切换与执行态 sidebar 刷新不再抛 `ReferenceError`。
-- **P0-2 执行项目引用持久化**：create/open-project 成功后写 `tinyrouter.playground.imageBatchActiveProject.v1`（`{schemaVersion:1, projectId, savedAt}`）；刷新/重入由 `pgImageBatchOnEnter` 先读引用再 GET snapshot，snapshot 成功后才进入 executing；只存 projectId，不存 snapshot/trace/凭证。
+- **P0-2 执行项目引用持久化**：create/open-project 成功后写 `tinyrouter.playground.imageBatchActiveProject.v1`（`{schemaVersion:1, projectId, savedAt}`）；只存 projectId，不存 snapshot/trace/凭证。~~刷新/重入由 `pgImageBatchOnEnter` 先读引用再 GET snapshot，snapshot 成功后才进入 executing~~ —— **该自动重入路径已于 2026-08-11 复核废除（见 §15.5）**：Batch 仅由显式点击进入，恢复改由 `pgImageBatchRestore()` 承担。
 - **P0-3 统一 Close 入口**：`pgImageBatchCloseUI()` = cleanup（关 EventSource/timers）+ `pgImageBatchExitUI({preserveProject:true})`，侧栏 Close 与模式切换共用，消除 SSE 连接泄漏与重复建流。
 - **P0-4 模式切换时序**：`pgSetMode()` 在切换 mode/加载目标模式 windows 之前先退出 Batch 并恢复 Image 布局，防止 Image 布局污染目标模式。
 - **P1-1 显式 Stop 双语义**：侧栏提供 `pgImageBatchStop()`（after-current）与 `pgImageBatchStopImmediate()`（immediate）两个显式动作，后端 `controls.go` 仅接受这两种 mode。
@@ -480,3 +480,15 @@ flowchart TD
 - **P1-4 新建项目清理**：`pgOpenImageBatch()` 先 cleanup 并清空 `projectId`/`snapshot`（含 active-project 引用）再进入 planning。
 
 **验证边界**：后端行为未变，仍由 `internal/imagebatch/*_test.go` 与 `internal/proxy/handler_test.go` 覆盖；前端修复经 `node --check` 语法检查（pg-image-batch.js / pg-ui.js / pg-lifecycle.js / web/static/api.js）；浏览器/截图/图像识别交互验收未在本轮声明，留待后续。
+
+### 15.5 显式进出与手动生成计数修正（2026-08-11 复核）
+
+复核修正（当前代码事实基线，替代 §15.4 P0-2 的自动重入路径；后端 `/api/image-batches` 协议、SSE 事件名与 manifest schema 未变）：
+
+- **Batch 仅显式进入，绝不自动重入**：`pg-lifecycle.js` `renderPlayground` 与 `pg-ui.js` `pgSetMode` 不再调用任何 Batch 进入函数——刷新、切回 Image 模式一律落回普通 Image 布局；`pgImageBatchOnEnter` 已删除，由 `pgImageBatchRestore()`（`pg-image-batch.js`，导出 `root.pgImageBatchRestore`）替代，且仅由用户**显式点击**侧栏按钮触发，按 内存 projectId（executing）→ 内存规划态（plan/transform/stage/draft 内容）→ `imageBatchActiveProject.v1` 引用 → `imageBatchDraft.v1` 草稿 顺序恢复，全部落空才进入新建项目流程（`pgOpenImageBatch()` 在 `uiMode!=='idle'` 时防御性走 Close 而非再建项目）。
+- **侧栏 Batch Project ↔ Return**：Batch UI 激活（`pgState.imageBatch.uiMode!=='idle'`）期间，Image 侧栏按钮渲染为可点击 `Return`（i18n `pgBatchReturn`，en 'Return'/cn '返回'），点击 = `pgImageBatchCloseUI()`（`pgImageBatchCleanup()` 关 EventSource/reconnect/reconcile 定时器 → `pgImageBatchExitUI({preserveProject:true})` 恢复 Image 布局），**保留 draft/plan/transform/active-project/后端执行**；下一次显式点击 Batch Project 恢复既有会话（含 Stage 4 executing 重新开 SSE）。
+- **Batch 激活期隐藏 Clear Chat**：`pgRenderSidebar` 在 Batch 激活时不再渲染 `pgImageClear` 按钮（对 Batch 无效）；普通 Image 模式 Clear Chat 行为完全保留。pane-head 的 Clear 按钮本就按 `!isBatchActive` 隐藏。
+- **手动生成计数与 Batch 数量完全独立**：Batch Project/Return 按钮右侧数字输入（默认 1）仅表示普通 Image 每次提交的生成次数——状态 `w.config.imgSubmitCount`（`pg-core.js` `PG_DEFAULT_CFG` 默认 1，经 `pgSave` 持久化），读缝 `pgGetImageSubmitCount()`（clamp 1..99）、写缝 `pgOnImageSubmitCount(v)`；**不进 API body、不改动 Batch Planning quantity（保持默认 4 且独立，`pg-img-batch-quantity` 步进器/`draft.quantity` 不受影响）**。多图生成循环由 `manual-image-batch` 工作流消费 `pgGetImageSubmitCount()` 实现（GPT/xAI 单请求 n=count、ModelScope/ComfyUI 顺序请求 per-image seed；count=1 保持原单请求行为）。
+
+**验证边界**：前端改动经 `node --check` 语法检查（pg-image-batch.js / pg-ui.js / pg-lifecycle.js / pg-core.js / pg-i18n.js）；浏览器交互验收留待后续。
+

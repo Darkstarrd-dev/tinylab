@@ -698,9 +698,9 @@ function pgComfyPromptFromMessage(content) {
   return typeof content === 'string' ? content : '';
 }
 
-function pgComfyWorkflowForPrompt(workflow, prompt) {
+function pgComfyWorkflowForPrompt(workflow, prompt, seed) {
   var run = pgComfyDeepCopy(workflow);
-  if (!prompt) return run;
+  if (!prompt && seed == null) return run;
   var fallback = null;
   Object.keys(run).forEach(function(nodeId) {
     var node = run[nodeId];
@@ -711,6 +711,20 @@ function pgComfyWorkflowForPrompt(workflow, prompt) {
     if (title.indexOf('positive') >= 0 || title.indexOf('正') >= 0 || title.indexOf('prompt') >= 0 || title.indexOf('提示') >= 0) fallback = node;
   });
   if (fallback) fallback.inputs.text = prompt;
+  // Per-image seed injection for multi-image runs (Count > 1): mirror the
+  // Batch convention of overriding the KSampler/KSamplerAdvanced seed so each
+  // sequential run of the same prompt produces a different image. Count=1
+  // passes no seed and leaves the workflow's own seed untouched.
+  if (seed != null) {
+    Object.keys(run).forEach(function(nodeId) {
+      var node = run[nodeId];
+      if (!node || !node.inputs) return;
+      if (node.class_type === 'KSampler' || node.class_type === 'KSamplerAdvanced') {
+        if ('seed' in node.inputs) node.inputs.seed = seed;
+        if ('noise_seed' in node.inputs) node.inputs.noise_seed = seed;
+      }
+    });
+  }
   return run;
 }
 

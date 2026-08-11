@@ -62,10 +62,9 @@ function renderPlayground(container) {
     pgRenderPanes();
     pgUpdateInputBar();
   });
-  // Batch tasks are backend-owned. Re-entry snapshot-reconciles before SSE.
-  if (typeof pgImageBatchOnEnter === 'function' && pgState.mode === 'image') {
-    pgImageBatchOnEnter();
-  }
+  // Batch UI is never entered automatically from persisted state: a
+  // refresh/load always shows the normal Image layout. The user re-enters
+  // (or resumes) Batch by clicking the sidebar Batch Project button.
 
 }
 

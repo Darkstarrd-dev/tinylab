@@ -641,6 +641,9 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-image-footer{font-size:11px;color:var(--text-muted);max-width:100%;word-break:break-all}
 .pg-image-actions-panel .pg-btn-row{margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pg-image-actions-panel .pg-btn{width:100%}
+.pg-batch-entry{display:flex;align-items:center;gap:6px;min-width:0}
+.pg-batch-entry .pg-image-submit-count{width:48px;height:28px;flex:0 0 48px;box-sizing:border-box;padding:2px 4px;font-size:12px;text-align:center;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--input-bg);color:var(--text)}
+.pg-batch-entry .pg-image-submit-count:focus{outline:none;border-color:var(--accent)}
 .pg-inspire-body{display:flex;flex-direction:column;gap:8px}
 .pg-inspire-body select,.pg-inspire-body textarea{width:100%;box-sizing:border-box;padding:7px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--input-bg);color:var(--text)}
 .pg-inspire-body textarea{min-height:90px;resize:vertical}

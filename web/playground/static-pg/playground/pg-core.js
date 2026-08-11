@@ -49,6 +49,10 @@ var PG_DEFAULT_CFG = {
   imgAspectRatio: '1:1',
   imgResolution: '2k',
   imgN: 1,
+  // Manual Canvas images per prompt submission (client-side loop count only;
+  // read via pgGetImageSubmitCount(), never sent in the API body, and
+  // independent of Batch Planning quantity).
+  imgSubmitCount: 1,
   // Endpoint control: 'generations' (default) or 'edits'
   imgEndpoint: 'generations',
   // GPT/image response/output format fields
