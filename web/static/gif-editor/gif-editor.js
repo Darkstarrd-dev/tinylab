@@ -1340,7 +1340,6 @@
       ctx.restore();
       drawGizmo(core.state.cropRect, '#ef4444', true);
     }
-    }
 
     updateStageOverlay();
   }
