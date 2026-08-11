@@ -12,6 +12,34 @@
   }
 
   var DRAFT_KEY = 'tinyrouter.playground.imageBatchDraft.v1';
+  // Executing-project reference: persisted so a refresh/re-entry can recover
+  // the running batch. Only the project id is stored — never snapshot, trace
+  // or credentials. Close/mode-switch preserves it; a genuinely new project
+  // clears it.
+  var ACTIVE_KEY = 'tinyrouter.playground.imageBatchActiveProject.v1';
+
+  function saveActiveProject() {
+    try {
+      if (!state.projectId) return;
+      localStorage.setItem(ACTIVE_KEY, JSON.stringify({ schemaVersion: 1, projectId: String(state.projectId), savedAt: Date.now() }));
+    } catch (e) {}
+  }
+
+  function loadActiveProject() {
+    try {
+      var raw = localStorage.getItem(ACTIVE_KEY);
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      if (!data || data.schemaVersion !== 1 || !data.projectId) return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearActiveProject() {
+    try { localStorage.removeItem(ACTIVE_KEY); } catch (e) {}
+  }
 
   var state = {
     uiMode: 'idle', // 'idle' | 'planning' | 'conversion' | 'review' | 'executing'
@@ -97,7 +125,9 @@
       clearBatchDraft();
     }
     if (state.previousLayout) {
-      if (root.pgState) {
+      // Restore the captured Image layout only while still in Image mode;
+      // restoring it into another mode would pollute that mode's layout.
+      if (root.pgState && root.pgState.mode === 'image') {
         root.pgState.splitCount = state.previousLayout.splitCount;
         root.pgState.activeWin = state.previousLayout.activeWin;
         if (state.previousLayout.windows) root.pgState.windows = state.previousLayout.windows;
@@ -142,7 +172,7 @@
       title: ['Batch Project','批量项目'], planning: ['Planning','规划'], conversion: ['Format Conversion','格式转换'], review: ['Review & Start','检查并开始'], batchSingleWindow: ['Batch Project is available only with one Image window.','多窗口 Image 模式不支持批量项目。'],
       name: ['Project name','项目名称'], helper: ['Prompt helper model','提示词辅助模型'], imageModel: ['Image model','图片模型'], requirements: ['Image requirements','批量创作要求'], format: ['Output format','输出格式'], negative: ['Default negative prompt','默认负面提示词'], quantity: ['Default quantity','默认数量'],
       plan: ['Generate plan','生成规划'], transform: ['Transform','转换'], back: ['Back','返回'], next: ['Next','下一步'], start: ['Start','开始'], cancel: ['Cancel','取消'], close: ['Close','关闭'], add: ['Add item','添加项目'], remove: ['Delete','删除'], up: ['Up','上移'], down: ['Down','下移'], natural: ['Natural','自然语言'], tag: ['Tag','标签'], json: ['JSON','JSON'],
-      status: ['Status','状态'], progress: ['Progress','进度'], directory: ['Project directory','项目目录'], interval: ['Interval (ms)','间隔（毫秒）'], retries: ['Max retries','最大重试'], retryDelay: ['Retry delay (ms)','重试延迟（毫秒）'], seedMode: ['Seed mode','Seed 策略'], baseSeed: ['Base seed','基础 Seed'], pause: ['Pause','暂停'], resume: ['Resume','继续'], stop: ['Stop','停止'], retry: ['Retry','重试'], previous: ['Previous','上一个'], nextImage: ['Next','下一个'], noImage: ['No image yet','暂无图片'], projects: ['Projects','项目列表'], refresh: ['Refresh','刷新'], planningError: ['Planning returned an invalid item list.','规划返回的项目列表无效。'], invalid: ['Invalid response','响应格式无效'], helperRequired: ['Select a prompt helper model first.','请先选择提示词辅助模型。'], imageRequired: ['Select an image model first.','请先选择图片模型。'], requirementsRequired: ['Enter image requirements first.','请先输入批量创作要求。'], nameRequired: ['Project name is required.','项目名称不能为空。'], jsonInvalid: ['JSON prompt is invalid.','JSON 提示词无效。']
+      status: ['Status','状态'], progress: ['Progress','进度'], directory: ['Project directory','项目目录'], interval: ['Interval (ms)','间隔（毫秒）'], retries: ['Max retries','最大重试'], retryDelay: ['Retry delay (ms)','重试延迟（毫秒）'], seedMode: ['Seed mode','Seed 策略'], baseSeed: ['Base seed','基础 Seed'], pause: ['Pause','暂停'], resume: ['Resume','继续'], stop: ['Stop','停止'], stopImmediate: ['Stop immediate','立即停止'], retry: ['Retry','重试'], previous: ['Previous','上一个'], nextImage: ['Next','下一个'], prevPrompt: ['Prev Prompt','上一 Prompt'], nextPrompt: ['Next Prompt','下一 Prompt'], noImage: ['No image yet','暂无图片'], projects: ['Projects','项目列表'], refresh: ['Refresh','刷新'], planningError: ['Planning returned an invalid item list.','规划返回的项目列表无效。'], invalid: ['Invalid response','响应格式无效'], helperRequired: ['Select a prompt helper model first.','请先选择提示词辅助模型。'], imageRequired: ['Select an image model first.','请先选择图片模型。'], requirementsRequired: ['Enter image requirements first.','请先输入批量创作要求。'], nameRequired: ['Project name is required.','项目名称不能为空。'], jsonInvalid: ['JSON prompt is invalid.','JSON 提示词无效。']
     };
     return m[key] ? tr(m[key][0], m[key][1]) : key;
   }
@@ -628,6 +658,10 @@
     }).then(function (res) {
       if (!res || res.error || !res.projectId) throw new Error(apiError(res));
       state.projectId = String(res.projectId);
+      // Create succeeded: persist the executing-project reference right away,
+      // before the snapshot fetch, so a refresh can recover even if that GET
+      // fails transiently. Only the project id is stored.
+      saveActiveProject();
       state.snapshot = res.snapshot || null;
       return state.snapshot ? Promise.resolve(state.snapshot) : pgImageBatchSnapshot(state.projectId);
     }).then(function (snap) {
@@ -713,6 +747,7 @@
       : ((status === 'running' || status === 'queued') ? button(text('pause'), 'pgImageBatchPause') : '');
     if (status === 'running' || status === 'queued' || status === 'paused') {
       controls += button(text('stop'), 'pgImageBatchStop');
+      controls += button(text('stopImmediate'), 'pgImageBatchStopImmediate');
     }
 
     var treeHtml = (s.prompts || []).map(function (p, pi) {
@@ -742,7 +777,7 @@
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
         controls +
         button(text('refresh'), 'pgImageBatchRefresh') +
-        '<button type="button" class="pg-btn" onclick="pgImageBatchExitUI({preserveProject:true})">' + esc(text('close')) + '</button>' +
+        '<button type="button" class="pg-btn" onclick="pgImageBatchCloseUI()">' + esc(text('close')) + '</button>' +
       '</div>' +
       '<div style="flex:1;overflow-y:auto">' + treeHtml + '</div>' +
     '</div>';
@@ -754,17 +789,32 @@
     var item = viewerItem(s);
     var img = item && item.v ? assetUrl(item.p, item.v) : '';
     var lastError = (item && item.v && item.v.lastError) || s.lastError || '';
+    var navPrompt = '';
+    var navVariant = '';
+    if (item) {
+      var canPrevP = item.pi > 0;
+      var canNextP = item.pi < item.pn - 1;
+      var canPrevV = item.vi > 0;
+      var canNextV = item.vn > 0 && item.vi < item.vn - 1;
+      navPrompt =
+        '<button type="button" class="pg-btn" onclick="pgImageBatchViewPrompt(' + (item.pi - 1) + ')"' + (canPrevP ? '' : ' disabled') + '>← ' + esc(text('prevPrompt')) + '</button>' +
+        '<span style="font-size:12px;color:var(--text-secondary)">Prompt ' + (item.pi + 1) + ' / ' + item.pn + '</span>' +
+        '<button type="button" class="pg-btn" onclick="pgImageBatchViewPrompt(' + (item.pi + 1) + ')"' + (canNextP ? '' : ' disabled') + '>' + esc(text('nextPrompt')) + ' →</button>';
+      navVariant =
+        '<button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(-1)"' + (canPrevV ? '' : ' disabled') + '>←</button>' +
+        '<span style="font-size:12px;color:var(--text-secondary)">Variant ' + (item.vi + 1) + ' / ' + Math.max(1, item.vn) + '</span>' +
+        '<button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(1)"' + (canNextV ? '' : ' disabled') + '>→</button>';
+    }
 
     return '<div class="pg-batch-inline-pane" style="display:flex;flex-direction:column;gap:12px">' +
       (lastError ? '<div class="pg-batch-error pg-batch-error-box">' + esc(lastError) + '</div>' : '') +
       '<div class="pg-batch-viewer" style="flex:1;min-height:300px;display:flex;align-items:center;justify-content:center;background:var(--bg-surface-2);border-radius:6px;overflow:hidden">' +
         (img ? '<img src="' + esc(img) + '" alt="batch result" style="max-width:100%;max-height:100%;object-fit:contain">' : '<span style="color:var(--text-secondary)">' + esc(text('noImage')) + '</span>') +
       '</div>' +
-      '<div class="pg-batch-viewer-nav" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px">' +
-        '<button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(-1)">←</button>' +
-        '<span style="font-size:12px;color:var(--text-secondary)">' + (item ? ('Prompt ' + (item.pi + 1) + ' / ' + item.pn + ' · Variant ' + (item.vi + 1) + ' / ' + Math.max(1, item.vn)) : '') + '</span>' +
-        '<button type="button" class="pg-btn" onclick="pgImageBatchViewVariant(1)">→</button>' +
-      '</div>' +
+      (item ? '<div class="pg-batch-viewer-nav" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 8px">' +
+        '<span style="display:flex;align-items:center;gap:6px">' + navPrompt + '</span>' +
+        '<span style="display:flex;align-items:center;gap:6px">' + navVariant + '</span>' +
+      '</div>' : '') +
       (item && item.p ? '<div class="pg-batch-current-prompt" style="padding:10px;background:var(--bg-surface-2);border-radius:6px;font-size:12px">' +
         '<strong style="color:var(--text)">' + esc(item.p.title || item.p.id) + '</strong><br>' +
         '<div style="margin:4px 0;color:var(--text-secondary)">' + esc(item.p.finalPrompt || item.p.naturalPrompt || '') + '</div>' +
@@ -814,6 +864,7 @@
   function pgImageBatchResume() { control('resume'); }
   function pgImageBatchPause() { control('pause'); }
   function pgImageBatchStop() { control('stop', { mode: 'after-current' }); }
+  function pgImageBatchStopImmediate() { control('stop', { mode: 'immediate' }); }
   function pgImageBatchRetry() {
     var item = viewerItem(state.snapshot);
     if (!state.projectId || !item || !item.p || !item.v) return;
@@ -878,6 +929,22 @@
       return;
     }
 
+    var active = loadActiveProject();
+    if (active && active.projectId) {
+      state.projectId = String(active.projectId);
+      pgImageBatchSnapshot(state.projectId).then(function () {
+        state.uiMode = 'executing';
+        state.stage = 4;
+        pgImageBatchSetLayout(1);
+        openEvents();
+      }).catch(function () {
+        // Backend no longer knows this project; drop the stale reference.
+        state.projectId = null;
+        clearActiveProject();
+      });
+      return;
+    }
+
     var draftData = loadBatchDraft();
     if (draftData && !state.draftRestored) {
       state.draftRestored = true;
@@ -900,9 +967,15 @@
     }
   }
 
-  function pgImageBatchClose() {
+  // Unified close entry: cleanup SSE/timers, then exit the Batch UI while
+  // preserving the executing project (the backend task keeps running).
+  function pgImageBatchCloseUI() {
     pgImageBatchCleanup();
     pgImageBatchExitUI({ preserveProject: true });
+  }
+
+  function pgImageBatchClose() {
+    pgImageBatchCloseUI();
   }
 
   function pgOpenImageBatch() {
@@ -910,6 +983,14 @@
       notify(text('batchSingleWindow'), 'warning');
       return;
     }
+    // Starting a genuinely new project: close any previous SSE/timers and
+    // clear stale project references so recovery cannot cross projects.
+    pgImageBatchCleanup();
+    state.projectId = null;
+    state.snapshot = null;
+    state.source = null;
+    state.viewer = { prompt: 0, variant: 0 };
+    clearActiveProject();
     if (!state.previousLayout && root.pgState) {
       state.previousLayout = {
         splitCount: root.pgState.splitCount,
@@ -927,6 +1008,7 @@
     state.traces = { plan: null, transform: null, create: null };
     state.events = [];
     state.draft = createDraft();
+    state.draftRestored = false;
     readDraft();
     saveBatchDraft();
     pgImageBatchSetLayout(2);
@@ -960,10 +1042,20 @@
     closeModal();
     pgImageBatchSetLayout(1);
     pgImageBatchSnapshot(state.projectId).then(function () {
+      saveActiveProject();
       if (typeof root.pgRenderPanes === 'function') root.pgRenderPanes();
       if (typeof root.pgRenderSidebar === 'function') root.pgRenderSidebar();
       openEvents();
-    }).catch(function (e) { notify(e.message || text('invalid'), 'error'); });
+    }).catch(function (e) {
+      notify(e.message || text('invalid'), 'error');
+      // The project never loaded: undo the transient executing state so a
+      // stale projectId/snapshot pair cannot render or feed asset URLs.
+      state.projectId = null;
+      state.snapshot = null;
+      state.stage = 1;
+      state.viewer = { prompt: 0, variant: 0 };
+      pgImageBatchExitUI({ preserveProject: true });
+    });
   }
 
   root.pgOpenImageBatch = pgOpenImageBatch;
@@ -977,13 +1069,14 @@
   root.pgImageBatchAddItem = pgImageBatchAddItem;
   root.pgImageBatchStart = pgImageBatchStart;
   root.pgImageBatchClose = pgImageBatchClose;
+  root.pgImageBatchCloseUI = pgImageBatchCloseUI;
   root.pgImageBatchRestoreCreateModal = closeModal;
   root.pgImageBatchSnapshot = pgImageBatchSnapshot;
   root.pgImageBatchRefresh = pgImageBatchRefresh;
   root.pgImageBatchPause = pgImageBatchPause;
   root.pgImageBatchResume = pgImageBatchResume;
   root.pgImageBatchStop = pgImageBatchStop;
-  root.pgImageBatchRetry = pgImageBatchRetry;
+  root.pgImageBatchStopImmediate = pgImageBatchStopImmediate;
   root.pgImageBatchViewPrompt = pgImageBatchViewPrompt;
   root.pgImageBatchViewVariant = pgImageBatchViewVariant;
   root.pgImageBatchCleanup = pgImageBatchCleanup;

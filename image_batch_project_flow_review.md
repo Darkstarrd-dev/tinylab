@@ -1,7 +1,7 @@
 # Image Batch Project 流程审核文稿
 
 > 审核对象：Playground Image 模式「批量项目」（Batch Project）完整流程
-> 依据：最近提交 `06101fa`（2026-08-04 初始实现）→ `a2933c5`（08-05 retry export 修复）→ `09ee6dc`（08-10 JSON 容错/模板可编辑/仓鼠加载）→ `0a0028d`（08-11 工作流修复）及当前代码事实基线（2026-08-11 inline 双 Pane & Request Trace 交互架构重构）
+> 依据：最近提交 `06101fa`（2026-08-04 初始实现）→ `a2933c5`（08-05 retry export 修复）→ `09ee6dc`（08-10 JSON 容错/模板可编辑/仓鼠加载）→ `0a0028d`（08-11 工作流修复）及当前代码事实基线（2026-08-11 inline 双 Pane & Request Trace 交互架构重构 + 生命周期审计修正：执行项目引用持久化与 snapshot-first 重入、统一 Close SSE cleanup、模式切换时序、显式 stop immediate/after-current、Prompt×Variant 导航、`responseRawBody` 脱敏，见 §15.4）
 > 本文描述流程、提示词、交互规范与结果契约。
 
 ---
@@ -276,6 +276,7 @@ flowchart TD
 - **停止语义**：
   - `stop immediate`：正在运行的 variant 标 `interrupted`，项目 `canceled`。
   - `stop after-current`：当前 variant 跑完后，项目按失败统计进入 `completed` 或 `completed_with_errors`。
+  - **前端显式双动作（08-11 修正）**：侧栏 Stop 提供 `after-current`（`pgImageBatchStop`）与 `immediate`（`pgImageBatchStopImmediate`）两个显式控件（`POST .../stop` body `{mode:'after-current'|'immediate'}`），不再只有默认 after-current 单按钮。
 - **暂停/恢复**：`pause` → 调度循环停在等待态（status=paused）；`resume` → 置 queued 并唤醒（startRuntime 幂等）。
 - **单 Variant 重试**：仅 `failed`/`interrupted` 的 variant 可重试；重置 status/LastError/Attempt 为 pending/空/0 后重启调度。
 - **终态分类**（08-11 修复）：`Failed>0 || Interrupted>0` → `completed_with_errors`，否则 `completed`；`onError=stop` 且出错 → `failed`（持久化 `LastError`）；`stop immediate` → `canceled`。
@@ -381,8 +382,9 @@ flowchart TD
 ### 10.2 Dashboard
 
 - Prompt 标签页（水平切换）→ 该 Prompt 的 Variant 翻页（prev/next）。
+- **Prompt×Variant 双层导航（08-11 修正）**：viewer 同时提供 Prompt 上一层/下一层（`pgImageBatchViewPrompt(index)`，越界禁用）与 Variant ←/→（`pgImageBatchViewVariant(±1)`，越界禁用）；侧栏 Prompt 树 variant 行点击（`pgImageBatchSelectViewer(pi, vi)`）直接定位。
 - 显示：当前图、状态、进度（completed/total）、`lastError`、最近事件日志。
-- 控制：pause / resume / stop（after-current）/ 单 Variant retry。
+- 控制：pause / resume / stop（immediate / after-current）/ 单 Variant retry。
 
 ---
 
@@ -438,7 +440,7 @@ flowchart TD
 5. **落盘与恢复**：`imgs/{slug}/p####/v####.ext` 生成成功；重启进程后 Reconcile 恢复 succeeded 状态、缺失槽位标 interrupted。
 6. **重试**：失败 variant 单条重试后变 succeeded，其余不动。
 7. **终态**：部分失败 → `completed_with_errors` 且项目/variant `LastError` 非空（`scheduler_test.go` 覆盖该契约）。
-8. **前端**：SSE 事件驱动 dashboard 实时更新；离开页面任务继续，重进恢复。
+8. **前端**：SSE 事件驱动 dashboard 实时更新；离开页面任务继续，重进先读 `tinyrouter.playground.imageBatchActiveProject.v1` 再 snapshot-first 恢复（GET snapshot 成功后才开 SSE）；Close/模式切换先 cleanup 关闭 SSE 再退出 UI，任务不被 UI 关闭隐式取消。
 
 ---
 **验证方案与结果**：受影响包测试、Playground webview 构建、临时实例 Batch UI DOM/交互冒烟均通过；全量 `go test ./...` 唯一失败为既有 `internal/mediaedit/TestManager_VideoToWebp` 的 ffprobe `count_frames=N/A` 环境问题。部署实例已替换并在端口 20102 返回 200；ModelScope 真密钥端到端生成尚未执行。
@@ -464,3 +466,17 @@ flowchart TD
 - `go test ./internal/imagebatch/... ./internal/api/imagebatch/... ./internal/proxy/...`：通过。
 - 覆盖：异步提交→轮询→base64 资产、失败状态、同步 `output.results`、非 ModelScope `n:1`/异步头回归、proxy task 路由/Provider Key/任务头透传。
 - Playground webview 构建与部署替换已完成；部署前备份：`C:\Tools\TinyRouter\backup-remediation-20260811-155529`。部署实例：`tinyrouter-webview-pg-stripped.exe`，端口 20102。
+### 15.4 前端生命周期审计修正（2026-08-11）
+
+依据 `image_batch_project_redesign_plan.md` 审核结论（P0-1~P0-4、P1-1~P1-4）修正，后端 `/api/image-batches` 协议、SSE 事件名与 manifest schema 未变：
+
+- **P0-1 全局引用修复**：`pg-ui.js` 不再引用未定义的 `root`，改以全局函数存在性守卫或显式 `window.*` 引用，模式切换与执行态 sidebar 刷新不再抛 `ReferenceError`。
+- **P0-2 执行项目引用持久化**：create/open-project 成功后写 `tinyrouter.playground.imageBatchActiveProject.v1`（`{schemaVersion:1, projectId, savedAt}`）；刷新/重入由 `pgImageBatchOnEnter` 先读引用再 GET snapshot，snapshot 成功后才进入 executing；只存 projectId，不存 snapshot/trace/凭证。
+- **P0-3 统一 Close 入口**：`pgImageBatchCloseUI()` = cleanup（关 EventSource/timers）+ `pgImageBatchExitUI({preserveProject:true})`，侧栏 Close 与模式切换共用，消除 SSE 连接泄漏与重复建流。
+- **P0-4 模式切换时序**：`pgSetMode()` 在切换 mode/加载目标模式 windows 之前先退出 Batch 并恢复 Image 布局，防止 Image 布局污染目标模式。
+- **P1-1 显式 Stop 双语义**：侧栏提供 `pgImageBatchStop()`（after-current）与 `pgImageBatchStopImmediate()`（immediate）两个显式动作，后端 `controls.go` 仅接受这两种 mode。
+- **P1-2 Prompt×Variant 导航**：viewer 补全 Prompt 上一层/下一层（`pgImageBatchViewPrompt(index)`，越界禁用），与 Variant ←/→ 构成双层导航。
+- **P1-3 responseRawBody 脱敏**：`apiPostTrace()` 对 JSON body 经 `redactTraceValue` 递归脱敏后 stringify，非 JSON 经 `redactTraceText`（data URL → `[redacted data URL]`、凭证键值 → `[redacted]`），再统一 256 KiB 截断。
+- **P1-4 新建项目清理**：`pgOpenImageBatch()` 先 cleanup 并清空 `projectId`/`snapshot`（含 active-project 引用）再进入 planning。
+
+**验证边界**：后端行为未变，仍由 `internal/imagebatch/*_test.go` 与 `internal/proxy/handler_test.go` 覆盖；前端修复经 `node --check` 语法检查（pg-image-batch.js / pg-ui.js / pg-lifecycle.js / web/static/api.js）；浏览器/截图/图像识别交互验收未在本轮声明，留待后续。

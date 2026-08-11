@@ -71,7 +71,7 @@ async function apiDelete(path, signal) {
 function redactTraceValue(val) {
   if (val == null) return val;
   if (typeof val === 'string') {
-    if (/^data:image\/[a-zA-Z]+;base64,/.test(val)) return '[redacted data URL]';
+    if (/^data:[^,]*,/i.test(val)) return '[redacted data URL]';
     return val;
   }
   if (Array.isArray(val)) {
@@ -91,6 +91,15 @@ function redactTraceValue(val) {
   }
   return val;
 }
+function redactTraceText(text) {
+  return text
+    .replace(/data:[^\s"'<>]+/gi, '[redacted data URL]')
+    .replace(/\bBasic\s+(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9+/]{8,}={0,2}\b/gi, '[redacted]')
+    .replace(/["']?(authorization|cookie|set-cookie|api[_-]?key|token|secret|password|credential)["']?\s*[:=]\s*["']?(?:(?:Bearer|Basic|Token|ApiKey|JWT|Digest)\s+)?([^"'\s,;&}<>]+)/gi, function(m, key, val) {
+      return m.slice(0, m.length - val.length) + '[redacted]';
+    });
+}
+
 
 async function apiPostTrace(path, body, signal, hooks) {
   hooks = hooks || {};
@@ -145,19 +154,21 @@ async function apiPostTrace(path, body, signal, hooks) {
     var rawText = '';
     try { rawText = await r.text(); } catch(e) { rawText = ''; }
 
-    if (rawText.length > MAX_BYTES) {
-      trace.responseRawBody = rawText.substring(0, MAX_BYTES) + '... [truncated]';
-      trace.truncated = true;
-    } else {
-      trace.responseRawBody = rawText;
-    }
-
     var data = null;
+    var jsonOk = false;
     try {
       data = JSON.parse(rawText);
+      jsonOk = true;
     } catch(e) {
       data = { error: 'HTTP ' + r.status + ' (non-JSON body)' };
     }
+
+    var rawBody = jsonOk ? JSON.stringify(redactTraceValue(data)) : redactTraceText(rawText);
+    if (rawBody.length > MAX_BYTES) {
+      rawBody = rawBody.substring(0, MAX_BYTES) + '... [truncated]';
+      trace.truncated = true;
+    }
+    trace.responseRawBody = rawBody;
 
     trace.responseBody = redactTraceValue(data);
     trace.loading = false;

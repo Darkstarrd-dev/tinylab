@@ -318,6 +318,14 @@ function pgSetMode(mode) {
     pgState.modeWindows = { normal: null, search: null, image: null, autochat: null };
   }
 
+  // Batch exit must run before mode/windows are switched: pgImageBatchExitUI
+  // restores the Image layout, which is only valid while still in Image mode.
+  if (oldMode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle') {
+    if (typeof pgImageBatchCloseUI === 'function') {
+      pgImageBatchCloseUI();
+    }
+  }
+
   // 1. Save oldMode's windows & splitCount
   if (oldMode) {
     pgState.modeWindows[oldMode] = pgState.windows;
@@ -360,12 +368,6 @@ function pgSetMode(mode) {
   }
 
   // 4. Mode-specific lifecycle actions
-  if (oldMode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode !== 'idle') {
-    if (typeof root.pgImageBatchExitUI === 'function') {
-      root.pgImageBatchExitUI({ preserveProject: true });
-    }
-  }
-
   if (mode === 'autochat') {
     pgAutoChatToggle(true);
   } else {
@@ -374,6 +376,11 @@ function pgSetMode(mode) {
       if (typeof pgSearchLoadSettings === 'function') pgSearchLoadSettings();
       if (typeof pgSyncSearchMessages === 'function') pgSyncSearchMessages();
     }
+  }
+
+  // Re-enter Batch UI when returning to Image mode with an active project.
+  if (mode === 'image' && typeof pgImageBatchOnEnter === 'function') {
+    pgImageBatchOnEnter();
   }
 
   pgSaveMode();
@@ -424,14 +431,12 @@ function pgResetSettings() {
   pgRenderMessages(pgState.activeWin);
   pgToast(pgT('pgCfgReset'), 'success');
 }
-
-// ----- Sidebar: model select + params + image + system + debug -----
 function pgRenderSidebar() {
   var side = document.getElementById('pg-side');
   if (!side) return;
   if (pgState.mode === 'image' && pgState.imageBatch && pgState.imageBatch.uiMode === 'executing') {
-    if (typeof root.pgImageBatchRenderSidebar === 'function') {
-      side.innerHTML = root.pgImageBatchRenderSidebar();
+    if (typeof pgImageBatchRenderSidebar === 'function') {
+      side.innerHTML = pgImageBatchRenderSidebar();
     }
     return;
   }
