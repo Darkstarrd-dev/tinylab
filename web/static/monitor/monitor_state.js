@@ -237,7 +237,10 @@ function isMultiKeyProvider(providerName) {
   for (var i = 0; i < providersCache.length; i++) {
     if (providersCache[i].name === providerName || providersCache[i].Name === providerName) {
       var keys = providersCache[i].keys || providersCache[i].Keys || [];
-      return keys.length > 1;
+      if (keys.length) return keys.length > 1;
+      // The provider list DTO is secret-minimized (F-04): keys are not
+      // embedded, only keyCount/hasKey are carried (see providers API).
+      return (providersCache[i].keyCount || 0) > 1;
     }
   }
   return true;
