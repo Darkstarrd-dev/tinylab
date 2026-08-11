@@ -131,3 +131,41 @@ func TestGenerationResultNeverSerializesCredentialsOrBytes(t *testing.T) {
 		t.Fatalf("sensitive result data serialized: %s", text)
 	}
 }
+
+func TestTransformOutputFormatValidation(t *testing.T) {
+	base := validPrompt()
+	base.FinalFormat = FormatNatural
+	base.FinalPrompt = "a snowy forest"
+	if err := (TransformOutput{Format: FormatNatural, Items: []Prompt{base}}).Validate(); err != nil {
+		t.Fatalf("natural output rejected: %v", err)
+	}
+	base.FinalFormat = FormatTag
+	base.FinalPrompt = "1girl, snowy_forest, high_quality"
+	if err := (TransformOutput{Format: FormatTag, Items: []Prompt{base}}).Validate(); err != nil {
+		t.Fatalf("tag output rejected: %v", err)
+	}
+	base.FinalPrompt = `{"subject":"snowy forest"}`
+	if err := (TransformOutput{Format: FormatTag, Items: []Prompt{base}}).Validate(); err == nil {
+		t.Fatal("JSON-shaped tag output should be rejected")
+	}
+	base.FinalFormat = FormatJSON
+	base.FinalPrompt = "a snowy forest"
+	base.FinalPromptObject = map[string]any{"subject": "snowy forest", "style": "cinematic"}
+	if err := (TransformOutput{Format: FormatJSON, Items: []Prompt{base}}).Validate(); err != nil {
+		t.Fatalf("json output rejected: %v", err)
+	}
+	base.FinalPromptObject = map[string]any{"style": "cinematic"}
+	if err := (TransformOutput{Format: FormatJSON, Items: []Prompt{base}}).Validate(); err == nil {
+		t.Fatal("JSON output without subject should be rejected")
+	}
+}
+
+func TestPromptPlanTransformVersionAllowsLegacyZero(t *testing.T) {
+	p := validProject().PromptPlan
+	p.TransformVersion = 0
+	if err := p.Validate(); err != nil {
+		t.Fatalf("legacy transformVersion zero rejected: %v", err)
+	}
+	p.TransformVersion = -1
+	assertInvalid(t, p.Validate(), "transformVersion")
+}

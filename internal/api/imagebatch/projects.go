@@ -7,10 +7,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
 )
+
+// transformUserPrompt is the fixed (non-editable) template for the format
+// conversion step. {format} and {items} are substituted at call time. The
+// rules pin down the three output formats so the helper model returns a
+// schema-conformant result the backend can validate.
+const transformUserPrompt = `Convert each prompt to format "{format}". Return JSON: {"format":"{format}","items":[same array, same order, same count, each naturalPrompt preserved exactly, with finalPrompt set to the converted text]}.
+
+Format rules:
+- natural: a clear descriptive sentence or phrase. Example finalPrompt: "a cyberpunk street warrior with a chrome arm in a neon-lit alley, cinematic lighting"
+- tag: comma-separated Booru-style tags. Start with character count/gender (1girl, 2boys, solo), then subject, action, environment, art style, quality. Use underscores for multi-word tags (chrome_arm). Separate with ", ". Optional weight: (tag:1.2). Example finalPrompt: "1girl, cyberpunk, street_warrior, chrome_arm, neon_lighting, night, high_quality"
+- json: set finalPromptObject to {"subject","action","environment","composition","style","lighting","quality","negative"} and set finalPrompt to a natural-language sentence compiled from those fields (NOT the raw JSON). Example finalPromptObject: {"subject":"cyberpunk street warrior","action":"standing","environment":"neon alley","composition":"full body","style":"cyberpunk","lighting":"neon rim","quality":"high","negative":"lowres"}; Example finalPrompt: "a cyberpunk street warrior standing in a neon alley, full body, cyberpunk style, neon rim lighting, high quality"
+
+Input: {items}`
 
 func (h *Handler) transform(w http.ResponseWriter, r *http.Request) {
 	var in domain.TransformInput
@@ -27,7 +41,9 @@ func (h *Handler) transform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(in.Items)
-	content, err := h.callHelper(r.Context(), in.HelperModel, helperSystemPrompt, "Convert each prompt to format "+in.Format+". Preserve naturalPrompt exactly. Input: "+string(b))
+	prompt := strings.ReplaceAll(transformUserPrompt, "{format}", in.Format)
+	prompt = strings.ReplaceAll(prompt, "{items}", string(b))
+	content, err := h.callHelper(r.Context(), in.HelperModel, helperSystemPrompt, prompt)
 	if err != nil {
 		errJSON(w, 502, "helper model request failed: "+err.Error())
 		return

@@ -105,7 +105,7 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 	if req.Seed != nil {
 		body["seed"] = *req.Seed
 	}
-	if _, ok := body["n"]; !ok {
+	if _, ok := body["n"]; !ok && !modelscopeIs(req.Protocol, req.Model) {
 		body["n"] = 1
 	}
 	raw, err := json.Marshal(body)
@@ -123,6 +123,9 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 	in.Header.Set("Content-Type", "application/json")
 	in.Header.Set("X-TinyRouter-Source", "playground-batch")
 	in.Header.Set("X-TinyRouter-Provenance", "playground-batch:project="+clipID(req.ProjectID)+":prompt="+clipID(req.PromptID)+":variant="+clipID(req.VariantID))
+	if modelscopeIs(req.Protocol, req.Model) {
+		in.Header.Set("X-Modelscope-Async-Mode", "true")
+	}
 	rec := httptest.NewRecorder()
 	proxyDone := make(chan struct{})
 	go func() {
@@ -158,28 +161,35 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 		}
 		return ImageGenerationResult{}, fmt.Errorf("image proxy returned %s", resp.Status)
 	}
-	var envelope remoteResponse
-	if err := json.Unmarshal(payload, &envelope); err != nil {
+	var doc map[string]any
+	if err := json.Unmarshal(payload, &doc); err != nil {
 		return ImageGenerationResult{}, fmt.Errorf("invalid image response: %w", err)
 	}
-	if len(envelope.Data) == 0 && envelope.TaskID == "" && envelope.ID == "" {
+	items := modelscopeItems(doc)
+	revised := modelscopeRevised(doc)
+	taskID := modelscopeTaskID(doc)
+	if len(items) == 0 && taskID == "" {
 		return ImageGenerationResult{}, errors.New("image response contains no assets")
 	}
-	// Some ModelScope deployments return a task id. Polling is delegated to an
-	// optional caller so the regular proxy interface remains intentionally small.
-	if len(envelope.Data) == 0 {
-		if p, ok := g.caller.(ImageTaskCaller); ok {
-			var e error
-			envelope, e = g.pollTask(ctx, p, firstNonEmpty(envelope.TaskID, envelope.ID), req)
-			if e != nil {
-				return ImageGenerationResult{}, e
-			}
-		} else {
+	// Async providers (e.g. ModelScope) return a task id without assets; poll
+	// until the image is ready. Polling is delegated to an optional caller so
+	// the regular proxy interface remains intentionally small.
+	if len(items) == 0 {
+		p, ok := g.caller.(ImageTaskCaller)
+		if !ok {
 			return ImageGenerationResult{}, errors.New("image provider returned an asynchronous task")
 		}
+		pi, pr, err := g.pollTask(ctx, p, taskID, req)
+		if err != nil {
+			return ImageGenerationResult{}, err
+		}
+		items = pi
+		if revised == "" {
+			revised = pr
+		}
 	}
-	result := ImageGenerationResult{Provider: protocolProvider(req.Protocol), RevisedPrompt: envelope.Revised, Duration: time.Since(started), RawMeta: map[string]any{"protocol": req.Protocol}}
-	for _, item := range envelope.Data {
+	result := ImageGenerationResult{Provider: protocolProvider(req.Protocol), RevisedPrompt: revised, Duration: time.Since(started), RawMeta: map[string]any{"protocol": req.Protocol}}
+	for _, item := range items {
 		if item.Revised != "" {
 			result.RevisedPrompt = item.Revised
 		}
@@ -218,15 +228,6 @@ type remoteItem struct {
 	Revised string `json:"revised_prompt"`
 }
 
-type remoteResponse struct {
-	Data    []remoteItem    `json:"data"`
-	Revised string          `json:"revised_prompt"`
-	TaskID  string          `json:"task_id"`
-	ID      string          `json:"id"`
-	Output  json.RawMessage `json:"output"`
-	Status  string          `json:"status"`
-}
-
 func compactErrorBody(payload []byte) string {
 	const maxDetail = 512
 	var envelope struct {
@@ -262,43 +263,75 @@ func clipError(s string, max int) string {
 	return s
 }
 
-func (g *RemoteGenerator) pollTask(ctx context.Context, caller ImageTaskCaller, id string, req ImageGenerationRequest) (remoteResponse, error) {
-	_ = req
-	for range 300 {
+// pollTask polls an async image task (ModelScope/DashScope) until it completes
+// or fails. The GET /v1/tasks/{id}?model={req.Model} request is routed through
+// the proxy's ImageTask so provider/key selection and header pass-through
+// (X-Modelscope-Task-Type) are reused. Limits mirror the verified manual
+// canvas flow: 60 attempts, 2s interval, 10s per-attempt timeout.
+func (g *RemoteGenerator) pollTask(ctx context.Context, caller ImageTaskCaller, id string, req ImageGenerationRequest) ([]remoteItem, string, error) {
+	const (
+		maxPolls       = 60
+		interval       = 2 * time.Second
+		attemptTimeout = 10 * time.Second
+	)
+	pollURL := "/v1/tasks/" + url.PathEscape(id) + "?model=" + url.QueryEscape(req.Model)
+	for range maxPolls {
 		if err := ctx.Err(); err != nil {
-			return remoteResponse{}, err
+			return nil, "", err
 		}
-		r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(id), nil)
-		r.Header.Set("X-TinyRouter-Source", "playground-batch")
-		r.Header.Set("X-TinyRouter-Provenance", "playground-batch:task="+clipID(id))
-		rec := httptest.NewRecorder()
-		caller.ImageTask(rec, r)
-		resp := rec.Result()
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
+		items, revised, pending, err := g.pollOnce(ctx, caller, pollURL, id, attemptTimeout)
 		if err != nil {
-			return remoteResponse{}, err
+			return nil, "", err
 		}
-		if rec.Code >= 400 {
-			return remoteResponse{}, fmt.Errorf("image task returned %s", resp.Status)
-		}
-		var out remoteResponse
-		if err := json.Unmarshal(b, &out); err != nil {
-			return remoteResponse{}, err
-		}
-		if len(out.Data) > 0 {
-			return out, nil
-		}
-		if strings.EqualFold(out.Status, "failed") || strings.EqualFold(out.Status, "canceled") {
-			return remoteResponse{}, fmt.Errorf("image task %s", out.Status)
+		if !pending {
+			return items, revised, nil
 		}
 		select {
 		case <-ctx.Done():
-			return remoteResponse{}, ctx.Err()
-		case <-time.After(200 * time.Millisecond):
+			return nil, "", ctx.Err()
+		case <-time.After(interval):
 		}
 	}
-	return remoteResponse{}, context.DeadlineExceeded
+	return nil, "", errors.New("image task polling timed out")
+}
+
+// pollOnce performs a single task poll. pending=true means the task is still
+// running and the caller should retry; pending=false with nil error means the
+// task finished and items (if any) are ready. A non-2xx response or a failed
+// status is a definitive error (transient retries are handled by the
+// scheduler's maxRetries on a fresh Generate, not within one poll sequence).
+func (g *RemoteGenerator) pollOnce(ctx context.Context, caller ImageTaskCaller, pollURL, id string, timeout time.Duration) (items []remoteItem, revised string, pending bool, err error) {
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	r := httptest.NewRequestWithContext(callCtx, http.MethodGet, pollURL, nil)
+	r.Header.Set("X-Modelscope-Task-Type", "image_generation")
+	r.Header.Set("X-TinyRouter-Source", "playground-batch")
+	r.Header.Set("X-TinyRouter-Provenance", "playground-batch:task="+clipID(id))
+	rec := httptest.NewRecorder()
+	caller.ImageTask(rec, r)
+	if err := ctx.Err(); err != nil {
+		return nil, "", false, err
+	}
+	resp := rec.Result()
+	b, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if readErr != nil {
+		return nil, "", false, fmt.Errorf("read image task response: %w", readErr)
+	}
+	if rec.Code < 200 || rec.Code >= 300 {
+		return nil, "", false, fmt.Errorf("image task returned %s: %s", resp.Status, compactErrorBody(b))
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, "", false, fmt.Errorf("invalid image task response: %w", err)
+	}
+	if st := modelscopeStatus(raw); modelscopeDecision(st) == "failed" {
+		return nil, "", false, fmt.Errorf("image task %s: %s", st, modelscopeMessage(raw))
+	}
+	if items = modelscopeItems(raw); len(items) > 0 {
+		return items, modelscopeRevised(raw), false, nil
+	}
+	return nil, "", true, nil
 }
 
 func (g *RemoteGenerator) fetchImage(ctx context.Context, raw string) ([]byte, string, error) {
@@ -368,16 +401,213 @@ func protocolProvider(p string) string {
 		return "gpt"
 	}
 }
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
+
 func clipID(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) > 80 {
 		s = s[:80]
 	}
 	return s
+}
+
+// modelscopeIs reports whether the request targets a ModelScope-style async
+// image API. The protocol field (set by the playground from the model's
+// imgProtocol) is the authoritative signal; the model-prefix check is a
+// belt-and-suspenders fallback for the canonical "modelscope/" prefix.
+func modelscopeIs(protocol, model string) bool {
+	if strings.EqualFold(strings.TrimSpace(protocol), "modelscope") {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(model), "modelscope/")
+}
+
+// modelscopeTaskID extracts an async task id from any known ModelScope /
+// DashScope submission envelope.
+func modelscopeTaskID(j map[string]any) string {
+	for _, k := range []string{"task_id", "id"} {
+		if s, _ := j[k].(string); s != "" {
+			return s
+		}
+	}
+	if out, ok := j["output"].(map[string]any); ok {
+		if s, _ := out["task_id"].(string); s != "" {
+			return s
+		}
+	}
+	if res, ok := j["result"].(map[string]any); ok {
+		if s, _ := res["task_id"].(string); s != "" {
+			return s
+		}
+	}
+	if data, ok := j["data"].([]any); ok && len(data) > 0 {
+		if m, ok := data[0].(map[string]any); ok {
+			if s, _ := m["task_id"].(string); s != "" {
+				return s
+			}
+		}
+	}
+	// Some ModelScope deployments expose only request_id. Use it only after
+	// all task-specific locations have been checked.
+	if s, _ := j["request_id"].(string); s != "" {
+		return s
+	}
+	return ""
+}
+
+// modelscopeItems extracts image items (url or base64) from any known
+// ModelScope / DashScope result shape, falling back to OpenAI-style data[].
+// It also accepts plain OpenAI data[] so a single code path serves both
+// sync and async providers.
+func modelscopeItems(j map[string]any) []remoteItem {
+	var lists [][]any
+	if v, ok := j["output_images"].([]any); ok {
+		lists = append(lists, v)
+	}
+	if v, ok := j["data"].([]any); ok {
+		lists = append(lists, v)
+	}
+	if v, ok := j["results"].([]any); ok {
+		lists = append(lists, v)
+	}
+	if out, ok := j["output"].(map[string]any); ok {
+		for _, k := range []string{"output_images", "results", "images"} {
+			if v, ok := out[k].([]any); ok {
+				lists = append(lists, v)
+			}
+		}
+	}
+	var out []remoteItem
+	seen := map[string]bool{}
+	for _, list := range lists {
+		for _, item := range list {
+			it, ok := item.(map[string]any)
+			if !ok {
+				if s, ok := item.(string); ok && s != "" {
+					if !seen[s] {
+						seen[s] = true
+						out = append(out, remoteItem{URL: s})
+					}
+				}
+				continue
+			}
+			url := strFrom(it, "url", "image_url", "oss_url")
+			if url == "" {
+				if u, ok := it["url"].(map[string]any); ok {
+					url = strFrom(u, "url", "href")
+				}
+			}
+			b64 := strFrom(it, "b64_json", "base64")
+			if url == "" && b64 == "" {
+				continue
+			}
+			if url != "" {
+				if seen[url] {
+					continue
+				}
+				seen[url] = true
+			}
+			out = append(out, remoteItem{URL: url, B64: b64, Revised: strFrom(it, "revised_prompt")})
+		}
+	}
+	if len(out) == 0 {
+		if u := strFrom(j, "image_url"); u != "" {
+			out = append(out, remoteItem{URL: u})
+		}
+		if outObj, ok := j["output"].(map[string]any); ok {
+			if u := strFrom(outObj, "image_url"); u != "" {
+				out = append(out, remoteItem{URL: u})
+			}
+		}
+	}
+	return out
+}
+
+// strFrom returns the first non-empty string value among the given keys.
+func strFrom(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, _ := m[k].(string); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func modelscopeRevised(j map[string]any) string {
+	if s, _ := j["revised_prompt"].(string); s != "" {
+		return s
+	}
+	if data, ok := j["data"].([]any); ok && len(data) > 0 {
+		if m, ok := data[0].(map[string]any); ok {
+			if s, _ := m["revised_prompt"].(string); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// modelscopeStatus extracts the task status string from any known shape.
+func modelscopeStatus(j map[string]any) string {
+	if s, _ := j["task_status"].(string); s != "" {
+		return s
+	}
+	if s, _ := j["status"].(string); s != "" {
+		return s
+	}
+	if out, ok := j["output"].(map[string]any); ok {
+		if s, _ := out["task_status"].(string); s != "" {
+			return s
+		}
+		if s, _ := out["status"].(string); s != "" {
+			return s
+		}
+	}
+	if data, ok := j["data"].([]any); ok && len(data) > 0 {
+		if m, ok := data[0].(map[string]any); ok {
+			if s, _ := m["task_status"].(string); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// modelscopeDecision classifies a status string as done/failed/pending.
+func modelscopeDecision(st string) string {
+	st = strings.ToUpper(st)
+	for _, tok := range []string{"SUCCEED", "SUCCESS", "COMPLETE", "DONE"} {
+		if strings.Contains(st, tok) {
+			return "done"
+		}
+	}
+	for _, tok := range []string{"FAIL", "ERROR", "CANCEL"} {
+		if strings.Contains(st, tok) {
+			return "failed"
+		}
+	}
+	return "pending"
+}
+
+// modelscopeMessage extracts a human-readable failure reason from a task
+// response (ModelScope/DashScope shapes).
+func modelscopeMessage(j map[string]any) string {
+	for _, k := range []string{"message", "msg"} {
+		if s, _ := j[k].(string); s != "" {
+			return s
+		}
+	}
+	switch e := j["error"].(type) {
+	case string:
+		return e
+	case map[string]any:
+		if s := strFrom(e, "message", "code"); s != "" {
+			return s
+		}
+	}
+	if out, ok := j["output"].(map[string]any); ok {
+		if s := strFrom(out, "message", "msg"); s != "" {
+			return s
+		}
+	}
+	return ""
 }

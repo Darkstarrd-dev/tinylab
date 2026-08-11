@@ -14,7 +14,7 @@ import (
 	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
 )
 
-const helperSystemPrompt = "Return only the requested output. For JSON, return valid JSON without Markdown fences. Preserve the user's subject and intent. Do not include explanations."
+const helperSystemPrompt = "Return raw JSON only. No code blocks, no backticks, no explanations. Start with { and end with }. Preserve the user's subject and intent."
 
 type helperChatRequest struct {
 	Model    string              `json:"model"`
@@ -42,7 +42,7 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusServiceUnavailable, "helper model unavailable")
 		return
 	}
-	prompt := fmt.Sprintf("Create a JSON image plan for these requirements: %s\nDefault negative prompt: %s\nDefault quantity: %d\nReturn {\"title\":string,\"items\":[{\"id\":string,\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":number}]}", in.Requirements, in.DefaultNegativePrompt, in.DefaultQuantity)
+	prompt := fmt.Sprintf("Create a JSON image plan for these requirements: %s\nUse this as the default negative prompt unless an item specifies otherwise: %s\nDefault quantity: %d\nReturn {\"title\":string,\"items\":[{\"id\":unique alphanumeric string (max 128 chars)\",\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":integer 1-100}]}", in.Requirements, in.DefaultNegativePrompt, in.DefaultQuantity)
 	if strings.TrimSpace(in.CustomUserPrompt) != "" {
 		prompt = strings.TrimSpace(in.CustomUserPrompt)
 	}

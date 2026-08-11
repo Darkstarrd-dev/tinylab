@@ -285,6 +285,21 @@ func (h *Handler) TaskGet(w http.ResponseWriter, r *http.Request, taskID, modelS
 	io.Copy(w, resp.Body)
 }
 
+// ImageTask supports async image-task polling (e.g. ModelScope) for callers
+// that only know the task id and model string. The request URL is
+// /v1/tasks/{taskID}?model={provider/model}; the handler parses both and
+// delegates to TaskGet, which resolves the provider, selects a key, and
+// forwards the GET upstream with the request headers (so X-Modelscope-Task-Type
+// is transparently passed through). This satisfies imagebatch.ImageTaskCaller.
+func (h *Handler) ImageTask(w http.ResponseWriter, r *http.Request) {
+	taskID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "/")
+	if taskID == "" || strings.ContainsAny(taskID, "/\\?#") {
+		writeError(w, http.StatusBadRequest, "invalid task id")
+		return
+	}
+	h.TaskGet(w, r, taskID, r.URL.Query().Get("model"))
+}
+
 func (h *Handler) SetDebugModeProvider(fn func() bool) {
 	h.debugModeProvider = fn
 }

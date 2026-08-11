@@ -65,6 +65,7 @@ const (
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var safeSlug = regexp.MustCompile(`^[^/\\\x00-\x1f\x7f]+$`)
+var tagJSONMarker = regexp.MustCompile(`^\s*[\[{]`)
 
 // ValidationError identifies a specific malformed schema field.
 type ValidationError struct{ Field, Message string }
@@ -95,6 +96,7 @@ type PromptPlan struct {
 	SourceRequirement string `json:"sourceRequirement"`
 	OutputFormat      string `json:"outputFormat"`
 	PlanVersion       int    `json:"planVersion"`
+	TransformVersion  int    `json:"transformVersion,omitempty"`
 }
 
 type ImageConfig struct {
@@ -366,14 +368,47 @@ func (p TransformOutput) Validate() error {
 		if err := v.Validate(); err != nil {
 			return fmt.Errorf("items[%d]: %w", i, err)
 		}
+		if err := validateFinalPromptFormat(p.Format, v.FinalPrompt, v.FinalPromptObject); err != nil {
+			return fmt.Errorf("items[%d]: %w", i, err)
+		}
 	}
 	return nil
 }
-
 func validFormat(s string) bool { return s == FormatNatural || s == FormatTag || s == FormatJSON }
+
+// validateFinalPromptFormat checks the converted finalPrompt conforms to the
+// target format semantics. It catches grossly wrong conversions (JSON emitted
+// for tag, missing object for json, empty output) rather than enforcing full
+// Booru compliance, which is guided by the transform prompt + user editing.
+func validateFinalPromptFormat(format, finalPrompt string, obj any) error {
+	if strings.TrimSpace(finalPrompt) == "" {
+		return invalid("finalPrompt", "must not be empty")
+	}
+	switch format {
+	case FormatTag:
+		if strings.ContainsAny(finalPrompt, "\n\r") {
+			return invalid("finalPrompt", "tag must be a single comma-separated line")
+		}
+		if tagJSONMarker.MatchString(finalPrompt) {
+			return invalid("finalPrompt", "tag must be comma-separated tokens, not JSON")
+		}
+	case FormatJSON:
+		m, ok := obj.(map[string]any)
+		if !ok {
+			return invalid("finalPromptObject", "must be a JSON object")
+		}
+		if _, ok := m["subject"]; !ok {
+			return invalid("finalPromptObject", "missing required field: subject")
+		}
+	}
+	return nil
+}
 func (p PromptPlan) Validate() error {
 	if p.PlanVersion < 1 {
 		return invalid("planVersion", "must be positive")
+	}
+	if p.TransformVersion < 0 {
+		return invalid("transformVersion", "must not be negative")
 	}
 	if strings.TrimSpace(p.SourceRequirement) == "" {
 		return invalid("sourceRequirement", "must not be empty")

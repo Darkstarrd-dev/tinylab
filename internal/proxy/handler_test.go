@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -1136,5 +1137,55 @@ func TestForwardUpstream_UseProxyDisabledStillDirect(t *testing.T) {
 	resp.Body.Close()
 	if atomic.LoadInt32(&upstreamHits) != 1 {
 		t.Fatalf("expected upstream hit when proxy disabled, got %d", upstreamHits)
+	}
+}
+
+func TestHandler_ImageTask_RoutingAndForward(t *testing.T) {
+	var gotPath, gotTaskType, gotAuth string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTaskType = r.Header.Get("X-Modelscope-Task-Type")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"output":{"task_status":"SUCCEEDED","results":[{"url":"http://example.com/x.png"}]}}`))
+	}))
+	defer mock.Close()
+	provider := config.Provider{
+		ID: "ms", Name: "ModelScope", Prefix: "ms", BaseURL: mock.URL, IsActive: true,
+		Keys:   []config.Key{{ID: "k1", Key: "sk-ms", Name: "K1", IsActive: true, Priority: 1}},
+		Models: []config.ModelDef{{ID: "qwen-image"}},
+	}
+	h := newTestHandlerWithCustomProvider(t, provider, config.RotationConfig{Strategy: "fill-first", MaxRetries: 1, BackoffMaxSec: 300})
+	r := httptest.NewRequest(http.MethodGet, "/v1/tasks/abc-123?model=ms/qwen-image", nil)
+	r.Header.Set("X-Modelscope-Task-Type", "image_generation")
+	w := httptest.NewRecorder()
+	h.ImageTask(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotPath != "/v1/tasks/abc-123" {
+		t.Fatalf("upstream path = %q, want /v1/tasks/abc-123", gotPath)
+	}
+	if gotTaskType != "image_generation" {
+		t.Fatalf("X-Modelscope-Task-Type not forwarded upstream: %q", gotTaskType)
+	}
+	if gotAuth != "Bearer sk-ms" {
+		t.Fatalf("Authorization not set from selected key: %q", gotAuth)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("SUCCEEDED")) {
+		t.Fatalf("response body not passed through: %s", w.Body.String())
+	}
+}
+
+func TestHandler_ImageTask_InvalidTaskID(t *testing.T) {
+	h := newTestHandler(t)
+	for _, p := range []string{"/v1/tasks/", "/v1/tasks/abc/def"} {
+		r := httptest.NewRequest(http.MethodGet, p+"?model=ms/qwen", nil)
+		w := httptest.NewRecorder()
+		h.ImageTask(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("path %q: expected 400, got %d", p, w.Code)
+		}
 	}
 }

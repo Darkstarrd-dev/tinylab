@@ -162,9 +162,9 @@
   root.pgImageBatchInspectPrompts = function () {
     readDraft();
     var d = state.draft;
-    var defaultSys = "Return only the requested output. For JSON, return valid JSON without Markdown fences. Preserve the user's subject and intent. Do not include explanations.";
+    var defaultSys = "Return raw JSON only. No code blocks, no backticks, no explanations. Start with { and end with }. Preserve the user's subject and intent.";
     var sysPrompt = d.customSystemPrompt || defaultSys;
-    var defaultUser = "Create a JSON image plan for these requirements: " + (d.requirements || '[批量创作要求]') + "\nDefault negative prompt: " + (d.negativePrompt || '[默认负面提示词]') + "\nDefault quantity: " + d.quantity + "\nReturn {\"title\":string,\"items\":[{\"id\":string,\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":number}]}";
+    var defaultUser = "Create a JSON image plan for these requirements: " + (d.requirements || '[批量创作要求]') + "\nUse this as the default negative prompt unless an item specifies otherwise: " + (d.negativePrompt || '[默认负面提示词]') + "\nDefault quantity: " + d.quantity + "\nReturn {\"title\":string,\"items\":[{\"id\":unique alphanumeric string (max 128 chars)\",\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":integer 1-100}]}";
     var reqPrompt = d.customUserPrompt || defaultUser;
 
     var html = '<div class="pg-modal-header"><span class="pg-modal-title">🔍 Prompt 模版与透明度（可查看并修改）</span><button type="button" class="pg-modal-close" onclick="pgImageBatchRestoreCreateModal()">✕</button></div>' +
@@ -295,7 +295,7 @@
         '<div id="pg-img-batch-error" style="color:var(--danger);min-height:18px;margin-top:6px"></div>' +
       '</div>';
   }
-  function transformItems(raw) { var source = raw && Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : null); if (!source || source.length !== state.plan.items.length) throw new Error(text('invalid')); return state.plan.items.map(function (it, i) { var x = source[i] || {}; var out = Object.assign({}, it); out.index = i + 1; out.finalFormat = state.draft.format; out.finalPrompt = String(x.finalPrompt != null ? x.finalPrompt : it.naturalPrompt); out.finalPromptObject = x.finalPromptObject != null ? x.finalPromptObject : null; if (out.finalFormat === 'json') { try { if (!out.finalPromptObject) out.finalPromptObject = JSON.parse(out.finalPrompt); else JSON.stringify(out.finalPromptObject); } catch (e) { out._invalid = true; } } return out; }); }
+  function transformItems(raw) { var source = raw && Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : null); if (!source || source.length !== state.plan.items.length) throw new Error(text('invalid')); return state.plan.items.map(function (it, i) { var x = source[i] || {}; var out = Object.assign({}, it); out.index = i + 1; out.finalFormat = state.draft.format; out.finalPrompt = String(x.finalPrompt != null ? x.finalPrompt : it.naturalPrompt); out.finalPromptObject = x.finalPromptObject != null ? x.finalPromptObject : null; if (!String(out.finalPrompt).trim()) { out._invalid = true; } else if (out.finalFormat === 'json') { try { var o = out.finalPromptObject; if (!o || typeof o === 'string') o = JSON.parse(out.finalPrompt); out.finalPromptObject = o; if (!o || typeof o !== 'object' || !o.subject) out._invalid = true; } catch (e) { out._invalid = true; } } else if (out.finalFormat === 'tag') { var fp = String(out.finalPrompt); if (/^[\s]*[[{]/.test(fp) || /[\r\n]/.test(fp)) out._invalid = true; } return out; }); }
   function pgImageBatchTransform() {
     readDraft();
     var items = state.plan.items.map(function (x, i) {
@@ -369,7 +369,7 @@
       schemaVersion: 1,
       displayName: state.draft.displayName,
       slug: slug,
-      promptPlan: { helperModel: state.draft.helperModel, sourceRequirement: state.draft.requirements, outputFormat: state.draft.format, planVersion: 1 },
+      promptPlan: { helperModel: state.draft.helperModel, sourceRequirement: state.draft.requirements, outputFormat: state.draft.format, planVersion: 1, transformVersion: 1 },
       prompts: items,
       imageConfig: { model: state.draft.imageModel, protocol: state.draft.protocol || 'gpt', endpoint: state.draft.endpoint, params: state.draft.params },
       batchConfig: { intervalMs: state.draft.intervalMs, maxRetries: state.draft.maxRetries, retryDelayMs: state.draft.retryDelayMs, retryBackoff: state.draft.retryBackoff, onError: state.draft.onError, seedMode: state.draft.seedMode, baseSeed: state.draft.baseSeed }
