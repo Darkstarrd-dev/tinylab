@@ -660,45 +660,6 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `pngmeta.go` | `AsciiJSON`/`InjectPNGText` + `isTextChunk`/`textKeyword`/`writeTextChunk` 辅助 |
 | `pngmeta_test.go` | AsciiJSON（CJK+astral、纯 ASCII 输出、round-trip）、InjectPNGText（1×1 PNG round-trip、重复 key 替换、非 PNG 原样、插入位置在 IHDR 后） |
 
-
-
----
-
-## 16. `internal/download/` — 视频/音频下载
-
-基于 yt-dlp + ffmpeg 的下载任务队列/执行器（VidBee 风格 Go 原生移植，无持久化）。架构基线见 [`docs/download-architecture.md`](docs/download-architecture.md)（含任务生命周期、yt-dlp 参数构造、API 端点、与归档计划的漂移、源码锚点）。
-
-| 文件 | build tag | 职责 |
-|---|---|---|
-| `types.go` | — | 下载任务类型（Task/Progress/状态常量/VideoInfo/PlaylistInfo/CreateTaskInput） |
-| `args.go` | — | yt-dlp 参数构造核心：RuntimeSettings、常量、BuildDownloadArgs/BuildVideoInfoArgs/BuildPlaylistInfoArgs/FormatYtDlpCommand/quoteArg |
-| `formats.go` | — | 格式选择器与质量映射：resolveVideoFormatSelector/resolveAudioFormatSelector/qualityToVideoHeight/qualityToAudioAbr/dedupe |
-| `network.go` | — | 网络参数与 URL 识别：appendNetworkArgs/isYouTubeURL/isBilibiliURL/hostOf/resolveFfmpegDir/isDir |
-| `manager.go` | — | Manager 核心：结构体/任务存储与顺序、NewManager/UpdateSettings/Started/CreateTask/GetVideoInfo/GetPlaylistInfo/snapshot/isTerminal/generateID/fileSizeOf |
-| `lifecycle.go` | — | 任务生命周期变更：CancelTask/RetryTask/ClearCompleted/RemoveTask |
-| `worker.go` | — | worker 池与执行循环：Start/Stop/worker/processTask/finalizeTask/updateTaskProgress |
-| `events.go` | — | SSE 事件总线：Event/Subscribe/Unsubscribe/publishEvent |
-| `playlist.go` | — | 播放列表展开：CreatePlaylistTask |
-| `executor.go` | — | Executor 核心：ErrCancelled/Executor/NewExecutor/Execute/ExecuteInfo/ExecutePlaylistInfo/runCapture |
-| `progress.go` | — | 进度解析与尾部缓冲：progressRe/parseProgressLine/parseSize/parseSpeed/parseETA/processingPatterns/hasPostprocessSignal/tailBuffer |
-| `binary.go` | — | yt-dlp/ffmpeg 路径解析与输出文件提取：resolveYtDlpPath/resolveFfmpegPath/extractSavedFilePath；**2026-08-09（audit F-08）：** `resolveConfiguredTool` 对配置/env/PATH 候选经 `procutil.ValidateExecutable` 校验（裸名先 `exec.LookPath`） |
-| `parse.go` | — | 错误分类与 JSON 解析：classifyExitError/wrapInfoError/parseVideoInfoJSON/parsePlaylistInfoJSON |
-| `kill_windows.go` | `windows` | 进程终止（委托 `internal/procutil`） |
-| `kill_unix.go` | `!windows` | 进程终止（委托 `internal/procutil`） |
-| `download_test.go` | — | 测试 |
-
-> 外部依赖：yt-dlp、ffmpeg 需用户自装（见 README.md）。
-
----
-
-## 17. `internal/anysearch/` — AnySearch 搜索客户端
-
-AnySearch JSON-RPC API 的 Go 客户端，供 Playground Search 模式使用。
-
-| 文件 | 职责 |
-|---|---|
-| `client.go` | `Client` 结构体（`httpClient`+`apiKey`）；`New(apiKey)` 构造（30s 超时）；`Search`/`GetSubDomains`/`Extract` 方法调用 AnySearch JSON-RPC API（endpoint `https://api.anysearch.com/mcp`，method `tools/call`）；`callAPI` 私有方法发送 JSON-RPC 请求，提取 `result.content[].text` |
-
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
 <a id="textreview"></a>AI 长文本清理的进程内会话引擎：一个 `Session` 持有待清理的章节列表与处理节点池，调度器跨节点派发 worker goroutine，经共享代理栈流式清理每章并把增量广播给 SSE 订阅者。支持 pause/resume/stop、单章重处理、以及节点 502-exhausted 时的自动并发 ramp-down（落盘到 `config.yaml`）。会话仅驻内存，**不持久化**（重启清零，已确认决策：无 `state.yaml`）。架构基线见 [`docs/playground-architecture.md`](docs/playground-architecture.md)（AI Text Review 一节）。

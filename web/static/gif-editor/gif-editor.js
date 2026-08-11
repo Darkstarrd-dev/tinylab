@@ -227,6 +227,8 @@
 
     dom.overlayContainer = core.byId('overlay-container');
     dom.globalDelayContainer = core.byId('global-delay-container');
+    dom.batchDelayInput = core.byId('batch-delay-input');
+    dom.batchDelayBtn = core.byId('batch-delay-btn');
     dom.batchDeleteContainer = core.byId('batch-delete-container');
     dom.intervalDeleteContainer = core.byId('interval-delete-container');
 
@@ -1812,6 +1814,9 @@
     var delayToggleBtn = core.byId('delay-toggle-btn');
     var delayPanel = core.byId('delay-panel');
     var cancelDelayBtn = core.byId('cancel-delay-btn');
+    var applyDelayBtn = dom.batchDelayBtn || core.byId('batch-delay-btn');
+    var delayInput = dom.batchDelayInput || core.byId('batch-delay-input');
+
     if (delayToggleBtn) {
       delayToggleBtn.addEventListener('click', function () {
         if (delayPanel) {
@@ -1820,14 +1825,18 @@
         }
       });
     }
-    if (dom.batchDelayBtn) {
-      dom.batchDelayBtn.addEventListener('click', function () {
+    if (applyDelayBtn) {
+      applyDelayBtn.addEventListener('click', function () {
         var slices = core.state.slices || [];
-        if (!slices.length) return;
-        var val = parseInt(dom.batchDelayInput ? dom.batchDelayInput.value : 100, 10);
+        if (!slices.length) {
+          alert(t('gifEditorAlertNoFrames', '没有可设置的帧'));
+          return;
+        }
+        var val = parseInt(delayInput ? delayInput.value : 100, 10);
         if (isNaN(val) || val < 0) val = 100;
         for (var i = 0; i < slices.length; i++) slices[i].delay = val;
         if (core.timeline && core.timeline.render) core.timeline.render();
+        if (core.playback && core.playback.updateButtons) core.playback.updateButtons();
         if (delayPanel) delayPanel.style.display = 'none';
       });
     }
