@@ -835,12 +835,12 @@
       var scale = (draft.scalePercent || 100) / 100;
       var w = Math.max(1, Math.round(draft.sourceWidth * scale));
       var h = Math.max(1, Math.round(draft.sourceHeight * scale));
-      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * scale));
-      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * scale)) : 0;
+      var innerGap = Math.max(0, parseInt(draft.innerGap || 0, 10) || 0);
+      var outerMargin = draft.enableOuterGap ? Math.max(0, parseInt(draft.outerMargin || 0, 10) || 0) : 0;
       var cols, rows;
       if (draft.splitMode === 'uneven') {
-        var cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
-        var cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        var cellW = Math.max(1, parseInt(draft.splitCols || 64, 10) || 64);
+        var cellH = Math.max(1, parseInt(draft.splitRows || 64, 10) || 64);
         cols = Math.max(1, Math.floor((w - outerMargin * 2 + innerGap) / (cellW + innerGap)));
         rows = Math.max(1, Math.floor((h - outerMargin * 2 + innerGap) / (cellH + innerGap)));
       } else {
@@ -922,14 +922,13 @@
       ctx.drawImage(draft.image, 0, 0, targetW, targetH);
 
       // Draw Grid Split Overlay for Sprite Sheet mode
-      var scale = (draft.scalePercent || 100) / 100;
-      var innerGap = Math.round((draft.innerGap || 0) * scale);
-      var outerMargin = draft.enableOuterGap ? Math.round((draft.outerMargin || 0) * scale) : 0;
+      var innerGap = Math.max(0, parseInt(draft.innerGap || 0, 10) || 0);
+      var outerMargin = draft.enableOuterGap ? Math.max(0, parseInt(draft.outerMargin || 0, 10) || 0) : 0;
       var cols, rows, cellW, cellH;
 
       if (draft.splitMode === 'uneven') {
-        cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
-        cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        cellW = Math.max(1, parseInt(draft.splitCols || 64, 10) || 64);
+        cellH = Math.max(1, parseInt(draft.splitRows || 64, 10) || 64);
         cols = Math.max(1, Math.floor((targetW - outerMargin * 2 + innerGap) / (cellW + innerGap)));
         rows = Math.max(1, Math.floor((targetH - outerMargin * 2 + innerGap) / (cellH + innerGap)));
       } else {
@@ -1109,14 +1108,13 @@
 
   function commitImageDraft(width, height) {
     return new Promise(function (resolve) {
-      var scale = (draft.scalePercent || 100) / 100;
-      var innerGap = Math.max(0, Math.round((draft.innerGap || 0) * scale));
-      var outerMargin = draft.enableOuterGap ? Math.max(0, Math.round((draft.outerMargin || 0) * scale)) : 0;
+      var innerGap = Math.max(0, parseInt(draft.innerGap || 0, 10) || 0);
+      var outerMargin = draft.enableOuterGap ? Math.max(0, parseInt(draft.outerMargin || 0, 10) || 0) : 0;
       var cols, rows, cellW, cellH;
 
       if (draft.splitMode === 'uneven') {
-        cellW = Math.max(1, Math.round((draft.splitCols || 64) * scale));
-        cellH = Math.max(1, Math.round((draft.splitRows || 64) * scale));
+        cellW = Math.max(1, parseInt(draft.splitCols || 64, 10) || 64);
+        cellH = Math.max(1, parseInt(draft.splitRows || 64, 10) || 64);
         cols = Math.max(1, Math.floor((width - outerMargin * 2 + innerGap) / (cellW + innerGap)));
         rows = Math.max(1, Math.floor((height - outerMargin * 2 + innerGap) / (cellH + innerGap)));
       } else {
@@ -1341,13 +1339,13 @@
     var importWidth = Math.max(1, Math.round(sourceWidth * scale));
     var importHeight = Math.max(1, Math.round(sourceHeight * scale));
 
-    var innerGap = Math.max(0, Math.round((opts.innerGap || 0) * scale));
-    var outerMargin = opts.enableOuterGap ? Math.max(0, Math.round((opts.outerMargin || 0) * scale)) : 0;
+    var innerGap = Math.max(0, parseInt(opts.innerGap || 0, 10) || 0);
+    var outerMargin = opts.enableOuterGap ? Math.max(0, parseInt(opts.outerMargin || 0, 10) || 0) : 0;
     var cols, rows, cellW, cellH;
 
     if (opts.mode === 'uneven') {
-      cellW = Math.max(1, Math.round((parseInt(opts.cols, 10) || 64) * scale));
-      cellH = Math.max(1, Math.round((parseInt(opts.rows, 10) || 64) * scale));
+      cellW = Math.max(1, parseInt(opts.cols, 10) || 64);
+      cellH = Math.max(1, parseInt(opts.rows, 10) || 64);
       cols = Math.max(1, Math.floor((importWidth - outerMargin * 2 + innerGap) / (cellW + innerGap)));
       rows = Math.max(1, Math.floor((importHeight - outerMargin * 2 + innerGap) / (cellH + innerGap)));
     } else {

@@ -1348,15 +1348,23 @@
     if (!dom.splitSheetPanel || dom.splitSheetPanel.style.display === 'none') return;
     if (!dom.splitCols || !dom.splitRows) return;
     var scale = (parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100;
-    var innerGap = Math.round((parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0) * scale);
-    var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.round((parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) * scale) : 0;
+    var realInnerGap = parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0;
+    var realOuterMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? (parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) : 0;
+
+    // Convert target canvas pixel gap/margin to stage coordinate system
+    var innerGap = realInnerGap / scale;
+    var outerMargin = realOuterMargin / scale;
     var cols, rows, cellW, cellH;
 
     if (core.state.splitMode === 'uneven') {
-      cellW = Math.max(1, Math.round((parseInt(dom.splitCols.value, 10) || 64) * scale));
-      cellH = Math.max(1, Math.round((parseInt(dom.splitRows.value, 10) || 64) * scale));
-      cols = Math.max(1, Math.floor((w - outerMargin * 2 + innerGap) / (cellW + innerGap)));
-      rows = Math.max(1, Math.floor((h - outerMargin * 2 + innerGap) / (cellH + innerGap)));
+      var realCellW = Math.max(1, parseInt(dom.splitCols.value, 10) || 64);
+      var realCellH = Math.max(1, parseInt(dom.splitRows.value, 10) || 64);
+      var scaledW = w * scale;
+      var scaledH = h * scale;
+      cols = Math.max(1, Math.floor((scaledW - realOuterMargin * 2 + realInnerGap) / (realCellW + realInnerGap)));
+      rows = Math.max(1, Math.floor((scaledH - realOuterMargin * 2 + realInnerGap) / (realCellH + realInnerGap)));
+      cellW = realCellW / scale;
+      cellH = realCellH / scale;
     } else {
       cols = Math.max(1, parseInt(dom.splitCols.value, 10) || 1);
       rows = Math.max(1, parseInt(dom.splitRows.value, 10) || 1);
@@ -2148,10 +2156,10 @@
 
       var totalFrames;
       if (core.state.splitMode === 'uneven') {
-        var cellW = Math.max(1, Math.round((parseInt(dom.splitCols.value, 10) || 64) * scale));
-        var cellH = Math.max(1, Math.round((parseInt(dom.splitRows.value, 10) || 64) * scale));
-        var innerGap = Math.round((parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0) * scale);
-        var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.round((parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) * scale) : 0;
+        var cellW = Math.max(1, parseInt(dom.splitCols.value, 10) || 64);
+        var cellH = Math.max(1, parseInt(dom.splitRows.value, 10) || 64);
+        var innerGap = Math.max(0, parseInt(dom.splitInnerGap ? dom.splitInnerGap.value : 0, 10) || 0);
+        var outerMargin = (dom.splitEnableOuter && dom.splitEnableOuter.checked) ? Math.max(0, parseInt(dom.splitOuterMargin ? dom.splitOuterMargin.value : 0, 10) || 0) : 0;
         var cols = Math.max(1, Math.floor((scaledW - outerMargin * 2 + innerGap) / (cellW + innerGap)));
         var rows = Math.max(1, Math.floor((scaledH - outerMargin * 2 + innerGap) / (cellH + innerGap)));
         totalFrames = cols * rows;
