@@ -43,12 +43,25 @@
     startLayerState: null,
     cropRect: { x: 0, y: 0, w: 100, h: 100 },
     textStyle: { bold: false, italic: false, underline: false },
-    dragSrcIndex: null,
-    dragItemEl: null,
+    // Transparency tool session (gif_upgrade.md §4.1, trans section).
+    // Live DOM inputs drive the preview while the panel is open; Apply
+    // snapshots them into `committed`. Consumers (draw preview when the
+    // panel is closed, thumbnails, exports) read ONLY the committed
+    // snapshot — slice canvases are never baked, so params stay fully
+    // reversible until a destructive transform (crop/resize/slice/split)
+    // materializes the committed removal into the new canvases.
+    trans: {
+      mode: 'color',        // 'color' (颜色去背) | 'flood' (区域去背)
+      keyColor: '#ffffff',
+      fuzziness: 15,
+      seeds: [],            // [{x, y}] flood seeds in slice-canvas coords
+      corner: false,        // flood preset: remove border-connected bg
+      c2a: false,           // GIMP Color-to-Alpha soft-edge mode
+      committed: null       // frozen params snapshot at Apply
+    },
     pickColorMode: false,
+    floodPickMode: false,
     transparencyReady: false,
-    touchDragItem: null,
-    touchStartIndex: null,
 
     // Integrated timeline state
     timeline: {

@@ -433,7 +433,7 @@ web/static/
 ├── gif-editor-timeline.js    # 虚拟化时间线、滚动、缩放、帧节点、排序
 ├── gif-editor-playback.js    # First/Prev/Play/Next/Last、键盘、timer
 ├── gif-editor-export.js      # GIF、ZIP、Sprite Sheet、结果 Modal、MediaBridge
-└── gif-editor.js             # 页面入口、模板、Canvas/图层/裁剪/透明/网格等暂留逻辑
+├── gif-editor-transparency.js # 透明引擎纯函数（2026-08-12 新增）：颜色去背/区域去背/软边管线，零 DOM 依赖
 ```
 
 ### 4.1 `gif-editor-state.js`
@@ -473,6 +473,15 @@ var state = {
   panY: 0,
   activeLayer: null,
   transparencyReady: false,
+  trans: {                 // 2026-08-12：透明工具会话状态（live DOM 参数 + Apply 冻结的 committed 快照）
+    mode: 'color',         //   'color'（颜色去背）| 'flood'（区域去背）
+    keyColor: '#ffffff',
+    fuzziness: 15,         //   0..100 → redmean 阈值 0..765
+    seeds: [],             //   flood 种子点（slice canvas 坐标）
+    corner: false,         //   角点 flood 预设
+    c2a: false,            //   GIMP Color-to-Alpha 软边
+    committed: null        //   Apply 冻结的参数快照；缩略图/导出只认它
+  },
   timeline: {
     zoom: 1,
     window: null,
@@ -1334,8 +1343,9 @@ Space 可作为 Play/Pause，但只在：
 <script src="/gif-editor-import.js"></script>
 <script src="/gif-editor-timeline.js"></script>
 <script src="/gif-editor-playback.js"></script>
-<script src="/gif-editor-export.js"></script>
-<script src="/gif-editor.js"></script>
+<script src="/gif-editor/gif-editor-state.js"></script>
+<script src="/gif-editor/gif-editor-transparency.js"></script>
+<script src="/gif-editor/gif-editor.js"></script>
 ```
 
 约束：
@@ -1604,6 +1614,7 @@ node --check web/static/gif-editor-timeline.js
 node --check web/static/gif-editor-playback.js
 node --check web/static/gif-editor-export.js
 node --check web/static/gif-editor.js
+node --check web/static/gif-editor/gif-editor-transparency.js
 node --check web/static/i18n.js
 ```
 

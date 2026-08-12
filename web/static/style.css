@@ -4559,8 +4559,11 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .gif-timeline-item:hover{border-color:var(--glass-border)}
 .gif-timeline-item.active{border-color:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
 .gif-timeline-item.dragging{opacity:0.5;transform:scale(0.95);border-color:var(--accent2)}
-.gif-thumb-wrapper{position:relative;width:100%;height:100%;overflow:hidden;background:#000;border-radius:var(--radius-xs);min-width:0}
+.gif-thumb-wrapper{position:relative;width:100%;height:100%;overflow:hidden;border-radius:var(--radius-xs);min-width:0;background-color:#262626;background-image:linear-gradient(45deg,#3a3a3a 25%,transparent 25%,transparent 75%,#3a3a3a 75%),linear-gradient(45deg,#3a3a3a 25%,transparent 25%,transparent 75%,#3a3a3a 75%);background-size:12px 12px;background-position:0 0,6px 6px}
 .gif-thumb-wrapper img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+/* Transparency checkerboard: dark theme = subtle gray pair; light theme =
+   classic image-editor white/gray pair (2026-08-12). */
+[data-theme="light"] .gif-thumb-wrapper{background-color:#f0f0f0;background-image:linear-gradient(45deg,#d0d0d0 25%,transparent 25%,transparent 75%,#d0d0d0 75%),linear-gradient(45deg,#d0d0d0 25%,transparent 25%,transparent 75%,#d0d0d0 75%);background-size:12px 12px;background-position:0 0,6px 6px}
 .gif-timeline-info{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:3px 6px;font-size:var(--font-badge);color:var(--text-secondary);background:transparent;z-index:1;min-width:0;pointer-events:none}
 .gif-timeline-info span.gif-frame-num{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9),0 0 2px rgba(0,0,0,0.9)}
 .gif-timeline-item:hover .gif-timeline-info span.gif-frame-num{display:none}

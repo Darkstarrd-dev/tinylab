@@ -66,7 +66,10 @@
 
   function isTransparencyEnabled() {
     var cb = document.getElementById('gif-enable-trans');
-    return !!(cb && cb.checked && core.state.transparencyReady);
+    // Transparency exports only what was APPLIED: the committed snapshot
+    // (never the live panel params).
+    return !!(cb && cb.checked && core.state.transparencyReady &&
+      core.state.trans && core.state.trans.committed);
   }
 
   // ------------------------------------------------------------------
@@ -634,7 +637,7 @@
     var tempCanvas = document.createElement('canvas');
     tempCanvas.width = Math.max(1, w);
     tempCanvas.height = Math.max(1, h);
-    renderCompositedFrame(0, tempCanvas, { applyTransparency: !core.state.srcImg });
+    renderCompositedFrame(0, tempCanvas, { applyTransparency: isTransparencyEnabled() });
     previewImg.src = tempCanvas.toDataURL('image/png');
   }
 
@@ -811,7 +814,7 @@
 
           for (var i = 0; i < slices.length; i++) {
             renderCompositedFrame(i, tmpCanvas, {
-              applyTransparency: !core.state.srcImg,
+              applyTransparency: transEnabled,
               matte: transEnabled ? core.constants.MATTE_HEX : null
             });
             encoder.addFrame(tmpCanvas, {

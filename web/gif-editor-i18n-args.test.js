@@ -230,8 +230,10 @@ check('reset-workspace title key resolves en + cn', function () {
   assert.strictEqual(vm.runInContext('__t(\'gifEditorResetWorkspace\')', makeContext('cn')), '重置工作区');
 });
 check('timeline zoom title key resolves en + cn', function () {
-  assert.strictEqual(vm.runInContext('__t(\'gifTimelineZoom\')', makeContext('en')), 'Zoom:');
-  assert.strictEqual(vm.runInContext('__t(\'gifTimelineZoom\')', makeContext('cn')), '倍率:');
+  // Values follow the current dictionary (c4a0751 renamed the zoom label to
+  // 缩略图/Zoom; the earlier 'Zoom:'/'倍率:' assertion was stale).
+  assert.strictEqual(vm.runInContext('__t(\'gifTimelineZoom\')', makeContext('en')), 'Zoom');
+  assert.strictEqual(vm.runInContext('__t(\'gifTimelineZoom\')', makeContext('cn')), '缩略图');
 });
 check('export-preview alt key resolves en + cn', function () {
   assert.strictEqual(vm.runInContext('__t(\'gifEditorExportPreviewAlt\')', makeContext('en')), 'Export preview');

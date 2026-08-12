@@ -1099,7 +1099,7 @@
       draft = null;
       core.state.importDraft = null;
 
-      if (core.commands.updateSourcePanels) core.commands.updateSourcePanels(currentDraft.kind);
+      if (core.commands.updateSourcePanels) core.commands.updateSourcePanels(currentDraft.kind, { resetTrans: true });
       if (core.timeline && core.timeline.render) core.timeline.render();
       if (core.commands.focusFrame) core.commands.focusFrame(0);
       if (core.commands.redrawSelection) core.commands.redrawSelection(0);

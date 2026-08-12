@@ -78,16 +78,28 @@
     thumbCanvas.width = thumbSize;
     thumbCanvas.height = thumbSize;
     var tCtx = thumbCanvas.getContext('2d');
-    tCtx.drawImage(slice.canvas, sx, sy, cropSize, cropSize, 0, 0, thumbSize, thumbSize);
+
+    // Thumbs reflect the APPLIED transparency: run the committed pipeline on
+    // the FULL frame first (flood connectivity must match the stage/export,
+    // not the cropped thumb), then crop+downscale.
+    var committed = core.state.trans && core.state.trans.committed;
+    if (committed && window.GifEditorTransparency) {
+      var full = document.createElement('canvas');
+      full.width = sw;
+      full.height = sh;
+      var fCtx = full.getContext('2d');
+      fCtx.drawImage(slice.canvas, 0, 0);
+      var imgData = fCtx.getImageData(0, 0, sw, sh);
+      window.GifEditorTransparency.applyPipeline(imgData, committed);
+      fCtx.putImageData(imgData, 0, 0);
+      tCtx.drawImage(full, sx, sy, cropSize, cropSize, 0, 0, thumbSize, thumbSize);
+    } else {
+      tCtx.drawImage(slice.canvas, sx, sy, cropSize, cropSize, 0, 0, thumbSize, thumbSize);
+    }
 
     var dataUrl = thumbCanvas.toDataURL('image/png');
     tl.thumbCache[slice.id] = dataUrl;
     tl.thumbKeys.push(slice.id);
-
-    if (tl.thumbKeys.length > THUMB_CACHE_MAX) {
-      var oldest = tl.thumbKeys.shift();
-      delete tl.thumbCache[oldest];
-    }
     return dataUrl;
   }
 

@@ -190,6 +190,15 @@
     dom.pickColorBtn = core.byId('pick-color-btn');
     dom.fuzziness = core.byId('fuzziness');
     dom.disableTransBtn = core.byId('disable-trans-btn');
+    dom.transModeColorBtn = core.byId('trans-mode-color-btn');
+    dom.transModeFloodBtn = core.byId('trans-mode-flood-btn');
+    dom.transColorControls = core.byId('trans-color-controls');
+    dom.transFloodControls = core.byId('trans-flood-controls');
+    dom.transC2a = core.byId('trans-c2a');
+    dom.floodPickBtn = core.byId('flood-pick-btn');
+    dom.clearSeedsBtn = core.byId('clear-seeds-btn');
+    dom.transCornerBtn = core.byId('corner-flood-btn');
+    dom.seedCountLabel = core.byId('seed-count');
     dom.imageTools = core.byId('image-tools');
     dom.videoTools = core.byId('video-tools');
 
@@ -380,7 +389,11 @@
     cc.height = slice.canvas.height;
     var c = cc.getContext('2d');
     c.drawImage(slice.canvas, 0, 0);
-    if (opts && opts.applyTransparency) applyTransparencyToCtx(c, cc.width, cc.height);
+    if (opts && opts.applyTransparency) {
+      // true -> the committed snapshot; an object -> explicit params.
+      var transParams = (opts.applyTransparency === true) ? committedTransParams() : opts.applyTransparency;
+      applyTransparencyToCtx(c, cc.width, cc.height, transParams);
+    }
     drawLayers(c, slice.layers);
 
     var tx = targetCanvas.getContext('2d');
@@ -443,18 +456,26 @@
     }
   }
 
-  function updateSourcePanels(kind) {
+  function updateSourcePanels(kind, opts) {
     if (dom.imageTools) dom.imageTools.style.display = (kind === 'image' ? 'block' : 'none');
     if (dom.splitSheetContainer) dom.splitSheetContainer.style.display = (kind === 'image' ? 'block' : 'none');
     if (dom.globalDelayContainer) dom.globalDelayContainer.style.display = 'block';
     if (dom.batchDeleteContainer) dom.batchDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
     if (dom.intervalDeleteContainer) dom.intervalDeleteContainer.style.display = (kind === 'image' ? 'none' : 'block');
     if (dom.overlayContainer) dom.overlayContainer.style.display = (kind === 'image' ? 'none' : 'block');
-    if (dom.enableTrans) dom.enableTrans.checked = false;
+    // The hidden checkbox mirrors the committed snapshot so a page re-entry
+    // (render -> updateSourcePanels without resetTrans) keeps applied
+    // transparency alive; a new source (resetTrans) clears it fully.
+    if (dom.enableTrans) dom.enableTrans.checked = !!(core.state.trans && core.state.trans.committed);
     if (dom.transPanel) dom.transPanel.style.display = 'none';
-    core.state.transparencyReady = false;
     core.state.pickColorMode = false;
+    core.state.floodPickMode = false;
     if (dom.canvasWrapper) dom.canvasWrapper.style.cursor = 'default';
+    if (opts && opts.resetTrans) {
+      resetTransState();
+    } else {
+      syncTransPanelUI();
+    }
 
     if (kind === 'image' && (dom.cropNumL || dom.sliderT)) {
       var s0 = (core.state.slices || [])[0];
@@ -478,59 +499,200 @@
   }
 
   // ------------------------------------------------------------------
-  // Chroma-key transparency (magic wand)
+  // Transparency (magic wand): color key / flood fill / soft edge
+  //
+  // Session model: the DOM inputs are LIVE params while the panel is open
+  // (the stage preview re-runs the pipeline on every change — no Apply
+  // needed to see the result). Apply freezes the live params into
+  // state.trans.committed and checks the hidden enable-trans checkbox.
+  // Slice canvases are NEVER baked: every consumer (stage preview when the
+  // panel is closed, thumbnails, exports) runs the GifEditorTransparency
+  // pipeline against the pristine canvas with the committed params, so
+  // adjustments stay fully reversible. A destructive transform (crop /
+  // resize / grid slice / split sheet) materializes the committed removal
+  // into the new canvases via materializeTransparency().
   // ------------------------------------------------------------------
 
+  function defaultTransParams() {
+    return { mode: 'color', keyColor: '#ffffff', fuzziness: 15, seeds: [], corner: false, c2a: false };
+  }
+
+  // Live params straight from the panel DOM (session state).
+  function liveTransParams() {
+    var tr = core.state.trans;
+    var keyColor = (dom.keyColor && dom.keyColor.value) || tr.keyColor;
+    var fuzz = dom.fuzziness ? parseFloat(dom.fuzziness.value) : tr.fuzziness;
+    if (isNaN(fuzz)) fuzz = tr.fuzziness;
+    return {
+      mode: tr.mode,
+      keyColor: keyColor,
+      fuzziness: fuzz,
+      seeds: (tr.seeds || []).slice(),
+      corner: !!tr.corner,
+      c2a: !!tr.c2a
+    };
+  }
+
+  // The frozen snapshot created by Apply; null when transparency is not
+  // applied. All non-interactive consumers (thumbnails, exports) read this.
+  function committedTransParams() {
+    var tr = core.state.trans;
+    return tr && tr.committed ? tr.committed : null;
+  }
+
+  // Stage preview params: live while the panel is open (immediate feedback
+  // before Apply), committed once the panel is closed but applied.
+  function previewTransParams() {
+    if (!core.state.transparencyReady) return null;
+    if (dom.transPanel && dom.transPanel.style.display === 'block') return liveTransParams();
+    if (dom.enableTrans && dom.enableTrans.checked) return committedTransParams();
+    return null;
+  }
+
+  function applyTransparencyToCtx(targetCtx, width, height, params) {
+    if (!params || !window.GifEditorTransparency) return;
+    var d = targetCtx.getImageData(0, 0, width, height);
+    window.GifEditorTransparency.applyPipeline(d, params);
+    targetCtx.putImageData(d, 0, 0);
+  }
+
+  // True when the committed snapshot represents an active removal (gates
+  // materialization in transforms that replace slice canvases).
+  function isTransCommitted() {
+    var c = committedTransParams();
+    return !!(c && window.GifEditorTransparency &&
+      window.GifEditorTransparency.hasActiveRemoval(c));
+  }
+
+  // Bake the committed removal into every slice canvas + the image source
+  // canvas, then clear the committed state. Called by crop / resize /
+  // grid slice / split sheet whose output canvases would otherwise lose
+  // the (never-baked) transparency. Flood seeds are dropped: their
+  // coordinates no longer map onto the new canvas geometry.
+  function materializeTransparency() {
+    if (!isTransCommitted()) return;
+    var params = committedTransParams();
+    var slices = core.state.slices || [];
+    for (var i = 0; i < slices.length; i++) {
+      var src = slices[i].canvas;
+      if (!src) continue;
+      var c = document.createElement('canvas');
+      c.width = src.width;
+      c.height = src.height;
+      var cctx = c.getContext('2d');
+      cctx.drawImage(src, 0, 0);
+      applyTransparencyToCtx(cctx, c.width, c.height, params);
+      slices[i].canvas = c;
+    }
+    if (core.state.processedImg && core.state.source && core.state.source.kind === 'image') {
+      var p = document.createElement('canvas');
+      p.width = core.state.processedImg.width;
+      p.height = core.state.processedImg.height;
+      var pctx = p.getContext('2d');
+      pctx.drawImage(core.state.processedImg, 0, 0);
+      applyTransparencyToCtx(pctx, p.width, p.height, params);
+      core.state.processedImg = p;
+    }
+    resetTransState();
+    if (core.timeline) core.timeline.clearThumbCache();
+    if (core.timeline && core.timeline.render) core.timeline.render();
+  }
+
+  // Full tool reset: new source, after materialization, or Disable.
+  function resetTransState() {
+    var tr = core.state.trans;
+    tr.mode = 'color';
+    tr.keyColor = '#ffffff';
+    tr.fuzziness = 15;
+    tr.seeds = [];
+    tr.corner = false;
+    tr.c2a = false;
+    tr.committed = null;
+    core.state.transparencyReady = false;
+    core.state.pickColorMode = false;
+    core.state.floodPickMode = false;
+    if (dom.enableTrans) dom.enableTrans.checked = false;
+    if (dom.canvasWrapper) dom.canvasWrapper.style.cursor = 'default';
+    syncTransPanelUI();
+  }
+
+  // Reflect state -> panel DOM (mode buttons, section visibility, seed
+  // count, key color / fuzziness inputs).
+  function syncTransPanelUI() {
+    var tr = core.state.trans;
+    if (dom.transModeColorBtn) dom.transModeColorBtn.classList.toggle('active', tr.mode === 'color');
+    if (dom.transModeFloodBtn) dom.transModeFloodBtn.classList.toggle('active', tr.mode === 'flood');
+    if (dom.transColorControls) dom.transColorControls.style.display = tr.mode === 'color' ? 'block' : 'none';
+    if (dom.transFloodControls) dom.transFloodControls.style.display = tr.mode === 'flood' ? 'block' : 'none';
+    if (dom.keyColor) dom.keyColor.value = tr.keyColor;
+    if (dom.fuzziness) dom.fuzziness.value = String(tr.fuzziness);
+    if (dom.transC2a) dom.transC2a.checked = !!tr.c2a;
+    if (dom.transCornerBtn) dom.transCornerBtn.classList.toggle('active', !!tr.corner);
+    if (dom.seedCountLabel) {
+      dom.seedCountLabel.textContent = t('gifEditorSeedCount', [String(tr.seeds.length)], tr.seeds.length + ' seeds');
+    }
+  }
+
   function toggleTransPanel() {
-    if (dom.transPanel) dom.transPanel.style.display = dom.enableTrans.checked ? 'block' : 'none';
-    rebakeImageFrame();
+    // Opening/closing switches the preview between live and committed
+    // params — just re-render.
     draw();
   }
 
   function transParamChanged() {
     core.state.transparencyReady = true;
-    rebakeImageFrame();
     draw();
   }
 
-  // For imported images the (single, not-yet-sliced) frame doubles as the
-  // source: re-apply the chroma key to the frame + processedImg so the grid
-  // slice and every export see the transparent pixels.
-  function rebakeImageFrame() {
-    if (!isImageUnsliced()) return;
-    var src = core.state.slices[0].canvas;
-    var c = document.createElement('canvas');
-    c.width = src.width;
-    c.height = src.height;
-    var cctx = c.getContext('2d');
-    cctx.drawImage(src, 0, 0);
-    applyTransparencyToCtx(cctx, c.width, c.height);
-    core.state.slices[0].canvas = c;
-    core.state.processedImg = c;
-    if (core.timeline) core.timeline.clearThumbCache();
-    if (core.timeline && core.timeline.render) core.timeline.render();
+  function setTransMode(mode) {
+    core.state.trans.mode = (mode === 'flood') ? 'flood' : 'color';
+    core.state.transparencyReady = true;
+    syncTransPanelUI();
+    draw();
   }
 
-  function applyTransparencyToCtx(targetCtx, width, height) {
-    if (!dom.enableTrans || !dom.enableTrans.checked) return;
-    if (!core.state.transparencyReady) return;
-    var d = targetCtx.getImageData(0, 0, width, height);
-    var data = d.data;
-    var hex = dom.keyColor.value;
-    var r = parseInt(hex.slice(1, 3), 16),
-        g = parseInt(hex.slice(3, 5), 16),
-        b = parseInt(hex.slice(5, 7), 16);
-    var f = parseFloat(dom.fuzziness.value) * 2.55;
-    if (isNaN(f)) f = 0;
-    for (var i = 0; i < data.length; i += 4) {
-      if (data[i + 3] === 0) continue;
-      if (Math.abs(data[i] - r) <= f &&
-          Math.abs(data[i + 1] - g) <= f &&
-          Math.abs(data[i + 2] - b) <= f) {
-        data[i + 3] = 0;
-      }
+  // Flood seed: bounds-checked against the current frame canvas; duplicate
+  // points are ignored. Seed coordinate space == slice canvas pixels.
+  function addFloodSeed(x, y) {
+    var slices = core.state.slices || [];
+    var idx = core.state.selectedSliceIdx;
+    var dims = null;
+    if (idx >= 0 && slices[idx] && slices[idx].canvas) {
+      dims = { w: slices[idx].canvas.width, h: slices[idx].canvas.height };
+    } else if (core.state.processedImg) {
+      dims = { w: core.state.processedImg.width, h: core.state.processedImg.height };
     }
-    targetCtx.putImageData(d, 0, 0);
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if (!dims || x < 0 || x >= dims.w || y < 0 || y >= dims.h) return;
+    var tr = core.state.trans;
+    for (var i = 0; i < tr.seeds.length; i++) {
+      if (tr.seeds[i].x === x && tr.seeds[i].y === y) return;
+    }
+    tr.seeds.push({ x: x, y: y });
+    core.state.transparencyReady = true;
+    syncTransPanelUI();
+    draw();
+  }
+
+  function clearFloodSeeds() {
+    core.state.trans.seeds = [];
+    core.state.trans.corner = false;
+    syncTransPanelUI();
+    draw();
+  }
+
+  function toggleCornerFlood() {
+    core.state.trans.corner = !core.state.trans.corner;
+    core.state.transparencyReady = true;
+    syncTransPanelUI();
+    draw();
+  }
+
+  function toggleSoftEdge() {
+    core.state.trans.c2a = !!(dom.transC2a && dom.transC2a.checked);
+    core.state.transparencyReady = true;
+    draw();
   }
 
   function pickColorClick() {
@@ -540,16 +702,17 @@
         ed.open().then(function (result) {
           dom.keyColor.value = result.sRGBHex;
           core.state.transparencyReady = true;
-          rebakeImageFrame();
           draw();
         }).catch(function () { /* user cancelled */ });
       } catch (e) { /* fall through to manual mode */ }
     } else {
       core.state.pickColorMode = !core.state.pickColorMode;
+      core.state.floodPickMode = false;
       if (core.state.pickColorMode) {
         dom.canvasWrapper.style.cursor = 'crosshair';
         dom.stageOverlayText.innerText = t('gifEditorPickColorHintStage');
         dom.pickColorBtn.classList.add('active');
+        if (dom.floodPickBtn) dom.floodPickBtn.classList.remove('active');
       } else {
         dom.canvasWrapper.style.cursor = 'default';
         dom.stageOverlayText.innerText = t('gifEditorPickColorCancelled');
@@ -563,6 +726,28 @@
     dom.canvasWrapper.style.cursor = 'default';
     dom.stageOverlayText.innerText = t('gifEditorPickColorCancelled');
     dom.pickColorBtn.classList.remove('active');
+  }
+
+  function toggleFloodPick() {
+    core.state.floodPickMode = !core.state.floodPickMode;
+    core.state.pickColorMode = false;
+    if (dom.pickColorBtn) dom.pickColorBtn.classList.remove('active');
+    if (core.state.floodPickMode) {
+      dom.canvasWrapper.style.cursor = 'crosshair';
+      dom.stageOverlayText.innerText = t('gifEditorFloodPickHintStage');
+      if (dom.floodPickBtn) dom.floodPickBtn.classList.add('active');
+    } else {
+      dom.canvasWrapper.style.cursor = 'default';
+      dom.stageOverlayText.innerText = t('gifEditorFloodPickCancelled');
+      if (dom.floodPickBtn) dom.floodPickBtn.classList.remove('active');
+    }
+  }
+
+  function cancelFloodPick() {
+    core.state.floodPickMode = false;
+    dom.canvasWrapper.style.cursor = 'default';
+    dom.stageOverlayText.innerText = t('gifEditorFloodPickCancelled');
+    if (dom.floodPickBtn) dom.floodPickBtn.classList.remove('active');
   }
 
   // ------------------------------------------------------------------
@@ -618,6 +803,9 @@
   }
 
   function runSlice() {
+    // The slice cells replace the pristine source canvas: materialize any
+    // committed transparency into the source first (seeds are dropped).
+    materializeTransparency();
     var src = core.state.processedImg ||
       ((core.state.slices && core.state.slices[0]) ? core.state.slices[0].canvas : null);
     if (!src) { alert(t('gifEditorAlertNoImage')); return; }
@@ -774,8 +962,10 @@
   }
 
   function applyCrop() {
+    // Cropping replaces the pristine canvases: bake the committed removal
+    // into them first so the crop does not silently drop transparency.
+    materializeTransparency();
     var r = core.state.cropRect;
-    if (r.w <= 0 || r.h <= 0) return;
     core.showSpinner(t('gifEditorCropping'));
     setTimeout(function () {
       var slices = core.state.slices || [];
@@ -964,6 +1154,11 @@
     if (e.target === canvas) e.preventDefault();
     var coords = getPointerPos(e);
 
+    if (core.state.floodPickMode) {
+      addFloodSeed(coords.x, coords.y);
+      return;
+    }
+
     if (core.state.pickColorMode) {
       var px = ctx.getImageData(Math.floor(coords.x), Math.floor(coords.y), 1, 1).data;
       var hex = '#' + [px[0], px[1], px[2]].map(function (x) {
@@ -972,7 +1167,6 @@
       }).join('');
       dom.keyColor.value = hex;
       core.state.transparencyReady = true;
-      rebakeImageFrame();
       draw();
       core.state.pickColorMode = false;
       dom.canvasWrapper.style.cursor = 'default';
@@ -1232,6 +1426,26 @@
     ctx.restore();
   }
 
+  // Crosshair marker for flood-fill seed points (stage canvas coords).
+  function drawSeedMarker(x, y) {
+    ctx.save();
+    ctx.strokeStyle = '#ff0055';
+    ctx.lineWidth = 2;
+    var r = 10;
+    ctx.beginPath();
+    ctx.moveTo(x - r, y);
+    ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x, y + r);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function checkLayerHit(x, y) {
     var slices = core.state.slices || [];
     var idx = core.state.selectedSliceIdx;
@@ -1302,15 +1516,18 @@
     var isSplitOpen = dom.splitSheetPanel && dom.splitSheetPanel.style.display !== 'none' && core.state.source && core.state.source.kind === 'image';
     var splitScaleRatio = isSplitOpen ? ((parseInt(dom.splitScale ? dom.splitScale.value : 100, 10) || 100) / 100) : 1;
 
-    // Source / Frame image draw with crisp pixel scaling if scale < 1
+    // Source / Frame image draw with crisp pixel scaling if scale < 1.
+    // Live preview while the trans panel is open; committed params once
+    // applied (panel closed). Never touches the pristine slice canvas.
     var sourceDrawImg = rawCanvas;
-    if (dom.enableTrans && dom.enableTrans.checked && core.state.transparencyReady && slices[idx]) {
+    var previewParams = previewTransParams();
+    if (previewParams && slices[idx]) {
       var tempC = document.createElement('canvas');
       tempC.width = origW;
       tempC.height = origH;
       var tCtx = tempC.getContext('2d');
       tCtx.drawImage(rawCanvas, 0, 0);
-      applyTransparencyToCtx(tCtx, origW, origH);
+      applyTransparencyToCtx(tCtx, origW, origH, previewParams);
       sourceDrawImg = tempC;
     }
 
@@ -1334,6 +1551,14 @@
     }
 
     if (slices[idx]) drawLayers(ctx, slices[idx].layers);
+    if (slices[idx] && core.state.trans && core.state.trans.mode === 'flood' &&
+        core.state.transparencyReady &&
+        (core.state.floodPickMode || (dom.transPanel && dom.transPanel.style.display === 'block'))) {
+      var seeds = core.state.trans.seeds;
+      for (var sIdx = 0; sIdx < seeds.length; sIdx++) {
+        drawSeedMarker(seeds[sIdx].x, seeds[sIdx].y);
+      }
+    }
     if (isImageUnsliced()) drawEdgeCropGrid(origW, origH);
     if (core.state.source && core.state.source.kind === 'image') drawSplitGridOverlay(origW, origH);
     if (core.state.mode === 'editor' && core.state.activeLayer) drawGizmo(core.state.activeLayer, '#3b82f6');
@@ -1411,7 +1636,7 @@
 
   function updateStageOverlay() {
     if (!dom.stageOverlayText) return;
-    if (core.state.pickColorMode) return;
+    if (core.state.pickColorMode || core.state.floodPickMode) return;
     var slices = core.state.slices || [];
     var hasContent = (slices.length > 0) || !!core.state.processedImg;
     if (hasContent) {
@@ -1601,6 +1826,11 @@
 
   function onKeyDown(e) {
     if (e.key !== 'Escape') return;
+    if (core.state.floodPickMode) {
+      e.stopPropagation();
+      cancelFloodPick();
+      return;
+    }
     if (core.state.pickColorMode) {
       e.stopPropagation();
       cancelPickColor();
@@ -1787,7 +2017,9 @@
     if (dom.applyCropBtn) dom.applyCropBtn.addEventListener('click', applyCrop);
     setupCropSliders();
 
-    // 2. Transparency (Set Transparency)
+    // 2. Transparency (Set Transparency): live preview while the panel is
+    // open; Apply freezes the committed snapshot; Cancel restores the
+    // committed state (or defaults); Disable clears transparency fully.
     dom.magicWandBtn = core.byId('magic-wand-btn');
     dom.applyTransBtn = core.byId('apply-trans-btn');
     dom.cancelTransBtn = core.byId('cancel-trans-btn');
@@ -1797,6 +2029,8 @@
         if (dom.transPanel) {
           var isExpanded = dom.transPanel.style.display === 'block';
           dom.transPanel.style.display = isExpanded ? 'none' : 'block';
+          if (!isExpanded) syncTransPanelUI();
+          draw();
         }
       });
     }
@@ -1804,21 +2038,51 @@
     if (dom.keyColor) dom.keyColor.addEventListener('input', transParamChanged);
     if (dom.fuzziness) dom.fuzziness.addEventListener('input', transParamChanged);
     if (dom.pickColorBtn) dom.pickColorBtn.addEventListener('click', pickColorClick);
+    if (dom.transModeColorBtn) dom.transModeColorBtn.addEventListener('click', function () { setTransMode('color'); });
+    if (dom.transModeFloodBtn) dom.transModeFloodBtn.addEventListener('click', function () { setTransMode('flood'); });
+    if (dom.floodPickBtn) dom.floodPickBtn.addEventListener('click', toggleFloodPick);
+    if (dom.clearSeedsBtn) dom.clearSeedsBtn.addEventListener('click', clearFloodSeeds);
+    if (dom.transCornerBtn) dom.transCornerBtn.addEventListener('click', toggleCornerFlood);
+    if (dom.transC2a) dom.transC2a.addEventListener('change', toggleSoftEdge);
     if (dom.applyTransBtn) {
       dom.applyTransBtn.addEventListener('click', function () {
-        if (dom.enableTrans) dom.enableTrans.checked = true;
         core.state.transparencyReady = true;
-        rebakeImageFrame();
-        draw();
+        core.state.trans.committed = liveTransParams();
+        if (dom.enableTrans) dom.enableTrans.checked = true;
         if (dom.transPanel) dom.transPanel.style.display = 'none';
+        if (core.timeline) core.timeline.clearThumbCache();
+        if (core.timeline && core.timeline.render) core.timeline.render();
+        draw();
       });
     }
     if (dom.cancelTransBtn) {
       dom.cancelTransBtn.addEventListener('click', function () {
-        if (dom.enableTrans) dom.enableTrans.checked = false;
-        rebakeImageFrame();
-        draw();
+        var committed = committedTransParams();
+        if (committed) {
+          // Discard the abandoned live tweaks; restore the committed state
+          // so a reopened panel shows what is actually applied.
+          if (dom.keyColor) dom.keyColor.value = committed.keyColor;
+          if (dom.fuzziness) dom.fuzziness.value = String(committed.fuzziness);
+          core.state.trans.mode = committed.mode;
+          core.state.trans.seeds = (committed.seeds || []).slice();
+          core.state.trans.corner = !!committed.corner;
+          core.state.trans.c2a = !!committed.c2a;
+          if (dom.enableTrans) dom.enableTrans.checked = true;
+        } else {
+          resetTransState();
+        }
         if (dom.transPanel) dom.transPanel.style.display = 'none';
+        syncTransPanelUI();
+        draw();
+      });
+    }
+    if (dom.disableTransBtn) {
+      dom.disableTransBtn.addEventListener('click', function () {
+        resetTransState();
+        if (dom.transPanel) dom.transPanel.style.display = 'none';
+        if (core.timeline) core.timeline.clearThumbCache();
+        if (core.timeline && core.timeline.render) core.timeline.render();
+        draw();
       });
     }
 
@@ -2026,6 +2290,9 @@
           confirmText: t('gifEditorResizeBtn', '确认缩放'),
           cancelText: t('cancel', '取消'),
           onConfirm: function () {
+            // Resize replaces the pristine canvases: bake the committed
+            // removal in first (seeds would not map onto the new size).
+            materializeTransparency();
             for (var i = 0; i < slices.length; i++) {
               var src = slices[i].canvas;
               var dst = document.createElement('canvas');
@@ -2138,10 +2405,9 @@
           onConfirm: function () {
             core.resetSlices();
             core.releaseSource();
-            updateSourcePanels(null);
             updateSelectionUI(-1);
             if (core.timeline && core.timeline.render) core.timeline.render();
-            if (core.playback && core.playback.updateButtons) core.playback.updateButtons();
+            updateSourcePanels(null, { resetTrans: true });
             core.hideSpinner();
             draw();
             resetView();
@@ -2245,6 +2511,9 @@
 
     if (dom.splitApplyBtn) {
       dom.splitApplyBtn.addEventListener('click', function () {
+        // The split cells replace the source canvas: bake the committed
+        // removal into the source first (seeds are dropped).
+        materializeTransparency();
         if (!core.import || !core.import.splitImage) return;
         var opts = {
           mode: core.state.splitMode || 'even',
@@ -2359,20 +2628,42 @@
       '          <span data-i18n="gifEditorMagicWandTitle">' + t('gifEditorMagicWandTitle', 'Set Transparency') + '</span>' +
       '        </button>' +
       '        <div id="gif-trans-panel" class="gif-trans-panel gif-sidebar-panel">' +
-      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
-      '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
-      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
-      '              <span data-i18n="gifEditorPickColor">' + t('gifEditorPickColor', 'Pick Color') + '</span>' +
-      '            </button>' +
+      '          <div class="gif-split-mode-toggle" id="gif-trans-mode-toggle" style="margin-bottom:8px;">' +
+      '            <button type="button" class="gif-split-mode-btn active" id="gif-trans-mode-color-btn" data-mode="color">' + t('gifEditorTransModeColor', 'Color Key') + '</button>' +
+      '            <button type="button" class="gif-split-mode-btn" id="gif-trans-mode-flood-btn" data-mode="flood">' + t('gifEditorTransModeFlood', 'Flood Fill') + '</button>' +
       '          </div>' +
-      '          <div class="gif-trans-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.3;" data-i18n="gifEditorPickColorHint">' + t('gifEditorPickColorHint', '* After clicking Pick Color, click background color on canvas') + '</div>' +
+      '          <div id="gif-trans-color-controls">' +
+      '            <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
+      '              <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '              <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '                <span data-i18n="gifEditorPickColor">' + t('gifEditorPickColor', 'Pick Color') + '</span>' +
+      '              </button>' +
+      '            </div>' +
+      '            <div class="gif-trans-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.3;" data-i18n="gifEditorPickColorHint">' + t('gifEditorPickColorHint', '* After clicking Pick Color, click background color on canvas') + '</div>' +
+      '          </div>' +
+      '          <div id="gif-trans-flood-controls" style="display:none;">' +
+      '            <div class="gif-trans-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.3;" data-i18n="gifEditorFloodHint">' + t('gifEditorFloodHint', '* Click the image to add a seed: the connected same-color region becomes transparent') + '</div>' +
+      '            <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
+      '              <span id="gif-seed-count" style="font-size:12px; color:var(--text-muted); flex-shrink:0;">' + t('gifEditorSeedCount', ['0'], '0 seeds') + '</span>' +
+      '              <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-flood-pick-btn" style="height:30px; font-size:12px; font-weight:600;" data-tooltip="' + t('gifEditorFloodPickTitle', 'Click the image to add a seed point') + '">' + t('gifEditorFloodPick', 'Pick Point') + '</button>' +
+      '              <button type="button" class="gif-btn" id="gif-clear-seeds-btn" style="height:30px; font-size:12px;" data-tooltip="' + t('gifEditorClearSeeds', 'Clear all seeds') + '">' + t('gifEditorClearSeeds', 'Clear') + '</button>' +
+      '            </div>' +
+      '            <div class="gif-control-row" style="margin-bottom:8px;">' +
+      '              <button type="button" class="gif-btn gif-full-width" id="gif-corner-flood-btn" style="height:30px; font-size:12px;" data-tooltip="' + t('gifEditorCornerFloodHint', 'Remove border-connected background from the four corners') + '">' + t('gifEditorCornerFlood', 'Remove Corner Background') + '</button>' +
+      '          </div>' +
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
       '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorFuzziness">' + t('gifEditorFuzziness', 'Tolerance:') + '</span>' +
       '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" data-tooltip="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
       '          </div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
+      '            <label class="gif-check-label" style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:12px;"><input type="checkbox" id="gif-trans-c2a"> <span data-i18n="gifEditorSoftEdge">' + t('gifEditorSoftEdge', 'Soft edge (preserve anti-aliasing)') + '</span></label>' +
+      '          </div>' +
       '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
       '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-apply-trans-btn" data-i18n="gifEditorApplyTrans">' + t('gifEditorApplyTrans', 'Apply') + '</button>' +
       '            <button type="button" class="gif-btn gif-btn-danger gif-crop-action-btn" id="gif-cancel-trans-btn" data-i18n="gifEditorCancelTrans">' + t('gifEditorCancelTrans', 'Cancel') + '</button>' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="margin-top: 8px;">' +
+      '            <button type="button" class="gif-btn gif-btn-danger gif-full-width" id="gif-disable-trans-btn" style="height:30px; font-size:12px;" data-i18n="gifEditorDisableTrans">' + t('gifEditorDisableTrans', 'Disable transparency') + '</button>' +
       '          </div>' +
       '        </div>' +
       '      </div>' +
