@@ -2311,7 +2311,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-global-crop-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorGlobalCrop">' + t('gifEditorGlobalCrop', 'Crop') + '</span>' +
       '        </button>' +
-      '        <div class="gif-crop-panel" id="gif-crop-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div class="gif-crop-panel gif-sidebar-panel" id="gif-crop-panel">' +
       '          <div class="gif-group-title" style="margin-bottom: 8px; font-weight: bold; font-size: 12px; color: var(--accent-color);" data-i18n="gifEditorCropAdjust">' + t('gifEditorCropAdjust', 'Crop area fine-tune') + '</div>' +
       '          <div class="gif-import-field-row" style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-bottom:6px;">' +
       '            <label for="gif-crop-num-l" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropLeft">' + t('gifEditorCropLeft', 'Left:') + '</label>' +
@@ -2358,7 +2358,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-magic-wand-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorMagicWandTitle">' + t('gifEditorMagicWandTitle', 'Set Transparency') + '</span>' +
       '        </button>' +
-      '        <div id="gif-trans-panel" class="gif-trans-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-trans-panel" class="gif-trans-panel gif-sidebar-panel">' +
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
       '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
       '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
@@ -2382,7 +2382,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-split-sheet-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorSplitSheet">Split Sheet</span>' +
       '        </button>' +
-      '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-split-sheet-panel" class="gif-split-sheet-panel gif-sidebar-panel">' +
       '          <div class="gif-import-row" style="display:flex; justify-content:space-between; font-size:12px; margin-bottom: 6px;">' +
       '            <span class="gif-import-label" style="color:var(--text-muted);">' + t('gifImportSourceResolution', 'Source Resolution:') + '</span>' +
       '            <span class="gif-import-value" id="gif-split-source-res" style="font-weight:bold; color:var(--accent-color);">2048 × 2048</span>' +
@@ -2458,7 +2458,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-image-tools-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorImageTools">' + t('gifEditorImageTools', 'Edge Crop & Grid Slice') + '</span>' +
       '        </button>' +
-      '        <div id="gif-image-tools-panel" class="gif-image-tools-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-image-tools-panel" class="gif-image-tools-panel gif-sidebar-panel">' +
       '          <div class="gif-group-title" style="margin-bottom: 8px; font-weight: bold; font-size: 12px; color: var(--accent-color);" data-i18n="gifEditorEdgeCropTitle">' + t('gifEditorEdgeCropTitle', 'Edge Crop') + '</div>' +
       '          <div class="gif-import-field-row" style="display:flex; align-items:center; gap:8px; width:100%; margin-bottom:6px;">' +
       '            <label for="gif-crop-t" class="gif-import-label" style="width:50px; font-size:12px; flex-shrink:0;" data-i18n="gifEditorCropTop">' + t('gifEditorCropTop', 'Top:') + '</label>' +
@@ -2507,7 +2507,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-delay-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorGlobalDelay">' + t('gifEditorGlobalDelay', 'Set Latency') + '</span>' +
       '        </button>' +
-      '        <div id="gif-delay-panel" class="gif-delay-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-delay-panel" class="gif-delay-panel gif-sidebar-panel">' +
       '          <div class="gif-import-field-vert" style="width: 100%; margin-bottom: 8px;">' +
       '            <label for="gif-batch-delay-input" class="gif-import-label" style="font-size: 11px; display: block; margin-bottom: 2px;" data-i18n="gifEditorDelayLabel">' + t('gifEditorDelayLabel', 'Frame Latency (ms):') + '</label>' +
       '            <div class="number-stepper" style="width: 100%;">' +
@@ -2528,7 +2528,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-batch-delete-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorBatchDelete">' + t('gifEditorBatchDelete', 'Batch Frame Delete') + '</span>' +
       '        </button>' +
-      '        <div id="gif-batch-delete-panel" class="gif-batch-delete-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-batch-delete-panel" class="gif-batch-delete-panel gif-sidebar-panel">' +
       '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">' +
       '            <input type="number" id="gif-del-start" placeholder="' + t('gifEditorStartFrame', 'Start') + '" min="1" style="width:100%; box-sizing:border-box;">' +
       '            <input type="number" id="gif-del-end" placeholder="' + t('gifEditorEndFrame', 'End') + '" min="1" style="width:100%; box-sizing:border-box;">' +
@@ -2545,7 +2545,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-interval-delete-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorReduceFrame">' + t('gifEditorReduceFrame', 'Reduce Frame') + '</span>' +
       '        </button>' +
-      '        <div id="gif-interval-delete-panel" class="gif-interval-delete-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-interval-delete-panel" class="gif-interval-delete-panel gif-sidebar-panel">' +
       '          <div class="gif-import-field-vert" style="width: 100%; margin-bottom: 8px;">' +
       '            <label for="gif-interval-delete-val" class="gif-import-label" style="font-size: 11px; display: block; margin-bottom: 2px;" data-i18n="gifEditorInterval">' + t('gifEditorInterval', 'Interval (N):') + '</label>' +
       '            <div class="number-stepper" style="width: 100%;">' +
@@ -2566,7 +2566,7 @@
       '        <button type="button" class="gif-btn gif-btn-primary gif-full-width" id="gif-overlay-toggle-btn" style="width:100%; height:38px; display:flex; align-items:center; justify-content:center; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorOverlay">' + t('gifEditorOverlay', 'Overlay') + '</span>' +
       '        </button>' +
-      '        <div id="gif-overlay-panel" class="gif-overlay-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
+      '        <div id="gif-overlay-panel" class="gif-overlay-panel gif-sidebar-panel">' +
       '          <div class="gif-group-title" style="margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorApplyTo">' + t('gifEditorApplyTo', 'Apply To') + '</div>' +
       '          <div class="gif-control-row" style="display:flex; gap:10px; align-items:center; margin-bottom:8px; font-size:12px;">' +
       '            <label class="gif-check-label" style="display:flex; align-items:center; gap:3px; cursor:pointer;"><input type="radio" name="gif-scope" value="current" checked> <span data-i18n="gifEditorScopeCurrent">' + t('gifEditorScopeCurrent', 'Current') + '</span></label>' +
@@ -2629,18 +2629,18 @@
       '    </div>' +
       '    <div class="gif-timeline-toolbar">' +
       '      <div class="gif-timeline-zoom-control">' +
-      '        <span class="gif-zoom-label" style="font-size:12px; color:var(--text-muted);">🔍</span>' +
-      '        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" data-tooltip="' + t('gifTimelineZoom', 'Zoom') + '">' +
+      '        <span class="gif-zoom-label" style="font-size:12px; color:var(--text-muted); margin-right:2px;" data-i18n="gifTimelineZoom">' + t('gifTimelineZoom', '缩略图') + '</span>' +
+      '        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" data-tooltip="' + t('gifTimelineZoom', '缩略图') + '">' +
       '        <span id="gif-timeline-zoom-value" style="font-size:11px; color:var(--text-muted); min-width:35px;">100%</span>' +
       '      </div>' +
       '      <div class="gif-timeline-nav" role="group">' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" data-tooltip="' + t('gifTimelineFirst', '第一帧') + '">|&lt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-prev" data-tooltip="' + t('gifTimelinePrev', '上一帧') + '">&lt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-reverse" data-tooltip="' + t('gifTimelineReverse', '反向播放') + '" aria-label="' + t('gifTimelineReverse', '反向播放') + '">◀️</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-play" data-tooltip="' + t('gifTimelinePlay', '播放') + '" aria-label="' + t('gifTimelinePlay', '播放') + '">▶️</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-next" data-tooltip="' + t('gifTimelineNext', '下一帧') + '">&gt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-last" data-tooltip="' + t('gifTimelineLast', '最后一帧') + '">&gt;|</button>' +
-      '        <button type="button" class="gif-timeline-control gif-loop-toggle" id="gif-timeline-loop" data-tooltip="' + t('gifTimelineLoop', '循环') + '" aria-label="' + t('gifTimelineLoop', '循环') + '">🔁</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" data-tooltip="' + t('gifTimelineFirst', '第一帧') + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-prev" data-tooltip="' + t('gifTimelinePrev', '上一帧') + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-reverse" data-tooltip="' + t('gifTimelineReverse', '反向播放') + '" aria-label="' + t('gifTimelineReverse', '反向播放') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="19 3 5 12 19 21 19 3"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-play" data-tooltip="' + t('gifTimelinePlay', '播放') + '" aria-label="' + t('gifTimelinePlay', '播放') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-next" data-tooltip="' + t('gifTimelineNext', '下一帧') + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-last" data-tooltip="' + t('gifTimelineLast', '最后一帧') + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg></button>' +
+      '        <button type="button" class="gif-timeline-control gif-loop-toggle" id="gif-timeline-loop" data-tooltip="' + t('gifTimelineLoop', '循环') + '" aria-label="' + t('gifTimelineLoop', '循环') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></button>' +
       '      </div>' +
       '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +
       '    </div>' +

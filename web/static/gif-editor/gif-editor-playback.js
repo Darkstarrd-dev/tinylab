@@ -15,6 +15,10 @@
     return fallback || key;
   }
 
+  var SVG_PLAY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+  var SVG_PAUSE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+  var SVG_REVERSE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="19 3 5 12 19 21 19 3"/></svg>';
+
   var bound = false; // per-render event binding guard
 
   // ------------------------------------------------------------------
@@ -208,7 +212,7 @@
     }
     if (reverseBtn) {
       reverseBtn.disabled = (!total);
-      reverseBtn.textContent = isReversePlaying ? '⏸️' : '◀️';
+      reverseBtn.innerHTML = isReversePlaying ? SVG_PAUSE : SVG_REVERSE;
       var revTitle = isReversePlaying ? t('gifTimelinePause', 'Pause') : t('gifTimelineReverse', 'Reverse Play');
       reverseBtn.setAttribute('data-tooltip', revTitle);
       reverseBtn.setAttribute('aria-label', revTitle);
@@ -217,7 +221,7 @@
     }
     if (playBtn) {
       playBtn.disabled = (!total);
-      playBtn.textContent = isForwardPlaying ? '⏸️' : '▶️';
+      playBtn.innerHTML = isForwardPlaying ? SVG_PAUSE : SVG_PLAY;
       var playTitle = isForwardPlaying ? t('gifTimelinePause', 'Pause') : t('gifTimelinePlay', 'Play');
       playBtn.setAttribute('data-tooltip', playTitle);
       playBtn.setAttribute('aria-label', playTitle);
