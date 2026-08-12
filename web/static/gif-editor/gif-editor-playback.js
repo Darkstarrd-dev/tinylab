@@ -73,11 +73,31 @@
     var slices = core.state.slices || [];
     if (!slices.length) return;
 
+    var pb = core.state.playback;
+    pb.reverse = false;
+
     if (core.state.selectedSliceIdx === -1 || core.state.selectedSliceIdx >= slices.length - 1) {
       focusFrame(0);
     }
 
+    pb.playing = true;
+    pb.generation++;
+
+    updateButtons();
+    scheduleNext();
+  }
+
+  function playReverse() {
+    var slices = core.state.slices || [];
+    if (!slices.length) return;
+
     var pb = core.state.playback;
+    pb.reverse = true;
+
+    if (core.state.selectedSliceIdx <= 0) {
+      focusFrame(slices.length - 1);
+    }
+
     pb.playing = true;
     pb.generation++;
 
@@ -98,11 +118,27 @@
   }
 
   function toggle() {
-    if (core.state.playback.playing) {
+    var pb = core.state.playback;
+    if (pb.playing && !pb.reverse) {
       pause();
     } else {
       play();
     }
+  }
+
+  function toggleReverse() {
+    var pb = core.state.playback;
+    if (pb.playing && pb.reverse) {
+      pause();
+    } else {
+      playReverse();
+    }
+  }
+
+  function toggleLoop() {
+    var pb = core.state.playback;
+    pb.loop = !pb.loop;
+    updateButtons();
   }
 
   function scheduleNext() {
@@ -113,9 +149,27 @@
     var idx = core.state.selectedSliceIdx;
     var slices = core.state.slices || [];
 
-    if (idx >= slices.length - 1) {
-      pause();
-      return;
+    var nextIdx;
+    if (pb.reverse) {
+      nextIdx = idx - 1;
+      if (nextIdx < 0) {
+        if (pb.loop) {
+          nextIdx = slices.length - 1;
+        } else {
+          pause();
+          return;
+        }
+      }
+    } else {
+      nextIdx = idx + 1;
+      if (nextIdx >= slices.length) {
+        if (pb.loop) {
+          nextIdx = 0;
+        } else {
+          pause();
+          return;
+        }
+      }
     }
 
     var currentSlice = slices[idx];
@@ -123,7 +177,7 @@
 
     pb.timer = setTimeout(function () {
       if (!pb.playing || gen !== pb.generation) return;
-      focusFrame(core.state.selectedSliceIdx + 1);
+      focusFrame(nextIdx);
       scheduleNext();
     }, delay);
   }
@@ -132,36 +186,57 @@
     var slices = core.state.slices || [];
     var total = slices.length;
     var idx = core.state.selectedSliceIdx;
-    var isPlaying = core.state.playback.playing;
+    var pb = core.state.playback;
+    var isForwardPlaying = pb.playing && !pb.reverse;
+    var isReversePlaying = pb.playing && pb.reverse;
 
     var firstBtn = document.getElementById('gif-timeline-first');
     var prevBtn = document.getElementById('gif-timeline-prev');
+    var reverseBtn = document.getElementById('gif-timeline-reverse');
     var playBtn = document.getElementById('gif-timeline-play');
     var nextBtn = document.getElementById('gif-timeline-next');
     var lastBtn = document.getElementById('gif-timeline-last');
+    var loopBtn = document.getElementById('gif-timeline-loop');
 
     if (firstBtn) {
       firstBtn.disabled = (!total || idx <= 0);
-      firstBtn.title = t('gifTimelineFirst', 'First Frame');
+      firstBtn.setAttribute('data-tooltip', t('gifTimelineFirst', 'First Frame'));
     }
     if (prevBtn) {
       prevBtn.disabled = (!total || idx <= 0);
-      prevBtn.title = t('gifTimelinePrev', 'Previous Frame');
+      prevBtn.setAttribute('data-tooltip', t('gifTimelinePrev', 'Previous Frame'));
+    }
+    if (reverseBtn) {
+      reverseBtn.disabled = (!total);
+      reverseBtn.textContent = isReversePlaying ? '⏸️' : '◀️';
+      var revTitle = isReversePlaying ? t('gifTimelinePause', 'Pause') : t('gifTimelineReverse', 'Reverse Play');
+      reverseBtn.setAttribute('data-tooltip', revTitle);
+      reverseBtn.setAttribute('aria-label', revTitle);
+      reverseBtn.setAttribute('aria-pressed', isReversePlaying ? 'true' : 'false');
+      reverseBtn.classList.toggle('active', isReversePlaying);
     }
     if (playBtn) {
       playBtn.disabled = (!total);
-      playBtn.textContent = isPlaying ? '⏸️' : '▶️';
-      playBtn.title = isPlaying ? t('gifTimelinePause', 'Pause') : t('gifTimelinePlay', 'Play');
-      playBtn.setAttribute('aria-label', playBtn.title);
-      playBtn.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
+      playBtn.textContent = isForwardPlaying ? '⏸️' : '▶️';
+      var playTitle = isForwardPlaying ? t('gifTimelinePause', 'Pause') : t('gifTimelinePlay', 'Play');
+      playBtn.setAttribute('data-tooltip', playTitle);
+      playBtn.setAttribute('aria-label', playTitle);
+      playBtn.setAttribute('aria-pressed', isForwardPlaying ? 'true' : 'false');
+      playBtn.classList.toggle('active', isForwardPlaying);
     }
     if (nextBtn) {
       nextBtn.disabled = (!total || idx >= total - 1);
-      nextBtn.title = t('gifTimelineNext', 'Next Frame');
+      nextBtn.setAttribute('data-tooltip', t('gifTimelineNext', 'Next Frame'));
     }
     if (lastBtn) {
       lastBtn.disabled = (!total || idx >= total - 1);
-      lastBtn.title = t('gifTimelineLast', 'Last Frame');
+      lastBtn.setAttribute('data-tooltip', t('gifTimelineLast', 'Last Frame'));
+    }
+    if (loopBtn) {
+      loopBtn.disabled = (!total);
+      loopBtn.setAttribute('data-tooltip', pb.loop ? t('gifTimelineLoopOn', 'Loop (On)') : t('gifTimelineLoop', 'Loop'));
+      loopBtn.setAttribute('aria-pressed', pb.loop ? 'true' : 'false');
+      loopBtn.classList.toggle('active', pb.loop);
     }
   }
 
@@ -215,15 +290,19 @@
 
     var firstBtn = document.getElementById('gif-timeline-first');
     var prevBtn = document.getElementById('gif-timeline-prev');
+    var reverseBtn = document.getElementById('gif-timeline-reverse');
     var playBtn = document.getElementById('gif-timeline-play');
     var nextBtn = document.getElementById('gif-timeline-next');
     var lastBtn = document.getElementById('gif-timeline-last');
+    var loopBtn = document.getElementById('gif-timeline-loop');
 
     if (firstBtn) firstBtn.addEventListener('click', function () { focusFrame(0); });
     if (prevBtn) prevBtn.addEventListener('click', function () { focusFrame(core.state.selectedSliceIdx - 1); });
+    if (reverseBtn) reverseBtn.addEventListener('click', function () { toggleReverse(); });
     if (playBtn) playBtn.addEventListener('click', function () { toggle(); });
     if (nextBtn) nextBtn.addEventListener('click', function () { focusFrame(core.state.selectedSliceIdx + 1); });
     if (lastBtn) lastBtn.addEventListener('click', function () { focusFrame(core.state.slices.length - 1); });
+    if (loopBtn) loopBtn.addEventListener('click', function () { toggleLoop(); });
 
     document.addEventListener('keydown', onKeyDown);
     updateButtons();
@@ -241,6 +320,8 @@
     play: play,
     pause: pause,
     toggle: toggle,
+    toggleReverse: toggleReverse,
+    toggleLoop: toggleLoop,
     next: function () { focusFrame(core.state.selectedSliceIdx + 1); },
     last: function () { focusFrame((core.state.slices || []).length - 1); },
     updateButtons: updateButtons,

@@ -62,7 +62,9 @@
     playback: {
       playing: false,
       timer: null,
-      generation: 0
+      generation: 0,
+      loop: false,
+      reverse: false
     }
   };
 
@@ -185,12 +187,29 @@
     state.srcVideo = null;
   }
 
-  function showSpinner(msg) {
+  function showSpinner(msg, pct) {
     state.isExtracting = true;
     var overlay = dom.spinnerOverlay || byId('loading-spinner');
-    var textEl = dom.spinnerText || byId('spinner-text');
     if (overlay) overlay.style.display = 'flex';
-    if (textEl && msg) textEl.textContent = msg;
+
+    var liquidFill = document.getElementById('gif-liquid-fill');
+    if (liquidFill) {
+      var numPct = (typeof pct === 'number') ? pct : null;
+      if (numPct === null && typeof msg === 'string') {
+        var match = msg.match(/(\d+)\s*%/);
+        if (match) {
+          numPct = parseInt(match[1], 10);
+        }
+      }
+
+      if (numPct !== null && !isNaN(numPct)) {
+        numPct = Math.max(0, Math.min(100, numPct));
+        liquidFill.style.animation = 'none';
+        liquidFill.style.width = Math.max(4, numPct) + '%';
+      } else {
+        liquidFill.style.animation = 'fillProgress 4s ease-out infinite';
+      }
+    }
   }
 
   function hideSpinner() {

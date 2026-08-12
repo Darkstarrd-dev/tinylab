@@ -36,7 +36,7 @@
   function getGeometry() {
     var zoom = getZoom();
     var itemWidth = Math.max(50, Math.round(100 * zoom));
-    var itemGap = Math.max(4, Math.round(10 * zoom));
+    var itemGap = 8;
     return {
       itemWidth: itemWidth,
       itemGap: itemGap,
@@ -67,15 +67,18 @@
     if (tl.thumbCache[slice.id]) return tl.thumbCache[slice.id];
 
     var geo = getGeometry();
-    var thumbW = Math.max(1, geo.itemWidth - 8);
-    var thumbH = Math.max(1, Math.round(thumbW * (slice.canvas.height / slice.canvas.width)));
-    if (thumbH > 96) { thumbH = 96; thumbW = Math.max(1, Math.round(thumbH * (slice.canvas.width / slice.canvas.height))); }
+    var thumbSize = Math.max(1, geo.itemWidth - 4);
+    var sw = slice.canvas.width;
+    var sh = slice.canvas.height;
+    var cropSize = Math.min(sw, sh);
+    var sx = (sw - cropSize) / 2;
+    var sy = (sh - cropSize) / 2;
 
     var thumbCanvas = document.createElement('canvas');
-    thumbCanvas.width = thumbW;
-    thumbCanvas.height = thumbH;
+    thumbCanvas.width = thumbSize;
+    thumbCanvas.height = thumbSize;
     var tCtx = thumbCanvas.getContext('2d');
-    tCtx.drawImage(slice.canvas, 0, 0, thumbW, thumbH);
+    tCtx.drawImage(slice.canvas, sx, sy, cropSize, cropSize, 0, 0, thumbSize, thumbSize);
 
     var dataUrl = thumbCanvas.toDataURL('image/png');
     tl.thumbCache[slice.id] = dataUrl;
@@ -117,6 +120,7 @@
     el.dataset.index = i;
     el.style.left = (i * geo.itemPitch) + 'px';
     el.style.width = geo.itemWidth + 'px';
+    el.style.height = geo.itemWidth + 'px';
 
     var imgBox = document.createElement('div');
     imgBox.className = 'gif-thumb-wrapper';
@@ -128,17 +132,38 @@
     var info = document.createElement('div');
     info.className = 'gif-timeline-info';
     var numSpan = document.createElement('span');
+    numSpan.className = 'gif-frame-num';
     numSpan.textContent = '#' + (i + 1);
     info.appendChild(numSpan);
 
+    var stepper = document.createElement('div');
+    stepper.className = 'number-stepper gif-mini-stepper';
+
+    var minusBtn = document.createElement('button');
+    minusBtn.type = 'button';
+    minusBtn.className = 'stepper-btn stepper-minus gif-delay-minus';
+    minusBtn.tabIndex = -1;
+    minusBtn.textContent = '-';
+
     var delayInput = document.createElement('input');
     delayInput.type = 'number';
-    delayInput.className = 'gif-delay-input';
+    delayInput.className = 'stepper-input gif-delay-input';
     delayInput.dataset.index = i;
     delayInput.value = Math.round(s.delay);
     delayInput.min = '0';
-    delayInput.title = t('gifEditorDelayTitle', 'Frame delay (ms)');
-    info.appendChild(delayInput);
+    var delayTitle = t('gifEditorDelayTitle', 'Frame delay (ms)');
+    delayInput.setAttribute('data-tooltip', delayTitle);
+
+    var plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'stepper-btn stepper-plus gif-delay-plus';
+    plusBtn.tabIndex = -1;
+    plusBtn.textContent = '+';
+
+    stepper.appendChild(minusBtn);
+    stepper.appendChild(delayInput);
+    stepper.appendChild(plusBtn);
+    info.appendChild(stepper);
 
     var actions = document.createElement('div');
     actions.className = 'gif-timeline-item-actions';
@@ -147,21 +172,24 @@
     copyBtn.className = 'btn-copy-slice';
     copyBtn.dataset.action = 'duplicate';
     copyBtn.textContent = '📑';
-    copyBtn.title = t('gifTimelineCopy', 'Copy frame');
-    copyBtn.setAttribute('aria-label', copyBtn.title);
+    var copyTitle = t('gifTimelineCopy', 'Copy frame');
+    copyBtn.setAttribute('data-tooltip', copyTitle);
+    copyBtn.setAttribute('aria-label', copyTitle);
     var delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-del-slice';
     delBtn.dataset.action = 'delete';
     delBtn.textContent = '🗑️';
-    delBtn.title = t('gifTimelineDelete', 'Delete frame');
-    delBtn.setAttribute('aria-label', delBtn.title);
+    var delTitle = t('gifTimelineDelete', 'Delete frame');
+    delBtn.setAttribute('data-tooltip', delTitle);
+    delBtn.setAttribute('aria-label', delTitle);
     actions.appendChild(copyBtn);
     actions.appendChild(delBtn);
 
+    imgBox.appendChild(info);
+    imgBox.appendChild(actions);
+
     el.appendChild(imgBox);
-    el.appendChild(info);
-    el.appendChild(actions);
     return el;
   }
 
@@ -174,6 +202,7 @@
 
     if (!slices.length) {
       track.style.width = '100%';
+      track.style.height = 'auto';
       track.innerHTML = '';
       var empty = document.createElement('div');
       empty.className = 'gif-timeline-empty';
@@ -194,6 +223,7 @@
     if (countEl) countEl.textContent = (Math.max(0, core.state.selectedSliceIdx) + 1) + ' / ' + slices.length;
 
     track.style.width = (slices.length * geo.itemPitch + geo.itemGap) + 'px';
+    track.style.height = geo.itemWidth + 'px';
 
     var win = timelineWindow();
     if (core.state.timeline) core.state.timeline.window = win;
@@ -282,6 +312,36 @@
 
     // Click/focus separation: the delay input never changes the selection.
     if (target.closest('input')) return;
+
+    var minusBtn = target.closest('.gif-delay-minus');
+    if (minusBtn) {
+      e.preventDefault();
+      var item = minusBtn.closest('.gif-timeline-item');
+      if (!item) return;
+      var aIdx = parseInt(item.dataset.index, 10);
+      var slice = (core.state.slices || [])[aIdx];
+      if (slice) {
+        slice.delay = Math.max(0, Math.round(slice.delay) - 10);
+        var input = item.querySelector('.gif-delay-input');
+        if (input) input.value = slice.delay;
+      }
+      return;
+    }
+
+    var plusBtn = target.closest('.gif-delay-plus');
+    if (plusBtn) {
+      e.preventDefault();
+      var item = plusBtn.closest('.gif-timeline-item');
+      if (!item) return;
+      var aIdx = parseInt(item.dataset.index, 10);
+      var slice = (core.state.slices || [])[aIdx];
+      if (slice) {
+        slice.delay = Math.max(0, Math.round(slice.delay) + 10);
+        var input = item.querySelector('.gif-delay-input');
+        if (input) input.value = slice.delay;
+      }
+      return;
+    }
 
     var actionEl = target.closest('.btn-copy-slice, .btn-del-slice');
     if (actionEl) {

@@ -1456,7 +1456,7 @@
     if (cw <= 0) cw = 800;
     if (ch <= 0) ch = 600;
 
-    var fitScale = Math.min((cw - 40) / w, (ch - 40) / h);
+    var fitScale = Math.min(cw / w, ch / h);
     core.state.scale = Math.max(0.05, fitScale);
     core.state.panX = (cw - w) / 2;
     core.state.panY = (ch - h) / 2;
@@ -2298,10 +2298,10 @@
       '    </div>' +
       '    <div id="gif-sidebar-editor-content" style="display:none;">' +
       '      <div class="gif-action-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; margin-bottom: 12px; width: 100%; box-sizing: border-box;">' +
-'        <button type="button" class="btn btn-primary" id="gif-open-export-btn" title="' + t('gifEditorExportSettingsTitle', 'Export settings') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+      '        <button type="button" class="btn btn-primary" id="gif-open-export-btn" data-tooltip="' + t('gifEditorExportSettingsTitle', 'Export settings') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorExportTitle">Export</span>' +
       '        </button>' +
-'        <button type="button" class="btn btn-ghost gif-reset-btn" id="gif-reload-btn" title="' + t('gifEditorResetWorkspace', 'Reset workspace') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
+      '        <button type="button" class="btn btn-ghost gif-reset-btn" id="gif-reload-btn" data-tooltip="' + t('gifEditorResetWorkspace', 'Reset workspace') + '" style="width:100%; display:flex; align-items:center; justify-content:center; padding:8px 12px; font-weight:600; box-sizing:border-box;">' +
       '          <span data-i18n="gifEditorReload">Reset</span>' +
       '        </button>' +
       '      </div>' +
@@ -2360,15 +2360,15 @@
       '        </button>' +
       '        <div id="gif-trans-panel" class="gif-trans-panel" style="display:none; width:100%; box-sizing:border-box; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px dashed var(--glass-border); border-radius: 8px;">' +
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
-      '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
-      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" title="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '            <input type="color" id="gif-key-color" value="#ffffff" class="gif-key-color-input" style="width:36px; height:36px; padding:0; border:1px solid var(--glass-border); border-radius:4px; cursor:pointer;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
+      '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-pick-color-btn" style="display:flex; align-items:center; justify-content:center; height:36px; font-weight:600;" data-tooltip="' + t('gifEditorPickColorTitle', 'Key color') + '">' +
       '              <span data-i18n="gifEditorPickColor">' + t('gifEditorPickColor', 'Pick Color') + '</span>' +
       '            </button>' +
       '          </div>' +
       '          <div class="gif-trans-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.3;" data-i18n="gifEditorPickColorHint">' + t('gifEditorPickColorHint', '* After clicking Pick Color, click background color on canvas') + '</div>' +
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
       '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorFuzziness">' + t('gifEditorFuzziness', 'Tolerance:') + '</span>' +
-      '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" title="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
+      '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" data-tooltip="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
       '          </div>' +
       '          <div class="gif-control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">' +
       '            <button type="button" class="gif-btn gif-btn-primary gif-crop-action-btn" id="gif-apply-trans-btn" data-i18n="gifEditorApplyTrans">' + t('gifEditorApplyTrans', 'Apply') + '</button>' +
@@ -2585,8 +2585,8 @@
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-bold" style="font-weight:bold; width:30px; height:30px; padding:0;">B</button>' +
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-italic" style="font-style:italic; width:30px; height:30px; padding:0;">I</button>' +
       '            <button type="button" class="gif-btn gif-btn-ghost" id="gif-btn-underline" style="text-decoration:underline; width:30px; height:30px; padding:0;">U</button>' +
-      '            <input type="color" id="gif-text-color" value="#ffffff" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="' + t('gifEditorTextColor', 'Text Color') + '">' +
-      '            <input type="color" id="gif-text-stroke-color" value="#000000" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" title="' + t('gifEditorStrokeColor', 'Stroke Color') + '">' +
+      '            <input type="color" id="gif-text-color" value="#ffffff" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" data-tooltip="' + t('gifEditorTextColor', 'Text Color') + '">' +
+      '            <input type="color" id="gif-text-stroke-color" value="#000000" style="width:30px; height:30px; padding:0; border:none; cursor:pointer;" data-tooltip="' + t('gifEditorStrokeColor', 'Stroke Color') + '">' +
       '            <button type="button" class="gif-btn gif-btn-primary gif-flex-1" id="gif-add-text-btn" style="height:30px; padding:0 8px; font-size:12px;" data-i18n="gifEditorAddTextBtn">' + t('gifEditorAddTextBtn', '+ Add Text') + '</button>' +
       '          </div>' +
       '          <div class="gif-group-title" style="margin-top:10px; margin-bottom:6px; font-weight:bold; font-size:12px; color:var(--accent-color);" data-i18n="gifEditorAddImageTitle">' + t('gifEditorAddImageTitle', 'Add Image / Watermark') + '</div>' +
@@ -2618,9 +2618,9 @@
       '      <canvas id="gif-preview-canvas"></canvas>' +
       '    </div>' +
       '    <div class="gif-stage-controls">' +
-      '      <button type="button" class="gif-icon-btn" id="gif-zoom-out-btn" title="' + t('gifEditorZoomOut', '缩小') + '">-</button>' +
-      '      <button type="button" class="gif-icon-btn" id="gif-reset-view-btn" title="' + t('gifEditorResetView', '重置') + '">1:1</button>' +
-      '      <button type="button" class="gif-icon-btn" id="gif-zoom-in-btn" title="' + t('gifEditorZoomIn', '放大') + '">+</button>' +
+      '      <button type="button" class="gif-icon-btn" id="gif-zoom-out-btn" data-tooltip="' + t('gifEditorZoomOut', '缩小') + '">-</button>' +
+      '      <button type="button" class="gif-icon-btn" id="gif-reset-view-btn" data-tooltip="' + t('gifEditorResetView', '重置') + '">1:1</button>' +
+      '      <button type="button" class="gif-icon-btn" id="gif-zoom-in-btn" data-tooltip="' + t('gifEditorZoomIn', '放大') + '">+</button>' +
       '    </div>' +
       '  </main>' +
       '  <section class="gif-timeline-area" aria-label="' + t('gifEditorTimelineAria', 'GIF timeline') + '">' +
@@ -2630,23 +2630,31 @@
       '    <div class="gif-timeline-toolbar">' +
       '      <div class="gif-timeline-zoom-control">' +
       '        <span class="gif-zoom-label" style="font-size:12px; color:var(--text-muted);">🔍</span>' +
-'        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" title="' + t('gifTimelineZoom', 'Zoom') + '">' +
+      '        <input type="range" id="gif-timeline-zoom-range" min="0.2" max="3" step="0.05" value="1" style="width:100px; cursor:pointer;" data-tooltip="' + t('gifTimelineZoom', 'Zoom') + '">' +
       '        <span id="gif-timeline-zoom-value" style="font-size:11px; color:var(--text-muted); min-width:35px;">100%</span>' +
       '      </div>' +
       '      <div class="gif-timeline-nav" role="group">' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" title="' + t('gifTimelineFirst', '第一帧') + '">|&lt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-prev" title="' + t('gifTimelinePrev', '上一帧') + '">&lt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-play" title="' + t('gifTimelinePlay', '播放') + '" aria-label="' + t('gifTimelinePlay', '播放') + '">▶️</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-next" title="' + t('gifTimelineNext', '下一帧') + '">&gt;</button>' +
-      '        <button type="button" class="gif-timeline-control" id="gif-timeline-last" title="' + t('gifTimelineLast', '最后一帧') + '">&gt;|</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-first" data-tooltip="' + t('gifTimelineFirst', '第一帧') + '">|&lt;</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-prev" data-tooltip="' + t('gifTimelinePrev', '上一帧') + '">&lt;</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-reverse" data-tooltip="' + t('gifTimelineReverse', '反向播放') + '" aria-label="' + t('gifTimelineReverse', '反向播放') + '">◀️</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-play" data-tooltip="' + t('gifTimelinePlay', '播放') + '" aria-label="' + t('gifTimelinePlay', '播放') + '">▶️</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-next" data-tooltip="' + t('gifTimelineNext', '下一帧') + '">&gt;</button>' +
+      '        <button type="button" class="gif-timeline-control" id="gif-timeline-last" data-tooltip="' + t('gifTimelineLast', '最后一帧') + '">&gt;|</button>' +
+      '        <button type="button" class="gif-timeline-control gif-loop-toggle" id="gif-timeline-loop" data-tooltip="' + t('gifTimelineLoop', '循环') + '" aria-label="' + t('gifTimelineLoop', '循环') + '">🔁</button>' +
       '      </div>' +
       '      <span class="gif-timeline-count" id="gif-timeline-count">0 / 0</span>' +
       '    </div>' +
       '  </section>' +
 
       '  <div class="gif-spinner-overlay" id="gif-loading-spinner">' +
-      '    <div class="gif-spinner"></div>' +
-      '    <div id="gif-spinner-text" style="color:#fff;">' + t('gifEditorProcessing', 'Processing...') + '</div>' +
+      '    <div class="liquid-loader">' +
+      '      <div class="loading-text">' +
+      '        Loading<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>' +
+      '      </div>' +
+      '      <div class="loader-track">' +
+      '        <div class="liquid-fill" id="gif-liquid-fill"></div>' +
+      '      </div>' +
+      '    </div>' +
       '  </div>' +
 
       '</div>';
