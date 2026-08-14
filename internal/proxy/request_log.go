@@ -285,6 +285,12 @@ func (h *Handler) incAttemptCount(reqID string) int {
 	return count
 }
 
+func (h *Handler) clearAttemptCount(reqID string) {
+	if reqID != "" {
+		attemptCounter.Delete(reqID)
+	}
+}
+
 // TraceMgmtCall records a lightweight trace entry for a management probe
 // call (e.g. key probe, model fetch, combo speed test) that bypasses the
 // normal proxy handler stack. label is a human-readable description of the

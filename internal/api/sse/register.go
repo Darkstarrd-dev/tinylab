@@ -65,6 +65,8 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubInflight()
 	defer unsubRequests()
 	ctx := r.Context()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ch:
@@ -88,7 +90,7 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		}

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -354,4 +355,67 @@ func (h *Handler) TracesDir() string {
 // 列表物理隔离。未注入时 playground 请求回落到 h.usage。
 func (h *Handler) SetPgUsage(r UsageRecorder) {
 	h.pgUsage = r
+}
+
+// SweepStaleEntries removes orphan in-flight processing entries older than maxAge,
+// decrements their in-flight counters, records a timeout usage entry, and broadcasts
+// request-done.
+func (h *Handler) SweepStaleEntries(maxAge time.Duration) int {
+	if h.EntryTracker == nil {
+		return 0
+	}
+	stale := h.EntryTracker.SweepStale(maxAge)
+	for _, e := range stale {
+		if e.KeyID != "" && h.keyState != nil && h.providers != nil {
+			for _, p := range h.providers.ListProviders() {
+				if ks := h.keyState.GetKeyState(p.ID, e.KeyID); ks != nil {
+					ks.DecInFlight()
+					break
+				}
+			}
+		}
+		e.Status = "error"
+		e.Error = "timeout"
+		e.LatencyMs = time.Since(e.Timestamp).Milliseconds()
+		if e.Source == "playground" && h.pgUsage != nil {
+			h.pgUsage.Add(e)
+		} else if h.usage != nil {
+			h.usage.Add(e)
+		}
+		raw := MarshalEntryJSON(e)
+		if raw != nil {
+			h.RequestUpdates.Broadcast(RequestEvent{
+				Type:   "request-done",
+				ID:     e.ID,
+				Status: "error",
+				Entry:  raw,
+			})
+		}
+		h.UsageUpdates.Signal()
+	}
+	if len(stale) > 0 {
+		h.InflightUpdates.Signal()
+	}
+	return len(stale)
+}
+
+// StartEntryTrackerSweeper runs a periodic background sweeper that cleans stale
+// in-flight entries until ctx is cancelled.
+func (h *Handler) StartEntryTrackerSweeper(ctx context.Context, interval, maxAge time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	if maxAge <= 0 {
+		maxAge = 5 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.SweepStaleEntries(maxAge)
+		}
+	}
 }

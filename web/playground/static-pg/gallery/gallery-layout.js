@@ -210,10 +210,24 @@ function buildPanelHTML(type, isSplit) {
                '<span class="gallery-main-msg" id="gallery-toolbar-msg" style="display:none"></span>' +
              '</div>' +
              '<div class="gallery-bottom">' +
-               thumbsHTML +
-               '<div class="gallery-controls">' +
-                 '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" data-tooltip="Directory Tree (T)">' + GALLERY_ICONS.tree + '</button>' +
-                 '<div class="gallery-path" id="' + pathId + '" data-tooltip="">-</div>' +
+                thumbsHTML +
+                '<div class="gallery-controls">' +
+                  '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" data-tooltip="Directory Tree (T)">' + GALLERY_ICONS.tree + '</button>' +
+                  '<button class="gallery-btn gallery-btn-icon bin-button" id="' + (isVid ? 'gallery-vid-clear-btn' : 'gallery-clear-btn') + '" type="button" data-tooltip="' + escapeHtml(T('galleryClearTitle') || 'Clear All & Free Memory') + '" aria-label="' + escapeHtml(T('galleryClearTitle') || 'Clear All & Free Memory') + '">' +
+                    '<svg class="bin-top" viewBox="0 0 39 7" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
+                      '<line y1="5" x2="39" y2="5" stroke="currentColor" stroke-width="4"></line>' +
+                      '<line x1="12" y1="1.5" x2="26.0357" y2="1.5" stroke="currentColor" stroke-width="3"></line>' +
+                    '</svg>' +
+                    '<svg class="bin-bottom" viewBox="0 0 33 39" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
+                      '<mask id="' + (isVid ? 'gallery-vid-bin-mask' : 'gallery-img-bin-mask') + '" fill="white">' +
+                        '<path d="M0 0H33V35C33 37.2091 31.2091 39 29 39H4C1.79086 39 0 37.2091 0 35V0Z"></path>' +
+                      '</mask>' +
+                      '<path d="M0 0H33H0ZM37 35C37 39.4183 33.4183 43 29 43H4C-0.418278 43 -4 39.4183 -4 35H4H29H37ZM4 43C-0.418278 43 -4 39.4183 -4 35V0H4V35V43ZM37 0V35C37 39.4183 33.4183 43 29 43V35V0H37Z" fill="currentColor" mask="url(#' + (isVid ? 'gallery-vid-bin-mask' : 'gallery-img-bin-mask') + ')"></path>' +
+                      '<path d="M12 6L12 29" stroke="currentColor" stroke-width="4"></path>' +
+                      '<path d="M21 6V29" stroke="currentColor" stroke-width="4"></path>' +
+                    '</svg>' +
+                  '</button>' +
+                  '<div class="gallery-path" id="' + pathId + '" data-tooltip="">-</div>' +
                  '<div class="gallery-ctrl-center">' + ctrlCenter + '</div>' +
                  '<div class="gallery-ctrl-right">' +
                    extraRight +
@@ -321,6 +335,23 @@ function bindEventsForCurrentLayout() {
   if (treeBtn) treeBtn.onclick = toggleTreePanel;
   var vidTreeBtn = document.getElementById('gallery-vid-tree-btn');
   if (vidTreeBtn) vidTreeBtn.onclick = toggleTreePanel;
+
+  var clearBtn = document.getElementById('gallery-clear-btn');
+  if (clearBtn) {
+    clearBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      clearActiveSideTree();
+      fetch('/api/gallery/clear', { method: 'POST' }).catch(function() {});
+    };
+  }
+  var vidClearBtn = document.getElementById('gallery-vid-clear-btn');
+  if (vidClearBtn) {
+    vidClearBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      clearActiveSideTree();
+      fetch('/api/gallery/clear', { method: 'POST' }).catch(function() {});
+    };
+  }
 
   var splitBtns = document.querySelectorAll('#gallery-split-btn');
   splitBtns.forEach(function(b) {

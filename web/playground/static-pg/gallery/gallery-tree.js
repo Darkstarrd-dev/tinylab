@@ -83,10 +83,13 @@ function renderTreePanel() {
       '</div>';
   } else {
     // 3. 标准 Header
-    headerHTML = '<div class="gallery-tree-header">' +
-      '<button class="gallery-tree-clear-btn" type="button" data-tooltip="' + T('galleryClearTitle') + '">' + T('galleryClear') + '</button>' +
-      (isVidActive ? '' : '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>') +
-      '</div>';
+    if (isVidActive) {
+      headerHTML = '';
+    } else {
+      headerHTML = '<div class="gallery-tree-header">' +
+        '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>' +
+        '</div>';
+    }
   }
 
   var contentHTML = '';
@@ -507,6 +510,7 @@ function clearActiveSideTree() {
   renderThumbnails();
   renderActive(-1);
   renderTreePanel();
+  fetch('/api/gallery/clear', { method: 'POST' }).catch(function() {});
 }
 
 function updateCurrentFolderItems(index) {

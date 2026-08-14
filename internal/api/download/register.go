@@ -340,6 +340,8 @@ func (h *Handler) streamDownloadEvents(w http.ResponseWriter, r *http.Request) {
 	defer h.d.DownloadMgr.Unsubscribe(ch)
 
 	ctx := r.Context()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case evt, ok := <-ch:
@@ -351,7 +353,7 @@ func (h *Handler) streamDownloadEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		}

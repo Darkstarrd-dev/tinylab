@@ -228,6 +228,8 @@ func (a *App) buildComponents() error {
 	// and deletes trace files older than RetainDays, enforcing MaxDiskMB.
 	// The goroutine stops when the app shutdown context is cancelled.
 	go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)
+	// Start the background in-flight processing entry sweeper.
+	go a.proxyHandler.StartEntryTrackerSweeper(a.shutdownCtx, time.Minute, 5*time.Minute)
 
 	// HTTP server (not started until Run).
 	a.sm = NewServerManager(a.apiRouter.Routes(a.proxyHandler), a.addr, a.logger, cfg.Server)

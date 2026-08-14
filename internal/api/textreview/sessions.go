@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
+	"runtime/debug"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
@@ -175,4 +178,19 @@ func (h *Handler) reprocessChapter(w http.ResponseWriter, r *http.Request) {
 func writeOK(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// clearAllSessions cancels and removes all in-memory sessions, releasing memory.
+// POST /api/text-review/clear
+func (h *Handler) clearAllSessions(w http.ResponseWriter, r *http.Request) {
+	tr.ClearAllSessions()
+	if h.d != nil && h.d.Logger != nil {
+		h.d.Logger.Info("textreview: cleared all sessions & released memory")
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		runtime.GC()
+		debug.FreeOSMemory()
+	}()
+	writeOK(w)
 }
