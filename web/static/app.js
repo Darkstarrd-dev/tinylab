@@ -277,10 +277,10 @@ function navigateTo(page) {
   // binds its root, and GIF rebuilds its editor). Do not call resume hooks
   // before or after this render, which would duplicate those bindings.
   var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
-  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility');
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || activeTool === 'fileTransfer');
   if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
-    if (page === 'gif' || activeTool === 'gif') container.style.height = '100%';
+    if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer') container.style.height = '100%';
   }
   function restoreFullscreenState() {
     if (wasFullscreen) {

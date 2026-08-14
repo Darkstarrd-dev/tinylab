@@ -4057,11 +4057,11 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 /* =====================================================================
    FileTransfer (Dual-Panel 2-Stage Staging Workflow)
    ===================================================================== */
-.filetransfer-utility-view{width:100%;max-width:1040px;margin:0 auto;padding:4px 0 20px 0}
-.filetransfer-utility-view.ft-in-modal{max-width:100%;padding:0}
+.filetransfer-utility-view{width:100%;height:100%;min-height:0;margin:0;padding:12px 18px 16px 18px;box-sizing:border-box;display:flex;flex-direction:column;flex:1;overflow:hidden}
+.filetransfer-utility-view.ft-in-modal{max-width:100%;min-height:auto;height:auto;padding:0}
 
 /* Header Banner */
-.filetransfer-banner{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;margin-bottom:18px;border-bottom:1px solid var(--glass-border)}
+.filetransfer-banner{width:100%;display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--glass-border);flex-shrink:0;box-sizing:border-box}
 .filetransfer-banner-left{display:flex;align-items:center;gap:12px}
 .filetransfer-badge-icon{width:36px;height:36px;border-radius:var(--radius-md);background:color-mix(in srgb,var(--accent) 15%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .filetransfer-title{font-size:15px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;margin:0}
@@ -4069,27 +4069,28 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-subtitle{font-size:11.5px;color:var(--text-secondary);margin-top:3px}
 
 /* Main 2-Column Grid Layout */
-.filetransfer-grid{display:grid;grid-template-columns:1.25fr 0.95fr;gap:18px;align-items:stretch}
-@media (max-width:860px){
-  .filetransfer-grid{grid-template-columns:1fr;gap:14px}
+.filetransfer-grid{width:100%;flex:1;min-height:0;display:grid;grid-template-columns:1.2fr 0.95fr;gap:16px;align-items:stretch;box-sizing:border-box}
+@media (max-width:920px){
+  .filetransfer-grid{display:flex;flex-direction:column;overflow-y:auto;gap:14px}
+  .filetransfer-utility-view{overflow-y:auto;height:auto}
 }
 
 /* Panel Containers */
-.filetransfer-panel{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:var(--shadow-card);min-height:460px;backdrop-filter:blur(var(--glass-blur-sm))}
-.ft-in-modal .filetransfer-panel{min-height:380px;padding:12px}
+.filetransfer-panel{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:var(--shadow-card);height:100%;min-height:0;box-sizing:border-box;backdrop-filter:blur(var(--glass-blur-sm));overflow:hidden}
+.ft-in-modal .filetransfer-panel{min-height:380px;height:auto;padding:12px}
 
-.filetransfer-panel-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--glass-border)}
+.filetransfer-panel-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--glass-border);flex-shrink:0}
 .filetransfer-header-title{display:flex;align-items:center;gap:8px}
 .filetransfer-stage-num{width:20px;height:20px;border-radius:50%;background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
 .filetransfer-stage-num.ft-stage-2{background:color-mix(in srgb,var(--accent2) 18%,transparent);color:var(--accent2);border-color:color-mix(in srgb,var(--accent2) 40%,transparent)}
 .filetransfer-stage-heading{font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:-0.2px}
 .filetransfer-stage-count{font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums}
 
-.filetransfer-stage-body{flex:1;display:flex;flex-direction:column;gap:10px}
-.ft-output-body{justify-content:flex-start;gap:12px}
+.filetransfer-stage-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.ft-output-body{justify-content:flex-start;gap:12px;overflow-y:auto}
 
 /* Dropzone (Staging Zone) */
-.filetransfer-dropzone{border:1.5px dashed var(--glass-border-hover);border-radius:var(--radius-md);padding:16px 12px;text-align:center;background:var(--input-bg);transition:all var(--transition-fast);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;outline:none}
+.filetransfer-dropzone{flex-shrink:0;border:1.5px dashed var(--glass-border-hover);border-radius:var(--radius-md);padding:18px 12px;text-align:center;background:var(--input-bg);transition:all var(--transition-fast);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;outline:none}
 .filetransfer-dropzone:hover,.filetransfer-dropzone.drag-active{border-color:var(--accent);background:var(--glass-active);box-shadow:0 0 0 2px var(--accent-glow)}
 .filetransfer-dropzone:focus-visible{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
 .filetransfer-drop-icon{color:var(--accent);margin-bottom:2px;transition:transform var(--transition-fast)}
@@ -4099,13 +4100,14 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-drop-actions .btn{display:inline-flex;align-items:center;gap:5px}
 
 /* File List Container */
-.filetransfer-file-list{flex:1;min-height:180px;max-height:240px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--log-bg);padding:6px;display:flex;flex-direction:column;gap:5px}
-.filetransfer-empty-zone{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:160px;gap:6px;color:var(--text-muted);text-align:center;padding:12px}
+.filetransfer-file-list{flex:1;min-height:120px;max-height:none;overflow-y:auto;overflow-x:hidden;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--log-bg);padding:6px;display:flex;flex-direction:column;gap:5px}
+.ft-in-modal .filetransfer-file-list{max-height:220px}
+.filetransfer-empty-zone{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:120px;gap:6px;color:var(--text-muted);text-align:center;padding:12px}
 .filetransfer-empty-icon{color:var(--text-muted);opacity:0.6}
 .filetransfer-empty-text{font-size:11.5px;color:var(--text-muted);max-width:240px;line-height:1.4}
 
 /* File Item Row */
-.filetransfer-file-item{display:flex;align-items:center;gap:9px;padding:7px 9px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-sm);transition:all var(--transition-fast);min-width:0}
+.filetransfer-file-item{display:flex;align-items:center;gap:9px;padding:7px 9px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-sm);transition:all var(--transition-fast);min-width:0;flex-shrink:0}
 .filetransfer-file-item:hover{border-color:var(--glass-border-hover);background:var(--glass-hover)}
 .filetransfer-item-icon-box{width:28px;height:28px;border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--glass-hover);color:var(--text-secondary)}
 .filetransfer-item-icon-box.ft-icon-pdf{background:color-mix(in srgb,var(--danger) 15%,transparent);color:var(--danger)}
@@ -4125,14 +4127,14 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-item-remove-btn:hover{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
 
 /* Panel Footers */
-.filetransfer-panel-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;margin-top:12px;border-top:1px solid var(--glass-border);min-height:38px}
+.filetransfer-panel-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;margin-top:12px;border-top:1px solid var(--glass-border);min-height:38px;flex-shrink:0}
 .filetransfer-summary-text{font-size:11.5px;color:var(--text-secondary);font-variant-numeric:tabular-nums}
 .filetransfer-clear-btn{background:transparent;border:1px solid var(--glass-border);color:var(--text-muted);font-size:11px;font-weight:500;border-radius:var(--radius-sm);padding:4px 9px;cursor:pointer;transition:all var(--transition-fast);display:inline-flex;align-items:center;gap:5px}
 .filetransfer-clear-btn:hover:not(:disabled){color:var(--danger);border-color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
 .filetransfer-clear-btn:disabled{opacity:0.35;cursor:not-allowed}
 
 /* Output Info Group */
-.filetransfer-info-group{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px}
+.filetransfer-info-group{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px;flex-shrink:0}
 .filetransfer-info-item{display:flex;flex-direction:column;gap:3px}
 .filetransfer-info-label{font-size:10.5px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px}
 .filetransfer-info-value{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -4143,7 +4145,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-info-hint svg{color:var(--accent);flex-shrink:0}
 
 /* Progress & Status */
-.filetransfer-progress-wrap{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:10px;display:flex;flex-direction:column;gap:5px}
+.filetransfer-progress-wrap{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:10px;display:flex;flex-direction:column;gap:5px;flex-shrink:0}
 .filetransfer-progress-wrap[hidden]{display:none}
 .filetransfer-progress-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-secondary)}
 .filetransfer-progress-title{font-weight:600;color:var(--text)}
@@ -4151,17 +4153,17 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .filetransfer-progress-bar-bg{width:100%;height:7px;border-radius:4px;background:var(--glass-border);overflow:hidden}
 .filetransfer-progress-bar-bg progress{width:100%;height:100%;display:block;accent-color:var(--accent)}
 
-.filetransfer-status{min-height:18px;font-size:11px;color:var(--accent2);text-align:center;line-height:1.4;word-break:break-word}
+.filetransfer-status{min-height:18px;font-size:11px;color:var(--accent2);text-align:center;line-height:1.4;word-break:break-word;flex-shrink:0}
 .filetransfer-status.error{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent);padding:6px 10px;border-radius:var(--radius-sm)}
 
 /* Primary Action Button */
-.ft-action-footer{justify-content:center}
-.filetransfer-action-btn{width:100%;padding:10px 14px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius-md);box-shadow:var(--btn-primary-shadow)}
+.ft-action-footer{justify-content:center;flex-shrink:0;margin-top:auto}
+.filetransfer-action-btn{width:100%;padding:11px 16px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius-md);box-shadow:var(--btn-primary-shadow)}
 .filetransfer-action-btn:hover:not(:disabled){box-shadow:var(--btn-primary-glow)}
 .filetransfer-action-btn:disabled{opacity:0.4;cursor:not-allowed}
 
 /* Success Result Card */
-.filetransfer-success-card{background:color-mix(in srgb,var(--accent2) 8%,var(--input-bg));border:1px solid color-mix(in srgb,var(--accent2) 40%,transparent);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.15)}
+.filetransfer-success-card{background:color-mix(in srgb,var(--accent2) 8%,var(--input-bg));border:1px solid color-mix(in srgb,var(--accent2) 40%,transparent);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.15);flex-shrink:0}
 .filetransfer-success-header{display:flex;align-items:center;gap:8px}
 .filetransfer-success-icon{width:28px;height:28px;border-radius:50%;background:color-mix(in srgb,var(--accent2) 20%,transparent);color:var(--accent2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .filetransfer-success-title-box{display:flex;flex-direction:column;gap:1px}
