@@ -522,10 +522,18 @@ function pgRenderComfyPanel(cfg) {
     tplOpts = [{ value: '', label: pgT('pgComfyTemplateNone') }];
   }
   tplOpts.push({ value: '__paste__', label: pgT('pgComfyTemplatePaste') });
-  var tSel = tplOpts.map(function(o) {
-    return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg.imgComfyTemplateId === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
-  }).join('');
-  html += '<select class="pg-param-select" onchange="pgComfySelectTemplate(this.value)" style="width:100%">' + tSel + '</select>';
+  var tplSelHtml = (typeof pgRenderCustomSelect === 'function')
+    ? pgRenderCustomSelect('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
+    : (typeof renderCustomSelectHtml === 'function'
+      ? renderCustomSelectHtml('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
+      : '');
+  if (!tplSelHtml) {
+    var tSel = tplOpts.map(function(o) {
+      return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg.imgComfyTemplateId === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
+    }).join('');
+    tplSelHtml = '<select class="pg-param-select" onchange="pgComfySelectTemplate(this.value)" style="width:100%">' + tSel + '</select>';
+  }
+  html += tplSelHtml;
   if (cfg.imgComfyTemplateId === '__paste__') {
     html += '<textarea class="pg-comfy-paste" placeholder="' + pgEscapeAttr(pgT('pgComfyPastePlaceholder')) + '" oninput="pgOnParam(\'imgComfyPasteJson\', this.value)" style="width:100%;height:110px;margin-top:6px">' + pgEscapeHtml(cfg.imgComfyPasteJson || '') + '</textarea>';
     html += '<button class="pg-btn" style="width:100%;margin-top:6px" onclick="pgComfyApplyPaste()">' + pgEscapeHtml(pgT('pgComfyApplyPaste')) + '</button>';
@@ -659,11 +667,20 @@ function pgComfyGroupLabel(nodeId, title) {
 
 function pgComfySelectRow(nodeId, field, val, opts, label) {
   var arr = [{ value: '', label: pgT('pgComfySelectDefault') }].concat(opts || []);
-  var o = arr.map(function(opt) {
-    return '<option value="' + pgEscapeAttr(opt.value) + '"' + (String(val) === String(opt.value) ? ' selected' : '') + '>' + pgEscapeHtml(opt.label) + '</option>';
-  }).join('');
-  return '<div class="pg-param-row"><label>' + pgEscapeHtml(label || field) + '</label>' +
-    '<select onchange="pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)" style="flex:1">' + o + '</select></div>';
+  var wrapId = 'pg-comfy-selwrap-' + nodeId + '-' + field;
+  var selId = 'pg-comfy-sel-' + nodeId + '-' + field;
+  var selHtml = (typeof pgRenderCustomSelect === 'function')
+    ? pgRenderCustomSelect(wrapId, selId, arr, val || '', 'pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)', 'flex:1;min-width:0')
+    : (typeof renderCustomSelectHtml === 'function'
+      ? renderCustomSelectHtml(wrapId, selId, arr, val || '', 'pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)', 'flex:1;min-width:0')
+      : '');
+  if (!selHtml) {
+    var o = arr.map(function(opt) {
+      return '<option value="' + pgEscapeAttr(opt.value) + '"' + (String(val) === String(opt.value) ? ' selected' : '') + '>' + pgEscapeHtml(opt.label) + '</option>';
+    }).join('');
+    selHtml = '<select onchange="pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)" style="flex:1">' + o + '</select>';
+  }
+  return '<div class="pg-param-row"><label>' + pgEscapeHtml(label || field) + '</label>' + selHtml + '</div>';
 }
 
 function pgComfyNumberRow(nodeId, field, val, min, max, step) {

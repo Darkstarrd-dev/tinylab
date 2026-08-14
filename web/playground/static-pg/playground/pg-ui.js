@@ -455,16 +455,19 @@ function pgRenderSidebar() {
   var imageBatchDisabled = pgState.mode === 'image' && pgState.splitCount > 1 && !batchActive;
   var imageBatchBtn;
   if (batchActive) {
-    imageBatchBtn = '<button class="pg-btn" onclick="if(typeof pgImageBatchCloseUI===\'function\') pgImageBatchCloseUI()" data-tooltip="' + pgEscapeHtml(pgT('pgBatchReturnTip')) + '" style="flex:1;min-width:0;width:auto">' + pgEscapeHtml(pgT('pgBatchReturn')) + '</button>';
+    imageBatchBtn = '<button class="pg-btn pg-batch-btn" onclick="if(typeof pgImageBatchCloseUI===\'function\') pgImageBatchCloseUI()" data-tooltip="' + pgEscapeHtml(pgT('pgBatchReturnTip')) + '" style="flex:1;min-width:0;width:auto;white-space:nowrap">' + pgEscapeHtml(pgT('pgBatchReturn')) + '</button>';
   } else {
     var imageBatchTitle = imageBatchDisabled ? pgT('pgBatchSingleWindow') : pgT('pgBatchProject');
-    imageBatchBtn = '<button class="pg-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="flex:1;min-width:0;width:auto">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
+    imageBatchBtn = '<button class="pg-btn pg-batch-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="flex:1;min-width:0;width:auto;white-space:nowrap">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
   }
-  var submitCountInput = '<input type="number" class="pg-image-submit-count" min="1" max="99" step="1" value="' + pgGetImageSubmitCount() + '" onchange="pgOnImageSubmitCount(this.value)" title="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" data-tooltip="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" aria-label="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">';
-  var batchEntryHtml = '<div class="pg-batch-entry"' + (batchActive ? ' style="grid-column:1 / -1"' : '') + '>' + imageBatchBtn + submitCountInput + '</div>';
-  // Clear Chat is hidden while Batch UI is active (it has no effect there);
-  // the ordinary Image Clear stays in normal Image mode.
-  var imageActionsRow = '<div class="pg-btn-row" style="margin-top:8px">' + (!batchActive ? '<button class="pg-btn danger" onclick="pgImageClear(pgState.activeWin)">' + pgEscapeHtml(pgT('pgClear')) + '</button>' : '') + batchEntryHtml + '</div>';
+  var submitCountStepper =
+    '<div class="number-stepper pg-img-submit-stepper" title="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" data-tooltip="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">' +
+      '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepImageSubmitCount(-1)" tabindex="-1">-</button>' +
+      '<input type="number" class="stepper-input pg-image-submit-count" min="1" max="99" step="1" value="' + pgGetImageSubmitCount() + '" onchange="pgOnImageSubmitCount(this.value)" aria-label="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">' +
+      '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepImageSubmitCount(1)" tabindex="-1">+</button>' +
+    '</div>';
+  var batchEntryHtml = '<div class="pg-batch-entry">' + imageBatchBtn + submitCountStepper + '</div>';
+  var imageActionsRow = '<div class="pg-image-actions-row" style="margin-top:8px">' + batchEntryHtml + '</div>';
   // --- WinBar ---
   var generating = pgIsGenerating();
   var winBtns = '';
@@ -1584,6 +1587,10 @@ function pgOnImageSubmitCount(v) {
   w.config.imgSubmitCount = n;
   pgSave();
   pgRenderSidebar();
+}
+function pgStepImageSubmitCount(delta) {
+  var cur = pgGetImageSubmitCount();
+  pgOnImageSubmitCount(cur + delta);
 }
 // pgOnImgSizeSelect handles the size <select> in image mode. Selecting the
 // '__custom' sentinel reveals the Custom Size text input below (without
