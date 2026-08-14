@@ -1211,7 +1211,7 @@ function renderCustomSelectHtml(wrapperId, selectId, options, selectedValue, onC
     var label = typeof opt === 'object' ? opt.label : opt;
     var isSel = String(val) === String(selectedValue);
     if (isSel) selectedText = label;
-    return '<div class="custom-select-option' + (isSel ? ' selected' : '') + '" data-value="' + escapeAttr(val) + '" onclick="selectCustomOption(\'' + wrapperId + '\', \'' + escapeForJsString(val) + '\', \'' + escapeForJsString(label) + '\')">' +
+    return '<div class="custom-select-option' + (isSel ? ' selected' : '') + '" data-value="' + escapeAttr(val) + '" title="' + escapeAttr(label) + '" onclick="selectCustomOption(\'' + wrapperId + '\', \'' + escapeForJsString(val) + '\', \'' + escapeForJsString(label) + '\')">' +
       '<span class="custom-select-option-link">' + escapeHtml(label) + '</span>' +
       '</div>';
   }).join('');

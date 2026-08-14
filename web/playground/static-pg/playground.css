@@ -1189,10 +1189,12 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-param-row .pg-param-label-btn:hover{color:var(--accent);opacity:1;text-decoration:underline}
 .pg-param-row select,.pg-param-row input[type="text"]{box-sizing:border-box;background:var(--input-bg,var(--bg));border:1px solid var(--glass-border);border-radius:var(--radius-sm);color:var(--text);padding:3px 8px;font-size:13px;height:32px;line-height:20px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pg-param-row select:focus,.pg-param-row input:focus{outline:none;border-color:var(--accent)}
+.pg-side .pg-panel,
 .pg-sidebar .pg-panel {
   overflow: visible;
 }
 
+.pg-side .custom-select-wrapper,
 .pg-sidebar .custom-select-wrapper,
 .pg-param-row .custom-select-wrapper {
   position: relative;
@@ -1201,6 +1203,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   height: 32px;
 }
 
+.pg-side .custom-select-trigger,
 .pg-sidebar .custom-select-trigger,
 .pg-param-row .custom-select-trigger {
   height: 32px;
@@ -1215,6 +1218,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   box-sizing: border-box;
 }
 
+.pg-side .custom-select-trigger span,
 .pg-sidebar .custom-select-trigger span,
 .pg-param-row .custom-select-trigger span {
   text-align: left;
@@ -1224,12 +1228,14 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   white-space: nowrap;
 }
 
+.pg-side .custom-select-trigger svg,
 .pg-sidebar .custom-select-trigger svg,
 .pg-param-row .custom-select-trigger svg {
   right: 8px;
 }
 
 .pg-param-row .custom-select-menu,
+.pg-side .custom-select-menu,
 .pg-sidebar .custom-select-menu {
   position: absolute !important;
   top: calc(100% + 4px) !important;
@@ -1243,6 +1249,25 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   max-height: 220px;
   overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.pg-side .custom-select-option,
+.pg-sidebar .custom-select-option {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.pg-side .custom-select-option-link,
+.pg-sidebar .custom-select-option-link {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 
 .pg-winbar .custom-select-wrapper,
