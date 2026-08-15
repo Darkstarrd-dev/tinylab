@@ -102,7 +102,8 @@ function updateVolumeUI(volPct, isMuted) {
   var volBtn = document.getElementById('gallery-vol-btn');
   if (volBtn) {
     volBtn.innerHTML = getVolumeIcon(volPct, isMuted);
-    volBtn.setAttribute('data-tooltip', (isMuted || volPct === 0) ? 'Unmute' : ('Volume: ' + volPct + '%'));
+    volBtn.removeAttribute('data-tooltip');
+    volBtn.setAttribute('aria-label', (isMuted || volPct === 0) ? 'Unmute' : ('Volume: ' + volPct + '%'));
   }
   var volSlider = document.getElementById('gallery-vol-slider');
   if (volSlider) {
@@ -110,7 +111,7 @@ function updateVolumeUI(volPct, isMuted) {
   }
   var volValTxt = document.getElementById('gallery-vol-value');
   if (volValTxt) {
-    volValTxt.textContent = (isMuted || volPct === 0) ? 'Mute' : (volPct + '%');
+    volValTxt.textContent = (isMuted || volPct === 0) ? '0%' : (volPct + '%');
   }
 }
 

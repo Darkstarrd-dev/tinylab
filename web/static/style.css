@@ -3409,13 +3409,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px soli
 .gallery-video-seeker:hover{height:7px}
 .gallery-video-seeker::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer}
 .gallery-video-seeker::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:none}
-.gallery-vol-wrapper{position:relative;display:inline-flex;align-items:center}
-.gallery-vol-popover{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(4px);background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur-sm));-webkit-backdrop-filter:blur(var(--glass-blur-sm));border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:10px 8px;display:flex;flex-direction:column;align-items:center;box-shadow:var(--shadow-modal);opacity:0;visibility:hidden;pointer-events:none;transition:opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);z-index:100}
+.gallery-vol-wrapper{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px}
+.gallery-vol-popover{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%) translateY(4px);width:30px;min-width:30px;max-width:30px;box-sizing:border-box;background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur-sm));-webkit-backdrop-filter:blur(var(--glass-blur-sm));border:1px solid var(--glass-border);border-radius:var(--radius-xs);padding:8px 0 6px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:var(--shadow-modal);opacity:0;visibility:hidden;pointer-events:none;transition:opacity 0.2s cubic-bezier(0.25,0.46,0.45,0.94), transform 0.2s cubic-bezier(0.25,0.46,0.45,0.94), visibility 0.2s;transition-delay:0.25s;z-index:100}
+.gallery-vol-popover::after{content:'';position:absolute;top:100%;left:-4px;right:-4px;height:12px;pointer-events:auto}
 .gallery-vol-wrapper:hover .gallery-vol-popover,
-.gallery-vol-wrapper:focus-within .gallery-vol-popover{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(-50%) translateY(0)}
-.gallery-vol-slider-box{display:flex;flex-direction:column;align-items:center;gap:8px}
-.gallery-vol-slider-vert{width:6px;height:90px;appearance:slider-vertical;-webkit-appearance:slider-vertical;writing-mode:bt-lr;outline:none;cursor:pointer;accent-color:var(--accent)}
-.gallery-vol-value{font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums;text-align:center;min-width:32px;white-space:nowrap}
+.gallery-vol-wrapper:focus-within .gallery-vol-popover,
+.gallery-vol-popover:hover{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(-50%) translateY(0);transition-delay:0s}
+.gallery-vol-slider-box{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box}
+.gallery-vol-slider-vert{width:4px;height:80px;appearance:slider-vertical;-webkit-appearance:slider-vertical;writing-mode:bt-lr;outline:none;cursor:pointer;accent-color:var(--accent);margin:0 auto;display:block}
+.gallery-vol-value{font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:9.5px;line-height:1.1;color:var(--text-secondary);font-variant-numeric:tabular-nums;text-align:center;width:100%;white-space:nowrap;overflow:hidden;display:block}
 
 .gallery-interval-dropdown{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(4px);background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur-sm));-webkit-backdrop-filter:blur(var(--glass-blur-sm));border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:4px;display:flex;flex-direction:column;gap:2px;box-shadow:var(--shadow-modal);opacity:0;visibility:hidden;transition:opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);z-index:100;min-width:110px}
 .gallery-auto-wrapper:hover .gallery-interval-dropdown{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}

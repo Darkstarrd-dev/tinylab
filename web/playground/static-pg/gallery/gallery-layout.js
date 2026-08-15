@@ -146,13 +146,13 @@ function buildPanelHTML(type, isSplit) {
 
   var volCtrl = isVid ?
     '<div class="gallery-vol-wrapper" id="gallery-vol-wrapper">' +
-      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" data-tooltip="Volume">' +
+      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" aria-label="Volume">' +
         getVolumeIcon(galleryState.videoVolume, galleryState.videoMuted) +
       '</button>' +
       '<div class="gallery-vol-popover" id="gallery-vol-popover">' +
         '<div class="gallery-vol-slider-box">' +
-          '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="' + (galleryState.videoMuted ? 0 : (galleryState.videoVolume != null ? galleryState.videoVolume : 80)) + '" min="0" max="100" data-tooltip="Volume" orient="vertical">' +
-          '<span class="gallery-vol-value" id="gallery-vol-value">' + (galleryState.videoMuted ? 'Mute' : ((galleryState.videoVolume != null ? galleryState.videoVolume : 80) + '%')) + '</span>' +
+          '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="' + (galleryState.videoMuted ? 0 : (galleryState.videoVolume != null ? galleryState.videoVolume : 80)) + '" min="0" max="100" orient="vertical" aria-label="Volume slider">' +
+          '<span class="gallery-vol-value" id="gallery-vol-value">' + (galleryState.videoMuted ? '0%' : ((galleryState.videoVolume != null ? galleryState.videoVolume : 80) + '%')) + '</span>' +
         '</div>' +
       '</div>' +
     '</div>' : '';
