@@ -3,6 +3,7 @@
 package main
 
 import (
+	"net/url"
 	"runtime"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"fyne.io/systray"
 	"github.com/jchv/go-webview2"
 	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	"golang.org/x/sys/windows"
 )
 
@@ -222,7 +224,16 @@ func openWebviewWindow(hctx *app.HostContext) {
 		return nil
 	})
 
-	// Inject auto-fullscreen sync script into every document load.
+	// Bind openExternalURL to launch system default browser for external URLs
+	w.Bind("openExternalURL", func(rawURL string) error {
+		parsed, err := url.Parse(rawURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil
+		}
+		return fsutil.OpenInBrowser(rawURL)
+	})
+
+	// Inject auto-fullscreen sync and external link interception script into every document load.
 	w.Init(`
 		(function() {
 			function syncFS() {
@@ -233,6 +244,48 @@ func openWebviewWindow(hctx *app.HostContext) {
 			}
 			document.addEventListener('fullscreenchange', syncFS);
 			document.addEventListener('webkitfullscreenchange', syncFS);
+
+			function handleExternal(href) {
+				if (!href || typeof href !== 'string') return false;
+				try {
+					var u = new URL(href, window.location.href);
+					if (u.protocol === 'http:' || u.protocol === 'https:') {
+						if (u.origin !== window.location.origin) {
+							if (typeof window.openExternalURL === 'function') {
+								try { window.openExternalURL(u.href); } catch(e) {}
+							} else {
+								fetch('/api/open-url', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify({ url: u.href })
+								}).catch(function() {});
+							}
+							return true;
+						}
+					}
+				} catch(e) {}
+				return false;
+			}
+
+			document.addEventListener('click', function(e) {
+				var target = e.target;
+				var a = target && target.closest ? target.closest('a') : null;
+				if (!a) return;
+				var href = a.getAttribute('href') || a.href;
+				if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+				if (handleExternal(href)) {
+					e.preventDefault();
+					e.stopPropagation();
+				}
+			}, true);
+
+			var origOpen = window.open;
+			window.open = function(url, target, features) {
+				if (typeof url === 'string' && handleExternal(url)) {
+					return null;
+				}
+				return origOpen ? origOpen.apply(this, arguments) : null;
+			};
 		})();
 	`)
 

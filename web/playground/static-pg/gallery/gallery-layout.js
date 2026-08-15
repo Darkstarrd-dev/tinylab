@@ -144,7 +144,21 @@ function buildPanelHTML(type, isSplit) {
   var autoPlayIcon = galleryState.autoplayOn ? GALLERY_ICONS.stop : GALLERY_ICONS.play;
   var autoPlayTitle = galleryState.autoplayOn ? 'Stop (A / ■)' : 'Autoplay (A / ▶)';
 
+  var volCtrl = isVid ?
+    '<div class="gallery-vol-wrapper" id="gallery-vol-wrapper">' +
+      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" data-tooltip="Volume">' +
+        getVolumeIcon(galleryState.videoVolume, galleryState.videoMuted) +
+      '</button>' +
+      '<div class="gallery-vol-popover" id="gallery-vol-popover">' +
+        '<div class="gallery-vol-slider-box">' +
+          '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="' + (galleryState.videoMuted ? 0 : (galleryState.videoVolume != null ? galleryState.videoVolume : 80)) + '" min="0" max="100" data-tooltip="Volume" orient="vertical">' +
+          '<span class="gallery-vol-value" id="gallery-vol-value">' + (galleryState.videoMuted ? 'Mute' : ((galleryState.videoVolume != null ? galleryState.videoVolume : 80) + '%')) + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>' : '';
+
   var ctrlCenter = isVid ?
+    volCtrl +
     '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-prev-btn" type="button" data-tooltip="Prev Video (‹ / Up)">' + GALLERY_ICONS.prev + '</button>' +
     '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-play" type="button" data-tooltip="Play / Pause (Space)">' + GALLERY_ICONS.play + '</button>' +
     '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-stop" type="button" data-tooltip="Stop">' + GALLERY_ICONS.stop + '</button>' +
@@ -167,14 +181,7 @@ function buildPanelHTML(type, isSplit) {
     '<button class="gallery-btn gallery-btn-icon" id="gallery-next-btn" type="button" data-tooltip="Next (› / Right / PageDown / Space)">' + GALLERY_ICONS.next + '</button>' +
     '<button class="gallery-btn gallery-btn-icon" id="gallery-next-folder-btn" type="button" data-tooltip="Next Folder (|&gt; / Down)">' + GALLERY_ICONS.nextFolder + '</button>';
 
-  var extraRight = isVid ?
-    '<div class="gallery-vol-wrapper">' +
-      '<button class="gallery-btn gallery-btn-icon" id="gallery-vol-btn" type="button" data-tooltip="Volume">' + GALLERY_ICONS.volume + '</button>' +
-      '<div class="gallery-vol-popover">' +
-        '<input type="range" class="gallery-vol-slider-vert" id="gallery-vol-slider" value="80" min="0" max="100" data-tooltip="Volume">' +
-      '</div>' +
-    '</div>'
-    : '';
+  var extraRight = '';
 
   var mainInner = isVid ?
     '<video class="gallery-main-video" id="gallery-main-video"></video>' +
