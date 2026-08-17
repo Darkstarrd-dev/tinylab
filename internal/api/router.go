@@ -30,6 +30,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
 	"github.com/tinyrouter/tinyrouter/internal/api/models"
 	apimonitor "github.com/tinyrouter/tinyrouter/internal/api/monitor"
+	playgroundapi "github.com/tinyrouter/tinyrouter/internal/api/playground"
 	"github.com/tinyrouter/tinyrouter/internal/api/probe"
 	"github.com/tinyrouter/tinyrouter/internal/api/providers"
 	"github.com/tinyrouter/tinyrouter/internal/api/quickslots"
@@ -271,6 +272,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed. Transparent
 	// passthrough using the standard Authorization: Bearer header.
 	r.Post("/v1/responses", proxyHandler.Responses)
+	// Proxy route (Google native generateContent protocol). POST only; CORS is handled by the
+	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed. Transparent
+	// passthrough using x-goog-api-key and model-in-path URL.
+	r.Post("/v1/generateContent", proxyHandler.GenerateContent)
 	r.Post("/v1/tasks/{taskId}", proxyHandler.PollTask)
 	r.Get("/v1/tasks/{taskId}", func(w http.ResponseWriter, r *http.Request) {
 		taskID := chi.URLParam(r, "taskId")
@@ -338,6 +343,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
 	archiveHandler := archiveapi.NewHandler(apiDeps, rt.archiveRunner)
+	playgroundHandler := playgroundapi.NewHandler(apiDeps)
 	// Gallery resolves registered archive sources through the /api/archive
 	// bridge (sourceId-based items); nil bridge keeps the legacy in-memory
 	// zip session flow working.
@@ -405,6 +411,19 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			r.Route("/traces", traceHandler.Register)
 		})
 	})
+	// Playground media prep endpoint: outside the 1 MiB /api group so larger
+	// audio/media blobs (up to 32MB) can be prepped/converted, protected by auth.
+	r.Route("/api/playground", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
+		playgroundHandler.Register(r)
+	})
+
 	// ComfyUI workflow proxy: outside the 1 MiB /api group so large API-format
 	// workflows remain usable, but still protected by the same auth middleware.
 	// Playground-attached backend: compiles unconditionally today (P5 blocker),

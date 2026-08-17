@@ -15,8 +15,14 @@ function pgSend(i, assistantIdx) {
   w.reasoningCompletedAt = null;
 
   var lastUser = null;
-  for (var j = body.messages.length - 1; j >= 0; j--) {
-    if (body.messages[j].role === 'user') { lastUser = body.messages[j]; break; }
+  if (Array.isArray(body.contents)) {
+    for (var j = body.contents.length - 1; j >= 0; j--) {
+      if (body.contents[j].role === 'user') { lastUser = body.contents[j]; break; }
+    }
+  } else if (Array.isArray(body.messages)) {
+    for (var j = body.messages.length - 1; j >= 0; j--) {
+      if (body.messages[j].role === 'user') { lastUser = body.messages[j]; break; }
+    }
   }
   body = pgFinalizeBodyForSend(body, lastUser, i);
   w.debugRequest = JSON.stringify(body, null, 2);
@@ -36,7 +42,8 @@ function pgStream(i, body, assistantIdx) {
   w.abortCtrl = new AbortController();
   pgUpdateInputBar();
 
-  var url = '/v1/chat/completions';
+  var isGoogle = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(w.config.model) === 'google';
+  var url = isGoogle ? '/v1/generateContent' : '/v1/chat/completions';
   var headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyRouter-Source': 'playground' };
   if (w.config.useCustomEndpoint && w.config.customEndpoint && w.config.customEndpoint.trim()) {
     url = w.config.customEndpoint.trim();

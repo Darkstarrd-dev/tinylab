@@ -101,7 +101,7 @@ flowchart LR
 
 `internal/api/router.go` 在 `Routes` 中通过 chi 挂载代理路由：
 
-- 八个 `/v1/*` 路由（router.go:228-240）：
+- 九个 `/v1/*` 路由（router.go:228-245）：
   - `r.Post("/v1/chat/completions", proxyHandler.ChatCompletions)`；
   - `r.Post("/v1/completions", proxyHandler.Completions)`；
   - `r.Get("/v1/models", proxyHandler.ListModels)`；
@@ -109,6 +109,7 @@ flowchart LR
   - `r.Post("/v1/embeddings", proxyHandler.Embeddings)`（**OpenAI Embeddings 协议入口**，见 §3.3）；
   - `r.Post("/v1/messages", proxyHandler.Messages)`（**Anthropic 协议入口**，见 §3.1）；
   - `r.Post("/v1/responses", proxyHandler.Responses)`（**OpenAI Responses 协议入口**，见 §3.2）；
+  - `r.Post("/v1/generateContent", proxyHandler.GenerateContent)`（**Google GenerateContent 协议入口**，见 §3.5）；
   - `r.Post("/v1/tasks/{taskId}", proxyHandler.PollTask)`。
 
 - **鉴权边界：** `/v1/*` 路由写在 `Routes` 函数顶层（router.go:196-204），而 `AuthMiddleware` 只包裹 `/api` 路由组（router.go:212-214）。因此 `/v1/*` 完全在 `AuthMiddleware` 之外，任意 API Key 或无 Key 均可访问（与 AGENTS.md “纯本地，无对外鉴权”一致）。
@@ -121,7 +122,7 @@ flowchart LR
 `Messages`（handler.go:179-181）是 Anthropic Messages API 的代理入口，与 OpenAI 系列入口**并行、同端口、按路径区分**——不引入新端口或新路径前缀。
 
 - **注册方式：** 仅注册 `POST` 方法（`r.Post("/v1/messages", proxyHandler.Messages)`，router.go:203）。Anthropic Messages 语义无 GET 形式，故不注册 GET；CORS 仍由 §3 的 `/v1/*` OPTIONS 处理自动覆盖。
-- **调用链：** `Messages`（handler.go:179-181）内部调用 `h.handleProxy(w, r, "/v1/messages", combo.EntryFormatAnthropic)`（handler.go:180），其余 OpenAI 入口调用时传入 `combo.EntryFormatOpenAI`（handler.go:160、164、168、172），Responses 入口传入 `combo.EntryFormatOpenAIResponses`（handler.go:189）。`entryFormat` 从 `handleProxy` 经 `handleCombo`/`forwardWithRetry`/`forwardUpstream`/`streamResponse` 一路下传，用于协议分支（上游构造、SSE usage 提取）。
+- **调用链：** `Messages`（handler.go:179-181）内部调用 `h.handleProxy(w, r, "/v1/messages", combo.EntryFormatAnthropic)`（handler.go:180），其余 OpenAI 入口调用时传入 `combo.EntryFormatOpenAI`（handler.go:160、164、168、172），Responses 入口传入 `combo.EntryFormatOpenAIResponses`（handler.go:189），Google GenerateContent 入口传入 `combo.EntryFormatGoogle`。`entryFormat` 从 `handleProxy` 经 `handleCombo`/`forwardWithRetry`/`forwardUpstream`/`streamResponse` 一路下传，用于协议分支（上游构造、SSE usage 提取）。
 - **不做格式翻译：** Anthropic 请求体（含 `model`/`messages`/`system`/`max_tokens` 等）原样转发给上游 provider，代理**不**做 OpenAI↔Anthropic 之间的任何格式转换（设计要点 #2）。上游响应同样原样回传。
 - **软策略（不再做入口协议严格匹配）：** 见 §4 与 §13.1。
 
@@ -143,9 +144,17 @@ flowchart LR
 - **不做格式翻译：** Embeddings 请求体原样转发给上游；代理不解析 `data[].embedding` 结构，只透传。
 - **模型类型关联：** `ModelDef.Kind` 支持 `"embedding"` 值（config/types.go），Provider detail 页面模型类型下拉菜单可选 Embedding；`testModelProtosSerial` 对 `kind=embedding` 模型仅测试 `openai-embedding` 协议（见 §18）。
 
+### 3.5 Google 原生协议入口（`/v1/generateContent`）
+
+`GenerateContent` 是 Google Gemini 原生 `generateContent` API 的代理入口，与 OpenAI/Anthropic 入口**并行、同端口、按路径区分**。
+
+- **注册方式：** 仅注册 `POST` 方法（`r.Post("/v1/generateContent", proxyHandler.GenerateContent)`）。CORS 仍由 §3 的 `/v1/*` OPTIONS 处理自动覆盖。
+- **调用链：** `GenerateContent` 内部调用 `h.handleProxy(w, r, "/v1/generateContent", combo.EntryFormatGoogle)`，`entryFormat == EntryFormatGoogle` 经调用链下传，上游构造走 Google 专用路径（`buildGoogleUpstreamRequest`，见 §7.6）。
+- **不做格式翻译：** 请求体与响应体原样转发透传，不进行任何 OpenAI↔Google 格式转换。上游 URL 由 `urlutil.BuildGoogleGenerateContentURL` 自动拼接为 `{baseURL}/v1beta/models/{realModel}:generateContent`（流式追加 `:streamGenerateContent?alt=sse`），鉴权头设置 `x-goog-api-key: <key>`，并在转发时安全剥离 body 中的 TinyRouter `model` 和 `stream` 路由字段。
+
 ### 3.4 入口协议透传策略（软策略）
 
-四个协议入口（OpenAI Chat / Anthropic Messages / OpenAI Responses / OpenAI Embeddings）**仅决定转发协议，不做 provider 准入校验**。客户端用哪个入口请求，proxy 就按哪个协议构造上游（`entryFormat` 路由分支在 `forwardUpstream` 内判定，upstream.go:76-91）。
+五个协议入口（OpenAI Chat / Anthropic Messages / OpenAI Responses / OpenAI Embeddings / Google GenerateContent）**仅决定转发协议，不做 provider 准入校验**。客户端用哪个入口请求，proxy 就按哪个协议构造上游（`entryFormat` 路由分支在 `forwardUpstream` 内判定，upstream.go:76-91）。
 
 - **同一 provider 可服务三入口：** 因为转发协议由 `entryFormat`（来自入口路径）决定，而不再由 `provider.APIType` 决定，一个聚合 provider（例如同 BaseURL 同时支持多种协议）可被任一入口访问，上游构造分支按 `entryFormat` 选 `buildUpstreamRequest(ctx, sel, body, endpointPath, authBearer)`（Anthropic: `"/v1/messages", false` → x-api-key；Responses: `"/v1/responses", true` → Bearer；Chat: default 分支直接 `Authorization: Bearer`）。
 - **已移除入口协议严格匹配：** 旧 `forward.go` 在解析出 provider 后对 `entryFormat` 与 `provider.IsAnthropic()` 做对称 400 校验（原 forward.go:84-91）已被删除；现在 proxy 不再因 `provider.APIType` 拒绝请求（forward.go:80-97 仅做模型解析与上游转发准备，无协议拒收分支）。
@@ -344,7 +353,15 @@ flowchart TD
 
 > 设计要点：Responses 入口与 Anthropic 入口**现在 URL 均通过 `BuildUpstreamURL` 统一构造**（不再各自实现三分支），启发式 A 自动判断是否注入 `/v1`。鉴权上 Responses 仍走 OpenAI 的 `Authorization: Bearer` 分支。TinyRouter 不解析 Responses 的 SSE event（如 `response.created`/`response.output_text.delta`/`response.completed`），只透传——但 SSE 数据结构与 OpenAI Chat 兼容，故 usage 提取复用 `util.ExtractTokens`（见 §8.9）。
 
-### 7.6 Anthropic Provider 配置示例
+### 7.6 Google 原生 generateContent 上游请求构造（upstream.go）
+
+`buildGoogleUpstreamRequest(ctx, sel, body, isStream)` 在 `entryFormat == EntryFormatGoogle` 时由 `forwardUpstream` 调用：
+
+1. **URL 由 `urlutil.BuildGoogleGenerateContentURL` 构造：** 拼接 `{baseURL}/v1beta/models/{realModel}:generateContent`（流式追加 `:streamGenerateContent?alt=sse`）。
+2. **鉴权头 `x-goog-api-key: <key>`：** 绝不设置 `Authorization` 头，直接将 key 设入 Google 官方头 `x-goog-api-key`。
+3. **安全剥离代理字段：** 自动剥离请求 body 中的 TinyRouter `model` 和 `stream` 路由字段，避免 Google 上游因识别到多余顶层字段返回 `400 INVALID_ARGUMENT`。
+
+### 7.7 Anthropic Provider 配置示例
 
 `apiType: anthropic` 的 provider 只需指定完整 endpoint 与 key；`AnthropicVersion` 不填时由 `finalizeConfig` 回填默认 `2023-06-01`（config/defaults.go:97-98），`AnthropicBeta` 可选。配置示例（仅作文档示例，不写入仓库 `config.yaml`）：
 

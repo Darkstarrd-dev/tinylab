@@ -101,7 +101,7 @@ flowchart TD
 |---|---|---|
 | `RotationConfig` | types.go:11-19 | `Strategy` / `StickyLimit` / `MaxRetries` / `RetryDelaySec` / `BackoffMaxSec` / `StatePersist` / `StatePath` |
 | `Key` | types.go:22-29 | `ID` / `Key` / `Name` / `Priority` / `IsActive` / `Account`（omitempty） |
-| `ModelDef` | types.go:32-55 | `ID` / `QuotaType`（"unlimited"|"limited"|"paid"） / `Alias`（可选别名）/ `Note`（可选备注）/ `Kind`（"text"|"image"，模型能力类型） / `ImgProtocol`（"gpt"|"xai"|"modelscope"，图片生成协议分支，仅 Image 模式使用） / `ImgSizes`（`[]string`，图片模型自定义尺寸列表如 `"1024x1024"`，omitempty，空=回退内置默认） / `NIMOver`（per-model NIM 限速覆盖，指针类型） / `Protocols`（`[]string`，`yaml/json:"protocols,omitempty"`，记录该模型经多协议探测证实支持的协议集合；合法值 `ProtocolOpenAICompat`="openai-compat" / `ProtocolOpenAIResponses`="openai-responses" / `ProtocolAnthropic`="anthropic"；空/nil 表示未探测或探测全失败） |
+| `ModelDef` | types.go:32-55 | `ID` / `QuotaType`（"unlimited"|"limited"|"paid"） / `Alias`（可选别名）/ `Note`（可选备注）/ `Kind`（"text"|"image"|"embedding"，模型能力类型） / `TextProtocol`（""|"auto"|"google"|"openai-compat"|"openai-responses"|"anthropic"，文本模型协议偏好） / `ImgProtocol`（"gpt"|"xai"|"modelscope"，图片生成协议分支，仅 Image 模式使用） / `ImgSizes`（`[]string`，图片模型自定义尺寸列表如 `"1024x1024"`，omitempty，空=回退内置默认） / `NIMOver`（per-model NIM 限速覆盖，指针类型） / `Protocols`（`[]string`，`yaml/json:"protocols,omitempty"`，记录该模型经多协议探测证实支持的协议集合；合法值 `ProtocolOpenAICompat`="openai-compat" / `ProtocolOpenAIResponses`="openai-responses" / `ProtocolAnthropic`="anthropic" / `ProtocolGoogle`="google"；空/nil 表示未探测或探测全失败） |
 | `Provider` | types.go:74-96 | `ID`/`Name`/`Prefix`/`BaseURL`/`APIType`/`IsActive`/`Keys`/`Models`/`RotationStrategy`/`StickyLimit`/`InjectStreamOpts`/`NormalizeStreamChunks`/`NIMConfig`/`UseProxy` 等 |
 | `ModelNIMOverride` | types.go:44-48 | per-model NIM 限速覆盖（`Enabled`、`RequestCountPerKey`、`MinIntervalMs`），为 nil 时使用标准轮转 |
 | `NIMSettings` | types.go:121-126 | `RequestCountPerKey` / `MinIntervalMs` / `CooldownLadderMin` / `MaxConcurrent` |
@@ -284,7 +284,7 @@ type KeyRuntimeState struct {
 - **`KeySnapshot`（state.go:25-38）：** 持久化子集——`BackoffLevel`/`ModelLocks`/`ModelStatus`/`RotatedAt`/`ConsecCount`/`LastUsedAt`/NIM 四字段 + **`ExhaustedModelLimits map[string]int`（yaml `exhausted_model_limits,omitempty`，2026-07-31 新增）**；**不含** `ModelErrors`/`InFlight`/`ModelQuotas`（全量 `ModelQuotas` 仍不持久化，仅 exhausted 子集的 limit 经由 `ExhaustedModelLimits` 持久化）。
 - **`ComboSnapshot`（state.go:41-44）：** `Index`/`ConsecCount`。
 - **`ProbeDetail`（state.go:29-37）：** 单协议探测结果的持久化子集——`Ok`/`Status`/`LatencyMs`/`Error`/`LastAt`。
-- **`ProbeRecord`（state.go:38-49）：** 单模型跨三协议的探测聚合——`ProviderID`/`ModelID` + 三段 `ProbeDetail`（`OpenAICompat`/`OpenAIResponses`/`Anthropic`，yaml tag `openai_compat`/`openai_responses`/`anthropic`）+ `Protocols`（`[]string` 汇总）+ `LastProbeAt`。`state.yaml` 中的 `probes` map **只持久化精简明细**（不含请求/响应 body）。
+- **`ProbeRecord`（state.go:38-49）：** 单模型跨协议探测聚合——`ProviderID`/`ModelID` + 四段 `ProbeDetail`（`OpenAICompat`/`OpenAIResponses`/`Anthropic`/`Google`，yaml tag `openai_compat`/`openai_responses`/`anthropic`/`google`）+ `Protocols`（`[]string` 汇总）+ `LastProbeAt`。`state.yaml` 中的 `probes` map **只持久化精简明细**（不含请求/响应 body）。
 - **`Load`（state.go:48-71）：** 文件不存在返回空快照（`CurrentVersion` + 空 map，不报错）；存在则**宽松** `yaml.Unmarshal`（61），缺 `Keys`/`Combos` 时补空 map（64-69）。
 - **`Save`（state.go:79-96）：** `yaml.Marshal` → 委托 `fsutil.AtomicWrite(path, data, 0600)`（确定性 `.tmp` + `os.Rename` → 失败回退直写 → 再失败返回 error 但保留 `.tmp`）。与 config.Save 同契约。
 

@@ -23,6 +23,8 @@ const (
 	// Like the OpenAI chat entry it transparently proxies using the standard
 	// Authorization: Bearer scheme; no x-api-key is used.
 	EntryFormatOpenAIResponses EntryFormat = "openai-responses"
+	// EntryFormatGoogle is the Google native generateContent /v1/generateContent entry.
+	EntryFormatGoogle EntryFormat = "google"
 )
 
 // ModelTarget is a resolved provider+model pair within a combo.

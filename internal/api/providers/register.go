@@ -103,6 +103,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Patch("/providers/{id}/models/nim", h.updateModelNIM)
 	r.Patch("/providers/{id}/models/kind", h.updateModelKind)
 	r.Patch("/providers/{id}/models/imgProtocol", h.updateModelImgProtocol)
+	r.Patch("/providers/{id}/models/textProtocol", h.updateModelTextProtocol)
 	r.Patch("/providers/{id}/models/imgSizes", h.updateModelImgSizes)
 	r.Patch("/providers/{id}/models/protocols", h.updateModelProtocols)
 	r.Delete("/providers/{id}/models", h.deleteProviderModel)
@@ -654,6 +655,45 @@ func (h *Handler) updateModelImgProtocol(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if h.d.Reg.UpdateModelImgProtocol(providerID, req.Model, req.ImgProtocol) {
+		cfg := h.d.Reg.Config()
+		if err := h.d.SaveConfig(&cfg); err != nil {
+			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	} else {
+		apibase.WriteAPIError(w, http.StatusNotFound, "model not found on provider")
+	}
+}
+
+// updateModelTextProtocol updates the text protocol of a single model on a provider.
+// Request: {"model": "model-id", "textProtocol": "auto|openai-compat|openai-responses|anthropic|google"}
+func (h *Handler) updateModelTextProtocol(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "id")
+	var req struct {
+		Model        string `json:"model"`
+		TextProtocol string `json:"textProtocol"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Model == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "model required")
+		return
+	}
+	switch req.TextProtocol {
+	case "", "auto", config.ProtocolOpenAICompat, config.ProtocolOpenAIResponses, config.ProtocolAnthropic, config.ProtocolGoogle:
+	default:
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid textProtocol, must be auto | openai-compat | openai-responses | anthropic | google")
+		return
+	}
+	storedVal := req.TextProtocol
+	if storedVal == "auto" {
+		storedVal = ""
+	}
+	if h.d.Reg.UpdateModelTextProtocol(providerID, req.Model, storedVal) {
 		cfg := h.d.Reg.Config()
 		if err := h.d.SaveConfig(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")

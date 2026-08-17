@@ -40,6 +40,19 @@ var PG_DEFAULT_CFG = {
   agentName: '',
   contextLimit: 8000,
   thinkingBudget: 4096,
+  // Google Native parameters
+  topK: 40,
+  thinkingLevel: 'medium', // minimal | low | medium | high
+  maxOutputTokens: 2048,
+  stopSequences: '',
+  candidateCount: 1,
+  responseMimeType: 'text/plain', // text/plain | application/json
+  responseSchema: '',
+  safetyHarassment: 'BLOCK_NONE',
+  safetyHateSpeech: 'BLOCK_NONE',
+  safetySexuallyExplicit: 'BLOCK_NONE',
+  safetyDangerousContent: 'BLOCK_NONE',
+  safetyCivicIntegrity: 'BLOCK_NONE',
   // Manual Image Canvas prompt helper model (text model only)
   imgPromptModel: '',
   imgSize: '',
@@ -84,6 +97,15 @@ var PG_DEFAULT_PARAMS = {
   presencePenalty: true,
   seed: false,
   thinkingBudget: false,
+  // Google Native toggles
+  topK: false,
+  thinkingLevel: true,
+  maxOutputTokens: false,
+  stopSequences: false,
+  candidateCount: false,
+  responseMimeType: false,
+  responseSchema: false,
+  safetySettings: false,
 };
 
 var PG_ICON_COPY = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';

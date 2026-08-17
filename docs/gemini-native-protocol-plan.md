@@ -2,7 +2,7 @@
 
 > **文档定位：** 本文档是 Google 原生 `generateContent` 协议接入 TinyRouter 的 **入口文档与迭代上下文**。在新对话中实施时，先读本文档 §1（如何使用）与 [`docs/gemini_research.md`](gemini_research.md)，再按 §4 Phase 1→4 顺序推进；每完成一个 Phase，按 §7 变更维护清单更新本文档的"最后核对"行与对应条目。
 >
-> **最后核对（2026-08-17，计划立稿）：** 全部锚点经源码验证（`main` 工作区）。三处待确认问题已按推荐方案落定（见 §3.5）：①入口路径用 `/v1/generateContent`（TinyRouter 别名，body 带 `model` 字段路由）；②视频 Files API（4c 含 key-pinning）列为后续规划，本期交付 4a+4b；③`TextProtocol` 仅作 Playground 侧提示 + 探测元数据，代理仍按入口路径透传，不做格式翻译。
+> **最后核对（2026-08-17，实施完成）：** Phase 1（后端协议地基）、Phase 2（Settings 协议下拉）、Phase 3（Playground 协议专属参数+原生 body）、Phase 4a（内联多模态）与 Phase 4b（服务端 ffmpeg media-prep 端点）全部实施完毕并通过单元测试与构建验证。
 >
 > **参考文档：** [`docs/gemini_research.md`](gemini_research.md)（Google 原生 generateContent / Files API / 多模态实测指南，所有方法经免费层 key + 本机代理实测通过 2026-08-17）。
 
@@ -224,11 +224,11 @@ Playground 普通聊天不用工具调用，本期不涉及。**若后续 Playgr
 
 ## 6. 实施进度
 
-- [ ] Phase 1 — 后端协议地基
-- [ ] Phase 2 — Settings 协议下拉
-- [ ] Phase 3 — Playground 协议专属参数 + 原生 body
-- [ ] Phase 4a — 内联多模态（image/audio/PDF）
-- [ ] Phase 4b — 服务端 ffmpeg 转换端点
+- [x] Phase 1 — 后端协议地基
+- [x] Phase 2 — Settings 协议下拉
+- [x] Phase 3 — Playground 协议专属参数 + 原生 body
+- [x] Phase 4a — 内联多模态（image/audio/PDF）
+- [x] Phase 4b — 服务端 ffmpeg 转换端点
 - [ ] Phase 4c — 视频 Files API（后续，§5.1）
 
 ---

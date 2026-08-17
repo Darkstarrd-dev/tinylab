@@ -51,6 +51,7 @@ const (
 	probeProtocolOpenAIResponses = "openai-responses"
 	probeProtocolAnthropic       = "anthropic"
 	probeProtocolOpenAIEmbedding = "openai-embedding"
+	probeProtocolGoogle          = "google"
 )
 
 const (
@@ -131,8 +132,9 @@ func (h *Handler) probeModel(w http.ResponseWriter, r *http.Request) {
 	if req.Proto != config.ProtocolOpenAICompat &&
 		req.Proto != config.ProtocolOpenAIResponses &&
 		req.Proto != config.ProtocolAnthropic &&
-		req.Proto != config.ProtocolOpenAIEmbedding {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid proto: must be one of openai-compat, openai-responses, anthropic, openai-embedding")
+		req.Proto != config.ProtocolOpenAIEmbedding &&
+		req.Proto != config.ProtocolGoogle {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid proto: must be one of openai-compat, openai-responses, anthropic, openai-embedding, google")
 		return
 	}
 
@@ -158,6 +160,8 @@ func (h *Handler) probeModel(w http.ResponseWriter, r *http.Request) {
 		res = h.ProbeAnthropic(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	case config.ProtocolOpenAIEmbedding:
 		res = h.ProbeOpenAIEmbedding(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
+	case config.ProtocolGoogle:
+		res = h.ProbeGoogle(ctx, client, provider.BaseURL, req.Model, key.Key, custom, nil)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -606,6 +610,21 @@ func (h *Handler) ProbeOpenAIEmbedding(ctx context.Context, client *http.Client,
 	return res
 }
 
+// ProbeGoogle sends a Google native generateContent probe request.
+func (h *Handler) ProbeGoogle(ctx context.Context, client *http.Client, baseURL, model, apiKey string, custom customheaders.Config, onOK ProbeQuotaHook) ProbeResult {
+	url := urlutil.BuildGoogleGenerateContentURL(baseURL, model, false)
+	body := map[string]any{
+		"contents": []map[string]any{
+			{
+				"parts": []map[string]any{
+					{"text": probeTestPrompt},
+				},
+			},
+		},
+	}
+	return doProbe(ctx, client, probeProtocolGoogle, http.MethodPost, url, "application/json", "x-goog-api-key", apiKey, body, custom, onOK)
+}
+
 // doProbe performs a single JSON POST probe and normalizes the result into a ProbeResult.
 func doProbe(ctx context.Context, client *http.Client, protocol, method, url, contentType, authKey, authVal string, body map[string]any, custom customheaders.Config, onOK ProbeQuotaHook, extraHeaders ...string) ProbeResult {
 	res := ProbeResult{Protocol: protocol}
@@ -751,6 +770,11 @@ func extractOutputTokens(raw string) int {
 			return int(ot)
 		}
 	}
+	if usageMeta, ok := resp["usageMetadata"].(map[string]any); ok {
+		if ctc, ok := usageMeta["candidatesTokenCount"].(float64); ok && ctc > 0 {
+			return int(ctc)
+		}
+	}
 	text := extractTextFromResponse(resp)
 	if len(text) > 0 {
 		runes := []rune(text)
@@ -764,7 +788,7 @@ func extractOutputTokens(raw string) int {
 }
 
 // extractTextFromResponse tries to extract generated text from OpenAI compat,
-// OpenAI responses, or Anthropic response JSONs.
+// OpenAI responses, Anthropic, or Google generateContent response JSONs.
 func extractTextFromResponse(resp map[string]any) string {
 	var sb strings.Builder
 	if choices, ok := resp["choices"].([]any); ok && len(choices) > 0 {
@@ -798,6 +822,23 @@ func extractTextFromResponse(resp map[string]any) string {
 			if cm, ok := c.(map[string]any); ok {
 				if text, ok := cm["text"].(string); ok {
 					sb.WriteString(text)
+				}
+			}
+		}
+	}
+	if candidates, ok := resp["candidates"].([]any); ok && len(candidates) > 0 {
+		for _, cand := range candidates {
+			if cm, ok := cand.(map[string]any); ok {
+				if content, ok := cm["content"].(map[string]any); ok {
+					if parts, ok := content["parts"].([]any); ok {
+						for _, p := range parts {
+							if partMap, ok := p.(map[string]any); ok {
+								if text, ok := partMap["text"].(string); ok {
+									sb.WriteString(text)
+								}
+							}
+						}
+					}
 				}
 			}
 		}

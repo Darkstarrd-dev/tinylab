@@ -517,6 +517,8 @@ function buildModelRowMainInner(p, m) {
   var kindVal = m.kind || 'text';
   var protoVal = m.imgProtocol || 'gpt';
   var protoDisplay = (kindVal === 'image') ? '' : 'none';
+  var textProtoVal = m.textProtocol || '';
+  var textProtoDisplay = (kindVal === 'text') ? '' : 'none';
   var chevronDown = '<svg class="quota-bar-chevron model-row-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
   var rowOnclick = batchManageMode
     ? 'batchToggleModel(\'' + midJs + '\')'
@@ -552,6 +554,16 @@ function buildModelRowMainInner(p, m) {
     { value: 'modelscope', label: 'ModelScope' }
   ], protoVal, 'updateModelImgProtocol(\'' + pidEsc + '\', this)', 'width:105px;display:' + (protoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-protocol-select" data-model="' + midEsc + '" data-tooltip="' + t('imgProtocol') + '"');
 
+  var mtWrapId = 'mt-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var mtSelId = 'mt-sel-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var textProtoHtml = renderCustomSelectHtml(mtWrapId, mtSelId, [
+    { value: '', label: t('protocolAuto') },
+    { value: 'openai-compat', label: t('protocolOpenAICompat') },
+    { value: 'openai-responses', label: t('protocolOpenAIResponses') },
+    { value: 'anthropic', label: t('protocolAnthropic') },
+    { value: 'google', label: t('protocolGoogle') }
+  ], textProtoVal, 'updateModelTextProtocol(\'' + pidEsc + '\', this)', 'width:125px;display:' + (textProtoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-text-protocol-select" data-model="' + midEsc + '" data-tooltip="' + t('textProtocol') + '"');
+
   return '<div class="model-row-main" onclick="' + rowOnclick + '">' +
     chevronDown +
     '<button type="button" class="btn btn-sm btn-test-model ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '"' + testBtnDisabled + ' onclick="event.stopPropagation(); withLoading(this, () => { var kind = this.parentElement.querySelector(\'.model-kind-select\') ? this.parentElement.querySelector(\'.model-kind-select\').value : \'' + kindVal + '\'; testSingleModel(\'' + pidEsc + '\', \'' + midJs + '\', kind); })">' + testBtnText + '</button>' +
@@ -559,6 +571,7 @@ function buildModelRowMainInner(p, m) {
     quotaHtml +
     kindHtml +
     protoHtml +
+    textProtoHtml +
     allBadge +
     '<span class="model-quota-numbers" style="display:none"></span>' +
     '<button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteModelDetail(\'' + pidEsc + '\', \'' + midJs + '\')">' + t('delete') + '</button>' +
@@ -1028,6 +1041,7 @@ async function testModelProtosSerial(pid, modelId, kind, options) {
     {key: 'openaiCompat', endpoint: 'openai-compat', kinds: ['text']},
     {key: 'openaiResponses', endpoint: 'openai-responses', kinds: ['text']},
     {key: 'anthropic', endpoint: 'anthropic', kinds: ['text']},
+    {key: 'google', endpoint: 'google', kinds: ['text']},
     {key: 'openaiEmbedding', endpoint: 'openai-embedding', kinds: ['embedding']}
   ];
   var protos = allProtos.filter(function(p) {
@@ -1184,6 +1198,7 @@ function buildMiniProtocolBadges(ts, modelId) {
     ['openaiCompat', 'O', t('protoOpenAICompat')],
     ['openaiResponses', 'R', t('protoOpenAIResponses')],
     ['anthropic', 'A', t('protoAnthropic')],
+    ['google', 'G', t('protoGoogle')],
     ['openaiEmbedding', 'E', t('protoOpenAIEmbedding')]
   ];
   var html = '<span class="mp-mini-badges">';
@@ -1230,6 +1245,7 @@ function showProtoDetail(modelId, protoKey) {
     openaiCompat: 'protoOpenAICompat',
     openaiResponses: 'protoOpenAIResponses',
     anthropic: 'protoAnthropic',
+    google: 'protoGoogle',
     openaiEmbedding: 'protoOpenAIEmbedding'
   };
   var nameKey = nameMap[protoKey] || protoKey;
@@ -1258,6 +1274,7 @@ function renderProtocolSection(key, r) {
     openaiCompat: 'protoOpenAICompat',
     openaiResponses: 'protoOpenAIResponses',
     anthropic: 'protoAnthropic',
+    google: 'protoGoogle',
     openaiEmbedding: 'protoOpenAIEmbedding'
   }[key] || key;
   var statusKey, statusCls;
@@ -1613,6 +1630,10 @@ async function updateModelKind(pid, selectEl) {
     if (protoWrap) {
       protoWrap.style.display = (kind === 'image') ? 'inline-flex' : 'none';
     }
+    var textProtoWrap = row ? row.querySelector('[id^="mt-wrap-"]') : null;
+    if (textProtoWrap) {
+      textProtoWrap.style.display = (kind === 'text') ? 'inline-flex' : 'none';
+    }
   } catch (e) {
     toast(e.message || t('failed'), 'error');
   }
@@ -1624,6 +1645,18 @@ async function updateModelImgProtocol(pid, selectEl) {
   try {
     await apiPatch('/providers/' + pid + '/models/imgProtocol', { model: modelId, imgProtocol: imgProtocol });
     toast(t('imgProtocol') + ' \u2192 ' + imgProtocol, 'success');
+  } catch (e) {
+    toast(e.message || t('failed'), 'error');
+  }
+}
+
+async function updateModelTextProtocol(pid, selectEl) {
+  var modelId = selectEl.getAttribute('data-model');
+  var textProtocol = selectEl.value;
+  try {
+    await apiPatch('/providers/' + pid + '/models/textProtocol', { model: modelId, textProtocol: textProtocol });
+    var label = textProtocol ? (textProtocol === 'google' ? t('protocolGoogle') : (textProtocol === 'anthropic' ? t('protocolAnthropic') : (textProtocol === 'openai-responses' ? t('protocolOpenAIResponses') : t('protocolOpenAICompat')))) : t('protocolAuto');
+    toast(t('textProtocol') + ' \u2192 ' + label, 'success');
   } catch (e) {
     toast(e.message || t('failed'), 'error');
   }

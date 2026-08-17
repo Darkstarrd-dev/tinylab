@@ -36,21 +36,23 @@ const (
 	ProtocolOpenAIResponses = "openai-responses" // OpenAI Responses API
 	ProtocolAnthropic       = "anthropic"        // Anthropic Messages API
 	ProtocolOpenAIEmbedding = "openai-embedding" // OpenAI Embeddings API
+	ProtocolGoogle          = "google"           // Google native generateContent API
 )
 
 // ModelDef represents one upstream model with its quota type tag.
 type ModelDef struct {
-	ID          string            `yaml:"id" json:"id"`
-	QuotaType   string            `yaml:"quotaType,omitempty" json:"quotaType,omitempty"`
-	Alias       string            `yaml:"alias,omitempty" json:"alias,omitempty"`
-	Note        string            `yaml:"note,omitempty" json:"note,omitempty"`
-	Kind        string            `yaml:"kind,omitempty" json:"kind,omitempty"`               // "text" (default/empty) | "image"
-	ImgProtocol string            `yaml:"imgProtocol,omitempty" json:"imgProtocol,omitempty"` // "gpt" | "xai" | "modelscope" (only when kind=image)
-	ImgSizes    []string          `yaml:"imgSizes,omitempty" json:"imgSizes,omitempty"`       // custom size option list (e.g. "1024x1024") for Playground image mode; empty = built-in defaults
-	NIMOver     *ModelNIMOverride `yaml:"nim,omitempty" json:"nim,omitempty"`
+	ID           string            `yaml:"id" json:"id"`
+	QuotaType    string            `yaml:"quotaType,omitempty" json:"quotaType,omitempty"`
+	Alias        string            `yaml:"alias,omitempty" json:"alias,omitempty"`
+	Note         string            `yaml:"note,omitempty" json:"note,omitempty"`
+	Kind         string            `yaml:"kind,omitempty" json:"kind,omitempty"`               // "text" (default/empty) | "image"
+	ImgProtocol  string            `yaml:"imgProtocol,omitempty" json:"imgProtocol,omitempty"` // "gpt" | "xai" | "modelscope" (only when kind=image)
+	TextProtocol string            `yaml:"textProtocol,omitempty" json:"textProtocol,omitempty"` // "auto" / "" | "openai-compat" | "openai-responses" | "anthropic" | "google"
+	ImgSizes     []string          `yaml:"imgSizes,omitempty" json:"imgSizes,omitempty"`       // custom size option list (e.g. "1024x1024") for Playground image mode; empty = built-in defaults
+	NIMOver      *ModelNIMOverride `yaml:"nim,omitempty" json:"nim,omitempty"`
 	// Protocols records the set of protocols this model was probed to support
 	// (legal values: ProtocolOpenAICompat, ProtocolOpenAIResponses,
-	// ProtocolAnthropic). An empty/nil slice means "not yet probed" OR "probed
+	// ProtocolAnthropic, ProtocolOpenAIEmbedding, ProtocolGoogle). An empty/nil slice means "not yet probed" OR "probed
 	// and found to support no known protocol". Absent in older config files
 	// (backward compatible: defaults to nil).
 	Protocols []string `yaml:"protocols,omitempty" json:"protocols,omitempty"`

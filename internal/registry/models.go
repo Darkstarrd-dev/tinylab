@@ -202,6 +202,25 @@ func (r *Registry) UpdateModelKind(providerID, modelID, kind string) bool {
 	return false
 }
 
+// UpdateModelTextProtocol sets the text protocol for a specific model on a provider.
+func (r *Registry) UpdateModelTextProtocol(providerID, modelID, textProtocol string) bool {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	for i := range r.config.Providers {
+		if r.config.Providers[i].ID != providerID {
+			continue
+		}
+		for j := range r.config.Providers[i].Models {
+			if r.config.Providers[i].Models[j].ID == modelID {
+				r.config.Providers[i].Models[j].TextProtocol = textProtocol
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // UpdateModelProtocols sets the probed protocol set for a specific model on a
 // provider. It performs no value validation (legal-value checks live in
 // config/validate.go); it only assigns the given slice. Pass an empty or nil

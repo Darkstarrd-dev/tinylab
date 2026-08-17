@@ -206,39 +206,89 @@ function pgUserSendText(text) {
   pgUserSend();
 }
 
-// ----- Module 12: Paste image from clipboard ------------------------
+// ----- Module 12: Paste / Upload multimodal media -------------------
+async function pgProcessUploadedFile(file) {
+  var mime = file.type || '';
+  if (!mime) {
+    var name = (file.name || '').toLowerCase();
+    if (name.endsWith('.pdf')) mime = 'application/pdf';
+    else if (name.endsWith('.png')) mime = 'image/png';
+    else if (name.endsWith('.jpg') || name.endsWith('.jpeg')) mime = 'image/jpeg';
+    else if (name.endsWith('.webp')) mime = 'image/webp';
+    else if (name.endsWith('.gif')) mime = 'image/gif';
+    else if (name.endsWith('.mp3')) mime = 'audio/mp3';
+    else if (name.endsWith('.wav')) mime = 'audio/wav';
+  }
+
+  // If audio or video, invoke /api/playground/media-prep
+  if (mime.indexOf('audio/') === 0 || mime.indexOf('video/') === 0) {
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('mimeType', mime);
+    formData.append('target', 'audio');
+    try {
+      var resp = await fetch('/api/playground/media-prep', {
+        method: 'POST',
+        body: formData
+      });
+      if (resp.ok) {
+        var json = await resp.json();
+        if (json.ok && json.inlineData) {
+          return 'data:' + json.inlineData.mimeType + ';base64,' + json.inlineData.data;
+        }
+      }
+    } catch (e) {
+      console.warn('media-prep request error, fallback to raw read:', e);
+    }
+  }
+
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      resolve(ev.target.result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function pgHandleFiles(files) {
+  var w = pgWin();
+  if (!w || !files || files.length === 0) return;
+  if (!w.config.imageEnabled) {
+    w.config.imageEnabled = true;
+  }
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    try {
+      var dataUrl = await pgProcessUploadedFile(file);
+      w.config.imageUrls.push(dataUrl);
+    } catch (e) {
+      console.error('File read error:', e);
+    }
+  }
+  pgSave();
+  pgRenderSidebar();
+  pgRenderInputThumbs();
+  pgToast(pgT('pgImagePasteAdded'), 'success');
+}
+
 function pgPasteImage(e) {
   var w = pgWin();
   if (!w) return;
   var items = e.clipboardData && e.clipboardData.items;
   if (!items) return;
-  var hasImage = false;
+  var filesToProcess = [];
   for (var i = 0; i < items.length; i++) {
-    if (items[i].type && items[i].type.indexOf('image/') === 0) {
-      hasImage = true;
-      break;
+    var it = items[i];
+    if (it.type && (it.type.indexOf('image/') === 0 || it.type.indexOf('audio/') === 0 || it.type.indexOf('video/') === 0 || it.type === 'application/pdf')) {
+      var blob = it.getAsFile();
+      if (blob) filesToProcess.push(blob);
     }
   }
-  if (!hasImage) return;
-  if (!w.config.imageEnabled) {
-    w.config.imageEnabled = true;
-  }
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].type && items[i].type.indexOf('image/') === 0) {
-      var blob = items[i].getAsFile();
-      if (!blob) continue;
-      var reader = new FileReader();
-      reader.onload = function(ev) {
-        var dataUrl = ev.target.result;
-        w.config.imageUrls.push(dataUrl);
-        pgSave();
-        pgRenderSidebar();
-        pgRenderInputThumbs();
-        pgToast(pgT('pgImagePasteAdded'), 'success');
-      };
-      reader.readAsDataURL(blob);
-      e.preventDefault();
-    }
+  if (filesToProcess.length > 0) {
+    e.preventDefault();
+    pgHandleFiles(filesToProcess);
   }
 }
 // ----- Panes layout ------------------------------------------------
@@ -545,19 +595,72 @@ function pgRenderSidebar() {
       input +
     '</div>';
   }
-  var params =
-    paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
-    paramRow('topP', 'pgTopP', 0, 1, 0.05, false) +
-    paramRow('frequencyPenalty', 'pgFreqPenalty', -2, 2, 0.1, false) +
-    paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
-    paramRow('maxTokens', 'pgMaxTokens', 0, 1, 1, true) +
-    paramRow('thinkingBudget', 'pgThinking', 0, 100000, 100, true) +
-    '<div class="pg-param' + (!en.seed || customMode ? ' disabled' : '') + '">' +
-      '<button class="pg-toggle' + (en.seed ? ' on' : '') + '" onclick="pgToggleParam(\'seed\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.seed ? '✓' : '✕') + '</button>' +
-      '<label>' + pgEscapeHtml(pgT('pgSeed')) + '</label>' +
-      '<input type="text" placeholder="' + pgEscapeHtml(pgT('pgSeedPlaceholder')) + '" value="' + pgEscapeHtml(cfg.seed || '') + '" oninput="pgOnParam(\'seed\', this.value)"' + (!en.seed || customMode ? ' disabled' : '') + '>' +
-    '</div>' +
-    '<div class="pg-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><label for="pg-stream">' + pgEscapeHtml(pgT('pgStream')) + '</label></div>';
+
+  var isGoogle = pgGetTextProtocol(cfg.model) === 'google';
+  var params = '';
+  if (isGoogle) {
+    var thinkOpts = [
+      { value: 'minimal', label: pgT('pgThinkingMinimal') || 'Minimal' },
+      { value: 'low', label: pgT('pgThinkingLow') || 'Low' },
+      { value: 'medium', label: pgT('pgThinkingMedium') || 'Medium' },
+      { value: 'high', label: pgT('pgThinkingHigh') || 'High' }
+    ];
+    var thinkSelHtml = pgRenderCustomSelect('pg-thinklvl-wrap', 'pg-thinklvl-sel', thinkOpts, cfg.thinkingLevel || 'medium', 'pgOnParam(\'thinkingLevel\', this.value)', 'flex:1;min-width:0');
+
+    var mimeOpts = [
+      { value: 'text/plain', label: 'Text (text/plain)' },
+      { value: 'application/json', label: 'JSON (application/json)' }
+    ];
+    var mimeSelHtml = pgRenderCustomSelect('pg-mimetype-wrap', 'pg-mimetype-sel', mimeOpts, cfg.responseMimeType || 'text/plain', 'pgOnParam(\'responseMimeType\', this.value); pgRenderSidebar();', 'flex:1;min-width:0');
+
+    params =
+      '<div class="pg-param' + (!en.thinkingLevel || customMode ? ' disabled' : '') + '">' +
+        '<button class="pg-toggle' + (en.thinkingLevel ? ' on' : '') + '" onclick="pgToggleParam(\'thinkingLevel\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.thinkingLevel ? '✓' : '✕') + '</button>' +
+        '<label>' + pgEscapeHtml(pgT('pgThinkingLevel')) + '</label>' +
+        thinkSelHtml +
+      '</div>' +
+      paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
+      paramRow('topP', 'pgTopP', 0, 1, 0.05, false) +
+      paramRow('topK', 'pgTopK', 1, 100, 1, true) +
+      paramRow('maxOutputTokens', 'pgMaxOutputTokens', 1, 65536, 1, true) +
+      paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
+      paramRow('frequencyPenalty', 'pgFreqPenalty', -2, 2, 0.1, false) +
+      '<div class="pg-param' + (!en.stopSequences || customMode ? ' disabled' : '') + '">' +
+        '<button class="pg-toggle' + (en.stopSequences ? ' on' : '') + '" onclick="pgToggleParam(\'stopSequences\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.stopSequences ? '✓' : '✕') + '</button>' +
+        '<label>' + pgEscapeHtml(pgT('pgStopSequences')) + '</label>' +
+        '<input type="text" placeholder="' + pgEscapeHtml(pgT('pgStopSequencesPlaceholder')) + '" value="' + pgEscapeHtml(cfg.stopSequences || '') + '" oninput="pgOnParam(\'stopSequences\', this.value)"' + (!en.stopSequences || customMode ? ' disabled' : '') + '>' +
+      '</div>' +
+      paramRow('candidateCount', 'pgCandidateCount', 1, 8, 1, true) +
+      '<div class="pg-param' + (!en.responseMimeType || customMode ? ' disabled' : '') + '">' +
+        '<button class="pg-toggle' + (en.responseMimeType ? ' on' : '') + '" onclick="pgToggleParam(\'responseMimeType\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.responseMimeType ? '✓' : '✕') + '</button>' +
+        '<label>' + pgEscapeHtml(pgT('pgResponseMimeType')) + '</label>' +
+        mimeSelHtml +
+      '</div>' +
+      ((cfg.responseMimeType === 'application/json') ? (
+        '<div class="pg-param' + (!en.responseSchema || customMode ? ' disabled' : '') + '" style="display:block;margin-top:6px;">' +
+          '<div style="display:flex;align-items:center;margin-bottom:4px;">' +
+            '<button class="pg-toggle' + (en.responseSchema ? ' on' : '') + '" onclick="pgToggleParam(\'responseSchema\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.responseSchema ? '✓' : '✕') + '</button>' +
+            '<label style="margin-left:4px;">' + pgEscapeHtml(pgT('pgResponseSchema')) + '</label>' +
+          '</div>' +
+          '<textarea style="width:100%;height:60px;font-family:monospace;font-size:11px;resize:vertical;" placeholder="' + pgEscapeHtml(pgT('pgResponseSchemaPlaceholder')) + '" oninput="pgOnParam(\'responseSchema\', this.value)"' + (!en.responseSchema || customMode ? ' disabled' : '') + '>' + pgEscapeHtml(cfg.responseSchema || '') + '</textarea>' +
+        '</div>'
+      ) : '') +
+      '<div class="pg-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><label for="pg-stream">' + pgEscapeHtml(pgT('pgStream')) + '</label></div>';
+  } else {
+    params =
+      paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
+      paramRow('topP', 'pgTopP', 0, 1, 0.05, false) +
+      paramRow('frequencyPenalty', 'pgFreqPenalty', -2, 2, 0.1, false) +
+      paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
+      paramRow('maxTokens', 'pgMaxTokens', 0, 1, 1, true) +
+      paramRow('thinkingBudget', 'pgThinking', 0, 100000, 100, true) +
+      '<div class="pg-param' + (!en.seed || customMode ? ' disabled' : '') + '">' +
+        '<button class="pg-toggle' + (en.seed ? ' on' : '') + '" onclick="pgToggleParam(\'seed\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.seed ? '✓' : '✕') + '</button>' +
+        '<label>' + pgEscapeHtml(pgT('pgSeed')) + '</label>' +
+        '<input type="text" placeholder="' + pgEscapeHtml(pgT('pgSeedPlaceholder')) + '" value="' + pgEscapeHtml(cfg.seed || '') + '" oninput="pgOnParam(\'seed\', this.value)"' + (!en.seed || customMode ? ' disabled' : '') + '>' +
+      '</div>' +
+      '<div class="pg-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><label for="pg-stream">' + pgEscapeHtml(pgT('pgStream')) + '</label></div>';
+  }
 
   // --- System prompt ---
   var sysPrompt =
@@ -751,6 +854,14 @@ function pgGetModelInfo(modelId) {
 function pgGetImgProtocol(modelId) {
   var info = pgGetModelInfo(modelId);
   return (info && info.kind === 'image' && info.imgProtocol) ? info.imgProtocol : 'gpt';
+}
+
+function pgGetTextProtocol(modelId) {
+  var info = pgGetModelInfo(modelId);
+  if (!info) return '';
+  if (info.textProtocol) return info.textProtocol;
+  if (Array.isArray(info.protocols) && info.protocols.indexOf('google') !== -1) return 'google';
+  return '';
 }
 // pgOnModelSelectBackfill sets the protocol filter to match the selected
 // pgOnModelSelectBackfill sets the protocol filter to match the selected
@@ -1425,6 +1536,7 @@ function pgRenderInputBar() {
     '</div>';
 
   var wandSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 4 2 2M18 13l-1.5-1.5M10.5 4.5 9 3M19 8l2-2M2 22l10-10"/><path d="M12 2v2M12 8v2M8 4.5l-1.5-1.5M14.5 4.5l1.5-1.5"/></svg>';
+  var attachSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
 
   bar.innerHTML =
     '<div class="pg-input-card' + (isMax ? ' pg-input-card-maximized' : '') + '">' +
@@ -1432,10 +1544,12 @@ function pgRenderInputBar() {
       '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
       expandBtnHtml +
       infinitySvgHtml +
+      '<input type="file" id="pg-file-input" multiple style="display:none" onchange="if(this.files){pgHandleFiles(this.files); this.value=\'\';}">' +
     '</div>' +
     '<div class="pg-input-actions">' +
       sendBtn +
       '<div class="pg-btn-row">' +
+        '<button type="button" class="pg-btn pg-btn-attach" onclick="document.getElementById(\'pg-file-input\').click()" data-tooltip="Upload / Attach (Image, Audio, PDF)">' + attachSvg + '</button>' +
         (pgState.autoChat.enabled && pgState.autoChat.isRunning
           ? '<button class="pg-btn danger" onclick="pgAutoChatStop()" data-tooltip="' + pgEscapeHtml(pgT('pgAutoChatStop')) + '">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>'
           : '') +
@@ -1449,6 +1563,14 @@ function pgRenderInputBar() {
   if (ta) {
     if (savedVal) ta.value = savedVal;
     ta.addEventListener('paste', pgPasteImage);
+    ta.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); });
+    ta.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        pgHandleFiles(e.dataTransfer.files);
+      }
+    });
     ta.addEventListener('input', function() {
       var w2 = pgWin();
       if (w2 && w2.config) w2.config.prompt = ta.value;
@@ -1494,8 +1616,19 @@ function pgRenderInputThumbs() {
   }
   var html = '';
   w.config.imageUrls.forEach(function(url, idx) {
+    var isPdf = url.indexOf('data:application/pdf') === 0 || url.toLowerCase().indexOf('.pdf') !== -1;
+    var isAudio = url.indexOf('data:audio/') === 0 || url.toLowerCase().indexOf('.mp3') !== -1 || url.toLowerCase().indexOf('.wav') !== -1;
+    var previewHtml = '';
+    if (isPdf) {
+      previewHtml = '<div class="pg-input-thumb" style="display:flex;align-items:center;justify-content:center;background:#2d3748;color:#f7fafc;font-size:10px;font-weight:bold;width:40px;height:40px;border-radius:4px;cursor:pointer;">PDF</div>';
+    } else if (isAudio) {
+      previewHtml = '<div class="pg-input-thumb" style="display:flex;align-items:center;justify-content:center;background:#2b6cb0;color:#f7fafc;font-size:10px;font-weight:bold;width:40px;height:40px;border-radius:4px;cursor:pointer;">🎵 AUD</div>';
+    } else {
+      previewHtml = '<img class="pg-input-thumb" src="' + pgEscapeHtml(url) + '" alt="media" onclick="pgShowImageModal(\'' + pgEscapeAttr(url) + '\')">';
+    }
+
     html += '<div class="pg-input-thumb-wrap">' +
-      '<img class="pg-input-thumb" src="' + pgEscapeHtml(url) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(url) + '\')">' +
+      previewHtml +
       '<button class="pg-input-thumb-del" onclick="event.stopPropagation();pgRemoveInputImage(' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">✕</button>' +
     '</div>';
   });
@@ -1523,7 +1656,7 @@ function pgApplyActiveQuickSlot(model) {
   pgRenderPanes();
   pgUpdateInputBar();
 }
-function pgOnModelChange(v) { var w = pgWin(); if (w) { w.config.model = v; if (typeof qsClearActive === 'function') qsClearActive(); pgSave(); pgRenderPanes(); pgUpdateInputBar(); } }
+function pgOnModelChange(v) { var w = pgWin(); if (w) { w.config.model = v; if (typeof qsClearActive === 'function') qsClearActive(); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar(); } }
 
 // pgOnProtocolFilter changes the protocol filter.  If the currently selected
 // model no longer matches the chosen protocol, it is cleared so the user

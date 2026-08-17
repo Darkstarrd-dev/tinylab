@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 
@@ -50,6 +51,26 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 		upstreamURL, req, err = buildUpstreamRequest(ctx, sel, body, "/v1/messages", false)
 	case entryFormat == combo.EntryFormatOpenAIResponses:
 		upstreamURL, req, err = buildUpstreamRequest(ctx, sel, body, "/v1/responses", true)
+	case entryFormat == combo.EntryFormatGoogle:
+		realModel := ""
+		cleanBody := body
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err == nil {
+			if modelVal, ok := m["model"].(string); ok {
+				realModel = modelVal
+			}
+			delete(m, "model")
+			delete(m, "stream")
+			if nb, err := json.Marshal(m); err == nil {
+				cleanBody = nb
+			}
+		}
+		upstreamURL = urlutil.BuildGoogleGenerateContentURL(sel.Provider.BaseURL, realModel, isStream)
+		req, err = http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(cleanBody))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-goog-api-key", sel.Key.Key)
+		}
 	default:
 		upstreamURL = urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
 		req, err = http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))

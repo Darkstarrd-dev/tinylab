@@ -80,3 +80,49 @@ func TestNormalizeBaseURL_TrimsSuffixes(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildGoogleGenerateContentURL(t *testing.T) {
+	tests := []struct {
+		baseURL  string
+		model    string
+		isStream bool
+		want     string
+	}{
+		{
+			baseURL:  "https://generativelanguage.googleapis.com",
+			model:    "gemini-2.5-flash",
+			isStream: false,
+			want:     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+		},
+		{
+			baseURL:  "https://generativelanguage.googleapis.com/v1beta",
+			model:    "gemini-2.5-flash",
+			isStream: true,
+			want:     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+		},
+		{
+			baseURL:  "https://generativelanguage.googleapis.com/v1beta/openai",
+			model:    "gemini-2.5-flash",
+			isStream: false,
+			want:     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+		},
+		{
+			baseURL:  "https://custom-proxy.internal/google",
+			model:    "gemini-2.5-pro",
+			isStream: false,
+			want:     "https://custom-proxy.internal/google/v1beta/models/gemini-2.5-pro:generateContent",
+		},
+		{
+			baseURL:  "https://custom-proxy.internal/raw*",
+			model:    "gemini-2.5-flash",
+			isStream: false,
+			want:     "https://custom-proxy.internal/raw",
+		},
+	}
+	for _, tt := range tests {
+		got := BuildGoogleGenerateContentURL(tt.baseURL, tt.model, tt.isStream)
+		if got != tt.want {
+			t.Errorf("BuildGoogleGenerateContentURL(%q, %q, %v) = %q, want %q", tt.baseURL, tt.model, tt.isStream, got, tt.want)
+		}
+	}
+}

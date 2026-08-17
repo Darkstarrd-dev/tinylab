@@ -12,6 +12,17 @@ var validProtocols = map[string]bool{
 	ProtocolOpenAICompat:    true,
 	ProtocolOpenAIResponses: true,
 	ProtocolAnthropic:       true,
+	ProtocolOpenAIEmbedding: true,
+	ProtocolGoogle:          true,
+}
+
+var validTextProtocols = map[string]bool{
+	"":                      true,
+	"auto":                  true,
+	ProtocolOpenAICompat:    true,
+	ProtocolOpenAIResponses: true,
+	ProtocolAnthropic:       true,
+	ProtocolGoogle:          true,
 }
 
 // validatePort checks that the port number is within the valid range (1-65535).
@@ -24,13 +35,16 @@ func validatePort(port int) error {
 }
 
 // validateModelDef logs warnings for best-effort validation of a single model.
-// It checks that any Protocols values are within the known legal set. Unknown
+// It checks that any Protocols and TextProtocol values are within the known legal set. Unknown
 // values are reported but do not block startup (warning only).
 func validateModelDef(p *Provider, m *ModelDef) {
 	for _, proto := range m.Protocols {
 		if !validProtocols[proto] {
-			fmt.Fprintf(os.Stderr, "[config] warning: provider %q model %q has unknown protocol %q (legal: openai-compat, openai-responses, anthropic)\n", p.ID, m.ID, proto)
+			fmt.Fprintf(os.Stderr, "[config] warning: provider %q model %q has unknown protocol %q (legal: openai-compat, openai-responses, anthropic, openai-embedding, google)\n", p.ID, m.ID, proto)
 		}
+	}
+	if !validTextProtocols[m.TextProtocol] {
+		fmt.Fprintf(os.Stderr, "[config] warning: provider %q model %q has unknown textProtocol %q (legal: auto, openai-compat, openai-responses, anthropic, google)\n", p.ID, m.ID, m.TextProtocol)
 	}
 }
 

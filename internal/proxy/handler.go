@@ -253,6 +253,13 @@ func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.handleProxy(w, r, "/v1/responses", combo.EntryFormatOpenAIResponses)
 }
 
+// GenerateContent handles Google native generateContent requests at the /v1/generateContent entry.
+// It transparently proxies to the upstream Google endpoint ({baseURL}/v1beta/models/{model}:generateContent)
+// using the x-goog-api-key header and model-in-path URL. The model field in the request body is stripped.
+func (h *Handler) GenerateContent(w http.ResponseWriter, r *http.Request) {
+	h.handleProxy(w, r, "/v1/generateContent", combo.EntryFormatGoogle)
+}
+
 func (h *Handler) TaskGet(w http.ResponseWriter, r *http.Request, taskID, modelStr string) {
 	providerID, upstreamModel := util.SplitModel(modelStr)
 	if providerID == "" {

@@ -150,6 +150,35 @@ func TestProbe_Anthropic_Success(t *testing.T) {
 	}
 }
 
+func TestProbe_Google_Success(t *testing.T) {
+	var gotPath, gotGoogKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotGoogKey = r.Header.Get("x-goog-api-key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"Hi"}]}}],"usageMetadata":{"candidatesTokenCount":5}}`))
+	}))
+	defer srv.Close()
+
+	h := newTestProbeHandler()
+	res, body := decodeProbeResult(t, srv, h.ProbeGoogle)
+	if !res.Ok {
+		t.Fatalf("expected Ok=true, got %+v (err=%q)", res, res.Error)
+	}
+	if gotPath != "/v1beta/models/model-x:generateContent" {
+		t.Fatalf("path = %q, want /v1beta/models/model-x:generateContent", gotPath)
+	}
+	if gotGoogKey != "sk-test" {
+		t.Fatalf("x-goog-api-key = %q, want sk-test", gotGoogKey)
+	}
+	if _, hasContents := body["contents"]; !hasContents {
+		t.Fatalf("google body missing 'contents': %+v", body)
+	}
+	if res.OutputTokens != 5 {
+		t.Fatalf("OutputTokens = %d, want 5", res.OutputTokens)
+	}
+}
+
 func TestProbe_OpenAICompat_Failure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

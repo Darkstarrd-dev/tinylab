@@ -158,6 +158,42 @@ func TestTestProviderModelProto_Anthropic(t *testing.T) {
 	}
 }
 
+func TestTestProviderModelProto_Google(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "sk-test" {
+			t.Errorf("x-goog-api-key = %q, want sk-test", r.Header.Get("x-goog-api-key"))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"Hello from Gemini"}]}}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := sampleConfig(srv.URL)
+	rt, _ := newTestRouter(t, cfg)
+
+	h := probe.NewHandler(&apibase.Deps{
+		Reg:          rt.reg,
+		ProxyHandler: rt.proxyHandler,
+		Logger:       rt.logger,
+	})
+
+	rec := serveProtoTest(t, h, "p1", "m1", config.ProtocolGoogle)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
+	}
+	if proto, _ := out["protocol"].(string); proto != "google" {
+		t.Fatalf("protocol = %q, want google", proto)
+	}
+	if ok, _ := out["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %+v", out)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Error cases
 // ---------------------------------------------------------------------------

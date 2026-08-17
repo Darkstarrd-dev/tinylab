@@ -158,3 +158,49 @@ func isHostRoot(base string) bool {
 	}
 	return u.Path == "" || u.Path == "/"
 }
+
+// BuildGoogleGenerateContentURL constructs the full upstream URL for Google native
+// generateContent requests.
+// When isStream is true, it uses ":streamGenerateContent?alt=sse"; otherwise ":generateContent".
+func BuildGoogleGenerateContentURL(baseURL, model string, isStream bool) string {
+	trimmed := strings.TrimSpace(baseURL)
+
+	// 1) Raw mode: trailing '*' marks the prefix as the complete endpoint.
+	if strings.HasSuffix(trimmed, "*") {
+		return strings.TrimRight(strings.TrimSuffix(trimmed, "*"), "/")
+	}
+
+	action := ":generateContent"
+	if isStream {
+		action = ":streamGenerateContent?alt=sse"
+	}
+
+	normalized := normalizeBaseURL(trimmed)
+	normalized = strings.TrimSuffix(normalized, "/openai")
+	normalized = strings.TrimSuffix(normalized, "/")
+
+	// 2) Host root (no path) -> inject "/v1beta" and append "/models/{model}{action}".
+	if isHostRoot(normalized) {
+		return normalized + "/v1beta/models/" + model + action
+	}
+
+	// 3) Base already ends with /v1beta
+	if strings.HasSuffix(normalized, "/v1beta") {
+		return normalized + "/models/" + model + action
+	}
+
+	// 4) Path-bearing base: check if any path segment is a version identifier (e.g. v1, v1beta).
+	parsed, err := url.Parse(normalized)
+	if err == nil {
+		segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		for _, seg := range segments {
+			if versionSegmentRE.MatchString(seg) {
+				return normalized + "/models/" + model + action
+			}
+		}
+	}
+
+	// No version segment found -> inject "/v1beta".
+	return normalized + "/v1beta/models/" + model + action
+}
+

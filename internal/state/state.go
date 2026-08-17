@@ -37,14 +37,15 @@ type ProbeDetail struct {
 	LastAt    time.Time `yaml:"last_at,omitempty"`
 }
 
-// ProbeRecord aggregates the probe outcome for a single model across all three
-// protocols plus the derived supported-protocol set.
+// ProbeRecord aggregates the probe outcome for a single model across all protocols
+// plus the derived supported-protocol set.
 type ProbeRecord struct {
 	ProviderID      string      `yaml:"provider_id"`
 	ModelID         string      `yaml:"model_id"`
 	OpenAICompat    ProbeDetail `yaml:"openai_compat"`
 	OpenAIResponses ProbeDetail `yaml:"openai_responses"`
 	Anthropic       ProbeDetail `yaml:"anthropic"`
+	Google          ProbeDetail `yaml:"google,omitempty"`
 	Protocols       []string    `yaml:"protocols,omitempty"`
 	LastProbeAt     time.Time   `yaml:"last_probe_at,omitempty"`
 }

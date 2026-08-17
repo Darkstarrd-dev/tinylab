@@ -284,6 +284,49 @@ func TestForwardUpstream_StreamingSetsAcceptHeader(t *testing.T) {
 	}
 }
 
+func TestForwardUpstream_GoogleGenerateContent(t *testing.T) {
+	var gotPath, gotGoogKey string
+	var gotBody map[string]any
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotGoogKey = r.Header.Get("x-goog-api-key")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`))
+	}))
+	defer mockUpstream.Close()
+
+	h := newTestHandler(t)
+	sel := &rotation.SelectedKey{
+		Provider: config.Provider{
+			ID: "google", Name: "Google Provider", Prefix: "google",
+			BaseURL: mockUpstream.URL, IsActive: true,
+		},
+		Key:     config.Key{ID: "k1", Key: "goog-secret", Name: "Key 1", IsActive: true, Priority: 1},
+		KeyName: "Key 1",
+	}
+
+	body := []byte(`{"model":"gemini-2.5-flash","contents":[{"parts":[{"text":"hi"}]}]}`)
+	resp, err := h.forwardUpstream(context.Background(), sel, body, nil, false, "/v1/generateContent", combo.EntryFormatGoogle)
+	if err != nil {
+		t.Fatalf("forwardUpstream failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotPath != "/v1beta/models/gemini-2.5-flash:generateContent" {
+		t.Fatalf("path = %q, want /v1beta/models/gemini-2.5-flash:generateContent", gotPath)
+	}
+	if gotGoogKey != "goog-secret" {
+		t.Fatalf("x-goog-api-key = %q, want goog-secret", gotGoogKey)
+	}
+	if _, hasModel := gotBody["model"]; hasModel {
+		t.Fatalf("model field should be stripped from upstream body: %+v", gotBody)
+	}
+	if _, hasContents := gotBody["contents"]; !hasContents {
+		t.Fatalf("upstream body missing contents: %+v", gotBody)
+	}
+}
+
 func TestForwardWithRetry_NetworkError(t *testing.T) {
 	h := newTestHandler(t)
 

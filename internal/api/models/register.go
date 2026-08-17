@@ -32,15 +32,17 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	combos := h.deps.Reg.ListCombos()
 
 	type modelInfo struct {
-		ID          string   `json:"id"`
-		RealModelID string   `json:"realModelId,omitempty"`
-		Provider    string   `json:"provider"`
-		ProviderID  string   `json:"providerId,omitempty"`
-		Type        string   `json:"type"`
-		Kind        string   `json:"kind,omitempty"`
-		ImgProtocol string   `json:"imgProtocol,omitempty"`
-		ImgSizes    []string `json:"imgSizes,omitempty"`
-		Note        string   `json:"note,omitempty"`
+		ID           string   `json:"id"`
+		RealModelID  string   `json:"realModelId,omitempty"`
+		Provider     string   `json:"provider"`
+		ProviderID   string   `json:"providerId,omitempty"`
+		Type         string   `json:"type"`
+		Kind         string   `json:"kind,omitempty"`
+		ImgProtocol  string   `json:"imgProtocol,omitempty"`
+		TextProtocol string   `json:"textProtocol,omitempty"`
+		Protocols    []string `json:"protocols,omitempty"`
+		ImgSizes     []string `json:"imgSizes,omitempty"`
+		Note         string   `json:"note,omitempty"`
 	}
 
 	var models []modelInfo
@@ -55,15 +57,17 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 					displayID = m.Alias
 				}
 				models = append(models, modelInfo{
-					ID:          p.Prefix + "/" + displayID,
-					RealModelID: m.ID,
-					Provider:    p.Name,
-					ProviderID:  p.ID,
-					Type:        "provider",
-					Kind:        m.Kind,
-					ImgProtocol: m.ImgProtocol,
-					ImgSizes:    m.ImgSizes,
-					Note:        m.Note,
+					ID:           p.Prefix + "/" + displayID,
+					RealModelID:  m.ID,
+					Provider:     p.Name,
+					ProviderID:   p.ID,
+					Type:         "provider",
+					Kind:         m.Kind,
+					ImgProtocol:  m.ImgProtocol,
+					TextProtocol: m.TextProtocol,
+					Protocols:    m.Protocols,
+					ImgSizes:     m.ImgSizes,
+					Note:         m.Note,
 				})
 			}
 		} else {

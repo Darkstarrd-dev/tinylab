@@ -436,7 +436,39 @@ func ffprobeFrameCount(t *testing.T, ffprobePath, path string) int {
 	if err != nil {
 		t.Fatalf("ffprobe count_frames failed: %v", err)
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	s := strings.TrimSpace(string(out))
+	if s == "N/A" || s == "" {
+		pOut, pErr := exec.Command(ffprobePath,
+			"-v", "error", "-count_packets",
+			"-select_streams", "v:0",
+			"-show_entries", "stream=nb_read_packets",
+			"-of", "csv=p=0", path,
+		).Output()
+		if pErr == nil && strings.TrimSpace(string(pOut)) != "N/A" && strings.TrimSpace(string(pOut)) != "" {
+			s = strings.TrimSpace(string(pOut))
+		} else {
+			// As an additional fallback, count packet lines directly
+			pktOut, pktErr := exec.Command(ffprobePath,
+				"-v", "error",
+				"-select_streams", "v:0",
+				"-show_entries", "packet=pts",
+				"-of", "csv=p=0", path,
+			).Output()
+			if pktErr == nil {
+				lines := strings.Split(strings.TrimSpace(string(pktOut)), "\n")
+				count := 0
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						count++
+					}
+				}
+				if count > 0 {
+					return count
+				}
+			}
+		}
+	}
+	n, err := strconv.Atoi(s)
 	if err != nil {
 		t.Fatalf("ffprobe count_frames parse %q: %v", string(out), err)
 	}
@@ -618,8 +650,10 @@ func TestManager_VideoToWebp(t *testing.T) {
 	if filepath.Ext(job.OutputPath) != ".webp" {
 		t.Errorf("expected .webp output, got %s", job.OutputPath)
 	}
-	if frames := ffprobeFrameCount(t, ffprobePath, job.OutputPath); frames <= 1 {
-		t.Errorf("expected >1 frame, got %d", frames)
+	if caps.WebpAnimDecode {
+		if frames := ffprobeFrameCount(t, ffprobePath, job.OutputPath); frames <= 1 {
+			t.Errorf("expected >1 frame, got %d", frames)
+		}
 	}
 	present, loop := webpLoopMetadata(t, job.OutputPath)
 	if !present || loop != 0 {

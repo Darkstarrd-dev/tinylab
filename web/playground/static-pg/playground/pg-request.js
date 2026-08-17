@@ -53,6 +53,88 @@ function pgBuildBodyForWin(i) {
   }
   var en = w.parameterEnabled;
   var cfg = w.config;
+  var isGoogle = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(cfg.model) === 'google';
+
+  if (isGoogle) {
+    var contents = [];
+    var systemInstructionParts = [];
+    w.messages.forEach(function(m) {
+      if (m.role === 'assistant' && (m.error || m.status === 'loading')) return;
+      if (m.role === 'system') {
+        var sysText = pgTextContent(m.content);
+        if (sysText) systemInstructionParts.push({ text: sysText });
+        return;
+      }
+      var role = (m.role === 'assistant') ? 'model' : 'user';
+      var parts = [];
+      if (typeof m.content === 'string') {
+        if (m.content) parts.push({ text: m.content });
+      } else if (Array.isArray(m.content)) {
+        m.content.forEach(function(p) {
+          if (p.type === 'text' && p.text) {
+            parts.push({ text: p.text });
+          } else if (p.type === 'image_url' && p.image_url && p.image_url.url) {
+            var url = p.image_url.url;
+            if (url.indexOf('data:') === 0) {
+              var match = url.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                parts.push({
+                  inlineData: {
+                    mimeType: match[1],
+                    data: match[2]
+                  }
+                });
+              }
+            } else {
+              parts.push({ text: url });
+            }
+          } else if (p.inlineData) {
+            parts.push({ inlineData: p.inlineData });
+          }
+        });
+      }
+      if (parts.length > 0) {
+        contents.push({ role: role, parts: parts });
+      }
+    });
+
+    var generationConfig = {};
+    if (en.thinkingLevel && cfg.thinkingLevel) {
+      generationConfig.thinkingConfig = { thinkingLevel: cfg.thinkingLevel };
+    }
+    if (en.temperature) generationConfig.temperature = cfg.temperature;
+    if (en.topP) generationConfig.topP = cfg.topP;
+    if (en.topK && cfg.topK > 0) generationConfig.topK = cfg.topK;
+    if (en.maxOutputTokens && cfg.maxOutputTokens > 0) generationConfig.maxOutputTokens = cfg.maxOutputTokens;
+    if (en.presencePenalty) generationConfig.presencePenalty = cfg.presencePenalty;
+    if (en.frequencyPenalty) generationConfig.frequencyPenalty = cfg.frequencyPenalty;
+    if (en.stopSequences && cfg.stopSequences) {
+      generationConfig.stopSequences = cfg.stopSequences.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    }
+    if (en.candidateCount && cfg.candidateCount > 0) generationConfig.candidateCount = cfg.candidateCount;
+    if (en.responseMimeType && cfg.responseMimeType) {
+      generationConfig.responseMimeType = cfg.responseMimeType;
+      if (cfg.responseMimeType === 'application/json' && en.responseSchema && cfg.responseSchema) {
+        try {
+          generationConfig.responseSchema = JSON.parse(cfg.responseSchema);
+        } catch (e) { /* ignore invalid json */ }
+      }
+    }
+
+    var body = {
+      model: cfg.model,
+      contents: contents,
+      stream: cfg.stream
+    };
+    if (Object.keys(generationConfig).length > 0) {
+      body.generationConfig = generationConfig;
+    }
+    if (systemInstructionParts.length > 0) {
+      body.systemInstruction = { parts: systemInstructionParts };
+    }
+    return body;
+  }
+
   var messages = w.messages
     .filter(function(m) {
       if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'system') return false;
@@ -87,6 +169,41 @@ function pgBuildBody() {
 
 function pgFinalizeBodyForSend(body, lastUserMessage, i) {
   var w = pgWinAt(i);
+  var isGoogle = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(w.config.model) === 'google';
+  if (isGoogle) {
+    if (w.config.systemPrompt && w.config.systemPrompt.trim()) {
+      if (!body.systemInstruction) {
+        body.systemInstruction = { parts: [{ text: w.config.systemPrompt.trim() }] };
+      } else if (body.systemInstruction.parts) {
+        body.systemInstruction.parts.unshift({ text: w.config.systemPrompt.trim() });
+      }
+    }
+    if (w.config.imageEnabled && Array.isArray(w.config.imageUrls)) {
+      var urls = w.config.imageUrls.filter(function(u) { return u && u.trim(); });
+      if (urls.length > 0 && body.contents && body.contents.length > 0) {
+        for (var cIdx = body.contents.length - 1; cIdx >= 0; cIdx--) {
+          if (body.contents[cIdx].role === 'user') {
+            urls.forEach(function(u) {
+              if (u.indexOf('data:') === 0) {
+                var match = u.match(/^data:([^;]+);base64,(.+)$/);
+                if (match) {
+                  body.contents[cIdx].parts.push({
+                    inlineData: {
+                      mimeType: match[1],
+                      data: match[2]
+                    }
+                  });
+                }
+              }
+            });
+            break;
+          }
+        }
+      }
+    }
+    return body;
+  }
+
   if (w.config.systemPrompt && w.config.systemPrompt.trim()) {
     var hasSystem = (body.messages || []).some(function(m) { return m.role === 'system'; });
     if (!hasSystem) {
