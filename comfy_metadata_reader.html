@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyUI 元数据读取器（零依赖单页）</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, "Microsoft YaHei", sans-serif;
+    max-width: 860px; margin: 0 auto; padding: 24px 16px 60px;
+  }
+  h1 { font-size: 20px; }
+  .sub { opacity: .65; font-size: 13px; margin: -8px 0 20px; }
+  #drop {
+    border: 2px dashed #888; border-radius: 10px; padding: 36px 16px;
+    text-align: center; cursor: pointer; transition: .15s;
+  }
+  #drop.over { border-color: #4a9eff; background: rgba(74,158,255,.08); }
+  #drop input { display: none; }
+  .card {
+    border: 1px solid #8888; border-radius: 10px; margin-top: 14px; padding: 12px 14px;
+  }
+  .card .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .card .name { font-weight: 600; word-break: break-all; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #4a9eff22; border: 1px solid #4a9eff55; }
+  .badge.err { background: #ff4a4a22; border-color: #ff4a4a66; color: #e44; }
+  .kv { margin-top: 8px; font-size: 13px; }
+  .kv .key { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+  pre {
+    background: #00000022; border-radius: 8px; padding: 10px; overflow: auto;
+    font-size: 12px; max-height: 320px; white-space: pre-wrap; word-break: break-all;
+  }
+  button {
+    border: 1px solid #8888; background: transparent; border-radius: 6px;
+    padding: 3px 10px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #88888822; }
+  .capsule { font-size: 12px; opacity: .6; }
+</style>
+</head>
+<body>
+<h1>ComfyUI 元数据读取器</h1>
+<p class="sub">纯浏览器本地解析 PNG / MP4 / WebP，无任何外部库、无网络请求、文件不上传。支持 ComfyUI 写入的 <code>prompt</code> / <code>workflow</code>（tEXt 块与 MP4 mdta 标签）。</p>
+
+<div id="drop">
+  <div>拖拽图片/视频到这里，或 <strong>点击选择文件</strong>（可多选）</div>
+  <div class="capsule" style="margin-top:6px">支持 .png .mp4 .webp</div>
+  <input type="file" id="file" multiple accept=".png,.mp4,.webp,image/png,video/mp4,image/webp">
+</div>
+<div id="results"></div>
+
+<script>
+"use strict";
+/* ============================================================
+ * 读取器：与 ComfyUI 后端写入格式一一对应
+ *   PNG : tEXt / zTXt / iTXt 文本块（键 prompt / workflow）
+ *   MP4 : moov/udta/meta 的 mdta keys+ilst 标签（iTunes 4CC 兜底）
+ *   WebP: RIFF 容器内 EXIF 块 → 内嵌 PNG tEXt 结构
+ * ============================================================ */
+
+const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function latin1(u8, start, end) {
+  // PNG tEXt 文本按 ISO-8859-1 编码（TextDecoder('latin1') 别名 windows-1252，
+  // 对 ASCII JSON（含 \uXXXX 转义）完全等价）
+  return new TextDecoder("latin1").decode(u8.subarray(start, end));
+}
+
+/* DecompressionStream('deflate') = zlib 封装(RFC1950)，与 PNG zTXt/iTXt 压缩一致。
+ * Chrome 80+ / Safari 16.4+ / Firefox 113+。 */
+async function inflate(u8) {
+  const ds = new DecompressionStream("deflate");
+  const stream = new Blob([u8]).stream().pipeThrough(ds);
+  const ab = await new Response(stream).arrayBuffer();
+  return new Uint8Array(ab);
+}
+
+async function parsePNG(buf) {
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  if (u8.length < 8 || PNG_SIG.some((b, i) => u8[i] !== b)) return null;
+  const out = {};
+  let pos = 8;
+  while (pos + 8 <= u8.length) {
+    const length = dv.getUint32(pos);
+    const type = String.fromCharCode(u8[pos + 4], u8[pos + 5], u8[pos + 6], u8[pos + 7]);
+    const bodyStart = pos + 8;
+    const bodyEnd = bodyStart + length;
+    if (type === "IEND") break;
+    if (type === "tEXt" || type === "zTXt" || type === "iTXt") {
+      let keyEnd = bodyStart;
+      while (keyEnd < bodyEnd && u8[keyEnd] !== 0) keyEnd++;
+      const key = latin1(u8, bodyStart, keyEnd);
+      const rest = u8.subarray(keyEnd + 1, bodyEnd);
+      if (type === "tEXt") {
+        out[key] = latin1(u8, keyEnd + 1, bodyEnd);
+      } else if (type === "zTXt") {
+        out[key] = latin1(await inflate(rest.subarray(1)), 0); // 第 1 字节是压缩方法
+      } else { // iTXt: compflag(1) compmethod(1) lang\0 translated\0 text
+        const compflag = rest[0];
+        let text = rest.subarray(1);
+        let idx = text.indexOf(0);            // 跳过 lang
+        text = text.subarray(idx + 1);
+        idx = text.indexOf(0);                // 跳过 translated
+        text = text.subarray(idx + 1);
+        if (compflag) text = await inflate(text);
+        out[key] = new TextDecoder("utf-8").decode(text); // iTXt 是 UTF-8
+      }
+    }
+    pos += 12 + length;
+  }
+  return out;
+}
+
+/* ---------- MP4: 通用盒遍历 ---------- */
+function walkBoxes(dv, start, end, wanted) {
+  const found = new Map(wanted.map((t) => [t, []]));
+  let pos = start;
+  while (pos + 8 <= end) {
+    let size = dv.getUint32(pos);
+    let hdr = 8;
+    const typ = String.fromCharCode(dv.getUint8(pos + 4), dv.getUint8(pos + 5),
+                                    dv.getUint8(pos + 6), dv.getUint8(pos + 7));
+    if (size === 1) { size = Number(dv.getBigUint64(pos + 8)); hdr = 16; }
+    else if (size === 0) size = end - pos;
+    if (size < hdr || pos + size > end) break;
+    if (wanted.includes(typ)) found.get(typ).push([pos + hdr, pos + size]);
+    pos += size;
+  }
+  return found;
+}
+
+function boxType(u8, pos) {
+  return String.fromCharCode(u8[pos + 4], u8[pos + 5], u8[pos + 6], u8[pos + 7]);
+}
+
+async function parseMP4(buf) {
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  const moovs = walkBoxes(dv, 0, u8.length, ["moov"]).get("moov");
+  for (const [ms, me] of moovs) {
+    const udtas = walkBoxes(dv, ms, me, ["udta"]).get("udta");
+    for (const [us, ue] of udtas) {
+      const metas = walkBoxes(dv, us, ue, ["meta"]).get("meta");
+      for (const [mstart, mend] of metas) {
+        // meta 是 full box：前 4 字节 version/flags
+        const body = walkBoxes(dv, mstart + 4, mend, ["keys", "ilst"]);
+        // keys: version/flags(4) count(4) 条目 = size(4) + namespace(4) + value(utf-8)
+        const keys = {};
+        for (const [ks, ke] of body.get("keys")) {
+          const count = dv.getUint32(ks + 4);
+          let pos = ks + 8;
+          for (let i = 0; i < count && pos + 8 <= ke; i++) {
+            const size = dv.getUint32(pos);
+            if (size < 8 || pos + size > ke) break;
+            keys[i + 1] = new TextDecoder("utf-8").decode(u8.subarray(pos + 8, pos + size));
+            pos += size;
+          }
+        }
+        // ilst: 条目 = size(4) + index(4) + 子盒; 'data' 子盒 = type/flags(4) + locale(4) + 值
+        const items = {};
+        for (const [ls, le] of body.get("ilst")) {
+          let pos = ls;
+          while (pos + 8 <= le) {
+            const size = dv.getUint32(pos);
+            if (size < 8 || pos + size > le) break;
+            const idx = u8.subarray(pos + 4, pos + 8); // mdta: 1 基索引
+            for (const [ds, de] of walkBoxes(dv, pos + 8, pos + size, ["data"]).get("data")) {
+              if (de - ds >= 8) {
+                items[idx] = new TextDecoder("utf-8").decode(u8.subarray(ds + 8, de));
+              }
+            }
+            pos += size;
+          }
+        }
+        const out = {};
+        for (const [idx, val] of Object.entries(items)) {
+          // Uint8Array 作对象键会被转成逗号串，这里改用字符串键 + 偏移判断
+          const keyBytes = idx.split(",").map(Number);
+          const n = keyBytes.reduce((a, b) => a * 256 + b, 0);
+          if (keys[n] !== undefined) out[keys[n]] = val;        // mdta
+          else out[latin1(new Uint8Array(keyBytes), 0)] = val;  // iTunes 4CC
+        }
+        if (Object.keys(out).length) return out;
+      }
+    }
+  }
+  return null;
+}
+
+/* ---------- WebP: RIFF → EXIF → PNG tEXt 结构 ---------- */
+async function parseWebP(buf) {
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  const tag = String.fromCharCode(u8[0], u8[1], u8[2]) + String.fromCharCode(u8[3]);
+  if (tag !== "RIFF" || String.fromCharCode(u8[8], u8[9], u8[10], u8[11]) !== "WEBP") return null;
+  let pos = 12;
+  while (pos + 8 <= u8.length) {
+    const size = dv.getUint32(pos + 4, true); // RIFF 小端
+    const type = String.fromCharCode(u8[pos], u8[pos + 1], u8[pos + 2], u8[pos + 3]);
+    if (type === "EXIF") return parsePNG(u8.buffer.slice(pos + 8, pos + 8 + size));
+    pos += 8 + size + (size & 1);
+  }
+  return null;
+}
+
+async function extract(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8.length >= 8 && PNG_SIG.every((b, i) => u8[i] === b)) return await parsePNG(buf);
+  if (u8.length >= 12 && String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) === "RIFF") {
+    const webp = await parseWebP(buf);
+    if (webp !== null) return webp;
+  }
+  return await parseMP4(buf); // 其余按 MP4 盒结构尝试
+}
+
+/* ============================ UI ============================ */
+const drop = document.getElementById("drop");
+const input = document.getElementById("file");
+const results = document.getElementById("results");
+
+drop.addEventListener("click", () => input.click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+  handleFiles(e.dataTransfer.files);
+});
+input.addEventListener("change", () => handleFiles(input.files));
+
+async function handleFiles(files) {
+  for (const file of files) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const head = document.createElement("div");
+    head.className = "head";
+    head.innerHTML = `<span class="name"></span>`;
+    head.querySelector(".name").textContent = file.name;
+    card.appendChild(head);
+    results.prepend(card);
+
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    head.appendChild(badge);
+
+    try {
+      const buf = await file.arrayBuffer();
+      const meta = await extract(buf);
+      if (!meta || Object.keys(meta).length === 0) {
+        badge.textContent = "无元数据";
+        badge.className = "badge err";
+        return;
+      }
+      badge.textContent = `${Object.keys(meta).length} 个键`;
+      for (const [k, v] of Object.entries(meta)) {
+        const kv = document.createElement("div");
+        kv.className = "kv";
+        kv.innerHTML = `<span class="key"></span><pre></pre>`;
+        kv.querySelector(".key").textContent = k;
+        let pretty = v;
+        try { pretty = JSON.stringify(JSON.parse(v), null, 2); } catch (_) { /* 非 JSON 原样 */ }
+        kv.querySelector("pre").textContent = pretty;
+        const copy = document.createElement("button");
+        copy.textContent = "复制";
+        copy.style.marginLeft = "8px";
+        copy.onclick = () => navigator.clipboard.writeText(v);
+        kv.insertBefore(copy, kv.querySelector("pre"));
+        card.appendChild(kv);
+      }
+    } catch (e) {
+      badge.textContent = "解析失败: " + e.message;
+      badge.className = "badge err";
+    }
+  }
+}
+
+/* 供自动化测试调用的句柄 */
+window.__comfyExtract = extract;
+</script>
+</body>
+</html>
