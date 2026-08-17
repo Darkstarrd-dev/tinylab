@@ -420,6 +420,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     // Text Review (AI 文本审校) keys
     trStepImport: 'Import', trStepSplit: 'Split', trStepClean: 'AI Clean', trStepReview: 'Review',
     trConfirmClear: 'Are you sure you want to clear current review state and reset session?',
+    trAddNode: 'Add Processing Node', trConfiguredNodes: 'Configured Nodes', trConfiguredPatterns: 'Configured Patterns',
+    trModelRequired: 'Please select a model first', trNodeAddSuccess: 'Node added successfully',
     trImportDesc: 'Open a text file or paste the novel text to begin.', trOpenFile: 'Open File',
     trPasteHere: 'Or paste text here:', trPastePlaceholder: 'Paste the novel text here...',
     trPastedText: 'Pasted text', trFileName: 'File', trFileSize: 'Size', trFileEncoding: 'Encoding',
@@ -1175,6 +1177,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     // Text Review (AI 文本审校) keys
     trStepImport: '导入', trStepSplit: '切分', trStepClean: 'AI 清理', trStepReview: '审校',
     trConfirmClear: '确定要清空当前的文本审校状态与重置会话吗？',
+    trAddNode: '添加处理节点', trConfiguredNodes: '已配置节点列表', trConfiguredPatterns: '已配置模式列表',
+    trModelRequired: '请先选择模型', trNodeAddSuccess: '节点添加成功',
     trImportDesc: '打开文本文件或粘贴小说正文以开始。', trOpenFile: '打开文件',
     trPasteHere: '或在此粘贴文本：', trPastePlaceholder: '在此粘贴小说正文...',
     trPastedText: '粘贴的文本', trFileName: '文件', trFileSize: '大小', trFileEncoding: '编码',

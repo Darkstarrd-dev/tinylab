@@ -575,27 +575,34 @@ function trStep2RenderPatternEditor() {
       '</tr>';
   }
   var html =
-    '<div class="modal" style="max-width:680px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
+    '<div class="modal" style="max-width:740px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
       '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
-        '<span>' + trEscapeHtml(trT('trPatternEditor')) + '</span>' +
+        '<span>' + trEscapeHtml(trT('trPatternEditor') || '模式管理') + '</span>' +
         '<button type="button" class="btn btn-ghost btn-sm" onclick="trCloseModal()" style="padding:2px 8px;">✕</button>' +
       '</div>' +
       '<div class="modal-body" style="flex:1; overflow-y:auto; padding:12px 0;">' +
-        '<table class="tr-pe-table"><thead><tr>' +
-          '<th>' + trEscapeHtml(trT('trPatternKey')) + '</th>' +
-          '<th>' + trEscapeHtml(trT('trPatternLabel')) + '</th>' +
-          '<th>' + trEscapeHtml(trT('trPatternRegex')) + '</th>' +
-          '<th>' + trEscapeHtml(trT('trActions')) + '</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table>' +
-        '<hr class="tr-pe-sep">' +
-        '<h4 style="margin:8px 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trAddPattern')) + '</h4>' +
-        '<div class="tr-pe-form">' +
-          '<input type="text" id="tr-pe-new-key" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternKeyPlaceholder')) + '" style="max-width:120px;">' +
-          '<input type="text" id="tr-pe-new-label" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternLabelPlaceholder')) + '" style="max-width:140px;">' +
-          '<input type="text" id="tr-pe-new-regex" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternRegexPlaceholder')) + '">' +
-          '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep2AddPattern()">' + trEscapeHtml(trT('trAdd')) + '</button>' +
+        '<div class="tr-node-card">' +
+          '<div class="tr-node-card-title">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>' +
+            '<span>' + trEscapeHtml(trT('trAddPattern') || '添加模式') + '</span>' +
+          '</div>' +
+          '<div class="tr-pe-form">' +
+            '<input type="text" id="tr-pe-new-key" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternKeyPlaceholder') || '键名') + '" style="flex:1;min-width:110px;">' +
+            '<input type="text" id="tr-pe-new-label" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternLabelPlaceholder') || '显示标签') + '" style="flex:1;min-width:130px;">' +
+            '<input type="text" id="tr-pe-new-regex" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternRegexPlaceholder') || '正则表达式') + '" style="flex:2;min-width:180px;">' +
+            '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep2AddPattern()">' + trEscapeHtml(trT('trAdd') || '添加') + '</button>' +
+          '</div>' +
+          '<p class="tr-hint" style="margin:8px 0 0 0;">' + trEscapeHtml(trT('trPatternRegexHint') || '正则匹配章节标题行。开头的 ^ 锚定行首。') + '</p>' +
         '</div>' +
-        '<p class="tr-hint">' + trEscapeHtml(trT('trPatternRegexHint')) + '</p>' +
+        '<div class="tr-node-table-section">' +
+          '<div class="tr-node-table-title">' + trEscapeHtml(trT('trConfiguredPatterns') || '已配置模式列表') + ' (' + patterns.length + ')</div>' +
+          '<table class="tr-pe-table" style="width:100%"><thead><tr>' +
+            '<th style="width:120px;">' + trEscapeHtml(trT('trPatternKey') || '键') + '</th>' +
+            '<th style="width:140px;">' + trEscapeHtml(trT('trPatternLabel') || '标签') + '</th>' +
+            '<th>' + trEscapeHtml(trT('trPatternRegex') || '正则') + '</th>' +
+            '<th style="text-align:right;width:70px;">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>' +
       '</div>' +
       '<div class="modal-footer" style="margin-top:10px;">' +
         '<button type="button" class="btn btn-ghost" onclick="trCloseModal()">' + trEscapeHtml(trT('cancel') || '关闭') + '</button>' +

@@ -324,11 +324,11 @@ function trS3UpsertNode(id, enabled, concurrency) {
  * Open the node pool Settings modal.
  */
 function trStep3OpenSettings() {
+  trS3ModalModel = null; // Reset selection only when opening settings freshly
   trStep3RenderSettingsModal();
 }
 
 function trStep3RenderSettingsModal() {
-  trS3ModalModel = null; // reset previous selection
   // Fetch models for provider/model dropdowns
   trApiGet('/models').then(function (res) {
     var allModels = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
@@ -341,72 +341,83 @@ function trStep3RenderSettingsModal() {
     for (var ni = 0; ni < nodes.length; ni++) {
       var n = nodes[ni];
       nodeRows += '<tr>' +
+        '<td style="color:var(--text-muted);">' + (ni + 1) + '</td>' +
         '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-        '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
-        '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
-        '<td>' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
-        '<td>' + (n.batchChars ? n.batchChars : '-') + '</td>' +
-        '<td>' + (n.enabled ? '✓' : '✗') + '</td>' +
-        '<td><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
-          trEscapeHtml(n.id || '') + '\')">' + trEscapeHtml(trT('trDelete')) + '</button></td>' +
+        '<td><strong style="color:var(--text);">' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</strong></td>' +
+        '<td style="text-align:center;">' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
+        '<td style="text-align:center;">' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
+        '<td style="text-align:center;">' + (n.batchChars ? n.batchChars : '-') + '</td>' +
+        '<td style="text-align:center;">' + (n.enabled ? '<span style="color:var(--success,#10b981);font-weight:bold;">✓</span>' : '<span style="color:var(--text-muted);">✗</span>') + '</td>' +
+        '<td style="text-align:right;"><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
+          trEscapeHtml(n.id || '') + '\')">' + trEscapeHtml(trT('trDelete') || '删除') + '</button></td>' +
       '</tr>';
     }
 
+    var hasModel = trS3ModalModel && trS3ModalModel.label;
+    var modelBtnHtml =
+      '<div class="tr-form-row">' +
+        '<label class="tr-form-label">' + trEscapeHtml(trT('trNodeModel') || '模型') + '</label>' +
+        '<button type="button" class="tr-model-select-btn' + (hasModel ? ' has-value' : '') + '" id="tr-s3-modal-model-btn" onclick="trStep3PickModel()">' +
+          '<span id="tr-s3-modal-model-txt" class="' + (hasModel ? 'tr-model-name' : 'tr-model-placeholder') + '">' +
+            trEscapeHtml(hasModel ? trS3ModalModel.label : (trT('trSelectModel') || '点击选择模型 (Click to select model)...')) +
+          '</span>' +
+          '<span style="opacity:0.6; font-size:11px;">▼</span>' +
+        '</button>' +
+      '</div>';
+
     var body =
-      '<div class="tr-s3-settings-section">' +
-        '<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trAddNode')) + '</h4>' +
-        '<div class="tr-s3-settings-form" style="display:flex; flex-direction:column; gap:12px;">' +
-          '<div>' +
-            '<label class="tr-label" style="display:block; margin-bottom:4px;">' + trEscapeHtml(trT('trNodeModel')) + '</label>' +
-            '<button type="button" class="btn btn-ghost" id="tr-s3-modal-model-btn" onclick="trStep3PickModel()" style="width:100%; text-align:left; justify-content:space-between; padding:8px 12px; border:1px solid var(--glass-border); border-radius:var(--radius-xs,4px); background:var(--input-bg);">' +
-              '<span id="tr-s3-modal-model-txt">' + trEscapeHtml(trT('trSelectModel') || '点击选择模型 (Click to select model)...') + '</span>' +
-              '<span style="opacity:0.6;">▼</span>' +
-            '</button>' +
+      '<div class="tr-node-card">' +
+        '<div class="tr-node-card-title">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>' +
+          '<span>' + trEscapeHtml(trT('trAddNode') || '添加处理节点') + '</span>' +
+        '</div>' +
+        modelBtnHtml +
+        '<div class="tr-form-grid">' +
+          '<div class="tr-form-field">' +
+            '<label class="tr-form-label">' + trEscapeHtml(trT('trNodeConcurrency') || '并发数') + '</label>' +
+            '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1">' +
           '</div>' +
-          '<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">' +
-            '<div style="display:flex; align-items:center; gap:6px;">' +
-              '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + ':</label>' +
-              '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:65px;">' +
-            '</div>' +
-            '<div style="display:flex; align-items:center; gap:6px;">' +
-              '<label class="tr-label">' + trEscapeHtml(trT('trIntervalSec')) + ':</label>' +
-              '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0" style="width:65px;">' +
-            '</div>' +
-            '<div style="display:flex; align-items:center; gap:6px;">' +
-              '<label class="tr-label">' + trEscapeHtml(trT('trBatchChars')) + ':</label>' +
-              '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0" style="width:75px;">' +
-            '</div>' +
-            '<label class="tr-check" style="margin-left:4px;">' +
-              '<input type="checkbox" id="tr-s3-modal-enabled" checked> ' +
-              trEscapeHtml(trT('trNodeEnabled')) +
+          '<div class="tr-form-field">' +
+            '<label class="tr-form-label">' + trEscapeHtml(trT('trIntervalSec') || '请求间隔(秒)') + '</label>' +
+            '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0">' +
+          '</div>' +
+          '<div class="tr-form-field">' +
+            '<label class="tr-form-label">' + trEscapeHtml(trT('trBatchChars') || '批次大小(字符)') + '</label>' +
+            '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0">' +
+          '</div>' +
+          '<div class="tr-form-field-actions">' +
+            '<label class="tr-check">' +
+              '<input type="checkbox" id="tr-s3-modal-enabled" checked>' +
+              '<span>' + trEscapeHtml(trT('trNodeEnabled') || '启用') + '</span>' +
             '</label>' +
-            '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep3AddNode()" style="margin-left:auto;">' +
-              trEscapeHtml(trT('trAdd')) + '</button>' +
+            '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep3AddNode()">' +
+              trEscapeHtml(trT('trAdd') || '添加') +
+            '</button>' +
           '</div>' +
         '</div>' +
       '</div>';
 
     if (nodes.length > 0) {
       body +=
-        '<hr class="tr-pe-sep">' +
-        '<div class="tr-s3-settings-section">' +
-          '<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trNodePool')) + '</h4>' +
+        '<div class="tr-node-table-section">' +
+          '<div class="tr-node-table-title">' + trEscapeHtml(trT('trConfiguredNodes') || '已配置节点列表') + ' (' + nodes.length + ')</div>' +
           '<table class="tr-pe-table" style="width:100%"><thead><tr>' +
-            '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
-            '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
-            '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
-            '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
-            '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
-            '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
-            '<th></th>' +
+            '<th style="width:36px;">#</th>' +
+            '<th>' + trEscapeHtml(trT('trNodeProvider') || '服务商') + '</th>' +
+            '<th>' + trEscapeHtml(trT('trNodeModel') || '模型') + '</th>' +
+            '<th style="text-align:center;width:70px;">' + trEscapeHtml(trT('trNodeConcurrency') || '并发数') + '</th>' +
+            '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trIntervalSec') || '请求间隔') + '</th>' +
+            '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trBatchChars') || '批次大小') + '</th>' +
+            '<th style="text-align:center;width:60px;">' + trEscapeHtml(trT('trNodeEnabled') || '启用') + '</th>' +
+            '<th style="text-align:right;width:65px;">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
           '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
         '</div>';
     }
 
     var html =
-      '<div class="modal" style="max-width:720px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
+      '<div class="modal" style="max-width:760px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
         '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
-          '<span>' + trEscapeHtml(trT('trSettings')) + ' — ' + trEscapeHtml(trT('trNodePool')) + '</span>' +
+          '<span>' + trEscapeHtml(trT('trSettings') || '设置') + ' — ' + trEscapeHtml(trT('trNodePool') || '节点池') + '</span>' +
           '<button type="button" class="btn btn-ghost btn-sm" onclick="trCloseModal();trStep3OnSettingsClosed()" style="padding:2px 8px;">✕</button>' +
         '</div>' +
         '<div class="modal-body" style="flex:1; overflow-y:auto; padding:12px 0;">' + body + '</div>' +
@@ -478,12 +489,7 @@ function trStep3PickModel() {
       label: label
     };
 
-    var btnTxt = document.getElementById('tr-s3-modal-model-txt');
-    if (btnTxt) {
-      btnTxt.textContent = label;
-      btnTxt.style.fontWeight = '600';
-    }
-    // Re-open settings modal to resume flow
+    // Re-render settings modal with the selected model preserved
     trStep3RenderSettingsModal();
   };
 
@@ -498,7 +504,7 @@ function trStep3PickModel() {
 
 function trStep3AddNode() {
   if (!trS3ModalModel || !trS3ModalModel.providerId || !trS3ModalModel.modelId) {
-    trToast(trT('trSelectModel') || '请先选择模型', 'warning');
+    trToast(trT('trModelRequired') || '请先选择模型', 'warning');
     return;
   }
   var concEl = document.getElementById('tr-s3-modal-conc');
@@ -515,7 +521,7 @@ function trStep3AddNode() {
   };
   trApiPost('/text-review/review-nodes', body).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
-    trToast('节点添加成功', 'success');
+    trToast(trT('trNodeAddSuccess') || '节点添加成功', 'success');
     trS3ModalModel = null;
     return trApiGet('/text-review/review-nodes');
   }).then(function (res) {
