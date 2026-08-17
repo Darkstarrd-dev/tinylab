@@ -53,6 +53,10 @@ function trS3PopulateProviders(models) {
       if (mid) {
         trS3ModelNames[m.providerId + '/' + mid] = m.alias || m.name || m.id || mid;
       }
+    } else if (m.type === 'combo') {
+      trS3ProviderNames['combo'] = 'Combo';
+      trS3ModelNames['combo/' + m.id] = (m.provider ? m.provider + ' / ' : '') + m.id;
+      trS3ModelNames[m.id] = (m.provider ? m.provider + ' / ' : '') + m.id;
     }
   }
 }
@@ -440,7 +444,7 @@ function trStep3RenderSettingsModal() {
  * Select an AI model using the system Model Picker modal.
  */
 function trStep3PickModel() {
-  var cur = trS3ModalModel ? (trS3ModalModel.providerId + '/' + trS3ModalModel.modelId) : '';
+  var cur = trS3ModalModel ? (trS3ModalModel.providerId ? (trS3ModalModel.providerId + '/' + trS3ModalModel.modelId) : trS3ModalModel.modelId) : '';
   
   var onModelSelected = function (val) {
     if (!val) return;
@@ -448,39 +452,47 @@ function trStep3PickModel() {
     var providerId = '';
     var modelId = '';
     var label = val;
+    var matched = null;
 
-    // Check if val is formatted as "providerId/modelId" or "combo:xxx"
-    var slash = val.indexOf('/');
-    if (slash > 0) {
-      providerId = val.slice(0, slash);
-      modelId = val.slice(slash + 1);
-    } else {
-      modelId = val;
-    }
-
-    // Lookup in all models for matching real model and provider info
+    // Direct match by ID first
     for (var i = 0; i < all.length; i++) {
       var m = all[i];
-      if (m.id === val || (m.providerId === providerId && (m.realModelId === modelId || m.id === modelId))) {
-        if (!providerId && m.providerId) providerId = m.providerId;
-        label = (m.provider ? m.provider + ' / ' : '') + (m.alias || m.name || m.realModelId || m.id);
+      if (m.id === val) {
+        matched = m;
         break;
       }
     }
 
-    // Fallback provider ID from prefix map if needed
-    if (!providerId && slash > 0) {
-      var prefix = val.slice(0, slash);
-      for (var pid in trS3ProviderPrefixes) {
-        if (trS3ProviderPrefixes[pid] === prefix) {
-          providerId = pid;
-          break;
-        }
+    if (matched) {
+      if (matched.type === 'combo') {
+        providerId = 'combo';
+        modelId = matched.id;
+        label = (matched.provider ? matched.provider + ' / ' : 'Combo / ') + matched.id;
+      } else {
+        providerId = matched.providerId || '';
+        modelId = matched.realModelId || matched.id;
+        label = (matched.provider ? matched.provider + ' / ' : '') + (matched.alias || matched.name || matched.realModelId || matched.id);
       }
+    } else {
+      var slash = val.indexOf('/');
+      if (slash > 0) {
+        providerId = val.slice(0, slash);
+        modelId = val.slice(slash + 1);
+        for (var pid in trS3ProviderPrefixes) {
+          if (trS3ProviderPrefixes[pid] === providerId) {
+            providerId = pid;
+            break;
+          }
+        }
+      } else {
+        providerId = 'combo';
+        modelId = val;
+      }
+      label = val;
     }
 
-    if (!providerId && slash > 0) {
-      providerId = val.slice(0, slash);
+    if (!providerId) {
+      providerId = 'combo';
     }
 
     trS3ModalModel = {
@@ -503,7 +515,7 @@ function trStep3PickModel() {
 }
 
 function trStep3AddNode() {
-  if (!trS3ModalModel || !trS3ModalModel.providerId || !trS3ModalModel.modelId) {
+  if (!trS3ModalModel || !trS3ModalModel.modelId) {
     trToast(trT('trModelRequired') || '请先选择模型', 'warning');
     return;
   }
@@ -512,7 +524,7 @@ function trStep3AddNode() {
   var intervalEl = document.getElementById('tr-s3-modal-interval');
   var batchEl = document.getElementById('tr-s3-modal-batch');
   var body = {
-    providerId: trS3ModalModel.providerId,
+    providerId: trS3ModalModel.providerId || 'combo',
     modelId: trS3ModalModel.modelId,
     concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
     enabled: enEl ? enEl.checked : true,

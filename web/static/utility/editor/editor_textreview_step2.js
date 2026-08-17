@@ -486,7 +486,7 @@ function trStep2AISplit() {
     }
 
     var modelStr = node.modelId || '';
-    if (modelStr.indexOf('/') === -1) {
+    if (node.providerId !== 'combo' && modelStr.indexOf('/') === -1) {
       var prefix = (window._trS3ProviderPrefix && window._trS3ProviderPrefix(node.providerId)) || '';
       if (prefix) {
         modelStr = prefix + '/' + modelStr;

@@ -81,11 +81,27 @@ func resolveModel(d *apibase.Deps, node config.TextReviewNode) (string, bool) {
 	if d == nil || d.Reg == nil {
 		return "", false
 	}
-	p, ok := d.Reg.GetProvider(node.ProviderID)
-	if !ok {
+	if node.ModelID == "" {
 		return "", false
 	}
-	if node.ModelID == "" {
+	// Check if this is a combo
+	if node.ProviderID == "combo" || node.ProviderID == "" {
+		if _, ok := d.Reg.GetComboByName(node.ModelID); ok {
+			return node.ModelID, true
+		}
+		if _, ok := d.Reg.GetComboByID(node.ModelID); ok {
+			return node.ModelID, true
+		}
+	}
+	p, ok := d.Reg.GetProvider(node.ProviderID)
+	if !ok {
+		// Fallback: check if ModelID matches a combo name
+		if _, ok := d.Reg.GetComboByName(node.ModelID); ok {
+			return node.ModelID, true
+		}
+		if _, ok := d.Reg.GetComboByID(node.ModelID); ok {
+			return node.ModelID, true
+		}
 		return "", false
 	}
 	return p.Prefix + "/" + node.ModelID, true
