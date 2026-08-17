@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -282,6 +283,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		modelStr := r.URL.Query().Get("model")
 		proxyHandler.TaskGet(w, r, taskID, modelStr)
 	})
+
+	// Profiling endpoints (/debug/pprof/*)
+	r.Mount("/debug/pprof", pprofRouter())
 
 	// Build the shared Deps for sub-packages.
 	apiDeps := &apibase.Deps{
@@ -622,4 +626,20 @@ func (rt *Router) serveUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	w.Write(data)
+}
+
+func pprofRouter() chi.Router {
+	r := chi.NewRouter()
+	r.HandleFunc("/", pprof.Index)
+	r.HandleFunc("/cmdline", pprof.Cmdline)
+	r.HandleFunc("/profile", pprof.Profile)
+	r.HandleFunc("/symbol", pprof.Symbol)
+	r.HandleFunc("/trace", pprof.Trace)
+	r.HandleFunc("/allocs", pprof.Handler("allocs").ServeHTTP)
+	r.HandleFunc("/block", pprof.Handler("block").ServeHTTP)
+	r.HandleFunc("/goroutine", pprof.Handler("goroutine").ServeHTTP)
+	r.HandleFunc("/heap", pprof.Handler("heap").ServeHTTP)
+	r.HandleFunc("/mutex", pprof.Handler("mutex").ServeHTTP)
+	r.HandleFunc("/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
+	return r
 }

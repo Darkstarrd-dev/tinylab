@@ -69,6 +69,10 @@ function renderActiveVideo(index) {
         vidEl.src = item.mainURL;
       }
       var restoreVidState = function() {
+        var v = (galleryState.videoVolume != null) ? galleryState.videoVolume : 80;
+        vidEl.volume = galleryState.videoMuted ? 0 : (v / 100);
+        vidEl.muted = !!galleryState.videoMuted;
+        updateVolumeUI(v, galleryState.videoMuted);
         if (galleryState.videoPlayingState === true) {
           try { vidEl.play().catch(function() {}); } catch (e) {}
         } else {
@@ -91,6 +95,26 @@ function renderActiveVideo(index) {
   renderMetaSidebar(true);
 }
 
+function updateVolumeUI(volPct, isMuted) {
+  if (volPct == null) volPct = (galleryState.videoVolume != null ? galleryState.videoVolume : 80);
+  if (isMuted == null) isMuted = !!galleryState.videoMuted;
+
+  var volBtn = document.getElementById('gallery-vol-btn');
+  if (volBtn) {
+    volBtn.innerHTML = getVolumeIcon(volPct, isMuted);
+    volBtn.removeAttribute('data-tooltip');
+    volBtn.setAttribute('aria-label', (isMuted || volPct === 0) ? 'Unmute' : ('Volume: ' + volPct + '%'));
+  }
+  var volSlider = document.getElementById('gallery-vol-slider');
+  if (volSlider) {
+    volSlider.value = isMuted ? 0 : volPct;
+  }
+  var volValTxt = document.getElementById('gallery-vol-value');
+  if (volValTxt) {
+    volValTxt.textContent = (isMuted || volPct === 0) ? '0%' : (volPct + '%');
+  }
+}
+
 // ---------- animation-mode helpers ------------------------------------
 // applyVideoPaneMode toggles the video pane controls for the two playback
 // modes. Real video shows the <video> plus the seeker/time bar; animated
@@ -104,7 +128,7 @@ function applyVideoPaneMode(isAnim) {
   if (animEl) animEl.style.display = isAnim ? 'block' : 'none';
   var ctrl = document.getElementById('gallery-video-ctrl');
   if (ctrl) ctrl.style.display = isAnim ? 'none' : '';
-  var volWrap = document.querySelector('.gallery-vol-wrapper');
+  var volWrap = document.getElementById('gallery-vol-wrapper') || document.querySelector('.gallery-vol-wrapper');
   if (volWrap) volWrap.style.display = isAnim ? 'none' : '';
   if (isAnim) {
     var playBtn = document.getElementById('gallery-vid-play');
@@ -145,6 +169,7 @@ function bindVideoControls() {
   var seeker = document.getElementById('gallery-video-seeker');
   var playBtn = document.getElementById('gallery-vid-play');
   var stopBtn = document.getElementById('gallery-vid-stop');
+  var volBtn = document.getElementById('gallery-vol-btn');
   var volSlider = document.getElementById('gallery-vol-slider');
   var timeTxt = document.getElementById('gallery-vid-time');
   var infoTxt = document.getElementById('gallery-vid-info');
@@ -227,7 +252,39 @@ function bindVideoControls() {
 
   if (volSlider) {
     volSlider.oninput = function() {
-      vidEl.volume = volSlider.value / 100;
+      var val = parseInt(volSlider.value, 10);
+      if (isNaN(val)) val = 0;
+      galleryState.videoVolume = val;
+      galleryState.videoMuted = (val === 0);
+      if (val > 0) galleryState.videoPrevVolume = val;
+      if (vidEl) {
+        vidEl.volume = val / 100;
+        vidEl.muted = (val === 0);
+      }
+      updateVolumeUI(val, galleryState.videoMuted);
+    };
+  }
+
+  if (volBtn) {
+    volBtn.onclick = function() {
+      if (galleryState.videoMuted || galleryState.videoVolume === 0) {
+        var restore = (galleryState.videoPrevVolume > 0) ? galleryState.videoPrevVolume : 80;
+        galleryState.videoVolume = restore;
+        galleryState.videoMuted = false;
+        if (vidEl) {
+          vidEl.muted = false;
+          vidEl.volume = restore / 100;
+        }
+      } else {
+        galleryState.videoPrevVolume = galleryState.videoVolume || 80;
+        galleryState.videoVolume = 0;
+        galleryState.videoMuted = true;
+        if (vidEl) {
+          vidEl.muted = true;
+          vidEl.volume = 0;
+        }
+      }
+      updateVolumeUI(galleryState.videoVolume, galleryState.videoMuted);
     };
   }
 }

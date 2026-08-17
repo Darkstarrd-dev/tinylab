@@ -2,13 +2,59 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/logredact"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
 )
+
+var (
+	dataURLImageRegex = regexp.MustCompile(`data:image/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=]{100,}`)
+	b64JSONRegex      = regexp.MustCompile(`"b64_json"\s*:\s*"[A-Za-z0-9+/=]{100,}"`)
+)
+
+func maskBase64Images(data []byte) []byte {
+	if len(data) < 120 {
+		return data
+	}
+	if !bytesContains(data, "base64") && !bytesContains(data, "b64_json") {
+		return data
+	}
+	data = dataURLImageRegex.ReplaceAllFunc(data, func(m []byte) []byte {
+		idx := bytesIndex(m, ";base64,")
+		if idx == -1 {
+			return m
+		}
+		prefix := m[:idx+8]
+		return []byte(fmt.Sprintf("%s[image omitted: %d bytes]", prefix, len(m)))
+	})
+	data = b64JSONRegex.ReplaceAllFunc(data, func(m []byte) []byte {
+		return []byte(fmt.Sprintf(`"b64_json":"[image omitted: %d bytes]"`, len(m)))
+	})
+	return data
+}
+
+func bytesContains(b []byte, s string) bool {
+	for i := 0; i+len(s) <= len(b); i++ {
+		if string(b[i:i+len(s)]) == s {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesIndex(b []byte, s string) int {
+	for i := 0; i+len(s) <= len(b); i++ {
+		if string(b[i:i+len(s)]) == s {
+			return i
+		}
+	}
+	return -1
+}
 
 // recordUsage records a completed (or errored) request into the usage ring
 // buffer, broadcasts a request-done event for the live UI, and signals the
@@ -111,6 +157,7 @@ func (h *Handler) parseAndUpdateQuota(sel *rotation.SelectedKey, providerID, mod
 }
 
 func captureBody(body []byte) json.RawMessage {
+	body = maskBase64Images(body)
 	if json.Valid(body) {
 		return append(json.RawMessage(nil), body...)
 	}

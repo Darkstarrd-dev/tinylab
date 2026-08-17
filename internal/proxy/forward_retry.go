@@ -31,6 +31,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 	// correlate the REQUEST/SEND/PROXY/error lines of one client request, and the
 	// EntryTracker entry reuses the same id across retries.
 	reqID := generateRequestID()
+	defer h.clearAttemptCount(reqID)
 	callerTag := requestCallerTag(r)
 	// logTag is reqID augmented with the inferred session key (|sess:xxxxxxxx)
 	// for console log lines, so concurrent sessions can be told apart. reqID
@@ -143,10 +144,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		credential := sel.Key.Key
 		if len(bodyBytes) > 0 {
 			rb := []byte(logredact.MaskString(string(bodyBytes), credential))
-			if !json.Valid(rb) {
-				rb, _ = json.Marshal(map[string]string{"raw": string(rb)})
-			}
-			processingEntry.ReqPayload = append([]byte(nil), rb...)
+			processingEntry.ReqPayload = captureBody(rb)
 		}
 		processingEntry.ReqHeaders = http.Header(h.maskHeaderMap(r.Header, credential))
 		processingEntry.UpstreamURL = redactURL(upstreamURL, credential)

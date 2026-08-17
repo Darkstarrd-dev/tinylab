@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
@@ -150,4 +153,27 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/edit/zip-outputs", h.galleryEditZipOutputs)
 	r.Post("/edit/zip-writeback", h.galleryEditZipWriteback)
 	r.Post("/paste-paths", h.galleryPastePaths)
+	r.Post("/clear", h.galleryClear)
+}
+
+func (h *Handler) galleryClear(w http.ResponseWriter, r *http.Request) {
+	ownerID := owner.From(r.Context())
+	if h.sessions != nil {
+		h.sessions.clearOwner(ownerID)
+	}
+	if h.tempFiles != nil {
+		h.tempFiles.sweep(time.Now())
+	}
+	if h.d != nil && h.d.Logger != nil {
+		h.d.Logger.Info("gallery: cleared all sessions & released memory for owner %s", ownerID)
+	}
+	// Trigger runtime garbage collection and return physical memory to OS
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		runtime.GC()
+		debug.FreeOSMemory()
+	}()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"ok":true}`))
 }

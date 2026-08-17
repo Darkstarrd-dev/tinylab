@@ -105,6 +105,17 @@ func (s *Session) unlock() { s.mu.Unlock() }
 // restarts (confirmed decision: no state.yaml for text-review).
 var sessions sync.Map // map[string]*Session
 
+// ClearAllSessions stops all active sessions, removes them from the store,
+// and frees resources.
+func ClearAllSessions() {
+	sessions.Range(func(key, _ any) bool {
+		if id, ok := key.(string); ok {
+			DeleteSession(id)
+		}
+		return true
+	})
+}
+
 // CreateSession builds a Session from the request, resolving nodeIds against
 // the configured processing pool. Chapters are indexed by array position.
 // Returns the session (not yet started). The caller invokes Start.

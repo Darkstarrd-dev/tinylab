@@ -84,7 +84,22 @@ function enterFullscreen() {
   setTimeout(autoBalanceFullscreenSplitRatio, 50);
 }
 
+function onExitFullscreenPlaybackHook() {
+  if (galleryState.autoplayOn) {
+    stopAutoplay();
+  }
+  var vidEl = document.getElementById('gallery-main-video');
+  if (vidEl && !vidEl.paused) {
+    try { vidEl.pause(); } catch (e) {}
+  }
+  var curItem = galleryState.videoItems && galleryState.videoItems[galleryState.videoIndex];
+  if (curItem && isAnimatedImg(curItem) && galleryState.videoPlayingState) {
+    stopAnim();
+  }
+}
+
 function exitFullscreen() {
+  onExitFullscreenPlaybackHook();
   document.body.classList.remove('gallery-fullscreen-active');
   unbindFullscreen();
   var layout = document.getElementById('gallery-layout');
@@ -115,6 +130,7 @@ function bindFullscreen() {
   if (!galleryState.fsChangeHandler) {
     galleryState.fsChangeHandler = function() {
       if (!document.fullscreenElement) {
+        onExitFullscreenPlaybackHook();
         document.body.classList.remove('gallery-fullscreen-active');
         var layout = document.getElementById('gallery-layout');
         if (layout) layout.classList.remove('gallery-layout-fullscreen');
@@ -253,9 +269,14 @@ function onFullscreenKey(e) {
         var num = parseInt(k, 10);
         var volPct = num * 11;
         if (volPct > 100) volPct = 100;
-        if (vidEl) vidEl.volume = volPct / 100;
-        var volSlider = document.getElementById('gallery-vol-slider');
-        if (volSlider) volSlider.value = volPct;
+        galleryState.videoVolume = volPct;
+        galleryState.videoMuted = (volPct === 0);
+        if (volPct > 0) galleryState.videoPrevVolume = volPct;
+        if (vidEl) {
+          vidEl.volume = volPct / 100;
+          vidEl.muted = (volPct === 0);
+        }
+        if (typeof updateVolumeUI === 'function') updateVolumeUI(volPct, galleryState.videoMuted);
         showMsg('Volume: ' + volPct + '%');
         return;
       }
@@ -275,20 +296,28 @@ function onFullscreenKey(e) {
       if (k === 'ArrowUp') {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
-          vidEl.volume = Math.min(1, vidEl.volume + 0.1);
-          var vs1 = document.getElementById('gallery-vol-slider');
-          if (vs1) vs1.value = Math.round(vidEl.volume * 100);
-          showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+          var newVol = Math.min(100, (galleryState.videoVolume || 0) + 10);
+          galleryState.videoVolume = newVol;
+          galleryState.videoMuted = false;
+          galleryState.videoPrevVolume = newVol;
+          vidEl.volume = newVol / 100;
+          vidEl.muted = false;
+          if (typeof updateVolumeUI === 'function') updateVolumeUI(newVol, false);
+          showMsg('Volume: ' + newVol + '%');
         }
         return;
       }
       if (k === 'ArrowDown') {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
-          vidEl.volume = Math.max(0, vidEl.volume - 0.1);
-          var vs2 = document.getElementById('gallery-vol-slider');
-          if (vs2) vs2.value = Math.round(vidEl.volume * 100);
-          showMsg('Volume: ' + Math.round(vidEl.volume * 100) + '%');
+          var newVol = Math.max(0, (galleryState.videoVolume || 0) - 10);
+          galleryState.videoVolume = newVol;
+          galleryState.videoMuted = (newVol === 0);
+          if (newVol > 0) galleryState.videoPrevVolume = newVol;
+          vidEl.volume = newVol / 100;
+          vidEl.muted = (newVol === 0);
+          if (typeof updateVolumeUI === 'function') updateVolumeUI(newVol, galleryState.videoMuted);
+          showMsg('Volume: ' + newVol + '%');
         }
         return;
       }
@@ -448,9 +477,14 @@ function onGalleryKeyDown(e) {
         var num = parseInt(k, 10);
         var volPct = num * 11;
         if (volPct > 100) volPct = 100;
-        if (vidEl) vidEl.volume = volPct / 100;
-        var volSlider = document.getElementById('gallery-vol-slider');
-        if (volSlider) volSlider.value = volPct;
+        galleryState.videoVolume = volPct;
+        galleryState.videoMuted = (volPct === 0);
+        if (volPct > 0) galleryState.videoPrevVolume = volPct;
+        if (vidEl) {
+          vidEl.volume = volPct / 100;
+          vidEl.muted = (volPct === 0);
+        }
+        if (typeof updateVolumeUI === 'function') updateVolumeUI(volPct, galleryState.videoMuted);
         showMsg('Volume: ' + volPct + '%');
         return;
       }

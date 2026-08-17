@@ -159,7 +159,36 @@ function trRenderStepBar() {
     }
   }
   html += '</div>';
+  html += '<div class="tr-stepbar-actions">' +
+    '<button type="button" class="tr-stepbar-clear-btn" id="tr-clear-session-btn" onclick="trHandleClear()" title="' + trEscapeHtml(trT('clear') || 'Clear') + '">' +
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        '<polyline points="3 6 5 6 21 6"></polyline>' +
+        '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>' +
+      '</svg>' +
+      '<span>' + trEscapeHtml(trT('clear') || 'Clear') + '</span>' +
+    '</button>' +
+  '</div>';
   bar.innerHTML = html;
+}
+
+function trHandleClear() {
+  if (typeof window.trCleanupStep3 === 'function') {
+    try { window.trCleanupStep3(); } catch (e) {}
+  }
+  trApiPost('/text-review/clear', {}).catch(function () {});
+  if (typeof trResetState === 'function') {
+    trResetState();
+  } else if (window.TR_STATE && typeof window.TR_STATE.resetState === 'function') {
+    window.TR_STATE.resetState();
+  }
+  if (typeof trClearPersisted === 'function') {
+    trClearPersisted();
+  } else if (window.TR_STATE && typeof window.TR_STATE.clearPersisted === 'function') {
+    window.TR_STATE.clearPersisted();
+  }
+  trRenderStepBar();
+  trRenderStep();
+  trToast(trT('trCleared') || 'Review state cleared & memory freed', 'success');
 }
 
 /**

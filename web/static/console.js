@@ -165,6 +165,13 @@ function appendLogLine(container, line) {
   }
   if (shouldShowLogLine(line)) {
     container.appendChild(createLogLineDiv(line));
+    // 裁剪 DOM：数组有上限，DOM 节点也必须有上限，否则 WebView2 长期运行内存耗尽（OOM 空白页）
+    if (container.childElementCount > 8000) {
+      var excess = container.childElementCount - 8000;
+      for (var i = 0; i < excess; i++) {
+        container.removeChild(container.firstElementChild);
+      }
+    }
     if (consoleAutoScroll) container.scrollTop = container.scrollHeight;
   }
 }

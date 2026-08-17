@@ -254,6 +254,17 @@ func (s *gallerySessionStore) remove(owner, sessionID string) {
 	}
 }
 
+// clearOwner removes all sessions created by owner (or all if owner is empty).
+func (s *gallerySessionStore) clearOwner(owner string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range append([]string(nil), s.order...) {
+		if sess, ok := s.sessions[id]; ok && (owner == "" || sess.owner == owner) {
+			s.removeLocked(id)
+		}
+	}
+}
+
 // removeLocked deletes a single session under lock (caller must hold mu).
 func (s *gallerySessionStore) removeLocked(sessionID string) {
 	sess, ok := s.sessions[sessionID]
