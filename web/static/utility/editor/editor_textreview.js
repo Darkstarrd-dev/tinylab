@@ -25,6 +25,33 @@ function trEscapeHtml(s) {
 function trToast(m, ty) { if (typeof toast === 'function') toast(m, ty); }
 function trT(k, ar) { return typeof t === 'function' ? t(k, ar) : k; }
 
+// ===================== universal modal helper =====================
+
+function trShowModal(html) {
+  var overlay = document.getElementById('modal-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'modal-overlay';
+    overlay.className = 'modal-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = html;
+  overlay.classList.add('show');
+}
+
+function trCloseModal() {
+  var overlay = document.getElementById('modal-overlay');
+  if (overlay) {
+    overlay.classList.remove('show');
+    overlay.innerHTML = '';
+  }
+  if (typeof closeModalOverlay === 'function') {
+    closeModalOverlay();
+  }
+}
+window.trShowModal = trShowModal;
+window.trCloseModal = trCloseModal;
+
 // ===================== page-level refs (cleanup) =====================
 
 var trContainer = null;
@@ -172,31 +199,42 @@ function trRenderStepBar() {
 }
 
 function trHandleClear() {
-  if (typeof window.trCleanupStep3 === 'function') {
-    try { window.trCleanupStep3(); } catch (e) {}
+  var promptMsg = trT('trConfirmClear') || '确定要清空当前的文本审校状态与重置会话吗？';
+  var doClear = function () {
+    if (typeof window.trCleanupStep3 === 'function') {
+      try { window.trCleanupStep3(); } catch (e) {}
+    }
+    trApiPost('/text-review/clear', {}).catch(function () {});
+    if (typeof trResetState === 'function') {
+      trResetState();
+    } else if (window.TR_STATE && typeof window.TR_STATE.resetState === 'function') {
+      window.TR_STATE.resetState();
+    }
+    if (typeof trClearPersisted === 'function') {
+      trClearPersisted();
+    } else if (window.TR_STATE && typeof window.TR_STATE.clearPersisted === 'function') {
+      window.TR_STATE.clearPersisted();
+    }
+    trRenderStepBar();
+    trRenderStep();
+    trToast(trT('trCleared') || 'Review state cleared & memory freed', 'success');
+  };
+
+  if (typeof confirmModal === 'function') {
+    confirmModal(promptMsg).then(function (ok) {
+      if (ok) doClear();
+    });
+  } else {
+    if (window.confirm(promptMsg)) doClear();
   }
-  trApiPost('/text-review/clear', {}).catch(function () {});
-  if (typeof trResetState === 'function') {
-    trResetState();
-  } else if (window.TR_STATE && typeof window.TR_STATE.resetState === 'function') {
-    window.TR_STATE.resetState();
-  }
-  if (typeof trClearPersisted === 'function') {
-    trClearPersisted();
-  } else if (window.TR_STATE && typeof window.TR_STATE.clearPersisted === 'function') {
-    window.TR_STATE.clearPersisted();
-  }
-  trRenderStepBar();
-  trRenderStep();
-  trToast(trT('trCleared') || 'Review state cleared & memory freed', 'success');
 }
 
 /**
  * Step lock rules:
  *  - Step1: always reachable (re-import / re-paste).
  *  - Step2: reachable when rawText non-empty.
- *  - Step3: reachable when chapters exist (Step2 done). P6 implements it.
- *  - Step4: reachable when a session exists (Step3 started). P7 implements it.
+ *  - Step3: reachable when chapters exist (Step2 done).
+ *  - Step4: reachable when a session exists (Step3 started).
  */
 function trStepLocked(n) {
   if (n === 1) return false;
@@ -225,10 +263,6 @@ function trGotoStep(n) {
 function trRenderStep() {
   var panel = document.getElementById('tr-panel');
   if (!panel) return;
-  // Step4 uses the full editor area (left wizard + right pane); other steps
-  // keep the wizard in the left half with the right content pane beside it.
-  var wrap = document.querySelector('.ed-review-wrap');
-  if (wrap) wrap.classList.toggle('tr-s4-active', trState.step === 4);
   if (trState.step === 1 && typeof window.trRenderStep1 === 'function') {
     window.trRenderStep1(panel, trState);
   } else if (trState.step === 2 && typeof window.trRenderStep2 === 'function') {
@@ -241,3 +275,4 @@ function trRenderStep() {
     panel.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trStepUnknown')) + '</div>';
   }
 }
+

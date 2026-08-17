@@ -138,6 +138,33 @@ function trS4RenderChapterList() {
 }
 
 /**
+ * Safe aligned diff helper with fallback.
+ */
+function trS4GetAlignedDiff(oldText, newText) {
+  if (typeof window.editorAlignedDiff === 'function') {
+    return window.editorAlignedDiff(oldText || '', newText || '');
+  }
+  var oLines = (oldText || '').split(/\r?\n/);
+  var nLines = (newText || '').split(/\r?\n/);
+  var rows = [];
+  var max = Math.max(oLines.length, nLines.length);
+  for (var i = 0; i < max; i++) {
+    var o = i < oLines.length ? oLines[i] : null;
+    var n = i < nLines.length ? nLines[i] : null;
+    if (o === n) {
+      rows.push({ type: 'same', left: o, right: n });
+    } else if (o != null && n != null) {
+      rows.push({ type: 'mod', left: o, right: n });
+    } else if (o != null) {
+      rows.push({ type: 'del', left: o, right: '' });
+    } else {
+      rows.push({ type: 'add', left: '', right: n });
+    }
+  }
+  return rows;
+}
+
+/**
  * Select a chapter by backend index: compute its diff rows, bind the live
  * decisions ref from trState.lineDecisions[index], then render toolbar + diff.
  */
@@ -145,7 +172,7 @@ function trS4SelectChapter(idx) {
   var ch = trS4FindChapter(idx);
   if (!ch) return;
   trS4Selected = idx;
-  trS4Rows = window.editorAlignedDiff(ch.content || '', ch.cleaned || '');
+  trS4Rows = trS4GetAlignedDiff(ch.content || '', ch.cleaned || '');
   if (!trState.lineDecisions[idx]) trState.lineDecisions[idx] = {};
   trS4Decisions = trState.lineDecisions[idx];
   trS4ClosePreview();
@@ -416,7 +443,7 @@ function trS4FinalText() {
  * all, which walks every chapter).
  */
 function trS4ChapterFinalText(ch) {
-  var rows = window.editorAlignedDiff(ch.content || '', ch.cleaned || '');
+  var rows = trS4GetAlignedDiff(ch.content || '', ch.cleaned || '');
   var decs = trState.lineDecisions[ch.index] || {};
   return window.TR.applyLineDecisions(rows, decs);
 }

@@ -71,70 +71,83 @@ window.trRenderStep3 = function (panel, state) {
 
   panel.innerHTML =
     '<div class="tr-step-panel">' +
+      '<div class="tr-split-view">' +
+        // Left pane: node-pool + controls + tabs + card list
+        '<div class="tr-left-pane">' +
+          // node pool (config form when idle, runtime table when session live)
+          '<div class="tr-section" id="tr-s3-pool-section">' +
+            '<div class="tr-s3-node-head">' +
+              '<h3 class="tr-section-title" style="margin:0">' + trEscapeHtml(trT('trNodePool')) + '</h3>' +
+              '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-settings" onclick="trStep3OpenSettings()">' +
+                trEscapeHtml(trT('trSettings')) + '</button>' +
+            '</div>' +
+            '<p class="tr-section-desc">' + trEscapeHtml(trT('trNodePoolDesc')) + '</p>' +
+            '<div class="tr-nodes-wrap" id="tr-s3-nodes">' +
+              '<div class="tr-empty">' + trEscapeHtml(trT('trLoading')) + '</div>' +
+            '</div>' +
+            '<div class="tr-s3-total" id="tr-s3-total"></div>' +
+          '</div>' +
 
-      // node pool (config form when idle, runtime table when session live)
-      '<div class="tr-section" id="tr-s3-pool-section">' +
-        '<div class="tr-s3-node-head">' +
-          '<h3 class="tr-section-title" style="margin:0">' + trEscapeHtml(trT('trNodePool')) + '</h3>' +
-          '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-settings" onclick="trStep3OpenSettings()">' +
-            trEscapeHtml(trT('trSettings')) + '</button>' +
-        '</div>' +
-        '<p class="tr-section-desc">' + trEscapeHtml(trT('trNodePoolDesc')) + '</p>' +
-        '<div class="tr-nodes-wrap" id="tr-s3-nodes">' +
-          '<div class="tr-empty">' + trEscapeHtml(trT('trLoading')) + '</div>' +
-        '</div>' +
-        '<div class="tr-s3-total" id="tr-s3-total"></div>' +
-      '</div>' +
+          // system prompt + auto-retry (collapsible)
+          '<div class="tr-section" id="tr-s3-prompt-section">' +
+            '<h3 class="tr-section-title tr-s3-prompt-head" id="tr-s3-prompt-head" onclick="trStep3TogglePrompt()"' +
+              ' style="cursor:pointer;user-select:none">' +
+              '<span class="tr-s3-chev' + (collapsed ? ' tr-s3-chev-collapsed' : '') + '" id="tr-s3-chev">&#9660;</span> ' +
+              trEscapeHtml(trT('trSystemPrompt')) +
+            '</h3>' +
+            '<div class="tr-s3-prompt-body" id="tr-s3-prompt-body"' +
+              (collapsed ? ' style="display:none"' : '') + '>' +
+              '<textarea class="tr-textarea" id="tr-s3-prompt" placeholder="' +
+                trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
+                trEscapeHtml(state.systemPrompt || '') +
+              '</textarea>' +
+              '<label class="tr-check"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
+                (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
+            '</div>' +
+          '</div>' +
 
-      // system prompt + auto-retry (collapsible)
-      '<div class="tr-section" id="tr-s3-prompt-section">' +
-        '<h3 class="tr-section-title tr-s3-prompt-head" id="tr-s3-prompt-head" onclick="trStep3TogglePrompt()"' +
-          ' style="cursor:pointer;user-select:none">' +
-          '<span class="tr-s3-chev' + (collapsed ? ' tr-s3-chev-collapsed' : '') + '" id="tr-s3-chev">&#9660;</span> ' +
-          trEscapeHtml(trT('trSystemPrompt')) +
-        '</h3>' +
-        '<div class="tr-s3-prompt-body" id="tr-s3-prompt-body"' +
-          (collapsed ? ' style="display:none"' : '') + '>' +
-          '<textarea class="tr-textarea" id="tr-s3-prompt" placeholder="' +
-            trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
-            trEscapeHtml(state.systemPrompt || '') +
-          '</textarea>' +
-          '<label class="tr-check"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
-            (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
-        '</div>' +
-      '</div>' +
+          // run controls
+          '<div class="tr-section">' +
+            '<div class="tr-s3-controls">' +
+              '<button type="button" class="tr-btn tr-btn-ghost" onclick="trGotoStep(2)">' +
+                trEscapeHtml(trT('trPrev')) + '</button>' +
+              '<span class="tr-s3-range">' +
+                '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeStart')) + '</label>' +
+                '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-start" min="1" placeholder="' +
+                  trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeStart ? state.rangeStart : '') +
+                  '" onchange="trS3OnRangeChange()">' +
+                '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeEnd')) + '</label>' +
+                '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-end" min="1" placeholder="' +
+                  trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeEnd ? state.rangeEnd : '') +
+                  '" onchange="trS3OnRangeChange()">' +
+              '</span>' +
+              '<span class="tr-spacer"></span>' +
+              '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-startpause" onclick="trStep3StartPause()">' +
+                trEscapeHtml(trT('trStartClean')) + '</button>' +
+              '<button type="button" class="tr-btn tr-btn-danger" id="tr-s3-stop" onclick="trStep3Stop()" disabled>' +
+                trEscapeHtml(trT('trStop')) + '</button>' +
+              '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-toreview" onclick="trGotoStep(4)">' +
+                trEscapeHtml(trT('trToReview')) + '</button>' +
+            '</div>' +
+          '</div>' +
 
-      // run controls
-      '<div class="tr-section">' +
-        '<div class="tr-s3-controls">' +
-          '<button type="button" class="tr-btn tr-btn-ghost" onclick="trGotoStep(2)">' +
-            trEscapeHtml(trT('trPrev')) + '</button>' +
-          '<span class="tr-s3-range">' +
-            '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeStart')) + '</label>' +
-            '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-start" min="1" placeholder="' +
-              trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeStart ? state.rangeStart : '') +
-              '" onchange="trS3OnRangeChange()">' +
-            '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeEnd')) + '</label>' +
-            '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-end" min="1" placeholder="' +
-              trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeEnd ? state.rangeEnd : '') +
-              '" onchange="trS3OnRangeChange()">' +
-          '</span>' +
-          '<span class="tr-spacer"></span>' +
-          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-startpause" onclick="trStep3StartPause()">' +
-            trEscapeHtml(trT('trStartClean')) + '</button>' +
-          '<button type="button" class="tr-btn tr-btn-danger" id="tr-s3-stop" onclick="trStep3Stop()" disabled>' +
-            trEscapeHtml(trT('trStop')) + '</button>' +
-          '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-toreview" onclick="trGotoStep(4)">' +
-            trEscapeHtml(trT('trToReview')) + '</button>' +
+          // chapter tabs + list
+          '<div class="tr-section">' +
+            '<div class="tr-s3-tabs" id="tr-s3-tabs"></div>' +
+            '<div class="tr-s3-chapters" id="tr-s3-chapters"></div>' +
+            '<div class="tr-empty tr-s3-empty-hint" id="tr-s3-empty-hint" style="display:none">' +
+              trEscapeHtml(trT('trTabEmpty')) + '</div>' +
+          '</div>' +
         '</div>' +
-      '</div>' +
 
-      // chapter tabs + list
-      '<div class="tr-section">' +
-        '<div class="tr-s3-tabs" id="tr-s3-tabs"></div>' +
-        '<div class="tr-s3-chapters" id="tr-s3-chapters"></div>' +
-        '<div class="tr-empty tr-s3-empty-hint" id="tr-s3-empty-hint" style="display:none">' +
-          trEscapeHtml(trT('trTabEmpty')) + '</div>' +
+        // Right pane: live streaming and preview content
+        '<div class="tr-right-pane">' +
+          '<div class="tr-right-pane-head">' +
+            '<span class="tr-right-pane-title" id="tr-s3-detail-title">' + trEscapeHtml(trT('trPreview') || '正文清洗实时预览') + '</span>' +
+            '<span class="tr-count" id="tr-s3-detail-prog">0 ' + trEscapeHtml(trT('trCharCount') || '字') + '</span>' +
+          '</div>' +
+          '<pre class="tr-review-content" id="tr-review-content"></pre>' +
+        '</div>' +
       '</div>' +
     '</div>';
 
@@ -142,9 +155,6 @@ window.trRenderStep3 = function (panel, state) {
   // snapshot + re-subscribe (no Start button needed). If already subscribed
   // (re-render within Step3), just repaint from the in-memory mirror.
   if (trState.sessionId) {
-    // Optimistic sync: immediately show controls + in-memory chapter mirror so
-    // the UI is correct on re-entry (e.g. returning from Step4) before the async
-    // snapshot reconciles. trS3SessionStatus persists across page switches.
     trS3UpdateControls();
     trS3RenderChapterList();
     trS3UpdateTabCounts();
@@ -167,8 +177,7 @@ window.trRenderStep3 = function (panel, state) {
 /**
  * Fetch /api/text-review/review-nodes and render the editable node table:
  * enable checkbox + concurrency number input. Edits are persisted via
- * POST /api/text-review/review-nodes (upsert). The total concurrency of all
- * enabled nodes is shown read-only beneath the table.
+ * POST /api/text-review/review-nodes (upsert).
  */
 function trStep3LoadNodes() {
   var wrap = document.getElementById('tr-s3-nodes');
@@ -223,7 +232,7 @@ function trS3RenderConfigNodes(nodes) {
         '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
       '<td><input type="number" class="tr-node-interval" min="0" value="' + (n.intervalSec != null ? n.intervalSec : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeInterval(' + idAttr + ')"></td>' +
       '<td><input type="number" class="tr-node-batch" min="0" value="' + (n.batchChars != null ? n.batchChars : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeBatch(' + idAttr + ')"></td>' +
-    '</tr>';
+      '</tr>';
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
@@ -309,18 +318,12 @@ function trS3UpsertNode(id, enabled, concurrency) {
   }, function () { trToast(trT('trNodeSaveFailed'), 'error'); });
 }
 
-// ===================== node pool: Settings modal =====================
+// ===================== node pool: Settings modal (universal modal) =====================
 
 /**
- * Open the node pool Settings modal (pg-modal). Shows an add-node form
- * (provider select + model select + concurrency + enabled + Add) plus
- * the existing node list with Delete buttons.
+ * Open the node pool Settings modal.
  */
 function trStep3OpenSettings() {
-  if (typeof pgShowModal !== 'function') {
-    trToast(trT('trPatternEditorUnavailable'), 'warning');
-    return;
-  }
   trStep3RenderSettingsModal();
 }
 
@@ -330,27 +333,7 @@ function trStep3RenderSettingsModal() {
   trApiGet('/models').then(function (res) {
     var allModels = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
     trS3PopulateProviders(allModels);
-
-    // Extract unique providers from models
-    var providerMap = {};
-    for (var i = 0; i < allModels.length; i++) {
-      var m = allModels[i];
-      if (m.type === 'provider' && m.providerId) {
-        if (!providerMap[m.providerId]) {
-          providerMap[m.providerId] = { id: m.providerId, name: m.provider || m.providerId };
-        }
-      }
-    }
-    var providers = [];
-    for (var k in providerMap) {
-      if (Object.prototype.hasOwnProperty.call(providerMap, k)) providers.push(providerMap[k]);
-    }
-
-    var providerOpts = '';
-    for (var pi = 0; pi < providers.length; pi++) {
-      providerOpts += '<option value="' + trEscapeHtml(providers[pi].id) + '">' +
-        trEscapeHtml(providers[pi].name) + '</option>';
-    }
+    window._trS3ModalModels = allModels;
 
     // Node list rows
     var nodes = trState.reviewNodes || [];
@@ -361,7 +344,9 @@ function trStep3RenderSettingsModal() {
         '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
         '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
         '<td>' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
-        '<td>' + (n.enabled ? '&#10003;' : '&#10007;') + '</td>' +
+        '<td>' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
+        '<td>' + (n.batchChars ? n.batchChars : '-') + '</td>' +
+        '<td>' + (n.enabled ? '✓' : '✗') + '</td>' +
         '<td><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
           trEscapeHtml(n.id || '') + '\')">' + trEscapeHtml(trT('trDelete')) + '</button></td>' +
       '</tr>';
@@ -369,23 +354,35 @@ function trStep3RenderSettingsModal() {
 
     var body =
       '<div class="tr-s3-settings-section">' +
-        '<h4>' + trEscapeHtml(trT('trAddNode')) + '</h4>' +
-        '<div class="tr-s3-settings-form">' +
-          '<label class="tr-label">' + trEscapeHtml(trT('trNodeModel')) + '</label>' +
-          '<button type="button" class="pg-btn pg-model-btn" id="tr-s3-modal-model-btn" onclick="trStep3PickModel()" style="width:100%;text-align:left;justify-content:flex-start">' +
-            trEscapeHtml(trT('trSelectModel')) + ' <span style="float:right;opacity:0.5">▼</span></button>' +
-          '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + '</label>' +
-          '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:80px">' +
-          '<label class="tr-label">' + trEscapeHtml(trT('trIntervalSec')) + '</label>' +
-          '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0" style="width:80px">' +
-          '<label class="tr-label">' + trEscapeHtml(trT('trBatchChars')) + '</label>' +
-          '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0" style="width:80px">' +
-          '<label class="tr-check">' +
-            '<input type="checkbox" id="tr-s3-modal-enabled" checked> ' +
-            trEscapeHtml(trT('trNodeEnabled')) +
-          '</label>' +
-          '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep3AddNode()">' +
-            trEscapeHtml(trT('trAdd')) + '</button>' +
+        '<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trAddNode')) + '</h4>' +
+        '<div class="tr-s3-settings-form" style="display:flex; flex-direction:column; gap:12px;">' +
+          '<div>' +
+            '<label class="tr-label" style="display:block; margin-bottom:4px;">' + trEscapeHtml(trT('trNodeModel')) + '</label>' +
+            '<button type="button" class="btn btn-ghost" id="tr-s3-modal-model-btn" onclick="trStep3PickModel()" style="width:100%; text-align:left; justify-content:space-between; padding:8px 12px; border:1px solid var(--glass-border); border-radius:var(--radius-xs,4px); background:var(--input-bg);">' +
+              '<span id="tr-s3-modal-model-txt">' + trEscapeHtml(trT('trSelectModel') || '点击选择模型 (Click to select model)...') + '</span>' +
+              '<span style="opacity:0.6;">▼</span>' +
+            '</button>' +
+          '</div>' +
+          '<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">' +
+            '<div style="display:flex; align-items:center; gap:6px;">' +
+              '<label class="tr-label">' + trEscapeHtml(trT('trNodeConcurrency')) + ':</label>' +
+              '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1" style="width:65px;">' +
+            '</div>' +
+            '<div style="display:flex; align-items:center; gap:6px;">' +
+              '<label class="tr-label">' + trEscapeHtml(trT('trIntervalSec')) + ':</label>' +
+              '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0" style="width:65px;">' +
+            '</div>' +
+            '<div style="display:flex; align-items:center; gap:6px;">' +
+              '<label class="tr-label">' + trEscapeHtml(trT('trBatchChars')) + ':</label>' +
+              '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0" style="width:75px;">' +
+            '</div>' +
+            '<label class="tr-check" style="margin-left:4px;">' +
+              '<input type="checkbox" id="tr-s3-modal-enabled" checked> ' +
+              trEscapeHtml(trT('trNodeEnabled')) +
+            '</label>' +
+            '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep3AddNode()" style="margin-left:auto;">' +
+              trEscapeHtml(trT('trAdd')) + '</button>' +
+          '</div>' +
         '</div>' +
       '</div>';
 
@@ -393,11 +390,13 @@ function trStep3RenderSettingsModal() {
       body +=
         '<hr class="tr-pe-sep">' +
         '<div class="tr-s3-settings-section">' +
-          '<h4>' + trEscapeHtml(trT('trNodePool')) + '</h4>' +
+          '<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trNodePool')) + '</h4>' +
           '<table class="tr-pe-table" style="width:100%"><thead><tr>' +
             '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
             '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
             '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
+            '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
+            '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
             '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
             '<th></th>' +
           '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
@@ -405,50 +404,101 @@ function trStep3RenderSettingsModal() {
     }
 
     var html =
-      '<div class="pg-modal-header">' +
-        '<span class="pg-modal-title">' + trEscapeHtml(trT('trSettings')) + ' — ' +
-          trEscapeHtml(trT('trNodePool')) + '</span>' +
-        '<button class="pg-modal-close" onclick="pgCloseModal();trStep3OnSettingsClosed()">&#10005;</button>' +
-      '</div>' +
-      '<div class="pg-modal-body" style="max-height:70vh;overflow-y:auto">' + body + '</div>';
+      '<div class="modal" style="max-width:720px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
+        '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<span>' + trEscapeHtml(trT('trSettings')) + ' — ' + trEscapeHtml(trT('trNodePool')) + '</span>' +
+          '<button type="button" class="btn btn-ghost btn-sm" onclick="trCloseModal();trStep3OnSettingsClosed()" style="padding:2px 8px;">✕</button>' +
+        '</div>' +
+        '<div class="modal-body" style="flex:1; overflow-y:auto; padding:12px 0;">' + body + '</div>' +
+        '<div class="modal-footer" style="margin-top:10px;">' +
+          '<button type="button" class="btn btn-ghost" onclick="trCloseModal();trStep3OnSettingsClosed()">' + trEscapeHtml(trT('cancel') || '关闭') + '</button>' +
+        '</div>' +
+      '</div>';
 
-    pgShowModal(html);
-
-    // Store model data for filtering
-    window._trS3ModalModels = allModels;
+    if (typeof window.trShowModal === 'function') {
+      window.trShowModal(html);
+    } else if (typeof pgShowModal === 'function') {
+      pgShowModal(html);
+    }
   }, function () {
     trToast(trT('trNodesLoadFailed'), 'error');
   });
 }
 
-/** Select a text model without requiring Playground globals. */
+/**
+ * Select an AI model using the system Model Picker modal.
+ */
 function trStep3PickModel() {
-  var current = trS3ModalModel ? trS3ModalModel.modelId : '';
-  trApiGet('/models').then(function (res) {
-    var all = res && Array.isArray(res.models) ? res.models : (Array.isArray(res) ? res : []);
-    var choices = [];
+  var cur = trS3ModalModel ? (trS3ModalModel.providerId + '/' + trS3ModalModel.modelId) : '';
+  
+  var onModelSelected = function (val) {
+    if (!val) return;
+    var all = window._trS3ModalModels || [];
+    var providerId = '';
+    var modelId = '';
+    var label = val;
+
+    // Check if val is formatted as "providerId/modelId" or "combo:xxx"
+    var slash = val.indexOf('/');
+    if (slash > 0) {
+      providerId = val.slice(0, slash);
+      modelId = val.slice(slash + 1);
+    } else {
+      modelId = val;
+    }
+
+    // Lookup in all models for matching real model and provider info
     for (var i = 0; i < all.length; i++) {
       var m = all[i];
-      if (m && (m.type === 'provider' || m.providerId || m.realModelId || m.id)) choices.push(m);
+      if (m.id === val || (m.providerId === providerId && (m.realModelId === modelId || m.id === modelId))) {
+        if (!providerId && m.providerId) providerId = m.providerId;
+        label = (m.provider ? m.provider + ' / ' : '') + (m.alias || m.name || m.realModelId || m.id);
+        break;
+      }
     }
-    var labels = choices.map(function (m, n) { return (n + 1) + ': ' + (m.alias || m.name || m.realModelId || m.id); });
-    var answer = window.prompt(labels.length ? labels.join('\n') + '\n\n' + trT('trSelectModel') : trT('trSelectModel'), current || '');
-    if (answer === null) return;
-    var selected = choices[parseInt(answer, 10) - 1] || null;
-    var id = selected ? (selected.realModelId || selected.id) : answer.trim();
-    if (!id) return;
+
+    // Fallback provider ID from prefix map if needed
+    if (!providerId && slash > 0) {
+      var prefix = val.slice(0, slash);
+      for (var pid in trS3ProviderPrefixes) {
+        if (trS3ProviderPrefixes[pid] === prefix) {
+          providerId = pid;
+          break;
+        }
+      }
+    }
+
+    if (!providerId && slash > 0) {
+      providerId = val.slice(0, slash);
+    }
+
     trS3ModalModel = {
-      providerId: selected ? (selected.providerId || '') : '',
-      modelId: id,
-      label: selected ? (selected.alias || selected.name || id) : id
+      providerId: providerId,
+      modelId: modelId,
+      label: label
     };
-    var btn = document.getElementById('tr-s3-modal-model-btn');
-    if (btn) btn.textContent = trS3ModalModel.label;
-  }, function () { trToast(trT('trNodesLoadFailed'), 'warning'); });
+
+    var btnTxt = document.getElementById('tr-s3-modal-model-txt');
+    if (btnTxt) {
+      btnTxt.textContent = label;
+      btnTxt.style.fontWeight = '600';
+    }
+    // Re-open settings modal to resume flow
+    trStep3RenderSettingsModal();
+  };
+
+  if (typeof window.openModelPickerModal === 'function') {
+    window.openModelPickerModal(cur, onModelSelected);
+  } else if (typeof pgOpenModelPicker === 'function') {
+    pgOpenModelPicker(cur, onModelSelected);
+  } else {
+    trToast('Model picker unavailable', 'warning');
+  }
 }
+
 function trStep3AddNode() {
-  if (!trS3ModalModel || !trS3ModalModel.providerId) {
-    trToast(trT('trSelectModel'), 'warning');
+  if (!trS3ModalModel || !trS3ModalModel.providerId || !trS3ModalModel.modelId) {
+    trToast(trT('trSelectModel') || '请先选择模型', 'warning');
     return;
   }
   var concEl = document.getElementById('tr-s3-modal-conc');
@@ -465,6 +515,8 @@ function trStep3AddNode() {
   };
   trApiPost('/text-review/review-nodes', body).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
+    trToast('节点添加成功', 'success');
+    trS3ModalModel = null;
     return trApiGet('/text-review/review-nodes');
   }).then(function (res) {
     var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
@@ -513,6 +565,7 @@ function trStep3OnSettingsClosed() {
 function trS3RenderRuntimeNodes(nodes) {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
+
   if (!nodes || nodes.length === 0) {
     wrap.innerHTML = '';
     trS3RenderTotal(0);
@@ -790,7 +843,7 @@ function trS3CardProgress(c) {
 }
 
 // trS3SelectChapter selects a chapter card: highlights it and renders its
-// content (or cleaned stream) in the right content pane (#ed-review-content).
+// content (or cleaned stream) in the right content pane.
 function trS3SelectChapter(idx) {
   if (idx < 0 || idx >= trS3Chapters.length) return;
   trS3SelectedIdx = idx;
@@ -798,12 +851,12 @@ function trS3SelectChapter(idx) {
   for (var i = 0; i < cards.length; i++) cards[i].classList.remove('selected');
   var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + idx + '"]');
   if (card) card.classList.add('selected');
-  var pane = document.getElementById('ed-review-content');
+  var pane = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
   if (!pane) return;
   var c = trS3Chapters[idx];
   var text;
   if (c.status === 'processing') {
-    text = c.cleaned || '';
+    text = c.cleaned || c.content || '';
   } else if (c.status === 'completed' || c.status === 'failed') {
     text = c.cleaned || c.content || '';
   } else {
@@ -811,6 +864,11 @@ function trS3SelectChapter(idx) {
   }
   if (c.status === 'failed' && c.error) text += (text ? '\n\n' : '') + '[' + c.error + ']';
   pane.textContent = text;
+  var titleEl = document.getElementById('tr-s3-detail-title');
+  if (titleEl) titleEl.textContent = (c.title || ('#' + (idx + 1))) + ' (' + trT('trStatus_' + (c.status || 'pending')) + ')';
+  var progEl = document.getElementById('tr-s3-detail-prog');
+  if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
+
   if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
 }
 // trS3PassChapter manually passes a processing/failed chapter: moves it to
@@ -941,14 +999,17 @@ function trS3OnChunk(evt) {
   trS3UpdateCardStatus(idx);
   // Mirror the stream into the right content pane when this chapter is selected.
   if (idx === trS3SelectedIdx) {
-    var pane = document.getElementById('ed-review-content');
+    var pane = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
     if (pane) {
       pane.textContent = c.cleaned;
       if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
     }
+    var progEl = document.getElementById('tr-s3-detail-prog');
+    if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
   }
   if (old !== 'processing') trS3UpdateTabCounts();
 }
+
 
 /**
  * status: update chapter chapterIdx's status badge (+ error/nodeId if present).

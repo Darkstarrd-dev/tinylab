@@ -419,6 +419,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     editorExportHtml: 'HTML',
     // Text Review (AI 文本审校) keys
     trStepImport: 'Import', trStepSplit: 'Split', trStepClean: 'AI Clean', trStepReview: 'Review',
+    trConfirmClear: 'Are you sure you want to clear current review state and reset session?',
     trImportDesc: 'Open a text file or paste the novel text to begin.', trOpenFile: 'Open File',
     trPasteHere: 'Or paste text here:', trPastePlaceholder: 'Paste the novel text here...',
     trPastedText: 'Pasted text', trFileName: 'File', trFileSize: 'Size', trFileEncoding: 'Encoding',
@@ -1173,6 +1174,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     editorWorkspace: '工作区', editorLocalSaved: '本地已保存', editorExternalFile: '外部文件', editorDirty: '有未保存的更改',
     // Text Review (AI 文本审校) keys
     trStepImport: '导入', trStepSplit: '切分', trStepClean: 'AI 清理', trStepReview: '审校',
+    trConfirmClear: '确定要清空当前的文本审校状态与重置会话吗？',
     trImportDesc: '打开文本文件或粘贴小说正文以开始。', trOpenFile: '打开文件',
     trPasteHere: '或在此粘贴文本：', trPastePlaceholder: '在此粘贴小说正文...',
     trPastedText: '粘贴的文本', trFileName: '文件', trFileSize: '大小', trFileEncoding: '编码',

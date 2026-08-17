@@ -41,6 +41,15 @@ window.trRenderStep2 = function (panel, state) {
   root.style.minHeight = '0';
   panel.appendChild(root);
 
+  var splitView = document.createElement('div');
+  splitView.className = 'tr-split-view';
+  root.appendChild(splitView);
+
+  // --- Left Pane: controls + table ---
+  var leftPane = document.createElement('div');
+  leftPane.className = 'tr-left-pane';
+  splitView.appendChild(leftPane);
+
   // --- Header row: Back left | centered Title | Next right ---
   var header = document.createElement('div');
   header.className = 'tr-s2-header';
@@ -74,7 +83,7 @@ window.trRenderStep2 = function (panel, state) {
   headerRight.appendChild(nextBtn);
   header.appendChild(headerRight);
 
-  root.appendChild(header);
+  leftPane.appendChild(header);
 
   // --- Config Panel (collapsible 2-column grid, hidden by default on step entry) ---
   var configPanel = document.createElement('div');
@@ -156,7 +165,7 @@ window.trRenderStep2 = function (panel, state) {
   grid.appendChild(customRow);
 
   configPanel.appendChild(grid);
-  root.appendChild(configPanel);
+  leftPane.appendChild(configPanel);
 
   // --- Controls2: four buttons ---
   var c2 = document.createElement('div');
@@ -191,13 +200,13 @@ window.trRenderStep2 = function (panel, state) {
   aiBtn.addEventListener('click', trStep2AISplit);
   c2.appendChild(aiBtn);
 
-  root.appendChild(c2);
+  leftPane.appendChild(c2);
 
   // --- Detect info hint ---
   var infoEl = document.createElement('div');
   infoEl.className = 'tr-hint';
   infoEl.id = 'tr-s2-detect-info';
-  root.appendChild(infoEl);
+  leftPane.appendChild(infoEl);
 
   // --- Preview section: fills remaining height ---
   var previewSection = document.createElement('div');
@@ -236,7 +245,18 @@ window.trRenderStep2 = function (panel, state) {
   previewWrap.id = 'tr-s2-preview';
   previewSection.appendChild(previewWrap);
 
-  root.appendChild(previewSection);
+  leftPane.appendChild(previewSection);
+
+  // --- Right Pane: Chapter Content Preview ---
+  var rightPane = document.createElement('div');
+  rightPane.className = 'tr-right-pane';
+  rightPane.innerHTML =
+    '<div class="tr-right-pane-head">' +
+      '<span class="tr-right-pane-title" id="tr-s2-detail-title">' + trEscapeHtml(trT('trChapterTitle') || '章节正文预览') + '</span>' +
+      '<span class="tr-count" id="tr-s2-detail-len">0 ' + trEscapeHtml(trT('trCharCount') || '字') + '</span>' +
+    '</div>' +
+    '<pre class="tr-review-content" id="tr-review-content"></pre>';
+  splitView.appendChild(rightPane);
 
   // --- Auto-detect on fresh entry (no existing chapters) ---
   if (freshEntry) {
@@ -385,6 +405,8 @@ function trStep2RenderPreview() {
   if (!wrap) return;
   if (chapters.length === 0) {
     wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNoChapters')) + '</div>';
+    var paneEmpty = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
+    if (paneEmpty) paneEmpty.textContent = '';
     return;
   }
   var html = '<table class="tr-preview-table"><thead><tr>' +
@@ -403,15 +425,28 @@ function trStep2RenderPreview() {
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
+  // Auto-select first chapter for immediate preview
+  trS2SelectChapter(0);
 }
+
 // trS2SelectChapter shows the chapter's original content in the right pane
-// (#ed-review-content) so the user can preview a split chapter before cleaning.
+// so the user can preview a split chapter before cleaning.
 function trS2SelectChapter(idx) {
   var chapters = trState.chapters || [];
   if (idx < 0 || idx >= chapters.length) return;
-  var pane = document.getElementById('ed-review-content');
-  if (!pane) return;
-  pane.textContent = chapters[idx].content || '';
+  var c = chapters[idx];
+  var pane = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
+  if (pane) {
+    pane.textContent = c.content || '';
+  }
+  var titleEl = document.getElementById('tr-s2-detail-title');
+  if (titleEl) {
+    titleEl.textContent = (c.title || ('#' + (idx + 1))) + (c.isVolume ? ' (卷)' : '');
+  }
+  var lenEl = document.getElementById('tr-s2-detail-len');
+  if (lenEl) {
+    lenEl.textContent = ((c.content || '').length) + ' ' + (trT('trCharCount') || '字');
+  }
   var rows = document.querySelectorAll('#tr-s2-preview tbody tr');
   for (var i = 0; i < rows.length; i++) rows[i].classList.remove('selected');
   if (rows[idx]) rows[idx].classList.add('selected');
@@ -423,8 +458,7 @@ function trS2SelectChapter(idx) {
  * "AI 拆分": send the rawText (or a truncated prefix if very large) to
  * /v1/chat/completions (stream:false) with a split prompt; parse the returned
  * title lines and re-split using a synthesized custom regex OR just refresh
- * the detect info. This is a one-shot, best-effort feature — failures are
- * surfaced as a toast and leave the existing regex split intact.
+ * the detect info.
  */
 function trStep2AISplit() {
   if (!trState.rawText) {
@@ -434,60 +468,68 @@ function trStep2AISplit() {
   var btn = document.getElementById('tr-s2-aisplit');
   if (btn) { btn.disabled = true; btn.textContent = trT('trWorking'); }
 
-  // Find first enabled review node for model routing through the proxy.
-  var node = (trState.reviewNodes || []).filter(function (n) { return n.enabled; })[0];
-  if (!node) {
-    if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-    trToast(trT('trAISplitNoNode'), 'warning');
-    return;
-  }
-  // Build model string: proxy expects "providerPrefix/modelId" format.
-  // modelId may or may not already include the prefix; if not, resolve it.
-  var modelStr = node.modelId || '';
-  if (modelStr.indexOf('/') === -1) {
-    var prefix = (window._trS3ProviderPrefix && window._trS3ProviderPrefix(node.providerId)) || '';
-    if (prefix) {
-      modelStr = prefix + '/' + modelStr;
-    }
-  }
+  // Ensure review nodes are loaded before attempting routing
+  var ensureNodesP = (trState.reviewNodes && trState.reviewNodes.length > 0)
+    ? Promise.resolve(trState.reviewNodes)
+    : trApiGet('/text-review/review-nodes').then(function (res) {
+        var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
+        trState.reviewNodes = nodes;
+        return nodes;
+      }, function () { return []; });
 
-  var sample = trState.rawText.length > 20000 ? trState.rawText.slice(0, 20000) : trState.rawText;
-  var body = {
-    model: modelStr,
-    stream: false,
-    messages: [
-      { role: 'system', content: TR_AI_SPLIT_PROMPT },
-      { role: 'user', content: sample }
-    ]
-  };
-  fetch('/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  })
-    .then(function (resp) { return resp.json(); })
-    .then(function (data) {
+  ensureNodesP.then(function (nodes) {
+    var node = (nodes || []).filter(function (n) { return n.enabled; })[0];
+    if (!node) {
       if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-      if (!data || data.error) {
-        var em = (data && data.error);
-        if (em && typeof em !== 'string') em = JSON.stringify(em);
-        trToast(em || trT('trAISplitFailed'), 'error');
-        return;
+      trToast(trT('trNoNodesEnabled') || '请先在 Step 3 节点池中配置并启用模型', 'warning');
+      return;
+    }
+
+    var modelStr = node.modelId || '';
+    if (modelStr.indexOf('/') === -1) {
+      var prefix = (window._trS3ProviderPrefix && window._trS3ProviderPrefix(node.providerId)) || '';
+      if (prefix) {
+        modelStr = prefix + '/' + modelStr;
       }
-      var content = trExtractChatContent(data);
-      var info = document.getElementById('tr-s2-detect-info');
-      if (info && content) {
-        var lines = content.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return !!l; });
-        info.textContent = trT('trAISplitResult', [String(lines.length)]) + (lines.length ? '：' + lines.slice(0, 5).join('、') : '');
-      } else if (info) {
-        info.textContent = trT('trAISplitEmpty');
-      }
+    }
+
+    var sample = trState.rawText.length > 20000 ? trState.rawText.slice(0, 20000) : trState.rawText;
+    var body = {
+      model: modelStr,
+      stream: false,
+      messages: [
+        { role: 'system', content: TR_AI_SPLIT_PROMPT },
+        { role: 'user', content: sample }
+      ]
+    };
+    return fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     })
-    .catch(function (err) {
-      if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-      console.warn('tr AI split failed:', err);
-      trToast(trT('trAISplitFailed'), 'error');
-    });
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
+        if (!data || data.error) {
+          var em = (data && data.error);
+          if (em && typeof em !== 'string') em = JSON.stringify(em);
+          trToast(em || trT('trAISplitFailed'), 'error');
+          return;
+        }
+        var content = trExtractChatContent(data);
+        var info = document.getElementById('tr-s2-detect-info');
+        if (info && content) {
+          var lines = content.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return !!l; });
+          info.textContent = trT('trAISplitResult', [String(lines.length)]) + (lines.length ? '：' + lines.slice(0, 5).join('、') : '');
+        } else if (info) {
+          info.textContent = trT('trAISplitEmpty');
+        }
+      });
+  }).catch(function (err) {
+    if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
+    console.warn('tr AI split failed:', err);
+    trToast(trT('trAISplitFailed'), 'error');
+  });
 }
 
 /**
@@ -504,18 +546,12 @@ function trExtractChatContent(data) {
   return '';
 }
 
-// ===================== Step2: pattern editor drawer =====================
+// ===================== Step2: pattern editor drawer (universal modal) =====================
 
 /**
- * Open a pg-modal drawer to add/delete custom split patterns. Delegates to
- * pg-modal (pgShowModal/pgCloseModal) for the overlay; calls POST/DELETE
- * /api/text-review/split-patterns (P1) and refreshes trState.splitPatterns.
+ * Open a universal modal to add/delete custom split patterns.
  */
 function trStep2OpenPatternEditor() {
-  if (typeof pgShowModal !== 'function') {
-    trToast(trT('trPatternEditorUnavailable'), 'warning');
-    return;
-  }
   trStep2RenderPatternEditor();
 }
 
@@ -539,33 +575,42 @@ function trStep2RenderPatternEditor() {
       '</tr>';
   }
   var html =
-    '<div class="pg-modal-header">' +
-      '<span class="pg-modal-title">' + trEscapeHtml(trT('trPatternEditor')) + '</span>' +
-      '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>' +
-    '</div>' +
-    '<div class="pg-modal-body" style="max-height:70vh;overflow-y:auto">' +
-      '<table class="tr-pe-table"><thead><tr>' +
-        '<th>' + trEscapeHtml(trT('trPatternKey')) + '</th>' +
-        '<th>' + trEscapeHtml(trT('trPatternLabel')) + '</th>' +
-        '<th>' + trEscapeHtml(trT('trPatternRegex')) + '</th>' +
-        '<th>' + trEscapeHtml(trT('trActions')) + '</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table>' +
-      '<hr class="tr-pe-sep">' +
-      '<h4>' + trEscapeHtml(trT('trAddPattern')) + '</h4>' +
-      '<div class="tr-pe-form">' +
-        '<input type="text" id="tr-pe-new-key" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternKeyPlaceholder')) + '">' +
-        '<input type="text" id="tr-pe-new-label" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternLabelPlaceholder')) + '">' +
-        '<input type="text" id="tr-pe-new-regex" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternRegexPlaceholder')) + '">' +
-        '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep2AddPattern()">' + trEscapeHtml(trT('trAdd')) + '</button>' +
+    '<div class="modal" style="max-width:680px; width:92%; max-height:85vh; display:flex; flex-direction:column;">' +
+      '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
+        '<span>' + trEscapeHtml(trT('trPatternEditor')) + '</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="trCloseModal()" style="padding:2px 8px;">✕</button>' +
       '</div>' +
-      '<p class="tr-hint">' + trEscapeHtml(trT('trPatternRegexHint')) + '</p>' +
+      '<div class="modal-body" style="flex:1; overflow-y:auto; padding:12px 0;">' +
+        '<table class="tr-pe-table"><thead><tr>' +
+          '<th>' + trEscapeHtml(trT('trPatternKey')) + '</th>' +
+          '<th>' + trEscapeHtml(trT('trPatternLabel')) + '</th>' +
+          '<th>' + trEscapeHtml(trT('trPatternRegex')) + '</th>' +
+          '<th>' + trEscapeHtml(trT('trActions')) + '</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<hr class="tr-pe-sep">' +
+        '<h4 style="margin:8px 0 10px 0; font-size:13px; font-weight:600;">' + trEscapeHtml(trT('trAddPattern')) + '</h4>' +
+        '<div class="tr-pe-form">' +
+          '<input type="text" id="tr-pe-new-key" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternKeyPlaceholder')) + '" style="max-width:120px;">' +
+          '<input type="text" id="tr-pe-new-label" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternLabelPlaceholder')) + '" style="max-width:140px;">' +
+          '<input type="text" id="tr-pe-new-regex" class="tr-input" placeholder="' + trEscapeHtml(trT('trPatternRegexPlaceholder')) + '">' +
+          '<button type="button" class="tr-btn tr-btn-primary" onclick="trStep2AddPattern()">' + trEscapeHtml(trT('trAdd')) + '</button>' +
+        '</div>' +
+        '<p class="tr-hint">' + trEscapeHtml(trT('trPatternRegexHint')) + '</p>' +
+      '</div>' +
+      '<div class="modal-footer" style="margin-top:10px;">' +
+        '<button type="button" class="btn btn-ghost" onclick="trCloseModal()">' + trEscapeHtml(trT('cancel') || '关闭') + '</button>' +
+      '</div>' +
     '</div>';
-  pgShowModal(html);
+
+  if (typeof window.trShowModal === 'function') {
+    window.trShowModal(html);
+  } else if (typeof pgShowModal === 'function') {
+    pgShowModal(html);
+  }
 }
 
 /**
- * Add a custom pattern via POST /api/text-review/split-patterns (P1), then
- * re-merge backend patterns and refresh the drawer.
+ * Add a custom pattern via POST /api/text-review/split-patterns (P1).
  */
 function trStep2AddPattern() {
   var keyEl = document.getElementById('tr-pe-new-key');
@@ -575,6 +620,14 @@ function trStep2AddPattern() {
   var label = labelEl ? labelEl.value.trim() : '';
   var regex = regexEl ? regexEl.value.trim() : '';
   if (!key) { trToast(trT('trPatternKeyRequired'), 'warning'); return; }
+  if (regex) {
+    try {
+      new RegExp(regex);
+    } catch (e) {
+      trToast('正则表达式语法错误: ' + e.message, 'warning');
+      return;
+    }
+  }
   trApiPost('/text-review/split-patterns', {
     key: key, label: label || key, regex: regex, builtin: false
   }).then(function (res) {
@@ -593,8 +646,6 @@ function trStep2AddPattern() {
 
 /**
  * Delete a pattern via DELETE /api/text-review/split-patterns/{key} (P1).
- * Built-in keys are blocked server-side anyway; we guard the 'custom' row
- * client-side (it has no delete button).
  */
 function trStep2DeletePattern(key) {
   if (!key || key === 'custom') return;
@@ -630,3 +681,4 @@ function trStep2Next() {
   trSave();
   trGotoStep(3);
 }
+
