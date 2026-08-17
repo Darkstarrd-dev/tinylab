@@ -368,7 +368,6 @@ function trStep2ReSplit() {
   if (panel && panel.style.display === 'none') {
     panel.style.display = '';
     trState.configPanelExpanded = true;
-    return;
   }
   trStep2DoSplit();
 }
@@ -569,8 +568,8 @@ function trStep2RenderPatternEditor() {
         '<td class="tr-pe-regex">' + trEscapeHtml(src) + '</td>' +
         '<td class="tr-pe-actions">' +
           (isCustom ? '' :
-            '<button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep2DeletePattern(\'' +
-              trEscapeHtml(p.key) + '\')">' + trEscapeHtml(trT('trDelete')) + '</button>') +
+            '<button type="button" class="tr-btn tr-btn-xs tr-btn-danger" data-key="' +
+              trEscapeHtml(p.key) + '" onclick="trStep2DeletePattern(this.getAttribute(\'data-key\'))">' + trEscapeHtml(trT('trDelete')) + '</button>') +
         '</td>' +
       '</tr>';
   }

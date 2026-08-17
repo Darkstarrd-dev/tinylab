@@ -451,6 +451,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     trNodesLoadFailed: 'Failed to load nodes', trNodeEnabled: 'Enabled', trNodeProvider: 'Provider',
     trNodeModel: 'Model', trNodeConcurrency: 'Concurrency', trIntervalSec: 'Min interval (s)', trBatchChars: 'Batch size (chars)', trRangeStart: 'From chapter', trRangeEnd: 'To chapter', trRangeAll: 'all', trPass: 'Pass', trSelectModel: 'Select Model',
     trSystemPrompt: 'System Prompt', trSystemPromptPlaceholder: 'Cleanup system prompt (sent to each chapter)',
+    trSavePromptDefault: 'Save as Default', trResetPromptDefault: 'Restore Built-in Default',
+    trPromptSaved: 'Default prompt saved', trPromptReset: 'Prompt restored to built-in default', trPromptSaveFailed: 'Failed to save default prompt',
     trAutoRetry: 'Auto-retry failed chapters on node exhaustion', trStartClean: 'Start Clean',
     trSaveFailed: 'Failed to save session to local storage',
     // Step3 (P6) keys
@@ -1208,6 +1210,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     trNodesLoadFailed: '加载节点失败', trNodeEnabled: '启用', trNodeProvider: '服务商',
     trNodeModel: '模型', trNodeConcurrency: '并发数', trIntervalSec: '请求间隔(秒)', trBatchChars: '批次大小(字符)', trRangeStart: '起始章节', trRangeEnd: '结束章节', trRangeAll: '全部', trPass: '通过', trSelectModel: '选择模型',
     trSystemPrompt: '系统提示词', trSystemPromptPlaceholder: '清理用系统提示词（每章发送）',
+    trSavePromptDefault: '保存为默认', trResetPromptDefault: '恢复系统默认',
+    trPromptSaved: '已保存为默认提示词', trPromptReset: '提示词已恢复为系统默认', trPromptSaveFailed: '保存默认提示词失败',
     trAutoRetry: '节点耗尽时自动重试失败章节', trStartClean: '开始清理',
     trSaveFailed: '保存会话到本地存储失败',
     // Step3 (P6) keys

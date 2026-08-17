@@ -140,7 +140,7 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 	s.unlock()
 
 	for _, idx := range batch {
-		broadcast(s, Event{Type: EventStatus, ChapterIdx: idx, Status: StatusProcessing, NodeID: nodeID})
+		broadcast(s, Event{Type: EventStatus, ChapterIdx: intPtr(idx), Status: StatusProcessing, NodeID: nodeID})
 	}
 	broadcast(s, Event{Type: EventNode, Nodes: e.nodeSnapshot(s)})
 
@@ -154,7 +154,7 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 		s.lock()
 		s.Chapters[idx].Cleaned += delta
 		s.unlock()
-		broadcast(s, Event{Type: EventChunk, ChapterIdx: idx, Delta: delta})
+		broadcast(s, Event{Type: EventChunk, ChapterIdx: intPtr(idx), Delta: delta})
 	}
 
 	var res CleanResult
@@ -244,7 +244,7 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 
 	broadcast(s, Event{Type: EventNode, Nodes: e.nodeSnapshot(s)})
 	for _, o := range outs {
-		broadcast(s, Event{Type: EventStatus, ChapterIdx: o.idx, Status: o.status, Error: o.errMsg, NodeID: nodeID})
+		broadcast(s, Event{Type: EventStatus, ChapterIdx: intPtr(o.idx), Status: o.status, Error: o.errMsg, NodeID: nodeID})
 	}
 }
 
@@ -487,7 +487,7 @@ func (e *Engine) ReprocessChapter(s *Session, idx int) bool {
 	s.Chapters[idx].Error = ""
 	running := s.Status == SessionRunning || s.Status == SessionPaused
 	s.unlock()
-	broadcast(s, Event{Type: EventStatus, ChapterIdx: idx, Status: StatusPending})
+	broadcast(s, Event{Type: EventStatus, ChapterIdx: intPtr(idx), Status: StatusPending})
 	if !running {
 		e.Start(s)
 	}

@@ -76,10 +76,14 @@ func (h *Handler) sessionEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
 
+	// Subscribe BEFORE the initial flush: callers that synchronize on the
+	// flush (tests, reconnecting clients) must be guaranteed that every
+	// event broadcast after the flush reaches this subscriber.
 	sub := tr.Subscribe(s)
 	defer tr.Unsubscribe(s, sub)
+
+	flusher.Flush()
 	ctx := r.Context()
 	for {
 		select {

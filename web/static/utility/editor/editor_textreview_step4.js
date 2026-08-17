@@ -499,6 +499,8 @@ function trS4ExportAll() {
     parts.push('\n## ' + title + '\n\n' + trS4ChapterFinalText(c));
   }
   var base = (trS4Snapshot && trS4Snapshot.fileName) ? trS4SafeName(trS4Snapshot.fileName) : 'text-review';
+  var dotIdx = base.lastIndexOf('.');
+  if (dotIdx > 0) base = base.substring(0, dotIdx);
   var name = base + '-cleaned.txt';
   trS4Download(name, parts.join('\n\n').replace(/^\n+/, ''));
   trToast(trT('trS4ExportDone') + ': ' + name, 'info');

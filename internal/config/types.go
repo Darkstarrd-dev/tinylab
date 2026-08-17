@@ -317,6 +317,7 @@ type TextReviewConfig struct {
 	Nodes                 []TextReviewNode `yaml:"nodes,omitempty" json:"nodes,omitempty"`
 	SplitPatterns         []SplitPattern   `yaml:"splitPatterns,omitempty" json:"splitPatterns,omitempty"`
 	DefaultPromptPresetID string           `yaml:"defaultPromptPresetId,omitempty" json:"defaultPromptPresetId,omitempty"`
+	Prompt                string           `yaml:"prompt,omitempty" json:"prompt,omitempty"`
 }
 
 // AnySearchConfig stores the configuration for the AnySearch web search feature.

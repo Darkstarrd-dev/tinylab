@@ -73,6 +73,26 @@ function trS3PopulateProviders(models) {
 window.trRenderStep3 = function (panel, state) {
   var collapsed = state.promptCollapsed !== false; // default true
 
+  // Ensure system prompt is seeded from backend default if unset
+  if (!state.systemPrompt) {
+    if (window.TR_DEFAULT_PROMPT) {
+      state.systemPrompt = window.TR_DEFAULT_PROMPT;
+    } else {
+      trApiGet('/text-review/prompt-default').then(function (res) {
+        if (res && res.systemPrompt) {
+          window.TR_DEFAULT_PROMPT = res.systemPrompt;
+          if (res.builtinPrompt) window.TR_BUILTIN_PROMPT = res.builtinPrompt;
+          if (!trState.systemPrompt) {
+            trState.systemPrompt = res.systemPrompt;
+            var ta = document.getElementById('tr-s3-prompt');
+            if (ta && !ta.value) ta.value = res.systemPrompt;
+            trSave();
+          }
+        }
+      });
+    }
+  }
+
   panel.innerHTML =
     '<div class="tr-step-panel">' +
       '<div class="tr-split-view">' +
@@ -105,8 +125,16 @@ window.trRenderStep3 = function (panel, state) {
                 trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
                 trEscapeHtml(state.systemPrompt || '') +
               '</textarea>' +
-              '<label class="tr-check"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
-                (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
+              '<div class="tr-s3-prompt-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px;flex-wrap:wrap;">' +
+                '<label class="tr-check" style="margin:0"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
+                  (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
+                '<div style="display:flex;gap:6px;">' +
+                  '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-prompt-save" onclick="trStep3SaveDefaultPrompt()">' +
+                    trEscapeHtml(trT('trSavePromptDefault')) + '</button>' +
+                  '<button type="button" class="tr-btn tr-btn-xs tr-btn-ghost" id="tr-s3-prompt-reset" onclick="trStep3ResetDefaultPrompt()">' +
+                    trEscapeHtml(trT('trResetPromptDefault')) + '</button>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
           '</div>' +
 
@@ -641,6 +669,51 @@ function trStep3TogglePrompt() {
   trSave();
 }
 
+/**
+ * Save current system prompt in textarea as the backend default (persisted to config.yaml).
+ */
+function trStep3SaveDefaultPrompt() {
+  var ta = document.getElementById('tr-s3-prompt');
+  var val = ta ? ta.value : (trState.systemPrompt || '');
+  trApiPost('/text-review/prompt-default', { systemPrompt: val }).then(function (res) {
+    if (res && res.systemPrompt !== undefined) {
+      window.TR_DEFAULT_PROMPT = res.systemPrompt;
+      trState.systemPrompt = val;
+      trSave();
+      trToast(trT('trPromptSaved'), 'success');
+    } else {
+      trToast(trT('trPromptSaveFailed'), 'error');
+    }
+  }, function () {
+    trToast(trT('trPromptSaveFailed'), 'error');
+  });
+}
+
+/**
+ * Restore textarea and state to built-in system default prompt.
+ */
+function trStep3ResetDefaultPrompt() {
+  var target = window.TR_BUILTIN_PROMPT;
+  if (!target) {
+    trApiGet('/text-review/prompt-default').then(function (res) {
+      if (res && res.builtinPrompt) {
+        window.TR_BUILTIN_PROMPT = res.builtinPrompt;
+        trS3ApplyResetPrompt(res.builtinPrompt);
+      }
+    });
+    return;
+  }
+  trS3ApplyResetPrompt(target);
+}
+
+function trS3ApplyResetPrompt(promptText) {
+  var ta = document.getElementById('tr-s3-prompt');
+  if (ta) ta.value = promptText;
+  trState.systemPrompt = promptText;
+  trSave();
+  trToast(trT('trPromptReset'), 'success');
+}
+
 // trS3OnRangeChange persists the (1-based) chapter range inputs to trState.
 function trS3OnRangeChange() {
   var rs = document.getElementById('tr-s3-range-start');
@@ -722,7 +795,11 @@ function trStep3Resume() {
 }
 
 function trStep3Stop() {
-  trApiPost('/text-review/sessions/' + trState.sessionId + '/stop', {}).then(function () {}, function () {
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/stop', {}).then(function () {
+    // 乐观更新：即使 SSE 事件稍后才到也能立即响应用户操作
+    trS3SessionStatus = 'cancelled';
+    trS3UpdateControls();
+  }, function () {
     trToast(trT('trStopFailed'), 'error');
   });
 }
@@ -760,8 +837,8 @@ function trS3UpdateControls() {
   // Hide node-pool and system-prompt config sections while a run is active.
   var pool = document.getElementById('tr-s3-pool-section');
   var promptSec = document.getElementById('tr-s3-prompt-section');
-  if (pool) pool.style.display = running ? 'none' : '';
-  if (promptSec) promptSec.style.display = running ? 'none' : '';
+  if (pool) pool.style.display = active ? 'none' : '';
+  if (promptSec) promptSec.style.display = active ? 'none' : '';
   // Range inputs are fixed at session creation; lock them while a session is live.
   var rs = document.getElementById('tr-s3-range-start');
   var re = document.getElementById('tr-s3-range-end');
@@ -1052,6 +1129,11 @@ function trS3OnStatus(evt) {
     trS3Chapters[idx].cleaned = '';
     trS3Chapters[idx].error = '';
   }
+  // 完成的章节同步清洗文本到 trState.chapters，保持数据一致性
+  if (evt.status === 'completed' && trState.chapters && trState.chapters[idx]) {
+    trState.chapters[idx].cleaned = trS3Chapters[idx].cleaned || '';
+    trState.chapters[idx].status = 'completed';
+  }
   trS3UpdateCardStatus(idx);
   trS3UpdateTabCounts();
   trS3MaybeSessionDone();
@@ -1073,7 +1155,7 @@ function trS3OnNode(evt) {
 function trS3MaybeSessionDone() {
   // Don't let a client-side "all chapters resolved" synthesis override a backend
   // running/paused state (e.g. after a reprocess or an SSE-drop leaving a stale mirror).
-  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused') return;
+  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused' || trS3SessionStatus === 'cancelled') return;
   for (var i = 0; i < trS3Chapters.length; i++) {
     var s = trS3Chapters[i].status;
     if (s !== 'completed' && s !== 'failed') return;

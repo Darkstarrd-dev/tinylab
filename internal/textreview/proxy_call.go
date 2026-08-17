@@ -465,13 +465,11 @@ func (s *batchSplitter) push(text string) {
 }
 
 // finish routes any buffered content of the final chapter (the one without a
-// trailing separator) when the stream ends.
+// trailing separator) when the stream ends. All pending text is flushed since
+// no more data will arrive.
 func (s *batchSplitter) finish() {
 	if s.curKey != "" && s.pending != "" {
-		safe, _ := holdPrefix(s.pending, ChapterSep)
-		if safe != "" {
-			s.onChunk(s.curKey, safe)
-		}
+		s.onChunk(s.curKey, s.pending)
 	}
 	s.pending = ""
 }

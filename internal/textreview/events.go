@@ -10,16 +10,22 @@ const (
 )
 
 // Event is the SSE payload sent to subscribers. Fields are omitempty so each
-// event type carries only what it needs.
+// event type carries only what it needs. ChapterIdx is a pointer so that
+// chapter-level events (including chapter 0) always serialize the field,
+// while session-level events (nil) omit it.
 type Event struct {
 	Type       string        `json:"type"`
-	ChapterIdx int           `json:"chapterIdx,omitempty"`
+	ChapterIdx *int          `json:"chapterIdx,omitempty"`
 	Delta      string        `json:"delta,omitempty"`
 	Status     string        `json:"status,omitempty"`
 	NodeID     string        `json:"nodeId,omitempty"`
 	Error      string        `json:"error,omitempty"`
 	Nodes      []NodeRuntime `json:"nodes,omitempty"`
 }
+
+// intPtr returns a pointer to n, used to populate Event.ChapterIdx for
+// chapter-level events (including chapter 0).
+func intPtr(n int) *int { return &n }
 
 // JSON encodes an Event to JSON bytes.
 func (e Event) JSON() []byte {

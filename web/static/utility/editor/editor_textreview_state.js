@@ -148,6 +148,7 @@ function trResetState() {
   trState.reviewNodes = [];
   trState.rangeStart = 0;
   trState.rangeEnd = 0;
+  trState.promptCollapsed = true;
 }
 
 // ===================== exported API =====================

@@ -1157,6 +1157,8 @@ flowchart LR
 - `web/static/i18n.js`：`textReview` 及相关 UI 字符串
 - `web/static/index.html`/`index-nopg.html`：`/utility/editor/*` 脚本加载
 
+> **最后核对（2026-08-17）：** Text Review 全模块深度审计与默认提示词管理修复——**(1)** `internal/textreview/events.go` 中 `Event.ChapterIdx` 从 `int` 改为 `*int`（配合 `intPtr` 辅助函数），彻底修复因 Go `omitempty` 导致 chapter 0 事件序列化丢失 `chapterIdx` 进而引发的前端 chunk 丢弃与 Stop 状态覆写严重 Bug。**(2)** `internal/textreview/proxy_call.go` 修复 `batchSplitter.finish()` 尾部截断。**(3)** `internal/api/textreview/sessions.go` 将 SSE `Subscribe` 调整至 `Flush` 之前，避免握手竞态丢事件。**(4)** `internal/config/types.go` + `internal/registry/text_review.go` + `internal/api/textreview/register.go` 新增 `TextReviewConfig.Prompt` 配置字段及 `POST /api/text-review/prompt-default` 端点，支持自定义系统提示词落盘 `config.yaml` 并向前端同时返回生效提示词与内置固定初始提示词。**(5)** 前端 `editor_textreview_step3.js`（初次渲染自动主动回填系统默认提示词、新增「保存为默认」与「恢复系统默认」操作按钮、Stop 乐观更新、cancelled 状态防覆写、paused 下池配置可见性、completed 文本写回 `trState.chapters`）、`editor_textreview_step2.js`（折叠状态下点击重新切分直接切分、模式删除 data-key 引号防御）、`editor_textreview_step4.js`（导出全本去重扩展名）、`editor_textreview_state.js`（重置 promptCollapsed）、`editor_textreview.js`（Bootstrap 回填与错误重试）。
+
 ### 变更维护清单
 
 | 触发变更 | 涉及源码 |
@@ -1166,7 +1168,7 @@ flowchart LR
 | 修改调度/ramp-down/重试 | `internal/textreview/scheduler.go`（`dispatch`/`runWorker`/`maxRetries`）、`nodepersister.go`（落盘）、`internal/config/types.go`（`TextReviewNode.Concurrency`/`Enabled`） |
 | 修改会话端点/SSE | `internal/api/textreview/sessions.go`、`internal/textreview/events.go`、`internal/api/router.go`（路由组） |
 | 修改节点池/切分模式 CRUD | `internal/registry/text_review.go`、`internal/api/textreview/register.go`、`internal/config/types.go` |
-| 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_state.js`、`playground.css`（`.tr-s3`/`.tr-s4`）、`web/static/i18n.js` |
+| 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_step2.js`、`editor_textreview_step3.js`、`editor_textreview_step4.js`、`editor_textreview_state.js`、`playground.css`（`.tr-s3`/`.tr-s4`）、`web/static/i18n.js` |
 | 修改导航（历史 Gallery↔Editor 2-way） | `web/static/app.js`、`web/static/auth.js`、`web/static/shortcuts.js`、旧 `web/playground/static-pg/editor/*`（仅迁移背景）；当前 Utility 导航维护见 §17.1 与 `web/static/utility/editor/*` |
 
 | 修改 Gallery 路径/编辑合同（audit F-03/F-28/F-30） | 后端：`internal/api/gallery/fs_handlers.go`（`galleryOpenDir`→grantId、`galleryListDir`/`galleryServeFile`/`galleryDeleteFs`/`galleryOpenFolder`/`galleryPastePaths`，raw path→410）、`zip_handlers.go`（`galleryZipFromPath`/`galleryZipWriteback` grantId）、`edit_handlers.go`（`resolveMediaInput`/`galleryEditZipOutputs`/`galleryEditZipWriteback` assetId/grantId）、`register.go`（`grants`/`uploadSem`/`tempFiles`/`assets` 字段 + `owner.Middleware`）；**前端已迁移（2026-08-09）**：`gallery-edit-operations.js::_startJob`/`gallery-edit-batch.js`/`gallery-fullscreen.js`/`gallery-io.js` 全走 `grantId`/`assetId`/`sourceId`；残留非安全缺陷：单 zip extract→edit 读已移除的 `data.tempPath`（应读 `data.assetId`） |

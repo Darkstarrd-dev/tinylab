@@ -123,3 +123,19 @@ func (r *Registry) DeleteSplitPattern(key string) bool {
 	}
 	return false
 }
+
+// --- TextReview Prompt ---
+
+// GetTextReviewPrompt returns the custom cleanup system prompt configured in TextReviewConfig.
+func (r *Registry) GetTextReviewPrompt() string {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	return r.config.TextReview.Prompt
+}
+
+// SetTextReviewPrompt sets the custom cleanup system prompt in TextReviewConfig.
+func (r *Registry) SetTextReviewPrompt(prompt string) {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	r.config.TextReview.Prompt = prompt
+}

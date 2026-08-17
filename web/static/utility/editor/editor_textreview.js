@@ -68,17 +68,28 @@ var trBootstrapDone = false; // fetch split-patterns + prompt-default once
  */
 function trBootstrap() {
   if (trBootstrapDone) return Promise.resolve();
-  trBootstrapDone = true;
   var patsP = trApiGet('/text-review/split-patterns').then(function (res) {
-    var backendPats = (res && !res.error && Array.isArray(res.patterns)) ? res.patterns : [];
+    if (!res || res.error) throw new Error((res && res.error) || 'Failed to fetch split-patterns');
+    var backendPats = Array.isArray(res.patterns) ? res.patterns : [];
     trMergePatterns(backendPats);
-  }, function () { trMergePatterns([]); });
+  });
   var promptP = trApiGet('/text-review/prompt-default').then(function (res) {
-    if (res && !res.error && res.systemPrompt && !trState.systemPrompt) {
-      trState.systemPrompt = res.systemPrompt;
+    if (!res || res.error) throw new Error((res && res.error) || 'Failed to fetch prompt-default');
+    if (res.builtinPrompt) window.TR_BUILTIN_PROMPT = res.builtinPrompt;
+    if (res.systemPrompt) {
+      window.TR_DEFAULT_PROMPT = res.systemPrompt;
+      if (!trState.systemPrompt) {
+        trState.systemPrompt = res.systemPrompt;
+      }
     }
-  }, function () { /* non-fatal */ });
-  return Promise.all([patsP, promptP]);
+  });
+  return Promise.all([patsP, promptP]).then(function () {
+    trBootstrapDone = true;
+    var ta = document.getElementById('tr-s3-prompt');
+    if (ta && !ta.value && trState.systemPrompt) {
+      ta.value = trState.systemPrompt;
+    }
+  });
 }
 
 /**

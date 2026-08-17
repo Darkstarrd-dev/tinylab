@@ -544,7 +544,7 @@ func TestHTTPEventsSSE(t *testing.T) {
 	for i, w := range want {
 		var ev struct {
 			Type       string `json:"type"`
-			ChapterIdx int    `json:"chapterIdx"`
+			ChapterIdx *int   `json:"chapterIdx"`
 			Status     string `json:"status"`
 			Delta      string `json:"delta"`
 			Nodes      []struct {
@@ -560,14 +560,18 @@ func TestHTTPEventsSSE(t *testing.T) {
 		if w.status != "" && ev.Status != w.status {
 			t.Errorf("frame %d: status = %q, want %q", i, ev.Status, w.status)
 		}
+		evIdx := -1
+		if ev.ChapterIdx != nil {
+			evIdx = *ev.ChapterIdx
+		}
 		switch w.typ {
 		case tr.EventChunk:
-			if ev.ChapterIdx != w.chIdx || ev.Delta != w.delta {
-				t.Errorf("frame %d: chunk = idx %d delta %q, want idx %d delta %q", i, ev.ChapterIdx, ev.Delta, w.chIdx, w.delta)
+			if evIdx != w.chIdx || ev.Delta != w.delta {
+				t.Errorf("frame %d: chunk = idx %d delta %q, want idx %d delta %q", i, evIdx, ev.Delta, w.chIdx, w.delta)
 			}
 		case tr.EventStatus:
-			if w.chIdx >= 0 && ev.ChapterIdx != w.chIdx {
-				t.Errorf("frame %d: chapterIdx = %d, want %d", i, ev.ChapterIdx, w.chIdx)
+			if w.chIdx >= 0 && evIdx != w.chIdx {
+				t.Errorf("frame %d: chapterIdx = %d, want %d", i, evIdx, w.chIdx)
 			}
 		case tr.EventNode:
 			if len(ev.Nodes) != 1 || ev.Nodes[0].ID != "n1" {
