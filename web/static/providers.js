@@ -268,6 +268,34 @@ async function changeProviderOrder(id, oldOrder, totalCount, valStr) {
 }
 
 
+async function reloadProviderDetail(providerId) {
+  currentProviderId = providerId;
+  const data = await apiGet('/providers');
+  const p = (data.providers || []).find(function(x) { return x.id === providerId; });
+  if (p) {
+    await loadDetailKeys(p);
+    providerDetailCache = p;
+    renderDetailKeys(p);
+    renderDetailModels(p);
+  }
+  return p;
+}
+
+function toggleKeyReveal(btn, kid) {
+  var el = document.getElementById('k-disp-' + kid);
+  if (!el) return;
+  var isRaw = el.getAttribute('data-showing-raw') === 'true';
+  if (isRaw) {
+    el.textContent = el.getAttribute('data-masked');
+    el.setAttribute('data-showing-raw', 'false');
+    btn.style.opacity = '0.75';
+  } else {
+    el.textContent = el.getAttribute('data-raw');
+    el.setAttribute('data-showing-raw', 'true');
+    btn.style.opacity = '1';
+  }
+}
+
 function renderDetailKeys(p) {
   const el = document.getElementById('detail-keys');
   const keys = p.keys || [];
@@ -291,6 +319,9 @@ function renderDetailKeys(p) {
         <thead><tr><th>' + t('keyName') + '</th><th>' + t('actions') + '</th><th>' + t('key') + '</th><th>' + t('priority') + '</th><th>' + t('status') + '</th></tr></thead>\
         <tbody>' +
           keys.map(function(k) {
+            var rawKey = k.key || '';
+            var masked = k.maskedKey || maskKey(rawKey);
+            var copyText = rawKey || masked;
             return '<tr>\
               <td>' + escapeHtml(k.name) + '</td>\
               <td>\
@@ -298,7 +329,12 @@ function renderDetailKeys(p) {
                 <button type="button" class="btn btn-sm" onclick="toggleKeyDetail(\'' + escapeForJsString(p.id) + '\',\'' + escapeForJsString(k.id) + '\',' + (!k.isActive) + ')">' + (k.isActive ? t('pause') : t('resume')) + '</button>\
                 <button type="button" class="btn btn-sm btn-danger" onclick="deleteKeyDetail(\'' + escapeForJsString(p.id) + '\',\'' + escapeForJsString(k.id) + '\')">' + t('delete') + '</button>\
               </td>\
-              <td><span class="code copyable" data-copy="' + escapeHtml(k.key) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'), \'' + escapeForJsString(k.name || 'key') + '\')" data-tooltip="' + t('clickToCopy') + '">' + maskKey(k.key) + '</span></td>\
+              <td>\
+                <div style="display:inline-flex;align-items:center;gap:6px">\
+                  <span class="code copyable" id="k-disp-' + escapeAttr(k.id) + '" data-copy="' + escapeHtml(copyText) + '" data-masked="' + escapeHtml(masked) + '" data-raw="' + escapeHtml(rawKey) + '" onclick="copyToClipboard(this.getAttribute(\'data-copy\'), \'' + escapeForJsString(k.name || 'key') + '\')" data-tooltip="' + t('clickToCopy') + '">' + escapeHtml(masked) + '</span>\
+                  ' + (rawKey ? '<button type="button" class="btn btn-sm" style="padding:1px 6px;font-size:11px;line-height:1.2;opacity:0.75" onclick="toggleKeyReveal(this, \'' + escapeForJsString(k.id) + '\')" title="Toggle reveal">\uD83D\uDC41</button>' : '') + '\
+                </div>\
+              </td>\
               <td>' + k.priority + '</td>\
               <td><span class="badge ' + (k.isActive ? 'badge-active' : 'badge-inactive') + '">' + (k.isActive ? t('active') : t('pause')) + '</span></td>\
             </tr>';
@@ -343,14 +379,7 @@ async function addKeyDetail(providerId) {
   if (!k.key) { toast(t('apiKeyRequired'), 'error'); return; }
   await apiPost('/providers/' + providerId + '/keys', k);
   toast(t('keyAdded'), 'success');
-  currentProviderId = providerId;
-  const data = await apiGet('/providers');
-  const p = (data.providers || []).find(function(x) { return x.id === providerId; });
-  if (p) {
-    providerDetailCache = p;
-    renderDetailKeys(p);
-    renderDetailModels(p);
-  }
+  await reloadProviderDetail(providerId);
   const formEl = document.getElementById('key-form-' + providerId);
   if (formEl) formEl.innerHTML = '';
 }
@@ -395,14 +424,7 @@ async function bulkAddKeys(providerId) {
     resultEl.innerHTML = '<span class="badge badge-valid">' + t('addedKeys', [result.added]) + '</span>';
   }
   setTimeout(async function() {
-    currentProviderId = providerId;
-    const data = await apiGet('/providers');
-    const p = (data.providers || []).find(function(x) { return x.id === providerId; });
-    if (p) {
-      providerDetailCache = p;
-      renderDetailKeys(p);
-      renderDetailModels(p);
-    }
+    await reloadProviderDetail(providerId);
     const formEl = document.getElementById('key-form-' + providerId);
     if (formEl) formEl.innerHTML = '';
   }, 1000);
@@ -419,18 +441,11 @@ async function testKeyDetail(pid, kid) {
 
 async function toggleKeyDetail(pid, kid, active) {
   const p = providerDetailCache;
-  const k = (p.keys || []).find(function(x) { return x.id === kid; });
+  const k = (p && p.keys || []).find(function(x) { return x.id === kid; });
   if (!k) return;
   k.isActive = active;
   await apiPut('/providers/' + pid + '/keys/' + kid, k);
-  currentProviderId = pid;
-  const data = await apiGet('/providers');
-  const np = (data.providers || []).find(function(x) { return x.id === pid; });
-  if (np) {
-    providerDetailCache = np;
-    renderDetailKeys(np);
-    renderDetailModels(np);
-  }
+  await reloadProviderDetail(pid);
 }
 
 async function deleteKeyDetail(pid, kid) {
@@ -438,14 +453,7 @@ async function deleteKeyDetail(pid, kid) {
   if (!ok) return;
   await apiDelete('/providers/' + pid + '/keys/' + kid);
   toast(t('keyDeleted'), 'success');
-  currentProviderId = pid;
-  const data = await apiGet('/providers');
-  const p = (data.providers || []).find(function(x) { return x.id === pid; });
-  if (p) {
-    providerDetailCache = p;
-    renderDetailKeys(p);
-    renderDetailModels(p);
-  }
+  await reloadProviderDetail(pid);
 }
 
 function renderDetailRotation(p) {

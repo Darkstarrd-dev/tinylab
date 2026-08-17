@@ -401,7 +401,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `listKeys`/`createKey`/`bulkAddKeys`/`updateKey`/`deleteKey`/`getKeyState` |
+| `register.go` | `Handler` + `Register` + `listKeys`/`createKey`/`bulkAddKeys`/`updateKey`/`deleteKey`/`getKeyState` + `KeyDTO`（支持 `key` 明文与 `maskedKey` 头尾各 4 位掩码 `sk-x****yyyy`）+ `MaskKey` |
 
 ### 10.12 `internal/api/models/` — 模型列表
 
@@ -848,7 +848,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | App 启动默认页面调整、Header QuickSlot 初始化与 Utility 选单样式动效升级 | PROJECT_MAP §18.2 | `web/static/app.js`（`currentPage` 启动默认切回 `monitor`，`utilityActiveTool` 初始 `null`，`renderUtility` 无激活工具时回退 `editor`，`openUtilityMenu`/`closeUtilityMenu` 增加 `.open` 动画 class 控制；`openUtilityMenu` 帧内与 50/120ms 延时多重护航定位 focus 到当前工具对应菜单项，支持方向键/回车上下轮转与选择，键盘 handler 增加 `index < 0` 焦点丢失恢复；Esc 快捷键在 `utilityMenuOpen` 时仅收起菜单并归还焦点到按钮，阻止误呼出 `shutdownServer` 弹窗；`navigateTo` 开头自动收起 `utilityMenuOpen` 下拉菜单，并把 `utility` 纳入 `isFullHeight` 锁高规则解决布局塌陷；F5 非 Utility 页面仅导航不强展选单）、`web/static/auth.js`（`initApp` 首次 `navigateTo('monitor')`，初始显式调用 `renderHeaderQuickSlots()`，非 Utility 页面点击导航仅切页不自动展单）、`web/static/quickslots.js`（`renderHeaderQuickSlots` 渲染/清空后触发 `window.dispatchEvent(new Event('resize'))` 联动 Header 响应式计算）、`web/static/style.css`（`.utility-menu` 增加 `left: 50%` + `translateX(-50%)` 精准居中对齐按钮，补充 `:focus` 选择器支持，且继承 Download 页面同款高斯模糊、`border: 1px solid var(--accent)` 边框、0.48s cubic-bezier 淡入向下平移动画与 hover/focus 划过横向滑块背景）、`web/static/i18n.js`（`logFileEditor` 统一为 `"Editor"` / `"编辑器"`） |
 | Provider Detail 模型输入框与 Header 按钮修复 | config-registry-state | `web/static/providers.js`（`renderProviderDetail` 顶栏按钮增加 `white-space:nowrap` 防止中文换行；`renderDetailModels` 将添加/测试按钮重排至 input 左侧，并增加 Enter 键回车添加逻辑）、`web/static/style.css`（`.btn` 增加了 `white-space:nowrap` 避免全站按钮字间换行；`.model-create-input` 重构为 `flex:1` 宽度自适应，解决撑爆拉伸挤走按钮问题）、`web/static/i18n.js`（新增 `add` 翻译键） |
 | Playground Prompt 输入框居中对齐 | playground | `web/playground/static-pg/playground.css`（`.pg-input-bar .pg-input`、`.pg-input`、`.pg-max-editor-textarea`、`.pg-gc-input` 及其 `::placeholder` 重构为 `text-align: center` + 对称 `padding: 12px 40px`，实现提示文本、输入内容与光标置中） |
-| Add Provider/Combo/QuickSlot 弹窗间距与 QuickSlot ID 徽章与仅垂直折叠修复 | config-registry-state | `web/static/providers.js`+`combos.js`+`quickslots.js`（`showAddProvider`/`showAddCombo`/`showAddQuickSlot`/`showEditCombo`/`showEditQuickSlot` 弹窗控件间距与按钮布局重构；QuickSlot 列表徽章文本由 `order: N` 改为 `ID: N`）、`web/static/i18n.js`（补充 `comboNamePlaceholder` 翻译键，更新 `quickSlotOrder` 为 `ID (1-9)`）、`web/static/style.css`（移除 `.settings-panel-half.collapsed` 的 `flex:0 0 auto` 限制，确保折叠时横向保持 50% 宽度仅垂直折叠；增加 `.form-group` 与 `.form-hint` 规范边距） |
+| Provider Detail Keys 增删刷新与真实完整 Key 复制/明文切换 | config-registry-state | `web/static/providers.js`（`reloadProviderDetail` 统一封装重载逻辑并补齐 `loadDetailKeys` 解决增删 key 后列表置 0 问题；`renderDetailKeys` 绑定真实 key 至 `data-copy` 并支持点击复制完整 key + `toggleKeyReveal` 眼睛按钮切换显示完整明文/掩码）、`web/static/app.js`（`maskKey` 统一为头尾各 4 位 `sk-x****yyyy`）、`internal/api/keys/register.go`（`KeyDTO` 包含 `key` 与 `maskedKey`，`MaskKey` 头尾各保留 4 位）、`internal/api/api_test.go`、`web/provider-keys.test.js` |
 ---
 
 ## 同步约束（重申）

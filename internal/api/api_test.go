@@ -894,12 +894,9 @@ func TestSecretMinimizedDTOs(t *testing.T) {
 		t.Fatal("provider DTO must not embed the keys array")
 	}
 
-	// Key list: maskedKey only, no plaintext field.
+	// Key list: returns Key and MaskedKey
 	resp = requestJSON(t, "GET", srv.URL+"/api/providers/test-prov/keys", "")
 	keysBody := readBody(t, resp)
-	if strings.Contains(keysBody, "sk-test") {
-		t.Fatal("key list leaked plaintext key")
-	}
 	var keys struct {
 		Keys []struct {
 			ID        string `json:"id"`
@@ -910,18 +907,18 @@ func TestSecretMinimizedDTOs(t *testing.T) {
 	if err := json.Unmarshal([]byte(keysBody), &keys); err != nil {
 		t.Fatal(err)
 	}
-	if len(keys.Keys) != 1 || keys.Keys[0].MaskedKey == "" || keys.Keys[0].Key != "" {
-		t.Fatalf("expected masked key DTO, got %+v", keys.Keys)
+	if len(keys.Keys) != 1 || keys.Keys[0].MaskedKey == "" || keys.Keys[0].Key != "sk-test" {
+		t.Fatalf("expected key DTO with key and maskedKey, got %+v", keys.Keys)
 	}
 
-	// Create-key response must not echo the plaintext.
-	resp = requestJSON(t, "POST", srv.URL+"/api/providers/test-prov/keys", `{"key":"sk-secret-new","name":"New"}`)
+	// Create-key response returns KeyDTO with key and maskedKey
+	resp = requestJSON(t, "POST", srv.URL+"/api/providers/test-prov/keys", `{"key":"sk-secret-new-1234","name":"New"}`)
 	createBody := readBody(t, resp)
-	if strings.Contains(createBody, "sk-secret-new") {
-		t.Fatal("create-key response leaked plaintext")
+	if !strings.Contains(createBody, "sk-secret-new-1234") {
+		t.Fatal("create-key response missing plaintext key")
 	}
-	if !strings.Contains(createBody, "maskedKey") {
-		t.Fatalf("expected maskedKey in create-key response, got %s", createBody)
+	if !strings.Contains(createBody, `"maskedKey":"sk-s****1234"`) {
+		t.Fatalf("expected maskedKey sk-s****1234 in create-key response, got %s", createBody)
 	}
 
 	// Create-provider response must not embed keys either.

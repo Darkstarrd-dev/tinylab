@@ -22,33 +22,32 @@ func NewHandler(d *apibase.Deps) *Handler {
 	return &Handler{d: d}
 }
 
-// KeyDTO is the public, secret-minimized representation of a provider key.
-// The plaintext value is never serialized; maskedKey is irreversible.
+// KeyDTO is the representation of a provider key.
 type KeyDTO struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	Key       string `json:"key"`
 	Account   string `json:"account"`
 	Priority  int    `json:"priority"`
 	IsActive  bool   `json:"isActive"`
 	MaskedKey string `json:"maskedKey"`
 }
 
-// MaskKey produces an irreversible display form of an API key: keys of 8
-// characters or fewer collapse to "***", longer keys keep only the last four
-// characters. The result cannot be used to reconstruct the original value.
+// MaskKey produces a display form of an API key: keys of 8 characters or
+// fewer collapse to "***", longer keys keep the first four and last four characters.
 func MaskKey(key string) string {
 	if len(key) <= 8 {
 		return "***"
 	}
-	return "****" + key[len(key)-4:]
+	return key[:4] + "****" + key[len(key)-4:]
 }
 
-// toKeyDTO converts a config.Key to its public DTO, replacing the plaintext
-// value with an irreversible mask.
+// toKeyDTO converts a config.Key to its DTO.
 func toKeyDTO(k config.Key) KeyDTO {
 	return KeyDTO{
 		ID:        k.ID,
 		Name:      k.Name,
+		Key:       k.Key,
 		Account:   k.Account,
 		Priority:  k.Priority,
 		IsActive:  k.IsActive,
