@@ -680,19 +680,29 @@ function openModelPickerModal(currentValue, onSelect) {
   if (!overlay) return;
   fetch('/api/models').then(function(r) { return r.json(); }).then(function(data) {
     var items = [];
-    if (data && Array.isArray(data.combos)) {
-      data.combos.forEach(function(c) {
-        items.push({ id: 'combo:' + c.name, name: '⚡ combo:' + c.name });
-      });
-    }
-    if (data && Array.isArray(data.providers)) {
-      data.providers.forEach(function(p) {
-        if (p && Array.isArray(p.models)) {
-          p.models.forEach(function(m) {
-            items.push({ id: p.id + '/' + (m.id || m.name), name: (p.name || p.id) + ' / ' + (m.name || m.id) });
-          });
+    var models = (data && Array.isArray(data.models)) ? data.models : (Array.isArray(data) ? data : []);
+    if (models.length > 0) {
+      models.forEach(function(m) {
+        if (m && m.id) {
+          var label = m.provider ? (m.provider + ' / ' + (m.alias || m.name || m.realModelId || m.id)) : m.id;
+          items.push({ id: m.id, name: label, note: m.note || '' });
         }
       });
+    } else {
+      if (data && Array.isArray(data.combos)) {
+        data.combos.forEach(function(c) {
+          items.push({ id: 'combo:' + c.name, name: '⚡ combo:' + c.name });
+        });
+      }
+      if (data && Array.isArray(data.providers)) {
+        data.providers.forEach(function(p) {
+          if (p && Array.isArray(p.models)) {
+            p.models.forEach(function(m) {
+              items.push({ id: p.id + '/' + (m.id || m.name), name: (p.name || p.id) + ' / ' + (m.name || m.id) });
+            });
+          }
+        });
+      }
     }
     renderPicker(items);
   }).catch(function() {

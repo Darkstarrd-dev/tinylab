@@ -622,6 +622,23 @@ var pgModelPickerCallback = null;
 
 function pgOpenModelPicker(currentValue, onSelect, opts) {
   pgModelPickerCallback = onSelect;
+  if (!window.pgState) window.pgState = {};
+  if (!pgState.models || pgState.models.length === 0) {
+    fetch('/api/models')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        pgState.models = (data && Array.isArray(data.models)) ? data.models : [];
+        pgOpenModelPicker(currentValue, onSelect, opts);
+      })
+      .catch(function() {
+        pgRenderModelPickerModal(currentValue, onSelect, opts, []);
+      });
+    return;
+  }
+  pgRenderModelPickerModal(currentValue, onSelect, opts, pgState.models || []);
+}
+
+function pgRenderModelPickerModal(currentValue, onSelect, opts, allModels) {
   var allowEmpty = opts && opts.allowEmpty;
   var emptyLabel = (opts && opts.emptyLabel) || pgT('Default (first window model)');
   var title = (opts && opts.title) || pgT('pgSelectModel');
@@ -630,7 +647,7 @@ function pgOpenModelPicker(currentValue, onSelect, opts) {
     itemsHtml += '<div class="pg-model-picker-item' + (!currentValue ? ' selected' : '') + '" data-value="" tabindex="-1" onclick="pgModelPickerSelect(this)">' + pgEscapeHtml(emptyLabel) + '</div>';
   }
   var kindFilter = opts && opts.kindFilter;
-  var models = (pgState.models || []).filter(function(m) {
+  var models = (allModels || []).filter(function(m) {
     if (!kindFilter) return true;
     if (kindFilter === 'image') return m.kind === 'image';
     return m.kind !== 'image';
@@ -646,23 +663,25 @@ function pgOpenModelPicker(currentValue, onSelect, opts) {
     if (currentValue === id) cls += ' selected';
     if (note) { cls += ' has-model-note'; }
     var noteAttr = note ? ' data-model-note="' + pgEscapeHtml(note) + '"' : '';
-    itemsHtml += '<div class="' + cls + '"' + noteAttr + ' data-value="' + pgEscapeHtml(id) + '" tabindex="-1" onclick="pgModelPickerSelect(this)">' + pgEscapeHtml(label) + '</div>';
+    itemsHtml += '<div class="' + cls + '"' + noteAttr + ' data-value="' + pgEscapeHtml(id) + '" tabindex="-1" onclick="pgModelPickerSelect(this)" ondblclick="pgModelPickerSelect(this);pgModelPickerConfirm()">' + pgEscapeHtml(label) + '</div>';
   });
-  var html = '<div class="pg-modal" style="width:400px;max-width:90vw">' +
+  var html = '<div class="pg-modal" style="width:460px;max-width:90vw">' +
     '<div class="pg-modal-header">' +
       '<span class="pg-modal-title">' + pgEscapeHtml(title) + '</span>' +
       '<button class="pg-modal-close" onclick="pgCloseModelPicker()">✕</button>' +
     '</div>' +
-    '<div class="pg-modal-body" style="max-height:50vh;overflow-y:auto">' +
+    '<div class="pg-modal-body" style="max-height:55vh;overflow-y:auto">' +
       '<input type="text" id="pg-model-picker-filter" placeholder="' + pgEscapeHtml(pgT('Filter')) + '" oninput="pgModelPickerFilter(this.value)" style="width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);font-size:13px;box-sizing:border-box">' +
-      itemsHtml +
+      '<div id="pg-model-picker-list">' + itemsHtml + '</div>' +
     '</div>' +
     '<div class="pg-modal-footer" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">' +
       '<button class="pg-btn" id="pg-model-picker-cancel" onclick="pgCloseModelPicker()">' + pgEscapeHtml(pgT('Cancel')) + '</button>' +
       '<button class="pg-btn" id="pg-model-picker-ok" style="background:var(--accent);color:#fff" onclick="pgModelPickerConfirm()">' + pgEscapeHtml(pgT('OK')) + '</button>' +
     '</div>' +
   '</div>';
-  var overlay = document.createElement('div');
+  var overlay = document.getElementById('pg-model-picker-overlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
   overlay.id = 'pg-model-picker-overlay';
   overlay.className = 'pg-modal-overlay show';
   overlay.style.zIndex = '10001';
