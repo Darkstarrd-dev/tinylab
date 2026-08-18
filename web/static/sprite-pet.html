@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyRouter Pet</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent !important;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .pet-container {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: var(--modal-bg, #14121e);
+    border: 1px solid var(--glass-border, rgba(255,255,255,0.12));
+    border-radius: 28px;
+    padding: 10px;
+  }
+  .pet-avatar {
+    width: 70px;
+    height: 70px;
+    background: var(--accent-gradient, linear-gradient(135deg, #4fc3f7, #7c4dff));
+    border-radius: 50% 50% 45% 45%;
+    box-shadow: 0 8px 24px rgba(79, 195, 247, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    position: relative;
+    animation: pet-bounce 2.5s ease-in-out infinite;
+  }
+  .pet-avatar:active {
+    cursor: grabbing;
+  }
+  .pet-face {
+    position: relative;
+    width: 46px;
+    height: 36px;
+  }
+  .pet-eye {
+    position: absolute;
+    top: 8px;
+    width: 7px;
+    height: 9px;
+    background: #0b0c13;
+    border-radius: 50%;
+  }
+  .pet-eye.left { left: 9px; }
+  .pet-eye.right { right: 9px; }
+  .pet-blush {
+    position: absolute;
+    top: 17px;
+    width: 9px;
+    height: 5px;
+    background: rgba(255, 105, 180, 0.7);
+    border-radius: 50%;
+  }
+  .pet-blush.left { left: 5px; }
+  .pet-blush.right { right: 5px; }
+  .pet-mouth {
+    position: absolute;
+    bottom: 5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 5px;
+    border-bottom: 2.5px solid #0b0c13;
+    border-radius: 0 0 10px 10px;
+  }
+  .pet-bubble {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    right: 10px;
+    background: var(--modal-bg, #1a1528);
+    border: 1px solid var(--glass-border, rgba(255,255,255,0.1));
+    border-radius: 12px;
+    padding: 8px 10px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+  }
+  .pet-bubble-text {
+    font-size: 12px;
+    color: var(--text, #fff);
+    line-height: 1.3;
+    max-height: 50px;
+    overflow-y: auto;
+  }
+  .pet-bubble-row {
+    display: flex;
+    gap: 4px;
+  }
+  .pet-bubble-input {
+    flex: 1;
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border, rgba(255,255,255,0.2));
+    border-radius: 6px;
+    color: #fff;
+    font-size: 11px;
+    outline: none;
+  }
+  .pet-bubble-btn {
+    padding: 2px 8px;
+    background: var(--accent, #4fc3f7);
+    color: #0b0c13;
+    border: none;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .pet-close-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    background: rgba(0, 0, 0, 0.4);
+    border: none;
+    border-radius: 50%;
+    color: #aaa;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .pet-close-btn:hover {
+    color: #fff;
+    background: rgba(239, 83, 80, 0.8);
+  }
+  @keyframes pet-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+  }
+</style>
+</head>
+<body>
+<div class="pet-container">
+  <button class="pet-close-btn" title="关闭桌面小精灵" onclick="closePet()">&times;</button>
+  
+  <div id="pet-bubble" class="pet-bubble">
+    <div id="pet-bubble-msg" class="pet-bubble-text">主人，我是桌面小精灵！</div>
+    <div class="pet-bubble-row">
+      <input type="text" id="pet-input" class="pet-bubble-input" placeholder="输入指令..." onkeydown="if(event.key==='Enter')sendPetIntent()">
+      <button class="pet-bubble-btn" onclick="sendPetIntent()">执行</button>
+    </div>
+  </div>
+
+  <div class="pet-avatar" id="pet-avatar" onclick="toggleBubble(event)">
+    <div class="pet-face">
+      <div class="pet-eye left"></div>
+      <div class="pet-eye right"></div>
+      <div class="pet-blush left"></div>
+      <div class="pet-blush right"></div>
+      <div class="pet-mouth"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  var isDragging = false;
+  var startX, startY;
+
+  var avatar = document.getElementById('pet-avatar');
+  avatar.addEventListener('mousedown', function(e) {
+    if (e.target.closest('#pet-bubble')) return;
+    isDragging = true;
+    startX = e.screenX;
+    startY = e.screenY;
+  });
+
+  window.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    var dx = e.screenX - startX;
+    var dy = e.screenY - startY;
+    startX = e.screenX;
+    startY = e.screenY;
+    if (window.movePetWindow) {
+      window.movePetWindow(dx, dy);
+    }
+  });
+
+  window.addEventListener('mouseup', function() {
+    isDragging = false;
+  });
+
+  function toggleBubble(e) {
+    if (e) e.stopPropagation();
+    var bubble = document.getElementById('pet-bubble');
+    if (bubble.style.display === 'flex') {
+      bubble.style.display = 'none';
+    } else {
+      bubble.style.display = 'flex';
+      var input = document.getElementById('pet-input');
+      if (input) input.focus();
+    }
+  }
+
+  function setBubbleMsg(msg) {
+    var bubble = document.getElementById('pet-bubble');
+    var msgEl = document.getElementById('pet-bubble-msg');
+    if (msgEl) msgEl.innerText = msg;
+    if (bubble) bubble.style.display = 'flex';
+  }
+
+  function sendPetIntent() {
+    var input = document.getElementById('pet-input');
+    if (!input) return;
+    var text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    setBubbleMsg('正在分析意图...');
+    fetch('/api/assistant/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: text })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var tools = data.tools || [];
+      if (tools.length > 0) {
+        var t = tools[0];
+        setBubbleMsg('已调度: ' + t.tool);
+      } else {
+        setBubbleMsg('未能识别意图');
+      }
+    })
+    .catch(function(err) {
+      setBubbleMsg('请求失败: ' + err.message);
+    });
+  }
+
+  function closePet() {
+    if (window.closePetWindow) {
+      window.closePetWindow();
+    } else {
+      window.close();
+    }
+  }
+
+  // Subscribe to Events SSE
+  try {
+    var es = new EventSource('/api/assistant/events');
+    es.addEventListener('notify', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        setBubbleMsg(data.message || data.title || '收到通知');
+      } catch(err) {}
+    });
+  } catch(e) {}
+</script>
+</body>
+</html>

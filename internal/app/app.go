@@ -12,7 +12,9 @@ import (
 
 	"github.com/tinyrouter/tinyrouter/internal/api"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	assistantapi "github.com/tinyrouter/tinyrouter/internal/api/assistant"
 	"github.com/tinyrouter/tinyrouter/internal/archivetool"
+	"github.com/tinyrouter/tinyrouter/internal/assistant"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -234,6 +236,59 @@ func (a *App) buildComponents() error {
 	// HTTP server (not started until Run).
 	a.sm = NewServerManager(a.apiRouter.Routes(a.proxyHandler), a.addr, a.logger, cfg.Server)
 	a.sm.SetConfigDir(a.configDir)
+
+	// Start Assistant Scheduler & Reactor (Execution Layer R1-R5)
+	if astHandler := a.apiRouter.AssistantHandler(); astHandler != nil {
+		if ast := astHandler.Assistant(); ast != nil && ast.Scheduler() != nil {
+			ast.Scheduler().Start(a.shutdownCtx, func(name string) {
+				switch name {
+				case "clean-traces", "clean-traces-daily":
+					a.proxyHandler.SweepTracesOnce(cfg.Trace.RetainDays, cfg.Trace.MaxDiskMB)
+				}
+			})
+		}
+
+		// Initialize & Start Assistant Reactor
+		reactor := assistant.NewReactor(nil, func(area, title, message, level string, data map[string]any) {
+			astHandler.EventsBroadcaster().Broadcast(assistantapi.Event{
+				Type:    "notify",
+				Area:    area,
+				Title:   title,
+				Message: message,
+				Level:   level,
+				Data:    data,
+			})
+		}, nil)
+
+		// Wire Todo Checker (R2)
+		reactor.SetTodoChecker(func() []assistant.TodoInfo {
+			dueTodos := astHandler.Todos().CheckDue(time.Now())
+			res := make([]assistant.TodoInfo, 0, len(dueTodos))
+			for _, td := range dueTodos {
+				res = append(res, assistant.TodoInfo{ID: td.ID, Text: td.Text})
+			}
+			return res
+		})
+
+		// Wire Model Availability Checker (R4/R5)
+		reactor.SetModelChecker(func() map[string]bool {
+			res := make(map[string]bool)
+			for _, p := range a.reg.Config().Providers {
+				if !p.IsActive {
+					continue
+				}
+				for _, m := range p.Models {
+					if m.ID != "" {
+						res[m.ID] = a.selector.IsModelAvailable(p.ID, m.ID)
+					}
+				}
+			}
+			return res
+		})
+
+		reactor.Start(a.shutdownCtx)
+	}
+
 	return nil
 }
 

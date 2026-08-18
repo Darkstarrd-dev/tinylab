@@ -60,41 +60,6 @@ func (r *ToolRegistry) Resolve(name string) (ToolSpec, bool) {
 // Count returns the number of registered tools.
 func (r *ToolRegistry) Count() int { return len(r.tools) }
 
-// Job is one periodic task the assistant can run on the user's behalf (e.g.
-// cleaning expired trace logs). It mirrors the project's existing SweepTraces
-// retention sweep as the first built-in job.
-type Job struct {
-	Name        string // stable id, e.g. "clean-traces"
-	IntervalSec int    // run cadence in seconds
-}
-
-// Scheduler tracks the periodic jobs the assistant knows about.
-type Scheduler struct {
-	jobs map[string]Job
-}
-
-// NewScheduler returns an empty scheduler.
-func NewScheduler() *Scheduler {
-	return &Scheduler{jobs: make(map[string]Job)}
-}
-
-// RegisterJob adds (or replaces) a periodic job. A job with an empty name is
-// ignored.
-func (s *Scheduler) RegisterJob(j Job) {
-	if j.Name == "" {
-		return
-	}
-	s.jobs[j.Name] = j
-}
-
-// Has reports whether the named job is registered.
-func (s *Scheduler) Has(name string) bool {
-	_, ok := s.jobs[name]
-	return ok
-}
-
-// Count returns the number of registered jobs.
-func (s *Scheduler) Count() int { return len(s.jobs) }
 
 // classifyRule maps an intent to a set of tools the rule contributes when it
 // fires. A rule fires when the intent contains at least one of any (OR), all
@@ -127,6 +92,11 @@ type Assistant struct {
 // gated on it so an assistant without routing cannot claim model capability.
 func New(reg *ToolRegistry, sched *Scheduler, hasModelRoute bool) *Assistant {
 	return &Assistant{reg: reg, sched: sched, modelRoute: hasModelRoute}
+}
+
+// SetScheduler sets or updates the scheduler instance on the Assistant.
+func (a *Assistant) SetScheduler(s *Scheduler) {
+	a.sched = s
 }
 
 // AddRule adds a simple OR intent→tools mapping: the rule fires when the

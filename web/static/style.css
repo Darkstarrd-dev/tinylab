@@ -55,7 +55,10 @@
   --z-sticky:20;
   --z-modal:50;
   --z-toast:60;
+  --z-sprite-dock:70;
   --z-tooltip:10005;
+  --z-sprite-modal:10010;
+  --z-sprite-char:10020;
   /* Design Tokens */
   --radius-xs:4px;
   --radius-sm:6px;
@@ -5781,3 +5784,469 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .tr-debug-live-stream{color:var(--accent2,#10b981);font-size:10px;animation:tr-debug-pulse 1.5s infinite;margin-left:4px}
 .tr-debug-live{color:var(--danger,#ff5252);font-size:10px;animation:tr-debug-pulse 1.5s infinite;margin-left:6px}
 @keyframes tr-debug-pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+/* ==========================================================================
+   Sprite Assistant Components (L1 Dock/Modal + L2 Character & Comic Bubble)
+   ========================================================================== */
+
+/* L1: Sprite Dock (Right Edge Capsule) */
+.sprite-dock {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-sprite-dock, 70);
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-right: none;
+  border-radius: var(--radius-lg, 14px) 0 0 var(--radius-lg, 14px);
+  padding: 8px 10px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: -4px 4px 20px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(var(--glass-blur, 20px));
+  transition: all var(--transition-normal, 0.25s);
+  user-select: none;
+}
+.sprite-dock:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  padding-left: 16px;
+  box-shadow: -6px 6px 24px rgba(79, 195, 247, 0.25);
+}
+.sprite-dock-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.sprite-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--danger, #ef5350);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  line-height: 1.2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+.sprite-dock-label {
+  font-size: var(--font-badge, 12px);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+/* L1: Sprite Modal Overlay & Window */
+.sprite-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sprite-modal, 10010);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(var(--glass-blur-overlay, 8px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--transition-normal, 0.25s);
+}
+.sprite-modal-overlay.show {
+  opacity: 1;
+  visibility: visible;
+}
+.sprite-modal {
+  width: 520px;
+  max-width: 92vw;
+  height: 600px;
+  max-height: 85vh;
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl, 18px);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: scale(0.95) translateY(10px);
+  transition: all var(--transition-normal, 0.25s);
+}
+.sprite-modal-overlay.show .sprite-modal {
+  transform: scale(1) translateY(0);
+}
+.sprite-modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--glass-bg);
+}
+.sprite-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: var(--font-size-md, 15px);
+  color: var(--text);
+}
+.sprite-avatar-mini {
+  font-size: 16px;
+}
+.sprite-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sprite-btn-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-btn-icon:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+  border-color: var(--glass-border-hover);
+}
+.sprite-btn-close {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sprite-modal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 18px;
+  gap: 12px;
+  overflow: hidden;
+}
+.sprite-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+.sprite-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 88%;
+}
+.sprite-msg-assistant {
+  align-self: flex-start;
+}
+.sprite-msg-user {
+  align-self: flex-end;
+}
+.sprite-msg-text {
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 10px);
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.sprite-msg-assistant .sprite-msg-text {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  border-bottom-left-radius: 2px;
+}
+.sprite-msg-user .sprite-msg-text {
+  background: var(--accent);
+  color: #0b0c13;
+  font-weight: 600;
+  border-bottom-right-radius: 2px;
+}
+.sprite-msg-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sprite-tool-card {
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sprite-tool-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+}
+.sprite-tool-path {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.sprite-tool-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sprite-action-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-action-btn:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sprite-action-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0c13;
+}
+.sprite-tool-exec-status {
+  font-size: 11.5px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs, 4px);
+}
+.sprite-tool-exec-status.success {
+  background: rgba(102, 187, 106, 0.15);
+  color: #66bb6a;
+}
+.sprite-tool-exec-status.error {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef5350;
+}
+
+.sprite-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--glass-border);
+}
+.sprite-chip {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-chip:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sprite-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+}
+#sprite-chat-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#sprite-chat-input {
+  flex: 1;
+  padding: 9px 14px;
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 10px);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  transition: all var(--transition-fast, 0.15s);
+}
+#sprite-chat-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.sprite-send-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--accent);
+  color: #0b0c13;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-send-btn:hover {
+  filter: brightness(1.1);
+  transform: scale(1.05);
+}
+
+/* L2: Character (In-App Roaming Avatar) */
+.sprite-char {
+  position: fixed;
+  z-index: var(--z-sprite-char, 10020);
+  width: 60px;
+  height: 60px;
+  cursor: pointer;
+  user-select: none;
+  animation: sprite-float 3s ease-in-out infinite;
+}
+.sprite-char-inner {
+  width: 100%;
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 50% 50% 45% 45%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 24px var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.sprite-char:hover .sprite-char-inner {
+  transform: scale(1.15) rotate(5deg);
+}
+.sprite-char-head {
+  position: relative;
+  width: 40px;
+  height: 30px;
+}
+.sprite-char-eye {
+  position: absolute;
+  top: 6px;
+  width: 6px;
+  height: 8px;
+  background: #0b0c13;
+  border-radius: 50%;
+}
+.sprite-char-eye.left { left: 8px; }
+.sprite-char-eye.right { right: 8px; }
+.sprite-char-blush {
+  position: absolute;
+  top: 14px;
+  width: 8px;
+  height: 4px;
+  background: rgba(255, 105, 180, 0.6);
+  border-radius: 50%;
+}
+.sprite-char-blush.left { left: 4px; }
+.sprite-char-blush.right { right: 4px; }
+.sprite-char-mouth {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 4px;
+  border-bottom: 2px solid #0b0c13;
+  border-radius: 0 0 8px 8px;
+}
+
+@keyframes sprite-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+/* L2: Comic Bubble */
+.sprite-bubble {
+  position: fixed;
+  z-index: var(--z-sprite-modal, 10010);
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg, 14px);
+  padding: 12px 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(var(--glass-blur, 20px));
+  min-width: 260px;
+  max-width: 320px;
+  transition: all var(--transition-normal, 0.25s);
+}
+/* Bubble Pointer Arrow */
+.sprite-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  right: 28px;
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid var(--modal-bg);
+}
+.sprite-bubble-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sprite-bubble-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
+}
+.sprite-bubble-input-wrap {
+  display: flex;
+  gap: 6px;
+}
+#sprite-bubble-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+#sprite-bubble-input:focus {
+  border-color: var(--accent);
+}
+.sprite-bubble-send {
+  padding: 4px 10px;
+  background: var(--accent);
+  color: #0b0c13;
+  font-weight: 700;
+  font-size: 12px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+.sprite-bubble-dock-btn {
+  align-self: flex-end;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.sprite-bubble-dock-btn:hover {
+  color: var(--text);
+}

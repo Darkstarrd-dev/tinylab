@@ -182,5 +182,27 @@ func (s *Selector) IsNIMEnabled(providerID, model string) bool {
 	return modelNIM != nil && modelNIM.Enabled
 }
 
+// IsModelAvailable reports whether at least one active key in the given provider
+// is currently available (not locked by cooldown or rate limit) for model.
+func (s *Selector) IsModelAvailable(providerID, model string) bool {
+	provider, ok := s.reg.GetProvider(providerID)
+	if !ok || !provider.IsActive {
+		return false
+	}
+	for _, k := range provider.Keys {
+		if !k.IsActive {
+			continue
+		}
+		state := s.reg.GetKeyState(provider.ID, k.ID)
+		if state == nil {
+			continue
+		}
+		if s.isKeyAvailable(state, model) {
+			return true
+		}
+	}
+	return false
+}
+
 // Compile-time interface checks.
 var _ KeySelector = (*Selector)(nil)

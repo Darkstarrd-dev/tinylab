@@ -18,6 +18,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/anysearch"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	archiveapi "github.com/tinyrouter/tinyrouter/internal/api/archive"
+	assistantapi "github.com/tinyrouter/tinyrouter/internal/api/assistant"
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
 	"github.com/tinyrouter/tinyrouter/internal/api/combos"
 	"github.com/tinyrouter/tinyrouter/internal/api/comfyui"
@@ -40,6 +41,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/sse"
 	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
 	"github.com/tinyrouter/tinyrouter/internal/api/trace"
+	"github.com/tinyrouter/tinyrouter/internal/assistant"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/console"
@@ -70,6 +72,9 @@ type deps struct {
 	comboRes     *combo.Resolver
 	downloadMgr  *download.Manager
 	shutdown     context.CancelFunc
+
+	// assistantHandler handles the assistant REST / SSE endpoints.
+	assistantHandler *assistantapi.Handler
 
 	// testClient is used by the batch key-probe handler.
 	testClient *http.Client
@@ -102,19 +107,25 @@ type Router struct {
 // New creates an API Router. The signature is kept stable so existing callers
 // (main.go and the package tests) do not need to change.
 func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf *usage.RingBuffer, pgUsageBuf *usage.RingBuffer, quotaTracker *usage.QuotaTracker, logger *console.Logger, proxyHandler *proxy.Handler, shutdown context.CancelFunc, selector *rotation.Selector, comboRes *combo.Resolver, downloadMgr *download.Manager) *Router {
+	contract, _ := assistant.LoadContract()
+	events := assistantapi.NewEventBroadcaster()
+	todos := assistantapi.NewTodoStore()
+	astHandler := assistantapi.NewHandler(nil, nil, contract, events, todos)
+
 	rt := &Router{
 		deps: deps{
-			reg:          reg,
-			configPath:   configPath,
-			usage:        usageBuf,
-			pgUsage:      pgUsageBuf,
-			quotaTracker: quotaTracker,
-			logger:       logger,
-			proxyHandler: proxyHandler,
-			selector:     selector,
-			comboRes:     comboRes,
-			downloadMgr:  downloadMgr,
-			shutdown:     shutdown,
+			reg:              reg,
+			configPath:       configPath,
+			usage:            usageBuf,
+			pgUsage:          pgUsageBuf,
+			quotaTracker:     quotaTracker,
+			logger:           logger,
+			proxyHandler:     proxyHandler,
+			selector:         selector,
+			comboRes:         comboRes,
+			downloadMgr:      downloadMgr,
+			shutdown:         shutdown,
+			assistantHandler: astHandler,
 			testClient: &http.Client{
 				Timeout: 30 * time.Second,
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -131,6 +142,11 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 	}
 	rt.deps.logRequests.Store(cfg.Trace.Enabled)
 	return rt
+}
+
+// AssistantHandler returns the assistant HTTP handler.
+func (rt *Router) AssistantHandler() *assistantapi.Handler {
+	return rt.assistantHandler
 }
 
 // SetRestartFunc configures a callback that will gracefully restart the HTTP
@@ -354,6 +370,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	if rt.archiveRunner != nil {
 		galleryHandler.SetArchive(archiveHandler)
 	}
+	rt.assistantHandler.SetDeps(apiDeps)
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -400,6 +417,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 			// Models
 			modelsHandler.Register(r)
+
+			// Assistant
+			r.Route("/assistant", rt.assistantHandler.Register)
 
 			// Downloads (feature_download)
 			if feature.Enabled(feature.Download) {
@@ -587,6 +607,24 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		}
 	}
 	r.Get("/*", rt.serveUI)
+
+	// Walk routes to dynamically build the assistant contract-backed router
+	routeSet := make(map[string]bool)
+	_ = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		p := assistant.NormalizePath(route)
+		if !strings.HasPrefix(p, "/v1/") && !strings.HasPrefix(p, "/api/") {
+			return nil
+		}
+		if method == http.MethodOptions || method == http.MethodHead {
+			return nil
+		}
+		routeSet[method+" "+p] = true
+		return nil
+	})
+	if contract, err := assistant.LoadContract(); err == nil {
+		ast, _ := contract.BuildAssistant(routeSet, true)
+		rt.assistantHandler.SetAssistant(ast)
+	}
 
 	return r
 }

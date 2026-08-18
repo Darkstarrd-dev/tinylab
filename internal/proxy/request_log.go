@@ -410,7 +410,7 @@ func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
 	}
 
 	// Run once immediately.
-	h.sweepTracesOnce(retainDays, maxDiskMB)
+	h.SweepTracesOnce(retainDays, maxDiskMB)
 
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
@@ -420,13 +420,13 @@ func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			h.sweepTracesOnce(retainDays, maxDiskMB)
+			h.SweepTracesOnce(retainDays, maxDiskMB)
 		}
 	}
 }
 
-// sweepTracesOnce performs a single retention sweep pass.
-func (h *Handler) sweepTracesOnce(retainDays, maxDiskMB int) {
+// SweepTracesOnce performs a single retention sweep pass.
+func (h *Handler) SweepTracesOnce(retainDays, maxDiskMB int) {
 	tracesDir := h.TracesDir()
 	now := time.Now()
 	cutoff := now.Add(-time.Duration(retainDays) * 24 * time.Hour)

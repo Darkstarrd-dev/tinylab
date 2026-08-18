@@ -760,6 +760,10 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     mediaBridgeImported: 'Imported {0} item(s) into Gallery',
     mediaBridgeGalleryUnavailable: 'Gallery is not available in this build',
     mediaBridgeAssetExpired: 'Media asset has expired or is unavailable',
+    spriteAssistant: 'Assistant',
+    spriteRelease: 'Release Sprite',
+    spriteDock: 'Dock Sprite',
+    spriteClear: 'Clear Chat',
   },
   cn: {
     requestTracing: '请求追踪',
@@ -1522,6 +1526,10 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     mediaBridgeImported: '已将 {0} 个项目导入画廊',
     mediaBridgeGalleryUnavailable: '当前构建不包含画廊功能',
     mediaBridgeAssetExpired: '媒体资产已过期或不可用',
+    spriteAssistant: '小精灵',
+    spriteRelease: '释放小精灵',
+    spriteDock: '收回小精灵',
+    spriteClear: '清空对话',
   }
 };
 

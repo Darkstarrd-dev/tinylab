@@ -1,0 +1,11 @@
+{
+  "reactions": [
+    {"when": "task.done", "area": "download", "status": "completed", "then": "notify", "msg": "下载任务已完成"},
+    {"when": "task.done", "area": "download", "status": "failed", "then": "notify", "msg": "下载任务失败"},
+    {"when": "task.done", "area": "imagebatch", "status": "completed", "then": "notify", "msg": "批量生图任务已完成"},
+    {"when": "task.done", "area": "imagebatch", "status": "failed", "then": "notify", "msg": "批量生图任务失败"},
+    {"when": "model.unavailable", "thresholdSec": 300, "then": "notify", "autoSwitch": "suggest"},
+    {"when": "schedule", "job": "clean-traces", "intervalSec": 3600, "then": "dispatch:trace.clear", "auto": true},
+    {"when": "todo.due", "then": "notify", "msg": "待办提醒"}
+  ]
+}

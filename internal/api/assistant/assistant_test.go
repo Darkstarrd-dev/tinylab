@@ -1,0 +1,200 @@
+package assistant
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/tinyrouter/tinyrouter/internal/assistant"
+)
+
+func setupTestHandler(t *testing.T) (*Handler, chi.Router) {
+	c, err := assistant.LoadContract()
+	if err != nil {
+		t.Fatalf("LoadContract failed: %v", err)
+	}
+
+	routes := map[string]bool{
+		"POST /v1/images/generations": true,
+		"POST /api/editor/save":       true,
+		"POST /api/traces/clear":      true,
+		"GET /api/traces":             true,
+	}
+	ast, _ := c.BuildAssistant(routes, true)
+
+	events := NewEventBroadcaster()
+	todos := NewTodoStore()
+	h := NewHandler(nil, ast, c, events, todos)
+
+	r := chi.NewRouter()
+	r.Route("/api/assistant", func(sub chi.Router) {
+		h.Register(sub)
+	})
+
+	return h, r
+}
+
+func TestGetTools(t *testing.T) {
+	_, r := setupTestHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/assistant/tools", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Tools []ToolSchema `json:"tools"`
+		Wired []string     `json:"wired"`
+		Count int          `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if resp.Count == 0 || len(resp.Tools) == 0 {
+		t.Error("expected non-empty tools")
+	}
+	if len(resp.Wired) == 0 {
+		t.Error("expected wired tools list")
+	}
+}
+
+func TestDispatchIntent(t *testing.T) {
+	_, r := setupTestHandler(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"intent": "生成一张猫的图片",
+	})
+	req := httptest.NewRequest("POST", "/api/assistant/dispatch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp DispatchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(resp.Tools) == 0 {
+		t.Fatal("expected at least 1 resolved tool")
+	}
+	if resp.Tools[0].Tool != "image.generate" {
+		t.Fatalf("expected image.generate, got %s", resp.Tools[0].Tool)
+	}
+}
+
+func TestJobsEndpoints(t *testing.T) {
+	_, r := setupTestHandler(t)
+
+	// List jobs
+	req := httptest.NewRequest("GET", "/api/assistant/jobs", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Create job
+	body, _ := json.Marshal(map[string]any{
+		"name":        "custom-sweep",
+		"intervalSec": 300,
+	})
+	req = httptest.NewRequest("POST", "/api/assistant/jobs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on create, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Delete job
+	req = httptest.NewRequest("DELETE", "/api/assistant/jobs/custom-sweep", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on delete, got %d", rec.Code)
+	}
+}
+
+func TestTodosEndpoints(t *testing.T) {
+	_, r := setupTestHandler(t)
+
+	// Create Todo
+	body, _ := json.Marshal(map[string]any{
+		"text":  "Check model benchmarks",
+		"dueAt": time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+	})
+	req := httptest.NewRequest("POST", "/api/assistant/todos", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var createResp struct {
+		Todo TodoItem `json:"todo"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &createResp)
+	if createResp.Todo.ID == "" {
+		t.Fatal("expected non-empty todo ID")
+	}
+
+	// List Todos
+	req = httptest.NewRequest("GET", "/api/assistant/todos", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	var listResp struct {
+		Todos []TodoItem `json:"todos"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &listResp)
+	if len(listResp.Todos) != 1 {
+		t.Fatalf("expected 1 todo, got %d", len(listResp.Todos))
+	}
+
+	// Delete Todo
+	req = httptest.NewRequest("DELETE", "/api/assistant/todos/"+createResp.Todo.ID, nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on delete, got %d", rec.Code)
+	}
+}
+
+func TestEventBroadcaster(t *testing.T) {
+	b := NewEventBroadcaster()
+	ch, unsub := b.Subscribe()
+	defer unsub()
+
+	b.Broadcast(Event{
+		Type:    "notify",
+		Title:   "Test Alert",
+		Message: "Hello",
+	})
+
+	select {
+	case evt := <-ch:
+		if evt.Title != "Test Alert" {
+			t.Fatalf("expected 'Test Alert', got %q", evt.Title)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for broadcast event")
+	}
+}

@@ -26,6 +26,9 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	m := systray.AddMenuItem("打开独立窗口", "Open TinyRouter UI in a native WebView2 window")
 	go runWebviewClickLoop(hctx, m)
 
+	mPet := systray.AddMenuItem("释放桌面小精灵", "Open desktop pet assistant")
+	go runPetClickLoop(hctx, mPet)
+
 	// Auto-open the native window once at startup (independent of the click loop).
 	go openWebviewAfterReady(hctx)
 
@@ -41,6 +44,12 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	}()
 
 	return m
+}
+
+func runPetClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
+	for range m.ClickedCh {
+		go openPetWindow(hctx)
+	}
 }
 
 // terminateAllWebviews force-closes every currently-open WebView2 window. Safe
@@ -352,7 +361,10 @@ var (
 	procGetMonitorInfoW    = user32Dll.NewProc("GetMonitorInfoW")
 	procMonitorFromWindow  = user32Dll.NewProc("MonitorFromWindow")
 	procSetWindowPos       = user32Dll.NewProc("SetWindowPos")
+	procSetWindowRgn       = user32Dll.NewProc("SetWindowRgn")
+	procCreateRoundRectRgn = gdi32Dll.NewProc("CreateRoundRectRgn")
 	user32Dll              = windows.NewLazySystemDLL("user32.dll")
+	gdi32Dll               = windows.NewLazySystemDLL("gdi32.dll")
 )
 
 const (
@@ -365,7 +377,92 @@ const (
 	swpShowWindow           = 0x0040
 	swpNoMove               = 0x0002
 	swpNoSize               = 0x0001
+	swpNoZOrder             = 0x0004
 )
+
+// openPetWindow creates a lightweight, borderless desktop pet window (L3).
+func openPetWindow(hctx *app.HostContext) {
+	webviewWindowMu.Lock()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	w := webview2.NewWithOptions(webview2.WebViewOptions{
+		Debug:     false,
+		AutoFocus: false,
+		WindowOptions: webview2.WindowOptions{
+			Title:  "",
+			Width:  240,
+			Height: 240,
+			IconId: 0,
+			Center: false,
+		},
+	})
+	webviewWindowMu.Unlock()
+
+	if w == nil {
+		hctx.Logger.Error("failed to create pet window")
+		return
+	}
+
+	hwnd := uintptr(w.Window())
+	if hwnd != 0 {
+		gwlStyle := ^uintptr(15)
+		style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlStyle)
+		newStyle := (uint32(style) &^ (wsCaption | wsThickFrame | wsSysMenu)) | wsPopup
+		procSetWindowLongPtrW.Call(hwnd, gwlStyle, uintptr(newStyle))
+		// Set Topmost (HWND_TOPMOST = -1 = ^uintptr(0))
+		procSetWindowPos.Call(
+			hwnd,
+			^uintptr(0),
+			100, 100, 240, 240,
+			swpFrameChanged|swpShowWindow,
+		)
+		// Clip rectangular frame to rounded region (28px corner radius -> ellipse diameter 56x56)
+		hrgn, _, _ := procCreateRoundRectRgn.Call(0, 0, 240, 240, 56, 56)
+		if hrgn != 0 {
+			procSetWindowRgn.Call(hwnd, hrgn, 1)
+		}
+	}
+
+	// Register window
+	webviewMu.Lock()
+	webviews[hwnd] = w
+	webviewMu.Unlock()
+	defer func() {
+		webviewMu.Lock()
+		delete(webviews, hwnd)
+		webviewMu.Unlock()
+	}()
+
+	var pos tagWINDOWPLACEMENT
+	pos.length = uint32(unsafe.Sizeof(pos))
+
+	w.Bind("movePetWindow", func(dx, dy int) error {
+		if hwnd == 0 {
+			return nil
+		}
+		procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&pos)))
+		curX := pos.rcNormalPosition.Left + int32(dx)
+		curY := pos.rcNormalPosition.Top + int32(dy)
+		procSetWindowPos.Call(
+			hwnd,
+			0,
+			uintptr(curX),
+			uintptr(curY),
+			0, 0,
+			swpNoSize|swpNoZOrder|swpShowWindow,
+		)
+		return nil
+	})
+
+	w.Bind("closePetWindow", func() error {
+		w.Terminate()
+		return nil
+	})
+
+	w.Navigate(hctx.ConsoleURL + "/sprite-pet.html")
+	w.Run()
+}
 
 type tagWINDOWPLACEMENT struct {
 	length           uint32
