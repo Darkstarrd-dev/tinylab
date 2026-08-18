@@ -11,7 +11,12 @@
 > - 模块职责发生迁移（文件/目录改属）
 > - 新增 / 移除 `docs/` 下的事实基线文档
 >
-> 不得让本文件与代码现状脱节。`AGENTS.md` / `CLAUDE.md` 中的模块说明已下放至此，两者仅保留约束与设计决策并引用本文件；若与本文件冲突，**以本文件为准**。
+> **最后核对（2026-08-18，Playground 多模态附件渲染、矢量 SVG 图标与横向并排布局整改）：** 
+> 1. **SVG 矢量图标体系**：在 `web/playground/static-pg/playground/pg-core.js` 新增 `pgGetMediaType` 与 `pgGetMediaSvg`，为 PDF 文档、视频 (Video)、音频 (Audio)、图片 (Image) 绘制高质量、自适应尺寸的现代 SVG 矢量图标。
+> 2. **待发送附件预览区整改**：在 `pg-ui.js` 的 `pgRenderInputThumbs` 彻底解决视频未做分支判断导致渲染 `<img>` 破损图片（`alt="media"`）的问题；使用专用徽标卡片（`.pg-input-thumb-file`, `.pg-input-thumb-pdf`, `.pg-input-thumb-video`, `.pg-input-thumb-audio`）结合 SVG 矢量图标与类型标识标签，大幅提升美观度；为 `.pg-input-thumb-wrap` 预留安全外边距，彻底解决 hover 移除按钮引起的卡片高度跳动。
+> 3. **消息历史气泡渲染修复与横向布局**：在 `pg-render.js` 新增 `pgRenderMediaPart`，彻底解决发送后在历史气泡中把 PDF、视频、音频当成 `<img>` 标签加载导致显示为破损图片图标的问题；为非图片多模态附件生成结构考究、语义清晰的 `.pg-media-card` 交互卡片，支持悬停动效与点击预览；引入 `.pg-msg-media-layout` 将媒体附件水平放置在文字气泡左侧并保留 12px 间隔，消除顶部重叠。
+> 4. **模态框全媒体预览支持**：在 `pg-modal.js` 将 `pgShowImageModal` 升级为 `pgShowMediaModal`，视频弹出 `<video controls autoplay>` 播放器，音频弹出声波/音符主题 `<audio controls autoplay>` 播放器，PDF 弹出内嵌预览与“在新窗口打开”/“下载”工具。
+> 涉及文件：`web/playground/static-pg/playground/pg-core.js`、`pg-i18n.js`、`pg-ui.js`、`pg-render.js`、`pg-modal.js`、`playground.css`、`web/pg-media-render.test.js`。
 > **最后核对（2026-08-18，Text Review Step3 AI Clean Debug 等分折叠面板与单章即时审校流转）：** (1) **Debug 面板均分与独立折叠**：`style.css` 重构 `.tr-debug-panel` 为 `overflow: hidden; height: 100%`，展开的 `.tr-debug-section` 采用 `flex: 1 1 0; min-height: 0;` 均分剩余垂直高度，折叠 `.collapsed` 紧凑收起，内部 `pre` 自适应局部滚动，彻底解决 Cleaned Output 无限增高挤压上方 Request / Thinking 的问题；`editor_textreview_step3.js` 统一为三个区域实现折叠/展开；修复 `trT()` 参数包装使 `{0} chars` 正确显示真实字数。(2) **Batch 章节即时完成与提前审校**：`cleaner.go` 新增 `ProgressiveBatchCleaner` 接口，`proxy_call.go` 的 `batchSplitter` 在流式检测到 `===CHAPTER_SEP===` 时立即触发 `onChapterDone`；`scheduler.go` 实时将该章标记为 `StatusCompleted` 并通过 SSE 广播事件，无需等待后续章节或全 batch 完成；前端持久化完成状态，审校按钮（`tr-s3-toreview`）只要有任意章节完成即亮起可用，无缝进入 Step4 审校。
 > **最后核对（2026-08-15，全链路内存泄漏与高水位线治理）：** 
 > 1. **方案 1 (画廊 Gallery 释放与 Footer 垃圾箱迁移)**：从 `gallery-tree.js` 目录树 Header 移除原 Clear 按钮；在 `gallery-layout.js` 底部控制栏 Directory Tree 展开按钮右侧新增带动态开盖动效的 SVG 垃圾箱按钮（`.bin-button`，样式由 `playground.css` 定义），点击后清空前端 Blob URL、释放当前视图所有媒体，并调用 `POST /api/gallery/clear` 清空后端 `gallerySessionStore` 中当前 owner 的驻留会话与临时文件，同时调用 `runtime/debug.FreeOSMemory()` 释放物理内存。

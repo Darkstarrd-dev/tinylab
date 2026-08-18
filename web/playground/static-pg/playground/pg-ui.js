@@ -216,8 +216,18 @@ async function pgProcessUploadedFile(file) {
     else if (name.endsWith('.jpg') || name.endsWith('.jpeg')) mime = 'image/jpeg';
     else if (name.endsWith('.webp')) mime = 'image/webp';
     else if (name.endsWith('.gif')) mime = 'image/gif';
+    else if (name.endsWith('.svg')) mime = 'image/svg+xml';
     else if (name.endsWith('.mp3')) mime = 'audio/mp3';
     else if (name.endsWith('.wav')) mime = 'audio/wav';
+    else if (name.endsWith('.ogg')) mime = 'audio/ogg';
+    else if (name.endsWith('.aac')) mime = 'audio/aac';
+    else if (name.endsWith('.flac')) mime = 'audio/flac';
+    else if (name.endsWith('.m4a')) mime = 'audio/m4a';
+    else if (name.endsWith('.mp4')) mime = 'video/mp4';
+    else if (name.endsWith('.webm')) mime = 'video/webm';
+    else if (name.endsWith('.mov')) mime = 'video/quicktime';
+    else if (name.endsWith('.mkv')) mime = 'video/x-matroska';
+    else if (name.endsWith('.avi')) mime = 'video/x-msvideo';
   }
 
   // If audio or video, invoke /api/playground/media-prep
@@ -1547,12 +1557,12 @@ function pgRenderInputBar() {
       '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
       expandBtnHtml +
       infinitySvgHtml +
-      '<input type="file" id="pg-file-input" multiple style="display:none" onchange="if(this.files){pgHandleFiles(this.files); this.value=\'\';}">' +
+      '<input type="file" id="pg-file-input" accept="image/*,video/*,audio/*,application/pdf" multiple style="display:none" onchange="if(this.files){pgHandleFiles(this.files); this.value=\'\';}">' +
     '</div>' +
     '<div class="pg-input-actions">' +
       sendBtn +
       '<div class="pg-btn-row">' +
-        '<button type="button" class="pg-btn pg-btn-attach" onclick="document.getElementById(\'pg-file-input\').click()" data-tooltip="Upload / Attach (Image, Audio, PDF)">' + attachSvg + '</button>' +
+        '<button type="button" class="pg-btn pg-btn-attach" onclick="document.getElementById(\'pg-file-input\').click()" data-tooltip="Upload / Attach (Image, Video, Audio, PDF)">' + attachSvg + '</button>' +
         (pgState.autoChat.enabled && pgState.autoChat.isRunning
           ? '<button class="pg-btn danger" onclick="pgAutoChatStop()" data-tooltip="' + pgEscapeHtml(pgT('pgAutoChatStop')) + '">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>'
           : '') +
@@ -1619,15 +1629,27 @@ function pgRenderInputThumbs() {
   }
   var html = '';
   w.config.imageUrls.forEach(function(url, idx) {
-    var isPdf = url.indexOf('data:application/pdf') === 0 || url.toLowerCase().indexOf('.pdf') !== -1;
-    var isAudio = url.indexOf('data:audio/') === 0 || url.toLowerCase().indexOf('.mp3') !== -1 || url.toLowerCase().indexOf('.wav') !== -1;
+    var mediaType = pgGetMediaType(url);
     var previewHtml = '';
-    if (isPdf) {
-      previewHtml = '<div class="pg-input-thumb" style="display:flex;align-items:center;justify-content:center;background:#2d3748;color:#f7fafc;font-size:10px;font-weight:bold;width:40px;height:40px;border-radius:4px;cursor:pointer;">PDF</div>';
-    } else if (isAudio) {
-      previewHtml = '<div class="pg-input-thumb" style="display:flex;align-items:center;justify-content:center;background:#2b6cb0;color:#f7fafc;font-size:10px;font-weight:bold;width:40px;height:40px;border-radius:4px;cursor:pointer;">🎵 AUD</div>';
+    var safeUrl = pgEscapeAttr(url);
+
+    if (mediaType === 'pdf') {
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-pdf" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgPdfDoc')) + '">' +
+        pgGetMediaSvg('pdf', 22) +
+        '<span>PDF</span>' +
+      '</div>';
+    } else if (mediaType === 'video') {
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-video" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgVideoFile')) + '">' +
+        pgGetMediaSvg('video', 22) +
+        '<span>VIDEO</span>' +
+      '</div>';
+    } else if (mediaType === 'audio') {
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-audio" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgAudioFile')) + '">' +
+        pgGetMediaSvg('audio', 22) +
+        '<span>AUDIO</span>' +
+      '</div>';
     } else {
-      previewHtml = '<img class="pg-input-thumb" src="' + pgEscapeHtml(url) + '" alt="media" onclick="pgShowImageModal(\'' + pgEscapeAttr(url) + '\')">';
+      previewHtml = '<img class="pg-input-thumb" src="' + pgEscapeHtml(url) + '" alt="media" onclick="pgShowMediaModal(\'' + safeUrl + '\')">';
     }
 
     html += '<div class="pg-input-thumb-wrap">' +

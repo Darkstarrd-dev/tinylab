@@ -91,7 +91,114 @@ function pgSetDebugModalTab(winIdx, tab) {
   pgRenderDebugModalContent(winIdx);
 }
 
-function pgShowImageModal(url, savedPath, savedFilename) {
+function pgDownloadMediaDirect(url, defaultFilename) {
+  if (!url) return;
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = defaultFilename || 'download';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function pgOpenMediaInNewTab(url) {
+  if (!url) return;
+  if (url.indexOf('data:') === 0) {
+    try {
+      var arr = url.split(',');
+      var mime = arr[0].match(/:(.*?);/)[1];
+      var bstr = atob(arr[1]);
+      var n = bstr.length;
+      var u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      var blob = new Blob([u8arr], { type: mime });
+      var blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      return;
+    } catch (e) {}
+  }
+  window.open(url, '_blank');
+}
+
+function pgShowMediaModal(url, savedPath, savedFilename) {
+  if (!url) return;
+  var type = (typeof pgGetMediaType === 'function') ? pgGetMediaType(url) : 'image';
+
+  if (type === 'video') {
+    var title = savedFilename || pgT('pgVideoFile');
+    var html = '<div class="pg-modal-header">' +
+      '<span class="pg-modal-title">&#x1F3AC; ' + pgEscapeHtml(pgT('pgVideoPreview')) + '</span>' +
+      '<span class="pg-modal-header-actions">' +
+        '<button class="pg-img-btn" onclick="pgCopyImageFallback(\'' + pgEscapeAttr(url) + '\', this)" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + pgEscapeHtml(pgT('pgCopy')) + '</button>' +
+        '<button class="pg-img-btn" onclick="pgDownloadMediaDirect(\'' + pgEscapeAttr(url) + '\', \'' + pgEscapeAttr(savedFilename || 'video.mp4') + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgDownloadMedia')) + '">' + pgEscapeHtml(pgT('pgDownloadMedia')) + '</button>' +
+        '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+      '</span>' +
+    '</div>' +
+    '<div class="pg-modal-body" style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:16px;background:rgba(0,0,0,0.85);height:75vh">' +
+      '<video src="' + pgEscapeHtml(url) + '" controls autoplay style="max-width:100%;max-height:100%;border-radius:6px;outline:none;box-shadow:0 8px 32px rgba(0,0,0,0.6)"></video>' +
+    '</div>' +
+    '<div class="pg-img-modal-footer" id="pg-img-footer">' +
+      '<span>' + pgEscapeHtml(title) + '</span>' +
+    '</div>';
+    pgShowModal(html);
+    return;
+  }
+
+  if (type === 'audio') {
+    var audioTitle = savedFilename || pgT('pgAudioFile');
+    var html = '<div class="pg-modal-header">' +
+      '<span class="pg-modal-title">&#x1F3B5; ' + pgEscapeHtml(pgT('pgAudioPreview')) + '</span>' +
+      '<span class="pg-modal-header-actions">' +
+        '<button class="pg-img-btn" onclick="pgCopyImageFallback(\'' + pgEscapeAttr(url) + '\', this)" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + pgEscapeHtml(pgT('pgCopy')) + '</button>' +
+        '<button class="pg-img-btn" onclick="pgDownloadMediaDirect(\'' + pgEscapeAttr(url) + '\', \'' + pgEscapeAttr(savedFilename || 'audio.mp3') + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgDownloadMedia')) + '">' + pgEscapeHtml(pgT('pgDownloadMedia')) + '</button>' +
+        '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+      '</span>' +
+    '</div>' +
+    '<div class="pg-modal-body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;background:radial-gradient(circle at center, rgba(14,165,233,0.1) 0%, rgba(15,23,42,0.9) 75%);min-height:280px">' +
+      '<div style="width:72px;height:72px;border-radius:50%;background:rgba(14,165,233,0.15);border:1px solid rgba(14,165,233,0.35);color:#38bdf8;display:flex;align-items:center;justify-content:center;margin-bottom:18px;box-shadow:0 0 24px rgba(14,165,233,0.25)">' +
+        pgGetMediaSvg('audio', 36) +
+      '</div>' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:18px;max-width:85%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + pgEscapeHtml(audioTitle) + '</div>' +
+      '<audio src="' + pgEscapeHtml(url) + '" controls autoplay style="width:420px;max-width:95%;outline:none"></audio>' +
+    '</div>' +
+    '<div class="pg-img-modal-footer" id="pg-img-footer">' +
+      '<span>' + pgEscapeHtml(audioTitle) + '</span>' +
+    '</div>';
+    pgShowModal(html);
+    return;
+  }
+
+  if (type === 'pdf') {
+    var pdfTitle = savedFilename || pgT('pgPdfDoc');
+    var html = '<div class="pg-modal-header">' +
+      '<span class="pg-modal-title">&#x1F4C4; ' + pgEscapeHtml(pgT('pgPdfPreview')) + '</span>' +
+      '<span class="pg-modal-header-actions">' +
+        '<button class="pg-img-btn" onclick="pgOpenMediaInNewTab(\'' + pgEscapeAttr(url) + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgOpenInNewTab')) + '">' + pgEscapeHtml(pgT('pgOpenInNewTab')) + '</button>' +
+        '<button class="pg-img-btn" onclick="pgDownloadMediaDirect(\'' + pgEscapeAttr(url) + '\', \'' + pgEscapeAttr(savedFilename || 'document.pdf') + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgDownloadMedia')) + '">' + pgEscapeHtml(pgT('pgDownloadMedia')) + '</button>' +
+        '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+      '</span>' +
+    '</div>' +
+    '<div class="pg-modal-body" style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0;background:#2d3748;width:100%;height:80vh">' +
+      '<iframe src="' + pgEscapeHtml(url) + '" style="width:100%;height:100%;border:none;background:#fff"></iframe>' +
+    '</div>' +
+    '<div class="pg-img-modal-footer" id="pg-img-footer">' +
+      '<span>' + pgEscapeHtml(pdfTitle) + '</span>' +
+    '</div>';
+    pgShowModal(html);
+    requestAnimationFrame(function() {
+      var modal = document.querySelector('#pg-modal-overlay .pg-modal');
+      if (modal) {
+        modal.style.width = '90vw';
+        modal.style.height = '90vh';
+        modal.style.maxWidth = '95vw';
+        modal.style.maxHeight = '95vh';
+      }
+    });
+    return;
+  }
+
   var html = '<div class="pg-modal-header">' +
     '<span class="pg-modal-title">&#x1F5BC; ' + pgEscapeHtml(pgT('pgImagePreview')) + '</span>' +
     '<span class="pg-modal-header-actions">' +
@@ -126,6 +233,7 @@ function pgShowImageModal(url, savedPath, savedFilename) {
     pgRefreshImageModalMeta(url, savedPath, savedFilename);
   });
 }
+var pgShowImageModal = pgShowMediaModal;
 
 var pgZoomResizeHandler = null;
 var pgZoomMouseMoveHandler = null;

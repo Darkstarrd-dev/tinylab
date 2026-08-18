@@ -14,6 +14,30 @@ function pgSafeHref(href) {
   return '#';
 }
 
+function pgRenderMediaPart(u, sp, sf) {
+  var type = pgGetMediaType(u);
+  var safeUrl = pgEscapeAttr(u);
+  var safeSp = pgEscapeAttr(sp || '');
+  var safeSf = pgEscapeAttr(sf || '');
+
+  if (type === 'image') {
+    return '<img class="pg-image-thumb" src="' + pgEscapeHtml(u) + '" alt="image" onclick="pgShowMediaModal(\'' + safeUrl + '\', \'' + safeSp + '\', \'' + safeSf + '\')">';
+  }
+
+  var typeClass = 'pg-media-card-' + type;
+  var name = sf || (type === 'pdf' ? pgT('pgPdfDoc') : (type === 'video' ? pgT('pgVideoFile') : pgT('pgAudioFile')));
+  var actionText = type === 'pdf' ? pgT('pgClickToPreview') : pgT('pgClickToPlay');
+  var meta = (type === 'pdf' ? pgT('pgPdfDoc') : (type === 'video' ? pgT('pgVideoFile') : pgT('pgAudioFile'))) + ' · ' + actionText;
+
+  return '<div class="pg-media-card ' + typeClass + '" onclick="pgShowMediaModal(\'' + safeUrl + '\', \'' + safeSp + '\', \'' + safeSf + '\')" title="' + pgEscapeHtml(name) + '">' +
+    '<div class="pg-media-card-icon">' + pgGetMediaSvg(type, 26) + '</div>' +
+    '<div class="pg-media-card-info">' +
+      '<div class="pg-media-card-name">' + pgEscapeHtml(name) + '</div>' +
+      '<div class="pg-media-card-meta">' + pgEscapeHtml(meta) + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
 function pgScrollBottom(i, assistantIdx) {
   pgScrollBottomReasoning(i, assistantIdx, true);
   var box = document.getElementById('pg-messages-' + i);
@@ -369,13 +393,16 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
   }
   var isError = msg.status === 'error';
   var cls = 'pg-bubble' + (isError ? ' pg-bubble-error' : '');
+  var mediaHtml = '';
   var imgs = pgImageParts(msg.content);
-    inner += '<div class="pg-image-row">' + imgs.map(function(p) {
+  if (imgs.length > 0) {
+    mediaHtml = '<div class="pg-image-row">' + imgs.map(function(p) {
       var u = p.image_url.url;
       var sp = p.image_url.savedPath || '';
       var sf = p.image_url.savedFilename || '';
-      return '<img class="pg-image-thumb" src="' + pgEscapeHtml(u) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(u) + '\', \'' + pgEscapeAttr(sp) + '\', \'' + pgEscapeAttr(sf) + '\')">';
+      return pgRenderMediaPart(u, sp, sf);
     }).join('') + '</div>';
+  }
   var bodyMd;
   if (isError) {
     bodyMd = msg.content ? pgRenderMarkdown(pgTextContent(msg.content), false) : '';
@@ -397,15 +424,16 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
   if (isUser && pgState.mode === 'image' && msg.images && msg.images.length) {
     var eurls = msg.images.filter(function(u) { return u && u.trim(); });
     if (eurls.length) {
-      inner += '<div class="pg-image-row">' + eurls.map(function(u) {
-        return '<img class="pg-image-thumb" src="' + pgEscapeHtml(u) + '" alt="image" onclick="pgShowImageModal(\'' + pgEscapeAttr(u) + '\')">';
+      mediaHtml += '<div class="pg-image-row">' + eurls.map(function(u) {
+        return pgRenderMediaPart(u, '', '');
       }).join('') + '</div>';
     }
   }
-  // Skip the text bubble when there is no text (e.g. image-only results),
-  // otherwise an empty bubble is rendered below the image.
-  if (bodyMd) {
-    inner += '<div class="' + cls + '">' + bodyMd + '</div>';
+  var bubbleHtml = bodyMd ? ('<div class="' + cls + '">' + bodyMd + '</div>') : '';
+  if (mediaHtml && bubbleHtml) {
+    inner += '<div class="pg-msg-media-layout">' + mediaHtml + bubbleHtml + '</div>';
+  } else {
+    inner += mediaHtml + bubbleHtml;
   }
   return inner;
 }

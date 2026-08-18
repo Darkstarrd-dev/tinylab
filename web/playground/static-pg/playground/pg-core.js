@@ -142,7 +142,14 @@ function pgApiGet(p)         { return PG_HOST && PG_HOST.apiGet ? PG_HOST.apiGet
 function pgApiPost(p, b)     { return PG_HOST && PG_HOST.apiPost ? PG_HOST.apiPost(p, b) : apiPost(p, b); }
 function pgApiPatch(p, b)    { return PG_HOST && PG_HOST.apiPatch ? PG_HOST.apiPatch(p, b) : apiPatch(p, b); }
 function pgToast(m, ty)      { return PG_HOST && PG_HOST.toast ? PG_HOST.toast(m, ty) : toast(m, ty); }
-function pgEscapeHtml(s)     { return PG_HOST && PG_HOST.escapeHtml ? PG_HOST.escapeHtml(s) : escapeHtml(s); }
+function pgEscapeHtml(s)     {
+  if (PG_HOST && PG_HOST.escapeHtml) return PG_HOST.escapeHtml(s);
+  if (typeof escapeHtml === 'function') return escapeHtml(s);
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pgEscapeAttr(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function pgCopyToClipboard(tx, lb) { return PG_HOST && PG_HOST.copyToClipboard ? PG_HOST.copyToClipboard(tx, lb) : copyToClipboard(tx, lb); }
 function pgT(k, ar) {
   if (PG_HOST && PG_HOST.t) return PG_HOST.t(k, ar);
@@ -166,3 +173,55 @@ var PG_MAX_MSGS = 100;
 var PG_MAX_MSGS_BYTES = 1024 * 1024;       // 1MB raw string cap
 var PG_MAX_MSG_CHARS = 40000;              // single message content cap
 var PG_MAX_MSGS_CHARS = 120000;            // total loaded content cap
+
+// ----- Media helpers (PDF / Video / Audio / Image) -----------------
+function pgGetMediaType(url) {
+  if (!url || typeof url !== 'string') return 'image';
+  var clean = url.trim().toLowerCase();
+  if (clean.indexOf('data:') === 0) {
+    if (clean.indexOf('data:application/pdf') === 0) return 'pdf';
+    if (clean.indexOf('data:video/') === 0) return 'video';
+    if (clean.indexOf('data:audio/') === 0) return 'audio';
+    if (clean.indexOf('data:image/') === 0) return 'image';
+  }
+  var pathPart = clean.split('?')[0].split('#')[0];
+  if (/\.pdf$/i.test(pathPart)) return 'pdf';
+  if (/\.(mp4|webm|mov|mkv|avi|flv|wmv|m4v|3gp|ogv)$/i.test(pathPart)) return 'video';
+  if (/\.(mp3|wav|ogg|aac|flac|m4a|wma|opus|oga|weba)$/i.test(pathPart)) return 'audio';
+  return 'image';
+}
+
+function pgGetMediaSvg(type, size) {
+  size = size || 24;
+  if (type === 'pdf') {
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="currentColor" fill-opacity="0.12"/>' +
+      '<polyline points="14 2 14 8 20 8"/>' +
+      '<path d="M10 13v4M10 13h1.8a1.6 1.6 0 0 0 0-3.2H10" stroke-width="1.6"/>' +
+      '<path d="M14 9.8v7.2M14 9.8h1.6a2.2 2.2 0 0 1 0 4.4H14" stroke-width="1.6"/>' +
+    '</svg>';
+  }
+  if (type === 'video') {
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="2" y="4" width="20" height="16" rx="3.5" fill="currentColor" fill-opacity="0.12"/>' +
+      '<polygon points="10 8.5 16 12 10 15.5 10 8.5" fill="currentColor" stroke-linejoin="round"/>' +
+      '<line x1="2" y1="8" x2="6" y2="8"/>' +
+      '<line x1="18" y1="8" x2="22" y2="8"/>' +
+      '<line x1="2" y1="16" x2="6" y2="16"/>' +
+      '<line x1="18" y1="16" x2="22" y2="16"/>' +
+    '</svg>';
+  }
+  if (type === 'audio') {
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M9 18V5l12-2v13" stroke-width="2"/>' +
+      '<circle cx="6" cy="18" r="3" fill="currentColor" fill-opacity="0.2" stroke-width="1.8"/>' +
+      '<circle cx="18" cy="16" r="3" fill="currentColor" fill-opacity="0.2" stroke-width="1.8"/>' +
+      '<path d="M6 8v3M3 9.5v0M9 9.5v0" stroke-width="1.5" stroke-linecap="round"/>' +
+    '</svg>';
+  }
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="3" y="3" width="18" height="18" rx="3" fill="currentColor" fill-opacity="0.12"/>' +
+    '<circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>' +
+    '<polyline points="21 15 16 10 5 21"/>' +
+  '</svg>';
+}
