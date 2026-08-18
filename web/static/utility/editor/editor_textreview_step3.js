@@ -26,6 +26,11 @@ var trS3ModelNames = {};        // "providerId/modelId" -> alias (from /api/mode
 var trS3NodeNumbers = {};       // nodeId -> 1-based display number
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
 var trS3ModalModel = null;      // {providerId, modelId, label} selected in the local model prompt
+var trS3RightTab = 'preview';  // 当前右侧面板视图: 'preview' | 'debug'
+var trS3DebugRaw = {};         // chapterIdx -> 累积的原始响应文本
+var trS3DebugThinking = {};    // chapterIdx -> 累积的 thinking 思考文本
+var trS3DebugContent = {};     // chapterIdx -> 累积的 content 原始输出文本
+var trS3DebugCollapsed = { request: false, thinking: false, output: false }; // 各 section 折叠状态
 window.trS3NodeNumbers = trS3NodeNumbers;
 
 function trS3NodeBadge(nodeId) {
@@ -176,9 +181,20 @@ window.trRenderStep3 = function (panel, state) {
         '<div class="tr-right-pane">' +
           '<div class="tr-right-pane-head">' +
             '<span class="tr-right-pane-title" id="tr-s3-detail-title">' + trEscapeHtml(trT('trPreview') || '正文清洗实时预览') + '</span>' +
+            '<div class="tr-s3-right-tabs">' +
+              '<button class="tr-s3-rtab' + (trS3RightTab === 'preview' ? ' active' : '') + '" data-tab="preview" onclick="trS3SwitchRightTab(\'preview\')">' +
+                trEscapeHtml(trT('trPreview') || 'Preview') + '</button>' +
+              '<button class="tr-s3-rtab' + (trS3RightTab === 'debug' ? ' active' : '') + '" data-tab="debug" onclick="trS3SwitchRightTab(\'debug\')">' +
+                trEscapeHtml(trT('trDebug') || 'Debug') + '</button>' +
+            '</div>' +
             '<span class="tr-count" id="tr-s3-detail-prog">0 ' + trEscapeHtml(trT('trCharCount') || '字') + '</span>' +
           '</div>' +
-          '<pre class="tr-review-content" id="tr-review-content"></pre>' +
+          '<div id="tr-s3-preview-wrap" class="tr-s3-view-wrap"' + (trS3RightTab !== 'preview' ? ' style="display:none"' : '') + '>' +
+            '<pre class="tr-review-content" id="tr-review-content"></pre>' +
+          '</div>' +
+          '<div id="tr-s3-debug-wrap" class="tr-s3-view-wrap"' + (trS3RightTab !== 'debug' ? ' style="display:none"' : '') + '>' +
+            '<div class="tr-debug-panel" id="tr-debug-panel"></div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -844,6 +860,13 @@ function trS3UpdateControls() {
   var re = document.getElementById('tr-s3-range-end');
   if (rs) rs.disabled = active;
   if (re) re.disabled = active;
+
+  var toReview = document.getElementById('tr-s3-toreview');
+  if (toReview) {
+    var hasDone = (typeof window.trS3HasCompleted === 'function') ? window.trS3HasCompleted() : false;
+    // 只要有任何一章完成了，审校按钮就高亮可用，无需等待全量或当前 batch 完成
+    toReview.className = hasDone ? 'tr-btn tr-btn-primary' : 'tr-btn';
+  }
 }
 
 // ===================== chapter tabs + list =====================
@@ -965,6 +988,9 @@ function trS3SelectChapter(idx) {
   if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
 
   if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
+
+  // 同步刷新 debug 面板
+  if (trS3RightTab === 'debug') trS3RenderDebugPanel(idx);
 }
 // trS3PassChapter manually passes a processing/failed chapter: moves it to
 // completed (preserving any cleaned text, falling back to content) and syncs
@@ -1053,6 +1079,9 @@ function trS3OpenEventSource(id) {
   trEventSource.addEventListener('chunk', function (e) {
     try { var d = JSON.parse(e.data); trS3OnChunk(d); } catch (_) {}
   });
+  trEventSource.addEventListener('raw', function (e) {
+    try { var d = JSON.parse(e.data); trS3OnRaw(d); } catch (_) {}
+  });
   trEventSource.addEventListener('status', function (e) {
     try { var d = JSON.parse(e.data); trS3OnStatus(d); } catch (_) {}
   });
@@ -1073,6 +1102,65 @@ function trS3OpenEventSource(id) {
       trSubscribeSession(trState.sessionId);
     }, 3000);
   };
+}
+
+/**
+ * raw: append raw unparsed streaming delta (separating thinking from content)
+ * to debug buffers for live visualization.
+ */
+function trS3OnRaw(evt) {
+  var idx = evt.chapterIdx;
+  if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
+  if (!trS3DebugRaw[idx]) trS3DebugRaw[idx] = '';
+  trS3DebugRaw[idx] += evt.delta || '';
+
+  if (evt.section === 'thinking') {
+    if (!trS3DebugThinking[idx]) trS3DebugThinking[idx] = '';
+    trS3DebugThinking[idx] += evt.delta || '';
+  } else {
+    if (!trS3DebugContent[idx]) trS3DebugContent[idx] = '';
+    trS3DebugContent[idx] += evt.delta || '';
+  }
+
+  if (trS3RightTab === 'debug' && idx === trS3SelectedIdx) {
+    trS3UpdateLiveDebugElements(idx);
+  }
+}
+
+/**
+ * 实时局部刷新 debug 面板中的 Thinking 和 Output 区域，避免全量重新渲染带来的卡顿。
+ */
+function trS3UpdateLiveDebugElements(idx) {
+  var c = trS3Chapters[idx];
+  if (!c) return;
+
+  var thinkText = trS3DebugThinking[idx] || '';
+  var thinkEl = document.getElementById('tr-debug-thinking');
+  var thinkCountEl = document.getElementById('tr-debug-thinking-count');
+  var thinkSec = document.getElementById('tr-debug-section-thinking');
+
+  if (thinkText) {
+    if (thinkSec) thinkSec.style.display = '';
+    if (thinkEl) {
+      thinkEl.textContent = thinkText;
+      if (trS3ScrolledToBottom(thinkEl)) thinkEl.scrollTop = thinkEl.scrollHeight;
+    }
+    if (thinkCountEl) {
+      thinkCountEl.textContent = (trT('trDebugChars', [thinkText.length]) || (thinkText.length + ' 字'));
+    }
+  }
+
+  var outText = trS3DebugContent[idx] || c.cleaned || trS3DebugRaw[idx] || '';
+  var outEl = document.getElementById('tr-debug-output');
+  var outCountEl = document.getElementById('tr-debug-output-count');
+
+  if (outEl && outText) {
+    outEl.textContent = outText;
+    if (trS3ScrolledToBottom(outEl)) outEl.scrollTop = outEl.scrollHeight;
+  }
+  if (outCountEl && outText) {
+    outCountEl.textContent = (trT('trDebugChars', [outText.length]) || (outText.length + ' 字'));
+  }
 }
 
 /**
@@ -1101,6 +1189,10 @@ function trS3OnChunk(evt) {
     }
     var progEl = document.getElementById('tr-s3-detail-prog');
     if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
+    // 如果当前处于 debug tab，更新 debug 输出区域
+    if (trS3RightTab === 'debug') {
+      trS3UpdateLiveDebugElements(idx);
+    }
   }
   if (old !== 'processing') trS3UpdateTabCounts();
 }
@@ -1124,18 +1216,29 @@ function trS3OnStatus(evt) {
   if (evt.error) trS3Chapters[idx].error = evt.error;
   if (evt.nodeId) trS3Chapters[idx].nodeId = evt.nodeId;
   // Mirror backend ReprocessChapter reset: when a chapter is reset to pending,
-  // clear the accumulated cleaned text + error so new chunks don't append to stale text.
+  // clear the accumulated cleaned text + error + raw debug buffers so new chunks don't append to stale text.
   if (evt.status === 'pending' && prevStatus !== 'pending') {
     trS3Chapters[idx].cleaned = '';
     trS3Chapters[idx].error = '';
+    trS3DebugRaw[idx] = '';
+    trS3DebugThinking[idx] = '';
+    trS3DebugContent[idx] = '';
   }
-  // 完成的章节同步清洗文本到 trState.chapters，保持数据一致性
+  // 完成的章节同步清洗文本到 trState.chapters，保持数据一致性并持久化
   if (evt.status === 'completed' && trState.chapters && trState.chapters[idx]) {
     trState.chapters[idx].cleaned = trS3Chapters[idx].cleaned || '';
     trState.chapters[idx].status = 'completed';
+    trSave();
   }
   trS3UpdateCardStatus(idx);
   trS3UpdateTabCounts();
+  trS3UpdateControls();
+
+  // 章节状态变化时刷新 debug 面板
+  if (trS3RightTab === 'debug' && idx === trS3SelectedIdx) {
+    trS3RenderDebugPanel(idx);
+  }
+
   trS3MaybeSessionDone();
 }
 
@@ -1176,6 +1279,9 @@ function trS3ReconcileFromSnapshot(snap) {
   if (Array.isArray(snap.nodes)) {
     trS3Nodes = snap.nodes;
   }
+  trS3DebugRaw = {};
+  trS3DebugThinking = {};
+  trS3DebugContent = {};
 }
 
 function trS3RenderAll() {
@@ -1240,4 +1346,206 @@ function trS3JsString(s) {
 // Escape a string for use inside a CSS attribute selector [data-id="..."].
 function trS3CssSelector(s) {
   return nid(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// ===================== right pane: debug view =====================
+
+/**
+ * 切换右侧面板的 Preview / Debug 子标签。
+ */
+function trS3SwitchRightTab(tab) {
+  trS3RightTab = tab;
+  var btns = document.querySelectorAll('.tr-s3-rtab');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
+  }
+  var pw = document.getElementById('tr-s3-preview-wrap');
+  var dw = document.getElementById('tr-s3-debug-wrap');
+  if (pw) pw.style.display = tab === 'preview' ? '' : 'none';
+  if (dw) dw.style.display = tab === 'debug' ? '' : 'none';
+  if (tab === 'debug') trS3RenderDebugPanel(trS3SelectedIdx);
+}
+
+/**
+ * 构建选中章节的备选请求体 JSON（在后端 DebugRequest 尚未到达时展示）。
+ */
+function trS3BuildPreviewRequest(idx) {
+  if (idx < 0 || idx >= trS3Chapters.length) return '';
+  var c = trS3Chapters[idx];
+  var modelName = 'default';
+  for (var i = 0; i < trS3Nodes.length; i++) {
+    if (trS3Nodes[i].enabled) {
+      modelName = trS3Nodes[i].modelId || trS3Nodes[i].id;
+      break;
+    }
+  }
+  var sys = trState.systemPrompt || '';
+  var req = {
+    model: modelName,
+    messages: [
+      { role: 'system', content: sys },
+      { role: 'user', content: c.content || '' }
+    ],
+    stream: true
+  };
+  return JSON.stringify(req, null, 2);
+}
+
+/**
+ * 切换指定调试区域（request / thinking / output）的折叠/展开状态。
+ */
+function trS3ToggleDebugSection(section) {
+  trS3DebugCollapsed[section] = !trS3DebugCollapsed[section];
+  var secEl = document.getElementById('tr-debug-section-' + section);
+  var btnEl = document.getElementById('tr-debug-toggle-' + section);
+  if (secEl) secEl.classList.toggle('collapsed', !!trS3DebugCollapsed[section]);
+  if (btnEl) {
+    btnEl.textContent = trS3DebugCollapsed[section]
+      ? (trT('trDebugThinkingExpand') || '展开')
+      : (trT('trDebugThinkingFold') || '折叠');
+  }
+}
+
+/**
+ * 渲染选中章节的调试信息面板：状态行 + 请求体 + 思考过程(Thinking) + 清洗输出(Output)。
+ */
+function trS3RenderDebugPanel(idx) {
+  var panel = document.getElementById('tr-debug-panel');
+  if (!panel || idx < 0 || idx >= trS3Chapters.length) return;
+  var c = trS3Chapters[idx];
+  var statusText = c.debugStatusCode ? ('HTTP ' + c.debugStatusCode) : (c.status === 'processing' ? 'PROCESSING' : '—');
+  var statusClass = '';
+  if (c.debugStatusCode >= 200 && c.debugStatusCode < 300) statusClass = ' tr-debug-ok';
+  else if (c.debugStatusCode >= 400) statusClass = ' tr-debug-err';
+  else if (c.status === 'processing') statusClass = ' tr-debug-ok';
+
+  var reqText = c.debugRequest || trS3BuildPreviewRequest(idx);
+  var thinkText = trS3DebugThinking[idx] || '';
+  var outText = trS3DebugContent[idx] || c.cleaned || c.debugRawBody || '';
+
+  // 是否处于思考阶段（正在 processing 且正文尚无输出）
+  var isThinkingActive = (c.status === 'processing' && !outText && thinkText);
+  var isOutputActive = (c.status === 'processing' && outText);
+
+  var outPlaceholder = (c.status === 'processing')
+    ? (thinkText ? '(' + trEscapeHtml(trT('trDebugThinkingActive') || '思考中，等待正文输出...') + ')' : '(' + trEscapeHtml(trT('trDebugWaiting') || '等待模型输出流...') + ')')
+    : (c.status === 'pending')
+      ? '(' + trEscapeHtml(trT('trDebugAwaitReq') || '等待请求...') + ')'
+      : '(' + trEscapeHtml(trT('trDebugNoData') || '无数据') + ')';
+
+  // 如果没有独立 thinking 数据但处于 completed 状态，且 rawBody 包含 <think> 标签，做一次智能抽取
+  if (!thinkText && c.debugRawBody && c.debugRawBody.indexOf('<think>') >= 0) {
+    var m = c.debugRawBody.match(/<think>([\s\S]*?)<\/think>/);
+    if (m && m[1]) {
+      thinkText = m[1].trim();
+      if (!outText) outText = c.debugRawBody.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+    }
+  }
+
+  var showThinkingSection = !!thinkText || (c.status === 'processing');
+
+  var reqCollapsed = !!trS3DebugCollapsed.request;
+  var thinkCollapsed = !!trS3DebugCollapsed.thinking;
+  var outCollapsed = !!trS3DebugCollapsed.output;
+
+  panel.innerHTML =
+    // 状态行
+    '<div class="tr-debug-status' + statusClass + '">' +
+      '<span class="tr-debug-status-code">' + trEscapeHtml(statusText) + '</span>' +
+      '<span class="tr-debug-status-label">' + trEscapeHtml(c.status || 'pending') + '</span>' +
+      (c.error ? '<span class="tr-debug-status-err" title="' + trEscapeHtml(c.error) + '">' + trEscapeHtml(c.error) + '</span>' : '') +
+    '</div>' +
+
+    // 请求体 (Request)
+    '<div class="tr-debug-section' + (reqCollapsed ? ' collapsed' : '') + '" id="tr-debug-section-request">' +
+      '<div class="tr-debug-section-head">' +
+        '<div class="tr-debug-head-title">' +
+          '<span>\ud83d\udce4 Request</span>' +
+        '</div>' +
+        '<div class="tr-debug-head-actions">' +
+          '<button class="tr-btn tr-btn-xs" id="tr-debug-toggle-request" onclick="trS3ToggleDebugSection(\'request\')">' +
+            trEscapeHtml(reqCollapsed ? (trT('trDebugThinkingExpand') || '展开') : (trT('trDebugThinkingFold') || '折叠')) +
+          '</button>' +
+          '<button class="tr-btn tr-btn-xs" onclick="trS3CopyDebug(\'request\')">' +
+            trEscapeHtml(trT('trCopy') || 'Copy') + '</button>' +
+        '</div>' +
+      '</div>' +
+      '<pre class="tr-debug-body" id="tr-debug-request">' +
+        trEscapeHtml(trS3FormatJson(reqText) || '(No data)') +
+      '</pre>' +
+    '</div>' +
+
+    // 思考过程 (Thinking Process)
+    (showThinkingSection ? (
+      '<div class="tr-debug-section' + (thinkCollapsed ? ' collapsed' : '') + '" id="tr-debug-section-thinking">' +
+        '<div class="tr-debug-section-head">' +
+          '<div class="tr-debug-head-title">' +
+            '<span>\ud83e\udde0 ' + trEscapeHtml(trT('trDebugThinking') || '思考过程') + '</span>' +
+            '<span class="tr-debug-badge tr-debug-thinking-badge" id="tr-debug-thinking-count">' +
+              trEscapeHtml(trT('trDebugChars', [thinkText.length]) || (thinkText.length + ' 字')) +
+            '</span>' +
+            (isThinkingActive ? ' <span class="tr-debug-live-think">\u25cf THINKING</span>' : '') +
+          '</div>' +
+          '<div class="tr-debug-head-actions">' +
+            '<button class="tr-btn tr-btn-xs" id="tr-debug-toggle-thinking" onclick="trS3ToggleDebugSection(\'thinking\')">' +
+              trEscapeHtml(thinkCollapsed ? (trT('trDebugThinkingExpand') || '展开') : (trT('trDebugThinkingFold') || '折叠')) +
+            '</button>' +
+            '<button class="tr-btn tr-btn-xs" onclick="trS3CopyDebug(\'thinking\')">' +
+              trEscapeHtml(trT('trCopy') || 'Copy') + '</button>' +
+          '</div>' +
+        '</div>' +
+        '<pre class="tr-debug-body tr-debug-thinking-body" id="tr-debug-thinking">' +
+          trEscapeHtml(thinkText || '(' + trEscapeHtml(trT('trDebugThinkingActive') || '思考中...') + ')') +
+        '</pre>' +
+      '</div>'
+    ) : '') +
+
+    // 清洗输出 (Cleaned Output)
+    '<div class="tr-debug-section' + (outCollapsed ? ' collapsed' : '') + '" id="tr-debug-section-output">' +
+      '<div class="tr-debug-section-head">' +
+        '<div class="tr-debug-head-title">' +
+          '<span>\ud83d\udcdd ' + trEscapeHtml(trT('trDebugOutput') || '清洗输出') + '</span>' +
+          (outText ? (
+            '<span class="tr-debug-badge" id="tr-debug-output-count">' +
+              trEscapeHtml(trT('trDebugChars', [outText.length]) || (outText.length + ' 字')) +
+            '</span>'
+          ) : '') +
+          (isOutputActive ? ' <span class="tr-debug-live-stream">\u25cf STREAMING</span>' : '') +
+        '</div>' +
+        '<div class="tr-debug-head-actions">' +
+          '<button class="tr-btn tr-btn-xs" id="tr-debug-toggle-output" onclick="trS3ToggleDebugSection(\'output\')">' +
+            trEscapeHtml(outCollapsed ? (trT('trDebugThinkingExpand') || '展开') : (trT('trDebugThinkingFold') || '折叠')) +
+          '</button>' +
+          '<button class="tr-btn tr-btn-xs" onclick="trS3CopyDebug(\'output\')">' +
+            trEscapeHtml(trT('trCopy') || 'Copy') + '</button>' +
+        '</div>' +
+      '</div>' +
+      '<pre class="tr-debug-body tr-debug-output-body" id="tr-debug-output">' +
+        trEscapeHtml(outText || outPlaceholder) +
+      '</pre>' +
+    '</div>';
+}
+
+/**
+ * 尝试格式化 JSON 字符串，失败则原样返回。
+ */
+function trS3FormatJson(s) {
+  if (!s) return '';
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch (_) { return s; }
+}
+
+/**
+ * 复制调试面板中指定区域的内容到剪贴板。
+ */
+function trS3CopyDebug(section) {
+  var el = document.getElementById('tr-debug-' + section);
+  if (!el) return;
+  var text = el.textContent || '';
+  if (typeof window.copyToClipboard === 'function') {
+    window.copyToClipboard(text, section);
+  } else {
+    navigator.clipboard.writeText(text).then(function () {
+      trToast(trT('trCopied') || 'Copied', 'success');
+    });
+  }
 }

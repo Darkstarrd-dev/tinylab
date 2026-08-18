@@ -38,6 +38,11 @@ type Chapter struct {
 	Error   string `json:"error,omitempty"`
 	NodeID  string `json:"nodeId,omitempty"`
 	Retry   int    `json:"retry"`
+
+	// 调试信息：最近一次清洗尝试的请求/响应原始数据
+	DebugRequest    string `json:"debugRequest,omitempty"`
+	DebugRawBody    string `json:"debugRawBody,omitempty"`
+	DebugStatusCode int    `json:"debugStatusCode,omitempty"`
 }
 
 // NodeRuntime wraps a configured TextReviewNode with live scheduling state.

@@ -12,6 +12,7 @@
 > - 新增 / 移除 `docs/` 下的事实基线文档
 >
 > 不得让本文件与代码现状脱节。`AGENTS.md` / `CLAUDE.md` 中的模块说明已下放至此，两者仅保留约束与设计决策并引用本文件；若与本文件冲突，**以本文件为准**。
+> **最后核对（2026-08-18，Text Review Step3 AI Clean Debug 等分折叠面板与单章即时审校流转）：** (1) **Debug 面板均分与独立折叠**：`style.css` 重构 `.tr-debug-panel` 为 `overflow: hidden; height: 100%`，展开的 `.tr-debug-section` 采用 `flex: 1 1 0; min-height: 0;` 均分剩余垂直高度，折叠 `.collapsed` 紧凑收起，内部 `pre` 自适应局部滚动，彻底解决 Cleaned Output 无限增高挤压上方 Request / Thinking 的问题；`editor_textreview_step3.js` 统一为三个区域实现折叠/展开；修复 `trT()` 参数包装使 `{0} chars` 正确显示真实字数。(2) **Batch 章节即时完成与提前审校**：`cleaner.go` 新增 `ProgressiveBatchCleaner` 接口，`proxy_call.go` 的 `batchSplitter` 在流式检测到 `===CHAPTER_SEP===` 时立即触发 `onChapterDone`；`scheduler.go` 实时将该章标记为 `StatusCompleted` 并通过 SSE 广播事件，无需等待后续章节或全 batch 完成；前端持久化完成状态，审校按钮（`tr-s3-toreview`）只要有任意章节完成即亮起可用，无缝进入 Step4 审校。
 > **最后核对（2026-08-15，全链路内存泄漏与高水位线治理）：** 
 > 1. **方案 1 (画廊 Gallery 释放与 Footer 垃圾箱迁移)**：从 `gallery-tree.js` 目录树 Header 移除原 Clear 按钮；在 `gallery-layout.js` 底部控制栏 Directory Tree 展开按钮右侧新增带动态开盖动效的 SVG 垃圾箱按钮（`.bin-button`，样式由 `playground.css` 定义），点击后清空前端 Blob URL、释放当前视图所有媒体，并调用 `POST /api/gallery/clear` 清空后端 `gallerySessionStore` 中当前 owner 的驻留会话与临时文件，同时调用 `runtime/debug.FreeOSMemory()` 释放物理内存。
 > 2. **方案 2 (文本审阅 Text Review 清理)**：在 `editor_textreview.js` 的 `1 import -> 2 split -> 3 clean -> 4 review` Stepbar 右侧新增 `Clear` 操作按钮；点击后取消 SSE 订阅与轮询、重置前端 `trState` 并清空 sessionStorage，同时调用后端 `POST /api/text-review/clear` 清空全局 `sync.Map sessions` 并调用 `runtime/debug.FreeOSMemory()`。

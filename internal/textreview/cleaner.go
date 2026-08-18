@@ -30,6 +30,11 @@ type CleanResult struct {
 	Passed4xx bool
 	// ErrMsg carries the human-readable error string for non-OK results.
 	ErrMsg string
+
+	// 调试字段：携带原始请求/响应供前端 debug 面板展示
+	DebugRequest    string // 发送给 LLM 的完整 JSON 请求体
+	DebugRawBody    string // 上游原始响应体（SSE 原始文本或错误 JSON）
+	DebugStatusCode int    // 上游 HTTP 状态码
 }
 
 // Cleaner cleans a single chapter's content against a processing node. The
@@ -67,3 +72,24 @@ type BatchChapter struct {
 type BatchCleaner interface {
 	CleanBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult
 }
+
+// RawCleaner is an optional extension to Cleaner that also receives unparsed
+// raw stream deltas (with section="thinking" or "content") for real-time debug UI.
+type RawCleaner interface {
+	CleanWithRaw(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string), onRaw func(section, delta string)) CleanResult
+}
+
+// RawBatchCleaner is an optional extension to BatchCleaner that also receives
+// unparsed raw stream deltas (with section="thinking" or "content") for real-time debug UI.
+type RawBatchCleaner interface {
+	CleanBatchWithRaw(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string)) CleanResult
+}
+
+// ProgressiveBatchCleaner is an optional extension to BatchCleaner that routes
+// per-chapter completion events as soon as a chapter's delimiter is encountered
+// in the model's output stream, allowing earlier chapters to be completed and
+// reviewed immediately without waiting for the rest of the batch.
+type ProgressiveBatchCleaner interface {
+	CleanBatchProgressive(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string), onChapterDone func(chapterKey string)) CleanResult
+}
+

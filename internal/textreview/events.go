@@ -7,6 +7,7 @@ const (
 	EventChunk  = "chunk"
 	EventStatus = "status"
 	EventNode   = "node"
+	EventRaw    = "raw"
 )
 
 // Event is the SSE payload sent to subscribers. Fields are omitempty so each
@@ -17,6 +18,7 @@ type Event struct {
 	Type       string        `json:"type"`
 	ChapterIdx *int          `json:"chapterIdx,omitempty"`
 	Delta      string        `json:"delta,omitempty"`
+	Section    string        `json:"section,omitempty"` // "thinking" | "content"
 	Status     string        `json:"status,omitempty"`
 	NodeID     string        `json:"nodeId,omitempty"`
 	Error      string        `json:"error,omitempty"`

@@ -13,12 +13,15 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 )
 
-// chatChunk is one OpenAI-format streaming chunk: choices[0].delta.content.
+// chatChunk is one OpenAI-format streaming chunk: choices[0].delta.content,
+// optional choices[0].delta.reasoning_content, and optional choices[0].finish_reason.
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content,omitempty"`
 		} `json:"delta"`
+		FinishReason *string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 }
 
@@ -41,11 +44,16 @@ func NewProxyCleaner(d *apibase.Deps) *ProxyCleaner {
 // streamingResponseWriter, and parses SSE chunks into onChunk callbacks. The
 // returned CleanResult is classified from the recorded status code + body.
 func (c *ProxyCleaner) Clean(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string)) CleanResult {
+	return c.CleanWithRaw(ctx, node, systemPrompt, content, onChunk, nil)
+}
+
+// CleanWithRaw implements RawCleaner.
+func (c *ProxyCleaner) CleanWithRaw(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string), onRaw func(section, delta string)) CleanResult {
 	caller := c.pc
 	if caller == nil {
 		caller = defaultProxyCaller{d: c.d}
 	}
-	return caller.call(ctx, node, systemPrompt, content, onChunk)
+	return caller.call(ctx, node, systemPrompt, content, onChunk, onRaw)
 }
 
 // CleanBatch implements BatchCleaner. It resolves the node's provider prefix,
@@ -53,12 +61,27 @@ func (c *ProxyCleaner) Clean(ctx context.Context, node config.TextReviewNode, sy
 // routes the streamed result back per chapter key through onChunk. The whole
 // batch shares one LLM call; the result is classified once from the recorded
 // status code + body (same rules as a single Clean).
+// CleanBatch implements BatchCleaner. It resolves the node's provider prefix,
+// builds one combined streaming request for all chapters in the batch, and
+// routes the streamed result back per chapter key through onChunk. The whole
+// batch shares one LLM call; the result is classified once from the recorded
+// status code + body (same rules as a single Clean).
 func (c *ProxyCleaner) CleanBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult {
+	return c.CleanBatchWithRaw(ctx, node, systemPrompt, batch, onChunk, nil)
+}
+
+// CleanBatchWithRaw implements RawBatchCleaner.
+func (c *ProxyCleaner) CleanBatchWithRaw(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string)) CleanResult {
+	return c.CleanBatchProgressive(ctx, node, systemPrompt, batch, onChunk, onRaw, nil)
+}
+
+// CleanBatchProgressive implements ProgressiveBatchCleaner.
+func (c *ProxyCleaner) CleanBatchProgressive(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string), onChapterDone func(chapterKey string)) CleanResult {
 	caller := c.pc
 	if caller == nil {
 		caller = defaultProxyCaller{d: c.d}
 	}
-	return caller.callBatch(ctx, node, systemPrompt, batch, onChunk)
+	return caller.callBatch(ctx, node, systemPrompt, batch, onChunk, onRaw, onChapterDone)
 }
 
 // proxyCaller abstracts the proxy invocation so the real ProxyCleaner can be
@@ -66,10 +89,10 @@ func (c *ProxyCleaner) CleanBatch(ctx context.Context, node config.TextReviewNod
 // request body and classify the result here, differing only in how the body
 // is produced/consumed.
 type proxyCaller interface {
-	call(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string)) CleanResult
+	call(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string), onRaw func(section, delta string)) CleanResult
 	// callBatch submits one merged streaming request for a batch of chapters,
 	// routing streamed output per chapter key. See ProxyCleaner.CleanBatch.
-	callBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult
+	callBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string), onChapterDone func(chapterKey string)) CleanResult
 }
 
 // resolveModel builds the "provider/model" string the proxy's model resolver
@@ -161,7 +184,7 @@ type defaultProxyCaller struct {
 	d *apibase.Deps
 }
 
-func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string)) CleanResult {
+func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string), onRaw func(section, delta string)) CleanResult {
 	if g.d == nil || g.d.ProxyHandler == nil {
 		return CleanResult{ErrMsg: "proxy handler unavailable"}
 	}
@@ -174,9 +197,9 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
 
-	// Bound each upstream request: a stalled LLM stream must not hang the
-	// session forever. 90s covers even slow reasoning models comfortably.
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	// Bound each upstream request: 300s comfortably covers long reasoning models
+	// (thinking phase can take 60s~120s+ before streaming content).
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	srw := newStreamingResponseWriter(ctx)
@@ -196,11 +219,16 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 		close(proxyDone)
 	}()
 
-	res := g.consumeSSE(srw, onChunk)
+	res := g.consumeSSE(srw, onChunk, onRaw)
 	<-proxyDone
 	if res.ErrMsg == "" && !res.OK && !res.Exhausted && !res.Passed4xx && srw.statusCode == 0 {
-		res.ErrMsg = "stream interrupted"
+		if ctx.Err() == context.DeadlineExceeded {
+			res.ErrMsg = "stream timeout (exceeded 300s)"
+		} else {
+			res.ErrMsg = "stream interrupted"
+		}
 	}
+	res.DebugRequest = string(bodyBytes)
 	return res
 }
 
@@ -208,7 +236,7 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 // routes the streamed output back per chapter key via consumeSSEBatch. The
 // single LLM call is classified once (OK/Exhausted/4xx) — the engine applies
 // that result to every chapter in the batch.
-func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string)) CleanResult {
+func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextReviewNode, systemPrompt string, batch []BatchChapter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string), onChapterDone func(chapterKey string)) CleanResult {
 	if g.d == nil || g.d.ProxyHandler == nil {
 		return CleanResult{ErrMsg: "proxy handler unavailable"}
 	}
@@ -224,9 +252,8 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
 
-	// Bound each upstream request: a stalled LLM stream must not hang the
-	// session forever (see call).
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	// Bound each upstream request: 300s for batch processing with reasoning.
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	srw := newStreamingResponseWriter(ctx)
@@ -242,11 +269,16 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 		close(proxyDone)
 	}()
 
-	res := g.consumeSSEBatch(srw, onChunk)
+	res := g.consumeSSEBatch(srw, onChunk, onRaw, onChapterDone)
 	<-proxyDone
 	if res.ErrMsg == "" && !res.OK && !res.Exhausted && !res.Passed4xx && srw.statusCode == 0 {
-		res.ErrMsg = "stream interrupted"
+		if ctx.Err() == context.DeadlineExceeded {
+			res.ErrMsg = "stream timeout (exceeded 300s)"
+		} else {
+			res.ErrMsg = "stream interrupted"
+		}
 	}
+	res.DebugRequest = string(bodyBytes)
 	return res
 }
 
@@ -256,14 +288,15 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 // closed) or ctx is canceled. The final classification uses the complete
 // captured body, not the in-flight partial line (which may be an incomplete
 // SSE event on a mid-stream cut).
-func (g defaultProxyCaller) consumeSSE(srw *streamingResponseWriter, onChunk func(delta string)) CleanResult {
+func (g defaultProxyCaller) consumeSSE(srw *streamingResponseWriter, onChunk func(delta string), onRaw func(section, delta string)) CleanResult {
 	var sawDone bool
+	var lastFinishReason string
 	sb := &strings.Builder{}
 	for {
 		select {
 		case p, ok := <-srw.chunks:
 			if !ok {
-				return g.classify(srw, sawDone)
+				return g.classify(srw, sawDone, lastFinishReason)
 			}
 			sb.Write(p)
 			text := sb.String()
@@ -278,19 +311,19 @@ func (g defaultProxyCaller) consumeSSE(srw *streamingResponseWriter, onChunk fun
 			sb.Reset()
 			sb.WriteString(rest)
 			for _, line := range strings.Split(complete, "\n") {
-				if g.processSSELine(line, onChunk, &sawDone) {
-					return g.classify(srw, sawDone)
+				if g.processSSELine(line, onChunk, onRaw, &sawDone, &lastFinishReason) {
+					return g.classify(srw, sawDone, lastFinishReason)
 				}
 			}
 		case <-srw.ctx.Done():
-			return g.classify(srw, sawDone)
+			return g.classify(srw, sawDone, lastFinishReason)
 		}
 	}
 }
 
 // processSSELine handles one SSE line. Returns true if the stream is terminal
 // (saw [DONE]).
-func (g defaultProxyCaller) processSSELine(line string, onChunk func(delta string), sawDone *bool) bool {
+func (g defaultProxyCaller) processSSELine(line string, onChunk func(delta string), onRaw func(section, delta string), sawDone *bool, finishReason *string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return false
@@ -313,8 +346,23 @@ func (g defaultProxyCaller) processSSELine(line string, onChunk func(delta strin
 	if err := json.Unmarshal([]byte(payload), &ch); err != nil {
 		return false
 	}
-	if len(ch.Choices) > 0 && ch.Choices[0].Delta.Content != "" && onChunk != nil {
-		onChunk(ch.Choices[0].Delta.Content)
+	if len(ch.Choices) > 0 {
+		choice := ch.Choices[0]
+		if choice.FinishReason != nil && *choice.FinishReason != "" && finishReason != nil {
+			*finishReason = *choice.FinishReason
+		}
+		delta := choice.Delta
+		if onRaw != nil {
+			if delta.ReasoningContent != "" {
+				onRaw("thinking", delta.ReasoningContent)
+			}
+			if delta.Content != "" {
+				onRaw("content", delta.Content)
+			}
+		}
+		if delta.Content != "" && onChunk != nil {
+			onChunk(delta.Content)
+		}
 	}
 	return false
 }
@@ -323,16 +371,17 @@ func (g defaultProxyCaller) processSSELine(line string, onChunk func(delta strin
 // framing but routes each delta.content through a batchSplitter, which splits
 // the combined model output by ChapterSep and emits onChunk(chapterKey, delta)
 // per chapter as the text streams in.
-func (g defaultProxyCaller) consumeSSEBatch(srw *streamingResponseWriter, onChunk func(chapterKey string, delta string)) CleanResult {
+func (g defaultProxyCaller) consumeSSEBatch(srw *streamingResponseWriter, onChunk func(chapterKey string, delta string), onRaw func(section, rawChunk string), onChapterDone func(chapterKey string)) CleanResult {
 	var sawDone bool
+	var lastFinishReason string
 	sb := &strings.Builder{}
-	sp := &batchSplitter{onChunk: onChunk}
+	sp := &batchSplitter{onChunk: onChunk, onChapterDone: onChapterDone}
 	for {
 		select {
 		case p, ok := <-srw.chunks:
 			if !ok {
 				sp.finish()
-				return g.classify(srw, sawDone)
+				return g.classify(srw, sawDone, lastFinishReason)
 			}
 			sb.Write(p)
 			text := sb.String()
@@ -347,14 +396,14 @@ func (g defaultProxyCaller) consumeSSEBatch(srw *streamingResponseWriter, onChun
 			sb.Reset()
 			sb.WriteString(rest)
 			for _, line := range strings.Split(complete, "\n") {
-				if g.processSSELineBatch(line, sp, &sawDone) {
+				if g.processSSELineBatch(line, sp, onRaw, &sawDone, &lastFinishReason) {
 					sp.finish()
-					return g.classify(srw, sawDone)
+					return g.classify(srw, sawDone, lastFinishReason)
 				}
 			}
 		case <-srw.ctx.Done():
 			sp.finish()
-			return g.classify(srw, sawDone)
+			return g.classify(srw, sawDone, lastFinishReason)
 		}
 	}
 }
@@ -362,7 +411,7 @@ func (g defaultProxyCaller) consumeSSEBatch(srw *streamingResponseWriter, onChun
 // processSSELineBatch handles one SSE line for a batch stream, feeding any
 // delta.content into the splitter instead of calling onChunk directly.
 // Returns true if the stream is terminal (saw [DONE]).
-func (g defaultProxyCaller) processSSELineBatch(line string, sp *batchSplitter, sawDone *bool) bool {
+func (g defaultProxyCaller) processSSELineBatch(line string, sp *batchSplitter, onRaw func(section, rawChunk string), sawDone *bool, finishReason *string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, ":") {
 		return false
@@ -382,8 +431,23 @@ func (g defaultProxyCaller) processSSELineBatch(line string, sp *batchSplitter, 
 	if err := json.Unmarshal([]byte(payload), &ch); err != nil {
 		return false
 	}
-	if len(ch.Choices) > 0 && ch.Choices[0].Delta.Content != "" {
-		sp.push(ch.Choices[0].Delta.Content)
+	if len(ch.Choices) > 0 {
+		choice := ch.Choices[0]
+		if choice.FinishReason != nil && *choice.FinishReason != "" && finishReason != nil {
+			*finishReason = *choice.FinishReason
+		}
+		delta := choice.Delta
+		if onRaw != nil {
+			if delta.ReasoningContent != "" {
+				onRaw("thinking", delta.ReasoningContent)
+			}
+			if delta.Content != "" {
+				onRaw("content", delta.Content)
+			}
+		}
+		if delta.Content != "" {
+			sp.push(delta.Content)
+		}
 	}
 	return false
 }
@@ -401,10 +465,11 @@ func (g defaultProxyCaller) processSSELineBatch(line string, sp *batchSplitter, 
 // trailing suffix that could be the start of a separator (or header) so a
 // partial delimiter is never emitted as chapter text.
 type batchSplitter struct {
-	pending    string // buffered text not yet routed
-	curKey     string // chapter currently streaming, "" while expecting a header
-	nlConsumed bool   // whether the single newline after the current header has been consumed
-	onChunk    func(chapterKey string, delta string)
+	pending       string // buffered text not yet routed
+	curKey        string // chapter currently streaming, "" while expecting a header
+	nlConsumed    bool   // whether the single newline after the current header has been consumed
+	onChunk       func(chapterKey string, delta string)
+	onChapterDone func(chapterKey string)
 }
 
 // push feeds one delta into the splitter, routing any now-complete chapter
@@ -458,6 +523,9 @@ func (s *batchSplitter) push(text string) {
 		if sj > 0 {
 			s.onChunk(s.curKey, s.pending[:sj])
 		}
+		if s.onChapterDone != nil && s.curKey != "" {
+			s.onChapterDone(s.curKey)
+		}
 		s.pending = s.pending[sj+len(ChapterSep):]
 		s.curKey = ""
 		// loop: look for the next header in the remainder
@@ -496,29 +564,54 @@ func holdPrefix(s, sep string) (safe, hold string) {
 // body/statusCode are read under srw.mu: classify may run while the proxy
 // goroutine is still writing (ctx-cancel path), so the reads must be atomic
 // with respect to Write/WriteHeader.
-func (g defaultProxyCaller) classify(srw *streamingResponseWriter, sawDone bool) CleanResult {
+func (g defaultProxyCaller) classify(srw *streamingResponseWriter, sawDone bool, finishReason string) CleanResult {
 	srw.mu.Lock()
 	body := srw.body.String()
 	status := srw.statusCode
 	srw.mu.Unlock()
+	// 截断过长的原始响应（防止 debug 面板超大内存占用，上限 128KB）
+	rawBody := body
+	if len(rawBody) > 131072 {
+		rawBody = rawBody[:131072] + "\n...[truncated at 128KB]"
+	}
+	base := CleanResult{DebugRawBody: rawBody, DebugStatusCode: status}
 	switch {
 	case status == 0:
-		// Proxy never wrote a header (e.g. ctx canceled before any output).
-		return CleanResult{OK: false, ErrMsg: "stream interrupted"}
+		if srw.ctx.Err() == context.DeadlineExceeded {
+			base.ErrMsg = "stream timeout (exceeded 300s)"
+		} else {
+			base.ErrMsg = "stream interrupted"
+		}
+		return base
 	case status == 200:
 		if sawDone {
-			return CleanResult{OK: true}
+			base.OK = true
+			return base
 		}
-		// 200 but no [DONE] and the stream ended — mid-stream disconnect.
-		return CleanResult{OK: false, ErrMsg: "stream interrupted"}
+		if finishReason == "length" {
+			base.ErrMsg = "output truncated (finish_reason: length) - token limit reached"
+			return base
+		}
+		if srw.ctx.Err() == context.DeadlineExceeded {
+			base.ErrMsg = "stream timeout (exceeded 300s)"
+			return base
+		}
+		base.ErrMsg = "stream interrupted"
+		return base
 	case status == 502:
 		if strings.Contains(body, "all keys exhausted") || strings.Contains(body, "no available keys") {
-			return CleanResult{Exhausted: true, ErrMsg: body}
+			base.Exhausted = true
+			base.ErrMsg = body
+			return base
 		}
-		return CleanResult{ErrMsg: body}
+		base.ErrMsg = body
+		return base
 	case status >= 400 && status < 500:
-		return CleanResult{Passed4xx: true, ErrMsg: body}
+		base.Passed4xx = true
+		base.ErrMsg = body
+		return base
 	default:
-		return CleanResult{ErrMsg: body}
+		base.ErrMsg = body
+		return base
 	}
 }

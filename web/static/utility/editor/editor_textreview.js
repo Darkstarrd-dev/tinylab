@@ -23,7 +23,10 @@ function trEscapeHtml(s) {
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function trToast(m, ty) { if (typeof toast === 'function') toast(m, ty); }
-function trT(k, ar) { return typeof t === 'function' ? t(k, ar) : k; }
+function trT(k, ar) {
+  if (ar !== undefined && !Array.isArray(ar)) ar = [ar];
+  return typeof t === 'function' ? t(k, ar) : k;
+}
 
 // ===================== universal modal helper =====================
 

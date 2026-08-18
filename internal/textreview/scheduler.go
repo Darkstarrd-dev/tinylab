@@ -3,6 +3,7 @@ package textreview
 import (
 	"context"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -137,6 +138,22 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 		s.Chapters[idx].NodeID = nodeID
 		batchChs[j] = BatchChapter{Key: strconv.Itoa(idx), Content: s.Chapters[idx].Content}
 	}
+	// 在发起 LLM 请求前预先构建并写入 DebugRequest，确保处理中阶段 Debug 面板立即可见请求体
+	var preReq string
+	if len(batch) == 1 {
+		if b, err := buildRequestBody(node.ModelID, sysPrompt, batchChs[0].Content); err == nil {
+			preReq = string(b)
+		}
+	} else {
+		if b, err := buildBatchRequestBody(node.ModelID, sysPrompt, batchChs); err == nil {
+			preReq = string(b)
+		}
+	}
+	if preReq != "" {
+		for _, idx := range batch {
+			s.Chapters[idx].DebugRequest = preReq
+		}
+	}
 	s.unlock()
 
 	for _, idx := range batch {
@@ -157,14 +174,66 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 		broadcast(s, Event{Type: EventChunk, ChapterIdx: intPtr(idx), Delta: delta})
 	}
 
+	// onRaw broadcasts unparsed raw stream deltas (with section="thinking" or "content")
+	// to SSE subscribers for real-time debug visualization.
+	onRaw := func(chapterKey string, section string, delta string) {
+		if delta == "" {
+			return
+		}
+		if chapterKey != "" {
+			if idx, err := strconv.Atoi(chapterKey); err == nil {
+				broadcast(s, Event{Type: EventRaw, ChapterIdx: intPtr(idx), Section: section, Delta: delta})
+				return
+			}
+		}
+		for _, idx := range batch {
+			broadcast(s, Event{Type: EventRaw, ChapterIdx: intPtr(idx), Section: section, Delta: delta})
+		}
+	}
+
+	earlyCompleted := make(map[int]bool)
+	var earlyMu sync.Mutex
+	onChapterDone := func(chapterKey string) {
+		cIdx, err := strconv.Atoi(chapterKey)
+		if err != nil {
+			return
+		}
+		s.lock()
+		if cIdx >= 0 && cIdx < len(s.Chapters) {
+			ch := &s.Chapters[cIdx]
+			if ch.Status == StatusProcessing && len(ch.Cleaned) >= 10 {
+				ch.Status = StatusCompleted
+				ch.Error = ""
+				earlyMu.Lock()
+				earlyCompleted[cIdx] = true
+				earlyMu.Unlock()
+				s.unlock()
+				broadcast(s, Event{Type: EventStatus, ChapterIdx: intPtr(cIdx), Status: StatusCompleted})
+				return
+			}
+		}
+		s.unlock()
+	}
+
 	var res CleanResult
 	switch {
 	case len(batch) == 1:
 		idx := batch[0]
 		single := func(delta string) { onChunk(strconv.Itoa(idx), delta) }
-		res = e.cleaner.Clean(ctx, node.TextReviewNode, sysPrompt, batchChs[0].Content, single)
+		singleRaw := func(sec, delta string) { onRaw(strconv.Itoa(idx), sec, delta) }
+		if rc, ok := e.cleaner.(RawCleaner); ok {
+			res = rc.CleanWithRaw(ctx, node.TextReviewNode, sysPrompt, batchChs[0].Content, single, singleRaw)
+		} else {
+			res = e.cleaner.Clean(ctx, node.TextReviewNode, sysPrompt, batchChs[0].Content, single)
+		}
 	default:
-		if bc, ok := e.cleaner.(BatchCleaner); ok {
+		if pbc, ok := e.cleaner.(ProgressiveBatchCleaner); ok {
+			rawWrapper := func(sec, rawChunk string) { onRaw("", sec, rawChunk) }
+			res = pbc.CleanBatchProgressive(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk, rawWrapper, onChapterDone)
+		} else if rbc, ok := e.cleaner.(RawBatchCleaner); ok {
+			rawWrapper := func(sec, rawChunk string) { onRaw("", sec, rawChunk) }
+			res = rbc.CleanBatchWithRaw(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk, rawWrapper)
+		} else if bc, ok := e.cleaner.(BatchCleaner); ok {
 			res = bc.CleanBatch(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk)
 		} else {
 			res = e.cleanBatchFallback(ctx, node.TextReviewNode, sysPrompt, batchChs, onChunk)
@@ -174,6 +243,16 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 	// Apply the result under the lock. Ramp-down happens once per batch.
 	s.lock()
 	s.Nodes[nodeIdx].Active--
+
+	// 存储最终调试信息到各章节
+	for _, idx := range batch {
+		if res.DebugRequest != "" {
+			s.Chapters[idx].DebugRequest = res.DebugRequest
+		}
+		s.Chapters[idx].DebugRawBody = res.DebugRawBody
+		s.Chapters[idx].DebugStatusCode = res.DebugStatusCode
+	}
+
 	gateEmpty := len(batch) > 1 // <10-char quality gate only for true batches
 	if res.Exhausted {
 		if s.Nodes[nodeIdx].Target > 0 {
@@ -191,6 +270,17 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 	outs := make([]outcome, len(batch))
 	for j, idx := range batch {
 		ch := &s.Chapters[idx]
+		earlyMu.Lock()
+		isEarlyDone := earlyCompleted[idx]
+		earlyMu.Unlock()
+
+		if isEarlyDone && len(ch.Cleaned) >= 10 {
+			ch.Status = StatusCompleted
+			ch.Error = ""
+			outs[j] = outcome{idx, StatusCompleted, ""}
+			continue
+		}
+
 		switch {
 		case res.OK:
 			if gateEmpty && len(ch.Cleaned) < 10 {
@@ -485,6 +575,9 @@ func (e *Engine) ReprocessChapter(s *Session, idx int) bool {
 	s.Chapters[idx].Status = StatusPending
 	s.Chapters[idx].Retry = 0
 	s.Chapters[idx].Error = ""
+	s.Chapters[idx].DebugRequest = ""
+	s.Chapters[idx].DebugRawBody = ""
+	s.Chapters[idx].DebugStatusCode = 0
 	running := s.Status == SessionRunning || s.Status == SessionPaused
 	s.unlock()
 	broadcast(s, Event{Type: EventStatus, ChapterIdx: intPtr(idx), Status: StatusPending})
