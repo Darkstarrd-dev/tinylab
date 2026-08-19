@@ -243,7 +243,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 }
 
 func (h *Handler) broadcastRequestStart(id string, entry usage.Entry) {
-	raw := MarshalEntryJSON(entry)
+	raw := MarshalEntryJSONLight(entry)
 	if raw == nil {
 		return
 	}

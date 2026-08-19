@@ -2,29 +2,28 @@
 
 async function showUsageEntryInfoById(id) {
   if (!id) return;
-  var e = lastUsageEntries.find(function(x) { return x.id === id; });
-  if (!e) {
-    e = inflightEntries[id];
+  // Fetch the full entry (with payload) from the detail API.
+  // Fall back to the lightweight in-memory entry for the summary header
+  // while waiting, or if the fetch fails.
+  var lightweight = lastUsageEntries.find(function(x) { return x.id === id; });
+  if (!lightweight) lightweight = inflightEntries[id];
+  if (!lightweight) return;
+  var e;
+  try {
+    e = await apiGet('/monitor/entry/' + encodeURIComponent(id));
+  } catch(ex) {
+    e = null;
   }
-  if (!e) return;
-  // If the entry is processing-status but no longer in inflightEntries, the
-  // request completed but the SSE request-done event may have been dropped
-  // (broadcaster channel full) or the entry came from refreshQuotaData's merged
-  // result which only has the tracker's processing copy. Also handle the case
-  // where the entry has a terminal status (success/error) but no respPayload/
-  // respHeaders — this happens when handleRequestDone fell back to the inflight
-  // entry (which lacks payloads) because the SSE event's entry field was
-  // missing or incomplete. In both cases, try to fetch the ring entry (which
-  // carries respPayload/respHeaders) from the API.
-  if (!traceEnabled && (e.status === 'processing' || (!infoHasValue(e.respPayload) && !infoHasValue(e.respHeaders))) && !inflightEntries[id]) {
-    try {
-      var resp = await apiGet('/monitor?limit=500&offset=0');
-      var entries = (resp && resp.entries) || [];
-      var ringEntry = entries.find(function(x) { return x.id === id; });
-      if (ringEntry && ringEntry.status !== 'processing') {
-        e = ringEntry;
-      }
-    } catch(ex) { /* fall through to the entry we have */ }
+  // If the API returned nothing (entry evicted from ring), use the
+  // lightweight copy and attempt trace-file fallback inside the modal.
+  if (!e) e = lightweight;
+  // Preserve streaming buffers from the inflight copy (SSE chunks
+  // accumulate there and are NOT in the ring entry).
+  var inflight = inflightEntries[id];
+  if (inflight) {
+    if (inflight.__streamingReasoning) e.__streamingReasoning = inflight.__streamingReasoning;
+    if (inflight.__streamingAssistant) e.__streamingAssistant = inflight.__streamingAssistant;
+    if (inflight.__streamingUsage) e.__streamingUsage = inflight.__streamingUsage;
   }
   showUsageEntryInfoWithData(e);
 }

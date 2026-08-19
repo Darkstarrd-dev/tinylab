@@ -9,7 +9,7 @@ function renderUsageRow(e, sessionKey, hidden) {
   else dotClass += ' status-dot-processing';
   var dotHtml = '<span class="' + dotClass + '"></span>';
   var statusInner;
-  if (e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing' || traceEnabled) {
+  if (e.id || e.reqPayload || e.respPayload || e.respHeaders || e.reqHeaders || e.upstreamUrl || e.respStatus || e.status === 'processing' || traceEnabled) {
     statusInner = '<button type="button" class="btn btn-sm btn-info" onclick="showUsageEntryInfoById(\'' + escapeForJsString(e.id || '') + '\')">' + dotHtml + '</button>';
   } else {
     statusInner = dotHtml;

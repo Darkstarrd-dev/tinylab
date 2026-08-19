@@ -355,3 +355,51 @@ func TestAccumulator_Clear(t *testing.T) {
 		t.Errorf("expected 0 model stats after clear, got %d", len(stats))
 	}
 }
+
+func TestRingBuffer_ByID(t *testing.T) {
+	rb := New(3)
+
+	// Empty ring
+	if _, ok := rb.ByID("non-existent"); ok {
+		t.Fatal("expected ByID to return false on empty ring")
+	}
+	if _, ok := rb.ByID(""); ok {
+		t.Fatal("expected ByID to return false for empty id")
+	}
+
+	e1 := Entry{ID: "req-1", Provider: "p1", Model: "m1", Status: "success"}
+	e2 := Entry{ID: "req-2", Provider: "p2", Model: "m2", Status: "success"}
+	e3 := Entry{ID: "req-3", Provider: "p3", Model: "m3", Status: "error"}
+
+	rb.Add(e1)
+	rb.Add(e2)
+	rb.Add(e3)
+
+	// Find each
+	got1, ok := rb.ByID("req-1")
+	if !ok || got1.Provider != "p1" {
+		t.Fatalf("expected to find req-1, got %+v (ok=%v)", got1, ok)
+	}
+	got3, ok := rb.ByID("req-3")
+	if !ok || got3.Provider != "p3" {
+		t.Fatalf("expected to find req-3, got %+v (ok=%v)", got3, ok)
+	}
+
+	// Overflow the buffer (capacity 3)
+	e4 := Entry{ID: "req-4", Provider: "p4", Model: "m4", Status: "success"}
+	rb.Add(e4) // evicts req-1
+
+	if _, ok := rb.ByID("req-1"); ok {
+		t.Fatal("expected req-1 to be evicted after overflow")
+	}
+
+	got4, ok := rb.ByID("req-4")
+	if !ok || got4.Provider != "p4" {
+		t.Fatalf("expected to find req-4, got %+v (ok=%v)", got4, ok)
+	}
+	got2, ok := rb.ByID("req-2")
+	if !ok || got2.Provider != "p2" {
+		t.Fatalf("expected to find req-2, got %+v (ok=%v)", got2, ok)
+	}
+}
+
