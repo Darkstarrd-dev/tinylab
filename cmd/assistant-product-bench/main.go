@@ -94,6 +94,10 @@ var correctnessScenarios = []correctnessScenario{
 	// Positive precision anchors (already pass — guard against regressions).
 	{id: "draw_table", intent: "画个表格", forbidden: []string{"image.generate"}},
 	{id: "download_audio", intent: "下载这首歌", required: []string{"download.create"}},
+	// --- Round 2 adversarial: web-search/extract over-match on 搜索/提取. ---
+	{id: "search_local_files", intent: "搜索本地的文件", forbidden: []string{"anysearch.search"}},
+	{id: "extract_audio_from_video", intent: "提取视频里的音频", forbidden: []string{"anysearch.extract"}},
+	{id: "web_search_news", intent: "搜索一下最新的AI新闻", required: []string{"anysearch.search"}},
 }
 
 func main() {
