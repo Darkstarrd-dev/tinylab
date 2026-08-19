@@ -6,7 +6,7 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 
 ## 编译裁剪边界（P5 feature manifest，2026-08-06 落地）
 
-计划 [`archive_compatibility_plan.md`](../archive_compatibility_plan.md) §11/P5 的**第一阶段**已落地：`internal/feature`（leaf 包，零依赖）是编译期功能面的唯一 honest manifest——每个 feature 声明 ID、依赖、归属静态资产与 `Compiled` 状态；`internal/api/router.go` 的路由注册与 `internal/app/app.go` 的组件构造都通过 `feature.Enabled(...)` 门控，`web/playground/static-pg` 的按文件静态路由列表改由 `feature.Assets(feature.RootPlaygroundPG)` 派生（取代硬编码 pgJSFiles 列表，顺序与旧列表完全一致）。
+计划 [`docs/archive_compatibility_plan.md`](docs/archive_compatibility_plan.md) §11/P5 的**第一阶段**已落地：`internal/feature`（leaf 包，零依赖）是编译期功能面的唯一 honest manifest——每个 feature 声明 ID、依赖、归属静态资产与 `Compiled` 状态；`internal/api/router.go` 的路由注册与 `internal/app/app.go` 的组件构造都通过 `feature.Enabled(...)` 门控，`web/playground/static-pg` 的按文件静态路由列表改由 `feature.Assets(feature.RootPlaygroundPG)` 派生（取代硬编码 pgJSFiles 列表，顺序与旧列表完全一致）。
 
 **当前事实（不虚假声明裁剪）：**
 
@@ -16,7 +16,7 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 
 **尚未实施（精确阻塞清单，做到这些之前不得宣称可裁剪）：**
 
-1. `feature_*` build tag + 每包 stub 文件（`archive_compatibility_plan.md` §11.2 表）。
+1. `feature_*` build tag + 每包 stub 文件（`docs/archive_compatibility_plan.md` §11.2 表）。
 2. 给包本身打 tag（`internal/gallery`、`internal/download`、`internal/mediaedit`、`internal/filetransfer`、`internal/textreview`、`internal/archive`、`internal/archivetool`、`internal/api/*`），使 router.go/app.go 的 import 与注册真正条件化。
 3. 按 feature 拆分 `go:embed`（当前 `web/embed.go` 嵌入 `all:static`）+ `index.html`/`index-nopg.html` 脚本列表改由 manifest 生成（页面目前无条件加载全部脚本）。
 4. `build.ps1`/`build_mac.ps1` 增加 `-Features` 参数——**在 tag 落地前加此参数是虚假声明**，故本阶段刻意不改脚本。

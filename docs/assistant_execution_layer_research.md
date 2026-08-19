@@ -2,7 +2,7 @@
 
 > 研究：在指令遵守（reactive dispatch）之上，小精灵的**执行层**——主动式/半自主行为：计划任务执行、todo 提醒、后台耗时任务完成提醒、路由模型持续不可用提醒、并有自主性切换为可用模型。
 >
-> 定位：前三层（契约系统=懂什么；交互层 L1/L2/L3=怎么呈现）已研究。本层=**主动感知 + 提醒 + 有界自主行动**。底部架构见 [`assistant_contract_research.md`](assistant_contract_research.md)、交互层见 [`assistant_interaction_research.md`](assistant_interaction_research.md)。
+> 定位：前三层（契约系统=懂什么；交互层 L1/L2/L3=怎么呈现）已研究。本层=**主动感知 + 提醒 + 有界自主行动**。底部架构见 [`docs/assistant_contract_research.md`](docs/assistant_contract_research.md)、交互层见 [`docs/assistant_interaction_research.md`](docs/assistant_interaction_research.md)。
 
 ## 1. 五项要求梳理
 

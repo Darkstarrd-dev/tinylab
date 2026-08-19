@@ -3,7 +3,7 @@
 > 基于 `C:\Tools\TinyRouter\docs\review.md`（审核报告 §4 Image Batch）与问题 2 修复方案重新设计的统一整改方案
 > 范围：Image Batch Project 模块（三种输出格式提示词设计 + 异步 Provider 生成 + 整体功能对齐）
 > 状态：**已按确认决策实施**（json 结构化创作→自然语言；Booru tag 不拆分；不纳入 AI Review；A+B 同批、C 收尾）。
-> 关联：`image_batch_project_flow_review.md`（流程审核文稿，§15 为本方案前身的问题初查）
+> 关联：`docs/image_batch_project_flow_review.md`（流程审核文稿，§15 为本方案前身的问题初查）
 
 ---
 
@@ -183,7 +183,7 @@ func (h *Handler) ImageTask(w http.ResponseWriter, r *http.Request) {
 
 - `docs/playground-architecture.md`：新增"三种输出格式规范"章节（A2 全文）、"json 传递方式"（A3）、"ModelScope 异步生成链路 + ImageTask 接口"（B1-B4）；更新"最后核对"行与变更维护清单。
 - `PROJECT_MAP.md` §24：同步 imagebatch 涉及条目（`internal/imagebatch/remote_generator.go` 新增辅助函数、`internal/proxy/handler.go` 新增 `ImageTask`）。
-- `image_batch_project_flow_review.md` §12/§13：更新提示词清单（A2 新模板）与结果契约（A4 校验）。
+- `docs/image_batch_project_flow_review.md` §12/§13：更新提示词清单（A2 新模板）与结果契约（A4 校验）。
 
 ### C2. 验证矩阵
 

@@ -27,7 +27,7 @@ type toolInfo struct {
 }
 
 // toolErrKind classifies tool failures into stable machine codes for the API
-// (archive_compatibility_plan.md §5.3: distinguishable errors for missing
+// (docs/archive_compatibility_plan.md §5.3: distinguishable errors for missing
 // tools, encrypted/volumed/corrupt archives, etc.).
 type toolErrKind string
 

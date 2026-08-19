@@ -247,7 +247,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// into the feature manifest. Every other feature is registered compiled by
 	// default because no feature_* build tags exist yet — their Go packages
 	// compile unconditionally. The gates below are the single drop point where
-	// future feature_* tags flip the manifest (archive_compatibility_plan.md
+	// future feature_* tags flip the manifest (docs/archive_compatibility_plan.md
 	// §11/P5); in the default build every gate passes, so no route changes.
 	feature.SetCompiled(feature.Playground, web.PlaygroundCompiled())
 	r := chi.NewRouter()

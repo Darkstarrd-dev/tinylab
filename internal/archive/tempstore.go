@@ -19,7 +19,7 @@ import (
 // scavenger without pinning disk forever.
 const DefaultTempTTL = 24 * time.Hour
 
-// Workspace quotas (audit_fix.md F-15/F-29, archive_compatibility_plan.md
+// Workspace quotas (docs/audit_fix.md F-15/F-29, docs/archive_compatibility_plan.md
 // §4.3). A single owner cannot grow the workspace without bound, a single job
 // cannot exceed its own budget, and the whole store stays under a global cap
 // even when many owners are active.

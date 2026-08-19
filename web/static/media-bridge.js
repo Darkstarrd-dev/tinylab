@@ -3,7 +3,7 @@
 // (GIF editor exports, Download "Play", future Archive pack outputs) and the
 // Gallery consumer.
 //
-// Contract (archive_compatibility_plan.md §9.2, frozen 2026-08-06):
+// Contract (docs/archive_compatibility_plan.md §9.2, frozen 2026-08-06):
 //   register(asset)      -> Promise<assetId>   short-term assetId + display
 //                                              metadata; never a permanent
 //                                              copy of large blobs

@@ -1,7 +1,7 @@
 // Package filetransfer creates a ZIP archive from user-selected files and
 // publishes it to an anonymous temporary file host.
 //
-// Path capability contract (audit_fix.md F-01, B-2): the browser never
+// Path capability contract (docs/audit_fix.md F-01, B-2): the browser never
 // submits server-side paths. Files arrive as multipart uploads (browser
 // picker / drag-drop / paste File objects) or as short-TTL pathGrantIds the
 // server issued from the OS clipboard (POST /api/filetransfer/paste). A raw

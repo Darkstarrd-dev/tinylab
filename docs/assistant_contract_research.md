@@ -2,7 +2,7 @@
 
 > 研究报告：TinyRouter 能否用一套"契约系统"承载小精灵助手（而非硬编码当前项目现状），使项目增删改功能时小精灵自动保持可用。
 >
-> 关联文件：`internal/assistant/`（契约大脑）、`cmd/assistant-bench/`（裁决 bench）、`autoresearch.sh`（入口）。实施计划见 [`assistant_implementation_plan.md`](assistant_implementation_plan.md)。
+> 关联文件：`internal/assistant/`（契约大脑）、`cmd/assistant-bench/`（裁决 bench）、`autoresearch.sh`（入口）。实施计划见 [`docs/assistant_implementation_plan.md`](docs/assistant_implementation_plan.md)。
 
 ## 1. 研究问题
 
@@ -120,4 +120,4 @@ TinyRouter 能用一套契约系统承载小精灵：
 
 ## 8. 剩余（bench 外）工作
 
-见 [`assistant_implementation_plan.md`](assistant_implementation_plan.md)：接真实 `/api/assistant` 端点、Scheduler 物化、gap 检测（bench 增强）、前端跳页/直接执行、LLM tool-calling 分类器。
+见 [`docs/assistant_implementation_plan.md`](docs/assistant_implementation_plan.md)：接真实 `/api/assistant` 端点、Scheduler 物化、gap 检测（bench 增强）、前端跳页/直接执行、LLM tool-calling 分类器。

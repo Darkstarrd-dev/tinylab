@@ -8,7 +8,7 @@
 // interfaces and types defined here, so 7z/RAR adapters (external tools) and
 // the Gallery/GIF consumers can be added without changing the contract.
 //
-// Contracts are frozen per archive_compatibility_plan.md §4 (P0). The ZIP
+// Contracts are frozen per docs/archive_compatibility_plan.md §4 (P0). The ZIP
 // adapter mirrors internal/gallery's behavior — natural name ordering, the
 // 100 MiB per-entry cap, index-or-path entry identifiers, and replacement
 // that preserves entry headers, comments, and attributes — while adding the

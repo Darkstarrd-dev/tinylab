@@ -43,7 +43,7 @@
     startLayerState: null,
     cropRect: { x: 0, y: 0, w: 100, h: 100 },
     textStyle: { bold: false, italic: false, underline: false },
-    // Transparency tool session (gif_upgrade.md §4.1, trans section).
+    // Transparency tool session (docs/gif_upgrade.md §4.1, trans section).
     // Live DOM inputs drive the preview while the panel is open; Apply
     // snapshots them into `committed`. Consumers (draw preview when the
     // panel is closed, thumbnails, exports) read ONLY the committed

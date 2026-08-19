@@ -13,7 +13,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/archive"
 )
 
-// Operation timeouts (archive_compatibility_plan.md §4.3). They apply when the
+// Operation timeouts (docs/archive_compatibility_plan.md §4.3). They apply when the
 // caller's Budget.MaxDuration is zero; the budget value, when set, wins.
 const (
 	listTimeout = 15 * time.Second

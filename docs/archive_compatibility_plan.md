@@ -4,7 +4,7 @@
 >
 > **状态：** 部分实施（2026-08-06 更新）。**P0/P1 已落地**（`internal/archive/` 合同/严格路径/预算/ZIP adapter/TempStore + 测试，见 §13e）。**P2 已落地**（`internal/archivetool/` 外部工具层 + `Config.Archive`/Settings presence-aware PATCH + `/api/archive` 挂载 + router/app 接线 + `web/static/media-bridge.js` §9.2 契约与 Download/GIF 生产端、Gallery 消费端）。**P3 部分落地**：Gallery 后端桥接（`internal/api/gallery` `archiveBridge` + `POST /api/archive/zip-replace`）+ 前端 sourceId 双路径（读取/删除/审核/编辑）——**旧 `/api/gallery/zip*`、`/edit/zip-outputs|zip-writeback|extract-zip-entry|upload-temp` 端点与前端 legacy 调用方完整保留**（FSAA/拖放/粘贴仍走 zip 会话；§7.2"迁移完成后删除"未执行；无浏览器任意路径 API 新增）；**7z/RAR 浏览器导入缺口**（picker `accept` 仅 `.zip`、`isArchiveName` 命中仍走 zip-only 上传——§8.2 未实施）。**P5 第一阶段已落地**（`internal/feature` manifest + router/app `feature.Enabled` 门控，§11 的 feature_* tags 与构建 profiles 未实施）。**P4（GIF 导出格式选择 + 帧 asset 化全量迁移）、P6（7z/RAR 原文件替换）未开始。** 实际行为以源码与 [`docs/archive-architecture.md`](docs/archive-architecture.md) 为准。
 >
-> **相关事实基线：** [`docs/archive-architecture.md`](docs/archive-architecture.md)（**已落地实现的权威基线**）、`docs/playground-architecture.md`、`docs/download-architecture.md`、`docs/config-registry-state-architecture.md`、`gif_implented.md`、`PROJECT_MAP.md`。
+> **相关事实基线：** [`docs/archive-architecture.md`](docs/archive-architecture.md)（**已落地实现的权威基线**）、`docs/playground-architecture.md`、`docs/download-architecture.md`、`docs/config-registry-state-architecture.md`、`docs/gif_implented.md`、`PROJECT_MAP.md`。
 
 ---
 
@@ -721,7 +721,7 @@ flowchart TD
 - `docs/download-architecture.md`：Download 输出以 assetId 发布、去除直接 Gallery state 写入；工具路径仍与 Archive 分离。
 - `docs/config-registry-state-architecture.md`：`Config.Archive`、严格 partial PATCH、runtime runner 回调、TempStore 持久化/清理边界（若落盘）。
 - `docs/build-variants.md`：feature tags、profiles、构建参数、每个 profile 的资产/二进制边界。
-- `gif_implented.md`：GIF 归档输出、assetId、Open Gallery、工具 capability 和新增验收。
+- `docs/gif_implented.md`：GIF 归档输出、assetId、Open Gallery、工具 capability 和新增验收。
 - 任何新增 handler/包必须补源码锚点和维护清单，不能只更新计划文档。
 
 ---

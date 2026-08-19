@@ -46,7 +46,7 @@ const (
 	gallerySessionTTL = 24 * time.Hour
 
 	// galleryMaxSessionBytes caps the TOTAL resident zip bytes across all
-	// sessions (archive_compatibility_plan.md §4.3: 2 GiB). put evicts the
+	// sessions (docs/archive_compatibility_plan.md §4.3: 2 GiB). put evicts the
 	// least-recently-used unpinned sessions while over budget; a single
 	// upload larger than the whole budget is rejected with 413 (see
 	// galleryListZip).

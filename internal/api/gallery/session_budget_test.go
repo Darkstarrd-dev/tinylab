@@ -1,7 +1,7 @@
 package gallery
 
 // Deterministic budget tests for the in-memory zip session store and its HTTP
-// surface (audit_fix.md F-15). The byte/pin budgets are exercised through
+// surface (docs/audit_fix.md F-15). The byte/pin budgets are exercised through
 // test-controlled limits instead of multi-GiB allocations, and the HTTP tests
 // hold upload slots with blocking readers so the 413/429 responses are
 // deterministic rather than load-dependent.

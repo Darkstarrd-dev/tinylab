@@ -1,6 +1,6 @@
 # 小精灵交互层研究
 
-> 研究：在已建成的契约系统（底部架构，见 [`assistant_contract_research.md`](assistant_contract_research.md)）之上，实现小精灵的**交互层**。用户提出三级递增复杂度：①侧边 dock 客服式悬浮窗 → ②可在 App 内移动的 spritesheet 形象 + 漫画气泡 → ③可在系统桌面行动的桌面宠物。
+> 研究：在已建成的契约系统（底部架构，见 [`docs/assistant_contract_research.md`](docs/assistant_contract_research.md)）之上，实现小精灵的**交互层**。用户提出三级递增复杂度：①侧边 dock 客服式悬浮窗 → ②可在 App 内移动的 spritesheet 形象 + 漫画气泡 → ③可在系统桌面行动的桌面宠物。
 >
 > 本文档梳理三级要求并逐级研究可行性、落地依据（TinyRouter 真实前端/原生代码）、实现方案、风险与升级路径。
 
@@ -8,7 +8,7 @@
 
 底部架构（已完成）：`semantics.json` 契约 → `assistant.Classify/Resolve` → `cmd/assistant-bench` 裁决（`assistant_readiness = dispatch_f1 × contract_health`，100%）。它解决"小精灵懂什么、怎么路由到项目能力"。
 
-交互层（本文）：解决"用户怎么与小精灵对话、小精灵怎么呈现"。三级仅改变**呈现层**，后端契约/分派（`/api/assistant/*`，见 [`assistant_implementation_plan.md`](assistant_implementation_plan.md) 任务 A）三级共用。后端未落地前，交互层可先用 mock/桩端点开发，落地后接线。
+交互层（本文）：解决"用户怎么与小精灵对话、小精灵怎么呈现"。三级仅改变**呈现层**，后端契约/分派（`/api/assistant/*`，见 [`docs/assistant_implementation_plan.md`](docs/assistant_implementation_plan.md) 任务 A）三级共用。后端未落地前，交互层可先用 mock/桩端点开发，落地后接线。
 
 ## 2. 三级复杂度总览
 

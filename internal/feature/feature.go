@@ -3,7 +3,7 @@
 // static assets it owns, and whether its code is actually compiled into this
 // binary.
 //
-// # Status (P5 boundary, archive_compatibility_plan.md §11)
+// # Status (P5 boundary, docs/archive_compatibility_plan.md §11)
 //
 // This package is the registrar/asset-manifest half of the P5 "feature tags
 // and build profiles" work. It does NOT claim pruning that does not exist:

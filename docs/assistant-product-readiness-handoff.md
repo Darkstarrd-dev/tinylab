@@ -20,7 +20,7 @@
 
 ## 2. 架构概览：助手分派链路
 
-助手分三层（详见根目录 `assistant_interaction_research.md` / `assistant_execution_layer_research.md`）：
+助手分三层（详见 `docs/assistant_interaction_research.md` / `docs/assistant_execution_layer_research.md`）：
 
 - **L1 Dock/Modal**（`web/static/sprite.js`）：右/左可拖拽 dock + 模态面板 + 群聊气泡。
 - **L2 角色 + 对话气泡**（`sprite.js`）：可点击漫游的角色 + SSE 事件气泡；`sendSpriteIntent`/`sendBubbleIntent` → `POST /api/assistant/dispatch {intent}`。
@@ -79,7 +79,7 @@ intent → classifyIntent(intent)
 - **透明窗口**：`host_webview_windows.go::openPetWindow`（`//go:build tray && webview && windows`）新增 Win32 透明：`WS_EX_LAYERED`（`gwlExstyle=-20`）+ `SetLayeredWindowAttributes(hwnd, petColorKey=RGB(255,0,255), 0, LWA_COLORKEY)`；`sprite-pet.html` `.pet-container` `background:#FF00FF`（color key），被 keyed out 透明，只留 sprite/气泡（非 key 像素）。新增 proc `procSetLayeredWindowAttributes` 与常量 `gwlExstyle`/`wsExLayered`/`lwaColorkey`/`petColorKey`。这是「释放小精灵无效果」（不透明方框）的根因修复。
 - **Spritesheet 渲染**：`web/static/sprite-pet.html` 新增 canvas 渲染器（`#pet-sprite` + `initPetSprite`：fetch `/api/settings` 取 `assistant.spritesheetPath`/`spritesheetFps`，`new Image`+`ctx.drawImage` 按帧步进，无配置则保留 CSS face fallback）——消费项 1 的 spritesheet 配置。
 - **验证**：`web/sprite-pet-drag.test.js`（提取真实内联 `<script>`，VM DOM stub，3 检查：movePetWindow 增量 delta、mouseup 结束拖拽、气泡上 mousedown 不拖拽）；`go build -tags "tray webview"` 通过。
-- **未验证**：透明窗口视觉（Win32 原生，需 tray+webview 运行时+显示器，本机无法跑；color-key 与 `assistant_interaction_research.md §6.3` MVP 一致）。
+- **未验证**：透明窗口视觉（Win32 原生，需 tray+webview 运行时+显示器，本机无法跑；color-key 与 `docs/assistant_interaction_research.md §6.3` MVP 一致）。
 
 ---
 
@@ -91,13 +91,13 @@ intent → classifyIntent(intent)
 - **可验证的最小版本**：dispatch 返回 `reply`（从已 Resolve 工具的 `Desc` 合成，如 `好的，我将为你：生成图片。`），前端 `data.reply` 优先；这是确定性可测的，不需要 LLM 调用。LLM 真实 `content` 作为 bonus（不可测）。
 
 ### 4.2 逐像素 Alpha 透明（项 5 的「后续优化」）
-当前 color-key（品红键出）是文档化 MVP——有锯齿边缘、不支持半透明。`assistant_interaction_research.md §6.3` 标注「后续：layered per-pixel alpha」。需核实 go-webview2 是否暴露 `put_DefaultBackgroundColor`（透明）+ `DwmExtendFrameIntoClientArea`。**未做原因**：Windows 原生、本机不可验证、MVP 已可用，盲改有风险。
+当前 color-key（品红键出）是文档化 MVP——有锯齿边缘、不支持半透明。`docs/assistant_interaction_research.md §6.3` 标注「后续：layered per-pixel alpha」。需核实 go-webview2 是否暴露 `put_DefaultBackgroundColor`（透明）+ `DwmExtendFrameIntoClientArea`。**未做原因**：Windows 原生、本机不可验证、MVP 已可用，盲改有风险。
 
 ### 4.3 视觉验证（环境受限）
 本机无头 chromium（browser 工具）无法启动（`about:blank` 超时）。以下特性**结构/行为已验证但视觉未确认**：dock 拖拽 UX、Settings 模态框渲染、透明宠物窗口外观。需在能启动浏览器/tray 运行时的环境复验。
 
 ### 4.4 executeSubRequest 鉴权（password-on 边缘 bug）
-「执行动作」(`executeSpriteAction`) 走 `executeSubRequest`（内部 HTTP 子请求到 `http://127.0.0.1:{port}/api/...`）。password OFF（默认）正常；password ON 时该内部请求无 CSRF/session → 403。`assistant_execution_layer_research.md` 提及「内部子请求免鉴权或带内部 session」——当前实现两者皆无。**未做原因**：需 password-on 环境复现，非用户明确报告。
+「执行动作」(`executeSpriteAction`) 走 `executeSubRequest`（内部 HTTP 子请求到 `http://127.0.0.1:{port}/api/...`）。password OFF（默认）正常；password ON 时该内部请求无 CSRF/session → 403。`docs/assistant_execution_layer_research.md` 提及「内部子请求免鉴权或带内部 session」——当前实现两者皆无。**未做原因**：需 password-on 环境复现，非用户明确报告。
 
 ### 4.5 默认 sprite 资产
 spritesheet 渲染器在 `SpritesheetPath` 为空时回退 CSS face。仓库无默认 sprite PNG。**未做原因**：需美术资源。

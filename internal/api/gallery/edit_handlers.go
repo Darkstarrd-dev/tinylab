@@ -2,7 +2,7 @@
 // web/playground/static-pg/gallery-edit.js + gallery-edit-operations.js +
 // gallery-edit-batch.js.
 //
-// Path capability contract (audit_fix.md F-28, B-4): ffmpeg inputs are
+// Path capability contract (docs/audit_fix.md F-28, B-4): ffmpeg inputs are
 // resolved server-side from assetIds (temp assets), or from grantId+rel
 // (files inside a granted directory). Subtitle files are uploaded into the
 // asset store. Outputs are registered as owner-bound assets and returned as
@@ -334,7 +334,7 @@ func (h *Handler) galleryEditStart(w http.ResponseWriter, r *http.Request) {
 // mediaStartStatus maps a mediaedit.Start error to an HTTP status and message.
 // The ffmpeg concurrency limit (mediaedit.ErrTooManyJobs) is reported as 429
 // so an overloaded server never answers 200 with a job that was not started
-// (audit_fix.md F-15).
+// (docs/audit_fix.md F-15).
 func mediaStartStatus(err error) (int, string) {
 	if errors.Is(err, mediaedit.ErrTooManyJobs) {
 		return http.StatusTooManyRequests, "too many concurrent media jobs, retry later"

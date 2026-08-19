@@ -9,7 +9,7 @@
 //
 // Run:  node web/gallery-edit-contract.test.js
 //
-// Covered contracts (archive_compatibility_plan.md §7.3/§8.2):
+// Covered contracts (docs/archive_compatibility_plan.md §7.3/§8.2):
 //   single zip extract-to-edit: resolved item carries assetId, never absPath;
 //   request bodies carry sourceId/sessionId/grantId (no raw zip paths);
 //   batch resolution returns { inputAssetId } descriptors for /edit/start.

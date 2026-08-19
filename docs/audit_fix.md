@@ -79,7 +79,7 @@ govulncheck ./...                      本机未安装，未完成 Go 漏洞数�
 
 本方案必须继承并落实：
 
-- `archive_compatibility_plan.md` §4、§7、§8、§12、§13：`sourceId`/`assetId`、严格路径、owner/job、root containment、预算、生命周期、旧接口迁移删除、归档测试矩阵。
+- `docs/archive_compatibility_plan.md` §4、§7、§8、§12、§13：`sourceId`/`assetId`、严格路径、owner/job、root containment、预算、生命周期、旧接口迁移删除、归档测试矩阵。
 - `docs/config-registry-state-architecture.md`：配置/Registry/State 所有权、原子持久化、reload merge、配置并发边界。
 - `docs/proxy-architecture.md`：`/v1` 路由边界、重试、SSE、用量、Trace 和上游 URL 构造。
 - `PROJECT_MAP.md` §23–§24：当前 Archive P3 仍部分落地，旧 Gallery 任意路径/legacy 端点仍保留；所有实现完成后必须同步模块地图和受影响架构文档。
@@ -431,7 +431,7 @@ type AssetRef struct {
 - `internal/archive/tempstore.go`
 - `internal/api/archive/register.go`
 - `internal/api/gallery/register.go`
-- `archive_compatibility_plan.md`
+- `docs/archive_compatibility_plan.md`
 
 实施：
 
@@ -448,7 +448,7 @@ type AssetRef struct {
 - 两个独立 session 的跨资源 read/pack/replace/release 全部拒绝；
 - owner 释放不会删除另一 owner 资源；
 - 24 小时 TTL、周期 scavenger、崩溃恢复和磁盘配额有测试；
-- 与 `archive_compatibility_plan.md` §7/§13.1 全部一致。
+- 与 `docs/archive_compatibility_plan.md` §7/§13.1 全部一致。
 
 ---
 
@@ -694,7 +694,7 @@ type AssetRef struct {
 
 ### F-2. 旧 API 迁移
 
-按 `archive_compatibility_plan.md` §7.2、§8、§12 执行：
+按 `docs/archive_compatibility_plan.md` §7.2、§8、§12 执行：
 
 1. 先让前端只调用 sourceId/assetId 新合同；
 2. 后端在兼容期记录旧路径调用并返回 deprecation；
@@ -836,7 +836,7 @@ node --check <所有受影响 JS>
 本方案执行过程中，涉及以下文件/包时必须在同一轮代码变更中同步文档：
 
 - `internal/api/router.go`、auth、settings、providers、keys：更新 `PROJECT_MAP.md`、`docs/config-registry-state-architecture.md`；
-- `internal/api/editor`、`internal/api/gallery`、`internal/filetransfer`、`internal/archive`、`internal/archivetool`：更新 `PROJECT_MAP.md`、`archive_compatibility_plan.md`、`docs/playground-architecture.md`、`docs/config-registry-state-architecture.md`；
+- `internal/api/editor`、`internal/api/gallery`、`internal/filetransfer`、`internal/archive`、`internal/archivetool`：更新 `PROJECT_MAP.md`、`docs/archive_compatibility_plan.md`、`docs/playground-architecture.md`、`docs/config-registry-state-architecture.md`；
 - `internal/proxy`、`internal/sse`、`internal/urlutil`：更新 `PROJECT_MAP.md`、`docs/proxy-architecture.md`；
 - `internal/download`、`internal/fsutil`：更新 `PROJECT_MAP.md`、`docs/download-architecture.md`、`docs/config-registry-state-architecture.md`；
 - vendor 变更：更新来源、版本、许可证和 SHA 记录；
@@ -906,7 +906,7 @@ node --check <所有受影响 JS>
 - `internal/archivetool/runner.go`
 - `internal/archivetool/exec.go`
 - `internal/api/archive/register.go`
-- `archive_compatibility_plan.md`
+- `docs/archive_compatibility_plan.md`
 
 ### Proxy、下载和配置状态
 

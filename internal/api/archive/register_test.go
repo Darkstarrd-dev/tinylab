@@ -939,7 +939,7 @@ func TestZipReplaceConcurrentRejected(t *testing.T) {
 
 // TestWriteStoreError_BudgetMaps422 pins the HTTP mapping of TempStore quota
 // failures: any budget dimension surfaces as a stable 422 with the
-// "archive.budget" machine code (audit_fix.md F-15 controlled error at the
+// "archive.budget" machine code (docs/audit_fix.md F-15 controlled error at the
 // archive workspace budget).
 func TestWriteStoreError_BudgetMaps422(t *testing.T) {
 	for name, err := range map[string]error{

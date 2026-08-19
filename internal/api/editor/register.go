@@ -1,6 +1,6 @@
 // Package editor implements the Editor page's text-file open/save handlers.
 //
-// Path capability contract (audit_fix.md F-02, B-3): the browser never
+// Path capability contract (docs/audit_fix.md F-02, B-3): the browser never
 // submits server-side physical paths. Files inside the configured docDir are
 // addressed by their docDir-relative fileId; files the native picker selects
 // outside docDir are addressed by a short-TTL pathGrantId the server issued

@@ -13,7 +13,7 @@ package archivetool
 import "time"
 
 // ToolStatus reports one tool/format capability set to the status endpoint
-// (archive_compatibility_plan.md §5.3). ZIP is always read+write (stdlib);
+// (docs/archive_compatibility_plan.md §5.3). ZIP is always read+write (stdlib);
 // sevenZip and rar depend on the resolved external tools.
 type ToolStatus struct {
 	Available bool   `json:"available"`

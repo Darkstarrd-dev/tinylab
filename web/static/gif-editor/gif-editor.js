@@ -2,7 +2,7 @@
 // GIF / frame editor page for TinyRouter (header nav 6th button, data-page="gif").
 // Pure local SPA, classic script execution under web/static/.
 //
-// Module split (gif_upgrade.md §4): state/lifecycle, import (Import Modal),
+// Module split (docs/gif_upgrade.md §4): state/lifecycle, import (Import Modal),
 // timeline (virtualized window + zoom), playback (First/Prev/Play/Next/Last),
 // export (GIF/ZIP/sprite + MediaBridge) live in gif-editor-{state,import,
 // timeline,playback,export}.js. This entry owns the page template, canvas

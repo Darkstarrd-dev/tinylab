@@ -1,5 +1,5 @@
 // Package archive implements the /api/archive HTTP surface for the shared
-// archive capability (archive_compatibility_plan.md §7.2): capability status,
+// archive capability (docs/archive_compatibility_plan.md §7.2): capability status,
 // source registration (uploaded ZIP/7z/RAR), single-entry reads, asset
 // registration/release and pack (ZIP via stdlib, 7z/RAR via external tools).
 //
@@ -33,7 +33,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/owner"
 )
 
-// Body caps (archive_compatibility_plan.md §4.3).
+// Body caps (docs/archive_compatibility_plan.md §4.3).
 const (
 	sourceUploadCap = 500 << 20 // browser-uploaded archive input
 	assetUploadCap  = 200 << 20 // pack inputs / GIF frame assets

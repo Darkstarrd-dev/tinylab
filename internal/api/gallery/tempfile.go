@@ -1,6 +1,6 @@
 package gallery
 
-// Code in this file: gallery temp-file registry (audit_fix.md F-27). Gallery
+// Code in this file: gallery temp-file registry (docs/audit_fix.md F-27). Gallery
 // handlers materialize temp files on the SUCCESS path (subtitle uploads,
 // upload-temp, extracted zip entries) whose lifecycle the frontend never
 // explicitly closes. The registry tracks them with a TTL and reclaims them

@@ -1,6 +1,6 @@
 # 小精灵助手实施计划
 
-> 自包含、可直接实施。背景见 [`assistant_contract_research.md`](assistant_contract_research.md)。
+> 自包含、可直接实施。背景见 [`docs/assistant_contract_research.md`](docs/assistant_contract_research.md)。
 > 实施全程不得改 `cmd/assistant-bench/` 与 `autoresearch.sh`（off-limits judge）。
 
 ## 0. 当前状态（已建成，可直接复用）

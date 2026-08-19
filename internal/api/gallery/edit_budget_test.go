@@ -10,7 +10,7 @@ import (
 
 // TestMediaStartStatus_TooManyJobs verifies the ffmpeg concurrency overload is
 // reported as 429 (never a 200 with a job that was not started) — the HTTP
-// half of audit_fix.md F-15's mediaedit semaphore contract.
+// half of docs/audit_fix.md F-15's mediaedit semaphore contract.
 func TestMediaStartStatus_TooManyJobs(t *testing.T) {
 	status, msg := mediaStartStatus(mediaedit.ErrTooManyJobs)
 	if status != http.StatusTooManyRequests {

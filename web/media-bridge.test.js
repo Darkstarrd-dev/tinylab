@@ -5,7 +5,7 @@
 //
 // Run:  node web/media-bridge.test.js
 //
-// Covered contracts (archive_compatibility_plan.md §9.2):
+// Covered contracts (docs/archive_compatibility_plan.md §9.2):
 //   register(blob|url) -> assetId; openGallery(assetId|assetId[]);
 //   consume(assetId); no absolute paths cross the bridge; no galleryState
 //   writes from the bridge; tokens survive until consumed / TTL; Archive API

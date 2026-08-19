@@ -13,10 +13,10 @@
 
 | 文档 | 层 | 状态 |
 |---|---|---|
-| [`assistant_contract_research.md`](assistant_contract_research.md) | 底部架构（契约系统：懂什么/怎么路由） | **已建成+验证** |
-| [`assistant_implementation_plan.md`](assistant_implementation_plan.md) | 实施计划（任务 A-E：端点/物化/gap/前端/LLM 分类器） | 可实施 |
-| [`assistant_interaction_research.md`](assistant_interaction_research.md) | 交互层 L1/L2/L3（dock→形象→桌面宠物） | 已研究 |
-| [`assistant_execution_layer_research.md`](assistant_execution_layer_research.md) | 执行层 R1-R5（主动提醒+有界自主） | 已研究 |
+| [`docs/assistant_contract_research.md`](docs/assistant_contract_research.md) | 底部架构（契约系统：懂什么/怎么路由） | **已建成+验证** |
+| [`docs/assistant_implementation_plan.md`](docs/assistant_implementation_plan.md) | 实施计划（任务 A-E：端点/物化/gap/前端/LLM 分类器） | 可实施 |
+| [`docs/assistant_interaction_research.md`](docs/assistant_interaction_research.md) | 交互层 L1/L2/L3（dock→形象→桌面宠物） | 已研究 |
+| [`docs/assistant_execution_layer_research.md`](docs/assistant_execution_layer_research.md) | 执行层 R1-R5（主动提醒+有界自主） | 已研究 |
 | 本文件 | 收口与实施 kickoff | — |
 
 四层互补：契约系统=懂、实施计划=接、交互层=呈现、执行层=主动。

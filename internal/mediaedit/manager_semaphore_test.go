@@ -55,7 +55,7 @@ func semaphoreTestRequest(t *testing.T) StartRequest {
 
 // TestManagerConcurrencyLimit_RejectsWhenFull verifies Start returns
 // ErrTooManyJobs (never a fake job) once the ffmpeg concurrency limit is
-// reached (audit_fix.md F-15).
+// reached (docs/audit_fix.md F-15).
 func TestManagerConcurrencyLimit_RejectsWhenFull(t *testing.T) {
 	m := NewManager()
 	// Occupy every slot so the next Start must be rejected.

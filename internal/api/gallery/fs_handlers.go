@@ -1,6 +1,6 @@
 // Code in this file: gallery filesystem handlers + helpers. Frontend: gallery.js.
 //
-// Path capability contract (audit_fix.md F-03/F-30, B-4): the browser never
+// Path capability contract (docs/audit_fix.md F-03/F-30, B-4): the browser never
 // submits server-side paths. Directory listings are bound to a server-issued
 // directory grant (open-dir / paste-paths); file reads resolve through
 // assetId (TempStore), sourceId+entryPath (archive bridge), or a

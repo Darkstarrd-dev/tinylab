@@ -28,7 +28,7 @@ const (
 	speedTestMaxTokens     = 1200
 	speedTestMinChunks     = 60 // early-stop: enough chunks for a meaningful speed measurement
 	speedTestMaxSec        = 30 // early-stop: max streaming seconds per model
-	speedTestTotalMaxSec   = 60 // overall budget: the whole test cannot run longer (audit_fix.md F-15)
+	speedTestTotalMaxSec   = 60 // overall budget: the whole test cannot run longer (docs/audit_fix.md F-15)
 	speedTestMaxModels     = 50 // cap: refuse absurdly large combos instead of probing hundreds of models
 	speedTestMaxConcurrent = 8  // semaphore: at most this many probes run at once
 )

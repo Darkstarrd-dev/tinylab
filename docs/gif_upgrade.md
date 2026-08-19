@@ -8,13 +8,13 @@
 > - ScreenToGif：<https://github.com/NickeManarin/ScreenToGif>
 > - ScreenToGif Editor 操作说明：<https://github.com/NickeManarin/ScreenToGif/wiki/Help/afdac811da4187c85323f6398de348c467dd4c66>
 > - ScreenToGif 视频导入预览讨论：<https://github.com/NickeManarin/ScreenToGif/issues/677>
-> - 本项目 GIF 既有实施基线：[`gif_implented.md`](gif_implented.md)
+> - 本项目 GIF 既有实施基线：[`docs/gif_implented.md`](docs/gif_implented.md)
 >
 > **实施原则：** 先完成模块边界和导入状态隔离，再实现 Import Modal；先迁移现有时间线行为，再增加底部控制和播放；每个阶段都必须保持现有图片/GIF/视频编辑及三种导出能力可回归验证。
 >
-> **实施增补（2026-08-07，侧栏接线修复）：** 模板恢复的步骤 2/3 控件以新 ID 渲染，入口 `cacheDom()`/`bindEvents()`/`getTargetIndices()` 与导出模块已按模板 ID 对齐（原 ID 失效导致控件静默无响应）；模板补齐全局裁剪微调面板（crop-panel 滑条/数值 + apply/cancel）与精灵图导出按钮，删除无处理单选；`syncLayer`（同步到所有帧）被模板的删除图层按钮取代后移除，图层缩放/描边/百分比应用等新控件接线完成。详见 `gif_implented.md` 顶部「最后核对（2026-08-07）」。
+> **实施增补（2026-08-07，侧栏接线修复）：** 模板恢复的步骤 2/3 控件以新 ID 渲染，入口 `cacheDom()`/`bindEvents()`/`getTargetIndices()` 与导出模块已按模板 ID 对齐（原 ID 失效导致控件静默无响应）；模板补齐全局裁剪微调面板（crop-panel 滑条/数值 + apply/cancel）与精灵图导出按钮，删除无处理单选；`syncLayer`（同步到所有帧）被模板的删除图层按钮取代后移除，图层缩放/描边/百分比应用等新控件接线完成。详见 `docs/gif_implented.md` 顶部「最后核对（2026-08-07）」。
 >
-> **实施增补（2026-08-11，GIF 修复轮）：** 时间线 zoom 范围从本方案的 50%–200% 扩为 **20%–300%**（`gif-editor-timeline.js::setZoom` clamp 0.2–3.0），且时间线 zoom（`core.state.timeline.zoom`）与舞台 zoom（`core.state.scale`/`updateTransform`）彻底解耦——时间线滚动区 Ctrl/Meta+滚轮只调时间线 zoom（§3.x 模板 `#gif-timeline-zoom-range` 相应改为 `min="0.2" max="3"`）。导出路径由旧结果 overlay 改为**导出弹窗（export modal）**（`previewCache` 按格式/config key 隔离、`setHandoff` 惰性 MediaBridge 登记、「Open in Gallery」按钮在弹窗 footer），ZIP 帧资产在失败与成功路径均释放、打包结果归 MediaBridge token，legacy `upload-temp` 保留 `frame_NNN.png` basename；导入侧新增 `draftGeneration` 事务代数（见 `gif_implented.md` 顶部最后核对）。本增补不改变 §3 固定设计决策（classic script / `GifEditorCore` / Import Modal 容器 / 草稿隔离 / 视频采样语义）。
+> **实施增补（2026-08-11，GIF 修复轮）：** 时间线 zoom 范围从本方案的 50%–200% 扩为 **20%–300%**（`gif-editor-timeline.js::setZoom` clamp 0.2–3.0），且时间线 zoom（`core.state.timeline.zoom`）与舞台 zoom（`core.state.scale`/`updateTransform`）彻底解耦——时间线滚动区 Ctrl/Meta+滚轮只调时间线 zoom（§3.x 模板 `#gif-timeline-zoom-range` 相应改为 `min="0.2" max="3"`）。导出路径由旧结果 overlay 改为**导出弹窗（export modal）**（`previewCache` 按格式/config key 隔离、`setHandoff` 惰性 MediaBridge 登记、「Open in Gallery」按钮在弹窗 footer），ZIP 帧资产在失败与成功路径均释放、打包结果归 MediaBridge token，legacy `upload-temp` 保留 `frame_NNN.png` basename；导入侧新增 `draftGeneration` 事务代数（见 `docs/gif_implented.md` 顶部最后核对）。本增补不改变 §3 固定设计决策（classic script / `GifEditorCore` / Import Modal 容器 / 草稿隔离 / 视频采样语义）。
 
 ---
 
@@ -1420,7 +1420,7 @@ web/static/gif-editor-import.js
 web/static/gif-editor-timeline.js
 web/static/gif-editor-playback.js
 web/static/gif-editor-export.js
-gif_upgrade.md
+docs/gif_upgrade.md
 ```
 
 ### 9.2 修改文件
@@ -1432,7 +1432,7 @@ web/static/index-nopg.html
 web/static/style.css
 web/static/i18n.js
 web/static/app.js                 # 仅在统一 modal-close 事件需要时修改
-gif_implented.md
+docs/gif_implented.md
 PROJECT_MAP.md
 docs/playground-architecture.md
 ```
@@ -1453,7 +1453,7 @@ web/static/vendor/gifuct-js/*
 
 ### 9.4 文档同步
 
-`gif_implented.md`：
+`docs/gif_implented.md`：
 
 - 在“最后核对”行记录本轮模块拆分和 Import Modal；
 - 更新 P1/P4 状态；
@@ -1595,7 +1595,7 @@ web/static/vendor/gifuct-js/*
 实现：
 
 1. 补齐 i18n 中英文键；
-2. 更新 `gif_implented.md`；
+2. 更新 `docs/gif_implented.md`；
 3. 更新 `PROJECT_MAP.md`；
 4. 更新 `docs/playground-architecture.md`；
 5. 清理迁移后入口文件中的重复/孤儿 import、timeline、playback、export 实现；
@@ -1721,7 +1721,7 @@ go build -tags playground ./...
 | 时间线 zoom 破坏虚拟窗口 | 空白、尾部无法到达或 DOM 暴增 | geometry 单一来源；每次 zoom 后 clamp、重算窗口；保留 buffer 和缓存上限 |
 | 旧按钮仍绑定旧函数 | 双重事件或按钮无效 | 迁移完成后删除入口文件中的旧 listener/函数；每个模块只绑定一次并在 cleanup 对称移除 |
 | classic script 加载顺序错误 | Core 或 vendor 未定义 | 两个入口逐一检查顺序；页面浏览器冒烟必须覆盖 no-playground 和 playground 构建 |
-| 文档与源码脱节 | 后续实施者误用旧锚点 | 每阶段结束更新 `gif_implented.md`/`PROJECT_MAP.md`/架构文档；锚点优先使用函数名而不是脆弱行号 |
+| 文档与源码脱节 | 后续实施者误用旧锚点 | 每阶段结束更新 `docs/gif_implented.md`/`PROJECT_MAP.md`/架构文档；锚点优先使用函数名而不是脆弱行号 |
 
 ---
 

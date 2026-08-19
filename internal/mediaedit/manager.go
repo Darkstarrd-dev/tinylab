@@ -18,7 +18,7 @@ import (
 // evicted so the map cannot grow unbounded across many edits.
 // maxConcurrentJobs caps the number of ffmpeg/ffprobe processes running at
 // once. A burst of edits cannot exhaust CPU or disk; Start rejects excess
-// jobs with ErrTooManyJobs (the API maps it to 429) (audit_fix.md F-15).
+// jobs with ErrTooManyJobs (the API maps it to 429) (docs/audit_fix.md F-15).
 const maxConcurrentJobs = 4
 
 // ErrTooManyJobs is returned by Start when the ffmpeg concurrency limit is

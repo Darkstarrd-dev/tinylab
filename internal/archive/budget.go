@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Default budget constants, frozen from archive_compatibility_plan.md §4.3.
+// Default budget constants, frozen from docs/archive_compatibility_plan.md §4.3.
 // They are code-level defaults only; the Settings surface intentionally does
 // not expose them.
 const (
