@@ -162,5 +162,26 @@ check('tiny move ≤4px: treated as click (no drag, opens modal)', () => {
   assert.strictEqual(lsSets.length, 0, 'no persistence for sub-threshold move');
 });
 
+// --- navigateToRoute (item 4: jump-to-page) behavioral checks ---
+// The app has no hashchange listener; navigateToRoute must call the app router
+// navigateTo(pageId) directly (the bug it fixed), not set location.hash.
+var navCalls = [];
+sandbox.navigateTo = function (page) { navCalls.push(page); };
+sandbox.showToast = function () {};
+
+check('navigateToRoute(pageId) calls app router navigateTo + closes modal', () => {
+  navCalls.length = 0;
+  modalEl().classList._s.add('show'); // pretend modal is open
+  sandbox.window.navigateToRoute('download');
+  assert.deepStrictEqual(navCalls, ['download'], 'navigateTo called with the page id');
+  assert.ok(!modalEl().classList.contains('show'), 'modal closed by closeSpriteModal');
+});
+
+check('navigateToRoute("") is a no-op (no navigation)', () => {
+  navCalls.length = 0;
+  sandbox.window.navigateToRoute('');
+  assert.strictEqual(navCalls.length, 0, 'empty route → no navigateTo call');
+});
+
 if (failures) { console.error('\n' + failures + ' check(s) FAILED'); process.exit(1); }
 console.log('\nall dock drag checks passed');
