@@ -77,6 +77,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			"rarPath":      cfg.Archive.RarPath,
 			"tempDir":      cfg.Archive.TempDir,
 		},
+		"assistant": cfg.Assistant,
 	})
 }
 
@@ -119,7 +120,8 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		Theme        *config.ThemeConfig `json:"theme"`
 		ImageSaveDir *string             `json:"imageSaveDir"`
 		DocDir       *string             `json:"docDir"`
-		Archive      *archivePatch       `json:"archive"`
+	Archive      *archivePatch       `json:"archive"`
+	Assistant    *assistantPatch     `json:"assistant"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -281,6 +283,9 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.Archive != nil {
 		applyArchiveUpdates(&cfg, updates.Archive)
+	}
+	if updates.Assistant != nil {
+		applyAssistantUpdates(&cfg, updates.Assistant)
 	}
 	if updates.ImageSaveDir != nil {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
@@ -484,6 +489,31 @@ func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 	}
 	if patch.TempDir != nil {
 		cfg.Archive.TempDir = *patch.TempDir
+	}
+}
+
+// assistantPatch is a presence-aware partial update for AssistantConfig:
+// only fields the frontend sends are applied, so a PATCH can change the model
+// alone without zeroing the spritesheet settings. Pointer fields distinguish
+// "absent" (nil, leave as-is) from "explicit empty string" (clear the model).
+type assistantPatch struct {
+	Model           *string `json:"model"`
+	SpritesheetPath *string `json:"spritesheetPath"`
+	SpritesheetFps  *int    `json:"spritesheetFps"`
+}
+
+func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
+	if patch == nil {
+		return
+	}
+	if patch.Model != nil {
+		cfg.Assistant.Model = *patch.Model
+	}
+	if patch.SpritesheetPath != nil {
+		cfg.Assistant.SpritesheetPath = *patch.SpritesheetPath
+	}
+	if patch.SpritesheetFps != nil {
+		cfg.Assistant.SpritesheetFps = *patch.SpritesheetFps
 	}
 }
 

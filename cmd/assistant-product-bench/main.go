@@ -285,7 +285,6 @@ func containsAnyCI(hay string, needles []string) bool {
 func scoreSettingsCoverage() (float64, []feat) {
 	types := readFile("internal/config/types.go")
 	settingsModal := readFile("web/static/settings/settings_modal.js")
-	indexHTML := readFile("web/static/index.html") + "\n" + readFile("web/static/index-nopg.html")
 	i18n := readFile("web/static/i18n.js")
 
 	feats := []feat{
@@ -294,7 +293,7 @@ func scoreSettingsCoverage() (float64, []feat) {
 		{name: "config spritesheet path field", ok: containsAnyCI(types, []string{"Spritesheet", "SpriteSheet", "SheetPath", "SpritePath"}), note: "types.go"},
 		{name: "settings modal assistant section", ok: containsCI(settingsModal, "assistant") || containsCI(settingsModal, "小精灵"), note: "settings_modal.js"},
 		{name: "settings modal sprite/spritesheet UI", ok: containsAnyCI(settingsModal, []string{"spritesheet", "spriteSheet", "sprite-sheet"}), note: "settings_modal.js"},
-		{name: "settings nav assistant entry (html)", ok: containsAnyCI(indexHTML, []string{"data-page=\"assistant", "assistant-settings", "assistantSettings"}), note: "index*.html"},
+		{name: "settings sidebar assistant row", ok: containsAnyCI(readFile("web/static/settings/settings.js"), []string{"openAssistantModal", "assistantSettings"}), note: "settings.js (settings-page left sidebar)"},
 		{name: "i18n assistant-settings keys", ok: containsAnyCI(i18n, []string{"assistantSettings", "assistantModel", "assistantSprite"}), note: "i18n.js"},
 	}
 	return dimensionScore(feats), feats

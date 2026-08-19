@@ -11,6 +11,7 @@
 > - 模块职责发生迁移（文件/目录改属）
 > - 新增 / 移除 `docs/` 下的事实基线文档
 >
+> **最后核对（2026-08-19，小精灵助手产品化：回复正确性 + Assistant 设置入口）：** (1) **契约正确性修复**：`internal/assistant/semantics.json` 的 `download.create` 规则从 `any` 移除 `视频`/`video`（现要求显式 `下载`/`download`），消除"播放视频"误路由到下载；新增窄规则 `image.generate`（`any:["画"]`，`none:["表格","文档","画线","画板","画图","刻画"]`）使"画一只猫"（无图字）正确路由到图片生成。(2) **Assistant 设置入口**：`internal/config/types.go` 新增 `AssistantConfig{Model,SpritesheetPath,SpritesheetFps}` + `Config.Assistant`（`yaml/json:"assistant,omitempty"`），`defaults.go` 给 `SpritesheetFps` 默认 8；`internal/api/settings/register.go` 的 GET 返回 `assistant`、PATCH 接受 presence-aware `assistantPatch`/`applyAssistantUpdates`；前端 `web/static/settings/settings.js`（Settings 侧栏 Assistant 行，显示当前 model 或 keyword fallback）、`settings_modal.js`（`openAssistantModal`/`saveAssistantModal`：model 文本框 + spritesheet 路径 + FPS Stepper）、`i18n.js`（`assistantSettings` 等 8 键 EN+CN）。详见 `docs/config-registry-state-architecture.md` 最后核对（2026-08-19）。涉及文件见 §24"新增/修改智能助理契约"行与本行。
 > **最后核对（2026-08-18，Playground 多模态附件渲染、矢量 SVG 图标与横向并排布局整改）：** 
 > 1. **SVG 矢量图标体系**：在 `web/playground/static-pg/playground/pg-core.js` 新增 `pgGetMediaType` 与 `pgGetMediaSvg`，为 PDF 文档、视频 (Video)、音频 (Audio)、图片 (Image) 绘制高质量、自适应尺寸的现代 SVG 矢量图标。
 > 2. **待发送附件预览区整改**：在 `pg-ui.js` 的 `pgRenderInputThumbs` 彻底解决视频未做分支判断导致渲染 `<img>` 破损图片（`alt="media"`）的问题；使用专用徽标卡片（`.pg-input-thumb-file`, `.pg-input-thumb-pdf`, `.pg-input-thumb-video`, `.pg-input-thumb-audio`）结合 SVG 矢量图标与类型标识标签，大幅提升美观度；为 `.pg-input-thumb-wrap` 预留安全外边距，彻底解决 hover 移除按钮引起的卡片高度跳动。

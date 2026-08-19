@@ -82,6 +82,29 @@ function openPathModal() {
   openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, docDir: true, imageDir: true, logDir: true, ytDlpPath: true, ffmpegPath: true } });
 }
 
+function openAssistantModal() {
+  var s = window.__settings;
+  var a = (s && s.assistant) || {};
+  openSettingsModal(t('assistantSettings'),
+    '<p class="muted">' + escapeHtml(t('assistantSettingsDesc')) + '</p>\
+    <div class="settings-form-grid" style="margin-top:16px">\
+      <div class="form-group"><label>' + escapeHtml(t('assistantModel')) + '</label>\
+        <input type="text" class="input" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '" placeholder="openai/gpt-4o-mini">\
+        <p class="muted" style="margin-top:4px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
+      </div>\
+      <div class="form-group"><label>' + escapeHtml(t('assistantSpritesheet')) + '</label>\
+        <input type="text" class="input" id="settings-modal-assistant-spritesheet" value="' + escapeHtml(a.spritesheetPath || '') + '" placeholder="/sprite/sprite.png">\
+      </div>\
+      <div class="form-group"><label>' + escapeHtml(t('assistantSpritesheetFps')) + '</label>\
+        ' + renderStepperHtml('settings-modal-assistant-fps', a.spritesheetFps || 8, { min: 1, max: 30, style: 'max-width:200px' }) + '\
+      </div>\
+    </div>'
+  );
+  document.getElementById('settings-modal-save').onclick = function() {
+    withLoading(this, function() { return saveAssistantModal(); });
+  };
+}
+
 function openRotationModal() {
   var s = window.__settings;
   var rot = s.rotation || {};
@@ -264,6 +287,20 @@ async function saveProxyModal() {
   try {
     await apiPatch('/settings', { proxy: { enabled: enabled, host: host, port: port } });
     toast(t('proxySaved'), 'success');
+    closeModalOverlay();
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+async function saveAssistantModal() {
+  var model = document.getElementById('settings-modal-assistant-model').value.trim();
+  var spritesheetPath = document.getElementById('settings-modal-assistant-spritesheet').value.trim();
+  var fps = parseInt(document.getElementById('settings-modal-assistant-fps').value, 10);
+  if (isNaN(fps) || fps < 1) fps = 8;
+  try {
+    await apiPatch('/settings', { assistant: { model: model, spritesheetPath: spritesheetPath, spritesheetFps: fps } });
+    toast(t('assistantSaved'), 'success');
     closeModalOverlay();
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
