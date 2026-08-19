@@ -153,7 +153,7 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
 	if req.Tool != "" {
 		toolNames = []string{req.Tool}
 	} else if req.Intent != "" {
-		toolNames = ast.Classify(req.Intent)
+		toolNames = h.classifyIntent(r.Context(), ast, req.Intent)
 	}
 
 	var dispatched []DispatchedTool
@@ -247,6 +247,79 @@ func resolveNavigationPage(path string) string {
 	default:
 		return ""
 	}
+}
+
+// classifyIntent picks tools for an intent: LLM-assisted classification
+// (item 3) when a model is configured, falling back to the keyword brain
+// (Assistant.Classify) when no model is set, the upstream is unavailable,
+// or the LLM returns no resolvable tools. This replaces the functional
+// instant keyword-only reply with a model-assisted path while keeping the
+// keyword classifier as the always-available fallback.
+func (h *Handler) classifyIntent(ctx context.Context, ast *assistant.Assistant, intent string) []string {
+	if llm := h.llmClassifier(ast); llm != nil {
+		if names, err := llm.Classify(ctx, intent); err == nil {
+			var wired []string
+			seen := map[string]bool{}
+			for _, n := range names {
+				if _, ok := ast.Resolve(n); ok && !seen[n] {
+					seen[n] = true
+					wired = append(wired, n)
+				}
+			}
+			if len(wired) > 0 {
+				return wired
+			}
+		}
+	}
+	return ast.Classify(intent)
+}
+
+// llmClassifier builds an LLMClassifier from the current config + contract,
+// offering only tools that resolve to a real registered route (wired via
+// BuildAssistant). Returns nil when no assistant model is configured (the
+// caller then uses the keyword fallback).
+func (h *Handler) llmClassifier(ast *assistant.Assistant) *assistant.LLMClassifier {
+	if h.d == nil || ast == nil {
+		return nil
+	}
+	cfg := h.d.Reg.Config()
+	model := cfg.Assistant.Model
+	if model == "" {
+		return nil
+	}
+	port := cfg.Port
+	if port <= 0 {
+		port = 20128
+	}
+	h.mu.RLock()
+	c := h.contract
+	h.mu.RUnlock()
+	tools := h.llmTools(ast, c)
+	if len(tools) == 0 {
+		return nil
+	}
+	return &assistant.LLMClassifier{
+		Addr:  fmt.Sprintf("http://127.0.0.1:%d", port),
+		Model: model,
+		Tools: tools,
+	}
+}
+
+// llmTools builds the LLM-offered tool list from the contract, restricted to
+// tools that resolve to a real registered route.
+func (h *Handler) llmTools(ast *assistant.Assistant, c *assistant.Contract) []assistant.LLMTool {
+	if c == nil || ast == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var list []assistant.LLMTool
+	for _, r := range c.Rules {
+		if _, ok := ast.Resolve(r.Tool); ok && !seen[r.Tool] {
+			seen[r.Tool] = true
+			list = append(list, assistant.LLMTool{Name: r.Tool, Desc: r.Desc})
+		}
+	}
+	return list
 }
 
 // executeSubRequest performs an in-process HTTP call to the project's own API.
