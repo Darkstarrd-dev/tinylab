@@ -80,6 +80,20 @@ var correctnessScenarios = []correctnessScenario{
 	{id: "open_vs_save", intent: "打开我的笔记文件", required: []string{"editor.open"}, forbidden: []string{"editor.save"}},
 	// Out-of-scope precision guard.
 	{id: "out_of_scope", intent: "今天几号了", forbidden: []string{"download.create", "chat", "image.generate"}},
+	// --- Adversarial hardening: latent disambiguation gaps not covered by
+	// the original 15. Each probes an over-match or recall hole the keyword
+	// contract should but does not yet handle. ---
+	// probe.test over-matches "测试" for non-provider tests (network speed).
+	{id: "test_network_speed", intent: "测试一下网络速度", forbidden: []string{"probe.test"}},
+	// providers.list none:["key"] over-blocks "查看provider的key" (recall gap).
+	{id: "view_provider_keys", intent: "查看provider的key列表", required: []string{"providers.list"}, forbidden: []string{"probe.test"}},
+	// monitor.view over-matches "监控" when the intent is to clean (precision).
+	{id: "clean_monitor_logs", intent: "清理过期的监控日志", required: []string{"trace.clear"}, forbidden: []string{"monitor.view"}},
+	// image.edit only matches exact "改图"; "改一下这张图" misses (recall gap).
+	{id: "edit_image_rephrase", intent: "改一下这张图", required: []string{"image.edit"}, forbidden: []string{"image.generate"}},
+	// Positive precision anchors (already pass — guard against regressions).
+	{id: "draw_table", intent: "画个表格", forbidden: []string{"image.generate"}},
+	{id: "download_audio", intent: "下载这首歌", required: []string{"download.create"}},
 }
 
 func main() {
