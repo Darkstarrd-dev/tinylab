@@ -29,7 +29,7 @@ function pgRenderMediaPart(u, sp, sf) {
   var actionText = type === 'pdf' ? pgT('pgClickToPreview') : pgT('pgClickToPlay');
   var meta = (type === 'pdf' ? pgT('pgPdfDoc') : (type === 'video' ? pgT('pgVideoFile') : pgT('pgAudioFile'))) + ' · ' + actionText;
 
-  return '<div class="pg-media-card ' + typeClass + '" onclick="pgShowMediaModal(\'' + safeUrl + '\', \'' + safeSp + '\', \'' + safeSf + '\')" title="' + pgEscapeHtml(name) + '">' +
+  return '<div class="pg-media-card ' + typeClass + '" onclick="pgShowMediaModal(\'' + safeUrl + '\', \'' + safeSp + '\', \'' + safeSf + '\')" data-tooltip="' + pgEscapeHtml(name) + '">' +
     '<div class="pg-media-card-icon">' + pgGetMediaSvg(type, 26) + '</div>' +
     '<div class="pg-media-card-info">' +
       '<div class="pg-media-card-name">' + pgEscapeHtml(name) + '</div>' +

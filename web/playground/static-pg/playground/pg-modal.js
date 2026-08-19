@@ -756,9 +756,11 @@ function pgRenderModelPickerModal(currentValue, onSelect, opts, allModels) {
   }
   var kindFilter = opts && opts.kindFilter;
   var models = (allModels || []).filter(function(m) {
+    if (!m) return false;
     if (!kindFilter) return true;
-    if (kindFilter === 'image') return m.kind === 'image';
-    return m.kind !== 'image';
+    var k = String(m.kind || '').toLowerCase();
+    if (kindFilter === 'image') return k === 'image';
+    return k !== 'image' && k !== 'embedding';
   });
   if (!models.length && !allowEmpty) {
     itemsHtml = '<div style="padding:20px;text-align:center;opacity:0.6">' + pgEscapeHtml(pgT('No models available')) + '</div>';

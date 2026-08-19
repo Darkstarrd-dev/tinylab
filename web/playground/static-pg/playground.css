@@ -261,9 +261,9 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.72);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: transparent;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border-radius: var(--radius-sm);
   z-index: 55;
   pointer-events: none;
@@ -1351,6 +1351,29 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-param-row .pg-param-label-btn:hover{color:var(--accent);opacity:1;text-decoration:underline}
 .pg-param-row select,.pg-param-row input[type="text"]{box-sizing:border-box;background:var(--input-bg,var(--bg));border:1px solid var(--glass-border);border-radius:var(--radius-sm);color:var(--text);padding:3px 8px;font-size:13px;height:32px;line-height:20px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pg-param-row select:focus,.pg-param-row input:focus{outline:none;border-color:var(--accent)}
+.pg-param-row .pg-model-btn {
+  box-sizing: border-box;
+  background: var(--input-bg, var(--bg));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+  height: 32px;
+  line-height: 20px;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.pg-param-row .pg-model-btn:hover {
+  border-color: var(--glass-border-hover);
+  background: var(--glass-hover);
+}
 .pg-side .pg-panel,
 .pg-sidebar .pg-panel {
   overflow: visible;
@@ -1419,6 +1442,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .pg-side .custom-select-option-link,

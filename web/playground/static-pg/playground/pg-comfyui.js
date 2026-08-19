@@ -498,10 +498,10 @@ function pgComfyConvertLevel(graph, ctx, idState) {
 // ----- Sidebar panel --------------------------------------------------------
 function pgRenderComfyPanel(cfg) {
   var s = pgComfyRuntime(pgWin());
-  var html = '<div class="pg-panel"><div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('pgComfyProtocol')) + '</span><button class="pg-btn pg-comfy-back" type="button" onclick="pgComfyBackToProtocol()" title="' + pgEscapeAttr(pgT('pgComfyBack')) + '">← ' + pgEscapeHtml(pgT('pgComfyBack')) + '</button></div>';
-  html += '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgComfyPort')) + '</label>' +
+  var html = '<div class="pg-panel"><div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('pgComfyProtocol')) + '</span><button class="pg-btn pg-comfy-back" type="button" onclick="pgComfyBackToProtocol()" data-tooltip="' + pgEscapeAttr(pgT('pgComfyBack')) + '">← ' + pgEscapeHtml(pgT('pgComfyBack')) + '</button></div>';
+  html += '<div class="pg-param-row"><label data-tooltip="' + pgEscapeAttr(pgT('pgComfyPort')) + '">' + pgEscapeHtml(pgT('pgComfyPort')) + '</label>' +
     '<input type="number" min="1" max="65535" value="' + pgEscapeAttr(cfg.imgComfyPort || '8188') + '" onchange="pgOnParam(\'imgComfyPort\', this.value)" style="flex:0 0 88px">' +
-    '<button class="pg-btn" onclick="pgComfyConnect()"' + (s.connecting ? ' disabled' : '') + '>' +
+    '<button class="pg-btn" onclick="pgComfyConnect()" style="flex:0 0 auto;margin-left:6px"' + (s.connecting ? ' disabled' : '') + '>' +
     pgEscapeHtml(s.connecting ? pgT('pgComfyConnecting') : (s.connected ? pgT('pgComfyReconnect') : pgT('pgComfyConnect'))) +
     '</button></div>';
   if (s.connecting) html += '<div class="pg-comfy-hint">' + pgEscapeHtml(pgT('pgComfyConnecting')) + '</div>';
@@ -666,6 +666,7 @@ function pgComfyGroupLabel(nodeId, title) {
 }
 
 function pgComfySelectRow(nodeId, field, val, opts, label) {
+  var displayLabel = label || field;
   var arr = [{ value: '', label: pgT('pgComfySelectDefault') }].concat(opts || []);
   var wrapId = 'pg-comfy-selwrap-' + nodeId + '-' + field;
   var selId = 'pg-comfy-sel-' + nodeId + '-' + field;
@@ -680,20 +681,31 @@ function pgComfySelectRow(nodeId, field, val, opts, label) {
     }).join('');
     selHtml = '<select onchange="pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)" style="flex:1">' + o + '</select>';
   }
-  return '<div class="pg-param-row"><label>' + pgEscapeHtml(label || field) + '</label>' + selHtml + '</div>';
+  return '<div class="pg-param-row"><label data-tooltip="' + pgEscapeAttr(displayLabel) + '">' + pgEscapeHtml(displayLabel) + '</label>' + selHtml + '</div>';
 }
 
 function pgComfyNumberRow(nodeId, field, val, min, max, step) {
   var num = (typeof val === 'number' && isFinite(val)) ? val : 0;
-  return '<div class="pg-param-row"><label>' + pgEscapeHtml(field) + '</label>' +
-    '<input type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + num + '"' +
-    ' onchange="pgComfySetNum(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)" style="flex:0 0 88px"></div>';
+  var stp = step || 1;
+  var isFloat = stp < 1;
+  var displayLabel = field;
+  var minArg = (min != null && isFinite(min)) ? min : 'null';
+  var maxArg = (max != null && isFinite(max) && max < 1e12) ? max : 'null';
+  return '<div class="pg-param-row"><label data-tooltip="' + pgEscapeAttr(displayLabel) + '">' + pgEscapeHtml(displayLabel) + '</label>' +
+    '<div class="number-stepper" style="flex:1;min-width:0">' +
+      '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepComfyNum(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', -' + stp + ', ' + minArg + ', ' + maxArg + ', ' + isFloat + ')">-</button>' +
+      '<input type="number" class="stepper-input" step="' + stp + '" value="' + num + '"' +
+      ' onchange="pgComfySetNum(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value, ' + minArg + ', ' + maxArg + ', ' + isFloat + ')">' +
+      '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepComfyNum(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', ' + stp + ', ' + minArg + ', ' + maxArg + ', ' + isFloat + ')">+</button>' +
+    '</div></div>';
 }
 
 function pgComfyTextRow(nodeId, field, val, label) {
-  return '<div class="pg-param-row"><label>' + pgEscapeHtml(label || field) + '</label>' +
-    '<input type="text" value="' + pgEscapeAttr(String(val == null ? '' : val)) + '"' +
-    ' oninput="pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value)" style="flex:1"></div>';
+  var displayLabel = label || field;
+  var strVal = String(val == null ? '' : val);
+  return '<div class="pg-param-row"><label data-tooltip="' + pgEscapeAttr(displayLabel) + '">' + pgEscapeHtml(displayLabel) + '</label>' +
+    '<input type="text" value="' + pgEscapeAttr(strVal) + '" data-tooltip="' + pgEscapeAttr(strVal || displayLabel) + '"' +
+    ' oninput="pgComfySetParam(\'' + pgEscapeAttr(nodeId) + '\',\'' + pgEscapeAttr(field) + '\', this.value); this.setAttribute(\'data-tooltip\', this.value || \'' + pgEscapeAttr(displayLabel) + '\')" style="flex:1"></div>';
 }
 
 // ----- Dynamic param writers (wired from generated controls) ---------------
@@ -705,10 +717,39 @@ function pgComfySetParam(nodeId, field, v) {
   pgSave();
 }
 
-function pgComfySetNum(nodeId, field, v) {
-  var num = parseFloat(v);
+function pgComfySetNum(nodeId, field, v, min, max, isFloat) {
+  var num = isFloat ? parseFloat(v) : parseInt(v, 10);
   if (isNaN(num)) num = 0;
+  if (min != null && num < min) num = min;
+  if (max != null && num > max) num = max;
+  if (isFloat) num = Math.round(num * 1000) / 1000;
   pgComfySetParam(nodeId, field, num);
+}
+
+function pgStepComfyNum(nodeId, field, delta, min, max, isFloat) {
+  var w = pgWin();
+  if (!w || !w.config.imgComfyWorkflow || !w.config.imgComfyWorkflow[nodeId] || !w.config.imgComfyWorkflow[nodeId].inputs) return;
+  var curVal = w.config.imgComfyWorkflow[nodeId].inputs[field];
+  var cur = isFloat ? (parseFloat(curVal) || 0) : (parseInt(curVal, 10) || 0);
+  var next = cur + delta;
+  if (min != null && next < min) next = min;
+  if (max != null && next > max) next = max;
+  if (isFloat) next = Math.round(next * 1000) / 1000;
+  w.config.imgComfyWorkflow[nodeId].inputs[field] = next;
+  pgSave();
+  pgRenderSidebar();
+}
+
+function pgStepComfyPort(delta, min, max) {
+  var w = pgWin();
+  if (!w) return;
+  var cur = parseInt(w.config.imgComfyPort, 10) || 8188;
+  var next = cur + delta;
+  if (min != null && next < min) next = min;
+  if (max != null && next > max) next = max;
+  w.config.imgComfyPort = String(next);
+  pgSave();
+  pgRenderSidebar();
 }
 function pgComfyPromptFromMessage(content) {
   if (typeof pgTextContent === 'function') return pgTextContent(content);

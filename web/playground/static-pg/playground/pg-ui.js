@@ -521,7 +521,7 @@ function pgRenderSidebar() {
     imageBatchBtn = '<button class="pg-btn pg-batch-btn' + (imageBatchDisabled ? ' disabled' : '') + '" onclick="if(!' + imageBatchDisabled + ' && typeof pgOpenImageBatch===\'function\') pgOpenImageBatch()"' + (imageBatchDisabled ? ' disabled' : '') + ' data-tooltip="' + pgEscapeHtml(imageBatchTitle) + '" style="flex:1;min-width:0;width:auto;white-space:nowrap">' + pgEscapeHtml(pgT('pgBatchProject')) + '</button>';
   }
   var submitCountStepper =
-    '<div class="number-stepper pg-img-submit-stepper" title="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '" data-tooltip="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">' +
+    '<div class="number-stepper pg-img-submit-stepper" data-tooltip="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">' +
       '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepImageSubmitCount(-1)" tabindex="-1">-</button>' +
       '<input type="number" class="stepper-input pg-image-submit-count" min="1" max="99" step="1" value="' + pgGetImageSubmitCount() + '" onchange="pgOnImageSubmitCount(this.value)" aria-label="' + pgEscapeHtml(pgT('pgImageSubmitCountTip')) + '">' +
       '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepImageSubmitCount(1)" tabindex="-1">+</button>' +
@@ -794,16 +794,15 @@ function pgRenderSidebar() {
 
   if (pgState.mode === 'image') {
     var effProto = pgEffectiveProtocol(cfg);
-    var helperModels = (pgState.models || []).filter(function(m) {
-      if (!m) return false;
-      var k = String(m.kind || '').toLowerCase();
-      return k !== 'image' && k !== 'embedding';
-    });
-    var helperOptsList = [{ value: '', label: pgT('pgSelectModel') }].concat(
-      helperModels.map(function(m) { return { value: m.id, label: m.id }; })
-    );
-    var helperSelHtml = pgRenderCustomSelect('pg-prompt-helper-wrap', 'pg-prompt-helper-sel', helperOptsList, cfg.imgPromptModel || '', 'pgOnParam(\'imgPromptModel\', this.value); pgSave(); pgRenderSidebar()', 'flex:1;min-width:0');
-    var promptHelperRow = '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' + helperSelHtml + '</div>';
+    var helperLabel = cfg.imgPromptModel || pgT('pgSelectModel');
+    var helperPickerOpts = {
+      allowEmpty: true,
+      emptyLabel: pgT('pgSelectModel'),
+      title: pgT('pgPromptHelperModel'),
+      kindFilter: 'text'
+    };
+    var helperBtnHtml = '<button type="button" class="pg-btn pg-model-btn" onclick="pgOpenModelPicker(pgWin().config.imgPromptModel, function(v){ pgOnParam(\'imgPromptModel\', v); pgSave(); pgRenderSidebar(); }, ' + JSON.stringify(helperPickerOpts).replace(/"/g, '&quot;') + ')" style="flex:1;min-width:0;text-align:right;justify-content:flex-end;display:flex;align-items:center;padding:0 10px;height:32px;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" data-tooltip="' + pgEscapeAttr(helperLabel) + '"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:6px">' + pgEscapeHtml(helperLabel) + '</span><span style="opacity:0.5;flex-shrink:0">▼</span></button>';
+    var promptHelperRow = '<div class="pg-param-row"><label data-tooltip="' + pgEscapeAttr(pgT('pgPromptHelperModel')) + '">' + pgEscapeHtml(pgT('pgPromptHelperModel')) + '</label>' + helperBtnHtml + '</div>';
 
     if (effProto === 'comfyui') {
       // ComfyUI protocol: connection panel + dynamic workflow params replace
@@ -1640,17 +1639,17 @@ function pgRenderInputThumbs() {
     var safeUrl = pgEscapeAttr(url);
 
     if (mediaType === 'pdf') {
-      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-pdf" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgPdfDoc')) + '">' +
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-pdf" onclick="pgShowMediaModal(\'' + safeUrl + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgPdfDoc')) + '">' +
         pgGetMediaSvg('pdf', 22) +
         '<span>PDF</span>' +
       '</div>';
     } else if (mediaType === 'video') {
-      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-video" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgVideoFile')) + '">' +
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-video" onclick="pgShowMediaModal(\'' + safeUrl + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgVideoFile')) + '">' +
         pgGetMediaSvg('video', 22) +
         '<span>VIDEO</span>' +
       '</div>';
     } else if (mediaType === 'audio') {
-      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-audio" onclick="pgShowMediaModal(\'' + safeUrl + '\')" title="' + pgEscapeHtml(pgT('pgAudioFile')) + '">' +
+      previewHtml = '<div class="pg-input-thumb pg-input-thumb-file pg-input-thumb-audio" onclick="pgShowMediaModal(\'' + safeUrl + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgAudioFile')) + '">' +
         pgGetMediaSvg('audio', 22) +
         '<span>AUDIO</span>' +
       '</div>';
