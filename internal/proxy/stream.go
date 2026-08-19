@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +65,59 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	// line (F-14): the upstream is emitting garbage beyond the line/buffer
 	// cap, so the stream is closed and usage is recorded with an error.
 	var streamAborted bool
+	// Terminal-marker tracking: some upstreams (notably opencode.ai's
+	// /v1/chat/completions) stream content but never emit the standard
+	// finish_reason chunk or data: [DONE] sentinel - the connection just
+	// closes after an empty usage chunk. Chat clients block forever on that,
+	// so we synthesize the missing terminator at stream end (see below).
+	var streamSawDone bool
+	var streamSawFinish bool
+	noteChunk := func(payload string) {
+		if payload == "[DONE]" {
+			streamSawDone = true
+		} else if strings.Contains(payload, `"finish_reason":"`) {
+			// A quoted string value means a real terminal reason
+			// ("stop"|"length"|"content_filter"|"tool_calls"); the common
+			// "finish_reason":null in mid-stream chunks must NOT count.
+			streamSawFinish = true
+		}
+	}
+	var respID string
+	extractStringField := func(s, field string) string {
+		i := strings.Index(s, field)
+		if i < 0 {
+			return ""
+		}
+		rest := s[i+len(field):]
+		j := strings.IndexByte(rest, '"')
+		if j <= 0 {
+			return ""
+		}
+		return rest[:j]
+	}
+	// patchOpenAIChunk backfills "id":"" / "model":"" on opencode.ai chat
+	// chunks with the real response id and model, so strict clients that
+	// drop empty-id chunks still receive content and the finish signals.
+	patchOpenAIChunk := func(line, payload string) string {
+		if respID == "" {
+			if v := extractStringField(payload, `"id":"`); v != "" && v != "null" {
+				respID = v
+			}
+		}
+		changed := false
+		if respID != "" && strings.Contains(payload, `"id":""`) {
+			payload = strings.Replace(payload, `"id":""`, `"id":"`+respID+`"`, 1)
+			changed = true
+		}
+		if strings.Contains(payload, `"model":""`) {
+			payload = strings.Replace(payload, `"model":""`, `"model":"`+model+`"`, 1)
+			changed = true
+		}
+		if !changed {
+			return line
+		}
+		return "data: " + payload
+	}
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
@@ -86,6 +140,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					totalOutput += len(out) + 1
 					if strings.HasPrefix(strings.TrimSpace(line), "data:") {
 						payload := strings.TrimSpace(strings.TrimSpace(line)[5:])
+						noteChunk(payload)
 						if payload != "[DONE]" {
 							if entryFormat == combo.EntryFormatAnthropic {
 								// Anthropic streams usage across two events
@@ -117,10 +172,19 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					}
 				}
 			} else {
-				if _, err := w.Write(buf[:n]); err != nil {
-					h.logger.Debug("client disconnected during SSE stream: %v", err)
-					clientDisconnected = true
-					break
+				// OpenAI chat chunks are patched per line so empty "id"/"model"
+				// fields (opencode.ai emits them as "") get backfilled with the
+				// real response id — strict clients drop empty-id chunks, which
+				// would silently erase both content and the terminal signals.
+				// All other entry formats keep the raw byte-forward path so
+				// their SSE fabric is untouched.
+				rawForward := entryFormat != combo.EntryFormatOpenAI
+				if rawForward {
+					if _, err := w.Write(buf[:n]); err != nil {
+						h.logger.Debug("client disconnected during SSE stream: %v", err)
+						clientDisconnected = true
+						break
+					}
 				}
 				lines, ferr := sb.Feed(buf[:n])
 				if ferr != nil {
@@ -129,10 +193,25 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					break
 				}
 				for _, line := range lines {
+					orig := line
 					line = strings.TrimSpace(line)
 					if strings.HasPrefix(line, "data:") {
 						payload := strings.TrimSpace(line[5:])
-						if payload == "[DONE]" {
+						noteChunk(payload)
+						if !rawForward {
+							out := line
+							if payload != "[DONE]" {
+								out = patchOpenAIChunk(line, payload)
+							}
+							if _, werr := w.Write([]byte(out + "\n")); werr != nil {
+								h.logger.Debug("client disconnected during SSE stream: %v", werr)
+								clientDisconnected = true
+								break
+							}
+							if payload == "[DONE]" {
+								continue
+							}
+						} else if payload == "[DONE]" {
 							continue
 						}
 						if entryFormat == combo.EntryFormatAnthropic {
@@ -157,6 +236,14 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 							h.sigCache.Put(id, sig)
 						}
 						contentChars += sseContentLength([]byte(payload))
+					} else if !rawForward {
+						// Preserve non-data SSE fields (event:..., : comments,
+						// blank separators) byte-for-byte.
+						if _, werr := w.Write([]byte(orig + "\n")); werr != nil {
+							h.logger.Debug("client disconnected during SSE stream: %v", werr)
+							clientDisconnected = true
+							break
+						}
 					}
 					if h.debugMode() && reqID != "" && entryFormat == combo.EntryFormatOpenAI {
 						h.parseAndBroadcastChunk(reqID, line, sb)
@@ -209,14 +296,27 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 						totalOutput += len(out) + 1
 						remaining = out
 					}
+				} else if entryFormat == combo.EntryFormatOpenAI {
+					// Patched per-line path: this trailing partial line was NOT
+					// written yet — flush it (with id/model backfill).
+					out := remaining
+					if tr := strings.TrimSpace(remaining); strings.HasPrefix(tr, "data:") {
+						pl := strings.TrimSpace(tr[5:])
+						out = patchOpenAIChunk(remaining, pl)
+					}
+					if _, werr := w.Write([]byte(out + "\n")); werr != nil {
+						h.logger.Debug("client disconnected during SSE stream: %v", werr)
+					}
 				} else {
-					// 非 normalize 路径：remaining 已经在循环中通过 w.Write(buf[:n]) 原样发出，
-					// 不应重复写出。仅提取 token 计入 totalOutput/usage。
+					// 非 normalize / non-OpenAI 路径：remaining 已经在循环中通过
+					// w.Write(buf[:n]) 原样发出，不应重复写出。仅提取 token 计入
+					// totalOutput/usage。
 				}
 				// 统一提取 token（两个路径都需要）
 				line := strings.TrimSpace(remaining)
 				if strings.HasPrefix(line, "data:") {
 					payload := strings.TrimSpace(line[5:])
+					noteChunk(payload)
 					if payload != "[DONE]" {
 						if entryFormat == combo.EntryFormatAnthropic {
 							// Anthropic usage spans message_start +
@@ -244,6 +344,38 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				}
 			}
 			break
+		}
+	}
+
+	// opencode.ai's /v1/chat/completions (OpenCode Go / Zen) streams real
+	// content deltas but never emits the standard terminal markers — no
+	// finish_reason chunk, no "data: [DONE]" — the connection just closes
+	// after an empty usage / "cost" chunk. OpenAI-spec chat clients (OMP,
+	// desktop apps, AI SDK) block forever waiting for that terminator, so a
+	// stream that looks "responsive" never finishes. Synthesize the missing
+	// terminal here; it is harmless when the upstream did send one (we only
+	// fill the gap: no finish chunk if a finish_reason was seen, no [DONE]
+	// if one already flowed).
+	if !streamAborted && !clientDisconnected && sel != nil && entryFormat == combo.EntryFormatOpenAI && !streamSawDone {
+		var synth strings.Builder
+		synth.WriteString(`data: {"id":`)
+		synth.WriteString(strconv.Quote(respID))
+		synth.WriteString(`,"object":"chat.completion.chunk","created":`)
+		synth.WriteString(strconv.FormatInt(time.Now().Unix(), 10))
+		synth.WriteString(`,"model":`)
+		synth.WriteString(strconv.Quote(model))
+		synth.WriteString(`,"choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}`)
+		if !streamSawFinish {
+			// Beware: SSE requires a blank line after each event (the upstream
+			// nonstandard stream may otherwise coalesce the synthetic finish
+			// chunk and [DONE] into one frame, which strict clients parse as a
+			// single malformed event and reject).
+			if _, werr := w.Write([]byte(synth.String() + "\n\n")); werr != nil {
+				h.logger.Debug("client disconnected during SSE finish synthesis: %v", werr)
+			}
+		}
+		if _, werr := w.Write([]byte("data: [DONE]\n\n")); werr == nil {
+			flusher.Flush()
 		}
 	}
 
