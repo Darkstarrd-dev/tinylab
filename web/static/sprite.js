@@ -19,6 +19,104 @@
     ]
   };
 
+  // --- Draggable dock (item 2): dock can be dragged to the left or right
+  // edge at any vertical position; position persists in localStorage. A
+  // click (mousedown→mouseup without moving >4px) opens the modal; a drag
+  // (movement >4px) repositions and does NOT open the modal. ---
+  var dockDrag = {
+    side: 'right',      // 'left' | 'right'
+    y: 0.5,             // 0..1 vertical fraction (0.5 = vertically centered)
+    isDown: false,
+    isDragging: false,
+    startX: 0, startY: 0,
+    moved: false
+  };
+
+  function loadDockPosition() {
+    try {
+      var s = localStorage.getItem('tr-sprite-dock-side');
+      var y = localStorage.getItem('tr-sprite-dock-y');
+      if (s === 'left' || s === 'right') dockDrag.side = s;
+      if (y !== null) { var f = parseFloat(y); if (!isNaN(f)) dockDrag.y = Math.max(0, Math.min(1, f)); }
+    } catch (e) {}
+  }
+
+  function saveDockPosition() {
+    try {
+      localStorage.setItem('tr-sprite-dock-side', dockDrag.side);
+      localStorage.setItem('tr-sprite-dock-y', String(dockDrag.y));
+    } catch (e) {}
+  }
+
+  function applyDockPosition() {
+    var dock = document.getElementById('sprite-dock');
+    if (!dock) return;
+    var h = dock.offsetHeight || 60;
+    var maxY = Math.max(0, window.innerHeight - h);
+    var top = Math.round(dockDrag.y * maxY);
+    dock.style.top = top + 'px';
+    dock.style.transform = 'none';
+    if (dockDrag.side === 'left') {
+      dock.style.left = '0px';
+      dock.style.right = 'auto';
+      dock.classList.add('side-left');
+    } else {
+      dock.style.right = '0px';
+      dock.style.left = 'auto';
+      dock.classList.remove('side-left');
+    }
+  }
+
+  function dockMouseDown(e) {
+    if (e.button !== 0) return; // left button only
+    e.preventDefault();
+    e.stopPropagation();
+    dockDrag.isDown = true;
+    dockDrag.isDragging = false;
+    dockDrag.startX = e.clientX;
+    dockDrag.startY = e.clientY;
+    document.addEventListener('mousemove', dockMouseMove);
+    document.addEventListener('mouseup', dockMouseUp);
+  }
+
+  function dockMouseMove(e) {
+    if (!dockDrag.isDown) return;
+    var dx = e.clientX - dockDrag.startX;
+    var dy = e.clientY - dockDrag.startY;
+    if (!dockDrag.isDragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+      dockDrag.isDragging = true;
+      var d = document.getElementById('sprite-dock');
+      if (d) d.classList.add('dragging');
+    }
+    if (!dockDrag.isDragging) return;
+    var dock = document.getElementById('sprite-dock');
+    if (!dock) return;
+    // Snap side to whichever screen half the cursor is in.
+    dockDrag.side = (e.clientX < window.innerWidth / 2) ? 'left' : 'right';
+    var h = dock.offsetHeight || 60;
+    var maxY = Math.max(0, window.innerHeight - h);
+    var top = e.clientY - h / 2;
+    top = Math.max(0, Math.min(maxY, top));
+    dockDrag.y = maxY > 0 ? top / maxY : 0.5;
+    applyDockPosition();
+  }
+
+  function dockMouseUp() {
+    document.removeEventListener('mousemove', dockMouseMove);
+    document.removeEventListener('mouseup', dockMouseUp);
+    var dock = document.getElementById('sprite-dock');
+    if (dock) dock.classList.remove('dragging');
+    var wasDrag = dockDrag.isDragging;
+    dockDrag.isDown = false;
+    dockDrag.isDragging = false;
+    if (wasDrag) {
+      saveDockPosition();
+    } else {
+      // No movement beyond threshold → treat as a click and open the modal.
+      openSpriteModal();
+    }
+  }
+
   function initSpriteDOM() {
     if (document.getElementById('sprite-dock')) return;
 
@@ -41,10 +139,7 @@
       '</div>',
       '<span class="sprite-dock-label">小精灵</span>'
     ].join('');
-    dock.onclick = function(e) {
-      e.stopPropagation();
-      openSpriteModal();
-    };
+    dock.addEventListener('mousedown', dockMouseDown);
     document.body.appendChild(dock);
 
     // 2. Modal Element
@@ -139,6 +234,9 @@
 
     renderSpriteMessages();
     connectEventsSSE();
+    loadDockPosition();
+    applyDockPosition();
+    window.addEventListener('resize', applyDockPosition);
   }
 
   function renderSpriteMessages() {

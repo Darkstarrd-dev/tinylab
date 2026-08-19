@@ -5804,7 +5804,7 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
+  cursor: grab;
   box-shadow: -4px 4px 20px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(var(--glass-blur, 20px));
   transition: all var(--transition-normal, 0.25s);
@@ -5815,6 +5815,21 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
   border-color: var(--accent);
   padding-left: 16px;
   box-shadow: -6px 6px 24px rgba(79, 195, 247, 0.25);
+}
+/* Draggable dock: left-edge capsule (flipped radius + shadow) and drag state. */
+.sprite-dock.side-left {
+  border-right: 1px solid var(--glass-border);
+  border-left: none;
+  border-radius: 0 var(--radius-lg, 14px) var(--radius-lg, 14px) 0;
+  box-shadow: 4px 4px 20px rgba(0, 0, 0, 0.25);
+}
+.sprite-dock.side-left:hover {
+  box-shadow: 6px 6px 24px rgba(79, 195, 247, 0.25);
+}
+.sprite-dock.dragging {
+  cursor: grabbing;
+  transition: none;
+  opacity: 0.9;
 }
 .sprite-dock-icon {
   position: relative;
