@@ -513,30 +513,65 @@ function pgRenderComfyPanel(cfg) {
   html += '</div>';
   if (!s.connected) return html;
 
-  // Template selector
-  html += '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgComfyTemplate')) + '</div>';
-  var tplOpts;
-  if (s.templates.length) {
-    tplOpts = s.templates.map(function(t) { return { value: t.prompt_id, label: t.title }; });
+  // Tab / Preset 视图切换
+  var comfyView = cfg.imgComfyView || 'tab';
+  html += '<div class="pg-panel">' +
+    '<div class="pg-comfy-view-toggle">' +
+      '<button class="pg-comfy-view-btn' + (comfyView === 'tab' ? ' active' : '') + '" onclick="pgComfySetView(\'tab\')">' + pgEscapeHtml(pgT('pgComfyTemplate')) + '</button>' +
+      '<button class="pg-comfy-view-btn' + (comfyView === 'preset' ? ' active' : '') + '" onclick="pgComfySetView(\'preset\')">' + pgEscapeHtml(pgT('pgComfyPreset')) + '</button>' +
+    '</div>';
+
+  if (comfyView === 'preset') {
+    // --- Preset 视图 ---
+    var presets = pgComfyLoadPresets();
+    var activePresetId = presets.activePresetId || '';
+    var presetOpts;
+    if (presets.presets.length) {
+      presetOpts = presets.presets.map(function(p) { return { value: p.id, label: p.name }; });
+    } else {
+      presetOpts = [{ value: '', label: pgT('pgComfyPresetNone') }];
+    }
+    var presetSelHtml = (typeof pgRenderCustomSelect === 'function')
+      ? pgRenderCustomSelect('pg-comfy-preset-wrap', 'pg-comfy-preset-sel', presetOpts, activePresetId, 'pgComfySelectPreset(this.value)', 'width:100%')
+      : '';
+    if (!presetSelHtml) {
+      var pSel = presetOpts.map(function(o) {
+        return '<option value="' + pgEscapeAttr(o.value) + '"' + (activePresetId === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
+      }).join('');
+      presetSelHtml = '<select class="pg-param-select" onchange="pgComfySelectPreset(this.value)" style="width:100%">' + pSel + '</select>';
+    }
+    html += presetSelHtml;
+    var hasActive = !!(activePresetId && presets.presets.length);
+    html += '<div class="pg-comfy-preset-actions">' +
+      '<button class="pg-btn" onclick="pgComfyPresetAdd()">' + pgEscapeHtml(pgT('pgComfyPresetAdd')) + '</button>' +
+      '<button class="pg-btn"' + (hasActive ? '' : ' disabled') + ' onclick="pgComfyPresetEdit()">' + pgEscapeHtml(pgT('pgComfyPresetEdit')) + '</button>' +
+      '<button class="pg-btn"' + (hasActive ? '' : ' disabled') + ' onclick="pgComfyPresetRemove()">' + pgEscapeHtml(pgT('pgComfyPresetRemove')) + '</button>' +
+    '</div>';
   } else {
-    tplOpts = [{ value: '', label: pgT('pgComfyTemplateNone') }];
-  }
-  tplOpts.push({ value: '__paste__', label: pgT('pgComfyTemplatePaste') });
-  var tplSelHtml = (typeof pgRenderCustomSelect === 'function')
-    ? pgRenderCustomSelect('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
-    : (typeof renderCustomSelectHtml === 'function'
-      ? renderCustomSelectHtml('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
-      : '');
-  if (!tplSelHtml) {
-    var tSel = tplOpts.map(function(o) {
-      return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg.imgComfyTemplateId === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
-    }).join('');
-    tplSelHtml = '<select class="pg-param-select" onchange="pgComfySelectTemplate(this.value)" style="width:100%">' + tSel + '</select>';
-  }
-  html += tplSelHtml;
-  if (cfg.imgComfyTemplateId === '__paste__') {
-    html += '<textarea class="pg-comfy-paste" placeholder="' + pgEscapeAttr(pgT('pgComfyPastePlaceholder')) + '" oninput="pgOnParam(\'imgComfyPasteJson\', this.value)" style="width:100%;height:110px;margin-top:6px">' + pgEscapeHtml(cfg.imgComfyPasteJson || '') + '</textarea>';
-    html += '<button class="pg-btn" style="width:100%;margin-top:6px" onclick="pgComfyApplyPaste()">' + pgEscapeHtml(pgT('pgComfyApplyPaste')) + '</button>';
+    // --- Tab 视图（原有逻辑）---
+    var tplOpts;
+    if (s.templates.length) {
+      tplOpts = s.templates.map(function(t) { return { value: t.prompt_id, label: t.title }; });
+    } else {
+      tplOpts = [{ value: '', label: pgT('pgComfyTemplateNone') }];
+    }
+    tplOpts.push({ value: '__paste__', label: pgT('pgComfyTemplatePaste') });
+    var tplSelHtml = (typeof pgRenderCustomSelect === 'function')
+      ? pgRenderCustomSelect('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
+      : (typeof renderCustomSelectHtml === 'function'
+        ? renderCustomSelectHtml('pg-comfy-tpl-wrap', 'pg-comfy-tpl-sel', tplOpts, cfg.imgComfyTemplateId || (tplOpts[0] && tplOpts[0].value), 'pgComfySelectTemplate(this.value)', 'width:100%')
+        : '');
+    if (!tplSelHtml) {
+      var tSel = tplOpts.map(function(o) {
+        return '<option value="' + pgEscapeAttr(o.value) + '"' + (cfg.imgComfyTemplateId === o.value ? ' selected' : '') + '>' + pgEscapeHtml(o.label) + '</option>';
+      }).join('');
+      tplSelHtml = '<select class="pg-param-select" onchange="pgComfySelectTemplate(this.value)" style="width:100%">' + tSel + '</select>';
+    }
+    html += tplSelHtml;
+    if (cfg.imgComfyTemplateId === '__paste__') {
+      html += '<textarea class="pg-comfy-paste" placeholder="' + pgEscapeAttr(pgT('pgComfyPastePlaceholder')) + '" oninput="pgOnParam(\'imgComfyPasteJson\', this.value)" style="width:100%;height:110px;margin-top:6px">' + pgEscapeHtml(cfg.imgComfyPasteJson || '') + '</textarea>';
+      html += '<button class="pg-btn" style="width:100%;margin-top:6px" onclick="pgComfyApplyPaste()">' + pgEscapeHtml(pgT('pgComfyApplyPaste')) + '</button>';
+    }
   }
   html += '</div>';
 
@@ -591,6 +626,8 @@ function pgComfyBackToProtocol() {
   w.config.imgComfyTemplateId = '';
   w.config.imgComfyWorkflow = null;
   w.config.imgComfyPasteJson = '';
+  w.config.imgComfyView = 'tab';
+  w.config.imgComfyVisibleNodes = null;
   pgSave();
   pgRenderSidebar();
   pgRenderPanes();
@@ -605,7 +642,11 @@ function pgRenderComfyWorkflowParams(cfg) {
   var s = pgComfyRuntime(pgWin());
   var html = '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgComfyParams')) + '</div>';
   var any = false;
-  Object.keys(wf).forEach(function(nodeId) {
+  // 如果当前有 Preset 的 visibleNodes 过滤，按该列表顺序渲染；否则全量渲染
+  var nodeIds = (cfg.imgComfyVisibleNodes && cfg.imgComfyVisibleNodes.length)
+    ? cfg.imgComfyVisibleNodes.map(function(vn) { return vn.nodeId; })
+    : Object.keys(wf);
+  nodeIds.forEach(function(nodeId) {
     var n = wf[nodeId];
     if (!n || !n.class_type || !n.inputs) return;
     var t = n.class_type;
@@ -908,4 +949,338 @@ function pgComfyWaitHistory(cfg, pid, timeoutMs, signal) {
     }
     poll();
   });
+}
+
+// ====== Preset 系统 ======================================================
+
+var PG_COMFY_PRESETS_KEY = 'tinyrouter.playground.comfy.presets.v1';
+
+// 从 localStorage 加载 Preset 数据
+function pgComfyLoadPresets() {
+  try {
+    var raw = localStorage.getItem(PG_COMFY_PRESETS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { presets: [], activePresetId: null };
+}
+
+// 保存 Preset 数据到 localStorage
+function pgComfySavePresets(data) {
+  try { localStorage.setItem(PG_COMFY_PRESETS_KEY, JSON.stringify(data)); } catch (e) {}
+}
+
+// 切换 Tab / Preset 视图
+function pgComfySetView(view) {
+  var w = pgWin();
+  if (!w) return;
+  w.config.imgComfyView = view;
+  // 切换到 Preset 视图时，如果有 activePreset，加载它的 workflow
+  if (view === 'preset') {
+    var presets = pgComfyLoadPresets();
+    if (presets.activePresetId) {
+      pgComfyApplyPreset(presets.activePresetId);
+    }
+  } else {
+    // 切回 Tab 视图时，清除 visibleNodes 过滤
+    w.config.imgComfyVisibleNodes = null;
+  }
+  pgSave();
+  pgRenderSidebar();
+}
+
+// 选择一个 Preset
+function pgComfySelectPreset(id) {
+  var presets = pgComfyLoadPresets();
+  presets.activePresetId = id || null;
+  pgComfySavePresets(presets);
+  if (id) pgComfyApplyPreset(id);
+  else {
+    // 清除 visibleNodes
+    var w = pgWin();
+    if (w) { w.config.imgComfyVisibleNodes = null; pgSave(); }
+  }
+  pgRenderSidebar();
+}
+
+// 应用 Preset 的 workflow 到当前 config
+function pgComfyApplyPreset(id) {
+  var presets = pgComfyLoadPresets();
+  var preset = null;
+  for (var i = 0; i < presets.presets.length; i++) {
+    if (presets.presets[i].id === id) { preset = presets.presets[i]; break; }
+  }
+  if (!preset) return;
+  var w = pgWin();
+  if (!w) return;
+  w.config.imgComfyTemplateId = preset.templateId;
+  w.config.imgComfyWorkflow = pgComfyDeepCopy(preset.workflow);
+  w.config.imgComfyVisibleNodes = preset.visibleNodes ? preset.visibleNodes.slice() : null;
+  pgSave();
+}
+
+// 从 workflow 中收集所有可渲染的节点信息（用于 Add Preset）
+function pgComfyCollectVisibleNodes(wf) {
+  var knownTypes = {
+    UNETLoader: true, DiffusionModelLoader: true, CLIPLoader: true,
+    VAELoader: true, CheckpointLoaderSimple: true,
+    KSampler: true, KSamplerAdvanced: true,
+    EmptyLatentImage: true, CLIPTextEncode: true, SaveImage: true
+  };
+  var nodes = [];
+  Object.keys(wf).forEach(function(nodeId) {
+    var n = wf[nodeId];
+    if (!n || !n.class_type || !n.inputs) return;
+    if (!knownTypes[n.class_type]) return;
+    nodes.push({
+      nodeId: nodeId,
+      classType: n.class_type,
+      title: (n._meta && n._meta.title) ? String(n._meta.title) : n.class_type
+    });
+  });
+  return nodes;
+}
+
+// === Add Preset ===
+function pgComfyPresetAdd() {
+  var w = pgWin();
+  if (!w || !w.config.imgComfyWorkflow) {
+    pgToast(pgT('pgComfyNoWorkflow'), 'warning');
+    return;
+  }
+  // 弹窗输入名称
+  pgComfyShowNameModal('', function(name) {
+    var presets = pgComfyLoadPresets();
+    // 收集当前 workflow 中所有可见的节点
+    var visibleNodes = pgComfyCollectVisibleNodes(w.config.imgComfyWorkflow);
+    var preset = {
+      id: pgComfyUuid(),
+      name: name,
+      templateId: w.config.imgComfyTemplateId || '',
+      workflow: pgComfyDeepCopy(w.config.imgComfyWorkflow),
+      visibleNodes: visibleNodes,
+      createdAt: Date.now()
+    };
+    presets.presets.push(preset);
+    presets.activePresetId = preset.id;
+    pgComfySavePresets(presets);
+    w.config.imgComfyVisibleNodes = visibleNodes;
+    w.config.imgComfyView = 'preset';
+    pgSave();
+    pgRenderSidebar();
+    pgToast(pgT('pgComfyPresetSaved', [name]), 'success');
+  });
+}
+
+// === Edit Preset ===
+function pgComfyPresetEdit() {
+  var presets = pgComfyLoadPresets();
+  var preset = null;
+  for (var i = 0; i < presets.presets.length; i++) {
+    if (presets.presets[i].id === presets.activePresetId) { preset = presets.presets[i]; break; }
+  }
+  if (!preset) return;
+  pgComfyShowEditModal(preset);
+}
+
+// === Remove Preset ===
+function pgComfyPresetRemove() {
+  var presets = pgComfyLoadPresets();
+  var idx = -1;
+  for (var i = 0; i < presets.presets.length; i++) {
+    if (presets.presets[i].id === presets.activePresetId) { idx = i; break; }
+  }
+  if (idx < 0) return;
+  var name = presets.presets[idx].name;
+  presets.presets.splice(idx, 1);
+  presets.activePresetId = presets.presets.length ? presets.presets[0].id : null;
+  pgComfySavePresets(presets);
+  // 清除 visibleNodes 过滤，或应用新的 active preset
+  var w = pgWin();
+  if (w) {
+    if (presets.activePresetId) {
+      pgComfyApplyPreset(presets.activePresetId);
+    } else {
+      w.config.imgComfyVisibleNodes = null;
+    }
+  }
+  pgSave();
+  pgRenderSidebar();
+  pgToast(pgT('pgComfyPresetRemoved', [name]), 'info');
+}
+
+// ====== 弹窗 — 名称输入 ================================================
+
+function pgComfyShowNameModal(defaultName, onConfirm) {
+  var html = '<div class="pg-modal-header">' +
+    '<span class="pg-modal-title">' + pgEscapeHtml(pgT('pgComfyPresetNameTitle')) + '</span>' +
+    '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+  '</div>' +
+  '<div class="pg-modal-body" style="padding:16px">' +
+    '<input id="pg-comfy-preset-name" type="text" value="' + pgEscapeAttr(defaultName) +
+    '" placeholder="' + pgEscapeAttr(pgT('pgComfyPresetNamePlaceholder')) +
+    '" style="width:100%;padding:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg)" ' +
+    'onkeydown="if(event.key===\'Enter\'){event.preventDefault();pgComfyConfirmPresetName();}">' +
+  '</div>' +
+  '<div class="pg-modal-footer" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="pg-btn" onclick="pgCloseModal()">' + pgEscapeHtml(pgT('Cancel')) + '</button>' +
+    '<button class="pg-btn" style="background:var(--accent);color:#fff" onclick="pgComfyConfirmPresetName()">' + pgEscapeHtml(pgT('OK')) + '</button>' +
+  '</div>';
+
+  window.__pgComfyPresetNameCb = onConfirm;
+  pgShowModal(html);
+  setTimeout(function() {
+    var inp = document.getElementById('pg-comfy-preset-name');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 30);
+}
+
+function pgComfyConfirmPresetName() {
+  var inp = document.getElementById('pg-comfy-preset-name');
+  var name = inp ? inp.value.trim() : '';
+  if (!name) { pgToast(pgT('pgComfyPresetNameEmpty'), 'warning'); return; }
+  pgCloseModal();
+  if (window.__pgComfyPresetNameCb) {
+    window.__pgComfyPresetNameCb(name);
+    window.__pgComfyPresetNameCb = null;
+  }
+}
+
+// ====== 弹窗 — 编辑 Preset（拖拽排序 + 移除节点）========================
+
+function pgComfyShowEditModal(preset) {
+  var nodes = (preset.visibleNodes || []).slice();
+  window.__pgComfyEditNodes = nodes;
+  window.__pgComfyEditPresetId = preset.id;
+
+  var html = '<div class="pg-modal-header">' +
+    '<span class="pg-modal-title">' + pgEscapeHtml(pgT('pgComfyPresetEditTitle', [preset.name])) + '</span>' +
+    '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+  '</div>' +
+  '<div class="pg-modal-body" style="padding:16px;max-height:60vh;overflow-y:auto">' +
+    '<div style="opacity:0.6;font-size:12px;margin-bottom:8px">' + pgEscapeHtml(pgT('pgComfyPresetEditHint')) + '</div>' +
+    '<div id="pg-comfy-edit-list">' + pgComfyRenderEditList(nodes) + '</div>' +
+  '</div>' +
+  '<div class="pg-modal-footer" style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="pg-btn" onclick="pgCloseModal()">' + pgEscapeHtml(pgT('Cancel')) + '</button>' +
+    '<button class="pg-btn" style="background:var(--accent);color:#fff" onclick="pgComfySaveEditPreset()">' + pgEscapeHtml(pgT('OK')) + '</button>' +
+  '</div>';
+
+  pgShowModal(html);
+  // 初始化拖拽
+  setTimeout(function() { pgComfyInitEditDrag(); }, 50);
+}
+
+// 渲染编辑列表中的节点项
+function pgComfyRenderEditList(nodes) {
+  if (!nodes.length) return '<div style="opacity:0.5;padding:8px">' + pgEscapeHtml(pgT('pgComfyPresetEditEmpty')) + '</div>';
+  return nodes.map(function(n, i) {
+    var title = n.title || n.classType || ('#' + n.nodeId);
+    return '<div class="pg-comfy-edit-item" data-index="' + i + '" draggable="true">' +
+      '<span class="pg-comfy-edit-drag">☰</span>' +
+      '<span class="pg-comfy-edit-label">' + pgEscapeHtml(title) + ' <span style="opacity:0.5">#' + pgEscapeHtml(n.nodeId) + '</span></span>' +
+      '<button class="pg-comfy-edit-remove" onclick="pgComfyEditRemoveNode(' + i + ')" data-tooltip="Remove">✕</button>' +
+    '</div>';
+  }).join('');
+}
+
+// 拖拽排序初始化（HTML5 Drag and Drop API）
+function pgComfyInitEditDrag() {
+  var list = document.getElementById('pg-comfy-edit-list');
+  if (!list) return;
+  var dragIdx = -1;
+
+  list.addEventListener('dragstart', function(e) {
+    var item = e.target.closest('.pg-comfy-edit-item');
+    if (!item) return;
+    dragIdx = parseInt(item.dataset.index, 10);
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  list.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    // 清除所有项的 drag 指示器
+    var items = list.querySelectorAll('.pg-comfy-edit-item');
+    items.forEach(function(el) { el.classList.remove('drag-above', 'drag-below'); });
+    var item = e.target.closest('.pg-comfy-edit-item');
+    if (!item) return;
+    var rect = item.getBoundingClientRect();
+    var mid = rect.top + rect.height / 2;
+    if (e.clientY < mid) {
+      item.classList.add('drag-above');
+    } else {
+      item.classList.add('drag-below');
+    }
+  });
+
+  list.addEventListener('dragleave', function(e) {
+    var item = e.target.closest('.pg-comfy-edit-item');
+    if (item) { item.classList.remove('drag-above', 'drag-below'); }
+  });
+
+  list.addEventListener('drop', function(e) {
+    e.preventDefault();
+    var items = list.querySelectorAll('.pg-comfy-edit-item');
+    items.forEach(function(el) { el.classList.remove('drag-above', 'drag-below', 'dragging'); });
+
+    var target = e.target.closest('.pg-comfy-edit-item');
+    if (!target) return;
+    var dropIdx = parseInt(target.dataset.index, 10);
+    if (dragIdx === dropIdx || dragIdx < 0) return;
+
+    // 计算放置位置：鼠标在项目上半部分则插入前面，下半部分则插入后面
+    var rect = target.getBoundingClientRect();
+    var mid = rect.top + rect.height / 2;
+    var insertBefore = e.clientY < mid;
+
+    // 执行数组移动
+    var nodes = window.__pgComfyEditNodes;
+    var moved = nodes.splice(dragIdx, 1)[0];
+    // dragIdx 被移除后，dropIdx 可能需要调整
+    var adjustedIdx = dropIdx;
+    if (dragIdx < dropIdx) adjustedIdx--;
+    if (!insertBefore) adjustedIdx++;
+    nodes.splice(adjustedIdx, 0, moved);
+
+    // 重新渲染列表
+    list.innerHTML = pgComfyRenderEditList(nodes);
+    pgComfyInitEditDrag();
+  });
+
+  list.addEventListener('dragend', function() {
+    var items = list.querySelectorAll('.pg-comfy-edit-item');
+    items.forEach(function(el) { el.classList.remove('drag-above', 'drag-below', 'dragging'); });
+  });
+}
+
+// 从编辑列表中移除一个节点
+function pgComfyEditRemoveNode(index) {
+  var nodes = window.__pgComfyEditNodes;
+  if (!nodes || index < 0 || index >= nodes.length) return;
+  nodes.splice(index, 1);
+  var list = document.getElementById('pg-comfy-edit-list');
+  if (list) {
+    list.innerHTML = pgComfyRenderEditList(nodes);
+    pgComfyInitEditDrag();
+  }
+}
+
+// 保存编辑后的 Preset
+function pgComfySaveEditPreset() {
+  var presets = pgComfyLoadPresets();
+  var preset = null;
+  for (var i = 0; i < presets.presets.length; i++) {
+    if (presets.presets[i].id === window.__pgComfyEditPresetId) { preset = presets.presets[i]; break; }
+  }
+  if (!preset) { pgCloseModal(); return; }
+  preset.visibleNodes = (window.__pgComfyEditNodes || []).slice();
+  pgComfySavePresets(presets);
+  // 更新当前 config
+  var w = pgWin();
+  if (w) w.config.imgComfyVisibleNodes = preset.visibleNodes.slice();
+  pgSave();
+  pgCloseModal();
+  pgRenderSidebar();
+  pgToast(pgT('pgComfyPresetUpdated'), 'success');
 }

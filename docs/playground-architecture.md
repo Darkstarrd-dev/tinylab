@@ -1,5 +1,6 @@
 
 # TinyRouter Playground 架构
+> **最后核对（2026-08-20，Playground ComfyUI 增加 Preset 预设与动态参数排序/移除）：** 在 Playground Image 模式下的 ComfyUI 协议侧边栏中引入 Preset 系统：(1) 将 Tab Select 标题行升级为 Tab/Preset 双视图切换按钮（`.pg-comfy-view-toggle` / `.pg-comfy-view-btn`，复用模式切换视觉风格）；(2) Preset 视图包含下拉选择器与 Add/Edit/Remove 三个操作按钮；(3) Add 弹窗输入预设名称，将当前 Tab 工作流与可见节点列表保存为独立 Preset（`localStorage` 键 `tinyrouter.playground.comfy.presets.v1`）；(4) Edit 弹窗支持 HTML5 拖拽排序与点击 ✕ 移除冗余参数节点，自定义 `visibleNodes` 有序过滤渲染；(5) Remove 删除当前选中 Preset 并切换回活动预设；(6) 动态参数表单在 Preset 模式下保持参数值实时可编辑，回退协议选择时同步重置视图状态。涉及文件：`web/playground/static-pg/playground/pg-comfyui.js`、`web/playground/static-pg/playground.css`、`web/playground/static-pg/playground/pg-i18n.js`。
 > **最后核对（2026-08-19，Playground 控件与交互体验整改）：** 
 > 1. **数值步进器统一（Number Stepper）**：ComfyUI 协议动态面板中的所有工作流数值参数（`seed`、`steps`、`cfg`、`denoise`、`width`、`height`、`batch_size`）与连接端口（`Port`）全量改造为通用带加减按键的 `.number-stepper` 步进组件（`pgStepComfyNum` / `pgStepComfyPort`），并在 JS 层处理边界 clamp，彻底杜绝 HTML5 原生校验气泡弹窗。
 > 2. **自定义主题 Tooltip 统一（Theme Tooltip）**：全局 `renderCustomSelectHtml` 下拉选项以及 ComfyUI 动态派生下拉、输入框、标签、媒体缩略图等全面将原生 `title` 属性替换为主题系统的 `data-tooltip`，使悬浮提示完全融入主题气泡与动画系统。
