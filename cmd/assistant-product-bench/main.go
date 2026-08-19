@@ -98,6 +98,9 @@ var correctnessScenarios = []correctnessScenario{
 	{id: "search_local_files", intent: "搜索本地的文件", forbidden: []string{"anysearch.search"}},
 	{id: "extract_audio_from_video", intent: "提取视频里的音频", forbidden: []string{"anysearch.extract"}},
 	{id: "web_search_news", intent: "搜索一下最新的AI新闻", required: []string{"anysearch.search"}},
+	// --- Round 3 adversarial: editor.open over-matches 打开 for browse-tree. ---
+	{id: "open_dir_vs_doc", intent: "打开文档目录", required: []string{"editor.tree"}, forbidden: []string{"editor.open"}},
+	{id: "save_doc_anchor", intent: "保存这篇文档", required: []string{"editor.save"}},
 }
 
 func main() {

@@ -8,7 +8,7 @@
     {"tool": "image.edit", "method": "POST", "path": "/v1/images/edits", "needsModel": true, "keywords": ["改"], "all": ["图"], "desc": "编辑图片（改…图，如改一下这张图）"},
     {"tool": "imagebatch.create", "method": "POST", "path": "/api/image-batches", "needsModel": true, "keywords": ["批量"], "desc": "批量生成图片"},
     {"tool": "editor.save", "method": "POST", "path": "/api/editor/save", "keywords": ["写", "文档", "保存", "存档", "save"], "none": ["目录", "打开"], "desc": "保存文档"},
-    {"tool": "editor.open", "method": "POST", "path": "/api/editor/open", "keywords": ["打开", "笔记"], "desc": "打开文档"},
+    {"tool": "editor.open", "method": "POST", "path": "/api/editor/open", "keywords": ["打开", "笔记"], "none": ["目录", "文件夹"], "desc": "打开文档"},
     {"tool": "editor.tree", "method": "GET", "path": "/api/editor/tree", "keywords": ["目录", "文档列表", "文件列表"], "desc": "浏览文档树"},
     {"tool": "download.create", "method": "POST", "path": "/api/downloads", "keywords": ["下载", "download"], "none": ["查", "信息", "info"], "desc": "下载视频/音频"},
     {"tool": "download.info", "method": "POST", "path": "/api/downloads/info", "keywords": ["查"], "all": ["视频"], "none": ["下载"], "desc": "查询视频信息"},
