@@ -1,6 +1,7 @@
 {
   "rules": [
     {"tool": "image.generate", "method": "POST", "path": "/v1/images/generations", "needsModel": true, "keywords": ["生成", "画", "绘图", "出图", "文生图", "做"], "all": ["图"], "none": ["批量", "向量", "embedding", "vector", "编辑", "修"], "desc": "生成图片"},
+    {"tool": "image.generate", "method": "POST", "path": "/v1/images/generations", "needsModel": true, "keywords": ["画"], "none": ["表格", "文档", "画线", "画板", "画图", "刻画"], "desc": "画图（无图字意图，如画一只猫）"},
     {"tool": "image.generate", "method": "POST", "path": "/v1/images/generations", "needsModel": true, "keywords": ["generate", "draw", "create"], "all": ["image"], "none": ["batch", "vector", "embedding", "edit", "modify"], "desc": "generate image (EN noun=image)"},
     {"tool": "image.generate", "method": "POST", "path": "/v1/images/generations", "needsModel": true, "keywords": ["generate", "draw", "create"], "all": ["picture"], "none": ["batch", "vector", "embedding", "edit", "modify"], "desc": "generate image (EN noun=picture)"},
     {"tool": "image.edit", "method": "POST", "path": "/v1/images/edits", "needsModel": true, "keywords": ["编辑", "修图", "图片编辑", "编辑图片", "改图"], "desc": "编辑图片"},
@@ -8,7 +9,7 @@
     {"tool": "editor.save", "method": "POST", "path": "/api/editor/save", "keywords": ["写", "文档", "保存", "存档", "save"], "none": ["目录", "打开"], "desc": "保存文档"},
     {"tool": "editor.open", "method": "POST", "path": "/api/editor/open", "keywords": ["打开", "笔记"], "desc": "打开文档"},
     {"tool": "editor.tree", "method": "GET", "path": "/api/editor/tree", "keywords": ["目录", "文档列表", "文件列表"], "desc": "浏览文档树"},
-    {"tool": "download.create", "method": "POST", "path": "/api/downloads", "keywords": ["下载", "视频", "download", "video"], "none": ["查", "信息", "info"], "desc": "下载视频"},
+    {"tool": "download.create", "method": "POST", "path": "/api/downloads", "keywords": ["下载", "download"], "none": ["查", "信息", "info"], "desc": "下载视频/音频"},
     {"tool": "download.info", "method": "POST", "path": "/api/downloads/info", "keywords": ["查"], "all": ["视频"], "none": ["下载"], "desc": "查询视频信息"},
     {"tool": "anysearch.search", "method": "POST", "path": "/api/anysearch/search", "keywords": ["搜索", "search", "搜一下"], "desc": "网页搜索"},
     {"tool": "anysearch.extract", "method": "POST", "path": "/api/anysearch/extract", "keywords": ["提取", "正文", "网页"], "desc": "提取网页正文"},
