@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -248,3 +250,55 @@ func TestEntryTracker_ConcurrentSafety(t *testing.T) {
 		<-done
 	}
 }
+
+func TestMarshalEntryJSONLight(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/json")
+	headers.Set("Authorization", "Bearer secret")
+
+	original := usage.Entry{
+		ID:          "req-light-1",
+		Provider:    "OpenAI",
+		Model:       "gpt-4",
+		Status:      "success",
+		LatencyMs:   150,
+		InputTokens: 50,
+		ReqPayload:  json.RawMessage(`{"prompt":"hello world"}`),
+		RespPayload: json.RawMessage(`{"response":"hi"}`),
+		ReqHeaders:  headers,
+		RespHeaders: headers,
+	}
+
+	raw := MarshalEntryJSONLight(original)
+	if raw == nil {
+		t.Fatal("expected non-nil JSON from MarshalEntryJSONLight")
+	}
+
+	// Verify original entry was NOT mutated (passed by value)
+	if original.ReqPayload == nil || original.RespPayload == nil || original.ReqHeaders == nil || original.RespHeaders == nil {
+		t.Fatal("expected original entry to remain unmutated")
+	}
+
+	// Verify serialized JSON does not contain payload/headers fields
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal light json: %v", err)
+	}
+
+	if parsed["id"] != "req-light-1" || parsed["provider"] != "OpenAI" || parsed["model"] != "gpt-4" {
+		t.Fatalf("basic fields missing in light json: %+v", parsed)
+	}
+	if _, ok := parsed["reqPayload"]; ok {
+		t.Errorf("expected reqPayload to be omitted, but found in JSON")
+	}
+	if _, ok := parsed["respPayload"]; ok {
+		t.Errorf("expected respPayload to be omitted, but found in JSON")
+	}
+	if _, ok := parsed["reqHeaders"]; ok {
+		t.Errorf("expected reqHeaders to be omitted, but found in JSON")
+	}
+	if _, ok := parsed["respHeaders"]; ok {
+		t.Errorf("expected respHeaders to be omitted, but found in JSON")
+	}
+}
+

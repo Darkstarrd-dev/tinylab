@@ -389,7 +389,7 @@ func (h *Handler) SweepStaleEntries(maxAge time.Duration) int {
 		} else if h.usage != nil {
 			h.usage.Add(e)
 		}
-		raw := MarshalEntryJSON(e)
+		raw := MarshalEntryJSONLight(e)
 		if raw != nil {
 			h.RequestUpdates.Broadcast(RequestEvent{
 				Type:   "request-done",

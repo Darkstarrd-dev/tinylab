@@ -49,7 +49,7 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 	// a freshly connected client immediately sees all currently-running requests.
 	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
 		for _, e := range h.d.ProxyHandler.EntryTracker.All() {
-			raw := proxy.MarshalEntryJSON(e)
+			raw := proxy.MarshalEntryJSONLight(e)
 			if raw != nil {
 				fmt.Fprintf(w, "data: {\"type\":\"request-start\",\"id\":%s,\"entry\":%s}\n\n",
 					json.RawMessage(mustJSON(e.ID)), raw)

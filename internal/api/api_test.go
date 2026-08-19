@@ -474,9 +474,154 @@ func TestUsage_QuotasIncludeInflightModel(t *testing.T) {
 		resp.Body.Close()
 		t.Fatal(err)
 	}
-	resp.Body.Close()
 	if len(body.Quotas) != 1 || body.Quotas[0].Provider != "Test" || body.Quotas[0].Model != "model-a" {
 		t.Fatalf("expected provisional quota bar for Test/model-a, got %+v", body.Quotas)
+	}
+}
+
+func TestGetUsageEntry(t *testing.T) {
+	srv, _, _, rt := setupTestServer(t)
+	defer srv.Close()
+
+	headers := make(http.Header)
+	headers.Set("X-Custom", "val")
+
+	// 1. Entry in main usage ring
+	rt.deps.usage.Add(usage.Entry{
+		ID:          "usage-entry-1",
+		Provider:    "Test",
+		Model:       "model-a",
+		Status:      "success",
+		LatencyMs:   120,
+		ReqPayload:  json.RawMessage(`{"prompt":"main ring"}`),
+		RespPayload: json.RawMessage(`{"reply":"ok"}`),
+		ReqHeaders:  headers,
+		RespHeaders: headers,
+	})
+
+	// 2. Entry in playground ring
+	rt.deps.pgUsage.Add(usage.Entry{
+		ID:          "pg-entry-1",
+		Provider:    "Test",
+		Model:       "model-a",
+		Status:      "success",
+		Source:      "playground",
+		ReqPayload:  json.RawMessage(`{"prompt":"pg ring"}`),
+		RespPayload: json.RawMessage(`{"reply":"pg ok"}`),
+	})
+
+	// 3. Entry in in-flight tracker
+	rt.deps.proxyHandler.EntryTracker.Register(usage.Entry{
+		ID:         "inflight-entry-1",
+		Provider:   "Test",
+		Model:      "model-a",
+		Status:     "processing",
+		ReqPayload: json.RawMessage(`{"prompt":"in flight"}`),
+	})
+
+	// Test GET /api/monitor/entry/usage-entry-1
+	resp := requestJSON(t, "GET", srv.URL+"/api/monitor/entry/usage-entry-1", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var entry1 usage.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entry1); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if entry1.ID != "usage-entry-1" || string(entry1.ReqPayload) != `{"prompt":"main ring"}` || string(entry1.RespPayload) != `{"reply":"ok"}` {
+		t.Fatalf("unexpected entry1 content: %+v", entry1)
+	}
+
+	// Test GET /api/monitor/entry/pg-entry-1
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/entry/pg-entry-1", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var entryPg usage.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entryPg); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if entryPg.ID != "pg-entry-1" || string(entryPg.ReqPayload) != `{"prompt":"pg ring"}` {
+		t.Fatalf("unexpected entryPg content: %+v", entryPg)
+	}
+
+	// Test GET /api/monitor/entry/inflight-entry-1
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/entry/inflight-entry-1", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var entryInf usage.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entryInf); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if entryInf.ID != "inflight-entry-1" || string(entryInf.ReqPayload) != `{"prompt":"in flight"}` {
+		t.Fatalf("unexpected entryInf content: %+v", entryInf)
+	}
+
+	// Test GET /api/monitor/entry/non-existent (404)
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/entry/non-existent", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-existent entry, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Test GET /api/monitor list strips heavy payload fields
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor?limit=10", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var listBody struct {
+		Total   int              `json:"total"`
+		Entries []map[string]any `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listBody); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(listBody.Entries) == 0 {
+		t.Fatal("expected entries in monitor list")
+	}
+	for _, e := range listBody.Entries {
+		if _, ok := e["reqPayload"]; ok {
+			t.Errorf("expected reqPayload to be stripped from list response for entry %v", e["id"])
+		}
+		if _, ok := e["respPayload"]; ok {
+			t.Errorf("expected respPayload to be stripped from list response for entry %v", e["id"])
+		}
+		if _, ok := e["reqHeaders"]; ok {
+			t.Errorf("expected reqHeaders to be stripped from list response for entry %v", e["id"])
+		}
+		if _, ok := e["respHeaders"]; ok {
+			t.Errorf("expected respHeaders to be stripped from list response for entry %v", e["id"])
+		}
+	}
+
+	// Test GET /api/monitor/playground list strips heavy payload fields
+	resp = requestJSON(t, "GET", srv.URL+"/api/monitor/playground?limit=10", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var pgListBody struct {
+		Total   int              `json:"total"`
+		Entries []map[string]any `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pgListBody); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(pgListBody.Entries) == 0 {
+		t.Fatal("expected entries in playground monitor list")
+	}
+	for _, e := range pgListBody.Entries {
+		if _, ok := e["reqPayload"]; ok {
+			t.Errorf("expected reqPayload to be stripped from pg list response for entry %v", e["id"])
+		}
+		if _, ok := e["respPayload"]; ok {
+			t.Errorf("expected respPayload to be stripped from pg list response for entry %v", e["id"])
+		}
 	}
 }
 

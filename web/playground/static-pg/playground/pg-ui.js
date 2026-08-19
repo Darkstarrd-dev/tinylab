@@ -1401,9 +1401,15 @@ function pgRenderReqLeftContent(data) {
 
 var pgReqLeftEntries = [];
 
-function pgShowReqDetail(idx) {
+async function pgShowReqDetail(idx) {
   var e = pgReqLeftEntries[idx];
   if (!e) return;
+  if (e.id) {
+    try {
+      var full = await pgApiGet('/monitor/entry/' + encodeURIComponent(e.id));
+      if (full) e = full;
+    } catch(ex) {}
+  }
   var overlay = document.getElementById('info-modal-overlay');
   if (!overlay) return;
   var titleEl = document.getElementById('info-modal-title');

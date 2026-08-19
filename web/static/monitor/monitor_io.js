@@ -185,30 +185,54 @@ function handleRequestDone(id, status, entry) {
   if (!hasProcessingEntries()) stopProcessingTimer();
   if (currentInfoModalRequestId === id) {
     currentInfoModalStreamingDone = true;
-    if (infoHasValue(completeEntry.respPayload)) {
-      updateStreamingModalResponse(completeEntry);
-    } else if (traceEnabled) {
-      // trace mode: ring entry has no payload; fetch final response from trace file.
-      // Remove streaming sections first so trace content replaces them.
-      var bodyEl = document.getElementById('info-modal-body');
-      if (bodyEl) {
-        var sr = bodyEl.querySelector('#streaming-reasoning-section');
-        if (sr) sr.remove();
-        var sa = bodyEl.querySelector('#streaming-assistant-section');
-        if (sa) sa.remove();
-        var su = bodyEl.querySelector('#streaming-usage-section');
-        if (su) su.remove();
-        var srb = bodyEl.querySelector('#streaming-response-body-section');
-        if (srb) srb.remove();
-        // Add the same collapsible monitor trace placeholder used by the modal renderer.
-        if (!bodyEl.querySelector('#trace-loading-section')) {
-          var ph = document.createElement('div');
-          ph.innerHTML = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoLoadingTrace'), false, false);
-          bodyEl.appendChild(ph.firstElementChild);
+    // SSE no longer carries payload; fetch the full entry for the modal.
+    apiGet('/monitor/entry/' + encodeURIComponent(id)).then(function(fullEntry) {
+      if (currentInfoModalRequestId !== id) return;
+      if (fullEntry && infoHasValue(fullEntry.respPayload)) {
+        updateStreamingModalResponse(fullEntry);
+      } else if (traceEnabled) {
+        // trace mode: ring entry has no payload; fetch final response from trace file.
+        // Remove streaming sections first so trace content replaces them.
+        var bodyEl = document.getElementById('info-modal-body');
+        if (bodyEl) {
+          var sr = bodyEl.querySelector('#streaming-reasoning-section');
+          if (sr) sr.remove();
+          var sa = bodyEl.querySelector('#streaming-assistant-section');
+          if (sa) sa.remove();
+          var su = bodyEl.querySelector('#streaming-usage-section');
+          if (su) su.remove();
+          var srb = bodyEl.querySelector('#streaming-response-body-section');
+          if (srb) srb.remove();
+          // Add the same collapsible monitor trace placeholder used by the modal renderer.
+          if (!bodyEl.querySelector('#trace-loading-section')) {
+            var ph = document.createElement('div');
+            ph.innerHTML = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoLoadingTrace'), false, false);
+            bodyEl.appendChild(ph.firstElementChild);
+          }
         }
+        loadTraceDetails(completeEntry);
       }
-      loadTraceDetails(completeEntry);
-    }
+    }).catch(function() {
+      if (traceEnabled && currentInfoModalRequestId === id) {
+        var bodyEl = document.getElementById('info-modal-body');
+        if (bodyEl) {
+          var sr = bodyEl.querySelector('#streaming-reasoning-section');
+          if (sr) sr.remove();
+          var sa = bodyEl.querySelector('#streaming-assistant-section');
+          if (sa) sa.remove();
+          var su = bodyEl.querySelector('#streaming-usage-section');
+          if (su) su.remove();
+          var srb = bodyEl.querySelector('#streaming-response-body-section');
+          if (srb) srb.remove();
+          if (!bodyEl.querySelector('#trace-loading-section')) {
+            var ph = document.createElement('div');
+            ph.innerHTML = monitorRenderTextSection(t('infoTraceDetail'), 'trace-loading-section', 'trace-loading-text', t('infoLoadingTrace'), false, false);
+            bodyEl.appendChild(ph.firstElementChild);
+          }
+        }
+        loadTraceDetails(completeEntry);
+      }
+    });
   }
 }
 

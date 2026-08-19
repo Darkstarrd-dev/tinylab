@@ -30,6 +30,7 @@ func NewHandler(d *apibase.Deps) *Handler {
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/monitor", h.getUsage)
 	r.Get("/monitor/playground", h.getPlaygroundUsage)
+	r.Get("/monitor/entry/{id}", h.getUsageEntry)
 	r.Get("/monitor/summary", h.getUsageSummary)
 	r.Get("/monitor/quotas", h.getQuotas)
 	r.Get("/monitor/model-keys", h.getModelKeys)
@@ -90,7 +91,7 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 			e.Error = "timeout"
 			e.LatencyMs = time.Since(e.Timestamp).Milliseconds()
 			h.d.Usage.Add(e)
-			raw := proxy.MarshalEntryJSON(e)
+			raw := proxy.MarshalEntryJSONLight(e)
 			if raw != nil {
 				h.d.ProxyHandler.RequestUpdates.Broadcast(proxy.RequestEvent{
 					Type:   "request-done",
@@ -131,11 +132,23 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 	combined = append(combined, ringEntries...)
 	combined = append(combined, inflightEntries...)
 
+	// Strip heavy payload fields for the list response to prevent OOM
+	// in the browser. Individual entries can be fetched via
+	// GET /monitor/entry/{id} when the user opens the detail modal.
+	stripped := make([]internalusage.Entry, len(combined[offset:end]))
+	for i, e := range combined[offset:end] {
+		stripped[i] = e
+		stripped[i].ReqPayload = nil
+		stripped[i].RespPayload = nil
+		stripped[i].ReqHeaders = nil
+		stripped[i].RespHeaders = nil
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]any{
 		"total":   total,
-		"entries": combined[offset:end],
+		"entries": stripped,
 	})
 }
 
@@ -172,12 +185,64 @@ func (h *Handler) getPlaygroundUsage(w http.ResponseWriter, r *http.Request) {
 	combined = append(combined, ringEntries...)
 	combined = append(combined, inflightEntries...)
 
+	// Strip heavy payload fields for the list response to prevent OOM.
+	stripped := make([]internalusage.Entry, len(combined[offset:end]))
+	for i, e := range combined[offset:end] {
+		stripped[i] = e
+		stripped[i].ReqPayload = nil
+		stripped[i].RespPayload = nil
+		stripped[i].ReqHeaders = nil
+		stripped[i].RespHeaders = nil
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]any{
 		"total":   total,
-		"entries": combined[offset:end],
+		"entries": stripped,
 	})
+}
+
+// getUsageEntry returns a single usage entry by ID with full payload,
+// sourced from the ring buffer or the in-flight entry tracker.
+func (h *Handler) getUsageEntry(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	// Check main ring buffer first
+	if h.d.Usage != nil {
+		if e, ok := h.d.Usage.ByID(id); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			json.NewEncoder(w).Encode(e)
+			return
+		}
+	}
+
+	// Check playground ring buffer
+	if h.d.PgUsage != nil {
+		if e, ok := h.d.PgUsage.ByID(id); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			json.NewEncoder(w).Encode(e)
+			return
+		}
+	}
+
+	// Check in-flight tracker (processing entries)
+	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
+		if e, ok := h.d.ProxyHandler.EntryTracker.Get(id); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			json.NewEncoder(w).Encode(e)
+			return
+		}
+	}
+
+	apibase.WriteAPIError(w, http.StatusNotFound, "entry not found")
 }
 
 func (h *Handler) getUsageSummary(w http.ResponseWriter, r *http.Request) {

@@ -119,7 +119,7 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		h.usage.Add(entry)
 	}
 
-	raw := MarshalEntryJSON(entry)
+	raw := MarshalEntryJSONLight(entry)
 	if raw != nil {
 		h.RequestUpdates.Broadcast(RequestEvent{
 			Type:   "request-done",

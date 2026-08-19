@@ -120,6 +120,21 @@ func MarshalEntryJSON(e usage.Entry) json.RawMessage {
 	return b
 }
 
+// MarshalEntryJSONLight returns a lightweight JSON representation of an entry,
+// omitting ReqPayload, RespPayload, ReqHeaders, and RespHeaders to reduce
+// transfer size for list/SSE endpoints.
+func MarshalEntryJSONLight(e usage.Entry) json.RawMessage {
+	e.ReqPayload = nil
+	e.RespPayload = nil
+	e.ReqHeaders = nil
+	e.RespHeaders = nil
+	b, err := json.Marshal(e)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
 // SweepStale removes and returns entries whose Timestamp is older than maxAge.
 // The caller is responsible for writing final error records for each returned
 // entry and broadcasting request-done events. This is a safety net for

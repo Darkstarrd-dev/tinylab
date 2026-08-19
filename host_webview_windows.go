@@ -363,6 +363,7 @@ var (
 	procSetWindowPos       = user32Dll.NewProc("SetWindowPos")
 	procSetWindowRgn       = user32Dll.NewProc("SetWindowRgn")
 	procCreateRoundRectRgn = gdi32Dll.NewProc("CreateRoundRectRgn")
+	procSetLayeredWindowAttributes = user32Dll.NewProc("SetLayeredWindowAttributes")
 	user32Dll              = windows.NewLazySystemDLL("user32.dll")
 	gdi32Dll               = windows.NewLazySystemDLL("gdi32.dll")
 )
@@ -378,6 +379,10 @@ const (
 	swpNoMove               = 0x0002
 	swpNoSize               = 0x0001
 	swpNoZOrder             = 0x0004
+	gwlExstyle              = ^uintptr(20) // GWL_EXSTYLE = -20
+	wsExLayered             = 0x00080000
+	lwaColorkey             = 0x00000001
+	petColorKey             = 0x00FF00FF // RGB(255,0,255) magenta — keyed out to transparent on the pet page
 )
 
 // openPetWindow creates a lightweight, borderless desktop pet window (L3).
@@ -410,6 +415,15 @@ func openPetWindow(hctx *app.HostContext) {
 		style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlStyle)
 		newStyle := (uint32(style) &^ (wsCaption | wsThickFrame | wsSysMenu)) | wsPopup
 		procSetWindowLongPtrW.Call(hwnd, gwlStyle, uintptr(newStyle))
+		// Make the window layered + color-key transparent: the pet page paints
+		// its background as the magenta color key, which SetLayeredWindowAttributes
+		// keys out → only the sprite/bubble (non-key pixels) show. This is the
+		// documented MVP for the L3 desktop pet (item 5) — fixes the "opaque
+		// box = no effect" appearance. Per-pixel alpha anti-aliasing is a later
+		// refinement.
+		exStyle, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlExstyle)
+		procSetWindowLongPtrW.Call(hwnd, gwlExstyle, exStyle|uintptr(wsExLayered))
+		procSetLayeredWindowAttributes.Call(hwnd, uintptr(petColorKey), 0, uintptr(lwaColorkey))
 		// Set Topmost (HWND_TOPMOST = -1 = ^uintptr(0))
 		procSetWindowPos.Call(
 			hwnd,

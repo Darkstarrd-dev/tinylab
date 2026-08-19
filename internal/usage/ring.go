@@ -93,6 +93,23 @@ func (rb *RingBuffer) All() []Entry {
 	return rb.allLocked()
 }
 
+// ByID returns the entry with the given ID, or zero value and false if not found.
+// The ring is searched in reverse chronological order (newest first).
+func (rb *RingBuffer) ByID(id string) (Entry, bool) {
+	if id == "" {
+		return Entry{}, false
+	}
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	for i := 0; i < rb.size; i++ {
+		idx := (rb.head - 1 - i + rb.max) % rb.max
+		if rb.entries[idx].ID == id {
+			return rb.entries[idx], true
+		}
+	}
+	return Entry{}, false
+}
+
 // Summary returns cumulative aggregate statistics since process start.
 // The numbers are independent of the ring buffer capacity.
 func (rb *RingBuffer) Summary() CumulativeSummary {
