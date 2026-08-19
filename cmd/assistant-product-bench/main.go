@@ -117,8 +117,14 @@ func main() {
 	}
 	a, drift := contract.BuildAssistant(routeSet, true /* model routing wired */)
 
-	// --- Dimension 4: reply correctness (behavioral) ---
-	correctness, correctRows := scoreCorrectness(a, routeSet)
+// --- Dimension 4: reply correctness (behavioral Classify + navigation wiring) ---
+// A correct reply is correct tool classification AND a working "jump to page"
+// action — navigateToRoute must call the app router (navigateTo), and
+// resolveNavigationPage must return valid app page ids (not no-op hashes).
+behavioural, correctRows := scoreCorrectness(a, routeSet)
+navWired, navRows := scoreNavigationWired()
+correctness := (behavioural*float64(len(correctnessScenarios)) + navWired*float64(len(navRows))) /
+	float64(len(correctnessScenarios)+len(navRows))
 
 	// --- Dimensions 1,2,3,5: structural source scans ---
 	settings, settingsRows := scoreSettingsCoverage()
@@ -164,6 +170,7 @@ func main() {
 	printRows("dock", dockRows)
 	printRows("llm", llmRows)
 	printRows("pet", petRows)
+	printRows("nav", navRows)
 
 	fmt.Printf("\n# product_readiness = %.2f%% (settings=%.1f%% dock=%.1f%% llm=%.1f%% correctness=%.1f%% pet=%.1f%%); contract_drift=%d\n",
 		productReadiness, settings, dock, llm, correctness, pet, len(drift))
@@ -224,6 +231,22 @@ func scoreCorrectness(a *assistant.Assistant, routeSet map[string]bool) (float64
 		rows = append(rows, correctnessRow{sc.id, wiredList, reqOK, forbidOK, verdict})
 	}
 	return 100.0 * float64(passed) / float64(len(correctnessScenarios)), rows
+}
+
+// scoreNavigationWired checks the "jump to page" half of reply correctness
+// (item 4: "跳转页面是无效的"). sprite.js navigateToRoute must call the app
+// router (navigateTo), not set location.hash (the app has no hashchange
+// listener → a no-op). And resolveNavigationPage must return valid app page
+// ids (e.g. "download", "endpoint"), not no-op hashes ("#downloads"/"#settings"
+// — the nav data-page is "download", the Settings page id is "endpoint").
+func scoreNavigationWired() (float64, []feat) {
+	sprite := readFile("web/static/sprite.js")
+	handler := readFile("internal/api/assistant/handler.go")
+	feats := []feat{
+		{name: "navigateToRoute calls app router (navigateTo)", ok: containsCI(sprite, "navigateTo("), note: "sprite.js: navigateToRoute calls navigateTo(...)"},
+		{name: "resolveNavigationPage returns valid app page ids (not hashes)", ok: contains(handler, `return "download"`) && contains(handler, `return "endpoint"`) && !contains(handler, `return "#`), note: "handler.go: return download/endpoint, no return #..."},
+	}
+	return dimensionScore(feats), feats
 }
 
 // --- structural scan helpers ------------------------------------------------

@@ -239,27 +239,30 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveNavigationPage returns SPA hash route (e.g. "#editor") if the route represents a UI page.
+// resolveNavigationPage returns the app SPA page id (e.g. "download", "endpoint")
+// for a route representing a UI page, so sprite.js navigateToRoute can call the
+// app router navigateTo(id) directly. Ids match app.js data-page / renderPage
+// switch (Settings page is "endpoint", downloads tool is "download").
 func resolveNavigationPage(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/api/editor"):
-		return "#editor"
+		return "editor"
 	case strings.HasPrefix(path, "/api/providers"):
-		return "#providers"
+		return "providers"
 	case strings.HasPrefix(path, "/api/combos"):
-		return "#combos"
+		return "combos"
 	case strings.HasPrefix(path, "/api/monitor"):
-		return "#monitor"
+		return "monitor"
 	case strings.HasPrefix(path, "/api/downloads"):
-		return "#downloads"
+		return "download"
 	case strings.HasPrefix(path, "/api/gallery"):
-		return "#gallery"
+		return "gallery"
 	case strings.HasPrefix(path, "/api/playground"):
-		return "#playground"
+		return "playground"
 	case strings.HasPrefix(path, "/api/settings"):
-		return "#settings"
+		return "endpoint"
 	case strings.HasPrefix(path, "/api/text-review"):
-		return "#editor"
+		return "review"
 	default:
 		return ""
 	}

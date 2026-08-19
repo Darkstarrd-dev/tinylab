@@ -379,8 +379,13 @@
 
   function navigateToRoute(route) {
     if (!route) return;
-    window.location.hash = route;
     closeSpriteModal();
+    // Call the app SPA router (navigateTo is a global from app.js). The app has
+    // no hashchange listener, so setting location.hash was a no-op (item 4);
+    // route is now a valid app page id (e.g. "download"/"endpoint").
+    if (typeof navigateTo === 'function') {
+      navigateTo(route);
+    }
     if (typeof showToast === 'function') {
       showToast('已跳转到 ' + route, 'info');
     }
