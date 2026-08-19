@@ -51,7 +51,23 @@ type Handler struct {
 	ast      *assistant.Assistant
 	events   *EventBroadcaster
 	todos    *TodoStore
+	llm      intentClassifier // injectable for tests; nil → config-built real classifier
 	mu       sync.RWMutex
+}
+
+// intentClassifier abstracts the LLM-assisted intent→tools classifier so the
+// dispatch orchestration (LLM-first → keyword fallback) can be tested with a
+// mock without a real upstream. *assistant.LLMClassifier satisfies it.
+type intentClassifier interface {
+	Classify(ctx context.Context, intent string) ([]string, error)
+}
+
+// SetLLMClassifier injects an LLM classifier for testing. Pass nil to revert
+// to the config-built real classifier (used in production).
+func (h *Handler) SetLLMClassifier(c intentClassifier) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.llm = c
 }
 
 // NewHandler constructs an assistant Handler.
@@ -153,7 +169,7 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
 	if req.Tool != "" {
 		toolNames = []string{req.Tool}
 	} else if req.Intent != "" {
-		toolNames = ast.Classify(req.Intent)
+		toolNames = h.classifyIntent(r.Context(), ast, req.Intent)
 	}
 
 	var dispatched []DispatchedTool
@@ -223,30 +239,112 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveNavigationPage returns SPA hash route (e.g. "#editor") if the route represents a UI page.
+// resolveNavigationPage returns the app SPA page id (e.g. "download", "endpoint")
+// for a route representing a UI page, so sprite.js navigateToRoute can call the
+// app router navigateTo(id) directly. Ids match app.js data-page / renderPage
+// switch (Settings page is "endpoint", downloads tool is "download").
 func resolveNavigationPage(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/api/editor"):
-		return "#editor"
+		return "editor"
 	case strings.HasPrefix(path, "/api/providers"):
-		return "#providers"
+		return "providers"
 	case strings.HasPrefix(path, "/api/combos"):
-		return "#combos"
+		return "combos"
 	case strings.HasPrefix(path, "/api/monitor"):
-		return "#monitor"
+		return "monitor"
 	case strings.HasPrefix(path, "/api/downloads"):
-		return "#downloads"
+		return "download"
 	case strings.HasPrefix(path, "/api/gallery"):
-		return "#gallery"
+		return "gallery"
 	case strings.HasPrefix(path, "/api/playground"):
-		return "#playground"
+		return "playground"
 	case strings.HasPrefix(path, "/api/settings"):
-		return "#settings"
+		return "endpoint"
 	case strings.HasPrefix(path, "/api/text-review"):
-		return "#editor"
+		return "review"
 	default:
 		return ""
 	}
+}
+
+// classifyIntent picks tools for an intent: LLM-assisted classification
+// (item 3) when a model is configured, falling back to the keyword brain
+// (Assistant.Classify) when no model is set, the upstream is unavailable,
+// or the LLM returns no resolvable tools. This replaces the functional
+// instant keyword-only reply with a model-assisted path while keeping the
+// keyword classifier as the always-available fallback.
+func (h *Handler) classifyIntent(ctx context.Context, ast *assistant.Assistant, intent string) []string {
+	h.mu.RLock()
+	llm := h.llm // injectable (tests); nil in production → config-built real classifier below
+	h.mu.RUnlock()
+	if llm == nil {
+		llm = h.llmClassifier(ast)
+	}
+	if llm != nil {
+		if names, err := llm.Classify(ctx, intent); err == nil {
+			var wired []string
+			seen := map[string]bool{}
+			for _, n := range names {
+				if _, ok := ast.Resolve(n); ok && !seen[n] {
+					seen[n] = true
+					wired = append(wired, n)
+				}
+			}
+			if len(wired) > 0 {
+				return wired
+			}
+		}
+	}
+	return ast.Classify(intent)
+}
+
+// llmClassifier builds an LLMClassifier from the current config + contract,
+// offering only tools that resolve to a real registered route (wired via
+// BuildAssistant). Returns nil when no assistant model is configured (the
+// caller then uses the keyword fallback).
+func (h *Handler) llmClassifier(ast *assistant.Assistant) *assistant.LLMClassifier {
+	if h.d == nil || ast == nil {
+		return nil
+	}
+	cfg := h.d.Reg.Config()
+	model := cfg.Assistant.Model
+	if model == "" {
+		return nil
+	}
+	port := cfg.Port
+	if port <= 0 {
+		port = 20128
+	}
+	h.mu.RLock()
+	c := h.contract
+	h.mu.RUnlock()
+	tools := h.llmTools(ast, c)
+	if len(tools) == 0 {
+		return nil
+	}
+	return &assistant.LLMClassifier{
+		Addr:  fmt.Sprintf("http://127.0.0.1:%d", port),
+		Model: model,
+		Tools: tools,
+	}
+}
+
+// llmTools builds the LLM-offered tool list from the contract, restricted to
+// tools that resolve to a real registered route.
+func (h *Handler) llmTools(ast *assistant.Assistant, c *assistant.Contract) []assistant.LLMTool {
+	if c == nil || ast == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var list []assistant.LLMTool
+	for _, r := range c.Rules {
+		if _, ok := ast.Resolve(r.Tool); ok && !seen[r.Tool] {
+			seen[r.Tool] = true
+			list = append(list, assistant.LLMTool{Name: r.Tool, Desc: r.Desc})
+		}
+	}
+	return list
 }
 
 // executeSubRequest performs an in-process HTTP call to the project's own API.

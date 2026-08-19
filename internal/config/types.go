@@ -362,6 +362,18 @@ type ArchiveConfig struct {
 	TempDir      string `yaml:"tempDir,omitempty" json:"tempDir,omitempty"`
 }
 
+// AssistantConfig configures the 小精灵 (sprite) assistant. Model is the
+// model id (provider-prefix/model or combo name) used for LLM-assisted intent
+// classification — the smart-assistant reply path that replaces the keyword
+// brain when a routable model is available (empty = keyword fallback only).
+// SpritesheetPath/SpritesheetFps configure the in-app and desktop character
+// animation asset.
+type AssistantConfig struct {
+	Model           string `yaml:"model,omitempty" json:"model,omitempty"`
+	SpritesheetPath string `yaml:"spritesheetPath,omitempty" json:"spritesheetPath,omitempty"`
+	SpritesheetFps  int    `yaml:"spritesheetFps,omitempty" json:"spritesheetFps,omitempty"`
+}
+
 // Config is the top-level configuration structure.
 type Config struct {
 	Port               int              `yaml:"port" json:"port"`
@@ -386,4 +398,5 @@ type Config struct {
 	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
 	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`
+	Assistant         AssistantConfig  `yaml:"assistant,omitempty" json:"assistant,omitempty"`
 }

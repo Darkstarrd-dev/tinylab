@@ -2,7 +2,9 @@ package assistant
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -196,5 +198,55 @@ func TestEventBroadcaster(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for broadcast event")
+	}
+}
+
+// mockLLM is a test double for the intentClassifier interface, returning a
+// fixed tool list or error to exercise the classifyIntent orchestration
+// (LLM-first → filter-by-Resolve → keyword fallback) without a real upstream.
+type mockLLM struct {
+	tools []string
+	err   error
+}
+
+func (m mockLLM) Classify(_ context.Context, _ string) ([]string, error) {
+	return m.tools, m.err
+}
+
+// TestClassifyIntent_LLMOrchestration behaviorally verifies the smart-assistant
+// dispatch path (item 3): the bench measures llm_dispatch_wired structurally,
+// but the orchestration (use LLM tools when resolvable, else fall back to the
+// keyword brain) is proven here with an injected mock — no network.
+func TestClassifyIntent_LLMOrchestration(t *testing.T) {
+	h, _ := setupTestHandler(t)
+	ast := h.Assistant()
+	ctx := context.Background()
+
+	// Case 1: LLM returns a resolvable tool → it is used (not the keyword path).
+	h.SetLLMClassifier(mockLLM{tools: []string{"image.generate"}})
+	got := h.classifyIntent(ctx, ast, "随便说点什么")
+	if len(got) != 1 || got[0] != "image.generate" {
+		t.Fatalf("case1: expected [image.generate] from LLM, got %v", got)
+	}
+
+	// Case 2: LLM errors → keyword fallback.
+	h.SetLLMClassifier(mockLLM{err: errors.New("upstream unavailable")})
+	got = h.classifyIntent(ctx, ast, "生成一张猫的图片")
+	if len(got) == 0 || got[0] != "image.generate" {
+		t.Fatalf("case2: expected keyword fallback to image.generate, got %v", got)
+	}
+
+	// Case 3: LLM returns an unresolvable tool → filtered out → keyword fallback.
+	h.SetLLMClassifier(mockLLM{tools: []string{"nonexistent.tool"}})
+	got = h.classifyIntent(ctx, ast, "清理过期的日志")
+	if len(got) == 0 || got[0] != "trace.clear" {
+		t.Fatalf("case3: expected keyword fallback to trace.clear, got %v", got)
+	}
+
+	// Case 4: no injected LLM and nil deps → config-built classifier is nil → keyword.
+	h.SetLLMClassifier(nil)
+	got = h.classifyIntent(ctx, ast, "写一篇文档并保存")
+	if len(got) == 0 || got[0] != "editor.save" {
+		t.Fatalf("case4: expected keyword editor.save, got %v", got)
 	}
 }

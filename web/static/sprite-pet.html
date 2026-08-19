@@ -25,8 +25,8 @@
     align-items: center;
     justify-content: center;
     position: relative;
-    background: var(--modal-bg, #14121e);
-    border: 1px solid var(--glass-border, rgba(255,255,255,0.12));
+    background: #FF00FF; /* color-key (magenta): keyed out to transparent by the host's SetLayeredWindowAttributes so only the sprite/bubble show */
+    border: none;
     border-radius: 28px;
     padding: 10px;
   }
@@ -166,6 +166,7 @@
   </div>
 
   <div class="pet-avatar" id="pet-avatar" onclick="toggleBubble(event)">
+    <canvas id="pet-sprite" width="70" height="70" style="display:none;image-rendering:pixelated;"></canvas>
     <div class="pet-face">
       <div class="pet-eye left"></div>
       <div class="pet-eye right"></div>
@@ -257,6 +258,43 @@
       window.close();
     }
   }
+
+  // Spritesheet renderer (item 1 integration): if the user configured a
+  // spritesheet path + fps in Assistant settings, load it onto the avatar
+  // canvas and step frames via drawImage; otherwise the CSS face remains.
+  (function initPetSprite() {
+    var canvas = document.getElementById('pet-sprite');
+    if (!canvas) return;
+    fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
+      var a = (s && s.assistant) || {};
+      var path = a.spritesheetPath || '';
+      var fps = a.spritesheetFps || 8;
+      if (!path) return;
+      var img = new Image();
+      img.onload = function() {
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        var frameW = img.naturalHeight || 70; // assume square frames (height = frame size)
+        var frameH = img.naturalHeight || 70;
+        var cols = Math.max(1, Math.floor(img.naturalWidth / frameW));
+        var frames = Math.max(1, Math.floor(img.naturalWidth / frameW));
+        var idx = 0;
+        canvas.style.display = 'block';
+        var face = document.querySelector('.pet-face');
+        if (face) face.style.display = 'none';
+        var interval = Math.max(1, Math.round(1000 / fps));
+        setInterval(function() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          var sx = (idx % cols) * frameW;
+          var sy = Math.floor(idx / cols) * frameH;
+          ctx.drawImage(img, sx, sy, frameW, frameH, 0, 0, canvas.width, canvas.height);
+          idx = (idx + 1) % frames;
+        }, interval);
+      };
+      img.onerror = function() { /* keep CSS face fallback */ };
+      img.src = path;
+    }).catch(function() { /* no settings / fetch fail → CSS face */ });
+  })();
 
   // Subscribe to Events SSE
   try {
