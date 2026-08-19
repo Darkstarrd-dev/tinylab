@@ -51,7 +51,23 @@ type Handler struct {
 	ast      *assistant.Assistant
 	events   *EventBroadcaster
 	todos    *TodoStore
+	llm      intentClassifier // injectable for tests; nil → config-built real classifier
 	mu       sync.RWMutex
+}
+
+// intentClassifier abstracts the LLM-assisted intent→tools classifier so the
+// dispatch orchestration (LLM-first → keyword fallback) can be tested with a
+// mock without a real upstream. *assistant.LLMClassifier satisfies it.
+type intentClassifier interface {
+	Classify(ctx context.Context, intent string) ([]string, error)
+}
+
+// SetLLMClassifier injects an LLM classifier for testing. Pass nil to revert
+// to the config-built real classifier (used in production).
+func (h *Handler) SetLLMClassifier(c intentClassifier) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.llm = c
 }
 
 // NewHandler constructs an assistant Handler.
@@ -256,7 +272,13 @@ func resolveNavigationPage(path string) string {
 // instant keyword-only reply with a model-assisted path while keeping the
 // keyword classifier as the always-available fallback.
 func (h *Handler) classifyIntent(ctx context.Context, ast *assistant.Assistant, intent string) []string {
-	if llm := h.llmClassifier(ast); llm != nil {
+	h.mu.RLock()
+	llm := h.llm // injectable (tests); nil in production → config-built real classifier below
+	h.mu.RUnlock()
+	if llm == nil {
+		llm = h.llmClassifier(ast)
+	}
+	if llm != nil {
 		if names, err := llm.Classify(ctx, intent); err == nil {
 			var wired []string
 			seen := map[string]bool{}
