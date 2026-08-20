@@ -286,6 +286,9 @@ async function saveProxyModal() {
   }
   try {
     await apiPatch('/settings', { proxy: { enabled: enabled, host: host, port: port } });
+    if (window.__settings) {
+      window.__settings.proxy = { enabled: enabled, host: host, port: port };
+    }
     toast(t('proxySaved'), 'success');
     closeModalOverlay();
   } catch (e) {
@@ -300,6 +303,9 @@ async function saveAssistantModal() {
   if (isNaN(fps) || fps < 1) fps = 8;
   try {
     await apiPatch('/settings', { assistant: { model: model, spritesheetPath: spritesheetPath, spritesheetFps: fps } });
+    if (window.__settings) {
+      window.__settings.assistant = { model: model, spritesheetPath: spritesheetPath, spritesheetFps: fps };
+    }
     toast(t('assistantSaved'), 'success');
     closeModalOverlay();
   } catch (e) {
@@ -317,6 +323,9 @@ async function saveRotationModal() {
   };
   try {
     await apiPatch('/settings', { rotation: rotation });
+    if (window.__settings) {
+      window.__settings.rotation = Object.assign({}, window.__settings.rotation || {}, rotation);
+    }
     toast(t('rotationSaved'), 'success');
     closeModalOverlay();
   } catch (e) {
@@ -333,6 +342,9 @@ async function saveServerTimeoutModal() {
   };
   try {
     var resp = await apiPatch('/settings', { server: server });
+    if (window.__settings) {
+      window.__settings.server = Object.assign({}, window.__settings.server || {}, server);
+    }
     closeModalOverlay();
     if (resp.restart) {
       showRestarting(resp.port);

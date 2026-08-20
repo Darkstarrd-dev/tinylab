@@ -194,6 +194,7 @@ function renderComboListInline(combos) {
 async function toggleDebugMode(enabled) {
   try {
     await apiPatch('/settings', { debugMode: enabled });
+    if (window.__settings) window.__settings.debugMode = enabled;
     toast(enabled ? t('debugModeOn') : t('debugModeOff'), 'success');
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
@@ -201,10 +202,10 @@ async function toggleDebugMode(enabled) {
     if (toggle) toggle.checked = !enabled;
   }
 }
-
 async function toggleQuickSlotOnly(enabled) {
   try {
     await apiPatch('/settings', { quickSlotOnly: enabled });
+    if (window.__settings) window.__settings.quickSlotOnly = enabled;
     toast(enabled ? t('quickSlotOnlyOn') : t('quickSlotOnlyOff'), 'success');
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
@@ -231,6 +232,7 @@ async function togglePasswordProtection(enabled) {
   }
   try {
     await apiPatch('/settings', { security: { passwordEnabled: false } });
+    if (window.__settings && window.__settings.security) window.__settings.security.passwordEnabled = false;
     toast(t('passwordDisabled'), 'success');
   } catch (e) {
     toast(t('failed', [e.message]), 'error');

@@ -35,6 +35,10 @@ function cancelTraceEnable() {
 async function doToggleTrace(enabled) {
   try {
     await apiPatch('/settings', { trace: { enabled: enabled } });
+    if (window.__settings) {
+      if (!window.__settings.trace) window.__settings.trace = {};
+      window.__settings.trace.enabled = enabled;
+    }
     closeModalOverlay();
     toast(enabled ? t('requestTracingOn') : t('requestTracingOff'), 'success');
   } catch (e) {
