@@ -131,7 +131,10 @@ func resolveModel(d *apibase.Deps, node config.TextReviewNode) (string, bool) {
 }
 
 // buildRequestBody marshals the OpenAI-format streaming chat request.
-func buildRequestBody(model, systemPrompt, content string) ([]byte, error) {
+// When reasoning is true, include reasoning_effort/enable_thinking to activate
+// the model's thinking capability. Otherwise leave reasoning out (some models
+// fail when reasoning is enabled).
+func buildRequestBody(model, systemPrompt, content string, reasoning bool) ([]byte, error) {
 	body := map[string]any{
 		"model": model,
 		"messages": []map[string]string{
@@ -139,6 +142,10 @@ func buildRequestBody(model, systemPrompt, content string) ([]byte, error) {
 			{"role": "user", "content": content},
 		},
 		"stream": true,
+	}
+	if reasoning {
+		body["reasoning_effort"] = "medium"
+		body["enable_thinking"] = true
 	}
 	return json.Marshal(body)
 }
@@ -166,7 +173,7 @@ func buildBatchContent(batch []BatchChapter) string {
 
 // buildBatchRequestBody marshals the OpenAI-format streaming chat request for
 // a batch of chapters merged into one user message.
-func buildBatchRequestBody(model, systemPrompt string, batch []BatchChapter) ([]byte, error) {
+func buildBatchRequestBody(model, systemPrompt string, batch []BatchChapter, reasoning bool) ([]byte, error) {
 	body := map[string]any{
 		"model": model,
 		"messages": []map[string]string{
@@ -174,6 +181,10 @@ func buildBatchRequestBody(model, systemPrompt string, batch []BatchChapter) ([]
 			{"role": "user", "content": buildBatchContent(batch)},
 		},
 		"stream": true,
+	}
+	if reasoning {
+		body["reasoning_effort"] = "medium"
+		body["enable_thinking"] = true
 	}
 	return json.Marshal(body)
 }
@@ -192,11 +203,10 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 	if !ok {
 		return CleanResult{ErrMsg: "provider not found for node " + node.ID}
 	}
-	bodyBytes, err := buildRequestBody(model, systemPrompt, content)
+	bodyBytes, err := buildRequestBody(model, systemPrompt, content, node.Reasoning)
 	if err != nil {
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
-
 	// Bound each upstream request: 300s comfortably covers long reasoning models
 	// (thinking phase can take 60s~120s+ before streaming content).
 	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
@@ -247,11 +257,10 @@ func (g defaultProxyCaller) callBatch(ctx context.Context, node config.TextRevie
 	if !ok {
 		return CleanResult{ErrMsg: "provider not found for node " + node.ID}
 	}
-	bodyBytes, err := buildBatchRequestBody(model, systemPrompt, batch)
+	bodyBytes, err := buildBatchRequestBody(model, systemPrompt, batch, node.Reasoning)
 	if err != nil {
 		return CleanResult{ErrMsg: "marshal request: " + err.Error()}
 	}
-
 	// Bound each upstream request: 300s for batch processing with reasoning.
 	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()

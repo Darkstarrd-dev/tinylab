@@ -302,8 +302,12 @@ type TextReviewNode struct {
 	// LLM request (multi-chapter batching). 0 = no batching (one chapter per
 	// request, the default single-chapter behavior).
 	BatchChars int `yaml:"batchChars,omitempty" json:"batchChars,omitempty"`
+	// Reasoning controls whether thinking/reasoning mode is enabled for this node.
+	// When true, the cleanup request includes reasoning_effort and enable_thinking
+	// to activate the model's reasoning capability. When false (default), no
+	// reasoning parameters are sent — suitable for models that work without thinking.
+	Reasoning bool `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
-
 // SplitPattern 章节检测正则（持久化形，regex 为字符串）。
 type SplitPattern struct {
 	Key     string `yaml:"key" json:"key"`

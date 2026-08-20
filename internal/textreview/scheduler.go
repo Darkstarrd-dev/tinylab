@@ -141,11 +141,11 @@ func (e *Engine) runBatch(ctx context.Context, s *Session, batch []int, nodeIdx 
 	// 在发起 LLM 请求前预先构建并写入 DebugRequest，确保处理中阶段 Debug 面板立即可见请求体
 	var preReq string
 	if len(batch) == 1 {
-		if b, err := buildRequestBody(node.ModelID, sysPrompt, batchChs[0].Content); err == nil {
+		if b, err := buildRequestBody(node.ModelID, sysPrompt, batchChs[0].Content, node.Reasoning); err == nil {
 			preReq = string(b)
 		}
 	} else {
-		if b, err := buildBatchRequestBody(node.ModelID, sysPrompt, batchChs); err == nil {
+		if b, err := buildBatchRequestBody(node.ModelID, sysPrompt, batchChs, node.Reasoning); err == nil {
 			preReq = string(b)
 		}
 	}

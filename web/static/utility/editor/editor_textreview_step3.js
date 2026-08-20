@@ -31,6 +31,10 @@ var trS3DebugRaw = {};         // chapterIdx -> 累积的原始响应文本
 var trS3DebugThinking = {};    // chapterIdx -> 累积的 thinking 思考文本
 var trS3DebugContent = {};     // chapterIdx -> 累积的 content 原始输出文本
 var trS3DebugCollapsed = { request: false, thinking: false, output: false }; // 各 section 折叠状态
+// --- 高频渲染节流: 每 chapter 用 rAF 合批，避免 100+ tok/s 时每 delta 都同步 textContent + 强制重排 ---
+var trS3PendingFlush = {};      // chapterIdx -> true (has pending render)
+var trS3FlushScheduled = false; // rAF already queued
+var trS3PendingDebugFlush = {}; // chapterIdx -> true (debug pane pending)
 window.trS3NodeNumbers = trS3NodeNumbers;
 
 function trS3NodeBadge(nodeId) {
@@ -260,6 +264,7 @@ function trS3RenderConfigNodes(nodes) {
     '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
     '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
+    '<th>' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
     '</tr></thead><tbody>';
   trS3NodeNumbers = {};
   for (var k = 0; k < nodes.length; k++) { trS3NodeNumbers[nodes[k].id] = k + 1; }
@@ -280,6 +285,8 @@ function trS3RenderConfigNodes(nodes) {
         '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
       '<td><input type="number" class="tr-node-interval" min="0" value="' + (n.intervalSec != null ? n.intervalSec : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeInterval(' + idAttr + ')"></td>' +
       '<td><input type="number" class="tr-node-batch" min="0" value="' + (n.batchChars != null ? n.batchChars : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeBatch(' + idAttr + ')"></td>' +
+      '<td><input type="checkbox" class="tr-node-reasoning" data-id="' + trEscapeHtml(n.id || '') + '"' +
+        (n.reasoning ? ' checked' : '') + ' onchange="trS3OnNodeReasoning(' + idAttr + ')"></td>' +
       '</tr>';
   }
   html += '</tbody></table>';
@@ -324,6 +331,16 @@ function trS3OnNodeBatch(id) {
   trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
 }
 
+function trS3OnNodeReasoning(id) {
+  var row = trS3FindNodeRow(id);
+  if (!row || !row.reasoning) return;
+  var node = null;
+  for (var i = 0; i < trState.reviewNodes.length; i++) { if (trState.reviewNodes[i].id === id) { node = trState.reviewNodes[i]; break; } }
+  if (!node) return;
+  node.reasoning = !!row.reasoning.checked;
+  trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
+}
+
 function trS3FindNodeRow(id) {
   var sel = trS3CssSelector(nid(id));
   var en = document.querySelector('.tr-node-en[data-id="' + sel + '"]');
@@ -331,9 +348,9 @@ function trS3FindNodeRow(id) {
   if (!en || !conc) return null;
   var interval = document.querySelector('.tr-node-interval[data-id="' + sel + '"]');
   var batch = document.querySelector('.tr-node-batch[data-id="' + sel + '"]');
-  return { en: en, conc: conc, interval: interval, batch: batch };
+  var reasoning = document.querySelector('.tr-node-reasoning[data-id="' + sel + '"]');
+  return { en: en, conc: conc, interval: interval, batch: batch, reasoning: reasoning };
 }
-
 function trS3UpsertNode(id, enabled, concurrency) {
   var node = null;
   for (var i = 0; i < trState.reviewNodes.length; i++) {
@@ -347,7 +364,8 @@ function trS3UpsertNode(id, enabled, concurrency) {
     concurrency: concurrency,
     enabled: enabled,
     intervalSec: node.intervalSec || 0,
-    batchChars: node.batchChars || 0
+    batchChars: node.batchChars || 0,
+    reasoning: !!node.reasoning
   };
   trApiPost('/text-review/review-nodes', patch).then(function (res) {
     if (res && res.error) {
@@ -358,6 +376,7 @@ function trS3UpsertNode(id, enabled, concurrency) {
     node.enabled = enabled;
     node.intervalSec = patch.intervalSec;
     node.batchChars = patch.batchChars;
+    node.reasoning = patch.reasoning;
     var total = 0;
     for (var j = 0; j < trState.reviewNodes.length; j++) {
       if (trState.reviewNodes[j].enabled) total += (trState.reviewNodes[j].concurrency || 0);
@@ -395,6 +414,7 @@ function trStep3RenderSettingsModal() {
         '<td style="text-align:center;">' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td style="text-align:center;">' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
         '<td style="text-align:center;">' + (n.batchChars ? n.batchChars : '-') + '</td>' +
+        '<td style="text-align:center;">' + (n.reasoning ? '<span style="color:var(--accent,#4fc3f7);font-weight:bold;">✓</span>' : '<span style="color:var(--text-muted);">—</span>') + '</td>' +
         '<td style="text-align:center;">' + (n.enabled ? '<span style="color:var(--success,#10b981);font-weight:bold;">✓</span>' : '<span style="color:var(--text-muted);">✗</span>') + '</td>' +
         '<td style="text-align:right;"><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
           trEscapeHtml(n.id || '') + '\')">' + trEscapeHtml(trT('trDelete') || '删除') + '</button></td>' +
@@ -412,7 +432,6 @@ function trStep3RenderSettingsModal() {
           '<span style="opacity:0.6; font-size:11px;">▼</span>' +
         '</button>' +
       '</div>';
-
     var body =
       '<div class="tr-node-card">' +
         '<div class="tr-node-card-title">' +
@@ -433,7 +452,11 @@ function trStep3RenderSettingsModal() {
             '<label class="tr-form-label">' + trEscapeHtml(trT('trBatchChars') || '批次大小(字符)') + '</label>' +
             '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0">' +
           '</div>' +
-          '<div class="tr-form-field-actions">' +
+          '<div class="tr-form-field-actions" style="gap:12px;">' +
+            '<label class="tr-check">' +
+              '<input type="checkbox" id="tr-s3-modal-reasoning">' +
+              '<span>' + trEscapeHtml(trT('trNodeReasoning') || '思考') + '</span>' +
+            '</label>' +
             '<label class="tr-check">' +
               '<input type="checkbox" id="tr-s3-modal-enabled" checked>' +
               '<span>' + trEscapeHtml(trT('trNodeEnabled') || '启用') + '</span>' +
@@ -444,7 +467,6 @@ function trStep3RenderSettingsModal() {
           '</div>' +
         '</div>' +
       '</div>';
-
     if (nodes.length > 0) {
       body +=
         '<div class="tr-node-table-section">' +
@@ -456,6 +478,7 @@ function trStep3RenderSettingsModal() {
             '<th style="text-align:center;width:70px;">' + trEscapeHtml(trT('trNodeConcurrency') || '并发数') + '</th>' +
             '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trIntervalSec') || '请求间隔') + '</th>' +
             '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trBatchChars') || '批次大小') + '</th>' +
+            '<th style="text-align:center;width:60px;">' + trEscapeHtml(trT('trNodeReasoning') || '思考') + '</th>' +
             '<th style="text-align:center;width:60px;">' + trEscapeHtml(trT('trNodeEnabled') || '启用') + '</th>' +
             '<th style="text-align:right;width:65px;">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
           '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
@@ -565,6 +588,7 @@ function trStep3AddNode() {
   }
   var concEl = document.getElementById('tr-s3-modal-conc');
   var enEl = document.getElementById('tr-s3-modal-enabled');
+  var reasoningEl = document.getElementById('tr-s3-modal-reasoning');
   var intervalEl = document.getElementById('tr-s3-modal-interval');
   var batchEl = document.getElementById('tr-s3-modal-batch');
   var body = {
@@ -572,6 +596,7 @@ function trStep3AddNode() {
     modelId: trS3ModalModel.modelId,
     concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
     enabled: enEl ? enEl.checked : true,
+    reasoning: reasoningEl ? reasoningEl.checked : false,
     intervalSec: intervalEl ? Math.max(0, parseInt(intervalEl.value, 10) || 0) : 0,
     batchChars: batchEl ? Math.max(0, parseInt(batchEl.value, 10) || 0) : 0
   };
@@ -1105,6 +1130,52 @@ function trS3OpenEventSource(id) {
 }
 
 /**
+ * rAF 合批调度: 将本帧内所有 pending 的 chunk/raw 合并为一次 DOM 写。
+ * 只刷新当前选中章节的可见面板，避免为非选中章节做无用重排。
+ * 状态/计数类更新仍即时执行，重量级 textContent 写走 rAF。
+ */
+function trS3ScheduleFlush() {
+  if (trS3FlushScheduled) return;
+  trS3FlushScheduled = true;
+  var raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
+  raf(function () {
+    trS3FlushScheduled = false;
+    // snapshot + clear pending before render (new deltas arriving during render go to next frame)
+    var pending = trS3PendingFlush;
+    var pendingDebug = trS3PendingDebugFlush;
+    trS3PendingFlush = {};
+    trS3PendingDebugFlush = {};
+    // 只刷新当前选中章节; 大量并发时非选中章节仅累积状态，不做 DOM
+    if (pending[trS3SelectedIdx]) {
+      trS3FlushChunkDom(trS3SelectedIdx);
+    }
+    if (pendingDebug[trS3SelectedIdx] && trS3RightTab === 'debug') {
+      trS3UpdateLiveDebugElements(trS3SelectedIdx);
+    }
+  });
+}
+
+function trS3FlushChunkDom(idx) {
+  if (idx == null || idx < 0 || idx >= trS3Chapters.length) return;
+  var c = trS3Chapters[idx];
+  if (idx !== trS3SelectedIdx) return;
+  var pane = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
+  if (pane) {
+    // 增量追加优于全量重赋: 仅当 pane 内容与 cleaned 不一致时做一次全量同步，其余走追加
+    var cur = pane.textContent || '';
+    var next = c.cleaned || '';
+    if (next.length >= cur.length && next.indexOf(cur) === 0) {
+      if (next.length > cur.length) pane.appendChild(document.createTextNode(next.slice(cur.length)));
+    } else {
+      pane.textContent = next;
+    }
+    if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
+  }
+  var progEl = document.getElementById('tr-s3-detail-prog');
+  if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
+}
+
+/**
  * raw: append raw unparsed streaming delta (separating thinking from content)
  * to debug buffers for live visualization.
  */
@@ -1122,13 +1193,16 @@ function trS3OnRaw(evt) {
     trS3DebugContent[idx] += evt.delta || '';
   }
 
+  // 数据先累积，DOM 走 rAF 合批，避免每 token 一次 textContent + 强制重排
   if (trS3RightTab === 'debug' && idx === trS3SelectedIdx) {
-    trS3UpdateLiveDebugElements(idx);
+    trS3PendingDebugFlush[idx] = true;
+    trS3ScheduleFlush();
   }
 }
 
 /**
  * 实时局部刷新 debug 面板中的 Thinking 和 Output 区域，避免全量重新渲染带来的卡顿。
+ * 内部做增量追加: 若新文本是旧文本的前缀扩展则只 append 增量。
  */
 function trS3UpdateLiveDebugElements(idx) {
   var c = trS3Chapters[idx];
@@ -1142,7 +1216,12 @@ function trS3UpdateLiveDebugElements(idx) {
   if (thinkText) {
     if (thinkSec) thinkSec.style.display = '';
     if (thinkEl) {
-      thinkEl.textContent = thinkText;
+      var curThink = thinkEl.textContent || '';
+      if (thinkText.length >= curThink.length && thinkText.indexOf(curThink) === 0) {
+        if (thinkText.length > curThink.length) thinkEl.appendChild(document.createTextNode(thinkText.slice(curThink.length)));
+      } else {
+        thinkEl.textContent = thinkText;
+      }
       if (trS3ScrolledToBottom(thinkEl)) thinkEl.scrollTop = thinkEl.scrollHeight;
     }
     if (thinkCountEl) {
@@ -1155,7 +1234,12 @@ function trS3UpdateLiveDebugElements(idx) {
   var outCountEl = document.getElementById('tr-debug-output-count');
 
   if (outEl && outText) {
-    outEl.textContent = outText;
+    var curOut = outEl.textContent || '';
+    if (outText.length >= curOut.length && outText.indexOf(curOut) === 0) {
+      if (outText.length > curOut.length) outEl.appendChild(document.createTextNode(outText.slice(curOut.length)));
+    } else {
+      outEl.textContent = outText;
+    }
     if (trS3ScrolledToBottom(outEl)) outEl.scrollTop = outEl.scrollHeight;
   }
   if (outCountEl && outText) {
@@ -1167,6 +1251,7 @@ function trS3UpdateLiveDebugElements(idx) {
  * chunk: append `delta` to chapter chapterIdx's accumulating cleaned text and
  * auto-scroll the live pane to bottom while the user hasn't scrolled up. The
  * first chunk for a chapter also flips its status to `processing`.
+ * 轻量状态走即时更新，重量级 textContent 写走 rAF 合批。
  */
 function trS3OnChunk(evt) {
   var idx = evt.chapterIdx;
@@ -1180,19 +1265,10 @@ function trS3OnChunk(evt) {
   var old = c.status;
   c.status = 'processing';
   trS3UpdateCardStatus(idx);
-  // Mirror the stream into the right content pane when this chapter is selected.
+  // 重量级 pane 写合批到下一帧
   if (idx === trS3SelectedIdx) {
-    var pane = document.getElementById('tr-review-content') || document.getElementById('ed-review-content');
-    if (pane) {
-      pane.textContent = c.cleaned;
-      if (trS3ScrolledToBottom(pane)) pane.scrollTop = pane.scrollHeight;
-    }
-    var progEl = document.getElementById('tr-s3-detail-prog');
-    if (progEl) progEl.textContent = trS3CardProgress(c) + ' ' + (trT('trCharCount') || '字');
-    // 如果当前处于 debug tab，更新 debug 输出区域
-    if (trS3RightTab === 'debug') {
-      trS3UpdateLiveDebugElements(idx);
-    }
+    trS3PendingFlush[idx] = true;
+    trS3ScheduleFlush();
   }
   if (old !== 'processing') trS3UpdateTabCounts();
 }
