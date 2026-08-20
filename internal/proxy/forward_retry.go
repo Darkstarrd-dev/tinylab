@@ -251,14 +251,14 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		if isStream {
 			h.EntryTracker.SetTTFT(reqID, latencyMs)
 			h.broadcastTTFT(reqID, latencyMs)
-			if isResponsesVisionRewrite(entryFormat, effectivePath) {
+			if isChatToResponsesRewrite(entryFormat, effectivePath) {
 				h.streamResponsesAsChat(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
 			} else {
 				normalize := cfgProvider != nil && cfgProvider.NormalizeStreamChunks
 				h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel, sessionKey)
 			}
 		} else {
-			if isResponsesVisionRewrite(entryFormat, effectivePath) {
+			if isChatToResponsesRewrite(entryFormat, effectivePath) {
 				h.passThroughResponsesAsChat(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
 			} else {
 				h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
