@@ -105,7 +105,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.Patch("/providers/{id}/models/imgProtocol", h.updateModelImgProtocol)
 	r.Patch("/providers/{id}/models/textProtocol", h.updateModelTextProtocol)
 	r.Patch("/providers/{id}/models/chatResponsesCompat", h.updateModelChatResponsesCompat)
+	r.Patch("/providers/{id}/models/protocols", h.updateModelProtocols)
 	r.Patch("/providers/{id}/models/imgSizes", h.updateModelImgSizes)
+	r.Delete("/providers/{id}/models", h.deleteProviderModel)
 }
 
 // --- Providers ---

@@ -134,14 +134,18 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			if rp == "/v1/responses" {
 				effectiveFormat = combo.EntryFormatOpenAIResponses
 			}
-		} else if bodyBytes != nil {
+		} else {
 			// Not rewritten — marshal the (possibly tool-call-patched) parsed body.
-			if nb, err := json.Marshal(parsed); err == nil {
-				upstreamBody = nb
-			} else {
-				h.logger.Error("failed to marshal upstream body: %v", err)
-				writeError(w, http.StatusInternalServerError, "internal marshalling error")
-				return false, ""
+			// This must happen even when bodyBytes is nil (programmatic callers
+			// in tests pass parsed only), otherwise an empty upstream body is sent.
+			if parsed != nil {
+				if nb, err := json.Marshal(parsed); err == nil {
+					upstreamBody = nb
+				} else {
+					h.logger.Error("failed to marshal upstream body: %v", err)
+					writeError(w, http.StatusInternalServerError, "internal marshalling error")
+					return false, ""
+				}
 			}
 		}
 		h.logger.Debug("[%s] SEND %s | %s | body=%dB", logTag, sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))

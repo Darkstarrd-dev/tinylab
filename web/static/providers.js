@@ -1506,14 +1506,21 @@ async function batchKeepSelected(pid) {
   }
   var p = providerDetailCache;
   if (!p || !p.models) return;
-  var allModels = p.models;
+  // Visible rows only: respect the current filter — hidden models are not
+  // considered part of the working set. See B1.
+  var visibleIds = new Set();
+  document.querySelectorAll('#model-list [data-batch-mid]').forEach(function(row) {
+    if (row.style.display !== 'none') visibleIds.add(row.getAttribute('data-batch-mid'));
+  });
   var toDelete = [];
-  for (var i = 0; i < allModels.length; i++) {
-    if (!batchSelectedModels.has(allModels[i].id)) {
-      toDelete.push(allModels[i].id);
-    }
+  for (var i = 0; i < p.models.length; i++) {
+    var mid = p.models[i].id;
+    if (!visibleIds.has(mid)) continue;
+    if (!batchSelectedModels.has(mid)) toDelete.push(mid);
   }
   if (toDelete.length === 0) {
+    // Nothing to delete among visible rows: exit batch mode without touching
+    // hidden models.
     batchManageMode = false;
     batchSelectedModels.clear();
     renderDetailModels(p);
@@ -1522,19 +1529,26 @@ async function batchKeepSelected(pid) {
   var ok = await confirmModal(t('confirmKeepSelected', [batchSelectedModels.size, toDelete.length]));
   if (!ok) return;
   var deleted = 0;
+  var failed = [];
   for (var j = 0; j < toDelete.length; j++) {
     var resp = await apiDelete('/providers/' + pid + '/models?model=' + encodeURIComponent(toDelete[j]));
     if (!resp.error) {
       delete modelTestStatus[toDelete[j]];
       deleted++;
+    } else {
+      failed.push(toDelete[j] + ': ' + resp.error);
     }
   }
   batchManageMode = false;
   batchSelectedModels.clear();
-  toast(t('batchDeleted', [deleted]), 'success');
+  if (failed.length > 0) {
+    toast(t('batchDeleted', [deleted]) + ' (' + failed.length + ' failed: ' + failed.join('; ') + ')', failed.length === toDelete.length ? 'error' : 'warning');
+  } else {
+    toast(t('batchDeleted', [deleted]), 'success');
+  }
   currentProviderId = pid;
-  const data = await apiGet('/providers');
-  const np = (data.providers || []).find(function(x) { return x.id === pid; });
+  var data = await apiGet('/providers');
+  var np = (data.providers || []).find(function(x) { return x.id === pid; });
   if (np) {
     providerDetailCache = np;
     renderDetailModels(np);
@@ -1550,19 +1564,26 @@ async function batchRemoveSelected(pid) {
   if (!ok) return;
   var toDelete = Array.from(batchSelectedModels);
   var deleted = 0;
+  var failed = [];
   for (var i = 0; i < toDelete.length; i++) {
     var resp = await apiDelete('/providers/' + pid + '/models?model=' + encodeURIComponent(toDelete[i]));
     if (!resp.error) {
       delete modelTestStatus[toDelete[i]];
       deleted++;
+    } else {
+      failed.push(toDelete[i] + ': ' + resp.error);
     }
   }
   batchManageMode = false;
   batchSelectedModels.clear();
-  toast(t('batchDeleted', [deleted]), 'success');
+  if (failed.length > 0) {
+    toast(t('batchDeleted', [deleted]) + ' (' + failed.length + ' failed: ' + failed.join('; ') + ')', failed.length === toDelete.length ? 'error' : 'warning');
+  } else {
+    toast(t('batchDeleted', [deleted]), 'success');
+  }
   currentProviderId = pid;
-  const data = await apiGet('/providers');
-  const np = (data.providers || []).find(function(x) { return x.id === pid; });
+  var data = await apiGet('/providers');
+  var np = (data.providers || []).find(function(x) { return x.id === pid; });
   if (np) {
     providerDetailCache = np;
     renderDetailModels(np);
