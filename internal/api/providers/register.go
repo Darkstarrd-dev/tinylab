@@ -104,9 +104,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Patch("/providers/{id}/models/kind", h.updateModelKind)
 	r.Patch("/providers/{id}/models/imgProtocol", h.updateModelImgProtocol)
 	r.Patch("/providers/{id}/models/textProtocol", h.updateModelTextProtocol)
+	r.Patch("/providers/{id}/models/chatResponsesCompat", h.updateModelChatResponsesCompat)
 	r.Patch("/providers/{id}/models/imgSizes", h.updateModelImgSizes)
-	r.Patch("/providers/{id}/models/protocols", h.updateModelProtocols)
-	r.Delete("/providers/{id}/models", h.deleteProviderModel)
 }
 
 // --- Providers ---
@@ -694,6 +693,37 @@ func (h *Handler) updateModelTextProtocol(w http.ResponseWriter, r *http.Request
 		storedVal = ""
 	}
 	if h.d.Reg.UpdateModelTextProtocol(providerID, req.Model, storedVal) {
+		cfg := h.d.Reg.Config()
+		if err := h.d.SaveConfig(&cfg); err != nil {
+			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	} else {
+		apibase.WriteAPIError(w, http.StatusNotFound, "model not found on provider")
+	}
+}
+
+func (h *Handler) updateModelChatResponsesCompat(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "id")
+	var req struct {
+		Model                 string `json:"model"`
+		ChatResponsesCompat *bool  `json:"chatResponsesCompat"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Model == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "model required")
+		return
+	}
+	if req.ChatResponsesCompat == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "chatResponsesCompat required")
+		return
+	}
+	if h.d.Reg.UpdateModelChatResponsesCompat(providerID, req.Model, *req.ChatResponsesCompat) {
 		cfg := h.d.Reg.Config()
 		if err := h.d.SaveConfig(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")

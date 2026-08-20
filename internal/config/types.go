@@ -48,6 +48,7 @@ type ModelDef struct {
 	Kind         string            `yaml:"kind,omitempty" json:"kind,omitempty"`               // "text" (default/empty) | "image"
 	ImgProtocol  string            `yaml:"imgProtocol,omitempty" json:"imgProtocol,omitempty"` // "gpt" | "xai" | "modelscope" (only when kind=image)
 	TextProtocol string            `yaml:"textProtocol,omitempty" json:"textProtocol,omitempty"` // "auto" / "" | "openai-compat" | "openai-responses" | "anthropic" | "google"
+	ChatResponsesCompat bool   `yaml:"chatResponsesCompat,omitempty" json:"chatResponsesCompat,omitempty"` // when true, route /v1/chat/completions via /v1/responses for this model
 	ImgSizes     []string          `yaml:"imgSizes,omitempty" json:"imgSizes,omitempty"`       // custom size option list (e.g. "1024x1024") for Playground image mode; empty = built-in defaults
 	NIMOver      *ModelNIMOverride `yaml:"nim,omitempty" json:"nim,omitempty"`
 	// Protocols records the set of protocols this model was probed to support

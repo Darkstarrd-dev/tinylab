@@ -564,6 +564,13 @@ function buildModelRowMainInner(p, m) {
     { value: 'google', label: t('protocolGoogle') }
   ], textProtoVal, 'updateModelTextProtocol(\'' + pidEsc + '\', this)', 'width:125px;display:' + (textProtoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-text-protocol-select" data-model="' + midEsc + '" data-tooltip="' + t('textProtocol') + '"');
 
+  var rcVal = m.chatResponsesCompat ? 'on' : 'off';
+  var rcWrapId = 'rc-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var rcSelId = 'rc-sel-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);
+  var rcHtml = renderCustomSelectHtml(rcWrapId, rcSelId, [
+    { value: 'off', label: 'Response off' },
+    { value: 'on', label: 'Response on' }
+  ], rcVal, 'updateModelChatResponsesCompat(\'' + pidEsc + '\', this)', 'width:112px;display:' + (textProtoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-chat-responses-compat-select" data-model="' + midEsc + '" data-tooltip="Chat→Responses (model-level)"');
   return '<div class="model-row-main" onclick="' + rowOnclick + '">' +
     chevronDown +
     '<button type="button" class="btn btn-sm btn-test-model ' + (ts ? (ts.ok ? 'btn-test-ok' : 'btn-test-err') : '') + '"' + testBtnDisabled + ' onclick="event.stopPropagation(); withLoading(this, () => { var kind = this.parentElement.querySelector(\'.model-kind-select\') ? this.parentElement.querySelector(\'.model-kind-select\').value : \'' + kindVal + '\'; testSingleModel(\'' + pidEsc + '\', \'' + midJs + '\', kind); })">' + testBtnText + '</button>' +
@@ -572,6 +579,7 @@ function buildModelRowMainInner(p, m) {
     kindHtml +
     protoHtml +
     textProtoHtml +
+    rcHtml +
     allBadge +
     '<span class="model-quota-numbers" style="display:none"></span>' +
     '<button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteModelDetail(\'' + pidEsc + '\', \'' + midJs + '\')">' + t('delete') + '</button>' +
@@ -1657,6 +1665,17 @@ async function updateModelTextProtocol(pid, selectEl) {
     await apiPatch('/providers/' + pid + '/models/textProtocol', { model: modelId, textProtocol: textProtocol });
     var label = textProtocol ? (textProtocol === 'google' ? t('protocolGoogle') : (textProtocol === 'anthropic' ? t('protocolAnthropic') : (textProtocol === 'openai-responses' ? t('protocolOpenAIResponses') : t('protocolOpenAICompat')))) : t('protocolAuto');
     toast(t('textProtocol') + ' \u2192 ' + label, 'success');
+  } catch (e) {
+    toast(e.message || t('failed'), 'error');
+  }
+}
+
+async function updateModelChatResponsesCompat(pid, selectEl) {
+  var modelId = selectEl.getAttribute('data-model');
+  var on = selectEl.value === 'on';
+  try {
+    await apiPatch('/providers/' + pid + '/models/chatResponsesCompat', { model: modelId, chatResponsesCompat: on });
+    toast('Response \u2192 ' + (on ? 'on' : 'off'), 'success');
   } catch (e) {
     toast(e.message || t('failed'), 'error');
   }

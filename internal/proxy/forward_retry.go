@@ -116,11 +116,33 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		if cfgProvider != nil && cfgProvider.IsGeminiOpenAICompat() {
 			backfillThoughtSignatures(parsed, h.sigCache)
 		}
-		upstreamBody, err := json.Marshal(parsed)
-		if err != nil {
-			h.logger.Error("failed to marshal upstream body: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal marshalling error")
-			return false, ""
+		upstreamBody := bodyBytes
+		effectivePath := path
+		effectiveFormat := entryFormat
+		compat := false
+		if cfgProvider != nil {
+			for _, mm := range cfgProvider.Models {
+				if mm.ID == upstreamModel && mm.ChatResponsesCompat {
+					compat = true
+					break
+				}
+			}
+		}
+		if rewritten, rp, ok := maybeRewriteChatVisionToResponses(nil, path, parsed, upstreamModel, compat); ok {
+			upstreamBody = rewritten
+			effectivePath = rp
+			if rp == "/v1/responses" {
+				effectiveFormat = combo.EntryFormatOpenAIResponses
+			}
+		} else if bodyBytes != nil {
+			// Not rewritten — marshal the (possibly tool-call-patched) parsed body.
+			if nb, err := json.Marshal(parsed); err == nil {
+				upstreamBody = nb
+			} else {
+				h.logger.Error("failed to marshal upstream body: %v", err)
+				writeError(w, http.StatusInternalServerError, "internal marshalling error")
+				return false, ""
+			}
 		}
 		h.logger.Debug("[%s] SEND %s | %s | body=%dB", logTag, sel.Provider.Name, resolveDisplayModel(sel.Provider.Name, upstreamModel, originalModel, h.aliases), len(upstreamBody))
 
@@ -140,7 +162,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			SessionKey:    sessionKey,
 			InputTokens:   len(bodyBytes) / 4, // rough estimate for live UI
 		}
-		upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
+		upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, effectivePath)
 		credential := sel.Key.Key
 		if len(bodyBytes) > 0 {
 			rb := []byte(logredact.MaskString(string(bodyBytes), credential))
@@ -160,8 +182,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		// responses; clients with short read timeouts must set an adequate timeout.
 
 		startTime := time.Now()
-		resp, err := h.forwardUpstream(r.Context(), sel, upstreamBody, r.Header, isStream, path, entryFormat)
-
+		resp, err := h.forwardUpstream(r.Context(), sel, upstreamBody, r.Header, isStream, effectivePath, effectiveFormat)
 		if err != nil {
 			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel, sessionKey)
 			h.EntryTracker.Remove(reqID)
@@ -226,10 +247,18 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		if isStream {
 			h.EntryTracker.SetTTFT(reqID, latencyMs)
 			h.broadcastTTFT(reqID, latencyMs)
-			normalize := cfgProvider != nil && cfgProvider.NormalizeStreamChunks
-			h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel, sessionKey)
+			if isResponsesVisionRewrite(entryFormat, effectivePath) {
+				h.streamResponsesAsChat(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
+			} else {
+				normalize := cfgProvider != nil && cfgProvider.NormalizeStreamChunks
+				h.streamResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, normalize, reqID, r.Header, upstreamURL, entryFormat, originalModel, sessionKey)
+			}
 		} else {
-			h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
+			if isResponsesVisionRewrite(entryFormat, effectivePath) {
+				h.passThroughResponsesAsChat(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
+			} else {
+				h.passThroughResponse(w, resp, upstreamModel, sel, latencyMs, bodyBytes, reqID, r.Header, upstreamURL, originalModel, sessionKey)
+			}
 		}
 		h.EntryTracker.Remove(reqID)
 		// DecInFlight after the synchronous response handling completes — this

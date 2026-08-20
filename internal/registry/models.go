@@ -221,6 +221,24 @@ func (r *Registry) UpdateModelTextProtocol(providerID, modelID, textProtocol str
 	return false
 }
 
+func (r *Registry) UpdateModelChatResponsesCompat(providerID, modelID string, on bool) bool {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	for i := range r.config.Providers {
+		if r.config.Providers[i].ID != providerID {
+			continue
+		}
+		for j := range r.config.Providers[i].Models {
+			if r.config.Providers[i].Models[j].ID == modelID {
+				r.config.Providers[i].Models[j].ChatResponsesCompat = on
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // UpdateModelProtocols sets the probed protocol set for a specific model on a
 // provider. It performs no value validation (legal-value checks live in
 // config/validate.go); it only assigns the given slice. Pass an empty or nil
