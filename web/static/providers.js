@@ -1506,21 +1506,15 @@ async function batchKeepSelected(pid) {
   }
   var p = providerDetailCache;
   if (!p || !p.models) return;
-  // Visible rows only: respect the current filter — hidden models are not
-  // considered part of the working set. See B1.
-  var visibleIds = new Set();
-  document.querySelectorAll('#model-list [data-batch-mid]').forEach(function(row) {
-    if (row.style.display !== 'none') visibleIds.add(row.getAttribute('data-batch-mid'));
-  });
+  // Delete every unselected model in the provider, regardless of the
+  // current filter — the filter only narrows what is displayed.
   var toDelete = [];
   for (var i = 0; i < p.models.length; i++) {
     var mid = p.models[i].id;
-    if (!visibleIds.has(mid)) continue;
     if (!batchSelectedModels.has(mid)) toDelete.push(mid);
   }
   if (toDelete.length === 0) {
-    // Nothing to delete among visible rows: exit batch mode without touching
-    // hidden models.
+    // All models selected: exit batch mode without deleting anything.
     batchManageMode = false;
     batchSelectedModels.clear();
     renderDetailModels(p);
