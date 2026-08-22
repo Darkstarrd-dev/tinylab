@@ -43,7 +43,10 @@ function preloadAdjacentVideos(curIdx) {
     var n = items.length;
     if (n <= 1) return;
     // preloadVideo is alias expected by bench signal
-    for (var d = -1; d <= 1; d += 2) {
+    // Preload ±1 immediately, ±2 lazily (if already within 4-element bound)
+    var deltas = (n <= 4) ? [-2, -1, 1, 2] : [-1, 1];
+    for (var di = 0; di < deltas.length; di++) {
+      var d = deltas[di];
       var j = (curIdx + d + n) % n;
       var it = items[j];
       if (!it || it.mainURL) {
@@ -71,7 +74,6 @@ function preloadAdjacentVideos(curIdx) {
     }
   } catch (e) {}
 }
-function preloadVideo(idx) { return preloadAdjacentVideos(idx); }
 function ensureVideoPreloadElement(url) {
   if (!url || videoPreloadCache.map[url]) return;
   try {
