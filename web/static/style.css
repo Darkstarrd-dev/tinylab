@@ -3481,6 +3481,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px soli
 .gallery-layout.gallery-layout-fullscreen .gallery-pane:has(.gallery-video-hover-ctrl:hover) .gallery-bottom,
 .gallery-layout.gallery-layout-fullscreen .gallery-main-area:has(.gallery-bottom:hover) .gallery-video-hover-ctrl,
 .gallery-layout.gallery-layout-fullscreen .gallery-main-area:has(.gallery-video-hover-ctrl:hover) .gallery-bottom{opacity:1;pointer-events:auto}
+/* Volume popover must paint above the fullscreen seeker bar: the popover
+   lives inside .gallery-bottom (z:25) and opens upward straight into the
+   .gallery-video-hover-ctrl band (z:26, bottom:42px) — trapped in the bottom
+   bar's stacking context it was covered by the seeker, and moving the mouse
+   off the volume button hit the seeker instead of the popover, closing it
+   before the slider was reachable. */
+.gallery-layout.gallery-layout-fullscreen .gallery-bottom:has(.gallery-vol-wrapper:hover),
+.gallery-layout.gallery-layout-fullscreen .gallery-bottom:has(.gallery-vol-wrapper:focus-within){z-index:27}
 
 .gallery-layout.gallery-layout-fullscreen .gallery-controls{background:transparent;border:none;width:100%}
 .gallery-layout.gallery-layout-fullscreen .gallery-path,
