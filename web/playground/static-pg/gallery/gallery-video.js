@@ -22,13 +22,19 @@ function setVideoActive(index) {
   if (index >= galleryState.videoItems.length) index = 0;
   galleryState.videoIndex = index;
   renderActiveVideo(index);
-  renderTreePanel();
+  // Defer tree panel re-render to next frame so video switch is not blocked
+  // by building the directory tree (O(n) for large libraries). The video
+  // element starts loading immediately; tree repaints on the following rAF.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function() { try { renderTreePanel(); } catch (e) {} });
+  } else {
+    renderTreePanel();
+  }
   // Adjacent preload: warm the next/prev video's mainURL (streaming URL or
   // blob) right after switching so a subsequent next/prev is already cached.
   // This is the user-visible 2 s+ delay fix for <100 MB PCIe4 SSD videos.
   preloadAdjacentVideos(index);
 }
-
 // videoPreloadSet tracks in-flight / completed preloads to avoid duplicate fetches.
 var videoPreloadSet = {};
 // videoPreloadCache is a bounded LRU-ish cache of hidden <video> preload
