@@ -286,12 +286,14 @@ async function walkDir(dirHandle, prefix, out, outVid) {
         queue.push({ handle: ent, prefix: rel });
       } else if (ent.kind === 'file') {
         if (isArchiveName(ent.name)) {
-          // Upload zip to server and create proper zip items with handle
+          // Collect the archive File for progressive registration by the
+          // caller (processZipFilesProgressive) — walkDir stays pure
+          // traversal so one slow pack upload cannot stall the whole walk.
           try {
             var ff = await ent.getFile();
-            await addArchive(ff, out, ent);
+            out.push({ kind: 'zipfile', file: ff, zipFileHandle: ent });
           } catch (e) {
-            console.warn('walkDir zip failed:', e);
+            console.warn('walkDir zip read failed:', e);
           }
         } else if (isSupportedExt(ent.name)) {
           if (isVideoExt(ent.name)) {
@@ -388,6 +390,122 @@ function appendNewItems(newItems) {
   }
 }
 
+// appendProgressiveItems appends a batch of newly-resolved items while the
+// import is still running. The first batch establishes the active item (tree
+// + main image render immediately); later batches merge in without stealing
+// focus. Used by the progressive loaders so users interact with content
+// while the rest is still loading.
+function appendProgressiveItems(newItems) {
+  if (!newItems || !newItems.length) return;
+  if (galleryState.items.length === 0) {
+    appendItems(newItems);
+  } else {
+    appendNewItems(newItems);
+  }
+}
+
+// queueProgressiveItems coalesces incremental appends: packs completing close
+// together share one strip/tree rebuild instead of triggering one each. The
+// first batch (empty gallery) flushes immediately so first display stays at
+// manifest latency; later batches wait at most PROGRESSIVE_FLUSH_MS. Callers
+// MUST flushProgressiveItems() when their import loop finishes so buffered
+// items land before the import promise resolves.
+var PROGRESSIVE_FLUSH_MS = 120;
+var _pgBuffer = [];
+var _pgTimer = null;
+function queueProgressiveItems(newItems) {
+  if (!newItems || !newItems.length) return;
+  _pgBuffer = _pgBuffer.concat(newItems);
+  if (galleryState.items.length === 0) {
+    flushProgressiveItems();
+    return;
+  }
+  if (!_pgTimer) {
+    _pgTimer = setTimeout(flushProgressiveItems, PROGRESSIVE_FLUSH_MS);
+  }
+}
+
+function flushProgressiveItems() {
+  if (_pgTimer) { clearTimeout(_pgTimer); _pgTimer = null; }
+  if (!_pgBuffer.length) return;
+  var batch = _pgBuffer;
+  _pgBuffer = [];
+  appendProgressiveItems(batch);
+}
+
+// processZipFilesProgressive registers dropped/pasted archive blobs with the
+// backend using bounded concurrency and appends each pack's items as soon as
+// its manifest arrives, instead of blocking the whole import on every
+// upload. The cap of 6 preserves the LRU working-set constraint documented
+// in processCollectedEntries (session eviction protection).
+async function processZipFilesProgressive(zipEntries) {
+  if (!zipEntries || !zipEntries.length) return;
+  zipEntries.sort(function(a, b) {
+    var an = (a.file && a.file.name) || '';
+    var bn = (b.file && b.file.name) || '';
+    return an.localeCompare(bn, undefined, { numeric: true, sensitivity: 'base' });
+  });
+  await runWithConcurrency(zipEntries, 6, function(zf) {
+    var packItems = [];
+    return addArchive(zf.file, packItems, zf.zipFileHandle || null)
+      .then(function() { queueProgressiveItems(packItems); });
+  });
+  flushProgressiveItems();
+}
+
+// fetchZipManifest creates a backend zip session for an on-disk archive.
+function fetchZipManifest(grantId, rel) {
+  var body = { grantId: grantId };
+  if (rel) body.rel = rel;
+  return fetch('/api/gallery/zip-from-path', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    if (!r.ok) throw new Error('zip-from-path http ' + r.status);
+    return r.json();
+  });
+}
+
+// pushZipPackItems expands a zip manifest into gallery zip items.
+function pushZipPackItems(zData, displayName, grantId, zipRel, out) {
+  var entries = (zData.manifest && zData.manifest.entries) || [];
+  for (var j = 0; j < entries.length; j++) {
+    var ze = entries[j];
+    out.push({
+      name: ze.path.split('/').pop(),
+      path: displayName + '/' + ze.path,
+      kind: 'zip', index: ze.index, zipPath: ze.path,
+      sessionId: zData.sessionId, size: ze.size || 0,
+      getBlob: null, zipFileHandle: null,
+      grantId: grantId, zipRel: zipRel || ''
+    });
+  }
+}
+
+// processBackendZipsProgressive expands on-disk archive grants with bounded
+// concurrency, appending each pack's items to the gallery as soon as its
+// manifest is ready so the tree grows incrementally instead of appearing all
+// at once after the slowest pack.
+// Concurrency 12: unlike FSAA-dropped packs (processZipFilesProgressive, cap
+// 6) nothing is uploaded here — zip-from-path sessions reference on-disk
+// files, so an LRU-evicted session rehydrates by re-reading the same cheap
+// disk op. The higher cap only shortens manifest wall time.
+var BACKEND_ZIP_CONCURRENCY = 12;
+async function processBackendZipsProgressive(zipJobs) {
+  if (!zipJobs || !zipJobs.length) return;
+  await runWithConcurrency(zipJobs, BACKEND_ZIP_CONCURRENCY, function(zj) {
+    var packItems = [];
+    return fetchZipManifest(zj.grantId, zj.rel)
+      .then(function(zData) {
+        pushZipPackItems(zData, zj.name, zj.grantId, zj.rel, packItems);
+        queueProgressiveItems(packItems);
+      })
+      .catch(function(e) { console.warn('zip-from-path failed:', e); });
+  });
+  flushProgressiveItems();
+}
+
 // runWithConcurrency runs task(item) over every item with at most `limit`
 // in-flight at once. Preserves input order of completion tracking but does not
 // wait for earlier items to finish before starting later ones up to the cap.
@@ -443,21 +561,6 @@ async function processCollectedEntries(collected) {
     }
   }
 
-  // Parallel process all zip files
-  zipFiles.sort(function(a, b) {
-    return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
-  });
-
-  if (zipFiles.length > 0) {
-    // Bounded concurrency: uploading hundreds of zips at once previously let
-    // the backend LRU evict the earliest sessions before their thumbnails were
-    // fetched (the "first N packs fail" bug). Capping at 6 keeps the working
-    // set within the session store and avoids a thundering-herd upload burst.
-    await runWithConcurrency(zipFiles, 6, function(zf) {
-      return addArchive(zf.file, outImg, zf.zipFileHandle);
-    });
-  }
-
   // Append videos (preserve existing)
   if (outVid.length) {
     var hadNoVideos = (galleryState.videoItems.length === 0);
@@ -466,7 +569,7 @@ async function processCollectedEntries(collected) {
     updateVideoDirStructure();
     if (hadNoVideos) {
       galleryState.videoIndex = -1;
-      if (galleryState.viewMode === 'single' && outImg.length === 0 && galleryState.items.length === 0) {
+      if (galleryState.viewMode === 'single' && outImg.length === 0 && zipFiles.length === 0 && galleryState.items.length === 0) {
         galleryState.mediaType = 'video';
         updateLayoutMode();
       }
@@ -476,10 +579,18 @@ async function processCollectedEntries(collected) {
     }
   }
 
-  // Append images (preserve existing)
+  // Append images BEFORE archive registration so the tree and the first
+  // image render immediately; packs then stream in progressively below.
   if (outImg.length) {
     appendItems(outImg);
   }
+  // Progressive zip registration. Bounded concurrency: uploading hundreds of
+  // zips at once previously let the backend LRU evict the earliest sessions
+  // before their thumbnails were fetched (the "first N packs fail" bug).
+  // Capping at 6 keeps the working set within the session store and avoids a
+  // thundering-herd upload burst.
+  await processZipFilesProgressive(zipFiles);
+
   renderTreePanel();
 }
 
@@ -885,7 +996,7 @@ async function onDrop(e) {
           if (isArchiveName(h.name)) {
             try {
               var ff = await h.getFile();
-              await addArchive(ff, out, h);
+              out.push({ kind: 'zipfile', file: ff, zipFileHandle: h });
             } catch (err) {
               console.warn('drop zip handle failed:', err);
             }
@@ -914,12 +1025,21 @@ async function onDrop(e) {
           }
         }
       }
-      if (out.length) {
-        appendItems(out);
+      // walkDir now collects dropped archives as zipfile entries; show the
+      // plain files immediately, then register packs progressively.
+      var dropZips = [];
+      var dropPlain = [];
+      for (var k = 0; k < out.length; k++) {
+        if (out[k].kind === 'zipfile') dropZips.push(out[k]);
+        else dropPlain.push(out[k]);
+      }
+      if (dropPlain.length) {
+        appendItems(dropPlain);
       }
       if (outVid.length) {
         appendVideoItems(outVid);
       }
+      await processZipFilesProgressive(dropZips);
       return;
     }
   }
@@ -1015,7 +1135,7 @@ async function onPaste(e) {
           if (isArchiveName(h.name)) {
             try {
               var ff = await h.getFile();
-              await addArchive(ff, out, h);
+              out.push({ kind: 'zipfile', file: ff, zipFileHandle: h });
             } catch (err) {
               console.warn('paste zip handle failed:', err);
             }
@@ -1044,12 +1164,20 @@ async function onPaste(e) {
           }
         }
       }
-      if (out.length) {
-        appendItems(out);
+      // Plain files first (tree + first image now), packs stream in.
+      var pasteZips = [];
+      var pastePlain = [];
+      for (var k = 0; k < out.length; k++) {
+        if (out[k].kind === 'zipfile') pasteZips.push(out[k]);
+        else pastePlain.push(out[k]);
+      }
+      if (pastePlain.length) {
+        appendItems(pastePlain);
       }
       if (outVid.length) {
         appendVideoItems(outVid);
       }
+      await processZipFilesProgressive(pasteZips);
       e.preventDefault();
       return;
     }
@@ -1117,38 +1245,13 @@ async function onOpenDirBackend() {
 
   var out = [];
   var outVid = [];
+  var zipJobs = [];
   for (var i = 0; i < data.files.length; i++) {
     var f = data.files[i];
     if (f.kind === 'zip') {
-      // Create zip session from the granted on-disk zip (no upload needed).
-      try {
-        var zRes = await fetch('/api/gallery/zip-from-path', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ grantId: grantId, rel: f.rel })
-        });
-        if (!zRes.ok) continue;
-        var zData = await zRes.json();
-        var manifest = zData.manifest;
-        for (var j = 0; j < manifest.entries.length; j++) {
-          var e = manifest.entries[j];
-          out.push({
-            name: e.path.split('/').pop(),
-            path: f.rel + '/' + e.path,
-            kind: 'zip',
-            index: e.index,
-            zipPath: e.path,
-            sessionId: zData.sessionId,
-            size: e.size || 0,
-            getBlob: null,
-            zipFileHandle: null,
-            grantId: grantId,
-            zipRel: f.rel
-          });
-        }
-      } catch (e) {
-        console.warn('zip-from-path failed:', e);
-      }
+      // Deferred: the pack is expanded progressively after the loose files
+      // are shown, so one slow manifest cannot delay first display.
+      zipJobs.push({ grantId: grantId, rel: f.rel, name: f.rel });
     } else if (f.kind === 'video') {
       outVid.push({
         name: f.name,
@@ -1181,18 +1284,19 @@ async function onOpenDirBackend() {
       });
     }
   }
+  // Loose files first (tree + first image render now), packs stream in.
   if (outVid.length) { appendVideoItems(outVid); }
   if (out.length) { appendItems(out); }
+  await processBackendZipsProgressive(zipJobs);
 }
 
 // loadBackendPaths loads gallery items from absolute file/directory paths
 // loadBackendPaths handles array of absolute local file system paths
 // (obtained from clipboard CF_HDROP or other backend sources). Directories
-// are expanded via /api/gallery/list-dir; individual files are classified
-// by extension.
 async function loadBackendGrants(grants) {
   var out = [];
   var outVid = [];
+  var zipJobs = [];
   for (var i = 0; i < grants.length; i++) {
     var g = grants[i];
     var grantId = g.pathGrantId;
@@ -1210,7 +1314,7 @@ async function loadBackendGrants(grants) {
         if (listRes.ok) {
           var listData = await listRes.json();
           if (listData.files && listData.files.length) {
-            await processBackendFileList(listData.files, grantId, out, outVid);
+            processBackendFileList(listData.files, grantId, out, outVid, zipJobs);
             continue;
           }
         }
@@ -1219,27 +1323,8 @@ async function loadBackendGrants(grants) {
 
     // 单个文件分类处理
     if (g.kind === 'zip' || isZipName(name)) {
-      try {
-        var zRes = await fetch('/api/gallery/zip-from-path', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ grantId: grantId })
-        });
-        if (zRes.ok) {
-          var zData = await zRes.json();
-          for (var j = 0; j < zData.manifest.entries.length; j++) {
-            var ze = zData.manifest.entries[j];
-            out.push({
-              name: ze.path.split('/').pop(),
-              path: name + '/' + ze.path,
-              kind: 'zip', index: ze.index, zipPath: ze.path,
-              sessionId: zData.sessionId, size: ze.size || 0,
-              getBlob: null, zipFileHandle: null,
-              grantId: grantId, zipRel: ''
-            });
-          }
-        }
-      } catch (e) { console.warn('paste zip-from-path failed:', e); }
+      // Deferred: expanded progressively after the loose files are shown.
+      zipJobs.push({ grantId: grantId, rel: '', name: name });
     } else if (isSupportedExt(name)) {
       var item = {
         name: name, path: name, kind: 'backend',
@@ -1255,35 +1340,23 @@ async function loadBackendGrants(grants) {
       if (isVideoExt(name)) { outVid.push(item); } else { out.push(item); }
     }
   }
+  // Loose files first so the tree + first image render immediately.
   if (outVid.length) { appendVideoItems(outVid); }
   if (out.length) { appendItems(out); }
+  // Packs then stream in progressively (bounded concurrency).
+  await processBackendZipsProgressive(zipJobs);
 }
 
 // processBackendFileList converts a backend file listing into gallery items.
-async function processBackendFileList(files, grantId, out, outVid) {
+// Zip entries are NOT expanded here — they are pushed onto zipJobs and
+// processed progressively by processBackendZipsProgressive so the listing's
+// loose files can render immediately.
+function processBackendFileList(files, grantId, out, outVid, zipJobs) {
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
     if (f.kind === 'zip') {
-      try {
-        var zRes = await fetch('/api/gallery/zip-from-path', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ grantId: grantId, rel: f.rel })
-        });
-        if (!zRes.ok) continue;
-        var zData = await zRes.json();
-        for (var j = 0; j < zData.manifest.entries.length; j++) {
-          var e = zData.manifest.entries[j];
-          out.push({
-            name: e.path.split('/').pop(),
-            path: f.rel + '/' + e.path,
-            kind: 'zip', index: e.index, zipPath: e.path,
-            sessionId: zData.sessionId, size: e.size || 0,
-            getBlob: null, zipFileHandle: null,
-            grantId: grantId, zipRel: f.rel
-          });
-        }
-      } catch (e) { console.warn('zip-from-path failed:', e); }
+      if (zipJobs) zipJobs.push({ grantId: grantId, rel: f.rel, name: f.rel });
+      continue;
     } else if (f.kind === 'video') {
       outVid.push({
         name: f.name, path: f.rel, kind: 'backend',
@@ -1317,8 +1390,17 @@ async function onOpenDir() {
   var out = [];
   var outVid = [];
   await walkDir(dirHandle, '', out, outVid);
+  // walkDir collects archives as zipfile entries; show plain files first,
+  // then register packs progressively.
+  var openZips = [];
+  var openPlain = [];
+  for (var i = 0; i < out.length; i++) {
+    if (out[i].kind === 'zipfile') openZips.push(out[i]);
+    else openPlain.push(out[i]);
+  }
   if (outVid.length) { appendVideoItems(outVid); }
-  appendItems(out);
+  if (openPlain.length) { appendItems(openPlain); }
+  await processZipFilesProgressive(openZips);
 }
 
 async function onOpenFiles() {
