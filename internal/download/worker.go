@@ -92,12 +92,27 @@ func (m *Manager) processTask(taskID string) {
 
 	m.mu.Lock()
 	delete(m.active, taskID)
-	delete(m.controls, taskID)
+	// Only clean up the control entry we own. If RetryTask already replaced
+	// it (cancel→retry race), this stale run must not clobber the new run.
+	superseded := false
+	if cur, ok := m.controls[taskID]; ok {
+		if cur == tc {
+			delete(m.controls, taskID)
+		} else {
+			superseded = true
+		}
+	}
 	// Store log output even on error so users can inspect what happened.
-	if task, ok := m.tasks[taskID]; ok {
-		task.LogTail = log
+	if !superseded {
+		if task, ok := m.tasks[taskID]; ok {
+			task.LogTail = log
+		}
 	}
 	m.mu.Unlock()
+
+	if superseded {
+		return
+	}
 
 	switch {
 	case err != nil && errors.Is(err, ErrCancelled):

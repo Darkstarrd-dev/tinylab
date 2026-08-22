@@ -1,6 +1,7 @@
 
 # TinyRouter Download 下载功能架构
 > **最后核对（2026-08-08，Utility 子工具与 Download 生命周期）：** Download 前端当前由 Utility 菜单的 `download` 子工具承载，入口仍为 `web/static/download.js`，后端 API 路径保持 `/api/downloads/*` 不变。`web/static/app.js` 在 Utility 子工具切换时调用 `suspendDownload`/`resumeDownload`，离开时关闭 SSE 并执行 cleanup；任务队列、SSE 事件与服务端执行语义未因导航重组改变。FileTransfer 是并列的 Utility `fileTransfer` 子工具，其上传路由事实记录于 `docs/config-registry-state-architecture.md`。
+> **最后核对（2026-08-22，Download 页审计修复）：** (1) **后端 cancel→retry 竞态**：`RetryTask`/`RemoveTask` 增加 `m.active[taskID]` 门控（进程未退出的 cancelled 任务拒绝重试/移除，报 "task is still finishing"），`ClearCompleted` 跳过 `active` 任务；`processTask` 清理时按 control 指针比对（`cur == tc`），被 superseded 的旧运行不再覆盖 `LogTail`/终态（worker.go）。(2) **队列满语义**：`CreateTask`/`RetryTask` 投递改为阻塞等待 `enqueueTimeout`（10s，manager.go），超时才标 error 并 cancel 释放 context（修复 context 泄漏）。(3) **音频容器**：`BuildDownloadArgs` 音频分支加 `--extract-audio`（auto/original 不转码；mp3/m4a/flac/wav/opus 加 `--audio-format` + `--audio-quality 0`），前端 `#dl-type` change 时经 `applyContainerOptions` 切换容器下拉为音频格式集（`DL_CONTAINER_OPTIONS`）。(4) **前端**：解析卡片快照 type/quality/container（`cachedParsedOptionsMap`，卡片副标题显示 "720p · MKV" 式标签），下载按钮走 `withLoading`，同 URL 非终态去重（`downloadAlreadyQueued`），提交后清空 `#dl-url`；`removeDownload` 修复 `selectTask(null, firstId)` 参数错位并同步 `selectedTaskIds`；`playVideo` 不再隐式变更多选集；详情面板 SSE tick 走 `updateSelectedTaskView` 原地 patch（状态不变仅更新进度文本，`maybeRefreshDetailLog` 2s 节流拉日志，状态变化才全量重渲染）；删除死代码 `viewLog`/`togglePlaylistEntries`，声明 `downloadDefaultDir`，硬编码英文文案全部 i18n 化，移除重复 DOM id `dl-playlist-count`。新增测试：`TestBuildDownloadArgsAudioFormat`/`TestRetryRejectedWhileTaskActive`/`TestRemoveRejectedWhileTaskActive`/`TestClearCompletedKeepsActiveCancelledTask`。
 > **最后核对（2026-08-09，docs/audit_fix.md F-08/F-16 落地）：** (1) **下载 URL SSRF（F-16，2026-08-09 完整落地）**：两层防线——`internal/api/download/register.go::validateDownloadURL` 用 `internal/outbound.ValidateURL` + `outbound.Policy.CheckHost` 做初始 URL 预检（scheme 仅 http/https、拒绝 userinfo、异常端口黑名单、DNS 解析后全部 IP fail-closed，`createDownload`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload` 全部入口，`url_policy_test.go` 3 测试）；**本地 SSRF 代理** `internal/download/ssrfproxy.go`（`newSSRFProxy`/`handlePlain`/`handleConnect`/`injectProxy`/`ensureProxyArg`）——yt-dlp 经 `--proxy` 指向该代理，初始 URL、**每个重定向跳、每个媒体分片**都在建连前逐跳重校验（DNS 逐跳解析 + 已校验 IP 字面量固定拨号防 rebinding，CONNECT 隧道同），public→private 重定向拒绝（`ssrfproxy_test.go` 7 测试含 `TestSSRFProxyRejectsRedirectToPrivate`/`TestSSRFProxyConnectBlocksPrivateTarget`）；用户自配 `DownloadConfig.Proxy` 时显式 opt-out（不装本地代理）。审计 §8.2 决策项"Download 是否允许公共 URL 重定向"由实现定案：公共重定向放行但逐跳受控、私网目标拒绝。(2) **外部工具路径校验（F-08）**：Settings PATCH `YtDlpPath`/`FfmpegPath` 经 `internal/procutil.ValidateExecutable` 校验（绝对路径、regular file、Windows 可执行扩展名、拒绝临时/其它用户可写目录）；`internal/download/binary.go::resolveConfiguredTool` 对配置/env/PATH 候选同样校验（裸名先 `exec.LookPath`）。(3) 其余生命周期/参数/SSE 语义未变（本文 §4–§13 保持）。
 
 > **文档定位：** `internal/download/` 包、`internal/api/download/`（子包，原 `internal/api/download.go`）与前端 `web/static/download.js` 实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
@@ -199,15 +200,15 @@ stateDiagram-v2
 
 ### 4.5 任务 CRUD
 
-- **`CreateTask`（manager.go:244-293）**：生成 8 字节随机 hex ID（`generateID`，manager.go:502-509）、填默认 type/quality/container/dir、写 `tasks`+`order`+`controls`、非阻塞投递 `pendingCh`（缓冲 100，`select` 失败即标记 `StatusError` “download queue is full”，manager.go:284-290）、发布 `queue-updated`。返回 ID。
+- **`CreateTask`（manager.go）**：生成 8 字节随机 hex ID、填默认 type/quality/container/dir、写 `tasks`+`order`+`controls`、投递 `pendingCh`（缓冲 100；满时阻塞等待 `enqueueTimeout`=10s 让 worker 消化，超时才标 `StatusError` "download queue is full" 并 cancel 释放 context）、发布 `queue-updated`。返回 ID。
 - **`CreatePlaylistTask`（manager.go:298-343）**：先 `ExecutePlaylistInfo` 查信息（manager.go:299）；若 `SelectedIndices` 非空则只保留命中的 1-based 条目（manager.go:308-320，保留原始 `size` 供前端显示 “3 / 10”）；对每个 entry 循环 `CreateTask`（manager.go:322-341），返回所有子任务 ID + 标题。无内置串行。
 - **`ListTasks`（manager.go:381-391）**：按 `order` 返回快照拷贝。
 - **`GetTask`（manager.go:394-402）**：返回指定任务快照 + 存在标志。
 - **`CancelTask`（manager.go:358-378）**：终态任务直接返回；否则置 `cancelled` + `CompletedAt` 并 `tc.cancel()` 取消 context。
-- **`RemoveTask`（manager.go:427-451）**：仅允许终态任务，否则返回错误；从三处 map/order 清理。
-- **`ClearCompleted`（manager.go:405-424）**：遍历 `order`，将所有 `isTerminal` 任务从 `tasks`/`controls`/`active` 删除，保留未终态。
+- **`RemoveTask`（lifecycle.go）**：仅允许终态任务，否则返回错误；`m.active[taskID]` 的任务（cancelled 但进程未退出）拒绝移除，报 "task is still finishing"；通过后从三处 map/order 清理。
+- **`ClearCompleted`（lifecycle.go）**：遍历 `order`，将所有 `isTerminal` 且不在 `active` 中的任务从 `tasks`/`controls`/`active` 删除；仍在执行的 cancelled 任务保留（防止下载继续却无记录）。
 
-> 服务端有 `RetryTask`（manager.go，CancelTask 之后）：状态门控只允许 `StatusError`/`StatusCancelled` 重试，重置运行时字段（`Status=Pending`、`Error`、`Progress`、`FilePath`/`SavedFile`、`FileSize`、`StartedAt`/`CompletedAt`、`LogTail`）后创建新 context 并重新入队，task-item 保持原位置。前端 `retryDownload` 调用 `POST /api/downloads/{id}/retry` 原地重试（不再从 `downloadTasksMap` 读取参数重新 `POST /downloads` 创建新任务）。
+> 服务端有 `RetryTask`（lifecycle.go，CancelTask 之后）：状态门控只允许 `StatusError`/`StatusCancelled` 重试，且 `m.active[taskID]`（进程未退出的刚取消任务）拒绝重试——否则同一任务会出现双 yt-dlp 进程并发、旧运行清理覆盖新运行状态；通过后重置运行时字段并创建新 context 阻塞入队（同 `CreateTask` 的 `enqueueTimeout` 等待）。前端 `retryDownload` 调用 `POST /api/downloads/{id}/retry` 原地重试。
 
 ### 4.6 事件总线（非阻塞）
 

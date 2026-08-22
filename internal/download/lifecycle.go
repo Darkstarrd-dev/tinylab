@@ -45,6 +45,12 @@ func (m *Manager) RetryTask(taskID string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("task is not in a failed or cancelled state")
 	}
+	// A cancelled task whose yt-dlp process has not exited yet is still
+	// running in a worker. Retrying now would run two processes for one task.
+	if m.active[taskID] {
+		m.mu.Unlock()
+		return fmt.Errorf("task is still finishing; try again shortly")
+	}
 	// Reset state for re-execution.
 	task.Status = StatusPending
 	task.Error = ""
@@ -60,12 +66,16 @@ func (m *Manager) RetryTask(taskID string) error {
 	m.controls[taskID] = &taskControl{ctx: ctx, cancel: cancel}
 	m.mu.Unlock()
 
-	// Enqueue (same non-blocking pattern as CreateTask).
+	// Enqueue (blocking with a bounded wait so a full queue drains instead of
+	// instantly failing large playlist batches).
 	select {
 	case m.pendingCh <- taskID:
-	default:
+	case <-time.After(enqueueTimeout):
 		m.mu.Lock()
-		delete(m.controls, taskID)
+		if tc, ok := m.controls[taskID]; ok {
+			tc.cancel()
+			delete(m.controls, taskID)
+		}
 		m.mu.Unlock()
 		m.finalizeTask(taskID, StatusError, "download queue is full", 0)
 		return fmt.Errorf("download queue is full")
@@ -84,7 +94,7 @@ func (m *Manager) ClearCompleted() {
 		if !ok {
 			continue
 		}
-		if isTerminal(t.Status) {
+		if isTerminal(t.Status) && !m.active[id] {
 			delete(m.tasks, id)
 			delete(m.controls, id)
 			delete(m.active, id)
@@ -108,6 +118,12 @@ func (m *Manager) RemoveTask(taskID string) error {
 	if !isTerminal(t.Status) {
 		m.mu.Unlock()
 		return fmt.Errorf("only completed tasks can be removed")
+	}
+	// A cancelled task whose process has not exited yet must not be removed:
+	// the download would continue invisibly with no task record.
+	if m.active[taskID] {
+		m.mu.Unlock()
+		return fmt.Errorf("task is still finishing; try again shortly")
 	}
 	delete(m.tasks, taskID)
 	delete(m.controls, taskID)

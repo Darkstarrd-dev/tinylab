@@ -11,6 +11,7 @@ var downloadTasksMap = {};
 // Map of task id -> rendered DOM element.
 var downloadTaskEls = {};
 // Persisted default download directory from the server settings.
+var downloadDefaultDir = '';
 var browsePickerOpen = false;
 
 // DL_STATUS_KEYS maps a raw TaskStatus to the i18n key for its label.
@@ -29,6 +30,7 @@ var selectedTaskId = '';
 // In-memory cache to restore parsed playlist and folding state when navigating back.
 var cachedParsedPreviewMap = {};
 var cachedParsedFoldedMap = {};
+var cachedParsedOptionsMap = {};
 
 // selectedTaskIds tracks all selected task IDs (for batch operations like multi-play)
 var selectedTaskIds = [];
@@ -171,8 +173,18 @@ function renderDownload(container) {
       if (e.key === 'Enter') { e.preventDefault(); parseDownloadUrl(); }
     });
   }
+  // Audio/video types offer different container sets; keep the hidden
+  // native select and the animated menu in sync on type change.
+  var typeSelect = document.getElementById('dl-type');
+  if (typeSelect) {
+    typeSelect.addEventListener('change', function() {
+      applyContainerOptions(typeSelect.value);
+    });
+  }
+
 
   selectedTaskId = '';
+  selectedTaskIds = [];
   loadDownloadTasks();
   resumeDownload();
   loadDownloadSettings();
@@ -200,33 +212,40 @@ async function doParse(url) {
   var playlist = results[1].status === 'fulfilled' ? results[1].value : null;
 
   var cardId = 'parse-card-' + Math.random().toString(36).substr(2, 9);
+  // Snapshot the toolbar options now so the card keeps them even if the
+  // user changes the dropdowns before clicking Download.
+  var toolbar = readToolbarOptions();
 
   // Prefer playlist view when the playlist endpoint returned entries.
   if (playlist && Array.isArray(playlist.entries) && playlist.entries.length > 0) {
-    renderPlaylistPreview(cardId, url, playlist);
+    renderPlaylistPreview(cardId, url, playlist, toolbar);
     return;
   }
   if (single && !single.error && (single.title || single.webpage_url || single.extractor_key)) {
-    renderSinglePreview(cardId, url, single);
+    renderSinglePreview(cardId, url, single, toolbar);
     return;
   }
   // Some servers return the single info nested under "info".
   if (single && !single.error && single.info) {
-    renderSinglePreview(cardId, url, single.info);
+    renderSinglePreview(cardId, url, single.info, toolbar);
     return;
   }
   var msg = (single && single.error) ? single.error : (playlist && playlist.error ? playlist.error : 'unknown');
   toast(t('parseFailed', [msg]), 'error');
 }
 
-// renderSinglePreview shows the parsed video info.
-function renderSinglePreview(cardId, url, info) {
-  var thumb = info.thumbnail || '';
+// renderSinglePreview shows the parsed video info. opts is the toolbar
+// snapshot taken at parse time; the card keeps it until Download is clicked.
+function renderSinglePreview(cardId, url, info, opts) {
+  opts = opts || readToolbarOptions();
+  cachedParsedOptionsMap[cardId] = opts;
   var title = info.title || url;
   var sub = [];
   if (info.duration) sub.push(formatDuration(info.duration));
   if (info.uploader) sub.push(info.uploader);
-  
+  var optsLabel = parsedOptionsLabel(opts);
+  if (optsLabel) sub.push(optsLabel);
+
   var html = `
     <div class="dl-playlist-preview">
       <div class="dl-playlist-header-sticky" style="border-bottom:none; margin-bottom:0;">
@@ -239,7 +258,7 @@ function renderSinglePreview(cardId, url, info) {
             <div class="dl-playlist-subtitle">${escapeHtml(sub.join(' · '))}</div>
           </div>
           <div class="dl-playlist-header-actions">
-            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="Remove List">
+            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="${escapeHtml(t('removeList'))}">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -247,7 +266,7 @@ function renderSinglePreview(cardId, url, info) {
         <div class="dl-playlist-actions-row">
           <div class="dl-playlist-actions-left"></div>
           <div class="dl-playlist-actions-right">
-            <button class="btn btn-primary btn-sm" type="button" onclick="startDownload('${cardId}', '${escapeForJsString(url)}')">${escapeHtml(t('download'))}</button>
+            <button class="btn btn-primary btn-sm" type="button" onclick="withLoading(this, function(){ startDownload('${cardId}', '${escapeForJsString(url)}'); })">${escapeHtml(t('download'))}</button>
           </div>
         </div>
       </div>
@@ -258,10 +277,14 @@ function renderSinglePreview(cardId, url, info) {
 
 // renderPlaylistPreview shows the detected playlist with a selectable list of
 // entries, so users can pick which ones to download.
-function renderPlaylistPreview(cardId, url, playlist) {
+function renderPlaylistPreview(cardId, url, playlist, opts) {
   var title = playlist.title || url;
   var entries = playlist.entries || [];
   var count = entries.length;
+  opts = opts || readToolbarOptions();
+  cachedParsedOptionsMap[cardId] = opts;
+  var optsLabel = parsedOptionsLabel(opts);
+  var subtitle = t('playlistDetected', [count]) + (optsLabel ? ' · ' + optsLabel : '');
   var rows = entries.map(function(entry) {
     var label = entry.title || (playlist.url || url);
     return '' +
@@ -283,14 +306,14 @@ function renderPlaylistPreview(cardId, url, playlist) {
           </div>
           <div class="dl-playlist-header-text">
             <div class="dl-playlist-title" data-tooltip="${escapeHtml(title)}">${escapeHtml(title)}</div>
-            <div class="dl-playlist-subtitle">${escapeHtml(t('playlistDetected', [count]))}</div>
+            <div class="dl-playlist-subtitle">${escapeHtml(subtitle)}</div>
           </div>
           <div class="dl-playlist-header-actions">
-            <button class="btn-action-icon" type="button" onclick="toggleParsedCard('${cardId}')" data-tooltip="Collapse/Expand List">
+            <button class="btn-action-icon" type="button" onclick="toggleParsedCard('${cardId}')" data-tooltip="${escapeHtml(t('collapseExpandList'))}">
               <svg class="icon-chevron-up" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
               <svg class="icon-chevron-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
-            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="Remove List">
+            <button class="btn-action-icon" type="button" onclick="removeParsedCard('${cardId}')" data-tooltip="${escapeHtml(t('removeList'))}">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -301,8 +324,8 @@ function renderPlaylistPreview(cardId, url, playlist) {
             <button class="btn btn-ghost btn-sm" type="button" onclick="setAllPlaylistSelected('${cardId}', false)">${escapeHtml(t('deselectAll'))}</button>
           </div>
           <div class="dl-playlist-actions-right">
-            <span class="dl-playlist-count" id="dl-playlist-count">${escapeHtml(t('nSelected', [count]))}</span>
-            <button class="btn btn-primary btn-sm" type="button" onclick="startPlaylistDownload('${cardId}', '${escapeForJsString(url)}')">${escapeHtml(t('download'))}</button>
+            <span class="dl-playlist-count">${escapeHtml(t('nSelected', [count]))}</span>
+            <button class="btn btn-primary btn-sm" type="button" onclick="withLoading(this, function(){ startPlaylistDownload('${cardId}', '${escapeForJsString(url)}'); })">${escapeHtml(t('download'))}</button>
           </div>
         </div>
       </div>
@@ -375,6 +398,7 @@ function removeParsedCard(cardId) {
   }
   delete cachedParsedPreviewMap[cardId];
   delete cachedParsedFoldedMap[cardId];
+  delete cachedParsedOptionsMap[cardId];
   checkPreviewVisibility();
 }
 
@@ -652,11 +676,23 @@ async function startDownload(cardId, url) {
     toast(t('downloadUrlPlaceholder'), 'warning');
     return;
   }
+  url = url.trim();
+  // Prefer the options snapshotted on the parsed card over the live dropdowns.
+  var opts = (cardId && cachedParsedOptionsMap[cardId]) || readToolbarOptions();
+  // Reject a duplicate submit of the same URL while a task for it is live.
+  var duplicate = Object.keys(downloadTasksMap).some(function(id) {
+    var task = downloadTasksMap[id];
+    return task && task.url === url && !isTerminalTaskStatus(task.status);
+  });
+  if (duplicate) {
+    toast(t('downloadAlreadyQueued'), 'warning');
+    return;
+  }
   var body = {
-    url: url.trim(),
-    type: (document.getElementById('dl-type') || {}).value || 'video',
-    quality: (document.getElementById('dl-quality') || {}).value || 'best',
-    container: (document.getElementById('dl-container') || {}).value || 'auto',
+    url: url,
+    type: opts.type,
+    quality: opts.quality,
+    container: opts.container,
     downloadDir: resolveDownloadDir()
   };
   var res = await apiPost('/downloads', body);
@@ -667,6 +703,8 @@ async function startDownload(cardId, url) {
   if (cardId) {
     removeParsedCard(cardId);
   }
+  var urlInput = document.getElementById('dl-url');
+  if (urlInput) urlInput.value = '';
   toast(t('downloadStarted'), 'success');
   if (res && res.id) {
     downloadTasksMap[res.id] = res;
@@ -681,16 +719,19 @@ async function startPlaylistDownload(cardId, url) {
     toast(t('downloadUrlPlaceholder'), 'warning');
     return;
   }
+  url = url.trim();
   var indices = getSelectedPlaylistIndices(cardId);
   if (indices.length === 0) {
     toast(t('noSelection'), 'warning');
     return;
   }
+  // Prefer the options snapshotted on the parsed card over the live dropdowns.
+  var opts = (cardId && cachedParsedOptionsMap[cardId]) || readToolbarOptions();
   var body = {
-    url: url.trim(),
-    type: (document.getElementById('dl-type') || {}).value || 'video',
-    quality: (document.getElementById('dl-quality') || {}).value || 'best',
-    container: (document.getElementById('dl-container') || {}).value || 'auto',
+    url: url,
+    type: opts.type,
+    quality: opts.quality,
+    container: opts.container,
     downloadDir: resolveDownloadDir(),
     selectedIndices: indices
   };
@@ -708,12 +749,14 @@ async function startPlaylistDownload(cardId, url) {
       }
     }
   }
+  var urlInput = document.getElementById('dl-url');
+  if (urlInput) urlInput.value = '';
   toast(t('downloadStarted'), 'success');
   // The backend may return a single id, a list of ids, or a status object.
   var ids = res && res.ids ? res.ids : (res && res.id ? [res.id] : []);
   if (ids.length) {
     ids.forEach(function(id) {
-      downloadTasksMap[id] = { id: id, status: 'pending', url: url.trim() };
+      downloadTasksMap[id] = { id: id, status: 'pending', url: url };
       renderDownloadTask(downloadTasksMap[id], true);
     });
   }
@@ -910,11 +953,13 @@ function updateDownloadTask(task) {
     itemEl.classList.toggle('selected', selectedTaskIds.indexOf(task.id) >= 0);
   }
 
-  // Refresh the detail panel if this is the selected task.
+  // Refresh the detail panel if this is the selected task. Live phases
+  // patch progress in place; status transitions re-render (actions change).
   if (task.id === selectedTaskId) {
-    renderTaskDetail();
+    updateSelectedTaskView(task);
   }
 }
+
 
 // selectTask updates the selected task id, highlights the left list items and
 // refreshes the right-hand detail panel. Supports Ctrl and Shift multi-select.
@@ -966,7 +1011,8 @@ function selectTask(event, taskId) {
   renderTaskDetail();
 }
 
-// renderTaskDetail renders the right-hand detail panel for the selected task.
+var lastDetailLogFetchAt = 0;
+
 // renderTaskDetail renders the right-hand detail panel for the selected task.
 function renderTaskDetail() {
   var detail = document.getElementById('dl-task-detail');
@@ -974,27 +1020,156 @@ function renderTaskDetail() {
   var task = selectedTaskId ? downloadTasksMap[selectedTaskId] : null;
   detail.innerHTML = taskDetailHtml(task);
   if (!task) return;
+  lastDetailLogFetchAt = Date.now();
+  fetchLogInto(task.id, 'dl-detail-log', true);
+}
 
-  // Fetch the log content for the pre element.
-  fetch('/api/downloads/' + encodeURIComponent(task.id) + '/log')
+// fetchLogInto loads a task's yt-dlp log tail into the given pre element.
+function fetchLogInto(taskId, elId, autoscroll) {
+  fetch('/api/downloads/' + encodeURIComponent(taskId) + '/log')
     .then(function(resp) {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.text();
     })
     .then(function(text) {
-      var logEl = document.getElementById('dl-detail-log');
-      if (!logEl) return;
+      var el = document.getElementById(elId);
+      if (!el) return;
       if (!text || !text.trim()) {
-        logEl.textContent = t('logEmpty');
+        el.textContent = t('logEmpty');
       } else {
-        logEl.textContent = text;
-        logEl.scrollTop = logEl.scrollHeight;
+        el.textContent = text;
+        if (autoscroll) el.scrollTop = el.scrollHeight;
       }
     })
     .catch(function(err) {
-      var logEl = document.getElementById('dl-detail-log');
-      if (logEl) logEl.textContent = 'Failed to load logs: ' + (err && err.message ? err.message : String(err));
+      var el = document.getElementById(elId);
+      if (el) el.textContent = t('logLoadFailed', [err && err.message ? err.message : String(err)]);
     });
+}
+
+// updateSelectedTaskView refreshes the open detail panel for one SSE tick.
+// Same live status: patch progress text only (no rebuild, no log refetch).
+// Status changed or terminal: full re-render so actions/badge stay correct.
+function updateSelectedTaskView(task) {
+  var detail = document.getElementById('dl-task-detail');
+  if (!detail) return;
+  var layoutEl = detail.querySelector('.dl-detail-layout');
+  var renderedStatus = layoutEl ? (layoutEl.getAttribute('data-status') || '') : '';
+  var status = task.status || 'pending';
+  if (status !== renderedStatus || (status !== 'downloading' && status !== 'processing')) {
+    renderTaskDetail();
+    return;
+  }
+  var progEl = detail.querySelector('.dl-detail-progress');
+  if (progEl) progEl.textContent = taskProgressText(task);
+  maybeRefreshDetailLog(task.id);
+}
+
+// maybeRefreshDetailLog refetches the log tail at most once every 2s while a
+// task is downloading, instead of on every progress event.
+function maybeRefreshDetailLog(taskId) {
+  var now = Date.now();
+  if (now - lastDetailLogFetchAt < 2000) return;
+  lastDetailLogFetchAt = now;
+  fetchLogInto(taskId, 'dl-detail-log', true);
+}
+
+// clampProgress returns the task's progress fraction clamped to 0..1.
+function clampProgress(task) {
+  var p = (task && task.progress) || {};
+  var percent = typeof p.percent === 'number' ? p.percent : 0;
+  if (percent < 0) percent = 0;
+  if (percent > 1) percent = 1;
+  return percent;
+}
+
+// taskProgressText renders "NN.N% · speed · ETA" for a live task.
+function taskProgressText(task) {
+  var p = task.progress || {};
+  var parts = [formatProgress(clampProgress(task))];
+  if (p.speedBytes) parts.push(formatSpeed(p.speedBytes));
+  if (p.etaSeconds) parts.push('ETA ' + formatETA(p.etaSeconds));
+  return parts.join(' · ');
+}
+
+// isTerminalTaskStatus reports whether a raw TaskStatus will never change.
+function isTerminalTaskStatus(status) {
+  return status === 'completed' || status === 'error' || status === 'cancelled';
+}
+
+// readToolbarOptions snapshots the current type/quality/container dropdowns.
+function readToolbarOptions() {
+  return {
+    type: (document.getElementById('dl-type') || {}).value || 'video',
+    quality: (document.getElementById('dl-quality') || {}).value || 'best',
+    container: (document.getElementById('dl-container') || {}).value || 'auto'
+  };
+}
+
+// parsedOptionsLabel renders a short "quality · container" summary for cards.
+function parsedOptionsLabel(opts) {
+  if (!opts) return '';
+  var quality = getResolutionLabel(opts.quality);
+  if (quality === '-') quality = opts.quality;
+  var container;
+  if (opts.container === 'auto') {
+    container = 'Auto';
+  } else if (opts.container === 'original') {
+    container = t('original');
+  } else {
+    container = String(opts.container).toUpperCase();
+  }
+  return quality + ' · ' + container;
+}
+
+// DL_CONTAINER_OPTIONS lists container choices per download type. Audio uses
+// yt-dlp --audio-format values; video uses merge/remux containers.
+var DL_CONTAINER_OPTIONS = {
+  video: [
+    ['auto', 'Auto (MP4/MKV)'],
+    ['mp4', 'MP4'],
+    ['mkv', 'MKV'],
+    ['webm', 'WebM'],
+    ['original', null] // label filled at call time via t('original')
+  ],
+  audio: [
+    ['auto', 'Auto'],
+    ['mp3', 'MP3'],
+    ['m4a', 'M4A'],
+    ['flac', 'FLAC'],
+    ['wav', 'WAV'],
+    ['opus', 'Opus']
+  ]
+};
+
+// applyContainerOptions rebuilds the animated custom-select menu and the
+// hidden native select when the download type changes. Keeps the current
+// value when still valid; otherwise resets to auto.
+function applyContainerOptions(type) {
+  var wrapper = document.getElementById('dl-container-wrap');
+  var selectEl = document.getElementById('dl-container');
+  if (!wrapper || !selectEl) return;
+  var defs = DL_CONTAINER_OPTIONS[type === 'audio' ? 'audio' : 'video'];
+  var current = selectEl.value;
+  var nextValue = 'auto';
+  defs.forEach(function(def) { if (def[0] === current) nextValue = current; });
+  function labelOf(def) { return def[1] === null ? t('original') : def[1]; }
+  var menuHtml = '';
+  var optionHtml = '';
+  defs.forEach(function(def) {
+    var selected = def[0] === nextValue ? ' selected' : '';
+    menuHtml += '<div class="custom-select-option' + selected + '" data-value="' + escapeAttr(def[0]) + '" onclick="selectCustomOption(\'dl-container-wrap\', \'' + def[0] + '\', \'' + escapeForJsString(labelOf(def)) + '\')">' +
+      '<span class="custom-select-option-link">' + escapeHtml(labelOf(def)) + '</span>' +
+      '</div>';
+    optionHtml += '<option value="' + escapeAttr(def[0]) + '"' + selected + '>' + escapeHtml(labelOf(def)) + '</option>';
+  });
+  var menu = wrapper.querySelector('.custom-select-menu');
+  if (menu) menu.innerHTML = menuHtml;
+  selectEl.innerHTML = optionHtml;
+  selectEl.value = nextValue;
+  var labelEl = wrapper.querySelector('.custom-select-label');
+  var match = defs.filter(function(d) { return d[0] === nextValue; })[0];
+  if (labelEl && match) labelEl.textContent = labelOf(match);
 }
 
 // taskListItemHtml returns the compact left-side list row for a task.
@@ -1029,12 +1204,9 @@ function taskDetailHtml(task) {
     return '<div class="dl-detail-empty">' + escapeHtml(t('noDownloads')) + '</div>';
   }
   var p = task.progress || {};
-  var percent = typeof p.percent === 'number' ? p.percent : 0;
-  if (percent < 0) percent = 0;
-  if (percent > 1) percent = 1;
-  var pctText = formatProgress(percent);
-
   var status = task.status || 'pending';
+  var pctText = formatProgress(clampProgress(task));
+
   var statusKey = DL_STATUS_KEYS[status] || 'statusPending';
   var statusLabel = t(statusKey);
   var title = task.title || task.url || task.id;
@@ -1050,10 +1222,7 @@ function taskDetailHtml(task) {
 
   var progressText = '';
   if (status === 'downloading' || status === 'processing') {
-    var parts = [pctText];
-    if (p.speedBytes) parts.push(formatSpeed(p.speedBytes));
-    if (p.etaSeconds) parts.push('ETA ' + formatETA(p.etaSeconds));
-    progressText = parts.join(' · ');
+    progressText = taskProgressText(task);
   }
 
   var actions = '';
@@ -1064,7 +1233,7 @@ function taskDetailHtml(task) {
     actions += '<button class="btn btn-ghost" type="button" onclick="removeDownload(\'' + tid + '\')">' + escapeHtml(t('removeDownload')) + '</button>';
   } else if (status === 'completed') {
     actions = '<button class="btn btn-ghost" type="button" onclick="openDownloadDir(\'' + tid + '\')">' + escapeHtml(t('openDir')) + '</button>';
-    actions += '<button class="btn btn-ghost" type="button" onclick="playVideo(\'' + tid + '\')">Play</button>';
+    actions += '<button class="btn btn-ghost" type="button" onclick="playVideo(\'' + tid + '\')">' + escapeHtml(t('play')) + '</button>';
     actions += '<button class="btn btn-ghost" type="button" onclick="removeDownload(\'' + tid + '\')">' + escapeHtml(t('removeDownload')) + '</button>';
   }
 
@@ -1089,7 +1258,7 @@ function taskDetailHtml(task) {
     '<div class="dl-detail-meta-line"><strong>' + escapeHtml(t('size')) + ':</strong> ' + sizeLabel + ' · <strong>' + escapeHtml(t('resolution')) + ':</strong> ' + resLabel + '</div>';
 
   return '' +
-    '<div class="dl-detail-layout" data-task-id="' + tid + '">' +
+    '<div class="dl-detail-layout" data-task-id="' + tid + '" data-status="' + escapeAttr(status) + '">' +
       '<div class="dl-detail-left">' +
         '<div class="dl-detail-thumb">' + thumb + '</div>' +
         '<div class="dl-detail-title" data-tooltip="' + escapeAttr(title) + '">' + escapeHtml(title) + '</div>' +
@@ -1136,6 +1305,8 @@ async function removeDownload(taskId) {
   }
   if (downloadTaskEls[taskId]) { downloadTaskEls[taskId].remove(); delete downloadTaskEls[taskId]; }
   delete downloadTasksMap[taskId];
+  var selIdx = selectedTaskIds.indexOf(taskId);
+  if (selIdx >= 0) selectedTaskIds.splice(selIdx, 1);
   if (selectedTaskId === taskId) selectedTaskId = '';
   var listEl = document.getElementById('dl-task-list');
   var detailEl = document.getElementById('dl-task-detail');
@@ -1148,7 +1319,7 @@ async function removeDownload(taskId) {
   // Pick a new selection if the removed one was selected.
   if (!selectedTaskId) {
     var firstId = Object.keys(downloadTaskEls)[0];
-    selectTask(firstId);
+    selectTask(null, firstId);
   } else {
     renderTaskDetail();
   }
@@ -1168,64 +1339,8 @@ async function clearCompletedDownloads() {
 async function openDownloadDir(taskId) {
   var res = await apiPost('/downloads/' + encodeURIComponent(taskId) + '/open', {});
   if (res && res.error) {
-    toast(res.error, 'error');
+    toast(t('downloadFailed', [res.error]), 'error');
   }
-}
-
-// viewLog opens a modal displaying the yt-dlp log output for a task.
-function viewLog(taskId) {
-  if (document.getElementById('dl-log-overlay')) return;
-
-  var overlay = document.createElement('div');
-  overlay.className = 'dl-log-modal';
-  overlay.id = 'dl-log-overlay';
-  overlay.innerHTML = '' +
-    '<div class="dl-log-card">' +
-      '<div class="dl-log-modal-title">' +
-        escapeHtml(t('viewLog')) +
-        '<button class="dl-log-modal-close" id="dl-log-close" type="button">&times;</button>' +
-      '</div>' +
-      '<pre class="dl-log-content" id="dl-log-content">' + escapeHtml(t('loading')) + '...</pre>' +
-    '</div>';
-
-  document.body.appendChild(overlay);
-  requestAnimationFrame(function() { overlay.classList.add('show'); });
-
-  var keyHandler = null;
-  function closeModal() {
-    if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
-    overlay.classList.remove('show');
-    overlay.addEventListener('transitionend', function() { overlay.remove(); }, { once: true });
-  }
-
-  document.getElementById('dl-log-close').onclick = closeModal;
-  overlay.addEventListener('click', function(e) {
-    if (e.target === overlay) closeModal();
-  });
-  keyHandler = function(e) {
-    if (e.key === 'Escape') closeModal();
-  };
-  document.addEventListener('keydown', keyHandler);
-
-  // Fetch the log content.
-  fetch('/api/downloads/' + encodeURIComponent(taskId) + '/log')
-    .then(function(resp) {
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      return resp.text();
-    })
-    .then(function(text) {
-      var el = document.getElementById('dl-log-content');
-      if (!el) return;
-      if (!text || !text.trim()) {
-        el.textContent = t('logEmpty');
-      } else {
-        el.textContent = text;
-      }
-    })
-    .catch(function(err) {
-      var el = document.getElementById('dl-log-content');
-      if (el) el.textContent = t('downloadFailed', [err && err.message ? err.message : String(err)]);
-    });
 }
 
 // formatBytes formats a byte count into a human-readable string.
@@ -1275,49 +1390,24 @@ function formatProgress(percent) {
   return pct.toFixed(1) + '%';
 }
 
-// togglePlaylistEntries expands or collapses the playlist list rows in preview.
-function togglePlaylistEntries() {
-  var entries = document.querySelector('.dl-playlist-entries');
-  var heading = document.querySelector('.dl-playlist-entries-heading');
-  var iconUp = document.querySelector('.icon-chevron-up');
-  var iconDown = document.querySelector('.icon-chevron-down');
-  var taskList = document.getElementById('dl-task-list');
-  if (!entries) return;
-  if (entries.style.display === 'none') {
-    entries.style.display = 'flex';
-    isParsedPreviewFolded = false;
-    if (heading) heading.style.display = 'block';
-    if (iconUp) iconUp.style.display = 'block';
-    if (iconDown) iconDown.style.display = 'none';
-    if (taskList) taskList.style.display = 'none';
-  } else {
-    entries.style.display = 'none';
-    isParsedPreviewFolded = true;
-    if (heading) heading.style.display = 'none';
-    if (iconUp) iconUp.style.display = 'none';
-    if (iconDown) iconDown.style.display = 'block';
-    if (taskList) taskList.style.display = 'flex';
-  }
-}
-
 // playVideo - hands completed download outputs to the Gallery through the
 // MediaBridge. No direct galleryState writes and no absolute paths: each
 // output is registered as a MediaAsset whose bytes are served by the
 // controlled /api/downloads/{id}/file endpoint; Gallery imports through its
 // own galleryImportAssets entry point.
 function playVideo(taskId) {
-  if (taskId && selectedTaskIds.indexOf(taskId) < 0) {
-    selectedTaskIds.push(taskId);
-  }
+  // Play the whole multi-selection when the clicked task is part of it;
+  // otherwise play just the clicked task. No hidden selection mutation.
+  var sourceIds = (taskId && selectedTaskIds.indexOf(taskId) >= 0) ? selectedTaskIds : [taskId];
 
-  var completedTasks = selectedTaskIds.map(function(id) {
+  var completedTasks = sourceIds.map(function(id) {
     return downloadTasksMap[id];
   }).filter(function(t) {
     return t && t.status === 'completed' && (t.filePath || t.savedFile);
   });
 
   if (!completedTasks.length) {
-    toast('No completed videos selected', 'warning');
+    toast(t('noCompletedSelected'), 'warning');
     return;
   }
 
@@ -1338,22 +1428,18 @@ function playVideo(taskId) {
   if (typeof window.MediaBridge === 'undefined' ||
       typeof window.MediaBridge.register !== 'function' ||
       typeof window.MediaBridge.openGallery !== 'function') {
-    toast('MediaBridge unavailable', 'error');
+    toast(t('mediaBridgeUnavailable'), 'error');
     return;
   }
 
-  var playMsg = assets.length > 1
-    ? 'Playing ' + assets.length + ' videos... (Switching to Gallery)'
-    : 'Playing ' + assets[0].name + '... (Switching to Gallery)';
-  toast(playMsg, 'success');
+  var playMsg = t('playingInGallery', [assets.length > 1 ? assets.length : assets[0].name]);
 
   Promise.all(assets.map(function(a) { return window.MediaBridge.register(a); }))
     .then(function(ids) {
       window.MediaBridge.openGallery(ids);
     })
     .catch(function(err) {
-      console.error('MediaBridge register failed:', err);
-      toast('Failed to open in Gallery', 'error');
+      toast(t('openGalleryFailed'), 'error');
     });
 }
 
@@ -1373,13 +1459,14 @@ function mimeFromDownloadName(name) {
 // getResolutionLabel maps quality preset to display resolution labels.
 function getResolutionLabel(quality) {
   var map = {
-    best: 'Best',
+    best: null, // label filled at call time via t('qualityBest')
     good: '1080p',
     normal: '720p',
     bad: '480p',
     worst: '360p'
   };
-  return map[quality] || '-';
+  var label = map[quality];
+  return label === null ? t('qualityBest') : (label || '-');
 }
 
 // Custom dropdown interaction handlers for theme-integrated animated select menus.

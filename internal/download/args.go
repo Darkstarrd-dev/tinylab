@@ -56,6 +56,14 @@ func BuildDownloadArgs(rawURL string, downloadType DownloadType, quality Quality
 	// 格式选择器
 	if downloadType == TypeAudio {
 		args = append(args, "-f", resolveAudioFormatSelector(quality))
+		// 音频模式：提取音轨；container 为具体音频格式时转码（mp3/m4a/flac/wav/opus），
+		// auto/original 保留原生容器不做转码。
+		switch container {
+		case ContainerAuto, ContainerOriginal, "":
+			args = append(args, "--extract-audio")
+		default:
+			args = append(args, "--extract-audio", "--audio-format", string(container), "--audio-quality", "0")
+		}
 	} else {
 		sel := resolveVideoFormatSelector(quality)
 		if sel != "" {

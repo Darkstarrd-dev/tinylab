@@ -123,13 +123,18 @@ func (m *Manager) CreateTask(input CreateTaskInput) string {
 	m.controls[id] = &taskControl{ctx: ctx, cancel: cancel}
 	m.mu.Unlock()
 
-	// 投递到队列（非阻塞失败时丢弃，但缓冲 100 足够）。
+	// 投递到队列；队列满时最多等待 enqueueTimeout 让 worker 消化。
+	timer := time.NewTimer(enqueueTimeout)
+	defer timer.Stop()
 	select {
 	case m.pendingCh <- id:
-	default:
-		// 队列满，立即标记错误。
+	case <-timer.C:
+		// 队列在超时内仍未腾出空位，标记错误并释放 context。
 		m.mu.Lock()
-		delete(m.controls, id)
+		if tc, ok := m.controls[id]; ok {
+			tc.cancel()
+			delete(m.controls, id)
+		}
 		m.mu.Unlock()
 		m.finalizeTask(id, StatusError, "download queue is full", 0)
 		return id
@@ -141,6 +146,11 @@ func (m *Manager) CreateTask(input CreateTaskInput) string {
 // infoQueryTimeout bounds metadata queries: a stalled upstream (network hang,
 // dead site) must not wedge the HTTP handler forever.
 const infoQueryTimeout = 60 * time.Second
+
+// enqueueTimeout bounds how long task creation waits for a queue slot when
+// pendingCh is full, so large playlist batches drain instead of instantly
+// failing their tail entries.
+const enqueueTimeout = 10 * time.Second
 
 // GetVideoInfo 查询视频信息（不下载）。
 func (m *Manager) GetVideoInfo(ctx context.Context, rawURL string) (*VideoInfo, error) {

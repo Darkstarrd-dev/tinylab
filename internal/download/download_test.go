@@ -292,3 +292,73 @@ func TestIsBilibiliURL(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDownloadArgsAudioFormat(t *testing.T) {
+	url := "https://example.com/a"
+	settings := RuntimeSettings{}
+
+	// 具体音频容器 → 提取并转码
+	args := BuildDownloadArgs(url, TypeAudio, QualityBest, ContainerFormat("mp3"), "/tmp/dl", 1, settings)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--extract-audio --audio-format mp3") {
+		t.Errorf("audio with mp3 container should add --extract-audio --audio-format mp3: %v", args)
+	}
+
+	// auto 容器 → 仅提取，不转码
+	argsAuto := BuildDownloadArgs(url, TypeAudio, QualityBest, ContainerAuto, "/tmp/dl", 1, settings)
+	joinedAuto := strings.Join(argsAuto, " ")
+	if !strings.Contains(joinedAuto, "--extract-audio") {
+		t.Errorf("audio with auto container should add --extract-audio: %v", argsAuto)
+	}
+	if strings.Contains(joinedAuto, "--audio-format") {
+		t.Errorf("audio with auto container should not transcode: %v", argsAuto)
+	}
+}
+
+func TestRetryRejectedWhileTaskActive(t *testing.T) {
+	m := NewManager(RuntimeSettings{}, nil)
+	id := m.CreateTask(CreateTaskInput{URL: "https://example.com/v"})
+	// Simulate: worker picked the task up, user cancelled it, but the yt-dlp
+	// process has not exited yet (still active). Retry must be rejected.
+	m.mu.Lock()
+	m.tasks[id].Status = StatusCancelled
+	m.active[id] = true
+	m.mu.Unlock()
+	if err := m.RetryTask(id); err == nil {
+		t.Fatal("expected RetryTask to be rejected while the task is still active")
+	}
+}
+
+func TestRemoveRejectedWhileTaskActive(t *testing.T) {
+	m := NewManager(RuntimeSettings{}, nil)
+	id := m.CreateTask(CreateTaskInput{URL: "https://example.com/v"})
+	m.mu.Lock()
+	m.tasks[id].Status = StatusCancelled
+	m.active[id] = true
+	m.mu.Unlock()
+	if err := m.RemoveTask(id); err == nil {
+		t.Fatal("expected RemoveTask to be rejected while the task is still active")
+	}
+}
+
+func TestClearCompletedKeepsActiveCancelledTask(t *testing.T) {
+	m := NewManager(RuntimeSettings{}, nil)
+	id := m.CreateTask(CreateTaskInput{URL: "https://example.com/v"})
+	m.mu.Lock()
+	m.tasks[id].Status = StatusCancelled
+	m.active[id] = true
+	m.mu.Unlock()
+
+	m.ClearCompleted()
+	if _, ok := m.GetTask(id); !ok {
+		t.Fatal("ClearCompleted must keep a cancelled task whose process is still running")
+	}
+
+	m.mu.Lock()
+	delete(m.active, id)
+	m.mu.Unlock()
+	m.ClearCompleted()
+	if _, ok := m.GetTask(id); ok {
+		t.Fatal("ClearCompleted should remove the cancelled task once it is no longer active")
+	}
+}
