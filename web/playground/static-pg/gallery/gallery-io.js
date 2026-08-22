@@ -176,7 +176,12 @@ function getVideoStreamURL(item) {
   if (item.mainURL && String(item.mainURL).indexOf('/api/archive/') === 0) return item.mainURL;
   // Backend gallery items (from open-dir / paste-paths grants) can stream
   // directly — the handler serves via http.ServeFile with Range + Accept-Ranges: bytes.
-  if (item.grantId) {
+  // kind==='backend' guard: zip items also carry grantId (the paste grant)
+  // but have NO rel — their entry bytes live inside the archive. Without the
+  // guard, an animated .webp/.gif entry (isVideoExt true) took this path and
+  // its mainURL pointed at the grant root instead of the image, leaving the
+  // main view blank while thumbnails (getItemBlob) stayed correct.
+  if (item.grantId && item.kind === 'backend') {
     var directURL = '/api/gallery/file?grantId=' + encodeURIComponent(item.grantId);
     if (item.rel) directURL += '&rel=' + encodeURIComponent(item.rel);
     return directURL;
