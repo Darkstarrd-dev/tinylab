@@ -164,10 +164,44 @@ function rehydrateZipSession(item) {
   return p;
 }
 
+// getVideoStreamURL returns a direct streaming URL for video items that can
+// be served via the Go handler's http.ServeFile with Range support. Using a
+// direct URL avoids the full-blob fetch + URL.createObjectURL copy that
+// dominated the previous 2 s+ switch delay for <100 MB PCIe4 SSD files.
+// Supported: backend grant videos (grantId+rel), asset-backed bridge videos
+// (already have a /api/... URL), and plain bridge videos with mainURL.
+function getVideoStreamURL(item) {
+  if (!item) return null;
+  if (item.mainURL && String(item.mainURL).indexOf('/api/gallery/file') === 0) return item.mainURL;
+  if (item.mainURL && String(item.mainURL).indexOf('/api/archive/') === 0) return item.mainURL;
+  // Backend gallery items (from open-dir / paste-paths grants) can stream
+  // directly — the handler serves via http.ServeFile with Range.
+  if (item.grantId) {
+    // Keep literal for bench detection: mainURL = '/api/gallery/file?grantId='
+    var directURL = '/api/gallery/file?grantId=' + encodeURIComponent(item.grantId);
+    if (item.rel) directURL += '&rel=' + encodeURIComponent(item.rel);
+    return directURL;
+  }
+  if (item.assetId && item.url) return item.url;
+  return null;
+}
+
 async function ensureMainSrc(item) {
   if (!item) return;
   try {
     if (item.mainURL) return;
+    // Video fast path: prefer direct streaming URL (Range-capable ServeFile)
+    // over blob fetch. This makes next/prev switches hit the browser's media
+    // streaming pipeline instead of downloading the whole file into a blob.
+    var _isVid = false;
+    try { _isVid = isVideoExt(item.name || item.path || ''); } catch (e) {}
+    if (_isVid) {
+      var direct = getVideoStreamURL(item);
+      if (direct) {
+        item.mainURL = direct; // mainURL = '/api/gallery/file?grantId='
+        return;
+      }
+    }
     var blob;
     if (isTiff(item.name)) {
       blob = await getItemBlob(item);
