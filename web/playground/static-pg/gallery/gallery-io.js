@@ -533,7 +533,7 @@ async function processCollectedEntries(collected) {
     updateVideoDirStructure();
     if (hadNoVideos) {
       galleryState.videoIndex = -1;
-      if (galleryState.viewMode === 'single' && outImg.length === 0 && galleryState.items.length === 0) {
+      if (galleryState.viewMode === 'single' && outImg.length === 0 && zipFiles.length === 0 && galleryState.items.length === 0) {
         galleryState.mediaType = 'video';
         updateLayoutMode();
       }
@@ -548,7 +548,6 @@ async function processCollectedEntries(collected) {
   if (outImg.length) {
     appendItems(outImg);
   }
-
   // Progressive zip registration. Bounded concurrency: uploading hundreds of
   // zips at once previously let the backend LRU evict the earliest sessions
   // before their thumbnails were fetched (the "first N packs fail" bug).
