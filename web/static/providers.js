@@ -109,6 +109,16 @@ function showAddProvider() {
         <span class="toggle-slider"></span>\
       </label>\
     </div>\
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;margin-bottom:0">\
+      <div>\
+        <label style="margin-bottom:2px;display:block">' + t('allowPrivateNetwork') + '</label>\
+        <div class="form-hint" style="margin-top:2px;margin-bottom:0">' + t('allowPrivateNetworkDesc') + '</div>\
+      </div>\
+      <label class="toggle-switch" for="p-allownet" style="flex-shrink:0;margin-left:16px">\
+        <input type="checkbox" id="p-allownet">\
+        <span class="toggle-slider"></span>\
+      </label>\
+    </div>\
     <div id="p-check-result" class="mt-12"></div>\
     <div class="modal-footer">\
       <button type="button" class="btn" onclick="closeModalOverlay()">' + t('cancel') + '</button>\
@@ -130,11 +140,10 @@ async function checkProvider() {
   }
   resultEl.innerHTML = '<span class="badge badge-testing">' + t('checking') + '</span>';
   try {
-    const result = await apiPost('/providers/validate', { baseUrl: baseUrl, apiKey: apiKey, modelId: modelId || undefined, useProxy: (document.getElementById('p-useproxy') ? document.getElementById('p-useproxy').checked : false) });
+    const result = await apiPost('/providers/validate', { baseUrl: baseUrl, apiKey: apiKey, modelId: modelId || undefined, useProxy: (document.getElementById('p-useproxy') ? document.getElementById('p-useproxy').checked : false), allowPrivate: (document.getElementById('p-allownet') ? document.getElementById('p-allownet').checked : false) });
     if (result.valid) {
       const method = result.method ? ' (via ' + result.method + ')' : '';
       resultEl.innerHTML = '<span class="badge badge-valid">' + t('validProvider') + method + '</span>';
-    } else {
       resultEl.innerHTML = '<span class="badge badge-invalid">' + t('invalidProvider', [result.error || 'unknown error']) + '</span>';
     }
   } catch (e) {
@@ -149,10 +158,10 @@ async function addProvider() {
     baseUrl: document.getElementById('p-url').value.trim(),
     apiType: 'openai-compatible',
     isActive: true,
-    keys: [],
     models: []
   };
   p.useProxy = document.getElementById('p-useproxy').checked;
+  p.allowPrivateNetwork = document.getElementById('p-allownet').checked;
   if (!p.name || !p.prefix || !p.baseUrl) {
     toast(t('requiredFields'), 'error');
     return;
@@ -1739,6 +1748,16 @@ function showEditProvider(id) {
           <span class="toggle-slider"></span>\
         </label>\
       </div>\
+      <div class="form-group form-group-inline mb-16">\
+        <div class="form-group-label-wrap">\
+          <label style="margin:0">' + t('allowPrivateNetwork') + '</label>\
+          <span class="form-hint" style="margin:0">' + t('allowPrivateNetworkDesc') + '</span>\
+        </div>\
+        <label class="toggle-switch" for="ep-allownet" style="flex-shrink:0">\
+          <input type="checkbox" id="ep-allownet" ' + (p.allowPrivateNetwork ? 'checked' : '') + '>\
+          <span class="toggle-slider"></span>\
+        </label>\
+      </div>\
       <div class="form-group mb-16">\
         <label for="r-strategy">' + t('strategy') + '</label>\
         ' + renderCustomSelectHtml('ep-strategy-wrap', 'r-strategy', [
@@ -1779,6 +1798,7 @@ async function saveEditProvider(id) {
   p.prefix = document.getElementById('ep-prefix').value.trim();
   p.baseUrl = document.getElementById('ep-url').value.trim();
   p.useProxy = document.getElementById('ep-useproxy').checked;
+  p.allowPrivateNetwork = document.getElementById('ep-allownet').checked;
   p.useCustomHeaders = document.getElementById('ep-customheaders').checked;
   p.customHeaders = parseCustomHeadersText(document.getElementById('ep-customheaders-text').value);
   p.rotationStrategy = document.getElementById('r-strategy').value;

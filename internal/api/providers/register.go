@@ -51,6 +51,7 @@ type ProviderDTO struct {
 	NormalizeStreamChunks bool                `json:"normalizeStreamChunks,omitempty"`
 	NIMConfig             *config.NIMSettings `json:"nim,omitempty"`
 	UseProxy              bool                `json:"useProxy,omitempty"`
+	AllowPrivateNetwork   bool                `json:"allowPrivateNetwork,omitempty"`
 	UseCustomHeaders      bool                `json:"useCustomHeaders,omitempty"`
 	CustomHeaders         map[string]string   `json:"customHeaders,omitempty"`
 }
@@ -76,6 +77,7 @@ func toProviderDTO(p config.Provider) ProviderDTO {
 		NormalizeStreamChunks: p.NormalizeStreamChunks,
 		NIMConfig:             p.NIMConfig,
 		UseProxy:              p.UseProxy,
+		AllowPrivateNetwork:   p.AllowPrivateNetwork,
 		UseCustomHeaders:      p.UseCustomHeaders,
 		CustomHeaders:         p.CustomHeaders,
 	}
@@ -230,14 +232,20 @@ func (h *Handler) reorderProvider(w http.ResponseWriter, r *http.Request) {
 // --- Provider Validation ---
 
 // validateProvider tests connectivity to an upstream provider before creation.
-// Request: {baseUrl, apiKey, modelId?}
+// Request: {baseUrl, apiKey, modelId?, useProxy?, allowPrivate?}
+// allowPrivate opts the probe into private/loopback targets (local Ollama,
+// vLLM, ...) — the same explicit capability persisted on the provider via
+// allowPrivateNetwork. The endpoint sits behind the management-plane CSRF
+// Origin checks and only listens on localhost, so this is not reachable by
+// external web pages.
 // Response: {valid, error?, method?}
 func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BaseURL  string `json:"baseUrl"`
-		APIKey   string `json:"apiKey"`
-		ModelID  string `json:"modelId"`
-		UseProxy bool   `json:"useProxy"`
+		BaseURL      string `json:"baseUrl"`
+		APIKey       string `json:"apiKey"`
+		ModelID      string `json:"modelId"`
+		UseProxy     bool   `json:"useProxy"`
+		AllowPrivate bool   `json:"allowPrivate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -248,7 +256,7 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy, customheaders.Config{}, false)
+	valid, method, err := h.probeUpstream(r.Context(), req.BaseURL, req.APIKey, req.ModelID, req.UseProxy, customheaders.Config{}, req.AllowPrivate)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"valid":  valid,
@@ -259,8 +267,9 @@ func (h *Handler) validateProvider(w http.ResponseWriter, r *http.Request) {
 
 // probeUpstream tries GET /v1/models first, then falls back to POST /v1/chat/completions if modelId is provided.
 // Returns (valid, method, errorMessage).
-// allowPrivate gates private/loopback targets: it is only ever true for a
-// registered provider whose explicit AllowPrivateNetwork capability is set.
+// allowPrivate gates private/loopback targets: callers pass either the
+// registered provider's explicit AllowPrivateNetwork capability or the
+// client-supplied opt-in from POST /providers/validate.
 func (h *Handler) probeUpstream(ctx context.Context, baseURL, apiKey, modelID string, useProxy bool, custom customheaders.Config, allowPrivate bool) (bool, string, string) {
 	modelsURL := urlutil.BuildUpstreamURL(baseURL, "/v1/models")
 	if u, err := outbound.ValidateURL(modelsURL); err != nil {
@@ -710,7 +719,7 @@ func (h *Handler) updateModelTextProtocol(w http.ResponseWriter, r *http.Request
 func (h *Handler) updateModelChatResponsesCompat(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "id")
 	var req struct {
-		Model                 string `json:"model"`
+		Model               string `json:"model"`
 		ChatResponsesCompat *bool  `json:"chatResponsesCompat"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
