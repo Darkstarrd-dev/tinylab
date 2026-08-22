@@ -120,8 +120,8 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		Theme        *config.ThemeConfig `json:"theme"`
 		ImageSaveDir *string             `json:"imageSaveDir"`
 		DocDir       *string             `json:"docDir"`
-	Archive      *archivePatch       `json:"archive"`
-	Assistant    *assistantPatch     `json:"assistant"`
+		Archive      *archivePatch       `json:"archive"`
+		Assistant    *assistantPatch     `json:"assistant"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")

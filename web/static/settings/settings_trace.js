@@ -84,13 +84,17 @@ async function saveTraceModal() {
   var m = parseInt(document.getElementById('trace-modal-maxdisk').value, 10);
   if (!r || r < 1) r = 2;
   if (!m || m < 50) m = 500;
-  await apiPatch('/settings', { trace: { retainDays: r, maxDiskMB: m } });
-  if (window.__settings && window.__settings.trace) {
-    window.__settings.trace.retainDays = r;
-    window.__settings.trace.maxDiskMB = m;
+  try {
+    await apiPatch('/settings', { trace: { retainDays: r, maxDiskMB: m } });
+    if (window.__settings && window.__settings.trace) {
+      window.__settings.trace.retainDays = r;
+      window.__settings.trace.maxDiskMB = m;
+    }
+    closeModalOverlay();
+    toast(t('saved'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
   }
-  closeModalOverlay();
-  toast(t('saved'), 'success');
 }
 
 function confirmClearTraces() {

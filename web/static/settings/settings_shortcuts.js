@@ -39,11 +39,17 @@ function updateShortcutSettingsSummary() {
   }
 }
 
+function cancelScCapture() {
+  __scActiveCapture = null;
+  document.removeEventListener('keydown', __scCaptureHandler, true);
+}
+
 function closeShortcutsModal() {
   if (window.__settings && window.__settings.shortcuts && typeof Shortcuts !== 'undefined') {
     Shortcuts.loadOverrides(window.__settings.shortcuts || {});
   }
   closeModalOverlay();
+  cancelScCapture();
 }
 
 function scRegionTabs() {
@@ -310,6 +316,7 @@ async function saveShortcutsModal() {
     updateShortcutSettingsSummary();
     toast(t('shortcutSaved'), 'success');
     closeModalOverlay();
+    cancelScCapture();
   } catch (e) {
     toast(t('shortcutSaveFailed', [String(e.message || e)]), 'error', 5000);
   }
