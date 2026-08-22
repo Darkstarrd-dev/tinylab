@@ -523,7 +523,11 @@ function runWithConcurrency(items, limit, task) {
     var active = 0;
     function next() {
       while (active < cap && i < items.length) {
-        var idx = i++;
+        // let (not var): the closure below must capture THIS iteration's
+        // index. With `var` the whole first wave of `cap` microtasks read the
+        // loop-final idx and all ran task(items[cap-1]) — silently dropping
+        // items[0..cap-2] and duplicating one pack cap times.
+        let idx = i++;
         active++;
         Promise.resolve()
           .then(function() { return task(items[idx]); })

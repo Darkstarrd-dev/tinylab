@@ -189,6 +189,24 @@ async function runOnce() {
   if (itemsTotal !== expected) {
     throw new Error(`items_total=${itemsTotal}, expected ${expected}`);
   }
+  // Pack-integrity assertions: total count alone cannot catch the
+  // runWithConcurrency first-wave bug (each dropped pack was exactly offset
+  // by one duplicated task on another pack, so items_total stayed equal).
+  // Group by the INPUT-derived path prefix ("packName/entry"), not by
+  // sessionId — the mock backend mints a fresh session per request, so a
+  // duplicated pack would otherwise masquerade as extra distinct packs.
+  const perPack = new Map();
+  for (const it of sandbox.galleryState.items) {
+    if (it.kind !== 'zip') continue;
+    const pack = String(it.path).split('/')[0];
+    perPack.set(pack, (perPack.get(pack) || 0) + 1);
+  }
+  if (perPack.size !== N_ZIPS || [...perPack.values()].some((n) => n !== ENTRIES_PER_ZIP)) {
+    throw new Error(
+      `pack integrity violated: ${perPack.size}/${N_ZIPS} distinct packs, ` +
+      `entries per pack ${JSON.stringify([...perPack.values()].sort((a, b) => a - b))}`
+    );
+  }
   if (events.treeShownAt == null) {
     throw new Error('tree display event never fired');
   }
