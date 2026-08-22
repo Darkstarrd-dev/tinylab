@@ -486,7 +486,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		r.Use(authHandler.AuthMiddleware)
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				req.Body = http.MaxBytesReader(w, req.Body, 600<<20)
+				// 610 MiB = filetransfer.maxTotalInputSize (600 MiB) plus
+				// multipart encoding headroom, so oversized selections are
+				// rejected by the handler's own check with a clear message.
+				req.Body = http.MaxBytesReader(w, req.Body, 610<<20)
 				next.ServeHTTP(w, req)
 			})
 		})

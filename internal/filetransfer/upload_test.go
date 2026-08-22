@@ -347,3 +347,115 @@ func TestUploadTriesServicesInOrder(t *testing.T) {
 		t.Fatalf("service calls = %v, want [first second]", calls)
 	}
 }
+
+func TestUploadRawModePublishesEachFile(t *testing.T) {
+	original := services
+	t.Cleanup(func() { services = original })
+	var names []string
+	services = []uploader{
+		{name: "only", retention: "1 hour", upload: func(_ context.Context, _ *http.Client, name string, _ []byte) (string, error) {
+			names = append(names, name)
+			return "https://example.test/" + name, nil
+		}},
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for _, filename := range []string{"a.txt", "b.png"} {
+		part, err := writer.CreateFormFile("files", filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("payload-" + filename)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.WriteField("package", "raw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	NewHandler().Upload(response, requestWithOwner(t, req, response))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Results []struct {
+			Name    string `json:"name"`
+			URL     string `json:"url"`
+			Error   string `json:"error"`
+			Size    int64  `json:"size"`
+			Service string `json:"service"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 per-file results, got %d", len(result.Results))
+	}
+	for i, want := range []string{"a.txt", "b.png"} {
+		got := result.Results[i]
+		if got.Name != want || got.URL != "https://example.test/"+want || got.Error != "" || got.Size == 0 {
+			t.Fatalf("result %d = %+v", i, got)
+		}
+	}
+	if strings.Join(names, ",") != "a.txt,b.png" {
+		t.Fatalf("uploaded names = %v", names)
+	}
+}
+
+func TestUploadRawModeAllServicesFail(t *testing.T) {
+	original := services
+	t.Cleanup(func() { services = original })
+	services = []uploader{
+		{name: "dead", upload: func(context.Context, *http.Client, string, []byte) (string, error) {
+			return "", io.ErrUnexpectedEOF
+		}},
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", "solo.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("package", "raw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	NewHandler().Upload(response, requestWithOwner(t, req, response))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCleanArchiveNameWindowsReserved(t *testing.T) {
+	cases := map[string]string{
+		"CON.txt":       "_CON.txt",
+		"nul":           "_nul",
+		"dir/com1.log":  "dir/_com1.log",
+		"normal.txt":    "normal.txt",
+		"constant.txt":  "constant.txt",
+		"../escape/aux": "escape/_aux",
+	}
+	for in, want := range cases {
+		if got := cleanArchiveName(in); got != want {
+			t.Errorf("cleanArchiveName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

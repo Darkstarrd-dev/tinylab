@@ -41,14 +41,22 @@ const (
 	maxFileSize    = 500 << 20
 	// maxTotalInputSize caps the combined bytes of all selected parts so a
 	// directory import cannot exceed the archive output cap by orders of
-	// magnitude (plan §4.3 / audit B-2.4: 总大小).
-	maxTotalInputSize = 1 << 30
+	// magnitude (plan §4.3 / audit B-2.4: 总大小). It must stay below the
+	// route's HTTP body cap (internal/api/router.go: 610 MiB) so oversized
+	// selections fail here with a clear message instead of a transport error.
+	maxTotalInputSize = 600 << 20
 	// maxScanDepth caps directory recursion depth during clipboard-import
 	// scanning (audit B-2.4: 扫描深度).
 	maxScanDepth = 32
 	// maxScanTime caps the total wall time of a clipboard-import scan
 	// (audit B-2.4: 总耗时).
 	maxScanTime = 30 * time.Second
+	// uploadOverallTimeout bounds one Upload request: sequential fallback
+	// across every configured host must finish inside this window.
+	uploadOverallTimeout = 20 * time.Minute
+
+	packageModeZip = "zip"
+	packageModeRaw = "raw"
 )
 
 type filePart struct {
@@ -84,14 +92,26 @@ func (h *Handler) Register(r interface {
 	r.Post("/paste", h.PasteClipboard)
 }
 
-// Upload receives selected files and pathGrantIds (never raw paths), packages
-// them as one ZIP archive, and tries the configured hosts in order.
+// uploadResult is one per-file outcome in raw (unpacked) mode.
+type uploadResult struct {
+	Name    string `json:"name,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Service string `json:"service,omitempty"`
+	Size    int64  `json:"size,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Upload receives selected files and pathGrantIds (never raw paths), then
+// either packages them as one ZIP archive (package=zip, default) or publishes
+// each file individually (package=raw), trying the configured hosts in order.
 func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("total upload exceeds %d MiB", maxTotalInputSize>>20))
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid multipart upload: "+err.Error())
 		return
 	}
@@ -107,6 +127,19 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := packageModeZip
+	if v := r.MultipartForm.Value["package"]; len(v) > 0 && strings.TrimSpace(v[0]) == packageModeRaw {
+		mode = packageModeRaw
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), uploadOverallTimeout)
+	defer cancel()
+
+	if mode == packageModeRaw {
+		h.uploadRaw(ctx, w, parts)
+		return
+	}
+
 	archiveName := archiveFileName()
 	archive, err := buildArchive(parts)
 	if err != nil {
@@ -116,13 +149,14 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	var failures []string
 	for _, service := range services {
-		link, uploadErr := service.upload(r.Context(), h.client, archiveName, archive)
+		link, uploadErr := service.upload(ctx, h.client, archiveName, archive)
 		if uploadErr == nil && link != "" {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"url":      link,
-				"service":  service.name,
-				"filename": archiveName,
-				"size":     len(archive),
+				"url":       link,
+				"service":   service.name,
+				"filename":  archiveName,
+				"size":      len(archive),
+				"retention": service.retention,
 			})
 			return
 		}
@@ -135,6 +169,53 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		"error":    "all temporary file services failed",
 		"failures": failures,
 	})
+}
+
+// tryServices uploads one payload to the configured hosts in order and
+// returns the first success; otherwise the aggregated error text.
+func (h *Handler) tryServices(ctx context.Context, name string, data []byte) uploadResult {
+	var failures []string
+	for _, service := range services {
+		link, uploadErr := service.upload(ctx, h.client, name, data)
+		if uploadErr == nil && link != "" {
+			return uploadResult{Name: name, URL: link, Service: service.name, Size: int64(len(data))}
+		}
+		if uploadErr == nil {
+			uploadErr = errors.New("empty download URL")
+		}
+		failures = append(failures, service.name+": "+uploadErr.Error())
+	}
+	return uploadResult{Name: name, Error: strings.Join(failures, "; ")}
+}
+
+// uploadRaw publishes every part as its own file (no ZIP wrapper) and answers
+// with per-file results. The response is 200 when at least one file succeeded,
+// 502 when every single upload failed.
+func (h *Handler) uploadRaw(ctx context.Context, w http.ResponseWriter, parts []filePart) {
+	results := make([]uploadResult, 0, len(parts))
+	anyOK := false
+	for _, part := range parts {
+		data, err := io.ReadAll(io.LimitReader(part.body, maxFileSize+1))
+		if err != nil {
+			results = append(results, uploadResult{Name: part.name, Error: err.Error()})
+			continue
+		}
+		if int64(len(data)) > maxFileSize {
+			results = append(results, uploadResult{Name: part.name,
+				Error: fmt.Sprintf("file %q is too large", part.name)})
+			continue
+		}
+		res := h.tryServices(ctx, part.name, data)
+		if res.URL != "" {
+			anyOK = true
+		}
+		results = append(results, res)
+	}
+	status := http.StatusOK
+	if !anyOK {
+		status = http.StatusBadGateway
+	}
+	writeJSON(w, status, map[string]any{"results": results})
 }
 
 // grantInfo is the browser-facing metadata for one registered path grant. It
@@ -196,10 +277,6 @@ type localPathInfo struct {
 // the upload request starts. Raw paths are rejected: only grant IDs the
 // requesting owner holds are resolved.
 func (h *Handler) PathInfo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
 	var req struct {
 		PathGrantIDs []string `json:"pathGrantIds"`
 		// Legacy raw path contract: rejected outright (audit F-01).
@@ -343,6 +420,7 @@ func (h *Handler) collectParts(r *http.Request) ([]filePart, error) {
 			return nil, err
 		}
 		if len(parts)-before == 0 {
+			closeParts(parts)
 			return nil, fmt.Errorf("path grant contains no readable regular files: %s", filepath.Base(p))
 		}
 	}
@@ -482,7 +560,29 @@ func cleanArchiveName(name string) string {
 	if name == ".." || name == "." || name == "" || strings.ContainsRune(name, 0) {
 		return ""
 	}
+	// Windows reserved device names cannot exist as extracted file names;
+	// prefix the final element so ZIPs unpack cleanly on Windows.
+	base := path.Base(name)
+	if isWindowsReservedName(base) {
+		name = name[:len(name)-len(base)] + "_" + base
+	}
 	return name
+}
+
+// isWindowsReservedName reports whether base is a reserved device name
+// (CON, PRN, AUX, NUL, COM1-9, LPT1-9), ignoring case and extension.
+func isWindowsReservedName(base string) bool {
+	stem := strings.ToUpper(base)
+	if dot := strings.IndexByte(stem, '.'); dot != -1 {
+		stem = stem[:dot]
+	}
+	switch stem {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	}
+	return false
 }
 
 func archiveFileName() string {
@@ -494,19 +594,22 @@ func archiveFileName() string {
 }
 
 type uploader struct {
-	name   string
-	upload func(context.Context, *http.Client, string, []byte) (string, error)
+	name      string
+	retention string
+	upload    func(context.Context, *http.Client, string, []byte) (string, error)
 }
 
+// retention strings are shown to the user next to the generated link. Empty
+// means the host does not document a fixed retention window.
 var services = []uploader{
 	{name: "tfLink", upload: uploadTFLink},
-	{name: "tmpfiles.org", upload: uploadTmpFiles},
-	{name: "temp.sh", upload: uploadTempSh},
-	{name: "Filebin", upload: uploadFilebin},
+	{name: "tmpfiles.org", retention: "48 hours", upload: uploadTmpFiles},
+	{name: "temp.sh", retention: "72 hours", upload: uploadTempSh},
+	{name: "Filebin", retention: "6 days", upload: uploadFilebin},
 }
 
 func uploadTFLink(ctx context.Context, client *http.Client, name string, data []byte) (string, error) {
-	body, contentType, err := multipartBody("file", name, data, nil)
+	body, contentType, err := multipartBody("file", name, data, nil, contentTypeForName(name))
 	if err != nil {
 		return "", err
 	}
@@ -524,7 +627,7 @@ func uploadTFLink(ctx context.Context, client *http.Client, name string, data []
 }
 
 func uploadTmpFiles(ctx context.Context, client *http.Client, name string, data []byte) (string, error) {
-	body, contentType, err := multipartBody("file", name, data, map[string]string{"expire": "172800"})
+	body, contentType, err := multipartBody("file", name, data, map[string]string{"expire": "172800"}, contentTypeForName(name))
 	if err != nil {
 		return "", err
 	}
@@ -541,11 +644,13 @@ func uploadTmpFiles(ctx context.Context, client *http.Client, name string, data 
 	if err := json.Unmarshal(resp, &result); err != nil || result.Status != "success" || result.Data.URL == "" {
 		return "", fmt.Errorf("unexpected response")
 	}
-	return result.Data.URL, nil
+	// The API returns the viewer page URL; the direct-download link inserts
+	// the /dl/ path segment (tmpfiles.org documented pattern).
+	return strings.Replace(result.Data.URL, "tmpfiles.org/", "tmpfiles.org/dl/", 1), nil
 }
 
 func uploadTempSh(ctx context.Context, client *http.Client, name string, data []byte) (string, error) {
-	body, contentType, err := multipartBody("file", name, data, nil)
+	body, contentType, err := multipartBody("file", name, data, nil, contentTypeForName(name))
 	if err != nil {
 		return "", err
 	}
@@ -571,7 +676,7 @@ func uploadFilebin(ctx context.Context, client *http.Client, name string, data [
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/zip")
+	req.Header.Set("Content-Type", contentTypeForName(name))
 	req.Header.Set("Content-Length", fmt.Sprint(len(data)))
 	resp, err := client.Do(req)
 	if err != nil {
@@ -592,7 +697,41 @@ func uploadFilebin(ctx context.Context, client *http.Client, name string, data [
 	return "https://filebin.net/" + bin + "/" + result.File.Filename, nil
 }
 
-func multipartBody(field, name string, data []byte, fields map[string]string) ([]byte, string, error) {
+// contentTypeForName maps a file name to a coarse upload content type; raw
+// (unpacked) mode publishes files with their own type instead of forcing zip.
+func contentTypeForName(name string) string {
+	ext := strings.ToLower(path.Ext(name))
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".pdf":
+		return "application/pdf"
+	case ".txt", ".md", ".log", ".csv", ".json", ".yaml", ".yml":
+		return "text/plain; charset=utf-8"
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".zip":
+		return "application/zip"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func multipartBody(field, name string, data []byte, fields map[string]string, contentType string) ([]byte, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	for key, value := range fields {
@@ -602,7 +741,7 @@ func multipartBody(field, name string, data []byte, fields map[string]string) ([
 	}
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, field, name))
-	h.Set("Content-Type", "application/zip")
+	h.Set("Content-Type", contentType)
 	part, err := mw.CreatePart(h)
 	if err != nil {
 		return nil, "", err
