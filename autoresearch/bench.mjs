@@ -110,9 +110,16 @@ const RENDER_STUBS = `
       __bench.events.treeShownAt = __bench.now();
     }
   }
-  function updateDirStructure() { __markTree(); }
+  function updateDirStructure() {
+    __markTree();
+    __bench.events.treeRebuilds = (__bench.events.treeRebuilds || 0) + 1;
+    __bench.events.treeScanned = (__bench.events.treeScanned || 0) + galleryState.items.length;
+  }
   function renderTreePanel() { __markTree(); }
-  function renderThumbnails() {}
+  function renderThumbnails() {
+    __bench.events.stripRebuilds = (__bench.events.stripRebuilds || 0) + 1;
+    __bench.events.stripScanned = (__bench.events.stripScanned || 0) + galleryState.items.length;
+  }
   function updateCurrentFolderItems() {}
   function updateLayoutMode() {}
   function updateVideoDirStructure() {}
@@ -199,6 +206,10 @@ async function runOnce() {
     tree_ms: events.treeShownAt - t0,
     total_ms: tDone - t0,
     items_total: itemsTotal,
+    strip_rebuilds: events.stripRebuilds || 0,
+    strip_scanned: events.stripScanned || 0,
+    tree_rebuilds: events.treeRebuilds || 0,
+    tree_scanned: events.treeScanned || 0,
   };
 }
 
@@ -213,7 +224,7 @@ for (let i = 0; i < REPS; i++) {
   const r = await runOnce();
   results.push(r);
   console.log(
-    `rep ${i + 1}/${REPS}: ttfi=${r.ttfi_ms.toFixed(0)}ms tree=${r.tree_ms.toFixed(0)}ms total=${r.total_ms.toFixed(0)}ms items=${r.items_total}`
+    `rep ${i + 1}/${REPS}: ttfi=${r.ttfi_ms.toFixed(0)}ms tree=${r.tree_ms.toFixed(0)}ms total=${r.total_ms.toFixed(0)}ms items=${r.items_total} stripRebuilds=${r.strip_rebuilds} stripScanned=${r.strip_scanned} treeRebuilds=${r.tree_rebuilds}`
   );
 }
 
@@ -222,3 +233,7 @@ console.log(`METRIC ttfi_ms=${pick('ttfi_ms').toFixed(1)}`);
 console.log(`METRIC tree_ms=${pick('tree_ms').toFixed(1)}`);
 console.log(`METRIC total_ms=${pick('total_ms').toFixed(1)}`);
 console.log(`METRIC items_total=${results[0].items_total}`);
+console.log(`METRIC strip_rebuilds=${pick('strip_rebuilds').toFixed(1)}`);
+console.log(`METRIC strip_scanned=${pick('strip_scanned').toFixed(1)}`);
+console.log(`METRIC tree_rebuilds=${pick('tree_rebuilds').toFixed(1)}`);
+console.log(`METRIC tree_scanned=${pick('tree_scanned').toFixed(1)}`);
