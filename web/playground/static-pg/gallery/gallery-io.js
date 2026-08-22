@@ -203,6 +203,16 @@ async function ensureMainSrc(item) {
         item.mainURL = direct; // mainURL = '/api/gallery/file?grantId='
         return;
       }
+      // Plain File videos (drag/drop/paste, no grant): create blob URL
+      // synchronously from the already-held File object. This avoids the
+      // extra async tick that previously made every switch pay a blob copy.
+      if (item.file && typeof item.file.size === 'number' && item.file.size > 0) {
+        setMainURL(item, trackURL(FsApi.BlobTracker.create(item.file)));
+        // Warm adjacent already — main switching path now sync.
+        return;
+      }
+      // FS handle videos without grant: File still retrievable via handle.
+      // Fall through to getItemBlob which will handle handle.getFile().
     }
     var blob;
     if (isTiff(item.name)) {
