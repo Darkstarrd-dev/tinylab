@@ -184,7 +184,7 @@ function buildPanelHTML(type, isSplit) {
   var extraRight = '';
 
   var mainInner = isVid ?
-    '<video class="gallery-main-video" id="gallery-main-video"></video>' +
+    '<video class="gallery-main-video" id="gallery-main-video" preload="metadata"></video>' +
     // Animated images (GIF/WebP) play in the video pane through their own
     // <img> node. It MUST NOT reuse the image pane's #gallery-main-img:
     // split mode would then produce a duplicate DOM id (R9). It is hidden

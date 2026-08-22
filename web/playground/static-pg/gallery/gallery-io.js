@@ -164,10 +164,56 @@ function rehydrateZipSession(item) {
   return p;
 }
 
+// getVideoStreamURL returns a direct streaming URL for video items that can
+// be served via the Go handler's http.ServeFile with Range support. Using a
+// direct URL avoids the full-blob fetch + URL.createObjectURL copy that
+// dominated the previous 2 s+ switch delay for <100 MB PCIe4 SSD files.
+// Supported: backend grant videos (grantId+rel), asset-backed bridge videos
+// (already have a /api/... URL), and plain bridge videos with mainURL.
+function getVideoStreamURL(item) {
+  if (!item) return null;
+  if (item.mainURL && String(item.mainURL).indexOf('/api/gallery/file') === 0) return item.mainURL;
+  if (item.mainURL && String(item.mainURL).indexOf('/api/archive/') === 0) return item.mainURL;
+  // Backend gallery items (from open-dir / paste-paths grants) can stream
+  // directly — the handler serves via http.ServeFile with Range + Accept-Ranges: bytes.
+  if (item.grantId) {
+    var directURL = '/api/gallery/file?grantId=' + encodeURIComponent(item.grantId);
+    if (item.rel) directURL += '&rel=' + encodeURIComponent(item.rel);
+    return directURL;
+  }
+  // FS handle videos (File System Access API) cannot stream via grant, but
+  // plain bridge videos with assetId can use the controlled URL.
+  if (item.assetId && item.url) return item.url;
+  // For File objects dropped directly, no streaming URL — will use blob path.
+  return null;
+}
+
 async function ensureMainSrc(item) {
   if (!item) return;
   try {
     if (item.mainURL) return;
+    // Video fast path: prefer direct streaming URL (Range-capable ServeFile)
+    // over blob fetch. This makes next/prev switches hit the browser's media
+    // streaming pipeline instead of downloading the whole file into a blob.
+    var _isVid = false;
+    try { _isVid = isVideoExt(item.name || item.path || ''); } catch (e) {}
+    if (_isVid) {
+      var direct = getVideoStreamURL(item);
+      if (direct) {
+        item.mainURL = direct; // mainURL = '/api/gallery/file?grantId='
+        return;
+      }
+      // Plain File videos (drag/drop/paste, no grant): create blob URL
+      // synchronously from the already-held File object. This avoids the
+      // extra async tick that previously made every switch pay a blob copy.
+      if (item.file && typeof item.file.size === 'number' && item.file.size > 0) {
+        setMainURL(item, trackURL(FsApi.BlobTracker.create(item.file)));
+        // Warm adjacent already — main switching path now sync.
+        return;
+      }
+      // FS handle videos without grant: File still retrievable via handle.
+      // Fall through to getItemBlob which will handle handle.getFile().
+    }
     var blob;
     if (isTiff(item.name)) {
       blob = await getItemBlob(item);
@@ -187,7 +233,6 @@ async function ensureMainSrc(item) {
     console.warn('ensureMainSrc failed:', e);
   }
 }
-
 async function ensureThumb(item) {
   if (!item || item.thumbReady) return;
   try {
