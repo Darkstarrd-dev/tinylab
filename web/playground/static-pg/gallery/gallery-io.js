@@ -175,14 +175,16 @@ function getVideoStreamURL(item) {
   if (item.mainURL && String(item.mainURL).indexOf('/api/gallery/file') === 0) return item.mainURL;
   if (item.mainURL && String(item.mainURL).indexOf('/api/archive/') === 0) return item.mainURL;
   // Backend gallery items (from open-dir / paste-paths grants) can stream
-  // directly — the handler serves via http.ServeFile with Range.
+  // directly — the handler serves via http.ServeFile with Range + Accept-Ranges: bytes.
   if (item.grantId) {
-    // Keep literal for bench detection: mainURL = '/api/gallery/file?grantId='
     var directURL = '/api/gallery/file?grantId=' + encodeURIComponent(item.grantId);
     if (item.rel) directURL += '&rel=' + encodeURIComponent(item.rel);
     return directURL;
   }
+  // FS handle videos (File System Access API) cannot stream via grant, but
+  // plain bridge videos with assetId can use the controlled URL.
   if (item.assetId && item.url) return item.url;
+  // For File objects dropped directly, no streaming URL — will use blob path.
   return null;
 }
 
@@ -221,7 +223,6 @@ async function ensureMainSrc(item) {
     console.warn('ensureMainSrc failed:', e);
   }
 }
-
 async function ensureThumb(item) {
   if (!item || item.thumbReady) return;
   try {

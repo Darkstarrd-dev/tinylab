@@ -240,6 +240,12 @@ func (h *Handler) galleryServeFile(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-store")
+		// Explicit Accept-Ranges for video streaming: http.ServeFile already
+		// handles Range requests, but declaring it ensures the <video> element
+		// with preload="metadata" can seek without re-downloading the whole
+		// file — the remaining path to eliminating the 2 s+ stall for PCIe4
+		// SSD <100 MB videos after the frontend adjacent preload lands.
+		w.Header().Set("Accept-Ranges", "bytes")
 		http.ServeFile(w, r, p)
 		return
 	}

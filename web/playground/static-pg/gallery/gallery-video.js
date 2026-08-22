@@ -31,6 +31,12 @@ function setVideoActive(index) {
 
 // videoPreloadSet tracks in-flight / completed preloads to avoid duplicate fetches.
 var videoPreloadSet = {};
+// videoPreloadCache is a bounded LRU-ish cache of hidden <video> preload
+// elements for adjacent items. Keeping the element alive retains the browser's
+// media cache for that URL so the subsequent setVideoActive is instant.
+// Bound to 4 entries to avoid unbounded memory for large libraries.
+var videoPreloadCache = { map: {}, order: [] };
+var VIDEO_PRELOAD_MAX = 4;
 function preloadAdjacentVideos(curIdx) {
   try {
     var items = galleryState.videoItems || [];
@@ -40,13 +46,25 @@ function preloadAdjacentVideos(curIdx) {
     for (var d = -1; d <= 1; d += 2) {
       var j = (curIdx + d + n) % n;
       var it = items[j];
-      if (!it || it.mainURL) continue;
+      if (!it || it.mainURL) {
+        // Even if mainURL is already resolved, warm the media element cache
+        // via hidden preload elements so the video bytes are already in
+        // Chromium's media cache. Skip purely blob items already in memory.
+        if (it && it.mainURL && String(it.mainURL).indexOf('/api/') === 0) {
+          ensureVideoPreloadElement(it.mainURL);
+        }
+        continue;
+      }
       var key = String(j) + ':' + (it.grantId || it.assetId || it.path || '');
       if (videoPreloadSet[key]) continue;
       videoPreloadSet[key] = true;
       // preload adjacent video: reuse the same streaming resolution as ensureMainSrc
       if (typeof ensureMainSrc === 'function') {
-        ensureMainSrc(it).catch(function() { delete videoPreloadSet[key]; });
+        (function(k, item) {
+          ensureMainSrc(item).then(function() {
+            if (item.mainURL) ensureVideoPreloadElement(item.mainURL);
+          }).catch(function() { delete videoPreloadSet[k]; });
+        })(key, it);
       }
       // bench marker literal: preloadVideo
       void key;
@@ -54,6 +72,38 @@ function preloadAdjacentVideos(curIdx) {
   } catch (e) {}
 }
 function preloadVideo(idx) { return preloadAdjacentVideos(idx); }
+function ensureVideoPreloadElement(url) {
+  if (!url || videoPreloadCache.map[url]) return;
+  try {
+    // Create a hidden <video preload="metadata"> that triggers a Range fetch
+    // for the first bytes — enough for the next switch to hit cache.
+    var v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.style.display = 'none';
+    v.src = url;
+    // Append to DOM so Chromium actually fetches; remove on metadata load
+    // but keep reference in cache so the media resource stays warm for
+    // a short TTL (evicted by VIDEO_PRELOAD_MAX bound).
+    document.body.appendChild(v);
+    videoPreloadCache.map[url] = v;
+    videoPreloadCache.order.push(url);
+    v.addEventListener('loadedmetadata', function() {
+      // Keep element hidden but warm; no removal yet.
+    });
+    v.addEventListener('error', function() {
+      try { v.remove(); } catch (e) {}
+      delete videoPreloadCache.map[url];
+    });
+    // Bounded eviction
+    while (videoPreloadCache.order.length > VIDEO_PRELOAD_MAX) {
+      var ev = videoPreloadCache.order.shift();
+      var el = videoPreloadCache.map[ev];
+      if (el) { try { el.pause(); el.removeAttribute('src'); el.load(); el.remove(); } catch (e) {} }
+      delete videoPreloadCache.map[ev];
+    }
+  } catch (e) {}
+}
 function renderActiveVideo(index) {
   var item = galleryState.videoItems[index];
   var vidEl = document.getElementById('gallery-main-video');
@@ -76,6 +126,45 @@ function renderActiveVideo(index) {
 
   var isAnim = isAnimatedImg(item);
   applyVideoPaneMode(isAnim);
+
+  // --- sync fast path for direct streaming URLs (grant / asset) ---
+  // Avoids the async full-blob fetch that dominated the 2 s+ delay.
+  try {
+    var syncURL = null;
+    if (item.mainURL && String(item.mainURL).indexOf('/api/') === 0) {
+      syncURL = item.mainURL;
+    } else if (typeof getVideoStreamURL === 'function') {
+      syncURL = getVideoStreamURL(item);
+    }
+    if (syncURL) {
+      item.mainURL = syncURL; // mainURL = '/api/gallery/file?grantId='
+      galleryState.videoURL = syncURL;
+      if (isAnim) {
+        if (animEl && animEl.getAttribute('src') !== syncURL) animEl.setAttribute('src', syncURL);
+        galleryState.videoPlayingState = true;
+      } else if (vidEl) {
+        if (vidEl.src !== syncURL) {
+          vidEl.preload = 'metadata';
+          vidEl.src = syncURL;
+        }
+        var v = (galleryState.videoVolume != null) ? galleryState.videoVolume : 80;
+        vidEl.volume = galleryState.videoMuted ? 0 : (v / 100);
+        vidEl.muted = !!galleryState.videoMuted;
+        updateVolumeUI(v, galleryState.videoMuted);
+        if (galleryState.videoPlayingState === true) {
+          try { vidEl.play().catch(function() {}); } catch (e) {}
+        }
+      }
+      if (info) {
+        var countStr = (index + 1) + ' / ' + galleryState.videoItems.length;
+        info.textContent = countStr + ' | Video';
+      }
+      autoBalanceFullscreenSplitRatio();
+      renderMetaSidebar(true);
+      if (typeof preloadAdjacentVideos === 'function') preloadAdjacentVideos(index);
+      return;
+    }
+  } catch (e) {}
 
   ensureMainSrc(item).then(function() {
     // Render race guard: ensureMainSrc is async, so by the time the blob

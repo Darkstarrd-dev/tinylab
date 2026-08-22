@@ -58,6 +58,20 @@ window.renderGallery = function(container) {
  */
 window.cleanupGallery = function() {
   stopAutoplay();
+  // Release hidden video preload cache (bounded 4, but must not leak across navigations)
+  try {
+    if (typeof videoPreloadCache !== 'undefined' && videoPreloadCache && videoPreloadCache.map) {
+      for (var _u in videoPreloadCache.map) {
+        var _el = videoPreloadCache.map[_u];
+        if (_el) { try { _el.pause(); _el.removeAttribute('src'); _el.load(); _el.remove(); } catch (e2) {} }
+      }
+      videoPreloadCache.map = {};
+      videoPreloadCache.order = [];
+    }
+    if (typeof videoPreloadSet !== 'undefined' && videoPreloadSet) {
+      for (var _k in videoPreloadSet) delete videoPreloadSet[_k];
+    }
+  } catch (e) {}
   var fs = isFullscreen();
   unbindFullscreen();
   if (!fs) {
