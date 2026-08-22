@@ -77,22 +77,19 @@ function preloadAdjacentVideos(curIdx) {
 function ensureVideoPreloadElement(url) {
   if (!url || videoPreloadCache.map[url]) return;
   try {
-    // Create a hidden <video preload="metadata"> that triggers a Range fetch
-    // for the first bytes — enough for the next switch to hit cache.
+    // Use preload="auto" for adjacent hidden videos so Chromium fetches
+    // beyond metadata — next/prev switch then hits cache, not network.
+    // For PCIe4 SSD <100 MB videos this turns the perceived 2 s stall
+    // into a near-instant switch once the hidden element has buffered.
     var v = document.createElement('video');
-    v.preload = 'metadata';
+    v.preload = 'auto';
     v.muted = true;
     v.style.display = 'none';
     v.src = url;
-    // Append to DOM so Chromium actually fetches; remove on metadata load
-    // but keep reference in cache so the media resource stays warm for
-    // a short TTL (evicted by VIDEO_PRELOAD_MAX bound).
+    // Append to DOM so Chromium actually fetches; keep alive for cache.
     document.body.appendChild(v);
     videoPreloadCache.map[url] = v;
     videoPreloadCache.order.push(url);
-    v.addEventListener('loadedmetadata', function() {
-      // Keep element hidden but warm; no removal yet.
-    });
     v.addEventListener('error', function() {
       try { v.remove(); } catch (e) {}
       delete videoPreloadCache.map[url];
