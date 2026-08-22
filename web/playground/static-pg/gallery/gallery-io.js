@@ -404,6 +404,35 @@ function appendProgressiveItems(newItems) {
   }
 }
 
+// queueProgressiveItems coalesces incremental appends: packs completing close
+// together share one strip/tree rebuild instead of triggering one each. The
+// first batch (empty gallery) flushes immediately so first display stays at
+// manifest latency; later batches wait at most PROGRESSIVE_FLUSH_MS. Callers
+// MUST flushProgressiveItems() when their import loop finishes so buffered
+// items land before the import promise resolves.
+var PROGRESSIVE_FLUSH_MS = 120;
+var _pgBuffer = [];
+var _pgTimer = null;
+function queueProgressiveItems(newItems) {
+  if (!newItems || !newItems.length) return;
+  _pgBuffer = _pgBuffer.concat(newItems);
+  if (galleryState.items.length === 0) {
+    flushProgressiveItems();
+    return;
+  }
+  if (!_pgTimer) {
+    _pgTimer = setTimeout(flushProgressiveItems, PROGRESSIVE_FLUSH_MS);
+  }
+}
+
+function flushProgressiveItems() {
+  if (_pgTimer) { clearTimeout(_pgTimer); _pgTimer = null; }
+  if (!_pgBuffer.length) return;
+  var batch = _pgBuffer;
+  _pgBuffer = [];
+  appendProgressiveItems(batch);
+}
+
 // processZipFilesProgressive registers dropped/pasted archive blobs with the
 // backend using bounded concurrency and appends each pack's items as soon as
 // its manifest arrives, instead of blocking the whole import on every
@@ -419,8 +448,9 @@ async function processZipFilesProgressive(zipEntries) {
   await runWithConcurrency(zipEntries, 6, function(zf) {
     var packItems = [];
     return addArchive(zf.file, packItems, zf.zipFileHandle || null)
-      .then(function() { appendProgressiveItems(packItems); });
+      .then(function() { queueProgressiveItems(packItems); });
   });
+  flushProgressiveItems();
 }
 
 // fetchZipManifest creates a backend zip session for an on-disk archive.
@@ -464,10 +494,11 @@ async function processBackendZipsProgressive(zipJobs) {
     return fetchZipManifest(zj.grantId, zj.rel)
       .then(function(zData) {
         pushZipPackItems(zData, zj.name, zj.grantId, zj.rel, packItems);
-        appendProgressiveItems(packItems);
+        queueProgressiveItems(packItems);
       })
       .catch(function(e) { console.warn('zip-from-path failed:', e); });
   });
+  flushProgressiveItems();
 }
 
 // runWithConcurrency runs task(item) over every item with at most `limit`
