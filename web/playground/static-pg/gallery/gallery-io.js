@@ -487,9 +487,14 @@ function pushZipPackItems(zData, displayName, grantId, zipRel, out) {
 // concurrency, appending each pack's items to the gallery as soon as its
 // manifest is ready so the tree grows incrementally instead of appearing all
 // at once after the slowest pack.
+// Concurrency 12: unlike FSAA-dropped packs (processZipFilesProgressive, cap
+// 6) nothing is uploaded here — zip-from-path sessions reference on-disk
+// files, so an LRU-evicted session rehydrates by re-reading the same cheap
+// disk op. The higher cap only shortens manifest wall time.
+var BACKEND_ZIP_CONCURRENCY = 12;
 async function processBackendZipsProgressive(zipJobs) {
   if (!zipJobs || !zipJobs.length) return;
-  await runWithConcurrency(zipJobs, 6, function(zj) {
+  await runWithConcurrency(zipJobs, BACKEND_ZIP_CONCURRENCY, function(zj) {
     var packItems = [];
     return fetchZipManifest(zj.grantId, zj.rel)
       .then(function(zData) {
