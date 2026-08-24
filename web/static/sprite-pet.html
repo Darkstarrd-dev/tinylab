@@ -2,9 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- no viewport meta / style.css link — both force opaque rasterization and defeat WebView2 transparency -->
 <title>TinyRouter Pet</title>
-<link rel="stylesheet" href="/style.css">
 <style>
   html, body {
     margin: 0;
@@ -12,7 +11,7 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    background: transparent !important;
+    /* leave root background unset — transparent default shows desktop through DefaultBackgroundColor=0 */
     user-select: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
@@ -25,9 +24,8 @@
     align-items: center;
     justify-content: center;
     position: relative;
-    background: #FF00FF; /* color-key (magenta): keyed out to transparent by the host's SetLayeredWindowAttributes so only the sprite/bubble show */
+    background: transparent;
     border: none;
-    border-radius: 28px;
     padding: 10px;
   }
   .pet-avatar {

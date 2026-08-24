@@ -4,13 +4,16 @@ package main
 
 import (
 	"net/url"
+	"os"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
 	"fyne.io/systray"
 	"github.com/jchv/go-webview2"
+	"github.com/jchv/go-webview2/pkg/edge"
 	"github.com/tinyrouter/tinyrouter/internal/app"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	"golang.org/x/sys/windows"
@@ -73,9 +76,9 @@ func openWebviewAfterReady(hctx *app.HostContext) {
 	// The HTTP server is started just before runHostLoop, but on a slow boot it
 	// may not yet be bound. Polling gctx.consoleURL is overkill; a short sleep is
 	// enough since the server goroutine has already been scheduled by main.
-	time.Sleep(500 * time.Millisecond)
 	openWebviewWindow(hctx)
 }
+
 
 // runWebviewClickLoop listens for clicks on the "独立窗口" menu item and launches
 // a new WebView2 window on each click. The window runs in its own goroutine;
@@ -361,11 +364,7 @@ var (
 	procGetMonitorInfoW    = user32Dll.NewProc("GetMonitorInfoW")
 	procMonitorFromWindow  = user32Dll.NewProc("MonitorFromWindow")
 	procSetWindowPos       = user32Dll.NewProc("SetWindowPos")
-	procSetWindowRgn       = user32Dll.NewProc("SetWindowRgn")
-	procCreateRoundRectRgn = gdi32Dll.NewProc("CreateRoundRectRgn")
-	procSetLayeredWindowAttributes = user32Dll.NewProc("SetLayeredWindowAttributes")
 	user32Dll              = windows.NewLazySystemDLL("user32.dll")
-	gdi32Dll               = windows.NewLazySystemDLL("gdi32.dll")
 )
 
 const (
@@ -379,18 +378,71 @@ const (
 	swpNoMove               = 0x0002
 	swpNoSize               = 0x0001
 	swpNoZOrder             = 0x0004
-	gwlExstyle              = ^uintptr(20) // GWL_EXSTYLE = -20
-	wsExLayered             = 0x00080000
-	lwaColorkey             = 0x00000001
-	petColorKey             = 0x00FF00FF // RGB(255,0,255) magenta — keyed out to transparent on the pet page
 )
+
+// chromiumOf reaches the *edge.Chromium behind a webview2.WebView. The
+// concrete *webview struct begins with {hwnd, mainthread uintptr, browser
+// interface}; mirroring that prefix is the only way to reach the underlying
+// controller without forking the module (its public interface does not expose
+// the controller, and upstream HEAD matches the pinned pseudo-version).
+type webviewPrefix struct {
+	hwnd       uintptr
+	mainthread uintptr
+	browserItf [2]uintptr // interface (itab, data); dynamic type *edge.Chromium
+}
+
+func chromiumOf(w webview2.WebView) *edge.Chromium {
+	iface := (*[2]uintptr)(unsafe.Pointer(&w))
+	inner := (*webviewPrefix)(unsafe.Pointer(iface[1]))
+	if inner == nil || inner.browserItf[1] == 0 {
+		return nil
+	}
+	return (*edge.Chromium)(unsafe.Pointer(inner.browserItf[1]))
+}
+
+// putDefaultBackgroundColor calls ICoreWebView2Controller2::
+// PutDefaultBackgroundColor (slot 27) with a raw 0xAARRGGBB color. Must run
+// on the controller's UI thread. Returns the COM HRESULT as an error.
+func putDefaultBackgroundColor(ctrl *edge.ICoreWebView2Controller, col uint32) error {
+	vtbl := *(*uintptr)(unsafe.Pointer(ctrl))
+	proc := *(*uintptr)(unsafe.Pointer(vtbl + 27*unsafe.Sizeof(uintptr(0))))
+	hr, _, _ := syscall.SyscallN(proc, uintptr(unsafe.Pointer(ctrl)), uintptr(col))
+	if hr != 0 {
+		return windows.Errno(hr)
+	}
+	return nil
+}
 
 // openPetWindow creates a lightweight, borderless desktop pet window (L3).
 func openPetWindow(hctx *app.HostContext) {
-	webviewWindowMu.Lock()
+	// Pin this goroutine to a single OS thread first, then initialize COM STA
+	// on that thread BEFORE anything WebView2-related. The edge package's
+	// init() only STA-initializes the MAIN thread; this window runs on its own
+	// goroutine thread, and without STA its WebView2 COM calls cross apartments
+	// and the message pump hangs (window shows "not responding", the page never
+	// finishes loading, and the process eventually dies). openWebviewWindow has
+	// the same dance — keep them in sync. RPC_E_CHANGED_MODE (0x80010106) and
+	// S_FALSE are tolerable.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	if err := windows.CoInitializeEx(0, 2); err != nil {
+		if err != windows.Errno(0x80010106) && err != windows.Errno(1) {
+			hctx.Logger.Error("pet window: CoInitializeEx failed: %v", err)
+			return
+		}
+	}
+	defer windows.CoUninitialize()
 
+	webviewWindowMu.Lock()
+	// The documented WEBVIEW2_DEFAULT_BACKGROUND_COLOR escape hatch (read by
+	// the WebView2 loader when the environment is created) is the only
+	// mechanism that actually yields per-pixel transparency here: the
+	// PutDefaultBackgroundColor vtable call alone stays white once the page
+	// paints any root background, and the color-key approach never worked.
+	// Value "0" = fully transparent (0xAARRGGBB). Scoped to this creation and
+	// unset right after — webviewWindowMu serializes environment creation, so
+	// no other window can observe the variable mid-flight.
+	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "0")
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: false,
@@ -402,12 +454,8 @@ func openPetWindow(hctx *app.HostContext) {
 			Center: false,
 		},
 	})
+	os.Unsetenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR")
 	webviewWindowMu.Unlock()
-
-	if w == nil {
-		hctx.Logger.Error("failed to create pet window")
-		return
-	}
 
 	hwnd := uintptr(w.Window())
 	if hwnd != 0 {
@@ -415,15 +463,6 @@ func openPetWindow(hctx *app.HostContext) {
 		style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlStyle)
 		newStyle := (uint32(style) &^ (wsCaption | wsThickFrame | wsSysMenu)) | wsPopup
 		procSetWindowLongPtrW.Call(hwnd, gwlStyle, uintptr(newStyle))
-		// Make the window layered + color-key transparent: the pet page paints
-		// its background as the magenta color key, which SetLayeredWindowAttributes
-		// keys out → only the sprite/bubble (non-key pixels) show. This is the
-		// documented MVP for the L3 desktop pet (item 5) — fixes the "opaque
-		// box = no effect" appearance. Per-pixel alpha anti-aliasing is a later
-		// refinement.
-		exStyle, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlExstyle)
-		procSetWindowLongPtrW.Call(hwnd, gwlExstyle, exStyle|uintptr(wsExLayered))
-		procSetLayeredWindowAttributes.Call(hwnd, uintptr(petColorKey), 0, uintptr(lwaColorkey))
 		// Set Topmost (HWND_TOPMOST = -1 = ^uintptr(0))
 		procSetWindowPos.Call(
 			hwnd,
@@ -431,13 +470,37 @@ func openPetWindow(hctx *app.HostContext) {
 			100, 100, 240, 240,
 			swpFrameChanged|swpShowWindow,
 		)
-		// Clip rectangular frame to rounded region (28px corner radius -> ellipse diameter 56x56)
-		hrgn, _, _ := procCreateRoundRectRgn.Call(0, 0, 240, 240, 56, 56)
-		if hrgn != 0 {
-			procSetWindowRgn.Call(hwnd, hrgn, 1)
-		}
+		// True per-pixel transparency via WebView2's DefaultBackgroundColor.
+		// The controller is not ready immediately after NewWithOptions (Embed
+		// is async) — poll until it appears then apply transparency. The env
+		// var scoping above handles first-navigation white flicker when the
+		// pet happens to be the first WebView2 in the process; the API call
+		// here handles the normal case where the main window already created
+		// the shared environment and the env var is ignored.
+		go func(targetHwnd uintptr, view webview2.WebView) {
+			for range 30 {
+				time.Sleep(100 * time.Millisecond)
+				chromium := chromiumOf(view)
+				if chromium == nil {
+					continue
+				}
+				ctrl := chromium.GetController()
+				if ctrl == nil {
+					continue
+				}
+				if err := putDefaultBackgroundColor(ctrl, 0x00000000); err != nil {
+					hctx.Logger.Error("pet window: transparent background: %v", err)
+				} else {
+					hctx.Logger.Info("pet window: transparent background applied")
+				}
+				// Ensure DComp repaints after background change.
+				_ = chromium.NotifyParentWindowPositionChanged()
+				_ = targetHwnd // keep hwnd alive for logging if needed
+				return
+			}
+			hctx.Logger.Error("pet window: controller not ready for transparency")
+		}(hwnd, w)
 	}
-
 	// Register window
 	webviewMu.Lock()
 	webviews[hwnd] = w
