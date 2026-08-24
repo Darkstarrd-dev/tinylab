@@ -26,6 +26,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/console_logs"
 	apidownload "github.com/tinyrouter/tinyrouter/internal/api/download"
 	"github.com/tinyrouter/tinyrouter/internal/api/editor"
+	"github.com/tinyrouter/tinyrouter/internal/api/fsbrowse"
 	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
@@ -347,6 +348,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	providersHandler := providers.NewHandler(apiDeps)
 	monitorHandler := apimonitor.NewHandler(apiDeps)
 	downloadHandler := apidownload.NewHandler(apiDeps)
+	fsbrowseHandler := fsbrowse.NewHandler()
 	galleryHandler := gallery.NewHandler(apiDeps)
 	fileTransferHandler := filetransfer.NewHandler()
 	imageBatchHandler := func() *apimagebatch.Handler {
@@ -431,6 +433,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// so this registration is intentionally NOT gated on Playground:
 			// gating it would drop the routes from default builds.
 			anysearchHandler.Register(r)
+			// Generic OS file/directory picker, shared by assistant/gallery/
+			// download frontends — intentionally NOT gated on feature.Download.
+			fsbrowseHandler.Register(r)
 			// Traces
 			r.Route("/traces", traceHandler.Register)
 		})

@@ -494,12 +494,13 @@ func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 
 // assistantPatch is a presence-aware partial update for AssistantConfig:
 // only fields the frontend sends are applied, so a PATCH can change the model
-// alone without zeroing the spritesheet settings. Pointer fields distinguish
-// "absent" (nil, leave as-is) from "explicit empty string" (clear the model).
+// alone without touching the action list. Pointer fields distinguish "absent"
+// (nil, leave as-is) from "explicit empty string" (clear the model). Actions
+// is replaced wholesale when present — the settings modal always edits and
+// saves the full list.
 type assistantPatch struct {
-	Model           *string `json:"model"`
-	SpritesheetPath *string `json:"spritesheetPath"`
-	SpritesheetFps  *int    `json:"spritesheetFps"`
+	Model   *string                   `json:"model"`
+	Actions *[]config.AssistantAction `json:"actions"`
 }
 
 func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
@@ -509,11 +510,8 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	if patch.Model != nil {
 		cfg.Assistant.Model = *patch.Model
 	}
-	if patch.SpritesheetPath != nil {
-		cfg.Assistant.SpritesheetPath = *patch.SpritesheetPath
-	}
-	if patch.SpritesheetFps != nil {
-		cfg.Assistant.SpritesheetFps = *patch.SpritesheetFps
+	if patch.Actions != nil {
+		cfg.Assistant.Actions = *patch.Actions
 	}
 }
 

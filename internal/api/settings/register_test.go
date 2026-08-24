@@ -181,3 +181,58 @@ func TestArchivePatchNilLeavesConfig(t *testing.T) {
 		t.Errorf("SevenZipPath = %q, want /keep/7z (nil patch mutated config)", cfg.Archive.SevenZipPath)
 	}
 }
+
+// TestAssistantPatchModelAndActions verifies the presence-aware assistant
+// patch: the model alone can change without touching actions, actions are
+// replaced wholesale when sent, and the block survives a Save/Load round-trip.
+func TestAssistantPatchModelAndActions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Assistant.Model = "openai/old"
+	cfg.Assistant.Actions = []config.AssistantAction{
+		{Name: "idle", SpritesheetPath: "/keep/idle.png", Cols: 4, Rows: 2, FrameStart: 0, FrameEnd: 7, Fps: 8},
+	}
+
+	// Model-only patch must not touch the action list.
+	var modelOnly struct {
+		Assistant *assistantPatch `json:"assistant"`
+	}
+	if err := json.Unmarshal([]byte(`{"assistant":{"model":"openai/new"}}`), &modelOnly); err != nil {
+		t.Fatalf("decode model-only patch: %v", err)
+	}
+	applyAssistantUpdates(cfg, modelOnly.Assistant)
+	if cfg.Assistant.Model != "openai/new" {
+		t.Errorf("Model = %q, want openai/new", cfg.Assistant.Model)
+	}
+	if len(cfg.Assistant.Actions) != 1 || cfg.Assistant.Actions[0].Name != "idle" {
+		t.Errorf("actions mutated by model-only patch: %+v", cfg.Assistant.Actions)
+	}
+
+	// Actions patch replaces the list wholesale.
+	var withActions struct {
+		Assistant *assistantPatch `json:"assistant"`
+	}
+	if err := json.Unmarshal([]byte(`{"assistant":{"actions":[{"name":"walk","spritesheetPath":"C:\\s\\w.png","cols":3,"rows":3,"frameStart":2,"frameEnd":5,"fps":10}]}}`), &withActions); err != nil {
+		t.Fatalf("decode actions patch: %v", err)
+	}
+	applyAssistantUpdates(cfg, withActions.Assistant)
+	if len(cfg.Assistant.Actions) != 1 || cfg.Assistant.Actions[0].Name != "walk" {
+		t.Fatalf("actions = %+v, want single walk action", cfg.Assistant.Actions)
+	}
+	a := cfg.Assistant.Actions[0]
+	if a.SpritesheetPath != `C:\s\w.png` || a.Cols != 3 || a.Rows != 3 || a.FrameStart != 2 || a.FrameEnd != 5 || a.Fps != 10 {
+		t.Errorf("walk action fields wrong after patch: %+v", a)
+	}
+
+	// Persistence round-trip keeps the actions block on disk.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Assistant.Model != "openai/new" || len(loaded.Assistant.Actions) != 1 || loaded.Assistant.Actions[0].Fps != 10 {
+		t.Errorf("assistant block lost in round-trip: %+v", loaded.Assistant)
+	}
+}

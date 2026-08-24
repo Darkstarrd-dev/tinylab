@@ -1,11 +1,10 @@
 // web/settings-assistant-modal.test.js
-// Zero-dependency Node behavioral test for the Assistant settings modal save
-// (item 1 frontend). Loads the REAL web/static/settings/settings_modal.js in
-// a VM sandbox with stubbed apiPatch/document/t/toast, calls saveAssistantModal,
-// and asserts it reads the field values and PATCHes the correct
-// {assistant:{model,spritesheetPath,spritesheetFps}} body — plus fps coercion.
-// The API round-trip already proved the backend; this proves the modal wires
-// the fields into the request body correctly.
+// Zero-dependency Node behavioral test for the Assistant settings modal save.
+// Loads the REAL web/static/settings/settings_modal.js in a VM sandbox with
+// stubbed apiPatch/document/t/toast, calls saveAssistantModal, and asserts it
+// reads the hidden model field + window.__assistantActions draft and PATCHes
+// the correct {assistant:{model,actions}} body — including per-action numeric
+// normalization (fps coercion, grid clamps).
 //
 // Run:  node web/settings-assistant-modal.test.js
 'use strict';
@@ -15,18 +14,13 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-// Field values the modal reads via document.getElementById(id).value.
 const fieldValues = {
   'settings-modal-assistant-model': 'openai/gpt-4o-mini',
-  'settings-modal-assistant-spritesheet': '/sprite/s.png',
-  'settings-modal-assistant-fps': '12',
 };
 const apiCalls = [];
 const document = {
   getElementById(id) { return { value: fieldValues[id] !== undefined ? fieldValues[id] : '' }; },
 };
-// Stubs for the globals settings_modal.js references (only saveAssistantModal's
-// dependencies are exercised; the rest are no-ops so the file loads cleanly).
 const sandbox = {
   document,
   window: {},
@@ -56,34 +50,49 @@ if (typeof sandbox.saveAssistantModal !== 'function') {
     catch (err) { failures++; console.error('FAIL  ' + name + ': ' + (err && err.message)); }
   }
 
-  console.log('settings assistant modal save (item 1) behavioral tests:');
+  console.log('settings assistant modal save (model + actions) behavioral tests:');
 
-  await check('saveAssistantModal reads fields + PATCHes {assistant:{model,spritesheetPath,spritesheetFps}}', async () => {
+  await check('saveAssistantModal PATCHes {assistant:{model, actions}} from hidden field + draft', async () => {
     apiCalls.length = 0;
-    fieldValues['settings-modal-assistant-fps'] = '12';
+    fieldValues['settings-modal-assistant-model'] = 'openai/gpt-4o-mini';
+    sandbox.window.__assistantActions = [
+      { name: 'idle', spritesheetPath: 'C:/sheets/idle.png', cols: 4, rows: 2, frameStart: 0, frameEnd: 7, fps: 12 },
+    ];
     await sandbox.saveAssistantModal();
     assert.strictEqual(apiCalls.length, 1, 'exactly one PATCH made');
     assert.strictEqual(apiCalls[0].url, '/settings', 'PATCHed /settings');
-    // field-by-field (not deepStrictEqual): the body object is created in the
-    // VM context so its Object.prototype differs from the main context.
     var b = apiCalls[0].body.assistant;
     assert.strictEqual(b.model, 'openai/gpt-4o-mini', 'model field');
-    assert.strictEqual(b.spritesheetPath, '/sprite/s.png', 'spritesheetPath field');
-    assert.strictEqual(b.spritesheetFps, 12, 'spritesheetFps field');
+    assert.strictEqual(b.actions.length, 1, 'one action sent');
+    var a = b.actions[0];
+    assert.strictEqual(a.name, 'idle', 'action name');
+    assert.strictEqual(a.spritesheetPath, 'C:/sheets/idle.png', 'action path');
+    assert.strictEqual(a.cols, 4, 'cols');
+    assert.strictEqual(a.rows, 2, 'rows');
+    assert.strictEqual(a.frameStart, 0, 'frameStart');
+    assert.strictEqual(a.frameEnd, 7, 'frameEnd');
+    assert.strictEqual(a.fps, 12, 'fps');
   });
 
-  await check('saveAssistantModal coerces invalid fps to default 8', async () => {
+  await check('saveAssistantModal coerces invalid fps to default 8 and clamps grid values', async () => {
     apiCalls.length = 0;
-    fieldValues['settings-modal-assistant-fps'] = 'not-a-number';
+    sandbox.window.__assistantActions = [
+      { name: 'walk', spritesheetPath: '', cols: -3, rows: 0, frameStart: -5, frameEnd: NaN, fps: 0 },
+    ];
     await sandbox.saveAssistantModal();
-    assert.strictEqual(apiCalls[0].body.assistant.spritesheetFps, 8, 'invalid fps coerced to 8');
+    var a = apiCalls[0].body.assistant.actions[0];
+    assert.strictEqual(a.cols, 1, 'cols clamped to 1');
+    assert.strictEqual(a.rows, 1, 'rows clamped to 1');
+    assert.strictEqual(a.frameStart, 0, 'frameStart clamped to 0');
+    assert.ok(!(a.frameEnd < 0), 'frameEnd never negative');
+    assert.strictEqual(a.fps, 8, 'invalid fps coerced to 8');
   });
 
-  await check('saveAssistantModal clamps fps<1 to default 8', async () => {
+  await check('saveAssistantModal sends empty actions list when none drafted', async () => {
     apiCalls.length = 0;
-    fieldValues['settings-modal-assistant-fps'] = '0';
+    sandbox.window.__assistantActions = [];
     await sandbox.saveAssistantModal();
-    assert.strictEqual(apiCalls[0].body.assistant.spritesheetFps, 8, 'fps<1 coerced to 8');
+    assert.deepStrictEqual(apiCalls[0].body.assistant.actions, [], 'empty actions array sent');
   });
 
   if (failures) { console.error('\n' + failures + ' check(s) FAILED'); process.exit(1); }

@@ -41,16 +41,16 @@ const (
 
 // ModelDef represents one upstream model with its quota type tag.
 type ModelDef struct {
-	ID           string            `yaml:"id" json:"id"`
-	QuotaType    string            `yaml:"quotaType,omitempty" json:"quotaType,omitempty"`
-	Alias        string            `yaml:"alias,omitempty" json:"alias,omitempty"`
-	Note         string            `yaml:"note,omitempty" json:"note,omitempty"`
-	Kind         string            `yaml:"kind,omitempty" json:"kind,omitempty"`               // "text" (default/empty) | "image"
-	ImgProtocol  string            `yaml:"imgProtocol,omitempty" json:"imgProtocol,omitempty"` // "gpt" | "xai" | "modelscope" (only when kind=image)
-	TextProtocol string            `yaml:"textProtocol,omitempty" json:"textProtocol,omitempty"` // "auto" / "" | "openai-compat" | "openai-responses" | "anthropic" | "google"
-	ChatResponsesCompat bool   `yaml:"chatResponsesCompat,omitempty" json:"chatResponsesCompat,omitempty"` // when true, route /v1/chat/completions via /v1/responses for this model
-	ImgSizes     []string          `yaml:"imgSizes,omitempty" json:"imgSizes,omitempty"`       // custom size option list (e.g. "1024x1024") for Playground image mode; empty = built-in defaults
-	NIMOver      *ModelNIMOverride `yaml:"nim,omitempty" json:"nim,omitempty"`
+	ID                  string            `yaml:"id" json:"id"`
+	QuotaType           string            `yaml:"quotaType,omitempty" json:"quotaType,omitempty"`
+	Alias               string            `yaml:"alias,omitempty" json:"alias,omitempty"`
+	Note                string            `yaml:"note,omitempty" json:"note,omitempty"`
+	Kind                string            `yaml:"kind,omitempty" json:"kind,omitempty"`                               // "text" (default/empty) | "image"
+	ImgProtocol         string            `yaml:"imgProtocol,omitempty" json:"imgProtocol,omitempty"`                 // "gpt" | "xai" | "modelscope" (only when kind=image)
+	TextProtocol        string            `yaml:"textProtocol,omitempty" json:"textProtocol,omitempty"`               // "auto" / "" | "openai-compat" | "openai-responses" | "anthropic" | "google"
+	ChatResponsesCompat bool              `yaml:"chatResponsesCompat,omitempty" json:"chatResponsesCompat,omitempty"` // when true, route /v1/chat/completions via /v1/responses for this model
+	ImgSizes            []string          `yaml:"imgSizes,omitempty" json:"imgSizes,omitempty"`                       // custom size option list (e.g. "1024x1024") for Playground image mode; empty = built-in defaults
+	NIMOver             *ModelNIMOverride `yaml:"nim,omitempty" json:"nim,omitempty"`
 	// Protocols records the set of protocols this model was probed to support
 	// (legal values: ProtocolOpenAICompat, ProtocolOpenAIResponses,
 	// ProtocolAnthropic, ProtocolOpenAIEmbedding, ProtocolGoogle). An empty/nil slice means "not yet probed" OR "probed
@@ -308,6 +308,7 @@ type TextReviewNode struct {
 	// reasoning parameters are sent — suitable for models that work without thinking.
 	Reasoning bool `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
+
 // SplitPattern 章节检测正则（持久化形，regex 为字符串）。
 type SplitPattern struct {
 	Key     string `yaml:"key" json:"key"`
@@ -371,12 +372,23 @@ type ArchiveConfig struct {
 // model id (provider-prefix/model or combo name) used for LLM-assisted intent
 // classification — the smart-assistant reply path that replaces the keyword
 // brain when a routable model is available (empty = keyword fallback only).
-// SpritesheetPath/SpritesheetFps configure the in-app and desktop character
-// animation asset.
+// Actions configure the character animation: each action names one spritesheet
+// split into Cols×Rows cells (numbered row-major, 0 = top-left), of which
+// frames [FrameStart, FrameEnd] inclusive play at Fps.
 type AssistantConfig struct {
-	Model           string `yaml:"model,omitempty" json:"model,omitempty"`
+	Model   string            `yaml:"model,omitempty" json:"model,omitempty"`
+	Actions []AssistantAction `yaml:"actions,omitempty" json:"actions,omitempty"`
+}
+
+// AssistantAction is one named sprite animation cut from a spritesheet image.
+type AssistantAction struct {
+	Name            string `yaml:"name" json:"name"`
 	SpritesheetPath string `yaml:"spritesheetPath,omitempty" json:"spritesheetPath,omitempty"`
-	SpritesheetFps  int    `yaml:"spritesheetFps,omitempty" json:"spritesheetFps,omitempty"`
+	Cols            int    `yaml:"cols,omitempty" json:"cols,omitempty"`
+	Rows            int    `yaml:"rows,omitempty" json:"rows,omitempty"`
+	FrameStart      int    `yaml:"frameStart,omitempty" json:"frameStart,omitempty"`
+	FrameEnd        int    `yaml:"frameEnd,omitempty" json:"frameEnd,omitempty"`
+	Fps             int    `yaml:"fps,omitempty" json:"fps,omitempty"`
 }
 
 // Config is the top-level configuration structure.
@@ -403,5 +415,5 @@ type Config struct {
 	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
 	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`
-	Assistant         AssistantConfig  `yaml:"assistant,omitempty" json:"assistant,omitempty"`
+	Assistant          AssistantConfig  `yaml:"assistant,omitempty" json:"assistant,omitempty"`
 }

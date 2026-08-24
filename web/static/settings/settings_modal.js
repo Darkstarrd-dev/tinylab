@@ -85,21 +85,32 @@ function openPathModal() {
 function openAssistantModal() {
   var s = window.__settings;
   var a = (s && s.assistant) || {};
+  // Draft action list for the editor (plain objects, safe to mutate freely).
+  window.__assistantActions = (a.actions || []).map(function(x) {
+    return {
+      name: x.name || '',
+      spritesheetPath: x.spritesheetPath || '',
+      cols: x.cols || 1,
+      rows: x.rows || 1,
+      frameStart: x.frameStart || 0,
+      frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0),
+      fps: x.fps || 8
+    };
+  });
   openSettingsModal(t('assistantSettings'),
     '<p class="muted">' + escapeHtml(t('assistantSettingsDesc')) + '</p>\
-    <div class="settings-form-grid" style="margin-top:16px">\
-      <div class="form-group"><label>' + escapeHtml(t('assistantModel')) + '</label>\
-        <input type="text" class="input" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '" placeholder="openai/gpt-4o-mini">\
-        <p class="muted" style="margin-top:4px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
-      </div>\
-      <div class="form-group"><label>' + escapeHtml(t('assistantSpritesheet')) + '</label>\
-        <input type="text" class="input" id="settings-modal-assistant-spritesheet" value="' + escapeHtml(a.spritesheetPath || '') + '" placeholder="/sprite/sprite.png">\
-      </div>\
-      <div class="form-group"><label>' + escapeHtml(t('assistantSpritesheetFps')) + '</label>\
-        ' + renderStepperHtml('settings-modal-assistant-fps', a.spritesheetFps || 8, { min: 1, max: 30, style: 'max-width:200px' }) + '\
-      </div>\
+    <div class="form-group" style="margin-top:16px"><label>' + escapeHtml(t('assistantModel')) + '</label>\
+      <button type="button" class="input" id="settings-assistant-model-btn" onclick="assistantModelBtnClick()" style="width:100%;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center">' +
+      escapeHtml(a.model || t('assistantKeywordFallback')) + ' <span style="opacity:0.5">▼</span></button>\
+      <input type="hidden" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '">\
+      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
+    </div>\
+    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
+      <div id="settings-assistant-actions"></div>\
+      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantActionListHint')) + '</p>\
     </div>'
   );
+  renderAssistantActions();
   document.getElementById('settings-modal-save').onclick = function() {
     withLoading(this, function() { return saveAssistantModal(); });
   };
@@ -297,15 +308,25 @@ async function saveProxyModal() {
 }
 
 async function saveAssistantModal() {
-  var model = document.getElementById('settings-modal-assistant-model').value.trim();
-  var spritesheetPath = document.getElementById('settings-modal-assistant-spritesheet').value.trim();
-  var fps = parseInt(document.getElementById('settings-modal-assistant-fps').value, 10);
-  if (isNaN(fps) || fps < 1) fps = 8;
+  var modelEl = document.getElementById('settings-modal-assistant-model');
+  var model = ((modelEl && modelEl.value) || '').trim();
+  var actions = (window.__assistantActions || []).map(function(a) {
+    return {
+      name: a.name || '',
+      spritesheetPath: a.spritesheetPath || '',
+      cols: Math.max(1, parseInt(a.cols, 10) || 1),
+      rows: Math.max(1, parseInt(a.rows, 10) || 1),
+      frameStart: Math.max(0, parseInt(a.frameStart, 10) || 0),
+      frameEnd: Math.max(0, parseInt(a.frameEnd, 10) || 0),
+      fps: Math.max(1, parseInt(a.fps, 10) || 8)
+    };
+  });
   try {
-    await apiPatch('/settings', { assistant: { model: model, spritesheetPath: spritesheetPath, spritesheetFps: fps } });
+    await apiPatch('/settings', { assistant: { model: model, actions: actions } });
     if (window.__settings) {
-      window.__settings.assistant = { model: model, spritesheetPath: spritesheetPath, spritesheetFps: fps };
+      window.__settings.assistant = { model: model, actions: actions };
     }
+    window.__assistantActions = null;
     toast(t('assistantSaved'), 'success');
     closeModalOverlay();
   } catch (e) {

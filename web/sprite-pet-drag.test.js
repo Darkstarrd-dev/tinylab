@@ -1,13 +1,18 @@
 // web/sprite-pet-drag.test.js
 // Zero-dependency Node behavioral test for the L3 desktop pet drag
-// (sprite-pet.html's mouse-drag-to-move). Extracts the REAL inline script
-// from web/static/sprite-pet.html and runs it in a VM sandbox with a minimal
-// DOM stub, then drives the avatar's mousedown + window mousemove/mouseup —
-// proving the drag calls the Go-bound window.movePetWindow with correct
-// deltas, that deltas are incremental (startX/Y updated each move), that
-// mouseup ends the drag, and that a mousedown on the bubble does NOT drag.
+// (sprite-pet.js's mouse-drag-to-move). Loads the REAL web/static/sprite-pet.js
+// in a VM sandbox with a minimal DOM stub, then drives the avatar's mousedown +
+// window mousemove/mouseup — proving the drag calls the Go-bound
+// window.movePetWindow with correct deltas, that deltas are incremental
+// (startX/Y updated each move), that mouseup ends the drag, and that a
+// mousedown on the bubble does NOT drag.
 // The transparency itself is Windows-native Win32 (untestable without a
 // tray+webview runtime + display); this covers the JS drag half of item 5.
+//
+// Since the pet logic was extracted from sprite-pet.html into its own module,
+// this file also guards the extraction contract: sprite-pet.html must load
+// /sprite-pet.js via an external script tag and must NOT contain inline
+// <script> blocks (regression guard against re-inlining the logic).
 //
 // Run:  node web/sprite-pet-drag.test.js
 'use strict';
@@ -23,11 +28,25 @@ function check(name, fn) {
   catch (err) { failures++; console.error('FAIL  ' + name + ': ' + (err && err.message)); }
 }
 
-// Extract the inline <script> from the real pet page.
-const html = fs.readFileSync(path.join(__dirname, 'static/sprite-pet.html'), 'utf8');
-const m = html.match(/<script>([\s\S]*?)<\/script>/);
-if (!m) { console.error('no <script> found in sprite-pet.html'); process.exit(1); }
-const SRC = m[1];
+const JS_PATH = path.join(__dirname, 'static/sprite-pet.js');
+const HTML_PATH = path.join(__dirname, 'static/sprite-pet.html');
+
+console.log('sprite pet module extraction contract:');
+
+check('sprite-pet.html loads /sprite-pet.js externally (no inline script)', () => {
+  const html = fs.readFileSync(HTML_PATH, 'utf8');
+  assert.ok(html.includes('<script src="/sprite-pet.js"></script>'),
+    'html must reference /sprite-pet.js via external tag');
+  assert.ok(!/<script>(?![\s]*<\/)/.test(html.replace('<script src="/sprite-pet.js"></script>', '')),
+    'no inline <script> blocks allowed in sprite-pet.html');
+});
+
+check('sprite-pet.js defines the drag + renderer entry points', () => {
+  const src = fs.readFileSync(JS_PATH, 'utf8');
+  for (const fn of ['movePetWindow', 'initPetSprite', 'sendPetIntent', 'toggleBubble', '/api/assistant/events']) {
+    assert.ok(src.includes(fn), 'missing expected symbol: ' + fn);
+  }
+});
 
 // --- Minimal DOM stub for the pet page drag path. ---
 function makeEl() {
@@ -67,7 +86,7 @@ const sandbox = {
   console,
 };
 vm.createContext(sandbox);
-vm.runInContext(SRC, sandbox, { filename: 'sprite-pet.html.js' });
+vm.runInContext(fs.readFileSync(JS_PATH, 'utf8'), sandbox, { filename: 'sprite-pet.js' });
 
 function fakeEvent(o) {
   return Object.assign({ button: 0, screenX: 0, screenY: 0, preventDefault() {}, stopPropagation() {},
@@ -77,28 +96,26 @@ function fakeEvent(o) {
 console.log('sprite pet drag (item 5, JS half) behavioral tests:');
 
 check('drag: avatar mousedown → mousemove → movePetWindow with incremental deltas', () => {
-  moveCalls.length = 0;
-  const avatar = els['pet-avatar'];
-  avatar._listeners.mousedown[0](fakeEvent({ screenX: 100, screenY: 100 }));
-  winListeners.mousemove[0](fakeEvent({ screenX: 150, screenY: 120 })); // dx=50, dy=20
-  winListeners.mousemove[0](fakeEvent({ screenX: 180, screenY: 120 })); // dx=30, dy=0 (startX updated)
-  assert.deepStrictEqual(moveCalls, [[50, 20], [30, 0]], 'movePetWindow called with incremental deltas');
+  els['pet-avatar']._listeners.mousedown[0](fakeEvent({ screenX: 100, screenY: 100 }));
+  winListeners.mousemove[0](fakeEvent({ screenX: 112, screenY: 95 })); // +12,-5
+  winListeners.mousemove[0](fakeEvent({ screenX: 120, screenY: 90 })); // +8,-5 (incremental)
+  assert.deepStrictEqual(moveCalls, [[12, -5], [8, -5]], 'deltas must be incremental per move');
 });
 
 check('mouseup ends drag: subsequent mousemove does NOT call movePetWindow', () => {
-  moveCalls.length = 0;
   winListeners.mouseup[0](fakeEvent({}));
-  winListeners.mousemove[0](fakeEvent({ screenX: 300, screenY: 300 }));
-  assert.strictEqual(moveCalls.length, 0, 'no movePetWindow after mouseup');
+  const before = moveCalls.length;
+  winListeners.mousemove[0](fakeEvent({ screenX: 200, screenY: 200 }));
+  assert.strictEqual(moveCalls.length, before, 'mousemove after mouseup must be ignored');
 });
 
 check('mousedown on bubble does NOT start a drag', () => {
-  moveCalls.length = 0;
-  const avatar = els['pet-avatar'];
-  // target.closest('#pet-bubble') returns truthy → handler returns early
-  avatar._listeners.mousedown[0](fakeEvent({ screenX: 100, screenY: 100, target: { closest() { return els['pet-bubble']; } } }));
-  winListeners.mousemove[0](fakeEvent({ screenX: 200, screenY: 200 }));
-  assert.strictEqual(moveCalls.length, 0, 'no drag when mousedown originated on the bubble');
+  els['pet-avatar']._listeners.mousedown[0](fakeEvent({
+    screenX: 50, screenY: 50,
+    target: { closest(sel) { return sel === '#pet-bubble' ? {} : null; } },
+  }));
+  winListeners.mousemove[0](fakeEvent({ screenX: 90, screenY: 90 }));
+  assert.ok(moveCalls.every(c => c[0] !== 40 && c[1] !== 40), 'bubble-originated drag must not move window');
 });
 
 if (failures) { console.error('\n' + failures + ' check(s) FAILED'); process.exit(1); }

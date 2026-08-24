@@ -221,9 +221,25 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 	if cfg.AnySearch.MaxResults == 0 {
 		cfg.AnySearch.MaxResults = 5
 	}
-	// Assistant spritesheet animation default frame rate.
-	if cfg.Assistant.SpritesheetFps == 0 {
-		cfg.Assistant.SpritesheetFps = 8
+	// Assistant actions: normalize per-action animation defaults so a
+	// hand-edited config with zero grid/fps values still animates sanely.
+	for i := range cfg.Assistant.Actions {
+		a := &cfg.Assistant.Actions[i]
+		if a.Cols < 1 {
+			a.Cols = 1
+		}
+		if a.Rows < 1 {
+			a.Rows = 1
+		}
+		if a.FrameStart < 0 {
+			a.FrameStart = 0
+		}
+		if a.FrameEnd < a.FrameStart {
+			a.FrameEnd = a.FrameStart
+		}
+		if a.Fps <= 0 {
+			a.Fps = 8
+		}
 	}
 	// Theme variant defaults.
 	if cfg.Theme.DarkVariant == "" {

@@ -49,9 +49,9 @@ intent → classifyIntent(intent)
 ## 3. 已完成并验证的部分（按用户项）
 
 ### 项 1：Settings 设置入口 ✅ 实现+验证
-- **配置层**：`internal/config/types.go` 新增 `AssistantConfig{Model, SpritesheetPath, SpritesheetFps}` + `Config.Assistant`（`yaml/json:"assistant,omitempty"`）；`internal/config/defaults.go` 给 `SpritesheetFps` 默认 8。
-- **API**：`internal/api/settings/register.go`——GET `/api/settings` 返回 `assistant` 对象；PATCH 接受 presence-aware `assistantPatch`（全指针字段，经 `applyAssistantUpdates` 逐字段合并，沿用 rotation/archive 的合并纪律——不整结构覆盖）。
-- **前端**：`web/static/settings/settings.js`（Settings 侧栏 Assistant 行，显示当前 model 或 `keyword` fallback）、`web/static/settings/settings_modal.js`（`openAssistantModal`/`saveAssistantModal`：model 文本框 + spritesheet 路径 + FPS Stepper）、`web/static/i18n.js`（`assistantSettings` 等 8 键 EN+CN）。
+- **配置层（2026-08-24 Action 化）**：`internal/config/types.go` `AssistantConfig{Model, Actions []AssistantAction}` + `Config.Assistant`；`AssistantAction{Name, SpritesheetPath, Cols, Rows, FrameStart, FrameEnd, Fps}` 描述一个精灵动画（网格行主序 0 基帧范围，左上=0）；旧顶层 `SpritesheetPath`/`SpritesheetFps` 已移除。`internal/config/defaults.go::finalizeConfig` 归一 cols/rows≥1、frameEnd≥frameStart、fps≤0→8。
+- **API**：`internal/api/settings/register.go`——GET `/api/settings` 返回 `assistant` 对象；PATCH 接受 presence-aware `assistantPatch`（`Model *string` + `Actions *[]config.AssistantAction` 整表替换，经 `applyAssistantUpdates` 合并）。spritesheet 文件服务在 `internal/api/assistant/sheet.go`：`POST /api/assistant/sheet-preview`（native picker 绝对路径 → owner 绑定 1h TTL 随机 id）、`GET /sheet-preview/{id}`、`GET /sheet-image/{name}`（按 action 名服务，宠物页运行时加载）。`/api/browse` 新增可选 `filter` 参数。
+- **前端**：`web/static/settings/settings.js`（Settings 侧栏 Assistant 行）、`web/static/settings/settings_assistant.js`（新：`openAssistantModelPicker` 独立 stacked overlay 复刻 pg 模型选择器 + Action 列表 Add/Remove/Edit + Action 编辑弹窗——Browse 选 spritesheet、canvas 网格分割预览与帧编号、单击选单帧/拖选连续范围、From/To 数值输入、fps stepper）、`web/static/settings/settings_modal.js`（`openAssistantModal`/`saveAssistantModal`：hidden input + `window.__assistantActions` 草稿，PATCH `{model, actions}`）、`web/static/i18n.js`（assistant 键 EN+CN）。
 - **验证**：API round-trip（Python urllib PATCH→GET 持久化）；`web/settings-assistant-modal.test.js`（VM 加载真实 `settings_modal.js`，3 检查：字段→PATCH body、invalid fps→8、fps<1→8）。
 - **未验证**：模态框视觉渲染（本机无头 chromium 无法启动）。
 
@@ -77,8 +77,8 @@ intent → classifyIntent(intent)
 
 ### 项 5：Systray 释放小精灵 ✅ 实现+验证（部分）
 - **透明窗口**：`host_webview_windows.go::openPetWindow`（`//go:build tray && webview && windows`）新增 Win32 透明：`WS_EX_LAYERED`（`gwlExstyle=-20`）+ `SetLayeredWindowAttributes(hwnd, petColorKey=RGB(255,0,255), 0, LWA_COLORKEY)`；`sprite-pet.html` `.pet-container` `background:#FF00FF`（color key），被 keyed out 透明，只留 sprite/气泡（非 key 像素）。新增 proc `procSetLayeredWindowAttributes` 与常量 `gwlExstyle`/`wsExLayered`/`lwaColorkey`/`petColorKey`。这是「释放小精灵无效果」（不透明方框）的根因修复。
-- **Spritesheet 渲染**：`web/static/sprite-pet.html` 新增 canvas 渲染器（`#pet-sprite` + `initPetSprite`：fetch `/api/settings` 取 `assistant.spritesheetPath`/`spritesheetFps`，`new Image`+`ctx.drawImage` 按帧步进，无配置则保留 CSS face fallback）——消费项 1 的 spritesheet 配置。
-- **验证**：`web/sprite-pet-drag.test.js`（提取真实内联 `<script>`，VM DOM stub，3 检查：movePetWindow 增量 delta、mouseup 结束拖拽、气泡上 mousedown 不拖拽）；`go build -tags "tray webview"` 通过。
+- **Spritesheet 渲染（2026-08-24 改 actions 消费；同日脚本模块化）**：宠物页逻辑已从 `sprite-pet.html` 内联 `<script>` 抽出为独立模块 `web/static/sprite-pet.js`（原样平移：窗口拖拽 `movePetWindow` 转发、气泡与 `/api/assistant/dispatch`、spritesheet 渲染器、Events SSE 订阅），HTML 仅保留 `<script src="/sprite-pet.js"></script>` 外链。渲染器 fetch `/api/settings` 取 `assistant.actions`，优先名为 `idle` 的 action 否则第一个带路径的，经 `/api/assistant/sheet-image/{name}` 加载图片，按 cols/rows/frameStart..frameEnd/fps 步进；无可用 action 保留 CSS face fallback。
+- **验证**：`web/sprite-pet-drag.test.js`（加载真实 `web/static/sprite-pet.js` VM DOM stub，5 检查：抽取契约——HTML 必须外链 /sprite-pet.js 且无内联 script、模块符号齐备；拖拽增量 delta、mouseup 结束拖拽、气泡上 mousedown 不拖拽）；`go build -tags "tray webview"` 通过。
 - **未验证**：透明窗口视觉（Win32 原生，需 tray+webview 运行时+显示器，本机无法跑；color-key 与 `docs/assistant_interaction_research.md §6.3` MVP 一致）。
 
 ---
@@ -100,14 +100,14 @@ intent → classifyIntent(intent)
 「执行动作」(`executeSpriteAction`) 走 `executeSubRequest`（内部 HTTP 子请求到 `http://127.0.0.1:{port}/api/...`）。password OFF（默认）正常；password ON 时该内部请求无 CSRF/session → 403。`docs/assistant_execution_layer_research.md` 提及「内部子请求免鉴权或带内部 session」——当前实现两者皆无。**未做原因**：需 password-on 环境复现，非用户明确报告。
 
 ### 4.5 默认 sprite 资产
-spritesheet 渲染器在 `SpritesheetPath` 为空时回退 CSS face。仓库无默认 sprite PNG。**未做原因**：需美术资源。
+sprite 渲染器在没有任何带 `spritesheetPath` 的 action 时回退 CSS face。仓库无默认 sprite PNG。**未做原因**：需美术资源。
 
 ---
 
 ## 5. 代码地图（本任务改动/新增文件）
 
 **Go 后端**
-- `internal/config/types.go`（`AssistantConfig` + `Config.Assistant`）、`internal/config/defaults.go`（SpritesheetFps 默认 8）
+- `internal/config/types.go`（`AssistantConfig`+`AssistantAction` + `Config.Assistant`）、`internal/config/defaults.go`（action 归一化）
 - `internal/api/settings/register.go`（GET 返回 assistant / PATCH `assistantPatch`+`applyAssistantUpdates`）
 - `internal/assistant/semantics.json`（26 规则，9 处加固改动 + 2 新规则）
 - `internal/assistant/llm_classifier.go`（新，`LLMClassifier`/`LLMTool`）

@@ -15,6 +15,10 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/dispatch", h.dispatch)
 	r.Get("/events", h.events.ServeSSE)
 
+	// Spritesheet serving (Action editor preview + runtime pet animation)
+	r.Post("/sheet-preview", h.sheetPreviewRegister)
+	r.Get("/sheet-preview/{id}", h.sheetPreviewServe)
+	r.Get("/sheet-image/{name}", h.sheetImageServe)
 	// Jobs (Task B)
 	r.Get("/jobs", h.getJobs)
 	r.Post("/jobs", h.createJob)

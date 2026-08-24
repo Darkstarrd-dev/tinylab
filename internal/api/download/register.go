@@ -46,7 +46,6 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/downloads/{id}/retry", h.retryDownloadTask)
 	r.Delete("/downloads/{id}", h.removeDownload)
 	r.Post("/open-url", h.openExternalURL)
-	r.Post("/browse", h.browseSystemPath)
 }
 
 // --- Download API Handlers ---
@@ -472,49 +471,3 @@ func (h *Handler) openExternalURL(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// browseSystemPath launches native System file/directory picker dialog and returns absolute path.
-// POST /api/browse
-func (h *Handler) browseSystemPath(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Mode        string `json:"mode"`        // "file" or "directory"
-		InitialPath string `json:"initialPath"` // optional; if the path is a file, its parent dir is used
-	}
-	_ = json.NewDecoder(r.Body).Decode(&input)
-
-	initialDir := resolveBrowseInitialDir(input.InitialPath, input.Mode)
-
-	var selectedPath string
-	if input.Mode == "directory" {
-		selectedPath, _ = fsutil.OpenDirectoryPickerAt(initialDir)
-	} else {
-		selectedPath, _ = fsutil.OpenFilePickerAt("Executables (*.exe)|*.exe|All Files (*.*)|*.*", initialDir)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"path": selectedPath})
-}
-
-// resolveBrowseInitialDir resolves the initial directory for a file/directory
-// picker. If initialPath is empty, returns empty (picker uses default location).
-// If initialPath is a file, returns its parent directory. If it's a directory,
-// returns it as-is. If the path doesn't exist, attempts to create it as a
-// directory (idempotent for existing dirs) so directory pickers can open at
-// freshly configured subdirectories like imgs/ or traces/.
-func resolveBrowseInitialDir(initialPath string, mode string) string {
-	if initialPath == "" {
-		return ""
-	}
-	info, err := os.Stat(initialPath)
-	if err != nil {
-		// Path doesn't exist — create it as a directory so the picker can
-		// navigate there. File-mode pickers also benefit: if the parent of a
-		// non-existent file is missing, MkdirAll creates it too.
-		_ = os.MkdirAll(initialPath, 0755)
-		return initialPath
-	}
-	if info.IsDir() {
-		return initialPath
-	}
-	return filepath.Dir(initialPath)
-}
