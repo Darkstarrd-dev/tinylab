@@ -139,35 +139,48 @@ func loadAfterTmpApply(path string) (*Config, bool) {
 // files auto-migrate instead of blocking startup. A genuinely unknown field
 // (e.g. a typo like "portt") is not in this list, so the strict error surfaces
 // unchanged — preserving the typo-catching intent of KnownFields(true).
-//
 // "monitor" was removed when the terminal/monitor features were deleted.
 // "download.proxy" was removed when the download proxy feature was deleted.
+// "assistant.spritesheetFps" / "assistant.spritesheetPath" were replaced in
+// 624cd3b by assistant.actions[] (multi-action spritesheet editor); old
+// config.yaml files carrying flat keys such as
+//   assistant:
+//     spritesheetPath: C:\x\y.png
+//     spritesheetFps: 8
+// previously crashed startup with "field spritesheetFps not found". They
+// should auto-migrate (strip legacy keys) like the other deprecated paths.
 var deprecatedFieldPaths = [][]string{
 	{"download", "proxy"},
 	{"monitor"},
+	{"assistant", "spritesheetFps"},
+	{"assistant", "spritesheetPath"},
 }
 
 // decodeConfig strictly decodes YAML data into cfg. If the strict decoder
 // rejects the data, it strips known-deprecated field paths, re-marshals, and
-// retries the strict decode. The migrated flag is true when a deprecated
-// field was stripped so the caller can persist the cleaned config. A strict
-// failure that is NOT explained by a deprecated field (e.g. a typo) returns
-// the original strict error.
+// retries the strict decode. For assistant.spritesheetPath/Fps the legacy
+// values are converted into assistant.actions[0] (name "idle") when the new
+// actions list is empty, so old spritesheets keep working after upgrade. The
+// migrated flag is true when a deprecated field was stripped/converted so the
+// caller can persist the cleaned config. A strict failure that is NOT explained
+// by a deprecated field (e.g. a typo) returns the original strict error.
 func decodeConfig(data []byte, cfg *Config) (migrated bool, err error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if derr := dec.Decode(cfg); derr == nil {
 		return false, nil
 	} else {
-		// Strict failed. Parse into a generic map (lenient) so we can strip
-		// deprecated fields without touching anything else.
+		// Strict failed. Parse into a generic map (lenient) so we can
+		// strip/convert deprecated fields without touching anything else.
 		var root map[string]any
 		ldec := yaml.NewDecoder(bytes.NewReader(data))
 		ldec.KnownFields(false)
 		if merr := ldec.Decode(&root); merr != nil {
 			return false, derr
 		}
-		if !stripPaths(root, deprecatedFieldPaths) {
+		converted := convertLegacyAssistantFields(root)
+		stripped := stripPaths(root, deprecatedFieldPaths)
+		if !stripped && !converted {
 			// No deprecated field present — the strict error is a genuine
 			// mistake (typo); surface it unchanged.
 			return false, derr
@@ -185,6 +198,45 @@ func decodeConfig(data []byte, cfg *Config) (migrated bool, err error) {
 		}
 		return true, nil
 	}
+}
+
+// convertLegacyAssistantFields migrates flat assistant.spritesheetPath/Fps
+// (pre-624cd3b schema) into assistant.actions[0] when no actions exist, so
+// an upgrade preserves the user's previous spritesheet. The legacy keys are
+// read here before stripPaths deletes them.
+func convertLegacyAssistantFields(root map[string]any) bool {
+	am, ok := root["assistant"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if _, hasActions := am["actions"]; hasActions {
+		return false
+	}
+	p, _ := am["spritesheetPath"].(string)
+	if p == "" {
+		return false
+	}
+	fps, _ := am["spritesheetFps"].(int)
+	if fps <= 0 {
+		if f2, ok := am["spritesheetFps"].(int64); ok && f2 > 0 {
+			fps = int(f2)
+		} else if f3, ok := am["spritesheetFps"].(float64); ok && f3 > 0 {
+			fps = int(f3)
+		}
+	}
+	if fps <= 0 {
+		fps = 8
+	}
+	am["actions"] = []any{map[string]any{
+		"name":            "idle",
+		"spritesheetPath": p,
+		"cols":            1,
+		"rows":            1,
+		"frameStart":      0,
+		"frameEnd":        0,
+		"fps":             fps,
+	}}
+	return true
 }
 
 // stripPaths removes each dot-path from root, returning whether any path was
