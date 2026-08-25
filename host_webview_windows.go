@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -365,6 +364,8 @@ var (
 	procMonitorFromWindow  = user32Dll.NewProc("MonitorFromWindow")
 	procSetWindowPos       = user32Dll.NewProc("SetWindowPos")
 	user32Dll              = windows.NewLazySystemDLL("user32.dll")
+	dwmapiDll              = windows.NewLazySystemDLL("dwmapi.dll")
+	procDwmExtendFrame     = dwmapiDll.NewProc("DwmExtendFrameIntoClientArea")
 )
 
 const (
@@ -379,6 +380,13 @@ const (
 	swpNoSize               = 0x0001
 	swpNoZOrder             = 0x0004
 )
+
+// dwmMARGINS 用于 DwmExtendFrameIntoClientArea，所有字段设为 -1 表示
+// 将 DWM 玻璃合成管线扩展至整个客户区，使 WebView2 DComp 表面的透明
+// alpha 通道可以直接穿透到桌面。
+type dwmMARGINS struct {
+	CxLeftWidth, CxRightWidth, CyTopHeight, CyBottomHeight int32
+}
 
 // chromiumOf reaches the *edge.Chromium behind a webview2.WebView. The
 // concrete *webview struct begins with {hwnd, mainthread uintptr, browser
@@ -400,17 +408,17 @@ func chromiumOf(w webview2.WebView) *edge.Chromium {
 	return (*edge.Chromium)(unsafe.Pointer(inner.browserItf[1]))
 }
 
-// putDefaultBackgroundColor calls ICoreWebView2Controller2::
-// PutDefaultBackgroundColor (slot 27) with a raw 0xAARRGGBB color. Must run
-// on the controller's UI thread. Returns the COM HRESULT as an error.
-func putDefaultBackgroundColor(ctrl *edge.ICoreWebView2Controller, col uint32) error {
-	vtbl := *(*uintptr)(unsafe.Pointer(ctrl))
-	proc := *(*uintptr)(unsafe.Pointer(vtbl + 27*unsafe.Sizeof(uintptr(0))))
-	hr, _, _ := syscall.SyscallN(proc, uintptr(unsafe.Pointer(ctrl)), uintptr(col))
-	if hr != 0 {
-		return windows.Errno(hr)
+// setTransparentBackground 通过正确的 COM QueryInterface 获取
+// ICoreWebView2Controller2 并调用 PutDefaultBackgroundColor 设置全透明。
+// 旧代码直接在 Controller v1 vtable 上按 slot 27 偏移调用，属于越界未定义行为。
+func setTransparentBackground(ctrl *edge.ICoreWebView2Controller) error {
+	ctrl2 := ctrl.GetICoreWebView2Controller2()
+	if ctrl2 == nil {
+		return windows.ERROR_NOT_FOUND
 	}
-	return nil
+	return ctrl2.PutDefaultBackgroundColor(edge.COREWEBVIEW2_COLOR{
+		A: 0, R: 0, G: 0, B: 0,
+	})
 }
 
 // openPetWindow creates a lightweight, borderless desktop pet window (L3).
@@ -442,7 +450,7 @@ func openPetWindow(hctx *app.HostContext) {
 	// Value "0" = fully transparent (0xAARRGGBB). Scoped to this creation and
 	// unset right after — webviewWindowMu serializes environment creation, so
 	// no other window can observe the variable mid-flight.
-	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "0")
+	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000")
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: false,
@@ -463,6 +471,14 @@ func openPetWindow(hctx *app.HostContext) {
 		style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlStyle)
 		newStyle := (uint32(style) &^ (wsCaption | wsThickFrame | wsSysMenu)) | wsPopup
 		procSetWindowLongPtrW.Call(hwnd, gwlStyle, uintptr(newStyle))
+
+		// 关键：将 DWM 玻璃合成管线扩展至全客户区，使 WebView2 DComp 表面的
+		// 透明 alpha 通道可以直接穿透到桌面。没有这一步，宿主窗口的 GDI 画刷
+		// 会在 WebView2 透明层下方叠一层不透明背景，导致要么看到白色矩形，
+		// 要么 DWM 合成器判定"无可见内容"使整个窗口不可见。
+		margins := dwmMARGINS{-1, -1, -1, -1}
+		procDwmExtendFrame.Call(hwnd, uintptr(unsafe.Pointer(&margins)))
+
 		// Set Topmost (HWND_TOPMOST = -1 = ^uintptr(0))
 		procSetWindowPos.Call(
 			hwnd,
@@ -488,13 +504,13 @@ func openPetWindow(hctx *app.HostContext) {
 				if ctrl == nil {
 					continue
 				}
-				if err := putDefaultBackgroundColor(ctrl, 0x00000000); err != nil {
+				if err := setTransparentBackground(ctrl); err != nil {
 					hctx.Logger.Error("pet window: transparent background: %v", err)
 				} else {
 					hctx.Logger.Info("pet window: transparent background applied")
 				}
-				// Ensure DComp repaints after background change.
-				_ = chromium.NotifyParentWindowPositionChanged()
+				// 强制 DComp 重新合成，确保透明变更立即生效。
+				_ = ctrl.NotifyParentWindowPositionChanged()
 				_ = targetHwnd // keep hwnd alive for logging if needed
 				return
 			}
