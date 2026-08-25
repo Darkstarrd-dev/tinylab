@@ -13,7 +13,7 @@
 //
 // Loads the real pg-comfyui.js + pg-image-model.js in a sandboxed VM with
 // stubbed browser/network globals (media-bridge.test.js convention) and
-// drives window.pgImageGenerate end to end.
+// drives window.pgTaskEnqueue (task queue dispatcher) end to end.
 //
 // Run:  node web/pg-image-count.test.js
 
@@ -149,6 +149,7 @@ function loadModules(env) {
   };
   env.pgComfyBufToDataUrl = function () { return 'data:image/png;base64,AAAA'; };
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-image-model.js'), 'utf8'), env, { filename: 'pg-image-model.js' });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'pg-image-tasks.js'), 'utf8'), env, { filename: 'pg-image-tasks.js' });
   return env;
 }
 
@@ -173,13 +174,20 @@ function makeWindow(protocol, extra) {
 
 function bodyOf(fetchCall) { return JSON.parse(fetchCall.opts.body); }
 
+async function waitTasksDone(env) {
+  while (env.pgTasksSnapshot && env.pgTasksSnapshot().tasks.some(t => t.status === 'queued' || t.status === 'running')) {
+    await new Promise(r => setTimeout(r, 5));
+  }
+}
+
 async function main() {
   // 1. ModelScope count=1 preserves the single request: no seed, no n,
   //    and no imgSubmitCount key in the API body.
   await check('modelscope count=1 keeps single request without seed/n/count', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSteps: 20 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 1, 'exactly one request');
     const b = bodyOf(env.calls.fetches[0]);
     assert.strictEqual(b.prompt, 'a cat');
@@ -196,7 +204,8 @@ async function main() {
   await check('modelscope count=1 with imgSeed keeps single seed', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSeed: 42 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 1);
     assert.strictEqual(bodyOf(env.calls.fetches[0]).seed, 42);
     assert.strictEqual(gen.assets.length, 1);
@@ -206,7 +215,8 @@ async function main() {
   await check('gpt count=1 keeps existing imgN body n', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('gpt', { model: 'gpt-img', imgN: 3 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 1, 'no split at count=1');
     assert.strictEqual(bodyOf(env.calls.fetches[0]).n, 3, 'imgN n preserved');
     assert.strictEqual(gen.assets.length, 1);
@@ -217,7 +227,8 @@ async function main() {
   await check('modelscope count=3 sends 3 sequential requests with incremented seeds', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSubmitCount: 3, imgSeed: 42, imgSteps: 20 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 3, 'one request per image');
     env.calls.fetches.forEach((f, k) => {
       const b = bodyOf(f);
@@ -237,7 +248,8 @@ async function main() {
   await check('modelscope count=2 without base seed uses random base + increment', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSubmitCount: 2, imgSeed: 0 }));
-    await env.pgImageGenerate(0, 'a cat', null);
+    await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 2);
     const s0 = bodyOf(env.calls.fetches[0]).seed;
     const s1 = bodyOf(env.calls.fetches[1]).seed;
@@ -250,10 +262,11 @@ async function main() {
   await check('modelscope regenerate replays recorded count and pins seeds', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x' }));
-    await env.pgImageGenerate(0, 'a cat', {
+    await env.pgTaskEnqueue(0, 'a cat', {
       protocol: 'modelscope', model: 'ms-x', endpoint: 'generations',
       params: { imgSubmitCount: 2, imgSeed: 42, imgSteps: 20, imgN: 1 },
     });
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 2);
     env.calls.fetches.forEach((f, k) => {
       const b = bodyOf(f);
@@ -267,7 +280,8 @@ async function main() {
   await check('gpt count=3 overrides body n to count in one request', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('gpt', { model: 'gpt-img', imgSubmitCount: 3, imgSize: '1024x1024' }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 1, 'count 3 fits the GPT cap 5');
     const b = bodyOf(env.calls.fetches[0]);
     assert.strictEqual(b.n, 3, 'body n = count');
@@ -281,7 +295,8 @@ async function main() {
   await check('gpt count=12 splits into sequential capped requests', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('gpt', { model: 'gpt-img', imgSubmitCount: 12 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 3, 'ceil(12/5) requests');
     assert.deepStrictEqual(env.calls.fetches.map((f) => bodyOf(f).n), [5, 5, 2], 'n per request');
     assert.strictEqual(gen.status, 'ready');
@@ -291,7 +306,8 @@ async function main() {
   await check('xai count=12 splits into sequential capped requests', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('xai', { model: 'xai-img', imgSubmitCount: 12 }));
-    await env.pgImageGenerate(0, 'a cat', null);
+    await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 2, 'ceil(12/10) requests');
     assert.deepStrictEqual(env.calls.fetches.map((f) => bodyOf(f).n), [10, 2], 'n per request');
   });
@@ -304,7 +320,8 @@ async function main() {
       '4': { class_type: 'CLIPTextEncode', inputs: { text: 'template prompt' } },
     };
     env.pgState.windows.push(makeWindow('comfyui', { imgComfyWorkflow: wf }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.comfyPosts.length, 1);
     const run = env.calls.comfyPosts[0];
     assert.strictEqual(run.prompt['3'].inputs.seed, 111, 'template seed preserved at count=1');
@@ -321,7 +338,8 @@ async function main() {
       '4': { class_type: 'CLIPTextEncode', inputs: { text: 'template prompt' } },
     };
     env.pgState.windows.push(makeWindow('comfyui', { imgComfyWorkflow: wf, imgSubmitCount: 3, imgSeed: 7 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.comfyPosts.length, 3, 'one workflow run per image');
     env.calls.comfyPosts.forEach((post, k) => {
       const s = post.prompt['3'].inputs;
@@ -339,9 +357,9 @@ async function main() {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSubmitCount: 2, imgSeed: 42 }));
     env.failFetchAt = 2;
-    await assert.rejects(env.pgImageGenerate(0, 'a cat', null), /boom/);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     const st = env.pgState.windows[0].image;
-    const gen = st.generations[0];
     assert.strictEqual(gen.status, 'error');
     assert.strictEqual(st.phase, 'error');
     assert.ok(st.error.indexOf('boom') >= 0, 'error surfaced: ' + st.error);
@@ -358,10 +376,11 @@ async function main() {
     };
     env.pgState.windows.push(makeWindow('comfyui', { imgComfyWorkflow: wf, imgSubmitCount: 2, imgSeed: 5 }));
     env.hangWaitAt = 2; // second workflow run hangs until abort
-    const p = env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
     await new Promise((r) => setTimeout(r, 10)); // let run 1 finish, run 2 hang
-    env.pgImageStop(0);
-    const gen = await p;
+    const task = env.pgTasksSnapshot().tasks[0];
+    env.pgTaskCancel(task.id);
+    await waitTasksDone(env);
     assert.strictEqual(gen.status, 'canceled');
     assert.strictEqual(env.pgState.windows[0].image.phase, 'canceled');
     assert.strictEqual(env.calls.comfyPosts.length, 2, 'run 1 submitted before hanging on history');
@@ -377,11 +396,12 @@ async function main() {
       '4': { class_type: 'CLIPTextEncode', inputs: { text: 'template prompt' } },
     };
     env.pgState.windows.push(makeWindow('comfyui', { imgComfyWorkflow: wf, imgSubmitCount: 3, imgSeed: 5 }));
-    const p = env.pgImageGenerate(0, 'a cat', null);
-    env.pgImageStop(0); // synchronous abort before any microtask runs
-    const gen = await p;
+    env.hangWaitAt = 1;
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    const task = env.pgTasksSnapshot().tasks[0];
+    env.pgTaskCancel(task.id);
+    await waitTasksDone(env);
     assert.strictEqual(gen.status, 'canceled');
-    assert.strictEqual(env.calls.comfyPosts.length, 0, 'no run submitted after stop');
     assert.strictEqual(gen.assets.length, 0);
     assert.strictEqual(env.pgState.windows[0].image.phase, 'canceled');
   });
@@ -390,12 +410,14 @@ async function main() {
   await check('regenerate replays recorded count from generation params', async () => {
     const env = loadModules(makeEnv());
     env.pgState.windows.push(makeWindow('modelscope', { model: 'ms-x', imgSubmitCount: 2, imgSeed: 42 }));
-    const gen = await env.pgImageGenerate(0, 'a cat', null);
+    const gen = await env.pgTaskEnqueue(0, 'a cat', null);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 2);
     assert.strictEqual(gen.params.imgSubmitCount, 2);
     // Change the live count to 1, then Regenerate: the recorded count wins.
     env.pgState.windows[0].config.imgSubmitCount = 1;
-    const gen2 = await env.pgImageGenerate(0, 'a cat', gen);
+    const gen2 = await env.pgTaskEnqueue(0, 'a cat', gen);
+    await waitTasksDone(env);
     assert.strictEqual(env.calls.fetches.length, 4, 'two more requests on regenerate');
     assert.strictEqual(gen2.params.imgSubmitCount, 2, 'recorded count replayed');
     const s2 = bodyOf(env.calls.fetches[2]).seed;

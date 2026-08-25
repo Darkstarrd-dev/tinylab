@@ -222,7 +222,7 @@ func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 	want := []string{
 		"playground/playground.js", "playground/pg-i18n.js",
 		"playground/pg-core.js", "playground/pg-state.js", "playground/pg-markdown.js",
-		"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
+		"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-tasks.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
 		"playground/pg-render.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
 		"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
 		"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",

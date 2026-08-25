@@ -87,6 +87,7 @@ function loadModules(env) {
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
   vm.createContext(env);
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-image-model.js'), 'utf8'), env, { filename: 'pg-image-model.js' });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'pg-image-tasks.js'), 'utf8'), env, { filename: 'pg-image-tasks.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-render.js'), 'utf8'), env, { filename: 'pg-render.js' });
   return env;
 }
@@ -104,6 +105,12 @@ function makeWindow(extra) {
     imgEndpoint: 'generations',
   };
   return { config: Object.assign(base, extra || {}), messages: [], image: null };
+}
+
+async function waitTasksDone(env) {
+  while (env.pgTasksSnapshot && env.pgTasksSnapshot().tasks.some(t => t.status === 'queued' || t.status === 'running')) {
+    await new Promise(r => setTimeout(r, 5));
+  }
 }
 
 async function main() {
@@ -128,8 +135,9 @@ async function main() {
       });
     };
 
-    const p = env.pgImageGenerate(0, 'a beautiful landscape', null);
+    const p = env.pgTaskEnqueue(0, 'a beautiful landscape', null);
     const gen = await p;
+    await waitTasksDone(env);
 
     assert.strictEqual(gen.assets.length, 3, 'all 3 assets collected at end');
     assert.strictEqual(gen.status, 'ready');

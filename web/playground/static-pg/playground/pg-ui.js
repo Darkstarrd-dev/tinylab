@@ -128,16 +128,19 @@ function pgUserSend() {
   }
 
   if (pgState.mode === 'image') {
-    var activeImageWin = pgWin();
-    var imageProtocol = activeImageWin && typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(activeImageWin.config) : null;
-    if (!activeImageWin) return;
-    if (imageProtocol !== 'comfyui' && !activeImageWin.config.model) { pgToast(pgT('pgSelectModel'), 'warning'); return; }
-    activeImageWin.image.draftPrompt = text;
-    pgImageGenerate(pgState.activeWin, text, { promptFormat: 'natural' }).then(function () {
-      ta.value = '';
-      activeImageWin.image.draftPrompt = '';
-      pgRenderInputBar();
-    }).catch(function () {});
+    var win0 = pgWin();
+    var proto0 = win0 && typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(win0.config) : null;
+    if (!win0) return;
+    if (proto0 !== 'comfyui' && !win0.config.model) { pgToast(pgT('pgSelectModel'), 'warning'); return; }
+    try {
+      if (typeof pgTaskEnqueue === 'function') {
+        pgTaskEnqueue(pgState.activeWin, text, { promptFormat: 'natural' });
+      }
+    } catch (e) {
+      pgToast(e.message || pgT('pgError'), 'warning');
+    }
+    ta.value = '';
+    if (win0.image) win0.image.draftPrompt = '';
     pgRenderInputBar();
     return;
   }
@@ -365,6 +368,9 @@ function pgRenderPanes() {
     layout.classList.toggle('pg-req-left-mode', showReqLeft);
   }
   pgRenderReqLeft(showReqLeft);
+  if (typeof pgRenderTaskQueue === 'function') {
+    pgRenderTaskQueue(showReqLeft);
+  }
   for (var i2 = 0; i2 < n; i2++) {
     pgRenderMessages(i2);
   }
@@ -527,7 +533,14 @@ function pgRenderSidebar() {
       '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepImageSubmitCount(1)" tabindex="-1">+</button>' +
     '</div>';
   var batchEntryHtml = '<div class="pg-batch-entry">' + imageBatchBtn + submitCountStepper + '</div>';
-  var imageActionsRow = '<div class="pg-image-actions-row" style="margin-top:8px">' + batchEntryHtml + '</div>';
+  var concurrencyStepper =
+    '<div class="number-stepper pg-img-concurrency-stepper" data-tooltip="' + pgEscapeHtml(pgT('pgImgConcurrency')) + '">' +
+      '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepImageConcurrency(-1)" tabindex="-1">-</button>' +
+      '<input type="number" class="stepper-input pg-image-concurrency" min="1" max="8" step="1" value="' + pgGetImageConcurrency() + '" onchange="pgOnImageConcurrency(this.value)" aria-label="' + pgEscapeHtml(pgT('pgImgConcurrency')) + '">' +
+      '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepImageConcurrency(1)" tabindex="-1">+</button>' +
+    '</div>';
+  var concurrencyRow = '<div class="pg-param-row" style="margin-top:8px"><label>' + pgEscapeHtml(pgT('pgImgConcurrency')) + '</label>' + concurrencyStepper + '</div>';
+  var imageActionsRow = '<div class="pg-image-actions-row" style="margin-top:8px">' + batchEntryHtml + concurrencyRow + '</div>';
   // --- WinBar ---
   var generating = pgIsGenerating();
   var winBtns = '';
@@ -1247,14 +1260,28 @@ function pgRenderReqLeft(showReqLeft) {
   if (!showReqLeft) {
     container.innerHTML = '';
     pgStopReqLeftPolling();
+    if (typeof pgRenderTaskQueue === 'function') pgRenderTaskQueue(false);
     return;
   }
-  container.innerHTML =
-    '<div class="pg-req-left-inner">' +
-      '<div class="pg-req-left-header">' + pgEscapeHtml(pgT('pgReqLeftTitle')) + '</div>' +
-      '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
-    '</div>';
+  if (pgState.mode === 'image') {
+    container.innerHTML =
+      '<div class="pg-req-left-inner pg-req-history-inner">' +
+        '<div class="pg-req-left-header">' + pgEscapeHtml(pgT('pgReqLeftTitle')) + '</div>' +
+        '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
+      '</div>' +
+      '<div class="pg-req-left-inner pg-tasks-inner">' +
+        '<div class="pg-req-left-header">' + pgEscapeHtml(pgT('pgTaskQueueTitle')) + '</div>' +
+        '<div class="pg-req-table-wrap" id="pg-tasks-content"></div>' +
+      '</div>';
+  } else {
+    container.innerHTML =
+      '<div class="pg-req-left-inner">' +
+        '<div class="pg-req-left-header">' + pgEscapeHtml(pgT('pgReqLeftTitle')) + '</div>' +
+        '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
+      '</div>';
+  }
   pgStartReqLeftPolling();
+  if (typeof pgRenderTaskQueue === 'function') pgRenderTaskQueue(pgState.mode === 'image');
 }
 
 function pgStartReqLeftPolling() {
@@ -1546,11 +1573,8 @@ function pgRenderInputBar() {
   var w = pgWin();
   var savedVal = existingTa ? existingTa.value : (w && w.config && w.config.prompt ? w.config.prompt : '');
 
-  var imageGenerating = pgState.mode === 'image' && w && w.image && w.image.phase === 'generating';
   var sendBtn = '';
-  if (imageGenerating) {
-    sendBtn = '<button class="pg-send stop" onclick="pgImageStop(pgState.activeWin)">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
-  } else if (pgIsGenerating() && !(pgState.autoChat.enabled && pgState.autoChat.isRunning)) {
+  if (pgIsGenerating() && !(pgState.autoChat.enabled && pgState.autoChat.isRunning)) {
     sendBtn = '<button class="pg-send stop" onclick="pgStop()">' + pgEscapeHtml(pgT('pgStop')) + '</button>';
   } else {
     var sendLabel = pgState.mode === 'image' ? pgT('pgGenerate') : (pgState.mode === 'search' ? pgT('pgSearchButton') : pgT('pgSendMessage'));
@@ -1770,6 +1794,28 @@ function pgOnImageSubmitCount(v) {
 function pgStepImageSubmitCount(delta) {
   var cur = pgGetImageSubmitCount();
   pgOnImageSubmitCount(cur + delta);
+}
+function pgGetImageConcurrency() {
+  var w = pgWin();
+  var raw = (w && w.config && w.config.imgConcurrency != null) ? w.config.imgConcurrency : 1;
+  var n = parseInt(raw, 10);
+  if (!isFinite(n) || n < 1) n = 1;
+  if (n > 8) n = 8;
+  return n;
+}
+function pgOnImageConcurrency(v) {
+  var w = pgWin();
+  if (!w) return;
+  var n = parseInt(v, 10);
+  if (!isFinite(n) || n < 1) n = 1;
+  if (n > 8) n = 8;
+  w.config.imgConcurrency = n;
+  pgSave();
+  pgRenderSidebar();
+}
+function pgStepImageConcurrency(delta) {
+  var cur = pgGetImageConcurrency();
+  pgOnImageConcurrency(cur + delta);
 }
 // pgOnImgSizeSelect handles the size <select> in image mode. Selecting the
 // '__custom' sentinel reveals the Custom Size text input below (without

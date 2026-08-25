@@ -220,29 +220,6 @@
     return (params && params.imgSeed > 0) ? params.imgSeed : (Math.floor(Math.random() * 2147483646) + 1);
   }
 
-  // pgImageRunSequence runs runFn(k) for k in 0..count-1 strictly one at a
-  // time. The shared abort signal is checked between runs so a stop lands as
-  // an AbortError instead of starting further requests. Resolves with the
-  // normalized results accumulated in `collected`; rejects on the first
-  // failing run (already-collected runs stay in `collected` for the caller's
-  // partial-success handling).
-  function pgImageRunSequence(runFn, count, signal, collected, onProgress) {
-    var chain = Promise.resolve();
-    for (var k = 0; k < count; k++) {
-      (function (index) {
-        chain = chain.then(function () {
-          if (signal && signal.aborted) { var e = new Error(pgT('pgCanceled')); e.name = 'AbortError'; throw e; }
-          return runFn(index).then(function (norm) {
-            collected.push(norm);
-            if (typeof onProgress === 'function') onProgress(norm, index);
-            return norm;
-          });
-        });
-      })(k);
-    }
-    return chain.then(function () { return collected; });
-  }
-
   // finalizeImageAssets attaches the per-asset metadata (non-ComfyUI) and
   // autosaves the assets; shared by the success tail and the partial-success
   // catch path so both behave like the existing single-request lifecycle.
@@ -264,6 +241,7 @@
     }
     assets.forEach(function (asset) { if (typeof pgAutoSaveImageArtifact === 'function') pgAutoSaveImageArtifact(asset.url, asset, generation.id, asset.id); });
   }
+  window.finalizeImageAssets = finalizeImageAssets;
 
   // remoteSubmit performs one remote image request (the pre-existing single
   // path): POST /v1/images/{generations|edits}, then for ModelScope an async
@@ -292,179 +270,110 @@
       });
   }
 
-  window.pgImageGenerate = function (i, prompt, snapshot) {
-    var w = pgWinAt(i), st = w && imageState(w);
-    if (!w || !prompt || (st && st.phase === 'generating')) return Promise.reject(new Error(pgT('pgSelectModel')));
+  window.pgImageBuildRequest = function (w, prompt, snapshot) {
+    if (!w || !prompt) throw new Error(pgT('pgSelectModel'));
     var cfg = w.config || {}, protocol = snapshot && snapshot.protocol || (typeof pgEffectiveProtocol === 'function' ? pgEffectiveProtocol(cfg) : '');
     var isComfy = protocol === 'comfyui';
-    if (!isComfy && !cfg.model && !(snapshot && snapshot.model)) return Promise.reject(new Error(pgT('pgSelectModel')));
+    if (!isComfy && !cfg.model && !(snapshot && snapshot.model)) throw new Error(pgT('pgSelectModel'));
     var req = isComfy ? { body: null, protocol: 'comfyui', params: Object.assign({}, snapshot && snapshot.params || cfgParams(cfg), { port: snapshot && snapshot.params && snapshot.params.port || cfg.imgComfyPort, workflow: snapshot && snapshot.params && snapshot.params.workflow || cfg.imgComfyWorkflow }), endpoint: 'comfyui' } : imageBody(w, prompt, snapshot);
-    // Count (imgSubmitCount, default 1): one ordinary Image prompt submission
-    // may generate N images from the same prompt. The value comes from the
-    // sidebar count input via pgGetImageSubmitCount() (pg-ui.js), is recorded
-    // in generation.params so Regenerate replays it, and is never part of the
-    // API body — it is unrelated to Batch Project planning quantity (default
-    // stays 4) and to the per-protocol imgN `n` control. count=1 must produce
-    // byte-for-byte today's single-request behavior.
     var count = Math.max(1, Math.min(99, (snapshot && snapshot.params && snapshot.params.imgSubmitCount) || (typeof pgGetImageSubmitCount === 'function' ? pgGetImageSubmitCount() : 1)));
-    // Record the count on the params snapshot so Regenerate replays it; the
-    // key is not mapped into any request body.
     req.params = Object.assign({}, req.params, { imgSubmitCount: count });
-    // Per-image seed base for sequential protocols (ModelScope/ComfyUI); drawn
-    // once per submission so the run seeds are base, base+1, ... and
-    // regenerate with a user seed reproduces the same images.
+    return { req: req, count: count };
+  };
+
+  window.pgImagePlanUnits = function (req, count) {
     var seedBase = imageSeedBase(req.params);
-    var generation = { id: uid('generation'), status: 'generating', prompt: prompt, promptFormat: snapshot && snapshot.promptFormat || 'natural', promptObject: snapshot && snapshot.promptObject || null, revisedPrompt: '', createdAt: Date.now(), completedAt: null, durationMs: 0, model: snapshot && snapshot.model || cfg.model || 'comfyui', protocol: req.protocol, endpoint: req.endpoint, params: req.params, assets: [], totalExpected: count };
-    st.phase = 'generating'; st.error = ''; st.submittedPrompt = prompt; st.activeRequestId = generation.id; st.generations.push(generation); st.activeAssetIndex = -1; st.abortCtrl = new AbortController();
-    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
-    var started = generation.createdAt;
-    var collected = [];
-
-    var onProgress = function (norm) {
-      if (st.activeRequestId !== generation.id) return;
-      var newAssets = norm && Array.isArray(norm.assets) ? norm.assets : [];
-      if (!newAssets.length) return;
-      var prevLen = generation.assets.length;
-      newAssets.forEach(function (a) { generation.assets.push(a); });
-      if (!generation.revisedPrompt && norm.revisedPrompt) generation.revisedPrompt = norm.revisedPrompt;
-      if (!generation.provider && norm.provider) generation.provider = norm.provider;
-      if (!generation.key && norm.key) generation.key = norm.key;
-      finalizeImageAssets(newAssets, generation, isComfy);
-      var flat = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [];
-      if (prevLen === 0) {
-        var targetIndex = -1;
-        flat.forEach(function (entry, idx) {
-          if (targetIndex < 0 && entry.generation === generation && entry.asset === newAssets[0]) {
-            targetIndex = idx;
-          }
-        });
-        if (targetIndex >= 0) st.activeAssetIndex = targetIndex;
-      }
-      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
-      if (typeof pgSave === 'function') pgSave();
-    };
-
-    var request;
+    var isComfy = req.protocol === 'comfyui';
+    if (count <= 1) {
+      return [{ body: req.body, seed: null }];
+    }
+    var units = [];
     if (isComfy) {
-      if (count > 1) {
-        request = pgImageRunSequence(function (index) {
-          return comfyResult(w, prompt, st.abortCtrl.signal, generation, seedBase + index).then(function (payload) {
-            return window.pgImageNormalizeResult(payload, req.protocol);
-          });
-        }, count, st.abortCtrl.signal, collected, onProgress);
-      } else {
-        request = comfyResult(w, prompt, st.abortCtrl.signal, generation);
+      for (var k = 0; k < count; k++) {
+        units.push({ body: null, seed: seedBase + k });
       }
-    } else if (count > 1 && (req.protocol === 'gpt' || req.protocol === 'xai')) {
-      // GPT/xAI generate N images in one request via the provider's `n` field
-      // (the provider assigns per-image seeds — the images API has no seed
-      // field, so no seed override is invented). The count is clamped to the
-      // provider's n cap (GPT 5 / xAI 10); larger counts split into sequential
-      // requests, each carrying the remaining n.
+    } else if (req.protocol === 'gpt' || req.protocol === 'xai') {
       var nCap = req.protocol === 'gpt' ? 5 : 10;
       var nRuns = Math.ceil(count / nCap);
-      request = pgImageRunSequence(function (index) {
+      for (var k = 0; k < nRuns; k++) {
         var runBody = Object.assign({}, req.body);
-        runBody.n = Math.min(nCap, count - index * nCap);
-        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
-          return window.pgImageNormalizeResult(payload, req.protocol);
-        });
-      }, nRuns, st.abortCtrl.signal, collected, onProgress);
-    } else if (count > 1 && req.protocol === 'modelscope') {
-      request = pgImageRunSequence(function (index) {
-        var runBody = Object.assign({}, req.body);
-        // Sequential multi-image runs: exactly one image per request — drop
-        // any `n` a regenerated snapshot may have carried, and pin a distinct
-        // per-image seed.
-        delete runBody.n;
-        runBody.seed = seedBase + index;
-        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
-          return window.pgImageNormalizeResult(payload, req.protocol);
-        });
-      }, count, st.abortCtrl.signal, collected, onProgress);
-    } else if (count > 1 && req.protocol === 'sensenova') {
-      // SenseNova n=1 only; sequential one-at-a-time requests
-      request = pgImageRunSequence(function (index) {
+        runBody.n = Math.min(nCap, count - k * nCap);
+        units.push({ body: runBody, seed: null });
+      }
+    } else if (req.protocol === 'modelscope') {
+      for (var k = 0; k < count; k++) {
         var runBody = Object.assign({}, req.body);
         delete runBody.n;
-        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
-          return window.pgImageNormalizeResult(payload, req.protocol);
-        });
-      }, count, st.abortCtrl.signal, collected, onProgress);
+        runBody.seed = seedBase + k;
+        units.push({ body: runBody, seed: null });
+      }
+    } else if (req.protocol === 'sensenova') {
+      for (var k = 0; k < count; k++) {
+        var runBody = Object.assign({}, req.body);
+        delete runBody.n;
+        units.push({ body: runBody, seed: null });
+      }
     } else {
-      request = remoteSubmit(req.body, st.abortCtrl.signal, req, generation);
+      for (var k = 0; k < count; k++) {
+        units.push({ body: Object.assign({}, req.body), seed: null });
+      }
     }
-    return request.then(function (result) {
-      if (st.activeRequestId !== generation.id) return generation;
-      if (count <= 1) {
-        var norms = Array.isArray(result) ? result : [window.pgImageNormalizeResult(result, req.protocol)];
-        var assets = [], revised = '', provider = '', key = '';
-        norms.forEach(function (norm) {
-          if (!norm) return;
-          if (norm.assets) assets = assets.concat(norm.assets);
-          if (!revised && norm.revisedPrompt) revised = norm.revisedPrompt;
-          if (!provider && norm.provider) provider = norm.provider;
-          if (!key && norm.key) key = norm.key;
-        });
-        generation.assets = assets;
-        generation.revisedPrompt = revised;
-        generation.provider = provider;
-        generation.key = key;
-        finalizeImageAssets(assets, generation, isComfy);
-      }
-      generation.status = generation.assets.length ? 'ready' : 'error';
-      generation.completedAt = Date.now();
-      generation.durationMs = generation.completedAt - started;
-      generation.totalExpected = 0;
-      st.phase = generation.status;
-      if (!generation.assets.length) {
-        st.error = pgT('pgImgNoResult');
-      } else if (st.activeAssetIndex < 0) {
-        var flatAfter = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [];
-        st.activeAssetIndex = flatAfter.length - 1;
-      }
-      st.activeRequestId = '';
-      st.abortCtrl = null;
-      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
-      if (typeof pgSave === 'function') pgSave();
-      return generation;
-    }).catch(function (err) {
-      if (st.activeRequestId !== generation.id) return generation;
-      var canceled = (err && err.name === 'AbortError') || (st.abortCtrl && st.abortCtrl.signal.aborted);
-      generation.status = canceled ? 'canceled' : 'error';
-      generation.totalExpected = 0;
-      st.phase = generation.status;
-      st.error = canceled ? '' : (err.message || String(err));
-      st.activeRequestId = '';
-      st.abortCtrl = null;
-      generation.completedAt = Date.now();
-      generation.durationMs = generation.completedAt - started;
-      // Partial success: runs that completed before a stop/failure keep their
-      // assets (meta + autosave), mirroring how a finished generation's assets
-      // remain visible in the canvas after a later failure/delete.
-      if (collected.length && (!generation.assets || !generation.assets.length)) {
-        var partial = [];
-        collected.forEach(function (norm) { if (norm && norm.assets) partial = partial.concat(norm.assets); });
-        if (partial.length) { generation.assets = partial; finalizeImageAssets(partial, generation, isComfy); }
-      }
-      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
-      if (typeof pgSave === 'function') pgSave();
-      if (canceled) return generation;
-      throw err;
+    return units;
+  };
+
+  window.pgImageExecUnit = function (w, prompt, req, unit, signal, generation) {
+    var p;
+    if (req.protocol === 'comfyui') {
+      p = comfyResult(w, prompt, signal, generation, unit ? unit.seed : null);
+    } else {
+      p = remoteSubmit(unit ? unit.body : req.body, signal, req, generation);
+    }
+    return p.then(function (payload) {
+      return window.pgImageNormalizeResult(payload, req.protocol);
     });
   };
-  window.pgImageStop = function (i) { var w = pgWinAt(i), st = w && imageState(w); if (st && st.abortCtrl) st.abortCtrl.abort(); };
-  window.pgImageClear = function (i) { var w = pgWinAt(i), st = w && imageState(w); if (!st || st.phase === 'generating') return; st.phase = 'empty'; st.error = ''; st.generations = []; st.activeAssetIndex = -1; st.submittedPrompt = ''; if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave(); };
+
+  window.pgImageClear = function (i) {
+    var w = pgWinAt(i), st = w && imageState(w);
+    if (!st) return;
+    if (typeof pgTaskWindowBusy === 'function' && pgTaskWindowBusy(i)) {
+      if (typeof pgToast === 'function') pgToast(pgT('pgTaskQueueBusy'), 'warning');
+      return;
+    }
+    st.phase = 'empty';
+    st.error = '';
+    st.generations = [];
+    st.activeAssetIndex = -1;
+    st.submittedPrompt = '';
+    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+    if (typeof pgSave === 'function') pgSave();
+  };
+
   window.pgImageDeleteAsset = function (i, gi, ai) {
-    var w = pgWinAt(i), st = w && imageState(w), generation = st && st.generations[gi];
+    var src = typeof pgImageViewSource === 'function' ? pgImageViewSource(i) : null;
+    var w = pgWinAt(i), st = w && imageState(w);
+    var generation = (src && src.generations && src.generations[gi]) || (st && st.generations && st.generations[gi]);
     if (!generation || !generation.assets[ai]) return;
-    var flatBefore = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [], target = -1;
+    var flatBefore = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(src || st) : [], target = -1;
     flatBefore.forEach(function (entry, index) { if (entry.gi === gi && entry.ai === ai) target = index; });
     generation.assets.splice(ai, 1);
     if (!generation.assets.length) generation.status = 'canceled';
-    var flatAfter = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [];
-    st.activeAssetIndex = flatAfter.length ? Math.min(Math.max(0, target), flatAfter.length - 1) : -1;
-    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave();
+    var flatAfter = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(src || st) : [];
+    var newIdx = flatAfter.length ? Math.min(Math.max(0, target), flatAfter.length - 1) : -1;
+    if (src) src.activeAssetIndex = newIdx;
+    if (st) st.activeAssetIndex = newIdx;
+    if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+    if (typeof pgSave === 'function') pgSave();
   };
-  window.pgImageRegenerate = function (i, gi) { var w = pgWinAt(i), st = w && imageState(w), generation = st && st.generations[gi]; if (!generation || st.phase === 'generating') return; pgImageGenerate(i, generation.prompt, generation).catch(function () {}); };
+
+  window.pgImageRegenerate = function (i, gi) {
+    var src = typeof pgImageViewSource === 'function' ? pgImageViewSource(i) : (pgWinAt(i) && imageState(pgWinAt(i)));
+    var generation = src && src.generations && src.generations[gi];
+    if (!generation) return;
+    try {
+      if (typeof pgTaskEnqueue === 'function') {
+        pgTaskEnqueue(i, generation.prompt, generation);
+      }
+    } catch (e) {}
+  };
 })();

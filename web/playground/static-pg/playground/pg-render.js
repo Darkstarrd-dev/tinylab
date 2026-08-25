@@ -625,18 +625,30 @@ function pgImageCurrentGeneration(st) {
   var entry = pgImageCurrentEntry(st);
   return entry ? entry.generation : (st && st.generations && st.generations.length ? st.generations[st.generations.length - 1] : null);
 }
+var pgImageCanvasTimer = null;
+
+function pgImageViewSource(i) {
+  if (typeof pgTaskSelectedView === 'function') {
+    var tv = pgTaskSelectedView();
+    if (tv) return tv;
+  }
+  var w = pgWinAt(i);
+  return w && w.image ? w.image : null;
+}
+
 function pgImageShowDetails(i, gi) {
-  var w = pgWinAt(i), st = w && pgImageState(w), g = st && st.generations[gi];
+  var src = pgImageViewSource(i), g = src && src.generations && src.generations[gi];
   if (!g) return;
   pgShowModal('<div class="pg-modal-header"><span class="pg-modal-title">' + pgEscapeHtml(pgT('pgImageDetails')) + '</span><button class="pg-modal-close" onclick="pgCloseModal()">✕</button></div><div class="pg-modal-body"><h4>' + pgEscapeHtml(pgT('pgImagePrompt')) + '</h4><pre class="pg-debug-pre">' + pgEscapeHtml(g.prompt || '') + '</pre><h4>' + pgEscapeHtml(pgT('pgImageParameters')) + '</h4><pre class="pg-debug-pre">' + pgEscapeHtml(JSON.stringify(g.params || {}, null, 2)) + '</pre></div>');
 }
 function pgImageRenderCanvas(i) {
-  var w = pgWinAt(i), box = document.getElementById('pg-messages-' + i), st = w && pgImageState(w);
-  if (!box || !st) return;
-  var flat = pgImageFlatAssets(st);
-  var index = (st.activeAssetIndex >= 0 && st.activeAssetIndex < flat.length) ? st.activeAssetIndex : (flat.length ? flat.length - 1 : 0);
+  var box = document.getElementById('pg-messages-' + i), src = pgImageViewSource(i);
+  if (!box || !src) return;
+  var flat = pgImageFlatAssets(src);
+  var index = (src.activeAssetIndex >= 0 && src.activeAssetIndex < flat.length) ? src.activeAssetIndex : (flat.length ? flat.length - 1 : 0);
   var entry = flat[index], g = entry && entry.generation, asset = entry && entry.asset;
-  var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
+  var effPhase = (entry && entry.generation && entry.generation.status === 'generating') ? 'generating' : (src.phase || 'empty');
+  var html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(effPhase) + '">';
 
   var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
     '<div class="wheel"></div>' +
@@ -682,10 +694,10 @@ function pgImageRenderCanvas(i) {
     html += '<button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button>';
     html += '</div>';
     html += '</div>';
-  } else if (phase === 'generating') {
+  } else if (effPhase === 'generating') {
     html += '<div class="pg-image-empty pg-image-generating">' + hamsterHtml + '<strong style="margin-top:20px;font-size:16px;font-weight:500;color:var(--text)">' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
-  } else if (phase === 'error') {
-    var errTxt = st.error || pgT('pgError');
+  } else if (effPhase === 'error') {
+    var errTxt = src.error || pgT('pgError');
     html += '<div class="pg-image-error-card">' +
       '<div class="pg-image-error-title">⚠️ ' + pgEscapeHtml(pgT('pgImgGenerationError')) + '</div>' +
       '<div class="pg-image-error-detail">' + pgEscapeHtml(errTxt) + '</div>' +
@@ -694,9 +706,9 @@ function pgImageRenderCanvas(i) {
       '</div>' +
     '</div>';
   }
-  else if (phase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
+  else if (effPhase === 'canceled') html += '<div class="pg-image-empty">' + pgEscapeHtml(pgT('pgCanceled')) + '</div>';
   else html += '<div class="pg-image-empty"><span class="pg-eye-loader"></span><div style="margin-top:36px;font-size:16px;font-weight:500;color:var(--text-secondary);letter-spacing:0.02em">' + pgEscapeHtml(pgT('pgImageCanvasEmpty')) + '</div></div>';
-  if (phase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
+  if (effPhase === 'generating') html += '<div class="pg-image-elapsed" id="pg-image-elapsed-' + i + '">0s</div>';
   html += '</div>'; box.innerHTML = html;
   var metaEl = document.getElementById('pg-pane-img-meta-' + i);
   var navEl = document.getElementById('pg-pane-img-nav-' + i);
@@ -738,9 +750,26 @@ function pgImageRenderCanvas(i) {
       navEl.textContent = '';
     }
   }
-  if (phase === 'generating') { if (st.timer) clearInterval(st.timer); st.timer = setInterval(function () { var el = document.getElementById('pg-image-elapsed-' + i); if (!el || st.phase !== 'generating') { clearInterval(st.timer); st.timer = null; return; } var started = st.generations.length ? st.generations[st.generations.length - 1].createdAt : Date.now(); el.textContent = Math.floor((Date.now() - started) / 1000) + 's'; }, 1000); }
+  if (pgImageCanvasTimer) { clearInterval(pgImageCanvasTimer); pgImageCanvasTimer = null; }
+  if (effPhase === 'generating') {
+    pgImageCanvasTimer = setInterval(function () {
+      var el = document.getElementById('pg-image-elapsed-' + i);
+      var curSrc = pgImageViewSource(i);
+      var curFlat = pgImageFlatAssets(curSrc);
+      var curEntry = curFlat[curSrc && curSrc.activeAssetIndex >= 0 && curSrc.activeAssetIndex < curFlat.length ? curSrc.activeAssetIndex : (curFlat.length ? curFlat.length - 1 : 0)];
+      var curGen = curEntry && curEntry.generation;
+      var curPhase = (curGen && curGen.status === 'generating') ? 'generating' : (curSrc && curSrc.phase || 'empty');
+      if (!el || curPhase !== 'generating') {
+        clearInterval(pgImageCanvasTimer);
+        pgImageCanvasTimer = null;
+        return;
+      }
+      var started = curGen ? curGen.createdAt : (curSrc && curSrc.generations && curSrc.generations.length ? curSrc.generations[curSrc.generations.length - 1].createdAt : Date.now());
+      el.textContent = Math.floor((Date.now() - started) / 1000) + 's';
+    }, 1000);
+  }
 }
-function pgImageSelectAsset(i, index) { var st = pgImageState(pgWinAt(i)), flat = pgImageFlatAssets(st); if (!flat.length || index < 0 || index >= flat.length) return; st.activeAssetIndex = index; pgImageRenderCanvas(i); }
+function pgImageSelectAsset(i, index) { var src = pgImageViewSource(i), flat = pgImageFlatAssets(src); if (!flat.length || index < 0 || index >= flat.length) return; src.activeAssetIndex = index; pgImageRenderCanvas(i); }
 
 function pgActionCopy(i, idx) {
   var w = pgWinAt(i);

@@ -3,7 +3,7 @@
 // 1. pgImageProtocols includes 'sensenova'
 // 2. pgBuildImageBody formats size, output_format, response_format, watermark, prompt_extend
 // 3. pgBuildImageBody formats reference images as images: [{image_url: "..."}] for sensenova
-// 4. pgImageGenerate schedules sequential requests for count > 1 under sensenova
+// 4. pgTaskEnqueue schedules requests for count > 1 under sensenova
 //
 // Run: node web/pg-sensenova-protocol.test.js
 
@@ -101,15 +101,21 @@ function makeEnv() {
 
   const ctx = vm.createContext(sandbox);
 
-  // Load pg-core.js, pg-i18n.js, pg-ui.js, pg-modal.js, pg-request.js, pg-image-model.js
+  // Load pg-core.js, pg-i18n.js, pg-ui.js, pg-modal.js, pg-request.js, pg-image-model.js, pg-image-tasks.js
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
-  const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js'];
+  const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
   for (const f of files) {
     const code = fs.readFileSync(path.join(dir, f), 'utf8');
     vm.runInContext(code, ctx, { filename: f });
   }
 
   return { sandbox, calls };
+}
+
+async function waitTasksDone(sandbox) {
+  while (sandbox.pgTasksSnapshot && sandbox.pgTasksSnapshot().tasks.some(t => t.status === 'queued' || t.status === 'running')) {
+    await new Promise(r => setTimeout(r, 5));
+  }
 }
 
 async function run() {
@@ -145,7 +151,7 @@ async function run() {
   await check('pgBuildImageBody formats reference images into images: [{image_url}] array', () => {
     const { sandbox } = makeEnv();
     const w = sandbox.pgWin();
-    w.messages = [{ role: 'user', content: 'Modify this image' }];
+    w.messages = [{ role: 'user', content: 'Transform cat' }];
     w.config.imageEnabled = true;
     w.config.imageUrls = ['https://example.com/ref1.png', 'data:image/png;base64,abc'];
 
@@ -157,9 +163,10 @@ async function run() {
     assert.strictEqual(body.images[1].image_url, 'data:image/png;base64,abc');
   });
 
-  await check('pgImageGenerate sends single request when count is 1', async () => {
+  await check('pgTaskEnqueue sends single request when count is 1', async () => {
     const { sandbox, calls } = makeEnv();
-    const gen = await sandbox.pgImageGenerate(0, 'Single image test');
+    const gen = await sandbox.pgTaskEnqueue(0, 'Single image test');
+    await waitTasksDone(sandbox);
     assert.strictEqual(gen.status, 'ready');
     assert.strictEqual(gen.assets.length, 1);
     assert.strictEqual(calls.fetches.length, 1);
@@ -169,12 +176,13 @@ async function run() {
     assert.strictEqual(sentBody.n, undefined, 'SenseNova should not send n in body');
   });
 
-  await check('pgImageGenerate sends sequential requests when count > 1', async () => {
+  await check('pgTaskEnqueue sends sequential requests when count > 1', async () => {
     const { sandbox, calls } = makeEnv();
     const w = sandbox.pgWin();
     w.config.imgSubmitCount = 3;
 
-    const gen = await sandbox.pgImageGenerate(0, 'Multi-image test');
+    const gen = await sandbox.pgTaskEnqueue(0, 'Multi-image test');
+    await waitTasksDone(sandbox);
     assert.strictEqual(gen.status, 'ready');
     assert.strictEqual(gen.assets.length, 3);
     assert.strictEqual(calls.fetches.length, 3, 'expected 3 sequential fetches');
@@ -236,7 +244,7 @@ async function run() {
     assert.strictEqual(normPng.assets[0].mime, 'image/png');
   });
 
-  await check('pgImageGenerate auto-routes to edits when reference images exist, generations when absent', async () => {
+  await check('pgTaskEnqueue auto-routes to edits when reference images exist, generations when absent', async () => {
     const { sandbox, calls } = makeEnv();
     const w = sandbox.pgWin();
 
@@ -244,14 +252,16 @@ async function run() {
     w.config.imageEnabled = false;
     w.config.imageUrls = [];
     calls.fetches = [];
-    await sandbox.pgImageGenerate(0, 'Gen prompt');
+    await sandbox.pgTaskEnqueue(0, 'Gen prompt');
+    await waitTasksDone(sandbox);
     assert.strictEqual(calls.fetches[0].url, '/v1/images/generations');
 
     // 2. With images -> edits
     w.config.imageEnabled = true;
     w.config.imageUrls = ['https://example.com/source.png'];
     calls.fetches = [];
-    await sandbox.pgImageGenerate(0, 'Edit prompt');
+    await sandbox.pgTaskEnqueue(0, 'Edit prompt');
+    await waitTasksDone(sandbox);
     assert.strictEqual(calls.fetches[0].url, '/v1/images/edits');
   });
 

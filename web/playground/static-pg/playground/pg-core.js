@@ -66,6 +66,8 @@ var PG_DEFAULT_CFG = {
   // read via pgGetImageSubmitCount(), never sent in the API body, and
   // independent of Batch Planning quantity).
   imgSubmitCount: 1,
+  // Per-provider maximum in-flight image requests (1..8)
+  imgConcurrency: 1,
   // Endpoint control: 'generations' (default) or 'edits'
   imgEndpoint: 'generations',
   // GPT/image response/output format fields
