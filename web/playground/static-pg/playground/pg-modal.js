@@ -626,7 +626,7 @@ function pgOpenImgSizesModal() {
   var info = pgGetModelInfo(w.config.model);
   if (!info) { pgToast(pgT('pgSelectModel'), 'info'); return; }
   var proto = (info.kind === 'image' && info.imgProtocol) ? info.imgProtocol : 'gpt';
-  var builtin = pgImgBuiltinSizesFor(proto);
+  var builtin = pgImgBuiltinSizesFor(proto, w.config.model);
   var current = (info.imgSizes && info.imgSizes.length) ? info.imgSizes.slice() : builtin.slice();
   var hint = pgT('pgImgEditSizesHint');
   var modelLabel = pgEscapeHtml(w.config.model);
@@ -718,9 +718,16 @@ function pgImgResolveModelID(displayId) {
 // so the edit modal can prefill when no custom list is set yet.
 // GPT modal builtin concrete defaults only: exact four sizes.
 // xAI and ModelScope defaults are unchanged.
-function pgImgBuiltinSizesFor(proto) {
+function pgImgBuiltinSizesFor(proto, modelId) {
   if (proto === 'modelscope') {
     return ['1024x1024', '1280x720', '720x1280', '1024x768', '768x1024'];
+  }
+  if (proto === 'sensenova') {
+    var m = (modelId || '').toLowerCase();
+    if (m.indexOf('fast') !== -1) {
+      return ['2752x1536', '2048x2048', '1536x2752', '2496x1664', '1664x2496', '2368x1760', '1760x2368', '2272x1824', '1824x2272', '3072x1376', '1344x3136'];
+    }
+    return ['auto', '2048x2048', '2720x1536', '1536x2720', '1664x2496', '2496x1664', '4096x4096'];
   }
   return ['1024x1024', '1200x675', '928x1664', '3000x1000'];
 }

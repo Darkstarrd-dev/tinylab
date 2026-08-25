@@ -661,9 +661,9 @@ func (h *Handler) updateModelImgProtocol(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	switch req.ImgProtocol {
-	case "gpt", "xai", "modelscope":
+	case "gpt", "xai", "modelscope", "sensenova":
 	default:
-		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid imgProtocol, must be gpt | xai | modelscope")
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid imgProtocol, must be gpt | xai | modelscope | sensenova")
 		return
 	}
 	if h.d.Reg.UpdateModelImgProtocol(providerID, req.Model, req.ImgProtocol) {

@@ -31,7 +31,7 @@
 
   function cfgParams(cfg) {
     var p = {};
-    ['imgSize', 'imgQuality', 'imgBackground', 'imgModeration', 'imgAspectRatio', 'imgResolution', 'imgN', 'imgResponseFormat', 'imgOutputFormat', 'imgOutputCompression', 'imgUser', 'imgNegativePrompt', 'imgSteps', 'imgGuidance', 'imgSeed'].forEach(function (key) {
+    ['imgSize', 'imgQuality', 'imgBackground', 'imgModeration', 'imgAspectRatio', 'imgResolution', 'imgN', 'imgResponseFormat', 'imgOutputFormat', 'imgOutputCompression', 'imgUser', 'imgNegativePrompt', 'imgSteps', 'imgGuidance', 'imgSeed', 'snWatermark', 'snPromptExtend'].forEach(function (key) {
       if (cfg[key] !== '' && cfg[key] !== 0 && cfg[key] != null) p[key] = cfg[key];
     });
     return p;
@@ -52,6 +52,8 @@
     var body = { model: model, prompt: prompt };
     var mappedKeys = { imgSize: 'size', imgQuality: 'quality', imgBackground: 'background', imgModeration: 'moderation', imgN: 'n', imgResponseFormat: 'response_format', imgOutputFormat: 'output_format', imgOutputCompression: 'output_compression', imgUser: 'user', imgAspectRatio: 'aspect_ratio', imgResolution: 'resolution', imgNegativePrompt: 'negative_prompt', imgSteps: 'steps', imgGuidance: 'guidance', imgSeed: 'seed' };
     Object.keys(params).forEach(function (key) { if (mappedKeys[key]) body[mappedKeys[key]] = params[key]; });
+    if (params.snWatermark === 'false') body.watermark = false;
+    if (params.snPromptExtend === 'false') body.prompt_extend = false;
     return { body: body, protocol: proto, params: params, endpoint: snapshot && snapshot.endpoint || (cfg.imgEndpoint === 'edits' ? 'edits' : 'generations') };
   }
 
@@ -323,6 +325,15 @@
         // per-image seed.
         delete runBody.n;
         runBody.seed = seedBase + index;
+        return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
+          return window.pgImageNormalizeResult(payload, req.protocol);
+        });
+      }, count, st.abortCtrl.signal, collected);
+    } else if (count > 1 && req.protocol === 'sensenova') {
+      // SenseNova n=1 only; sequential one-at-a-time requests
+      request = pgImageRunSequence(function (index) {
+        var runBody = Object.assign({}, req.body);
+        delete runBody.n;
         return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
           return window.pgImageNormalizeResult(payload, req.protocol);
         });

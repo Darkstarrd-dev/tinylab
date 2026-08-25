@@ -560,7 +560,8 @@ function buildModelRowMainInner(p, m) {
   var protoHtml = renderCustomSelectHtml(mpWrapId, mpSelId, [
     { value: 'gpt', label: 'GPT' },
     { value: 'xai', label: 'xAI' },
-    { value: 'modelscope', label: 'ModelScope' }
+    { value: 'modelscope', label: 'ModelScope' },
+    { value: 'sensenova', label: 'SenseNova' }
   ], protoVal, 'updateModelImgProtocol(\'' + pidEsc + '\', this)', 'width:105px;display:' + (protoDisplay === 'none' ? 'none' : 'inline-flex') + ';flex-shrink:0;', 'class="model-quota-select model-protocol-select" data-model="' + midEsc + '" data-tooltip="' + t('imgProtocol') + '"');
 
   var mtWrapId = 'mt-wrap-' + sanitizeId(p.id) + '-' + sanitizeId(m.id);

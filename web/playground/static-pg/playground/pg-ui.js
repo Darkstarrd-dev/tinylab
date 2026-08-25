@@ -576,7 +576,7 @@ function pgRenderSidebar() {
   var modelSel = '<button class="pg-btn pg-model-btn"' + (customMode ? ' disabled' : '') + ' onclick="pgOpenModelPicker(pgWin().config.model, function(v){ pgOnModelChange(v); pgRenderSidebar(); }, ' + JSON.stringify(modelPickerOpts).replace(/"/g, '&quot;') + ')" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(modelLabel) + ' <span style="float:right;opacity:0.5">▼</span></button>';
   if (pgState.mode === 'image') {
     var protos = pgImageProtocols(), protoCur = cfg.imgProtocolFilter || 'all';
-    var protoLabels = { all: pgT('pgImgProtocolAll'), gpt: 'GPT', xai: 'Xai', modelscope: 'ModelScope', comfyui: 'ComfyUI' };
+    var protoLabels = { all: pgT('pgImgProtocolAll'), gpt: 'GPT', xai: 'Xai', modelscope: 'ModelScope', sensenova: 'SenseNova', comfyui: 'ComfyUI' };
     var protoOptsList = protos.map(function(p) {
       return { value: p, label: protoLabels[p] || p };
     });
@@ -909,7 +909,7 @@ function pgEffectiveProtocol(cfg) {
 }
 
 function pgImageProtocols() {
-  return ['all', 'gpt', 'xai', 'modelscope', 'comfyui'];
+  return ['all', 'gpt', 'xai', 'modelscope', 'sensenova', 'comfyui'];
 }
 
 function pgRenderCustomSelect(wrapperId, selectId, options, selectedValue, onChangeCode, extraStyle) {
@@ -1109,6 +1109,49 @@ function pgRenderImageParams(cfg, proto) {
     html += pgImgParamNumber('imgSteps', 'pgImgSteps', cfg.imgSteps || 0, 0, 100, 1, false);
     html += pgImgParamNumber('imgGuidance', 'pgImgGuidance', cfg.imgGuidance || 0, 0, 20, 0.5, true);
     html += pgImgParamNumber('imgSeed', 'pgImgSeed', cfg.imgSeed || 0, 0, 999999, 1, false);
+  } else if (proto === 'sensenova') {
+    var mName = (cfg.model || '').toLowerCase();
+    var isFast = mName.indexOf('fast') !== -1;
+    var snSizes = isFast ? [
+      {value: '2752x1536', label: '2752×1536 (16:9 默认)'},
+      {value: '2048x2048', label: '2048×2048 (1:1)'},
+      {value: '1536x2752', label: '1536×2752 (9:16)'},
+      {value: '2496x1664', label: '2496×1664 (3:2)'},
+      {value: '1664x2496', label: '1664×2496 (2:3)'},
+      {value: '2368x1760', label: '2368×1760 (4:3)'},
+      {value: '1760x2368', label: '1760×2368 (3:4)'},
+      {value: '2272x1824', label: '2272×1824 (5:4)'},
+      {value: '1824x2272', label: '1824×2272 (4:5)'},
+      {value: '3072x1376', label: '3072×1376 (21:9)'},
+      {value: '1344x3136', label: '1344×3136 (9:21)'},
+    ] : [
+      {value: 'auto', label: 'auto'},
+      {value: '2048x2048', label: '2048×2048 (1:1 2K)'},
+      {value: '2720x1536', label: '2720×1536 (16:9 2K)'},
+      {value: '1536x2720', label: '1536×2720 (9:16 2K)'},
+      {value: '1664x2496', label: '1664×2496 (2:3 2K)'},
+      {value: '2496x1664', label: '2496×1664 (3:2 2K)'},
+      {value: '4096x4096', label: '4096×4096 (1:1 4K)'},
+    ];
+    html += pgImgParamSelectWithEdit('imgSize', 'sensenova', cfg.model, cfg, snSizes);
+    html += pgImgParamSelect('imgOutputFormat', 'pgImgOutputFormat', cfg.imgOutputFormat || '', [
+      {value: '', label: pgT('pgImgSizeDefault')},
+      {value: 'png', label: pgT('pgImgOutputFormatPng')},
+      {value: 'jpeg', label: pgT('pgImgOutputFormatJpeg')},
+      {value: 'webp', label: pgT('pgImgOutputFormatWebp')},
+    ]);
+    html += pgImgParamSelect('imgResponseFormat', 'pgImgResponseFormat', cfg.imgResponseFormat || '', [
+      {value: '', label: pgT('pgImgResponseFormatB64')},
+      {value: 'url', label: pgT('pgImgResponseFormatUrl')},
+    ]);
+    html += pgImgParamSelect('snWatermark', 'pgSnWatermark', cfg.snWatermark || '', [
+      {value: '', label: pgT('pgSnWatermarkOn')},
+      {value: 'false', label: pgT('pgSnWatermarkOff')},
+    ]);
+    html += pgImgParamSelect('snPromptExtend', 'pgSnPromptExtend', cfg.snPromptExtend || '', [
+      {value: '', label: pgT('pgSnPromptExtendOn')},
+      {value: 'false', label: pgT('pgSnPromptExtendOff')},
+    ]);
   }
   html += '</div>';
   return html;

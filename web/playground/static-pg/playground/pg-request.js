@@ -273,14 +273,24 @@ function pgBuildImageBody(i) {
     if (cfg.imgSteps > 0) body.steps = cfg.imgSteps;
     if (cfg.imgGuidance > 0) body.guidance = cfg.imgGuidance;
     if (cfg.imgSeed > 0) body.seed = cfg.imgSeed;
+  } else if (proto === 'sensenova') {
+    if (cfg.imgSize) body.size = cfg.imgSize;
+    if (cfg.imgOutputFormat) body.output_format = cfg.imgOutputFormat;
+    if (cfg.imgResponseFormat) body.response_format = cfg.imgResponseFormat;
+    if (cfg.snWatermark === 'false') body.watermark = false;
+    if (cfg.snPromptExtend === 'false') body.prompt_extend = false;
   }
-  // Input image(s) for image-edit / image-to-image models (e.g. ModelScope
-  // FireRed-Image-Edit). Single image -> string; multiple -> array, matching
-  // the ModelScope /v1/images/generations image_url field.
+  // Input image(s) for image-edit / image-to-image models.
+  // SenseNova /v1/images/edits expects images: [{image_url: "..."}].
+  // Other protocols (ModelScope, GPT) expect image_url: "..." or string array.
   if (cfg.imageEnabled && cfg.imageUrls) {
     var imgUrls = cfg.imageUrls.filter(function(u) { return u && u.trim(); });
     if (imgUrls.length > 0) {
-      body.image_url = imgUrls.length === 1 ? imgUrls[0] : imgUrls;
+      if (proto === 'sensenova') {
+        body.images = imgUrls.map(function(u) { return { image_url: u }; });
+      } else {
+        body.image_url = imgUrls.length === 1 ? imgUrls[0] : imgUrls;
+      }
     }
   }
   return body;
