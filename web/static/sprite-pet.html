@@ -209,34 +209,34 @@
 </head>
 <body>
 <div class="pet-container">
-  <button class="pet-close-btn" title="关闭桌面小精灵" onclick="closePet()">&times;</button>
-  
-  <div id="pet-bubble" class="pet-bubble">
-    <div id="pet-bubble-msg" class="pet-bubble-text">主人，我是桌面小精灵！</div>
-    <div class="pet-bubble-row">
+  <div id="pet-area">
+    <button class="pet-close-btn" title="关闭桌面小精灵" onclick="closePet()">&times;</button>
+    <div class="pet-avatar" id="pet-avatar" onclick="toggleBubble(event)">
+      <canvas id="pet-sprite" width="70" height="70" style="display:none;image-rendering:pixelated;"></canvas>
+      <div class="pet-face">
+        <div class="pet-eye left"></div>
+        <div class="pet-eye right"></div>
+        <div class="pet-blush left"></div>
+        <div class="pet-blush right"></div>
+        <div class="pet-mouth"></div>
+      </div>
+    </div>
+  </div>
+  <div id="pet-panel">
+    <div id="pet-bubble" class="pet-bubble">
+      <div id="pet-bubble-msg" class="pet-bubble-text">主人，我是桌面小精灵！</div>
+    </div>
+    <div class="pet-input-row">
       <input type="text" id="pet-input" class="pet-bubble-input" placeholder="输入指令..." onkeydown="if(event.key==='Enter')sendPetIntent()">
       <button class="pet-bubble-btn" onclick="sendPetIntent()">执行</button>
     </div>
   </div>
-
   <div id="pet-ctxmenu">
     <div class="pet-menu-item" id="pet-mi-close">关闭桌面宠物</div>
     <div class="pet-menu-sep"></div>
     <div class="pet-scales"></div>
   </div>
-
-  <div class="pet-avatar" id="pet-avatar" onclick="toggleBubble(event)">
-    <canvas id="pet-sprite" width="70" height="70" style="display:none;image-rendering:pixelated;"></canvas>
-    <div class="pet-face">
-      <div class="pet-eye left"></div>
-      <div class="pet-eye right"></div>
-      <div class="pet-blush left"></div>
-      <div class="pet-blush right"></div>
-      <div class="pet-mouth"></div>
-    </div>
-  </div>
 </div>
-
 <script src="/sprite-pet.js"></script>
 </body>
 </html>

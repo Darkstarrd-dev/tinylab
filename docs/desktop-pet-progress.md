@@ -135,3 +135,33 @@ Norma 自身的应用层实现可直接借鉴：
    `FindWindowW` 探测须 `CharSet=CharSet.Unicode`；DPI unaware 进程的
    GetWindowRect 返回虚拟化坐标，合成点击/截屏须用同一坐标系。
 4. `PrintWindow` 对 DComp 内容无效（全黑），不能用于透明窗口内容验证，用屏幕截取。
+
+---
+
+## 8. 透明区域点击穿透（2026-08-25 完成，用户实测通过）
+
+需求：宠物窗口的透明区域不能吃掉点击，需透到下层内容。
+
+**最终方案：`SetWindowRgn` 区域裁剪**
+- 页面上报交互矩形（`#pet-avatar`、`.pet-close-btn`、`#pet-bubble`、`.pet-input-row`
+  的 `getBoundingClientRect`，viewport 相对坐标）；ResizeObserver 跟踪气泡尺寸变化 +
+  300ms 周期重报兜底（RO 首次回调可能早于布局稳定，捕获过期矩形后因尺寸不再变化
+  永不刷新——实测踩坑）
+- 宿主按 `winW/vpW` 比例换算成物理像素后，`CreateRectRgn`+`CombineRgn(RGN_OR)`
+  取并集，`SetWindowRgn` 裁剪窗口：区域外不渲染（本来就全透明）且点击自然落到下层
+- 无轮询、无窗口样式切换、无渲染副作用；拖拽时矩形为窗口相对坐标，随窗口移动自动生效
+
+**弃用方案：`WS_EX_LAYERED|WS_EX_TRANSPARENT` 80ms 光标轮询切换（Norma 同款）**
+在带重定向表面的窗口上，LAYERED 样式会使 WebView2 DComp 输出消失（渲染被劫持到
+layered 路径）；该技巧只在 `WS_EX_NOREDIRECTIONBITMAP` 无表面窗口（Wails/Norma 路线）
+上安全。若未来迁移到 NOREDIRECTIONBITMAP 配方，可重新考虑轮询方案。
+
+**DPI 坐标系（重要踩坑）**：go-webview2 初始化使进程 DPI-aware——宿主 Win32 坐标
+全部是物理像素（GetWindowRect 560×300）；而 WebView2 内容按虚拟化 96 DPI 渲染，
+JS 视口是 374×200 CSS px。两套坐标相差 DPI 比例（winW/vpW），矩形必须换算。
+另：合成点击/截屏的 PowerShell 是 DPI-unaware（又是第三套坐标），跨进程探测时
+三方坐标各不相同，须逐一实测换算。
+
+**验证手段**：`WindowFromPoint` 判定各点命中归属 + GetWindowLong 检查样式 +
+截屏；注意锁屏期间 LockScreenBackstopFrame 会接管一切命中且截图截到锁屏背景，
+验证须在解锁状态下进行。

@@ -25,6 +25,41 @@ function petPost(obj) {
   }
 }
 
+// ---- click-through hit regions: report the window-relative rects of every
+// interactive element (avatar, close button, bubble, input row). The host
+// polls the cursor every 80ms and toggles WS_EX_TRANSPARENT so clicks fall
+// through all transparent regions. ResizeObserver tracks bubble growth from
+// text; explicit petPostHit() calls cover toggle/scale/side changes.
+function petPostHit() {
+  var sel = ['#pet-avatar', '.pet-close-btn', '#pet-bubble', '.pet-input-row'];
+  var rects = [];
+  sel.forEach(function (q) {
+    var el = document.querySelector(q);
+    if (!el) return;
+    var st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') return;
+    var r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    rects.push([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
+  });
+  petPost({ type: 'hit', rects: rects, vp: [window.innerWidth, window.innerHeight], scr: [window.screenX, window.screenY] });
+}
+window.petPostHit = petPostHit;
+
+// RO 首次回调可能早于布局稳定（捕获到过期矩形且尺寸不变时不再触发），
+// 因此叠加 load/双 rAF 与 300ms 周期重报兜底
+window.addEventListener('DOMContentLoaded', petPostHit);
+window.addEventListener('load', petPostHit);
+requestAnimationFrame(function () { requestAnimationFrame(petPostHit); });
+setInterval(petPostHit, 300);
+if (window.ResizeObserver) {
+  var ro = new ResizeObserver(petPostHit);
+  ['#pet-bubble', '.pet-input-row', '#pet-avatar'].forEach(function (q) {
+    var el = document.querySelector(q);
+    if (el) ro.observe(el);
+  });
+}
+
 // ---- drag: host tracks the physical-pixel cursor delta (DPI-safe), so the
 // page only signals start/move/end. Move events throttled to >=2px deltas.
 var isDragging = false;

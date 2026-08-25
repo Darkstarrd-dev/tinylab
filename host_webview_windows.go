@@ -358,8 +358,6 @@ func openWebviewWindow(hctx *app.HostContext) {
 }
 
 var (
-	procGetWindowLongPtrW         = user32Dll.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtrW         = user32Dll.NewProc("SetWindowLongPtrW")
 	procGetWindowPlacement        = user32Dll.NewProc("GetWindowPlacement")
 	procSetWindowPlacement        = user32Dll.NewProc("SetWindowPlacement")
 	procGetMonitorInfoW           = user32Dll.NewProc("GetMonitorInfoW")
@@ -383,8 +381,13 @@ var (
 	procShowWindow                = user32Dll.NewProc("ShowWindow")
 	procGetCursorPos              = user32Dll.NewProc("GetCursorPos")
 	procGetWindowRect             = user32Dll.NewProc("GetWindowRect")
+	procGetWindowLongPtrW         = user32Dll.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW         = user32Dll.NewProc("SetWindowLongPtrW")
+	procSetWindowRgn              = user32Dll.NewProc("SetWindowRgn")
+	procCombineRgn                = gdi32Dll.NewProc("CombineRgn")
 	procGetStockObject            = gdi32Dll.NewProc("GetStockObject")
 	procCreateRectRgn             = gdi32Dll.NewProc("CreateRectRgn")
+	procDeleteObject              = gdi32Dll.NewProc("DeleteObject")
 	procGetModuleHandleW          = kernel32Dll.NewProc("GetModuleHandleW")
 )
 
@@ -403,9 +406,15 @@ const (
 	dwmBbBlurRegion = 2
 	wsExTopmost     = 0x00000008
 	wsExToolWindow  = 0x00000080
-	wmSize          = 0x0005
-	wmDestroy       = 0x0002
-	swpNoActivate   = 0x0010
+	// Click-through: SetWindowRgn clips the window to the union of the page's
+	// interactive rects — pixels outside render nothing AND receive no clicks.
+	// (WS_EX_LAYERED|WS_EX_TRANSPARENT toggling was tried first: on a window
+	// WITH a redirection surface the layered style blanks the WebView2 DComp
+	// output; it only works on WS_EX_NOREDIRECTIONBITMAP windows like Wails.)
+	wmRgn         = 0
+	wmSize        = 0x0005
+	wmDestroy     = 0x0002
+	swpNoActivate = 0x0010
 )
 
 // petWNDCLASSEX mirrors WNDCLASSEXW.
@@ -534,6 +543,10 @@ type petWindow struct {
 	dragging bool
 	dragCur  struct{ X, Y int32 }
 	dragWin  struct{ X, Y int32 }
+	// hitRects: window-relative interactive regions reported by the page
+	// (avatar, close button, bubble, input row). Empty => fully pass-through.
+	hitRects [][4]int32
+	passthru bool // current WS_EX_TRANSPARENT state
 }
 
 const (
@@ -585,12 +598,16 @@ func petCursorPos() (x, y int32) {
 // petOnMessage dispatches chrome.webview.postMessage payloads from sprite-pet.js.
 func petOnMessage(pw *petWindow, msg string) {
 	var m struct {
-		Type string  `json:"type"`
-		F    float64 `json:"f,omitempty"`
+		Type  string    `json:"type"`
+		F     float64   `json:"f,omitempty"`
+		Rects [][]int32 `json:"rects,omitempty"`
+		Vp    []int32   `json:"vp,omitempty"`
+		Scr   []int32   `json:"scr,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(msg), &m); err != nil {
 		return
 	}
+	pw.hctx.Logger.Info("pet msg: %s", m.Type)
 	switch m.Type {
 	case "dragstart":
 		pw.dragging = true
@@ -613,9 +630,50 @@ func petOnMessage(pw *petWindow, msg string) {
 		if m.F >= 0.5 && m.F <= 2.0 {
 			applyPetScale(pw, m.F)
 		}
+	case "hit":
+		// JS rects are in the webview's CSS px (DPI-virtualized); the host is
+		// DPI-aware (physical px). Scale by winW/vpW before storing.
+		scale := 1.0
+		if len(m.Vp) == 2 && m.Vp[0] > 0 {
+			var wr windows.Rect
+			procGetWindowRect.Call(pw.hwnd, uintptr(unsafe.Pointer(&wr)))
+			scale = float64(wr.Right-wr.Left) / float64(m.Vp[0])
+		}
+		rects := make([][4]int32, 0, len(m.Rects))
+		for _, r := range m.Rects {
+			if len(r) == 4 {
+				rects = append(rects, [4]int32{
+					int32(float64(r[0]) * scale), int32(float64(r[1]) * scale),
+					int32(float64(r[2]) * scale), int32(float64(r[3]) * scale),
+				})
+			}
+		}
+		pw.hitRects = rects
+		applyPetRegion(pw)
 	case "close":
 		procDestroyWindow.Call(pw.hwnd)
 	}
+}
+
+// applyPetRegion clips the window to the union of the page's interactive
+// rects (physical px, window-relative). Outside the region the window renders
+// nothing and clicks fall through to whatever is beneath. Runs on the window
+// thread (MessageCallback fires during the message pump).
+func applyPetRegion(pw *petWindow) {
+	if len(pw.hitRects) == 0 {
+		procSetWindowRgn.Call(pw.hwnd, 0, 1) // NULL region = whole window
+		return
+	}
+	union, _, _ := procCreateRectRgn.Call(0, 0, 0, 0)
+	for _, h := range pw.hitRects {
+		rgn, _, _ := procCreateRectRgn.Call(
+			uintptr(h[0]), uintptr(h[1]),
+			uintptr(h[0]+h[2]), uintptr(h[1]+h[3]))
+		procCombineRgn.Call(union, union, rgn, 2) // RGN_OR
+		procDeleteObject.Call(rgn)
+	}
+	procSetWindowRgn.Call(pw.hwnd, union, 1)
+	procDeleteObject.Call(union)
 }
 
 // applyPetScale resizes the pet AREA to 300*f while the chat panel keeps its
