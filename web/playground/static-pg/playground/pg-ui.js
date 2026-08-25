@@ -1602,7 +1602,7 @@ function pgRenderInputBar() {
   bar.innerHTML =
     '<div class="pg-input-card' + (isMax ? ' pg-input-card-maximized' : '') + '">' +
       '<div class="pg-input-thumbs" id="pg-input-thumbs"></div>' +
-      '<textarea class="pg-input" id="pg-input"' + (imageGenerating ? ' readonly' : '') + ' placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
+      '<textarea class="pg-input" id="pg-input" placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '" onkeydown="pgOnInputKey(event)"></textarea>' +
       expandBtnHtml +
       infinitySvgHtml +
       '<input type="file" id="pg-file-input" accept="image/*,video/*,audio/*,application/pdf" multiple style="display:none" onchange="if(this.files){pgHandleFiles(this.files); this.value=\'\';}">' +
