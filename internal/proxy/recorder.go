@@ -129,6 +129,9 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		})
 	}
 	h.UsageUpdates.Signal()
+	if h.hardLimit != nil {
+		h.hardLimit.Reconcile(sel.Provider.ID, id, inputTokens+outputTokens)
+	}
 }
 
 // parseAndUpdateQuota extracts rate-limit info from upstream response headers

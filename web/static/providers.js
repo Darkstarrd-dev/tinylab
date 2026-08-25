@@ -1727,6 +1727,7 @@ function showEditProvider(id) {
   if (!p) return;
   var strategy = p.rotationStrategy || '';
   var sticky = p.stickyLimit || 0;
+  var hl = p.hardLimit || {};
   var summary = document.getElementById('detail-info-summary');
   if (summary) summary.style.display = 'none';
   var el = document.getElementById('detail-info');
@@ -1784,6 +1785,28 @@ function showEditProvider(id) {
         </div>\
         <textarea id="ep-customheaders-text" class="input mt-8" rows="4" style="width:100%;resize:vertical" placeholder="' + t('customHeadersPlaceholder') + '">' + escapeHtml(providerHeadersToText(p)) + '</textarea>\
       </div>\
+      <div class="form-group mb-16">\
+        <div class="form-group-label-wrap">\
+          <label style="margin:0">' + t('hardLimit') + '</label>\
+          <span class="form-hint" style="margin:0">' + t('hardLimitDesc') + '</span>\
+        </div>\
+        <div class="form-group-inline" style="margin-top:8px;margin-bottom:8px">\
+          <label style="margin:0;min-width:180px">' + t('hardLimitRPM') + '</label>\
+          ' + renderStepperHtml('ep-hl-rpm', hl.rpm || 0, 0, 1000000, 1, 'max-width:140px;') + '\
+          <label class="toggle-switch" for="ep-hl-rpm-enabled" style="flex-shrink:0;margin-left:12px">\
+            <input type="checkbox" id="ep-hl-rpm-enabled" ' + (hl.rpmEnabled ? 'checked' : '') + '>\
+            <span class="toggle-slider"></span>\
+          </label>\
+        </div>\
+        <div class="form-group-inline" style="margin-bottom:0">\
+          <label style="margin:0;min-width:180px">' + t('hardLimitTPM') + '</label>\
+          ' + renderStepperHtml('ep-hl-tpm', hl.tpm || 0, 0, 100000000, 100, 'max-width:140px;') + '\
+          <label class="toggle-switch" for="ep-hl-tpm-enabled" style="flex-shrink:0;margin-left:12px">\
+            <input type="checkbox" id="ep-hl-tpm-enabled" ' + (hl.tpmEnabled ? 'checked' : '') + '>\
+            <span class="toggle-slider"></span>\
+          </label>\
+        </div>\
+      </div>\
       <div class="form-footer-actions">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditProvider(\'' + id + '\'))">' + t('save') + '</button>\
         <button type="button" class="btn" onclick="cancelEditProvider()">' + t('cancel') + '</button>\
@@ -1803,6 +1826,15 @@ async function saveEditProvider(id) {
   p.customHeaders = parseCustomHeadersText(document.getElementById('ep-customheaders-text').value);
   p.rotationStrategy = document.getElementById('r-strategy').value;
   p.stickyLimit = parseInt(document.getElementById('r-sticky').value) || 0;
+  var rpmOn = document.getElementById('ep-hl-rpm-enabled').checked;
+  var tpmOn = document.getElementById('ep-hl-tpm-enabled').checked;
+  p.hardLimit = {
+    rpmEnabled: rpmOn,
+    rpm: parseInt(document.getElementById('ep-hl-rpm').value) || 0,
+    tpmEnabled: tpmOn,
+    tpm: parseInt(document.getElementById('ep-hl-tpm').value) || 0
+  };
+  if (!rpmOn && !tpmOn) p.hardLimit = null;
   if (!p.name || !p.prefix || !p.baseUrl) {
     toast(t('requiredFields'), 'error');
     return;

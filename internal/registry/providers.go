@@ -89,6 +89,7 @@ func (r *Registry) UpdateProvider(id string, updates config.Provider) bool {
 			r.config.Providers[i].AllowPrivateNetwork = updates.AllowPrivateNetwork
 			r.config.Providers[i].UseCustomHeaders = updates.UseCustomHeaders
 			r.config.Providers[i].CustomHeaders = updates.CustomHeaders
+			r.config.Providers[i].HardLimit = updates.HardLimit
 			// 注意：Keys 和 Models 不在此更新——前者通过 createKey/updateKey/deleteKey
 			// API 操作，后者通过 addProviderModel 等 API 操作，避免误覆盖。
 			return true

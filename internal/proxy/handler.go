@@ -51,6 +51,7 @@ type Handler struct {
 	RequestUpdates        *Broadcaster
 	Inflight              *InflightTracker
 	EntryTracker          *EntryTracker
+	hardLimit             *HardLimiter
 	sigCache              SignatureCacheProvider
 	debugModeProvider     func() bool
 	quickSlotOnlyProvider func() bool
@@ -99,6 +100,7 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 		RequestUpdates:  NewBroadcaster(256),
 		Inflight:        NewInflightTracker(),
 		EntryTracker:    NewEntryTracker(),
+		hardLimit:       NewHardLimiter(),
 		sigCache:        NewSignatureCache(),
 		client: &http.Client{
 			Timeout: upstreamTimeout,

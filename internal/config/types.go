@@ -126,7 +126,8 @@ type Provider struct {
 	// object). When true, streamResponse rewrites "choices":null to
 	// "choices":[] while preserving the usage field. Off by default.
 	NormalizeStreamChunks bool         `yaml:"normalizeStreamChunks,omitempty" json:"normalizeStreamChunks,omitempty"`
-	NIMConfig             *NIMSettings `yaml:"nim,omitempty" json:"nim,omitempty"`
+	NIMConfig             *NIMSettings       `yaml:"nim,omitempty" json:"nim,omitempty"`
+	HardLimit             *HardLimitSettings `yaml:"hardLimit,omitempty" json:"hardLimit,omitempty"`
 	// UseProxy routes this provider's upstream requests through the global
 	// upstream proxy (Config.Proxy) when enabled.
 	UseProxy bool `yaml:"useProxy,omitempty" json:"useProxy,omitempty"`
@@ -192,6 +193,17 @@ type NIMSettings struct {
 	MinIntervalMs      int   `yaml:"min_interval_ms" json:"min_interval_ms"`
 	CooldownLadderMin  []int `yaml:"cooldown_ladder" json:"cooldown_ladder"`
 	MaxConcurrent      int   `yaml:"max_concurrent" json:"max_concurrent"`
+}
+
+// HardLimitSettings enables provider-level outbound rate limiting over a
+// sliding one-minute window. RPM caps upstream send count per window; TPM caps
+// estimated+actual tokens per window. Each axis toggles independently; when
+// both are active the longer computed wait wins.
+type HardLimitSettings struct {
+	RPMEnabled bool `yaml:"rpmEnabled" json:"rpmEnabled"`
+	RPM        int  `yaml:"rpm,omitempty" json:"rpm,omitempty"`
+	TPMEnabled bool `yaml:"tpmEnabled" json:"tpmEnabled"`
+	TPM        int  `yaml:"tpm,omitempty" json:"tpm,omitempty"`
 }
 
 // Combo represents a model combination with a routing strategy.

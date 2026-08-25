@@ -75,6 +75,11 @@ func validateProviders(cfg *Config) {
 		if p.APIType == "anthropic" && !strings.HasSuffix(p.BaseURL, "/v1/messages") && !strings.HasSuffix(p.BaseURL, "*") && !strings.HasSuffix(p.BaseURL, "/v1") && !isHostRootURL(p.BaseURL) {
 			fmt.Fprintf(os.Stderr, "[config] warning: anthropic provider %q BaseURL should typically end with /v1/messages or /v1, or be a host root (e.g. https://api.anthropic.com), or use raw mode (*) suffix\n", p.ID)
 		}
+		if p.HardLimit != nil {
+			if (p.HardLimit.RPMEnabled && p.HardLimit.RPM < 1) || (p.HardLimit.TPMEnabled && p.HardLimit.TPM < 1) {
+				fmt.Fprintf(os.Stderr, "[config] warning: provider %q hard limit enabled but rpm/tpm invalid (<1), engine will ignore it\n", p.Name)
+			}
+		}
 		for j := range p.Models {
 			validateModelDef(&p, &p.Models[j])
 		}

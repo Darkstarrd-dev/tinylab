@@ -1194,3 +1194,59 @@ func TestGallery_OwnerCookieIssuedOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderHardLimit_APIRoundTrip(t *testing.T) {
+	srv, _, _, _ := setupTestServer(t)
+	defer srv.Close()
+
+	// 1. PUT with hardLimit enabled
+	payload := `{"name":"Test","prefix":"test","baseUrl":"https://api.test.com","isActive":true,"hardLimit":{"rpmEnabled":true,"rpm":5,"tpmEnabled":true,"tpm":10000}}`
+	resp := requestJSON(t, "PUT", srv.URL+"/api/providers/test-prov", payload)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	var updated map[string]any
+	json.Unmarshal([]byte(readBody(t, resp)), &updated)
+	hl, ok := updated["hardLimit"].(map[string]any)
+	if !ok || hl == nil {
+		t.Fatalf("expected hardLimit object in response, got %+v", updated)
+	}
+	if hl["rpmEnabled"] != true || int(hl["rpm"].(float64)) != 5 {
+		t.Errorf("unexpected rpm settings: %+v", hl)
+	}
+	if hl["tpmEnabled"] != true || int(hl["tpm"].(float64)) != 10000 {
+		t.Errorf("unexpected tpm settings: %+v", hl)
+	}
+
+	// 2. GET list check
+	resp = requestJSON(t, "GET", srv.URL+"/api/providers", "")
+	var listResp map[string]any
+	json.Unmarshal([]byte(readBody(t, resp)), &listResp)
+	providers := listResp["providers"].([]any)
+	found := false
+	for _, p := range providers {
+		pm := p.(map[string]any)
+		if pm["id"] == "test-prov" {
+			found = true
+			if pm["hardLimit"] == nil {
+				t.Fatalf("expected hardLimit in listed provider, got nil")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("test-prov not found in list")
+	}
+
+	// 3. PUT with hardLimit cleared (null)
+	payloadNoHL := `{"name":"Test","prefix":"test","baseUrl":"https://api.test.com","isActive":true,"hardLimit":null}`
+	resp = requestJSON(t, "PUT", srv.URL+"/api/providers/test-prov", payloadNoHL)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on clearing hardLimit, got %d", resp.StatusCode)
+	}
+	var cleared map[string]any
+	json.Unmarshal([]byte(readBody(t, resp)), &cleared)
+	if cleared["hardLimit"] != nil {
+		t.Errorf("expected nil hardLimit after clearing, got %+v", cleared["hardLimit"])
+	}
+}
+

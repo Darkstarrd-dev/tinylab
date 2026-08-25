@@ -98,6 +98,25 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			h.logRequest(sel, logLabel, providerName, upstreamModel, originalModel, msgCount, state, reqID, callerTag, sessionKey)
 		}
 
+		// Provider hard limit: sliding-window RPM/TPM throttling before send.
+		if cfgProvider != nil && cfgProvider.HardLimit != nil {
+			hl := cfgProvider.HardLimit
+			var rpm, tpm int
+			if hl.RPMEnabled && hl.RPM > 0 {
+				rpm = hl.RPM
+			}
+			if hl.TPMEnabled && hl.TPM > 0 {
+				tpm = hl.TPM
+			}
+			if rpm > 0 || tpm > 0 {
+				est := len(bodyBytes) / 4 // same rough estimate as processingEntry.InputTokens
+				if !h.hardLimit.WaitAndReserve(r.Context(), providerID, reqID, rpm, tpm, est) {
+					h.logger.Debug("[%s] client canceled during hard-limit wait", logTag)
+					return false, ""
+				}
+			}
+		}
+
 		// NIM min_interval: wait if too soon since last send on this key.
 		if cfgProvider != nil && h.nim.IsNIMEnabled(providerID, upstreamModel) {
 			if wait := h.nim.WaitNIMInterval(providerID, sel.Key.ID, upstreamModel); wait > 0 {

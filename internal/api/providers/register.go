@@ -48,12 +48,13 @@ type ProviderDTO struct {
 	RotationStrategy      string              `json:"rotationStrategy,omitempty"`
 	StickyLimit           int                 `json:"stickyLimit,omitempty"`
 	InjectStreamOpts      bool                `json:"injectStreamOptions,omitempty"`
-	NormalizeStreamChunks bool                `json:"normalizeStreamChunks,omitempty"`
-	NIMConfig             *config.NIMSettings `json:"nim,omitempty"`
-	UseProxy              bool                `json:"useProxy,omitempty"`
-	AllowPrivateNetwork   bool                `json:"allowPrivateNetwork,omitempty"`
-	UseCustomHeaders      bool                `json:"useCustomHeaders,omitempty"`
-	CustomHeaders         map[string]string   `json:"customHeaders,omitempty"`
+	NormalizeStreamChunks bool                       `json:"normalizeStreamChunks,omitempty"`
+	NIMConfig             *config.NIMSettings        `json:"nim,omitempty"`
+	HardLimit             *config.HardLimitSettings  `json:"hardLimit,omitempty"`
+	UseProxy              bool                       `json:"useProxy,omitempty"`
+	AllowPrivateNetwork   bool                       `json:"allowPrivateNetwork,omitempty"`
+	UseCustomHeaders      bool                       `json:"useCustomHeaders,omitempty"`
+	CustomHeaders         map[string]string          `json:"customHeaders,omitempty"`
 }
 
 // toProviderDTO converts a config.Provider to its public DTO, dropping all
@@ -76,6 +77,7 @@ func toProviderDTO(p config.Provider) ProviderDTO {
 		InjectStreamOpts:      p.InjectStreamOpts,
 		NormalizeStreamChunks: p.NormalizeStreamChunks,
 		NIMConfig:             p.NIMConfig,
+		HardLimit:             p.HardLimit,
 		UseProxy:              p.UseProxy,
 		AllowPrivateNetwork:   p.AllowPrivateNetwork,
 		UseCustomHeaders:      p.UseCustomHeaders,
