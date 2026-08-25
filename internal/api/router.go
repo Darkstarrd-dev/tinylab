@@ -413,7 +413,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			monitorHandler.Register(r)
 			sseHandler.Register(r)
 
-			imageHandler.Register(r)
 			// Console logs
 			consoleLogsHandler.Register(r)
 
@@ -440,6 +439,24 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			r.Route("/traces", traceHandler.Register)
 		})
 	})
+
+	// Image API: /api/save-image (receives large base64 data URLs up to 32MB) and
+	// /api/image-proxy. Outside the generic 1 MiB /api group, still auth-gated.
+	r.Route("/api/save-image", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
+		r.Post("/", imageHandler.SaveImage)
+	})
+	r.Route("/api/image-proxy", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Get("/", imageHandler.ImageProxy)
+	})
+
 	// Playground media prep endpoint: outside the 1 MiB /api group so larger
 	// audio/media blobs (up to 32MB) can be prepped/converted, protected by auth.
 	r.Route("/api/playground", func(r chi.Router) {

@@ -589,6 +589,9 @@ function pgSaveImage(url, btn) {
   var body = { url: url };
   if (meta) body.metadata = meta;
   pgApiPost('/save-image', body).then(function(res) {
+    if (!res || res.error || !res.path) {
+      throw new Error((res && res.error) || 'Save failed');
+    }
     btn.textContent = orig;
     pgToast(pgT('pgImageSaved', [res.filename || res.path]), 'success');
     if (res && res.path) {

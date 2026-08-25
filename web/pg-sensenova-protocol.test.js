@@ -31,6 +31,7 @@ function makeEnv() {
     Date, Math, Promise, JSON, Object, Array, String, Number, Error,
     parseInt, parseFloat, isNaN, encodeURIComponent, URLSearchParams,
     AbortController, Uint8Array,
+    document: { documentElement: { lang: 'en', getAttribute: function(attr) { return 'en'; } } },
     fetch: function (url, opts) {
       calls.fetches.push({ url: String(url), opts: opts || null });
       const idx = calls.fetches.length;
@@ -212,6 +213,53 @@ async function run() {
     assert(!fastSizes.includes('4096x4096'), 'U1 Fast should not include 4096x4096');
     assert(fastSizes.includes('2752x1536'), 'U1 Fast should include 2752x1536');
     assert.strictEqual(fastSizes.length, 11, 'U1 Fast should have 11 fixed sizes');
+  });
+
+  await check('pgImageNormalizeResult correctly detects WebP from b64_json', () => {
+    const { sandbox } = makeEnv();
+    // Simulate WebP base64 output (RIFF... header encoded)
+    const b64WebP = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsSScQAA3AAAA+v1/70wAAA=';
+    const normWebP = sandbox.pgImageNormalizeResult({
+      data: [{ b64_json: b64WebP }]
+    }, 'sensenova');
+    assert.strictEqual(normWebP.assets.length, 1);
+    assert.ok(normWebP.assets[0].url.indexOf('data:image/webp;base64,') === 0, 'url should have data:image/webp prefix');
+    assert.strictEqual(normWebP.assets[0].mime, 'image/webp');
+
+    // Simulate PNG base64 output (iVBOR... header)
+    const b64Png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const normPng = sandbox.pgImageNormalizeResult({
+      data: [{ b64_json: b64Png }]
+    }, 'sensenova');
+    assert.strictEqual(normPng.assets.length, 1);
+    assert.ok(normPng.assets[0].url.indexOf('data:image/png;base64,') === 0, 'url should have data:image/png prefix');
+    assert.strictEqual(normPng.assets[0].mime, 'image/png');
+  });
+
+  await check('pgImageGenerate auto-routes to edits when reference images exist, generations when absent', async () => {
+    const { sandbox, calls } = makeEnv();
+    const w = sandbox.pgWin();
+
+    // 1. Without images -> generations
+    w.config.imageEnabled = false;
+    w.config.imageUrls = [];
+    calls.fetches = [];
+    await sandbox.pgImageGenerate(0, 'Gen prompt');
+    assert.strictEqual(calls.fetches[0].url, '/v1/images/generations');
+
+    // 2. With images -> edits
+    w.config.imageEnabled = true;
+    w.config.imageUrls = ['https://example.com/source.png'];
+    calls.fetches = [];
+    await sandbox.pgImageGenerate(0, 'Edit prompt');
+    assert.strictEqual(calls.fetches[0].url, '/v1/images/edits');
+  });
+
+  await check('pgRenderImageBlock does not contain redundant Endpoint dropdown', () => {
+    const { sandbox } = makeEnv();
+    const html = sandbox.pgRenderImageBlock(false);
+    assert(!html.includes('pg-img-endpoint-sel'), 'UI should not contain pg-img-endpoint-sel dropdown');
+    assert(!html.includes('pgImgEndpoint'), 'UI should not contain Endpoint label');
   });
 
   console.log(`\nSummary: ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'}`);

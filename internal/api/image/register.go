@@ -67,8 +67,18 @@ func (h *Handler) httpClient() *http.Client {
 
 // Register adds the image routes to the given router.
 func (h *Handler) Register(r chi.Router) {
-	r.Post("/save-image", h.saveImage)
-	r.Get("/image-proxy", h.imageProxy)
+	r.Post("/save-image", h.SaveImage)
+	r.Get("/image-proxy", h.ImageProxy)
+}
+
+// SaveImage handles POST /api/save-image requests.
+func (h *Handler) SaveImage(w http.ResponseWriter, r *http.Request) {
+	h.saveImage(w, r)
+}
+
+// ImageProxy handles GET /api/image-proxy requests.
+func (h *Handler) ImageProxy(w http.ResponseWriter, r *http.Request) {
+	h.imageProxy(w, r)
 }
 
 func (h *Handler) saveImage(w http.ResponseWriter, r *http.Request) {

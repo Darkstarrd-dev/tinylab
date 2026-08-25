@@ -608,6 +608,10 @@ function pgImageFlatAssets(st) {
     (generation.assets || []).forEach(function (asset, ai) {
       out.push({ generation: generation, asset: asset, gi: gi, ai: ai });
     });
+    if (generation.status === 'generating' && generation.totalExpected > 0 &&
+        (!generation.assets || generation.assets.length < generation.totalExpected)) {
+      out.push({ generation: generation, asset: null, gi: gi, ai: -1, isPlaceholder: true });
+    }
   });
   return out;
 }
@@ -633,7 +637,36 @@ function pgImageRenderCanvas(i) {
   var index = (st.activeAssetIndex >= 0 && st.activeAssetIndex < flat.length) ? st.activeAssetIndex : (flat.length ? flat.length - 1 : 0);
   var entry = flat[index], g = entry && entry.generation, asset = entry && entry.asset;
   var phase = st.phase || 'empty', html = '<div class="pg-image-canvas pg-image-phase-' + pgEscapeAttr(phase) + '">';
-  if (asset && asset.url) {
+
+  var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
+    '<div class="wheel"></div>' +
+    '<div class="hamster">' +
+      '<div class="hamster__body">' +
+        '<div class="hamster__head">' +
+          '<div class="hamster__ear"></div>' +
+          '<div class="hamster__eye"></div>' +
+          '<div class="hamster__nose"></div>' +
+        '</div>' +
+        '<div class="hamster__limb hamster__limb--fr"></div>' +
+        '<div class="hamster__limb hamster__limb--fl"></div>' +
+        '<div class="hamster__limb hamster__limb--br"></div>' +
+        '<div class="hamster__limb hamster__limb--bl"></div>' +
+        '<div class="hamster__tail"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="spoke"></div>' +
+  '</div>';
+
+  if (entry && entry.isPlaceholder) {
+    var total = flat.length;
+    html += '<div class="pg-image-stage">';
+    html += '<div class="pg-image-empty pg-image-generating" style="position:relative;height:100%">' + hamsterHtml + '<strong style="margin-top:20px;font-size:16px;font-weight:500;color:var(--text)">' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
+    if (total > 1) {
+      html += '<button class="pg-image-nav-btn pg-image-nav-prev" onclick="pgImageSelectAsset(' + i + ',' + Math.max(0, index - 1) + ')" ' + (index <= 0 ? 'disabled' : '') + '>‹</button>';
+      html += '<button class="pg-image-nav-btn pg-image-nav-next" disabled>›</button>';
+    }
+    html += '</div>';
+  } else if (asset && asset.url) {
     var total = flat.length;
     html += '<div class="pg-image-stage">';
     html += '<img class="pg-image-result" src="' + pgEscapeHtml(asset.url) + '" alt="' + pgEscapeAttr(g.prompt || 'Generated image') + '" onclick="pgShowImageModal(\'' + pgEscapeAttr(asset.url) + '\',\'' + pgEscapeAttr(asset.savedPath || '') + '\',\'' + pgEscapeAttr(asset.savedFilename || '') + '\')">';
@@ -648,46 +681,8 @@ function pgImageRenderCanvas(i) {
     html += '<button class="pg-btn" onclick="pgImageRegenerate(' + i + ',' + entry.gi + ')">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button>';
     html += '<button class="pg-btn danger" onclick="pgImageDeleteAsset(' + i + ',' + entry.gi + ',' + entry.ai + ')">' + pgEscapeHtml(pgT('pgDelete')) + '</button>';
     html += '</div>';
-    var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
-      '<div class="wheel"></div>' +
-      '<div class="hamster">' +
-        '<div class="hamster__body">' +
-          '<div class="hamster__head">' +
-            '<div class="hamster__ear"></div>' +
-            '<div class="hamster__eye"></div>' +
-            '<div class="hamster__nose"></div>' +
-          '</div>' +
-          '<div class="hamster__limb hamster__limb--fr"></div>' +
-          '<div class="hamster__limb hamster__limb--fl"></div>' +
-          '<div class="hamster__limb hamster__limb--br"></div>' +
-          '<div class="hamster__limb hamster__limb--bl"></div>' +
-          '<div class="hamster__tail"></div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="spoke"></div>' +
-    '</div>';
-
-    if (phase === 'generating') html += '<div class="pg-image-loading-overlay">' + hamsterHtml + '<span style="margin-top:16px;font-size:16px;font-weight:500">' + pgEscapeHtml(pgT('pgGenerating')) + '</span></div>';
     html += '</div>';
   } else if (phase === 'generating') {
-    var hamsterHtml = '<div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">' +
-      '<div class="wheel"></div>' +
-      '<div class="hamster">' +
-        '<div class="hamster__body">' +
-          '<div class="hamster__head">' +
-            '<div class="hamster__ear"></div>' +
-            '<div class="hamster__eye"></div>' +
-            '<div class="hamster__nose"></div>' +
-          '</div>' +
-          '<div class="hamster__limb hamster__limb--fr"></div>' +
-          '<div class="hamster__limb hamster__limb--fl"></div>' +
-          '<div class="hamster__limb hamster__limb--br"></div>' +
-          '<div class="hamster__limb hamster__limb--bl"></div>' +
-          '<div class="hamster__tail"></div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="spoke"></div>' +
-    '</div>';
     html += '<div class="pg-image-empty pg-image-generating">' + hamsterHtml + '<strong style="margin-top:20px;font-size:16px;font-weight:500;color:var(--text)">' + pgEscapeHtml(pgT('pgGenerating')) + '</strong></div>';
   } else if (phase === 'error') {
     var errTxt = st.error || pgT('pgError');
@@ -720,6 +715,17 @@ function pgImageRenderCanvas(i) {
       if (totVal > 0) {
         navEl.style.display = 'inline-flex';
         navEl.textContent = (idxVal + 1) + ' / ' + totVal;
+      } else {
+        navEl.style.display = 'none';
+        navEl.textContent = '';
+      }
+    }
+  } else if (entry && entry.isPlaceholder) {
+    if (metaEl) metaEl.textContent = '';
+    if (navEl) {
+      if (flat.length > 0) {
+        navEl.style.display = 'inline-flex';
+        navEl.textContent = (index + 1) + ' / ' + flat.length;
       } else {
         navEl.style.display = 'none';
         navEl.textContent = '';

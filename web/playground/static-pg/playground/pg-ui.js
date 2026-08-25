@@ -1162,7 +1162,6 @@ function pgRenderImageBlock(customMode) {
   if (!w) return '';
   var cfg = w.config;
   var en = cfg.imageEnabled && !customMode;
-  var isImageMode = pgState.mode === 'image';
   var urls = cfg.imageUrls || [];
   var hintKey;
   if (customMode) hintKey = 'pgImageCustomDisabled';
@@ -1179,34 +1178,11 @@ function pgRenderImageBlock(customMode) {
       '</div>';
     });
   }
-  // Endpoint selector: image mode only, visible even when imageEnabled=false, disabled in customMode
-  var epSel = '';
-  if (isImageMode) {
-    var epVal = cfg.imgEndpoint || 'generations';
-    var epOptsList = [
-      { value: 'generations', label: 'generations' },
-      { value: 'edits', label: 'edits' },
-      { value: 'chat', label: 'chat' }
-    ];
-    var customEpSelect = pgRenderCustomSelect(
-      'pg-img-endpoint-wrap',
-      'pg-img-endpoint-sel',
-      epOptsList,
-      epVal,
-      'pgOnParam(\'imgEndpoint\', this.value); pgSave()',
-      'flex:1;min-width:0'
-    );
-    epSel = '<div class="pg-param-row">' +
-      '<label>' + pgEscapeHtml(pgT('pgImgEndpoint')) + '</label>' +
-      customEpSelect +
-    '</div>';
-  }
   return '<div class="pg-image-block' + (en ? '' : ' disabled') + '">' +
     '<div class="pg-switch"><input type="checkbox" id="pg-imgenable" ' + (cfg.imageEnabled ? 'checked' : '') + ' onchange="pgOnParam(\'imageEnabled\', this.checked); pgRenderSidebar()"' + (customMode ? ' disabled' : '') + '><label for="pg-imgenable">' + pgEscapeHtml(pgT('pgImageEnable')) + '</label>' +
       '<button class="pg-image-add" onclick="pgAddImageUrl()" ' + (en ? '' : 'disabled') + ' data-tooltip="' + pgEscapeHtml(pgT('pgImageAdd')) + '">+</button>' +
     '</div>' +
     (rows || '') +
-    epSel +
     '<div class="pg-image-hint">' + pgEscapeHtml(hintText) + '</div>' +
   '</div>';
 }

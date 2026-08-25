@@ -9,6 +9,21 @@
   }
   window.pgImageState = imageState;
 
+  function detectBase64ImagePrefix(b64, itemMime) {
+    if (!b64) return 'data:image/png;base64,';
+    if (b64.indexOf('data:') === 0) return '';
+    var mime = itemMime || '';
+    if (!mime) {
+      if (b64.indexOf('UklGR') === 0) mime = 'image/webp';
+      else if (b64.indexOf('/9j/') === 0) mime = 'image/jpeg';
+      else if (b64.indexOf('iVBOR') === 0) mime = 'image/png';
+      else if (b64.indexOf('R0lGO') === 0) mime = 'image/gif';
+      else if (b64.indexOf('Qk') === 0) mime = 'image/bmp';
+      else mime = 'image/png';
+    }
+    return 'data:' + mime + ';base64,';
+  }
+
   window.pgImageNormalizeResult = function (payload, protocol) {
     var data = payload && Array.isArray(payload.data) ? payload.data : [];
     if (!data.length && payload && Array.isArray(payload.images)) data = payload.images;
@@ -21,7 +36,9 @@
       item = item || {};
       var imageURL = item.url || item.image_url;
       if (imageURL && typeof imageURL === 'object') imageURL = imageURL.url || imageURL.href || '';
-      var url = imageURL || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : '') || (item.base64 ? 'data:image/png;base64,' + item.base64 : '');
+      var b64 = item.b64_json || item.base64 || '';
+      var b64Prefix = b64 ? detectBase64ImagePrefix(b64, item.mime || item.content_type) : '';
+      var url = imageURL || (b64 ? (b64.indexOf('data:') === 0 ? b64 : b64Prefix + b64) : '');
       if (!url) return;
       if (item.revised_prompt) revised = item.revised_prompt;
       assets.push({ id: uid('asset'), url: url, savedPath: item.savedPath || '', savedFilename: item.savedFilename || '', mime: item.mime || (url.indexOf('data:image/') === 0 ? url.slice(5, url.indexOf(';')) : ''), width: item.width || 0, height: item.height || 0, bytes: item.bytes || 0, meta: item.meta || null });
@@ -36,17 +53,24 @@
     });
     return p;
   }
+  function resolveImageEndpoint(cfg, snapshot) {
+    if (snapshot && snapshot.endpoint) return snapshot.endpoint;
+    var hasImages = cfg && cfg.imageEnabled && Array.isArray(cfg.imageUrls) && cfg.imageUrls.some(function (u) { return u && u.trim(); });
+    return hasImages ? 'edits' : 'generations';
+  }
+
   function imageBody(w, prompt, snapshot) {
     var cfg = w.config || {}, model = snapshot && snapshot.model || cfg.model;
     var proto = snapshot && snapshot.protocol || (typeof pgGetImgProtocol === 'function' ? pgGetImgProtocol(model) : 'gpt');
     var savedParams = snapshot && snapshot.params, params = savedParams || cfgParams(cfg);
+    var endpoint = resolveImageEndpoint(cfg, snapshot);
     if (!savedParams && typeof pgBuildImageBody === 'function') {
       var old = w.messages;
       w.messages = [{ role: 'user', content: prompt }];
       try {
         var built = pgBuildImageBody(w === pgWin() ? pgState.activeWin : pgState.windows.indexOf(w));
         w.messages = old;
-        return { body: built || { model: model, prompt: prompt }, protocol: proto, params: params, endpoint: snapshot && snapshot.endpoint || (cfg.imgEndpoint === 'edits' ? 'edits' : 'generations') };
+        return { body: built || { model: model, prompt: prompt }, protocol: proto, params: params, endpoint: endpoint };
       } catch (e) { w.messages = old; }
     }
     var body = { model: model, prompt: prompt };
@@ -54,7 +78,7 @@
     Object.keys(params).forEach(function (key) { if (mappedKeys[key]) body[mappedKeys[key]] = params[key]; });
     if (params.snWatermark === 'false') body.watermark = false;
     if (params.snPromptExtend === 'false') body.prompt_extend = false;
-    return { body: body, protocol: proto, params: params, endpoint: snapshot && snapshot.endpoint || (cfg.imgEndpoint === 'edits' ? 'edits' : 'generations') };
+    return { body: body, protocol: proto, params: params, endpoint: endpoint };
   }
 
   function comfyResult(w, prompt, signal, snapshot, seedOverride) {
@@ -202,13 +226,17 @@
   // normalized results accumulated in `collected`; rejects on the first
   // failing run (already-collected runs stay in `collected` for the caller's
   // partial-success handling).
-  function pgImageRunSequence(runFn, count, signal, collected) {
+  function pgImageRunSequence(runFn, count, signal, collected, onProgress) {
     var chain = Promise.resolve();
     for (var k = 0; k < count; k++) {
       (function (index) {
         chain = chain.then(function () {
           if (signal && signal.aborted) { var e = new Error(pgT('pgCanceled')); e.name = 'AbortError'; throw e; }
-          return runFn(index).then(function (norm) { collected.push(norm); return norm; });
+          return runFn(index).then(function (norm) {
+            collected.push(norm);
+            if (typeof onProgress === 'function') onProgress(norm, index);
+            return norm;
+          });
         });
       })(k);
     }
@@ -286,11 +314,36 @@
     // once per submission so the run seeds are base, base+1, ... and
     // regenerate with a user seed reproduces the same images.
     var seedBase = imageSeedBase(req.params);
-    var generation = { id: uid('generation'), status: 'generating', prompt: prompt, promptFormat: snapshot && snapshot.promptFormat || 'natural', promptObject: snapshot && snapshot.promptObject || null, revisedPrompt: '', createdAt: Date.now(), completedAt: null, durationMs: 0, model: snapshot && snapshot.model || cfg.model || 'comfyui', protocol: req.protocol, endpoint: req.endpoint, params: req.params, assets: [] };
+    var generation = { id: uid('generation'), status: 'generating', prompt: prompt, promptFormat: snapshot && snapshot.promptFormat || 'natural', promptObject: snapshot && snapshot.promptObject || null, revisedPrompt: '', createdAt: Date.now(), completedAt: null, durationMs: 0, model: snapshot && snapshot.model || cfg.model || 'comfyui', protocol: req.protocol, endpoint: req.endpoint, params: req.params, assets: [], totalExpected: count };
     st.phase = 'generating'; st.error = ''; st.submittedPrompt = prompt; st.activeRequestId = generation.id; st.generations.push(generation); st.activeAssetIndex = -1; st.abortCtrl = new AbortController();
     if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
     var started = generation.createdAt;
     var collected = [];
+
+    var onProgress = function (norm) {
+      if (st.activeRequestId !== generation.id) return;
+      var newAssets = norm && Array.isArray(norm.assets) ? norm.assets : [];
+      if (!newAssets.length) return;
+      var prevLen = generation.assets.length;
+      newAssets.forEach(function (a) { generation.assets.push(a); });
+      if (!generation.revisedPrompt && norm.revisedPrompt) generation.revisedPrompt = norm.revisedPrompt;
+      if (!generation.provider && norm.provider) generation.provider = norm.provider;
+      if (!generation.key && norm.key) generation.key = norm.key;
+      finalizeImageAssets(newAssets, generation, isComfy);
+      var flat = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [];
+      if (prevLen === 0) {
+        var targetIndex = -1;
+        flat.forEach(function (entry, idx) {
+          if (targetIndex < 0 && entry.generation === generation && entry.asset === newAssets[0]) {
+            targetIndex = idx;
+          }
+        });
+        if (targetIndex >= 0) st.activeAssetIndex = targetIndex;
+      }
+      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+      if (typeof pgSave === 'function') pgSave();
+    };
+
     var request;
     if (isComfy) {
       if (count > 1) {
@@ -298,7 +351,7 @@
           return comfyResult(w, prompt, st.abortCtrl.signal, generation, seedBase + index).then(function (payload) {
             return window.pgImageNormalizeResult(payload, req.protocol);
           });
-        }, count, st.abortCtrl.signal, collected);
+        }, count, st.abortCtrl.signal, collected, onProgress);
       } else {
         request = comfyResult(w, prompt, st.abortCtrl.signal, generation);
       }
@@ -316,7 +369,7 @@
         return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
           return window.pgImageNormalizeResult(payload, req.protocol);
         });
-      }, nRuns, st.abortCtrl.signal, collected);
+      }, nRuns, st.abortCtrl.signal, collected, onProgress);
     } else if (count > 1 && req.protocol === 'modelscope') {
       request = pgImageRunSequence(function (index) {
         var runBody = Object.assign({}, req.body);
@@ -328,7 +381,7 @@
         return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
           return window.pgImageNormalizeResult(payload, req.protocol);
         });
-      }, count, st.abortCtrl.signal, collected);
+      }, count, st.abortCtrl.signal, collected, onProgress);
     } else if (count > 1 && req.protocol === 'sensenova') {
       // SenseNova n=1 only; sequential one-at-a-time requests
       request = pgImageRunSequence(function (index) {
@@ -337,38 +390,67 @@
         return remoteSubmit(runBody, st.abortCtrl.signal, req, generation).then(function (payload) {
           return window.pgImageNormalizeResult(payload, req.protocol);
         });
-      }, count, st.abortCtrl.signal, collected);
+      }, count, st.abortCtrl.signal, collected, onProgress);
     } else {
       request = remoteSubmit(req.body, st.abortCtrl.signal, req, generation);
     }
     return request.then(function (result) {
       if (st.activeRequestId !== generation.id) return generation;
-      var norms = Array.isArray(result) ? result : [window.pgImageNormalizeResult(result, req.protocol)];
-      var assets = [], revised = '', provider = '', key = '';
-      norms.forEach(function (norm) {
-        if (!norm) return;
-        if (norm.assets) assets = assets.concat(norm.assets);
-        if (!revised && norm.revisedPrompt) revised = norm.revisedPrompt;
-        if (!provider && norm.provider) provider = norm.provider;
-        if (!key && norm.key) key = norm.key;
-      });
-      generation.assets = assets; generation.revisedPrompt = revised; generation.status = assets.length ? 'ready' : 'error'; generation.completedAt = Date.now(); generation.durationMs = generation.completedAt - started; generation.provider = provider; generation.key = key;
-      st.phase = generation.status; st.activeAssetIndex = generation.assets.length ? (st.generations.reduce(function (n, item) { return n + (item.assets ? item.assets.length : 0); }, 0) - generation.assets.length) : -1; st.activeRequestId = ''; st.abortCtrl = null; if (!assets.length) st.error = pgT('pgImgNoResult');
-      finalizeImageAssets(assets, generation, isComfy);
-      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave(); return generation;
+      if (count <= 1) {
+        var norms = Array.isArray(result) ? result : [window.pgImageNormalizeResult(result, req.protocol)];
+        var assets = [], revised = '', provider = '', key = '';
+        norms.forEach(function (norm) {
+          if (!norm) return;
+          if (norm.assets) assets = assets.concat(norm.assets);
+          if (!revised && norm.revisedPrompt) revised = norm.revisedPrompt;
+          if (!provider && norm.provider) provider = norm.provider;
+          if (!key && norm.key) key = norm.key;
+        });
+        generation.assets = assets;
+        generation.revisedPrompt = revised;
+        generation.provider = provider;
+        generation.key = key;
+        finalizeImageAssets(assets, generation, isComfy);
+      }
+      generation.status = generation.assets.length ? 'ready' : 'error';
+      generation.completedAt = Date.now();
+      generation.durationMs = generation.completedAt - started;
+      generation.totalExpected = 0;
+      st.phase = generation.status;
+      if (!generation.assets.length) {
+        st.error = pgT('pgImgNoResult');
+      } else if (st.activeAssetIndex < 0) {
+        var flatAfter = typeof pgImageFlatAssets === 'function' ? pgImageFlatAssets(st) : [];
+        st.activeAssetIndex = flatAfter.length - 1;
+      }
+      st.activeRequestId = '';
+      st.abortCtrl = null;
+      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+      if (typeof pgSave === 'function') pgSave();
+      return generation;
     }).catch(function (err) {
       if (st.activeRequestId !== generation.id) return generation;
       var canceled = (err && err.name === 'AbortError') || (st.abortCtrl && st.abortCtrl.signal.aborted);
-      generation.status = canceled ? 'canceled' : 'error'; st.phase = generation.status; st.error = canceled ? '' : (err.message || String(err)); st.activeRequestId = ''; st.abortCtrl = null; generation.completedAt = Date.now(); generation.durationMs = generation.completedAt - started;
+      generation.status = canceled ? 'canceled' : 'error';
+      generation.totalExpected = 0;
+      st.phase = generation.status;
+      st.error = canceled ? '' : (err.message || String(err));
+      st.activeRequestId = '';
+      st.abortCtrl = null;
+      generation.completedAt = Date.now();
+      generation.durationMs = generation.completedAt - started;
       // Partial success: runs that completed before a stop/failure keep their
       // assets (meta + autosave), mirroring how a finished generation's assets
       // remain visible in the canvas after a later failure/delete.
-      if (collected.length) {
+      if (collected.length && (!generation.assets || !generation.assets.length)) {
         var partial = [];
         collected.forEach(function (norm) { if (norm && norm.assets) partial = partial.concat(norm.assets); });
         if (partial.length) { generation.assets = partial; finalizeImageAssets(partial, generation, isComfy); }
       }
-      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i); if (typeof pgSave === 'function') pgSave(); if (canceled) return generation; throw err;
+      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(i);
+      if (typeof pgSave === 'function') pgSave();
+      if (canceled) return generation;
+      throw err;
     });
   };
   window.pgImageStop = function (i) { var w = pgWinAt(i), st = w && imageState(w); if (st && st.abortCtrl) st.abortCtrl.abort(); };
