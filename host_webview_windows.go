@@ -3,10 +3,13 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -77,7 +80,6 @@ func openWebviewAfterReady(hctx *app.HostContext) {
 	// enough since the server goroutine has already been scheduled by main.
 	openWebviewWindow(hctx)
 }
-
 
 // runWebviewClickLoop listens for clicks on the "独立窗口" menu item and launches
 // a new WebView2 window on each click. The window runs in its own goroutine;
@@ -356,20 +358,98 @@ func openWebviewWindow(hctx *app.HostContext) {
 }
 
 var (
-	procGetWindowLongPtrW  = user32Dll.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtrW  = user32Dll.NewProc("SetWindowLongPtrW")
-	procGetWindowPlacement = user32Dll.NewProc("GetWindowPlacement")
-	procSetWindowPlacement = user32Dll.NewProc("SetWindowPlacement")
-	procGetMonitorInfoW    = user32Dll.NewProc("GetMonitorInfoW")
-	procMonitorFromWindow  = user32Dll.NewProc("MonitorFromWindow")
-	procSetWindowPos       = user32Dll.NewProc("SetWindowPos")
-	user32Dll              = windows.NewLazySystemDLL("user32.dll")
-	dwmapiDll              = windows.NewLazySystemDLL("dwmapi.dll")
-	procDwmExtendFrame     = dwmapiDll.NewProc("DwmExtendFrameIntoClientArea")
+	procGetWindowLongPtrW         = user32Dll.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW         = user32Dll.NewProc("SetWindowLongPtrW")
+	procGetWindowPlacement        = user32Dll.NewProc("GetWindowPlacement")
+	procSetWindowPlacement        = user32Dll.NewProc("SetWindowPlacement")
+	procGetMonitorInfoW           = user32Dll.NewProc("GetMonitorInfoW")
+	procMonitorFromWindow         = user32Dll.NewProc("MonitorFromWindow")
+	procSetWindowPos              = user32Dll.NewProc("SetWindowPos")
+	user32Dll                     = windows.NewLazySystemDLL("user32.dll")
+	gdi32Dll                      = windows.NewLazySystemDLL("gdi32.dll")
+	kernel32Dll                   = windows.NewLazySystemDLL("kernel32.dll")
+	dwmapiDll                     = windows.NewLazySystemDLL("dwmapi.dll")
+	procDwmExtendFrame            = dwmapiDll.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmEnableBlurBehindWindow = dwmapiDll.NewProc("DwmEnableBlurBehindWindow")
+	procRegisterClassExW          = user32Dll.NewProc("RegisterClassExW")
+	procCreateWindowExW           = user32Dll.NewProc("CreateWindowExW")
+	procDefWindowProcW            = user32Dll.NewProc("DefWindowProcW")
+	procGetMessageW               = user32Dll.NewProc("GetMessageW")
+	procTranslateMessage          = user32Dll.NewProc("TranslateMessage")
+	procDispatchMessageW          = user32Dll.NewProc("DispatchMessageW")
+	procPostQuitMessage           = user32Dll.NewProc("PostQuitMessage")
+	procPostMessageW              = user32Dll.NewProc("PostMessageW")
+	procDestroyWindow             = user32Dll.NewProc("DestroyWindow")
+	procShowWindow                = user32Dll.NewProc("ShowWindow")
+	procGetCursorPos              = user32Dll.NewProc("GetCursorPos")
+	procGetWindowRect             = user32Dll.NewProc("GetWindowRect")
+	procGetStockObject            = gdi32Dll.NewProc("GetStockObject")
+	procCreateRectRgn             = gdi32Dll.NewProc("CreateRectRgn")
+	procGetModuleHandleW          = kernel32Dll.NewProc("GetModuleHandleW")
 )
+
+// mustStockObject returns a GDI stock object handle (never fails for BLACK_BRUSH).
+func mustStockObject(idx uintptr) uintptr {
+	r, _, _ := procGetStockObject.Call(idx)
+	return r
+}
+
+// Pet window recipe constants (see openPetWindow doc comment).
+const (
+	csHredraw       = 0x0002
+	csVredraw       = 0x0001
+	blackBrush      = 4 // GetStockObject: writes alpha=0 into the redirection surface
+	dwmBbEnable     = 1
+	dwmBbBlurRegion = 2
+	wsExTopmost     = 0x00000008
+	wsExToolWindow  = 0x00000080
+	wmSize          = 0x0005
+	wmDestroy       = 0x0002
+	swpNoActivate   = 0x0010
+)
+
+// petWNDCLASSEX mirrors WNDCLASSEXW.
+type petWNDCLASSEX struct {
+	CbSize        uint32
+	Style         uint32
+	LpfnWndProc   uintptr
+	CbClsExtra    int32
+	CbWndExtra    int32
+	HInstance     syscall.Handle
+	HIcon         syscall.Handle
+	HCursor       syscall.Handle
+	HbrBackground syscall.Handle
+	LpszMenuName  *uint16
+	LpszClassName *uint16
+	HIconSm       syscall.Handle
+}
+
+// petMSG mirrors MSGW.
+type petMSG struct {
+	Hwnd    windows.HWND
+	Message uint32
+	WParam  uintptr
+	LParam  uintptr
+	Time    uint32
+	Pt      struct{ X, Y int32 }
+}
+
+// dwmBlurBehind mirrors DWM_BLURBEHIND. An EMPTY region (CreateRectRgn(0,0,-1,-1))
+// enables per-pixel alpha compositing with no blur.
+type dwmBlurBehind struct {
+	DwFlags                uint32
+	FEnable                uint32
+	HRgnBlur               uintptr
+	FTransitionOnMaximized uint32
+}
+
+type tagPOINT struct {
+	X, Y int32
+}
 
 const (
 	wsPopup                 = 0x80000000
+	wsVisible               = 0x10000000
 	wsCaption               = 0x00C00000
 	wsThickFrame            = 0x00040000
 	wsSysMenu               = 0x00080000
@@ -422,15 +502,141 @@ func setTransparentBackground(ctrl *edge.ICoreWebView2Controller) error {
 }
 
 // openPetWindow creates a lightweight, borderless desktop pet window (L3).
+//
+// Transparency recipe (verified in webview-pet-test, see
+// docs/desktop-pet-progress.md): DefaultBackgroundColor=transparent only
+// reveals the HOST window; the host window itself must composite per-pixel
+// alpha against the desktop. That requires a window class whose background
+// brush is BLACK_BRUSH (zeroes redirection-surface alpha) plus
+// DwmEnableBlurBehindWindow with an EMPTY region (enables DWM per-pixel alpha
+// compositing, no blur). The former DwmExtendFrameIntoClientArea(-1) call was
+// the wrong API and never produced transparency; WS_EX_LAYERED/colorkey break
+// DirectComposition content and must NOT be used.
+//
+// jchv/go-webview2's webview2.New() creates its own window class (opaque
+// brush), so the pet window is built by hand (RegisterClassExW + CreateWindowExW)
+// and the WebView2 controller is embedded via edge.Chromium.Embed. Interactions
+// (drag/close/scale) use chrome.webview.postMessage — the Bind host-object API
+// is not available on the raw edge.Chromium.
+var (
+	petWndOnce sync.Once
+	// petMu guards petWindows; wndProc (any window's thread) and shutdown
+	// (systray thread) both touch it.
+	petMu      sync.Mutex
+	petWindows = map[uintptr]*petWindow{}
+)
+
+type petWindow struct {
+	hctx     *app.HostContext
+	hwnd     uintptr
+	chromium *edge.Chromium
+	scale    float64
+	dragging bool
+	dragCur  struct{ X, Y int32 }
+	dragWin  struct{ X, Y int32 }
+}
+
+const (
+	// 宠物区基准 300 + 交流列固定 260；高恒 300（交流列不随缩放变化）
+	petAreaW  = 300
+	petPanelW = 260
+	petBaseH  = 300
+	wmClose   = 0x0010
+)
+
+func petWndProc(hwnd windows.HWND, msg uint32, wp, lp uintptr) uintptr {
+	petMu.Lock()
+	pw := petWindows[uintptr(hwnd)]
+	petMu.Unlock()
+	switch msg {
+	case wmClose:
+		procDestroyWindow.Call(uintptr(hwnd))
+		return 0
+	case wmDestroy:
+		if pw != nil {
+			petMu.Lock()
+			delete(petWindows, uintptr(hwnd))
+			petMu.Unlock()
+			pw.hctx.Logger.Info("pet window: closed")
+		}
+		procPostQuitMessage.Call(0)
+		return 0
+	case wmSize:
+		if pw != nil && pw.chromium != nil {
+			pw.chromium.Resize()
+		}
+		return 0
+	}
+	return petDefWndProc(hwnd, msg, wp, lp)
+}
+
+func petDefWndProc(hwnd windows.HWND, msg uint32, wp, lp uintptr) uintptr {
+	r, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wp, lp)
+	return r
+}
+
+// petCursorPos returns the physical-pixel cursor position (DPI-safe drag).
+func petCursorPos() (x, y int32) {
+	var pt tagPOINT
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	return pt.X, pt.Y
+}
+
+// petOnMessage dispatches chrome.webview.postMessage payloads from sprite-pet.js.
+func petOnMessage(pw *petWindow, msg string) {
+	var m struct {
+		Type string  `json:"type"`
+		F    float64 `json:"f,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(msg), &m); err != nil {
+		return
+	}
+	switch m.Type {
+	case "dragstart":
+		pw.dragging = true
+		pw.dragCur.X, pw.dragCur.Y = petCursorPos()
+		var r windows.Rect
+		procGetWindowRect.Call(pw.hwnd, uintptr(unsafe.Pointer(&r)))
+		pw.dragWin.X, pw.dragWin.Y = r.Left, r.Top
+	case "dragmove":
+		if !pw.dragging {
+			return
+		}
+		cx, cy := petCursorPos()
+		procSetWindowPos.Call(pw.hwnd, 0,
+			uintptr(pw.dragWin.X+cx-pw.dragCur.X),
+			uintptr(pw.dragWin.Y+cy-pw.dragCur.Y),
+			0, 0, swpNoSize|swpNoZOrder|swpNoActivate)
+	case "dragend":
+		pw.dragging = false
+	case "scale":
+		if m.F >= 0.5 && m.F <= 2.0 {
+			applyPetScale(pw, m.F)
+		}
+	case "close":
+		procDestroyWindow.Call(pw.hwnd)
+	}
+}
+
+// applyPetScale resizes the pet AREA to 300*f while the chat panel keeps its
+// physical size: window width = 300*f + 260, height constant 300.
+// sprite-pet.html must NOT use vw/vh units (they ignore zoom and crop).
+func applyPetScale(pw *petWindow, f float64) {
+	pw.scale = f
+	w, h := int32(float64(petAreaW)*f)+petPanelW, int32(petBaseH)
+	procSetWindowPos.Call(pw.hwnd, 0, 0, 0, uintptr(w), uintptr(h),
+		swpNoMove|swpNoZOrder|swpNoActivate)
+	pw.chromium.Resize()
+	pw.chromium.Eval(fmt.Sprintf("setPetScale(%v)", f))
+}
+
 func openPetWindow(hctx *app.HostContext) {
 	// Pin this goroutine to a single OS thread first, then initialize COM STA
 	// on that thread BEFORE anything WebView2-related. The edge package's
 	// init() only STA-initializes the MAIN thread; this window runs on its own
 	// goroutine thread, and without STA its WebView2 COM calls cross apartments
-	// and the message pump hangs (window shows "not responding", the page never
-	// finishes loading, and the process eventually dies). openWebviewWindow has
-	// the same dance — keep them in sync. RPC_E_CHANGED_MODE (0x80010106) and
-	// S_FALSE are tolerable.
+	// and the message pump hangs. RPC_E_CHANGED_MODE (0x80010106) and S_FALSE
+	// are tolerable.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := windows.CoInitializeEx(0, 2); err != nil {
@@ -441,120 +647,122 @@ func openPetWindow(hctx *app.HostContext) {
 	}
 	defer windows.CoUninitialize()
 
-	webviewWindowMu.Lock()
-	// The documented WEBVIEW2_DEFAULT_BACKGROUND_COLOR escape hatch (read by
-	// the WebView2 loader when the environment is created) is the only
-	// mechanism that actually yields per-pixel transparency here: the
-	// PutDefaultBackgroundColor vtable call alone stays white once the page
-	// paints any root background, and the color-key approach never worked.
-	// Value "0" = fully transparent (0xAARRGGBB). Scoped to this creation and
-	// unset right after — webviewWindowMu serializes environment creation, so
-	// no other window can observe the variable mid-flight.
+	// The documented WEBVIEW2_DEFAULT_BACKGROUND_COLOR escape hatch is read
+	// when the WebView2 environment is created; set it just before Embed.
+	// NOTE: webviewWindowMu must NOT be taken here — openWebviewWindow holds
+	// it for the LIFETIME of the main window (deferred unlock after Run), so
+	// acquiring it would deadlock the pet until the main window closes. The
+	// pet path does not use webview2.New() (the mutex's actual guard target).
+
 	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000")
-	w := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug:     false,
-		AutoFocus: false,
-		WindowOptions: webview2.WindowOptions{
-			Title:  "",
-			Width:  240,
-			Height: 240,
-			IconId: 0,
-			Center: false,
-		},
+
+	// Register the pet window class once: BLACK_BRUSH class brush zeroes the
+	// redirection-surface alpha (prerequisite 1 of the transparency recipe).
+	petWndOnce.Do(func() {
+		hInstance, _, _ := procGetModuleHandleW.Call(0)
+		wc := petWNDCLASSEX{
+			CbSize:        uint32(unsafe.Sizeof(petWNDCLASSEX{})),
+			Style:         csHredraw | csVredraw,
+			LpfnWndProc:   windows.NewCallback(petWndProc),
+			HInstance:     syscall.Handle(hInstance),
+			HbrBackground: syscall.Handle(mustStockObject(blackBrush)),
+			LpszClassName: windows.StringToUTF16Ptr("TinyRouterPetWnd"),
+		}
+		if r, _, _ := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
+			hctx.Logger.Error("pet window: RegisterClassExW failed")
+		}
 	})
-	os.Unsetenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR")
-	webviewWindowMu.Unlock()
 
-	hwnd := uintptr(w.Window())
-	if hwnd != 0 {
-		gwlStyle := ^uintptr(15)
-		style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlStyle)
-		newStyle := (uint32(style) &^ (wsCaption | wsThickFrame | wsSysMenu)) | wsPopup
-		procSetWindowLongPtrW.Call(hwnd, gwlStyle, uintptr(newStyle))
-
-		// 关键：将 DWM 玻璃合成管线扩展至全客户区，使 WebView2 DComp 表面的
-		// 透明 alpha 通道可以直接穿透到桌面。没有这一步，宿主窗口的 GDI 画刷
-		// 会在 WebView2 透明层下方叠一层不透明背景，导致要么看到白色矩形，
-		// 要么 DWM 合成器判定"无可见内容"使整个窗口不可见。
-		margins := dwmMARGINS{-1, -1, -1, -1}
-		procDwmExtendFrame.Call(hwnd, uintptr(unsafe.Pointer(&margins)))
-
-		// Set Topmost (HWND_TOPMOST = -1 = ^uintptr(0))
-		procSetWindowPos.Call(
-			hwnd,
-			^uintptr(0),
-			100, 100, 240, 240,
-			swpFrameChanged|swpShowWindow,
-		)
-		// True per-pixel transparency via WebView2's DefaultBackgroundColor.
-		// The controller is not ready immediately after NewWithOptions (Embed
-		// is async) — poll until it appears then apply transparency. The env
-		// var scoping above handles first-navigation white flicker when the
-		// pet happens to be the first WebView2 in the process; the API call
-		// here handles the normal case where the main window already created
-		// the shared environment and the env var is ignored.
-		go func(targetHwnd uintptr, view webview2.WebView) {
-			for range 30 {
-				time.Sleep(100 * time.Millisecond)
-				chromium := chromiumOf(view)
-				if chromium == nil {
-					continue
-				}
-				ctrl := chromium.GetController()
-				if ctrl == nil {
-					continue
-				}
-				if err := setTransparentBackground(ctrl); err != nil {
-					hctx.Logger.Error("pet window: transparent background: %v", err)
-				} else {
-					hctx.Logger.Info("pet window: transparent background applied")
-				}
-				// 强制 DComp 重新合成，确保透明变更立即生效。
-				_ = ctrl.NotifyParentWindowPositionChanged()
-				_ = targetHwnd // keep hwnd alive for logging if needed
-				return
-			}
-			hctx.Logger.Error("pet window: controller not ready for transparency")
-		}(hwnd, w)
+	// Create VISIBLE from the start (verified-recipe parity): a WebView2
+	// controller created on a hidden parent window does not commit its
+	// DComp frames after a later ShowWindow. An empty window under this
+	// recipe is fully transparent anyway, so there is no flash to avoid.
+	hwnd, _, callErr := procCreateWindowExW.Call(
+		uintptr(wsExTopmost|wsExToolWindow),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("TinyRouterPetWnd"))),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(""))),
+		uintptr(wsPopup|wsVisible),
+		100, 100, petAreaW+petPanelW, petBaseH,
+		0, 0, 0, 0,
+	)
+	if hwnd == 0 {
+		hctx.Logger.Error("pet window: CreateWindowExW failed: %v", callErr)
+		return
 	}
-	// Register window
-	webviewMu.Lock()
-	webviews[hwnd] = w
-	webviewMu.Unlock()
+
+	// Prerequisite 2: DwmEnableBlurBehindWindow with an empty region switches
+	// DWM to per-pixel alpha compositing for this window (no blur).
+	emptyRgn := ^uintptr(0) // 0xFFFFFFFF: CreateRectRgn treats it as -1 (empty region)
+	rgn, _, _ := procCreateRectRgn.Call(0, 0, emptyRgn, emptyRgn)
+	bb := dwmBlurBehind{
+		DwFlags:  dwmBbEnable | dwmBbBlurRegion,
+		FEnable:  1,
+		HRgnBlur: rgn,
+	}
+	if hr, _, _ := procDwmEnableBlurBehindWindow.Call(hwnd, uintptr(unsafe.Pointer(&bb))); hr != 0 {
+		hctx.Logger.Error("pet window: DwmEnableBlurBehindWindow failed: 0x%x", hr)
+		procDestroyWindow.Call(hwnd)
+		return
+	}
+
+	pw := &petWindow{hctx: hctx, hwnd: hwnd, scale: 1.0}
+	chromium := edge.NewChromium()
+	pw.chromium = chromium
+	chromium.MessageCallback = func(msg string) { petOnMessage(pw, msg) }
+	if !chromium.Embed(hwnd) {
+		hctx.Logger.Error("pet window: chromium.Embed failed (WebView2 runtime missing?)")
+		procDestroyWindow.Call(hwnd)
+		return
+	}
+
+	petMu.Lock()
+	petWindows[hwnd] = pw
+	petMu.Unlock()
 	defer func() {
-		webviewMu.Lock()
-		delete(webviews, hwnd)
-		webviewMu.Unlock()
+		petMu.Lock()
+		delete(petWindows, hwnd)
+		petMu.Unlock()
 	}()
 
-	var pos tagWINDOWPLACEMENT
-	pos.length = uint32(unsafe.Sizeof(pos))
-
-	w.Bind("movePetWindow", func(dx, dy int) error {
-		if hwnd == 0 {
-			return nil
+	// Pump until the async controller creation completes, then apply
+	// transparency and show.
+	deadline := time.Now().Add(15 * time.Second)
+	for chromium.GetController() == nil {
+		if !petPumpOnce() || time.Now().After(deadline) {
+			hctx.Logger.Error("pet window: WebView2 controller not ready in time")
+			procDestroyWindow.Call(hwnd)
+			return
 		}
-		procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&pos)))
-		curX := pos.rcNormalPosition.Left + int32(dx)
-		curY := pos.rcNormalPosition.Top + int32(dy)
-		procSetWindowPos.Call(
-			hwnd,
-			0,
-			uintptr(curX),
-			uintptr(curY),
-			0, 0,
-			swpNoSize|swpNoZOrder|swpShowWindow,
-		)
-		return nil
-	})
+		time.Sleep(10 * time.Millisecond)
+	}
+	chromium.Resize()
+	if err := setTransparentBackground(chromium.GetController()); err != nil {
+		hctx.Logger.Error("pet window: transparent background: %v", err)
+	} else {
+		hctx.Logger.Info("pet window: transparent background applied")
+	}
+	// Belt and braces: the page also preventDefaults contextmenu, but disable
+	// the Chromium default menu at the settings level too.
+	if settings, err := chromium.GetSettings(); err == nil {
+		_ = settings.PutAreDefaultContextMenusEnabled(false)
+	}
+	chromium.Navigate(hctx.ConsoleURL + "/sprite-pet.html")
 
-	w.Bind("closePetWindow", func() error {
-		w.Terminate()
-		return nil
-	})
+	// Message pump: runs until WM_DESTROY -> PostQuitMessage.
+	for petPumpOnce() {
+	}
+}
 
-	w.Navigate(hctx.ConsoleURL + "/sprite-pet.html")
-	w.Run()
+// petPumpOnce dispatches one queued message; returns false on WM_QUIT/error.
+func petPumpOnce() bool {
+	var m petMSG
+	r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+	if int32(r) <= 0 {
+		return false
+	}
+	procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+	procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+	return true
 }
 
 type tagWINDOWPLACEMENT struct {

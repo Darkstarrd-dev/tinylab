@@ -16,31 +16,95 @@
 //   - Events SSE subscription: assistant notifications pop the bubble.
 'use strict';
 
+// ---- postMessage bridge to the pet host (host_webview_windows.go::petOnMessage).
+// Raw edge.Chromium has no Bind host objects; all native actions go through
+// chrome.webview.postMessage JSON payloads.
+function petPost(obj) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage(JSON.stringify(obj));
+  }
+}
+
+// ---- drag: host tracks the physical-pixel cursor delta (DPI-safe), so the
+// page only signals start/move/end. Move events throttled to >=2px deltas.
 var isDragging = false;
-var startX, startY;
+var lastX = 0, lastY = 0;
 
 var avatar = document.getElementById('pet-avatar');
 avatar.addEventListener('mousedown', function(e) {
   if (e.target.closest('#pet-bubble')) return;
+  if (e.button !== 0) return;
+  e.preventDefault();
   isDragging = true;
-  startX = e.screenX;
-  startY = e.screenY;
+  lastX = e.screenX;
+  lastY = e.screenY;
+  petPost({ type: 'dragstart' });
 });
 
 window.addEventListener('mousemove', function(e) {
   if (!isDragging) return;
-  var dx = e.screenX - startX;
-  var dy = e.screenY - startY;
-  startX = e.screenX;
-  startY = e.screenY;
-  if (window.movePetWindow) {
-    window.movePetWindow(dx, dy);
+  if (Math.abs(e.screenX - lastX) < 2 && Math.abs(e.screenY - lastY) < 2) return;
+  lastX = e.screenX;
+  lastY = e.screenY;
+  petPost({ type: 'dragmove' });
+});
+
+window.addEventListener('mouseup', function(e) {
+  if (isDragging && e.button === 0) {
+    isDragging = false;
+    petPost({ type: 'dragend' });
   }
 });
 
-window.addEventListener('mouseup', function() {
-  isDragging = false;
+// ---- HTML context menu (close/scale). Win32 TrackPopupMenu cannot be used:
+// the WebView2 Chromium child holds mouse capture and dismisses it instantly.
+var ctxmenu = document.getElementById('pet-ctxmenu');
+var SCALE_LIST = [0.5, 0.75, 1.0, 1.25, 1.5];
+var petScale = 1.0;
+
+function buildPetScales() {
+  if (!ctxmenu) return;
+  var box = ctxmenu.querySelector('.pet-scales');
+  box.innerHTML = '';
+  SCALE_LIST.forEach(function (f) {
+    var d = document.createElement('div');
+    d.className = 'pet-scale-item' + (f === petScale ? ' active' : '');
+    d.textContent = Math.round(f * 100) + '%';
+    d.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    d.addEventListener('click', function () {
+      petScale = f;
+      petPost({ type: 'scale', f: f });
+      hidePetMenu();
+    });
+    box.appendChild(d);
+  });
+}
+
+function showPetMenu(x, y) {
+  if (!ctxmenu) return;
+  buildPetScales();
+  ctxmenu.classList.add('show');
+  var r = ctxmenu.getBoundingClientRect();
+  ctxmenu.style.left = Math.max(2, Math.min(x, window.innerWidth - r.width - 2)) + 'px';
+  ctxmenu.style.top = Math.max(2, Math.min(y, window.innerHeight - r.height - 2)) + 'px';
+}
+
+function hidePetMenu() { if (ctxmenu) ctxmenu.classList.remove('show'); }
+
+window.addEventListener('mousedown', function (e) {
+  if (e.button !== 2) {
+    if (ctxmenu && !ctxmenu.contains(e.target)) hidePetMenu();
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  showPetMenu(e.clientX, e.clientY);
 });
+window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+window.addEventListener('keydown', function (e) { if (e.key === 'Escape') hidePetMenu(); });
+
+var miClose = document.getElementById('pet-mi-close');
+if (miClose) miClose.addEventListener('click', function () { petPost({ type: 'close' }); });
 
 function toggleBubble(e) {
   if (e) e.stopPropagation();
@@ -90,11 +154,7 @@ function sendPetIntent() {
 }
 
 function closePet() {
-  if (window.closePetWindow) {
-    window.closePetWindow();
-  } else {
-    window.close();
-  }
+  petPost({ type: 'close' });
 }
 
 (function initPetSprite() {

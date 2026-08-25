@@ -112,7 +112,7 @@
 | `host_console.go` | `!tray && !webview` | 默认变体：`runHostLoop` 包裹 `runHostLoopConsole` |
 | `host_tray_windows.go` | `tray && windows` | 系统托盘常驻（`fyne.io/systray`），内嵌 favicon，右键菜单"打开控制台/退出"，调用 `addWebviewMenuItem` |
 | `host_tray_other.go` | `tray && !windows` | Linux/macOS 托盘回退为 console 行为 |
-| `host_webview_windows.go` | `tray && webview && windows` | WebView2 原生独立窗口（`jchv/go-webview2`，纯 Go 无 CGO），菜单多一项"打开独立窗口" |
+| `host_webview_windows.go` | `tray && webview && windows` | WebView2 原生独立窗口（`jchv/go-webview2`，纯 Go 无 CGO），菜单多一项"打开独立窗口"；**2026-08-25 桌面小精灵重写（`openPetWindow`）**：自建窗口类 `TinyRouterPetWnd`（BLACK_BRUSH 类画刷）+ `DwmEnableBlurBehindWindow` 空区域逐像素透明 + `edge.Chromium.Embed` 直嵌（不再经 `webview2.New`，其自建窗口类不透明）；交互走 `chrome.webview.postMessage`（`petOnMessage`：dragstart/dragmove/dragend 光标差值拖拽、close、scale 窗口宽=300*f+260 交流列不缩放）；**勿在宠物路径取 `webviewWindowMu`**（主窗口 defer 持锁至关闭，会死锁）；窗口必须创建即可见（隐藏父窗口上创建的 controller 不提交 DComp 帧） |
 | `host_webview_other.go` | `tray && webview && !windows` | 非 Windows 的 webview stub：`addWebviewMenuItem` 返回 nil |
 | `host_webview_stub.go` | `tray && windows && !webview` | webview tag 关闭时 `addWebviewMenuItem` no-op，保持托盘菜单降级 |
 
