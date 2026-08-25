@@ -20,6 +20,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/console"
 	"github.com/tinyrouter/tinyrouter/internal/download"
 	"github.com/tinyrouter/tinyrouter/internal/feature"
+	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"github.com/tinyrouter/tinyrouter/internal/proxy"
 	"github.com/tinyrouter/tinyrouter/internal/registry"
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
@@ -348,6 +349,11 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 
 	// Block on the host loop until shutdown is requested (signal or UI or tray quit).
 	// runHostLoop (and its shutdown wiring) is implemented per build tag in host_*.go.
+	// Seed the pet switches from the initial config; the settings PATCH keeps
+	// them in sync afterwards (internal/petstate).
+	petstate.SetEnabled(a.cfg.Assistant.PetEnabled())
+	petstate.SetDebug(a.cfg.Assistant.Debug)
+
 	hctx := &HostContext{
 		Logger:     a.logger,
 		ConsoleURL: fmt.Sprintf("http://%s", a.addr),

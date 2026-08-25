@@ -31,7 +31,7 @@ function petPost(obj) {
 // through all transparent regions. ResizeObserver tracks bubble growth from
 // text; explicit petPostHit() calls cover toggle/scale/side changes.
 function petPostHit() {
-  var sel = ['#pet-avatar', '.pet-close-btn', '#pet-bubble', '.pet-input-row'];
+  var sel = ['#pet-avatar', '.pet-close-btn', '#pet-bubble', '.pet-input-row', '#pet-ctxmenu'];
   var rects = [];
   sel.forEach(function (q) {
     var el = document.querySelector(q);
@@ -48,13 +48,13 @@ window.petPostHit = petPostHit;
 
 // RO 首次回调可能早于布局稳定（捕获到过期矩形且尺寸不变时不再触发），
 // 因此叠加 load/双 rAF 与 300ms 周期重报兜底
-window.addEventListener('DOMContentLoaded', petPostHit);
+window.addEventListener('DOMContentLoaded', function () { if (window.updateSide) window.updateSide(); });
 window.addEventListener('load', petPostHit);
 requestAnimationFrame(function () { requestAnimationFrame(petPostHit); });
 setInterval(petPostHit, 300);
 if (window.ResizeObserver) {
   var ro = new ResizeObserver(petPostHit);
-  ['#pet-bubble', '.pet-input-row', '#pet-avatar'].forEach(function (q) {
+  ['#pet-bubble', '.pet-input-row', '#pet-avatar', '#pet-ctxmenu'].forEach(function (q) {
     var el = document.querySelector(q);
     if (el) ro.observe(el);
   });
@@ -108,6 +108,7 @@ function buildPetScales() {
     d.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     d.addEventListener('click', function () {
       petScale = f;
+      if (window.setPetScale) window.setPetScale(f);
       petPost({ type: 'scale', f: f });
       hidePetMenu();
     });
@@ -136,21 +137,81 @@ window.addEventListener('mousedown', function (e) {
   showPetMenu(e.clientX, e.clientY);
 });
 window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+avatar.addEventListener('dblclick', function (e) {
+  if (e.target.closest('#pet-bubble')) return;
+  var row = document.querySelector('.pet-input-row');
+  if (row && row.classList.contains('show')) { hidePetInput(); } else { showPetInput(); }
+});
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { hidePetInput(); hidePetMenu(); }
+});
 window.addEventListener('keydown', function (e) { if (e.key === 'Escape') hidePetMenu(); });
 
 var miClose = document.getElementById('pet-mi-close');
 if (miClose) miClose.addEventListener('click', function () { petPost({ type: 'close' }); });
 
+// ---- scale: only the pet area grows/shrinks (300*f); the chat column and the
+// reply bubble keep their physical size. Window width = 300*f + 260 (host).
+window.setPetScale = function (f) {
+  petScale = f;
+  var area = document.getElementById('pet-area');
+  if (area) area.style.width = Math.round(300 * f) + 'px';
+  var a = Math.round(70 * f) + 'px';
+  pet.style.width = a;
+  pet.style.height = a;
+  var canvas = document.getElementById('pet-sprite');
+  if (canvas) { canvas.style.width = a; canvas.style.height = a; }
+  positionBubble();
+  petPostHit();
+};
+
+// ---- side: chat column sits on the side of the pet that faces the screen
+// center. screen.availLeft/availWidth describe the CURRENT monitor (multi-
+// monitor correct); screen.width is primary-only.
+window.updateSide = function () {
+  var area = document.getElementById('pet-area');
+  var petCenter = window.screenX + (area ? area.offsetWidth : 300) / 2;
+  var monitorCenter = (screen.availLeft || 0) + screen.availWidth / 2;
+  document.body.classList.toggle('chat-left', petCenter > monitorCenter);
+  positionBubble();
+  petPostHit();
+};
+
+// Reply bubble hugs the avatar's edge (35*f half-avatar + 8px gap), on the
+// side facing the screen center.
+function positionBubble() {
+  var bubble = document.getElementById('pet-bubble');
+  if (!bubble) return;
+  var off = Math.round(35 * petScale + 8);
+  if (document.body.classList.contains('chat-left')) {
+    bubble.style.left = 'auto';
+    bubble.style.right = off + 'px';
+  } else {
+    bubble.style.right = 'auto';
+    bubble.style.left = off + 'px';
+  }
+}
+
 function toggleBubble(e) {
   if (e) e.stopPropagation();
   var bubble = document.getElementById('pet-bubble');
-  if (bubble.style.display === 'flex') {
-    bubble.style.display = 'none';
-  } else {
-    bubble.style.display = 'flex';
-    var input = document.getElementById('pet-input');
-    if (input) input.focus();
-  }
+  if (!bubble) return;
+  bubble.style.display = (bubble.style.display === 'flex') ? 'none' : 'flex';
+}
+
+// 输入指令行：仅双击宠物显示，发送或 Esc 后隐藏
+function showPetInput() {
+  var row = document.querySelector('.pet-input-row');
+  if (!row) return;
+  row.classList.add('show');
+  var input = document.getElementById('pet-input');
+  if (input) input.focus();
+}
+
+function hidePetInput() {
+  var row = document.querySelector('.pet-input-row');
+  if (row) row.classList.remove('show');
 }
 
 function setBubbleMsg(msg) {
@@ -166,6 +227,7 @@ function sendPetIntent() {
   var text = input.value.trim();
   if (!text) return;
   input.value = '';
+  hidePetInput();
 
   setBubbleMsg('正在分析意图...');
   fetch('/api/assistant/dispatch', {
@@ -186,10 +248,6 @@ function sendPetIntent() {
   .catch(function(err) {
     setBubbleMsg('请求失败: ' + err.message);
   });
-}
-
-function closePet() {
-  petPost({ type: 'close' });
 }
 
 (function initPetSprite() {

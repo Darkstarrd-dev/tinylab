@@ -16,6 +16,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
 
@@ -501,6 +502,8 @@ func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 type assistantPatch struct {
 	Model   *string                   `json:"model"`
 	Actions *[]config.AssistantAction `json:"actions"`
+	Enabled *bool                     `json:"enabled"`
+	Debug   *bool                     `json:"debug"`
 }
 
 func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
@@ -512,6 +515,21 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	}
 	if patch.Actions != nil {
 		cfg.Assistant.Actions = *patch.Actions
+	}
+	if patch.Enabled != nil {
+		cfg.Assistant.Enabled = patch.Enabled
+	}
+	if patch.Debug != nil {
+		cfg.Assistant.Debug = *patch.Debug
+	}
+	// Push the switches to the host side and close any open pet window when
+	// the feature is turned off.
+	petstate.SetEnabled(cfg.Assistant.PetEnabled())
+	petstate.SetDebug(cfg.Assistant.Debug)
+	if cfg.Assistant.PetEnabled() {
+		petstate.Open()
+	} else {
+		petstate.CloseAll()
 	}
 }
 

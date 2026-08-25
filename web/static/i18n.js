@@ -803,6 +803,8 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     assistantModelFilterPlaceholder: 'Filter models...',
     assistantModelNone: 'No text models available',
     assistantKeywordFallback: 'keyword',
+    assistantDebug: 'Debug logging',
+    assistantDebugDesc: 'Log desktop pet window messages (drag, menu, intents) to the console log. Off by default.',
     assistantSaved: 'Assistant settings saved',
   },
   cn: {
@@ -1600,6 +1602,8 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     assistantModelFilterPlaceholder: '过滤模型...',
     assistantModelNone: '没有可用的文本模型',
     assistantKeywordFallback: '关键词',
+    assistantDebug: '调试日志',
+    assistantDebugDesc: '将桌面小精灵窗口的消息（拖拽、菜单、意图调度）记录到控制台日志，默认关闭。',
     assistantSaved: '小精灵助手设置已保存',
     gifEditorTimelineAria: 'GIF 时间轴',
     mediaBridgeImported: '已将 {0} 个项目导入画廊',

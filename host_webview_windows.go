@@ -18,6 +18,7 @@ import (
 	"github.com/jchv/go-webview2/pkg/edge"
 	"github.com/tinyrouter/tinyrouter/internal/app"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"golang.org/x/sys/windows"
 )
 
@@ -28,6 +29,7 @@ import (
 // Returns interface{} so the caller (host_tray_windows.go) stays build-tag-
 // agnostic; the matching stub when `webview` is absent returns nil.
 func addWebviewMenuItem(hctx *app.HostContext) interface{} {
+	hctxGlob = hctx
 	m := systray.AddMenuItem("打开独立窗口", "Open TinyRouter UI in a native WebView2 window")
 	go runWebviewClickLoop(hctx, m)
 
@@ -36,6 +38,14 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 
 	// Auto-open the native window once at startup (independent of the click loop).
 	go openWebviewAfterReady(hctx)
+
+	// The desktop pet IS the assistant surface (the in-app dock was removed):
+	// settings toggle off closes it, toggle on / tray click brings it back.
+	petstate.SetCloseAll(terminateAllPetWindows)
+	petstate.SetOpen(openPetIfNeeded)
+
+	// Auto-release the pet at startup when the assistant is enabled.
+	go openPetAfterReady(hctx)
 
 	// On UI shutdown, terminate all open native windows immediately so they
 	// close at once instead of waiting for the user to close each one. Each
@@ -53,7 +63,49 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 
 func runPetClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
 	for range m.ClickedCh {
-		go openPetWindow(hctx)
+		if !petstate.Enabled() {
+			hctx.Logger.Info("pet window: disabled in Assistant settings")
+			continue
+		}
+		openPetIfNeeded()
+	}
+}
+
+// openPetAfterReady waits for the HTTP server (the pet page loads from it),
+// then opens the pet unless the feature is off or it is already open.
+func openPetAfterReady(hctx *app.HostContext) {
+	for i := 0; i < 100; i++ {
+		if petWindowsOpen() || !petstate.Enabled() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	openPetIfNeeded()
+}
+
+// openPetIfNeeded opens a pet window unless one is already up or the feature
+// is disabled. Registered with petstate so the settings toggle can re-open.
+func openPetIfNeeded() {
+	if petWindowsOpen() || !petstate.Enabled() {
+		return
+	}
+	go openPetWindow(hctxGlob)
+}
+
+// petWindowsOpen reports whether any pet window is currently up.
+func petWindowsOpen() bool {
+	petMu.Lock()
+	defer petMu.Unlock()
+	return len(petWindows) > 0
+}
+
+// terminateAllPetWindows posts WM_CLOSE to every open pet window (safe from a
+// foreign thread; the owning pump turns it into DestroyWindow).
+func terminateAllPetWindows() {
+	petMu.Lock()
+	defer petMu.Unlock()
+	for hwnd := range petWindows {
+		procPostMessageW.Call(hwnd, wmClose, 0, 0)
 	}
 }
 
@@ -380,6 +432,8 @@ var (
 	procDestroyWindow             = user32Dll.NewProc("DestroyWindow")
 	procShowWindow                = user32Dll.NewProc("ShowWindow")
 	procGetCursorPos              = user32Dll.NewProc("GetCursorPos")
+	procIsIconic                  = user32Dll.NewProc("IsIconic")
+	procGetForegroundWindow       = user32Dll.NewProc("GetForegroundWindow")
 	procGetWindowRect             = user32Dll.NewProc("GetWindowRect")
 	procGetWindowLongPtrW         = user32Dll.NewProc("GetWindowLongPtrW")
 	procSetWindowLongPtrW         = user32Dll.NewProc("SetWindowLongPtrW")
@@ -528,6 +582,7 @@ func setTransparentBackground(ctrl *edge.ICoreWebView2Controller) error {
 // (drag/close/scale) use chrome.webview.postMessage — the Bind host-object API
 // is not available on the raw edge.Chromium.
 var (
+	hctxGlob   *app.HostContext
 	petWndOnce sync.Once
 	// petMu guards petWindows; wndProc (any window's thread) and shutdown
 	// (systray thread) both touch it.
@@ -607,7 +662,9 @@ func petOnMessage(pw *petWindow, msg string) {
 	if err := json.Unmarshal([]byte(msg), &m); err != nil {
 		return
 	}
-	pw.hctx.Logger.Info("pet msg: %s", m.Type)
+	if petstate.Debug() && m.Type != "hit" {
+		pw.hctx.Logger.Info("pet msg: %s", m.Type)
+	}
 	switch m.Type {
 	case "dragstart":
 		pw.dragging = true

@@ -105,6 +105,7 @@ function openAssistantModal() {
       <input type="hidden" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '">\
       <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
     </div>\
+    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantDebug')) + '</label>      <label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantDebugDesc')) + '</p>    </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
       <div id="settings-assistant-actions"></div>\
       <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantActionListHint')) + '</p>\
@@ -321,10 +322,12 @@ async function saveAssistantModal() {
       fps: Math.max(1, parseInt(a.fps, 10) || 8)
     };
   });
+  var dbgEl = document.getElementById('settings-assistant-debug');
+  var debug = !!(dbgEl && dbgEl.checked);
   try {
-    await apiPatch('/settings', { assistant: { model: model, actions: actions } });
+    await apiPatch('/settings', { assistant: { model: model, actions: actions, debug: debug } });
     if (window.__settings) {
-      window.__settings.assistant = { model: model, actions: actions };
+      window.__settings.assistant = Object.assign({}, window.__settings.assistant, { model: model, actions: actions, debug: debug });
     }
     window.__assistantActions = null;
     toast(t('assistantSaved'), 'success');

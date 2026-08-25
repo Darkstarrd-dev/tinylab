@@ -378,7 +378,15 @@ type ArchiveConfig struct {
 type AssistantConfig struct {
 	Model   string            `yaml:"model,omitempty" json:"model,omitempty"`
 	Actions []AssistantAction `yaml:"actions,omitempty" json:"actions,omitempty"`
+	// Enabled gates the desktop pet feature; nil means enabled (default on).
+	// Pointer so the settings PATCH can distinguish "absent" from "off".
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// Debug turns on per-message pet window logging (default off).
+	Debug bool `yaml:"debug,omitempty" json:"debug,omitempty"`
 }
+
+// PetEnabled reports whether the desktop pet feature is on; nil = enabled.
+func (c *AssistantConfig) PetEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
 // AssistantAction is one named sprite animation cut from a spritesheet image.
 type AssistantAction struct {

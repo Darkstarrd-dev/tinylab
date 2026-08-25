@@ -100,8 +100,10 @@
     border-radius: 0 0 10px 10px;
   }
   .pet-bubble {
-    align-self: flex-start;
-    max-width: 100%;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    max-width: 200px;
     background: var(--modal-bg, #1a1528);
     border: 1px solid var(--glass-border, rgba(255,255,255,0.1));
     border-radius: 12px;
@@ -113,10 +115,11 @@
   }
   /* 输入行常驻面板底部，不随气泡显隐 */
   .pet-input-row {
-    display: flex;
+    display: none;
     gap: 4px;
     width: 100%;
   }
+  .pet-input-row.show { display: flex; }
   .pet-bubble-text {
     font-size: 12px;
     color: var(--text, #fff);
@@ -147,26 +150,6 @@
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-  }
-  .pet-close-btn {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 18px;
-    height: 18px;
-    background: rgba(0, 0, 0, 0.4);
-    border: none;
-    border-radius: 50%;
-    color: #aaa;
-    font-size: 11px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-  .pet-close-btn:hover {
-    color: #fff;
-    background: rgba(239, 83, 80, 0.8);
   }
   /* HTML context menu (right-click): close + scale */
   #pet-ctxmenu {
@@ -210,7 +193,6 @@
 <body>
 <div class="pet-container">
   <div id="pet-area">
-    <button class="pet-close-btn" title="关闭桌面小精灵" onclick="closePet()">&times;</button>
     <div class="pet-avatar" id="pet-avatar" onclick="toggleBubble(event)">
       <canvas id="pet-sprite" width="70" height="70" style="display:none;image-rendering:pixelated;"></canvas>
       <div class="pet-face">
@@ -221,11 +203,11 @@
         <div class="pet-mouth"></div>
       </div>
     </div>
-  </div>
-  <div id="pet-panel">
     <div id="pet-bubble" class="pet-bubble">
       <div id="pet-bubble-msg" class="pet-bubble-text">主人，我是桌面小精灵！</div>
     </div>
+  </div>
+  <div id="pet-panel">
     <div class="pet-input-row">
       <input type="text" id="pet-input" class="pet-bubble-input" placeholder="输入指令..." onkeydown="if(event.key==='Enter')sendPetIntent()">
       <button class="pet-bubble-btn" onclick="sendPetIntent()">执行</button>

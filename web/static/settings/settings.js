@@ -48,7 +48,7 @@ async function renderEndpoint(c) {
         </div>\
         <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('assistantSettingsDesc')) + '" onclick="openAssistantModal()">' + t('assistantSettings') + '</span>\
-          <span class="code settings-row-endpoint" data-tooltip="' + escapeHtml(t('assistantSettingsDesc')) + '">' + escapeHtml((s.assistant && s.assistant.model) ? s.assistant.model : t('assistantKeywordFallback')) + '</span>\
+          <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('assistantSettingsDesc')) + '"><input type="checkbox" id="assistant-toggle"' + (s.assistant && s.assistant.enabled === false ? '' : ' checked') + ' onchange="toggleAssistant(this.checked)"><span class="toggle-slider"></span></label>\
         </div>\
         <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('proxyDesc')) + '" onclick="openProxyModal()">' + t('proxySettings') + '</span>\
@@ -238,6 +238,20 @@ async function togglePasswordProtection(enabled) {
     toast(t('failed', [e.message]), 'error');
     var toggle = document.getElementById('password-toggle');
     if (toggle) toggle.checked = true;
+  }
+}
+
+async function toggleAssistant(enabled) {
+  try {
+    await apiPatch('/settings', { assistant: { enabled: enabled } });
+    if (window.__settings) {
+      window.__settings.assistant = Object.assign({}, window.__settings.assistant, { enabled: enabled });
+    }
+    window.dispatchEvent(new CustomEvent('assistant-switch', { detail: { enabled: enabled } }));
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+    var toggle = document.getElementById('assistant-toggle');
+    if (toggle) toggle.checked = !enabled;
   }
 }
 

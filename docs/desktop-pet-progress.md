@@ -165,3 +165,29 @@ JS 视口是 374×200 CSS px。两套坐标相差 DPI 比例（winW/vpW），矩
 **验证手段**：`WindowFromPoint` 判定各点命中归属 + GetWindowLong 检查样式 +
 截屏；注意锁屏期间 LockScreenBackstopFrame 会接管一切命中且截图截到锁屏背景，
 验证须在解锁状态下进行。
+
+---
+
+## 9. 单一助手表面 + 开关联动（2026-08-25，用户实测通过）
+
+两轮迭代后的最终形态：
+
+1. **点击穿透**（§8）之后曾尝试「焦点驱动双表面」：App 失焦/最小化时宠物接管、
+   激活时回到 App 内 dock（runPetFocusLoop 500ms 轮询 + Eval `__assistantPetMode`）。
+   实测冲突：dock 点击失效、自动弹出与托盘手动释放叠加出双宠物、开关切换竞态崩溃。
+   **已按用户决定回退**——取消 App 内助手，桌面宠物成为唯一助手表面。
+
+2. **最终形态**：
+   - `index.html`/`index-nopg.html` 不再加载 `sprite.js`（App 内 dock 移除，文件休眠）
+   - 宠物生命周期：启动自动释放（等 HTTP 就绪）→ Settings 开关 OFF 即关、ON 即开
+     （petstate.Open/CloseAll 回调，settings PATCH 与宿主解耦）→ 托盘「释放」带
+     `petWindowsOpen()` 去重（修复双宠物 bug：原点击无条件 go openPetWindow）
+   - `internal/petstate`：settings API 与宿主之间的开关同步包（避免 import cycle）
+
+3. **Settings**：Assistant 行 keyword 徽章 → 启用 toggle（PATCH `assistant.enabled`，
+   `*bool` nil=启用兼容旧配置）；Assistant modal 新增调试日志 toggle（PATCH
+   `assistant.debug`，开启后宿主才记录宠物窗口消息，hit 消息永不记录）。
+
+4. **DPI 教训补充**：go-webview2 使进程 DPI-aware（宿主物理像素），WebView2 内容
+   虚拟化 96 DPI（JS 视口 = 物理/1.5），PowerShell 等 DPI-unaware 工具是第三套
+   坐标——跨进程探测/合成点击必须逐一实测换算，不能假设同一空间。
