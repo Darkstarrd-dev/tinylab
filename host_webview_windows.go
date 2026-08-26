@@ -111,7 +111,24 @@ func probeConsoleReady(consoleURL string, timeout time.Duration) bool {
 // openPetIfNeeded opens a pet window unless one is already up or the feature
 // is disabled. Registered with petstate so the settings toggle can re-open.
 func openPetIfNeeded() {
-	if petWindowsOpen() || !petstate.Enabled() {
+	if !petstate.Enabled() {
+		return
+	}
+	// If a creation is already in progress, don't spawn a second one — rapid
+	// toggle would otherwise queue up multiple LockOSThread goroutines behind
+	// petCreateMu (each holding an OS thread hostage) and serialize them
+	// sequentially, producing the stutter/freeze.
+	if !petCreateMu.TryLock() {
+		return
+	}
+	petCreateMu.Unlock()
+	// Re-check under lock-then-spawn: avoid TOCTOU where a window appeared
+	// between the first check and the goroutine start. Cheap racy pre-check
+	// above just avoids the extra spawning; correctness depends on this.
+	petMu.Lock()
+	hasWindow := len(petWindows) > 0
+	petMu.Unlock()
+	if hasWindow {
 		return
 	}
 	go openPetWindow(hctxGlob)
@@ -123,7 +140,6 @@ func petWindowsOpen() bool {
 	defer petMu.Unlock()
 	return len(petWindows) > 0
 }
-
 // terminateAllPetWindows posts WM_CLOSE to every open pet window (safe from a
 // foreign thread; the owning pump turns it into DestroyWindow).
 func terminateAllPetWindows() {
@@ -825,11 +841,14 @@ func openPetWindow(hctx *app.HostContext) {
 	// pet path does not use webview2.New() (the mutex's actual guard target).
 
 	petEnvOnce.Do(func() { os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000") })
-	petCreateMu.Lock()
-	defer petCreateMu.Unlock()
 
-	// Register the pet window class once: BLACK_BRUSH class brush zeroes the
-	// redirection-surface alpha (prerequisite 1 of the transparency recipe).
+	// Only the WebView2 environment creation (Embed + async controller wait)
+	// races. Holding petCreateMu for the entire window lifetime (message pump)
+	// would keep the LockOSThread goroutine pinned on the mutex and make every
+	// later toggle block for the whole lifetime of the window — the freeze on
+	// rapid toggle. Serialize creation then immediately release; the pump runs
+	// without the mutex.
+	petCreateMu.Lock()
 	petWndOnce.Do(func() {
 		hInstance, _, _ := procGetModuleHandleW.Call(0)
 		wc := petWNDCLASSEX{
@@ -858,6 +877,7 @@ func openPetWindow(hctx *app.HostContext) {
 		0, 0, 0, 0,
 	)
 	if hwnd == 0 {
+		petCreateMu.Unlock()
 		hctx.Logger.Error("pet window: CreateWindowExW failed: %v", callErr)
 		return
 	}
@@ -872,6 +892,7 @@ func openPetWindow(hctx *app.HostContext) {
 		HRgnBlur: rgn,
 	}
 	if hr, _, _ := procDwmEnableBlurBehindWindow.Call(hwnd, uintptr(unsafe.Pointer(&bb))); hr != 0 {
+		petCreateMu.Unlock()
 		hctx.Logger.Error("pet window: DwmEnableBlurBehindWindow failed: 0x%x", hr)
 		procDestroyWindow.Call(hwnd)
 		return
@@ -882,6 +903,7 @@ func openPetWindow(hctx *app.HostContext) {
 	pw.chromium = chromium
 	chromium.MessageCallback = func(msg string) { petOnMessage(pw, msg) }
 	if !chromium.Embed(hwnd) {
+		petCreateMu.Unlock()
 		hctx.Logger.Error("pet window: chromium.Embed failed (WebView2 runtime missing?)")
 		procDestroyWindow.Call(hwnd)
 		return
@@ -901,6 +923,7 @@ func openPetWindow(hctx *app.HostContext) {
 	deadline := time.Now().Add(15 * time.Second)
 	for chromium.GetController() == nil {
 		if !petPumpOnce() || time.Now().After(deadline) {
+			petCreateMu.Unlock()
 			hctx.Logger.Error("pet window: WebView2 controller not ready in time")
 			procDestroyWindow.Call(hwnd)
 			return
@@ -919,6 +942,8 @@ func openPetWindow(hctx *app.HostContext) {
 		_ = settings.PutAreDefaultContextMenusEnabled(false)
 	}
 	chromium.Navigate(hctx.ConsoleURL + "/sprite-pet.html")
+	// ENV/Embed race window is over — release so next rapid toggle doesn't block.
+	petCreateMu.Unlock()
 
 	// Message pump: runs until WM_DESTROY -> PostQuitMessage.
 	for petPumpOnce() {
