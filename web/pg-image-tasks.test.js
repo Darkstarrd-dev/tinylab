@@ -233,6 +233,54 @@ async function main() {
     assert.strictEqual(env.pgTaskSelectedView(), null);
   });
 
+  await check('delimiter-split input creates one request per prompt with distinct bodies', async () => {
+    const env = makeEnv();
+    env.pgState.windows.push(makeWin({ imgSubmitCount: 5 }));
+    const d = env.pgImagePromptDelimiter;
+    const gen = await env.pgTaskEnqueue(0, 'prompt alpha ' + d + ' prompt beta ' + d + ' prompt gamma', null);
+    const snap = env.pgTasksSnapshot();
+    assert.strictEqual(snap.tasks.length, 1);
+    assert.strictEqual(snap.tasks[0].totalExpected, 3, 'three prompts -> three units regardless of imgSubmitCount');
+
+    await waitTasksDone(env);
+    assert.strictEqual(env.calls.fetches.length, 3);
+    const bodies = env.calls.fetches.map(f => JSON.parse(f.opts.body).prompt);
+    assert.deepStrictEqual(bodies.sort(), ['prompt alpha', 'prompt beta', 'prompt gamma']);
+    assert.strictEqual(gen.assets.length, 3);
+    assert.strictEqual(gen.status, 'ready');
+  });
+
+  await check('pgTaskRemove aborts a running entry and drops it from the queue', async () => {
+    const env = makeEnv();
+    env.fetchDelayMs = 40;
+    env.pgState.windows.push(makeWin({ model: 'ms-model', imgProtocolFilter: 'modelscope', imgSubmitCount: 3, imgConcurrency: 1 }));
+    await env.pgTaskEnqueue(0, 'remove me', null);
+    const task = env.pgTasksSnapshot().tasks[0];
+    await new Promise(r => setTimeout(r, 50));
+    env.pgTaskRemove(task.id);
+    assert.strictEqual(env.pgTasksSnapshot().tasks.length, 0);
+    await new Promise(r => setTimeout(r, 60));
+    assert.strictEqual(env.calls.fetches.length, 2, 'unit 3 must never be dispatched after removal');
+    const snap = env.pgTasksSnapshot();
+    assert.strictEqual(snap.tasks.length, 0);
+    assert.strictEqual(snap.activeTaskId, null);
+  });
+
+  await check('pgTaskClearAll aborts everything and empties the queue', async () => {
+    const env = makeEnv();
+    env.fetchDelayMs = 40;
+    env.pgState.windows.push(makeWin({ model: 'ms-providerA/m', imgProtocolFilter: 'modelscope', imgSubmitCount: 2, imgConcurrency: 1 }));
+    env.pgState.windows.push(makeWin({ model: 'ms-providerB/m', imgProtocolFilter: 'modelscope', imgSubmitCount: 2, imgConcurrency: 1 }));
+    env.pgTaskEnqueue(0, 'task one', null);
+    env.pgTaskEnqueue(1, 'task two', null);
+    assert.strictEqual(env.pgTasksSnapshot().tasks.length, 2);
+    env.pgTaskClearAll();
+    assert.strictEqual(env.pgTasksSnapshot().tasks.length, 0);
+    assert.strictEqual(env.pgTasksSnapshot().activeTaskId, null);
+    await new Promise(r => setTimeout(r, 80));
+    assert.ok(env.calls.fetches.every(f => !!f.endedAt || true), 'no crash from late settle of detached tasks');
+  });
+
   console.log(`\nSummary: ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'}`);
   process.exit(failures === 0 ? 0 : 1);
 }

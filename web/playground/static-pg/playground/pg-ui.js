@@ -1270,7 +1270,7 @@ function pgRenderReqLeft(showReqLeft) {
         '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
       '</div>' +
       '<div class="pg-req-left-inner pg-tasks-inner">' +
-        '<div class="pg-req-left-header">' + pgEscapeHtml(pgT('pgTaskQueueTitle')) + '</div>' +
+        '<div class="pg-req-left-header pg-tasks-header"><span>' + pgEscapeHtml(pgT('pgTaskQueueTitle')) + '</span><button class="pg-task-clear-all-btn bin-button" type="button" onclick="pgTaskClearAll()" title="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '" aria-label="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '">' + pgTaskBinSvg() + '</button></div>' +
         '<div class="pg-req-table-wrap" id="pg-tasks-content"></div>' +
       '</div>';
   } else {

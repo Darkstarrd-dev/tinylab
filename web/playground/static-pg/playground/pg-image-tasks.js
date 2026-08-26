@@ -4,6 +4,17 @@
 
   function uid(prefix) { return (prefix || 'id') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9); }
 
+  // Semantic delimiter that splits one input into multiple per-request prompts
+  // (inspire batch mode). Exposed for the inspire modal and tests.
+  var PROMPT_DELIMITER = '<<<PROMPT>>>';
+  function splitPrompts(text) {
+    var raw = String(text || '');
+    if (raw.indexOf(PROMPT_DELIMITER) === -1) return [raw.trim()];
+    return raw.split(PROMPT_DELIMITER).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+  }
+  window.pgImagePromptDelimiter = PROMPT_DELIMITER;
+  window.pgImageSplitPrompts = splitPrompts;
+
   var tasks = [];
   var activeTaskId = null;
   var providerRunning = {};
@@ -111,7 +122,7 @@
   function startUnit(t, key, uIdx) {
     var w = pgWinAt(t.winIndex);
     var unit = t.units[uIdx];
-    window.pgImageExecUnit(w, t.prompt, t.req, unit, t.abortCtrl.signal, t.generation)
+    window.pgImageExecUnit(w, unit.prompt || t.prompt, unit.req || t.req, unit, t.abortCtrl.signal, t.generation)
       .then(function (norm) {
         if (t.abortCtrl.signal.aborted) return;
         mergeNorm(t, norm);
@@ -163,12 +174,29 @@
   window.pgTaskEnqueue = function (winIndex, prompt, snapshot) {
     var w = pgWinAt(winIndex);
     if (!w) return Promise.reject(new Error(pgT('pgSelectModel')));
-    var built = window.pgImageBuildRequest(w, prompt, snapshot);
+    var parts = splitPrompts(prompt);
+    var built = window.pgImageBuildRequest(w, parts[0], snapshot);
     var cfg = w.config || {};
     var isComfy = built.req.protocol === 'comfyui';
     var model = (snapshot && snapshot.model) || cfg.model || (isComfy ? 'comfyui' : '');
     var st = pgImageState(w);
-    var units = window.pgImagePlanUnits(built.req, built.count);
+    var units;
+    var totalExpected;
+    if (parts.length === 1) {
+      units = window.pgImagePlanUnits(built.req, built.count);
+      totalExpected = built.count;
+    } else {
+      // Inspire batch mode: one request per delimiter-separated prompt.
+      units = [];
+      totalExpected = parts.length;
+      for (var pi = 0; pi < parts.length; pi++) {
+        var partBuilt = pi === 0 ? built : window.pgImageBuildRequest(w, parts[pi], snapshot);
+        var partUnits = window.pgImagePlanUnits(partBuilt.req, 1);
+        partUnits[0].prompt = parts[pi];
+        partUnits[0].req = partBuilt.req;
+        units.push(partUnits[0]);
+      }
+    }
 
     var generation = {
       id: uid('generation'),
@@ -185,7 +213,7 @@
       endpoint: built.req.endpoint,
       params: built.req.params,
       assets: [],
-      totalExpected: built.count
+      totalExpected: totalExpected
     };
 
     st.phase = 'generating';
@@ -202,7 +230,7 @@
       endpoint: built.req.endpoint,
       req: built.req,
       status: 'queued',
-      totalExpected: built.count,
+      totalExpected: totalExpected,
       error: '',
       createdAt: Date.now(),
       completedAt: null,
@@ -249,6 +277,47 @@
     }
   };
 
+  function abortTaskEntry(t) {
+    if (t.status !== 'queued' && t.status !== 'running') return false;
+    t.abortCtrl.abort();
+    t.status = 'canceled';
+    t.generation.status = 'canceled';
+    t.generation.totalExpected = 0;
+    if (t.inFlight === 0) settleTask(t);
+    return true;
+  }
+
+  // Removes one queue entry; running work is aborted. Saved image files and
+  // the generation kept in window history are untouched.
+  window.pgTaskRemove = function (id) {
+    var t = findTask(id);
+    if (!t) return;
+    tasks.splice(tasks.indexOf(t), 1);
+    if (activeTaskId === id) activeTaskId = null;
+    abortTaskEntry(t);
+    if (typeof pgRenderTaskQueue === 'function') pgRenderTaskQueue(true);
+    if (t.winIndex === pgState.activeWin && pgState.mode === 'image') {
+      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(t.winIndex);
+    }
+    pump();
+  };
+
+  // Clears every queue entry; running tasks are aborted in place. In-flight
+  // units settle against detached task objects so their generations end up
+  // consistently marked canceled in window history.
+  window.pgTaskClearAll = function () {
+    if (!tasks.length) return;
+    var hadActiveWin = {};
+    tasks.forEach(function (t) { hadActiveWin[t.winIndex] = true; abortTaskEntry(t); });
+    tasks = [];
+    activeTaskId = null;
+    if (typeof pgRenderTaskQueue === 'function') pgRenderTaskQueue(true);
+    if (pgState.mode === 'image' && hadActiveWin[pgState.activeWin]) {
+      if (typeof pgImageRenderCanvas === 'function') pgImageRenderCanvas(pgState.activeWin);
+    }
+    pump();
+  };
+
   window.pgTaskSelect = function (id) {
     if (activeTaskId === id) {
       activeTaskId = null;
@@ -293,6 +362,26 @@
   function escHtml(s) { return typeof pgEscapeHtml === 'function' ? pgEscapeHtml(s) : String(s || ''); }
   function escAttr(s) { return typeof pgEscapeAttr === 'function' ? pgEscapeAttr(s) : String(s || ''); }
   function t(k) { return typeof pgT === 'function' ? pgT(k) : k; }
+
+  // Animated trash icon copied from the download page "Clear Completed"
+  // button (style.css .bin-button hover rotates .bin-top). Mask id must be
+  // unique per instance — several buttons can coexist in one document.
+  var binSeq = 0;
+  function binSvg() {
+    binSeq++;
+    var maskId = 'pg-bin-mask-' + binSeq;
+    return '<svg class="bin-top" viewBox="0 0 39 7" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
+      '<line y1="5" x2="39" y2="5" stroke="currentColor" stroke-width="4"></line>' +
+      '<line x1="12" y1="1.5" x2="26.0357" y2="1.5" stroke="currentColor" stroke-width="3"></line>' +
+      '</svg>' +
+      '<svg class="bin-bottom" viewBox="0 0 33 39" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
+      '<mask id="' + maskId + '" fill="white"><path d="M0 0H33V35C33 37.2091 31.2091 39 29 39H4C1.79086 39 0 37.2091 0 35V0Z"></path></mask>' +
+      '<path d="M0 0H33H0ZM37 35C37 39.4183 33.4183 43 29 43H4C-0.418278 43 -4 39.4183 -4 35H4H29H37ZM4 43C-0.418278 43 -4 39.4183 -4 35V0H4V35V43ZM37 0V35C37 39.4183 33.4183 43 29 43V35V0H37Z" fill="currentColor" mask="url(#' + maskId + ')"></path>' +
+      '<path d="M12 6L12 29" stroke="currentColor" stroke-width="4"></path>' +
+      '<path d="M21 6V29" stroke="currentColor" stroke-width="4"></path>' +
+      '</svg>';
+  }
+  window.pgTaskBinSvg = binSvg;
 
   window.pgRenderTaskQueue = function (visible) {
     if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
@@ -345,6 +434,7 @@
           '</div>' +
         '</div>' +
         stopBtnHtml +
+        '<button class="pg-task-remove-btn bin-button" onclick="event.stopPropagation();pgTaskRemove(\'' + escAttr(taskItem.id) + '\')" title="' + escAttr(t('pgTaskRemoveTip')) + '" aria-label="' + escAttr(t('pgTaskRemoveTip')) + '">' + binSvg() + '</button>' +
       '</div>';
     }
 
