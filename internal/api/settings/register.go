@@ -522,17 +522,27 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	if patch.Debug != nil {
 		cfg.Assistant.Debug = *patch.Debug
 	}
-	// Push the switches to the host side and close any open pet window when
-	// the feature is turned off.
 	petstate.SetEnabled(cfg.Assistant.PetEnabled())
 	petstate.SetDebug(cfg.Assistant.Debug)
-	if cfg.Assistant.PetEnabled() {
-		petstate.Open()
-	} else {
-		petstate.CloseAll()
+	if patch.Enabled != nil {
+		if cfg.Assistant.PetEnabled() {
+			// Prefer re-showing an existing hidden window over creating a new
+			// WebView2 environment. Creating/destroying the Chromium child
+			// process races with a concurrent creation on the next toggle —
+			// that race is the main-window freeze on off->on->off->on.
+			if !petstate.ShowAll() {
+				petstate.Open()
+			}
+		} else {
+			// Hide keeps the WebView2 environment alive, avoiding the
+			// destroy/recreate churn. CloseAll remains the fallback for
+			// windows that never registered a hide handler (non-webview builds).
+			if !petstate.HideAll() {
+				petstate.CloseAll()
+			}
+		}
 	}
 }
-
 // validateProxyConfig checks that the proxy host and port are well-formed when
 // proxying is enabled. Port must be a numeric value in [1,65535].
 func validateProxyConfig(p config.ProxyConfig) error {

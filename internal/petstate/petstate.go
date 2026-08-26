@@ -11,6 +11,8 @@ var (
 	debug    atomic.Bool  // pet/assistant debug logging (default false)
 	closeAll atomic.Value // func() — closes every open pet window
 	open     atomic.Value // func() — opens a pet window if none is up
+	hideAll  atomic.Value // func() — hides the pet without destroying WebView2
+	showAll  atomic.Value // func() — re-shows a hidden pet window
 )
 
 // SetOpen registers the host callback that opens a pet window.
@@ -43,4 +45,26 @@ func CloseAll() {
 	if f, ok := closeAll.Load().(func()); ok && f != nil {
 		f()
 	}
+}
+
+// SetHideAll registers the hide callback.
+func SetHideAll(f func() bool) { hideAll.Store(f) }
+
+// HideAll hides the pet window if one exists. Returns true if a handler ran.
+func HideAll() bool {
+	if f, ok := hideAll.Load().(func() bool); ok && f != nil {
+		return f()
+	}
+	return false
+}
+
+// SetShowAll registers the show callback.
+func SetShowAll(f func() bool) { showAll.Store(f) }
+
+// ShowAll re-shows a hidden pet window. Returns true if a handler ran and made a window visible.
+func ShowAll() bool {
+	if f, ok := showAll.Load().(func() bool); ok && f != nil {
+		return f()
+	}
+	return false
 }

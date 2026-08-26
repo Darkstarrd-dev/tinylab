@@ -45,6 +45,8 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	// settings toggle off closes it, toggle on / tray click brings it back.
 	petstate.SetCloseAll(terminateAllPetWindows)
 	petstate.SetOpen(openPetIfNeeded)
+	petstate.SetHideAll(func() bool { return setPetWindowVisible(false) })
+	petstate.SetShowAll(func() bool { return setPetWindowVisible(true) })
 	registerPetTriggerHook(hctx)
 
 	// Auto-release the pet at startup when the assistant is enabled.
@@ -140,6 +142,7 @@ func petWindowsOpen() bool {
 	defer petMu.Unlock()
 	return len(petWindows) > 0
 }
+
 // terminateAllPetWindows posts WM_CLOSE to every open pet window (safe from a
 // foreign thread; the owning pump turns it into DestroyWindow).
 func terminateAllPetWindows() {
@@ -148,6 +151,25 @@ func terminateAllPetWindows() {
 	for hwnd := range petWindows {
 		procPostMessageW.Call(hwnd, wmClose, 0, 0)
 	}
+}
+
+// setPetWindowVisible shows/hides the pet without destroying the WebView2
+// environment. Destroy+recreate tears down the Edge/Chromium child process and
+// races with a concurrently-creating window — the second cycle's Embed races
+// the first window's WM_DESTROY cleanup, freezing the main window's message
+// pump (the App freeze on slow toggle: restart->on->off->on->off).
+func setPetWindowVisible(show bool) bool {
+	petMu.Lock()
+	defer petMu.Unlock()
+	for hwnd := range petWindows {
+		var cmd uintptr = 0 // SW_HIDE
+		if show {
+			cmd = 5 // SW_SHOW
+		}
+		procShowWindow.Call(hwnd, cmd)
+		return true
+	}
+	return false
 }
 
 // terminateAllWebviews force-closes every currently-open WebView2 window. Safe
