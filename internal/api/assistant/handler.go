@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
@@ -397,4 +398,64 @@ func (h *Handler) executeSubRequest(ctx context.Context, method, path string, ar
 	}
 
 	return resp.StatusCode, parsed, nil
+}
+
+// petTrigger handles POST /api/assistant/pet-trigger {event: "poke"} — a
+// visual smoke-test endpoint for the settings state-machine panel. It
+// dispatches the event through the assistant's classification is not needed;
+// it simply forwards to any registered pet hook (host Eval on the pet window)
+// or, if no hook is registered, reports that the pet is not open.
+func (h *Handler) petTrigger(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Event string `json:"event"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Event == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "event is required")
+		return
+	}
+	// Ask the host to Eval petSM.dispatch(event) on the pet window, if any.
+	// The host registers a hook via petstate.SetPetTrigger.
+	if fn, ok := petTriggerHook.Load().(func(string) (string, bool)); ok && fn != nil {
+		if state, ok2 := fn(req.Event); ok2 {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "event": req.Event, "state": state})
+			return
+		}
+		apibase.WriteAPIError(w, http.StatusBadRequest, "event not mapped to any action")
+		return
+	}
+	// No host hook: fall back to a no-op success so the panel still works in
+	// non-webview builds; the frontend will show "pet window not open".
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "pet window not open"})
+}
+
+// petState handles GET /api/assistant/pet-state — returns current/Default
+// state names and alias mapping so the panel can render without needing to
+// Eval inside the pet webview first.
+func (h *Handler) petState(w http.ResponseWriter, r *http.Request) {
+	state := ""
+	if fn, ok := petStateHook.Load().(func() string); ok && fn != nil {
+		state = fn()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "state": state})
+}
+
+// petTriggerHook / petStateHook are set by the host (host_webview_windows.go)
+// so the assistant API can Eval inside the pet webview without importing the
+// host package (which would create a cycle).
+var (
+	petTriggerHook atomic.Value // func(string)(string,bool)
+	petStateHook   atomic.Value // func()string
+)
+
+// SetPetTriggerHook registers the host hook for petTrigger/petState.
+func SetPetTriggerHook(trigger func(string) (string, bool), state func() string) {
+	if trigger != nil {
+		petTriggerHook.Store(trigger)
+	}
+	if state != nil {
+		petStateHook.Store(state)
+	}
 }

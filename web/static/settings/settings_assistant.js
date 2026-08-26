@@ -76,10 +76,152 @@ function assistantRemoveAction(i) {
   if (i < 0 || i >= actions.length) return;
   actions.splice(i, 1);
   renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSM) {}
+}
+
+// ----- State-machine visibility panel ------------------------------------
+// Renders every preset event (the keys of petSM EVENT_ALIASES = behavior states)
+// and shows which configured action it currently resolves to. Live pet readout
+// is fetched via backend probe (no cross-window Eval dependency on the tray
+// webview boundary) + optional local window.__petState when available.
+var __assistantSMCurPoll = null;
+var __assistantSMAliases = {
+  idle:   ['idle', 'stand', 'default'],
+  drag:   ['drag', 'grab', 'move', 'walk'],
+  think:  ['think', 'loading', 'busy', 'working'],
+  reply:  ['reply', 'happy', 'talk', 'success'],
+  error:  ['error', 'confused', 'sad'],
+  notify: ['notify', 'alert', 'notice'],
+  poke:   ['poke', 'click', 'wave', 'greet']
+};
+
+function assistantResolveAlias(eventKey, actions) {
+  var cands = __assistantSMAliases[eventKey] || [];
+  var names = {};
+  for (var k = 0; k < actions.length; k++) names[(actions[k].name || '').toLowerCase()] = actions[k].name;
+  for (var j = 0; j < cands.length; j++) {
+    var low = cands[j].toLowerCase();
+    if (names[low]) return names[low];
+  }
+  // No alias match → event key is also tried as exact action name by petSM.dispatch.
+  for (var j2 = 0; j2 < actions.length; j2++) if ((actions[j2].name || '').toLowerCase() === eventKey.toLowerCase()) return actions[j2].name;
+  return null;
+}
+
+function assistantStateRows() {
+  var actions = window.__assistantActions || [];
+  var rows = '';
+  var order = ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'];
+  var hasAny = actions.length > 0;
+  for (var oi = 0; oi < order.length; oi++) {
+    var ev = order[oi];
+    var aliases = (__assistantSMAliases[ev] || []).join(', ');
+    var mapped = assistantResolveAlias(ev, actions);
+    var actionLabel = mapped ? assistantEscape(mapped) : '<span class="muted">' + assistantEscape(t('assistantStateUnmapped')) + '</span>';
+    var canTrigger = !!mapped;
+    rows += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,0.08))">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:600;font-size:13px">' + assistantEscape(ev) + ' <span class="muted" style="font-weight:400;font-size:11px">→ ' + actionLabel + '</span></div>' +
+        '<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(t('assistantStateAlias') + ': ' + aliases) + '</div>' +
+      '</div>' +
+      '<button type="button" class="btn btn-ghost" style="padding:3px 10px;flex-shrink:0" ' + (canTrigger ? '' : 'disabled title="' + assistantEscape(t('assistantStateNoActions')) + '"') + ' onclick="assistantTriggerState(\'' + assistantEscape(ev) + '\')">' + assistantEscape(t('assistantStateTrigger')) + '</button>' +
+    '</div>';
+  }
+  if (!rows) rows = '<p class="muted" style="padding:8px">' + assistantEscape(t('assistantStateNoActions')) + '</p>';
+  return rows;
+}
+
+function renderAssistantStateMatrix() {
+  var box = document.getElementById('assistant-state-matrix');
+  if (!box) return;
+  var actions = window.__assistantActions || [];
+  // Live state: probe via backend first (works across separate webview), fall
+  // back to in-page __petState when available (dev / same-context).
+  var curLive = null;
+  try {
+    if (window.__petState && window.__petState.cur) curLive = window.__petState.cur;
+    else if (window.petSM && typeof window.petSM.state === 'function') curLive = window.petSM.state() || null;
+  } catch(eLive) {}
+  var curLabel = curLive ? assistantEscape(curLive) : '<span class="muted">' + assistantEscape(t('assistantStateNoPet')) + '</span>';
+  var defaultName = (function() {
+    for (var k = 0; k < actions.length; k++) {
+      var nm = (actions[k].name||'').toLowerCase();
+      if (nm === 'idle' || nm === 'stand' || nm === 'default') return actions[k].name;
+    }
+    return (actions[0] && actions[0].name) || '—';
+  })();
+  var header = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;margin:-8px -8px 6px;background:var(--option-bg,rgba(255,255,255,0.04));border-radius:var(--radius-sm);font-size:12px">' +
+    '<span data-live-cur>' + (curLive ? assistantEscape(t('assistantStateCurrent', [curLive])) : assistantEscape(t('assistantStateCurrent', ['—'])) ) + '</span>' +
+    '<span class="muted">' + assistantEscape(t('assistantStateDefault', [defaultName])) + '</span>' +
+    '<button type="button" class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="assistantTriggerAllStates()">' + assistantEscape(t('assistantStateTriggerAll')) + '</button>' +
+  '</div>';
+  box.innerHTML = header + assistantStateRows();
+  // Kick a backend poll to fill live state when not in same browsing context.
+  fetch('/api/assistant/pet-state').then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.state) return;
+    var span = box.querySelector('[data-live-cur]');
+    if (span) span.textContent = t('assistantStateCurrent', [j.state]);
+  }).catch(function(){});
+  // Poll live state while the modal is open.
+  clearInterval(__assistantSMCurPoll);
+  var pollEl = box;
+  __assistantSMCurPoll = setInterval(function() {
+    if (!document.getElementById('assistant-state-matrix')) { clearInterval(__assistantSMCurPoll); __assistantSMCurPoll = null; return; }
+    // Prefer backend (authoritative across webviews), fall back to in-page.
+    fetch('/api/assistant/pet-state').then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.state) {
+        var liveSpan = pollEl.querySelector('[data-live-cur]');
+        if (liveSpan) liveSpan.textContent = t('assistantStateCurrent', [j.state]);
+      }
+    }).catch(function(){});
+    try {
+      var cur = null;
+      if (window.__petState && window.__petState.cur) cur = window.__petState.cur;
+      else if (window.petSM && typeof window.petSM.state === 'function') cur = window.petSM.state();
+      if (cur) {
+        var liveSpan2 = pollEl.querySelector('[data-live-cur]');
+        if (liveSpan2) liveSpan2.textContent = t('assistantStateCurrent', [cur]);
+      }
+    } catch(ePoll) {}
+  }, 900);
+}
+function assistantTriggerState(evt) {
+  // Prefer in-page petSM when available (modal opened from same browsing context).
+  try {
+    if (window.petSM && typeof window.petSM.dispatch === 'function') {
+      var ok = window.petSM.dispatch(evt);
+      if (!ok && window.__petTrigger) ok = window.__petTrigger(evt);
+      toast(ok ? (evt + ' → ' + (window.petSM.state() || '?')) : (evt + ': ' + t('assistantStateUnmapped')), ok ? 'success' : 'warning');
+      setTimeout(function(){ try{ renderAssistantStateMatrix(); }catch(e){} }, 180);
+      return;
+    }
+    if (window.__petTrigger) {
+      var ok2 = window.__petTrigger(evt);
+      toast(ok2 ? (evt + ' dispatched') : (evt + ': ' + t('assistantStateUnmapped')), ok2 ? 'success' : 'warning');
+      return;
+    }
+  } catch(eTrig) {}
+  // Fallback: ask backend to trigger via Eval on the pet window (tray webview).
+  fetch('/api/assistant/pet-trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: evt }) })
+    .then(function(r){ return r.json(); }).then(function(j){
+      toast(j.ok ? (evt + ' → ' + (j.state || '?')) : (j.error || t('assistantStateUnmapped')), j.ok ? 'success' : 'warning');
+      setTimeout(function(){ try{ renderAssistantStateMatrix(); }catch(e){} }, 280);
+    }).catch(function(err){ toast(t('failed', [err.message]), 'error'); });
+}
+
+function assistantTriggerAllStates() {
+  var order = ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'];
+  var i = 0;
+  function next(){
+    if (i >= order.length) return;
+    var ev = order[i++];
+    assistantTriggerState(ev);
+    setTimeout(next, 900);
+  }
+  next();
 }
 
 // ----- Action editor modal ----------------------------------------------
-
 var __assistantEditorImg = null;
 var __assistantEditorDrag = null; // { anchor, pointerId }
 

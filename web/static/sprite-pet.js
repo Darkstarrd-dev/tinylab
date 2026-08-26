@@ -278,6 +278,39 @@ var petSM = (function () {
     return play(target);
   }
 
+  // Surface current state + alias map for the settings state-machine panel,
+  // without requiring a new HTTP round-trip to the pet window. The panel
+  // reads these via chromium.Eval("window.__petState ...") or subscribes
+  // to petPost({type:'state'}) -> host /api/assistant/pet-state.
+  window.__petState = { cur: null, aliases: EVENT_ALIASES, names: function () { return order.slice(); } };
+  // Wrap play/register to keep __petState.cur in sync (do not capture stale
+  // closure — rebind after dispatch is defined so __petTrigger can see it).
+  (function wrapPetState() {
+    var _origPlay = play;
+    play = function (name, force) {
+      var ok = _origPlay(name, force);
+      window.__petState.cur = current;
+      try { petPost({ type: 'state', state: current }); } catch (e2) {}
+      return ok;
+    };
+    var _origRegister = register;
+    register = function (name, def) {
+      var ok = _origRegister(name, def);
+      window.__petState.cur = current;
+      try { petPost({ type: 'state', state: current }); } catch (e2) {}
+      return ok;
+    };
+  })();
+
+  // Allow the settings panel to trigger any configured action remotely
+  // (visual smoke test, no backend involvement): Eval "petSM.dispatch('poke')".
+  // Expose a tiny trigger helper that also handles direct action names.
+  window.__petTrigger = function (evt) {
+    if (!evt) return false;
+    if (dispatch(evt)) return true;
+    if (states[evt]) return play(evt);
+    return false;
+  };
   function register(name, def) {
     if (!name || states[name]) return false;
     var cols = Math.max(1, def.cols || 1), rows = Math.max(1, def.rows || 1);
@@ -290,7 +323,6 @@ var petSM = (function () {
       frameW: (def.frameW || (def.img ? def.img.naturalWidth : 0)) / cols,
       frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows
     };
-    order.push(name);
     if (!current) { play(defaultName(), true); startLoop(); }
     return true;
   }

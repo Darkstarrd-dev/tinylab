@@ -5,10 +5,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -43,6 +45,7 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	// settings toggle off closes it, toggle on / tray click brings it back.
 	petstate.SetCloseAll(terminateAllPetWindows)
 	petstate.SetOpen(openPetIfNeeded)
+	registerPetTriggerHook(hctx)
 
 	// Auto-release the pet at startup when the assistant is enabled.
 	go openPetAfterReady(hctx)
@@ -73,14 +76,36 @@ func runPetClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
 
 // openPetAfterReady waits for the HTTP server (the pet page loads from it),
 // then opens the pet unless the feature is off or it is already open.
+// Old logic: sleep 10s blindly then try once → if the server wasn't ready in
+// that window the pet never appeared until the user toggled the switch (bug 1).
+// New: probe TCP readiness and break as soon as the listener accepts.
 func openPetAfterReady(hctx *app.HostContext) {
-	for i := 0; i < 100; i++ {
+	for range 300 {
 		if petWindowsOpen() || !petstate.Enabled() {
 			return
 		}
+		if hctx != nil && hctx.ConsoleURL != "" && probeConsoleReady(hctx.ConsoleURL, 150*time.Millisecond) {
+			break
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if petWindowsOpen() || !petstate.Enabled() {
+		return
+	}
 	openPetIfNeeded()
+}
+
+func probeConsoleReady(consoleURL string, timeout time.Duration) bool {
+	u, err := url.Parse(consoleURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	c, err := net.DialTimeout("tcp", u.Host, timeout)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 // openPetIfNeeded opens a pet window unless one is already up or the feature
@@ -588,8 +613,10 @@ var (
 	// (systray thread) both touch it.
 	petMu      sync.Mutex
 	petWindows = map[uintptr]*petWindow{}
+	petCreateMu sync.Mutex
+	petEnvOnce  sync.Once
+	petLastState atomic.Value // string — latest petSM state pushed via postMessage
 )
-
 type petWindow struct {
 	hctx     *app.HostContext
 	hwnd     uintptr
@@ -662,6 +689,7 @@ func petOnMessage(pw *petWindow, msg string) {
 		Rects [][]int32 `json:"rects,omitempty"`
 		Vp    []int32   `json:"vp,omitempty"`
 		Scr   []int32   `json:"scr,omitempty"`
+		State string    `json:"state,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(msg), &m); err != nil {
 		return
@@ -670,6 +698,10 @@ func petOnMessage(pw *petWindow, msg string) {
 		pw.hctx.Logger.Info("pet msg: %s", m.Type)
 	}
 	switch m.Type {
+	case "state":
+		if m.State != "" {
+			petLastState.Store(m.State)
+		}
 	case "dragstart":
 		pw.dragging = true
 		pw.dragCur.X, pw.dragCur.Y = petCursorPos()
@@ -792,7 +824,9 @@ func openPetWindow(hctx *app.HostContext) {
 	// acquiring it would deadlock the pet until the main window closes. The
 	// pet path does not use webview2.New() (the mutex's actual guard target).
 
-	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000")
+	petEnvOnce.Do(func() { os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000") })
+	petCreateMu.Lock()
+	defer petCreateMu.Unlock()
 
 	// Register the pet window class once: BLACK_BRUSH class brush zeroes the
 	// redirection-surface alpha (prerequisite 1 of the transparency recipe).
@@ -917,4 +951,28 @@ type tagMONITORINFO struct {
 	rcMonitor windows.Rect
 	rcWork    windows.Rect
 	dwFlags   uint32
+}
+
+// registerPetTriggerHook wires settings state-machine panel triggers
+func registerPetTriggerHook(hctx *app.HostContext) { tryRegisterPetHook() }
+func tryRegisterPetHook() {
+	if setter := petHookSetter; setter != nil {
+		setter(func(evt string) (string, bool) { return petEvalTrigger(evt) }, func() string { return petEvalState() })
+	}
+}
+var petHookSetter func(trigger func(string)(string,bool), state func()string)
+func petEvalTrigger(evt string)(string,bool){
+	petMu.Lock()
+	var target *edge.Chromium
+	for _,pw:=range petWindows{ if pw!=nil && pw.chromium!=nil { target=pw.chromium; break } }
+	petMu.Unlock()
+	if target==nil{ return "",false }
+	esc:=""
+	for _,ch:=range evt{ if ch=='\''||ch=='\\'{esc+="\\"}; esc+=string(ch) }
+	target.Eval("try{window.__petTrigger?window.__petTrigger('"+esc+"'):petSM&&petSM.dispatch('"+esc+"')}catch(e){}")
+	return evt,true
+}
+func petEvalState()string{
+	if v:=petLastState.Load(); v!=nil { if s,ok:=v.(string); ok { return s } }
+	return ""
 }
