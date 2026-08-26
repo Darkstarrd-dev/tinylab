@@ -605,8 +605,9 @@ type petWindow struct {
 }
 
 const (
-	// 宠物区基准 300；高恒 300。气泡与输入行均锚定在宠物区内精灵侧面
-	// （旧 260px 交流列已移除，见 sprite-pet.html 布局注释）
+	// 初始/兜底窗口尺寸（物理 px）。实际大小由页面驱动：sprite-pet.js
+	// postPetSize 按当前 action 帧宽高比发 {type:'size', w, h, dpr}（CSS px），
+	// 宿主乘 dpr 转物理像素 —— 见 petOnMessage "size" 分支。
 	petAreaW = 300
 	petBaseH = 300
 	wmClose  = 0x0010
@@ -655,6 +656,9 @@ func petOnMessage(pw *petWindow, msg string) {
 	var m struct {
 		Type  string    `json:"type"`
 		F     float64   `json:"f,omitempty"`
+		W     float64   `json:"w,omitempty"`
+		H     float64   `json:"h,omitempty"`
+		Dpr   float64   `json:"dpr,omitempty"`
 		Rects [][]int32 `json:"rects,omitempty"`
 		Vp    []int32   `json:"vp,omitempty"`
 		Scr   []int32   `json:"scr,omitempty"`
@@ -707,6 +711,29 @@ func petOnMessage(pw *petWindow, msg string) {
 		}
 		pw.hitRects = rects
 		applyPetRegion(pw)
+	case "size":
+		// Page-driven window size (sprite-pet.js postPetSize): w/h are CSS px,
+		// dpr = window.devicePixelRatio. Physical = css*dpr keeps the CSS
+		// layout exact on any DPI; the old f-multiplied sizing was wrong on
+		// DPI-scaled monitors (viewport = physical/dpi, not physical/f).
+		dpr := m.Dpr
+		if dpr < 0.5 || dpr > 5 {
+			dpr = 1
+		}
+		w, h := int32(m.W*dpr), int32(m.H*dpr)
+		if w < 40 {
+			w = 40
+		} else if w > 2000 {
+			w = 2000
+		}
+		if h < 40 {
+			h = 40
+		} else if h > 2000 {
+			h = 2000
+		}
+		procSetWindowPos.Call(pw.hwnd, 0, 0, 0, uintptr(w), uintptr(h),
+			swpNoMove|swpNoZOrder|swpNoActivate)
+		pw.chromium.Resize()
 	case "close":
 		procDestroyWindow.Call(pw.hwnd)
 	}
@@ -733,14 +760,11 @@ func applyPetRegion(pw *petWindow) {
 	procDeleteObject.Call(union)
 }
 
-// applyPetScale resizes the whole window to the pet AREA (300*f wide, 300
-// high). sprite-pet.html must NOT use vw/vh units (they ignore zoom and crop).
+// applyPetScale delegates scaling to the page: setPetScale recomputes the CSS
+// layout (avatar box from the active action's frame aspect) and posts a "size"
+// message; the host no longer derives physical px from f.
 func applyPetScale(pw *petWindow, f float64) {
 	pw.scale = f
-	w, h := int32(float64(petAreaW)*f), int32(petBaseH)
-	procSetWindowPos.Call(pw.hwnd, 0, 0, 0, uintptr(w), uintptr(h),
-		swpNoMove|swpNoZOrder|swpNoActivate)
-	pw.chromium.Resize()
 	pw.chromium.Eval(fmt.Sprintf("setPetScale(%v)", f))
 }
 

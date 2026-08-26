@@ -4,6 +4,9 @@
 > 位置：`C:/opencode/webview-pet-test/`（独立于 tinyrouter 项目的最小验证工程）
 > 目标：脱离项目验证「WebView2 + 透明 PNG 桌宠」的完整交互配方，稳定后移植进
 > `host_webview_windows.go` 的 `openPetWindow`。
+> **注意**：本文只覆盖窗口宿主配方（透明/穿透/DPI/死锁）。Assistant 功能层
+> （actions 配置、petSM 状态机、意图分发、关闭联动）的迭代基线见
+> [`assistant-progress.md`](assistant-progress.md)。
 
 ## 1. 已验证成立的核心配方（透明）
 
@@ -51,18 +54,21 @@ webview-pet-test/
 | 功能 | 状态 | 实现 |
 |---|---|---|
 | 拖拽移动 | ✅ 已验证可用 | JS 左键 mousedown/mousemove → postMessage → 宿主 `GetCursorPos` 差值 + `SetWindowPos`（纯物理像素，DPI 安全；JS 侧 ≥2px 节流）。用户实测拖动成功。 |
-| 缩放比 | ✅ 已验证 | 菜单项 50%–150% → 宿主 `applyPetScale`：窗口宽 = 300×f（整窗即宠物区），高恒 300；JS `setPetScale` 同步宠物区宽与精灵框（70×f，按帧宽高比适配），气泡/输入框保持物理尺寸。 |
+| 缩放比 | ✅ 页面驱动 | 菜单项 50%–150% → 宿主 `applyPetScale` 仅 Eval `setPetScale(f)`；页面重算 CSS 布局后 postMessage `size`（CSS px + devicePixelRatio），宿主乘 dpr 转物理像素。旧 `300×f` 物理换算在高 DPI 下偏小（viewport=物理/dpi），已废弃。 |
 | 右键菜单 | ⚠️ 调试中 | JS mousedown(button=2) → postMessage → 宿主。消息链路已通（日志确认 `webmsg: menu`），但 `TrackPopupMenu` 在 COM 回调上下文内立即返回 0（菜单不显示）。**已改为**：回调内仅 `PostMessageW(WM_APP+1)`，在主消息循环 wndProc 顶层弹菜单——此修复刚编译，待验证。另已加 `SetForegroundWindow` 前置调用。默认网页菜单已用 `PutAreDefaultContextMenusEnabled(false)` 禁用。 |
 | 精灵气泡 | ✅ 布局定稿 | 单条气泡，JS `positionBubble()` 锚定精灵侧面（8px 间隙、垂直居中、区域内钳制），内容原位更新（非堆叠流）。 |
+| Action 状态机 | ✅ 代码就绪 | `petSM`（sprite-pet.js）：状态 = 配置的 assistant actions；`dispatch(event)` 按别名表解析（idle/drag/think/reply/error/notify/poke），默认态（idle 别名或首个）循环播放，其余一次性播完自动回默认态。接入：拖拽→drag/idle、意图分发→think→reply/error、SSE notify→notify、双击→poke。窗口尺寸随当前 action 帧宽高比（`postPetSize`）。 |
 | 用户输入 | ✅ 布局定稿 | 输入行位于气泡内部（双击精灵显示，Enter 发送/Esc 隐藏）——与回复气泡共享同一锚定位置。 |
 | 气泡换边 | ✅ 代码就绪 | `updateSide()`：宠物在屏幕右半 → 气泡在精灵左侧（`body.chat-left` 切 `#pet-area` 的 justify-content）；dragend 时宿主 Eval 触发。 |
 | 自适应气泡 | ✅ | 无 max-height/滚动条，`width:fit-content` 自适应。 |
 | 右键菜单 | ✅ 已验证（HTML 方案） | Win32 `TrackPopupMenu` 路线废弃：WebView2 子窗口（Chromium）持有鼠标捕获，与菜单捕获冲突，即使窗口前台仍立即返回 0（日志多次实证 `fg_owned=true, track cmd=0`）。最终方案：HTML 自定义菜单（页面内绝对定位面板），菜单项 postMessage（`close`/`scale`）给宿主执行原生动作。用户实测生效。 |
-窗口布局：整窗即宠物区，默认 `300×300`（无独立交流列；气泡与输入行锚定在精灵侧面）。
-缩放作用于整窗：窗口宽 = 300×f，高恒 300。
+窗口布局：整窗即宠物区，初始 `300×300` 物理像素兜底；实际大小页面驱动——`postPetSize()` 按
+当前 action 帧宽高比计算 CSS 尺寸（精灵框 ≤300×f，宽 = 精灵框 + 224 气泡列），发
+`{type:'size', w, h, dpr}`，宿主 `petOnMessage` "size" 分支乘 dpr 得物理像素。
+缩放纯 CSS：`setPetScale(f)` 重算布局后重新 post size；宿主不再从 f 推物理尺寸。
 注意：不要用 `body zoom`（曾试过，`100vw/vh` 视口单位不随 zoom 缩放导致裁剪）。
-注意：精灵图非固定尺寸——canvas 背衬 = 单帧原生尺寸，显示尺寸按帧宽高比适配 70×f 框
-（`petFrameAspect` + `applyPetSpriteSize`），非方形精灵不拉伸不裁剪。
+注意：精灵图非固定尺寸——canvas 背衬 = 单帧原生尺寸，显示按帧宽高比 contain 进 300×f 框
+（`petAvatarBox`/`applyPetSpriteSize`），非方形精灵不拉伸不裁剪；无 action 时回退 70×f CSS 脸。
 
 ## 4. 已知问题 / 待办
 
@@ -119,8 +125,9 @@ Norma 自身的应用层实现可直接借鉴：
 - `host_webview_windows.go::openPetWindow` 整体重写：
   - 自建窗口类 `TinyRouterPetWnd`（BLACK_BRUSH 类画刷）+ `DwmEnableBlurBehindWindow` 空区域
   - `edge.Chromium.Embed` 直嵌自建 HWND（`webview2.New` 的自建窗口类不透明，不可用）
-  - 交互 postMessage 协议（`petOnMessage`）：拖拽（宿主光标差值）、close、scale
-  - 布局：整窗即宠物区 300*f、高恒 300（2026-08-26 移除 260px 交流列）
+  - 交互 postMessage 协议（`petOnMessage`）：拖拽（宿主光标差值）、close、scale、
+    size（页面驱动窗口尺寸：CSS px × dpr → 物理像素，2026-08-26）、hit
+  - 布局：整窗即宠物区，初始 300×300 物理兜底，实际尺寸由页面按 action 帧宽高比 post（2026-08-26 移除 260px 交流列）
   - 关闭联动：菜单「关闭桌面宠物」先 PATCH `/api/settings {assistant:{enabled:false}}`
     （复用 `applyAssistantUpdates` 持久化 + `petstate.CloseAll`），再 postMessage `close`；
     Settings 页 Assistant 开关随下次 `renderEndpoint` 重新拉取自动同步为 OFF
@@ -128,7 +135,9 @@ Norma 自身的应用层实现可直接借鉴：
   HTML 右键菜单（关闭 + 缩放），`html/body` 弃用 vw/vh
 - `web/static/sprite-pet.js`：Bind 宿主对象迁移到 postMessage；`setPetScale`/`updateSide`
   由宿主 Eval 触发；`positionBubble` 按 avatar rect 锚定气泡；hit 矩形 8px 外扩
-  （盖住 bounce 动画位移与阴影，防 SetWindowRgn 裁边）；换边用 `screen.availLeft/availWidth`
+  （盖住 bounce 动画位移与阴影，防 SetWindowRgn 裁边）；换边用 `screen.availLeft/availWidth`；
+  `petSM` action 状态机（别名表 dispatch、一次性态自动回默认、rAF 渲染循环、
+  `register` 即测试缝）；`postPetSize`/`petAvatarBox` 按帧宽高比驱动窗口尺寸
 
 ### 移植期踩坑（重要）
 

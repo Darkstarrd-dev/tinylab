@@ -9,10 +9,11 @@
 //     SetWindowPos in host_webview_windows.go::openPetWindow).
 //   - Speech bubble: toggle/set message, send user intent to
 //     POST /api/assistant/dispatch and show the dispatched tool name.
-//   - Spritesheet renderer: plays the configured Assistant action (prefers an
-//     action named "idle", otherwise the first one with a spritesheet). Frames
-//     are the row-major cells [frameStart..frameEnd] of the cols×rows grid,
-//     stepped at the action's fps; without any action the CSS face remains.
+//   - Action state machine: states = configured Assistant actions; events
+//     (drag/think/reply/notify/poke) switch animations via canonical alias
+//     lists. Loop states play forever; one-shots return to the default.
+//     Window size follows the active action's frame aspect (posted to the
+//     host as CSS px + devicePixelRatio; host never guesses DPI).
 //   - Events SSE subscription: assistant notifications pop the bubble.
 'use strict';
 
@@ -50,7 +51,7 @@ window.petPostHit = petPostHit;
 
 // RO 首次回调可能早于布局稳定（捕获到过期矩形且尺寸不变时不再触发），
 // 因此叠加 load/双 rAF 与 300ms 周期重报兜底
-window.addEventListener('DOMContentLoaded', function () { if (window.updateSide) window.updateSide(); });
+window.addEventListener('DOMContentLoaded', function () { if (window.updateSide) window.updateSide(); postPetSize(); });
 window.addEventListener('load', petPostHit);
 requestAnimationFrame(function () { requestAnimationFrame(petPostHit); });
 setInterval(petPostHit, 300);
@@ -75,6 +76,7 @@ avatar.addEventListener('mousedown', function(e) {
   isDragging = true;
   lastX = e.screenX;
   lastY = e.screenY;
+  if (window.petSM) petSM.dispatch('drag');
   petPost({ type: 'dragstart' });
 });
 
@@ -89,6 +91,7 @@ window.addEventListener('mousemove', function(e) {
 window.addEventListener('mouseup', function(e) {
   if (isDragging && e.button === 0) {
     isDragging = false;
+    if (window.petSM) petSM.dispatch('idle');
     petPost({ type: 'dragend' });
   }
 });
@@ -142,6 +145,7 @@ window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 avatar.addEventListener('dblclick', function (e) {
   if (e.target.closest('#pet-bubble')) return;
+  if (window.petSM) petSM.dispatch('poke');
   var row = document.querySelector('.pet-input-row');
   if (row && row.classList.contains('show')) { hidePetInput(); } else { showPetInput(); }
 });
@@ -165,31 +169,174 @@ if (miClose) miClose.addEventListener('click', function () {
   petPost({ type: 'close' });
 });
 
-// ---- scale: the whole window is the pet area (300*f); bubble/input keep
-// their physical size. Window width = 300*f (host applyPetScale).
+// ---- scale: purely visual, applied in CSS. The page owns its CSS layout and
+// posts the desired window size (CSS px + devicePixelRatio); the host only
+// converts to physical px. Window width follows the active action's frame
+// aspect; bubble/input keep their physical size.
 window.setPetScale = function (f) {
   petScale = f;
-  var area = document.getElementById('pet-area');
-  if (area) area.style.width = Math.round(300 * f) + 'px';
   applyPetSpriteSize();
+  postPetSize();
   positionBubble();
   petPostHit();
 };
 
-// Sprite frame aspect (w/h) once a spritesheet loads; 0 = CSS face fallback
-// (square 70px avatar). The avatar box follows the frame's aspect ratio so
-// non-square sprites are never stretched or clipped.
-var petFrameAspect = 0;
-function applyPetSpriteSize() {
-  var box = 70 * petScale;
-  var w = box, h = box;
-  if (petFrameAspect > 0) {
-    if (petFrameAspect >= 1) { h = box / petFrameAspect; } else { w = box * petFrameAspect; }
+// ---- Action state machine ----------------------------------------------
+// States = configured assistant actions (name + spritesheet + frame range +
+// fps). dispatch(event) resolves an action via canonical alias lists (first
+// configured match wins), else treats the event as an exact action name.
+// The default state (idle alias, else first registered) loops forever; every
+// other state is one-shot and returns to the default when its frame range
+// finishes. register() doubles as the test seam (no img needed).
+var petSM = (function () {
+  var states = {};   // name -> {img, cols, rows, start, end, fps, frameW, frameH}
+  var order = [];    // configured registration order (fallback chain)
+  var current = null;
+  var frameIdx = 0, acc = 0, lastTs = 0, started = false;
+
+  // Canonical event -> candidate action names.
+  var EVENT_ALIASES = {
+    idle:   ['idle', 'stand', 'default'],
+    drag:   ['drag', 'grab', 'move', 'walk'],
+    think:  ['think', 'loading', 'busy', 'working'],
+    reply:  ['reply', 'happy', 'talk', 'success'],
+    error:  ['error', 'confused', 'sad'],
+    notify: ['notify', 'alert', 'notice'],
+    poke:   ['poke', 'click', 'wave', 'greet']
+  };
+
+  function resolve(names) {
+    for (var i = 0; i < names.length; i++) if (states[names[i]]) return names[i];
+    return null;
   }
-  avatar.style.width = Math.round(w) + 'px';
-  avatar.style.height = Math.round(h) + 'px';
+  function defaultName() { return resolve(EVENT_ALIASES.idle) || order[0] || null; }
+
+  function render() {
+    var st = states[current];
+    var canvas = document.getElementById('pet-sprite');
+    if (!st || !st.img || !canvas) return;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    var frames = st.end - st.start + 1;
+    var f = st.start + (frameIdx % frames);
+    var sx = (f % st.cols) * st.frameW;
+    var sy = Math.floor(f / st.cols) * st.frameH;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(st.img, sx, sy, st.frameW, st.frameH, 0, 0, canvas.width, canvas.height);
+  }
+
+  var frameIdx = 0, acc = 0, lastTs = null, started = false;
+
+  function play(name, force) {
+    if (current === name && !force) return true;
+    current = name; frameIdx = 0; acc = 0; lastTs = null;
+    var st = states[name];
+    var canvas = document.getElementById('pet-sprite');
+    if (canvas && st.img) {
+      canvas.width = Math.max(1, Math.round(st.frameW));
+      canvas.height = Math.max(1, Math.round(st.frameH));
+      canvas.style.display = 'block';
+    }
+    var face = document.querySelector('.pet-face');
+    if (face && st.img) face.style.display = 'none';
+    applyPetSpriteSize();
+    render();
+    postPetSize();
+    petPostHit();
+    return true;
+  }
+
+  function tick(ts) {
+    if (lastTs == null) { lastTs = ts; return; }
+    var dt = ts - lastTs; lastTs = ts;
+    var st = states[current];
+    if (!st) return;
+    acc += dt;
+    var step = 1000 / Math.max(1, st.fps);
+    while (acc >= step) {
+      acc -= step;
+      frameIdx++;
+      if (frameIdx >= st.end - st.start + 1) {
+        if (current === defaultName()) { frameIdx = 0; }
+        else { play(returnTarget()); return; }
+      }
+    }
+    render();
+  }
+  function returnTarget() { return defaultName() || current; }
+
+  function startLoop() {
+    if (started) return;
+    started = true;
+    var step = function (ts) { tick(ts); requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  function dispatch(evt) {
+    var target = EVENT_ALIASES[evt] ? resolve(EVENT_ALIASES[evt]) : (states[evt] ? evt : null);
+    if (!target) return false;
+    return play(target);
+  }
+
+  function register(name, def) {
+    if (!name || states[name]) return false;
+    var cols = Math.max(1, def.cols || 1), rows = Math.max(1, def.rows || 1);
+    var start = Math.max(0, def.start || 0);
+    var end = Math.max(start, def.end === undefined ? start : def.end);
+    if (end > cols * rows - 1) end = cols * rows - 1;
+    states[name] = {
+      img: def.img || null, cols: cols, rows: rows, start: start, end: end,
+      fps: Math.max(1, def.fps || 8),
+      frameW: (def.frameW || (def.img ? def.img.naturalWidth : 0)) / cols,
+      frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows
+    };
+    order.push(name);
+    if (!current) { play(defaultName(), true); startLoop(); }
+    return true;
+  }
+
+  window.petSM = {
+    dispatch: dispatch,
+    play: function (n) { return play(n, false); },
+    register: register,
+    state: function () { return current; },
+    defaultState: defaultName,
+    aspect: function () { var st = states[current]; return st && st.frameH > 0 ? st.frameW / st.frameH : 0; },
+    frame: function () { var st = states[current]; return st ? { w: st.frameW, h: st.frameH } : null; },
+    _tick: tick
+  };
+  return window.petSM;
+})();
+
+// ---- dynamic window size ------------------------------------------------
+// The page computes its desired CSS layout from the active action's frame
+// aspect and posts {type:'size', w, h, dpr}; the host converts to physical
+// px with the reported devicePixelRatio (never guesses DPI from f).
+function petAvatarBox() {
+  var maxBox = 300 * petScale;
+  var faceBox = 70 * petScale;
+  var aspect = petSM.aspect();
+  if (!aspect) return { w: faceBox, h: faceBox };
+  if (aspect >= 1) return { w: maxBox, h: maxBox / aspect };
+  return { w: maxBox * aspect, h: maxBox };
+}
+function petDesiredSize() {
+  var b = petAvatarBox();
+  // 224 = bubble 200 + gap 8 + area padding 16; 80 = minimum bubble height.
+  return { w: Math.ceil(b.w + 224), h: Math.ceil(Math.max(b.h, 80) + 16) };
+}
+function postPetSize() {
+  var d = petDesiredSize();
+  var area = document.getElementById('pet-area');
+  if (area) area.style.width = d.w + 'px';
+  petPost({ type: 'size', w: d.w, h: d.h, dpr: window.devicePixelRatio || 1 });
+}
+function applyPetSpriteSize() {
+  var b = petAvatarBox();
+  avatar.style.width = Math.round(b.w) + 'px';
+  avatar.style.height = Math.round(b.h) + 'px';
   var canvas = document.getElementById('pet-sprite');
-  if (canvas) { canvas.style.width = Math.round(w) + 'px'; canvas.style.height = Math.round(h) + 'px'; }
+  if (canvas) { canvas.style.width = Math.round(b.w) + 'px'; canvas.style.height = Math.round(b.h) + 'px'; }
 }
 
 // ---- side: the bubble sits on the side of the sprite that faces the screen
@@ -271,6 +418,7 @@ function sendPetIntent() {
   hidePetInput();
 
   setBubbleMsg('正在分析意图...');
+  if (window.petSM) petSM.dispatch('think');
   fetch('/api/assistant/dispatch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -282,67 +430,36 @@ function sendPetIntent() {
     if (tools.length > 0) {
       var t = tools[0];
       setBubbleMsg('已调度: ' + t.tool);
+      if (window.petSM) petSM.dispatch('reply');
     } else {
       setBubbleMsg('未能识别意图');
+      if (window.petSM) petSM.dispatch('error');
     }
   })
   .catch(function(err) {
     setBubbleMsg('请求失败: ' + err.message);
+    if (window.petSM) petSM.dispatch('error');
   });
 }
 
-(function initPetSprite() {
-  var canvas = document.getElementById('pet-sprite');
-  if (!canvas) return;
-  fetch('/api/settings').then(function(r) { return r.json(); }).then(function(s) {
+// Load configured assistant actions as state-machine states. Spritesheets are
+// served by /api/assistant/sheet-image/{name} (no filesystem access needed).
+(function loadPetActions() {
+  fetch('/api/settings').then(function (r) { return r.json(); }).then(function (s) {
     var actions = ((s && s.assistant) || {}).actions || [];
-    var act = null;
-    for (var i = 0; i < actions.length; i++) {
-      if (actions[i] && actions[i].spritesheetPath && String(actions[i].name).toLowerCase() === 'idle') { act = actions[i]; break; }
-    }
-    if (!act) {
-      for (var j = 0; j < actions.length; j++) {
-        if (actions[j] && actions[j].spritesheetPath) { act = actions[j]; break; }
-      }
-    }
-    if (!act) return;
-    var img = new Image();
-    img.onload = function() {
-      var ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      var cols = Math.max(1, act.cols || 1);
-      var rows = Math.max(1, act.rows || 1);
-      var frameW = img.naturalWidth / cols;
-      var frameH = img.naturalHeight / rows;
-      var start = Math.max(0, act.frameStart || 0);
-      var end = Math.max(start, (act.frameEnd === undefined ? start : act.frameEnd));
-      var total = cols * rows;
-      if (end > total - 1) end = total - 1;
-      var frames = end - start + 1;
-      if (frames < 1 || frameW < 1 || frameH < 1) return;
-      var idx = 0;
-      var fps = Math.max(1, act.fps || 8);
-      // Canvas backing store = one frame at native size (1:1 drawImage);
-      // display size = frame aspect fitted into the 70*f box.
-      canvas.width = Math.max(1, Math.round(frameW));
-      canvas.height = Math.max(1, Math.round(frameH));
-      petFrameAspect = canvas.width / canvas.height;
-      applyPetSpriteSize();
-      canvas.style.display = 'block';
-      var face = document.querySelector('.pet-face');
-      if (face) face.style.display = 'none';
-      setInterval(function() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        var f = start + (idx % frames);
-        var sx = (f % cols) * frameW;
-        var sy = Math.floor(f / cols) * frameH;
-        ctx.drawImage(img, sx, sy, frameW, frameH, 0, 0, canvas.width, canvas.height);
-        idx++;
-      }, Math.round(1000 / fps));
-    };
-    img.onerror = function() { /* keep CSS face fallback */ };
-    img.src = '/api/assistant/sheet-image/' + encodeURIComponent(act.name || '');
-  }).catch(function() { /* no settings / fetch fail → CSS face */ });
+    actions.forEach(function (a) {
+      if (!a || !a.spritesheetPath || !a.name) return;
+      var img = new Image();
+      img.onload = function () {
+        petSM.register(a.name, {
+          img: img, cols: a.cols, rows: a.rows,
+          start: a.frameStart, end: a.frameEnd, fps: a.fps
+        });
+      };
+      img.onerror = function () { /* unreachable sheet → keep CSS face */ };
+      img.src = '/api/assistant/sheet-image/' + encodeURIComponent(a.name);
+    });
+  }).catch(function () { /* no settings → CSS face fallback */ });
 })();
 
 // Subscribe to Events SSE
@@ -352,6 +469,7 @@ try {
     try {
       var data = JSON.parse(e.data);
       setBubbleMsg(data.message || data.title || '收到通知');
+      if (window.petSM) petSM.dispatch('notify');
     } catch(err) {}
   });
 } catch(e) {}

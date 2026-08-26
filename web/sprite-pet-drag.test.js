@@ -44,7 +44,7 @@ check('sprite-pet.html loads /sprite-pet.js externally (no inline script)', () =
 
 check('sprite-pet.js defines the drag + renderer entry points', () => {
   const src = fs.readFileSync(JS_PATH, 'utf8');
-  for (const fn of ['dragstart', 'dragmove', 'dragend', 'initPetSprite', 'sendPetIntent', 'toggleBubble', '/api/assistant/events', 'setPetScale', 'updateSide']) {
+  for (const fn of ['dragstart', 'dragmove', 'dragend', 'loadPetActions', 'sendPetIntent', 'toggleBubble', '/api/assistant/events', '/api/assistant/sheet-image/', 'setPetScale', 'updateSide', 'petSM']) {
     assert.ok(src.includes(fn), 'missing expected symbol: ' + fn);
   }
 });
@@ -91,7 +91,9 @@ const window = {
   EventSource: class { constructor() {} addEventListener() {} close() {} },
   fetch: () => Promise.reject(new Error('no fetch in test')),
   setTimeout() {}, setInterval() {}, clearInterval() {},
-  requestAnimationFrame(fn) { if (fn) fn(); },
+  // No-op (NOT synchronous invoke): the SM render loop self-schedules via
+  // rAF; invoking synchronously would recurse forever in the VM.
+  requestAnimationFrame() {},
 };
 window.document = document; window.window = window;
 
@@ -148,14 +150,18 @@ check('mousedown on bubble does NOT start a drag', () => {
 
 console.log('sprite pet layout regressions:');
 
-check('setPetScale resizes area + avatar without throwing (regression: undefined pet global)', () => {
+check('setPetScale resizes avatar + area and posts size (regression: undefined pet global)', () => {
   // setPetScale used to reference an undefined `pet` global and threw a
   // ReferenceError, so the page never re-laid-out when the host resized the
   // window → the sprite got clipped by SetWindowRgn.
+  const before = posted.length;
   window.setPetScale(1.25);
-  assert.strictEqual(els['pet-area'].style.width, '375px', 'area = 300*1.25');
   assert.strictEqual(els['pet-avatar'].style.width, '88px', 'avatar = 70*1.25 rounded');
   assert.strictEqual(els['pet-avatar'].style.height, '88px');
+  assert.strictEqual(els['pet-area'].style.width, '312px', 'area = avatar 88 + bubble col 224');
+  const size = posted.slice(before).find(m => m.type === 'size');
+  assert.deepStrictEqual(size, { type: 'size', w: 312, h: 104, dpr: 1 },
+    'window size posted as CSS px + dpr (host converts to physical)');
 });
 
 check('petPostHit pads rects by 8px (bounce/shadow must not be region-clipped)', () => {
@@ -166,17 +172,28 @@ check('petPostHit pads rects by 8px (bounce/shadow must not be region-clipped)',
   assert.deepStrictEqual(avatarRect, [2, 2, 86, 86], 'avatar rect padded 8px on every side');
 });
 
-check('applyPetSpriteSize keeps non-square frame aspect', () => {
-  // Drive the sizing path directly after simulating a loaded 140x70 frame
-  // (aspect 2) via the internal applyPetSpriteSize.
-  const src = fs.readFileSync(JS_PATH, 'utf8');
-  assert.ok(src.includes('petFrameAspect'), 'aspect tracking variable exists');
-  // Reset to 100%, then simulate a loaded 140x70 frame (aspect 2) through the
-  // internal applyPetSpriteSize and verify the avatar box follows the frame.
+check('action SM: window size follows frame aspect (140x70 frame at 100%)', () => {
   window.setPetScale(1.0);
-  vm.runInContext('petFrameAspect = 2; applyPetSpriteSize();', sandbox);
-  assert.strictEqual(els['pet-avatar'].style.width, '70px', 'wide frame: full box width');
-  assert.strictEqual(els['pet-avatar'].style.height, '35px', 'wide frame: half box height');
+  const before = posted.length;
+  assert.ok(window.petSM.register('wide', { cols: 1, frameW: 140, frameH: 70, fps: 8 }),
+    'first registered state becomes current');
+  assert.strictEqual(window.petSM.state(), 'wide');
+  assert.strictEqual(els['pet-avatar'].style.width, '300px', 'wide frame: full 300px box width');
+  assert.strictEqual(els['pet-avatar'].style.height, '150px', 'wide frame: half box height');
+  assert.strictEqual(els['pet-area'].style.width, '524px', 'area = avatar 300 + bubble col 224');
+  const size = posted.slice(before).find(m => m.type === 'size');
+  assert.deepStrictEqual(size, { type: 'size', w: 524, h: 166, dpr: 1 });
+});
+
+check('action SM: one-shot state returns to default after its frame range', () => {
+  assert.ok(window.petSM.register('idle', { cols: 2, start: 0, end: 1, fps: 10 }));
+  assert.ok(window.petSM.register('reply', { cols: 1, start: 0, end: 0, fps: 10 }));
+  assert.ok(window.petSM.dispatch('reply'), 'reply resolves a configured action');
+  assert.strictEqual(window.petSM.state(), 'reply');
+  assert.ok(!window.petSM.dispatch('drag'), 'unconfigured event is a no-op');
+  window.petSM._tick(0);      // prime the clock
+  window.petSM._tick(150);    // 150ms ≥ one 100ms frame → one-shot (1 frame) finishes
+  assert.strictEqual(window.petSM.state(), 'idle', 'auto-return to default state');
 });
 
 if (failures) { console.error('\n' + failures + ' check(s) FAILED'); process.exit(1); }
