@@ -16,6 +16,10 @@ import (
 
 // defaultCleanSystemPrompt is the built-in cleanup prompt returned by
 // /prompt-default, transplanted from novelhelper (v2 M1_CLEAN_SYSTEM_PROMPT).
+// 在原 v2 prompt 基础之上追加「输出格式（多章分段）」要求：对应 novelhelper
+// 批处理协议（docs/M1_text_cleaning.md §3.3：系统提示词附严格指令——必须返回
+// N 段、保留 ===CHAPTER_ID:=== 标记、不得合并/遗漏）与 proxy_call.go 中
+// batchInstruction 的既有分段协议，确保模型按章节标记分段输出。
 const defaultCleanSystemPrompt = `你是一位专业的小说文本编辑。你拿到的章节来自网络流传的 TXT 文件，发布渠道在正文中植入了大量推广 QQ 群的广告杂讯。你的任务是清除杂讯、尽可能恢复作者原文。
 
 ## 先理解杂讯的原理（这决定你能否识别没见过的变种）
@@ -44,6 +48,12 @@ const defaultCleanSystemPrompt = `你是一位专业的小说文本编辑。你�
 - 成片的"乱码状文字"若删掉后句子出现缺口（说明它占位着原文，是编码损坏），原样保留，不要尝试修复或删除。
 - 作者本人的话：ps 求票、请假说明、求鲜花等，原样保留。
 - 有任何疑问时保留原文。
+
+## 输出格式（多章分段）
+
+一次请求可能包含多个章节，也可能只有一个章节：
+- 多章时：正文必须按输入顺序逐章分段输出。每段以 ===CHAPTER_ID:章节序号=== 开头（与输入中的标记一致，不得改动），段与段之间用 <<<|||CHAPTER_SEP|||>>> 分隔。输出段数必须与输入章数完全一致，逐章一一对应，不得合并、遗漏或调换章节。
+- 单章时：直接输出该章清理后的正文，不添加任何标记或格式包装。
 
 直接输出清理后的正文，不附加任何解释。`
 

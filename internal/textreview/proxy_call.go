@@ -131,9 +131,12 @@ func resolveModel(d *apibase.Deps, node config.TextReviewNode) (string, bool) {
 }
 
 // buildRequestBody marshals the OpenAI-format streaming chat request.
-// When reasoning is true, include reasoning_effort/enable_thinking to activate
-// the model's thinking capability. Otherwise leave reasoning out (some models
-// fail when reasoning is enabled).
+// reasoning toggles the model's thinking capability explicitly on the wire:
+// true → reasoning_effort "medium"; false → reasoning_effort "none". Omitting
+// the field on false leaves llama.cpp-class servers on their template default
+// (thinking ON for Qwen3-style templates), which is the reported toggle bug.
+// enable_thinking / chat_template_kwargs are ignored by llama.cpp (verified
+// 2026-08-26 against llama.cpp serve on 127.0.0.1:8080).
 func buildRequestBody(model, systemPrompt, content string, reasoning bool) ([]byte, error) {
 	body := map[string]any{
 		"model": model,
@@ -145,7 +148,11 @@ func buildRequestBody(model, systemPrompt, content string, reasoning bool) ([]by
 	}
 	if reasoning {
 		body["reasoning_effort"] = "medium"
-		body["enable_thinking"] = true
+	} else {
+		// llama.cpp 等 OpenAI-compat 服务在模型模板中默认开启思考：仅省略字段
+		// 会继续思考（enable_thinking/chat_template_kwargs 实测无效）。显式发送
+		// "none" 是唯一能强制关闭的 wire 值（对应 OMP reasoningDisableMode=none-effort）。
+		body["reasoning_effort"] = "none"
 	}
 	return json.Marshal(body)
 }
@@ -184,7 +191,8 @@ func buildBatchRequestBody(model, systemPrompt string, batch []BatchChapter, rea
 	}
 	if reasoning {
 		body["reasoning_effort"] = "medium"
-		body["enable_thinking"] = true
+	} else {
+		body["reasoning_effort"] = "none"
 	}
 	return json.Marshal(body)
 }
