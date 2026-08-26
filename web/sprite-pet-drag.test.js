@@ -72,13 +72,17 @@ const document = {
   getElementById(id) { return els[id] || null; },
   querySelector(sel) {
     if (sel === '.pet-input-row') return els['pet-input-row'] || null;
+    if (sel === '#pet-avatar') return els['pet-avatar'] || null;
+    if (sel === '#pet-bubble') return els['pet-bubble'] || null;
+    if (sel === '#pet-ctxmenu') return els['pet-ctxmenu'] || null;
     return null;
   },
   querySelectorAll() { return []; },
   body: makeEl(),
-  addEventListener() {},
 };
 els['pet-input-row'] = makeEl();
+// Non-zero avatar rect so petPostHit's width>0 filter keeps it.
+els['pet-avatar'].getBoundingClientRect = () => ({ left: 10, top: 10, width: 70, height: 70 });
 const window = {
   innerWidth: 560, innerHeight: 300, screenX: 100, screenY: 100,
   addEventListener(t, fn) { (winListeners[t] = winListeners[t] || []).push(fn); },
@@ -140,6 +144,39 @@ check('mousedown on bubble does NOT start a drag', () => {
   winListeners.mousemove[0](fakeEvent({ screenX: 90, screenY: 90 }));
   assert.ok(dragMessages().every(m => m.type !== 'dragstart' || m.screenX !== 50),
     'bubble-originated drag must not move window');
+});
+
+console.log('sprite pet layout regressions:');
+
+check('setPetScale resizes area + avatar without throwing (regression: undefined pet global)', () => {
+  // setPetScale used to reference an undefined `pet` global and threw a
+  // ReferenceError, so the page never re-laid-out when the host resized the
+  // window → the sprite got clipped by SetWindowRgn.
+  window.setPetScale(1.25);
+  assert.strictEqual(els['pet-area'].style.width, '375px', 'area = 300*1.25');
+  assert.strictEqual(els['pet-avatar'].style.width, '88px', 'avatar = 70*1.25 rounded');
+  assert.strictEqual(els['pet-avatar'].style.height, '88px');
+});
+
+check('petPostHit pads rects by 8px (bounce/shadow must not be region-clipped)', () => {
+  const before = posted.length;
+  window.petPostHit();
+  const hit = posted.slice(before).find(m => m.type === 'hit');
+  const avatarRect = hit.rects[0];
+  assert.deepStrictEqual(avatarRect, [2, 2, 86, 86], 'avatar rect padded 8px on every side');
+});
+
+check('applyPetSpriteSize keeps non-square frame aspect', () => {
+  // Drive the sizing path directly after simulating a loaded 140x70 frame
+  // (aspect 2) via the internal applyPetSpriteSize.
+  const src = fs.readFileSync(JS_PATH, 'utf8');
+  assert.ok(src.includes('petFrameAspect'), 'aspect tracking variable exists');
+  // Reset to 100%, then simulate a loaded 140x70 frame (aspect 2) through the
+  // internal applyPetSpriteSize and verify the avatar box follows the frame.
+  window.setPetScale(1.0);
+  vm.runInContext('petFrameAspect = 2; applyPetSpriteSize();', sandbox);
+  assert.strictEqual(els['pet-avatar'].style.width, '70px', 'wide frame: full box width');
+  assert.strictEqual(els['pet-avatar'].style.height, '35px', 'wide frame: half box height');
 });
 
 if (failures) { console.error('\n' + failures + ' check(s) FAILED'); process.exit(1); }

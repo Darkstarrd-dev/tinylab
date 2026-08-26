@@ -40,7 +40,9 @@ function petPostHit() {
     if (st.display === 'none' || st.visibility === 'hidden') return;
     var r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
-    rects.push([Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]);
+    // 8px 外扩：盖住 bounce 动画位移（±6px，transform 不触发 RO）与阴影，
+    // 避免 SetWindowRgn 裁掉精灵/气泡边缘
+    rects.push([Math.round(r.left) - 8, Math.round(r.top) - 8, Math.round(r.width) + 16, Math.round(r.height) + 16]);
   });
   petPost({ type: 'hit', rects: rects, vp: [window.innerWidth, window.innerHeight], scr: [window.screenX, window.screenY] });
 }
@@ -53,7 +55,7 @@ window.addEventListener('load', petPostHit);
 requestAnimationFrame(function () { requestAnimationFrame(petPostHit); });
 setInterval(petPostHit, 300);
 if (window.ResizeObserver) {
-  var ro = new ResizeObserver(petPostHit);
+  var ro = new ResizeObserver(function () { positionBubble(); petPostHit(); });
   ['#pet-bubble', '.pet-input-row', '#pet-avatar', '#pet-ctxmenu'].forEach(function (q) {
     var el = document.querySelector(q);
     if (el) ro.observe(el);
@@ -149,24 +151,48 @@ window.addEventListener('keydown', function (e) {
 window.addEventListener('keydown', function (e) { if (e.key === 'Escape') hidePetMenu(); });
 
 var miClose = document.getElementById('pet-mi-close');
-if (miClose) miClose.addEventListener('click', function () { petPost({ type: 'close' }); });
+if (miClose) miClose.addEventListener('click', function () {
+  // 菜单关闭 = 关闭功能：持久化 assistant.enabled=false，Settings 页的
+  // Assistant 开关随下次 renderEndpoint 重新拉取 /api/settings 自动同步为 OFF。
+  // PATCH 失败（如未登录）也照常关窗，行为与旧版一致。
+  try {
+    fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assistant: { enabled: false } })
+    }).catch(function () {});
+  } catch (e) {}
+  petPost({ type: 'close' });
+});
 
-// ---- scale: only the pet area grows/shrinks (300*f); the chat column and the
-// reply bubble keep their physical size. Window width = 300*f + 260 (host).
+// ---- scale: the whole window is the pet area (300*f); bubble/input keep
+// their physical size. Window width = 300*f (host applyPetScale).
 window.setPetScale = function (f) {
   petScale = f;
   var area = document.getElementById('pet-area');
   if (area) area.style.width = Math.round(300 * f) + 'px';
-  var a = Math.round(70 * f) + 'px';
-  pet.style.width = a;
-  pet.style.height = a;
-  var canvas = document.getElementById('pet-sprite');
-  if (canvas) { canvas.style.width = a; canvas.style.height = a; }
+  applyPetSpriteSize();
   positionBubble();
   petPostHit();
 };
 
-// ---- side: chat column sits on the side of the pet that faces the screen
+// Sprite frame aspect (w/h) once a spritesheet loads; 0 = CSS face fallback
+// (square 70px avatar). The avatar box follows the frame's aspect ratio so
+// non-square sprites are never stretched or clipped.
+var petFrameAspect = 0;
+function applyPetSpriteSize() {
+  var box = 70 * petScale;
+  var w = box, h = box;
+  if (petFrameAspect > 0) {
+    if (petFrameAspect >= 1) { h = box / petFrameAspect; } else { w = box * petFrameAspect; }
+  }
+  avatar.style.width = Math.round(w) + 'px';
+  avatar.style.height = Math.round(h) + 'px';
+  var canvas = document.getElementById('pet-sprite');
+  if (canvas) { canvas.style.width = Math.round(w) + 'px'; canvas.style.height = Math.round(h) + 'px'; }
+}
+
+// ---- side: the bubble sits on the side of the sprite that faces the screen
 // center. screen.availLeft/availWidth describe the CURRENT monitor (multi-
 // monitor correct); screen.width is primary-only.
 window.updateSide = function () {
@@ -178,19 +204,30 @@ window.updateSide = function () {
   petPostHit();
 };
 
-// Reply bubble hugs the avatar's edge (35*f half-avatar + 8px gap), on the
-// side facing the screen center.
+// Bubble hugs the sprite's edge (8px gap) on the side facing the screen
+// center; vertically centered on the sprite and clamped inside the pet area.
+// Input row lives INSIDE the bubble, so user input and the reply always share
+// one stable anchor position next to the sprite.
 function positionBubble() {
   var bubble = document.getElementById('pet-bubble');
-  if (!bubble) return;
-  var off = Math.round(35 * petScale + 8);
+  var area = document.getElementById('pet-area');
+  if (!bubble || !area || bubble.style.display === 'none') return;
+  var areaRect = area.getBoundingClientRect();
+  var ar = avatar.getBoundingClientRect();
+  var maxW = Math.max(80, Math.min(200, area.clientWidth - ar.width - 24));
+  bubble.style.maxWidth = Math.round(maxW) + 'px';
+  var br = bubble.getBoundingClientRect();
+  var left;
   if (document.body.classList.contains('chat-left')) {
-    bubble.style.left = 'auto';
-    bubble.style.right = off + 'px';
+    left = (ar.left - areaRect.left) - br.width - 8;
   } else {
-    bubble.style.right = 'auto';
-    bubble.style.left = off + 'px';
+    left = (ar.right - areaRect.left) + 8;
   }
+  left = Math.max(2, Math.min(left, area.clientWidth - br.width - 2));
+  var top = (ar.top - areaRect.top) + ar.height / 2 - br.height / 2;
+  top = Math.max(2, Math.min(top, area.clientHeight - br.height - 2));
+  bubble.style.left = Math.round(left) + 'px';
+  bubble.style.top = Math.round(top) + 'px';
 }
 
 function toggleBubble(e) {
@@ -200,11 +237,13 @@ function toggleBubble(e) {
   bubble.style.display = (bubble.style.display === 'flex') ? 'none' : 'flex';
 }
 
-// 输入指令行：仅双击宠物显示，发送或 Esc 后隐藏
+// 输入指令行：在气泡内，双击精灵显示；发送或 Esc 后隐藏（气泡保留回复）
 function showPetInput() {
   var row = document.querySelector('.pet-input-row');
-  if (!row) return;
-  row.classList.add('show');
+  var bubble = document.getElementById('pet-bubble');
+  if (bubble) bubble.style.display = 'flex';
+  if (row) row.classList.add('show');
+  positionBubble();
   var input = document.getElementById('pet-input');
   if (input) input.focus();
 }
@@ -212,6 +251,7 @@ function showPetInput() {
 function hidePetInput() {
   var row = document.querySelector('.pet-input-row');
   if (row) row.classList.remove('show');
+  positionBubble();
 }
 
 function setBubbleMsg(msg) {
@@ -219,6 +259,7 @@ function setBubbleMsg(msg) {
   var msgEl = document.getElementById('pet-bubble-msg');
   if (msgEl) msgEl.innerText = msg;
   if (bubble) bubble.style.display = 'flex';
+  positionBubble();
 }
 
 function sendPetIntent() {
@@ -281,6 +322,12 @@ function sendPetIntent() {
       if (frames < 1 || frameW < 1 || frameH < 1) return;
       var idx = 0;
       var fps = Math.max(1, act.fps || 8);
+      // Canvas backing store = one frame at native size (1:1 drawImage);
+      // display size = frame aspect fitted into the 70*f box.
+      canvas.width = Math.max(1, Math.round(frameW));
+      canvas.height = Math.max(1, Math.round(frameH));
+      petFrameAspect = canvas.width / canvas.height;
+      applyPetSpriteSize();
       canvas.style.display = 'block';
       var face = document.querySelector('.pet-face');
       if (face) face.style.display = 'none';

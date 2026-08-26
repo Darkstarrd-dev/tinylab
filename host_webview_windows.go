@@ -605,11 +605,11 @@ type petWindow struct {
 }
 
 const (
-	// 宠物区基准 300 + 交流列固定 260；高恒 300（交流列不随缩放变化）
-	petAreaW  = 300
-	petPanelW = 260
-	petBaseH  = 300
-	wmClose   = 0x0010
+	// 宠物区基准 300；高恒 300。气泡与输入行均锚定在宠物区内精灵侧面
+	// （旧 260px 交流列已移除，见 sprite-pet.html 布局注释）
+	petAreaW = 300
+	petBaseH = 300
+	wmClose  = 0x0010
 )
 
 func petWndProc(hwnd windows.HWND, msg uint32, wp, lp uintptr) uintptr {
@@ -733,12 +733,11 @@ func applyPetRegion(pw *petWindow) {
 	procDeleteObject.Call(union)
 }
 
-// applyPetScale resizes the pet AREA to 300*f while the chat panel keeps its
-// physical size: window width = 300*f + 260, height constant 300.
-// sprite-pet.html must NOT use vw/vh units (they ignore zoom and crop).
+// applyPetScale resizes the whole window to the pet AREA (300*f wide, 300
+// high). sprite-pet.html must NOT use vw/vh units (they ignore zoom and crop).
 func applyPetScale(pw *petWindow, f float64) {
 	pw.scale = f
-	w, h := int32(float64(petAreaW)*f)+petPanelW, int32(petBaseH)
+	w, h := int32(float64(petAreaW)*f), int32(petBaseH)
 	procSetWindowPos.Call(pw.hwnd, 0, 0, 0, uintptr(w), uintptr(h),
 		swpNoMove|swpNoZOrder|swpNoActivate)
 	pw.chromium.Resize()
@@ -797,7 +796,7 @@ func openPetWindow(hctx *app.HostContext) {
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("TinyRouterPetWnd"))),
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(""))),
 		uintptr(wsPopup|wsVisible),
-		100, 100, petAreaW+petPanelW, petBaseH,
+		100, 100, petAreaW, petBaseH,
 		0, 0, 0, 0,
 	)
 	if hwnd == 0 {
