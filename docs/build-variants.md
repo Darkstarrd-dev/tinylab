@@ -59,6 +59,9 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 `build-minimal-webview-pg.ps1` 仍使用 `CGO_ENABLED=0`、`-s -w -buildid=`、`-gcflags="all=-l"` 与 `-trimpath`，生成 `dist/TinyRouter_Win11.exe` 和 `dist/TinyRouter_Linux`。默认**不使用 UPX**：Windows 对部分 UPX 压缩 PE 的加载会返回 `STATUS_INVALID_PAGE_PROTECTION (0xC0000045)`，导致“应用程序无法正常启动”。
 
 如确实需要压缩，可显式执行 `./build-minimal-webview-pg.ps1 -Upx`；发布给 Windows 用户的产物应使用默认未压缩版本。
+
+`build-max-minimal.ps1`（配套 `build-max-minimal.bat` 包装器）是 Windows 专用极限压缩变体：全功能（tags `tray,webview,playground`）+ `CGO_ENABLED=0` + `-ldflags "-H windowsgui -s -w -buildid="` + `-gcflags all=-l` + `-trimpath`，再以 `upx --best --lzma --ultra-brute` 打包（`-Fast` 跳过 ultra-brute），输出 `dist/TinyRouter_Max.exe` 并自动 `upx --test` 校验。同样受上述 Windows 加载 UPX PE 的兼容性风险约束，仅用于体积实验/可控分发，不作为推荐发布产物。
+
 ## macOS 双架构构建
 
 Windows 开发机可直接运行：

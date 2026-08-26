@@ -68,8 +68,12 @@ var PG_DEFAULT_CFG = {
   imgSubmitCount: 1,
   // Per-provider maximum in-flight image requests (1..8)
   imgConcurrency: 1,
-  // Prompt Inspire modal: user-editable preset prompt templates
+  // Prompt Inspire modal: user-editable instruction presets submitted to the
+  // helper model (empty = built-in BUILTIN_PRESETS fallback)
   imgInspirePresets: [],
+  // Prompt Inspire modal: currently selected preset instruction (empty =
+  // first built-in). Stored as text; stale text falls back to the default.
+  imgInspirePreset: '',
   // Endpoint control: 'generations' (default) or 'edits'
   imgEndpoint: 'generations',
   // GPT/image response/output format fields

@@ -434,7 +434,7 @@
           '</div>' +
         '</div>' +
         stopBtnHtml +
-        '<button class="pg-task-remove-btn bin-button" onclick="event.stopPropagation();pgTaskRemove(\'' + escAttr(taskItem.id) + '\')" title="' + escAttr(t('pgTaskRemoveTip')) + '" aria-label="' + escAttr(t('pgTaskRemoveTip')) + '">' + binSvg() + '</button>' +
+        '<button class="pg-task-remove-btn btn-icon bin-button" onclick="event.stopPropagation();pgTaskRemove(\'' + escAttr(taskItem.id) + '\')" title="' + escAttr(t('pgTaskRemoveTip')) + '" aria-label="' + escAttr(t('pgTaskRemoveTip')) + '">' + binSvg() + '</button>' +
       '</div>';
     }
 

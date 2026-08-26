@@ -418,9 +418,17 @@ function pgSetMode(mode) {
   if (pgState.modeWindows[mode] && pgState.modeWindows[mode].length > 0) {
     pgState.windows = pgState.modeWindows[mode];
   } else {
+    // Fresh mode windows must inherit the persisted config (pgLoad restores it
+    // into the startup windows only). Without this, per-mode settings saved in
+    // image mode — helper model, inspire presets, submit count, sizes — are
+    // lost on every reload because image mode swaps in brand-new windows.
+    var seedSrc = pgState.windows[0];
+    var seedCfg = seedSrc && seedSrc.config ? JSON.parse(JSON.stringify(seedSrc.config)) : null;
     pgState.windows = [];
     for (var wI = 0; wI < targetSplit; wI++) {
-      if (typeof makeWin === 'function') pgState.windows.push(makeWin());
+      var seedWin = (typeof makeWin === 'function') ? makeWin() : null;
+      if (seedWin && seedCfg) seedWin.config = JSON.parse(JSON.stringify(seedCfg));
+      pgState.windows.push(seedWin);
     }
     pgState.modeWindows[mode] = pgState.windows;
   }
@@ -1270,7 +1278,7 @@ function pgRenderReqLeft(showReqLeft) {
         '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
       '</div>' +
       '<div class="pg-req-left-inner pg-tasks-inner">' +
-        '<div class="pg-req-left-header pg-tasks-header"><span>' + pgEscapeHtml(pgT('pgTaskQueueTitle')) + '</span><button class="pg-task-clear-all-btn bin-button" type="button" onclick="pgTaskClearAll()" title="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '" aria-label="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '">' + pgTaskBinSvg() + '</button></div>' +
+        '<div class="pg-req-left-header pg-tasks-header"><span>' + pgEscapeHtml(pgT('pgTaskQueueTitle')) + '</span><button class="pg-task-clear-all-btn btn-icon bin-button" type="button" onclick="pgTaskClearAll()" title="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '" aria-label="' + pgEscapeAttr(pgT('pgTaskClearAllTip')) + '">' + pgTaskBinSvg() + '</button></div>' +
         '<div class="pg-req-table-wrap" id="pg-tasks-content"></div>' +
       '</div>';
   } else {
@@ -1789,6 +1797,12 @@ function pgOnImageSubmitCount(v) {
   if (n > 99) n = 99;
   w.config.imgSubmitCount = n;
   pgSave();
+  // Keep every rendered stepper (main input bar + inspire modal) in display
+  // sync — the +/- buttons only change state, they never re-render the modal.
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    var countInputs = document.querySelectorAll('input.pg-image-submit-count');
+    for (var ci = 0; ci < countInputs.length; ci++) countInputs[ci].value = n;
+  }
   pgRenderSidebar();
 }
 function pgStepImageSubmitCount(delta) {

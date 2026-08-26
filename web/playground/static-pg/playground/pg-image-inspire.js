@@ -22,10 +22,51 @@
     var d = delimiter();
     return String(raw || '').split(d).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
   }
+  // Built-in preset INSTRUCTIONS — system prompts submitted to the helper
+  // model to turn the user input into polished prompt(s). Not image style
+  // templates. Supported placeholders: {n} = batch count, {format} = output
+  // format requirement, {delimiter} = multi-prompt separator. They double as
+  // editable starting points: Edit prefills them, Save overwrites
+  // imgInspirePresets. BUILTIN_PRESETS[0] reproduces the historical default
+  // instruction verbatim after substitution.
+  var BUILTIN_PRESETS = [
+    'Return only {format}.',
+    'Generate exactly {n} DIFFERENT image prompts based on the user input. Each prompt must be a self-contained {format}. Separate consecutive prompts with a line containing only {delimiter} and nothing else. Return ONLY the prompts and the separators — no numbering, no explanations, no Markdown fences.',
+    'Expand the user input into one highly detailed {format}: enrich the subject, action, environment, composition, lighting and quality. Return only {format} — no explanations, no Markdown fences.',
+    'Create one imaginative {format} inspired by the user input, adding vivid sensory details and a distinctive artistic style. Return only {format} — no explanations, no Markdown fences.'
+  ];
   function presets() {
     var w = pgWin();
     var list = w && w.config && Array.isArray(w.config.imgInspirePresets) ? w.config.imgInspirePresets : [];
-    return list.filter(function (p) { return String(p || '').trim().length > 0; });
+    var clean = list.filter(function (p) { return String(p || '').trim().length > 0; });
+    // No user presets yet: fall back to the built-in instruction templates so
+    // the section is never blank and Edit offers modifiable starting points.
+    return clean.length ? clean : BUILTIN_PRESETS.slice();
+  }
+  function selectedPreset() {
+    var w = pgWin();
+    var sel = w && w.config && typeof w.config.imgInspirePreset === 'string' ? w.config.imgInspirePreset.trim() : '';
+    if (!sel) return BUILTIN_PRESETS[0];
+    var list = presets();
+    for (var i = 0; i < list.length; i++) if (list[i] === sel) return sel;
+    return BUILTIN_PRESETS[0]; // stale selection (edited away) → default
+  }
+  function formatRequirement(format) {
+    return format === 'json'
+      ? 'valid JSON object with subject, action, environment, composition, style, lighting, quality, negative'
+      : (format === 'tag' ? 'comma-separated image tags' : 'a polished natural-language image prompt');
+  }
+  function buildInstruction(preset, format, batchCount) {
+    var instruction = String(preset || BUILTIN_PRESETS[0])
+      .replace(/\{n\}/g, String(batchCount))
+      .replace(/\{format\}/g, formatRequirement(format))
+      .replace(/\{delimiter\}/g, delimiter());
+    // Batch run with a template that has no multi-prompt scaffolding: append
+    // the count + separator requirement so N prompts still come back.
+    if (batchCount > 1 && instruction.indexOf(delimiter()) < 0) {
+      instruction += ' Generate exactly ' + batchCount + ' DIFFERENT image prompts based on the user input, separated by a line containing only ' + delimiter() + ' and nothing else. Return ONLY the prompts and the separators — no numbering, no explanations, no Markdown fences.';
+    }
+    return instruction;
   }
   function infinitySvgHtml() {
     return '<div class="pg-infinity-loader" id="pg-inspire-loader">' +
@@ -48,19 +89,18 @@
     } else {
       out += '<div class="pg-inspire-presets-head"><label>' + pgEscapeHtml(pgT('pgInspirePresets')) + '</label>' +
         '<button class="pg-btn pg-inspire-presets-edit-btn" onclick="pgInspireToggleEdit(true)">' + pgEscapeHtml(pgT('pgInspirePresetsEdit')) + '</button></div>';
-      if (!list.length) {
-        out += '<div class="pg-inspire-preset-empty">' + pgEscapeHtml(pgT('pgInspirePresetsEmpty')) + '</div>';
-      } else {
-        out += '<div class="pg-inspire-preset-list">';
-        list.forEach(function (p, i) {
-          out += '<div class="pg-inspire-preset-item" onclick="pgInspireUsePreset(' + i + ')" title="' + pgEscapeAttr(p) + '">' + pgEscapeHtml(p) + '</div>';
-        });
-        out += '</div>';
-      }
+      // presets() never returns empty (built-in fallback), always render list.
+      // The highlighted item is the instruction template used by Generate.
+      var sel = selectedPreset();
+      out += '<div class="pg-inspire-preset-list">';
+      list.forEach(function (p, i) {
+        out += '<div class="pg-inspire-preset-item' + (p === sel ? ' active' : '') + '" onclick="pgInspireUsePreset(' + i + ')" title="' + pgEscapeAttr(p) + '">' + pgEscapeHtml(p) + '</div>';
+      });
+      out += '</div>';
     }
     return out + '</div>';
   }
-  function render(model, format, input, result, error, editingPresets) {
+  function render(model, format, input, result, error, editingPresets, batchDone) {
     var models = helperModels();
     var opts = models.map(function (m) { return '<option value="' + pgEscapeAttr(m.id) + '"' + (m.id === model ? ' selected' : '') + '>' + pgEscapeHtml(m.id) + '</option>'; }).join('');
     var list = presets();
@@ -71,7 +111,7 @@
     out += '<div class="pg-inspire-col pg-inspire-col-batch"><label>' + pgEscapeHtml(pgT('pgInspireBatchCount')) + '</label>' +
       '<div class="number-stepper pg-inspire-batch-stepper" data-tooltip="' + pgEscapeAttr(pgT('pgImageSubmitCountTip')) + '">' +
         '<button type="button" class="stepper-btn stepper-minus" onclick="pgStepImageSubmitCount(-1)" tabindex="-1">-</button>' +
-        '<input type="number" class="stepper-input" min="1" max="99" step="1" value="' + (typeof pgGetImageSubmitCount === 'function' ? pgGetImageSubmitCount() : 1) + '" onchange="pgOnImageSubmitCount(this.value)" aria-label="' + pgEscapeAttr(pgT('pgInspireBatchCount')) + '">' +
+        '<input type="number" class="stepper-input pg-image-submit-count" min="1" max="99" step="1" value="' + (typeof pgGetImageSubmitCount === 'function' ? pgGetImageSubmitCount() : 1) + '" onchange="pgOnImageSubmitCount(this.value)" aria-label="' + pgEscapeAttr(pgT('pgInspireBatchCount')) + '">' +
         '<button type="button" class="stepper-btn stepper-plus" onclick="pgStepImageSubmitCount(1)" tabindex="-1">+</button>' +
       '</div></div>';
     out += '</div>';
@@ -79,6 +119,7 @@
     out += '<label>' + pgEscapeHtml(pgT('pgCurrentInput')) + '</label><div class="pg-inspire-input-wrap"><textarea id="pg-inspire-input" class="pg-input" oninput="pgInspireAutosize()">' + pgEscapeHtml(input || '') + '</textarea>' + infinitySvgHtml() + '</div>';
     if (error) out += '<div class="pg-inspire-error">' + pgEscapeHtml(error) + '</div>';
     if (result != null) out += '<label>' + pgEscapeHtml(pgT('pgGeneratedPrompt')) + '</label><pre class="pg-inspire-preview">' + pgEscapeHtml(result) + '</pre><div class="pg-modal-footer"><button class="pg-btn" onclick="pgImageInspireGenerate()">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button><button class="pg-btn active" onclick="pgImageInspireApply()">' + pgEscapeHtml(pgT('pgApplyToInput')) + '</button><button class="pg-btn" onclick="pgCloseModal()">' + pgEscapeHtml(pgT('Cancel')) + '</button></div>';
+    else if (batchDone) out += '<div class="pg-modal-footer"><button class="pg-btn" onclick="pgImageInspireGenerate()">' + pgEscapeHtml(pgT('pgRegenerate')) + '</button><button class="pg-btn active" onclick="pgImageInspireApply()">' + pgEscapeHtml(pgT('pgApplyToInput')) + '</button><button class="pg-btn" onclick="pgCloseModal()">' + pgEscapeHtml(pgT('Cancel')) + '</button></div>';
     else out += '<div class="pg-modal-footer"><button class="pg-btn active" onclick="pgImageInspireGenerate()">' + pgEscapeHtml(pgT('pgGenerateInspiration')) + '</button><button class="pg-btn" onclick="pgCloseModal()">' + pgEscapeHtml(pgT('Cancel')) + '</button></div>';
     return out + '</div>';
   }
@@ -103,11 +144,15 @@
     if (w && w.config) { w.config.imgPromptModel = v; pgSave(); }
   };
   window.pgInspireUsePreset = function (i) {
-    var list = presets();
-    var ta = document.getElementById('pg-inspire-input');
-    if (!ta || i < 0 || i >= list.length) return;
-    ta.value = list[i];
-    pgInspireAutosize();
+    var list = presets(), w = pgWin();
+    if (i < 0 || i >= list.length || !w || !w.config) return;
+    // Click = select the instruction template used by the next Generate.
+    w.config.imgInspirePreset = list[i];
+    pgSave();
+    var model = (document.getElementById('pg-inspire-model') || {}).value || '', format = (document.getElementById('pg-inspire-format') || {}).value || 'natural', input = (document.getElementById('pg-inspire-input') || {}).value || '';
+    var preview = document.querySelector('.pg-inspire-preview');
+    pgShowModal(render(model, format, input, preview ? preview.textContent : null, '', false));
+    setTimeout(pgInspireAutosize, 0);
   };
   window.pgInspireToggleEdit = function (editing) {
     var model = (document.getElementById('pg-inspire-model') || {}).value || '', format = (document.getElementById('pg-inspire-format') || {}).value || 'natural', input = (document.getElementById('pg-inspire-input') || {}).value || '';
@@ -129,15 +174,7 @@
     var batchCount = (typeof pgGetImageSubmitCount === 'function') ? pgGetImageSubmitCount() : 1;
     var loader = document.getElementById('pg-inspire-loader');
     if (loader) loader.classList.add('active');
-    var instruction;
-    if (batchCount > 1) {
-      instruction = 'Generate exactly ' + batchCount + ' DIFFERENT image prompts based on the user input. ' +
-        'Each prompt must be a self-contained ' + (format === 'json' ? 'JSON object with subject, action, environment, composition, style, lighting, quality, negative' : (format === 'tag' ? 'comma-separated image tag list' : 'natural-language image prompt')) + '. ' +
-        'Separate consecutive prompts with a line containing only ' + delimiter() + ' and nothing else. ' +
-        'Return ONLY the prompts and the separators — no numbering, no explanations, no Markdown fences.';
-    } else {
-      instruction = format === 'json' ? 'Return only valid JSON object with subject, action, environment, composition, style, lighting, quality, negative.' : (format === 'tag' ? 'Return only comma-separated image tags.' : 'Return only a polished natural-language image prompt.');
-    }
+    var instruction = buildInstruction(selectedPreset(), format, batchCount);
     var body = { model: model, messages: [{ role: 'system', content: instruction }, { role: 'user', content: input.trim() || 'Create a random image prompt.' }], temperature: 0.8, stream: false };
     fetch('/v1/chat/completions', {
       method: 'POST',
@@ -163,7 +200,7 @@
           ta.value = parts.join('\n' + delimiter() + '\n');
           pgInspireAutosize();
         }
-        pgShowModal(render(model, format, ta ? ta.value : parsed.text, null, '', false));
+        pgShowModal(render(model, format, ta ? ta.value : parsed.text, null, '', false, true));
         setTimeout(pgInspireAutosize, 0);
       } else {
         pgShowModal(render(model, format, input, parsed.text, '', false));
