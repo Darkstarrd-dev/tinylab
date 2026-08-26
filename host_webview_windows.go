@@ -146,30 +146,44 @@ func petWindowsOpen() bool {
 // terminateAllPetWindows posts WM_CLOSE to every open pet window (safe from a
 // foreign thread; the owning pump turns it into DestroyWindow).
 func terminateAllPetWindows() {
+	var hwnds []uintptr
 	petMu.Lock()
-	defer petMu.Unlock()
 	for hwnd := range petWindows {
+		hwnds = append(hwnds, hwnd)
+	}
+	petMu.Unlock()
+	for _, hwnd := range hwnds {
 		procPostMessageW.Call(hwnd, wmClose, 0, 0)
 	}
 }
-
 // setPetWindowVisible shows/hides the pet without destroying the WebView2
 // environment. Destroy+recreate tears down the Edge/Chromium child process and
 // races with a concurrently-creating window — the second cycle's Embed races
 // the first window's WM_DESTROY cleanup, freezing the main window's message
 // pump (the App freeze on slow toggle: restart->on->off->on->off).
 func setPetWindowVisible(show bool) bool {
+	// Collect hwnd without holding the lock across the cross-thread
+	// SendMessage. ShowWindow sent from a non-owner thread blocks until the
+	// pet's message pump dispatches it. Holding petMu across that round-trip
+	// deadlocks when the pump's petWndProc tries to lock petMu to look up
+	// petWindows — visible as main-window input freeze (no keyboard/mouse)
+	// after a toggle, with HTTP still alive on its own thread.
+	var hwnd uintptr
 	petMu.Lock()
-	defer petMu.Unlock()
-	for hwnd := range petWindows {
-		var cmd uintptr = 0 // SW_HIDE
-		if show {
-			cmd = 5 // SW_SHOW
-		}
-		procShowWindow.Call(hwnd, cmd)
-		return true
+	for h := range petWindows {
+		hwnd = h
+		break
 	}
-	return false
+	petMu.Unlock()
+	if hwnd == 0 {
+		return false
+	}
+	var cmd uintptr = 0 // SW_HIDE
+	if show {
+		cmd = 5 // SW_SHOWNA (show without activating, avoids stealing focus)
+	}
+	procShowWindow.Call(hwnd, cmd)
+	return true
 }
 
 // terminateAllWebviews force-closes every currently-open WebView2 window. Safe
