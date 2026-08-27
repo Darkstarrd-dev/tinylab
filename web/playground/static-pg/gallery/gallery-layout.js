@@ -343,11 +343,19 @@ function bindEventsForCurrentLayout() {
   var vidTreeBtn = document.getElementById('gallery-vid-tree-btn');
   if (vidTreeBtn) vidTreeBtn.onclick = toggleTreePanel;
 
+  // Clear buttons must target the pane they live in, not galleryState.focus:
+  // stopPropagation below keeps the pane click handler from syncing focus, so
+  // clearing by logical focus would hit the other side when this pane is
+  // unfocused (split mode) and the click would appear to do nothing.
+  function _paneIsVideo(btn) {
+    var paneEl = btn && btn.closest ? btn.closest('.gallery-pane') : null;
+    return !!(paneEl && paneEl.id === 'gallery-pane-video');
+  }
   var clearBtn = document.getElementById('gallery-clear-btn');
   if (clearBtn) {
     clearBtn.onclick = function(e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      clearActiveSideTree();
+      clearActiveSideTree(_paneIsVideo(clearBtn));
       fetch('/api/gallery/clear', { method: 'POST' }).catch(function() {});
     };
   }
@@ -355,7 +363,7 @@ function bindEventsForCurrentLayout() {
   if (vidClearBtn) {
     vidClearBtn.onclick = function(e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      clearActiveSideTree();
+      clearActiveSideTree(_paneIsVideo(vidClearBtn));
       fetch('/api/gallery/clear', { method: 'POST' }).catch(function() {});
     };
   }

@@ -455,8 +455,11 @@ function releaseZipSessions(removedItems) {
   }
 }
 
-function clearActiveSideTree() {
-  var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
+function clearActiveSideTree(forceVid) {
+  // forceVid (boolean) targets an explicit pane; undefined keeps the
+  // historical "logically focused side" behaviour for keyboard/tree callers.
+  var isVidActive = (typeof forceVid === 'boolean') ? forceVid
+    : ((galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video'));
 
   if (isVidActive) {
     for (var i = 0; i < galleryState.videoItems.length; i++) {
