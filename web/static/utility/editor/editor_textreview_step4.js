@@ -595,7 +595,6 @@ function trS4RefreshFromSnapshot() {
     }
     var allBtn = document.getElementById('tr-s4-exportall');
     if (allBtn) allBtn.disabled = trS4Completed.length === 0;
-    trToast(trT('trS4NewCompleted') || '有新章节完成', 'info');
   }, function(){});
 }
 

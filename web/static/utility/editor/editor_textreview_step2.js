@@ -238,6 +238,16 @@ window.trRenderStep2 = function (panel, state) {
   kpLabel.appendChild(document.createTextNode(' ' + trT('trKeepPrologue')));
   previewHead.appendChild(kpLabel);
 
+  // Export button placed on the right side of Preview head
+  var expBtn = document.createElement('button');
+  expBtn.type = 'button';
+  expBtn.className = 'tr-btn tr-s2-export-btn';
+  expBtn.id = 'tr-s2-export';
+  expBtn.textContent = trT('trExport') || '导出';
+  expBtn.disabled = !hasChapters;
+  expBtn.addEventListener('click', trStep2Export);
+  previewHead.appendChild(expBtn);
+
   previewSection.appendChild(previewHead);
 
   var previewWrap = document.createElement('div');
@@ -398,9 +408,11 @@ function trStep2RenderPreview() {
   var wrap = document.getElementById('tr-s2-preview');
   var count = document.getElementById('tr-s2-count');
   var next = document.getElementById('tr-s2-next');
+  var expBtn = document.getElementById('tr-s2-export');
   var chapters = trState.chapters || [];
   if (count) count.textContent = String(chapters.length);
   if (next) next.disabled = chapters.length === 0;
+  if (expBtn) expBtn.disabled = chapters.length === 0;
   if (!wrap) return;
   if (chapters.length === 0) {
     wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNoChapters')) + '</div>';
@@ -687,4 +699,57 @@ function trStep2Next() {
   trSave();
   trGotoStep(3);
 }
+
+// ===================== Step2: export split chapters =====================
+
+/**
+ * "导出": prompt user to pick a target directory via native file manager (/api/browse),
+ * then package split chapters into individual .txt files inside a .zip file and save to target directory.
+ */
+function trStep2Export() {
+  var chapters = trState.chapters || [];
+  if (!chapters.length) {
+    trToast(trT('trSplitFirst') || '请先切分章节', 'warning');
+    return;
+  }
+  var btn = document.getElementById('tr-s2-export');
+  if (btn) btn.disabled = true;
+
+  // Open native directory picker
+  trApiPost('/browse', { mode: 'directory', initialPath: '' }).then(function (res) {
+    if (!res || !res.path) {
+      if (btn) btn.disabled = false;
+      return; // user cancelled dialog
+    }
+    var targetDir = res.path;
+    var baseName = (trState.fileName ? trState.fileName.replace(/\.[^/.]+$/, '') : 'novel');
+    var zipName = baseName + '_chapters.zip';
+
+    var payload = {
+      targetDir: targetDir,
+      zipName: zipName,
+      chapters: chapters.map(function (c, idx) {
+        return {
+          title: c.title || ('Chapter ' + (idx + 1)),
+          content: c.content || ''
+        };
+      })
+    };
+
+    return trApiPost('/text-review/export-split', payload).then(function (expRes) {
+      if (btn) btn.disabled = false;
+      if (expRes && expRes.error) {
+        trToast(expRes.error, 'error');
+        return;
+      }
+      var outPath = (expRes && expRes.path) || zipName;
+      var count = (expRes && expRes.count) || chapters.length;
+      trToast((typeof trT === 'function' ? trT('trExportZipSuccess', [count, outPath]) : '') || ('已导出 ' + count + ' 个章节至: ' + outPath), 'success');
+    });
+  }).catch(function (err) {
+    if (btn) btn.disabled = false;
+    trToast((typeof trT === 'function' ? trT('trExportFailed') : '') || ('导出失败: ' + (err && err.message || err)), 'error');
+  });
+}
+
 

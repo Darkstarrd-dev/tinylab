@@ -65,15 +65,6 @@ window.trRenderStep1 = function (panel, state) {
     }
   }
 
-  var titleEl = document.createElement('span');
-  titleEl.className = 'tr-s1-title';
-  titleEl.textContent = trT('trStepImport');
-  titleRow.appendChild(titleEl);
-
-  var rightActions = document.createElement('div');
-  rightActions.className = 'tr-s1-actions';
-  titleRow.appendChild(rightActions);
-
   var nextBtn = document.createElement('button');
   nextBtn.type = 'button';
   nextBtn.className = 'tr-btn tr-btn-primary';
@@ -81,7 +72,7 @@ window.trRenderStep1 = function (panel, state) {
   nextBtn.textContent = trT('trNext');
   nextBtn.disabled = !hasText;
   nextBtn.addEventListener('click', trStep1Next);
-  rightActions.appendChild(nextBtn);
+  leftActions.appendChild(nextBtn);
 
   if (hasText) {
     var abandonBtn = document.createElement('button');
@@ -90,8 +81,13 @@ window.trRenderStep1 = function (panel, state) {
     abandonBtn.id = 'tr-s1-abandon';
     abandonBtn.textContent = trT('trAbandon');
     abandonBtn.addEventListener('click', trStep1Abandon);
-    rightActions.appendChild(abandonBtn);
+    leftActions.appendChild(abandonBtn);
   }
+
+  var titleEl = document.createElement('span');
+  titleEl.className = 'tr-s1-title';
+  titleEl.textContent = trT('trStepImport');
+  titleRow.appendChild(titleEl);
 
   // --- info row (shown after import) ---
   if (hasText) {

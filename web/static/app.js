@@ -1295,24 +1295,33 @@ document.addEventListener('click', closeAllCustomSelects);
 // Global Number Stepper Component (matching Settings Modal)
 // Accepts both the positional form (id, value, min, max, step, extraStyle,
 // onchange) used by provider/quick-slot forms AND the legacy opts-object form
-// (id, value, {min, max, step, style}) used by the settings/trace modals, so a
-// single global component serves every caller.
+// (id, value, {min, max, step, style, placeholder, dataId, inputClass, onchange})
+// used by the settings/trace modals, so a single global component serves every caller.
 function renderStepperHtml(id, value, min, max, step, extraStyle, onchangeAttrStr) {
+  var placeholder = '';
+  var dataId = '';
+  var inputClass = 'stepper-input';
   if (min && typeof min === 'object') {
     var opts = min;
     min = opts.min;
     max = opts.max;
     step = opts.step;
     extraStyle = opts.style;
+    placeholder = opts.placeholder || '';
+    dataId = opts.dataId || '';
+    if (opts.inputClass) inputClass += ' ' + opts.inputClass;
+    if (opts.onchange) onchangeAttrStr = opts.onchange;
   }
   var minAttr = min !== undefined && min !== null ? ' min="' + min + '"' : '';
   var maxAttr = max !== undefined && max !== null ? ' max="' + max + '"' : '';
+  var phAttr = placeholder ? ' placeholder="' + placeholder + '"' : '';
+  var dataIdAttr = dataId ? ' data-id="' + dataId + '"' : '';
   var stepVal = step || 1;
   var styleAttr = extraStyle ? ' style="' + extraStyle + '"' : '';
   var onchangeStr = onchangeAttrStr ? ' onchange="' + onchangeAttrStr + '"' : '';
   return '<div class="number-stepper"' + styleAttr + '>' +
     '<button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'' + id + '\', -' + stepVal + ')">-</button>' +
-    '<input type="number" class="stepper-input" id="' + id + '" value="' + value + '"' + minAttr + maxAttr + onchangeStr + '>' +
+    '<input type="number" class="' + inputClass + '" id="' + id + '" value="' + value + '"' + minAttr + maxAttr + phAttr + dataIdAttr + onchangeStr + '>' +
     '<button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'' + id + '\', ' + stepVal + ')">+</button>' +
     '</div>';
 }
@@ -1320,14 +1329,22 @@ function renderStepperHtml(id, value, min, max, step, extraStyle, onchangeAttrSt
 function changeStepper(id, delta) {
   var input = document.getElementById(id);
   if (!input) return;
-  var val = parseInt(input.value, 10) || 0;
-  var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : -Infinity;
-  var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : Infinity;
-  var newVal = val + delta;
-  if (newVal < min) newVal = min;
-  if (newVal > max) newVal = max;
-  input.value = newVal;
+  var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : null;
+  var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : null;
+  var hasVal = input.value !== '' && input.value !== null && !isNaN(parseInt(input.value, 10));
+  var step = delta || 1;
+  var val = hasVal ? parseInt(input.value, 10) : (step > 0 && min !== null && min > 0 ? min - step : 0);
+  var newVal = val + step;
+  if (input.hasAttribute('placeholder') && min !== null && newVal < min) {
+    input.value = '';
+  } else {
+    if (min !== null && newVal < min) newVal = min;
+    if (max !== null && newVal > max) newVal = max;
+    input.value = newVal;
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
+
 
 

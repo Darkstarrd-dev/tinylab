@@ -33,15 +33,19 @@ function openSettingsModal(title, bodyHtml) {
 function changeStepper(inputId, delta) {
   var input = document.getElementById(inputId);
   if (!input) return;
-  var val = parseInt(input.value, 10);
-  if (isNaN(val)) val = 0;
-  var step = delta || 1;
-  var newVal = val + step;
   var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : null;
   var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : null;
-  if (min !== null && !isNaN(min) && newVal < min) newVal = min;
-  if (max !== null && !isNaN(max) && newVal > max) newVal = max;
-  input.value = newVal;
+  var hasVal = input.value !== '' && input.value !== null && !isNaN(parseInt(input.value, 10));
+  var step = delta || 1;
+  var val = hasVal ? parseInt(input.value, 10) : (step > 0 && min !== null && min > 0 ? min - step : 0);
+  var newVal = val + step;
+  if (input.hasAttribute('placeholder') && min !== null && newVal < min) {
+    input.value = '';
+  } else {
+    if (min !== null && !isNaN(min) && newVal < min) newVal = min;
+    if (max !== null && !isNaN(max) && newVal > max) newVal = max;
+    input.value = newVal;
+  }
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }

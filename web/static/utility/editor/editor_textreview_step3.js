@@ -165,13 +165,9 @@ window.trRenderStep3 = function (panel, state) {
                 trEscapeHtml(trT('trPrev')) + '</button>' +
               '<span class="tr-s3-range">' +
                 '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeStart')) + '</label>' +
-                '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-start" min="1" placeholder="' +
-                  trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeStart ? state.rangeStart : '') +
-                  '" onchange="trS3OnRangeChange()">' +
+                renderStepperHtml('tr-s3-range-start', (state.rangeStart ? state.rangeStart : ''), { min: 1, placeholder: trT('trRangeAll'), style: 'width:78px;height:26px;', inputClass: 'tr-s3-range-in', onchange: 'trS3OnRangeChange()' }) +
                 '<label class="tr-s3-range-lbl">' + trEscapeHtml(trT('trRangeEnd')) + '</label>' +
-                '<input type="number" class="tr-input tr-s3-range-in" id="tr-s3-range-end" min="1" placeholder="' +
-                  trEscapeHtml(trT('trRangeAll')) + '" value="' + (state.rangeEnd ? state.rangeEnd : '') +
-                  '" onchange="trS3OnRangeChange()">' +
+                renderStepperHtml('tr-s3-range-end', (state.rangeEnd ? state.rangeEnd : ''), { min: 1, placeholder: trT('trRangeAll'), style: 'width:78px;height:26px;', inputClass: 'tr-s3-range-in', onchange: 'trS3OnRangeChange()' }) +
               '</span>' +
               '<span class="tr-spacer"></span>' +
               '<button type="button" class="tr-btn tr-btn-primary" id="tr-s3-startpause" onclick="trStep3StartPause()">' +
@@ -280,15 +276,26 @@ function trS3RenderConfigNodes(nodes) {
     trS3RenderTotal(0);
     return;
   }
-  var html = '<table class="tr-nodes-table"><thead><tr>' +
-    '<th>#</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
+  var html = '<table class="tr-nodes-table">' +
+    '<colgroup>' +
+      '<col style="width:26px;">' +
+      '<col style="width:32px;">' +
+      '<col style="width:82px;">' +
+      '<col style="min-width:160px;">' +
+      '<col style="width:62px;">' +
+      '<col style="width:62px;">' +
+      '<col style="width:86px;">' +
+      '<col style="width:42px;">' +
+    '</colgroup>' +
+    '<thead><tr>' +
+      '<th style="text-align:center;">#</th>' +
+      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeEnabledFull') || 'Enabled') + '">' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
+      '<th data-tooltip="' + trEscapeHtml(trT('trNodeProviderFull') || 'Provider') + '">' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
+      '<th data-tooltip="' + trEscapeHtml(trT('trNodeModelFull') || 'Model') + '">' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
+      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeConcurrencyFull') || 'Concurrency') + '">' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
+      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trIntervalSecFull') || 'Interval (seconds)') + '">' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
+      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trBatchCharsFull') || 'Batch Size (characters)') + '">' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
+      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeReasoningFull') || 'Reasoning (CoT)') + '">' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
     '</tr></thead><tbody>';
   trS3NodeNumbers = {};
   for (var k = 0; k < nodes.length; k++) { trS3NodeNumbers[nodes[k].id] = k + 1; }
@@ -297,19 +304,33 @@ function trS3RenderConfigNodes(nodes) {
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
     if (n.enabled) totalConc += (n.concurrency || 0);
-    var idAttr = trS3JsString(n.id);
+    var rawId = n.id || '';
+    var idAttr = trS3JsString(rawId);
+    var safeDomId = 'tr-s3-node-' + i;
+    var concId = safeDomId + '-conc';
+    var intId = safeDomId + '-interval';
+    var batchId = safeDomId + '-batch';
+    var provName = trS3ProviderName(n.providerId);
+    var modelName = trS3ModelName(n.providerId, n.modelId);
+    var concVal = (n.concurrency != null ? n.concurrency : 1);
+    var intVal = (n.intervalSec != null ? n.intervalSec : 0);
+    var batchVal = (n.batchChars != null ? n.batchChars : 0);
     html += '<tr>' +
       '<td class="tr-node-num">' + (i + 1) + '</td>' +
-      '<td><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(n.id || '') + '"' +
+      '<td style="text-align:center;"><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(rawId) + '"' +
         (n.enabled ? ' checked' : '') + ' onchange="trS3OnNodeToggle(' + idAttr + ')"></td>' +
-      '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
-      '<td><input type="number" class="tr-node-conc" min="0" value="' +
-        (n.concurrency != null ? n.concurrency : 1) + '" data-id="' + trEscapeHtml(n.id || '') +
-        '" onchange="trS3OnNodeConcurrency(' + idAttr + ')"></td>' +
-      '<td><input type="number" class="tr-node-interval" min="0" value="' + (n.intervalSec != null ? n.intervalSec : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeInterval(' + idAttr + ')"></td>' +
-      '<td><input type="number" class="tr-node-batch" min="0" value="' + (n.batchChars != null ? n.batchChars : 0) + '" data-id="' + trEscapeHtml(n.id || '') + '" onchange="trS3OnNodeBatch(' + idAttr + ')"></td>' +
-      '<td><input type="checkbox" class="tr-node-reasoning" data-id="' + trEscapeHtml(n.id || '') + '"' +
+      '<td class="tr-node-prov" data-tooltip="' + trEscapeHtml(provName) + '">' + trEscapeHtml(provName) + '</td>' +
+      '<td class="tr-node-model"><div class="tr-model-cell"><span class="tr-model-tail" data-tooltip="' + trEscapeHtml(modelName) + '"><bdo dir="ltr">' + trEscapeHtml(modelName) + '</bdo></span></div></td>' +
+      '<td style="text-align:center;">' +
+        renderStepperHtml(concId, concVal, { min: 0, dataId: rawId, inputClass: 'tr-node-conc', style: 'width:56px;', onchange: 'trS3OnNodeConcurrency(' + idAttr + ')' }) +
+      '</td>' +
+      '<td style="text-align:center;">' +
+        renderStepperHtml(intId, intVal, { min: 0, dataId: rawId, inputClass: 'tr-node-interval', style: 'width:56px;', onchange: 'trS3OnNodeInterval(' + idAttr + ')' }) +
+      '</td>' +
+      '<td style="text-align:center;">' +
+        renderStepperHtml(batchId, batchVal, { min: 0, step: 50, dataId: rawId, inputClass: 'tr-node-batch', style: 'width:80px;', onchange: 'trS3OnNodeBatch(' + idAttr + ')' }) +
+      '</td>' +
+      '<td style="text-align:center;"><input type="checkbox" class="tr-node-reasoning" data-id="' + trEscapeHtml(rawId) + '"' +
         (n.reasoning ? ' checked' : '') + ' onchange="trS3OnNodeReasoning(' + idAttr + ')"></td>' +
       '</tr>';
   }
@@ -431,10 +452,12 @@ function trStep3RenderSettingsModal() {
     var nodeRows = '';
     for (var ni = 0; ni < nodes.length; ni++) {
       var n = nodes[ni];
+      var provName = trS3ProviderName(n.providerId);
+      var modelName = trS3ModelName(n.providerId, n.modelId);
       nodeRows += '<tr>' +
-        '<td style="color:var(--text-muted);">' + (ni + 1) + '</td>' +
-        '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-        '<td><strong style="color:var(--text);">' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</strong></td>' +
+        '<td style="color:var(--text-muted);text-align:center;">' + (ni + 1) + '</td>' +
+        '<td class="tr-node-prov" data-tooltip="' + trEscapeHtml(provName) + '">' + trEscapeHtml(provName) + '</td>' +
+        '<td class="tr-node-model"><div class="tr-model-cell"><span class="tr-model-tail" data-tooltip="' + trEscapeHtml(modelName) + '"><bdo dir="ltr"><strong style="color:var(--text);">' + trEscapeHtml(modelName) + '</strong></bdo></span></div></td>' +
         '<td style="text-align:center;">' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td style="text-align:center;">' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
         '<td style="text-align:center;">' + (n.batchChars ? n.batchChars : '-') + '</td>' +
@@ -466,15 +489,15 @@ function trStep3RenderSettingsModal() {
         '<div class="tr-form-grid">' +
           '<div class="tr-form-field">' +
             '<label class="tr-form-label">' + trEscapeHtml(trT('trNodeConcurrency') || '并发数') + '</label>' +
-            '<input type="number" class="tr-input" id="tr-s3-modal-conc" min="1" value="1">' +
+            renderStepperHtml('tr-s3-modal-conc', 1, { min: 1, style: 'height:32px;' }) +
           '</div>' +
           '<div class="tr-form-field">' +
-            '<label class="tr-form-label">' + trEscapeHtml(trT('trIntervalSec') || '请求间隔(秒)') + '</label>' +
-            '<input type="number" class="tr-input" id="tr-s3-modal-interval" min="0" value="0">' +
+            '<label class="tr-form-label">' + trEscapeHtml(trT('trIntervalSec') || '间隔(秒)') + '</label>' +
+            renderStepperHtml('tr-s3-modal-interval', 0, { min: 0, style: 'height:32px;' }) +
           '</div>' +
           '<div class="tr-form-field">' +
-            '<label class="tr-form-label">' + trEscapeHtml(trT('trBatchChars') || '批次大小(字符)') + '</label>' +
-            '<input type="number" class="tr-input" id="tr-s3-modal-batch" min="0" value="0">' +
+            '<label class="tr-form-label">' + trEscapeHtml(trT('trBatchChars') || '批次(字符)') + '</label>' +
+            renderStepperHtml('tr-s3-modal-batch', 0, { min: 0, step: 50, style: 'height:32px;' }) +
           '</div>' +
           '<div class="tr-form-field-actions" style="gap:12px;">' +
             '<label class="tr-check">' +
@@ -495,17 +518,29 @@ function trStep3RenderSettingsModal() {
       body +=
         '<div class="tr-node-table-section">' +
           '<div class="tr-node-table-title">' + trEscapeHtml(trT('trConfiguredNodes') || '已配置节点列表') + ' (' + nodes.length + ')</div>' +
-          '<table class="tr-pe-table" style="width:100%"><thead><tr>' +
-            '<th style="width:36px;">#</th>' +
-            '<th>' + trEscapeHtml(trT('trNodeProvider') || '服务商') + '</th>' +
-            '<th>' + trEscapeHtml(trT('trNodeModel') || '模型') + '</th>' +
-            '<th style="text-align:center;width:70px;">' + trEscapeHtml(trT('trNodeConcurrency') || '并发数') + '</th>' +
-            '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trIntervalSec') || '请求间隔') + '</th>' +
-            '<th style="text-align:center;width:85px;">' + trEscapeHtml(trT('trBatchChars') || '批次大小') + '</th>' +
-            '<th style="text-align:center;width:60px;">' + trEscapeHtml(trT('trNodeReasoning') || '思考') + '</th>' +
-            '<th style="text-align:center;width:60px;">' + trEscapeHtml(trT('trNodeEnabled') || '启用') + '</th>' +
-            '<th style="text-align:right;width:65px;">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
-          '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
+          '<table class="tr-pe-table" style="width:100%">' +
+            '<colgroup>' +
+              '<col style="width:26px;">' +
+              '<col style="width:80px;">' +
+              '<col style="min-width:140px;">' +
+              '<col style="width:52px;">' +
+              '<col style="width:52px;">' +
+              '<col style="width:58px;">' +
+              '<col style="width:38px;">' +
+              '<col style="width:38px;">' +
+              '<col style="width:48px;">' +
+            '</colgroup>' +
+            '<thead><tr>' +
+              '<th style="text-align:center;">#</th>' +
+              '<th data-tooltip="' + trEscapeHtml(trT('trNodeProviderFull') || 'Provider') + '">' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
+              '<th data-tooltip="' + trEscapeHtml(trT('trNodeModelFull') || 'Model') + '">' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
+              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeConcurrencyFull') || 'Concurrency') + '">' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
+              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trIntervalSecFull') || 'Interval (seconds)') + '">' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
+              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trBatchCharsFull') || 'Batch Size (characters)') + '">' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
+              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeReasoningFull') || 'Reasoning (CoT)') + '">' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
+              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeEnabledFull') || 'Enabled') + '">' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
+              '<th style="text-align:right;" data-tooltip="' + trEscapeHtml(trT('trActions') || 'Actions') + '">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
+            '</tr></thead><tbody>' + nodeRows + '</tbody></table>' +
         '</div>';
     }
 
@@ -683,20 +718,29 @@ function trS3RenderRuntimeNodes(nodes) {
     trS3RenderTotal(0);
     return;
   }
-  var html = '<table class="tr-nodes-table tr-s3-runtime"><thead><tr>' +
-    '<th>' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeTarget')) + '</th>' +
-    '<th>' + trEscapeHtml(trT('trNodeActive')) + '</th>' +
+  var html = '<table class="tr-nodes-table tr-s3-runtime">' +
+    '<colgroup>' +
+      '<col style="width:90px;">' +
+      '<col style="min-width:160px;">' +
+      '<col style="width:65px;">' +
+      '<col style="width:65px;">' +
+    '</colgroup>' +
+    '<thead><tr>' +
+      '<th data-tooltip="' + trEscapeHtml(trT('trNodeProviderFull') || 'Provider') + '">' + trEscapeHtml(trT('trNodeProvider')) + '</th>' +
+      '<th data-tooltip="' + trEscapeHtml(trT('trNodeModelFull') || 'Model') + '">' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
+      '<th style="text-align:right;" data-tooltip="' + trEscapeHtml(trT('trNodeTargetFull') || 'Target') + '">' + trEscapeHtml(trT('trNodeTarget')) + '</th>' +
+      '<th style="text-align:right;" data-tooltip="' + trEscapeHtml(trT('trNodeActiveFull') || 'Active') + '">' + trEscapeHtml(trT('trNodeActive')) + '</th>' +
     '</tr></thead><tbody>';
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i];
     var rowClass = n.enabled ? '' : ' tr-s3-node-disabled';
+    var provName = trS3ProviderName(n.providerId);
+    var modelName = trS3ModelName(n.providerId, n.modelId);
     html += '<tr class="' + rowClass + '">' +
-      '<td>' + trEscapeHtml(trS3ProviderName(n.providerId)) + '</td>' +
-      '<td>' + trEscapeHtml(trS3ModelName(n.providerId, n.modelId)) + '</td>' +
-      '<td>' + (n.target || 0) + '</td>' +
-      '<td>' + (n.active || 0) + '</td>' +
+      '<td class="tr-node-prov" data-tooltip="' + trEscapeHtml(provName) + '">' + trEscapeHtml(provName) + '</td>' +
+      '<td class="tr-node-model"><div class="tr-model-cell"><span class="tr-model-tail" data-tooltip="' + trEscapeHtml(modelName) + '"><bdo dir="ltr">' + trEscapeHtml(modelName) + '</bdo></span></div></td>' +
+      '<td style="text-align:right;">' + (n.target || 0) + '</td>' +
+      '<td style="text-align:right;">' + (n.active || 0) + '</td>' +
     '</tr>';
   }
   html += '</tbody></table>';
