@@ -33,7 +33,6 @@ func (r *Registry) UpdateTextReviewNode(id string, updates config.TextReviewNode
 			r.config.TextReview.Nodes[i].Concurrency = updates.Concurrency
 			r.config.TextReview.Nodes[i].Enabled = updates.Enabled
 			r.config.TextReview.Nodes[i].IntervalSec = updates.IntervalSec
-			r.config.TextReview.Nodes[i].BatchChars = updates.BatchChars
 			r.config.TextReview.Nodes[i].Reasoning = updates.Reasoning
 			return true
 		}
@@ -42,9 +41,9 @@ func (r *Registry) UpdateTextReviewNode(id string, updates config.TextReviewNode
 }
 
 // UpdateTextReviewNodeFields merges only the non-nil fields into the node with
-// the given ID, preserving all other fields (ProviderID/ModelID/IntervalSec/
-// BatchChars). Used by the scheduler ramp-down writeback, which must never wipe
-// fields it does not manage. Returns false if no node with that ID exists.
+// the given ID, preserving all other fields (ProviderID/ModelID/IntervalSec).
+// Used by the scheduler ramp-down writeback, which must never wipe fields it
+// does not manage. Returns false if no node with that ID exists.
 func (r *Registry) UpdateTextReviewNodeFields(id string, concurrency *int, enabled *bool) bool {
 	r.cfgMu.Lock()
 	defer r.cfgMu.Unlock()

@@ -310,10 +310,6 @@ type TextReviewNode struct {
 	// IntervalSec is the minimum number of seconds between two dispatches on
 	// this node (node-level request rate limiting). 0 = no limit.
 	IntervalSec int `yaml:"intervalSec,omitempty" json:"intervalSec,omitempty"`
-	// BatchChars is the maximum accumulated chapter characters sent in one
-	// LLM request (multi-chapter batching). 0 = no batching (one chapter per
-	// request, the default single-chapter behavior).
-	BatchChars int `yaml:"batchChars,omitempty" json:"batchChars,omitempty"`
 	// Reasoning controls whether thinking/reasoning mode is enabled for this node.
 	// When true, the cleanup request includes reasoning_effort and enable_thinking
 	// to activate the model's reasoning capability. When false (default), no

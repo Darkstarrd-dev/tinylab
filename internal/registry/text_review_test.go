@@ -8,7 +8,7 @@ import (
 
 // TestUpdateTextReviewNodeFieldsPreservesStaticFields covers the scheduler
 // ramp-down writeback contract: a concurrency/enabled-only merge must never
-// wipe ProviderID/ModelID/IntervalSec/BatchChars.
+// wipe ProviderID/ModelID/IntervalSec.
 func TestUpdateTextReviewNodeFieldsPreservesStaticFields(t *testing.T) {
 	r := New(&config.Config{})
 	r.AddTextReviewNode(config.TextReviewNode{
@@ -18,7 +18,6 @@ func TestUpdateTextReviewNodeFieldsPreservesStaticFields(t *testing.T) {
 		Concurrency: 3,
 		Enabled:     true,
 		IntervalSec: 5,
-		BatchChars:  8000,
 	})
 
 	// Ramp-down writeback: concurrency 1, still enabled.
@@ -40,8 +39,8 @@ func TestUpdateTextReviewNodeFieldsPreservesStaticFields(t *testing.T) {
 	if n.ProviderID != "p1" || n.ModelID != "m1" {
 		t.Errorf("writeback wiped static fields: provider=%q model=%q, want p1/m1", n.ProviderID, n.ModelID)
 	}
-	if n.IntervalSec != 5 || n.BatchChars != 8000 {
-		t.Errorf("writeback wiped tuning fields: interval=%d batchChars=%d, want 5/8000", n.IntervalSec, n.BatchChars)
+	if n.IntervalSec != 5 {
+		t.Errorf("writeback wiped tuning fields: interval=%d, want 5", n.IntervalSec)
 	}
 	if n.Concurrency != 1 || n.Enabled {
 		t.Errorf("writeback did not apply ramp fields: concurrency=%d enabled=%v, want 1/false", n.Concurrency, n.Enabled)

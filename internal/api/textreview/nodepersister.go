@@ -19,8 +19,8 @@ func NewRegistryPersister(d *apibase.Deps) tr.NodePersister {
 }
 
 // UpdateNodeConcurrency persists the new concurrency for the node, keeping it
-// enabled. Field-level merge: ProviderID/ModelID/IntervalSec/BatchChars are
-// preserved. Returns false if the node was not found.
+// enabled. Field-level merge: ProviderID/ModelID/IntervalSec are preserved.
+// Returns false if the node was not found.
 func (p *registryPersister) UpdateNodeConcurrency(id string, concurrency int) bool {
 	if p.d == nil || p.d.Reg == nil {
 		return false
@@ -35,8 +35,8 @@ func (p *registryPersister) UpdateNodeConcurrency(id string, concurrency int) bo
 }
 
 // DisableNode marks the node disabled with concurrency 0 and persists. Field-level
-// merge: ProviderID/ModelID/IntervalSec/BatchChars are preserved. Returns false if
-// the node was not found.
+// merge: ProviderID/ModelID/IntervalSec are preserved. Returns false if the node
+// was not found.
 func (p *registryPersister) DisableNode(id string) bool {
 	if p.d == nil || p.d.Reg == nil {
 		return false

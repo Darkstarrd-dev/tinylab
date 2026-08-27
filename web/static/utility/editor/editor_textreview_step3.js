@@ -284,7 +284,6 @@ function trS3RenderConfigNodes(nodes) {
       '<col style="min-width:160px;">' +
       '<col style="width:62px;">' +
       '<col style="width:62px;">' +
-      '<col style="width:86px;">' +
       '<col style="width:42px;">' +
     '</colgroup>' +
     '<thead><tr>' +
@@ -294,7 +293,6 @@ function trS3RenderConfigNodes(nodes) {
       '<th data-tooltip="' + trEscapeHtml(trT('trNodeModelFull') || 'Model') + '">' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
       '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeConcurrencyFull') || 'Concurrency') + '">' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
       '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trIntervalSecFull') || 'Interval (seconds)') + '">' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
-      '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trBatchCharsFull') || 'Batch Size (characters)') + '">' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
       '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeReasoningFull') || 'Reasoning (CoT)') + '">' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
     '</tr></thead><tbody>';
   trS3NodeNumbers = {};
@@ -309,12 +307,10 @@ function trS3RenderConfigNodes(nodes) {
     var safeDomId = 'tr-s3-node-' + i;
     var concId = safeDomId + '-conc';
     var intId = safeDomId + '-interval';
-    var batchId = safeDomId + '-batch';
     var provName = trS3ProviderName(n.providerId);
     var modelName = trS3ModelName(n.providerId, n.modelId);
     var concVal = (n.concurrency != null ? n.concurrency : 1);
     var intVal = (n.intervalSec != null ? n.intervalSec : 0);
-    var batchVal = (n.batchChars != null ? n.batchChars : 0);
     html += '<tr>' +
       '<td class="tr-node-num">' + (i + 1) + '</td>' +
       '<td style="text-align:center;"><input type="checkbox" class="tr-node-en" data-id="' + trEscapeHtml(rawId) + '"' +
@@ -326,9 +322,6 @@ function trS3RenderConfigNodes(nodes) {
       '</td>' +
       '<td style="text-align:center;">' +
         renderStepperHtml(intId, intVal, { min: 0, dataId: rawId, inputClass: 'tr-node-interval', style: 'width:56px;', onchange: 'trS3OnNodeInterval(' + idAttr + ')' }) +
-      '</td>' +
-      '<td style="text-align:center;">' +
-        renderStepperHtml(batchId, batchVal, { min: 0, step: 50, dataId: rawId, inputClass: 'tr-node-batch', style: 'width:80px;', onchange: 'trS3OnNodeBatch(' + idAttr + ')' }) +
       '</td>' +
       '<td style="text-align:center;"><input type="checkbox" class="tr-node-reasoning" data-id="' + trEscapeHtml(rawId) + '"' +
         (n.reasoning ? ' checked' : '') + ' onchange="trS3OnNodeReasoning(' + idAttr + ')"></td>' +
@@ -366,16 +359,6 @@ function trS3OnNodeInterval(id) {
   trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
 }
 
-function trS3OnNodeBatch(id) {
-  var row = trS3FindNodeRow(id);
-  if (!row) return;
-  var node = null;
-  for (var i = 0; i < trState.reviewNodes.length; i++) { if (trState.reviewNodes[i].id === id) { node = trState.reviewNodes[i]; break; } }
-  if (!node) return;
-  node.batchChars = Math.max(0, parseInt(row.batch.value, 10) || 0);
-  trS3UpsertNode(id, !!row.en.checked, Math.max(0, parseInt(row.conc.value, 10) || 0));
-}
-
 function trS3OnNodeReasoning(id) {
   var row = trS3FindNodeRow(id);
   if (!row || !row.reasoning) return;
@@ -392,9 +375,8 @@ function trS3FindNodeRow(id) {
   var conc = document.querySelector('.tr-node-conc[data-id="' + sel + '"]');
   if (!en || !conc) return null;
   var interval = document.querySelector('.tr-node-interval[data-id="' + sel + '"]');
-  var batch = document.querySelector('.tr-node-batch[data-id="' + sel + '"]');
   var reasoning = document.querySelector('.tr-node-reasoning[data-id="' + sel + '"]');
-  return { en: en, conc: conc, interval: interval, batch: batch, reasoning: reasoning };
+  return { en: en, conc: conc, interval: interval, reasoning: reasoning };
 }
 function trS3UpsertNode(id, enabled, concurrency) {
   var node = null;
@@ -409,7 +391,6 @@ function trS3UpsertNode(id, enabled, concurrency) {
     concurrency: concurrency,
     enabled: enabled,
     intervalSec: node.intervalSec || 0,
-    batchChars: node.batchChars || 0,
     reasoning: !!node.reasoning
   };
   trApiPost('/text-review/review-nodes', patch).then(function (res) {
@@ -420,7 +401,6 @@ function trS3UpsertNode(id, enabled, concurrency) {
     node.concurrency = concurrency;
     node.enabled = enabled;
     node.intervalSec = patch.intervalSec;
-    node.batchChars = patch.batchChars;
     node.reasoning = patch.reasoning;
     var total = 0;
     for (var j = 0; j < trState.reviewNodes.length; j++) {
@@ -460,7 +440,6 @@ function trStep3RenderSettingsModal() {
         '<td class="tr-node-model"><div class="tr-model-cell"><span class="tr-model-tail" data-tooltip="' + trEscapeHtml(modelName) + '"><bdo dir="ltr"><strong style="color:var(--text);">' + trEscapeHtml(modelName) + '</strong></bdo></span></div></td>' +
         '<td style="text-align:center;">' + (n.concurrency != null ? n.concurrency : 1) + '</td>' +
         '<td style="text-align:center;">' + (n.intervalSec ? n.intervalSec + 's' : '-') + '</td>' +
-        '<td style="text-align:center;">' + (n.batchChars ? n.batchChars : '-') + '</td>' +
         '<td style="text-align:center;">' + (n.reasoning ? '<span style="color:var(--accent,#4fc3f7);font-weight:bold;">✓</span>' : '<span style="color:var(--text-muted);">—</span>') + '</td>' +
         '<td style="text-align:center;">' + (n.enabled ? '<span style="color:var(--success,#10b981);font-weight:bold;">✓</span>' : '<span style="color:var(--text-muted);">✗</span>') + '</td>' +
         '<td style="text-align:right;"><button type="button" class="tr-btn tr-btn-xs tr-btn-danger" onclick="trStep3DeleteNode(\'' +
@@ -495,10 +474,6 @@ function trStep3RenderSettingsModal() {
             '<label class="tr-form-label">' + trEscapeHtml(trT('trIntervalSec') || '间隔(秒)') + '</label>' +
             renderStepperHtml('tr-s3-modal-interval', 0, { min: 0, style: 'height:32px;' }) +
           '</div>' +
-          '<div class="tr-form-field">' +
-            '<label class="tr-form-label">' + trEscapeHtml(trT('trBatchChars') || '批次(字符)') + '</label>' +
-            renderStepperHtml('tr-s3-modal-batch', 0, { min: 0, step: 50, style: 'height:32px;' }) +
-          '</div>' +
           '<div class="tr-form-field-actions" style="gap:12px;">' +
             '<label class="tr-check">' +
               '<input type="checkbox" id="tr-s3-modal-reasoning">' +
@@ -525,7 +500,6 @@ function trStep3RenderSettingsModal() {
               '<col style="min-width:140px;">' +
               '<col style="width:52px;">' +
               '<col style="width:52px;">' +
-              '<col style="width:58px;">' +
               '<col style="width:38px;">' +
               '<col style="width:38px;">' +
               '<col style="width:48px;">' +
@@ -536,7 +510,6 @@ function trStep3RenderSettingsModal() {
               '<th data-tooltip="' + trEscapeHtml(trT('trNodeModelFull') || 'Model') + '">' + trEscapeHtml(trT('trNodeModel')) + '</th>' +
               '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeConcurrencyFull') || 'Concurrency') + '">' + trEscapeHtml(trT('trNodeConcurrency')) + '</th>' +
               '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trIntervalSecFull') || 'Interval (seconds)') + '">' + trEscapeHtml(trT('trIntervalSec')) + '</th>' +
-              '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trBatchCharsFull') || 'Batch Size (characters)') + '">' + trEscapeHtml(trT('trBatchChars')) + '</th>' +
               '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeReasoningFull') || 'Reasoning (CoT)') + '">' + trEscapeHtml(trT('trNodeReasoning')) + '</th>' +
               '<th style="text-align:center;" data-tooltip="' + trEscapeHtml(trT('trNodeEnabledFull') || 'Enabled') + '">' + trEscapeHtml(trT('trNodeEnabled')) + '</th>' +
               '<th style="text-align:right;" data-tooltip="' + trEscapeHtml(trT('trActions') || 'Actions') + '">' + trEscapeHtml(trT('trActions') || '操作') + '</th>' +
@@ -649,15 +622,13 @@ function trStep3AddNode() {
   var enEl = document.getElementById('tr-s3-modal-enabled');
   var reasoningEl = document.getElementById('tr-s3-modal-reasoning');
   var intervalEl = document.getElementById('tr-s3-modal-interval');
-  var batchEl = document.getElementById('tr-s3-modal-batch');
   var body = {
     providerId: trS3ModalModel.providerId || 'combo',
     modelId: trS3ModalModel.modelId,
     concurrency: concEl ? Math.max(1, parseInt(concEl.value, 10) || 1) : 1,
     enabled: enEl ? enEl.checked : true,
     reasoning: reasoningEl ? reasoningEl.checked : false,
-    intervalSec: intervalEl ? Math.max(0, parseInt(intervalEl.value, 10) || 0) : 0,
-    batchChars: batchEl ? Math.max(0, parseInt(batchEl.value, 10) || 0) : 0
+    intervalSec: intervalEl ? Math.max(0, parseInt(intervalEl.value, 10) || 0) : 0
   };
   trApiPost('/text-review/review-nodes', body).then(function (res) {
     if (res && res.error) { trToast(res.error, 'error'); return; }
