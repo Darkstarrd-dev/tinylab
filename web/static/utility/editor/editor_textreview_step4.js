@@ -17,6 +17,8 @@ var trS4Completed = [];      // completed chapters (status==='completed'), with 
 var trS4Selected = -1;       // selected chapter's backend `index` (-1 = none)
 var trS4Rows = [];            // DiffRow[] for the selected chapter (window.editorAlignedDiff output)
 var trS4Decisions = null;    // ref to trState.lineDecisions[selectedIdx] (object or null)
+var trS4EventSource = null; // SSE handle for live step4 updates
+var trS4PollTimer = null;    // fallback poll when SSE closes unexpectedly
 
 // ===================== main render =====================
 
@@ -25,6 +27,11 @@ var trS4Decisions = null;    // ref to trState.lineDecisions[selectedIdx] (objec
  * @param {HTMLElement} panel container element
  * @param {object} state trState
  */
+window.trCleanupStep4 = function () {
+  if (trS4EventSource) { try { trS4EventSource.close(); } catch(e){} trS4EventSource=null; }
+  if (trS4PollTimer) { clearInterval(trS4PollTimer); trS4PollTimer=null; }
+};
+
 window.trRenderStep4 = function (panel, state) {
   panel.innerHTML =
     '<div class="tr-step-panel tr-s4-panel">' +
@@ -77,7 +84,6 @@ function trS4Load() {
       if (allBtn0) allBtn0.disabled = true;
       return;
     }
-    // Keep the previous selection if still valid, else pick the first.
     var stillValid = false;
     for (var i = 0; i < trS4Completed.length; i++) {
       if (trS4Completed[i].index === trS4Selected) { stillValid = true; break; }
@@ -87,6 +93,7 @@ function trS4Load() {
     trS4SelectChapter(trS4Selected);
     var allBtn = document.getElementById('tr-s4-exportall');
     if (allBtn) allBtn.disabled = false;
+    trS4OpenLive();
   }, function () {
     trS4Snapshot = null;
     trS4Completed = [];
@@ -520,6 +527,76 @@ function trS4Download(name, text) {
   a.click();
   document.body.removeChild(a);
   setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+
+function trS4OpenLive() {
+  trS4CloseLive();
+  if (!trState.sessionId) return;
+  try {
+    trS4EventSource = new EventSource('/api/text-review/sessions/' + encodeURIComponent(trState.sessionId) + '/events');
+  } catch(e) { trS4StartPoll(); return; }
+  trS4EventSource.addEventListener('status', function (e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (d.chapterIdx == null) return; // session-level status: let counts refresh via next poll if needed
+      trS4ApplyStatus(d);
+    } catch(_) {}
+  });
+  trS4EventSource.onerror = function () {
+    try { trS4EventSource.close(); } catch(_){}
+    trS4EventSource = null;
+    trS4StartPoll();
+  };
+}
+
+function trS4CloseLive() {
+  if (trS4EventSource) { try { trS4EventSource.close(); } catch(e){} trS4EventSource=null; }
+  if (trS4PollTimer) { clearInterval(trS4PollTimer); trS4PollTimer=null; }
+}
+
+function trS4StartPoll() {
+  if (trS4PollTimer) return;
+  trS4PollTimer = setInterval(function () { trS4RefreshFromSnapshot(); }, 2500);
+}
+
+function trS4ApplyStatus(evt) {
+  var idx = evt.chapterIdx;
+  if (idx == null) return;
+  // Only care about newly completed chapters; other statuses are handled in step3 detail
+  if (evt.status !== 'completed') return;
+  trS4RefreshFromSnapshot();
+}
+
+function trS4RefreshFromSnapshot() {
+  if (!trState.sessionId) return;
+  trApiGet('/text-review/sessions/' + encodeURIComponent(trState.sessionId)).then(function (res) {
+    if (!res || res.error || !Array.isArray(res.chapters)) return;
+    var next = res.chapters.filter(function (c) {
+      return c.status === 'completed' && typeof c.cleaned === 'string' && typeof c.content === 'string';
+    });
+    var changed = (next.length !== trS4Completed.length);
+    if (!changed) {
+      for (var i=0;i<next.length;i++){ if(next[i].index !== trS4Completed[i].index){ changed=true; break; } }
+    }
+    if (!changed) return;
+    trS4Snapshot = res;
+    trS4Completed = next;
+    // keep selection if still present
+    var keep=false;
+    for(var j=0;j<trS4Completed.length;j++){ if(trS4Completed[j].index===trS4Selected){ keep=true; break; } }
+    if(!keep && trS4Completed.length) trS4Selected = trS4Completed[0].index;
+    var selBefore = trS4Selected;
+    trS4RenderChapterList();
+    if (keep) {
+      // selection unchanged: only list grew — don't steal focus off current diff
+    } else if (trS4Completed.length) {
+      trS4SelectChapter(trS4Selected);
+    }
+    var allBtn = document.getElementById('tr-s4-exportall');
+    if (allBtn) allBtn.disabled = trS4Completed.length === 0;
+    trToast(trT('trS4NewCompleted') || '有新章节完成', 'info');
+  }, function(){});
 }
 
 // ===================== reprocess =====================

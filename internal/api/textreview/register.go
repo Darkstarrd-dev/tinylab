@@ -125,6 +125,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/sessions/{id}/pause", h.pauseSession)
 	r.Post("/sessions/{id}/resume", h.resumeSession)
 	r.Post("/sessions/{id}/stop", h.stopSession)
+	r.Post("/sessions/{id}/restart", h.restartSession)
 	r.Post("/sessions/{id}/chapters/{idx}/reprocess", h.reprocessChapter)
 	r.Delete("/sessions/{id}", h.deleteSession)
 	r.Post("/clear", h.clearAllSessions)

@@ -25,6 +25,7 @@ var trS3ProviderPrefixes = {};  // providerId -> prefix (from /api/models id fie
 var trS3ModelNames = {};        // "providerId/modelId" -> alias (from /api/models); keyed by providerId to avoid collision when multiple providers carry the same realModelId
 var trS3NodeNumbers = {};       // nodeId -> 1-based display number
 var trS3SelectedIdx = 0;       // currently selected chapter card (shown in the right content pane)
+var trS3UserSelected = false; // true after user manually clicked a card; auto-follow disabled until reset
 var trS3ModalModel = null;      // {providerId, modelId, label} selected in the local model prompt
 var trS3RightTab = 'preview';  // 当前右侧面板视图: 'preview' | 'debug'
 var trS3DebugRaw = {};         // chapterIdx -> 累积的原始响应文本
@@ -35,6 +36,16 @@ var trS3DebugCollapsed = { request: false, thinking: false, output: false }; // 
 var trS3PendingFlush = {};      // chapterIdx -> true (has pending render)
 var trS3FlushScheduled = false; // rAF already queued
 var trS3PendingDebugFlush = {}; // chapterIdx -> true (debug pane pending)
+var trS3SubscribeAttempts = 0; // snapshot fetch retry counter
+// --- timer + processing-speed state ---
+var trTimerStart = 0;      // epoch-ms when the current running stretch began (0 when not running)
+var trTimerAccum = 0;      // accumulated elapsed ms across finished running stretches
+var trTimerRunning = false;
+var trTimerInterval = null; // 1s clock
+var trSpeedSamples = [];    // [{t: epoch-ms, total: chars}] rolling window
+var trLastCleanedTotal = 0;
+var trS3NodesLoadToken = 0; // coalesce concurrent pool reloads; only latest renders
+var trS3PoolEditing = false;  // true while user focuses an input in the pool section (suppress clobbering re-renders)
 window.trS3NodeNumbers = trS3NodeNumbers;
 
 function trS3NodeBadge(nodeId) {
@@ -174,6 +185,7 @@ window.trRenderStep3 = function (panel, state) {
 
           // chapter tabs + list
           '<div class="tr-section">' +
+            '<div class="tr-s3-stats"><span class="tr-s3-timer" id="tr-s3-timer"></span></div>' +
             '<div class="tr-s3-tabs" id="tr-s3-tabs"></div>' +
             '<div class="tr-s3-chapters" id="tr-s3-chapters"></div>' +
             '<div class="tr-empty tr-s3-empty-hint" id="tr-s3-empty-hint" style="display:none">' +
@@ -202,6 +214,14 @@ window.trRenderStep3 = function (panel, state) {
         '</div>' +
       '</div>' +
     '</div>';
+
+  // Focus guard: while the user is editing a node-pool input, background
+  // refreshes must not clobber the table (innerHTML rebuild drops focus).
+  var trPoolSec = document.getElementById('tr-s3-pool-section');
+  if (trPoolSec) {
+    trPoolSec.addEventListener('focusin', function () { trS3PoolEditing = true; });
+    trPoolSec.addEventListener('focusout', function () { trS3PoolEditing = false; });
+  }
 
   // Wire dynamic content. 切页重连: if a session is already known, re-fetch
   // snapshot + re-subscribe (no Start button needed). If already subscribed
@@ -234,15 +254,18 @@ window.trRenderStep3 = function (panel, state) {
 function trStep3LoadNodes() {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
+  var token = ++trS3NodesLoadToken;
   trApiGet('/models').then(function (res) {
     var models = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
     trS3PopulateProviders(models);
     return trApiGet('/text-review/review-nodes');
   }).then(function (res) {
+    if (token !== trS3NodesLoadToken) return; // superseded by a newer load
     var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
     trState.reviewNodes = nodes;
     trS3RenderConfigNodes(nodes);
   }, function () {
+    if (token !== trS3NodesLoadToken) return;
     if (wrap) wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNodesLoadFailed')) + '</div>';
     trS3RenderTotal(0);
   });
@@ -251,6 +274,7 @@ function trStep3LoadNodes() {
 function trS3RenderConfigNodes(nodes) {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
+  if (trS3PoolEditing) return; // user editing an input: don't rebuild and drop focus
   if (!nodes || nodes.length === 0) {
     wrap.innerHTML = '<div class="tr-empty">' + trEscapeHtml(trT('trNoNodes')) + '</div>';
     trS3RenderTotal(0);
@@ -652,6 +676,7 @@ function trStep3OnSettingsClosed() {
 function trS3RenderRuntimeNodes(nodes) {
   var wrap = document.getElementById('tr-s3-nodes');
   if (!wrap) return;
+  if (trS3PoolEditing) return; // never clobber a table the user is editing
 
   if (!nodes || nodes.length === 0) {
     wrap.innerHTML = '';
@@ -800,6 +825,39 @@ function trStep3Start() {
     trToast(trT('trNoNodesEnabled'), 'warning');
     return;
   }
+  // If there's an existing terminal session (cancelled/completed), restart it
+  // to preserve already-completed chapters instead of creating a fresh session.
+  var terminal = (trS3SessionStatus === 'cancelled' || trS3SessionStatus === 'completed' || trS3SessionStatus === 'failed');
+  if (trState.sessionId && terminal) {
+    trS3SessionStatus = 'running';
+    trS3UpdateControls();
+    trApiPost('/text-review/sessions/' + trState.sessionId + '/restart', { nodeIds: nodeIds }).then(function (res) {
+      if (res && res.error) {
+        trToast(res.error, 'error');
+        // No pending to restart means everything was already completed; just mark completed
+        if (String(res.error).indexOf('no pending') !== -1) {
+          trS3SessionStatus = 'completed';
+          trS3UpdateControls();
+        } else {
+          trS3SessionStatus = 'cancelled';
+          trS3UpdateControls();
+        }
+        return;
+      }
+      trS3UserSelected = false;
+      trTimerReset();
+      trTimerStartRun();
+      trTimerTick();
+      trTimerEnsureClock();
+      trSubscribeSession(trState.sessionId);
+    }).catch(function (err) {
+      console.warn('tr restart failed:', err);
+      trToast(trT('trStartFailed'), 'error');
+      trS3SessionStatus = 'cancelled';
+      trS3UpdateControls();
+    });
+    return;
+  }
   trS3SessionStatus = 'running';
   trS3UpdateControls();
   var range = trS3RangeBounds();
@@ -814,6 +872,15 @@ function trStep3Start() {
     if (res && res.error) { trToast(res.error, 'error'); trS3SessionStatus = 'idle'; trS3UpdateControls(); return; }
     trState.sessionId = res && res.sessionId;
     trSave();
+    trS3UserSelected = false;
+    trTimerReset();
+    trTimerStartRun();
+    trTimerTick();
+    trTimerEnsureClock();
+    // Surface an instantly-terminated session (no usable node) instead of silent no-op
+    if (res && res.status && res.status !== 'running' && res.status !== 'paused') {
+      trToast((typeof trT === 'function' ? trT('trSessionNoWork') : '') || ('会话未开始处理（' + res.status + '）：请检查节点是否启用且并发数>0'), 'warning');
+    }
     trSubscribeSession(trState.sessionId);
   }).catch(function (err) {
     console.warn('tr start failed:', err);
@@ -824,22 +891,44 @@ function trStep3Start() {
 }
 
 function trStep3Pause() {
-  trApiPost('/text-review/sessions/' + trState.sessionId + '/pause', {}).then(function () {}, function () {
+  if (!trState.sessionId) return;
+  trS3SessionStatus = 'paused';
+  trS3UpdateControls();
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/pause', {}).then(function (res) {
+    if (res && res.error) {
+      trToast(res.error, 'error');
+      // revert via snapshot
+      if (trState.sessionId) trSubscribeSession(trState.sessionId);
+    }
+  }, function () {
     trToast(trT('trPauseFailed'), 'error');
+    if (trState.sessionId) trSubscribeSession(trState.sessionId);
   });
 }
 
 function trStep3Resume() {
-  trApiPost('/text-review/sessions/' + trState.sessionId + '/resume', {}).then(function () {}, function () {
+  if (!trState.sessionId) return;
+  trS3SessionStatus = 'running';
+  trS3UpdateControls();
+  trApiPost('/text-review/sessions/' + trState.sessionId + '/resume', {}).then(function (res) {
+    if (res && res.error) {
+      trToast(res.error, 'error');
+      if (trState.sessionId) trSubscribeSession(trState.sessionId);
+    }
+  }, function () {
     trToast(trT('trResumeFailed'), 'error');
+    if (trState.sessionId) trSubscribeSession(trState.sessionId);
   });
 }
 
 function trStep3Stop() {
+  if (!trState.sessionId) return;
+  trTimerFreeze();
+  trTimerTick();
   trApiPost('/text-review/sessions/' + trState.sessionId + '/stop', {}).then(function () {
-    // 乐观更新：即使 SSE 事件稍后才到也能立即响应用户操作
     trS3SessionStatus = 'cancelled';
     trS3UpdateControls();
+    trS3RefreshPoolAfterStop();
   }, function () {
     trToast(trT('trStopFailed'), 'error');
   });
@@ -990,6 +1079,7 @@ function trS3CardProgress(c) {
 function trS3SelectChapter(idx) {
   if (idx < 0 || idx >= trS3Chapters.length) return;
   trS3SelectedIdx = idx;
+  trS3UserSelected = true;
   var cards = document.querySelectorAll('#tr-s3-chapters .tr-s3-card');
   for (var i = 0; i < cards.length; i++) cards[i].classList.remove('selected');
   var card = document.querySelector('#tr-s3-chapters .tr-s3-card[data-idx="' + idx + '"]');
@@ -1085,17 +1175,35 @@ function trS3UpdateCardStatus(idx) {
  * authoritative; events overwrite the in-memory mirror post-snapshot.
  */
 function trSubscribeSession(id) {
+  trS3SubscribeAttempts = 0;
+  trS3FetchSnapshot(id);
+  trS3OpenEventSource(id);
+}
+
+function trS3FetchSnapshot(id) {
   trApiGet('/text-review/sessions/' + id).then(function (res) {
     if (res && !res.error) {
+      trS3SubscribeAttempts = 0;
       trS3ReconcileFromSnapshot(res);
       trS3RenderAll();
     } else {
-      trS3OnSessionGone();
+      trS3SubscribeAttempts++;
+      if (trS3SubscribeAttempts <= 3) {
+        setTimeout(function () { if (trState.sessionId === id) trS3FetchSnapshot(id); }, 400);
+      } else {
+        trS3OnSessionGone();
+        trToast((typeof trT === 'function' ? trT('trSessionUnavailable') : '') || '会话暂时不可用（' + (res && res.error || '网络错误') + '）', 'error');
+      }
     }
   }).catch(function () {
-    trS3OnSessionGone();
+    trS3SubscribeAttempts++;
+    if (trS3SubscribeAttempts <= 3) {
+      setTimeout(function () { if (trState.sessionId === id) trS3FetchSnapshot(id); }, 400);
+    } else {
+      trS3OnSessionGone();
+      trToast('会话暂时不可用（网络错误）', 'error');
+    }
   });
-  trS3OpenEventSource(id);
 }
 
 function trS3OpenEventSource(id) {
@@ -1281,8 +1389,17 @@ function trS3OnChunk(evt) {
 function trS3OnStatus(evt) {
   var idx = evt.chapterIdx;
   if (idx == null) {
-    // Session-level status (running/paused/resumed/cancelled/completed).
-    if (evt.status) { trS3SessionStatus = evt.status; trS3UpdateControls(); }
+    if (evt.status) {
+      trS3SessionStatus = evt.status;
+      trS3UpdateControls();
+      if (evt.status === 'cancelled' || evt.status === 'completed') {
+        trS3RefreshPoolAfterStop();
+      }
+      if (evt.status === 'running' || evt.status === 'paused') {
+        trS3UserSelected = false;
+      }
+      trTimerSync(evt.status);
+    }
     trS3MaybeSessionDone();
     return;
   }
@@ -1310,12 +1427,22 @@ function trS3OnStatus(evt) {
   trS3UpdateTabCounts();
   trS3UpdateControls();
 
-  // 章节状态变化时刷新 debug 面板
   if (trS3RightTab === 'debug' && idx === trS3SelectedIdx) {
     trS3RenderDebugPanel(idx);
   }
 
+  // 完成一章后自动切到 processing 队列首位（除非用户手动点过卡片）
+  if (evt.status === 'completed') {
+    // If the currently selected chapter just completed, auto-follow to next processing
+    if (idx === trS3SelectedIdx) trS3UserSelected = false;
+    trS3AutoFollow();
+  }
+
   trS3MaybeSessionDone();
+  // If session just became terminal, refresh pool so inputs are editable
+  if (evt.status === 'cancelled' || evt.status === 'completed') {
+    // session-level status handles pool too, but chapter-level terminal may also imply done
+  }
 }
 
 /**
@@ -1324,7 +1451,12 @@ function trS3OnStatus(evt) {
  */
 function trS3OnNode(evt) {
   trS3Nodes = evt.nodes || [];
-  trS3RenderRuntimeNodes(trS3Nodes);
+  // Only update the live runtime table while actively cleaning. After
+  // stop/complete the trailing in-flight node events must NOT overwrite the
+  // now-editable config table (would drop input focus / show read-only rows).
+  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused') {
+    trS3RenderRuntimeNodes(trS3Nodes);
+  }
 }
 
 /**
@@ -1358,13 +1490,23 @@ function trS3ReconcileFromSnapshot(snap) {
   trS3DebugRaw = {};
   trS3DebugThinking = {};
   trS3DebugContent = {};
+  trTimerSync(trS3SessionStatus);
+  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused') {
+    trS3UserSelected = false;
+  }
 }
 
 function trS3RenderAll() {
-  trS3RenderRuntimeNodes(trS3Nodes);
+  if (trS3SessionStatus === 'running' || trS3SessionStatus === 'paused') {
+    trS3RenderRuntimeNodes(trS3Nodes);
+  } else {
+    // Terminal/idle: show editable config pool (inputs), not read-only runtime view
+    trStep3LoadNodes();
+  }
   trS3RenderChapterList();
   trS3UpdateTabCounts();
   trS3UpdateControls();
+  trS3AutoFollow();
 }
 
 function trS3OnSessionGone() {
@@ -1394,6 +1536,76 @@ window.trS3HasCompleted = function () {
   return false;
 };
 
+// ===================== timer + processing speed =====================
+
+function trTimerFmt(ms) {
+  ms = Math.max(0, Math.floor(ms / 1000));
+  var h = Math.floor(ms / 3600);
+  var m = Math.floor((ms % 3600) / 60);
+  var s2 = ms % 60;
+  function pad(n){ return (n < 10 ? '0' : '') + n; }
+  return (h > 0 ? pad(h) + ':' : '') + pad(m) + ':' + pad(s2);
+}
+function trCleanedTotal() {
+  var t = 0;
+  for (var i = 0; i < trS3Chapters.length; i++) {
+    t += (trS3Chapters[i].cleaned || '').length;
+  }
+  return t;
+}
+function trTimerElapsed() {
+  return trTimerAccum + (trTimerRunning ? (Date.now() - trTimerStart) : 0);
+}
+function trTimerStartRun() {
+  if (!trTimerRunning) {
+    trTimerRunning = true;
+    trTimerStart = Date.now();
+    trSpeedSamples = [];
+  }
+}
+function trTimerFreeze() {
+  if (trTimerRunning) {
+    trTimerAccum += (Date.now() - trTimerStart);
+    trTimerRunning = false;
+    trTimerStart = 0;
+  }
+}
+function trTimerReset() {
+  trTimerAccum = 0;
+  trTimerStart = 0;
+  trTimerRunning = false;
+  trSpeedSamples = [];
+}
+function trTimerTick() {
+  var el = document.getElementById('tr-s3-timer');
+  if (!el) return;
+  var now = Date.now();
+  // rolling speed: chars/second over the last ~4s
+  if (trTimerRunning) {
+    trSpeedSamples.push({ t: now, total: trCleanedTotal() });
+    while (trSpeedSamples.length > 2 && (now - trSpeedSamples[0].t) > 4000) trSpeedSamples.shift();
+  }
+  var speed = 0;
+  if (trTimerRunning && trSpeedSamples.length >= 2) {
+    var first = trSpeedSamples[0];
+    var last = trSpeedSamples[trSpeedSamples.length - 1];
+    if (last.t > first.t) speed = Math.round((last.total - first.total) * 1000 / (last.t - first.t));
+  }
+  el.textContent = '⏱ ' + trTimerFmt(trTimerElapsed()) + ' · ' + speed + ' ' + (trT('trCharsPerSec') || '字/秒');
+}
+function trTimerEnsureClock() {
+  if (trTimerInterval) return;
+  trTimerInterval = setInterval(trTimerTick, 1000);
+}
+function trTimerStopClock() {
+  if (trTimerInterval) { clearInterval(trTimerInterval); trTimerInterval = null; }
+}
+function trTimerSync(status) {
+  if (status === 'running') { trTimerStartRun(); trTimerTick(); trTimerEnsureClock(); }
+  else if (status === 'paused' || status === 'cancelled' || status === 'completed') { trTimerFreeze(); trTimerTick(); }
+  else { trTimerStopClock(); }
+}
+
 // ===================== cleanup =====================
 
 /**
@@ -1407,6 +1619,7 @@ window.trCleanupStep3 = function () {
     trEventSource.close();
     trEventSource = null;
   }
+  trTimerStopClock();
 };
 
 // ===================== small helpers =====================

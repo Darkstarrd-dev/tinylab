@@ -162,8 +162,8 @@ window.renderTextReview = function (container) {
 };
 
 window.cleanupTextReview = function () {
-  // Close the Step3 SSE subscription (backend task continues — 切页不丢).
   if (typeof window.trCleanupStep3 === 'function') window.trCleanupStep3();
+  if (typeof window.trCleanupStep4 === 'function') window.trCleanupStep4();
   // Persist lightweight state so the user's place in the wizard survives.
   trSave();
   trContainer = null;

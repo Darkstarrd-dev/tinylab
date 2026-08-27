@@ -103,6 +103,11 @@ type Session struct {
 // mu helpers — the scheduler and workers lock the session to mutate chapters
 // and node runtime state. HTTP handlers use Snapshot for a consistent read.
 
+// Lock exposes the session mutex for handler use (e.g. restart). Prefer the
+// internal lock/unlock helpers inside the textreview package.
+func (s *Session) Lock()   { s.mu.Lock() }
+func (s *Session) Unlock() { s.mu.Unlock() }
+
 func (s *Session) lock()   { s.mu.Lock() }
 func (s *Session) unlock() { s.mu.Unlock() }
 

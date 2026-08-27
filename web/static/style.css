@@ -5694,6 +5694,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 /* Step3: node-pool runtime + controls + chapter tabs + cards */
 .tr-s3-total{margin-top:8px;font-size:var(--font-badge,12px);color:var(--text-muted)}
 .tr-s3-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+.tr-s3-stats{display:flex;justify-content:flex-end;align-items:center;margin-bottom:6px;min-height:18px}
+.tr-s3-timer{font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;letter-spacing:0.3px;white-space:nowrap}
+
 .tr-s3-tabs{display:flex;gap:4px;border-bottom:1px solid var(--glass-border);margin-bottom:10px;flex-wrap:wrap}
 .tr-s3-tab{padding:6px 12px;font-size:var(--font-badge,12px);border:none;background:transparent;color:var(--text-muted);cursor:pointer;border-radius:0;transition:all var(--transition-fast,0.15s);display:inline-flex;align-items:center;gap:6px}
 .tr-s3-tab:hover{background:var(--glass-hover);color:var(--text-secondary)}
