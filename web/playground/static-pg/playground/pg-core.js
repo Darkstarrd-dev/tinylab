@@ -40,6 +40,8 @@ var PG_DEFAULT_CFG = {
   agentName: '',
   contextLimit: 8000,
   thinkingBudget: 4096,
+  // OpenAI reasoning effort (normal mode): off | minimal | low | medium | high | xhigh | max
+  reasoningEffort: 'medium',
   // Google Native parameters
   topK: 40,
   thinkingLevel: 'medium', // minimal | low | medium | high
@@ -108,6 +110,7 @@ var PG_DEFAULT_PARAMS = {
   presencePenalty: true,
   seed: false,
   thinkingBudget: false,
+  reasoningEffort: false,
   // Google Native toggles
   topK: false,
   thinkingLevel: true,
@@ -117,6 +120,19 @@ var PG_DEFAULT_PARAMS = {
   responseMimeType: false,
   responseSchema: false,
   safetySettings: false,
+};
+
+// OpenAI reasoning_effort wire values: UI level -> JSON body field value.
+// 'off' (UI "Off") maps to the wire disable value "none" (per omp mapping:
+// reasoning_effort:"none" disables reasoning on supporting models).
+var PG_REASONING_EFFORT_WIRE = {
+  off: 'none',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max'
 };
 
 var PG_ICON_COPY = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';

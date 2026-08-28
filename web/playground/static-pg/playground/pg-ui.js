@@ -688,6 +688,19 @@ function pgRenderSidebar() {
       paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
       paramRow('maxTokens', 'pgMaxTokens', 0, 1, 1, true) +
       paramRow('thinkingBudget', 'pgThinking', 0, 100000, 100, true) +
+      '<div class="pg-param' + (!en.reasoningEffort || customMode ? ' disabled' : '') + '">' +
+        '<button class="pg-toggle' + (en.reasoningEffort ? ' on' : '') + '" onclick="pgToggleParam(\'reasoningEffort\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.reasoningEffort ? '✓' : '✕') + '</button>' +
+        '<label data-tooltip="' + pgEscapeAttr(pgT('pgReasoningEffortHint')) + '">' + pgEscapeHtml(pgT('pgReasoningEffort')) + '</label>' +
+        pgRenderCustomSelect('pg-reason-wrap', 'pg-reason-sel', [
+          { value: 'off', label: pgT('pgReasoningOff') || 'Off' },
+          { value: 'minimal', label: pgT('pgThinkingMinimal') || 'Minimal' },
+          { value: 'low', label: pgT('pgThinkingLow') || 'Low' },
+          { value: 'medium', label: pgT('pgThinkingMedium') || 'Medium' },
+          { value: 'high', label: pgT('pgThinkingHigh') || 'High' },
+          { value: 'xhigh', label: pgT('pgReasoningXHigh') || 'XHigh' },
+          { value: 'max', label: pgT('pgReasoningMax') || 'Max' }
+        ], cfg.reasoningEffort || 'medium', 'pgOnParam(\'reasoningEffort\', this.value)', 'flex:1;min-width:0') +
+      '</div>' +
       '<div class="pg-param' + (!en.seed || customMode ? ' disabled' : '') + '">' +
         '<button class="pg-toggle' + (en.seed ? ' on' : '') + '" onclick="pgToggleParam(\'seed\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.seed ? '✓' : '✕') + '</button>' +
         '<label>' + pgEscapeHtml(pgT('pgSeed')) + '</label>' +

@@ -160,6 +160,7 @@ function pgBuildBodyForWin(i) {
     body.seed = isNaN(seedNum) ? cfg.seed : seedNum;
   }
   if (en.thinkingBudget && cfg.thinkingBudget > 0) body.thinking = { type: 'enabled', budget_tokens: cfg.thinkingBudget };
+  if (en.reasoningEffort && cfg.reasoningEffort) body.reasoning_effort = PG_REASONING_EFFORT_WIRE[cfg.reasoningEffort] || cfg.reasoningEffort;
   return body;
 }
 
