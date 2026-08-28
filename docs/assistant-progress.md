@@ -2,7 +2,7 @@
 
 > 桌面小精灵助手（Assistant）功能的单一事实来源，供后续仅针对该功能迭代时快速定位。
 > 窗口透明/点击穿透/DPI 等宿主级配方见 [`desktop-pet-progress.md`](desktop-pet-progress.md)，本文不重复。
-> 最后核对：2026-08-26。
+> 最后核对：2026-08-28（新增 §8 F6 Demo 2D 测试台）。
 
 ## 1. 功能面总览
 
@@ -15,6 +15,7 @@
 | 意图分发 | `internal/api/assistant/handler.go`（`dispatch`→`classifyIntent`：LLM 优先 `internal/assistant/llm_classifier.go`，无模型/失败回退关键词 `semantics.json`）、`schema.go`、`events.go`（SSE 广播） | `POST /api/assistant/dispatch` 返回命中的工具；`GET /api/assistant/events` SSE `notify` 事件驱动宠物气泡 |
 | 宠物运行时 | `web/static/sprite-pet.html` + `sprite-pet.js`、`host_webview_windows.go::openPetWindow/petOnMessage` | 唯一助手表面（App 内 dock 已废弃，勿恢复）；petSM 状态机 + 页面驱动窗口尺寸 |
 | 生命周期 | `internal/petstate`、托盘「释放」（`petWindowsOpen` 防重入）、菜单关闭回写 | 启动 enabled 即开；Settings 开关 OFF 即关 / ON 即开；宠物菜单关闭 = PATCH enabled=false（关闭联动） |
+| Demo 测试台 | `web/static/assistant-demo.js`（ademoSM + 平台物理 + 输入 + 碰撞体 + 背景图）、`web/assistant-demo.test.js` | F6/导航第 6 格进入的 2D 游戏测试页；全部行为 demo 页局部（不写配置、不触宠物窗），详见 §8 |
 
 ## 2. Action 状态机（petSM，sprite-pet.js）
 
@@ -46,9 +47,10 @@
 
 ## 6. 验证
 
-- JS 回归：`node web/sprite-pet-drag.test.js`（VM DOM stub，8 项：拖拽协议 ×3、setPetScale+size 消息、hit 8px 外扩、帧宽高比→size、SM 一次性态回默认、外部脚本契约 ×2）。
+- JS 回归：`node web/sprite-pet-drag.test.js`（VM DOM stub，8 项：拖拽协议 ×3、setPetScale+size 消息、hit 8px 外扩、帧宽高比→size、SM 一次性态回默认、外部脚本契约 ×2）。**注意：「帧宽高比→size」用例 2026-08-28 起在干净树上失败（历史遗留，未修）。**
+- Demo 页回归：`node web/assistant-demo.test.js`（19 项，见 §8 验证行）。
 - Go：`go build -tags "tray webview"`；`go test ./internal/api/assistant/ ./internal/api/settings/ ./internal/config/`。
-- 行为验证须在解锁桌面 + webview 变体运行时（headless 浏览器本机不可用）；`PrintWindow` 对 DComp 内容无效，用屏幕截取。
+- 宠物窗行为验证须在解锁桌面 + webview 变体运行时（headless 无法驱动原生宠物窗）；`PrintWindow` 对 DComp 内容无效，用屏幕截取。**App 内 SPA 页面（含 Demo 页）可用 headless Chrome CDP 验证**：隔离实例（复制 config 改端口）+ `chrome --headless=new --remote-debugging-port` 驱动，经 `window.__ademo` 测试缝断言。
 
 ## 7. 变更维护清单（改这些必须同步本文）
 
@@ -59,4 +61,18 @@
 | 窗口尺寸协议（size 消息） | §3、`host_webview_windows.go::petOnMessage`、`desktop-pet-progress.md` |
 | sheet 端点 / 预览机制 | §1 精灵图服务行、`sheet.go`、`sheet_test.go` |
 | dispatch / 分类器 | §1 意图分发行、`internal/assistant/llm_classifier.go`、PROJECT_MAP「小精灵 LLM 分类器」条目 |
-| 关闭/生命周期 | §5、`internal/petstate`、`desktop-pet-progress.md` |
+| Demo 页（接线/物理/输入/别名表） | §8、`web/static/assistant-demo.js`、`web/assistant-demo.test.js`、PROJECT_MAP 文首最后核对 |
+
+## 8. F6 Demo 页：2D 游戏测试台（web/static/assistant-demo.js）
+
+头部导航第 6 格（原 `nav-placeholder`，col3/row2）= `data-page="demo"` 按钮，F6 = `global.goto-demo`（shortcuts.js 预设；app.js keydown + `case 'demo'` + 切出 `cleanupAssistantDemo`）。双入口 HTML（index.html / index-nopg.html）均挂载。**全部行为 demo 页局部**：不触宠物窗、不写配置、不影响全局 assistant 行为。
+
+- **状态机 `ademoSM`**：状态 = `assistant.actions[]`（经 `/api/assistant/sheet-image/{name}` 加载，与宠物页同数据源）。与 petSM 的差异：**所有态循环播放**（游戏语义，petSM 是一次性回默认）；`setEvent(idle/walk/run/jump/fall)` 别名解析（idle→[idle,stand,default]、walk→[walk,move,run]、run→[run,dash,walk,move]、jump→[jump,leap]、fall→[fall,jump,leap]），未配置事件回退默认态（idle 别名链 → 首个注册）。无动作时渲染占位色块（圆角矩形+眼睛，朝向跟随 facing）。
+- **物理**：重力 2200 px/s²、跳跃初速 760、终端速度 1600；速度档 Shift 慢走 70 / 默认 160 / Ctrl 快跑 340 px/s（同时按 Shift 优先）；8ms 子步积分（防高速穿透薄碰撞体）；AABB 轴分离解算（X 撞墙/侧面、Y 落顶/碰头/楔入最小推出）；舞台四壁 + 底部地面。
+- **输入**：方向键 ←→ 移动、↑/Space 跳跃（仅 grounded，keydown 沿触发，忽略 repeat）、↓ 空中快落（+1400 px/s²）；右键点舞台 = 走到该列（目标 x 居中，键盘输入即取消）；绘制模式 Escape 退出——**window 捕获阶段监听 + stopPropagation**，否则 app.js 全局 Escape 会弹关机确认。失焦（blur）清空按键态防卡键。
+- **碰撞体**：Add Body 进入绘制模式（canvas crosshair），拖绘 ≥8×8 矩形提交；Undo/Clear 按整个列表操作；会话级内存持久（`ademoPersist.bodies`，切页再进保留，重启丢）。
+- **背景图**：Set Background 经 `/api/browse` native 选图 + `POST /api/assistant/sheet-preview` 注册 → `GET /sheet-preview/{id}` 加载（复用 sheet.go 1h TTL 机制；路径存 `ademoPersist.bgPath`，每次渲染重新注册拿新 id，TTL 过期无感）；canvas cover 适配绘制；Clear 清除。
+- **实体盒**：当前 action 帧尺寸 × scale 滑条（0.5–4，默认 1.5）；切 action/改 scale 保持脚底锚点；canvas 按容器 × devicePixelRatio 缩放（ResizeObserver）。
+- **测试缝**：`window.__ademo = {sm, ent, keys, persist, stage, step, tryJump, motionEvent, syncSize, addBody, clearBodies}`。
+- **HUD**：canvas 左上角常驻 state/event/ground/facing/x/y/vx/vy/bodies 调试读出（刻意英文原文）。
+- **验证**：`node web/assistant-demo.test.js`（19 项：接线契约 ×4、SM ×3、物理 ×8、右键移动 ×3、运动事件 ×1）；浏览器实测（隔离实例 + CDP）：走/慢走/快跑速度、跳跃落地、右键移动到点、绘制碰撞体+站上、绘制模式 Escape 不触发关机、背景图加载与重进重注册、F6 往返导航、切页后键盘监听摘除。

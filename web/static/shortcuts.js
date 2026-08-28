@@ -27,6 +27,7 @@ var SHORTCUT_PRESETS = {
     'global.goto-playground':  { key: 'F3', label: 'Go to Playground' },
     'global.goto-download':    { key: 'F5', label: 'Open Utility Menu' },
     'global.goto-gallery':     { key: 'F4', label: 'Go to Gallery' },
+    'global.goto-demo':        { key: 'F6', label: 'Go to Assistant Demo' },
     'global.quickslot-cycle-1': { key: '1', label: 'Quickslot #1' },
     'global.quickslot-cycle-2': { key: '2', label: 'Quickslot #2' },
     'global.quickslot-cycle-3': { key: '3', label: 'Quickslot #3' },

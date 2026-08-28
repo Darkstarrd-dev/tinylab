@@ -232,6 +232,7 @@ function navigateTo(page) {
   if (typeof stopUsageRefresh === 'function') stopUsageRefresh();
   if (page !== 'playground' && typeof cleanupPlayground === 'function') cleanupPlayground();
   if (page !== 'gallery' && typeof cleanupGallery === 'function') cleanupGallery();
+  if (page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
   if (!preserveUtilityState) {
     if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
@@ -265,6 +266,7 @@ function navigateTo(page) {
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gallery': return renderGallery(container);
+      case 'demo': return renderAssistantDemo(container);
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);
@@ -277,7 +279,7 @@ function navigateTo(page) {
   // binds its root, and GIF rebuilds its editor). Do not call resume hooks
   // before or after this render, which would duplicate those bindings.
   var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
-  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || activeTool === 'fileTransfer');
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || activeTool === 'fileTransfer');
   if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
     if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer') container.style.height = '100%';
@@ -1031,6 +1033,7 @@ document.addEventListener('keydown', function(e) {
     return;
   }
   if (Shortcuts.matchEvent('global.goto-gallery', e)) { e.preventDefault(); navigateTo('gallery'); return; }
+  if (Shortcuts.matchEvent('global.goto-demo', e)) { e.preventDefault(); var dNav = document.querySelector('.nav-item[data-page="demo"]'); if (dNav) navigateTo('demo'); return; }
 
   // F: toggle fullscreen (ignore when typing in any input field)
   if (Shortcuts.matchEvent('global.toggle-fullscreen', e)) {
