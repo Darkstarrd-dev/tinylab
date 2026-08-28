@@ -154,6 +154,7 @@ var deprecatedFieldPaths = [][]string{
 	{"monitor"},
 	{"assistant", "spritesheetFps"},
 	{"assistant", "spritesheetPath"},
+	{"textReview", "nodes", "batchChars"},
 }
 
 // decodeConfig strictly decodes YAML data into cfg. If the strict decoder
@@ -252,25 +253,48 @@ func stripPaths(root map[string]any, paths [][]string) bool {
 }
 
 // stripPath removes the leaf key identified by path from a nested map tree.
+// It also handles intermediate slices (e.g. textReview.nodes[].batchChars)
+// by stripping the leaf from every element of the slice.
 func stripPath(root map[string]any, path []string) bool {
-	m := root
-	for i, k := range path {
-		if i == len(path)-1 {
-			if _, ok := m[k]; ok {
-				delete(m, k)
-				return true
+	if len(path) == 0 {
+		return false
+	}
+	if len(path) == 1 {
+		if _, ok := root[path[0]]; ok {
+			delete(root, path[0])
+			return true
+		}
+		return false
+	}
+	v, ok := root[path[0]]
+	if !ok {
+		return false
+	}
+	if mm, ok := v.(map[string]any); ok {
+		return stripPath(mm, path[1:])
+	}
+	if arr, ok := v.([]any); ok {
+		changed := false
+		if len(path) == 2 {
+			leaf := path[1]
+			for _, el := range arr {
+				if em, ok := el.(map[string]any); ok {
+					if _, ok := em[leaf]; ok {
+						delete(em, leaf)
+						changed = true
+					}
+				}
 			}
-			return false
+			return changed
 		}
-		v, ok := m[k]
-		if !ok {
-			return false
+		for _, el := range arr {
+			if em, ok := el.(map[string]any); ok {
+				if stripPath(em, path[1:]) {
+					changed = true
+				}
+			}
 		}
-		mm, ok := v.(map[string]any)
-		if !ok {
-			return false
-		}
-		m = mm
+		return changed
 	}
 	return false
 }
