@@ -6377,7 +6377,10 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 
 .ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;padding:0}
 /* Demo toolbar is now the single row at shell top (blue 1+2 merged) */
-.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%}
+.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%;min-height:36px}
+.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.dg-toolbar-fields[hidden]{display:none !important}
+.ademo-toolbar-fields[hidden]{display:none !important}
 .ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 0 auto}
 .ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{min-width:92px}
 .ademo-bgmode-wrap .custom-select-wrapper{min-width:110px;max-width:160px}

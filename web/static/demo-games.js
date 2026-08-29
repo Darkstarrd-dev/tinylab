@@ -239,6 +239,99 @@ function dgBindShellTabs(container) {
   }
 }
 
+function dgEnsureToolbar() {
+  if (!window.ademoInjectGamesToolbar) return;
+  var injected = window.ademoInjectGamesToolbar(
+    '<div class="dg-select-wrap" style="min-width:180px;flex:0 0 auto"></div>' +
+    '<button type="button" class="btn dg-launch">' + escapeHtml(t('demoGamesLaunch')) + '</button>' +
+    '<button type="button" class="btn btn-ghost dg-stop" disabled>' + escapeHtml(t('demoGamesStop')) + '</button>' +
+    '<button type="button" class="btn btn-ghost dg-reload" data-tooltip="' + escapeHtml(t('demoGamesReloadDesc')) + '">' + escapeHtml(t('demoGamesReload')) + '</button>' +
+    '<span class="dg-status" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>'
+  );
+  if (!injected || injected.dataset.bound) return;
+  injected.dataset.bound = '1';
+  var selWrap = injected.querySelector('.dg-select-wrap');
+  var launchBtn = injected.querySelector('.dg-launch');
+  var stopBtn = injected.querySelector('.dg-stop');
+  var reloadBtn = injected.querySelector('.dg-reload');
+  var status = injected.querySelector('.dg-status');
+  // Create a plain select and upgrade to custom-select on next sync
+  var sel = document.createElement('select');
+  sel.className = 'input dg-select';
+  sel.setAttribute('data-tooltip', t('demoGamesSelect'));
+  selWrap.appendChild(sel);
+  // Keep dgUi.toolbar alias so existing callers find it
+  if (!dgUi) dgUi = { status: status };
+  dgUi.select = sel;
+  dgUi.selWrap = selWrap;
+  dgUi.launchBtn = launchBtn;
+  dgUi.stopBtn = stopBtn;
+  dgUi.reloadBtn = reloadBtn;
+  dgUi.status = status;
+  dgUi.toolbarFields = injected;
+  launchBtn.addEventListener('click', function () {
+    var id = sel.value;
+    if (!id) return;
+    dgLaunch(id).catch(function () {});
+    launchBtn.blur();
+  });
+  stopBtn.addEventListener('click', function () { dgStopGame(); stopBtn.blur(); });
+  reloadBtn.addEventListener('click', function () {
+    var wasRunning = dgCurrent && dgCurrent.id;
+    dgStopGame();
+    if (wasRunning && dgRegistry[wasRunning]) delete dgRegistry[wasRunning];
+    dgRefreshList().then(function () {
+      if (wasRunning) {
+        sel.value = wasRunning;
+        if (selWrap && selWrap._customWrap) {
+          // Custom select label will be synced by dgSyncUi select replacement
+        }
+        return dgLaunch(wasRunning).catch(function () {});
+      }
+    });
+    reloadBtn.blur();
+  });
+}
+
+function dgRenderSelect() {
+  if (!dgUi || !dgUi.selWrap) return;
+  var sel = dgUi.select;
+  // If custom-select is available, build custom wrapper; else keep native select options.
+  var useCustom = typeof renderCustomSelectHtml === 'function';
+  if (useCustom) {
+    var opts = dgGames.map(function (g) {
+      return { value: g.id, label: (g.title || g.id) + (g.version ? ' v' + g.version : '') };
+    });
+    if (!dgGames.length) opts = [{ value: '', label: t('demoGamesEmpty') }];
+    var cur = sel ? sel.value : (dgGames[0] && dgGames[0].id) || '';
+    dgUi.selWrap.innerHTML = renderCustomSelectHtml('dg-select-wrap', 'dg-select', opts, cur, 'dgOnSelectChange(this.value)', 'min-width:180px');
+    var newSel = dgUi.selWrap.querySelector('#dg-select');
+    if (newSel) {
+      dgUi.select = newSel;
+      dgUi.selWrap._customWrap = dgUi.selWrap.querySelector('.custom-select-wrapper');
+    }
+    sel = newSel;
+  }
+  if (sel && dgGames.length) {
+    sel.innerHTML = '';
+    if (!dgGames.length) {
+      var opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = t('demoGamesEmpty');
+      sel.appendChild(opt);
+    } else {
+      dgGames.forEach(function (g) {
+        var opt = document.createElement('option');
+        opt.value = g.id;
+        opt.textContent = (g.title || g.id) + (g.version ? ' v' + g.version : '');
+        sel.appendChild(opt);
+      });
+    }
+  }
+}
+window.dgOnSelectChange = function (v) { if (dgUi && dgUi.select) dgUi.select.value = v; };
+window.dgEnsureToolbar = dgEnsureToolbar;
+
 function renderDemoGames(container) {
   cleanupDemoGames();
 
@@ -254,64 +347,23 @@ function renderDemoGames(container) {
     shell.appendChild(gamesPane);
   }
 
-  var root = document.createElement('div');
-  root.className = 'dg-root';
-  root.innerHTML =
-    '<div class="dg-toolbar">' +
-      '<span class="dg-title">' + escapeHtml(t('demoGamesTitle')) + '</span>' +
-      '<select class="input dg-select" data-tooltip="' + escapeHtml(t('demoGamesSelect')) + '"></select>' +
-      '<button type="button" class="btn dg-launch">' + escapeHtml(t('demoGamesLaunch')) + '</button>' +
-      '<button type="button" class="btn btn-ghost dg-stop" disabled>' + escapeHtml(t('demoGamesStop')) + '</button>' +
-      '<button type="button" class="btn btn-ghost dg-reload" data-tooltip="' + escapeHtml(t('demoGamesReloadDesc')) + '">' + escapeHtml(t('demoGamesReload')) + '</button>' +
-      '<span class="dg-status"></span>' +
-      '<span class="dg-fs-sep" style="flex:1"></span>' +
-      '<button type="button" class="btn btn-ghost dg-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + DG_SVG_FULLSCREEN + '</button>' +
-    '</div>' +
-    '<div class="dg-stage-wrap" hidden><div class="dg-stage"></div><button type="button" class="dg-fs-exit" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + DG_SVG_CLOSE + '</button></div>';
-  gamesPane.innerHTML = '';
-  gamesPane.appendChild(root);
+  // Toolbar row is now owned by .demo-toolbar in the shell; create stub pane only.
+  gamesPane.innerHTML = '<div class="dg-root"><div class="dg-stage-wrap" hidden><div class="dg-stage"></div><button type="button" class="dg-fs-exit" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + DG_SVG_CLOSE + '</button></div></div>';
+  var root = gamesPane.querySelector('.dg-root');
+  dgUi = dgUi || {};
+  dgUi.root = root;
+  dgUi.stageWrap = root.querySelector('.dg-stage-wrap');
+  dgUi.stage = root.querySelector('.dg-stage');
+  dgUi.fsExit = root.querySelector('.dg-fs-exit');
+  // Toolbar fields live in shell's demo-toolbar; ensure them.
+  dgEnsureToolbar();
+  if (!dgUi.select) {
+    // Select will be populated by refresh; keep compatibility if toolbar injection failed
+    var fallbackSel = gamesPane.querySelector('.dg-select') || document.querySelector('.dg-select');
+    if (fallbackSel) dgUi.select = fallbackSel;
+  }
 
-  dgUi = {
-    root: root,
-    select: root.querySelector('.dg-select'),
-    launchBtn: root.querySelector('.dg-launch'),
-    stopBtn: root.querySelector('.dg-stop'),
-    reloadBtn: root.querySelector('.dg-reload'),
-    status: root.querySelector('.dg-status'),
-    stageWrap: root.querySelector('.dg-stage-wrap'),
-    stage: root.querySelector('.dg-stage'),
-    fsBtn: root.querySelector('.dg-fs-btn'),
-    fsExit: root.querySelector('.dg-fs-exit')
-  };
-
-  dgUi.fsBtn.addEventListener('click', function () { dgToggleFullscreen(); this.blur(); });
-  dgUi.fsExit.addEventListener('click', function () { dgSetFullscreen(false); this.blur(); });
-
-  dgUi.launchBtn.addEventListener('click', function () {
-    var id = dgUi.select.value;
-    if (!id) return;
-    dgLaunch(id).catch(function () { /* status already set */ });
-    dgUi.launchBtn.blur();
-  });
-  dgUi.stopBtn.addEventListener('click', function () {
-    dgStopGame();
-    dgUi.stopBtn.blur();
-  });
-  dgUi.reloadBtn.addEventListener('click', function () {
-    // Reload = re-scan the games dir, drop the registered entry so the next
-    // launch re-fetches the (possibly edited) script, then relaunch if one
-    // was running.
-    var wasRunning = dgCurrent && dgCurrent.id;
-    dgStopGame();
-    if (wasRunning && dgRegistry[wasRunning]) delete dgRegistry[wasRunning];
-    dgRefreshList().then(function () {
-      if (wasRunning) {
-        dgUi.select.value = wasRunning;
-        return dgLaunch(wasRunning).catch(function () {});
-      }
-    });
-    dgUi.reloadBtn.blur();
-  });
+  if (dgUi.fsExit) dgUi.fsExit.addEventListener('click', function () { dgSetFullscreen(false); this.blur(); });
 
   dgRefreshList();
 }
@@ -320,20 +372,23 @@ function dgRefreshList() {
   return dgFetchList().then(function (games) {
     dgGames = games;
     if (!dgUi) return;
-    var sel = dgUi.select;
-    sel.innerHTML = '';
-    if (!games.length) {
-      var opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = t('demoGamesEmpty');
-      sel.appendChild(opt);
-    } else {
-      games.forEach(function (g) {
+    if (dgUi.selWrap) dgRenderSelect();
+    else if (dgUi.select) {
+      var sel = dgUi.select;
+      sel.innerHTML = '';
+      if (!games.length) {
         var opt = document.createElement('option');
-        opt.value = g.id;
-        opt.textContent = (g.title || g.id) + (g.version ? ' v' + g.version : '');
+        opt.value = '';
+        opt.textContent = t('demoGamesEmpty');
         sel.appendChild(opt);
-      });
+      } else {
+        games.forEach(function (g) {
+          var opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = (g.title || g.id) + (g.version ? ' v' + g.version : '');
+          sel.appendChild(opt);
+        });
+      }
     }
     dgSyncUi();
   }).catch(function (err) {
@@ -344,19 +399,18 @@ function dgRefreshList() {
 function dgSyncUi() {
   if (!dgUi) return;
   var running = !!dgCurrent;
-  dgUi.stageWrap.hidden = !running;
-  dgUi.stopBtn.disabled = !running;
-  dgUi.launchBtn.disabled = running || !dgGames.length;
-  dgUi.select.disabled = running;
-  if (dgUi.fsBtn) {
-    dgUi.fsBtn.setAttribute('aria-label', dgIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
-    dgUi.fsBtn.setAttribute('data-tooltip', dgIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
-  }
+  if (dgUi.stageWrap) dgUi.stageWrap.hidden = !running;
+  var tf = document.querySelector('.dg-toolbar-fields');
+  if (tf) tf.hidden = false; // always visible when Games tab active; parent shell hidden controls it
+  if (dgUi.stopBtn) dgUi.stopBtn.disabled = !running;
+  if (dgUi.launchBtn) dgUi.launchBtn.disabled = running || !dgGames.length;
+  if (dgUi.select) dgUi.select.disabled = running;
   if (dgUi.fsExit) dgUi.fsExit.style.display = dgIsFullscreen() ? '' : 'none';
 }
 
 function dgSetStatus(msg) {
-  if (dgUi.fsExit) dgUi.fsExit.style.display = dgIsFullscreen() ? '' : 'none';
+  if (dgUi && dgUi.status) dgUi.status.textContent = msg || '';
+  if (dgUi && dgUi.fsExit) dgUi.fsExit.style.display = dgIsFullscreen() ? '' : 'none';
 }
 
 function cleanupDemoGames() {

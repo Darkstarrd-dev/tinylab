@@ -66,6 +66,11 @@ function ademoIsFullscreen() {
 }
 function ademoApplyFullscreenChrome() {
   var on = ademoIsFullscreen();
+  var toolbarFs = document.querySelector('.demo-toolbar .demo-fs-btn');
+  if (toolbarFs) {
+    toolbarFs.setAttribute('aria-label', on ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+    toolbarFs.setAttribute('data-tooltip', on ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+  }
   // Show only the correct pane's exit button
   var ademoExit = document.querySelector('.ademo-fs-exit');
   var dgExit = document.querySelector('.dg-fs-exit');
@@ -636,12 +641,48 @@ function ademoSyncShellTabs() {
     // Active look when showing Assistant Demo (optional)
     toggle.classList.toggle('btn-ghost', isGames);
   }
+  var toolbar = shell.querySelector('.demo-toolbar');
   var ademoPane = shell.querySelector('.demo-pane-ademo');
   var gamesPane = shell.querySelector('.demo-pane-games');
+  var ademoFields = toolbar ? toolbar.querySelector('.ademo-toolbar-fields') : null;
+  var gamesFields = toolbar ? toolbar.querySelector('.dg-toolbar-fields') : null;
+  // Single toolbar row: show one set of fields at a time
+  if (ademoFields) ademoFields.hidden = ademoActiveTab !== 'ademo';
+  if (gamesFields) gamesFields.hidden = ademoActiveTab !== 'games';
+  // Keep panes exclusive too (stage)
   if (ademoPane) ademoPane.hidden = ademoActiveTab !== 'ademo';
   if (gamesPane) gamesPane.hidden = ademoActiveTab !== 'games';
-  ademoSyncToolbar();
-  if (typeof dgSyncUi === 'function') try { dgSyncUi(); } catch (e2) {}
+  // When switching to Games, render/refresh the games row if empty
+  if (ademoActiveTab === 'games' && typeof dgEnsureToolbar === 'function') try { dgEnsureToolbar(); } catch (e3) {}
+  // Refresh the visible toolbar fields
+  if (ademoActiveTab === 'games') {
+    if (typeof dgSyncUi === 'function') try { dgSyncUi(); } catch (e2) {}
+  } else {
+    ademoSyncToolbar();
+  }
+}
+
+// Called by demo-games to inject its toolbar fields into the shared demo-toolbar.
+function ademoInjectGamesToolbar(html) {
+  var shell = document.querySelector('.demo-shell');
+  if (!shell) return null;
+  var tbar = shell.querySelector('.demo-toolbar');
+  if (!tbar) return null;
+  var existing = tbar.querySelector('.dg-toolbar-fields');
+  if (existing) return existing;
+  var wrap = document.createElement('span');
+  wrap.className = 'dg-toolbar-fields';
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '8px';
+  wrap.style.flex = '1';
+  wrap.style.minWidth = '0';
+  wrap.innerHTML = html;
+  // Insert after the ademo fields block
+  var ademoFields = tbar.querySelector('.ademo-toolbar-fields');
+  if (ademoFields && ademoFields.nextSibling) tbar.insertBefore(wrap, ademoFields.nextSibling);
+  else tbar.appendChild(wrap);
+  return wrap;
 }
 
 function ademoHandleFullscreenShortcut(e) {
@@ -921,6 +962,7 @@ function renderAssistantDemo(container) {
       '<div class="demo-toolbar">' +
         '<button type="button" class="btn demo-toggle" data-tooltip="' + escapeHtml(t('demoTabGames')) + '">' + escapeHtml(ademoActiveTab === 'games' ? t('demoTabGames') : t('demoTabAssistant')) + '</button>' +
         '<span class="ademo-sep demo-toggle-sep"></span>' +
+        '<span class="ademo-toolbar-fields" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">' +
         '<div class="ademo-type1-wrap"></div>' +
         '<div class="ademo-type2-wrap"></div>' +
         '<span class="ademo-sep"></span>' +
@@ -942,7 +984,7 @@ function renderAssistantDemo(container) {
           ' <input type="number" class="input ademo-scaleto ademo-scaleto-h" min="1" step="1">' +
         '</label>' +
         '<span class="ademo-no-actions" data-tooltip="' + escapeHtml(t('demoNoActions')) + '">!</span>' +
-        '<span style="flex:1"></span>' +
+        '</span>' +
         '<button type="button" class="btn btn-ghost demo-fs-btn ademo-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + ADEMO_SVG_FULLSCREEN + '</button>' +
       '</div>' +
       '<div class="demo-pane-ademo"' + (ademoActiveTab !== 'ademo' ? ' hidden' : '') + '>' +
