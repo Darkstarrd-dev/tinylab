@@ -1,3 +1,5 @@
+/* P1-04a concurrency limiter: cap batch to 6 concurrent ops to avoid 429 */
+function runWithConcurrency(tasks, cap, fn){ cap=Math.max(1, cap||6); return new Promise(function(resolve,reject){ var i=0, active=0, results=[], failed=null; function next(){ if(failed) return; while(active<cap && i<tasks.length){ (function(idx){ var t=tasks[idx]; active++; Promise.resolve(fn(t, idx)).then(function(r){results[idx]=r; active--; if(i>=tasks.length && active===0) resolve(results); else next();}, function(e){ failed=e; reject(e);}); })(i++); } if(i>=tasks.length && active===0) resolve(results); } next(); }); }
 // gallery-edit-batch.js — batch convert/compress flow, archive mode, zip-outputs/zip-writeback integration.
 // Split from gallery-edit.js (refactor Fix 5).
 // Backend: internal/api/gallery/edit_handlers.go (zip-outputs/zip-writeback).
@@ -276,22 +278,22 @@ function _startBatch(op, params, dest, compress, targets) {
   for (var i = 0; i < siblings.length; i++) {
     var it = siblings[i];
     var job = { item: it, jobId: null, done: false, error: null, outStem: '' };
-    // Uniform (sequential) → <prefix><NN..>; Set Name on a single target →
-    // that name; otherwise leave empty so the server falls back to its
-    // "<name>_<desc>.<ext>" default next to the source.
     job.outStem = digits > 0
       ? (_batchCfg.prefix || T('geRenormPrefixPh')) + _padNum(i + 1, digits)
       : (_batchTotal === 1 && _batchCfg && _batchCfg.renameName ? _batchCfg.renameName : '');
     _batchJobs.push(job);
-
-    (function(idx, item, reqOp, reqParams, reqBatchDest, outStem) {
-      _resolveBatchInput(item).then(function(inputPath) {
-        var body = { inputAssetId: inputPath.inputAssetId, inputGrantId: inputPath.inputGrantId, inputRel: inputPath.inputRel, operation: reqOp, overwrite: false, params: reqParams };
-        // Send outputName whenever we computed a stem. Covers both
-        // "Save to dir" (outputDir+!overwrite → server appends new ext) and
-        // "Same Path" (overwrite, no outputDir → server appends _desc+ext).
-        // This lets sequential-rename in batch yield e.g. "img001_converted.webp"
-        // even in Same Path mode, next to the originals.
+  }
+  // P1-04a: cap batch concurrency to 4 to avoid 429 burst.
+  (function runBatchBatch(start) {
+    var batch = _batchJobs.slice(start, start + 4);
+    if (batch.length === 0) return;
+    var offset = start;
+    Promise.all(batch.map(function(job, j) {
+      var idx = offset + j;
+      var item = siblings[idx];
+      var outStem = job.outStem;
+      return _resolveBatchInput(item).then(function(inputPath) {
+        var body = { inputAssetId: inputPath.inputAssetId, inputGrantId: inputPath.inputGrantId, inputRel: inputPath.inputRel, operation: op, overwrite: false, params: params };
         if (outStem) body.outputName = outStem;
         return fetch('/api/gallery/edit/start', {
           method: 'POST',
@@ -314,8 +316,10 @@ function _startBatch(op, params, dest, compress, targets) {
         _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
         if (_batchDone >= _batchTotal) _onBatchComplete();
       });
-    })(i, it, op, params, batchDest, job.outStem);
-  }
+    })).then(function() {
+      runBatchBatch(start + 4);
+    });
+  })(0);
 }
 
 function _pollBatchJob(idx, jobId) {

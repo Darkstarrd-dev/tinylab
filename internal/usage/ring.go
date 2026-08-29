@@ -12,6 +12,7 @@ type Entry struct {
 	ID            string          `json:"id"`
 	Timestamp     time.Time       `json:"timestamp"`
 	Provider      string          `json:"provider"`
+	ProviderID    string          `json:"providerId,omitempty"`
 	Model         string          `json:"model"`
 	OriginalModel string          `json:"originalModel"` // original request model name (alias, before resolution)
 	KeyID         string          `json:"keyId"`

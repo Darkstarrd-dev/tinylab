@@ -4,10 +4,29 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
+
+// findPendingTmp returns the newest pending tmp file matching path+".tmp" or path+".tmp.*".
+func findPendingTmp(path string) string {
+	cands, _ := filepath.Glob(path + ".tmp*")
+	if len(cands) == 0 {
+		return ""
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		ai, _ := os.Stat(cands[i])
+		aj, _ := os.Stat(cands[j])
+		if ai == nil || aj == nil {
+			return cands[i] < cands[j]
+		}
+		return ai.ModTime().After(aj.ModTime())
+	})
+	return cands[0]
+}
 
 // Load reads config from path, or creates a default config there if not found.
 //
@@ -26,7 +45,10 @@ import (
 //     older residue from a completed direct-write fallback, or an abandoned
 //     write that has been superseded).
 func Load(path string) (*Config, error) {
-	tmp := path + ".tmp"
+	tmp := findPendingTmp(path)
+	if tmp == "" {
+		tmp = path + ".tmp"
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -90,7 +112,14 @@ func Load(path string) (*Config, error) {
 // migration) as a normal load.
 func tryRecoverFromTmp(tmp, path string) (*Config, bool) {
 	if _, err := os.Stat(tmp); err != nil {
-		return nil, false
+		if alt := findPendingTmp(path); alt != "" && alt != tmp {
+			tmp = alt
+		} else {
+			return nil, false
+		}
+		if _, err := os.Stat(tmp); err != nil {
+			return nil, false
+		}
 	}
 	if os.Rename(tmp, path) == nil {
 		return loadAfterTmpApply(path)
@@ -103,11 +132,10 @@ func tryRecoverFromTmp(tmp, path string) (*Config, bool) {
 		_ = os.Remove(tmp)
 		return loadAfterTmpApply(path)
 	}
-	// Both rename and direct write failed — parse the pending data directly.
+	// Both rename and direct write failed — parse the pending data directly
+	// via decodeConfig so deprecated fields are migrated (P0-04d).
 	var cfg Config
-	dec := yaml.NewDecoder(bytes.NewReader(tmpData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
+	if _, err := decodeConfig(tmpData, &cfg); err != nil {
 		return nil, false
 	}
 	return finalizeConfig(&cfg, tmpData), true

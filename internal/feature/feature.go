@@ -141,7 +141,7 @@ func registerDefaults() {
 			"fs-api.js", "headerStats.js", "i18n.js", "info_common.js",
 			"monitor/monitor.js", "monitor/monitor_io.js", "monitor/monitor_modal.js",
 			"monitor/monitor_quota.js", "monitor/monitor_recent.js", "monitor/monitor_state.js",
-			"providers.js", "quickslots.js",
+			"providers.js", "providers-detail.js", "providers-keys.js", "providers-models.js", "quickslots.js",
 			"settings/settings.js", "settings/settings_modal.js", "settings/settings_shortcuts.js",
 			"settings/settings_trace.js", "shortcuts.js", "theme.js",
 		},
@@ -154,7 +154,7 @@ func registerDefaults() {
 			"playground/playground.js", "playground/pg-i18n.js",
 			"playground/pg-core.js", "playground/pg-state.js", "playground/pg-markdown.js",
 			"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-tasks.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
-			"playground/pg-render.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
+			"playground/pg-render.js", "playground/pg-ui-params.js", "playground/pg-ui-reqleft.js", "playground/pg-ui-events.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
 			"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
 		},
 	})
@@ -162,7 +162,7 @@ func registerDefaults() {
 		ID: Download, Name: "Download",
 		Description: "yt-dlp download manager, /api/downloads and web/static/download.js.",
 		StaticRoot:  RootStatic,
-		StaticFiles: []string{"download.js"},
+		StaticFiles: []string{"download.js", "download-settings.js", "download-sse.js", "download-detail.js", "download-list.js"},
 	})
 	register(Feature{
 		ID: Archive, Name: "Archive",

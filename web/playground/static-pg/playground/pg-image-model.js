@@ -174,8 +174,20 @@
   function modelscopePoll(taskId, model, signal) {
     var pollUrl = '/v1/tasks/' + encodeURIComponent(taskId) + '?model=' + encodeURIComponent(model);
     var attempts = 0;
-    function delayThen(ms, fn) {
-      return new Promise(function (resolve) { setTimeout(function () { resolve(fn()); }, ms); });
+    // PG-EN-1: delayThen is signal-aware; abort clears timer and rejects so no further polling is scheduled.
+    function delayThen(ms, fn, sig) {
+      var s = sig || signal;
+      return new Promise(function (resolve, reject) {
+        var tid = setTimeout(function () { resolve(fn()); }, ms);
+        if (s) {
+          if (s.aborted) { clearTimeout(tid); reject(s.reason || new DOMException('Aborted', 'AbortError')); return; }
+          s.addEventListener('abort', function onAbort() {
+            clearTimeout(tid);
+            s.removeEventListener('abort', onAbort);
+            reject(s.reason || new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        }
+      });
     }
     function attempt() {
       attempts++;

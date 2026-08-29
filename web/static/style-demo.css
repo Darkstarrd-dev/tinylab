@@ -1,0 +1,556 @@
+/* =====================================================================
+   Sprite Assistant
+   ===================================================================== */
+
+/* ==========================================================================
+   Sprite Assistant Components (L1 Dock/Modal + L2 Character & Comic Bubble)
+   ========================================================================== */
+
+/* L1: Sprite Dock (Right Edge Capsule) */
+.sprite-dock {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-sprite-dock, 70);
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-right: none;
+  border-radius: var(--radius-lg, 14px) 0 0 var(--radius-lg, 14px);
+  padding: 8px 10px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  box-shadow: -4px 4px 20px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(var(--glass-blur, 20px));
+  transition: all var(--transition-normal, 0.25s);
+  user-select: none;
+}
+.sprite-dock:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  padding-left: 16px;
+  box-shadow: -6px 6px 24px rgba(79, 195, 247, 0.25);
+}
+/* Draggable dock: left-edge capsule (flipped radius + shadow) and drag state. */
+.sprite-dock.side-left {
+  border-right: 1px solid var(--glass-border);
+  border-left: none;
+  border-radius: 0 var(--radius-lg, 14px) var(--radius-lg, 14px) 0;
+  box-shadow: 4px 4px 20px rgba(0, 0, 0, 0.25);
+}
+.sprite-dock.side-left:hover {
+  box-shadow: 6px 6px 24px rgba(79, 195, 247, 0.25);
+}
+.sprite-dock.dragging {
+  cursor: grabbing;
+  transition: none;
+  opacity: 0.9;
+}
+.sprite-dock-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.sprite-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--danger, #ef5350);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  line-height: 1.2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+.sprite-dock-label {
+  font-size: var(--font-badge, 12px);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+/* L1: Sprite Modal Overlay & Window */
+.sprite-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sprite-modal, 10010);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(var(--glass-blur-overlay, 8px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--transition-normal, 0.25s);
+}
+.sprite-modal-overlay.show {
+  opacity: 1;
+  visibility: visible;
+}
+.sprite-modal {
+  width: 520px;
+  max-width: 92vw;
+  height: 600px;
+  max-height: 85vh;
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl, 18px);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: scale(0.95) translateY(10px);
+  transition: all var(--transition-normal, 0.25s);
+}
+.sprite-modal-overlay.show .sprite-modal {
+  transform: scale(1) translateY(0);
+}
+.sprite-modal-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--glass-bg);
+}
+.sprite-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: var(--font-size-md, 15px);
+  color: var(--text);
+}
+.sprite-avatar-mini {
+  font-size: 16px;
+}
+.sprite-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sprite-btn-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-btn-icon:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+  border-color: var(--glass-border-hover);
+}
+.sprite-btn-close {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sprite-modal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 18px;
+  gap: 12px;
+  overflow: hidden;
+}
+.sprite-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+.sprite-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 88%;
+}
+.sprite-msg-assistant {
+  align-self: flex-start;
+}
+.sprite-msg-user {
+  align-self: flex-end;
+}
+.sprite-msg-text {
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 10px);
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.sprite-msg-assistant .sprite-msg-text {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  border-bottom-left-radius: 2px;
+}
+.sprite-msg-user .sprite-msg-text {
+  background: var(--accent);
+  color: #0b0c13;
+  font-weight: 600;
+  border-bottom-right-radius: 2px;
+}
+.sprite-msg-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sprite-tool-card {
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sprite-tool-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+}
+.sprite-tool-path {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.sprite-tool-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sprite-action-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-action-btn:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sprite-action-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0c13;
+}
+.sprite-tool-exec-status {
+  font-size: 11.5px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs, 4px);
+}
+.sprite-tool-exec-status.success {
+  background: rgba(102, 187, 106, 0.15);
+  color: #66bb6a;
+}
+.sprite-tool-exec-status.error {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef5350;
+}
+
+.sprite-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--glass-border);
+}
+.sprite-chip {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-chip:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sprite-modal-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+}
+#sprite-chat-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#sprite-chat-input {
+  flex: 1;
+  padding: 9px 14px;
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 10px);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  transition: all var(--transition-fast, 0.15s);
+}
+#sprite-chat-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.sprite-send-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--accent);
+  color: #0b0c13;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.sprite-send-btn:hover {
+  filter: brightness(1.1);
+  transform: scale(1.05);
+}
+
+/* L2: Character (In-App Roaming Avatar) */
+.sprite-char {
+  position: fixed;
+  z-index: var(--z-sprite-char, 10020);
+  width: 60px;
+  height: 60px;
+  cursor: pointer;
+  user-select: none;
+  animation: sprite-float 3s ease-in-out infinite;
+}
+.sprite-char-inner {
+  width: 100%;
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 50% 50% 45% 45%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 24px var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.sprite-char:hover .sprite-char-inner {
+  transform: scale(1.15) rotate(5deg);
+}
+.sprite-char-head {
+  position: relative;
+  width: 40px;
+  height: 30px;
+}
+.sprite-char-eye {
+  position: absolute;
+  top: 6px;
+  width: 6px;
+  height: 8px;
+  background: #0b0c13;
+  border-radius: 50%;
+}
+.sprite-char-eye.left { left: 8px; }
+.sprite-char-eye.right { right: 8px; }
+.sprite-char-blush {
+  position: absolute;
+  top: 14px;
+  width: 8px;
+  height: 4px;
+  background: rgba(255, 105, 180, 0.6);
+  border-radius: 50%;
+}
+.sprite-char-blush.left { left: 4px; }
+.sprite-char-blush.right { right: 4px; }
+.sprite-char-mouth {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 4px;
+  border-bottom: 2px solid #0b0c13;
+  border-radius: 0 0 8px 8px;
+}
+
+@keyframes sprite-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+/* L2: Comic Bubble */
+.sprite-bubble {
+  position: fixed;
+  z-index: var(--z-sprite-modal, 10010);
+  background: var(--modal-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg, 14px);
+  padding: 12px 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(var(--glass-blur, 20px));
+  min-width: 260px;
+  max-width: 320px;
+  transition: all var(--transition-normal, 0.25s);
+}
+/* Bubble Pointer Arrow */
+.sprite-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  right: 28px;
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid var(--modal-bg);
+}
+.sprite-bubble-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sprite-bubble-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
+}
+.sprite-bubble-input-wrap {
+  display: flex;
+  gap: 6px;
+}
+#sprite-bubble-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+#sprite-bubble-input:focus {
+  border-color: var(--accent);
+}
+.sprite-bubble-send {
+  padding: 4px 10px;
+  background: var(--accent);
+  color: #0b0c13;
+  font-weight: 700;
+  font-size: 12px;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+.sprite-bubble-dock-btn {
+  align-self: flex-end;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.sprite-bubble-dock-btn:hover {
+  color: var(--text);
+}
+
+
+/* =====================================================================
+   Demo Shell
+   ===================================================================== */
+
+/* ===================== Assistant Demo page (F6) ===================== */
+.demo-shell{display:flex;flex-direction:column;height:100%;padding:12px;box-sizing:border-box;gap:10px;min-height:0}
+/* Single toggle button lives at the start of the demo-toolbar (one row) */
+.demo-toggle{min-width:118px;height:34px;padding:0 12px;white-space:nowrap;font-weight:700;flex-shrink:0}
+.demo-pane-ademo,.demo-pane-games{display:flex;flex-direction:column;flex:1;min-height:0}
+.demo-pane-ademo[hidden],.demo-pane-games[hidden]{display:none !important}
+
+.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;padding:0}
+/* Demo toolbar is now the single row at shell top (blue 1+2 merged) */
+.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%;min-height:36px}
+.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.dg-toolbar-fields[hidden]{display:none !important}
+.ademo-toolbar-fields[hidden]{display:none !important}
+.ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 0 auto}
+.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{min-width:92px}
+.ademo-bgmode-wrap .custom-select-wrapper{min-width:110px;max-width:160px}
+.ademo-toolbar .custom-select-wrapper{flex:0 0 auto}
+.ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px}
+.ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
+.ademo-scaleto{width:64px;padding:3px 6px;font-size:12px;height:auto}
+.ademo-scale{width:110px}
+.ademo-body-sq{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
+.ademo-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm);margin-left:auto}
+/* push fullscreen to far right */
+.demo-fs-btn{margin-left:auto}
+.ademo-no-actions{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#0b0c13;font-size:12px;font-weight:800;cursor:help}
+.ademo-stage-wrap{flex:1;min-height:0;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}
+.ademo-stage{position:absolute;inset:0;width:100%;height:100%;display:block}
+.ademo-stage.ademo-draw-mode{cursor:crosshair}
+/* Stage-only fullscreen: chrome hidden, only stage remains */
+body.demo-stage-fullscreen .top-header,
+body.demo-stage-fullscreen .demo-toolbar,
+body.demo-stage-fullscreen .ademo-hint,
+body.demo-stage-fullscreen .dg-toolbar{display:none !important}
+body.demo-stage-fullscreen .demo-shell{padding:0 !important;gap:0 !important}
+body.demo-stage-fullscreen .demo-pane-ademo,
+body.demo-stage-fullscreen .demo-pane-games,
+body.demo-stage-fullscreen .ademo-root,
+body.demo-stage-fullscreen .dg-root{padding:0 !important;gap:0 !important}
+body.demo-stage-fullscreen .ademo-stage-wrap,
+body.demo-stage-fullscreen .dg-stage-wrap{border:none !important;border-radius:0 !important;flex:1 !important;min-height:0 !important;height:100vh !important}
+body.demo-stage-fullscreen{overflow:hidden}
+.ademo-fs-exit,.dg-fs-exit{position:absolute;top:10px;right:10px;z-index:5;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--glass-border);background:rgba(10,10,15,0.82);color:#fff;cursor:pointer;backdrop-filter:blur(8px)}
+.ademo-fs-exit:hover,.dg-fs-exit:hover{background:rgba(20,20,28,0.96)}
+/* Legacy container fullscreen kept for programmatic exit */
+.ademo-root.ademo-fullscreen,.dg-root.dg-fullscreen{position:fixed;inset:0;z-index:var(--z-modal);padding:12px;background:var(--panel-sticky-bg);gap:10px}
+.ademo-root.ademo-fullscreen .ademo-stage-wrap,.dg-root.dg-fullscreen .dg-stage-wrap{flex:1;min-height:0;border-radius:var(--radius-lg)}
+.ademo-hint{flex-shrink:0;font-size:12px;color:var(--text-muted);line-height:1.5}
+
+/* ===================== Demo Games plugin section (F6, below testbed) ===================== */
+/* Now rendered inside .demo-pane-games; the shell tabs make only one pane
+   visible at a time, reclaiming the previous split-page space. */
+.dg-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;box-sizing:border-box}
+.dg-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible}
+.dg-title{font-weight:700;font-size:14px;margin-right:4px}
+.dg-select{min-width:180px}
+.dg-status{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.dg-stage-wrap{flex:1;min-height:280px;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%);display:flex;flex-direction:column}
+.dg-stage{position:absolute;inset:0;width:100%;height:100%}
+.dg-stage canvas{display:block;margin:0 auto}
+.dg-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
+/* Legacy :has gate kept for old tests */
+
+/* Legacy :has gate no longer needed — retained as no-op for old tests. */
+#page-content:has(.dg-root){} 

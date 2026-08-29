@@ -407,7 +407,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, inputTokens, outputTokens, errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
 }
 
-// maxPassThroughBodyBytes caps a non-streaming upstream response buffered for
+// budget caps a non-streaming upstream response buffered for
 // pass-through. Unlike the old io.LimitReader (which silently truncated), an
 // over-budget response is refused with a controlled 502 error before any
 // header is committed, so the client never receives a corrupt partial body.
@@ -416,6 +416,35 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 const maxPassThroughBodyBytes = 256 << 20
 
 func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, originalModel, sessionKey string) {
+	// P0-05 tiered budget: image/* streams via io.Copy (zero buffer), text/* 32MiB,
+	// application/json keeps 256MiB (compat with TestPassThrough_LargeBodyStreamsFully 64MiB), other 16MiB.
+	ct := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "image/") {
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", ct)
+		if sel != nil {
+			w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
+			w.Header().Set("X-TinyRouter-Key", sel.KeyName)
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		if sel != nil {
+			h.recordUsage(reqID, sel.Provider.Name, model, sel, "success", latencyMs, 0, 0, 0, "", reqBody, nil, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, "success", "")
+		}
+		return
+	}
+	var budget int64
+	if strings.HasPrefix(ct, "text/") {
+		budget = 32 << 20
+	} else if strings.Contains(ct, "application/json") {
+		budget = maxPassThroughBodyBytes
+	} else {
+		budget = 16 << 20
+	}
+	// Respect a smaller configured limit if set.
+	if h.maxPassThroughBody > 0 && h.maxPassThroughBody < budget {
+		budget = h.maxPassThroughBody
+	}
 	defer resp.Body.Close()
 
 	// Read the FULL upstream body with an explicit budget, and only commit
@@ -423,10 +452,6 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	// read must surface as a controlled error instead of an empty/truncated
 	// response body. The old io.LimitReader silently truncated large bodies;
 	// the client-facing budget errors out instead (F-14).
-	budget := h.maxPassThroughBody
-	if budget <= 0 {
-		budget = maxPassThroughBodyBytes
-	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, budget+1))
 	if err != nil {
 		h.logger.Error("failed to read upstream response: %v", err)

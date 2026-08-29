@@ -118,9 +118,12 @@ function makeEnv() {
 const DIR = path.join(__dirname, 'playground', 'static-pg', 'playground');
 function loadModules(env) {
   vm.createContext(env);
-  // pg-ui.js provides the real pgSetMode / pgGetImageSubmitCount /
+  // pg-ui.js (+ params/reqleft/events) provides pgSetMode / pgGetImageSubmitCount /
   // pgOnImageSubmitCount / pgStepImageSubmitCount.
   vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-ui.js'), 'utf8'), env, { filename: 'pg-ui.js' });
+  vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-ui-params.js'), 'utf8'), env, { filename: 'pg-ui-params.js' });
+  vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-ui-reqleft.js'), 'utf8'), env, { filename: 'pg-ui-reqleft.js' });
+  vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-ui-events.js'), 'utf8'), env, { filename: 'pg-ui-events.js' });
   vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-image-inspire.js'), 'utf8'), env, { filename: 'pg-image-inspire.js' });
   vm.runInContext(fs.readFileSync(path.join(DIR, 'pg-image-tasks.js'), 'utf8'), env, { filename: 'pg-image-tasks.js' });
   return env;
@@ -343,7 +346,7 @@ async function main() {
       assert.ok(src.indexOf('pg-task-remove-btn btn-icon bin-button') >= 0);
     });
     check('task clear-all button carries btn-icon bin-button classes', () => {
-      const src = fs.readFileSync(path.join(DIR, 'pg-ui.js'), 'utf8');
+      const src = fs.readFileSync(path.join(DIR, 'pg-ui.js'), 'utf8') + fs.readFileSync(path.join(DIR, 'pg-ui-reqleft.js'), 'utf8') + fs.readFileSync(path.join(DIR, 'pg-ui-params.js'), 'utf8') + fs.readFileSync(path.join(DIR, 'pg-ui-events.js'), 'utf8');
       assert.ok(src.indexOf('pg-task-clear-all-btn btn-icon bin-button') >= 0);
     });
     check('playground.css scopes bin icon sizes for pg buttons', () => {

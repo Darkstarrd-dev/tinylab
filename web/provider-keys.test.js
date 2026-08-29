@@ -7,6 +7,7 @@ const vm = require('vm');
 
 const appSource = fs.readFileSync(path.join(__dirname, 'static/app.js'), 'utf8');
 const providersSource = fs.readFileSync(path.join(__dirname, 'static/providers.js'), 'utf8');
+const providersKeysSource = fs.readFileSync(path.join(__dirname, 'static/providers-keys.js'), 'utf8');
 
 const elementMap = {};
 function createMockElement(id) {
@@ -96,6 +97,7 @@ vm.createContext(sandbox);
 // Run subset of app.js maskKey and providers.js
 vm.runInContext(appSource, sandbox, { filename: 'app.js' });
 vm.runInContext(providersSource, sandbox, { filename: 'providers.js' });
+vm.runInContext(providersKeysSource, sandbox, { filename: 'providers-keys.js' });
 
 // 1. Test maskKey logic:
 assert.strictEqual(sandbox.maskKey(''), '***', 'empty key returns ***');

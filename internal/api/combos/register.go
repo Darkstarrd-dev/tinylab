@@ -104,7 +104,7 @@ func (h *Handler) createCombo(w http.ResponseWriter, r *http.Request) {
 	}
 	h.d.Reg.AddCombo(c)
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save")
 		return
 	}
@@ -122,7 +122,7 @@ func (h *Handler) updateCombo(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateCombo(id, updates) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -137,7 +137,7 @@ func (h *Handler) deleteCombo(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if h.d.Reg.DeleteCombo(id) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -364,7 +364,7 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		DisabledModels: newDisabledModels,
 	})
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		saveErr := fmt.Sprintf("speed test completed but failed to persist: %v", err)
 		h.d.Logger.Error("SPEED-TEST %s | %s", combo.Name, saveErr)
 		// Push a partial error event so the frontend knows the order was not saved.

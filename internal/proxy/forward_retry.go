@@ -112,6 +112,11 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 				est := len(bodyBytes) / 4 // same rough estimate as processingEntry.InputTokens
 				if !h.hardLimit.WaitAndReserve(r.Context(), providerID, reqID, rpm, tpm, est) {
 					h.logger.Debug("[%s] client canceled during hard-limit wait", logTag)
+					if keyState != nil {
+						keyState.DecInFlight()
+					}
+					// Entry not yet registered at this point (registered after hardLimit/NIM),
+					// so no Remove/Signal needed here — but keep symmetric with NIM for safety.
 					return false, ""
 				}
 			}
@@ -124,6 +129,9 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 				select {
 				case <-r.Context().Done():
 					h.logger.Debug("client canceled during NIM wait")
+					if keyState != nil {
+						keyState.DecInFlight()
+					}
 					return false, ""
 				case <-time.After(wait):
 				}
@@ -176,6 +184,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			ID:            reqID,
 			Timestamp:     time.Now(),
 			Provider:      sel.Provider.Name,
+			ProviderID:    sel.Provider.ID,
 			Model:         upstreamModel,
 			OriginalModel: originalModel,
 			KeyID:         sel.Key.ID,

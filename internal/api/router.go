@@ -8,8 +8,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"net/url"
-	"os"
-	"path/filepath"
+		"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -263,46 +262,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	// Compress responses (brotli/gzip) for compressible content types.
 	r.Use(compress.Compress)
 
-	// CORS preflight for proxy routes only (/v1/*). Management /api/* routes
-	// have NO CORS — the admin UI is same-origin and external pages must not
-	// be able to read/modify config or steal API keys via cross-origin fetch.
-	r.Options("/v1/*", func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && isLocalhostOrigin(origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Expose-Headers", "X-TinyRouter-Provider, X-TinyRouter-Key")
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	// Proxy routes (OpenAI-compatible)
-	r.Post("/v1/chat/completions", proxyHandler.ChatCompletions)
-	r.Post("/v1/completions", proxyHandler.Completions)
-	r.Get("/v1/models", proxyHandler.ListModels)
-	r.Post("/v1/images/generations", proxyHandler.ImagesGenerations)
-	r.Post("/v1/images/edits", proxyHandler.ImagesEdits)
-	r.Post("/v1/embeddings", proxyHandler.Embeddings)
-	// Proxy route (Anthropic protocol). Anthropic /v1/messages has no GET
-	// semantics, so only POST is registered. CORS is handled by the
-	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed.
-	r.Post("/v1/messages", proxyHandler.Messages)
-	// Proxy route (OpenAI Responses protocol). POST only; CORS is handled by the
-	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed. Transparent
-	// passthrough using the standard Authorization: Bearer header.
-	r.Post("/v1/responses", proxyHandler.Responses)
-	// Proxy route (Google native generateContent protocol). POST only; CORS is handled by the
-	// path-prefix `/v1/*` OPTIONS handler below — no extra config needed. Transparent
-	// passthrough using x-goog-api-key and model-in-path URL.
-	r.Post("/v1/generateContent", proxyHandler.GenerateContent)
-	r.Post("/v1/tasks/{taskId}", proxyHandler.PollTask)
-	r.Get("/v1/tasks/{taskId}", func(w http.ResponseWriter, r *http.Request) {
-		taskID := chi.URLParam(r, "taskId")
-		modelStr := r.URL.Query().Get("model")
-		proxyHandler.TaskGet(w, r, taskID, modelStr)
-	})
+	rt.registerProxyRoutes(r, proxyHandler)
 
 	// Profiling endpoints (/debug/pprof/*)
 	r.Mount("/debug/pprof", pprofRouter())
@@ -443,227 +403,21 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// Traces
 			r.Route("/traces", traceHandler.Register)
 
-			// Games plugins
-			r.Route("/games", func(r chi.Router) { gamesHandler.Register(r) })
+			rt.registerDemoAPIRoutes(r, gamesHandler)
 
 			// Music (local playback + Jamendo/online; no extra feature gate)
 			r.Route("/music", func(r chi.Router) { musicHandler.Register(r) })
 		})
 	})
 
-	// Image API: /api/save-image (receives large base64 data URLs up to 32MB) and
-	// /api/image-proxy. Outside the generic 1 MiB /api group, still auth-gated.
-	r.Route("/api/save-image", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		r.Post("/", imageHandler.SaveImage)
-	})
-	r.Route("/api/image-proxy", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Get("/", imageHandler.ImageProxy)
-	})
+	rt.registerPlaygroundRoutes(r, authHandler, imageHandler, playgroundHandler, comfyuiHandler, imageBatchHandler)
 
-	// Playground media prep endpoint: outside the 1 MiB /api group so larger
-	// audio/media blobs (up to 32MB) can be prepped/converted, protected by auth.
-	r.Route("/api/playground", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		playgroundHandler.Register(r)
-	})
+	rt.registerUtilityRoutes(r, authHandler, editorHandler, textReviewHandler, galleryHandler, fileTransferHandler, archiveHandler)
 
-	// ComfyUI workflow proxy: outside the 1 MiB /api group so large API-format
-	// workflows remain usable, but still protected by the same auth middleware.
-	// Playground-attached backend: compiles unconditionally today (P5 blocker),
-	// so the group is intentionally NOT gated on the Playground feature.
-	r.Route("/api/comfyui", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		comfyuiHandler.Register(r)
-	})
 
-	// Gallery API routes: outside the /api group so they bypass the 1MB body
-	// limit (zip uploads can be up to 500MB) but still require auth, matching
-	// the protected /api/* authorization boundary.
-	r.Route("/api/gallery", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		// Owner middleware + routes live in the handler's Register, so every
-		// gallery resource (zip sessions, assets, grants, archive source
-		// lookups) is bound to the requesting session at exactly one boundary
-		// (internal/owner, F-29) — mirroring /api/archive, /api/editor, and
-		// /api/filetransfer. Mounting it here AND in Register would stamp two
-		// different owner values per request (duplicate Set-Cookie + owner
-		// drift between requests).
-		if feature.Enabled(feature.Gallery) {
-			galleryHandler.Register(r)
-		}
-	})
+	rt.registerPlaygroundStatic(r)
 
-	// FileTransfer receives browser files and may create a large ZIP archive;
-	// keep it outside the generic 1 MiB API group while retaining auth.
-	r.Route("/api/filetransfer", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				// 610 MiB = filetransfer.maxTotalInputSize (600 MiB) plus
-				// multipart encoding headroom, so oversized selections are
-				// rejected by the handler's own check with a clear message.
-				req.Body = http.MaxBytesReader(w, req.Body, 610<<20)
-				next.ServeHTTP(w, req)
-			})
-		})
-		if feature.Enabled(feature.FileTransfer) {
-			// Owner middleware + routes live in the handler's Register so the
-			// path-grant contract (F-01) is bound to the requesting session.
-			fileTransferHandler.Register(r)
-		}
-	})
-
-	r.Route("/api/archive", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		// Per-route body caps (500 MiB sources / 200 MiB assets) are applied
-		// inside the handlers; this group deliberately bypasses the generic
-		// 1 MiB /api limit, mirroring /api/gallery.
-		if feature.Enabled(feature.Archive) {
-			archiveHandler.Register(r)
-		}
-	})
-
-	// Editor API: text file open (native picker) + atomic save. Outside the
-	// /api group to bypass the 1MB body limit (large text files), still auth-gated.
-	r.Route("/api/editor", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		if feature.Enabled(feature.Editor) {
-			editorHandler.Register(r)
-		}
-	})
-
-	// Text-review API: AI text-review config + sessions. Outside the /api
-	// group to bypass the 1MB body limit (sessions carry large rawText),
-	// still auth-gated. Mirrors /api/editor.
-	r.Route("/api/text-review", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		// AI Text Review ships with the editor feature (feature_editor).
-		if feature.Enabled(feature.Editor) {
-			textReviewHandler.Register(r)
-		}
-	})
-	// Image Batch API: project manifests/imports can exceed the generic 1 MiB API limit.
-	// Playground-attached backend: compiles unconditionally today (P5 blocker),
-	// so the group is intentionally NOT gated on the Playground feature.
-	r.Route("/api/image-batches", func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				req.Body = http.MaxBytesReader(w, req.Body, 32<<20)
-				next.ServeHTTP(w, req)
-			})
-		})
-		imageBatchHandler.Register(r)
-	})
-	r.Group(func(r chi.Router) {
-		r.Use(authHandler.AuthMiddleware)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				req.Body = http.MaxBytesReader(w, req.Body, 32<<20)
-				next.ServeHTTP(w, req)
-			})
-		})
-		imageBatchHandler.RegisterRoot(r)
-	})
-
-	// Embedded UI (fallback to index.html)
-	// Playground static routes: only register when the playground feature is
-	// compiled into the binary. Its compiled state is derived from the real
-	// `playground` build tag signal (web.PlaygroundCompiled, reported into the
-	// feature manifest at the top of Routes). At runtime the flag is a no-op
-	// when the binary lacks playground resources.
-	if feature.Enabled(feature.Playground) {
-		if pgStatic, err := fs.Sub(web.PlaygroundStatic, "playground/static-pg"); err == nil {
-			pgFSRoot := http.FileServer(http.FS(pgStatic))
-			noCacheHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-				pgFSRoot.ServeHTTP(w, r)
-			})
-			// /vendor/*: serve the playground vendor dir first (katex, marked,
-			// mermaid, ...); fall back to the main static FS for vendors that only
-			// live there (gif.js/gifuct-js, loaded by the GIF editor SPA page).
-			vendorHandler := noCacheHandler
-			if mainStaticFS, err := fs.Sub(web.Static, "static"); err == nil {
-				vendorHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-					rel := strings.TrimPrefix(r.URL.Path, "/")
-					if f, ferr := pgStatic.Open(rel); ferr == nil {
-						f.Close()
-						pgFSRoot.ServeHTTP(w, r)
-						return
-					}
-					http.FileServer(http.FS(mainStaticFS)).ServeHTTP(w, r)
-				})
-			} else {
-				rt.logger.Warn("router: main static sub for /vendor/* fallback failed: %v", err)
-			}
-			r.Get("/playground.css", noCacheHandler)
-			r.Get("/vendor/*", vendorHandler)
-			// Static-file route list is owned by the feature manifest: every
-			// enabled feature whose assets live under web/playground/static-pg
-			// contributes its scripts here (playground, gallery, editor). The
-			// order follows feature registration order, preserving the
-			// historical playground → gallery → editor load order.
-			pgJSFiles := feature.Assets(feature.RootPlaygroundPG)
-			for _, f := range pgJSFiles {
-				r.Get("/"+f, noCacheHandler)
-			}
-		}
-	}
-
-	// Games plugins: seed the embedded default set into the games directory,
-	// then serve game files verbatim from disk (no auth, no cache — game code
-	// is live-editable without recompiling or restarting). Registered before
-	// the serveUI catch-all below so the specific /games/* pattern wins.
-	gamesDir := config.ResolveGamesDir(rt.reg.Config().GamesDir, filepath.Dir(rt.configPath))
-	if err := os.MkdirAll(gamesDir, 0o755); err != nil {
-		rt.logger.Warn("router: games: create dir %s failed: %v", gamesDir, err)
-	} else if gameFS, ferr := fs.Sub(web.Games, "games"); ferr == nil {
-		if seeded, serr := games.SeedGames(gameFS, gamesDir, rt.logger.Warn); serr != nil {
-			rt.logger.Warn("router: games: seed failed: %v", serr)
-		} else if len(seeded) > 0 {
-			rt.logger.Info("router: games: seeded default games: %v", seeded)
-		}
-	} else {
-		rt.logger.Warn("router: games: embedded default set unavailable: %v", ferr)
-	}
-	gamesStatic := http.StripPrefix("/games/", http.FileServer(http.Dir(gamesDir)))
-	r.Get("/games/*", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		gamesStatic.ServeHTTP(w, req)
-	})
+	rt.registerDemoStatic(r)
 	r.Get("/*", rt.serveUI)
 
 	// Walk routes to dynamically build the assistant contract-backed router

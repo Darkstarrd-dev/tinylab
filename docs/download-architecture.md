@@ -1,3 +1,4 @@
+> **最后核对（2026-08-29，Round-2 P0-01c/P1-02 SSE与并发）：** `validateDownloadDir` 相对路径经 `Abs(defaultDir/cleaned)` 后 `HasPrefix` 校验，`"evil"` 拒绝；`download-sse.js` `onerror` 重连前 `loadDownloadTasks()` 全量校正；`playDownloadFile`/`openDownloadDir` 经 `PathGuard(DownloadDir)` 403 越界；`Manager.UpdateSettings` 的 `maxConcurrent` 生效说明。
 
 # TinyRouter Download 下载功能架构
 > **最后核对（2026-08-08，Utility 子工具与 Download 生命周期）：** Download 前端当前由 Utility 菜单的 `download` 子工具承载，入口仍为 `web/static/download.js`，后端 API 路径保持 `/api/downloads/*` 不变。`web/static/app.js` 在 Utility 子工具切换时调用 `suspendDownload`/`resumeDownload`，离开时关闭 SSE 并执行 cleanup；任务队列、SSE 事件与服务端执行语义未因导航重组改变。FileTransfer 是并列的 Utility `fileTransfer` 子工具，其上传路由事实记录于 `docs/config-registry-state-architecture.md`。

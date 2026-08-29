@@ -229,7 +229,9 @@ function __scCaptureHandler(e) {
     document.addEventListener('keydown', __scCaptureHandler, true);
     return;
   }
-  // Find same-region conflict.
+  // P1-06a cross-region conflict: global bindings shadow gallery etc.
+  // Find same-region conflict. Also check cross-region (global) shadow.
+
   var region = (function() {
     var regions = Shortcuts.getAllRegions();
     for (var i = 0; i < regions.length; i++) {
@@ -239,6 +241,16 @@ function __scCaptureHandler(e) {
   })();
   if (region) {
     var conflict = Shortcuts.findConflict(region, binding, cap.actionId);
+    // P1-06a: if no same-region conflict, check if this binding collides with a different region's effective binding
+    if (!conflict) {
+      var allRegions = Shortcuts.getAllRegions();
+      for (var _ri=0; _ri<allRegions.length; _ri++){
+        var otherRegion = allRegions[_ri].id;
+        if (otherRegion === region) continue;
+        var otherConflict = Shortcuts.findConflict(otherRegion, binding, null);
+        if (otherConflict) { conflict = otherConflict; break; }
+      }
+    }
     if (conflict) {
       toast(t('shortcutConflictingAction', [scActionLabel(conflict)]), 'error', 4000);
       reRenderScRow(cap.actionId);

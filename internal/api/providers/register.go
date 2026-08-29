@@ -147,7 +147,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	h.d.Reg.AddProvider(p)
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save")
 		return
 	}
@@ -171,7 +171,7 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request) {
 
 	if h.d.Reg.UpdateProvider(id, updates) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -193,7 +193,7 @@ func (h *Handler) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if h.d.Reg.DeleteProvider(id) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -220,7 +220,7 @@ func (h *Handler) reorderProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
@@ -498,7 +498,7 @@ func (h *Handler) addProviderModel(w http.ResponseWriter, r *http.Request) {
 
 	if h.d.Reg.AddModel(providerID, config.ModelDef{ID: req.Model}) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -533,7 +533,7 @@ func (h *Handler) updateModelQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelQuotaType(providerID, req.Model, req.QuotaType) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -562,7 +562,7 @@ func (h *Handler) updateModelAlias(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelAlias(providerID, req.Model, req.Alias) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -598,7 +598,7 @@ func (h *Handler) updateModelNote(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelNote(providerID, req.Model, req.Note) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -633,7 +633,7 @@ func (h *Handler) updateModelKind(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelKind(providerID, req.Model, req.Kind) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -668,7 +668,7 @@ func (h *Handler) updateModelImgProtocol(w http.ResponseWriter, r *http.Request)
 	}
 	if h.d.Reg.UpdateModelImgProtocol(providerID, req.Model, req.ImgProtocol) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -707,7 +707,7 @@ func (h *Handler) updateModelTextProtocol(w http.ResponseWriter, r *http.Request
 	}
 	if h.d.Reg.UpdateModelTextProtocol(providerID, req.Model, storedVal) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -738,7 +738,7 @@ func (h *Handler) updateModelChatResponsesCompat(w http.ResponseWriter, r *http.
 	}
 	if h.d.Reg.UpdateModelChatResponsesCompat(providerID, req.Model, *req.ChatResponsesCompat) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -785,7 +785,7 @@ func (h *Handler) updateModelImgSizes(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelImgSizes(providerID, req.Model, cleaned) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -820,7 +820,7 @@ func (h *Handler) updateModelProtocols(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
@@ -853,7 +853,7 @@ func (h *Handler) updateModelNIM(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateModelNIMOverride(providerID, req.Model, req.NIM) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -871,7 +871,7 @@ func (h *Handler) deleteProviderModel(w http.ResponseWriter, r *http.Request) {
 
 	if h.d.Reg.DeleteModel(providerID, modelID) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}

@@ -1,3 +1,4 @@
+> **最后核对（2026-08-29，Round-2 P1-07/NIM与currentKey对齐）：** `monitor/currentKey` 与 `SelectKey` 语义对齐——NIM 使能时以 `WaitNIMInterval==0` 过滤候选，`ManualKey` pin 优先；`Entry.ProviderID` 新增并参与 `decInFlightForKey` 精确匹配，跨 Provider KeyID 碰撞不再误扣。
 ﻿# TinyRouter Rotation Key 轮询架构
 
 > **文档定位：** `internal/rotation/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。

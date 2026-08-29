@@ -32,8 +32,9 @@
     return String(t.model || '').split('/')[0] || t.protocol || 'default';
   }
 
-  function effectiveConcurrency() {
-    var w = pgWinAt(pgState.activeWin);
+  function effectiveConcurrency(winIndex) { // P1-01c per-win
+    var idx = (typeof winIndex === "number" ? winIndex : pgState.activeWin);
+    var w = pgWinAt(idx);
     var v = w && w.config ? parseInt(w.config.imgConcurrency, 10) : 0;
     return Math.max(1, Math.min(8, v || 1));
   }
@@ -156,7 +157,7 @@
           continue;
         }
         var key = providerKeyOf(t);
-        var limit = effectiveConcurrency();
+        var limit = effectiveConcurrency(typeof t !== "undefined" && t.winIndex != null ? t.winIndex : undefined);
         while (t.nextUnit < t.units.length && (providerRunning[key] || 0) < limit && !t.abortCtrl.signal.aborted) {
           providerRunning[key] = (providerRunning[key] || 0) + 1;
           t.status = 'running';

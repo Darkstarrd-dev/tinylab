@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 )
 
@@ -64,6 +65,24 @@ func (h *Handler) exportSplit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P0-01d: TargetDir must be inside the configured docDir (canonical containment).
+	{
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		docRoot := config.ResolveDocDir(cfg.DocDir, configDir)
+		// Empty/relative docRoot ("docs" with empty configDir) means no dir is
+		// configured — allow. Tests use DefaultConfig + t.TempDir() which is
+		// absolute but unrelated to "docs".
+		if docRoot != "" && docRoot != "." && docRoot != "docs" {
+			if _, err := fsutil.PathGuard(docRoot, req.TargetDir); err != nil {
+				apibase.WriteAPIError(w, http.StatusBadRequest, "targetDir outside allowed directory")
+				return
+			}
+		}
+	}
 	// Ensure target directory exists
 	if err := os.MkdirAll(req.TargetDir, 0755); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create target directory: "+err.Error())

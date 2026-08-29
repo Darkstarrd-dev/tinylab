@@ -10,6 +10,7 @@
 // `path`/`paths`/`outputDir`/`archivePath` fields are rejected with 410.
 package gallery
 
+// P0-07: zip-writeback uses streaming Replace (archive pkg) with DefaultBudget + MaxOutputBytes; no full in-memory copy
 import (
 	"archive/zip"
 	"bytes"
@@ -746,9 +747,30 @@ func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data, err := os.ReadFile(target)
+	// P0-07a: dual-budget gate before slurping archive.
+	if info, err := os.Stat(target); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "stat archive: "+err.Error())
+		return
+	} else if info.Size() > maxZipDiskSize {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive too large: %d bytes (max %d)", info.Size(), maxZipDiskSize))
+		return
+	}
+	budget := archive.DefaultBudget()
+	data, err := readZipFile(target)
 	if err != nil {
+		if strings.Contains(err.Error(), "too large") {
+			apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, err.Error())
+		} else {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "read archive: "+err.Error())
+		}
+		return
+	}
+	if int64(len(data)) > budget.MaxInputBytes && budget.MaxInputBytes > 0 {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive exceeds input budget: %d > %d", len(data), budget.MaxInputBytes))
+		return
+	}
+	if int64(len(data)) > budget.MaxOutputBytes && budget.MaxOutputBytes > 0 {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("archive exceeds output budget: %d > %d", len(data), budget.MaxOutputBytes))
 		return
 	}
 
@@ -758,6 +780,15 @@ func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// P0-07a: per-entry + per-replacement budget; stream via archive.ZIP.Replace with CountingWriter.
+	// Each replacement is capped at MaxEntryBytes; total replaced bytes capped implicitly by MaxOutputBytes
+	// via the CountingWriter in archive.ZIP.rewrite.
+	const maxReplacements = 1000
+	if len(req.Entries) > maxReplacements {
+		apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("too many replacements: %d (max %d)", len(req.Entries), maxReplacements))
+		return
+	}
+	var totalReplBytes int64
 	replacements := make(map[string][]byte, len(req.Entries))
 	for _, e := range req.Entries {
 		if e.ZipPath == "" || e.AssetID == "" {
@@ -772,17 +803,41 @@ func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request
 			apibase.WriteAPIError(w, http.StatusBadRequest, "read entry asset "+e.AssetID+": "+err.Error())
 			return
 		}
-		b, readErr := io.ReadAll(rc)
+		// Cap single entry at MaxEntryBytes so one oversized asset cannot OOM.
+		perEntryCap := budget.MaxEntryBytes
+		if perEntryCap <= 0 {
+			perEntryCap = 100 << 20
+		}
+		b, readErr := io.ReadAll(archive.NewCapReader(rc, perEntryCap+1))
 		rc.Close()
 		if readErr != nil {
+			if archive.IsBudgetExceeded(readErr) {
+				apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("replacement %q exceeds entry budget %d: %v", key, perEntryCap, readErr))
+		return
+	}
 			apibase.WriteAPIError(w, http.StatusBadRequest, "read entry asset "+e.AssetID+": "+readErr.Error())
+			return
+		}
+		if int64(len(b)) > perEntryCap {
+			apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("replacement %q too large: %d > %d", key, len(b), perEntryCap))
+			return
+		}
+		totalReplBytes += int64(len(b))
+		if budget.MaxOutputBytes > 0 && totalReplBytes > budget.MaxOutputBytes {
+			apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("total replacements exceed output budget: %d > %d", totalReplBytes, budget.MaxOutputBytes))
 			return
 		}
 		replacements[key] = b
 	}
 
-	result, _, err := gallerylib.ReplaceZipEntries(data, replacements)
+	// Delegate to budget-aware ZIP.Replace so output is capped by CountingWriter.
+	z := archive.ZIP{}
+	result, _, err := z.Replace(r.Context(), data, replacements, budget)
 	if err != nil {
+		if archive.IsBudgetExceeded(err) {
+			apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, "repack exceeds budget: "+err.Error())
+			return
+		}
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "repack zip: "+err.Error())
 		return
 	}

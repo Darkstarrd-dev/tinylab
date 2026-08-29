@@ -1,6 +1,8 @@
 package music
 
 import (
+	"context"
+	"time"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 // Playlist persistence: single JSON file Musics/playlists.json
@@ -88,14 +91,35 @@ func (h *Handler) importPlaylistURL(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url")
 		return
 	}
-	resp, err := http.Get(body.URL)
+	// P0-02c: SSRF via outbound Policy + timeout + limit
+	parsedURL, err := outbound.ValidateURL(body.URL)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := (outbound.Policy{Timeout: 15 * time.Second}).CheckHost(ctx, parsedURL.Hostname()); err != nil {
+		apibase.WriteAPIError(w, http.StatusForbidden, "url resolves to a blocked address")
+		return
+	}
+	client := (outbound.Policy{Timeout: 15 * time.Second}).Client()
+	req2, _ := http.NewRequestWithContext(ctx, "GET", body.URL, nil)
+	resp, err := client.Do(req2)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer resp.Body.Close()
-	resp.Body = http.MaxBytesReader(w, resp.Body, 5<<20)
-	bs, _ := io.ReadAll(resp.Body)
+	if resp.ContentLength > 5<<20 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
+		return
+	}
+	bs, _ := io.ReadAll(io.LimitReader(resp.Body, 5<<20+1))
+	if int64(len(bs)) > 5<<20 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
+		return
+	}
 	ct := resp.Header.Get("Content-Type")
 	tracks := []map[string]any{}
 	name := body.Name

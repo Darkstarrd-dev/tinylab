@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 // domains need. Each sub-package's Register function receives a *Deps, and the
 // parent internal/api package creates it from its own deps struct.
 type Deps struct {
+	cfgSaveMu sync.Mutex
 	Reg          *registry.Registry
 	ConfigPath   string
 	Usage        *usage.RingBuffer
@@ -84,6 +86,8 @@ type ArchiveRunner interface {
 // registry reload and is used by handlers whose in-memory changes do not need to
 // be re-applied to the running registry (e.g. plain CRUD persistence).
 func (d *Deps) SaveConfig(cfg *config.Config) error {
+	d.cfgSaveMu.Lock()
+	defer d.cfgSaveMu.Unlock()
 	return config.Save(d.ConfigPath, cfg)
 }
 
@@ -92,6 +96,8 @@ func (d *Deps) SaveConfig(cfg *config.Config) error {
 // It is the single convergence point for the "modify cfg -> Save -> Reload"
 // pattern.
 func (d *Deps) SaveConfigAndReload(cfg *config.Config) error {
+	d.cfgSaveMu.Lock()
+	defer d.cfgSaveMu.Unlock()
 	if err := config.Save(d.ConfigPath, cfg); err != nil {
 		return err
 	}

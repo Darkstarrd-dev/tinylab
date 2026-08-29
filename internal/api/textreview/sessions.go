@@ -36,6 +36,14 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if req.SystemPrompt == "" {
 		req.SystemPrompt = defaultCleanSystemPrompt
 	}
+	if tr.SessionCount() >= tr.MaxSessions {
+		apibase.WriteAPIError(w, http.StatusTooManyRequests, fmt.Sprintf("too many sessions (%d max)", tr.MaxSessions))
+		return
+	}
+	if tr.EstimateBytes() > tr.MaxSessionBytes {
+		apibase.WriteAPIError(w, http.StatusTooManyRequests, "session store byte budget exceeded; delete old sessions first")
+		return
+	}
 	s := tr.CreateSession(req, h.d)
 	tr.StoreSession(s)
 	h.engineOnce().Start(s)

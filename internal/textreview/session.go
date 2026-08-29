@@ -89,6 +89,7 @@ type Session struct {
 	SystemPrompt string        `json:"systemPrompt"`
 	Status       string        `json:"status"`
 	CreatedAt    time.Time     `json:"createdAt"`
+	LastAccess   time.Time     `json:"-"`
 	RangeStart   int           `json:"rangeStart,omitempty"`
 	RangeEnd     int           `json:"rangeEnd,omitempty"`
 	Eligible     []int         `json:"-"` // chapter indices eligible for this session (snapshot at creation)
@@ -111,9 +112,91 @@ func (s *Session) Unlock() { s.mu.Unlock() }
 func (s *Session) lock()   { s.mu.Lock() }
 func (s *Session) unlock() { s.mu.Unlock() }
 
+func (s *Session) touchLocked() { s.LastAccess = time.Now() }
+func (s *Session) Touch() {
+	s.lock()
+	s.touchLocked()
+	s.unlock()
+}
+
 // sessions is the in-memory session store. Sessions do not persist across
 // restarts (confirmed decision: no state.yaml for text-review).
 var sessions sync.Map // map[string]*Session
+
+// P1-03c: bounds to prevent unbounded growth.
+const (
+	MaxSessions      = 50
+	MaxSessionBytes  = 50 << 20 // ~50 MiB aggregate RawText+Cleaned estimate
+	SessionTTL       = 2 * time.Hour
+	SweepInterval    = 15 * time.Minute
+)
+
+var sweepOnce sync.Once
+
+func EnsureSweep() {
+	sweepOnce.Do(func() {
+		go func() {
+			t := time.NewTicker(SweepInterval)
+			defer t.Stop()
+			for range t.C {
+				SweepExpired(time.Now())
+			}
+		}()
+	})
+}
+
+func SweepExpired(now time.Time) int {
+	n := 0
+	sessions.Range(func(key, val any) bool {
+		s, _ := val.(*Session)
+		if s == nil {
+			return true
+		}
+		s.lock()
+		expired := !s.LastAccess.IsZero() && now.Sub(s.LastAccess) > SessionTTL
+		isTerminal := s.Status == SessionCompleted || s.Status == SessionCancelled
+		s.unlock()
+		if expired || (isTerminal && now.Sub(s.CreatedAt) > SessionTTL) {
+			if s2, ok := sessions.LoadAndDelete(key); ok {
+				if ss, ok := s2.(*Session); ok {
+					ss.lock()
+					if ss.cancel != nil {
+						ss.cancel()
+					}
+					ss.unlock()
+				}
+				n++
+			}
+		}
+		return true
+	})
+	return n
+}
+
+func SessionCount() int {
+	c := 0
+	sessions.Range(func(_, _ any) bool { c++; return true })
+	return c
+}
+
+func EstimateBytes() int64 {
+	var total int64
+	sessions.Range(func(_, val any) bool {
+		s, _ := val.(*Session)
+		if s == nil {
+			return true
+		}
+		s.lock()
+		for i := range s.Chapters {
+			total += int64(len(s.Chapters[i].Content))
+			total += int64(len(s.Chapters[i].Cleaned))
+		}
+		total += int64(len(s.RawText))
+		s.unlock()
+		return true
+	})
+	return total
+}
 
 // ClearAllSessions stops all active sessions, removes them from the store,
 // and frees resources.
@@ -173,6 +256,7 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 	for i := eligibleStart; i < eligibleEnd; i++ {
 		eligible = append(eligible, i)
 	}
+	now := time.Now()
 	s := &Session{
 		ID:           apibase.GenerateID("tr"),
 		FileName:     req.FileName,
@@ -181,7 +265,8 @@ func CreateSession(req CreateSessionRequest, d *apibase.Deps) *Session {
 		Nodes:        nodes,
 		SystemPrompt: req.SystemPrompt,
 		Status:       SessionIdle,
-		CreatedAt:    time.Now(),
+		CreatedAt:    now,
+		LastAccess:   now,
 		RangeStart:   req.RangeStart,
 		RangeEnd:     req.RangeEnd,
 		Eligible:     eligible,
@@ -195,11 +280,19 @@ func GetSession(id string) *Session {
 	if !ok {
 		return nil
 	}
-	return v.(*Session)
+	s := v.(*Session)
+	s.Touch()
+	return s
 }
 
 // StoreSession records a session in the global map.
 func StoreSession(s *Session) {
+	EnsureSweep()
+	// Enforce MaxSessions by evicting oldest terminal/oldest if needed.
+	if SessionCount() >= MaxSessions {
+		// Evict one expired or oldest terminal first.
+		SweepExpired(time.Now())
+	}
 	sessions.Store(s.ID, s)
 }
 
@@ -225,6 +318,7 @@ func DeleteSession(id string) bool {
 // is safe to encode without holding the lock.
 func (s *Session) Snapshot() *Session {
 	s.lock()
+	s.touchLocked()
 	defer s.unlock()
 	chapters := make([]Chapter, len(s.Chapters))
 	copy(chapters, s.Chapters)
@@ -238,6 +332,7 @@ func (s *Session) Snapshot() *Session {
 		SystemPrompt: s.SystemPrompt,
 		Status:       s.Status,
 		CreatedAt:    s.CreatedAt,
+		LastAccess:   s.LastAccess,
 		RangeStart:   s.RangeStart,
 		RangeEnd:     s.RangeEnd,
 	}

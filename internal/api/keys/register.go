@@ -135,7 +135,7 @@ func (h *Handler) createKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.AddKey(providerID, k) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -202,7 +202,7 @@ func (h *Handler) bulkAddKeys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.d.Reg.Config()
-	saveErr := h.d.SaveConfig(&cfg)
+	saveErr := h.d.SaveConfigAndReload(&cfg)
 	w.Header().Set("Content-Type", "application/json")
 	if saveErr != nil {
 		json.NewEncoder(w).Encode(map[string]any{
@@ -230,7 +230,7 @@ func (h *Handler) updateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateKey(providerID, keyID, updates) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -248,7 +248,7 @@ func (h *Handler) deleteKey(w http.ResponseWriter, r *http.Request) {
 	keyID := chi.URLParam(r, "kid")
 	if h.d.Reg.DeleteKey(providerID, keyID) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}

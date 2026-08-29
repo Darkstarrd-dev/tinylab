@@ -30,7 +30,7 @@ func (p *registryPersister) UpdateNodeConcurrency(id string, concurrency int) bo
 		return false
 	}
 	cfg := p.d.Reg.Config()
-	_ = p.d.SaveConfig(&cfg)
+	_ = p.d.SaveConfigAndReload(&cfg)
 	return true
 }
 
@@ -46,6 +46,6 @@ func (p *registryPersister) DisableNode(id string) bool {
 		return false
 	}
 	cfg := p.d.Reg.Config()
-	_ = p.d.SaveConfig(&cfg)
+	_ = p.d.SaveConfigAndReload(&cfg)
 	return true
 }

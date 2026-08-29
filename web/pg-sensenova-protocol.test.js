@@ -101,9 +101,9 @@ function makeEnv() {
 
   const ctx = vm.createContext(sandbox);
 
-  // Load pg-core.js, pg-i18n.js, pg-ui.js, pg-modal.js, pg-request.js, pg-image-model.js, pg-image-tasks.js
+  // Load pg-core.js, pg-i18n.js, pg-ui.js (+ params/reqleft/events), pg-modal.js, pg-request.js, pg-image-model.js, pg-image-tasks.js
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
-  const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
+  const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-ui-params.js', 'pg-ui-reqleft.js', 'pg-ui-events.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
   for (const f of files) {
     const code = fs.readFileSync(path.join(dir, f), 'utf8');
     vm.runInContext(code, ctx, { filename: f });

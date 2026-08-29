@@ -186,7 +186,7 @@ func (h *Handler) upsertReviewNode(w http.ResponseWriter, r *http.Request) {
 		n.ID = apibase.GenerateID("trn")
 		h.d.Reg.AddTextReviewNode(n)
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -197,7 +197,7 @@ func (h *Handler) upsertReviewNode(w http.ResponseWriter, r *http.Request) {
 		// Update
 		if h.d.Reg.UpdateTextReviewNode(n.ID, n) {
 			cfg := h.d.Reg.Config()
-			if err := h.d.SaveConfig(&cfg); err != nil {
+			if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 				apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 				return
 			}
@@ -215,7 +215,7 @@ func (h *Handler) deleteReviewNode(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if h.d.Reg.DeleteTextReviewNode(id) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -254,7 +254,7 @@ func (h *Handler) upsertSplitPattern(w http.ResponseWriter, r *http.Request) {
 		h.d.Reg.AddSplitPattern(p)
 	}
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
@@ -271,7 +271,7 @@ func (h *Handler) deleteSplitPattern(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	if h.d.Reg.DeleteSplitPattern(key) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -310,7 +310,7 @@ func (h *Handler) savePromptDefault(w http.ResponseWriter, r *http.Request) {
 	}
 	h.d.Reg.SetTextReviewPrompt(req.SystemPrompt)
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}

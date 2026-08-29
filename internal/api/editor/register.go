@@ -405,6 +405,21 @@ func (h *Handler) editorRename(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "rename failed: "+err.Error())
 		return
 	}
+	// editorRename stem fix: new name may include extension — strip it before appending _imgs.
+	// P1-03b: sync companion _imgs dir when present
+	{
+		oldBase := filepath.Base(target)
+		oldStem := oldBase[:len(oldBase)-len(filepath.Ext(oldBase))]
+		oldImgs := filepath.Join(filepath.Dir(target), oldStem+"_imgs")
+		newStem := strings.TrimSuffix(name, filepath.Ext(name))
+		if newStem == "" {
+			newStem = name
+		}
+		newImgs := filepath.Join(filepath.Dir(newPath), newStem+"_imgs")
+		if _, err := os.Stat(oldImgs); err == nil {
+			_ = os.Rename(oldImgs, newImgs)
+		}
+	}
 
 	if req.PathGrantID != "" {
 		ownerID := owner.From(r.Context())
@@ -664,7 +679,12 @@ func (h *Handler) editorDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if len(baseName) > len(ext) {
 		rawName := baseName[:len(baseName)-len(ext)]
 		imgsDir := filepath.Join(filepath.Dir(target), rawName+"_imgs")
-		_ = os.RemoveAll(imgsDir)
+		// P0-01e: only remove the companion _imgs dir that is a direct sibling
+		// of the deleted file and inside the same parent. PathGuard ensures we
+		// never traverse outside the file's directory.
+		if guarded, err := fsutil.PathGuard(filepath.Dir(target), imgsDir); err == nil {
+			_ = os.RemoveAll(guarded)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

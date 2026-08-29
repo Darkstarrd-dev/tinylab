@@ -72,11 +72,13 @@ func resolveBrowseInitialDir(initialPath string, mode string) string {
 	}
 	info, err := os.Stat(initialPath)
 	if err != nil {
-		// Path doesn't exist — create it as a directory so the picker can
-		// navigate there. File-mode pickers also benefit: if the parent of a
-		// non-existent file is missing, MkdirAll creates it too.
-		_ = os.MkdirAll(initialPath, 0755)
-		return initialPath
+		// Path doesn't exist — do NOT create arbitrary directories.
+		// Previously this unconditionally MkdirAll'd the user-supplied path,
+		// allowing an authenticated caller to create any directory the
+			// server process can write. Returning empty lets the picker fall
+			// back to its default location; the frontend may retry with a
+			// known-good configDir subtree if needed.
+		return ""
 	}
 	if info.IsDir() {
 		return initialPath

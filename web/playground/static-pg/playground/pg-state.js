@@ -125,7 +125,7 @@ function pgSyncSearchMessages() {
   var msgs = s ? s.messages : [];
   for (var i = 0; i < pgState.windows.length; i++) {
     if (i < 2) {
-      pgState.windows[i].messages = msgs;
+      pgState.windows[i].messages = msgs.map(function(m){ return Object.assign({}, m); }); // P1-01a isolate
     }
   }
 }

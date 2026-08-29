@@ -18,6 +18,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/games"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 	"github.com/tinyrouter/tinyrouter/web"
 	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"github.com/tinyrouter/tinyrouter/internal/procutil"
@@ -162,7 +163,22 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.DocDir = *updates.DocDir
 	}
 	if updates.MusicDir != nil {
-		cfg.MusicDir = *updates.MusicDir
+		proposed := *updates.MusicDir
+		if proposed != "" {
+			configDir := filepath.Dir(h.d.ConfigPath)
+			resolved := config.ResolveMusicDir(proposed, configDir)
+			// Must stay within configDir (or its Musics default) to prevent write-to-root.
+			allowedRoot, err := filepath.Abs(configDir)
+			if err != nil {
+				apibase.WriteAPIError(w, http.StatusInternalServerError, "resolve config dir failed")
+				return
+			}
+			if _, err := fsutil.PathGuard(allowedRoot, resolved); err != nil {
+				apibase.WriteAPIError(w, http.StatusBadRequest, fmt.Sprintf("musicDir must be inside config directory: %v", err))
+				return
+			}
+		}
+		cfg.MusicDir = proposed
 	}
 	if updates.Rotation != nil {
 		applyRotationUpdates(&cfg, updates.Rotation)
@@ -223,7 +239,20 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		cfg.Proxy = *updates.Proxy
+		// P1-06b: proxy PATCH is partial-merge (per-key) so unrelated proxy fields aren't wiped
+		merged := cfg.Proxy
+		// Use JSON merge via map: marshal both and merge keys
+		{
+			b1, _ := json.Marshal(merged)
+			b2, _ := json.Marshal(*updates.Proxy)
+			var m1, m2 map[string]any
+			_ = json.Unmarshal(b1, &m1)
+			_ = json.Unmarshal(b2, &m2)
+			for k, v := range m2 { if v != nil { m1[k] = v } }
+			bb, _ := json.Marshal(m1)
+			_ = json.Unmarshal(bb, &merged)
+		}
+		cfg.Proxy = merged
 	}
 	if updates.Server != nil {
 		cfg.Server = *updates.Server

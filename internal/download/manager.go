@@ -65,13 +65,44 @@ func NewManager(settings RuntimeSettings, logger *console.Logger) *Manager {
 // 使正在运行和后续的下载无需重启即可生效。
 func (m *Manager) UpdateSettings(settings RuntimeSettings) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.settings = settings
 	if m.executor != nil {
 		m.executor.settings = settings
 	}
-	if settings.MaxConcurrent > 0 {
-		m.maxConcurrent = settings.MaxConcurrent
+	if settings.MaxConcurrent <= 0 {
+		m.mu.Unlock()
+		return
+	}
+	old := m.maxConcurrent
+	newVal := settings.MaxConcurrent
+	if newVal == old {
+		m.mu.Unlock()
+		return
+	}
+	m.maxConcurrent = newVal
+	// Hot-scale workers when already started.
+	started := m.started
+	m.mu.Unlock()
+	if !started {
+		return
+	}
+	if newVal > old {
+		for range newVal - old {
+			m.wg.Add(1)
+			go m.worker()
+		}
+		if m.logger != nil {
+			m.logger.Info("download workers scaled up: %d → %d", old, newVal)
+		}
+	} else {
+		// Scale down: workers will naturally drain and exit on next stopCh signal.
+		// We cannot safely kill in-flight workers; instead future Start() will use new count,
+		// and Stop() recreates stopCh. For immediate effect, we signal extra workers to exit
+		// by closing and recreating stopCh only when explicitly shrinking via Stop/Start cycle.
+		// Keep it simple: log the new limit; actual concurrency decreases after next Stop/Start.
+		if m.logger != nil {
+			m.logger.Info("download workers scaled down (effective on next restart): %d → %d", old, newVal)
+		}
 	}
 }
 

@@ -1,0 +1,770 @@
+/* =====================================================================
+   GIF Editor
+   ===================================================================== */
+
+/* =====================================================================
+   GIF Editor page (web/static/gif-editor.js) — all selectors gif- prefixed
+   ===================================================================== */
+.main.main-no-scroll #page-content{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.gif-app{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;color:var(--text)}
+.gif-header{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:0 14px;height:42px;background:var(--modal-bg);border-bottom:1px solid var(--glass-border)}
+.gif-title{font-size:var(--font-h3);font-weight:var(--font-weight-bold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.gif-title-sub{color:var(--accent);font-size:var(--font-badge);margin-left:6px;font-weight:var(--font-weight-normal)}
+.gif-workspace{flex:1;min-height:0;height:100%;display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr auto;overflow:hidden}
+/* Narrow layout is defined authoritatively at the END of the GIF styles
+   section: desktop rules below (e.g. .gif-stage-area min-height:0) would
+   otherwise override this earlier block. Only the title tweak stays here. */
+@media (max-width:768px){
+  .gif-title-sub{display:none}
+}
+.gif-sidebar{grid-row:1/-1;background:var(--panel-sticky-bg);border-right:1px solid var(--glass-border);overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0;height:100%;max-height:100%}
+.gif-group-title-row{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--glass-border);padding-bottom:5px;margin-bottom:8px}
+.gif-group-title{font-size:var(--font-card-title);color:var(--text-secondary);font-weight:var(--font-weight-bold);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--glass-border);padding-bottom:5px}
+.gif-group-title.gif-mt{margin-top:10px}
+.gif-control-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.gif-range-wrap{display:flex;align-items:center;gap:5px;margin-bottom:8px;font-size:var(--font-badge)}
+.gif-axis-label{width:20px;flex-shrink:0;color:var(--text-secondary)}
+.gif-scale-label{font-size:var(--font-badge);color:var(--text-muted);width:30px;flex-shrink:0}
+.gif-scale-val{font-size:var(--font-badge);width:35px;text-align:right;font-family:var(--font-mono)}
+.gif-flex-1{flex:1;min-width:0}
+.gif-full-width{width:100%}
+.gif-nowrap{white-space:nowrap}
+.gif-mt{margin-top:8px}
+.gif-mt-sm{margin-top:10px}
+.gif-mb{margin-bottom:15px}
+.gif-muted-label{color:var(--text-muted);font-size:var(--font-badge)}
+.gif-muted-hint{font-size:var(--font-badge);color:var(--text-muted);line-height:1.4}
+.gif-label{font-size:var(--font-badge);color:var(--text-muted);display:block;margin-bottom:4px}
+.gif-check-label{display:flex;align-items:center;gap:8px;font-size:var(--font-card-title);margin-bottom:5px;cursor:pointer}
+.gif-radio-label{font-size:var(--font-badge);margin-right:8px;color:var(--text-secondary)}
+.gif-drop-zone{border:2px dashed var(--glass-border);padding:28px 16px;text-align:center;border-radius:var(--radius-md);cursor:pointer;margin-bottom:12px;transition:all var(--transition-fast);aspect-ratio:1 / 1;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--input-bg);box-sizing:border-box}
+.gif-drop-zone:hover{border-color:var(--accent);background:var(--glass-hover)}
+.gif-drop-zone-icon{font-size:38px;margin-bottom:10px;line-height:1}
+.gif-drop-zone-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px}
+.gif-drop-zone-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
+.gif-drop-hint{font-size:var(--font-card-title);color:var(--text-muted)}
+.gif-reset-bar-btn,.gif-reset-btn{border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg);color:var(--text);font-weight:600;font-size:13px;cursor:pointer;transition:all var(--transition-fast);box-sizing:border-box}
+.gif-reset-bar-btn:hover,.gif-reset-btn:hover{background:rgba(220,53,69,0.15);border-color:rgba(220,53,69,0.4);color:#ff6b6b}
+.gif-crop-action-btn{height:38px;display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 8px;font-weight:600;box-sizing:border-box}
+.gif-trans-panel{display:none;padding:10px;background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-sm);margin-bottom:15px}
+.gif-trans-hint{font-size:var(--font-badge);color:var(--text-muted);margin-bottom:8px;line-height:1.4}
+.gif-style-toolbar{display:flex;gap:5px;margin-bottom:10px}
+.gif-style-btn{background:var(--glass-hover);border:1px solid var(--glass-border);color:var(--text-muted);width:44px;height:44px;border-radius:var(--radius-sm);cursor:pointer;font-weight:var(--font-weight-bold);font-family:serif;display:flex;justify-content:center;align-items:center;transition:all var(--transition-fast);font-size:1.1rem;padding:0}
+.gif-style-btn.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.gif-style-image-label{flex:1;margin:0;display:flex;justify-content:center;align-items:center;cursor:pointer}
+.gif-scope-box{background:var(--input-bg);border:1px solid var(--glass-border);padding:8px;border-radius:var(--radius-sm);margin-bottom:10px;font-size:var(--font-card-title);color:var(--text-secondary)}
+.gif-range-input{display:none;margin-top:5px}
+.gif-selected-layer-tools{display:none;margin-top:10px;border:1px solid var(--accent);padding:5px;border-radius:var(--radius-sm)}
+.gif-layer-list{background:var(--input-bg);border:1px solid var(--glass-border);height:80px;overflow-y:auto;border-radius:var(--radius-sm)}
+.gif-layer-item{display:flex;justify-content:space-between;align-items:center;padding:5px;border-bottom:1px solid var(--glass-border);font-size:var(--font-badge);cursor:pointer}
+.gif-layer-item:hover{background:var(--glass-hover)}
+.gif-layer-item-active{background:var(--accent-glow)}
+.gif-layer-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.gif-layer-remove{color:var(--danger);flex-shrink:0;padding:0 4px;cursor:pointer}
+.gif-stage-area{grid-column:2;grid-row:1;background-color:#050505;background-image:linear-gradient(45deg,#111 25%,transparent 25%),linear-gradient(-45deg,#111 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#111 75%),linear-gradient(-45deg,transparent 75%,#111 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;position:relative;overflow:hidden;display:block;touch-action:none;min-width:0;min-height:0}
+.gif-canvas-wrapper{transform-origin:center center;transition:transform 0.05s ease-out;box-shadow:none !important;line-height:0;position:absolute;top:0;left:0}
+.gif-stage-overlay-text{display:none !important}
+.gif-stage-controls{position:absolute;bottom:16px;right:16px;background:var(--modal-bg);padding:4px;border-radius:var(--radius-sm);display:flex;gap:4px;border:1px solid var(--glass-border);backdrop-filter:blur(8px);z-index:10}
+.gif-icon-btn{background:var(--input-bg);border:1px solid var(--glass-border);color:var(--text);width:32px;height:32px;border-radius:var(--radius-xs);cursor:pointer;display:flex;justify-content:center;align-items:center;font-size:1rem;padding:0;transition:all var(--transition-fast)}
+.gif-icon-btn:hover{background:var(--glass-hover);border-color:var(--accent);color:var(--accent)}
+/* .gif-timeline-area layout is redefined in "GIF Editor Upgrade Styles" below
+   (.gif-timeline-scroll owns horizontal scrolling; the area itself clips). */
+.gif-timeline-empty{color:var(--text-muted);margin:auto;font-size:var(--font-card-title);white-space:nowrap}
+/* Legacy .gif-slice-* timeline rules removed: the virtualized timeline
+   (gif-editor-timeline.js) emits .gif-timeline-item/.gif-thumb-wrapper/
+   .gif-timeline-info/.gif-timeline-item-actions/.btn-copy-slice/.btn-del-slice
+   — see "GIF Editor Upgrade Styles" below for the current timeline styles. */
+.gif-crop-panel{background:var(--input-bg);border:1px solid var(--glass-border);padding:10px;border-radius:var(--radius-sm);margin-bottom:15px;display:none}
+.gif-crop-panel.active{display:block}
+/* Sidebar collapsible panels — shared base (dark default) */
+.gif-sidebar-panel{display:none;width:100%;box-sizing:border-box;margin-top:8px;padding:10px;background:rgba(255,255,255,0.06);border:1px dashed var(--glass-border);border-radius:8px}
+.gif-crop-title{text-align:center;color:var(--text);font-weight:var(--font-weight-bold);margin-bottom:10px}
+.gif-panel-sep{border-top:1px solid var(--glass-border);padding-top:15px;margin-top:15px}
+.gif-output-sep{border-top:1px solid var(--glass-border);padding-top:15px;margin-top:auto}
+.gif-output-sep-inner{margin-top:20px;border-top:1px dashed var(--glass-border);padding-top:10px}
+.gif-quality-title{border:none;margin-bottom:5px}
+.gif-quality-range{font-weight:var(--font-weight-normal);font-size:var(--font-badge);color:var(--text-muted);margin-left:auto}
+.gif-frame-indicator{color:var(--accent);font-size:var(--font-badge)}
+.gif-btn{background:var(--btn-secondary-bg);border:1px solid var(--btn-secondary-border);color:var(--btn-secondary-text);padding:var(--btn-padding);border-radius:var(--radius-md);cursor:pointer;font-size:var(--font-card-title);transition:all var(--transition-fast);font-weight:var(--font-weight-normal);text-align:center;display:inline-flex;justify-content:center;align-items:center;gap:5px;font-family:inherit;box-sizing:border-box;text-decoration:none}
+.gif-btn:hover{background:var(--btn-secondary-bg-hover);border-color:var(--btn-secondary-border-hover);box-shadow:var(--btn-secondary-shadow)}
+.gif-btn:active{background:var(--btn-secondary-bg-active);transform:translateY(0)}
+.gif-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.gif-btn-primary{background:var(--btn-primary-bg);border:1px solid var(--btn-primary-border);color:var(--btn-primary-text);box-shadow:var(--btn-primary-shadow);font-weight:600}
+.gif-btn-primary:hover{background:var(--btn-primary-bg-hover);color:var(--btn-primary-text);box-shadow:var(--btn-primary-glow)}
+.gif-btn-primary.active{background:var(--btn-primary-bg-active);border-color:var(--btn-primary-border);color:var(--btn-primary-text)}
+.gif-btn-accent{background:var(--btn-accent-bg);color:var(--btn-accent-text);border:1px solid var(--btn-accent-border)}
+.gif-btn-accent:hover{background:var(--btn-accent-bg-hover)}
+.gif-btn-danger{background:var(--btn-danger-bg);color:var(--btn-danger-text);border:1px solid var(--btn-danger-border)}
+.gif-btn-danger:hover{background:var(--btn-danger-bg-hover);border-color:var(--btn-danger-border-hover);box-shadow:var(--btn-danger-shadow)}
+.gif-sm-btn{font-size:var(--font-badge);padding:6px}
+.gif-extract-btn{height:42px;margin-top:auto}
+.gif-spinner-overlay{position:fixed;inset:0;background:transparent !important;pointer-events:none;z-index:20000;display:none;justify-content:center;align-items:center;flex-direction:column}
+.gif-spinner{width:40px;height:40px;border:4px solid var(--glass-border);border-top-color:var(--accent);border-radius:50%;animation:gif-spin 1s linear infinite;margin-bottom:10px}
+@keyframes gif-spin{to{transform:rotate(360deg)}}
+.gif-result-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:100;display:none;justify-content:center;align-items:center}
+.gif-result-overlay.show{display:flex}
+.gif-result-overlay.active{display:flex}
+.gif-result-box{background:var(--modal-bg);backdrop-filter:blur(var(--glass-blur-sm));-webkit-backdrop-filter:blur(var(--glass-blur-sm));padding:20px;border-radius:var(--radius-xl);border:1px solid var(--glass-border);text-align:center;max-width:90vw;max-height:90vh;overflow-y:auto}
+.gif-result-title{font-size:var(--font-h3);font-weight:var(--font-weight-bold);margin:0 0 6px}
+.gif-result-img{max-height:50vh;border:1px solid var(--glass-border);margin:15px 0;max-width:100%}
+.gif-result-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.gif-hidden{display:none!important}
+.gif-edit-blocked{opacity:0.3;pointer-events:none;filter:grayscale(1)}
+.gif-workspace input[type="range"]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;height:20px;margin:0}
+.gif-workspace input[type="range"]::-webkit-slider-runnable-track{width:100%;height:6px;background:var(--glass-border);border-radius:var(--radius-xs)}
+.gif-workspace input[type="range"]::-webkit-slider-thumb{height:16px;width:16px;border-radius:50%;background:var(--accent);-webkit-appearance:none;margin-top:-5px;box-shadow:0 0 5px rgba(0,0,0,0.5)}
+.gif-workspace input[type="range"]::-moz-range-track{width:100%;height:6px;background:var(--glass-border);border-radius:var(--radius-xs)}
+.gif-workspace input[type="range"]::-moz-range-thumb{height:16px;width:16px;border-radius:50%;background:var(--accent);border:none}
+.gif-workspace input[type="number"],.gif-workspace input[type="text"]{background:var(--input-bg);border:1px solid var(--glass-border);color:var(--text);padding:8px;border-radius:var(--radius-sm);font-size:var(--font-card-title);width:100%;min-width:0;box-sizing:border-box;font-family:inherit;height:auto}
+.gif-workspace input:focus{border-color:var(--accent);outline:none}
+.gif-workspace input[type="checkbox"],.gif-workspace input[type="radio"]{accent-color:var(--accent)}
+.gif-workspace input[type="color"].gif-key-color-input,.gif-workspace input[type="color"].gif-style-color{padding:0;border:none;background:transparent;width:44px;height:44px;cursor:pointer}
+.gif-workspace input.gif-crop-num{width:50px;text-align:center;padding:5px}
+.gif-workspace input.gif-delay-input{width:100%;margin-top:4px;padding:2px;text-align:center;font-size:var(--font-badge);font-family:var(--font-mono);color:var(--text)}
+.gif-workspace input.gif-range-input{display:none;margin-top:5px}
+.quota-dot-color{background:var(--accent)}
+.settings-section-expanded{display:block}
+.settings-section-collapsed{display:none}
+.info-view-raw .info-pretty-view,.info-view-pretty .info-raw-view,.info-json-hidden{display:none}
+.info-view-raw .info-raw-view,.info-view-pretty .info-pretty-view{display:block}
+.download-card-folded .download-card-body,.dl-playlist-entries-folded,.dl-playlist-heading-hidden,.dl-chevron-hidden{display:none}
+.download-card-expanded .download-card-body,.download-preview-visible,.download-list-visible{display:block}
+
+/* --- GIF Editor Upgrade Styles (Import Modal & Timeline Controls) --- */
+.modal.gif-import-modal {
+  width: min(900px, calc(100vw - 32px));
+  max-width: 900px;
+}
+.gif-import-modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+@media (max-width: 768px) {
+  .gif-import-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+.gif-import-preview-wrapper {
+  background: #050505;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 240px;
+  overflow: hidden;
+}
+.gif-import-preview-canvas {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+.gif-import-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gif-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gif-import-row.gif-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gif-import-label {
+  font-size: var(--font-badge);
+  color: var(--text-secondary);
+}
+.gif-import-value, .gif-import-summary-val {
+  font-weight: var(--font-weight-bold);
+  color: var(--accent);
+}
+.gif-import-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gif-import-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.gif-import-three-col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.gif-import-three-col.gif-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gif-import-field-vert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gif-import-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.gif-import-modal input[type="number"]::-webkit-inner-spin-button,
+.gif-import-modal input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.gif-import-modal input[type="number"] {
+  -moz-appearance: textfield;
+}
+.gif-import-range {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-xs);
+  padding: 0;
+}
+.gif-import-range-track {
+  position: absolute;
+  left: 8px; right: 8px;
+  height: 6px;
+  background: var(--glass-border);
+  border-radius: 3px;
+}
+.gif-import-range-selected {
+  position: absolute;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.gif-import-range input[type="range"] {
+  position: absolute;
+  width: 100%;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.gif-import-range input[type="range"]:focus,
+.gif-import-range input[type="range"]:focus-visible,
+.gif-import-range input[type="range"]:active,
+.gif-import-modal input[type="range"]:focus,
+.gif-import-modal input[type="range"]:focus-visible,
+.gif-import-modal input[type="range"]:active,
+.gif-workspace input[type="range"]:focus,
+.gif-workspace input[type="range"]:focus-visible,
+.gif-workspace input[type="range"]:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.gif-import-range input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.gif-import-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.gif-import-divider {
+  border: 0;
+  border-top: 1px dashed var(--glass-border);
+  margin: 4px 0;
+}
+
+/* Timeline Layout Adjustments */
+.gif-timeline-area {
+  grid-column: 2;
+  grid-row: 2;
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  min-height: 100px;
+  max-height: 50vh;
+  flex-shrink: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.gif-timeline-scroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px;
+  min-height: 0;
+  touch-action: pan-x;
+  scrollbar-width: auto;
+}
+.gif-timeline-scroll::-webkit-scrollbar {
+  height: 14px;
+}
+.gif-timeline-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 0;
+}
+.gif-timeline-scroll::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 6px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+}
+.gif-timeline-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+.gif-timeline-toolbar {
+  height: 44px;
+  min-height: 44px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--input-bg);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  gap: 16px;
+  box-sizing: border-box;
+  font-size: var(--font-badge);
+}
+.gif-timeline-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+}
+.gif-timeline-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.gif-timeline-count {
+  min-width: 90px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 13px;
+}
+.gif-timeline-zoom {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gif-timeline-zoom input[type="range"]{flex:1 1 90px;min-width:70px;max-width:130px}
+.gif-timeline-count {
+  font-weight: var(--font-weight-bold);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.gif-timeline-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gif-timeline-control {
+  background: var(--btn-secondary-bg);
+  border: 1px solid var(--btn-secondary-border);
+  color: var(--btn-secondary-text);
+  border-radius: var(--radius-xs);
+  min-width: 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0;
+}
+.gif-timeline-control:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gif-timeline-control:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.gif-timeline-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.gif-timeline-control.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+/* --- Virtualized timeline item (emitted by gif-editor-timeline.js) --- */
+.gif-timeline-track{position:relative;flex-shrink:0;min-width:0}
+.gif-timeline-item{position:absolute;top:0;left:0;box-sizing:border-box;display:flex;flex-direction:column;background:var(--glass-bg);border:2px solid transparent;border-radius:var(--radius-sm);overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;transition:transform var(--transition-fast),box-shadow var(--transition-fast),opacity var(--transition-fast),border-color var(--transition-fast)}
+.gif-timeline-item:active{cursor:grabbing}
+.gif-timeline-item:hover{border-color:var(--glass-border)}
+.gif-timeline-item.active{border-color:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
+.gif-timeline-item.dragging{opacity:0.5;transform:scale(0.95);border-color:var(--accent2)}
+.gif-thumb-wrapper{position:relative;width:100%;height:100%;overflow:hidden;border-radius:var(--radius-xs);min-width:0;background-color:#262626;background-image:linear-gradient(45deg,#3a3a3a 25%,transparent 25%,transparent 75%,#3a3a3a 75%),linear-gradient(45deg,#3a3a3a 25%,transparent 25%,transparent 75%,#3a3a3a 75%);background-size:12px 12px;background-position:0 0,6px 6px}
+.gif-thumb-wrapper img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+/* Transparency checkerboard: dark theme = subtle gray pair; light theme =
+   classic image-editor white/gray pair (2026-08-12). */
+[data-theme="light"] .gif-thumb-wrapper{background-color:#f0f0f0;background-image:linear-gradient(45deg,#d0d0d0 25%,transparent 25%,transparent 75%,#d0d0d0 75%),linear-gradient(45deg,#d0d0d0 25%,transparent 25%,transparent 75%,#d0d0d0 75%);background-size:12px 12px;background-position:0 0,6px 6px}
+.gif-timeline-info{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:3px 6px;font-size:var(--font-badge);color:var(--text-secondary);background:transparent;z-index:1;min-width:0;pointer-events:none}
+.gif-timeline-info span.gif-frame-num{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9),0 0 2px rgba(0,0,0,0.9)}
+.gif-timeline-item:hover .gif-timeline-info span.gif-frame-num{display:none}
+
+/* Stepper Input in Timeline Thumbnail Hover */
+.gif-timeline-info .gif-mini-stepper {
+  display: none;
+  width: 100%;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs, 4px);
+  overflow: hidden;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.gif-timeline-item:hover .gif-timeline-info .gif-mini-stepper {
+  display: flex;
+}
+.gif-mini-stepper .stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 100%;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.gif-mini-stepper .stepper-btn:hover {
+  background: var(--glass-hover);
+  color: var(--accent);
+}
+.gif-mini-stepper .stepper-btn:active {
+  background: var(--glass-active);
+  color: var(--accent);
+}
+.gif-mini-stepper .stepper-minus {
+  border-right: 1px solid var(--glass-border);
+}
+.gif-mini-stepper .stepper-plus {
+  border-left: 1px solid var(--glass-border);
+}
+.gif-mini-stepper input.gif-delay-input {
+  display: block !important;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center !important;
+  padding: 0 2px;
+  margin: 0;
+  -moz-appearance: textfield;
+}
+.gif-mini-stepper input.gif-delay-input::-webkit-outer-spin-button,
+.gif-mini-stepper input.gif-delay-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Top-right Frame Action Buttons Overlay (No background container) */
+.gif-timeline-item-actions {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  display: none;
+  flex-direction: row;
+  gap: 3px;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  border: none;
+}
+.gif-timeline-item:hover .gif-timeline-item-actions {
+  display: flex;
+}
+.btn-copy-slice, .btn-del-slice {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+.btn-copy-slice:hover, .btn-del-slice:hover {
+  background: rgba(0, 0, 0, 0.8);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-del-slice:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-copy-slice:focus-visible, .btn-del-slice:focus-visible {
+  outline: none;
+}
+
+/* --- Liquid Loader (GIF/Video Import Progress) --- */
+.liquid-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  font-family: inherit;
+}
+.loader-track {
+  position: relative;
+  width: 220px;
+  height: 24px;
+  background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(255, 255, 255, 0.1);
+}
+.liquid-fill {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  height: calc(100% - 4px);
+  width: 4px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, var(--accent) 100%);
+  border-radius: 10px;
+  animation: fillProgress 4s ease-out infinite;
+  box-shadow: 0 0 12px var(--accent-glow), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+  transition: width 0.25s ease-out;
+}
+.loading-text {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  animation: textGlow 1.5s ease-in-out infinite;
+}
+.dot {
+  margin-left: 3px;
+  animation: blink 1.5s infinite;
+}
+.dot:nth-of-type(1) { animation-delay: 0s; }
+.dot:nth-of-type(2) { animation-delay: 0.3s; }
+.dot:nth-of-type(3) { animation-delay: 0.6s; }
+
+@keyframes fillProgress {
+  0% { width: 4px; }
+  25% { width: 25%; }
+  50% { width: 50%; }
+  75% { width: 75%; }
+  100% { width: calc(100% - 4px); }
+}
+
+@keyframes textGlow {
+  0%, 100% { opacity: 0.7; text-shadow: 0 0 8px var(--accent-glow); }
+  50% { opacity: 1; text-shadow: 0 0 16px var(--accent-glow); }
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* --- Light Theme Adaptations for GIF Editor --- */
+/* Sidebar / timeline area: base styles already use var(--panel-sticky-bg),
+   var(--glass-bg), var(--input-bg), var(--text) — no hardcoded override needed,
+   colors follow the active light variant automatically. */
+[data-theme="light"] .gif-drop-zone {
+  background: #ffffff;
+  border: 2px dashed rgba(0, 0, 0, 0.15);
+}
+[data-theme="light"] .gif-drop-zone:hover {
+  border-color: var(--accent);
+  background: #f0f4f8;
+}
+[data-theme="light"] .gif-crop-panel,
+[data-theme="light"] .gif-trans-panel,
+[data-theme="light"] .gif-scope-box,
+[data-theme="light"] .gif-layer-list,
+[data-theme="light"] .gif-tool-card,
+[data-theme="light"] .gif-sidebar-section {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .gif-sidebar-panel {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .gif-stage-area,
+[data-theme="light"] .gif-export-preview-container,
+[data-theme="light"] .gif-import-preview-wrapper {
+  background-color: #e5e7eb;
+  background-image: linear-gradient(45deg, #ffffff 25%, transparent 25%),
+                    linear-gradient(-45deg, #ffffff 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #ffffff 75%),
+                    linear-gradient(-45deg, transparent 75%, #ffffff 75%);
+  background-size: 20px 20px;
+  border: none !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] .gif-stage-controls {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .gif-icon-btn {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1a1a1a;
+}
+[data-theme="light"] .gif-icon-btn:hover {
+  background: #f0f4f8;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+[data-theme="light"] .gif-timeline-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 0;
+}
+[data-theme="light"] .gif-timeline-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border: 2px solid var(--panel-sticky-bg);
+  border-radius: 6px;
+}
+[data-theme="light"] .gif-timeline-control {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.15);
+  color: #1a1a1a;
+}
+[data-theme="light"] .gif-timeline-control:hover {
+  background: #e2e8f0;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+[data-theme="light"] .gif-timeline-control.active {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+[data-theme="light"] .gif-timeline-info .gif-mini-stepper {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .gif-mini-stepper .stepper-btn {
+  color: #1a1a1a;
+}
+[data-theme="light"] .gif-mini-stepper input.gif-delay-input {
+  color: #1a1a1a !important;
+}
+[data-theme="light"] .liquid-loader {
+  background: transparent;
+}
+[data-theme="light"] .loader-track {
+  background: linear-gradient(135deg, #e2e5ea, #d1d5db);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .loading-text {
+  color: #1a1a1a;
+}
+.login-error-visible{display:block}
+
+/* --- GIF Editor Export Modal Styles --- */
+.gif-export-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-width: 560px;
+}
+.gif-export-preview-container {
+  width: 100%;
+  min-height: 180px;
+  max-height: 280px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.25);
+  background-image: linear-gradient(45deg, var(--glass-border) 25%, transparent 25%),
+                    linear-gradient(-45deg, var(--glass-border) 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, var(--glass-border) 75%),
+                    linear-gradient(-45deg, transparent 75%, var(--glass-border) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  padding: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.gif-export-preview-img {
+  max-width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+  margin: 0 auto;
+  display: block;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.gif-input-with-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.gif-input-with-label .gif-axis-label {
+  font-weight: bold;
+  color: var(--accent);
+  min-width: 18px;
+  text-align: center;

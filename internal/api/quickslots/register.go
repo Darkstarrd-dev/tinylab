@@ -54,7 +54,7 @@ func (h *Handler) createQuickSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	h.d.Reg.AddQuickSlot(qs)
 	cfg := h.d.Reg.Config()
-	if err := h.d.SaveConfig(&cfg); err != nil {
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 		return
 	}
@@ -74,7 +74,7 @@ func (h *Handler) updateQuickSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.d.Reg.UpdateQuickSlot(id, updates) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -91,7 +91,7 @@ func (h *Handler) deleteQuickSlot(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if h.d.Reg.DeleteQuickSlot(id) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}

@@ -25,7 +25,7 @@ function getItemBlob(item) {
 // (internal/gallery SupportedExts): the /api/archive manifest lists ALL
 // entries, so the import filter must keep the same image-only set the legacy
 // zip session manifest used (no videos, no documents, no avif).
-var _ARCHIVE_IMG_EXTS = ['webp', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'tiff', 'tif'];
+var _ARCHIVE_IMG_EXTS = ['webp', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'tiff', 'tif', 'avif']; // P1-04b synced with gallery-state + backend
 function _isArchiveImageExt(name) {
   if (!name) return false;
   var dot = name.lastIndexOf('.');

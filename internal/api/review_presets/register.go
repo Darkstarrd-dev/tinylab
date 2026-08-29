@@ -49,7 +49,7 @@ func (h *Handler) upsertReviewPreset(w http.ResponseWriter, r *http.Request) {
 		p.ID = apibase.GenerateID("rp")
 		h.d.Reg.AddReviewPreset(p)
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}
@@ -60,7 +60,7 @@ func (h *Handler) upsertReviewPreset(w http.ResponseWriter, r *http.Request) {
 		// Update
 		if h.d.Reg.UpdateReviewPreset(p.ID, p) {
 			cfg := h.d.Reg.Config()
-			if err := h.d.SaveConfig(&cfg); err != nil {
+			if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 				apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 				return
 			}
@@ -78,7 +78,7 @@ func (h *Handler) deleteReviewPreset(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if h.d.Reg.DeleteReviewPreset(id) {
 		cfg := h.d.Reg.Config()
-		if err := h.d.SaveConfig(&cfg); err != nil {
+		if err := h.d.SaveConfigAndReload(&cfg); err != nil {
 			apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
 			return
 		}

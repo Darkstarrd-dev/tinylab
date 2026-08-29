@@ -110,14 +110,18 @@ var errSessionTooLarge = errors.New("zip session exceeds total byte budget")
 // expireLocked drops sessions whose TTL elapsed (caller holds mu) and adjusts
 // the byte accounting.
 func (s *gallerySessionStore) expireLocked(now time.Time) {
+	var expired []string
 	for _, id := range s.order {
 		sess, ok := s.sessions[id]
 		if !ok {
 			continue
 		}
 		if now.Sub(sess.lastAccess) > gallerySessionTTL {
-			s.removeLocked(id)
+			expired = append(expired, id)
 		}
+	}
+	for _, id := range expired {
+		s.removeLocked(id)
 	}
 }
 

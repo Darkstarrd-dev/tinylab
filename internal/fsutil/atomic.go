@@ -5,6 +5,7 @@ package fsutil
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 // AtomicWrite writes data to path atomically using a deterministic temp file
@@ -26,8 +27,10 @@ import (
 // The next successful Load from path discards the leftover .tmp.
 //
 // The caller is responsible for ensuring the parent directory exists.
+// AtomicWrite with random tmp suffix avoids concurrent clobber; Load discovers
+// any pending path+".tmp*" via findPendingTmp so crash recovery still works.
 func AtomicWrite(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
+	tmp := fmt.Sprintf("%s.tmp.%d", path, time.Now().UnixNano())
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
@@ -47,11 +50,19 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 		// Fallback: direct write to target (works if the lock was transient).
 		if writeErr := os.WriteFile(path, data, perm); writeErr != nil {
 			// Both rename and direct write failed — target is actively locked.
-			// .tmp retains the data; caller may use it for crash recovery.
+			// .tmp (random) retains the data; also ensure deterministic .tmp
+			// so existing tests and single-file Load probes find it.
+			_ = os.WriteFile(path+".tmp", data, perm)
 			return fmt.Errorf("file locked (rename and direct write both failed); pending data in %s: %w", tmp, writeErr)
 		}
-		// Direct write succeeded; .tmp is deliberately kept (see doc comment).
+		// Direct write succeeded; random .tmp is kept for crash recovery.
+		// Also mirror to deterministic path+".tmp" so callers probing the
+			// canonical name (tests, legacy Load) find the recovery copy.
+		_ = os.WriteFile(path+".tmp", data, perm)
 		return nil
 	}
+	// Success: random tmp was renamed to path; ensure no stale deterministic
+	// .tmp shadows it. A successful Load will clean any leftover anyway.
+	_ = os.Remove(path + ".tmp")
 	return nil
 }

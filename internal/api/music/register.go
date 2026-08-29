@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinyrouter/tinyrouter/internal/outbound"
 )
 
 // Handler implements /api/music endpoints.
@@ -45,8 +47,25 @@ func (h *Handler) musicDir() string {
 	return config.ResolveMusicDir(cfg.MusicDir, filepath.Dir(h.deps.ConfigPath))
 }
 
-func (h *Handler) library(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) guardedMusicDir() (string, error) {
 	dir := h.musicDir()
+	configDir := filepath.Dir(h.deps.ConfigPath)
+	allowedRoot, err := filepath.Abs(configDir)
+	if err != nil {
+		return "", err
+	}
+	if _, err := fsutil.PathGuard(allowedRoot, dir); err != nil {
+		return "", fmt.Errorf("music dir outside allowed root: %w", err)
+	}
+	return dir, nil
+}
+
+func (h *Handler) library(w http.ResponseWriter, r *http.Request) {
+	dir, err := h.guardedMusicDir()
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -102,13 +121,25 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
 	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
-	client := &http.Client{Timeout: 30 * time.Second}
+	// P0-02a: outbound SSRF policy with redirect revalidation + budget
+	if u2, err2 := outbound.ValidateURL(body.URL); err2 != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err2.Error())
+		return
+	} else if err2 = (outbound.Policy{Timeout: 30 * time.Second}).CheckHost(r.Context(), u2.Hostname()); err2 != nil {
+		apibase.WriteAPIError(w, http.StatusForbidden, "url resolves to a blocked address")
+		return
+	}
+	client := (outbound.Policy{Timeout: 30 * time.Second}).Client()
 	resp, err := client.Do(req)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer resp.Body.Close()
+	if resp.ContentLength > 32<<20 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
+		return
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apibase.WriteAPIError(w, http.StatusBadGateway, fmt.Sprintf("upstream %d", resp.StatusCode))
 		return
@@ -299,6 +330,11 @@ func (h *Handler) transcode(w http.ResponseWriter, r *http.Request) {
 		if p, err := lookupFFmpeg(); err == nil { ffmpegPath = p }
 	}
 	if ffmpegPath == "" { apibase.WriteAPIError(w, http.StatusServiceUnavailable, "ffmpeg not configured (Settings → Path Settings → ffmpeg Path)"); return }
+	if !tryAcquireTranscode() {
+		apibase.WriteAPIError(w, http.StatusTooManyRequests, "too many concurrent transcodes")
+		return
+	}
+	defer releaseTranscode()
 	format := strings.ToLower(r.URL.Query().Get("format"))
 	if format == "" { format = "mp3" }
 	if format != "mp3" && format != "opus" && format != "ogg" && format != "wav" { format = "mp3" }
@@ -343,7 +379,15 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
 	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
-	client := &http.Client{Timeout: 120 * time.Second}
+	// P0-02b: SSRF + limit
+	if u2, err2 := outbound.ValidateURL(body.URL); err2 != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err2.Error())
+		return
+	} else if err2 = (outbound.Policy{Timeout: 120 * time.Second}).CheckHost(r.Context(), u2.Hostname()); err2 != nil {
+		apibase.WriteAPIError(w, http.StatusForbidden, "url resolves to a blocked address")
+		return
+	}
+	client := (outbound.Policy{Timeout: 120 * time.Second}).Client()
 	resp, err := client.Do(req)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
@@ -354,7 +398,11 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, fmt.Sprintf("upstream %d", resp.StatusCode))
 		return
 	}
-	dir := h.musicDir()
+	dir, err := h.guardedMusicDir()
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -364,7 +412,8 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(dest); err == nil {
 		ext := filepath.Ext(body.Filename)
 		base := strings.TrimSuffix(body.Filename, ext)
-		for i := 1; i < 1000; i++ {
+		for i := range 999 {
+			i++ // 1..999
 			tryName := fmt.Sprintf("%s (%d)%s", base, i, ext)
 			tryPath := filepath.Join(dir, tryName)
 			if _, err := os.Stat(tryPath); os.IsNotExist(err) {
@@ -380,7 +429,19 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	n, err := io.Copy(f, resp.Body)
+	if resp.ContentLength > 200<<20 {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
+		return
+	}
+	n, err := io.Copy(f, io.LimitReader(resp.Body, 200<<20+1))
+	if n > 200<<20 {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
+		return
+	}
 	_ = f.Close()
 	if err != nil {
 		_ = os.Remove(tmp)

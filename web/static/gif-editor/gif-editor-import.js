@@ -199,6 +199,10 @@
   //
   // gifuct-js already reports `delay` in milliseconds — no conversion.
   function compositeGifFrames(frames, width, height) {
+    // P0-06: pre-check W*H*N*4*3 budget (2GiB) before allocating 3 canvases per frame
+    var budget = 2 << 30;
+    var estimated = frames.length * width * height * 4 * 3;
+    if (estimated > budget) throw new Error('Import exceeds budget: ' + estimated + ' > ' + budget + ' bytes ('+frames.length+'x'+width+'x'+height+')');
     var composited = [];
     var totalMs = 0;
 
@@ -206,7 +210,12 @@
     fullCanvas.width = width;
     fullCanvas.height = height;
     var fullCtx = fullCanvas.getContext('2d');
-    var prevStateCanvas = null;
+    // P0-06: reuse canvases instead of per-frame allocation
+    var prevStateCanvas = document.createElement('canvas');
+    prevStateCanvas.width = width;
+    prevStateCanvas.height = height;
+    var prevStateCtx = prevStateCanvas.getContext('2d');
+    var patchCanvas = null, patchCtx = null;
 
     for (var i = 0; i < frames.length; i++) {
       var f = frames[i];
@@ -224,20 +233,20 @@
         }
       }
 
-      // 2) Snapshot the pre-draw canvas (needed if THIS frame is disposal 3).
-      prevStateCanvas = document.createElement('canvas');
-      prevStateCanvas.width = width;
-      prevStateCanvas.height = height;
-      prevStateCanvas.getContext('2d').drawImage(fullCanvas, 0, 0);
+      // 2) Snapshot the pre-draw canvas (needed if THIS frame is disposal 3). Reuse P0-06.
+      prevStateCtx.clearRect(0,0,width,height);
+      prevStateCtx.drawImage(fullCanvas, 0, 0);
 
-      // 3) Draw this frame's patch at its offset.
-      var patchCanvas = document.createElement('canvas');
-      patchCanvas.width = f.dims.width;
-      patchCanvas.height = f.dims.height;
-      var pCtx = patchCanvas.getContext('2d');
-      var imgData = pCtx.createImageData(f.dims.width, f.dims.height);
+      // 3) Draw this frame's patch at its offset. Reuse patchCanvas when size matches.
+      if (!patchCanvas || patchCanvas.width !== f.dims.width || patchCanvas.height !== f.dims.height) {
+        patchCanvas = document.createElement('canvas');
+        patchCanvas.width = f.dims.width;
+        patchCanvas.height = f.dims.height;
+        patchCtx = patchCanvas.getContext('2d');
+      } else { patchCtx.clearRect(0,0,patchCanvas.width,patchCanvas.height); }
+      var imgData = patchCtx.createImageData(f.dims.width, f.dims.height);
       imgData.data.set(f.patch);
-      pCtx.putImageData(imgData, 0, 0);
+      patchCtx.putImageData(imgData, 0, 0);
       fullCtx.drawImage(patchCanvas, f.dims.left, f.dims.top);
 
       // 4) Capture the fully composed frame.
@@ -1036,7 +1045,10 @@
     core.showSpinner(t('gifEditorProcessing', 'Processing...'));
 
     var scale = currentDraft.scalePercent / 100;
-    var importWidth = Math.max(1, Math.round(currentDraft.sourceWidth * scale));
+    var importWidth = Math.max(1, Math.round(currentDraft.sourceWidth * scale)); // P0-06 videoBudget
+    var frameCountEst = Math.max(1, Math.floor((currentDraft.endMs - currentDraft.startMs) * currentDraft.fps / 1000) + 1);
+    var videoBudget = 4 << 30;
+    if (frameCountEst * importWidth * Math.max(1, Math.round(currentDraft.sourceHeight * scale)) * 4 > videoBudget) throw new Error('Video sampling exceeds budget');
     var importHeight = Math.max(1, Math.round(currentDraft.sourceHeight * scale));
 
     var commitPromise;
@@ -1248,7 +1260,8 @@
     });
   }
 
-  function commitVideoDraft(width, height) {
+  // P0-06 video sampling budget: 4GiB
+function commitVideoDraft(width, height) {
     return new Promise(function (resolve, reject) {
       var video = draft.video;
       if (!video) return reject(new Error('No video reference'));

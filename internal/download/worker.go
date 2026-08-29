@@ -12,7 +12,7 @@ func (m *Manager) Start() {
 	concurrency := m.maxConcurrent
 	m.mu.Unlock()
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		m.wg.Add(1)
 		go m.worker()
 	}
@@ -33,8 +33,24 @@ func (m *Manager) Stop() {
 	for _, tc := range m.controls {
 		tc.cancel()
 	}
+	pending := m.pendingCh
 	m.mu.Unlock()
 	m.wg.Wait()
+	// D-EN-1: drain residual pendingCh so a fresh Manager does not consume stale IDs.
+	for {
+		select {
+		case <-pending:
+		default:
+			goto reset
+		}
+	}
+reset:
+	m.mu.Lock()
+	// Recreate channels for next Start().
+	m.pendingCh = make(chan string, 100)
+	m.stopCh = make(chan struct{})
+	m.started = false
+	m.mu.Unlock()
 }
 
 // worker 从 pendingCh 取任务并执行，直到 stopCh 关闭或 channel 关闭。

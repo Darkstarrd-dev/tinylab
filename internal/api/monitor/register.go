@@ -57,7 +57,15 @@ func getIntQuery(r *http.Request, key string, defaultVal int) int {
 // practice, and DecInFlight clamps at 0, so an incidental cross-provider
 // collision can only under-count, never go negative.
 func (h *Handler) decInFlightForKeyID(keyID string) {
+	// deprecated wrapper: keep for tests that call with single arg
+	h.decInFlightForKey(keyID, "")
+}
+
+func (h *Handler) decInFlightForKey(keyID, providerID string) {
 	for _, p := range h.d.Reg.ListProviders() {
+		if providerID != "" && p.ID != providerID && p.Name != providerID {
+			continue
+		}
 		for _, k := range p.Keys {
 			if k.ID == keyID {
 				if st := h.d.Reg.GetKeyState(p.ID, k.ID); st != nil {
@@ -85,7 +93,7 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 			// removed from the tracker, so both paths cannot fire for the same
 			// request, and DecInFlight clamps at 0.
 			if e.KeyID != "" {
-				h.decInFlightForKeyID(e.KeyID)
+				h.decInFlightForKey(e.KeyID, e.ProviderID)
 			}
 			e.Status = "error"
 			e.Error = "timeout"
@@ -455,9 +463,18 @@ func (h *Handler) currentKey(providerName, model string) currentKey {
 		} else {
 			entry.usable = k.IsActive
 		}
-		if entry.usable {
-			cands = append(cands, entry)
+		if !entry.usable {
+			continue
 		}
+		// P1-07: when NIM is enabled for provider/model, filter to the same
+		// candidate set SelectKey sees (NIM interval throttling excludes keys
+		// that would still be wait-blocked).
+		if h.d.Selector != nil && h.d.Selector.IsNIMEnabled(provider.ID, model) {
+			if h.d.Selector.WaitNIMInterval(provider.ID, k.ID, model) > 0 {
+				continue
+			}
+		}
+		cands = append(cands, entry)
 	}
 	if len(cands) == 0 {
 		return currentKey{}

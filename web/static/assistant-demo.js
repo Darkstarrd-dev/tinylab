@@ -870,6 +870,7 @@ function ademoIsFormTarget(e) {
 // Capture-phase so a body-draw Escape is consumed before app.js's global
 // Escape (which would shut the server down).
 function ademoOnKeyDown(e) {
+  if (ademoPaused) return; // P1-05c
   if (!ademoRt) return;
   if (typeof topOpenModal === 'function' && topOpenModal()) return;
   if (ademoIsFormTarget(e)) return;

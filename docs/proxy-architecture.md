@@ -1,4 +1,5 @@
 # TinyRouter Proxy 代理核心架构
+> **最后核对（2026-08-29，Round-2 P0-03/P0-05/InFlight与分级预算）：** HardLimit/NIM 取消分支配对 `DecInFlight`（`forward_retry.go:113/126`）；非流式 `passThroughResponse` 分级预算——`image/*` 流式 `io.Copy` 零缓冲、`text/*` 32MiB、`application/json` 256MiB（兼容 64MiB 测试）、其他 16MiB，`maxPassThroughBody` 可缩小；该分级覆盖 `TestPassThrough_LargeBodyStreamsFully`。
 
 > **最后核对（2026-08-29，SenseNova 套餐权益耗尽 429）：** `retry.go::handle429` 新增 `isSenseNovaEntitlementExhausted` 分支（retry.go:148-158、判定函数 retry.go:394-399）：仅当 provider `BaseURL` 含 `sensenova` 且 429 body 含 `token plan entitlement exhausted`（quota_exceeded_error/code 8）时，`MarkRateLimited` 冷却当前 Key+model **300 分钟** 并 `excludeSameAccountKeys` 排除同 account Key（套餐权益为账号级额度，区别于 rpm/tpm 的 60s 滑动窗口）；否则原有 rpm/tpm 分类不变。该文件中段行号整体后移 12 行，§9.2/§9.3 锚点已同步。
 > **最后核对（2026-08-25，Provider Hard Limit 自动节流）：** 新增 `internal/proxy/hardlimit.go`（`HardLimiter`：provider 级滑动 60s 窗口 RPM/TPM 发送前节流引擎，发送前预留 + 完成后对账，取消不残留）；`internal/config/types.go` 新增 `HardLimitSettings` 并在 `Provider.HardLimit` 接入；`forward_retry.go` 在每次真正发往上游前（NIM 之前）经 `WaitAndReserve` 插入等待；`recorder.go::recordUsage` 经 `Reconcile` 用真实 token 对账；API/Registry/前端表单同步接入。

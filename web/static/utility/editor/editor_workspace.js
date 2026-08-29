@@ -392,6 +392,18 @@
           nextContents[fileId] = '';
         }
       });
+      // P1-03a: preserve local-only nodes not present in disk snapshot
+      var localOnly = [];
+      Object.keys(memory.nodes || {}).forEach(function(id){
+        var n = memory.nodes[id];
+        if (!n || n.deleted) return;
+        if (nextNodes[id]) return;
+        // doc/docdir ids are disk-backed; other prefixes are local/unsaved
+        if (id.indexOf('doc:') === 0 || id.indexOf('docdir:') === 0) return;
+        // also keep isLocal flagged nodes regardless of prefix
+        localOnly.push(id);
+      });
+      localOnly.forEach(function(id){ nextNodes[id] = memory.nodes[id]; if (memory.contents[id] != null) nextContents[id] = memory.contents[id]; });
       memory.nodes = nextNodes;
       memory.contents = nextContents;
       memory.meta.currentFileId = null;

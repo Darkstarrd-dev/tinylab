@@ -64,16 +64,28 @@ func validateDownloadDir(dir, defaultDir string) error {
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("download directory cannot contain path traversal (..)")
 	}
-	// If the path is absolute and a default dir is configured, ensure it's
-	// within the default dir subtree.
-	if filepath.IsAbs(cleaned) && defaultDir != "" {
+	// When a default dir is configured, the download directory must be within
+	// its subtree regardless of whether the caller supplied an absolute or
+	// relative path. Relative paths are resolved against the default dir
+	// before the containment check (so "evil" cannot bypass it).
+	if defaultDir != "" {
 		absDefault, err := filepath.Abs(defaultDir)
 		if err != nil {
 			return fmt.Errorf("failed to resolve default download dir: %w", err)
 		}
-		absDir, err := filepath.Abs(cleaned)
-		if err != nil {
-			return fmt.Errorf("failed to resolve download dir: %w", err)
+		var absDir string
+		if filepath.IsAbs(cleaned) {
+			absDir, err = filepath.Abs(cleaned)
+			if err != nil {
+				return fmt.Errorf("failed to resolve download dir: %w", err)
+			}
+		} else {
+			// Relative: resolve against the allowed root so containment is enforced.
+			joined := filepath.Join(absDefault, cleaned)
+			absDir, err = filepath.Abs(joined)
+			if err != nil {
+				return fmt.Errorf("failed to resolve download dir: %w", err)
+			}
 		}
 		if absDir != absDefault && !strings.HasPrefix(absDir, absDefault+string(filepath.Separator)) {
 			return fmt.Errorf("download directory must be within %s", absDefault)
@@ -394,9 +406,23 @@ func (h *Handler) openDownloadDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath, err := filepath.Abs(path)
-	if err == nil {
-		path = absPath
+	// PathGuard: ensure the served path is inside the configured download root.
+	// Download tasks are created with validateDownloadDir, but SavedFile/FilePath
+	// are extracted from yt-dlp stdout and could be traversed if yt-dlp was
+	// fed a malicious URL. Reject outside-root resolves.
+	cfgDir := h.d.Reg.Config().Download.DefaultDir
+	if cfgDir != "" {
+		if guarded, err := fsutil.PathGuard(cfgDir, path); err != nil {
+			apibase.WriteAPIError(w, http.StatusForbidden, "file path outside allowed directory")
+			return
+		} else {
+			path = guarded
+		}
+	} else {
+		absPath, err := filepath.Abs(path)
+		if err == nil {
+			path = absPath
+		}
 	}
 
 	if err := fsutil.OpenInFileManager(path); err != nil {
@@ -438,6 +464,16 @@ func (h *Handler) playDownloadFile(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "file path is empty")
 		return
+	}
+	// PathGuard: reject file serves outside the download root (see openDownloadDir).
+	cfgDir := h.d.Reg.Config().Download.DefaultDir
+	if cfgDir != "" {
+		if guarded, err := fsutil.PathGuard(cfgDir, path); err != nil {
+			apibase.WriteAPIError(w, http.StatusForbidden, "file path outside allowed directory")
+			return
+		} else {
+			path = guarded
+		}
 	}
 	if _, err := os.Stat(path); err != nil {
 		apibase.WriteAPIError(w, http.StatusNotFound, "file not found on disk")

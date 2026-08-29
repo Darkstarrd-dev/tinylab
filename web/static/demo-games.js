@@ -92,7 +92,7 @@ function dgIsFullscreenActive() { return document.body.classList.contains('demo-
 
 // ---- loaders ----------------------------------------------------------------
 function dgFetchList() {
-  return fetch('/api/games').then(function (r) {
+  return (typeof apiFetch==='function'?apiFetch:fetch)('/api/games').then(function (r) { // P1-05a
     if (!r.ok) throw new Error('GET /api/games -> ' + r.status);
     return r.json();
   }).then(function (data) {
@@ -115,7 +115,7 @@ function dgLoadPhaser() {
 function dgLoadGame(id, entry, v) {
   if (dgRegistry[id]) return Promise.resolve(dgRegistry[id].def);
   if (dgLoadPromises[id]) return dgLoadPromises[id];
-  var src = '/games/' + encodeURIComponent(id) + '/' + encodeURIComponent(entry || 'main.js') + '?v=' + (v || Date.now());
+  var src = '/games/' + encodeURIComponent(id) + '/' + (entry || 'main.js').split('/').map(encodeURIComponent).join('/') + '?v=' + (v || Date.now()); // P1-05b
   dgLoadPromises[id] = dgInjectScript(src).then(function () {
     delete dgLoadPromises[id];
     if (!dgRegistry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
@@ -146,7 +146,7 @@ function dgMakeHost(id, stageEl) {
     height: stageEl.clientHeight || 450,
     phaser: window.Phaser || null,
     saveState: function (obj) {
-      return fetch('/api/games/' + encodeURIComponent(id) + '/state', {
+      return (typeof apiFetch==='function'?apiFetch:fetch)('/api/games/' + encodeURIComponent(id) + '/state', { // P1-05a
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(obj == null ? {} : obj)
@@ -155,7 +155,7 @@ function dgMakeHost(id, stageEl) {
       });
     },
     loadState: function () {
-      return fetch('/api/games/' + encodeURIComponent(id) + '/state').then(function (r) {
+      return (typeof apiFetch==='function'?apiFetch:fetch)('/api/games/' + encodeURIComponent(id) + '/state').then(function (r) { // P1-05a
         if (r.status === 404) return null;
         if (!r.ok) throw new Error('loadState -> ' + r.status);
         return r.json();
@@ -175,7 +175,7 @@ function dgMakeHost(id, stageEl) {
       });
     },
     getAssistantConfig: function () {
-      return fetch('/api/settings').then(function (r) {
+      return (typeof apiFetch==='function'?apiFetch:fetch)('/api/settings').then(function (r) { // P1-05a
         if (!r.ok) throw new Error('getAssistantConfig -> ' + r.status);
         return r.json();
       }).then(function (j) {

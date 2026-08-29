@@ -26,10 +26,12 @@ func TestResolveBrowseInitialDir(t *testing.T) {
 		t.Errorf("file input: got %q, want parent %q", got, dir)
 	}
 	missing := filepath.Join(dir, "nested", "sub")
-	if got := resolveBrowseInitialDir(missing, "directory"); got != missing {
-		t.Errorf("missing path: got %q, want %q", got, missing)
+	// P0-01a: missing paths no longer auto-created (security: no arbitrary MkdirAll).
+	// The picker falls back to its default location.
+	if got := resolveBrowseInitialDir(missing, "directory"); got != "" {
+		t.Errorf("missing path: got %q, want empty (fallback)", got)
 	}
-	if _, err := os.Stat(missing); err != nil {
-		t.Errorf("missing path was not created: %v", err)
+	if _, err := os.Stat(missing); err == nil {
+		t.Errorf("missing path was unexpectedly created")
 	}
 }

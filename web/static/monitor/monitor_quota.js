@@ -451,16 +451,23 @@ async function quotaKeyRowClick(ev, provider, model, keyId) {
 // latency/speed + expanded sub-rows. It fetches every quota bar so the
 // top-level latency/speed cells are populated even before a row is expanded.
 // Sub-row rendering remains gated by expandedModels inside fetchModelKeyDetail.
+// M-EN-1: runWithConcurrency limits parallel detail fetches to avoid 50-bar burst.
+function runWithConcurrency(tasks, cap, fn) { cap = Math.max(1, cap || 6); return new Promise(function(resolve) { var i = 0, active = 0, done = 0; if (!tasks.length) { resolve([]); return; } function next() { while (active < cap && i < tasks.length) { (function(idx) { var t = tasks[idx]; i++; active++; Promise.resolve(fn(t, idx)).then(function() { active--; done++; if (done === tasks.length) resolve(); else next(); }, function() { active--; done++; if (done === tasks.length) resolve(); else next(); }); })(i); } } next(); }); }
 function refreshAllKeyDetails() {
   var now = Date.now();
   if (now - _lastPerKeyRefresh < KEY_DETAIL_TTL) return;
   _lastPerKeyRefresh = now;
+  // M-EN-1: cap concurrency to 6 to avoid 50-bar burst.
+  var pending = [];
   for (var key in quotaBarItems) {
     var el = quotaBarItems[key];
     if (!el || !el._bar) continue;
     var cache = keyDetailCache[key];
-    if (cache && now - cache.ts < KEY_DETAIL_TTL) continue;  // still fresh
-    fetchModelKeyDetail(el._bar.provider, el._bar.model);
+    if (cache && now - cache.ts < KEY_DETAIL_TTL) continue;
+    (function(provider, model) {
+      pending.push(function() { return fetchModelKeyDetail(provider, model); });
+    })(el._bar.provider, el._bar.model);
   }
-  scheduleMonitorTableAutoFit();
+  if (pending.length === 0) { scheduleMonitorTableAutoFit(); return; }
+  runWithConcurrency(pending, 6, function(fn) { return fn().catch(function() {}); }).then(function() { scheduleMonitorTableAutoFit(); });
 }

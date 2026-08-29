@@ -1,0 +1,6 @@
+/* style-utility.css — compatibility shim (re-exports per-domain sheets) */
+@import url("style-gallery.css");
+@import url("style-filetransfer.css");
+@import url("style-gif.css");
+@import url("style-editor.css");
+@import url("style-textreview.css");

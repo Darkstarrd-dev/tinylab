@@ -1,0 +1,184 @@
+/* =====================================================================
+   FileTransfer
+   ===================================================================== */
+
+/* =====================================================================
+   FileTransfer (Dual-Panel 2-Stage Staging Workflow)
+   ===================================================================== */
+.filetransfer-utility-view{width:100%;height:100%;min-height:0;margin:0;padding:12px 18px 16px 18px;box-sizing:border-box;display:flex;flex-direction:column;flex:1;overflow:hidden}
+.filetransfer-utility-view.ft-in-modal{max-width:100%;min-height:auto;height:auto;padding:0}
+
+/* Header Banner */
+.filetransfer-banner{width:100%;display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--glass-border);flex-shrink:0;box-sizing:border-box}
+.filetransfer-banner-left{display:flex;align-items:center;gap:12px}
+.filetransfer-badge-icon{width:36px;height:36px;border-radius:var(--radius-md);background:color-mix(in srgb,var(--accent) 15%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.filetransfer-title{font-size:15px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;margin:0}
+.filetransfer-badge-tag{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:var(--radius-xs);background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-secondary);font-family:monospace}
+.filetransfer-subtitle{font-size:11.5px;color:var(--text-secondary);margin-top:3px}
+
+/* Main 2-Column Grid Layout */
+.filetransfer-grid{width:100%;flex:1;min-height:0;display:grid;grid-template-columns:1.2fr 0.95fr;gap:16px;align-items:stretch;box-sizing:border-box}
+@media (max-width:920px){
+  .filetransfer-grid{display:flex;flex-direction:column;overflow-y:auto;gap:14px}
+  .filetransfer-utility-view{overflow-y:auto;height:auto}
+}
+
+/* Panel Containers */
+.filetransfer-panel{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:var(--shadow-card);height:100%;min-height:0;box-sizing:border-box;backdrop-filter:blur(var(--glass-blur-sm));overflow:hidden}
+.ft-in-modal .filetransfer-panel{min-height:380px;height:auto;padding:12px}
+
+.filetransfer-panel-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--glass-border);flex-shrink:0}
+.filetransfer-header-title{display:flex;align-items:center;gap:8px}
+.filetransfer-stage-num{width:20px;height:20px;border-radius:50%;background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.filetransfer-stage-num.ft-stage-2{background:color-mix(in srgb,var(--accent2) 18%,transparent);color:var(--accent2);border-color:color-mix(in srgb,var(--accent2) 40%,transparent)}
+.filetransfer-stage-heading{font-size:12.5px;font-weight:700;color:var(--text);letter-spacing:-0.2px}
+.filetransfer-stage-count{font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+
+.filetransfer-stage-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.ft-output-body{justify-content:flex-start;gap:12px;overflow-y:auto}
+
+/* Dropzone (Staging Zone) */
+.filetransfer-dropzone{flex-shrink:0;border:1.5px dashed var(--glass-border-hover);border-radius:var(--radius-md);padding:18px 12px;text-align:center;background:var(--input-bg);transition:all var(--transition-fast);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;outline:none}
+.filetransfer-dropzone:hover,.filetransfer-dropzone.drag-active{border-color:var(--accent);background:var(--glass-active);box-shadow:0 0 0 2px var(--accent-glow)}
+.filetransfer-dropzone:focus-visible{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+.filetransfer-drop-icon{color:var(--accent);margin-bottom:2px;transition:transform var(--transition-fast)}
+.filetransfer-dropzone:hover .filetransfer-drop-icon{transform:translateY(-2px)}
+.filetransfer-drop-text{font-size:11.5px;font-weight:500;color:var(--text-secondary)}
+.filetransfer-drop-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px}
+.filetransfer-drop-actions .btn{display:inline-flex;align-items:center;gap:5px}
+
+/* File List Container */
+.filetransfer-file-list{flex:1;min-height:120px;max-height:none;overflow-y:auto;overflow-x:hidden;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--log-bg);padding:6px;display:flex;flex-direction:column;gap:5px}
+.ft-in-modal .filetransfer-file-list{max-height:220px}
+.filetransfer-empty-zone{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:120px;gap:6px;color:var(--text-muted);text-align:center;padding:12px}
+.filetransfer-empty-icon{color:var(--text-muted);opacity:0.6}
+.filetransfer-empty-text{font-size:11.5px;color:var(--text-muted);max-width:240px;line-height:1.4}
+
+/* File Item Row */
+.filetransfer-file-item{display:flex;align-items:center;gap:9px;padding:7px 9px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-sm);transition:all var(--transition-fast);min-width:0;flex-shrink:0}
+.filetransfer-file-item:hover{border-color:var(--glass-border-hover);background:var(--glass-hover)}
+.filetransfer-item-icon-box{width:28px;height:28px;border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--glass-hover);color:var(--text-secondary)}
+.filetransfer-item-icon-box.ft-icon-pdf{background:color-mix(in srgb,var(--danger) 15%,transparent);color:var(--danger)}
+.filetransfer-item-icon-box.ft-icon-code{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)}
+.filetransfer-item-icon-box.ft-icon-image{background:color-mix(in srgb,var(--accent2) 15%,transparent);color:var(--accent2)}
+.filetransfer-item-icon-box.ft-icon-video{background:color-mix(in srgb,#9c27b0 15%,transparent);color:#ba68c8}
+.filetransfer-item-icon-box.ft-icon-audio{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
+.filetransfer-item-icon-box.ft-icon-archive{background:color-mix(in srgb,#00bcd4 15%,transparent);color:#26c6da}
+.filetransfer-item-icon-box.ft-icon-spreadsheet{background:color-mix(in srgb,var(--accent2) 15%,transparent);color:var(--accent2)}
+.filetransfer-item-icon-box.ft-icon-doc{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)}
+.filetransfer-item-icon-box.ft-icon-file{background:var(--glass-hover);color:var(--text-secondary)}
+
+.filetransfer-item-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.filetransfer-item-name{font-size:11.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filetransfer-item-meta{font-size:10px;color:var(--text-secondary);font-family:monospace}
+.filetransfer-item-remove-btn{width:24px;height:24px;border-radius:var(--radius-xs);border:1px solid transparent;background:transparent;color:var(--text-muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all var(--transition-fast);padding:0}
+.filetransfer-item-remove-btn:hover{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+
+/* Panel Footers */
+.filetransfer-panel-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;margin-top:12px;border-top:1px solid var(--glass-border);min-height:38px;flex-shrink:0}
+.filetransfer-summary-text{font-size:11.5px;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.filetransfer-clear-btn{background:transparent;border:1px solid var(--glass-border);color:var(--text-muted);font-size:11px;font-weight:500;border-radius:var(--radius-sm);padding:4px 9px;cursor:pointer;transition:all var(--transition-fast);display:inline-flex;align-items:center;gap:5px}
+.filetransfer-clear-btn:hover:not(:disabled){color:var(--danger);border-color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
+.filetransfer-clear-btn:disabled{opacity:0.35;cursor:not-allowed}
+
+/* Output Info Group */
+.filetransfer-info-group{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px;flex-shrink:0}
+.filetransfer-info-item{display:flex;flex-direction:column;gap:3px}
+.filetransfer-info-label{font-size:10.5px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px}
+.filetransfer-info-value{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filetransfer-format-badge{font-size:10.5px;font-weight:700;font-family:monospace;padding:1px 6px;border-radius:var(--radius-xs);background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
+.filetransfer-host-badge{font-size:10.5px;font-weight:700;font-family:monospace;padding:1px 6px;border-radius:var(--radius-xs);background:color-mix(in srgb,var(--accent2) 15%,transparent);color:var(--accent2);border:1px solid color-mix(in srgb,var(--accent2) 30%,transparent)}
+.filetransfer-info-subtext{font-size:11px;color:var(--text)}
+.filetransfer-info-hint{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text-muted);border-top:1px solid var(--glass-border);padding-top:8px;margin-top:2px}
+.filetransfer-info-hint svg{color:var(--accent);flex-shrink:0}
+
+/* Progress & Status */
+.filetransfer-progress-wrap{background:var(--input-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:10px;display:flex;flex-direction:column;gap:5px;flex-shrink:0}
+.filetransfer-progress-wrap[hidden]{display:none}
+.filetransfer-progress-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-secondary)}
+.filetransfer-progress-title{font-weight:600;color:var(--text)}
+.filetransfer-progress-label{font-family:monospace;font-weight:700;color:var(--accent)}
+.filetransfer-progress-bar-bg{width:100%;height:7px;border-radius:4px;background:var(--glass-border);overflow:hidden}
+.filetransfer-progress-bar-bg progress{width:100%;height:100%;display:block;accent-color:var(--accent)}
+
+.filetransfer-status{min-height:18px;font-size:11px;color:var(--accent2);text-align:center;line-height:1.4;word-break:break-word;flex-shrink:0}
+.filetransfer-status.error{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent);padding:6px 10px;border-radius:var(--radius-sm)}
+
+/* Primary Action Button */
+.ft-action-footer{justify-content:center;flex-shrink:0;margin-top:auto}
+.filetransfer-action-btn{width:100%;padding:11px 16px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius-md);box-shadow:var(--btn-primary-shadow)}
+.filetransfer-action-btn:hover:not(:disabled){box-shadow:var(--btn-primary-glow)}
+.filetransfer-action-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+/* Success Result Card */
+.filetransfer-success-card{background:color-mix(in srgb,var(--accent2) 8%,var(--input-bg));border:1px solid color-mix(in srgb,var(--accent2) 40%,transparent);border-radius:var(--radius-md);padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.15);flex-shrink:0}
+.filetransfer-success-header{display:flex;align-items:center;gap:8px}
+.filetransfer-success-icon{width:28px;height:28px;border-radius:50%;background:color-mix(in srgb,var(--accent2) 20%,transparent);color:var(--accent2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.filetransfer-success-title-box{display:flex;flex-direction:column;gap:1px}
+.filetransfer-success-title{font-size:12px;font-weight:700;color:var(--text)}
+.filetransfer-success-sub{font-size:10.5px;color:var(--accent2);font-weight:500}
+.filetransfer-link-box{width:100%}
+.filetransfer-link-input{width:100%;background:var(--panel-sticky-bg,#0b0c13);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:6px 8px;font-family:monospace;font-size:11.5px;color:var(--text);outline:none;cursor:text}
+.filetransfer-link-input:focus{border-color:var(--accent2);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent2) 30%,transparent)}
+.filetransfer-success-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filetransfer-success-actions .btn{display:inline-flex;align-items:center;gap:5px;font-size:11px}
+.filetransfer-package-row{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--text);cursor:pointer;user-select:none}
+.filetransfer-package-row input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+.filetransfer-cancel-upload-btn{align-self:flex-end;font-size:11px;padding:2px 10px}
+.filetransfer-result-list{display:flex;flex-direction:column;gap:8px;width:100%;max-height:260px;overflow-y:auto}
+.filetransfer-result-row{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-sm);background:var(--glass-bg)}
+.filetransfer-result-row-error{border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.filetransfer-result-row .filetransfer-status.error{padding:4px 8px}
+.filetransfer-result-row-name{font-size:11px;font-weight:600;color:var(--text-secondary);word-break:break-all}
+@media (max-width:720px){
+  .theme-modal-picker{flex-direction:column;gap:14px}
+}
+
+.modal-theme-dialog{max-width:760px !important;width:90vw;max-height:calc(100vh - 40px);display:flex;flex-direction:column}
+
+/* Style Picker */
+.style-picker-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 4px;box-sizing:border-box;width:100%}
+.style-swatch{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--radius-md);border:1.5px solid var(--glass-border);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;transition:all var(--transition-fast);position:relative;outline:none;box-sizing:border-box}
+.style-swatch:hover{border-color:var(--text-muted);color:var(--text);background:var(--glass-hover)}
+.style-swatch.active{border-color:var(--accent);color:var(--accent);background:var(--glass-active);box-shadow:0 0 0 2px var(--accent-glow)}
+.style-swatch:focus,.style-swatch:focus-visible{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent), 0 0 0 4px var(--accent-glow);outline:none;z-index:2}
+.style-swatch svg{flex-shrink:0}
+.style-modal-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--glass-border);padding-bottom:6px}
+.style-modal-title{font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:10px}
+
+/* Language & Font Size Row in Appearance Modal */
+.lang-font-row{display:flex;flex-wrap:wrap;gap:20px;align-items:center;padding:4px 0}
+.lang-font-group{display:flex;align-items:center;gap:12px;flex:1;min-width:220px}
+.lang-font-label{font-size:13px;font-weight:var(--font-weight-normal);color:var(--text-secondary);white-space:nowrap;min-width:64px}
+.segmented-control{display:inline-flex;align-items:center;padding:3px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-md);gap:3px}
+.segmented-btn{padding:6px 14px;font-size:12px;font-weight:500;color:var(--text-secondary);background:transparent;border:none;border-radius:var(--radius-sm);cursor:pointer;transition:all var(--transition-fast);line-height:1.2;outline:none}
+.segmented-btn:hover{color:var(--text);background:var(--glass-hover)}
+.segmented-btn.active{color:var(--text);background:var(--glass-active);border:1px solid var(--glass-border-hover);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.25)}
+.segmented-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* Clear Completed Animated Bin Icon Button */
+.btn-icon.bin-button{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:0;transition:transform 0.2s ease,background var(--transition-fast),color var(--transition-fast)}
+.bin-top{width:16px;height:auto;transform-origin:right;transition:transform 0.3s ease}
+.bin-bottom{width:14px;height:auto}
+.btn-icon.bin-button:hover .bin-top{transform:rotate(45deg)}
+.btn-icon.bin-button:active{transform:scale(0.92)}
+
+
+/* Semantic state classes used by dynamic settings and monitor views. */
+.combo-model-disabled,.combo-disabled,.quickslot-model-disabled{opacity:.55}
+.combo-speed-status-success{color:var(--accent2)}
+.combo-speed-status-error{color:var(--danger)}
+.combo-speed-row-success{border-left-color:var(--accent2)}
+.combo-speed-row-error{border-left:3px solid var(--danger);background:var(--status-danger-bg)}
+.provider-temp-highlight{background:var(--status-warning-bg);border-color:var(--warn)}
+.provider-keys-hidden,.provider-keys-chevron-hidden{display:none}
+.provider-keys-expanded,.provider-model-chevron-expanded{transform:rotate(90deg)}
+.provider-keys-title-clickable{cursor:pointer;user-select:none}
+.pager-disabled{opacity:.45;pointer-events:none;cursor:not-allowed}
+.session-row-hidden,.quickslot-item-hidden,.quickslot-group-hidden,.download-preview-hidden,.download-list-hidden,.auth-app-hidden{display:none!important}
+.session-row-indented{padding-left:18px}
+.quota-row-clickable{cursor:pointer}
+.quota-row-expanded{background:var(--interactive-active-bg)}
+.quota-row-expanded .quota-row-chevron,.quota-chevron-expanded{transform:rotate(180deg)}
+
+
