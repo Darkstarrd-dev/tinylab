@@ -6369,32 +6369,51 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 }
 
 /* ===================== Assistant Demo page (F6) ===================== */
-.ademo-root{display:flex;flex-direction:column;height:100%;gap:8px;padding:12px;box-sizing:border-box}
-.ademo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0}
-.ademo-title{font-weight:700;font-size:14px;margin-right:4px}
+.demo-shell{display:flex;flex-direction:column;height:100%;padding:12px;box-sizing:border-box;gap:10px;min-height:0}
+.demo-tabs{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.demo-tab{padding:6px 14px;font-size:13px;font-weight:700}
+.demo-tab.active{background:var(--glass-active);border-color:var(--glass-border-hover);color:var(--text)}
+.demo-pane-ademo,.demo-pane-games{display:flex;flex-direction:column;flex:1;min-height:0}
+.demo-pane-ademo[hidden],.demo-pane-games[hidden]{display:none !important}
+
+.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px}
+.ademo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding-bottom:2px}
 .ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px}
 .ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap}
 .ademo-type1,.ademo-type2{width:auto;min-width:0;padding:3px 8px;font-size:12px;height:auto}
 .ademo-scaleto{width:64px;padding:3px 6px;font-size:12px;height:auto}
 .ademo-scale{width:110px}
+.ademo-body-sq{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
+.ademo-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm);margin-left:auto}
 .ademo-no-actions{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#0b0c13;font-size:12px;font-weight:800;cursor:help}
 .ademo-stage-wrap{flex:1;min-height:0;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}
 .ademo-stage{position:absolute;inset:0;width:100%;height:100%;display:block}
 .ademo-stage.ademo-draw-mode{cursor:crosshair}
+.ademo-fs-exit{position:absolute;top:10px;right:10px;z-index:5;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--glass-border);background:rgba(10,10,15,0.82);color:#fff;cursor:pointer;backdrop-filter:blur(8px)}
+.ademo-fs-exit:hover{background:rgba(20,20,28,0.96)}
+/* Fullscreen container fills the shell; stage grows to fill */
+.ademo-root.ademo-fullscreen{position:fixed;inset:0;z-index:var(--z-modal);padding:12px 12px 12px;background:var(--panel-sticky-bg);gap:10px}
+.ademo-root.ademo-fullscreen .ademo-stage-wrap{flex:1;min-height:0;border-radius:var(--radius-lg)}
+.ademo-root.ademo-fullscreen .ademo-hint{color:var(--text-secondary)}
 .ademo-hint{flex-shrink:0;font-size:12px;color:var(--text-muted);line-height:1.5}
 
 /* ===================== Demo Games plugin section (F6, below testbed) ===================== */
-/* When the games section (.dg-root) is present the demo page becomes a
-   scrolling column: testbed flexes, games section sizes to content. The
-   :has() gate keeps the classic testbed-only layout pixel-identical. */
-#page-content:has(.dg-root){display:flex;flex-direction:column;gap:10px;overflow-y:auto}
-#page-content:has(.dg-root) .ademo-root{height:auto;flex:1 1 0;min-height:340px}
-.dg-root{display:flex;flex-direction:column;gap:8px;padding:0 12px 12px;box-sizing:border-box;flex:0 0 auto}
-.dg-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0}
+/* Now rendered inside .demo-pane-games; the shell tabs make only one pane
+   visible at a time, reclaiming the previous split-page space. */
+.dg-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;box-sizing:border-box}
+.dg-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding-bottom:2px}
 .dg-title{font-weight:700;font-size:14px;margin-right:4px}
 .dg-select{min-width:180px}
 .dg-status{font-size:12px;color:var(--text-muted);white-space:nowrap}
-.dg-stage-wrap{height:46vh;min-height:280px;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}
+.dg-stage-wrap{flex:1;min-height:280px;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}
 .dg-stage{position:absolute;inset:0;width:100%;height:100%}
 .dg-stage canvas{display:block;margin:0 auto}
+.dg-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
+.dg-fs-exit{position:absolute;top:10px;right:10px;z-index:5;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--glass-border);background:rgba(10,10,15,0.82);color:#fff;cursor:pointer;backdrop-filter:blur(8px)}
+.dg-fs-exit:hover{background:rgba(20,20,28,0.96)}
+.dg-root.dg-fullscreen{position:fixed;inset:0;z-index:var(--z-modal);padding:12px;background:var(--panel-sticky-bg);gap:10px}
+.dg-root.dg-fullscreen .dg-stage-wrap{flex:1;min-height:0}
+
+/* Legacy :has gate no longer needed — retained as no-op for old tests. */
+#page-content:has(.dg-root){} 

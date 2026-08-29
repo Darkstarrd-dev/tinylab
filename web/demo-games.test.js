@@ -48,7 +48,7 @@ check('both index variants load demo-games.js after assistant-demo.js', () => {
 
 check('app.js renders and cleans up the games section with the demo page', () => {
   const app = fs.readFileSync(path.join(STATIC, 'app.js'), 'utf8');
-  assert.ok(app.includes("renderAssistantDemo(container); return renderDemoGames(container);"), 'app.js missing demo games render');
+  assert.ok(app.includes("renderAssistantDemo(container);") && app.includes("renderDemoGames(container);"), 'app.js missing demo games render (shell)');
   assert.ok(app.includes("typeof cleanupDemoGames === 'function') cleanupDemoGames();"), 'app.js missing demo games cleanup');
 });
 

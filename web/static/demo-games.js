@@ -63,6 +63,24 @@ window.TRGames = {
   stop: function () { dgStopGame(); }
 };
 
+// ---- fullscreen + icons (mirrors assistant-demo.js) ------------------------
+var DG_SVG_FULLSCREEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+var DG_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+function dgIsFullscreen() {
+  return !!(dgUi && dgUi.root && dgUi.root.classList.contains('dg-fullscreen'));
+}
+function dgSetFullscreen(on) {
+  if (!dgUi || !dgUi.root) return;
+  dgUi.root.classList.toggle('dg-fullscreen', !!on);
+  dgSyncUi();
+  if (dgUi.stageWrap) {
+    // Nudge stage sizing if game has fixed layout.
+    try { window.dispatchEvent(new Event('resize')); } catch (e0) {}
+  }
+}
+function dgToggleFullscreen() { dgSetFullscreen(!dgIsFullscreen()); }
+
 // ---- loaders ----------------------------------------------------------------
 function dgFetchList() {
   return fetch('/api/games').then(function (r) {
@@ -192,8 +210,49 @@ function dgStopGame() {
 }
 
 // ---- UI ---------------------------------------------------------------------
+function dgBindShellTabs(container) {
+  var shell = container.querySelector('.demo-shell');
+  if (!shell) return;
+  shell.querySelectorAll('.demo-tab').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var tab = btn.getAttribute('data-tab');
+      if (window.__ademo && typeof window.__ademo.setActiveTab === 'function') {
+        window.__ademo.setActiveTab(tab);
+      } else {
+        // Fallback if ademo not yet loaded.
+        shell.querySelectorAll('.demo-tab').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+        });
+        var ademoPane = shell.querySelector('.demo-pane-ademo');
+        var gamesPane = shell.querySelector('.demo-pane-games');
+        if (ademoPane) ademoPane.hidden = tab !== 'ademo';
+        if (gamesPane) gamesPane.hidden = tab !== 'games';
+      }
+      btn.blur();
+    });
+  });
+}
+
 function renderDemoGames(container) {
   cleanupDemoGames();
+
+  // Ensure the shell exists (renderAssistantDemo creates it). If not, create a minimal shell.
+  var shell = container.querySelector('.demo-shell');
+  if (!shell) {
+    // Fallback: wrap existing content (defensive; normal path has shell).
+    var existing = container.innerHTML;
+    container.innerHTML = '<div class="demo-shell"><div class="demo-tabs"><button type="button" class="btn demo-tab active" data-tab="ademo">' + escapeHtml(t('demoTabAssistant')) + '</button><button type="button" class="btn btn-ghost demo-tab" data-tab="games">' + escapeHtml(t('demoTabGames')) + '</button></div><div class="demo-pane-ademo">' + existing + '</div><div class="demo-pane-games" hidden></div></div>';
+    shell = container.querySelector('.demo-shell');
+    dgBindShellTabs(container);
+  }
+
+  var gamesPane = shell.querySelector('.demo-pane-games');
+  if (!gamesPane) {
+    gamesPane = document.createElement('div');
+    gamesPane.className = 'demo-pane-games';
+    gamesPane.hidden = true;
+    shell.appendChild(gamesPane);
+  }
 
   var root = document.createElement('div');
   root.className = 'dg-root';
@@ -205,9 +264,12 @@ function renderDemoGames(container) {
       '<button type="button" class="btn btn-ghost dg-stop" disabled>' + escapeHtml(t('demoGamesStop')) + '</button>' +
       '<button type="button" class="btn btn-ghost dg-reload" data-tooltip="' + escapeHtml(t('demoGamesReloadDesc')) + '">' + escapeHtml(t('demoGamesReload')) + '</button>' +
       '<span class="dg-status"></span>' +
+      '<span class="dg-fs-sep" style="flex:1"></span>' +
+      '<button type="button" class="btn btn-ghost dg-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + DG_SVG_FULLSCREEN + '</button>' +
     '</div>' +
-    '<div class="dg-stage-wrap" hidden><div class="dg-stage"></div></div>';
-  container.appendChild(root);
+    '<div class="dg-stage-wrap" hidden><div class="dg-stage"></div><button type="button" class="dg-fs-exit" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + DG_SVG_CLOSE + '</button></div>';
+  gamesPane.innerHTML = '';
+  gamesPane.appendChild(root);
 
   dgUi = {
     root: root,
@@ -217,8 +279,13 @@ function renderDemoGames(container) {
     reloadBtn: root.querySelector('.dg-reload'),
     status: root.querySelector('.dg-status'),
     stageWrap: root.querySelector('.dg-stage-wrap'),
-    stage: root.querySelector('.dg-stage')
+    stage: root.querySelector('.dg-stage'),
+    fsBtn: root.querySelector('.dg-fs-btn'),
+    fsExit: root.querySelector('.dg-fs-exit')
   };
+
+  dgUi.fsBtn.addEventListener('click', function () { dgToggleFullscreen(); this.blur(); });
+  dgUi.fsExit.addEventListener('click', function () { dgSetFullscreen(false); this.blur(); });
 
   dgUi.launchBtn.addEventListener('click', function () {
     var id = dgUi.select.value;
@@ -281,6 +348,11 @@ function dgSyncUi() {
   dgUi.stopBtn.disabled = !running;
   dgUi.launchBtn.disabled = running || !dgGames.length;
   dgUi.select.disabled = running;
+  if (dgUi.fsBtn) {
+    dgUi.fsBtn.setAttribute('aria-label', dgIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+    dgUi.fsBtn.setAttribute('data-tooltip', dgIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+  }
+  if (dgUi.fsExit) dgUi.fsExit.style.display = dgIsFullscreen() ? '' : 'none';
 }
 
 function dgSetStatus(msg) {
@@ -288,6 +360,7 @@ function dgSetStatus(msg) {
 }
 
 function cleanupDemoGames() {
+  if (dgUi && dgUi.root) dgUi.root.classList.remove('dg-fullscreen');
   dgStopGame();
   dgUi = null;
 }
@@ -303,5 +376,8 @@ window.__dgames = {
   stop: dgStopGame,
   idRe: DG_ID_RE,
   // VM-test backdoor: inject a fake running game (same role as petSM.register).
-  setCurrent: function (c) { dgCurrent = c; }
+  setCurrent: function (c) { dgCurrent = c; },
+  isFullscreen: dgIsFullscreen,
+  setFullscreen: dgSetFullscreen,
+  toggleFullscreen: dgToggleFullscreen
 };

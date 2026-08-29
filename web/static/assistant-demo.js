@@ -45,11 +45,31 @@ var ADEMO_TYPES = {
 // ---- persisted for the session (module lifetime) -------------------------
 var ademoPersist = { bgPath: '', bgMode: 'fit-width', bodies: [], scale: 1, type1: 'scroller', type2: 'Platformer' };
 
+// Active demo shell tab: 'ademo' | 'games'.
+var ademoActiveTab = 'ademo';
+
 // ---- per-render runtime (torn down by cleanupAssistantDemo) --------------
 var ademoRt = null; // {wrap, canvas, ctx, ro, raf, lastTs, bgImg, bodyMode, dragRect, bound:{...}}
 
 // ---- input state ----------------------------------------------------------
 var ademoKeys = { left: false, right: false, up: false, down: false, shift: false, ctrl: false };
+
+// ---- square body + fullscreen icons (inline SVG, no assets) ---------------
+var ADEMO_SVG_ADD_BODY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>';
+var ADEMO_SVG_UNDO_BODY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 14l-3-3 3-3"/><path d="M12 11H6"/></svg>';
+var ADEMO_SVG_CLEAR_BODY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 8l8 8M16 8l-8 8"/></svg>';
+var ADEMO_SVG_FULLSCREEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+var ADEMO_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+function ademoIsFullscreen() {
+  return !!(ademoRt && ademoRt.wrap && ademoRt.wrap.classList.contains('ademo-fullscreen'));
+}
+function ademoSetFullscreen(on) {
+  if (!ademoRt || !ademoRt.wrap) return;
+  ademoRt.wrap.classList.toggle('ademo-fullscreen', !!on);
+  requestAnimationFrame(ademoResize);
+}
+function ademoToggleFullscreen() { ademoSetFullscreen(!ademoIsFullscreen()); }
 
 // ---- mouse aim (topdown): stage coords, active while cursor over canvas ----
 var ademoAim = { x: 0, y: 0, active: false };
@@ -528,7 +548,8 @@ function ademoSyncToolbar() {
   if (bgMode && bgMode.value !== ademoPersist.bgMode) bgMode.value = ademoPersist.bgMode;
   var addBtn = q('.ademo-add-body');
   if (addBtn) {
-    addBtn.textContent = ademoRt.bodyMode ? t('demoAddingBody') : t('demoAddBody');
+    addBtn.setAttribute('aria-pressed', ademoRt.bodyMode ? 'true' : 'false');
+    addBtn.setAttribute('data-tooltip', ademoRt.bodyMode ? t('demoAddingBody') : t('demoAddBody'));
     addBtn.classList.toggle('btn-accent', !!ademoRt.bodyMode);
   }
   if (ademoRt.canvas) ademoRt.canvas.classList.toggle('ademo-draw-mode', !!ademoRt.bodyMode);
@@ -539,6 +560,48 @@ function ademoSyncToolbar() {
     hint.textContent = t(ademoPersist.type1 === 'topdown' ? 'demoHintTopdown'
       : (ademoPersist.type1 === 'isometric' ? 'demoHintTactic' : 'demoHint'));
   }
+  var fsBtn = q('.ademo-fs-btn');
+  if (fsBtn) {
+    fsBtn.setAttribute('aria-label', ademoIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+    fsBtn.setAttribute('data-tooltip', ademoIsFullscreen() ? t('demoExitFullscreen') : t('demoEnterFullscreen'));
+  }
+  var fsExit = q('.ademo-fs-exit');
+  if (fsExit) fsExit.style.display = ademoIsFullscreen() ? '' : 'none';
+}
+
+// Sync the demo shell tab UI (Assistant Demo | Games). Called from both hosts.
+function ademoSyncShellTabs() {
+  var shell = document.querySelector('.demo-shell');
+  if (!shell) return;
+  shell.querySelectorAll('.demo-tab').forEach(function (btn) {
+    var active = btn.getAttribute('data-tab') === ademoActiveTab;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  var ademoPane = shell.querySelector('.demo-pane-ademo');
+  var gamesPane = shell.querySelector('.demo-pane-games');
+  if (ademoPane) ademoPane.hidden = ademoActiveTab !== 'ademo';
+  if (gamesPane) gamesPane.hidden = ademoActiveTab !== 'games';
+  ademoSyncToolbar();
+  if (typeof dgSyncUi === 'function') try { dgSyncUi(); } catch (e2) {}
+}
+
+function ademoHandleFullscreenShortcut(e) {
+  // Ctrl+F toggles fullscreen of the currently visible pane's container.
+  var isCtrlF = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+  if (!isCtrlF) return false;
+  var shell = document.querySelector('.demo-shell');
+  if (!shell || shell.hidden) return false;
+  // Ignore when typing.
+  var tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable)) return false;
+  e.preventDefault();
+  if (ademoActiveTab === 'games') {
+    if (typeof dgToggleFullscreen === 'function') dgToggleFullscreen();
+  } else {
+    ademoToggleFullscreen();
+  }
+  return true;
 }
 
 function ademoSetBodyMode(on) {
@@ -791,13 +854,19 @@ function renderAssistantDemo(container) {
   cleanupAssistantDemo();
 
   // Clamp the persisted scale into the 0.01-1.00 slider range (older sessions
-  // used 0.5-4).
+
   ademoPersist.scale = Math.min(1, Math.max(0.01, ademoPersist.scale || 1));
 
+  // Shell with tab toggle: Assistant Demo | Games — only one pane visible.
   container.innerHTML =
+    '<div class="demo-shell">' +
+      '<div class="demo-tabs">' +
+        '<button type="button" class="btn demo-tab' + (ademoActiveTab === 'ademo' ? '' : ' btn-ghost') + (ademoActiveTab === 'ademo' ? ' active' : '') + '" data-tab="ademo">' + escapeHtml(t('demoTabAssistant')) + '</button>' +
+        '<button type="button" class="btn demo-tab' + (ademoActiveTab === 'games' ? '' : ' btn-ghost') + (ademoActiveTab === 'games' ? ' active' : '') + '" data-tab="games">' + escapeHtml(t('demoTabGames')) + '</button>' +
+      '</div>' +
+      '<div class="demo-pane-ademo"' + (ademoActiveTab !== 'ademo' ? ' hidden' : '') + '>' +
     '<div class="ademo-root">' +
       '<div class="ademo-toolbar">' +
-        '<span class="ademo-title">' + escapeHtml(t('demoTitle')) + '</span>' +
         '<select class="input ademo-type1" data-tooltip="' + escapeHtml(t('demoType')) + '"></select>' +
         '<select class="input ademo-type2" data-tooltip="' + escapeHtml(t('demoSubtype')) + '"></select>' +
         '<span class="ademo-sep"></span>' +
@@ -808,9 +877,9 @@ function renderAssistantDemo(container) {
           '<option value="pixel">' + escapeHtml(t('demoBgPixel')) + '</option>' +
         '</select>' +
         '<span class="ademo-sep"></span>' +
-        '<button type="button" class="btn ademo-add-body">' + escapeHtml(t('demoAddBody')) + '</button>' +
-        '<button type="button" class="btn btn-ghost ademo-undo-body">' + escapeHtml(t('demoUndoBody')) + '</button>' +
-        '<button type="button" class="btn btn-ghost ademo-clear-bodies">' + escapeHtml(t('demoClearBodies')) + '</button>' +
+        '<button type="button" class="btn ademo-body-sq ademo-add-body" data-tooltip="' + escapeHtml(t('demoAddBody')) + '" aria-label="' + escapeHtml(t('demoAddBody')) + '">' + ADEMO_SVG_ADD_BODY + '</button>' +
+        '<button type="button" class="btn btn-ghost ademo-body-sq ademo-undo-body" data-tooltip="' + escapeHtml(t('demoUndoBody')) + '" aria-label="' + escapeHtml(t('demoUndoBody')) + '">' + ADEMO_SVG_UNDO_BODY + '</button>' +
+        '<button type="button" class="btn btn-ghost ademo-body-sq ademo-clear-bodies" data-tooltip="' + escapeHtml(t('demoClearBodies')) + '" aria-label="' + escapeHtml(t('demoClearBodies')) + '">' + ADEMO_SVG_CLEAR_BODY + '</button>' +
         '<span class="ademo-body-count"></span>' +
         '<span class="ademo-sep"></span>' +
         '<label class="ademo-scale-label">' + escapeHtml(t('demoScale')) +
@@ -823,10 +892,29 @@ function renderAssistantDemo(container) {
           ' <input type="number" class="input ademo-scaleto ademo-scaleto-h" min="1" step="1">' +
         '</label>' +
         '<span class="ademo-no-actions" data-tooltip="' + escapeHtml(t('demoNoActions')) + '">!</span>' +
+        '<span class="ademo-sep ademo-fs-sep"></span>' +
+        '<button type="button" class="btn btn-ghost ademo-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + ADEMO_SVG_FULLSCREEN + '</button>' +
       '</div>' +
-      '<div class="ademo-stage-wrap"><canvas class="ademo-stage"></canvas></div>' +
+      '<div class="ademo-stage-wrap"><canvas class="ademo-stage"></canvas><button type="button" class="ademo-fs-exit" data-tooltip="' + escapeHtml(t('demoExitFullscreen')) + '" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + ADEMO_SVG_CLOSE + '</button></div>' +
       '<div class="ademo-hint">' + escapeHtml(t('demoHint')) + '</div>' +
+      '</div>' +
+      '</div>' +
+      '<div class="demo-pane-games"' + (ademoActiveTab !== 'games' ? ' hidden' : '') + '></div>' +
     '</div>';
+
+  // Bind shell tab toggle
+  (function bindDemoTabs() {
+    var shell = container.querySelector('.demo-shell');
+    if (!shell) return;
+    shell.querySelectorAll('.demo-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.getAttribute('data-tab');
+        ademoActiveTab = tab === 'games' ? 'games' : 'ademo';
+        ademoSyncShellTabs();
+        btn.blur();
+      });
+    });
+  })();
 
   var wrap = container.querySelector('.ademo-root');
   var stageWrap = container.querySelector('.ademo-stage-wrap');
@@ -845,6 +933,21 @@ function renderAssistantDemo(container) {
     bgImg: null, bodyMode: false, dragStart: null, dragRect: null,
     accent: accentRaw || '56,189,248'
   };
+
+  // Fullscreen handlers
+  wrap.querySelector('.ademo-fs-btn').addEventListener('click', function () {
+    ademoToggleFullscreen();
+    this.blur();
+  });
+  wrap.querySelector('.ademo-fs-exit').addEventListener('click', function () {
+    ademoSetFullscreen(false);
+    this.blur();
+  });
+  // Ctrl+F shortcut while demo page is active
+  ademoRt._fsKeyHandler = function (e) { ademoHandleFullscreenShortcut(e); };
+  window.addEventListener('keydown', ademoRt._fsKeyHandler);
+  // Keep toolbar fullscreen button in sync when dg toggles causes reflow
+  ademoSyncToolbar();
 
   // --- toolbar bindings ---
   // Merged background button: Set when no background is configured, Clear once set.
@@ -980,6 +1083,9 @@ function cleanupAssistantDemo() {
   window.removeEventListener('keydown', ademoOnKeyDown, true);
   window.removeEventListener('keyup', ademoOnKeyUp, true);
   window.removeEventListener('blur', ademoOnBlur);
+  if (ademoRt._fsKeyHandler) window.removeEventListener('keydown', ademoRt._fsKeyHandler);
+  // Exit fullscreen on navigation away
+  if (ademoRt.wrap) ademoRt.wrap.classList.remove('ademo-fullscreen');
   ademoRt = null;
   ademoOnBlur();
 }
@@ -1004,5 +1110,10 @@ window.__ademo = {
   addBody: ademoAddBody,
   clearBodies: ademoClearBodies,
   setPaused: function (v) { ademoPaused = !!v; },
-  isPaused: function () { return ademoPaused; }
+  isPaused: function () { return ademoPaused; },
+  activeTab: function () { return ademoActiveTab; },
+  setActiveTab: function (v) { ademoActiveTab = v === 'games' ? 'games' : 'ademo'; ademoSyncShellTabs(); },
+  isFullscreen: ademoIsFullscreen,
+  setFullscreen: ademoSetFullscreen,
+  toggleFullscreen: ademoToggleFullscreen
 };

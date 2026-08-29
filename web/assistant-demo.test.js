@@ -46,7 +46,9 @@ check('shortcuts.js binds F6 to global.goto-demo; app.js routes demo page', () =
   const sc = fs.readFileSync(path.join(__dirname, 'static/shortcuts.js'), 'utf8');
   assert.ok(/'global\.goto-demo':\s*\{\s*key:\s*'F6'/.test(sc), 'shortcuts.js missing F6 goto-demo preset');
   const app = fs.readFileSync(path.join(__dirname, 'static/app.js'), 'utf8');
-  assert.ok(app.includes("case 'demo': renderAssistantDemo(container); return renderDemoGames(container);"), 'app.js missing demo route');
+  // Shell toggle refactor (2026-08-29): demo renders via two panes, not a single return.
+  assert.ok(app.includes("case 'demo':") && app.includes('renderAssistantDemo(container)') && app.includes('renderDemoGames(container)'), 'app.js missing demo route (shell)');
+  assert.ok(app.includes('ademoSyncShellTabs') || app.includes("return renderDemoGames"), 'app.js demo route missing shell sync or legacy return');
   assert.ok(app.includes("matchEvent('global.goto-demo'"), 'app.js missing F6 keydown binding');
   assert.ok(app.includes('cleanupAssistantDemo'), 'app.js missing demo cleanup on navigate-away');
 });
