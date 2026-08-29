@@ -105,6 +105,117 @@ function utilityHasTool(id) {
   return false;
 }
 
+var DEMO_TOOLS = [
+  { id: 'ademo', labelKey: 'demoTabAssistant' },
+  { id: 'games', labelKey: 'demoTabGames' }
+];
+function isDemoTool(id) {
+  return DEMO_TOOLS.some(function(tool) { return tool.id === id; });
+}
+var demoActiveTool = (function(){ try{ var v=localStorage.getItem('demoActiveTool'); return (v==='games'||v==='ademo')?v:'ademo'; }catch(e){ return 'ademo'; }})();
+var demoMenuOpen = false;
+function demoHasTool(id) {
+  if (id === 'ademo') return typeof renderAssistantDemo === 'function';
+  if (id === 'games') return typeof renderDemoGames === 'function';
+  return isDemoTool(id);
+}
+function updateDemoNavLabel() {
+  var button = document.querySelector('.demo-nav-wrap [data-page="demo"]');
+  if (!button) return;
+  var item = DEMO_TOOLS.filter(function(tool) { return tool.id === demoActiveTool; })[0];
+  button.textContent = item ? t(item.labelKey) : t('demo');
+  // Ensure active styling when on any demo tool page
+  var isDemoActive = currentPage === 'demo' || isDemoTool(currentPage);
+  button.classList.toggle('active', !!isDemoActive);
+}
+function updateDemoMenuState() {
+  var menu = document.getElementById('demo-menu');
+  if (!menu) return;
+  var toolToMark = demoActiveTool || 'ademo';
+  menu.querySelectorAll('[data-demo-tool]').forEach(function(item) {
+    item.setAttribute('aria-current', item.dataset.demoTool === toolToMark ? 'page' : 'false');
+  });
+}
+function demoToolLifecycle(id, phase) {
+  // No suspend hooks yet; keep symmetry with utility/gallery for future games pause.
+  var hooks = {
+    ademo: { suspend: 'suspendAssistantDemo' },
+    games: { suspend: 'suspendDemoGames' }
+  };
+  var hook = hooks[id] && hooks[id][phase];
+  if (hook && typeof window[hook] === 'function') window[hook]();
+}
+function closeDemoMenu() {
+  demoMenuOpen = false;
+  var menu = document.getElementById('demo-menu');
+  var button = document.querySelector('.demo-nav-wrap [data-page="demo"]');
+  if (menu) {
+    menu.classList.remove('open');
+    setTimeout(function() {
+      if (!demoMenuOpen) menu.hidden = true;
+    }, 480);
+  }
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+function focusDemoMenuSelected() {
+  var menu = document.getElementById('demo-menu');
+  if (!menu || menu.hidden) return;
+  var toolToMark = demoActiveTool || 'ademo';
+  var selected = menu.querySelector('button[data-demo-tool="' + toolToMark + '"]') ||
+                 menu.querySelector('[aria-current="page"]') ||
+                 menu.querySelector('button:not([disabled])');
+  if (selected) selected.focus();
+}
+function openDemoMenu() {
+  var menu = document.getElementById('demo-menu');
+  var button = document.querySelector('.demo-nav-wrap [data-page="demo"]');
+  if (!menu || !button) return;
+  demoMenuOpen = true;
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  updateDemoMenuState();
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      menu.classList.add('open');
+      focusDemoMenuSelected();
+      setTimeout(focusDemoMenuSelected, 50);
+      setTimeout(focusDemoMenuSelected, 120);
+    });
+  });
+}
+function toggleDemoMenu() {
+  if (demoMenuOpen) closeDemoMenu(); else openDemoMenu();
+}
+function selectDemoTool(id) {
+  var item = DEMO_TOOLS.filter(function(tool) { return tool.id === id; })[0];
+  if (!item || !demoHasTool(id)) return;
+  demoActiveTool = id;
+  try { localStorage.setItem('demoActiveTool', id); } catch(e) {}
+  updateDemoNavLabel();
+  updateDemoMenuState();
+  closeDemoMenu();
+  navigateTo(id);
+}
+function renderDemoWithMenu(container) {
+  if (!demoActiveTool || !demoHasTool(demoActiveTool)) {
+    demoActiveTool = 'ademo';
+  }
+  updateDemoNavLabel();
+  updateDemoMenuState();
+  // Render the selected pane; the other pane is not rendered (no hidden toggle needed).
+  // Keep the shared toolbar row by rendering a shell that hosts the active pane.
+  if (demoActiveTool === 'games' && typeof renderDemoGames === 'function') {
+    // Games is self-contained; still call ademoSyncShellTabs for shared fullscreen chrome if present.
+    try { renderDemoGames(container); } catch(e){ console.error('renderDemoGames failed', e); }
+    if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch(e0) {}
+    return;
+  }
+  // Default: Assistant demo
+  try { renderAssistantDemo(container); } catch(e){ console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; }
+  // Assistant pane also renders games toolbar injection point; ensure shell tabs hidden when single-pane.
+  if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch(e0) {}
+}
+
 function renderUtilityReview(container) {
   return window.renderReview(container);
 }
@@ -289,20 +400,28 @@ function selectUtilityTool(id) {
 document.addEventListener('click', function(e){
   var gItem = e.target.closest && e.target.closest('[data-gallery-tool]');
   if (gItem) { e.preventDefault(); selectGalleryTool(gItem.getAttribute('data-gallery-tool')); return; }
+  var dItem = e.target.closest && e.target.closest('[data-demo-tool]');
+  if (dItem) { e.preventDefault(); selectDemoTool(dItem.getAttribute('data-demo-tool')); return; }
   var uItem = e.target.closest && e.target.closest('[data-utility-tool]');
   if (uItem) { e.preventDefault(); selectUtilityTool(uItem.getAttribute('data-utility-tool')); return; }
   var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
   if (galBtn) { e.preventDefault(); e.stopPropagation(); toggleGalleryMenu(); return; }
-  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap) [data-page="utility"]');
+  var demoBtn = e.target.closest && e.target.closest('.demo-nav-wrap [data-page="demo"]');
+  if (demoBtn) { e.preventDefault(); e.stopPropagation(); toggleDemoMenu(); return; }
+  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap):not(.demo-nav-wrap) [data-page="utility"]');
   if (utilBtn) { e.preventDefault(); e.stopPropagation(); toggleUtilityMenu(); return; }
   var galWrap = document.querySelector('.gallery-nav-wrap');
-  var utilWrap = document.querySelector('.utility-nav-wrap:not(.gallery-nav-wrap)');
+  var demoWrap = document.querySelector('.demo-nav-wrap');
+  var utilWrap = document.querySelector('.utility-nav-wrap:not(.gallery-nav-wrap):not(.demo-nav-wrap)');
   if (galleryMenuOpen && galWrap && !galWrap.contains(e.target)) closeGalleryMenu();
+  if (demoMenuOpen && demoWrap && !demoWrap.contains(e.target) && !e.target.closest('#demo-menu')) closeDemoMenu();
   if (utilityMenuOpen && utilWrap && !utilWrap.contains(e.target) && !e.target.closest('#utility-menu')) closeUtilityMenu();
 });
 document.addEventListener('mouseover', function(e){
   var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
   if (galBtn && !galleryMenuOpen) openGalleryMenu();
+  var demoBtn = e.target.closest && e.target.closest('.demo-nav-wrap [data-page="demo"]');
+  if (demoBtn && !demoMenuOpen) openDemoMenu();
   var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap) [data-page="utility"]');
   if (utilBtn && !utilityMenuOpen) openUtilityMenu();
 });
@@ -343,32 +462,41 @@ document.addEventListener('DOMContentLoaded', async function() {
 function navigateTo(page) {
   if (utilityMenuOpen) closeUtilityMenu();
   if (galleryMenuOpen) closeGalleryMenu();
+  if (demoMenuOpen) closeDemoMenu();
   var previousPage = currentPage;
   var previousIsUtilityTool = isUtilityTool(previousPage);
   var previousIsGalleryTool = isGalleryTool(previousPage);
+  var previousIsDemoTool = isDemoTool(previousPage);
   var preserveUtilityState = previousIsUtilityTool || utilityHasTool(utilityActiveTool);
   var preserveGalleryState = previousIsGalleryTool || galleryHasTool(galleryActiveTool);
   var wasFullscreen = document.body.classList.contains('gallery-fullscreen-active') || (typeof isFullscreen === 'function' && isFullscreen());
   if (previousIsUtilityTool && previousPage !== page) utilityToolLifecycle(previousPage, 'suspend');
   if (previousIsGalleryTool && previousPage !== page) galleryToolLifecycle(previousPage, 'suspend');
+  if (previousIsDemoTool && previousPage !== page) demoToolLifecycle(previousPage, 'suspend');
   currentPage = page;
   if (isUtilityTool(page)) utilityActiveTool = page;
   if (isGalleryTool(page)) {
     galleryActiveTool = page;
     try { localStorage.setItem('galleryActiveTool', page); } catch(e) {}
   }
+  if (isDemoTool(page)) {
+    demoActiveTool = page;
+    try { localStorage.setItem('demoActiveTool', page); } catch(e) {}
+  }
   updateUtilityNavLabel();
   updateUtilityMenuState();
   updateGalleryNavLabel();
   updateGalleryMenuState();
+  updateDemoNavLabel();
+  updateDemoMenuState();
   var gen = ++navGen;
   currentProviderId = null;
   if (typeof stopUsageRefresh === 'function') stopUsageRefresh();
   if (page !== 'playground' && typeof cleanupPlayground === 'function') cleanupPlayground();
   if (!isGalleryTool(page) && typeof cleanupGallery === 'function') cleanupGallery();
   if (page !== 'music' && typeof cleanupMusic === 'function') try{ cleanupMusic(); }catch(e){}
-  if (page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
-  if (page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
+  if (!isDemoTool(page) && page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
+  if (!isDemoTool(page) && page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
   if (!preserveUtilityState) {
     if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
@@ -381,7 +509,7 @@ function navigateTo(page) {
   }
   if (page !== 'monitor' && typeof closeConsoleStream === 'function') closeConsoleStream();
   document.querySelectorAll('.nav-item').forEach(function(el) {
-    el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility') || (GALLERY_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='gallery'));
+    el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility') || (GALLERY_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='gallery') || (DEMO_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='demo'));
   });
   updateGalleryNavLabel();
   var container = document.getElementById('page-content');
@@ -402,7 +530,9 @@ function navigateTo(page) {
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gallery': galleryActiveTool='gallery'; try{localStorage.setItem('galleryActiveTool','gallery');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
       case 'music': galleryActiveTool='music'; try{localStorage.setItem('galleryActiveTool','music');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
-      case 'demo': try { renderAssistantDemo(container); } catch (e) { console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; } try { renderDemoGames(container); } catch (e2) { console.error('renderDemoGames failed', e2); } if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch (e0) {} return;
+      case 'demo': return renderDemoWithMenu(container);
+      case 'ademo': return renderDemoWithMenu(container);
+      case 'games': return renderDemoWithMenu(container);
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);
@@ -416,7 +546,8 @@ function navigateTo(page) {
   // before or after this render, which would duplicate those bindings.
   var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
   var galleryTool = isGalleryTool(page) ? page : null;
-  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'music' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || activeTool === 'fileTransfer' || galleryTool === 'music');
+  var demoTool = isDemoTool(page) ? page : (page === 'demo' ? demoActiveTool : null);
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'music' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || isDemoTool(page) || activeTool === 'fileTransfer' || galleryTool === 'music' || demoTool);
   if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
     if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer') container.style.height = '100%';
@@ -962,8 +1093,16 @@ function initLang() {
 function updateSidebarNav() {
   document.querySelectorAll('.nav-item').forEach(function(el) {
     var page = el.dataset.page;
-    if (page) el.textContent = t(page);
+    if (!page) return;
+    // Skip wrapped dropdown buttons (label is managed by update*NavLabel).
+    if (el.closest && el.closest('.demo-nav-wrap')) return;
+    if (el.closest && el.closest('.utility-nav-wrap:not(.demo-nav-wrap):not(.gallery-nav-wrap)')) return;
+    if (el.closest && el.closest('.gallery-nav-wrap')) return;
+    el.textContent = t(page);
   });
+  if (typeof updateDemoNavLabel === 'function') updateDemoNavLabel();
+  if (typeof updateGalleryNavLabel === 'function') updateGalleryNavLabel();
+  if (typeof updateUtilityNavLabel === 'function') updateUtilityNavLabel();
   var shutdownBtn = document.querySelector('.shutdown-btn');
   if (shutdownBtn) {
     var shutdownLabel = t('shutdown');
@@ -1202,7 +1341,15 @@ document.addEventListener('keydown', function(e) {
     return;
   }
   if (Shortcuts.matchEvent('global.goto-gallery', e)) { e.preventDefault(); navigateTo('gallery'); return; }
-  if (Shortcuts.matchEvent('global.goto-demo', e)) { e.preventDefault(); var dNav = document.querySelector('.nav-item[data-page="demo"]'); if (dNav) navigateTo('demo'); return; }
+  if (Shortcuts.matchEvent('global.goto-demo', e)) {
+    e.preventDefault();
+    if (currentPage === 'demo' || (typeof isDemoTool === 'function' && isDemoTool(currentPage))) {
+      if (typeof toggleDemoMenu === 'function') toggleDemoMenu();
+    } else {
+      navigateTo('demo');
+    }
+    return;
+  }
 
   // F: toggle fullscreen (ignore when typing in any input field)
   if (Shortcuts.matchEvent('global.toggle-fullscreen', e)) {
@@ -1244,6 +1391,13 @@ document.addEventListener('keydown', function(e) {
       }
       if (matchedQuickslot) return;
     }
+  }
+  if (demoMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {
+    e.preventDefault();
+    closeDemoMenu();
+    var dBtn = document.querySelector('.demo-nav-wrap [data-page="demo"]');
+    if (dBtn) dBtn.focus();
+    return;
   }
   // ESC: close utility menu if open, otherwise shutdown server (when no modal is open)
   if (galleryMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {

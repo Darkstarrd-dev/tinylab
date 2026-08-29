@@ -240,7 +240,18 @@ function initApp() {
         }
         return;
       }
-      if (page === 'gallery') { navigateTo('gallery'); return; }
+      if (page === 'gallery') {
+        if (currentPage !== 'gallery' && !(typeof isGalleryTool === 'function' && isGalleryTool(currentPage))) {
+          navigateTo('gallery');
+        } else if (typeof toggleGalleryMenu === 'function') toggleGalleryMenu();
+        return;
+      }
+      if (page === 'demo') {
+        if (currentPage !== 'demo' && !(typeof isDemoTool === 'function' && isDemoTool(currentPage))) {
+          navigateTo('demo');
+        } else if (typeof toggleDemoMenu === 'function') toggleDemoMenu();
+        return;
+      }
       if (page) navigateTo(page);
     });
   });
@@ -278,8 +289,46 @@ function initApp() {
       }
     });
   }
+  var demoMenu = document.getElementById('demo-menu');
+  if (demoMenu) {
+    demoMenu.addEventListener('click', function(e) {
+      var item = e.target.closest('[data-demo-tool]');
+      if (item && !item.disabled) selectDemoTool(item.dataset.demoTool);
+    });
+    demoMenu.addEventListener('mousemove', function(e) {
+      var item = e.target.closest('[data-demo-tool]:not([disabled])');
+      if (item && document.activeElement !== item) {
+        item.focus({ preventScroll: true });
+      }
+    });
+    demoMenu.addEventListener('keydown', function(e) {
+      var items = Array.prototype.slice.call(demoMenu.querySelectorAll('[data-demo-tool]:not([disabled])'));
+      var index = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (items.length) {
+          if (index < 0) {
+            var activeItem = demoMenu.querySelector('[aria-current="page"]') || items[0];
+            activeItem.focus();
+          } else {
+            items[(index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+          }
+        }
+      } else if (e.key === 'Enter' && index >= 0) {
+        e.preventDefault(); selectDemoTool(items[index].dataset.demoTool);
+      } else if (e.key === 'Escape') {
+        e.preventDefault(); closeDemoMenu();
+        var button = document.querySelector('.demo-nav-wrap [data-page="demo"]');
+        if (button) button.focus();
+      }
+    });
+  }
   document.addEventListener('click', function(e) {
     if (utilityMenuOpen && !e.target.closest('.utility-nav-wrap')) closeUtilityMenu();
+    if (typeof demoMenuOpen !== 'undefined' && demoMenuOpen) {
+      var dWrap = document.querySelector('.demo-nav-wrap');
+      if (dWrap && !dWrap.contains(e.target) && !e.target.closest('#demo-menu')) closeDemoMenu();
+    }
   });
   navigateTo('monitor');
 }

@@ -2,7 +2,7 @@
 
 > Demo 页游戏插件架构的单一事实来源：游戏作为**磁盘插件**按需加载，改游戏代码不重编译、不重启进程。
 > Assistant 测试台（ademoSM/物理/碰撞体）见 [`assistant-progress.md`](assistant-progress.md) §8，本文不重复；两者仅在暂停缝（§5）与 Demo 页共存布局上相交。
-> 最后核对：2026-08-29（插件架构 + GamesDir Path Settings + Default Games Dir 行；CDP 实测热更新闭环 + v4 overlap 回调参数顺序陷阱）。
+> 最后核对：2026-08-29（Demo 下拉复刻 Utility + Editor TileMap 类别；插件架构 + GamesDir Path Settings + Default Games Dir 行；CDP 实测热更新闭环 + v4 overlap 回调参数顺序陷阱）。
 
 ## 1. 功能面总览
 
@@ -16,7 +16,8 @@
 | 前端宿主 | `web/static/demo-games.js` | `window.TRGames` 注册表、Phaser 懒加载、游戏脚本注入（mtime 缓存击穿）、host adapter、Demo 页游戏区 UI（选择/启动/停止/重载）、`__dgames` 测试缝 |
 | 引擎 vendor | `web/static/vendor/phaser/`（`phaser.min.js` v4.2.1 + `README.md` 记录来源/SHA-256 + `LICENSE` MIT） | 经典 script UMD，`window.Phaser`；首次启动游戏时注入 `/vendor/phaser/phaser.min.js`，不经主页面预加载 |
 | Seed 游戏 | `web/games/survivor/`（`game.json` + `main.js`） | 插件契约参考实现：吸血鬼幸存者式最小原型（详见 §6） |
-| Demo 页集成 | `web/static/app.js`（`case 'demo'` 追加 `renderDemoGames`、切页 `cleanupDemoGames`）、`web/static/style.css`（`:has(.dg-root)` 布局门）、`web/static/i18n.js`（`demoGames*` en+zh）、两个 index 变体 script 标签 | 游戏区渲染在测试台下方；测试台布局在无游戏区时逐像素不变 |
+| Demo 页集成 | `web/static/app.js`（`DEMO_TOOLS=[ademo,games]` 下拉复刻 Utility：`demoActiveTool/demoMenuOpen` 状态机、`renderDemoWithMenu` 按需单窗渲染、`F6→toggleDemoMenu`）、`web/static/auth.js`（`#demo-menu` 三件套：click/mousemove/keydown）、`web/static/style.css`（`.demo-nav-wrap` 定位复用 `.utility-menu` / `.utility-nav-wrap` 样式；`:has(.dg-root)` 布局门）、`web/static/i18n.js`（`demoTabAssistant/demoTabGames/demoGames*`）、两个 index 变体 `.demo-nav-wrap#demo-menu` | Demo 导航与 Utility/Gallery 同构：悬停展开 + 点击 toggle + 外部点击关闭 + Esc 关闭 + 页内再次触发 toggle；`localStorage.demoActiveTool` 持久化 |
+| Editor 类别 | `web/static/utility/editor/tilemap_editor.js`（`TileMap Editor` 类别：画布+调色板+图层面板；Tiled JSON 直出→Phaser `tilemapTiledJSON`；包裹 `renderEditor` 注入类别 Tab） | 首个 Editor 类别，参考 Godot TileSet/TileMapLayer + Tiled TMJ；导出与 Phaser 4 `make.tilemap/addTilesetImage/createLayer` 契约一致 |
 | 运行时目录 | `{configDir}/games/`（插件）、`{configDir}/gamedata/{id}.json`（存档） | gitignored 运行时数据，首次运行生成（类比 config.yaml） |
 
 ## 2. 插件结构约定（游戏开发契约）
