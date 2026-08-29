@@ -608,15 +608,20 @@ function ademoSyncToolbar() {
   if (fsExit) fsExit.style.display = ademoIsFullscreen() ? '' : 'none';
 }
 
-// Sync the demo shell tab UI (Assistant Demo | Games). Called from both hosts.
+// Sync the demo shell toggle (single button two states).
 function ademoSyncShellTabs() {
   var shell = document.querySelector('.demo-shell');
   if (!shell) return;
-  shell.querySelectorAll('.demo-tab').forEach(function (btn) {
-    var active = btn.getAttribute('data-tab') === ademoActiveTab;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-selected', active ? 'true' : 'false');
-  });
+  var toggle = shell.querySelector('.demo-toggle');
+  if (toggle) {
+    var isGames = ademoActiveTab === 'games';
+    toggle.textContent = isGames ? t('demoTabGames') : t('demoTabAssistant');
+    toggle.setAttribute('aria-pressed', isGames ? 'true' : 'false');
+    toggle.setAttribute('data-tooltip', isGames ? t('demoTabAssistant') : t('demoTabGames'));
+    toggle.setAttribute('aria-label', isGames ? t('demoTabGames') : t('demoTabAssistant'));
+    // Active look when showing Assistant Demo (optional)
+    toggle.classList.toggle('btn-ghost', isGames);
+  }
   var ademoPane = shell.querySelector('.demo-pane-ademo');
   var gamesPane = shell.querySelector('.demo-pane-games');
   if (ademoPane) ademoPane.hidden = ademoActiveTab !== 'ademo';
@@ -896,16 +901,12 @@ function renderAssistantDemo(container) {
 
   ademoPersist.scale = Math.min(1, Math.max(0.01, ademoPersist.scale || 1));
 
-  // Shell with segmented toggle: Assistant Demo | Games — only one pane visible.
+  // Single toggle button + single-row toolbar (blue box 1+2 merged into one line).
   container.innerHTML =
     '<div class="demo-shell">' +
-      '<div class="demo-segment" role="tablist" aria-label="' + escapeHtml(t('demoTabAssistant')) + ' / ' + escapeHtml(t('demoTabGames')) + '">' +
-        '<button type="button" role="tab" class="demo-tab' + (ademoActiveTab === 'ademo' ? ' active' : '') + '" data-tab="ademo" aria-selected="' + (ademoActiveTab === 'ademo' ? 'true' : 'false') + '">' + escapeHtml(t('demoTabAssistant')) + '</button>' +
-        '<button type="button" role="tab" class="demo-tab' + (ademoActiveTab === 'games' ? ' active' : '') + '" data-tab="games" aria-selected="' + (ademoActiveTab === 'games' ? 'true' : 'false') + '">' + escapeHtml(t('demoTabGames')) + '</button>' +
-      '</div>' +
-      '<div class="demo-pane-ademo"' + (ademoActiveTab !== 'ademo' ? ' hidden' : '') + '>' +
-    '<div class="ademo-root">' +
-      '<div class="ademo-toolbar">' +
+      '<div class="demo-toolbar">' +
+        '<button type="button" class="btn demo-toggle" data-tooltip="' + escapeHtml(t('demoTabGames')) + '">' + escapeHtml(ademoActiveTab === 'games' ? t('demoTabGames') : t('demoTabAssistant')) + '</button>' +
+        '<span class="ademo-sep demo-toggle-sep"></span>' +
         '<div class="ademo-type1-wrap"></div>' +
         '<div class="ademo-type2-wrap"></div>' +
         '<span class="ademo-sep"></span>' +
@@ -927,9 +928,11 @@ function renderAssistantDemo(container) {
           ' <input type="number" class="input ademo-scaleto ademo-scaleto-h" min="1" step="1">' +
         '</label>' +
         '<span class="ademo-no-actions" data-tooltip="' + escapeHtml(t('demoNoActions')) + '">!</span>' +
-        '<span class="ademo-sep ademo-fs-sep"></span>' +
-        '<button type="button" class="btn btn-ghost ademo-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + ADEMO_SVG_FULLSCREEN + '</button>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="btn btn-ghost demo-fs-btn ademo-fs-btn" data-tooltip="' + escapeHtml(t('demoEnterFullscreen')) + '" aria-label="' + escapeHtml(t('demoEnterFullscreen')) + '">' + ADEMO_SVG_FULLSCREEN + '</button>' +
       '</div>' +
+      '<div class="demo-pane-ademo"' + (ademoActiveTab !== 'ademo' ? ' hidden' : '') + '>' +
+    '<div class="ademo-root">' +
       '<div class="ademo-stage-wrap"><canvas class="ademo-stage"></canvas><button type="button" class="ademo-fs-exit" data-tooltip="' + escapeHtml(t('demoExitFullscreen')) + '" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + ADEMO_SVG_CLOSE + '</button></div>' +
       '<div class="ademo-hint">' + escapeHtml(t('demoHint')) + '</div>' +
       '</div>' +
@@ -937,17 +940,14 @@ function renderAssistantDemo(container) {
       '<div class="demo-pane-games"' + (ademoActiveTab !== 'games' ? ' hidden' : '') + '></div>' +
     '</div>';
 
-  // Bind shell tab toggle
-  (function bindDemoTabs() {
-    var shell = container.querySelector('.demo-shell');
-    if (!shell) return;
-    shell.querySelectorAll('.demo-tab').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var tab = btn.getAttribute('data-tab');
-        ademoActiveTab = tab === 'games' ? 'games' : 'ademo';
-        ademoSyncShellTabs();
-        btn.blur();
-      });
+  // Single toggle button: one button, two states
+  (function bindDemoToggle() {
+    var btn = container.querySelector('.demo-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      ademoActiveTab = ademoActiveTab === 'ademo' ? 'games' : 'ademo';
+      ademoSyncShellTabs();
+      btn.blur();
     });
   })();
 

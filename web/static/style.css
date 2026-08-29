@@ -6370,18 +6370,14 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 
 /* ===================== Assistant Demo page (F6) ===================== */
 .demo-shell{display:flex;flex-direction:column;height:100%;padding:12px;box-sizing:border-box;gap:10px;min-height:0}
-/* Segmented toggle: two segments inside one pill, merged item */
-.demo-segment{display:inline-flex;align-items:stretch;border:1px solid var(--glass-border);border-radius:999px;overflow:hidden;background:var(--glass-bg);padding:2px;gap:2px;flex-shrink:0}
-.demo-segment .demo-tab{appearance:none;border:none;background:transparent;color:var(--text-secondary);padding:6px 14px;font-size:13px;font-weight:700;border-radius:999px;cursor:pointer;line-height:1;transition:background var(--transition-fast),color var(--transition-fast)}
-.demo-segment .demo-tab:hover{color:var(--text)}
-.demo-segment .demo-tab.active{background:var(--glass-active);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,0.12)}
-.demo-segment .demo-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Single toggle button lives at the start of the demo-toolbar (one row) */
+.demo-toggle{min-width:118px;height:34px;padding:0 12px;white-space:nowrap;font-weight:700;flex-shrink:0}
 .demo-pane-ademo,.demo-pane-games{display:flex;flex-direction:column;flex:1;min-height:0}
 .demo-pane-ademo[hidden],.demo-pane-games[hidden]{display:none !important}
 
-.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px}
-/* Single-row toolbar: fitted widths, no wrapping except extreme narrow */
-.ademo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible}
+.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;padding:0}
+/* Demo toolbar is now the single row at shell top (blue 1+2 merged) */
+.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%}
 .ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 0 auto}
 .ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{min-width:92px}
 .ademo-bgmode-wrap .custom-select-wrapper{min-width:110px;max-width:160px}
@@ -6393,14 +6389,15 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .ademo-scale{width:110px}
 .ademo-body-sq{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
 .ademo-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm);margin-left:auto}
+/* push fullscreen to far right */
+.demo-fs-btn{margin-left:auto}
 .ademo-no-actions{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#0b0c13;font-size:12px;font-weight:800;cursor:help}
 .ademo-stage-wrap{flex:1;min-height:0;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}
 .ademo-stage{position:absolute;inset:0;width:100%;height:100%;display:block}
 .ademo-stage.ademo-draw-mode{cursor:crosshair}
 /* Stage-only fullscreen: chrome hidden, only stage remains */
 body.demo-stage-fullscreen .top-header,
-body.demo-stage-fullscreen .demo-segment,
-body.demo-stage-fullscreen .ademo-toolbar,
+body.demo-stage-fullscreen .demo-toolbar,
 body.demo-stage-fullscreen .ademo-hint,
 body.demo-stage-fullscreen .dg-toolbar{display:none !important}
 body.demo-stage-fullscreen .demo-shell{padding:0 !important;gap:0 !important}

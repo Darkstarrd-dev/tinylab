@@ -220,38 +220,31 @@ function dgStopGame() {
 function dgBindShellTabs(container) {
   var shell = container.querySelector('.demo-shell');
   if (!shell) return;
-  shell.querySelectorAll('.demo-tab').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var tab = btn.getAttribute('data-tab');
-      if (window.__ademo && typeof window.__ademo.setActiveTab === 'function') {
-        window.__ademo.setActiveTab(tab);
-      } else {
-        // Fallback if ademo not yet loaded.
-        shell.querySelectorAll('.demo-tab').forEach(function (b) {
-          b.classList.toggle('active', b.getAttribute('data-tab') === tab);
-        });
+  // Single toggle button fallback (when ademo owns the toggle)
+  var toggle = shell.querySelector('.demo-toggle');
+  if (toggle) {
+    // Fallback handler if ademo not loaded
+    if (!window.__ademo || typeof window.__ademo.setActiveTab !== 'function') {
+      toggle.addEventListener('click', function () {
+        var isGames = toggle.textContent.trim() === 'Games';
+        var next = isGames ? 'Assistant Demo' : 'Games';
+        toggle.textContent = next;
         var ademoPane = shell.querySelector('.demo-pane-ademo');
         var gamesPane = shell.querySelector('.demo-pane-games');
-        if (ademoPane) ademoPane.hidden = tab !== 'ademo';
-        if (gamesPane) gamesPane.hidden = tab !== 'games';
-      }
-      btn.blur();
-    });
-  });
+        if (ademoPane) ademoPane.hidden = next === 'Games';
+        if (gamesPane) gamesPane.hidden = next !== 'Games';
+        toggle.blur();
+      });
+    }
+  }
 }
 
 function renderDemoGames(container) {
   cleanupDemoGames();
 
-  // Ensure the shell exists (renderAssistantDemo creates it). If not, create a minimal shell.
+  // Shell is created by renderAssistantDemo (single toggle + toolbar in demo-toolbar).
   var shell = container.querySelector('.demo-shell');
-  if (!shell) {
-    // Fallback: wrap existing content (defensive; normal path has shell).
-    var existing = container.innerHTML;
-    container.innerHTML = '<div class="demo-shell"><div class="demo-tabs"><button type="button" class="btn demo-tab active" data-tab="ademo">' + escapeHtml(t('demoTabAssistant')) + '</button><button type="button" class="btn btn-ghost demo-tab" data-tab="games">' + escapeHtml(t('demoTabGames')) + '</button></div><div class="demo-pane-ademo">' + existing + '</div><div class="demo-pane-games" hidden></div></div>';
-    shell = container.querySelector('.demo-shell');
-    dgBindShellTabs(container);
-  }
+  if (!shell) return;
 
   var gamesPane = shell.querySelector('.demo-pane-games');
   if (!gamesPane) {
