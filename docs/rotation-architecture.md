@@ -274,7 +274,7 @@ func BackoffSequence(n int) int {
 
 ### 8.4 MarkRateLimited（cooldown.go:186-202）
 
-`unlock = now + duration`，设 `ModelLocks[model]`、`ModelStatus="cooldown"`（cooldown.go:194-196），**不**递增 `BackoffLevel`。用于 SenseNova rpm/tpm 429 这类按账户约 60s 滑动窗口的限流（cooldown.go:183-185）。
+`unlock = now + duration`，设 `ModelLocks[model]`、`ModelStatus="cooldown"`（cooldown.go:194-196），**不**递增 `BackoffLevel`。用于 SenseNova rpm/tpm 429 这类按账户约 60s 滑动窗口的限流（cooldown.go:183-185），以及 SenseNova 套餐权益耗尽（`token plan entitlement exhausted`）的 300 分钟冷却（proxy/retry.go:148-158）。
 
 ### 8.5 IsDailyQuota429（cooldown.go:139-171）
 

@@ -1,5 +1,6 @@
 # TinyRouter Proxy 代理核心架构
 
+> **最后核对（2026-08-29，SenseNova 套餐权益耗尽 429）：** `retry.go::handle429` 新增 `isSenseNovaEntitlementExhausted` 分支（retry.go:148-158、判定函数 retry.go:394-399）：仅当 provider `BaseURL` 含 `sensenova` 且 429 body 含 `token plan entitlement exhausted`（quota_exceeded_error/code 8）时，`MarkRateLimited` 冷却当前 Key+model **300 分钟** 并 `excludeSameAccountKeys` 排除同 account Key（套餐权益为账号级额度，区别于 rpm/tpm 的 60s 滑动窗口）；否则原有 rpm/tpm 分类不变。该文件中段行号整体后移 12 行，§9.2/§9.3 锚点已同步。
 > **最后核对（2026-08-25，Provider Hard Limit 自动节流）：** 新增 `internal/proxy/hardlimit.go`（`HardLimiter`：provider 级滑动 60s 窗口 RPM/TPM 发送前节流引擎，发送前预留 + 完成后对账，取消不残留）；`internal/config/types.go` 新增 `HardLimitSettings` 并在 `Provider.HardLimit` 接入；`forward_retry.go` 在每次真正发往上游前（NIM 之前）经 `WaitAndReserve` 插入等待；`recorder.go::recordUsage` 经 `Reconcile` 用真实 token 对账；API/Registry/前端表单同步接入。
 > **最后核对（2026-08-29，QuotaMonitor 多 Key 子行交互与 per-key 指标）：** (1) **快捷键人工干预**（不改 Key 策略）：`web/static/monitor/monitor_quota.js` 新增 `quotaKeyRowClick`——Ctrl+点击子行经 `PUT /api/providers/{id}/keys/{kid}`（body 携带 name/priority/isActive，避免 UpdateKey 无条件覆写抹零）切换该 Key 暂停/恢复（等效 Settings provider detail，持久化 config.yaml）；Shift+点击经新增 `POST /api/providers/{id}/keys/{kid}/activate`（api/keys/register.go）把该 Key pin 为人工活跃 Key（rotation.Selector `manualPins` 内存态、重启即失，详见 rotation-architecture.md 2026-08-29 核对行）。(2) **子行布局**：状态徽标（available/inactive/cooldown/locked 等）从原 colspan=2 独立单元格移到第一列与 color dot/timer 并列；配额单元格复用 `formatQuotaCell` 渲染 per-key `success/limit|∞` + 红色 error badge；新增 per-key input/output token 两列（`Accumulator.KeyStatsFor` 的 `KeyStatEntry` 新增 `InputTokens`/`OutputTokens`，usage/accumulator.go）；latency/avg-speed 两列沿用既有 per-key 渲染，非活跃 Key 由内存 accumulator 保留最后数据、关闭 app 即清、无持久化。(3) **后端配套**：`getModelKeys` 响应新增 `providerId` 字段；`currentKey`/`getModelKeys` 的 in-use 判定感知人工 pin（pin 的 key 可用时优先标记 inUseKeyID）；子行带 `title` 快捷键提示（i18n `keyRowHint`/`keyPaused`/`keyResumed`/`keyActivated`）。
 > **最后核对（2026-08-19，Monitor 页面 OOM 修复与轻量传输）：** (1) **列表响应与 SSE 传输轻量化**：`internal/proxy/entry_tracker.go` 新增 `MarshalEntryJSONLight`，在列表响应（`GET /monitor` 与 `GET /monitor/playground`）及 SSE 广播（`request-start`、`request-done`、初始 inflight 推送）中剥离 `ReqPayload`/`RespPayload`/`ReqHeaders`/`RespHeaders` 大字段，解决 500 条大 payload entry 反复传输/反序列化导致的浏览器堆内存耗尽（OOM）；(2) **按需拉取详情**：`internal/usage/ring.go` 新增 `ByID` 方法，`internal/api/monitor/register.go` 新增 `GET /monitor/entry/{id}` 路由；前端 `monitor_modal.js`（`showUsageEntryInfoById`）及 Playground（`pgShowReqDetail`）在打开详情弹窗时按需异步拉取完整 entry；后端 `Usage.RingBuffer` 继续保留完整 payload 以支持详情查看。
@@ -473,36 +474,38 @@ type retryState struct {
 
 ### 9.2 三个错误处理器
 
-- **handleNetworkError（retry.go:52-59）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。
-- **handle429（retry.go:62-235）：** 区分多类 429：
-  - **NIM 429：** `MarkNIM429` + 冷却阶梯 + 排除当前 key + 切 key（retry.go:72-80）。
-  - **配额头（adapter）：** 解析 `ParseHeaders` 更新 quota；`ModelExhausted` → `MarkDailyQuotaLocked` 并排除（retry.go:82-110）。
-  - **有 quota 未耗尽：** 渐进退避序列 `BackoffSequence(temp429Retries)`，最多 `maxBackoffRetries=10` 次，超时后排除并 `OnKeyFailure`（retry.go:113-135）。
+- **handleNetworkError（retry.go:61-70）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。
+- **handle429（retry.go:73-258）：** 区分多类 429：
+  - **NIM 429：** `MarkNIM429` + 冷却阶梯 + 排除当前 key + 切 key（retry.go:82-91）。
+  - **配额头（adapter）：** 解析 `ParseHeaders` 更新 quota；`ModelExhausted` → `MarkDailyQuotaLocked` 并排除（retry.go:94-121）。
+  - **有 quota 未耗尽：** 渐进退避序列 `BackoffSequence(temp429Retries)`，最多 `maxBackoffRetries=10` 次，超时后排除并 `OnKeyFailure`（retry.go:124-146）。
+  - **SenseNova 套餐耗尽（仅 sensenova URL）：** `isSenseNovaEntitlementExhausted` 命中 → 冷却 300 分钟 + `excludeSameAccountKeys`，切 account（retry.go:148-158、retry.go:394-399）。
   - **SenseNova 429：** `classifySenseNova429` 分 `rpm` / `tpm`：
-    - `rpm`：冷却当前 key 60s，`excludeSameAccountKeys`（同 account 其他 key 一并排除），立即切 account（retry.go:145-152、retry.go:332-342）。
-    - `tpm`：**不切 key**（大请求在任意 account 都会立即 429），等待 15s 后重试同一 key 一次；仍 429 则冷却 60s + 排除（retry.go:153-174）。
-  - **兜底 ClassifyError：** `ActionDailyQuota`→锁每日配额；`ActionCooldown`→按 `CooldownSec` 冷却；`ActionTransient`→`DefaultTransientCooldownSec` 冷却；`ActionBackoff`→落入通用退避（retry.go:178-204）。`IsDailyQuota429` 再兜底一次（retry.go:206-213）。
-  - **通用退避：** `temp429Retries < maxRetries` 时 `BackoffSequence` 退避后 `continue`；耗尽则排除 + `OnKeyFailure` + 切 key（retry.go:215-235）。
-- **handleUpstreamError（retry.go:241-305）：** 处理 5xx 与 4xx（非 429）。
-  - **余额耗尽（ModelScope 402）：** `IsBalanceExhausted` → `MarkBalanceLocked` + `quotaTracker.RemoveKey` + 排除当前 key（retry.go:255-263）。
-  - **ClassifyError：** `ActionBackoff`→`OnKeyFailure`；`ActionCooldown`/`ActionDailyQuota`/`ActionTransient` 分别冷却/锁（retry.go:265-275）。
-  - **5xx 短退避：** `consecutive5xx++`，退避 `500ms + 500ms*n`，上限 5s（retry.go:287-292）；`<500` 重置 `consecutive5xx`（retry.go:281-284）。退避期间可因 context 取消而退出（retry.go:294-303）。
+    - `rpm`：冷却当前 key 60s，`excludeSameAccountKeys`（同 account 其他 key 一并排除），立即切 account（retry.go:166-175、retry.go:404-414）。
+    - `tpm`：**不切 key**（大请求在任意 account 都会立即 429），等待 15s 后重试同一 key 一次；仍 429 则冷却 60s + 排除（retry.go:176-197）。
+  - **兜底 ClassifyError：** `ActionDailyQuota`→锁每日配额；`ActionCooldown`→按 `CooldownSec` 冷却；`ActionTransient`→`DefaultTransientCooldownSec` 冷却；`ActionBackoff`→落入通用退避（retry.go:201-227）。`IsDailyQuota429` 再兜底一次（retry.go:229-236）。
+  - **通用退避：** `temp429Retries < maxRetries` 时 `BackoffSequence` 退避后 `continue`；耗尽则排除 + `OnKeyFailure` + 切 key（retry.go:238-258）。
+- **handleUpstreamError（retry.go:269-366）：** 处理 5xx 与 4xx（非 429）。
+  - **余额耗尽（ModelScope 402）：** `IsBalanceExhausted` → `MarkBalanceLocked` + `quotaTracker.RemoveKey` + 排除当前 key（retry.go:267-275）。
+  - **ClassifyError：** `ActionBackoff`→`OnKeyFailure`；`ActionCooldown`/`ActionDailyQuota`/`ActionTransient` 分别冷却/锁（retry.go:295-311）。
+  - **5xx 短退避：** `consecutive5xx++`，退避 `500ms + 500ms*n`，上限 5s（retry.go:299-304 附近）；`<500` 重置 `consecutive5xx`。退避期间可因 context 取消而退出。
 
 ### 9.3 决策小结
 
 | 场景 | 动作 |
 |---|---|
-| 网络错误 | 排除当前 key，切下一 key（retry.go:52-59） |
-| NIM 429 | 冷却阶梯，切下一 key（retry.go:72-80） |
-| 429 每日/账户配额锁 | `MarkDailyQuotaLocked`/`MarkRateLimited`，切下一 key（retry.go:103-110、181-213） |
-| 429 通用退避用尽 | `OnKeyFailure`，切下一 key（retry.go:215-235） |
-| SenseNova rpm | 冷却 60s + 排除同 account，切 account（retry.go:145-152、332-342） |
-| SenseNova tpm | **同一 key 等待 15s 重试一次**（最长阻塞一个 goroutine），失败再冷却切 key（retry.go:153-174） |
-| 5xx | `ClassifyError` 动作（未映射 5xx 现为 `ActionBackoff`，2026-08-03 起不再落 30s 瞬态冷却）+ 短退避，切下一 key（retry.go:241-305） |
+| 网络错误 | 排除当前 key，切下一 key（retry.go:61-70） |
+| NIM 429 | 冷却阶梯，切下一 key（retry.go:82-91） |
+| 429 每日/账户配额锁 | `MarkDailyQuotaLocked`/`MarkRateLimited`，切下一 key（retry.go:113-121、229-236） |
+| 429 通用退避用尽 | `OnKeyFailure`，切下一 key（retry.go:238-258） |
+| SenseNova 套餐权益耗尽（sensenova URL） | 冷却 **300 分钟** + 排除同 account，切 account（retry.go:148-158、394-399） |
+| SenseNova rpm | 冷却 60s + 排除同 account，切 account（retry.go:166-175、404-414） |
+| SenseNova tpm | **同一 key 等待 15s 重试一次**（最长阻塞一个 goroutine），失败再冷却切 key（retry.go:176-197） |
+| 5xx | `ClassifyError` 动作（未映射 5xx 现为 `ActionBackoff`，2026-08-03 起不再落 30s 瞬态冷却）+ 短退避，切下一 key（retry.go:269-366） |
 
 | combo 目标全部失败 | 上一层 `handleCombo` 切**下一 combo 目标**（forward.go:106-124） |
 
-`excludeSameAccountKeys`（retry.go:332-342）把当前 key 及同 `Account` 的其他 key 一并加入 `excludeKeyIDs`。
+`excludeSameAccountKeys`（retry.go:404-414）把当前 key 及同 `Account` 的其他 key 一并加入 `excludeKeyIDs`。
 
 ## 10. Gemini thought_signature 缓存与回填
 
@@ -644,7 +647,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 | 测试文件 | 覆盖内容 |
 |---|---|
 | `handler_test.go` | `forwardUpstream` 成功/网络错误/UA 透传/流式 Accept 头；`BuildUpstreamURL`；`maskURL`；`normalizeBaseURL`；`forwardWithRetry` 网络错误；`SelectKey` 集成；`handleProxy` 无效/缺失/非法 JSON/坏格式 model；`ChatCompletions` 成功；`maxRetries` 默认/自定义；`recordUsage`；重试耗尽；`writeError`；`stream_options` 注入；`ListModels`；`parseAndUpdateQuota`；流式请求；combo fallback；成功往返；调试模式与捕获；`ManagementClient` 直连/经代理；`SetProxy`；`UseProxy` 启用/禁用 |
-| `retry_test.go` | `handle429` 每日配额/限流/瞬态/NIM 冷却/经 body 文本锁定/已有排除/ModelScope 耗尽/最大重试耗尽；`handleUpstreamError` 401/500/403/402/404/无 body；`handleNetworkError`；`logRequest`；`BackoffSequence`；`classifySenseNova429` 未知/rpm/tpm/短 body；`excludeSameAccountKeys` 空/有 account |
+| `retry_test.go` | `handle429` 每日配额/限流/瞬态/NIM 冷却/经 body 文本锁定/已有排除/ModelScope 耗尽/最大重试耗尽；`handleUpstreamError` 401/500/403/402/404/无 body；`handleNetworkError`；`logRequest`；`BackoffSequence`；`classifySenseNova429` 未知/rpm/tpm/短 body；`isSenseNovaEntitlementExhausted` URL 门控与 body 匹配；`excludeSameAccountKeys` 空/有 account |
 | `stream_test.go` | `SSELineBuffer` 正常/跨块/数据跨块/剩余/空；SSE `data:` 带/不带空格；`ExtractTokens` 多 chunk/无 usage/total_tokens 回退；`normalizeSSEChunk` choices-null/error 透传/`[DONE]`/合法数组/空行/末 usage 保留 |
 | `stream_e2e_test.go` | `streamResponse` 非 normalize 无重复 / normalize 路径 / token 提取 / 客户端取消 |
 | `stream_signature_e2e_test.go` | `TestStreamSignature_RoundTrip`：Gemini 签名捕获→回填闭环 |

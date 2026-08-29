@@ -348,6 +348,26 @@ func TestClassifySenseNova429_TPM_ShortBody(t *testing.T) {
 	}
 }
 
+func TestIsSenseNovaEntitlementExhausted(t *testing.T) {
+	body := `{"error":{"message":"token plan entitlement exhausted","type":"quota_exceeded_error","code":"8"}}`
+	tests := []struct {
+		name    string
+		baseURL string
+		body    string
+		want    bool
+	}{
+		{"sensenova match", "https://api.sensenova.cn/v1", body, true},
+		{"non-sensenova URL ignored", "https://api.example.com/v1", body, false},
+		{"unrelated body", "https://api.sensenova.cn/v1", `{"error":"rpm exhausted"}`, false},
+		{"case-insensitive URL", "https://SenseNova.cn/v1", body, true},
+	}
+	for _, tt := range tests {
+		if got := isSenseNovaEntitlementExhausted(tt.baseURL, tt.body); got != tt.want {
+			t.Errorf("%s: isSenseNovaEntitlementExhausted(%q, ...) = %v, want %v", tt.name, tt.baseURL, got, tt.want)
+		}
+	}
+}
+
 func TestExcludeSameAccountKeys_EmptyAccount(t *testing.T) {
 	h := newTestHandler(t)
 	sel := newSelectedKey()

@@ -145,6 +145,18 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 		return
 	}
 
+	// SenseNova plan-entitlement exhaustion: the account's token plan is used up.
+	// This is neither an rpm nor a tpm window — the account is done for the day,
+	// so cool the key for 300 minutes instead of the 60s sliding-window cooldown.
+	if isSenseNovaEntitlementExhausted(sel.Provider.BaseURL, bodyStr) {
+		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, 300*time.Minute)
+		h.excludeSameAccountKeys(sel, state)
+		state.temp429Retries = 0
+		h.logger.Warn("429 entitlement exhausted: %s | Key %s cooled 300m, switching account", util.TruncStr(bodyStr, 200), sel.Key.Name)
+		h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel, sessionKey, "429 entitlement exhausted → cool 300m, switch account", "")
+		return
+	}
+
 	// SenseNova-style 429: no rate-limit headers, but body is classifiable into rpm/tpm.
 	// Both are per-account per-model with ~60s sliding window, but need different strategies:
 	//   - rpm (request count): switching to a fresh account always works (count resets)
@@ -373,6 +385,17 @@ func classifySenseNova429(body string) senseNova429Type {
 		return sn429TPM
 	}
 	return sn429Unknown
+}
+
+// isSenseNovaEntitlementExhausted detects SenseNova's plan-level quota error:
+// 429 {"error":{"message":"token plan entitlement exhausted","type":"quota_exceeded_error","code":"8"}}.
+// Only applies to SenseNova providers (BaseURL contains "sensenova") to avoid
+// mis-classifying the same body text from unrelated upstreams.
+func isSenseNovaEntitlementExhausted(baseURL, body string) bool {
+	if !strings.Contains(strings.ToLower(baseURL), "sensenova") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(body), "token plan entitlement exhausted")
 }
 
 // excludeSameAccountKeys adds the current key and all keys with the same non-empty
