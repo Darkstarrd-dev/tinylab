@@ -84,6 +84,15 @@ var UTILITY_TOOLS = [
 function isUtilityTool(id) {
   return UTILITY_TOOLS.some(function(tool) { return tool.id === id; });
 }
+var GALLERY_TOOLS = [
+  { id: 'gallery', labelKey: 'gallery' },
+  { id: 'music', labelKey: 'music' }
+];
+function isGalleryTool(id) {
+  return GALLERY_TOOLS.some(function(tool) { return tool.id === id; });
+}
+var galleryActiveTool = (function(){ try{ var v=localStorage.getItem('galleryActiveTool'); return (v==='music'||v==='gallery')?v:'gallery'; }catch(e){ return 'gallery'; }})();
+var galleryMenuOpen = false;
 function utilityHasTool(id) {
   var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
   if (!item || (item.requiresPlayground && window.__hasPlayground === false)) return false;
@@ -114,6 +123,99 @@ function updateUtilityMenuState() {
   menu.querySelectorAll('[data-utility-tool]').forEach(function(item) {
     item.setAttribute('aria-current', item.dataset.utilityTool === toolToMark ? 'page' : 'false');
   });
+}
+function galleryHasTool(id) {
+  if (id === 'gallery') return typeof renderGallery === 'function';
+  if (id === 'music') return typeof renderMusic === 'function';
+  return isGalleryTool(id);
+}
+function updateGalleryNavLabel() {
+  var button = document.querySelector('.nav-item[data-page="gallery"]');
+  if (!button) return;
+  var item = GALLERY_TOOLS.filter(function(tool) { return tool.id === galleryActiveTool; })[0];
+  button.textContent = item ? t(item.labelKey) : t('gallery');
+}
+function updateGalleryMenuState() {
+  var menu = document.getElementById('gallery-menu');
+  if (!menu) return;
+  var toolToMark = galleryActiveTool || 'gallery';
+  menu.querySelectorAll('[data-gallery-tool]').forEach(function(item) {
+    item.setAttribute('aria-current', item.dataset.galleryTool === toolToMark ? 'page' : 'false');
+  });
+}
+function galleryToolLifecycle(id, phase) {
+  var hooks = {
+    gallery: { suspend: 'suspendGallery', resume: 'resumeGallery' },
+    music: { suspend: 'suspendMusic', resume: 'resumeMusic' }
+  };
+  var hook = hooks[id] && hooks[id][phase];
+  if (hook && typeof window[hook] === 'function') window[hook]();
+}
+function closeGalleryMenu() {
+  galleryMenuOpen = false;
+  var menu = document.getElementById('gallery-menu');
+  var button = document.querySelector('.nav-item[data-page="gallery"]');
+  if (menu) {
+    menu.classList.remove('open');
+    setTimeout(function() {
+      if (!galleryMenuOpen) menu.hidden = true;
+    }, 480);
+  }
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+function focusGalleryMenuSelected() {
+  var menu = document.getElementById('gallery-menu');
+  if (!menu || menu.hidden) return;
+  var toolToMark = galleryActiveTool || 'gallery';
+  var selected = menu.querySelector('button[data-gallery-tool="' + toolToMark + '"]') ||
+                 menu.querySelector('[aria-current="page"]') ||
+                 menu.querySelector('button:not([disabled])');
+  if (selected) selected.focus();
+}
+function openGalleryMenu() {
+  var menu = document.getElementById('gallery-menu');
+  var button = document.querySelector('.nav-item[data-page="gallery"]');
+  if (!menu || !button) return;
+  galleryMenuOpen = true;
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  updateGalleryMenuState();
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      menu.classList.add('open');
+      focusGalleryMenuSelected();
+      setTimeout(focusGalleryMenuSelected, 50);
+      setTimeout(focusGalleryMenuSelected, 120);
+    });
+  });
+}
+function toggleGalleryMenu() {
+  if (galleryMenuOpen) closeGalleryMenu(); else openGalleryMenu();
+}
+function selectGalleryTool(id) {
+  var item = GALLERY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
+  if (!item || !galleryHasTool(id)) return;
+  galleryActiveTool = id;
+  try { localStorage.setItem('galleryActiveTool', id); } catch(e) {}
+  updateGalleryNavLabel();
+  updateGalleryMenuState();
+  closeGalleryMenu();
+  navigateTo(id);
+}
+function renderGalleryWithMenu(container) {
+  if (!galleryActiveTool || !galleryHasTool(galleryActiveTool)) {
+    galleryActiveTool = 'gallery';
+  }
+  updateGalleryNavLabel();
+  updateGalleryMenuState();
+  if (galleryActiveTool === 'music' && typeof renderMusic === 'function') return renderMusic(container);
+  if (galleryActiveTool === 'gallery' && typeof renderGallery === 'function') return renderGallery(container);
+  // Fallback: music not yet loaded, show comingsoon for music, otherwise gallery
+  if (galleryActiveTool === 'music') {
+    container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary)"><h3 style="margin-bottom:8px">'+escapeHtml(t('music'))+'</h3><p>'+escapeHtml(t('comingSoon')||'Coming soon — see docs/music-implementation-plan.md')+'</p></div>';
+    return;
+  }
+  return renderGallery(container);
 }
 function utilityToolLifecycle(id, phase) {
   var hooks = {
@@ -183,6 +285,28 @@ function selectUtilityTool(id) {
   navigateTo(id);
 }
 
+// Gallery dropdown wiring (delegated)
+document.addEventListener('click', function(e){
+  var gItem = e.target.closest && e.target.closest('[data-gallery-tool]');
+  if (gItem) { e.preventDefault(); selectGalleryTool(gItem.getAttribute('data-gallery-tool')); return; }
+  var uItem = e.target.closest && e.target.closest('[data-utility-tool]');
+  if (uItem) { e.preventDefault(); selectUtilityTool(uItem.getAttribute('data-utility-tool')); return; }
+  var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
+  if (galBtn) { e.preventDefault(); e.stopPropagation(); toggleGalleryMenu(); return; }
+  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap) [data-page="utility"]');
+  if (utilBtn) { e.preventDefault(); e.stopPropagation(); toggleUtilityMenu(); return; }
+  var galWrap = document.querySelector('.gallery-nav-wrap');
+  var utilWrap = document.querySelector('.utility-nav-wrap:not(.gallery-nav-wrap)');
+  if (galleryMenuOpen && galWrap && !galWrap.contains(e.target)) closeGalleryMenu();
+  if (utilityMenuOpen && utilWrap && !utilWrap.contains(e.target) && !e.target.closest('#utility-menu')) closeUtilityMenu();
+});
+document.addEventListener('mouseover', function(e){
+  var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
+  if (galBtn && !galleryMenuOpen) openGalleryMenu();
+  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap) [data-page="utility"]');
+  if (utilBtn && !utilityMenuOpen) openUtilityMenu();
+});
+
 function renderUtility(container) {
   if (!utilityActiveTool || !utilityHasTool(utilityActiveTool)) {
     utilityActiveTool = 'editor';
@@ -218,20 +342,31 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 function navigateTo(page) {
   if (utilityMenuOpen) closeUtilityMenu();
+  if (galleryMenuOpen) closeGalleryMenu();
   var previousPage = currentPage;
   var previousIsUtilityTool = isUtilityTool(previousPage);
+  var previousIsGalleryTool = isGalleryTool(previousPage);
   var preserveUtilityState = previousIsUtilityTool || utilityHasTool(utilityActiveTool);
+  var preserveGalleryState = previousIsGalleryTool || galleryHasTool(galleryActiveTool);
   var wasFullscreen = document.body.classList.contains('gallery-fullscreen-active') || (typeof isFullscreen === 'function' && isFullscreen());
   if (previousIsUtilityTool && previousPage !== page) utilityToolLifecycle(previousPage, 'suspend');
+  if (previousIsGalleryTool && previousPage !== page) galleryToolLifecycle(previousPage, 'suspend');
   currentPage = page;
   if (isUtilityTool(page)) utilityActiveTool = page;
+  if (isGalleryTool(page)) {
+    galleryActiveTool = page;
+    try { localStorage.setItem('galleryActiveTool', page); } catch(e) {}
+  }
   updateUtilityNavLabel();
   updateUtilityMenuState();
+  updateGalleryNavLabel();
+  updateGalleryMenuState();
   var gen = ++navGen;
   currentProviderId = null;
   if (typeof stopUsageRefresh === 'function') stopUsageRefresh();
   if (page !== 'playground' && typeof cleanupPlayground === 'function') cleanupPlayground();
-  if (page !== 'gallery' && typeof cleanupGallery === 'function') cleanupGallery();
+  if (!isGalleryTool(page) && typeof cleanupGallery === 'function') cleanupGallery();
+  if (page !== 'music' && typeof cleanupMusic === 'function') try{ cleanupMusic(); }catch(e){}
   if (page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
   if (page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
   if (!preserveUtilityState) {
@@ -246,10 +381,9 @@ function navigateTo(page) {
   }
   if (page !== 'monitor' && typeof closeConsoleStream === 'function') closeConsoleStream();
   document.querySelectorAll('.nav-item').forEach(function(el) {
-    el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility'));
+    el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility') || (GALLERY_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='gallery'));
   });
-  var galBtn = document.querySelector('.nav-item[data-page="gallery"]');
-  if (galBtn) galBtn.textContent = t('gallery');
+  updateGalleryNavLabel();
   var container = document.getElementById('page-content');
   var mainEl = document.querySelector('.main');
   if (mainEl) mainEl.classList.remove('main-no-scroll');
@@ -266,7 +400,8 @@ function navigateTo(page) {
       case 'monitor': return renderUsage(container);
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
-      case 'gallery': return renderGallery(container);
+      case 'gallery': galleryActiveTool='gallery'; try{localStorage.setItem('galleryActiveTool','gallery');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
+      case 'music': galleryActiveTool='music'; try{localStorage.setItem('galleryActiveTool','music');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
       case 'demo': try { renderAssistantDemo(container); } catch (e) { console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; } try { renderDemoGames(container); } catch (e2) { console.error('renderDemoGames failed', e2); } if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch (e0) {} return;
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
@@ -280,7 +415,8 @@ function navigateTo(page) {
   // binds its root, and GIF rebuilds its editor). Do not call resume hooks
   // before or after this render, which would duplicate those bindings.
   var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
-  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || activeTool === 'fileTransfer');
+  var galleryTool = isGalleryTool(page) ? page : null;
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'music' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || activeTool === 'fileTransfer' || galleryTool === 'music');
   if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
     if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer') container.style.height = '100%';
@@ -1110,6 +1246,13 @@ document.addEventListener('keydown', function(e) {
     }
   }
   // ESC: close utility menu if open, otherwise shutdown server (when no modal is open)
+  if (galleryMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {
+    e.preventDefault();
+    closeGalleryMenu();
+    var gBtn = document.querySelector('.gallery-nav-wrap [data-page="gallery"]');
+    if (gBtn) gBtn.focus();
+    return;
+  }
   if (utilityMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {
     e.preventDefault();
     closeUtilityMenu();

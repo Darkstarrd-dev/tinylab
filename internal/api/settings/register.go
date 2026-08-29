@@ -66,6 +66,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"imageSaveDir": cfg.ImageSaveDir,
 		"docDir":       cfg.DocDir,
 		"gamesDir":     cfg.GamesDir,
+		"musicDir":     cfg.MusicDir,
 		"download":     cfg.Download,
 		"shortcuts":    cfg.Shortcuts,
 		"security": map[string]any{
@@ -126,6 +127,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		ImageSaveDir *string             `json:"imageSaveDir"`
 		DocDir       *string             `json:"docDir"`
 		GamesDir     *string             `json:"gamesDir"`
+		MusicDir     *string             `json:"musicDir"`
 		Archive      *archivePatch       `json:"archive"`
 		Assistant    *assistantPatch     `json:"assistant"`
 	}
@@ -152,11 +154,15 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.Port = newPort
 	}
-	if updates.ConsoleLogMaxLines != nil {
-		cfg.ConsoleLogMaxLines = *updates.ConsoleLogMaxLines
+
+	if updates.ImageSaveDir != nil {
+		cfg.ImageSaveDir = *updates.ImageSaveDir
 	}
-	if updates.UsageRingSize != nil {
-		cfg.UsageRingSize = *updates.UsageRingSize
+	if updates.DocDir != nil {
+		cfg.DocDir = *updates.DocDir
+	}
+	if updates.MusicDir != nil {
+		cfg.MusicDir = *updates.MusicDir
 	}
 	if updates.Rotation != nil {
 		applyRotationUpdates(&cfg, updates.Rotation)

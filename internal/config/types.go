@@ -443,4 +443,9 @@ type Config struct {
 	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
 	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`
 	Assistant          AssistantConfig  `yaml:"assistant,omitempty" json:"assistant,omitempty"`
+	// MusicDir is the default directory for downloaded music and playlists.
+	// Empty means {configDir}/Musics. Relative paths are resolved against
+	// configDir; absolute paths are used verbatim. Managed via
+	// Settings → Path Settings → Default Music Dir.
+	MusicDir string `yaml:"musicDir,omitempty" json:"musicDir,omitempty"`
 }

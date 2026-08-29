@@ -93,10 +93,10 @@ func ResolveDocDir(docDir, configDir string) string {
 // relative path is joined with configDir; an absolute path is used verbatim.
 func ResolveGamesDir(gamesDir, configDir string) string {
 	if gamesDir == "" {
-		if configDir != "" {
-			return filepath.Join(configDir, "games")
+		if configDir == "" {
+			return "games"
 		}
-		return "games"
+		return filepath.Join(configDir, "games")
 	}
 	if filepath.IsAbs(gamesDir) {
 		return gamesDir
@@ -105,4 +105,20 @@ func ResolveGamesDir(gamesDir, configDir string) string {
 		return filepath.Join(configDir, gamesDir)
 	}
 	return gamesDir
+}
+
+// ResolveMusicDir resolves the default music directory. An empty musicDir
+// falls back to {configDir}/Musics (or "Musics" if configDir is empty); a
+// relative path is joined with configDir; an absolute path is used verbatim.
+func ResolveMusicDir(musicDir, configDir string) string {
+	if musicDir == "" {
+		if configDir == "" {
+			return "Musics"
+		}
+		return filepath.Join(configDir, "Musics")
+	}
+	if filepath.IsAbs(musicDir) {
+		return musicDir
+	}
+	return filepath.Join(configDir, musicDir)
 }

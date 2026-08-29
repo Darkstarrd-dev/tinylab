@@ -497,7 +497,7 @@ async function fasBrowsePicker(inputEl, mode, initialPath) {
 }
 
 // openPathSettingsModal shows a modal with path/tool settings.
-// opts = { title?: string, sections: { defaultDir?, imageDir?, logDir?, ytDlpPath?, ffmpegPath? }, useProxy?: bool }
+// opts = { title?: string, sections: { defaultDir?, imageDir?, docDir?, logDir?, gamesDir?, musicDir?, ytDlpPath?, ffmpegPath? }, useProxy?: bool }
 async function openPathSettingsModal(opts) {
   opts = opts || {};
   var sections = opts.sections || {};
@@ -563,6 +563,12 @@ async function openPathSettingsModal(opts) {
     var gamesInit = gamesVal || (configDir ? configDir + '/games' : '');
     var gamesPh = configDir ? configDir + '/games' : 'games';
     formRows += browseRow('gamesDir', 'modal-dl-games-dir', gamesVal, gamesPh, 'directory', null, gamesInit);
+  }
+  if (sections.musicDir) {
+    var musicVal = (res && res.musicDir) || '';
+    var musicInit = musicVal || (configDir ? configDir + '/Musics' : '');
+    var musicPh = configDir ? configDir + '/Musics' : 'Musics';
+    formRows += browseRow('musicDir', 'modal-dl-music-dir', musicVal, musicPh, 'directory', null, musicInit);
   }
   if (opts.useProxy) {
     formRows += '<div class="dl-settings-field" style="margin-bottom:12px;">' +
@@ -645,6 +651,7 @@ async function openPathSettingsModal(opts) {
     if (sections.docDir) payload.docDir = (document.getElementById('modal-dl-doc-dir') || {}).value || '';
     if (sections.logDir) payload.trace = { logDir: (document.getElementById('modal-dl-log-dir') || {}).value || '' };
     if (sections.gamesDir) payload.gamesDir = (document.getElementById('modal-dl-games-dir') || {}).value || '';
+    if (sections.musicDir) payload.musicDir = (document.getElementById('modal-dl-music-dir') || {}).value || '';
 
     apiPatch('/settings', payload)
       .then(function() {

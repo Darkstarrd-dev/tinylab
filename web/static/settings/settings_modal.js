@@ -83,7 +83,7 @@ function openProxyModal() {
 }
 
 function openPathModal() {
-  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, docDir: true, imageDir: true, logDir: true, gamesDir: true, ytDlpPath: true, ffmpegPath: true } });
+  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, docDir: true, imageDir: true, logDir: true, gamesDir: true, musicDir: true, ytDlpPath: true, ffmpegPath: true } });
 }
 
 function openAssistantModal() {

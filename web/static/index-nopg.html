@@ -64,7 +64,6 @@ window.__hasPlayground = false;
 <button class="nav-item active" type="button" data-page="monitor">Monitor</button>
 <button class="nav-item" type="button" data-page="endpoint">Settings</button>
 <span class="nav-placeholder nav-placeholder-top" aria-hidden="true"></span>
-<button class="nav-item" type="button" data-page="gallery">Gallery</button>
 <div class="utility-nav-wrap">
 <button class="nav-item" type="button" data-page="utility" aria-haspopup="menu" aria-expanded="false">Utility</button>
 <div id="utility-menu" class="utility-menu" role="menu" hidden>
@@ -74,6 +73,12 @@ window.__hasPlayground = false;
 <button type="button" role="menuitem" data-utility-tool="gif">Gif Editor</button>
 <button type="button" role="menuitem" data-utility-tool="download">Download</button>
 <button type="button" role="menuitem" data-utility-tool="fileTransfer">FileTransfer</button>
+</div></div>
+<div class="utility-nav-wrap gallery-nav-wrap">
+<button class="nav-item" type="button" data-page="gallery" aria-haspopup="menu" aria-expanded="false">Gallery</button>
+<div id="gallery-menu" class="utility-menu" role="menu" hidden>
+<button type="button" role="menuitem" data-gallery-tool="gallery">Gallery</button>
+<button type="button" role="menuitem" data-gallery-tool="music">Music</button>
 </div></div>
 <button class="nav-item" type="button" data-page="demo">Demo</button>
 </nav>
@@ -124,6 +129,7 @@ window.__hasPlayground = false;
 <script src="/auth.js"></script>
 <script src="/app.js"></script>
 <script src="/shortcuts.js"></script>
+<script src="/music/music.js"></script>
 <script src="/settings/settings.js"></script>
 <script src="/settings/settings_trace.js"></script>
 <script src="/settings/settings_modal.js"></script>
