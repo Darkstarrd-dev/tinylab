@@ -1,25 +1,27 @@
 # Music Architecture
 
 > 覆盖：Music 模块（融合 5 家：MusicFree 插件思想、LX/Luxon、Listen1、Azusa/Bilibili、Jamendo/Nuclear + yt-dlp/ffmpeg）。
-> 前端 `web/static/music/*.js`（host/player/ui），后端 `internal/api/music/register.go`（library/proxy/download，当前 MVP 已闭环；`transcode`/`playlists`/`file-serve` 为后续），配置 `internal/config/{types,paths}.go`（MusicDir），路由 `internal/api/router.go`（`/api/music`），落盘 `Musics` 目录。
-> 融合蓝本：`docs/music-implementation-plan.md`（5 源分工 + 零依赖设计 + 5 约束映射，§8 分阶段：当前至 Stage 2 MVP，Stages 3–5 见下文 §6）。
+> 前端 `web/static/music/*.js`（`host.js`/`player.js`/`music.js` + `providers/bilibili.js`/`example-generic.js`），后端 `internal/api/music/{register,transcode,playlists}.go`（library/proxy/download + `bilibili/search|resolve` + `transcode`/`file` + `playlists/m3u`），配置 `internal/config/{types,paths}.go`（MusicDir），路由 `internal/api/router.go`（`/api/music`），落盘 `Musics`（`playlists.json` + 音频 + `m3u`）。
+> 融合蓝本：`docs/music-implementation-plan.md`（5 源分工 + 零依赖设计 + 5 约束映射，§8 分阶段：至 Stage 5 全量，已闭环）。
 
 ## 1. 模块定位
 
 - **落位**：`Gallery` 页面下拉的 `Music` 子工具（`GALLERY_TOOLS=['gallery','music']`，`galleryActiveTool` 持久化 `localStorage.galleryActiveTool`），仿 `Utility` 下拉（见 `app.js: GALLERY_TOOLS/updateGalleryNavLabel/renderGalleryWithMenu`）。
-- **解耦**：独立 `web/static/music/` 目录（当前 `host.js`+`player.js`+`music.js`；后续 `providers/`），与 `web/playground/static-pg/gallery/*.js`、`web/static/download.js`、`web/playground/*` 零交叉；仅 `app.js/index.html/index-nopg.html/settings_modal` 做最小拼接。
+- **解耦**：独立 `web/static/music/` 目录（`host.js`+`player.js`+`music.js` + `providers/bilibili.js`/`example-generic.js` 热加载示范），与 `web/playground/static-pg/gallery/*.js`、`web/static/download.js`、`web/playground/*` 零交叉；仅 `app.js/index.html/index-nopg.html/settings_modal` 做最小拼接。
 - **存储**：`Settings → Path Settings → Default Music Dir`（`MusicDir`），默认 `{configDir}/Musics`（`internal/config/paths.go::ResolveMusicDir`：空→`Musics`/`{configDir}/Musics`，相对拼 `configDir`，绝对原样；`internal/api/settings/register.go: getSettings` 暴露 `musicDir/configDir`，PATCH presence-aware）。
 
 ## 2. 前端架构
 
 ### 2.1 host.js — 插件沙箱
-- 统一接口 `MusicHost {register, list, get, loadFromSource, search, getMediaSource}`。
+- 统一接口 `MusicHost {register, list, get, loadFromSource, loadFromURL, search, getMediaSource}`。
 - `register(plugin)` 要求 `{id, name, search(keyword,limit)=>Promise<Song[]>, getMediaSource(song|id)=>Promise<{url, quality}>}`。
-- `loadFromSource(sourceCode, expectedId)` 以 `new Function('register','fetch',...)` 沙箱求值，返回 `plugin` 并注册（为后续 `MusicFree/LX/Listen1` JS 插件热加载预留）。
-- **内置 providers**：
-  - `jamendo`（builtin）：`https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&format=json&limit&search` → 映射 `Song {id,title,artist,album,duration,url,downloadUrl,cover,source:'jamendo',raw}`，`getMediaSource` 直取 `audio`。
+- `loadFromSource(sourceCode, expectedId)` 以 `new Function('register','fetch',...)` 沙箱求值，返回 `plugin` 并注册（`MusicFree/LX/Listen1` JS 插件热加载）；`loadFromURL(url)` 为其 fetch 封装。
+- **内置/随船 providers**：
+  - `jamendo`（builtin）：`https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&format=json` → `Song {id,title,artist,album,duration,url,downloadUrl,cover,source:'jamendo',raw}`，`getMediaSource` 直取 `audio`。
+  - `bilibili`（`providers/bilibili.js`，Azusa 思想）：`search` → `GET /api/music/bilibili/search?keyword=&limit=`（后端代理 Bilibili 搜索），`getMediaSource` → `POST /api/music/bilibili/resolve {bvid,cid}`（后端 `bvid→cid→playurl durl[0].url/dash.audio`）。
+  - `generic`（`providers/example-generic.js`，Listen1/LX 思想示范）：镜像 Jamendo 的可替换模板，演示 `loadFromSource` 热加载契约（`var plugin={id,...}`/`module.exports`）。
   - `local`：`search` 空、`getMediaSource` 取 `song._objectUrl`（`URL.createObjectURL(File)`）。
-- `search(keyword, providerIds, limit)` 并发聚合多 provider 结果（本 MVP `['jamendo']`）。
+- `search(keyword, providerIds, limit)` 并发聚合多 provider 结果（UI 以 `selectedProviders` 多选徽标驱动，默认 `['jamendo']`）。
 
 ### 2.2 player.js — `<audio>` 队列
 - `MusicPlayer {audio, queue, index, loop, shuffle, _order}`，事件 `track/timeupdate/play/pause/error/ended/loop/shuffle`。
@@ -27,21 +29,25 @@
 - `playAt(idx)` 经 `MusicHost.getMediaSource(song)` 解析直链 → `audio.src=url` → `audio.play()`；`next/prev/_onEnded/cycleLoop/seek/destroy`。
 
 ### 2.3 music.js — MVP 交互
-- `renderMusic(container)`：顶部搜索 + Local 文件 + Library 按钮 + Path Settings；左侧 results + Library 列表；右侧 Now Playing（cover/title/artist）+ 播放控制（prev/play/next/shuffle/loop）+ 进度条 + Queue。
-- `doSearch()` → `MusicHost.search(kw,['jamendo'],24)` → `renderResults`；行操作 Play/+Queue/↓（下载到 Musics）。
-- `addToQueue/playSong/renderQueue` 维护 `queue` 与 `player.setQueue/playAt` 同步，queue 点击切歌、✕ 删除。
-- 本地：`input[type=file] accept audio/*` → `URL.createObjectURL` → `Song {_objectUrl,_file,source:'local'}` 入队。
-- 下载：`POST /api/music/download {url,filename}` 落盘 Musics → `refreshLibrary()`。
-- `GET /api/music/library` 扫 `Musics` 列文件（name/size/mtime/ext/isDir）。
-- 生命周期：`cleanupMusic/suspendMusic/resumeMusic` 对称 `galleryToolLifecycle`。
+- `renderMusic(container)`：顶部搜索 + provider 多选徽标（`renderProviderChips`）+ Local + Library + Path Settings；次级 playlists bar（select/name/Create/Save queue→/Load→queue/Export m3u/Import m3u file/Fetch URL）；左侧 results + Library（音频行 Play/→mp3 转码）；右侧 Now Playing + 控制 + 进度 + Queue。
+- `doSearch()` → `MusicHost.search(kw, selectedProviders, 24)` → `renderResults`；行操作 Play/+Queue/↓。
+- `addToQueue/playSong/renderQueue` 维护 `queue` 同步；Library：`Play` → `GET /api/music/file?name=` 的 `Song url` 播，`→mp3` → `fetch /api/music/file` → `POST /api/music/transcode?format=mp3` → `blob URL` 入队播；本地 `input[type=file]` → `createObjectURL` 入队。
+- 下载落盘 `POST /api/music/download` → `refreshLibrary()`；`GET /api/music/library` 列 Musics。
+- 播放列表：`GET/PUT /api/music/playlists`（`Musics/playlists.json` + `tmp+Rename`）、`POST /api/music/playlists/import {url}`（远端 `m3u/json`）、`GET /api/music/m3u?name=` 导出、`POST /api/music/m3u {name,m3u}` 导入（前端 FileReader + URL Fetch）。
+- 生命周期 `cleanupMusic/suspendMusic/resumeMusic` 对称 `galleryToolLifecycle`；`refreshPlaylists/bindPlaylistEvents/renderProviderChips`。
 
 ## 3. 后端契约
 
 - `GET  /api/music/library` → `{dir, files:[{name,size,mtime,ext,isDir}]}`（`os.MkdirAll` + `os.ReadDir`，`files` 恒为数组）。
 - `POST /api/music/proxy`   `{url}` 或 `?url=` → 透传 `GET url`（校验 `http/https`，`User-Agent: TinyRouter/1.0 Music`，30s 超时，`Access-Control-Allow-Origin:*`，直拷 `Content-Type`）。
 - `POST /api/music/download` `{url, filename}` → 校验 → 拉取 → `Musics/filename` 原子写（`filepath.Base` 防穿越、已存在自动 `(1),(2)` 后缀、`tmp`+`Rename`，目录 `MkdirAll`）。
+- `GET  /api/music/bilibili/search?keyword=&limit=` → 代理 `https://api.bilibili.com/x/web-interface/search/type?keyword=&search_type=video`（`User-Agent`+`Referer`），映射 `Song {id/bvid,cid,title,artist,cover,duration,source:'bilibili'}`。
+- `POST /api/music/bilibili/resolve {bvid,cid?,id?}` → 若缺 `cid` 则 `GET /x/web-interface/view?bvid=` 解析 `cid`，再 `GET /x/player/playurl?bvid=&cid=&fnval=16` 取 `durl[0].url`/`dash.audio.baseUrl` → `{url,bvid,cid}`。
+- `GET  /api/music/file?name=` → `Musics/name` 的 `http.ServeContent`（`Content-Type` 按 `ext` + `Accept-Ranges: bytes`，`filepath.Base` 防穿越）。
+- `POST /api/music/transcode?format=mp3|opus|ogg|wav` body 为原始音频字节（`MaxBytes 200MiB`）→ `lookupFFmpeg`（`config.Download.FfmpegPath` 或 `PATH`）→ `runFFmpegTranscode(ctx, ffmpeg, data, format)` → 管道 `pipe:0→pipe:1`（`mp3: libmp3lame -q:a 4` / `opus: libopus` 等，见 `internal/api/music/transcode.go`），503/422 语义。
+- 播放列表（`internal/api/music/playlists.go`，`Musics/playlists.json`，`tmp+Rename` 原子）：`GET /api/music/playlists` → `{playlists}`（不存在则 `[]`）；`PUT /api/music/playlists {playlists}` 覆盖；`POST /api/music/playlists/import {url,name?}` 远端取 `m3u/json` → `{name,tracks}`；`GET /api/music/m3u?name=` 导出 `#EXTM3U`（`Content-Disposition: attachment`）；`POST /api/music/m3u {name,m3u}` 导入（`#EXTINF` 解析，存在则按名替换否则追加）。
 - 挂载：`internal/api/router.go: Routes()` 内 `apiDeps` → `music.NewHandler(apiDeps)` → `r.Route("/api", auth Group, "/music")`（复用 `/api` 的 1 MiB limit + auth），与 `fsbrowse/gallery/filetransfer` 同级。
-- CSP：`internal/api/router.go: securityHeaders` 的 `connect-src` 已放行 `https://api.jamendo.com`（前端直连搜索不走 proxy 亦可）。
+- CSP：`internal/api/router.go: securityHeaders` 的 `connect-src` 已放行 `https://api.jamendo.com https://api.bilibili.com`（前端直连 Jamendo/Bilibili 搜索可用，B站解析经后端则无跨域顾虑）。
 
 ## 4. 配置
 
@@ -54,24 +60,24 @@
 
 ## 5. 验证
 
-- `go vet ./... && go build -o ./build/tinyrouter-music.exe .`
-- `node --check web/static/music/*.js && node --check web/static/app.js`
-- 手动：`Settings → Path Settings → Default Music Dir` 改 Musics → 重启 → `Gallery ▾ → Music` → Jamendo 搜 `lofi` 可播 → `↓` 落盘 Musics → `Local` 选本地 `mp3` 可播/入队 → 进度可拖、shuffle/loop 生效 → Library 刷新可见落盘文件。
+- `go vet ./... && go build -o ./build/tinyrouter-music2.exe .`
+- `node --check web/static/music/*.js web/static/music/providers/*.js && node --check web/static/app.js`
+- 手动：`Settings → Path Settings → Default Music Dir` → `Gallery ▾ → Music` → 顶部切 `Jamendo/Bilibili/Generic` 多选搜（`lofi`/关键字）可播 → `↓` 落盘 Musics → `Local` 选本地 `mp3` 入队可播 → Library `Play`/`→mp3`（`ffmpeg`）可用 → 播放列表 Create/Save queue→/Load→queue/Export m3u/Import m3u/Fetch URL 均落 `Musics/playlists.json` → 进度拖拽/shuffle/loop 生效。
 
 ## 6. 风险与后续
 
-- Jamendo 直链为 `mp3`，浏览器原生支持；非标准格式（`ape/wma`）本地走 `ffmpeg` 转码为后续阶段（`/api/music/transcode`，复用 `download.ffmpegPath`）。
-- 国内平台（`Listen1/LX`）与 B站（`Azusa`）provider 为下一阶段：以 `host.loadFromSource(fetch(js))` 热加载注入 `registry`，无需改后端。
-- `Library Play` 对已落盘文件的静态服务为后续（当前提示经文件选择器回放），可考虑 `GET /api/music/file?name=` 静态透传。
+- 非标准格式（`ape/wma`）经 `POST /api/music/transcode`（复用 `download.ffmpegPath`，`wav/flac` 等原生可播无需转码，仅 `ape/wma` 等兜底）；B站音频 `m4a/mp4` 原生可播，无需转码。
+- 国内平台完整接入：以 `host.loadFromSource(fetch(js))`/`loadFromURL` 热加载 `MusicFree/LX/Listen1` JS 插件注入 `registry`，无需改后端（当前 `generic` 为可替换模板）。
+- `yt-dlp` YouTube 音源可作为后续冗余（复用 `internal/download`），Jamendo(CC)+Bilibili 已满足私用免费播放。
 
 ## 7. 变更维护清单
 
-- 新增/修改 Music 前端：`web/static/music/*.js`（host/player/music）
-- 新增/修改 Music 后端：`internal/api/music/register.go`（library/proxy/download）
-- 新增/修改 Music 配置：`internal/config/types.go`（MusicDir）、`internal/config/paths.go`（ResolveMusicDir）、`internal/api/settings/register.go`（musicDir）
-- 修改路由/CSP：`internal/api/router.go`（musicHandler + `connect-src https://api.jamendo.com`）
-- 修改导航/加载：`web/static/app.js`（`GALLERY_TOOLS/renderGalleryWithMenu/galleryToolLifecycle/preserveGalleryState`）、`web/static/index.html`+`index-nopg.html`（`gallery-nav-wrap`、script 顺序）
-- 修改路径设置：`web/static/download.js`（`musicDir:true` 行）、`web/static/settings/settings_modal.js`（`musicDir:true`）、`web/static/i18n.js`（`music/musicDir`）
-- 文档：`docs/music-implementation-plan.md`（蓝本）、`docs/music-architecture.md`（本文件）、`docs/config-registry-state-architecture.md`（`2026-08-29 Music` 段）、`PROJECT_MAP.md`（`paths.go`/`quick-lookup` Music/path 行）
+- 新增/修改 Music 前端：`web/static/music/{host,player,music}.js` + `web/static/music/providers/{bilibili,example-generic}.js`（多源+热加载）
+- 新增/修改 Music 后端：`internal/api/music/{register,transcode,playlists}.go`（library/proxy/download + `bilibili/search|resolve` + `transcode`/`file` + `playlists`/`m3u`）
+- 新增/修改 Music 配置：`internal/config/types.go`（MusicDir）、`internal/config/paths.go`（ResolveMusicDir）、`internal/api/settings/register.go`（musicDir，`getSettings`/PATCH）
+- 修改路由/CSP：`internal/api/router.go`（`music.NewHandler` + `r.Route("/music")` 挂 `auth Group` 内 + `securityHeaders connect-src` 放行 `https://api.jamendo.com https://api.bilibili.com`）
+- 修改导航/加载：`web/static/app.js`（`GALLERY_TOOLS/renderGalleryWithMenu/galleryToolLifecycle/preserveGalleryState` + `DEMO_TOOLS` 同批次）、`web/static/index.html`+`index-nopg.html`（`gallery-nav-wrap`/`demo-nav-wrap`、music `host→player→providers→music` 顺序）
+- 修改路径设置：`web/static/download.js`（`musicDir:true` 行 预览 `configDir/Musics`）、`web/static/settings/settings_modal.js`（`musicDir:true`）、`web/static/i18n.js`（`music/musicDir/musicDirDesc` en+cn）
+- 文档：`docs/music-implementation-plan.md`（蓝本，Stage 2→5 全量）、`docs/music-architecture.md`（本文件，§2–§3 全量）、`docs/config-registry-state-architecture.md`（`2026-08-29 Music MVP→全量` 段）、`PROJECT_MAP.md`（`paths.go`/`quick-lookup` Music/path 行）
 
-> **最后核对（2026-08-29，Music MVP Jamendo+Local+Musics 闭环）：** `web/static/music/host.js`（`MusicHost` 沙箱+`jamendo`/`local` 内置 provider + `loadFromSource`+`search/getMediaSource`）、`web/static/music/player.js`（`MusicPlayer<audio>` 队列/随机/循环/进度+`playAt/next/prev/seek/cycleLoop`）、`web/static/music/music.js`（搜索+Local 文件入队+Queue+Now Playing/进度+下载落 Musics+Library + `cleanup/suspend/resume`）、`internal/api/music/register.go`（`GET /api/music/library`、`POST /api/music/proxy` 透传、`POST /api/music/download` 原子落盘 `(1)` 去重）、`internal/api/router.go`（`music.NewHandler` 挂 `r.Route("/music")` 于 `auth Group` 内、`securityHeaders connect-src` 放行 `https://api.jamendo.com`）、`web/static/index.html`/`index-nopg.html`（`host→player→music` 顺序加载，`gallery-nav-wrap` 已在前轮）。详见 `docs/music-implementation-plan.md` §2–§5。
+> **最后核对（2026-08-29，Music 全量：Stages 3–5 Bilibili+transcode+playlists）：** `web/static/music/host.js`（+`loadFromURL`，`providers/bilibili|example-generic` 热加载示范）+ `providers/bilibili.js`（Azusa `bvid→cid→playurl` 经后端代理）+ `example-generic.js`（Listen1/LX 热加载模板，`var plugin={id}`/`module.exports` 契约）+ `music.js`（provider 多选徽标 `selectedProviders`+`renderProviderChips` + Library `Play`→`/api/music/file` + `→mp3`→`file→transcode→blobURL` + playlists bar `Musics/playlists.json` + `m3u` 导入导出/远端 Fetch）+ `internal/api/music/{register,transcode,playlists}.go`（`bilibili/search|resolve`→Bilibili 官方 API 映射、`file` `ServeContent` + `Accept-Ranges`、`transcode` `ffmpeg pipe:0→pipe:1` + `lookupFFmpeg` + `playlists.json`/`m3u`）+ `router.go`（`music` 挂 `Group /music` + `connect-src https://api.jamendo.com https://api.bilibili.com`）+ `index*.html`（`host→player→providers→music` 顺序）。详见 `docs/music-implementation-plan.md` §8（Stages 3–5 已闭环）及 `docs/music-architecture.md` §2–§3。

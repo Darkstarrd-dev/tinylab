@@ -96,9 +96,9 @@ function selectGalleryTool(id){ galleryActiveTool=id; updateGalleryNavLabel(); n
 
 1. **本蓝本+骨架**：落 `docs/music-implementation-plan.md`+`MusicDir`配置+Settings Path项+Gallery下拉占位（本轮）
 2. **Host+Jamendo最小可播（已完成，MVP）**：`host.js+player.js+<audio>+Jamendo` 打通搜索→播放→下载（`web/static/music/host|player|music.js` + `internal/api/music/register.go: library/proxy/download` + `internal/api/router.go` + `docs/music-architecture.md` 基线，见 `docs/music-architecture.md` §2–§5）
-3. **国内音源+B站（deferred，下一步）**：接入 Listen1/LX providers + Azusa extractor（`host.loadFromSource(fetch(js))` 热加载注入 `registry`，无需改后端）
-4. **本地+ffmpeg（deferred）**：`library+transcode` 闭环（`POST /api/music/transcode` `ffmpeg -i pipe:0 -f mp3 pipe:1`，`wma/ape/flac/alac` 全量 + `GET /api/music/file` 静态透传）
-5. **播放列表持久化（deferred）**：`config.yaml:music.playlists` + `m3u` 导入导出（`Playlist{id,name,tracks:Song[]}` + `localStorage` 双写 + `importPlaylist(url)`）
+3. **国内音源+B站（已完成）**：接入 `providers/bilibili.js`（Azusa `bvid→cid→playurl` 经 `GET /api/music/bilibili/search` + `POST /api/music/bilibili/resolve`）+ `providers/example-generic.js`（Listen1/LX 热加载模板，`host.loadFromSource/loadFromURL`，`var plugin={id}`/`module.exports` 契约）+ `host.js loadFromURL` + UI `selectedProviders` 多选徽标
+4. **本地+ffmpeg（已完成）**：`GET /api/music/file?name=` `ServeContent` + `Accept-Ranges` + `POST /api/music/transcode?format=mp3|opus|ogg|wav`（`ffmpeg pipe:0→pipe:1`，`lookupFFmpeg` 复用 `download.ffmpegPath`/`PATH`，`MaxBytes 200MiB`，`internal/api/music/transcode.go`）+ Library `Play`/`→mp3` 前端闭环
+5. **播放列表持久化（已完成）**：`Musics/playlists.json` + `GET/PUT /api/music/playlists` + `POST /api/music/playlists/import {url}` + `GET /api/music/m3u?name=`/`POST /api/music/m3u {name,m3u}`（`#EXTM3U/#EXTINF` + `tmp+Rename` 原子，`internal/api/music/playlists.go`）+ 前端 playlists bar（Create/Save queue→/Load→queue/Export m3u/Import m3u/Fetch URL，`playlistsCache`）
 
 ## 9. 验证
 

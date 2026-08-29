@@ -29,6 +29,14 @@
     }catch(e){ console.warn('[Music Host] loadFromSource',e); return null; }
   }
 
+  // Hot-load: fetch remote provider JS and register it.
+  function loadFromURL(url){
+    return fetch(url).then(function(r){
+      if(!r.ok) throw new Error('provider fetch '+r.status);
+      return r.text();
+    }).then(function(src){ return loadFromSource(src, url); });
+  }
+
   // Built-in Jamendo provider (CC licensed, no key, client_id demo 56d30dc8)
   // API: https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&format=json&limit=20&search=xxx
   // Also supports tracks by id via /tracks/?id=xxx
@@ -99,6 +107,7 @@
     list: list,
     get: get,
     loadFromSource: loadFromSource,
+    loadFromURL: loadFromURL,
     search: function(keyword, providerIds, limit){
       var ids = providerIds && providerIds.length ? providerIds : order.filter(function(id){ return registry[id] && registry[id].kind!=='local'; });
       // parallel search

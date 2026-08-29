@@ -5,7 +5,7 @@
   var player = null;
   var queue = []; // Song[]
   var searchResults = [];
-  var selectedProvider = 'jamendo';
+  var selectedProviders = ['jamendo']; // multi-select, default jamendo only
 
   function fmtDuration(sec){
     sec = Math.round(sec||0);
@@ -79,15 +79,26 @@
   function renderMusic(container){
     container.innerHTML = ''+
       '<div class="music-page" style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden">'+
-        // header bar
         '<div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--glass-border);flex-wrap:wrap">'+
           '<div style="display:flex;gap:8px;align-items:center;flex:1;min-width:220px">'+
-            '<input id="music-search" placeholder="Search Jamendo (CC) — e.g. lofi, piano, jazz" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
+            '<input id="music-search" placeholder="Search — e.g. lofi, piano, jazz (Jamendo+Bilibili)" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
             '<button id="music-search-btn" class="btn btn-primary">Search</button>'+
           '</div>'+
+          '<div id="music-provider-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>'+
           '<label class="btn btn-ghost" style="cursor:pointer">Local<input id="music-file" type="file" accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.wma,.ape" multiple hidden></label>'+
           '<button id="music-refresh-lib" class="btn btn-ghost" title="Refresh local Musics">Library</button>'+
           '<button class="btn btn-ghost" onclick="openPathSettingsModal({title:t(\'pathSettings\'),sections:{musicDir:true}})">'+escapeHtml(t('pathSettings')||'Path Settings')+'</button>'+
+        '</div>'+
+        '<div id="music-playlists-bar" style="display:flex;gap:8px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--glass-border);flex-wrap:wrap;background:var(--glass-bg)">'+
+          '<select id="music-playlist-select" style="min-width:160px;padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)"><option value="">Playlists — Musics/playlists.json</option></select>'+
+          '<input id="music-playlist-name" placeholder="New playlist name" style="padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);min-width:140px">'+
+          '<button id="music-pl-create" class="btn btn-ghost">Create</button>'+
+          '<button id="music-pl-savequeue" class="btn btn-ghost" title="Save queue to selected playlist">Save queue →</button>'+
+          '<button id="music-pl-load" class="btn btn-ghost" title="Load selected playlist to queue">Load → queue</button>'+
+          '<button id="music-pl-export" class="btn btn-ghost" title="Export selected as .m3u">Export m3u</button>'+
+          '<label class="btn btn-ghost" style="cursor:pointer">Import m3u<input id="music-m3u-file" type="file" accept=".m3u,.m3u8" hidden></label>'+
+          '<input id="music-pl-url" placeholder="Import playlist URL (remote m3u/json)" style="flex:1;min-width:180px;padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
+          '<button id="music-pl-import-url" class="btn btn-ghost">Fetch</button>'+
         '</div>'+
         '<div style="display:flex;flex:1;min-height:0;overflow:hidden">'+
           // left: results + library
@@ -134,11 +145,31 @@
     }, 120);
   }
 
+  function renderProviderChips(){
+    var el=document.getElementById('music-provider-chips'); if(!el) return;
+    var host=window.MusicHost; var providers=(host&&host.list()||[]).filter(function(p){return p.id!=='local';});
+    if(providers.length===0) providers=[{id:'jamendo',name:'Jamendo'}];
+    el.innerHTML = providers.map(function(p){
+      var on = selectedProviders.indexOf(p.id)>=0;
+      return '<button data-prov="'+escapeHtml(p.id)+'" class="btn '+(on?'btn-primary':'btn-ghost')+'" style="padding:4px 8px;font-size:11px;border-radius:999px">'+escapeHtml(p.name||p.id)+'</button>';
+    }).join('');
+    el.querySelectorAll('button[data-prov]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id=b.getAttribute('data-prov');
+        var i=selectedProviders.indexOf(id);
+        if(i>=0) { if(selectedProviders.length>1) selectedProviders.splice(i,1); }
+        else selectedProviders.push(id);
+        renderProviderChips();
+      });
+    });
+  }
+
   function bindMusicEvents(container){
     var searchBtn = document.getElementById('music-search-btn');
     var searchInp = document.getElementById('music-search');
     var fileInp = document.getElementById('music-file');
     var prog = document.getElementById('music-progress');
+    renderProviderChips();
     if(searchBtn) searchBtn.onclick = doSearch;
     if(searchInp) searchInp.addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
     if(fileInp) fileInp.addEventListener('change', function(e){
@@ -165,6 +196,9 @@
       var r=prog.getBoundingClientRect(); var ratio=(e.clientX - r.left)/r.width; player.seek(Math.max(0,Math.min(1,ratio)));
     });
     var libBtn=document.getElementById('music-refresh-lib'); if(libBtn) libBtn.onclick=refreshLibrary;
+    // playlists bar
+    bindPlaylistEvents();
+    refreshPlaylists();
   }
 
   function doSearch(){
@@ -174,7 +208,8 @@
     var btn=document.getElementById('music-search-btn');
     if(btn) { btn.disabled=true; btn.textContent='…'; }
     var host = window.MusicHost;
-    host.search(kw, ['jamendo'], 24).then(function(list){
+    var provs = selectedProviders.length? selectedProviders : null;
+    host.search(kw, provs, 24).then(function(list){
       searchResults = list||[];
       renderResults(searchResults);
     }).catch(function(e){
@@ -291,24 +326,132 @@
       if(dirEl) dirEl.textContent = j.dir||'';
       if(!box) return;
       var files=j.files||[];
-      if(!files.length){ box.innerHTML='<span style="color:var(--text-tertiary)">Empty — downloads go to Musics; local files play via queue.</span>'; return; }
+      if(!files.length){ box.innerHTML='<span style="color:var(--text-tertiary)">Empty — downloads go to Musics; Local files play via queue. Library files support Play & Transcode.</span>'; return; }
       box.innerHTML = files.map(function(f){
-        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--glass-border)">'+
+        var isAudio = !f.isDir && /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|wma|ape)$/i.test(f.name);
+        return '<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--glass-border)">'+
           '<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escapeHtml(f.name)+'</span>'+
           '<span style="font-size:11px;color:var(--text-tertiary)">'+(f.isDir? 'dir' : (Math.round(f.size/1024)+' KB'))+'</span>'+
-          (f.isDir? '' : '<button class="btn btn-ghost" data-play-file="'+escapeHtml(f.name)+'" style="padding:4px 8px">Play</button>')+
+          (isAudio? '<button class="btn btn-ghost" data-play-file="'+escapeHtml(f.name)+'" style="padding:4px 8px">Play</button><button class="btn btn-ghost" data-transcode-file="'+escapeHtml(f.name)+'" title="Transcode via ffmpeg to mp3" style="padding:4px 8px">→mp3</button>' : (f.isDir? '' : '<button class="btn btn-ghost" data-play-file="'+escapeHtml(f.name)+'" style="padding:4px 8px">Play</button>'))+
         '</div>';
       }).join('');
       box.querySelectorAll('button[data-play-file]').forEach(function(b){
         b.addEventListener('click', function(){
           var name=b.getAttribute('data-play-file');
-          // Play via direct file URL not exposed; for MVP play the downloaded file by fetching its url via /api/music/library not enough.
-          // We can play via creating a track that points to /api/music/proxy-like static? For now open file directly via browser path not available.
-          // Fallback: instruct user to open via local File picker; keep button as placeholder.
-          if(typeof toast==='function') toast('Library play via file picker: choose '+name+' from Musics','info');
+          var url='/api/music/file?name='+encodeURIComponent(name);
+          var song={id:'lib:'+name, title:name, artist:'Library', url:url, cover:'', source:'library'};
+          playSong(song, true);
+        });
+      });
+      box.querySelectorAll('button[data-transcode-file]').forEach(function(b){
+        b.addEventListener('click', function(){
+          var name=b.getAttribute('data-transcode-file');
+          var orig=b.textContent; b.disabled=true; b.textContent='…';
+          // Fetch file bytes then POST to transcode
+          fetch('/api/music/file?name='+encodeURIComponent(name)).then(function(r){
+            if(!r.ok) throw new Error('fetch '+r.status);
+            return r.arrayBuffer();
+          }).then(function(buf){
+            return fetch('/api/music/transcode?format=mp3', {method:'POST', body: buf});
+          }).then(function(r){
+            if(!r.ok) return r.text().then(function(t){ throw new Error(t); });
+            return r.blob();
+          }).then(function(blob){
+            var url=URL.createObjectURL(blob);
+            var song={id:'transcoded:'+name+':'+Date.now(), title:name+' (mp3)', artist:'Transcoded', url:url, _objectUrl:url, source:'local'};
+            addToQueue(song, false);
+            playSong(song, false);
+            if(typeof toast==='function') toast('Transcoded '+name+' → mp3','success');
+          }).catch(function(e){ if(typeof toast==='function') toast('Transcode failed: '+(e.message||e),'error'); })
+          .finally(function(){ b.disabled=false; b.textContent=orig; });
         });
       });
     }).catch(function(e){ if(box) box.textContent='Library error: '+(e.message||e); });
+  }
+
+  // Playlists: Musics/playlists.json via /api/music/playlists + m3u
+  var playlistsCache = [];
+  function refreshPlaylists(){
+    var sel=document.getElementById('music-playlist-select'); if(!sel) return;
+    apiFetch('/api/music/playlists').then(function(data){
+      var pls=(data&&data.playlists)||[];
+      playlistsCache=pls;
+      var cur=sel.value;
+      sel.innerHTML='<option value="">Playlists — Musics/playlists.json</option>' + pls.map(function(p){
+        return '<option value="'+escapeHtml(String(p.id||p.name))+'">'+escapeHtml(String(p.name||p.id))+' ('+((p.tracks||[]).length)+')</option>';
+      }).join('');
+      if(cur) sel.value=cur;
+    }).catch(function(){});
+  }
+  function savePlaylists(pls){
+    return apiFetch('/api/music/playlists', {method:'PUT', body:{playlists: pls}});
+  }
+  function bindPlaylistEvents(){
+    var sel=document.getElementById('music-playlist-select');
+    var nameIn=document.getElementById('music-playlist-name');
+    var btnCreate=document.getElementById('music-pl-create');
+    var btnSaveQueue=document.getElementById('music-pl-savequeue');
+    var btnLoad=document.getElementById('music-pl-load');
+    var btnExport=document.getElementById('music-pl-export');
+    var m3uFile=document.getElementById('music-m3u-file');
+    var urlIn=document.getElementById('music-pl-url');
+    var btnFetch=document.getElementById('music-pl-import-url');
+    if(btnCreate) btnCreate.addEventListener('click', function(){
+      var name=(nameIn&&nameIn.value||'').trim() || ('Playlist '+(playlistsCache.length+1));
+      var id='pl-'+Date.now();
+      playlistsCache.push({id:id, name:name, tracks:[]});
+      savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Created '+name,'success'); refreshPlaylists(); sel.value=id; }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); });
+    });
+    if(btnSaveQueue) btnSaveQueue.addEventListener('click', function(){
+      var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
+      var pl=playlistsCache.find(function(p){ return String(p.id)===String(id) || String(p.name)===String(id); });
+      if(!pl){ if(typeof toast==='function') toast('Playlist not found','error'); return; }
+      pl.tracks = queue.map(function(s){ return {id:s.id, title:s.title, artist:s.artist, url:s.url||s.downloadUrl||s._objectUrl||'', cover:s.cover||'', source:s.source||''}; });
+      savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Saved queue → '+pl.name+' ('+pl.tracks.length+')','success'); refreshPlaylists(); }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); });
+    });
+    if(btnLoad) btnLoad.addEventListener('click', function(){
+      var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
+      var pl=playlistsCache.find(function(p){ return String(p.id)===String(id) || String(p.name)===String(id); });
+      if(!pl || !(pl.tracks||[]).length){ if(typeof toast==='function') toast('Playlist empty','error'); return; }
+      var songs=(pl.tracks||[]).map(function(t){ return {id:t.id||t.url||('pl:'+t.title), title:t.title||t.url||'Untitled', artist:t.artist||'', url:t.url||'', cover:t.cover||'', source:t.source||'library'}; });
+      queue = songs.slice();
+      ensurePlayer().setQueue(queue, 0);
+      renderQueue();
+      if(queue.length) ensurePlayer().playAt(0);
+      if(typeof toast==='function') toast('Loaded '+pl.name+' → queue ('+songs.length+')','success');
+    });
+    if(btnExport) btnExport.addEventListener('click', function(){
+      var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
+      var pl=playlistsCache.find(function(p){ return String(p.id)===String(id) || String(p.name)===String(id); });
+      if(!pl){ if(typeof toast==='function') toast('Playlist not found','error'); return; }
+      window.open('/api/music/m3u?name='+encodeURIComponent(pl.name||pl.id), '_blank');
+    });
+    if(m3uFile) m3uFile.addEventListener('change', function(e){
+      var f=(e.target.files||[])[0]; if(!f) return;
+      var rd=new FileReader();
+      rd.onload=function(ev){
+        var text=String(ev.target.result||'');
+        var name=f.name.replace(/\.[^.]+$/,'') || 'import';
+        apiFetch('/api/music/m3u', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:name, m3u:text})})
+          .then(function(){ if(typeof toast==='function') toast('Imported '+name,'success'); refreshPlaylists(); })
+          .catch(function(err){ if(typeof toast==='function') toast(String(err.message||err),'error'); });
+      };
+      rd.readAsText(f); e.target.value='';
+    });
+    if(btnFetch) btnFetch.addEventListener('click', function(){
+      var url=(urlIn&&urlIn.value||'').trim(); if(!url){ if(typeof toast==='function') toast('Enter a playlist URL','error'); return; }
+      btnFetch.disabled=true; var old=btnFetch.textContent; btnFetch.textContent='…';
+      apiFetch('/api/music/playlists/import', {method:'POST', body:{url:url}}).then(function(data){
+        var name=(data&&data.name)||('import-'+Date.now());
+        var tracks=(data&&data.tracks)||[];
+        if(!tracks.length){ if(typeof toast==='function') toast('No tracks found at URL','error'); return; }
+        // append as new playlist
+        var id='pl-'+Date.now();
+        playlistsCache.push({id:id, name:name, tracks: tracks.map(function(t){ return {id:t.url||t.title, title:t.title||t.url, url:t.url||'', source:'import'}; })});
+        return savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Imported '+name+' ('+tracks.length+')','success'); refreshPlaylists(); sel.value=id; });
+      }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); })
+      .finally(function(){ btnFetch.disabled=false; btnFetch.textContent=old; });
+    });
   }
 
   function cleanupMusic(){
