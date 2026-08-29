@@ -597,92 +597,11 @@
   }
   function cleanupTilemap(){ destroyRoot(); }
 
-  // ---- Editor category chrome (tabs above existing editor) ----
-  function ensureCategoryBar(edContainer){
-    if(!edContainer) return;
-    var existing=edContainer.querySelector('#ed-category-bar');
-    if(existing) return existing;
-    var bar=document.createElement('div');
-    bar.id='ed-category-bar';
-    bar.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--glass-border);background:rgba(0,0,0,0.12);flex-shrink:0;';
-    var cat=getCategory();
-    bar.innerHTML='<button data-ed-cat="text" class="btn '+(cat===CAT_TEXT?'btn-primary':'btn-ghost')+'" style="padding:4px 10px">Text Editor</button>'
-      +'<button data-ed-cat="tilemap" class="btn '+(cat===CAT_TILEMAP?'btn-primary':'btn-ghost')+'" style="padding:4px 10px">TileMap Editor</button>'
-      +'<span style="flex:1"></span><span style="font-size:11px;color:var(--text-muted)">Editor categories</span>';
-    // insert as first child of edContainer (which is #page-content)
-    if(edContainer.firstChild) edContainer.insertBefore(bar, edContainer.firstChild);
-    else edContainer.appendChild(bar);
-    bar.querySelectorAll('[data-ed-cat]').forEach(function(btn){
-      btn.addEventListener('click', function(){
-        var c=btn.getAttribute('data-ed-cat');
-        setCategory(c);
-        // re-render Editor page via navigateTo to switch category content
-        if(typeof global.navigateTo==='function'){
-          // force re-render by navigating to editor again
-          var cur = (typeof global.currentPage!=='undefined'? global.currentPage : 'editor');
-          if(cur==='editor') { destroyRoot(); if(typeof global.renderEditor==='function' && c===CAT_TEXT) { /* will be handled by wrapper */ } }
-          global.navigateTo('editor');
-        }
-      });
-    });
-    return bar;
-  }
-
-  // Wrap existing renderEditor to support categories
-  function installEditorCategory(){
-    if(global.__tilemapCategoryInstalled) return;
-    global.__tilemapCategoryInstalled=true;
-    var origRender = global.renderEditor;
-    var origCleanup = global.cleanupEditor;
-    var origSuspend = global.suspendEditor;
-    var origResume = global.resumeEditor;
-    global.renderEditor = function(container){
-      var cat=getCategory();
-      // Always ensure bar exists at top of #page-content
-      // We render bar first, then the actual editor content below it.
-      // To keep layout, wrap content in a flex column: bar + body.
-      container.innerHTML='';
-      container.style.height='100%'; container.style.overflow='hidden'; container.style.display='flex'; container.style.flexDirection='column';
-      var bar=document.createElement('div');
-      bar.id='ed-category-bar';
-      bar.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--glass-border);background:rgba(0,0,0,0.12);flex-shrink:0;';
-      bar.innerHTML='<button data-ed-cat="text" class="btn '+(cat===CAT_TEXT?'btn-primary':'btn-ghost')+'" style="padding:4px 10px">Text Editor</button>'
-        +'<button data-ed-cat="tilemap" class="btn '+(cat===CAT_TILEMAP?'btn-primary':'btn-ghost')+'" style="padding:4px 10px">TileMap Editor</button>'
-        +'<span style="flex:1"></span><span style="font-size:11px;color:var(--text-muted)">TileMap · Tiled JSON → Phaser</span>';
-      container.appendChild(bar);
-      var body=document.createElement('div');
-      body.id='ed-category-body';
-      body.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
-      container.appendChild(body);
-      bar.querySelectorAll('[data-ed-cat]').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var c=btn.getAttribute('data-ed-cat');
-          setCategory(c);
-          global.renderEditor(container);
-        });
-      });
-      if(cat===CAT_TILEMAP){
-        renderTilemap(body);
-        return;
-      }
-      // Text Editor: delegate to original (renderLegacyEditor if available)
-      var fn = global.renderLegacyEditor || origRender;
-      if(typeof fn==='function') return fn.call(global, body);
-    };
-    global.cleanupEditor = function(){
-      cleanupTilemap();
-      if(typeof origCleanup==='function') try{ origCleanup(); }catch(e){}
-    };
-    global.suspendEditor = function(){ cleanupTilemap(); if(typeof origSuspend==='function') try{ origSuspend(); }catch(e){} };
-    global.resumeEditor = function(){ if(typeof origResume==='function') try{ origResume(); }catch(e){} };
-  }
-
-  // auto-install when script loaded after editor.js
-  if(typeof global.renderEditor==='function') installEditorCategory();
-  else {
-    // defer until DOM ready in case script order is off
-    document.addEventListener('DOMContentLoaded', function(){ if(typeof global.renderEditor==='function') installEditorCategory(); });
-  }
+  // TileMap is now a standalone Demo tool (not an Editor category).
+  // Previously this file wrapped renderEditor to inject a category bar
+  // (Text Editor | TileMap Editor). That wrapper is removed so Editor
+  // renders in its original single-page style. TileMap is rendered via
+  // Demo dropdown -> Demo tool 'tilemap' (see app.js DEMO_TOOLS).
 
   // Expose for tests/manual
   global.TilemapEditor = {

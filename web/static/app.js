@@ -91,7 +91,7 @@ var GALLERY_TOOLS = [
 function isGalleryTool(id) {
   return GALLERY_TOOLS.some(function(tool) { return tool.id === id; });
 }
-var galleryActiveTool = (function(){ try{ var v=localStorage.getItem('galleryActiveTool'); return (v==='music'||v==='gallery')?v:'gallery'; }catch(e){ return 'gallery'; }})();
+var galleryActiveTool = 'gallery';
 var galleryMenuOpen = false;
 function utilityHasTool(id) {
   var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
@@ -106,17 +106,17 @@ function utilityHasTool(id) {
 }
 
 var DEMO_TOOLS = [
-  { id: 'ademo', labelKey: 'demoTabAssistant' },
-  { id: 'games', labelKey: 'demoTabGames' }
+  { id: 'ademo', labelKey: 'demo' },
+  { id: 'tilemap', labelKey: 'tilemap' }
 ];
 function isDemoTool(id) {
   return DEMO_TOOLS.some(function(tool) { return tool.id === id; });
 }
-var demoActiveTool = (function(){ try{ var v=localStorage.getItem('demoActiveTool'); return (v==='games'||v==='ademo')?v:'ademo'; }catch(e){ return 'ademo'; }})();
+var demoActiveTool = 'ademo';
 var demoMenuOpen = false;
 function demoHasTool(id) {
   if (id === 'ademo') return typeof renderAssistantDemo === 'function';
-  if (id === 'games') return typeof renderDemoGames === 'function';
+  if (id === 'tilemap') return typeof TilemapEditor !== 'undefined' && typeof TilemapEditor.renderTilemap === 'function';
   return isDemoTool(id);
 }
 function updateDemoNavLabel() {
@@ -137,13 +137,15 @@ function updateDemoMenuState() {
   });
 }
 function demoToolLifecycle(id, phase) {
-  // No suspend hooks yet; keep symmetry with utility/gallery for future games pause.
   var hooks = {
     ademo: { suspend: 'suspendAssistantDemo' },
-    games: { suspend: 'suspendDemoGames' }
+    tilemap: { suspend: 'cleanupTilemap', resume: null }
   };
   var hook = hooks[id] && hooks[id][phase];
-  if (hook && typeof window[hook] === 'function') window[hook]();
+  if (!hook) return;
+  // support TilemapEditor.* as well as globals
+  if (hook === 'cleanupTilemap' && typeof TilemapEditor !== 'undefined' && typeof TilemapEditor.cleanupTilemap === 'function') { TilemapEditor.cleanupTilemap(); return; }
+  if (typeof window[hook] === 'function') window[hook]();
 }
 function closeDemoMenu() {
   demoMenuOpen = false;
@@ -190,7 +192,6 @@ function selectDemoTool(id) {
   var item = DEMO_TOOLS.filter(function(tool) { return tool.id === id; })[0];
   if (!item || !demoHasTool(id)) return;
   demoActiveTool = id;
-  try { localStorage.setItem('demoActiveTool', id); } catch(e) {}
   updateDemoNavLabel();
   updateDemoMenuState();
   closeDemoMenu();
@@ -202,18 +203,12 @@ function renderDemoWithMenu(container) {
   }
   updateDemoNavLabel();
   updateDemoMenuState();
-  // Render the selected pane; the other pane is not rendered (no hidden toggle needed).
-  // Keep the shared toolbar row by rendering a shell that hosts the active pane.
-  if (demoActiveTool === 'games' && typeof renderDemoGames === 'function') {
-    // Games is self-contained; still call ademoSyncShellTabs for shared fullscreen chrome if present.
-    try { renderDemoGames(container); } catch(e){ console.error('renderDemoGames failed', e); }
-    if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch(e0) {}
+  if (demoActiveTool === 'tilemap' && typeof TilemapEditor !== 'undefined' && typeof TilemapEditor.renderTilemap === 'function') {
+    try { TilemapEditor.renderTilemap(container); } catch(e){ console.error('renderTilemap failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">TileMap init failed: '+(e&&e.message||e)+'</div>'; }
     return;
   }
   // Default: Assistant demo
   try { renderAssistantDemo(container); } catch(e){ console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; }
-  // Assistant pane also renders games toolbar injection point; ensure shell tabs hidden when single-pane.
-  if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch(e0) {}
 }
 
 function renderUtilityReview(container) {
@@ -307,7 +302,6 @@ function selectGalleryTool(id) {
   var item = GALLERY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
   if (!item || !galleryHasTool(id)) return;
   galleryActiveTool = id;
-  try { localStorage.setItem('galleryActiveTool', id); } catch(e) {}
   updateGalleryNavLabel();
   updateGalleryMenuState();
   closeGalleryMenu();
@@ -404,26 +398,14 @@ document.addEventListener('click', function(e){
   if (dItem) { e.preventDefault(); selectDemoTool(dItem.getAttribute('data-demo-tool')); return; }
   var uItem = e.target.closest && e.target.closest('[data-utility-tool]');
   if (uItem) { e.preventDefault(); selectUtilityTool(uItem.getAttribute('data-utility-tool')); return; }
-  var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
-  if (galBtn) { e.preventDefault(); e.stopPropagation(); toggleGalleryMenu(); return; }
-  var demoBtn = e.target.closest && e.target.closest('.demo-nav-wrap [data-page="demo"]');
-  if (demoBtn) { e.preventDefault(); e.stopPropagation(); toggleDemoMenu(); return; }
-  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap):not(.demo-nav-wrap) [data-page="utility"]');
-  if (utilBtn) { e.preventDefault(); e.stopPropagation(); toggleUtilityMenu(); return; }
+  // Nav button clicks are handled by auth.js initApp per-button listeners (conditional nav vs toggle).
+  // This delegated handler only closes on outside clicks.
   var galWrap = document.querySelector('.gallery-nav-wrap');
   var demoWrap = document.querySelector('.demo-nav-wrap');
   var utilWrap = document.querySelector('.utility-nav-wrap:not(.gallery-nav-wrap):not(.demo-nav-wrap)');
   if (galleryMenuOpen && galWrap && !galWrap.contains(e.target)) closeGalleryMenu();
   if (demoMenuOpen && demoWrap && !demoWrap.contains(e.target) && !e.target.closest('#demo-menu')) closeDemoMenu();
   if (utilityMenuOpen && utilWrap && !utilWrap.contains(e.target) && !e.target.closest('#utility-menu')) closeUtilityMenu();
-});
-document.addEventListener('mouseover', function(e){
-  var galBtn = e.target.closest && e.target.closest('.gallery-nav-wrap [data-page="gallery"]');
-  if (galBtn && !galleryMenuOpen) openGalleryMenu();
-  var demoBtn = e.target.closest && e.target.closest('.demo-nav-wrap [data-page="demo"]');
-  if (demoBtn && !demoMenuOpen) openDemoMenu();
-  var utilBtn = e.target.closest && e.target.closest('.utility-nav-wrap:not(.gallery-nav-wrap) [data-page="utility"]');
-  if (utilBtn && !utilityMenuOpen) openUtilityMenu();
 });
 
 function renderUtility(container) {
@@ -475,14 +457,8 @@ function navigateTo(page) {
   if (previousIsDemoTool && previousPage !== page) demoToolLifecycle(previousPage, 'suspend');
   currentPage = page;
   if (isUtilityTool(page)) utilityActiveTool = page;
-  if (isGalleryTool(page)) {
-    galleryActiveTool = page;
-    try { localStorage.setItem('galleryActiveTool', page); } catch(e) {}
-  }
-  if (isDemoTool(page)) {
-    demoActiveTool = page;
-    try { localStorage.setItem('demoActiveTool', page); } catch(e) {}
-  }
+  if (isGalleryTool(page)) galleryActiveTool = page;
+  if (isDemoTool(page)) demoActiveTool = page;
   updateUtilityNavLabel();
   updateUtilityMenuState();
   updateGalleryNavLabel();
@@ -497,6 +473,8 @@ function navigateTo(page) {
   if (page !== 'music' && typeof cleanupMusic === 'function') try{ cleanupMusic(); }catch(e){}
   if (!isDemoTool(page) && page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
   if (!isDemoTool(page) && page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
+  // TileMap cleanup is handled by demoToolLifecycle above; legacy per-page cleanup kept as fallback.
+  if (!isDemoTool(page) && page !== 'demo' && typeof TilemapEditor !== 'undefined' && TilemapEditor && typeof TilemapEditor.cleanupTilemap === 'function') { try{ TilemapEditor.cleanupTilemap(); }catch(e0){} }
   if (!preserveUtilityState) {
     if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
@@ -528,11 +506,11 @@ function navigateTo(page) {
       case 'monitor': return renderUsage(container);
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
-      case 'gallery': galleryActiveTool='gallery'; try{localStorage.setItem('galleryActiveTool','gallery');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
-      case 'music': galleryActiveTool='music'; try{localStorage.setItem('galleryActiveTool','music');}catch(e){} updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
+      case 'gallery': galleryActiveTool='gallery'; updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
+      case 'music': galleryActiveTool='music'; updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
       case 'demo': return renderDemoWithMenu(container);
       case 'ademo': return renderDemoWithMenu(container);
-      case 'games': return renderDemoWithMenu(container);
+      case 'tilemap': return renderDemoWithMenu(container);
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);

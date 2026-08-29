@@ -1,7 +1,7 @@
 // ===================== Translation System =====================
 const L = {
   en: {
-    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', textReview: 'Text Review', utilityReview: 'Text Review',
+    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', music: 'Music', tilemap: 'TileMap', tilemapEditor: 'TileMap Editor', textReview: 'Text Review', utilityReview: 'Text Review',
     shutdown: 'Shutdown',
     debugSettings: 'Debug Settings', debugMode: 'Debug Mode',
     debugModeDesc: 'When enabled, request/response details are cached for inspection in the Usage page.',
@@ -908,6 +908,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     traceEnableConfirm: '开启请求追踪后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）将以一个约 1MB 的 JSONL 文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏（保留末 4 位）；base64 图片内容不保存。超过保留天数的文件自动删除，总量受磁盘上限约束。是否继续？',
     saved: '已保存',
     endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校',
+    music: 'Music', tilemap: 'TileMap', tilemapEditor: 'TileMap Editor',
     shutdown: '关闭',
     debugSettings: '调试设置', debugMode: '调试模式',
     debugModeDesc: '开启后，请求/响应详情将缓存以供 Usage 页面查看。',
