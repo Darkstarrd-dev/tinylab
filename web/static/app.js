@@ -267,7 +267,7 @@ function navigateTo(page) {
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gallery': return renderGallery(container);
-      case 'demo': renderAssistantDemo(container); renderDemoGames(container); if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch (e0) {} return;
+      case 'demo': try { renderAssistantDemo(container); } catch (e) { console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; } try { renderDemoGames(container); } catch (e2) { console.error('renderDemoGames failed', e2); } if (typeof ademoSyncShellTabs === 'function') try { ademoSyncShellTabs(); } catch (e0) {} return;
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);

@@ -258,13 +258,17 @@ function ademoApplyScale(s) {
 // ademoSyncEntitySize so action switches (frame size changes) also refresh.
 function ademoSyncScaleControls() {
   if (!ademoRt || !ademoRt.wrap) return;
+  var shellQ = function (sel) {
+    var sh = document.querySelector('.demo-shell');
+    return (sh && sh.querySelector(sel)) || ademoRt.wrap.querySelector(sel) || document.querySelector(sel);
+  };
   var fs = ademoFrameRef();
-  var slider = ademoRt.wrap.querySelector('.ademo-scale');
-  if (slider && document.activeElement !== slider) slider.value = ademoPersist.scale;
-  var wIn = ademoRt.wrap.querySelector('.ademo-scaleto-w');
-  if (wIn && document.activeElement !== wIn) wIn.value = Math.round(fs.w * ademoPersist.scale);
-  var hIn = ademoRt.wrap.querySelector('.ademo-scaleto-h');
-  if (hIn && document.activeElement !== hIn) hIn.value = Math.round(fs.h * ademoPersist.scale);
+  var slider = shellQ('.ademo-scale');
+  if (slider && document.activeElement !== slider) slider.value = String(ademoPersist.scale);
+  var wIn = shellQ('.ademo-scaleto-w');
+  if (wIn && document.activeElement !== wIn) wIn.value = String(Math.round(fs.w * ademoPersist.scale));
+  var hIn = shellQ('.ademo-scaleto-h');
+  if (hIn && document.activeElement !== hIn) hIn.value = String(Math.round(fs.h * ademoPersist.scale));
 }
 
 function ademoClampEntity() {
@@ -570,7 +574,17 @@ function ademoBgScale(mode, iw, ih, W, H) {
 // ---- toolbar sync --------------------------------------------------------------
 function ademoSyncToolbar() {
   if (!ademoRt) return;
-  var q = function (id) { return ademoRt.wrap.querySelector(id); };
+  var shellQ = function (sel) {
+    // Toolbar now lives in .demo-toolbar at shell level, not inside .ademo-root.
+    // Search wrap first, then toolbar/shell, then document.
+    var r = ademoRt.wrap.querySelector(sel);
+    if (r) return r;
+    if (ademoRt.toolbar) { r = ademoRt.toolbar.querySelector(sel); if (r) return r; }
+    var sh = document.querySelector('.demo-shell');
+    if (sh) { r = sh.querySelector(sel); if (r) return r; }
+    return document.querySelector(sel);
+  };
+  var q = shellQ;
   var count = q('.ademo-body-count');
   if (count) count.textContent = t('demoBodyCount', [String(ademoPersist.bodies.length)]);
   var undo = q('.ademo-undo-body');
@@ -954,6 +968,7 @@ function renderAssistantDemo(container) {
   var wrap = container.querySelector('.ademo-root');
   var stageWrap = container.querySelector('.ademo-stage-wrap');
   var canvas = container.querySelector('.ademo-stage');
+  var toolbar = container.querySelector('.demo-toolbar');
   var accentRaw = '';
   try {
     var hex = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '').trim();
@@ -962,22 +977,32 @@ function renderAssistantDemo(container) {
   } catch (e0) {}
 
   ademoRt = {
-    wrap: wrap, stageWrap: stageWrap, canvas: canvas,
+    wrap: wrap, stageWrap: stageWrap, canvas: canvas, toolbar: toolbar,
     ctx: canvas.getContext('2d'),
     ro: null, raf: 0, lastTs: null,
     bgImg: null, bodyMode: false, dragStart: null, dragRect: null,
     accent: accentRaw || '56,189,248'
   };
+  if (!wrap || !stageWrap || !canvas) {
+    console.error('renderAssistantDemo: missing stage elements', {wrap: !!wrap, stageWrap: !!stageWrap, canvas: !!canvas});
+    ademoSyncToolbar();
+    return;
+  }
+  if (!toolbar) console.warn('renderAssistantDemo: demo-toolbar not found — single-row layout may be incomplete');
 
   // Fullscreen handlers
-  wrap.querySelector('.ademo-fs-btn').addEventListener('click', function () {
-    ademoToggleFullscreen();
-    this.blur();
-  });
-  wrap.querySelector('.ademo-fs-exit').addEventListener('click', function () {
-    ademoSetFullscreen(false);
-    this.blur();
-  });
+  (function bindFullscreenButtons() {
+    var fsBtn = container.querySelector('.demo-fs-btn');
+    if (fsBtn) fsBtn.addEventListener('click', function () {
+      ademoToggleFullscreen();
+      this.blur();
+    });
+    var fsExit = container.querySelector('.ademo-fs-exit');
+    if (fsExit) fsExit.addEventListener('click', function () {
+      ademoSetFullscreen(false);
+      this.blur();
+    });
+  })();
   // Ctrl+F shortcut while demo page is active
   ademoRt._fsKeyHandler = function (e) { ademoHandleFullscreenShortcut(e); };
   window.addEventListener('keydown', ademoRt._fsKeyHandler);
@@ -986,12 +1011,16 @@ function renderAssistantDemo(container) {
 
   // --- toolbar bindings ---
   // Merged background button: Set when no background is configured, Clear once set.
-  wrap.querySelector('.ademo-set-bg').addEventListener('click', function () {
-    if (!ademoPersist.bgPath) { ademoPickBackground(); return; }
-    ademoPersist.bgPath = '';
-    if (ademoRt) ademoRt.bgImg = null;
-    ademoSyncToolbar();
-  });
+  (function bindSetBg() {
+    var setBg = container.querySelector('.ademo-set-bg');
+    if (!setBg) return;
+    setBg.addEventListener('click', function () {
+      if (!ademoPersist.bgPath) { ademoPickBackground(); return; }
+      ademoPersist.bgPath = '';
+      if (ademoRt) ademoRt.bgImg = null;
+      ademoSyncToolbar();
+    });
+  })();
   // --- custom dropdowns (project style: renderCustomSelectHtml) -------------
   function ademoMakeOpts(map, labelPrefix) {
     var opts = [];
@@ -1002,7 +1031,7 @@ function renderAssistantDemo(container) {
     return opts;
   }
   function ademoRenderType1() {
-    var c = wrap.querySelector('.ademo-type1-wrap');
+    var c = (toolbar || container).querySelector('.ademo-type1-wrap');
     if (!c) return;
     var opts = ademoMakeOpts(ADEMO_TYPES, 'demoType');
     if (typeof renderCustomSelectHtml === 'function') {
@@ -1015,7 +1044,7 @@ function renderAssistantDemo(container) {
     }
   }
   function ademoRenderType2() {
-    var c = wrap.querySelector('.ademo-type2-wrap');
+    var c = (toolbar || container).querySelector('.ademo-type2-wrap');
     if (!c) return;
     var keys = ADEMO_TYPES[ademoPersist.type1] || [];
     var opts = keys.map(function (k) { return { value: k, label: t('demoSub' + k) || k }; });
@@ -1029,7 +1058,7 @@ function renderAssistantDemo(container) {
     }
   }
   function ademoRenderBgMode() {
-    var c = wrap.querySelector('.ademo-bgmode-wrap');
+    var c = (toolbar || container).querySelector('.ademo-bgmode-wrap');
     if (!c) return;
     var opts = [
       { value: 'fit-width', label: t('demoBgFitWidth') },
@@ -1058,7 +1087,7 @@ function renderAssistantDemo(container) {
     ademoRenderType2();
     // Keep bg mode in sync if changed elsewhere.
     try {
-      var sel = wrap.querySelector('#ademo-bg-mode');
+      var sel = (toolbar || container).querySelector('#ademo-bg-mode');
       if (sel && sel.value !== ademoPersist.bgMode) {
         ademoRenderBgMode();
       }
@@ -1067,32 +1096,35 @@ function renderAssistantDemo(container) {
   // Fallback escape attr helper if not yet loaded.
   function escapeAttr(s) {
     if (typeof window.escapeAttr === 'function') return window.escapeAttr(s);
-    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
   }
-  wrap.querySelector('.ademo-add-body').addEventListener('click', function () {
-    ademoSetBodyMode(!ademoRt.bodyMode);
-  });
-  wrap.querySelector('.ademo-undo-body').addEventListener('click', ademoUndoBody);
-  wrap.querySelector('.ademo-clear-bodies').addEventListener('click', ademoClearBodies);
-  var scaleInput = wrap.querySelector('.ademo-scale');
-  scaleInput.addEventListener('input', function () {
-    ademoApplyScale(parseFloat(scaleInput.value));
-  });
-  scaleInput.addEventListener('change', function () { scaleInput.blur(); });
-  var scaleWInput = wrap.querySelector('.ademo-scaleto-w');
-  scaleWInput.addEventListener('change', function () {
-    var vw = parseFloat(scaleWInput.value);
-    if (vw > 0) ademoApplyScale(vw / ademoFrameRef().w);
-    ademoSyncScaleControls();
-    scaleWInput.blur();
-  });
-  var scaleHInput = wrap.querySelector('.ademo-scaleto-h');
-  scaleHInput.addEventListener('change', function () {
-    var vh = parseFloat(scaleHInput.value);
-    if (vh > 0) ademoApplyScale(vh / ademoFrameRef().h);
-    ademoSyncScaleControls();
-    scaleHInput.blur();
-  });
+  (function bindBodyAndScale() {
+    var addBody = container.querySelector('.ademo-add-body');
+    if (addBody) addBody.addEventListener('click', function () { ademoSetBodyMode(!ademoRt.bodyMode); });
+    var undoBody = container.querySelector('.ademo-undo-body');
+    if (undoBody) undoBody.addEventListener('click', ademoUndoBody);
+    var clearBodies = container.querySelector('.ademo-clear-bodies');
+    if (clearBodies) clearBodies.addEventListener('click', ademoClearBodies);
+    var scaleInput = container.querySelector('.ademo-scale');
+    if (scaleInput) {
+      scaleInput.addEventListener('input', function () { ademoApplyScale(parseFloat(scaleInput.value)); });
+      scaleInput.addEventListener('change', function () { scaleInput.blur(); });
+    }
+    var scaleWInput = container.querySelector('.ademo-scaleto-w');
+    if (scaleWInput) scaleWInput.addEventListener('change', function () {
+      var vw = parseFloat(scaleWInput.value);
+      if (vw > 0) ademoApplyScale(vw / ademoFrameRef().w);
+      ademoSyncScaleControls();
+      scaleWInput.blur();
+    });
+    var scaleHInput = container.querySelector('.ademo-scaleto-h');
+    if (scaleHInput) scaleHInput.addEventListener('change', function () {
+      var vh = parseFloat(scaleHInput.value);
+      if (vh > 0) ademoApplyScale(vh / ademoFrameRef().h);
+      ademoSyncScaleControls();
+      scaleHInput.blur();
+    });
+  })();
 
   // --- stage mouse: right-click move-to + aim/attack (topdown) + body drawing ---
   canvas.addEventListener('contextmenu', function (e) {
