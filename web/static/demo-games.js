@@ -26,6 +26,8 @@
 //   loadState()     -> Promise<object|null>,  // null when nothing stored
 //   sheetImageUrl(actionName) -> string,      // assistant spritesheet URL
 //   llmChat({model, messages}) -> Promise< parsed chat-completion JSON >
+//   getAssistantConfig()  -> Promise<{model,actions,enabled,debug}|null>, // GET /api/settings -> assistant slice
+//   getAssistantActions() -> Promise<AssistantAction[]>,                   // convenience: config.actions || []
 // }
 //
 // Backend endpoints (see internal/api/games):
@@ -138,7 +140,7 @@ function dgInjectScript(src) {
 
 // ---- host adapter -------------------------------------------------------------
 function dgMakeHost(id, stageEl) {
-  return {
+  var host = {
     container: stageEl,
     width: stageEl.clientWidth || 800,
     height: stageEl.clientHeight || 450,
@@ -171,8 +173,22 @@ function dgMakeHost(id, stageEl) {
         if (!r.ok) throw new Error('llmChat -> ' + r.status);
         return r.json();
       });
+    },
+    getAssistantConfig: function () {
+      return fetch('/api/settings').then(function (r) {
+        if (!r.ok) throw new Error('getAssistantConfig -> ' + r.status);
+        return r.json();
+      }).then(function (j) {
+        return (j && j.assistant) ? j.assistant : null;
+      });
+    },
+    getAssistantActions: function () {
+      return host.getAssistantConfig().then(function (c) {
+        return (c && c.actions) ? c.actions : [];
+      });
     }
   };
+  return host;
 }
 
 // ---- lifecycle -------------------------------------------------------------
