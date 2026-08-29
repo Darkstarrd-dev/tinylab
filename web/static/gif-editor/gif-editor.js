@@ -189,6 +189,8 @@
     dom.keyColor = core.byId('key-color');
     dom.pickColorBtn = core.byId('pick-color-btn');
     dom.fuzziness = core.byId('fuzziness');
+    dom.transErode = core.byId('trans-erode');
+    dom.transErodeSmooth = core.byId('trans-erode-smooth');
     dom.disableTransBtn = core.byId('disable-trans-btn');
     dom.transModeColorBtn = core.byId('trans-mode-color-btn');
     dom.transModeFloodBtn = core.byId('trans-mode-flood-btn');
@@ -514,7 +516,7 @@
   // ------------------------------------------------------------------
 
   function defaultTransParams() {
-    return { mode: 'color', keyColor: '#ffffff', fuzziness: 15, seeds: [], corner: false, c2a: false };
+    return { mode: 'color', keyColor: '#ffffff', fuzziness: 15, seeds: [], corner: false, c2a: false, erode: 0, erodeSmooth: 0 };
   }
 
   // Live params straight from the panel DOM (session state).
@@ -523,13 +525,19 @@
     var keyColor = (dom.keyColor && dom.keyColor.value) || tr.keyColor;
     var fuzz = dom.fuzziness ? parseFloat(dom.fuzziness.value) : tr.fuzziness;
     if (isNaN(fuzz)) fuzz = tr.fuzziness;
+    var erode = dom.transErode ? parseFloat(dom.transErode.value) : tr.erode;
+    if (isNaN(erode)) erode = tr.erode;
+    var erodeSmooth = dom.transErodeSmooth ? parseFloat(dom.transErodeSmooth.value) : tr.erodeSmooth;
+    if (isNaN(erodeSmooth)) erodeSmooth = tr.erodeSmooth;
     return {
       mode: tr.mode,
       keyColor: keyColor,
       fuzziness: fuzz,
       seeds: (tr.seeds || []).slice(),
       corner: !!tr.corner,
-      c2a: !!tr.c2a
+      c2a: !!tr.c2a,
+      erode: erode,
+      erodeSmooth: erodeSmooth
     };
   }
 
@@ -607,6 +615,8 @@
     tr.seeds = [];
     tr.corner = false;
     tr.c2a = false;
+    tr.erode = 0;
+    tr.erodeSmooth = 0;
     tr.committed = null;
     core.state.transparencyReady = false;
     core.state.pickColorMode = false;
@@ -626,6 +636,8 @@
     if (dom.transFloodControls) dom.transFloodControls.style.display = tr.mode === 'flood' ? 'block' : 'none';
     if (dom.keyColor) dom.keyColor.value = tr.keyColor;
     if (dom.fuzziness) dom.fuzziness.value = String(tr.fuzziness);
+    if (dom.transErode) dom.transErode.value = String(tr.erode || 0);
+    if (dom.transErodeSmooth) dom.transErodeSmooth.value = String(tr.erodeSmooth || 0);
     if (dom.transC2a) dom.transC2a.checked = !!tr.c2a;
     if (dom.transCornerBtn) dom.transCornerBtn.classList.toggle('active', !!tr.corner);
     if (dom.seedCountLabel) {
@@ -640,6 +652,11 @@
   }
 
   function transParamChanged() {
+    // erode sliders are state-backed (DOM -> state on every input) so the
+    // panel round-trips committed values on reopen.
+    var trc = core.state.trans;
+    if (dom.transErode) { var e = parseFloat(dom.transErode.value); if (!isNaN(e)) trc.erode = e; }
+    if (dom.transErodeSmooth) { var es = parseFloat(dom.transErodeSmooth.value); if (!isNaN(es)) trc.erodeSmooth = es; }
     core.state.transparencyReady = true;
     draw();
   }
@@ -2037,6 +2054,8 @@
     if (dom.enableTrans) dom.enableTrans.addEventListener('change', toggleTransPanel);
     if (dom.keyColor) dom.keyColor.addEventListener('input', transParamChanged);
     if (dom.fuzziness) dom.fuzziness.addEventListener('input', transParamChanged);
+    if (dom.transErode) dom.transErode.addEventListener('input', transParamChanged);
+    if (dom.transErodeSmooth) dom.transErodeSmooth.addEventListener('input', transParamChanged);
     if (dom.pickColorBtn) dom.pickColorBtn.addEventListener('click', pickColorClick);
     if (dom.transModeColorBtn) dom.transModeColorBtn.addEventListener('click', function () { setTransMode('color'); });
     if (dom.transModeFloodBtn) dom.transModeFloodBtn.addEventListener('click', function () { setTransMode('flood'); });
@@ -2067,6 +2086,8 @@
           core.state.trans.seeds = (committed.seeds || []).slice();
           core.state.trans.corner = !!committed.corner;
           core.state.trans.c2a = !!committed.c2a;
+          core.state.trans.erode = committed.erode || 0;
+          core.state.trans.erodeSmooth = committed.erodeSmooth || 0;
           if (dom.enableTrans) dom.enableTrans.checked = true;
         } else {
           resetTransState();
@@ -2654,6 +2675,14 @@
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
       '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorFuzziness">' + t('gifEditorFuzziness', 'Tolerance:') + '</span>' +
       '            <input type="range" id="gif-fuzziness" min="0" max="100" value="15" class="gif-flex-1" data-tooltip="' + t('gifEditorFuzzinessTitle', 'Fuzziness') + '">' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
+      '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorErode">' + t('gifEditorErode', 'Erode:') + '</span>' +
+      '            <input type="range" id="gif-trans-erode" min="-10" max="10" step="1" value="0" class="gif-flex-1" data-tooltip="' + t('gifEditorErodeTitle', 'Expand (+) or shrink (-) the selection in pixels') + '">' +
+      '          </div>' +
+      '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">' +
+      '            <span class="gif-muted-label" style="font-size:12px; color:var(--text-muted);" data-i18n="gifEditorErodeSmooth">' + t('gifEditorErodeSmooth', 'Erode Smooth:') + '</span>' +
+      '            <input type="range" id="gif-trans-erode-smooth" min="0" max="20" step="1" value="0" class="gif-flex-1" data-tooltip="' + t('gifEditorErodeSmoothTitle', 'Feather the selection edge in pixels') + '">' +
       '          </div>' +
       '          <div class="gif-control-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">' +
       '            <label class="gif-check-label" style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:12px;"><input type="checkbox" id="gif-trans-c2a"> <span data-i18n="gifEditorSoftEdge">' + t('gifEditorSoftEdge', 'Soft edge (preserve anti-aliasing)') + '</span></label>' +

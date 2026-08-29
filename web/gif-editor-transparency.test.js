@@ -19,7 +19,9 @@
 //   colorToAlphaGimp — exact key -> alpha 0, far color -> alpha 255,
 //     blend -> partial alpha with composite invariance F*a + B*(1-a) == N;
 //   applyPipeline — mode dispatch (color hard / color c2a / flood + seeds /
-//     flood + corner + c2a), hasActiveRemoval gating.
+//     flood + corner + c2a), erode expand/shrink of the flood selection
+//     (half-pixel-shifted chamfer signed distance), erodeSmooth feather
+//     partial-alpha ramp, hasActiveRemoval gating.
 
 'use strict';
 
@@ -312,6 +314,90 @@ check('hasActiveRemoval gates color/flood configurations', function () {
   assert.ok(T.hasActiveRemoval({ mode: 'flood', keyColor: '#ffffff', corner: true }));
   assert.ok(!T.hasActiveRemoval({ mode: 'flood', keyColor: '#ffffff' }));
   assert.ok(!T.hasActiveRemoval(null));
+});
+
+// --- flood erode / erode smooth ---------------------------------------
+//
+// Distance expectations use the geometric chamfer field (1 / sqrt(2)
+// steps), NOT orthogonal-only steps; the boundary edge sits half a pixel
+// between an inside pixel and its outside neighbor.
+
+console.log('  applyPipeline erode / erodeSmooth (flood mode)');
+
+check('erode > 0 expands the selection into the character', function () {
+  // 12x12, red square x,y in [3..8]; chamfer distance from mask to
+  // (3,3)/(4,4)/(5,5) = 1/2/3.
+  const img = makeImg(12, 12, (x, y) =>
+    (x >= 3 && x <= 8 && y >= 3 && y <= 8) ? [255, 0, 0, 255] : [255, 255, 255, 255]);
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: 2, erodeSmooth: 0 });
+  assert.strictEqual(px(img, 0, 0)[3], 0);   // background still removed
+  assert.strictEqual(px(img, 3, 3)[3], 0);   // 1 step inside the old edge: eaten
+  assert.strictEqual(px(img, 4, 4)[3], 0);   // 2 steps inside: eaten
+  assert.strictEqual(px(img, 5, 5)[3], 255); // 3 steps inside: survives erode=2
+});
+
+check('erode < 0 shrinks the selection and restores the rim', function () {
+  const img = makeImg(10, 10, (x, y) =>
+    (x >= 3 && x <= 6 && y >= 3 && y <= 6) ? [255, 0, 0, 255] : [255, 255, 255, 255]);
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: -2, erodeSmooth: 0 });
+  assert.strictEqual(px(img, 3, 3)[3], 255); // character untouched
+  assert.strictEqual(px(img, 2, 5)[3], 255); // 1 step into old selection: restored
+  assert.strictEqual(px(img, 1, 5)[3], 255); // 2 steps: restored at erode=-2
+  assert.strictEqual(px(img, 0, 5)[3], 0);   // 3 steps: still transparent
+  assert.strictEqual(px(img, 2, 5)[0], 255); // restored alpha comes from the
+  assert.strictEqual(px(img, 2, 5)[1], 255); // pre-flood snapshot — RGB intact
+});
+
+check('erode clamps to MAX_ERODE', function () {
+  const img = makeImg(10, 10, (x, y) =>
+    (x >= 3 && x <= 6 && y >= 3 && y <= 6) ? [255, 0, 0, 255] : [255, 255, 255, 255]);
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: 99, erodeSmooth: 0 });
+  assert.strictEqual(T.MAX_ERODE, 10);
+  // clamped to 10 -> whole 10x10 frame selected
+  assert.strictEqual(px(img, 5, 5)[3], 0);
+});
+
+check('erodeSmooth feathers the edge with partial alpha on both sides', function () {
+  // 11x11 white, opaque red column at x=5; flood selects everything else.
+  // Single left seed: mask = x<5; the boundary edge sits at x=4.5 and the
+  // feather ramp crosses it onto the character side (distances are purely
+  // geometric, so the unselected right side is measured from the mask).
+  const img = makeImg(11, 11, (x) => (x === 5 ? [255, 0, 0, 255] : [255, 255, 255, 255]));
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: 0, erodeSmooth: 4 });
+  // half-pixel edge at x=4.5, smooth=4: r = 0.5 + s/4
+  assert.strictEqual(px(img, 4, 5)[3], 96);  // s=+0.5 -> r=0.625 -> 255*0.375
+  assert.strictEqual(px(img, 3, 5)[3], 32);  // s=+1.5 -> r=0.875
+  assert.strictEqual(px(img, 2, 5)[3], 0);   // s=+2.5 -> fully removed
+  assert.strictEqual(px(img, 5, 5)[3], 159); // character edge: s=-0.5 -> r=0.375
+  assert.strictEqual(px(img, 6, 5)[3], 223); // s=-1.5 -> r=0.125
+  assert.strictEqual(px(img, 7, 5)[3], 255); // outside the feather: untouched
+});
+
+check('erodeSmooth=0 with erode=0 is a pure no-op fast path', function () {
+  const img = makeImg(5, 5, () => [255, 255, 255, 255]);
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: 0, erodeSmooth: 0 });
+  assert.strictEqual(countAlpha(img, 0), 25); // plain flood, untouched behavior
+});
+
+check('pre-transparent pixels are never re-opaqued by erode/smooth', function () {
+  const img = makeImg(10, 10, (x, y) =>
+    (x >= 3 && x <= 6 && y >= 3 && y <= 6) ? [255, 0, 0, 255] : [255, 255, 255, 255]);
+  img.data[(0 * 10 + 5) * 4 + 3] = 0; // pre-transparent hole at (5,0), inside the future selection
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 0 }], erode: -3, erodeSmooth: 0 });
+  assert.strictEqual(px(img, 5, 0)[3], 0); // stays transparent after erosion
+});
+
+check('dilation hits only the region this run flooded', function () {
+  // two disconnected white regions split by a 2px opaque red barrier
+  const img = makeImg(12, 3, (x) =>
+    (x === 5 || x === 6) ? [255, 0, 0, 255] : [255, 255, 255, 255]);
+  T.applyPipeline(img, { mode: 'flood', fuzziness: 0, seeds: [{ x: 0, y: 1 }], erode: 1, erodeSmooth: 0 });
+  assert.strictEqual(px(img, 0, 1)[3], 0);   // flooded region removed
+  assert.strictEqual(px(img, 4, 1)[3], 0);   // ... all of it
+  assert.strictEqual(px(img, 5, 1)[3], 0);   // dilation eats 1px into the barrier
+  assert.strictEqual(px(img, 6, 1)[3], 255); // 2 steps in: barrier survives
+  assert.strictEqual(px(img, 7, 1)[3], 255); // never-flooded region untouched
+  assert.strictEqual(px(img, 11, 1)[3], 255);
 });
 
 if (failures > 0) {

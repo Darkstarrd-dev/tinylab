@@ -57,6 +57,8 @@
       seeds: [],            // [{x, y}] flood seeds in slice-canvas coords
       corner: false,        // flood preset: remove border-connected bg
       c2a: false,           // GIMP Color-to-Alpha soft-edge mode
+      erode: 0,             // flood: expand (+) / shrink (−) selection, px -10..10
+      erodeSmooth: 0,       // flood: feather the selection edge, px 0..20
       committed: null       // frozen params snapshot at Apply
     },
     pickColorMode: false,

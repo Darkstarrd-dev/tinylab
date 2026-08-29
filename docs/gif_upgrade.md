@@ -480,6 +480,8 @@ var state = {
     seeds: [],             //   flood 种子点（slice canvas 坐标）
     corner: false,         //   角点 flood 预设
     c2a: false,            //   GIMP Color-to-Alpha 软边
+    erode: 0,              //   2026-08-29：flood 选区扩展(+)/收缩(-)，px，-10..10
+    erodeSmooth: 0,        //   2026-08-29：选区边缘羽化 px，0..20（chamfer 距离场半像素偏移）
     committed: null        //   Apply 冻结的参数快照；缩略图/导出只认它
   },
   timeline: {
