@@ -83,7 +83,7 @@ function openProxyModal() {
 }
 
 function openPathModal() {
-  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, docDir: true, imageDir: true, logDir: true, ytDlpPath: true, ffmpegPath: true } });
+  openPathSettingsModal({ title: t('pathSettings'), sections: { defaultDir: true, docDir: true, imageDir: true, logDir: true, gamesDir: true, ytDlpPath: true, ffmpegPath: true } });
 }
 
 function openAssistantModal() {
@@ -98,7 +98,8 @@ function openAssistantModal() {
       rows: x.rows || 1,
       frameStart: x.frameStart || 0,
       frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0),
-      fps: x.fps || 8
+      fps: x.fps || 8,
+      mirror: !!x.mirror
     };
   });
   openSettingsModal(t('assistantSettings'),
@@ -113,6 +114,7 @@ function openAssistantModal() {
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
       <div id="settings-assistant-actions"></div>\
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">\
+        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'move\')">' + escapeHtml(t('assistantPresetMove') || 'Move preset') + '</button>\
         <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'pet\')">' + escapeHtml(t('assistantPresetPet')) + '</button>\
         <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'platformer\')">' + escapeHtml(t('assistantPresetPlatformer')) + '</button>\
         <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'topdown\')">' + escapeHtml(t('assistantPresetTopdown')) + '</button>\

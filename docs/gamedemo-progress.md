@@ -2,15 +2,16 @@
 
 > Demo 页游戏插件架构的单一事实来源：游戏作为**磁盘插件**按需加载，改游戏代码不重编译、不重启进程。
 > Assistant 测试台（ademoSM/物理/碰撞体）见 [`assistant-progress.md`](assistant-progress.md) §8，本文不重复；两者仅在暂停缝（§5）与 Demo 页共存布局上相交。
-> 最后核对：2026-08-29（插件架构落地：Go 后端 + TRGames 宿主 + Phaser v4.2.1 vendor + survivor seed 游戏；CDP 实测热更新闭环 + v4 overlap 回调参数顺序陷阱）。
+> 最后核对：2026-08-29（插件架构 + GamesDir Path Settings + Default Games Dir 行；CDP 实测热更新闭环 + v4 overlap 回调参数顺序陷阱）。
 
 ## 1. 功能面总览
 
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 配置 | `internal/config/types.go`（`GamesDir` 根字段，`yaml/json:"gamesDir,omitempty"`）、`internal/config/paths.go`（`ResolveGamesDir` 三段式：空→`{configDir}/games`、相对→拼 configDir、绝对→原样） | 游戏插件根目录解析；存档目录恒为 `{configDir}/gamedata`（无配置项） |
-| API | `internal/api/games/register.go` | `GET /api/games` 列表（扫目录+manifest 校验+entry mtime）、`GET/PUT /api/games/{id}/state` 存档 KV（`fsutil.AtomicWrite`）；`SeedGames` 启动播种 |
-| 路由 | `internal/api/router.go` | `/api` 组内 `r.Route("/games", ...)`（继承鉴权+1MB cap）；`r.Get("/games/*")` 磁盘静态（`StripPrefix`+`http.Dir`，no-store，**不鉴权**，注册在 `serveUI` 通配之前）；启动时 `MkdirAll`+`SeedGames`（seeded 列表 Info 日志） |
+| API | `internal/api/games/register.go`、`internal/api/settings/register.go`（GamesDir 搬移 + Seed） | `GET /api/games` 列表（扫目录+manifest 校验+entry mtime）、`GET/PUT /api/games/{id}/state` 存档 KV（`fsutil.AtomicWrite`）；`SeedGames` 启动播种；`GET /api/settings` 暴露 `gamesDir`/`configDir`，`PATCH /api/settings` 的 `gamesDir` 变更触发目录创建→顶层条目移动（`os.Rename` 失败回退递归拷贝）→已存在目标跳过不覆盖→空旧目录移除→空新目录 `SeedGames(web.Games)` |
+| 路由 | `internal/api/router.go` + `web/games.go` | `/api` 组内 `r.Route("/games", ...)`（继承鉴权+1MB cap）；`r.Get("/games/*")` 磁盘静态（`StripPrefix`+`http.Dir`，no-store，**不鉴权**，注册在 `serveUI` 通配之前）；启动时 `MkdirAll`+`SeedGames`（seeded 列表 Info 日志）|
+| Path Settings | `web/static/download.js`（`openPathSettingsModal` 的 `gamesDir` 行）、`web/static/settings/settings_modal.js`（`openPathModal` 全量 sections 含 `gamesDir`）、`web/static/i18n.js`（`gamesDir/gamesDirDesc/gamesDirMoved` en+cn） | 统一 Path Settings 弹窗：Default Games Dir 行（placeholder `configDir/games`），PATCH 后自动迁移磁盘内容 |
 | 内嵌默认集 | `web/games.go`（无 build tag，`//go:embed all:games` → `web.Games`）、`web/games/<id>/` | 默认游戏的编译期副本；seed 仅在目标游戏目录**不存在**时复制，永不覆盖磁盘已有内容 |
 | 前端宿主 | `web/static/demo-games.js` | `window.TRGames` 注册表、Phaser 懒加载、游戏脚本注入（mtime 缓存击穿）、host adapter、Demo 页游戏区 UI（选择/启动/停止/重载）、`__dgames` 测试缝 |
 | 引擎 vendor | `web/static/vendor/phaser/`（`phaser.min.js` v4.2.1 + `README.md` 记录来源/SHA-256 + `LICENSE` MIT） | 经典 script UMD，`window.Phaser`；首次启动游戏时注入 `/vendor/phaser/phaser.min.js`，不经主页面预加载 |
@@ -105,7 +106,7 @@
 
 | 变更 | 同步位置 |
 |---|---|
-| `GamesDir` 配置 / `ResolveGamesDir` 语义 | §1 配置行、`config/types.go`+`paths.go`+`paths_test.go`、PROJECT_MAP §3 |
+| `GamesDir` 配置 / `ResolveGamesDir` / Path Settings 行 | §1 配置/Path Settings 行、`config/types.go`+`paths.go`+`paths_test.go`、`internal/api/settings/register.go`（搬移+Seed）、`web/static/download.js`+`settings_modal.js`+`i18n.js`、PROJECT_MAP §3 |
 | 插件契约（manifest 字段、TRGames.register、host adapter 面） | §2/§5、`demo-games.js` 头注释、`internal/api/games/register.go` 包注释、seed 游戏参考实现 |
 | `/api/games*` 端点 / `/games/*` 静态 / seed 语义 | §3/§4、`register.go`+`register_test.go`、`router.go`、PROJECT_MAP §10 |
 | Phaser 版本升级 / v4 新陷阱 | §1 vendor 行、§6、`vendor/phaser/README.md`（版本+SHA-256） |

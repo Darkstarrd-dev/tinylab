@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,8 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	"github.com/tinyrouter/tinyrouter/internal/api/auth"
+	"github.com/tinyrouter/tinyrouter/internal/api/games"
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/download"
+	"github.com/tinyrouter/tinyrouter/web"
 	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
@@ -62,6 +65,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"server":       cfg.Server,
 		"imageSaveDir": cfg.ImageSaveDir,
 		"docDir":       cfg.DocDir,
+		"gamesDir":     cfg.GamesDir,
 		"download":     cfg.Download,
 		"shortcuts":    cfg.Shortcuts,
 		"security": map[string]any{
@@ -121,6 +125,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		Theme        *config.ThemeConfig `json:"theme"`
 		ImageSaveDir *string             `json:"imageSaveDir"`
 		DocDir       *string             `json:"docDir"`
+		GamesDir     *string             `json:"gamesDir"`
 		Archive      *archivePatch       `json:"archive"`
 		Assistant    *assistantPatch     `json:"assistant"`
 	}
@@ -293,6 +298,48 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.DocDir != nil {
 		cfg.DocDir = *updates.DocDir
+	}
+	if updates.GamesDir != nil {
+		oldResolved := config.ResolveGamesDir(cfg.GamesDir, filepath.Dir(h.d.ConfigPath))
+		newResolved := config.ResolveGamesDir(*updates.GamesDir, filepath.Dir(h.d.ConfigPath))
+		if oldResolved != newResolved {
+			// Ensure target directory exists
+			if err := os.MkdirAll(newResolved, 0755); err != nil {
+				h.d.Logger.Warn("gamesDir: failed to create target %s: %v", newResolved, err)
+			} else if oldResolved != "" {
+				// Move content from old to new if old exists and is not empty
+				if entries, err := os.ReadDir(oldResolved); err == nil && len(entries) > 0 {
+					for _, e := range entries {
+						srcPath := filepath.Join(oldResolved, e.Name())
+						dstPath := filepath.Join(newResolved, e.Name())
+						if _, err := os.Stat(dstPath); err == nil {
+							continue // skip existing, never overwrite
+						}
+						if err := os.Rename(srcPath, dstPath); err != nil {
+							// Cross-device fallback: copy + remove
+							if copyErr := copyGameDirFallback(srcPath, dstPath); copyErr != nil {
+								h.d.Logger.Warn("gamesDir: failed to move %s -> %s: %v (copy: %v)", srcPath, dstPath, err, copyErr)
+							} else {
+								os.RemoveAll(srcPath)
+							}
+						}
+					}
+					// Remove old dir if now empty
+					if remaining, err := os.ReadDir(oldResolved); err == nil && len(remaining) == 0 {
+						os.Remove(oldResolved)
+					}
+				}
+			}
+			// Seed new dir if empty (e.g. switching to a fresh disk path)
+			if entries, err := os.ReadDir(newResolved); err == nil && len(entries) == 0 {
+				if _, err := games.SeedGames(web.Games, newResolved, func(f string, a ...any) {
+					h.d.Logger.Warn(f, a...)
+				}); err != nil {
+					h.d.Logger.Warn("gamesDir: seed failed for %s: %v", newResolved, err)
+				}
+			}
+		}
+		cfg.GamesDir = *updates.GamesDir
 	}
 
 	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
@@ -559,6 +606,38 @@ func validateProxyConfig(p config.ProxyConfig) error {
 	}
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		return fmt.Errorf("proxy port must be a number between 1 and 65535")
+	}
+	return nil
+}
+
+// copyGameDirFallback recursively copies src to dst (file or directory).
+func copyGameDirFallback(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		dir := filepath.Dir(dst)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(dst, data, 0644)
+	}
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := copyGameDirFallback(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			return err
+		}
 	}
 	return nil
 }

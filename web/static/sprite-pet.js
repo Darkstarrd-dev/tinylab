@@ -193,6 +193,7 @@ var petSM = (function () {
   var order = [];    // configured registration order (fallback chain)
   var current = null;
   var frameIdx = 0, acc = 0, lastTs = 0, started = false;
+  var _mirrorPending = false;
 
   // Canonical event -> candidate action names.
   var EVENT_ALIASES = {
@@ -202,7 +203,30 @@ var petSM = (function () {
     reply:  ['reply', 'happy', 'talk', 'success'],
     error:  ['error', 'confused', 'sad'],
     notify: ['notify', 'alert', 'notice'],
-    poke:   ['poke', 'click', 'wave', 'greet']
+    poke:   ['poke', 'click', 'wave', 'greet'],
+    move_left:       ['move_left', 'walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
+    move_right:      ['move_right', 'walk_right', 'walk_r', 'right_walk', 'move_left', 'walk', 'move'],
+    move_up:         ['move_up', 'walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
+    move_down:       ['move_down', 'walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
+    move_up_left:    ['move_up_left', 'walk_up_left', 'walk_ul', 'walk_nw', 'move_up', 'move_left', 'walk', 'move'],
+    move_down_left:  ['move_down_left', 'walk_down_left', 'walk_dl', 'walk_sw', 'move_down', 'move_left', 'walk', 'move'],
+    move_up_right:   ['move_up_right', 'walk_up_right', 'walk_ur', 'walk_ne', 'move_up_left', 'walk_up_left', 'move_up', 'move_left', 'walk', 'move'],
+    move_down_right: ['move_down_right', 'walk_down_right', 'walk_dr', 'walk_se', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move'],
+    walk:   ['walk', 'move'],
+    run:    ['run', 'dash'],
+    jump:   ['jump', 'leap'],
+    fall:   ['fall'],
+    attack: ['attack', 'shoot', 'hit'],
+    walk_left: ['walk_left', 'move_left', 'walk_l', 'left_walk', 'walk', 'move'],
+    run_left: ['run_left', 'move_left', 'run_l', 'run', 'dash', 'walk', 'move'],
+    walk_up: ['walk_up', 'move_up', 'up_walk', 'walk_north', 'walk', 'move'],
+    walk_down: ['walk_down', 'move_down', 'down_walk', 'walk_south', 'walk', 'move'],
+    walk_up_left: ['walk_up_left', 'move_up_left', 'walk_ul', 'walk_nw', 'move_up', 'move_left', 'walk', 'move'],
+    walk_down_left: ['walk_down_left', 'move_down_left', 'walk_dl', 'walk_sw', 'move_down', 'move_left', 'walk', 'move'],
+    walk_right:      ['walk_right', 'move_right', 'walk_r', 'right_walk', 'move_left', 'walk', 'move'],
+    run_right:       ['run_right', 'move_right', 'run_r', 'right_run', 'run_left', 'move_left', 'run', 'dash', 'walk', 'move'],
+    walk_up_right:   ['walk_up_right', 'move_up_right', 'walk_ur', 'walk_ne', 'move_up_right', 'move_up_left', 'walk_up_left', 'move_up', 'move_left', 'walk', 'move'],
+    walk_down_right: ['walk_down_right', 'move_down_right', 'walk_dr', 'walk_se', 'move_down_right', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move']
   };
 
   function resolve(names) {
@@ -222,7 +246,16 @@ var petSM = (function () {
     var sx = (f % st.cols) * st.frameW;
     var sy = Math.floor(f / st.cols) * st.frameH;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(st.img, sx, sy, st.frameW, st.frameH, 0, 0, canvas.width, canvas.height);
+    var needMirror = !!st.mirror || _mirrorPending;
+    if (needMirror) {
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(st.img, sx, sy, st.frameW, st.frameH, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(st.img, sx, sy, st.frameW, st.frameH, 0, 0, canvas.width, canvas.height);
+    }
   }
 
   var frameIdx = 0, acc = 0, lastTs = null, started = false;
@@ -273,8 +306,16 @@ var petSM = (function () {
   }
 
   function dispatch(evt) {
-    var target = EVENT_ALIASES[evt] ? resolve(EVENT_ALIASES[evt]) : (states[evt] ? evt : null);
+    var aliases = EVENT_ALIASES[evt];
+    var target = aliases ? resolve(aliases) : (states[evt] ? evt : null);
     if (!target) return false;
+    // Right-variant fallback to left should be mirrored (plan: image reuse via flip)
+    var isRightEvt = /_right/.test(evt);
+    var isLeftTarget = /_left/.test(target);
+    var isRightTarget = /_right/.test(target);
+    _mirrorPending = isRightEvt && isLeftTarget && !isRightTarget;
+    // If target itself is not the mirror event, clear pending when not a right->left fallback
+    if (!isRightEvt) _mirrorPending = false;
     return play(target);
   }
 
@@ -321,7 +362,8 @@ var petSM = (function () {
       img: def.img || null, cols: cols, rows: rows, start: start, end: end,
       fps: Math.max(1, def.fps || 8),
       frameW: (def.frameW || (def.img ? def.img.naturalWidth : 0)) / cols,
-      frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows
+      frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows,
+      mirror: !!def.mirror
     };
     if (!current) { play(defaultName(), true); startLoop(); }
     return true;
@@ -335,7 +377,8 @@ var petSM = (function () {
     defaultState: defaultName,
     aspect: function () { var st = states[current]; return st && st.frameH > 0 ? st.frameW / st.frameH : 0; },
     frame: function () { var st = states[current]; return st ? { w: st.frameW, h: st.frameH } : null; },
-    _tick: tick
+    _tick: tick,
+    _reset: function () { states = {}; order = []; current = null; frameIdx = 0; acc = 0; lastTs = null; started = false; _mirrorPending = false; window.__petState.cur = null; }
   };
   return window.petSM;
 })();
@@ -485,7 +528,7 @@ function sendPetIntent() {
       img.onload = function () {
         petSM.register(a.name, {
           img: img, cols: a.cols, rows: a.rows,
-          start: a.frameStart, end: a.frameEnd, fps: a.fps
+          start: a.frameStart, end: a.frameEnd, fps: a.fps, mirror: !!a.mirror
         });
       };
       img.onerror = function () { /* unreachable sheet → keep CSS face */ };

@@ -405,6 +405,7 @@ type AssistantAction struct {
 	FrameStart      int    `yaml:"frameStart,omitempty" json:"frameStart,omitempty"`
 	FrameEnd        int    `yaml:"frameEnd,omitempty" json:"frameEnd,omitempty"`
 	Fps             int    `yaml:"fps,omitempty" json:"fps,omitempty"`
+	Mirror          bool   `yaml:"mirror,omitempty" json:"mirror,omitempty"`
 }
 
 // Config is the top-level configuration structure.

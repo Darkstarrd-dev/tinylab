@@ -23,9 +23,9 @@ function assistantEscape(s) {
 }
 
 function assistantActionSummary(a) {
-  if (!a || !a.spritesheetPath) return t('assistantActionNoSheet');
+  if (!a || !a.spritesheetPath) return t('assistantActionNoSheet') + (a && a.mirror ? ' · mirrored' : '');
   var grid = (a.cols || 1) + '×' + (a.rows || 1);
-  return grid + ' · ' + t('assistantActionSummaryFrames', [String(a.frameStart || 0), String(a.frameEnd || 0)]) + ' · ' + (a.fps || 8) + ' fps';
+  return grid + ' · ' + t('assistantActionSummaryFrames', [String(a.frameStart || 0), String(a.frameEnd || 0)]) + ' · ' + (a.fps || 8) + ' fps' + (a.mirror ? ' · mirrored' : '');
 }
 
 function assistantActionRowHtml(a, i) {
@@ -40,13 +40,14 @@ function assistantActionRowHtml(a, i) {
 }
 
 // Actions are grouped by the preset their name belongs to (first match wins,
-// e.g. idle -> pet); anything else lands in Other.
+// Moves first; other groups keep only non-move names.
 function assistantActionGroupOf(name) {
   var low = (name || '').toLowerCase();
-  var order = ['pet', 'platformer', 'topdown'];
-  for (var i = 0; i < order.length; i++) {
-    if ((__assistantActionPresets[order[i]] || []).indexOf(low) >= 0) return order[i];
-  }
+  if (__assistantMoveActions.indexOf(low) >= 0) return 'move';
+  // pet/platformer/topdown non-move only
+  if (['drag','think','reply','error','notify','poke'].indexOf(low) >= 0) return 'pet';
+  if (['jump','fall'].indexOf(low) >= 0) return 'platformer';
+  if (['attack'].indexOf(low) >= 0) return 'topdown';
   return 'other';
 }
 
@@ -62,11 +63,12 @@ function renderAssistantActions() {
     box.innerHTML = html + '<p class="muted" style="margin:4px 0">' + assistantEscape(t('assistantActionNone')) + '</p>';
     return;
   }
-  var buckets = { pet: [], platformer: [], topdown: [], other: [] };
+  var buckets = { move: [], pet: [], platformer: [], topdown: [], other: [] };
   for (var i = 0; i < actions.length; i++) {
     buckets[assistantActionGroupOf(actions[i] && actions[i].name)].push(i);
   }
   var groupDefs = [
+    { id: 'move',       label: t('assistantGroupMove') || 'Move' },
     { id: 'pet',        label: t('assistantStateGroupPet') },
     { id: 'platformer', label: t('assistantStateGroupPlatformer') },
     { id: 'topdown',    label: t('assistantStateGroupTopdown') },
@@ -95,6 +97,7 @@ function assistantAddAction() {
     }
   }
   actions.push({ name: name, spritesheetPath: '', cols: 1, rows: 1, frameStart: 0, frameEnd: 0, fps: 8 });
+  __assistantAutoMirrorFor(name.toLowerCase());
   renderAssistantActions();
   try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSM0) {}
   var newInput = document.getElementById('settings-assistant-new-action');
@@ -102,13 +105,26 @@ function assistantAddAction() {
 }
 
 // ----- Action presets per game type ----------------------------------------
-// Each preset is the set of state-machine events a demo game type needs; the
-// button appends the missing action names so the user only has to bind a
-// spritesheet per action afterwards.
+// Move actions: 8-directional + idle, shared by all game types.
+var __assistantMoveActions = ['idle', 'move_left', 'move_up_left', 'move_up', 'move_up_right', 'move_right', 'move_down_right', 'move_down', 'move_down_left'];
+// Pair map for auto-mirror: left -> right mirror.
+var __assistantMoveMirrorPairs = {
+  'move_up_left': 'move_up_right',
+  'move_left': 'move_right',
+  'move_down_left': 'move_down_right'
+};
+var __assistantMoveMirrorRev = {
+  'move_up_right': 'move_up_left',
+  'move_right': 'move_left',
+  'move_down_right': 'move_down_left'
+};
+
+// Presets: pet/platformer/topdown keep non-move states; move is separate button.
 var __assistantActionPresets = {
-  pet: ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'],
-  platformer: ['idle', 'walk', 'walk_left', 'run', 'run_left', 'jump', 'fall'],
-  topdown: ['idle', 'walk_up', 'walk_down', 'walk_left', 'walk_up_left', 'walk_down_left', 'attack']
+  pet: ['drag', 'think', 'reply', 'error', 'notify', 'poke'],
+  platformer: ['jump', 'fall'],
+  topdown: ['attack'],
+  move: __assistantMoveActions.slice()
 };
 
 function assistantAddPreset(kind) {
@@ -129,6 +145,38 @@ function assistantAddPreset(kind) {
   renderAssistantActions();
   try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSMp) {}
   toast(added > 0 ? t('assistantPresetAdded', [String(added)]) : t('assistantPresetExists'), added > 0 ? 'success' : 'info');
+}
+
+function __assistantHasAction(nameLow) {
+  var actions = window.__assistantActions || [];
+  for (var i = 0; i < actions.length; i++) if ((actions[i].name || '').toLowerCase() === nameLow) return true;
+  return false;
+}
+
+function __assistantAutoMirrorFor(newNameLow) {
+  var actions = window.__assistantActions || [];
+  var peer = (__assistantMoveMirrorPairs[newNameLow] || __assistantMoveMirrorRev[newNameLow] || '').toLowerCase();
+  if (!peer) return;
+  var peerExists = __assistantHasAction(peer);
+  // Only auto-create if peer does not already exist; mirror flag on source
+  if (peerExists) return;
+  // Find source action to mirror
+  var src = null;
+  for (var i = 0; i < actions.length; i++) if ((actions[i].name || '').toLowerCase() === newNameLow) { src = actions[i]; break; }
+  if (!src) return;
+  // Auto-create mirrored peer
+  var canonName = peer.indexOf('move_') === 0 ? peer : peer;
+  // Use display canonical with underscore: move_up_right etc keep as is
+  actions.push({
+    name: peer,
+    spritesheetPath: src.spritesheetPath || '',
+    cols: src.cols || 1,
+    rows: src.rows || 1,
+    frameStart: src.frameStart || 0,
+    frameEnd: (src.frameEnd !== undefined ? src.frameEnd : 0),
+    fps: src.fps || 8,
+    mirror: true
+  });
 }
 
 function assistantRemoveAction(i) {
@@ -152,25 +200,40 @@ var __assistantSMAliases = {
   error:  ['error', 'confused', 'sad'],
   notify: ['notify', 'alert', 'notice'],
   poke:   ['poke', 'click', 'wave', 'greet'],
-  walk:   ['walk', 'move'],
-  run:    ['run', 'dash'],
+  // canonical move aliases map to move_* actions
+  move_left:       ['move_left', 'walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
+  move_right:      ['move_right', 'walk_right', 'walk_r', 'right_walk', 'move_left', 'walk', 'move'],
+  move_up:         ['move_up', 'walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
+  move_down:       ['move_down', 'walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
+  move_up_left:    ['move_up_left', 'walk_up_left', 'walk_ul', 'walk_nw', 'move_up', 'move_left', 'walk', 'move'],
+  move_down_left:  ['move_down_left', 'walk_down_left', 'walk_dl', 'walk_sw', 'move_down', 'move_left', 'walk', 'move'],
+  move_up_right:   ['move_up_right', 'walk_up_right', 'walk_ur', 'walk_ne', 'move_up_left', 'walk_up_left', 'move_up', 'move_left', 'walk', 'move'],
+  move_down_right: ['move_down_right', 'walk_down_right', 'walk_dr', 'walk_se', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move'],
+  // legacy walk_* aliases kept for backward compat (actions still may be named walk_*)
+  walk:   ['walk', 'move', 'move_right', 'move_left'],
+  run:    ['run', 'dash', 'move'],
   jump:   ['jump', 'leap'],
   fall:   ['fall'],
   attack: ['attack', 'shoot', 'hit'],
-  walk_left: ['walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
-  run_left: ['run_left', 'run_l', 'run', 'dash', 'walk', 'move'],
-  walk_up: ['walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
-  walk_down: ['walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
-  walk_up_left: ['walk_up_left', 'walk_ul', 'walk_nw', 'walk_up', 'walk_left', 'walk', 'move'],
-  walk_down_left: ['walk_down_left', 'walk_dl', 'walk_sw', 'walk_down', 'walk_left', 'walk', 'move']
+  walk_left: ['walk_left', 'move_left', 'walk_l', 'left_walk', 'walk', 'move'],
+  run_left: ['run_left', 'move_left', 'run_l', 'run', 'dash', 'walk', 'move'],
+  walk_up: ['walk_up', 'move_up', 'up_walk', 'walk_north', 'walk', 'move'],
+  walk_down: ['walk_down', 'move_down', 'down_walk', 'walk_south', 'walk', 'move'],
+  walk_up_left: ['walk_up_left', 'move_up_left', 'walk_ul', 'walk_nw', 'walk_up', 'move_up', 'walk_left', 'move_left', 'walk', 'move'],
+  walk_down_left: ['walk_down_left', 'move_down_left', 'walk_dl', 'walk_sw', 'walk_down', 'move_down', 'walk_left', 'move_left', 'walk', 'move'],
+  walk_right:      ['walk_right', 'move_right', 'walk_r', 'right_walk', 'move_left', 'walk_left', 'walk', 'move'],
+  run_right:       ['run_right', 'move_right', 'run_r', 'right_run', 'run_left', 'move_left', 'run', 'dash', 'walk', 'move'],
+  walk_up_right:   ['walk_up_right', 'move_up_right', 'walk_ur', 'walk_ne', 'move_up_right', 'move_up_left', 'walk_up_left', 'walk_up', 'move_up', 'move_left', 'walk', 'move'],
+  walk_down_right: ['walk_down_right', 'move_down_right', 'walk_dr', 'walk_se', 'move_down_right', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move']
 };
 
 // Event groups shown in the state matrix. domain 'pet' rows dispatch to the
 // live pet; domain 'demo' rows drive the demo page's state machine (__ademo).
 var __assistantSMGroups = [
-  { key: 'Pet',        domain: 'pet',  events: ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'] },
-  { key: 'Platformer', domain: 'demo', events: ['idle', 'walk', 'walk_left', 'run', 'run_left', 'jump', 'fall'] },
-  { key: 'Topdown',    domain: 'demo', events: ['idle', 'walk_up', 'walk_down', 'walk_left', 'walk_up_left', 'walk_down_left', 'attack'] }
+  { key: 'Move',       domain: 'pet',  events: ['idle', 'move_left', 'move_up_left', 'move_up', 'move_up_right', 'move_right', 'move_down_right', 'move_down', 'move_down_left'] },
+  { key: 'Pet',        domain: 'pet',  events: ['drag', 'think', 'reply', 'error', 'notify', 'poke'] },
+  { key: 'Platformer', domain: 'demo', events: ['jump', 'fall'] },
+  { key: 'Topdown',    domain: 'demo', events: ['attack'] }
 ];
 
 function assistantResolveAlias(eventKey, actions) {
@@ -380,6 +443,7 @@ function assistantEditAction(i) {
             '<input type="number" class="input" id="assistant-editor-frame-start" value="' + start + '" min="0" style="width:90px"></div>' +
           '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionFrameTo')) + '</label>' +
             '<input type="number" class="input" id="assistant-editor-frame-end" value="' + end + '" min="0" style="width:90px"></div>' +
+          '<div style="display:flex;align-items:center;gap:8px"><span class="muted" style="font-size:12px">Mirror</span><label class="toggle-switch"><input type="checkbox" id="assistant-editor-mirror"' + (a.mirror ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>' +
         '</div>' +
       '</div>' +
       '<div class="modal-footer">' +
@@ -418,7 +482,14 @@ function assistantEditAction(i) {
     }
   });
 
-  if (a.spritesheetPath) assistantLoadSheetPreview(a.spritesheetPath);
+  var mirrorEl = document.getElementById('assistant-editor-mirror');
+  if (mirrorEl) mirrorEl.addEventListener('change', assistantDrawSheet);
+
+  if (a.spritesheetPath) {
+    // Existing action: spritesheet on disk -> use sheet-image endpoint (never file://)
+    // Fallback: if action already has a preview registered, it will still be served via sheet-image
+    assistantLoadSheetPreview('/api/assistant/sheet-image/' + encodeURIComponent(a.name));
+  }
 }
 
 function closeAssistantActionEditor() {
@@ -542,11 +613,31 @@ function assistantDrawSheet() {
   var ctx = canvas.getContext('2d');
   if (!ctx) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Draw base sheet without mirroring; mirroring applies only to selected frames' output
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  var mirror = !!(document.getElementById('assistant-editor-mirror') || {}).checked;
 
   var g = assistantGridGeom();
   if (!g) return;
   var sel = assistantSelectedRange();
+  // If mirror is on, redraw selected cells mirrored to preview the flipped output
+  if (mirror) {
+    for (var mIdx = sel.start; mIdx <= sel.end; mIdx++) {
+      var mCol = mIdx % g.cols;
+      var mRow = Math.floor(mIdx / g.cols);
+      var mDX = mCol * g.cellW;
+      var mDY = mRow * g.cellH;
+      var sx = mCol * (img.naturalWidth / g.cols);
+      var sy = mRow * (img.naturalHeight / g.rows);
+      var sw = img.naturalWidth / g.cols;
+      var sh = img.naturalHeight / g.rows;
+      ctx.save();
+      ctx.translate(mDX + g.cellW, mDY);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, g.cellW, g.cellH);
+      ctx.restore();
+    }
+  }
 
   // Highlight the selected range first so grid lines draw on top.
   ctx.fillStyle = assistantAccentColor(0.28);
@@ -675,6 +766,11 @@ function assistantSaveActionEditor(index) {
   var sel = assistantSelectedRange();
   var fps = parseInt((document.getElementById('assistant-editor-fps') || {}).value, 10);
   if (isNaN(fps) || fps < 1) fps = 8;
+  var mirror = !!((document.getElementById('assistant-editor-mirror') || {}).checked);
+  var oldName = (actions[index].name || '').toLowerCase();
+  var newNameLow = name.toLowerCase();
+  var wasMove = !!(__assistantMoveMirrorPairs[oldName] || __assistantMoveMirrorRev[oldName] || __assistantMoveMirrorPairs[newNameLow] || __assistantMoveMirrorRev[newNameLow] || newNameLow === 'move_up' || newNameLow === 'move_down' || newNameLow === 'idle');
+  // Determine if this is a new move entry becoming set (has sheet) and peer missing
   actions[index] = {
     name: name,
     spritesheetPath: (pathEl && pathEl.dataset && pathEl.dataset.path) || '',
@@ -682,10 +778,31 @@ function assistantSaveActionEditor(index) {
     rows: g ? g.rows : 1,
     frameStart: sel.start,
     frameEnd: sel.end,
-    fps: fps
+    fps: fps,
+    mirror: mirror
   };
+  // Auto-mirror: if saved as a move direction and peer doesn't exist, create mirrored peer (only once)
+  if (wasMove || __assistantMoveMirrorPairs[newNameLow] || __assistantMoveMirrorRev[newNameLow]) {
+    var peerLow = (__assistantMoveMirrorPairs[newNameLow] || __assistantMoveMirrorRev[newNameLow] || '').toLowerCase();
+    if (peerLow && !__assistantHasAction(peerLow)) {
+      // Copy from just-saved entry
+      var src2 = actions[index];
+      actions.push({
+        name: peerLow,
+        spritesheetPath: src2.spritesheetPath || '',
+        cols: src2.cols || 1,
+        rows: src2.rows || 1,
+        frameStart: src2.frameStart || 0,
+        frameEnd: (src2.frameEnd !== undefined ? src2.frameEnd : 0),
+        fps: src2.fps || 8,
+        mirror: true
+      });
+      // If both already existed, do not auto-overwrite (override allowed)
+    }
+  }
   closeAssistantActionEditor();
   renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eMir) {}
 }
 
 // assistantModelBtnClick wires the Assistant modal's model button: reads the

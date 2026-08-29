@@ -558,6 +558,12 @@ async function openPathSettingsModal(opts) {
     var logPh = configDir ? configDir + '/traces' : 'traces';
     formRows += browseRow('logDir', 'modal-dl-log-dir', logVal, logPh, 'directory', null, logInit);
   }
+  if (sections.gamesDir) {
+    var gamesVal = (res && res.gamesDir) || '';
+    var gamesInit = gamesVal || (configDir ? configDir + '/games' : '');
+    var gamesPh = configDir ? configDir + '/games' : 'games';
+    formRows += browseRow('gamesDir', 'modal-dl-games-dir', gamesVal, gamesPh, 'directory', null, gamesInit);
+  }
   if (opts.useProxy) {
     formRows += '<div class="dl-settings-field" style="margin-bottom:12px;">' +
       '<div class="dl-settings-row" style="justify-content:space-between; align-items:center;">' +
@@ -638,6 +644,7 @@ async function openPathSettingsModal(opts) {
     if (sections.imageDir) payload.imageSaveDir = (document.getElementById('modal-dl-image-dir') || {}).value || '';
     if (sections.docDir) payload.docDir = (document.getElementById('modal-dl-doc-dir') || {}).value || '';
     if (sections.logDir) payload.trace = { logDir: (document.getElementById('modal-dl-log-dir') || {}).value || '' };
+    if (sections.gamesDir) payload.gamesDir = (document.getElementById('modal-dl-games-dir') || {}).value || '';
 
     apiPatch('/settings', payload)
       .then(function() {

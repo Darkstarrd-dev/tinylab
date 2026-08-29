@@ -362,8 +362,8 @@ check('wiring: i18n defines new demo-type / ScaleTo / preset keys in en+cn', () 
   ['demoTypeTopdown', 'demoTypeIsometric', 'demoSubSurvivor', 'demoSubTactic',
    'demoScaleToW', 'demoScaleToH', 'demoHintTopdown', 'demoHintTactic',
    'demoBgMode', 'demoBgFitWidth', 'demoBgFitHeight', 'demoBgPixel',
-   'assistantPresetPlatformer', 'assistantPresetTopdown', 'assistantPresetPet',
-   'assistantStateGroupPet', 'assistantStateGroupPlatformer', 'assistantStateGroupTopdown',
+   'assistantPresetPlatformer', 'assistantPresetTopdown', 'assistantPresetPet', 'assistantPresetMove',
+   'assistantStateGroupPet', 'assistantStateGroupPlatformer', 'assistantStateGroupTopdown', 'assistantGroupMove',
    'assistantGroupOther', 'assistantDemoNotOpen'
   ].forEach(k => {
     const hits = i18n.split(k + ':').length - 1;
@@ -396,12 +396,12 @@ console.log('assistant demo directional events:');
 check('topdown: movement direction maps to directional events', () => {
   resetTopdown(400, 200);
   const cases = [
-    { keys: { up: true, left: true }, ev: 'walk_up_left' },
-    { keys: { down: true, left: true }, ev: 'walk_down_left' },
-    { keys: { up: true }, ev: 'walk_up' },
-    { keys: { down: true }, ev: 'walk_down' },
-    { keys: { left: true }, ev: 'walk_left' },
-    { keys: { right: true }, ev: 'walk' }
+    { keys: { up: true, left: true }, ev: 'move_up_left' },
+    { keys: { down: true, left: true }, ev: 'move_down_left' },
+    { keys: { up: true }, ev: 'move_up' },
+    { keys: { down: true }, ev: 'move_down' },
+    { keys: { left: true }, ev: 'move_left' },
+    { keys: { right: true }, ev: 'move_right' }
   ];
   for (const c of cases) {
     resetTopdown(400, 200);
@@ -420,14 +420,14 @@ check('scroller: left movement maps to left-variant events', () => {
   resetEnt(400, 450 - 64);
   demo.keys.left = true;
   demo.step(0.016);
-  assert.strictEqual(demo.motionEvent(), 'walk_left', 'walking left must emit walk_left');
+  assert.strictEqual(demo.motionEvent(), 'move_left', 'walking left must emit move_left');
   demo.keys.ctrl = true;
   demo.step(0.016);
   assert.strictEqual(demo.motionEvent(), 'run_left', 'running left must emit run_left');
   demo.keys.ctrl = false; demo.keys.left = false;
   demo.keys.right = true;
   demo.step(0.016);
-  assert.strictEqual(demo.motionEvent(), 'walk', 'walking right stays on the base event');
+  assert.strictEqual(demo.motionEvent(), 'walk', 'walking right stays on base walk event');
 });
 
 check('SM: left-variant states are flagged so the renderer skips mirroring', () => {

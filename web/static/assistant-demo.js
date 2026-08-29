@@ -136,22 +136,36 @@ var ademoSM = (function () {
   var order = [];
   var current = null;
   var frameIdx = 0, acc = 0;
+  var _mirrorPending = false;
 
   // Directional variants resolve to their own sprite first, then fall back to
   // the base animation (which the renderer mirrors for left movement).
   var EVENT_ALIASES = {
     idle: ['idle', 'stand', 'default'],
+    // move canonical
+    move_left:       ['move_left', 'walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
+    move_right:      ['move_right', 'walk_right', 'walk_r', 'right_walk', 'move_left', 'walk', 'move'],
+    move_up:         ['move_up', 'walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
+    move_down:       ['move_down', 'walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
+    move_up_left:    ['move_up_left', 'walk_up_left', 'walk_ul', 'walk_nw', 'move_up', 'move_left', 'walk', 'move'],
+    move_down_left:  ['move_down_left', 'walk_down_left', 'walk_dl', 'walk_sw', 'move_down', 'move_left', 'walk', 'move'],
+    move_up_right:   ['move_up_right', 'walk_up_right', 'walk_ur', 'walk_ne', 'move_up_left', 'walk_up_left', 'move_up', 'move_left', 'walk', 'move'],
+    move_down_right: ['move_down_right', 'walk_down_right', 'walk_dr', 'walk_se', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move'],
     walk: ['walk', 'move', 'run'],
     run: ['run', 'dash', 'walk', 'move'],
     jump: ['jump', 'leap'],
     fall: ['fall', 'jump', 'leap'],
     attack: ['attack', 'shoot', 'hit'],
-    walk_left: ['walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
-    run_left: ['run_left', 'run_l', 'run', 'dash', 'walk', 'move'],
-    walk_up: ['walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
-    walk_down: ['walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
-    walk_up_left: ['walk_up_left', 'walk_ul', 'walk_nw', 'walk_up', 'walk_left', 'walk', 'move'],
-    walk_down_left: ['walk_down_left', 'walk_dl', 'walk_sw', 'walk_down', 'walk_left', 'walk', 'move']
+    walk_left: ['walk_left', 'move_left', 'walk_l', 'left_walk', 'walk', 'move'],
+    run_left: ['run_left', 'move_left', 'run_l', 'run', 'dash', 'walk', 'move'],
+    walk_up: ['walk_up', 'move_up', 'up_walk', 'walk_north', 'walk', 'move'],
+    walk_down: ['walk_down', 'move_down', 'down_walk', 'walk_south', 'walk', 'move'],
+    walk_up_left: ['walk_up_left', 'move_up_left', 'walk_ul', 'walk_nw', 'move_up', 'move_left', 'walk', 'move'],
+    walk_down_left: ['walk_down_left', 'move_down_left', 'walk_dl', 'walk_sw', 'move_down', 'move_left', 'walk', 'move'],
+    walk_right:      ['walk_right', 'move_right', 'walk_r', 'right_walk', 'move_left', 'walk', 'move'],
+    run_right:       ['run_right', 'move_right', 'run_r', 'right_run', 'run_left', 'move_left', 'run', 'dash', 'walk', 'move'],
+    walk_up_right:   ['walk_up_right', 'move_up_right', 'walk_ur', 'walk_ne', 'move_up_right', 'move_up_left', 'walk_up_left', 'move_up', 'move_left', 'walk', 'move'],
+    walk_down_right: ['walk_down_right', 'move_down_right', 'walk_dr', 'walk_se', 'move_down_right', 'move_down_left', 'walk_down_left', 'move_down', 'move_left', 'walk', 'move']
   };
 
   function resolveAliases(names) {
@@ -170,7 +184,8 @@ var ademoSM = (function () {
       img: def.img || null, cols: cols, rows: rows, start: start, end: end,
       fps: Math.max(1, def.fps || 8),
       frameW: (def.frameW || (def.img ? def.img.naturalWidth : 0)) / cols,
-      frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows
+      frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows,
+      mirror: !!def.mirror
     };
     order.push(name);
     if (!current) current = defaultName();
@@ -179,9 +194,20 @@ var ademoSM = (function () {
 
   function setEvent(ev) {
     var target = resolveAliases(EVENT_ALIASES[ev] || []) || defaultName();
-    if (!target) { current = null; return false; }
-    if (target === current) return true;
+    if (!target) { current = null; _mirrorPending = false; return false; }
+    var isRightEvt = /_right/.test(ev);
+    var isLeftTarget = /_left/.test(target);
+    var isRightTarget = /_right/.test(target);
+    var newMirror = isRightEvt && isLeftTarget && !isRightTarget;
+    if (target === current) {
+      _mirrorPending = newMirror;
+      return true;
+    }
     current = target; frameIdx = 0; acc = 0;
+    _mirrorPending = newMirror;
+    // Clear pending if event is not a right variant
+    if (!isRightEvt) _mirrorPending = false;
+    // Keep pending if right->left fallback, otherwise clear unless action itself is mirrored
     ademoSyncEntitySize();
     return true;
   }
@@ -223,9 +249,11 @@ var ademoSM = (function () {
     // (walk_left / walk_up_left / run_left / ...): the renderer must NOT
     // mirror these frames.
     currentIsLeftVariant: function () { return !!current && current.toLowerCase().indexOf('_left') > 0; },
+    isMirrorPending: function () { return !!_mirrorPending; },
     aliases: EVENT_ALIASES,
     hasActions: function () { return order.length > 0; },
-    reset: function () { states = {}; order = []; current = null; frameIdx = 0; acc = 0; }
+    reset: function () { states = {}; order = []; current = null; frameIdx = 0; acc = 0; _mirrorPending = false; },
+    _state: function (name) { return states[name] || null; }
   };
 })();
 
@@ -489,13 +517,16 @@ function ademoMotionEvent() {
   if (ademoPersist.type1 === 'topdown') {
     if (e.attackUntil && Date.now() < e.attackUntil) return 'attack';
     if (Math.abs(e.vx) > 1 || Math.abs(e.vy) > 1) {
-      if (ademoKeys.ctrl && !ademoKeys.shift) return 'run';
-      var left = e.moveDir.x < 0, up = e.moveDir.y < 0, down = e.moveDir.y > 0;
-      if (up && left) return 'walk_up_left';
-      if (down && left) return 'walk_down_left';
-      if (up) return 'walk_up';
-      if (down) return 'walk_down';
-      if (left) return 'walk_left';
+      var left = e.moveDir.x < 0, right = e.moveDir.x > 0, up = e.moveDir.y < 0, down = e.moveDir.y > 0;
+      var isRun = ademoKeys.ctrl && !ademoKeys.shift;
+      if (up && left) return 'move_up_left';
+      if (down && left) return 'move_down_left';
+      if (up && right) return 'move_up_right';
+      if (down && right) return 'move_down_right';
+      if (up) return 'move_up';
+      if (down) return 'move_down';
+      if (left) return isRun ? 'run_left' : 'move_left';
+      if (right) return isRun ? 'run' : 'move_right';
       return 'walk';
     }
     return 'idle';
@@ -503,7 +534,7 @@ function ademoMotionEvent() {
   if (!e.onGround) return e.vy < 0 ? 'jump' : 'fall';
   if (Math.abs(e.vx) > 1) {
     var run = ademoKeys.ctrl && !ademoKeys.shift && (ademoKeys.left || ademoKeys.right);
-    if (e.vx < 0) return run ? 'run_left' : 'walk_left';
+    if (e.vx < 0) return run ? 'run_left' : 'move_left';
     return run ? 'run' : 'walk';
   }
   return 'idle';
@@ -760,9 +791,13 @@ function ademoDraw() {
   var fr = ademoSM.frame();
   if (fr) {
     ctx.save();
-    // Mirror for left movement only when the current state is NOT a
-    // pre-drawn left-facing variant (walk_left & co. are used as-is).
-    if (e.facing < 0 && !ademoSM.currentIsLeftVariant()) {
+    var cur = ademoSM.current();
+    var st = ademoSM._state && ademoSM._state(cur);
+    var mirroredAction = !!(st && st.mirror);
+    var pendingMirror = !!(ademoSM.isMirrorPending && ademoSM.isMirrorPending());
+    var isLeftVariant = ademoSM.currentIsLeftVariant();
+    var needMirror = mirroredAction || pendingMirror || (e.facing < 0 && !isLeftVariant);
+    if (needMirror) {
       ctx.translate(e.x + e.w / 2, e.y);
       ctx.scale(-1, 1);
       ctx.drawImage(fr.img, fr.sx, fr.sy, fr.w, fr.h, -e.w / 2, 0, e.w, e.h);
@@ -935,7 +970,7 @@ function ademoLoadActions() {
       img.onload = function () {
         ademoSM.register(a.name, {
           img: img, cols: a.cols, rows: a.rows,
-          start: a.frameStart, end: a.frameEnd, fps: a.fps
+          start: a.frameStart, end: a.frameEnd, fps: a.fps, mirror: !!a.mirror
         });
         if (--pending <= 0) ademoSM.setEvent('idle');
         ademoSyncEntitySize();
