@@ -95,10 +95,10 @@ function selectGalleryTool(id){ galleryActiveTool=id; updateGalleryNavLabel(); n
 ## 8. 实施顺序（分阶段，每段可独立交付）
 
 1. **本蓝本+骨架**：落 `docs/music-implementation-plan.md`+`MusicDir`配置+Settings Path项+Gallery下拉占位（本轮）
-2. **Host+Jamendo最小可播**：`host.js+player.js+<audio>+Jamendo` 打通搜索→播放→下载
-3. **国内音源+B站**：接入 Listen1/LX providers + Azusa extractor
-4. **本地+ffmpeg**：`library+transcode` 闭环
-5. **播放列表持久化**：`config.yaml:music.playlists` + `m3u` 导入导出
+2. **Host+Jamendo最小可播（已完成，MVP）**：`host.js+player.js+<audio>+Jamendo` 打通搜索→播放→下载（`web/static/music/host|player|music.js` + `internal/api/music/register.go: library/proxy/download` + `internal/api/router.go` + `docs/music-architecture.md` 基线，见 `docs/music-architecture.md` §2–§5）
+3. **国内音源+B站（deferred，下一步）**：接入 Listen1/LX providers + Azusa extractor（`host.loadFromSource(fetch(js))` 热加载注入 `registry`，无需改后端）
+4. **本地+ffmpeg（deferred）**：`library+transcode` 闭环（`POST /api/music/transcode` `ffmpeg -i pipe:0 -f mp3 pipe:1`，`wma/ape/flac/alac` 全量 + `GET /api/music/file` 静态透传）
+5. **播放列表持久化（deferred）**：`config.yaml:music.playlists` + `m3u` 导入导出（`Playlist{id,name,tracks:Song[]}` + `localStorage` 双写 + `importPlaylist(url)`）
 
 ## 9. 验证
 

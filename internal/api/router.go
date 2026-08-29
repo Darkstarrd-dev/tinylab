@@ -30,6 +30,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/fsbrowse"
 	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/api/games"
+	"github.com/tinyrouter/tinyrouter/internal/api/music"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
@@ -222,7 +223,7 @@ func securityHeaders(port int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(r.URL.Path, "/v1/") {
-				csp := fmt.Sprintf("default-src 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:%d ws://127.0.0.1:*", port)
+				csp := fmt.Sprintf("default-src 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' https://api.jamendo.com ws://127.0.0.1:%d ws://127.0.0.1:*", port)
 				w.Header().Set("Content-Security-Policy", csp)
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
@@ -367,6 +368,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
 	gamesHandler := games.NewHandler(apiDeps)
+	musicHandler := music.NewHandler(apiDeps)
 	archiveHandler := archiveapi.NewHandler(apiDeps, rt.archiveRunner)
 	playgroundHandler := playgroundapi.NewHandler(apiDeps)
 	// Gallery resolves registered archive sources through the /api/archive
@@ -443,6 +445,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 			// Games plugins
 			r.Route("/games", func(r chi.Router) { gamesHandler.Register(r) })
+
+			// Music (local playback + Jamendo/online; no extra feature gate)
+			r.Route("/music", func(r chi.Router) { musicHandler.Register(r) })
 		})
 	})
 

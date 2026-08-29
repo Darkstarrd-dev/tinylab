@@ -80,7 +80,12 @@ window.__hasPlayground = false;
 <button type="button" role="menuitem" data-gallery-tool="gallery">Gallery</button>
 <button type="button" role="menuitem" data-gallery-tool="music">Music</button>
 </div></div>
-<button class="nav-item" type="button" data-page="demo">Demo</button>
+<div class="utility-nav-wrap demo-nav-wrap">
+<button class="nav-item" type="button" data-page="demo" aria-haspopup="menu" aria-expanded="false">Demo</button>
+<div id="demo-menu" class="utility-menu" role="menu" hidden>
+<button type="button" role="menuitem" data-demo-tool="ademo">Assistant</button>
+<button type="button" role="menuitem" data-demo-tool="games">Games</button>
+</div></div>
 </nav>
 <div id="quickslot-header" class="quickslot-header"></div>
 <div class="top-header-stats">
@@ -129,6 +134,8 @@ window.__hasPlayground = false;
 <script src="/auth.js"></script>
 <script src="/app.js"></script>
 <script src="/shortcuts.js"></script>
+<script src="/music/host.js"></script>
+<script src="/music/player.js"></script>
 <script src="/music/music.js"></script>
 <script src="/settings/settings.js"></script>
 <script src="/settings/settings_trace.js"></script>
@@ -173,6 +180,7 @@ window.__hasPlayground = false;
 <script src="/utility/editor/editor_layout.js"></script>
 <script src="/utility/editor/editor.js"></script>
 <script src="/utility/editor/editor_shell.js"></script>
+<script src="/utility/editor/tilemap_editor.js"></script>
 <script src="/utility/editor/editor-logs.js"></script>
 <script src="/utility/editor/editor_textreview_split.js"></script>
 <script src="/utility/editor/editor_textreview_diff.js"></script>
