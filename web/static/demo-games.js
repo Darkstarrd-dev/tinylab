@@ -92,12 +92,21 @@ function dgIsFullscreenActive() { return document.body.classList.contains('demo-
 
 // ---- loaders ----------------------------------------------------------------
 function dgFetchList() {
-  return (typeof apiFetch==='function'?apiFetch:fetch)('/api/games').then(function (r) { // P1-05a
-    if (!r.ok) throw new Error('GET /api/games -> ' + r.status);
-    return r.json();
-  }).then(function (data) {
-    return (data && data.games) || [];
-  });
+  var p;
+  if (typeof apiFetch === 'function') {
+    // apiFetch already parses JSON and wraps non-ok as rejected promise with text
+    p = apiFetch('/api/games').then(function(data){
+      // apiFetch returns the decoded JSON; could be {games:[...]} or raw array
+      if (Array.isArray(data)) return data;
+      return (data && data.games) || [];
+    });
+  } else {
+    p = fetch('/api/games').then(function(r){
+      if(!r.ok) throw new Error('GET /api/games -> '+r.status);
+      return r.json();
+    }).then(function(data){ return (data && data.games) || []; });
+  }
+  return p;
 }
 
 // Lazy-load vendored Phaser exactly once.
@@ -286,9 +295,11 @@ function dgEnsureToolbar() {
   dgUi.status = status;
   dgUi.toolbarFields = injected;
   launchBtn.addEventListener('click', function () {
-    var id = sel.value;
-    if (!id) return;
-    dgLaunch(id).catch(function () {});
+    var cur = dgUi && dgUi.select ? dgUi.select.value : sel.value;
+    if (!cur) { dgSetStatus(t('demoGamesEmpty')); return; }
+    dgLaunch(cur).catch(function (e) {
+      console.warn('[Games] launch failed', e);
+    });
     launchBtn.blur();
   });
   stopBtn.addEventListener('click', function () { dgStopGame(); stopBtn.blur(); });
@@ -298,7 +309,8 @@ function dgEnsureToolbar() {
     if (wasRunning && dgRegistry[wasRunning]) delete dgRegistry[wasRunning];
     dgRefreshList().then(function () {
       if (wasRunning) {
-        sel.value = wasRunning;
+        if (dgUi && dgUi.select) dgUi.select.value = wasRunning;
+        else sel.value = wasRunning;
         if (selWrap && selWrap._customWrap) {
           // Custom select label will be synced by dgSyncUi select replacement
         }
@@ -328,7 +340,7 @@ function dgRenderSelect() {
     }
     sel = newSel;
   }
-  if (sel && dgGames.length) {
+  if (sel) {
     sel.innerHTML = '';
     if (!dgGames.length) {
       var opt = document.createElement('option');
@@ -342,6 +354,8 @@ function dgRenderSelect() {
         opt.textContent = (g.title || g.id) + (g.version ? ' v' + g.version : '');
         sel.appendChild(opt);
       });
+      // Preserve selection across re-render (first load default to first game)
+      if (!sel.value && dgGames[0]) sel.value = dgGames[0].id;
     }
   }
 }
@@ -350,11 +364,8 @@ window.dgEnsureToolbar = dgEnsureToolbar;
 
 function renderDemoGames(container) {
   cleanupDemoGames();
-
-  // Shell is created by renderAssistantDemo (single toggle + toolbar in demo-toolbar).
   var shell = container.querySelector('.demo-shell');
   if (!shell) return;
-
   var gamesPane = shell.querySelector('.demo-pane-games');
   if (!gamesPane) {
     gamesPane = document.createElement('div');
@@ -362,8 +373,6 @@ function renderDemoGames(container) {
     gamesPane.hidden = true;
     shell.appendChild(gamesPane);
   }
-
-  // Toolbar row is now owned by .demo-toolbar in the shell; create stub pane only.
   gamesPane.innerHTML = '<div class="dg-root"><div class="dg-stage-wrap" hidden><div class="dg-stage"></div><button type="button" class="dg-fs-exit" aria-label="' + escapeHtml(t('demoExitFullscreen')) + '" style="display:none">' + DG_SVG_CLOSE + '</button></div></div>';
   var root = gamesPane.querySelector('.dg-root');
   dgUi = dgUi || {};
@@ -371,17 +380,16 @@ function renderDemoGames(container) {
   dgUi.stageWrap = root.querySelector('.dg-stage-wrap');
   dgUi.stage = root.querySelector('.dg-stage');
   dgUi.fsExit = root.querySelector('.dg-fs-exit');
-  // Toolbar fields live in shell's demo-toolbar; ensure them.
   dgEnsureToolbar();
   if (!dgUi.select) {
-    // Select will be populated by refresh; keep compatibility if toolbar injection failed
     var fallbackSel = gamesPane.querySelector('.dg-select') || document.querySelector('.dg-select');
     if (fallbackSel) dgUi.select = fallbackSel;
   }
-
   if (dgUi.fsExit) dgUi.fsExit.addEventListener('click', function () { dgSetFullscreen(false); this.blur(); });
-
-  dgRefreshList();
+  dgRefreshList().catch(function(e){
+    // Surface fetch errors to status line; previous code silently required manual reload to appear
+    try{ dgSetStatus(t('demoGamesLoadError')+': '+(e&&e.message||e)); }catch(_){ dgSetStatus('load error: '+(e&&e.message||e)); }
+  });
 }
 
 function dgRefreshList() {

@@ -106,5 +106,12 @@ function renderDemoWithMenu(container) {
     return;
   }
   // Default: Assistant demo
-  try { renderAssistantDemo(container); } catch(e){ console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; }
+  try { renderAssistantDemo(container); } catch(e){ console.error('renderAssistantDemo failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Demo init failed: '+(e&&e.message||e)+'</div>'; return; }
+  // Games plugin area: shell was created by renderAssistantDemo; populate
+  // the games pane (list + stage + toolbar fields). Without this the Games
+  // tab stays empty — the list only appears after a manual Reload and launch
+  // fails with "game stage not rendered" (swallowed by the catch).
+  if (typeof renderDemoGames === 'function') {
+    try { renderDemoGames(container); } catch(e){ console.error('renderDemoGames failed', e); }
+  }
 }

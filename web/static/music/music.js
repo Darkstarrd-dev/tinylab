@@ -13,15 +13,29 @@
     return (m<10?'0':'')+m+':'+(s<10?'0':'')+s;
   }
 
+  function musicUseProxy(){
+    try{ return localStorage.getItem('tr:music:useProxy')==='1'; }catch(e){ return false; }
+  }
+  function setMusicUseProxy(v){
+    try{ localStorage.setItem('tr:music:useProxy', v?'1':'0'); }catch(e){}
+  }
+
   function ensurePlayer(){
     if(player) return player;
     player = new MusicPlayer();
-    player.on('track', function(song){ syncNowPlaying(song); });
+    player.on('track', function(song){ syncNowPlaying(song); musicLog('Now playing: "'+(song&&song.title||'')+'" — '+ (song&&song.artist||''),'ok'); });
     player.on('timeupdate', syncProgress);
     player.on('play', syncPlayBtn);
     player.on('pause', syncPlayBtn);
-    player.on('error', function(e){ console.warn('[Music] play error', e); });
+    player.on('error', function(e){ var msg=(e&&e.message)||String(e); console.warn('[Music] play error', e); musicLog('Audio error: '+msg+' — check media URL / CORS / Referer','error'); if(typeof toast==='function') toast('Playback failed: '+msg,'error'); });
     player.audio.addEventListener('loadedmetadata', syncProgress);
+    // <audio> 自身错误（MediaError）也进 Activity
+    player.audio.addEventListener('error', function(){
+      var me=player.audio.error;
+      var code=me?me.code:0;
+      var msg=me?('MediaError '+code+': '+(me.message||'')):'audio error';
+      musicLog(msg,'error');
+    });
     return player;
   }
 
@@ -76,15 +90,36 @@
     });
   }
 
+  // Download-style trace panel: explicit step/request/feedback display so silent failures are visible.
+  var musicTrace = []; // {ts, msg, kind:'step'|'req'|'ok'|'warn'|'error'}
+  function musicLog(msg, kind){
+    var ts = new Date().toLocaleTimeString();
+    musicTrace.push({ts: ts, msg: String(msg), kind: kind||'step'});
+    if(musicTrace.length>120) musicTrace.shift();
+    console.log('[Music]['+kind+'] '+msg);
+    renderMusicTrace();
+  }
+  function renderMusicTrace(){
+    var el=document.getElementById('music-trace');
+    if(!el) return;
+    if(!musicTrace.length){ el.innerHTML='<div style="color:var(--text-tertiary);font-size:11px;padding:4px">No activity yet — search to see steps here. Like Download, each step and request is logged with feedback.</div>'; return; }
+    el.innerHTML = musicTrace.slice(-80).map(function(e){
+      var c = e.kind==='error' ? 'var(--danger)' : e.kind==='warn' ? 'var(--warning,#e6a23c)' : e.kind==='ok' ? 'var(--success,#67c23a)' : e.kind==='req' ? 'var(--text-secondary)' : 'var(--text-tertiary)';
+      return '<div style="font-size:11px;line-height:1.5;color:'+c+';white-space:pre-wrap;word-break:break-all">['+escapeHtml(e.ts)+'] '+escapeHtml(e.msg)+'</div>';
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+  }
+
   function renderMusic(container){
     container.innerHTML = ''+
       '<div class="music-page" style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden">'+
         '<div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--glass-border);flex-wrap:wrap">'+
           '<div style="display:flex;gap:8px;align-items:center;flex:1;min-width:220px">'+
-            '<input id="music-search" placeholder="Search — e.g. lofi, piano, jazz (Jamendo+Bilibili)" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
+            '<input id="music-search" placeholder="Search — e.g. lofi, piano, jazz" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
             '<button id="music-search-btn" class="btn btn-primary">Search</button>'+
           '</div>'+
           '<div id="music-provider-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>'+
+          '<label class="btn btn-ghost" style="cursor:pointer;white-space:nowrap"><input id="music-use-proxy" type="checkbox" style="margin-right:6px;vertical-align:middle">Proxy</label>'+
           '<label class="btn btn-ghost" style="cursor:pointer">Local<input id="music-file" type="file" accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.wma,.ape" multiple hidden></label>'+
           '<button id="music-refresh-lib" class="btn btn-ghost" title="Refresh local Musics">Library</button>'+
           '<button class="btn btn-ghost" onclick="openPathSettingsModal({title:t(\'pathSettings\'),sections:{musicDir:true}})">'+escapeHtml(t('pathSettings')||'Path Settings')+'</button>'+
@@ -107,6 +142,10 @@
             '<div style="border-top:1px solid var(--glass-border);padding:10px 12px;max-height:38%;overflow:auto">'+
               '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px"><b style="font-size:13px">Library — Musics</b><span id="music-lib-dir" style="font-size:11px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%"></span></div>'+
               '<div id="music-library" style="font-size:12px;color:var(--text-secondary)">—</div>'+
+            '</div>'+
+            '<div style="border-top:1px solid var(--glass-border);padding:8px 12px;max-height:32%;overflow:auto;background:rgba(0,0,0,0.12)">'+
+              '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px"><b style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-tertiary)">Activity — steps &amp; requests (like Download)</b><div style="display:flex;gap:6px"><button id="music-trace-copy" class="btn btn-ghost" style="padding:3px 8px;font-size:11px">Copy</button><button id="music-trace-clear" class="btn btn-ghost" style="padding:3px 8px;font-size:11px">Clear</button></div></div>'+
+              '<div id="music-trace" style="font-family:ui-monospace,monospace;font-size:11px;min-height:64px;max-height:160px;overflow:auto;border:1px solid var(--glass-border);border-radius:8px;padding:6px;background:var(--glass-bg)"></div>'+
             '</div>'+
           '</div>'+
           // right: queue + player
@@ -137,12 +176,9 @@
     ensurePlayer();
     bindMusicEvents(container);
     renderResults([]);
+    renderMusicTrace();
     refreshLibrary();
-    // initial demo search
-    setTimeout(function(){
-      var inp=document.getElementById('music-search');
-      if(inp && !inp.value) { inp.value='lofi'; doSearch(); }
-    }, 120);
+    // Issue 6: 不再自动检索。仅在结果为空时提示用户主动点击搜索
   }
 
   function renderProviderChips(){
@@ -172,14 +208,34 @@
     renderProviderChips();
     if(searchBtn) searchBtn.onclick = doSearch;
     if(searchInp) searchInp.addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
+    var proxyChk=document.getElementById('music-use-proxy');
+    if(proxyChk){
+      proxyChk.checked = musicUseProxy();
+      proxyChk.title='Use backend proxy for Jamendo (like Download useProxy)';
+      proxyChk.addEventListener('change', function(){
+        setMusicUseProxy(proxyChk.checked);
+        musicLog('Settings: Music proxy '+(proxyChk.checked?'ON':'OFF')+' — Jamendo will '+(proxyChk.checked?'go via /api/music/proxy':'fetch directly'),'step');
+      });
+    }
+    // trace panel controls
+    var trCopy=document.getElementById('music-trace-copy');
+    var trClear=document.getElementById('music-trace-clear');
+    if(trClear) trClear.onclick=function(){ musicTrace=[]; renderMusicTrace(); };
+    if(trCopy) trCopy.onclick=function(){
+      var t=musicTrace.map(function(x){return '['+x.ts+']['+x.kind+'] '+x.msg;}).join('\n');
+      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function(){ if(typeof toast==='function') toast('Copied','success'); }).catch(function(){});
+      else if(typeof toast==='function') toast(t.slice(0,120),'info');
+    };
     if(fileInp) fileInp.addEventListener('change', function(e){
       var files = Array.from(e.target.files||[]);
       if(!files.length) return;
+      musicLog('Local: selected '+files.length+' file(s): '+files.map(function(f){return f.name;}).join(', '),'step');
       files.forEach(function(f){
         var url = URL.createObjectURL(f);
         var song = { id:'local:'+Date.now()+':'+f.name, title: f.name.replace(/\.[^.]+$/,''), artist:'Local', album:'', duration:0, url:url, _objectUrl:url, cover:'', source:'local', _file:f };
         addToQueue(song, false);
       });
+      musicLog('Local: added '+files.length+' to queue','ok');
       e.target.value='';
     });
     var btnPrev=document.getElementById('music-btn-prev'); if(btnPrev) btnPrev.onclick=function(){ player && player.prev(); };
@@ -195,25 +251,35 @@
       if(!player) return;
       var r=prog.getBoundingClientRect(); var ratio=(e.clientX - r.left)/r.width; player.seek(Math.max(0,Math.min(1,ratio)));
     });
-    var libBtn=document.getElementById('music-refresh-lib'); if(libBtn) libBtn.onclick=refreshLibrary;
+    var libBtn=document.getElementById('music-refresh-lib'); if(libBtn) libBtn.onclick=function(){ musicLog('Library: refresh','step'); refreshLibrary(); };
     // playlists bar
     bindPlaylistEvents();
     refreshPlaylists();
+    musicLog('Music page ready — providers: '+(window.MusicHost? window.MusicHost.list().map(function(p){return p.id;}).join(', '):'?')+' — Jamendo '+(musicUseProxy()?'via proxy':'direct')+', Bilibili via /api/music','warn');
   }
 
   function doSearch(){
     var inp=document.getElementById('music-search');
     var kw=(inp&&inp.value||'').trim();
-    if(!kw) return;
-    var btn=document.getElementById('music-search-btn');
-    if(btn) { btn.disabled=true; btn.textContent='…'; }
+    if(!kw){ musicLog('Search: empty keyword — nothing to do','warn'); return; }
     var host = window.MusicHost;
+    if(!host){ musicLog('Search: MusicHost not loaded (host.js missing?)','error'); renderResults([], 'MusicHost not loaded'); return; }
+    var btn=document.getElementById('music-search-btn');
+    if(btn) { btn.disabled=true; btn.textContent='…'; musicLog('Search: "'+kw+'" — providers ['+selectedProviders.join(', ')+']','step'); }
     var provs = selectedProviders.length? selectedProviders : null;
+    var t0=Date.now();
+    musicLog('Request: MusicHost.search("'+kw+'", ['+(provs?provs.join(', '):'all')+'], 24)','req');
+    // Also surface what each fetch will hit so CSP/network blocks are obvious
+    if(selectedProviders.indexOf('jamendo')>=0) musicLog('Request: Jamendo → '+(musicUseProxy()?'via /api/music/proxy':'https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&search='+encodeURIComponent(kw))+' (proxy '+(musicUseProxy()?'ON':'OFF')+')','req');
+    if(selectedProviders.indexOf('bilibili')>=0) musicLog('Request: Bilibili → GET /api/music/bilibili/search?keyword='+encodeURIComponent(kw)+' (proxied via backend)','req');
     host.search(kw, provs, 24).then(function(list){
+      var dt=Date.now()-t0;
       searchResults = list||[];
+      if(!searchResults.length) musicLog('Response: no results for "'+kw+'" ('+dt+'ms) — try another keyword or check Activity above for per-provider errors','warn');
+      else musicLog('Response: '+(list.length)+' result(s) ('+dt+'ms) — providers: '+(function(){var m={}; list.forEach(function(s){m[s.source||'?']=1;}); return Object.keys(m).join(', ');})(),'ok');
       renderResults(searchResults);
     }).catch(function(e){
-      console.warn(e);
+      musicLog('Search failed: '+String(e&&e.message||e)+' — open DevTools Console/Network for stack & HTTP status','error');
       searchResults=[];
       renderResults([], String(e&&e.message||e));
     }).finally(function(){ if(btn){ btn.disabled=false; btn.textContent='Search'; } });
@@ -223,11 +289,11 @@
     var el=document.getElementById('music-results');
     if(!el) return;
     if(err){
-      el.innerHTML='<div style="color:var(--danger);font-size:13px">Search failed: '+escapeHtml(err)+'</div>';
+      el.innerHTML='<div style="color:var(--danger);font-size:13px">Search failed: '+escapeHtml(err)+'<br><span style="color:var(--text-tertiary)">Check the Activity panel below and DevTools Console/Network for details.</span></div>';
       return;
     }
     if(!list || !list.length){
-      el.innerHTML='<div style="color:var(--text-tertiary);font-size:13px;line-height:1.6">No results yet. Try a keyword like <code>lofi</code>, <code>piano</code>, <code>jazz</code>. Jamendo is CC-licensed and fully free.</div>';
+      el.innerHTML='<div style="color:var(--text-tertiary);font-size:13px;line-height:1.6">No results yet. Click Search or try a keyword like <code>lofi</code>, <code>piano</code>, <code>jazz</code>. If only Bilibili returns, try Proxy ON for Jamendo.<br><span style="font-size:11px">If search always returns empty, check Activity panel for request errors.</span></div>';
       return;
     }
     el.innerHTML = list.map(function(s,idx){
@@ -261,6 +327,7 @@
     queue.push(song);
     ensurePlayer().setQueue(queue, Math.max(0, ensurePlayer().index));
     renderQueue();
+    musicLog('Queue: + "'+(song.title||song.id)+'" ('+queue.length+' total)','ok');
     if(toast && typeof window.toast==='function') window.toast('Added to queue: '+(song.title||''),'success');
   }
   function playSong(song, addFirst){
@@ -268,7 +335,26 @@
     var idx = queue.findIndex(function(q){ return String(q.id)===String(song.id); });
     if(idx===-1){ queue.push(song); idx=queue.length-1; }
     player.setQueue(queue, idx);
-    player.playAt(idx).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); });
+    // Issue 7: Bilibili 的 song 只有 bvid/cid，无直链；需先 resolve 再播放。
+    // 若 song 已有 _objectUrl / url（Jamendo/Local/已 resolve），直接播；否则显式 resolve。
+    var needResolve = song && song.source==='bilibili' && !song.url && !song._objectUrl;
+    musicLog('Play: "'+(song.title||song.id)+'" via '+ (song.source||'?')+' — '+(needResolve?'resolving Bilibili…':'resolving media source…'),'step');
+    musicLog('Play: request MusicHost.getMediaSource for id='+song.id+(song.cid?(' cid='+song.cid):''),'req');
+    var p = needResolve
+      ? window.MusicHost.getMediaSource(song).then(function(m){
+          if(!m || !m.url) throw new Error('resolve returned empty url (bvid may need login)');
+          // 回填 url 以便下载复用
+          song.url = m.url;
+          song._resolvedUrl = m.url;
+          if(m.cid) song.cid = m.cid;
+          musicLog('Resolve: '+song.id+' → '+m.url.slice(0,80)+' ('+m.quality+')','ok');
+          // 更新队列中的引用
+          var qref = queue[idx];
+          if(qref) { qref.url = m.url; qref._resolvedUrl = m.url; }
+          return player.playAt(idx);
+        })
+      : player.playAt(idx);
+    p.then(function(){ musicLog('Play: started "'+(song.title||song.id)+'"','ok'); }).catch(function(e){ musicLog('Play failed: '+(e&&e.message||e),'error'); if(typeof toast==='function') toast(String(e.message||e),'error'); });
     renderQueue();
   }
   function renderQueue(){
@@ -306,23 +392,48 @@
   }
 
   function downloadSong(song, btn){
-    var url = song.downloadUrl || song.url || '';
-    if(!url){ if(typeof toast==='function') toast('No download url','error'); return; }
-    var orig = btn?btn.textContent:'';
-    if(btn){ btn.disabled=true; btn.textContent='…'; }
-    var filename = (song.artist? (song.artist+' - '):'') + (song.title||'track') + '.mp3';
-    filename = filename.replace(/[\\/:*?"<>|]/g,'_');
-    apiFetch('/api/music/download', {method:'POST', body:{url:url, filename: filename}}).then(function(j){
-      if(typeof toast==='function') toast('Saved: '+(j.filename||filename),'success');
-      refreshLibrary();
-    }).catch(function(e){ if(typeof toast==='function') toast('Download failed: '+(e.message||e),'error'); })
-    .finally(function(){ if(btn){ btn.disabled=false; btn.textContent=orig||'↓'; } });
+    var doDownload = function(url){
+      if(!url){ musicLog('Download: no url for "'+(song.title||song.id)+'"','error'); if(typeof toast==='function') toast('No download url','error'); return; }
+      var orig = btn?btn.textContent:'';
+      if(btn){ btn.disabled=true; btn.textContent='…'; }
+      var filename = (song.artist? (song.artist+' - '):'') + (song.title||'track') + '.mp3';
+      filename = filename.replace(/[\\/:*?"<>|]/g,'_');
+      musicLog('Download: POST /api/music/download → '+filename+' from '+url.slice(0,80),'req');
+      apiFetch('/api/music/download', {method:'POST', body:{url:url, filename: filename}}).then(function(j){
+        musicLog('Download: saved '+ (j.filename||filename)+' — refresh library','ok');
+        if(typeof toast==='function') toast('Saved: '+(j.filename||filename),'success');
+        refreshLibrary();
+      }).catch(function(e){ musicLog('Download failed: '+(e.message||e),'error'); if(typeof toast==='function') toast('Download failed: '+(e.message||e),'error'); })
+      .finally(function(){ if(btn){ btn.disabled=false; btn.textContent=orig||'↓'; } });
+    };
+    var direct = song.downloadUrl || song._resolvedUrl || song.url || '';
+    if(direct){ doDownload(direct); return; }
+    // Bilibili 无直链：先 resolve 再下载
+    if(song.source==='bilibili'){
+      if(btn){ btn.disabled=true; btn.textContent='…'; }
+      musicLog('Download: resolving Bilibili '+song.id+' before download','step');
+      window.MusicHost.getMediaSource(song).then(function(m){
+        if(!m || !m.url) throw new Error('no url after resolve');
+        song.url = m.url; song._resolvedUrl = m.url;
+        if(m.cid) song.cid = m.cid;
+        musicLog('Resolve: '+song.id+' → '+m.url.slice(0,80),'ok');
+        doDownload(m.url);
+      }).catch(function(e){
+        musicLog('Resolve failed: '+(e&&e.message||e),'error');
+        if(typeof toast==='function') toast('Resolve failed: '+(e.message||e),'error');
+        if(btn){ btn.disabled=false; btn.textContent='↓'; }
+      });
+      return;
+    }
+    doDownload(direct);
   }
 
   function refreshLibrary(){
     var box=document.getElementById('music-library'); var dirEl=document.getElementById('music-lib-dir');
     if(box) box.textContent='Loading…';
+    musicLog('Library: GET /api/music/library','req');
     apiFetch('/api/music/library').then(function(j){
+      musicLog('Library: '+(j.files||[]).length+' file(s) in '+(j.dir||''),'ok');
       if(dirEl) dirEl.textContent = j.dir||'';
       if(!box) return;
       var files=j.files||[];
@@ -340,6 +451,7 @@
           var name=b.getAttribute('data-play-file');
           var url='/api/music/file?name='+encodeURIComponent(name);
           var song={id:'lib:'+name, title:name, artist:'Library', url:url, cover:'', source:'library'};
+          musicLog('Library: Play '+name,'step');
           playSong(song, true);
         });
       });
@@ -347,11 +459,13 @@
         b.addEventListener('click', function(){
           var name=b.getAttribute('data-transcode-file');
           var orig=b.textContent; b.disabled=true; b.textContent='…';
+          musicLog('Transcode: '+name+' — fetch bytes then POST /api/music/transcode?format=mp3','step');
           // Fetch file bytes then POST to transcode
           fetch('/api/music/file?name='+encodeURIComponent(name)).then(function(r){
             if(!r.ok) throw new Error('fetch '+r.status);
             return r.arrayBuffer();
           }).then(function(buf){
+            musicLog('Transcode: POST /api/music/transcode?format=mp3 ('+buf.byteLength+' bytes)','req');
             return fetch('/api/music/transcode?format=mp3', {method:'POST', body: buf});
           }).then(function(r){
             if(!r.ok) return r.text().then(function(t){ throw new Error(t); });
@@ -361,18 +475,20 @@
             var song={id:'transcoded:'+name+':'+Date.now(), title:name+' (mp3)', artist:'Transcoded', url:url, _objectUrl:url, source:'local'};
             addToQueue(song, false);
             playSong(song, false);
+            musicLog('Transcode: '+name+' → mp3 ok ('+blob.size+' bytes)','ok');
             if(typeof toast==='function') toast('Transcoded '+name+' → mp3','success');
-          }).catch(function(e){ if(typeof toast==='function') toast('Transcode failed: '+(e.message||e),'error'); })
+          }).catch(function(e){ musicLog('Transcode failed: '+(e.message||e),'error'); if(typeof toast==='function') toast('Transcode failed: '+(e.message||e),'error'); })
           .finally(function(){ b.disabled=false; b.textContent=orig; });
         });
       });
-    }).catch(function(e){ if(box) box.textContent='Library error: '+(e.message||e); });
+    }).catch(function(e){ musicLog('Library error: '+(e.message||e),'error'); if(box) box.textContent='Library error: '+(e.message||e); });
   }
 
   // Playlists: Musics/playlists.json via /api/music/playlists + m3u
   var playlistsCache = [];
   function refreshPlaylists(){
     var sel=document.getElementById('music-playlist-select'); if(!sel) return;
+    musicLog('Playlists: GET /api/music/playlists','req');
     apiFetch('/api/music/playlists').then(function(data){
       var pls=(data&&data.playlists)||[];
       playlistsCache=pls;
@@ -381,9 +497,11 @@
         return '<option value="'+escapeHtml(String(p.id||p.name))+'">'+escapeHtml(String(p.name||p.id))+' ('+((p.tracks||[]).length)+')</option>';
       }).join('');
       if(cur) sel.value=cur;
-    }).catch(function(){});
+      musicLog('Playlists: loaded '+pls.length+' playlist(s)','ok');
+    }).catch(function(e){ musicLog('Playlists error: '+String(e&&e.message||e),'error'); });
   }
   function savePlaylists(pls){
+    musicLog('Playlists: PUT /api/music/playlists ('+pls.length+' playlist(s))','req');
     return apiFetch('/api/music/playlists', {method:'PUT', body:{playlists: pls}});
   }
   function bindPlaylistEvents(){
@@ -400,14 +518,16 @@
       var name=(nameIn&&nameIn.value||'').trim() || ('Playlist '+(playlistsCache.length+1));
       var id='pl-'+Date.now();
       playlistsCache.push({id:id, name:name, tracks:[]});
-      savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Created '+name,'success'); refreshPlaylists(); sel.value=id; }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); });
+      musicLog('Playlist: create "'+name+'"','step');
+      savePlaylists(playlistsCache).then(function(){ musicLog('Playlist: created "'+name+'"','ok'); if(typeof toast==='function') toast('Created '+name,'success'); refreshPlaylists(); sel.value=id; }).catch(function(e){ musicLog('Create failed: '+(e.message||e),'error'); if(typeof toast==='function') toast(String(e.message||e),'error'); });
     });
     if(btnSaveQueue) btnSaveQueue.addEventListener('click', function(){
       var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
       var pl=playlistsCache.find(function(p){ return String(p.id)===String(id) || String(p.name)===String(id); });
       if(!pl){ if(typeof toast==='function') toast('Playlist not found','error'); return; }
       pl.tracks = queue.map(function(s){ return {id:s.id, title:s.title, artist:s.artist, url:s.url||s.downloadUrl||s._objectUrl||'', cover:s.cover||'', source:s.source||''}; });
-      savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Saved queue → '+pl.name+' ('+pl.tracks.length+')','success'); refreshPlaylists(); }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); });
+      musicLog('Playlist: save queue → "'+pl.name+'" ('+pl.tracks.length+' tracks)','step');
+      savePlaylists(playlistsCache).then(function(){ musicLog('Playlist: saved','ok'); if(typeof toast==='function') toast('Saved queue → '+pl.name+' ('+pl.tracks.length+')','success'); refreshPlaylists(); }).catch(function(e){ musicLog('Save failed: '+(e.message||e),'error'); if(typeof toast==='function') toast(String(e.message||e),'error'); });
     });
     if(btnLoad) btnLoad.addEventListener('click', function(){
       var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
@@ -418,38 +538,44 @@
       ensurePlayer().setQueue(queue, 0);
       renderQueue();
       if(queue.length) ensurePlayer().playAt(0);
+      musicLog('Playlist: loaded "'+pl.name+'" → queue ('+songs.length+')','ok');
       if(typeof toast==='function') toast('Loaded '+pl.name+' → queue ('+songs.length+')','success');
     });
     if(btnExport) btnExport.addEventListener('click', function(){
       var id=sel&&sel.value||''; if(!id){ if(typeof toast==='function') toast('Select a playlist first','error'); return; }
       var pl=playlistsCache.find(function(p){ return String(p.id)===String(id) || String(p.name)===String(id); });
       if(!pl){ if(typeof toast==='function') toast('Playlist not found','error'); return; }
+      musicLog('Playlist: export "'+pl.name+'" as m3u','step');
       window.open('/api/music/m3u?name='+encodeURIComponent(pl.name||pl.id), '_blank');
     });
     if(m3uFile) m3uFile.addEventListener('change', function(e){
       var f=(e.target.files||[])[0]; if(!f) return;
       var rd=new FileReader();
+      musicLog('m3u import: reading '+f.name,'step');
       rd.onload=function(ev){
         var text=String(ev.target.result||'');
         var name=f.name.replace(/\.[^.]+$/,'') || 'import';
+        musicLog('m3u import: POST /api/music/m3u name="'+name+'" ('+text.length+' chars)','req');
         apiFetch('/api/music/m3u', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:name, m3u:text})})
-          .then(function(){ if(typeof toast==='function') toast('Imported '+name,'success'); refreshPlaylists(); })
-          .catch(function(err){ if(typeof toast==='function') toast(String(err.message||err),'error'); });
+          .then(function(){ musicLog('m3u import: imported "'+name+'"','ok'); if(typeof toast==='function') toast('Imported '+name,'success'); refreshPlaylists(); })
+          .catch(function(err){ musicLog('m3u import failed: '+(err.message||err),'error'); if(typeof toast==='function') toast(String(err.message||err),'error'); });
       };
       rd.readAsText(f); e.target.value='';
     });
     if(btnFetch) btnFetch.addEventListener('click', function(){
       var url=(urlIn&&urlIn.value||'').trim(); if(!url){ if(typeof toast==='function') toast('Enter a playlist URL','error'); return; }
       btnFetch.disabled=true; var old=btnFetch.textContent; btnFetch.textContent='…';
+      musicLog('Remote import: POST /api/music/playlists/import url='+url,'req');
       apiFetch('/api/music/playlists/import', {method:'POST', body:{url:url}}).then(function(data){
         var name=(data&&data.name)||('import-'+Date.now());
         var tracks=(data&&data.tracks)||[];
-        if(!tracks.length){ if(typeof toast==='function') toast('No tracks found at URL','error'); return; }
+        if(!tracks.length){ musicLog('Remote import: no tracks at URL','warn'); if(typeof toast==='function') toast('No tracks found at URL','error'); return; }
         // append as new playlist
         var id='pl-'+Date.now();
         playlistsCache.push({id:id, name:name, tracks: tracks.map(function(t){ return {id:t.url||t.title, title:t.title||t.url, url:t.url||'', source:'import'}; })});
-        return savePlaylists(playlistsCache).then(function(){ if(typeof toast==='function') toast('Imported '+name+' ('+tracks.length+')','success'); refreshPlaylists(); sel.value=id; });
-      }).catch(function(e){ if(typeof toast==='function') toast(String(e.message||e),'error'); })
+        musicLog('Remote import: "'+name+'" ('+tracks.length+' tracks) — saving','step');
+        return savePlaylists(playlistsCache).then(function(){ musicLog('Remote import: imported "'+name+'"','ok'); if(typeof toast==='function') toast('Imported '+name+' ('+tracks.length+')','success'); refreshPlaylists(); sel.value=id; });
+      }).catch(function(e){ musicLog('Remote import failed: '+(e.message||e),'error'); if(typeof toast==='function') toast(String(e.message||e),'error'); })
       .finally(function(){ btnFetch.disabled=false; btnFetch.textContent=old; });
     });
   }

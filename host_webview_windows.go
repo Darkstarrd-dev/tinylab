@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"runtime"
@@ -32,119 +31,112 @@ import (
 // agnostic; the matching stub when `webview` is absent returns nil.
 func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	hctxGlob = hctx
-	m := systray.AddMenuItem("打开独立窗口", "Open TinyRouter UI in a native WebView2 window")
-	go runWebviewClickLoop(hctx, m)
-
-	mPet := systray.AddMenuItem("释放桌面小精灵", "Open desktop pet assistant")
-	go runPetClickLoop(hctx, mPet)
-
-	// Auto-open the native window once at startup (independent of the click loop).
+	// “打开独立窗口”已无意义：关闭窗口的 X 现在就是退出（w.Run 后 systray.Quit 带动
+	// 整个进程退出），仅关窗不退出的旧前后端解耦语义已失效，故移除该条目。
+	mRestart := systray.AddMenuItem("重新打开独立窗口", "当窗口卡死或已关闭时重新打开")
+	trayRestartItem = mRestart
+	go runWebviewRestartLoop(hctx, mRestart)
+	registerTrayLangBinding()
+	applyTrayLang(currentTrayLang())
 	go openWebviewAfterReady(hctx)
-
-	// The desktop pet IS the assistant surface (the in-app dock was removed):
-	// settings toggle off closes it, toggle on / tray click brings it back.
-	petstate.SetCloseAll(terminateAllPetWindows)
-	petstate.SetOpen(openPetIfNeeded)
-	petstate.SetHideAll(func() bool { return setPetWindowVisible(false) })
-	petstate.SetShowAll(func() bool { return setPetWindowVisible(true) })
-	registerPetTriggerHook(hctx)
-
-	// Auto-release the pet at startup when the assistant is enabled.
-	go openPetAfterReady(hctx)
-
-	// On UI shutdown, terminate all open native windows immediately so they
-	// close at once instead of waiting for the user to close each one. Each
-	// window's Run() returns on Terminate and its deferred cleanup unregisters
-	// it and calls systray.Quit(); the existing tray Quit listener also quits
-	// systray, so both paths are idempotent.
 	go func() {
 		<-hctx.Quit()
 		hctx.Logger.Info("terminating webview windows (UI)")
 		terminateAllWebviews()
 	}()
-
-	return m
+	petstate.SetCloseAll(terminateAllPetWindows)
+	petstate.SetOpen(openPetIfNeeded)
+	petstate.SetHideAll(func() bool { return setPetWindowVisible(false) })
+	petstate.SetShowAll(func() bool { return setPetWindowVisible(true) })
+	registerPetTriggerHook(hctx)
+	return mRestart
 }
 
-func runPetClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
+func runWebviewRestartLoop(hctx *app.HostContext, m *systray.MenuItem) {
 	for range m.ClickedCh {
-		if !petstate.Enabled() {
-			hctx.Logger.Info("pet window: disabled in Assistant settings")
-			continue
+		hctx.Logger.Info("tray: reopen/recover webview — kill current then respawn")
+		// 独立 goroutine：绝不把托盘线程堵在卡死窗口的 Terminate 上
+		go func() {
+			// 无论是否有窗口，先终止一切（有则消、无则空）。Terminate 本身带超时。
+			terminateAllWebviews()
+			// 等待窗体 pump 退出后再 respawn，避免 CreateWindow 与 WM_DESTROY 竞争。
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) && hasAnyWebview() {
+				time.Sleep(80 * time.Millisecond)
+			}
+			go openWebviewWindow(hctx)
+		}()
+	}
+}
+
+// Tray i18n: the host receives lang='en'|'cn' from JS via the onTrayLang binding
+// (called from i18n.js setLang), then updates every native menu title/tooltip.
+// Persist last lang so new windows started after a language switch get the right labels.
+var trayLangMu sync.RWMutex
+var trayLang = "en"
+
+func currentTrayLang() string {
+	trayLangMu.RLock()
+	defer trayLangMu.RUnlock()
+	if trayLang == "cn" {
+		return "cn"
+	}
+	return "en"
+}
+func setTrayLang(lang string) {
+	if lang != "cn" {
+		lang = "en"
+	}
+	trayLangMu.Lock()
+	trayLang = lang
+	trayLangMu.Unlock()
+}
+var trayLangHandlerRegistered bool
+func registerTrayLangBinding() {
+	if trayLangHandlerRegistered {
+		return
+	}
+	trayLangHandlerRegistered = true
+}
+func applyTrayLang(lang string) {
+	cn := lang == "cn"
+	if trayRestartItem != nil {
+		if cn {
+			trayRestartItem.SetTitle("重新打开独立窗口")
+			trayRestartItem.SetTooltip("当窗口卡死或已关闭时重新打开")
+		} else {
+			trayRestartItem.SetTitle("Reopen Window")
+			trayRestartItem.SetTooltip("Reopen the independent window")
 		}
-		openPetIfNeeded()
 	}
-}
-
-// openPetAfterReady waits for the HTTP server (the pet page loads from it),
-// then opens the pet unless the feature is off or it is already open.
-// Old logic: sleep 10s blindly then try once → if the server wasn't ready in
-// that window the pet never appeared until the user toggled the switch (bug 1).
-// New: probe TCP readiness and break as soon as the listener accepts.
-func openPetAfterReady(hctx *app.HostContext) {
-	for range 300 {
-		if petWindowsOpen() || !petstate.Enabled() {
-			return
+	if trayConsoleItem != nil {
+		if cn {
+			trayConsoleItem.SetTitle("打开控制台")
+			trayConsoleItem.SetTooltip("在浏览器中打开管理界面")
+		} else {
+			trayConsoleItem.SetTitle("Open Console")
+			trayConsoleItem.SetTooltip("Open the admin UI in your browser")
 		}
-		if hctx != nil && hctx.ConsoleURL != "" && probeConsoleReady(hctx.ConsoleURL, 150*time.Millisecond) {
-			break
+	}
+	if trayQuitItem != nil {
+		if cn {
+			trayQuitItem.SetTitle("退出")
+			trayQuitItem.SetTooltip("退出 TinyRouter")
+		} else {
+			trayQuitItem.SetTitle("Quit")
+			trayQuitItem.SetTooltip("Quit TinyRouter")
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
-	if petWindowsOpen() || !petstate.Enabled() {
-		return
-	}
-	openPetIfNeeded()
 }
 
-func probeConsoleReady(consoleURL string, timeout time.Duration) bool {
-	u, err := url.Parse(consoleURL)
-	if err != nil || u.Host == "" {
-		return false
-	}
-	c, err := net.DialTimeout("tcp", u.Host, timeout)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
-}
+var trayRestartItem *systray.MenuItem
+var trayConsoleItem *systray.MenuItem
+var trayQuitItem *systray.MenuItem
 
-// openPetIfNeeded opens a pet window unless one is already up or the feature
-// is disabled. Registered with petstate so the settings toggle can re-open.
-func openPetIfNeeded() {
-	if !petstate.Enabled() {
-		return
-	}
-	// If a creation is already in progress, don't spawn a second one — rapid
-	// toggle would otherwise queue up multiple LockOSThread goroutines behind
-	// petCreateMu (each holding an OS thread hostage) and serialize them
-	// sequentially, producing the stutter/freeze.
-	if !petCreateMu.TryLock() {
-		return
-	}
-	petCreateMu.Unlock()
-	// Re-check under lock-then-spawn: avoid TOCTOU where a window appeared
-	// between the first check and the goroutine start. Cheap racy pre-check
-	// above just avoids the extra spawning; correctness depends on this.
-	petMu.Lock()
-	hasWindow := len(petWindows) > 0
-	petMu.Unlock()
-	if hasWindow {
-		return
-	}
-	go openPetWindow(hctxGlob)
-}
+func setTrayConsoleItem(m *systray.MenuItem) { trayConsoleItem = m; applyTrayLang(currentTrayLang()) }
+func setTrayQuitItem(m *systray.MenuItem) { trayQuitItem = m; applyTrayLang(currentTrayLang()) }
 
-// petWindowsOpen reports whether any pet window is currently up.
-func petWindowsOpen() bool {
-	petMu.Lock()
-	defer petMu.Unlock()
-	return len(petWindows) > 0
-}
-
-// terminateAllPetWindows posts WM_CLOSE to every open pet window (safe from a
-// foreign thread; the owning pump turns it into DestroyWindow).
+// Helpers restored (no tray button, but still needed for settings toggle callbacks).
 func terminateAllPetWindows() {
 	var hwnds []uintptr
 	petMu.Lock()
@@ -156,18 +148,31 @@ func terminateAllPetWindows() {
 		procPostMessageW.Call(hwnd, wmClose, 0, 0)
 	}
 }
-// setPetWindowVisible shows/hides the pet without destroying the WebView2
-// environment. Destroy+recreate tears down the Edge/Chromium child process and
-// races with a concurrently-creating window — the second cycle's Embed races
-// the first window's WM_DESTROY cleanup, freezing the main window's message
-// pump (the App freeze on slow toggle: restart->on->off->on->off).
+
+func hasAnyWebview() bool {
+	webviewMu.Lock()
+	n := len(webviews)
+	webviewMu.Unlock()
+	return n > 0
+}
+
+func openPetIfNeeded() {
+	if !petstate.Enabled() {
+		return
+	}
+	if !petCreateMu.TryLock() {
+		return
+	}
+	petCreateMu.Unlock()
+	petMu.Lock()
+	hasWindow := len(petWindows) > 0
+	petMu.Unlock()
+	if hasWindow {
+		return
+	}
+	go openPetWindow(hctxGlob)
+}
 func setPetWindowVisible(show bool) bool {
-	// Collect hwnd without holding the lock across the cross-thread
-	// SendMessage. ShowWindow sent from a non-owner thread blocks until the
-	// pet's message pump dispatches it. Holding petMu across that round-trip
-	// deadlocks when the pump's petWndProc tries to lock petMu to look up
-	// petWindows — visible as main-window input freeze (no keyboard/mouse)
-	// after a toggle, with HTTP still alive on its own thread.
 	var hwnd uintptr
 	petMu.Lock()
 	for h := range petWindows {
@@ -191,12 +196,27 @@ func setPetWindowVisible(show bool) bool {
 // Destroy; the owning goroutine's w.Run() returns on Terminate and handles its
 // own teardown.
 func terminateAllWebviews() {
+	// 复制句柄后释放锁再逐个 Terminate：若目标窗口的 COM 已卡死，
+	// 在锁内同步等待会堵住托盘线程，表现为重启/开启无反应。
 	webviewMu.Lock()
-	defer webviewMu.Unlock()
+	ws := make([]webview2.WebView, 0, len(webviews))
 	for _, w := range webviews {
 		if w != nil {
-			w.Terminate()
+			ws = append(ws, w)
 		}
+	}
+	webviewMu.Unlock()
+	for _, w := range ws {
+		func(ww webview2.WebView) {
+			defer func() { _ = recover() }()
+			// 带超时的 Terminate：卡死窗口的 Terminate 可能不返回
+			done := make(chan struct{})
+			go func() { ww.Terminate(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(900 * time.Millisecond):
+			}
+		}(w)
 	}
 }
 
@@ -215,6 +235,7 @@ func openWebviewAfterReady(hctx *app.HostContext) {
 // closing it only ends that goroutine, not the whole process.
 func runWebviewClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
 	for range m.ClickedCh {
+		// 在独立 goroutine 中排队创建，避免托盘线程被 webviewWindowMu 阻塞
 		go openWebviewWindow(hctx)
 	}
 }
@@ -375,6 +396,17 @@ func openWebviewWindow(hctx *app.HostContext) {
 		return fsutil.OpenInBrowser(rawURL)
 	})
 
+	// Bind setTrayLang so JS setLang(lang) can push lang to the native tray.
+	w.Bind("setTrayLang", func(lang string) error {
+		if lang != "cn" {
+			lang = "en"
+		}
+		setTrayLang(lang)
+		applyTrayLang(lang)
+		hctx.Logger.Info("tray lang -> %s", lang)
+		return nil
+	})
+
 	// Inject auto-fullscreen sync and external link interception script into every document load.
 	w.Init(`
 		(function() {
@@ -428,6 +460,21 @@ func openWebviewWindow(hctx *app.HostContext) {
 				}
 				return origOpen ? origOpen.apply(this, arguments) : null;
 			};
+			try {
+				var cur = (document.documentElement.getAttribute('data-lang')||'en');
+				if (typeof window.setTrayLang === 'function') { try{ window.setTrayLang(cur);}catch(e){} }
+			} catch(e){}
+			try {
+				new MutationObserver(function(muts){
+					for (var i=0;i<muts.length;i++){
+						var m=muts[i];
+						if (m.attributeName==='data-lang' && m.target===document.documentElement){
+							var nl=document.documentElement.getAttribute('data-lang')||'en';
+							if (typeof window.setTrayLang==='function'){ try{ window.setTrayLang(nl);}catch(e){} }
+						}
+					}
+				}).observe(document.documentElement, {attributes:true, attributeFilter:['data-lang']});
+			} catch(e){}
 		})();
 	`)
 
@@ -480,8 +527,8 @@ func openWebviewWindow(hctx *app.HostContext) {
 	}
 
 	// w.Run() pumps Win32 messages for this thread until the window is closed.
-	// On close it returns; the deferred cleanup runs and the goroutine exits.
-	// We call systray.Quit() here so closing the window exits the whole app.
+	// 行为：点 X 即退出整个 app（用户明确不保留“只关窗不退出”的旧语义）。
+	// 随后 runWebviewRestartLoop 可以用 Tray 菜单重新打开新窗口。
 	w.Run()
 	systray.Quit()
 }

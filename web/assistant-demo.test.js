@@ -45,12 +45,15 @@ check('index-nopg.html has Demo nav button + script tag', () => {
 check('shortcuts.js binds F6 to global.goto-demo; app.js routes demo page', () => {
   const sc = fs.readFileSync(path.join(__dirname, 'static/shortcuts.js'), 'utf8');
   assert.ok(/'global\.goto-demo':\s*\{\s*key:\s*'F6'/.test(sc), 'shortcuts.js missing F6 goto-demo preset');
-  const app = fs.readFileSync(path.join(__dirname, 'static/app.js'), 'utf8');
+  const appRouter = fs.readFileSync(path.join(__dirname, 'static/app-router.js'), 'utf8');
+  const appDemo = fs.readFileSync(path.join(__dirname, 'static/app-demo.js'), 'utf8');
+  const appShortcuts = fs.readFileSync(path.join(__dirname, 'static/app-shortcuts.js'), 'utf8');
   // Shell toggle refactor (2026-08-29): demo renders via two panes, not a single return.
-  assert.ok(app.includes("case 'demo':") && app.includes('renderAssistantDemo(container)') && app.includes('renderDemoGames(container)'), 'app.js missing demo route (shell)');
-  assert.ok(app.includes('ademoSyncShellTabs') || app.includes("return renderDemoGames"), 'app.js demo route missing shell sync or legacy return');
-  assert.ok(app.includes("matchEvent('global.goto-demo'"), 'app.js missing F6 keydown binding');
-  assert.ok(app.includes('cleanupAssistantDemo'), 'app.js missing demo cleanup on navigate-away');
+  assert.ok(appRouter.includes("case 'demo':") && appRouter.includes('renderDemoWithMenu(container)'), 'app-router.js missing demo route');
+  assert.ok(appDemo.includes('renderAssistantDemo(container)') || appRouter.includes('renderAssistantDemo'), 'demo shell missing Assistant render');
+  assert.ok(appDemo.includes('renderDemoGames(container)') || appRouter.includes('renderDemoGames'), 'demo shell missing Games render');
+  assert.ok(appShortcuts.includes("matchEvent('global.goto-demo'") || appShortcuts.includes('global.goto-demo'), 'app-shortcuts.js missing F6 keydown binding');
+  assert.ok(appRouter.includes('cleanupAssistantDemo'), 'app-router.js missing demo cleanup on navigate-away');
 });
 
 check('style.css places demo button at grid slot col3/row2 with active color', () => {

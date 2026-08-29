@@ -28,18 +28,18 @@ func NewHandler(d *apibase.Deps) *Handler { return &Handler{deps: d} }
 
 // Register mounts /api/music routes. Called from router.go under auth middleware.
 func (h *Handler) Register(r chi.Router) {
-	r.Get("/music/library", h.library)
-	r.Post("/music/proxy", h.proxy)
-	r.Post("/music/download", h.download)
-	r.Get("/music/bilibili/search", h.bilibiliSearch)
-	r.Post("/music/bilibili/resolve", h.bilibiliResolve)
-	r.Post("/music/transcode", h.transcode)
-	r.Get("/music/file", h.serveFile)
-	r.Get("/music/playlists", h.listPlaylists)
-	r.Put("/music/playlists", h.savePlaylists)
-	r.Post("/music/playlists/import", h.importPlaylistURL)
-	r.Get("/music/m3u", h.exportM3U)
-	r.Post("/music/m3u", h.importM3U)
+	r.Get("/library", h.library)
+	r.Post("/proxy", h.proxy)
+	r.Post("/download", h.download)
+	r.Get("/bilibili/search", h.bilibiliSearch)
+	r.Post("/bilibili/resolve", h.bilibiliResolve)
+	r.Post("/transcode", h.transcode)
+	r.Get("/file", h.serveFile)
+	r.Get("/playlists", h.listPlaylists)
+	r.Put("/playlists", h.savePlaylists)
+	r.Post("/playlists/import", h.importPlaylistURL)
+	r.Get("/m3u", h.exportM3U)
+	r.Post("/m3u", h.importM3U)
 }
 
 func (h *Handler) musicDir() string {

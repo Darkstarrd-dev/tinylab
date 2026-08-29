@@ -24,7 +24,7 @@
     // Delegate to backend — backend mimics Bilibili search mapping to Song[]
     return apiFetch('/api/music/bilibili/search?keyword=' + encodeURIComponent(q) + '&limit=' + (limit || 20))
       .then(function(data){ return Array.isArray(data) ? data : (data.results || data.data || []); })
-      .catch(function(e){ console.warn('[Bilibili] search', e); return []; });
+      .catch(function(e){ console.warn('[Bilibili] search', e); throw e; });
   }
 
   function getMediaSource(song){
@@ -36,9 +36,9 @@
       .then(function(data){
         var url = (data && (data.url || data.audio || data.src)) || '';
         if (!url) return null;
-        return { url: url, quality: 'm4a', source:'bilibili' };
+        return { url: url, quality: 'm4a', source:'bilibili', bvid: data.bvid||id, cid: data.cid||cid };
       })
-      .catch(function(){ return null; });
+      .catch(function(e){ console.warn('[Bilibili] resolve', e); throw e; });
   }
 
   var plugin = { id:'bilibili', name:'Bilibili', kind:'builtin', search: search, getMediaSource: getMediaSource };

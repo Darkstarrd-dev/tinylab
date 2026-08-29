@@ -47,9 +47,10 @@ check('both index variants load demo-games.js after assistant-demo.js', () => {
 });
 
 check('app.js renders and cleans up the games section with the demo page', () => {
-  const app = fs.readFileSync(path.join(STATIC, 'app.js'), 'utf8');
-  assert.ok(app.includes("renderAssistantDemo(container);") && app.includes("renderDemoGames(container);"), 'app.js missing demo games render (shell)');
-  assert.ok(app.includes("typeof cleanupDemoGames === 'function') cleanupDemoGames();"), 'app.js missing demo games cleanup');
+  const appDemo = fs.readFileSync(path.join(STATIC, 'app-demo.js'), 'utf8');
+  const appRouter = fs.readFileSync(path.join(STATIC, 'app-router.js'), 'utf8');
+  assert.ok(appDemo.includes("renderAssistantDemo(container)") && appDemo.includes("renderDemoGames(container)"), 'app-demo.js missing demo games render (shell)');
+  assert.ok(appRouter.includes("typeof cleanupDemoGames === 'function') cleanupDemoGames();"), 'app-router.js missing demo games cleanup');
 });
 
 check('i18n defines demoGames* keys in en and zh', () => {
@@ -61,9 +62,9 @@ check('i18n defines demoGames* keys in en and zh', () => {
 });
 
 check('style.css gates the two-panel demo layout behind :has(.dg-root)', () => {
-  const css = fs.readFileSync(path.join(STATIC, 'style.css'), 'utf8');
-  assert.ok(css.includes('#page-content:has(.dg-root)'), 'missing :has(.dg-root) layout gate');
-  assert.ok(css.includes('.dg-stage-wrap{'), 'missing .dg-stage-wrap rule');
+  const css = fs.readFileSync(path.join(STATIC, 'style-demo.css'), 'utf8');
+  assert.ok(css.includes('#page-content:has(.dg-root)'), 'style-demo.css missing :has(.dg-root) layout gate');
+  assert.ok(css.includes('.dg-stage-wrap'), 'style-demo.css missing .dg-stage-wrap rule');
 });
 
 check('vendored Phaser bundle + README + LICENSE exist', () => {

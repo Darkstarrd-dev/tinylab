@@ -52,11 +52,13 @@ func runHostLoop(hctx *app.HostContext) {
 		systray.SetTooltip("TinyRouter — lightweight LLM API proxy")
 
 		mOpen := systray.AddMenuItem("打开控制台", "Open the admin UI in your browser")
+		setTrayConsoleItem(mOpen)
 		// "打开独立窗口" entry is only present when the `webview` tag is set;
 		// otherwise addWebviewMenuItem is nil-typed and the menu skips it.
 		_ = addWebviewMenuItem(hctx)
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("退出", "Quit TinyRouter")
+		setTrayQuitItem(mQuit)
 
 		go handleTrayMenu(hctx, mOpen, mQuit)
 	}, func() {

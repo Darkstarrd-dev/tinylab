@@ -26,6 +26,9 @@ function isGalleryTool(id) {
 }
 var galleryActiveTool = 'gallery';
 var galleryMenuOpen = false;
+// 持久化：上次在 Gallery|Music 中的选择，切页回来仍保持
+// 与 Utility/Demo 一致：内存态由 navigateTo 维护，切页回来由状态机
+// 决定展示哪一子页（不强制回 gallery），不再另做 localStorage 持久。
 function utilityHasTool(id) {
   var item = UTILITY_TOOLS.filter(function(tool) { return tool.id === id; })[0];
   if (!item || (item.requiresPlayground && window.__hasPlayground === false)) return false;
@@ -135,9 +138,9 @@ function selectGalleryTool(id) {
   navigateTo(id);
 }
 function renderGalleryWithMenu(container) {
-  if (!galleryActiveTool || !galleryHasTool(galleryActiveTool)) {
-    galleryActiveTool = 'gallery';
-  }
+  // Same as Utility/Demo: keep whichever sub-page was last selected.
+  // 'gallery' case from nav just re-opens the shell; 'music' case pins Music.
+  if (galleryActiveTool !== 'music') galleryActiveTool = 'gallery';
   updateGalleryNavLabel();
   updateGalleryMenuState();
   if (galleryActiveTool === 'music' && typeof renderMusic === 'function') return renderMusic(container);
@@ -269,7 +272,8 @@ function navigateTo(page) {
   if (previousIsDemoTool && previousPage !== page) demoToolLifecycle(previousPage, 'suspend');
   currentPage = page;
   if (isUtilityTool(page)) utilityActiveTool = page;
-  if (isGalleryTool(page)) galleryActiveTool = page;
+  // Same as Utility/Demo: keep last-selected sub-page; explicit 'music' still pins it.
+  if (isGalleryTool(page) && page === 'music') galleryActiveTool = 'music';
   if (isDemoTool(page)) demoActiveTool = page;
   updateUtilityNavLabel();
   updateUtilityMenuState();
@@ -318,8 +322,8 @@ function navigateTo(page) {
       case 'monitor': return renderUsage(container);
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
-      case 'gallery': galleryActiveTool='gallery'; updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
-      case 'music': galleryActiveTool='music'; updateGalleryNavLabel(); updateGalleryMenuState(); return renderGalleryWithMenu(container);
+      case 'gallery': /* same as Utility/Demo: keep last-selected sub-page */ return renderGalleryWithMenu(container);
+      case 'music': /* same as Utility/Demo: keep last-selected sub-page */ return renderGalleryWithMenu(container);
       case 'demo': return renderDemoWithMenu(container);
       case 'ademo': return renderDemoWithMenu(container);
       case 'tilemap': return renderDemoWithMenu(container);

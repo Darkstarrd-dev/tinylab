@@ -241,7 +241,9 @@ function initApp() {
         return;
       }
       if (page === 'gallery') {
-        if (currentPage !== 'gallery' && !(typeof isGalleryTool === 'function' && isGalleryTool(currentPage))) {
+        // Same semantics as Utility/Demo: navigating back to the Gallery tool
+        // keeps whichever sub-page (Gallery or Music) was last active.
+        if (!(typeof isGalleryTool === 'function' && isGalleryTool(currentPage))) {
           navigateTo('gallery');
         } else if (typeof toggleGalleryMenu === 'function') toggleGalleryMenu();
         return;

@@ -38,18 +38,28 @@
     flex: none;
   }
   body.chat-left #pet-area { justify-content: flex-end; }
+  /* 状态：容器透明；仅在 fallback（无 sheet）或有 sprite 时分别展现装饰 */
   .pet-avatar {
     width: 70px;
     height: 70px;
-    background: var(--accent-gradient, linear-gradient(135deg, #4fc3f7, #7c4dff));
-    border-radius: 50% 50% 45% 45%;
-    box-shadow: 0 8px 24px rgba(79, 195, 247, 0.4);
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: grab;
     position: relative;
+  }
+  /* 有 spritesheet 时按需开启 bounce；默认无 sprite 时不跑动画 */
+  .pet-avatar.has-sprite {
     animation: pet-bounce 2.5s ease-in-out infinite;
+  }
+  /* fallback（无 sprite）：仅头像容器呈现装饰，去除蓝紫渐变叠加 */
+  .pet-avatar.no-sprite {
+    background: var(--accent-gradient, linear-gradient(135deg, #4fc3f7, #7c4dff));
+    border-radius: 50% 50% 45% 45%;
+    box-shadow: 0 8px 24px rgba(79, 195, 247, 0.4);
   }
   .pet-avatar:active {
     cursor: grabbing;

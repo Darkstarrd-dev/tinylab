@@ -80,6 +80,19 @@ avatar.addEventListener('mousedown', function(e) {
   petPost({ type: 'dragstart' });
 });
 
+// 初始状态：无 sprite 时加 no-sprite，仅头像容器带装饰，消除蓝色渐变叠加
+avatar.classList.add('no-sprite');
+avatar.classList.remove('has-sprite');
+function syncAvatarDecor(){
+  var hasSheet = !!(petSM && petSM.state());
+  // 更稳：canvas 显示即视为有 sprite（即使宠物品种尚未取名）
+  var canvas = document.getElementById('pet-sprite');
+  var canvasVisible = !!(canvas && canvas.style.display !== 'none' && canvas.width>1);
+  var has = hasSheet || canvasVisible;
+  avatar.classList.toggle('has-sprite', has);
+  avatar.classList.toggle('no-sprite', !has);
+}
+
 window.addEventListener('mousemove', function(e) {
   if (!isDragging) return;
   if (Math.abs(e.screenX - lastX) < 2 && Math.abs(e.screenY - lastY) < 2) return;
@@ -266,13 +279,14 @@ var petSM = (function () {
     var st = states[name];
     var canvas = document.getElementById('pet-sprite');
     if (canvas && st.img) {
-      canvas.width = Math.max(1, Math.round(st.frameW));
-      canvas.height = Math.max(1, Math.round(st.frameH));
+      canvas.width = Math.round(st.frameW);
+      canvas.height = Math.round(st.frameH);
       canvas.style.display = 'block';
     }
     var face = document.querySelector('.pet-face');
     if (face && st.img) face.style.display = 'none';
     applyPetSpriteSize();
+    if(typeof syncAvatarDecor==='function') syncAvatarDecor();
     render();
     postPetSize();
     petPostHit();

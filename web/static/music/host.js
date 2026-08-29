@@ -39,14 +39,26 @@
 
   // Built-in Jamendo provider (CC licensed, no key, client_id demo 56d30dc8)
   // API: https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&format=json&limit=20&search=xxx
+  // Issue 5: Jamendo 前端直连在某些网络/代理下无法命中时静默零结果；增加
+  // 上游代理开关（localStorage tr:music:useProxy）时改走后端 /api/music/proxy。
   // Also supports tracks by id via /tracks/?id=xxx
   var JAMENDO_CLIENT = '56d30dc8';
   var JAMENDO_API = 'https://api.jamendo.com/v3.0';
+  function musicUseProxy(){
+    try{ return localStorage.getItem('tr:music:useProxy')==='1'; }catch(e){ return false; }
+  }
+  function fetchWithProxy(targetUrl, opts){
+    if(!musicUseProxy()) return fetch(targetUrl, opts);
+    return fetch('/api/music/proxy', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url: targetUrl})}).then(function(r){
+      if(!r.ok) return r.text().then(function(t){ throw new Error('proxy '+r.status+': '+t.slice(0,400)); });
+      return r;
+    });
+  }
 
   function jamendoSearch(keyword, limit){
     var url = JAMENDO_API+'/tracks/?client_id='+JAMENDO_CLIENT+'&format=json&limit='+(limit||20)+'&search='+encodeURIComponent(keyword||'')+'&include=musicinfo&audioformat=mp32';
-    return fetch(url).then(function(r){
-      if(!r.ok) throw new Error('Jamendo '+r.status);
+    return fetchWithProxy(url).then(function(r){
+      if(!r.ok) return r.text().then(function(t){ throw new Error('Jamendo '+r.status+': '+t.slice(0,300)); });
       return r.json();
     }).then(function(j){
       var arr = j.results || j.tracks || [];
@@ -64,6 +76,10 @@
           raw: t
         };
       }).filter(function(s){ return !!s.url; });
+    }).catch(function(e){
+      // Surface as rejected so music.js Activity can show per-provider error instead of silently swallowing
+      console.warn('[Jamendo] search failed', e);
+      throw e;
     });
   }
 
@@ -74,7 +90,7 @@
     // If song already has url, reuse
     if(song && song.url) return Promise.resolve({url: song.url, quality:'mp3', source:'jamendo'});
     var url = JAMENDO_API+'/tracks/?client_id='+JAMENDO_CLIENT+'&format=json&id='+encodeURIComponent(id);
-    return fetch(url).then(function(r){return r.json();}).then(function(j){
+    return fetchWithProxy(url).then(function(r){ if(!r.ok) throw new Error('Jamendo '+r.status); return r.json();}).then(function(j){
       var t=(j.results||j.tracks||[])[0];
       if(!t) return null;
       return {url: t.audio || t.audio_url || '', quality:'mp3', source:'jamendo'};
@@ -110,14 +126,36 @@
     loadFromURL: loadFromURL,
     search: function(keyword, providerIds, limit){
       var ids = providerIds && providerIds.length ? providerIds : order.filter(function(id){ return registry[id] && registry[id].kind!=='local'; });
-      // parallel search
+      // parallel search — per-provider errors are wrapped with provider id so Activity can show them
       var ps = ids.map(function(id){
         var p = registry[id];
         if(!p || !p.search) return Promise.resolve([]);
-        try{ return Promise.resolve(p.search(keyword, limit)).catch(function(){return [];}); }catch(e){ return Promise.resolve([]); }
+        try{
+          return Promise.resolve(p.search(keyword, limit)).catch(function(e){
+            var msg = (e && e.message) || String(e);
+            console.warn('[MusicHost] search provider '+id+' failed: '+msg);
+            // Propagate as tagged empty so overall search can still succeed with other providers
+            // but the error is visible via console and music.js per-provider logging
+            // (the previous code silently mapped to [] with no trace).
+            throw new Error(id+': '+msg);
+          });
+        }catch(e){
+          return Promise.resolve([]);
+        }
       });
-      return Promise.all(ps).then(function(groups){
-        var out=[]; for(var i=0;i<groups.length;i++) out = out.concat(groups[i]||[]);
+      // Use allSettled semantics: providers that fail don't kill the whole search, but errors are still visible
+      return Promise.all(ps.map(function(p){ return p.catch(function(e){ return {__musicError: String(e&&e.message||e)}; }); })).then(function(groups){
+        var out=[], errs=[];
+        for(var i=0;i<groups.length;i++){
+          var g=groups[i];
+          if(g && g.__musicError){ errs.push(g.__musicError); }
+          else out = out.concat(g||[]);
+        }
+        if(out.length===0 && errs.length){
+          // All providers failed — surface combined error so the Activity panel can explain why (CSP/CORS/network)
+          return Promise.reject(new Error(errs.join(' | ')));
+        }
+        if(errs.length) console.warn('[MusicHost] partial search errors: '+errs.join(' | '));
         return out;
       });
     },

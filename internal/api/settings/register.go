@@ -612,30 +612,63 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	petstate.SetDebug(cfg.Assistant.Debug)
 	if patch.Enabled != nil {
 		enabled := cfg.Assistant.PetEnabled()
-		// Run window show/hide asynchronously so the HTTP handler does not block
-		// on ShowWindow's cross-thread SendMessage. A blocked handler would hold
-		// the HTTP worker and, if the pet pump is momentarily busy, appear as a
-		// main-window freeze (API still alive, window deadlocked). Async also
-		// collapses rapid toggles without queuing multiple LockOSThread creations.
+		// 去耦：绝不在 HTTP handler 线程直接觸碰窗口。在 HTTP 线程内直接调用
+		// petstate.HideAll/ShowAll 会經跨線程 SendMessage 进入宠物的消息泵，
+		// 若泵正忙（WebView2 初始化/Resize），则表现为主窗口锁死（API 仍活）。
+		// 同時創建/銷毀 Chromium 子进程的競態也會誘發 WebView2 冻結。改為：
+		// 1) 立刻仅切状态；2) 由单例的 petToggleWorker 串行执行显隐，避免
+		//    频繁切换排队出多个 LockOSThread/CreateWindow 序列。
+		ctxEnabled := enabled
+		select {
+		case petToggleCh <- ctxEnabled:
+		default:
+			// 队列满：以最新状态覆盖队尾
+			select { case <-petToggleCh: default: }
+			petToggleCh <- ctxEnabled
+				}
+	}
+}
+
+var petToggleCh = make(chan bool, 4)
+
+func init() {
 		go func() {
-			if enabled {
-				// Prefer re-showing an existing hidden window over creating a new
-				// WebView2 environment. Creating/destroying the Chromium child
-				// process races with a concurrent creation on the next toggle —
-				// that race is the main-window freeze on off->on->off->on.
-				if !petstate.ShowAll() {
+		for enabled := range petToggleCh {
+			if (enabled) {
+				if (!petstate.ShowAll()) {
 					petstate.Open()
 				}
 			} else {
-				// Hide keeps the WebView2 environment alive, avoiding the
-				// destroy/recreate churn. CloseAll remains the fallback for
-				// windows that never registered a hide handler (non-webview builds).
-				if !petstate.HideAll() {
+				if (!petstate.HideAll()) {
 					petstate.CloseAll()
 				}
 			}
-		}()
+			// 合并抖动：连续切换只保留最终态
+			for {
+				select {
+				case v := <-petToggleCh:
+					enabled = v
+					continue
+				default:
+				}
+				// 若队列在本次处理期间又进了新值，则以新值再做一次
+				select {
+				case v := <-petToggleCh:
+					if (v) {
+						if (!petstate.ShowAll()) {
+					petstate.Open()
+				}
+			} else {
+						if (!petstate.HideAll()) {
+					petstate.CloseAll()
+			}
 	}
+				default:
+				}
+				break
+			}
+}
+		}()
 }
 // validateProxyConfig checks that the proxy host and port are well-formed when
 // proxying is enabled. Port must be a numeric value in [1,65535].
