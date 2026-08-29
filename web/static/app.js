@@ -233,6 +233,7 @@ function navigateTo(page) {
   if (page !== 'playground' && typeof cleanupPlayground === 'function') cleanupPlayground();
   if (page !== 'gallery' && typeof cleanupGallery === 'function') cleanupGallery();
   if (page !== 'demo' && typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo();
+  if (page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
   if (!preserveUtilityState) {
     if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
@@ -266,7 +267,7 @@ function navigateTo(page) {
       case 'utility': return renderUtility(container);
       case 'download': utilityActiveTool = 'download'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gallery': return renderGallery(container);
-      case 'demo': return renderAssistantDemo(container);
+      case 'demo': renderAssistantDemo(container); return renderDemoGames(container);
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);

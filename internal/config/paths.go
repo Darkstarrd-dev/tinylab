@@ -87,3 +87,22 @@ func ResolveDocDir(docDir, configDir string) string {
 	}
 	return docDir
 }
+
+// ResolveGamesDir resolves the game plugins directory. An empty gamesDir
+// falls back to {configDir}/games (or "games" if configDir is empty); a
+// relative path is joined with configDir; an absolute path is used verbatim.
+func ResolveGamesDir(gamesDir, configDir string) string {
+	if gamesDir == "" {
+		if configDir != "" {
+			return filepath.Join(configDir, "games")
+		}
+		return "games"
+	}
+	if filepath.IsAbs(gamesDir) {
+		return gamesDir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, gamesDir)
+	}
+	return gamesDir
+}

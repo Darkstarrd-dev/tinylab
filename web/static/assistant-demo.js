@@ -639,13 +639,18 @@ function ademoDraw() {
 }
 
 // ---- frame loop -----------------------------------------------------------------
+// Pause seam: while a demo game (web/static/demo-games.js) is running on the
+// same page the testbed freezes physics/SM (draw keeps rendering the frozen
+// frame) so keyboard input belongs to the game alone.
+var ademoPaused = false;
+
 function ademoLoop(ts) {
   var rt = ademoRt;
   if (!rt) return;
   if (rt.lastTs == null) rt.lastTs = ts;
   var dtMs = Math.min(ts - rt.lastTs, 100);
   rt.lastTs = ts;
-  if (ademoTypeImplemented()) {
+  if (ademoTypeImplemented() && !ademoPaused) {
     ademoStep(dtMs / 1000);
     ademoSM.setEvent(ademoMotionEvent());
     ademoSM.tick(dtMs);
@@ -997,5 +1002,7 @@ window.__ademo = {
   motionEvent: ademoMotionEvent,
   syncSize: ademoSyncEntitySize,
   addBody: ademoAddBody,
-  clearBodies: ademoClearBodies
+  clearBodies: ademoClearBodies,
+  setPaused: function (v) { ademoPaused = !!v; },
+  isPaused: function () { return ademoPaused; }
 };

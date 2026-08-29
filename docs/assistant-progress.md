@@ -2,7 +2,7 @@
 
 > 桌面小精灵助手（Assistant）功能的单一事实来源，供后续仅针对该功能迭代时快速定位。
 > 窗口透明/点击穿透/DPI 等宿主级配方见 [`desktop-pet-progress.md`](desktop-pet-progress.md)，本文不重复。
-> 最后核对：2026-08-29（Topdown 右键移动、背景模式+合并按钮、方向变体 action/翻转抑制、预设补全 pet、分组折叠、游戏组 Trigger）。
+> 最后核对：2026-08-29（Topdown 右键移动、背景模式+合并按钮、方向变体 action/翻转抑制、预设补全 pet、分组折叠、游戏组 Trigger；Demo 页下方新增游戏插件区与 `setPaused` 暂停缝——游戏侧架构见 [`gamedemo-progress.md`](gamedemo-progress.md)）。
 
 ## 1. 功能面总览
 
@@ -15,7 +15,7 @@
 | 意图分发 | `internal/api/assistant/handler.go`（`dispatch`→`classifyIntent`：LLM 优先 `internal/assistant/llm_classifier.go`，无模型/失败回退关键词 `semantics.json`）、`schema.go`、`events.go`（SSE 广播） | `POST /api/assistant/dispatch` 返回命中的工具；`GET /api/assistant/events` SSE `notify` 事件驱动宠物气泡 |
 | 宠物运行时 | `web/static/sprite-pet.html` + `sprite-pet.js`、`host_webview_windows.go::openPetWindow/petOnMessage` | 唯一助手表面（App 内 dock 已废弃，勿恢复）；petSM 状态机 + 页面驱动窗口尺寸 |
 | 生命周期 | `internal/petstate`、托盘「释放」（`petWindowsOpen` 防重入）、菜单关闭回写 | 启动 enabled 即开；Settings 开关 OFF 即关 / ON 即开；宠物菜单关闭 = PATCH enabled=false（关闭联动） |
-| Demo 测试台 | `web/static/assistant-demo.js`（ademoSM + 平台物理 + 输入 + 碰撞体 + 背景图）、`web/assistant-demo.test.js` | F6/导航第 6 格进入的 2D 游戏测试页；全部行为 demo 页局部（不写配置、不触宠物窗），详见 §8 |
+| Demo 测试台 | `web/static/assistant-demo.js`（ademoSM + 平台物理 + 输入 + 碰撞体 + 背景图）、`web/assistant-demo.test.js` | F6/导航第 6 格进入的 2D 游戏测试页；全部行为 demo 页局部（不写配置、不触宠物窗），详见 §8。页面下方为游戏插件区（`web/static/demo-games.js`，架构见 gamedemo-progress.md），游戏运行时经 `__ademo.setPaused` 冻结本测试台 |
 
 ## 2. Action 状态机（petSM，sprite-pet.js）
 
@@ -61,11 +61,11 @@
 | 窗口尺寸协议（size 消息） | §3、`host_webview_windows.go::petOnMessage`、`desktop-pet-progress.md` |
 | sheet 端点 / 预览机制 | §1 精灵图服务行、`sheet.go`、`sheet_test.go` |
 | dispatch / 分类器 | §1 意图分发行、`internal/assistant/llm_classifier.go`、PROJECT_MAP「小精灵 LLM 分类器」条目 |
-| Demo 页（接线/物理/输入/别名表） | §8、`web/static/assistant-demo.js`、`web/assistant-demo.test.js`、PROJECT_MAP 文首最后核对 |
+| Demo 页（接线/物理/输入/别名表/暂停缝） | §8、`web/static/assistant-demo.js`、`web/assistant-demo.test.js`、PROJECT_MAP 文首最后核对；游戏插件区侧见 `docs/gamedemo-progress.md` §9 |
 
 ## 8. F6 Demo 页：2D 游戏测试台（web/static/assistant-demo.js）
 
-头部导航第 6 格（原 `nav-placeholder`，col3/row2）= `data-page="demo"` 按钮，F6 = `global.goto-demo`（shortcuts.js 预设；app.js keydown + `case 'demo'` + 切出 `cleanupAssistantDemo`）。双入口 HTML（index.html / index-nopg.html）均挂载。**全部行为 demo 页局部**：不触宠物窗、不写配置、不影响全局 assistant 行为。
+头部导航第 6 格（原 `nav-placeholder`，col3/row2）= `data-page="demo"` 按钮，F6 = `global.goto-demo`（shortcuts.js 预设；app.js keydown + `case 'demo'`（先 `renderAssistantDemo` 再 `renderDemoGames` 追加游戏区）+ 切出 `cleanupAssistantDemo`/`cleanupDemoGames`）。双入口 HTML（index.html / index-nopg.html）均挂载。**全部行为 demo 页局部**：不触宠物窗、不写配置、不影响全局 assistant 行为。
 
 - **Demo 类型切换**：工具栏一级 `ADEMO_TYPES` 下拉（scroller/topdown/isometric，i18n `demoType*`）+ 二级子类型下拉（`demoSub*`：Scroller→Platformer、Topdown→Survivor、Isometric→Tactic）。`ademoSetType(t1,t2)` 清输入态/aim/攻击窗并按类型重生实体（scroller 左下角、topdown 居中）；选择持久于 `ademoPersist.type1/type2`。**Isometric/Tactic 为空白占位**：`ademoTypeImplemented()` 返回 false → `ademoLoop` 跳过物理/SM，`ademoDraw` 画居中 “coming soon” 文本与提示行（`demoHintTactic`）。
 - **状态机 `ademoSM`**：状态 = `assistant.actions[]`（经 `/api/assistant/sheet-image/{name}` 加载，与宠物页同数据源）。与 petSM 的差异：**所有态循环播放**（游戏语义，petSM 是一次性回默认）；`setEvent` 别名解析（idle/walk/run/jump/fall/attack + **方向变体** walk_left/run_left/walk_up/walk_down/walk_up_left/walk_down_left，变体链回退到基础动画）；未配置事件回退默认态（idle 别名链 → 首个注册）。**左向变体抑制镜像**：`currentIsLeftVariant()`（action 名含 `_left`）为 true 时渲染不再水平翻转（帧本身已朝左）。无动作时渲染占位色块（圆角矩形+眼睛，朝向跟随 facing）。
@@ -74,6 +74,7 @@
 - **碰撞体**：Add Body 进入绘制模式（canvas crosshair），拖绘 ≥8×8 矩形提交；Undo/Clear 按整个列表操作；会话级内存持久（`ademoPersist.bodies`，切页再进保留，重启丢）。
 - **背景图**：**单按钮合并**（无 bgPath = Set Background… 选图，有 = Clear Background，标签/ghost 样式随 `ademoSyncToolbar` 切换）+ **模式下拉** `ademoPersist.bgMode`（fit-width 默认 / fit-height / pixel 1:1，`ademoBgScale(mode,iw,ih,W,H)` 纯函数，居中绘制）。选图经 `/api/browse` native + `POST /api/assistant/sheet-preview` 注册 → `GET /sheet-preview/{id}` 加载（复用 sheet.go 1h TTL 机制；路径存 `ademoPersist.bgPath`，每次渲染重新注册拿新 id，TTL 过期无感）。
 - **实体盒 / 缩放**：当前 action 帧尺寸 × scale（滑条 **0.01–1.00**，步进 0.01，旧 0.5–4 会话值渲染时钳入）；**ScaleTo W/H 输入框**：输入任一像素尺寸，另一边按帧宽高比自动算（`scale = 目标 ÷ 帧尺寸`，同样钳 0.01–1.00）。滑条与 W/H 三控件经唯一入口 `ademoApplyScale` 联动（`ademoSyncEntitySize` 尾部 `ademoSyncScaleControls` 回写；聚焦中的输入框不回写防打字抖动；切 action 帧尺寸变化也刷新）。切 action/改 scale 保持脚底锚点；canvas 按容器 × devicePixelRatio 缩放（ResizeObserver）。
-- **测试缝**：`window.__ademo = {sm, ent, keys, aim, persist, stage, step, tryJump, attack, setType, spawn, bgScale, applyScale, frameRef, motionEvent, syncSize, addBody, clearBodies}`。
+- **暂停缝（2026-08-29 新增）**：`__ademo.setPaused(bool)` 冻结物理/SM 步进（`ademoLoop` 跳过 step 与 SM tick，画面定格继续渲染），供同页运行的游戏插件独占键盘输入；`isPaused()` 查询。游戏插件区（`demo-games.js`）启动/停止/切页时调用。
+- **测试缝**：`window.__ademo = {sm, ent, keys, aim, persist, stage, step, tryJump, attack, setType, spawn, bgScale, applyScale, frameRef, motionEvent, syncSize, addBody, clearBodies, setPaused, isPaused}`。
 - **HUD**：canvas 左上角常驻 state/event/ground/facing/x/y/vx/vy/bodies 调试读出（刻意英文原文）。
-- **验证**：`node web/assistant-demo.test.js`（34 项：接线契约 ×4、SM ×4、平台物理 ×8、右键移动 ×3、运动事件 ×1、topdown ×8、方向事件 ×3、背景模式 ×1、类型/缩放/i18n 键 ×3）；浏览器实测（隔离实例 20199 + headless CDP，2026-08-29 二轮）：topdown 右键走到点击点并清除、背景按钮 Set↔Clear 随 bgPath 翻转 + 模式下拉持久、预设三组 18 动作（仅补缺失）、Actions/矩阵分组折叠互不干扰、demo 域 Trigger 无 Demo 页时 toast 守卫；一轮实测：类型下拉三级切换、ScaleTo 联动与钳制、WASD 对角移动、左键/空格 attack、鼠标瞄准朝向、Isometric 占位渲染、scroller 跳跃回归；旧实测：碰撞体绘制/站上、绘制模式 Escape 不触发关机、背景图重注册、F6 往返导航、切页监听摘除。
+- **验证**：`node web/assistant-demo.test.js`（34 项（demo 路由断言已随 `renderDemoGames` 接线更新为组合形式）：接线契约 ×4、SM ×4、平台物理 ×8、右键移动 ×3、运动事件 ×1、topdown ×8、方向事件 ×3、背景模式 ×1、类型/缩放/i18n 键 ×3）；浏览器实测（隔离实例 20199 + headless CDP，2026-08-29 二轮）：topdown 右键走到点击点并清除、背景按钮 Set↔Clear 随 bgPath 翻转 + 模式下拉持久、预设三组 18 动作（仅补缺失）、Actions/矩阵分组折叠互不干扰、demo 域 Trigger 无 Demo 页时 toast 守卫；一轮实测：类型下拉三级切换、ScaleTo 联动与钳制、WASD 对角移动、左键/空格 attack、鼠标瞄准朝向、Isometric 占位渲染、scroller 跳跃回归；旧实测：碰撞体绘制/站上、绘制模式 Escape 不触发关机、背景图重注册、F6 往返导航、切页监听摘除。

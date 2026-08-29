@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/editor"
 	"github.com/tinyrouter/tinyrouter/internal/api/fsbrowse"
 	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
+	"github.com/tinyrouter/tinyrouter/internal/api/games"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
@@ -364,6 +366,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	}()
 	traceHandler := trace.NewHandler(apiDeps)
 	probeHandler := probe.NewHandler(apiDeps)
+	gamesHandler := games.NewHandler(apiDeps)
 	archiveHandler := archiveapi.NewHandler(apiDeps, rt.archiveRunner)
 	playgroundHandler := playgroundapi.NewHandler(apiDeps)
 	// Gallery resolves registered archive sources through the /api/archive
@@ -437,6 +440,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			fsbrowseHandler.Register(r)
 			// Traces
 			r.Route("/traces", traceHandler.Register)
+
+			// Games plugins
+			r.Route("/games", func(r chi.Router) { gamesHandler.Register(r) })
 		})
 	})
 
@@ -631,6 +637,28 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			}
 		}
 	}
+
+	// Games plugins: seed the embedded default set into the games directory,
+	// then serve game files verbatim from disk (no auth, no cache — game code
+	// is live-editable without recompiling or restarting). Registered before
+	// the serveUI catch-all below so the specific /games/* pattern wins.
+	gamesDir := config.ResolveGamesDir(rt.reg.Config().GamesDir, filepath.Dir(rt.configPath))
+	if err := os.MkdirAll(gamesDir, 0o755); err != nil {
+		rt.logger.Warn("router: games: create dir %s failed: %v", gamesDir, err)
+	} else if gameFS, ferr := fs.Sub(web.Games, "games"); ferr == nil {
+		if seeded, serr := games.SeedGames(gameFS, gamesDir, rt.logger.Warn); serr != nil {
+			rt.logger.Warn("router: games: seed failed: %v", serr)
+		} else if len(seeded) > 0 {
+			rt.logger.Info("router: games: seeded default games: %v", seeded)
+		}
+	} else {
+		rt.logger.Warn("router: games: embedded default set unavailable: %v", ferr)
+	}
+	gamesStatic := http.StripPrefix("/games/", http.FileServer(http.Dir(gamesDir)))
+	r.Get("/games/*", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		gamesStatic.ServeHTTP(w, req)
+	})
 	r.Get("/*", rt.serveUI)
 
 	// Walk routes to dynamically build the assistant contract-backed router
