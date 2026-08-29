@@ -962,6 +962,38 @@ document.addEventListener('keydown', function(e) {
     e.stopImmediatePropagation();
     return;
   }
+  // Demo stage-only fullscreen: only Ctrl+F toggles and game input pass through.
+  // Must run before modal/shortcut handling so we can suppress all global shortcuts.
+  if (document.body.classList.contains('demo-stage-fullscreen')) {
+    var isCtrlF = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+    if (isCtrlF) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (typeof ademoSetFullscreen === 'function') ademoSetFullscreen(false);
+      else document.body.classList.remove('demo-stage-fullscreen');
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (typeof ademoSetFullscreen === 'function') ademoSetFullscreen(false);
+      else document.body.classList.remove('demo-stage-fullscreen');
+      return;
+    }
+    // Let capture-phase game handlers (WASD/arrows) run; suppress every global shortcut below.
+    // Return early so F1-F6 etc. don't fire while playing fullscreen.
+    // We still allow the event to reach capture listeners, so don't stopPropagation here.
+    // Just skip the rest of this bubble handler's shortcut routing.
+    // Mark so later checks (if any) can also gate.
+    window.__demoStageFullscreen = true;
+    // Fall through to block only global shortcuts — not game keys — by returning after modal block.
+    // Quick gating: if a modal is open we already returned; otherwise skip global shortcut section.
+    // We achieve that by short-circuiting the rest of the handler:
+    // Use a flag check at the top of the global-shortcut block below via early return.
+    // Instead, just return here after allowing capture handlers to have run; game keys are capture-phase.
+    // But we still need to let keydown propagate to canvas listeners — don't preventDefault.
+    // Simply skip global shortcuts by returning.
+    return;
+  }
+  window.__demoStageFullscreen = false;
   var tag = document.activeElement ? document.activeElement.tagName : '';
   var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
   var modal = topOpenModal();

@@ -62,14 +62,52 @@ var ADEMO_SVG_FULLSCREEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill
 var ADEMO_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 function ademoIsFullscreen() {
-  return !!(ademoRt && ademoRt.wrap && ademoRt.wrap.classList.contains('ademo-fullscreen'));
+  return document.body.classList.contains('demo-stage-fullscreen');
+}
+function ademoApplyFullscreenChrome() {
+  var on = ademoIsFullscreen();
+  // Show only the correct pane's exit button
+  var ademoExit = document.querySelector('.ademo-fs-exit');
+  var dgExit = document.querySelector('.dg-fs-exit');
+  if (ademoExit) ademoExit.style.display = (on && ademoActiveTab === 'ademo') ? '' : 'none';
+  if (dgExit) dgExit.style.display = (on && ademoActiveTab === 'games') ? '' : 'none';
+  // Native window chrome like F fullscreen
+  if (typeof window.toggleNativeFullscreen === 'function') {
+    try { window.toggleNativeFullscreen(on); } catch (e0) {}
+  }
+  if (on) {
+    document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(function () {});
+  } else {
+    if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen().catch(function () {});
+  }
+  requestAnimationFrame(ademoResize);
+  try { window.dispatchEvent(new Event('resize')); } catch (e1) {}
+  ademoSyncToolbar();
+  if (typeof dgSyncUi === 'function') try { dgSyncUi(); } catch (e2) {}
 }
 function ademoSetFullscreen(on) {
-  if (!ademoRt || !ademoRt.wrap) return;
-  ademoRt.wrap.classList.toggle('ademo-fullscreen', !!on);
-  requestAnimationFrame(ademoResize);
+  var will = !!on;
+  document.body.classList.toggle('demo-stage-fullscreen', will);
+  // Keep legacy container classes for exit paths
+  if (ademoRt && ademoRt.wrap) ademoRt.wrap.classList.toggle('ademo-fullscreen', will);
+  var dgRoot = document.querySelector('.dg-root');
+  if (dgRoot) dgRoot.classList.toggle('dg-fullscreen', will && ademoActiveTab === 'games');
+  ademoApplyFullscreenChrome();
 }
 function ademoToggleFullscreen() { ademoSetFullscreen(!ademoIsFullscreen()); }
+function ademoIsFullscreenActive() {
+  return document.body.classList.contains('demo-stage-fullscreen');
+}
+// When stage-fullscreen, only game input + Ctrl+F + floating X should work
+function ademoFullscreenBlocksShortcut(e) {
+  if (!ademoIsFullscreenActive()) return false;
+  // Allow Ctrl+F (toggle) and Esc (exit) and game keys; block global nav shortcuts
+  var isCtrlF = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+  if (isCtrlF) return false;
+  if (e.key === 'Escape') return false;
+  // Game movement keys are handled by capture listeners (ademoOnKeyDown etc.), let them through
+  return true;
+}
 
 // ---- mouse aim (topdown): stage coords, active while cursor over canvas ----
 var ademoAim = { x: 0, y: 0, active: false };
@@ -544,8 +582,9 @@ function ademoSyncToolbar() {
     bgBtn.textContent = ademoPersist.bgPath ? t('demoClearBackground') : t('demoSetBackground');
     bgBtn.classList.toggle('btn-ghost', !!ademoPersist.bgPath);
   }
-  var bgMode = q('.ademo-bg-mode');
-  if (bgMode && bgMode.value !== ademoPersist.bgMode) bgMode.value = ademoPersist.bgMode;
+  // Custom select render is authoritative for bgMode; keep fallback only when native fallback rendered.
+  var bgMode = q('#ademo-bg-mode');
+  if (bgMode && bgMode.tagName === 'SELECT' && bgMode.value !== ademoPersist.bgMode) bgMode.value = ademoPersist.bgMode;
   var addBtn = q('.ademo-add-body');
   if (addBtn) {
     addBtn.setAttribute('aria-pressed', ademoRt.bodyMode ? 'true' : 'false');
@@ -857,25 +896,21 @@ function renderAssistantDemo(container) {
 
   ademoPersist.scale = Math.min(1, Math.max(0.01, ademoPersist.scale || 1));
 
-  // Shell with tab toggle: Assistant Demo | Games — only one pane visible.
+  // Shell with segmented toggle: Assistant Demo | Games — only one pane visible.
   container.innerHTML =
     '<div class="demo-shell">' +
-      '<div class="demo-tabs">' +
-        '<button type="button" class="btn demo-tab' + (ademoActiveTab === 'ademo' ? '' : ' btn-ghost') + (ademoActiveTab === 'ademo' ? ' active' : '') + '" data-tab="ademo">' + escapeHtml(t('demoTabAssistant')) + '</button>' +
-        '<button type="button" class="btn demo-tab' + (ademoActiveTab === 'games' ? '' : ' btn-ghost') + (ademoActiveTab === 'games' ? ' active' : '') + '" data-tab="games">' + escapeHtml(t('demoTabGames')) + '</button>' +
+      '<div class="demo-segment" role="tablist" aria-label="' + escapeHtml(t('demoTabAssistant')) + ' / ' + escapeHtml(t('demoTabGames')) + '">' +
+        '<button type="button" role="tab" class="demo-tab' + (ademoActiveTab === 'ademo' ? ' active' : '') + '" data-tab="ademo" aria-selected="' + (ademoActiveTab === 'ademo' ? 'true' : 'false') + '">' + escapeHtml(t('demoTabAssistant')) + '</button>' +
+        '<button type="button" role="tab" class="demo-tab' + (ademoActiveTab === 'games' ? ' active' : '') + '" data-tab="games" aria-selected="' + (ademoActiveTab === 'games' ? 'true' : 'false') + '">' + escapeHtml(t('demoTabGames')) + '</button>' +
       '</div>' +
       '<div class="demo-pane-ademo"' + (ademoActiveTab !== 'ademo' ? ' hidden' : '') + '>' +
     '<div class="ademo-root">' +
       '<div class="ademo-toolbar">' +
-        '<select class="input ademo-type1" data-tooltip="' + escapeHtml(t('demoType')) + '"></select>' +
-        '<select class="input ademo-type2" data-tooltip="' + escapeHtml(t('demoSubtype')) + '"></select>' +
+        '<div class="ademo-type1-wrap"></div>' +
+        '<div class="ademo-type2-wrap"></div>' +
         '<span class="ademo-sep"></span>' +
         '<button type="button" class="btn ademo-set-bg">' + escapeHtml(t(ademoPersist.bgPath ? 'demoClearBackground' : 'demoSetBackground')) + '</button>' +
-        '<select class="input ademo-bg-mode" data-tooltip="' + escapeHtml(t('demoBgMode')) + '">' +
-          '<option value="fit-width">' + escapeHtml(t('demoBgFitWidth')) + '</option>' +
-          '<option value="fit-height">' + escapeHtml(t('demoBgFitHeight')) + '</option>' +
-          '<option value="pixel">' + escapeHtml(t('demoBgPixel')) + '</option>' +
-        '</select>' +
+        '<div class="ademo-bgmode-wrap"></div>' +
         '<span class="ademo-sep"></span>' +
         '<button type="button" class="btn ademo-body-sq ademo-add-body" data-tooltip="' + escapeHtml(t('demoAddBody')) + '" aria-label="' + escapeHtml(t('demoAddBody')) + '">' + ADEMO_SVG_ADD_BODY + '</button>' +
         '<button type="button" class="btn btn-ghost ademo-body-sq ademo-undo-body" data-tooltip="' + escapeHtml(t('demoUndoBody')) + '" aria-label="' + escapeHtml(t('demoUndoBody')) + '">' + ADEMO_SVG_UNDO_BODY + '</button>' +
@@ -957,35 +992,88 @@ function renderAssistantDemo(container) {
     if (ademoRt) ademoRt.bgImg = null;
     ademoSyncToolbar();
   });
-  var bgModeSel = wrap.querySelector('.ademo-bg-mode');
-  bgModeSel.value = ademoPersist.bgMode;
-  bgModeSel.addEventListener('change', function () {
-    ademoPersist.bgMode = bgModeSel.value;
-    bgModeSel.blur();
-  });
+  // --- custom dropdowns (project style: renderCustomSelectHtml) -------------
+  function ademoMakeOpts(map, labelPrefix) {
+    var opts = [];
+    Object.keys(map).forEach(function (k) {
+      var lab = labelPrefix ? t(labelPrefix + k.charAt(0).toUpperCase() + k.slice(1)) : k;
+      opts.push({ value: k, label: lab || k });
+    });
+    return opts;
+  }
+  function ademoRenderType1() {
+    var c = wrap.querySelector('.ademo-type1-wrap');
+    if (!c) return;
+    var opts = ademoMakeOpts(ADEMO_TYPES, 'demoType');
+    if (typeof renderCustomSelectHtml === 'function') {
+      c.innerHTML = renderCustomSelectHtml('ademo-type1-wrap', 'ademo-type1', opts, ademoPersist.type1, 'ademoOnType1Change(this.value)', 'min-width:92px;width:auto');
+    } else {
+      var html = '<select class="input ademo-type1" id="ademo-type1">' + opts.map(function (o) { return '<option value="' + escapeAttr(o.value) + '"' + (o.value === ademoPersist.type1 ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>'; }).join('') + '</select>';
+      c.innerHTML = html;
+      var sel = c.querySelector('#ademo-type1');
+      if (sel) sel.addEventListener('change', function () { ademoOnType1Change(sel.value); });
+    }
+  }
+  function ademoRenderType2() {
+    var c = wrap.querySelector('.ademo-type2-wrap');
+    if (!c) return;
+    var keys = ADEMO_TYPES[ademoPersist.type1] || [];
+    var opts = keys.map(function (k) { return { value: k, label: t('demoSub' + k) || k }; });
+    if (typeof renderCustomSelectHtml === 'function') {
+      c.innerHTML = renderCustomSelectHtml('ademo-type2-wrap', 'ademo-type2', opts, ademoPersist.type2, 'ademoOnType2Change(this.value)', 'min-width:92px;width:auto');
+    } else {
+      var html = '<select class="input ademo-type2" id="ademo-type2">' + opts.map(function (o) { return '<option value="' + escapeAttr(o.value) + '"' + (o.value === ademoPersist.type2 ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>'; }).join('') + '</select>';
+      c.innerHTML = html;
+      var sel = c.querySelector('#ademo-type2');
+      if (sel) sel.addEventListener('change', function () { ademoOnType2Change(sel.value); });
+    }
+  }
+  function ademoRenderBgMode() {
+    var c = wrap.querySelector('.ademo-bgmode-wrap');
+    if (!c) return;
+    var opts = [
+      { value: 'fit-width', label: t('demoBgFitWidth') },
+      { value: 'fit-height', label: t('demoBgFitHeight') },
+      { value: 'pixel', label: t('demoBgPixel') }
+    ];
+    if (typeof renderCustomSelectHtml === 'function') {
+      c.innerHTML = renderCustomSelectHtml('ademo-bgmode-wrap', 'ademo-bg-mode', opts, ademoPersist.bgMode, 'ademoOnBgModeChange(this.value)', 'min-width:110px;width:auto');
+    } else {
+      var html = '<select class="input ademo-bg-mode" id="ademo-bg-mode">' + opts.map(function (o) { return '<option value="' + escapeAttr(o.value) + '"' + (o.value === ademoPersist.bgMode ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>'; }).join('') + '</select>';
+      c.innerHTML = html;
+      var sel = c.querySelector('#ademo-bg-mode');
+      if (sel) sel.addEventListener('change', function () { ademoOnBgModeChange(sel.value); });
+    }
+  }
+  window.ademoOnType1Change = function (v) { ademoSetType(v, null); ademoRenderType2(); };
+  window.ademoOnType2Change = function (v) { ademoSetType(ademoPersist.type1, v); };
+  window.ademoOnBgModeChange = function (v) { ademoPersist.bgMode = v; };
+  ademoRenderType1();
+  ademoRenderType2();
+  ademoRenderBgMode();
+  // Sync type2 when the subsystem updates it.
+  var _origSyncType2 = ademoSyncType2Options;
+  ademoSyncType2Options = function () {
+    try { _origSyncType2(); } catch (e0) {}
+    ademoRenderType2();
+    // Keep bg mode in sync if changed elsewhere.
+    try {
+      var sel = wrap.querySelector('#ademo-bg-mode');
+      if (sel && sel.value !== ademoPersist.bgMode) {
+        ademoRenderBgMode();
+      }
+    } catch (e1) {}
+  };
+  // Fallback escape attr helper if not yet loaded.
+  function escapeAttr(s) {
+    if (typeof window.escapeAttr === 'function') return window.escapeAttr(s);
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
   wrap.querySelector('.ademo-add-body').addEventListener('click', function () {
     ademoSetBodyMode(!ademoRt.bodyMode);
   });
   wrap.querySelector('.ademo-undo-body').addEventListener('click', ademoUndoBody);
   wrap.querySelector('.ademo-clear-bodies').addEventListener('click', ademoClearBodies);
-  var type1Sel = wrap.querySelector('.ademo-type1');
-  Object.keys(ADEMO_TYPES).forEach(function (k) {
-    var opt = document.createElement('option');
-    opt.value = k;
-    opt.textContent = t('demoType' + k.charAt(0).toUpperCase() + k.slice(1));
-    type1Sel.appendChild(opt);
-  });
-  type1Sel.value = ademoPersist.type1;
-  type1Sel.addEventListener('change', function () {
-    ademoSetType(type1Sel.value, null);
-    type1Sel.blur();
-  });
-  var type2Sel = wrap.querySelector('.ademo-type2');
-  type2Sel.addEventListener('change', function () {
-    ademoSetType(ademoPersist.type1, type2Sel.value);
-    type2Sel.blur();
-  });
-  ademoSyncType2Options();
   var scaleInput = wrap.querySelector('.ademo-scale');
   scaleInput.addEventListener('input', function () {
     ademoApplyScale(parseFloat(scaleInput.value));
@@ -1084,8 +1172,13 @@ function cleanupAssistantDemo() {
   window.removeEventListener('keyup', ademoOnKeyUp, true);
   window.removeEventListener('blur', ademoOnBlur);
   if (ademoRt._fsKeyHandler) window.removeEventListener('keydown', ademoRt._fsKeyHandler);
-  // Exit fullscreen on navigation away
+  // Exit stage-only fullscreen on navigation away
+  document.body.classList.remove('demo-stage-fullscreen');
+  if (typeof window.toggleNativeFullscreen === 'function') { try { window.toggleNativeFullscreen(false); } catch (e0) {} }
+  try { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen().catch(function(){}); } catch (e1) {}
   if (ademoRt.wrap) ademoRt.wrap.classList.remove('ademo-fullscreen');
+  var dgRoot = document.querySelector('.dg-root');
+  if (dgRoot) dgRoot.classList.remove('dg-fullscreen');
   ademoRt = null;
   ademoOnBlur();
 }

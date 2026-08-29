@@ -68,18 +68,25 @@ var DG_SVG_FULLSCREEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="n
 var DG_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 function dgIsFullscreen() {
-  return !!(dgUi && dgUi.root && dgUi.root.classList.contains('dg-fullscreen'));
+  return document.body.classList.contains('demo-stage-fullscreen');
 }
 function dgSetFullscreen(on) {
-  if (!dgUi || !dgUi.root) return;
-  dgUi.root.classList.toggle('dg-fullscreen', !!on);
+  var will = !!on;
+  // Delegate to the shell's fullscreen controller so both panes share one chrome
+  if (typeof ademoSetFullscreen === 'function') { ademoSetFullscreen(will); return; }
+  document.body.classList.toggle('demo-stage-fullscreen', will);
+  if (dgUi && dgUi.root) dgUi.root.classList.toggle('dg-fullscreen', will);
   dgSyncUi();
   if (dgUi.stageWrap) {
     // Nudge stage sizing if game has fixed layout.
     try { window.dispatchEvent(new Event('resize')); } catch (e0) {}
   }
+  if (typeof window.toggleNativeFullscreen === 'function') {
+    try { window.toggleNativeFullscreen(will); } catch (e1) {}
+  }
 }
 function dgToggleFullscreen() { dgSetFullscreen(!dgIsFullscreen()); }
+function dgIsFullscreenActive() { return document.body.classList.contains('demo-stage-fullscreen'); }
 
 // ---- loaders ----------------------------------------------------------------
 function dgFetchList() {
@@ -356,11 +363,15 @@ function dgSyncUi() {
 }
 
 function dgSetStatus(msg) {
-  if (dgUi) dgUi.status.textContent = msg || '';
+  if (dgUi.fsExit) dgUi.fsExit.style.display = dgIsFullscreen() ? '' : 'none';
 }
 
 function cleanupDemoGames() {
-  if (dgUi && dgUi.root) dgUi.root.classList.remove('dg-fullscreen');
+  // Stage-only fullscreen is body-scoped; clear it on leave if we own it.
+  if (document.body.classList.contains('demo-stage-fullscreen')) {
+    // Don't force-clear if ademo still owns the stage (both share the class).
+    // The ademo cleanup will clear it; here we just leave it.
+}
   dgStopGame();
   dgUi = null;
 }
