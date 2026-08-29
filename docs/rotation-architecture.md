@@ -5,6 +5,8 @@
 > **最后核对：** 2026-07-25，仓库工作区（`main`）。**运行时状态类型抽离 + 反向依赖消除**：per-key 运行时状态类型 `KeyRuntimeState`/`QuotaInfo` 迁移到新包 `internal/keystate`；`rotation` 不再 `import registry`，改为 `import keystate`（类型）+ 依赖本包新定义的 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足，由 `app.go` 组合根注入）。`Selector.reg` 字段类型由 `*registry.Registry` 改为 `KeyStateProvider`。`proxy.ModelResolver.GetKeyState` 返回类型随之改为 `*keystate.KeyRuntimeState`。行为不变。此前：test-proto 单协议 endpoint 替换复合探测 + URL 归一化修复。
 >
 > **最后核对（2026-08-03，审计修复）：** `IsDailyQuota429` 收紧（quota 关键字 + 日额度标记 + 排除 `try again in`，§8.5）；`DefaultErrorRules` 新增 5xx 区间规则 `{StatusMin:500, StatusMax:599, Action:ActionBackoff}`（error_rules.go:68-74）——未映射 5xx 从 `ActionTransient`（30s 锁健康 key）改为短退避切 key；`ErrorRule` 新增 `StatusMin`/`StatusMax` 区间字段；NIM 三个路径（`WaitNIMInterval`/`OnNIMRequestSuccess`/`MarkNIM429`）改为**先读配置（cfgMu RLock 释放）再锁 key state（ks.mu）**，消除与 `Reload`（cfgMu→stateMu）、`SnapshotKeyStates`（stateMu→ks.mu）构成的 cfgMu→stateMu→ks.mu→cfgMu 死锁环。
+>
+> **最后核对（2026-08-29，人工指定活跃 Key）：** `Selector` 新增内存态 per-provider 人工 pin（`manualPins map[string]string` + `manualMu`，selector.go:39-45）：`SetManualKey(providerID, keyID)`（selector.go:64-72，空 keyID 清除）/ `ManualKey(providerID)`（selector.go:77-81）。`SelectKey` 在 NIM 过滤之后、策略分发之前优先命中 pin（selector.go:127-135）——pin 仅在 key 位于可用候选（active、未排除、无模型锁、NIM 达标）时生效，否则回退策略选择；**不改配置、不持久化、重启即失**。入口为 Monitor 页面 QuotaMonitor 多 Key 子行 Shift+点击 → `POST /api/providers/{id}/keys/{kid}/activate`（api/keys/register.go）；Monitor 的 `currentKey`/`getModelKeys` in-use 判定同步感知 pin（api/monitor/register.go），保证 UI 徽标与实际选择一致。
 
 > **2026-07-18 更新（软策略修正 + Responses 路由 + 多协议探测）：** (1) **移除 anthropic 入口的 target 过滤**——`Resolver.Resolve(name, entryFormat)` 不再对 `entryFormat == EntryFormatAnthropic` 做 `IsAnthropic()` 过滤（resolver.go:103-118 已删除），现对所有 `entryFormat` 返回同一 target 集合；`entryFormat` 参数保留但不再被消费（供未来扩展）。(2) **新增 OpenAI Responses 入口** `EntryFormatOpenAIResponses`（resolver.go:22-25），与 OpenAI Chat / Anthropic 并列。(3) **协议感知 usage 提取**——OpenAI Chat / Responses 入口走 `util.ExtractTokens`；Anthropic 入口走 `parseAnthropicSSEUsage`（`internal/proxy/stream.go:415-450`）提取 `message_start`/`message_delta` 的 input/output tokens 并复用 `recordUsage`。(4) **多协议探测**——`api/probe_model.go`+`probe_common.go` 三协议并发探测，结果写回 `config.ModelDef.Protocols` 与 `state.yaml` 的 `probes` map。rotation 仍对协议无感知，Key 轮询/冷却/退避对三入口完全复用同一套机制。详见 §4.4、§5（usage）、§17、§18。
 >
@@ -151,11 +153,12 @@ rotation 模块不负责 usage 提取，但本协议相关的提取路径如下�
    - 否则加入 `candidates`（selector.go:74）。
 4. **空候选 → 错误：** `len(candidates)==0` 返回 `"no available keys"`（selector.go:76-78）。
 5. **NIM 过滤：** `s.IsNIMEnabled(providerID, model)` 为真时 `candidates = s.filterNIMCandidates(provider.ID, model, candidates)`（selector.go:81-83，nim.go:188-216）。
-6. **策略分发：** `strategy := s.effectiveStrategy(provider)`（selector.go:84），`switch`（selector.go:86-93）：`"round-robin"`→`selectRoundRobin`、`"failover"`→`selectRotation`、默认→`selectFillFirst`。
-7. **未选中 → 错误：** `!chosenOk` 返回 `"no available keys"`（selector.go:94-96）。
-8. **状态更新：** 重新 `GetKeyState(chosen)`，加锁置 `LastUsedAt=now`、`ConsecCount++`（selector.go:97-103）。
-9. **持久化回调：** `s.onStateChange != nil` 时调用（selector.go:104-106）。
-10. **返回：** `&SelectedKey{Provider:*provider, Key:chosen, KeyName:chosen.Name}`（selector.go:107）。
+6. **人工 pin 优先：** `s.ManualKey(provider.ID)` 非空且 pin 的 key 在 `candidates` 中（即可用）→ 直接选中、跳过策略分发（selector.go:127-135）；pin 缺失或不可用时不消费、继续走策略。
+7. **策略分发：** `switch s.effectiveStrategy(provider)`（selector.go:137-144）：`"round-robin"`→`selectRoundRobin`、`"failover"`→`selectRotation`、默认→`selectFillFirst`。
+8. **未选中 → 错误：** `!chosenOk` 返回 `"no available keys"`（selector.go:146-148）。
+9. **状态更新：** 重新 `GetKeyState(chosen)`，加锁置 `LastUsedAt=now`、`ConsecCount++`（selector.go:149-155）。
+10. **持久化回调：** `s.onStateChange != nil` 时调用（selector.go:156-158）。
+11. **返回：** `&SelectedKey{Provider:*provider, Key:chosen, KeyName:chosen.Name}`（selector.go:159）。
 
 ```mermaid
 flowchart TD
@@ -168,9 +171,11 @@ flowchart TD
     F -->|"是"| E2["error: no available keys"]
     F -->|"否"| G{"IsNIM?"}
     G -->|"是"| H["filterNIMCandidates (81-83)"]
-    G -->|"否"| I["effectiveStrategy (84)"]
-    H --> I
-    I --> J{"策略 switch (86-93)"}
+    G -->|"否"| P{"人工 pin 可用? (127-135)"}
+    H --> P
+    P -->|"是: 直接选中"| L
+    P -->|"否"| I["effectiveStrategy (137)"]
+    I --> J{"策略 switch (137-144)"}
     J -->|"round-robin"| K1["selectRoundRobin"]
     J -->|"failover"| K2["selectRotation"]
     J -->|"default"| K3["selectFillFirst"]
@@ -481,7 +486,7 @@ flowchart TD
 
 ### 16.2 已测 vs 未测
 
-- **已测：** fill-first / round-robin / failover 选择；指数退避与 ClearError 锁语义；每日配额锁 / 余额锁 / 毫秒边界；错误分类文本优先与状态码回退；NIM 计数轮转、429 阶梯、24h 重置、最小间隔、全池重置；速率限制头解析与 adapter 路由。
+- **已测：** fill-first / round-robin / failover 选择；人工 pin（三策略命中、排除回退、锁定回退、清除回退，selector_test.go `TestSelectKey_ManualPin*`）；指数退避与 ClearError 锁语义；每日配额锁 / 余额锁 / 毫秒边界；错误分类文本优先与状态码回退；NIM 计数轮转、429 阶梯、24h 重置、最小间隔、全池重置；速率限制头解析与 adapter 路由。
 - **未充分覆盖（按源码锚点）：**
   - **`effectiveStrategy` 覆盖解析：** provider 级 `RotationStrategy` 优先于全局的分支（strategy.go:133-135）无专门单测，现有测试只经全局 `Strategy` 间接覆盖。
   - **`Settings` / `UpdateSettings`：** 配置读写（selector.go:148-158）无测试。
@@ -506,7 +511,7 @@ go build -o tinyrouter .
 
 本包（internal/rotation）：
 
-- `selector.go`：KeyStateProvider 接口（12-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（21-32）、Selector 结构体（34-40，`reg KeyStateProvider` 非 `*registry.Registry`）、New（42-44）、SetStateHook（46-49）、SelectedKey、SelectKey 算法、IsNIMEnabled、OnKeyFailure 分发、RotateToBack、Settings、UpdateSettings、编译期检查。
+- `selector.go`：KeyStateProvider 接口（16-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（23-32）、Selector 结构体（34-48，`reg KeyStateProvider` 非 `*registry.Registry`，含 `manualMu`/`manualPins` 人工 pin 字段 39-45）、New（50-52）、SetStateHook（55-57）、SetManualKey/ManualKey（64-81，人工 pin 读写，内存态不持久化）、SelectedKey、SelectKey 算法（89-160，含 pin 优先分支 127-135）、IsNIMEnabled、OnKeyFailure 分发、RotateToBack、Settings、UpdateSettings、编译期检查。
 - `strategy.go`：selectRotation（39-64）、selectFillFirst（66-77）、selectRoundRobin（79-130）、effectiveStrategy（132-137）、effectiveStickyLimit（139-144）。
 - `cooldown.go`：CooldownManager 接口（14-36，**含 `SonestCooldown` + `CooldownInfo`**）、MarkUnavailable（38-65）、ClearError（67-86）、isKeyAvailable（88-110）、BackoffSequence、IsDailyQuota429、nextCSTMidnight05、MarkDailyQuotaLocked、MarkBalanceLocked、MarkRateLimited、SonestCooldown（220-263，最早未排除 key 的 `ModelLocks[model]` 到期 + keyName/reason）、编译期检查。
 - `error_rules.go`：ErrorAction（8-16，**含 `ActionPassThrough`**）、ErrorRule（18-24）、DefaultErrorRules（28-66，**含 `{StatusCode:400/422, Action:ActionPassThrough}` + 文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`**）、DefaultTransientCooldownSec（69）、ClassifyError（73-89，先文本后状态）、IsBalanceExhausted（95-101）。
@@ -533,5 +538,6 @@ go build -o tinyrouter .
 | 修改 NIM | nim.go（getNIMSettings/getModelNIMOverride/getEffectiveNIMSettings/WaitNIMInterval/OnNIMRequestSuccess/MarkNIM429/filterNIMCandidates）+ config NIMSettings（121-126）+ ModelNIMOverride（40-48）+ IsNIM（102-107）+ selector.go IsNIMEnabled + OnKeyFailure NIM 分支 + proxy 层 IsNIMEnabled 门控（forward.go、retry.go） |
 | 修改速率限制头 | ratelimit.go 各 Adapter（36-56）+ adapterRegistry（59-64）+ GetAdapter（71-80） |
 | 修改运行时状态字段 | `keystate/state.go` KeyRuntimeState(26-51) + `registry/state.go` snapshotKeyState(76-102)/RestoreKeyState(113-146) + state.yaml 快照/恢复；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
+| 修改人工指定活跃 Key（Monitor Shift+点击 pin） | selector.go `manualPins`/`manualMu`（39-45）+ `SetManualKey`（64-72）/`ManualKey`（77-81）+ SelectKey pin 优先分支（127-135）；api/keys/register.go `activateKey`（`POST /providers/{id}/keys/{kid}/activate`）；api/monitor/register.go `currentKey`/`getModelKeys` in-use pin 感知；前端 `web/static/monitor/monitor_quota.js` `quotaKeyRowClick` |
 | 新增/修改 Anthropic 协议路由（combo 入口过滤，已移除） | combo/resolver.go `Resolve(name, entryFormat)` **不再**做 `entryFormat==EntryFormatAnthropic` 的 `IsAnthropic()` 过滤（原 103-118 已删除，现 resolver.go:70-135 对所有 entryFormat 返回同一 target 集合）；EntryFormat 类型（14-25，新增 `EntryFormatOpenAIResponses` 22-25）；rotation 的 SelectKey / 冷却 / 退避 / 配额锁对三入口 provider 复用同一套机制（selector.go:47-108、cooldown.go、error_rules.go，不按协议分支） |
 | 软策略修正 / Responses 路由 / 单协议探测 | combo/resolver.go 移除 anthropic `IsAnthropic()` 过滤 + 保留 `entryFormat` 参数（供未来扩展）；config/types.go `ModelDef.Protocols`（50）+ `Protocol*` 常量（31-37）+ validate.go `validateModelDef`；proxy/forward.go 删除入口协议严格匹配（§13.1）+ upstream.go 三分支 + stream.go `parseAnthropicSSEUsage`（415-450）；api/probe_model.go `testProviderModelProto` 单协议单次探测（**不持久化**）+ probe_common.go `normalizeProbeBaseURL` + `buildProbeURL`/`buildAnthropicURL` 归一化修复 + probe_proto_test.go；前端 providers.js/combos.js/quickslots.js 串行调用三次实现三协议探测；registry `UpdateModelProtocols` + `UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord` + `WithProbeStateProvider`（app.go:166） |

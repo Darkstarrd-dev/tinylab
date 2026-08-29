@@ -50,6 +50,8 @@ type KeyStatEntry struct {
 	KeyName      string  `json:"keyName"`
 	SuccessCount int     `json:"successCount"`
 	ErrorCount   int     `json:"errorCount"`
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
 	AvgTTFTMs    int64   `json:"avgTtftMs"`
 	AvgSpeed     float64 `json:"avgSpeed"`
 }
@@ -162,6 +164,8 @@ func (a *Accumulator) KeyStatsFor(providerName, model string) []KeyStatEntry {
 			KeyName:      ks.KeyName,
 			SuccessCount: ks.SuccessCount,
 			ErrorCount:   ks.ErrorCount,
+			InputTokens:  ks.InputTokens,
+			OutputTokens: ks.OutputTokens,
 			AvgTTFTMs:    avgTTFT,
 			AvgSpeed:     avgSpeed,
 		})

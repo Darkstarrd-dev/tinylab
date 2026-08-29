@@ -28,7 +28,7 @@
 | 新增/修改配置字段 | config-registry-state | `config/types.go`+`defaults.go`+`persistence.go` |
 | 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + 键盘陷阱 + 浏览锁）+ `internal/api/settings/register.go`（`getSettings` + `configDir` + `trace.logDir` + 指针字段按需合并）+ `internal/fsutil/open_windows.go`（`OpenFilePickerAt`+`SetFolder`） |
 | 修改运行时状态持久化 | config-registry-state | `state/manager.go`+`state.go`、`registry/state.go`（`KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`，持久化 `ModelRemaining==0` 的 model→limit 子集） |
-| 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/monitor/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`）、`web/static/monitor_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
+| 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/monitor/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`；`getModelKeys` 含 `providerId` 与 in-use pin 感知）、`web/static/monitor_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key、第一列 dot/timer+状态徽标并列、per-key quota/input/output 列；`quotaKeyRowClick` Ctrl+点击 pause/resume、Shift+点击 pin 活跃 Key）、`api/keys/register.go`（`activateKey`）、`usage/accumulator.go`（`KeyStatEntry.InputTokens/OutputTokens`）、`rotation/selector.go`（`manualPins`）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。
 

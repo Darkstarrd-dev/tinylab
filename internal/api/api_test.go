@@ -847,6 +847,88 @@ func TestGetQuotas_AggregationFromKeyStates(t *testing.T) {
 	}
 }
 
+// TestModelKeys_ManualPinAndPerKeyTokens covers the monitor multi-key
+// interactions: per-key input/output token fields, the manual active-key pin
+// endpoint, and pin-aware inUseKeyID/currentKeyId reporting.
+func TestModelKeys_ManualPinAndPerKeyTokens(t *testing.T) {
+	srv, reg, _, rt := setupTestServer(t)
+	defer srv.Close()
+
+	prov := config.Provider{
+		ID: "pin-prov", Name: "PinProv", Prefix: "pin", BaseURL: "https://pin.com",
+		APIType: "openai-compatible", IsActive: true,
+		Keys: []config.Key{
+			{ID: "pk1", Key: "sk-p1", Name: "Key-1", Priority: 1, IsActive: true},
+			{ID: "pk2", Key: "sk-p2", Name: "Key-2", Priority: 2, IsActive: true},
+		},
+		Models: []config.ModelDef{{ID: "model-p"}},
+	}
+	reg.AddProvider(prov)
+
+	// Seed per-key usage so the token/count fields are populated.
+	rt.usage.Add(usage.Entry{
+		Provider: "PinProv", Model: "model-p", KeyID: "pk2", KeyName: "Key-2",
+		Status: "success", LatencyMs: 1000, TTFTMs: 120, InputTokens: 42, OutputTokens: 128,
+	})
+
+	getKeys := func() map[string]any {
+		resp := requestJSON(t, "GET", srv.URL+"/api/monitor/model-keys?provider=PinProv&model=model-p", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+		}
+		var body map[string]any
+		json.Unmarshal([]byte(readBody(t, resp)), &body)
+		return body
+	}
+
+	// Baseline: fill-first picks the priority-1 key; pk2 carries the seeded stats.
+	body := getKeys()
+	if body["providerId"] != "pin-prov" {
+		t.Errorf("expected providerId pin-prov, got %v", body["providerId"])
+	}
+	if body["inUseKeyID"] != "pk1" {
+		t.Errorf("expected baseline inUseKeyID pk1, got %v", body["inUseKeyID"])
+	}
+	for _, k := range body["keys"].([]any) {
+		kd := k.(map[string]any)
+		if kd["keyId"] == "pk2" {
+			if int(kd["inputTokens"].(float64)) != 42 {
+				t.Errorf("expected pk2 inputTokens 42, got %v", kd["inputTokens"])
+			}
+			if int(kd["outputTokens"].(float64)) != 128 {
+				t.Errorf("expected pk2 outputTokens 128, got %v", kd["outputTokens"])
+			}
+			if int(kd["successCount"].(float64)) != 1 {
+				t.Errorf("expected pk2 successCount 1, got %v", kd["successCount"])
+			}
+		}
+	}
+
+	// Unknown provider/key are rejected.
+	if resp := requestJSON(t, "POST", srv.URL+"/api/providers/nope/keys/pk1/activate", ""); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown provider, got %d", resp.StatusCode)
+	}
+	if resp := requestJSON(t, "POST", srv.URL+"/api/providers/pin-prov/keys/nope/activate", ""); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown key, got %d", resp.StatusCode)
+	}
+
+	// Pin pk2; both the monitor view and SelectKey must honor it.
+	resp := requestJSON(t, "POST", srv.URL+"/api/providers/pin-prov/keys/pk2/activate", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	if body = getKeys(); body["inUseKeyID"] != "pk2" {
+		t.Errorf("expected pinned inUseKeyID pk2, got %v", body["inUseKeyID"])
+	}
+	sel, err := rt.selector.SelectKey("pin-prov", "model-p", nil)
+	if err != nil {
+		t.Fatalf("SelectKey failed: %v", err)
+	}
+	if sel.Key.ID != "pk2" {
+		t.Errorf("expected SelectKey to honor pin pk2, got %s", sel.Key.ID)
+	}
+}
+
 // TestModelKeys_PerModelStatusIsolation guards against a bug where a key's
 // cooldown/error for one model leaked into the displayed status/error of the
 // same key under a different model (e.g. ModelScope model-a rate limited

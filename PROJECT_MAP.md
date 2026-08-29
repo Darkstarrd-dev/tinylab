@@ -228,7 +228,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子；定义 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）——`Selector.reg` 字段类型为该接口，故 rotation **不 import registry**（改 import `keystate`） |
+| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子；定义 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）——`Selector.reg` 字段类型为该接口，故 rotation **不 import registry**（改 import `keystate`）；**2026-08-29：** 新增 `manualPins`/`manualMu` 人工活跃 Key pin（内存态不持久化），`SetManualKey`/`ManualKey`，`SelectKey` 在 NIM 过滤后、策略分发前优先命中可用 pin |
 | `strategy.go` | 轮询策略（fill-first / round-robin / failover）+ stickyLimit |
 | `cooldown.go` | 指数退避（1s→240s），429 日配额锁至次日 CST 00:05，per-model 锁；`IsDailyQuota429` 需 body 同时含 quota 关键字 + 日额度/耗尽标记（exceeded/daily/today/tomorrow）且无 `try again in` 时长提示才判定（普通 429 不再误锁到次日 00:05）；`CooldownManager` 接口新增 `SonestCooldown(providerID, model, excludeKeyIDs)` + `CooldownInfo`（最早 `ModelLocks[model]` 到期 + keyName/reason），供 proxy "无可用 key" 时等待最近冷却到期而非即时 502 |
 | `ratelimit.go` | 每 key 请求速率记账 |
@@ -290,7 +290,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 | 文件 | 职责 |
 |---|---|
 | `ring.go` | `RingBuffer`：有界环形缓冲（默认 500 条）+ `ByID(id)` 单条检索 + 摘要；`Entry` 结构体含 `SessionKey`、`Decision`、`Provenance` 及完整请求/响应详情（实际 Provider Key 统一显示为 `******`） |
-| `accumulator.go` | `CumulativeSummary` + per-model 累计（单调）统计 |
+| `accumulator.go` | `CumulativeSummary` + per-model 累计（单调）统计；`KeyStatsFor` 返回 per-key `KeyStatEntry`（success/error、`InputTokens`/`OutputTokens`（2026-08-29 新增）、avgTtft/avgSpeed），内存态、重启清零 |
 | `quota.go` | `QuotaTracker`：per-model 配额展示/快照 |
 | `ring_test.go` / `quota_test.go` | 测试 |
 
@@ -466,7 +466,7 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register` + `listKeys`/`createKey`/`bulkAddKeys`/`updateKey`/`deleteKey`/`getKeyState` + `KeyDTO`（支持 `key` 明文与 `maskedKey` 头尾各 4 位掩码 `sk-x****yyyy`）+ `MaskKey` |
+| `register.go` | `Handler` + `Register` + `listKeys`/`createKey`/`bulkAddKeys`/`updateKey`/`deleteKey`/`getKeyState` + `KeyDTO`（支持 `key` 明文与 `maskedKey` 头尾各 4 位掩码 `sk-x****yyyy`）+ `MaskKey`；**2026-08-29：** 新增 `activateKey`（`POST /providers/{id}/keys/{kid}/activate`）把 key pin 为 provider 人工活跃 Key（写 `Selector.manualPins`，运行时偏好、不改策略、不持久化） |
 
 ### 10.12 `internal/api/models/` — 模型列表
 
@@ -905,6 +905,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | 修改前端页面/资产 | PROJECT_MAP §18 | `web/static/<page>.js`、`web/static/utility/editor/*`（Editor：`editor-state.js`/`editor_workspace.js`/`editor_commands.js`/`editor_markdown.js`/`editor_layout.js`/`editor.js`/`editor_shell.js`/`editor-logs.js`；独立 Text Review wrapper 与 wizard）、`web/static/vendor/utility-editor/*`（各依赖许可证）、`web/static/index.html`、`web/static/index-nopg.html`、`internal/feature/feature.go` 的 RootStatic manifest |
 | 修改 Editor 文件标题重命名 | `web/static/utility/editor/editor_shell.js::renameCurrent`（先调用 `/api/editor/rename`，成功后同步工作区节点/标题；本地-only 节点仅更新 IndexedDB）+ `internal/api/editor/register.go::editorRename`（安全文件名校验、冲突检查、原子 `os.Rename`）+ `internal/pathgrant/pathgrant.go::Store.Rebind` + `internal/api/editor/register_test.go`（物理改名、冲突/非法名、grant 重绑定与改名后 Save） |
 | 修复 Quota Monitor latency/avg-speed 空白及首次加载空白 | proxy、config-registry-state | `web/static/monitor/monitor_quota.js::refreshAllKeyDetails` 为每个 quota bar 拉取 `monitor/model-keys` 以回填未展开主行指标；`internal/api/monitor/register.go::getQuotas` 把非 Playground `EntryTracker` 在途请求加入 provisional bar，避免请求完成前 quota 表为空；`docs/proxy-architecture.md` 记录两项修复 |
+| 修改 Quota Monitor 多 Key 子行（布局/快捷键/per-key 指标） | proxy、rotation、config-registry-state | `web/static/monitor/monitor_quota.js`（`renderQuotaKeyRows` 第一列 = dot/timer + 状态徽标并列、配额列复用 `formatQuotaCell` per-key `success/limit|∞`+error badge、input/output 列；`quotaKeyRowClick` Ctrl+点击 pause/resume、Shift+点击 pin 活跃 Key）、`internal/api/monitor/register.go`（`getModelKeys` 增 `providerId` + in-use pin 感知、`currentKey` pin 优先）、`internal/api/keys/register.go`（`activateKey` 端点）、`internal/usage/accumulator.go`（`KeyStatEntry.InputTokens/OutputTokens`）、`internal/rotation/selector.go`（`manualPins` 内存 pin）、`web/static/i18n.js`（`keyRowHint`/`keyPaused`/`keyResumed`/`keyActivated`）、`web/static/style.css`（`.quota-key-row .key-status-badge`） |
 | 修复 Monitor Recent Requests 分页状态 | proxy、config-registry-state | `web/static/monitor/monitor_recent.js::updateRecentPagerState` 计算 `atFirst`/`atLast` 后同步上一页/下一页 `disabled` 与 `pager-disabled` class，修复 `atFirst is not defined` 导致 Monitor 首次渲染失败；`docs/proxy-architecture.md` 记录修复 |
 | 修复 Monitor 页面 OOM（列表轻量传输 + 按需拉取详情） | proxy、config-registry-state | `internal/usage/ring.go::ByID`（按 ID 检索单条 entry）+ `internal/proxy/entry_tracker.go::MarshalEntryJSONLight`（剥离 payload/headers）+ `internal/api/monitor/register.go`（`GET /monitor`、`/monitor/playground` 列表响应剥离 payload 字段，新增 `GET /monitor/entry/{id}` 详情路由）+ `internal/proxy/{recorder.go,forward_retry.go,handler.go}` 与 `internal/api/sse/register.go`（SSE 推送轻量化）+ `web/static/monitor/monitor_modal.js` 与 `web/playground/static-pg/playground/pg-ui.js`（按需异步请求完整 entry）；`docs/proxy-architecture.md` 记录修复 |
 | 修改 Monitor Recent Requests 详情弹窗 | proxy、playground | `web/static/monitor/monitor_modal.js`（六个固定 section：`Request Info`/`Request`/`Request Headers`/`Response Headers`/`Status`/`Response Body`；Status 静态行，其余 section 默认折叠并提供 section 级 Pretty/Raw/Copy + 字段级 Pretty/Raw/Copy；Request Info 补齐 Key ID/Session/Source/Decision/Provenance；section/field Raw 直接显示原文；两级 sticky header）+ `web/static/info_common.js`（`renderInfoSection`/`buildInfoField` 共享兼容边界，直接 Raw 文本，其他调用方默认行为不变）+ `web/static/style.css` + `docs/proxy-architecture.md`/`docs/playground-architecture.md`

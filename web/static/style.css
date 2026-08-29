@@ -1093,9 +1093,11 @@ tbody tr:last-child td{border-bottom:none}
 .quota-table .model-key-metric{font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-badge);font-variant-numeric:tabular-nums;white-space:nowrap}
 .quota-table .metric-live{color:var(--accent2);font-weight:700}
 /* Per-key expand sub-rows */
-.quota-key-row{background:var(--table-hover);font-size:var(--font-badge)}
+.quota-key-row{background:var(--table-hover);font-size:var(--font-badge);cursor:pointer}
 .quota-key-row td{border-bottom:1px solid var(--glass-border)}
 .quota-key-row .model-color-dot,.quota-key-row .model-key-timer{margin-right:0}
+/* Status badge sits in the first cell next to the color dot / timer. */
+.quota-key-row .key-status-badge{margin-left:6px}
 .quota-key-row-in-use{background:rgba(79,195,247,0.08)}
 .quota-key-row-disabled{opacity:.55}
 .quota-key-row-empty,.quota-key-row-loading,.quota-key-row-error td{text-align:center;color:var(--text-muted)}

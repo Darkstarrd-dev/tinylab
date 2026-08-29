@@ -306,3 +306,60 @@ func TestSonestCooldown_ExpiredLockIgnored(t *testing.T) {
 		t.Fatal("expected ok=false when lock already expired")
 	}
 }
+
+func TestSelectKey_ManualPinOverridesStrategy(t *testing.T) {
+	for _, strategy := range []string{"fill-first", "round-robin", "failover"} {
+		_, sel := setupTestProvider(t, []int{1, 2, 3}, strategy, 3)
+		sel.SetManualKey("test", "c")
+		sk, err := sel.SelectKey("test", "gpt-4", nil)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", strategy, err)
+		}
+		if sk.Key.ID != "c" {
+			t.Fatalf("%s: expected pinned key 'c', got %s", strategy, sk.Key.ID)
+		}
+	}
+}
+
+func TestSelectKey_ManualPinFallsBackWhenExcluded(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1, 2, 3}, "fill-first", 3)
+	sel.SetManualKey("test", "c")
+	// Pinned key already failed this request (excluded) → strategy picks 'a'.
+	sk, err := sel.SelectKey("test", "gpt-4", []string{"c"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sk.Key.ID != "a" {
+		t.Fatalf("expected fallback key 'a', got %s", sk.Key.ID)
+	}
+}
+
+func TestSelectKey_ManualPinFallsBackWhenLocked(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1, 2, 3}, "fill-first", 3)
+	sel.SetManualKey("test", "a")
+	// Pinned key 'a' is cooldown-locked for gpt-4 → strategy picks 'b'.
+	sel.MarkUnavailable("test", "a", "gpt-4", 500, "server error")
+	sk, err := sel.SelectKey("test", "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sk.Key.ID != "b" {
+		t.Fatalf("expected fallback key 'b', got %s", sk.Key.ID)
+	}
+}
+
+func TestSelectKey_ManualPinCleared(t *testing.T) {
+	_, sel := setupTestProvider(t, []int{1, 2, 3}, "fill-first", 3)
+	sel.SetManualKey("test", "c")
+	sel.SetManualKey("test", "")
+	if pin := sel.ManualKey("test"); pin != "" {
+		t.Fatalf("expected pin cleared, got %q", pin)
+	}
+	sk, err := sel.SelectKey("test", "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sk.Key.ID != "a" {
+		t.Fatalf("expected strategy pick 'a' after clearing pin, got %s", sk.Key.ID)
+	}
+}

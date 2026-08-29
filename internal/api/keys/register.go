@@ -63,6 +63,36 @@ func (h *Handler) Register(r chi.Router) {
 	r.Put("/providers/{id}/keys/{kid}", h.updateKey)
 	r.Delete("/providers/{id}/keys/{kid}", h.deleteKey)
 	r.Get("/providers/{id}/keys/{kid}/state", h.getKeyState)
+	r.Post("/providers/{id}/keys/{kid}/activate", h.activateKey)
+}
+
+// activateKey pins a key as the provider's manual active key (monitor UI
+// Shift+click). The pin is a runtime preference honored by SelectKey while the
+// key is usable; it does not change the configured rotation strategy and is
+// not persisted.
+// POST /api/providers/{id}/keys/{kid}/activate
+func (h *Handler) activateKey(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "id")
+	keyID := chi.URLParam(r, "kid")
+	provider, ok := h.d.Reg.GetProvider(providerID)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	found := false
+	for _, k := range provider.Keys {
+		if k.ID == keyID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		apibase.WriteAPIError(w, http.StatusNotFound, "key not found")
+		return
+	}
+	h.d.Selector.SetManualKey(providerID, keyID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // listKeys returns all keys for a provider.

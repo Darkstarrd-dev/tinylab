@@ -145,13 +145,19 @@ function renderQuotaKeyRows(provider, model, data) {
     }
     var leadHtml = timerHtml !== '' ? timerHtml : '<span class="' + dotClass + '" style="background:' + color + '"></span>';
 
-    var quotaStr = (data.hasQuota && k.hasQuota) ? ((k.modelLimit - k.modelRemaining) + '/' + k.modelLimit) : '∞';
+    var keyQuotaHtml = formatQuotaCell({
+      hasQuota: data.hasQuota && k.hasQuota,
+      totalCapacity: k.modelLimit,
+      successCount: k.successCount,
+      errorCount: k.errorCount
+    });
 
-    rows += '<tr class="' + rowClass + '">\
-      <td style="padding-left:22px">' + leadHtml + '</td>\
+    rows += '<tr class="' + rowClass + '" title="' + escapeHtml(t('keyRowHint')) + '" onclick="quotaKeyRowClick(event,\'' + escapeForJsString(provider) + '\',\'' + escapeForJsString(model) + '\',\'' + escapeForJsString(k.keyId) + '\')">\
+      <td style="padding-left:22px;white-space:nowrap">' + leadHtml + statusBadge + '</td>\
       <td>' + escapeHtml(k.keyName) + '</td>\
-      <td>' + quotaStr + '</td>\
-      <td colspan="2">' + statusBadge + '</td>\
+      <td class="quota-td-quota">' + keyQuotaHtml + '</td>\
+      <td>' + formatCompactTokens(k.inputTokens) + '</td>\
+      <td>' + formatCompactTokens(k.outputTokens) + '</td>\
       <td>' + formatAvgLatency(k) + '</td>\
       <td>' + formatAvgSpeed(k) + '</td>\
     </tr>';
@@ -405,6 +411,42 @@ function renderQuotaKeyRowsInto(provider, model, data) {
     parent = node;
   }
   scheduleMonitorTableAutoFit();
+}
+
+// quotaKeyRowClick implements the multi-key sub-row shortcuts. Ctrl+click
+// toggles the key's pause/resume state (same effect as the settings provider
+// detail pause/resume button, persisted to config.yaml); Shift+click pins the
+// key as the provider's manual active key (runtime-only preference, no
+// strategy change). Plain clicks are ignored.
+async function quotaKeyRowClick(ev, provider, model, keyId) {
+  if (!ev || (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey)) return;
+  ev.preventDefault();
+  var cache = keyDetailCache[provider + '/' + model];
+  var data = cache && cache.data;
+  if (!data || !data.keys || !data.providerId) return;
+  var k = null;
+  for (var i = 0; i < data.keys.length; i++) {
+    if (data.keys[i].keyId === keyId) { k = data.keys[i]; break; }
+  }
+  if (!k) return;
+  var url = '/providers/' + data.providerId + '/keys/' + keyId;
+  try {
+    if (ev.ctrlKey || ev.metaKey) {
+      var next = !k.isActive;
+      // Send name/priority along: the backend applies them unconditionally,
+      // so an isActive-only body would wipe both.
+      await apiPut(url, { name: k.keyName, priority: k.priority, isActive: next });
+      toast(next ? t('keyResumed', [k.keyName]) : t('keyPaused', [k.keyName]), 'success');
+    } else {
+      await apiPost(url + '/activate', {});
+      toast(t('keyActivated', [k.keyName]), 'success');
+    }
+  } catch(e) {
+    toast(t('failed', [e.message || '']), 'error');
+    return;
+  }
+  await fetchModelKeyDetail(provider, model);
+  scheduleQuotaRefresh();
 }
 // latency/speed + expanded sub-rows. It fetches every quota bar so the
 // top-level latency/speed cells are populated even before a row is expanded.

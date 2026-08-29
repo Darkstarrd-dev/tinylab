@@ -36,16 +36,48 @@ type Selector struct {
 	settings   *config.RotationConfig
 	settingsMu sync.RWMutex
 
+	// manualPins holds per-provider manual active-key overrides set via the
+	// monitor UI (Shift+click). A pinned key is preferred by SelectKey whenever
+	// it is among the usable candidates; the rotation strategy is unchanged and
+	// still governs every non-pinned selection. Pins are in-memory only and
+	// cleared on restart.
+	manualMu   sync.RWMutex
+	manualPins map[string]string // providerID -> pinned key ID
+
 	onStateChange func() // injected by main.go for state persistence
 }
 
 func New(reg KeyStateProvider, settings *config.RotationConfig) *Selector {
-	return &Selector{reg: reg, settings: settings}
+	return &Selector{reg: reg, settings: settings, manualPins: make(map[string]string)}
 }
 
 // SetStateHook sets a callback that is called when key runtime state changes.
 func (s *Selector) SetStateHook(fn func()) {
 	s.onStateChange = fn
+}
+
+// SetManualKey pins keyID as the manual active key for providerID (monitor UI
+// Shift+click). The pin is a preference, not a strategy change: SelectKey picks
+// the pinned key only while it is among the usable candidates (active, not
+// excluded, not locked for the requested model, NIM-eligible); otherwise the
+// configured strategy selects as usual. Passing an empty keyID clears the pin.
+func (s *Selector) SetManualKey(providerID, keyID string) {
+	s.manualMu.Lock()
+	defer s.manualMu.Unlock()
+	if keyID == "" {
+		delete(s.manualPins, providerID)
+		return
+	}
+	s.manualPins[providerID] = keyID
+}
+
+// ManualKey returns the manually pinned key ID for providerID, or "" when no
+// pin is set. The monitor API uses this to mark the in-use key consistently
+// with what SelectKey would pick.
+func (s *Selector) ManualKey(providerID string) string {
+	s.manualMu.RLock()
+	defer s.manualMu.RUnlock()
+	return s.manualPins[providerID]
 }
 
 type SelectedKey struct {
@@ -91,15 +123,25 @@ func (s *Selector) SelectKey(providerID, model string, excludeKeyIDs []string) (
 		candidates = s.filterNIMCandidates(provider.ID, model, candidates)
 	}
 	var chosen config.Key
-	strategy := s.effectiveStrategy(provider)
 	var chosenOk bool
-	switch strategy {
-	case "round-robin":
-		chosen, chosenOk = s.selectRoundRobin(provider, candidates, model)
-	case "failover":
-		chosen, chosenOk = s.selectRotation(provider, candidates)
-	default:
-		chosen, chosenOk = s.selectFillFirst(candidates)
+	// A manually pinned key wins over the strategy whenever it is usable.
+	if pin := s.ManualKey(provider.ID); pin != "" {
+		for _, k := range candidates {
+			if k.ID == pin {
+				chosen, chosenOk = k, true
+				break
+			}
+		}
+	}
+	if !chosenOk {
+		switch s.effectiveStrategy(provider) {
+		case "round-robin":
+			chosen, chosenOk = s.selectRoundRobin(provider, candidates, model)
+		case "failover":
+			chosen, chosenOk = s.selectRotation(provider, candidates)
+		default:
+			chosen, chosenOk = s.selectFillFirst(candidates)
+		}
 	}
 	if !chosenOk {
 		return nil, fmt.Errorf("no available keys for provider %s (model %s)", provider.Name, model)

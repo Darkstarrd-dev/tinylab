@@ -301,6 +301,12 @@ func TestAccumulator_KeyStatsFor(t *testing.T) {
 	if ks1.ErrorCount != 0 {
 		t.Errorf("expected key1 error 0, got %d", ks1.ErrorCount)
 	}
+	if ks1.InputTokens != 200 {
+		t.Errorf("expected key1 input tokens 200, got %d", ks1.InputTokens)
+	}
+	if ks1.OutputTokens != 900 {
+		t.Errorf("expected key1 output tokens 900, got %d", ks1.OutputTokens)
+	}
 	if ks1.AvgTTFTMs != 250 {
 		t.Errorf("expected key1 avg ttft 250, got %d", ks1.AvgTTFTMs)
 	}

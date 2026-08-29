@@ -462,6 +462,15 @@ func (h *Handler) currentKey(providerName, model string) currentKey {
 	if len(cands) == 0 {
 		return currentKey{}
 	}
+	// A manually pinned key (Shift+click in the monitor UI) wins while usable,
+	// matching SelectKey's preference order.
+	if pin := h.d.Selector.ManualKey(provider.ID); pin != "" {
+		for _, c := range cands {
+			if c.id == pin {
+				return currentKey{ID: c.id, Name: c.name}
+			}
+		}
+	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		switch strategy {
 		case "round-robin":
@@ -520,6 +529,8 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 		ConfigIdx    int     `json:"configIdx"`
 		SuccessCount int     `json:"successCount"`
 		ErrorCount   int     `json:"errorCount"`
+		InputTokens  int     `json:"inputTokens"`
+		OutputTokens int     `json:"outputTokens"`
 		AvgTTFTMs    int64   `json:"avgTtftMs"`
 		AvgSpeed     float64 `json:"avgSpeed"`
 		InFlight     int     `json:"inFlight"`
@@ -588,6 +599,8 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 		if kse, ok := keyStatByID[k.ID]; ok {
 			kd.SuccessCount = kse.SuccessCount
 			kd.ErrorCount = kse.ErrorCount
+			kd.InputTokens = kse.InputTokens
+			kd.OutputTokens = kse.OutputTokens
 			kd.AvgTTFTMs = kse.AvgTTFTMs
 			kd.AvgSpeed = kse.AvgSpeed
 		}
@@ -670,15 +683,27 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 	for i, k := range keys {
 		sorted[i] = details[k.idx]
 	}
-
-	// Identify the in-use key (top usable entry) so the frontend can badge it.
+	// Identify the in-use key so the frontend can badge it. A manually pinned
+	// key (Shift+click in the monitor UI) wins while usable; otherwise the top
+	// usable entry in strategy order is the key SelectKey would pick next.
 	inUseKeyName := ""
 	inUseKeyID := ""
-	for _, d := range sorted {
-		if d.IsActive && d.ModelLock == nil {
-			inUseKeyName = d.KeyName
-			inUseKeyID = d.KeyID
-			break
+	if pin := h.d.Selector.ManualKey(provider.ID); pin != "" {
+		for _, d := range sorted {
+			if d.KeyID == pin && d.IsActive && d.ModelLock == nil {
+				inUseKeyName = d.KeyName
+				inUseKeyID = d.KeyID
+				break
+			}
+		}
+	}
+	if inUseKeyID == "" {
+		for _, d := range sorted {
+			if d.IsActive && d.ModelLock == nil {
+				inUseKeyName = d.KeyName
+				inUseKeyID = d.KeyID
+				break
+			}
 		}
 	}
 
@@ -686,6 +711,7 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]any{
 		"provider":         providerName,
+		"providerId":       provider.ID,
 		"model":            model,
 		"hasQuota":         hasQuota,
 		"keys":             sorted,
