@@ -549,6 +549,7 @@ func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 type assistantPatch struct {
 	Model   *string                   `json:"model"`
 	Actions *[]config.AssistantAction `json:"actions"`
+	Presets *[]config.AssistantPreset `json:"presets"`
 	Enabled *bool                     `json:"enabled"`
 	Debug   *bool                     `json:"debug"`
 }
@@ -563,6 +564,9 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	if patch.Actions != nil {
 		cfg.Assistant.Actions = *patch.Actions
 	}
+	if patch.Presets != nil {
+		cfg.Assistant.Presets = *patch.Presets
+	}
 	if patch.Enabled != nil {
 		cfg.Assistant.Enabled = patch.Enabled
 	}
@@ -572,22 +576,30 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 	petstate.SetEnabled(cfg.Assistant.PetEnabled())
 	petstate.SetDebug(cfg.Assistant.Debug)
 	if patch.Enabled != nil {
-		if cfg.Assistant.PetEnabled() {
-			// Prefer re-showing an existing hidden window over creating a new
-			// WebView2 environment. Creating/destroying the Chromium child
-			// process races with a concurrent creation on the next toggle —
-			// that race is the main-window freeze on off->on->off->on.
-			if !petstate.ShowAll() {
-				petstate.Open()
+		enabled := cfg.Assistant.PetEnabled()
+		// Run window show/hide asynchronously so the HTTP handler does not block
+		// on ShowWindow's cross-thread SendMessage. A blocked handler would hold
+		// the HTTP worker and, if the pet pump is momentarily busy, appear as a
+		// main-window freeze (API still alive, window deadlocked). Async also
+		// collapses rapid toggles without queuing multiple LockOSThread creations.
+		go func() {
+			if enabled {
+				// Prefer re-showing an existing hidden window over creating a new
+				// WebView2 environment. Creating/destroying the Chromium child
+				// process races with a concurrent creation on the next toggle —
+				// that race is the main-window freeze on off->on->off->on.
+				if !petstate.ShowAll() {
+					petstate.Open()
+				}
+			} else {
+				// Hide keeps the WebView2 environment alive, avoiding the
+				// destroy/recreate churn. CloseAll remains the fallback for
+				// windows that never registered a hide handler (non-webview builds).
+				if !petstate.HideAll() {
+					petstate.CloseAll()
+				}
 			}
-		} else {
-			// Hide keeps the WebView2 environment alive, avoiding the
-			// destroy/recreate churn. CloseAll remains the fallback for
-			// windows that never registered a hide handler (non-webview builds).
-			if !petstate.HideAll() {
-				petstate.CloseAll()
-			}
-		}
+		}()
 	}
 }
 // validateProxyConfig checks that the proxy host and port are well-formed when

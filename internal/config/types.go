@@ -391,6 +391,8 @@ type AssistantConfig struct {
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	// Debug turns on per-message pet window logging (default off).
 	Debug bool `yaml:"debug,omitempty" json:"debug,omitempty"`
+	// Presets stores named action bundles (see AssistantPreset / settings_assistant.js).
+	Presets []AssistantPreset `yaml:"presets,omitempty" json:"presets,omitempty"`
 }
 
 // PetEnabled reports whether the desktop pet feature is on; nil = enabled.
@@ -406,6 +408,13 @@ type AssistantAction struct {
 	FrameEnd        int    `yaml:"frameEnd,omitempty" json:"frameEnd,omitempty"`
 	Fps             int    `yaml:"fps,omitempty" json:"fps,omitempty"`
 	Mirror          bool   `yaml:"mirror,omitempty" json:"mirror,omitempty"`
+}
+
+// AssistantPreset is a named bundle of actions (preset dropdown in the
+// Assistant settings modal). Names are unique within Config.Assistant.Presets.
+type AssistantPreset struct {
+	Name    string            `yaml:"name" json:"name"`
+	Actions []AssistantAction `yaml:"actions,omitempty" json:"actions,omitempty"`
 }
 
 // Config is the top-level configuration structure.

@@ -243,7 +243,7 @@ check('motionEvent maps movement state to animation events', () => {
   assert.strictEqual(demo.motionEvent(), 'idle');
   demo.keys.right = true;
   demo.step(0.016);
-  assert.strictEqual(demo.motionEvent(), 'walk');
+  assert.strictEqual(demo.motionEvent(), 'move_right');
   demo.keys.ctrl = true;
   demo.step(0.016);
   assert.strictEqual(demo.motionEvent(), 'run');
@@ -427,7 +427,7 @@ check('scroller: left movement maps to left-variant events', () => {
   demo.keys.ctrl = false; demo.keys.left = false;
   demo.keys.right = true;
   demo.step(0.016);
-  assert.strictEqual(demo.motionEvent(), 'walk', 'walking right stays on base walk event');
+  assert.strictEqual(demo.motionEvent(), 'move_right', 'walking right must emit move_right');
 });
 
 check('SM: left-variant states are flagged so the renderer skips mirroring', () => {

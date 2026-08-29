@@ -194,20 +194,9 @@ var ademoSM = (function () {
 
   function setEvent(ev) {
     var target = resolveAliases(EVENT_ALIASES[ev] || []) || defaultName();
-    if (!target) { current = null; _mirrorPending = false; return false; }
-    var isRightEvt = /_right/.test(ev);
-    var isLeftTarget = /_left/.test(target);
-    var isRightTarget = /_right/.test(target);
-    var newMirror = isRightEvt && isLeftTarget && !isRightTarget;
-    if (target === current) {
-      _mirrorPending = newMirror;
-      return true;
-    }
+    if (!target) { current = null; return false; }
+    if (target === current) return true;
     current = target; frameIdx = 0; acc = 0;
-    _mirrorPending = newMirror;
-    // Clear pending if event is not a right variant
-    if (!isRightEvt) _mirrorPending = false;
-    // Keep pending if right->left fallback, otherwise clear unless action itself is mirrored
     ademoSyncEntitySize();
     return true;
   }
@@ -534,8 +523,11 @@ function ademoMotionEvent() {
   if (!e.onGround) return e.vy < 0 ? 'jump' : 'fall';
   if (Math.abs(e.vx) > 1) {
     var run = ademoKeys.ctrl && !ademoKeys.shift && (ademoKeys.left || ademoKeys.right);
+    if (e.moveDir.x < 0) return run ? 'run_left' : 'move_left';
+    if (e.moveDir.x > 0) return run ? 'run' : 'move_right';
+    // Fallback to velocity sign when moveDir is zero (mouse moveTarget path)
     if (e.vx < 0) return run ? 'run_left' : 'move_left';
-    return run ? 'run' : 'walk';
+    return run ? 'run' : 'move_right';
   }
   return 'idle';
 }
@@ -794,9 +786,7 @@ function ademoDraw() {
     var cur = ademoSM.current();
     var st = ademoSM._state && ademoSM._state(cur);
     var mirroredAction = !!(st && st.mirror);
-    var pendingMirror = !!(ademoSM.isMirrorPending && ademoSM.isMirrorPending());
-    var isLeftVariant = ademoSM.currentIsLeftVariant();
-    var needMirror = mirroredAction || pendingMirror || (e.facing < 0 && !isLeftVariant);
+    var needMirror = !!mirroredAction;
     if (needMirror) {
       ctx.translate(e.x + e.w / 2, e.y);
       ctx.scale(-1, 1);

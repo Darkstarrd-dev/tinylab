@@ -246,7 +246,7 @@ var petSM = (function () {
     var sx = (f % st.cols) * st.frameW;
     var sy = Math.floor(f / st.cols) * st.frameH;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    var needMirror = !!st.mirror || _mirrorPending;
+    var needMirror = !!st.mirror;
     if (needMirror) {
       ctx.save();
       ctx.translate(canvas.width, 0);
@@ -309,13 +309,6 @@ var petSM = (function () {
     var aliases = EVENT_ALIASES[evt];
     var target = aliases ? resolve(aliases) : (states[evt] ? evt : null);
     if (!target) return false;
-    // Right-variant fallback to left should be mirrored (plan: image reuse via flip)
-    var isRightEvt = /_right/.test(evt);
-    var isLeftTarget = /_left/.test(target);
-    var isRightTarget = /_right/.test(target);
-    _mirrorPending = isRightEvt && isLeftTarget && !isRightTarget;
-    // If target itself is not the mirror event, clear pending when not a right->left fallback
-    if (!isRightEvt) _mirrorPending = false;
     return play(target);
   }
 

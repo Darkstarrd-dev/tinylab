@@ -102,6 +102,24 @@ function openAssistantModal() {
       mirror: !!x.mirror
     };
   });
+  // Presets draft: persisted bundles (AssistantPreset[]).
+  window.__assistantPresets = (a.presets || []).map(function(p) {
+    return {
+      name: p.name || '',
+      actions: (p.actions || []).map(function(x) {
+        return {
+          name: x.name || '',
+          spritesheetPath: x.spritesheetPath || '',
+          cols: x.cols || 1,
+          rows: x.rows || 1,
+          frameStart: x.frameStart || 0,
+          frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0),
+          fps: x.fps || 8,
+          mirror: !!x.mirror
+        };
+      })
+    };
+  });
   openSettingsModal(t('assistantSettings'),
     '<p class="muted">' + escapeHtml(t('assistantSettingsDesc')) + '</p>\
     <div class="form-group" style="margin-top:16px"><label>' + escapeHtml(t('assistantModel')) + '</label>\
@@ -111,6 +129,9 @@ function openAssistantModal() {
       <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
     </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantDebug')) + '</label>      <label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantDebugDesc')) + '</p>    </div>\
+    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantPreset') || 'Assistant Preset') + '</label>\
+      <div id="assistant-preset-bar"></div>\
+    </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
       <div id="settings-assistant-actions"></div>\
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">\
@@ -126,6 +147,7 @@ function openAssistantModal() {
       <div id="assistant-state-matrix" style="border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px;background:var(--bg)"></div>\
     </div>'
   );
+  try { if (typeof renderAssistantPresetBar === 'function') renderAssistantPresetBar(); } catch(ePB) {}
   renderAssistantActions();
   // Render the preset-state → action mapping + live pet readout.
   try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSM2) {}
@@ -336,17 +358,37 @@ async function saveAssistantModal() {
       rows: Math.max(1, parseInt(a.rows, 10) || 1),
       frameStart: Math.max(0, parseInt(a.frameStart, 10) || 0),
       frameEnd: Math.max(0, parseInt(a.frameEnd, 10) || 0),
-      fps: Math.max(1, parseInt(a.fps, 10) || 8)
+      fps: Math.max(1, parseInt(a.fps, 10) || 8),
+      mirror: !!a.mirror
     };
   });
+  var presets = (window.__assistantPresets || []).map(function(p) {
+    return {
+      name: (p.name || '').trim(),
+      actions: (p.actions || []).map(function(a) {
+        return {
+          name: a.name || '',
+          spritesheetPath: a.spritesheetPath || '',
+          cols: Math.max(1, parseInt(a.cols, 10) || 1),
+          rows: Math.max(1, parseInt(a.rows, 10) || 1),
+          frameStart: Math.max(0, parseInt(a.frameStart, 10) || 0),
+          frameEnd: Math.max(0, parseInt(a.frameEnd, 10) || 0),
+          fps: Math.max(1, parseInt(a.fps, 10) || 8),
+          mirror: !!a.mirror
+        };
+      })
+    };
+  }).filter(function(p) { return !!p.name; });
   var dbgEl = document.getElementById('settings-assistant-debug');
   var debug = !!(dbgEl && dbgEl.checked);
   try {
-    await apiPatch('/settings', { assistant: { model: model, actions: actions, debug: debug } });
+    await apiPatch('/settings', { assistant: { model: model, actions: actions, presets: presets, debug: debug } });
     if (window.__settings) {
-      window.__settings.assistant = Object.assign({}, window.__settings.assistant, { model: model, actions: actions, debug: debug });
+      window.__settings.assistant = Object.assign({}, window.__settings.assistant, { model: model, actions: actions, presets: presets, debug: debug });
     }
     window.__assistantActions = null;
+    window.__assistantPresets = null;
+    window.__assistantPresetSel = '';
     toast(t('assistantSaved'), 'success');
     closeModalOverlay();
   } catch (e) {

@@ -443,7 +443,7 @@ function assistantEditAction(i) {
             '<input type="number" class="input" id="assistant-editor-frame-start" value="' + start + '" min="0" style="width:90px"></div>' +
           '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionFrameTo')) + '</label>' +
             '<input type="number" class="input" id="assistant-editor-frame-end" value="' + end + '" min="0" style="width:90px"></div>' +
-          '<div style="display:flex;align-items:center;gap:8px"><span class="muted" style="font-size:12px">Mirror</span><label class="toggle-switch"><input type="checkbox" id="assistant-editor-mirror"' + (a.mirror ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>' +
+          '<div style="display:flex;flex-direction:column;gap:4px"><label class="muted" style="font-size:12px;display:block">Mirror</label><label class="toggle-switch"><input type="checkbox" id="assistant-editor-mirror"' + (a.mirror ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>' +
         '</div>' +
       '</div>' +
       '<div class="modal-footer">' +
@@ -967,5 +967,134 @@ function assistantModelKeydown(e) {
     } else if (filter) {
       filter.focus();
     }
+  }
+}
+
+// ----- Assistant presets: dropdown + add/remove for named action bundles -----
+// Draft presets live in window.__assistantPresets (array of {name, actions}).
+// window.__assistantPresetSel holds the active dropdown value (preset name).
+if (typeof window.__assistantPresetSel === 'undefined') window.__assistantPresetSel = '';
+
+function assistantCloneAction(a) {
+  return {
+    name: a && a.name ? String(a.name) : '',
+    spritesheetPath: a && a.spritesheetPath ? String(a.spritesheetPath) : '',
+    cols: Math.max(1, parseInt(a && a.cols, 10) || 1),
+    rows: Math.max(1, parseInt(a && a.rows, 10) || 1),
+    frameStart: Math.max(0, parseInt(a && a.frameStart, 10) || 0),
+    frameEnd: Math.max(0, parseInt(a && a.frameEnd, 10) || 0),
+    fps: Math.max(1, parseInt(a && a.fps, 10) || 8),
+    mirror: !!(a && a.mirror)
+  };
+}
+
+function renderAssistantPresetBar() {
+  var bar = document.getElementById('assistant-preset-bar');
+  if (!bar) return;
+  var presets = window.__assistantPresets || [];
+  var sel = window.__assistantPresetSel || '';
+  var opts = '<option value="">' + assistantEscape(t('assistantPresetPlaceholder') || '— Select preset —') + '</option>';
+  for (var i = 0; i < presets.length; i++) {
+    var nm = (presets[i] && presets[i].name) || '';
+    if (!nm) continue;
+    opts += '<option value="' + assistantEscape(nm) + '"' + (nm === sel ? ' selected' : '') + '>' + assistantEscape(nm) + '</option>';
+  }
+  bar.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<select class="input" id="assistant-preset-select" style="flex:1;min-width:160px" onchange="assistantSelectPreset(this.value)">' + opts + '</select>' +
+      '<button type="button" class="btn btn-ghost" style="padding:4px 12px" onclick="assistantAddPresetBundle()">' + assistantEscape(t('assistantPresetAdd') || 'Add') + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:4px 12px"' + (sel ? '' : ' disabled') + ' onclick="assistantApplyPresetBundle()">' + assistantEscape(t('assistantPresetApply') || 'Apply') + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:4px 12px" onclick="assistantSaveCurrentAsPreset()">' + assistantEscape(t('assistantPresetSaveCurrent') || 'Save current') + '</button>' +
+      '<button type="button" class="btn btn-ghost btn-danger" style="padding:4px 12px"' + (sel ? '' : ' disabled') + ' onclick="assistantRemovePresetBundle()">' + assistantEscape(t('assistantPresetRemove') || 'Remove') + '</button>' +
+    '</div>';
+}
+
+function assistantSelectPreset(name) {
+  window.__assistantPresetSel = name || '';
+  renderAssistantPresetBar();
+}
+
+function assistantAddPresetBundle() {
+  var name = (typeof prompt === 'function' ? prompt(t('assistantPresetNamePrompt') || 'Preset name:', '') : '') || '';
+  name = String(name).trim();
+  if (!name) return;
+  var presets = window.__assistantPresets || (window.__assistantPresets = []);
+  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === name.toLowerCase()) {
+    toast(t('assistantActionDupName') || 'Name already exists', 'error');
+    return;
+  }
+  presets.push({ name: name, actions: [] });
+  window.__assistantPresetSel = name;
+  renderAssistantPresetBar();
+}
+
+function assistantApplyPresetBundle() {
+  var sel = window.__assistantPresetSel || '';
+  if (!sel) return;
+  var presets = window.__assistantPresets || [];
+  var found = null;
+  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === sel.toLowerCase()) { found = presets[i]; break; }
+  if (!found) { toast(t('assistantPresetNotFound') || 'Preset not found', 'error'); return; }
+  var actions = window.__assistantActions || (window.__assistantActions = []);
+  var existing = {};
+  for (var j = 0; j < actions.length; j++) existing[(actions[j].name || '').toLowerCase()] = true;
+  var added = 0;
+  for (var k = 0; k < (found.actions || []).length; k++) {
+    var a = found.actions[k];
+    var low = (a && a.name ? String(a.name).toLowerCase() : '');
+    if (!low || existing[low]) continue;
+    actions.push(assistantCloneAction(a));
+    existing[low] = true;
+    added++;
+  }
+  renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eAP) {}
+  toast(added > 0 ? t('assistantPresetAdded', [String(added)]) : t('assistantPresetExists'), added > 0 ? 'success' : 'info');
+}
+
+function assistantSaveCurrentAsPreset() {
+  var sel = window.__assistantPresetSel || '';
+  var name = sel;
+  if (!name) {
+    var entered = (typeof prompt === 'function' ? prompt(t('assistantPresetNamePrompt') || 'Preset name:', '') : '') || '';
+    name = String(entered).trim();
+    if (!name) return;
+  }
+  var presets = window.__assistantPresets || (window.__assistantPresets = []);
+  var cur = window.__assistantActions || [];
+  var snap = cur.map(assistantCloneAction);
+  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === name.toLowerCase()) {
+    presets[i].actions = snap;
+    window.__assistantPresetSel = presets[i].name;
+    renderAssistantPresetBar();
+    toast(t('assistantPresetSaved') || 'Preset saved', 'success');
+    return;
+  }
+  presets.push({ name: name, actions: snap });
+  window.__assistantPresetSel = name;
+  renderAssistantPresetBar();
+  toast(t('assistantPresetSaved') || 'Preset saved', 'success');
+}
+
+function assistantRemovePresetBundle() {
+  var sel = window.__assistantPresetSel || '';
+  if (!sel) return;
+  var presets = window.__assistantPresets || [];
+  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === sel.toLowerCase()) {
+    var ok = true;
+    if (typeof confirmModal === 'function') {
+      // fire async confirm without blocking this click path is fine? Use sync confirm fallback
+      // Keep modal flow: schedule removal after UI interaction
+      // For now use native confirm for immediate sync removal
+      try { ok = confirm(t('assistantPresetRemoveConfirm', [presets[i].name]) || ('Remove preset \"' + presets[i].name + '\"?')); } catch(eC) { ok = true; }
+    } else {
+      try { ok = confirm(t('assistantPresetRemoveConfirm', [presets[i].name]) || ('Remove preset \"' + presets[i].name + '\"?')); } catch(eC2) { ok = true; }
+    }
+    if (!ok) return;
+    presets.splice(i, 1);
+    window.__assistantPresetSel = '';
+    renderAssistantPresetBar();
+    toast(t('assistantPresetRemoved') || 'Preset removed', 'success');
+    return;
   }
 }
