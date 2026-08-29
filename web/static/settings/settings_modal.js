@@ -112,6 +112,11 @@ function openAssistantModal() {
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantDebug')) + '</label>      <label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantDebugDesc')) + '</p>    </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
       <div id="settings-assistant-actions"></div>\
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">\
+        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'pet\')">' + escapeHtml(t('assistantPresetPet')) + '</button>\
+        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'platformer\')">' + escapeHtml(t('assistantPresetPlatformer')) + '</button>\
+        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'topdown\')">' + escapeHtml(t('assistantPresetTopdown')) + '</button>\
+      </div>\
       <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantActionListHint')) + '</p>\
     </div>\
     <div class="form-group" id="assistant-state-matrix-group" style="margin-top:14px"><label>' + escapeHtml(t('assistantStateMatrix')) + '</label>\

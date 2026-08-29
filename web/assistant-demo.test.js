@@ -207,7 +207,7 @@ console.log('assistant demo move target (right-click):');
 check('move target: walks to x and clears on arrival', () => {
   resetEnt(100, 450 - 64);
   demo.step(0.016);
-  demo.ent.moveTarget = 300;
+  demo.ent.moveTarget = { x: 300, y: null };
   run(2.0);
   const e = demo.ent;
   assert.strictEqual(e.x, 300, 'must arrive exactly at the target');
@@ -218,7 +218,7 @@ check('move target: walks to x and clears on arrival', () => {
 check('move target: manual arrow key cancels it', () => {
   resetEnt(100, 450 - 64);
   demo.step(0.016);
-  demo.ent.moveTarget = 300;
+  demo.ent.moveTarget = { x: 300, y: null };
   demo.step(0.016);
   demo.keys.right = true;
   demo.step(0.016);
@@ -228,7 +228,7 @@ check('move target: manual arrow key cancels it', () => {
 check('move target: direction left sets facing', () => {
   resetEnt(400, 450 - 64);
   demo.step(0.016);
-  demo.ent.moveTarget = 100;
+  demo.ent.moveTarget = { x: 100, y: null };
   demo.step(0.016);
   assert.strictEqual(demo.ent.facing, -1, 'walking left must face left');
 });
@@ -249,6 +249,202 @@ check('motionEvent maps movement state to animation events', () => {
   demo.tryJump();
   demo.step(0.016);
   assert.strictEqual(demo.motionEvent(), 'jump');
+});
+
+console.log('assistant demo topdown (Survivor):');
+
+function resetTopdown(x, y) {
+  demo.setType('topdown');
+  const e = demo.ent;
+  e.x = x; e.y = y; e.w = 48; e.h = 64;
+  e.vx = 0; e.vy = 0; e.facing = 1; e.attackUntil = 0; e.moveTarget = null;
+  demo.keys.left = demo.keys.right = demo.keys.up = demo.keys.down = demo.keys.shift = demo.keys.ctrl = false;
+  demo.aim.active = false;
+  demo.clearBodies();
+  demo.stage.w = 800; demo.stage.h = 450;
+}
+
+check('topdown: no gravity — idle entity floats, up key moves up', () => {
+  resetTopdown(100, 200);
+  run(1.0);
+  assert.strictEqual(demo.ent.y, 200, 'no gravity: y must not change while idle');
+  assert.strictEqual(demo.ent.onGround, true, 'topdown reports grounded for HUD/jump consistency');
+  demo.keys.up = true;
+  run(0.5);
+  const moved = 200 - demo.ent.y;
+  assert.ok(Math.abs(moved - 160 * 0.5) < 2, 'up key walks up at walk speed, got ' + moved);
+});
+
+check('topdown: diagonal movement is normalized to walk speed', () => {
+  resetTopdown(100, 200);
+  demo.keys.right = true; demo.keys.down = true;
+  run(1.0);
+  const dx = demo.ent.x - 100, dy = demo.ent.y - 200;
+  const expect = 160 * Math.SQRT1_2;
+  assert.ok(Math.abs(dx - expect) < 2 && Math.abs(dy - expect) < 2,
+    'diagonal axes must each move walk/sqrt(2), got dx=' + dx + ' dy=' + dy);
+});
+
+check('topdown: mouse aim drives facing, movement is the fallback', () => {
+  resetTopdown(100, 200);
+  demo.aim.active = true; demo.aim.x = 10; // left of the entity center
+  run(0.05);
+  assert.strictEqual(demo.ent.facing, -1, 'aim left of the sprite must face left');
+  demo.aim.x = 700;
+  run(0.05);
+  assert.strictEqual(demo.ent.facing, 1, 'aim right of the sprite must face right');
+  demo.aim.active = false;
+  demo.keys.left = true;
+  run(0.05);
+  assert.strictEqual(demo.ent.facing, -1, 'without aim, movement direction drives facing');
+});
+
+check('topdown: attack holds the attack event then falls back to idle', () => {
+  resetTopdown(100, 200);
+  assert.strictEqual(demo.attack(), true, 'attack must fire in topdown');
+  assert.strictEqual(demo.motionEvent(), 'attack', 'attack window must surface the attack event');
+  demo.ent.attackUntil = 0; // expire
+  assert.strictEqual(demo.motionEvent(), 'idle', 'expired attack falls back to idle');
+  demo.setType('scroller');
+  assert.strictEqual(demo.attack(), false, 'attack is topdown-only');
+});
+
+check('topdown: collider blocks horizontal walk', () => {
+  resetTopdown(100, 300);
+  demo.addBody({ x: 200, y: 200, w: 20, h: 200 });
+  demo.keys.right = true;
+  run(2.0);
+  assert.ok(demo.ent.x + demo.ent.w <= 200 + 0.5, 'body side must stop the entity, got x=' + demo.ent.x);
+  assert.strictEqual(demo.ent.y, 300, 'blocked on X must not push on Y');
+});
+
+check('topdown: jump is disabled (scroller-only)', () => {
+  resetTopdown(100, 200);
+  demo.step(0.016);
+  assert.strictEqual(demo.tryJump(), false, 'tryJump must refuse outside scroller');
+  assert.strictEqual(demo.ent.vy, 0);
+});
+
+console.log('assistant demo types & scale:');
+
+check('setType: level-1 switch resets subtype and respawns centered (topdown)', () => {
+  demo.setType('topdown');
+  assert.strictEqual(demo.persist.type2, 'Survivor');
+  const e = demo.ent;
+  assert.ok(Math.abs(e.x - (800 - e.w) / 2) < 1 && Math.abs(e.y - (450 - e.h) / 2) < 1,
+    'topdown spawn must center the entity');
+  demo.setType('isometric');
+  assert.strictEqual(demo.persist.type2, 'Tactic');
+  demo.setType('scroller');
+  assert.strictEqual(demo.persist.type2, 'Platformer');
+  const e2 = demo.ent;
+  assert.strictEqual(e2.x, 40, 'scroller spawn returns to the left');
+  assert.ok(Math.abs(e2.y - (450 - e2.h)) < 1, 'scroller spawn rests on the floor');
+});
+
+check('scale: applyScale clamps into 0.01-1.00 and resizes the entity', () => {
+  demo.setType('scroller');
+  demo.applyScale(5);
+  assert.strictEqual(demo.persist.scale, 1, 'scale must clamp to the 1.00 slider max');
+  demo.applyScale(0.001);
+  assert.strictEqual(demo.persist.scale, 0.01, 'scale must clamp to the 0.01 slider min');
+  demo.applyScale(0.5);
+  const ref = demo.frameRef();
+  assert.ok(Math.abs(demo.ent.w - ref.w * 0.5) < 0.001 && Math.abs(demo.ent.h - ref.h * 0.5) < 0.001,
+    'entity box must follow frame size x scale (ScaleTo semantics)');
+  demo.applyScale(1); // restore for any later checks
+});
+
+check('wiring: i18n defines new demo-type / ScaleTo / preset keys in en+cn', () => {
+  const i18n = fs.readFileSync(path.join(__dirname, 'static/i18n.js'), 'utf8');
+  ['demoTypeTopdown', 'demoTypeIsometric', 'demoSubSurvivor', 'demoSubTactic',
+   'demoScaleToW', 'demoScaleToH', 'demoHintTopdown', 'demoHintTactic',
+   'demoBgMode', 'demoBgFitWidth', 'demoBgFitHeight', 'demoBgPixel',
+   'assistantPresetPlatformer', 'assistantPresetTopdown', 'assistantPresetPet',
+   'assistantStateGroupPet', 'assistantStateGroupPlatformer', 'assistantStateGroupTopdown',
+   'assistantGroupOther', 'assistantDemoNotOpen'
+  ].forEach(k => {
+    const hits = i18n.split(k + ':').length - 1;
+    assert.ok(hits >= 2, k + ' must exist in both en and cn (found ' + hits + ')');
+  });
+});
+
+check('topdown: right-click move target walks to the 2D point and clears', () => {
+  resetTopdown(100, 300);
+  demo.ent.moveTarget = { x: 400, y: 100 };
+  run(4.0);
+  const e = demo.ent;
+  assert.ok(Math.abs(e.x - 400) < 2 && Math.abs(e.y - 100) < 2,
+    'must arrive at the clicked point, got x=' + e.x + ' y=' + e.y);
+  assert.strictEqual(e.moveTarget, null, 'target must clear after arrival');
+  assert.ok(Math.abs(e.vx) < 1 && Math.abs(e.vy) < 1, 'stops after arrival');
+});
+
+check('topdown: manual keys cancel the move target', () => {
+  resetTopdown(100, 300);
+  demo.ent.moveTarget = { x: 400, y: 100 };
+  demo.step(0.016);
+  demo.keys.down = true;
+  demo.step(0.016);
+  assert.strictEqual(demo.ent.moveTarget, null, 'manual input must cancel the target');
+});
+
+console.log('assistant demo directional events:');
+
+check('topdown: movement direction maps to directional events', () => {
+  resetTopdown(400, 200);
+  const cases = [
+    { keys: { up: true, left: true }, ev: 'walk_up_left' },
+    { keys: { down: true, left: true }, ev: 'walk_down_left' },
+    { keys: { up: true }, ev: 'walk_up' },
+    { keys: { down: true }, ev: 'walk_down' },
+    { keys: { left: true }, ev: 'walk_left' },
+    { keys: { right: true }, ev: 'walk' }
+  ];
+  for (const c of cases) {
+    resetTopdown(400, 200);
+    Object.assign(demo.keys, c.keys);
+    demo.step(0.016);
+    assert.strictEqual(demo.motionEvent(), c.ev, 'expected ' + c.ev + ' for ' + JSON.stringify(c.keys));
+  }
+  resetTopdown(400, 200);
+  demo.keys.right = true; demo.keys.ctrl = true;
+  demo.step(0.016);
+  assert.strictEqual(demo.motionEvent(), 'run', 'ctrl still maps to run');
+});
+
+check('scroller: left movement maps to left-variant events', () => {
+  demo.setType('scroller');
+  resetEnt(400, 450 - 64);
+  demo.keys.left = true;
+  demo.step(0.016);
+  assert.strictEqual(demo.motionEvent(), 'walk_left', 'walking left must emit walk_left');
+  demo.keys.ctrl = true;
+  demo.step(0.016);
+  assert.strictEqual(demo.motionEvent(), 'run_left', 'running left must emit run_left');
+  demo.keys.ctrl = false; demo.keys.left = false;
+  demo.keys.right = true;
+  demo.step(0.016);
+  assert.strictEqual(demo.motionEvent(), 'walk', 'walking right stays on the base event');
+});
+
+check('SM: left-variant states are flagged so the renderer skips mirroring', () => {
+  demo.sm.reset();
+  demo.sm.register('walk_left', { cols: 1, rows: 1, start: 0, end: 0, fps: 8, frameW: 32, frameH: 32 });
+  demo.sm.register('idle', { cols: 1, rows: 1, start: 0, end: 0, fps: 8, frameW: 32, frameH: 32 });
+  demo.sm.setEvent('walk_left');
+  assert.strictEqual(demo.sm.currentIsLeftVariant(), true, 'walk_left must be a left variant');
+  demo.sm.setEvent('idle');
+  assert.strictEqual(demo.sm.currentIsLeftVariant(), false, 'idle is not a left variant');
+});
+
+console.log('assistant demo background modes:');
+
+check('bgScale: fit-width / fit-height / pixel map to the right scale', () => {
+  assert.strictEqual(demo.bgScale('fit-width', 200, 100, 800, 450), 4, 'fit-width = W/iw');
+  assert.strictEqual(demo.bgScale('fit-height', 200, 100, 800, 450), 4.5, 'fit-height = H/ih');
+  assert.strictEqual(demo.bgScale('pixel', 200, 100, 800, 450), 1, 'pixel = 1:1');
+  assert.strictEqual(demo.bgScale('bogus', 200, 100, 800, 450), 4, 'unknown mode falls back to fit-width');
 });
 
 if (failures) { console.error(failures + ' check(s) failed'); process.exit(1); }

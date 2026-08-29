@@ -6375,6 +6375,8 @@ body.gallery-fullscreen-active #page-content{height:100vh!important}
 .ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px}
 .ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap}
+.ademo-type1,.ademo-type2{width:auto;min-width:0;padding:3px 8px;font-size:12px;height:auto}
+.ademo-scaleto{width:64px;padding:3px 6px;font-size:12px;height:auto}
 .ademo-scale{width:110px}
 .ademo-no-actions{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#0b0c13;font-size:12px;font-weight:800;cursor:help}
 .ademo-stage-wrap{flex:1;min-height:0;position:relative;border:1px solid var(--glass-border);border-radius:var(--radius-lg);overflow:hidden;background:color-mix(in srgb,var(--modal-bg,#1a1a26) 88%,#000 12%)}

@@ -28,6 +28,28 @@ function assistantActionSummary(a) {
   return grid + ' · ' + t('assistantActionSummaryFrames', [String(a.frameStart || 0), String(a.frameEnd || 0)]) + ' · ' + (a.fps || 8) + ' fps';
 }
 
+function assistantActionRowHtml(a, i) {
+  return '<div class="assistant-action-row" data-index="' + i + '" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:6px;background:var(--option-bg)">' +
+    '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+      '<span style="font-weight:600">' + assistantEscape(a.name || ('#' + (i + 1))) + '</span> ' +
+      '<span class="muted" style="font-size:12px">' + assistantEscape(assistantActionSummary(a)) + '</span>' +
+    '</div>' +
+    '<button type="button" class="btn btn-ghost" style="padding:2px 10px" onclick="assistantEditAction(' + i + ')">' + assistantEscape(t('assistantActionEdit')) + '</button>' +
+    '<button type="button" class="btn btn-ghost" style="padding:2px 10px;color:var(--danger,#e5484d)" onclick="assistantRemoveAction(' + i + ')">' + assistantEscape(t('assistantActionRemove')) + '</button>' +
+  '</div>';
+}
+
+// Actions are grouped by the preset their name belongs to (first match wins,
+// e.g. idle -> pet); anything else lands in Other.
+function assistantActionGroupOf(name) {
+  var low = (name || '').toLowerCase();
+  var order = ['pet', 'platformer', 'topdown'];
+  for (var i = 0; i < order.length; i++) {
+    if ((__assistantActionPresets[order[i]] || []).indexOf(low) >= 0) return order[i];
+  }
+  return 'other';
+}
+
 function renderAssistantActions() {
   var box = document.getElementById('settings-assistant-actions');
   if (!box) return;
@@ -40,16 +62,23 @@ function renderAssistantActions() {
     box.innerHTML = html + '<p class="muted" style="margin:4px 0">' + assistantEscape(t('assistantActionNone')) + '</p>';
     return;
   }
+  var buckets = { pet: [], platformer: [], topdown: [], other: [] };
   for (var i = 0; i < actions.length; i++) {
-    var a = actions[i] || {};
-    html += '<div class="assistant-action-row" data-index="' + i + '" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:6px;background:var(--option-bg)">' +
-      '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-        '<span style="font-weight:600">' + assistantEscape(a.name || ('#' + (i + 1))) + '</span> ' +
-        '<span class="muted" style="font-size:12px">' + assistantEscape(assistantActionSummary(a)) + '</span>' +
-      '</div>' +
-      '<button type="button" class="btn btn-ghost" style="padding:2px 10px" onclick="assistantEditAction(' + i + ')">' + assistantEscape(t('assistantActionEdit')) + '</button>' +
-      '<button type="button" class="btn btn-ghost" style="padding:2px 10px;color:var(--danger,#e5484d)" onclick="assistantRemoveAction(' + i + ')">' + assistantEscape(t('assistantActionRemove')) + '</button>' +
-    '</div>';
+    buckets[assistantActionGroupOf(actions[i] && actions[i].name)].push(i);
+  }
+  var groupDefs = [
+    { id: 'pet',        label: t('assistantStateGroupPet') },
+    { id: 'platformer', label: t('assistantStateGroupPlatformer') },
+    { id: 'topdown',    label: t('assistantStateGroupTopdown') },
+    { id: 'other',      label: t('assistantGroupOther') }
+  ];
+  for (var g = 0; g < groupDefs.length; g++) {
+    var gd = groupDefs[g];
+    var idxs = buckets[gd.id];
+    if (!idxs.length && gd.id === 'other') continue; // hide empty Other
+    html += assistantGroupHeader(gd.id, idxs.length, gd.label);
+    if (__assistantGroupCollapsed[gd.id]) continue;
+    for (var k = 0; k < idxs.length; k++) html += assistantActionRowHtml(actions[idxs[k]] || {}, idxs[k]);
   }
   box.innerHTML = html;
 }
@@ -67,8 +96,39 @@ function assistantAddAction() {
   }
   actions.push({ name: name, spritesheetPath: '', cols: 1, rows: 1, frameStart: 0, frameEnd: 0, fps: 8 });
   renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSM0) {}
   var newInput = document.getElementById('settings-assistant-new-action');
   if (newInput) newInput.focus();
+}
+
+// ----- Action presets per game type ----------------------------------------
+// Each preset is the set of state-machine events a demo game type needs; the
+// button appends the missing action names so the user only has to bind a
+// spritesheet per action afterwards.
+var __assistantActionPresets = {
+  pet: ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'],
+  platformer: ['idle', 'walk', 'walk_left', 'run', 'run_left', 'jump', 'fall'],
+  topdown: ['idle', 'walk_up', 'walk_down', 'walk_left', 'walk_up_left', 'walk_down_left', 'attack']
+};
+
+function assistantAddPreset(kind) {
+  var names = __assistantActionPresets[kind] || [];
+  if (!names.length) return;
+  var actions = window.__assistantActions || (window.__assistantActions = []);
+  var added = 0;
+  for (var i = 0; i < names.length; i++) {
+    var exists = false;
+    for (var j = 0; j < actions.length; j++) {
+      if ((actions[j].name || '').toLowerCase() === names[i]) { exists = true; break; }
+    }
+    if (!exists) {
+      actions.push({ name: names[i], spritesheetPath: '', cols: 1, rows: 1, frameStart: 0, frameEnd: 0, fps: 8 });
+      added++;
+    }
+  }
+  renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSMp) {}
+  toast(added > 0 ? t('assistantPresetAdded', [String(added)]) : t('assistantPresetExists'), added > 0 ? 'success' : 'info');
 }
 
 function assistantRemoveAction(i) {
@@ -84,7 +144,6 @@ function assistantRemoveAction(i) {
 // and shows which configured action it currently resolves to. Live pet readout
 // is fetched via backend probe (no cross-window Eval dependency on the tray
 // webview boundary) + optional local window.__petState when available.
-var __assistantSMCurPoll = null;
 var __assistantSMAliases = {
   idle:   ['idle', 'stand', 'default'],
   drag:   ['drag', 'grab', 'move', 'walk'],
@@ -92,8 +151,27 @@ var __assistantSMAliases = {
   reply:  ['reply', 'happy', 'talk', 'success'],
   error:  ['error', 'confused', 'sad'],
   notify: ['notify', 'alert', 'notice'],
-  poke:   ['poke', 'click', 'wave', 'greet']
+  poke:   ['poke', 'click', 'wave', 'greet'],
+  walk:   ['walk', 'move'],
+  run:    ['run', 'dash'],
+  jump:   ['jump', 'leap'],
+  fall:   ['fall'],
+  attack: ['attack', 'shoot', 'hit'],
+  walk_left: ['walk_left', 'walk_l', 'left_walk', 'walk', 'move'],
+  run_left: ['run_left', 'run_l', 'run', 'dash', 'walk', 'move'],
+  walk_up: ['walk_up', 'up_walk', 'walk_north', 'walk', 'move'],
+  walk_down: ['walk_down', 'down_walk', 'walk_south', 'walk', 'move'],
+  walk_up_left: ['walk_up_left', 'walk_ul', 'walk_nw', 'walk_up', 'walk_left', 'walk', 'move'],
+  walk_down_left: ['walk_down_left', 'walk_dl', 'walk_sw', 'walk_down', 'walk_left', 'walk', 'move']
 };
+
+// Event groups shown in the state matrix. domain 'pet' rows dispatch to the
+// live pet; domain 'demo' rows drive the demo page's state machine (__ademo).
+var __assistantSMGroups = [
+  { key: 'Pet',        domain: 'pet',  events: ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'] },
+  { key: 'Platformer', domain: 'demo', events: ['idle', 'walk', 'walk_left', 'run', 'run_left', 'jump', 'fall'] },
+  { key: 'Topdown',    domain: 'demo', events: ['idle', 'walk_up', 'walk_down', 'walk_left', 'walk_up_left', 'walk_down_left', 'attack'] }
+];
 
 function assistantResolveAlias(eventKey, actions) {
   var cands = __assistantSMAliases[eventKey] || [];
@@ -108,27 +186,62 @@ function assistantResolveAlias(eventKey, actions) {
   return null;
 }
 
+// Collapse state shared by the actions list and the state matrix groups.
+var __assistantGroupCollapsed = {};
+
+function assistantToggleGroup(g) {
+  __assistantGroupCollapsed[g] = !__assistantGroupCollapsed[g];
+  renderAssistantActions();
+  try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eTG) {}
+}
+
+function assistantGroupHeader(key, count, tag) {
+  var collapsed = !!__assistantGroupCollapsed[key];
+  return '<div style="display:flex;align-items:center;gap:6px;padding:8px 8px 4px;cursor:pointer;user-select:none" onclick="assistantToggleGroup(\'' + assistantEscape(key) + '\')">' +
+    '<span style="font-size:10px;width:12px;color:var(--text-muted)">' + (collapsed ? '▸' : '▾') + '</span>' +
+    '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">' + assistantEscape(tag || t('assistantStateGroup' + key)) + '</span>' +
+    (count != null ? '<span class="muted" style="font-size:11px">(' + count + ')</span>' : '') +
+  '</div>';
+}
+
 function assistantStateRows() {
   var actions = window.__assistantActions || [];
   var rows = '';
-  var order = ['idle', 'drag', 'think', 'reply', 'error', 'notify', 'poke'];
-  var hasAny = actions.length > 0;
-  for (var oi = 0; oi < order.length; oi++) {
-    var ev = order[oi];
-    var aliases = (__assistantSMAliases[ev] || []).join(', ');
-    var mapped = assistantResolveAlias(ev, actions);
-    var actionLabel = mapped ? assistantEscape(mapped) : '<span class="muted">' + assistantEscape(t('assistantStateUnmapped')) + '</span>';
-    var canTrigger = !!mapped;
-    rows += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,0.08))">' +
-      '<div style="flex:1;min-width:0">' +
-        '<div style="font-weight:600;font-size:13px">' + assistantEscape(ev) + ' <span class="muted" style="font-weight:400;font-size:11px">→ ' + actionLabel + '</span></div>' +
-        '<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(t('assistantStateAlias') + ': ' + aliases) + '</div>' +
-      '</div>' +
-      '<button type="button" class="btn btn-ghost" style="padding:3px 10px;flex-shrink:0" ' + (canTrigger ? '' : 'disabled title="' + assistantEscape(t('assistantStateNoActions')) + '"') + ' onclick="assistantTriggerState(\'' + assistantEscape(ev) + '\')">' + assistantEscape(t('assistantStateTrigger')) + '</button>' +
-    '</div>';
+  for (var g = 0; g < __assistantSMGroups.length; g++) {
+    var grp = __assistantSMGroups[g];
+    rows += assistantGroupHeader(grp.key, null);
+    if (__assistantGroupCollapsed[grp.key]) continue;
+    for (var oi = 0; oi < grp.events.length; oi++) {
+      var ev = grp.events[oi];
+      var aliases = (__assistantSMAliases[ev] || []).join(', ');
+      var mapped = assistantResolveAlias(ev, actions);
+      var actionLabel = mapped ? assistantEscape(mapped) : '<span class="muted">' + assistantEscape(t('assistantStateUnmapped')) + '</span>';
+      var triggerFn = grp.domain === 'demo' ? 'assistantTriggerDemoState' : 'assistantTriggerState';
+      var btn = '<button type="button" class="btn btn-ghost" style="padding:3px 10px;flex-shrink:0" ' + (mapped ? '' : 'disabled title="' + assistantEscape(t('assistantStateNoActions')) + '"') + ' onclick="event.stopPropagation();' + triggerFn + '(\'' + assistantEscape(ev) + '\')">' + assistantEscape(t('assistantStateTrigger')) + '</button>';
+      rows += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,0.08))">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-weight:600;font-size:13px">' + assistantEscape(ev) + ' <span class="muted" style="font-weight:400;font-size:11px">→ ' + actionLabel + '</span></div>' +
+          '<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(t('assistantStateAlias') + ': ' + aliases) + '</div>' +
+        '</div>' + btn +
+      '</div>';
+    }
   }
-  if (!rows) rows = '<p class="muted" style="padding:8px">' + assistantEscape(t('assistantStateNoActions')) + '</p>';
+  if (!actions.length) rows += '<p class="muted" style="padding:8px">' + assistantEscape(t('assistantStateNoActions')) + '</p>';
   return rows;
+}
+
+// assistantTriggerDemoState drives the demo page's state machine (F6 page,
+// same browsing context) so game-type rows can be previewed like pet states.
+function assistantTriggerDemoState(evt) {
+  try {
+    if (window.__ademo && window.__ademo.sm && typeof window.__ademo.sm.setEvent === 'function'
+        && document.querySelector('.ademo-root')) {
+      var ok = window.__ademo.sm.setEvent(evt);
+      toast(evt + ' → ' + (window.__ademo.sm.current() || '?'), ok ? 'success' : 'warning');
+      return;
+    }
+  } catch(eD) {}
+  toast(t('assistantDemoNotOpen'), 'warning');
 }
 
 function renderAssistantStateMatrix() {
