@@ -113,6 +113,116 @@
   var PLATFORM_TEX_H = 16;
 
   // ==========================================================================
+  // Shared: Input mapping + sprite display (reusable for every future game)
+  // ==========================================================================
+  /** Default key bindings; mirror assistant-demo.js WASD/arrows/Jump/Pause. */
+  var DEFAULT_BINDINGS = {
+    up: ['W', 'UP'], down: ['S', 'DOWN'], left: ['A', 'LEFT'], right: ['D', 'RIGHT'],
+    jump: ['W', 'UP', 'SPACE'], attack: ['SPACE'], pause: ['ESC'], menu: ['M'], restart: ['R'],
+    run: ['CTRL'], slow: ['SHIFT']
+  };
+  /** Live bindings mutated by the Input mapping overlay. */
+  var activeBindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS));
+  /** 0.35–2.0 range; 1.0 = generated 28px disc baseline, matches editor 0.5→1.0 scaling. */
+  var spriteScale = 1;
+  /** Last resolved frame size (from assistant action def or fallback 28×28). */
+  var spriteFrameW = 28, spriteFrameH = 28;
+  /** Whether current action is a mirrored left-variant. */
+  var spriteMirror = false;
+
+  function keyName(e) {
+    var c = e && e.code ? e.code : (e && e.key ? e.key : '');
+    // Normalize code: "KeyA"→"A", "ArrowLeft"→"LEFT", "Space"→"SPACE"
+    var u = String(c).toUpperCase();
+    if (u.indexOf('KEY') === 0) u = u.slice(3);
+    if (u === 'ARROWLEFT') u = 'LEFT';
+    else if (u === 'ARROWRIGHT') u = 'RIGHT';
+    else if (u === 'ARROWUP') u = 'UP';
+    else if (u === 'ARROWDOWN') u = 'DOWN';
+    else if (u === ' ') u = 'SPACE';
+    else if (u === 'CONTROLLEFT' || u === 'CONTROLRIGHT' || u === 'CONTROL') u = 'CTRL';
+    else if (u === 'SHIFTLEFT' || u === 'SHIFTRIGHT' || u === 'SHIFT') u = 'SHIFT';
+    return u;
+  }
+  function applySpriteScaleTo(sceneSprite) {
+    if (!sceneSprite) return;
+    try {
+      sceneSprite.setDisplaySize(spriteFrameW * spriteScale, spriteFrameH * spriteScale);
+      // Keep physics body centered around the scaled display.
+      if (sceneSprite.body) {
+        sceneSprite.body.setSize(spriteFrameW * spriteScale * 0.72, spriteFrameH * spriteScale * 0.72, true);
+      }
+    } catch (e) {
+      try { sceneSprite.setScale(spriteScale); } catch (e2) {}
+    }
+  }
+  function applyFrameSizeFromAction(name) {
+    // Look up action def if assistant is configured; otherwise use 28×28 fallback.
+    if (assistantConfig && assistantConfig.actions) {
+      for (var i = 0; i < assistantConfig.actions.length; i++) {
+        var a = assistantConfig.actions[i];
+        if (a.name !== name) continue;
+        var cols = Math.max(1, a.cols || 1), rows = Math.max(1, a.rows || 1);
+        // Natural size is the sheet image / (cols,rows); until loaded use
+        // persisted per-action width/height derived from assistant-demo's scale
+        // math: ademoSyncEntitySize uses frameW/frameH × persist.scale.
+        // For survivor we derive a stable square fallback and let setDisplaySize
+        // normalize already-loaded 'assist_*' textures on next scale apply.
+        // Use 48×64 baseline divided by frame grid like the demo stage does.
+        var img = null;
+        // Try to get the texture's actual frame size if already loaded
+        // (Phaser stores it on the texture source).
+        var key = 'assist_' + name;
+        try {
+          // sceneRef may be null during boot; guard
+          if (sceneRef && sceneRef.textures && sceneRef.textures.exists(key)) {
+            var src = sceneRef.textures.get(key);
+            if (src && src.source && src.source[0]) {
+              spriteFrameW = src.source[0].width / cols;
+              spriteFrameH = src.source[0].height / rows;
+              spriteMirror = !!a.mirror;
+              return;
+            }
+          }
+        } catch (e) {}
+        // Fallback: estimate from cols/rows against 48×64 baseline
+        spriteFrameW = Math.max(8, Math.round(48 / cols * 0.9 + 28 / Math.max(cols, rows) * 0.1));
+        spriteFrameH = Math.max(8, Math.round(64 / rows * 0.9 + 28 / Math.max(cols, rows) * 0.1));
+        spriteMirror = !!a.mirror;
+        return;
+      }
+    }
+    // Not an assistant action — generated player/enemy: keep 28×28
+    spriteFrameW = 28; spriteFrameH = 28; spriteMirror = false;
+  }
+  function loadInputBindingsFromState(data) {
+    if (data && data.inputBindings && typeof data.inputBindings === 'object') {
+      var b = data.inputBindings;
+      // Validate: each key must be array of strings; unknown actions ignored.
+      for (var k in DEFAULT_BINDINGS) {
+        if (b[k] && Array.isArray(b[k]) && b[k].length && b[k].every(function (x) { return typeof x === 'string' && x; })) {
+          activeBindings[k] = b[k].slice();
+        }
+      }
+    }
+    if (data && typeof data.spriteScale === 'number' && isFinite(data.spriteScale) && data.spriteScale >= 0.35 && data.spriteScale <= 2.0) {
+      spriteScale = Math.round(data.spriteScale * 100) / 100;
+    }
+  }
+  function persistInputAndSprite() {
+    if (!hostRef || typeof hostRef.saveState !== 'function') return;
+    try {
+      hostRef.loadState().then(function (prev) {
+        var best = (prev && prev.best) ? prev.best : (bestScore !== null ? { kills: bestScore, timeSec: 0 } : null);
+        var mode = (prev && prev.mode) || selectedMode;
+        hostRef.saveState({ best: best, mode: mode, inputBindings: activeBindings, spriteScale: spriteScale }).then(function () {}, function () {});
+      }, function () {
+        hostRef.saveState({ mode: selectedMode, inputBindings: activeBindings, spriteScale: spriteScale }).then(function () {}, function () {});
+      });
+    } catch (e) {}
+  }
+
+  // ==========================================================================
   // State & seam — closed-over references exposed via window.__trgame
   // ==========================================================================
   /** @type {object|null} host adapter injected by TRGames */
@@ -127,6 +237,8 @@
   var selectedMode = 'topdown';
   /** @type {number|null} best score = kills + floor(timeSec), restored from storage */
   var bestScore = null;
+  // Pending action name awaiting a key rebind capture (null when idle).
+  var pendingRebind = null;
 
   /**
    * Read the current gameplay state for the CDP seam.
@@ -151,6 +263,54 @@
    */
   function getMode() {
     return selectedMode;
+  }
+
+  // ── Input-mapping helpers (used by gameplay scenes + overlays) ──────────
+  function pressed(scene, action) {
+    if (!scene || !scene.input || !scene.input.keyboard) return false;
+    var keys = activeBindings[action];
+    if (!keys || !keys.length) return false;
+    for (var i = 0; i < keys.length; i++) {
+      var code = keys[i].toUpperCase();
+      var ph = code === 'SPACE' ? 'SPACE' : (code === 'LEFT' ? 'LEFT' : (code === 'RIGHT' ? 'RIGHT' : (code === 'UP' ? 'UP' : (code === 'DOWN' ? 'DOWN' : (code === 'ESC' ? 'ESC' : code)))));
+      try {
+        if (code.length === 1) {
+          var k = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes[code]);
+          if (k && k.isDown) return true;
+        } else {
+          var kc = Phaser.Input.Keyboard.KeyCodes[ph];
+          if (kc !== undefined) {
+            var k2 = scene.input.keyboard.addKey(kc);
+            if (k2 && k2.isDown) return true;
+          }
+        }
+      } catch (e) {}
+    }
+    return false;
+  }
+  function justPressed(scene, action) {
+    var keys = activeBindings[action];
+    if (!keys || !keys.length) return false;
+    for (var i = 0; i < keys.length; i++) {
+      var code = keys[i].toUpperCase();
+      var ph = code === 'SPACE' ? 'SPACE' : (code === 'LEFT' ? 'LEFT' : (code === 'RIGHT' ? 'RIGHT' : (code === 'UP' ? 'UP' : (code === 'DOWN' ? 'DOWN' : (code === 'ESC' ? 'ESC' : code)))));
+      try {
+        if (code.length === 1) {
+          var k = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes[code]);
+          if (k && Phaser.Input.Keyboard.JustDown(k)) return true;
+        } else {
+          var kc = Phaser.Input.Keyboard.KeyCodes[ph];
+          if (kc !== undefined) {
+            var k2 = scene.input.keyboard.addKey(kc);
+            if (Phaser.Input.Keyboard.JustDown(k2)) return true;
+          }
+        }
+      } catch (e) {}
+    }
+    return false;
+  }
+  function anyManualDir(scene) {
+    return pressed(scene, 'left') || pressed(scene, 'right') || pressed(scene, 'up') || pressed(scene, 'down');
   }
 
   // ==========================================================================
@@ -344,13 +504,14 @@
     var chain = SURVIVOR_ALIASES[eventName] || SURVIVOR_ALIASES.idle;
     for (var i = 0; i < chain.length; i++) {
       var key = 'assist_' + chain[i];
-      if (assistantTextures[key]) { return key; }
-      if (scene && scene.textures && scene.textures.exists(key)) { return key; }
+      if (assistantTextures[key]) { applyFrameSizeFromAction(chain[i]); return key; }
+      if (scene && scene.textures && scene.textures.exists(key)) { applyFrameSizeFromAction(chain[i]); return key; }
     }
-    // Also try the event name itself as a direct assistant action name.
     var direct = 'assist_' + eventName;
-    if (assistantTextures[direct]) { return direct; }
-    if (scene && scene.textures && scene.textures.exists(direct)) { return direct; }
+    if (assistantTextures[direct]) { applyFrameSizeFromAction(eventName); return direct; }
+    if (scene && scene.textures && scene.textures.exists(direct)) { applyFrameSizeFromAction(eventName); return direct; }
+    spriteFrameSize = { w: 28, h: 28 };
+    spriteIsLeftVariant = false;
     return 'player';
   }
 
@@ -475,6 +636,115 @@
     try { scene.scene.resume(sceneKey); } catch (e) { /* already resumed */ }
   }
 
+  // ── Input mapping overlay (reusable demo module) ────────────────────────
+  function showInputOverlay(scene, sceneKey) {
+    if (scene._inputOverlay) return;
+    var w = scene.cameras.main.width, h = scene.cameras.main.height;
+    var bg = scene.add.sprite(0, 0, 'panel').setOrigin(0, 0).setDisplaySize(w, h).setTint(0x0b0e14).setAlpha(0.78).setDepth(80);
+    var title = scene.add.text(w / 2, 30, 'Input Mapping  (click a row, press a key)', { fontFamily: 'monospace', fontSize: '14px', color: '#e8e8e8', align: 'center' }).setOrigin(0.5, 0).setDepth(81);
+    var rows = [];
+    var actions = ['up', 'down', 'left', 'right', 'jump', 'attack', 'pause', 'restart', 'menu'];
+    var y0 = 62, lh = 22;
+    for (var i = 0; i < actions.length; i++) {
+      (function (act, idx) {
+        var y = y0 + idx * lh;
+        var label = scene.add.text(40, y, act.toUpperCase(), { fontFamily: 'monospace', fontSize: '12px', color: '#8ab4f8' }).setDepth(81);
+        var val = (activeBindings[act] || []).join(' / ') || '-';
+        var btn = scene.add.text(w - 40, y, val, { fontFamily: 'monospace', fontSize: '12px', color: '#7fe0a0', backgroundColor: '#1a2332', padding: { x: 6, y: 2 } }).setOrigin(1, 0).setDepth(81).setInteractive({ useHandCursor: true });
+        btn.on('pointerdown', function () {
+          pendingRebind = act;
+          btn.setText('… press a key …');
+          btn.setStyle({ color: '#ffd54f' });
+        });
+        rows.push({ label: label, btn: btn, act: act });
+      })(actions[i], i);
+    }
+    var hint = scene.add.text(w / 2, y0 + actions.length * lh + 10, 'ESC closes  ·  Backspace clears  ·  changes save to host.saveState', { fontFamily: 'monospace', fontSize: '10px', color: '#8b949e', align: 'center' }).setOrigin(0.5, 0).setDepth(81);
+    var close = scene.add.text(w - 12, 12, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#e8e8e8' }).setOrigin(1, 0).setDepth(81).setInteractive({ useHandCursor: true });
+    close.on('pointerdown', function () { hideInputOverlay(scene, sceneKey); });
+    scene._inputOverlay = [bg, title, hint, close].concat(rows.reduce(function (a, r) { return a.concat([r.label, r.btn]); }, []));
+    scene._inputRows = rows;
+    scene._inputClose = close;
+    scene._inputKeyHandler = function (e) {
+      if (!pendingRebind) {
+        if (e.key === 'Escape') hideInputOverlay(scene, sceneKey);
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { pendingRebind = null; refreshInputRows(scene); return; }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        activeBindings[pendingRebind] = [];
+        pendingRebind = null;
+        persistInputAndSprite();
+        refreshInputRows(scene);
+        return;
+      }
+      var code = keyName(e);
+      if (!code) return;
+      activeBindings[pendingRebind] = [code];
+      pendingRebind = null;
+      persistInputAndSprite();
+      refreshInputRows(scene);
+    };
+    document.addEventListener('keydown', scene._inputKeyHandler, true);
+    scene._inputOverlayKey = sceneKey;
+  }
+  function refreshInputRows(scene) {
+    var rows = scene._inputRows;
+    if (!rows) return;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var val = (activeBindings[r.act] || []).join(' / ') || '-';
+      if (pendingRebind === r.act) { r.btn.setText('… press a key …'); r.btn.setStyle({ color: '#ffd54f' }); }
+      else { r.btn.setText(val); r.btn.setStyle({ color: '#7fe0a0' }); }
+    }
+  }
+  function hideInputOverlay(scene, _sceneKey) {
+    if (!scene._inputOverlay) return;
+    if (scene._inputKeyHandler) { try { document.removeEventListener('keydown', scene._inputKeyHandler, true); } catch (e) {} scene._inputKeyHandler = null; }
+    pendingRebind = null;
+    for (var i = 0; i < scene._inputOverlay.length; i++) { try { scene._inputOverlay[i].destroy(); } catch (e2) {} }
+    scene._inputOverlay = null; scene._inputRows = null; scene._inputClose = null; scene._inputOverlayKey = null;
+  }
+  // ── Sprite settings overlay (reusable demo module) ──────────────────────
+  function showSpriteOverlay(scene, sceneKey) {
+    if (scene._spriteOverlay) return;
+    var w = scene.cameras.main.width, h = scene.cameras.main.height;
+    var bg = scene.add.sprite(0, 0, 'panel').setOrigin(0, 0).setDisplaySize(w, h).setTint(0x0b0e14).setAlpha(0.78).setDepth(80);
+    var title = scene.add.text(w / 2, 30, 'Sprite Settings', { fontFamily: 'monospace', fontSize: '14px', color: '#e8e8e8', align: 'center' }).setOrigin(0.5, 0).setDepth(81);
+    var info = scene.add.text(w / 2, 58, 'Assistant sheets (when configured) or generated discs', { fontFamily: 'monospace', fontSize: '10px', color: '#8b949e', align: 'center' }).setOrigin(0.5, 0).setDepth(81);
+    var cur = scene.add.text(w / 2, 84, 'Scale: ' + spriteScale.toFixed(2) + '  Frame: ' + (spriteFrameSize ? spriteFrameSize.w + '×' + spriteFrameSize.h : '—'), { fontFamily: 'monospace', fontSize: '11px', color: '#c9d1d9', align: 'center' }).setOrigin(0.5, 0).setDepth(81);
+    function refreshInfo() {
+      cur.setText('Scale: ' + spriteScale.toFixed(2) + '  Frame: ' + (spriteFrameSize ? spriteFrameSize.w + '×' + spriteFrameSize.h : '—') + (spriteIsLeftVariant ? '  [left-variant]' : ''));
+    }
+    var btnMinus = scene.add.text(w / 2 - 60, 108, ' − ', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', backgroundColor: '#1a2332', padding: { x: 14, y: 6 } }).setOrigin(0.5, 0).setDepth(81).setInteractive({ useHandCursor: true });
+    var btnPlus = scene.add.text(w / 2 + 60, 108, ' + ', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', backgroundColor: '#1a2332', padding: { x: 14, y: 6 } }).setOrigin(0.5, 0).setDepth(81).setInteractive({ useHandCursor: true });
+    var btnReset = scene.add.text(w / 2, 144, 'Reset (1.00)', { fontFamily: 'monospace', fontSize: '11px', color: '#8ab4f8', backgroundColor: '#1a2332', padding: { x: 10, y: 4 } }).setOrigin(0.5, 0).setDepth(81).setInteractive({ useHandCursor: true });
+    var close = scene.add.text(w - 12, 12, '✕', { fontFamily: 'monospace', fontSize: '18px', color: '#e8e8e8' }).setOrigin(1, 0).setDepth(81).setInteractive({ useHandCursor: true });
+    close.on('pointerdown', function () { hideSpriteOverlay(scene, sceneKey); });
+    function apply(n) {
+      spriteScale = Math.max(0.35, Math.min(2.0, n));
+      refreshInfo();
+      if (scene.player) applySpriteScaleTo(scene.player);
+      persistInputAndSprite();
+    }
+    btnMinus.on('pointerdown', function () { apply(spriteScale - 0.1); });
+    btnPlus.on('pointerdown', function () { apply(spriteScale + 0.1); });
+    btnReset.on('pointerdown', function () { apply(1.0); });
+    var escHandler = function (e) { if (e.key === 'Escape') hideSpriteOverlay(scene, sceneKey); };
+    document.addEventListener('keydown', escHandler, true);
+    scene._spriteOverlay = [bg, title, info, cur, btnMinus, btnPlus, btnReset, close];
+    scene._spriteEsc = escHandler;
+    scene._spriteOverlayKey = sceneKey;
+  }
+  function hideSpriteOverlay(scene, _sceneKey) {
+    if (!scene._spriteOverlay) return;
+    if (scene._spriteEsc) { try { document.removeEventListener('keydown', scene._spriteEsc, true); } catch (e) {} scene._spriteEsc = null; }
+    for (var i = 0; i < scene._spriteOverlay.length; i++) { try { scene._spriteOverlay[i].destroy(); } catch (e2) {} }
+    scene._spriteOverlay = null; scene._spriteOverlayKey = null;
+  }
+
   // ==========================================================================
   // Entry point — launch(host)
   // ==========================================================================
@@ -501,6 +771,7 @@
         buildTextures(self);
         buildPlatformTexture(self);
         // Restore best score + mode from storage (async, non-fatal).
+        // Also restore inputBindings/spriteScale so demos survive reload.
         // Try to load assistant data as well so textures can be prefetched.
         var stateP = Promise.resolve(null);
         if (hostRef && typeof hostRef.loadState === 'function') {
@@ -511,7 +782,7 @@
         var assistP = fetchAssistantData();
         Promise.all([stateP, assistP]).then(function (results) {
           var data = results[0];
-          // State shape: { best: {kills, timeSec}, mode }
+          // State shape: { best: {kills, timeSec}, mode, inputBindings, spriteScale }
           if (data) {
             if (data.best && typeof data.best.kills === 'number' && typeof data.best.timeSec === 'number') {
               bestScore = data.best.kills + Math.floor(data.best.timeSec);
@@ -520,6 +791,7 @@
               selectedMode = data.mode;
               hostRef._survivorMode = selectedMode;
             }
+            try { loadInputBindingsFromState(data); } catch (e2) {}
           }
           // Prefetch assistant textures while we're still in Boot.
           try { loadAssistantTextures(self); } catch (e) { /* ignore */ }
@@ -619,10 +891,31 @@
             // Read existing best from bestScore; encode as kills/timeSec for compat.
             var kills = 0, timeSec = 0;
             if (bestScore !== null) { kills = bestScore; } // approximate; full best is kills+timeSec
-            hostRef.saveState({ best: { kills: kills, timeSec: timeSec }, mode: selectedMode })
-              .then(function () {}, function () {});
+            // Preserve inputBindings/spriteScale so demo settings are not clobbered.
+            hostRef.loadState().then(function (prev) {
+              var ib = (prev && prev.inputBindings) ? prev.inputBindings : activeBindings;
+              var sc = (prev && typeof prev.spriteScale === 'number') ? prev.spriteScale : spriteScale;
+              hostRef.saveState({ best: { kills: kills, timeSec: timeSec }, mode: selectedMode, inputBindings: ib, spriteScale: sc })
+                .then(function () {}, function () {});
+            }, function () {
+              hostRef.saveState({ best: { kills: kills, timeSec: timeSec }, mode: selectedMode, inputBindings: activeBindings, spriteScale: spriteScale })
+                .then(function () {}, function () {});
+            });
           } catch (e) { /* ignore */ }
         }
+
+        // Demo modules — every future game should expose these two entries.
+        var demoInputBtn = this.add.text(w / 2, h * 0.82, 'Input Mapping  [I]', {
+          fontFamily: 'monospace', fontSize: '11px', color: '#8ab4f8',
+          backgroundColor: '#1a2332', padding: { x: 10, y: 5 }
+        }).setOrigin(0.5, 0.5).setInteractive({ useHandCursor: true });
+        var demoSpriteBtn = this.add.text(w / 2, h * 0.89, 'Sprite Settings  [O]', {
+          fontFamily: 'monospace', fontSize: '11px', color: '#8ab4f8',
+          backgroundColor: '#1a2332', padding: { x: 10, y: 5 }
+        }).setOrigin(0.5, 0.5).setInteractive({ useHandCursor: true });
+        demoInputBtn.on('pointerdown', function () { showInputOverlay(self, 'menu'); });
+        demoSpriteBtn.on('pointerdown', function () { showSpriteOverlay(self, 'menu'); });
+        this._menuDemoKeys = this.input.keyboard.addKeys('I,O');
 
         // Start button — large, centered below mode selector.
         var startBtn = this.add.text(w / 2, h * 0.56, 'START  ▶', {
@@ -638,8 +931,8 @@
         startBtn.on('pointerdown', doStart);
 
         // How to Play — contextual by mode.
-        var howTopdown = 'WASD / Arrows to move · Auto turret shoots nearest foe\n3 HP · R to restart · ESC to pause';
-        var howPlatformer = 'A/D or Arrows to move · W/UP/SPACE to jump · S/DOWN fastfall\nRight-click to move-to-x · R to restart · ESC to pause';
+        var howTopdown = 'WASD / Arrows to move · Auto turret shoots nearest foe\n3 HP · R restart · ESC pause · I input · O sprite';
+        var howPlatformer = 'A/D or Arrows to move · W/UP/SPACE to jump · S/DOWN fastfall\nRight-click to move-to-x · R restart · ESC pause · I input · O sprite';
         var howText = this.add.text(w / 2, h * 0.72, selectedMode === 'platformer' ? howPlatformer : howTopdown, {
           fontFamily: 'monospace', fontSize: '11px', color: '#8b949e', align: 'center'
         });
@@ -658,7 +951,7 @@
         this._doStart = doStart;
 
         // Hint line
-        this.add.text(w / 2, h - 16, 'Press ENTER/SPACE to start  ·  Click a mode to switch', {
+        this.add.text(w / 2, h - 16, 'ENTER/SPACE to start  ·  I input  ·  O sprite  ·  ESC/M to leave overlay', {
           fontFamily: 'monospace', fontSize: '10px', color: '#484f58', align: 'center'
         }).setOrigin(0.5, 0.5);
       }
@@ -670,10 +963,23 @@
             if (this._doStart) { this._doStart(); }
           }
         }
+        // Menu-level demo overlays: I = Input mapping, O = Sprite settings.
+        if (this._menuDemoKeys) {
+          if (Phaser.Input.Keyboard.JustDown(this._menuDemoKeys.I)) {
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'menu');
+            if (this._inputOverlay) hideInputOverlay(this, 'menu'); else showInputOverlay(this, 'menu');
+          }
+          if (Phaser.Input.Keyboard.JustDown(this._menuDemoKeys.O)) {
+            if (this._inputOverlay) hideInputOverlay(this, 'menu');
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'menu'); else showSpriteOverlay(this, 'menu');
+          }
+        }
       }
       shutdown() {
         if (this._bestPoll) { try { this._bestPoll.remove(false); } catch (e) {} this._bestPoll = null; }
         if (this._howPoll) { try { this._howPoll.remove(false); } catch (e) {} this._howPoll = null; }
+        if (this._inputOverlay) { try { hideInputOverlay(this, 'menu'); } catch (e2) {} }
+        if (this._spriteOverlay) { try { hideSpriteOverlay(this, 'menu'); } catch (e3) {} }
       }
     };
 
@@ -718,7 +1024,7 @@
         this.player = this.physics.add.sprite(this.w / 2, this.h / 2, pTex);
         this.player.setDepth(10);
         try { this.player.body.setCircle(10); } catch (e) { /* fallback */ this.player.body.setSize(20, 20); }
-        // Track current texture so setTexture is only called on change.
+        try { applySpriteScaleTo(this.player); } catch (e) {}
         this._playerTex = pTex;
 
         // Groups
@@ -730,10 +1036,13 @@
         this.physics.add.overlap(this.enemies, this.player, this.onPlayerHit, null, this);
 
         // Input — movement + restart + pause.
-        this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SHIFT,CTRL');
-        this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+        this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SHIFT,CTRL,I,O');
+        this.restartKey = this.input.keyboard.addKeys('R')[Object.keys(this.input.keyboard.addKeys('R'))[0]] || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+        // Prefer mappings; fall back to legacy keys for pause/menu/restart when not mapped.
         this.menuKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
         this.pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+        // Keep direct refs for demo overlays.
+        this._demoKeys = { i: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I), o: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O) };
         // Cache last movement intent for alias + assistant texture selection.
         this._lastDx = 0;
         this._lastDy = 0;
@@ -786,6 +1095,7 @@
                   sceneLoad.updateHud();
                 }
               }
+              try { loadInputBindingsFromState(data); } catch (e) {}
             }, function () {});
           } catch (e) {}
         }
@@ -932,6 +1242,20 @@
           }
           return;
         }
+        // Demo overlays: I = Input mapping, O = Sprite settings (even mid-game).
+        if (this._demoKeys) {
+          if (Phaser.Input.Keyboard.JustDown(this._demoKeys.i)) {
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'topdown-scene');
+            if (this._inputOverlay) hideInputOverlay(this, 'topdown-scene'); else showInputOverlay(this, 'topdown-scene');
+            return;
+          }
+          if (Phaser.Input.Keyboard.JustDown(this._demoKeys.o)) {
+            if (this._inputOverlay) hideInputOverlay(this, 'topdown-scene');
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'topdown-scene'); else showSpriteOverlay(this, 'topdown-scene');
+            return;
+          }
+        }
+        if (this._inputOverlay || this._spriteOverlay) return;
         // Pause overlay active — only pause/menu keys matter.
         if (this._paused) {
           if (Phaser.Input.Keyboard.JustDown(this.pauseKey)) { this.togglePause(); }
@@ -955,12 +1279,14 @@
 
         // 8-direction movement, diagonals normalized to TOPDOWN_SPEED.
         var dx = 0, dy = 0;
-        if (this.keys.A.isDown || this.keys.LEFT.isDown) { dx -= 1; }
-        if (this.keys.D.isDown || this.keys.RIGHT.isDown) { dx += 1; }
-        if (this.keys.W.isDown || this.keys.UP.isDown) { dy -= 1; }
-        if (this.keys.S.isDown || this.keys.DOWN.isDown) { dy += 1; }
+        // Honor remapped bindings; legacy WASD/arrows remain compatible via activeBindings defaults.
+        var leftDown = pressed(this, 'left'), rightDown = pressed(this, 'right'), upDown = pressed(this, 'up'), downDown = pressed(this, 'down');
+        if (leftDown) dx -= 1;
+        if (rightDown) dx += 1;
+        if (upDown) dy -= 1;
+        if (downDown) dy += 1;
         // Normalize diagonals so cornering is not faster.
-        var isRun = this.keys.CTRL.isDown && !this.keys.SHIFT.isDown;
+        var isRun = pressed(this, 'run') && !pressed(this, 'slow');
         var moving = dx !== 0 || dy !== 0;
         if (moving) {
           var len = Math.sqrt(dx * dx + dy * dy);
@@ -1003,7 +1329,7 @@
           var canSwitch = false;
           try { canSwitch = this.textures.exists(desiredTex); } catch (e3) { canSwitch = false; }
           if (canSwitch) {
-            try { this.player.setTexture(desiredTex); this._playerTex = desiredTex; } catch (e4) {}
+            try { this.player.setTexture(desiredTex); this._playerTex = desiredTex; applySpriteScaleTo(this.player); } catch (e4) {}
           }
         }
 
@@ -1053,6 +1379,10 @@
           var ens = this.enemies.getChildren();
           for (var k = 0; k < ens.length; k++) { try { ens[k].setVelocity(0, 0); } catch (e2) {} }
         }
+      }
+      shutdown() {
+        if (this._inputOverlay) try { hideInputOverlay(this, 'topdown-scene'); } catch (e) {}
+        if (this._spriteOverlay) try { hideSpriteOverlay(this, 'topdown-scene'); } catch (e) {}
       }
     };
 
@@ -1116,6 +1446,7 @@
         this.player.setCollideWorldBounds(true);
         this.player.setBounce(0);
         try { this.player.body.setSize(18, 24); } catch (e) {}
+        try { applySpriteScaleTo(this.player); } catch (e) {}
         this.physics.add.collider(this.player, this.platforms);
         this._playerTex = pTexPlat;
 
@@ -1128,10 +1459,11 @@
         this.physics.add.collider(this.enemies, this.platforms);
 
         // Input — horizontal, jump, fastfall, pause/menu/restart.
-        this.keys = this.input.keyboard.addKeys('A,D,LEFT,RIGHT,SHIFT,CTRL,W,UP,SPACE,S,DOWN');
+        this.keys = this.input.keyboard.addKeys('A,D,LEFT,RIGHT,SHIFT,CTRL,W,UP,SPACE,S,DOWN,I,O');
         this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
         this.menuKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
         this.pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+        this._demoKeys = { i: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I), o: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O) };
         // Track last horizontal intent for alias.
         this._lastDir = 0;
 
@@ -1325,6 +1657,19 @@
           }
           return;
         }
+        if (this._demoKeys) {
+          if (Phaser.Input.Keyboard.JustDown(this._demoKeys.i)) {
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'platformer-scene');
+            if (this._inputOverlay) hideInputOverlay(this, 'platformer-scene'); else showInputOverlay(this, 'platformer-scene');
+            return;
+          }
+          if (Phaser.Input.Keyboard.JustDown(this._demoKeys.o)) {
+            if (this._inputOverlay) hideInputOverlay(this, 'platformer-scene');
+            if (this._spriteOverlay) hideSpriteOverlay(this, 'platformer-scene'); else showSpriteOverlay(this, 'platformer-scene');
+            return;
+          }
+        }
+        if (this._inputOverlay || this._spriteOverlay) return;
         if (this._paused) {
           if (Phaser.Input.Keyboard.JustDown(this.pauseKey)) { this.togglePause(); }
           if (Phaser.Input.Keyboard.JustDown(this.menuKey)) {
@@ -1345,8 +1690,8 @@
 
         // ---- Horizontal intent — manual keys beat right-click moveTarget ----
         var dir = 0;
-        if (this.keys.A.isDown || this.keys.LEFT.isDown) { dir -= 1; }
-        if (this.keys.D.isDown || this.keys.RIGHT.isDown) { dir += 1; }
+        if (pressed(this, 'left')) dir -= 1;
+        if (pressed(this, 'right')) dir += 1;
         // Any manual horizontal input cancels the right-click target (parity with ademoSubstep).
         if (dir !== 0) {
           this._moveTarget = null;
@@ -1363,8 +1708,8 @@
             dir = dxT > 0 ? 1 : -1;
           }
         }
-        var speed = this.keys.SHIFT.isDown ? PLATFORMER_SLOW
-          : (this.keys.CTRL.isDown ? PLATFORMER_RUN : PLATFORMER_WALK);
+        var speed = pressed(this, 'slow') ? PLATFORMER_SLOW
+          : (pressed(this, 'run') ? PLATFORMER_RUN : PLATFORMER_WALK);
         // Shift wins over Ctrl already via ternary above (SHIFT checked first).
         this.player.setVelocityX(dir * speed);
         if (dir !== 0) { this._lastDir = dir; }
@@ -1375,9 +1720,7 @@
         // Jump: JustDown on W/UP/SPACE while grounded.
         var jumpDown = false;
         try {
-          jumpDown = Phaser.Input.Keyboard.JustDown(this.keys.W) ||
-            Phaser.Input.Keyboard.JustDown(this.keys.UP) ||
-            Phaser.Input.Keyboard.JustDown(this.keys.SPACE);
+          jumpDown = justPressed(this, 'jump');
         } catch (e6) {}
         if (jumpDown && onGround) {
           this.player.setVelocityY(-PLATFORMER_JUMP_VEL);
@@ -1385,7 +1728,7 @@
         }
         // Fastfall: holding S/DOWN while airborne adds extra gravity.
         var isDownHeld = false;
-        try { isDownHeld = this.keys.S.isDown || this.keys.DOWN.isDown; } catch (e7) {}
+        try { isDownHeld = pressed(this, 'down'); } catch (e7) {}
         if (isDownHeld && !onGround) {
           // Nudge velocity downward — additive so it stacks with world gravity.
           var vy = this.player.body.velocity.y;
@@ -1402,14 +1745,14 @@
         }
 
         // Assistant sprite selection — platformer motion event.
-        var isRun = this.keys.CTRL.isDown && !this.keys.SHIFT.isDown;
+        var isRun = pressed(this, 'run') && !pressed(this, 'slow');
         var platEvt = motionEventPlatformer(dir, onGround, this.player.body.velocity.y, isRun);
         var desiredTexP = resolvePlayerTexture(platEvt, this);
         if (desiredTexP !== this._playerTex) {
           var canSwitchP = false;
           try { canSwitchP = this.textures.exists(desiredTexP); } catch (e9) { canSwitchP = false; }
           if (canSwitchP) {
-            try { this.player.setTexture(desiredTexP); this._playerTex = desiredTexP; } catch (e10) {}
+            try { this.player.setTexture(desiredTexP); this._playerTex = desiredTexP; applySpriteScaleTo(this.player); } catch (e10) {}
           }
         }
 
@@ -1455,6 +1798,10 @@
           var ens = this.enemies.getChildren();
           for (var k = 0; k < ens.length; k++) { try { ens[k].setVelocity(0, 0); } catch (e2) {} }
         }
+      }
+      shutdown() {
+        if (this._inputOverlay) try { hideInputOverlay(this, 'platformer-scene'); } catch (e) {}
+        if (this._spriteOverlay) try { hideSpriteOverlay(this, 'platformer-scene'); } catch (e) {}
       }
     };
 

@@ -526,6 +526,26 @@
       .then(function (src) {
         // Delete prior registry entry (reload semantics — mirrors dg-reload flow).
         if (seam.registry && seam.registry[id]) delete seam.registry[id];
+        // Prefer disk reload when the entry was not being edited in-memory;
+        // disk URLs are CSP-safe and avoid blob: edge cases.
+        var isInMemory = hasEntryOpen;
+        if (!isInMemory) {
+          var v = Date.now();
+          var diskSrc = '/games/' + encodeURIComponent(id) + '/' + entryName.split('/').map(encodeURIComponent).join('/') + '?v=' + v;
+          return seam.injectScript(diskSrc).then(function () {
+            if (!seam.registry || !seam.registry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
+            var def = seam.registry[id].def;
+            dgnPreviewStop();
+            var stage = stageEl();
+            if (!stage) throw new Error('preview stage not rendered');
+            stage.innerHTML = '';
+            var handle = def.launch(seam.makeHost(id, stage));
+            dgn.preview = { id: id, handle: handle || null };
+            dgnStatus('');
+          });
+        }
+        // In-memory edit: inject via Blob URL (CSP now allows blob:) with
+        // inline text fallback if the blob script fails to parse/load.
         var blob = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
         return seam.injectScript(blob).then(function () {
           try { URL.revokeObjectURL(blob); } catch (ignored) {}
@@ -538,9 +558,25 @@
           var handle = def.launch(seam.makeHost(id, stage));
           dgn.preview = { id: id, handle: handle || null };
           dgnStatus('');
-        }, function (err) {
+        }, function (blobErr) {
           try { URL.revokeObjectURL(blob); } catch (ignored) {}
-          throw err;
+          // Blob blocked or parse error: fall back to inline evaluation.
+          try {
+            // eslint-disable-next-line no-eval
+            (1, eval)(src + '\n//# sourceURL=designer-preview://' + id + '/' + entryName);
+            if (!seam.registry || !seam.registry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
+            var def2 = seam.registry[id].def;
+            dgnPreviewStop();
+            var stage2 = stageEl();
+            if (!stage2) throw new Error('preview stage not rendered');
+            stage2.innerHTML = '';
+            var handle2 = def2.launch(seam.makeHost(id, stage2));
+            dgn.preview = { id: id, handle: handle2 || null };
+            dgnStatus('');
+            return;
+          } catch (evalErr) {
+            throw blobErr;
+          }
         });
       })
       .catch(function (err) {
