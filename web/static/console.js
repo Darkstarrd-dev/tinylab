@@ -108,10 +108,37 @@ function closeConsoleStream() {
     consoleEventSource.close();
     consoleEventSource = null;
   }
+  if (consoleReconnectTimer) {
+    clearTimeout(consoleReconnectTimer);
+    consoleReconnectTimer = null;
+  }
+}
+
+var consoleReconnectTimer = null;
+var consoleReconnectDelay = 1000;
+
+function scheduleConsoleReconnect() {
+  if (consoleReconnectTimer) return;
+  if (consoleSubView !== 'logs') return;
+  // Only reconnect while console logs view is active.
+  var jitter = 0.8 + Math.random() * 0.4;
+  var delay = Math.round(consoleReconnectDelay * jitter);
+  consoleReconnectTimer = setTimeout(function() {
+    consoleReconnectTimer = null;
+    if (consoleSubView === 'logs') startConsoleStream();
+    consoleReconnectDelay = Math.min(consoleReconnectDelay * 2, 30000);
+  }, delay);
 }
 
 function startConsoleStream() {
-  if (consoleEventSource) consoleEventSource.close();
+  if (consoleReconnectTimer) {
+    clearTimeout(consoleReconnectTimer);
+    consoleReconnectTimer = null;
+  }
+  if (consoleEventSource) {
+    try { consoleEventSource.close(); } catch(e) {}
+    consoleEventSource = null;
+  }
   var container = document.getElementById('log-container');
   var status = document.getElementById('console-status');
 
@@ -121,9 +148,25 @@ function startConsoleStream() {
   // line (including startup messages already in the buffer) to be rendered
   // twice. Removing the REST call eliminates the duplication.
 
+  if (typeof EventSource === 'undefined') {
+    if (status) status.textContent = t('disconnected');
+    return;
+  }
   consoleEventSource = new EventSource('/api/console-logs/stream');
-  consoleEventSource.onopen = function() { status.textContent = t('connected'); };
-  consoleEventSource.onerror = function() { status.textContent = t('disconnected'); };
+  consoleEventSource.onopen = function() {
+    if (status) status.textContent = t('connected');
+    consoleReconnectDelay = 1000;
+    if (consoleReconnectTimer) {
+      clearTimeout(consoleReconnectTimer);
+      consoleReconnectTimer = null;
+    }
+  };
+  consoleEventSource.onerror = function() {
+    if (status) status.textContent = t('disconnected');
+    try { consoleEventSource.close(); } catch(e) {}
+    consoleEventSource = null;
+    if (consoleSubView === 'logs' && !consoleReconnectTimer) scheduleConsoleReconnect();
+  };
   consoleEventSource.onmessage = function(e) {
     try {
       var msg = JSON.parse(e.data);

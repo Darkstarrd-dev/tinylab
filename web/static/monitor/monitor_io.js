@@ -66,20 +66,31 @@ function scheduleQuotaRefresh() {
   }, 300);
 }
 
+var _quotaRefreshInFlight = null;
 async function refreshQuotaData() {
-  try {
-    const [summary, usage, quotas] = await Promise.all([
-      apiGet('/monitor/summary'),
-      apiGet('/monitor?limit=500'),
-      apiGet('/monitor/quotas')
-    ]);
-    mergeUsageEntries(usage.entries || []);
-    updateUsageSummary(summary);
-    updateQuotaTable(quotas.quotas || []);
-    updateRecentRequestsInline(lastUsageEntries);
-    ensureProcessingTimer();
-    refreshAllKeyDetails();
-  } catch(e) { console.warn('refreshQuotaData failed:', e); }
+  if (_quotaRefreshInFlight) return _quotaRefreshInFlight;
+  _quotaRefreshInFlight = (async function() {
+    try {
+      const [summary, usage, quotas] = await Promise.all([
+        apiGet('/monitor/summary'),
+        apiGet('/monitor?limit=500'),
+        apiGet('/monitor/quotas')
+      ]);
+      mergeUsageEntries(usage.entries || []);
+      updateUsageSummary(summary);
+      updateQuotaTable(quotas.quotas || []);
+      updateRecentRequestsInline(lastUsageEntries);
+      ensureProcessingTimer();
+      refreshAllKeyDetails();
+    } catch(e) {
+      if (e && e.message && e.message.indexOf('Failed to fetch') >= 0) {
+        // Server unreachable (SSE dropped / restarting) — suppress storm.
+      } else {
+        console.warn('refreshQuotaData failed:', e);
+      }
+    }
+  })().finally(function() { _quotaRefreshInFlight = null; });
+  return _quotaRefreshInFlight;
 }
 
 function applyUsageSSEHandlers(es) {
@@ -111,14 +122,19 @@ function applyUsageSSEHandlers(es) {
       }
     } catch(e) {}
   };
-  es.onerror = function() {
-    var status = document.getElementById('console-status');
-    if (status) status.textContent = t('disconnected');
-  };
-  es.onopen = function() {
-    var status = document.getElementById('console-status');
-    if (status) status.textContent = t('connected');
-  };
+  // Preserve base handlers set here; monitor.js connectUsageSSE wraps
+  // onerror/onopen with reconnect/backoff while keeping status updates.
+  // Only set defaults if not already overridden by the wrapper.
+  if (!es._trWrapped) {
+    es.onerror = function() {
+      var status = document.getElementById('console-status');
+      if (status) status.textContent = t('disconnected');
+    };
+    es.onopen = function() {
+      var status = document.getElementById('console-status');
+      if (status) status.textContent = t('connected');
+    };
+  }
 }
 
 function handleRequestStart(entry) {

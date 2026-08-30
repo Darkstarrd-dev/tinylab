@@ -98,26 +98,76 @@ function stopProcessingTimer() {
   }
 }
 
+var usageReconnectTimer = null;
+var usageReconnectDelay = 1000;
+
+function connectUsageSSE() {
+  if (usageReconnectTimer) {
+    clearTimeout(usageReconnectTimer);
+    usageReconnectTimer = null;
+  }
+  if (usageEventSource) {
+    usageEventSource.close();
+    usageEventSource = null;
+  }
+  if (typeof EventSource === 'undefined') return;
+  var es = new EventSource('/api/monitor/events');
+  usageEventSource = es;
+  es._trWrapped = true;
+  applyUsageSSEHandlers(es);
+  es.onopen = function() {
+    var status = document.getElementById('console-status');
+    if (status) status.textContent = t('connected');
+    usageReconnectDelay = 1000;
+    if (usageReconnectTimer) {
+      clearTimeout(usageReconnectTimer);
+      usageReconnectTimer = null;
+    }
+  };
+  es.onerror = function() {
+    try { es.close(); } catch(e) {}
+    if (usageEventSource === es) usageEventSource = null;
+    var status = document.getElementById('console-status');
+    if (status) status.textContent = t('disconnected');
+    if (currentPage === 'monitor' && !usageReconnectTimer) scheduleUsageReconnect();
+  };
+}
+
+function scheduleUsageReconnect() {
+  if (usageReconnectTimer) return;
+  // Exponential backoff with jitter: 1s -> 2s -> 4s -> ... capped at 30s.
+  var jitter = 0.8 + Math.random() * 0.4;
+  var delay = Math.round(usageReconnectDelay * jitter);
+  usageReconnectTimer = setTimeout(function() {
+    usageReconnectTimer = null;
+    if (currentPage === 'monitor') connectUsageSSE();
+    usageReconnectDelay = Math.min(usageReconnectDelay * 2, 30000);
+  }, delay);
+}
+
 function startUsageRefresh() {
-  stopUsageRefresh();
-  usageEventSource = new EventSource('/api/monitor/events');
-  applyUsageSSEHandlers(usageEventSource);
+  if (usageReconnectTimer) {
+    clearTimeout(usageReconnectTimer);
+    usageReconnectTimer = null;
+  }
+  usageReconnectDelay = 1000;
+  connectUsageSSE();
 
   usageVisibilityHandler = function() {
     if (document.visibilityState === 'visible' && currentPage === 'monitor') {
       if (!usageEventSource || usageEventSource.readyState === EventSource.CLOSED) {
-        if (usageEventSource) usageEventSource.close();
-        usageEventSource = new EventSource('/api/monitor/events');
-        applyUsageSSEHandlers(usageEventSource);
+        connectUsageSSE();
       }
-      refreshQuotaData();
+      if (typeof scheduleQuotaRefresh === 'function') scheduleQuotaRefresh();
+      else refreshQuotaData();
     }
   };
   document.addEventListener('visibilitychange', usageVisibilityHandler);
 
   usagePeriodicTimer = setInterval(function() {
-    if (currentPage === 'monitor') {
-      refreshQuotaData();
+    if (currentPage === 'monitor' && document.visibilityState === 'visible') {
+      if (typeof scheduleQuotaRefresh === 'function') scheduleQuotaRefresh();
+      else refreshQuotaData();
     }
   }, 5000);
 }
@@ -126,6 +176,10 @@ function stopUsageRefresh() {
   if (usageVisibilityHandler) {
     document.removeEventListener('visibilitychange', usageVisibilityHandler);
     usageVisibilityHandler = null;
+  }
+  if (usageReconnectTimer) {
+    clearTimeout(usageReconnectTimer);
+    usageReconnectTimer = null;
   }
   if (usageEventSource) {
     usageEventSource.close();

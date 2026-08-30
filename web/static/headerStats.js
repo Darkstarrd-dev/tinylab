@@ -1,6 +1,8 @@
 // headerStats.js —— 顶部 header 的 stat-grid 实时统计模块
 var headerStatsEventSource = null;
 var headerStatsRefreshScheduled = false;
+var headerStatsReconnectTimer = null;
+var headerStatsReconnectDelay = 1000;
 
 function applyHeaderStatLabels() {
   var labels = ['totalRequests', 'success', 'errors', 'avgLatency', 'totalInput', 'totalOutput'];
@@ -32,11 +34,42 @@ async function refreshHeaderStats() {
   } catch(e) {}
 }
 
+function scheduleHeaderStatsReconnect() {
+  if (headerStatsReconnectTimer) return;
+  var jitter = 0.8 + Math.random() * 0.4;
+  var delay = Math.round(headerStatsReconnectDelay * jitter);
+  headerStatsReconnectTimer = setTimeout(function() {
+    headerStatsReconnectTimer = null;
+    startHeaderStatsSSE();
+    headerStatsReconnectDelay = Math.min(headerStatsReconnectDelay * 2, 30000);
+  }, delay);
+}
+
 function startHeaderStatsSSE() {
-  stopHeaderStatsSSE();
+  if (headerStatsReconnectTimer) {
+    clearTimeout(headerStatsReconnectTimer);
+    headerStatsReconnectTimer = null;
+  }
+  if (headerStatsEventSource) {
+    try { headerStatsEventSource.close(); } catch(e) {}
+    headerStatsEventSource = null;
+  }
   if (typeof EventSource === 'undefined') return;
-  headerStatsEventSource = new EventSource('/api/monitor/events');
-  headerStatsEventSource.onmessage = function(ev) {
+  var es = new EventSource('/api/monitor/events');
+  headerStatsEventSource = es;
+  es.onopen = function() {
+    headerStatsReconnectDelay = 1000;
+    if (headerStatsReconnectTimer) {
+      clearTimeout(headerStatsReconnectTimer);
+      headerStatsReconnectTimer = null;
+    }
+  };
+  es.onerror = function() {
+    try { es.close(); } catch(e) {}
+    if (headerStatsEventSource === es) headerStatsEventSource = null;
+    if (!headerStatsReconnectTimer) scheduleHeaderStatsReconnect();
+  };
+  es.onmessage = function(ev) {
     try {
       var data = JSON.parse(ev.data);
       if (data.type === 'usage-updated' || data.type === 'key-inflight') {
@@ -49,8 +82,12 @@ function startHeaderStatsSSE() {
 window.addEventListener('beforeunload', stopHeaderStatsSSE);
 
 function stopHeaderStatsSSE() {
+  if (headerStatsReconnectTimer) {
+    clearTimeout(headerStatsReconnectTimer);
+    headerStatsReconnectTimer = null;
+  }
   if (headerStatsEventSource) {
-    headerStatsEventSource.close();
+    try { headerStatsEventSource.close(); } catch(e) {}
     headerStatsEventSource = null;
   }
 }

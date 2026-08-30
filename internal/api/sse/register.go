@@ -37,27 +37,42 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.d.ProxyHandler == nil || h.d.ProxyHandler.UsageUpdates == nil || h.d.ProxyHandler.InflightUpdates == nil || h.d.ProxyHandler.RequestUpdates == nil {
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, "event stream unavailable")
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	fmt.Fprintf(w, "data: {\"type\":\"connected\"}\n\n")
+	// Exempt long-lived SSE from the server's WriteTimeout (one-shot deadline).
+	// Same pattern as proxy/stream.go:streamResponse; keeps chunked stream alive
+	// beyond 300s while downstream context still cancels on disconnect.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
+	if _, err := fmt.Fprintf(w, "data: {\"type\":\"connected\"}\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	// Send existing inflight (processing) entries as request-start events so
 	// a freshly connected client immediately sees all currently-running requests.
-	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
+	if h.d.ProxyHandler.EntryTracker != nil {
 		for _, e := range h.d.ProxyHandler.EntryTracker.All() {
 			raw := proxy.MarshalEntryJSONLight(e)
 			if raw != nil {
-				fmt.Fprintf(w, "data: {\"type\":\"request-start\",\"id\":%s,\"entry\":%s}\n\n",
-					json.RawMessage(mustJSON(e.ID)), raw)
+				if _, err := fmt.Fprintf(w, "data: {\"type\":\"request-start\",\"id\":%s,\"entry\":%s}\n\n",
+					json.RawMessage(mustJSON(e.ID)), raw); err != nil {
+					return
+				}
 				flusher.Flush()
 			}
 		}
 	}
-
 	ch, unsubUsage := h.d.ProxyHandler.UsageUpdates.Subscribe()
 	infCh, unsubInflight := h.d.ProxyHandler.InflightUpdates.Subscribe()
 	reqCh, unsubRequests := h.d.ProxyHandler.RequestUpdates.Subscribe()
@@ -70,10 +85,14 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ch:
-			fmt.Fprintf(w, "data: {\"type\":\"usage-updated\"}\n\n")
+			if _, err := fmt.Fprintf(w, "data: {\"type\":\"usage-updated\"}\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		case <-infCh:
-			fmt.Fprintf(w, "data: {\"type\":\"key-inflight\"}\n\n")
+			if _, err := fmt.Fprintf(w, "data: {\"type\":\"key-inflight\"}\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		case ev, ok := <-reqCh:
 			if !ok {
@@ -85,13 +104,17 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+					return
+				}
 				flusher.Flush()
 			}
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fmt.Fprintf(w, ": keepalive\n\n")
+			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}

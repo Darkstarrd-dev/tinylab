@@ -50,10 +50,17 @@ func (h *Handler) streamConsoleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
+	// Exempt long-lived SSE from the server's WriteTimeout.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
 	// Send existing lines first
 	for _, line := range h.d.Logger.AllLines() {
 		payload, _ := json.Marshal(map[string]string{"type": "line", "line": line})
-		fmt.Fprintf(w, "data: %s\n\n", payload)
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			return
+		}
 		flusher.Flush()
 	}
 
@@ -71,13 +78,17 @@ func (h *Handler) streamConsoleLogs(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			payload, _ := json.Marshal(map[string]string{"type": "line", "line": line})
-			fmt.Fprintf(w, "data: %s\n\n", payload)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+				return
+			}
 			flusher.Flush()
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			// Keepalive ping
-			fmt.Fprintf(w, ": keepalive\n\n")
+			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
