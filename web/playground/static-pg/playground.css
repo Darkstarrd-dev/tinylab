@@ -853,8 +853,13 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-toggle{width:18px;height:18px;border-radius:50%;border:1px solid var(--glass-border-hover);background:transparent;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;font-size:11px;flex-shrink:0;transition:all var(--transition-fast)}
 .pg-toggle:hover{border-color:var(--accent);color:var(--accent)}
 .pg-toggle.on{background:var(--accent);border-color:var(--accent);color:var(--text-on-accent)}
-.pg-switch{display:flex;align-items:center;gap:8px;font-size:var(--font-badge);color:var(--text-secondary);margin-bottom:10px}
+.pg-switch{display:flex;align-items:center;gap:8px;font-size:var(--font-badge);color:var(--text-secondary);margin-bottom:10px;min-height:28px}
 .pg-switch input[type=checkbox]{cursor:pointer;accent-color:var(--accent);width:18px;height:18px;flex-shrink:0}
+/* Auto Chat / Director model rows: the pill buttons should not stretch the row height */
+.pg-panel .pg-param-row .pg-model-btn{height:32px;box-sizing:border-box}
+.pg-autochat-actions{display:flex;gap:8px;flex-wrap:wrap}
+.pg-autochat-panel .pg-param-row input[type="number"],
+.pg-director-panel .pg-param-row input[type="number"]{height:32px;box-sizing:border-box}
 
 /* System prompt textarea */
 .pg-system-prompt{width:100%;min-height:54px;max-height:120px;padding:8px 10px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-badge);font-family:inherit;resize:vertical}

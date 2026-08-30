@@ -679,7 +679,7 @@ function pgRenderSidebar() {
           '<textarea style="width:100%;height:60px;font-family:monospace;font-size:11px;resize:vertical;" placeholder="' + pgEscapeHtml(pgT('pgResponseSchemaPlaceholder')) + '" oninput="pgOnParam(\'responseSchema\', this.value)"' + (!en.responseSchema || customMode ? ' disabled' : '') + '>' + pgEscapeHtml(cfg.responseSchema || '') + '</textarea>' +
         '</div>'
       ) : '') +
-      '<div class="pg-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><label for="pg-stream">' + pgEscapeHtml(pgT('pgStream')) + '</label></div>';
+      '<div class="pg-switch"><label class="toggle-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><span class="toggle-slider"></span></label><span class="pg-switch-label">' + pgEscapeHtml(pgT('pgStream')) + '</span></div>';
   } else {
     params =
       paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
@@ -706,7 +706,7 @@ function pgRenderSidebar() {
         '<label>' + pgEscapeHtml(pgT('pgSeed')) + '</label>' +
         '<input type="text" placeholder="' + pgEscapeHtml(pgT('pgSeedPlaceholder')) + '" value="' + pgEscapeHtml(cfg.seed || '') + '" oninput="pgOnParam(\'seed\', this.value)"' + (!en.seed || customMode ? ' disabled' : '') + '>' +
       '</div>' +
-      '<div class="pg-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><label for="pg-stream">' + pgEscapeHtml(pgT('pgStream')) + '</label></div>';
+      '<div class="pg-switch"><label class="toggle-switch"><input type="checkbox" id="pg-stream" ' + (cfg.stream ? 'checked' : '') + ' onchange="pgOnParam(\'stream\', this.checked)"' + (customMode ? ' disabled' : '') + '><span class="toggle-slider"></span></label><span class="pg-switch-label">' + pgEscapeHtml(pgT('pgStream')) + '</span></div>';
   }
 
   // --- System prompt ---
@@ -734,7 +734,7 @@ function pgRenderSidebar() {
   var customErrLine = (!customValid && customErr) ? '<div class="pg-custom-error-msg">' + pgEscapeHtml(pgT('pgCustomJsonError', [customErr])) + '</div>' : '';
   var custom =
     '<div class="pg-custom-toolbar">' +
-      '<div class="pg-switch" style="margin-bottom:0"><input type="checkbox" id="pg-custombody-toggle" ' + (cfg.useCustomBody ? 'checked' : '') + ' onchange="pgOnParam(\'useCustomBody\', this.checked); pgRenderSidebar()"><label for="pg-custombody-toggle">' + pgEscapeHtml(pgT('pgUseCustomBody')) + '</label></div>' +
+      '<div class="pg-switch" style="margin-bottom:0"><label class="toggle-switch"><input type="checkbox" id="pg-custombody-toggle" ' + (cfg.useCustomBody ? 'checked' : '') + ' onchange="pgOnParam(\'useCustomBody\', this.checked); pgRenderSidebar()"><span class="toggle-slider"></span></label><span class="pg-switch-label">' + pgEscapeHtml(pgT('pgUseCustomBody')) + '</span></div>' +
       customStatus +
     '</div>' +
     customWarning +
@@ -746,7 +746,7 @@ function pgRenderSidebar() {
   // --- Custom Endpoint ---
   var customEp =
     '<div class="pg-custom-toolbar">' +
-      '<div class="pg-switch" style="margin-bottom:0"><input type="checkbox" id="pg-customep-toggle" ' + (cfg.useCustomEndpoint ? 'checked' : '') + ' onchange="pgOnParam(\'useCustomEndpoint\', this.checked); pgRenderSidebar()"><label for="pg-customep-toggle">' + pgEscapeHtml(pgT('pgUseCustomEndpoint')) + '</label></div>' +
+      '<div class="pg-switch" style="margin-bottom:0"><label class="toggle-switch"><input type="checkbox" id="pg-customep-toggle" ' + (cfg.useCustomEndpoint ? 'checked' : '') + ' onchange="pgOnParam(\'useCustomEndpoint\', this.checked); pgRenderSidebar()"><span class="toggle-slider"></span></label><span class="pg-switch-label">' + pgEscapeHtml(pgT('pgUseCustomEndpoint')) + '</span></div>' +
     '</div>' +
     (cfg.useCustomEndpoint ? '<div class="pg-custom-ep-hint">' + pgEscapeHtml(pgT('pgCustomEndpointHint')) + '</div>' : '') +
     '<div class="pg-custom-ep-fields"' + (cfg.useCustomEndpoint ? '' : ' style="display:none"') + '>' +
@@ -774,55 +774,33 @@ function pgRenderSidebar() {
     '<div class="pg-panel pg-autochat-panel">' +
       '<div class="pg-panel-title">' + pgEscapeHtml(pgT('pgAutoChat')) + '</div>' +
       '<div class="pg-autochat-config">' +
-        '<div class="pg-param-row">' +
-          '<label>' + pgEscapeHtml(pgT('pgAutoChatIterations')) + '</label>' +
-          '<input type="number" min="0" value="' + pgState.autoChat.iterations + '" onchange="pgAutoChatSetIterations(this.value)">' +
+        '<div class="pg-panel-section">' +
+          '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgAutoChatIterations')) + '</label><input type="number" class="input" style="width:92px;height:32px;text-align:center" min="0" value="' + pgState.autoChat.iterations + '" onchange="pgAutoChatSetIterations(this.value)"></div>' +
+          '<div class="pg-autochat-hint" id="pg-autochat-iterations-hint" style="margin-top:4px">' + (pgState.autoChat.iterations === 0 ? pgEscapeHtml(pgT('pgAutoChatInfiniteWarn')) : '') + '</div>' +
         '</div>' +
-        '<div class="pg-autochat-hint" id="pg-autochat-iterations-hint">' + (pgState.autoChat.iterations === 0 ? pgEscapeHtml(pgT('pgAutoChatInfiniteWarn')) : '') + '</div>' +
-        '<div class="pg-param-row">' +
-          '<label>' + pgEscapeHtml(pgT('pgAutoChatUserName')) + '</label>' +
-          '<input type="text" value="' + pgEscapeHtml(pgState.autoChat.userName || 'User') + '" oninput="pgAutoChatSetUserName(this.value)">' +
+        '<div class="pg-panel-section">' +
+          '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('pgAutoChatUserName')) + '</label><input type="text" class="input" style="flex:1;min-width:0;height:32px" value="' + pgEscapeHtml(pgState.autoChat.userName || 'User') + '" oninput="pgAutoChatSetUserName(this.value)"></div>' +
+          '<div class="pg-param-row" style="margin-top:8px"><label>' + pgEscapeHtml(pgT('pgAutoChatDelay')) + '</label><input type="number" class="input" style="width:92px;height:32px;text-align:center" min="0" step="0.5" value="' + pgState.autoChat.delaySeconds + '" onchange="pgAutoChatSetDelay(this.value)"></div>' +
+          '<div class="pg-autochat-hint" style="margin-top:4px">' + pgEscapeHtml(pgT('pgAutoChatDelayHint')) + '</div>' +
         '</div>' +
-        '<div class="pg-param-row">' +
-          '<label>' + pgEscapeHtml(pgT('pgAutoChatDelay')) + '</label>' +
-          '<input type="number" min="0" step="0.5" value="' + pgState.autoChat.delaySeconds + '" onchange="pgAutoChatSetDelay(this.value)">' +
-        '</div>' +
-        '<div class="pg-autochat-hint">' + pgEscapeHtml(pgT('pgAutoChatDelayHint')) + '</div>' +
       '</div>' +
       '<div class="pg-autochat-actions">' +
-        '<button class="pg-btn danger' + (pgState.autoChat.isRunning ? ' running' : '') + '" onclick="pgAutoChatStop()" id="pg-autochat-stop-btn">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>' +
-        '<button class="pg-btn" onclick="pgOpenGroupChatModal()">' + pgEscapeHtml(pgT('pgAutoChatOpenGroup')) + '</button>' +
-        '<button class="pg-btn" onclick="if(typeof pgOpenSetupWizard===\'function\') pgOpenSetupWizard()">' + pgEscapeHtml(pgT('Scenario Setup')) + '</button>' +
+        '<button class="btn btn-ghost danger' + (pgState.autoChat.isRunning ? ' running' : '') + '" onclick="pgAutoChatStop()" id="pg-autochat-stop-btn" style="height:32px">' + pgEscapeHtml(pgT('pgAutoChatStop')) + '</button>' +
+        '<button class="btn btn-ghost" onclick="pgOpenGroupChatModal()" style="height:32px">' + pgEscapeHtml(pgT('pgAutoChatOpenGroup')) + '</button>' +
+        '<button class="btn btn-ghost" onclick="if(typeof pgOpenSetupWizard===\'function\') pgOpenSetupWizard()" style="height:32px">' + pgEscapeHtml(pgT('Scenario Setup')) + '</button>' +
       '</div>' +
     '</div>' +
     // --- Director panel ---
     '<div class="pg-panel pg-director-panel">' +
-      '<div class="pg-panel-title">' + pgEscapeHtml(pgT('Director')) + '</div>' +
-      '<div class="pg-param-row">' +
-        '<label>' + pgEscapeHtml(pgT('Director Enable')) + '</label>' +
-        '<input type="checkbox" id="pg-director-enable"' + (pgState.autoChat.director.enabled ? ' checked' : '') + ' onchange="pgDirectorToggle(this.checked)">' +
-      '</div>' +
-       '<div class="pg-param-row">' +
-         '<label>' + pgEscapeHtml(pgT('Director Model')) + '</label>' +
-         '<button class="pg-btn pg-model-btn" onclick="pgOpenModelPicker(pgState.autoChat.director.directorModel, function(v){ pgDirectorSetDirectorModel(v); pgRenderSidebar(); }, {allowEmpty:true})" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(pgState.autoChat.director.directorModel || pgT('Default (first window model)')) + ' <span style="float:right;opacity:0.5">▼</span></button>' +
-       '</div>' +
-       '<div class="pg-param-row">' +
-         '<label>' + pgEscapeHtml(pgT('Narrator Model')) + '</label>' +
-         '<button class="pg-btn pg-model-btn" onclick="pgOpenModelPicker(pgState.autoChat.director.narratorModel, function(v){ pgDirectorSetNarratorModel(v); pgRenderSidebar(); }, {allowEmpty:true})" style="width:100%;text-align:left;justify-content:flex-start">' + pgEscapeHtml(pgState.autoChat.director.narratorModel || pgT('Default (first window model)')) + ' <span style="float:right;opacity:0.5">▼</span></button>' +
-       '</div>' +
-      '<div class="pg-param-row">' +
-        '<label>' + pgEscapeHtml(pgT('Every N Replies')) + '</label>' +
-        '<input type="number" min="1" value="' + pgState.autoChat.director.everyNReplies + '" onchange="pgDirectorSetEveryNReplies(this.value)">' +
-      '</div>' +
-      '<div class="pg-param-row">' +
-        '<label>' + pgEscapeHtml(pgT('Max Narrations')) + '</label>' +
-        '<input type="number" min="0" value="' + pgState.autoChat.director.maxNarrations + '" onchange="pgDirectorSetMaxNarrations(this.value)">' +
-        '<span class="pg-autochat-hint" style="margin-left:4px">' + pgEscapeHtml(pgT('0 = ∞')) + '</span>' +
-      '</div>' +
+      '<div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('Director')) + '</span><label class="toggle-switch" data-tooltip="' + pgEscapeHtml(pgT('Director Enable')) + '"><input type="checkbox" id="pg-director-enable"' + (pgState.autoChat.director.enabled ? ' checked' : '') + ' onchange="pgDirectorToggle(this.checked)"><span class="toggle-slider"></span></label></div>' +
+      '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('Director Model')) + '</label><button class="input pg-model-btn" onclick="pgOpenModelPicker(pgState.autoChat.director.directorModel, function(v){ pgDirectorSetDirectorModel(v); pgRenderSidebar(); }, {allowEmpty:true})" style="flex:1;min-width:0;text-align:left;display:flex;justify-content:space-between;align-items:center;cursor:pointer;height:32px">' + pgEscapeHtml(pgState.autoChat.director.directorModel || pgT('Default (first window model)')) + ' <span style="opacity:0.5">▼</span></button></div>' +
+      '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('Narrator Model')) + '</label><button class="input pg-model-btn" onclick="pgOpenModelPicker(pgState.autoChat.director.narratorModel, function(v){ pgDirectorSetNarratorModel(v); pgRenderSidebar(); }, {allowEmpty:true})" style="flex:1;min-width:0;text-align:left;display:flex;justify-content:space-between;align-items:center;cursor:pointer;height:32px">' + pgEscapeHtml(pgState.autoChat.director.narratorModel || pgT('Default (first window model)')) + ' <span style="opacity:0.5">▼</span></button></div>' +
+      '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('Every N Replies')) + '</label><input type="number" class="input" style="width:92px;height:32px;text-align:center" min="1" value="' + pgState.autoChat.director.everyNReplies + '" onchange="pgDirectorSetEveryNReplies(this.value)"></div>' +
+      '<div class="pg-param-row"><label>' + pgEscapeHtml(pgT('Max Narrations')) + '</label><input type="number" class="input" style="width:92px;height:32px;text-align:center" min="0" value="' + pgState.autoChat.director.maxNarrations + '" onchange="pgDirectorSetMaxNarrations(this.value)"><span class="pg-autochat-hint" style="margin-left:6px">' + pgEscapeHtml(pgT('0 = ∞')) + '</span></div>' +
     '</div>' +
     '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgAutoChatAgentName')) + '</div>' +
-      '<input type="text" class="pg-agent-name" placeholder="' + pgEscapeHtml(pgT('pgAutoChatAgentNamePlaceholder')) + '" value="' + pgEscapeHtml(cfg.agentName || '') + '" oninput="pgOnAgentName(this.value)">' +
-      '<div class="pg-param-row" style="margin-top:8px"><label>' + pgEscapeHtml(pgT('pgContextLimit')) + '</label><input type="number" min="1000" step="1000" value="' + (cfg.contextLimit || 8000) + '" onchange="pgOnContextLimit(this.value)"></div>' +
+      '<input type="text" class="input pg-agent-name" style="width:100%;height:32px;box-sizing:border-box" placeholder="' + pgEscapeHtml(pgT('pgAutoChatAgentNamePlaceholder')) + '" value="' + pgEscapeHtml(cfg.agentName || '') + '" oninput="pgOnAgentName(this.value)">' +
+      '<div class="pg-param-row" style="margin-top:8px"><label>' + pgEscapeHtml(pgT('pgContextLimit')) + '</label><input type="number" class="input" style="width:92px;height:32px;text-align:center" min="1000" step="1000" value="' + (cfg.contextLimit || 8000) + '" onchange="pgOnContextLimit(this.value)"></div>' +
     '</div>'
   ) : '';
 
@@ -908,7 +886,7 @@ function pgRenderImageBlock(customMode) {
     });
   }
   return '<div class="pg-image-block' + (en ? '' : ' disabled') + '">' +
-    '<div class="pg-switch"><input type="checkbox" id="pg-imgenable" ' + (cfg.imageEnabled ? 'checked' : '') + ' onchange="pgOnParam(\'imageEnabled\', this.checked); pgRenderSidebar()"' + (customMode ? ' disabled' : '') + '><label for="pg-imgenable">' + pgEscapeHtml(pgT('pgImageEnable')) + '</label>' +
+    '<div class="pg-switch"><label class="toggle-switch"><input type="checkbox" id="pg-imgenable" ' + (cfg.imageEnabled ? 'checked' : '') + ' onchange="pgOnParam(\'imageEnabled\', this.checked); pgRenderSidebar()"' + (customMode ? ' disabled' : '') + '><span class="toggle-slider"></span></label><span class="pg-switch-label">' + pgEscapeHtml(pgT('pgImageEnable')) + '</span>' +
       '<button class="pg-image-add" onclick="pgAddImageUrl()" ' + (en ? '' : 'disabled') + ' data-tooltip="' + pgEscapeHtml(pgT('pgImageAdd')) + '">+</button>' +
     '</div>' +
     (rows || '') +

@@ -498,19 +498,20 @@
 .ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:10px;padding:0}
 /* Demo toolbar: always single row. When narrow, items shrink gracefully
    instead of wrapping to a second line (wrap caused #2's first-entry 2-line). */
-.demo-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;overflow:hidden;width:100%;min-height:36px;min-width:0}
-.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:6px;flex:1;min-width:0;flex-wrap:nowrap;overflow:hidden}
+.demo-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;overflow:hidden;width:100%;min-height:36px;min-width:0;align-content:center}
+/* Single-row guarantee: fields row is a single flex line; children compress via min-width:0. */
+.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:hidden}
 .dg-toolbar-fields[hidden]{display:none !important}
 .ademo-toolbar-fields[hidden]{display:none !important}
-.ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 1 auto;min-width:0}
-.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:160px}
-.ademo-bgmode-wrap .custom-select-wrapper{flex:1 1 auto;min-width:80px;max-width:150px}
+.ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 1 auto;min-width:0;display:flex;align-items:center}
+.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:150px}
+.ademo-bgmode-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:145px}
 .ademo-toolbar .custom-select-wrapper{flex:1 1 auto;min-width:0}
 .ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px;flex-shrink:0}
-.ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
-.ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap;flex:0 1 auto;min-width:0}
-.ademo-scaleto{width:72px;max-width:120px;flex:1 1 72px;min-width:48px;height:32px;padding:0 8px;font-size:12px;box-sizing:border-box}
-.ademo-scale{width:100px;min-width:60px;flex:1 1 100px;accent-color:var(--accent)}
+.ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap;flex-shrink:0;line-height:32px}
+.ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap;flex:0 1 auto;min-width:0;height:32px;box-sizing:border-box}
+.ademo-scaleto{width:64px;max-width:92px;flex:0 1 64px;min-width:44px;height:32px;padding:0 8px;font-size:12px;box-sizing:border-box}
+.ademo-scale{width:88px;min-width:56px;flex:0 1 88px;accent-color:var(--accent);height:4px;align-self:center;display:block}
 .ademo-body-sq{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
 .ademo-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm);margin-left:auto}
 /* push fullscreen to far right */

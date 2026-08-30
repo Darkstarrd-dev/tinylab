@@ -425,7 +425,19 @@ function dgSyncUi() {
   var running = !!dgCurrent;
   if (dgUi.stageWrap) dgUi.stageWrap.hidden = !running;
   var tf = document.querySelector('.dg-toolbar-fields');
-  if (tf) tf.hidden = false; // always visible when Games tab active; parent shell hidden controls it
+  if (tf) {
+    // Respect Assistant Demo tab: only show Games toolbar fields when Games tab is active.
+    var isGames = false;
+    try {
+      if (typeof ademoActiveTab !== 'undefined') isGames = ademoActiveTab === 'games';
+      else if (window.__ademo && typeof window.__ademo.activeTab === 'function') isGames = window.__ademo.activeTab() === 'games';
+      else {
+        var gp = document.querySelector('.demo-pane-games');
+        isGames = gp ? !gp.hidden : true;
+      }
+    } catch (e) {}
+    tf.hidden = !isGames;
+  }
   if (dgUi.stopBtn) dgUi.stopBtn.disabled = !running;
   if (dgUi.launchBtn) dgUi.launchBtn.disabled = running || !dgGames.length;
   if (dgUi.select) dgUi.select.disabled = running;

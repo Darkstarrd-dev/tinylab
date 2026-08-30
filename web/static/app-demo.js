@@ -102,6 +102,15 @@ function renderDemoWithMenu(container) {
   if (!demoActiveTool || !demoHasTool(demoActiveTool)) {
     demoActiveTool = 'ademo';
   }
+  // Guard double-shell: if container already has a .demo-shell (hot-reload /
+  // concurrent navigateTo), remove it before re-rendering so toolbars don't stack.
+  var stale = container.querySelector('.demo-shell');
+  if (stale) {
+    try { stale.remove(); } catch (e) { stale.parentNode && stale.parentNode.removeChild(stale); }
+    // Also clean up previous ademo state (RAF, listeners).
+    try { if (typeof cleanupAssistantDemo === 'function') cleanupAssistantDemo(); } catch (e2) {}
+    try { if (typeof cleanupDemoGames === 'function') cleanupDemoGames(); } catch (e3) {}
+  }
   updateDemoNavLabel();
   updateDemoMenuState();
   if (demoActiveTool === 'design' && typeof GameDesigner !== 'undefined' && typeof GameDesigner.render === 'function') {
@@ -121,4 +130,6 @@ function renderDemoWithMenu(container) {
   if (typeof renderDemoGames === 'function') {
     try { renderDemoGames(container); } catch(e){ console.error('renderDemoGames failed', e); }
   }
+  // Ensure panes are exclusive on first paint (before any tab click).
+  try { if (typeof ademoSyncShellTabs === 'function') ademoSyncShellTabs(); } catch (e4) {}
 }
