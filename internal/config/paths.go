@@ -122,3 +122,22 @@ func ResolveMusicDir(musicDir, configDir string) string {
 	}
 	return filepath.Join(configDir, musicDir)
 }
+
+// ResolveAssistantDir resolves the assistant data directory. An empty dir
+// falls back to {configDir}/assistant (or "assistant" if configDir is empty);
+// a relative path is joined with configDir; an absolute path is used verbatim.
+func ResolveAssistantDir(dir, configDir string) string {
+	if dir == "" {
+		if configDir == "" {
+			return "assistant"
+		}
+		return filepath.Join(configDir, "assistant")
+	}
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, dir)
+	}
+	return dir
+}

@@ -1026,6 +1026,7 @@ function assistantAddPresetBundle() {
   presets.push({ name: name, actions: [] });
   window.__assistantPresetSel = name;
   renderAssistantPresetBar();
+  try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', name); } catch (e) {}
 }
 
 function assistantApplyPresetBundle() {
@@ -1068,12 +1069,14 @@ function assistantSaveCurrentAsPreset() {
     window.__assistantPresetSel = presets[i].name;
     renderAssistantPresetBar();
     toast(t('assistantPresetSaved') || 'Preset saved', 'success');
+    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('update', presets[i].name); } catch (e) {}
     return;
   }
   presets.push({ name: name, actions: snap });
   window.__assistantPresetSel = name;
   renderAssistantPresetBar();
   toast(t('assistantPresetSaved') || 'Preset saved', 'success');
+  try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', name); } catch (e2) {}
 }
 
 function assistantRemovePresetBundle() {
@@ -1091,10 +1094,12 @@ function assistantRemovePresetBundle() {
       try { ok = confirm(t('assistantPresetRemoveConfirm', [presets[i].name]) || ('Remove preset \"' + presets[i].name + '\"?')); } catch(eC2) { ok = true; }
     }
     if (!ok) return;
+    var removedName = presets[i].name;
     presets.splice(i, 1);
     window.__assistantPresetSel = '';
     renderAssistantPresetBar();
     toast(t('assistantPresetRemoved') || 'Preset removed', 'success');
+    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('remove', removedName); } catch (e3) {}
     return;
   }
 }

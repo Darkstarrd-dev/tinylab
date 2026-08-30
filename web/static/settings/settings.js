@@ -112,6 +112,36 @@ async function renderEndpoint(c) {
   ThemeSystem.initFromSettings(settings);
 }
 
+// Pet window "close" writes localStorage 'assistant-enabled=false' (best-effort).
+// Settings page is a different window/origin partition, so listen for
+// storage + window focus to re-render.
+(function assistantCloseSync() {
+  function syncToggleOff() {
+    try {
+      if (localStorage.getItem('assistant-enabled') !== 'false') return;
+      localStorage.removeItem('assistant-enabled');
+      if (window.__settings && window.__settings.assistant) {
+        window.__settings.assistant.enabled = false;
+      }
+      var t = document.getElementById('assistant-toggle');
+      if (t) t.checked = false;
+    } catch (e) {}
+  }
+  window.addEventListener('storage', function(e) {
+    if (e.key === 'assistant-enabled' && e.newValue === 'false') syncToggleOff();
+  });
+  // Also on focus, in case the event was missed (same-tab nav / no storage event).
+  window.addEventListener('focus', syncToggleOff);
+  // Custom event path for same-window listeners (optional).
+  window.addEventListener('assistant-switch', function(e) {
+    try {
+      if (e && e.detail && e.detail.enabled === false) {
+        localStorage.removeItem('assistant-enabled');
+      }
+    } catch (ex) {}
+  });
+})();
+
 // Collapsed Settings sections persist across re-renders (renderEndpoint re-runs
 // on every combo/quickslot/provider toggle).
 var collapsedSettingsSections = new Set();

@@ -102,24 +102,45 @@ function openAssistantModal() {
       mirror: !!x.mirror
     };
   });
-  // Presets draft: persisted bundles (AssistantPreset[]).
-  window.__assistantPresets = (a.presets || []).map(function(p) {
-    return {
-      name: p.name || '',
-      actions: (p.actions || []).map(function(x) {
-        return {
-          name: x.name || '',
-          spritesheetPath: x.spritesheetPath || '',
-          cols: x.cols || 1,
-          rows: x.rows || 1,
-          frameStart: x.frameStart || 0,
-          frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0),
-          fps: x.fps || 8,
-          mirror: !!x.mirror
-        };
-      })
-    };
-  });
+  // Assistant presets (sprite animations) are now aliases into the inner
+  // model-presets store ({configDir}/assistant/model-presets.json). Load
+  // them synchronously from that store when available so outer and inner
+  // see the same list. Fall back to legacy assistant.presets from config.
+  var inner = null;
+  try {
+    if (typeof __assistantMSLoadForOuter === 'function') {
+      var cached = __assistantMSLoadForOuter();
+      if (cached && Array.isArray(cached.presets) && cached.presets.length) inner = cached;
+    }
+  } catch (eOuter) {}
+  if (inner) {
+    window.__assistantPresets = inner.presets.map(function(p) {
+      return { name: p.name || '', actions: (p.actions || []).map(function(x) {
+        return { name: x.name || '', spritesheetPath: x.spritesheetPath || '', cols: x.cols || 1, rows: x.rows || 1, frameStart: x.frameStart || 0, frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0), fps: x.fps || 8, mirror: !!x.mirror };
+      })};
+    });
+    window.__assistantPresetSel = inner.active || (inner.presets[0] ? inner.presets[0].name : '');
+    window.__assistantMSOuterBound = true;
+  } else {
+    window.__assistantPresets = (a.presets || []).map(function(p) {
+      return {
+        name: p.name || '',
+        actions: (p.actions || []).map(function(x) {
+          return {
+            name: x.name || '',
+            spritesheetPath: x.spritesheetPath || '',
+            cols: x.cols || 1,
+            rows: x.rows || 1,
+            frameStart: x.frameStart || 0,
+            frameEnd: (x.frameEnd !== undefined ? x.frameEnd : 0),
+            fps: x.fps || 8,
+            mirror: !!x.mirror
+          };
+        })
+      };
+    });
+    window.__assistantMSOuterBound = false;
+  }
   openSettingsModal(t('assistantSettings'),
     '<p class="muted">' + escapeHtml(t('assistantSettingsDesc')) + '</p>\
     <div class="form-group" style="margin-top:16px"><label>' + escapeHtml(t('assistantModel')) + '</label>\
@@ -127,6 +148,9 @@ function openAssistantModal() {
       escapeHtml(a.model || t('assistantKeywordFallback')) + ' <span style="opacity:0.5">▼</span></button>\
       <input type="hidden" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '">\
       <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
+    </div>\
+    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantModelSettings')) + '</label>\
+      <button type="button" class="btn btn-ghost" onclick="openAssistantModelSettings()" style="width:100%">' + escapeHtml(t('assistantModelSettingsOpen')) + '</button>\
     </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantDebug')) + '</label>      <label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantDebugDesc')) + '</p>    </div>\
     <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantPreset') || 'Assistant Preset') + '</label>\
@@ -383,12 +407,14 @@ async function saveAssistantModal() {
   var debug = !!(dbgEl && dbgEl.checked);
   try {
     await apiPatch('/settings', { assistant: { model: model, actions: actions, presets: presets, debug: debug } });
+    if (window.__assistantMSOuterBound) { try { if (typeof __assistantMSSyncFromOuter === 'function') await __assistantMSSyncFromOuter(presets); } catch(e2){} }
     if (window.__settings) {
       window.__settings.assistant = Object.assign({}, window.__settings.assistant, { model: model, actions: actions, presets: presets, debug: debug });
     }
     window.__assistantActions = null;
     window.__assistantPresets = null;
     window.__assistantPresetSel = '';
+    window.__assistantMSOuterBound = false;
     toast(t('assistantSaved'), 'success');
     closeModalOverlay();
   } catch (e) {

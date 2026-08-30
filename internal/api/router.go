@@ -114,6 +114,51 @@ func New(reg *registry.Registry, cfg *config.Config, configPath string, usageBuf
 	events := assistantapi.NewEventBroadcaster()
 	todos := assistantapi.NewTodoStore()
 	astHandler := assistantapi.NewHandler(nil, nil, contract, events, todos)
+	// Per-preset assistant persona + memory (separate from config.yaml, under {configDir}/assistant/).
+	assistantDir := config.ResolveAssistantDir("", filepath.Dir(configPath))
+	presetStore := assistant.LoadPresets(filepath.Join(assistantDir, "model-presets.json"))
+	chatSessions := assistant.NewChatSessions()
+	memMgr := &assistant.MemoryManager{
+		Dir:  filepath.Join(assistantDir, "memory"),
+		Idle: 10 * time.Minute,
+	}
+	memMgr.History = chatSessions.Get
+	memMgr.Logf = func(format string, args ...any) {
+		if logger != nil {
+			logger.Warn(format, args...)
+		}
+	}
+	memMgr.Summarize = func(ctx context.Context, preset assistant.ModelPreset, transcript, existing string) (string, error) {
+		// Resolve model: per-preset override → main assistant.model.
+		model := preset.MemoryModel
+		if model == "" && reg != nil {
+			model = reg.Config().Assistant.Model
+		}
+		if model == "" {
+			return "", fmt.Errorf("no model for summarization")
+		}
+		// Resolve addr from live config port.
+		port := 0
+		if reg != nil {
+			port = reg.Config().Port
+		}
+		if port <= 0 {
+			port = 20128
+		}
+		addr := fmt.Sprintf("http://127.0.0.1:%d", port)
+		msgs := []assistant.ChatMessage{
+			{Role: "system", Content: assistant.SummarizeSystemPrompt},
+			{Role: "user", Content: "【既有记忆】\n" + func() string {
+				if strings.TrimSpace(existing) == "" {
+					return "（空）"
+				}
+				return existing
+			}() + "\n\n【新对话记录】\n" + transcript},
+		}
+		client := &assistant.ChatClient{Addr: addr, Model: model}
+		return client.Chat(ctx, msgs, nil)
+	}
+	astHandler.SetChatDeps(presetStore, memMgr, chatSessions)
 
 	rt := &Router{
 		deps: deps{

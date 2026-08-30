@@ -178,6 +178,7 @@ if (miClose) miClose.addEventListener('click', function () {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assistant: { enabled: false } })
     }).catch(function () {});
+    try { localStorage.setItem('assistant-enabled', 'false'); } catch (e2) {}
   } catch (e) {}
   petPost({ type: 'close' });
 });
@@ -499,6 +500,32 @@ function sendPetIntent() {
   input.value = '';
   hidePetInput();
 
+  // When a model is configured, chat via /api/assistant/chat; otherwise dispatch.
+  if (window.__petAssistantModel) {
+    setBubbleMsg('思考中...');
+    if (window.petSM) petSM.dispatch('think');
+    fetch('/api/assistant/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, d: d }; }); })
+    .then(function(r) {
+      if (r.ok && r.d.reply) {
+        setBubbleMsg(r.d.reply);
+        if (window.petSM) petSM.dispatch('reply');
+      } else {
+        setBubbleMsg('出错了: ' + ((r.d && r.d.error) || 'unknown'));
+        if (window.petSM) petSM.dispatch('error');
+      }
+    })
+    .catch(function(err) {
+      setBubbleMsg('请求失败: ' + err.message);
+      if (window.petSM) petSM.dispatch('error');
+    });
+    return;
+  }
+
   setBubbleMsg('正在分析意图...');
   if (window.petSM) petSM.dispatch('think');
   fetch('/api/assistant/dispatch', {
@@ -528,6 +555,7 @@ function sendPetIntent() {
 // served by /api/assistant/sheet-image/{name} (no filesystem access needed).
 (function loadPetActions() {
   fetch('/api/settings').then(function (r) { return r.json(); }).then(function (s) {
+    window.__petAssistantModel = ((s && s.assistant) || {}).model || '';
     var actions = ((s && s.assistant) || {}).actions || [];
     actions.forEach(function (a) {
       if (!a || !a.spritesheetPath || !a.name) return;

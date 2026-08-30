@@ -53,6 +53,10 @@ type Handler struct {
 	events   *EventBroadcaster
 	todos    *TodoStore
 	llm      intentClassifier // injectable for tests; nil → config-built real classifier
+	presets  *assistant.PresetStore
+	memory   *assistant.MemoryManager
+	sessions *assistant.ChatSessions
+	chatAddr func() string // injectable for tests; nil → derive from cfg.Port
 	mu       sync.RWMutex
 }
 
@@ -93,6 +97,23 @@ func (h *Handler) SetDeps(d *apibase.Deps) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.d = d
+}
+
+// SetChatDeps wires the per-preset chat/model-preset deps. Preserves the
+// mirror of SetDeps/SetAssistant setter pattern so NewHandler signature stays stable.
+func (h *Handler) SetChatDeps(presets *assistant.PresetStore, memory *assistant.MemoryManager, sessions *assistant.ChatSessions) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.presets = presets
+	h.memory = memory
+	h.sessions = sessions
+}
+
+// SetChatAddr overrides the loopback addr derivation for tests.
+func (h *Handler) SetChatAddr(fn func() string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.chatAddr = fn
 }
 
 // SetAssistant updates the live Assistant instance while preserving existing scheduler state.

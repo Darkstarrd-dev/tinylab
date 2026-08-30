@@ -524,18 +524,23 @@ function renderStepperHtml(id, value, min, max, step, extraStyle, onchangeAttrSt
 function changeStepper(id, delta) {
   var input = document.getElementById(id);
   if (!input) return;
-  var min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : null;
-  var max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : null;
-  var hasVal = input.value !== '' && input.value !== null && !isNaN(parseInt(input.value, 10));
+  var minStr = input.getAttribute('min');
+  var maxStr = input.getAttribute('max');
+  var min = minStr !== null && minStr !== '' ? parseFloat(minStr) : null;
+  var max = maxStr !== null && maxStr !== '' ? parseFloat(maxStr) : null;
+  var stepStr = input.getAttribute('step');
+  var isDecimalStep = stepStr && stepStr.indexOf('.') >= 0;
+  var hasVal = input.value !== '' && input.value !== null && !isNaN(parseFloat(input.value));
   var step = delta || 1;
-  var val = hasVal ? parseInt(input.value, 10) : (step > 0 && min !== null && min > 0 ? min - step : 0);
+  var val = hasVal ? parseFloat(input.value) : (step > 0 && min !== null && min > 0 ? min - step : 0);
   var newVal = val + step;
+  if (isDecimalStep) newVal = Math.round(newVal * 10) / 10;
   if (input.hasAttribute('placeholder') && min !== null && newVal < min) {
     input.value = '';
   } else {
     if (min !== null && newVal < min) newVal = min;
     if (max !== null && newVal > max) newVal = max;
-    input.value = newVal;
+    input.value = isDecimalStep ? newVal.toFixed(1).replace(/\.0$/, '') : String(newVal).replace(/\.0$/, '');
   }
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
