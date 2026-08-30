@@ -495,21 +495,22 @@
 .demo-pane-ademo,.demo-pane-games{display:flex;flex-direction:column;flex:1;min-height:0}
 .demo-pane-ademo[hidden],.demo-pane-games[hidden]{display:none !important}
 
-.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;padding:0}
-/* Demo toolbar is now the single row at shell top (blue 1+2 merged) */
-.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%;min-height:36px}
-.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:10px;padding:0}
+/* Demo toolbar: allow wrap on narrow viewports so controls never overlap/overflow;
+   row gap keeps stacked lines tidy. */
+.demo-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;overflow:visible;width:100%;min-height:36px;row-gap:8px}
+.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-wrap:wrap}
 .dg-toolbar-fields[hidden]{display:none !important}
 .ademo-toolbar-fields[hidden]{display:none !important}
 .ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 0 auto}
 .ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{min-width:92px}
 .ademo-bgmode-wrap .custom-select-wrapper{min-width:110px;max-width:160px}
 .ademo-toolbar .custom-select-wrapper{flex:0 0 auto}
-.ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px}
+.ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px;flex-shrink:0}
 .ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .ademo-scale-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
-.ademo-scaleto{width:64px;padding:3px 6px;font-size:12px;height:auto}
-.ademo-scale{width:110px}
+.ademo-scaleto{width:72px;height:32px;padding:0 8px;font-size:12px;box-sizing:border-box}
+.ademo-scale{width:120px;accent-color:var(--accent)}
 .ademo-body-sq{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm)}
 .ademo-fs-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:var(--radius-sm);margin-left:auto}
 /* push fullscreen to far right */
@@ -541,8 +542,8 @@ body.demo-stage-fullscreen{overflow:hidden}
 /* ===================== Demo Games plugin section (F6, below testbed) ===================== */
 /* Now rendered inside .demo-pane-games; the shell tabs make only one pane
    visible at a time, reclaiming the previous split-page space. */
-.dg-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:8px;box-sizing:border-box}
-.dg-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:0;overflow:visible}
+.dg-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:10px;box-sizing:border-box}
+.dg-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;overflow:visible;row-gap:8px}
 .dg-title{font-weight:700;font-size:14px;margin-right:4px}
 .dg-select{min-width:180px}
 .dg-status{font-size:12px;color:var(--text-muted);white-space:nowrap}

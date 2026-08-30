@@ -375,43 +375,50 @@
       return;
     }
     if (!selectedModel) { toastError(tstr('designerAiNoModel', 'Select a model first')); return; }
-    var prompt = window.prompt(isSel ? tstr('designerAiPromptSel', 'Instruction for selected text:') : tstr('designerAiPrompt', 'AI prompt:'), '');
-    if (prompt === null) return;
-    prompt = String(prompt).trim();
-    if (!prompt) { toastInfo(tstr('designerAiEmpty', 'Prompt is empty')); return; }
-    var msgs;
-    if (isSel) {
-      msgs = [
-        { role: 'system', content: '你是一个专业的代码与写作助手。只输出对【选中内容】按【用户指令】修改后的最终文本，不要附加解释。' },
-        { role: 'user', content: '【指令】\n' + prompt + '\n\n【选中内容】\n' + selText }
-      ];
-    } else {
-      msgs = [
-        { role: 'system', content: '你是一个智能助手。只输出按【用户指令】生成的最终文本。' },
-        { role: 'user', content: prompt }
-      ];
-    }
-    dgnStatus(tstr('demoGamesLoading', 'Loading…'));
-    fetch('/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: selectedModel, messages: msgs, stream: false }) })
-      .then(function (r) { if (!r.ok) throw new Error('AI ' + r.status); return r.json(); })
-      .then(function (data) {
-        var reply = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!reply) throw new Error('No content');
-        if (typeof global.EditorCommands !== 'undefined' && typeof global.EditorCommands.replaceSelection === 'function') {
-          global.EditorCommands.replaceSelection(ta, reply);
-        } else {
-          var before = ta.value.slice(0, selStart), after = ta.value.slice(isSel ? selEnd : selStart);
-          var inserted = reply;
-          ta.value = before + inserted + after;
-          var caret = before.length + inserted.length;
-          try { ta.selectionStart = ta.selectionEnd = caret; } catch (e2) {}
-        }
-        try { if (typeof global.EditorCommands !== 'undefined') global.EditorCommands.record && global.EditorCommands.record(ta); } catch (e3) {}
-        updateGutterInner(); updateStatusBar();
-        dgnStatus(tstr('designerAiDone', 'AI inserted'));
-        toastInfo(tstr('designerAiDone', 'AI inserted'));
-      })
-      .catch(function (err) { dgnStatus(tstr('designerPreviewError', 'Preview error') + ': ' + (err && err.message || err)); toastError(String(err && err.message || err)); });
+    var runWithPrompt = function(aiPrompt) {
+      aiPrompt = String(aiPrompt == null ? '' : aiPrompt).trim();
+      if (!aiPrompt) { toastInfo(tstr('designerAiEmpty', 'Prompt is empty')); return; }
+      var msgs;
+      if (isSel) {
+        msgs = [
+          { role: 'system', content: '你是一个专业的代码与写作助手。只输出对【选中内容】按【用户指令】修改后的最终文本，不要附加解释。' },
+          { role: 'user', content: '【指令】\n' + aiPrompt + '\n\n【选中内容】\n' + selText }
+        ];
+      } else {
+        msgs = [
+          { role: 'system', content: '你是一个智能助手。只输出按【用户指令】生成的最终文本。' },
+          { role: 'user', content: aiPrompt }
+        ];
+      }
+      dgnStatus(tstr('demoGamesLoading', 'Loading…'));
+      fetch('/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: selectedModel, messages: msgs, stream: false }) })
+        .then(function (r) { if (!r.ok) throw new Error('AI ' + r.status); return r.json(); })
+        .then(function (data) {
+          var reply = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+          if (!reply) throw new Error('No content');
+          if (typeof global.EditorCommands !== 'undefined' && typeof global.EditorCommands.replaceSelection === 'function') {
+            global.EditorCommands.replaceSelection(ta, reply);
+          } else {
+            var before = ta.value.slice(0, selStart), after = ta.value.slice(isSel ? selEnd : selStart);
+            var inserted = reply;
+            ta.value = before + inserted + after;
+            var caret = before.length + inserted.length;
+            try { ta.selectionStart = ta.selectionEnd = caret; } catch (e2) {}
+          }
+          try { if (typeof global.EditorCommands !== 'undefined') global.EditorCommands.record && global.EditorCommands.record(ta); } catch (e3) {}
+          updateGutterInner(); updateStatusBar();
+          dgnStatus(tstr('designerAiDone', 'AI inserted'));
+          toastInfo(tstr('designerAiDone', 'AI inserted'));
+        })
+        .catch(function (err) { dgnStatus(tstr('designerPreviewError', 'Preview error') + ': ' + (err && err.message || err)); toastError(String(err && err.message || err)); });
+    };
+    var titleKey = isSel ? tstr('designerAiPromptSel', 'Instruction for selected text:') : tstr('designerAiPrompt', 'AI prompt:');
+    if (typeof global.promptModal === 'function') { global.promptModal(titleKey, '', '').then(function(v){ if (v !== null) runWithPrompt(v); }); return; }
+    // Fallback when app-modal not loaded (e.g. isolated test): still use stacked style if available
+    if (typeof global.assistantPromptModal === 'function') { global.assistantPromptModal(titleKey, '', '').then(function(v){ if (v !== null) runWithPrompt(v); }); return; }
+    var promptVal = (typeof window.prompt === 'function' ? window.prompt(titleKey, '') : null);
+    if (promptVal === null) return;
+    runWithPrompt(promptVal);
   }
   function titleName() {
     if (dgn.current && dgn.current.fileId) {

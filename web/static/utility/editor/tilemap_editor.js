@@ -347,11 +347,12 @@
       m.layers.forEach(function(ly, idx){
         var row=document.createElement('div');
         row.className='tm-layer-row'+(idx===state.selectedLayer?' active':'');
-        row.innerHTML='<span class="tm-layer-name">'+escapeHtml(ly.name)+'</span>'
-          +'<label class="tm-layer-vis"><input type="checkbox" '+(ly.visible!==false?'checked':'')+' data-vis="'+idx+'"> vis</label>'
-          +'<input type="range" min="0" max="100" value="'+Math.round((ly.opacity==null?1:ly.opacity)*100)+'" data-op="'+idx+'" style="width:70px">'
-          +'<button data-up="'+idx+'" title="Up">↑</button><button data-down="'+idx+'" title="Down">↓</button>'
-          +'<button data-del="'+idx+'" title="Delete">×</button>';
+        row.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:'+(idx===state.selectedLayer?'var(--glass-hover)':'var(--glass-bg)')+';flex-wrap:wrap';
+        row.innerHTML='<span class="tm-layer-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12px">'+escapeHtml(ly.name)+'</span>'
+          +'<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);white-space:nowrap"><input type="checkbox" '+(ly.visible!==false?'checked':'')+' data-vis="'+idx+'"> vis</label>'
+          +'<input type="range" min="0" max="100" value="'+Math.round((ly.opacity==null?1:ly.opacity)*100)+'" data-op="'+idx+'" style="width:80px;accent-color:var(--accent)">'
+          +'<button class="btn btn-ghost" data-up="'+idx+'" title="Up" style="padding:0 8px;height:28px;min-width:28px">↑</button><button class="btn btn-ghost" data-down="'+idx+'" title="Down" style="padding:0 8px;height:28px;min-width:28px">↓</button>'
+          +'<button class="btn btn-ghost" data-del="'+idx+'" title="Delete" style="padding:0 8px;height:28px;min-width:28px;color:var(--danger)">×</button>';
         row.addEventListener('click', function(e){
           if(e.target.closest('button')||e.target.closest('input')) return;
           state.selectedLayer=idx; renderAll();
@@ -485,24 +486,24 @@
       +'<button id="tm-undo" class="btn btn-ghost" style="padding:4px 8px">Undo</button><button id="tm-redo" class="btn btn-ghost" style="padding:4px 8px">Redo</button>';
     root.appendChild(top);
     var cfg=document.createElement('div');
-    cfg.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text-muted)';
+    cfg.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);padding:8px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg)';
     cfg.innerHTML=
-      'W <input id="tm-w" type="number" min="1" max="256" style="width:64px;padding:4px 6px"> '
-      +'H <input id="tm-h" type="number" min="1" max="256" style="width:64px;padding:4px 6px"> '
-      +'TW <input id="tm-tw" type="number" min="8" max="256" style="width:64px;padding:4px 6px"> '
-      +'TH <input id="tm-th" type="number" min="8" max="256" style="width:64px;padding:4px 6px"> '
-      +'<button id="tm-resize" class="btn btn-ghost" style="padding:4px 8px">Resize</button>'
-      +'<span style="width:1px;height:18px;background:var(--glass-border);margin:0 4px"></span>'
-      +'Zoom <input id="tm-zoom" type="range" min="25" max="300" step="25" style="width:90px"> <span id="tm-zoom-label" style="min-width:36px;text-align:right">100%</span>'
-      +'<label style="display:inline-flex;align-items:center;gap:4px"><input id="tm-grid" type="checkbox" checked> Grid</label>'
-      +'<label style="display:inline-flex;align-items:center;gap:4px"><input id="tm-ids" type="checkbox"> IDs</label>'
-      +'<span id="tm-sel" style="margin-left:auto;font-size:11px;color:var(--text-muted)"></span>';
+      '<label style="display:inline-flex;align-items:center;gap:6px">W <input id="tm-w" type="number" min="1" max="256" class="input" style="width:72px;height:32px;padding:0 8px"></label> '
+      +'<label style="display:inline-flex;align-items:center;gap:6px">H <input id="tm-h" type="number" min="1" max="256" class="input" style="width:72px;height:32px;padding:0 8px"></label> '
+      +'<label style="display:inline-flex;align-items:center;gap:6px">TW <input id="tm-tw" type="number" min="8" max="256" class="input" style="width:72px;height:32px;padding:0 8px"></label> '
+      +'<label style="display:inline-flex;align-items:center;gap:6px">TH <input id="tm-th" type="number" min="8" max="256" class="input" style="width:72px;height:32px;padding:0 8px"></label> '
+      +'<button id="tm-resize" class="btn btn-primary" style="padding:0 14px;height:32px">Resize</button>'
+      +'<span style="width:1px;height:18px;background:var(--glass-border);margin:0 2px;flex-shrink:0"></span>'
+      +'<label style="display:inline-flex;align-items:center;gap:6px">Zoom <input id="tm-zoom" type="range" min="25" max="300" step="25" style="width:96px;accent-color:var(--accent)"> <span id="tm-zoom-label" style="min-width:36px;text-align:right;color:var(--text)">100%</span></label>'
+      +'<label style="display:inline-flex;align-items:center;gap:5px"><input id="tm-grid" type="checkbox" checked> Grid</label>'
+      +'<label style="display:inline-flex;align-items:center;gap:5px"><input id="tm-ids" type="checkbox"> IDs</label>'
+      +'<span id="tm-sel" style="margin-left:auto;font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px"></span>';
     root.appendChild(cfg);
     var body=document.createElement('div');
-    body.style.cssText='display:flex;flex:1;min-height:0;gap:10px;';
+    body.style.cssText='display:flex;flex:1;min-height:0;gap:10px;min-width:0;';
     // left palette
     var left=document.createElement('div');
-    left.style.cssText='width:280px;min-width:220px;max-width:360px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--glass-border);border-radius:10px;padding:8px;overflow:auto;background:rgba(0,0,0,0.12)';
+    left.style.cssText='width:280px;min-width:220px;max-width:360px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:10px;overflow:auto;background:var(--glass-bg);flex-shrink:0';
     left.innerHTML='<div style="font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:space-between">Palette <span style="font-weight:400;font-size:11px;color:var(--text-muted)">click to select</span></div>';
     palCanvas=document.createElement('canvas');
     palCanvas.style.cssText='width:100%;height:auto;display:block;border-radius:8px;background:rgba(255,255,255,0.03)';
@@ -514,7 +515,7 @@
     left.appendChild(palHint);
     // Phaser snippet helper
     var snippet=document.createElement('div');
-    snippet.style.cssText='margin-top:6px;padding:8px;border:1px dashed var(--glass-border);border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;line-height:1.4';
+    snippet.style.cssText='margin-top:6px;padding:8px;border:1px dashed var(--glass-border);border-radius:var(--radius-md);background:rgba(255,255,255,0.04);font-size:11px;line-height:1.4';
     snippet.innerHTML='<div style="font-weight:600;margin-bottom:4px">Phaser 4 snippet</div>'
       +'<pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-family:monospace;font-size:11px">preload(){ this.load.image(\'tiles\', \'tileset.png\'); this.load.tilemapTiledJSON(\'map\', \'map.json\'); }\ncreate(){ const map=this.make.tilemap({key:\'map\'}); const ts=map.addTilesetImage(\'tileset\',\'tiles\'); map.createLayer(\'Ground\',ts); }</pre>'
       +'<div style="color:var(--text-muted);margin-top:4px">Exported JSON already matches Tiled format: spacing/margin/firstgid preserved. Put the tileset PNG next to the JSON.</div>';
@@ -523,20 +524,20 @@
     var center=document.createElement('div');
     center.style.cssText='flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;';
     var canvasWrap=document.createElement('div');
-    canvasWrap.style.cssText='flex:1;min-height:280px;overflow:auto;border:1px solid var(--glass-border);border-radius:10px;background:rgba(0,0,0,0.18);display:flex;align-items:flex-start;justify-content:flex-start;padding:8px;';
+    canvasWrap.style.cssText='flex:1;min-height:280px;overflow:auto;border:1px solid var(--glass-border);border-radius:var(--radius-lg);background:rgba(0,0,0,0.18);display:flex;align-items:flex-start;justify-content:flex-start;padding:8px;';
     canvas=document.createElement('canvas');
     canvas.style.cssText='display:block;image-rendering:pixelated;image-rendering:crisp-edges;';
     ctx=canvas.getContext('2d');
     canvasWrap.appendChild(canvas);
     center.appendChild(canvasWrap);
     var hint=document.createElement('div');
-    hint.style.cssText='font-size:11px;color:var(--text-muted)';
+    hint.style.cssText='font-size:11px;color:var(--text-muted);line-height:1.5';
     hint.textContent='Layers are orthogonal grid. Exported JSON is Tiled-compatible: load via Phaser tilemapTiledJSON → make.tilemap → addTilesetImage → createLayer. Spacing/margin preserved.';
     center.appendChild(hint);
     // right layers
     var right=document.createElement('div');
-    right.style.cssText='width:260px;min-width:220px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--glass-border);border-radius:10px;padding:8px;overflow:auto;background:rgba(0,0,0,0.12)';
-    right.innerHTML='<div style="font-weight:600;font-size:13px">Layers</div><div id="tm-layers" style="display:flex;flex-direction:column;gap:6px"></div><div style="display:flex;gap:6px"><input id="tm-layer-name" placeholder="New layer" style="flex:1;padding:4px 6px"><button id="tm-layer-add" class="btn btn-ghost" style="padding:4px 8px">Add</button></div><div style="font-size:11px;color:var(--text-muted)">Top = drawn last. Visibility & opacity per layer.</div>';
+    right.style.cssText='width:280px;min-width:220px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:10px;overflow:auto;background:var(--glass-bg);flex-shrink:0';
+    right.innerHTML='<div style="font-weight:600;font-size:13px">Layers</div><div id="tm-layers" style="display:flex;flex-direction:column;gap:6px"></div><div style="display:flex;gap:8px;align-items:center"><input id="tm-layer-name" class="input" placeholder="New layer" style="flex:1;min-width:0;height:32px;padding:0 10px"><button id="tm-layer-add" class="btn btn-ghost" style="padding:0 14px;height:32px;flex-shrink:0">Add</button></div><div style="font-size:11px;color:var(--text-muted);line-height:1.5">Top = drawn last. Visibility & opacity per layer.</div>';
     body.appendChild(left); body.appendChild(center); body.appendChild(right);
     root.appendChild(body);
     container.appendChild(root);
@@ -547,7 +548,14 @@
     root.querySelector('#tm-import-file').addEventListener('change', function(e){ var f=e.target.files&&e.target.files[0]; if(!f) return; var r=new FileReader(); r.onload=function(){ importJson(r.result); }; r.readAsText(f); e.target.value=''; });
     root.querySelector('#tm-export').addEventListener('click', function(){ var txt=exportTiledJSON(); downloadText((state.map.tileset.name||'map')+'.json', txt, 'application/json'); if(typeof global.toast==='function') global.toast('Exported JSON','success'); });
     root.querySelector('#tm-copy').addEventListener('click', function(){ var txt=exportTiledJSON(); if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ if(typeof global.toast==='function') global.toast('Copied JSON','success'); }); } else { downloadText('map.json', txt); } });
-    root.querySelector('#tm-clear').addEventListener('click', function(){ if(!confirm('Clear current layer?')) return; pushHistory(); var ly=state.map.layers[state.selectedLayer]; if(ly) for(var i=0;i<ly.data.length;i++) ly.data[i]=0; renderAll(); });
+    root.querySelector('#tm-clear').addEventListener('click', function(){
+      var doClear = function(){ pushHistory(); var ly=state.map.layers[state.selectedLayer]; if(ly) for(var i=0;i<ly.data.length;i++) ly.data[i]=0; renderAll(); };
+      // Prefer project's modal (already styled), but TileMap is a Demo page
+      // rendered outside #modal-overlay — confirmModal is safe here (not stacked).
+      if(typeof global.confirmModal==='function'){ global.confirmModal('Clear current layer?').then(function(ok){ if(ok) doClear(); }); return; }
+      if(typeof global.assistantConfirmModal==='function'){ global.assistantConfirmModal('Clear current layer?').then(function(ok){ if(ok) doClear(); }); return; }
+      if(typeof window.confirm==='function'){ if(window.confirm('Clear current layer?')) doClear(); else return; } else doClear();
+    });
     root.querySelectorAll('[data-tm-tool]').forEach(function(b){ b.addEventListener('click', function(){ state.tool=b.getAttribute('data-tm-tool'); renderAll(); }); });
     root.querySelector('#tm-undo').addEventListener('click', undo);
     root.querySelector('#tm-redo').addEventListener('click', redo);

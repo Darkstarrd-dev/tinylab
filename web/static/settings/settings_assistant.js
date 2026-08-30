@@ -18,6 +18,87 @@
 var __assistantModelsCache = null;
 var __assistantPickerCb = null;
 
+// Project-styled stacked confirm/prompt for use while #modal-overlay is
+// already occupied by the Assistant settings modal. Uses its own overlay
+// (#assistant-confirm-overlay) so it never collides with app-modal's
+// confirmModal which bails when modal-overlay is busy.
+function assistantConfirmModal(message) {
+  return new Promise(function(resolve) {
+    var old = document.getElementById('assistant-confirm-overlay');
+    if (old) old.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'assistant-confirm-overlay';
+    overlay.className = 'modal-overlay show';
+    overlay.style.zIndex = 'calc(var(--z-modal, 50) + 30)';
+    overlay.innerHTML = '<div class="modal" style="max-width:460px"><div class="modal-title">' + assistantEscape(t('confirmTitle') || 'Confirm') + '</div><div class="modal-body">' + assistantEscape(message) + '</div><div class="modal-footer"><button type="button" class="btn btn-ghost" id="assistant-confirm-cancel">' + assistantEscape(t('cancel') || 'Cancel') + '</button><button type="button" class="btn btn-primary" id="assistant-confirm-ok">' + assistantEscape(t('confirm') || 'Confirm') + '</button></div></div>';
+    document.body.appendChild(overlay);
+    var closed = false;
+    function close(v) {
+      if (closed) return;
+      closed = true;
+      try { document.removeEventListener('keydown', onKey); } catch (e) {}
+      try { overlay.remove(); } catch (e2) {}
+      resolve(v);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+    }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) close(false); });
+    var cancelEl = overlay.querySelector('#assistant-confirm-cancel');
+    var okEl = overlay.querySelector('#assistant-confirm-ok');
+    if (cancelEl) cancelEl.onclick = function() { close(false); };
+    if (okEl) okEl.onclick = function() { close(true); };
+    setTimeout(function() { if (okEl) try { okEl.focus(); } catch (e3) {} }, 20);
+  });
+}
+function assistantPromptModal(title, defaultValue, placeholder) {
+  if (typeof promptModal === 'function') {
+    var ov = document.getElementById('modal-overlay');
+    if (!ov || (!ov.classList.contains('show') && !ov.children.length)) {
+      return promptModal(title, defaultValue, placeholder);
+    }
+  }
+  return new Promise(function(resolve) {
+    var old = document.getElementById('assistant-prompt-overlay');
+    if (old) old.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'assistant-prompt-overlay';
+    overlay.className = 'modal-overlay show';
+    overlay.style.zIndex = 'calc(var(--z-modal, 50) + 30)';
+    var val = defaultValue || '';
+    var ph = placeholder || '';
+    var ea = typeof escapeAttr === 'function' ? escapeAttr : function(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    overlay.innerHTML = '<div class="modal" style="max-width:440px"><div class="modal-title">' + assistantEscape(title || t('inputPromptTitle') || 'Input') + '</div><div class="modal-body" style="margin-top:12px"><input type="text" class="input" id="assistant-prompt-input" value="' + ea(val) + '" placeholder="' + ea(ph) + '" style="width:100%;box-sizing:border-box"></div><div class="modal-footer"><button type="button" class="btn btn-ghost" id="assistant-prompt-cancel">' + assistantEscape(t('cancel') || 'Cancel') + '</button><button type="button" class="btn btn-primary" id="assistant-prompt-ok">' + assistantEscape(t('confirm') || 'Confirm') + '</button></div></div>';
+    document.body.appendChild(overlay);
+    var closed = false;
+    function close(v) {
+      if (closed) return;
+      closed = true;
+      try { document.removeEventListener('keydown', onKey2); } catch (e) {}
+      try { overlay.remove(); } catch (e2) {}
+      resolve(v);
+    }
+    function onKey2(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+    }
+    document.addEventListener('keydown', onKey2);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) close(null); });
+    var input = overlay.querySelector('#assistant-prompt-input');
+    var cancelEl2 = overlay.querySelector('#assistant-prompt-cancel');
+    var okEl2 = overlay.querySelector('#assistant-prompt-ok');
+    if (cancelEl2) cancelEl2.onclick = function(){ close(null); };
+    if (okEl2) okEl2.onclick = function(){ var inp = overlay.querySelector('#assistant-prompt-input'); close(inp ? inp.value.trim() : null); };
+    if (input) {
+      setTimeout(function(){ try{ input.focus(); input.select(); }catch(e3){} }, 50);
+      input.onkeydown = function(e){ if(e.key==='Enter'){ e.preventDefault(); var inp2=overlay.querySelector('#assistant-prompt-input'); close(inp2?inp2.value.trim():null); } else if(e.key==='Escape'){ e.preventDefault(); close(null); } };
+    } else {
+      setTimeout(function(){ if(okEl2) try{ okEl2.focus(); }catch(e4){} }, 20);
+    }
+  });
+}
+
 function assistantEscape(s) {
   return typeof escapeHtml === 'function' ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
 }
@@ -1019,18 +1100,20 @@ function assistantSelectPreset(name) {
 }
 
 function assistantAddPresetBundle() {
-  var name = (typeof prompt === 'function' ? prompt(t('assistantPresetNamePrompt') || 'Preset name:', '') : '') || '';
-  name = String(name).trim();
-  if (!name) return;
-  var presets = window.__assistantPresets || (window.__assistantPresets = []);
-  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === name.toLowerCase()) {
-    toast(t('assistantActionDupName') || 'Name already exists', 'error');
-    return;
-  }
-  presets.push({ name: name, actions: [] });
-  window.__assistantPresetSel = name;
-  renderAssistantPresetBar();
-  try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', name); } catch (e) {}
+  var run = function(name) {
+    name = String(name == null ? '' : name).trim();
+    if (!name) return;
+    var presets = window.__assistantPresets || (window.__assistantPresets = []);
+    for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === name.toLowerCase()) {
+      toast(t('assistantActionDupName') || 'Name already exists', 'error');
+      return;
+    }
+    presets.push({ name: name, actions: [] });
+    window.__assistantPresetSel = name;
+    renderAssistantPresetBar();
+    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', name); } catch (e) {}
+  };
+  assistantPromptModal(t('assistantPresetNamePrompt') || 'Preset name:', '', '').then(function(v) { if (v) run(v); });
 }
 
 function assistantApplyPresetBundle() {
@@ -1060,27 +1143,30 @@ function assistantApplyPresetBundle() {
 function assistantSaveCurrentAsPreset() {
   var sel = window.__assistantPresetSel || '';
   var name = sel;
-  if (!name) {
-    var entered = (typeof prompt === 'function' ? prompt(t('assistantPresetNamePrompt') || 'Preset name:', '') : '') || '';
-    name = String(entered).trim();
-    if (!name) return;
-  }
-  var presets = window.__assistantPresets || (window.__assistantPresets = []);
-  var cur = window.__assistantActions || [];
-  var snap = cur.map(assistantCloneAction);
-  for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === name.toLowerCase()) {
-    presets[i].actions = snap;
-    window.__assistantPresetSel = presets[i].name;
+  var doSave = function(n) {
+    n = String(n || '').trim();
+    if (!n) return;
+    var presets = window.__assistantPresets || (window.__assistantPresets = []);
+    var cur = window.__assistantActions || [];
+    var snap = cur.map(assistantCloneAction);
+    for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === n.toLowerCase()) {
+      presets[i].actions = snap;
+      window.__assistantPresetSel = presets[i].name;
+      renderAssistantPresetBar();
+      toast(t('assistantPresetSaved') || 'Preset saved', 'success');
+      try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('update', presets[i].name); } catch (e) {}
+      return;
+    }
+    presets.push({ name: n, actions: snap });
+    window.__assistantPresetSel = n;
     renderAssistantPresetBar();
     toast(t('assistantPresetSaved') || 'Preset saved', 'success');
-    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('update', presets[i].name); } catch (e) {}
-    return;
+    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', n); } catch (e2) {}
+  };
+  if (!name) {
+    assistantPromptModal(t('assistantPresetNamePrompt') || 'Preset name:', '', '').then(function(v) { if (v) doSave(v); }); return;
   }
-  presets.push({ name: name, actions: snap });
-  window.__assistantPresetSel = name;
-  renderAssistantPresetBar();
-  toast(t('assistantPresetSaved') || 'Preset saved', 'success');
-  try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('add', name); } catch (e2) {}
+  doSave(name);
 }
 
 function assistantRemovePresetBundle() {
@@ -1088,22 +1174,21 @@ function assistantRemovePresetBundle() {
   if (!sel) return;
   var presets = window.__assistantPresets || [];
   for (var i = 0; i < presets.length; i++) if ((presets[i].name || '').toLowerCase() === sel.toLowerCase()) {
-    var ok = true;
-    if (typeof confirmModal === 'function') {
-      // fire async confirm without blocking this click path is fine? Use sync confirm fallback
-      // Keep modal flow: schedule removal after UI interaction
-      // For now use native confirm for immediate sync removal
-      try { ok = confirm(t('assistantPresetRemoveConfirm', [presets[i].name]) || ('Remove preset \"' + presets[i].name + '\"?')); } catch(eC) { ok = true; }
-    } else {
-      try { ok = confirm(t('assistantPresetRemoveConfirm', [presets[i].name]) || ('Remove preset \"' + presets[i].name + '\"?')); } catch(eC2) { ok = true; }
-    }
-    if (!ok) return;
-    var removedName = presets[i].name;
-    presets.splice(i, 1);
-    window.__assistantPresetSel = '';
-    renderAssistantPresetBar();
-    toast(t('assistantPresetRemoved') || 'Preset removed', 'success');
-    try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('remove', removedName); } catch (e3) {}
+    (function(idx){
+      var pName = presets[idx].name;
+      var msg = t('assistantPresetRemoveConfirm', [pName]) || ('Remove preset \"' + pName + '\"?');
+      var doRemove = function() {
+        var at = -1;
+        for (var k = 0; k < presets.length; k++) if ((presets[k].name || '').toLowerCase() === String(pName).toLowerCase()) { at = k; break; }
+        if (at < 0) return;
+        presets.splice(at, 1);
+        window.__assistantPresetSel = '';
+        renderAssistantPresetBar();
+        toast(t('assistantPresetRemoved') || 'Preset removed', 'success');
+        try { if (typeof __assistantMSPersistPresetChange === 'function') __assistantMSPersistPresetChange('remove', pName); } catch (e3) {}
+      };
+      assistantConfirmModal(msg).then(function(ok){ if (ok) doRemove(); });
+    })(i);
     return;
   }
 }
