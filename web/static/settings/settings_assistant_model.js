@@ -309,17 +309,15 @@ function assistantMSRenderOverlay() {
       '<div class="assistant-ms-preset-row">';
 
   if (typeof renderCustomSelectHtml === 'function') {
-    bodyHtml += renderCustomSelectHtml('assistant-ms-preset-wrap', 'assistant-ms-preset-select', presetOpts, __assistantMS.sel, 'assistantMSSelectPreset(this.value)', 'flex:1;min-width:180px;height:36px');
+    bodyHtml += renderCustomSelectHtml('assistant-ms-preset-wrap', 'assistant-ms-preset-select', presetOpts, __assistantMS.sel, 'assistantMSSelectPreset(this.value)', 'flex:1;min-width:0;height:36px');
   } else {
-    bodyHtml += '<select id="assistant-ms-preset-select" onchange="assistantMSSelectPreset(this.value)" style="flex:1;min-width:180px;height:36px" class="input">';
+    bodyHtml += '<select id="assistant-ms-preset-select" onchange="assistantMSSelectPreset(this.value)" style="flex:1;min-width:0;height:36px" class="input">';
     presetOpts.forEach(function(o) {
       bodyHtml += '<option value="' + escapeHtml(o.value) + '"' + (o.value === __assistantMS.sel ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
     });
     bodyHtml += '</select>';
   }
   bodyHtml +=
-      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantMSAddPreset()">' + escapeHtml(t('assistantMSPresetAdd')) + '</button>' +
-      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px;color:var(--danger,#e5484d)" onclick="assistantMSDeletePreset()">' + escapeHtml(t('assistantMSPresetDelete')) + '</button>' +
       '</div></div>' +
     '<div class="assistant-ms-section">' +
       '<h3 class="assistant-ms-section-title">' + escapeHtml(t('assistantMSMemoryModel')) + '</h3>' +

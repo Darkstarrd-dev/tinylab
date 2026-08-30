@@ -112,28 +112,28 @@
 
   function renderMusic(container){
     container.innerHTML = ''+
-      '<div class="music-page" style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden">'+
-        '<div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--glass-border);flex-wrap:wrap">'+
-          '<div style="display:flex;gap:8px;align-items:center;flex:1;min-width:220px">'+
-            '<input id="music-search" placeholder="Search — e.g. lofi, piano, jazz" style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
-            '<button id="music-search-btn" class="btn btn-primary">Search</button>'+
+      '<div class="music-page" style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;background:var(--panel-bg,transparent)">'+
+        '<div style="display:flex;gap:8px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--glass-border);flex-wrap:nowrap;min-width:0;overflow:hidden">'+
+          '<div style="display:flex;gap:8px;align-items:center;flex:1 1 280px;min-width:0">'+
+            '<input id="music-search" class="input" placeholder="Search — e.g. lofi, piano, jazz" style="flex:1;min-width:0;height:36px">'+
+            '<button id="music-search-btn" class="btn btn-primary" style="height:36px;padding:0 16px;flex-shrink:0">Search</button>'+
           '</div>'+
-          '<div id="music-provider-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>'+
-          '<label class="btn btn-ghost" style="cursor:pointer;white-space:nowrap"><input id="music-use-proxy" type="checkbox" style="margin-right:6px;vertical-align:middle">Proxy</label>'+
-          '<label class="btn btn-ghost" style="cursor:pointer">Local<input id="music-file" type="file" accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.wma,.ape" multiple hidden></label>'+
-          '<button id="music-refresh-lib" class="btn btn-ghost" title="Refresh local Musics">Library</button>'+
-          '<button class="btn btn-ghost" onclick="openPathSettingsModal({title:t(\'pathSettings\'),sections:{musicDir:true}})">'+escapeHtml(t('pathSettings')||'Path Settings')+'</button>'+
+          '<div id="music-provider-chips" style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;flex-shrink:0;overflow:hidden;max-width:280px"></div>'+
+          '<label class="btn btn-ghost" style="cursor:pointer;white-space:nowrap;flex-shrink:0;height:36px;display:inline-flex;align-items:center"><input id="music-use-proxy" type="checkbox" style="margin-right:6px;vertical-align:middle">Proxy</label>'+
+          '<label class="btn btn-ghost" style="cursor:pointer;flex-shrink:0;height:36px;display:inline-flex;align-items:center">Local<input id="music-file" type="file" accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus,.wma,.ape" multiple hidden></label>'+
+          '<button id="music-refresh-lib" class="btn btn-ghost" style="flex-shrink:0;height:36px" title="Refresh local Musics">Library</button>'+
+          '<button class="btn btn-ghost" style="flex-shrink:0;height:36px;white-space:nowrap" onclick="openPathSettingsModal({title:t(\'pathSettings\'),sections:{musicDir:true}})">'+escapeHtml(t('pathSettings')||'Path Settings')+'</button>'+
         '</div>'+
-        '<div id="music-playlists-bar" style="display:flex;gap:8px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--glass-border);flex-wrap:wrap;background:var(--glass-bg)">'+
-          '<select id="music-playlist-select" style="min-width:160px;padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)"><option value="">Playlists — Musics/playlists.json</option></select>'+
-          '<input id="music-playlist-name" placeholder="New playlist name" style="padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);min-width:140px">'+
-          '<button id="music-pl-create" class="btn btn-ghost">Create</button>'+
-          '<button id="music-pl-savequeue" class="btn btn-ghost" title="Save queue to selected playlist">Save queue →</button>'+
-          '<button id="music-pl-load" class="btn btn-ghost" title="Load selected playlist to queue">Load → queue</button>'+
-          '<button id="music-pl-export" class="btn btn-ghost" title="Export selected as .m3u">Export m3u</button>'+
-          '<label class="btn btn-ghost" style="cursor:pointer">Import m3u<input id="music-m3u-file" type="file" accept=".m3u,.m3u8" hidden></label>'+
-          '<input id="music-pl-url" placeholder="Import playlist URL (remote m3u/json)" style="flex:1;min-width:180px;padding:6px 8px;border-radius:8px;border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text)">'+
-          '<button id="music-pl-import-url" class="btn btn-ghost">Fetch</button>'+
+        '<div id="music-playlists-bar" style="display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--glass-border);flex-wrap:nowrap;background:var(--glass-bg);min-width:0;overflow:hidden">'+
+          '<select id="music-playlist-select" class="input" style="min-width:160px;flex:0 1 200px;height:32px"><option value="">Playlists — Musics/playlists.json</option></select>'+
+          '<input id="music-playlist-name" class="input" placeholder="New playlist name" style="flex:0 1 140px;min-width:0;height:32px">'+
+          '<button id="music-pl-create" class="btn btn-ghost" style="flex-shrink:0;height:32px">Create</button>'+
+          '<button id="music-pl-savequeue" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Save queue to selected playlist">Save queue →</button>'+
+          '<button id="music-pl-load" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Load selected playlist to queue">Load → queue</button>'+
+          '<button id="music-pl-export" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Export selected as .m3u">Export m3u</button>'+
+          '<label class="btn btn-ghost" style="cursor:pointer;flex-shrink:0;height:32px;display:inline-flex;align-items:center;white-space:nowrap">Import m3u<input id="music-m3u-file" type="file" accept=".m3u,.m3u8" hidden></label>'+
+          '<input id="music-pl-url" class="input" placeholder="Import playlist URL (remote m3u/json)" style="flex:1;min-width:0;height:32px">'+
+          '<button id="music-pl-import-url" class="btn btn-ghost" style="flex-shrink:0;height:32px">Fetch</button>'+
         '</div>'+
         '<div style="display:flex;flex:1;min-height:0;overflow:hidden">'+
           // left: results + library

@@ -695,11 +695,6 @@ function ademoInjectGamesToolbar(html) {
   if (existing) return existing;
   var wrap = document.createElement('span');
   wrap.className = 'dg-toolbar-fields';
-  wrap.style.display = 'flex';
-  wrap.style.alignItems = 'center';
-  wrap.style.gap = '8px';
-  wrap.style.flex = '1';
-  wrap.style.minWidth = '0';
   wrap.innerHTML = html;
   // Insert after the ademo fields block
   var ademoFields = tbar.querySelector('.ademo-toolbar-fields');
