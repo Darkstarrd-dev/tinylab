@@ -102,21 +102,45 @@ func (h *Handler) docDir() string {
 	return abs
 }
 
-// resolveDocFile maps a docDir-relative fileId to a real path inside docDir.
-// It rejects every escape vector (.., absolute, drive, UNC, NUL, symlink
-// jump-out) and returns an error the caller maps to 400. A single leading
-// "./" (the frontend's image URL convention) is normalized away.
-func (h *Handler) resolveDocFile(fileID string) (string, error) {
+// gamesDir resolves the configured games directory to an absolute path.
+func (h *Handler) gamesDir() string {
+	gamesDir := "games"
+	if h != nil && h.d != nil {
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		gamesDir = config.ResolveGamesDir(cfg.GamesDir, configDir)
+	}
+	abs, err := filepath.Abs(gamesDir)
+	if err != nil {
+		return gamesDir
+	}
+	return abs
+}
+
+// baseDir returns the filesystem root for the current request: gamesDir when
+// ?root=games is present, otherwise docDir. The query param is intentionally
+// case-sensitive and has no other accepted values to keep the contract tight.
+func (h *Handler) baseDir(r *http.Request) string {
+	if r != nil && r.URL.Query().Get("root") == "games" {
+		return h.gamesDir()
+	}
+	return h.docDir()
+}
+
+// resolveFileIn is the root-parameterized path resolver. It mirrors
+// resolveDocFile's strict checks but against an arbitrary root (docDir or
+// gamesDir), including StrictRel, realPathWithin on the deepest existing
+// ancestor, and EvalSymlinks containment.
+func (h *Handler) resolveFileIn(root, fileID string) (string, error) {
 	rel := strings.TrimPrefix(fileID, "./")
 	rel, err := pathgrant.StrictRel(rel)
 	if err != nil {
 		return "", err
 	}
-	root := h.docDir()
 	full := filepath.Join(root, filepath.FromSlash(rel))
-	// Symlink containment: a link inside docDir pointing outside must not
-	// grant access. The leaf or its parents may not exist yet (new save
-	// target); the deepest existing ancestor must stay inside the root.
 	if !realPathWithin(root, filepath.Dir(full)) {
 		return "", errors.New("path escapes the document directory")
 	}
@@ -128,6 +152,14 @@ func (h *Handler) resolveDocFile(fileID string) (string, error) {
 		}
 	}
 	return full, nil
+}
+
+// resolveDocFile maps a docDir-relative fileId to a real path inside docDir.
+// It rejects every escape vector (.., absolute, drive, UNC, NUL, symlink
+// jump-out) and returns an error the caller maps to 400. A single leading
+// "./" (the frontend's image URL convention) is normalized away.
+func (h *Handler) resolveDocFile(fileID string) (string, error) {
+	return h.resolveFileIn(h.docDir(), fileID)
 }
 
 // realPathWithin reports whether the deepest existing ancestor of dir (or dir
@@ -149,15 +181,15 @@ func realPathWithin(root, dir string) bool {
 // editorTree returns the list of files in the configured docDir, addressed
 // only by docDir-relative fileId (no absolute paths, no root leak).
 func (h *Handler) editorTree(w http.ResponseWriter, r *http.Request) {
-	docDir := h.docDir()
-	_ = os.MkdirAll(docDir, 0o755)
+	root := h.baseDir(r)
+	_ = os.MkdirAll(root, 0o755)
 
 	var files []DocFileItem
-	_ = filepath.WalkDir(docDir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || p == docDir {
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == root {
 			return nil
 		}
-		rel, relErr := filepath.Rel(docDir, p)
+		rel, relErr := filepath.Rel(root, p)
 		if relErr != nil {
 			rel = filepath.Base(p)
 		}
@@ -244,7 +276,7 @@ func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileID := ""
-	if rel, rerr := filepath.Rel(h.docDir(), path); rerr == nil && !strings.HasPrefix(rel, "..") {
+	if rel, rerr := filepath.Rel(h.baseDir(r), path); rerr == nil && !strings.HasPrefix(rel, "..") {
 		fileID = filepath.ToSlash(rel)
 	}
 	resp := map[string]any{
@@ -277,7 +309,7 @@ func (h *Handler) openTarget(r *http.Request, fileID, grantID string) (string, s
 		}
 		return p, grantID, nil
 	case fileID != "":
-		p, err := h.resolveDocFile(fileID)
+		p, err := h.resolveFileIn(h.baseDir(r), fileID)
 		return p, "", err
 	}
 
@@ -347,7 +379,7 @@ func (h *Handler) saveTarget(r *http.Request, fileID, grantID string) (string, e
 		return p, nil
 	}
 	if fileID != "" {
-		return h.resolveDocFile(fileID)
+		return h.resolveFileIn(h.baseDir(r), fileID)
 	}
 	return "", errors.New("fileId or pathGrantId is required")
 }
@@ -471,7 +503,7 @@ func (h *Handler) renameTarget(r *http.Request, fileID, grantID string) (string,
 		return target, nil
 	}
 	if fileID != "" {
-		return h.resolveDocFile(fileID)
+		return h.resolveFileIn(h.baseDir(r), fileID)
 	}
 	return "", errors.New("fileId or pathGrantId is required")
 }
@@ -672,18 +704,38 @@ func (h *Handler) editorDeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = os.Remove(target)
-
-	baseName := filepath.Base(target)
-	ext := filepath.Ext(baseName)
-	if len(baseName) > len(ext) {
-		rawName := baseName[:len(baseName)-len(ext)]
-		imgsDir := filepath.Join(filepath.Dir(target), rawName+"_imgs")
-		// P0-01e: only remove the companion _imgs dir that is a direct sibling
-		// of the deleted file and inside the same parent. PathGuard ensures we
-		// never traverse outside the file's directory.
-		if guarded, err := fsutil.PathGuard(filepath.Dir(target), imgsDir); err == nil {
+	// Game Designer enhancement: delete of a direct child of gamesDir
+	// (top-level game folder) is recursive remove-all when root=games.
+	if fi, lerr := os.Lstat(target); lerr == nil && fi.IsDir() {
+		if r.URL.Query().Get("root") != "games" {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "directory delete requires root=games and a top-level game dir")
+			return
+		}
+		gamesRoot := h.gamesDir()
+		if filepath.Dir(filepath.Clean(target)) != filepath.Clean(gamesRoot) {
+			apibase.WriteAPIError(w, http.StatusBadRequest, "only top-level game dirs can be deleted")
+			return
+		}
+		if guarded, gerr := fsutil.PathGuard(gamesRoot, target); gerr != nil {
+			apibase.WriteAPIError(w, http.StatusBadRequest, gerr.Error())
+			return
+		} else {
 			_ = os.RemoveAll(guarded)
+		}
+	} else {
+		_ = os.Remove(target)
+
+		baseName := filepath.Base(target)
+		ext := filepath.Ext(baseName)
+		if len(baseName) > len(ext) {
+			rawName := baseName[:len(baseName)-len(ext)]
+			imgsDir := filepath.Join(filepath.Dir(target), rawName+"_imgs")
+			// P0-01e: only remove the companion _imgs dir that is a direct sibling
+			// of the deleted file and inside the same parent. PathGuard ensures we
+			// never traverse outside the file's directory.
+			if guarded, err := fsutil.PathGuard(filepath.Dir(target), imgsDir); err == nil {
+				_ = os.RemoveAll(guarded)
+			}
 		}
 	}
 
@@ -694,7 +746,7 @@ func (h *Handler) editorDeleteFile(w http.ResponseWriter, r *http.Request) {
 // deleteTarget resolves the delete target: a docDir fileId or a delete grant.
 func (h *Handler) deleteTarget(r *http.Request, fileID, grantID string) (string, error) {
 	if fileID != "" {
-		return h.resolveDocFile(fileID)
+		return h.resolveFileIn(h.baseDir(r), fileID)
 	}
 	if grantID != "" {
 		ownerID := owner.From(r.Context())

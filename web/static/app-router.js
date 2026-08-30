@@ -291,6 +291,7 @@ function navigateTo(page) {
   if (!isDemoTool(page) && page !== 'demo' && typeof cleanupDemoGames === 'function') cleanupDemoGames();
   // TileMap cleanup is handled by demoToolLifecycle above; legacy per-page cleanup kept as fallback.
   if (!isDemoTool(page) && page !== 'demo' && typeof TilemapEditor !== 'undefined' && TilemapEditor && typeof TilemapEditor.cleanupTilemap === 'function') { try{ TilemapEditor.cleanupTilemap(); }catch(e0){} }
+  if (!isDemoTool(page) && page !== 'demo' && typeof cleanupGameDesigner === 'function') { try{ cleanupGameDesigner(); }catch(e0){} }
   if (!preserveUtilityState) {
     if (page !== 'editor' && page !== 'logReader' && page !== 'review' && typeof cleanupEditor === 'function') cleanupEditor();
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
@@ -327,6 +328,7 @@ function navigateTo(page) {
       case 'demo': return renderDemoWithMenu(container);
       case 'ademo': return renderDemoWithMenu(container);
       case 'tilemap': return renderDemoWithMenu(container);
+      case 'design': return renderDemoWithMenu(container);
       case 'editor': utilityActiveTool = 'editor'; updateUtilityNavLabel(); return renderUtility(container);
       case 'logReader': utilityActiveTool = 'logReader'; updateUtilityNavLabel(); return renderUtility(container);
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);

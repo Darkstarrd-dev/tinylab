@@ -2,7 +2,7 @@
 
 > Demo 页游戏插件架构的单一事实来源：游戏作为**磁盘插件**按需加载，改游戏代码不重编译、不重启进程。
 > Assistant 测试台（ademoSM/物理/碰撞体）见 [`assistant-progress.md`](assistant-progress.md) §8，本文不重复；两者仅在暂停缝（§5）与 Demo 页共存布局上相交。
-> 最后核对：2026-08-29（Demo 下拉改为 Demo+TileMap Editor（Games 内页切换按钮已移除）；Editor TileMap 类别已拆回 Demo；插件架构 + GamesDir Path Settings + Default Games Dir 行；CDP 实测热更新闭环 + v4 overlap 回调参数顺序陷阱）。
+> 最后核对：2026-08-30（Demo 下拉新增 design=Game Designer（短标签 Design）——复用 TextEditor 工厂：EditorLayout + `?root=games` 的 editor 后端 + Blob 预览；editor 后端 `resolveFileIn/baseDir` 分流、目录删除仅顶层递归；宿主缝 `__dgames.loadPhaser/injectScript`；TDD 契约 14 项）。
 
 ## 1. 功能面总览
 
@@ -16,7 +16,8 @@
 | 前端宿主 | `web/static/demo-games.js` | `window.TRGames` 注册表、Phaser 懒加载、游戏脚本注入（mtime 缓存击穿）、host adapter、Demo 页游戏区 UI（选择/启动/停止/重载）、`__dgames` 测试缝 |
 | 引擎 vendor | `web/static/vendor/phaser/`（`phaser.min.js` v4.2.1 + `README.md` 记录来源/SHA-256 + `LICENSE` MIT） | 经典 script UMD，`window.Phaser`；首次启动游戏时注入 `/vendor/phaser/phaser.min.js`，不经主页面预加载 |
 | Seed 游戏 | `web/games/survivor/`（`game.json` + `main.js`） | 插件契约参考实现：吸血鬼幸存者式最小原型（详见 §6） |
-| Demo 页集成 | `web/static/app.js`（`DEMO_TOOLS=[ademo,tilemap]` 下拉：`demoActiveTool/demoMenuOpen` 状态机、`renderDemoWithMenu` 按需渲染（ademo=Assistant Demo、tilemap=TileMap Editor）、`F6→toggleDemoMenu`）、`web/static/auth.js`（`#demo-menu` 三件套：click/mousemove/keydown）、`web/static/style.css`（`.demo-nav-wrap` 定位复用 `.utility-menu` / `.utility-nav-wrap` 样式）、`web/static/i18n.js`（`demo/tilemapEditor`）、两个 index 变体 `.demo-nav-wrap#demo-menu` | Demo 导航与 Utility/Gallery 同构：点击 toggle + 外部点击关闭 + Esc 关闭 + 页内再次触发 toggle（hover 已移除）；`localStorage.demoActiveTool` 持久化；`ademo` 页内 `Games` 切换按钮已移除（与下拉重复） |
+| Demo 页集成 | `web/static/app-demo.js`（`DEMO_TOOLS=[ademo,tilemap,design]` 下拉：`demoActiveTool/demoMenuOpen` 状态机、`renderDemoWithMenu` 按需渲染（ademo=Assistant Demo、tilemap=TileMap Editor、design=Game Designer）、`F6→toggleDemoMenu`）、`web/static/app-router.js`（`case ademo/tilemap/design→renderDemoWithMenu`、离开清理 `cleanupGameDesigner`）、`web/static/auth.js`（`#demo-menu` 三件套：click/mousemove/keydown）、`web/static/style-editor.css`（`.dgn-root` 作用域、`.dgn-stage/.dgn-status`）、`web/static/i18n.js`（`design/designer*` en+cn）、两个 index 变体 `.demo-nav-wrap#demo-menu`+`demo-designer.js` 脚本 | Demo 导航与 Utility/Gallery 同构：点击 toggle + 外部点击关闭 + Esc 关闭 + 页内再次触发 toggle（hover 已移除）；`localStorage.demoActiveTool` 持久化；`ademo` 页内 `Games` 切换按钮已移除（与下拉重复） |
+| Game Designer | `web/static/demo-designer.js`（独立 Demo 工具 `GameDesigner.render/cleanup`：复用 `EditorLayout` 工厂（tree/input/gutter/status）+ `?root=games` 的 editor 后端（tree/open/save/delete 均 scope 到 games 目录）+ Phaser 预览（Blob 注入 `TRGames.register` 的 entry → `__dgames.loadPhaser/injectScript/makeHost` → `launch`）；经 Demo 下拉 `design` 项渲染） | games 作用域的文件编辑（新建项目=`game.json{ id=目录名, entry: main.js}`+`main.js` 模板→`TRGames.register/Phaser.Game`、`Ctrl+S`、新建文件、删除项目/文件）+ 右侧 Phaser 实时预览（`Run/Reload` Blob 热注入，`Stop` 销毁）；藏 markdown 控件（`.dgn-root`）、显 `JS`/`Saved/Preview error` 状态；工具内增删改经 `GET /api/games` 立即出现在 `Demo→Games` 下拉 |
 | TileMap Editor | `web/static/utility/editor/tilemap_editor.js`（独立 Demo 工具：画布+调色板+图层面板；Tiled JSON 直出→Phaser `tilemapTiledJSON`；经 Demo 下拉 `tilemap` 项渲染，不再包裹 `renderEditor` 注入类别 Tab） | Tiled JSON 编辑器，参考 Godot TileSet/TileMapLayer + Tiled TMJ；导出与 Phaser 4 `make.tilemap/addTilesetImage/createLayer` 契约一致 |
 | 运行时目录 | `{configDir}/games/`（插件）、`{configDir}/gamedata/{id}.json`（存档） | gitignored 运行时数据，首次运行生成（类比 config.yaml） |
 
@@ -62,6 +63,7 @@
 | `GET /api/games/{id}/state` | 是 | 200 + 原样 JSON 字节；无文件 → 404；id 非法（正则外/路径分隔符）→ 400 |
 | `PUT /api/games/{id}/state` | 是（1MB cap） | body 必须 `json.Valid`；原子写 `{configDir}/gamedata/{id}.json` → `{"ok":true}` |
 | `GET /games/<id>/*` | **否**（与主静态同惯例） | 磁盘原样服务 + `no-store`；`http.StripPrefix("/games/")`（**必须**，否则 FileServer 按完整 URL.Path 找 `{gamesDir}/games/...` → 404） |
+| `GET /api/editor/tree?root=games` 等 `POST /api/editor/{open,save,delete}?root=games` | 是（/api 组，+1MB cap 同 doc） | games 作用域：`?root=games` 时复用同一 editor 后端走 `{gamesDir}/` 根（`baseDir/resolveFileIn`）；`tree` 列 games 树、`open/save` 读写文件（含 `fileId` 含斜杠的嵌套文件）、`delete` 递归删顶层游戏目录（仅 `top-level`+`root=games`） |
 
 ## 4. 热更新工作流
 
@@ -79,7 +81,8 @@
 - **测试台暂停缝**：游戏运行时经 `window.__ademo.setPaused(true)` 冻结测试台物理/SM（`ademoLoop` 跳过 step，画面定格；`assistant-demo.js` 唯一为此新增的代码，6 行 + `isPaused` 查询）。停止/切页恢复。避免 WASD 同时驱动游戏与测试台实体。
 - **布局**：`:has(.dg-root)` 门控——有游戏区时 `#page-content` 变滚动 flex 列（测试台 `flex:1 1 0; min-height:340px`，游戏区 `46vh` 舞台）；无游戏区时测试台独占，CSS 零影响（VM 测试守护 `:has` 门存在）。
 - **UI**：游戏下拉（title+version）/启动/停止/重载按钮 + 状态行；空列表显示占位 option。i18n 键 `demoGames*`（en+zh 各 9 个）。
-- **测试缝**：`window.__dgames = {registry, current(), makeHost, fetchList, loadGame, launch, stop, idRe, setCurrent}`（`setCurrent` 为 VM 测试后门，角色同 petSM.register）。
+- **测试缝**：`window.__dgames = {registry, current(), makeHost, fetchList, loadGame, launch, stop, idRe, loadPhaser, injectScript, setCurrent}`（`setCurrent` 为 VM 测试后门，角色同 petSM.register；`loadPhaser/injectScript` 为 Designer Blob 预览复用面）。
+- **Designer 缝**：`GameDesigner` 仅经 `EditorLayout`/editor 后端 games 作用域 + 该宿主缝实现预览，不复制宿主逻辑；失败（未 register/加载失败）进 `.dgn-status`。
 
 ## 6. Phaser v4.2.1 实战注意事项（CDP 实证）
 
@@ -98,9 +101,10 @@
 
 ## 8. 验证
 
-- Go：`go build ./...` + `go build -tags "tray webview" ./...`；`go test ./internal/api/games/ ./internal/config/`（list 校验跳过 ×4、state 404/PUT/GET/非法 JSON/遍历 id、SeedGames 全复制/跳过已存在/权限 Windows 感知）。
-- JS 回归：`node web/demo-games.test.js`（16 项：接线 ×6、注册表 ×3、adapter ×4、stop ×3）；`node web/assistant-demo.test.js`（34 项，demo 路由断言已随 `renderDemoGames` 接线更新）。
+- Go：`go build ./...` + `go build -tags "tray webview" ./...`；`go test ./internal/api/games/ ./internal/config/ ./internal/api/editor/`（games: list 校验跳过 ×4、state 404/PUT/GET/非法 JSON/遍历 id、SeedGames 全复制/跳过已存在；editor: `TestEditorGamesRoot_TreeAndSaveAndOpenAndDelete` 的 games 作用域 5 场景；config: ResolveGamesDir 等）。
+- JS 回归：`node web/demo-games.test.js`（17 项：接线 ×6、注册表 ×3、adapter ×4、stop ×3、Designer 缝 ×1）；`node web/demo-designer.test.js`（14 项：index 菜单/`demo-designer.js` 顺序/`app-demo` 4 项/`app-router` 2 项/i18n 1 项/编辑器调用 1 项/manifest 1 项/Blob 预览 1 项/`EditorLayout`/modal 1 项/导出 1 项）；`node web/assistant-demo.test.js`（34 项）。
 - 浏览器实测（隔离实例 20199 + headless CDP，2026-08-29）：`/api/games` 列表含 survivor（v=mtime）；`/games/survivor/main.js` 200 + no-store（**首轮 404 → StripPrefix 修复**）；state PUT/GET 回环 + `gamedata/survivor.json` 落盘；游戏区渲染 + 下拉填充；启动后 Phaser 4.2.1 加载、canvas 挂载、测试台暂停；WASD 位移精确（220px/s × 0.6s = 132px）；敌机追击/自动炮塔击杀/受击 hp-1 且玩家存活（v4 参数顺序修复后）；gameOver 遮罩 + best 405 存档 PUT + R 重开 + best 回读；停止后 canvas 移除 + 暂停解除 + 按钮态同步；**热更新闭环：磁盘改速度 220→440 → 重载按钮 → 位移 220px/500ms 精确生效**。
+- 2026-08-30 Designer 闭环（隔离实例+CDP，TDD 14 项通过：`GET /api/editor/tree?root=games`/save/open/delete 顶层递归/遍历拒绝、demo-designer/design 菜单/`case design`/blob 预览/`dgn-root`）：Design 新建 `designtest`→`Run`→`.dgn-stage canvas`→改速未保存→`Reload` 命中→`Ctrl+S` 后 `GET /api/games v` 刷新→切 ademo→Games 下拉含新游戏并可 Launch→回 Design `Delete`→`/api/games` 回退；Utility Editor docDir 树/保存回退无影响。
 - 已知非 bug：CDP `keyboard.press('r')`（down+up 同帧）偶发不触发 JustDown 重开，hold 400ms 必触发——CDP 时序假象，真机按键无此问题。
 
 ## 9. 变更维护清单（改这些必须同步本文）
@@ -113,6 +117,7 @@
 | Phaser 版本升级 / v4 新陷阱 | §1 vendor 行、§6、`vendor/phaser/README.md`（版本+SHA-256） |
 | Demo 页游戏区 UI / 布局门 / 暂停缝 | §5、`demo-games.js`、`style.css`、`i18n.js`、`assistant-progress.md` §8（测试台侧） |
 | seed 游戏增删 / 默认集内容 | §1 seed 行、`web/games/`、§8 验证行、PROJECT_MAP §18 |
+| Game Designer（design=Game Designer） | §1-§5、本表、`internal/api/editor/register.go`（`?root=games`）、`web/static/demo-designer.js`/`app-demo.js`/`app-router.js`/`i18n.js`/`style-editor.css`、两个 index 变体 |
 | 运行时目录约定（games/gamedata） | §1、PROJECT_MAP §21 |
 
 ## 10. 路线图与框架决策记录

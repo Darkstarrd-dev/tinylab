@@ -5,7 +5,8 @@
 // openDemoMenu, toggleDemoMenu, selectDemoTool, renderDemoWithMenu
 var DEMO_TOOLS = [
   { id: 'ademo', labelKey: 'demo' },
-  { id: 'tilemap', labelKey: 'tilemap' }
+  { id: 'tilemap', labelKey: 'tilemap' },
+  { id: 'design', labelKey: 'design' }
 ];
 function isDemoTool(id) {
   return DEMO_TOOLS.some(function(tool) { return tool.id === id; });
@@ -15,6 +16,7 @@ var demoMenuOpen = false;
 function demoHasTool(id) {
   if (id === 'ademo') return typeof renderAssistantDemo === 'function';
   if (id === 'tilemap') return typeof TilemapEditor !== 'undefined' && typeof TilemapEditor.renderTilemap === 'function';
+  if (id === 'design') return typeof GameDesigner !== 'undefined' && typeof GameDesigner.render === 'function';
   return isDemoTool(id);
 }
 function updateDemoNavLabel() {
@@ -37,7 +39,8 @@ function updateDemoMenuState() {
 function demoToolLifecycle(id, phase) {
   var hooks = {
     ademo: { suspend: 'suspendAssistantDemo' },
-    tilemap: { suspend: 'cleanupTilemap', resume: null }
+    tilemap: { suspend: 'cleanupTilemap', resume: null },
+    design: { suspend: 'cleanupGameDesigner' }
   };
   var hook = hooks[id] && hooks[id][phase];
   if (!hook) return;
@@ -101,6 +104,10 @@ function renderDemoWithMenu(container) {
   }
   updateDemoNavLabel();
   updateDemoMenuState();
+  if (demoActiveTool === 'design' && typeof GameDesigner !== 'undefined' && typeof GameDesigner.render === 'function') {
+    try { GameDesigner.render(container); } catch(e){ console.error('renderGameDesigner failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">Designer init failed: '+(e&&e.message||e)+'</div>'; }
+    return;
+  }
   if (demoActiveTool === 'tilemap' && typeof TilemapEditor !== 'undefined' && typeof TilemapEditor.renderTilemap === 'function') {
     try { TilemapEditor.renderTilemap(container); } catch(e){ console.error('renderTilemap failed', e); container.innerHTML = '<div style="padding:12px;color:var(--danger)">TileMap init failed: '+(e&&e.message||e)+'</div>'; }
     return;

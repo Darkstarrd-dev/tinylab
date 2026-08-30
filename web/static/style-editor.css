@@ -511,3 +511,16 @@
   .gif-export-modal{min-width:0;width:calc(100vw - 32px)}
 }
 
+/* Game Designer — reuse TextEditor layout factory; preview is Phaser, not md/html. */
+.dgn-root .ed-format-tools,
+.dgn-root .ed-toggles-group,
+.dgn-root #ed-toc,
+.dgn-root .ed-action-open { display: none !important; }
+.dgn-root .ed-preview-surface { display: flex; flex-direction: column; }
+.dgn-root #ed-main-preview { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 0; overflow: hidden; }
+.dgn-stage { position: relative; flex: 1 1 auto; min-height: 220px; background: #0f172a; overflow: hidden; }
+.dgn-stage canvas { display: block; margin: 0 auto; }
+.dgn-status { flex: 0 0 auto; font-size: 12px; color: var(--text-muted); padding: 4px 8px; min-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dgn-controls { display: flex; gap: 6px; margin-left: 8px; }
+.dgn-root .ed-explorer-actions .group-right { display: flex; gap: 6px; margin-left: 6px; }
+

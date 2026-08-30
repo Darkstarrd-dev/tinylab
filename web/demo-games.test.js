@@ -95,6 +95,11 @@ vm.runInContext(src, ctx, { filename: 'demo-games.js' });
 const TR = ctx.window.TRGames;
 const dg = ctx.window.__dgames;
 
+check('__dgames exposes loadPhaser/injectScript for the game designer preview', () => {
+  assert.ok(typeof dg.loadPhaser === 'function', 'loadPhaser missing from __dgames seam');
+  assert.ok(typeof dg.injectScript === 'function', 'injectScript missing from __dgames seam');
+});
+
 console.log('registry contract:');
 
 check('register accepts a valid def and stores it', () => {

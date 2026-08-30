@@ -457,6 +457,8 @@ window.__dgames = {
   launch: dgLaunch,
   stop: dgStopGame,
   idRe: DG_ID_RE,
+  loadPhaser: dgLoadPhaser,
+  injectScript: dgInjectScript,
   // VM-test backdoor: inject a fake running game (same role as petSM.register).
   setCurrent: function (c) { dgCurrent = c; },
   isFullscreen: dgIsFullscreen,

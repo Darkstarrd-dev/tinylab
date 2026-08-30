@@ -485,3 +485,115 @@ func TestEditorForeignGrantDenied(t *testing.T) {
 		t.Fatalf("foreign grant open: status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestEditorGamesRoot_TreeAndSaveAndOpenAndDelete(t *testing.T) {
+	// Use non-standard ConfigPath so gamesDir/docDir are siblings under distinct parents.
+	configDir := t.TempDir()
+	docDir := filepath.Join(configDir, "docs")
+	gamesDir := filepath.Join(configDir, "games")
+	_ = os.MkdirAll(docDir, 0o755)
+	_ = os.MkdirAll(filepath.Join(gamesDir, "proj1"), 0o755)
+	cfg := config.DefaultConfig()
+	cfg.DocDir = docDir
+	cfg.GamesDir = gamesDir
+	h := NewHandler(&apibase.Deps{Reg: registry.New(cfg), ConfigPath: filepath.Join(configDir, "config.yaml")})
+
+	// Tree without root lists docDir (no games leak).
+	if err := os.WriteFile(filepath.Join(docDir, "hello.md"), []byte("# doc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gamesDir, "proj1", "game.json"), []byte(`{"id":"proj1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, h, http.MethodGet, "/tree", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("doc tree status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var tree map[string][]DocFileItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &tree); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range tree["files"] {
+		if strings.HasPrefix(f.FileID, "proj1") {
+			t.Fatalf("default tree leaked games file %q", f.FileID)
+		}
+	}
+	// ?root=games lists games dir.
+	rec = doJSON(t, h, http.MethodGet, "/tree?root=games", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("games tree status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	tree = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &tree); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range tree["files"] {
+		if f.FileID == "proj1/game.json" {
+			found = true
+		}
+		if strings.HasPrefix(f.FileID, "hello.md") {
+			t.Fatalf("games tree leaked doc file %q", f.FileID)
+		}
+	}
+	if !found {
+		t.Fatalf("games tree missing proj1/game.json, got: %s", rec.Body.String())
+	}
+	// Save into games via root=games creates the project dir.
+	rec = doJSON(t, h, http.MethodPost, "/save?root=games", map[string]any{"fileId": "newgame/game.json", "content": `{"id":"newgame"}`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("games save status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if b, err := os.ReadFile(filepath.Join(gamesDir, "newgame", "game.json")); err != nil || string(b) != `{"id":"newgame"}` {
+		t.Fatalf("games save wrote %q err %v", string(b), err)
+	}
+	// Open from games via root=games.
+	rec = doJSON(t, h, http.MethodPost, "/open?root=games", map[string]any{"fileId": "proj1/game.json"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("games open status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var opened map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened["fileId"] != "proj1/game.json" || !strings.Contains(opened["content"].(string), "proj1") {
+		t.Fatalf("games open got %s", rec.Body.String())
+	}
+	// Directory delete requires games root and only top-level dirs.
+	// Create a two-level nested dir newgame/nested and attempt to delete newgame/nested as dir → 400.
+	nested := filepath.Join(gamesDir, "newgame", "nested")
+	_ = os.MkdirAll(nested, 0o755)
+	if err := os.WriteFile(filepath.Join(nested, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/delete?root=games", map[string]any{"fileId": "newgame/nested"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete nested dir status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	// Delete top-level newgame dir via fileId → recursive remove-all.
+	rec = doJSON(t, h, http.MethodPost, "/delete?root=games", map[string]any{"fileId": "newgame"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete top-level dir status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(gamesDir, "newgame")); !os.IsNotExist(err) {
+		t.Fatalf("newgame dir still exists after delete: %v", err)
+	}
+	// Directory delete without root=games → 400 (docDir regression: directories are not deletable via fileId).
+	dtop := filepath.Join(docDir, "dtop")
+	_ = os.MkdirAll(dtop, 0o755)
+	if err := os.WriteFile(filepath.Join(dtop, "x.txt"), []byte("y"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec = doJSON(t, h, http.MethodPost, "/delete", map[string]any{"fileId": "dtop"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete dtop without root status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(dtop); err != nil {
+		t.Fatalf("dtop should still exist after rejected delete: %v", err)
+	}
+	// Escape rejected on games root too.
+	rec = doJSON(t, h, http.MethodPost, "/save?root=games", map[string]any{"fileId": "../evil.js", "content": "bad"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("games save traversal status = %d, want 400", rec.Code)
+	}
+}
