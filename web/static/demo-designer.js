@@ -872,7 +872,7 @@
     }
 
     // AI Assist alongside Collapse Explorer — main text-editor header (view actions row).
-      viewActions = dgn.layoutRoot.querySelector('.ed-view-actions');
+      var viewActions = dgn.layoutRoot.querySelector('.ed-view-actions');
     if (viewActions) {
       (function addHeaderButtons() {
         function headerIconBtn(svg, tipKey, fallback, cls, handler) {
