@@ -1,0 +1,6 @@
+{
+  "id": "example",
+  "title": "Example — Staged Demos",
+  "version": "0.2.0",
+  "entry": "main.js"
+}

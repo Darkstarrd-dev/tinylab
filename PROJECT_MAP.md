@@ -836,7 +836,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 
 ### 18.4 `web/games/` — 内嵌默认游戏集（2026-08-29 新增）
 
-游戏插件的编译期副本，经 `web/games.go`（无 build tag）`//go:embed all:games` 嵌入；启动时 `SeedGames` 复制到 `{configDir}/games/`（目标游戏目录已存在则整体跳过，**永不覆盖磁盘内容**——磁盘为唯一事实源）。每个一级子目录是一个游戏：`game.json` manifest（`{"id","title","version","entry"}`，id 必须等于目录名）+ classic-script 入口（同步 `window.TRGames.register`，host adapter 契约见 `docs/gamedemo-progress.md` §2）。当前默认集：`survivor/`（吸血鬼幸存者式最小原型，Phaser v4 参考实现：零资产 generateTexture 造纹理、overlap 回调参数顺序无关写法、`__trgame` CDP 测试缝）。插件**不经** embed 更新——新增/修改游戏直接改磁盘目录经 Demo 页「重载」生效；要更新已 seed 的默认游戏须删磁盘目录重启重 seed。
+游戏插件的编译期副本，经 `web/games.go`（无 build tag）`//go:embed all:games` 嵌入；启动时 `SeedGames` 复制到 `{configDir}/games/`（目标游戏目录已存在则整体跳过，**永不覆盖磁盘内容**——磁盘为唯一事实源）。每个一级子目录是一个游戏：`game.json` manifest（`{"id","title","version","entry"}`，id 必须等于目录名）+ classic-script 入口（同步 `window.TRGames.register`，host adapter 契约见 `docs/gamedemo-progress.md` §2）。当前默认集：`example/`（吸血鬼幸存者式最小原型，Phaser v4 参考实现：零资产 generateTexture 造纹理、overlap 回调参数顺序无关写法、`__trgame` CDP 测试缝）。插件**不经** embed 更新——新增/修改游戏直接改磁盘目录经 Demo 页「重载」生效；要更新已 seed 的默认游戏须删磁盘目录重启重 seed。
 
 ---
 

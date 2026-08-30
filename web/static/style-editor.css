@@ -523,4 +523,24 @@
 .dgn-status { flex: 0 0 auto; font-size: 12px; color: var(--text-muted); padding: 4px 8px; min-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dgn-controls { display: flex; gap: 6px; margin-left: 8px; }
 .dgn-root .ed-explorer-actions .group-right { display: flex; gap: 6px; margin-left: 6px; }
+.dgn-root #ed-main-preview { position: relative; }
+.dgn-preview-fs, .dgn-preview-focus {
+  position: absolute; top: 8px; z-index: 3; width: 30px; height: 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); border: 1px solid var(--glass-border);
+  background: rgba(10,10,15,0.78); color: #fff; cursor: pointer; backdrop-filter: blur(8px);
+}
+.dgn-preview-fs { right: 8px; }
+.dgn-preview-focus { right: 44px; font-size: 14px; line-height: 1; }
+.dgn-preview-fs:hover, .dgn-preview-focus:hover { background: rgba(20,20,28,0.92); }
+/* Focus indicator is non-layout: a subtle ring that does not reflow. */
+.dgn-preview-focused { box-shadow: inset 0 0 0 2px var(--accent, #4f46e5); }
+/* Fullscreen reuses the same body class as Demo→games (see style-demo.css) */
+body.demo-stage-fullscreen .dgn-root #ed-main-preview { height: 100vh !important; }
+body.demo-stage-fullscreen .dgn-root .ed-explorer,
+body.demo-stage-fullscreen .dgn-root .ed-navigation,
+body.demo-stage-fullscreen .dgn-root .ed-control-bar,
+body.demo-stage-fullscreen .dgn-root .ed-statusbar,
+body.demo-stage-fullscreen .dgn-root #ed-main-preview .dgn-status { display: none !important; }
+body.demo-stage-fullscreen .dgn-root #ed-main-preview { padding: 0 !important; }
 

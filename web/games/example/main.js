@@ -1,56 +1,44 @@
 // =============================================================================
-// Survivor v0.2.0 — Vampire Survivors-style demo with dual-mode support
 // =============================================================================
-// IIFE + 'use strict'; classic script, no imports, no modules. Registered
-// synchronously via window.TRGames.register({id, title, launch}). The host
+// Demo Bundle — Survivor + annotated mini-demos (see C:/omp/Phaser lessons)
+// =============================================================================
+// IIFE + 'use strict'; classic script, no imports. Registered synchronously
+// via window.TRGames.register({id, title, launch}). The host
 // (web/static/demo-games.js :: dgMakeHost) injects the only external API:
-//
 //   host.container        HTMLElement — empty stage, canvas mounts here
 //   host.width/height     number      — stage CSS px at launch time (fixed)
 //   host.phaser           Phaser      — window.Phaser v4.2.1 (lazy-loaded)
-//   host.saveState(obj)   Promise     — PUT /api/games/<id>/state (any JSON ≤1MB)
+//   host.saveState(obj)   Promise     — PUT /api/games/<id>/state (≤1MB)
 //   host.loadState()      Promise<obj|null> — 404 → null
 //   host.sheetImageUrl(name) string   — GET /api/assistant/sheet-image/{name}
 //   host.getAssistantConfig() Promise<{model,actions,enabled,debug}|null>
 //   host.getAssistantActions() Promise<AssistantAction[]>
 //   host.llmChat({model,messages}) Promise<parsed JSON>
-//   host._survivorMode    string      — closure-owned selected mode
-//   host._moveTarget      {x:number}|null — platformer right-click target
-//
-// All strings rendered as English literals (no t()/escapeHtml dependency).
-//
-// Phaser v4.2.1 traps preserved from v0.1.0:
-//   1. overlap(group, gameObject, cb) callback arg order is NOT v3 order:
-//      v4.2.1 delivers (gameObject, groupChild). Callbacks resolve roles via
-//      group.contains() so they are order-agnostic (a naive first-arg assumption
-//      destroyed the player on contact in the first CDP smoke).
-//   2. physics sprite setPosition does NOT reliably teleport (body not updated
-//      until next step, then overwritten). Use body.reset(x,y) for teleports.
-//   3. See docs/gamedemo-progress.md §6 for the full list.
-//
-// Modes:
-//   topdown    — gravity 0, 8-direction WASD/arrows, diagonal √½ normalized,
-//                mouse aim optional, auto-turret, enemies chase in 2D.
-//   platformer — gravity 2200 px/s², 1-D horizontal walk/slow/run (Shift/Ctrl),
-//                W/UP/SPACE jump (grounded gate), S/DOWN fastfall, static
-//                platforms + collider, X-only enemy chase, right-click x-target.
-//
+// How to learn / extend (read code + comments, run the overlay demos):
+//   Topdown gameplay   — lessons 05-physics-arcade (Arcade), 06-input
+//   Platformer gravity — lessons 05-physics-arcade + assistant-demo.js parity
+//   Sprites / tint     — lessons 03-sprites, 10-animations, 18-filters
+//   Load / sheets      — lessons 04-loading, 14-time (timers), 15-events
+//   Scale / fullscreen — lessons 17-scale, 09-cameras, 11-text
+//   Project template   — C:/omp/Phaser/INDEX.md + phaser-game/lessons/*/README.md
+// In-game mini-demos (press I/O or use Menu buttons Input Mapping / Sprite):
+//   Input Mapping (I)  — shows DEFAULT_BINDINGS → rebind capture → saveState
+//   Sprite Settings (O)— shows spriteScale + frameW×H → +/- (0.35–2.0)
+//   Both overlays are deliberately exposed as copy-pastable module patterns so
+//   almost every future game can reuse them by copying the marked blocks.
 // Persisted state (via host.saveState/loadState):
-//   { best: {kills:number, timeSec:number}, mode: 'topdown'|'platformer' }
-//
-// Test seam: window.__trgame = { game:Phaser.Game, getState():{hp,kills,timeSec,over,mode}, getMode():string }
-//   sceneRef always points at the active gameplay scene (topdown/platformer),
-//   not Boot/Menu. CDP drives via window.__trgame + scene internals.
-//
-// Full comment pass (v0.2.0) — every section banner + function JSDoc + tunable
-// units + trap notes. Behaviour of v0.1.0 topdown is preserved inside
-// TopdownScene; new scenes are Boot/Menu/Platformer + shared Pause overlay.
-// =============================================================================
+//   { best:{kills,timeSec}, mode:'topdown'|'platformer',
+//     inputBindings:DEFAULT_BINDINGS, spriteScale:1 }
+// Test seam: window.__trgame = { game:Phaser.Game,
+//   getState():{hp,kills,timeSec,over,mode}, getMode():string }
+// Phaser v4 traps (see docs/gamedemo-progress.md §6): overlap CB order
+// (group agnostic), body.reset for teleports, scale via setDisplaySize.
 (function () {
   'use strict';
 
   // ==========================================================================
-  // Tunables (per-mode) — units annotated; see assistant-demo.js for parity
+  // Tunables (per-mode) — units annotated; parity with assistant-demo.js
+  // Lesson refs: 01-game-config (fps/scale), 05-physics-arcade (gravity)
   // ==========================================================================
 
   // ---- Shared (both modes) -------------------------------------------------
@@ -113,7 +101,8 @@
   var PLATFORM_TEX_H = 16;
 
   // ==========================================================================
-  // Shared: Input mapping + sprite display (reusable for every future game)
+  // Shared: Input mapping + sprite display — REUSABLE MODULE (copy this block
+  // into any new game; see C:/omp/Phaser lessons 03-sprites, 06-input, 10-animations)
   // ==========================================================================
   /** Default key bindings; mirror assistant-demo.js WASD/arrows/Jump/Pause. */
   var DEFAULT_BINDINGS = {
@@ -144,6 +133,9 @@
     else if (u === 'SHIFTLEFT' || u === 'SHIFTRIGHT' || u === 'SHIFT') u = 'SHIFT';
     return u;
   }
+  // Helpers below (applySpriteScaleTo/applyFrameSizeFromAction/loadInputBindingsFromState/
+  // persistInputAndSprite/keyName/pressed/justPressed) are the copy-paste core
+  // for per-game input + sprite demos. Keep them together when reusing.
   function applySpriteScaleTo(sceneSprite) {
     if (!sceneSprite) return;
     try {
@@ -636,7 +628,8 @@
     try { scene.scene.resume(sceneKey); } catch (e) { /* already resumed */ }
   }
 
-  // ── Input mapping overlay (reusable demo module) ────────────────────────
+  // ── Input mapping overlay — REUSABLE DEMO MODULE (copy show/hide/refresh) ─
+  // Lesson refs: 06-input (keys), 11-text (labels). See C:/omp/Phaser.
   function showInputOverlay(scene, sceneKey) {
     if (scene._inputOverlay) return;
     var w = scene.cameras.main.width, h = scene.cameras.main.height;
@@ -707,7 +700,8 @@
     for (var i = 0; i < scene._inputOverlay.length; i++) { try { scene._inputOverlay[i].destroy(); } catch (e2) {} }
     scene._inputOverlay = null; scene._inputRows = null; scene._inputClose = null; scene._inputOverlayKey = null;
   }
-  // ── Sprite settings overlay (reusable demo module) ──────────────────────
+  // ── Sprite settings overlay — REUSABLE DEMO MODULE (copy show/hide) ──────
+  // Lesson refs: 03-sprites (setDisplaySize/tint), 17-scale, 10-animations.
   function showSpriteOverlay(scene, sceneKey) {
     if (scene._spriteOverlay) return;
     var w = scene.cameras.main.width, h = scene.cameras.main.height;
@@ -821,7 +815,7 @@
 
         // Background — reuse the panel tint logic for a subtle frame.
         // Title
-        var title = this.add.text(w / 2, h * 0.16, 'SURVIVOR v0.2.0', {
+        var title = this.add.text(w / 2, h * 0.16, 'EXAMPLE — Staged Demos', {
           fontFamily: 'monospace', fontSize: '22px', color: '#e8e8e8', align: 'center'
         });
         title.setOrigin(0.5, 0.5);
@@ -1827,8 +1821,8 @@
   if (typeof window.TRGames !== 'undefined' &&
     typeof window.TRGames.register === 'function') {
     window.TRGames.register({
-      id: 'survivor',
-      title: 'Survivor',
+      id: 'example',
+      title: 'Example',
       launch: launch
     });
   }

@@ -1,7 +1,10 @@
 // demo-designer.js — Game Designer: games-scoped editor + Phaser preview.
 // Consumes: EditorLayout (editor_layout.js), edFileExt (editor-state.js),
 // __dgames.{idRe,registry,makeHost,loadPhaser,injectScript} (demo-games.js),
-// promptModal/confirmModal (app-modal.js), toast/t (api.js+i18n.js).
+// promptModal/confirmModal (app-modal.js), toast/t (api.js+i18n.js),
+// global EditorCommands + editor_shell showAiModal reference (for AI) when
+// available. The AI path reuses the existing Utility Editor helper that posts
+// to /v1/chat/completions, so no new proxy logic is needed here.
 
 (function (global) {
   'use strict';
@@ -16,7 +19,19 @@
     originalById: {},
     preview: null,      // {id, handle}
     keyHandler: null,
-    ignoreInput: false
+    ignoreInput: false,
+    previewFocused: false,
+    previewFsKey: null,
+    previewFocusKey: null,
+    previewClick: null
+  };
+
+  var DGN_SVG = {
+    fullscreen: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
+    folderPlus: '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2m-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+    ai: '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L14.39 7.61L20 10L14.39 12.39L12 18L9.61 12.39L4 10L9.61 7.61L12 2ZM6 15l1.19 2.81L10 19l-2.81 1.19L6 23l-1.19-2.81L2 19l2.81-1.19L6 15z"/></svg>',
+    example: '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 6h8v2H8V6m0 4h8v2H8v-2m0 4h5v2H8v-2M6 4h12c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2m0 2v12h12V6H6z"/></svg>'
   };
 
   // i18n helper — edT already falls back to window.t.
@@ -109,10 +124,164 @@
     if (typeof global.toast === 'function') global.toast(msg, 'error');
   }
 
+  function escapeHtml(s) {
+    if (typeof global.escapeHtml === 'function') return global.escapeHtml(s);
+    if (typeof global.edEscapeHtml === 'function') return global.edEscapeHtml(s);
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function inputEl() { return dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-main-input'); }
   function gutterEl() { return dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-line-gutter'); }
   function previewHost() { return dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-main-preview'); }
   function stageEl() { return dgn.layoutRoot && dgn.layoutRoot.querySelector('.dgn-stage'); }
+
+  // Fullscreen: mirror demo-games.js/.ademo same chrome used by Demo→games.
+  function dgnIsFullscreen() { return document.body.classList.contains('demo-stage-fullscreen'); }
+  function dgnSetFullscreen(on) {
+    var will = !!on;
+    if (typeof ademoSetFullscreen === 'function') { ademoSetFullscreen(will); return; }
+    document.body.classList.toggle('demo-stage-fullscreen', will);
+    if (dgn.layoutRoot) dgn.layoutRoot.classList.toggle('dgn-fullscreen', will);
+    var stage = stageEl();
+    if (stage) stage.classList.toggle('dgn-fullscreen-stage', will);
+    if (typeof window.toggleNativeFullscreen === 'function') { try { window.toggleNativeFullscreen(will); } catch (e0) {} }
+    try { window.dispatchEvent(new Event('resize')); } catch (e1) {}
+  }
+  function dgnToggleFullscreen() { dgnSetFullscreen(!dgnIsFullscreen()); }
+
+  // Preview focus: when focused, block other project shortcuts until Esc.
+  function enterPreviewFocus() {
+    if (dgn.previewFocused) return;
+    dgn.previewFocused = true;
+    // No layout mutation: focus is a pure input gate. Stage is not moved
+    // and body is not overflow-hidden. Only the capture handlers change.
+    dgnStatus(tstr('designerPreviewFocused', 'Preview focused — Esc to exit'));
+  }
+  function exitPreviewFocus() {
+    if (!dgn.previewFocused) return;
+    dgn.previewFocused = false;
+    dgnStatus('');
+  }
+
+  // Example bundle — on-demand creation of staged demo projects.
+  var EXAMPLE_UNITS = [
+    { id: 'Unit01', title: 'Unit01 — Hello Phaser', entry: 'main.js',
+      // Minimal Phaser launch; mirrors lessons 01-game-config + 02-scenes.
+      main: '/* Unit01 — Hello Phaser */\n/* lesson refs: 01-game-config, 02-scenes, 03-sprites */\n/* open this file, change the color/text below and click Run */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit01\", title: \"Unit01 — Hello Phaser\", launch: function(host){\n    var Phaser = host.phaser;\n    var S = new (Phaser.Scene)(\"Hello\");\n    S.create = function(){ var w=this.scale.width,h=this.scale.height; this.add.text(w/2,h/2,\"Hello Phaser — edit me\",{fontFamily:\"monospace\",fontSize:\"18px\",color:\"#e8e8e8\"}).setOrigin(0.5); this.add.text(w/2,h/2+22,\"See C:/omp/Phaser lessons 01-03\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
+    { id: 'Unit02', title: 'Unit02 — Input & Arcade', entry: 'main.js',
+      main: '/* Unit02 — Input & Arcade Physics */\n/* lesson refs: 06-input, 05-physics-arcade, 04-loading */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit02\", title: \"Unit02 — Input & Arcade\", launch: function(host){\n    var Phaser = host.phaser;\n    var S = Phaser.Scene;\n    var scene = new S(\"Arcade\");\n    scene.create = function(){\n      var w=this.scale.width,h=this.scale.height;\n      this.player=this.physics.add.sprite(w/2,h/2,\"__DEFAULT\");\n      /* generate a texture similar to survivor\\\'s buildTextures */\n      try{ var g=this.add.graphics(); g.fillStyle(0x22c55e,1); g.fillCircle(0,0,14); g.generateTexture(\"__DOT\",28,28); g.destroy(); this.player.setTexture(\"__DOT\"); }catch(e){}\n      this.player.setCollideWorldBounds(true);\n      this.cursors=this.input.keyboard.createCursorKeys();\n      this.wasd=this.input.keyboard.addKeys(\"W,A,S,D\");\n      this.add.text(w/2,14,\"WASD / arrows — see lessons 05, 06\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0);\n    };\n    scene.update=function(){\n      if(!this.player) return;\n      var dx=0,dy=0,sp=220;\n      if(this.cursors.left.isDown||this.wasd.A.isDown) dx-=1;\n      if(this.cursors.right.isDown||this.wasd.D.isDown) dx+=1;\n      if(this.cursors.up.isDown||this.wasd.W.isDown) dy-=1;\n      if(this.cursors.down.isDown||this.wasd.S.isDown) dy+=1;\n      var len=Math.sqrt(dx*dx+dy*dy)||1; this.player.setVelocity(dx/len*sp, dy/len*sp);\n    };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",physics:{default:\"arcade\",arcade:{gravity:{y:0}}},scene:[scene]});\n  }});\n})();\n' },
+    { id: 'Unit03', title: 'Unit03 — Sprites & Tweens', entry: 'main.js',
+      main: '/* Unit03 — Sprites, Text, Tweens */\n/* lesson refs: 03-sprites, 07-tweens, 11-text, 18-filters */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit03\", title: \"Unit03 — Sprites & Tweens\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"Tweens\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height, g=this.add.graphics(); g.fillStyle(0x60a5fa,1); g.fillRect(0,0,28,28); g.generateTexture(\"box\",28,28); g.destroy(); var sp=this.add.sprite(w/2,h/2,\"box\"); this.tweens.add({targets:sp, y:h/2-40, duration:700, yoyo:true, repeat:-1, ease:\"Sine.inOut\"}); this.add.text(w/2,14,\"Tweens — lessons 07, 03, 11\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
+    { id: 'Unit04', title: 'Unit04 — Particles & Time', entry: 'main.js',
+      main: '/* Unit04 — Particles, Time, Events */\n/* lesson refs: 08-particles, 14-time, 15-events */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit04\", title: \"Unit04 — Particles & Time\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"X\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height; this.add.text(w/2,14,\"Particles & timers — lessons 08, 14, 15\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); this.time.addEvent({delay:900, loop:true, callback:function(){ try{ var g=this.add.graphics(); g.fillStyle(0xf59e0b,1); g.fillCircle(0,0,4); g.generateTexture(\"p\"+Date.now(),8,8); g.destroy(); var s=this.add.sprite(Phaser.Math.Between(20,w-20),Phaser.Math.Between(30,h-20),\"p\"+(Date.now()-1)); this.tweens.add({targets:s, alpha:0, duration:900, onComplete:function(){ s.destroy(); }});}catch(e){} }, callbackScope:this}); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
+    { id: 'Unit05', title: 'Unit05 — Scale & Cameras', entry: 'main.js',
+      main: '/* Unit05 — Scale & Cameras */\n/* lesson refs: 17-scale, 09-cameras, 12-graphics, 13-groups */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit05\", title: \"Unit05 — Scale & Cameras\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"Cam\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height; this.cameras.main.setBackgroundColor(\"#111827\"); this.add.rectangle(w/2,h/2,Math.min(w,h)-40,Math.min(w,h)-40,0x1f2937).setStrokeStyle(2,0x4b5563); this.add.text(w/2,14,\"Scale & cameras — lessons 17, 09\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' }
+  ];
+  function createExampleUnits() {
+    var created = 0, skipped = 0, failed = 0;
+    // Serialize to keep game.json before main.js per unit (manifest must exist for list).
+    var chain = Promise.resolve();
+    EXAMPLE_UNITS.forEach(function (u) {
+      chain = chain.then(function () {
+        return edFetch('/api/editor/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: u.id + '/game.json', content: JSON.stringify({ id: u.id, title: u.title, version: '0.1.0', entry: u.entry }, null, 2) }) })
+          .then(function (r) {
+            // 200 even if already exists (handler just overwrites); but we skip if file was already present to avoid clobber.
+            // Check via tree: we already serialize, so always write — user can delete from explorer.
+            return edFetch('/api/editor/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: u.id + '/' + u.entry, content: u.main }) });
+          })
+          .then(function (r) {
+            if (r.ok) created++; else failed++;
+          })
+          .catch(function () { failed++; });
+      });
+    });
+    return chain.then(function () {
+      toastInfo('Example units: ' + created + ' written' + (failed ? ' (' + failed + ' failed)' : ''));
+      return dgnLoadTree().then(function () {
+        if (dgn.tree && dgn.tree.length) { var first = EXAMPLE_UNITS[0].id + '/' + EXAMPLE_UNITS[0].entry; selectFileOrDir(first); }
+      });
+    });
+  }
+  function isInputFocusGlobally() {
+    var tag = document.activeElement ? document.activeElement.tagName : '';
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
+  }
+
+  // Reuse the existing AI assist from the Utility editor shell when available.
+  // Falls back to a minimal prompt→/v1/chat/completions path shared with editor_shell.
+  function runAiAssist() {
+    var ta = inputEl();
+    if (!ta) { toastInfo(tstr('designerSelectProject', 'Select a project first')); return; }
+    // Prefer the canonical editor shell's modal if it was loaded (hidden in Designer,
+    // the layout hides its button, but the JS is still on the page).
+    var hit = false;
+    try {
+      var overlay = document.getElementById('modal-overlay');
+      // editor_shell exposes no global showAiModal; probe known leaf
+      if (typeof global.EditorCommands !== 'undefined' && typeof global.EditorCommands.replaceSelection === 'function' && overlay) {
+        // Dispatch the same toolbar action the shell uses — action 'ai' is the
+        // AI entry; we synthesize it via a transient shell root if needed.
+        // Prefer dispatching on the designer input itself: the shell's overlay
+        // only reads currentInput().value/selection, so faking that surface is enough.
+        // The simplest real reuse: delegate to the hidden shell state when present.
+        if (typeof global.showAiModal === 'function') { global.showAiModal(); hit = true; }
+      }
+    } catch (e) {}
+    if (hit) return;
+    // Fallback: minimal AI flow (prompt → /v1/chat/completions → insert)
+    var selStart = ta.selectionStart || 0, selEnd = ta.selectionEnd || 0;
+    var selText = ta.value.slice(selStart, selEnd);
+    var isSel = !!(selText && selText.trim());
+    var selectedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
+    // Use the project's model picker if available, else prompt for model once
+    if (!selectedModel && typeof window.openModelPickerModal === 'function') {
+      window.openModelPickerModal('', function (m) {
+        if (m) {
+          localStorage.setItem('tinyrouter_editor_ai_model', m);
+          runAiAssist();
+        } else { toastError(tstr('designerAiNoModel', 'Select a model first')); }
+      });
+      return;
+    }
+    if (!selectedModel) { toastError(tstr('designerAiNoModel', 'Select a model first')); return; }
+    var prompt = window.prompt(isSel ? tstr('designerAiPromptSel', 'Instruction for selected text:') : tstr('designerAiPrompt', 'AI prompt:'), '');
+    if (prompt === null) return;
+    prompt = String(prompt).trim();
+    if (!prompt) { toastInfo(tstr('designerAiEmpty', 'Prompt is empty')); return; }
+    var msgs;
+    if (isSel) {
+      msgs = [
+        { role: 'system', content: '你是一个专业的代码与写作助手。只输出对【选中内容】按【用户指令】修改后的最终文本，不要附加解释。' },
+        { role: 'user', content: '【指令】\n' + prompt + '\n\n【选中内容】\n' + selText }
+      ];
+    } else {
+      msgs = [
+        { role: 'system', content: '你是一个智能助手。只输出按【用户指令】生成的最终文本。' },
+        { role: 'user', content: prompt }
+      ];
+    }
+    dgnStatus(tstr('demoGamesLoading', 'Loading…'));
+    fetch('/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: selectedModel, messages: msgs, stream: false }) })
+      .then(function (r) { if (!r.ok) throw new Error('AI ' + r.status); return r.json(); })
+      .then(function (data) {
+        var reply = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!reply) throw new Error('No content');
+        if (typeof global.EditorCommands !== 'undefined' && typeof global.EditorCommands.replaceSelection === 'function') {
+          global.EditorCommands.replaceSelection(ta, reply);
+        } else {
+          var before = ta.value.slice(0, selStart), after = ta.value.slice(isSel ? selEnd : selStart);
+          var inserted = reply;
+          ta.value = before + inserted + after;
+          var caret = before.length + inserted.length;
+          try { ta.selectionStart = ta.selectionEnd = caret; } catch (e2) {}
+        }
+        try { if (typeof global.EditorCommands !== 'undefined') global.EditorCommands.record && global.EditorCommands.record(ta); } catch (e3) {}
+        updateGutterInner(); updateStatusBar();
+        dgnStatus(tstr('designerAiDone', 'AI inserted'));
+        toastInfo(tstr('designerAiDone', 'AI inserted'));
+      })
+      .catch(function (err) { dgnStatus(tstr('designerPreviewError', 'Preview error') + ': ' + (err && err.message || err)); toastError(String(err && err.message || err)); });
+  }
   function titleName() {
     if (dgn.current && dgn.current.fileId) {
       var parts = dgn.current.fileId.split('/');
@@ -625,6 +794,12 @@
         } else if (name === 'reader' && global.EditorLayout && typeof global.EditorLayout.setReader === 'function') {
           var on2 = !dgn.layoutRoot.classList.contains('is-reader');
           global.EditorLayout.setReader(dgn.layoutRoot, on2);
+        } else if (name === 'explorer' && global.EditorLayout && typeof global.EditorLayout.setExplorer === 'function') {
+          var hidden = dgn.layoutRoot.classList.contains('is-explorer-hidden');
+          global.EditorLayout.setExplorer(dgn.layoutRoot, hidden);
+          if (typeof global.EditorLayout.updateExplorerToggleIcon === 'function') {
+            try { global.EditorLayout.updateExplorerToggleIcon(dgn.layoutRoot, !hidden); } catch (e) {}
+          }
         }
       }
     };
@@ -632,11 +807,15 @@
     dgn.layoutRoot = global.EditorLayout.create(container, { tree: dgn.tree }, hooksRef);
     if (!dgn.layoutRoot) return;
     dgn.layoutRoot.classList.add('dgn-root');
+    // Ensure Toggle Explorer icon reflects initial (expanded) state.
+    if (typeof global.EditorLayout.updateExplorerToggleIcon === 'function') {
+      try { global.EditorLayout.updateExplorerToggleIcon(dgn.layoutRoot, true); } catch (e0) {}
+    }
 
     // Transform preview surface into Phaser stage.
     var preview = previewHost();
     if (preview) {
-      preview.innerHTML = '<div class="dgn-stage"></div><div class="dgn-status"></div>';
+      preview.innerHTML = '<div class="dgn-stage"></div><div class="dgn-status"></div><button type="button" class="dgn-preview-fs" aria-label="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '" data-tooltip="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '">' + DGN_SVG.fullscreen + '</button><button type="button" class="dgn-preview-focus" data-tooltip="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '" aria-label="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '">⛶</button>';
     }
     // Default split view.
     if (global.EditorLayout && typeof global.EditorLayout.setPreview === 'function') {
@@ -648,24 +827,28 @@
     var hide = dgn.layoutRoot.querySelector('.ed-status-right');
     if (hide) hide.style.display = 'none';
 
-    // Append extra explorer buttons (New Project / Delete) — simple btns.
+    // Append extra explorer buttons (SVG + tooltip, like the main toolbar).
     var expActions = dgn.layoutRoot.querySelector('.ed-explorer-actions');
     if (expActions) {
-      var groupRight = document.createElement('div');
-      groupRight.className = 'ed-explorer-group group-right';
-      var newProjectBtn = document.createElement('button');
-      newProjectBtn.type = 'button';
-      newProjectBtn.className = 'btn btn-ghost dgn-new-project';
-      newProjectBtn.textContent = tstr('designerNewProject', 'New Project');
+      function svgBtn(svg, tipKey, fallback, cls) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ed-button ed-button-icon-only ' + cls;
+        var tip = tstr(tipKey, fallback);
+        b.setAttribute('aria-label', tip);
+        b.setAttribute('data-tooltip', tip);
+        var sp = document.createElement('span');
+        sp.className = 'ed-button-icon';
+        sp.innerHTML = svg;
+        b.appendChild(sp);
+        return b;
+      }
+      var newProjectBtn = svgBtn(DGN_SVG.folderPlus, 'designerNewProject', 'New Project', 'dgn-new-project');
       newProjectBtn.addEventListener('click', dgnNewProject);
-      groupRight.appendChild(newProjectBtn);
-      var deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn btn-ghost dgn-delete';
-      deleteBtn.textContent = tstr('designerDelete', 'Delete');
+      expActions.appendChild(newProjectBtn);
+      var deleteBtn = svgBtn(DGN_SVG.trash, 'designerDelete', 'Delete', 'dgn-delete');
       deleteBtn.addEventListener('click', dgnDelete);
-      groupRight.appendChild(deleteBtn);
-      expActions.appendChild(groupRight);
+      expActions.appendChild(deleteBtn);
     }
 
     // Append preview controls into navigation actions.
@@ -688,6 +871,42 @@
       navActions.appendChild(ctrl);
     }
 
+    // AI Assist alongside Collapse Explorer — main text-editor header (view actions row).
+      viewActions = dgn.layoutRoot.querySelector('.ed-view-actions');
+    if (viewActions) {
+      (function addHeaderButtons() {
+        function headerIconBtn(svg, tipKey, fallback, cls, handler) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ed-button ed-button-icon-only ' + cls;
+          var tip = tstr(tipKey, fallback);
+          b.setAttribute('aria-label', tip);
+          b.setAttribute('data-tooltip', tip);
+          var sp = document.createElement('span');
+          sp.className = 'ed-button-icon';
+          sp.innerHTML = svg;
+          b.appendChild(sp);
+          b.addEventListener('click', handler);
+          viewActions.appendChild(b);
+    }
+        headerIconBtn(DGN_SVG.example, 'designerExampleUnits', 'Example units', 'dgn-example-units', createExampleUnits);
+        headerIconBtn(DGN_SVG.ai, 'editorAI', 'AI Assist', 'dgn-ai-header', runAiAssist);
+      })();
+    }
+
+    // Preview chrome handlers: fullscreen + focus.
+    var fsBtn = preview && preview.querySelector('.dgn-preview-fs');
+    if (fsBtn) fsBtn.addEventListener('click', function () { dgnToggleFullscreen(); this.blur(); });
+    var focusBtn = preview && preview.querySelector('.dgn-preview-focus');
+    if (focusBtn) focusBtn.addEventListener('click', function () { if (dgn.previewFocused) exitPreviewFocus(); else enterPreviewFocus(); this.blur(); });
+    var stage = stageEl();
+    if (stage) {
+      dgn.previewClick = function () { enterPreviewFocus(); };
+      stage.addEventListener('click', dgn.previewClick);
+      // Double-click the stage also toggles focus.
+      stage.addEventListener('dblclick', function () { if (dgn.previewFocused) exitPreviewFocus(); else enterPreviewFocus(); });
+    }
+
     // Bind editor inputs.
     var ta = inputEl();
     if (ta) {
@@ -695,8 +914,44 @@
       ta.addEventListener('keyup', function () { updateStatusBar(); });
       ta.addEventListener('click', function () { updateStatusBar(); });
       ta.addEventListener('scroll', function () { var g = gutterEl(); if (g) g.scrollTop = ta.scrollTop; });
-      // Ctrl+S save binding on root.
+      // Ctrl+S save + Ctrl+ + fullscreen. Keep focus isolation: when preview is focused,
+      // Esc must exit focus first before any other shortcut fires.
       dgn.keyHandler = function (e) {
+        if (dgn.previewFocused) {
+          if (e.key === 'Escape') {
+            e.preventDefault(); e.stopImmediatePropagation();
+            exitPreviewFocus();
+            return;
+          }
+          // In focus, suppress project shortcuts; let game keys through to canvas
+          // by returning without handling (capture game listeners still run).
+          return;
+        }
+        if (dgnIsFullscreen()) {
+          if (e.key === 'Escape') {
+            e.preventDefault(); e.stopImmediatePropagation();
+            dgnSetFullscreen(false);
+            return;
+          }
+          var isCtrlF = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+          if (isCtrlF) {
+            e.preventDefault(); e.stopImmediatePropagation();
+            dgnSetFullscreen(false);
+            return;
+          }
+          // Let game keys pass; suppress project nav below by returning.
+          return;
+        }
+        var isCtrlPlus = (e.key === '+' || e.key === '=' || (e.code && e.code === 'Equal')) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+        if (isCtrlPlus) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          // Ignore when typing
+          var tag = document.activeElement && document.activeElement.tagName;
+          var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
+          if (typing) return;
+          dgnToggleFullscreen();
+          return;
+        }
         if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
           e.preventDefault();
           e.stopPropagation();
@@ -704,6 +959,25 @@
         }
       };
       document.addEventListener('keydown', dgn.keyHandler, true);
+      // Separate capture for Esc when focus is on the stage element itself.
+      dgn.previewFocusKey = function (e) {
+        if (dgn.previewFocused && e.key === 'Escape') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          exitPreviewFocus();
+        }
+      };
+      document.addEventListener('keydown', dgn.previewFocusKey, true);
+      dgn.previewFsKey = function (e) {
+        var isCtrlPlus = (e.key === '+' || e.key === '=' || (e.code && e.code === 'Equal')) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+        if (!isCtrlPlus) return;
+        var tag = document.activeElement && document.activeElement.tagName;
+        var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
+        if (typing) return;
+        if (dgn.previewFocused || dgnIsFullscreen()) return; // already handled above
+        e.preventDefault(); e.stopImmediatePropagation();
+        dgnToggleFullscreen();
+      };
+      document.addEventListener('keydown', dgn.previewFsKey);
       updateGutterInner();
       updateStatusBar();
     }
@@ -718,10 +992,16 @@
   }
 
   function cleanup() {
+    if (dgn.previewFsKey) { try { document.removeEventListener('keydown', dgn.previewFsKey); } catch (e0) {} dgn.previewFsKey = null; }
+    if (dgn.previewFocusKey) { try { document.removeEventListener('keydown', dgn.previewFocusKey, true); } catch (e1) {} dgn.previewFocusKey = null; }
     if (dgn.keyHandler) {
       document.removeEventListener('keydown', dgn.keyHandler, true);
       dgn.keyHandler = null;
     }
+    var stage = stageEl();
+    if (stage && dgn.previewClick) { try { stage.removeEventListener('click', dgn.previewClick); } catch (e2) {} dgn.previewClick = null; }
+    if (dgn.previewFocused) { dgn.previewFocused = false; document.body.classList.remove('dgn-preview-focus'); }
+    if (dgnIsFullscreen()) { try { dgnSetFullscreen(false); } catch (e3) {} }
     dgnPreviewStop();
     if (dgn.layoutRoot && global.EditorLayout && typeof global.EditorLayout.destroy === 'function') {
       try { global.EditorLayout.destroy(dgn.layoutRoot); } catch (e) {}
