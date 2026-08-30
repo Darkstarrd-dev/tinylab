@@ -23,8 +23,18 @@
     previewFocused: false,
     previewFsKey: null,
     previewFocusKey: null,
-    previewClick: null
+    previewClick: null,
+    consoleLines: [],
+    consoleVisible: false,
+    consoleWrapInstalled: false,
+    origConsole: null,
+    consoleEl: null,
+    consoleWinError: null,
+    consoleRejection: null
   };
+
+  var DGN_CONSOLE_MAX = 500;
+  var DGN_CONSOLE_TRUNCATE = 4000;
 
   var DGN_SVG = {
     fullscreen: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
@@ -44,6 +54,162 @@
     return v || fallback;
   }
   function tstr(key, fallback) { return tr(key, fallback); }
+
+  // Console pipeline — captured before any UI touches layout.
+  function dgnConsoleFormat(args) {
+    var parts = [];
+    for (var i = 0; i < args.length; i++) {
+      var v = args[i];
+      var s;
+      if (v instanceof Error) {
+        s = v.message ? v.message : String(v);
+        if (v.stack) s += '\n' + v.stack;
+      } else if (v && typeof v === 'object') {
+        try { s = JSON.stringify(v); } catch (e) { s = String(v); }
+      } else {
+        s = String(v == null ? '' : v);
+      }
+      parts.push(s);
+    }
+    var out = parts.join(' ');
+    if (out.length > DGN_CONSOLE_TRUNCATE) out = out.slice(0, DGN_CONSOLE_TRUNCATE) + ' … (truncated)';
+    return out;
+  }
+  function dgnConsoleTs() {
+    var d = new Date();
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+    function pad3(n) { return n < 10 ? '00' + n : n < 100 ? '0' + n : String(n); }
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + '.' + pad3(d.getMilliseconds());
+  }
+  function dgnConsolePush(level, args) {
+    try {
+      var lvl = String(level || 'log').toLowerCase();
+      if (lvl !== 'log' && lvl !== 'info' && lvl !== 'warn' && lvl !== 'error' && lvl !== 'debug') lvl = 'log';
+      var text = dgnConsoleFormat(args && args.length ? Array.prototype.slice.call(args) : []);
+      dgn.consoleLines.push({ ts: dgnConsoleTs(), level: lvl, text: text });
+      while (dgn.consoleLines.length > DGN_CONSOLE_MAX) dgn.consoleLines.shift();
+      if (dgn.consoleVisible) dgnRenderConsole();
+      else if (lvl === 'error' || lvl === 'warn') {
+        var bar = dgn.layoutRoot && dgn.layoutRoot.querySelector('[data-tab="console"]');
+        if (bar) bar.classList.add('has-error');
+      }
+    } catch (e) {}
+  }
+  function dgnRenderConsole() {
+    try {
+      var el = dgn.consoleEl;
+      if (!el) return;
+      var nearBottom = (el.scrollTop + el.clientHeight) >= (el.scrollHeight - 24);
+      el.textContent = '';
+      if (!dgn.consoleLines.length) {
+        var empty = document.createElement('div');
+        empty.className = 'dgn-console-empty';
+        empty.textContent = tstr('designerConsoleEmpty', 'No output yet — Run to see logs');
+        el.appendChild(empty);
+      } else {
+        for (var i = 0; i < dgn.consoleLines.length; i++) {
+          var row = dgn.consoleLines[i];
+          var line = document.createElement('div');
+          line.className = 'dgn-console-line level-' + row.level;
+          var ts = document.createElement('span');
+          ts.className = 'dgn-console-ts';
+          ts.textContent = row.ts;
+          var lv = document.createElement('span');
+          lv.className = 'dgn-console-level dgn-console-level-' + row.level;
+          lv.textContent = row.level;
+          var tx = document.createElement('span');
+          tx.className = 'dgn-console-text';
+          tx.textContent = row.text;
+          line.appendChild(ts);
+          line.appendChild(lv);
+          line.appendChild(tx);
+          el.appendChild(line);
+        }
+      }
+      if (nearBottom) { try { el.scrollTop = el.scrollHeight; } catch (e2) {} }
+    } catch (e3) {}
+  }
+  function dgnSetConsoleVisible(on) {
+    var will = !!on;
+    dgn.consoleVisible = will;
+    var stage = stageEl();
+    var cEl = dgn.consoleEl;
+    if (stage) stage.classList.toggle('is-hidden', will);
+    if (cEl) cEl.classList.toggle('is-visible', will);
+    var bar = dgn.layoutRoot && dgn.layoutRoot.querySelector('.dgn-preview-toolbar');
+    if (bar) {
+      var tabs = bar.querySelectorAll('.dgn-tab');
+      for (var i = 0; i < tabs.length; i++) {
+        var isC = tabs[i].getAttribute('data-tab') === 'console';
+        tabs[i].classList.toggle('is-active', isC ? will : !will);
+        tabs[i].setAttribute('aria-selected', String(isC ? will : !will));
+        if (isC && will) tabs[i].classList.remove('has-error');
+      }
+    }
+    try { localStorage.setItem('designerConsoleVisible', will ? '1' : '0'); } catch (e) {}
+    if (will) dgnRenderConsole();
+  }
+  function dgnClearConsole() {
+    dgn.consoleLines.length = 0;
+    dgnRenderConsole();
+  }
+  function dgnInstallConsoleCapture() {
+    if (dgn.consoleWrapInstalled) return;
+    try {
+      var orig = global.console || {};
+      dgn.origConsole = {
+        log: orig.log, info: orig.info, warn: orig.warn, error: orig.error, debug: orig.debug
+      };
+      function wrap(level) {
+        return function () {
+          try { if (typeof dgn.origConsole[level] === 'function') dgn.origConsole[level].apply(orig, arguments); } catch (e) {}
+          dgnConsolePush(level, arguments);
+        };
+      }
+      if (global.console) {
+        global.console.log = wrap('log');
+        global.console.info = wrap('info');
+        global.console.warn = wrap('warn');
+        global.console.error = wrap('error');
+        if (orig.debug) global.console.debug = wrap('debug');
+      }
+      dgn.consoleWinError = function (ev) {
+        try {
+          var msg = (ev && (ev.message || ev.error && (ev.error.stack || ev.error.message))) || (ev && ev.type) || 'error';
+          var extra = ev && ev.filename ? ' @ ' + ev.filename + ':' + (ev.lineno || 0) + ':' + (ev.colno || 0) : '';
+          dgnConsolePush('error', [String(msg) + extra]);
+        } catch (e2) {}
+      };
+      dgn.consoleRejection = function (ev) {
+        try {
+          var reason = ev && ev.reason;
+          var text = reason ? (reason.stack || reason.message || String(reason)) : 'unhandledrejection';
+          dgnConsolePush('error', [String(text)]);
+        } catch (e3) {}
+      };
+      global.addEventListener('error', dgn.consoleWinError);
+      global.addEventListener('unhandledrejection', dgn.consoleRejection);
+      dgn.consoleWrapInstalled = true;
+    } catch (e4) {}
+  }
+  function dgnUninstallConsoleCapture() {
+    if (!dgn.consoleWrapInstalled) return;
+    try {
+      if (dgn.origConsole && global.console) {
+        if (dgn.origConsole.log) global.console.log = dgn.origConsole.log;
+        if (dgn.origConsole.info) global.console.info = dgn.origConsole.info;
+        if (dgn.origConsole.warn) global.console.warn = dgn.origConsole.warn;
+        if (dgn.origConsole.error) global.console.error = dgn.origConsole.error;
+        if (dgn.origConsole.debug) global.console.debug = dgn.origConsole.debug;
+      }
+      if (dgn.consoleWinError) global.removeEventListener('error', dgn.consoleWinError);
+      if (dgn.consoleRejection) global.removeEventListener('unhandledrejection', dgn.consoleRejection);
+    } catch (e) {}
+    dgn.consoleWrapInstalled = false;
+    dgn.consoleWinError = null;
+    dgn.consoleRejection = null;
+    dgn.origConsole = null;
+  }
 
   // Root-param API helper: all editor calls go through ?root=games.
   function edFetch(path, opts) {
@@ -610,6 +776,7 @@
     var seam = global.__dgames;
     if (!seam || typeof seam.loadPhaser !== 'function' || typeof seam.injectScript !== 'function' || typeof seam.makeHost !== 'function') {
       dgnStatus(tstr('designerPreviewError', 'Game host not available'));
+      dgnConsolePush('error', [tstr('designerPreviewError', 'Preview error') + ': Game host not available']);
       return Promise.resolve();
     }
     var ta = inputEl();
@@ -651,10 +818,11 @@
         .then(function (r) { if (!r.ok) throw new Error('entry fetch -> ' + r.status); return r.text(); });
     }
 
+    dgnConsolePush('info', ['\u25B6 Run ' + id + '/' + entryName]);
     dgnStatus(tstr('demoGamesLoading', 'Loading\u2026'));
     return entrySrcPromise
       .then(function (src) {
-        if (!src || !String(src).trim()) throw new Error('entry is empty');
+        if (!src || !String(src).trim()) { var ee = new Error('entry is empty'); dgnConsolePush('error', [ee.message]); throw ee; }
         return seam.loadPhaser().then(function () { return src; });
       })
       .then(function (src) {
@@ -667,13 +835,15 @@
           var v = Date.now();
           var diskSrc = '/games/' + encodeURIComponent(id) + '/' + entryName.split('/').map(encodeURIComponent).join('/') + '?v=' + v;
           return seam.injectScript(diskSrc).then(function () {
-            if (!seam.registry || !seam.registry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
+            if (!seam.registry || !seam.registry[id]) { var ne = new Error('game "' + id + '" did not call TRGames.register'); dgnConsolePush('error', [ne.message]); throw ne; }
             var def = seam.registry[id].def;
             dgnPreviewStop();
             var stage = stageEl();
-            if (!stage) throw new Error('preview stage not rendered');
+            if (!stage) { var se = new Error('preview stage not rendered'); dgnConsolePush('error', [se.message]); throw se; }
             stage.innerHTML = '';
-            var handle = def.launch(seam.makeHost(id, stage));
+            var handle;
+            try { handle = def.launch(seam.makeHost(id, stage)); }
+            catch (launchErr) { dgnConsolePush('error', [launchErr && (launchErr.stack || launchErr.message) || String(launchErr)]); throw launchErr; }
             dgn.preview = { id: id, handle: handle || null };
             dgnStatus('');
           });
@@ -683,14 +853,16 @@
         var blob = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
         return seam.injectScript(blob).then(function () {
           try { URL.revokeObjectURL(blob); } catch (ignored) {}
-          if (!seam.registry || !seam.registry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
+          if (!seam.registry || !seam.registry[id]) { var ne2 = new Error('game "' + id + '" did not call TRGames.register'); dgnConsolePush('error', [ne2.message]); throw ne2; }
           var def = seam.registry[id].def;
           dgnPreviewStop();
           var stage = stageEl();
-          if (!stage) throw new Error('preview stage not rendered');
+          if (!stage) { var se2 = new Error('preview stage not rendered'); dgnConsolePush('error', [se2.message]); throw se2; }
           stage.innerHTML = '';
-          var handle = def.launch(seam.makeHost(id, stage));
-          dgn.preview = { id: id, handle: handle || null };
+          var handle2;
+          try { handle2 = def.launch(seam.makeHost(id, stage)); }
+          catch (launchErr2) { dgnConsolePush('error', [launchErr2 && (launchErr2.stack || launchErr2.message) || String(launchErr2)]); throw launchErr2; }
+            dgn.preview = { id: id, handle: handle2 || null };
           dgnStatus('');
         }, function (blobErr) {
           try { URL.revokeObjectURL(blob); } catch (ignored) {}
@@ -698,23 +870,27 @@
           try {
             // eslint-disable-next-line no-eval
             (1, eval)(src + '\n//# sourceURL=designer-preview://' + id + '/' + entryName);
-            if (!seam.registry || !seam.registry[id]) throw new Error('game "' + id + '" did not call TRGames.register');
+            if (!seam.registry || !seam.registry[id]) { var ne3 = new Error('game "' + id + '" did not call TRGames.register'); dgnConsolePush('error', [ne3.message]); throw ne3; }
             var def2 = seam.registry[id].def;
             dgnPreviewStop();
             var stage2 = stageEl();
-            if (!stage2) throw new Error('preview stage not rendered');
+            if (!stage2) { var se3 = new Error('preview stage not rendered'); dgnConsolePush('error', [se3.message]); throw se3; }
             stage2.innerHTML = '';
-            var handle2 = def2.launch(seam.makeHost(id, stage2));
-            dgn.preview = { id: id, handle: handle2 || null };
+            var handle3;
+            try { handle3 = def2.launch(seam.makeHost(id, stage2)); }
+            catch (launchErr3) { dgnConsolePush('error', [launchErr3 && (launchErr3.stack || launchErr3.message) || String(launchErr3)]); throw launchErr3; }
+            dgn.preview = { id: id, handle: handle3 || null };
             dgnStatus('');
             return;
           } catch (evalErr) {
+            dgnConsolePush('error', [evalErr && (evalErr.stack || evalErr.message) || String(evalErr)]);
             throw blobErr;
           }
         });
       })
       .catch(function (err) {
         dgnStatus(tstr('designerPreviewError', 'Preview error') + ': ' + (err && err.message || String(err)));
+        dgnConsolePush('error', [err && (err.stack || err.message) || String(err)]);
       });
   }
 
@@ -780,7 +956,34 @@
     // Transform preview surface into Phaser stage.
     var preview = previewHost();
     if (preview) {
-      preview.innerHTML = '<div class="dgn-stage"></div><div class="dgn-status"></div><button type="button" class="dgn-preview-fs" aria-label="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '" data-tooltip="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '">' + DGN_SVG.fullscreen + '</button><button type="button" class="dgn-preview-focus" data-tooltip="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '" aria-label="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '">⛶</button>';
+      preview.innerHTML = '<div class="dgn-preview-toolbar" role="tablist" aria-label="' + escapeHtml(tstr('designerPreview', 'Preview') + ' / ' + tstr('designerConsole', 'Console')) + '"><div class="dgn-preview-tabs"><button type="button" class="dgn-tab is-active" data-tab="preview" role="tab" aria-selected="true">' + escapeHtml(tstr('designerPreview', 'Preview')) + '</button><button type="button" class="dgn-tab" data-tab="console" role="tab" aria-selected="false">' + escapeHtml(tstr('designerConsole', 'Console')) + '</button></div><button type="button" class="dgn-console-clear btn btn-ghost">' + escapeHtml(tstr('designerConsoleClear', 'Clear')) + '</button></div><div class="dgn-stage"></div><div class="dgn-console" role="log" aria-live="polite"></div><div class="dgn-status"></div><button type="button" class="dgn-preview-fs" aria-label="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '" data-tooltip="' + escapeHtml(tstr('demoEnterFullscreen', 'Enter fullscreen')) + '">' + DGN_SVG.fullscreen + '</button><button type="button" class="dgn-preview-focus" data-tooltip="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '" aria-label="' + escapeHtml(tstr('designerPreviewFocus', 'Focus preview')) + '">⛶</button>';
+      // Bind console surface and toolbar.
+      dgn.consoleEl = preview.querySelector('.dgn-console');
+      var toolbar = preview.querySelector('.dgn-preview-toolbar');
+      if (toolbar) {
+        var clearBtn = toolbar.querySelector('.dgn-console-clear');
+        if (clearBtn) {
+          clearBtn.addEventListener('click', function () { dgnClearConsole(); });
+        }
+        var tabs = toolbar.querySelectorAll('.dgn-tab');
+        for (var ti = 0; ti < tabs.length; ti++) {
+          (function (btn) {
+            btn.addEventListener('click', function () {
+              var wantConsole = btn.getAttribute('data-tab') === 'console';
+              dgnSetConsoleVisible(wantConsole);
+            });
+          })(tabs[ti]);
+        }
+      }
+      // Install global console capture once per render lifecycle.
+      dgnInstallConsoleCapture();
+      // Restore last visibility (default preview).
+      try {
+        var saved = localStorage.getItem('designerConsoleVisible');
+        if (saved === '1') dgnSetConsoleVisible(true);
+        else dgnSetConsoleVisible(false);
+      } catch (e0) { dgnSetConsoleVisible(false); }
+      if (!dgn.consoleLines.length) dgnRenderConsole();
     }
     // Default split view.
     if (global.EditorLayout && typeof global.EditorLayout.setPreview === 'function') {
@@ -1019,6 +1222,10 @@
   }
 
   function cleanup() {
+    // Console: uninstall capture and drop refs (history preserved across re-render).
+    try { dgnUninstallConsoleCapture(); } catch (eC) {}
+    dgn.consoleEl = null;
+    dgn.consoleVisible = false;
     if (dgn.previewFsKey) { try { document.removeEventListener('keydown', dgn.previewFsKey); } catch (e0) {} dgn.previewFsKey = null; }
     if (dgn.previewFocusKey) { try { document.removeEventListener('keydown', dgn.previewFocusKey, true); } catch (e1) {} dgn.previewFocusKey = null; }
     if (dgn.keyHandler) {

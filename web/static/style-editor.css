@@ -535,6 +535,25 @@
 .dgn-preview-fs:hover, .dgn-preview-focus:hover { background: rgba(20,20,28,0.92); }
 /* Focus indicator is non-layout: a subtle ring that does not reflow. */
 .dgn-preview-focused { box-shadow: inset 0 0 0 2px var(--accent, #4f46e5); }
+/* Designer console — Preview/Console toggle */
+.dgn-preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border, rgba(255,255,255,0.08));background:var(--panel-bg, rgba(15,23,42,0.04));flex:0 0 auto}
+.dgn-preview-tabs{display:flex;gap:4px}
+.dgn-tab{padding:4px 10px;border-radius:999px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:12px;cursor:pointer}
+.dgn-tab.is-active{background:var(--accent, #4f46e5);color:#fff;border-color:var(--accent, #4f46e5)}
+.dgn-tab.has-error{box-shadow:0 0 0 2px rgba(248,113,113,0.35)}
+.dgn-console{flex:1 1 auto;min-height:160px;max-height:100%;overflow:auto;background:#0a0f1e;color:#e2e8f0;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px;line-height:1.5;padding:8px;white-space:pre-wrap;word-break:break-word;display:none}
+.dgn-console.is-visible{display:block}
+.dgn-stage.is-hidden{display:none !important}
+.dgn-console-line{display:flex;gap:8px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.dgn-console-ts{opacity:0.55;flex:0 0 auto}
+.dgn-console-level{flex:0 0 auto;text-transform:uppercase;font-weight:600}
+.dgn-console-level-log,.dgn-console-level-info{color:#94a3b8}
+.dgn-console-level-warn{color:#facc15}
+.dgn-console-level-error{color:#f87171}
+.dgn-console-line.level-error{background:rgba(248,113,113,0.08)}
+.dgn-console-line.level-warn{background:rgba(250,204,21,0.08)}
+.dgn-console-empty{opacity:0.6;padding:12px 4px}
+.dgn-console-clear{font-size:12px}
 /* Fullscreen reuses the same body class as Demo→games (see style-demo.css) */
 body.demo-stage-fullscreen .dgn-root #ed-main-preview { height: 100vh !important; }
 body.demo-stage-fullscreen .dgn-root .ed-explorer,
@@ -542,5 +561,8 @@ body.demo-stage-fullscreen .dgn-root .ed-navigation,
 body.demo-stage-fullscreen .dgn-root .ed-control-bar,
 body.demo-stage-fullscreen .dgn-root .ed-statusbar,
 body.demo-stage-fullscreen .dgn-root #ed-main-preview .dgn-status { display: none !important; }
+body.demo-stage-fullscreen .dgn-root .dgn-preview-toolbar,
+body.demo-stage-fullscreen .dgn-root .dgn-console.is-visible { display: flex !important; }
+body.demo-stage-fullscreen .dgn-root .dgn-console.is-visible { flex-direction: column; }
 body.demo-stage-fullscreen .dgn-root #ed-main-preview { padding: 0 !important; }
 
