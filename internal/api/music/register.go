@@ -121,6 +121,14 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
 	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
+	if rg := r.Header.Get("Range"); rg != "" {
+		req.Header.Set("Range", rg)
+	}
+	// P0-bili: bilibili CDN (upos/*bilivideo.com / *.bilivideo.com) rejects audio without Referer -> 403.
+	// Forward a Bilibili referer only for those hosts; other URLs keep UA-only.
+	if strings.Contains(strings.ToLower(u.Hostname()), "bilivideo.com") || strings.Contains(strings.ToLower(u.Hostname()), "bilibili.com") {
+		req.Header.Set("Referer", "https://www.bilibili.com/")
+	}
 	// P0-02a: outbound SSRF policy with redirect revalidation + budget
 	if u2, err2 := outbound.ValidateURL(body.URL); err2 != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err2.Error())
@@ -136,7 +144,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	if resp.ContentLength > 32<<20 {
+	if resp.ContentLength > 200<<20 {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "response too large")
 		return
 	}
@@ -149,9 +157,21 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Content-Type", "audio/mpeg")
 	}
+	if cr := resp.Header.Get("Content-Range"); cr != "" {
+		w.Header().Set("Content-Range", cr)
+	}
+	if ar := resp.Header.Get("Accept-Ranges"); ar != "" {
+		w.Header().Set("Accept-Ranges", ar)
+	} else {
+		w.Header().Set("Accept-Ranges", "bytes")
+	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, resp.Body)
+	if resp.StatusCode == http.StatusPartialContent {
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 200<<20))
 }
 
 // download fetches a remote audio URL and saves it to Musics dir.
@@ -183,11 +203,74 @@ func (h *Handler) bilibiliSearch(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	cli := &http.Client{Timeout: 15 * time.Second}
 	resp, err := cli.Do(req)
-	if err != nil { apibase.WriteAPIError(w, http.StatusBadGateway, err.Error()); return }
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	b, _ := io.ReadAll(resp.Body)
 	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil { apibase.WriteAPIError(w, http.StatusBadGateway, "bilibili search decode"); return }
+	if err := json.Unmarshal(b, &raw); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadGateway, "bilibili search decode")
+		return
+	}
+	// -412 wind-control fallback: some keywords (e.g. "音乐") are banned on /search/type but work via /search/all/v2.
+	if code, _ := raw["code"].(float64); code == -412 {
+		fallbackURL := fmt.Sprintf("https://api.bilibili.com/x/web-interface/search/all/v2?keyword=%s", url.QueryEscape(kw))
+		req2, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, fallbackURL, nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		req2.Header.Set("Referer", "https://www.bilibili.com/")
+		req2.Header.Set("Accept", "application/json")
+		if resp2, err2 := cli.Do(req2); err2 == nil {
+			defer resp2.Body.Close()
+			b2, _ := io.ReadAll(resp2.Body)
+			var raw2 map[string]any
+			if json.Unmarshal(b2, &raw2) == nil {
+				if data2, ok := raw2["data"].(map[string]any); ok {
+					if results, ok := data2["result"].([]any); ok {
+						for _, entry := range results {
+							if em, ok := entry.(map[string]any); ok {
+								if rt, _ := em["result_type"].(string); rt == "video" {
+									if arr, ok := em["data"].([]any); ok {
+										raw = map[string]any{"data": map[string]any{"result": arr}}
+									}
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	} else if raw["code"] == nil && len(b) > 0 && b[0] == '<' {
+		// HTML anti-bot page instead of JSON — retry via all/v2 same as -412
+		fallbackURL := fmt.Sprintf("https://api.bilibili.com/x/web-interface/search/all/v2?keyword=%s", url.QueryEscape(kw))
+		req2, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, fallbackURL, nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		req2.Header.Set("Referer", "https://www.bilibili.com/")
+		req2.Header.Set("Accept", "application/json")
+		if resp2, err2 := cli.Do(req2); err2 == nil {
+			defer resp2.Body.Close()
+			b2, _ := io.ReadAll(resp2.Body)
+			var raw2 map[string]any
+			if json.Unmarshal(b2, &raw2) == nil {
+				if data2, ok := raw2["data"].(map[string]any); ok {
+					if results, ok := data2["result"].([]any); ok {
+						for _, entry := range results {
+							if em, ok := entry.(map[string]any); ok {
+								if rt, _ := em["result_type"].(string); rt == "video" {
+									if arr, ok := em["data"].([]any); ok {
+										raw = map[string]any{"data": map[string]any{"result": arr}}
+									}
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	var songs []map[string]any
 	if data, ok := raw["data"].(map[string]any); ok {
 		var list []any
@@ -338,6 +421,10 @@ func (h *Handler) transcode(w http.ResponseWriter, r *http.Request) {
 	format := strings.ToLower(r.URL.Query().Get("format"))
 	if format == "" { format = "mp3" }
 	if format != "mp3" && format != "opus" && format != "ogg" && format != "wav" { format = "mp3" }
+	// The /api group wraps every handler with a 1 MiB MaxBytesReader. For transcode
+	// (raw audio bytes, not JSON) that cap would reject any real track. Restore
+	// the full 200 MiB budget by replacing the already-wrapped reader — the
+	// outer 1 MiB limit is effectively re-applied then lifted for this route.
 	r.Body = http.MaxBytesReader(w, r.Body, 200<<20)
 	data, err := io.ReadAll(r.Body)
 	if err != nil { apibase.WriteAPIError(w, http.StatusBadRequest, err.Error()); return }
@@ -379,6 +466,9 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
 	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
+	if strings.Contains(strings.ToLower(u.Hostname()), "bilivideo.com") || strings.Contains(strings.ToLower(u.Hostname()), "bilibili.com") {
+		req.Header.Set("Referer", "https://www.bilibili.com/")
+	}
 	// P0-02b: SSRF + limit
 	if u2, err2 := outbound.ValidateURL(body.URL); err2 != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid url: "+err2.Error())

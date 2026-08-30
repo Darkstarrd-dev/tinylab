@@ -270,7 +270,7 @@
     var t0=Date.now();
     musicLog('Request: MusicHost.search("'+kw+'", ['+(provs?provs.join(', '):'all')+'], 24)','req');
     // Also surface what each fetch will hit so CSP/network blocks are obvious
-    if(selectedProviders.indexOf('jamendo')>=0) musicLog('Request: Jamendo → '+(musicUseProxy()?'via /api/music/proxy':'https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&search='+encodeURIComponent(kw))+' (proxy '+(musicUseProxy()?'ON':'OFF')+')','req');
+    if(selectedProviders.indexOf('jamendo')>=0) musicLog('Request: Jamendo → '+(musicUseProxy()?'via /api/music/proxy':'https://api.jamendo.com/v3.0/tracks/?client_id=836523a7&search='+encodeURIComponent(kw))+' (proxy '+(musicUseProxy()?'ON':'OFF')+')','req');
     if(selectedProviders.indexOf('bilibili')>=0) musicLog('Request: Bilibili → GET /api/music/bilibili/search?keyword='+encodeURIComponent(kw)+' (proxied via backend)','req');
     host.search(kw, provs, 24).then(function(list){
       var dt=Date.now()-t0;

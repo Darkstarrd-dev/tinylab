@@ -344,6 +344,13 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		// 1 MB API request body limit
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Music transcode carries raw audio bytes (up to 200 MiB), not JSON — the
+				// global 1 MiB cap would make it unusable. Bypass here; the handler
+				// enforces its own 200 MiB MaxBytesReader.
+				if r.URL.Path == "/api/music/transcode" || strings.HasPrefix(r.URL.Path, "/api/music/transcode?") {
+					next.ServeHTTP(w, r)
+					return
+				}
 				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 				next.ServeHTTP(w, r)
 			})

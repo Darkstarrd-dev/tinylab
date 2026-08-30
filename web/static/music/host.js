@@ -37,12 +37,12 @@
     }).then(function(src){ return loadFromSource(src, url); });
   }
 
-  // Built-in Jamendo provider (CC licensed, no key, client_id demo 56d30dc8)
-  // API: https://api.jamendo.com/v3.0/tracks/?client_id=56d30dc8&format=json&limit=20&search=xxx
+  // Built-in Jamendo provider (CC licensed, client_id 836523a7 via Nuclear .env)
+  // API: https://api.jamendo.com/v3.0/tracks/?client_id=836523a7&format=json&limit=20&search=xxx
   // Issue 5: Jamendo 前端直连在某些网络/代理下无法命中时静默零结果；增加
   // 上游代理开关（localStorage tr:music:useProxy）时改走后端 /api/music/proxy。
   // Also supports tracks by id via /tracks/?id=xxx
-  var JAMENDO_CLIENT = '56d30dc8';
+  var JAMENDO_CLIENT = '836523a7';
   var JAMENDO_API = 'https://api.jamendo.com/v3.0';
   function musicUseProxy(){
     try{ return localStorage.getItem('tr:music:useProxy')==='1'; }catch(e){ return false; }

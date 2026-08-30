@@ -12,7 +12,7 @@
   // Template search: override with real API. Here mirrors Jamendo search
   // to keep an additional demo source in Stage 3 without external auth.
   var JAMENDO_API = 'https://api.jamendo.com/v3.0';
-  var CLIENT = '56d30dc8';
+  var CLIENT = '836523a7';
   function search(keyword, limit){
     var url = JAMENDO_API + '/tracks/?client_id=' + CLIENT + '&format=json&limit=' + (limit || 12) + '&search=' + encodeURIComponent(keyword || '') + '&audioformat=mp32';
     return fetch(url).then(function(r){ if(!r.ok) throw new Error('Jamendo '+r.status); return r.json(); })
