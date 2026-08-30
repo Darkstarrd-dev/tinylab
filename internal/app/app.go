@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api"
 	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
 	assistantapi "github.com/tinyrouter/tinyrouter/internal/api/assistant"
+	"github.com/tinyrouter/tinyrouter/internal/api/games"
 	"github.com/tinyrouter/tinyrouter/internal/archivetool"
 	"github.com/tinyrouter/tinyrouter/internal/assistant"
 	"github.com/tinyrouter/tinyrouter/internal/combo"
@@ -26,6 +28,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/rotation"
 	"github.com/tinyrouter/tinyrouter/internal/state"
 	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinyrouter/tinyrouter/web"
 )
 
 // HostLoopFunc blocks until the host (console signal, tray, webview) requests
@@ -222,6 +225,14 @@ func (a *App) buildComponents() error {
 	// before Routes() so /api/archive handlers and the settings PATCH hook are
 	// populated.
 	a.apiRouter.SetArchiveRunner(a.archiveRunner)
+	// Wire the embedded games FS so POST /api/games/seed can materialize
+	// the staged example units on demand. The embed is read once at startup
+	// and never overwritten on disk (SeedGames skips existing dirs).
+	if sub, err := fs.Sub(web.Games, "games"); err == nil {
+		games.SetEmbeddedGames(sub)
+	} else {
+		a.logger.Warn("embedded games unavailable: %v", err)
+	}
 	a.proxyHandler.SetDebugModeProvider(a.apiRouter.DebugMode)
 	a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)
 	a.proxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, a.configDir))

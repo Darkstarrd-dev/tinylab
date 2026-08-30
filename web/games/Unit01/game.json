@@ -1,0 +1,6 @@
+{
+  "id": "Unit01",
+  "title": "示例单元 01 — Hello Phaser",
+  "version": "0.1.0",
+  "entry": "main.js"
+}

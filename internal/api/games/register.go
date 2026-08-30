@@ -19,6 +19,7 @@
 package games
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -33,6 +34,32 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
 )
+
+// ctxKeySrcFS is the context key for injecting an fs.FS in tests.
+type ctxKey string
+
+const ctxKeySrcFS ctxKey = "games-src-fs"
+
+// CtxWithSrcFS returns a context carrying src as the seed source.
+func CtxWithSrcFS(ctx context.Context, src fs.FS) context.Context {
+	return context.WithValue(ctx, ctxKeySrcFS, src)
+}
+
+// embeddedGames is the production embedded games FS, set once at startup via
+// SetEmbeddedGames. Tests inject their own FS via CtxWithSrcFS.
+var embeddedGames fs.FS
+
+// SetEmbeddedGames registers the production embedded games FS (web.Games).
+func SetEmbeddedGames(src fs.FS) { embeddedGames = src }
+
+// SeedFromEmbedded seeds the embedded games into gamesDir using the
+// production embedded FS. No-op if none registered.
+func SeedFromEmbedded(gamesDir string, warnf func(string, ...any)) ([]string, error) {
+	if embeddedGames == nil {
+		return nil, nil
+	}
+	return SeedGames(embeddedGames, gamesDir, warnf)
+}
 
 // gameIDRe bounds a game id to URL-safe tokens: 1-64 alphanumerics, dash,
 // underscore. It is applied before any path use so a state file can never
@@ -71,12 +98,14 @@ func NewHandler(d *apibase.Deps) *Handler {
 type chiRouter interface {
 	Get(string, http.HandlerFunc)
 	Put(string, http.HandlerFunc)
+	Post(string, http.HandlerFunc)
 }
 
 // Register wires up the games routes on the given router. The caller is
 // expected to mount it inside the auth-gated, 1 MiB-capped /api group.
 func (h *Handler) Register(r chiRouter) {
 	r.Get("/", h.listGames)
+	r.Post("/seed", h.seedExamples)
 	r.Get("/{id}/state", h.getState)
 	r.Put("/{id}/state", h.putState)
 }
@@ -239,6 +268,66 @@ func (h *Handler) putState(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// seedExamples copies every embedded game directory that is not already on
+// disk into the games directory. POST /api/games/seed, auth-gated. Existing
+// directories are skipped (never overwritten). Returns
+// {"seeded":[...],"skipped":[...] }.
+func (h *Handler) seedExamples(w http.ResponseWriter, r *http.Request) {
+	gamesDir := h.gamesDir()
+	if err := os.MkdirAll(gamesDir, 0o755); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "create games dir failed: "+err.Error())
+		return
+	}
+	// Collect existing top-level dirs to report skipped.
+	existing := map[string]bool{}
+	if entries, err := os.ReadDir(gamesDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				existing[e.Name()] = true
+			}
+		}
+	}
+	// Source is the embedded default set; if the build has no embedded games
+	// we simply return an empty result (no error) so the call is idempotent.
+	// The embed lives in package web; import it here would create a cycle
+	// web->api/games->web, so the caller provides the FS. Instead we open
+	// the in-process embedded FS via an indirection: try to load the global
+	// web.Games through a helper. Keep the handler testable by accepting
+	// src via context — tests set r.Context with the src FS; production
+	// falls back to the embedded FS registered via SetEmbeddedGames.
+	src := embeddedGames
+	if v := r.Context().Value(ctxKeySrcFS); v != nil {
+		if f, ok := v.(fs.FS); ok {
+			src = f
+		}
+	}
+	if src == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"seeded": []string{}, "skipped": keysOf(existing)})
+		return
+	}
+	seeded, err := SeedGames(src, gamesDir, h.d.Logger.Warn)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "seed failed: "+err.Error())
+		return
+	}
+	// Re-collect skipped (those that existed before this call and were not seeded).
+	skipped := []string{}
+	for k := range existing {
+		skipped = append(skipped, k)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"seeded": seeded, "skipped": skipped})
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // SeedGames copies every game directory from src (an embedded FS whose top

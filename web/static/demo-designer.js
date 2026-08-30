@@ -164,44 +164,9 @@
   }
 
   // Example bundle — on-demand creation of staged demo projects.
-  var EXAMPLE_UNITS = [
-    { id: 'Unit01', title: 'Unit01 — Hello Phaser', entry: 'main.js',
-      // Minimal Phaser launch; mirrors lessons 01-game-config + 02-scenes.
-      main: '/* Unit01 — Hello Phaser */\n/* lesson refs: 01-game-config, 02-scenes, 03-sprites */\n/* open this file, change the color/text below and click Run */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit01\", title: \"Unit01 — Hello Phaser\", launch: function(host){\n    var Phaser = host.phaser;\n    var S = new (Phaser.Scene)(\"Hello\");\n    S.create = function(){ var w=this.scale.width,h=this.scale.height; this.add.text(w/2,h/2,\"Hello Phaser — edit me\",{fontFamily:\"monospace\",fontSize:\"18px\",color:\"#e8e8e8\"}).setOrigin(0.5); this.add.text(w/2,h/2+22,\"See C:/omp/Phaser lessons 01-03\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
-    { id: 'Unit02', title: 'Unit02 — Input & Arcade', entry: 'main.js',
-      main: '/* Unit02 — Input & Arcade Physics */\n/* lesson refs: 06-input, 05-physics-arcade, 04-loading */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit02\", title: \"Unit02 — Input & Arcade\", launch: function(host){\n    var Phaser = host.phaser;\n    var S = Phaser.Scene;\n    var scene = new S(\"Arcade\");\n    scene.create = function(){\n      var w=this.scale.width,h=this.scale.height;\n      this.player=this.physics.add.sprite(w/2,h/2,\"__DEFAULT\");\n      /* generate a texture similar to survivor\\\'s buildTextures */\n      try{ var g=this.add.graphics(); g.fillStyle(0x22c55e,1); g.fillCircle(0,0,14); g.generateTexture(\"__DOT\",28,28); g.destroy(); this.player.setTexture(\"__DOT\"); }catch(e){}\n      this.player.setCollideWorldBounds(true);\n      this.cursors=this.input.keyboard.createCursorKeys();\n      this.wasd=this.input.keyboard.addKeys(\"W,A,S,D\");\n      this.add.text(w/2,14,\"WASD / arrows — see lessons 05, 06\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0);\n    };\n    scene.update=function(){\n      if(!this.player) return;\n      var dx=0,dy=0,sp=220;\n      if(this.cursors.left.isDown||this.wasd.A.isDown) dx-=1;\n      if(this.cursors.right.isDown||this.wasd.D.isDown) dx+=1;\n      if(this.cursors.up.isDown||this.wasd.W.isDown) dy-=1;\n      if(this.cursors.down.isDown||this.wasd.S.isDown) dy+=1;\n      var len=Math.sqrt(dx*dx+dy*dy)||1; this.player.setVelocity(dx/len*sp, dy/len*sp);\n    };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",physics:{default:\"arcade\",arcade:{gravity:{y:0}}},scene:[scene]});\n  }});\n})();\n' },
-    { id: 'Unit03', title: 'Unit03 — Sprites & Tweens', entry: 'main.js',
-      main: '/* Unit03 — Sprites, Text, Tweens */\n/* lesson refs: 03-sprites, 07-tweens, 11-text, 18-filters */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit03\", title: \"Unit03 — Sprites & Tweens\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"Tweens\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height, g=this.add.graphics(); g.fillStyle(0x60a5fa,1); g.fillRect(0,0,28,28); g.generateTexture(\"box\",28,28); g.destroy(); var sp=this.add.sprite(w/2,h/2,\"box\"); this.tweens.add({targets:sp, y:h/2-40, duration:700, yoyo:true, repeat:-1, ease:\"Sine.inOut\"}); this.add.text(w/2,14,\"Tweens — lessons 07, 03, 11\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
-    { id: 'Unit04', title: 'Unit04 — Particles & Time', entry: 'main.js',
-      main: '/* Unit04 — Particles, Time, Events */\n/* lesson refs: 08-particles, 14-time, 15-events */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit04\", title: \"Unit04 — Particles & Time\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"X\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height; this.add.text(w/2,14,\"Particles & timers — lessons 08, 14, 15\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); this.time.addEvent({delay:900, loop:true, callback:function(){ try{ var g=this.add.graphics(); g.fillStyle(0xf59e0b,1); g.fillCircle(0,0,4); g.generateTexture(\"p\"+Date.now(),8,8); g.destroy(); var s=this.add.sprite(Phaser.Math.Between(20,w-20),Phaser.Math.Between(30,h-20),\"p\"+(Date.now()-1)); this.tweens.add({targets:s, alpha:0, duration:900, onComplete:function(){ s.destroy(); }});}catch(e){} }, callbackScope:this}); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' },
-    { id: 'Unit05', title: 'Unit05 — Scale & Cameras', entry: 'main.js',
-      main: '/* Unit05 — Scale & Cameras */\n/* lesson refs: 17-scale, 09-cameras, 12-graphics, 13-groups */\n(function(){\n  \"use strict\";\n  window.TRGames.register({ id: \"Unit05\", title: \"Unit05 — Scale & Cameras\", launch: function(host){\n    var Phaser=host.phaser;\n    var S=new (Phaser.Scene)(\"Cam\");\n    S.create=function(){ var w=this.scale.width,h=this.scale.height; this.cameras.main.setBackgroundColor(\"#111827\"); this.add.rectangle(w/2,h/2,Math.min(w,h)-40,Math.min(w,h)-40,0x1f2937).setStrokeStyle(2,0x4b5563); this.add.text(w/2,14,\"Scale & cameras — lessons 17, 09\",{fontFamily:\"monospace\",fontSize:\"11px\",color:\"#8b949e\"}).setOrigin(0.5,0); };\n    return new Phaser.Game({type:Phaser.AUTO,parent:host.container,width:host.width,height:host.height,backgroundColor:\"#0d1117\",scene:[S]});\n  }});\n})();\n' }
-  ];
-  function createExampleUnits() {
-    var created = 0, skipped = 0, failed = 0;
-    // Serialize to keep game.json before main.js per unit (manifest must exist for list).
-    var chain = Promise.resolve();
-    EXAMPLE_UNITS.forEach(function (u) {
-      chain = chain.then(function () {
-        return edFetch('/api/editor/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: u.id + '/game.json', content: JSON.stringify({ id: u.id, title: u.title, version: '0.1.0', entry: u.entry }, null, 2) }) })
-          .then(function (r) {
-            // 200 even if already exists (handler just overwrites); but we skip if file was already present to avoid clobber.
-            // Check via tree: we already serialize, so always write — user can delete from explorer.
-            return edFetch('/api/editor/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: u.id + '/' + u.entry, content: u.main }) });
-          })
-          .then(function (r) {
-            if (r.ok) created++; else failed++;
-          })
-          .catch(function () { failed++; });
-      });
-    });
-    return chain.then(function () {
-      toastInfo('Example units: ' + created + ' written' + (failed ? ' (' + failed + ' failed)' : ''));
-      return dgnLoadTree().then(function () {
-        if (dgn.tree && dgn.tree.length) { var first = EXAMPLE_UNITS[0].id + '/' + EXAMPLE_UNITS[0].entry; selectFileOrDir(first); }
-      });
-    });
-  }
+  // 旧版：前端内嵌 5 个 Unit 的 main 字符串并逐文件 POST /api/editor/save，
+  // 已替换为按需调用 POST /api/games/seed（内嵌 Unit01~06 由后端 embed 提供，
+  // 已存在的不覆盖）。按钮在 navLeft 的 collapse explorer 同列。
   function isInputFocusGlobally() {
     var tag = document.activeElement ? document.activeElement.tagName : '';
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
@@ -851,6 +816,72 @@
       expActions.appendChild(deleteBtn);
     }
 
+    // Example Unit — 与 collapse explorer 同列（navLeft 的 toggle-explorer 旁）。
+    // 按需通过 POST /api/games/seed 将内嵌的 Unit01~06 复制到磁盘 games 目录；
+    // 已存在的不覆盖，用户可在 Explorer 自行删除以腾出下拉菜单。
+    (function addExampleUnitButton() {
+      var navLeft = dgn.layoutRoot.querySelector('.ed-navigation-left');
+      var toggleBtn = navLeft ? navLeft.querySelector('.ed-nav-explorer-toggle, [data-action=\"toggle-explorer\"]') : null;
+      var anchor = navLeft || expActions;
+      if (!anchor) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ed-button ed-button-icon-only dgn-example-unit';
+      var tip = tstr('designerExampleUnits', 'Example units');
+      btn.setAttribute('aria-label', tip);
+      btn.setAttribute('data-tooltip', tip);
+      // 与现有按钮一致的图标容器结构，便于样式统一
+      var sp = document.createElement('span');
+      sp.className = 'ed-button-icon';
+      sp.innerHTML = DGN_SVG.example;
+      btn.appendChild(sp);
+      btn.addEventListener('click', function () {
+        // 防连点
+        if (btn.disabled) return;
+        btn.disabled = true;
+        var prevTip = btn.getAttribute('data-tooltip') || '';
+        dgnStatus(tstr('designerExampleSeeding', 'Seeding examples…'));
+        fetch('/api/games/seed', { method: 'POST' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('seed -> ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            var seeded = (data && data.seeded) || [];
+            var skipped = (data && data.skipped) || [];
+            var msg;
+            if (seeded.length === 0 && skipped.length > 0) {
+              msg = tstr('designerExampleExists', 'Examples already exist');
+            } else if (seeded.length > 0) {
+              var n = seeded.length;
+              msg = tstr('designerExampleSeeded', 'Created ' + n + ' example units');
+              // 用占位替换，避免 i18n 未更新时显示 {0}
+              if (msg.indexOf('{0}') >= 0) msg = msg.replace('{0}', String(n));
+            } else {
+              msg = tstr('designerSaved', 'Done');
+            }
+            dgnStatus(msg);
+            if (typeof global.toast === 'function') global.toast(msg, 'success');
+            return dgnLoadTree();
+          })
+          .catch(function (err) {
+            var m = (err && err.message) ? err.message : String(err);
+            dgnStatus(tstr('designerPreviewError', 'Error') + ': ' + m);
+            if (typeof global.toast === 'function') global.toast(m, 'error');
+          })
+          .then(function () { btn.disabled = false; }, function () { btn.disabled = false; });
+      });
+      // 插在 toggle explorer 按钮之后，保持同列
+      if (toggleBtn && toggleBtn.parentNode === navLeft) {
+        if (toggleBtn.nextSibling) navLeft.insertBefore(btn, toggleBtn.nextSibling);
+        else navLeft.appendChild(btn);
+      } else {
+        // 降级：放到 Explorer actions 行（用户仍可通过该入口创建示例）
+        if (expActions) expActions.appendChild(btn);
+        else anchor.appendChild(btn);
+      }
+    })();
+
     // Append preview controls into navigation actions.
     var navActions = dgn.layoutRoot.querySelector('.ed-navigation-actions') || dgn.layoutRoot.querySelector('.ed-navigation');
     if (navActions) {
@@ -871,26 +902,22 @@
       navActions.appendChild(ctrl);
     }
 
-    // AI Assist alongside Collapse Explorer — main text-editor header (view actions row).
-      var viewActions = dgn.layoutRoot.querySelector('.ed-view-actions');
+    // AI Assist — 保留在文本编辑器 header 的 view actions 行（原有位置）
+    var viewActions = dgn.layoutRoot.querySelector('.ed-view-actions');
     if (viewActions) {
-      (function addHeaderButtons() {
-        function headerIconBtn(svg, tipKey, fallback, cls, handler) {
-          var b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'ed-button ed-button-icon-only ' + cls;
-          var tip = tstr(tipKey, fallback);
-          b.setAttribute('aria-label', tip);
-          b.setAttribute('data-tooltip', tip);
-          var sp = document.createElement('span');
-          sp.className = 'ed-button-icon';
-          sp.innerHTML = svg;
-          b.appendChild(sp);
-          b.addEventListener('click', handler);
-          viewActions.appendChild(b);
-    }
-        headerIconBtn(DGN_SVG.example, 'designerExampleUnits', 'Example units', 'dgn-example-units', createExampleUnits);
-        headerIconBtn(DGN_SVG.ai, 'editorAI', 'AI Assist', 'dgn-ai-header', runAiAssist);
+      (function addAiButton() {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ed-button ed-button-icon-only dgn-ai-header';
+        var tip = tstr('editorAI', 'AI Assist');
+        b.setAttribute('aria-label', tip);
+        b.setAttribute('data-tooltip', tip);
+        var sp = document.createElement('span');
+        sp.className = 'ed-button-icon';
+        sp.innerHTML = DGN_SVG.ai;
+        b.appendChild(sp);
+        b.addEventListener('click', runAiAssist);
+        viewActions.appendChild(b);
       })();
     }
 

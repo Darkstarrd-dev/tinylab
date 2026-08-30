@@ -19,7 +19,6 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/config"
 	"github.com/tinyrouter/tinyrouter/internal/download"
 	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/web"
 	"github.com/tinyrouter/tinyrouter/internal/petstate"
 	"github.com/tinyrouter/tinyrouter/internal/procutil"
 )
@@ -367,9 +366,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			// Seed new dir if empty (e.g. switching to a fresh disk path)
 			if entries, err := os.ReadDir(newResolved); err == nil && len(entries) == 0 {
-				if _, err := games.SeedGames(web.Games, newResolved, func(f string, a ...any) {
-					h.d.Logger.Warn(f, a...)
-				}); err != nil {
+				if _, err := games.SeedFromEmbedded(newResolved, func(f string, a ...any) { h.d.Logger.Warn(f, a...) }); err != nil {
 					h.d.Logger.Warn("gamesDir: seed failed for %s: %v", newResolved, err)
 				}
 			}

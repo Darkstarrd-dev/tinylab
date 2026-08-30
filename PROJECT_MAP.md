@@ -325,7 +325,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 | `router_proxy.go` | P2-07 拆出：`registerProxyRoutes`——`/v1/*` CORS 预检 + 全部代理端点（chat/completions/models/images/embeddings/messages/responses/generateContent/tasks）；**位于 AuthMiddleware 之外**（审计 F-12 显式兼容决策：`/v1` 是本地代理入口，无应用层认证） |
 | `router_playground.go` | P2-07 拆出：`registerPlaygroundRoutes`（`/api/save-image`/`/api/image-proxy`/`/api/playground`/`/api/comfyui`/`/api/image-batches` + `RegisterRoot`——均 32MiB body 例外、auth 保护）+ `registerPlaygroundStatic`（`playground.css`/`/vendor/*`/`feature.Assets(RootPlaygroundPG)` 静态资源，门控于 `feature.Playground`） |
 | `router_utility.go` | P2-07 拆出：`registerUtilityRoutes`——`/api/gallery`（500MB 例外、`owner.Middleware`）/`/api/filetransfer`（610MiB body 上限、owner 路由）/`/api/archive`（逐路由 body cap、`owner.Middleware`）/`/api/editor`/`/api/text-review`（32MiB 例外组，门控于 `feature.Gallery`/`FileTransfer`/`Archive`/`Editor`） |
-| `router_demo.go` | P2-07 拆出：`registerDemoAPIRoutes`（`/api` 组内的 `/games`）+ `registerDemoStatic`（`ResolveGamesDir`→`MkdirAll`→`fs.Sub(web.Games)`→`SeedGames` + `/games/*` no-store 静态，位于 `serveUI` 通配前）；**约束**：各 `router_*.go` ≥50 行、无碎片，vendor 不动，`go build`/`go vet` 通过、路由不变 |
+| `router_demo.go` | P2-07 拆出，后于 2026-08-31 去启动自动播种：`registerDemoAPIRoutes`（`/api` 组内的 `/games`，含 `POST /seed`）+ `registerDemoStatic`（仅 `ResolveGamesDir`→`MkdirAll` + `/games/*` no-store 静态，启动不再播种，按需 `POST /api/games/seed` 由 Designer “Example Unit” 按钮触发，已存在跳过）；**约束**：各 `router_*.go` ≥50 行、无碎片，vendor 不动，`go build`/`go vet` 通过、路由不变 |
 | `helpers.go` | 根包辅助：`saveConfig`/`saveConfigAndReload`（config.Save→Reload 收敛点）、`writeAPIError`（JSON 错误信封）、`checkPortAvailable`、`getIntQuery`、`generateID`/`SyncIDCounter`（委托 `apibase` 单一计数器）、`firstActiveKey` |
 
 ### 10.10 `internal/api/trace/` — 追踪读取 API
@@ -551,10 +551,10 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 | 文件 | 职责 |
 |---|---|
-| `register.go` | `Handler` + `Register`（挂 `/api` 组内 `/games`：`GET /` 游戏列表（扫 gamesDir 一级子目录，manifest 校验 id=目录名/title/entry 必填/entry 不逃逸目录且存在，无效跳过 + Warn，附 entry mtime `v`）；`GET/{id}/state` + `PUT/{id}/state` 每游戏单 JSON 存档槽（id 正则 `^[A-Za-z0-9_-]{1,64}$` 防遍历，`fsutil.AtomicWrite` 落 `{configDir}/gamedata/{id}.json`））；`SeedGames(src fs.FS, gamesDir, warnf)` 启动播种（仅复制目标不存在的游戏目录，永不覆盖，可被 fstest.MapFS 测） |
+| `register.go` | `Handler` + `Register`（挂 `/api` 组内 `/games`：`GET /` 列表（扫 gamesDir 一级子目录，manifest 校验 id=目录名/title/entry 必填/entry 不逃逸目录且存在，无效跳过 + Warn，附 entry mtime `v`）；`POST /seed` 按需播种（复制内嵌 Unit01~06 到磁盘，已存在跳过，返回 `{seeded,skipped}`，走 `SetEmbeddedGames/CtxWithSrcFS/SeedFromEmbedded`）；`GET/{id}/state` + `PUT/{id}/state` 每游戏单 JSON 存档槽（id 正则 `^[A-Za-z0-9_-]{1,64}$` 防遍历，`fsutil.AtomicWrite` 落 `{configDir}/gamedata/{id}.json`））；`SeedGames(src fs.FS, gamesDir, warnf)` + `SeedFromEmbedded` 按需播种（可被 fstest.MapFS 测，永不覆盖） |
 | `register_test.go` | 列表校验跳过 ×4、state 404/PUT/GET 回环/非法 JSON/遍历 id、SeedGames 复制/跳过已存在不覆盖/权限（Windows 感知 0666） |
 
-路由挂载（`internal/api/router.go`）：`/api` 组内 `r.Route("/games", ...)`（继承鉴权 + 1MB cap）；`r.Get("/games/*")` 磁盘静态（`http.StripPrefix("/games/")` + `http.Dir` + no-store，**不鉴权**，注册在 `serveUI` 通配之前）；启动时 `MkdirAll(gamesDir)` + `SeedGames(fs.Sub(web.Games,"games"))`（seeded 列表 Info 日志）。插件根目录经 `config.ResolveGamesDir(cfg.GamesDir, configDir)` 解析。
+路由挂载（`internal/api/router.go`）：`/api` 组内 `r.Route("/games", ...)`（继承鉴权 + 1MB cap，含 `POST /seed`）；`r.Get("/games/*")` 磁盘静态（`http.StripPrefix("/games/")` + `http.Dir` + no-store，**不鉴权**，注册在 `serveUI` 通配之前）；启动仅 `MkdirAll(gamesDir)`，**不再自动播种**，由 Designer “Example Unit” 按钮按需 `POST /api/games/seed`（已存在跳过，返回 `{seeded,skipped}`）。插件根目录经 `config.ResolveGamesDir(cfg.GamesDir, configDir)` 解析；内嵌集经 `internal/app/app.go` 启动时 `SetEmbeddedGames(fs.Sub(web.Games,"games"))` 注册。
 
 ### 10.22 `internal/gallery/` — Gallery 图片查看器后端（库）
 
@@ -806,7 +806,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `embed.go` | `!playground` | 内嵌 `static/` 到 `web.Static`；`PlaygroundCompiled()=false` |
 | `embed_playground.go` | `playground` | 内嵌 `static/` + `playground/static-pg`；`PlaygroundCompiled()=true` |
 | `embed_playground_stub.go` | `!playground` | 空 `PlaygroundStatic` FS（调用方须判 `PlaygroundCompiled()`） |
-| `games.go` | 无（所有构建） | **2026-08-29 新增** `//go:embed all:games` → `web.Games`：磁盘游戏插件的内嵌默认集（`web/games/<id>/`，见 §18.4），启动时 seed 到 `{configDir}/games`（已存在跳过） |
+| `games.go` | 无（所有构建） | **2026-08-29 新增，2026-08-31 改为按需播种** `//go:embed all:games` → `web.Games`：磁盘游戏插件的内嵌默认集（`web/games/Unit0{1..6}/`，见 §18.4）；`internal/app/app.go` 启动时 `SetEmbeddedGames(fs.Sub(web.Games,"games"))` 注册，已存在跳过，仅 `POST /api/games/seed` 触发复制（永不覆盖） |
 
 ### 18.2 `web/static/` — 管理 SPA
 
@@ -834,9 +834,9 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | 静态路由 | `static-pg` 按文件路由由 `internal/feature/feature.go` 的 `StaticFiles` manifest 经 `feature.Assets(RootPlaygroundPG)` 派生（`internal/api/router.go`），当前仅承载 `playground/` 与 `gallery/` 子目录；无硬编码 `pgJSFiles` 列表；URL 路径 = 子目录相对路径（如 `/playground/pg-core.js`、`/gallery/gallery.js`），不提供 Utility Editor/Log Reader/Review 路径 |
 ---
 
-### 18.4 `web/games/` — 内嵌默认游戏集（2026-08-29 新增）
+### 18.4 `web/games/` — 内嵌默认游戏集（2026-08-29 新增，2026-08-31 分阶段改版）
 
-游戏插件的编译期副本，经 `web/games.go`（无 build tag）`//go:embed all:games` 嵌入；启动时 `SeedGames` 复制到 `{configDir}/games/`（目标游戏目录已存在则整体跳过，**永不覆盖磁盘内容**——磁盘为唯一事实源）。每个一级子目录是一个游戏：`game.json` manifest（`{"id","title","version","entry"}`，id 必须等于目录名）+ classic-script 入口（同步 `window.TRGames.register`，host adapter 契约见 `docs/gamedemo-progress.md` §2）。当前默认集：`example/`（吸血鬼幸存者式最小原型，Phaser v4 参考实现：零资产 generateTexture 造纹理、overlap 回调参数顺序无关写法、`__trgame` CDP 测试缝）。插件**不经** embed 更新——新增/修改游戏直接改磁盘目录经 Demo 页「重载」生效；要更新已 seed 的默认游戏须删磁盘目录重启重 seed。
+编译期副本经 `web/games.go`（无 build tag）`//go:embed all:games` 嵌入，一级子目录=一游戏：`game.json` manifest（`{"id","title","version","entry"}`，id 必须等于目录名）+ classic-script 入口（同步 `window.TRGames.register`，host adapter 见 `docs/gamedemo-progress.md` §2）。**不再启动自动播种**，由 Designer “Example Unit” 按钮按需 `POST /api/games/seed` 复制到 `{configDir}/games/`（已存在跳过，永不覆盖；用户可在 Explorer 删除示例以腾出 Demo Games 下拉），通过 `internal/app/app.go` 的 `SetEmbeddedGames` 注册内嵌集。当前默认集：`Unit01`（Hello Phaser，01-game-config/02-scenes）/`Unit02`（Sprites & Graphics，03-sprites/12-graphics）/`Unit03`（Input & Physics，05-arcade/06-input）/`Unit04`（Tweens & Time，07-tweens/14-time）/`Unit05`（Camera & Particles，09-cameras/08-particles）/`Unit06`（Mini Survivor 综合，含 v4 overlap 顺序陷阱注释），均为中文注释充足、零资产 `generateTexture`、适配 `host.container/width/height` 的 TRGames 容器形态，参考 `C:/omp/Phaser` 分阶段教学改编。插件**不经** embed 更新——改磁盘目录点 Demo 页「重载」生效；要更新已 seed 的默认游戏可在 Designer 删对应 Unit 后再次点 “Example Unit” 重新创建。
 
 ---
 
@@ -906,7 +906,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 
 | 变更任务 | 先读文档 | 涉及源码 |
 |---|---|---|
-| 新增/修改 Demo 游戏插件（含 Game Designer） | gamedemo-progress | `web/games/<id>/`（manifest+入口，默认集）、`web/static/demo-games.js`（TRGames 宿主/adapter/游戏区+__dgames `loadPhaser/injectScript` 缝）、`web/static/demo-designer.js`（GameDesigner：复用 `EditorLayout` 工厂的 games 作用域编辑 + Blob 预览）、`internal/api/games/register.go`（列表/state KV/seed）、`internal/api/editor/register.go`（`?root=games` 走 `ResolveGamesDir` 的 games 根，目录删除仅顶层递归）、`internal/api/router.go`（`/games/*` 静态 + seed 调用）、`internal/config/paths.go`（`ResolveGamesDir`）、`web/games.go`（embed）、`web/static/vendor/phaser/`（引擎升级时）、`web/static/i18n.js`（`design/designer*`）、`web/static/app-demo.js`/`app-router.js`/`index*.html`（`DEMO_TOOLS=[ademo,tilemap,design]`/`case 'design'`/`#demo-menu`） |
+| 新增/修改 Demo 游戏插件（含 Game Designer） | gamedemo-progress | `web/games/Unit0{1..6}/`（manifest+入口，6 个分阶段示例，参考 C:/omp/Phaser 改编，中文注释充足）、`web/static/demo-games.js`（TRGames 宿主/adapter/游戏区+__dgames `loadPhaser/injectScript` 缝）、`web/static/demo-designer.js`（GameDesigner：复用 `EditorLayout`、games 作用域编辑+Blob 预览、与 collapse explorer 同列的 `Example Unit` 按钮 `.dgn-example-unit` 按需 `POST /api/games/seed`）、`internal/api/games/register.go`（列表/state KV/按需 seed `POST /seed` + `SeedFromEmbedded/SetEmbeddedGames/CtxWithSrcFS`）、`internal/api/editor/register.go`（`?root=games` 走 `ResolveGamesDir` 的 games 根，目录删除仅顶层递归）、`internal/api/router_demo.go`（`/games/*` 静态，不再自动播种）+ `internal/app/app.go`（启动 `SetEmbeddedGames` 注册内嵌集）、`internal/config/paths.go`（`ResolveGamesDir`）、`web/games.go`（embed `Unit0{1..6}`）、`web/static/vendor/phaser/`（引擎升级时）、`web/static/i18n.js`（`design/designer*` + `designerExample*`）、`web/static/app-demo.js`/`app-router.js`/`index*.html`（`DEMO_TOOLS=[ademo,tilemap,design]`/`case 'design'`/`#demo-menu`） |
 | FileTransfer 临时文件中转 | config-registry-state | `internal/filetransfer/upload.go`（`POST /api/filetransfer/upload` multipart 文件/本机剪贴板路径收集、`package=zip` ZIP Deflate 或 `package=raw` 逐文件直传（`{results[]}` 逐文件结果）、tfLink → tmpfiles.org → temp.sh → Filebin 顺序回退并返回 `retention`；总输入 600 MiB 上限（413）、单文件 500 MiB、20min 整体超时；外部服务失败时返回错误，不保证上传成功）+ `internal/api/router.go`（`/api/filetransfer` 路由组：认证与 610MB body 上限，`POST /upload` 与 `POST /path-info`）+ `web/static/filetransfer.js`（Utility FileTransfer：任意文件拖拽/粘贴、客户端预检（FT_LIMITS 与后端常量同步）、path-info 目录大小刷新与 grant 过期预检、「打包为 ZIP」开关、多链接结果渲染、上传取消、进度阶段化（本地确定→远端 indeterminate）、paste 可编辑目标守卫、Clear、`suspendFileTransfer`/`resumeFileTransfer` 生命周期）+ `web/static/index.html`/`index-nopg.html`（Utility 入口脚本） |
 | 新增/修改 Provider API 类型 | config-registry-state、proxy、rotation | `config/types.go`（`APIType`/`IsNIM`/`IsGeminiOpenAICompat`/`IsCline`）、`config/validate.go`、`rotation/nim.go`、`proxy/forward.go`、`proxy/upstream.go`（`applyClineHeaders` 域名特例请求头注入） |
 | 新增 Key 轮询策略 | rotation | `rotation/strategy.go`+`selector.go`、`config/types.go`（`RotationConfig`）、`proxy/forward.go`（`forwardWithRetry`） |
