@@ -141,43 +141,91 @@ function openAssistantModal() {
     });
     window.__assistantMSOuterBound = false;
   }
-  openSettingsModal(t('assistantSettings'),
-    '<p class="muted">' + escapeHtml(t('assistantSettingsDesc')) + '</p>\
-    <div class="form-group" style="margin-top:16px"><label>' + escapeHtml(t('assistantModel')) + '</label>\
-      <button type="button" class="input" id="settings-assistant-model-btn" onclick="assistantModelBtnClick()" style="width:100%;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center">' +
-      escapeHtml(a.model || t('assistantKeywordFallback')) + ' <span style="opacity:0.5">▼</span></button>\
-      <input type="hidden" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '">\
-      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantModelDesc')) + '</p>\
-    </div>\
-    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantModelSettings')) + '</label>\
-      <button type="button" class="btn btn-ghost" onclick="openAssistantModelSettings()" style="width:100%">' + escapeHtml(t('assistantModelSettingsOpen')) + '</button>\
-    </div>\
-    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantDebug')) + '</label>      <label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantDebugDesc')) + '</p>    </div>\
-    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantPreset') || 'Assistant Preset') + '</label>\
-      <div id="assistant-preset-bar"></div>\
-    </div>\
-    <div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantActions')) + '</label>\
-      <div id="settings-assistant-actions"></div>\
-      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">\
-        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'move\')">' + escapeHtml(t('assistantPresetMove') || 'Move preset') + '</button>\
-        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'pet\')">' + escapeHtml(t('assistantPresetPet')) + '</button>\
-        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'platformer\')">' + escapeHtml(t('assistantPresetPlatformer')) + '</button>\
-        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'topdown\')">' + escapeHtml(t('assistantPresetTopdown')) + '</button>\
-      </div>\
-      <p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantActionListHint')) + '</p>\
-    </div>\
-    <div class="form-group" id="assistant-state-matrix-group" style="margin-top:14px"><label>' + escapeHtml(t('assistantStateMatrix')) + '</label>\
-      <p class="muted" style="margin:4px 0 8px;font-size:12px">' + escapeHtml(t('assistantStateMatrixDesc')) + '</p>\
-      <div id="assistant-state-matrix" style="border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px;background:var(--bg)"></div>\
-    </div>'
-  );
+  // Redesigned layout (2026-08-30): matches Appearance/Rotation rhythm —
+  // wider modal, section blocks with dividers, two-column grids for
+  // settings-like rows, and a clean preset-actions-state progression.
+  // Keeps every existing id/class so behavior, tests, and CSS hooks remain intact.
+  var assistantBody =
+    '<style id="assistant-modal-style">' +
+      '.assistant-modal .modal-body{padding-top:10px}' +
+      '.assistant-head-desc{margin:4px 0 16px;line-height:1.55}' +
+      '.assistant-section{padding:14px 0;border-top:1px solid var(--glass-border)}' +
+      '.assistant-section:first-of-type{border-top:none;padding-top:0}' +
+      '.assistant-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}' +
+      '.assistant-section-title{font-size:13px;font-weight:700;letter-spacing:-0.02em;color:var(--text);margin:0}' +
+      '.assistant-section-sub{margin:0 0 10px;color:var(--text-muted);font-size:12px;line-height:1.5}' +
+      '.assistant-field-label{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px}' +
+      '.assistant-hint{margin-top:6px;color:var(--text-muted);font-size:12px;line-height:1.5}' +
+      '.assistant-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;align-items:start}' +
+      '.assistant-grid-2 .form-group{margin:0}' +
+      '.assistant-model-row{display:flex;gap:8px;align-items:center}' +
+      '.assistant-model-row #settings-assistant-model-btn{flex:1;min-width:0}' +
+      '.assistant-debug-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg)}' +
+      '.assistant-debug-row .muted{font-size:12px;line-height:1.5}' +
+      '.assistant-actions-shell{border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg);padding:10px}' +
+      '.assistant-preset-quick{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}' +
+      '.assistant-state-card{border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg);padding:8px;overflow:hidden}' +
+      '@media(max-width:640px){.assistant-grid-2{grid-template-columns:1fr}.assistant-modal{max-width:min(94vw,760px)!important}}' +
+    '</style>' +
+    '<p class="muted assistant-head-desc">' + escapeHtml(t('assistantSettingsDesc')) + '</p>' +
+    '<div class="assistant-section" id="assistant-section-model">' +
+      '<div class="assistant-section-head"><h3 class="assistant-section-title">' + escapeHtml(t('assistantModel')) + '</h3></div>' +
+      '<div class="assistant-grid-2">' +
+        '<div class="form-group">' +
+          '<label class="assistant-field-label">' + escapeHtml(t('assistantModel')) + '</label>' +
+          '<div class="assistant-model-row">' +
+            '<button type="button" class="input" id="settings-assistant-model-btn" onclick="assistantModelBtnClick()" style="text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center">' + escapeHtml(a.model || t('assistantKeywordFallback')) + ' <span style="opacity:0.5">▼</span></button>' +
+          '</div>' +
+          '<input type="hidden" id="settings-modal-assistant-model" value="' + escapeHtml(a.model || '') + '">' +
+          '<p class="assistant-hint">' + escapeHtml(t('assistantModelDesc')) + '</p>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="assistant-field-label">' + escapeHtml(t('assistantModelSettings')) + '</label>' +
+          '<button type="button" class="btn btn-ghost" onclick="openAssistantModelSettings()" style="width:100%;justify-content:center">' + escapeHtml(t('assistantModelSettingsOpen')) + '</button>' +
+          '<p class="assistant-hint">' + escapeHtml(t('assistantMSParams') || 'Parameters (only enabled ones are sent)') + '</p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="assistant-debug-row" style="margin-top:12px">' +
+        '<div style="min-width:0"><div style="font-size:13px;font-weight:600;color:var(--text)">' + escapeHtml(t('assistantDebug')) + '</div><div class="muted">' + escapeHtml(t('assistantDebugDesc')) + '</div></div>' +
+        '<label class="toggle-switch" data-tooltip="' + escapeHtml(t('assistantDebugDesc')) + '"><input type="checkbox" id="settings-assistant-debug"' + (a.debug ? ' checked' : '') + '><span class="toggle-slider"></span></label>' +
+      '</div>' +
+    '</div>' +
+    '<div class="assistant-section" id="assistant-section-preset">' +
+      '<div class="assistant-section-head"><h3 class="assistant-section-title">' + escapeHtml(t('assistantPreset') || 'Assistant Preset') + '</h3></div>' +
+      '<div id="assistant-preset-bar"></div>' +
+    '</div>' +
+    '<div class="assistant-section" id="assistant-section-actions">' +
+      '<div class="assistant-section-head"><h3 class="assistant-section-title">' + escapeHtml(t('assistantActions')) + '</h3></div>' +
+      '<div class="assistant-actions-shell">' +
+        '<div id="settings-assistant-actions"></div>' +
+        '<div class="assistant-preset-quick">' +
+          '<button type="button" class="btn btn-ghost" style="padding:5px 12px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'move\')">' + escapeHtml(t('assistantPresetMove') || 'Move preset') + '</button>' +
+          '<button type="button" class="btn btn-ghost" style="padding:5px 12px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'pet\')">' + escapeHtml(t('assistantPresetPet')) + '</button>' +
+          '<button type="button" class="btn btn-ghost" style="padding:5px 12px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'platformer\')">' + escapeHtml(t('assistantPresetPlatformer')) + '</button>' +
+          '<button type="button" class="btn btn-ghost" style="padding:5px 12px;font-size:12px" data-tooltip="' + escapeHtml(t('assistantPresetDesc')) + '" onclick="assistantAddPreset(\'topdown\')">' + escapeHtml(t('assistantPresetTopdown')) + '</button>' +
+        '</div>' +
+        '<p class="assistant-hint" style="margin-top:10px">' + escapeHtml(t('assistantActionListHint')) + '</p>' +
+      '</div>' +
+    '</div>' +
+    '<div class="assistant-section" id="assistant-state-matrix-group">' +
+      '<div class="assistant-section-head"><h3 class="assistant-section-title">' + escapeHtml(t('assistantStateMatrix')) + '</h3></div>' +
+      '<p class="assistant-section-sub">' + escapeHtml(t('assistantStateMatrixDesc')) + '</p>' +
+      '<div id="assistant-state-matrix" class="assistant-state-card"></div>' +
+    '</div>';
+  openSettingsModal(t('assistantSettings'), assistantBody);
+  // Widen to Appearance-like scale: existing modal is 520px, Appearance uses 760px.
+  var _amModal = document.querySelector('#modal-overlay .modal');
+  if (_amModal) {
+    _amModal.classList.add('assistant-modal');
+    _amModal.style.maxWidth = '760px';
+    _amModal.style.minWidth = '560px';
+    _amModal.style.width = 'min(760px, calc(100vw - 32px))';
+  }
   try { if (typeof renderAssistantPresetBar === 'function') renderAssistantPresetBar(); } catch(ePB) {}
   renderAssistantActions();
-  // Render the preset-state → action mapping + live pet readout.
   try { if (typeof renderAssistantStateMatrix === 'function') renderAssistantStateMatrix(); } catch(eSM2) {}
-  document.getElementById('settings-modal-save').onclick = function() {
-    withLoading(this, function() { return saveAssistantModal(); });
-  };
+  var _amSave = document.getElementById('settings-modal-save');
+  if (_amSave) _amSave.onclick = function() { withLoading(this, function() { return saveAssistantModal(); }); };
 }
 
 function openRotationModal() {

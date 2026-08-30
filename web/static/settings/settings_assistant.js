@@ -29,13 +29,14 @@ function assistantActionSummary(a) {
 }
 
 function assistantActionRowHtml(a, i) {
-  return '<div class="assistant-action-row" data-index="' + i + '" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:6px;background:var(--option-bg)">' +
-    '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-      '<span style="font-weight:600">' + assistantEscape(a.name || ('#' + (i + 1))) + '</span> ' +
-      '<span class="muted" style="font-size:12px">' + assistantEscape(assistantActionSummary(a)) + '</span>' +
+  // Polished row: badge-like name + secondary summary, consistent with modal token density.
+  return '<div class="assistant-action-row" data-index="' + i + '" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);margin-bottom:8px;background:var(--option-bg)">' +
+    '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">' +
+      '<span style="font-weight:700;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(a.name || ('#' + (i + 1))) + '</span>' +
+      '<span class="muted" style="font-size:11px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(assistantActionSummary(a)) + '</span>' +
     '</div>' +
-    '<button type="button" class="btn btn-ghost" style="padding:2px 10px" onclick="assistantEditAction(' + i + ')">' + assistantEscape(t('assistantActionEdit')) + '</button>' +
-    '<button type="button" class="btn btn-ghost" style="padding:2px 10px;color:var(--danger,#e5484d)" onclick="assistantRemoveAction(' + i + ')">' + assistantEscape(t('assistantActionRemove')) + '</button>' +
+    '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="assistantEditAction(' + i + ')">' + assistantEscape(t('assistantActionEdit')) + '</button>' +
+    '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;color:var(--danger,#e5484d)" onclick="assistantRemoveAction(' + i + ')">' + assistantEscape(t('assistantActionRemove')) + '</button>' +
   '</div>';
 }
 
@@ -55,12 +56,12 @@ function renderAssistantActions() {
   var box = document.getElementById('settings-assistant-actions');
   if (!box) return;
   var actions = window.__assistantActions || [];
-  var html = '<div class="assistant-action-row" style="display:flex;gap:8px;margin-bottom:8px">' +
-    '<input type="text" class="input" id="settings-assistant-new-action" placeholder="' + assistantEscape(t('assistantActionNamePlaceholder')) + '" style="flex:1;min-width:0" onkeydown="if(event.key===\'Enter\'){event.preventDefault();assistantAddAction();}">' +
-    '<button type="button" class="btn btn-primary" style="padding:4px 14px;flex-shrink:0" onclick="assistantAddAction()">' + assistantEscape(t('assistantActionAdd')) + '</button>' +
+  var html = '<div class="assistant-action-row" style="display:flex;gap:8px;margin-bottom:10px">' +
+    '<input type="text" class="input" id="settings-assistant-new-action" placeholder="' + assistantEscape(t('assistantActionNamePlaceholder')) + '" style="flex:1;min-width:0;height:36px" onkeydown="if(event.key===\'Enter\'){event.preventDefault();assistantAddAction();}">' +
+    '<button type="button" class="btn btn-primary" style="padding:0 16px;height:36px;flex-shrink:0" onclick="assistantAddAction()">' + assistantEscape(t('assistantActionAdd')) + '</button>' +
   '</div>';
   if (!actions.length) {
-    box.innerHTML = html + '<p class="muted" style="margin:4px 0">' + assistantEscape(t('assistantActionNone')) + '</p>';
+    box.innerHTML = html + '<p class="muted" style="margin:2px 0 4px;font-size:12px;line-height:1.5">' + assistantEscape(t('assistantActionNone')) + '</p>';
     return;
   }
   var buckets = { move: [], pet: [], platformer: [], topdown: [], other: [] };
@@ -260,10 +261,10 @@ function assistantToggleGroup(g) {
 
 function assistantGroupHeader(key, count, tag) {
   var collapsed = !!__assistantGroupCollapsed[key];
-  return '<div style="display:flex;align-items:center;gap:6px;padding:8px 8px 4px;cursor:pointer;user-select:none" onclick="assistantToggleGroup(\'' + assistantEscape(key) + '\')">' +
-    '<span style="font-size:10px;width:12px;color:var(--text-muted)">' + (collapsed ? '▸' : '▾') + '</span>' +
-    '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">' + assistantEscape(tag || t('assistantStateGroup' + key)) + '</span>' +
-    (count != null ? '<span class="muted" style="font-size:11px">(' + count + ')</span>' : '') +
+  return '<div style="display:flex;align-items:center;gap:6px;padding:10px 8px 6px;cursor:pointer;user-select:none;border-top:1px solid var(--glass-border);margin-top:6px" onclick="assistantToggleGroup(\'' + assistantEscape(key) + '\')">' +
+    '<span style="font-size:10px;width:12px;color:var(--text-muted);text-align:center">' + (collapsed ? '▸' : '▾') + '</span>' +
+    '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)">' + assistantEscape(tag || t('assistantStateGroup' + key)) + '</span>' +
+    (count != null ? '<span style="font-size:11px;color:var(--text-muted);opacity:0.9">· ' + count + '</span>' : '') +
   '</div>';
 }
 
@@ -272,20 +273,21 @@ function assistantStateRows() {
   var rows = '';
   for (var g = 0; g < __assistantSMGroups.length; g++) {
     var grp = __assistantSMGroups[g];
+    // First group omits top divider; subsequent groups keep it (handled inside header).
     rows += assistantGroupHeader(grp.key, null);
     if (__assistantGroupCollapsed[grp.key]) continue;
     for (var oi = 0; oi < grp.events.length; oi++) {
       var ev = grp.events[oi];
       var aliases = (__assistantSMAliases[ev] || []).join(', ');
       var mapped = assistantResolveAlias(ev, actions);
-      var actionLabel = mapped ? assistantEscape(mapped) : '<span class="muted">' + assistantEscape(t('assistantStateUnmapped')) + '</span>';
-      var triggerFn = grp.domain === 'demo' ? 'assistantTriggerDemoState' : 'assistantTriggerState';
-      var btn = '<button type="button" class="btn btn-ghost" style="padding:3px 10px;flex-shrink:0" ' + (mapped ? '' : 'disabled title="' + assistantEscape(t('assistantStateNoActions')) + '"') + ' onclick="event.stopPropagation();' + triggerFn + '(\'' + assistantEscape(ev) + '\')">' + assistantEscape(t('assistantStateTrigger')) + '</button>';
-      rows += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--glass-border,rgba(255,255,255,0.08))">' +
-        '<div style="flex:1;min-width:0">' +
-          '<div style="font-weight:600;font-size:13px">' + assistantEscape(ev) + ' <span class="muted" style="font-weight:400;font-size:11px">→ ' + actionLabel + '</span></div>' +
-          '<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + assistantEscape(t('assistantStateAlias') + ': ' + aliases) + '</div>' +
-        '</div>' + btn +
+      var mappedLabel = mapped ? '<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;background:var(--glass-hover);border:1px solid var(--glass-border);font-weight:600;color:var(--text)">' + assistantEscape(mapped) + '</span>' : '<span class="muted" style="font-size:11px">' + assistantEscape(t('assistantStateUnmapped')) + '</span>';
+      var triggerFn2 = grp.domain === 'demo' ? 'assistantTriggerDemoState' : 'assistantTriggerState';
+      var btn2 = '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;flex-shrink:0" ' + (mapped ? '' : 'disabled title="' + assistantEscape(t('assistantStateNoActions')) + '"') + ' onclick="event.stopPropagation();' + triggerFn2 + '(\'' + assistantEscape(ev) + '\')">' + assistantEscape(t('assistantStateTrigger')) + '</button>';
+      rows += '<div style="display:flex;align-items:center;gap:10px;padding:8px 8px;border-bottom:1px solid var(--glass-border)">' +
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-weight:700;font-size:13px">' + assistantEscape(ev) + '</span>' + mappedLabel + '</div>' +
+          '<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.9">' + assistantEscape(t('assistantStateAlias') + ': ' + aliases) + '</div>' +
+        '</div>' + btn2 +
       '</div>';
     }
   }
@@ -318,7 +320,6 @@ function renderAssistantStateMatrix() {
     if (window.__petState && window.__petState.cur) curLive = window.__petState.cur;
     else if (window.petSM && typeof window.petSM.state === 'function') curLive = window.petSM.state() || null;
   } catch(eLive) {}
-  var curLabel = curLive ? assistantEscape(curLive) : '<span class="muted">' + assistantEscape(t('assistantStateNoPet')) + '</span>';
   var defaultName = (function() {
     for (var k = 0; k < actions.length; k++) {
       var nm = (actions[k].name||'').toLowerCase();
@@ -326,12 +327,13 @@ function renderAssistantStateMatrix() {
     }
     return (actions[0] && actions[0].name) || '—';
   })();
-  var header = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;margin:-8px -8px 6px;background:var(--option-bg,rgba(255,255,255,0.04));border-radius:var(--radius-sm);font-size:12px">' +
-    '<span data-live-cur>' + (curLive ? assistantEscape(t('assistantStateCurrent', [curLive])) : assistantEscape(t('assistantStateCurrent', ['—'])) ) + '</span>' +
-    '<span class="muted">' + assistantEscape(t('assistantStateDefault', [defaultName])) + '</span>' +
-    '<button type="button" class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="assistantTriggerAllStates()">' + assistantEscape(t('assistantStateTriggerAll')) + '</button>' +
+  var header = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;margin:-8px -8px 8px;background:var(--option-bg,rgba(255,255,255,0.04));border-radius:var(--radius-md);border:1px solid var(--glass-border);font-size:12px;flex-wrap:wrap">' +
+    '<span data-live-cur style="font-weight:600">' + (curLive ? assistantEscape(t('assistantStateCurrent', [curLive])) : assistantEscape(t('assistantStateCurrent', ['—'])) ) + '</span>' +
+    '<span class="muted" style="font-size:12px">' + assistantEscape(t('assistantStateDefault', [defaultName])) + '</span>' +
+    '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="assistantTriggerAllStates()">' + assistantEscape(t('assistantStateTriggerAll')) + '</button>' +
   '</div>';
-  box.innerHTML = header + assistantStateRows();
+  // Subtle containment for rows: keep header visually separated from the grouped lists.
+  box.innerHTML = header + '<div style="border-top:1px solid var(--glass-border);margin:0 -8px 6px"></div>' + assistantStateRows();
   // Kick a backend poll to fill live state when not in same browsing context.
   fetch('/api/assistant/pet-state').then(function(r){ return r.json(); }).then(function(j){
     if (!j || !j.state) return;
@@ -413,40 +415,42 @@ function assistantEditAction(i) {
   var end = Math.min(Math.max(start, a.frameEnd || 0), maxFrame);
 
   var html =
-    '<div class="modal" style="width:520px;max-width:94vw">' +
-      '<div class="modal-title">' + assistantEscape(t('assistantActionEditorTitle')) + '</div>' +
-      '<div class="modal-body" style="overflow-y:auto">' +
-        '<div class="form-group"><label>' + assistantEscape(t('assistantActionNameLabel')) + '</label>' +
-          '<input type="text" class="input" id="assistant-editor-name" value="' + assistantEscape(a.name) + '">' +
-        '</div>' +
-        '<div class="form-group"><label>' + assistantEscape(t('assistantActionSheetLabel')) + '</label>' +
-          '<div style="display:flex;gap:8px;align-items:center">' +
-            '<span id="assistant-editor-path" class="muted" data-path="' + assistantEscape(a.spritesheetPath || '') + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">' + assistantEscape(a.spritesheetPath || t('assistantActionNoSheet')) + '</span>' +
-            '<button type="button" class="btn btn-ghost" id="assistant-editor-browse" style="padding:4px 12px;flex-shrink:0">' + assistantEscape(t('assistantActionBrowse')) + '</button>' +
+    '<div class="modal" style="width:560px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column">' +
+      '<div class="modal-title" style="flex-shrink:0">' + assistantEscape(t('assistantActionEditorTitle')) + ' · ' + assistantEscape(a.name || '') + '</div>' +
+      '<div class="modal-body" style="overflow-y:auto;flex:1">' +
+        '<div style="display:grid;grid-template-columns:1fr;gap:12px">' +
+          '<div class="form-group" style="margin:0"><label>' + assistantEscape(t('assistantActionNameLabel')) + '</label>' +
+            '<input type="text" class="input" id="assistant-editor-name" value="' + assistantEscape(a.name) + '">' +
+          '</div>' +
+          '<div class="form-group" style="margin:0"><label>' + assistantEscape(t('assistantActionSheetLabel')) + '</label>' +
+            '<div style="display:flex;gap:8px;align-items:center">' +
+              '<span id="assistant-editor-path" class="muted" data-path="' + assistantEscape(a.spritesheetPath || '') + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;padding:7px 10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg)">' + assistantEscape(a.spritesheetPath || t('assistantActionNoSheet')) + '</span>' +
+              '<button type="button" class="btn btn-ghost" id="assistant-editor-browse" style="padding:6px 14px;flex-shrink:0">' + assistantEscape(t('assistantActionBrowse')) + '</button>' +
+            '</div>' +
+          '</div>' +
+          '<div id="assistant-editor-canvas-wrap" style="border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--bg);min-height:140px;display:flex;align-items:center;justify-content:center;overflow:hidden">' +
+            '<canvas id="assistant-editor-canvas" style="display:none;max-width:100%;touch-action:none"></canvas>' +
+            '<span id="assistant-editor-empty" class="muted" style="padding:28px;font-size:12px">' + assistantEscape(t('assistantActionNoSheet')) + '</span>' +
+          '</div>' +
+          '<p class="muted" style="margin:0;font-size:12px;line-height:1.5">' + assistantEscape(t('assistantActionHint')) + '</p>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">' +
+            '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:6px">' + assistantEscape(t('assistantActionSplitX')) + '</label>' +
+              renderStepperHtml('assistant-editor-cols', a.cols || 1, { min: 1, max: 100 }) + '</div>' +
+            '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:6px">' + assistantEscape(t('assistantActionSplitY')) + '</label>' +
+              renderStepperHtml('assistant-editor-rows', a.rows || 1, { min: 1, max: 100 }) + '</div>' +
+            '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:6px">' + assistantEscape(t('assistantActionFps')) + '</label>' +
+              renderStepperHtml('assistant-editor-fps', a.fps || 8, { min: 1, max: 30 }) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:10px;border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg)">' +
+            '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:6px">' + assistantEscape(t('assistantActionFrameFrom')) + '</label>' +
+              '<input type="number" class="input" id="assistant-editor-frame-start" value="' + start + '" min="0" style="width:96px"></div>' +
+            '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:6px">' + assistantEscape(t('assistantActionFrameTo')) + '</label>' +
+              '<input type="number" class="input" id="assistant-editor-frame-end" value="' + end + '" min="0" style="width:96px"></div>' +
+            '<div style="display:flex;flex-direction:column;gap:6px"><label class="muted" style="font-size:12px;display:block">Mirror</label><label class="toggle-switch"><input type="checkbox" id="assistant-editor-mirror"' + (a.mirror ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>' +
           '</div>' +
         '</div>' +
-        '<div id="assistant-editor-canvas-wrap" style="border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--bg);min-height:120px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;overflow:hidden">' +
-          '<canvas id="assistant-editor-canvas" style="display:none;max-width:100%;touch-action:none"></canvas>' +
-          '<span id="assistant-editor-empty" class="muted" style="padding:24px;font-size:12px">' + assistantEscape(t('assistantActionNoSheet')) + '</span>' +
-        '</div>' +
-        '<p class="muted" style="margin:0 0 10px;font-size:12px">' + assistantEscape(t('assistantActionHint')) + '</p>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">' +
-          '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionSplitX')) + '</label>' +
-            renderStepperHtml('assistant-editor-cols', a.cols || 1, { min: 1, max: 100 }) + '</div>' +
-          '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionSplitY')) + '</label>' +
-            renderStepperHtml('assistant-editor-rows', a.rows || 1, { min: 1, max: 100 }) + '</div>' +
-          '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionFps')) + '</label>' +
-            renderStepperHtml('assistant-editor-fps', a.fps || 8, { min: 1, max: 30 }) + '</div>' +
-        '</div>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">' +
-          '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionFrameFrom')) + '</label>' +
-            '<input type="number" class="input" id="assistant-editor-frame-start" value="' + start + '" min="0" style="width:90px"></div>' +
-          '<div><label class="muted" style="font-size:12px;display:block;margin-bottom:4px">' + assistantEscape(t('assistantActionFrameTo')) + '</label>' +
-            '<input type="number" class="input" id="assistant-editor-frame-end" value="' + end + '" min="0" style="width:90px"></div>' +
-          '<div style="display:flex;flex-direction:column;gap:4px"><label class="muted" style="font-size:12px;display:block">Mirror</label><label class="toggle-switch"><input type="checkbox" id="assistant-editor-mirror"' + (a.mirror ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>' +
-        '</div>' +
       '</div>' +
-      '<div class="modal-footer">' +
+      '<div class="modal-footer" style="flex-shrink:0">' +
         '<button type="button" class="btn btn-ghost" id="assistant-editor-cancel">' + assistantEscape(t('cancel')) + '</button>' +
         '<button type="button" class="btn btn-primary" id="assistant-editor-ok">' + assistantEscape(t('confirm')) + '</button>' +
       '</div>' +
@@ -1001,11 +1005,11 @@ function renderAssistantPresetBar() {
   }
   bar.innerHTML =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-      '<select class="input" id="assistant-preset-select" style="flex:1;min-width:160px" onchange="assistantSelectPreset(this.value)">' + opts + '</select>' +
-      '<button type="button" class="btn btn-ghost" style="padding:4px 12px" onclick="assistantAddPresetBundle()">' + assistantEscape(t('assistantPresetAdd') || 'Add') + '</button>' +
-      '<button type="button" class="btn btn-ghost" style="padding:4px 12px"' + (sel ? '' : ' disabled') + ' onclick="assistantApplyPresetBundle()">' + assistantEscape(t('assistantPresetApply') || 'Apply') + '</button>' +
-      '<button type="button" class="btn btn-ghost" style="padding:4px 12px" onclick="assistantSaveCurrentAsPreset()">' + assistantEscape(t('assistantPresetSaveCurrent') || 'Save current') + '</button>' +
-      '<button type="button" class="btn btn-ghost btn-danger" style="padding:4px 12px"' + (sel ? '' : ' disabled') + ' onclick="assistantRemovePresetBundle()">' + assistantEscape(t('assistantPresetRemove') || 'Remove') + '</button>' +
+      '<select class="input" id="assistant-preset-select" style="flex:1;min-width:200px;height:36px" onchange="assistantSelectPreset(this.value)">' + opts + '</select>' +
+      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantAddPresetBundle()">' + assistantEscape(t('assistantPresetAdd') || 'Add') + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px"' + (sel ? '' : ' disabled') + ' onclick="assistantApplyPresetBundle()">' + assistantEscape(t('assistantPresetApply') || 'Apply') + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantSaveCurrentAsPreset()">' + assistantEscape(t('assistantPresetSaveCurrent') || 'Save current') + '</button>' +
+      '<button type="button" class="btn btn-ghost btn-danger" style="padding:0 14px;height:36px"' + (sel ? '' : ' disabled') + ' onclick="assistantRemovePresetBundle()">' + assistantEscape(t('assistantPresetRemove') || 'Remove') + '</button>' +
     '</div>';
 }
 

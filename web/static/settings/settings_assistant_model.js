@@ -237,10 +237,10 @@ function assistantMSParamRowHtml(k) {
   var toggle = '<label class="toggle-switch"><input type="checkbox" id="assistant-ms-enable-' + k.key + '" onchange="assistantMSToggleParam(\'' + k.key + '\', this.checked)"><span class="toggle-slider"></span></label>';
   // reasoning is enable-only: no separate value input
   if (k.kind === 'reasoning_toggle') {
-    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--glass-border)">' +
-      '<span style="flex:1;font-size:13px">' + k.label + '</span>' +
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--glass-border)">' +
+      '<span style="flex:1;font-size:13px;font-weight:600">' + k.label + '</span>' +
       toggle +
-      '<span style="width:160px"></span>' +
+      '<span style="width:160px;flex-shrink:0"></span>' +
     '</div>';
   }
   var inputHtml = '';
@@ -248,11 +248,11 @@ function assistantMSParamRowHtml(k) {
     if (typeof renderStepperHtml === 'function') {
       inputHtml = renderStepperHtml('assistant-ms-val-' + k.key, k.def, { min: k.min, max: k.max, step: k.step, style: 'width:160px' });
     } else {
-      inputHtml = '<input type="number" class="input" id="assistant-ms-val-' + k.key + '" value="' + k.def + '" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" style="width:110px"> ';
+      inputHtml = '<input type="number" class="input" id="assistant-ms-val-' + k.key + '" value="' + k.def + '" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" style="width:160px"> ';
     }
   } else if (k.kind === 'reasoning_effort') {
     // Portaled menu: keep label + hidden select, trigger opens body-anchored portal
-    inputHtml = '<div class="custom-select-wrapper" id="assistant-ms-wrap-' + k.key + '" style="width:150px;position:relative" onclick="event.stopPropagation()">' +
+    inputHtml = '<div class="custom-select-wrapper" id="assistant-ms-wrap-' + k.key + '" style="width:160px;position:relative" onclick="event.stopPropagation()">' +
       '<div class="custom-select-trigger" onclick="assistantMSToggleEffortMenu(event)">' +
         '<span class="custom-select-label">' + (k.def || 'medium') + '</span>' +
         '<svg viewBox="0 0 512 512"><path d="M233.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L256 338.7 77.7 160.3c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z"/></svg>' +
@@ -260,10 +260,10 @@ function assistantMSParamRowHtml(k) {
       '<select id="' + 'assistant-ms-val-' + k.key + '" style="display:none"><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select>' +
     '</div>';
   }
-  return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--glass-border)">' +
-    '<span style="flex:1;font-size:13px">' + k.label + '</span>' +
+  return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--glass-border)">' +
+    '<span style="flex:1;font-size:13px;font-weight:600">' + k.label + '</span>' +
     toggle +
-    '<span style="width:160px;display:flex;justify-content:flex-end">' + inputHtml + '</span>' +
+    '<span style="width:160px;display:flex;justify-content:flex-end;flex-shrink:0">' + inputHtml + '</span>' +
   '</div>';
 }
 
@@ -292,35 +292,50 @@ function assistantMSRenderOverlay() {
 
   var presetOpts = __assistantMS.presets.map(function(p) { return { value: p.name, label: p.name }; });
 
+  // Sectioned body mirrors outer assistant modal: dividers + labeled blocks.
   var bodyHtml =
-    '<div class="form-group"><label>' + escapeHtml(t('assistantMSPreset')) + '</label>' +
-      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+    '<style id="assistant-ms-inline-style">' +
+      '.assistant-ms-head{margin:4px 0 14px;color:var(--text-muted);font-size:12px;line-height:1.55}' +
+      '.assistant-ms-section{padding:12px 0;border-top:1px solid var(--glass-border)}' +
+      '.assistant-ms-section:first-child{border-top:none;padding-top:0}' +
+      '.assistant-ms-section-title{font-size:13px;font-weight:700;letter-spacing:-0.02em;color:var(--text);margin:0 0 10px}' +
+      '.assistant-ms-params-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}' +
+      '.assistant-ms-params-list{border:1px solid var(--glass-border);border-radius:var(--radius-md);background:var(--glass-bg);padding:6px 12px}' +
+      '.assistant-ms-preset-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+    '</style>' +
+    '<p class="assistant-ms-head">' + escapeHtml(t('assistantMSParams') || 'Parameters (only enabled ones are sent)') + ' · ' + escapeHtml(t('assistantMSTitle')) + '</p>' +
+    '<div class="assistant-ms-section">' +
+      '<h3 class="assistant-ms-section-title">' + escapeHtml(t('assistantMSPreset')) + '</h3>' +
+      '<div class="assistant-ms-preset-row">';
 
   if (typeof renderCustomSelectHtml === 'function') {
-    bodyHtml += renderCustomSelectHtml('assistant-ms-preset-wrap', 'assistant-ms-preset-select', presetOpts, __assistantMS.sel, 'assistantMSSelectPreset(this.value)', 'flex:1;min-width:160px');
+    bodyHtml += renderCustomSelectHtml('assistant-ms-preset-wrap', 'assistant-ms-preset-select', presetOpts, __assistantMS.sel, 'assistantMSSelectPreset(this.value)', 'flex:1;min-width:180px;height:36px');
   } else {
-    bodyHtml += '<select id="assistant-ms-preset-select" onchange="assistantMSSelectPreset(this.value)" style="flex:1;min-width:160px" class="input">';
+    bodyHtml += '<select id="assistant-ms-preset-select" onchange="assistantMSSelectPreset(this.value)" style="flex:1;min-width:180px;height:36px" class="input">';
     presetOpts.forEach(function(o) {
       bodyHtml += '<option value="' + escapeHtml(o.value) + '"' + (o.value === __assistantMS.sel ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
     });
     bodyHtml += '</select>';
   }
   bodyHtml +=
-      '<button type="button" class="btn btn-ghost btn-sm" onclick="assistantMSAddPreset()">' + escapeHtml(t('assistantMSPresetAdd')) + '</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" onclick="assistantMSDeletePreset()" style="color:var(--danger,#e5484d)">' + escapeHtml(t('assistantMSPresetDelete')) + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantMSAddPreset()">' + escapeHtml(t('assistantMSPresetAdd')) + '</button>' +
+      '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px;color:var(--danger,#e5484d)" onclick="assistantMSDeletePreset()">' + escapeHtml(t('assistantMSPresetDelete')) + '</button>' +
       '</div></div>' +
-    '<div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantMSMemoryModel')) + '</label>' +
-      '<div style="display:flex;gap:6px;align-items:center">' +
-        '<button type="button" class="input" id="assistant-ms-memory-model" data-value="" onclick="assistantMSPickMemoryModel()" style="flex:1;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center">' + escapeHtml(t('assistantMSMemoryModelFollow')) + ' <span style="opacity:0.5">\u25BC</span></button>' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="assistantMSClearMemoryModel()" title="' + escapeHtml(t('assistantMSMemoryModelFollow')) + '">\u2715</button>' +
+    '<div class="assistant-ms-section">' +
+      '<h3 class="assistant-ms-section-title">' + escapeHtml(t('assistantMSMemoryModel')) + '</h3>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<button type="button" class="input" id="assistant-ms-memory-model" data-value="" onclick="assistantMSPickMemoryModel()" style="flex:1;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;height:36px">' + escapeHtml(t('assistantMSMemoryModelFollow')) + ' <span style="opacity:0.5">\u25BC</span></button>' +
+        '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantMSClearMemoryModel()" title="' + escapeHtml(t('assistantMSMemoryModelFollow')) + '">\u2715</button>' +
       '</div>' +
-      '<p class="muted" style="margin-top:4px;font-size:12px">' + escapeHtml(t('assistantMSMemoryModelDesc') || '') + '</p>' +
+      '<p class="muted" style="margin-top:6px;font-size:12px;line-height:1.5">' + escapeHtml(t('assistantMSMemoryModelDesc') || '') + '</p>' +
     '</div>' +
-    '<div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantMSSystemPrompt')) + '</label>' +
-      '<textarea class="input" id="assistant-ms-prompt" rows="5" style="width:100%;resize:vertical"></textarea>' +
+    '<div class="assistant-ms-section">' +
+      '<h3 class="assistant-ms-section-title">' + escapeHtml(t('assistantMSSystemPrompt')) + '</h3>' +
+      '<textarea class="input" id="assistant-ms-prompt" rows="5" style="width:100%;resize:vertical;min-height:96px"></textarea>' +
     '</div>' +
-    '<div class="form-group" style="margin-top:12px"><label>' + escapeHtml(t('assistantMSParams')) + '</label>' +
-      '<div id="assistant-ms-params">' + ASSISTANT_MS_PARAMS.map(assistantMSParamRowHtml).join('') + '</div>' +
+    '<div class="assistant-ms-section">' +
+      '<div class="assistant-ms-params-head"><h3 class="assistant-ms-section-title" style="margin:0">' + escapeHtml(t('assistantMSParams')) + '</h3></div>' +
+      '<div id="assistant-ms-params" class="assistant-ms-params-list">' + ASSISTANT_MS_PARAMS.map(assistantMSParamRowHtml).join('') + '</div>' +
     '</div>';
 
   var overlay = document.createElement('div');
@@ -328,10 +343,10 @@ function assistantMSRenderOverlay() {
   overlay.className = 'modal-overlay show';
   overlay.style.zIndex = 'calc(var(--z-modal, 1000) + 20)';
   overlay.innerHTML =
-    '<div class="modal" style="min-width:520px;max-width:640px;max-height:85vh;display:flex;flex-direction:column">' +
-      '<div class="modal-title">' + escapeHtml(t('assistantMSTitle')) + '</div>' +
-      '<div class="modal-body" style="flex:1">' + bodyHtml + '</div>' +
-      '<div class="modal-footer">' +
+    '<div class="modal" style="min-width:520px;max-width:760px;width:min(760px,calc(100vw - 32px));max-height:88vh;display:flex;flex-direction:column">' +
+      '<div class="modal-title" style="flex-shrink:0">' + escapeHtml(t('assistantMSTitle')) + '</div>' +
+      '<div class="modal-body" style="flex:1;overflow-y:auto">' + bodyHtml + '</div>' +
+      '<div class="modal-footer" style="flex-shrink:0">' +
         '<button type="button" class="btn btn-ghost" onclick="closeAssistantMSOverlay()">' + escapeHtml(t('cancel')) + '</button>' +
         '<button type="button" class="btn btn-primary" id="assistant-ms-save">' + escapeHtml(t('save')) + '</button>' +
       '</div>' +
