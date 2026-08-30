@@ -41,7 +41,10 @@
     'ai': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L14.39 7.61L20 10L14.39 12.39L12 18L9.61 12.39L4 10L9.61 7.61L12 2ZM6 15l1.19 2.81L10 19l-2.81 1.19L6 23l-1.19-2.81L2 19l2.81-1.19L6 15z"/></svg>',
     'html-iframe': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.89-2-2-2zm0 14H5V8h14v10zm-7-1h5v-4h-5v4z"/></svg>',
     'sidebar-collapse': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm6 3l-3 3 3 3V9z"/></svg>',
-    'sidebar-expand': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm-3 3l3 3-3 3V9z"/></svg>'
+    'sidebar-expand': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm-3 3l3 3-3 3V9z"/></svg>',
+    'zoom-out': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 12h14"/></svg>',
+    'zoom-reset': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-1.5-5"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M21 3v6h-6"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M10 8l-2 4 2 4M14 8l2 4-2 4"/></svg>',
+    'zoom-in': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>'
   };
 
   var ACTION_ICONS = {
@@ -78,7 +81,10 @@
     'sync': 'sync',
     'toc': 'toc',
     'ai': 'ai',
-    'html-iframe': 'html-iframe'
+    'html-iframe': 'html-iframe',
+    'zoom-out': 'zoom-out',
+    'zoom-reset': 'zoom-reset',
+    'zoom-in': 'zoom-in'
   };
 
   var SHORTCUT_HINTS = {
@@ -346,6 +352,18 @@
     ]);
     viewActions.appendChild(togglesGroup);
 
+    // Text-only zoom (−/reset/+) — font-size only, operates on #ed-main-input via zoom.js.
+    var zoomGroup = make('div', 'ed-toolbar-section ed-zoom-group');
+    zoomGroup.id = 'ed-zoom-group';
+    zoomGroup.setAttribute('role', 'group');
+    zoomGroup.setAttribute('aria-label', 'Text size');
+    appendButtons(zoomGroup, [
+      ['zoom-out', 'Decrease text size', { 'data-zoom': 'out' }, { icon: 'zoom-out', hideLabel: true }],
+      ['zoom-reset', 'Reset text size', { 'data-zoom': 'reset' }, { icon: 'zoom-reset', hideLabel: true }],
+      ['zoom-in', 'Increase text size', { 'data-zoom': 'in' }, { icon: 'zoom-in', hideLabel: true }]
+    ]);
+    viewActions.appendChild(zoomGroup);
+
     controls.appendChild(viewActions);
     main.appendChild(controls);
 
@@ -430,6 +448,13 @@
     root.__edLayoutHooks = hooks;
     var clickHandler = function (event) {
       var target = event.target;
+      var zoomNode = target && target.closest ? target.closest('[data-zoom]') : null;
+      if (zoomNode && root.contains(zoomNode)) {
+        var dir = zoomNode.getAttribute('data-zoom');
+        if (dir === 'out' && typeof window.editorZoomStep === 'function') { window.editorZoomStep(-0.1); event.preventDefault(); return; }
+        if (dir === 'in'  && typeof window.editorZoomStep === 'function') { window.editorZoomStep(0.1);  event.preventDefault(); return; }
+        if (dir === 'reset' && typeof window.editorZoomReset === 'function') { window.editorZoomReset(); event.preventDefault(); return; }
+      }
       var actionNode = target && target.closest ? target.closest('[data-action]') : null;
       if (actionNode && root.contains(actionNode)) {
         var action = actionNode.getAttribute('data-action');

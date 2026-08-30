@@ -498,14 +498,33 @@
 .ademo-root{display:flex;flex-direction:column;flex:1;min-height:0;gap:10px;padding:0}
 /* Demo toolbar: always single row. When narrow, items shrink gracefully
    instead of wrapping to a second line (wrap caused #2's first-entry 2-line). */
-.demo-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;overflow:hidden;width:100%;min-height:36px;min-width:0;align-content:center}
+/* overflow:visible is required so the absolutely-positioned custom-select menus
+   (portaled under each trigger) can render outside the toolbar's bounding box.
+   Without it `overflow:hidden` clips the dropdown and it appears "not opening". */
+.demo-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;overflow:visible;width:100%;min-height:36px;min-width:0;align-content:center}
 /* Single-row guarantee: fields row is a single flex line; children compress via min-width:0. */
-.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:hidden}
+.ademo-toolbar-fields,.dg-toolbar-fields{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:visible}
 .dg-toolbar-fields[hidden]{display:none !important}
 .ademo-toolbar-fields[hidden]{display:none !important}
-.ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 1 auto;min-width:0;display:flex;align-items:center}
-.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:150px}
+.ademo-type1-wrap,.ademo-type2-wrap,.ademo-bgmode-wrap{flex:0 1 auto;min-width:0;display:flex;align-items:center;position:relative}
+/* Ensure .custom-select-menu from music playlists bar sits above #music-results */
+#music-playlists-bar .custom-select-menu{z-index:1000 !important}
+#music-playlist-select-wrap .custom-select-wrapper{position:relative}
+#music-playlist-select-wrap .custom-select-menu{position:absolute !important;top:calc(100% + 4px) !important;left:0 !important;right:auto !important;min-width:100% !important}
+#music-playlist-select-wrap .custom-select-wrapper.open{z-index:1000}
+.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper,.ademo-bgmode-wrap .custom-select-wrapper{position:relative}
+/* Demo Games (dg) dropdown: many entries -> scroll without showing the bar.
+   The base .custom-select-menu is overflow:hidden; games must override it to
+   a scroll container with hidden scrollbars (Firefox: scrollbar-width, WebKit:
+   ::-webkit-scrollbar). Other demo menus keep auto height. */
+.ademo-type1-wrap .custom-select-menu,.ademo-type2-wrap .custom-select-menu,.ademo-bgmode-wrap .custom-select-menu{position:absolute !important;top:calc(100% + 4px) !important;left:0 !important;right:auto !important;z-index:9999 !important;min-width:100% !important}
+.dg-select-wrap .custom-select-menu{position:absolute !important;top:calc(100% + 4px) !important;left:0 !important;right:auto !important;z-index:9999 !important;min-width:100% !important;max-height:min(52vh, 380px) !important;overflow-y:auto !important;overflow-x:hidden !important;scrollbar-width:none !important;-ms-overflow-style:none !important}
+.dg-select-wrap .custom-select-menu::-webkit-scrollbar{width:0;height:0;display:none}
+.dg-select-wrap{position:relative}
+.ademo-type1-wrap .custom-select-wrapper,.ademo-type2-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:150px;position:relative;z-index:1}
 .ademo-bgmode-wrap .custom-select-wrapper{flex:1 1 auto;min-width:72px;max-width:145px}
+.dg-select-wrap .custom-select-wrapper{position:relative;z-index:1}
+.dg-select-wrap .custom-select-wrapper.open{z-index:1000}
 .ademo-toolbar .custom-select-wrapper{flex:1 1 auto;min-width:0}
 .ademo-sep{width:1px;height:20px;background:var(--glass-border);margin:0 4px;flex-shrink:0}
 .ademo-body-count{font-size:12px;color:var(--text-muted);white-space:nowrap;flex-shrink:0;line-height:32px}

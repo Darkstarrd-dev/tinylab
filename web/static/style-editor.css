@@ -206,6 +206,10 @@
   align-items: center;
   gap: 6px;
 }
+.ed-zoom-group{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:rgba(0,0,0,0.22);border:1px solid var(--glass-border)}
+.ed-zoom-group .ed-button{width:28px;height:26px;border-radius:999px}
+.ed-zoom-group .ed-button:hover{border-color:var(--glass-border)}
+.ed-zoom-group .ed-button:active{transform:scale(0.96)}
 .ed-segmented-control {
   display: inline-flex;
   align-items: center;

@@ -351,6 +351,11 @@ function pgRenderPanes() {
         '</span>' +
         (!isBatchActive ? '<span class="pg-pane-model">' + modelLabel + '</span>' : '') +
         (pgState.mode === 'image' && !isBatchActive ? '<span class="pg-pane-img-meta" id="pg-pane-img-meta-' + i + '"></span><span class="pg-pane-img-nav" id="pg-pane-img-nav-' + i + '"></span>' : '') +
+        '<span class="pg-zoom-group" onclick="event.stopPropagation()" role="group" aria-label="Text size">' +
+          '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.pgZoomStep) window.pgZoomStep(-0.1);" data-tooltip="Decrease text size" aria-label="Decrease text size">' + (typeof PG_ICON_ZOOM_OUT !== 'undefined' ? PG_ICON_ZOOM_OUT : '−') + '</button>' +
+          '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.pgZoomReset) window.pgZoomReset();" data-tooltip="Reset text size" aria-label="Reset text size">' + (typeof PG_ICON_ZOOM_RESET !== 'undefined' ? PG_ICON_ZOOM_RESET : '↺') + '</button>' +
+          '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.pgZoomStep) window.pgZoomStep(0.1);" data-tooltip="Increase text size" aria-label="Increase text size">' + (typeof PG_ICON_ZOOM_IN !== 'undefined' ? PG_ICON_ZOOM_IN : '+') + '</button>' +
+        '</span>' +
         (pgState.mode !== 'search' && !isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
         (!isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' : '') +
       '</div>' +

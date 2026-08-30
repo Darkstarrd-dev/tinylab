@@ -1078,15 +1078,28 @@ function renderAssistantPresetBar() {
   if (!bar) return;
   var presets = window.__assistantPresets || [];
   var sel = window.__assistantPresetSel || '';
-  var opts = '<option value="">' + assistantEscape(t('assistantPresetPlaceholder') || '— Select preset —') + '</option>';
+  var placeholder = t('assistantPresetPlaceholder') || '— Select preset —';
+  var csOpts = [{ value: '', label: placeholder }];
   for (var i = 0; i < presets.length; i++) {
-    var nm = (presets[i] && presets[i].name) || '';
-    if (!nm) continue;
-    opts += '<option value="' + assistantEscape(nm) + '"' + (nm === sel ? ' selected' : '') + '>' + assistantEscape(nm) + '</option>';
+    var nm2 = (presets[i] && presets[i].name) || '';
+    if (!nm2) continue;
+    csOpts.push({ value: nm2, label: nm2 });
+  }
+  var selectHtml;
+  if (typeof renderCustomSelectHtml === 'function') {
+    selectHtml = renderCustomSelectHtml('assistant-preset-wrap', 'assistant-preset-select', csOpts, sel, 'assistantSelectPreset(this.value)', 'flex:1;min-width:200px;height:36px');
+  } else {
+    var opts2 = '<option value="">' + assistantEscape(placeholder) + '</option>';
+    for (var j = 0; j < presets.length; j++) {
+      var nm3 = (presets[j] && presets[j].name) || '';
+      if (!nm3) continue;
+      opts2 += '<option value="' + assistantEscape(nm3) + '"' + (nm3 === sel ? ' selected' : '') + '>' + assistantEscape(nm3) + '</option>';
+    }
+    selectHtml = '<select class="input" id="assistant-preset-select" style="flex:1;min-width:200px;height:36px" onchange="assistantSelectPreset(this.value)">' + opts2 + '</select>';
   }
   bar.innerHTML =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-      '<select class="input" id="assistant-preset-select" style="flex:1;min-width:200px;height:36px" onchange="assistantSelectPreset(this.value)">' + opts + '</select>' +
+      selectHtml +
       '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantAddPresetBundle()">' + assistantEscape(t('assistantPresetAdd') || 'Add') + '</button>' +
       '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px"' + (sel ? '' : ' disabled') + ' onclick="assistantApplyPresetBundle()">' + assistantEscape(t('assistantPresetApply') || 'Apply') + '</button>' +
       '<button type="button" class="btn btn-ghost" style="padding:0 14px;height:36px" onclick="assistantSaveCurrentAsPreset()">' + assistantEscape(t('assistantPresetSaveCurrent') || 'Save current') + '</button>' +

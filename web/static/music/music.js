@@ -124,16 +124,16 @@
           '<button id="music-refresh-lib" class="btn btn-ghost" style="flex-shrink:0;height:36px" title="Refresh local Musics">Library</button>'+
           '<button class="btn btn-ghost" style="flex-shrink:0;height:36px;white-space:nowrap" onclick="openPathSettingsModal({title:t(\'pathSettings\'),sections:{musicDir:true}})">'+escapeHtml(t('pathSettings')||'Path Settings')+'</button>'+
         '</div>'+
-        '<div id="music-playlists-bar" style="display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--glass-border);flex-wrap:nowrap;background:var(--glass-bg);min-width:0;overflow:hidden">'+
-          '<select id="music-playlist-select" class="input" style="min-width:160px;flex:0 1 200px;height:32px"><option value="">Playlists — Musics/playlists.json</option></select>'+
+        '<div id="music-playlists-bar" style="display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--glass-border);flex-wrap:nowrap;background:var(--glass-bg);min-width:0;overflow:visible;position:relative;z-index:30;isolation:isolate">'+
+          '<div id="music-playlist-select-wrap" style="min-width:160px;flex:0 1 200px;position:relative;overflow:visible"></div>'+
           '<input id="music-playlist-name" class="input" placeholder="New playlist name" style="flex:0 1 140px;min-width:0;height:32px">'+
           '<button id="music-pl-create" class="btn btn-ghost" style="flex-shrink:0;height:32px">Create</button>'+
           '<button id="music-pl-savequeue" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Save queue to selected playlist">Save queue →</button>'+
           '<button id="music-pl-load" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Load selected playlist to queue">Load → queue</button>'+
           '<button id="music-pl-export" class="btn btn-ghost" style="flex-shrink:0;height:32px;white-space:nowrap" title="Export selected as .m3u">Export m3u</button>'+
-          '<label class="btn btn-ghost" style="cursor:pointer;flex-shrink:0;height:32px;display:inline-flex;align-items:center;white-space:nowrap">Import m3u<input id="music-m3u-file" type="file" accept=".m3u,.m3u8" hidden></label>'+
-          '<input id="music-pl-url" class="input" placeholder="Import playlist URL (remote m3u/json)" style="flex:1;min-width:0;height:32px">'+
-          '<button id="music-pl-import-url" class="btn btn-ghost" style="flex-shrink:0;height:32px">Fetch</button>'+
+          '<label class="btn btn-ghost" style="cursor:pointer;flex-shrink:0;height:32px;display:inline-flex;align-items:center;white-space:nowrap;position:relative;z-index:1">Import m3u<input id="music-m3u-file" type="file" accept=".m3u,.m3u8" hidden></label>'+
+          '<input id="music-pl-url" class="input" placeholder="Import playlist URL (remote m3u/json)" style="flex:1;min-width:0;height:32px;position:relative;z-index:1">'+
+          '<button id="music-pl-import-url" class="btn btn-ghost" style="flex-shrink:0;height:32px;position:relative;z-index:1">Fetch</button>'+
         '</div>'+
         '<div style="display:flex;flex:1;min-height:0;overflow:hidden">'+
           // left: results + library
@@ -486,17 +486,30 @@
 
   // Playlists: Musics/playlists.json via /api/music/playlists + m3u
   var playlistsCache = [];
+  window.musicOnPlaylistSelect = function(v){ var s=document.getElementById('music-playlist-select'); if(s) s.value=v; };
   function refreshPlaylists(){
-    var sel=document.getElementById('music-playlist-select'); if(!sel) return;
+    var wrap=document.getElementById('music-playlist-select-wrap'); if(!wrap) return;
+    var sel=document.getElementById('music-playlist-select');
     musicLog('Playlists: GET /api/music/playlists','req');
     apiFetch('/api/music/playlists').then(function(data){
       var pls=(data&&data.playlists)||[];
       playlistsCache=pls;
-      var cur=sel.value;
-      sel.innerHTML='<option value="">Playlists — Musics/playlists.json</option>' + pls.map(function(p){
-        return '<option value="'+escapeHtml(String(p.id||p.name))+'">'+escapeHtml(String(p.name||p.id))+' ('+((p.tracks||[]).length)+')</option>';
-      }).join('');
-      if(cur) sel.value=cur;
+      var cur=(sel && sel.value) || '';
+      var placeholder='Playlists — Musics/playlists.json';
+      var csOpts=[{value:'',label:placeholder}].concat(pls.map(function(p){ return {value:String(p.id||p.name), label:String(p.name||p.id)+' ('+((p.tracks||[]).length)+')'}; }));
+      if(typeof renderCustomSelectHtml==='function'){
+        wrap.innerHTML=renderCustomSelectHtml('music-playlist-wrap','music-playlist-select',csOpts,cur,'musicOnPlaylistSelect(this.value)','width:100%;height:32px');
+        sel=wrap.querySelector('#music-playlist-select');
+      } else {
+        // Fallback native
+        wrap.innerHTML='<select id="music-playlist-select" class="input" style="width:100%;height:32px"><option value="">'+escapeHtml(placeholder)+'</option>' + pls.map(function(p){
+          return '<option value="'+escapeHtml(String(p.id||p.name))+'">'+escapeHtml(String(p.name||p.id))+' ('+((p.tracks||[]).length)+')</option>';
+        }).join('')+'</select>';
+        sel=wrap.querySelector('#music-playlist-select');
+      }
+      // Restore selection on either path (renderCustomSelectHtml already sets hidden select value
+      // via its selectedValue param, fallback path must do it here)
+      if(cur && sel){ try{ sel.value=cur; }catch(e){} }
       musicLog('Playlists: loaded '+pls.length+' playlist(s)','ok');
     }).catch(function(e){ musicLog('Playlists error: '+String(e&&e.message||e),'error'); });
   }

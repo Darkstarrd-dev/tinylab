@@ -1100,6 +1100,12 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-pane-btn:hover{background:var(--glass-hover);color:var(--text-secondary)}
 .pg-pane-btn.danger:hover{color:var(--danger)}
 
+/* Text-only zoom group in pane header: −/reset/+ (SVG, only font-size via zoom.js). */
+.pg-zoom-group{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--glass-bg);border:1px solid var(--glass-border);flex-shrink:0;margin-left:auto}
+.pg-zoom-group .pg-zoom-btn{width:22px;height:22px;border-radius:999px}
+.pg-zoom-group .pg-zoom-btn:hover{background:var(--glass-hover);color:var(--text)}
+.pg-zoom-group .pg-zoom-btn:active{transform:scale(0.96)}
+
 /* Input thumbnails area (left side of input card) */
 .pg-input-thumbs{display:flex;flex-wrap:wrap;gap:2px;padding:4px 6px 4px 10px;flex-shrink:0;align-content:center;align-items:center;max-width:220px;overflow-y:auto;overflow-x:hidden;box-sizing:border-box}
 .pg-input-thumbs:empty{display:none}

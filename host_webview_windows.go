@@ -337,6 +337,28 @@ func openWebviewWindow(hctx *app.HostContext) {
 		gwlStyle         uintptr = ^uintptr(15)
 	)
 
+	// Disable WebView2's built-in IsZoomControlEnabled (Ctrl±/Ctrl0/Ctrl+Wheel).
+	// Our app owns all zoom: global via CSS zoom (zoom.js) and contextual text-only
+	// zoom (playground .pg-input/.pg-bubble, editor #ed-main-input). Keeping the
+	// native control enabled makes WebView2 scale the whole page under us and fight
+	// our handlers.
+	go func() {
+		for range 40 {
+			time.Sleep(50 * time.Millisecond)
+			ch := chromiumOf(w)
+			if ch == nil {
+				continue
+			}
+			s, err := ch.GetSettings()
+			if err != nil || s == nil {
+				continue
+			}
+			_ = s.PutIsZoomControlEnabled(false)
+			_ = s.PutIsPinchZoomEnabled(false)
+			return
+		}
+	}()
+
 	// Bind toggleNativeFullscreen BEFORE calling Navigate so it is immediately
 	// available in the DOM environment.
 	w.Bind("toggleNativeFullscreen", func(enable bool) error {
