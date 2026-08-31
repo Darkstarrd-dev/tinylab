@@ -142,12 +142,14 @@
     for (var i = 0; i < this.enemyPool.length; i++) if (!this.enemyPool[i].active) { e = this.enemyPool[i]; break; }
     if (!e) { e = new TD.Enemy(this, def); this.enemyPool.push(e); }
     e.spawn(def, hpMul, speedMul, rewardMul, 0);
-    // 起点
     var p0 = this.mapMgr.pathWorld[0];
-    e.x = p0.x; e.y = p0.y; if (e.go) { e.go.x = p0.x; e.go.y = p0.y; e.go.setVisible(true).setActive(true); }
-    // 分裂：死亡时分裂两个小怪（在 onEnemyKilled 中处理）
+    e.x = p0.x; e.y = p0.y;
+    if (e.go) {
+      e.go.x = p0.x; e.go.y = p0.y;
+      if (typeof e.go.setVisible === 'function') e.go.setVisible(true);
+      if (typeof e.go.setActive === 'function') e.go.setActive(true);
+    }
     this.enemiesAlive.push(e);
-    // 分裂敌标记
     e._isSplitParent = (enemyId === 'split');
   };
   TD.GameScene.prototype.onEnemyKilled = function (enemy, killer) {
@@ -169,7 +171,10 @@
   };
   TD.GameScene.prototype._reapEnemy = function (enemy) {
     enemy.active = false;
-    if (enemy.go) enemy.go.setVisible(false).setActive(false);
+    if (enemy.go) {
+      if (typeof enemy.go.setVisible === 'function') enemy.go.setVisible(false);
+      if (typeof enemy.go.setActive === 'function') enemy.go.setActive(false);
+    }
     var idx = this.enemiesAlive.indexOf(enemy); if (idx !== -1) this.enemiesAlive.splice(idx, 1);
   };
   TD.GameScene.prototype._toast = function (msg, ms) {
