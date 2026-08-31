@@ -14,6 +14,7 @@ var traceEnabled = false;
 var usageVisibilityHandler = null;
 var usagePeriodicTimer = null;
 var _lastPerKeyRefresh = 0;
+var lastSseVersion = 0; // last monotonic SSE event version (review Bug1/U1 gap detection)
 var inflightEntries = {};
 var processingTimer = null;
 var usageFilters = { success: true, failure: true, processing: true };

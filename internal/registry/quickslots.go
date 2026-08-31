@@ -94,6 +94,32 @@ func (r *Registry) UpdateQuickSlot(id string, updates config.QuickSlot) bool {
 	return false
 }
 
+// SetQuickSlotSelectedIndex atomically sets the SelectedIndex of a quickslot,
+// clamping it to the models slice (out-of-range values snap to the nearest
+// valid index; an empty model list stays 0). Returns the updated quickslot and
+// whether the id matched. Unlike a full UpdateQuickSlot PUT this cannot race
+// with concurrent selection changes.
+func (r *Registry) SetQuickSlotSelectedIndex(id string, idx int) (config.QuickSlot, bool) {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	for i := range r.config.QuickSlots {
+		if r.config.QuickSlots[i].ID == id {
+			models := r.config.QuickSlots[i].Models
+			if len(models) == 0 {
+				r.config.QuickSlots[i].SelectedIndex = 0
+			} else if idx < 0 {
+				r.config.QuickSlots[i].SelectedIndex = 0
+			} else if idx >= len(models) {
+				r.config.QuickSlots[i].SelectedIndex = len(models) - 1
+			} else {
+				r.config.QuickSlots[i].SelectedIndex = idx
+			}
+			return r.config.QuickSlots[i], true
+		}
+	}
+	return config.QuickSlot{}, false
+}
+
 func (r *Registry) DeleteQuickSlot(id string) bool {
 	r.cfgMu.Lock()
 	defer r.cfgMu.Unlock()

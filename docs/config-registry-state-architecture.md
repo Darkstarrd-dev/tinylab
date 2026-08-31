@@ -1,3 +1,5 @@
+> **最后核对（2026-08-31，Provider override 三字段 + QuickSlot 原子 selectedIndex）：** `Provider` 新增 `MaxRetriesOverride *int` / `RetryIntervalOverrideSec *int` / `CooldownOverrideSec *int`（`yaml/json:"...override...,omitempty"`，types.go）——三个指针零值 nil = disabled，omitempty 免迁移，旧 config.yaml 无段即保持旧行为；`validate.go::validateProviders` 对三字段 clamp + stderr Warn（`<1→1` / `<0→0` / `<1→1`，validate.go:88-100，best-effort 不阻断）；`registry/providers.go::UpdateProvider` 显式合并三字段（providers.go:93-95，与 HardLimit 整体指针替换并列——**本方案下合并清单需追加三项**）；`registry/quickslots.go` 新增 `SetQuickSlotSelectedIndex(id, idx)`（原子设置 `SelectedIndex`，越界钳制空→0/<0→0/≥len→len-1，返回权威快照）供 `PATCH /quickslots/{id}/selectedIndex`（api/quickslots/register.go:30/93-107）使用，消除前端 `apiGet→改→apiPut` 竞态。
+>
 > **最后核对（2026-08-29，Round-2 P0-04 配置并发与原子写）：** `Deps.cfgSaveMu` 串行化 `SaveConfig`/`SaveConfigAndReload`；`fsutil.AtomicWrite` 改随机后缀 `path.tmp.<nanos>` 并镜像确定性 `.tmp` 兼容探针；`config.Load` 经 `findPendingTmp(path.tmp*)` 发现悬空随机文件；`.tmp` 第三分支经 `decodeConfig` 迁移废弃字段。
 
 # TinyRouter Config / Registry / State 基础设施架构

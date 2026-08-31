@@ -36,6 +36,16 @@ type CooldownInfo struct {
 }
 
 func (s *Selector) MarkUnavailable(providerID, keyID, model string, statusCode int, body string) time.Time {
+	return s.MarkUnavailableWithOverride(providerID, keyID, model, statusCode, body, nil)
+}
+
+// MarkUnavailableWithOverride applies the retry-exhausted cooldown lock for a
+// key+model. When overrideSec is non-nil the lock duration is fixed at
+// overrideSec seconds (clamped to >=1s) instead of the exponential pow2
+// backoff (capped by BackoffMaxSec, default 300s). The fixed-duration branch
+// does not touch BackoffLevel so a later switch back to exponential backoff
+// starts from an unaffected level.
+func (s *Selector) MarkUnavailableWithOverride(providerID, keyID, model string, statusCode int, body string, overrideSec *int) time.Time {
 	state := s.reg.GetKeyState(providerID, keyID)
 	if state == nil {
 		return time.Time{}
@@ -43,16 +53,25 @@ func (s *Selector) MarkUnavailable(providerID, keyID, model string, statusCode i
 	state.Lock()
 	defer state.Unlock()
 
-	if state.BackoffLevel < 15 {
-		state.BackoffLevel++
-	}
-	backoff := time.Duration(math.Pow(2, float64(state.BackoffLevel))) * time.Second
-	maxBackoff := time.Duration(s.Settings().BackoffMaxSec) * time.Second
-	if maxBackoff == 0 {
-		maxBackoff = 300 * time.Second
-	}
-	if backoff > maxBackoff {
-		backoff = maxBackoff
+	var backoff time.Duration
+	if overrideSec != nil {
+		sec := *overrideSec
+		if sec < 1 {
+			sec = 1
+		}
+		backoff = time.Duration(sec) * time.Second
+	} else {
+		if state.BackoffLevel < 15 {
+			state.BackoffLevel++
+		}
+		backoff = time.Duration(math.Pow(2, float64(state.BackoffLevel))) * time.Second
+		maxBackoff := time.Duration(s.Settings().BackoffMaxSec) * time.Second
+		if maxBackoff == 0 {
+			maxBackoff = 300 * time.Second
+		}
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
 	unlock := time.Now().Add(backoff)
 	state.ModelLocks[model] = unlock

@@ -403,10 +403,23 @@ func (h *Handler) getQuotas(w http.ResponseWriter, r *http.Request) {
 		return ki < kj
 	})
 
+	// Inline per-key model detail for every bar (review Bug1/U1: eliminates the
+	// frontend's N+1 /monitor/model-keys fetches and their 3s TTL staleness —
+	// the dominant contributor to Quota lagging Recent). The frontend reads
+	// details[key] directly and only falls back to GET /monitor/model-keys for
+	// a bar whose provider was just renamed/added between refreshes.
+	details := make(map[string]modelKeysResult, len(bars))
+	for i := range bars {
+		if res, ok := h.buildModelKeys(bars[i].Provider, bars[i].Model); ok {
+			details[bars[i].Provider+"/"+bars[i].Model] = res
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]any{
-		"quotas": bars,
+		"quotas":    bars,
+		"keyDetail": details,
 	})
 }
 
@@ -507,16 +520,50 @@ func (h *Handler) currentKey(providerName, model string) currentKey {
 	return currentKey{ID: cands[0].id, Name: cands[0].name}
 }
 
-// --- Model-Key detail / ordering ---
+// modelKeysResult is the shared payload shape for per-key model detail,
+// returned both by the standalone GET /monitor/model-keys endpoint and
+// inlined into GET /monitor/quotas (eliminating the frontend's N+1 detail
+// fetches — review Bug1/U1).
+type modelKeysResult struct {
+	ProviderName     string      `json:"provider"`
+	ProviderID       string      `json:"providerId"`
+	Model            string      `json:"model"`
+	HasQuota         bool        `json:"hasQuota"`
+	Keys             []keyDetail `json:"keys"`
+	InUseKeyName     string      `json:"inUseKeyName"`
+	InUseKeyID       string      `json:"inUseKeyID"`
+	RotationStrategy string      `json:"rotationStrategy"`
+}
 
-func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
-	providerName := r.URL.Query().Get("provider")
-	model := r.URL.Query().Get("model")
-	if providerName == "" || model == "" {
-		apibase.WriteAPIError(w, http.StatusBadRequest, "provider and model are required")
-		return
-	}
+type keyDetail struct {
+	KeyID        string  `json:"keyId"`
+	KeyName      string  `json:"keyName"`
+	IsActive     bool    `json:"isActive"`
+	Status       string  `json:"status"`
+	HasQuota     bool    `json:"hasQuota"`
+	ModelLimit   int     `json:"modelLimit"`
+	ModelRemain  int     `json:"modelRemaining"`
+	ModelLock    *string `json:"modelLock"`
+	LastError    string  `json:"lastError"`
+	LastUsedAt   string  `json:"lastUsedAt"`
+	RotatedAt    string  `json:"rotatedAt"`
+	Priority     int     `json:"priority"`
+	ConfigIdx    int     `json:"configIdx"`
+	SuccessCount int     `json:"successCount"`
+	ErrorCount   int     `json:"errorCount"`
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
+	AvgTTFTMs    int64   `json:"avgTtftMs"`
+	AvgSpeed     float64 `json:"avgSpeed"`
+	InFlight     int     `json:"inFlight"`
+	LiveSpeed    float64 `json:"liveSpeed"`
+}
 
+// buildModelKeys computes the per-key model detail for a provider/model,
+// sorted by the provider's effective rotation strategy (review Bug1/U1
+// refactor: shared by getModelKeys and getQuotas so the frontend gets detail
+// inline and never issues N+1 fetches).
+func (h *Handler) buildModelKeys(providerName, model string) (modelKeysResult, bool) {
 	var provider *config.Provider
 	for _, p := range h.d.Reg.ListProviders() {
 		if p.Name == providerName || p.ID == providerName {
@@ -526,34 +573,8 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if provider == nil {
-		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
-		return
+		return modelKeysResult{}, false
 	}
-
-	type keyDetail struct {
-		KeyID        string  `json:"keyId"`
-		KeyName      string  `json:"keyName"`
-		IsActive     bool    `json:"isActive"`
-		Status       string  `json:"status"`
-		HasQuota     bool    `json:"hasQuota"`
-		ModelLimit   int     `json:"modelLimit"`
-		ModelRemain  int     `json:"modelRemaining"`
-		ModelLock    *string `json:"modelLock"`
-		LastError    string  `json:"lastError"`
-		LastUsedAt   string  `json:"lastUsedAt"`
-		RotatedAt    string  `json:"rotatedAt"`
-		Priority     int     `json:"priority"`
-		ConfigIdx    int     `json:"configIdx"`
-		SuccessCount int     `json:"successCount"`
-		ErrorCount   int     `json:"errorCount"`
-		InputTokens  int     `json:"inputTokens"`
-		OutputTokens int     `json:"outputTokens"`
-		AvgTTFTMs    int64   `json:"avgTtftMs"`
-		AvgSpeed     float64 `json:"avgSpeed"`
-		InFlight     int     `json:"inFlight"`
-		LiveSpeed    float64 `json:"liveSpeed"`
-	}
-
 	hasQuota := false
 	details := make([]keyDetail, 0, len(provider.Keys))
 
@@ -724,17 +745,45 @@ func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	return modelKeysResult{
+		ProviderName:     providerName,
+		ProviderID:       provider.ID,
+		Model:            model,
+		HasQuota:         hasQuota,
+		Keys:             sorted,
+		InUseKeyName:     inUseKeyName,
+		InUseKeyID:       inUseKeyID,
+		RotationStrategy: strategy,
+	}, true
+}
+
+// getModelKeys serves GET /monitor/model-keys: standalone per-key model
+// detail. The frontend normally consumes the inlined copy inside
+// GET /monitor/quotas (see getQuotas) and only falls back here for bars whose
+// detail could not be inlined.
+func (h *Handler) getModelKeys(w http.ResponseWriter, r *http.Request) {
+	providerName := r.URL.Query().Get("provider")
+	model := r.URL.Query().Get("model")
+	if providerName == "" || model == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "provider and model are required")
+		return
+	}
+	res, ok := h.buildModelKeys(providerName, model)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "provider not found")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(map[string]any{
-		"provider":         providerName,
-		"providerId":       provider.ID,
-		"model":            model,
-		"hasQuota":         hasQuota,
-		"keys":             sorted,
-		"inUseKeyName":     inUseKeyName,
-		"inUseKeyID":       inUseKeyID,
-		"rotationStrategy": strategy,
+		"provider":         res.ProviderName,
+		"providerId":       res.ProviderID,
+		"model":            res.Model,
+		"hasQuota":         res.HasQuota,
+		"keys":             res.Keys,
+		"inUseKeyName":     res.InUseKeyName,
+		"inUseKeyID":       res.InUseKeyID,
+		"rotationStrategy": res.RotationStrategy,
 	})
 }
 

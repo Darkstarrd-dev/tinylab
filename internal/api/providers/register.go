@@ -34,54 +34,60 @@ func NewHandler(d *apibase.Deps) *Handler {
 // The non-secret editable fields are preserved so the frontend's whole-object
 // PUT round-trip does not zero them in Registry.UpdateProvider.
 type ProviderDTO struct {
-	ID                    string              `json:"id"`
-	Name                  string              `json:"name"`
-	Prefix                string              `json:"prefix"`
-	BaseURL               string              `json:"baseUrl"`
-	APIType               string              `json:"apiType"`
-	AnthropicVersion      string              `json:"anthropicVersion,omitempty"`
-	AnthropicBeta         string              `json:"anthropicBeta,omitempty"`
-	IsActive              bool                `json:"isActive"`
-	Models                []config.ModelDef   `json:"models,omitempty"`
-	KeyCount              int                 `json:"keyCount"`
-	HasKey                bool                `json:"hasKey"`
-	RotationStrategy      string              `json:"rotationStrategy,omitempty"`
-	StickyLimit           int                 `json:"stickyLimit,omitempty"`
-	InjectStreamOpts      bool                `json:"injectStreamOptions,omitempty"`
-	NormalizeStreamChunks bool                       `json:"normalizeStreamChunks,omitempty"`
-	NIMConfig             *config.NIMSettings        `json:"nim,omitempty"`
-	HardLimit             *config.HardLimitSettings  `json:"hardLimit,omitempty"`
-	UseProxy              bool                       `json:"useProxy,omitempty"`
-	AllowPrivateNetwork   bool                       `json:"allowPrivateNetwork,omitempty"`
-	UseCustomHeaders      bool                       `json:"useCustomHeaders,omitempty"`
-	CustomHeaders         map[string]string          `json:"customHeaders,omitempty"`
+	ID                       string                    `json:"id"`
+	Name                     string                    `json:"name"`
+	Prefix                   string                    `json:"prefix"`
+	BaseURL                  string                    `json:"baseUrl"`
+	APIType                  string                    `json:"apiType"`
+	AnthropicVersion         string                    `json:"anthropicVersion,omitempty"`
+	AnthropicBeta            string                    `json:"anthropicBeta,omitempty"`
+	IsActive                 bool                      `json:"isActive"`
+	Models                   []config.ModelDef         `json:"models,omitempty"`
+	KeyCount                 int                       `json:"keyCount"`
+	HasKey                   bool                      `json:"hasKey"`
+	RotationStrategy         string                    `json:"rotationStrategy,omitempty"`
+	StickyLimit              int                       `json:"stickyLimit,omitempty"`
+	InjectStreamOpts         bool                      `json:"injectStreamOptions,omitempty"`
+	NormalizeStreamChunks    bool                      `json:"normalizeStreamChunks,omitempty"`
+	NIMConfig                *config.NIMSettings       `json:"nim,omitempty"`
+	HardLimit                *config.HardLimitSettings `json:"hardLimit,omitempty"`
+	MaxRetriesOverride       *int                      `json:"maxRetriesOverride"`
+	RetryIntervalOverrideSec *int                      `json:"retryIntervalOverrideSec"`
+	CooldownOverrideSec      *int                      `json:"cooldownOverrideSec"`
+	UseProxy                 bool                      `json:"useProxy,omitempty"`
+	AllowPrivateNetwork      bool                      `json:"allowPrivateNetwork,omitempty"`
+	UseCustomHeaders         bool                      `json:"useCustomHeaders,omitempty"`
+	CustomHeaders            map[string]string         `json:"customHeaders,omitempty"`
 }
 
 // toProviderDTO converts a config.Provider to its public DTO, dropping all
 // key material.
 func toProviderDTO(p config.Provider) ProviderDTO {
 	return ProviderDTO{
-		ID:                    p.ID,
-		Name:                  p.Name,
-		Prefix:                p.Prefix,
-		BaseURL:               p.BaseURL,
-		APIType:               p.APIType,
-		AnthropicVersion:      p.AnthropicVersion,
-		AnthropicBeta:         p.AnthropicBeta,
-		IsActive:              p.IsActive,
-		Models:                p.Models,
-		KeyCount:              len(p.Keys),
-		HasKey:                len(p.Keys) > 0,
-		RotationStrategy:      p.RotationStrategy,
-		StickyLimit:           p.StickyLimit,
-		InjectStreamOpts:      p.InjectStreamOpts,
-		NormalizeStreamChunks: p.NormalizeStreamChunks,
-		NIMConfig:             p.NIMConfig,
-		HardLimit:             p.HardLimit,
-		UseProxy:              p.UseProxy,
-		AllowPrivateNetwork:   p.AllowPrivateNetwork,
-		UseCustomHeaders:      p.UseCustomHeaders,
-		CustomHeaders:         p.CustomHeaders,
+		ID:                       p.ID,
+		Name:                     p.Name,
+		Prefix:                   p.Prefix,
+		BaseURL:                  p.BaseURL,
+		APIType:                  p.APIType,
+		AnthropicVersion:         p.AnthropicVersion,
+		AnthropicBeta:            p.AnthropicBeta,
+		IsActive:                 p.IsActive,
+		Models:                   p.Models,
+		KeyCount:                 len(p.Keys),
+		HasKey:                   len(p.Keys) > 0,
+		RotationStrategy:         p.RotationStrategy,
+		StickyLimit:              p.StickyLimit,
+		InjectStreamOpts:         p.InjectStreamOpts,
+		NormalizeStreamChunks:    p.NormalizeStreamChunks,
+		NIMConfig:                p.NIMConfig,
+		HardLimit:                p.HardLimit,
+		MaxRetriesOverride:       p.MaxRetriesOverride,
+		RetryIntervalOverrideSec: p.RetryIntervalOverrideSec,
+		CooldownOverrideSec:      p.CooldownOverrideSec,
+		UseProxy:                 p.UseProxy,
+		AllowPrivateNetwork:      p.AllowPrivateNetwork,
+		UseCustomHeaders:         p.UseCustomHeaders,
+		CustomHeaders:            p.CustomHeaders,
 	}
 }
 

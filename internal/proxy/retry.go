@@ -40,6 +40,39 @@ func (h *Handler) maxRetries() int {
 	return mr
 }
 
+// maxRetriesFor returns the effective max retry count for a provider:
+// MaxRetriesOverride wins (clamped 1..20), otherwise the global Rotation
+// MaxRetries with the ≤0→5 fallback.
+func (h *Handler) maxRetriesFor(providerID string) int {
+	if p, ok := h.providers.GetProvider(providerID); ok && p.MaxRetriesOverride != nil {
+		return clampInt(*p.MaxRetriesOverride, 1, 20)
+	}
+	return h.maxRetries()
+}
+
+// providerRetryOverride returns the provider's MaxRetriesOverride and
+// RetryIntervalOverrideSec pointers (both nil when the provider is missing or
+// no override is configured). A uniform retry interval is applied in the
+// generic 429/5xx backoff paths only when both overrides are set.
+func (h *Handler) providerRetryOverride(providerID string) (*int, *int) {
+	p, ok := h.providers.GetProvider(providerID)
+	if !ok {
+		return nil, nil
+	}
+	return p.MaxRetriesOverride, p.RetryIntervalOverrideSec
+}
+
+// clampInt bounds v to [min, max].
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // logRequest logs the initial request line (only once per forwardWithRetry call).
 // reqID and callerTag thread requester identity into the console so concurrent
 // clients can be told apart.
@@ -78,6 +111,12 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	resp.Body.Close()
 	bodyStr := string(body)
 	latencyMs := time.Since(startTime).Milliseconds()
+
+	// Provider-level retry overrides replace the exponential backoff with a
+	// fixed count + uniform interval in the generic sections below. NIM
+	// ladder, daily-quota locks and SenseNova fixed segments keep their
+	// dedicated handling and are never overridden.
+	ovMax, ovInterval := h.providerRetryOverride(providerID)
 
 	// NIM 429: use NIM-specific cooldown ladder.
 	if h.nim.IsNIMEnabled(providerID, model) {
@@ -123,9 +162,15 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 	// If adapter has quota info but not exhausted, use progressive backoff sequence
 	if snap != nil && snap.HasQuota() && !snap.ModelExhausted() {
 		maxBackoffRetries := 10
+		if ovMax != nil {
+			maxBackoffRetries = clampInt(*ovMax, 1, 20)
+		}
 		if state.temp429Retries < maxBackoffRetries {
 			state.temp429Retries++
 			delay := rotation.BackoffSequence(state.temp429Retries)
+			if ovMax != nil && ovInterval != nil {
+				delay = clampInt(*ovInterval, 0, 60)
+			}
 			h.logger.Warn("429: %s | retrying in %ds (attempt %d/%d) [Key %s]",
 				util.TruncStr(bodyStr, 200), delay, state.temp429Retries, maxBackoffRetries, sel.Key.Name)
 			h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel, sessionKey, "429 backoff "+strconv.Itoa(delay)+"s", "")
@@ -235,11 +280,18 @@ func (h *Handler) handle429(resp *http.Response, sel *rotation.SelectedKey, prov
 		return
 	}
 
-	if state.temp429Retries < state.maxRetries {
+	maxRetries := state.maxRetries
+	if ovMax != nil {
+		maxRetries = h.maxRetriesFor(providerID)
+	}
+	if state.temp429Retries < maxRetries {
 		state.temp429Retries++
 		delay := rotation.BackoffSequence(state.temp429Retries)
+		if ovMax != nil && ovInterval != nil {
+			delay = clampInt(*ovInterval, 0, 60)
+		}
 		h.logger.Warn("429: %s | retrying in %ds (attempt %d/%d) [Key %s]",
-			util.TruncStr(bodyStr, 200), delay, state.temp429Retries, state.maxRetries, sel.Key.Name)
+			util.TruncStr(bodyStr, 200), delay, state.temp429Retries, maxRetries, sel.Key.Name)
 		h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel, sessionKey, "429 backoff "+strconv.Itoa(delay)+"s", "")
 		select {
 		case <-r.Context().Done():
@@ -277,6 +329,10 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 
 	latencyMs := time.Since(startTime).Milliseconds()
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, "error", latencyMs, 0, 0, 0, bodyStr, reqBody, body, resp.Header, resp.StatusCode, requestHeaders(r), upstreamURL, originalModel, sessionKey, "upstream error", "")
+
+	// Provider-level retry overrides also normalize the 5xx backoff below into
+	// a uniform interval when both overrides are set.
+	ovMax, ovInterval := h.providerRetryOverride(providerID)
 
 	// Account-level balance exhaustion (ModelScope 402 insufficient_balance_error):
 	// lock the key for this model, invalidate its stale quota snapshot so the quota
@@ -349,6 +405,9 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 		backoff := time.Duration(500+(state.consecutive5xx-1)*500) * time.Millisecond
 		if backoff > 5*time.Second {
 			backoff = 5 * time.Second
+		}
+		if ovMax != nil && ovInterval != nil {
+			backoff = time.Duration(clampInt(*ovInterval, 0, 60)) * time.Second
 		}
 		h.logger.Debug("[%s] 5xx backoff: waiting %v before next retry (consecutive5xx=%d)", tag, backoff, state.consecutive5xx)
 		if r != nil {

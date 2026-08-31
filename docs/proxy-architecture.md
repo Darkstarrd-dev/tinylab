@@ -1,4 +1,5 @@
 # TinyRouter Proxy 代理核心架构
+> **最后核对（2026-08-31，Round-2 P0-02/P1-01/P1-03/P1-04/P2-01 流式用量/SSE/Quota）：** (1) **token 原子化 + 时间驱动广播**——`stream.go` `inputTokens`/`outputTokens`/`contentCharsTotal` 改 `atomic.Int64`（stream.go:63-65），新增 250ms `time.Ticker` goroutine 在计数变化时推送 `request-tokens`（替代原 1500ms read-batch 节流，消除上游静默期盲区，stream.go:67-107）；OpenAI/Anthropic usage 提取改**条件赋值**（`if in>0`/`if out>0`，output-only usage 不再把 `inputTokens` 清零，stream.go:199-215/277-292/375-390）；终态 `recordUsage` 前 `outputTokens==0 && contentCharsTotal>0` 时补 `contentCharsTotal/4` fallback（stream.go:465-467）。(2) **include_usage 渐进推广**——`forward_retry.go` 对 OpenAI 流式默认注入 `stream_options.include_usage`（局部 `injectedStreamOpts`，forward_retry.go:46-60），上游 400/422 拒绝时 strip 后重试一次（`streamOptsStripped`，forward_retry.go:251-262）。(3) **SSE version**——`api/sse/register.go` `streamUsageEvents` 每推送附加单调 `seq` version（`appendVersion`），前端 `monitor_io.js` 检测 gap 触发补偿拉取。(4) **getQuotas 内联 keyDetail**——`api/monitor/register.go` 重构 `buildModelKeys`（复用 `getModelKeys` 逻辑），`getQuotas` 内联每 key latency/avgSpeed，消前端 N+1。
 > **最后核对（2026-08-29，Round-2 P0-03/P0-05/InFlight与分级预算）：** HardLimit/NIM 取消分支配对 `DecInFlight`（`forward_retry.go:113/126`）；非流式 `passThroughResponse` 分级预算——`image/*` 流式 `io.Copy` 零缓冲、`text/*` 32MiB、`application/json` 256MiB（兼容 64MiB 测试）、其他 16MiB，`maxPassThroughBody` 可缩小；该分级覆盖 `TestPassThrough_LargeBodyStreamsFully`。
 
 > **最后核对（2026-08-29，SenseNova 套餐权益耗尽 429）：** `retry.go::handle429` 新增 `isSenseNovaEntitlementExhausted` 分支（retry.go:148-158、判定函数 retry.go:394-399）：仅当 provider `BaseURL` 含 `sensenova` 且 429 body 含 `token plan entitlement exhausted`（quota_exceeded_error/code 8）时，`MarkRateLimited` 冷却当前 Key+model **300 分钟** 并 `excludeSameAccountKeys` 排除同 account Key（套餐权益为账号级额度，区别于 rpm/tpm 的 60s 滑动窗口）；否则原有 rpm/tpm 分类不变。该文件中段行号整体后移 12 行，§9.2/§9.3 锚点已同步。
@@ -343,7 +344,7 @@ flowchart TD
 
 在每次 `forwardUpstream` 之前、选定 key 之后改写 `parsed` map 并重新 `json.Marshal`：
 
-- **`stream_options` 注入：** 仅当 `isStream && cfgProvider.InjectStreamOpts` 且 body 无 `stream_options` 时注入 `{"include_usage":true}`（forward.go:134-138）。
+- **`stream_options` 注入（2026-08-31 渐进推广）：** `isStream` 且 `cfgProvider.InjectStreamOpts` **或** `entryFormat == combo.EntryFormatOpenAI` 时，若 body 无 `stream_options` 则注入 `{"include_usage":true}`（forward_retry.go:46-60，局部 `injectedStreamOpts`）——OpenAI 流式**默认注入**以让支持的上游在流末上报真实 usage；注入导致上游 400/422 拒绝时，**strip 该字段并重试一次**（`streamOptsStripped`，forward_retry.go:251-262），不因测量辅助字段牺牲请求。
 - **model 替换：** `parsed["model"] = upstreamModel`，用真实上游模型名替换客户端模型名（forward.go:170）。
 - **thought_signature 回填：** 仅当 `cfgProvider.IsGeminiOpenAICompat()` 时调用 `backfillThoughtSignatures(parsed, h.sigCache)`（forward.go:171-173），见第 10 节。
 
@@ -400,6 +401,7 @@ providers:
 - **客户端断开保护：** `streamResponse` 引入 `clientDisconnected bool` 标志。normalize 模式的 `w.Write` 失败（`for _, line := range sb.Feed` 内层）、raw 模式的 `w.Write` 失败、normalize 模式 `remaining` 写出失败，均设 `clientDisconnected=true` 并 `break`（内层 range 的 `break` 仅跳出 range，外层 `if clientDisconnected { break }` 检查跳出外层 for 循环，stream.go:307-310）。末尾据 `clientDisconnected` 设 `status="error"`、`errMsg="client disconnected"` 调 `recordUsage`，保证 `request-done` 广播不遗漏。
 - **逐块读取 + flush：** 32 KiB 缓冲读取（stream.go:174），每读一块即 `flusher.Flush()`（stream.go:240）。
 - **在途跟踪：** 进入时 `Inflight.Register`（stream.go:144），首个 chunk 后 `SetFirstChunk`（stream.go:243），累计 content 字符 `AddBytes`（stream.go:247），每 >1.5s 触发 `InflightUpdates.Signal()`（stream.go:249-252）。
+- **时间驱动 token 广播（2026-08-31）：** `inputTokens`/`outputTokens`/`contentCharsTotal` 为 `atomic.Int64`（stream.go:63-65）——读循环（单 goroutine）写、后台 ticker goroutine 读，二者通过原子解耦。启动 250ms `time.Ticker` goroutine（stream.go:67-107）：计数自上次推送变化时（≤5 次/秒）`EntryTracker.UpdateTokens` + `broadcastTokens`，**独立于 read-batch**——上游静默期（如长 reasoning 首包后无数据）也持续推送，消除原「读批后才检查 >1500ms」的节流盲区。终态 `recordUsage` 前若 `outputTokens==0 && contentCharsTotal>0` 补 `contentCharsTotal/4` fallback（stream.go:465-467）。
 
 ### 8.2 SSELineBuffer 与两种模式
 
@@ -421,7 +423,7 @@ providers:
 
 ### 8.5 Token / thought_signature 提取与 [DONE]
 
-- **token 提取：** `util.ExtractTokens([]byte(payload))` 从 `data:` payload 提取 `input_tokens`/`output_tokens`（stream.go:196-199、224-227、276-279）。多 chunk 累计时采用 **last-chunk-wins**（后续 chunk 覆盖 `inputTokens`/`outputTokens`）。
+- **token 提取（2026-08-31 条件赋值）：** `util.ExtractTokens([]byte(payload))` 从 `data:` payload 提取 `input_tokens`/`output_tokens`（stream.go:199-215、206-216、277-292、375-390）。多 chunk 累计采用**条件赋值**——仅当提取值 `>0` 才 `atomic.Store`（`if in>0` / `if out>0`），output-only usage 包（Anthropic 转 OpenAI 兼容中间包）不再把 `inputTokens` 覆盖清零。`parseAnthropicSSEUsage` 分支同样条件赋值（stream.go:277-282）。
 - **thought_signature 提取：** `extractThoughtSignature([]byte(payload))` 从 `delta.tool_calls[].extra_content.google.thought_signature` 提取首个匹配的 `tool_call id` 与签名并 `sigCache.Put`（stream.go:200-202、228-230、280-282；函数定义 stream.go:444-490）。
 - **[DONE]：** token / signature 提取时跳过 `[DONE]`（stream.go:195、221、275）。
 - **调试模式：** `parseAndBroadcastChunk` 解析 `request-chunk` 事件并经 `RequestUpdates.Broadcast`（stream.go:206-210、233-237、349-368）。
@@ -530,6 +532,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 - **来源标记与分流（始终写入）：** 若请求带 `X-TinyRouter-Source` 头，则 `entry.Source = reqHeaders.Get("X-TinyRouter-Source")`（recorder.go:31-33）。`source == "playground"` 的请求写入独立的 `pgUsageBuf`（经 `Handler.SetPgUsage` 注入），其余写入 `usageBuf`，实现两个列表物理隔离。未带该头的请求 `Source` 为空（`json:"source,omitempty"` 不输出）。
 > **2026-07-27 更新（两层 JSONL 追踪日志，行为新增）：** `recordUsage` 新增 `decision string`、`provenance string` 参数（写入 `usage.Entry`）；`writeRequestLog` hook 在 body 截断前调用（保证完整 body 被捕获），受 `h.logRequests()` 运行时原子开关（加载自持久化 `cfg.Trace.Enabled`，默认 `false`）控制。追踪日志采用两层 JSONL 格式：`writeRequestLog` 写入 `traces/index-YYYYMMDD.jsonl`（每日轮转，同 reqID 末次写入覆盖，`traceLine` 结构体为 JSONL 行 schema）+ `traces/req/<reqID>.jsonl`（追加，仅首次调用写 request 行，后续每次调用写 attempt 行）。`TraceMgmtCall` 方法捕获 ManagementClient …
 - **Input Token 粗估（2026-07-21）：** `forwardWithRetry` 在创建 `processingEntry` 时设置 `InputTokens = len(bodyBytes) / 4`（约 4 字节≈1 token 粗估），使 `request-start` 事件立即携带 input token 估算值供前端实时显示。流式中若上游返回真实 input_tokens（Anthropic `message_start` / OpenAI usage chunk），经 `streamResponse` 提取后通过 `request-tokens` 事件更正。
+- **终态 token fallback（2026-08-31）：** `streamResponse` 调 `recordUsage` 前，若 `outputTokens==0 && contentCharsTotal>0` 则以 `contentCharsTotal / 4` 补写（stream.go:465-467）——上游从不发 usage 时终态不再为 0（配合 §7.4 include_usage 渐进注入与 §8.1 时间驱动广播，构成「流中实时 + 终态正确」）。
 - **详情捕获门控（2026-07-28，追踪与 debug 解耦占用）：** 两处门控分离：ring 存储（`recorder.go`）`captureDetails := isPlayground || (h.debugMode() && !h.logRequests())`——playground 始终捕获 `ReqPayload`/`RespPayload`/`RespHeaders`/`RespStatus`/`ReqHeaders`/`UpstreamURL`；非 playground 仅在 **debug 开 且 追踪关** 时存 payload/headers，追踪开时完整 body 已落盘 JSONL（由 Log Reader 查看）故 ring 退化为轻量表（时间/服务商/模型/密钥/延迟/Tokens）避免重复占用，debug 关亦不存。响应体累积（`stream.go` `streamResponse`/`passThroughResponse`）`captureDetails := h.logRequests() || isPlayground || h.debugMode()`——任一消费者（追踪 `logRequests`/debug ring/…到完整 respBody）。`reqBody` 截断 64KB 后经 `json.Valid` 校验，`respBody` 截断 512KB（含 `data[].b64_json` 占位符替换）后经 `json.Valid` 校验，二者非法 JSON 均包装为 `{"raw":...}`（recorder.go）。ring 的 payload 内存开销仅在 **追踪关 且 debug 开**（非 playground）时产生。`debugMode()` 另门控 `stream.go` 的 `parseAndBroadcastChunk`（SSE debug 控制台实时推理面板广播，见 §8）。前端（2026-07-28）：追踪开且 ring 无 payload 时，Recent Requests 详情 modal 异步从 `GET /api/traces/req/{reqID}` 取 request/attempt 行渲染 body/headers（`monitor_modal.js` `loadTraceDetails`）；info 按钮在 trace 开时即使 ring 无 payload 亦显示。非 playground 构建由此亦可在 Recent Requests 查看 trace 详情（Log Reader 仅 playground 构建内嵌）。
 - **Monitor Recent Requests 详情弹窗契约（2026-08-08）：** `monitor_modal.js` 固定渲染 `Request Info`、`Request`、`Request Headers`、`Response Headers`、`Status`、`Response Body` 六个 section，默认折叠；`Status` 为仅折叠的例外，其余五个 section 具备 section 级 Pretty/Raw/Copy，字段级仍具备 Pretty/Raw/Copy。Raw 视图保留捕获原始字符串，不从 Pretty 重新序列化；section header 与 field header 两级 sticky。共享 `info_common.js` 的 `renderInfoSection`/`buildInfoField` 作为兼容边界，其他调用方保持既有默认语义。
 - **广播链路：** `isPlayground && h.pgUsage != nil` → `h.pgUsage.Add(entry)`，否则 `h.usage.Add(entry)`（recorder.go:78-82）→ `RequestUpdates.Broadcast(RequestEvent{Type:"request-done", ...})`（recorder.go:84-91）→ `h.UsageUpdates.Signal()`（recorder.go:92）。
@@ -546,7 +549,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 经 `RequestUpdates` 广播的事件载荷：`Type`（`request-start` / `request-done` / `request-chunk` / `request-ttft` / `request-tokens`）、`ID`、`Status`、`Section`、`Delta`、`Entry`（`json.RawMessage`）。
 
 - `request-ttft`（2026-07-21 新增）：流式请求成功时，`forwardWithRetry` 在 `streamResponse` 调用前广播，`Entry` 为 `{"ttftMs": <int>}`。前端收到后切换 Latency 从"实时已耗时"到 TTFT 固定值。
-- `request-tokens`（2026-07-21 新增）：`streamResponse` 流式循环中每 1.5s 广播，`Entry` 为 `{"inputTokens": <int>, "outputTokens": <int>}`。output 优先用上游真实值，无则用 `contentCharsTotal / 4` 粗估。input 为 0 时前端保留估算值不覆盖。
+- `request-tokens`（2026-07-21 新增；**2026-08-31 改时间驱动**）：由 §8.1 的 250ms ticker goroutine 在计数变化时广播（≤5 次/秒，替代原「读批 + 1500ms」节流），`Entry` 为 `{"inputTokens": <int>, "outputTokens": <int>}`。output 优先用上游真实值，无则用 `contentCharsTotal / 4` 粗估。input 为 0 时前端保留估算值不覆盖。
 
 ## 12. 在途跟踪与事件广播
 
@@ -572,18 +575,20 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 - `Signal`：向每个订阅者非阻塞投递 `struct{}{}`，缓冲区满则跳过该订阅者（broadcaster.go:57-66）。
 - `Broadcast(event)`：向每个订阅者非阻塞投递带类型事件，缓冲满则跳过（broadcaster.go:71-80）。
 
-### 12.4 SSE 事件扇出（api/sse_events.go:16-79）
+### 12.4 SSE 事件扇出（internal/api/sse/register.go:streamUsageEvents）
 
-`GET /api/monitor/events`（router.go:266）由 `streamUsageEvents` 处理（api/sse_events.go:16-79）：
+`GET /api/monitor/events`（router.go:266）由 `streamUsageEvents` 处理（internal/api/sse/register.go，`Handler.Register` 挂 `Get("/monitor/events")`）：
 
-1. 写 SSE 头与 `{"type":"connected"}`（api/sse_events.go:23-29）。
-2. **重放**：把 `proxyHandler.EntryTracker.All()` 作为 `request-start` 事件回放，使新连接立即看到在途请求（api/sse_events.go:33-42）。
-3. `Subscribe` 三个 `Broadcaster`（UsageUpdates / InflightUpdates / RequestUpdates），进入 `select` 循环（api/sse_events.go:44-78）：
+1. 写 SSE 头与 `{"type":"connected"}`（sse/register.go，并 `SetWriteDeadline(time.Time{})` 豁免长流 WriteTimeout）。
+2. **重放**：把 `proxyHandler.EntryTracker.All()` 作为 `request-start` 事件回放，使新连接立即看到在途请求（sse/register.go）。
+3. `Subscribe` 三个 `Broadcaster`（UsageUpdates / InflightUpdates / RequestUpdates），进入 `select` 循环（sse/register.go）：
    - `ch`（UsageUpdates）→ `usage-updated`；
    - `infCh`（InflightUpdates）→ `key-inflight`；
    - `reqCh`（RequestUpdates）→ 序列化 `proxy.RequestEvent` 为 `request-*` 事件（含 `request-start`/`request-done`/`request-chunk`/`request-ttft`/`request-tokens`，2026-07-21 新增后两者）；
    - `ctx.Done()` → 退出；
-   - `30s` 超时 → `: keepalive` 注释行（api/sse_events.go:74-76）。
+   - `30s` 超时 → `: keepalive` 注释行。
+
+> **version 单调序列（2026-08-31 新增）：** `streamUsageEvents` 维护 per-connection 单调 `seq uint64`，对每类推送（`request-start`/`usage-updated`/`key-inflight`/`request-*`）附加 `"version":<seq>` 成员——`appendVersion` 在不重序列化的情况下把 `version` 注入顶层 JSON 对象（非对象 payload 原样回退）。前端 `monitor_io.js` 收到 `version > lastSseVersion + 1` 即判定一帧被丢弃（Broadcaster 满缓冲 drop），触发一次 `scheduleQuotaRefresh()` 补偿拉取——配合「无变化时跳过 5s 轮询」的 version-lag 补偿。
 
 `broadcastRequestStart`（forward.go:437-447）在每次 `forwardWithRetry` 迭代发出 `request-start` 事件，经 `RequestUpdates.Broadcast`。`broadcastTTFT`（forward.go:449-461）和 `broadcastTokens`（forward.go:463-476）分别发出 `request-ttft` 和 `request-tokens` 事件（2026-07-21 新增）。
 ## 13. 响应契约

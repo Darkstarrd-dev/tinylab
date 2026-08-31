@@ -1,19 +1,43 @@
 // pg-ui-events.js — all pgOn* handlers + global shortcuts (split from pg-ui.js)
-// Provides: pgOnImagePromptModel, pgApplyActiveQuickSlot, pgOnModelChange, pgOnProtocolFilter,
+// Provides: pgOnImagePromptModel, pgApplyActiveQuickSlot, pgApplyActiveQuickSlotToAll,
+// pgOnModelChange, pgOnProtocolFilter,
 // pgOnParam, pgGetImageSubmitCount, pgOnImageSubmitCount, pgStepImageSubmitCount,
 // pgGetImageConcurrency, pgOnImageConcurrency, pgStepImageConcurrency, pgOnImgSizeSelect,
 // pgOnSystemPrompt, pgOnContextLimit, pgToggleParam, pgOnCustomToggle, pgCustomFormat,
 // pgOnInputKey, pgIsEditingTarget, pgInitGlobalShortcuts
 function pgOnImagePromptModel(v) { var w = pgWin(); if (!w) return; w.config.imgPromptModel = v || ''; pgSave(); pgRenderSidebar(); }
+// pgApplyActiveQuickSlot applies the selected quickslot model to the active
+// window. A quickslot is a global model preset, so this applies in every mode
+// (normal/search/autochat/image alike); in image mode the image protocol is
+// driven by the model itself (same semantics as pgOnModelChange).
 function pgApplyActiveQuickSlot(model) {
   if (!model) return;
-  if (pgState.mode !== 'normal' && pgState.mode !== 'search') return;
   var w = pgWin(); if (!w) return;
   w.config.model = model;
   if (pgState.mode === 'search') {
     for (var si = 0; si < pgState.windows.length && si < 2; si++) {
       pgState.windows[si].config.model = model;
     }
+  }
+  pgSave();
+  pgRenderSidebar();
+  pgRenderPanes();
+  pgUpdateInputBar();
+}
+// pgApplyActiveQuickSlotToAll broadcasts a quickslot model switch to every
+// window (multi-pane normal/search/autochat all follow the preset) and aborts
+// any in-flight stream so an old-model request cannot leave a long-tail
+// Console entry behind.
+function pgApplyActiveQuickSlotToAll(model) {
+  if (!model) return;
+  for (var i = 0; i < pgState.windows.length; i++) {
+    var w = pgState.windows[i];
+    if (!w || !w.config) continue;
+    if (w.streaming && w.abortCtrl) {
+      try { w.abortCtrl.abort(); } catch (e) {}
+      w.streaming = false;
+    }
+    w.config.model = model;
   }
   pgSave();
   pgRenderSidebar();
@@ -34,6 +58,7 @@ function pgOnModelChange(v) {
   if (typeof qsClearActive === 'function') qsClearActive();
   pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar();
 }
+
 
 // pgOnProtocolFilter changes the protocol filter.  If the currently selected
 // model no longer matches the chosen protocol, it is cleared so the user

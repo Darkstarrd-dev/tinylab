@@ -27,6 +27,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/quickslots", h.listQuickSlots)
 	r.Post("/quickslots", h.createQuickSlot)
 	r.Put("/quickslots/{id}", h.updateQuickSlot)
+	r.Patch("/quickslots/{id}/selectedIndex", h.patchQuickSlotSelectedIndex)
 	r.Delete("/quickslots/{id}", h.deleteQuickSlot)
 }
 
@@ -83,6 +84,34 @@ func (h *Handler) updateQuickSlot(w http.ResponseWriter, r *http.Request) {
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "quickslot not found")
 	}
+}
+
+// patchQuickSlotSelectedIndex atomically switches the selected model index of
+// a quickslot, avoiding the full-PUT race that rapid re-selection can cause
+// (a later full PUT could otherwise overwrite a newer SelectedIndex or regress
+// it to 0 on an out-of-range index).
+// PATCH /api/quickslots/{id}/selectedIndex
+func (h *Handler) patchQuickSlotSelectedIndex(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		SelectedIndex int `json:"selectedIndex"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	qs, ok := h.d.Reg.SetQuickSlotSelectedIndex(id, req.SelectedIndex)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "quickslot not found")
+		return
+	}
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(qs)
 }
 
 // deleteQuickSlot deletes a quickslot by ID.

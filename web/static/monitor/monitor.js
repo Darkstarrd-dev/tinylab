@@ -130,6 +130,13 @@ function connectUsageSSE() {
     var status = document.getElementById('console-status');
     if (status) status.textContent = t('disconnected');
     if (currentPage === 'monitor' && !usageReconnectTimer) scheduleUsageReconnect();
+    // Compensation pull: with the SSE link down, streaming token updates stop
+    // reaching the Recent DOM. Trigger one immediate refreshQuotaData instead
+    // of waiting for the next 5s poll, so a short stream still shows output
+    // before it terminates (review Bug2/C).
+    if (currentPage === 'monitor') {
+      if (typeof refreshQuotaData === 'function') refreshQuotaData();
+    }
   };
 }
 
@@ -164,12 +171,20 @@ function startUsageRefresh() {
   };
   document.addEventListener('visibilitychange', usageVisibilityHandler);
 
-  usagePeriodicTimer = setInterval(function() {
-    if (currentPage === 'monitor' && document.visibilityState === 'visible') {
+  // Adaptive polling: while any request is processing, poll every 1s so a
+  // short stream's tokens are reflected even if the SSE link is down; idle
+  // drops back to 5s. Recursive setTimeout (not setInterval) so the interval
+  // can change between ticks.
+  function usagePeriodicTick() {
+    if (currentPage !== 'monitor') return;
+    var interval = (typeof hasProcessingEntries === 'function' && hasProcessingEntries()) ? 1000 : 5000;
+    if (document.visibilityState === 'visible') {
       if (typeof scheduleQuotaRefresh === 'function') scheduleQuotaRefresh();
       else refreshQuotaData();
     }
-  }, 5000);
+    usagePeriodicTimer = setTimeout(usagePeriodicTick, interval);
+  }
+  usagePeriodicTick();
 }
 
 function stopUsageRefresh() {
@@ -186,7 +201,7 @@ function stopUsageRefresh() {
     usageEventSource = null;
   }
   if (usagePeriodicTimer) {
-    clearInterval(usagePeriodicTimer);
+    clearTimeout(usagePeriodicTimer);
     usagePeriodicTimer = null;
   }
   if (lockCountdownInterval) {

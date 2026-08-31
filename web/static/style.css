@@ -1207,6 +1207,14 @@ select.select,
   margin: 0;
 }
 
+/* Disabled stepper group (Provider edit Even Retry / Cooldown Timer rows when
+   their enable toggle is off): grayed out and inert, inputs also get the
+   disabled attribute from JS so stale values are never saved. */
+.stepper-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .form-group{margin-bottom:14px}
 .form-group:last-child{margin-bottom:0}
 .form-hint{font-size:calc(var(--font-base) - 1.5px);color:var(--text-muted);line-height:1.45;margin-top:4px;margin-bottom:14px}

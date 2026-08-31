@@ -43,9 +43,19 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 	if cfgProvider != nil && cfgProvider.Name != "" {
 		dispName = cfgProvider.Name
 	}
-	if isStream && cfgProvider != nil && cfgProvider.InjectStreamOpts {
+	// Inject stream_options.include_usage so upstreams that support it report
+	// real token usage at stream end — without it the Recent output column
+	// stays 0 for gateways that only emit usage in the terminal chunk.
+	// OpenAI-format streams get it by default (most gateways accept it); the
+	// provider-level InjectStreamOpts flag forces it for any format. If the
+	// upstream rejects the injected field with 400/422, it is stripped and the
+	// request retried once without it (see the 400 branch below).
+	injectedStreamOpts := false
+	streamOptsStripped := false
+	if isStream && cfgProvider != nil && (cfgProvider.InjectStreamOpts || entryFormat == combo.EntryFormatOpenAI) {
 		if _, ok := parsed["stream_options"]; !ok {
 			parsed["stream_options"] = map[string]any{"include_usage": true}
+			injectedStreamOpts = true
 		}
 	}
 
@@ -238,6 +248,22 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		}
 
 		if resp.StatusCode >= 400 {
+			// Fallback: some upstreams (older OpenAI-compat gateways) reject an
+			// injected stream_options.include_usage with 400/422. When we injected
+			// it and the upstream rejects the request format, strip the field and
+			// retry once before classifying the error — the injected option is a
+			// measurement aid, not worth failing the request over.
+			if injectedStreamOpts && !streamOptsStripped && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) {
+				delete(parsed, "stream_options")
+				streamOptsStripped = true
+				h.logger.Debug("[%s] upstream rejected injected stream_options (%d) → stripped and retrying once", logTag, resp.StatusCode)
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				continue
+			}
 			written := h.handleUpstreamError(w, resp, sel, providerID, upstreamModel, state, r, reqID, upstreamBody, upstreamURL, startTime, originalModel, sessionKey)
 			if written {
 				// Pass-through: the upstream 4xx error was already written to the

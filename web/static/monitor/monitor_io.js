@@ -79,6 +79,22 @@ async function refreshQuotaData() {
       mergeUsageEntries(usage.entries || []);
       updateUsageSummary(summary);
       updateQuotaTable(quotas.quotas || []);
+      // Review Bug1/U1: the quotas response now inlines per-key model detail
+      // (keyDetail map). Seed the cache so expanded sub-rows render without
+      // any N+1 /monitor/model-keys fetches and their 3s TTL staleness.
+      if (quotas.keyDetail) {
+        var now = Date.now();
+        Object.keys(quotas.keyDetail).forEach(function(key) {
+          keyDetailCache[key] = { data: quotas.keyDetail[key], ts: now };
+          // Inline detail makes refreshAllKeyDetails a no-op (cache fresh), so
+          // the top-level latency/speed cells must be patched here directly —
+          // they used to be filled by fetchModelKeyDetail (review Bug1/U1).
+          var slash = key.indexOf('/');
+          if (slash > 0 && typeof patchQuotaRowActiveMetrics === 'function') {
+            patchQuotaRowActiveMetrics(key.substring(0, slash), key.substring(slash + 1), quotas.keyDetail[key]);
+          }
+        });
+      }
       updateRecentRequestsInline(lastUsageEntries);
       ensureProcessingTimer();
       refreshAllKeyDetails();
@@ -97,6 +113,15 @@ function applyUsageSSEHandlers(es) {
   es.onmessage = function(ev) {
     try {
       var data = JSON.parse(ev.data);
+      // Review Bug1/U1: a monotonic version lets us detect a dropped SSE frame
+      // (an event arriving with a gap) and compensate with an immediate pull.
+      // Events are delivered on one connection, so seq gaps mean missed frames.
+      if (data.version && typeof lastSseVersion === 'number') {
+        if (data.version > lastSseVersion + 1) {
+          scheduleQuotaRefresh();
+        }
+        lastSseVersion = data.version;
+      }
       if (data.type === 'usage-updated' || data.type === 'key-inflight') {
         scheduleQuotaRefresh();
         return;

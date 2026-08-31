@@ -6,6 +6,11 @@ var consoleSearchQuery = '';
 var consoleAutoScroll = true;
 var consoleAllLines = [];
 var consoleSubView = 'logs';
+var consolePendingLines = [];
+var consoleFlushTimer = null;
+var consoleRelativeTimer = null;
+var CONSOLE_FLUSH_INTERVAL = 100;
+var CONSOLE_MAX_BATCH = 50;
 
 var ICON_LOG_ALL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
 var ICON_LOG_ERROR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
@@ -60,6 +65,9 @@ function initLogsView() {
     var atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
     consoleAutoScroll = atBottom;
   });
+  if (!consoleRelativeTimer) {
+    consoleRelativeTimer = setInterval(refreshConsoleRelativeTimes, 30000);
+  }
 }
 
 // ===================== View switching (toggle) =====================
@@ -71,6 +79,10 @@ function switchConsoleTab(tab) {
   // Stop log SSE if leaving logs
   if (consoleSubView === 'logs' && tab !== 'logs') {
     if (consoleEventSource) { consoleEventSource.close(); consoleEventSource = null; }
+    if (consoleRelativeTimer) {
+      clearInterval(consoleRelativeTimer);
+      consoleRelativeTimer = null;
+    }
     var status = document.getElementById('console-status');
     if (status) status.textContent = '';
   }
@@ -177,6 +189,60 @@ function startConsoleStream() {
   };
 }
 
+var LOG_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s?(.*)$/;
+
+function parseLogTimestamp(line) {
+  var m = LOG_TIMESTAMP_RE.exec(line);
+  if (!m) return null;
+  return { time: m[1], rest: m[2] };
+}
+
+function logTimestampMs(timeStr) {
+  return new Date(timeStr.replace(' ', 'T')).getTime();
+}
+
+function formatRelativeTime(tsMs) {
+  var diff = Date.now() - tsMs;
+  if (diff < 0) diff = 0;
+  if (diff < 5000) return '刚刚';
+  if (diff < 60000) return Math.floor(diff / 1000) + 's前';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm前';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h前';
+  return Math.floor(diff / 86400000) + 'd前';
+}
+
+function refreshConsoleRelativeTimes() {
+  var container = document.getElementById('log-container');
+  if (!container) return;
+  var lines = container.querySelectorAll('.log-line[data-ts]');
+  for (var i = 0; i < lines.length; i++) {
+    var rel = lines[i].querySelector('.log-relative');
+    var ts = lines[i].getAttribute('data-ts');
+    if (rel && ts) rel.textContent = formatRelativeTime(Number(ts));
+  }
+}
+
+var LOG_COPY_FIELD_RE = /model=[^\s]+|reqID=[^\s]+/g;
+
+function appendLogMessageWithCopyFields(msg, text) {
+  LOG_COPY_FIELD_RE.lastIndex = 0;
+  var last = 0;
+  var m;
+  while ((m = LOG_COPY_FIELD_RE.exec(text))) {
+    if (m.index > last) msg.appendChild(document.createTextNode(text.slice(last, m.index)));
+    var span = document.createElement('span');
+    span.className = 'log-copy-field';
+    span.textContent = m[0];
+    span.title = t('copy') + ': ' + m[0];
+    span.addEventListener('click', (function(value) {
+      return function(e) { e.stopPropagation(); copyToClipboard(value, value); };
+    })(m[0]));
+    msg.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) msg.appendChild(document.createTextNode(text.slice(last)));
+}
+
 function getLogLevel(line) {
   if (line.includes('[ERROR]')) return 'error';
   if (line.includes('\u26A0')) return 'warn';
@@ -187,7 +253,41 @@ function getLogLevel(line) {
 function createLogLineDiv(line) {
   var div = document.createElement('div');
   div.className = 'log-line log-' + getLogLevel(line);
-  div.textContent = line;
+
+  var parsed = parseLogTimestamp(line);
+  var body = parsed ? parsed.rest : line;
+  if (parsed) {
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'log-time';
+    timeSpan.textContent = parsed.time;
+    timeSpan.title = parsed.time;
+    div.appendChild(timeSpan);
+    var relSpan = document.createElement('span');
+    relSpan.className = 'log-relative';
+    var tsMs = logTimestampMs(parsed.time);
+    div.setAttribute('data-ts', String(tsMs));
+    relSpan.textContent = formatRelativeTime(tsMs);
+    div.appendChild(relSpan);
+  }
+
+  var msg = document.createElement('span');
+  msg.className = 'log-msg';
+  appendLogMessageWithCopyFields(msg, body);
+  div.appendChild(msg);
+
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'log-copy-btn';
+  btn.title = t('copy');
+  btn.textContent = t('copy');
+  btn.addEventListener('click', (function(rawLine, label) {
+    return function(e) {
+      e.stopPropagation();
+      copyToClipboard(rawLine, label);
+    };
+  })(line, parsed ? parsed.time : ''));
+  div.appendChild(btn);
+
   return div;
 }
 
@@ -207,19 +307,50 @@ function appendLogLine(container, line) {
     consoleAllLines.splice(0, consoleAllLines.length - 8000);
   }
   if (shouldShowLogLine(line)) {
-    container.appendChild(createLogLineDiv(line));
-    // 裁剪 DOM：数组有上限，DOM 节点也必须有上限，否则 WebView2 长期运行内存耗尽（OOM 空白页）
-    if (container.childElementCount > 8000) {
-      var excess = container.childElementCount - 8000;
-      for (var i = 0; i < excess; i++) {
-        container.removeChild(container.firstElementChild);
-      }
+    consolePendingLines.push(line);
+    if (consolePendingLines.length >= CONSOLE_MAX_BATCH) {
+      flushConsoleLogLines(container);
+    } else {
+      scheduleConsoleFlush(container);
     }
-    if (consoleAutoScroll) container.scrollTop = container.scrollHeight;
   }
 }
 
+function scheduleConsoleFlush(container) {
+  if (consoleFlushTimer) return;
+  consoleFlushTimer = setTimeout(function() {
+    consoleFlushTimer = null;
+    flushConsoleLogLines(container);
+  }, CONSOLE_FLUSH_INTERVAL);
+}
+
+function flushConsoleLogLines(container) {
+  consoleFlushTimer = null;
+  if (!consolePendingLines.length) return;
+  var target = document.getElementById('log-container') || container;
+  if (!target) return;
+  var lines = consolePendingLines.splice(0, consolePendingLines.length);
+  var fragment = document.createDocumentFragment();
+  for (var i = 0; i < lines.length; i++) {
+    fragment.appendChild(createLogLineDiv(lines[i]));
+  }
+  target.appendChild(fragment);
+  // 裁剪 DOM：数组有上限，DOM 节点也必须有上限，否则 WebView2 长期运行内存耗尽（OOM 空白页）
+  if (target.childElementCount > 8000) {
+    var excess = target.childElementCount - 8000;
+    for (var j = 0; j < excess; j++) {
+      target.removeChild(target.firstElementChild);
+    }
+  }
+  if (consoleAutoScroll) target.scrollTop = target.scrollHeight;
+}
+
 function renderConsoleLogs() {
+  if (consoleFlushTimer) {
+    clearTimeout(consoleFlushTimer);
+    consoleFlushTimer = null;
+  }
+  consolePendingLines = [];
   var container = document.getElementById('log-container');
   if (!container) return;
   container.innerHTML = '';
@@ -256,6 +387,11 @@ function onConsoleSearch(val) {
 async function clearConsole() {
   await apiDelete('/console-logs');
   consoleAllLines = [];
+  if (consoleFlushTimer) {
+    clearTimeout(consoleFlushTimer);
+    consoleFlushTimer = null;
+  }
+  consolePendingLines = [];
   var c = document.getElementById('log-container');
   if (c) c.innerHTML = '';
   toast(t('consoleCleared'), 'info');

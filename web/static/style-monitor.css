@@ -197,12 +197,20 @@
 .console-layout{display:flex;flex-direction:column;height:100%;gap:0;padding:0}
 .console-toolbar{display:flex;justify-content:space-between;align-items:center;flex-shrink:0;gap:8px;flex-wrap:nowrap;min-height:28px;padding:10px 14px;box-sizing:border-box;overflow:hidden}
 .log-container{background:var(--log-bg);border:1px solid var(--glass-border);border-radius:0;padding:14px;box-shadow:inset 0 2px 8px rgba(0,0,0,0.1);font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-log);flex:1;min-height:0;overflow-y:auto;line-height:1.7;user-select:text;-webkit-user-select:text;cursor:text}
-.log-line{white-space:pre-wrap;word-break:break-all;transition:background var(--transition-fast)}
+.log-line{white-space:pre-wrap;word-break:break-all;transition:background var(--transition-fast);display:flex;align-items:flex-start;gap:8px;border-left:3px solid transparent;padding:1px 6px 1px 11px}
 .log-line:hover{background:var(--table-hover)}
-.log-error{color:var(--danger)}
+.log-time{flex:0 0 19ch;white-space:nowrap;color:var(--text-muted)}
+.log-relative{flex:0 0 auto;white-space:nowrap;font-size:calc(var(--font-log) - 1px);color:var(--text-muted);opacity:0.75}
+.log-msg{flex:1;min-width:0}
+.log-copy-btn{flex:0 0 auto;align-self:center;font-family:var(--font-body);font-size:calc(var(--font-log) - 1px);padding:0 6px;line-height:1.6;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:transparent;color:var(--text-muted);cursor:pointer;opacity:0;transition:opacity var(--transition-fast),color var(--transition-fast)}
+.log-line:hover .log-copy-btn,.log-copy-btn:focus-visible{opacity:1}
+.log-copy-btn:hover{color:var(--accent);border-color:var(--accent)}
+.log-copy-field{color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent)}
+.log-copy-field:hover{background:var(--accent-glow)}
+.log-error{color:var(--danger);border-left-color:var(--danger)}
 .log-warn{color:var(--warn)}
 .log-debug{color:var(--text-muted)}
-.log-info{color:var(--text-secondary)}
+.log-info{color:var(--text-primary)}
 
 /* ---------------------------------------------------------------------
    Console Filters & Segmented Control Button Groups

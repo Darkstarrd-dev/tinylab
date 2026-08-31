@@ -834,8 +834,15 @@ function qsSetActive(id, qs) {
   _qsUpdateActiveClass();
   if (!qs) return;
   var model = _qsResolveModel(qs);
-  if (model && typeof currentPage !== 'undefined' && currentPage === 'playground' && typeof pgApplyActiveQuickSlot === 'function') {
-    pgApplyActiveQuickSlot(model);
+  if (model && typeof currentPage !== 'undefined' && currentPage === 'playground') {
+    // Broadcast the preset to every window (multi-pane / autochat / image all
+    // follow the slot). Fall back to the single-window apply if the all-window
+    // variant is not loaded.
+    if (typeof pgApplyActiveQuickSlotToAll === 'function') {
+      pgApplyActiveQuickSlotToAll(model);
+    } else if (typeof pgApplyActiveQuickSlot === 'function') {
+      pgApplyActiveQuickSlot(model);
+    }
   }
 }
 
@@ -1036,17 +1043,32 @@ async function _qsModalSelectFocused() {
   var qsId = _qsModalData.qsId;
   var modelName = _qsModalData.models[idx];
   var qsName = _qsModalData.name;
-  var data = await apiGet('/quickslots');
-  var qs = (data.quickslots || []).find(function(x) { return x.id === qsId; });
-  if (!qs) return;
-  qs.selectedIndex = idx;
-  await apiPut('/quickslots/' + qsId, qs);
-  closeQuickSlotModal();
-  renderHeaderQuickSlots();
-  toast(t('quickSlotSwitched', [qsName, modelName]), 'info', 2000, 'quickslot');
-  // If the active quickslot just had its model changed, update playground
-  if (_qsActiveId === qsId && typeof currentPage !== 'undefined' && currentPage === 'playground' && typeof pgApplyActiveQuickSlot === 'function') {
-    pgApplyActiveQuickSlot(modelName);
+  // Atomic selectedIndex switch: PATCH avoids the full-PUT race (rapid
+  // re-selection can otherwise overwrite a newer index or regress to 0 on an
+  // out-of-range index). The server returns the authoritative quickslot, so we
+  // backfill the applied model from its response body instead of trusting the
+  // pre-PUT snapshot. On failure we toast and keep the header unchanged.
+  try {
+    var updated = await apiPatch('/quickslots/' + qsId + '/selectedIndex', { selectedIndex: idx });
+    var appliedModel = modelName;
+    if (updated && Array.isArray(updated.models)) {
+      var appliedIdx = updated.selectedIndex || 0;
+      if (appliedIdx >= 0 && appliedIdx < updated.models.length) appliedModel = updated.models[appliedIdx];
+    }
+    closeQuickSlotModal();
+    renderHeaderQuickSlots();
+    toast(t('quickSlotSwitched', [qsName, appliedModel]), 'info', 2000, 'quickslot');
+    // If the active quickslot just had its model changed, broadcast to all
+    // playground windows (fall back to single-window apply if needed).
+    if (_qsActiveId === qsId && typeof currentPage !== 'undefined' && currentPage === 'playground') {
+      if (typeof pgApplyActiveQuickSlotToAll === 'function') {
+        pgApplyActiveQuickSlotToAll(appliedModel);
+      } else if (typeof pgApplyActiveQuickSlot === 'function') {
+        pgApplyActiveQuickSlot(appliedModel);
+      }
+    }
+  } catch (e) {
+    toast((e && e.message) || t('loadFailed'), 'error', 3000, 'quickslot');
   }
 }
 

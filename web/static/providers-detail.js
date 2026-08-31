@@ -152,6 +152,14 @@ function showEditProvider(id) {
   var strategy = p.rotationStrategy || '';
   var sticky = p.stickyLimit || 0;
   var hl = p.hardLimit || {};
+  var er = p.maxRetriesOverride;
+  var ei = p.retryIntervalOverrideSec;
+  var cd = p.cooldownOverrideSec;
+  var evenRetryOn = er !== undefined && er !== null;
+  var cooldownOn = cd !== undefined && cd !== null;
+  var evenCount = evenRetryOn ? er : 5;
+  var evenInterval = (ei !== undefined && ei !== null) ? ei : 0;
+  var cooldownSec = cooldownOn ? cd : 30;
   var summary = document.getElementById('detail-info-summary');
   if (summary) summary.style.display = 'none';
   var el = document.getElementById('detail-info');
@@ -230,12 +238,63 @@ function showEditProvider(id) {
             <span class="toggle-slider"></span>\
           </label>\
         </div>\
+        <div class="form-group-inline" style="margin-top:8px;margin-bottom:8px">\
+          <div class="form-group-label-wrap" style="flex:1">\
+            <label style="margin:0">' + t('evenRetry') + '</label>\
+            <span class="form-hint" style="margin:0">' + t('evenRetryDesc') + '</span>\
+          </div>\
+          <label class="toggle-switch" for="ep-even-retry" style="flex-shrink:0;margin-left:12px">\
+            <input type="checkbox" id="ep-even-retry" onchange="toggleOverrideSteppers()" ' + (evenRetryOn ? 'checked' : '') + '>\
+            <span class="toggle-slider"></span>\
+          </label>\
+        </div>\
+        <div id="ep-even-retry-fields" class="form-group-inline' + (evenRetryOn ? '' : ' stepper-disabled') + '" style="margin-bottom:8px">\
+          <label style="margin:0;min-width:180px">' + t('evenRetryCount') + '</label>\
+          ' + renderStepperHtml('ep-even-count', evenCount, 1, 20, 1, 'max-width:140px;') + '\
+          <label style="margin:0;min-width:120px;margin-left:12px">' + t('evenRetryInterval') + '</label>\
+          ' + renderStepperHtml('ep-even-interval', evenInterval, 0, 60, 1, 'max-width:140px;') + '\
+        </div>\
+        <div class="form-group-inline" style="margin-bottom:8px">\
+          <div class="form-group-label-wrap" style="flex:1">\
+            <label style="margin:0">' + t('cooldownTimer') + '</label>\
+            <span class="form-hint" style="margin:0">' + t('cooldownTimerDesc') + '</span>\
+          </div>\
+          <label class="toggle-switch" for="ep-cooldown" style="flex-shrink:0;margin-left:12px">\
+            <input type="checkbox" id="ep-cooldown" onchange="toggleOverrideSteppers()" ' + (cooldownOn ? 'checked' : '') + '>\
+            <span class="toggle-slider"></span>\
+          </label>\
+        </div>\
+        <div id="ep-cooldown-fields" class="form-group-inline' + (cooldownOn ? '' : ' stepper-disabled') + '" style="margin-bottom:0">\
+          <label style="margin:0;min-width:180px">' + t('cooldownTimerSec') + '</label>\
+          ' + renderStepperHtml('ep-cooldown-sec', cooldownSec, 1, 3600, 1, 'max-width:140px;') + '\
+        </div>\
       </div>\
       <div class="form-footer-actions">\
         <button type="button" class="btn btn-primary" onclick="withLoading(this, () => saveEditProvider(\'' + id + '\'))">' + t('save') + '</button>\
         <button type="button" class="btn" onclick="cancelEditProvider()">' + t('cancel') + '</button>\
       </div>\
     </div>';
+  toggleOverrideSteppers();
+}
+
+// toggleOverrideSteppers enables/disables the Even Retry and Cooldown Timer
+// steppers based on their enable toggles. Disabled steppers are grayed out and
+// their inputs/buttons are inert so no stale value can be saved.
+function toggleOverrideSteppers() {
+  var even = document.getElementById('ep-even-retry');
+  var cooldown = document.getElementById('ep-cooldown');
+  if (even) setStepperDisabled('ep-even-retry-fields', !even.checked);
+  if (cooldown) setStepperDisabled('ep-cooldown-fields', !cooldown.checked);
+}
+
+function setStepperDisabled(containerId, disabled) {
+  var box = document.getElementById(containerId);
+  if (!box) return;
+  box.classList.toggle('stepper-disabled', disabled);
+  var els = box.querySelectorAll('input.stepper-input, button.stepper-btn');
+  for (var i = 0; i < els.length; i++) {
+    els[i].disabled = disabled;
+  }
 }
 
 async function saveEditProvider(id) {
@@ -259,6 +318,20 @@ async function saveEditProvider(id) {
     tpm: parseInt(document.getElementById('ep-hl-tpm').value) || 0
   };
   if (!rpmOn && !tpmOn) p.hardLimit = null;
+  var evenRetryOn = document.getElementById('ep-even-retry').checked;
+  var cooldownOn = document.getElementById('ep-cooldown').checked;
+  if (evenRetryOn) {
+    p.maxRetriesOverride = parseInt(document.getElementById('ep-even-count').value, 10) || null;
+    p.retryIntervalOverrideSec = parseInt(document.getElementById('ep-even-interval').value, 10) || 0;
+  } else {
+    p.maxRetriesOverride = null;
+    p.retryIntervalOverrideSec = null;
+  }
+  if (cooldownOn) {
+    p.cooldownOverrideSec = parseInt(document.getElementById('ep-cooldown-sec').value, 10) || null;
+  } else {
+    p.cooldownOverrideSec = null;
+  }
   if (!p.name || !p.prefix || !p.baseUrl) {
     toast(t('requiredFields'), 'error');
     return;

@@ -52,7 +52,8 @@ func validateModelDef(p *Provider, m *ModelDef) {
 func validateProviders(cfg *Config) {
 	prefixes := make(map[string]bool)
 	validAPITypes := map[string]bool{"openai": true, "anthropic": true, "nim": true, "": true}
-	for i, p := range cfg.Providers {
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
 		if p.ID == "" {
 			fmt.Fprintf(os.Stderr, "[config] warning: provider[%d] has empty id, skipping\n", i)
 			continue
@@ -80,8 +81,25 @@ func validateProviders(cfg *Config) {
 				fmt.Fprintf(os.Stderr, "[config] warning: provider %q hard limit enabled but rpm/tpm invalid (<1), engine will ignore it\n", p.Name)
 			}
 		}
+		// Provider-level retry/cooldown override normalization: a nil pointer
+		// leaves the override disabled (global rotation/backoff values apply);
+		// a non-nil pointer is clamped to a sane range so the engine never
+		// sees an invalid negative/zero override. Warnings only, never
+		// blocking startup — same style as the HardLimit check above.
+		if p.MaxRetriesOverride != nil && *p.MaxRetriesOverride < 1 {
+			fmt.Fprintf(os.Stderr, "[config] warning: provider %q maxRetriesOverride %d invalid (<1), clamping to 1\n", p.ID, *p.MaxRetriesOverride)
+			*p.MaxRetriesOverride = 1
+		}
+		if p.RetryIntervalOverrideSec != nil && *p.RetryIntervalOverrideSec < 0 {
+			fmt.Fprintf(os.Stderr, "[config] warning: provider %q retryIntervalOverrideSec %d invalid (<0), clamping to 0\n", p.ID, *p.RetryIntervalOverrideSec)
+			*p.RetryIntervalOverrideSec = 0
+		}
+		if p.CooldownOverrideSec != nil && *p.CooldownOverrideSec < 1 {
+			fmt.Fprintf(os.Stderr, "[config] warning: provider %q cooldownOverrideSec %d invalid (<1), clamping to 1\n", p.ID, *p.CooldownOverrideSec)
+			*p.CooldownOverrideSec = 1
+		}
 		for j := range p.Models {
-			validateModelDef(&p, &p.Models[j])
+			validateModelDef(p, &p.Models[j])
 		}
 	}
 	for _, c := range cfg.Combos {

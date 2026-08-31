@@ -177,7 +177,9 @@ func (s *Selector) OnKeyFailure(providerID, keyID, model string, statusCode int,
 		s.RotateToBack(providerID, keyID, model, statusCode, body)
 		return
 	}
-	s.MarkUnavailable(providerID, keyID, model, statusCode, body)
+	// A provider-level CooldownOverrideSec replaces the exponential
+	// retry-exhausted cooldown with a fixed duration when set.
+	s.MarkUnavailableWithOverride(providerID, keyID, model, statusCode, body, provider.CooldownOverrideSec)
 }
 
 // RotateToBack marks a key as rotated to the back of the failover queue by setting

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/tinyrouter/tinyrouter/internal/combo"
@@ -52,13 +53,58 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 
 	buf := make([]byte, 32*1024)
 	totalOutput := 0
-	inputTokens := 0
-	outputTokens := 0
 	sb := sse.NewSSELineBuffer(0, 0)
 	var sseBuf bytes.Buffer
-	var contentCharsTotal int
-	var lastTokenBroadcast time.Time
 	var lastEntryRefresh time.Time
+	// inputTokens/outputTokens/contentCharsTotal are atomic: the read loop
+	// (single goroutine) stores them while a background ticker goroutine loads
+	// them to push live token updates to the UI independent of the upstream
+	// read cadence (see the goroutine below).
+	var inputTokens atomic.Int64
+	var outputTokens atomic.Int64
+	var contentCharsTotal atomic.Int64
+
+	// Time-driven token broadcast. The old code only pushed a token update
+	// after a read batch arrived AND 1500ms had elapsed — during an upstream
+	// silence (e.g. a long reasoning phase with no data arriving) no tick
+	// fired at all, so Recent's output column stayed frozen mid-stream. This
+	// goroutine pushes on a 250ms ticker whenever the counters changed since
+	// the last push (rate-capped to <=5 broadcasts/sec), independent of reads.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		var lastPush time.Time
+		var lastIn, lastOut int64
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if reqID == "" {
+					continue
+				}
+				it := inputTokens.Load()
+				ot := outputTokens.Load()
+				cc := contentCharsTotal.Load()
+				eff := ot
+				if eff == 0 && cc > 0 {
+					eff = cc / 4
+				}
+				if it == lastIn && eff == lastOut {
+					continue
+				}
+				if time.Since(lastPush) < 200*time.Millisecond {
+					continue
+				}
+				lastPush = time.Now()
+				lastIn, lastOut = it, eff
+				h.EntryTracker.UpdateTokens(reqID, -1, int(eff))
+				h.broadcastTokens(reqID, int(it), int(eff))
+			}
+		}
+	}()
 
 	var clientDisconnected bool
 	// streamAborted records a controlled abort caused by an over-budget SSE
@@ -151,15 +197,22 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 								// clobber input_tokens to 0.
 								if in, out, ok := parseAnthropicSSEUsage([]byte(payload)); ok {
 									if in > 0 {
-										inputTokens = in
+										inputTokens.Store(int64(in))
 									}
 									if out > 0 {
-										outputTokens = out
+										outputTokens.Store(int64(out))
 									}
 								}
 							} else if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
-								inputTokens = in
-								outputTokens = out
+								// Conditional per-field store: a usage chunk
+								// carrying only one of the two counts must not
+								// clobber the other back to 0 (review +5).
+								if in > 0 {
+									inputTokens.Store(int64(in))
+								}
+								if out > 0 {
+									outputTokens.Store(int64(out))
+								}
 							}
 							if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 								h.sigCache.Put(id, sig)
@@ -222,15 +275,20 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 							// message_delta and would clobber input_tokens to 0.
 							if ain, aout, aok := parseAnthropicSSEUsage([]byte(payload)); aok {
 								if ain > 0 {
-									inputTokens = ain
+									inputTokens.Store(int64(ain))
 								}
 								if aout > 0 {
-									outputTokens = aout
+									outputTokens.Store(int64(aout))
 								}
 							}
 						} else if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
-							inputTokens = in
-							outputTokens = out
+							// Conditional per-field store (see normalize branch).
+							if in > 0 {
+								inputTokens.Store(int64(in))
+							}
+							if out > 0 {
+								outputTokens.Store(int64(out))
+							}
 						}
 						if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 							h.sigCache.Put(id, sig)
@@ -264,16 +322,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 					lastSSEPush = time.Now()
 				}
 			}
-			contentCharsTotal += contentChars
-			if reqID != "" && time.Since(lastTokenBroadcast) > 1500*time.Millisecond {
-				lastTokenBroadcast = time.Now()
-				effectiveOutput := outputTokens
-				if effectiveOutput == 0 && contentCharsTotal > 0 {
-					effectiveOutput = contentCharsTotal / 4
-				}
-				h.EntryTracker.UpdateTokens(reqID, -1, effectiveOutput)
-				h.broadcastTokens(reqID, inputTokens, effectiveOutput)
-			}
+			contentCharsTotal.Add(int64(contentChars))
 			if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
 				h.EntryTracker.Refresh(reqID)
 				lastEntryRefresh = now
@@ -324,15 +373,20 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 							// the per-line branch above for the rationale).
 							if in, out, ok := parseAnthropicSSEUsage([]byte(payload)); ok {
 								if in > 0 {
-									inputTokens = in
+									inputTokens.Store(int64(in))
 								}
 								if out > 0 {
-									outputTokens = out
+									outputTokens.Store(int64(out))
 								}
 							}
 						} else if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
-							inputTokens = in
-							outputTokens = out
+							// Conditional per-field store (see normalize branch).
+							if in > 0 {
+								inputTokens.Store(int64(in))
+							}
+							if out > 0 {
+								outputTokens.Store(int64(out))
+							}
 						}
 						if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 							h.sigCache.Put(id, sig)
@@ -384,7 +438,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 		return
 	}
 	totalLatencyMs := latencyMs + time.Since(streamStart).Milliseconds()
-	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
+	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s", sel.Provider.Name, inputTokens.Load(), outputTokens.Load(), sel.KeyName)
 	dspModel := resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases)
 	h.logger.Info("\U0001f300 [STREAM] %s | %s | %dms | %d", sel.Provider.Name, dspModel, totalLatencyMs, resp.StatusCode)
 	sseBody := sseBuf.Bytes()
@@ -404,7 +458,14 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	case status == "error":
 		streamDecision = "client disconnected"
 	}
-	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, inputTokens, outputTokens, errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
+	// Terminal fallback: if the upstream never emitted a usage chunk (no
+	// include_usage injection, or the gateway stripped it), fall back to the
+	// SSE content-character estimate so the terminal record is non-zero
+	// (review +4/A3).
+	if outputTokens.Load() == 0 && contentCharsTotal.Load() > 0 {
+		outputTokens.Store(contentCharsTotal.Load() / 4)
+	}
+	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, int(inputTokens.Load()), int(outputTokens.Load()), errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
 }
 
 // budget caps a non-streaming upstream response buffered for

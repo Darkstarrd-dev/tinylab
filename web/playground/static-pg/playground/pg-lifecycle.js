@@ -47,15 +47,17 @@ function renderPlayground(container) {
     }
   }
 
-  // Apply active quickslot model (if any) before loading models & rendering
+  // Apply active quickslot model (if any) before loading models & rendering.
+  // A quickslot is a global model preset, so the first-screen apply is not
+  // mode-guarded: AutoChat / multi-pane refreshes pick up the slot model too.
+  // (This mirrors pgApplyActiveQuickSlotToAll but without aborting streams —
+  // on first render there is no in-flight work yet.)
   var activePromise = typeof qsGetActiveModel === 'function'
     ? qsGetActiveModel().then(function(a) {
-        if (a && a.model && (pgState.mode === 'normal' || pgState.mode === 'search')) {
-          pgWin().config.model = a.model;
-          if (pgState.mode === 'search') {
-            for (var si = 0; si < pgState.windows.length && si < 2; si++) {
-              pgState.windows[si].config.model = a.model;
-            }
+        if (a && a.model) {
+          for (var qi = 0; qi < pgState.windows.length; qi++) {
+            var qw = pgState.windows[qi];
+            if (qw && qw.config) qw.config.model = a.model;
           }
         }
       })

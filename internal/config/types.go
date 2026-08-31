@@ -125,9 +125,21 @@ type Provider struct {
 	// chat-completion-chunk schema (choices must be an array or error an
 	// object). When true, streamResponse rewrites "choices":null to
 	// "choices":[] while preserving the usage field. Off by default.
-	NormalizeStreamChunks bool         `yaml:"normalizeStreamChunks,omitempty" json:"normalizeStreamChunks,omitempty"`
+	NormalizeStreamChunks bool               `yaml:"normalizeStreamChunks,omitempty" json:"normalizeStreamChunks,omitempty"`
 	NIMConfig             *NIMSettings       `yaml:"nim,omitempty" json:"nim,omitempty"`
 	HardLimit             *HardLimitSettings `yaml:"hardLimit,omitempty" json:"hardLimit,omitempty"`
+	// MaxRetriesOverride overrides the global Rotation MaxRetries for this
+	// provider (clamped 1..20). nil = use the global value.
+	MaxRetriesOverride *int `yaml:"maxRetriesOverride,omitempty" json:"maxRetriesOverride"`
+	// RetryIntervalOverrideSec is the uniform delay (0..60s) between retry
+	// attempts, replacing the exponential BackoffSequence in the generic
+	// 429/5xx retry paths. 0 = retries are sent back-to-back. Only applied
+	// when MaxRetriesOverride is also set; nil keeps the exponential sequence.
+	RetryIntervalOverrideSec *int `yaml:"retryIntervalOverrideSec,omitempty" json:"retryIntervalOverrideSec"`
+	// CooldownOverrideSec overrides the exponential retry-exhausted cooldown
+	// (pow2 capped by BackoffMaxSec) with a fixed duration (clamped >=1s).
+	// nil = keep the exponential backoff.
+	CooldownOverrideSec *int `yaml:"cooldownOverrideSec,omitempty" json:"cooldownOverrideSec"`
 	// UseProxy routes this provider's upstream requests through the global
 	// upstream proxy (Config.Proxy) when enabled.
 	UseProxy bool `yaml:"useProxy,omitempty" json:"useProxy,omitempty"`

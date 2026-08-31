@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,12 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 		_ = rc.SetWriteDeadline(time.Time{})
 	}
 
+	// Monotonic per-connection event sequence. Every pushed event carries it so
+	// the frontend can detect a delivery gap (an event arriving with seq > last+1
+	// means a frame was dropped) and trigger a compensation pull — the
+	// "version-lag compensation" that lets the 5s poll be skipped when nothing
+	// changed (review Bug1/U1).
+	var seq uint64
 	if _, err := fmt.Fprintf(w, "data: {\"type\":\"connected\"}\n\n"); err != nil {
 		return
 	}
@@ -65,8 +72,9 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 		for _, e := range h.d.ProxyHandler.EntryTracker.All() {
 			raw := proxy.MarshalEntryJSONLight(e)
 			if raw != nil {
-				if _, err := fmt.Fprintf(w, "data: {\"type\":\"request-start\",\"id\":%s,\"entry\":%s}\n\n",
-					json.RawMessage(mustJSON(e.ID)), raw); err != nil {
+				seq++
+				if _, err := fmt.Fprintf(w, "data: {\"type\":\"request-start\",\"id\":%s,\"entry\":%s,\"version\":%d}\n\n",
+					json.RawMessage(mustJSON(e.ID)), raw, seq); err != nil {
 					return
 				}
 				flusher.Flush()
@@ -85,12 +93,14 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ch:
-			if _, err := fmt.Fprintf(w, "data: {\"type\":\"usage-updated\"}\n\n"); err != nil {
+			seq++
+			if _, err := fmt.Fprintf(w, "data: {\"type\":\"usage-updated\",\"version\":%d}\n\n", seq); err != nil {
 				return
 			}
 			flusher.Flush()
 		case <-infCh:
-			if _, err := fmt.Fprintf(w, "data: {\"type\":\"key-inflight\"}\n\n"); err != nil {
+			seq++
+			if _, err := fmt.Fprintf(w, "data: {\"type\":\"key-inflight\",\"version\":%d}\n\n", seq); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -104,7 +114,11 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				seq++
+				// Inject the sequence into the marshalled event: append as a
+				// trailing JSON member on the top-level object.
+				payload := appendVersion(data, seq)
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 					return
 				}
 				flusher.Flush()
@@ -112,12 +126,30 @@ func (h *Handler) streamUsageEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			seq++
 			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
 		}
 	}
+}
+
+// appendVersion injects a "version":N member into a top-level JSON object
+// (the marshalled RequestEvent) without re-marshalling: it trims the closing
+// '}' and appends ,"version":N}. Falls back to the original bytes when the
+// payload is not a JSON object (should not happen for RequestEvent).
+func appendVersion(data []byte, seq uint64) []byte {
+	n := len(data)
+	if n == 0 || data[n-1] != '}' {
+		return data
+	}
+	buf := make([]byte, 0, n+24)
+	buf = append(buf, data[:n-1]...)
+	buf = append(buf, ',', '"', 'v', 'e', 'r', 's', 'i', 'o', 'n', '"', ':')
+	buf = strconv.AppendUint(buf, seq, 10)
+	buf = append(buf, '}')
+	return buf
 }
 
 // mustJSON returns the JSON encoding of s as a string, or the original string
