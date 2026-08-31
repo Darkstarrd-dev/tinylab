@@ -397,7 +397,7 @@
       this.bg = this.add.tileSprite(0, 0, this.W, this.H, 'bg_tile').setOrigin(0, 0).setDepth(-20).setAlpha(0.55);
 
       // 输入
-      this.keys = this.input.keyboard.addKeys('LEFT,RIGHT,A,D,SPACE,ENTER,R,P');
+      this.keys = this.input.keyboard.addKeys('LEFT,RIGHT,A,D,SPACE,ENTER,R,P,Z');
       this.cursors = this.input.keyboard.createCursorKeys();
       // 数字选关键（预创建，避免 update 中重复 addKey 泄漏）
       this.keyOne = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
@@ -1028,7 +1028,7 @@
       }
       // 标题态按键
       if (this.gameState === 'title') {
-        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.ENTER)) {
+        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.ENTER) || Phaser.Input.Keyboard.JustDown(this.keys.Z)) {
           this.startStage(this.curStage);
         }
         return;
@@ -1113,7 +1113,8 @@
     };
     var game = new Phaser.Game(config);
     // 存档恢复后刷新标题在 create 中处理
-    window.__trgame = { game: game, getState: getState, _scene: function () { return sceneRef; } };
+    window.__trgame = { game: game, getState: getState, _scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: function () { return sceneRef; } };
     return game;
   }
 

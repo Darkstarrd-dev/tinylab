@@ -919,7 +919,8 @@
       scene: [FarmScene]
     };
     var game = new Phaser.Game(config);
-    window.__trgame = { game: game, getState: getState, scene: function () { return sceneRef; } };
+    window.__trgame = { game: game, getState: getState, scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: function () { return sceneRef; } };
     return {
       dispose: function () {
         try { Sfx.stopBgm(); } catch (e) {}

@@ -346,6 +346,7 @@
         SHIFT: Phaser.Input.Keyboard.KeyCodes.SHIFT,
         P: Phaser.Input.Keyboard.KeyCodes.P,
         R: Phaser.Input.Keyboard.KeyCodes.R,
+        ENTER: Phaser.Input.Keyboard.KeyCodes.ENTER,
         ONE: Phaser.Input.Keyboard.KeyCodes.ONE,
         TWO: Phaser.Input.Keyboard.KeyCodes.TWO
       });
@@ -962,7 +963,7 @@
       if (this.gameState === 'title') {
         if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) { Sfx.ensure(); this.resetGame(0); return; }
         if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) { Sfx.ensure(); this.resetGame(1); return; }
-        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) { Sfx.ensure(); this.resetGame(0); return; }
+        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.ENTER) || Phaser.Input.Keyboard.JustDown(this.keys.Z)) { Sfx.ensure(); this.resetGame(0); return; }
         return;
       }
       // 游戏结束：R 重开，1/2 选关
@@ -1099,7 +1100,8 @@
         height: H,
         backgroundColor: '#0b1220',
         physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
-        scene: [MainScene]
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: [MainScene]
       });
       sceneRef = null;
       var tryBind = function () {

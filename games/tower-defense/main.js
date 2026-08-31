@@ -31,6 +31,8 @@
   TD.currentLevel = 1;
   TD.save = { best:{}, unlocked:[1], lastLevel:1 };
   TD._loadError = null;
+  TD._scriptsLoaded = false;
+  TD._scriptsLoading = null;
 
   var SCRIPTS = [
     'src/config/constants.js',
@@ -54,18 +56,33 @@
     'src/scenes/GameScene.js'
   ];
 
-  function loadScriptsSequential(list, done) {
+  function loadScriptsSequential(list) {
     var idx = 0;
-    function next() {
-      if (idx >= list.length) { done(null); return; }
-      var url = '/games/tower-defense/' + list[idx] + '?v=' + Date.now() + '_' + idx;
-      var s = document.createElement('script');
-      s.src = url;
-      s.onload = function () { idx++; next(); };
-      s.onerror = function () { done(new Error('script load failed: ' + url)); };
-      document.head.appendChild(s);
-    }
-    next();
+    return new Promise(function (resolve, reject) {
+      function next() {
+        if (idx >= list.length) { TD._scriptsLoaded = true; resolve(); return; }
+        var url = '/games/tower-defense/' + list[idx] + '?v=' + Date.now() + '_' + idx;
+        var s = document.createElement('script');
+        s.src = url;
+        s.onload = function () { idx++; next(); };
+        s.onerror = function () { reject(new Error('script load failed: ' + url)); };
+        document.head.appendChild(s);
+      }
+      next();
+    });
+  }
+
+  function ensureScripts() {
+    if (TD._scriptsLoaded && TD.BootScene && TD.GameScene) return Promise.resolve();
+    if (TD._scriptsLoading) return TD._scriptsLoading;
+    TD._scriptsLoading = loadScriptsSequential(SCRIPTS).then(function () {
+      TD._scriptsLoaded = true;
+    }).catch(function (err) {
+      TD._loadError = err.message;
+      TD._scriptsLoading = null;
+      throw err;
+    });
+    return TD._scriptsLoading;
   }
 
   TD.boot = function (host) {
@@ -73,7 +90,7 @@
     var Phaser = host.phaser;
     if (!Phaser) throw new Error('Phaser not loaded (host.phaser missing)');
     if (!TD.BootScene || !TD.GameScene) {
-      throw new Error('tower-defense scripts not yet loaded — click Reload to retry');
+      throw new Error('tower-defense scripts not yet loaded');
     }
     var W = host.width || 960, H = host.height || 540;
     var game = new Phaser.Game({
@@ -83,6 +100,7 @@
       height: H,
       backgroundColor: '#0e1628',
       physics: { default: 'arcade', arcade: { debug: false } },
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       scene: [TD.BootScene, TD.StartScene, TD.LevelSelectScene, TD.GameScene]
     });
     window.__trgame = {
@@ -111,27 +129,31 @@
     };
   };
 
-  // 同步预加载子脚本后再注册（保证 dgLoadGame onload 后 registry 已就绪，首次 Launch 无需 Reload）
-  // 失败则仍注册，launch 内抛错提示 Reload（与其它 games 一致的降级）
-  loadScriptsSequential(SCRIPTS, function (err) {
-    if (err) {
-      TD._loadError = err.message;
-      console.warn('[TD] preload failed: ' + err.message);
-    }
-    try {
-      window.TRGames.register({
-        id: 'tower-defense',
-        title: 'Tower Defense',
-        launch: function (host) {
-          if (TD._loadError) throw new Error(TD._loadError);
-          if (!TD.BootScene) throw new Error('tower-defense scripts not yet loaded — click Reload');
+  // 同步注册：满足宿主 dgLoadGame 的同步检查；脚本后台预加载，launch 内按需等待。
+  try {
+    window.TRGames.register({
+      id: 'tower-defense',
+      title: 'Tower Defense',
+      launch: function (host) {
+        if (TD._loadError) throw new Error(TD._loadError);
+        // 若脚本已就绪，同步启动；否则返回 Promise，宿主会等待
+        if (TD._scriptsLoaded && TD.BootScene && TD.GameScene) {
           return TD.boot(host);
         }
-      });
-    } catch (e) {
-      // 重复注册等，宿主会捕获
-      console.error('[TD] register failed: ' + e.message);
-    }
+        return ensureScripts().then(function () {
+          if (TD._loadError) throw new Error(TD._loadError);
+          if (!TD.BootScene) throw new Error('tower-defense scripts not yet loaded');
+          return TD.boot(host);
+        });
+      }
+    });
+  } catch (e) {
+    console.error('[TD] register failed: ' + e.message);
+  }
+
+  // 后台预加载，首次 Launch 前尽量就绪（失败不抛，launch 时重试）
+  ensureScripts().catch(function (err) {
+    console.warn('[TD] preload failed: ' + err.message);
   });
 
 })();

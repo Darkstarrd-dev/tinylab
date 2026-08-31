@@ -1452,10 +1452,11 @@
     var config = {
       type: Phaser.AUTO,
       parent: host.container,
-      width: host.width,
-      height: host.height,
+      width: host.width || 800,
+      height: host.height || 600,
       backgroundColor: '#0a0e1a',
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       scene: [BootScene, MenuScene, PlayScene]
     };
     var game = new Phaser.Game(config);

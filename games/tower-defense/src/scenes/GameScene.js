@@ -72,8 +72,10 @@
     var g = this.add.graphics().setDepth(0);
     var cols = this.grid.cols, rows = this.grid.rows, tile = this.grid.tile, ox = this.grid.ox, oy = this.grid.oy;
     g.lineStyle(1, TD.COLORS.GRID, 0.85);
-    for (var c = 0; c <= cols; c++) g.lineBetween(ox + c * tile, oy, ox + c * tile, oy + rows * tile);
-    for (var r = 0; r <= rows; r++) g.lineBetween(ox, oy + r * tile, ox + cols * tile, oy + r * tile);
+    for (var c = 0; c <= cols; c++) { g.moveTo(ox + c * tile, oy); g.lineTo(ox + c * tile, oy + rows * tile); }
+    g.strokePath();
+    for (var r = 0; r <= rows; r++) { g.moveTo(ox, oy + r * tile); g.lineTo(ox + cols * tile, oy + r * tile); }
+    g.strokePath();
     this._gridGfx = g;
   };
 
@@ -140,12 +142,14 @@
     for (var i = 0; i < this.enemyPool.length; i++) if (!this.enemyPool[i].active) { e = this.enemyPool[i]; break; }
     if (!e) { e = new TD.Enemy(this, def); this.enemyPool.push(e); }
     e.spawn(def, hpMul, speedMul, rewardMul, 0);
-    // 起点
     var p0 = this.mapMgr.pathWorld[0];
-    e.x = p0.x; e.y = p0.y; if (e.go) { e.go.x = p0.x; e.go.y = p0.y; e.go.setVisible(true).setActive(true); }
-    // 分裂：死亡时分裂两个小怪（在 onEnemyKilled 中处理）
+    e.x = p0.x; e.y = p0.y;
+    if (e.go) {
+      e.go.x = p0.x; e.go.y = p0.y;
+      if (typeof e.go.setVisible === 'function') e.go.setVisible(true);
+      if (typeof e.go.setActive === 'function') e.go.setActive(true);
+    }
     this.enemiesAlive.push(e);
-    // 分裂敌标记
     e._isSplitParent = (enemyId === 'split');
   };
   TD.GameScene.prototype.onEnemyKilled = function (enemy, killer) {
@@ -167,12 +171,20 @@
   };
   TD.GameScene.prototype._reapEnemy = function (enemy) {
     enemy.active = false;
-    if (enemy.go) enemy.go.setVisible(false).setActive(false);
+    if (enemy.go) {
+      if (typeof enemy.go.setVisible === 'function') enemy.go.setVisible(false);
+      if (typeof enemy.go.setActive === 'function') enemy.go.setActive(false);
+    }
     var idx = this.enemiesAlive.indexOf(enemy); if (idx !== -1) this.enemiesAlive.splice(idx, 1);
   };
   TD.GameScene.prototype._toast = function (msg, ms) {
     var t = this.add.text(this.scale.width/2, this.scale.height - 90, msg, { fontSize:'11px', color:'#e6edf3', backgroundColor:'#111827cc' }).setOrigin(0.5).setDepth(30);
-    this.time.delayedCall(ms || 1400, function(){ try { t.destroy(); } catch (e) {} });
+    var self = this;
+    if (self.time && typeof self.time.delayedCall === 'function') {
+      self.time.delayedCall(ms || 1400, function(){ try { t.destroy(); } catch (e) {} });
+    } else {
+      setTimeout(function(){ try { t.destroy(); } catch (e) {} }, ms || 1400);
+    }
   };
   TD.GameScene.prototype._fireTower = function (tower) {
     var target = this.targeting.pick(tower, this.enemiesAlive);

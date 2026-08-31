@@ -1331,7 +1331,8 @@
       width: W, height: H,
       backgroundColor: STAGES[saveData.unlockedStage] ? STAGES[saveData.unlockedStage].bg : '#0f1117',
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
-      scene: [BootScene, MenuScene, FightScene]
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: [BootScene, MenuScene, FightScene]
     });
     sceneRef = null;
     // 延迟绑定 sceneRef 便于 getState 指向 FightScene

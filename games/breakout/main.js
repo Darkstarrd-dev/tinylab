@@ -1246,6 +1246,8 @@
   // ---------------------------------------------------------------------------
   function launch(host){
     hostRef = host;
+    var Phaser = (host && host.phaser) || window.Phaser;
+    if(!Phaser) throw new Error('Phaser not loaded');
     var w = host.width || CFG.W;
     var h = host.height || CFG.H;
     if(host.loadState){
@@ -1264,6 +1266,7 @@
       width: w,
       height: h,
       backgroundColor: STAGES[0].bg,
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       physics: { default:'arcade', arcade:{ gravity:{y:0}, debug:false } },
       scene: [BootScene, BreakoutScene]
     });
@@ -1279,7 +1282,6 @@
     game.events.on('ready', tryBind);
     return game;
   }
-
   window.TRGames = window.TRGames || { register:function(){}, _r:{} };
   window.TRGames.register({ id:'breakout', title:'打砖块 Breakout', launch: launch });
 

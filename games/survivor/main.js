@@ -653,7 +653,7 @@
         });
 
         // Keyboard: ENTER/SPACE starts, keep mode selection via input too.
-        this._startKeys = this.input.keyboard.addKeys('ENTER,SPACE');
+        this._startKeys = this.input.keyboard.addKeys('ENTER,SPACE,Z');
         // Store refs so update() can poll without re-querying.
         this._doStart = doStart;
 
@@ -666,7 +666,8 @@
         // Keyboard start from menu.
         if (this._startKeys) {
           if (Phaser.Input.Keyboard.JustDown(this._startKeys.ENTER) ||
-              Phaser.Input.Keyboard.JustDown(this._startKeys.SPACE)) {
+              Phaser.Input.Keyboard.JustDown(this._startKeys.SPACE) ||
+              Phaser.Input.Keyboard.JustDown(this._startKeys.Z)) {
             if (this._doStart) { this._doStart(); }
           }
         }
@@ -1468,6 +1469,7 @@
       height: host.height,
       backgroundColor: '#0d1117',
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       scene: [BootScene, MenuScene, TopdownScene, PlatformerScene]
     };
 

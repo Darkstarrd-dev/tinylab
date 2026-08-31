@@ -1202,7 +1202,8 @@
     var game=new Phaser.Game(config);
     // 暴露给验收：getState {scene, score, moves, board}
     var getStateBound=getState;
-    window.__trgame={ game:game, getState:getStateBound, scene: function(){ return sceneRef; } };
+    window.__trgame={ game:game, getState:getStateBound, scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: function(){ return sceneRef; } };
     return game;
   }
 

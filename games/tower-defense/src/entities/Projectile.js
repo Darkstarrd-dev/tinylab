@@ -14,8 +14,8 @@
   Projectile.prototype.ensureGO = function () {
     if (this.go) return;
     var sc = this.scene;
-    // 4×4 小矩形，tint 区分类型
-    this.go = sc.add.rectangle(0, 0, 5, 5, 0xffffff).setDepth(11).setVisible(false).setActive(false);
+    this.go = sc.add.rectangle(0, 0, 5, 5, 0xffffff).setDepth(11).setVisible(false);
+    if (this.go && typeof this.go.setActive === 'function') this.go.setActive(false);
   };
   Projectile.prototype.fire = function (fromX, fromY, target, def, damage, owner) {
     this.ensureGO();
@@ -38,8 +38,9 @@
     else if (this.ptype === 'aura') col = 0x00cec9;
     this.go.fillColor = col;
     this.go.width = this.splashR ? 7 : 5; this.go.height = this.splashR ? 7 : 5;
-    this.go.x = fromX; this.go.y = fromY; this.go.setVisible(true).setActive(true);
-    // laserTick 为即时命中，不走飞行
+    this.go.x = fromX; this.go.y = fromY;
+    this.go.setVisible(true);
+    if (this.go && typeof this.go.setActive === 'function') this.go.setActive(true);
     if (this.ptype === 'laserTick') { this._hitTarget(target); this.recycle(); return; }
     if (this.ptype === 'aura') { this._auraTick(); this.recycle(); return; }
   };
@@ -107,7 +108,7 @@
   };
   Projectile.prototype.recycle = function () {
     this.active = false; this.target = null;
-    if (this.go) this.go.setVisible(false).setActive(false);
+    if (this.go) { this.go.setVisible(false); if (typeof this.go.setActive === 'function') this.go.setActive(false); }
   };
   TD.Projectile = Projectile;
 })();

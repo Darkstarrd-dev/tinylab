@@ -1201,7 +1201,8 @@
       height: H,
       backgroundColor: '#1a1410',
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
-      scene: [RoguelikeScene]
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: [RoguelikeScene]
     });
     window.__trgame = { game: game, getState: getState };
     return game;

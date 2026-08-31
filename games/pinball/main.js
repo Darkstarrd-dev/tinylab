@@ -984,7 +984,8 @@
         height: H,
         backgroundColor: '#0a1620',
         physics: { default: 'arcade', arcade: { gravity: { y: GRAVITY }, debug: false } },
-        scene: [MainScene]
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: [MainScene]
       });
       sceneRef = null;
       var tryBind = function () { try { var s = game.scene.getScene('Main'); if (s) { sceneRef = s; } } catch (e) {} };

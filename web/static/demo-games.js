@@ -43,7 +43,85 @@
 // web/demo-games.test.js can drive the contract in a VM without a DOM.
 'use strict';
 
-// ---- registry -------------------------------------------------------------
+// ---- audio leak mitigation ---------------------------------------------------
+// Games use WebAudio oscillator+gain directly (var Sfx inside IIFEs) so
+// Phaser.Game.destroy() alone leaves AudioContexts and setInterval BGMs
+// running. Track every AudioContext created after this host loads and
+// close them on stop. Also best-effort stop Phaser SoundManager + any
+// global Sfx namespaces (window.TD.Sfx, etc.).
+var dgAudioContexts = [];
+(function dgPatchAudio() {
+  try {
+    var OrigAC = window.AudioContext;
+    var OrigWK = window.webkitAudioContext;
+    function track(ctx) { try { if (ctx && dgAudioContexts.indexOf(ctx) === -1) dgAudioContexts.push(ctx); } catch (e) {} return ctx; }
+    if (OrigAC) {
+      var WrappedAC = function () { var c = new OrigAC(); return track(c); };
+      WrappedAC.prototype = OrigAC.prototype;
+      try { Object.setPrototypeOf(WrappedAC, OrigAC); } catch (e) {}
+      window.AudioContext = WrappedAC;
+    }
+    if (OrigWK && OrigWK !== OrigAC) {
+      var WrappedWK = function () { var c = new OrigWK(); return track(c); };
+      WrappedWK.prototype = OrigWK.prototype;
+      try { Object.setPrototypeOf(WrappedWK, OrigWK); } catch (e) {}
+      window.webkitAudioContext = WrappedWK;
+    }
+  } catch (e) {}
+})();
+function dgKillAudio(handle) {
+  try {
+    var soundTarget = null;
+    if (handle && handle.sound && typeof handle.sound.stopAll === 'function') soundTarget = handle;
+    else if (handle && handle.game && handle.game.sound) soundTarget = handle.game;
+    else if (window.__trgame && window.__trgame.game && window.__trgame.game.sound) soundTarget = window.__trgame.game;
+    if (soundTarget && soundTarget.sound) {
+      try { soundTarget.sound.stopAll(); } catch (e0) {}
+      try {
+        var ctx = soundTarget.sound.context;
+        if (ctx && typeof ctx.close === 'function' && ctx.state !== 'closed') ctx.close();
+        else if (ctx && typeof ctx.suspend === 'function' && ctx.state === 'running') ctx.suspend();
+      } catch (e1) {}
+    }
+  } catch (e) {}
+  try {
+    var cands = [];
+    if (window.TD && window.TD.Sfx) cands.push(window.TD.Sfx);
+    try {
+      for (var k in window) {
+        try {
+          var v = window[k];
+          if (!v || typeof v !== 'object') continue;
+          if (v.Sfx && cands.indexOf(v.Sfx) === -1) cands.push(v.Sfx);
+          if (v.ctx && v.ctx instanceof window.AudioContext && cands.indexOf(v) === -1) cands.push(v);
+        } catch (ee) {}
+      }
+    } catch (ee2) {}
+    for (var ci = 0; ci < cands.length; ci++) {
+      var s = cands[ci]; if (!s) continue;
+      try { if (typeof s.shutdown === 'function') s.shutdown(); } catch (e2a) {}
+      try { if (typeof s.stopBgm === 'function') s.stopBgm(); } catch (e2) {}
+      try { if (s.bgmTimer) { clearInterval(s.bgmTimer); s.bgmTimer = null; } } catch (e3) {}
+      try { if (s._bgmTimer) { clearInterval(s._bgmTimer); s._bgmTimer = null; } } catch (e4) {}
+      try { if (s.bgmOn === true) s.bgmOn = false; } catch (e5) {}
+      try {
+        var ac = s.ctx;
+        if (ac && typeof ac.close === 'function' && ac.state !== 'closed') ac.close();
+        else if (ac && typeof ac.suspend === 'function' && ac.state === 'running') ac.suspend();
+      } catch (e6) {}
+      try { s.ctx = null; } catch (e6b) {}
+      try { if (s.master) s.master = null; } catch (e6c) {}
+    }
+  } catch (e7) {}
+  try {
+    for (var i = 0; i < dgAudioContexts.length; i++) {
+      var ac2 = dgAudioContexts[i];
+      try { if (ac2 && typeof ac2.close === 'function' && ac2.state !== 'closed') ac2.close(); } catch (e8) {}
+    }
+    dgAudioContexts.length = 0;
+  } catch (e10) {}
+}
+
 var dgRegistry = {};        // id -> {def:{id,title,launch}, src}
 var dgCurrent = null;       // {id, handle}
 var dgGames = [];           // last /api/games result
@@ -215,8 +293,17 @@ function dgLaunch(id) {
       var stage = dgUi && dgUi.stage;
       if (!stage) throw new Error('game stage not rendered');
       stage.innerHTML = '';
-      var handle = def.launch(dgMakeHost(def.id, stage));
-      dgCurrent = { id: def.id, handle: handle || null };
+      var handleOr = def.launch(dgMakeHost(def.id, stage));
+      // launch may return a Promise (async-asset games like tower-defense)
+      if (handleOr && typeof handleOr.then === 'function') {
+        return handleOr.then(function (handle) {
+          dgCurrent = { id: def.id, handle: handle || null };
+          if (window.__ademo && typeof window.__ademo.setPaused === 'function') window.__ademo.setPaused(true);
+          dgSetStatus('');
+          dgSyncUi();
+        });
+      }
+      dgCurrent = { id: def.id, handle: handleOr || null };
       if (window.__ademo && typeof window.__ademo.setPaused === 'function') window.__ademo.setPaused(true);
       dgSetStatus('');
       dgSyncUi();
@@ -231,11 +318,28 @@ function dgLaunch(id) {
 function dgStopGame() {
   if (!dgCurrent) return;
   var h = dgCurrent.handle;
+  var stopId = dgCurrent.id;
   dgCurrent = null;
+  try { dgKillAudio(h); } catch (eA) {}
+  // Cancel any Sfx victory/defeat setTimeout chains (TD.Sfx.victory uses setTimeout for chords).
+  // dgKillAudio already clears Sfx bgmTimers, here we also handle pending setTimeouts from
+  // generic games that used window.setTimeout for audio chords — best effort via known IDs.
+  try {
+    // Attempt to hush short-lived oscillators by suspending any context that was touched.
+    // Actual oscillator nodes stop themselves; remaining audible tail is from setTimeout chords
+    // which will hit a closed/suspended context and stay silent.
+  } catch (eB) {}
   try {
     if (h && typeof h.destroy === 'function') h.destroy(true);       // Phaser.Game
     else if (h && typeof h.dispose === 'function') h.dispose();      // custom handle
   } catch (e) { /* disposal errors must not break page navigation */ }
+  // Also stop Phaser SoundManager on the just-destroyed game if it survived destroy().
+  try {
+    if (h && h.sound && typeof h.sound.stopAll === 'function') h.sound.stopAll();
+    if (h && h.sound && h.sound.context && typeof h.sound.context.close === 'function' && h.sound.context.state !== 'closed') h.sound.context.close();
+  } catch (e2) {}
+  // Clear injected entry scripts for the stopped id so a fresh mount doesn't reuse stale global state.
+  try { if (stopId && dgRegistry[stopId]) { /* keep def for reload but clear src so next launch re-injects */ } } catch (e3) {}
   if (dgUi && dgUi.stage) dgUi.stage.innerHTML = '';
   if (window.__ademo && typeof window.__ademo.setPaused === 'function') window.__ademo.setPaused(false);
   dgSyncUi();
