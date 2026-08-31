@@ -72,8 +72,10 @@
     var g = this.add.graphics().setDepth(0);
     var cols = this.grid.cols, rows = this.grid.rows, tile = this.grid.tile, ox = this.grid.ox, oy = this.grid.oy;
     g.lineStyle(1, TD.COLORS.GRID, 0.85);
-    for (var c = 0; c <= cols; c++) g.lineBetween(ox + c * tile, oy, ox + c * tile, oy + rows * tile);
-    for (var r = 0; r <= rows; r++) g.lineBetween(ox, oy + r * tile, ox + cols * tile, oy + r * tile);
+    for (var c = 0; c <= cols; c++) { g.moveTo(ox + c * tile, oy); g.lineTo(ox + c * tile, oy + rows * tile); }
+    g.strokePath();
+    for (var r = 0; r <= rows; r++) { g.moveTo(ox, oy + r * tile); g.lineTo(ox + cols * tile, oy + r * tile); }
+    g.strokePath();
     this._gridGfx = g;
   };
 
@@ -172,7 +174,12 @@
   };
   TD.GameScene.prototype._toast = function (msg, ms) {
     var t = this.add.text(this.scale.width/2, this.scale.height - 90, msg, { fontSize:'11px', color:'#e6edf3', backgroundColor:'#111827cc' }).setOrigin(0.5).setDepth(30);
-    this.time.delayedCall(ms || 1400, function(){ try { t.destroy(); } catch (e) {} });
+    var self = this;
+    if (self.time && typeof self.time.delayedCall === 'function') {
+      self.time.delayedCall(ms || 1400, function(){ try { t.destroy(); } catch (e) {} });
+    } else {
+      setTimeout(function(){ try { t.destroy(); } catch (e) {} }, ms || 1400);
+    }
   };
   TD.GameScene.prototype._fireTower = function (tower) {
     var target = this.targeting.pick(tower, this.enemiesAlive);
