@@ -1,4 +1,4 @@
-> **最后核对（2026-08-29，Round-2 文件拆分 P2-01..P2-07）：** `style.css` 按页面拆 6 文件（@import 聚合）；`gif-editor.js` 拆 page/stage/input/transparency-ui/actions；`app.js` 拆 router/modal/shortcuts/auth/demo/i18n；`providers.js` 拆 detail/models/keys；`download.js` 拆 list/sse/detail/settings；`pg-ui.js` 拆 events/params/reqleft；`router.go` 拆 proxy/playground/utility/demo。`feature.go` 与 `index.html` 加载顺序已同步。
+> **最后核对（2026-08-31，Docs manuel 沉淀 generate.md + PNG→WEBP 70 全量 276 张）：** `docs/manuel/` 已 `276 PNG + 276 WEBP + 276 MD`（`WEBP 70` 平均 `902KB→81KB r11:1`，`RIFF WEBP` 校验 `small<50k 0`），新增 `generate.md`（清单/拍摄/SEED/文档/转码/验收/变更清单）、`scripts/convert-webp.mjs`（`ffmpeg -quality 70` 优先/回退 `sharp`，`--quality/--keep/--out`），更新 `README.md` 拍摄+转码+验收（含 webp）与 `scripts/capture.mjs` 头注释；校验 `webp 276/276 RIFF 0 bad`，`go vet 0`。
 
 # PROJECT_MAP.md — TinyRouter 模块地图
 
@@ -857,11 +857,8 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `docs/download-architecture.md` | **当前/权威** | Download 下载架构基线（任务队列生命周期、yt-dlp 参数构造、SSE 进度、与归档计划漂移、源码锚点） |
 | `docs/combo-architecture.md` | **当前/权威** | Combo 组合策略架构基线（Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级、状态持久化、源码锚点） |
 | `docs/config-registry-state-architecture.md` | **当前/权威** | Config/Registry/State 基础设施架构基线（三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge、回调去抖、源码锚点） |
-| `docs/providerinfo.md` | 参考 | 各 Provider API 参考笔记（响应 schema、限速头、错误码） |
-| `docs/research/` | 参考 | 调研笔记（`request.md`、`respond.md` 等） |
-| `docs/archive/` | 归档 | 历史规划/审计/交接文档，**非当前事实来源** |
-| `docs/assistant-progress.md` | **当前/权威** | Assistant 桌面小精灵功能进度基线：配置模型（AssistantConfig/AssistantAction）、Settings UI 与 presence-aware PATCH、sheet-image/sheet-preview 精灵图服务、petSM action 状态机（别名表 dispatch、一次性态回默认）、页面驱动窗口尺寸（size 消息 + dpr）、意图分发（LLM 优先/关键词回退）、关闭联动、F6 Demo 2D 测试台（§8）、**模型设置弹窗+per-preset 采样参数+宠物聊天+单文件记忆+闲时 10m 归纳（§9）**、变更维护清单 |
-| `docs/gamedemo-progress.md` | **当前/权威** | **2026-08-29 新增** Demo 页游戏插件架构基线：磁盘插件结构约定（game.json/TRGames.register/host adapter）、`/api/games*` + `/games/*` 静态 + seed 语义、热更新工作流、前端宿主（demo-games.js/暂停缝/布局门）、Phaser v4.2.1 实战注意事项（overlap 回调参数顺序陷阱）、边界与代价、变更维护清单、框架决策记录 |
+| `docs/manuel/` | **当前/权威（本轮新增）** | Docs 网页截图素材库：四级 `00_common/01_monitor/02_settings/03_playground/04_utility/05_gallery/06_demo`，`138 场景 × zh/en = 276 PNG + 276 WEBP(70) + 276 MD`，`PNG 2880×1800` + `WEBP 70` 平均 `902KB→81KB`（11:1），`generate.md` 方法沉淀（清单推导/拍摄/SEED/文档/转码/验收/变更清单），`README.md` 命名/视口/双语/验收（含 webp），`00_index.md` 138 清单（F1→F6），`scripts/capture.mjs`（`--base/--out/--live`，`headless:shell` 每场景 `navigateTo`/`pgSetMode`）+ `convert-webp.mjs`（`ffmpeg -quality 70` 优先，回退 `sharp`）+ `SEED.md`；来源 `index.html:66-92/app-router:9-26/app-demo:6-10/shortcuts:23-73` |
+| `docs/build-variants.md` | **当前/权威** | 构建变体矩阵（default/tray/webview/debug × playground/strip，13 产物，图标/体积） |
 
 ---
 
