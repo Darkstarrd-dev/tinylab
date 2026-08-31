@@ -854,7 +854,8 @@
       width: W, height: H,
       parent: host.container,
       backgroundColor: '#87ceeb',
-      scene: SceneClass,
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: SceneClass,
       physics: { default: 'arcade' },
       render: { antialias: true }
     });

@@ -353,11 +353,16 @@
       var t2 = this.add.text(cx, 268, saveData.unlockedChapter >= 2 ? '第二章（神殿）' : '第二章（未解锁）', { fontFamily: 'Arial', fontSize: '14px', color: '#ffffff' }).setOrigin(0.5);
       this.add.text(cx, 310, 'R 重启本章  P 暂停  Enter Boss 调试通关', { fontFamily: 'Arial', fontSize: '10px', color: '#8888aa' }).setOrigin(0.5);
       var self = this;
-      ch1.on('pointerdown', function () { Sfx.ensure(); Sfx.resume(); curChapter = 1; saveData.chapter = 1; self.scene.start('Game', { chapter: 1 }); });
-      if (saveData.unlockedChapter >= 2) ch2.on('pointerdown', function () { Sfx.ensure(); Sfx.resume(); curChapter = 2; saveData.chapter = 2; self.scene.start('Game', { chapter: 2 }); });
-      this.input.keyboard.on('keydown-ONE', function () { curChapter = 1; saveData.chapter = 1; self.scene.start('Game', { chapter: 1 }); });
-      this.input.keyboard.on('keydown-TWO', function () { if (saveData.unlockedChapter >= 2) { curChapter = 2; saveData.chapter = 2; self.scene.start('Game', { chapter: 2 }); } });
-      this.input.keyboard.on('keydown-ENTER', function () { curChapter = 1; saveData.chapter = 1; self.scene.start('Game', { chapter: 1 }); });
+      var startCh1 = function () { Sfx.ensure(); Sfx.resume(); curChapter = 1; saveData.chapter = 1; self.scene.start('Game', { chapter: 1 }); };
+      var startCh2 = function () { if (saveData.unlockedChapter >= 2) { Sfx.ensure(); Sfx.resume(); curChapter = 2; saveData.chapter = 2; self.scene.start('Game', { chapter: 2 }); } };
+      ch1.on('pointerdown', startCh1);
+      if (saveData.unlockedChapter >= 2) ch2.on('pointerdown', startCh2);
+      this.input.keyboard.on('keydown-ONE', startCh1);
+      this.input.keyboard.on('keydown-TWO', startCh2);
+      // 统一 Title 入口：SPACE / ENTER / Z 均可开始（指向首章）
+      this.input.keyboard.on('keydown-ENTER', startCh1);
+      this.input.keyboard.on('keydown-SPACE', startCh1);
+      this.input.keyboard.on('keydown-Z', startCh1);
     };
     return Title;
   }
@@ -1095,7 +1100,8 @@
     hostRef = host;
     loadPersisted();
     try { document.addEventListener('click', function f() { Sfx.resume(); document.removeEventListener('click', f); }, { once: true }); } catch (e) {}
-    var Phaser = host.phaser;
+    var Phaser = (host && host.phaser) || window.Phaser;
+    if (!Phaser) throw new Error('Phaser not found — ensure phaser is loaded before launch');
     var BootScene = createBootScene(Phaser);
     var TitleScene = createTitleScene(Phaser);
     var GameScene = createGameScene(Phaser);
@@ -1105,10 +1111,10 @@
       width: W, height: H,
       backgroundColor: '#0b132b',
       physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       scene: [BootScene, TitleScene, GameScene]
     };
     var game = new Phaser.Game(config);
-    gameRef = game;
     // 测试缝：getState / __trgame
     window.__trgame = {
       game: game,

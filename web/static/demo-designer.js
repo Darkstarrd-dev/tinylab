@@ -764,10 +764,30 @@
     return null;
   }
 
+  function dgnKillPreviewAudio(handle) {
+    try { if (typeof dgKillAudio === 'function') dgKillAudio(handle); } catch (e0) {}
+    try {
+      if (handle && handle.sound && typeof handle.sound.stopAll === 'function') handle.sound.stopAll();
+      if (handle && handle.sound && handle.sound.context && typeof handle.sound.context.close === 'function' && handle.sound.context.state !== 'closed') handle.sound.context.close();
+    } catch (e1) {}
+    try {
+      var cands2 = [];
+      if (window.TD && window.TD.Sfx) cands2.push(window.TD.Sfx);
+      if (typeof Sfx !== 'undefined' && Sfx) cands2.push(Sfx);
+      for (var ci2 = 0; ci2 < cands2.length; ci2++) {
+        var s2 = cands2[ci2]; if (!s2) continue;
+        try { if (typeof s2.stopBgm === 'function') s2.stopBgm(); } catch (e2) {}
+        try { if (s2.bgmTimer) { clearInterval(s2.bgmTimer); s2.bgmTimer = null; } } catch (e3) {}
+        try { if (s2._bgmTimer) { clearInterval(s2._bgmTimer); s2._bgmTimer = null; } } catch (e4) {}
+        try { if (s2.ctx && typeof s2.ctx.close === 'function' && s2.ctx.state !== 'closed') s2.ctx.close(); else if (s2.ctx && typeof s2.ctx.suspend === 'function' && s2.ctx.state === 'running') s2.ctx.suspend(); } catch (e5) {}
+      }
+    } catch (e6) {}
+  }
   function dgnPreviewStop() {
     if (!dgn.preview) return;
     var h = dgn.preview.handle;
     dgn.preview = null;
+    try { dgnKillPreviewAudio(h); } catch (eA) {}
     try {
       if (h && typeof h.destroy === 'function') h.destroy(true);
       else if (h && typeof h.dispose === 'function') h.dispose();
@@ -848,10 +868,11 @@
             var stage = stageEl();
             if (!stage) { var se = new Error('preview stage not rendered'); dgnConsolePush('error', [se.message]); throw se; }
             stage.innerHTML = '';
-            var handle;
-            try { handle = def.launch(seam.makeHost(id, stage)); }
-            catch (launchErr) { dgnConsolePush('error', [launchErr && (launchErr.stack || launchErr.message) || String(launchErr)]); throw launchErr; }
-            dgn.preview = { id: id, handle: handle || null };
+            var handleOr = def.launch(seam.makeHost(id, stage));
+            if (handleOr && typeof handleOr.then === 'function') {
+              return handleOr.then(function (handle) { dgn.preview = { id: id, handle: handle || null }; dgnStatus(''); });
+            }
+            dgn.preview = { id: id, handle: handleOr || null };
             dgnStatus('');
           });
         }
@@ -866,10 +887,11 @@
           var stage = stageEl();
           if (!stage) { var se2 = new Error('preview stage not rendered'); dgnConsolePush('error', [se2.message]); throw se2; }
           stage.innerHTML = '';
-          var handle2;
-          try { handle2 = def.launch(seam.makeHost(id, stage)); }
-          catch (launchErr2) { dgnConsolePush('error', [launchErr2 && (launchErr2.stack || launchErr2.message) || String(launchErr2)]); throw launchErr2; }
-            dgn.preview = { id: id, handle: handle2 || null };
+          var handleOr2 = def.launch(seam.makeHost(id, stage));
+          if (handleOr2 && typeof handleOr2.then === 'function') {
+            return handleOr2.then(function (handle2) { dgn.preview = { id: id, handle: handle2 || null }; dgnStatus(''); });
+          }
+          dgn.preview = { id: id, handle: handleOr2 || null };
           dgnStatus('');
         }, function (blobErr) {
           try { URL.revokeObjectURL(blob); } catch (ignored) {}
@@ -883,10 +905,11 @@
             var stage2 = stageEl();
             if (!stage2) { var se3 = new Error('preview stage not rendered'); dgnConsolePush('error', [se3.message]); throw se3; }
             stage2.innerHTML = '';
-            var handle3;
-            try { handle3 = def2.launch(seam.makeHost(id, stage2)); }
-            catch (launchErr3) { dgnConsolePush('error', [launchErr3 && (launchErr3.stack || launchErr3.message) || String(launchErr3)]); throw launchErr3; }
-            dgn.preview = { id: id, handle: handle3 || null };
+            var handleOr3 = def2.launch(seam.makeHost(id, stage2));
+            if (handleOr3 && typeof handleOr3.then === 'function') {
+              return handleOr3.then(function (handle3) { dgn.preview = { id: id, handle: handle3 || null }; dgnStatus(''); });
+            }
+            dgn.preview = { id: id, handle: handleOr3 || null };
             dgnStatus('');
             return;
           } catch (evalErr) {
@@ -900,7 +923,6 @@
         dgnConsolePush('error', [err && (err.stack || err.message) || String(err)]);
       });
   }
-
   function render(container) {
     cleanup();
     if (!container) return;

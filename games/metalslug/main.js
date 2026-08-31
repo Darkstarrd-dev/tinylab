@@ -293,7 +293,7 @@ create: function(){
   this.bgFar=this.add.tileSprite(0,0,6000,180,'sky1').setOrigin(0,0).setScrollFactor(0).setDepth(-20);
   this.bgNear=this.add.tileSprite(0,120,6000,100,'sky2').setOrigin(0,0).setScrollFactor(0).setDepth(-10);
 
-  this.keys=this.input.keyboard.addKeys('LEFT,RIGHT,UP,DOWN,A,D,W,S,SPACE,G,H,R,P,ENTER');
+  this.keys=this.input.keyboard.addKeys('LEFT,RIGHT,UP,DOWN,A,D,W,S,SPACE,G,H,R,P,ENTER,Z');
   this.keyC=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
   this.keyX=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
   this.keyG=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.G);
@@ -961,7 +961,7 @@ update: function(time,delta){
   if(this.gameState==='title'){
     this.titleText.setVisible(true);
     this.centerText.setVisible(false);
-    if(this.keys.SPACE.isDown || this.keys.ENTER.isDown){
+    if(this.keys.SPACE.isDown || this.keys.ENTER.isDown || this.keys.Z.isDown || (this.keys.G && this.keys.G.isDown)){
       this.titleText.setVisible(false);
       this.loadStage(1);
       this.gameState='playing';
@@ -1207,7 +1207,8 @@ window.TRGames.register({
       width:W, height:H,
       backgroundColor:'#87c1e8',
       physics:{ default:'arcade', arcade:{ gravity:{y:GRAVITY,x:0}, debug:false } },
-      scene:[MainScene]
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene:[MainScene]
     });
     sceneRef=null;
     var tryBind=function(){ try{ var s=game.scene.getScene('Main'); if(s) sceneRef=s; }catch(e){} };

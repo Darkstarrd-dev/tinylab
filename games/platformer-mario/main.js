@@ -369,7 +369,7 @@
       this.physics.world.setBounds(0, 0, 4000, 600);
 
       // 输入
-      this.keys = this.input.keyboard.addKeys('W,A,S,D,LEFT,RIGHT,UP,DOWN,SPACE,SHIFT,R');
+      this.keys = this.input.keyboard.addKeys('W,A,S,D,LEFT,RIGHT,UP,DOWN,SPACE,SHIFT,R,ENTER,Z');
       this.keys.W2 = this.input.keyboard.addKey('W');
       this.keys.A2 = this.input.keyboard.addKey('A');
 
@@ -766,7 +766,7 @@
     update: function (time, delta) {
       // 标题态：按 SPACE 开始
       if (this.gameState === 'title') {
-        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.UP)) {
+        if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.ENTER) || Phaser.Input.Keyboard.JustDown(this.keys.Z) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.UP)) {
           Sfx.ensure();
           this.titleText.setVisible(false);
           this.centerText.setVisible(false);
@@ -779,7 +779,7 @@
       }
       // 死亡/胜利：R 重开，SPACE 回标题
       if (this.gameState === 'dead' || this.gameState === 'win') {
-        if (Phaser.Input.Keyboard.JustDown(this.keys.R) || Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.UP)) {
+        if (Phaser.Input.Keyboard.JustDown(this.keys.R) || Phaser.Input.Keyboard.JustDown(this.keys.SPACE) || Phaser.Input.Keyboard.JustDown(this.keys.ENTER) || Phaser.Input.Keyboard.JustDown(this.keys.Z) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.UP)) {
           Sfx.ensure();
           this.centerText.setVisible(false);
           this.coins = 0; this.hp = 2; this.isDead = false;
@@ -958,7 +958,8 @@
           default: 'arcade',
           arcade: { gravity: { y: GRAVITY, x: 0 }, debug: false }
         },
-        scene: [MainScene]
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+scene: [MainScene]
       });
       // 测试缝：与 survivor 一致暴露 game + getState；scene 指向 MainScene
       sceneRef = null;

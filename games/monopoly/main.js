@@ -451,6 +451,7 @@ function launch(host){
       var startBtn=this.add.text(w/2, 300, '掷骰开始 ROLL ▶', { fontFamily:'monospace', fontSize:'16px', color:'#ffffff', backgroundColor:'#238636', padding:{x:18,y:10} }).setOrigin(0.5,0.5).setInteractive({useHandCursor:true});
       var keyR=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
       var keyEnter=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+      var keyZ=this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
       var self=this;
       function doStart(){
         Sfx.ensure(); Sfx.play('dice');
@@ -458,7 +459,7 @@ function launch(host){
       }
       startBtn.on('pointerdown', doStart);
       this._doStart=doStart;
-      this._keyR=keyR; this._keyEnter=keyEnter;
+      this._keyR=keyR; this._keyEnter=keyEnter; this._keyZ=keyZ;
 
       // 说明
       this.add.text(w/2, 350, '骰子1-6走格  房产3级租金递增  机会/税/监狱  破产淘汰  最后一人胜', { fontFamily:'monospace', fontSize:'9px', color:'#484f58' }).setOrigin(0.5,0.5);
@@ -467,6 +468,7 @@ function launch(host){
     update(){
       if(this._keyR && Phaser.Input.Keyboard.JustDown(this._keyR)) this._doStart();
       if(this._keyEnter && Phaser.Input.Keyboard.JustDown(this._keyEnter)) this._doStart();
+      if(this._keyZ && Phaser.Input.Keyboard.JustDown(this._keyZ)) this._doStart();
     }
   };
 
@@ -1162,6 +1164,7 @@ function launch(host){
     width: host.width||960,
     height: host.height||540,
     backgroundColor: '#0b1220',
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: [BootScene, MenuScene, GameScene]
   };
   var game=new Phaser.Game(config);

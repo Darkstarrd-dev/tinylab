@@ -661,6 +661,7 @@
         width: W,
         height: H,
         backgroundColor: '#0b132b',
+        scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
         scene: [BootScene, TitleScene, ChapterSelectScene, ChapterCardScene, NovelScene]
       });
       gameRef = game;

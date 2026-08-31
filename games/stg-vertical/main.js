@@ -991,6 +991,7 @@
       height: h,
       backgroundColor: '#87ceeb',
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       scene: [BootScene, MenuScene, StgScene]
     };
     var game = new Phaser.Game(config);

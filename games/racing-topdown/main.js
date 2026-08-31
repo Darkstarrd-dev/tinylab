@@ -1305,6 +1305,7 @@ function launch(host){
     height:CH,
     backgroundColor:'#0f1820',
     physics:{default:'arcade', arcade:{gravity:{y:0}, debug:false}},
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene:[BootScene, MenuScene, RaceScene]
   };
   // 注入 hostRef 供 Boot 读取
