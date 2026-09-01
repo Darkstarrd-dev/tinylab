@@ -236,7 +236,6 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
               '<button class="pg-search-toggle-btn pg-search-toggle-btn-active" data-view="pretty" onclick="event.stopPropagation();pgToggleSearchRaw(this,\'pretty\')">' + pgEscapeHtml(pgT('pgSearchPretty')) + '</button>' +
               '<button class="pg-search-toggle-btn" data-view="raw" onclick="event.stopPropagation();pgToggleSearchRaw(this,\'raw\')">' + pgEscapeHtml(pgT('pgSearchRaw')) + '</button>' +
             '</span>' +
-            '<button class="pg-search-append" onclick="event.stopPropagation();pgAppendSearch(' + i + ',' + idx + ',\'raw\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>' +
           '</div>' +
           '<div class="pg-search-raw-body">' +
             '<div class="pg-search-pretty-view">' + prettyHtml + '</div>' +
@@ -259,7 +258,7 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
 
     // Right pane (win 1): Synthesized Result
     if (i === 1) {
-      if (msg.status === 'loading' && !msg.content) {
+      if ((msg.status === 'loading' || msg.status === 'streaming') && !msg.content && !msg.reasoning) {
         var sec2 = msg.startedAt ? Math.max(0, Math.floor((Date.now() - msg.startedAt) / 1000)) : 0;
         pgEnsureWaitingTicker();
         return '<div class="pg-bubble"><span class="pg-toast-inline">⏳ ' + pgEscapeHtml(pgT('pgSearchSynthesizing')) + ' <span class="pg-wait-sec" id="pg-wait-' + i + '-' + idx + '">' + sec2 + 's</span></span></div>';
@@ -309,9 +308,9 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
         bodyMd2 = pgRenderMarkdown(pgTextContent(msg.content), false);
       }
       if (!rightInner) {
-        rightInner += '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span><button class="pg-search-append" onclick="pgAppendSearch(' + i + ',' + idx + ',\'synth\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button></div>';
+        rightInner += '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span></div>';
       } else {
-        rightInner = '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span><button class="pg-search-append" onclick="pgAppendSearch(' + i + ',' + idx + ',\'synth\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button></div>' + rightInner;
+        rightInner = '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span></div>' + rightInner;
       }
       if (bodyMd2) {
         rightInner += '<div class="' + cls2 + '">' + bodyMd2 + '</div>';
@@ -549,8 +548,8 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
     if (isSearch && i === 1) {
       html += '<button class="pg-action" onclick="pgSaveActiveSearchResultMarkdown()" data-tooltip="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
     }
-    html += '<button class="pg-action" onclick="pgAppendAssistant(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>';
     if (!isSearch) {
+      html += '<button class="pg-action" onclick="pgAppendAssistant(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>';
       html += '<button class="pg-action" onclick="pgRegenerate(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRegenerate')) + '">' + PG_ICON_REGEN + '</button>';
     }
     if (msg.status === 'error') {

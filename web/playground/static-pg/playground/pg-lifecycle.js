@@ -52,6 +52,11 @@ function renderPlayground(container) {
     ? qsGetActiveModel().then(function(a) {
         if (a && a.model && (pgState.mode === 'normal' || pgState.mode === 'search')) {
           pgWin().config.model = a.model;
+          if (pgState.mode === 'search') {
+            for (var si = 0; si < pgState.windows.length && si < 2; si++) {
+              pgState.windows[si].config.model = a.model;
+            }
+          }
         }
       })
     : Promise.resolve();

@@ -10,12 +10,30 @@ function pgApplyActiveQuickSlot(model) {
   if (pgState.mode !== 'normal' && pgState.mode !== 'search') return;
   var w = pgWin(); if (!w) return;
   w.config.model = model;
+  if (pgState.mode === 'search') {
+    for (var si = 0; si < pgState.windows.length && si < 2; si++) {
+      pgState.windows[si].config.model = model;
+    }
+  }
   pgSave();
   pgRenderSidebar();
   pgRenderPanes();
   pgUpdateInputBar();
 }
-function pgOnModelChange(v) { var w = pgWin(); if (w) { w.config.model = v; if (typeof qsClearActive === 'function') qsClearActive(); pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar(); } }
+function pgOnModelChange(v) {
+  var w = pgWin();
+  if (!w) return;
+  w.config.model = v;
+  // In search mode, sync model to both windows so headers stay consistent
+  // and API requests (which always read from window 0) use the chosen model.
+  if (pgState.mode === 'search') {
+    for (var si = 0; si < pgState.windows.length && si < 2; si++) {
+      pgState.windows[si].config.model = v;
+    }
+  }
+  if (typeof qsClearActive === 'function') qsClearActive();
+  pgSave(); pgRenderSidebar(); pgRenderPanes(); pgUpdateInputBar();
+}
 
 // pgOnProtocolFilter changes the protocol filter.  If the currently selected
 // model no longer matches the chosen protocol, it is cleared so the user

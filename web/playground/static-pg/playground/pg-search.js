@@ -63,6 +63,12 @@ function pgSearchSend(query) {
     }
     msg.searchClassification = classification;
     msg.searchStep = 'searching';
+    var w1_1 = pgWinAt(1);
+    var w1msg_1 = w1_1 && w1_1.messages && w1_1.messages[w2.messages.length - 1];
+    if (w1msg_1) {
+      w1msg_1.searchClassification = classification;
+      w1msg_1.searchStep = 'searching';
+    }
     pgRenderBubble(0, w2.messages.length - 1);
     pgRenderBubble(1, w2.messages.length - 1);
 
@@ -93,7 +99,21 @@ function pgSearchSend(query) {
       msg2.searchStep = 'synthesizing';
       msg2.status = 'streaming';
       w3.pendingContent = '';
+      w3.pendingReasoning = '';
+      w3.pendingSources = [];
+      w3.reasoningStartedAt = null;
+      w3.reasoningCompletedAt = null;
       w3.lastRenderedRawLen = rawResult.length;
+      var w1_2 = pgWinAt(1);
+      var w1msg_2 = w1_2 && w1_2.messages && w1_2.messages[w3.messages.length - 1];
+      if (w1msg_2) {
+        w1msg_2.searchRaw = rawResult;
+        w1msg_2.searchStep = 'synthesizing';
+        w1msg_2.status = 'streaming';
+        w1msg_2.content = '';
+        w1msg_2.reasoning = '';
+        w1msg_2.sources = [];
+      }
       pgRenderBubble(0, w3.messages.length - 1);
       pgRenderBubble(1, w3.messages.length - 1);
       pgScrollBottom(0, w3.messages.length - 1);
@@ -163,6 +183,15 @@ function pgSearchApplyChunk(data) {
   if (!choices || !choices.length) return;
   var delta = choices[0].delta || {};
   if (delta.content) w.pendingContent = pgMergeChunk(w.pendingContent, delta.content);
+  var reasonChunk = delta.reasoning_content || delta.reasoning || delta.thinking || delta.thought;
+  if (reasonChunk) {
+    if (!w.reasoningStartedAt) w.reasoningStartedAt = Date.now();
+    w.pendingReasoning = pgMergeChunk(w.pendingReasoning, reasonChunk);
+  }
+  if (typeof pgApplySourcesFromObject === 'function') {
+    pgApplySourcesFromObject(0, delta);
+    if (choices[0].message) pgApplySourcesFromObject(0, choices[0].message);
+  }
 }
 
 function pgSearchFlushRender() {
@@ -174,6 +203,17 @@ function pgSearchFlushRender() {
     if (!w2.streaming) return;
     var msg = w2.messages[w2.messages.length - 1];
     if (!msg) return;
+
+    if (typeof pgExtractAllReasoning === 'function') {
+      var split = pgExtractAllReasoning(w2.pendingContent);
+      if (split.reasoning) {
+        w2.pendingReasoning = w2.pendingReasoning
+          ? w2.pendingReasoning + '\n' + split.reasoning
+          : split.reasoning;
+        w2.pendingContent = split.content;
+        if (!w2.reasoningStartedAt) w2.reasoningStartedAt = Date.now();
+      }
+    }
 
     // DOM existence check — background tab render may fire after container is cleared
     var bubble0 = document.getElementById('pg-bubble-0-' + (w2.messages.length - 1));
@@ -193,7 +233,36 @@ function pgSearchFlushRender() {
 
     // Right pane (synthesized result) is updated during streaming
     msg.content = w2.pendingContent;
+    msg.reasoning = w2.pendingReasoning;
+    if (w2.pendingSources && w2.pendingSources.length) msg.sources = w2.pendingSources.slice();
+    if (w2.reasoningStartedAt) {
+      msg.reasoningStartedAt = w2.reasoningStartedAt;
+      if (w2.reasoningCompletedAt) {
+        msg.reasoningCompletedAt = w2.reasoningCompletedAt;
+        msg.reasoningDurationMs = w2.reasoningCompletedAt - w2.reasoningStartedAt;
+      } else {
+        msg.reasoningDurationMs = Date.now() - w2.reasoningStartedAt;
+      }
+    }
+    if (w2.reasoningStartedAt && !w2.reasoningCompletedAt && w2.pendingContent) {
+      w2.reasoningCompletedAt = Date.now();
+      msg.reasoningCompletedAt = w2.reasoningCompletedAt;
+      msg.reasoningDurationMs = w2.reasoningCompletedAt - w2.reasoningStartedAt;
+    }
     msg.status = 'streaming';
+
+    // Sync to window 1 so pgRenderBubble(1,...) sees updated content
+    var w1 = pgWinAt(1);
+    var w1msg = w1 && w1.messages && w1.messages[w2.messages.length - 1];
+    if (w1msg) {
+      w1msg.content = msg.content;
+      w1msg.reasoning = msg.reasoning;
+      w1msg.sources = msg.sources;
+      w1msg.reasoningStartedAt = msg.reasoningStartedAt;
+      w1msg.reasoningCompletedAt = msg.reasoningCompletedAt;
+      w1msg.reasoningDurationMs = msg.reasoningDurationMs;
+      w1msg.status = msg.status;
+    }
     if (bubble1) pgRenderBubble(1, w2.messages.length - 1);
     if (bubble1) pgScrollBottom(1, w2.messages.length - 1);
   }, 50);
@@ -209,15 +278,46 @@ function pgSearchFinish() {
   w0.abortCtrl = null;
   var msg = w0.messages[w0.messages.length - 1];
   if (msg) {
+    if (typeof pgExtractAllReasoning === 'function') {
+      var split = pgExtractAllReasoning(w0.pendingContent);
+      if (split.reasoning) {
+        w0.pendingReasoning = w0.pendingReasoning
+          ? w0.pendingReasoning + '\n' + split.reasoning
+          : split.reasoning;
+        w0.pendingContent = split.content;
+      }
+    }
     msg.content = w0.pendingContent || msg.content;
+    msg.reasoning = w0.pendingReasoning || msg.reasoning;
+    if (w0.pendingSources && w0.pendingSources.length) msg.sources = w0.pendingSources.slice();
     msg.status = 'complete';
     msg.searchStep = 'done';
     if (!msg.completedAt) {
       msg.completedAt = Date.now();
       if (msg.startedAt) msg.durationMs = msg.completedAt - msg.startedAt;
     }
+    if (w0.reasoningStartedAt && !w0.reasoningCompletedAt) {
+      w0.reasoningCompletedAt = Date.now();
+      msg.reasoningCompletedAt = w0.reasoningCompletedAt;
+      msg.reasoningDurationMs = w0.reasoningCompletedAt - w0.reasoningStartedAt;
+    }
+    var w1msg = w1 && w1.messages && w1.messages[w0.messages.length - 1];
+    if (w1msg) {
+      w1msg.content = msg.content;
+      w1msg.reasoning = msg.reasoning;
+      w1msg.sources = msg.sources;
+      w1msg.status = msg.status;
+      w1msg.searchStep = msg.searchStep;
+      w1msg.completedAt = msg.completedAt;
+      w1msg.durationMs = msg.durationMs;
+      w1msg.reasoningStartedAt = msg.reasoningStartedAt;
+      w1msg.reasoningCompletedAt = msg.reasoningCompletedAt;
+      w1msg.reasoningDurationMs = msg.reasoningDurationMs;
+    }
   }
   w0.pendingContent = '';
+  w0.pendingReasoning = '';
+  w0.pendingSources = [];
   // DOM existence check — background tab render may fire after container is cleared
   var bubble0 = document.getElementById('pg-bubble-0-' + (w0.messages.length - 1));
   var bubble1 = document.getElementById('pg-bubble-1-' + (w0.messages.length - 1));
@@ -243,6 +343,14 @@ function pgSearchFail(errMsg) {
     if (!msg.completedAt) {
       msg.completedAt = Date.now();
       if (msg.startedAt) msg.durationMs = msg.completedAt - msg.startedAt;
+    }
+    var w1msg = w1 && w1.messages && w1.messages[w0.messages.length - 1];
+    if (w1msg) {
+      w1msg.error = msg.error;
+      w1msg.status = msg.status;
+      w1msg.searchStep = msg.searchStep;
+      w1msg.completedAt = msg.completedAt;
+      w1msg.durationMs = msg.durationMs;
     }
   }
   // DOM existence check — background tab render may fire after container is cleared
@@ -356,6 +464,7 @@ function pgSwitchSearch(searchId) {
       pgState.activeSearchId = searchId;
       pgSyncSearchMessages();
       pgRenderMessages(0);
+      if (pgWinAt(1)) pgRenderMessages(1);
       pgRenderSidebar();
       pgUpdateInputBar();
       return;

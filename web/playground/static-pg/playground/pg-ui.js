@@ -158,6 +158,41 @@ function pgAppendSearch(i, idx, kind) {
   if (!content) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
   pgAppendNote(content);
 }
+function pgAppendWindow(i) {
+  var w = pgWinAt(i);
+  if (!w || !w.messages || !w.messages.length) {
+    pgToast(pgT('pgNothingToAppend'), 'warning');
+    return;
+  }
+  if (pgState.mode === 'search') {
+    var w0 = pgWinAt(0);
+    var msgs = (w0 && w0.messages) || w.messages;
+    var msg = msgs[msgs.length - 1];
+    if (!msg) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+    var content = '';
+    if (i === 0) {
+      content = (msg.searchRaw || '').trim();
+    } else {
+      content = pgTextContent(msg.content).trim();
+    }
+    if (!content) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+    pgAppendNote(content);
+    return;
+  }
+  var parts = [];
+  w.messages.forEach(function(msg) {
+    if (!msg || msg.status === 'loading') return;
+    var txt = pgTextContent(msg.content).trim();
+    if (!txt) return;
+    var roleLabel = msg.role === 'user' ? 'User' : (msg.role === 'assistant' ? 'Assistant' : (msg.role === 'system' ? 'System' : msg.role));
+    parts.push('### ' + roleLabel + ':\n' + txt);
+  });
+  if (!parts.length) {
+    pgToast(pgT('pgNothingToAppend'), 'warning');
+    return;
+  }
+  pgAppendNote(parts.join('\n\n'));
+}
 
 // ----- Module: New message send (broadcast) -------------------------
 function pgUserSend() {
@@ -435,6 +470,12 @@ function pgSetMode(mode) {
   if (mode === pgState.mode) return;
   var oldMode = pgState.mode;
 
+  // Cancel any pending debounced save to prevent cross-mode storage bleeding
+  if (typeof pgSaveTimer !== 'undefined' && pgSaveTimer) {
+    clearTimeout(pgSaveTimer);
+    pgSaveTimer = null;
+  }
+
   if (!pgState.modeWindows) {
     pgState.modeWindows = { normal: null, search: null, image: null, autochat: null };
   }
@@ -447,11 +488,21 @@ function pgSetMode(mode) {
     }
   }
 
-  // 1. Save oldMode's windows & splitCount
+  // 1. Save oldMode's windows & splitCount & persist immediately
   if (oldMode) {
     pgState.modeWindows[oldMode] = pgState.windows;
     if (pgState.modeSplitCounts) {
       pgState.modeSplitCounts[oldMode] = pgState.splitCount;
+    }
+    if (oldMode === 'normal') {
+      try {
+        var w0Old = pgState.windows[0];
+        var trimmedOld = (w0Old && w0Old.messages) || [];
+        if (trimmedOld.length > PG_MAX_MSGS) trimmedOld = trimmedOld.slice(-PG_MAX_MSGS);
+        localStorage.setItem(PG_MSG_KEY, JSON.stringify(trimmedOld));
+      } catch (e) {}
+    } else if (oldMode === 'search') {
+      if (typeof pgSaveSearchHistory === 'function') pgSaveSearchHistory();
     }
   }
 
@@ -483,6 +534,15 @@ function pgSetMode(mode) {
     for (var wI = 0; wI < targetSplit; wI++) {
       var seedWin = (typeof makeWin === 'function') ? makeWin() : null;
       if (seedWin && seedCfg) seedWin.config = JSON.parse(JSON.stringify(seedCfg));
+      if (mode === 'normal' && wI === 0 && seedWin) {
+        try {
+          var rawNorm = localStorage.getItem(PG_MSG_KEY);
+          if (rawNorm) {
+            var parsedNorm = JSON.parse(rawNorm);
+            if (Array.isArray(parsedNorm)) seedWin.messages = parsedNorm.map(pgNormalizeLoadedMessage);
+          }
+        } catch (e) {}
+      }
       pgState.windows.push(seedWin);
     }
     pgState.modeWindows[mode] = pgState.windows;

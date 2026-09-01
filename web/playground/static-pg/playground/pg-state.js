@@ -120,12 +120,20 @@ function pgActiveSearch() {
 
 // Mirror the active search's messages into w.messages for rendering.
 // If no active search, clear w.messages.
+// Window 0 shares the same message objects with searchEntry so that
+// property mutations (content, searchRaw, status …) automatically
+// persist back to searchHistory — no manual write-back needed.
+// Window 1 gets shallow copies for display isolation.
 function pgSyncSearchMessages() {
   var s = pgActiveSearch();
   var msgs = s ? s.messages : [];
   for (var i = 0; i < pgState.windows.length; i++) {
     if (i < 2) {
-      pgState.windows[i].messages = msgs.map(function(m){ return Object.assign({}, m); }); // P1-01a isolate
+      if (i === 0) {
+        pgState.windows[i].messages = msgs.slice(); // same objects, write-back by reference
+      } else {
+        pgState.windows[i].messages = msgs.map(function(m){ return Object.assign({}, m); });
+      }
     }
   }
 }
@@ -164,6 +172,10 @@ function pgLoadSearchHistory() {
       var parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         pgState.searchHistory = parsed;
+        // Restore ID counter to max(existing IDs) to prevent collisions
+        for (var j = 0; j < parsed.length; j++) {
+          if (parsed[j].id > pgSearchIdCounter) pgSearchIdCounter = parsed[j].id;
+        }
       }
     }
   } catch (e) {}
@@ -244,14 +256,12 @@ function pgLoad() {
   } catch (e) { /* corrupt image history */ }
   // Load search history from localStorage (before messages are loaded)
   pgLoadSearchHistory();
+
+  var loadedNormalMsgs = [];
   try {
     var rawMsgs = localStorage.getItem(PG_MSG_KEY);
     if (rawMsgs) {
-      // Search mode: messages come from searchHistory, not localStorage.
-      // Skip loading to avoid overwriting w.messages reference.
-      if (pgState.mode === 'search') {
-        pgSyncSearchMessages();
-      } else if (rawMsgs.length > PG_MAX_MSGS_BYTES) {
+      if (rawMsgs.length > PG_MAX_MSGS_BYTES) {
         localStorage.removeItem(PG_MSG_KEY);
       } else {
         var msgs = JSON.parse(rawMsgs);
@@ -266,7 +276,7 @@ function pgLoad() {
             totalSize += mc;
             trimmedBySize.unshift(msgs[mi]);
           }
-          trimmedBySize = trimmedBySize.map(function(m) {
+          loadedNormalMsgs = trimmedBySize.map(function(m) {
             var copy = Object.assign({}, m);
             if (typeof copy.content === 'string' && copy.content.length > PG_MAX_MSG_CHARS) {
               copy.content = copy.content.slice(0, PG_MAX_MSG_CHARS) + '\n\n[...]';
@@ -276,18 +286,34 @@ function pgLoad() {
             }
             return pgNormalizeLoadedMessage(copy);
           });
-          w.messages = trimmedBySize;
-          if (w.image && Array.isArray(w.image.generations)) {
-            var latest = w.image.generations[w.image.generations.length - 1];
-            if (latest && latest.status === 'generating') { latest.status = 'canceled'; w.image.phase = 'canceled'; w.image.activeRequestId = ''; }
-          }
         }
       }
-    } else if (pgState.mode === 'search') {
-      // No saved msgs in localStorage (expected for search), sync from searchHistory
-      pgSyncSearchMessages();
     }
   } catch (e) { /* corrupt storage */ }
+
+  if (!pgState.modeWindows) {
+    pgState.modeWindows = { normal: null, search: null, image: null, autochat: null };
+  }
+
+  if (pgState.mode === 'search') {
+    // Normal window gets normalMsgs stored in modeWindows.normal
+    var normWin = makeWin();
+    normWin.config = JSON.parse(JSON.stringify(w.config));
+    normWin.parameterEnabled = JSON.parse(JSON.stringify(w.parameterEnabled));
+    normWin.messages = loadedNormalMsgs;
+    pgState.modeWindows.normal = [normWin];
+
+    // Search window gets search messages
+    pgSyncSearchMessages();
+    pgState.modeWindows.search = pgState.windows;
+  } else {
+    w.messages = loadedNormalMsgs;
+    if (w.image && Array.isArray(w.image.generations)) {
+      var latest = w.image.generations[w.image.generations.length - 1];
+      if (latest && latest.status === 'generating') { latest.status = 'canceled'; w.image.phase = 'canceled'; w.image.activeRequestId = ''; }
+    }
+    pgState.modeWindows.normal = pgState.windows;
+  }
 }
 
 function pgEnsureWindows() {
@@ -309,13 +335,16 @@ function pgEnsureWindows() {
 
 var pgSaveTimer = null;
 function pgSave() {
+  if (pgSaveTimer) clearTimeout(pgSaveTimer);
   pgSaveTimer = setTimeout(function() {
+    var curMode = pgState.mode;
     var w = pgState.windows[0];
+    if (!w) return;
     try { localStorage.setItem(PG_CFG_KEY, JSON.stringify(w.config)); } catch (e) {}
     try { localStorage.setItem(PG_PARAM_KEY, JSON.stringify(w.parameterEnabled)); } catch (e) {}
     try { localStorage.setItem(PG_IMAGE_KEY, JSON.stringify(w.image || {})); } catch (e) {}
     // In search mode, messages are per-search and in-memory only; don't overwrite normal-mode localStorage.
-    if (pgState.mode !== 'search') {
+    if (curMode === 'normal') {
       try {
         var trimmed = w.messages;
         if (trimmed.length > PG_MAX_MSGS) trimmed = trimmed.slice(-PG_MAX_MSGS);
@@ -323,10 +352,10 @@ function pgSave() {
       } catch (e) {}
     }
     // Persist search history to localStorage
-    if (pgState.mode === 'search' && pgState.searchHistory.length) {
+    if (curMode === 'search' && pgState.searchHistory.length) {
       pgSaveSearchHistory();
     }
-    }, 500);
+  }, 500);
 }
 
 function pgSaveMode() {
@@ -334,12 +363,13 @@ function pgSaveMode() {
 }
 
 function pgSaveSync() {
+  var curMode = pgState.mode;
   var w = pgState.windows[0];
   if (!w) return;
   try { localStorage.setItem(PG_IMAGE_KEY, JSON.stringify(w.image || {})); } catch (e) {}
   try { localStorage.setItem(PG_CFG_KEY, JSON.stringify(w.config)); } catch (e) {}
   try { localStorage.setItem(PG_PARAM_KEY, JSON.stringify(w.parameterEnabled)); } catch (e) {}
-  if (pgState.mode !== 'search') {
+  if (curMode === 'normal') {
     try {
       var trimmed = w.messages;
       if (trimmed.length > PG_MAX_MSGS) trimmed = trimmed.slice(-PG_MAX_MSGS);
@@ -347,7 +377,7 @@ function pgSaveSync() {
     } catch (e) {}
   }
   // Persist search history to localStorage
-  if (pgState.mode === 'search' && pgState.searchHistory.length) {
+  if (curMode === 'search' && pgState.searchHistory.length) {
     pgSaveSearchHistory();
   }
 }
