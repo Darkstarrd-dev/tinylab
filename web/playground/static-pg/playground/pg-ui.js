@@ -98,16 +98,65 @@ function pgPrevUserBefore(i, idx) {
   return -1;
 }
 
-function pgRetryError(i, idx) {
-  if (pgIsGenerating()) return;
-  pgRegenerate(i, idx);
-}
-
 function pgEditPromptForError(i, idx) {
   if (pgIsGenerating()) return;
   var prevUser = pgPrevUserBefore(i, idx);
   if (prevUser < 0) { pgToast(pgT('pgNoPrevUser'), 'warning'); return; }
   pgBeginEdit(i, prevUser);
+}
+
+// ----- Append to note ------------------------------------------------
+function pgAppendNote(content) {
+  if (!content || !String(content).trim()) { pgToast(pgT('pgNothingToAppend'), 'warning'); return Promise.resolve(); }
+  return (typeof apiPost === 'function' ? apiPost : pgApiPost)('/notes/append', { content: content }).then(function(res) {
+    if (res && res.error) throw new Error(res.error);
+    var name = (res && res.fileId) || 'NOTE.md';
+    pgToast(pgT('pgAppended', [name]), 'success');
+    return res;
+  }).catch(function(err) {
+    pgToast((err && err.message) || String(err), 'error');
+    throw err;
+  });
+}
+function pgAppendSingle(i, idx) {
+  // Backward compat: old thinking-block called pgAppendSingle which previously
+  // concatenated user+assistant+reasoning. Now it means reasoning-only.
+  pgAppendReasoning(i, idx);
+}
+function pgAppendReasoning(i, idx) {
+  var w = pgWinAt(i);
+  if (!w || !w.messages || !w.messages[idx]) return;
+  var msg = w.messages[idx];
+  var rt = (msg.reasoning || '').trim();
+  if (!rt) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+  pgAppendNote(rt);
+}
+function pgAppendUser(i, idx) {
+  var w = pgWinAt(i);
+  if (!w || !w.messages || !w.messages[idx]) return;
+  var txt = pgTextContent(w.messages[idx].content).trim();
+  if (!txt) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+  pgAppendNote(txt);
+}
+function pgAppendAssistant(i, idx) {
+  var w = pgWinAt(i);
+  if (!w || !w.messages || !w.messages[idx]) return;
+  var txt = pgTextContent(w.messages[idx].content).trim();
+  if (!txt) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+  pgAppendNote(txt);
+}
+function pgAppendSearch(i, idx, kind) {
+  var w = pgWinAt(i);
+  var msg = w && w.messages ? w.messages[idx] : null;
+  if (!msg) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+  var content = '';
+  if (kind === 'raw') {
+    content = (msg.searchRaw || '').trim();
+  } else {
+    content = pgTextContent(msg.content).trim();
+  }
+  if (!content) { pgToast(pgT('pgNothingToAppend'), 'warning'); return; }
+  pgAppendNote(content);
 }
 
 // ----- Module: New message send (broadcast) -------------------------
@@ -356,6 +405,7 @@ function pgRenderPanes() {
           '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.pgZoomReset) window.pgZoomReset();" data-tooltip="Reset text size" aria-label="Reset text size">' + (typeof PG_ICON_ZOOM_RESET !== 'undefined' ? PG_ICON_ZOOM_RESET : '↺') + '</button>' +
           '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.pgZoomStep) window.pgZoomStep(0.1);" data-tooltip="Increase text size" aria-label="Increase text size">' + (typeof PG_ICON_ZOOM_IN !== 'undefined' ? PG_ICON_ZOOM_IN : '+') + '</button>' +
         '</span>' +
+        (!isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgAppendWindow(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppendWindow')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>' : '') +
         (pgState.mode !== 'search' && !isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgClearWindowMessages(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgClearWin')) + '">' + PG_ICON_DELETE + '</button>' : '') +
         (!isBatchActive ? '<button class="pg-pane-btn" onclick="event.stopPropagation();pgOpenDebugModal(' + i + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDebugWin')) + '">' + PG_ICON_DEBUG + '</button>' : '') +
       '</div>' +

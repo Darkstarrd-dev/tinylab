@@ -30,6 +30,7 @@ import (
 	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
 	"github.com/tinyrouter/tinyrouter/internal/api/games"
 	"github.com/tinyrouter/tinyrouter/internal/api/music"
+	"github.com/tinyrouter/tinyrouter/internal/api/notes"
 	"github.com/tinyrouter/tinyrouter/internal/api/image"
 	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
 	"github.com/tinyrouter/tinyrouter/internal/api/keys"
@@ -374,6 +375,7 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	probeHandler := probe.NewHandler(apiDeps)
 	gamesHandler := games.NewHandler(apiDeps)
 	musicHandler := music.NewHandler(apiDeps)
+	notesHandler := notes.NewHandler(apiDeps)
 	archiveHandler := archiveapi.NewHandler(apiDeps, rt.archiveRunner)
 	playgroundHandler := playgroundapi.NewHandler(apiDeps)
 	// Gallery resolves registered archive sources through the /api/archive
@@ -383,8 +385,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		galleryHandler.SetArchive(archiveHandler)
 	}
 	rt.assistantHandler.SetDeps(apiDeps)
-
-	// API routes
 	r.Route("/api", func(r chi.Router) {
 		// 1 MB API request body limit
 		r.Use(func(next http.Handler) http.Handler {
@@ -454,14 +454,12 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			fsbrowseHandler.Register(r)
 			// Traces
 			r.Route("/traces", traceHandler.Register)
-
 			rt.registerDemoAPIRoutes(r, gamesHandler)
-
+			notesHandler.Register(r)
 			// Music (local playback + Jamendo/online; no extra feature gate)
 			r.Route("/music", func(r chi.Router) { musicHandler.Register(r) })
 		})
 	})
-
 	rt.registerPlaygroundRoutes(r, authHandler, imageHandler, playgroundHandler, comfyuiHandler, imageBatchHandler)
 
 	rt.registerUtilityRoutes(r, authHandler, editorHandler, textReviewHandler, galleryHandler, fileTransferHandler, archiveHandler)

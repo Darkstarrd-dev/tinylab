@@ -1,4 +1,4 @@
-> **最后核对（2026-08-31，Docs manuel 沉淀 generate.md + PNG→WEBP 70 全量 276 张）：** `docs/manuel/` 已 `276 PNG + 276 WEBP + 276 MD`（`WEBP 70` 平均 `902KB→81KB r11:1`，`RIFF WEBP` 校验 `small<50k 0`），新增 `generate.md`（清单/拍摄/SEED/文档/转码/验收/变更清单）、`scripts/convert-webp.mjs`（`ffmpeg -quality 70` 优先/回退 `sharp`，`--quality/--keep/--out`），更新 `README.md` 拍摄+转码+验收（含 webp）与 `scripts/capture.mjs` 头注释；校验 `webp 276/276 RIFF 0 bad`，`go vet 0`。
+> **最后核对（2026-09-01，Playground Append to Note + 去重 Retry）：** 删除 `PG_ICON_RETRY`/`pgRetryError` 重复按钮（`pg-core.js`/`pg-render.js:pgMsgMetaInnerHTML`/`pg-ui.js`），保留 `Regenerate` 单一入口；新增 `internal/api/notes`（`POST /api/notes/append {content}`→`{configDir}/docs/YYYYMMDD-NOTE.md` 换行追加，`ResolveDocDir` + `StrictRel` + `realPathWithin` + 进程内互斥，`router.go` 挂载 `notesHandler` 于 `/api` 受保护组），前端新增 `PG_ICON_APPEND` + `pgAppendNote/pgAppendSingle/pgAppendWindow/pgAppendSearch`（`pg-ui.js`）+ `pg-thinking-head` 右侧与 `pg-search-raw/synth` 头部按钮（`pg-render.js`）+ `pg-pane-head` Window 头按钮（`pg-ui.js:pgRenderPanes`）+ `pgAppend/pgAppendSingle/pgAppendWindow/pgNothingToAppend/pgAppended/pgSearchSynthTitle` 双语（`pg-i18n.js`）+ 追加样式（`playground.css` `.pg-thinking-append/.pg-search-append/.pg-search-synth-head`）；`go vet/build` 与 `go test ./internal/api/...` 通过。
 
 # PROJECT_MAP.md — TinyRouter 模块地图
 
@@ -469,10 +469,15 @@ Gallery 图片查看器的 HTTP 路由层。zip 解析与 TIFF 转码能力委�
 
 `/api/playground/*` 独立于 generic `/api` 组，沿用管理 session 鉴权并设置 32 MiB request limit。
 
+| `media_prep_test.go` | 测试：直接透传已支持类型、ffmpeg 缺失与转码测试 |
+
+### 10.13e `internal/api/notes/` — 笔记追加（2026-09-01 新增）
+
+Playground 追加到日记文件的后端：`POST /api/notes/append {"content":"..."}` 换行追加到 `{configDir}/docs/YYYYMMDD-NOTE.md`（`Default Doc Path`，经 `config.ResolveDocDir` 三段式解析；文件名 `20060102-NOTE.md` 经 `pathgrant.StrictRel` + `realPathWithin` 校验防逃逸，进程内 `sync.Mutex` 串行化尾换行补齐与 `O_APPEND` 写入，`router.go` 挂载于 `/api` 受保护组内，`authMiddleware` + 1MiB body 上限）。
+
 | 文件 | 职责 |
 |---|---|
-| `media_prep.go` | `Handler` + `Register`（`GET /api/playground/ffmpeg-status` 探测 ffmpeg 可用性，`POST /api/playground/media-prep` 媒体转换端点，利用 `internal/mediaedit.RunFfmpeg` 将音视频提取转码为 44.1kHz mono 128k mp3，直传 image/pdf，返回 Google 原生 `inlineData` 结构） |
-| `media_prep_test.go` | 测试：直接透传已支持类型、ffmpeg 缺失与转码测试 |
+| `register.go` | `Handler` + `Register` + `appendNote`（`POST /api/notes/append`，`content` 非空+1MiB 上限，`MkdirAll` + 尾换行探针 + `O_APPEND` 追加 + `Sync`，返回 `{"ok":true,"fileId":"YYYYMMDD-NOTE.md"}`） |
 
 ### 10.11 `internal/api/keys/` — Key 管理
 

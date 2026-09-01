@@ -236,6 +236,7 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
               '<button class="pg-search-toggle-btn pg-search-toggle-btn-active" data-view="pretty" onclick="event.stopPropagation();pgToggleSearchRaw(this,\'pretty\')">' + pgEscapeHtml(pgT('pgSearchPretty')) + '</button>' +
               '<button class="pg-search-toggle-btn" data-view="raw" onclick="event.stopPropagation();pgToggleSearchRaw(this,\'raw\')">' + pgEscapeHtml(pgT('pgSearchRaw')) + '</button>' +
             '</span>' +
+            '<button class="pg-search-append" onclick="event.stopPropagation();pgAppendSearch(' + i + ',' + idx + ',\'raw\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>' +
           '</div>' +
           '<div class="pg-search-raw-body">' +
             '<div class="pg-search-pretty-view">' + prettyHtml + '</div>' +
@@ -307,6 +308,11 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
       } else {
         bodyMd2 = pgRenderMarkdown(pgTextContent(msg.content), false);
       }
+      if (!rightInner) {
+        rightInner += '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span><button class="pg-search-append" onclick="pgAppendSearch(' + i + ',' + idx + ',\'synth\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button></div>';
+      } else {
+        rightInner = '<div class="pg-search-synth-head"><span class="pg-search-raw-title">' + pgEscapeHtml(pgT('pgSearchSynthTitle') || 'Synthesized Result') + '</span><button class="pg-search-append" onclick="pgAppendSearch(' + i + ',' + idx + ',\'synth\')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button></div>' + rightInner;
+      }
       if (bodyMd2) {
         rightInner += '<div class="' + cls2 + '">' + bodyMd2 + '</div>';
       }
@@ -346,6 +352,7 @@ function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
     var thinkCls = streamingThink ? 'pg-thinking' : 'pg-thinking collapsed';
     inner += '<div class="' + thinkCls + '" onclick="this.classList.toggle(\'collapsed\')">' +
       '<div class="pg-thinking-head"><span class="pg-think-label">' + lbl + '</span>' +
+      '<span class="pg-thinking-actions" onclick="event.stopPropagation()"><button class="pg-thinking-append" onclick="event.stopPropagation();pgAppendReasoning(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button></span>' +
       '<span class="pg-think-chev">▾</span></div>' +
       '<div class="pg-thinking-body">' + pgRenderMarkdown(msg.reasoning, false) + '</div>' +
     '</div>';
@@ -542,11 +549,11 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
     if (isSearch && i === 1) {
       html += '<button class="pg-action" onclick="pgSaveActiveSearchResultMarkdown()" data-tooltip="' + pgEscapeHtml(pgT('pgSaveMarkdown')) + '">' + PG_ICON_SAVE + '</button>';
     }
+    html += '<button class="pg-action" onclick="pgAppendAssistant(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>';
     if (!isSearch) {
       html += '<button class="pg-action" onclick="pgRegenerate(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRegenerate')) + '">' + PG_ICON_REGEN + '</button>';
     }
     if (msg.status === 'error') {
-      html += '<button class="pg-action" onclick="pgRetryError(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRetry')) + '">' + PG_ICON_RETRY + '</button>';
       html += '<button class="pg-action" onclick="pgEditPromptForError(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEditPrompt')) + '">' + PG_ICON_EDIT + '</button>';
     }
     if (!isSearch) {
@@ -554,6 +561,7 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
     }
   } else if (!isSearch && msg.role === 'user') {
     html += '<button class="pg-action" onclick="pgActionCopy(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgCopy')) + '">' + PG_ICON_COPY + '</button>';
+    html += '<button class="pg-action" onclick="pgAppendUser(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>';
     html += '<button class="pg-action" onclick="pgToggleRole(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgToggleRole')) + '">' + PG_ICON_ROLE + '</button>';
     html += '<button class="pg-action" onclick="pgBeginEdit(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEdit')) + '">' + PG_ICON_EDIT + '</button>';
     html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';

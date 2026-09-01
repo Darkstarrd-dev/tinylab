@@ -433,17 +433,20 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 
 /* Reasoning panel */
 .pg-thinking{border:1px solid var(--border-strong);border-radius:var(--radius-md);margin-bottom:6px;overflow:hidden;background:var(--status-warning-bg);box-shadow:0 1px 4px rgba(0,0,0,.06)}
-.pg-thinking-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;cursor:pointer;font-size:var(--font-badge);color:var(--text);user-select:none}
+.pg-thinking-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;cursor:pointer;font-size:var(--font-badge);color:var(--text);user-select:none;gap:8px}
 .pg-thinking-head:hover{background:var(--glass-hover)}
-.pg-thinking-head .pg-think-label{display:flex;align-items:center;gap:6px;font-weight:600}
+.pg-thinking-head .pg-think-label{display:flex;align-items:center;gap:6px;font-weight:600;flex:1;min-width:0}
+.pg-thinking-actions{display:inline-flex;align-items:center;flex-shrink:0}
+.pg-thinking-append,.pg-search-append{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid transparent;background:transparent;color:var(--text-muted);cursor:pointer;border-radius:var(--radius-xs);flex-shrink:0;transition:all var(--transition-fast)}
+.pg-thinking-append:hover,.pg-search-append:hover{background:var(--glass-hover);color:var(--text);border-color:var(--glass-border)}
 .pg-thinking-spinner{width:12px;height:12px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:pg-spin .8s linear infinite;display:inline-block}
 @keyframes pg-spin{to{transform:rotate(360deg)}}
-.pg-think-chev{transition:transform var(--transition-fast)}
+.pg-think-chev{transition:transform var(--transition-fast);flex-shrink:0}
 .pg-thinking.collapsed .pg-think-chev{transform:rotate(-90deg)}
 .pg-thinking-body{margin:0 12px 10px;padding-top:8px;border-top:1px solid var(--border-strong);font-size:var(--font-body);color:var(--text-secondary);white-space:normal;max-height:60vh;overflow-y:auto;scrollbar-width:thin}
 .pg-thinking.collapsed .pg-thinking-body{display:none}
+.pg-search-synth-head{display:flex;align-items:center;gap:6px;padding:8px 12px;font-size:var(--font-badge);color:var(--text-muted);border-bottom:1px solid var(--glass-border);background:var(--glass-bg)}
 
-/* Sources */
 .pg-sources{margin-bottom:6px;border:1px solid var(--glass-border);border-radius:var(--radius-md);overflow:hidden;background:var(--glass-bg)}
 .pg-sources-head{padding:6px 12px;cursor:pointer;font-size:var(--font-badge);color:var(--text-secondary);font-weight:600;display:flex;align-items:center;gap:6px}
 .pg-sources-head:hover{color:var(--text)}
