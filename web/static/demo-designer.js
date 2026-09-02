@@ -502,8 +502,8 @@
       var rel = String(it.relPath).replace(/\\/g, '/').replace(/^\.\//, '');
       if (!rel || rel.indexOf('..') >= 0) return;
       if (it.isDir) {
-        // Directories are represented as folder nodes; expand defaults ON.
-        var node = { id: rel, name: it.name || rel.split('/').pop(), type: 'folder', children: [], expanded: true };
+        // Directories are represented as folder nodes; expand defaults false (collapse).
+        var node = { id: rel, name: it.name || rel.split('/').pop(), type: 'folder', children: [], expanded: false };
         folderMap[rel] = node;
       } else {
         fileNodes.push({ rel: rel, name: it.name || rel.split('/').pop(), size: it.size });
@@ -516,7 +516,7 @@
       var cur = '';
       dirParts.forEach(function (seg) {
         cur = cur ? cur + '/' + seg : seg;
-        if (!folderMap[cur]) folderMap[cur] = { id: cur, name: seg, type: 'folder', children: [], expanded: true };
+        if (!folderMap[cur]) folderMap[cur] = { id: cur, name: seg, type: 'folder', children: [], expanded: false };
       });
     });
     // Parent-link folders.
@@ -555,21 +555,46 @@
     return roots;
   }
 
+  function ensureAncestorsExpanded(nodes, targetId) {
+    if (!targetId) return false;
+    for (var i = 0; i < (nodes || []).length; i++) {
+      var n = nodes[i];
+      if (n.id === targetId) return true;
+      if (n.children && ensureAncestorsExpanded(n.children, targetId)) {
+        n.expanded = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  var hooksRef = {};
+
+  function dgnRenderTreeNow() {
+    var treeEl = dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-file-tree');
+    if (treeEl && global.EditorLayout && typeof global.EditorLayout.renderTree === 'function') {
+      global.EditorLayout.renderTree(treeEl, dgn.tree, {
+        selectedId: dgn.selectedId,
+        filterQuery: dgn.filterQuery || ''
+      }, hooksRef);
+    }
+  }
+
   function dgnLoadTree() {
     return edFetch('/api/editor/tree', { method: 'GET' })
       .then(function (r) { if (!r.ok) throw new Error('tree -> ' + r.status); return r.json(); })
       .then(function (data) {
         var files = (data && (data.files || data.docs)) || [];
         dgn.tree = buildNested(files);
-        var treeEl = dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-file-tree');
-        if (treeEl && global.EditorLayout && typeof global.EditorLayout.renderTree === 'function') {
-          global.EditorLayout.renderTree(treeEl, dgn.tree, { selectedId: dgn.selectedId }, hooksRef);
+        if (dgn.selectedId) {
+          ensureAncestorsExpanded(dgn.tree, dgn.selectedId);
+        } else if (dgn.tree && dgn.tree.length > 0) {
+          dgn.tree[0].expanded = true;
         }
+        dgnRenderTreeNow();
       })
       .catch(function (e) { dgnStatus(tstr('designerPreviewError', 'Load error') + ': ' + (e && e.message || e)); });
   }
-
-  var hooksRef = {};
 
   function selectFileOrDir(fileId) {
     var isDir = false;
@@ -597,10 +622,17 @@
       }
     }
     dgn.selectedId = fileId;
-    var treeEl = dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-file-tree');
-    if (treeEl && global.EditorLayout && typeof global.EditorLayout.renderTree === 'function') {
-      global.EditorLayout.renderTree(treeEl, dgn.tree, { selectedId: fileId }, hooksRef);
+    ensureAncestorsExpanded(dgn.tree, fileId);
+    if (isDir) {
+      (function expandNode(nodes) {
+        for (var i = 0; i < (nodes || []).length; i++) {
+          if (nodes[i].id === fileId && nodes[i].type === 'folder') { nodes[i].expanded = true; return true; }
+          if (nodes[i].children && expandNode(nodes[i].children)) return true;
+        }
+        return false;
+      })(dgn.tree);
     }
+    dgnRenderTreeNow();
     if (isDir) {
       dgnStatus('');
       updateTitle();
@@ -623,10 +655,8 @@
         dgn.current = { fileId: fid, original: content };
         dgn.originalById[fid] = content;
         dgn.selectedId = fid;
-        var treeEl = dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-file-tree');
-        if (treeEl && global.EditorLayout && typeof global.EditorLayout.renderTree === 'function') {
-          global.EditorLayout.renderTree(treeEl, dgn.tree, { selectedId: fid }, hooksRef);
-        }
+        ensureAncestorsExpanded(dgn.tree, fid);
+        dgnRenderTreeNow();
         var ta = inputEl();
         if (ta) {
           dgn.ignoreInput = true;
@@ -970,10 +1000,37 @@
           }
           return false;
         })(dgn.tree);
-        var treeEl = dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-file-tree');
-        if (treeEl && global.EditorLayout && typeof global.EditorLayout.renderTree === 'function') {
-          global.EditorLayout.renderTree(treeEl, dgn.tree, { selectedId: dgn.selectedId }, hooksRef);
+        dgnRenderTreeNow();
+      },
+      collapseAll: function () {
+        (function setAll(nodes) {
+          for (var i = 0; i < (nodes || []).length; i++) {
+            if (nodes[i].type === 'folder' || nodes[i].children) {
+              nodes[i].expanded = false;
+              setAll(nodes[i].children);
+            }
+          }
+        })(dgn.tree);
+        dgnRenderTreeNow();
+      },
+      expandAll: function () {
+        (function setAll(nodes) {
+          for (var i = 0; i < (nodes || []).length; i++) {
+            if (nodes[i].type === 'folder' || nodes[i].children) {
+              nodes[i].expanded = true;
+              setAll(nodes[i].children);
+            }
+          }
+        })(dgn.tree);
+        dgnRenderTreeNow();
+      },
+      filter: function (query) {
+        var prevQ = dgn.filterQuery || '';
+        dgn.filterQuery = query || '';
+        if (prevQ && !dgn.filterQuery && dgn.selectedId) {
+          ensureAncestorsExpanded(dgn.tree, dgn.selectedId);
         }
+        dgnRenderTreeNow();
       },
       toggle: function (name) {
         if (name === 'preview' && global.EditorLayout && typeof global.EditorLayout.setPreview === 'function') {

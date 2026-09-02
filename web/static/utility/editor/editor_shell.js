@@ -518,7 +518,12 @@
   function refreshTree() {
     return global.EditorWorkspace.listNodes().then(function (nodes) {
       var tree = shellRoot && shellRoot.querySelector('#ed-file-tree');
-      if (tree) global.EditorLayout.renderTree(tree, buildTree(nodes), { selectedId: shellState.selectedId || shellState.currentId }, shellHooks());
+      if (tree) {
+        global.EditorLayout.renderTree(tree, buildTree(nodes), {
+          selectedId: shellState.selectedId || shellState.currentId,
+          filterQuery: shellState.filterQuery || ''
+        }, shellHooks());
+      }
       return nodes;
     });
   }
@@ -1246,6 +1251,48 @@
         var index = shellState.expanded.indexOf(id);
         if (index >= 0) shellState.expanded.splice(index, 1); else shellState.expanded.push(id);
         global.EditorWorkspace.setExpandedIds(shellState.expanded).then(function () { refreshTree(); });
+      },
+      collapseAll: function () {
+        shellState.expanded = [];
+        global.EditorWorkspace.setExpandedIds([]).then(function () { refreshTree(); });
+      },
+      expandAll: function () {
+        global.EditorWorkspace.listNodes().then(function (nodes) {
+          var allIds = [];
+          (nodes || []).forEach(function (n) {
+            if (n && n.type === 'folder' && !n.deleted) allIds.push(n.id);
+          });
+          shellState.expanded = allIds;
+          global.EditorWorkspace.setExpandedIds(allIds).then(function () { refreshTree(); });
+        });
+      },
+      filter: function (query) {
+        var prevQ = shellState.filterQuery || '';
+        shellState.filterQuery = query || '';
+        if (prevQ && !shellState.filterQuery && (shellState.selectedId || shellState.currentId)) {
+          var targetId = shellState.selectedId || shellState.currentId;
+          global.EditorWorkspace.listNodes().then(function (nodes) {
+            var nMap = Object.create(null);
+            (nodes || []).forEach(function (n) { if (n) nMap[n.id] = n; });
+            var cur = nMap[targetId];
+            var changed = false;
+            while (cur && cur.parentId && nMap[cur.parentId]) {
+              if (shellState.expanded.indexOf(cur.parentId) < 0) {
+                shellState.expanded.push(cur.parentId);
+                changed = true;
+              }
+              cur = nMap[cur.parentId];
+            }
+            if (cur && cur.type === 'folder' && shellState.expanded.indexOf(cur.id) < 0) {
+              shellState.expanded.push(cur.id);
+              changed = true;
+            }
+            if (changed) global.EditorWorkspace.setExpandedIds(shellState.expanded);
+            refreshTree();
+          });
+          return;
+        }
+        refreshTree();
       }
     };
   }

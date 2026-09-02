@@ -2,7 +2,7 @@
 
 > Demo 页游戏插件架构的单一事实来源：游戏作为**磁盘插件**按需加载，改游戏代码不重编译、不重启进程。
 > Assistant 测试台（ademoSM/物理/碰撞体）见 [`assistant-progress.md`](assistant-progress.md) §8，本文不重复；两者仅在暂停缝（§5）与 Demo 页共存布局上相交。
-> 最后核对：2026-09-03（Editor & Designer 文本按键与备注行明度：Text Editor 与 Game Designer 统一快捷键 `Tab/Shift+Tab` 缩进/反缩进（`EditorCommands.indent`，支持多行选区与单行）、`Alt+/` 注释/解注释（`EditorCommands.toggleComment`，保留缩进）、`Alt+Shift+Up/Down` 向上/向下复制当前行或所选代码块（`EditorCommands.duplicateLine`，支持撤销历史）；左侧编辑区布局修复为 `EditorLayout` 工厂统一输出 `.ed-input-wrap` + `.ed-syntax-overlay` + `.ed-main-input`，CSS 采用绝对重叠与局部透明，移除全局 `.ed-input` 污染，`zoom.js` 同步缩放，行号槽 `.ed-line-number.is-comment` 与注释行 `<span class="ed-comment">` 均实现明度区分；见 §1/§5/§8/§9）。
+> 最后核对：2026-09-03（Editor & Designer 侧边栏折叠、检索与视口焦点修复：在 `EditorLayout` 增加 `.ed-tree-toolbar`（SVG `collapse-all` 全折叠 / `expand-all` 全展开按钮）与 `.ed-tree-search-wrap` 范围检索/Filter；`filterTree` 支持模糊匹配与祖先自动展开、`<mark>` 高亮与 Esc/✕ 清空；修复滚动条位置保持（`renderTree` 记录并恢复 `prevScrollTop` + `rAF` 双保险，避免展开时跳回第 1 项）、修复从 filter 清空恢复时选中的 folder 自动 `scrollIntoView` 滚入视口并聚焦（`preventScroll` 焦点保持）；Designer 选中 folder 自动展开自身及其祖先；见 §1/§5/§8/§9）。
 
 ## 1. 功能面总览
 

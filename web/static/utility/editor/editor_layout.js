@@ -44,10 +44,15 @@
     'sidebar-expand': '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h5V6H4zm7 0v12h9V6h-9zm-3 3l3 3-3 3V9z"/></svg>',
     'zoom-out': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 12h14"/></svg>',
     'zoom-reset': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-1.5-5"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M21 3v6h-6"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M10 8l-2 4 2 4M14 8l2 4-2 4"/></svg>',
-    'zoom-in': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>'
+    'zoom-in': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>',
+    'collapse-all': '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 4.5l-5 5 1.41 1.41L12 7.33l3.59 3.58L17 9.5l-5-5zm0 6l-5 5 1.41 1.41L12 13.33l3.59 3.58L17 15.5l-5-5z"/></svg>',
+    'expand-all': '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 19.5l5-5-1.41-1.41L12 16.67l-3.59-3.58L7 14.5l5 5zm0-6l5-5-1.41-1.41L12 10.67 8.41 7.09 7 8.5l5 5z"/></svg>',
+    'search': '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>'
   };
 
   var ACTION_ICONS = {
+    'collapse-all': 'collapse-all',
+    'expand-all': 'expand-all',
     'new-file': 'file-plus',
     'new-folder': 'folder-plus',
     'delete': 'delete',
@@ -165,6 +170,7 @@
   }
 
   var ACTION_LABEL_KEYS = {
+    'collapse-all':'editorCollapseAll', 'expand-all':'editorExpandAll',
     'new-file':'editorNewFile', 'new-folder':'editorNewFolder', 'delete':'editorDelete',
     'undo':'editorUndo', 'redo':'editorRedo', 'bold':'editorBold', 'italic':'editorItalic', 'heading':'editorHeading',
     'strike':'editorStrike', 'ul':'editorUnorderedList', 'ol':'editorOrderedList', 'checklist':'editorTaskList',
@@ -173,6 +179,49 @@
     'focus':'editorFocus', 'preview':'editorPreview', 'sync':'editorScrollSync', 'toc':'editorTableOfContents', 'open':'editorOpen',
     'save':'editorSave', 'edit':'editorEditMode', 'diff':'editorDiff', 'toggle':'editorToggle'
   };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function filterTree(nodes, query) {
+    if (!query || typeof query !== 'string' || !query.trim()) return nodes;
+    var q = query.trim().toLowerCase();
+
+    function matchOrFilter(node) {
+      var name = String(node.title || node.name || node.label || node.path || '');
+      var matchSelf = name.toLowerCase().indexOf(q) >= 0;
+      var children = Array.isArray(node.children) ? node.children : [];
+      var filteredChildren = [];
+
+      for (var i = 0; i < children.length; i++) {
+        var res = matchOrFilter(children[i]);
+        if (res) filteredChildren.push(res);
+      }
+
+      if (matchSelf || filteredChildren.length > 0) {
+        var clone = Object.assign({}, node);
+        clone.children = filteredChildren;
+        if (clone.type === 'folder' || filteredChildren.length > 0) {
+          clone.expanded = true;
+        }
+        return clone;
+      }
+      return null;
+    }
+
+    var result = [];
+    (nodes || []).forEach(function (n) {
+      var r = matchOrFilter(n);
+      if (r) result.push(r);
+    });
+    return result;
+  }
 
   function layoutText(key, fallback) {
     var translate = global && typeof global.edT === 'function' ? global.edT : (global && typeof global.t === 'function' ? global.t : null);
@@ -219,8 +268,24 @@
     iconSpan.innerHTML = folder ? SVG_ICONS['folder'] : SVG_ICONS['file'];
     row.appendChild(iconSpan);
 
-    row.appendChild(make('span', 'ed-tree-label', name));
+    var labelSpan = make('span', 'ed-tree-label');
+    var query = state && state.filterQuery ? String(state.filterQuery).trim().toLowerCase() : '';
+    if (query) {
+      var lower = name.toLowerCase();
+      var idx = lower.indexOf(query);
+      if (idx >= 0) {
+        labelSpan.innerHTML = escapeHtml(name.slice(0, idx)) +
+          '<mark class="ed-tree-highlight">' + escapeHtml(name.slice(idx, idx + query.length)) + '</mark>' +
+          escapeHtml(name.slice(idx + query.length));
+      } else {
+        labelSpan.textContent = name;
+      }
+    } else {
+      labelSpan.textContent = name;
+    }
+    row.appendChild(labelSpan);
     li.appendChild(row);
+
     if (folder) {
       var list = make('ul', 'ed-tree-children');
       list.setAttribute('role', 'group');
@@ -233,11 +298,64 @@
 
   function renderTree(treeRoot, nodes, state, hooks) {
     if (!treeRoot || !doc) return treeRoot || null;
+    var prevScrollTop = treeRoot.scrollTop;
+    var prevScrollLeft = treeRoot.scrollLeft;
+    var lastFilter = treeRoot.__edLastFilter || '';
+    var filterQuery = (state && state.filterQuery) || '';
+    treeRoot.__edLastFilter = filterQuery;
+
     while (treeRoot.firstChild) treeRoot.removeChild(treeRoot.firstChild);
-    var items = Array.isArray(nodes) ? nodes : [];
+    var rawItems = Array.isArray(nodes) ? nodes : [];
+    var items = filterQuery ? filterTree(rawItems, filterQuery) : rawItems;
     treeRoot.setAttribute('role', 'tree');
-    for (var i = 0; i < items.length; i++) treeRoot.appendChild(buildTreeItem(items[i], state || {}, 0));
+    if (items.length === 0 && filterQuery) {
+      var emptyLi = make('li', 'ed-tree-empty', layoutText('editorFilterEmpty', 'No matching files'));
+      treeRoot.appendChild(emptyLi);
+    } else {
+      for (var i = 0; i < items.length; i++) treeRoot.appendChild(buildTreeItem(items[i], state || {}, 0));
+    }
     treeRoot.__edLayoutHooks = hooks || treeRoot.__edLayoutHooks || {};
+
+    // 确定选中的元素
+    var selectedId = state && (state.selectedId !== undefined && state.selectedId !== null ? state.selectedId : state.currentId);
+    var selectedEl = null;
+    if (selectedId != null && selectedId !== '') {
+      var escId = String(selectedId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      selectedEl = treeRoot.querySelector('[data-file-id="' + escId + '"]');
+    }
+    if (!selectedEl) {
+      selectedEl = treeRoot.querySelector('.ed-tree-item.is-selected') || treeRoot.querySelector('.is-selected');
+    }
+
+    // 当明确指定 revealSelected 或从过滤模式清空恢复完整树且有选中项时，将选中项滚动到可视区域并聚焦
+    var shouldReveal = !!(state && state.revealSelected) || (!!lastFilter && !filterQuery && !!selectedEl);
+
+    if (shouldReveal && selectedEl) {
+      try {
+        if (typeof selectedEl.scrollIntoView === 'function') {
+          selectedEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      } catch (e) {}
+      var focusTarget = selectedEl.querySelector('.ed-tree-item') || selectedEl;
+      if (focusTarget) {
+        if (!focusTarget.hasAttribute('tabindex')) focusTarget.setAttribute('tabindex', '-1');
+        try {
+          focusTarget.focus({ preventScroll: true });
+        } catch (e2) {}
+      }
+    } else {
+      // 保持之前的滚动条位置，彻底避免展开/折叠目录时跳回最顶端
+      treeRoot.scrollTop = prevScrollTop;
+      treeRoot.scrollLeft = prevScrollLeft;
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(function () {
+          if (treeRoot && treeRoot.scrollTop !== prevScrollTop) {
+            treeRoot.scrollTop = prevScrollTop;
+          }
+        });
+      }
+    }
+
     return treeRoot;
   }
 
@@ -273,6 +391,45 @@
     explorerActions.appendChild(groupCenter);
     explorerHeader.appendChild(explorerActions);
     explorer.appendChild(explorerHeader);
+
+    // 1b. Tree Toolbar: search/filter input + collapse-all + expand-all buttons
+    var treeToolbar = make('div', 'ed-tree-toolbar');
+    treeToolbar.id = 'ed-tree-toolbar';
+
+    var searchWrap = make('div', 'ed-tree-search-wrap');
+    var searchIcon = make('span', 'ed-tree-search-icon');
+    searchIcon.innerHTML = SVG_ICONS['search'];
+    searchWrap.appendChild(searchIcon);
+
+    var searchInput = make('input', 'ed-tree-search-input');
+    searchInput.type = 'text';
+    searchInput.id = 'ed-tree-search-input';
+    searchInput.placeholder = layoutText('editorFilterPlaceholder', 'Filter files…');
+    searchInput.setAttribute('aria-label', layoutText('editorFilterPlaceholder', 'Filter files…'));
+    searchInput.spellcheck = false;
+    searchInput.autocomplete = 'off';
+    searchWrap.appendChild(searchInput);
+
+    var clearBtn = make('button', 'ed-tree-search-clear');
+    clearBtn.type = 'button';
+    clearBtn.setAttribute('aria-label', layoutText('editorFilterClear', 'Clear filter'));
+    clearBtn.title = layoutText('editorFilterClear', 'Clear filter');
+    clearBtn.innerHTML = '✕';
+    clearBtn.hidden = true;
+    searchWrap.appendChild(clearBtn);
+    treeToolbar.appendChild(searchWrap);
+
+    var treeActions = make('div', 'ed-tree-actions');
+    var collapseBtn = button('collapse-all', layoutText('editorCollapseAll', 'Collapse All'), { 'data-action': 'collapse-all' }, { icon: 'collapse-all', hideLabel: true });
+    collapseBtn.className += ' ed-tree-action-btn ed-action-collapse-all';
+    treeActions.appendChild(collapseBtn);
+
+    var expandBtn = button('expand-all', layoutText('editorExpandAll', 'Expand All'), { 'data-action': 'expand-all' }, { icon: 'expand-all', hideLabel: true });
+    expandBtn.className += ' ed-tree-action-btn ed-action-expand-all';
+    treeActions.appendChild(expandBtn);
+
+    treeToolbar.appendChild(treeActions);
+    explorer.appendChild(treeToolbar);
 
     var tree = make('ul', 'ed-file-tree');
     tree.id = 'ed-file-tree';
@@ -470,9 +627,17 @@
         safeCall(hooks.action, hooks, [action, event]);
         if (action === 'open') safeCall(hooks.open, hooks);
         else if (action === 'save') safeCall(hooks.save, hooks);
+        else if (action === 'collapse-all') safeCall(hooks.collapseAll, hooks, [event]);
+        else if (action === 'expand-all') safeCall(hooks.expandAll, hooks, [event]);
         if (actionNode.hasAttribute('data-toggle')) safeCall(hooks.toggle, hooks, [actionNode.getAttribute('data-toggle')]);
         if (action === 'toggle' && actionNode.hasAttribute('data-tree-node-id')) {
-          safeCall(hooks.toggleTree, hooks, [actionNode.getAttribute('data-tree-node-id'), event]);
+          var toggleNodeId = actionNode.getAttribute('data-tree-node-id');
+          safeCall(hooks.toggleTree, hooks, [toggleNodeId, event]);
+          var escToggleId = String(toggleNodeId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          var newExpander = root.querySelector('[data-tree-node-id="' + escToggleId + '"]');
+          if (newExpander && typeof newExpander.focus === 'function') {
+            try { newExpander.focus({ preventScroll: true }); } catch (eToggle) {}
+          }
         }
         event.preventDefault();
         return;
@@ -491,9 +656,40 @@
         event.preventDefault();
       }
     };
+
+    var searchInput = root.querySelector('#ed-tree-search-input');
+    var clearBtn = root.querySelector('.ed-tree-search-clear');
+    var searchHandlers = null;
+    if (searchInput) {
+      var onFilterInput = function () {
+        var val = searchInput.value;
+        if (clearBtn) clearBtn.hidden = !val;
+        safeCall(hooks.filter, hooks, [val]);
+      };
+      var onFilterKeydown = function (e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          searchInput.value = '';
+          if (clearBtn) clearBtn.hidden = true;
+          safeCall(hooks.filter, hooks, ['']);
+          searchInput.blur();
+        }
+      };
+      var onClearClick = function () {
+        searchInput.value = '';
+        if (clearBtn) clearBtn.hidden = true;
+        safeCall(hooks.filter, hooks, ['']);
+        searchInput.focus();
+      };
+      searchInput.addEventListener('input', onFilterInput);
+      searchInput.addEventListener('keydown', onFilterKeydown);
+      if (clearBtn) clearBtn.addEventListener('click', onClearClick);
+      searchHandlers = { input: onFilterInput, keydown: onFilterKeydown, clearClick: onClearClick, clearBtn: clearBtn, searchInput: searchInput };
+    }
+
     root.addEventListener('click', clickHandler);
     root.addEventListener('keydown', keyHandler);
-    root.__edLayoutHandlers = { click: clickHandler, keydown: keyHandler };
+    root.__edLayoutHandlers = { click: clickHandler, keydown: keyHandler, search: searchHandlers };
     root.__edLayoutBound = true;
     return root;
   }
@@ -502,6 +698,14 @@
     if (!root || !root.__edLayoutHandlers) return root;
     root.removeEventListener('click', root.__edLayoutHandlers.click);
     root.removeEventListener('keydown', root.__edLayoutHandlers.keydown);
+    if (root.__edLayoutHandlers.search) {
+      var sh = root.__edLayoutHandlers.search;
+      if (sh.searchInput) {
+        sh.searchInput.removeEventListener('input', sh.input);
+        sh.searchInput.removeEventListener('keydown', sh.keydown);
+      }
+      if (sh.clearBtn) sh.clearBtn.removeEventListener('click', sh.clearClick);
+    }
     root.__edLayoutHandlers = null;
     root.__edLayoutBound = false;
     return root;
@@ -681,6 +885,7 @@
     highlightComments: highlightComments,
     updateOverlay: updateOverlay,
     syncOverlayScroll: syncOverlayScroll,
+    filterTree: filterTree,
     destroy: destroy
   };
 }(typeof window !== 'undefined' ? window : this));
