@@ -63,7 +63,6 @@
     });
     // 暴露测试缝
     TD.sceneRef = this;
-    if (window.__trgame) window.__trgame.scene = this;
     // 提示
     this._toast('点击底部商店选塔，再点网格建造', 2200);
   };
