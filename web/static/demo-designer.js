@@ -457,15 +457,33 @@
     if (leftSel) leftSel.hidden = !isDirty;
   }
 
+  function updateOverlay() {
+    if (global.EditorLayout && typeof global.EditorLayout.updateOverlay === 'function') {
+      global.EditorLayout.updateOverlay(dgn.layoutRoot);
+    }
+  }
+
+  function syncOverlayScroll() {
+    if (global.EditorLayout && typeof global.EditorLayout.syncOverlayScroll === 'function') {
+      global.EditorLayout.syncOverlayScroll(dgn.layoutRoot);
+    }
+  }
+
   function updateGutterInner() {
     var ta = inputEl(), g = gutterEl();
     if (!g || !ta) return;
     var lines = ta.value.split(/\r?\n/);
     var html = '';
-    for (var i = 1; i <= lines.length; i++) html += '<span>' + i + '</span>\n';
+    for (var i = 1; i <= lines.length; i++) {
+      var lineText = lines[i - 1] || '';
+      var trimmed = lineText.trim();
+      var isComment = /^(\/\/|#|\/\*|\*)/.test(trimmed);
+      html += '<span' + (isComment ? ' class="is-comment"' : '') + '>' + i + '</span>\n';
+    }
     if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) html = '<span>1</span>\n';
     g.innerHTML = html;
     g.scrollTop = ta.scrollTop;
+    updateOverlay();
   }
 
   function onInput() {
@@ -1172,7 +1190,39 @@
       ta.addEventListener('input', onInput);
       ta.addEventListener('keyup', function () { updateStatusBar(); });
       ta.addEventListener('click', function () { updateStatusBar(); });
-      ta.addEventListener('scroll', function () { var g = gutterEl(); if (g) g.scrollTop = ta.scrollTop; });
+      ta.addEventListener('scroll', function () {
+        var g = gutterEl();
+        if (g) g.scrollTop = ta.scrollTop;
+        syncOverlayScroll();
+      });
+      ta.addEventListener('keydown', function (e) {
+        var mod = e.ctrlKey || e.metaKey;
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
+            global.EditorCommands.indent(ta, e.shiftKey);
+          }
+        } else if (e.altKey && !mod && e.key === '/') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {
+            global.EditorCommands.toggleComment(ta);
+          }
+        } else if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowUp' || e.key === 'Up')) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
+            global.EditorCommands.duplicateLine(ta, 'up');
+          }
+        } else if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowDown' || e.key === 'Down')) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
+            global.EditorCommands.duplicateLine(ta, 'down');
+          }
+        }
+      });
       // Ctrl+S save + Ctrl+ + fullscreen. Keep focus isolation: when preview is focused,
       // Esc must exit focus first before any other shortcut fires.
       dgn.keyHandler = function (e) {

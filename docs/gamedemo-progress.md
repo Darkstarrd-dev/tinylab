@@ -2,7 +2,7 @@
 
 > Demo 页游戏插件架构的单一事实来源：游戏作为**磁盘插件**按需加载，改游戏代码不重编译、不重启进程。
 > Assistant 测试台（ademoSM/物理/碰撞体）见 [`assistant-progress.md`](assistant-progress.md) §8，本文不重复；两者仅在暂停缝（§5）与 Demo 页共存布局上相交。
-> 最后核对：2026-09-01（Design Console：右侧预览新增 Preview/Console 切换，webview 默认无 DevTools 时的唯一排障通道；`demo-designer.js` 新增 console 管线 `consoleLines/consoleVisible/origConsole/consoleEl` 与 `dgnConsoleFormat/dgnConsolePush/dgnRenderConsole/dgnSetConsoleVisible/dgnClearConsole/dgnInstallConsoleCapture/dgnUninstallConsoleCapture`，`#ed-main-preview` 内 `.dgn-preview-toolbar(.dgn-tab[data-tab=preview|console]+.dgn-console-clear)` + `.dgn-console[role=log]` + `.dgn-stage.is-hidden/.dgn-console.is-visible`，`localStorage.designerConsoleVisible` 持久；`dgnPreviewRun` 全链路错误落 console（`▶ Run`/`entry empty`/`did not call TRGames.register`/`stage not rendered`/`launch` 抛错/`blob eval`/`injectScript`/`catch` 含 stack）；`style-editor.css` 新增 `.dgn-preview-toolbar/.dgn-tab/.dgn-console*` 与全屏铺满；`i18n.js` 新增 `designerPreview/Console/ConsoleClear/ConsoleEmpty` en/zh；见 §1 Demo 页集成/§5 Designer 缝/§7 边界/§8 验证/§9 清单）。
+> 最后核对：2026-09-03（Editor & Designer 文本按键与备注行明度：Text Editor 与 Game Designer 统一快捷键 `Tab/Shift+Tab` 缩进/反缩进（`EditorCommands.indent`，支持多行选区与单行）、`Alt+/` 注释/解注释（`EditorCommands.toggleComment`，保留缩进）、`Alt+Shift+Up/Down` 向上/向下复制当前行或所选代码块（`EditorCommands.duplicateLine`，支持撤销历史）；左侧编辑区布局修复为 `EditorLayout` 工厂统一输出 `.ed-input-wrap` + `.ed-syntax-overlay` + `.ed-main-input`，CSS 采用绝对重叠与局部透明，移除全局 `.ed-input` 污染，`zoom.js` 同步缩放，行号槽 `.ed-line-number.is-comment` 与注释行 `<span class="ed-comment">` 均实现明度区分；见 §1/§5/§8/§9）。
 
 ## 1. 功能面总览
 

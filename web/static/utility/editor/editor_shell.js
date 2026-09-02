@@ -93,20 +93,39 @@
 
   function currentInput() { return shellRoot && shellRoot.querySelector('#ed-main-input'); }
   function currentText() { var input = currentInput(); return input ? input.value : ''; }
+  function updateOverlay() {
+    if (global.EditorLayout && typeof global.EditorLayout.updateOverlay === 'function') {
+      global.EditorLayout.updateOverlay(shellRoot);
+    }
+  }
+
+  function syncOverlayScroll() {
+    if (global.EditorLayout && typeof global.EditorLayout.syncOverlayScroll === 'function') {
+      global.EditorLayout.syncOverlayScroll(shellRoot);
+    }
+  }
+
   function updateGutter() {
     if (!shellRoot) return;
     var gutter = shellRoot.querySelector('#ed-line-gutter');
     var input = currentInput();
     if (!gutter || !input) return;
-    var count = Math.max(1, input.value.split(/\r?\n/).length);
+    var lines = input.value.split(/\r?\n/);
+    var count = Math.max(1, lines.length);
     gutter.innerHTML = '';
     for (var i = 1; i <= count; i++) {
       var span = global.document.createElement('span');
       span.className = 'ed-line-number';
+      var lineText = lines[i - 1] || '';
+      var trimmed = lineText.trim();
+      if (/^(\/\/|#|\/\*|\*)/.test(trimmed)) {
+        span.className += ' is-comment';
+      }
       span.textContent = String(i);
       gutter.appendChild(span);
     }
     gutter.scrollTop = input.scrollTop;
+    updateOverlay();
   }
 
   function renderToc(preview) {
@@ -1239,6 +1258,7 @@
     var onInput = function () { if (global.EditorCommands) global.EditorCommands.record(input); saveDraft(shellState.currentId, input.value); updateGutter(); renderPreview(); };
     var onScroll = function () {
       updateGutter();
+      syncOverlayScroll();
       if (!shellState.sync || !shellRoot) return;
       var preview = shellRoot.querySelector('#ed-main-preview');
       if (!preview) return;
@@ -1251,7 +1271,34 @@
       else if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) triggerRedo(); else triggerUndo(); }
       else if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); triggerRedo(); }
       else if (mod && event.key.toLowerCase() === 'f') { event.preventDefault(); shellFindToggle(); }
-      else if (event.key === 'Tab') { event.preventDefault(); var start = input.selectionStart; input.value = input.value.slice(0, start) + '  ' + input.value.slice(input.selectionEnd); input.setSelectionRange(start + 2, start + 2); onInput(); }
+      else if (event.key === 'Tab') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
+          global.EditorCommands.indent(input, event.shiftKey);
+        }
+      }
+      else if (event.altKey && !mod && event.key === '/') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {
+          global.EditorCommands.toggleComment(input);
+        }
+      }
+      else if (event.altKey && event.shiftKey && !mod && (event.key === 'ArrowUp' || event.key === 'Up')) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
+          global.EditorCommands.duplicateLine(input, 'up');
+        }
+      }
+      else if (event.altKey && event.shiftKey && !mod && (event.key === 'ArrowDown' || event.key === 'Down')) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
+          global.EditorCommands.duplicateLine(input, 'down');
+        }
+      }
     };
     var onClick = function (event) {
       var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;

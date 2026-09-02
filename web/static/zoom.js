@@ -73,7 +73,7 @@
     else {
       // Toolbar buttons use data-zoom; input + gutter + preview must share scale.
       el.textContent =
-        '#ed-main-input, textarea.ed-input, .ed-input, .ed-main-input, textarea[id^="ed-input-"]{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important; line-height:calc(1.55 * ' + editorScale + ')}\n' +
+        '#ed-main-input, .ed-syntax-overlay, textarea.ed-input, .ed-input, .ed-main-input, textarea[id^="ed-input-"]{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important; line-height:calc(1.55 * ' + editorScale + ')}\n' +
         '.ed-line-gutter{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content{font-size:calc(var(--font-base,14px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content h1{font-size:calc((var(--font-base,14px) + 8px) * ' + editorScale + ') !important}\n' +
@@ -82,7 +82,7 @@
         '.ed-preview-content code{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content pre code{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content table,.ed-preview-content th,.ed-preview-content td{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
-        '.dgn-root #ed-main-input{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
+        '.dgn-root #ed-main-input, .dgn-root .ed-syntax-overlay{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
         '.dgn-root .ed-preview-content{font-size:calc(var(--font-base,14px) * ' + editorScale + ') !important}\n';
     }
     try { localStorage.setItem(EDITOR_KEY, String(editorScale)); } catch (e) {}

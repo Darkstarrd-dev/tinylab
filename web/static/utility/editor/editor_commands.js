@@ -452,6 +452,152 @@
     return mutate(ta, value, caret, caret);
   }
 
+  function indent(ta, shift) {
+    if (!isTextarea(ta)) return false;
+    var old = snapshot(ta);
+    var val = old.value;
+    var start = old.start;
+    var end = old.end;
+
+    if (start === end && !shift) {
+      return mutate(ta, val.slice(0, start) + '  ' + val.slice(end), start + 2, start + 2);
+    }
+
+    if (start === end && shift) {
+      var lineStart = val.lastIndexOf('\n', start - 1) + 1;
+      var spaces = 0;
+      while (spaces < 2 && val.charAt(lineStart + spaces) === ' ') spaces++;
+      if (spaces === 0) return false;
+      var newVal = val.slice(0, lineStart) + val.slice(lineStart + spaces);
+      var newPos = Math.max(lineStart, start - spaces);
+      return mutate(ta, newVal, newPos, newPos);
+    }
+
+    var firstLineStart = val.lastIndexOf('\n', start - 1) + 1;
+    var lastLineEnd = val.indexOf('\n', end);
+    if (lastLineEnd === -1) lastLineEnd = val.length;
+    if (end > start && val.charAt(end - 1) === '\n' && lastLineEnd > start) {
+      lastLineEnd = end - 1;
+    }
+
+    var block = val.slice(firstLineStart, lastLineEnd);
+    var lines = block.split('\n');
+    var deltaStart = 0;
+    var deltaEnd = 0;
+
+    if (!shift) {
+      for (var i = 0; i < lines.length; i++) {
+        lines[i] = '  ' + lines[i];
+      }
+      deltaStart = 2;
+      deltaEnd = lines.length * 2;
+    } else {
+      var removedFirst = 0;
+      var totalRemoved = 0;
+      for (var j = 0; j < lines.length; j++) {
+        var sp = 0;
+        while (sp < 2 && lines[j].charAt(sp) === ' ') sp++;
+        if (sp > 0) {
+          lines[j] = lines[j].slice(sp);
+          if (j === 0) removedFirst = sp;
+          totalRemoved += sp;
+        }
+      }
+      if (totalRemoved === 0) return false;
+      deltaStart = -removedFirst;
+      deltaEnd = -totalRemoved;
+    }
+
+    var newBlock = lines.join('\n');
+    var newVal = val.slice(0, firstLineStart) + newBlock + val.slice(lastLineEnd);
+    var newStart = Math.max(firstLineStart, start + deltaStart);
+    var newEnd = Math.max(newStart, end + deltaEnd);
+    return mutate(ta, newVal, newStart, newEnd);
+  }
+
+  function toggleComment(ta) {
+    if (!isTextarea(ta)) return false;
+    var old = snapshot(ta);
+    var val = old.value;
+    var start = old.start;
+    var end = old.end;
+
+    var firstLineStart = val.lastIndexOf('\n', start - 1) + 1;
+    var lastLineEnd = val.indexOf('\n', end);
+    if (lastLineEnd === -1) lastLineEnd = val.length;
+    if (end > start && val.charAt(end - 1) === '\n' && lastLineEnd > start) {
+      lastLineEnd = end - 1;
+    }
+
+    var block = val.slice(firstLineStart, lastLineEnd);
+    var lines = block.split('\n');
+
+    var allCommented = true;
+    var hasNonEmpty = false;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.trim().length === 0) continue;
+      hasNonEmpty = true;
+      if (!/^\s*\/\//.test(line)) {
+        allCommented = false;
+        break;
+      }
+    }
+    if (!hasNonEmpty) allCommented = false;
+
+    var deltaFirst = 0;
+    var deltaTotal = 0;
+    for (var j = 0; j < lines.length; j++) {
+      var orig = lines[j];
+      var updated = orig;
+      if (allCommented) {
+        updated = orig.replace(/^(\s*)\/\/\s?/, '$1');
+      } else {
+        if (orig.trim().length === 0) {
+          updated = '//';
+        } else {
+          updated = orig.replace(/^(\s*)/, '$1// ');
+        }
+      }
+      var diff = updated.length - orig.length;
+      if (j === 0) deltaFirst = diff;
+      deltaTotal += diff;
+      lines[j] = updated;
+    }
+
+    var newBlock = lines.join('\n');
+    var newVal = val.slice(0, firstLineStart) + newBlock + val.slice(lastLineEnd);
+    var newStart = Math.max(firstLineStart, start + deltaFirst);
+    var newEnd = Math.max(newStart, end + deltaTotal);
+    return mutate(ta, newVal, newStart, newEnd);
+  }
+
+  function duplicateLine(ta, direction) {
+    if (!isTextarea(ta)) return false;
+    var old = snapshot(ta);
+    var val = old.value;
+    var start = old.start;
+    var end = old.end;
+
+    var firstLineStart = val.lastIndexOf('\n', start - 1) + 1;
+    var lastLineEnd = val.indexOf('\n', end);
+    if (lastLineEnd === -1) lastLineEnd = val.length;
+    if (end > start && val.charAt(end - 1) === '\n' && lastLineEnd > start) {
+      lastLineEnd = end - 1;
+    }
+
+    var block = val.slice(firstLineStart, lastLineEnd);
+
+    if (direction === 'up') {
+      var newVal = val.slice(0, firstLineStart) + block + '\n' + val.slice(firstLineStart);
+      return mutate(ta, newVal, start, end);
+    } else {
+      var offset = block.length + 1;
+      var newVal = val.slice(0, lastLineEnd) + '\n' + block + val.slice(lastLineEnd);
+      return mutate(ta, newVal, start + offset, end + offset);
+    }
+  }
+
   var api = {
     wrapSelection: wrapSelection,
     toggleLinePrefix: toggleLinePrefix,
@@ -463,6 +609,9 @@
     insertImage: insertImage,
     replaceSelection: replaceSelection,
     insertTable: insertTable,
+    indent: indent,
+    toggleComment: toggleComment,
+    duplicateLine: duplicateLine,
     record: record,
     undo: undo,
     redo: redo,

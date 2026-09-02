@@ -6,6 +6,7 @@
 //   • 参考 C:/omp/Phaser 第 01 节 game-config 与第 02 节 scenes 的思想，
 //     但适配到本项目的 TRGames host 容器：canvas 挂在 host.container，
 //     尺寸来自 host.width / host.height（跟随右侧预览区大小）。
+//   • 文字锐化技巧：为何文字会发虚？如何使用 resolution + DPR 超采样让文字变得清晰锐利。
 //   • 中文注释已尽量写细，改一改文字/颜色点 “Run” 就能看到效果。
 //
 // 【怎么玩】
@@ -39,24 +40,40 @@
         // 背景色用 setBackgroundColor（v4 写法），不要直接改属性
         this.cameras.main.setBackgroundColor('#0f172a');
 
+        // ---------------------------------------------------------------------
+        // 【文字清晰度与锐化技巧】
+        // 在 Phaser 中，Text 对象是由独立的离线 Canvas 栅格化生成位图纹理后送入 WebGL 渲染的。
+        // 若未指定 resolution，默认仅按 1 倍逻辑像素绘制，在高分屏（Retina / Windows 缩放）下
+        // 纹理被双线性插值放大就会产生柔化/发虚感（且全局 Phaser.Game 的 resolution 并不会
+        // 自动提升各个 Text 内部生成器的分辨率，直接在 Text 样式中指定是标准做法）。
+        //
+        // 语法说明：
+        //   • window.devicePixelRatio || 1：读取系统设备像素比（DPR），若未定义则以 1 保底。
+        //   • Math.max(..., 2)：至少采用 2 倍超采样精度光栅化文字，确保普通 100% 屏也有极佳锐度。
+        // ---------------------------------------------------------------------
+        var textResolution = Math.max(window.devicePixelRatio || 1, 2);
+
         // 主标题：大字，居中
         this.add.text(W / 2, H / 2 - 10, 'Hello Phaser — 改这里 ✨', {
           fontFamily: 'monospace',
           fontSize: '20px',
-          color: '#e8e8e8'
+          color: '#e8e8e8',
+          resolution: textResolution
         }).setOrigin(0.5);
 
         // 副标题：小字，提示改法与参考资料
         this.add.text(W / 2, H / 2 + 22, '改上面那行字，点 Run 立刻生效 · 参考 C:/omp/Phaser 01-game-config / 02-scenes', {
           fontFamily: 'monospace',
           fontSize: '11px',
-          color: '#8b949e'
+          color: '#8b949e',
+          resolution: textResolution
         }).setOrigin(0.5);
 
         // 可选：读一条只读的运行时信息展示在角落（像 Phaser 教程第 01 节那样）
         var isWebGL = this.game.renderer instanceof Phaser.Renderer.WebGL.WebGLRenderer;
-        this.add.text(10, H - 18, (isWebGL ? 'WebGL' : 'Canvas') + ' · ' + W + '×' + H, {
-          fontFamily: 'monospace', fontSize: '10px', color: '#475569'
+        this.add.text(10, H - 18, (isWebGL ? 'WebGL' : 'Canvas') + ' · ' + W + '×' + H + ' · DPR ' + (window.devicePixelRatio || 1), {
+          fontFamily: 'monospace', fontSize: '10px', color: '#475569',
+          resolution: textResolution
         }).setOrigin(0, 0.5);
 
         // 调试缝：让自动化/控制台可通过 window.__trgame.getState() 探查

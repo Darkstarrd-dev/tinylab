@@ -379,11 +379,20 @@
     gutter.setAttribute('aria-hidden', 'true');
     gutter.appendChild(make('span', 'ed-line-number', '1'));
     editorSurface.appendChild(gutter);
+
+    var inputWrap = make('div', 'ed-input-wrap');
+    inputWrap.id = 'ed-input-wrap';
+    var overlay = make('pre', 'ed-syntax-overlay');
+    overlay.id = 'ed-syntax-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    inputWrap.appendChild(overlay);
+
     var input = make('textarea', 'ed-main-input ed-input');
     input.id = 'ed-main-input';
     input.setAttribute('spellcheck', 'false');
     input.setAttribute('aria-label', 'Editor text');
-    editorSurface.appendChild(input);
+    inputWrap.appendChild(input);
+    editorSurface.appendChild(inputWrap);
     contentSplit.appendChild(editorSurface);
     
     var preview = make('section', 'ed-preview-surface');
@@ -618,6 +627,43 @@
     if (iconSpan && SVG_ICONS[iconName]) iconSpan.innerHTML = SVG_ICONS[iconName];
   }
 
+  function highlightComments(text) {
+    if (!text) return '';
+    var escaped = String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    escaped = escaped.replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="ed-comment">$1</span>');
+    escaped = escaped.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="ed-comment">$1</span>');
+    escaped = escaped.replace(/(^|[ \t;,\(\{\[])(\/\/[^\n]*)/g, '$1<span class="ed-comment">$2</span>');
+    escaped = escaped.replace(/(^|[ \t])(#[^\n]*)/g, '$1<span class="ed-comment">$2</span>');
+    if (text.slice(-1) === '\n') {
+      escaped += ' ';
+    }
+    return escaped;
+  }
+
+  function syncOverlayScroll(root) {
+    if (!root) return;
+    var input = root.querySelector('#ed-main-input');
+    var overlay = root.querySelector('#ed-syntax-overlay');
+    if (!input || !overlay) return;
+    overlay.scrollTop = input.scrollTop;
+    overlay.scrollLeft = input.scrollLeft;
+    if (input.clientWidth) {
+      overlay.style.width = input.clientWidth + 'px';
+    }
+  }
+
+  function updateOverlay(root) {
+    if (!root) return;
+    var input = root.querySelector('#ed-main-input');
+    var overlay = root.querySelector('#ed-syntax-overlay');
+    if (!input || !overlay) return;
+    overlay.innerHTML = highlightComments(input.value);
+    syncOverlayScroll(root);
+  }
+
   global.EditorLayout = {
     create: create,
     bind: bind,
@@ -632,6 +678,9 @@
     setExplorer: setExplorer,
     setSync: setSync,
     updateExplorerToggleIcon: updateExplorerToggleIcon,
+    highlightComments: highlightComments,
+    updateOverlay: updateOverlay,
+    syncOverlayScroll: syncOverlayScroll,
     destroy: destroy
   };
 }(typeof window !== 'undefined' ? window : this));

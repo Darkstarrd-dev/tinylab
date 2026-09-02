@@ -66,3 +66,7 @@ skills-lock.json
 
 # Large local model files must not enter project history
 Qwen3.6-27B-DSpark.gguf
+
+# Runtime games and game data
+/games/
+/gamedata/
