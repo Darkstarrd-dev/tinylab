@@ -48,8 +48,8 @@ func runHostLoop(hctx *app.HostContext) {
 		if len(iconBytes) > 0 {
 			systray.SetIcon(iconBytes)
 		}
-		systray.SetTitle("TinyRouter")
-		systray.SetTooltip("TinyRouter — lightweight LLM API proxy")
+		systray.SetTitle("TinyLab")
+		systray.SetTooltip("TinyLab — lightweight LLM API proxy")
 
 		mOpen := systray.AddMenuItem("打开控制台", "Open the admin UI in your browser")
 		setTrayConsoleItem(mOpen)
@@ -57,7 +57,7 @@ func runHostLoop(hctx *app.HostContext) {
 		// otherwise addWebviewMenuItem is nil-typed and the menu skips it.
 		_ = addWebviewMenuItem(hctx)
 		systray.AddSeparator()
-		mQuit := systray.AddMenuItem("退出", "Quit TinyRouter")
+		mQuit := systray.AddMenuItem("退出", "Quit TinyLab")
 		setTrayQuitItem(mQuit)
 
 		go handleTrayMenu(hctx, mOpen, mQuit)

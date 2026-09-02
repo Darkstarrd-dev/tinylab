@@ -338,7 +338,7 @@ function pgSetupImportProfile(file) {
     }
     // Version check
     if (parsed.version > 1) {
-      pgToast(pgT('This scenario requires a newer version') + ' (v' + parsed.version + '). ' + pgT('Please update TinyRouter.'), 'error');
+      pgToast(pgT('This scenario requires a newer version') + ' (v' + parsed.version + '). ' + pgT('Please update TinyLab.'), 'error');
       return;
     }
     // Show preview in a confirmation dialog

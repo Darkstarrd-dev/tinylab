@@ -38,7 +38,7 @@
 
 ## 项目概述
 
-TinyRouter 是一个轻量级 LLM API 代理与本地工具集，单二进制交付，内置 Web 管理界面，纯本地运行无需鉴权。
+TinyLab 是一个轻量级 LLM API 代理与本地工具集，单二进制交付，内置 Web 管理界面，纯本地运行无需鉴权。
 
 ### 功能模块
 
@@ -72,41 +72,41 @@ TinyRouter 是一个轻量级 LLM API 代理与本地工具集，单二进制交
 
 ```bash
 # 构建
-go build -o tinyrouter .
+go build -o tinylab .
 
 # 运行 (首次自动生成 config.yaml)
-./tinyrouter
+./tinylab
 
 # 运行测试
 go test ./...
 
 # 交叉编译
-GOOS=linux GOARCH=amd64 go build -o tinyrouter-linux-amd64 .
-GOOS=windows GOARCH=amd64 go build -o tinyrouter-windows-amd64.exe .
+GOOS=linux GOARCH=amd64 go build -o tinylab-linux-amd64 .
+GOOS=windows GOARCH=amd64 go build -o tinylab-windows-amd64.exe .
 # macOS 双架构无签名、未压缩可执行文件（Windows PowerShell）
 ./build_mac.ps1 -OutputDir dist
 ```
 
 ## 构建变体
 
-TinyRouter 通过 build tag + 链接器 flag 提供 default / tray / webview / debug 四类变体，可组合 `-Playground`（内嵌 Playground 资产）和 `-Strip`（剥离符号表）开关，共 13 个产物。完整矩阵、参数说明与图标资源见 [`docs/build-variants.md`](docs/build-variants.md)。
+TinyLab 通过 build tag + 链接器 flag 提供 default / tray / webview / debug 四类变体，可组合 `-Playground`（内嵌 Playground 资产）和 `-Strip`（剥离符号表）开关，共 13 个产物。完整矩阵、参数说明与图标资源见 [`docs/build-variants.md`](docs/build-variants.md)。
 
 ### Windows 推荐
 
 ```powershell
 # webview + playground + stripped：托盘常驻 + WebView2 独立窗口 + 最小体积
 ./build.ps1 -Variant webview -Playground -Strip
-# 产出 dist/tinyrouter-webview-pg-stripped.exe (~16 MB)
+# 产出 dist/tinylab-webview-pg-stripped.exe (~16 MB)
 ```
 
 ### mac/Linux
 
 ```bash
 # 直接构建（无 tag = console + 自动打开浏览器）
-go build -o tinyrouter .
+go build -o tinylab .
 
 # Linux 交叉编译
-GOOS=linux GOARCH=amd64 go build -o tinyrouter-linux-amd64 .
+GOOS=linux GOARCH=amd64 go build -o tinylab-linux-amd64 .
 ```
 
 ### macOS 双架构（Windows 开发机）
@@ -115,7 +115,7 @@ GOOS=linux GOARCH=amd64 go build -o tinyrouter-linux-amd64 .
 ./build_mac.ps1 -OutputDir dist
 ```
 
-生成未签名、未压缩的裸 Mach-O 文件：`dist/TinyRouter_Darwin_arm64`（Apple Silicon）和 `dist/TinyRouter_Darwin_amd64`（Intel，macOS 显示为 x86_64）。这两个文件不是 `.app` Bundle；不要仅修改扩展名。
+生成未签名、未压缩的裸 Mach-O 文件：`dist/TinyLab_Darwin_arm64`（Apple Silicon）和 `dist/TinyLab_Darwin_amd64`（Intel，macOS 显示为 x86_64）。这两个文件不是 `.app` Bundle；不要仅修改扩展名。
 
 ## 代码结构
 

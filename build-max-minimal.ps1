@@ -3,7 +3,7 @@
 # Windows-only maximum-compression build of the FULL-FEATURE binary:
 #   tray + webview + playground (all build tags), no functionality removed.
 #
-# Output: dist\TinyRouter_Max.exe
+# Output: dist\TinyLab_Max.exe
 #
 # Size pipeline (each step stacks):
 #   1. CGO_ENABLED=0            pure-Go toolchain, no libc runtime
@@ -72,7 +72,7 @@ if (-not (Test-Path $OutputDir)) {
 }
 
 # --- Build: full features, minimum compile-time size ---------------------------
-$outName = "TinyRouter_Max.exe"
+$outName = "TinyLab_Max.exe"
 $outPath = Join-Path $OutputDir $outName
 
 $env:CGO_ENABLED = "0"

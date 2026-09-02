@@ -247,7 +247,7 @@
           created_at: generation.createdAt,
           duration_ms: generation.durationMs,
           provider: generation.provider,
-          generator: 'TinyRouter Playground'
+          generator: 'TinyLab Playground'
         };
       });
     }

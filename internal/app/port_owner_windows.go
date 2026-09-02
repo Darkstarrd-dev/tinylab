@@ -52,13 +52,13 @@ func identifyPortOwner(port int) (PortOwner, bool) {
 	isTR := false
 	if name != "" {
 		lower := strings.ToLower(name)
-		if strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
 			isTR = true
 		}
 	}
 	if !isTR && path != "" {
 		lower := strings.ToLower(path)
-		if strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
 			isTR = true
 		}
 	}

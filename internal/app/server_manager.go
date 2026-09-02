@@ -79,10 +79,10 @@ func (m *ServerManager) startLocked() {
 	}
 
 	go func() {
-		m.logger.Info("TinyRouter v%s starting on http://%s", Version, m.addr)
+		m.logger.Info("TinyLab v%s starting on http://%s", Version, m.addr)
 		if err := m.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			if isAddrInUse(err) {
-				FeedbackFatalError(m.configDir, fmt.Sprintf("端口 %s 已被占用，可能已有另一个 TinyRouter 实例在运行", m.addr))
+				FeedbackFatalError(m.configDir, fmt.Sprintf("端口 %s 已被占用，可能已有另一个 TinyLab 实例在运行", m.addr))
 			}
 			FeedbackFatalError(m.configDir, fmt.Sprintf("server error: %v", err))
 			log.Fatalf("server error: %v", err)

@@ -1,8 +1,8 @@
 # 构建变体 (Build Variants)
 
-> 最后核对：2026-08-06（新增 P5 feature manifest 边界，见下文"编译裁剪边界"）
+> 最后核对：2026-09-02（项目更名为 TinyLab V3.0.0）
 
-TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
+TinyLab 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
 
 ## 编译裁剪边界（P5 feature manifest，2026-08-06 落地）
 
@@ -48,7 +48,7 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 
 ## 默认构建 vs 标签构建
 
-- **无 tag** = 当前行为(console 窗口 + 浏览器),`go build -o tinyrouter .` 与 `./build.ps1` 等价
+- **无 tag** = 当前行为(console 窗口 + 浏览器),`go build -o tinylab .` 与 `./build.ps1` 等价
 - **`-tags tray`** = 切换到 `host_tray_windows.go`,引入 `fyne.io/systray`;无此 tag 用 `host_console.go`
 - **`-tags "tray,webview"`** = tray 基础上引入 `host_webview_windows.go` + `jchv/go-webview2`;托盘菜单多一项"打开独立窗口",在 Win10/11 上用 WebView2 Runtime 弹出原生窗口加载 admin UI;关闭窗口不退出进程,仍可再次打开
 - **`-tags playground`** = 切换到 `web/embed_playground.go`,内嵌 Playground 资产;无此 tag 用 `web/embed_playground_stub.go`
@@ -56,11 +56,11 @@ TinyRouter 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与
 
 ## Windows/Linux 极限体积脚本
 
-`build-minimal-webview-pg.ps1` 仍使用 `CGO_ENABLED=0`、`-s -w -buildid=`、`-gcflags="all=-l"` 与 `-trimpath`，生成 `dist/TinyRouter_Win11.exe` 和 `dist/TinyRouter_Linux`。默认**不使用 UPX**：Windows 对部分 UPX 压缩 PE 的加载会返回 `STATUS_INVALID_PAGE_PROTECTION (0xC0000045)`，导致“应用程序无法正常启动”。
+`build-minimal-webview-pg.ps1` 仍使用 `CGO_ENABLED=0`、`-s -w -buildid=`、`-gcflags="all=-l"` 与 `-trimpath`，生成 `dist/TinyLab_Win11.exe` 和 `dist/TinyLab_Linux`。默认**不使用 UPX**：Windows 对部分 UPX 压缩 PE 的加载会返回 `STATUS_INVALID_PAGE_PROTECTION (0xC0000045)`，导致“应用程序无法正常启动”。
 
 如确实需要压缩，可显式执行 `./build-minimal-webview-pg.ps1 -Upx`；发布给 Windows 用户的产物应使用默认未压缩版本。
 
-`build-max-minimal.ps1`（配套 `build-max-minimal.bat` 包装器）是 Windows 专用极限压缩变体：全功能（tags `tray,webview,playground`）+ `CGO_ENABLED=0` + `-ldflags "-H windowsgui -s -w -buildid="` + `-gcflags all=-l` + `-trimpath`，再以 `upx --best --lzma --ultra-brute` 打包（`-Fast` 跳过 ultra-brute），输出 `dist/TinyRouter_Max.exe` 并自动 `upx --test` 校验。同样受上述 Windows 加载 UPX PE 的兼容性风险约束，仅用于体积实验/可控分发，不作为推荐发布产物。
+`build-max-minimal.ps1`（配套 `build-max-minimal.bat` 包装器）是 Windows 专用极限压缩变体：全功能（tags `tray,webview,playground`）+ `CGO_ENABLED=0` + `-ldflags "-H windowsgui -s -w -buildid="` + `-gcflags all=-l` + `-trimpath`，再以 `upx --best --lzma --ultra-brute` 打包（`-Fast` 跳过 ultra-brute），输出 `dist/TinyLab_Max.exe` 并自动 `upx --test` 校验。同样受上述 Windows 加载 UPX PE 的兼容性风险约束，仅用于体积实验/可控分发，不作为推荐发布产物。
 
 ## macOS 双架构构建
 
@@ -74,28 +74,28 @@ Windows 开发机可直接运行：
 
 | 文件 | macOS 架构 | 适用设备 |
 |---|---|---|
-| `dist/TinyRouter_Darwin_arm64` | arm64 | Apple Silicon |
-| `dist/TinyRouter_Darwin_amd64` | x86_64 | Intel Mac |
+| `dist/TinyLab_Darwin_arm64` | arm64 | Apple Silicon |
+| `dist/TinyLab_Darwin_amd64` | x86_64 | Intel Mac |
 
-下载后在 macOS 终端执行 `chmod +x TinyRouter_Darwin_*`。Finder 需要 `.app` 时，必须在 macOS 上另行创建 Bundle；不要仅修改文件扩展名。
+下载后在 macOS 终端执行 `chmod +x TinyLab_Darwin_*`。Finder 需要 `.app` 时，必须在 macOS 上另行创建 Bundle；不要仅修改文件扩展名。
 
 ## 13 产物矩阵 (实际体积,基于 1024×1024 logo.png 多尺寸 ICO)
 
 | Variant | Playground | Strip | 输出文件 | 体积 |
 |---|---|---|---|---|
-| default | 否 | 否 | `tinyrouter.exe` | 15.15 MB |
-| default | 否 | 是 | `tinyrouter-stripped.exe` | 11.51 MB |
-| default | 是 | 否 | `tinyrouter-pg.exe` | 19.17 MB |
-| default | 是 | 是 | `tinyrouter-pg-stripped.exe` | 15.53 MB |
-| tray | 否 | 否 | `tinyrouter-tray.exe` | 15.62 MB |
-| tray | 否 | 是 | `tinyrouter-tray-stripped.exe` | 11.77 MB |
-| tray | 是 | 否 | `tinyrouter-tray-pg.exe` | 19.64 MB |
-| tray | 是 | 是 | `tinyrouter-tray-pg-stripped.exe` | 15.79 MB |
-| webview | 否 | 否 | `tinyrouter-webview.exe` | 16.02 MB |
-| webview | 否 | 是 | `tinyrouter-webview-stripped.exe` | 12.09 MB |
-| webview | 是 | 否 | `tinyrouter-webview-pg.exe` | 20.04 MB |
-| webview | 是 | 是 | `tinyrouter-webview-pg-stripped.exe` | 16.11 MB |
-| debug | — | — | `tinyrouter-debug.exe` | 15.15 MB |
+| default | 否 | 否 | `tinylab.exe` | 15.15 MB |
+| default | 否 | 是 | `tinylab-stripped.exe` | 11.51 MB |
+| default | 是 | 否 | `tinylab-pg.exe` | 19.17 MB |
+| default | 是 | 是 | `tinylab-pg-stripped.exe` | 15.53 MB |
+| tray | 否 | 否 | `tinylab-tray.exe` | 15.62 MB |
+| tray | 否 | 是 | `tinylab-tray-stripped.exe` | 11.77 MB |
+| tray | 是 | 否 | `tinylab-tray-pg.exe` | 19.64 MB |
+| tray | 是 | 是 | `tinylab-tray-pg-stripped.exe` | 15.79 MB |
+| webview | 否 | 否 | `tinylab-webview.exe` | 16.02 MB |
+| webview | 否 | 是 | `tinylab-webview-stripped.exe` | 12.09 MB |
+| webview | 是 | 否 | `tinylab-webview-pg.exe` | 20.04 MB |
+| webview | 是 | 是 | `tinylab-webview-pg-stripped.exe` | 16.11 MB |
+| debug | — | — | `tinylab-debug.exe` | 15.15 MB |
 
 Playground 模块增量约 +4.0 MB;Strip 减约 3.6 MB;Tray 仅增约 +0.3 MB(纯 Go,无 CGO);WebView 在 tray 基础再增约 +0.4 MB(`jchv/go-webview2` 纯 Go + 内嵌 WebView2Loader 字节)。
 

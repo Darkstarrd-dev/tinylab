@@ -1,10 +1,10 @@
 [中文](README.md) | [English](README_EN.md)
 
-# TinyRouter V2.0.0
+# TinyLab V3.0.0
 
-TinyRouter 是一个极轻量级的本地端 AI 工具箱与 API 代理引擎。它以单二进制交付（解压即用、零外部依赖、极低内存占用），在提供 OpenAI ChatCompletions、Responses、Anthropic 协议兼容代理与多 Key 轮询功能的同时，方便手中有多 Key、多公益站的用户无需部署庞大的项目。通过模型组合（Combo）与快速切换（QuickSlot）设计，用户可以轻松在多个模型间实时切换，而客户端使用端仅需配置几个对应的快速切换模型 ID 即可。
+TinyLab 是一个极轻量级的本地端 AI 工具箱与 API 代理引擎。它以单二进制交付（解压即用、零外部依赖、极低内存占用），在提供 OpenAI ChatCompletions、Responses、Anthropic 协议兼容代理与多 Key 轮询功能的同时，方便手中有多 Key、多公益站的用户无需部署庞大的项目。通过模型组合（Combo）与快速切换（QuickSlot）设计，用户可以轻松在多个模型间实时切换，而客户端使用端仅需配置几个对应的快速切换模型 ID 即可。
 
-同时，TinyRouter 深度集成了多模式的 Playground（支持 AI 联网检索、图像生成、流式对话、一对多模型测试、多模型自动碰撞群聊）、提供详细的请求记录与 Debug 审计、整合音视频下载器（yt-dlp）、多媒体画廊（图片/漫画浏览器与视频播放器）以及交互终端与系统实时监控等功能。
+同时，TinyLab 深度集成了多模式的 Playground（支持 AI 联网检索、图像生成、流式对话、一对多模型测试、多模型自动碰撞群聊）、提供详细的请求记录与 Debug 审计、整合音视频下载器（yt-dlp）、多媒体画廊（图片/漫画浏览器与视频播放器）以及交互终端与系统实时监控等功能。
 
 ---
 
@@ -47,9 +47,7 @@ TinyRouter 是一个极轻量级的本地端 AI 工具箱与 API 代理引擎。
 
 ## 详细功能指南与快捷键
 
-## 详细功能指南与快捷键
-
-TinyRouter 提供了丰富的键盘快捷键支持，其中全局、Playground 及 Gallery 的核心快捷键均支持在 **Settings → Shortcut Settings** 页面中进行**自定义重新绑定**（预设存储于内存，仅覆盖项写入 `config.yaml`）。
+TinyLab 提供了丰富的键盘快捷键支持，其中全局、Playground 及 Gallery 的核心快捷键均支持在 **Settings → Shortcut Settings** 页面中进行**自定义重新绑定**（预设存储于内存，仅覆盖项写入 `config.yaml`）。
 
 ### 1. 页面全局导航与系统快捷键 (*支持自定义*)
 
@@ -63,7 +61,7 @@ TinyRouter 提供了丰富的键盘快捷键支持，其中全局、Playground �
 | `F6` | `F6` | 快速切换到 **Gallery** (图片/漫画/视频画廊) 页面 |
 | `1` ~ `9` | `1` ~ `9` | 唤起 QuickSlot #1 ~ #9 模型选择悬浮弹窗并循环切槽 |
 | `f` | `f` | 切换网页全屏 / 全屏视图模式 |
-| `Escape` | `Escape` | 安全关闭 TinyRouter 服务进程 (仅在无弹窗时触发) |
+| `Escape` | `Escape` | 安全关闭 TinyLab 服务进程 (仅在无弹窗时触发) |
 
 ---
 
@@ -142,24 +140,24 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 ## 基本配置与客户端调用指南
 
-在任意 OpenAI 兼容客户端（如 NextChat、Cherry Studio、ChatBox、Cursor、VS Code Continue、Claude Dev / Cline 等）中，只需配置 TinyRouter 的本地服务入口：
+在任意 OpenAI 兼容客户端（如 NextChat、Cherry Studio、ChatBox、Cursor、VS Code Continue、Claude Dev / Cline 等）中，只需配置 TinyLab 的本地服务入口：
 
 - **API Base URL / Endpoint**：`http://localhost:8080/v1` （端口见 Settings 页面，默认 `8080`）
 - **API Key**：填入任意字符串即可（如 `sk-local`；若在 Settings 中启用了本地密码保护，请填入您设置的密码）。
-- **AI First**: 不会设置的可以直接委派AI代为设置，因为各个软件的要求各自有些区别，可以直接贴各个软件的仓库地址，然后告诉AI TinyRouter的端点，因为是兼容+透传，AI会自动帮你搞定一切的
+- **AI First**: 不会设置的可以直接委派AI代为设置，因为各个软件的要求各自有些区别，可以直接贴各个软件的仓库地址，然后告诉AI TinyLab的端点，因为是兼容+透传，AI会自动帮你搞定一切的
 - **OpenCode示例**
 ```opencode.jsonc
   "provider": {
-    "TinyRouter": {
+    "TinyLab": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "TinyRouter",
+      "name": "TinyLab",
       "options": {
         "baseURL": "http://localhost:20102/v1", //你设定的端口
         "apiKey": "any", //随意
       },
       "models": {
         "01-Plan": { //OpenCode内部使用的字段，比如用来设置某个Agent使用什么使用这个
-          "id": "Plan", //向服务器端请求的名字，对应你在TinyRouter里指定的名称
+          "id": "Plan", //向服务器端请求的名字，对应你在TinyLab里指定的名称
           "name": "01-Plan", //OpenCode里面显示的名字
           "attachment": false, //是否支持附件
           "reasoning": true, //是否支持推理
@@ -190,11 +188,11 @@ Download 功能依赖 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 抓取与 [ffmp
 
 #### 1. 调用 Quick Slot (快捷切换槽)
 - **模型名称格式**：可以自定义为任何名称，比如`Planner`、`Scout` ... `Builder`（或简写数字 `1`, `2` ... `9`）。
-- **优势**：客户端配置固定为 `Scout` 后，您只需在 TinyRouter 界面或按数字键切槽，即可**实时、无缝地更换客户端背后的实际物理模型/Combo**，客户端无需修改任何设置！
+- **优势**：客户端配置固定为 `Scout` 后，您只需在 TinyLab 界面或按数字键切槽，即可**实时、无缝地更换客户端背后的实际物理模型/Combo**，客户端无需修改任何设置！
 
 #### 2. 调用 Combo (模型组合)
 - **模型名称格式**：填入 Combo 的名称（如 `DeekSeekV4Flash` 或 `GLM-5.2`）, 可以聚合OpenCode、Nvidai、ModelScope、SenseNova等塞博活佛提供的免费模型。
-- **优势**：触发 Combo 内的多模型自动调度逻辑（如故障备用转移 `fallback`、免费优先 `greedy-squirrel`），由 TinyRouter 自动完成上游节点选择与重试。
+- **优势**：触发 Combo 内的多模型自动调度逻辑（如故障备用转移 `fallback`、免费优先 `greedy-squirrel`），由 TinyLab 自动完成上游节点选择与重试。
 
 #### 3. 直接调用特定 Provider 的模型
 - **带前缀形式**：不需要用户自己填写，在provider的详情卡里可以直接点击模型ID，复制到剪贴板里，直接黏贴即可

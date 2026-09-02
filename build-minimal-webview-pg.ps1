@@ -1,8 +1,8 @@
 # build-minimal-webview-pg.ps1
 #
 # Minimal-size build of the Windows and Linux binaries:
-#   - TinyRouter_Win11.exe (Windows 11 amd64 / webview + tray + playground)
-#   - TinyRouter_Linux     (Linux amd64 / playground)
+#   - TinyLab_Win11.exe (Windows 11 amd64 / webview + tray + playground)
+#   - TinyLab_Linux     (Linux amd64 / playground)
 #
 # macOS binaries are built by build_mac.ps1. They intentionally skip UPX so
 # the resulting Mach-O files remain suitable for later signing/notarization.
@@ -59,8 +59,8 @@ if (-not (Test-Path $OutputDir)) {
 Invoke-EnsureSyso
 
 $targets = @(
-    @{ Name = "TinyRouter_Win11.exe"; GOOS = "windows"; GOARCH = "amd64"; Tags = "tray,webview,playground"; LdFlags = "-H windowsgui -s -w -buildid="; UpxExtra = @() },
-    @{ Name = "TinyRouter_Linux";     GOOS = "linux";   GOARCH = "amd64"; Tags = "playground";                LdFlags = "-s -w -buildid=";                UpxExtra = @() }
+    @{ Name = "TinyLab_Win11.exe"; GOOS = "windows"; GOARCH = "amd64"; Tags = "tray,webview,playground"; LdFlags = "-H windowsgui -s -w -buildid="; UpxExtra = @() },
+    @{ Name = "TinyLab_Linux";     GOOS = "linux";   GOARCH = "amd64"; Tags = "playground";                LdFlags = "-s -w -buildid=";                UpxExtra = @() }
 )
 
 Write-Host "=== Building Windows/Linux minimal binaries ==="
@@ -110,5 +110,5 @@ foreach ($t in $targets) {
 }
 
 Write-Host "`n=== Final Artifacts Summary in $OutputDir ==="
-Get-ChildItem "$OutputDir/TinyRouter_*" | Sort-Object Name |
+Get-ChildItem "$OutputDir/TinyLab_*" | Sort-Object Name |
     ForEach-Object { "{0,-24} {1,11:N0} bytes ({2,6:N2} MB)" -f $_.Name, $_.Length, ($_.Length / 1MB) }

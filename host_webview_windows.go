@@ -121,10 +121,10 @@ func applyTrayLang(lang string) {
 	if trayQuitItem != nil {
 		if cn {
 			trayQuitItem.SetTitle("退出")
-			trayQuitItem.SetTooltip("退出 TinyRouter")
+			trayQuitItem.SetTooltip("退出 TinyLab")
 		} else {
 			trayQuitItem.SetTitle("Quit")
-			trayQuitItem.SetTooltip("Quit TinyRouter")
+			trayQuitItem.SetTooltip("Quit TinyLab")
 		}
 	}
 }
@@ -301,7 +301,7 @@ func openWebviewWindow(hctx *app.HostContext) {
 		Debug:     false,
 		AutoFocus: true,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "TinyRouter V" + app.Version,
+			Title:  "TinyLab V" + app.Version,
 			Width:  1280,
 			Height: 800,
 			// IconId is intentionally 0; jchv uses it to LoadImageW as RT_ICON,
@@ -318,7 +318,7 @@ func openWebviewWindow(hctx *app.HostContext) {
 		hctx.Logger.Error("failed to create WebView2 window (WebView2 runtime missing?)")
 		return
 	}
-	w.SetTitle("TinyRouter V" + app.Version)
+	w.SetTitle("TinyLab V" + app.Version)
 
 	// Register this window so shutdown can terminate it immediately.
 	webviewMu.Lock()

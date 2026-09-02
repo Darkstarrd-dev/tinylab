@@ -1,4 +1,4 @@
-# TinyRouter build presets
+# TinyLab build presets
 # Usage:
 #   ./build.ps1                                  # default: console + browser, no playground
 #   ./build.ps1 -Strip                           # + minimal size (stripped symbols)
@@ -14,15 +14,15 @@
 # builds the full matrix: default|tray|webview x {pg,strip} combinations + debug.
 #
 # All artifacts land in ./dist/ with descriptive names:
-#   tinyrouter.exe                        default console (current behavior)
-#   tinyrouter-pg.exe                     default console + playground
-#   tinyrouter-tray.exe                    tray resident
-#   tinyrouter-tray-pg.exe                tray + playground
-#   tinyrouter-tray-stripped.exe           tray + strip
-#   tinyrouter-tray-pg-stripped.exe       tray + playground + strip
-#   tinyrouter-webview.exe                tray + WebView2 window (pure Go, no CGO)
-#   tinyrouter-webview-pg.exe             tray + WebView2 + playground
-#   tinyrouter-debug.exe                  full DWARF, no stripping, console window
+#   tinylab.exe                        default console (current behavior)
+#   tinylab-pg.exe                     default console + playground
+#   tinylab-tray.exe                    tray resident
+#   tinylab-tray-pg.exe                tray + playground
+#   tinylab-tray-stripped.exe           tray + strip
+#   tinylab-tray-pg-stripped.exe       tray + playground + strip
+#   tinylab-webview.exe                tray + WebView2 window (pure Go, no CGO)
+#   tinylab-webview-pg.exe             tray + WebView2 + playground
+#   tinylab-debug.exe                  full DWARF, no stripping, console window
 #
 # See the 13-artifact matrix at the bottom of this file.
 
@@ -78,18 +78,18 @@ function Invoke-BuildOne {
     $ldflags = @()
 
     switch ($variant) {
-        "default" { $base = "tinyrouter" }
+        "default" { $base = "tinylab" }
         "tray" {
             $tags += "tray"
             $ldflags += "-H windowsgui"
-            $base = "tinyrouter-tray"
+            $base = "tinylab-tray"
         }
         "webview" {
             $tags += "tray", "webview"
             $ldflags += "-H windowsgui"
-            $base = "tinyrouter-webview"
+            $base = "tinylab-webview"
         }
-        "debug" { $base = "tinyrouter-debug" }
+        "debug" { $base = "tinylab-debug" }
     }
 
     if ($withPg -and $variant -ne "debug") { $tags += "playground" }
@@ -168,16 +168,16 @@ if ($All) {
 # --- 13-artifact output matrix (for reference) -------------------------------
 # | Variant  | PG   | Strip | Output                              |
 # |----------|------|-------|-------------------------------------|
-# | default  | no   | no    | tinyrouter.exe                      |
-# | default  | yes  | no    | tinyrouter-pg.exe                   |
-# | default  | no   | yes   | tinyrouter-stripped.exe             |
-# | default  | yes  | yes   | tinyrouter-pg-stripped.exe          |
-# | tray     | no   | no    | tinyrouter-tray.exe                 |
-# | tray     | yes  | no    | tinyrouter-tray-pg.exe              |
-# | tray     | no   | yes   | tinyrouter-tray-stripped.exe        |
-# | tray     | yes  | yes   | tinyrouter-tray-pg-stripped.exe    |
-# | webview  | no   | no    | tinyrouter-webview.exe              |
-# | webview  | yes  | no    | tinyrouter-webview-pg.exe           |
-# | webview  | no   | yes   | tinyrouter-webview-stripped.exe     |
-# | webview  | yes  | yes   | tinyrouter-webview-pg-stripped.exe |
-# | debug    | -    | -     | tinyrouter-debug.exe                |
+# | default  | no   | no    | tinylab.exe                         |
+# | default  | yes  | no    | tinylab-pg.exe                      |
+# | default  | no   | yes   | tinylab-stripped.exe                |
+# | default  | yes  | yes   | tinylab-pg-stripped.exe             |
+# | tray     | no   | no    | tinylab-tray.exe                    |
+# | tray     | yes  | no    | tinylab-tray-pg.exe                 |
+# | tray     | no   | yes   | tinylab-tray-stripped.exe           |
+# | tray     | yes  | yes   | tinylab-tray-pg-stripped.exe       |
+# | webview  | no   | no    | tinylab-webview.exe                 |
+# | webview  | yes  | no    | tinylab-webview-pg.exe              |
+# | webview  | no   | yes   | tinylab-webview-stripped.exe        |
+# | webview  | yes  | yes   | tinylab-webview-pg-stripped.exe    |
+# | debug    | -    | -     | tinylab-debug.exe                   |

@@ -1,4 +1,4 @@
-// sprite.js — TinyRouter 小精灵助手交互层 (L1 Dock/Modal + L2 角色与漫画气泡)
+// sprite.js — TinyLab 小精灵助手交互层 (L1 Dock/Modal + L2 角色与漫画气泡)
 (function() {
   'use strict';
 
@@ -13,7 +13,7 @@
     messages: [
       {
         role: 'assistant',
-        content: '你好！我是 TinyRouter 小精灵。我可以帮你快速跳转页面、查询模型配额、清理日志、打包归档等。有什么我可以帮你的吗？',
+        content: '你好！我是 TinyLab 小精灵。我可以帮你快速跳转页面、查询模型配额、清理日志、打包归档等。有什么我可以帮你的吗？',
         tools: []
       }
     ]
@@ -155,7 +155,7 @@
       '  <div class="sprite-modal-header">',
       '    <div class="sprite-modal-title">',
       '      <div class="sprite-avatar-mini">✨</div>',
-      '      <span>TinyRouter 智能助理</span>',
+      '      <span>TinyLab 智能助理</span>',
       '    </div>',
       '    <div class="sprite-modal-actions">',
       '      <button class="sprite-btn-icon" title="释放小精灵到界面" onclick="window.releaseSpriteChar()">',

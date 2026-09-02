@@ -3,8 +3,8 @@
 # Build unsigned, uncompressed macOS command-line binaries for both CPU
 # architectures. The outputs are raw Mach-O executables, not .app bundles.
 #
-#   - TinyRouter_Darwin_arm64  (Apple Silicon)
-#   - TinyRouter_Darwin_amd64  (Intel, reported by macOS as x86_64)
+#   - TinyLab_Darwin_arm64  (Apple Silicon)
+#   - TinyLab_Darwin_amd64  (Intel, reported by macOS as x86_64)
 #
 # Usage:
 #   ./build_mac.ps1
@@ -26,15 +26,15 @@ if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
 }
 
-$legacyDarwinPath = Join-Path $outDir "TinyRouter_Darwin"
+$legacyDarwinPath = Join-Path $outDir "TinyLab_Darwin"
 if (Test-Path $legacyDarwinPath) {
     Remove-Item $legacyDarwinPath -Force
     Write-Host "Removed legacy Darwin artifact: $legacyDarwinPath"
 }
 
 $targets = @(
-    @{ Name = "TinyRouter_Darwin_arm64"; GOARCH = "arm64" },
-    @{ Name = "TinyRouter_Darwin_amd64"; GOARCH = "amd64" }
+    @{ Name = "TinyLab_Darwin_arm64"; GOARCH = "arm64" },
+    @{ Name = "TinyLab_Darwin_amd64"; GOARCH = "amd64" }
 )
 
 $oldGoOS = $env:GOOS

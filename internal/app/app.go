@@ -82,13 +82,13 @@ func New(configPath string) (*App, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Single-instance check: use OS-level file locking on .tinyrouter.lock.
+	// Single-instance check: use OS-level file locking on .tinylab.lock.
 	// Unlike file-existence checks (O_EXCL), OS file locks are automatically
 	// released when the process exits (even on crash/kill), so a stale lock file
 	// left on disk by a killed process never prevents the next startup. The file
 	// may already exist; we open it read/write and re-acquire the lock.
 	configDir := filepath.Dir(configPath)
-	lockPath := filepath.Join(configDir, ".tinyrouter.lock")
+	lockPath := filepath.Join(configDir, ".tinylab.lock")
 	lockFile, lockErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if lockErr != nil {
 		err := fmt.Errorf("failed to open lock file: %w", lockErr)
@@ -96,7 +96,7 @@ func New(configPath string) (*App, error) {
 	}
 	if err := tryLockFile(lockFile); err != nil {
 		lockFile.Close()
-		msg := "另一个 TinyRouter 实例已在运行。请先关闭它后重试。"
+		msg := "另一个 TinyLab 实例已在运行。请先关闭它后重试。"
 		return nil, fmt.Errorf("%s", msg)
 	}
 	// Write PID for diagnostic purposes (not used for locking logic).

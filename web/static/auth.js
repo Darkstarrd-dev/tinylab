@@ -66,8 +66,8 @@ function renderLoginScreen() {
   loginOverlay.innerHTML = '\
     <div class="login-card">\
       <div class="login-logo">\
-        <img src="/logo-sm.png" alt="TinyRouter" width="48" height="48">\
-        <h2>TinyRouter</h2>\
+        <img src="/logo-sm.png" alt="TinyLab" width="48" height="48">\
+        <h2>TinyLab</h2>\
       </div>\
       <div class="login-form">\
         <input type="password" id="login-password" class="login-input" placeholder="' + t('enterPassword') + '" autocomplete="current-password">\
@@ -138,7 +138,7 @@ async function handleLogin() {
 
 async function handleExitApp() {
   try { await fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch(e) {}
-  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h2>TinyRouter</h2><p class="muted">Stopped</p></div></div>';
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h2>TinyLab</h2><p class="muted">Stopped</p></div></div>';
 }
 
 function setupHeaderResponsive() {

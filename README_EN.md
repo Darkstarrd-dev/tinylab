@@ -1,10 +1,10 @@
 [Chinese](README.md) | [English](README_EN.md)
 
-# TinyRouter V2.0.0
+# TinyLab V3.0.0
 
-TinyRouter is an extremely lightweight local AI toolkit and API proxy engine. Delivered as a single binary (zero external dependencies, zero installation, ultra-low memory footprint), it provides OpenAI ChatCompletions, Responses, and Anthropic protocol-compatible proxies with multi-Key rotation. It allows users with multiple API keys or free community providers to easily manage endpoints without deploying heavy server stacks. With Model Combos and QuickSlots, users can seamlessly switch models in real time, while clients only need to configure a few corresponding QuickSlot IDs.
+TinyLab is an extremely lightweight local AI toolkit and API proxy engine. Delivered as a single binary (zero external dependencies, zero installation, ultra-low memory footprint), it provides OpenAI ChatCompletions, Responses, and Anthropic protocol-compatible proxies with multi-Key rotation. It allows users with multiple API keys or free community providers to easily manage endpoints without deploying heavy server stacks. With Model Combos and QuickSlots, users can seamlessly switch models in real time, while clients only need to configure a few corresponding QuickSlot IDs.
 
-Furthermore, TinyRouter deeply integrates a multi-mode Playground (supporting AI web search, image generation, streaming dialogue, 1-to-N model testing, and auto-chat agent battles), detailed request logging with debug auditing, a stream video/audio download manager (yt-dlp), a multimedia gallery (image/manga viewer and video player), an interactive terminal, and real-time system monitoring.
+Furthermore, TinyLab deeply integrates a multi-mode Playground (supporting AI web search, image generation, streaming dialogue, 1-to-N model testing, and auto-chat agent battles), detailed request logging with debug auditing, a stream video/audio download manager (yt-dlp), a multimedia gallery (image/manga viewer and video player), an interactive terminal, and real-time system monitoring.
 
 ---
 
@@ -47,9 +47,7 @@ Furthermore, TinyRouter deeply integrates a multi-mode Playground (supporting AI
 
 ## Detailed Feature Guide & Shortcuts
 
-## Detailed Feature Guide & Shortcuts
-
-TinyRouter provides rich keyboard shortcut support. Core shortcuts across Global, Playground, and Gallery can be **customized and rebound** on the **Settings → Shortcut Settings** page (defaults live in memory; only overrides are written to `config.yaml`).
+TinyLab provides rich keyboard shortcut support. Core shortcuts across Global, Playground, and Gallery can be **customized and rebound** on the **Settings → Shortcut Settings** page (defaults live in memory; only overrides are written to `config.yaml`).
 
 ### 1. Page Navigation & System Shortcuts (*Customizable*)
 
@@ -63,7 +61,7 @@ TinyRouter provides rich keyboard shortcut support. Core shortcuts across Global
 | `F6` | `F6` | Switch to **Gallery** (Image/Manga/Video Viewer) page |
 | `1`–`9` | `1`–`9` | Open & cycle QuickSlot #1–#9 model selector popup |
 | `f` | `f` | Toggle web / native fullscreen mode |
-| `Escape` | `Escape` | Safely shutdown TinyRouter service (when no modal is open) |
+| `Escape` | `Escape` | Safely shutdown TinyLab service (when no modal is open) |
 
 ---
 
@@ -142,7 +140,7 @@ Download relies on [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https
 
 ## Basic Configuration & Client Setup
 
-Configure TinyRouter's local endpoint in any OpenAI-compatible client (such as NextChat, Cherry Studio, ChatBox, Cursor, VS Code Continue, Claude Dev / Cline, Zed, etc.):
+Configure TinyLab's local endpoint in any OpenAI-compatible client (such as NextChat, Cherry Studio, ChatBox, Cursor, VS Code Continue, Claude Dev / Cline, Zed, etc.):
 
 - **API Base URL**: `http://localhost:8080/v1` (Default port `8080`, configurable in Settings)
 - **API Key**: Enter any string (e.g., `sk-local`; or your custom password if password protection is enabled in Settings).
@@ -151,7 +149,7 @@ Configure TinyRouter's local endpoint in any OpenAI-compatible client (such as N
 
 #### 1. Calling Quick Slots
 - **Model Format**: Custom slot names such as `Planner`, `Scout`, `Builder`, or numbers `1`, `2` ... `9`.
-- **Advantage**: Once configured to `Scout` in your client, switching slots in TinyRouter's UI or via hotkeys **instantly changes the actual model/combo serving the client in real time** without altering client settings!
+- **Advantage**: Once configured to `Scout` in your client, switching slots in TinyLab's UI or via hotkeys **instantly changes the actual model/combo serving the client in real time** without altering client settings!
 
 #### 2. Calling Combos
 - **Model Format**: Enter the Combo name (e.g., `DeepSeekV4Flash` or `GLM-5.2`), aggregating free models provided by OpenCode, NVIDIA, ModelScope, SenseNova, etc.
