@@ -1,6 +1,6 @@
 # 构建变体 (Build Variants)
 
-> 最后核对：2026-09-02（项目更名为 TinyLab V3.0.0）
+> 最后核对：2026-09-03（构建脚本自动解析 rsrc：GOBIN/GOPATH 回退 + 缺失自动安装）
 
 TinyLab 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
 
@@ -101,4 +101,4 @@ Playground 模块增量约 +4.0 MB;Strip 减约 3.6 MB;Tray 仅增约 +0.3 MB(�
 
 ## 图标资源
 
-`web/static/favicon.ico` 通过 `gen-icon.ps1` 从 `web/static/logo.png` (1024×1024) 生成,内嵌 7 个尺寸(16/24/32/48/64/128/256),覆盖托盘、资源管理器、任务栏、Alt+Tab、jumplist 全部 DPI 场景。`rsrc.syso` 自动同步,无需手动维护;改 logo 后跑 `./gen-icon.ps1` 再 `go generate ./...`。
+`web/static/favicon.ico` 通过 `gen-icon.ps1` 从 `web/static/logo.png` (1024×1024) 生成,内嵌 7 个尺寸(16/24/32/48/64/128/256),覆盖托盘、资源管理器、任务栏、Alt+Tab、jumplist 全部 DPI 场景。`rsrc.syso` 自动同步,无需手动维护;改 logo 后跑 `./gen-icon.ps1` 再 `go generate ./...`。构建脚本(`build.ps1`/`build-minimal-webview-pg.ps1`/`build-max-minimal.ps1`)在重生成前自动把 `go env GOBIN` 与 `GOPATH/bin` 加入本会话 PATH,找不到 `rsrc` 时自动 `go install github.com/akavel/rsrc@latest`,无需手动配 PATH。

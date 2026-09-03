@@ -43,10 +43,26 @@ function Invoke-EnsureSyso {
         }
     }
     if ($needGenerate) {
+        foreach ($binDir in @(
+                (& go env GOBIN 2>$null),
+                (Join-Path (& go env GOPATH 2>$null) "bin")
+            )) {
+            if ($binDir -and (Test-Path $binDir) -and ($env:PATH -notlike "*$binDir*")) {
+                $env:PATH = "$binDir;$env:PATH"
+            }
+        }
+        if (-not (Get-Command rsrc -ErrorAction SilentlyContinue)) {
+            Write-Host "rsrc not found, installing github.com/akavel/rsrc@latest..."
+            & go install github.com/akavel/rsrc@latest
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "go install rsrc failed"
+                exit $LASTEXITCODE
+            }
+        }
         Write-Host "Regenerating rsrc.syso from web/static/favicon.ico + rsrc.manifest..."
         & go generate ./...
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "go generate failed (install rsrc: go install github.com/akavel/rsrc@latest)"
+            Write-Error "go generate failed"
             exit $LASTEXITCODE
         }
     }
