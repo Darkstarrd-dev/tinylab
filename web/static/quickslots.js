@@ -811,6 +811,7 @@ var _qsModalData = null;       // { qsId, orderNum, models, selectedIndex, name 
 var _qsModalFocusIdx = 0;
 var _qsModalTimer = null;
 var _qsModalAutoClose = false;
+var _qsModalSorting = false;
 
 // --- QuickSlot Active State (session-only) ---
 var _qsActiveId = null;
@@ -993,12 +994,13 @@ function _qsModalOpenImport() {
   importModelsForQuickSlotHeader(qsId);
 }
 
-// Sort the modal list by model id (provider prefix first letter, then full
-// id). The focused/selected entries follow their models; the import row stays
-// last. Display-only: persisted order is unchanged until the user selects or
-// edits the slot.
-function _qsModalSort() {
+// Sort the modal list by model id (case-insensitive full-id lexicographic).
+// The focused/selected entries follow their models; the import row stays
+// last. The sorted order is persisted via PUT so it survives modal close and
+// re-open (selectedIndex follows the selected model to its new position).
+async function _qsModalSort() {
   if (!_qsModalData) return;
+  if (_qsModalSorting) return;
   _qsModalCancelAutoClose();
   var d = _qsModalData;
   var focusedModel = (d.models && d.models.length > 0 && _qsModalFocusIdx < d.models.length) ? d.models[_qsModalFocusIdx] : null;
@@ -1017,6 +1019,31 @@ function _qsModalSort() {
   if (_qsModalOverlay) {
     _qsModalOverlay.querySelector('.qs-modal').innerHTML = _qsModalBuildInner();
     _qsModalRefresh();
+  }
+  // Persist sorted order; other fields come from a fresh GET so concurrent
+  // edits (disabled flag / disabledModels) are not clobbered by stale modal
+  // state. Modal list is the source of truth for models (deletes PUT
+  // immediately, imports re-open the modal fresh).
+  _qsModalSorting = true;
+  try {
+    var qsId = d.qsId;
+    var data = await apiGet('/quickslots');
+    var qs = ((data || {}).quickslots || []).find(function(x) { return x.id === qsId; });
+    if (!qs) return;
+    var updated = {
+      name: qs.name,
+      order: qs.order,
+      models: (d.models || []).slice(),
+      disabledModels: (qs.disabledModels || []).slice(),
+      disabled: !!qs.disabled,
+      selectedIndex: d.selectedIndex || 0
+    };
+    await apiPut('/quickslots/' + qsId, updated);
+    renderHeaderQuickSlots();
+  } catch (e) {
+    toast((e && e.message) || t('loadFailed'), 'error', 3000, 'quickslot');
+  } finally {
+    _qsModalSorting = false;
   }
 }
 
@@ -1073,6 +1100,7 @@ function _qsModalItemDelete(idx) {
 
 async function _qsModalSelectFocused() {
   if (!_qsModalData) return;
+  if (_qsModalSorting) return;
   var idx = _qsModalFocusIdx;
   if (idx === _qsModalData.models.length) {
     _qsModalOpenImport();
@@ -1113,6 +1141,7 @@ async function _qsModalSelectFocused() {
 
 async function _qsModalDeleteFocused() {
   if (!_qsModalData) return;
+  if (_qsModalSorting) return;
   var idx = _qsModalFocusIdx;
   if (idx === _qsModalData.models.length) return;
   if (idx < 0 || idx >= _qsModalData.models.length) return;
