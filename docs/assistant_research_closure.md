@@ -61,7 +61,7 @@
 
 ## 6. 验证与不变量纪律
 
-- **每步**：`go build ./...` + `go test ./...` + `node --check <改动的 js>` + 浏览器/tray 烟测（`tinyrouter-frontend-smoke-test` skill）+ `bash autoresearch.sh`（确认 bench 仍 100%/0 drift，契约未被破坏）。
+- **每步**：`go build ./...` + `go test ./...` + `node --check <改动的 js>` + 浏览器/tray 烟测（`tinylab-frontend-smoke-test` skill）+ `bash autoresearch.sh`（确认 bench 仍 100%/0 drift，契约未被破坏）。
 - **doc-sync**（`AGENTS.md` 强制）：改 `web/static` 同步 `PROJECT_MAP.md` §18.2/§24 + 相关 `docs/*-architecture.md`；改 host/build variant 同步 `docs/build-variants.md`；改 rotation/事件 同步 `docs/rotation-architecture.md`/`proxy-architecture.md`。
 - **不变量**：`cmd/assistant-bench`/`autoresearch.sh` off-limits；`catalog.go` 零手维护（新能力只改 `semantics.json`）；不引 DB/前端框架/对外鉴权；有界自主（notify/只读 auto，配置变更默认 suggest、auto 需授权且仅 reversible）；L3 限 Windows。
 - **新增能力**：加 `semantics.json` rule → bench 校验 `(method,path)`∈真实 chi 路由集（drift 强制同步）。

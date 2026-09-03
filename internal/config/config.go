@@ -1,4 +1,4 @@
-// Package config defines the TinyRouter configuration structures and handles
+// Package config defines the TinyLab configuration structures and handles
 // loading, saving, validation, and default-filling of config.yaml, plus the
 // AES-256-GCM encryption helpers used to protect API keys at rest.
 //

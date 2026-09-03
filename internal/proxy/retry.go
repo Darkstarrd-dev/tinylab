@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 // retryState holds mutable state across retry iterations.

@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/registry"
 )
 
 func TestFfmpegStatus(t *testing.T) {

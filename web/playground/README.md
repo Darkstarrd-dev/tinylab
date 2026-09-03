@@ -1,4 +1,4 @@
-# TinyRouter Playground
+# TinyLab Playground
 
 Playground 的 canonical 前后端架构文档位于：
 

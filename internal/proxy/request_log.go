@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/logredact"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
+	"github.com/tinylab/tinylab/internal/logredact"
+	"github.com/tinylab/tinylab/internal/rotation"
 )
 
 // traceLine is the JSON structure for every line written to the
@@ -62,7 +62,7 @@ type traceLine struct {
 //
 // The decision string describes what the retry state machine did
 // (e.g. "success", "backoff 2s, switch key", "daily quota lock").
-// The provenance string comes from the X-TinyRouter-Provenance header.
+// The provenance string comes from the X-TinyLab-Provenance header.
 //
 // This method never panics or affects the request path.
 func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.SelectedKey, status string, latencyMs, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL, originalModel, sessionKey, decision, provenance string) {
@@ -85,7 +85,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 	upstreamURL = redactURL(upstreamURL, credential)
 
 	// Compute source from headers and provenance.
-	source := reqHeaders.Get("X-TinyRouter-Source")
+	source := reqHeaders.Get("X-TinyLab-Source")
 	if source == "" {
 		if provenance != "" {
 			if idx := strings.Index(provenance, ":"); idx > 0 {

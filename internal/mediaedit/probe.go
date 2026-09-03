@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // validateLocalMediaInput rejects non-local inputs (URLs, pipes, devices)
@@ -40,7 +40,7 @@ func validateLocalMediaInput(path string) error {
 // land in. Subtitle inputs must resolve inside it so a client cannot point
 // ffmpeg at an arbitrary local file.
 func subtitleUploadDir() string {
-	return filepath.Join(os.TempDir(), "tinyrouter-subs")
+	return filepath.Join(os.TempDir(), "tinylab-subs")
 }
 
 // validateSubtitleInput restricts subtitle inputs to files that were

@@ -1,5 +1,5 @@
 // web/static/gif-editor.js
-// GIF / frame editor page for TinyRouter (header nav 6th button, data-page="gif").
+// GIF / frame editor page for TinyLab (header nav 6th button, data-page="gif").
 // Pure local SPA, classic script execution under web/static/.
 //
 // Module split (docs/gif_upgrade.md §4): state/lifecycle, import (Import Modal),

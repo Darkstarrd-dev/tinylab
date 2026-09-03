@@ -1,5 +1,5 @@
 // web/static/gif-editor-export.js
-// Export GIF, ZIP, Sprite Sheet & MediaBridge Integration for TinyRouter GIF Editor
+// Export GIF, ZIP, Sprite Sheet & MediaBridge Integration for TinyLab GIF Editor
 
 (function () {
   'use strict';
@@ -942,11 +942,11 @@
   function bindEvents() {
     var openExportBtn = document.getElementById('gif-open-export-btn');
     if (openExportBtn) openExportBtn.addEventListener('click', openExportModal);
-    document.addEventListener('tinyrouter:modal-close', handleModalCloseEvent);
+    document.addEventListener('tinylab:modal-close', handleModalCloseEvent);
   }
 
   function cleanup() {
-    document.removeEventListener('tinyrouter:modal-close', handleModalCloseEvent);
+    document.removeEventListener('tinylab:modal-close', handleModalCloseEvent);
     if (currentEncoder && typeof currentEncoder.abort === 'function') {
       try { currentEncoder.abort(); } catch (e) {}
     }

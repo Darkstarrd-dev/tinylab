@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/assistant"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/assistant"
 )
 
 // chat handles POST /api/assistant/chat {message: string} → {reply, preset}.

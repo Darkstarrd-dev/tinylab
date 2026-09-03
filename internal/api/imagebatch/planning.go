@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
+	domain "github.com/tinylab/tinylab/internal/imagebatch"
 )
 
 const helperSystemPrompt = "Return raw JSON only. No code blocks, no backticks, no explanations. Start with { and end with }. Preserve the user's subject and intent."
@@ -76,8 +76,8 @@ func (h *Handler) callHelper(ctx context.Context, model, sysPrompt, prompt strin
 	req := &http.Request{Method: http.MethodPost, URL: u, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-TinyRouter-Source", "playground-batch")
-	req.Header.Set("X-TinyRouter-Provenance", "image-batch-helper")
+	req.Header.Set("X-TinyLab-Source", "playground-batch")
+	req.Header.Set("X-TinyLab-Provenance", "image-batch-helper")
 	rec := newResponseRecorder()
 	h.d.ProxyHandler.ChatCompletions(rec, req)
 	if rec.code < 200 || rec.code >= 300 {

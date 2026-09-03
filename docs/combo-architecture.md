@@ -1,4 +1,4 @@
-# TinyRouter Combo 组合策略架构
+# TinyLab Combo 组合策略架构
 
 > **文档定位：** `internal/combo/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
@@ -6,7 +6,7 @@
 
 ## 1. 范围与结论
 
-`internal/combo/` 是 TinyRouter 的 **Combo 组合策略模块**，把“组合名（combo name）”解析为一个有序的 `ComboPlan`（`[]ModelTarget`）交由 proxy 驱动执行。它自身不做 HTTP 转发、SSE、用量记录、key 轮询或冷却记账——这些仍由 proxy / rotation 负责。combo 只是**名称 → 执行计划**的解析层。
+`internal/combo/` 是 TinyLab 的 **Combo 组合策略模块**，把“组合名（combo name）”解析为一个有序的 `ComboPlan`（`[]ModelTarget`）交由 proxy 驱动执行。它自身不做 HTTP 转发、SSE、用量记录、key 轮询或冷却记账——这些仍由 proxy / rotation 负责。combo 只是**名称 → 执行计划**的解析层。
 
 - **谁调用它：** `internal/proxy/` 通过 `ComboResolver` 接口（proxy/interfaces.go:61-64）注入 `*combo.Resolver`，在 `handleProxy` 先以 `IsComboName` 判断请求 `model` 是否为 combo 名（forward.go:46-49），是则走 `handleCombo` 调 `Resolve` 取计划并按策略驱动（forward.go:87-122）；`internal/app/app.go` 作为组合根构造 `Resolver` 并挂 `SetStateHook` 持久化 `state.yaml`（app.go:127、168）。
 - **它调用谁：** `registry.Registry`（读 combo/provider 定义、`GetComboByName` 查名、`GetProviderByPrefix` 解前缀、`ListCombos`）、`config`（Combo / ModelDef 定义）、`state`（ComboSnapshot 持久化）。combo 不写文件，状态变更经注入的 `onStateChange` 旁路回调触发。
@@ -287,7 +287,7 @@ providers:
 ```powershell
 go test ./internal/combo/...
 go test ./...
-go build -o tinyrouter .
+go build -o tinylab .
 ```
 
 涉及 Resolve 策略、配额排序、状态持久化的修改，应优先跑 `resolver_test.go`，并手工用浏览器构造 combo 请求验证轮转分布与重启后游标恢复。
@@ -330,5 +330,6 @@ go build -o tinyrouter .
 | 修改 combo 配置 | config/types.go Combo（129-136）+ defaults.go Combos（55）+ registry/combos.go 读写 |
 | 修改状态持久化 | resolver.go SnapshotComboStates（170-183）/RestoreComboState（185-202）+ state/state.go ComboSnapshot（41-44）+ app.go 接线（165、168） |
 | 修改 Combo 批量测速排序 | api/combo_speedtest.go（speedTestCombo + probeComboModel）+ registry/combos.go GetComboByID + api/router.go（路由注册）+ web/static/combos.js runComboSpeedTest + web/static/i18n.js comboSpeedTest* 键 |
+| 清理 combo 无效引用 | registry/sweep.go（SweepStaleComboModels + isRefAliveLocked：provider 前缀+模型 ID/别名存活判定）+ registry DeleteProvider/DeleteModel 内联自动 sweep + api/combos/register.go（POST /api/combos/cleanup，经 SaveConfigAndReload 持久化）+ web/static/combos.js cleanupStaleCombos + settings.js combos header 清理按钮 + i18n.js cleanupStale* 键 |
 | 修改 model 字符串格式 | util/util.go SplitModel（6-13）+ resolver.go Resolve 遍历与 SplitModel 调用（79-111） |
 | 修改接口契约 | proxy/interfaces.go ComboResolver（61-64）须与 resolver.go 方法签名同步 |

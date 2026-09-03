@@ -25,13 +25,13 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
-	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/archive"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	gallerylib "github.com/tinylab/tinylab/internal/gallery"
+	"github.com/tinylab/tinylab/internal/mediaedit"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 )
 
 // resolveFfmpeg resolves ffmpeg and ffprobe paths from config.

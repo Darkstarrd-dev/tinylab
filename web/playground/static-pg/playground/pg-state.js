@@ -33,13 +33,13 @@ function makeWin() {
 }
 
 // Auto chat runtime state (not persisted except userName/iterations/director).
-var PG_AUTOCHAT_KEY = 'tinyrouter.playground.autochat.v1';
-var PG_SCENARIO_KEY = 'tinyrouter.playground.scenario.v1';
-var PG_MODE_KEY = 'tinyrouter.playground.mode.v1';
+var PG_AUTOCHAT_KEY = 'tinylab.playground.autochat.v1';
+var PG_SCENARIO_KEY = 'tinylab.playground.scenario.v1';
+var PG_MODE_KEY = 'tinylab.playground.mode.v1';
 
-var PG_IMAGE_KEY = 'tinyrouter.playground.image.v1';
-var PG_SEARCH_HISTORY_KEY = 'tinyrouter.playground.search.history.v1';
-var PG_SEARCH_ACTIVE_KEY  = 'tinyrouter.playground.search.active.v1';
+var PG_IMAGE_KEY = 'tinylab.playground.image.v1';
+var PG_SEARCH_HISTORY_KEY = 'tinylab.playground.search.history.v1';
+var PG_SEARCH_ACTIVE_KEY  = 'tinylab.playground.search.active.v1';
 var PG_SEARCH_MAX_ENTRIES = 50; // Max search history entries in localStorage
 
 var pgState = {

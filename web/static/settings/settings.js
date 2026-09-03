@@ -85,7 +85,10 @@ async function renderEndpoint(c) {
           <div class="settings-panel-half" id="settings-section-combos" data-collapse-key="settings-combos">\
             <div class="settings-panel-header">\
               <span class="settings-panel-title settings-panel-title-clickable" onclick="toggleSettingsSectionCollapse(\'settings-combos\')">' + settingsSectionChevron() + t('combos') + '</span>\
-              <button type="button" class="btn btn-primary btn-sm" onclick="showAddCombo()">' + t('addCombo') + '</button>\
+              <span style="display:inline-flex;gap:8px;align-items:center">\
+                <button type="button" class="btn btn-sm" data-tooltip="' + escapeHtml(t('cleanupStaleDesc')) + '" onclick="cleanupStaleCombos(this)">' + t('cleanupStale') + '</button>\
+                <button type="button" class="btn btn-primary btn-sm" onclick="showAddCombo()">' + t('addCombo') + '</button>\
+              </span>\
             </div>\
             <div class="settings-panel-body">\
               <div id="combo-list" class="settings-card-grid"></div>\
@@ -94,7 +97,10 @@ async function renderEndpoint(c) {
           <div class="settings-panel-half" id="settings-section-quickslots" data-collapse-key="settings-quickslots">\
             <div class="settings-panel-header">\
               <span class="settings-panel-title settings-panel-title-clickable" onclick="toggleSettingsSectionCollapse(\'settings-quickslots\')">' + settingsSectionChevron() + t('quickSlots') + '</span>\
-              <button type="button" class="btn btn-primary btn-sm" onclick="showAddQuickSlot()">' + t('addQuickSlot') + '</button>\
+              <span style="display:inline-flex;gap:8px;align-items:center">\
+                <button type="button" class="btn btn-sm" data-tooltip="' + escapeHtml(t('cleanupStaleDesc')) + '" onclick="cleanupStaleQuickSlots(this)">' + t('cleanupStale') + '</button>\
+                <button type="button" class="btn btn-primary btn-sm" onclick="showAddQuickSlot()">' + t('addQuickSlot') + '</button>\
+              </span>\
             </div>\
             <div class="settings-panel-body">\
               <div id="quickslot-list" class="settings-card-grid"></div>\

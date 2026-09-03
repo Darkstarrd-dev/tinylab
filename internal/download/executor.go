@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 // ErrCancelled is returned when a download is cancelled via context.

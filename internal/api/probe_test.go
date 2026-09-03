@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/probe"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/customheaders"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/api/probe"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/customheaders"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // newTestRouter builds a minimal Router wired to an in-memory registry, a real

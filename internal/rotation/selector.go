@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/keystate"
 )
 
 // KeyStateProvider is the subset of *registry.Registry that the Selector needs:

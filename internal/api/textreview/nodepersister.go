@@ -1,8 +1,8 @@
 package textreview
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	tr "github.com/tinyrouter/tinyrouter/internal/textreview"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	tr "github.com/tinylab/tinylab/internal/textreview"
 )
 
 // registryPersister is the production NodePersister: it applies ramp-down

@@ -19,7 +19,7 @@ func repoRoot(t *testing.T) string {
 	}
 	root := filepath.Clean(filepath.Join(dir, "..", ".."))
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
-		t.Fatalf("repo root %q does not look like tinyrouter root: %v", root, err)
+		t.Fatalf("repo root %q does not look like tinylab root: %v", root, err)
 	}
 	return root
 }

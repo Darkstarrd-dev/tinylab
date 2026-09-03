@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 func setupTestProvider(t *testing.T, priorities []int, strategy string, stickyLimit int) (*fakeStore, *Selector) {

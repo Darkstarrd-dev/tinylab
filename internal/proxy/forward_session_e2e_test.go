@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // TestSessionKey_EndToEnd_FlowedToEntryAndConsoleLog drives a real chat

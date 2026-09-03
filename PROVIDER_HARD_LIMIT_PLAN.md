@@ -1,7 +1,7 @@
 # 执行文档：Provider Hard Limit（RPM/TPM 自动节流）
 
 > 本文档为自足执行规格：执行者无需对话上下文，按顺序自上而下执行即可完成。
-> 工作目录：`C:/opencode/tinyrouter`。文档内所有行号来自本次勘察时的 read 快照标签（如 `#55DC`），执行前必须重新 read 对应文件确认。
+> 工作目录：`C:/opencode/tinylab`。文档内所有行号来自本次勘察时的 read 快照标签（如 `#55DC`），执行前必须重新 read 对应文件确认。
 
 ---
 
@@ -252,7 +252,7 @@ func NewHardLimiter() *HardLimiter // window: defaultHLWindow, windows: make(map
 
 ## 4. 验证步骤（命令级）
 
-前置：仓库根 `C:/opencode/tinyrouter`；Go 1.25+；node 可用。
+前置：仓库根 `C:/opencode/tinylab`；Go 1.25+；node 可用。
 
 1. 编译与静态检查：
    ```

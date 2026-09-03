@@ -315,7 +315,7 @@ flowchart TD
  }
 ```
 
-- 请求头：所有 Batch 请求带 `X-TinyRouter-Source: playground-batch` 与 provenance（project/prompt/variant）；ModelScope 额外带 `X-Modelscope-Async-Mode: true`。
+- 请求头：所有 Batch 请求带 `X-TinyLab-Source: playground-batch` 与 provenance（project/prompt/variant）；ModelScope 额外带 `X-Modelscope-Async-Mode: true`。
 - **结果解析**：兼容 OpenAI `data[]` 与 ModelScope/DashScope 的 `output.results`、`output_images`、`output.images`、`image_url`；图片项支持 URL、`b64_json`/`base64`，保留 `revised_prompt`。
 - **ModelScope 异步任务**：提交只返回嵌套 `task_id` 时，通过 proxy `ImageTask` 轮询 `GET /v1/tasks/{id}?model={provider/model}`，带 `X-Modelscope-Task-Type: image_generation`；最多 60 次、间隔 2s、单次 10s 超时，SUCCEED/SUCCESS/COMPLETE/DONE 才完成，FAIL/ERROR/CANCEL 失败，只有拿到真实图片资产才进入下一 Variant。
 - **资产校验**（写入前强制）：MIME 必须 `image/*`、字节 ≤32 MiB、`image.DecodeConfig` 可解码且宽高为正；jpeg 归一为 jpg 扩展名。
@@ -440,7 +440,7 @@ flowchart TD
 5. **落盘与恢复**：`imgs/{slug}/p####/v####.ext` 生成成功；重启进程后 Reconcile 恢复 succeeded 状态、缺失槽位标 interrupted。
 6. **重试**：失败 variant 单条重试后变 succeeded，其余不动。
 7. **终态**：部分失败 → `completed_with_errors` 且项目/variant `LastError` 非空（`scheduler_test.go` 覆盖该契约）。
-8. **前端**：SSE 事件驱动 dashboard 实时更新；离开页面任务继续，重进先读 `tinyrouter.playground.imageBatchActiveProject.v1` 再 snapshot-first 恢复（GET snapshot 成功后才开 SSE）；Close/模式切换先 cleanup 关闭 SSE 再退出 UI，任务不被 UI 关闭隐式取消。
+8. **前端**：SSE 事件驱动 dashboard 实时更新；离开页面任务继续，重进先读 `tinylab.playground.imageBatchActiveProject.v1` 再 snapshot-first 恢复（GET snapshot 成功后才开 SSE）；Close/模式切换先 cleanup 关闭 SSE 再退出 UI，任务不被 UI 关闭隐式取消。
 
 ---
 **验证方案与结果**：受影响包测试、Playground webview 构建、临时实例 Batch UI DOM/交互冒烟均通过；全量 `go test ./...` 唯一失败为既有 `internal/mediaedit/TestManager_VideoToWebp` 的 ffprobe `count_frames=N/A` 环境问题。部署实例已替换并在端口 20102 返回 200；ModelScope 真密钥端到端生成尚未执行。
@@ -465,13 +465,13 @@ flowchart TD
 
 - `go test ./internal/imagebatch/... ./internal/api/imagebatch/... ./internal/proxy/...`：通过。
 - 覆盖：异步提交→轮询→base64 资产、失败状态、同步 `output.results`、非 ModelScope `n:1`/异步头回归、proxy task 路由/Provider Key/任务头透传。
-- Playground webview 构建与部署替换已完成；部署前备份：`C:\Tools\TinyRouter\backup-remediation-20260811-155529`。部署实例：`tinyrouter-webview-pg-stripped.exe`，端口 20102。
+- Playground webview 构建与部署替换已完成；部署前备份：`C:\Tools\TinyLab\backup-remediation-20260811-155529`。部署实例：`tinylab-webview-pg-stripped.exe`，端口 20102。
 ### 15.4 前端生命周期审计修正（2026-08-11）
 
 依据 `image_batch_project_redesign_plan.md` 审核结论（P0-1~P0-4、P1-1~P1-4）修正，后端 `/api/image-batches` 协议、SSE 事件名与 manifest schema 未变：
 
 - **P0-1 全局引用修复**：`pg-ui.js` 不再引用未定义的 `root`，改以全局函数存在性守卫或显式 `window.*` 引用，模式切换与执行态 sidebar 刷新不再抛 `ReferenceError`。
-- **P0-2 执行项目引用持久化**：create/open-project 成功后写 `tinyrouter.playground.imageBatchActiveProject.v1`（`{schemaVersion:1, projectId, savedAt}`）；只存 projectId，不存 snapshot/trace/凭证。~~刷新/重入由 `pgImageBatchOnEnter` 先读引用再 GET snapshot，snapshot 成功后才进入 executing~~ —— **该自动重入路径已于 2026-08-11 复核废除（见 §15.5）**：Batch 仅由显式点击进入，恢复改由 `pgImageBatchRestore()` 承担。
+- **P0-2 执行项目引用持久化**：create/open-project 成功后写 `tinylab.playground.imageBatchActiveProject.v1`（`{schemaVersion:1, projectId, savedAt}`）；只存 projectId，不存 snapshot/trace/凭证。~~刷新/重入由 `pgImageBatchOnEnter` 先读引用再 GET snapshot，snapshot 成功后才进入 executing~~ —— **该自动重入路径已于 2026-08-11 复核废除（见 §15.5）**：Batch 仅由显式点击进入，恢复改由 `pgImageBatchRestore()` 承担。
 - **P0-3 统一 Close 入口**：`pgImageBatchCloseUI()` = cleanup（关 EventSource/timers）+ `pgImageBatchExitUI({preserveProject:true})`，侧栏 Close 与模式切换共用，消除 SSE 连接泄漏与重复建流。
 - **P0-4 模式切换时序**：`pgSetMode()` 在切换 mode/加载目标模式 windows 之前先退出 Batch 并恢复 Image 布局，防止 Image 布局污染目标模式。
 - **P1-1 显式 Stop 双语义**：侧栏提供 `pgImageBatchStop()`（after-current）与 `pgImageBatchStopImmediate()`（immediate）两个显式动作，后端 `controls.go` 仅接受这两种 mode。

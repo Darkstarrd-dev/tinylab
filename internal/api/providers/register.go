@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/customheaders"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
-	"github.com/tinyrouter/tinyrouter/internal/urlutil"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/customheaders"
+	"github.com/tinylab/tinylab/internal/outbound"
+	"github.com/tinylab/tinylab/internal/urlutil"
 )
 
 // Handler wires up provider routes.

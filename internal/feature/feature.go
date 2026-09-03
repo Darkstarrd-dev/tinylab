@@ -1,4 +1,4 @@
-// Package feature declares TinyRouter's compile-time feature surface as a
+// Package feature declares TinyLab's compile-time feature surface as a
 // single honest manifest: what each feature is, what it depends on, which
 // static assets it owns, and whether its code is actually compiled into this
 // binary.

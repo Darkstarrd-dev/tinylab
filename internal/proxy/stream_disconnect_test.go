@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // smallChunkReader wraps a string reader and returns at most chunkSize bytes

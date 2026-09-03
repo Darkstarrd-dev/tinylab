@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 )
 
 // Handler wires up the /api/models endpoint.

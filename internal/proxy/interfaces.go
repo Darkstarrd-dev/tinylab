@@ -3,11 +3,11 @@ package proxy
 import (
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/keystate"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // Logger abstracts the logging sink the proxy writes to. It is the exact subset

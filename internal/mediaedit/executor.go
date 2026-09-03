@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // ErrCancelled is returned when a job is cancelled.

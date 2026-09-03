@@ -178,7 +178,7 @@
     var body = { model: model, messages: [{ role: 'system', content: instruction }, { role: 'user', content: input.trim() || 'Create a random image prompt.' }], temperature: 0.8, stream: false };
     fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Tinyrouter-Source': 'playground' },
+      headers: { 'Content-Type': 'application/json', 'X-Tinylab-Source': 'playground' },
       body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().then(function (data) {
@@ -237,7 +237,7 @@
 
     fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Tinyrouter-Source': 'playground' },
+      headers: { 'Content-Type': 'application/json', 'X-Tinylab-Source': 'playground' },
       body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().then(function (data) {

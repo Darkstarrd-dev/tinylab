@@ -2,7 +2,7 @@
 
 > 研究：在已建成的契约系统（底部架构，见 [`docs/assistant_contract_research.md`](docs/assistant_contract_research.md)）之上，实现小精灵的**交互层**。用户提出三级递增复杂度：①侧边 dock 客服式悬浮窗 → ②可在 App 内移动的 spritesheet 形象 + 漫画气泡 → ③可在系统桌面行动的桌面宠物。
 >
-> 本文档梳理三级要求并逐级研究可行性、落地依据（TinyRouter 真实前端/原生代码）、实现方案、风险与升级路径。
+> 本文档梳理三级要求并逐级研究可行性、落地依据（TinyLab 真实前端/原生代码）、实现方案、风险与升级路径。
 
 ## 1. 定位：交互层 vs 底部架构
 
@@ -53,7 +53,7 @@
 - **后端依赖**：任务 A 的 `/api/assistant/dispatch`；落地前可用 mock handler 返回固定 `{tool, route}` 验证 UI。
 
 ### 4.4 验证
-- `node --check web/static/sprite.js`；`go build`（重 embed）；按 `tinyrouter-frontend-smoke-test` skill 起真实 binary（temp dir + `port:` only config），headless 浏览器：切页（Monitor→Settings）后 dock/modal **仍在**（`document.getElementById('sprite-dock')` 非空）；点 dock 开 modal；发送意图→消息渲染；console 无 error；暗/亮主题切换颜色跟随。
+- `node --check web/static/sprite.js`；`go build`（重 embed）；按 `tinylab-frontend-smoke-test` skill 起真实 binary（temp dir + `port:` only config），headless 浏览器：切页（Monitor→Settings）后 dock/modal **仍在**（`document.getElementById('sprite-dock')` 非空）；点 dock 开 modal；发送意图→消息渲染；console 无 error；暗/亮主题切换颜色跟随。
 - i18n：键进 `i18n.js`。
 
 ### 4.5 风险
@@ -81,7 +81,7 @@
 - 动画循环：`requestAnimationFrame` 按 `sprite.json` 帧表步进 `background-position`；状态机 `state=idle|walk|talk`，移动时切 `walk`，停则 `idle`，气泡打开切 `talk`。
 - click-to-move：监听 `.main` 点击→`moveSpriteTo(e.clientX,e.clientY)`（限定在 `.main` 视口内）；移动用 `transition:left .4s,top .4s` 或 JS 缓动。
 - 气泡：`#sprite-bubble` 绝对定位在形象附近，`::after` 尖角指向形象；内含 `<input>` + 发送按钮→`sendSpriteIntent`（复用 L1）。
-- 侧栏释放按钮：`.top-header-nav` 或 utility 菜单加按钮 `onclick="releaseSprite()"`（参考 `tinyrouter-header-nav-reference-control` 的 nav 装配约束）。
+- 侧栏释放按钮：`.top-header-nav` 或 utility 菜单加按钮 `onclick="releaseSprite()"`（参考 `tinylab-header-nav-reference-control` 的 nav 装配约束）。
 
 ### 5.4 验证
 - 浏览器 smoke：释放后形象出现并 idle 动画；点击移动→walk 动画→停 idle；气泡打开→输入→消息流；切页形象仍在（body 级）；暗/亮主题气泡配色跟随。

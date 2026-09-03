@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/assistant"
+	"github.com/tinylab/tinylab/internal/assistant"
 )
 
 func setupTestHandler(t *testing.T) (*Handler, chi.Router) {

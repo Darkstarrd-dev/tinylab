@@ -1,7 +1,7 @@
 > **最后核对（2026-08-31，Provider 级 Retry/Cooldown override）：** `Provider` 新增三个 `*int` 指针字段 `MaxRetriesOverride` / `RetryIntervalOverrideSec` / `CooldownOverrideSec`（types.go，omitempty 零值兼容）；`cooldown.go` 新增 `MarkUnavailableWithOverride(..., overrideSec *int)`——非 nil 时以固定 `overrideSec` 秒（clamp≥1）替换 `pow2(BackoffLevel)` 指数退避，普通 `MarkUnavailable` 传 nil 保持原行为；`selector.go::OnKeyFailure` 读 `Provider.CooldownOverrideSec` 传入；`isKeyAvailable`/`SonestCooldown` 读锁内存储值自动反映覆盖。**覆盖优先级：** provider 级 `MaxRetriesOverride`（clamp 1-20，retry.go::maxRetriesFor）> 全局 `RotationConfig.MaxRetries`（≤0→5）；均匀间隔 `RetryIntervalOverrideSec`（clamp 0-60s）仅替换 `handle429`/`handleUpstreamError` 的**通用退避段**（HasQuota `BackoffSequence` + 5xx 退避），NIM ladder / quota 头 `ModelExhausted` 每日锁 / SenseNova entitlement 300m / rpm 60s + tpm 15s **固定段不被覆盖**（proxy 域，详见 proxy-architecture.md §7.4）。与既有 `effectiveStrategy`/`effectiveStickyLimit`（Provider 级覆盖全局）同模式。
 >
 > **最后核对（2026-08-29，Round-2 P1-07/NIM与currentKey对齐）：** `monitor/currentKey` 与 `SelectKey` 语义对齐——NIM 使能时以 `WaitNIMInterval==0` 过滤候选，`ManualKey` pin 优先；`Entry.ProviderID` 新增并参与 `decInFlightForKey` 精确匹配，跨 Provider KeyID 碰撞不再误扣。
-﻿# TinyRouter Rotation Key 轮询架构
+﻿# TinyLab Rotation Key 轮询架构
 
 > **文档定位：** `internal/rotation/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
@@ -17,7 +17,7 @@
 
 ## 1. 范围与结论
 
-`internal/rotation/` 是 TinyRouter 的 **Key 轮询（Rotation）模块**，承载 provider 下多个 key 的选取与 per-key 运行时记账：冷却（cooldown）、指数退避（backoff）、配额锁（daily-quota / balance / rate-limit）、NIM 请求计数与节流、以及上游速率限制响应头的解析。它自身不处理 HTTP 转发、SSE、用量记录或管理接口。
+`internal/rotation/` 是 TinyLab 的 **Key 轮询（Rotation）模块**，承载 provider 下多个 key 的选取与 per-key 运行时记账：冷却（cooldown）、指数退避（backoff）、配额锁（daily-quota / balance / rate-limit）、NIM 请求计数与节流、以及上游速率限制响应头的解析。它自身不处理 HTTP 转发、SSE、用量记录或管理接口。
 
 - **谁调用它：** `internal/proxy/` 通过 `KeyProvider` 接口（proxy/interfaces.go:27-38）注入 `*rotation.Selector`，在 `forwardWithRetry` 循环中调用 `SelectKey`、`OnKeyFailure`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429`、`MarkDailyQuotaLocked`、`MarkRateLimited`、`MarkBalanceLocked`、`ClearError`、`Settings`；`internal/app/app.go` 作为组合根构造 `Selector` 并调用 `SetStateHook` 将状态变更回调挂到 `state.yaml` 持久化（selector.go:36-39）。
 - **它调用谁：** `keystate`（`*keystate.KeyRuntimeState` 类型 + 自带锁方法）、`config`（配置与 `Provider.IsNIM()` 判定）；经 `KeyStateProvider` 接口（selector.go）取得 provider 定义与 per-key 运行时状态——接口由 `*registry.Registry` 结构性满足（`app.go` 组合根注入），故 rotation **不 import registry**。rotation 不直接写磁盘；状态持久化由注入的 `onStateChange` 钩子旁路触发。
@@ -505,7 +505,7 @@ flowchart TD
 ```powershell
 go test ./internal/rotation/...
 go test ./...
-go build -o tinyrouter .
+go build -o tinylab .
 ```
 
 涉及策略 / 冷却 / NIM / 错误分类 / 速率限制头的修改，应优先跑 `selector_test.go`、`cooldown_test.go`、`nim_test.go`、`error_rules_test.go`、`ratelimit_test.go`，并手工用浏览器验证选择分布、冷却恢复与 NIM 节流表现。

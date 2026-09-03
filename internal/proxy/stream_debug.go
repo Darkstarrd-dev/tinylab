@@ -3,7 +3,7 @@ package proxy
 import (
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/sse"
+	"github.com/tinylab/tinylab/internal/sse"
 )
 
 // parseAndBroadcastChunk extracts delta text from an SSE data: line in debug

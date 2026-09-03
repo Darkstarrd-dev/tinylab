@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 // ExportChapterItem represents a single chapter in the export request.

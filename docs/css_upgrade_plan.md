@@ -1,4 +1,4 @@
-# TinyRouter CSS 优化计划
+# TinyLab CSS 优化计划
 
 > 计划状态：进行中
 >
@@ -34,7 +34,7 @@
 
 - `style.css` 同时承载主题、全局布局、Header、按钮、表单、Modal、Settings、Download、Monitor、Auth 等基础设施；大范围移动规则容易破坏跨页面契约。
 - `playground.css` 以 `.pg-*`、`.ed-*`、`.ge-*` 等模块命名空间为主，但仍包含全屏布局、主题覆盖、Editor/Gallery/Text Review 和 Log Reader 等多个边界。
-- TinyRouter 没有 CSS bundler；CSS 文件通过 HTML 和 `embed.FS` 交付。拆分必须同步入口、静态资产、构建变体和 HTTP 验证。
+- TinyLab 没有 CSS bundler；CSS 文件通过 HTML 和 `embed.FS` 交付。拆分必须同步入口、静态资产、构建变体和 HTTP 验证。
 - 现有主题不是单一 dark/light，而是 72 个组合（2 mode × 9 variant × 4 style），任何 Token 或层叠调整都必须避免只在默认暗色下成立。
 
 ### 1.3 当前基线
@@ -1350,7 +1350,7 @@ Phase 0 工作项 6 的源码级产物：页面 → shell 可用性 / 导航按�
 
 **1.19.1 构建与运行：**
 
-- 二进制：`go build -tags playground`（小写 tag），25,153,536 字节，置于 `tmp/css-verify/tinyrouter.exe`（验证后已删除）。
+- 二进制：`go build -tags playground`（小写 tag），25,153,536 字节，置于 `tmp/css-verify/tinylab.exe`（验证后已删除）。
 - 运行：临时 `run/config.yaml`，端口 21337，密码禁用，`enablePlayground` true→false 切换两个 shell；浏览器为 headless Chromium 150（playwright-core；xd://browser 工具不可用时的替代通道）。
 
 **1.19.2 两个 shell 的静态资源基线（Phase 0 工作项 7 完成）：**

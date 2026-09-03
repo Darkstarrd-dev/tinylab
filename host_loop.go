@@ -5,7 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 // runHostLoopConsole blocks on OS signal (SIGINT/SIGTERM) or UI-triggered

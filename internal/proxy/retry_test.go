@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/rotation"
 )
 
 func newSelectedKey() *rotation.SelectedKey {

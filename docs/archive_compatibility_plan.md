@@ -1,4 +1,4 @@
-# TinyRouter 归档兼容与媒体交接实施计划
+# TinyLab 归档兼容与媒体交接实施计划
 
 > **文档定位：** 本文件是“ZIP/7z/RAR 统一归档能力 + Gallery/GIF/Download 媒体交接”实施前的唯一执行上下文。它是计划，不代表功能已经实现；实施完成后，实际行为以源码、测试和同步后的架构文档为准。
 >
@@ -332,7 +332,7 @@ type ArchiveConfig struct {
 }
 ```
 
-`Config` 增加 `Archive ArchiveConfig`。第一阶段不自动把 PATH 解析结果写入配置，不在 `finalizeConfig` 因工具缺失阻塞 TinyRouter 启动；无工具时 Archive/Gallery/GIF 显示 disabled/error。
+`Config` 增加 `Archive ArchiveConfig`。第一阶段不自动把 PATH 解析结果写入配置，不在 `finalizeConfig` 因工具缺失阻塞 TinyLab 启动；无工具时 Archive/Gallery/GIF 显示 disabled/error。
 
 `TempDir` 只允许配置为绝对路径或相对 configDir 的路径，启动时创建 0700 workspace；若目录不可用，归档能力关闭并保留其它核心功能。
 

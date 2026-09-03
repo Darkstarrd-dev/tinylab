@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path string, entryFormat combo.EntryFormat) {
@@ -101,7 +101,7 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 		}
 	}
 
-	// NOTE: entry-format ↔ provider protocol matching was removed. TinyRouter
+	// NOTE: entry-format ↔ provider protocol matching was removed. TinyLab
 	// fronts aggregating proxies (e.g. newapi / 2api) that serve multiple
 	// protocols from the same provider, and capabilities are per-model rather
 	// than per-provider. Whatever protocol the client requests, the proxy

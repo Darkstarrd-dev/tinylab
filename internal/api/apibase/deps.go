@@ -16,17 +16,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	"github.com/tinyrouter/tinyrouter/internal/archivetool"
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/archive"
+	"github.com/tinylab/tinylab/internal/archivetool"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/outbound"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // Deps bundles every dependency and shared runtime state that the API handler
@@ -224,7 +224,7 @@ func SyncIDCounter(cfg *config.Config) {
 }
 
 // ValidateBaseURL 校验 provider BaseURL 格式（scheme + hostname），
-// 不拦截私网/回环地址（TinyRouter 为纯本地工具，无 SSRF 风险）。
+// 不拦截私网/回环地址（TinyLab 为纯本地工具，无 SSRF 风险）。
 func ValidateBaseURL(baseURL string) error {
 	if baseURL == "" {
 		return fmt.Errorf("baseUrl is required")

@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 )
 
 // testOwner is one fixed owner identity shared by every request in a test:

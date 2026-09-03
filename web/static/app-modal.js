@@ -183,7 +183,7 @@ window.promptModal = promptModal;
 window.openModelPickerModal = openModelPickerModal;
 
 function closeModalOverlay() {
-  document.dispatchEvent(new CustomEvent('tinyrouter:modal-close'));
+  document.dispatchEvent(new CustomEvent('tinylab:modal-close'));
   var overlay = document.getElementById('modal-overlay');
   if (typeof window.__confirmResolver === 'function') {
     var r = window.__confirmResolver;

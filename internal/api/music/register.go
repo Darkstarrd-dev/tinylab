@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // Handler implements /api/music endpoints.
@@ -120,7 +120,7 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
-	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
+	req.Header.Set("User-Agent", "TinyLab/1.0 Music")
 	if rg := r.Header.Get("Range"); rg != "" {
 		req.Header.Set("Range", rg)
 	}
@@ -465,7 +465,7 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, body.URL, nil)
-	req.Header.Set("User-Agent", "TinyRouter/1.0 Music")
+	req.Header.Set("User-Agent", "TinyLab/1.0 Music")
 	if strings.Contains(strings.ToLower(u.Hostname()), "bilivideo.com") || strings.Contains(strings.ToLower(u.Hostname()), "bilibili.com") {
 		req.Header.Set("Referer", "https://www.bilibili.com/")
 	}

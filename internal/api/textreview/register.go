@@ -9,9 +9,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	tr "github.com/tinyrouter/tinyrouter/internal/textreview"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	tr "github.com/tinylab/tinylab/internal/textreview"
 )
 
 // defaultCleanSystemPrompt is the built-in cleanup system prompt returned by

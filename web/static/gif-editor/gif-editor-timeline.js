@@ -1,5 +1,5 @@
 // web/static/gif-editor-timeline.js
-// Timeline, Virtual Window & Zoom Handling for TinyRouter GIF Editor
+// Timeline, Virtual Window & Zoom Handling for TinyLab GIF Editor
 //
 // DOM contract (style.css "GIF Editor Upgrade Styles"): the track
 // (#gif-timeline, .gif-timeline-track) is a position:relative strip sized

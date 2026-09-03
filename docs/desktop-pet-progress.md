@@ -1,7 +1,7 @@
 # 桌面宠物（桌面小精灵）最小验证进度文档
 
 > 日期：2026-08-25
-> 位置：`C:/opencode/webview-pet-test/`（独立于 tinyrouter 项目的最小验证工程）
+> 位置：`C:/opencode/webview-pet-test/`（独立于 tinylab 项目的最小验证工程）
 > 目标：脱离项目验证「WebView2 + 透明 PNG 桌宠」的完整交互配方，稳定后移植进
 > `host_webview_windows.go` 的 `openPetWindow`。
 > **注意**：本文只覆盖窗口宿主配方（透明/穿透/DPI/死锁）。Assistant 功能层
@@ -113,7 +113,7 @@ Norma 自身的应用层实现可直接借鉴：
 | 拖拽 | Wails `--wails-draggable` CSS（框架内置） | 不可直接借鉴，我们的 postMessage 拖拽已可用 |
 | 右键 | 仅 JS `preventDefault`（无原生菜单） | 我们的 TrackPopupMenu 方案更符合需求 |
 
-参考副本：`C:/opencode/tinyrouter/reference/norma-ref/`（浅克隆，只读，已加入 .gitignore）。
+参考副本：`C:/opencode/tinylab/reference/norma-ref/`（浅克隆，只读，已加入 .gitignore）。
 关键文件：`backend/core/desktop/app.go`、`backend/core/desktop/window_clickthrough_windows.go`。
 
 ---
@@ -123,7 +123,7 @@ Norma 自身的应用层实现可直接借鉴：
 最小验证通过后移植进项目本体，改动：
 
 - `host_webview_windows.go::openPetWindow` 整体重写：
-  - 自建窗口类 `TinyRouterPetWnd`（BLACK_BRUSH 类画刷）+ `DwmEnableBlurBehindWindow` 空区域
+  - 自建窗口类 `TinyLabPetWnd`（BLACK_BRUSH 类画刷）+ `DwmEnableBlurBehindWindow` 空区域
   - `edge.Chromium.Embed` 直嵌自建 HWND（`webview2.New` 的自建窗口类不透明，不可用）
   - 交互 postMessage 协议（`petOnMessage`）：拖拽（宿主光标差值）、close、scale、
     size（页面驱动窗口尺寸：CSS px × dpr → 物理像素，2026-08-26）、hit
@@ -146,7 +146,7 @@ Norma 自身的应用层实现可直接借鉴：
    宠物已不用 `webview2.New`（该锁的保护目标），不再取锁。
 2. **隐藏父窗口 → DComp 不渲染**：controller 在隐藏窗口上创建后，事后 ShowWindow
    不会触发帧提交，窗口永久透明不可见。必须创建即可见（本配方空窗口本就全透明，无白闪）。
-3. **诊断手段**：临时 `TINYROUTER_AUTO_PET=1` 环境变量 + 入口日志定位（已移除）；
+3. **诊断手段**：临时 `TINYLAB_AUTO_PET=1` 环境变量 + 入口日志定位（已移除）；
    `FindWindowW` 探测须 `CharSet=CharSet.Unicode`；DPI unaware 进程的
    GetWindowRect 返回虚拟化坐标，合成点击/截屏须用同一坐标系。
 4. `PrintWindow` 对 DComp 内容无效（全黑），不能用于透明窗口内容验证，用屏幕截取。

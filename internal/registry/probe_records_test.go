@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/state"
+	"github.com/tinylab/tinylab/internal/state"
 )
 
 func TestUpdateProbeRecord_RoundTrip(t *testing.T) {

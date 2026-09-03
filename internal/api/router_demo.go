@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/games"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/games"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // registerDemoAPIRoutes mounts the /api/games endpoints on the given router.

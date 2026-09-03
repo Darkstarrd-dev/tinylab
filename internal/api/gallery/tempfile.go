@@ -22,7 +22,7 @@ const (
 	galleryTempTTL = 24 * time.Hour
 	// galleryTempRootName is the dedicated workspace root inside the OS temp
 	// directory, so sweeping it can never delete foreign files.
-	galleryTempRootName = "tinyrouter-gallery"
+	galleryTempRootName = "tinylab-gallery"
 	// galleryTempSweepInt is the lazy sweep cadence (at most once per create).
 	galleryTempSweepInt = time.Hour
 )

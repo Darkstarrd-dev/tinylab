@@ -8,7 +8,7 @@
     </windowsSettings>
   </application>
 
-  <!-- Request administrator privileges only if needed; TinyRouter runs as standard user. -->
+  <!-- Request administrator privileges only if needed; TinyLab runs as standard user. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

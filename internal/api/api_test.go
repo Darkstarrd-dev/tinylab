@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 func setupTestServer(t *testing.T) (*httptest.Server, *registry.Registry, string, *Router) {
@@ -1244,7 +1244,7 @@ func TestCSRF_BlocksSimplePOST(t *testing.T) {
 // middleware has exactly one mount point on the gallery boundary (inside the
 // gallery handler's Register, like archive/editor/filetransfer — NOT also on
 // the /api/gallery route group). A gallery request with no owner cookie must
-// receive exactly one tinyrouter_owner Set-Cookie. Regression: the middleware
+// receive exactly one tinylab_owner Set-Cookie. Regression: the middleware
 // was mounted twice (route group + Register), emitting two Set-Cookie headers
 // with different owner values so the browser's stored owner drifted from the
 // owner stamped on the request context (session owner mismatch).

@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/api/probe"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/api/probe"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // sampleConfig returns a minimal config with one provider (p1/Prov1) that has

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // F-16: download URLs are pre-flighted under the outbound SSRF policy before

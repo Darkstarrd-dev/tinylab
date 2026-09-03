@@ -1,4 +1,4 @@
-# TinyRouter Proxy 代理核心架构
+# TinyLab Proxy 代理核心架构
 > **最后核对（2026-08-31，Round-2 P0-02/P1-01/P1-03/P1-04/P2-01 流式用量/SSE/Quota）：** (1) **token 原子化 + 时间驱动广播**——`stream.go` `inputTokens`/`outputTokens`/`contentCharsTotal` 改 `atomic.Int64`（stream.go:63-65），新增 250ms `time.Ticker` goroutine 在计数变化时推送 `request-tokens`（替代原 1500ms read-batch 节流，消除上游静默期盲区，stream.go:67-107）；OpenAI/Anthropic usage 提取改**条件赋值**（`if in>0`/`if out>0`，output-only usage 不再把 `inputTokens` 清零，stream.go:199-215/277-292/375-390）；终态 `recordUsage` 前 `outputTokens==0 && contentCharsTotal>0` 时补 `contentCharsTotal/4` fallback（stream.go:465-467）。(2) **include_usage 渐进推广**——`forward_retry.go` 对 OpenAI 流式默认注入 `stream_options.include_usage`（局部 `injectedStreamOpts`，forward_retry.go:46-60），上游 400/422 拒绝时 strip 后重试一次（`streamOptsStripped`，forward_retry.go:251-262）。(3) **SSE version**——`api/sse/register.go` `streamUsageEvents` 每推送附加单调 `seq` version（`appendVersion`），前端 `monitor_io.js` 检测 gap 触发补偿拉取。(4) **getQuotas 内联 keyDetail**——`api/monitor/register.go` 重构 `buildModelKeys`（复用 `getModelKeys` 逻辑），`getQuotas` 内联每 key latency/avgSpeed，消前端 N+1。
 > **最后核对（2026-08-29，Round-2 P0-03/P0-05/InFlight与分级预算）：** HardLimit/NIM 取消分支配对 `DecInFlight`（`forward_retry.go:113/126`）；非流式 `passThroughResponse` 分级预算——`image/*` 流式 `io.Copy` 零缓冲、`text/*` 32MiB、`application/json` 256MiB（兼容 64MiB 测试）、其他 16MiB，`maxPassThroughBody` 可缩小；该分级覆盖 `TestPassThrough_LargeBodyStreamsFully`。
 
@@ -30,7 +30,7 @@
 > **2026-07-26 更新（P1-5 文件拆分，行为不变）：** `internal/proxy/forward.go`（591 行）按职责拆为 4 个文件：`forward.go`（共享叶级工具：`resolveDisplayModel`/`generateToolCallID`/`ensureToolCallIDs`/`writeError`/`maskURL`/`backfillThoughtSignatures`/`hasThoughtSignature`）、`forward_request.go`（`handleProxy` 请求解析入口）、`forward_combo.go`（`handleCombo` 策略路由）、`forward_retry.go`（`forwardWithRetry` 重试循环 + 非流式 keep-alive 延迟刷新 + `broadcastRequestStart`/`broadcastTTFT`/`broadcastTokens`，**H-8 bug 区原样搬迁未改语义**）。`internal/proxy/stream.go`（531 行）拆为 4 个文件 + 1 处迁移：`stream.go`（`streamResponse`/`passThroughResponse` I/O 循环）、`stream_usage.go`（`sseContentLength`/`parseSSEChunkDelta`/`chunkDelta`/`formatTokenDelta`/`itoa`）、`stream_anthropic.go`（`parseAnthropicSSEUsage`）、`stream_debug.go`（`parseAndBroadcastChunk`）；`extractThoughtSignature` 迁入 `signature_cache.go`（与 `SignatureCacheProvider` 伴生）。`package proxy` 不变、无可见性/签名/行为变更，测试未改动。本文档内散落的 `forward.go:`/`stream.go:` 旧行号锚点（§5/§6/§7/§8/§17 等）尚未逐条重锚，以本节与 `PROJECT_MAP.md` §7 表为准。
 >
 > **2026-07-26 更新（P1-6 接口隔离，行为不变）：** `internal/proxy/interfaces.go` 的两个胖接口按职责拆分为窄接口 + composite：`KeyProvider`（原 11 方法）= `KeySelector`/`NIMProvider`/`CooldownManager`/`QuotaLocker`/`RotationSettings`（interfaces.go:24-62）；`ModelResolver`（原 9 方法）= `QuickSlotResolver`/`ProviderResolver`/`KeyStateAccessor`/`AliasResolver`/`ComboLister`（interfaces.go:65-106）。`Handler` 单一 `selector KeyProvider` 字段拆为 `keySel`/`nim`/`cooldown`/`quotaLock`/`rotSet` 5 个窄字段；单一 `reg ModelResolver` 字段拆为 `quickSlots`/`providers`/`keyState`/`aliases`/`comboList` 5 个窄字段（`reg` 保留为完整 `ModelResolver`，仅供现有测试经 `h.reg.GetKeyState` 访问 key 运行时状态）。`New` 签名不变（仍接收 composite 入参），内部将复合入参直接赋给各窄字段；所有非测试调用点经窄字段路由（`h.keySel.SelectKey` 等），`resolveDisplayModel` 形参由 `ModelResolver` 收窄为 `AliasResolver`。无行为变化，测试文件未改。
-> **2026-07-26 更新（H-8 修复，行为变更）：** 移除非流式 keep-alive 字节刷新路径。`forwardWithRetry`（`forward_retry.go`）原对 `!isStream` 请求在 20s 宽限期后由后台 goroutine 写 `"\n"` + `Flush` 提交 HTTP 200，再每 5s 写 `" "`；该首字节 `w.Write` 隐式提交 `WriteHeader(200)`，导致上游随后失败且全部 key 耗尽时 `writeError(w, 502)` 的 `WriteHeader` 被静默忽略——客户端收到 **HTTP 200 + 错误 JSON body** 而非 502。**修复**：删除整个 keep-alive goroutine（`keepAliveDelay`/`keepAliveInterval` 常量、`keepAliveDone`/`keepAliveStopped` channel、`if !isStream { go func(){...}() }` 块、`close(keepAliveDone); <-keepAliveStopped` 同步退出）；删除 `retryState.headersFlushed` 字段；`passThroughResponse` 移除 `headersFlushed bool` 参数，恒设 `Content-Type`/`X-TinyRouter-*` 头并调用 `w.WriteHeader(resp.StatusCode)`。现非流式响应在最终响应/错误前不向 `w` 写任何字节，`writeError(w, 502)` 恒生效。**行为变更**：keep-alive 字节原仅用于维持 CLIENT 短读超时（服务端 `WriteTimeout` 300s 由 Go 在读请求头后一次性设定，写字节不会重置它，故 keep-alive 对服务端超时无保护作用）；客户端在长耗时非流式请求上的短读超时须自行设足。300s 服务器 `WriteTimeout` 上限不变。详见 §8.7。
+> **2026-07-26 更新（H-8 修复，行为变更）：** 移除非流式 keep-alive 字节刷新路径。`forwardWithRetry`（`forward_retry.go`）原对 `!isStream` 请求在 20s 宽限期后由后台 goroutine 写 `"\n"` + `Flush` 提交 HTTP 200，再每 5s 写 `" "`；该首字节 `w.Write` 隐式提交 `WriteHeader(200)`，导致上游随后失败且全部 key 耗尽时 `writeError(w, 502)` 的 `WriteHeader` 被静默忽略——客户端收到 **HTTP 200 + 错误 JSON body** 而非 502。**修复**：删除整个 keep-alive goroutine（`keepAliveDelay`/`keepAliveInterval` 常量、`keepAliveDone`/`keepAliveStopped` channel、`if !isStream { go func(){...}() }` 块、`close(keepAliveDone); <-keepAliveStopped` 同步退出）；删除 `retryState.headersFlushed` 字段；`passThroughResponse` 移除 `headersFlushed bool` 参数，恒设 `Content-Type`/`X-TinyLab-*` 头并调用 `w.WriteHeader(resp.StatusCode)`。现非流式响应在最终响应/错误前不向 `w` 写任何字节，`writeError(w, 502)` 恒生效。**行为变更**：keep-alive 字节原仅用于维持 CLIENT 短读超时（服务端 `WriteTimeout` 300s 由 Go 在读请求头后一次性设定，写字节不会重置它，故 keep-alive 对服务端超时无保护作用）；客户端在长耗时非流式请求上的短读超时须自行设足。300s 服务器 `WriteTimeout` 上限不变。详见 §8.7。
 >
 > **2026-07-26 更新（4xx pass-through + 冷却等待 + 控制台请求者标识，行为变更）：** 修复"两个不同上游同样 400→30s『无可用 key』突发→恢复"的代理误冷却 bug。根因：400（请求格式错误，key 健康）经 `handleUpstreamError`→`ClassifyError(400,body)` 落入 `ActionTransient`（默认 30s）→ `MarkRateLimited` 锁健康 key 30s + 排除 → 并发请求全部即时 "no available keys" → 502 突发；30s 后冷却到期（上游从未故障）→ 恢复。**(A) 4xx pass-through：** `rotation/error_rules.go` 新增 `ActionPassThrough` + 400/422 默认 `ActionPassThrough`（文本规则优先可覆盖，新增聚合器文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`）；`retry.go` `handleUpstreamError` 改返回 `bool`（true=已原样写客户端+停止重试），新增 pass-through 分支——不调 `OnKeyFailure`/`MarkRateLimited`/不排除 key，转发上游原始 `resp.StatusCode`+body（保留如 Ollama "invalid reasoning value" 原文），`forward_retry.go` 调用点对 `true` 做 `EntryTracker.Remove`+`DecInFlight`+`return true,reqID`（caller 不再 `writeError(502)`）。**(B) 冷却等待：** `cooldown.go` 新增 `SonestCooldown(providerID, model, excludeKeyIDs)` + `CooldownInfo`（最早未排除 key 的 `ModelLocks[model]` 到期 + keyName/reason），`interfaces.go` `CooldownManager` 加该法；`forward_retry.go` `SelectKey` 失败时先查最近冷却，有则 `select{Context|time.After(wait)}`（上限 30s）等待后重试一次 `SelectKey`，避免冷却窗口内并发即时 502 突发——真正耗尽仍返回 502。**(C) 控制台请求者标识：** `forward.go` 新增 `requestCallerTag`+`maskAuth`+`clipStr`（`src=`/masked `auth=`/`ua=`/`from=`，全 key 恒掩码，~80B 上限）；`reqID` 提至 `forwardWithRetry` 顶部生成一次贯穿 REQUEST/SEND/PROXY/错误行；`logRequest` 加 `reqID`+`callerTag`；各错误动作新增中文后果 WARN（指数退避/冷却 Ns/锁至次日 CST 00:05/网络错误退避切换）。**未改：** 最终状态码（502 耗尽 / 400 pass-through）；H-8 keep-alive 移除；`proxy.New` 签名。
 >
@@ -60,7 +60,7 @@
 
 ## 1. 范围与结论
 
-`internal/proxy/` 是 TinyRouter 的**代理核心包**，承载所有 `/v1/*`（OpenAI-compatible）请求的处理：模型解析、Key 选择、上游转发、SSE 流式透传、重试/故障转移、用量记录、在途跟踪与事件广播。它自身不含任何管理接口、配置加载或 UI 逻辑。
+`internal/proxy/` 是 TinyLab 的**代理核心包**，承载所有 `/v1/*`（OpenAI-compatible）请求的处理：模型解析、Key 选择、上游转发、SSE 流式透传、重试/故障转移、用量记录、在途跟踪与事件广播。它自身不含任何管理接口、配置加载或 UI 逻辑。
 
 - **谁调用它：** `internal/api/router.go` 在顶层挂载八个 `/v1/*` 路由（`/v1/chat/completions`、`/v1/completions`、`/v1/models`、`/v1/images/generations`、`/v1/embeddings`、`/v1/messages`、`/v1/responses`、`/v1/tasks/{taskId}`，见 router.go:228-240），把请求派发到 `proxy.Handler`；`internal/app/app.go` 作为组合根构造 `Handler` 并注入依赖（`app/app.go:129`）；`internal/api/sse_events.go` 消费 `Handler` 暴露的 `Broadcaster` / `EntryTracker`，把用量/在途/请求事件以 SSE 推送给管理 UI。四个协议入口——`/v1/chat/completions`（OpenAI Chat，仅注册 POST，见 §3）、`/v1/messages`（Anthropic Messages，仅注册 POST，见 §3.1）、`/v1/responses`（OpenAI Responses，仅注册 POST，见 §3.2）、`/v1/embeddings`（OpenAI Embeddings，仅注册 POST，见 §3.3）——并列、同端口、按路径区分。
 - **它调用谁：** `rotation.Selector`（Key 选择、冷却、退避、锁定）、`combo.Resolver`（combo 解析）、`registry.Registry`（provider/quickslot/key 运行时状态）、`usage.RingBuffer` 与 `usage.QuotaTracker`（用量）、`config`（配置与 provider 判定）、`util`（模型名拆分、token 提取、日志截断）。
@@ -119,7 +119,7 @@ flowchart LR
   - `r.Post("/v1/tasks/{taskId}", proxyHandler.PollTask)`。
 
 - **鉴权边界：** `/v1/*` 路由写在 `Routes` 函数顶层（router.go:196-204），而 `AuthMiddleware` 只包裹 `/api` 路由组（router.go:212-214）。因此 `/v1/*` 完全在 `AuthMiddleware` 之外，任意 API Key 或无 Key 均可访问（与 AGENTS.md “纯本地，无对外鉴权”一致）。
-- **CORS preflight（仅 `/v1/*`）：** router.go:194-204 处理 `OPTIONS /v1/*`，通过 `isLocalhostOrigin`（router.go:170-177）校验请求方 `Origin` 的 host 是否为 `127.0.0.1`、`localhost` 或 `::1`——**仅 localhost 来源的 Origin 被反射**到 `Access-Control-Allow-Origin`，外部网页不再能跨域调用本机代理。此外设置 `Allow-Methods: GET, POST, OPTIONS`、`Allow-Headers: Content-Type, Authorization`、`Expose-Headers: X-TinyRouter-Provider, X-TinyRouter-Key`，并以 204 响应。管理 `/api/*` 无 CORS（同源管理 UI），外部页面不能跨域读取配置或密钥。`/v1/messages` 经路径前缀 `/v1/*` 的 OPTIONS 处理自动覆盖，无需额外配置（router.go:200-203 注释）。
+- **CORS preflight（仅 `/v1/*`）：** router.go:194-204 处理 `OPTIONS /v1/*`，通过 `isLocalhostOrigin`（router.go:170-177）校验请求方 `Origin` 的 host 是否为 `127.0.0.1`、`localhost` 或 `::1`——**仅 localhost 来源的 Origin 被反射**到 `Access-Control-Allow-Origin`，外部网页不再能跨域调用本机代理。此外设置 `Allow-Methods: GET, POST, OPTIONS`、`Allow-Headers: Content-Type, Authorization`、`Expose-Headers: X-TinyLab-Provider, X-TinyLab-Key`，并以 204 响应。管理 `/api/*` 无 CORS（同源管理 UI），外部页面不能跨域读取配置或密钥。`/v1/messages` 经路径前缀 `/v1/*` 的 OPTIONS 处理自动覆盖，无需额外配置（router.go:200-203 注释）。
 - **securityHeaders 跳过 `/v1/`：** `securityHeaders` 中间件（router.go:151-165）对 `/v1/` 前缀路径跳过设置 CSP / `X-Content-Type-Options` / `X-Frame-Options` / `X-XSS-Protection`，使上游响应头透传（router.go:156）。
 - **上游 HTTP 代理：** `proxy.Handler.SetProxy`（handler.go:102-142）设置走代理的 `*url.URL`；`provider.UseProxy` 为 true 时，`forwardUpstream` 选择代理 client（upstream.go:104-120）。代理 URL 始终以 `http://host:port` 重建，端口范围 `[1,65535]`，非法则禁用代理并返回错误（handler.go:129-141）。
 
@@ -156,7 +156,7 @@ flowchart LR
 
 - **注册方式：** 仅注册 `POST` 方法（`r.Post("/v1/generateContent", proxyHandler.GenerateContent)`）。CORS 仍由 §3 的 `/v1/*` OPTIONS 处理自动覆盖。
 - **调用链：** `GenerateContent` 内部调用 `h.handleProxy(w, r, "/v1/generateContent", combo.EntryFormatGoogle)`，`entryFormat == EntryFormatGoogle` 经调用链下传，上游构造走 Google 专用路径（`buildGoogleUpstreamRequest`，见 §7.6）。
-- **不做格式翻译：** 请求体与响应体原样转发透传，不进行任何 OpenAI↔Google 格式转换。上游 URL 由 `urlutil.BuildGoogleGenerateContentURL` 自动拼接为 `{baseURL}/v1beta/models/{realModel}:generateContent`（流式追加 `:streamGenerateContent?alt=sse`），鉴权头设置 `x-goog-api-key: <key>`，并在转发时安全剥离 body 中的 TinyRouter `model` 和 `stream` 路由字段。
+- **不做格式翻译：** 请求体与响应体原样转发透传，不进行任何 OpenAI↔Google 格式转换。上游 URL 由 `urlutil.BuildGoogleGenerateContentURL` 自动拼接为 `{baseURL}/v1beta/models/{realModel}:generateContent`（流式追加 `:streamGenerateContent?alt=sse`），鉴权头设置 `x-goog-api-key: <key>`，并在转发时安全剥离 body 中的 TinyLab `model` 和 `stream` 路由字段。
 
 ### 3.4 入口协议透传策略（软策略）
 
@@ -192,7 +192,7 @@ flowchart LR
 | `sigCache` | `SignatureCacheProvider` | Gemini thought_signature 缓存 |
 | `debugModeProvider` | `func() bool` | 调试模式开关 |
 
-> **2026-07-27 更新（新增状态模型）：** `TraceConfig` 结构体（`internal/config/types.go`）定义持久化追踪配置：`Enabled bool`（默认 `false`）、`RetainDays int`（默认 `2`）、`MaxDiskMB int`（默认 `500`）；`Config.Trace` 字段（yaml/json `trace`）在 `DefaultConfig()` 中初始化。`traceLine` 结构体（`request_log.go:20-52`）定义两层 JSONL 行 schema：`Type`（`"index"`/`"request"`/`"attempt"`）、`ReqID`、`Timestamp`、`Provider`、`Model`、`KeyID`、`Status`、`LatencyMs`、`TTFTMs`、`InputTokens`、`OutputTokens`、`Error`、`Decision`（重试状态机决策）、`Provenance`（`X-TinyRouter-Provenance` 头值）、`Body`（截断后 body）。`TraceMgmtCall` 方法（`request_log.go`）捕获 ManagementClient 路径的调用，attempt n=1，decision="management probe"。`SweepTraces`/`sweepTracesOnce` 后台保留清理（每小时，按 retainDays + maxDiskMB 限制），在 `app.go:191` 以 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.Reta…
+> **2026-07-27 更新（新增状态模型）：** `TraceConfig` 结构体（`internal/config/types.go`）定义持久化追踪配置：`Enabled bool`（默认 `false`）、`RetainDays int`（默认 `2`）、`MaxDiskMB int`（默认 `500`）；`Config.Trace` 字段（yaml/json `trace`）在 `DefaultConfig()` 中初始化。`traceLine` 结构体（`request_log.go:20-52`）定义两层 JSONL 行 schema：`Type`（`"index"`/`"request"`/`"attempt"`）、`ReqID`、`Timestamp`、`Provider`、`Model`、`KeyID`、`Status`、`LatencyMs`、`TTFTMs`、`InputTokens`、`OutputTokens`、`Error`、`Decision`（重试状态机决策）、`Provenance`（`X-TinyLab-Provenance` 头值）、`Body`（截断后 body）。`TraceMgmtCall` 方法（`request_log.go`）捕获 ManagementClient 路径的调用，attempt n=1，decision="management probe"。`SweepTraces`/`sweepTracesOnce` 后台保留清理（每小时，按 retainDays + maxDiskMB 限制），在 `app.go:191` 以 `go a.proxyHandler.SweepTraces(a.shutdownCtx, cfg.Trace.Reta…
 
 ### 4.2 构造函数
 
@@ -357,7 +357,7 @@ flowchart TD
 1. **URL 统一由 `BuildUpstreamURL` 构造：** 不再单独实现 raw/完整 endpoint/host-root 三分支，改为一行调用 `BuildUpstreamURL(sel.Provider.BaseURL, "/v1/responses")`（upstream.go:85）。启发式 A 自动判断是否需注入 `/v1`：若 BaseURL 已含版本段（如 `/v1`、`/v1beta`）则不注入，否则注入。
 2. **鉴权头 `Authorization: Bearer <key>`（与 OpenAI Chat 保持一致）：** Responses 分支不设 `x-api-key`，复用 OpenAI Chat 的 Bearer 鉴权；固定头 `Content-Type: application/json`（upstream.go:90）。
 
-> 设计要点：Responses 入口与 Anthropic 入口**现在 URL 均通过 `BuildUpstreamURL` 统一构造**（不再各自实现三分支），启发式 A 自动判断是否注入 `/v1`。鉴权上 Responses 仍走 OpenAI 的 `Authorization: Bearer` 分支。TinyRouter 不解析 Responses 的 SSE event（如 `response.created`/`response.output_text.delta`/`response.completed`），只透传——但 SSE 数据结构与 OpenAI Chat 兼容，故 usage 提取复用 `util.ExtractTokens`（见 §8.9）。
+> 设计要点：Responses 入口与 Anthropic 入口**现在 URL 均通过 `BuildUpstreamURL` 统一构造**（不再各自实现三分支），启发式 A 自动判断是否注入 `/v1`。鉴权上 Responses 仍走 OpenAI 的 `Authorization: Bearer` 分支。TinyLab 不解析 Responses 的 SSE event（如 `response.created`/`response.output_text.delta`/`response.completed`），只透传——但 SSE 数据结构与 OpenAI Chat 兼容，故 usage 提取复用 `util.ExtractTokens`（见 §8.9）。
 
 ### 7.6 Google 原生 generateContent 上游请求构造（upstream.go）
 
@@ -365,7 +365,7 @@ flowchart TD
 
 1. **URL 由 `urlutil.BuildGoogleGenerateContentURL` 构造：** 拼接 `{baseURL}/v1beta/models/{realModel}:generateContent`（流式追加 `:streamGenerateContent?alt=sse`）。
 2. **鉴权头 `x-goog-api-key: <key>`：** 绝不设置 `Authorization` 头，直接将 key 设入 Google 官方头 `x-goog-api-key`。
-3. **安全剥离代理字段：** 自动剥离请求 body 中的 TinyRouter `model` 和 `stream` 路由字段，避免 Google 上游因识别到多余顶层字段返回 `400 INVALID_ARGUMENT`。
+3. **安全剥离代理字段：** 自动剥离请求 body 中的 TinyLab `model` 和 `stream` 路由字段，避免 Google 上游因识别到多余顶层字段返回 `400 INVALID_ARGUMENT`。
 
 ### 7.7 Anthropic Provider 配置示例
 
@@ -395,7 +395,7 @@ providers:
 
 成功且 `isStream` 时调用。流程：
 
-- **SSE 头与调试头：** `Content-Type: text/event-stream`、`Cache-Control: no-cache`、`Connection: keep-alive`，并写入 `X-TinyRouter-Provider` / `X-TinyRouter-Key`（stream.go:157-163）。
+- **SSE 头与调试头：** `Content-Type: text/event-stream`、`Cache-Control: no-cache`、`Connection: keep-alive`，并写入 `X-TinyLab-Provider` / `X-TinyLab-Key`（stream.go:157-163）。
 - **`WriteHeader(200)`：** 流式响应**始终**返回 200，上游错误已在重试阶段拦截（stream.go:164）。
 - **清除写死线：** 用 `http.NewResponseController(w).SetWriteDeadline(time.Time{})` 避免长 SSE 流被服务器 `WriteTimeout` 中断；下游 context 仍能在客户端断开时取消（stream.go:170-172）。
 - **客户端断开保护：** `streamResponse` 引入 `clientDisconnected bool` 标志。normalize 模式的 `w.Write` 失败（`for _, line := range sb.Feed` 内层）、raw 模式的 `w.Write` 失败、normalize 模式 `remaining` 写出失败，均设 `clientDisconnected=true` 并 `break`（内层 range 的 `break` 仅跳出 range，外层 `if clientDisconnected { break }` 检查跳出外层 for 循环，stream.go:307-310）。末尾据 `clientDisconnected` 设 `status="error"`、`errMsg="client disconnected"` 调 `recordUsage`，保证 `request-done` 广播不遗漏。
@@ -430,7 +430,7 @@ providers:
 
 ### 8.6 passThroughResponse（stream.go:309-341）
 
-非流式成功响应：设置 `Content-Type: application/json` 与 `X-TinyRouter-*` 头，用 `w.WriteHeader(resp.StatusCode)` **原样透传上游状态码**（stream.go:312-317）。**2026-08-09（audit F-14）：** body 改为显式预算读取——`maxPassThroughBodyBytes=256MiB`（`Handler.maxPassThroughBody` 字段，测试可缩小），先 `io.ReadAll(io.LimitReader(resp.Body, budget+1))` 完整读入预算内、**读成功后才 `WriteHeader`**；超预算 → 受控 502 + `recordUsage` 错误（不再 2026-08-03 起的无上限 `io.ReadAll`、也不再 64MiB 静默截断）；usage 捕获副本仍截 512KB；`io.ReadAll` 错误路径 `recordUsage(status="error")`（stream.go:405-408）。客户端断开统一为 `status="error"`、`errMsg="client disconnected"`（stream.go:334-341）。
+非流式成功响应：设置 `Content-Type: application/json` 与 `X-TinyLab-*` 头，用 `w.WriteHeader(resp.StatusCode)` **原样透传上游状态码**（stream.go:312-317）。**2026-08-09（audit F-14）：** body 改为显式预算读取——`maxPassThroughBodyBytes=256MiB`（`Handler.maxPassThroughBody` 字段，测试可缩小），先 `io.ReadAll(io.LimitReader(resp.Body, budget+1))` 完整读入预算内、**读成功后才 `WriteHeader`**；超预算 → 受控 502 + `recordUsage` 错误（不再 2026-08-03 起的无上限 `io.ReadAll`、也不再 64MiB 静默截断）；usage 捕获副本仍截 512KB；`io.ReadAll` 错误路径 `recordUsage(status="error")`（stream.go:405-408）。客户端断开统一为 `status="error"`、`errMsg="client disconnected"`（stream.go:334-341）。
 
 ### 8.7 非流式 keep-alive 延迟刷新（已移除 / H-8 修复）
 
@@ -438,7 +438,7 @@ providers:
 
 **为何移除（H-8）：** keep-alive 首字节 `w.Write([]byte("\n"))` 隐式提交 `WriteHeader(http.StatusOK)`。若上游随后失败且全部 key 耗尽，`forwardWithRetry` 返回 `(false, "")`，调用方 `writeError(w, http.StatusBadGateway, ...)` 的 `WriteHeader(502)` 被 Go `http.ResponseWriter` 静默忽略（首次 write 后 `WriteHeader` 不再生效）——客户端收到 **HTTP 200 + 错误 JSON body** 而非 502。20s 宽限期只覆盖了"快速失败不提交 200"这一半场景；超 20s 的失败仍会触发该 bug。
 
-**移除范围：** 删除 `keepAliveDelay`/`keepAliveInterval` 常量、`keepAliveDone`/`keepAliveStopped` channel、`if !isStream { go func(){...}() }` goroutine 块、`close(keepAliveDone); <-keepAliveStopped` 同步退出；删除 `retryState.headersFlushed` 字段；`passThroughResponse` 移除 `headersFlushed bool` 参数，恒设 `Content-Type`/`X-TinyRouter-*` 头并调用 `w.WriteHeader(resp.StatusCode)`。现非流式响应在最终响应/错误前不向 `w` 写任何字节，`writeError(w, 502)` 恒生效，502 全 key 耗尽契约恢复。
+**移除范围：** 删除 `keepAliveDelay`/`keepAliveInterval` 常量、`keepAliveDone`/`keepAliveStopped` channel、`if !isStream { go func(){...}() }` goroutine 块、`close(keepAliveDone); <-keepAliveStopped` 同步退出；删除 `retryState.headersFlushed` 字段；`passThroughResponse` 移除 `headersFlushed bool` 参数，恒设 `Content-Type`/`X-TinyLab-*` 头并调用 `w.WriteHeader(resp.StatusCode)`。现非流式响应在最终响应/错误前不向 `w` 写任何字节，`writeError(w, 502)` 恒生效，502 全 key 耗尽契约恢复。
 
 **关于服务端超时：** Go HTTP server 的 `WriteTimeout`（`config.ServerConfig.WriteTimeoutSec`，默认 300s，`internal/app/server_manager.go`）在读请求头后一次性设定写死线，写字节**不会**重置它——故 keep-alive 字节对服务端 WriteTimeout 无保护作用，300s 上限无论是否 keep-alive 都生效。keep-alive 字节的实际作用仅是维持 **CLIENT** 短读超时（向客户端周期注入字节以防其读超时）。移除后，客户端在长耗时非流式请求上须自行设置足够的读超时。`Compress` 中间件对 `/v1/images/*` 的绕过列表为历史遗留（keep-alive 已无），保留无害。
 
@@ -456,7 +456,7 @@ Anthropic 流式响应**复用同一份 `streamResponse` 逐 chunk 透传 + `htt
 
 ### 8.9 OpenAI Responses 入口的 SSE 透传
 
-OpenAI Responses 入口（`EntryFormatOpenAIResponses`）**复用 OpenAI 兼容的 `util.ExtractTokens` 提取 usage**（stream.go:212、254、318 的 OpenAI 分支），不需修改代码——Responses 的 SSE 数据结构（`response.created`/`response.output_text.delta`/`response.completed` 等）与 OpenAI Chat 兼容，token 字段（`input_tokens`/`output_tokens`）结构一致，`util.ExtractTokens` 可直接命中。TinyRouter **不解析** Responses 的 event 类型，只透传。
+OpenAI Responses 入口（`EntryFormatOpenAIResponses`）**复用 OpenAI 兼容的 `util.ExtractTokens` 提取 usage**（stream.go:212、254、318 的 OpenAI 分支），不需修改代码——Responses 的 SSE 数据结构（`response.created`/`response.output_text.delta`/`response.completed` 等）与 OpenAI Chat 兼容，token 字段（`input_tokens`/`output_tokens`）结构一致，`util.ExtractTokens` 可直接命中。TinyLab **不解析** Responses 的 event 类型，只透传。
 
 ## 9. 重试与故障转移状态机
 
@@ -529,7 +529,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 
 - 字段： `ID`、`Timestamp`、`Provider`、`Model`（解析后的真实模型 ID）、`OriginalModel`（请求时传入的原始模型名，alias 解析前的值；combo 目标为空字符串）、`KeyID`、`KeyName`、`Status`、`LatencyMs`、`TTFTMs`、`InputTokens`、`OutputTokens`、`Error`，以及调试态的 `ReqPayload`/`RespPayload`/`RespHeaders`/`RespStatus`/`ReqHeaders`/`UpstreamURL`（recorder.go:17-53）。
 - **OriginalModel 传递链路：** `handleProxy` 在 alias 解析前（forward.go:175）捕获 `originalModel := upstreamModel`，经 `forwardWithRetry`（forward.go:225）→ 错误处理器（retry.go:55/65/240）/ `streamResponse`（stream.go:139）/ `passThroughResponse`（stream.go:360）→ `recordUsage`（recorder.go:17）写入 `usage.Entry.OriginalModel`。Combo 目标（forward.go:203/210/215）传 `""`，因为 combo targets 已是解析后的模型名。前端 `monitor_recent.js` `renderUsageRow` 使用 `displayModelName(e.model, e.originalModel)` 辅助函数，优先从 `modelIdToAlias` map（由 `providersCache` 构建）查找 alias，其次 `originalModel`，兜底 `model`。Console `logRequest`（retry.go:43-54）优先用 `ResolveModelAliasByID` 查 alias，其次 `originalModel`，兜底 `upstreamModel`。Quota bar 使用 `bar.alias`（后端 `getQuotas` 通过 `ResolveModelAliasByID` 填充）。
-- **来源标记与分流（始终写入）：** 若请求带 `X-TinyRouter-Source` 头，则 `entry.Source = reqHeaders.Get("X-TinyRouter-Source")`（recorder.go:31-33）。`source == "playground"` 的请求写入独立的 `pgUsageBuf`（经 `Handler.SetPgUsage` 注入），其余写入 `usageBuf`，实现两个列表物理隔离。未带该头的请求 `Source` 为空（`json:"source,omitempty"` 不输出）。
+- **来源标记与分流（始终写入）：** 若请求带 `X-TinyLab-Source` 头，则 `entry.Source = reqHeaders.Get("X-TinyLab-Source")`（recorder.go:31-33）。`source == "playground"` 的请求写入独立的 `pgUsageBuf`（经 `Handler.SetPgUsage` 注入），其余写入 `usageBuf`，实现两个列表物理隔离。未带该头的请求 `Source` 为空（`json:"source,omitempty"` 不输出）。
 > **2026-07-27 更新（两层 JSONL 追踪日志，行为新增）：** `recordUsage` 新增 `decision string`、`provenance string` 参数（写入 `usage.Entry`）；`writeRequestLog` hook 在 body 截断前调用（保证完整 body 被捕获），受 `h.logRequests()` 运行时原子开关（加载自持久化 `cfg.Trace.Enabled`，默认 `false`）控制。追踪日志采用两层 JSONL 格式：`writeRequestLog` 写入 `traces/index-YYYYMMDD.jsonl`（每日轮转，同 reqID 末次写入覆盖，`traceLine` 结构体为 JSONL 行 schema）+ `traces/req/<reqID>.jsonl`（追加，仅首次调用写 request 行，后续每次调用写 attempt 行）。`TraceMgmtCall` 方法捕获 ManagementClient …
 - **Input Token 粗估（2026-07-21）：** `forwardWithRetry` 在创建 `processingEntry` 时设置 `InputTokens = len(bodyBytes) / 4`（约 4 字节≈1 token 粗估），使 `request-start` 事件立即携带 input token 估算值供前端实时显示。流式中若上游返回真实 input_tokens（Anthropic `message_start` / OpenAI usage chunk），经 `streamResponse` 提取后通过 `request-tokens` 事件更正。
 - **终态 token fallback（2026-08-31）：** `streamResponse` 调 `recordUsage` 前，若 `outputTokens==0 && contentCharsTotal>0` 则以 `contentCharsTotal / 4` 补写（stream.go:465-467）——上游从不发 usage 时终态不再为 0（配合 §7.4 include_usage 渐进注入与 §8.1 时间驱动广播，构成「流中实时 + 终态正确」）。
@@ -604,8 +604,8 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 
 > 软策略的前提是“客户端须使用与上游匹配的入口”——proxy 仍严格原样透传，不臆造协议间的双向翻译或自动协商；若客户端用错入口，上游会自行返回协议错误（由重试/透传机制处理）。
 
-- **流式成功头**（stream.go:157-163）：`Content-Type: text/event-stream`、`Cache-Control: no-cache`、`Connection: keep-alive`、`X-TinyRouter-Provider`、`X-TinyRouter-Key`；状态码恒为 200（stream.go:164）。
-- **非流式成功头**（stream.go:312-316）：`Content-Type: application/json` + `X-TinyRouter-*`；**状态码原样透传上游**（stream.go:317）。
+- **流式成功头**（stream.go:157-163）：`Content-Type: text/event-stream`、`Cache-Control: no-cache`、`Connection: keep-alive`、`X-TinyLab-Provider`、`X-TinyLab-Key`；状态码恒为 200（stream.go:164）。
+- **非流式成功头**（stream.go:312-316）：`Content-Type: application/json` + `X-TinyLab-*`；**状态码原样透传上游**（stream.go:317）。
 - **本地代理错误**：`writeError`（forward.go:290-298）写 `Content-Type: application/json` + 状态码 + `{"error":{"message":...,"type":"proxy_error"}}`。
 - **502 全 key 耗尽**：`handleProxy` 在 `forwardWithRetry` 返回 `false` 时写 `writeError(w, 502, "all keys exhausted")`；combo 全目标失败写 `all keys exhausted for combo: <name>`（forward.go:88-90、112、116、124）。
 - **上游状态透传语义**：非流式 verbatim（stream.go:317）；流式恒 200（错误已在重试阶段拦截或回 502）。
@@ -678,7 +678,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 ```powershell
 go test ./internal/proxy/...
 go test ./...
-go build -o tinyrouter .
+go build -o tinylab .
 ```
 
 涉及重试策略 / SSE 改写 / Gemini 签名 / 在途速度 / combo 策略的修改，应优先跑 `handler_test.go`、`retry_test.go`、`stream*_test.go`、`signature*_test.go`、`inflight_test.go`，并手工用浏览器验证流式、非流式、combo fallback、debug 视图与实时速度显示。
@@ -727,7 +727,7 @@ go build -o tinyrouter .
 | 修改 4xx pass-through / 冷却等待 / 控制台请求者标识 | proxy+rotation | `rotation/error_rules.go`（`ActionPassThrough` + 400/422 默认 + `upstream request failed` 文本规则）+`rotation/cooldown.go`（`SonestCooldown`+`CooldownInfo`）+`proxy/interfaces.go`（`CooldownManager.SonestCooldown`）+`proxy/retry.go`（`handleUpstreamError` 返回 `bool` + pass-through 分支 + 中文后果 WARN + `logRequest`/`handleNetworkError` 加 reqID/callerTag）+`proxy/forward_retry.go`（`SelectKey` 失败冷却等待 + reqID/callerTag 贯穿 SEND/PROXY/no-available-keys）+`proxy/forward.go`（`requestCallerTag`/`maskAuth`/`clipStr`）；新增测试 `forward_caller_test.go`、`passthrough_test.go`、`rotation/selector_test.go`（SonestCooldown）、`rotation/error_rules_test.go`（400/422） |
 | 修改 Gemini 签名 | signature_cache.go（`SignatureCache` 11-104 + `extractThoughtSignature` 已并入此文件）+ forward.go `backfillThoughtSignatures`/`hasThoughtSignature` + config `IsGeminiOpenAICompat`（109-117） |
 | 新增/修改 ListModels 过滤逻辑 | proxy | `proxy/models.go` `ListModels`（8-65）+ `proxy/handler.go` `quickSlotOnlyProvider`/`quickSlotOnly()`（40/238-245）+ `api/router.go` `quickSlotOnly atomic.Bool` + `api/settings.go` `getSettings`/`updateSettings` |
-| 修改用量/在途/兜底清理 | recorder.go（16-90）+ entry_tracker.go（13-138，含 `SetTTFT`/`UpdateTokens`/`SweepStale`）+ inflight.go（11-88）+ broadcaster.go（9-80）+ api/sse_events.go（16-79）+ forward_retry.go `broadcastTTFT`/`broadcastTokens` + stream.go token 广播 + 客户端断开补 recordUsage（`clientDisconnected` 标志 + 外层 `break` + 末尾 status 判断）+ api/monitor/register.go `getUsage` 调用 `SweepStale(10min)` 转超时条目为 error + 前端 `monitor_io.js`（`handleRequestStart` 去重、`handleRequestDone` 兜底清理、`refreshQuotaData` stale 判定）+ `monitor.js`（`updateProcessingLatencyCells` 超时停止）；改 `Entry.Source` 来源标记须同步前端 `X-TinyRouter-Source` 头（pg-stream.js）；改 `Entry.OriginalModel` 须同步 forward_request.go `handleProxy` alias 解析前捕获、所有 `recordUsage` 调用点、前端 `monitor_state.js`（`displayModelName`/`buildModelIdToAlias`）+ `monitor_recent.js`（`renderUsageRow`）；改 `QuotaBar.Alias` 须同步 `api/monitor/register.go`（`getQuotas`） |
+| 修改用量/在途/兜底清理 | recorder.go（16-90）+ entry_tracker.go（13-138，含 `SetTTFT`/`UpdateTokens`/`SweepStale`）+ inflight.go（11-88）+ broadcaster.go（9-80）+ api/sse_events.go（16-79）+ forward_retry.go `broadcastTTFT`/`broadcastTokens` + stream.go token 广播 + 客户端断开补 recordUsage（`clientDisconnected` 标志 + 外层 `break` + 末尾 status 判断）+ api/monitor/register.go `getUsage` 调用 `SweepStale(10min)` 转超时条目为 error + 前端 `monitor_io.js`（`handleRequestStart` 去重、`handleRequestDone` 兜底清理、`refreshQuotaData` stale 判定）+ `monitor.js`（`updateProcessingLatencyCells` 超时停止）；改 `Entry.Source` 来源标记须同步前端 `X-TinyLab-Source` 头（pg-stream.js）；改 `Entry.OriginalModel` 须同步 forward_request.go `handleProxy` alias 解析前捕获、所有 `recordUsage` 调用点、前端 `monitor_state.js`（`displayModelName`/`buildModelIdToAlias`）+ `monitor_recent.js`（`renderUsageRow`）；改 `QuotaBar.Alias` 须同步 `api/monitor/register.go`（`getQuotas`） |
 | 修改 Monitor Recent Requests 详情弹窗 | `web/static/monitor/monitor_modal.js`（六个固定 section：`Request Info`/`Request`/`Request Headers`/`Response Headers`/`Status`/`Response Body`；默认折叠；Status 仅折叠，其余 section 级 Pretty/Raw/Copy + 字段级 Pretty/Raw/Copy；Raw 保留原始字符串；两级 sticky header）+ `web/static/info_common.js`（`renderInfoSection`/`buildInfoField` 共享兼容边界，非 Monitor 调用方默认行为不变）+ `web/static/style.css`（info modal 的 section/field sticky 视觉承载） |
 | 修改 quota 聚合重算/配额单元格显示/ exhausted key 过滤 | **2026-07-31 新增**：`api/monitor/register.go` `getQuotas` 从 per-key `ModelQuotas`（`GetQuota` 锁安全读取）重算 `TotalUsed`/`TotalCapacity`，覆盖 `QuotaTracker` 纯会话聚合；`web/static/monitor_quota.js` `renderQuotaKeyRows` 跳过 `data.hasQuota && k.hasQuota && k.modelRemaining === 0` 的 key；`formatQuotaCell(bar)` 渲染 `success/capacity` + 可选 error badge；`renderQuotaRow`/`patchQuotaRow`（innerHTML）消费；`web/static/style.css` 新增 `.quota-success`/`.quota-capacity`/`.quota-error-badge` 类、列 4 宽度 110px。 |
 | 修改 quota 多 Key 子行布局/快捷键/per-key 指标 | **2026-08-29 新增**：`web/static/monitor/monitor_quota.js` `renderQuotaKeyRows`（第一列 = color dot/timer + 状态徽标并列；配额列复用 `formatQuotaCell` per-key `success/limit|∞`+error badge；input/output 列来自 model-keys 的 `inputTokens`/`outputTokens`）+ `quotaKeyRowClick`（Ctrl+点击 pause/resume 走 `PUT /providers/{id}/keys/{kid}` body 须带 name/priority；Shift+点击 pin 活跃 Key 走 `POST /providers/{id}/keys/{kid}/activate`）；`api/monitor/register.go` `getModelKeys`（`providerId` 字段 + in-use pin 感知）/ `currentKey`（pin 优先）；`api/keys/register.go` `activateKey`；`usage/accumulator.go` `KeyStatEntry.InputTokens/OutputTokens`；rotation `Selector` `manualPins`（见 rotation-architecture.md）；i18n `keyRowHint`/`keyPaused`/`keyResumed`/`keyActivated`；`style.css` `.quota-key-row .key-status-badge`（margin-left） |

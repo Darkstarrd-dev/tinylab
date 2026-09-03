@@ -1,6 +1,6 @@
 // FileTransfer: collect arbitrary files, confirm, optionally ZIP, and
 // upload through the backend's ordered temporary-host fallback.
-// Dual-Panel Staging Workflow layout, matching TinyRouter design system.
+// Dual-Panel Staging Workflow layout, matching TinyLab design system.
 'use strict';
 
 // Mirror of internal/filetransfer/upload.go limits; keep in sync.

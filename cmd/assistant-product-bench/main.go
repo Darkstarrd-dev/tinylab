@@ -1,4 +1,4 @@
-// Command assistant-product-bench measures TinyRouter's 小精灵 (sprite)
+// Command assistant-product-bench measures TinyLab's 小精灵 (sprite)
 // assistant PRODUCT readiness across five dimensions the follow-up research
 // targets: (1) a dedicated Assistant settings entry, (2) a draggable dock,
 // (3) model-assisted (LLM) dispatch, (4) reply correctness on tricky
@@ -31,16 +31,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/tinyrouter/tinyrouter/internal/api"
-	"github.com/tinyrouter/tinyrouter/internal/assistant"
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/api"
+	"github.com/tinylab/tinylab/internal/assistant"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // correctnessScenario is one tricky user intent with a known answer key. A

@@ -1,5 +1,5 @@
 // web/static/download-settings.js
-// Path/tool settings modal for TinyRouter Download.
+// Path/tool settings modal for TinyLab Download.
 // Extracted from download.js (P2-05): modal + path settings + browse picker.
 // Depends on download.js globals: downloadDefaultDir, browsePickerOpen, apiGet/apiPost, t/escapeHtml/escapeAttr, toast
 

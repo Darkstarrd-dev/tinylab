@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 func sanitizeAlias(providerPrefix, providerID, alias string) string {
@@ -83,6 +83,7 @@ func (r *Registry) DeleteModel(providerID, modelID string) bool {
 		for j, m := range models {
 			if m.ID == modelID {
 				r.config.Providers[i].Models = append(models[:j], models[j+1:]...)
+				r.sweepStaleRefsLocked()
 				return true
 			}
 		}

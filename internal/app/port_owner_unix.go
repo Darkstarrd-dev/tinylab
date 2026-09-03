@@ -14,7 +14,7 @@ type PortOwner struct {
 	PID          int
 	Name         string // process name
 	Path         string // full executable path
-	IsTinyRouter bool   // name or path contains "tinyrouter" / "tr-pg"
+	IsTinyLab bool   // name or path contains "tinylab" / "tr-pg"
 }
 
 // identifyPortOwner attempts to discover the process listening on a given TCP
@@ -109,7 +109,7 @@ func identifyWithSS(port int) (PortOwner, bool) {
 		if line == "" || strings.HasPrefix(line, "State") || strings.HasPrefix(line, "Netid") {
 			continue
 		}
-		// Parse: LISTEN 0 128 127.0.0.1:20128 users:(("tinyrouter",pid=1234,fd=5))
+		// Parse: LISTEN 0 128 127.0.0.1:20128 users:(("tinylab",pid=1234,fd=5))
 		pidIdx := strings.Index(line, "pid=")
 		if pidIdx < 0 {
 			continue
@@ -142,14 +142,14 @@ func identifyWithSS(port int) (PortOwner, bool) {
 func makeOwner(pid int, name, path string) (PortOwner, bool) {
 	isTR := false
 	lower := strings.ToLower(name)
-	if strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+	if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tr-pg") {
 		isTR = true
 	}
 	if !isTR {
 		lower = strings.ToLower(path)
-		if strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tr-pg") {
 			isTR = true
 		}
 	}
-	return PortOwner{PID: pid, Name: name, Path: path, IsTinyRouter: isTR}, true
+	return PortOwner{PID: pid, Name: name, Path: path, IsTinyLab: isTR}, true
 }

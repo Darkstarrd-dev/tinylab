@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // ssrfProxy is a minimal forward HTTP proxy that revalidates every request
@@ -77,7 +77,7 @@ func (p *ssrfProxy) handlePlain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := p.policy.CheckHost(r.Context(), r.URL.Hostname()); err != nil {
-		http.Error(w, "target blocked by TinyRouter SSRF policy", http.StatusForbidden)
+		http.Error(w, "target blocked by TinyLab SSRF policy", http.StatusForbidden)
 		return
 	}
 	// Strip hop-by-hop headers (RFC 9110 §7.6.1) so they are never forwarded
@@ -133,7 +133,7 @@ func (p *ssrfProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	ips, err := p.policy.Resolve(r.Context(), host)
 	if err != nil {
-		http.Error(w, "connect target blocked by TinyRouter SSRF policy", http.StatusForbidden)
+		http.Error(w, "connect target blocked by TinyLab SSRF policy", http.StatusForbidden)
 		return
 	}
 	var dst net.Conn

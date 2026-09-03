@@ -1,5 +1,5 @@
 // web/static/gif-editor-import.js
-// GIF / Image / Video Import & Modal Handling for TinyRouter GIF Editor
+// GIF / Image / Video Import & Modal Handling for TinyLab GIF Editor
 
 (function () {
   'use strict';
@@ -1361,11 +1361,11 @@ function commitVideoDraft(width, height) {
   }
 
   function bindEvents() {
-    document.addEventListener('tinyrouter:modal-close', onModalClose);
+    document.addEventListener('tinylab:modal-close', onModalClose);
   }
 
   function cleanup() {
-    document.removeEventListener('tinyrouter:modal-close', onModalClose);
+    document.removeEventListener('tinylab:modal-close', onModalClose);
     cancelDraft();
   }
 

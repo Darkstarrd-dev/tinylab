@@ -147,7 +147,7 @@ func BuildSystemPrompt(p ModelPreset, memory string) string {
 			name = "小精灵"
 		}
 	}
-	prompt := "You are " + name + ", a desktop-pet assistant living inside the TinyRouter app. Reply concisely and in the user's language."
+	prompt := "You are " + name + ", a desktop-pet assistant living inside the TinyLab app. Reply concisely and in the user's language."
 	if p.SystemPrompt != "" {
 		prompt += "\n\n" + p.SystemPrompt
 	}

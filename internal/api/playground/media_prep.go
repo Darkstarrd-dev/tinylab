@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/mediaedit"
 )
 
 // Handler owns playground media preparation and operations.

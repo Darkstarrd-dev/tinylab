@@ -67,7 +67,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, intent string) ([]string, 
 		"tool_choice": "auto",
 		"tools":       tools,
 		"messages": []map[string]any{
-			{"role": "system", "content": "You are TinyRouter's routing assistant. Pick the tool(s) that best fulfill the user's intent from the provided tools. If none fit, respond with no tool_calls."},
+			{"role": "system", "content": "You are TinyLab's routing assistant. Pick the tool(s) that best fulfill the user's intent from the provided tools. If none fit, respond with no tool_calls."},
 			{"role": "user", "content": intent},
 		},
 	}

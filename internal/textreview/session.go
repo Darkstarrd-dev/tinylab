@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // Chapter status constants.

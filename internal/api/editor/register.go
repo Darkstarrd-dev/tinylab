@@ -21,11 +21,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 )
 
 // maxOpenSize caps the size of a file the editor will read into memory.

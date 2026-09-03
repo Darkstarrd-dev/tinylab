@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // TestReload_MergesStates verifies that Reload preserves runtime state for

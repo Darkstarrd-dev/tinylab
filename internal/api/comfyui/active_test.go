@@ -63,8 +63,8 @@ func TestActiveWorkflowUnavailableOutsideWindows(t *testing.T) {
 }
 
 func TestInstalledComfyDesktopActiveWorkflow(t *testing.T) {
-	if os.Getenv("TINYROUTER_ACTIVE_INTEGRATION") != "1" {
-		t.Skip("set TINYROUTER_ACTIVE_INTEGRATION=1 to inspect the installed Comfy Desktop store")
+	if os.Getenv("TINYLAB_ACTIVE_INTEGRATION") != "1" {
+		t.Skip("set TINYLAB_ACTIVE_INTEGRATION=1 to inspect the installed Comfy Desktop store")
 	}
 	if runtime.GOOS != "windows" {
 		t.Skip("Comfy Desktop stores only exist on Windows")

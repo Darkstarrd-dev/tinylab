@@ -1,5 +1,5 @@
 // web/static/download-sse.js
-// SSE lifecycle for TinyRouter Download.
+// SSE lifecycle for TinyLab Download.
 // Extracted from download.js (P2-05): EventSource + reconnect + suspend/resume.
 // Depends on download.js globals: downloadEventSource, downloadReconnectTimer, downloadActivePredicate, downloadTasksMap, downloadTaskEls, isDownloadActive via download.js or own definition
 

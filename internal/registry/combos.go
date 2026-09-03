@@ -1,6 +1,6 @@
 package registry
 
-import "github.com/tinyrouter/tinyrouter/internal/config"
+import "github.com/tinylab/tinylab/internal/config"
 
 // --- Combos ---
 

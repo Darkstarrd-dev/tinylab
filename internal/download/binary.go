@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // resolveConfiguredTool canonicalizes a configured/external tool path and

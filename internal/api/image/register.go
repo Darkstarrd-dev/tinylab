@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/image"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/image"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 type saveImageRequest struct {

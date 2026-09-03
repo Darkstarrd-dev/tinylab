@@ -2,7 +2,7 @@
 >
 > **最后核对（2026-08-29，Round-2 P0-04 配置并发与原子写）：** `Deps.cfgSaveMu` 串行化 `SaveConfig`/`SaveConfigAndReload`；`fsutil.AtomicWrite` 改随机后缀 `path.tmp.<nanos>` 并镜像确定性 `.tmp` 兼容探针；`config.Load` 经 `findPendingTmp(path.tmp*)` 发现悬空随机文件；`.tmp` 第三分支经 `decodeConfig` 迁移废弃字段。
 
-# TinyRouter Config / Registry / State 基础设施架构
+# TinyLab Config / Registry / State 基础设施架构
 > **最后核对（2026-08-29，Music 全量：Stages 3–5 Bilibili+transcode+playlists）：** `web/static/music/host.js`（+`loadFromURL`，`providers/bilibili|example-generic` 热加载示范）+ `providers/bilibili.js`（Azusa `bvid→cid→playurl` 经后端代理）+ `example-generic.js`（Listen1/LX 热加载模板，`var plugin={id}`/`module.exports` 契约）+ `music.js`（provider 多选徽标 `selectedProviders`+`renderProviderChips` + Library `Play`→`/api/music/file` + `→mp3`→`file→transcode→blobURL` + playlists bar `Musics/playlists.json` + `m3u` 导入导出/远端 Fetch）+ `internal/api/music/{register,transcode,playlists}.go`（`bilibili/search|resolve`→Bilibili 官方 API 映射、`file` `ServeContent` + `Accept-Ranges`、`transcode` `ffmpeg pipe:0→pipe:1` + `lookupFFmpeg` + `playlists.json`/`m3u`）+ `router.go`（`music` 挂 `Group /music` + `connect-src https://api.jamendo.com https://api.bilibili.com`）+ `index*.html`（`host→player→providers→music` 顺序）。详见 `docs/music-implementation-plan.md` §8（Stages 3–5 已闭环）及 `docs/music-architecture.md` §2–§3。
 > **最后核对（2026-08-29，Music 默认目录）：** `Config.MusicDir string`（`yaml/json:"musicDir,omitempty"`，默认目录为 `{configDir}/Musics`）+ `internal/config/paths.go::ResolveMusicDir(musicDir, configDir string)`（空→`{configDir}/Musics`、相对拼 configDir、绝对原样）。`GET /api/settings` 暴露 `musicDir`/`configDir`，`PATCH /api/settings` 接受 presence-aware `musicDir`（`apply*` 纪律，指针判存在即覆盖，空串=显式回退默认）。`web/static/download.js::openPathSettingsModal` 新增 `musicDir:true` 行（Default Music Dir，placeholder `configDir/Musics`），与 `web/static/settings/settings_modal.js::openPathModal` 全量 sections 含 `musicDir`；`web/static/i18n.js` 新增 `music/musicDir/musicDirDesc`（en+cn）。前端 `web/static/music/music.js` 为独立 Music 域（`renderMusic`/`cleanupMusic`），`web/static/app.js`+`index.html`/`index-nopg.html` 在 Gallery 下新增下拉切换 `Gallery|Music`（`GALLERY_TOOLS`/`galleryActiveTool`/`galleryMenuOpen`，仿 Utility）。详见 `docs/music-implementation-plan.md` 蓝本。
 > **最后核对（2026-08-25，Provider Hard Limit 自动节流）：** `config.Provider` 新增 `HardLimit *HardLimitSettings`（`yaml/json:"hardLimit,omitempty"`，`HardLimitSettings{RPMEnabled,RPM,TPMEnabled,TPM}`），支持站点级滑动 60s 窗口请求数（RPM）与 Token 数（TPM）节流；`validateProviders` 对零值/负值告警；`Registry.UpdateProvider` 增加显式合并；节流窗口为内存态，不持久化到 state.yaml。
@@ -23,7 +23,7 @@
 
 ## 1. 范围与结论
 
-`internal/config/`、`internal/registry/`、`internal/state/` 三者是 TinyRouter 的 **基础设施层**，分别承担：
+`internal/config/`、`internal/registry/`、`internal/state/` 三者是 TinyLab 的 **基础设施层**，分别承担：
 
 - **`internal/config/`** —— 全部配置**类型定义**（`Config` 及其子结构、`Provider`/`Key`/`ModelDef`/`Combo`/`QuickSlot` 等）、`config.yaml` 的**原子读写与首次生成**、以及保护 API Key 不为明文落盘的 **AES-256-GCM 加密**（`crypto.go`）。不持有任何运行时可变状态。
 - **`internal/registry/`** —— 进程内**内存后端**：存放当前 `Config` 副本，以及每个 key 的运行时状态 **`*keystate.KeyRuntimeState`**（冷却、退避、配额锁、NIM 计数等运行时记账；**类型定义在 `internal/keystate`**，registry 持有 `states` map 与全部 snapshot/restore/reload-merge 逻辑）。提供 provider/key/model/combo/quickslot 的 **CRUD**，并负责 reload 时**保持既有 `*keystate.KeyRuntimeState` 指针稳定**（merge 语义）。`rotation` 经 `KeyStateProvider` 接口（而非 `*registry.Registry`）取得这些指针，故 rotation **不 import registry**。
@@ -511,7 +511,7 @@ go test ./internal/config/...
 go test ./internal/registry/...
 go test ./internal/state/...
 go test ./...
-go build -o tinyrouter .
+go build -o tinylab .
 ```
 
 修改配置/注册表/状态相关逻辑时，优先跑对应包的 `_test.go`，并配合 `TestReload_MergesStates`（指针稳定性）、`TestManagerScheduleWrite`（去抖）、`TestSave_ReturnsNilAndLeavesTmpWhenPathLocked`（原子写回退）做回归。
@@ -572,4 +572,5 @@ go build -o tinyrouter .
 | 修改凭证输出/Provider 私网 opt-in | `internal/api/providers/register.go`（`ProviderDTO`/`toProviderDTO`，2026-08-22 增 `allowPrivateNetwork` 字段；`validateProvider` 接受 `allowPrivate` 参数）+ `internal/api/keys/register.go`（`KeyDTO`/`MaskKey`）+ `internal/api/settings/register.go`（`anySearch` 只回 `hasApiKey`）+ `internal/config/types.go`（`Provider.AllowPrivateNetwork`）+ `internal/api/apibase/deps.go`（`ManagementClient`，outbound 策略）+ `internal/outbound/outbound.go` + `registry/providers.go::UpdateProvider`（写回 `AllowPrivateNetwork`）+ `web/static/providers.js`（编辑/新建表单 `allowPrivateNetwork` 开关）+ `web/static/i18n.js`（`allowPrivateNetwork*` 翻译键） |
 | 修改 reload 运行时收敛 | `internal/api/settings/register.go::convergeRuntime(cfg)`（单一收敛点）+ `reload` handler（先 `validateProxyConfig` 再 `Reg.Reload`+`convergeRuntime`）+ `converge_test.go`；涉及回调：`SetRequestLogDir`/`SetProxy`/`ServerCfgFn`/`UpstreamTimeoutFn`/`Selector.UpdateSettings`/`pushDownloadSettings`/`ArchiveSettingsFn` |
 | 修改 Config() 拷贝语义 | `internal/registry/registry.go::Config`/`cloneConfig`（JSON round-trip 深拷贝）+ `deepcopy_test.go`；handler 不得再依赖浅拷贝共享切片 |
+| 清理 combo/quickslot 无效引用 | `internal/registry/sweep.go`（新增：`SweepStaleComboModels`/`SweepStaleQuickSlotModels`/`SweepStaleModelRefs`，quickslot `SelectedIndex` 跟随存活模型/钳制）+ `DeleteProvider`/`DeleteModel` 成功路径内联 sweep（handler 层 `SaveConfigAndReload` 持久化）+ `POST /api/combos/cleanup`（`api/combos/register.go::cleanupCombos`）+ `POST /api/quickslots/cleanup`（`api/quickslots/register.go::cleanupQuickSlots`）；前端 `web/static/settings/settings.js` 双 header 清理按钮 + `combos.js::cleanupStaleCombos` + `quickslots.js::cleanupStaleQuickSlots` + `quickslots.js::_qsModalSort`（弹窗标题栏排序按钮，按模型 id 字典序即 provider 缩写首字母优先，focus/selected 跟随模型）+ `i18n.js`（`cleanupStale*`/`qsSort*` en+cn） |
 | 修改 state key 序列化 | `internal/state/state.go`（`KeySnapshot.ProviderID/KeyID` + `EncodeSnapshotKey`/`decodeSnapshotKey`）+ `internal/state/manager.go::Restore`（结构化→长度前缀→legacy `::`）+ `internal/registry/state.go`（`SnapshotKeyStates`/`probeRecordKey`）+ `state_key_test.go` |

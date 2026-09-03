@@ -3,9 +3,9 @@ package combo
 import (
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 func testRegistry(combos ...config.Combo) *registry.Registry {

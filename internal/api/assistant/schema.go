@@ -1,6 +1,6 @@
 package assistant
 
-import "github.com/tinyrouter/tinyrouter/internal/assistant"
+import "github.com/tinylab/tinylab/internal/assistant"
 
 // FunctionDef represents OpenAI-compatible tool function definition.
 type FunctionDef struct {

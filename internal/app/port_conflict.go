@@ -23,7 +23,7 @@ func isAddrInUse(err error) bool {
 }
 
 // resolvePortConflict checks which process is using the port and, if it is
-// another TinyRouter instance, asks the user whether to kill it. Returns true
+// another TinyLab instance, asks the user whether to kill it. Returns true
 // if the caller should retry listening (after killing the conflicting process).
 func resolvePortConflict(configDir string, port int) (retry bool) {
 	owner, ok := identifyPortOwner(port)
@@ -34,11 +34,11 @@ func resolvePortConflict(configDir string, port int) (retry bool) {
 	}
 
 	shouldKill := feedbackPortConflict(configDir, port, owner)
-	if !shouldKill || !owner.IsTinyRouter {
+	if !shouldKill || !owner.IsTinyLab {
 		return false
 	}
 
-	// Attempt to kill the other TinyRouter instance.
+	// Attempt to kill the other TinyLab instance.
 	proc, err := os.FindProcess(owner.PID)
 	if err != nil {
 		FeedbackFatalError(configDir, fmt.Sprintf("无法找到进程 %d 以关闭它: %v", owner.PID, err))

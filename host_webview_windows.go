@@ -17,9 +17,9 @@ import (
 	"fyne.io/systray"
 	"github.com/jchv/go-webview2"
 	"github.com/jchv/go-webview2/pkg/edge"
-	"github.com/tinyrouter/tinyrouter/internal/app"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/internal/petstate"
+	"github.com/tinylab/tinylab/internal/app"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/petstate"
 	"golang.org/x/sys/windows"
 )
 
@@ -962,7 +962,7 @@ func openPetWindow(hctx *app.HostContext) {
 			LpfnWndProc:   windows.NewCallback(petWndProc),
 			HInstance:     syscall.Handle(hInstance),
 			HbrBackground: syscall.Handle(mustStockObject(blackBrush)),
-			LpszClassName: windows.StringToUTF16Ptr("TinyRouterPetWnd"),
+			LpszClassName: windows.StringToUTF16Ptr("TinyLabPetWnd"),
 		}
 		if r, _, _ := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
 			hctx.Logger.Error("pet window: RegisterClassExW failed")
@@ -975,7 +975,7 @@ func openPetWindow(hctx *app.HostContext) {
 	// recipe is fully transparent anyway, so there is no flash to avoid.
 	hwnd, _, callErr := procCreateWindowExW.Call(
 		uintptr(wsExTopmost|wsExToolWindow),
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("TinyRouterPetWnd"))),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("TinyLabPetWnd"))),
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(""))),
 		uintptr(wsPopup|wsVisible),
 		100, 100, petAreaW, petBaseH,

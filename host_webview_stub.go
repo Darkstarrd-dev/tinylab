@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 // addWebviewMenuItem when the `webview` tag is NOT set is a no-op: the tray

@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 // Handler implements the fsbrowse HTTP handlers. The picker endpoint is

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // validateResolvedTool canonicalizes a candidate tool path and verifies it is

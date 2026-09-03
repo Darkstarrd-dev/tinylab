@@ -17,11 +17,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	"github.com/tinyrouter/tinyrouter/internal/archivetool"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/archive"
+	"github.com/tinylab/tinylab/internal/archivetool"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/owner"
 )
 
 // newTestServer wires a real runner (zip works without external tools) and the

@@ -1,6 +1,6 @@
 # Binaries
-tinyrouter
-tinyrouter-*
+tinylab
+tinylab-*
 *.exe
 *.exe~
 
@@ -53,7 +53,7 @@ tmp/
 .pi-subagents/
 
 # Runtime lock file (PID for single-instance lock)
-.tinyrouter.lock
+.tinylab.lock
 
 # Harness-local agent/skill artifacts (Oh My Pi / Claude skills), not project content
 .agents/

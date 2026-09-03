@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/logredact"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/logredact"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 var (
@@ -87,7 +87,7 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		Provenance:    provenance,
 	}
 	if reqHeaders != nil {
-		entry.Source = reqHeaders.Get("X-TinyRouter-Source")
+		entry.Source = reqHeaders.Get("X-TinyLab-Source")
 	}
 	entry.SessionKey = sessionKey
 

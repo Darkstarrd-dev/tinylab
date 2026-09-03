@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 const (

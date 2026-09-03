@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // Handler implements HTTP handlers for the download API.

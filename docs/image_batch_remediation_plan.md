@@ -1,6 +1,6 @@
 # Image Batch Project 整改方案
 
-> 基于 `C:\Tools\TinyRouter\docs\review.md`（审核报告 §4 Image Batch）与问题 2 修复方案重新设计的统一整改方案
+> 基于 `C:\Tools\TinyLab\docs\review.md`（审核报告 §4 Image Batch）与问题 2 修复方案重新设计的统一整改方案
 > 范围：Image Batch Project 模块（三种输出格式提示词设计 + 异步 Provider 生成 + 整体功能对齐）
 > 状态：**已按确认决策实施**（json 结构化创作→自然语言；Booru tag 不拆分；不纳入 AI Review；A+B 同批、C 收尾）。
 > 关联：`docs/image_batch_project_flow_review.md`（流程审核文稿，§15 为本方案前身的问题初查）
@@ -161,7 +161,7 @@ func (h *Handler) ImageTask(w http.ResponseWriter, r *http.Request) {
 ### B4. `pollTask` 重写
 
 - URL：`/v1/tasks/{id}?model={req.Model}`（带 provider 前缀，`TaskGet` 的 `SplitModel` 需要）。
-- 头：`X-Modelscope-Task-Type: image_generation` + `X-TinyRouter-Source: playground-batch`。
+- 头：`X-Modelscope-Task-Type: image_generation` + `X-TinyLab-Source: playground-batch`。
 - 状态判定：`task_status`/`status`/`output.*/data[0].task_status` → SUCCEED/SUCCESS/COMPLETE/DONE=done、FAIL/ERROR/CANCEL=failed、其余 pending。
 - 节奏：上限 60 次、间隔 2s、单次尝试 10s 超时（对齐手动画布 `MODELSCOPE_MAX_POLLS=60`/`MODELSCOPE_POLL_MS=2000`/`MODELSCOPE_ATTEMPT_TIMEOUT_MS=10000`）。
 - **done 且取到真实图片才返回资产**；failed → 错误；超时 → `"image task polling timed out"`。
@@ -196,7 +196,7 @@ func (h *Handler) ImageTask(w http.ResponseWriter, r *http.Request) {
 
 ### C3. 部署同步
 
-- 重新构建 `tinyrouter-webview-pg-stripped.exe` 替换 `C:\Tools\TinyRouter\`（当前部署实例 20102 为今日 11:45 构建，整改后重建替换）。
+- 重新构建 `tinylab-webview-pg-stripped.exe` 替换 `C:\Tools\TinyLab\`（当前部署实例 20102 为今日 11:45 构建，整改后重建替换）。
 - 替换前备份当前 `state.yaml` / `imgs/`。
 
 ---

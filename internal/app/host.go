@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 // HostContext carries everything the host loop needs to drive exit + UI without

@@ -7,7 +7,7 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 func main() {

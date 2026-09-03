@@ -1,4 +1,4 @@
-# DESIGN.md — TinyRouter Design System Contract
+# DESIGN.md — TinyLab Design System Contract
 
 > Machine-readable design token specification. Last synced with `style.css` at commit HEAD.
 

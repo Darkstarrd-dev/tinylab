@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // fakeCleaner is a test Cleaner whose behavior is controlled per call. When

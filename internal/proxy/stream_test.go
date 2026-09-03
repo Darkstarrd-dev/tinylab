@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 func TestExtractTokens_MultipleChunks(t *testing.T) {

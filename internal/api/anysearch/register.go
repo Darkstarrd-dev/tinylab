@@ -8,8 +8,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/anysearch"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/anysearch"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 )
 
 // Handler wires up AnySearch routes.

@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 )
 
 const (
@@ -588,9 +588,9 @@ func isWindowsReservedName(base string) bool {
 func archiveFileName() string {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "tinyrouter-files.zip"
+		return "tinylab-files.zip"
 	}
-	return fmt.Sprintf("tinyrouter-files-%x.zip", b[:])
+	return fmt.Sprintf("tinylab-files-%x.zip", b[:])
 }
 
 type uploader struct {
@@ -670,7 +670,7 @@ func uploadFilebin(ctx context.Context, client *http.Client, name string, data [
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", err
 	}
-	bin := fmt.Sprintf("tinyrouter-%x", id[:])
+	bin := fmt.Sprintf("tinylab-%x", id[:])
 	url := "https://filebin.net/" + bin + "/" + name
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
@@ -762,7 +762,7 @@ func postMultipart(ctx context.Context, client *http.Client, url string, body []
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Content-Length", fmt.Sprint(len(body)))
-	req.Header.Set("User-Agent", "TinyRouterFileTransfer/1.0")
+	req.Header.Set("User-Agent", "TinyLabFileTransfer/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

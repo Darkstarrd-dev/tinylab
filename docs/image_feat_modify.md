@@ -1,4 +1,4 @@
-# TinyRouter Playground Image 功能实施方案
+# TinyLab Playground Image 功能实施方案
 
 > 文档状态：实施前冻结方案
 >
@@ -54,7 +54,7 @@ Image
 
 - Go 1.25+，原生 HTML + Vanilla JS + CSS。
 - Playground 仅在 `-tags playground` 变体中嵌入。
-- TinyRouter 仅监听 localhost；`/api/*` 由管理 session 保护，`/v1/*` 不经过应用层鉴权。
+- TinyLab 仅监听 localhost；`/api/*` 由管理 session 保护，`/v1/*` 不经过应用层鉴权。
 - 没有数据库。配置使用 YAML，运行时状态通常驻内存，文件写入应采用临时文件 + rename 的原子方式。
 - 现有图片默认保存目录由 `config.ResolveImageSaveDir` 解析：默认是 `<configDir>/imgs`，配置相对路径相对 `configDir`，绝对路径直接使用。
 
@@ -689,7 +689,7 @@ type ImageGenerationResult struct {
 实现时优先顺序：
 
 1. 为 Proxy 抽出可复用的内部服务调用接口；
-2. 若无法安全抽取，可通过受控内部 request adapter 调用现有 Handler，但必须保留 `X-TinyRouter-Source: playground-batch` 的 Usage 分流并正确传播 Context；
+2. 若无法安全抽取，可通过受控内部 request adapter 调用现有 Handler，但必须保留 `X-TinyLab-Source: playground-batch` 的 Usage 分流并正确传播 Context；
 3. 禁止 Batch Manager 自己读取 config 中的 API Key；
 4. Batch 层 `maxRetries` 是 Proxy 最终失败后的外层重试，不取代现有 Key/Provider 重试。
 
@@ -1671,7 +1671,7 @@ node --check web/playground/static-pg/pg-comfyui.js
 ```powershell
 gofmt -w <modified-go-files>
 go test ./...
-go build -tags playground -o tinyrouter-image-test.exe .
+go build -tags playground -o tinylab-image-test.exe .
 ```
 
 使用临时 config，禁止触碰用户现有 `config.yaml`、`state.yaml`、`imgs`。验证结束清理临时 exe、配置和输出目录。
@@ -1688,7 +1688,7 @@ go build -tags playground -o tinyrouter-image-test.exe .
 
 **决策：** attempt 记录 + 幂等槽位 + 不覆盖最终文件；不声称绝对取消。
 
-### R3：ComfyUI 输出已生成但 TinyRouter 尚未写入
+### R3：ComfyUI 输出已生成但 TinyLab 尚未写入
 
 **决策：** 保存 promptId/source metadata；`.part`/orphan 诊断；Resume 按最终项目槽位文件判定。
 

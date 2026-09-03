@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 // On non-Windows platforms the native WebView2 window is unavailable.

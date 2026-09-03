@@ -3,7 +3,7 @@ package proxy
 import (
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 func TestBackfillThoughtSignatures_MissingField(t *testing.T) {

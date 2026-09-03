@@ -3,7 +3,7 @@ package registry
 import (
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 func sanitizeQuickSlotModels(models []string) []string {

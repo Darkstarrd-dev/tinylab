@@ -1,12 +1,12 @@
 # 小精灵助手契约系统研究
 
-> 研究报告：TinyRouter 能否用一套"契约系统"承载小精灵助手（而非硬编码当前项目现状），使项目增删改功能时小精灵自动保持可用。
+> 研究报告：TinyLab 能否用一套"契约系统"承载小精灵助手（而非硬编码当前项目现状），使项目增删改功能时小精灵自动保持可用。
 >
 > 关联文件：`internal/assistant/`（契约大脑）、`cmd/assistant-bench/`（裁决 bench）、`autoresearch.sh`（入口）。实施计划见 [`docs/assistant_implementation_plan.md`](docs/assistant_implementation_plan.md)。
 
 ## 1. 研究问题
 
-TinyRouter 本身带模型路由功能（`/v1/*` 代理 + Key 轮询 + Combo 解析）和一大片本地能力 REST 面（`/api/*`：图片生成/编辑、文档编辑保存、下载、网页搜索、归档、文本审、trace 清理、provider/监控/配额/文件上传/gallery/probe…）。研究问题：
+TinyLab 本身带模型路由功能（`/v1/*` 代理 + Key 轮询 + Combo 解析）和一大片本地能力 REST 面（`/api/*`：图片生成/编辑、文档编辑保存、下载、网页搜索、归档、文本审、trace 清理、provider/监控/配额/文件上传/gallery/probe…）。研究问题：
 
 1. 能否在这套架构上实现一个"小精灵"式 AI 助手——按用户自然语言意图，路由到项目**自身已实现**的能力来完成请求（生成图片后写文档保存、定时清理日志等），并能在前端跳页或直接调用？
 2. 能否用一套**规范与系统**（契约）承载它，使得项目内容变更（增删改功能）后，开发者只需同步更新契约，小精灵就能继续理解并使用——而非靠硬编码当前现状、一改就脱节？
@@ -99,7 +99,7 @@ TinyRouter 本身带模型路由功能（`/v1/*` 代理 + Key 轮询 + Combo 解
 
 ## 6. 研究结论（可行：YES）
 
-TinyRouter 能用一套契约系统承载小精灵：
+TinyLab 能用一套契约系统承载小精灵：
 
 - **薄分发大脑**的能力知识 SOLELY 来自 `semantics.json` 契约；bench 用 `chi.Walk` 真实路由集合交叉校验；drift（契约引用已删路由）自动检测并拉低 `contract_health`→`readiness`——故**项目增删改功能时，开发者只需更新契约（增能力=加 rule，删能力=删 rule），bench 强制同步，契约不可能静默脱节**。
 - 30 意图（单步/多步 CN+EN、定时维护、out-of-scope）100% 精确映射到 22 真实能力；模型意图 gate 路由层、维护意图 gate 定时任务。

@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 func TestVersion(t *testing.T) {

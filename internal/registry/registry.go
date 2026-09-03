@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
-	"github.com/tinyrouter/tinyrouter/internal/state"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/keystate"
+	"github.com/tinylab/tinylab/internal/state"
 )
 
 // Registry provides thread-safe access to providers, keys, combos, and runtime key states.

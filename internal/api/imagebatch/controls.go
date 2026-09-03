@@ -2,7 +2,7 @@ package imagebatch
 
 import (
 	"github.com/go-chi/chi/v5"
-	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
+	domain "github.com/tinylab/tinylab/internal/imagebatch"
 	"net/http"
 )
 

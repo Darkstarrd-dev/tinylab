@@ -1,4 +1,4 @@
-// Command assistant-bench measures TinyRouter's "小精灵" assistant dispatch
+// Command assistant-bench measures TinyLab's "小精灵" assistant dispatch
 // readiness under a CONTRACT-DRIVEN design: the assistant's capability
 // knowledge comes solely from internal/assistant/semantics.json (the
 // contract), not hand-maintained Go code. The bench constructs the real
@@ -27,16 +27,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/tinyrouter/tinyrouter/internal/api"
-	"github.com/tinyrouter/tinyrouter/internal/assistant"
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/api"
+	"github.com/tinylab/tinylab/internal/assistant"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // scenario is one fixed user intent the assistant must dispatch. required is

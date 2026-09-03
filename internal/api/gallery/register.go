@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/archive"
+	"github.com/tinylab/tinylab/internal/mediaedit"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 
 	// Register all image format decoders so image.Decode works for PNG/GIF/WebP/BMP/TIFF.
 	_ "golang.org/x/image/bmp"
@@ -101,7 +101,7 @@ func NewHandler(d *apibase.Deps) *Handler {
 // temps, and outputs are registered here and addressed by assetId only.
 func (h *Handler) assetStore() (*archive.TempStore, error) {
 	h.assetsOnce.Do(func() {
-		root := filepath.Join(os.TempDir(), "tinyrouter-gallery-assets")
+		root := filepath.Join(os.TempDir(), "tinylab-gallery-assets")
 		h.assets, h.assetsErr = archive.NewTempStore(root, 0)
 	})
 	if h.assetsErr != nil {

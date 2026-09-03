@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 // Manager 管理下载任务队列和执行。

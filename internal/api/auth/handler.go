@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
-const sessionCookieName = "tinyrouter_session"
+const sessionCookieName = "tinylab_session"
 const sessionMaxAge = 24 * time.Hour
 
 // maxSessions caps the number of live sessions held in memory. Tokens are

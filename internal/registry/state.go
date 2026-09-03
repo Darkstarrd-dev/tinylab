@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
-	"github.com/tinyrouter/tinyrouter/internal/state"
+	"github.com/tinylab/tinylab/internal/keystate"
+	"github.com/tinylab/tinylab/internal/state"
 )
 
 // GetKeyState returns the runtime state for a key, or nil if not found.

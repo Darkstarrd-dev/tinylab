@@ -482,6 +482,15 @@
   font-size: var(--font-lg);
   border-bottom: 1px solid var(--glass-border);
 }
+.qs-modal-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.qs-modal-sort-btn {
+  flex-shrink: 0;
+}
 .qs-modal-list {
   overflow-y: auto;
   padding: 6px;

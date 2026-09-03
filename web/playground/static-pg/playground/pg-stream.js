@@ -44,7 +44,7 @@ function pgStream(i, body, assistantIdx) {
 
   var isGoogle = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(w.config.model) === 'google';
   var url = isGoogle ? '/v1/generateContent' : '/v1/chat/completions';
-  var headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyRouter-Source': 'playground' };
+  var headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyLab-Source': 'playground' };
   if (w.config.useCustomEndpoint && w.config.customEndpoint && w.config.customEndpoint.trim()) {
     url = w.config.customEndpoint.trim();
     headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
@@ -56,8 +56,8 @@ function pgStream(i, body, assistantIdx) {
     body: JSON.stringify(body),
     signal: w.abortCtrl.signal,
   }).then(function(resp) {
-    w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyRouter-Provider') || '');
-    w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyRouter-Key') || '');
+    w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Provider') || '');
+    w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Key') || '');
     if (!resp.ok || !resp.body) {
       resp.text().then(function(text) {
         var details = pgParseErrorDetails(text);
@@ -215,7 +215,7 @@ function pgSendNonStream(i, body, assistantIdx) {
   pgUpdateInputBar();
   var isGoogleNS = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(w.config.model) === 'google';
   var url = isGoogleNS ? '/v1beta/models/' + encodeURIComponent(w.config.model) + ':generateContent' : '/v1/chat/completions'; // P1-01b
-  var headers = { 'Content-Type': 'application/json', 'X-TinyRouter-Source': 'playground' };
+  var headers = { 'Content-Type': 'application/json', 'X-TinyLab-Source': 'playground' };
   if (w.config.useCustomEndpoint && w.config.customEndpoint && w.config.customEndpoint.trim()) {
     url = w.config.customEndpoint.trim();
     headers = { 'Content-Type': 'application/json' };
@@ -227,8 +227,8 @@ function pgSendNonStream(i, body, assistantIdx) {
     body: JSON.stringify(body),
     signal: w.abortCtrl.signal,
   }).then(function(resp) {
-    w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyRouter-Provider') || '');
-    w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyRouter-Key') || '');
+    w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Provider') || '');
+    w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Key') || '');
     return resp.json().then(function(j) {
       if (!resp.ok) {
         var details = pgParseErrorDetails(JSON.stringify(j));

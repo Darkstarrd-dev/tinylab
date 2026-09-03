@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
+	"github.com/tinylab/tinylab/internal/combo"
 )
 
 func (h *Handler) handleCombo(w http.ResponseWriter, r *http.Request, comboName string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, path string, entryFormat combo.EntryFormat, sessionKey string) {

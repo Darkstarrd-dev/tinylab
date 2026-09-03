@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 // Manager coordinates debounced writes of runtime state to the state.yaml file.

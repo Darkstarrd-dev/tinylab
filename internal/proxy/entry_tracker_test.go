@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 func TestEntryTracker_RegisterAndGet(t *testing.T) {

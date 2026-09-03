@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 )
 
 // proxyRequest is the JSON payload accepted by POST /api/comfyui/proxy.

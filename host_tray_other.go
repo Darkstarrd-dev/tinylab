@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 // runHostLoop on non-Windows tray builds falls back to console behavior: there

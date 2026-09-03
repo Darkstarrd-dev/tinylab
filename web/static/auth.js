@@ -216,8 +216,8 @@ function setupHeaderResponsive() {
 }
 
 function initApp() {
-  if (window.__tinyRouterAppInitialized) return;
-  window.__tinyRouterAppInitialized = true;
+  if (window.__tinyLabAppInitialized) return;
+  window.__tinyLabAppInitialized = true;
   // Active utility state is intentionally memory-only; default to editor.
   sessionStorage.removeItem('trUtilityTool');
   if (typeof utilityActiveTool !== 'undefined') utilityActiveTool = null;

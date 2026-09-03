@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // TestStreamResponse_TerminalFallbackNoUsage covers the review +4/A3 fix:

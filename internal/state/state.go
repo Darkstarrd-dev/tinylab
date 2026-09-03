@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 

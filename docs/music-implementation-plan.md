@@ -1,8 +1,8 @@
-# TinyRouter Music 实施蓝本（融合 5 家长板·零依赖·可回溯）
+# TinyLab Music 实施蓝本（融合 5 家长板·零依赖·可回溯）
 
-> **定位**：为 TinyRouter 添加音乐播放功能，直接复用现有能力、不引新依赖。私用场景，不考虑许可约束。
+> **定位**：为 TinyLab 添加音乐播放功能，直接复用现有能力、不引新依赖。私用场景，不考虑许可约束。
 > **落位**：Gallery 页面下，仿 Utility 的下拉菜单，切换 `Gallery | Music`（`galleryActiveTool`）。
-> **存储**：`Settings → Path Settings` 新增 `Default Music Dir`，默认 `TinyRouter 运行目录/Musics`，下载音乐/播放列表等落此目录。
+> **存储**：`Settings → Path Settings` 新增 `Default Music Dir`，默认 `TinyLab 运行目录/Musics`，下载音乐/播放列表等落此目录。
 > **解耦要求**：音乐模块独立包/前端目录，与 Gallery/Download/Playground 互不侵入；仅在 `app.js/index.html/settings_modal` 做最小路由/菜单拼接。
 > **来源追踪**：基于 `anysearch` 对 GitHub 的 5 家开源音乐项目实测得出的融合选型（见 §1），满足 5 约束见 §3。
 
@@ -103,7 +103,7 @@ function selectGalleryTool(id){ galleryActiveTool=id; updateGalleryNavLabel(); n
 ## 9. 验证
 
 - `go vet ./... && go test ./...`（新增 `internal/config` paths 单测、`internal/api/music` 单测）
-- `node --check web/static/music/*.js`；`go build -o tinyrouter .`
+- `node --check web/static/music/*.js`；`go build -o tinylab .`
 - 手动：Settings Path 设置 MusicDir→重启→Gallery下拉切 Music→Jamendo 搜索可播→B站直链可播→本地文件可播→ffmpeg 转码可播→下载落盘到 MusicDir
 
 ## 10. 风险与规避

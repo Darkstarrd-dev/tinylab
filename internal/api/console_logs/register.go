@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 )
 
 // Handler wires the console-log HTTP handlers to the shared dependencies.

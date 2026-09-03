@@ -1,5 +1,5 @@
 // web/static/download-list.js
-// Task list render + multi-select for TinyRouter Download.
+// Task list render + multi-select for TinyLab Download.
 // Extracted from download.js (P2-05): list render, update, selection, row HTML, clear.
 // Depends on download.js globals: downloadTasksMap, downloadTaskEls, selectedTaskId, selectedTaskIds, DL_STATUS_KEYS etc; detail globals for renderTaskDetail/updateSelectedTaskView
 

@@ -64,6 +64,11 @@ async function deleteProviderFromList(event, id) {
   providersCache = providersCache.filter(function(x) { return x.id !== id; });
   renderProviderList();
   toast(t('providerDeleted'), 'success');
+  // Settings 页同时展示 combos/quickslot：后端删除已自动清理无效引用，
+  // 此处整页重拉使清理结果即时可见（独立 Providers 页无 #combo-list，不触发）。
+  if (document.getElementById('combo-list') && typeof renderEndpoint === 'function') {
+    renderEndpoint(document.getElementById('page-content'));
+  }
 }
 
 function openProviderDetail(id) {

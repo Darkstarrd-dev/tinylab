@@ -5,7 +5,7 @@ package download
 import (
 	"os/exec"
 
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // killProcessTree 终止进程及其整个子进程树（Windows）。

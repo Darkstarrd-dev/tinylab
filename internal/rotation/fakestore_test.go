@@ -3,8 +3,8 @@ package rotation
 import (
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/keystate"
 )
 
 // fakeStore is a test double for the KeyStateProvider interface. It holds a

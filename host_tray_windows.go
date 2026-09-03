@@ -9,8 +9,8 @@ import (
 	"syscall"
 
 	"fyne.io/systray"
-	"github.com/tinyrouter/tinyrouter/internal/app"
-	"github.com/tinyrouter/tinyrouter/web"
+	"github.com/tinylab/tinylab/internal/app"
+	"github.com/tinylab/tinylab/web"
 )
 
 //go:embed web/static/favicon.ico

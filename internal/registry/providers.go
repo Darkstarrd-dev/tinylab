@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/keystate"
 )
 
 // --- Providers ---
@@ -107,6 +107,8 @@ func (r *Registry) DeleteProvider(id string) bool {
 	for i, p := range r.config.Providers {
 		if p.ID == id {
 			r.config.Providers = append(r.config.Providers[:i], r.config.Providers[i+1:]...)
+
+			r.sweepStaleRefsLocked()
 
 			r.stateMu.Lock()
 			for _, k := range p.Keys {

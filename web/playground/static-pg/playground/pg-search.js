@@ -31,7 +31,7 @@ function pgSearchSend(query) {
   // Step 1: Classify query
   fetch('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-TinyRouter-Source': 'playground' },
+    headers: { 'Content-Type': 'application/json', 'X-TinyLab-Source': 'playground' },
     body: JSON.stringify({
       model: w0.config.model,
       messages: [
@@ -129,7 +129,7 @@ function pgSearchSend(query) {
       };
       return fetch('/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyRouter-Source': 'playground' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyLab-Source': 'playground' },
         body: JSON.stringify(synthBody),
         signal: w3.abortCtrl.signal,
       }).then(function(resp3) {
@@ -517,7 +517,7 @@ function pgRepairSearchMarkdownAI(i, idx) {
   var pendingPretty = '';
   fetch('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyRouter-Source': 'playground' },
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'X-TinyLab-Source': 'playground' },
     body: JSON.stringify(reqBody)
   }).then(function(resp) {
     if (!resp.ok) {

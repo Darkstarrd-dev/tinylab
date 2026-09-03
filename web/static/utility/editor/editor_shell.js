@@ -1088,7 +1088,7 @@
     var isSelectionMode = !!selectedText;
 
     var titleText = isSelectionMode ? 'AI 润色 / 修改选中文本' : 'AI 智能辅助写作';
-    var selectedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
+    var selectedModel = localStorage.getItem('tinylab_editor_ai_model') || '';
 
     overlay.innerHTML =
       '<div class="modal" style="max-width:500px; width:90%;">' +
@@ -1136,7 +1136,7 @@
             if (newModel) {
               selectedModel = newModel;
               if (modelLabel) modelLabel.textContent = selectedModel;
-              localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+              localStorage.setItem('tinylab_editor_ai_model', selectedModel);
             }
           });
         } else if (typeof window.pgOpenModelPicker === 'function') {
@@ -1144,7 +1144,7 @@
             if (newModel) {
               selectedModel = newModel;
               if (modelLabel) modelLabel.textContent = selectedModel;
-              localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+              localStorage.setItem('tinylab_editor_ai_model', selectedModel);
             }
           });
         }
@@ -1164,7 +1164,7 @@
       if (!selectedModel) { toast('请先选择一个 AI 模型', 'warning'); return; }
       if (!userPrompt) { toast('请输入提示词要求', 'warning'); return; }
 
-      localStorage.setItem('tinyrouter_editor_ai_model', selectedModel);
+      localStorage.setItem('tinylab_editor_ai_model', selectedModel);
       submitBtn.disabled = true;
       submitBtn.textContent = '生成中...';
       if (statusMsg) statusMsg.style.display = 'block';

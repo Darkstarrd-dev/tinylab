@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/sse"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/sse"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel, sessionKey string) {
@@ -38,8 +38,8 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	if sel != nil {
-		w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyRouter-Key", sel.KeyName)
+		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
+		w.Header().Set("X-TinyLab-Key", sel.KeyName)
 	}
 	w.WriteHeader(http.StatusOK)
 
@@ -484,8 +484,8 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 		defer resp.Body.Close()
 		w.Header().Set("Content-Type", ct)
 		if sel != nil {
-			w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-			w.Header().Set("X-TinyRouter-Key", sel.KeyName)
+			w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
+			w.Header().Set("X-TinyLab-Key", sel.KeyName)
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
@@ -533,8 +533,8 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 
 	w.Header().Set("Content-Type", "application/json")
 	if sel != nil {
-		w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyRouter-Key", sel.KeyName)
+		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
+		w.Header().Set("X-TinyLab-Key", sel.KeyName)
 	}
 	w.WriteHeader(resp.StatusCode)
 

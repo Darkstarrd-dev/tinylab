@@ -11,12 +11,12 @@
     return { displayName: '', helperModel: '', imageModel: '', protocol: '', endpoint: '', requirements: '', format: 'natural', negativePrompt: '', quantity: 4, intervalMs: 0, maxRetries: 1, retryDelayMs: 1000, retryBackoff: 'fixed', onError: 'continue', seedMode: 'provider-controlled', baseSeed: 0, params: {}, customSystemPrompt: '', customUserPrompt: '', error: '', starting: false };
   }
 
-  var DRAFT_KEY = 'tinyrouter.playground.imageBatchDraft.v1';
+  var DRAFT_KEY = 'tinylab.playground.imageBatchDraft.v1';
   // Executing-project reference: persisted so a refresh/re-entry can recover
   // the running batch. Only the project id is stored — never snapshot, trace
   // or credentials. Close/mode-switch preserves it; a genuinely new project
   // clears it.
-  var ACTIVE_KEY = 'tinyrouter.playground.imageBatchActiveProject.v1';
+  var ACTIVE_KEY = 'tinylab.playground.imageBatchActiveProject.v1';
 
   function saveActiveProject() {
     try {

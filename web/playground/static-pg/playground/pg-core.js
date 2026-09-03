@@ -12,9 +12,9 @@
 
 // ----- Module 1: State management -----------------------------------
 // localStorage v2 schema (hard cut from v1; v1 data is ignored entirely).
-var PG_CFG_KEY = 'tinyrouter.playground.cfg.v2';
-var PG_MSG_KEY = 'tinyrouter.playground.msg.v2';
-var PG_PARAM_KEY = 'tinyrouter.playground.params.v2';
+var PG_CFG_KEY = 'tinylab.playground.cfg.v2';
+var PG_MSG_KEY = 'tinylab.playground.msg.v2';
+var PG_PARAM_KEY = 'tinylab.playground.params.v2';
 
 var PG_DEFAULT_CFG = {
   model: '',
@@ -27,7 +27,7 @@ var PG_DEFAULT_CFG = {
   stream: true,
   useCustomBody: false,
   customBody: '',
-  // Custom endpoint (bypass TinyRouter proxy, direct fetch to arbitrary URL)
+  // Custom endpoint (bypass TinyLab proxy, direct fetch to arbitrary URL)
   useCustomEndpoint: false,
   customEndpoint: '',
   customEndpointKey: '',
@@ -164,7 +164,7 @@ async function pgSaveMarkdownFile(content, filename) {
 // =====================================================================
 // Adapter contract — 宿主可以注入 PG_HOST 来覆盖默认全局函数。
 // 不注入时, fallback 到现有全局 (apiGet/toast/pgEscapeHtml/copyToClipboard/t),
-// 保持 TinyRouter 宿主原行为不变; 外部宿主可通过 window.PG_HOST = {...}
+// 保持 TinyLab 宿主原行为不变; 外部宿主可通过 window.PG_HOST = {...}
 // 替换为自身实现, 实现模块的零侵入移植。
 // =====================================================================
 var PG_HOST = (typeof window !== 'undefined' && window.PG_HOST) ? window.PG_HOST : null;

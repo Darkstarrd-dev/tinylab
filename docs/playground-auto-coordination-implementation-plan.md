@@ -7,7 +7,7 @@
 
 ## 0. 背景
 
-TinyRouter Playground 的「Auto Chat」（群聊）模式（`pg-autochat.js`）是一个多窗口独立迭代的对话循环。当前实现缺少协调机制，导致三类缺陷：
+TinyLab Playground 的「Auto Chat」（群聊）模式（`pg-autochat.js`）是一个多窗口独立迭代的对话循环。当前实现缺少协调机制，导致三类缺陷：
 
 | 缺陷类 | 现象 | 根因 |
 |---|---|---|
@@ -432,7 +432,7 @@ function pgSetAutoChatLayer(layer, enabled) {
 ### 5.2 Go 模拟回归
 
 ```bash
-cd /path/to/tinyrouter
+cd /path/to/tinylab
 go test ./internal/autochat/ -v   # 11 个回归测试
 go run ./cmd/autochat-bench       # 10 场景 + 指标
 ```

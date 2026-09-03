@@ -11,9 +11,9 @@ import (
 // PortOwner describes the process that owns a port.
 type PortOwner struct {
 	PID          int
-	Name         string // process name (e.g. "tinyrouter.exe", "node.exe")
+	Name         string // process name (e.g. "tinylab.exe", "node.exe")
 	Path         string // full executable path
-	IsTinyRouter bool   // name or path contains "tinyrouter" / "tr-pg"
+	IsTinyLab bool   // name or path contains "tinylab" / "tr-pg"
 }
 
 // identifyPortOwner attempts to discover the process listening on a given TCP
@@ -52,18 +52,18 @@ func identifyPortOwner(port int) (PortOwner, bool) {
 	isTR := false
 	if name != "" {
 		lower := strings.ToLower(name)
-		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinylab") || strings.Contains(lower, "tr-pg") {
 			isTR = true
 		}
 	}
 	if !isTR && path != "" {
 		lower := strings.ToLower(path)
-		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinyrouter") || strings.Contains(lower, "tr-pg") {
+		if strings.Contains(lower, "tinylab") || strings.Contains(lower, "tinylab") || strings.Contains(lower, "tr-pg") {
 			isTR = true
 		}
 	}
 
-	return PortOwner{PID: pid, Name: name, Path: path, IsTinyRouter: isTR}, true
+	return PortOwner{PID: pid, Name: name, Path: path, IsTinyLab: isTR}, true
 }
 
 // extractJSONValue is a minimal JSON value extractor for PowerShell output.

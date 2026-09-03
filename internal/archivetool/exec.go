@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	"github.com/tinyrouter/tinyrouter/internal/procutil"
+	"github.com/tinylab/tinylab/internal/archive"
+	"github.com/tinylab/tinylab/internal/procutil"
 )
 
 // stderrTailMax bounds how much tool stderr is retained for diagnostics.

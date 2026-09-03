@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	tr "github.com/tinyrouter/tinyrouter/internal/textreview"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	tr "github.com/tinylab/tinylab/internal/textreview"
 )
 
 // createSession creates and starts a text-review session.

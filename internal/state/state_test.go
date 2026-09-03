@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/console"
+	"github.com/tinylab/tinylab/internal/console"
 )
 
 func TestLoadSaveRoundtrip(t *testing.T) {

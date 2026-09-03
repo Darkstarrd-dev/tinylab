@@ -1,6 +1,6 @@
 # Google 原生 generateContent 协议支持 — 实施计划
 
-> **文档定位：** 本文档是 Google 原生 `generateContent` 协议接入 TinyRouter 的 **入口文档与迭代上下文**。在新对话中实施时，先读本文档 §1（如何使用）与 [`docs/gemini_research.md`](gemini_research.md)，再按 §4 Phase 1→4 顺序推进；每完成一个 Phase，按 §7 变更维护清单更新本文档的"最后核对"行与对应条目。
+> **文档定位：** 本文档是 Google 原生 `generateContent` 协议接入 TinyLab 的 **入口文档与迭代上下文**。在新对话中实施时，先读本文档 §1（如何使用）与 [`docs/gemini_research.md`](gemini_research.md)，再按 §4 Phase 1→4 顺序推进；每完成一个 Phase，按 §7 变更维护清单更新本文档的"最后核对"行与对应条目。
 >
 > **最后核对（2026-08-17，实施完成）：** Phase 1（后端协议地基）、Phase 2（Settings 协议下拉）、Phase 3（Playground 协议专属参数+原生 body）、Phase 4a（内联多模态）与 Phase 4b（服务端 ffmpeg media-prep 端点）全部实施完毕并通过单元测试与构建验证。
 >
@@ -25,7 +25,7 @@
 
 ## 2. 背景：当前 Google 协议 = OpenAI 兼容，非原生
 
-**结论：TinyRouter 当前对 Google 模型走 OpenAI 兼容端点，不支持原生 `generateContent`。**
+**结论：TinyLab 当前对 Google 模型走 OpenAI 兼容端点，不支持原生 `generateContent`。**
 
 证据（均为源码锚点）：
 
@@ -33,7 +33,7 @@
 - `backfillThoughtSignatures`（`internal/proxy/forward.go:199-259`）：处理的是 **OpenAI 兼容格式**（`messages[].tool_calls[].extra_content.google.thought_signature`），非原生 `thoughtSignature`。触发点 `internal/proxy/forward_retry.go:115-116`，仅在 `IsGeminiOpenAICompat()` 时执行。
 - 全仓搜索 `generateContent` / `ProtocolGoogle` / `EntryFormatGoogle` / `streamGenerateContent` **零命中**——无原生入口、无 `EntryFormatGoogle`、无 `ProtocolGoogle` 常量。
 - `entryFormat → forwardUpstream` 分支表（`internal/proxy/upstream.go:48-61`）只有 Anthropic / OpenAIResponses / default(OpenAI) 三分支。
-- [`docs/gemini_research.md`](gemini_research.md) §0、§20 印证：OMP/TinyRouter 的 google provider 走 OpenAI 兼容端点，只能 text+image，无视频/音频/PDF 的 wire 格式。
+- [`docs/gemini_research.md`](gemini_research.md) §0、§20 印证：OMP/TinyLab 的 google provider 走 OpenAI 兼容端点，只能 text+image，无视频/音频/PDF 的 wire 格式。
 
 **要支持视频/音频/PDF（需求 3）与 google 原生参数（需求 2），必须新增原生 `generateContent` 协议路径。**
 
@@ -75,9 +75,9 @@ flowchart LR
 - `config.yaml` 严格解析（`KnownFields(true)`，`internal/config/persistence.go:65`），但新增 `omitempty` 字段对旧配置无害（缺失即默认空）。
 - `"auto"` 在存储时归一化为 `""`（避免双值歧义）。
 
-### 3.4 决策 4：Google 入口用 TinyRouter 内部别名 `/v1/generateContent`
+### 3.4 决策 4：Google 入口用 TinyLab 内部别名 `/v1/generateContent`
 
-不为模型在路径中（`/v1beta/models/{model}:generateContent`）注册 chi 参数路由——那会破坏 TinyRouter 统一的"从 body `model` 字段解析 provider/key"路由模型（`forward_request.go:65-83`：`util.SplitModel` + `GetProviderByPrefix` + `ResolveModelAlias`）。改为：
+不为模型在路径中（`/v1beta/models/{model}:generateContent`）注册 chi 参数路由——那会破坏 TinyLab 统一的"从 body `model` 字段解析 provider/key"路由模型（`forward_request.go:65-83`：`util.SplitModel` + `GetProviderByPrefix` + `ResolveModelAlias`）。改为：
 
 - Playground POST `/v1/generateContent`，body 含 `model:"prefix/gemini-3.5-flash"` 用于路由。
 - 代理解析 provider/key 后构造真实上游 URL `{baseURL}/v1beta/models/{realModel}:generateContent`（流式用 `:streamGenerateContent?alt=sse`，见 [`docs/gemini_research.md`](gemini_research.md) §13）。
@@ -85,7 +85,7 @@ flowchart LR
 
 ### 3.5 已确认的待答问题（按推荐方案落定）
 
-1. **入口路径命名** → `/v1/generateContent`（TinyRouter 别名，body 带 model）。✅ 已确认。
+1. **入口路径命名** → `/v1/generateContent`（TinyLab 别名，body 带 model）。✅ 已确认。
 2. **视频 Files API 落地优先级** → 4c（含 key-pinning）列为后续规划（§5.1），本期先交付 4a+4b（image/audio/PDF + ffmpeg 转码）。✅ 已确认。
 3. **协议下拉作用域** → `TextProtocol` 仅作 Playground 侧提示 + 探测元数据，代理仍按入口路径透传，不做翻译。✅ 已确认。
 
@@ -200,7 +200,7 @@ ffmpeg 仅服务端可运行（`internal/mediaedit`，浏览器不可调）。�
 | # | 文件 | 改动 |
 |---|---|---|
 | 4c.1 | 新增 `internal/api/playground/google_files.go` | 后端用轮选 key 调 Google Files API：①启动 resumable upload（`X-Goog-Upload-Protocol:resumable`）→ ②上传二进制 → ③轮询 `state==ACTIVE` → ④返回 `{fileData:{mimeType,fileUri}}` |
-| 4c.2 | `internal/proxy/forward_retry.go` + `internal/rotation` | **key 固定机制**：Files API 文件绑定上传 key 的 project，`generateContent` 必须复用同 key（§6 全程用同一 `KEY`）。需扩展 forward 路径接受 pinned-key 提示（如请求头 `X-TinyRouter-Pin-Key:{keyId}`），`SelectKey` 优先返回该 key。**单 key 配置无此问题**；多 key 轮转才需 |
+| 4c.2 | `internal/proxy/forward_retry.go` + `internal/rotation` | **key 固定机制**：Files API 文件绑定上传 key 的 project，`generateContent` 必须复用同 key（§6 全程用同一 `KEY`）。需扩展 forward 路径接受 pinned-key 提示（如请求头 `X-TinyLab-Pin-Key:{keyId}`），`SelectKey` 优先返回该 key。**单 key 配置无此问题**；多 key 轮转才需 |
 
 > ⚠️ **key 固定是后续最大后端复杂点**。单 Key google 配置可直接工作；多 key 轮转需 pin-key 机制贯穿 rotation/forward。
 

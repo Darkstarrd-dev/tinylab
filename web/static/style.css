@@ -1,5 +1,5 @@
 /* =====================================================================
-   TinyRouter Shared Styles (style.css)
+   TinyLab Shared Styles (style.css)
    Shared layer: theme tokens, base layout, top header, cards/buttons,
    tables/badges, modal/toast/skeleton, utilities, theme variants.
    Per-page layers are imported below and own their selectors.
@@ -583,7 +583,7 @@ h3{font-size:var(--font-h3);font-weight:var(--font-weight-normal);color:var(--te
 .header-icon-btn{width:32px;height:32px;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:var(--font-weight-normal);transition:all var(--transition-fast);line-height:1;padding:0}
 .header-icon-btn:hover{background:var(--glass-hover);color:var(--text);border-color:var(--glass-border-hover)}
 
-/* From Uiverse.io by Galahhad - Adapted for TinyRouter (40px height, bottom aligned) */
+/* From Uiverse.io by Galahhad - Adapted for TinyLab (40px height, bottom aligned) */
 .theme-switch {
   --toggle-size: 16px;
   --container-width: 5.625em;

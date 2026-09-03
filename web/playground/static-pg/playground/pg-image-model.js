@@ -196,7 +196,7 @@
         var t = setTimeout(function () { resolve(delayThen(MODELSCOPE_RETRY_MS, attempt)); }, MODELSCOPE_ATTEMPT_TIMEOUT_MS);
         fetch(pollUrl, {
           method: 'GET',
-          headers: { 'X-ModelScope-Task-Type': 'image_generation', 'X-TinyRouter-Source': 'playground' },
+          headers: { 'X-ModelScope-Task-Type': 'image_generation', 'X-TinyLab-Source': 'playground' },
           signal: signal,
         }).then(function (resp) {
           return resp.json();
@@ -260,7 +260,7 @@
   // submit is polled via /v1/tasks/{id} until the images are ready. Resolves
   // with the canonical payload the normalize path understands.
   function remoteSubmit(body, signal, req, generation) {
-    var reqHeaders = { 'Content-Type': 'application/json', 'X-TinyRouter-Source': 'playground' };
+    var reqHeaders = { 'Content-Type': 'application/json', 'X-TinyLab-Source': 'playground' };
     // ModelScope submits image tasks asynchronously; the header tells the
     // upstream to return task_id immediately instead of blocking for the
     // whole generation (the old pgSendImage flow did the same).

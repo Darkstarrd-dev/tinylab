@@ -1,5 +1,5 @@
 // web/static/download.js
-// Video download page for TinyRouter.
+// Video download page for TinyLab.
 // Uses the shared helpers from api.js (apiGet/apiPost/apiDelete) and
 // app.js (t/escapeHtml/emptyState/toast/confirmModal).
 

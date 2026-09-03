@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
-	"github.com/tinyrouter/tinyrouter/internal/state"
+	"github.com/tinylab/tinylab/internal/keystate"
+	"github.com/tinylab/tinylab/internal/state"
 )
 
 func TestIncInFlight(t *testing.T) {

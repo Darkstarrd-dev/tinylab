@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 // EntryTracker keeps a concurrent-safe map of in-flight (processing) usage

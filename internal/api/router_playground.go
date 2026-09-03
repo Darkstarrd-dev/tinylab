@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/auth"
-	"github.com/tinyrouter/tinyrouter/internal/api/comfyui"
-	"github.com/tinyrouter/tinyrouter/internal/api/image"
-	apimagebatch "github.com/tinyrouter/tinyrouter/internal/api/imagebatch"
-	playgroundapi "github.com/tinyrouter/tinyrouter/internal/api/playground"
-	"github.com/tinyrouter/tinyrouter/internal/feature"
-	"github.com/tinyrouter/tinyrouter/web"
+	"github.com/tinylab/tinylab/internal/api/auth"
+	"github.com/tinylab/tinylab/internal/api/comfyui"
+	"github.com/tinylab/tinylab/internal/api/image"
+	apimagebatch "github.com/tinylab/tinylab/internal/api/imagebatch"
+	playgroundapi "github.com/tinylab/tinylab/internal/api/playground"
+	"github.com/tinylab/tinylab/internal/feature"
+	"github.com/tinylab/tinylab/web"
 )
 
 // registerPlaygroundRoutes mounts playground-attached API endpoints that sit

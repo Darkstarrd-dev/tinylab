@@ -3,7 +3,7 @@ package archivetool
 import (
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/archive"
+	"github.com/tinylab/tinylab/internal/archive"
 	"testing"
 )
 

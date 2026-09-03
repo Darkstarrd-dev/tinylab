@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 )
 
 // TodoItem represents a user todo / reminder item.

@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinylab/tinylab/internal/owner"
 )
 
 // Register mounts assistant routes on the provided chi router.

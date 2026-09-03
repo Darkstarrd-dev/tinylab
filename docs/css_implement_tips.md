@@ -1,12 +1,12 @@
 # CSS 样式移植实施经验与检查清单
 
-> 本文总结 TinyRouter 本轮 Header 页面切换控件移植的经验。目标不是复刻某一段 Uiverse CSS，而是把外部视觉参考安全地转换成符合 TinyRouter 现有 shell、主题系统、交互逻辑和嵌入式交付方式的生产样式。
+> 本文总结 TinyLab 本轮 Header 页面切换控件移植的经验。目标不是复刻某一段 Uiverse CSS，而是把外部视觉参考安全地转换成符合 TinyLab 现有 shell、主题系统、交互逻辑和嵌入式交付方式的生产样式。
 >
 > 适用范围：`web/static/index.html`、`web/static/index-nopg.html`、`web/static/style.css`，以及依赖全局 SPA 导航状态的 Header 控件。
 
 ## 结论先行
 
-“有完整 HTML/CSS”不等于“可以直接复制”。外部代码只完整描述了它自己的 DOM、层叠环境、状态模型和尺寸假设；移植到 TinyRouter 后，至少还要重新确认：
+“有完整 HTML/CSS”不等于“可以直接复制”。外部代码只完整描述了它自己的 DOM、层叠环境、状态模型和尺寸假设；移植到 TinyLab 后，至少还要重新确认：
 
 1. DOM 结构是否仍然成立。
 2. 原有 JavaScript 行为是否仍然绑定到新元素。
@@ -29,7 +29,7 @@ Uiverse 示例默认拥有自己的：
 - 固定正方形尺寸、固定间距和固定文字长度。
 - 一个与业务无关的 radio 状态模型。
 
-TinyRouter 的 Header 则是：
+TinyLab 的 Header 则是：
 
 - `nav` 内的原生 `button`。
 - `data-page` 作为页面身份。
@@ -37,7 +37,7 @@ TinyRouter 的 Header 则是：
 - Playground 版和 no-playground 版拥有不同按钮数量。
 - Header 旁边还有品牌、QuickSlot、统计卡片和关闭按钮。
 
-因此，直接复制 HTML 会丢失项目行为；直接复制 CSS 会把示例的尺寸、层级和状态假设带进生产 shell。正确做法是保留 TinyRouter 的 DOM 行为契约，只移植视觉语义。
+因此，直接复制 HTML 会丢失项目行为；直接复制 CSS 会把示例的尺寸、层级和状态假设带进生产 shell。正确做法是保留 TinyLab 的 DOM 行为契约，只移植视觉语义。
 
 ### 2. 参考图包含大量未显式编码的视觉信息
 
@@ -55,7 +55,7 @@ TinyRouter 的 Header 则是：
 
 ### 3. 项目主题系统会改变最终计算值
 
-TinyRouter 不是单一暗色页面。`html` 上的以下属性共同参与样式计算：
+TinyLab 不是单一暗色页面。`html` 上的以下属性共同参与样式计算：
 
 - `data-theme`：dark / light。
 - `data-theme-variant`：每种模式的 9 个变体。
@@ -68,7 +68,7 @@ TinyRouter 不是单一暗色页面。`html` 上的以下属性共同参与样�
 
 ### 4. 视觉状态和业务状态不是一回事
 
-参考组件用 radio 的 `:checked` 表示激活；TinyRouter 用 `button[data-page]` 和 `.active` 表示激活。两者不能只替换标签名：
+参考组件用 radio 的 `:checked` 表示激活；TinyLab 用 `button[data-page]` 和 `.active` 表示激活。两者不能只替换标签名：
 
 - `app.js` 会在页面切换时更新 `.active`。
 - Gallery 按钮还承担 Gallery / Editor 二路切换显示名和 active 联动。
@@ -108,7 +108,7 @@ TinyRouter 不是单一暗色页面。`html` 上的以下属性共同参与样�
 
 ### 7. 浏览器看到的 CSS 可能不是工作区里的 CSS
 
-TinyRouter 使用 `//go:embed all:static`。修改工作区的 `style.css` 后直接刷新浏览器，服务器仍可能提供旧二进制中嵌入的 CSS。
+TinyLab 使用 `//go:embed all:static`。修改工作区的 `style.css` 后直接刷新浏览器，服务器仍可能提供旧二进制中嵌入的 CSS。
 
 这会产生非常典型的误判：
 
@@ -226,7 +226,7 @@ text-shadow: 0 0 20px var(--accent);
 
 输出一张“参考结构 → 项目结构”的映射表，再开始改代码。
 
-### Phase 1：定位 TinyRouter 的真实契约
+### Phase 1：定位 TinyLab 的真实契约
 
 必须先确认：
 
@@ -272,7 +272,7 @@ preview 必须通过 HTTP，不能用 `file://` 模拟，因为 `file://` 不会
 
 优先映射到已有 Token：
 
-| 外部概念 | TinyRouter 方向 |
+| 外部概念 | TinyLab 方向 |
 |---|---|
 | page/card surface | `--surface-page` / `--surface-card` |
 | normal/strong border | `--border-subtle` / `--border-strong` |

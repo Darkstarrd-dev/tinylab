@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // QuotaSnapshot holds rate-limit info extracted from response headers.

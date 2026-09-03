@@ -46,7 +46,7 @@ func TestValidateExecutableRejects(t *testing.T) {
 		t.Error("non-executable plain file must be rejected")
 	}
 	// A file inside the OS temp directory is rejected on every platform.
-	tempTool := filepath.Join(os.TempDir(), "tinyrouter-evil-tool"+extForTest())
+	tempTool := filepath.Join(os.TempDir(), "tinylab-evil-tool"+extForTest())
 	if err := os.WriteFile(tempTool, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestValidateExecutableAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(cache, "tinyrouter-procutil-test")
+	dir := filepath.Join(cache, "tinylab-procutil-test")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

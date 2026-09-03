@@ -39,7 +39,7 @@
 ## 3. 后端契约
 
 - `GET  /api/music/library` → `{dir, files:[{name,size,mtime,ext,isDir}]}`（`os.MkdirAll` + `os.ReadDir`，`files` 恒为数组）。
-- `POST /api/music/proxy`   `{url}` 或 `?url=` → 透传 `GET url`（`User-Agent: TinyRouter/1.0 Music`，对 `*bilivideo.com/*bilibili.com` 加 `Referer: https://www.bilibili.com/` 否则 403，透传 `Range`→`206 Content-Range/Accept-Ranges`，200 MB 限 `io.LimitReader`，`Access-Control-Allow-Origin:*`）。
+- `POST /api/music/proxy`   `{url}` 或 `?url=` → 透传 `GET url`（`User-Agent: TinyLab/1.0 Music`，对 `*bilivideo.com/*bilibili.com` 加 `Referer: https://www.bilibili.com/` 否则 403，透传 `Range`→`206 Content-Range/Accept-Ranges`，200 MB 限 `io.LimitReader`，`Access-Control-Allow-Origin:*`）。
 - `POST /api/music/download` `{url, filename}` → 同 proxy 的 `Referer`/`Range` 语义 → `Musics/filename` 原子写（`filepath.Base` 防穿越、`(1),(2)` 递增、`tmp+Rename`）。
 - `GET  /api/music/bilibili/search?keyword=&limit=` → 优先 `search/type`，`-412/HTML` 时降级 `search/all/v2` 抽 `result_type=video`，映射 `Song {id/bvid,cid,title,artist,cover,duration,source:'bilibili'}`（见 `docs/music-verification-report.md` §2 #2）。
 - `POST /api/music/bilibili/resolve {bvid,cid?,id?}` → 若缺 `cid` 则 `GET /x/web-interface/view?bvid=` 解析 `cid`，再 `GET /x/player/playurl?bvid=&cid=&fnval=16` 取 `durl[0].url`/`dash.audio.baseUrl` → `{url,bvid,cid}`。

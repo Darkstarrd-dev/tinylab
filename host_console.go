@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/app"
+	"github.com/tinylab/tinylab/internal/app"
 )
 
 // runHostLoop blocks the main goroutine until an OS signal (SIGINT/SIGTERM) is

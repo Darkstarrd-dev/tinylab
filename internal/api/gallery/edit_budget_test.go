@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/mediaedit"
+	"github.com/tinylab/tinylab/internal/mediaedit"
 )
 
 // TestMediaStartStatus_TooManyJobs verifies the ffmpeg concurrency overload is

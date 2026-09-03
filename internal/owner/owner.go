@@ -18,7 +18,7 @@ import (
 )
 
 // CookieName is the name of the HttpOnly owner cookie.
-const CookieName = "tinyrouter_owner"
+const CookieName = "tinylab_owner"
 
 // tokenBytes is the entropy of one owner value (32 bytes = 256 bits).
 const tokenBytes = 32

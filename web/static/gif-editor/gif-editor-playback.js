@@ -1,5 +1,5 @@
 // web/static/gif-editor-playback.js
-// Playback Control & Key Binding for TinyRouter GIF Editor
+// Playback Control & Key Binding for TinyLab GIF Editor
 
 (function () {
   'use strict';

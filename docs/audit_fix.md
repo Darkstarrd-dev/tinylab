@@ -1,4 +1,4 @@
-# TinyRouter 发布前全库审核修复方案
+# TinyLab 发布前全库审核修复方案
 
 > 文档用途：本文件是发布前修复流程的执行上下文、任务分解、验收合同和发布门禁。后续处理应以本文件的任务编号、接口合同和验收条件为准；不得只修复单个症状而保留同类路径/认证/资源漏洞。
 >
@@ -38,7 +38,7 @@
 
 ### 1.1 仓库和提交基线
 
-- 仓库：`Z:/Playground/tinyrouter`
+- 仓库：`Z:/Playground/tinylab`
 - 审核 HEAD：`c099129`
 - HEAD 提交信息：`fix(editor): resolve history clear bug, iframe styling corruption, and statusbar theme integration`
 - 审核期间未修改源码、配置或测试。
@@ -108,7 +108,7 @@ govulncheck ./...                      本机未安装，未完成 Go 漏洞数�
 - 不可利用的内部函数调用；
 - 单纯性能建议，除非可造成有明确输入路径的 DoS；
 - 没有证据的 Mermaid/第三方未知绕过猜测；
-- `X-TinyRouter-Source` 欺骗、日志换行等低影响完整性问题，除非后续实现把它们变成授权依据。
+- `X-TinyLab-Source` 欺骗、日志换行等低影响完整性问题，除非后续实现把它们变成授权依据。
 
 ---
 
@@ -163,7 +163,7 @@ govulncheck ./...                      本机未安装，未完成 Go 漏洞数�
 | 场景 | 默认策略 |
 |---|---|
 | 图片代理/保存图片 | 禁止 loopback/private/link-local/multicast/unspecified；重定向逐跳检查；DNS rebinding 防护 |
-| AnySearch extract | 只发送到固定 AnySearch endpoint；用户 URL 作为上游参数时按 AnySearch 合同处理，不直接由 TinyRouter fetch |
+| AnySearch extract | 只发送到固定 AnySearch endpoint；用户 URL 作为上游参数时按 AnySearch 合同处理，不直接由 TinyLab fetch |
 | Provider 管理探测 | 默认拒绝私网目标；若必须支持本地 Provider，使用显式 `allowPrivateProvider` 能力并要求认证 |
 | 已登记 Provider 的 `/v1` 代理 | 允许产品支持的本地 Provider，但 Provider 注册/修改必须受管理认证保护；不允许匿名创建任意 BaseURL |
 | ffprobe/ffmpeg | 只允许服务端已登记的本地 asset，强制 `file` 协议 |
@@ -959,13 +959,13 @@ node --check <所有受影响 JS>
 | F-21 | fixed | 2bc4637，Phase E | `internal/registry/state_key_test.go`；`KeySnapshot.ProviderID/KeyID` + `EncodeSnapshotKey` 长度前缀；`Restore` 兼容 结构化→长度前缀→legacy `::` | | `convertKey` 已删；`cfgMu→stateMu` 锁序显式化 |
 | F-22 | fixed | 2bc4637，Phase E（phase-e-trace） | `internal/api/trace/register.go`：`traceIndexDTO`/`traceDetailDTO` 秘密安全投影（排除 `finalKey`/`finalKeyName`/`upstreamURL`/`upstreamURLBase`，不依赖 writer 侧掩码）、`maskHeaderMap`/`maskHeaderValue`/`maskToken` 幂等重掩码、`normalizeTraceDate`（日历合法日期）、`matchIndexFilters`、`newTraceScanner`（1MiB 行上限）、`countIndexMatches`/`collectIndexPage` 两遍流式分页 + `collectDetailPage`、`writeIndexEnvelope`/`writeReqEnvelope` 增量输出；上限 `limit` 默认 200 最大 1000、`maxReqDetailLines` 1000、`maxTraceResponseBytes` 16MiB、`maxQFilterLen`/`maxReqIDLen` 256；超限页面置 `"truncated":true`、取消不输出。`internal/api/trace/register_test.go` 28 测试（新增 10：LargeFileStreaming/PaginationBoundaries/QFilterTooLong/ImpossibleDate/ReqIDTooLong/ReqLargeFileTruncation/ReqResponseByteBudget/ReqSecretSafeDTO/2×ContextCancellation），`go test ./internal/api/trace/` ok | | `/index` 与 `/req/{reqID}` 均流式有界读取，不再整文件加载内存 |
 | F-23 | fixed | 2bc4637，Phase E + final-hardening | `internal/proxy` 全量 ok（44s）；`sensitiveHeaderNames`/`isSecretHeader`/`maskHeaderMap`/`isCustomSecretHeader`/`redactURL`；recorder 响应头掩码 + `upstreamURL` redact；**E-4 控制台日志消毒已补（final-hardening，2026-08-09）：** `internal/console/logger.go::sanitize`（C0 0x00–0x1F + DEL 0x7F → 可见转义 `\n`/`\r`/`\t`/`\xNN`，Unicode 原样）+ `Logger.emit` 单一出口（Log/Info/Warn/Error/Debug 全经此，先消毒再 stdout/ring/SSE）；`logger_test.go` 6 新测试（`TestLogger_Sanitize_NoLineForging`/`_NoTerminalEscapes`/`_SubscriberNoControlBytes`/`_UnicodePreserved`/`TestSanitize_AllControlBytes`/`_StdoutNoLineForging`），`go test ./internal/console/` ok | | E-4 全部落实；无残留子项 |
-> **2026-08-10 后续本地可观测性调整：** F-22/F-23 的“字段白名单/广泛脱敏”不符合 TinyRouter 纯本地诊断用途，已由 `internal/logredact` 重新收敛为“仅 Provider Key 值替换为 `******`”。Trace API 恢复完整动态字段，Recent Requests/Probe 恢复完整 Body、Header、URL、决策与 provenance；`TestTraceReq_TransparentRecord`、完整 Body、Key 固定掩码回归测试已更新；流式分页、取消处理、上游传输预算和 Console 控制字符转义仍保留。该调整是明确的本地部署可观测性取舍，不恢复任何完整 Provider Key。
+> **2026-08-10 后续本地可观测性调整：** F-22/F-23 的“字段白名单/广泛脱敏”不符合 TinyLab 纯本地诊断用途，已由 `internal/logredact` 重新收敛为“仅 Provider Key 值替换为 `******`”。Trace API 恢复完整动态字段，Recent Requests/Probe 恢复完整 Body、Header、URL、决策与 provenance；`TestTraceReq_TransparentRecord`、完整 Body、Key 固定掩码回归测试已更新；流式分页、取消处理、上游传输预算和 Console 控制字符转义仍保留。该调整是明确的本地部署可观测性取舍，不恢复任何完整 Provider Key。
 | F-24 | fixed | 2bc4637，Phase F | 两份 bundle 均 DOMPurify **3.4.13**；`static-pg/vendor/README.md` SHA-256 `9ab3d44d…`；`playground-markdown.test.js`/`media-bridge.test.js` PASS | | 来源/许可证已记录；**依赖门禁（2026-08-09）：** chi v5.2.1→**v5.2.2**（修复 GO-2025-3770/GHSA-vrw8-fxc6-2r93 RedirectSlashes open redirect；仓库仅 import `middleware.Recoverer`/`RequestID`，RealIP/RedirectSlashes 未引用）、`toolchain go1.26.5`（修复 GO-2026-5856 crypto/tls ECH）、`govulncheck v1.6.0` 全仓 0 affected/0 called |
 | F-25 | fixed | 2bc4637，Phase F | `mermaid.min.js` **11.16.1**（esbuild UMD 自包含）；README + `LICENSE.mermaid`；`securityLevel:'strict'` headless Chrome 渲染验证 | | 版本已钉定；依赖门禁同 F-24 行（govulncheck v1.6.0 零漏洞证据） |
 | F-26 | fixed | 2bc4637，Phase A | `internal/api/auth/auth_test.go`（26 测试）；`loginResponseWriter` 只记 ≥400 失败、成功仅 `loginGuard.Success()` 显式记账 | | malformed body/隐式 200 不再重置计数 |
 | F-27 | fixed | 2bc4637，Phase D | `internal/api/gallery/tempfile.go`（注册成功 + 24h TTL + 小时/启动 sweep）；gallery 测试 ok；archive scavenger | | subtitle/upload-temp/extract-zip-entry 成功路径登记 |
 | F-28 | fixed | 2bc4637，Phase B | `edit_handlers_test.go`/`register_grant_test.go`；`resolveMediaInput`（asset/grant, owner 绑定）、`sanitizeOutputStem`、`zip-outputs`/`zip-writeback` assetIds/grantId（raw→410） | | 输出经 `assetStore` 登记（jobOutputs jobID→assetID） |
-| F-29 | fixed | 2bc4637，Phase B + owner-isolation-fix | 缺陷（非视觉 HTTP smoke 发现）：(A) `owner.Middleware` 在 `/api/gallery` 路由组与 gallery `Register` 双挂载 → 首次请求发两个不同 `tinyrouter_owner` Set-Cookie，context owner 与浏览器保留 cookie 漂移；(B) `session_store.go` get/touch/update/pin 对任何 owner 不匹配都 `removeLocked` → 已知 sessionId 的外部探测会**清空 owner 会话**。修复（已核对源码）：(A) 移除 router.go 重复挂载，单一边界留在 gallery `Register`（与 archive/editor/filetransfer 一致）；(B) get/touch/update/pin 对 owner 不匹配**失败关闭且不删除不修改**（TTL 惰性驱逐仅限 owner 自己的会话）。测试：`session_owner_test.go`（新）+ `register_grant_test.go`（`ownerTransport`/`foreignClient`）+ `register_test.go`/`api_test.go`——`TestGallery_OwnerCookieIssuedOnce`（恰好一个 Set-Cookie）/`TestGallery_OwnerBoundSessionIsolation`（外部读/touch/条目删/会话删/review-pin 均不 purge）/`TestSessionStore_ForeignAccessNeverPurgesOwnerSession`/`_MissingSession`/`TestSessionStore_OwnerAccessStillEvictsExpired`；`go test ./internal/api/...` 13 包 ok | | 修复后已按源码+测试复核；HTTP smoke 的 42/43 断言（setup-required 5/5、CSRF 11/11、DTO 3/3、raw path 410 9/9、SSRF 代理 4/4、iframe sandbox DOM 扫描）亦为旁证 |
+| F-29 | fixed | 2bc4637，Phase B + owner-isolation-fix | 缺陷（非视觉 HTTP smoke 发现）：(A) `owner.Middleware` 在 `/api/gallery` 路由组与 gallery `Register` 双挂载 → 首次请求发两个不同 `tinylab_owner` Set-Cookie，context owner 与浏览器保留 cookie 漂移；(B) `session_store.go` get/touch/update/pin 对任何 owner 不匹配都 `removeLocked` → 已知 sessionId 的外部探测会**清空 owner 会话**。修复（已核对源码）：(A) 移除 router.go 重复挂载，单一边界留在 gallery `Register`（与 archive/editor/filetransfer 一致）；(B) get/touch/update/pin 对 owner 不匹配**失败关闭且不删除不修改**（TTL 惰性驱逐仅限 owner 自己的会话）。测试：`session_owner_test.go`（新）+ `register_grant_test.go`（`ownerTransport`/`foreignClient`）+ `register_test.go`/`api_test.go`——`TestGallery_OwnerCookieIssuedOnce`（恰好一个 Set-Cookie）/`TestGallery_OwnerBoundSessionIsolation`（外部读/touch/条目删/会话删/review-pin 均不 purge）/`TestSessionStore_ForeignAccessNeverPurgesOwnerSession`/`_MissingSession`/`TestSessionStore_OwnerAccessStillEvictsExpired`；`go test ./internal/api/...` 13 包 ok | | 修复后已按源码+测试复核；HTTP smoke 的 42/43 断言（setup-required 5/5、CSRF 11/11、DTO 3/3、raw path 410 9/9、SSRF 代理 4/4、iframe sandbox DOM 扫描）亦为旁证 |
 | F-30 | fixed | 2bc4637，Phase B | `fs_handlers.go` `galleryFsEntry{name,rel,size,kind}`（无绝对路径）+ `listGalleryFiles` 仅 rel；`register_grant_test.go` | | `list-dir`/`file`/`open-dir` 响应不含本机路径 |
 
 > 状态语义：`fixed`=后端+前端/测试按验收落地且已按源码核对；`partial`=部分落地，备注列出剩余项；`pending`=未实施；`decision-required`=需产品决策（当前保持推荐项）。"修复提交"列已记录实施阶段与修复提交 `2bc4637`（security(audit): remediate pre-release findings）。F-12 为决策项无代码变更。风险接受人待发布评审指派。

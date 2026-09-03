@@ -1,5 +1,5 @@
 // Package assistant implements the 小精灵 (sprite) assistant core: it maps a
-// natural-language user intent to a set of TinyRouter's own callable
+// natural-language user intent to a set of TinyLab's own callable
 // capabilities (its real REST routes), confirms the model-routing layer where
 // a model is involved, and tracks periodic jobs the assistant can run on the
 // user's behalf (e.g. cleaning expired traces).

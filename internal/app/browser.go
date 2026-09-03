@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 // OpenBrowser opens the default browser for the current OS. It is used both by

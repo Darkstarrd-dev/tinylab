@@ -3,7 +3,7 @@ package registry
 import (
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 func TestUpdateModelProtocols_Success(t *testing.T) {

@@ -26,44 +26,44 @@ func TestIdentifyPortOwner_NotFound(t *testing.T) {
 	}
 }
 
-// TestPortOwner_IsTinyRouter checks that the IsTinyRouter detection works
+// TestPortOwner_IsTinyLab checks that the IsTinyLab detection works
 // for various naming patterns.
-func TestPortOwner_IsTinyRouterDetection(t *testing.T) {
+func TestPortOwner_IsTinyLabDetection(t *testing.T) {
 	tests := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{name: "tinyrouter", path: "/usr/local/bin/tinyrouter", want: true},
+		{name: "tinylab", path: "/usr/local/bin/tinylab", want: true},
 		{name: "tr-pg", path: "/usr/local/bin/tr-pg", want: true},
-		{name: "TinyRouter", path: "C:\\Program Files\\TinyRouter\\tinyrouter.exe", want: true},
+		{name: "TinyLab", path: "C:\\Program Files\\TinyLab\\tinylab.exe", want: true},
 		{name: "node", path: "/usr/bin/node", want: false},
 		{name: "python3", path: "/usr/bin/python3", want: false},
 		{name: "tr-pg.exe", path: "C:\\tools\\tr-pg.exe", want: true},
-		{name: "tinyrouter_old", path: "/opt/tinyrouter_old/tinyrouter", want: true},
+		{name: "tinylab_old", path: "/opt/tinylab_old/tinylab", want: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Recalculate IsTinyRouter using the same logic as makeOwner
-			got := isTinyRouterName(tt.name) || isTinyRouterPath(tt.path)
+			// Recalculate IsTinyLab using the same logic as makeOwner
+			got := isTinyLabName(tt.name) || isTinyLabPath(tt.path)
 			if got != tt.want {
-				t.Errorf("PortOwner{Name=%q, Path=%q}.IsTinyRouter = %v, want %v", tt.name, tt.path, got, tt.want)
+				t.Errorf("PortOwner{Name=%q, Path=%q}.IsTinyLab = %v, want %v", tt.name, tt.path, got, tt.want)
 			}
 		})
 	}
 }
 
-// isTinyRouterName checks if a process name indicates TinyRouter.
-func isTinyRouterName(name string) bool {
+// isTinyLabName checks if a process name indicates TinyLab.
+func isTinyLabName(name string) bool {
 	lower := toLower(name)
-	return contains(lower, "tinyrouter") || contains(lower, "tr-pg")
+	return contains(lower, "tinylab") || contains(lower, "tr-pg")
 }
 
-// isTinyRouterPath checks if a process path indicates TinyRouter.
-func isTinyRouterPath(path string) bool {
+// isTinyLabPath checks if a process path indicates TinyLab.
+func isTinyLabPath(path string) bool {
 	lower := toLower(path)
-	return contains(lower, "tinyrouter") || contains(lower, "tr-pg")
+	return contains(lower, "tinylab") || contains(lower, "tr-pg")
 }
 
 func toLower(s string) string {

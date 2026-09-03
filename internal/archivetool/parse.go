@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinyrouter/tinyrouter/internal/archive"
+	"github.com/tinylab/tinylab/internal/archive"
 )
 
 // rawEntry is one parsed external-tool listing row before strict validation.

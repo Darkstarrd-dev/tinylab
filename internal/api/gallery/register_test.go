@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/owner"
 )
 
 // buildTestZipBytes creates an in-memory zip with one gallery-supported image
@@ -218,7 +218,7 @@ func TestGalleryRoutes_DeleteSessionAndTouch(t *testing.T) {
 
 // TestGallery_OwnerBoundSessionIsolation pins the F-29 owner boundary end to
 // end over HTTP: the owner middleware is mounted exactly once (a request with
-// no owner cookie receives exactly one tinyrouter_owner cookie), a session
+// no owner cookie receives exactly one tinylab_owner cookie), a session
 // created under one owner is readable only by that owner, and foreign
 // read/touch/delete/pin attempts return not-found/denied WITHOUT purging the
 // owner's session (regression: foreign get/touch/update/pin deleted the

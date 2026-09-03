@@ -8,7 +8,7 @@ import (
 )
 
 // errorLogName is the file name used for fatal startup error logs.
-const errorLogName = "tinyrouter-error.log"
+const errorLogName = "tinylab-error.log"
 
 // writeErrorLog writes a timestamped error message to the error log file,
 // overwriting any previous content. Errors are silently ignored to avoid

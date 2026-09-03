@@ -1,7 +1,7 @@
 'use strict';
 
 (function (global) {
-  var DB_NAME = 'tinyrouter-editor-workspace';
+  var DB_NAME = 'tinylab-editor-workspace';
   var DB_VERSION = 1;
   var NODE_STORE = 'nodes';
   var CONTENT_STORE = 'contents';
@@ -9,7 +9,7 @@
   var TRASH_ID = 'system:trash';
   var TEMP_ID = 'system:temp';
   var WELCOME_ID = 'file:welcome';
-  var WELCOME_TEXT = 'Welcome to TinyRouter Editor.\n\nCreate a file to get started.';
+  var WELCOME_TEXT = 'Welcome to TinyLab Editor.\n\nCreate a file to get started.';
 
   var db = null;
   var memoryMode = false;

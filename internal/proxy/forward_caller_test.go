@@ -11,7 +11,7 @@ import (
 func TestRequestCallerTag_Masking(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
 	req.Header.Set("Authorization", "Bearer sk-secret-key-1234567890-abcd")
-	req.Header.Set("X-TinyRouter-Source", "playground")
+	req.Header.Set("X-TinyLab-Source", "playground")
 	req.Header.Set("User-Agent", "OpenCode/1.2")
 	req.RemoteAddr = "127.0.0.1:54321"
 
@@ -41,7 +41,7 @@ func TestRequestCallerTag_Masking(t *testing.T) {
 // are skipped entirely (no "src=" placeholder, etc.).
 func TestRequestCallerTag_EmptyFieldsOmitted(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
-	// No Authorization, no X-TinyRouter-Source, no User-Agent.
+	// No Authorization, no X-TinyLab-Source, no User-Agent.
 	req.RemoteAddr = "10.0.0.1:7777"
 
 	tag := requestCallerTag(req)
@@ -81,7 +81,7 @@ func TestRequestCallerTag_ShortKeyRevealsNothing(t *testing.T) {
 // even with absurdly long field values.
 func TestRequestCallerTag_Bounded(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader("{}"))
-	req.Header.Set("X-TinyRouter-Source", strings.Repeat("x", 200))
+	req.Header.Set("X-TinyLab-Source", strings.Repeat("x", 200))
 	req.Header.Set("User-Agent", strings.Repeat("u", 200))
 	req.RemoteAddr = strings.Repeat("z", 200)
 

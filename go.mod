@@ -1,4 +1,4 @@
-module github.com/tinyrouter/tinyrouter
+module github.com/tinylab/tinylab
 
 go 1.25.0
 

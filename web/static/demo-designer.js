@@ -363,12 +363,12 @@
     var selStart = ta.selectionStart || 0, selEnd = ta.selectionEnd || 0;
     var selText = ta.value.slice(selStart, selEnd);
     var isSel = !!(selText && selText.trim());
-    var selectedModel = localStorage.getItem('tinyrouter_editor_ai_model') || '';
+    var selectedModel = localStorage.getItem('tinylab_editor_ai_model') || '';
     // Use the project's model picker if available, else prompt for model once
     if (!selectedModel && typeof window.openModelPickerModal === 'function') {
       window.openModelPickerModal('', function (m) {
         if (m) {
-          localStorage.setItem('tinyrouter_editor_ai_model', m);
+          localStorage.setItem('tinylab_editor_ai_model', m);
           runAiAssist();
         } else { toastError(tstr('designerAiNoModel', 'Select a model first')); }
       });

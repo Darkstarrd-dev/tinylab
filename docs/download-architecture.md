@@ -1,6 +1,6 @@
 > **最后核对（2026-08-29，Round-2 P0-01c/P1-02 SSE与并发）：** `validateDownloadDir` 相对路径经 `Abs(defaultDir/cleaned)` 后 `HasPrefix` 校验，`"evil"` 拒绝；`download-sse.js` `onerror` 重连前 `loadDownloadTasks()` 全量校正；`playDownloadFile`/`openDownloadDir` 经 `PathGuard(DownloadDir)` 403 越界；`Manager.UpdateSettings` 的 `maxConcurrent` 生效说明。
 
-# TinyRouter Download 下载功能架构
+# TinyLab Download 下载功能架构
 > **最后核对（2026-08-08，Utility 子工具与 Download 生命周期）：** Download 前端当前由 Utility 菜单的 `download` 子工具承载，入口仍为 `web/static/download.js`，后端 API 路径保持 `/api/downloads/*` 不变。`web/static/app.js` 在 Utility 子工具切换时调用 `suspendDownload`/`resumeDownload`，离开时关闭 SSE 并执行 cleanup；任务队列、SSE 事件与服务端执行语义未因导航重组改变。FileTransfer 是并列的 Utility `fileTransfer` 子工具，其上传路由事实记录于 `docs/config-registry-state-architecture.md`。
 > **最后核对（2026-08-22，Download 页审计修复）：** (1) **后端 cancel→retry 竞态**：`RetryTask`/`RemoveTask` 增加 `m.active[taskID]` 门控（进程未退出的 cancelled 任务拒绝重试/移除，报 "task is still finishing"），`ClearCompleted` 跳过 `active` 任务；`processTask` 清理时按 control 指针比对（`cur == tc`），被 superseded 的旧运行不再覆盖 `LogTail`/终态（worker.go）。(2) **队列满语义**：`CreateTask`/`RetryTask` 投递改为阻塞等待 `enqueueTimeout`（10s，manager.go），超时才标 error 并 cancel 释放 context（修复 context 泄漏）。(3) **音频容器**：`BuildDownloadArgs` 音频分支加 `--extract-audio`（auto/original 不转码；mp3/m4a/flac/wav/opus 加 `--audio-format` + `--audio-quality 0`），前端 `#dl-type` change 时经 `applyContainerOptions` 切换容器下拉为音频格式集（`DL_CONTAINER_OPTIONS`）。(4) **前端**：解析卡片快照 type/quality/container（`cachedParsedOptionsMap`，卡片副标题显示 "720p · MKV" 式标签），下载按钮走 `withLoading`，同 URL 非终态去重（`downloadAlreadyQueued`），提交后清空 `#dl-url`；`removeDownload` 修复 `selectTask(null, firstId)` 参数错位并同步 `selectedTaskIds`；`playVideo` 不再隐式变更多选集；详情面板 SSE tick 走 `updateSelectedTaskView` 原地 patch（状态不变仅更新进度文本，`maybeRefreshDetailLog` 2s 节流拉日志，状态变化才全量重渲染）；删除死代码 `viewLog`/`togglePlaylistEntries`，声明 `downloadDefaultDir`，硬编码英文文案全部 i18n 化，移除重复 DOM id `dl-playlist-count`。新增测试：`TestBuildDownloadArgsAudioFormat`/`TestRetryRejectedWhileTaskActive`/`TestRemoveRejectedWhileTaskActive`/`TestClearCompletedKeepsActiveCancelledTask`。
 > **最后核对（2026-08-09，docs/audit_fix.md F-08/F-16 落地）：** (1) **下载 URL SSRF（F-16，2026-08-09 完整落地）**：两层防线——`internal/api/download/register.go::validateDownloadURL` 用 `internal/outbound.ValidateURL` + `outbound.Policy.CheckHost` 做初始 URL 预检（scheme 仅 http/https、拒绝 userinfo、异常端口黑名单、DNS 解析后全部 IP fail-closed，`createDownload`/`getVideoInfo`/`getPlaylistInfo`/`createPlaylistDownload` 全部入口，`url_policy_test.go` 3 测试）；**本地 SSRF 代理** `internal/download/ssrfproxy.go`（`newSSRFProxy`/`handlePlain`/`handleConnect`/`injectProxy`/`ensureProxyArg`）——yt-dlp 经 `--proxy` 指向该代理，初始 URL、**每个重定向跳、每个媒体分片**都在建连前逐跳重校验（DNS 逐跳解析 + 已校验 IP 字面量固定拨号防 rebinding，CONNECT 隧道同），public→private 重定向拒绝（`ssrfproxy_test.go` 7 测试含 `TestSSRFProxyRejectsRedirectToPrivate`/`TestSSRFProxyConnectBlocksPrivateTarget`）；用户自配 `DownloadConfig.Proxy` 时显式 opt-out（不装本地代理）。审计 §8.2 决策项"Download 是否允许公共 URL 重定向"由实现定案：公共重定向放行但逐跳受控、私网目标拒绝。(2) **外部工具路径校验（F-08）**：Settings PATCH `YtDlpPath`/`FfmpegPath` 经 `internal/procutil.ValidateExecutable` 校验（绝对路径、regular file、Windows 可执行扩展名、拒绝临时/其它用户可写目录）；`internal/download/binary.go::resolveConfiguredTool` 对配置/env/PATH 候选同样校验（裸名先 `exec.LookPath`）。(3) 其余生命周期/参数/SSE 语义未变（本文 §4–§13 保持）。
@@ -27,7 +27,7 @@
 
 ## 1. 范围与结论
 
-`internal/download/` 是 TinyRouter 的**下载（Download）功能模块**，把外部 `yt-dlp` + `ffmpeg` 二进制包装为进程内（in-process）的任务队列：负责构建 `yt-dlp` 命令行参数、spawn 子进程、解析 `[download]` 进度行、通过 SSE 把任务状态推给管理 UI。它**不是** LLM 代理的一部分，与 `internal/proxy/` 在职责上完全正交——前者转发 `/v1/*` OpenAI 流量，后者只处理视频/音频下载。二者共享的只有：HTTP 服务器（`internal/api/router.go`）、`internal/console.Logger`、配置加载（`internal/config`）与 `AuthMiddleware` 鉴权边界。
+`internal/download/` 是 TinyLab 的**下载（Download）功能模块**，把外部 `yt-dlp` + `ffmpeg` 二进制包装为进程内（in-process）的任务队列：负责构建 `yt-dlp` 命令行参数、spawn 子进程、解析 `[download]` 进度行、通过 SSE 把任务状态推给管理 UI。它**不是** LLM 代理的一部分，与 `internal/proxy/` 在职责上完全正交——前者转发 `/v1/*` OpenAI 流量，后者只处理视频/音频下载。二者共享的只有：HTTP 服务器（`internal/api/router.go`）、`internal/console.Logger`、配置加载（`internal/config`）与 `AuthMiddleware` 鉴权边界。
 
 - **谁调用它：** `internal/app/app.go` 在 `buildComponents` 中构造 `download.Manager` 并注入 `RuntimeSettings`（app.go:134-145），随后**无条件**调用 `Start()`（app.go:151）；`internal/api/router.go` 在 `AuthMiddleware` 保护组内注册 11 条 `/api/downloads/*` 路由（router.go:291-302）；`internal/api/settings.go` 在 PATCH `/settings` 时把下载配置推送到运行中的管理器（settings.go:137-168）。
 - **它调用谁：** 外部 `yt-dlp` 进程（路径按 `YtDlpPath`/`YTDLP_PATH`/`PATH` 解析，executor.go:199-211）、`ffmpeg`（仅通过 `--ffmpeg-location` 传给 yt-dlp，由 yt-dlp 内部拉起，executor.go:124-127、args.go:124-127）、配置与 `console.Logger`。
@@ -113,7 +113,7 @@ type RuntimeSettings struct {
 
 ### 3.4 外部二进制路径解析
 
-yt-dlp 与 ffmpeg 都不由 TinyRouter 携带，解析顺序一致（explicit → 环境变量 → PATH LookPath）：
+yt-dlp 与 ffmpeg 都不由 TinyLab 携带，解析顺序一致（explicit → 环境变量 → PATH LookPath）：
 
 - **yt-dlp**（`resolveYtDlpPath`，executor.go:199-211）：`settings.YtDlpPath` → `os.Getenv("YTDLP_PATH")` → `exec.LookPath("yt-dlp")`。三者皆空返回 `yt-dlp not found (...) ` 错误（executor.go:208）。
 - **ffmpeg**（`resolveFfmpegPath`，executor.go:217-229）：`settings.FfmpegPath` → `os.Getenv("FFMPEG_PATH")` → `exec.LookPath("ffmpeg")`。注意 ffmpeg 本身**从不直接 spawn**，`Execute` 仅校验其存在（executor.go:41-43），真正使用是通过 `BuildDownloadArgs` 注入 `--ffmpeg-location <dir>`（args.go:124-127），由 yt-dlp 内部拉起 ffmpeg 子进程。
@@ -507,7 +507,7 @@ Download 是 Utility 菜单的 `download` 子工具；入口脚本仍是 `web/st
 ```powershell
 go test ./internal/download/...
 go test ./...
-go build -o tinyrouter .
+go build -o tinylab .
 ```
 
 涉及 yt-dlp 参数、进度解析、错误分类、任务生命周期的修改，应优先跑 `download_test.go`；并手工用浏览器验证单视频下载、播放列表选择性下载、取消、重试、日志查看与 SSE 实时进度。

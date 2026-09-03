@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
+	gallerylib "github.com/tinylab/tinylab/internal/gallery"
 	"golang.org/x/image/draw"
 )
 
@@ -215,7 +215,7 @@ func (h *Handler) sendVisionRequest(ctx context.Context, imgData []byte, mimeTyp
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-TinyRouter-Provenance", "gallery:review:image="+strconv.Itoa(entry.Index))
+		req.Header.Set("X-TinyLab-Provenance", "gallery:review:image="+strconv.Itoa(entry.Index))
 		rec := httptest.NewRecorder()
 
 		h.proxy.ChatCompletions(rec, req)

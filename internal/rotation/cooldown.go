@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/keystate"
+	"github.com/tinylab/tinylab/internal/keystate"
 )
 
 // CooldownManager manages key cooldown, backoff, and daily quota locks.

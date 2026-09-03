@@ -12,11 +12,11 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
-	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
-	"github.com/tinyrouter/tinyrouter/internal/pathgrant"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/fsutil"
+	gallerylib "github.com/tinylab/tinylab/internal/gallery"
+	"github.com/tinylab/tinylab/internal/owner"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 )
 
 // maxZipDiskSize caps loading an on-disk zip archive into memory (1 GiB).

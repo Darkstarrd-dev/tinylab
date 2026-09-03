@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/logredact"
-	"github.com/tinyrouter/tinyrouter/internal/urlutil"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/logredact"
+	"github.com/tinylab/tinylab/internal/urlutil"
+	"github.com/tinylab/tinylab/internal/usage"
 )
 
 func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, providerID, upstreamModel, path string, bodyBytes []byte, parsed map[string]any, isStream bool, msgCount int, logLabel, providerName string, entryFormat combo.EntryFormat, originalModel string, sessionKey string) (bool, string) {
@@ -200,7 +200,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			KeyID:         sel.Key.ID,
 			KeyName:       sel.KeyName,
 			Status:        "processing",
-			Source:        r.Header.Get("X-TinyRouter-Source"),
+			Source:        r.Header.Get("X-TinyLab-Source"),
 			SessionKey:    sessionKey,
 			InputTokens:   len(bodyBytes) / 4, // rough estimate for live UI
 		}

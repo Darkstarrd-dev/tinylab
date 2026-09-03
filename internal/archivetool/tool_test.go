@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // toolTestDir returns a private, non-temp directory for test tool binaries:

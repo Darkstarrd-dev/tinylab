@@ -9,7 +9,7 @@ package textreview
 import (
 	"context"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // CleanResult is the outcome of a single Cleaner invocation, classified for

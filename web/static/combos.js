@@ -132,6 +132,17 @@ async function deleteCombo(id) {
   renderEndpoint(document.getElementById('page-content'));
 }
 
+async function cleanupStaleCombos(btn) {
+  try {
+    var res = await withLoading(btn, function() { return apiPost('/combos/cleanup', {}); });
+    var removed = (res && typeof res.removed === 'number') ? res.removed : 0;
+    toast(t('cleanupDone', [removed]), 'success');
+    renderEndpoint(document.getElementById('page-content'));
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
 async function showEditCombo(id) {
   const data = await apiGet('/combos');
   const cb = (data.combos || []).find(function(x) { return x.id === id; });

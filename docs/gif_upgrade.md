@@ -1,8 +1,8 @@
-# TinyRouter GIF Editor 升级执行方案
+# TinyLab GIF Editor 升级执行方案
 
 > **用途：** 本文件是本轮 GIF Editor 导入流程、时间线控制和模块拆分的唯一执行入口。后续实施者应先读取本文，再按阶段执行；不需要重新解释需求或重新设计模块边界。
 >
-> **范围：** 仅修改 TinyRouter 的 GIF Editor 前端及其必要的页面资产/文档同步。当前方案不新增 Go 媒体 API，不改变 Gallery 后端媒体编辑契约。
+> **范围：** 仅修改 TinyLab 的 GIF Editor 前端及其必要的页面资产/文档同步。当前方案不新增 Go 媒体 API，不改变 Gallery 后端媒体编辑契约。
 >
 > **参考：**
 > - ScreenToGif：<https://github.com/NickeManarin/ScreenToGif>
@@ -119,7 +119,7 @@
 #### 导入
 
 1. 选择文件、拖放文件、粘贴文件统一打开 Import Modal。
-2. Import Modal 采用 TinyRouter 当前 Modal、Button、Input、Range 和主题 token 样式，不复制 ScreenToGif 的 WPF 代码或视觉样式。
+2. Import Modal 采用 TinyLab 当前 Modal、Button、Input、Range 和主题 token 样式，不复制 ScreenToGif 的 WPF 代码或视觉样式。
 3. Modal 至少支持：
    - 原文件分辨率；
    - 导入比例；
@@ -232,7 +232,7 @@ Import Modal 必须带有独立 class：
 为确保 ESC、右键和全局 Modal 关闭流程不会遗留 `importDraft`，需要增加通用关闭事件：
 
 ```js
-document.dispatchEvent(new CustomEvent('tinyrouter:modal-close'));
+document.dispatchEvent(new CustomEvent('tinylab:modal-close'));
 ```
 
 `closeModalOverlay()` 在清空 `#modal-overlay` 前触发该事件；GIF import 模块监听该事件，若当前有导入草稿则执行取消和资源清理。该事件是通用通知，不让 `app.js` 直接依赖 GIF Editor。

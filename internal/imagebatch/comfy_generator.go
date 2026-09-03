@@ -60,7 +60,7 @@ func (g *ComfyGenerator) Generate(ctx context.Context, req ImageGenerationReques
 		return ImageGenerationResult{}, errors.New("ComfyUI workflow is empty")
 	}
 	applyComfyInputs(workflow, req)
-	body, err := json.Marshal(map[string]any{"prompt": workflow, "client_id": "tinyrouter-batch"})
+	body, err := json.Marshal(map[string]any{"prompt": workflow, "client_id": "tinylab-batch"})
 	if err != nil {
 		return ImageGenerationResult{}, fmt.Errorf("marshal ComfyUI prompt: %w", err)
 	}

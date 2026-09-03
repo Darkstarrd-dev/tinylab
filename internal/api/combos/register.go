@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/customheaders"
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
-	"github.com/tinyrouter/tinyrouter/internal/sse"
-	"github.com/tinyrouter/tinyrouter/internal/urlutil"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/customheaders"
+	"github.com/tinylab/tinylab/internal/outbound"
+	"github.com/tinylab/tinylab/internal/sse"
+	"github.com/tinylab/tinylab/internal/urlutil"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 const (
@@ -78,6 +78,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/combos", h.createCombo)
 	r.Put("/combos/{id}", h.updateCombo)
 	r.Delete("/combos/{id}", h.deleteCombo)
+	r.Post("/combos/cleanup", h.cleanupCombos)
 	r.Post("/combos/{id}/speed-test", h.speedTestCombo)
 	r.Get("/combos/{id}/speed-results", h.getComboSpeedResults)
 }
@@ -146,6 +147,20 @@ func (h *Handler) deleteCombo(w http.ResponseWriter, r *http.Request) {
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "combo not found")
 	}
+}
+
+// cleanupCombos removes stale combo model references (deleted providers or
+// models) and persists the result.
+// POST /api/combos/cleanup
+func (h *Handler) cleanupCombos(w http.ResponseWriter, r *http.Request) {
+	removed := h.d.Reg.SweepStaleComboModels()
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
 }
 
 // speedTestCombo is an SSE-streaming handler that measures the output speed of every

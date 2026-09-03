@@ -1,4 +1,4 @@
-// Package app wires together TinyRouter's runtime components and owns the
+// Package app wires together TinyLab's runtime components and owns the
 // process lifecycle (start, host loop, graceful shutdown). main.go stays tiny:
 // it only parses CLI flags and delegates to app.New / app.Run.
 package app
@@ -11,24 +11,24 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/api"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	assistantapi "github.com/tinyrouter/tinyrouter/internal/api/assistant"
-	"github.com/tinyrouter/tinyrouter/internal/api/games"
-	"github.com/tinyrouter/tinyrouter/internal/archivetool"
-	"github.com/tinyrouter/tinyrouter/internal/assistant"
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/console"
-	"github.com/tinyrouter/tinyrouter/internal/download"
-	"github.com/tinyrouter/tinyrouter/internal/feature"
-	"github.com/tinyrouter/tinyrouter/internal/petstate"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
-	"github.com/tinyrouter/tinyrouter/internal/registry"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/state"
-	"github.com/tinyrouter/tinyrouter/internal/usage"
-	"github.com/tinyrouter/tinyrouter/web"
+	"github.com/tinylab/tinylab/internal/api"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	assistantapi "github.com/tinylab/tinylab/internal/api/assistant"
+	"github.com/tinylab/tinylab/internal/api/games"
+	"github.com/tinylab/tinylab/internal/archivetool"
+	"github.com/tinylab/tinylab/internal/assistant"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/console"
+	"github.com/tinylab/tinylab/internal/download"
+	"github.com/tinylab/tinylab/internal/feature"
+	"github.com/tinylab/tinylab/internal/petstate"
+	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/state"
+	"github.com/tinylab/tinylab/internal/usage"
+	"github.com/tinylab/tinylab/web"
 )
 
 // HostLoopFunc blocks until the host (console signal, tray, webview) requests

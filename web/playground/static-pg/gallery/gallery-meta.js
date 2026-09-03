@@ -65,7 +65,7 @@ function _metaCacheKey(item) {
 }
 
 // ---------- metadata read pipeline --------------------------------
-// readItemMetadata resolves with the parsed metadata object (TinyRouter
+// readItemMetadata resolves with the parsed metadata object (TinyLab
 // record, ComfyUI API-format graph, or raw string) or null.
 function readItemMetadata(item) {
   return new Promise(function(resolve) {
@@ -122,7 +122,7 @@ function readBlobMetadata(blob) {
 // raw {key:value} map and JSON-parses it. When the parsed prompt is an
 // OBJECT and the file also carries a `workflow` key, the parsed workflow
 // graph is stashed on parsed.__workflow_graph so the overlay can report
-// its presence (raw-string prompts and TinyRouter records never stash).
+// its presence (raw-string prompts and TinyLab records never stash).
 function _extractPromptMeta(texts) {
   if (!texts) return null;
   if (texts.prompt != null) {
@@ -310,7 +310,7 @@ function formatMetadataForOverlay(meta) {
     return '<div class="gm-field"><pre>' + escapeHtml(meta) + '</pre></div>';
   }
   if (typeof meta === 'object') {
-    // TinyRouter generation record: {prompt, model, protocol?, params?, ...}
+    // TinyLab generation record: {prompt, model, protocol?, params?, ...}
     if (typeof meta.prompt === 'string' && typeof meta.model === 'string') {
       var html = '';
       // Prompt first, always fully visible (never truncated, never folded).

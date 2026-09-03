@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/combo"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/sse"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/combo"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/sse"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 // isChatToResponsesRewrite reports whether the current frame was rewritten from
@@ -291,8 +291,8 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	if sel != nil {
-		w.Header().Set("X-TinyRouter-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyRouter-Key", sel.KeyName)
+		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
+		w.Header().Set("X-TinyLab-Key", sel.KeyName)
 	}
 	w.WriteHeader(http.StatusOK)
 	if rc := http.NewResponseController(w); rc != nil {

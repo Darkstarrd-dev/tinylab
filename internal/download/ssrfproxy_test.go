@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // proxyClient returns an http.Client whose traffic is routed through the

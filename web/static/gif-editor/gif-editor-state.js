@@ -1,5 +1,5 @@
 // web/static/gif-editor-state.js
-// TinyRouter GIF Editor Core State & Lifecycle Registry
+// TinyLab GIF Editor Core State & Lifecycle Registry
 
 (function () {
   'use strict';

@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
-	"github.com/tinyrouter/tinyrouter/internal/customheaders"
-	"github.com/tinyrouter/tinyrouter/internal/logredact"
-	"github.com/tinyrouter/tinyrouter/internal/rotation"
-	"github.com/tinyrouter/tinyrouter/internal/sse"
-	"github.com/tinyrouter/tinyrouter/internal/urlutil"
-	"github.com/tinyrouter/tinyrouter/internal/util"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
+	"github.com/tinylab/tinylab/internal/customheaders"
+	"github.com/tinylab/tinylab/internal/logredact"
+	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/sse"
+	"github.com/tinylab/tinylab/internal/urlutil"
+	"github.com/tinylab/tinylab/internal/util"
 )
 
 // Handler is the HTTP handler for probe-related endpoints.

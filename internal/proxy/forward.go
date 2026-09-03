@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/logredact"
+	"github.com/tinylab/tinylab/internal/logredact"
 )
 
 // resolveDisplayModel returns the best display name for console logs:
@@ -35,7 +35,7 @@ func requestCallerTag(r *http.Request) string {
 		return ""
 	}
 	var parts []string
-	if src := strings.TrimSpace(r.Header.Get("X-TinyRouter-Source")); src != "" {
+	if src := strings.TrimSpace(r.Header.Get("X-TinyLab-Source")); src != "" {
 		parts = append(parts, "src="+clipStr(src, 16))
 	}
 	if auth := r.Header.Get("Authorization"); auth != "" {

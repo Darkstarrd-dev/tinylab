@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	domain "github.com/tinylab/tinylab/internal/imagebatch"
 )
 
 // Manager is the API-facing batch service. Implementations own persistence and scheduling.

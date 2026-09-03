@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tinyrouter/tinyrouter/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 // KnownParams is the fixed set of sampling parameters exposed in the model settings modal.

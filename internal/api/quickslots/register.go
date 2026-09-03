@@ -8,8 +8,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // Handler wires up QuickSlot routes.
@@ -29,6 +29,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Put("/quickslots/{id}", h.updateQuickSlot)
 	r.Patch("/quickslots/{id}/selectedIndex", h.patchQuickSlotSelectedIndex)
 	r.Delete("/quickslots/{id}", h.deleteQuickSlot)
+	r.Post("/quickslots/cleanup", h.cleanupQuickSlots)
 }
 
 // listQuickSlots returns all configured quickslots.
@@ -129,4 +130,18 @@ func (h *Handler) deleteQuickSlot(w http.ResponseWriter, r *http.Request) {
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "quickslot not found")
 	}
+}
+
+// cleanupQuickSlots removes stale quickslot model references (deleted
+// providers, models, or combos) and persists the result.
+// POST /api/quickslots/cleanup
+func (h *Handler) cleanupQuickSlots(w http.ResponseWriter, r *http.Request) {
+	removed := h.d.Reg.SweepStaleQuickSlotModels()
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
 }

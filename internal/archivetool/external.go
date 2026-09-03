@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/archive"
+	"github.com/tinylab/tinylab/internal/archive"
 )
 
 // Operation timeouts (docs/archive_compatibility_plan.md §4.3). They apply when the

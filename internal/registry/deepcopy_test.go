@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // TestConfigSnapshot_IsDeepCopy guards F-18: Config() must return a full deep

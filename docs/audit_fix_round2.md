@@ -1,4 +1,4 @@
-# TinyRouter 全项目审核修复实施计划
+# TinyLab 全项目审核修复实施计划
 
 > **文档用途**：本文件是 `2026-08-29` 全项目 9 域代码审核（正确性/安全性/性能/并发）与模块化/文件规模复核的**合并执行路线**。后续所有修复应以本文件的任务编号、证据、验收合同为准；不得只修单个症状而保留同类漏洞。新对话加载本文件即可直接实施。
 >
@@ -61,7 +61,7 @@ Phase 5 — 加固与文档同步（持续）
 ## 1. 审核上下文与基线
 
 ### 1.1 仓库和提交基线
-- **仓库**：`Z:/Playground/tinyrouter`
+- **仓库**：`Z:/Playground/tinylab`
 - **审核 HEAD**：当前 HEAD（2026-08-29）
 - **审核范围**：9 域（Settings / Monitor / Playground / Core Infra / Download / GIF Editor / Editor Suite / Gallery+Music / Demo）+ 模块化复核
 - **审核期间未修改源码、配置或测试**

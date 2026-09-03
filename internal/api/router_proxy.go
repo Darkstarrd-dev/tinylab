@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/proxy"
+	"github.com/tinylab/tinylab/internal/proxy"
 )
 
 // registerProxyRoutes mounts all OpenAI-compatible proxy endpoints and the
@@ -23,7 +23,7 @@ func (rt *Router) registerProxyRoutes(r chi.Router, proxyHandler *proxy.Handler)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Expose-Headers", "X-TinyRouter-Provider, X-TinyRouter-Key")
+		w.Header().Set("Access-Control-Expose-Headers", "X-TinyLab-Provider, X-TinyLab-Key")
 		w.WriteHeader(http.StatusNoContent)
 	})
 

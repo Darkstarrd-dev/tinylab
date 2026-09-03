@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	domain "github.com/tinyrouter/tinyrouter/internal/imagebatch"
+	domain "github.com/tinylab/tinylab/internal/imagebatch"
 )
 
 // transformUserPrompt is the fixed (non-editable) template for the format

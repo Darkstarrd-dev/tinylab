@@ -1,6 +1,6 @@
 package archivetool
 
-import "github.com/tinyrouter/tinyrouter/internal/archive"
+import "github.com/tinylab/tinylab/internal/archive"
 
 // argvBuilder produces the machine-safe argument lists for one tool family.
 // Every user-derived value (archive path, entry selector) is passed as its

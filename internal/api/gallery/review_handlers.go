@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/archive"
-	gallerylib "github.com/tinyrouter/tinyrouter/internal/gallery"
-	"github.com/tinyrouter/tinyrouter/internal/owner"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/archive"
+	gallerylib "github.com/tinylab/tinylab/internal/gallery"
+	"github.com/tinylab/tinylab/internal/owner"
 )
 
 // startReviewRequest is the request body for starting a review.
@@ -324,7 +324,7 @@ func (h *Handler) galleryGeneratePrompt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	proxyReq.Header.Set("Content-Type", "application/json")
-	proxyReq.Header.Set("X-TinyRouter-Provenance", "gallery:promptgen")
+	proxyReq.Header.Set("X-TinyLab-Provenance", "gallery:promptgen")
 	rec := httptest.NewRecorder()
 
 	h.proxy.ChatCompletions(rec, proxyReq)

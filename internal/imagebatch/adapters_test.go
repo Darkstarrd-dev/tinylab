@@ -23,11 +23,11 @@ func (f fakeImageProxy) ImagesGenerations(w http.ResponseWriter, r *http.Request
 	if r.Context().Err() != nil {
 		return
 	}
-	if r.Header.Get("X-TinyRouter-Source") != "playground-batch" {
+	if r.Header.Get("X-TinyLab-Source") != "playground-batch" {
 		http.Error(w, "source", 400)
 		return
 	}
-	if r.Header.Get("X-TinyRouter-Provenance") == "" {
+	if r.Header.Get("X-TinyLab-Provenance") == "" {
 		http.Error(w, "provenance", 400)
 		return
 	}

@@ -1,5 +1,5 @@
 // web/static/download-detail.js
-// Right detail panel for TinyRouter Download.
+// Right detail panel for TinyLab Download.
 // Extracted from download.js (P2-05): detail render, log, progress, actions, gallery handoff.
 // Depends on download.js globals: downloadTasksMap, downloadTaskEls, selectedTaskId, selectedTaskIds, DL_STATUS_KEYS, formatBytes etc
 

@@ -6,7 +6,7 @@
 // /history for completion, and returns the generated images as base64 data
 // URLs (reusing the standard image-save + bubble rendering pipeline).
 //
-// HTTP calls go through the TinyRouter same-origin proxy POST /api/comfyui/proxy
+// HTTP calls go through the TinyLab same-origin proxy POST /api/comfyui/proxy
 // (the browser cannot read cross-origin responses from 127.0.0.1 without
 // ComfyUI CORS being enabled). Polling also avoids ComfyUI browser Origin
 // checks, so the integration does not require CORS or a direct WebSocket.
@@ -953,7 +953,7 @@ function pgComfyWaitHistory(cfg, pid, timeoutMs, signal) {
 
 // ====== Preset 系统 ======================================================
 
-var PG_COMFY_PRESETS_KEY = 'tinyrouter.playground.comfy.presets.v1';
+var PG_COMFY_PRESETS_KEY = 'tinylab.playground.comfy.presets.v1';
 
 // 从 localStorage 加载 Preset 数据
 function pgComfyLoadPresets() {

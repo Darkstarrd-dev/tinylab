@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/api/apibase"
-	"github.com/tinyrouter/tinyrouter/internal/config"
+	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
 )
 
 // chatChunk is one OpenAI-format streaming chunk: choices[0].delta.content,
@@ -152,7 +152,7 @@ func (g defaultProxyCaller) call(ctx context.Context, node config.TextReviewNode
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-TinyRouter-Provenance", "textreview:clean:node="+node.ID)
+	req.Header.Set("X-TinyLab-Provenance", "textreview:clean:node="+node.ID)
 
 	// Run the proxy call in its own goroutine: ChatCompletions blocks until
 	// the upstream stream finishes (or ctx cancels), and we consume chunks

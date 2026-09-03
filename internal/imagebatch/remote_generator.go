@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinyrouter/tinyrouter/internal/outbound"
+	"github.com/tinylab/tinylab/internal/outbound"
 )
 
 // ImageProxyCaller is the deliberately narrow interface used to invoke the
@@ -121,8 +121,8 @@ func (g *RemoteGenerator) Generate(ctx context.Context, req ImageGenerationReque
 	}
 	in := httptest.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(raw))
 	in.Header.Set("Content-Type", "application/json")
-	in.Header.Set("X-TinyRouter-Source", "playground-batch")
-	in.Header.Set("X-TinyRouter-Provenance", "playground-batch:project="+clipID(req.ProjectID)+":prompt="+clipID(req.PromptID)+":variant="+clipID(req.VariantID))
+	in.Header.Set("X-TinyLab-Source", "playground-batch")
+	in.Header.Set("X-TinyLab-Provenance", "playground-batch:project="+clipID(req.ProjectID)+":prompt="+clipID(req.PromptID)+":variant="+clipID(req.VariantID))
 	if modelscopeIs(req.Protocol, req.Model) {
 		in.Header.Set("X-Modelscope-Async-Mode", "true")
 	}
@@ -305,8 +305,8 @@ func (g *RemoteGenerator) pollOnce(ctx context.Context, caller ImageTaskCaller, 
 	defer cancel()
 	r := httptest.NewRequestWithContext(callCtx, http.MethodGet, pollURL, nil)
 	r.Header.Set("X-Modelscope-Task-Type", "image_generation")
-	r.Header.Set("X-TinyRouter-Source", "playground-batch")
-	r.Header.Set("X-TinyRouter-Provenance", "playground-batch:task="+clipID(id))
+	r.Header.Set("X-TinyLab-Source", "playground-batch")
+	r.Header.Set("X-TinyLab-Provenance", "playground-batch:task="+clipID(id))
 	rec := httptest.NewRecorder()
 	caller.ImageTask(rec, r)
 	if err := ctx.Err(); err != nil {

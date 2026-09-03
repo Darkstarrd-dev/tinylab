@@ -5,13 +5,13 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	archiveapi "github.com/tinyrouter/tinyrouter/internal/api/archive"
-	"github.com/tinyrouter/tinyrouter/internal/api/auth"
-	"github.com/tinyrouter/tinyrouter/internal/api/editor"
-	"github.com/tinyrouter/tinyrouter/internal/api/gallery"
-	"github.com/tinyrouter/tinyrouter/internal/api/textreview"
-	"github.com/tinyrouter/tinyrouter/internal/feature"
-	"github.com/tinyrouter/tinyrouter/internal/filetransfer"
+	archiveapi "github.com/tinylab/tinylab/internal/api/archive"
+	"github.com/tinylab/tinylab/internal/api/auth"
+	"github.com/tinylab/tinylab/internal/api/editor"
+	"github.com/tinylab/tinylab/internal/api/gallery"
+	"github.com/tinylab/tinylab/internal/api/textreview"
+	"github.com/tinylab/tinylab/internal/feature"
+	"github.com/tinylab/tinylab/internal/filetransfer"
 )
 
 // registerUtilityRoutes mounts utility-domain API endpoints (editor, text-review,

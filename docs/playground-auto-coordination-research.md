@@ -6,7 +6,7 @@
 
 ## 1. 研究目标
 
-研究 cumora 的多代理协调防御层如何改善 TinyRouter Playground 的「Auto Chat」（群聊）模式。
+研究 cumora 的多代理协调防御层如何改善 TinyLab Playground 的「Auto Chat」（群聊）模式。
 
 Playground Auto Chat 的当前实现（`pg-autochat.js`）是一个多窗口独立迭代的对话循环：每个窗口有独立的回复计数器，回复完成后广播到其他窗口的收件箱。该实现缺少以下协调机制，导致竞态碰撞、传递级联和对话停滞等协调缺陷：
 
