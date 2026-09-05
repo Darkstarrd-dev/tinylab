@@ -5,8 +5,8 @@
 // openDemoMenu, toggleDemoMenu, selectDemoTool, renderDemoWithMenu
 var DEMO_TOOLS = [
   { id: 'ademo', labelKey: 'demo' },
-  { id: 'tilemap', labelKey: 'tilemap' },
-  { id: 'design', labelKey: 'design' }
+  { id: 'tilemap', labelKey: 'tilemapEditor' },
+  { id: 'design', labelKey: 'gameDesigner' }
 ];
 function isDemoTool(id) {
   return DEMO_TOOLS.some(function(tool) { return tool.id === id; });
@@ -33,7 +33,12 @@ function updateDemoMenuState() {
   if (!menu) return;
   var toolToMark = demoActiveTool || 'ademo';
   menu.querySelectorAll('[data-demo-tool]').forEach(function(item) {
-    item.setAttribute('aria-current', item.dataset.demoTool === toolToMark ? 'page' : 'false');
+    var toolId = item.dataset.demoTool;
+    var tool = DEMO_TOOLS.filter(function(t) { return t.id === toolId; })[0];
+    if (tool && tool.labelKey) {
+      item.textContent = t(tool.labelKey);
+    }
+    item.setAttribute('aria-current', toolId === toolToMark ? 'page' : 'false');
   });
 }
 function demoToolLifecycle(id, phase) {

@@ -20,9 +20,9 @@
     });
 
     var typeFilterOptions = [
-      { value: 'all', label: '全部类型' },
-      { value: 'project', label: '📙 作品 (Project)' },
-      { value: 'reference', label: '📁 素材 (Reference)' }
+      { value: 'all', label: t('storyAllTypes') },
+      { value: 'project', label: t('storyProjectOpt') },
+      { value: 'reference', label: t('storyReferenceOpt') }
     ];
 
     container.innerHTML = '' +
@@ -30,8 +30,8 @@
         '<div class="sm-page-header">' +
           '<div class="sm-page-title">' + escapeHtml(t('storyHome')) + '</div>' +
           '<div class="sm-page-actions">' +
-            '<div style="width:160px;">' +
-              renderCustomSelectHtml('sm-filter-type-wrap', 'sm-filter-type-select', typeFilterOptions, filterType, null, 'width:100%;height:32px') +
+            '<div style="width:160px;height:36px;">' +
+              renderCustomSelectHtml('sm-filter-type-wrap', 'sm-filter-type-select', typeFilterOptions, filterType, null, 'width:100%;height:36px;') +
             '</div>' +
             '<button class="btn btn-primary" type="button" id="sm-btn-create-book">' + escapeHtml(t('storyNewBook')) + '</button>' +
           '</div>' +
@@ -45,8 +45,8 @@
                   '<th>' + escapeHtml(t('storyType')) + '</th>' +
                   '<th>' + escapeHtml(t('storyAuthor')) + '</th>' +
                   '<th>' + escapeHtml(t('storyPlatform')) + '</th>' +
-                  '<th>创建时间</th>' +
-                  '<th style="text-align:right;">操作</th>' +
+                  '<th>' + escapeHtml(t('createdAt')) + '</th>' +
+                  '<th style="text-align:right;">' + escapeHtml(t('actions')) + '</th>' +
                 '</tr>' +
               '</thead>' +
               '<tbody id="sm-books-tbody"></tbody>' +
@@ -66,16 +66,16 @@
         var isCurrent = b.id === currentCtx.activeBookId;
         var highlight = isCurrent ? ' style="background:var(--accent-subtle);"' : '';
         rowsHtml += '<tr' + highlight + '>' +
-          '<td><strong>' + escapeHtml(b.title) + '</strong>' + (isCurrent ? ' <span style="font-size:11px;color:var(--accent);font-weight:normal;">(当前选中)</span>' : '') + '</td>' +
-          '<td>' + (b.type === 'project' ? '<span class="tag tag-blue">作品</span>' : '<span class="tag tag-gray">素材</span>') + '</td>' +
+          '<td><strong>' + escapeHtml(b.title) + '</strong>' + (isCurrent ? ' <span style="font-size:11px;color:var(--accent);font-weight:normal;">(' + escapeHtml(t('storyCurrentSelected')) + ')</span>' : '') + '</td>' +
+          '<td>' + (b.type === 'project' ? '<span class="tag tag-blue">' + escapeHtml(t('storyProject')) + '</span>' : '<span class="tag tag-gray">' + escapeHtml(t('storyReference')) + '</span>') + '</td>' +
           '<td>' + escapeHtml(b.author || '—') + '</td>' +
           '<td>' + escapeHtml(b.platform || '—') + '</td>' +
           '<td style="color:var(--text-secondary);">' + escapeHtml((b.createdAt || '').slice(0, 10)) + '</td>' +
           '<td style="text-align:right;white-space:nowrap;">' +
-            '<button class="btn btn-ghost btn-sm sm-action-select" data-id="' + b.id + '" type="button">选定</button> ' +
-            '<button class="btn btn-ghost btn-sm sm-action-edit" data-id="' + b.id + '" type="button">编辑</button> ' +
+            '<button class="btn btn-ghost btn-sm sm-action-select" data-id="' + b.id + '" type="button">' + escapeHtml(t('storySelect')) + '</button> ' +
+            '<button class="btn btn-ghost btn-sm sm-action-edit" data-id="' + b.id + '" type="button">' + escapeHtml(t('edit')) + '</button> ' +
             '<button class="btn btn-ghost btn-sm sm-action-export" data-id="' + b.id + '" type="button">' + escapeHtml(t('storyExportTxt')) + '</button> ' +
-            '<button class="btn btn-danger btn-sm sm-action-delete" data-id="' + b.id + '" type="button">删除</button>' +
+            '<button class="btn btn-danger btn-sm sm-action-delete" data-id="' + b.id + '" type="button">' + escapeHtml(t('delete')) + '</button>' +
           '</td>' +
         '</tr>';
       }
@@ -117,10 +117,10 @@
         var id = btn.dataset.id;
         confirmModal({
           title: t('storyDeleteConfirm'),
-          content: '删除后无法恢复，关联的章节、卡片和大纲将一并清理。',
+          content: t('storyDeleteBookConfirm'),
           onOk: function() {
             currentCtx.api.del('/books/' + encodeURIComponent(id)).then(function() {
-              toast('已删除作品', 'success');
+              toast(t('storyBookDeleted'), 'success');
               if (currentCtx.activeBookId === id) {
                 currentCtx.setActiveBookId('');
               }
@@ -128,7 +128,7 @@
                 drawUI(container);
               });
             }).catch(function(err) {
-              toast('删除失败: ' + err.message, 'error');
+              toast(t('storyDeleteFail') + ': ' + err.message, 'error');
             });
           }
         });
@@ -139,36 +139,34 @@
   function openCreateBookModal() {
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
+    var typeOptions = [
+      { value: 'project', label: t('storyProjectCreateOpt') },
+      { value: 'reference', label: t('storyReferenceCreateOpt') }
+    ];
     overlay.innerHTML = '' +
-      '<div class="modal-card" style="width:400px;">' +
-        '<div class="modal-header">' +
-          '<div class="modal-title">' + escapeHtml(t('storyNewBook')) + '</div>' +
-          '<button class="modal-close-btn">&times;</button>' +
-        '</div>' +
-        '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">' +
+      '<div class="modal modal-card" style="width:400px;">' +
+        '<div class="modal-title">' + escapeHtml(t('storyNewBook')) + '</div>' +
+        '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;overflow:visible;">' +
           '<div class="sm-field">' +
             '<span class="sm-field-label">' + escapeHtml(t('storyTitle')) + ' *</span>' +
-            '<input type="text" class="input" id="sm-new-title" placeholder="如：凡人修仙传" />' +
+            '<input type="text" class="input" id="sm-new-title" placeholder="' + escapeAttr(t('storyTitlePlaceholder')) + '" />' +
           '</div>' +
           '<div class="sm-field">' +
             '<span class="sm-field-label">' + escapeHtml(t('storyType')) + '</span>' +
-            '<select class="select" id="sm-new-type">' +
-              '<option value="project">作品 (Project - 可创作与生成)</option>' +
-              '<option value="reference">素材 (Reference - 仅供参考拆解)</option>' +
-            '</select>' +
+            renderCustomSelectHtml('sm-new-type-wrap', 'sm-new-type', typeOptions, 'project', null, 'width:100%;height:36px;') +
           '</div>' +
           '<div class="sm-field">' +
             '<span class="sm-field-label">' + escapeHtml(t('storyAuthor')) + '</span>' +
-            '<input type="text" class="input" id="sm-new-author" placeholder="作者名（选填）" />' +
+            '<input type="text" class="input" id="sm-new-author" placeholder="' + escapeAttr(t('storyAuthorPlaceholder')) + '" />' +
           '</div>' +
           '<div class="sm-field">' +
             '<span class="sm-field-label">' + escapeHtml(t('storyPlatform')) + '</span>' +
-            '<input type="text" class="input" id="sm-new-platform" placeholder="首发平台（选填）" />' +
+            '<input type="text" class="input" id="sm-new-platform" placeholder="' + escapeAttr(t('storyPlatformPlaceholder')) + '" />' +
           '</div>' +
         '</div>' +
-        '<div class="modal-actions">' +
-          '<button class="btn btn-ghost modal-cancel-btn">' + escapeHtml(t('cancel')) + '</button>' +
-          '<button class="btn btn-primary" id="sm-new-confirm">' + escapeHtml(t('confirm')) + '</button>' +
+        '<div class="modal-footer">' +
+          '<button class="btn btn-ghost modal-cancel-btn" type="button">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-primary" id="sm-new-confirm" type="button">' + escapeHtml(t('confirm')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -176,19 +174,24 @@
     function close() {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     }
-    overlay.querySelector('.modal-close-btn').onclick = close;
-    overlay.querySelector('.modal-cancel-btn').onclick = close;
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+    var cancelBtn = overlay.querySelector('.modal-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = close;
+    var closeBtn = overlay.querySelector('.modal-close-btn');
+    if (closeBtn) closeBtn.onclick = close;
     overlay.querySelector('#sm-new-confirm').onclick = function() {
       var title = overlay.querySelector('#sm-new-title').value.trim();
       var type = overlay.querySelector('#sm-new-type').value;
       var author = overlay.querySelector('#sm-new-author').value.trim();
       var platform = overlay.querySelector('#sm-new-platform').value.trim();
       if (!title) {
-        toast('请输入书名', 'error');
+        toast(t('storyInputTitlePrompt'), 'error');
         return;
       }
       currentCtx.api.post('/books', { title: title, type: type, author: author, platform: platform }).then(function(res) {
-        toast('创建成功', 'success');
+        toast(t('storyCreateSuccess'), 'success');
         currentCtx.setActiveBookId(res.id);
         close();
         currentCtx.refreshBooks(function() {
@@ -196,7 +199,7 @@
           if (container) drawUI(container);
         });
       }).catch(function(err) {
-        toast('创建失败: ' + err.message, 'error');
+        toast(t('storyCreateFail') + ': ' + err.message, 'error');
       });
     };
   }
@@ -205,12 +208,9 @@
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
     overlay.innerHTML = '' +
-      '<div class="modal-card" style="width:400px;">' +
-        '<div class="modal-header">' +
-          '<div class="modal-title">编辑作品属性</div>' +
-          '<button class="modal-close-btn">&times;</button>' +
-        '</div>' +
-        '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">' +
+      '<div class="modal modal-card" style="width:400px;">' +
+        '<div class="modal-title">' + escapeHtml(t('storyEditBookModalTitle')) + '</div>' +
+        '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;overflow:visible;">' +
           '<div class="sm-field">' +
             '<span class="sm-field-label">' + escapeHtml(t('storyTitle')) + '</span>' +
             '<input type="text" class="input" id="sm-edit-title" value="' + escapeAttr(b.title) + '" />' +
@@ -224,9 +224,9 @@
             '<input type="text" class="input" id="sm-edit-platform" value="' + escapeAttr(b.platform || '') + '" />' +
           '</div>' +
         '</div>' +
-        '<div class="modal-actions">' +
-          '<button class="btn btn-ghost modal-cancel-btn">' + escapeHtml(t('cancel')) + '</button>' +
-          '<button class="btn btn-primary" id="sm-edit-confirm">' + escapeHtml(t('save')) + '</button>' +
+        '<div class="modal-footer">' +
+          '<button class="btn btn-ghost modal-cancel-btn" type="button">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-primary" id="sm-edit-confirm" type="button">' + escapeHtml(t('save')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -234,21 +234,26 @@
     function close() {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     }
-    overlay.querySelector('.modal-close-btn').onclick = close;
-    overlay.querySelector('.modal-cancel-btn').onclick = close;
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+    var cancelBtn = overlay.querySelector('.modal-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = close;
+    var closeBtn = overlay.querySelector('.modal-close-btn');
+    if (closeBtn) closeBtn.onclick = close;
     overlay.querySelector('#sm-edit-confirm').onclick = function() {
       var title = overlay.querySelector('#sm-edit-title').value.trim();
       var author = overlay.querySelector('#sm-edit-author').value.trim();
       var platform = overlay.querySelector('#sm-edit-platform').value.trim();
       currentCtx.api.patch('/books/' + encodeURIComponent(b.id), { title: title, author: author, platform: platform }).then(function() {
-        toast('已保存修改', 'success');
+        toast(t('storySaved'), 'success');
         close();
         currentCtx.refreshBooks(function() {
           var container = document.getElementById('sm-main-content');
           if (container) drawUI(container);
         });
       }).catch(function(err) {
-        toast('保存失败: ' + err.message, 'error');
+        toast(t('storySaveFail') + ': ' + err.message, 'error');
       });
     };
   }

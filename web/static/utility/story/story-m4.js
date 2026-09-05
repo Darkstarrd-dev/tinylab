@@ -7,7 +7,7 @@
 
   var currentCtx = null;
   var currentAbort = null;
-  var draftModel = { value: '', label: '选择模型' };
+  var draftModel = { value: '', label: '' };
 
   var outlineNodes = [];
   var existingChapters = [];
@@ -87,26 +87,32 @@
         }
       }, { kindFilter: 'text' });
     } else {
-      var m = prompt('请输入模型 ID (例如 provider/model-name):', current.value || '');
+      var isEn = currentLang() === 'en';
+      var m = prompt(isEn ? 'Enter Model ID (e.g. provider/model-name):' : '请输入模型 ID (例如 provider/model-name):', current.value || '');
       if (m) onPick({ value: m, label: m });
     }
   }
 
   function drawUI(container) {
     var book = currentCtx.getActiveBook();
+    var isEn = currentLang() === 'en';
     var nodeOptions = outlineNodes.map(function(n) {
-      return { value: String(n.order), label: '第 ' + n.order + ' 章 ' + (n.title || '未命名') };
+      var prefix = isEn ? ('Chapter ' + n.order + ' ') : ('第 ' + n.order + ' 章 ');
+      var untitled = isEn ? 'Untitled' : '未命名';
+      return { value: String(n.order), label: prefix + (n.title || untitled) };
     });
     if (nodeOptions.length === 0) {
-      nodeOptions = [{ value: '1', label: '第 1 章 (暂无大纲蓝图)' }];
+      nodeOptions = [{ value: '1', label: t('storyM4NoOutline', [1]) }];
     }
+
+    var chTitle = isEn ? ('Chapter ' + selectedChapterIndex + ' Draft') : ('第 ' + selectedChapterIndex + ' 章正文');
 
     container.innerHTML = '' +
       '<div class="sm-page-container">' +
         '<div class="sm-page-header">' +
           '<div class="sm-page-title">' + escapeHtml(t('storyM4')) + ' <span style="font-size:14px;color:var(--text-secondary);font-weight:normal;">(' + escapeHtml(book.title) + ')</span></div>' +
           '<div class="sm-page-actions">' +
-            '<button class="btn btn-primary" type="button" id="sm-m4-btn-save">💾 保存章节正文</button>' +
+            '<button class="btn btn-primary" type="button" id="sm-m4-btn-save">💾 ' + escapeHtml(t('storyM4SaveChapter')) + '</button>' +
           '</div>' +
         '</div>' +
 
@@ -114,55 +120,55 @@
         '<div class="sm-card">' +
           '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">' +
             '<div style="flex:1;min-width:220px;">' +
-              '<span class="sm-field-label">目标章节大纲：</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM4TargetOutline')) + '</span>' +
               renderCustomSelectHtml('sm-m4-node-wrap', 'sm-m4-node-select', nodeOptions, String(selectedChapterIndex), null, 'width:100%;height:32px') +
             '</div>' +
             '<div style="width:130px;">' +
-              '<span class="sm-field-label">目标字数：</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM4TargetWords')) + '</span>' +
               renderStepperHtml('sm-m4-word-count', targetWordCount, 1000, 10000, 500) +
             '</div>' +
             '<div style="display:flex;flex-direction:column;gap:4px;">' +
-              '<span class="sm-field-label">生成模型：</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM4DraftModel')) + '</span>' +
               '<button type="button" class="sm-model-btn" id="sm-m4-model-btn">' +
-                '<span>🤖</span><span id="sm-m4-model-label">' + escapeHtml(draftModel.label) + '</span>' +
+                '<span>🤖</span><span id="sm-m4-model-label">' + escapeHtml(draftModel.label || t('storySelectModel')) + '</span>' +
               '</button>' +
             '</div>' +
             '<div style="padding-top:20px;">' +
-              '<button class="btn btn-primary" type="button" id="sm-m4-btn-generate" style="padding:8px 20px;">✍️ 生成章节正文</button>' +
+              '<button class="btn btn-primary" type="button" id="sm-m4-btn-generate" style="padding:8px 20px;">✍️ ' + escapeHtml(t('storyM4GenDraft')) + '</button>' +
             '</div>' +
           '</div>' +
 
           // Blueprint details
           (currentOutlineNode ? '' +
             '<div style="background:rgba(255,255,255,0.02);padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--glass-border);font-size:12px;display:flex;flex-direction:column;gap:4px;">' +
-              '<div><strong>本章蓝图：</strong>' + escapeHtml(currentOutlineNode.summary || '无简述') + '</div>' +
+              '<div><strong>' + escapeHtml(t('storyM4ChapterBlueprint')) + ' </strong>' + escapeHtml(currentOutlineNode.summary || t('storyM4NoSummary')) + '</div>' +
               '<div style="color:var(--text-secondary);display:flex;gap:16px;flex-wrap:wrap;">' +
-                '<span>定位: ' + escapeHtml(currentOutlineNode.positioning || '—') + '</span>' +
-                '<span>作用: ' + escapeHtml(currentOutlineNode.role || '—') + '</span>' +
-                '<span>悬念: ' + escapeHtml(currentOutlineNode.suspenseDensity || '—') + '</span>' +
-                '<span>颠覆指数: ' + '★'.repeat(currentOutlineNode.twistLevel || 0) + '</span>' +
+                '<span>' + escapeHtml(t('storyM4PosLabel')) + ' ' + escapeHtml(currentOutlineNode.positioning || '—') + '</span>' +
+                '<span>' + escapeHtml(t('storyM4RoleLabel')) + ' ' + escapeHtml(currentOutlineNode.role || '—') + '</span>' +
+                '<span>' + escapeHtml(t('storyM4SuspenseLabel')) + ' ' + escapeHtml(currentOutlineNode.suspenseDensity || '—') + '</span>' +
+                '<span>' + escapeHtml(t('storyM4TwistLabel')) + ' ' + '★'.repeat(currentOutlineNode.twistLevel || 0) + '</span>' +
               '</div>' +
             '</div>' : '') +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">额外写作指导 / 细节要求：</span>' +
-            '<textarea class="sm-textarea" id="sm-m4-user-guidance" rows="2" placeholder="输入对本章剧情、文风、特殊桥段的额外指导...">' + escapeHtml(userGuidance) + '</textarea>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM4Guidance')) + '</span>' +
+            '<textarea class="sm-textarea" id="sm-m4-user-guidance" rows="2" placeholder="' + escapeHtml(t('storyM4GuidancePlaceholder')) + '">' + escapeHtml(userGuidance) + '</textarea>' +
           '</div>' +
 
           // Adopted Fragments Hard Constraint
           '<details class="sm-prompt-details" ' + (allFragments.length > 0 ? 'open' : '') + '>' +
-            '<summary class="sm-prompt-summary">🔗 包含已采纳推演片段作为硬约束 (已勾选 ' + selectedFragmentIds.length + ' / ' + allFragments.length + ')</summary>' +
+            '<summary class="sm-prompt-summary">🔗 ' + escapeHtml(t('storyM4FragmentsConstraint', [selectedFragmentIds.length, allFragments.length])) + '</summary>' +
             '<div id="sm-m4-frag-checkboxes" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;">' +
-              (allFragments.length === 0 ? '<span style="color:var(--text-secondary);font-size:12px;">暂无已采纳推演片段。可在 M3 采纳角色片段。</span>' : '') +
+              (allFragments.length === 0 ? '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM4NoFragments')) + '</span>' : '') +
             '</div>' +
           '</details>' +
 
           // Prompt Override
           '<details class="sm-prompt-details">' +
-            '<summary class="sm-prompt-summary">⚙️ 章节生成 Prompt 设定 (系统预设)</summary>' +
+            '<summary class="sm-prompt-summary">⚙️ ' + escapeHtml(t('storyM4PromptPreset')) + '</summary>' +
             '<div class="sm-prompt-editor">' +
               '<textarea class="sm-textarea" id="sm-m4-prompt-textarea" rows="4">' + escapeHtml(promptOverride) + '</textarea>' +
-              '<button type="button" class="btn btn-ghost btn-sm" id="sm-m4-save-prompt" style="align-self:flex-end;">保存 Prompt 覆盖</button>' +
+              '<button type="button" class="btn btn-ghost btn-sm" id="sm-m4-save-prompt" style="align-self:flex-end;">' + escapeHtml(t('storyM4SavePrompt')) + '</button>' +
             '</div>' +
           '</details>' +
         '</div>' +
@@ -171,28 +177,28 @@
         '<div class="sm-card" style="min-height:400px;display:flex;flex-direction:column;gap:12px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
             '<div style="font-weight:600;font-size:var(--font-base);display:flex;align-items:center;gap:10px;">' +
-              '<span>第 ' + selectedChapterIndex + ' 章正文</span>' +
-              (isGenerating ? '<span class="tag tag-blue" style="font-size:11px;">生成中...</span>' : '') +
-              (currentChapter ? '<span class="tag tag-gray" style="font-size:11px;">已有草稿 (' + (currentChapter.Content || '').length + ' 字)</span>' : '<span class="tag tag-amber" style="font-size:11px;">新章节</span>') +
+              '<span>' + escapeHtml(chTitle) + '</span>' +
+              (isGenerating ? '<span class="tag tag-blue" style="font-size:11px;">' + escapeHtml(t('storyM4Generating')) + '</span>' : '') +
+              (currentChapter ? '<span class="tag tag-gray" style="font-size:11px;">' + escapeHtml(t('storyM4HasDraft', [(currentChapter.Content || '').length])) + '</span>' : '<span class="tag tag-amber" style="font-size:11px;">' + escapeHtml(t('storyM4NewChapter')) + '</span>') +
             '</div>' +
-            '<div id="sm-m4-word-stats" style="font-size:12px;color:var(--text-secondary);">字数：0 字</div>' +
+            '<div id="sm-m4-word-stats" style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(t('storyM4WordStats', [0])) + '</div>' +
           '</div>' +
 
           '<div id="sm-m4-diff-container" style="display:none;" class="sm-diff-container">' +
             '<div class="sm-diff-pane">' +
-              '<div class="sm-diff-header">旧版正文 (现有草稿)</div>' +
+              '<div class="sm-diff-header">' + escapeHtml(t('storyM4OldDraft')) + '</div>' +
               '<div class="sm-diff-body" id="sm-m4-diff-old"></div>' +
             '</div>' +
             '<div class="sm-diff-pane">' +
               '<div class="sm-diff-header" style="display:flex;justify-content:space-between;align-items:center;">' +
-                '<span>新生成正文</span>' +
-                '<button type="button" class="btn btn-primary btn-sm" id="sm-m4-apply-new" style="font-size:11px;">采纳新版覆盖</button>' +
+                '<span>' + escapeHtml(t('storyM4NewGenerated')) + '</span>' +
+                '<button type="button" class="btn btn-primary btn-sm" id="sm-m4-apply-new" style="font-size:11px;">' + escapeHtml(t('storyM4AdoptNewDraft')) + '</button>' +
               '</div>' +
               '<div class="sm-diff-body" id="sm-m4-diff-new"></div>' +
             '</div>' +
           '</div>' +
 
-          '<textarea class="sm-textarea" id="sm-m4-content-editor" style="flex:1;min-height:360px;font-family:monospace;font-size:14px;line-height:1.6;" placeholder="章节正文内容将在此实时生成，也可手动在此编辑...">' +
+          '<textarea class="sm-textarea" id="sm-m4-content-editor" style="flex:1;min-height:360px;font-family:monospace;font-size:14px;line-height:1.6;" placeholder="' + escapeHtml(t('storyM4DraftPlaceholder')) + '">' +
             escapeHtml(generatedDraft || (currentChapter ? currentChapter.Content : '')) +
           '</textarea>' +
         '</div>' +
@@ -205,10 +211,11 @@
       for (var fi = 0; fi < allFragments.length; fi++) {
         var frag = allFragments[fi];
         var isChecked = selectedFragmentIds.includes(frag.id);
+        var fragPrefix = isEn ? 'Deduction Fragment #' : '推演片段 #';
         fHtml += '<label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;cursor:pointer;padding:4px;border-radius:4px;background:rgba(255,255,255,0.02);">' +
           '<input type="checkbox" class="sm-m4-frag-cb" value="' + escapeHtml(frag.id) + '"' + (isChecked ? ' checked' : '') + ' style="margin-top:2px;">' +
           '<div style="display:flex;flex-direction:column;gap:2px;">' +
-            '<strong>[推演片段 #' + frag.order + ']</strong>' +
+            '<strong>[' + fragPrefix + frag.order + ']</strong>' +
             '<span style="color:var(--text-secondary);">' + escapeHtml((frag.adoptedText || '').slice(0, 120)) + '...</span>' +
           '</div>' +
         '</label>';
@@ -251,7 +258,7 @@
       var val = container.querySelector('#sm-m4-prompt-textarea').value.trim();
       currentCtx.api.put('/prompts/m4-draft', { content: val }).then(function() {
         promptOverride = val;
-        toast('Prompt 覆盖已保存', 'success');
+        toast(t('storySaved'), 'success');
       });
     });
 
@@ -259,7 +266,7 @@
     var wordStats = container.querySelector('#sm-m4-word-stats');
     function updateWordStats() {
       if (editor && wordStats) {
-        wordStats.textContent = '字数：' + (editor.value || '').length + ' 字';
+        wordStats.textContent = t('storyM4WordStats', [(editor.value || '').length]);
       }
     }
     editor?.addEventListener('input', updateWordStats);
@@ -268,7 +275,7 @@
     // Start Draft Generation
     container.querySelector('#sm-m4-btn-generate')?.addEventListener('click', function() {
       if (!draftModel.value) {
-        toast('请先选择生成模型', 'warning');
+        toast(isEn ? 'Please select a generation model first' : '请先选择生成模型', 'warning');
         return;
       }
 
@@ -302,7 +309,7 @@
       }, function() {
         isGenerating = false;
         genBtn.disabled = false;
-        toast('章节正文生成完成！', 'success');
+        toast(t('storyM4GenDone'), 'success');
 
         // Show diff if old text exists
         if (oldText && oldText.trim()) {
@@ -311,7 +318,7 @@
       }, function(err) {
         isGenerating = false;
         genBtn.disabled = false;
-        toast('生成失败: ' + err.message, 'error');
+        toast((isEn ? 'Generation failed: ' : '生成失败: ') + err.message, 'error');
       });
     });
 
@@ -319,11 +326,12 @@
     container.querySelector('#sm-m4-btn-save')?.addEventListener('click', function() {
       var content = editor.value.trim();
       if (!content) {
-        toast('章节正文为空，无法保存', 'warning');
+        toast(t('storyM4ContentEmptyWarning'), 'warning');
         return;
       }
 
-      var chapterTitle = (currentOutlineNode && currentOutlineNode.title) || ('第 ' + selectedChapterIndex + ' 章');
+      var defaultChTitle = isEn ? ('Chapter ' + selectedChapterIndex) : ('第 ' + selectedChapterIndex + ' 章');
+      var chapterTitle = (currentOutlineNode && currentOutlineNode.title) || defaultChTitle;
       var chapterId = currentChapter ? currentChapter.id : ('ch_' + Date.now());
 
       var payload = {
@@ -337,13 +345,13 @@
       };
 
       currentCtx.api.post('/chapters', payload).then(function(saved) {
-        toast('章节保存成功！', 'success');
+        toast(t('storyM4ChapterSaved'), 'success');
         currentChapter = saved;
         loadData(function() {
           drawUI(container);
         });
       }).catch(function(err) {
-        toast('保存失败: ' + err.message, 'error');
+        toast((isEn ? 'Save failed: ' : '保存失败: ') + err.message, 'error');
       });
     });
   }
@@ -363,7 +371,7 @@
       if (editor) {
         editor.value = newText;
         diffContainer.style.display = 'none';
-        toast('已采纳新版正文', 'success');
+        toast(t('storyM4AdoptNewDraftSuccess'), 'success');
       }
     });
   }

@@ -143,6 +143,34 @@
   gap: 12px;
 }
 
+.sm-page-actions .btn {
+  height: 36px;
+  line-height: 34px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sm-page-actions .custom-select-wrapper {
+  height: 36px;
+}
+
+.sm-page-actions .custom-select-trigger {
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.sm-page-container .custom-select-menu,
+.modal .custom-select-menu {
+  top: calc(100% + 6px);
+}
+
+.modal .sm-field .custom-select-wrapper {
+  width: 100%;
+}
+
 /* Glass card container */
 .sm-card {
   background: var(--glass-bg);

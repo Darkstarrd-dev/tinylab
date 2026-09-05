@@ -11,7 +11,7 @@ var UTILITY_TOOLS = [
   { id: 'logReader', labelKey: 'logReader', requiresPlayground: true },
   { id: 'review', labelKey: 'utilityReview', requiresPlayground: true },
   { id: 'gif', labelKey: 'gifEditor' },
-  { id: 'download', labelKey: 'download' },
+  { id: 'download', labelKey: 'mediaDownload' },
   { id: 'fileTransfer', labelKey: 'fileTransfer' },
   { id: 'storyMaker', labelKey: 'storyMaker', requiresPlayground: true }
 ];
@@ -59,7 +59,12 @@ function updateUtilityMenuState() {
   if (!menu) return;
   var toolToMark = utilityActiveTool || 'editor';
   menu.querySelectorAll('[data-utility-tool]').forEach(function(item) {
-    item.setAttribute('aria-current', item.dataset.utilityTool === toolToMark ? 'page' : 'false');
+    var toolId = item.dataset.utilityTool;
+    var tool = UTILITY_TOOLS.filter(function(t) { return t.id === toolId; })[0];
+    if (tool && tool.labelKey) {
+      item.textContent = t(tool.labelKey);
+    }
+    item.setAttribute('aria-current', toolId === toolToMark ? 'page' : 'false');
   });
 }
 function galleryHasTool(id) {
@@ -78,7 +83,12 @@ function updateGalleryMenuState() {
   if (!menu) return;
   var toolToMark = galleryActiveTool || 'gallery';
   menu.querySelectorAll('[data-gallery-tool]').forEach(function(item) {
-    item.setAttribute('aria-current', item.dataset.galleryTool === toolToMark ? 'page' : 'false');
+    var toolId = item.dataset.galleryTool;
+    var tool = GALLERY_TOOLS.filter(function(t) { return t.id === toolId; })[0];
+    if (tool && tool.labelKey) {
+      item.textContent = t(tool.labelKey);
+    }
+    item.setAttribute('aria-current', toolId === toolToMark ? 'page' : 'false');
   });
 }
 function galleryToolLifecycle(id, phase) {

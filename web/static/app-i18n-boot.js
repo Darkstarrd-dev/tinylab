@@ -43,6 +43,9 @@ function updateSidebarNav() {
   if (typeof updateDemoNavLabel === 'function') updateDemoNavLabel();
   if (typeof updateGalleryNavLabel === 'function') updateGalleryNavLabel();
   if (typeof updateUtilityNavLabel === 'function') updateUtilityNavLabel();
+  if (typeof updateDemoMenuState === 'function') updateDemoMenuState();
+  if (typeof updateGalleryMenuState === 'function') updateGalleryMenuState();
+  if (typeof updateUtilityMenuState === 'function') updateUtilityMenuState();
   var shutdownBtn = document.querySelector('.shutdown-btn');
   if (shutdownBtn) {
     var shutdownLabel = t('shutdown');

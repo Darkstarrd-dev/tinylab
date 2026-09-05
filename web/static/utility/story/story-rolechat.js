@@ -10,7 +10,7 @@
 
   var characterCards = [];
   var participants = []; // { id, cardId, name, model: {value, label}, color }
-  var sceneSetting = '在避难所的一间安全屋内，窗外暴雨倾盆。两人正在整理此前的战斗情报...';
+  var sceneSetting = '';
   var chatHistory = []; // { id, participantId, senderName, content, timestamp, isUser }
 
   // Auto conversation loop
@@ -24,12 +24,21 @@
 
   var COLOR_PALETTE = ['#4dabf7', '#ff8787', '#69db7c', '#ffd43b', '#da77f2', '#ffa94d'];
 
+  function getDefaultSceneSetting() {
+    return currentLang() === 'en' ?
+      'Inside a safehouse shelter, heavy rain outside. The two are reviewing combat intel...' :
+      '在避难所的一间安全屋内，窗外暴雨倾盆。两人正在整理此前的战斗情报...';
+  }
+
   function render(container, ctx) {
     currentCtx = ctx;
     var book = ctx.getActiveBook();
     if (!book) {
       ctx.showEmptyBookState(container);
       return;
+    }
+    if (!sceneSetting) {
+      sceneSetting = getDefaultSceneSetting();
     }
     loadData(function() {
       drawUI(container);
@@ -63,7 +72,7 @@
             id: 'part_' + i,
             cardId: c.id,
             name: c.name,
-            model: { value: '', label: '选择模型' },
+            model: { value: '', label: '' },
             color: COLOR_PALETTE[i % COLOR_PALETTE.length]
           });
         }
@@ -83,12 +92,42 @@
         }
       }, { kindFilter: 'text' });
     } else {
-      var m = prompt('请输入模型 ID (例如 provider/model-name):', current.value || '');
+      var isEn = currentLang() === 'en';
+      var m = prompt(isEn ? 'Enter Model ID (e.g. provider/model-name):' : '请输入模型 ID (例如 provider/model-name):', current.value || '');
       if (m) onPick({ value: m, label: m });
     }
   }
 
   function buildRoleSystemPrompt(card, scene) {
+    var isEn = currentLang() === 'en';
+    if (isEn) {
+      var lines = [
+        'You are roleplaying as [' + card.name + '].',
+        '[Aliases] ' + ((card.aliases && card.aliases.length) ? card.aliases.join(', ') : 'None'),
+        '[Character Background & Setting]',
+        card.description || '(No specific description)'
+      ];
+      if (card.fields && Object.keys(card.fields).length > 0) {
+        lines.push('[Attributes]');
+        for (var k in card.fields) {
+          lines.push(k + ': ' + card.fields[k]);
+        }
+      }
+      if (card.styleNote) {
+        lines.push('[Language Style / Tone]', card.styleNote);
+      }
+      if (card.styleExamples && card.styleExamples.length > 0) {
+        lines.push('[Dialogue Examples]', card.styleExamples.join('\n'));
+      }
+      lines.push('[Current Scene Setting]', scene || '(No specific scene)');
+      lines.push(
+        'Guidelines:',
+        '1. Fully immerse yourself in this character, maintaining their distinct voice, tone, thinking, and personality.',
+        '2. Only output your direct dialogue or psychological actions (approx 20-150 words). Strictly do not speak or narrate on behalf of other characters.'
+      );
+      return lines.join('\n');
+    }
+
     var lines = [
       '你正在扮演角色【' + card.name + '】。',
       '【别名】' + ((card.aliases && card.aliases.length) ? card.aliases.join('、') : '无'),
@@ -117,13 +156,15 @@
   }
 
   function buildParticipantMessages(history, targetPart) {
+    var isEn = currentLang() === 'en';
     var msgs = [];
     var targetCard = characterCards.find(function(c) { return c.id === targetPart.cardId; });
-    var sysPrompt = targetCard ? buildRoleSystemPrompt(targetCard, sceneSetting) : '请根据角色设定参与对话。';
+    var defaultSys = isEn ? 'Please participate in dialogue according to your character persona.' : '请根据角色设定参与对话。';
+    var sysPrompt = targetCard ? buildRoleSystemPrompt(targetCard, sceneSetting) : defaultSys;
     msgs.push({ role: 'system', content: sysPrompt });
 
     if (!history || history.length === 0) {
-      msgs.push({ role: 'user', content: '（请根据你的角色设定，开启对话）' });
+      msgs.push({ role: 'user', content: isEn ? '(Please initiate the conversation according to your persona)' : '（请根据你的角色设定，开启对话）' });
       return msgs;
     }
 
@@ -132,8 +173,8 @@
       if (h.participantId === targetPart.id) {
         msgs.push({ role: 'assistant', content: h.content });
       } else {
-        var prefix = h.isUser ? '【旁白/旁听】' : ('【' + h.senderName + '】');
-        msgs.push({ role: 'user', content: prefix + '：' + h.content });
+        var prefix = h.isUser ? (isEn ? '[Narrator/Observer]' : '【旁白/旁听】') : (isEn ? ('[' + h.senderName + ']') : ('【' + h.senderName + '】'));
+        msgs.push({ role: 'user', content: prefix + (isEn ? ': ' : '：') + h.content });
       }
     }
     return msgs;
@@ -141,40 +182,48 @@
 
   function drawUI(container) {
     var book = currentCtx.getActiveBook();
+    var isEn = currentLang() === 'en';
+
+    var exportBtnText = '📥 ' + (isEn ? 'Export JSON' : '导出 JSON');
+    var participantsTitle = '👥 ' + (isEn ? 'Dialogue Participants & Model Config' : '对话参与角色与模型配置');
+    var addPartText = '＋ ' + (isEn ? 'Add Participant' : '添加参与者');
+    var autoRoundsLabel = isEn ? 'Auto Loop Rounds:' : '自动对话轮数：';
+    var stopAutoText = '⏹ ' + (isEn ? 'Stop Auto Chat' : '停止自动对话');
+    var startAutoText = '▶ ' + (isEn ? 'Start Auto Loop' : '开启自动循环对话');
 
     container.innerHTML = '' +
       '<div class="sm-page-container">' +
         '<div class="sm-page-header">' +
           '<div class="sm-page-title">' + escapeHtml(t('storyRoleChat')) + ' <span style="font-size:14px;color:var(--text-secondary);font-weight:normal;">(' + escapeHtml(book.title) + ')</span></div>' +
           '<div class="sm-page-actions">' +
-            '<button class="btn btn-ghost" type="button" id="sm-chat-btn-export">📥 导出 JSON</button>' +
-            '<button class="btn btn-danger btn-sm" type="button" id="sm-chat-btn-clear">清空记录</button>' +
+            '<button class="btn btn-ghost" type="button" id="sm-chat-btn-export">' + exportBtnText + '</button>' +
+            '<button class="btn btn-danger btn-sm" type="button" id="sm-chat-btn-clear">' + escapeHtml(t('storyRoleChatClearBtn')) + '</button>' +
           '</div>' +
         '</div>' +
 
         // Participants & Scene Settings
         '<div class="sm-card" style="gap:14px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<div style="font-weight:600;font-size:var(--font-base);">👥 对话参与角色与模型配置</div>' +
-            '<button type="button" class="btn btn-ghost btn-sm" id="sm-chat-add-part">＋ 添加参与者</button>' +
+            '<div style="font-weight:600;font-size:var(--font-base);">' + participantsTitle + '</div>' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="sm-chat-add-part">' + addPartText + '</button>' +
           '</div>' +
           '<div id="sm-chat-participants-list" style="display:flex;flex-direction:column;gap:8px;"></div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">当前场景设定 (Scene Setting)：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyRoleChatSceneLabel')) + '</span>' +
             '<textarea class="sm-textarea" id="sm-chat-scene" rows="2">' + escapeHtml(sceneSetting) + '</textarea>' +
           '</div>' +
 
           // Auto chat control row
           '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--glass-border);flex-wrap:wrap;gap:10px;">' +
             '<div style="display:flex;align-items:center;gap:12px;">' +
-              '<span class="sm-field-label">自动对话轮数：</span>' +
+              '<span class="sm-field-label">' + autoRoundsLabel + '</span>' +
               '<div style="width:110px;">' + renderStepperHtml('sm-chat-auto-rounds', autoConfig.count, 2, 50, 2) + '</div>' +
             '</div>' +
             '<div style="display:flex;gap:10px;">' +
               (autoRunning ?
-                '<button class="btn btn-danger" type="button" id="sm-chat-stop-auto">⏹ 停止自动对话</button>' :
-                '<button class="btn btn-primary" type="button" id="sm-chat-start-auto">▶ 开启自动循环对话</button>'
+                '<button class="btn btn-danger" type="button" id="sm-chat-stop-auto">' + stopAutoText + '</button>' :
+                '<button class="btn btn-primary" type="button" id="sm-chat-start-auto">' + startAutoText + '</button>'
               ) +
             '</div>' +
           '</div>' +
@@ -185,14 +234,14 @@
           '<div class="sm-chat-history" id="sm-chat-history-box"></div>' +
 
           // Active reasoning indicator
-          '<div id="sm-chat-reasoning" style="display:none;padding:6px 16px;background:rgba(255,255,255,0.03);border-top:1px solid var(--glass-border);font-size:12px;color:var(--accent);">' +
-            '<span id="sm-chat-reasoning-text">正在回复中...</span>' +
+          '<div id="sm-chat-reasoning" style="display:none;padding:6px 16px;background:rgba(255,255,200,0.03);border-top:1px solid var(--glass-border);font-size:12px;color:var(--accent);">' +
+            '<span id="sm-chat-reasoning-text">' + escapeHtml(t('storyRoleChatThinking')) + '</span>' +
           '</div>' +
 
           // Send Bar
           '<div style="padding:12px 16px;border-top:1px solid var(--glass-border);display:flex;gap:10px;background:rgba(0,0,0,0.1);align-items:center;">' +
-            '<input type="text" class="input" id="sm-chat-user-input" style="flex:1;" placeholder="以旁白/旁听者身份发言，或留空让下一位角色说话...">' +
-            '<button class="btn btn-primary" type="button" id="sm-chat-send-btn">发送</button>' +
+            '<input type="text" class="input" id="sm-chat-user-input" style="flex:1;" placeholder="' + escapeHtml(t('storyRoleChatInputPlaceholder')) + '">' +
+            '<button class="btn btn-primary" type="button" id="sm-chat-send-btn">' + escapeHtml(t('storyRoleChatSendBtn')) + '</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -217,7 +266,7 @@
     container.querySelector('#sm-chat-btn-clear')?.addEventListener('click', function() {
       chatHistory = [];
       renderChatHistory(container);
-      toast('对话记录已清空', 'info');
+      toast(isEn ? 'Chat history cleared' : '对话记录已清空', 'info');
     });
 
     container.querySelector('#sm-chat-btn-export')?.addEventListener('click', function() {
@@ -239,7 +288,7 @@
         chatHistory.push({
           id: 'msg_' + Date.now(),
           participantId: 'user',
-          senderName: '旁白/你',
+          senderName: isEn ? 'Narrator/You' : '旁白/你',
           content: text,
           timestamp: new Date().toLocaleTimeString(),
           isUser: true
@@ -262,18 +311,18 @@
     // Auto loop buttons
     container.querySelector('#sm-chat-start-auto')?.addEventListener('click', function() {
       if (participants.length === 0) {
-        toast('请添加至少一位角色参与者', 'warning');
+        toast(isEn ? 'Please add at least one participant' : '请添加至少一位角色参与者', 'warning');
         return;
       }
       for (var p = 0; p < participants.length; p++) {
         if (!participants[p].model.value) {
-          toast('参与者【' + participants[p].name + '】尚未选择模型', 'warning');
+          toast((isEn ? ('Participant [' + participants[p].name + '] has not selected a model') : ('参与者【' + participants[p].name + '】尚未选择模型')), 'warning');
           return;
         }
       }
       autoRunning = true;
       autoRoundsLeft = autoConfig.count;
-      toast('已开启自动循环对话（共 ' + autoRoundsLeft + ' 轮）', 'info');
+      toast((isEn ? ('Auto loop started (' + autoRoundsLeft + ' rounds)') : ('已开启自动循环对话（共 ' + autoRoundsLeft + ' 轮）')), 'info');
       drawUI(container);
       runAutoLoopStep(container);
     });
@@ -285,19 +334,22 @@
         try { currentAbort.abort(); } catch (e) {}
         currentAbort = null;
       }
-      toast('自动循环对话已停止', 'warning');
+      toast(isEn ? 'Auto loop stopped' : '自动循环对话已停止', 'warning');
       drawUI(container);
     });
   }
 
   function renderParticipantsList(container) {
+    var isEn = currentLang() === 'en';
     var listEl = container.querySelector('#sm-chat-participants-list');
     if (!listEl) return;
     if (participants.length === 0) {
-      listEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">暂无参与者，请点击右上角添加。</span>';
+      listEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">' + (isEn ? 'No participants yet. Click Add in the top right.' : '暂无参与者，请点击右上角添加。') + '</span>';
       return;
     }
 
+    var speakTitle = isEn ? 'Trigger this character to speak once' : '让该角色单独发言一次';
+    var speakText = isEn ? 'Speak' : '发言';
     var html = '';
     for (var i = 0; i < participants.length; i++) {
       var p = participants[i];
@@ -308,9 +360,9 @@
         '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
           '<button type="button" class="sm-model-btn sm-part-pick-model" data-idx="' + i + '">' +
-            '<span>🤖</span><span>' + escapeHtml(p.model.label) + '</span>' +
+            '<span>🤖</span><span>' + escapeHtml(p.model.label || t('storySelectModel')) + '</span>' +
           '</button>' +
-          '<button type="button" class="btn btn-ghost btn-sm sm-part-trigger-one" data-idx="' + i + '" title="让该角色单独发言一次">🗣️ 发言</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm sm-part-trigger-one" data-idx="' + i + '" title="' + speakTitle + '">🗣️ ' + speakText + '</button>' +
           '<button type="button" class="btn btn-danger btn-sm sm-part-del" data-idx="' + i + '">&times;</button>' +
         '</div>' +
       '</div>';
@@ -344,10 +396,11 @@
   }
 
   function renderChatHistory(container) {
+    var isEn = currentLang() === 'en';
     var box = container.querySelector('#sm-chat-history-box');
     if (!box) return;
     if (chatHistory.length === 0) {
-      box.innerHTML = '<div style="margin:auto;color:var(--text-secondary);font-size:13px;">对话记录为空。可在下方输入发言或点击角色“🗣️ 发言”。</div>';
+      box.innerHTML = '<div style="margin:auto;color:var(--text-secondary);font-size:13px;">' + (isEn ? 'Chat history is empty. Send a message below or click "🗣️ Speak" on a character.' : '对话记录为空。可在下方输入发言或点击角色“🗣️ 发言”。') + '</div>';
       return;
     }
 
@@ -381,8 +434,9 @@
   }
 
   function executeParticipantTurn(part, container, onDone) {
+    var isEn = currentLang() === 'en';
     if (!part || !part.model.value) {
-      toast('角色【' + (part ? part.name : '未知') + '】未配置模型', 'warning');
+      toast((isEn ? ('Character [' + (part ? part.name : 'Unknown') + '] has no model configured') : ('角色【' + (part ? part.name : '未知') + '】未配置模型')), 'warning');
       if (onDone) onDone(false);
       return;
     }
@@ -391,7 +445,7 @@
     var reasoningText = container.querySelector('#sm-chat-reasoning-text');
     if (reasoningEl && reasoningText) {
       reasoningEl.style.display = 'block';
-      reasoningText.textContent = '【' + part.name + '】正在组织语言...';
+      reasoningText.textContent = isEn ? ('[' + part.name + '] is thinking...') : ('【' + part.name + '】正在组织语言...');
     }
 
     var messages = buildParticipantMessages(chatHistory, part);
@@ -420,16 +474,17 @@
       if (onDone) onDone(true);
     }, function(err) {
       if (reasoningEl) reasoningEl.style.display = 'none';
-      toast(part.name + ' 回复失败: ' + err.message, 'error');
+      toast(part.name + (isEn ? ' reply failed: ' : ' 回复失败: ') + err.message, 'error');
       if (onDone) onDone(false);
     });
   }
 
   function runAutoLoopStep(container) {
+    var isEn = currentLang() === 'en';
     if (!autoRunning || autoRoundsLeft <= 0) {
       autoRunning = false;
       drawUI(container);
-      toast('自动对话已结束', 'info');
+      toast(isEn ? 'Auto chat ended' : '自动对话已结束', 'info');
       return;
     }
 
@@ -450,23 +505,24 @@
   }
 
   function openAddParticipantModal(container) {
+    var isEn = currentLang() === 'en';
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
     overlay.innerHTML = '' +
       '<div class="modal-card" style="width:420px;">' +
         '<div class="modal-header">' +
-          '<div class="modal-title">添加对话角色</div>' +
+          '<div class="modal-title">' + (isEn ? 'Add Dialogue Character' : '添加对话角色') + '</div>' +
           '<button class="modal-close-btn">&times;</button>' +
         '</div>' +
         '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">' +
           '<div class="sm-field">' +
-            '<span class="sm-field-label">选择设定卡片：</span>' +
+            '<span class="sm-field-label">' + (isEn ? 'Select Setting Card:' : '选择设定卡片：') + '</span>' +
             '<select class="select" id="sm-part-select-card"></select>' +
           '</div>' +
         '</div>' +
         '<div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;">' +
-          '<button class="btn btn-ghost" type="button" id="sm-part-modal-cancel">取消</button>' +
-          '<button class="btn btn-primary" type="button" id="sm-part-modal-add">添加</button>' +
+          '<button class="btn btn-ghost" type="button" id="sm-part-modal-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-primary" type="button" id="sm-part-modal-add">' + escapeHtml(t('add')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -477,7 +533,7 @@
 
     var sel = overlay.querySelector('#sm-part-select-card');
     if (characterCards.length === 0) {
-      sel.innerHTML = '<option value="">暂无人物卡片</option>';
+      sel.innerHTML = '<option value="">' + (isEn ? 'No character cards available' : '暂无人物卡片') + '</option>';
     } else {
       var sHtml = '';
       for (var i = 0; i < characterCards.length; i++) {
@@ -495,7 +551,7 @@
         id: 'part_' + Date.now(),
         cardId: card.id,
         name: card.name,
-        model: { value: '', label: '选择模型' },
+        model: { value: '', label: '' },
         color: COLOR_PALETTE[participants.length % COLOR_PALETTE.length]
       });
       close();

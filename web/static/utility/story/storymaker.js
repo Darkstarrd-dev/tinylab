@@ -86,14 +86,14 @@
   };
 
   var TABS = [
-    { id: 'home', labelKey: 'storyHome', icon: '📚' },
-    { id: 'm0', labelKey: 'storyM0', icon: '🏛️' },
-    { id: 'm2', labelKey: 'storyM2', icon: '🃏' },
-    { id: 'm3', labelKey: 'storyM3', icon: '🎭' },
-    { id: 'm4', labelKey: 'storyM4', icon: '✍️' },
-    { id: 'm5', labelKey: 'storyM5', icon: '📑' },
-    { id: 'batch', labelKey: 'storyBatch', icon: '⚡' },
-    { id: 'rolechat', labelKey: 'storyRoleChat', icon: '💬' }
+    { id: 'home', labelKey: 'storyHome' },
+    { id: 'm0', labelKey: 'storyM0' },
+    { id: 'm2', labelKey: 'storyM2' },
+    { id: 'm3', labelKey: 'storyM3' },
+    { id: 'm4', labelKey: 'storyM4' },
+    { id: 'm5', labelKey: 'storyM5' },
+    { id: 'batch', labelKey: 'storyBatch' },
+    { id: 'rolechat', labelKey: 'storyRoleChat' }
   ];
 
   function refreshBookList(cb) {
@@ -124,7 +124,6 @@
         '<div class="sm-sidebar">' +
           '<div class="sm-sidebar-header">' +
             '<div class="sm-sidebar-title">' +
-              '<span>📖</span>' +
               '<span>' + escapeHtml(t('storyMaker')) + '</span>' +
             '</div>' +
             '<div class="sm-book-selector-wrap" id="sm-book-selector"></div>' +
@@ -148,7 +147,6 @@
       var active = tab.id === currentTab ? ' active' : '';
       var aria = tab.id === currentTab ? ' aria-current="page"' : '';
       html += '<button type="button" class="sm-nav-item' + active + '"' + aria + ' data-tab="' + tab.id + '">' +
-        '<span class="sm-nav-icon">' + tab.icon + '</span>' +
         '<span>' + escapeHtml(t(tab.labelKey)) + '</span>' +
       '</button>';
     }
@@ -167,10 +165,13 @@
       wrap.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(t('storyNoBooks')) + '</span>';
       return;
     }
+    var options = activeBooksCache.map(function(b) {
+      return { value: b.id, label: (b.type === 'project' ? (t('storyProject') + ': ') : (t('storyReference') + ': ')) + b.title };
+    });
     var curBook = options.find(function(o) { return o.value === activeBookId; });
     var curVal = curBook ? curBook.value : (options[0] ? options[0].value : '');
     activeBookId = curVal;
-    wrap.innerHTML = renderCustomSelectHtml('sm-active-book-wrap', 'sm-active-book-select', options, curVal, null, 'width:100%;height:32px');
+    wrap.innerHTML = renderCustomSelectHtml('sm-active-book-wrap', 'sm-active-book-select', options, curVal, null, 'width:100%;height:36px;');
     var sel = wrap.querySelector('select');
     if (sel) {
       sel.addEventListener('change', function(e) {
@@ -216,7 +217,6 @@
       },
       showEmptyBookState: function(parentEl) {
         parentEl.innerHTML = '<div class="sm-empty-state">' +
-          '<div class="sm-empty-icon">📖</div>' +
           '<p>' + escapeHtml(t('storyNoBooks')) + '</p>' +
           '<button class="btn btn-primary" type="button" id="sm-empty-goto-home">' + escapeHtml(t('storyGoHome')) + '</button>' +
         '</div>';

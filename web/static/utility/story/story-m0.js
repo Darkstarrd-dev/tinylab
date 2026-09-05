@@ -4,8 +4,8 @@
 
   var currentCtx = null;
   var currentAbort = null;
-  var archModel = { value: '', label: '选择模型' };
-  var bpModel = { value: '', label: '选择模型' };
+  var archModel = { value: '', label: t('storySelectModel') };
+  var bpModel = { value: '', label: t('storySelectModel') };
 
   var state = {
     topic: '',
@@ -82,8 +82,8 @@
       list.push({
         id: 'bp_' + Date.now() + '_' + order,
         order: order,
-        volume: '第一卷',
-        title: title || '未命名章节',
+        volume: (typeof currentLang === 'function' && currentLang() === 'en') ? 'Volume 1' : '第一卷',
+        title: title || t('editorUntitled'),
         positioning: getField('定位'),
         role: getField('核心作用'),
         suspenseDensity: getField('悬念密度'),
@@ -103,7 +103,7 @@
         }
       }, { kindFilter: 'text' });
     } else {
-      var m = prompt('请输入模型 ID (例如 provider/model-name):', current.value || '');
+      var m = prompt(t('assistantPickModel') + ' (provider/model):', current.value || '');
       if (m) onPick({ value: m, label: m });
     }
   }
@@ -118,28 +118,28 @@
 
         // Inputs Card
         '<div class="sm-card">' +
-          '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">1. 创作方向与构思</div>' +
+          '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">' + escapeHtml(t('storyM0Step1Title')) + '</div>' +
           '<div class="sm-form-grid">' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">主题 (一句式钩子) *</span>' +
-              '<input type="text" class="input" id="sm-m0-topic" value="' + escapeAttr(state.topic) + '" placeholder="如：当废柴少年意外发现家族供奉的剑圣是魔界卧底" />' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0TopicLabel')) + '</span>' +
+              '<input type="text" class="input" id="sm-m0-topic" value="' + escapeAttr(state.topic) + '" placeholder="' + escapeAttr(t('storyM0TopicPlaceholder')) + '" />' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">类型标签</span>' +
-              '<input type="text" class="input" id="sm-m0-genre" value="' + escapeAttr(state.genre) + '" placeholder="如：玄幻/悬疑/反转" />' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0GenreLabel')) + '</span>' +
+              '<input type="text" class="input" id="sm-m0-genre" value="' + escapeAttr(state.genre) + '" placeholder="' + escapeAttr(t('storyM0GenrePlaceholder')) + '" />' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">预估章节数</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0ChapterCountLabel')) + '</span>' +
               renderStepperHtml('sm-m0-chapters', state.chapters, 1, 300, 1) +
             '</div>' +
           '</div>' +
           '<div class="sm-field">' +
-            '<span class="sm-field-label">核心梗概 / 指导细节</span>' +
-            '<textarea class="sm-textarea" id="sm-m0-guidance" style="min-height:60px;" placeholder="补充关键角色关系、世界法则或预期结局方向...">' + escapeHtml(state.guidance) + '</textarea>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM0GuidanceLabel')) + '</span>' +
+            '<textarea class="sm-textarea" id="sm-m0-guidance" style="min-height:60px;" placeholder="' + escapeAttr(t('storyM0GuidancePlaceholder')) + '">' + escapeHtml(state.guidance) + '</textarea>' +
           '</div>' +
           '<div style="display:flex;gap:10px;align-items:center;">' +
-            '<button class="btn btn-ghost" type="button" id="sm-m0-btn-brainstorm">AI 脑暴创作方向</button>' +
-            '<button class="btn btn-primary" type="button" id="sm-m0-btn-gen-arch">生成小说架构</button>' +
+            '<button class="btn btn-ghost" type="button" id="sm-m0-btn-brainstorm">' + escapeHtml(t('storyM0BrainstormBtn')) + '</button>' +
+            '<button class="btn btn-primary" type="button" id="sm-m0-btn-gen-arch">' + escapeHtml(t('storyM0GenArchBtn')) + '</button>' +
             '<button class="sm-model-btn" type="button" id="sm-m0-model-arch">🤖 <span>' + escapeHtml(archModel.label) + '</span></button>' +
           '</div>' +
         '</div>' +
@@ -147,24 +147,24 @@
         // Architecture Editor Card
         '<div class="sm-card">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">2. 雪花法架构编辑</div>' +
-            '<button class="btn btn-ghost btn-sm" type="button" id="sm-m0-adopt-arch">采纳并保存架构</button>' +
+            '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">' + escapeHtml(t('storyM0Step2Title')) + '</div>' +
+            '<button class="btn btn-ghost btn-sm" type="button" id="sm-m0-adopt-arch">' + escapeHtml(t('storyM0AdoptArchBtn')) + '</button>' +
           '</div>' +
           '<div class="sm-form-grid">' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">核心种子 (Seed)</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0SeedLabel')) + '</span>' +
               '<textarea class="sm-textarea" id="sm-m0-seed">' + escapeHtml(state.seed) + '</textarea>' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">角色动力学 (Character Dynamics)</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0CharDynLabel')) + '</span>' +
               '<textarea class="sm-textarea" id="sm-m0-cd">' + escapeHtml(state.characterDynamics) + '</textarea>' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">世界观 (World Building)</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0WorldLabel')) + '</span>' +
               '<textarea class="sm-textarea" id="sm-m0-wb">' + escapeHtml(state.worldBuilding) + '</textarea>' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">三幕式情节 (Plot Structure)</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM0PlotLabel')) + '</span>' +
               '<textarea class="sm-textarea" id="sm-m0-ps">' + escapeHtml(state.plotStructure) + '</textarea>' +
             '</div>' +
           '</div>' +
@@ -173,11 +173,11 @@
         // Blueprint Generator Card
         '<div class="sm-card">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">3. 章节蓝图规划</div>' +
+            '<div style="font-weight:600;font-size:calc(var(--font-base) + 1px);">' + escapeHtml(t('storyM0Step3Title')) + '</div>' +
             '<div style="display:flex;gap:10px;">' +
               '<button class="sm-model-btn" type="button" id="sm-m0-model-bp">🤖 <span>' + escapeHtml(bpModel.label) + '</span></button>' +
-              '<button class="btn btn-primary" type="button" id="sm-m0-btn-gen-bp">生成章节蓝图</button>' +
-              '<button class="btn btn-ghost" type="button" id="sm-m0-adopt-bp" ' + (state.parsedBlueprint.length === 0 ? 'disabled' : '') + '>采纳进大纲目录</button>' +
+              '<button class="btn btn-primary" type="button" id="sm-m0-btn-gen-bp">' + escapeHtml(t('storyM0GenBpBtn')) + '</button>' +
+              '<button class="btn btn-ghost" type="button" id="sm-m0-adopt-bp" ' + (state.parsedBlueprint.length === 0 ? 'disabled' : '') + '>' + escapeHtml(t('storyM0AdoptBpBtn')) + '</button>' +
             '</div>' +
           '</div>' +
           '<div id="sm-m0-bp-preview" style="max-height:360px;overflow-y:auto;">' +
@@ -187,8 +187,8 @@
 
         // Prompt Override Foldable
         '<details class="sm-prompt-details">' +
-          '<summary class="sm-prompt-summary">⚙️ ' + escapeHtml(t('storyPromptOverride')) + ' (M0 提示词)</summary>' +
-          '<div class="sm-prompt-editor" id="sm-m0-prompts-wrap">加载提示词...</div>' +
+          '<summary class="sm-prompt-summary">⚙️ ' + escapeHtml(t('storyPromptOverride')) + ' (M0)</summary>' +
+          '<div class="sm-prompt-editor" id="sm-m0-prompts-wrap">' + escapeHtml(t('loading')) + '</div>' +
         '</details>' +
       '</div>';
 
@@ -198,9 +198,17 @@
 
   function renderBlueprintTableHtml(items) {
     if (!items || items.length === 0) {
-      return '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">暂未生成蓝图</div>';
+      return '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">' + escapeHtml(t('storyM0NoBpYet')) + '</div>';
     }
-    var html = '<table class="sm-table"><thead><tr><th>#</th><th>标题</th><th>定位</th><th>核心作用</th><th>悬念</th><th>颠覆</th><th>简述</th></tr></thead><tbody>';
+    var html = '<table class="sm-table"><thead><tr>' +
+      '<th>#</th>' +
+      '<th>' + escapeHtml(t('storyTitle')) + '</th>' +
+      '<th>' + escapeHtml(t('storyM0ColPos')) + '</th>' +
+      '<th>' + escapeHtml(t('storyM0ColRole')) + '</th>' +
+      '<th>' + escapeHtml(t('storyM0ColSuspense')) + '</th>' +
+      '<th>' + escapeHtml(t('storyM0ColTwist')) + '</th>' +
+      '<th>' + escapeHtml(t('storyM0ColSummary')) + '</th>' +
+    '</tr></thead><tbody>';
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       html += '<tr>' +
@@ -245,12 +253,12 @@
     // Brainstorm
     container.querySelector('#sm-m0-btn-brainstorm')?.addEventListener('click', function() {
       if (!archModel.value) {
-        toast('请先选择模型', 'error');
+        toast(t('trModelRequired'), 'error');
         return;
       }
       var btn = this;
       btn.disabled = true;
-      btn.textContent = '脑暴中...';
+      btn.textContent = t('storyM0Brainstorming');
       var full = '';
       currentAbort = currentCtx.api.sse('/arch-input', {
         model: archModel.value,
@@ -262,7 +270,7 @@
         full += delta;
       }, function() {
         btn.disabled = false;
-        btn.textContent = 'AI 脑暴创作方向';
+        btn.textContent = t('storyM0BrainstormBtn');
         try {
           var cleaned = full.trim().replace(/^```json\s*/, '').replace(/```$/, '');
           var res = JSON.parse(cleaned);
@@ -270,30 +278,30 @@
           if (res.genre) state.genre = res.genre;
           if (res.guidance) state.guidance = res.guidance;
           drawUI(container);
-          toast('脑暴完成，已回填方向', 'success');
+          toast(t('storyM0BrainstormDone'), 'success');
         } catch (e) {
-          toast('解析脑暴结果失败: ' + e.message, 'error');
+          toast(t('failed') + ': ' + e.message, 'error');
         }
       }, function(err) {
         btn.disabled = false;
-        btn.textContent = 'AI 脑暴创作方向';
-        toast('脑暴失败: ' + err.message, 'error');
+        btn.textContent = t('storyM0BrainstormBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
     // Generate Architecture
     container.querySelector('#sm-m0-btn-gen-arch')?.addEventListener('click', function() {
       if (!archModel.value) {
-        toast('请先选择模型', 'error');
+        toast(t('trModelRequired'), 'error');
         return;
       }
       if (!state.topic.trim()) {
-        toast('请输入主题', 'error');
+        toast(t('storyM0TopicLabel'), 'error');
         return;
       }
       var btn = this;
       btn.disabled = true;
-      btn.textContent = '架构生成中...';
+      btn.textContent = t('storyM0ArchGenerating');
       state.archOutput = '';
       currentAbort = currentCtx.api.sse('/arch', {
         model: archModel.value,
@@ -319,12 +327,12 @@
         if (elPs) elPs.value = state.plotStructure;
       }, function() {
         btn.disabled = false;
-        btn.textContent = '生成小说架构';
-        toast('架构生成完成', 'success');
+        btn.textContent = t('storyM0GenArchBtn');
+        toast(t('storyM0ArchGenDone'), 'success');
       }, function(err) {
         btn.disabled = false;
-        btn.textContent = '生成小说架构';
-        toast('架构生成失败: ' + err.message, 'error');
+        btn.textContent = t('storyM0GenArchBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
@@ -342,26 +350,26 @@
         updatedAt: new Date().toISOString()
       };
       currentCtx.api.post('/books', { title: book.title, type: book.type }).then(function() {
-        toast('已采纳并保存架构设定', 'success');
+        toast(t('storyM0ArchSaved'), 'success');
       }).catch(function(err) {
-        toast('保存架构失败: ' + err.message, 'error');
+        toast(t('storySaveFail') + ': ' + err.message, 'error');
       });
     });
 
     // Generate Blueprint
     container.querySelector('#sm-m0-btn-gen-bp')?.addEventListener('click', function() {
       if (!bpModel.value) {
-        toast('请先选择模型', 'error');
+        toast(t('trModelRequired'), 'error');
         return;
       }
       var combinedArch = '## 核心种子\n' + state.seed + '\n## 角色动力学\n' + state.characterDynamics + '\n## 世界观\n' + state.worldBuilding + '\n## 三幕式情节\n' + state.plotStructure;
       if (!combinedArch.trim()) {
-        toast('架构内容为空，请先生成或填写架构', 'error');
+        toast(t('storyM0ArchEmpty'), 'error');
         return;
       }
       var btn = this;
       btn.disabled = true;
-      btn.textContent = '蓝图规划中...';
+      btn.textContent = t('storyM0BpGenerating');
       state.blueprintOutput = '';
       currentAbort = currentCtx.api.sse('/blueprint', {
         model: bpModel.value,
@@ -375,14 +383,14 @@
         if (preview) preview.innerHTML = renderBlueprintTableHtml(state.parsedBlueprint);
       }, function() {
         btn.disabled = false;
-        btn.textContent = '生成章节蓝图';
+        btn.textContent = t('storyM0GenBpBtn');
         var adoptBtn = container.querySelector('#sm-m0-adopt-bp');
         if (adoptBtn) adoptBtn.disabled = state.parsedBlueprint.length === 0;
-        toast('章节蓝图生成完成', 'success');
+        toast(t('storyM0BpGenDone'), 'success');
       }, function(err) {
         btn.disabled = false;
-        btn.textContent = '生成章节蓝图';
-        toast('蓝图生成失败: ' + err.message, 'error');
+        btn.textContent = t('storyM0GenBpBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
@@ -394,9 +402,9 @@
         bookId: book.id,
         nodes: state.parsedBlueprint
       }).then(function() {
-        toast('已成功将蓝图追加至大纲目录 (' + state.parsedBlueprint.length + ' 章)', 'success');
+        toast(t('storyM0BpAppended', [state.parsedBlueprint.length]), 'success');
       }).catch(function(err) {
-        toast('追加大纲失败: ' + err.message, 'error');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
   }
@@ -410,7 +418,7 @@
       html += '<div style="margin-bottom:12px;">' +
         '<div style="font-weight:600;font-size:12px;margin-bottom:4px;color:var(--text-secondary);">' + k + '</div>' +
         '<textarea class="sm-textarea" id="sm-prompt-' + k + '" style="min-height:80px;"></textarea>' +
-        '<button class="btn btn-ghost btn-sm sm-save-prompt" data-key="' + k + '" style="margin-top:4px;">保存提示词覆盖</button>' +
+        '<button class="btn btn-ghost btn-sm sm-save-prompt" data-key="' + k + '" style="margin-top:4px;">' + escapeHtml(t('storyM0SavePrompt')) + '</button>' +
       '</div>';
     });
     wrap.innerHTML = html;
@@ -427,9 +435,9 @@
         var k = btn.dataset.key;
         var val = (wrap.querySelector('#sm-prompt-' + k) || {}).value || '';
         currentCtx.api.put('/prompts/' + k, { content: val }).then(function() {
-          toast('提示词已保存覆盖', 'success');
+          toast(t('storyM0PromptSaved'), 'success');
         }).catch(function(err) {
-          toast('保存提示词失败: ' + err.message, 'error');
+          toast(t('storySaveFail') + ': ' + err.message, 'error');
         });
       });
     });

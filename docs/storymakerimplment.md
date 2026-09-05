@@ -1,5 +1,7 @@
 # Story Maker 迁移计划（novelhelper → TinyRouter Utility）
 
+> **最后核对（2026-09-06，Story Maker 全量国际化与中英文多语言对齐）：** 完善全套 321 个 `story*` i18n 词条（`web/static/i18n.js` `L.en` 与 `L.cn` 100% 对称），全面重构 `storymaker.js`、`story-home.js`、`story-m0.js`、`story-m2.js`、`story-m3.js`、`story-m4.js`、`story-m5.js`、`story-batch.js`、`story-rolechat.js` 杜绝 UI 中文泄露，并确保 LLM 协议与数据存储契约安全。
+
 ## Context
 
 将 `Z:/Playground/novelhelper` 小说生成部分迁移为 TinyRouter `Utility` 下新模块 `Story Maker`。
@@ -268,3 +270,10 @@ M3 user=scene+target+present+characterTimeline+adoptedFragments；M4 user=curren
 
 ### F. 落盘说明
 本文件为执行唯一依据；实施时另存为 `docs/storymakerimplment.md`（注意拼写与用户指定一致）后按序执行 Step 1→1B→2→…→8，每步后跑 Verification 对应项。
+
+### G. 样式修正维护记录（2026-09-06）
+1. **Books 页面按钮高度对齐**：`.sm-page-actions .btn` 与 `.custom-select-trigger` 均统一定义为 `height: 36px`，`box-sizing: border-box`；`story-home.js` 头部筛选下拉包装容器与组件高度统一定为 36px，解决原本 38px/29px 高度不一致与不对齐问题。
+2. **下拉菜单与触发器间距**：为 `.sm-page-container .custom-select-menu` 与 `.modal .custom-select-menu` 统一定义 `top: calc(100% + 6px)`，消除 wrapper 高度错配导致的倒扣重叠，保留紧凑且舒适的呼吸间隙，且不影响选项交互与操作。
+3. **New Book 弹窗自定义下拉菜单**：将 New Book 弹窗内的 Type 原生 `<select>` 替换为项目标准 `renderCustomSelectHtml('sm-new-type-wrap', 'sm-new-type', ...)`，并在确认创建时保持读取底层 select 的值；弹窗使用项目标准 `.modal`、`.modal-footer` 与 `overflow: visible`，确保完全契合暗黑毛玻璃风格与防裁剪。
+4. **移除冗余关闭按钮**：移除弹窗头部原有的 `modal-close-btn`（`[x]`），保留底部 Cancel/Confirm 按钮及遮罩点击关闭。
+5. **移除侧边栏与空态图形**：从 `storymaker.js` 侧栏标题中移除 `📖`、从 8 个 Tab 按钮中移除 `📚/🏛️/🃏/🎭/✍️/📑/⚡/💬` 等 emoji 图标，从空态页面移除 `Go to Books` 上方的 `📖` 图标，仅保留清爽的纯文字与操作按钮。

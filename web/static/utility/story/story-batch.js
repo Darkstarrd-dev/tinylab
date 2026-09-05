@@ -7,8 +7,8 @@
 
   var currentCtx = null;
   var currentAbort = null;
-  var draftModel = { value: '', label: '选择正文模型' };
-  var reviewModel = { value: '', label: '选择审校模型' };
+  var draftModel = { value: '', label: '' };
+  var reviewModel = { value: '', label: '' };
 
   var outlineNodes = [];
   var existingChapters = [];
@@ -50,12 +50,14 @@
   }
 
   function initTasksFromOutline() {
+    var isEn = currentLang() === 'en';
     tasks = outlineNodes.map(function(n) {
       var existing = existingChapters.find(function(c) { return c.Index === n.order; });
       var status = (existing && existing.Status === 'final') ? 'completed' : 'pending';
+      var fallbackTitle = isEn ? ('Chapter ' + n.order) : ('第 ' + n.order + ' 章');
       return {
         chapterIndex: n.order,
-        title: n.title || ('第 ' + n.order + ' 章'),
+        title: n.title || fallbackTitle,
         outlineNodeId: n.id,
         status: status,
         selected: status !== 'completed' // pre-select incomplete
@@ -71,17 +73,35 @@
         }
       }, { kindFilter: 'text' });
     } else {
-      var m = prompt('请输入模型 ID (例如 provider/model-name):', current.value || '');
+      var isEn = currentLang() === 'en';
+      var m = prompt(isEn ? 'Enter Model ID (e.g. provider/model-name):' : '请输入模型 ID (例如 provider/model-name):', current.value || '');
       if (m) onPick({ value: m, label: m });
     }
   }
 
   function drawUI(container) {
     var book = currentCtx.getActiveBook();
+    var isEn = currentLang() === 'en';
 
     var completedCount = tasks.filter(function(t) { return t.status === 'completed'; }).length;
     var totalCount = tasks.length;
     var pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    var startBtnText = '▶ ' + escapeHtml(t('storyBatchStartBtn'));
+    var pauseBtnText = '⏸ ' + escapeHtml(t('storyBatchPauseBtn'));
+    var resumeBtnText = '▶ ' + (isEn ? 'Resume' : '继续');
+    var stopBtnText = '⏹ ' + escapeHtml(t('storyBatchCancelBtn'));
+
+    var draftLabel = draftModel.label || (isEn ? 'Select Draft Model' : '选择正文模型');
+    var reviewLabel = reviewModel.label || (isEn ? 'Select Review Model' : '选择审校模型');
+
+    var progressText = isEn ?
+      ('Progress: ' + completedCount + ' / ' + totalCount + ' chapters (' + pct + '%)') :
+      ('生产总进度：' + completedCount + ' / ' + totalCount + ' 章 (' + pct + '%)');
+
+    var statusText = runnerState === 'running' ?
+      ('🚀 ' + escapeHtml(t('storyBatchStatusRunning'))) :
+      (runnerState === 'paused' ? ('⏸ ' + escapeHtml(t('storyBatchStatusPaused'))) : escapeHtml(t('storyBatchStatusIdle')));
 
     container.innerHTML = '' +
       '<div class="sm-page-container">' +
@@ -89,12 +109,12 @@
           '<div class="sm-page-title">' + escapeHtml(t('storyBatch')) + ' <span style="font-size:14px;color:var(--text-secondary);font-weight:normal;">(' + escapeHtml(book.title) + ')</span></div>' +
           '<div class="sm-page-actions">' +
             (runnerState === 'idle' ?
-              '<button class="btn btn-primary" type="button" id="sm-batch-start" ' + (totalCount === 0 ? 'disabled' : '') + '>▶ 开始批量生产</button>' :
+              '<button class="btn btn-primary" type="button" id="sm-batch-start" ' + (totalCount === 0 ? 'disabled' : '') + '>' + startBtnText + '</button>' :
               (runnerState === 'running' ?
-                '<button class="btn btn-ghost" type="button" id="sm-batch-pause">⏸ 暂停</button>' :
-                '<button class="btn btn-primary" type="button" id="sm-batch-resume">▶ 继续</button>'
+                '<button class="btn btn-ghost" type="button" id="sm-batch-pause">' + pauseBtnText + '</button>' :
+                '<button class="btn btn-primary" type="button" id="sm-batch-resume">' + resumeBtnText + '</button>'
               ) +
-              '<button class="btn btn-danger" type="button" id="sm-batch-stop">⏹ 终止生产</button>'
+              '<button class="btn btn-danger" type="button" id="sm-batch-stop">' + stopBtnText + '</button>'
             ) +
           '</div>' +
         '</div>' +
@@ -103,27 +123,25 @@
         '<div class="sm-card">' +
           '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">' +
             '<div style="display:flex;flex-direction:column;gap:4px;">' +
-              '<span class="sm-field-label">正文生成模型：</span>' +
+              '<span class="sm-field-label">' + (isEn ? 'Draft Generation Model:' : '正文生成模型：') + '</span>' +
               '<button type="button" class="sm-model-btn" id="sm-batch-draft-model-btn" ' + (runnerState !== 'idle' ? 'disabled' : '') + '>' +
-                '<span>✍️</span><span id="sm-batch-draft-model-label">' + escapeHtml(draftModel.label) + '</span>' +
+                '<span>✍️</span><span id="sm-batch-draft-model-label">' + escapeHtml(draftLabel) + '</span>' +
               '</button>' +
             '</div>' +
             '<div style="display:flex;flex-direction:column;gap:4px;">' +
-              '<span class="sm-field-label">定稿审校模型：</span>' +
+              '<span class="sm-field-label">' + (isEn ? 'Finalize Review Model:' : '定稿审校模型：') + '</span>' +
               '<button type="button" class="sm-model-btn" id="sm-batch-rev-model-btn" ' + (runnerState !== 'idle' ? 'disabled' : '') + '>' +
-                '<span>📑</span><span id="sm-batch-rev-model-label">' + escapeHtml(reviewModel.label) + '</span>' +
+                '<span>📑</span><span id="sm-batch-rev-model-label">' + escapeHtml(reviewLabel) + '</span>' +
               '</button>' +
             '</div>' +
             '<div style="width:130px;">' +
-              '<span class="sm-field-label">单章目标字数：</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM4TargetWords')) + '</span>' +
               renderStepperHtml('sm-batch-target-words', targetWordCount, 1000, 10000, 500) +
             '</div>' +
             '<div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px;">' +
               '<div style="display:flex;justify-content:space-between;font-size:12px;">' +
-                '<span>生产总进度：' + completedCount + ' / ' + totalCount + ' 章 (' + pct + '%)</span>' +
-                '<span style="color:var(--text-secondary);">' +
-                  (runnerState === 'running' ? '🚀 运行中' : (runnerState === 'paused' ? '⏸ 已暂停' : '待机')) +
-                '</span>' +
+                '<span>' + progressText + '</span>' +
+                '<span style="color:var(--text-secondary);">' + statusText + '</span>' +
               '</div>' +
               '<div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;">' +
                 '<div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width 0.3s ease;"></div>' +
@@ -135,23 +153,23 @@
         // Task Queue Card
         '<div class="sm-card" style="padding:0;overflow:hidden;">' +
           '<div style="padding:12px 16px;background:rgba(0,0,0,0.05);border-bottom:1px solid var(--glass-border);display:flex;justify-content:space-between;align-items:center;">' +
-            '<div style="font-weight:600;font-size:var(--font-base);">生产任务队列</div>' +
+            '<div style="font-weight:600;font-size:var(--font-base);">' + (isEn ? 'Production Queue' : '生产任务队列') + '</div>' +
             (runnerState === 'idle' ?
               '<div style="display:flex;gap:8px;">' +
-                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-sel-all">全选</button>' +
-                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-sel-none">全清</button>' +
-                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-reset">重置状态</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-sel-all">' + (isEn ? 'Select All' : '全选') + '</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-sel-none">' + (isEn ? 'Deselect All' : '全清') + '</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" id="sm-batch-reset">' + (isEn ? 'Reset' : '重置状态') + '</button>' +
               '</div>' : '') +
           '</div>' +
           '<div class="sm-table-wrap" style="border:none;border-radius:0;">' +
             '<table class="sm-table">' +
               '<thead>' +
                 '<tr>' +
-                  '<th style="width:40px;">选择</th>' +
+                  '<th style="width:40px;">' + (isEn ? 'Select' : '选择') + '</th>' +
                   '<th style="width:60px;">#</th>' +
-                  '<th>章节大纲标题</th>' +
-                  '<th>状态</th>' +
-                  '<th>详情 / 错误</th>' +
+                  '<th>' + (isEn ? 'Outline Title' : '章节大纲标题') + '</th>' +
+                  '<th>' + escapeHtml(t('storyM5ColStatus')) + '</th>' +
+                  '<th>' + (isEn ? 'Details / Error' : '详情 / 错误') + '</th>' +
                 '</tr>' +
               '</thead>' +
               '<tbody id="sm-batch-tbody"></tbody>' +
@@ -163,7 +181,7 @@
     var tbody = container.querySelector('#sm-batch-tbody');
     if (tasks.length === 0) {
       tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-secondary);">' +
-        '大纲蓝图为空，请先在 M0 规划并采纳章节蓝图。</td></tr>';
+        (isEn ? 'Outline is empty. Please plan and adopt chapter blueprints in M0 first.' : '大纲蓝图为空，请先在 M0 规划并采纳章节蓝图。') + '</td></tr>';
     } else {
       var rowsHtml = '';
       for (var i = 0; i < tasks.length; i++) {
@@ -171,29 +189,30 @@
         var statusBadge = '';
         switch (tsk.status) {
           case 'drafting':
-            statusBadge = '<span class="tag tag-blue">✍️ 起草正文中</span>';
+            statusBadge = '<span class="tag tag-blue">✍️ ' + (isEn ? 'Drafting' : '起草正文中') + '</span>';
             break;
           case 'finalizing':
-            statusBadge = '<span class="tag tag-purple">📑 定稿审校中</span>';
+            statusBadge = '<span class="tag tag-purple">📑 ' + (isEn ? 'Finalizing' : '定稿审校中') + '</span>';
             break;
           case 'completed':
-            statusBadge = '<span class="tag tag-green">✓ 已完成</span>';
+            statusBadge = '<span class="tag tag-green">✓ ' + (isEn ? 'Completed' : '已完成') + '</span>';
             break;
           case 'failed':
-            statusBadge = '<span class="tag tag-red">✕ 失败中断</span>';
+            statusBadge = '<span class="tag tag-red">✕ ' + (isEn ? 'Failed' : '失败中断') + '</span>';
             break;
           default:
-            statusBadge = '<span class="tag tag-gray">等待中</span>';
+            statusBadge = '<span class="tag tag-gray">' + (isEn ? 'Waiting' : '等待中') + '</span>';
             break;
         }
 
+        var detailText = tsk.error || (tsk.status === 'completed' ? (isEn ? 'Stored' : '已入库') : '—');
         rowsHtml += '<tr>' +
           '<td><input type="checkbox" class="sm-task-cb" data-idx="' + i + '" ' + (tsk.selected ? 'checked' : '') + ' ' + (runnerState !== 'idle' ? 'disabled' : '') + '></td>' +
           '<td>' + tsk.chapterIndex + '</td>' +
           '<td><strong>' + escapeHtml(tsk.title) + '</strong></td>' +
           '<td>' + statusBadge + '</td>' +
           '<td style="color:' + (tsk.status === 'failed' ? 'var(--danger, #ff6b6b)' : 'var(--text-secondary)') + ';font-size:12px;">' +
-            escapeHtml(tsk.error || (tsk.status === 'completed' ? '已入库' : '—')) +
+            escapeHtml(detailText) +
           '</td>' +
         '</tr>';
       }
@@ -242,12 +261,12 @@
     // Start / Pause / Resume / Stop
     container.querySelector('#sm-batch-start')?.addEventListener('click', function() {
       if (!draftModel.value || !reviewModel.value) {
-        toast('请先选择正文模型与审校模型', 'warning');
+        toast(isEn ? 'Please select both draft and review models' : '请先选择正文模型与审校模型', 'warning');
         return;
       }
       var selectedTasks = tasks.filter(function(t) { return t.selected && t.status !== 'completed'; });
       if (selectedTasks.length === 0) {
-        toast('没有待处理的选中章节', 'warning');
+        toast(isEn ? 'No pending selected chapters' : '没有待处理的选中章节', 'warning');
         return;
       }
       runnerState = 'running';
@@ -258,13 +277,13 @@
 
     container.querySelector('#sm-batch-pause')?.addEventListener('click', function() {
       runnerState = 'paused';
-      toast('生产已暂停，在途章节完成后挂起', 'info');
+      toast(isEn ? 'Batch paused, will suspend after active chapter' : '生产已暂停，在途章节完成后挂起', 'info');
       drawUI(container);
     });
 
     container.querySelector('#sm-batch-resume')?.addEventListener('click', function() {
       runnerState = 'running';
-      toast('继续批量生产', 'info');
+      toast(isEn ? 'Resuming batch production' : '继续批量生产', 'info');
       drawUI(container);
       runNextTask(container);
     });
@@ -275,12 +294,13 @@
         try { currentAbort.abort(); } catch (e) {}
         currentAbort = null;
       }
-      toast('已终止批量生产', 'warning');
+      toast(isEn ? 'Batch production cancelled' : '已终止批量生产', 'warning');
       drawUI(container);
     });
   }
 
   function runNextTask(container) {
+    var isEn = currentLang() === 'en';
     if (runnerState !== 'running') return;
 
     // Find next pending selected task
@@ -294,7 +314,7 @@
 
     if (!task) {
       runnerState = 'idle';
-      toast('全部选中章节批量生产完毕！', 'success');
+      toast(isEn ? 'All selected chapters completed!' : '全部选中章节批量生产完毕！', 'success');
       drawUI(container);
       return;
     }
@@ -362,7 +382,7 @@
         task.status = 'failed';
         task.error = err.message;
         runnerState = 'idle';
-        toast('第 ' + task.chapterIndex + ' 章生产失败，已中断后续任务 (Fail-Fast): ' + err.message, 'error');
+        toast((isEn ? ('Chapter ' + task.chapterIndex + ' failed: ') : ('第 ' + task.chapterIndex + ' 章生产失败，已中断后续任务 (Fail-Fast): ')) + err.message, 'error');
         drawUI(container);
       });
     }, function(err) {
@@ -370,7 +390,7 @@
       task.status = 'failed';
       task.error = err.message;
       runnerState = 'idle';
-      toast('第 ' + task.chapterIndex + ' 章起草失败，已中断生产: ' + err.message, 'error');
+      toast((isEn ? ('Chapter ' + task.chapterIndex + ' drafting failed: ') : ('第 ' + task.chapterIndex + ' 章起草失败，已中断生产: ')) + err.message, 'error');
       drawUI(container);
     });
   }

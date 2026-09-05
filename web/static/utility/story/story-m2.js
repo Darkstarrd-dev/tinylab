@@ -12,19 +12,21 @@
   var currentTypeFilter = 'all';
   var searchKeyword = '';
 
-  var textModel = { value: '', label: '选择模型' };
-  var imageModel = { value: '', label: '选择生图模型' };
+  var textModel = { value: '', label: t('storySelectModel') };
+  var imageModel = { value: '', label: t('storySelectImageModel') };
 
   var cardsCache = [];
   var mergeCandidatesCache = [];
 
-  var TYPE_LABELS = {
-    character: '人物',
-    location: '地点',
-    item: '物品',
-    skill: '技能',
-    faction: '势力'
-  };
+  function getTypeLabels() {
+    return {
+      character: t('storyCardCharacter'),
+      location: t('storyCardLocation'),
+      item: t('storyCardItem'),
+      skill: t('storyCardSkill'),
+      faction: t('storyCardFaction')
+    };
+  }
 
   var TYPE_ICONS = {
     character: '👤',
@@ -81,7 +83,7 @@
         }
       }, { kindFilter: filter });
     } else {
-      var m = prompt('请输入模型 ID (例如 provider/model-name):', current.value || '');
+      var m = prompt(t('assistantPickModel') + ' (provider/model):', current.value || '');
       if (m) onPick({ value: m, label: m });
     }
   }
@@ -89,16 +91,16 @@
   function drawUI(container) {
     var book = currentCtx.getActiveBook();
     var scopeOptions = [
-      { value: 'project', label: '📙 当前作品' },
-      { value: 'all', label: '🌐 全部素材' }
+      { value: 'project', label: t('storyM2CurProject') },
+      { value: 'all', label: t('storyM2AllRef') }
     ];
     var typeOptions = [
-      { value: 'all', label: '全部类型' },
-      { value: 'character', label: '👤 人物 (Character)' },
-      { value: 'location', label: '🏰 地点 (Location)' },
-      { value: 'item', label: '🗡️ 物品 (Item)' },
-      { value: 'skill', label: '⚡ 技能 (Skill)' },
-      { value: 'faction', label: '🛡️ 势力 (Faction)' }
+      { value: 'all', label: t('storyAllTypes') },
+      { value: 'character', label: t('storyCardCharacter') },
+      { value: 'location', label: t('storyCardLocation') },
+      { value: 'item', label: t('storyCardItem') },
+      { value: 'skill', label: t('storyCardSkill') },
+      { value: 'faction', label: t('storyCardFaction') }
     ];
 
     container.innerHTML = '' +
@@ -106,23 +108,23 @@
         '<div class="sm-page-header">' +
           '<div class="sm-page-title">' + escapeHtml(t('storyM2')) + ' <span style="font-size:14px;color:var(--text-secondary);font-weight:normal;">(' + escapeHtml(book.title) + ')</span></div>' +
           '<div class="sm-page-actions">' +
-            '<button class="btn btn-ghost" type="button" id="sm-m2-btn-extract">🔍 实体提取</button>' +
-            '<button class="btn btn-ghost" type="button" id="sm-m2-btn-batch">⚡ 批量生成</button>' +
-            '<button class="btn btn-primary" type="button" id="sm-m2-btn-create">＋ 新建卡片</button>' +
+            '<button class="btn btn-ghost" type="button" id="sm-m2-btn-extract">' + escapeHtml(t('storyCardExtract')) + '</button>' +
+            '<button class="btn btn-ghost" type="button" id="sm-m2-btn-batch">' + escapeHtml(t('storyCardBatch')) + '</button>' +
+            '<button class="btn btn-primary" type="button" id="sm-m2-btn-create">' + escapeHtml(t('storyCardNew')) + '</button>' +
           '</div>' +
         '</div>' +
 
         // Filter Bar & Tabs
         '<div class="sm-card" style="padding:14px 20px;gap:12px;">' +
           '<div class="sm-tabs">' +
-            '<button type="button" class="sm-tab-btn' + (currentTab === 'cards' ? ' active' : '') + '" data-tab="cards">卡片列表 (' + cardsCache.length + ')</button>' +
-            '<button type="button" class="sm-tab-btn' + (currentTab === 'merge' ? ' active' : '') + '" data-tab="merge">合并候选 (' + mergeCandidatesCache.length + ')</button>' +
+            '<button type="button" class="sm-tab-btn' + (currentTab === 'cards' ? ' active' : '') + '" data-tab="cards">' + escapeHtml(t('storyM2CardList')) + ' (' + cardsCache.length + ')</button>' +
+            '<button type="button" class="sm-tab-btn' + (currentTab === 'merge' ? ' active' : '') + '" data-tab="merge">' + escapeHtml(t('storyM2MergeCandidates')) + ' (' + mergeCandidatesCache.length + ')</button>' +
           '</div>' +
           '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">' +
             '<div style="width:140px;">' + renderCustomSelectHtml('sm-m2-scope-wrap', 'sm-m2-scope-select', scopeOptions, currentScope, null, 'width:100%;height:32px') + '</div>' +
             '<div style="width:160px;">' + renderCustomSelectHtml('sm-m2-type-wrap', 'sm-m2-type-select', typeOptions, currentTypeFilter, null, 'width:100%;height:32px') + '</div>' +
             '<div style="flex:1;min-width:200px;">' +
-              '<input type="text" class="input" id="sm-m2-search-input" placeholder="搜索卡片名称、描述、别名..." value="' + escapeHtml(searchKeyword) + '">' +
+              '<input type="text" class="input" id="sm-m2-search-input" placeholder="' + escapeAttr(t('storyM2SearchPlaceholder')) + '" value="' + escapeHtml(searchKeyword) + '">' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -187,8 +189,8 @@
       contentEl.innerHTML = '<div class="sm-card">' +
         '<div class="sm-empty-state">' +
           '<div class="sm-empty-icon">🃏</div>' +
-          '<p>暂无符合条件的设定卡片</p>' +
-          '<button class="btn btn-primary btn-sm" type="button" id="sm-m2-empty-create">＋ 新建卡片</button>' +
+          '<p>' + escapeHtml(t('storyM2NoCardsYet')) + '</p>' +
+          '<button class="btn btn-primary btn-sm" type="button" id="sm-m2-empty-create">' + escapeHtml(t('storyCardNew')) + '</button>' +
         '</div>' +
       '</div>';
       contentEl.querySelector('#sm-m2-empty-create')?.addEventListener('click', function() {
@@ -197,12 +199,13 @@
       return;
     }
 
+    var typeLabels = getTypeLabels();
     var html = '<div class="sm-card-grid">';
     for (var i = 0; i < filtered.length; i++) {
       var c = filtered[i];
       var icon = TYPE_ICONS[c.type] || '📄';
       var tagClass = TYPE_TAG_CLASSES[c.type] || 'tag-gray';
-      var typeLabel = TYPE_LABELS[c.type] || c.type;
+      var typeLabel = typeLabels[c.type] || c.type;
 
       var thumbHtml = '';
       if (c.images && c.images.length > 0) {
@@ -230,12 +233,12 @@
             '<span class="tag ' + tagClass + '" style="font-size:11px;">' + escapeHtml(typeLabel) + '</span>' +
           '</div>' +
           aliasesHtml +
-          '<div class="sm-card-desc">' + escapeHtml(c.description || '暂无详细描述。') + '</div>' +
+          '<div class="sm-card-desc">' + escapeHtml(c.description || t('storyM2NoDescription')) + '</div>' +
         '</div>' +
         '<div class="sm-card-footer">' +
-          '<button class="btn btn-ghost btn-sm sm-card-btn-img" data-id="' + escapeHtml(c.id) + '" type="button">🎨 生图</button>' +
-          '<button class="btn btn-ghost btn-sm sm-card-btn-edit" data-id="' + escapeHtml(c.id) + '" type="button">查看/编辑</button>' +
-          '<button class="btn btn-danger btn-sm sm-card-btn-del" data-id="' + escapeHtml(c.id) + '" type="button">删除</button>' +
+          '<button class="btn btn-ghost btn-sm sm-card-btn-img" data-id="' + escapeHtml(c.id) + '" type="button">' + escapeHtml(t('storyCardGenerateImage')) + '</button>' +
+          '<button class="btn btn-ghost btn-sm sm-card-btn-edit" data-id="' + escapeHtml(c.id) + '" type="button">' + escapeHtml(t('storyM2ViewEdit')) + '</button>' +
+          '<button class="btn btn-danger btn-sm sm-card-btn-del" data-id="' + escapeHtml(c.id) + '" type="button">' + escapeHtml(t('delete')) + '</button>' +
         '</div>' +
       '</div>';
     }
@@ -261,16 +264,16 @@
       btn.addEventListener('click', function() {
         var id = btn.dataset.id;
         confirmModal({
-          title: '删除设定卡片',
-          content: '确定要删除此卡片吗？删除后不可恢复。',
+          title: t('delete'),
+          content: t('storyM2DeleteCardConfirm'),
           onOk: function() {
             currentCtx.api.del('/cards/' + encodeURIComponent(id)).then(function() {
-              toast('卡片已删除', 'success');
+              toast(t('storyM2CardDeleted'), 'success');
               loadData(function() {
                 renderTabContent(container);
               });
             }).catch(function(err) {
-              toast('删除失败: ' + err.message, 'error');
+              toast(t('storyDeleteFail') + ': ' + err.message, 'error');
             });
           }
         });
@@ -283,7 +286,7 @@
       contentEl.innerHTML = '<div class="sm-card">' +
         '<div class="sm-empty-state">' +
           '<div class="sm-empty-icon">🤝</div>' +
-          '<p>当前没有待处理的合并候选</p>' +
+          '<p>' + escapeHtml(t('storyM2NoCandidates')) + '</p>' +
         '</div>' +
       '</div>';
       return;
@@ -293,11 +296,11 @@
       '<table class="sm-table">' +
         '<thead>' +
           '<tr>' +
-            '<th>卡片 A</th>' +
-            '<th>卡片 B</th>' +
-            '<th>相似度</th>' +
-            '<th>状态</th>' +
-            '<th style="text-align:right;">操作</th>' +
+            '<th>' + escapeHtml(t('storyM2CardA')) + '</th>' +
+            '<th>' + escapeHtml(t('storyM2CardB')) + '</th>' +
+            '<th>' + escapeHtml(t('storyM2Similarity')) + '</th>' +
+            '<th>' + escapeHtml(t('status')) + '</th>' +
+            '<th style="text-align:right;">' + escapeHtml(t('actions')) + '</th>' +
           '</tr>' +
         '</thead>' +
         '<tbody>';
@@ -313,8 +316,8 @@
         '<td>' + Math.round((mc.similarity || 0) * 100) + '%</td>' +
         '<td><span class="tag tag-amber">' + escapeHtml(mc.status || 'pending') + '</span></td>' +
         '<td style="text-align:right;">' +
-          '<button class="btn btn-ghost btn-sm sm-mc-keep" data-id="' + escapeHtml(mc.id) + '" type="button">保留两者</button> ' +
-          '<button class="btn btn-primary btn-sm sm-mc-merge" data-id="' + escapeHtml(mc.id) + '" type="button">合并入 A</button>' +
+          '<button class="btn btn-ghost btn-sm sm-mc-keep" data-id="' + escapeHtml(mc.id) + '" type="button">' + escapeHtml(t('storyM2KeepBoth')) + '</button> ' +
+          '<button class="btn btn-primary btn-sm sm-mc-merge" data-id="' + escapeHtml(mc.id) + '" type="button">' + escapeHtml(t('storyM2MergeIntoA')) + '</button>' +
         '</td>' +
       '</tr>';
     }
@@ -328,7 +331,7 @@
         if (!mc) return;
         mc.status = 'kept';
         currentCtx.api.post('/merge-candidates', mc).then(function() {
-          toast('已标记保留两者', 'success');
+          toast(t('storyM2KeepBothSuccess'), 'success');
           loadData(function() { renderTabContent(contentEl.parentElement); });
         });
       });
@@ -342,7 +345,7 @@
         var cardA = cardsCache.find(function(c) { return c.id === mc.cardAId; });
         var cardB = cardsCache.find(function(c) { return c.id === mc.cardBId; });
         if (!cardA || !cardB) {
-          toast('找不到对应的卡片', 'error');
+          toast(t('storyM2CardNotFound'), 'error');
           return;
         }
         // Merge B aliases into A
@@ -360,10 +363,10 @@
           mc.status = 'merged';
           return currentCtx.api.post('/merge-candidates', mc);
         }).then(function() {
-          toast('合并成功', 'success');
+          toast(t('storyM2MergeSuccess'), 'success');
           loadData(function() { renderTabContent(contentEl.parentElement); });
         }).catch(function(err) {
-          toast('合并失败: ' + err.message, 'error');
+          toast(t('storyM2MergeFail') + ': ' + err.message, 'error');
         });
       });
     });
@@ -376,44 +379,44 @@
     overlay.innerHTML = '' +
       '<div class="modal-card" style="width:680px;max-width:95vw;">' +
         '<div class="modal-header">' +
-          '<div class="modal-title">🔍 从章节中提取设定实体</div>' +
+          '<div class="modal-title">' + escapeHtml(t('storyM2ExtractModalTitle')) + '</div>' +
           '<button class="modal-close-btn">&times;</button>' +
         '</div>' +
         '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;max-height:75vh;overflow-y:auto;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<span class="sm-field-label">提取模型：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storySelectModel')) + ':</span>' +
             '<button type="button" class="sm-model-btn" id="sm-extract-model-btn">' +
               '<span>🤖</span><span id="sm-extract-model-label">' + escapeHtml(textModel.label) + '</span>' +
             '</button>' +
           '</div>' +
           '<div class="sm-field">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-              '<span class="sm-field-label">选择要提取的章节：</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2ExtractSelectChapters')) + '</span>' +
               '<div style="display:flex;gap:8px;">' +
-                '<button type="button" class="btn btn-ghost btn-sm" id="sm-ch-select-all">全选</button>' +
-                '<button type="button" class="btn btn-ghost btn-sm" id="sm-ch-select-none">清空</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" id="sm-ch-select-all">' + escapeHtml(t('selectAll')) + '</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" id="sm-ch-select-none">' + escapeHtml(t('deselectAll')) + '</button>' +
               '</div>' +
             '</div>' +
             '<div id="sm-extract-ch-list" style="max-height:160px;overflow-y:auto;border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px;display:flex;flex-direction:column;gap:4px;">' +
-              '<span style="color:var(--text-secondary);font-size:12px;">加载章节中...</span>' +
+              '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM2ChaptersLoading')) + '</span>' +
             '</div>' +
           '</div>' +
           '<div class="sm-field" id="sm-extract-progress-wrap" style="display:none;">' +
-            '<span class="sm-field-label">提取进度：<span id="sm-extract-progress-text">0 / 0</span></span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2Progress')) + '<span id="sm-extract-progress-text">0 / 0</span></span>' +
             '<div style="height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">' +
               '<div id="sm-extract-progress-bar" style="width:0%;height:100%;background:var(--accent);transition:width 0.2s ease;"></div>' +
             '</div>' +
           '</div>' +
           '<div class="sm-field">' +
-            '<span class="sm-field-label">提取结果预览：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2Preview')) + '</span>' +
             '<div id="sm-extract-results" style="min-height:120px;max-height:220px;overflow-y:auto;border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:10px;font-size:12px;display:flex;flex-direction:column;gap:6px;">' +
-              '<span style="color:var(--text-secondary);">尚未开始提取。</span>' +
+              '<span style="color:var(--text-secondary);">' + escapeHtml(t('storyM2NotStarted')) + '</span>' +
             '</div>' +
           '</div>' +
         '</div>' +
         '<div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;">' +
-          '<button class="btn btn-ghost" type="button" id="sm-extract-cancel">取消</button>' +
-          '<button class="btn btn-primary" type="button" id="sm-extract-start">开始提取</button>' +
+          '<button class="btn btn-ghost" type="button" id="sm-extract-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-primary" type="button" id="sm-extract-start">' + escapeHtml(t('storyM2ExtractBtn')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -440,15 +443,16 @@
       var chapters = (res && res.chapters) || [];
       var chListEl = overlay.querySelector('#sm-extract-ch-list');
       if (chapters.length === 0) {
-        chListEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">本书尚无章节。请先在 M4 生成或在书库导入章节。</span>';
+        chListEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM2ExtractNoChapters')) + '</span>';
         return;
       }
       var chHtml = '';
       for (var i = 0; i < chapters.length; i++) {
         var ch = chapters[i];
+        var chPrefix = (typeof getLang === 'function' && getLang() === 'en') ? ('Chapter ' + ch.Index + ': ') : ('第 ' + ch.Index + ' 章 ');
         chHtml += '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">' +
           '<input type="checkbox" class="sm-ch-cb" value="' + escapeHtml(ch.id) + '"> ' +
-          '<span>第 ' + ch.Index + ' 章 ' + escapeHtml(ch.Title) + '</span>' +
+          '<span>' + chPrefix + escapeHtml(ch.Title) + '</span>' +
         '</label>';
       }
       chListEl.innerHTML = chHtml;
@@ -463,7 +467,7 @@
 
     overlay.querySelector('#sm-extract-start').addEventListener('click', function() {
       if (!textModel.value) {
-        toast('请先选择提取模型', 'warning');
+        toast(t('trModelRequired'), 'warning');
         return;
       }
       var selectedChIds = [];
@@ -471,7 +475,7 @@
         selectedChIds.push(cb.value);
       });
       if (selectedChIds.length === 0) {
-        toast('请选择至少一个章节', 'warning');
+        toast(t('storyM2ExtractSelectChapterWarning'), 'warning');
         return;
       }
 
@@ -485,7 +489,7 @@
       progressWrap.style.display = 'flex';
       resultsEl.innerHTML = '';
       startBtn.disabled = true;
-      startBtn.textContent = '提取中...';
+      startBtn.textContent = t('storyM2ExtractLoading');
 
       var total = selectedChIds.length;
       var newCardsCount = 0;
@@ -519,18 +523,19 @@
         }
       }, function() {
         startBtn.disabled = false;
-        startBtn.textContent = '开始提取';
-        toast('提取完成，新增 ' + newCardsCount + ' 张卡片', 'success');
+        startBtn.textContent = t('storyM2ExtractBtn');
+        toast(t('storyM2ExtractDone', [newCardsCount]), 'success');
         loadData(function() {
           var container = document.getElementById('sm-main-content');
           if (container) drawUI(container);
         });
       }, function(err) {
         startBtn.disabled = false;
-        startBtn.textContent = '开始提取';
-        toast('提取失败: ' + err.message, 'error');
+        startBtn.textContent = t('storyM2ExtractBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
+  }
   }
 
   // --- CardEditorModal (Create / Edit / AI Enrich) ---
@@ -552,84 +557,84 @@
     overlay.innerHTML = '' +
       '<div class="sm-drawer">' +
         '<div class="sm-drawer-header">' +
-          '<div class="modal-title">' + (card.id ? '编辑设定卡片' : '新建设定卡片') + '</div>' +
+          '<div class="modal-title">' + (card.id ? escapeHtml(t('storyM2CardEditModalTitle')) : escapeHtml(t('storyM2CardNewModalTitle'))) + '</div>' +
           '<button class="modal-close-btn">&times;</button>' +
         '</div>' +
         '<div class="sm-drawer-body">' +
           // AI Assistant Panel
           '<details class="sm-prompt-details" open>' +
-            '<summary class="sm-prompt-summary">✨ AI 创作 / 扩写助手</summary>' +
+            '<summary class="sm-prompt-summary">✨ ' + escapeHtml(t('storyM2AiHelper')) + '</summary>' +
             '<div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">' +
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                '<span class="sm-field-label">AI 模型：</span>' +
+                '<span class="sm-field-label">' + escapeHtml(t('storySelectModel')) + ':</span>' +
                 '<button type="button" class="sm-model-btn" id="sm-card-ai-model-btn">' +
                   '<span>🤖</span><span id="sm-card-ai-model-label">' + escapeHtml(textModel.label) + '</span>' +
                 '</button>' +
               '</div>' +
               '<div style="display:flex;gap:10px;align-items:center;">' +
                 '<label style="font-size:12px;display:flex;align-items:center;gap:4px;">' +
-                  '<input type="radio" name="sm-card-ai-mode" value="create"' + (!card.id ? ' checked' : '') + '> 从零创作' +
+                  '<input type="radio" name="sm-card-ai-mode" value="create"' + (!card.id ? ' checked' : '') + '> ' + escapeHtml(t('storyM2AiFromScratch')) +
                 '</label>' +
                 '<label style="font-size:12px;display:flex;align-items:center;gap:4px;">' +
-                  '<input type="radio" name="sm-card-ai-mode" value="enrich"' + (card.id ? ' checked' : '') + '> 丰富扩写' +
+                  '<input type="radio" name="sm-card-ai-mode" value="enrich"' + (card.id ? ' checked' : '') + '> ' + escapeHtml(t('storyM2AiEnrich')) +
                 '</label>' +
               '</div>' +
-              '<input type="text" class="input" id="sm-card-ai-inst" placeholder="创作灵感、要求或扩写侧重点 (留空则自由发挥)...">' +
-              '<button type="button" class="btn btn-ghost btn-sm" id="sm-card-ai-gen-btn">🪄 生成设定并回填</button>' +
+              '<input type="text" class="input" id="sm-card-ai-inst" placeholder="' + escapeAttr(t('storyM2AiInstPlaceholder')) + '">' +
+              '<button type="button" class="btn btn-ghost btn-sm" id="sm-card-ai-gen-btn">' + escapeHtml(t('storyM2AiGenBtn')) + '</button>' +
             '</div>' +
           '</details>' +
 
           // Basic fields
           '<div class="sm-form-grid">' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">名称 *</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2CardNameLabel')) + '</span>' +
               '<input type="text" class="input" id="sm-card-name" value="' + escapeHtml(card.name) + '">' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">类型 *</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2CardTypeLabel')) + '</span>' +
               '<select class="select" id="sm-card-type">' +
-                '<option value="character"' + (card.type === 'character' ? ' selected' : '') + '>人物 (Character)</option>' +
-                '<option value="location"' + (card.type === 'location' ? ' selected' : '') + '>地点 (Location)</option>' +
-                '<option value="item"' + (card.type === 'item' ? ' selected' : '') + '>物品 (Item)</option>' +
-                '<option value="skill"' + (card.type === 'skill' ? ' selected' : '') + '>技能 (Skill)</option>' +
-                '<option value="faction"' + (card.type === 'faction' ? ' selected' : '') + '>势力 (Faction)</option>' +
+                '<option value="character"' + (card.type === 'character' ? ' selected' : '') + '>' + escapeHtml(t('storyCardCharacter')) + '</option>' +
+                '<option value="location"' + (card.type === 'location' ? ' selected' : '') + '>' + escapeHtml(t('storyCardLocation')) + '</option>' +
+                '<option value="item"' + (card.type === 'item' ? ' selected' : '') + '>' + escapeHtml(t('storyCardItem')) + '</option>' +
+                '<option value="skill"' + (card.type === 'skill' ? ' selected' : '') + '>' + escapeHtml(t('storyCardSkill')) + '</option>' +
+                '<option value="faction"' + (card.type === 'faction' ? ' selected' : '') + '>' + escapeHtml(t('storyCardFaction')) + '</option>' +
               '</select>' +
             '</div>' +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">别名 (多个别名以逗号隔开)</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2CardAliasesLabel')) + '</span>' +
             '<input type="text" class="input" id="sm-card-aliases" value="' + escapeHtml((card.aliases || []).join(', ')) + '">' +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">设定描述</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2CardDescLabel')) + '</span>' +
             '<textarea class="sm-textarea" id="sm-card-desc" rows="4">' + escapeHtml(card.description || '') + '</textarea>' +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">语言风格 / 语气特征</span>' +
-            '<input type="text" class="input" id="sm-card-style-note" placeholder="例如：毒舌傲娇，常用反问句，口头禅是..." value="' + escapeHtml(card.styleNote || '') + '">' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2CardStyleNoteLabel')) + '</span>' +
+            '<input type="text" class="input" id="sm-card-style-note" placeholder="' + escapeAttr(t('storyM2CardStyleNotePlaceholder')) + '" value="' + escapeHtml(card.styleNote || '') + '">' +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">台词示例 (每行一句)</span>' +
-            '<textarea class="sm-textarea" id="sm-card-style-examples" rows="2" placeholder="输入典型台词...">' + escapeHtml((card.styleExamples || []).join('\n')) + '</textarea>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2CardStyleExamplesLabel')) + '</span>' +
+            '<textarea class="sm-textarea" id="sm-card-style-examples" rows="2" placeholder="' + escapeAttr(t('storyM2CardStyleExamplesPlaceholder')) + '">' + escapeHtml((card.styleExamples || []).join('\n')) + '</textarea>' +
           '</div>' +
 
           // Custom key-value fields
           '<div class="sm-field">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-              '<span class="sm-field-label">扩展属性 (键值对)</span>' +
-              '<button type="button" class="btn btn-ghost btn-sm" id="sm-card-add-field">＋ 添加属性</button>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2CardFieldsLabel')) + '</span>' +
+              '<button type="button" class="btn btn-ghost btn-sm" id="sm-card-add-field">' + escapeHtml(t('storyM2CardAddFieldBtn')) + '</button>' +
             '</div>' +
             '<div id="sm-card-fields-wrap" style="display:flex;flex-direction:column;gap:6px;"></div>' +
           '</div>' +
         '</div>' +
 
         '<div class="sm-drawer-footer">' +
-          '<button class="btn btn-ghost" type="button" id="sm-card-cancel">取消</button>' +
-          '<button class="btn btn-primary" type="button" id="sm-card-save">保存设定卡片</button>' +
+          '<button class="btn btn-ghost" type="button" id="sm-card-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-primary" type="button" id="sm-card-save">' + escapeHtml(t('storyM2CardSaveBtn')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -651,7 +656,7 @@
       fieldsWrap.innerHTML = '';
       var keys = Object.keys(card.fields || {});
       if (keys.length === 0) {
-        fieldsWrap.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">暂无扩展属性。</span>';
+        fieldsWrap.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM2CardNoFields')) + '</span>';
         return;
       }
       keys.forEach(function(k) {
@@ -659,8 +664,8 @@
         row.style.display = 'flex';
         row.style.gap = '8px';
         row.innerHTML = '' +
-          '<input type="text" class="input sm-field-k" style="width:120px;" placeholder="键名" value="' + escapeHtml(k) + '">' +
-          '<input type="text" class="input sm-field-v" style="flex:1;" placeholder="属性值" value="' + escapeHtml(card.fields[k] || '') + '">' +
+          '<input type="text" class="input sm-field-k" style="width:120px;" placeholder="' + escapeAttr(t('storyM2CardFieldKeyPlaceholder')) + '" value="' + escapeHtml(k) + '">' +
+          '<input type="text" class="input sm-field-v" style="flex:1;" placeholder="' + escapeAttr(t('storyM2CardFieldValPlaceholder')) + '" value="' + escapeHtml(card.fields[k] || '') + '">' +
           '<button type="button" class="btn btn-danger btn-sm sm-field-del">&times;</button>';
         row.querySelector('.sm-field-del').addEventListener('click', function() {
           delete card.fields[k];
@@ -683,14 +688,14 @@
     overlay.querySelector('#sm-card-add-field').addEventListener('click', function() {
       if (!card.fields) card.fields = {};
       var count = Object.keys(card.fields).length + 1;
-      card.fields['属性' + count] = '';
+      card.fields['attr_' + count] = '';
       renderFields();
     });
 
     // AI Generate Card
     overlay.querySelector('#sm-card-ai-gen-btn').addEventListener('click', function() {
       if (!textModel.value) {
-        toast('请先选择 AI 模型', 'warning');
+        toast(t('trModelRequired'), 'warning');
         return;
       }
       var mode = overlay.querySelector('input[name="sm-card-ai-mode"]:checked')?.value || 'create';
@@ -699,7 +704,7 @@
 
       var genBtn = overlay.querySelector('#sm-card-ai-gen-btn');
       genBtn.disabled = true;
-      genBtn.textContent = '生成中...';
+      genBtn.textContent = t('storyM2AiGenLoading');
 
       var existingCardStr = '';
       if (mode === 'enrich') {
@@ -715,10 +720,10 @@
         existingCard: existingCardStr
       }).then(function(res) {
         genBtn.disabled = false;
-        genBtn.textContent = '🪄 生成设定并回填';
+        genBtn.textContent = t('storyM2AiGenBtn');
         var generated = res && res.card;
         if (!generated) {
-          toast('生成结果为空', 'error');
+          toast(t('storyM2AiGenEmpty'), 'error');
           return;
         }
         if (generated.name) overlay.querySelector('#sm-card-name').value = generated.name;
@@ -734,11 +739,11 @@
           card.fields = Object.assign({}, card.fields, generated.fields);
           renderFields();
         }
-        toast('AI 生成完毕并已回填', 'success');
+        toast(t('storyM2AiGenDone'), 'success');
       }).catch(function(err) {
         genBtn.disabled = false;
-        genBtn.textContent = '🪄 生成设定并回填';
-        toast('AI 生成失败: ' + err.message, 'error');
+        genBtn.textContent = t('storyM2AiGenBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
@@ -746,7 +751,7 @@
     overlay.querySelector('#sm-card-save').addEventListener('click', function() {
       var name = overlay.querySelector('#sm-card-name').value.trim();
       if (!name) {
-        toast('请输入卡片名称', 'warning');
+        toast(t('storyM2CardInputNameWarning'), 'warning');
         return;
       }
       card.name = name;
@@ -759,14 +764,14 @@
       card.styleExamples = examplesStr ? examplesStr.split('\n').filter(Boolean) : [];
 
       currentCtx.api.post('/cards', card).then(function(saved) {
-        toast('设定卡片保存成功', 'success');
+        toast(t('storyM2CardSaved'), 'success');
         close();
         loadData(function() {
           var container = document.getElementById('sm-main-content');
           if (container) drawUI(container);
         });
       }).catch(function(err) {
-        toast('保存失败: ' + err.message, 'error');
+        toast(t('storySaveFail') + ': ' + err.message, 'error');
       });
     });
   }
@@ -778,45 +783,45 @@
     overlay.innerHTML = '' +
       '<div class="modal-card" style="width:600px;max-width:95vw;">' +
         '<div class="modal-header">' +
-          '<div class="modal-title">⚡ 批量生成设定卡片</div>' +
+          '<div class="modal-title">' + escapeHtml(t('storyM2BatchModalTitle')) + '</div>' +
           '<button class="modal-close-btn">&times;</button>' +
         '</div>' +
         '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<span class="sm-field-label">AI 模型：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storySelectModel')) + ':</span>' +
             '<button type="button" class="sm-model-btn" id="sm-batch-model-btn">' +
               '<span>🤖</span><span id="sm-batch-model-label">' + escapeHtml(textModel.label) + '</span>' +
             '</button>' +
           '</div>' +
           '<div class="sm-form-grid">' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">实体类型</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2CardTypeLabel')) + '</span>' +
               '<select class="select" id="sm-batch-type">' +
-                '<option value="character">人物 (Character)</option>' +
-                '<option value="location">地点 (Location)</option>' +
-                '<option value="item">物品 (Item)</option>' +
-                '<option value="skill">技能 (Skill)</option>' +
-                '<option value="faction">势力 (Faction)</option>' +
+                '<option value="character">' + escapeHtml(t('storyCardCharacter')) + '</option>' +
+                '<option value="location">' + escapeHtml(t('storyCardLocation')) + '</option>' +
+                '<option value="item">' + escapeHtml(t('storyCardItem')) + '</option>' +
+                '<option value="skill">' + escapeHtml(t('storyCardSkill')) + '</option>' +
+                '<option value="faction">' + escapeHtml(t('storyCardFaction')) + '</option>' +
               '</select>' +
             '</div>' +
             '<div class="sm-field">' +
-              '<span class="sm-field-label">生成数量</span>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2BatchCountLabel')) + '</span>' +
               '<div style="width:120px;">' + renderStepperHtml('sm-batch-count', 3, 1, 8) + '</div>' +
             '</div>' +
           '</div>' +
           '<div class="sm-field">' +
-            '<span class="sm-field-label">总体要求 / 主题</span>' +
-            '<textarea class="sm-textarea" id="sm-batch-inst" rows="3" placeholder="例如：生成反派阵营的核心骨干成员，性格各异且各怀鬼胎..."></textarea>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2BatchThemeLabel')) + '</span>' +
+            '<textarea class="sm-textarea" id="sm-batch-inst" rows="3" placeholder="' + escapeAttr(t('storyM2BatchThemePlaceholder')) + '"></textarea>' +
           '</div>' +
           '<div id="sm-batch-profiles-wrap" style="display:none;flex-direction:column;gap:8px;">' +
-            '<span class="sm-field-label">生成的角色侧写：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2BatchProfilesLabel')) + '</span>' +
             '<div id="sm-batch-profiles-list" style="max-height:180px;overflow-y:auto;border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px;display:flex;flex-direction:column;gap:6px;"></div>' +
           '</div>' +
         '</div>' +
         '<div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;">' +
-          '<button class="btn btn-ghost" type="button" id="sm-batch-cancel">取消</button>' +
-          '<button class="btn btn-ghost" type="button" id="sm-batch-step1">步骤 1: 生成侧写</button>' +
-          '<button class="btn btn-primary" type="button" id="sm-batch-step2" style="display:none;">步骤 2: 批量生成并入库</button>' +
+          '<button class="btn btn-ghost" type="button" id="sm-batch-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+          '<button class="btn btn-ghost" type="button" id="sm-batch-step1">' + escapeHtml(t('storyM2BatchStep1Btn')) + '</button>' +
+          '<button class="btn btn-primary" type="button" id="sm-batch-step2" style="display:none;">' + escapeHtml(t('storyM2BatchStep2Btn')) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -836,7 +841,7 @@
 
     overlay.querySelector('#sm-batch-step1').addEventListener('click', function() {
       if (!textModel.value) {
-        toast('请先选择模型', 'warning');
+        toast(t('trModelRequired'), 'warning');
         return;
       }
       var type = overlay.querySelector('#sm-batch-type').value;
@@ -845,7 +850,7 @@
 
       var s1Btn = overlay.querySelector('#sm-batch-step1');
       s1Btn.disabled = true;
-      s1Btn.textContent = '侧写生成中...';
+      s1Btn.textContent = t('storyM2BatchStep1Loading');
 
       currentCtx.api.post('/card-profiles', {
         model: textModel.value,
@@ -854,10 +859,10 @@
         instruction: instruction
       }).then(function(res) {
         s1Btn.disabled = false;
-        s1Btn.textContent = '重新生成侧写';
+        s1Btn.textContent = t('storyM2BatchStep1Regen');
         profilesCache = (res && res.profiles) || [];
         if (profilesCache.length === 0) {
-          toast('未生成侧写', 'warning');
+          toast(t('storyM2BatchEmpty'), 'warning');
           return;
         }
 
@@ -876,11 +881,11 @@
           '</div>';
         }
         list.innerHTML = pRows;
-        toast('侧写生成成功，请确认后点击步骤 2', 'success');
+        toast(t('storyM2BatchStep1Success'), 'success');
       }).catch(function(err) {
         s1Btn.disabled = false;
-        s1Btn.textContent = '步骤 1: 生成侧写';
-        toast('生成侧写失败: ' + err.message, 'error');
+        s1Btn.textContent = t('storyM2BatchStep1Btn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
@@ -889,7 +894,7 @@
       var instruction = overlay.querySelector('#sm-batch-inst').value.trim();
       var s2Btn = overlay.querySelector('#sm-batch-step2');
       s2Btn.disabled = true;
-      s2Btn.textContent = '批量生成中...';
+      s2Btn.textContent = t('storyM2BatchStep2Loading');
 
       currentCtx.api.post('/generate-cards-batch', {
         model: textModel.value,
@@ -899,7 +904,7 @@
       }).then(function(res) {
         var cards = (res && res.cards) || [];
         if (cards.length === 0) {
-          toast('批量生成卡片为空', 'warning');
+          toast(t('storyM2BatchEmpty'), 'warning');
           s2Btn.disabled = false;
           return;
         }
@@ -911,7 +916,7 @@
         });
         return Promise.all(savePromises);
       }).then(function() {
-        toast('批量生成并入库成功！', 'success');
+        toast(t('storyM2BatchDone'), 'success');
         close();
         loadData(function() {
           var container = document.getElementById('sm-main-content');
@@ -919,8 +924,8 @@
         });
       }).catch(function(err) {
         s2Btn.disabled = false;
-        s2Btn.textContent = '步骤 2: 批量生成并入库';
-        toast('批量生成失败: ' + err.message, 'error');
+        s2Btn.textContent = t('storyM2BatchStep2Btn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
   }
@@ -932,12 +937,12 @@
     overlay.innerHTML = '' +
       '<div class="modal-card" style="width:620px;max-width:95vw;">' +
         '<div class="modal-header">' +
-          '<div class="modal-title">🎨 为【' + escapeHtml(card.name) + '】生成形象插图</div>' +
+          '<div class="modal-title">' + escapeHtml(t('storyM2ImageModalTitle', [card.name])) + '</div>' +
           '<button class="modal-close-btn">&times;</button>' +
         '</div>' +
         '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-            '<span class="sm-field-label">生图模型：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storySelectImageModel')) + ':</span>' +
             '<button type="button" class="sm-model-btn" id="sm-img-model-btn">' +
               '<span>🖼️</span><span id="sm-img-model-label">' + escapeHtml(imageModel.label) + '</span>' +
             '</button>' +
@@ -945,40 +950,40 @@
 
           '<div class="sm-field">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-              '<span class="sm-field-label">生图意图 / 构图偏好：</span>' +
-              '<button type="button" class="btn btn-ghost btn-sm" id="sm-img-gen-prompts">🪄 智能推导提示词</button>' +
+              '<span class="sm-field-label">' + escapeHtml(t('storyM2ImageIntentLabel')) + '</span>' +
+              '<button type="button" class="btn btn-ghost btn-sm" id="sm-img-gen-prompts">' + escapeHtml(t('storyM2ImagePromptGenBtn')) + '</button>' +
             '</div>' +
-            '<input type="text" class="input" id="sm-img-intent" value="高精细全身立绘，电影级光影，唯美插画风格">' +
+            '<input type="text" class="input" id="sm-img-intent" value="' + escapeAttr(t('storyM2ImageIntentDefault')) + '">' +
           '</div>' +
 
           '<div id="sm-img-prompt-candidates" style="display:none;flex-direction:column;gap:6px;">' +
-            '<span class="sm-field-label">推导提示词建议 (点击选用)：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2ImageSuggestionsLabel')) + '</span>' +
             '<div id="sm-img-prompts-list" style="display:flex;flex-direction:column;gap:6px;"></div>' +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">最终生图提示词 (Prompt)：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2ImageFinalPromptLabel')) + '</span>' +
             '<textarea class="sm-textarea" id="sm-img-final-prompt" rows="3"></textarea>' +
           '</div>' +
 
           '<div class="sm-field" style="width:140px;">' +
-            '<span class="sm-field-label">生成张数：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2ImageCountLabel')) + '</span>' +
             renderStepperHtml('sm-img-count', 1, 1, 4) +
           '</div>' +
 
           '<div class="sm-field">' +
-            '<span class="sm-field-label">已有图库 (' + ((card.images && card.images.length) || 0) + ' 张)：</span>' +
+            '<span class="sm-field-label">' + escapeHtml(t('storyM2ImageExistingLabel', [((card.images && card.images.length) || 0)])) + '</span>' +
             '<div id="sm-img-gallery" style="display:flex;gap:10px;overflow-x:auto;padding:8px;border:1px solid var(--glass-border);border-radius:var(--radius-md);min-height:90px;align-items:center;">' +
-              ((card.images && card.images.length) ? '' : '<span style="color:var(--text-secondary);font-size:12px;">暂无图片</span>') +
+              ((card.images && card.images.length) ? '' : '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM2ImageNoExisting')) + '</span>') +
             '</div>' +
           '</div>' +
         '</div>' +
 
         '<div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">' +
-          '<button class="btn btn-ghost btn-sm" type="button" id="sm-img-manual-add">🔗 手动添加图片 URL</button>' +
+          '<button class="btn btn-ghost btn-sm" type="button" id="sm-img-manual-add">' + escapeHtml(t('storyM2ImageAddUrlBtn')) + '</button>' +
           '<div style="display:flex;gap:10px;">' +
-            '<button class="btn btn-ghost" type="button" id="sm-img-cancel">关闭</button>' +
-            '<button class="btn btn-primary" type="button" id="sm-img-start-task">🚀 提交生图任务</button>' +
+            '<button class="btn btn-ghost" type="button" id="sm-img-cancel">' + escapeHtml(t('close')) + '</button>' +
+            '<button class="btn btn-primary" type="button" id="sm-img-start-task">' + escapeHtml(t('storyM2ImageStartBtn')) + '</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -999,7 +1004,7 @@
     var galleryEl = overlay.querySelector('#sm-img-gallery');
     function renderGallery() {
       if (!card.images || card.images.length === 0) {
-        galleryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">暂无图片</span>';
+        galleryEl.innerHTML = '<span style="color:var(--text-secondary);font-size:12px;">' + escapeHtml(t('storyM2ImageNoExisting')) + '</span>';
         return;
       }
       var gHtml = '';
@@ -1033,13 +1038,13 @@
     // AI derive image prompts
     overlay.querySelector('#sm-img-gen-prompts').addEventListener('click', function() {
       if (!textModel.value) {
-        toast('请在提取或卡片助手中先选定一个文本模型用于推导提示词', 'warning');
+        toast(t('storyM2InferPromptTextModelWarning'), 'warning');
         return;
       }
       var intent = overlay.querySelector('#sm-img-intent').value.trim();
       var pBtn = overlay.querySelector('#sm-img-gen-prompts');
       pBtn.disabled = true;
-      pBtn.textContent = '推导中...';
+      pBtn.textContent = t('storyM2ImagePromptInferring');
 
       currentCtx.api.post('/card-image-prompts', {
         model: textModel.value,
@@ -1048,10 +1053,10 @@
         count: 3
       }).then(function(res) {
         pBtn.disabled = false;
-        pBtn.textContent = '🪄 智能推导提示词';
+        pBtn.textContent = t('storyM2ImagePromptGenBtn');
         var prompts = (res && res.prompts) || [];
         if (prompts.length === 0) {
-          toast('推导结果为空', 'warning');
+          toast(t('storyM2InferPromptEmpty'), 'warning');
           return;
         }
         var candWrap = overlay.querySelector('#sm-img-prompt-candidates');
@@ -1061,7 +1066,7 @@
         for (var i = 0; i < prompts.length; i++) {
           var p = prompts[i];
           html += '<button type="button" class="btn btn-ghost btn-sm sm-img-pick-p" style="text-align:left;white-space:normal;height:auto;padding:6px 10px;" data-p="' + escapeHtml(p.prompt) + '">' +
-            '<strong>[' + escapeHtml(p.label || '候选') + ']</strong> ' + escapeHtml(p.prompt) +
+            '<strong>[' + escapeHtml(p.label || 'Candidate') + ']</strong> ' + escapeHtml(p.prompt) +
           '</button>';
         }
         candList.innerHTML = html;
@@ -1072,14 +1077,14 @@
         });
       }).catch(function(err) {
         pBtn.disabled = false;
-        pBtn.textContent = '🪄 智能推导提示词';
-        toast('推导失败: ' + err.message, 'error');
+        pBtn.textContent = t('storyM2ImagePromptGenBtn');
+        toast(t('failed') + ': ' + err.message, 'error');
       });
     });
 
     // Manual add URL
     overlay.querySelector('#sm-img-manual-add').addEventListener('click', function() {
-      var url = prompt('请输入外部图片 URL：');
+      var url = prompt(t('storyM2ImagePromptUrlTitle'));
       if (url && url.trim()) {
         if (!card.images) card.images = [];
         card.images.push({
@@ -1089,11 +1094,11 @@
           createdAt: new Date().toISOString()
         });
         currentCtx.api.post('/cards', card).then(function() {
-          toast('图片已添加', 'success');
+          toast(t('storyM2ImageAddedSuccess'), 'success');
           renderGallery();
           var container = document.getElementById('sm-main-content');
           if (container) drawUI(container);
-        }).catch(function(e) { toast('保存失败: ' + e.message, 'error'); });
+        }).catch(function(e) { toast(t('storySaveFail') + ': ' + e.message, 'error'); });
       }
     });
 
@@ -1101,18 +1106,18 @@
     overlay.querySelector('#sm-img-start-task').addEventListener('click', function() {
       var promptText = overlay.querySelector('#sm-img-final-prompt').value.trim();
       if (!promptText) {
-        toast('请输入生图提示词', 'warning');
+        toast(t('storyM2ImageInputPromptWarning'), 'warning');
         return;
       }
       if (!imageModel.value) {
-        toast('请选择生图模型', 'warning');
+        toast(t('storyM2ImageSelectModelWarning'), 'warning');
         return;
       }
       var count = parseInt(overlay.querySelector('#sm-img-count')?.value || '1', 10);
 
       var btn = overlay.querySelector('#sm-img-start-task');
       btn.disabled = true;
-      btn.textContent = '提交任务中...';
+      btn.textContent = t('storyM2ImageSubmitting');
 
       if (typeof pgTaskEnqueue === 'function') {
         try {
@@ -1122,13 +1127,13 @@
             model: imageModel.value,
             params: { imgSubmitCount: count }
           });
-          toast('生图任务已提交至后台 Playground 生成队列', 'success');
+          toast(t('storyM2ImageTaskEnqueued'), 'success');
           btn.disabled = false;
-          btn.textContent = '🚀 提交生图任务';
+          btn.textContent = t('storyM2ImageStartBtn');
         } catch (e) {
           btn.disabled = false;
-          btn.textContent = '🚀 提交生图任务';
-          toast('调用 pgTaskEnqueue 失败: ' + e.message, 'error');
+          btn.textContent = t('storyM2ImageStartBtn');
+          toast(t('failed') + ': ' + e.message, 'error');
         }
       } else {
         // Fallback: direct call
@@ -1142,7 +1147,7 @@
           })
         }).then(function(resp) { return resp.json(); }).then(function(data) {
           btn.disabled = false;
-          btn.textContent = '🚀 提交生图任务';
+          btn.textContent = t('storyM2ImageStartBtn');
           var urls = (data && data.data) || [];
           if (urls.length > 0) {
             if (!card.images) card.images = [];
@@ -1157,21 +1162,22 @@
               }
             }
             return currentCtx.api.post('/cards', card).then(function() {
-              toast('生图完成并挂载至卡片', 'success');
+              toast(t('storyM2ImageDoneAttached'), 'success');
               renderGallery();
               var container = document.getElementById('sm-main-content');
               if (container) drawUI(container);
             });
           } else {
-            toast('未生成有效图片数据', 'warning');
+            toast(t('storyM2NoValidImageData'), 'warning');
           }
         }).catch(function(err) {
           btn.disabled = false;
-          btn.textContent = '🚀 提交生图任务';
-          toast('生图请求失败: ' + err.message, 'error');
+          btn.textContent = t('storyM2ImageStartBtn');
+          toast(t('failed') + ': ' + err.message, 'error');
         });
       }
     });
+  }
   }
 
   // Lifecycle
