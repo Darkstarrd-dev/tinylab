@@ -90,6 +90,67 @@ function formatLatency(ms) {
   return (ms / 1000).toFixed(1) + 's';
 }
 
+// formatTTFT renders seconds.tenths with zero-padded seconds ("04.2", 4
+// chars). Fixed-width so the Recent TTFT column never reflows while ticking.
+function formatTTFT(ms) {
+  if (ms == null || isNaN(ms) || ms < 0) return '—';
+  var totalSeconds = ms / 1000;
+  var sec = Math.floor(totalSeconds);
+  var tenth = Math.floor((totalSeconds - sec) * 10);
+  return (sec < 10 ? '0' : '') + sec + '.' + tenth;
+}
+
+// formatGenTime renders MM:SS.d (minutes:seconds.tenths, e.g. "05:55.0", 7
+// chars). Fixed-width so the Recent GT column never reflows while ticking;
+// minutes are the largest unit (no hours branch — streams past 10m render
+// ">10m" via the tick cap).
+function formatGenTime(ms) {
+  if (ms == null || isNaN(ms) || ms < 0) return '—';
+  var totalSeconds = ms / 1000;
+  var minutes = Math.floor(totalSeconds / 60);
+  var sec = Math.floor(totalSeconds % 60);
+  var tenth = Math.floor((totalSeconds - Math.floor(totalSeconds)) * 10);
+  return (minutes < 10 ? '0' : '') + minutes + ':' +
+    (sec < 10 ? '0' : '') + sec + '.' + tenth;
+}
+
+// formatGenSpeed renders tokens/sec with 1 decimal, matching the quota
+// table formatAvgSpeed convention. GT below 0.2s or zero output returns
+// '—' to avoid divide-by-zero jitter on the first tick.
+function formatGenSpeed(outTokens, genMs) {
+  if (!outTokens || outTokens <= 0 || !genMs || genMs < 200) return '—';
+  return (outTokens / (genMs / 1000)).toFixed(1) + ' tok/s';
+}
+
+// shortKeyName strips the default "Key-" prefix for the compact Key column
+// (Key-1 -> 1). Custom names (Key Main, K1) pass through unchanged; the
+// full name stays available via the cell data-tooltip.
+function shortKeyName(name) {
+  if (!name) return '';
+  var m = String(name).match(/^[Kk]ey-(\d+)$/);
+  return m ? m[1] : String(name);
+}
+
+// findProviderPrefix resolves a usage entry's provider name (or providerId)
+// to its configured prefix via providersCache. Falls back to the full name
+// when the cache is not ready or the provider was renamed/removed, so the
+// Prov column never renders empty.
+function findProviderPrefix(entry) {
+  var full = entry && (entry.provider || '');
+  var pid = entry && (entry.providerId || '');
+  if (typeof providersCache !== 'undefined' && providersCache) {
+    for (var i = 0; i < providersCache.length; i++) {
+      var p = providersCache[i];
+      if ((pid && (p.id === pid || p.ID === pid)) ||
+          (full && (p.name === full || p.Name === full))) {
+        if (p.prefix || p.Prefix) return p.prefix || p.Prefix;
+        break;
+      }
+    }
+  }
+  return full;
+}
+
 function hasProcessingEntries() {
   return lastUsageEntries.some(function(e) { return e.status === 'processing'; });
 }
@@ -131,6 +192,10 @@ function autoFitMonitorTables() {
 
 function fitMonitorTable(table) {
   if (!table || !table.isConnected || !table.rows.length) return;
+  // Recent Requests ships an explicit <colgroup> with ch-locked widths;
+  // autofit must not touch it (percentage redistribution squeezes the
+  // fixed numeric columns and lets TIME/MODEL sprawl).
+  if (table.getAttribute('data-nofit') === '1') return;
   var measure = table.cloneNode(true);
   measure.removeAttribute('id');
   measure.querySelectorAll('[id]').forEach(function(el) { el.removeAttribute('id'); });
@@ -154,6 +219,11 @@ function fitMonitorTable(table) {
   }
   var widths = [];
   for (var c = 0; c < colCount; c++) widths[c] = 0;
+  // Fixed-width numeric columns (Recent TTFT/GT/IN/RES/CT/Spd, marked
+  // data-fixed on the header) keep their CSS ch widths: skip measuring so
+  // ticking values never trigger a whole-table reflow.
+  var fixed = [];
+  for (var fc = 0; fc < colCount; fc++) fixed[fc] = header && header.cells[fc] && header.cells[fc].getAttribute('data-fixed') === '1';
   var rows = measure.querySelectorAll('tr');
   for (var r = 0; r < rows.length; r++) {
     if (rows[r].style.display === 'none' || rows[r].hidden) continue;
@@ -162,7 +232,7 @@ function fitMonitorTable(table) {
     for (var j = 0; j < cells.length && column < colCount; j++) {
       var cell = cells[j];
       var span = cell.colSpan || 1;
-      if (span === 1) widths[column] = Math.max(widths[column], Math.ceil(cell.getBoundingClientRect().width));
+      if (span === 1 && !fixed[column]) widths[column] = Math.max(widths[column], Math.ceil(cell.getBoundingClientRect().width));
       column += span;
     }
   }
@@ -182,6 +252,7 @@ function fitMonitorTable(table) {
     table.style.width = '100%';
     table.style.minWidth = '100%';
     for (var k = 0; k < colCount; k++) {
+      if (fixed[k]) { colgroup.children[k].style.width = ''; continue; }
       var pct = (widths[k] / total * 100).toFixed(2) + '%';
       colgroup.children[k].style.width = pct;
     }
@@ -189,6 +260,7 @@ function fitMonitorTable(table) {
     table.style.width = total + 'px';
     table.style.minWidth = total + 'px';
     for (var k = 0; k < colCount; k++) {
+      if (fixed[k]) { colgroup.children[k].style.width = ''; continue; }
       colgroup.children[k].style.width = widths[k] + 'px';
     }
   }

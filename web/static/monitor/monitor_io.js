@@ -23,6 +23,20 @@ function mergeUsageEntries(apiEntries) {
       if (existing.__streamingReasoning) e.__streamingReasoning = existing.__streamingReasoning;
       if (existing.__streamingAssistant) e.__streamingAssistant = existing.__streamingAssistant;
       if (existing.__streamingUsage) e.__streamingUsage = existing.__streamingUsage;
+      // Monotonic guard: REST snapshots of a processing entry may carry
+      // older counters than the SSE-driven live values (ttft/tokens arrive
+      // via request-ttft/request-tokens between polls). Never regress a
+      // processing entry's live fields — GT anchoring and OUT/SPD would
+      // otherwise jump backwards on every refresh. Terminal entries bypass
+      // merge via handleRequestDone direct replace.
+      if (e.status === 'processing' && existing.status === 'processing') {
+        if ((existing.ttftMs || 0) > (e.ttftMs || 0)) e.ttftMs = existing.ttftMs;
+        if ((existing.inputTokens || 0) > (e.inputTokens || 0)) e.inputTokens = existing.inputTokens;
+        if ((existing.outputTokens || 0) > (e.outputTokens || 0)) e.outputTokens = existing.outputTokens;
+        if ((existing.reasoningTokens || 0) > (e.reasoningTokens || 0)) e.reasoningTokens = existing.reasoningTokens;
+        if ((existing.contentTokens || 0) > (e.contentTokens || 0)) e.contentTokens = existing.contentTokens;
+        if (existing.firstContentMs && !(e.firstContentMs)) e.firstContentMs = existing.firstContentMs;
+      }
     }
     if (e.id) seenIds[e.id] = true;
     merged.push(e);
@@ -319,8 +333,21 @@ function handleRequestTTFT(id, entry) {
   var row = document.querySelector('tr[data-id="' + sanitizeId(id) + '"]');
   if (row) {
     row.setAttribute('data-ttft', '1');
-    var cell = row.querySelector('.latency-cell');
-    if (cell) cell.textContent = formatLatency(ttftMs);
+    var cell = row.querySelector('.ttft-cell');
+    if (cell) cell.textContent = formatTTFT(ttftMs);
+    // Gen start anchors GT ticking: ts + ttft. Prefer the row's data-ts
+    // (authoritative request start) over Date.now() - ttft.
+    var tsAttr = row.getAttribute('data-ts');
+    var base = tsAttr ? new Date(tsAttr).getTime() : NaN;
+    if (isNaN(base)) base = Date.now() - ttftMs;
+    row.setAttribute('data-gen-start', String(base + ttftMs));
+    // Source tag lets request-tokens upgrade the anchor to the server
+    // first-content stamp when it arrives (more accurate than ts+ttft).
+    if (row.getAttribute('data-gen-src') !== 'fcm') {
+      row.setAttribute('data-gen-src', 'ttft');
+    }
+    var gtCell = row.querySelector('.gt-cell');
+    if (gtCell) gtCell.textContent = formatGenTime(0);
   }
 }
 
@@ -328,22 +355,68 @@ function handleRequestTokens(id, entry) {
   if (!id || !entry) return;
   var input = entry.inputTokens;
   var output = entry.outputTokens || 0;
+  var res = entry.reasoningTokens || 0;
+  var ct = entry.contentTokens || 0;
+  // Backend sends aggregate-only broadcasts (Anthropic usage path) with
+  // res/ct unset: keep the row's existing split and only lift the total.
+  var fcm = entry.firstContentMs || 0;
   var inflight = inflightEntries[id];
   if (inflight) {
     if (input && input > 0) inflight.inputTokens = input;
-    inflight.outputTokens = output;
+    // Monotonic: the locally estimated eff may already exceed a later
+    // upstream value in edge cases — never regress the live OUT.
+    if (output > (inflight.outputTokens || 0)) inflight.outputTokens = output;
+    if (res > (inflight.reasoningTokens || 0)) inflight.reasoningTokens = res;
+    if (ct > (inflight.contentTokens || 0)) inflight.contentTokens = ct;
+    if (fcm > 0 && !(inflight.firstContentMs)) inflight.firstContentMs = fcm;
   }
   var found = lastUsageEntries.findIndex(function(x) { return x.id === id; });
   if (found >= 0 && lastUsageEntries[found].status === 'processing') {
     if (input && input > 0) lastUsageEntries[found].inputTokens = input;
-    lastUsageEntries[found].outputTokens = output;
+    if (output > (lastUsageEntries[found].outputTokens || 0)) lastUsageEntries[found].outputTokens = output;
+    if (res > (lastUsageEntries[found].reasoningTokens || 0)) lastUsageEntries[found].reasoningTokens = res;
+    if (ct > (lastUsageEntries[found].contentTokens || 0)) lastUsageEntries[found].contentTokens = ct;
+    if (fcm > 0 && !(lastUsageEntries[found].firstContentMs)) lastUsageEntries[found].firstContentMs = fcm;
   }
   var row = document.querySelector('tr[data-id="' + sanitizeId(id) + '"]');
   if (row) {
-    var cell = row.querySelector('.tokens-cell');
-    if (cell) {
-      var displayInput = (input && input > 0) ? input : ((inflight && inflight.inputTokens) || (found >= 0 ? lastUsageEntries[found].inputTokens : 0) || 0);
-      cell.textContent = displayInput + '/' + output;
+    // Local per-cell patch: IN / RES / CT columns + immediate speed
+    // recompute against current GT (covers the gap between 200ms ticks).
+    // OUT is monotonic: the row may already show a higher local estimate
+    // than this event carries — take the max so the column never jumps back.
+    var prevOut = Number(row.getAttribute('data-out') || '0');
+    if (output < prevOut) output = prevOut;
+    var displayInput = (input && input > 0) ? input : ((inflight && inflight.inputTokens) || (found >= 0 ? lastUsageEntries[found].inputTokens : 0) || 0);
+    var inCell = row.querySelector('.in-cell');
+    if (inCell) inCell.textContent = String(displayInput);
+    var prevRes = Number(row.getAttribute('data-res') || '0');
+    if (res < prevRes) res = prevRes;
+    var prevCt = Number(row.getAttribute('data-ct') || '0');
+    if (ct < prevCt) ct = prevCt;
+    // Aggregate-only event (no split): attribute the delta to CT so the
+    // total stays consistent without disturbing an established RES.
+    if (res + ct === 0 && output > 0) ct = output - prevRes > 0 ? output - prevRes : prevCt;
+    row.setAttribute('data-out', String(output));
+    row.setAttribute('data-res', String(res));
+    row.setAttribute('data-ct', String(ct));
+    var resCell = row.querySelector('.res-cell');
+    if (resCell) resCell.textContent = String(res);
+    var ctCell = row.querySelector('.ct-cell');
+    if (ctCell) ctCell.textContent = String(ct);
+    // GT anchor priority: server first-content stamp > ts+ttft. The stamp
+    // is provider-agnostic (local byte observation), so GT no longer jumps
+    // when ttft arrives late or not at all.
+    if (fcm > 0 && row.getAttribute('data-gen-src') !== 'fcm') {
+      row.setAttribute('data-gen-start', String(fcm));
+      row.setAttribute('data-gen-src', 'fcm');
+    }
+    var genStart = row.getAttribute('data-gen-start');
+    if (genStart) {
+      var gtMs = Date.now() - Number(genStart);
+      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+      var spdCell = row.querySelector('.speed-cell');
+      var spdBase = res + ct > 0 ? res + ct : output;
+      if (spdCell) spdCell.textContent = formatGenSpeed(spdBase, gtMs);
     }
   }
 }

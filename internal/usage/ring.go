@@ -22,6 +22,8 @@ type Entry struct {
 	TTFTMs        int64           `json:"ttftMs"`
 	InputTokens   int             `json:"inputTokens"`
 	OutputTokens  int             `json:"outputTokens"`
+	ReasoningTokens int           `json:"reasoningTokens,omitempty"` // reasoning/thinking incremental output (live + terminal)
+	ContentTokens   int           `json:"contentTokens,omitempty"`   // content/body incremental output (live + terminal)
 	Error         string          `json:"error,omitempty"`
 	ReqPayload    json.RawMessage `json:"reqPayload,omitempty"`
 	RespPayload   json.RawMessage `json:"respPayload,omitempty"`

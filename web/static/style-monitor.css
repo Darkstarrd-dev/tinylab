@@ -287,6 +287,30 @@
 .usage-table tbody tr:hover{background:var(--table-hover)}
 /* Auto-fit sets the remaining column widths from the longest cell. */
 .usage-table th:nth-child(1),.usage-table td:nth-child(1){width:28px;min-width:28px}
+/* Recent Requests: tighter cell gap so 11 columns fit without squeezing. */
+.recent-requests-card .usage-table th,.recent-requests-card .usage-table td{padding:6px 6px}
+/* Recent Requests: fixed-width columns via ch units. Numeric values are
+   fixed-format (TTFT SS.d 4ch, GT MM:SS.d 7ch) so these never need
+   remeasuring — fitMonitorTable skips data-fixed columns. Only Model flexes
+   (min 12ch, ellipsis overflow); everything else is nailed down so ticking
+   values can't push siblings around. tabular-nums keeps digits equal-width;
+   IN/RES/CT/Spd right-aligned. */
+.recent-requests-card .usage-table{table-layout:fixed}
+.recent-requests-card .col-time,.recent-requests-card td:nth-child(2){width:9ch;min-width:9ch;max-width:9ch}
+.recent-requests-card .col-prov{width:6ch;min-width:6ch;max-width:6ch;overflow:hidden;text-overflow:ellipsis}
+.recent-requests-card .col-model{width:30ch;min-width:30ch;max-width:30ch;overflow:hidden;text-overflow:ellipsis}
+/* Model names read from the right: long names (muse-spark-1.3-contributor)
+   keep the distinctive tail visible, ellipsis on the left. direction:rtl
+   only affects the overflow side + base direction; LTR latin/digits render
+   in logical order, short names are unaffected. Header stays LTR. */
+.recent-requests-card td.model-cell{direction:rtl;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-requests-card .ttft-cell,.recent-requests-card th.num-ttft{width:5ch;min-width:5ch;max-width:5ch;font-variant-numeric:tabular-nums}
+.recent-requests-card .gt-cell,.recent-requests-card th.num-gt{width:8ch;min-width:8ch;max-width:8ch;font-variant-numeric:tabular-nums}
+.recent-requests-card .col-key{width:5ch;min-width:5ch;max-width:5ch;text-align:center;overflow:hidden;text-overflow:ellipsis}
+.recent-requests-card .in-cell,.recent-requests-card th.num-in{width:7ch;min-width:7ch;max-width:7ch;text-align:right;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.recent-requests-card .res-cell,.recent-requests-card .ct-cell,
+.recent-requests-card th.num-int{width:6ch;min-width:6ch;max-width:6ch;text-align:right;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.recent-requests-card .speed-cell,.recent-requests-card th.num-spd{width:13ch;min-width:13ch;max-width:13ch;text-align:right;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
 /* Colspan cells (session group headers) span all columns; neutralize per-cell max-width. */
 .usage-table td[colspan]{max-width:none}
 /* Session group header: structured flex layout with pre-allocated field widths so rows align. */

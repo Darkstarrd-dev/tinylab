@@ -14,40 +14,86 @@ function renderUsageRow(e, sessionKey, hidden) {
   } else {
     statusInner = dotHtml;
   }
-  var latencyDisplay;
+  // TTFT: frozen on first-token (request-ttft), ticking wall-clock before.
+  var ttftDisplay, ttftFrozen;
   if (e.status === 'processing') {
     if (e.ttftMs && e.ttftMs > 0) {
-      latencyDisplay = formatLatency(e.ttftMs);
+      ttftDisplay = formatTTFT(e.ttftMs);
+      ttftFrozen = true;
     } else {
-      var elapsed = Date.now() - new Date(e.timestamp).getTime();
-      if (isNaN(elapsed) || elapsed < 0) elapsed = 0;
-      latencyDisplay = formatLatency(elapsed);
+      var ttftElapsed = Date.now() - new Date(e.timestamp).getTime();
+      if (isNaN(ttftElapsed) || ttftElapsed < 0) ttftElapsed = 0;
+      ttftDisplay = formatTTFT(ttftElapsed);
+      ttftFrozen = false;
     }
   } else {
-    latencyDisplay = formatLatency(e.latencyMs);
+    ttftFrozen = true;
+    ttftDisplay = (e.ttftMs && e.ttftMs > 0) ? formatTTFT(e.ttftMs) : '—';
   }
-  var tokensDisplay;
+  // GT anchor priority: server first-content stamp (provider-agnostic local
+  // byte observation) > ts + ttft. Freezes at done via LatencyMs - TTFTMs.
+  var genStartMs = null;
+  var genSrc = '';
+  if (e.firstContentMs && e.firstContentMs > 0) {
+    genStartMs = e.firstContentMs;
+    genSrc = 'fcm';
+  } else if (e.ttftMs && e.ttftMs > 0 && e.timestamp) {
+    genStartMs = new Date(e.timestamp).getTime() + e.ttftMs;
+    if (isNaN(genStartMs)) genStartMs = null;
+    if (genStartMs != null) genSrc = 'ttft';
+  }
+  var gtMs = null, gtDisplay, spdDisplay;
+  var inT = (e.inputTokens || 0);
+  // RES/CT split: prefer per-split fields; fall back to splitting the
+  // aggregate by ratio when only outputTokens exists (old entries).
+  var resT = (e.reasoningTokens || 0);
+  var ctT = (e.contentTokens || 0);
+  var outT = (e.outputTokens || 0);
+  if (outT > 0 && resT + ctT === 0) ctT = outT;
+  var spdBase = resT + ctT > 0 ? resT + ctT : outT;
   if (e.status === 'processing') {
-    var inT = (e.inputTokens || 0);
-    var outT = (e.outputTokens || 0);
-    tokensDisplay = inT + '/' + outT;
+    if (genStartMs != null) {
+      gtMs = Date.now() - genStartMs;
+      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+      gtDisplay = formatGenTime(gtMs);
+      spdDisplay = formatGenSpeed(spdBase, gtMs);
+    } else {
+      gtDisplay = '—';
+      spdDisplay = '—';
+    }
   } else {
-    tokensDisplay = e.inputTokens + '/' + e.outputTokens;
+    if (genStartMs != null) {
+      gtMs = (e.latencyMs || 0) - (e.ttftMs || 0);
+      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+    } else {
+      gtMs = e.latencyMs || 0;
+    }
+    gtDisplay = formatGenTime(gtMs);
+    spdDisplay = formatGenSpeed(spdBase, gtMs);
   }
   var tsAttr = e.timestamp ? ' data-ts="' + escapeHtml(e.timestamp) + '"' : '';
-  var ttftAttr = (e.status === 'processing' && e.ttftMs && e.ttftMs > 0) ? ' data-ttft="1"' : '';
+  var ttftAttr = (ttftFrozen && e.status === 'processing') ? ' data-ttft="1"' : '';
+  var genAttr = (genStartMs != null) ? ' data-gen-start="' + genStartMs + '"' : '';
+  genAttr += (genSrc ? ' data-gen-src="' + genSrc + '"' : '');
+  var outAttr = ' data-out="' + outT + '" data-res="' + resT + '" data-ct="' + ctT + '"';
+  var provPrefix = (typeof findProviderPrefix === 'function') ? findProviderPrefix(e) : (e.provider || '');
+  var keyShort = (typeof shortKeyName === 'function') ? shortKeyName(e.keyName) : (e.keyName || '');
   var idAttr = e.id ? ' data-id="' + sanitizeId(e.id) + '"' : '';
   var inSession = sessionKey !== undefined;
   var sessionAttr = inSession ? ' data-session="' + escapeHtml(sessionKey) + '" class="session-row' + (hidden ? ' session-row-hidden' : '') + '"' : '';
   var firstCellClass = inSession ? 'status-col-cell session-row-indented' : 'status-col-cell';
-  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + idAttr + sessionAttr + '>\
+  return '<tr data-status="' + e.status + '"' + tsAttr + ttftAttr + genAttr + outAttr + idAttr + sessionAttr + '>\
     <td class="' + firstCellClass + '">' + statusInner + '</td>\
     <td>' + new Date(e.timestamp).toLocaleTimeString() + '</td>\
-    <td>' + escapeHtml(e.provider) + '</td>\
-    <td>' + escapeHtml(displayModelName(e.model, e.originalModel)) + '</td>\
-    <td>' + escapeHtml(e.keyName) + '</td>\
-    <td class="latency-cell">' + latencyDisplay + '</td>\
-    <td class="tokens-cell">' + tokensDisplay + '</td>\
+    <td data-tooltip="' + escapeHtml(e.provider || '') + '">' + escapeHtml(provPrefix) + '</td>\
+    <td class="model-cell" data-tooltip="' + escapeHtml(displayModelName(e.model, e.originalModel)) + '">' + escapeHtml(displayModelName(e.model, e.originalModel)) + '</td>\
+    <td data-tooltip="' + escapeHtml(e.keyName || '') + '">' + escapeHtml(keyShort) + '</td>\
+    <td class="ttft-cell" data-tooltip="' + escapeHtml(t('ttTTFT')) + '">' + ttftDisplay + '</td>\
+    <td class="gt-cell" data-tooltip="' + escapeHtml(t('ttGT')) + '">' + gtDisplay + '</td>\
+    <td class="in-cell" data-tooltip="' + escapeHtml(t('thInput')) + '">' + inT + '</td>\
+    <td class="res-cell" data-tooltip="' + escapeHtml(t('ttRES')) + '">' + resT + '</td>\
+    <td class="ct-cell" data-tooltip="' + escapeHtml(t('ttCT')) + '">' + ctT + '</td>\
+    <td class="speed-cell" data-tooltip="' + escapeHtml(t('thAvgSpeed')) + '">' + spdDisplay + '</td>\
   </tr>';
 }
 
@@ -135,17 +181,34 @@ function renderRecentRequestsInline(entries) {
       pagerHtml +
     '</span>' +
   '</div>';
-  var emptyRow = '<tr class="recent-empty-row"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
+  var emptyRow = '<tr class="recent-empty-row"><td colspan="11" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
   var body = '<div class="recent-requests-scroll card-scroll">' +
-    '<table class="usage-table">' +
+    '<table class="usage-table" data-nofit="1">' +
+      '<colgroup>' +
+        '<col style="width:28px">' +
+        '<col style="width:9ch">' +
+        '<col style="width:6ch">' +
+        '<col style="width:30ch">' +
+        '<col style="width:5ch">' +
+        '<col style="width:5ch">' +
+        '<col style="width:8ch">' +
+        '<col style="width:7ch">' +
+        '<col style="width:6ch">' +
+        '<col style="width:6ch">' +
+        '<col style="width:13ch">' +
+      '</colgroup>' +
       '<thead><tr>' +
         '<th class="status-col-header"></th>' +
-        '<th>' + t('thTime') + '</th>' +
-        '<th>' + t('thProvider') + '</th>' +
-        '<th>' + t('thModel') + '</th>' +
-        '<th>' + t('thKey') + '</th>' +
-        '<th>' + t('thLatency') + '</th>' +
-        '<th>' + t('thTokens') + '</th>' +
+        '<th class="col-time" data-fixed="1">' + t('thTime') + '</th>' +
+        '<th class="col-prov" data-fixed="1" data-tooltip="' + escapeHtml(t('thProvider')) + '">' + t('thProv') + '</th>' +
+        '<th class="col-model">' + t('thModel') + '</th>' +
+        '<th class="col-key" data-fixed="1" data-tooltip="' + escapeHtml(t('thKey')) + '">' + t('thKey') + '</th>' +
+        '<th class="num-ttft" data-fixed="1" data-tooltip="' + escapeHtml(t('ttTTFT')) + '">' + t('thTTFT') + '</th>' +
+        '<th class="num-gt" data-fixed="1" data-tooltip="' + escapeHtml(t('ttGT')) + '">' + t('thGT') + '</th>' +
+        '<th class="num-in" data-fixed="1" data-tooltip="' + escapeHtml(t('thInput')) + '">' + t('thIn') + '</th>' +
+        '<th class="num-int" data-fixed="1" data-tooltip="' + escapeHtml(t('ttRES')) + '">' + t('thRES') + '</th>' +
+        '<th class="num-int" data-fixed="1" data-tooltip="' + escapeHtml(t('ttCT')) + '">' + t('thCT') + '</th>' +
+        '<th class="num-spd" data-fixed="1" data-tooltip="' + escapeHtml(t('thAvgSpeed')) + '">' + t('thSpd') + '</th>' +
       '</tr></thead>' +
       '<tbody id="recent-tbody">' + (rows.length > 0 ? renderRecentRows(rows) : emptyRow) + '</tbody>' +
     '</table>' +
@@ -188,7 +251,7 @@ function updateRecentRequestsInline(entries) {
   }
   tbody.innerHTML = rows.length > 0
     ? renderRecentRows(rows)
-    : '<tr class="recent-empty-row"><td colspan="7" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
+    : '<tr class="recent-empty-row"><td colspan="11" style="text-align:center;color:var(--text-muted)">' + escapeHtml(recentSearchQuery.trim() ? t('noMatchingRequests') : t('noUsage')) + '</td></tr>';
   scheduleMonitorTableAutoFit();
   var countEl = document.querySelector('.recent-requests-card .recent-count');
   if (countEl) countEl.textContent = String(filtered.length);
@@ -223,7 +286,7 @@ function renderRecentRowsGrouped(rows) {
   }
   var html = '';
   if (ungrouped.length) {
-    html += '<tr class="session-group-header ungrouped" data-session-group=""><td colspan="7" style="font-size:var(--font-badge);color:var(--text-muted)">' +
+    html += '<tr class="session-group-header ungrouped" data-session-group=""><td colspan="11" style="font-size:var(--font-badge);color:var(--text-muted)">' +
       escapeHtml(t('ungrouped')) + ' \u00B7 ' + ungrouped.length + ' ' + t('requests') +
     '</td></tr>';
     html += ungrouped.map(function(e) { return renderUsageRow(e, ''); }).join('');
@@ -249,7 +312,7 @@ function renderSessionGroupHeader(sk, label, group, expanded) {
   var cls = expanded ? 'session-group-header expanded' : 'session-group-header collapsed';
   var arrow = expanded ? '\u25BE' : '\u25B8';
   return '<tr class="' + cls + '" data-session-group="' + escapeHtml(sk) + '" onclick="toggleSessionGroup(this, \'' + escapeForJsString(sk) + '\')">' +
-    '<td colspan="7" class="session-group-cell">' +
+    '<td colspan="11" class="session-group-cell">' +
       '<div class="session-group-flex">' +
         '<span class="session-group-arrow">' + arrow + '</span>' +
         '<span class="session-group-name">' + escapeHtml(label) + '</span>' +

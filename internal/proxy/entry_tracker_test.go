@@ -91,8 +91,9 @@ func TestEntryTracker_UpdateTokens(t *testing.T) {
 }
 
 // TestEntryTracker_SweepStale_RemovesOnlyOldEntries verifies that SweepStale
-// returns only entries whose timestamp is older than maxAge, and removes them
-// from the tracker while leaving recent entries intact.
+// returns only entries whose liveness heartbeat is older than maxAge, and
+// removes them from the tracker while leaving recent entries intact.
+// Heartbeat backdating simulates entries whose streams went silent.
 func TestEntryTracker_SweepStale_RemovesOnlyOldEntries(t *testing.T) {
 	tracker := NewEntryTracker()
 	now := time.Now()
@@ -105,6 +106,13 @@ func TestEntryTracker_SweepStale_RemovesOnlyOldEntries(t *testing.T) {
 	tracker.Register(usage.Entry{ID: "recent", Status: "processing", Timestamp: now.Add(-1 * time.Minute)})
 	// Register a current entry (now)
 	tracker.Register(usage.Entry{ID: "current", Status: "processing", Timestamp: now})
+	// Simulate silent streams: backdate heartbeats to match timestamps
+	// (Register stamps lastActive=now; only silent ones should sweep).
+	tracker.mu.Lock()
+	tracker.lastActive["old-1"] = now.Add(-15 * time.Minute)
+	tracker.lastActive["old-2"] = now.Add(-30 * time.Minute)
+	tracker.lastActive["recent"] = now.Add(-1 * time.Minute)
+	tracker.mu.Unlock()
 
 	// Sweep with 10 minute maxAge
 	stale := tracker.SweepStale(10 * time.Minute)
@@ -196,6 +204,11 @@ func TestEntryTracker_SweepStale_PreservesEntryFields(t *testing.T) {
 		Source:        "",
 	}
 	tracker.Register(original)
+
+	// Silence the stream so heartbeat age (not Timestamp) drives the sweep.
+	tracker.mu.Lock()
+	tracker.lastActive["req-xyz"] = now.Add(-15 * time.Minute)
+	tracker.mu.Unlock()
 
 	stale := tracker.SweepStale(10 * time.Minute)
 	if len(stale) != 1 {
@@ -301,4 +314,3 @@ func TestMarshalEntryJSONLight(t *testing.T) {
 		t.Errorf("expected respHeaders to be omitted, but found in JSON")
 	}
 }
-

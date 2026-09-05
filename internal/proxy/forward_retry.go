@@ -355,11 +355,22 @@ func (h *Handler) broadcastTTFT(id string, ttftMs int64) {
 	})
 }
 
-func (h *Handler) broadcastTokens(id string, input, output int) {
+// broadcastTokens pushes a live token update for a processing request. The
+// firstContentMs carries the server-side UnixMilli of the first content
+// chunk (0 = unknown / no content yet); the frontend prefers it as the GT
+// anchor and falls back to ts+ttft when absent, so GT no longer depends on
+// the provider emitting usage/timings chunks.
+// broadcastTokensSplit is the RES/CT-segregated variant: res/ct carry the
+// live per-split estimates (chars/4 caliber or upstream-exact), output stays
+// the aggregate. broadcastTokens wraps it for aggregate-only callers.
+func (h *Handler) broadcastTokensSplit(id string, input, output, res, ct int, firstContentMs int64) {
 	raw, err := json.Marshal(struct {
-		InputTokens  int `json:"inputTokens"`
-		OutputTokens int `json:"outputTokens"`
-	}{input, output})
+		InputTokens     int   `json:"inputTokens"`
+		OutputTokens    int   `json:"outputTokens"`
+		ReasoningTokens int   `json:"reasoningTokens,omitempty"`
+		ContentTokens   int   `json:"contentTokens,omitempty"`
+		FirstContentMs  int64 `json:"firstContentMs,omitempty"`
+	}{input, output, res, ct, firstContentMs})
 	if err != nil {
 		return
 	}
@@ -368,4 +379,14 @@ func (h *Handler) broadcastTokens(id string, input, output int) {
 		ID:    id,
 		Entry: raw,
 	})
+}
+
+// broadcastTokens is the aggregate-only wrapper kept for the non-split
+// paths (Anthropic usage deltas, error paths). RES/CT arrive as 0.
+func (h *Handler) broadcastTokens(id string, input, output int, firstContentMs ...int64) {
+	var fcm int64
+	if len(firstContentMs) > 0 {
+		fcm = firstContentMs[0]
+	}
+	h.broadcastTokensSplit(id, input, output, 0, 0, fcm)
 }

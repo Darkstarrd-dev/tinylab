@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/tinylab/tinylab/internal/combo"
@@ -83,6 +84,21 @@ func (s *responsesToChatState) contentDelta(content, finish string) []byte {
 		obj["choices"] = []any{map[string]any{
 			"index": 0, "delta": map[string]any{}, "logprobs": nil, "finish_reason": finish,
 		}}
+	}
+	b, _ := json.Marshal(obj)
+	return b
+}
+
+// reasoningDelta builds a chat chunk carrying a reasoning/thinking delta in
+// reasoning_content (the OpenAI-compatible reasoning field). Returns nil for
+// empty input.
+func (s *responsesToChatState) reasoningDelta(reasoning string) []byte {
+	if reasoning == "" {
+		return nil
+	}
+	obj := map[string]any{
+		"id": s.respID, "object": "chat.completion.chunk", "created": s.created, "model": s.model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"reasoning_content": reasoning}, "finish_reason": nil}},
 	}
 	b, _ := json.Marshal(obj)
 	return b
@@ -209,6 +225,14 @@ func (s *responsesToChatState) OnEvent(ev map[string]any) [][]byte {
 		if c := s.contentDelta(delta, ""); c != nil {
 			out = append(out, c)
 		}
+	// Reasoning summaries fold into a chat delta carrying reasoning_content
+	// (the same field OpenAI-compatible reasoning models use), so downstream
+	// clients AND the local RES char counter see one unified shape.
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+		delta, _ := ev["delta"].(string)
+		if c := s.reasoningDelta(delta); c != nil {
+			out = append(out, c)
+		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := ev["item_id"].(string)
 		delta, _ := ev["delta"].(string)
@@ -304,8 +328,59 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	var sseBuf bytes.Buffer
 	var clientDisconnected bool
 	var streamAborted bool
-	inputTokens, outputTokens := 0, 0
+	// Live token counters are atomic: the read loop stores them while a
+	// background ticker goroutine loads them to push live updates to the
+	// Recent Requests OUT column, mirroring streamResponse (stream.go).
+	var inputTokens atomic.Int64
+	var outputTokens atomic.Int64
+	var contentCharsTotal atomic.Int64
+	// reasoningCharsTotal is the RES split; contentCharsTotal stays CT-only.
+	var reasoningCharsTotal atomic.Int64
+	// firstContentMs anchors the frontend GT clock; 0 = no content yet.
+	var firstContentMs atomic.Int64
 	conv := newResponsesToChatState(model)
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		var lastPush time.Time
+		var lastIn, lastOut int64
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if reqID == "" {
+					continue
+				}
+				it := inputTokens.Load()
+				ot := outputTokens.Load()
+				// Live split estimates, same caliber as stream.go: upstream
+				// usage chunks may arrive only at stream end (or never).
+				cc := contentCharsTotal.Load()
+				rc := reasoningCharsTotal.Load()
+				effRes := rc / 4
+				effCt := cc / 4
+				eff := ot
+				if eff == 0 && effRes+effCt > 0 {
+					eff = effRes + effCt
+				}
+				if it == lastIn && eff == lastOut {
+					continue
+				}
+				if time.Since(lastPush) < 200*time.Millisecond {
+					continue
+				}
+				lastPush = time.Now()
+				lastIn, lastOut = it, eff
+				h.EntryTracker.UpdateTokensSplit(reqID, -1, int(eff), int(effRes), int(effCt))
+				h.broadcastTokensSplit(reqID, int(it), int(eff), int(effRes), int(effCt), firstContentMs.Load())
+			}
+		}
+	}()
+	var lastEntryRefresh time.Time
 
 	writeChunk := func(b []byte) {
 		line := "data: " + string(b)
@@ -342,21 +417,39 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 				}
 				for _, c := range conv.OnEvent(ev) {
 					writeChunk(c)
+					// Count translated chat-chunk content chars for the live
+					// OUT estimate (covers upstreams with no usage chunks).
+					if n := sseContentLength(c); n > 0 {
+						contentCharsTotal.Add(int64(n))
+						if firstContentMs.Load() == 0 {
+							firstContentMs.CompareAndSwap(0, time.Now().UnixMilli())
+						}
+					}
+					if n := sseReasoningLength(c); n > 0 {
+						reasoningCharsTotal.Add(int64(n))
+						if firstContentMs.Load() == 0 {
+							firstContentMs.CompareAndSwap(0, time.Now().UnixMilli())
+						}
+					}
 				}
 				if conv.usageInput > 0 {
-					inputTokens = conv.usageInput
+					inputTokens.Store(int64(conv.usageInput))
 				}
 				if conv.usageOutput > 0 {
-					outputTokens = conv.usageOutput
+					outputTokens.Store(int64(conv.usageOutput))
 				}
 				if in, out := util.ExtractTokens([]byte(payload)); in > 0 || out > 0 {
 					if in > 0 {
-						inputTokens = in
+						inputTokens.Store(int64(in))
 					}
 					if out > 0 {
-						outputTokens = out
+						outputTokens.Store(int64(out))
 					}
 				}
+			}
+			if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
+				h.EntryTracker.Refresh(reqID)
+				lastEntryRefresh = now
 			}
 		}
 		if clientDisconnected {
@@ -402,9 +495,18 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	case status == "error":
 		streamDecision = "client disconnected"
 	}
-	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s (responses→chat)", sel.Provider.Name, inputTokens, outputTokens, sel.KeyName)
+	// Terminal split mirroring stream.go: per-split local estimates first,
+	// then aggregate. No usage chunk all stream long must not record OUT=0.
+	finalRes := int(reasoningCharsTotal.Load() / 4)
+	finalCt := int(contentCharsTotal.Load() / 4)
+	finalOut := int(outputTokens.Load())
+	if finalOut == 0 && finalRes+finalCt > 0 {
+		finalOut = finalRes + finalCt
+		outputTokens.Store(int64(finalOut))
+	}
+	h.logger.Info("\U0001f4ca [stream] %s | in=%d | out=%d | conn=%s (responses→chat)", sel.Provider.Name, inputTokens.Load(), outputTokens.Load(), sel.KeyName)
 	h.logger.Info("\U0001f300 [STREAM] %s | %s | %dms | %d (responses→chat)", sel.Provider.Name, model, totalLatencyMs, resp.StatusCode)
-	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, inputTokens, outputTokens, errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
+	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, int(inputTokens.Load()), int(outputTokens.Load()), errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "", finalRes, finalCt)
 }
 
 func (h *Handler) passThroughResponsesAsChat(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, reqID string, reqHeaders http.Header, upstreamURL string, originalModel, sessionKey string) {

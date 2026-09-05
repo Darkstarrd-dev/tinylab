@@ -64,18 +64,36 @@ async function renderUsage(c) {
 function updateProcessingLatencyCells() {
   var rows = document.querySelectorAll('tr[data-status="processing"]');
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i].getAttribute('data-ttft')) continue;
-    var ts = rows[i].getAttribute('data-ts');
+    var row = rows[i];
+    var ts = row.getAttribute('data-ts');
     if (!ts) continue;
-    var elapsed = Date.now() - new Date(ts).getTime();
-    if (isNaN(elapsed) || elapsed < 0) elapsed = 0;
-    var cell = rows[i].querySelector('.latency-cell');
-    if (!cell) continue;
-    if (elapsed > MAX_PROCESSING_MS) {
-      cell.textContent = '>10m';
-    } else {
-      cell.textContent = formatLatency(elapsed);
+    var base = new Date(ts).getTime();
+    if (isNaN(base)) continue;
+    // TTFT cell: frozen once data-ttft is set; otherwise tick wall-clock.
+    if (!row.getAttribute('data-ttft')) {
+      var ttftElapsed = Date.now() - base;
+      if (isNaN(ttftElapsed) || ttftElapsed < 0) ttftElapsed = 0;
+      var ttftCell = row.querySelector('.ttft-cell');
+      if (ttftCell) {
+        ttftCell.textContent = ttftElapsed > MAX_PROCESSING_MS ? '>10m' : formatTTFT(ttftElapsed);
+      }
     }
+    // GT + speed cells: only after gen start (first token). Local
+    // textContent patch per row — no full re-render.
+    var genStart = row.getAttribute('data-gen-start');
+    if (!genStart) continue;
+    var gtMs = Date.now() - Number(genStart);
+    if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+    var gtCell = row.querySelector('.gt-cell');
+    if (gtCell) {
+      gtCell.textContent = gtMs > MAX_PROCESSING_MS ? '>10m' : formatGenTime(gtMs);
+    }
+    var outVal = Number(row.getAttribute('data-out') || '0');
+    var resVal = Number(row.getAttribute('data-res') || '0');
+    var ctVal = Number(row.getAttribute('data-ct') || '0');
+    var spdBase = resVal + ctVal > 0 ? resVal + ctVal : outVal;
+    var spdCell = row.querySelector('.speed-cell');
+    if (spdCell) spdCell.textContent = formatGenSpeed(spdBase, gtMs);
   }
 }
 

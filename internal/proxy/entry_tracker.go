@@ -14,11 +14,16 @@ import (
 type EntryTracker struct {
 	mu      sync.RWMutex
 	entries map[string]usage.Entry
+	// lastActive records the last heartbeat per request ID. Refresh writes
+	// here instead of mutating Entry.Timestamp, so Timestamp stays the true
+	// request start (GT/TTFT anchoring, Recent display) while SweepStale
+	// still sees stream liveness.
+	lastActive map[string]time.Time
 }
 
 // NewEntryTracker creates a new EntryTracker.
 func NewEntryTracker() *EntryTracker {
-	return &EntryTracker{entries: make(map[string]usage.Entry)}
+	return &EntryTracker{entries: make(map[string]usage.Entry), lastActive: make(map[string]time.Time)}
 }
 
 // Register stores a processing entry. Returns true if the entry was newly
@@ -30,6 +35,7 @@ func (t *EntryTracker) Register(e usage.Entry) bool {
 		return false
 	}
 	t.entries[e.ID] = e
+	t.lastActive[e.ID] = time.Now()
 	return true
 }
 
@@ -48,6 +54,7 @@ func (t *EntryTracker) Remove(id string) bool {
 	_, ok := t.entries[id]
 	if ok {
 		delete(t.entries, id)
+		delete(t.lastActive, id)
 	}
 	return ok
 }
@@ -98,15 +105,39 @@ func (t *EntryTracker) UpdateTokens(id string, input, output int) {
 	}
 }
 
-// Refresh updates the entry's Timestamp to now, resetting the SweepStale
-// window. Called periodically during long streams so an active request
-// is not swept as a stale timeout.
-func (t *EntryTracker) Refresh(id string) {
+// UpdateTokensSplit is the RES/CT-segregated variant: res/ct update the
+// per-split live estimates alongside the aggregate output. Monotonic: live
+// estimates only move forward, so stale ticker interleavings never regress
+// the Recent columns.
+func (t *EntryTracker) UpdateTokensSplit(id string, input, output, res, ct int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if e, ok := t.entries[id]; ok {
-		e.Timestamp = time.Now()
+		if input >= 0 {
+			e.InputTokens = input
+		}
+		if output >= 0 && output > e.OutputTokens {
+			e.OutputTokens = output
+		}
+		if res > e.ReasoningTokens {
+			e.ReasoningTokens = res
+		}
+		if ct > e.ContentTokens {
+			e.ContentTokens = ct
+		}
 		t.entries[id] = e
+	}
+}
+
+// Refresh records a liveness heartbeat without touching Entry.Timestamp.
+// Called periodically during long streams so an active request is not swept
+// as a stale timeout. Timestamp stays the request start: the frontend GT
+// anchor (ts+ttft) and TTFT ticking depend on it never moving mid-stream.
+func (t *EntryTracker) Refresh(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.entries[id]; ok {
+		t.lastActive[id] = time.Now()
 	}
 }
 
@@ -135,7 +166,9 @@ func MarshalEntryJSONLight(e usage.Entry) json.RawMessage {
 	return b
 }
 
-// SweepStale removes and returns entries whose Timestamp is older than maxAge.
+// SweepStale removes and returns entries whose liveness heartbeat (Refresh,
+// falling back to Timestamp for entries that never refreshed) is older than
+// maxAge.
 // The caller is responsible for writing final error records for each returned
 // entry and broadcasting request-done events. This is a safety net for
 // processing entries that were never completed (e.g. due to a client disconnect
@@ -149,9 +182,14 @@ func (t *EntryTracker) SweepStale(maxAge time.Duration) []usage.Entry {
 	cutoff := time.Now().Add(-maxAge)
 	var stale []usage.Entry
 	for id, e := range t.entries {
-		if e.Timestamp.Before(cutoff) {
+		last, ok := t.lastActive[id]
+		if !ok {
+			last = e.Timestamp
+		}
+		if last.Before(cutoff) {
 			stale = append(stale, e)
 			delete(t.entries, id)
+			delete(t.lastActive, id)
 		}
 	}
 	return stale

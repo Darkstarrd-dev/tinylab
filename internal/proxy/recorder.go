@@ -61,7 +61,12 @@ func bytesIndex(b []byte, s string) int {
 // usage broadcaster. Payloads and headers are captured for every source so
 // Recent Requests remains a complete local diagnostic surface; the playground
 // source is routed to a dedicated ring.
-func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string, sessionKey string, decision string, provenance string) {
+// recordUsage persists one usage entry and broadcasts request-done. The
+// trailing variadic split carries the RES/CT segregated estimates:
+// split[0]=reasoning tokens, split[1]=content tokens. Variadic so the ~20
+// existing error/retry/pass-through call sites stay untouched (split unset
+// = aggregate-only entry).
+func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.SelectedKey, status string, latencyMs int64, ttftMs int64, inputTokens, outputTokens int, errMsg string, reqBody []byte, respBody []byte, respHeaders http.Header, respStatus int, reqHeaders http.Header, upstreamURL string, originalModel string, sessionKey string, decision string, provenance string, split ...int) {
 	credential := sel.Key.Key
 	errMsg = logredact.MaskString(errMsg, credential)
 	decision = logredact.MaskString(decision, credential)
@@ -85,6 +90,12 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 		Error:         errMsg,
 		Decision:      decision,
 		Provenance:    provenance,
+	}
+	if len(split) > 0 {
+		entry.ReasoningTokens = split[0]
+	}
+	if len(split) > 1 {
+		entry.ContentTokens = split[1]
 	}
 	if reqHeaders != nil {
 		entry.Source = reqHeaders.Get("X-TinyLab-Source")

@@ -63,6 +63,18 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	var inputTokens atomic.Int64
 	var outputTokens atomic.Int64
 	var contentCharsTotal atomic.Int64
+	// reasoningCharsTotal accumulates RES-split chars (reasoning_content et
+	// al); contentCharsTotal stays CT-only. Live RES/CT estimates derive
+	// from these two, independent of upstream usage/timings chunks.
+	var reasoningCharsTotal atomic.Int64
+	// firstContentMs records the server-side UnixMilli of the first content
+	// chunk (reasoning OR content, any provider fabric). It anchors the frontend GT clock
+	// independent of usage/timings chunks; 0 = no content seen yet.
+	var firstContentMs atomic.Int64
+	// lastChatChunkMs stamps the last translated chat row for mixed-stream
+	// dedup (countContentSplit suppresses the duplicate native Responses
+	// row). Loop-local: only the read loop calls countContentSplit.
+	var lastChatChunkMs int64
 
 	// Time-driven token broadcast. The old code only pushed a token update
 	// after a read batch arrived AND 1500ms had elapsed — during an upstream
@@ -88,9 +100,15 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				it := inputTokens.Load()
 				ot := outputTokens.Load()
 				cc := contentCharsTotal.Load()
+				rc := reasoningCharsTotal.Load()
+				// Live split estimates: upstream usage may arrive only at
+				// stream end (or never), so fall back to locally counted
+				// chars per split. Aggregate eff keeps the old contract.
+				effRes := rc / 4
+				effCt := cc / 4
 				eff := ot
-				if eff == 0 && cc > 0 {
-					eff = cc / 4
+				if eff == 0 && effRes+effCt > 0 {
+					eff = effRes + effCt
 				}
 				if it == lastIn && eff == lastOut {
 					continue
@@ -100,8 +118,8 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				}
 				lastPush = time.Now()
 				lastIn, lastOut = it, eff
-				h.EntryTracker.UpdateTokens(reqID, -1, int(eff))
-				h.broadcastTokens(reqID, int(it), int(eff))
+				h.EntryTracker.UpdateTokensSplit(reqID, -1, int(eff), int(effRes), int(effCt))
+				h.broadcastTokensSplit(reqID, int(it), int(eff), int(effRes), int(effCt), firstContentMs.Load())
 			}
 		}
 	}()
@@ -169,6 +187,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 		if n > 0 {
 			_, _ = sseBuf.Write(buf[:n])
 			var contentChars int
+			var reasoningChars int
 			if normalize {
 				lines, ferr := sb.Feed(buf[:n])
 				if ferr != nil {
@@ -217,7 +236,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 							if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 								h.sigCache.Put(id, sig)
 							}
-							contentChars += sseContentLength([]byte(payload))
+							ct, res := countContentSplit([]byte(payload), time.Now().UnixMilli(), &lastChatChunkMs)
+							contentChars += ct
+							reasoningChars += res
 						}
 					}
 					if h.debugMode() && reqID != "" && entryFormat == combo.EntryFormatOpenAI {
@@ -293,7 +314,11 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 						if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 							h.sigCache.Put(id, sig)
 						}
-						contentChars += sseContentLength([]byte(payload))
+						ct, res := countContentSplit([]byte(payload), time.Now().UnixMilli(), &lastChatChunkMs)
+						contentChars += ct
+						// RES split: reasoning deltas accumulate separately so
+						// the Recent RES/CT columns stay segregated.
+						reasoningChars += res
 					} else if !rawForward {
 						// Preserve non-data SSE fields (event:..., : comments,
 						// blank separators) byte-for-byte.
@@ -323,6 +348,13 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				}
 			}
 			contentCharsTotal.Add(int64(contentChars))
+			reasoningCharsTotal.Add(int64(reasoningChars))
+			// First locally observed incremental (reasoning OR content)
+			// anchors GT; CompareAndSwap keeps the earliest stamp across
+			// concurrent batches.
+			if (contentChars > 0 || reasoningChars > 0) && firstContentMs.Load() == 0 {
+				firstContentMs.CompareAndSwap(0, time.Now().UnixMilli())
+			}
 			if now := time.Now(); now.Sub(lastEntryRefresh) >= time.Second {
 				h.EntryTracker.Refresh(reqID)
 				lastEntryRefresh = now
@@ -458,14 +490,16 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	case status == "error":
 		streamDecision = "client disconnected"
 	}
-	// Terminal fallback: if the upstream never emitted a usage chunk (no
-	// include_usage injection, or the gateway stripped it), fall back to the
-	// SSE content-character estimate so the terminal record is non-zero
-	// (review +4/A3).
-	if outputTokens.Load() == 0 && contentCharsTotal.Load() > 0 {
-		outputTokens.Store(contentCharsTotal.Load() / 4)
+	// Terminal split: per-split local estimates first, then aggregate.
+	// Upstream reasoning usage (output_tokens_details.reasoning_tokens) is
+	// parsed where present in the loop; per-split fallbacks keep RES/CT
+	// segregated when only raw chars were observed.
+	finalRes := int(reasoningCharsTotal.Load() / 4)
+	finalCt := int(contentCharsTotal.Load() / 4)
+	if outputTokens.Load() == 0 && finalRes+finalCt > 0 {
+		outputTokens.Store(int64(finalRes + finalCt))
 	}
-	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, int(inputTokens.Load()), int(outputTokens.Load()), errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "")
+	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, int(inputTokens.Load()), int(outputTokens.Load()), errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "", finalRes, finalCt)
 }
 
 // budget caps a non-streaming upstream response buffered for
