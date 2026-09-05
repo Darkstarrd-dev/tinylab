@@ -1,3 +1,5 @@
+> **最后核对（2026-09-06，Story Maker SQLite 移除与换 JSON 文件组瘦身）：** (1) **Store 重写**：`internal/storymaker/store.go` 内部由 `*sql.DB` 彻底替换为内存 `map[string]map[string]json.RawMessage` + JSON 文件组落盘（`{storyDir}/{table}.json` × 11 + `images/`），公开方法签名零改动；通过 `fsutil.AtomicWrite` 实现原子持久化；`Open` 与 `ReadAll` 支持行级容错（坏行自动跳过）；(2) **依赖清空与瘦身**：移除 `modernc.org/sqlite` 及 13 个间接依赖，二进制体积大幅缩减，全项目零 DB 纯净契约回归；(3) **测试与验证**：`store_test.go` 坏行容错注入用例对齐更新，`go test ./internal/storymaker/... ./internal/api/storymaker/...` 全绿，`go vet` 零警告，`go build ./...` 与 `go build -tags nopg` 成功。
+>
 > **最后核对（2026-09-06，Story Maker 全量国际化与中英文多语言对齐）：** (1) **多语言词库全面扩展与 100% 对称校验**：`web/static/i18n.js` 为 `L.en` 与 `L.cn` 扩充 321 个 `story*` 专用键，覆盖 Books 书库概览、M0 架构与三步流程、M2 设定卡片与生图抽屉、M3 角色推演与双路候选、M4 章节生成与 Diff 对比、M5 章节管理/一致性审校与时间线、Batch 批量生产流水线、RoleChat 角色交流与多角色循环对话，经自动化脚本验证在 EN 和 CN 之间 100% 严格对称无遗漏；(2) **StoryMaker 前端 9 大模块杜绝硬编码中文泄露**：全面排查并重构 `web/static/utility/story/` 下的 `storymaker.js`、`story-home.js`、`story-m0.js`、`story-m2.js`、`story-m3.js`、`story-m4.js`、`story-m5.js`、`story-batch.js`、`story-rolechat.js`，将所有 UI 文本、表头、按钮、选择器选项、模态弹窗、状态徽标、占位符及 Toast 提示统一接入 `t(...)` 或语言条件分支（`isEn ? ... : ...`）；(3) **LLM 协议与数据存储契约安全隔离**：大纲生成分章正则匹配（`/(?=第\s*\d+\s*章)/`）、Snowflake 架构 Markdown 标记（`## 核心种子` 等）与卡片推断格式作为上游协议安全保留，默认卷名自适应双语（`Volume 1` / `第一卷`）；(4) **自动化验证**：`node --check` 语法校验通过、全量中文字符行扫描确认英文模式下 0 处非受控硬编码中文泄露、`go build -o tinylab.exe .` 编译通过。
 
 > **最后核对（2026-09-06，Gallery / Utility / Demo 导航与菜单文案定制更名）：** (1) **中文文案优化**：`i18n.js` 将 `editor`/`logFileEditor` 由“编辑器”变更为“文本编辑器”；新增 `mediaDownload` 独立键为“流媒体下载”（避免与页面内部下载操作按钮冲突），`app-router.js` 的 `UTILITY_TOOLS` 中 `download` 项对齐指向 `mediaDownload`；`tilemap`/`tilemapEditor` 由“瓦片地图编辑器”变更为“地图编辑器”；`design`/`gameDesigner`/`gameMaker` 由“游戏设计器”变更为“游戏工坊”；(2) **英文文案与标识更名**：英文相应变更为 `Text Editor`、`Media Download`、`Map Editor`，并将游戏工坊英文统一对应更名为 `GameMaker`（`design`/`gameDesigner`/`gameMaker` 均映射为 `GameMaker`）；(3) **HTML 模板占位同步**：`index.html` 与 `index-nopg.html` 的初始静态按钮文案对齐为 `Text Editor`、`Media Download`、`Map Editor`、`GameMaker`。验证：`node --check`、自动化断言测试脚本、`go build .` 全绿。
@@ -815,15 +817,15 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 
 ## 13m. `internal/storymaker/` — Story Maker 小说工坊核心数据层与持久化（2026-09-06 新增）
 
-小说工坊领域模型与 SQLite 持久化层（破例单模块放宽，采用纯 Go 驱动 `modernc.org/sqlite`，确保全平台 `CGO_ENABLED=0` 交叉编译）。数据库文件落盘于 `{configDir}/Story/story.db`，图片目录为 `{configDir}/Story/images/`。连接池配置 WAL 模式与 `busy_timeout=5000` 防并发锁冲突。核心方法严格遵守 upsert-only 与显式删除边界，提供 M3 角色推演与 M4 章节生成的多维上下文组装引擎（ContextAssembler）。架构基线见 [`docs/storymakerimplment.md`](docs/storymakerimplment.md)。
+小说工坊领域模型与内存 Map + JSON 文件组持久化层。11 张实体表以 JSON 文件分别落盘于 `{configDir}/Story/{table}.json`，图片目录为 `{configDir}/Story/images/`。通过 `fsutil.AtomicWrite` 实现原子写与锁容错，无外部数据库依赖（纯净零 DB，移除 `modernc.org/sqlite`）。核心方法严格遵守 upsert-only 与显式删除边界，支持行级容错加载，提供 M3 角色推演与 M4 章节生成的多维上下文组装引擎（ContextAssembler）。架构基线见 [`docs/storymakerimplment.md`](docs/storymakerimplment.md)。
 
 | 文件 | 职责 |
 |---|---|
 | `types.go` | 核心领域模型（`Book`、`Chapter`、`EntityCard`、`OutlineNode`、`NovelArchitecture`、`SimScene`、`SimFragment`、`StateEvent`、`ConsistencyIssue`、`MergeCandidate` 等）与时间工具 `NowRFC3339` |
 | `default_prompts.go` | 12 个内置小说生成系统 Prompt 常量（`m0-arch`、`m0-blueprint`、`m2-extract`、`m3-sim`、`m4-chapter`、`m5-consistency`、`role-chat` 等） |
-| `store.go` | `Store` 存储层：SQLite 初始化建表与 PRAGMA 调优、默认 Prompt 启动播种、GenericEntity 实体通用读写、`SyncAll` 纯 upsert 安全同步、实体显式删除、书籍级联删除、全书 txt 导出、Prompt 存取以及各专有模型辅助方法 |
+| `store.go` | `Store` 存储层：内存 Map + JSON 文件组原子落盘、默认 Prompt 启动播种、GenericEntity 实体通用读写（带行级坏数据容错解析）、`SyncAll` 纯 upsert 安全同步、实体显式删除、书籍级联删除、全书 txt 导出、Prompt 存取以及各专有模型辅助方法 |
 | `context_assembler.go` | `ContextAssembler`：大纲定位、已定稿章节前文摘要/尾部全文拼接、实体设定检索、已采纳推演片段硬约束注入 |
-| `store_test.go` | 单元测试（默认 Prompt 播种、覆盖更新、SyncAll 纯 upsert 安全契约、显式删除、实体 CRUD 与级联删除） |
+| `store_test.go` | 单元测试（默认 Prompt 播种、覆盖更新、SyncAll 纯 upsert 安全契约、显式删除、实体 CRUD 与级联删除、坏行容错注入解析） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
@@ -925,7 +927,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `assistant/` | `internal/assistant`（`presets.go`/`memory.go`）+ `internal/api/assistant` + `internal/config/paths.go:ResolveAssistantDir` | 助手模型设置与记忆目录（`ResolveAssistantDir`，默认 `{configDir}/assistant`）：`model-presets.json`（`ModelPresetFile{Active,Presets[]}` 经 `PresetStore` 持久化，与 config.yaml 分离）+ `memory/<slug>.md`（per-preset 单文件记忆，`MemorySlug` 安全化，`MemoryManager.Read/NoteTurn→AfterFunc(10m,fire)→Summarize→AtomicWrite`，最近 40 轮≤8000 字符 transcript，不注入采样参数）；未配置/首次保存前目录可缺省，首次 `Save/NoteTurn` 时 `MkdirAll` |
 | `games/` | `internal/api/games`（seed） | 磁盘游戏插件目录（`ResolveGamesDir`，默认 `{configDir}/games`）；首次运行从内嵌默认集播种，之后磁盘为唯一事实源（seed 永不覆盖） |
 | `gamedata/` | `internal/api/games` | 游戏存档 KV（`{id}.json` 单槽原子写，`PUT /api/games/{id}/state` 写入） |
-| `Story/` | `internal/storymaker` + `internal/config/paths.go:ResolveStoryDir` | Story Maker 小说工坊存储与生图目录（`ResolveStoryDir`，默认 `{configDir}/Story`）：`story.db` SQLite 数据库（WAL 模式 + 5s 锁等待，pure-Go `modernc.org/sqlite` 驱动）+ `images/` 生成卡片立绘目录 |
+| `Story/` | `internal/storymaker` + `internal/config/paths.go:ResolveStoryDir` | Story Maker 小说工坊存储与生图目录（`ResolveStoryDir`，默认 `{configDir}/Story`）：11 张实体表 JSON 文件组（`{table}.json`，`AtomicWrite` 原子持久化）+ `images/` 生成卡片立绘目录 |
 
 ---
 

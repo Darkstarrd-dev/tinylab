@@ -1,5 +1,7 @@
 # Story Maker 迁移计划（novelhelper → TinyRouter Utility）
 
+> **最后核对（2026-09-06，SQLite 移除与换 JSON 文件组瘦身）：** `internal/storymaker/store.go` 彻底移除 `modernc.org/sqlite` 及 `database/sql`，改为内存 `map[string]map[string]json.RawMessage` + JSON 文件组落盘（`{storyDir}/{table}.json` × 11 + `images/`）；通过 `fsutil.AtomicWrite` 实现原子写与锁容错，支持行级容错解析；二进制体积大幅缩减，回归项目无 DB 设计契约。
+>
 > **最后核对（2026-09-06，Story Maker 全量国际化与中英文多语言对齐）：** 完善全套 321 个 `story*` i18n 词条（`web/static/i18n.js` `L.en` 与 `L.cn` 100% 对称），全面重构 `storymaker.js`、`story-home.js`、`story-m0.js`、`story-m2.js`、`story-m3.js`、`story-m4.js`、`story-m5.js`、`story-batch.js`、`story-rolechat.js` 杜绝 UI 中文泄露，并确保 LLM 协议与数据存储契约安全。
 
 ## Context
@@ -8,10 +10,8 @@
 范围为截图侧边栏 8 项：书库概览 / M0立项架构 / M2设定卡片 / M3角色推演 / M4章节生成 / M5章节管理 / 批量生产 / 角色交流。
 书库概览中的清理功能不迁（已在 utility→text review）。新模块保留原侧边栏版式但只保留文本内容并接入本项目 theme 系统；
 各分页样式使用本项目 theme tokens + 自定义控件；模型选择用 text review step2/3 同款选择器；对照编辑用 text editor + step4 differ 设计；
-图片生成用 playground→image 已有模块。持久化沿用原项目 SQLite（用户明确要求保留，仅 StoryMaker 单模块破例放宽本仓库禁 DB 规则）：
-Go 标准库只有 `database/sql` 接口、不自带 sqlite 驱动，必须新增纯 Go 驱动 `modernc.org/sqlite`
-（cgo 的 `mattn/go-sqlite3` 与全矩阵 `CGO_ENABLED=0` 冲突，禁用，依据 `build.ps1:132`/`build_mac.ps1:50` 已核实）。
-DB 文件落在新增的 Default Story Path（默认 `<运行目录>/Story`，即 `{configDir}/Story`）下。LLM/图片走现有 `/v1/*` 代理。
+图片生成用 playground→image 已有模块。持久化采用内存 Map + JSON 文件组（11 张表对应 `{storyDir}/{table}.json`，经 `fsutil.AtomicWrite` 原子落盘），完全无需外部数据库依赖，严格遵守全项目禁 DB 规则并保持极致轻量。
+JSON 文件落在新增的 Default Story Path（默认 `<运行目录>/Story`，即 `{configDir}/Story`）下。LLM/图片走现有 `/v1/*` 代理。
 
 ## Approach
 
@@ -51,19 +51,15 @@ DB 文件落在新增的 Default Story Path（默认 `<运行目录>/Story`，�
   / `POST /arch-input|/arch|/blueprint`（SSE） / `POST /extract-entities`（SSE progress/entity/merge/done）
   / `POST /generate-card|/card-profiles|/generate-cards-batch` / `POST /simulate`（SSE） / `POST /draft`（SSE）
   / `POST /finalize` / `POST /consistency` / `POST /chat`（SSE） / `GET|PUT /prompts/{key}`。
-- `go.mod` 新增 `modernc.org/sqlite`（执行 `go get modernc.org/sqlite && go mod tidy` 取最新纯 Go 版 pinned 到 go.mod；
-  `database/sql` 兼容，保持 `CGO_ENABLED=0` 与 Windows→darwin 交叉编译；`mattn/go-sqlite3` 需 cgo/gcc，禁用）。
-  新建 `internal/storymaker/store.go`：`import _ "modernc.org/sqlite"`，`type Store struct{ DB *sql.DB; dir string }`，
-  `func Open(dir string) (*Store, error)` 打开 `{storyDir}/story.db`（`sql.Open("sqlite", dsn)`，`db.Ping()` 后建表；
-  DSN 形如 `file:<dbPath>?cache=shared` 并执行 `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000`，
-  照搬原项目 `db.ts:getDb` 的 WAL + 5000ms 超时；modernc DSN 的 `_pragma` 参数写法 unverified — confirm first，落地以 `sql.Open` 成功 + `PRAGMA` 生效为准），
-  建表沿用原项目文档式契约（`Z:/Playground/novelhelper/server/src/store/db.ts` ENTITIES）：
-  每实体一张表 `(id TEXT PRIMARY KEY, data TEXT NOT NULL)`，表集合
+- `internal/storymaker/store.go`：`type Store struct{ tables map[string]map[string]json.RawMessage; dir string; mu sync.RWMutex }`，
+  `func Open(dir string) (*Store, error)` 打开 `{storyDir}`，初始化并加载 11 张实体表的 JSON 文件 `{table}.json`；
+  缺文件视为空表，支持行级/块级坏数据容错扫描；读完调用内存版 `seedDefaultPrompts()` 检查并原子落盘；
+  实体表集合：
   `books/chapters/cards/outline/scenes/fragments/state_events/issues/architectures/merge_candidates/prompts`
   （`prompts` 存各页 prompt 覆盖，key 即 prompt key；不移植 `test_history/chat_sessions`（节点测试不在范围）、
   `chunk_meta/vec_chunks`（sqlite-vec 无纯 Go 等价，v1 不做 RAG）；图片只存文件 URL/路径，绝不存 BLOB）。
-  写入语义照搬原项目安全契约：`syncAll` 只 upsert（`INSERT … ON CONFLICT(id) DO UPDATE`），永不删除；
-  删除走白名单 `deleteEntities(table, ids)`；`readAll` 逐行容错（单行 JSON 坏跳过并继续）。
+  写入语义照搬原项目安全契约：`SyncAll` 只 upsert（`tables[table][id] = data`），永不删除，并通过 `fsutil.AtomicWrite` 原子落盘；
+  删除走白名单 `DeleteEntities(table, ids)`；`ReadAll` 逐项容错（单项 JSON 坏跳过并继续）。
   `storyDir` 经 `config.ResolveStoryDir(cfg.StoryDir, filepath.Dir(configPath))` 解析，`Open` 前 `MkdirAll`，
   images 子目录 `{storyDir}/images` 随建；绝不使用 raw path，只收 id/JSON body。
 - `internal/api/router.go` `Routes()` 构造 `storymaker.NewHandler` 并传入 `registerUtilityRoutes`；
@@ -190,13 +186,12 @@ DB 文件落在新增的 Default Story Path（默认 `<运行目录>/Story`，�
   4. M3 双候选采纳进 sequence；M4 片段勾选约束生效 + draft diff 接受/拒绝/改写落盘正确；M5 定稿→检查→忽略/已处理流转；批量 start→pause/resume→stop 状态机正确；角色交流双人发送 + 自动循环可取消 + 导出 JSON。
   5. `-tags nopg` 构建（`index-nopg.html`）下 Story Maker 因 `requiresPlayground` 隐藏且不报错。
   6. Settings→Path Settings 出现 Default Story Path（默认 `{configDir}/Story`），browse/保存/重启后 `GET /api/settings` 回显一致；
-  Story Maker 内建书建卡后重启进程，书/卡/章节均从 `{storyDir}/story.db` 恢复（图片在 `{storyDir}/images` 为文件）。
+  Story Maker 内建书建卡后重启进程，书/卡/章节均从 `{storyDir}/{table}.json` 恢复（图片在 `{storyDir}/images` 为文件）。
 
 ## Assumptions & contingencies
 
-- AGENTS.md 禁 DB 规则：经用户明确要求，仅 StoryMaker 单模块破例使用 SQLite（`modernc.org/sqlite`），其他模块仍禁 DB。
-- `modernc.org/sqlite` 使各产物增大约 8–15MB（13 变体 + 2 mac 二进制全部受影响），故事文档负载可接受；
-  若体积不可接受，备选是 store 换回文件 JSON（路由契约不变），需用户另行批准后才执行。
+- AGENTS.md 禁 DB 规则：StoryMaker 已彻底移除 SQLite（`modernc.org/sqlite`），全面回归内存 Map + JSON 文件组存储契约，全项目 100% 保持无 DB 纯净架构。
+- 存储瘦身已完成：移除 `modernc.org/sqlite` 依赖树使产物体积大幅缩减，`store.go` 内部采用原子落盘与行级容错解析。
 - LLM/图片全部走站内 `/v1/*` 代理 + `openModelPickerModal` 选择，不移植 novelhelper node-pool/`ModuleKey`/`moduleMapping`；若某页必须多节点调度，复用 `GET /api/models` 列表在前端轮询，仍不建新调度表。
 - M4/M5 真实生成以 `services/real/generation.ts` 语义为准而非 mock 串联；mock 的“已死角色本地规则”不移植，一律走 `/consistency` 上游判定。
 - 图片仅 M2 需要；若 M0/M4 提出封面/插图需求，同样调用 `pgTaskEnqueue`，不另建图片管线。

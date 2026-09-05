@@ -1,7 +1,7 @@
 package storymaker
 
 import (
-	"database/sql"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	_ "modernc.org/sqlite"
+	"github.com/tinylab/tinylab/internal/fsutil"
 )
 
 // AllowedTables lists all valid entity table names.
@@ -28,14 +28,14 @@ var AllowedTables = map[string]bool{
 	"prompts":          true,
 }
 
-// Store wraps SQLite operations for storymaker.
+// Store wraps in-memory map + JSON file group operations for storymaker.
 type Store struct {
-	db  *sql.DB
-	dir string
-	mu  sync.RWMutex
+	tables map[string]map[string]json.RawMessage // table -> id -> data
+	dir    string
+	mu     sync.RWMutex
 }
 
-// Open initializes the story SQLite database at {storyDir}/story.db.
+// Open initializes the story store at {storyDir}, loading {table}.json files.
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create story dir: %w", err)
@@ -45,40 +45,23 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("create story images dir: %w", err)
 	}
 
-	dbPath := filepath.Join(dir, "story.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite db: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("ping sqlite db: %w", err)
-	}
-
-	// Apply WAL and busy timeout pragmas matching novelhelper db.ts
-	if _, err := db.Exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set db pragmas: %w", err)
-	}
-
-	// Create tables if not exist
+	tables := make(map[string]map[string]json.RawMessage, len(AllowedTables))
 	for table := range AllowedTables {
-		query := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (id TEXT PRIMARY KEY, data TEXT NOT NULL)", table)
-		if _, err := db.Exec(query); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("create table %s: %w", table, err)
+		filePath := filepath.Join(dir, table+".json")
+		tableMap, err := loadTableFile(filePath)
+		if err != nil {
+			tableMap = make(map[string]json.RawMessage)
 		}
+		tables[table] = tableMap
 	}
 
 	s := &Store{
-		db:  db,
-		dir: dir,
+		tables: tables,
+		dir:    dir,
 	}
 
 	// Seed default prompts if missing
 	if err := s.seedDefaultPrompts(); err != nil {
-		_ = db.Close()
 		return nil, fmt.Errorf("seed default prompts: %w", err)
 	}
 
@@ -95,31 +78,222 @@ func (s *Store) ImagesDir() string {
 	return filepath.Join(s.dir, "images")
 }
 
-// Close closes the underlying SQLite database.
+// Close resets in-memory tables.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.db == nil {
-		return nil
+	s.tables = nil
+	return nil
+}
+
+func (s *Store) saveTable(table string) error {
+	filePath := filepath.Join(s.dir, table+".json")
+	tbl := s.tables[table]
+	if tbl == nil {
+		tbl = make(map[string]json.RawMessage)
 	}
-	err := s.db.Close()
-	s.db = nil
-	return err
+	data, err := json.Marshal(tbl)
+	if err != nil {
+		return err
+	}
+	return fsutil.AtomicWrite(filePath, data, 0600)
+}
+
+func loadTableFile(filePath string) (map[string]json.RawMessage, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return make(map[string]json.RawMessage), nil
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return make(map[string]json.RawMessage), nil
+	}
+
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err == nil {
+		result := make(map[string]json.RawMessage, len(rawMap))
+		for k, v := range rawMap {
+			if k != "" && json.Valid(v) {
+				result[k] = v
+			}
+		}
+		return result, nil
+	}
+
+	// Fallback: parse entries with error tolerance for corrupted/bad rows
+	return parseTolerantEntries(data), nil
+}
+
+// parseTolerantEntries extracts valid JSON object fields from potentially corrupted JSON text.
+func parseTolerantEntries(data []byte) map[string]json.RawMessage {
+	result := make(map[string]json.RawMessage)
+	n := len(data)
+	i := 0
+
+	for i < n {
+		// Look for key start: quote '"'
+		for i < n && data[i] != '"' {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		// Parse string key
+		keyStart := i + 1
+		i++
+		escaped := false
+		for i < n {
+			if escaped {
+				escaped = false
+				i++
+				continue
+			}
+			if data[i] == '\\' {
+				escaped = true
+				i++
+				continue
+			}
+			if data[i] == '"' {
+				break
+			}
+			i++
+		}
+		if i >= n {
+			break
+		}
+		key := string(data[keyStart:i])
+		i++ // skip closing '"'
+
+		// Skip whitespace to find ':'
+		for i < n && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n') {
+			i++
+		}
+		if i >= n || data[i] != ':' {
+			continue
+		}
+		i++ // skip ':'
+
+		// Skip whitespace after ':'
+		for i < n && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n') {
+			i++
+		}
+		if i >= n {
+			break
+		}
+
+		// Find start and end of value
+		valStart := i
+		var valEnd int
+		ch := data[i]
+
+		if ch == '{' || ch == '[' {
+			openChar := ch
+			closeChar := byte('}')
+			if openChar == '[' {
+				closeChar = ']'
+			}
+			depth := 0
+			inStr := false
+			strEsc := false
+			found := false
+			for i < n {
+				c := data[i]
+				if inStr {
+					if strEsc {
+						strEsc = false
+					} else if c == '\\' {
+						strEsc = true
+					} else if c == '"' {
+						inStr = false
+					}
+					i++
+					continue
+				}
+				if c == '"' {
+					inStr = true
+					i++
+					continue
+				}
+				if c == openChar {
+					depth++
+				} else if c == closeChar {
+					depth--
+					if depth == 0 {
+						i++
+						valEnd = i
+						found = true
+						break
+					}
+				}
+				i++
+			}
+			if !found {
+				// Malformed, skip this entry and continue scanning
+				continue
+			}
+		} else if ch == '"' {
+			// String value
+			i++
+			inEsc := false
+			found := false
+			for i < n {
+				if inEsc {
+					inEsc = false
+					i++
+					continue
+				}
+				if data[i] == '\\' {
+					inEsc = true
+					i++
+					continue
+				}
+				if data[i] == '"' {
+					i++
+					valEnd = i
+					found = true
+					break
+				}
+				i++
+			}
+			if !found {
+				continue
+			}
+		} else {
+			// Literal (number, boolean, null)
+			for i < n && data[i] != ',' && data[i] != '}' && data[i] != ']' && data[i] != ' ' && data[i] != '\t' && data[i] != '\r' && data[i] != '\n' {
+				i++
+			}
+			valEnd = i
+		}
+
+		candidate := data[valStart:valEnd]
+		if key != "" && json.Valid(candidate) {
+			result[key] = json.RawMessage(candidate)
+		}
+	}
+
+	return result
 }
 
 func (s *Store) seedDefaultPrompts() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tbl := s.tables["prompts"]
+	if tbl == nil {
+		tbl = make(map[string]json.RawMessage)
+		s.tables["prompts"] = tbl
+	}
+	modified := false
 	for k, prompt := range DefaultPrompts {
-		var exists int
-		err := s.db.QueryRow("SELECT 1 FROM prompts WHERE id = ?", k).Scan(&exists)
-		if err == sql.ErrNoRows {
+		if _, ok := tbl[k]; !ok {
 			dataBytes, _ := json.Marshal(map[string]string{"content": prompt})
-			_, err = s.db.Exec("INSERT INTO prompts (id, data) VALUES (?, ?)", k, string(dataBytes))
-			if err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
+			tbl[k] = dataBytes
+			modified = true
 		}
+	}
+	if modified {
+		return s.saveTable("prompts")
 	}
 	return nil
 }
@@ -132,28 +306,23 @@ func (s *Store) SyncAll(table string, entities []GenericEntity) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
+	tbl := s.tables[table]
+	if tbl == nil {
+		tbl = make(map[string]json.RawMessage)
+		s.tables[table] = tbl
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := tx.Prepare(fmt.Sprintf("INSERT INTO %s (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data", table))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = stmt.Close() }()
 
 	for _, e := range entities {
 		if e.ID == "" {
 			continue
 		}
-		if _, err := stmt.Exec(e.ID, string(e.Data)); err != nil {
-			return err
+		if !json.Valid(e.Data) {
+			continue
 		}
+		tbl[e.ID] = e.Data
 	}
 
-	return tx.Commit()
+	return s.saveTable(table)
 }
 
 // ReadAll returns all entities from a table with row-level error tolerance.
@@ -164,29 +333,18 @@ func (s *Store) ReadAll(table string) ([]GenericEntity, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(fmt.Sprintf("SELECT id, data FROM %s", table))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
+	tbl := s.tables[table]
 	var results []GenericEntity
-	for rows.Next() {
-		var id string
-		var raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			continue
-		}
-		// Validate JSON
-		if !json.Valid([]byte(raw)) {
+	for id, raw := range tbl {
+		if !json.Valid(raw) {
 			continue
 		}
 		results = append(results, GenericEntity{
 			ID:   id,
-			Data: json.RawMessage(raw),
+			Data: raw,
 		})
 	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // DeleteEntities deletes entities by IDs from a whitelisted table.
@@ -200,28 +358,17 @@ func (s *Store) DeleteEntities(table string, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := tx.Prepare(fmt.Sprintf("DELETE FROM %s WHERE id = ?", table))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, id := range ids {
-		if id == "" {
-			continue
-		}
-		if _, err := stmt.Exec(id); err != nil {
-			return err
+	tbl := s.tables[table]
+	if tbl != nil {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			delete(tbl, id)
 		}
 	}
 
-	return tx.Commit()
+	return s.saveTable(table)
 }
 
 // GetBooks returns all books.
@@ -249,16 +396,16 @@ func (s *Store) GetBook(id string) (*Book, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var raw string
-	err := s.db.QueryRow("SELECT data FROM books WHERE id = ?", id).Scan(&raw)
-	if err == sql.ErrNoRows {
+	tbl := s.tables["books"]
+	if tbl == nil {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	raw, ok := tbl[id]
+	if !ok {
+		return nil, nil
 	}
 	var b Book
-	if err := json.Unmarshal([]byte(raw), &b); err != nil {
+	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil, err
 	}
 	return &b, nil
@@ -514,22 +661,15 @@ func (s *Store) GetPrompt(key string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var raw string
-	err := s.db.QueryRow("SELECT data FROM prompts WHERE id = ?", key).Scan(&raw)
-	if err == sql.ErrNoRows {
-		if def, ok := DefaultPrompts[key]; ok {
-			return def, nil
-		}
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-
-	var m map[string]string
-	if err := json.Unmarshal([]byte(raw), &m); err == nil {
-		if c, ok := m["content"]; ok && c != "" {
-			return c, nil
+	tbl := s.tables["prompts"]
+	if tbl != nil {
+		if raw, ok := tbl[key]; ok {
+			var m map[string]string
+			if err := json.Unmarshal(raw, &m); err == nil {
+				if c, ok := m["content"]; ok && c != "" {
+					return c, nil
+				}
+			}
 		}
 	}
 	if def, ok := DefaultPrompts[key]; ok {

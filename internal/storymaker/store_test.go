@@ -1,6 +1,7 @@
 package storymaker
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -78,9 +79,20 @@ func TestStore_BasicAndSecurityContracts(t *testing.T) {
 	}
 
 	// 5. ReadAll row-level fault tolerance (corrupt JSON row does not break read)
-	_, err = store.db.Exec("INSERT INTO books (id, data) VALUES (?, ?)", "bad_row", "{invalid_json")
+	booksPath := filepath.Join(tempDir, "books.json")
+	booksBytes, err := os.ReadFile(booksPath)
 	if err != nil {
-		t.Fatalf("insert corrupt row: %v", err)
+		t.Fatalf("read books.json: %v", err)
+	}
+	corruptContent := bytes.TrimSuffix(bytes.TrimSpace(booksBytes), []byte("}"))
+	corruptContent = append(corruptContent, []byte(`,"bad_row":{invalid_json}`)...)
+	if err := os.WriteFile(booksPath, corruptContent, 0600); err != nil {
+		t.Fatalf("write corrupt books.json: %v", err)
+	}
+	_ = store.Close()
+	store, err = Open(tempDir)
+	if err != nil {
+		t.Fatalf("reopen store with corrupt row: %v", err)
 	}
 	booksAfterCorrupt, err := store.GetBooks()
 	if err != nil {
