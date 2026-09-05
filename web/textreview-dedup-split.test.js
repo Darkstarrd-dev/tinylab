@@ -161,6 +161,18 @@ check('aiSplitChapters returns null on garbage model output', () => {
   assert.strictEqual(TR.aiSplitChapters(text, c, '[99999]', true), null);
 });
 
+check('inline trailing digits (amounts/times) are not chapters', () => {
+  const compiled = TR.compilePatterns(TR.DEFAULT_SPLIT_PATTERNS);
+  const re = compiled.find((p) => p.key === 'bare-num').regex;
+  // regression: $100,043.28 / $100,417.83 trailing digits produced ghost 28/83 chapters
+  for (const line of ['$100,043.28', '可用余额：$100,417.83', '第一日·傍晚 17:03', '当前篆刻魔法数量：3', '17:03']) {
+    assert.strictEqual(TR.findTitleInLine(line, re), null, 'false chapter: ' + line);
+  }
+  const text = ['28', '', '正文', '', '　　$43.28', '', '83', '', '尾声'].join('\n');
+  const chapters = TR.splitChapters(text, re, true);
+  assert.strictEqual(chapters.length, 2, JSON.stringify(chapters.map((c) => c.title)));
+});
+
 check('strong title signals survive cap thinning', () => {
   // 100 bare-number chapters + 5000 weak short lines, cap 4000:
   // all 100 numbers must survive.

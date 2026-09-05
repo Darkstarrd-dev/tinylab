@@ -111,8 +111,9 @@ function stripDecor(s) {
 
 /**
  * 把存储形正则（带 ^）转成「行内搜索形」编译。
- * 剥掉开头的 `^` 锚（若有），其余原样。`flags` 透传。
- * 编译失败返回 null。
+ * 剥掉开头的 `^` 锚（若有）；行尾 `$` 锚保留——全行匹配类模式
+ * （如 bare-num `^(\d{1,4})$`）靠它拒绝行内数字（时间 17:03、
+ * “数量：3”、角色卡 lv3 等）。`flags` 透传。编译失败返回 null。
  */
 function toSearchRegex(source, flags) {
   if (!source) return null;
@@ -154,6 +155,10 @@ var TITLE_MAX = 50;
  */
 var SENTENCE_END = new Set('。！？!?…」』)）"】》>.;\u201D\u2019');
 
+// CJK-only sentence end for numeric titles: excludes '.'/';'/':' so that
+// trailing digits of amounts ($100,043.28) or times (17:03) never pass.
+var CJK_SENTENCE_END = new Set('。！？!?…；」』)）"】》\u201D\u2019');
+
 /**
  * 在一行内查找章节标题。返回 {index, prefix, title} 或 null。
  *
@@ -167,13 +172,16 @@ function findTitleInLine(line, searchRegex) {
   var m = line.match(searchRegex);
   if (!m || typeof m.index !== 'number') return null;
   var idx = m.index;
+  var rawTitle = (m[1] != null ? m[1] : m[0]).replace(/\s+/g, ' ').trim();
+  if (!rawTitle) return null;
+  var numericOnly = /^[0-9]+$/.test(rawTitle);
   // 行内非开头位置：必须有句末标点背书，否则判正文引用
   if (idx > 0) {
     var prev = line[idx - 1];
-    if (!SENTENCE_END.has(prev)) return null;
+    if (numericOnly) {
+      if (!CJK_SENTENCE_END.has(prev)) return null;
+    } else if (!SENTENCE_END.has(prev)) return null;
   }
-  var rawTitle = (m[1] != null ? m[1] : m[0]).replace(/\s+/g, ' ').trim();
-  if (!rawTitle) return null;
   return {
     index: idx,
     prefix: line.slice(0, idx).trim(),
@@ -351,6 +359,9 @@ function splitChapters(text, regex, keepPrologue, options) {
     var volHit = null;
     if (!isVolumeMode && volumeSearch) {
       volHit = findTitleInLine(stripped, volumeSearch);
+      // 卷旁路只认短标题（真卷名 ≤30 字）；正文以“第N卷”开头的长段落
+      // （如“第20卷内的描写的是…”，完整版误切）不视为卷边界。
+      if (volHit && stripped.length > 30) volHit = null;
     }
     var hit = findTitleInLine(stripped, regex);
 
