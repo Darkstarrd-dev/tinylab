@@ -138,6 +138,8 @@ func (h *Handler) engineOnce() *tr.Engine {
 //	POST   /api/text-review/sessions/{id}/resume resume the dispatcher
 //	POST   /api/text-review/sessions/{id}/chapters/{idx}/reprocess  re-clean one chapter
 //	DELETE /api/text-review/sessions/{id}   cancel + remove a session
+//	POST   /api/text-review/export-split     export split chapters as per-chapter .txt files in a .zip
+//	POST   /api/text-review/export-combined  export split chapters merged into a single .txt
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/review-nodes", h.listReviewNodes)
 	r.Post("/review-nodes", h.upsertReviewNode)
@@ -162,6 +164,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Delete("/sessions/{id}", h.deleteSession)
 	r.Post("/clear", h.clearAllSessions)
 	r.Post("/export-split", h.exportSplit)
+	r.Post("/export-combined", h.exportCombined)
 }
 
 // listReviewNodes returns the text-review processing-node pool.

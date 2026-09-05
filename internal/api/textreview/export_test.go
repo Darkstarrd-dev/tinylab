@@ -105,3 +105,62 @@ func TestExportSplit_Validation(t *testing.T) {
 		t.Errorf("expected 400 for empty chapters, got %d", rec2.Code)
 	}
 }
+
+func TestExportCombined_Success(t *testing.T) {
+	h, _ := newTestHandler(t, nil, nil)
+	mux := newTestRouter(h)
+	tmpDir := t.TempDir()
+
+	reqBody := ExportCombinedRequest{
+		TargetDir: tmpDir,
+		FileName:  "test_novel_combined.txt",
+		Chapters: []ExportChapterItem{
+			{Title: "第1章 开始", Content: "这是第一章的正文内容。"},
+			{Title: "第2章 发展", Content: "第2章 发展\n\n这是第二章的内容。"},
+		},
+	}
+
+	rec := doJSON(t, mux, http.MethodPost, "/api/text-review/export-combined", reqBody)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res["ok"] != true {
+		t.Fatalf("expected ok true, got %v", res["ok"])
+	}
+	outPath, _ := res["path"].(string)
+	if outPath == "" {
+		t.Fatalf("expected non-empty path")
+	}
+	if !strings.HasSuffix(outPath, ".txt") {
+		t.Fatalf("expected .txt path, got %q", outPath)
+	}
+}
+
+func TestExportCombined_Validation(t *testing.T) {
+	h, _ := newTestHandler(t, nil, nil)
+	mux := newTestRouter(h)
+
+	// Missing TargetDir
+	rec1 := doJSON(t, mux, http.MethodPost, "/api/text-review/export-combined", ExportCombinedRequest{
+		TargetDir: "",
+		Chapters:  []ExportChapterItem{{Title: "Ch1", Content: "text"}},
+	})
+	if rec1.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty targetDir, got %d", rec1.Code)
+	}
+
+	// Empty chapters
+	rec2 := doJSON(t, mux, http.MethodPost, "/api/text-review/export-combined", ExportCombinedRequest{
+		TargetDir: t.TempDir(),
+		Chapters:  []ExportChapterItem{},
+	})
+	if rec2.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty chapters, got %d", rec2.Code)
+	}
+}

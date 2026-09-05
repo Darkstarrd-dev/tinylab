@@ -1175,7 +1175,7 @@ flowchart LR
 - **历史前端锚点（迁移前）：** `web/playground/static-pg/editor_textreview.js`、`editor/editor_textreview_step1..4.js`、`editor/editor_textreview_state.js`、`editor/editor_textreview_split.js`、`editor/editor_textreview_diff.js`；旧 `pgJSFiles`/独立导航仅作背景。
 - **当前前端锚点：** `web/static/utility/editor/editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_state.js`、`editor_textreview_split.js`（+`bare-num` 纯数字预设/`extractSplitCandidates`/`aiSplitChapters`）、`editor_textreview_diff.js`、`editor_textreview_dedup.js`（`TRDedup.scanDuplicates/applyDedup`，新增）、`web/textreview-dedup-split.test.js`（13 契约），由 `RootStatic` 的 `/utility/editor/*` 脚本加载。
 - `internal/textreview/{session,scheduler,cleaner,proxy_call,streaming_writer,events}.go`：会话引擎
-- `internal/api/textreview/{register,sessions,nodepersister}.go`：HTTP handler + ramp-down 落盘
+- `internal/api/textreview/{register,sessions,nodepersister,export}.go`：HTTP handler + ramp-down 落盘 + Step2 导出（`export-split` 单章 zip / `export-combined` 合并 txt）
 - `internal/registry/text_review.go`：节点池/切分模式 CRUD
 - `internal/config/types.go`（`TextReviewConfig`/`TextReviewNode`/`SplitPattern`）+ `defaults.go`（10 内置 split-pattern 注入 + 存量 key 回填）
 - `internal/api/router.go`：`/api/text-review/*` 路由组（API 路径保持不变）
@@ -1192,6 +1192,8 @@ flowchart LR
 
 > **最后核对（2026-09-05，Step2 去重 + 纯数字拆分 + AI 标题拆分落地）：** (1) **去重**：新增 `editor_textreview_dedup.js`（`TRDedup.scanDuplicates/applyDedup`：归一化行滚动哈希 K=8 候选→双向扩展最大块→长度降序贪心取不重叠块，删后现副本留首现；跨 2000 行视为跨章合法复用只计 singleLineGroups；广告行 9 正则整行删；`applyDedup` 迭代至不动点，上限 5 轮）；Step2 去重区（扫描→块列表行号+行数+预览→应用重写 rawText+重切/丢弃/复扫；i18n `trDedup*` en+zh）。目标文本实测：19 块 + 12 广告行 + 31K 字符清除，复扫残留 0，切分 97 章不变。(2) **纯数字拆分**：`bare-num` 预设 `^(\d{1,4})$` 进前后端默认池（`defaults.go` 10 项 + 存量 key 回填，custom 恒列尾；旧测试 9→10 + 回填单测）；目标文本 97 纯数字章（1-98 缺 91）零误杀（`N>>`/`17:03` 不中），此前 9 预设全灭。(3) **AI 标题拆分**：`extractSplitCandidates`（空行包围短行≤60 字，强信号纯数字/第N章/顿号冒号优先保，超 cap 只稀释弱候选；目标 97/97 全保留）+ `aiSplitChapters`（模型回 JSON 行号数组→切分，非法/越界/空回退 null 不改切分）；Step2 确认改单次 `/v1/chat/completions` 分类调用（Step3 前缀表复用，失败 toast 不改切分）。`web/textreview-dedup-split.test.js` 13 契约全绿 + `go test ./internal/config/`（回填单测）+ `go build ./...`。
 
+> **最后核对（2026-09-05，完整版 10.6MB 回归 + 幽灵章节修复）：** `…聪明？ - 副本 (2).txt`（18 万行/3.8M 字）：去重 236 块 + 74 广告 + 374K 字符（-15.1%），复扫残留 0；切分 1059 章（1–1060 缺 91，锚点 2→1）。修复两处完整版暴露的误切：(1) `findTitleInLine` 纯数字行内命中只认行首/`CJK_SENTENCE_END`（英文 `.` 剔除，`$100,043.28` 尾部 `28`/`83` 不再成章）；(2) 卷旁路只认 ≤30 字短标题（`第20卷内的描写的是…` 长段落不再成章）。短版重验 97 章零回归；契约 14 项（含金额/时间回归）全绿。
+
 ### 变更维护清单
 
 | 触发变更 | 涉及源码 |
@@ -1201,7 +1203,8 @@ flowchart LR
 | 修改调度/ramp-down/重试 | `internal/textreview/scheduler.go`（`dispatch`/`runWorker`/`maxRetries`）、`nodepersister.go`（落盘）、`internal/config/types.go`（`TextReviewNode.Concurrency`/`Enabled`） |
 | 修改会话端点/SSE | `internal/api/textreview/sessions.go`、`internal/textreview/events.go`、`internal/api/router.go`（路由组） |
 | 修改节点池/切分模式 CRUD | `internal/registry/text_review.go`、`internal/api/textreview/register.go`、`internal/config/types.go`、`editor_textreview_step2.js`（trStep2RenderPatternSelect 统一刷新下拉/AI Split 模型弹窗） |
-| 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_step2.js`（trStep2RenderPatternSelect/trS2AIModel/去重区 trStep2RenderDedup）、`editor_textreview_step3.js`、`editor_textreview_step4.js`、`editor_textreview_state.js`、`playground.css`（`.tr-s3`/`.tr-s4`/）、`web/static/i18n.js`（`trAISplitHint`/`trDedup*`）、`web/static/style-textreview.css`（）、`web/static/index.html`/`index-nopg.html`（dedup 脚本挂载） |
+| 修改 4 步向导交互 | `editor_textreview.js`、`editor_textreview_step1..4.js`、`editor_textreview_step2.js`（trStep2RenderPatternSelect/trS2AIModel/去重区 trStep2RenderDedup/Export 右侧 combine\|split toggle `trStep2OnExportMode`）、`editor_textreview_step3.js`、`editor_textreview_step4.js`、`editor_textreview_state.js`（`exportMode` 持久化）、`playground.css`（`.tr-s3`/`.tr-s4`/`.tr-s2-export-toggle`）、`web/static/i18n.js`（`trAISplitHint`/`trDedup*`/`trExportSplit/trExportCombine/trExportModeHint/trExportTxtSuccess`）、`web/static/style-textreview.css`（`.tr-s2-export-toggle`）、`web/static/index.html`/`index-nopg.html`（dedup 脚本挂载） |
+| 修改 Step2 导出（combine/split） | `internal/api/textreview/export.go`（`exportSplit` + `exportCombined`）+ `register.go`（两路由）+ `export_test.go`（成功+校验）+ `editor_textreview_step2.js`（toggle UI + 按 mode 走对应端点） |
 | 修改导航（历史 Gallery↔Editor 2-way） | `web/static/app.js`、`web/static/auth.js`、`web/static/shortcuts.js`、旧 `web/playground/static-pg/editor/*`（仅迁移背景）；当前 Utility 导航维护见 §17.1 与 `web/static/utility/editor/*` |
 
 | 修改 Gallery 路径/编辑合同（audit F-03/F-28/F-30） | 后端：`internal/api/gallery/fs_handlers.go`（`galleryOpenDir`→grantId、`galleryListDir`/`galleryServeFile`/`galleryDeleteFs`/`galleryOpenFolder`/`galleryPastePaths`，raw path→410）、`zip_handlers.go`（`galleryZipFromPath`/`galleryZipWriteback` grantId）、`edit_handlers.go`（`resolveMediaInput`/`galleryEditZipOutputs`/`galleryEditZipWriteback` assetId/grantId）、`register.go`（`grants`/`uploadSem`/`tempFiles`/`assets` 字段 + `owner.Middleware`）；**前端已迁移（2026-08-09）**：`gallery-edit-operations.js::_startJob`/`gallery-edit-batch.js`/`gallery-fullscreen.js`/`gallery-io.js` 全走 `grantId`/`assetId`/`sourceId`；残留非安全缺陷：单 zip extract→edit 读已移除的 `data.tempPath`（应读 `data.assetId`） |

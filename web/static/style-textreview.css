@@ -108,6 +108,9 @@
 .tr-s2-preview-head{display:flex;align-items:center;gap:8px;flex-shrink:0;margin-bottom:0;padding:8px 16px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border)}
 .tr-s2-preview-kp{margin-left:12px;font-size:var(--font-badge,12px);color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .tr-s2-export-btn{margin-left:auto;height:24px;padding:0 12px;font-size:var(--font-badge,12px);line-height:22px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.tr-s2-export-toggle{margin-left:8px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.tr-s2-export-toggle-label{font-size:var(--font-badge,12px);color:var(--text-secondary);min-width:52px;text-align:right}
+.tr-s2-export-switch{--size:18px}
 .tr-s2-preview-section .tr-preview-wrap{flex:1 1 0;min-height:0;overflow:auto;max-height:none;border:none;border-radius:0}
 
 /* Step3 node-pool + prompt collapsible + settings modal */

@@ -240,6 +240,30 @@ window.trRenderStep2 = function (panel, state) {
   expBtn.addEventListener('click', trStep2Export);
   previewHead.appendChild(expBtn);
 
+  // Export mode toggle (right of Export): split = per-chapter .txt in .zip,
+  // combine = merged deduped text in a single .txt. Checked = combine.
+  var expModeWrap = document.createElement('span');
+  expModeWrap.className = 'tr-s2-export-toggle';
+  expModeWrap.title = trT('trExportModeHint') || '';
+  var expModeLabel = document.createElement('span');
+  expModeLabel.className = 'tr-s2-export-toggle-label';
+  expModeLabel.id = 'tr-s2-export-mode-label';
+  expModeLabel.textContent = (state.exportMode === 'combine') ? (trT('trExportCombine') || 'Combine') : (trT('trExportSplit') || 'Split');
+  expModeWrap.appendChild(expModeLabel);
+  var expModeSwitch = document.createElement('label');
+  expModeSwitch.className = 'toggle-switch tr-s2-export-switch';
+  var expModeCheck = document.createElement('input');
+  expModeCheck.type = 'checkbox';
+  expModeCheck.id = 'tr-s2-export-mode';
+  expModeCheck.checked = state.exportMode === 'combine';
+  expModeCheck.addEventListener('change', trStep2OnExportMode);
+  expModeSwitch.appendChild(expModeCheck);
+  var expModeSlider = document.createElement('span');
+  expModeSlider.className = 'toggle-slider';
+  expModeSwitch.appendChild(expModeSlider);
+  expModeWrap.appendChild(expModeSwitch);
+  previewHead.appendChild(expModeWrap);
+
   previewSection.appendChild(previewHead);
 
   var previewWrap = document.createElement('div');
@@ -303,6 +327,15 @@ function trStep2OnKeepPrologue() {
   trState.keepPrologue = cb.checked;
   trSave();
   trStep2DoSplit();
+}
+
+function trStep2OnExportMode() {
+  var cb = document.getElementById('tr-s2-export-mode');
+  if (!cb) return;
+  trState.exportMode = cb.checked ? 'combine' : 'split';
+  trSave();
+  var label = document.getElementById('tr-s2-export-mode-label');
+  if (label) label.textContent = cb.checked ? (trT('trExportCombine') || 'Combine') : (trT('trExportSplit') || 'Split');
 }
 
 /**
@@ -812,7 +845,9 @@ function trStep2Next() {
 
 /**
  * "导出": prompt user to pick a target directory via native file manager (/api/browse),
- * then package split chapters into individual .txt files inside a .zip file and save to target directory.
+ * then export per the combine/split toggle: split packages chapters into individual
+ * .txt files inside a .zip file; combine merges them (deduped preview text) into a
+ * single .txt file.
  */
 function trStep2Export() {
   var chapters = trState.chapters || [];
@@ -831,28 +866,30 @@ function trStep2Export() {
     }
     var targetDir = res.path;
     var baseName = (trState.fileName ? trState.fileName.replace(/\.[^/.]+$/, '') : 'novel');
-    var zipName = baseName + '_chapters.zip';
+    var items = chapters.map(function (c, idx) {
+      return {
+        title: c.title || ('Chapter ' + (idx + 1)),
+        content: c.content || ''
+      };
+    });
+    var mode = (trState.exportMode === 'combine') ? 'combine' : 'split';
+    var endpoint = (mode === 'combine') ? '/text-review/export-combined' : '/text-review/export-split';
+    var payload = (mode === 'combine')
+      ? { targetDir: targetDir, fileName: baseName + '_combined.txt', chapters: items }
+      : { targetDir: targetDir, zipName: baseName + '_chapters.zip', chapters: items };
 
-    var payload = {
-      targetDir: targetDir,
-      zipName: zipName,
-      chapters: chapters.map(function (c, idx) {
-        return {
-          title: c.title || ('Chapter ' + (idx + 1)),
-          content: c.content || ''
-        };
-      })
-    };
-
-    return trApiPost('/text-review/export-split', payload).then(function (expRes) {
+    return trApiPost(endpoint, payload).then(function (expRes) {
       if (btn) btn.disabled = false;
       if (expRes && expRes.error) {
         trToast(expRes.error, 'error');
         return;
       }
-      var outPath = (expRes && expRes.path) || zipName;
+      var outPath = (expRes && expRes.path) || payload.fileName || payload.zipName;
       var count = (expRes && expRes.count) || chapters.length;
-      trToast((typeof trT === 'function' ? trT('trExportZipSuccess', [count, outPath]) : '') || ('已导出 ' + count + ' 个章节至: ' + outPath), 'success');
+      var okMsg = (mode === 'combine')
+        ? ((typeof trT === 'function' ? trT('trExportTxtSuccess', [count, outPath]) : '') || ('已合并导出 ' + count + ' 个章节至: ' + outPath))
+        : ((typeof trT === 'function' ? trT('trExportZipSuccess', [count, outPath]) : '') || ('已导出 ' + count + ' 个章节至: ' + outPath));
+      trToast(okMsg, 'success');
     });
   }).catch(function (err) {
     if (btn) btn.disabled = false;

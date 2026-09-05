@@ -38,6 +38,8 @@ func TestRoutesRegistered(t *testing.T) {
 		http.MethodDelete + " /api/text-review/split-patterns/{key}",
 		http.MethodGet + " /api/text-review/prompt-default",
 		http.MethodPost + " /api/text-review/prompt-default",
+		http.MethodPost + " /api/text-review/export-split",
+		http.MethodPost + " /api/text-review/export-combined",
 	}
 	sort.Strings(want)
 	for _, w := range want {

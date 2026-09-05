@@ -179,3 +179,107 @@ func (h *Handler) exportSplit(w http.ResponseWriter, r *http.Request) {
 		"count":   len(req.Chapters),
 	})
 }
+
+// ExportCombinedRequest holds the payload for POST /api/text-review/export-combined.
+type ExportCombinedRequest struct {
+	TargetDir string              `json:"targetDir"`
+	FileName  string              `json:"fileName"`
+	Chapters  []ExportChapterItem `json:"chapters"`
+}
+
+// exportCombined merges the split chapters (already deduped in Step2 state)
+// into a single .txt file, saving it directly to the specified target directory.
+// Chapter framing mirrors exportSplit entries: "title\r\n\r\ncontent" per
+// chapter (title prepended only when content doesn't already start with it),
+// joined with a blank line. Step2's combine/split toggle selects this vs zip.
+// POST /api/text-review/export-combined
+func (h *Handler) exportCombined(w http.ResponseWriter, r *http.Request) {
+	var req ExportCombinedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.TargetDir = strings.TrimSpace(req.TargetDir)
+	if req.TargetDir == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "targetDir is required")
+		return
+	}
+	if len(req.Chapters) == 0 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "no chapters to export")
+		return
+	}
+
+	// P0-01d: TargetDir must be inside the configured docDir (canonical containment).
+	{
+		cfg := h.d.Reg.Config()
+		configDir := ""
+		if h.d.ConfigPath != "" {
+			configDir = filepath.Dir(h.d.ConfigPath)
+		}
+		docRoot := config.ResolveDocDir(cfg.DocDir, configDir)
+		// Empty/relative docRoot ("docs" with empty configDir) means no dir is
+		// configured — allow. Tests use DefaultConfig + t.TempDir() which is
+		// absolute but unrelated to "docs".
+		if docRoot != "" && docRoot != "." && docRoot != "docs" {
+			if _, err := fsutil.PathGuard(docRoot, req.TargetDir); err != nil {
+				apibase.WriteAPIError(w, http.StatusBadRequest, "targetDir outside allowed directory")
+				return
+			}
+		}
+	}
+	// Ensure target directory exists
+	if err := os.MkdirAll(req.TargetDir, 0755); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to create target directory: "+err.Error())
+		return
+	}
+
+	rawFileName := sanitizeFilename(filepath.Base(req.FileName))
+	if rawFileName == "" || rawFileName == "." {
+		rawFileName = "combined"
+	}
+	fileName := rawFileName
+	if !strings.HasSuffix(strings.ToLower(fileName), ".txt") {
+		fileName += ".txt"
+	}
+
+	blocks := make([]string, 0, len(req.Chapters))
+	for _, ch := range req.Chapters {
+		text := ch.Content
+		trimTitle := strings.TrimSpace(ch.Title)
+		trimContent := strings.TrimSpace(ch.Content)
+		if trimTitle != "" && !strings.HasPrefix(trimContent, trimTitle) {
+			text = trimTitle + "\r\n\r\n" + ch.Content
+		}
+		blocks = append(blocks, text)
+	}
+	combined := strings.Join(blocks, "\r\n\r\n")
+
+	// Resolve unique file path if file already exists in target directory
+	outPath := filepath.Join(req.TargetDir, fileName)
+	if _, err := os.Stat(outPath); err == nil {
+		stem := strings.TrimSuffix(fileName, ".txt")
+		for attempt := 1; attempt <= 1000; attempt++ {
+			candidate := filepath.Join(req.TargetDir, fmt.Sprintf("%s (%d).txt", stem, attempt))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				outPath = candidate
+				fileName = filepath.Base(candidate)
+				break
+			}
+		}
+	}
+
+	if err := fsutil.AtomicWrite(outPath, []byte(combined), 0644); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to write txt file: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":       true,
+		"path":     outPath,
+		"fileName": fileName,
+		"count":    len(req.Chapters),
+		"chars":    len([]rune(combined)),
+	})
+}

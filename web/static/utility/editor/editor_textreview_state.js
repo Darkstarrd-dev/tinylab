@@ -26,6 +26,7 @@ var trState = {
   customRegex: '',           // custom regex source (when selectedPatternKey === 'custom')
   titleTemplate: '',         // chapter title template (e.g. "第{0n}章 {title}")
   keepPrologue: true,        // keep opening un-titled text as a prologue chapter
+  exportMode: 'split',       // Step2 export mode: 'split' = per-chapter .txt in .zip, 'combine' = merged single .txt
   systemPrompt: '',         // cleanup system prompt (fetched from backend default, editable in Step3)
   autoRetry: true,          // auto-retry failed chapters on node exhaustion (Step3)
   lineDecisions: {},         // {chapterIdx: {rowIdx: {action, content?}}} Step4 decisions (persisted)
@@ -39,7 +40,7 @@ var trState = {
 // Fields persisted to localStorage. chapters is stored as a META stub:
 var TR_PERSIST_FIELDS = [
   'sessionId', 'step', 'fileName', 'selectedPatternKey', 'customRegex',
-  'titleTemplate', 'keepPrologue', 'systemPrompt', 'autoRetry', 'lineDecisions', 'promptCollapsed',
+  'titleTemplate', 'keepPrologue', 'exportMode', 'systemPrompt', 'autoRetry', 'lineDecisions', 'promptCollapsed',
   'rangeStart', 'rangeEnd'
 ];
 
@@ -92,6 +93,9 @@ function trLoad() {
       trState[k] = snap[k];
     }
   }
+  if (trState.exportMode !== 'combine' && trState.exportMode !== 'split') {
+    trState.exportMode = 'split';
+  }
   // chaptersMeta is informational only; we do NOT reconstruct chapters content
   // from sessionStorage. The caller (editor_textreview.js) will re-split from rawText
   // if present, or prompt the user to re-import.
@@ -142,6 +146,7 @@ function trResetState() {
   trState.customRegex = '';
   trState.titleTemplate = '';
   trState.keepPrologue = true;
+  trState.exportMode = 'split';
   trState.systemPrompt = '';
   trState.autoRetry = true;
   trState.lineDecisions = {};
