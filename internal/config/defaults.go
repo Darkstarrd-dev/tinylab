@@ -207,6 +207,7 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 	// novelhelper/frontend/src/utils/split.ts::DEFAULT_SPLIT_PATTERNS。
 	if cfg.TextReview.SplitPatterns == nil {
 		cfg.TextReview.SplitPatterns = []SplitPattern{
+			{Key: "bare-num", Label: "纯数字行（1 / 001）", Regex: "^(\\d{1,4})$", Builtin: true},
 			{Key: "zhang", Label: "第X章（中文/阿拉伯数字）", Regex: "^(第[0-9零一二三四五六七八九十百千万]+章.*)", Builtin: true},
 			{Key: "hui", Label: "第X回", Regex: "^(第[0-9零一二三四五六七八九十百千万]+回.*)", Builtin: true},
 			{Key: "juan", Label: "第X卷", Regex: "^(第[0-9零一二三四五六七八九十百千万]+卷.*)", Builtin: true},
@@ -216,6 +217,40 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 			{Key: "dunhao", Label: "数字+顿号（3、标题）", Regex: "^(\\d{1,4}、.*)", Builtin: true},
 			{Key: "maohao", Label: "数字+冒号（001：标题）", Regex: "^(\\d{1,4}[:：].*)", Builtin: true},
 			{Key: "custom", Label: "自定义正则", Regex: "", Builtin: true},
+		}
+	} else if len(cfg.TextReview.SplitPatterns) > 0 {
+		// 存量配置回填：旧 config.yaml 只有 9 个内置模式时，按 key 补齐缺失的
+		// builtin（如 bare-num），用户自定义 key 与已清空（[]）不受影响。
+		// custom 条目恒定位列尾。
+		builtinDefaults := []SplitPattern{
+			{Key: "bare-num", Label: "纯数字行（1 / 001）", Regex: "^(\\d{1,4})$", Builtin: true},
+		}
+		have := make(map[string]bool, len(cfg.TextReview.SplitPatterns))
+		for _, p := range cfg.TextReview.SplitPatterns {
+			have[p.Key] = true
+		}
+		var missing []SplitPattern
+		for _, b := range builtinDefaults {
+			if !have[b.Key] {
+				missing = append(missing, b)
+			}
+		}
+		if len(missing) > 0 {
+			var rest []SplitPattern
+			var custom *SplitPattern
+			for i := range cfg.TextReview.SplitPatterns {
+				if cfg.TextReview.SplitPatterns[i].Key == "custom" {
+					c := cfg.TextReview.SplitPatterns[i]
+					custom = &c
+				} else {
+					rest = append(rest, cfg.TextReview.SplitPatterns[i])
+				}
+			}
+			rest = append(rest, missing...)
+			if custom != nil {
+				rest = append(rest, *custom)
+			}
+			cfg.TextReview.SplitPatterns = rest
 		}
 	}
 	if cfg.AnySearch.MaxResults == 0 {

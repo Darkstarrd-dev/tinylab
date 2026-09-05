@@ -58,6 +58,7 @@
 // ===================== 内置默认模式池（存储形） =====================
 
 var DEFAULT_SPLIT_PATTERNS = [
+  { key: 'bare-num', label: '纯数字行（1 / 001）', regex: '^(\\d{1,4})$', builtin: true },
   { key: 'zhang',   label: '第X章（中文/阿拉伯数字）', regex: '^(第[0-9零一二三四五六七八九十百千万]+章.*)', builtin: true },
   { key: 'hui',     label: '第X回',   regex: '^(第[0-9零一二三四五六七八九十百千万]+回.*)', builtin: true },
   { key: 'juan',    label: '第X卷',   regex: '^(第[0-9零一二三四五六七八九十百千万]+卷.*)', builtin: true },
@@ -490,3 +491,131 @@ window.TR.retentionRate = retentionRate;
 window.TR.stripChapterMarker = stripChapterMarker;
 window.TR.normalizeParagraphs = normalizeParagraphs;
 window.TR.findTitleInLine = findTitleInLine;
+
+// ===================== AI 标题拆分（候选行提取 + 行号切分） =====================
+
+/**
+ * 提取候选标题行：被空行包围（或文首/文末）的短行（默认 ≤60 字符）。
+ * 长正文段落天然被过滤；纯数字章、"第N章"、"N>>" 引用行全部保留为候选，
+ * 强标题信号（纯数字行、第N章/回/卷/节、数字+顿号/冒号）优先保留——抽稀时
+ * 永远先保强信号，弱候选（其他短行）只填补剩余配额，避免章节标题在长篇
+ * 中被均匀抽稀丢掉（目标文本 97 个纯数字章全保留）。
+ * 由 LLM 按语义判定（数字章首 vs 章内 N>> 引用），正则无法区分的场景正好是 LLM 强项。
+ * 返回 {lines: [{no (1-based 行号), text}], totalLines}。
+ */
+var AI_CAND_MAXLEN = 60;
+var AI_CAND_CAP = 4000;
+
+/** 强标题信号：命中即优先保留（与内置模式池同源的子集）。 */
+var AI_CAND_STRONG = [
+  /^\d{1,4}$/,
+  /^第[0-9零一二三四五六七八九十百千万]+[章回卷节]/,
+  /^\d{1,4}[、:：]/,
+  /^chapter\s+[0-9ivxlc]+/i,
+];
+
+function aiCandIsStrong(t) {
+  for (var i = 0; i < AI_CAND_STRONG.length; i++) {
+    if (AI_CAND_STRONG[i].test(t)) return true;
+  }
+  return false;
+}
+
+function extractSplitCandidates(text, opts) {
+  var o = opts || {};
+  var maxLen = o.maxLen != null ? o.maxLen : AI_CAND_MAXLEN;
+  var cap = o.cap != null ? o.cap : AI_CAND_CAP;
+  var rawLines = String(text || '').split(/\r?\n/);
+  var n = rawLines.length;
+  var strong = [];
+  var weak = [];
+  for (var i = 0; i < n; i++) {
+    var t = rawLines[i].trim();
+    if (!t || t.length > maxLen) continue;
+    var prevBlank = (i === 0) || (rawLines[i - 1].trim() === '');
+    var nextBlank = (i === n - 1) || (rawLines[i + 1].trim() === '');
+    if (!prevBlank && !nextBlank) continue;
+    var item = { no: i + 1, text: t.slice(0, maxLen) };
+    if (aiCandIsStrong(t)) strong.push(item);
+    else weak.push(item);
+  }
+  // 强信号全保留（超 cap 时自身均匀抽稀，仍保持分布）；弱候选填补剩余配额
+  if (strong.length > cap) {
+    var sStep = strong.length / cap;
+    var sSparse = [];
+    for (var k = 0; k < cap; k++) sSparse.push(strong[Math.floor(k * sStep)]);
+    return { lines: sSparse, totalLines: n };
+  }
+  var room = cap - strong.length;
+  var picked = weak;
+  if (weak.length > room) {
+    var wStep = weak.length / room;
+    picked = [];
+    for (var w = 0; w < room; w++) picked.push(weak[Math.floor(w * wStep)]);
+  }
+  // 按行号归并，保持出现顺序
+  var merged = strong.concat(picked);
+  merged.sort(function (a, b) { return a.no - b.no; });
+  return { lines: merged, totalLines: n };
+}
+
+/**
+ * 按 LLM 返回的行号切分。content 为模型输出文本，从中提取首个 [...] 数字数组；
+ * 行号映射回 0-based 行下标，该行即新章标题（含该行），标题前文字归上一章。
+ * 非法/越界行号丢弃；有效标题 <1 个时返回 null（调用方回退不改切分）。
+ */
+function aiSplitChapters(text, cands, content, keepPrologue) {
+  if (!text || !cands || !cands.lines || !cands.lines.length || !content) return null;
+  var m = String(content).match(/\[[\s\d,]*\]/);
+  if (!m) return null;
+  var nums;
+  try {
+    nums = JSON.parse(m[0]);
+  } catch (e) {
+    return null;
+  }
+  if (!nums || !nums.length) return null;
+  var lines = String(text).split(/\r?\n/);
+  var validNos = {};
+  for (var i = 0; i < cands.lines.length; i++) validNos[cands.lines[i].no] = true;
+  var titleIdx = [];
+  for (var j = 0; j < nums.length; j++) {
+    var no = nums[j];
+    if (typeof no !== 'number' || no < 1 || no > lines.length) continue;
+    if (!validNos[no]) continue;
+    var idx0 = no - 1;
+    if (titleIdx.length && idx0 <= titleIdx[titleIdx.length - 1]) continue;
+    titleIdx.push(idx0);
+  }
+  if (!titleIdx.length) return null;
+  var chapters = [];
+  var buf = [];
+  var curTitle = null;
+  function flush() {
+    var c = buf.join('\n').trim().replace(/\n+$/, '');
+    c = normalizeParagraphs(c);
+    if (curTitle !== null) {
+      chapters.push({ title: curTitle, content: c });
+    } else if (c && keepPrologue) {
+      chapters.push({ title: '序章', content: c });
+    }
+  }
+  var ti = 0;
+  for (var li = 0; li < lines.length; li++) {
+    if (ti < titleIdx.length && li === titleIdx[ti]) {
+      var pending = (curTitle === null && !keepPrologue && buf.join('\n').trim()) ? buf.join('\n').trim() : null;
+      flush();
+      curTitle = lines[li].trim().slice(0, TITLE_MAX);
+      buf = pending ? [pending] : [];
+      ti++;
+    } else {
+      buf.push(lines[li]);
+    }
+  }
+  flush();
+  if (!chapters.length) return null;
+  return chapters;
+}
+
+window.TR.extractSplitCandidates = extractSplitCandidates;
+window.TR.aiSplitChapters = aiSplitChapters;

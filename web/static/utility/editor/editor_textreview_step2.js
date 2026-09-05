@@ -1,22 +1,13 @@
 // editor_textreview_step2.js — Step2 panel: 章节切分 (chapter splitting).
 // Exposes window.trRenderStep2(panel, state).
 // Uses window.TR.* (P4): pattern selector (dropdown from backend list + TR
-// .DEFAULT_SPLIT_PATTERNS, with an "edit patterns" drawer via pg-modal),
+// .DEFAULT_SPLIT_PATTERNS, with an "edit patterns" modal),
 // "自动检测" button (TR.detectChapterPattern), live preview table (TR
-// .splitChapters + TR.applyTitleTemplate), title-template input, optional
-// "AI 拆分" button that POSTs a single chapter's content to /v1/chat/completions
-// (stream:false) with a split prompt and reparses results via TR.
+// .splitChapters + TR.applyTitleTemplate), title-template input,
+// "AI 拆分" button (TR.aiSplitChapters: candidate-line extraction + single
+// LLM classification pass), dedup section (window.TRDedup.*: scan + preview
+// + apply, rewrites trState.rawText and re-splits).
 // Mirrors editor.js style: 'use strict' + function + var.
-
-'use strict';
-
-// Split prompt for the optional "AI 拆分" feature. Sends a single chunk of
-// text and asks the model to emit one chapter-title line per detected break.
-var TR_AI_SPLIT_PROMPT =
-  '你是章节切分助手。请阅读下面的文本，找出所有章节标题行（即正文中出现的章/回/节/卷等章节边界）。' +
-  '只输出你识别出的章节标题，每行一个，按出现顺序排列，不要输出任何解释文字、不要输出正文内容。' +
-  '如果无法识别章节标题，输出空行。';
-
 /**
  * Render the Step2 (split) panel.
  * @param {HTMLElement} panel container element
@@ -207,6 +198,13 @@ window.trRenderStep2 = function (panel, state) {
   infoEl.className = 'tr-hint';
   infoEl.id = 'tr-s2-detect-info';
   leftPane.appendChild(infoEl);
+
+  // --- Dedup section: scan + apply (window.TRDedup) ---
+  var dedupBox = document.createElement('div');
+  dedupBox.className = 'tr-s2-dedup';
+  dedupBox.id = 'tr-s2-dedup';
+  leftPane.appendChild(dedupBox);
+  trStep2RenderDedup();
 
   // --- Preview section: fills remaining height ---
   var previewSection = document.createElement('div');
@@ -465,97 +463,152 @@ function trS2SelectChapter(idx) {
 
 // ===================== Step2: AI split (optional) =====================
 
+// AI Split modal 选中的模型 {value, label};确认后走候选行提取 + 单次 LLM 行号分类切分。
+var trS2AIModel = null;
+
 /**
- * "AI 拆分": send the rawText (or a truncated prefix if very large) to
- * /v1/chat/completions (stream:false) with a split prompt; parse the returned
- * title lines and re-split using a synthesized custom regex OR just refresh
- * the detect info.
+ * "AI 拆分": 弹出模型选择 Modal (Step3 Node Pool Setting 同款模型选择器) +
+ * 确定/取消;确认后按候选行 + 模型返回行号切分 (TR.aiSplitChapters)。
  */
 function trStep2AISplit() {
   if (!trState.rawText) {
     trToast(trT('trImportFirst'), 'warning');
     return;
   }
-  var btn = document.getElementById('tr-s2-aisplit');
-  if (btn) { btn.disabled = true; btn.textContent = trT('trWorking'); }
+  trStep2RenderAISplitModal();
+}
 
-  // Ensure review nodes are loaded before attempting routing
-  var ensureNodesP = (trState.reviewNodes && trState.reviewNodes.length > 0)
-    ? Promise.resolve(trState.reviewNodes)
-    : trApiGet('/text-review/review-nodes').then(function (res) {
-        var nodes = (res && !res.error && Array.isArray(res.nodes)) ? res.nodes : [];
-        trState.reviewNodes = nodes;
-        return nodes;
-      }, function () { return []; });
-
-  ensureNodesP.then(function (nodes) {
-    var node = (nodes || []).filter(function (n) { return n.enabled; })[0];
-    if (!node) {
-      if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-      trToast(trT('trNoNodesEnabled') || '请先在 Step 3 节点池中配置并启用模型', 'warning');
-      return;
-    }
-
-    var modelStr = node.modelId || '';
-    if (node.providerId !== 'combo' && modelStr.indexOf('/') === -1) {
-      var prefix = (window._trS3ProviderPrefix && window._trS3ProviderPrefix(node.providerId)) || '';
-      if (prefix) {
-        modelStr = prefix + '/' + modelStr;
-      }
-    }
-
-    var sample = trState.rawText.length > 20000 ? trState.rawText.slice(0, 20000) : trState.rawText;
-    var body = {
-      model: modelStr,
-      stream: false,
-      messages: [
-        { role: 'system', content: TR_AI_SPLIT_PROMPT },
-        { role: 'user', content: sample }
-      ]
-    };
-    return fetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
-        if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-        if (!data || data.error) {
-          var em = (data && data.error);
-          if (em && typeof em !== 'string') em = JSON.stringify(em);
-          trToast(em || trT('trAISplitFailed'), 'error');
-          return;
-        }
-        var content = trExtractChatContent(data);
-        var info = document.getElementById('tr-s2-detect-info');
-        if (info && content) {
-          var lines = content.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return !!l; });
-          info.textContent = trT('trAISplitResult', [String(lines.length)]) + (lines.length ? '：' + lines.slice(0, 5).join('、') : '');
-        } else if (info) {
-          info.textContent = trT('trAISplitEmpty');
-        }
-      });
-  }).catch(function (err) {
-    if (btn) { btn.disabled = false; btn.textContent = trT('trAISplit'); }
-    console.warn('tr AI split failed:', err);
-    trToast(trT('trAISplitFailed'), 'error');
-  });
+function trStep2RenderAISplitModal() {
+  var hasModel = !!(trS2AIModel && trS2AIModel.label);
+  var body =
+    '<div class="tr-form-row">' +
+      '<label class="tr-form-label">' + trEscapeHtml(trT('trNodeModel') || '模型') + '</label>' +
+      '<button type="button" class="tr-model-select-btn' + (hasModel ? ' has-value' : '') + '" onclick="trStep2PickAISplitModel()">' +
+        '<span class="' + (hasModel ? 'tr-model-name' : 'tr-model-placeholder') + '">' +
+          trEscapeHtml(hasModel ? trS2AIModel.label : (trT('trSelectModel') || '点击选择模型...')) +
+        '</span>' +
+        '<span style="opacity:0.6; font-size:11px;">▼</span>' +
+      '</button>' +
+      '<p class="tr-hint" style="margin:8px 0 0 0;">' + trEscapeHtml(trT('trAISplitHint')) + '</p>' +
+    '</div>';
+  var html =
+    '<div class="modal" style="max-width:480px; width:92%;">' +
+      '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
+        '<span>' + trEscapeHtml(trT('trAISplit')) + '</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="trCloseModal()" style="padding:2px 8px;">✕</button>' +
+      '</div>' +
+      '<div class="modal-body" style="padding:12px 0;">' + body + '</div>' +
+      '<div class="modal-footer" style="margin-top:10px;">' +
+        '<button type="button" class="btn btn-ghost" onclick="trCloseModal()">' + trEscapeHtml(trT('cancel')) + '</button>' +
+        '<button type="button" class="btn btn-primary" onclick="trStep2ConfirmAISplit()">' + trEscapeHtml(trT('confirm')) + '</button>' +
+      '</div>' +
+    '</div>';
+  if (typeof window.trShowModal === 'function') {
+    window.trShowModal(html);
+  } else if (typeof pgShowModal === 'function') {
+    pgShowModal(html);
+  }
 }
 
 /**
- * Extract the assistant message text from a /v1/chat/completions response.
+ * AI Split 模型选择:复用系统 Model Picker (Step3 trStep3PickModel 同款),
+ * 选中后回填按钮标签并重绘 Modal。
  */
-function trExtractChatContent(data) {
-  try {
-    var choices = data && data.choices;
-    if (choices && choices.length > 0) {
-      var msg = choices[0].message;
-      if (msg && typeof msg.content === 'string') return msg.content;
-    }
-  } catch (e) {}
-  return '';
+function trStep2PickAISplitModel() {
+  var cur = trS2AIModel ? trS2AIModel.value : '';
+  var onModelSelected = function (val) {
+    if (!val) return;
+    trS2AIModel = { value: val, label: val };
+    trApiGet('/models').then(function (res) {
+      var models = (res && !res.error && Array.isArray(res.models)) ? res.models : [];
+      for (var i = 0; i < models.length; i++) {
+        var m = models[i];
+        if (m && m.id === val) {
+          trS2AIModel.label = (m.provider ? m.provider + ' / ' : '') + (m.alias || m.name || m.realModelId || m.id);
+          break;
+        }
+      }
+      trStep2RenderAISplitModal();
+    }, function () { trStep2RenderAISplitModal(); });
+  };
+  if (typeof window.openModelPickerModal === 'function') {
+    window.openModelPickerModal(cur, onModelSelected);
+  } else if (typeof pgOpenModelPicker === 'function') {
+    pgOpenModelPicker(cur, onModelSelected);
+  } else {
+    trToast('Model picker unavailable', 'warning');
+  }
 }
+
+/**
+ * AI Split 确认:候选行提取 + 单次 LLM 分类,按返回行号切分。
+ * 候选行 = 空行分隔的短行(默认 ≤60 字符,≤4000 行封顶);prompt 要求模型
+ * 只输出章节标题行号(JSON 数组),逐行 fetch 无流式,失败回退提示不改切分。
+ */
+function trStep2ConfirmAISplit() {
+  if (!trS2AIModel || !trS2AIModel.value) {
+    trToast(trT('trModelRequired') || '请先选择模型', 'warning');
+    return;
+  }
+  if (!window.TR || !window.TR.extractSplitCandidates || !window.TR.aiSplitChapters) {
+    trToast('AI split unavailable', 'error');
+    return;
+  }
+  if (!trState.rawText) {
+    trToast(trT('trImportFirst'), 'warning');
+    return;
+  }
+  trCloseModal();
+  var info = document.getElementById('tr-s2-detect-info');
+  if (info) info.textContent = trT('trWorking');
+  var cands = window.TR.extractSplitCandidates(trState.rawText, {});
+  if (!cands.lines.length) {
+    if (info) info.textContent = trT('trAISplitEmpty');
+    return;
+  }
+  var modelStr = trS2AIModel.value;
+  if (modelStr.indexOf('/') === -1 && typeof window._trS3ProviderPrefix === 'function') {
+    var pid = (trS2AIModel.providerId || '');
+    var prefix = pid ? window._trS3ProviderPrefix(pid) : '';
+    if (prefix) modelStr = prefix + '/' + modelStr;
+  }
+  var prompt = '你是章节切分助手。下面是按行号列出的候选标题行（每行格式为"行号: 内容"，只包含短行，正文长段落已过滤）。' +
+    '请判断其中哪些是真正的章节标题（章/回/节/卷/纯数字编号等章节边界），只输出 JSON 数组，如 [12, 45, 78]，按出现顺序排列，不要输出任何解释文字。' +
+    '如果没有章节标题，输出 []。\n\n' +
+    cands.lines.map(function (l) { return l.no + ': ' + l.text; }).join('\n');
+  fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelStr, stream: false, messages: [{ role: 'user', content: prompt }] }),
+  }).then(function (resp) { return resp.json(); }).then(function (data) {
+    if (!data || data.error) {
+      var em = (data && data.error);
+      if (em && typeof em !== 'string') em = JSON.stringify(em);
+      trToast(em || trT('trAISplitFailed'), 'error');
+      if (info) info.textContent = trT('trAISplitFailed');
+      return;
+    }
+    var content = trExtractChatContent(data);
+    var chapters = window.TR.aiSplitChapters(trState.rawText, cands, content, trState.keepPrologue);
+    if (!chapters || !chapters.length) {
+      if (info) info.textContent = trT('trAISplitEmpty');
+      return;
+    }
+    if (trState.titleTemplate && window.TR.applyTitleTemplate) {
+      chapters = window.TR.applyTitleTemplate(chapters, trState.titleTemplate);
+    }
+    trState.chapters = chapters;
+    trSave();
+    trStep2RenderPreview();
+    if (info) info.textContent = trT('trAISplitResult', [String(chapters.length)]);
+  }).catch(function (err) {
+    console.warn('tr AI split failed:', err);
+    trToast(trT('trAISplitFailed'), 'error');
+    if (info) info.textContent = trT('trAISplitFailed');
+  });
+}
+window.trStep2PickAISplitModel = trStep2PickAISplitModel;
+window.trStep2ConfirmAISplit = trStep2ConfirmAISplit;
 
 // ===================== Step2: pattern editor drawer (universal modal) =====================
 
@@ -751,5 +804,97 @@ function trStep2Export() {
     trToast((typeof trT === 'function' ? trT('trExportFailed') : '') || ('导出失败: ' + (err && err.message || err)), 'error');
   });
 }
+
+// ===================== Step2: dedup（重复块扫描 + 清除） =====================
+
+var trS2DedupReport = null;
+
+/**
+ * 去重区渲染：扫描按钮常驻；有报告时展示块列表（起点行号+行数+预览）与
+ * 广告行数，应用/丢弃按钮。扫描耗时 <100ms，同步执行。
+ */
+function trStep2RenderDedup() {
+  var box = document.getElementById('tr-s2-dedup');
+  if (!box) return;
+  if (!window.TRDedup) {
+    box.innerHTML = '';
+    return;
+  }
+  if (!trS2DedupReport) {
+    box.innerHTML =
+      '<button type="button" class="tr-btn" id="tr-s2-dedup-scan">' +
+        trEscapeHtml(trT('trDedupScan') || '去重扫描') + '</button>';
+    var scanBtn = document.getElementById('tr-s2-dedup-scan');
+    if (scanBtn) scanBtn.addEventListener('click', trStep2DedupScan);
+    return;
+  }
+  var r = trS2DedupReport;
+  var html = '<div class="tr-hint">RAW_TEXT_PLACEHOLDER</div>';
+  html = html.replace('RAW_TEXT_PLACEHOLDER', trEscapeHtml(
+    (trT('trDedupFound', [String(r.blocks.length), String(r.adLines.length)]) ||
+      ('发现重复块 ' + r.blocks.length + ' 处，广告行 ' + r.adLines.length + ' 行')) +
+    (r.singleLineGroups ? ('（另有 ' + r.singleLineGroups + ' 组单行复用，仅提示不删除）') : '')));
+  if (r.blocks.length) {
+    html += '<table class="tr-preview-table"><thead><tr>' +
+      '<th class="tr-col-idx">#</th>' +
+      '<th class="tr-col-title">' + trEscapeHtml(trT('trDedupBlock') || '重复块') + '</th>' +
+      '<th class="tr-col-len">' + trEscapeHtml(trT('trCharCount') || '字') + '</th>' +
+      '</tr></thead><tbody>';
+    for (var i = 0; i < r.blocks.length; i++) {
+      var b = r.blocks[i];
+      html += '<tr><td class="tr-col-idx">' + (i + 1) + '</td>' +
+        '<td class="tr-col-title">' + trEscapeHtml('行' + (b.aStart + 1) + ' ⇄ 行' + (b.bStart + 1) + ' · ' + b.lines + '行 · ' + (b.preview || '')) + '</td>' +
+        '<td class="tr-col-len">' + b.chars + '</td></tr>';
+    }
+    html += '</tbody></table>';
+  }
+  html += '<div class="tr-s2-controls2" style="margin-top:8px">' +
+    '<button type="button" class="tr-btn tr-btn-primary" id="tr-s2-dedup-apply">' +
+      trEscapeHtml(trT('trDedupApply') || '应用去重') + '</button>' +
+    '<button type="button" class="tr-btn tr-btn-ghost" id="tr-s2-dedup-drop">' +
+      trEscapeHtml(trT('trDedupDrop') || '丢弃') + '</button>' +
+    '<button type="button" class="tr-btn" id="tr-s2-dedup-rescan">' +
+      trEscapeHtml(trT('trDedupScan') || '去重扫描') + '</button>' +
+    '</div>';
+  box.innerHTML = html;
+  var applyBtn = document.getElementById('tr-s2-dedup-apply');
+  if (applyBtn) applyBtn.addEventListener('click', trStep2DedupApply);
+  var dropBtn = document.getElementById('tr-s2-dedup-drop');
+  if (dropBtn) dropBtn.addEventListener('click', function () { trS2DedupReport = null; trStep2RenderDedup(); });
+  var rescanBtn = document.getElementById('tr-s2-dedup-rescan');
+  if (rescanBtn) rescanBtn.addEventListener('click', trStep2DedupScan);
+}
+
+/**
+ * 去重扫描：对 trState.rawText 跑 TRDedup.scanDuplicates，存报告并渲染。
+ */
+function trStep2DedupScan() {
+  if (!trState.rawText) {
+    trToast(trT('trImportFirst'), 'warning');
+    return;
+  }
+  if (!window.TRDedup) {
+    trToast('Dedup unavailable', 'error');
+    return;
+  }
+  trS2DedupReport = window.TRDedup.scanDuplicates(trState.rawText, {});
+  trStep2RenderDedup();
+}
+
+/**
+ * 应用去重：TRDedup.applyDedup 重写 trState.rawText，清空报告，重新切分。
+ */
+function trStep2DedupApply() {
+  if (!trS2DedupReport || !trState.rawText) return;
+  var res = window.TRDedup.applyDedup(trState.rawText, trS2DedupReport, {});
+  trState.rawText = res.text;
+  trS2DedupReport = null;
+  trSave();
+  trStep2RenderDedup();
+  trStep2DoSplit();
+  trToast(trT('trDedupApplied', [String(res.removedBlocks), String(res.removedAdLines)]) ||
+    ('已清除重复块 ' + res.removedBlocks + ' 处，广告行 ' + res.removedAdLines + ' 行'), 'success');
+}
+
 
 
