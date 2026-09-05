@@ -46,11 +46,12 @@ function renderUsageRow(e, sessionKey, hidden) {
   var inT = (e.inputTokens || 0);
   // RES/CT split: prefer per-split fields; fall back to splitting the
   // aggregate by ratio when only outputTokens exists (old entries).
-  var resT = (e.reasoningTokens || 0);
+  var resT = (typeof resIsEnc === 'function' && resIsEnc(e.reasoningTokens)) ? -1 : (e.reasoningTokens || 0);
   var ctT = (e.contentTokens || 0);
   var outT = (e.outputTokens || 0);
-  if (outT > 0 && resT + ctT === 0) ctT = outT;
-  var spdBase = resT + ctT > 0 ? resT + ctT : outT;
+  var resN = (typeof resNum === 'function') ? resNum(resT) : (resT < 0 ? 0 : resT);
+  if (outT > 0 && resN + ctT === 0) ctT = outT;
+  var spdBase = resN + ctT > 0 ? resN + ctT : outT;
   if (e.status === 'processing') {
     if (genStartMs != null) {
       gtMs = Date.now() - genStartMs;
@@ -91,7 +92,7 @@ function renderUsageRow(e, sessionKey, hidden) {
     <td class="ttft-cell" data-tooltip="' + escapeHtml(t('ttTTFT')) + '">' + ttftDisplay + '</td>\
     <td class="gt-cell" data-tooltip="' + escapeHtml(t('ttGT')) + '">' + gtDisplay + '</td>\
     <td class="in-cell" data-tooltip="' + escapeHtml(t('thInput')) + '">' + inT + '</td>\
-    <td class="res-cell" data-tooltip="' + escapeHtml(t('ttRES')) + '">' + resT + '</td>\
+    <td class="res-cell" data-tooltip="' + escapeHtml(t('ttRES')) + '">' + ((typeof resDisplay === 'function') ? resDisplay(resT) : (resT < 0 ? 'enc' : resT)) + '</td>\
     <td class="ct-cell" data-tooltip="' + escapeHtml(t('ttCT')) + '">' + ctT + '</td>\
     <td class="speed-cell" data-tooltip="' + escapeHtml(t('thAvgSpeed')) + '">' + spdDisplay + '</td>\
   </tr>';

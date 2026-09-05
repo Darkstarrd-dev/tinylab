@@ -115,11 +115,68 @@ func countContentSplit(payload []byte, nowUnixMilli int64, lastChatUnixMilli *in
 		*lastChatUnixMilli = nowUnixMilli
 		return sseContentLength(payload), sseReasoningLength(payload)
 	}
-	if isNativeResponsesPayload(payload) && *lastChatUnixMilli != 0 &&
-		nowUnixMilli-*lastChatUnixMilli < int64(mixedSuppressWindow/time.Millisecond) {
-		return 0, 0
+	if isNativeResponsesPayload(payload) {
+		if *lastChatUnixMilli != 0 &&
+			nowUnixMilli-*lastChatUnixMilli < int64(mixedSuppressWindow/time.Millisecond) {
+			return 0, 0
+		}
+		// Done/completed echoes re-emit accumulated text — only *.delta
+		// rows are incremental. See isResponsesDeltaEvent.
+		if !isResponsesDeltaEvent(payload) {
+			return 0, 0
+		}
 	}
 	return sseContentLength(payload), sseReasoningLength(payload)
+}
+
+// isResponsesDeltaEvent reports whether a native Responses payload is an
+// incremental delta event. Terminal echoes (response.output_item.done,
+// response.output_text.done, response.completed, ...) carry the accumulated
+// full text, so counting them duplicates the deltas (CT roughly doubles and
+// the derived SPD inflates). Only *.delta rows are countable.
+func isResponsesDeltaEvent(payload []byte) bool {
+	return bytes.Contains(payload, []byte(`.delta"`))
+}
+
+// reasoningEncryptedSentinel marks ReasoningTokens when the stream carried
+// encrypted (opaque) reasoning with no countable plaintext counterpart. The
+// Recent RES column renders it as "enc". Plaintext always wins: any counted
+// reasoning chars overwrite it, and all output/speed math normalizes it to 0.
+const reasoningEncryptedSentinel = -1
+
+// sseHasEncryptedReasoning reports whether an SSE data payload carries opaque
+// reasoning (Responses "encrypted_content"). Encrypted bytes are not
+// countable (byte length says nothing about tokens), but their presence flips
+// the RES column from 0 to the "enc" sentinel so "no reasoning" and "hidden
+// reasoning" stay distinguishable. Empty or null values do not count.
+func sseHasEncryptedReasoning(payload []byte) bool {
+	const marker = `"encrypted_content":"`
+	idx := bytes.Index(payload, []byte(marker))
+	if idx < 0 {
+		return false
+	}
+	i := idx + len(marker)
+	return i < len(payload) && payload[i] != '"'
+}
+
+// splitOutputTotal is the aggregate output for RES+CT estimates. The
+// encrypted sentinel normalizes to 0: hidden reasoning contributes no known
+// tokens to OUT/SPD.
+func splitOutputTotal(res, ct int) int {
+	if res < 0 {
+		res = 0
+	}
+	return res + ct
+}
+
+// applyReasoningSentinel maps a zero RES estimate to the encrypted sentinel
+// when the stream saw encrypted reasoning and counted no plaintext
+// counterpart. Any counted reasoning chars keep their estimate.
+func applyReasoningSentinel(res int, reasoningChars int64, encrypted bool) int {
+	if res == 0 && reasoningChars == 0 && encrypted {
+		return reasoningEncryptedSentinel
+	}
+	return res
 }
 
 // chunkDelta is the per-chunk parse result for a single SSE data payload.

@@ -278,3 +278,85 @@ func TestStreamResponseAnthropic_TerminalFallbackNoUsage(t *testing.T) {
 		t.Fatalf("anthropic text fallback failed: output tokens must be non-zero, got 0")
 	}
 }
+
+// TestSSEHasEncryptedReasoning covers the RES=enc sentinel trigger: an
+// "encrypted_content" value marks opaque reasoning; empty/null values and
+// unrelated payloads do not.
+func TestSSEHasEncryptedReasoning(t *testing.T) {
+	enc := []byte(`{"type":"response.output_item.done","item":{"type":"reasoning","encrypted_content":"Q-PaDgFM"}}`)
+	if !sseHasEncryptedReasoning(enc) {
+		t.Errorf("expected encrypted_content to flag opaque reasoning")
+	}
+	empty := []byte(`{"item":{"type":"reasoning","encrypted_content":""}}`)
+	if sseHasEncryptedReasoning(empty) {
+		t.Errorf("empty encrypted_content must not flag")
+	}
+	plain := []byte(`{"choices":[{"delta":{"content":"hello"}}]}`)
+	if sseHasEncryptedReasoning(plain) {
+		t.Errorf("plain content must not flag")
+	}
+}
+
+// TestCountContentSplit_NativeDoneEchoSuppressed covers the delta+done dedup:
+// native Responses terminal echoes (output_item.done re-emitting accumulated
+// text via "text":"...") are not incremental and must not count. *.delta
+// rows still count on a pure-passthrough stream.
+func TestCountContentSplit_NativeDoneEchoSuppressed(t *testing.T) {
+	var last int64
+	delta := []byte(`{"type":"response.output_text.delta","delta":"hello"}`)
+	if ct, _ := countContentSplit(delta, 1000, &last); ct != 5 {
+		t.Errorf("delta row: got %d, want 5", ct)
+	}
+	done := []byte(`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"hello"}]}}`)
+	if ct, res := countContentSplit(done, 2000, &last); ct != 0 || res != 0 {
+		t.Errorf("done echo: got ct=%d res=%d, want 0,0", ct, res)
+	}
+	completed := []byte(`{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}}`)
+	if ct, res := countContentSplit(completed, 3000, &last); ct != 0 || res != 0 {
+		t.Errorf("completed echo: got ct=%d res=%d, want 0,0", ct, res)
+	}
+}
+
+// TestStreamResponse_EncryptedReasoningSentinel covers the end-to-end enc
+// path: a native Responses stream with encrypted reasoning and one commentary
+// delta records ReasoningTokens=-1 (rendered "enc"), keeps CT from the
+// delta only (done echo not double-counted), and keeps OUT == CT.
+func TestStreamResponse_EncryptedReasoningSentinel(t *testing.T) {
+	commentary := "sort commentary here resync now"
+	raw := "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"Q-PaDgFM\"}}\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + commentary + "\"}\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + commentary + "\"}]}}\n" +
+		"data: [DONE]\n"
+
+	h := newTestHandlerWithCustomProvider(t, sseTestProvider("http://localhost:9999"),
+		config.RotationConfig{Strategy: "fill-first", MaxRetries: 0, BackoffMaxSec: 300})
+	sel := sseSelectedKey()
+	w := httptest.NewRecorder()
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(raw)),
+	}
+	h.streamResponse(w, resp, "muse-spark", sel, 5, []byte("{}"), false, "test-enc-sentinel", nil, "", combo.EntryFormatOpenAIResponses, "", "")
+
+	rb, ok := h.usage.(*usage.RingBuffer)
+	if !ok {
+		t.Fatalf("usage is %T, expected *usage.RingBuffer", h.usage)
+	}
+	entries := rb.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 usage entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.ReasoningTokens != reasoningEncryptedSentinel {
+		t.Errorf("expected ReasoningTokens=%d (enc), got %d (entry=%+v)", reasoningEncryptedSentinel, e.ReasoningTokens, e)
+	}
+	wantCt := len(commentary) / 4
+	if e.ContentTokens != wantCt {
+		t.Errorf("expected ContentTokens=%d (single-counted delta), got %d (entry=%+v)", wantCt, e.ContentTokens, e)
+	}
+	if e.OutputTokens != e.ContentTokens {
+		t.Errorf("expected OutputTokens=%d to equal CT (enc normalizes to 0), got %d", e.ContentTokens, e.OutputTokens)
+	}
+}

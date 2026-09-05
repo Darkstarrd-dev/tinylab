@@ -109,6 +109,9 @@ func (t *EntryTracker) UpdateTokens(id string, input, output int) {
 // per-split live estimates alongside the aggregate output. Monotonic: live
 // estimates only move forward, so stale ticker interleavings never regress
 // the Recent columns.
+// The encrypted sentinel (res == -1) sticks only over the zero value: it
+// marks "hidden reasoning seen, nothing countable yet". Any counted plaintext
+// (res > current) overwrites it, so plaintext always wins.
 func (t *EntryTracker) UpdateTokensSplit(id string, input, output, res, ct int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -119,7 +122,12 @@ func (t *EntryTracker) UpdateTokensSplit(id string, input, output, res, ct int) 
 		if output >= 0 && output > e.OutputTokens {
 			e.OutputTokens = output
 		}
-		if res > e.ReasoningTokens {
+		if res == reasoningEncryptedSentinel {
+			if e.ReasoningTokens == 0 {
+				e.ReasoningTokens = res
+			}
+		} else if res > e.ReasoningTokens && (res != 0 || e.ReasoningTokens != reasoningEncryptedSentinel) {
+			// A no-info zero (aggregate-only broadcast) must not clear "enc".
 			e.ReasoningTokens = res
 		}
 		if ct > e.ContentTokens {

@@ -33,7 +33,12 @@ function mergeUsageEntries(apiEntries) {
         if ((existing.ttftMs || 0) > (e.ttftMs || 0)) e.ttftMs = existing.ttftMs;
         if ((existing.inputTokens || 0) > (e.inputTokens || 0)) e.inputTokens = existing.inputTokens;
         if ((existing.outputTokens || 0) > (e.outputTokens || 0)) e.outputTokens = existing.outputTokens;
-        if ((existing.reasoningTokens || 0) > (e.reasoningTokens || 0)) e.reasoningTokens = existing.reasoningTokens;
+        // Sentinel-aware: "enc" (-1) beats 0/no-info, loses to any counted
+        // plaintext; never regress live RES on REST snapshots.
+        var mResE = existing.reasoningTokens, mResN = e.reasoningTokens;
+        if (mResN === -1) { if (mResE > 0) e.reasoningTokens = mResE; }
+        else if (mResE === -1) { if (!(mResN > 0)) e.reasoningTokens = -1; }
+        else if ((mResE || 0) > (mResN || 0)) e.reasoningTokens = mResE;
         if ((existing.contentTokens || 0) > (e.contentTokens || 0)) e.contentTokens = existing.contentTokens;
         if (existing.firstContentMs && !(e.firstContentMs)) e.firstContentMs = existing.firstContentMs;
       }
@@ -355,7 +360,10 @@ function handleRequestTokens(id, entry) {
   if (!id || !entry) return;
   var input = entry.inputTokens;
   var output = entry.outputTokens || 0;
-  var res = entry.reasoningTokens || 0;
+  // Encrypted-reasoning sentinel: -1 carries no countable tokens; a later
+  // no-info 0 must not clear an established "enc".
+  var resRaw = entry.reasoningTokens;
+  var res = (typeof resIsEnc === 'function' && resIsEnc(resRaw)) ? -1 : (resRaw || 0);
   var ct = entry.contentTokens || 0;
   // Backend sends aggregate-only broadcasts (Anthropic usage path) with
   // res/ct unset: keep the row's existing split and only lift the total.
@@ -366,7 +374,10 @@ function handleRequestTokens(id, entry) {
     // Monotonic: the locally estimated eff may already exceed a later
     // upstream value in edge cases — never regress the live OUT.
     if (output > (inflight.outputTokens || 0)) inflight.outputTokens = output;
-    if (res > (inflight.reasoningTokens || 0)) inflight.reasoningTokens = res;
+    // Encrypted sentinel sticks over zero; plaintext always overwrites it;
+    // a no-info zero never clears "enc".
+    if (res === -1) { if ((inflight.reasoningTokens || 0) === 0) inflight.reasoningTokens = -1; }
+    else if (res > (inflight.reasoningTokens || 0) && (res !== 0 || inflight.reasoningTokens !== -1)) inflight.reasoningTokens = res;
     if (ct > (inflight.contentTokens || 0)) inflight.contentTokens = ct;
     if (fcm > 0 && !(inflight.firstContentMs)) inflight.firstContentMs = fcm;
   }
@@ -374,7 +385,8 @@ function handleRequestTokens(id, entry) {
   if (found >= 0 && lastUsageEntries[found].status === 'processing') {
     if (input && input > 0) lastUsageEntries[found].inputTokens = input;
     if (output > (lastUsageEntries[found].outputTokens || 0)) lastUsageEntries[found].outputTokens = output;
-    if (res > (lastUsageEntries[found].reasoningTokens || 0)) lastUsageEntries[found].reasoningTokens = res;
+    if (res === -1) { if ((lastUsageEntries[found].reasoningTokens || 0) === 0) lastUsageEntries[found].reasoningTokens = -1; }
+    else if (res > (lastUsageEntries[found].reasoningTokens || 0) && (res !== 0 || lastUsageEntries[found].reasoningTokens !== -1)) lastUsageEntries[found].reasoningTokens = res;
     if (ct > (lastUsageEntries[found].contentTokens || 0)) lastUsageEntries[found].contentTokens = ct;
     if (fcm > 0 && !(lastUsageEntries[found].firstContentMs)) lastUsageEntries[found].firstContentMs = fcm;
   }
@@ -390,17 +402,23 @@ function handleRequestTokens(id, entry) {
     var inCell = row.querySelector('.in-cell');
     if (inCell) inCell.textContent = String(displayInput);
     var prevRes = Number(row.getAttribute('data-res') || '0');
-    if (res < prevRes) res = prevRes;
+    // Sentinel-aware monotonic: -1 ("enc") beats 0 but loses to any
+    // counted plaintext; a no-info 0 never clears "enc".
+    if (res === -1) { if (prevRes !== 0) res = prevRes; }
+    else if (prevRes === -1) { if (res <= 0) res = -1; }
+    else if (res < prevRes) res = prevRes;
     var prevCt = Number(row.getAttribute('data-ct') || '0');
     if (ct < prevCt) ct = prevCt;
     // Aggregate-only event (no split): attribute the delta to CT so the
     // total stays consistent without disturbing an established RES.
-    if (res + ct === 0 && output > 0) ct = output - prevRes > 0 ? output - prevRes : prevCt;
+    var resN0 = (typeof resNum === 'function') ? resNum(res) : (res < 0 ? 0 : res);
+    var prevResN0 = (typeof resNum === 'function') ? resNum(prevRes) : (prevRes < 0 ? 0 : prevRes);
+    if (resN0 + ct === 0 && output > 0) ct = output - prevResN0 > 0 ? output - prevResN0 : prevCt;
     row.setAttribute('data-out', String(output));
     row.setAttribute('data-res', String(res));
     row.setAttribute('data-ct', String(ct));
     var resCell = row.querySelector('.res-cell');
-    if (resCell) resCell.textContent = String(res);
+    if (resCell) resCell.textContent = (typeof resDisplay === 'function') ? resDisplay(res) : (res < 0 ? 'enc' : String(res));
     var ctCell = row.querySelector('.ct-cell');
     if (ctCell) ctCell.textContent = String(ct);
     // GT anchor priority: server first-content stamp > ts+ttft. The stamp
@@ -415,7 +433,8 @@ function handleRequestTokens(id, entry) {
       var gtMs = Date.now() - Number(genStart);
       if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
       var spdCell = row.querySelector('.speed-cell');
-      var spdBase = res + ct > 0 ? res + ct : output;
+      var spdResN = (typeof resNum === 'function') ? resNum(res) : (res < 0 ? 0 : res);
+      var spdBase = spdResN + ct > 0 ? spdResN + ct : output;
       if (spdCell) spdCell.textContent = formatGenSpeed(spdBase, gtMs);
     }
   }

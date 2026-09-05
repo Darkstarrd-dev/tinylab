@@ -122,6 +122,22 @@ function formatGenSpeed(outTokens, genMs) {
   return (outTokens / (genMs / 1000)).toFixed(1) + ' tok/s';
 }
 
+// resIsEnc reports the encrypted-reasoning sentinel: reasoningTokens == -1
+// means opaque reasoning was observed but nothing is countable.
+function resIsEnc(res) {
+  return res === -1;
+}
+
+// resNum normalizes the sentinel to 0 for all total/speed math.
+function resNum(res) {
+  return resIsEnc(res) ? 0 : (res || 0);
+}
+
+// resDisplay renders the RES cell: "enc" for the sentinel, else the number.
+function resDisplay(res) {
+  return resIsEnc(res) ? 'enc' : String(res || 0);
+}
+
 // shortKeyName strips the default "Key-" prefix for the compact Key column
 // (Key-1 -> 1). Custom names (Key Main, K1) pass through unchanged; the
 // full name stays available via the cell data-tooltip.

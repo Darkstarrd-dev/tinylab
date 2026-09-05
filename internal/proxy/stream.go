@@ -67,6 +67,10 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	// al); contentCharsTotal stays CT-only. Live RES/CT estimates derive
 	// from these two, independent of upstream usage/timings chunks.
 	var reasoningCharsTotal atomic.Int64
+	// reasoningEncrypted flags opaque (encrypted) reasoning observed on the
+	// stream. Encrypted bytes are uncountable, but their presence flips the
+	// RES column to the "enc" sentinel instead of 0.
+	var reasoningEncrypted atomic.Bool
 	// firstContentMs records the server-side UnixMilli of the first content
 	// chunk (reasoning OR content, any provider fabric). It anchors the frontend GT clock
 	// independent of usage/timings chunks; 0 = no content seen yet.
@@ -88,7 +92,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 		var lastPush time.Time
-		var lastIn, lastOut int64
+		var lastIn, lastOut, lastRes int64
 		for {
 			select {
 			case <-done:
@@ -104,22 +108,25 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 				// Live split estimates: upstream usage may arrive only at
 				// stream end (or never), so fall back to locally counted
 				// chars per split. Aggregate eff keeps the old contract.
-				effRes := rc / 4
-				effCt := cc / 4
-				eff := ot
-				if eff == 0 && effRes+effCt > 0 {
-					eff = effRes + effCt
+				// Encrypted (opaque) reasoning is uncountable: with no
+				// plaintext counterpart RES carries the enc sentinel (-1),
+				// normalized to 0 in all output/speed math.
+				effRes := applyReasoningSentinel(int(rc/4), rc, reasoningEncrypted.Load())
+				effCt := int(cc / 4)
+				eff := int(ot)
+				if eff == 0 && splitOutputTotal(effRes, effCt) > 0 {
+					eff = splitOutputTotal(effRes, effCt)
 				}
-				if it == lastIn && eff == lastOut {
+				if it == lastIn && int64(eff) == lastOut && int64(effRes) == lastRes {
 					continue
 				}
 				if time.Since(lastPush) < 200*time.Millisecond {
 					continue
 				}
 				lastPush = time.Now()
-				lastIn, lastOut = it, eff
-				h.EntryTracker.UpdateTokensSplit(reqID, -1, int(eff), int(effRes), int(effCt))
-				h.broadcastTokensSplit(reqID, int(it), int(eff), int(effRes), int(effCt), firstContentMs.Load())
+				lastIn, lastOut, lastRes = it, int64(eff), int64(effRes)
+				h.EntryTracker.UpdateTokensSplit(reqID, -1, eff, effRes, effCt)
+				h.broadcastTokensSplit(reqID, int(it), eff, effRes, effCt, firstContentMs.Load())
 			}
 		}
 	}()
@@ -236,6 +243,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 							if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 								h.sigCache.Put(id, sig)
 							}
+							if !reasoningEncrypted.Load() && sseHasEncryptedReasoning([]byte(payload)) {
+								reasoningEncrypted.Store(true)
+							}
 							ct, res := countContentSplit([]byte(payload), time.Now().UnixMilli(), &lastChatChunkMs)
 							contentChars += ct
 							reasoningChars += res
@@ -313,6 +323,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 						}
 						if id, sig, ok := extractThoughtSignature([]byte(payload)); ok {
 							h.sigCache.Put(id, sig)
+						}
+						if !reasoningEncrypted.Load() && sseHasEncryptedReasoning([]byte(payload)) {
+							reasoningEncrypted.Store(true)
 						}
 						ct, res := countContentSplit([]byte(payload), time.Now().UnixMilli(), &lastChatChunkMs)
 						contentChars += ct
@@ -494,10 +507,12 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	// Upstream reasoning usage (output_tokens_details.reasoning_tokens) is
 	// parsed where present in the loop; per-split fallbacks keep RES/CT
 	// segregated when only raw chars were observed.
-	finalRes := int(reasoningCharsTotal.Load() / 4)
+	// Encrypted reasoning with no plaintext counterpart records the enc
+	// sentinel (-1) instead of 0; normalized to 0 in aggregate/speed math.
+	finalRes := applyReasoningSentinel(int(reasoningCharsTotal.Load()/4), reasoningCharsTotal.Load(), reasoningEncrypted.Load())
 	finalCt := int(contentCharsTotal.Load() / 4)
-	if outputTokens.Load() == 0 && finalRes+finalCt > 0 {
-		outputTokens.Store(int64(finalRes + finalCt))
+	if outputTokens.Load() == 0 && splitOutputTotal(finalRes, finalCt) > 0 {
+		outputTokens.Store(int64(splitOutputTotal(finalRes, finalCt)))
 	}
 	h.recordUsage(reqID, sel.Provider.Name, model, sel, status, totalLatencyMs, latencyMs, int(inputTokens.Load()), int(outputTokens.Load()), errMsg, reqBody, sseBody, resp.Header, resp.StatusCode, reqHeaders, upstreamURL, originalModel, sessionKey, streamDecision, "", finalRes, finalCt)
 }

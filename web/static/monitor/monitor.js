@@ -91,7 +91,8 @@ function updateProcessingLatencyCells() {
     var outVal = Number(row.getAttribute('data-out') || '0');
     var resVal = Number(row.getAttribute('data-res') || '0');
     var ctVal = Number(row.getAttribute('data-ct') || '0');
-    var spdBase = resVal + ctVal > 0 ? resVal + ctVal : outVal;
+    var resValN = (typeof resNum === 'function') ? resNum(resVal) : (resVal < 0 ? 0 : resVal);
+    var spdBase = resValN + ctVal > 0 ? resValN + ctVal : outVal;
     var spdCell = row.querySelector('.speed-cell');
     if (spdCell) spdCell.textContent = formatGenSpeed(spdBase, gtMs);
   }
