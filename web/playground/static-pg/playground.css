@@ -1758,6 +1758,10 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .tr-s2-col{display:flex;align-items:center;min-width:0}
 .tr-s2-col-full{grid-column:1 / -1}
 .tr-s2-form-grid .tr-select, .tr-s2-form-grid .tr-input{width:100%;box-sizing:border-box}
+/* Step2 Pattern 自定义下拉:撑满左列,菜单贴列宽 (renderCustomSelectHtml) */
+#tr-s2-pattern-col .custom-select-wrapper{width:100%;}
+#tr-s2-pattern-col .custom-select-trigger{height:30px;width:100%;box-sizing:border-box;}
+#tr-s2-pattern-col .custom-select-menu{left:0;right:0;min-width:100%;max-height:min(52vh,380px);overflow-y:auto;overflow-x:hidden;}
 .tr-s2-controls1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border);flex-shrink:0;border-radius:0}
 .tr-s2-controls2{display:flex;gap:6px;padding:10px 16px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border);flex-shrink:0;border-radius:0}
 .tr-s2-controls2 .tr-btn{flex:1;text-align:center}

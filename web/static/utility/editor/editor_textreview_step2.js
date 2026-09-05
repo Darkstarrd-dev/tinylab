@@ -8,6 +8,9 @@
 // LLM classification pass), dedup section (window.TRDedup.*: scan + preview
 // + apply, rewrites trState.rawText and re-splits).
 // Mirrors editor.js style: 'use strict' + function + var.
+
+'use strict';
+
 /**
  * Render the Step2 (split) panel.
  * @param {HTMLElement} panel container element
@@ -20,7 +23,6 @@ window.trRenderStep2 = function (panel, state) {
     trMergePatterns([]);
   }
   var patterns = state.splitPatterns || [];
-  var selKey = state.selectedPatternKey || 'zhang';
   var hasChapters = !!(state.chapters && state.chapters.length);
   var freshEntry = !hasChapters; // auto-detect only on fresh entry
 
@@ -104,22 +106,14 @@ window.trRenderStep2 = function (panel, state) {
   l2.appendChild(tmplLabel);
   grid.appendChild(l2);
 
-  // Row 2: Inputs (Left: Select | Right: Text Input)
+  // Row 2: Inputs (Left: custom dropdown | Right: Text Input)
+  // 项目统一样式:renderCustomSelectHtml (app.js);底层隐藏 select#tr-s2-pattern
+  // 保持 change 事件契约,选项重建统一走 trStep2RenderPatternSelect()。
   var i1 = document.createElement('div');
   i1.className = 'tr-s2-col';
-  var patSelect = document.createElement('select');
-  patSelect.className = 'tr-select';
-  patSelect.id = 'tr-s2-pattern';
-  for (var i = 0; i < patterns.length; i++) {
-    var opt = document.createElement('option');
-    opt.value = patterns[i].key;
-    opt.textContent = patterns[i].label || patterns[i].key;
-    if (patterns[i].key === selKey) opt.selected = true;
-    patSelect.appendChild(opt);
-  }
-  patSelect.addEventListener('change', trStep2OnPatternChange);
-  i1.appendChild(patSelect);
+  i1.id = 'tr-s2-pattern-col';
   grid.appendChild(i1);
+  trStep2RenderPatternSelect();
 
   var i2 = document.createElement('div');
   i2.className = 'tr-s2-col';
@@ -137,7 +131,7 @@ window.trRenderStep2 = function (panel, state) {
   var customRow = document.createElement('div');
   customRow.className = 'tr-s2-col tr-s2-col-full';
   customRow.id = 'tr-s2-custom-row';
-  customRow.style.display = selKey === 'custom' ? '' : 'none';
+  customRow.style.display = (state.selectedPatternKey || 'zhang') === 'custom' ? '' : 'none';
 
   var crLabel = document.createElement('label');
   crLabel.className = 'tr-label';
@@ -311,6 +305,64 @@ function trStep2OnKeepPrologue() {
   trStep2DoSplit();
 }
 
+/**
+ * Render/rebuild the Step2 pattern custom dropdown from trState.splitPatterns.
+ * 底层隐藏 <select id="tr-s2-pattern"> + change 事件契约不变,auto-detect 与
+ * Pattern Editor 的增删都经此统一刷新,无需刷新页面。
+ * renderCustomSelectHtml 不可用时回退原生 select。
+ */
+function trStep2RenderPatternSelect() {
+  var col = document.getElementById('tr-s2-pattern-col');
+  if (!col) return;
+  var patterns = trState.splitPatterns || [];
+  var selKey = trState.selectedPatternKey || 'zhang';
+  var found = false;
+  for (var i = 0; i < patterns.length; i++) {
+    if (patterns[i].key === selKey) { found = true; break; }
+  }
+  if (!found) {
+    selKey = patterns.length ? patterns[0].key : 'zhang';
+    trState.selectedPatternKey = selKey;
+  }
+  col.innerHTML = '';
+  if (typeof renderCustomSelectHtml === 'function') {
+    var opts = patterns.map(function (p) { return { value: p.key, label: p.label || p.key }; });
+    col.innerHTML = renderCustomSelectHtml('tr-s2-pattern-wrap', 'tr-s2-pattern', opts, selKey, 'trStep2OnPatternChangeV(this.value)', 'width:100%');
+  } else {
+    var sel = document.createElement('select');
+    sel.className = 'tr-select';
+    sel.id = 'tr-s2-pattern';
+    for (var j = 0; j < patterns.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = patterns[j].key;
+      opt.textContent = patterns[j].label || patterns[j].key;
+      if (patterns[j].key === selKey) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    col.appendChild(sel);
+  }
+  var hidden = document.getElementById('tr-s2-pattern');
+  // 注意:custom 分支出身已挂 onchange 内联 (trStep2OnPatternChangeV),原生回退
+  // 分支才需要显式监听;同时挂会导致 custom 侧同一切换触发两次 DoSplit。
+  if (hidden && typeof renderCustomSelectHtml !== 'function') {
+    hidden.addEventListener('change', trStep2OnPatternChange);
+  }
+}
+
+/**
+ * Custom dropdown 的 change 入口 (hidden select onchange 透出):
+ * 与 trStep2OnPatternChange 同语义,供 renderCustomSelectHtml 内联调用。
+ */
+function trStep2OnPatternChangeV(value) {
+  if (value == null) return;
+  trState.selectedPatternKey = value;
+  var customRow = document.getElementById('tr-s2-custom-row');
+  if (customRow) customRow.style.display = (value === 'custom') ? '' : 'none';
+  trSave();
+  trStep2DoSplit();
+}
+window.trStep2OnPatternChangeV = trStep2OnPatternChangeV;
+
 // ===================== Step2: the runtime regex =====================
 
 /**
@@ -354,8 +406,7 @@ function trStep2AutoDetect(silent) {
   var info = document.getElementById('tr-s2-detect-info');
   if (res && res.patternKey && res.patternKey !== 'custom') {
     trState.selectedPatternKey = res.patternKey;
-    var sel = document.getElementById('tr-s2-pattern');
-    if (sel) sel.value = res.patternKey;
+    trStep2RenderPatternSelect();
     var customRow = document.getElementById('tr-s2-custom-row');
     if (customRow) customRow.style.display = 'none';
     trSave();
@@ -707,8 +758,11 @@ function trStep2AddPattern() {
   }).then(function (res) {
     var backendPats = (res && !res.error && Array.isArray(res.patterns)) ? res.patterns : [];
     trMergePatterns(backendPats);
+    trState.selectedPatternKey = key;
     trSave();
+    trStep2RenderPatternSelect();
     trStep2RenderPatternEditor();
+    trStep2DoSplit();
   }).catch(function (err) {
     console.warn('tr add pattern failed:', err);
     trToast(trT('trPatternSaveFailed'), 'error');
@@ -730,6 +784,7 @@ function trStep2DeletePattern(key) {
       trState.selectedPatternKey = 'zhang';
     }
     trSave();
+    trStep2RenderPatternSelect();
     trStep2RenderPatternEditor();
     trStep2ReSplit();
   }).catch(function (err) {
