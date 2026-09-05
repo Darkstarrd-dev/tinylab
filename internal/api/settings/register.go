@@ -67,6 +67,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"docDir":       cfg.DocDir,
 		"gamesDir":     cfg.GamesDir,
 		"musicDir":     cfg.MusicDir,
+		"storyDir":     cfg.StoryDir,
 		"download":     cfg.Download,
 		"shortcuts":    cfg.Shortcuts,
 		"security": map[string]any{
@@ -128,6 +129,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		DocDir       *string             `json:"docDir"`
 		GamesDir     *string             `json:"gamesDir"`
 		MusicDir     *string             `json:"musicDir"`
+		StoryDir     *string             `json:"storyDir"`
 		Archive      *archivePatch       `json:"archive"`
 		Assistant    *assistantPatch     `json:"assistant"`
 	}
@@ -178,6 +180,23 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		cfg.MusicDir = proposed
+	}
+	if updates.StoryDir != nil {
+		proposed := *updates.StoryDir
+		if proposed != "" {
+			configDir := filepath.Dir(h.d.ConfigPath)
+			resolved := config.ResolveStoryDir(proposed, configDir)
+			allowedRoot, err := filepath.Abs(configDir)
+			if err != nil {
+				apibase.WriteAPIError(w, http.StatusInternalServerError, "resolve config dir failed")
+				return
+			}
+			if _, err := fsutil.PathGuard(allowedRoot, resolved); err != nil {
+				apibase.WriteAPIError(w, http.StatusBadRequest, fmt.Sprintf("storyDir must be inside config directory: %v", err))
+				return
+			}
+		}
+		cfg.StoryDir = proposed
 	}
 	if updates.Rotation != nil {
 		applyRotationUpdates(&cfg, updates.Rotation)

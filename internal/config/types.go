@@ -460,4 +460,9 @@ type Config struct {
 	// configDir; absolute paths are used verbatim. Managed via
 	// Settings → Path Settings → Default Music Dir.
 	MusicDir string `yaml:"musicDir,omitempty" json:"musicDir,omitempty"`
+	// StoryDir is the default directory for story projects, assets and database.
+	// Empty means {configDir}/Story. Relative paths are resolved against
+	// configDir; absolute paths are used verbatim. Managed via
+	// Settings → Path Settings → Default Story Path.
+	StoryDir string `yaml:"storyDir,omitempty" json:"storyDir,omitempty"`
 }

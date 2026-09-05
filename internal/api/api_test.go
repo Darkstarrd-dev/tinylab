@@ -66,6 +66,9 @@ func setupTestServer(t *testing.T) (*httptest.Server, *registry.Registry, string
 	apiRouter := New(reg, cfg, tmpFile, usageBuf, usage.New(50), usage.NewQuotaTracker(), logger, proxyHandler, context.CancelFunc(func() {}), selector, comboRes, download.NewManager(download.RuntimeSettings{}, logger))
 	handler := apiRouter.Routes(proxyHandler)
 	srv := httptest.NewServer(handler)
+	t.Cleanup(func() {
+		apiRouter.Cleanup()
+	})
 	// The CSRF Origin check validates against the configured management port,
 	// which must equal the port the test server actually listens on.
 	alignServerPort(t, reg, srv)
@@ -1025,6 +1028,7 @@ func TestNoPassword_AllowsManagementRoutes(t *testing.T) {
 	apiRouter := New(reg, cfg, tmpFile, usageBuf, usage.New(50), usage.NewQuotaTracker(), logger, proxyHandler, context.CancelFunc(func() {}), selector, comboRes, download.NewManager(download.RuntimeSettings{}, logger))
 	srv := httptest.NewServer(apiRouter.Routes(proxyHandler))
 	defer srv.Close()
+	defer apiRouter.Cleanup()
 
 	resp, err := http.Get(srv.URL + "/api/auth/status")
 	if err != nil {

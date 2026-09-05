@@ -46,7 +46,7 @@ async function fasBrowsePicker(inputEl, mode, initialPath) {
 }
 
 // openPathSettingsModal shows a modal with path/tool settings.
-// opts = { title?: string, sections: { defaultDir?, imageDir?, docDir?, logDir?, gamesDir?, musicDir?, ytDlpPath?, ffmpegPath? }, useProxy?: bool }
+// opts = { title?: string, sections: { defaultDir?, imageDir?, docDir?, logDir?, gamesDir?, musicDir?, storyDir?, ytDlpPath?, ffmpegPath? }, useProxy?: bool }
 async function openPathSettingsModal(opts) {
   opts = opts || {};
   var sections = opts.sections || {};
@@ -118,6 +118,12 @@ async function openPathSettingsModal(opts) {
     var musicInit = musicVal || (configDir ? configDir + '/Musics' : '');
     var musicPh = configDir ? configDir + '/Musics' : 'Musics';
     formRows += browseRow('musicDir', 'modal-dl-music-dir', musicVal, musicPh, 'directory', null, musicInit);
+  }
+  if (sections.storyDir) {
+    var storyVal = (res && res.storyDir) || '';
+    var storyInit = storyVal || (configDir ? configDir + '/Story' : '');
+    var storyPh = configDir ? configDir + '/Story' : 'Story';
+    formRows += browseRow('storyDir', 'modal-dl-story-dir', storyVal, storyPh, 'directory', null, storyInit);
   }
   if (opts.useProxy) {
     formRows += '<div class="dl-settings-field" style="margin-bottom:12px;">' +
@@ -201,6 +207,7 @@ async function openPathSettingsModal(opts) {
     if (sections.logDir) payload.trace = { logDir: (document.getElementById('modal-dl-log-dir') || {}).value || '' };
     if (sections.gamesDir) payload.gamesDir = (document.getElementById('modal-dl-games-dir') || {}).value || '';
     if (sections.musicDir) payload.musicDir = (document.getElementById('modal-dl-music-dir') || {}).value || '';
+    if (sections.storyDir) payload.storyDir = (document.getElementById('modal-dl-story-dir') || {}).value || '';
 
     apiPatch('/settings', payload)
       .then(function() {

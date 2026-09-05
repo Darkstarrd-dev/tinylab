@@ -9,13 +9,14 @@ import (
 	"github.com/tinylab/tinylab/internal/api/auth"
 	"github.com/tinylab/tinylab/internal/api/editor"
 	"github.com/tinylab/tinylab/internal/api/gallery"
+	storymakerapi "github.com/tinylab/tinylab/internal/api/storymaker"
 	"github.com/tinylab/tinylab/internal/api/textreview"
 	"github.com/tinylab/tinylab/internal/feature"
 	"github.com/tinylab/tinylab/internal/filetransfer"
 )
 
 // registerUtilityRoutes mounts utility-domain API endpoints (editor, text-review,
-// gallery, filetransfer, archive) that sit outside the generic 1 MiB /api group
+// gallery, filetransfer, archive, storymaker) that sit outside the generic 1 MiB /api group
 // so large payloads remain usable while still auth-gated.
 func (rt *Router) registerUtilityRoutes(
 	r chi.Router,
@@ -25,6 +26,7 @@ func (rt *Router) registerUtilityRoutes(
 	galleryHandler *gallery.Handler,
 	fileTransferHandler *filetransfer.Handler,
 	archiveHandler *archiveapi.Handler,
+	storyMakerHandler *storymakerapi.Handler,
 ) {
 	// Gallery: zip uploads up to 500 MiB; auth-gated but outside the 1 MiB group.
 	r.Route("/api/gallery", func(r chi.Router) {
@@ -82,4 +84,19 @@ func (rt *Router) registerUtilityRoutes(
 			textReviewHandler.Register(r)
 		}
 	})
+
+	// StoryMaker: novel generation & chapter management; up to 32 MiB.
+	r.Route("/api/storymaker", func(r chi.Router) {
+		r.Use(authHandler.AuthMiddleware)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				req.Body = http.MaxBytesReader(w, req.Body, 32<<20)
+				next.ServeHTTP(w, req)
+			})
+		})
+		if feature.Enabled(feature.Editor) && storyMakerHandler != nil {
+			storyMakerHandler.Register(r)
+		}
+	})
 }
+

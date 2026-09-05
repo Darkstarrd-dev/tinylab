@@ -226,6 +226,12 @@ func registerDefaults() {
 			"utility/editor/editor_textreview_split.js", "utility/editor/editor_textreview_diff.js", "utility/editor/editor_textreview_state.js",
 			"utility/editor/editor_textreview_step1.js", "utility/editor/editor_textreview_step2.js",
 			"utility/editor/editor_textreview_step3.js", "utility/editor/editor_textreview_step4.js",
+			// Story Maker modules (CSS -> shell -> pages).
+			"utility/story/storymaker.css", "utility/story/storymaker.js",
+			"utility/story/story-home.js", "utility/story/story-m0.js",
+			"utility/story/story-m2.js", "utility/story/story-m3.js",
+			"utility/story/story-m4.js", "utility/story/story-m5.js",
+			"utility/story/story-batch.js", "utility/story/story-rolechat.js",
 			"utility/editor/editor_textreview.js", "utility/editor/review.js",
 		},
 	})

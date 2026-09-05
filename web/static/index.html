@@ -27,6 +27,7 @@ window.__hasPlayground = true;
 </script>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/playground.css">
+<link rel="stylesheet" href="/utility/story/storymaker.css">
 <link rel="stylesheet" href="/vendor/pg-highlight-theme.css">
 <link rel="stylesheet" href="/vendor/katex.min.css">
 </head>
@@ -75,6 +76,7 @@ window.__hasPlayground = true;
 <button type="button" role="menuitem" data-utility-tool="gif">Gif Editor</button>
 <button type="button" role="menuitem" data-utility-tool="download">Download</button>
 <button type="button" role="menuitem" data-utility-tool="fileTransfer">FileTransfer</button>
+<button type="button" role="menuitem" data-utility-tool="storyMaker">Story Maker</button>
 </div></div>
 <button class="nav-item" type="button" data-page="playground">Playground</button>
 <div class="utility-nav-wrap gallery-nav-wrap">
@@ -261,6 +263,16 @@ window.__hasPlayground = true;
 <script src="/utility/editor/editor_textreview_step2.js"></script>
 <script src="/utility/editor/editor_textreview_step3.js"></script>
 <script src="/utility/editor/editor_textreview_step4.js"></script>
+<!-- Story Maker modules (load order: shell -> sub-pages) -->
+<script src="/utility/story/storymaker.js"></script>
+<script src="/utility/story/story-home.js"></script>
+<script src="/utility/story/story-m0.js"></script>
+<script src="/utility/story/story-m2.js"></script>
+<script src="/utility/story/story-m3.js"></script>
+<script src="/utility/story/story-m4.js"></script>
+<script src="/utility/story/story-m5.js"></script>
+<script src="/utility/story/story-batch.js"></script>
+<script src="/utility/story/story-rolechat.js"></script>
 <script src="/utility/editor/editor_textreview.js"></script>
 <script src="/utility/editor/review.js"></script>
 <script src="/assistant-demo.js"></script>

@@ -43,6 +43,7 @@ import (
 	"github.com/tinylab/tinylab/internal/api/review_presets"
 	"github.com/tinylab/tinylab/internal/api/settings"
 	"github.com/tinylab/tinylab/internal/api/sse"
+	storymakerapi "github.com/tinylab/tinylab/internal/api/storymaker"
 	"github.com/tinylab/tinylab/internal/api/textreview"
 	"github.com/tinylab/tinylab/internal/api/trace"
 	"github.com/tinylab/tinylab/internal/assistant"
@@ -56,6 +57,7 @@ import (
 	"github.com/tinylab/tinylab/internal/proxy"
 	"github.com/tinylab/tinylab/internal/registry"
 	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/storymaker"
 	"github.com/tinylab/tinylab/internal/usage"
 	"github.com/tinylab/tinylab/web"
 )
@@ -98,6 +100,9 @@ type deps struct {
 	serverCfgFn       func(config.ServerConfig)
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
+
+	// storyStore holds the SQLite database connection pool for Story Maker.
+	storyStore *storymaker.Store
 }
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and
@@ -254,11 +259,15 @@ func (rt *Router) SetLogRequests(on bool) {
 	rt.deps.logRequests.Store(on)
 }
 
-// Cleanup stops the download manager.
+// Cleanup stops the download manager and closes stores.
 // This should be called during graceful shutdown.
 func (rt *Router) Cleanup() {
 	if rt.downloadMgr != nil {
 		rt.downloadMgr.Stop()
+	}
+	if rt.storyStore != nil {
+		_ = rt.storyStore.Close()
+		rt.storyStore = nil
 	}
 }
 
@@ -462,7 +471,21 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	})
 	rt.registerPlaygroundRoutes(r, authHandler, imageHandler, playgroundHandler, comfyuiHandler, imageBatchHandler)
 
-	rt.registerUtilityRoutes(r, authHandler, editorHandler, textReviewHandler, galleryHandler, fileTransferHandler, archiveHandler)
+	if rt.storyStore == nil {
+		storyDir := config.ResolveStoryDir(rt.reg.Config().StoryDir, filepath.Dir(rt.configPath))
+		s, err := storymaker.Open(storyDir)
+		if err != nil {
+			rt.logger.Warn("failed to open storymaker store: %v", err)
+		} else {
+			rt.storyStore = s
+		}
+	}
+	var storyMakerHandler *storymakerapi.Handler
+	if rt.storyStore != nil {
+		storyMakerHandler = storymakerapi.NewHandler(apiDeps, rt.storyStore)
+	}
+
+	rt.registerUtilityRoutes(r, authHandler, editorHandler, textReviewHandler, galleryHandler, fileTransferHandler, archiveHandler, storyMakerHandler)
 
 
 	rt.registerPlaygroundStatic(r)

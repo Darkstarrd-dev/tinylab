@@ -133,3 +133,47 @@ func TestResolveGamesDir(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveStoryDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		storyDir  string
+		configDir string
+		want      string
+	}{
+		{
+			name:      "empty storyDir and empty configDir",
+			storyDir:  "",
+			configDir: "",
+			want:      "Story",
+		},
+		{
+			name:      "empty storyDir with configDir",
+			storyDir:  "",
+			configDir: "/app/config",
+			want:      filepath.Join("/app/config", "Story"),
+		},
+		{
+			name:      "relative storyDir with configDir",
+			storyDir:  "custom_story",
+			configDir: "/app/config",
+			want:      filepath.Join("/app/config", "custom_story"),
+		},
+		{
+			name:      "absolute storyDir",
+			storyDir:  filepath.FromSlash("C:/data/story"),
+			configDir: filepath.FromSlash("C:/app/config"),
+			want:      filepath.FromSlash("C:/data/story"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveStoryDir(tt.storyDir, tt.configDir)
+			if got != tt.want {
+				t.Errorf("ResolveStoryDir(%q, %q) = %q; want %q", tt.storyDir, tt.configDir, got, tt.want)
+			}
+		})
+	}
+}
+

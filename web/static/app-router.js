@@ -12,7 +12,8 @@ var UTILITY_TOOLS = [
   { id: 'review', labelKey: 'utilityReview', requiresPlayground: true },
   { id: 'gif', labelKey: 'gifEditor' },
   { id: 'download', labelKey: 'download' },
-  { id: 'fileTransfer', labelKey: 'fileTransfer' }
+  { id: 'fileTransfer', labelKey: 'fileTransfer' },
+  { id: 'storyMaker', labelKey: 'storyMaker', requiresPlayground: true }
 ];
 function isUtilityTool(id) {
   return UTILITY_TOOLS.some(function(tool) { return tool.id === id; });
@@ -38,6 +39,7 @@ function utilityHasTool(id) {
   if (id === 'gif') return typeof renderGifEditor === 'function';
   if (id === 'download') return typeof renderDownload === 'function';
   if (id === 'fileTransfer') return typeof window.renderUtilityFileTransfer === 'function';
+  if (id === 'storyMaker') return typeof window.renderStoryMaker === 'function';
   return false;
 }
 
@@ -159,7 +161,8 @@ function utilityToolLifecycle(id, phase) {
     review: { suspend: 'cleanupReview' },
     gif: { suspend: 'suspendGifEditor', resume: 'resumeGifEditor' },
     download: { suspend: 'suspendDownload', resume: 'resumeDownload' },
-    fileTransfer: { suspend: 'suspendFileTransfer', resume: 'resumeFileTransfer' }
+    fileTransfer: { suspend: 'suspendFileTransfer', resume: 'resumeFileTransfer' },
+    storyMaker: { suspend: 'suspendStoryMaker', resume: 'resumeStoryMaker' }
   };
   var hook = hooks[id] && hooks[id][phase];
   if (hook && typeof window[hook] === 'function') window[hook]();
@@ -249,6 +252,7 @@ function renderUtility(container) {
     if (utilityActiveTool === 'gif') return renderGifEditor(container);
     if (utilityActiveTool === 'download') return renderDownload(container);
     if (utilityActiveTool === 'fileTransfer') return window.renderUtilityFileTransfer(container);
+    if (utilityActiveTool === 'storyMaker') return window.renderStoryMaker(container);
   }
   utilityActiveTool = 'editor';
   updateUtilityNavLabel();
@@ -297,6 +301,7 @@ function navigateTo(page) {
     if (page !== 'review' && typeof cleanupTextReview === 'function') cleanupTextReview();
     if (page !== 'gif' && typeof cleanupGifEditor === 'function') cleanupGifEditor();
     if (page !== 'fileTransfer' && typeof cleanupFileTransfer === 'function') cleanupFileTransfer();
+    if (page !== 'storyMaker' && typeof cleanupStoryMaker === 'function') cleanupStoryMaker();
   }
   if (!preserveUtilityState && page !== 'download' && typeof downloadEventSource !== 'undefined' && downloadEventSource) {
     downloadEventSource.close();
@@ -334,6 +339,7 @@ function navigateTo(page) {
       case 'review': utilityActiveTool = 'review'; updateUtilityNavLabel(); return renderUtility(container);
       case 'gif': utilityActiveTool = 'gif'; updateUtilityNavLabel(); return renderUtility(container);
       case 'fileTransfer': utilityActiveTool = 'fileTransfer'; updateUtilityNavLabel(); return renderUtility(container);
+      case 'storyMaker': utilityActiveTool = 'storyMaker'; updateUtilityNavLabel(); return renderUtility(container);
     }
   })();
   // renderUtility is the resume boundary for retained tools: each renderer
@@ -343,10 +349,10 @@ function navigateTo(page) {
   var activeTool = (page === 'utility' || isUtilityTool(page)) ? (utilityActiveTool || 'editor') : null;
   var galleryTool = isGalleryTool(page) ? page : null;
   var demoTool = isDemoTool(page) ? page : (page === 'demo' ? demoActiveTool : null);
-  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'music' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'demo' || isDemoTool(page) || activeTool === 'fileTransfer' || galleryTool === 'music' || demoTool);
+  var isFullHeight = (page === 'playground' || page === 'gallery' || page === 'music' || page === 'endpoint' || page === 'editor' || page === 'logReader' || page === 'gif' || page === 'utility' || page === 'fileTransfer' || page === 'storyMaker' || page === 'demo' || isDemoTool(page) || activeTool === 'fileTransfer' || activeTool === 'storyMaker' || galleryTool === 'music' || demoTool);
   if (isFullHeight && mainEl) {
     mainEl.classList.add('main-no-scroll');
-    if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer') container.style.height = '100%';
+    if (page === 'gif' || activeTool === 'gif' || page === 'fileTransfer' || activeTool === 'fileTransfer' || page === 'storyMaker' || activeTool === 'storyMaker') container.style.height = '100%';
   }
   function restoreFullscreenState() {
     if (wasFullscreen) {

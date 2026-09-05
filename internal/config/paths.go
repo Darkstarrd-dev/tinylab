@@ -141,3 +141,20 @@ func ResolveAssistantDir(dir, configDir string) string {
 	}
 	return dir
 }
+
+// ResolveStoryDir resolves the default story directory. An empty storyDir
+// falls back to {configDir}/Story (or "Story" if configDir is empty); a
+// relative path is joined with configDir; an absolute path is used verbatim.
+func ResolveStoryDir(storyDir, configDir string) string {
+	if storyDir == "" {
+		if configDir == "" {
+			return "Story"
+		}
+		return filepath.Join(configDir, "Story")
+	}
+	if filepath.IsAbs(storyDir) {
+		return storyDir
+	}
+	return filepath.Join(configDir, storyDir)
+}
+
