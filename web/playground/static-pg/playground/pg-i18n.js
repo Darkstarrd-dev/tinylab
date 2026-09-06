@@ -437,6 +437,7 @@ pgSaveSuccess: 'Markdown file saved successfully',
     pgComfyPresetEditTitle: 'Edit Preset: {0}',
     pgComfyPresetEditHint: 'Drag items to reorder, click ✕ to remove',
     pgComfyPresetEditEmpty: 'No parameter nodes in this preset',
+    pgStaleModelCleared: 'Removed model cleared, please reselect',
   },
   cn: {
     pgSelectModel: '选择模型', pgNoModels: '未配置模型', pgSendMessage: '发送', pgStop: '停止', pgClear: '清空对话',
@@ -872,6 +873,7 @@ pgSaveSuccess: 'Markdown 文件已保存',
     pgComfyPresetEditTitle: '编辑预设：{0}',
     pgComfyPresetEditHint: '拖拽排序，点击 ✕ 移除',
     pgComfyPresetEditEmpty: '此预设中没有参数节点',
+    pgStaleModelCleared: '已删除的模型已清空，请重新选择',
   }
 };
 

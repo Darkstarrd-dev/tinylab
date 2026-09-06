@@ -2,6 +2,7 @@
 
 > **文档定位：** `internal/combo/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
 >
+> **最后核对（2026-09-07，DeleteCombo 补 quickslot sweep）：** `registry/combos.go::DeleteCombo` 成功路径补 `sweepStaleQuickSlotModelsLocked()`——删 combo 按名清 quickslot 引用（combo 名是 `sweep.go::isRefAliveLocked` 的 quickslot 存活口径之一），与 `DeleteProvider`/`DeleteModel` 的 `sweepStaleRefsLocked()` 对齐；此前删 combo 后 quickslot 下拉与 header 残留已删 combo 名。测试见 `registry/sweep_test.go::TestDeleteComboSweepsQuickSlots`。
 > **最后核对：** 2026-07-25，仓库工作区（`main`）。本文描述的是当时源码的实际行为，不把规划或历史设计稿当作现状。**本轮修复：** combo warning 输出从 `log.Printf` 改为 `fmt.Fprintf(os.Stderr, …)`（resolver.go:91），符合「log 仅限 main.go」规则。
 
 ## 1. 范围与结论
@@ -330,6 +331,6 @@ go build -o tinylab .
 | 修改 combo 配置 | config/types.go Combo（129-136）+ defaults.go Combos（55）+ registry/combos.go 读写 |
 | 修改状态持久化 | resolver.go SnapshotComboStates（170-183）/RestoreComboState（185-202）+ state/state.go ComboSnapshot（41-44）+ app.go 接线（165、168） |
 | 修改 Combo 批量测速排序 | api/combo_speedtest.go（speedTestCombo + probeComboModel）+ registry/combos.go GetComboByID + api/router.go（路由注册）+ web/static/combos.js runComboSpeedTest + web/static/i18n.js comboSpeedTest* 键 |
-| 清理 combo 无效引用 | registry/sweep.go（SweepStaleComboModels + isRefAliveLocked：provider 前缀+模型 ID/别名存活判定）+ registry DeleteProvider/DeleteModel 内联自动 sweep + api/combos/register.go（POST /api/combos/cleanup，经 SaveConfigAndReload 持久化）+ web/static/combos.js cleanupStaleCombos + settings.js combos header 清理按钮 + i18n.js cleanupStale* 键 |
+| 清理 combo 无效引用 | registry/sweep.go（SweepStaleComboModels + isRefAliveLocked：provider 前缀+模型 ID/别名存活判定；quickslot 侧 combo 名存活）+ registry DeleteProvider/DeleteModel 内联自动 sweep + DeleteCombo 内联 `sweepStaleQuickSlotModelsLocked()`（清 quickslot 侧 combo 名引用）+ api/combos/register.go（POST /api/combos/cleanup，经 SaveConfigAndReload 持久化）+ web/static/combos.js cleanupStaleCombos + settings.js combos header 清理按钮 + i18n.js cleanupStale* 键 |
 | 修改 model 字符串格式 | util/util.go SplitModel（6-13）+ resolver.go Resolve 遍历与 SplitModel 调用（79-111） |
 | 修改接口契约 | proxy/interfaces.go ComboResolver（61-64）须与 resolver.go 方法签名同步 |

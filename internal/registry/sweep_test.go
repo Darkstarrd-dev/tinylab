@@ -96,3 +96,19 @@ func TestDeleteProviderAutoSweeps(t *testing.T) {
 		t.Fatalf("c2 models = %v, want empty after provider delete", c.Models)
 	}
 }
+
+func TestDeleteComboSweepsQuickSlots(t *testing.T) {
+	r := New(sweepTestConfig())
+	if !r.DeleteCombo("c1") {
+		t.Fatal("DeleteCombo should return true")
+	}
+	qs, _ := r.GetQuickSlot("q1")
+	for _, m := range qs.Models {
+		if m == "C1" {
+			t.Fatalf("stale combo ref C1 still in quickslot: %v", qs.Models)
+		}
+	}
+	if qs.SelectedIndex < 0 || qs.SelectedIndex >= len(qs.Models) {
+		t.Fatalf("SelectedIndex %d out of range for %v", qs.SelectedIndex, qs.Models)
+	}
+}

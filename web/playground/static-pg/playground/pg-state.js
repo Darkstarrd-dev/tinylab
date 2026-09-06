@@ -417,7 +417,67 @@ function pgLoadScenario() {
 function pgLoadModels() {
   return pgApiGet('/models').then(function(res) {
     pgState.models = (res && res.models) ? res.models : [];
+    pgPruneStaleModels();
   }).catch(function() {
     pgState.models = [];
   });
+}
+
+// pgPruneStaleModels clears window/director model ids that no longer resolve
+// to a live /api/models entry (provider/model deleted, combo deleted, or
+// provider disabled). Without this the sidebar/pane keeps showing a removed
+// name and the next send fails. '__comfyui__' is a local placeholder (no
+// /api/models entry) and is always kept.
+function pgPruneStaleModels() {
+  var models = pgState.models || [];
+  var alive = {};
+  for (var i = 0; i < models.length; i++) {
+    if (models[i] && models[i].id) alive[models[i].id] = true;
+  }
+  function stale(id) {
+    if (!id) return false;
+    if (id === '__comfyui__') return false;
+    return !alive[id];
+  }
+  var changed = false;
+  var wins = (pgState.modeWindows && pgState.modeWindows.image) || pgState.windows || [];
+  // Dedupe by identity: the same window object can appear in both
+  // pgState.windows and a modeWindows slot (pgSetMode swaps the array).
+  // NOTE: plain-object keys stringify to "[object Object]", so use a list.
+  var seenList = [];
+  function checkWin(w) {
+    if (!w || !w.config || seenList.indexOf(w) >= 0) return;
+    seenList.push(w);
+    if (stale(w.config.model)) { w.config.model = ''; changed = true; }
+    if (stale(w.config.imgPromptModel)) { w.config.imgPromptModel = ''; changed = true; }
+  }
+  var k;
+  for (k = 0; k < wins.length; k++) checkWin(wins[k]);
+  for (k = 0; k < (pgState.windows || []).length; k++) checkWin(pgState.windows[k]);
+  // Per-mode parked windows also hold model ids (pgSetMode swaps the array).
+  if (pgState.modeWindows) {
+    for (var mode in pgState.modeWindows) {
+      if (!Object.prototype.hasOwnProperty.call(pgState.modeWindows, mode)) continue;
+      var arr = pgState.modeWindows[mode];
+      if (!arr) continue;
+      for (k = 0; k < arr.length; k++) checkWin(arr[k]);
+    }
+  }
+  var d = pgState.autoChat && pgState.autoChat.director;
+  if (d) {
+    if (stale(d.directorModel)) { d.directorModel = ''; changed = true; }
+    if (stale(d.narratorModel)) { d.narratorModel = ''; changed = true; }
+  }
+  if (typeof pgSetupState !== 'undefined' && pgSetupState && stale(pgSetupState.model)) {
+    pgSetupState.model = '';
+    changed = true;
+  }
+  if (changed) {
+    if (typeof pgSave === 'function') pgSave();
+    if (typeof pgSaveAutoChat === 'function') pgSaveAutoChat();
+    if (typeof pgRenderSidebar === 'function') pgRenderSidebar();
+    if (typeof pgRenderPanes === 'function') pgRenderPanes();
+    if (typeof pgUpdateInputBar === 'function') pgUpdateInputBar();
+    if (typeof pgToast === 'function') pgToast(pgT('pgStaleModelCleared'), 'warning');
+  }
 }

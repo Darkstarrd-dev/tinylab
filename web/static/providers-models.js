@@ -886,6 +886,9 @@ async function deleteModelDetail(pid, modelId) {
     providerDetailCache = p;
     renderDetailModels(p);
   }
+  // Backend DeleteModel auto-sweeps combo/quickslot refs: refresh the header
+  // so the quickslot button no longer shows the removed model name.
+  if (typeof renderHeaderQuickSlots === 'function') renderHeaderQuickSlots();
 }
 
 function enterBatchManage(pid) {
@@ -1055,6 +1058,9 @@ async function batchKeepSelected(pid) {
     providerDetailCache = np;
     renderDetailModels(np);
   }
+  // Backend auto-sweeps combo/quickslot refs on model delete: refresh the
+  // header so quickslot buttons no longer show removed model names.
+  if (typeof renderHeaderQuickSlots === 'function') renderHeaderQuickSlots();
 }
 
 async function batchRemoveSelected(pid) {
@@ -1090,6 +1096,9 @@ async function batchRemoveSelected(pid) {
     providerDetailCache = np;
     renderDetailModels(np);
   }
+  // Same header refresh as batchKeepSelected: deleted models are already
+  // swept from quickslots by the backend.
+  if (typeof renderHeaderQuickSlots === 'function') renderHeaderQuickSlots();
 }
 
 function batchCancel() {

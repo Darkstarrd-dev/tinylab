@@ -64,6 +64,9 @@ func (r *Registry) DeleteCombo(id string) bool {
 	for i, c := range r.config.Combos {
 		if c.ID == id {
 			r.config.Combos = append(r.config.Combos[:i], r.config.Combos[i+1:]...)
+			// QuickSlots may reference combos by name: drop dangling refs so
+			// the header button and dropdown never show a deleted combo.
+			r.sweepStaleQuickSlotModelsLocked()
 			return true
 		}
 	}

@@ -69,6 +69,9 @@ async function deleteProviderFromList(event, id) {
   if (document.getElementById('combo-list') && typeof renderEndpoint === 'function') {
     renderEndpoint(document.getElementById('page-content'));
   }
+  // Backend DeleteProvider auto-sweeps quickslot refs: always refresh the
+  // header even when the combos list is absent (standalone Providers page).
+  if (typeof renderHeaderQuickSlots === 'function') renderHeaderQuickSlots();
 }
 
 function openProviderDetail(id) {
