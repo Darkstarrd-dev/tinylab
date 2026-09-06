@@ -4,7 +4,15 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const markedSource = fs.readFileSync(path.join(__dirname, 'playground/static-pg/vendor/marked.min.js'), 'utf8');
+const markedCandidatePaths = [
+  path.join(__dirname, 'static/vendor/marked.min.js'),
+  path.join(__dirname, 'playground/static-pg/vendor/marked.min.js'),
+];
+const markedPath = markedCandidatePaths.find(p => fs.existsSync(p));
+if (!markedPath) {
+  throw new Error('marked.min.js not found in static/vendor or playground/static-pg/vendor');
+}
+const markedSource = fs.readFileSync(markedPath, 'utf8');
 const markdownSource = fs.readFileSync(path.join(__dirname, 'playground/static-pg/playground/pg-markdown.js'), 'utf8');
 
 const sandbox = {

@@ -144,10 +144,24 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
-  // Number keys 1-9: open quickslot modal (only when not in input and not in gallery)
+  // ---- Editor V2 Guard: consume events inside active .ed2-root without leaking to QuickSlots/shutdown ----
+  var ed2Root = document.querySelector('.ed2-root');
+  var isInsideEd2 = ed2Root && (ed2Root.contains(e.target) || (document.activeElement && ed2Root.contains(document.activeElement)));
+  if (e.defaultPrevented || isInsideEd2) {
+    if (e.key === 'Escape') {
+      // Escape in V2 cancels find/selection or closes menu; do not trigger shutdown
+      return;
+    }
+    // If inside V2 editor/menu, do not process global quickslot or shutdown
+    if (isInsideEd2) {
+      return;
+    }
+  }
+
+  // Number keys 1-9: open quickslot modal (only when not in input and not in gallery/editor/editorV2)
   if (!isInput) {
-    if (typeof currentPage !== 'undefined' && (currentPage === 'gallery' || currentPage === 'editor')) {
-      // Gallery/Editor page owns these keys; do not double-trigger quickslot.
+    if (typeof currentPage !== 'undefined' && (currentPage === 'gallery' || currentPage === 'editor' || currentPage === 'editorV2')) {
+      // Gallery/Editor/EditorV2 owns these keys; do not double-trigger quickslot.
       // QuickSlot modal handles its own keys; skip global processing.
     } else {
       var matchedQuickslot = false;

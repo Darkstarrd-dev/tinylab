@@ -85,10 +85,17 @@ func writeFakeFFmpeg(t *testing.T, encoders, decoders []string) string {
 	if runtime.GOOS == "windows" {
 		name += ".bat"
 	}
-	path := filepath.Join(fakeToolDir(t), name)
+	dir := fakeToolDir(t)
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
+	probeName := strings.Replace(name, "ffmpeg", "ffprobe", 1)
+	probeContent := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		probeContent = "@echo off\r\nexit /b 0\r\n"
+	}
+	_ = os.WriteFile(filepath.Join(dir, probeName), []byte(probeContent), 0755)
 	return path
 }
 
@@ -122,6 +129,13 @@ func fakeToolDir(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir testbin: %v", err)
 	}
+	probeName := "ffprobe"
+	probeContent := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		probeName += ".bat"
+		probeContent = "@echo off\r\nexit /b 0\r\n"
+	}
+	_ = os.WriteFile(filepath.Join(dir, probeName), []byte(probeContent), 0o755)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
@@ -144,9 +158,14 @@ func fakeFFmpegBrokenProbe(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		name += ".bat"
 	}
-	path := filepath.Join(fakeToolDir(t), name)
+	dir := fakeToolDir(t)
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
 		t.Fatalf("write broken ffmpeg: %v", err)
+	}
+	probePath := filepath.Join(dir, strings.Replace(name, "ffmpeg", "ffprobe", 1))
+	if err := os.WriteFile(probePath, []byte(content), 0755); err != nil {
+		t.Fatalf("write broken ffprobe: %v", err)
 	}
 	return path
 }

@@ -222,6 +222,13 @@ func registerDefaults() {
 			"utility/editor/editor-state.js", "utility/editor/editor_workspace.js", "utility/editor/editor_commands.js",
 			"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor.js",
 			"utility/editor/editor_shell.js", "utility/editor/editor-logs.js",
+			// Editor V2 (Monaco engine + modules)
+			"style-editor-v2.css",
+			"vendor/monaco/ed2monaco.js", "vendor/monaco/ed2monaco.css", "vendor/monaco/editor.worker.js",
+			"utility/editor-v2/editor-v2-engine.js", "utility/editor-v2/editor-v2-layout.js", "utility/editor-v2/editor-v2-store.js",
+			"utility/editor-v2/editor-v2-diff-core.js", "utility/editor-v2/editor-v2-diff-worker.js", "utility/editor-v2/editor-v2-diff.js",
+			"utility/editor-v2/editor-v2-preview.js", "utility/editor-v2/editor-v2-extras.js", "utility/editor-v2/editor-v2-io.js",
+			"utility/editor-v2/editor-v2-commands.js", "utility/editor-v2/editor-v2.js",
 			// AI Text Review (load order: split/diff/state first, then steps, then entry).
 			"utility/editor/editor_textreview_split.js", "utility/editor/editor_textreview_diff.js", "utility/editor/editor_textreview_state.js",
 			"utility/editor/editor_textreview_step1.js", "utility/editor/editor_textreview_step2.js",

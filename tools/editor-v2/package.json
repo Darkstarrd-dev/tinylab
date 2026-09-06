@@ -1,0 +1,12 @@
+{
+  "name": "tinylab-editor-v2-builder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9",
+    "monaco-editor": "0.56.0"
+  }
+}

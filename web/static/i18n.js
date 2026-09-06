@@ -1,7 +1,12 @@
 // ===================== Translation System =====================
 const L = {
   en: {
-    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', music: 'Music', tilemap: 'Map Editor', tilemapEditor: 'Map Editor', textReview: 'Text Review', utilityReview: 'Text Review', review: 'Text Review',
+    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', music: 'Music', tilemap: 'Map Editor', tilemapEditor: 'Map Editor', textReview: 'Text Review', utilityReview: 'Text Review', review: 'Text Review', utilityEditorV2: 'Text Editor V2',
+    ed2MenuFile: 'File', ed2MenuEdit: 'Edit', ed2MenuSelection: 'Selection',
+    ed2MenuNewFile: 'New File…', ed2MenuNewTextFile: 'New Text File', ed2MenuOpenFile: 'Open File…', ed2MenuSave: 'Save', ed2MenuSaveAs: 'Save As…', ed2MenuSaveAll: 'Save All', ed2MenuClose: 'Close Editor', ed2MenuCloseAll: 'Close All Editors',
+    ed2MenuUndo: 'Undo', ed2MenuRedo: 'Redo', ed2MenuCut: 'Cut', ed2MenuCopy: 'Copy', ed2MenuPaste: 'Paste', ed2MenuFind: 'Find', ed2MenuReplace: 'Replace', ed2MenuGoToLine: 'Go to Line…', ed2MenuToggleLineComment: 'Toggle Line Comment', ed2MenuToggleBlockComment: 'Toggle Block Comment', ed2MenuIndent: 'Indent', ed2MenuOutdent: 'Outdent',
+    ed2MenuSelectAll: 'Select All', ed2MenuExpandSelection: 'Expand Selection', ed2MenuShrinkSelection: 'Shrink Selection', ed2MenuCopyLineUp: 'Copy Line Up', ed2MenuCopyLineDown: 'Copy Line Down', ed2MenuMoveLineUp: 'Move Line Up', ed2MenuMoveLineDown: 'Move Line Down', ed2MenuDuplicate: 'Duplicate Selection', ed2MenuDuplicateSelection: 'Duplicate Selection',
+    ed2MenuAddCursorAbove: 'Add Cursor Above', ed2MenuAddCursorBelow: 'Add Cursor Below', ed2MenuAddCursorsToLineEnds: 'Add Cursors to Line Ends', ed2MenuAddNextOccurrence: 'Add Next Occurrence', ed2MenuAddPrevOccurrence: 'Add Previous Occurrence', ed2MenuAddPreviousOccurrence: 'Add Previous Occurrence', ed2MenuSelectAllOccurrences: 'Select All Occurrences',
     design: 'GameMaker', gameDesigner: 'GameMaker', gameMaker: 'GameMaker', mediaDownload: 'Media Download',
     shutdown: 'Shutdown',
     debugSettings: 'Debug Settings', debugMode: 'Debug Mode',
@@ -1301,7 +1306,12 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     clearTraceDone: '已清除 {0} 个追踪文件',
     traceEnableConfirm: '开启请求追踪后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）将以一个约 1MB 的 JSONL 文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏（保留末 4 位）；base64 图片内容不保存。超过保留天数的文件自动删除，总量受磁盘上限约束。是否继续？',
     saved: '已保存',
-    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校', review: '文本审校',
+    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校', review: '文本审校', utilityEditorV2: '文本编辑器 V2',
+    ed2MenuFile: '文件', ed2MenuEdit: '编辑', ed2MenuSelection: '选择',
+    ed2MenuNewFile: '新建文件…', ed2MenuNewTextFile: '新建文本文档', ed2MenuOpenFile: '打开文件…', ed2MenuSave: '保存', ed2MenuSaveAs: '另存为…', ed2MenuSaveAll: '全部保存', ed2MenuClose: '关闭编辑器', ed2MenuCloseAll: '关闭所有编辑器',
+    ed2MenuUndo: '撤销', ed2MenuRedo: '恢复', ed2MenuCut: '剪切', ed2MenuCopy: '复制', ed2MenuPaste: '粘贴', ed2MenuFind: '查找', ed2MenuReplace: '替换', ed2MenuGoToLine: '跳转到行…', ed2MenuToggleLineComment: '切换行注释', ed2MenuToggleBlockComment: '切换块注释', ed2MenuIndent: '增加缩进', ed2MenuOutdent: '减少缩进',
+    ed2MenuSelectAll: '全选', ed2MenuExpandSelection: '扩大选区', ed2MenuShrinkSelection: '缩小选区', ed2MenuCopyLineUp: '向上复制行', ed2MenuCopyLineDown: '向下复制行', ed2MenuMoveLineUp: '向上移动行', ed2MenuMoveLineDown: '向下移动行', ed2MenuDuplicate: '复制选区', ed2MenuDuplicateSelection: '复制选区',
+    ed2MenuAddCursorAbove: '在上方添加光标', ed2MenuAddCursorBelow: '在下方添加光标', ed2MenuAddCursorsToLineEnds: '在行尾添加光标', ed2MenuAddNextOccurrence: '添加下一个匹配项', ed2MenuAddPrevOccurrence: '添加上一个匹配项', ed2MenuAddPreviousOccurrence: '添加上一个匹配项', ed2MenuSelectAllOccurrences: '选择所有匹配项',
     design: '游戏工坊', gameDesigner: '游戏工坊', gameMaker: '游戏工坊', music: '音乐', tilemap: '地图编辑器', tilemapEditor: '地图编辑器', mediaDownload: '流媒体下载',
     shutdown: '关闭',
     debugSettings: '调试设置', debugMode: '调试模式',

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tinylab/tinylab/internal/api/apibase"
 	"github.com/tinylab/tinylab/internal/config"
@@ -39,13 +40,18 @@ var editorImageExts = map[string]bool{
 
 // Handler provides HTTP handlers for the editor page.
 type Handler struct {
-	d      *apibase.Deps
-	grants *pathgrant.Store
+	d          *apibase.Deps
+	grants     *pathgrant.Store
+	savePicker func(filter, initialDir, suggestedName string) (string, error)
 }
 
 // NewHandler creates a new editor Handler.
 func NewHandler(d *apibase.Deps) *Handler {
-	return &Handler{d: d, grants: pathgrant.NewStore(0)}
+	return &Handler{
+		d:          d,
+		grants:     pathgrant.NewStore(0),
+		savePicker: fsutil.SaveFilePickerAt,
+	}
 }
 
 // chiRouter is the chi router surface the editor needs, decoupled so tests
@@ -69,6 +75,12 @@ func (h *Handler) Register(r chiRouter) {
 	r.Post("/upload-image", h.editorUploadImage)
 	r.Post("/save-session-images", h.editorSaveSessionImages)
 	r.Get("/image", h.editorServeImage)
+
+	// Editor V2 endpoints
+	r.Post("/create", h.editorCreate)
+	r.Post("/save-document", h.editorSaveDocument)
+	r.Post("/save-as", h.editorSaveAs)
+	r.Get("/file-image", h.editorServeFileImage)
 }
 
 // errCancelled signals the user dismissed the native picker.
@@ -228,6 +240,7 @@ func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 		Path        string `json:"path"` // legacy raw-path contract: rejected
 		FileID      string `json:"fileId"`
 		PathGrantID string `json:"pathGrantId"`
+		StrictText  bool   `json:"strictText"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -272,6 +285,11 @@ func (h *Handler) editorOpen(w http.ResponseWriter, r *http.Request) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "read failed: "+err.Error())
+		return
+	}
+
+	if req.StrictText && !utf8.Valid(content) {
+		apibase.WriteAPIError(w, http.StatusUnsupportedMediaType, "file is not valid UTF-8 text")
 		return
 	}
 

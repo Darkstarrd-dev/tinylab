@@ -12,6 +12,8 @@
 @import url("style-filetransfer.css");
 @import url("style-gif.css");
 @import url("style-editor.css");
+@import url("style-editor-v2.css");
+@import url("vendor/monaco/ed2monaco.css");
 @import url("style-textreview.css");
 @import url("style-demo.css");
 @import url("style-music.css");

@@ -11,12 +11,15 @@
   var GLOBAL_KEY = 'tr-global-zoom';
   var PG_KEY = 'tr-pg-text-zoom';
   var EDITOR_KEY = 'tr-editor-text-zoom';
+  var EDITOR_V2_KEY = 'tr-editor-v2-text-zoom';
   var globalScale = parseFloat(localStorage.getItem(GLOBAL_KEY) || '1');
   if (!isFinite(globalScale)) globalScale = 1;
   var pgScale = parseFloat(localStorage.getItem(PG_KEY) || '1');
   if (!isFinite(pgScale)) pgScale = 1;
   var editorScale = parseFloat(localStorage.getItem(EDITOR_KEY) || '1');
   if (!isFinite(editorScale)) editorScale = 1;
+  var editorV2Scale = parseFloat(localStorage.getItem(EDITOR_V2_KEY) || '1');
+  if (!isFinite(editorV2Scale)) editorV2Scale = 1;
 
   function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
 
@@ -91,9 +94,23 @@
     try { localStorage.setItem(EDITOR_KEY, String(editorScale)); } catch (e) {}
   }
 
+  function applyEditorV2() {
+    if (window.EditorV2 && typeof window.EditorV2.setFontScale === 'function') {
+      window.EditorV2.setFontScale(editorV2Scale);
+    }
+    try { localStorage.setItem(EDITOR_V2_KEY, String(editorV2Scale)); } catch (e) {}
+  }
+
   function getContext() {
     var ae = document.activeElement;
     if (!ae) return 'global';
+    // Editor V2 (Monaco / tree / preview inside .ed2-root)
+    if (ae.closest && ae.closest('.ed2-root')) {
+      return 'editorV2';
+    }
+    if (ae.classList && (ae.classList.contains('monaco-editor') || ae.classList.contains('ed2-input'))) {
+      return 'editorV2';
+    }
     // Editor / Game Designer (both reuse EditorLayout → #ed-main-input)
     if (ae.id === 'ed-main-input' || ae.classList.contains('ed-input') || ae.classList.contains('ed-main-input') || (ae.id && ae.id.indexOf('ed-input-') === 0)) {
       return 'editor';
@@ -110,6 +127,7 @@
     var msg = '';
     if (ctx === 'pg') msg = 'Playground ' + Math.round(scale * 100) + '%';
     else if (ctx === 'editor') msg = 'Editor ' + Math.round(scale * 100) + '%';
+    else if (ctx === 'editorV2') msg = 'Text Editor V2 ' + Math.round(scale * 100) + '%';
     else msg = Math.round(scale * 100) + '%';
     if (typeof window.toast === 'function') {
       try { window.toast(msg, 'info', 1200); } catch (e) {}
@@ -121,6 +139,7 @@
     applyGlobal();
     applyPg();
     applyEditor();
+    applyEditorV2();
   }
   if (document.head) initApply();
   else document.addEventListener('DOMContentLoaded', initApply);
@@ -129,9 +148,11 @@
     getGlobal: function () { return globalScale; },
     getPg: function () { return pgScale; },
     getEditor: function () { return editorScale; },
+    getEditorV2: function () { return editorV2Scale; },
     resetGlobal: function () { globalScale = 1; applyGlobal(); },
     resetPg: function () { pgScale = 1; applyPg(); },
-    resetEditor: function () { editorScale = 1; applyEditor(); }
+    resetEditor: function () { editorScale = 1; applyEditor(); },
+    resetEditorV2: function () { editorV2Scale = 1; applyEditorV2(); }
   };
 
   // Button-facing helpers (also wired to wheel/middle)
@@ -145,17 +166,27 @@
     applyEditor();
     toastScale('editor', editorScale);
   }
+  function editorV2Step(delta) {
+    editorV2Scale = clamp(editorV2Scale + delta, 0.5, 3);
+    applyEditorV2();
+    toastScale('editorV2', editorV2Scale);
+  }
   function pgReset() { pgScale = 1; applyPg(); toastScale('pg', pgScale); }
   function editorReset() { editorScale = 1; applyEditor(); toastScale('editor', editorScale); }
+  function editorV2Reset() { editorV2Scale = 1; applyEditorV2(); toastScale('editorV2', editorV2Scale); }
   window.__zoom.pgStep = pgStep;
   window.__zoom.editorStep = editorStep;
+  window.__zoom.editorV2Step = editorV2Step;
   window.__zoom.pgReset = pgReset;
   window.__zoom.editorReset = editorReset;
+  window.__zoom.editorV2Reset = editorV2Reset;
   // globals for inline onclick (pg-ui / EditorLayout)
   window.pgZoomStep = pgStep;
   window.pgZoomReset = pgReset;
   window.editorZoomStep = editorStep;
   window.editorZoomReset = editorReset;
+  window.editorV2ZoomStep = editorV2Step;
+  window.editorV2ZoomReset = editorV2Reset;
 
   function isInternalZoomTarget(t) {
     if (!t || !t.closest) return false;
@@ -168,6 +199,9 @@
     if (!(e.ctrlKey || e.metaKey)) return;
     if (isInternalZoomTarget(e.target)) return;
     var ctx = getContext();
+    if (ctx === 'global' && e.target && e.target.closest) {
+      if (e.target.closest('.ed2-root')) ctx = 'editorV2';
+    }
     e.preventDefault();
     var delta = e.deltaY < 0 ? 0.05 : -0.05;
     if (ctx === 'pg') {
@@ -178,6 +212,10 @@
       editorScale = clamp(editorScale + delta, 0.5, 3);
       applyEditor();
       toastScale(ctx, editorScale);
+    } else if (ctx === 'editorV2') {
+      editorV2Scale = clamp(editorV2Scale + delta, 0.5, 3);
+      applyEditorV2();
+      toastScale(ctx, editorV2Scale);
     } else {
       globalScale = clamp(globalScale + delta, 0.5, 3);
       applyGlobal();
@@ -192,8 +230,12 @@
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     var ctx = getContext();
+    if (ctx === 'global' && e.target && e.target.closest) {
+      if (e.target.closest('.ed2-root')) ctx = 'editorV2';
+    }
     if (ctx === 'pg') { pgScale = 1; applyPg(); toastScale(ctx, pgScale); }
     else if (ctx === 'editor') { editorScale = 1; applyEditor(); toastScale(ctx, editorScale); }
+    else if (ctx === 'editorV2') { editorV2Scale = 1; applyEditorV2(); toastScale(ctx, editorV2Scale); }
     else { globalScale = 1; applyGlobal(); toastScale(ctx, globalScale); }
   }
   window.addEventListener('mousedown', onMiddle, { passive: false, capture: true });
@@ -207,6 +249,7 @@
       var ctx = getContext();
       if (ctx === 'pg') { pgScale = 1; applyPg(); toastScale(ctx, pgScale); }
       else if (ctx === 'editor') { editorScale = 1; applyEditor(); toastScale(ctx, editorScale); }
+      else if (ctx === 'editorV2') { editorV2Scale = 1; applyEditorV2(); toastScale(ctx, editorV2Scale); }
       else { globalScale = 1; applyGlobal(); toastScale(ctx, globalScale); }
     }
   });
