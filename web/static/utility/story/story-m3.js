@@ -475,7 +475,6 @@
       });
     });
   }
-  }
 
   // Lifecycle
   window.storyRenderM3 = render;

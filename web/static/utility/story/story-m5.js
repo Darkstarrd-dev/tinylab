@@ -488,15 +488,6 @@
     });
   }
 
-    html += '</div></div>';
-    contentEl.innerHTML = html;
-
-    contentEl.querySelector('#sm-tl-char-select')?.addEventListener('change', function(e) {
-      selectedTimelineCharId = e.target.value;
-      renderCurrentTab(contentEl.parentElement);
-    });
-  }
-
   // Lifecycle
   window.storyRenderM5 = render;
   window.storyCleanupM5 = function() {};

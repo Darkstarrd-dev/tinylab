@@ -536,7 +536,6 @@
       });
     });
   }
-  }
 
   // --- CardEditorModal (Create / Edit / AI Enrich) ---
   function openCardEditor(initialCard) {
@@ -1173,11 +1172,10 @@
         }).catch(function(err) {
           btn.disabled = false;
           btn.textContent = t('storyM2ImageStartBtn');
-          toast(t('failed') + ': ' + err.message, 'error');
-        });
+         toast(t('failed') + ': ' + err.message, 'error');
+       });
       }
     });
-  }
   }
 
   // Lifecycle
