@@ -715,8 +715,14 @@
     if (!root) return root;
     var title = root.querySelector('#ed-title');
     if (title) {
-      title.textContent = (name || layoutText('editorUntitled', 'Untitled')) + (dirty ? ' *' : '');
-      title.setAttribute('aria-label', 'Document: ' + title.textContent);
+      // Skip DOM writes when nothing changed: title reflow on every keystroke
+      // (textContent + setAttribute) is pure waste; only write when the
+      // visible string actually differs.
+      var next = (name || layoutText('editorUntitled', 'Untitled')) + (dirty ? ' *' : '');
+      if (title.textContent !== next) {
+        title.textContent = next;
+        title.setAttribute('aria-label', 'Document: ' + title.textContent);
+      }
     }
     root.setAttribute('data-dirty', dirty ? 'true' : 'false');
     return root;
@@ -737,20 +743,26 @@
     var parasEl = root.querySelector('.ed-stat-paragraphs');
     var htmlSelEl = root.querySelector('.ed-status-right .ed-status-selection');
 
-    if (bytesEl && stats.bytes !== undefined) bytesEl.textContent = stats.bytes + ' bytes';
-    if (wordsEl && stats.words !== undefined) wordsEl.textContent = stats.words + ' words';
-    if (linesEl && stats.lines !== undefined) linesEl.textContent = stats.lines + ' lines';
+    // Skip DOM writes when nothing changed: status-bar rewrites every
+    // keystroke cost a reflow each; only write when the visible string
+    // actually differs.
+    var write = function (el, str) {
+      if (el && el.textContent !== str) el.textContent = str;
+    };
+    if (bytesEl && stats.bytes !== undefined) write(bytesEl, stats.bytes + ' bytes');
+    if (wordsEl && stats.words !== undefined) write(wordsEl, stats.words + ' words');
+    if (linesEl && stats.lines !== undefined) write(linesEl, stats.lines + ' lines');
     if (posEl && (stats.line !== undefined || stats.column !== undefined)) {
-      posEl.textContent = 'Ln ' + (stats.line || 1) + ', Col ' + (stats.column || 0);
+      write(posEl, 'Ln ' + (stats.line || 1) + ', Col ' + (stats.column || 0));
     }
-    if (textSelEl) textSelEl.hidden = !stats.textSelection;
+    if (textSelEl) { var hs = !stats.textSelection; if (textSelEl.hidden !== hs) textSelEl.hidden = hs; }
 
-    if (charsEl && stats.chars !== undefined) charsEl.textContent = stats.chars + ' chars';
+    if (charsEl && stats.chars !== undefined) write(charsEl, stats.chars + ' chars');
     if (htmlWordsEl && (stats.htmlWords !== undefined || stats.words !== undefined)) {
-      htmlWordsEl.textContent = (stats.htmlWords !== undefined ? stats.htmlWords : stats.words) + ' words';
+      write(htmlWordsEl, (stats.htmlWords !== undefined ? stats.htmlWords : stats.words) + ' words');
     }
-    if (parasEl && stats.paragraphs !== undefined) parasEl.textContent = stats.paragraphs + ' paragraphs';
-    if (htmlSelEl) htmlSelEl.hidden = !stats.htmlSelection;
+    if (parasEl && stats.paragraphs !== undefined) write(parasEl, stats.paragraphs + ' paragraphs');
+    if (htmlSelEl) { var hh = !stats.htmlSelection; if (htmlSelEl.hidden !== hh) htmlSelEl.hidden = hh; }
 
     // Fallback for legacy string format
     if (stats.left !== undefined && !bytesEl) {
@@ -854,9 +866,28 @@
     if (!input || !overlay) return;
     overlay.scrollTop = input.scrollTop;
     overlay.scrollLeft = input.scrollLeft;
-    if (input.clientWidth) {
-      overlay.style.width = input.clientWidth + 'px';
-    }
+    // NOTE: no width write here. Setting overlay.style.width forces a
+    // synchronous layout of the full pre-wrap overlay subtree on every
+    // call (scroll + each overlay sync); CSS already keeps both layers
+    // pixel-aligned (same box model/padding/font in style-editor.css).
+  }
+
+  // imeTick: blind compositor heartbeat for IME sessions. Never reads the
+  // textarea (value/selection are TSF-owned mid-session); toggles a
+  // zero-cost data attribute on the input wrapper so the browser schedules
+  // a frame without re-laying the overlay subtree. Throttled to one flip
+  // per 500ms: the attribute flip itself costs a style recalc, and firing
+  // it per keystroke reintroduces the layout churn it was meant to avoid.
+  function imeTick(root) {
+    if (!root) return;
+    var wrap = root.querySelector('.ed-input-wrap');
+    if (!wrap) return;
+    var now = (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
+    var last = wrap.__edImeTickAt || 0;
+    if (now - last < 500) return;
+    wrap.__edImeTickAt = now;
+    var on = wrap.getAttribute('data-ime-tick') === '1';
+    try { wrap.setAttribute('data-ime-tick', on ? '0' : '1'); } catch (eTick) {}
   }
 
   function updateOverlay(root) {
@@ -864,8 +895,293 @@
     var input = root.querySelector('#ed-main-input');
     var overlay = root.querySelector('#ed-syntax-overlay');
     if (!input || !overlay) return;
-    overlay.innerHTML = highlightComments(input.value);
+    // Hash skip: byte-identical text never re-highlights. The full
+    // highlightComments pass (4 whole-string regexes) plus the pre-wrap
+    // reflow it triggers is the most expensive edit-path item on 2000-line
+    // CJK docs, so repeats are dropped here, not just in the preview.
+    var value = input.value;
+    var state = root.__edLayoutState || (root.__edLayoutState = {});
+    var hash = edOverlayHash(value);
+    if (hash === state.overlayHash) { syncOverlayScroll(root); return; }
+    state.overlayHash = hash;
+    // Large-document plain mode: past ~1500 lines the 4-regex highlight
+    // plus the pre-wrap full reflow dominates the compositionend frame
+    // (frame-gap 25s in the trace). Paste escaped text with zero spans;
+    // comment tint is a nicety, not worth seconds of freeze.
+    var plain = edIsLargeValue(value);
+    overlay.innerHTML = plain ? escapeOverlayText(value) : highlightComments(value);
     syncOverlayScroll(root);
+  }
+
+  function edIsLargeValue(value) {
+    var text = value == null ? '' : String(value);
+    if (text.length >= 150 * 1024) return true;
+    var lines = 1;
+    var idx = -1;
+    while ((idx = text.indexOf('\n', idx + 1)) >= 0) {
+      if (++lines >= 1500) return true;
+    }
+    return false;
+  }
+
+  function escapeOverlayText(value) {
+    var text = String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    if (text.slice(-1) === '\n') text += ' ';
+    return text;
+  }
+
+  // Cheap length-tagged FNV-1a over the raw value. Local to the layout
+  // module (the shell has its own copy); only used to skip identical
+  // overlay re-highlights, so cross-module consistency is not required.
+  function edOverlayHash(value) {
+    var text = value == null ? '' : String(value);
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = (hash * 0x01000193) | 0;
+    }
+    return (hash >>> 0).toString(36) + ':' + text.length;
+  }
+
+  // syncGutter: incremental line-number gutter sync shared by the Utility
+  // Text Editor shell and the GameMaker designer. Named export on purpose:
+  // both callers diff the live spans (append/remove only the delta) instead
+  // of rebuilding innerHTML per keystroke. One-time purge of stray
+  // whitespace text nodes left by legacy innerHTML builders; afterwards the
+  // gutter holds pure SPAN children and each input costs O(delta).
+  //
+  // Gutter windowing: past ~500 lines the per-line SPAN list itself costs
+  // layout/paint participation on every keystroke and scroll, even though
+  // only ~30 lines are visible. Windowed mode renders the visible run plus
+  // an 80-line margin on each side, with top/bottom spacer DIVs preserving
+  // total height so scrollTop semantics are unchanged. The window start is
+  // quantized to 40-line chunks so scrolling inside a chunk only syncs
+  // scrollTop with zero DOM churn. Small docs keep the legacy full-span
+  // path untouched; callers pass nothing new (view height is measured from
+  // the gutter, line height from a live span or computed style).
+  var GUTTER_WIN_LINES = 500;
+  var GUTTER_WIN_MARGIN = 80;
+  var GUTTER_WIN_QUANT = 40;
+
+  function gutterLineCount(text) {
+    var n = 1;
+    var p = -1;
+    while ((p = text.indexOf('\n', p + 1)) >= 0) n++;
+    return n;
+  }
+
+  function gutterMeasureLH(gutter, state) {
+    var kids = gutter.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].tagName === 'SPAN') {
+        var h = kids[i].offsetHeight;
+        if (h > 0) { state.lh = h; return h; }
+      }
+    }
+    if (state.lh > 0) return state.lh;
+    try {
+      var view = gutter.ownerDocument.defaultView;
+      var cs = view.getComputedStyle(gutter);
+      var lh = parseFloat(cs.lineHeight);
+      if (lh > 0) return lh;
+      var fs = parseFloat(cs.fontSize) || 13;
+      return fs * 1.5;
+    } catch (eMeasure) { return 19.5; }
+  }
+
+  function syncGutterWindowed(gutter, doc, text, count, state, opts, wantComment, scrollTop, hash) {
+    var lh = gutterMeasureLH(gutter, state);
+    if (!(lh > 0)) lh = 19.5;
+    state.lh = lh;
+    var viewH = gutter.clientHeight || 0;
+    if (viewH <= 0) {
+      try { viewH = gutter.ownerDocument.defaultView.innerHeight || 600; } catch (eView) { viewH = 600; }
+    }
+    var st = (opts && opts.scrollTop !== undefined && opts.scrollTop !== null) ? opts.scrollTop : gutter.scrollTop;
+    if (!(st >= 0)) st = 0;
+    var visLines = Math.ceil(viewH / lh) + 1;
+    // Position by scroll ratio, not st/lh: wrapped long lines inflate the
+    // textarea's scrollHeight far beyond count*lh, so st/lh underestimates
+    // the first visible line and pins the window early near the bottom
+    // (line numbers freeze while the textarea keeps scrolling ~20 pages).
+    // ratio = st / maxScroll maps the full textarea range onto the full
+    // logical-line range, so bottom stays bottom on every host.
+    var start;
+    var taMax = (opts && opts.scrollHeight > 0 && opts.clientHeight > 0)
+      ? (opts.scrollHeight - opts.clientHeight) : -1;
+    if (taMax > 0) {
+      var maxStart = Math.max(0, count - visLines);
+      var ratioStart = Math.floor(st / taMax * maxStart / GUTTER_WIN_QUANT) * GUTTER_WIN_QUANT - GUTTER_WIN_MARGIN;
+      start = ratioStart;
+    } else {
+      start = Math.floor(st / lh / GUTTER_WIN_QUANT) * GUTTER_WIN_QUANT - GUTTER_WIN_MARGIN;
+    }
+    if (start < 0) start = 0;
+    var end = start + visLines + GUTTER_WIN_MARGIN * 2;
+    if (end > count - 1) {
+      end = count - 1;
+      start = Math.max(0, end - visLines - GUTTER_WIN_MARGIN * 2);
+    }
+    if (state.windowed && state.winStart === start && state.winEnd === end) {
+      // Window stable: typing inside the window only refreshes the visible
+      // spans in place (no innerHTML churn); identical text only syncs
+      // scrollTop. Line-count changes resize by construction only when the
+      // window itself moves.
+      if (state.hash !== hash) {
+        var wlines = text.split(/\r?\n/);
+        var kids = gutter.children;
+        // children = [topPad, start..end spans, botPad]
+        for (var k = start; k <= end; k++) {
+          var el = kids[k - start + 1];
+          if (!el || el.tagName !== 'SPAN') continue;
+          var want = 'ed-line-number';
+          if (wantComment) {
+            var wlt = wlines[k] || '';
+            if (/^(\/\/|#|\/\*|\*)/.test(wlt.trim())) want += ' is-comment';
+          }
+          if (el.textContent !== String(k + 1)) el.textContent = String(k + 1);
+          if (el.className !== want) el.className = want;
+        }
+        state.hash = hash;
+      }
+      if (scrollTop !== null && gutter.scrollTop !== scrollTop) gutter.scrollTop = scrollTop;
+      return gutter;
+    }
+    // Line count changed while the window is stable (Enter pressed
+    // mid-doc): keep spacer heights exact so total height stays count*lh.
+    if (state.windowed && state.count !== count) {
+      state.count = count;
+      var kidsAll = gutter.children;
+      if (kidsAll.length >= 2) {
+        var lhPad = (state.lh > 0) ? state.lh : lh;
+        kidsAll[0].style.height = Math.round(start * lhPad) + 'px';
+        kidsAll[kidsAll.length - 1].style.height = Math.round(Math.max(0, count - 1 - end) * lhPad) + 'px';
+      }
+    }
+    var lines = text.split(/\r?\n/);
+    // innerHTML reset drops scrollTop; the same value is restored below
+    // (total height is unchanged: spacers preserve count*lh exactly).
+    gutter.innerHTML = '';
+    var top = doc.createElement('div');
+    top.className = 'ed-gutter-pad';
+    top.style.height = Math.round(start * lh) + 'px';
+    gutter.appendChild(top);
+    for (var i = start; i <= end; i++) {
+      var cls = 'ed-line-number';
+      if (wantComment) {
+        var lt = lines[i] || '';
+        if (/^(\/\/|#|\/\*|\*)/.test(lt.trim())) cls += ' is-comment';
+      }
+      var span = doc.createElement('span');
+      span.className = cls;
+      span.textContent = String(i + 1);
+      gutter.appendChild(span);
+    }
+    var bot = doc.createElement('div');
+    bot.className = 'ed-gutter-pad';
+    bot.style.height = Math.round((count - 1 - end) * lh) + 'px';
+    gutter.appendChild(bot);
+    state.windowed = true;
+    state.winStart = start;
+    state.winEnd = end;
+    state.count = count;
+    state.hash = hash;
+    var want = (scrollTop !== null) ? scrollTop : st;
+    if (gutter.scrollTop !== want) gutter.scrollTop = want;
+    return gutter;
+  }
+
+  function syncGutter(gutter, value, opts) {
+    if (!gutter) return gutter;
+    var doc = gutter.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (!doc || typeof doc.createElement !== 'function') return gutter;
+    var wantComment = !opts || opts.comment !== false;
+    var scrollTop = (opts && opts.scrollTop !== undefined) ? opts.scrollTop : null;
+    var gutterState = gutter.__edGutterState || (gutter.__edGutterState = {});
+    // Windowed path needs a string body (line offsets); array callers keep
+    // the legacy full-span path below.
+    if (typeof value === 'string') {
+      var count = gutterLineCount(value == null ? '' : value);
+      if (count > GUTTER_WIN_LINES) {
+        return syncGutterWindowed(gutter, doc, String(value), count, gutterState, opts, wantComment, scrollTop, edOverlayHash(value));
+      }
+    }
+    if (gutterState.windowed) {
+      // Doc shrank below the window threshold: drop the spacers and fall
+      // through to the full-span path for an exact rebuild.
+      gutter.innerHTML = '';
+      gutterState.windowed = false;
+      gutterState.count = null;
+      gutterState.hash = null;
+      gutterState.winStart = -1;
+      gutterState.winEnd = -1;
+    }
+    // Cheapest exit: byte-identical text, no split/iterate at all.
+    if (typeof value === 'string' && gutterState.hash === edOverlayHash(value) && gutterState.count != null) {
+      if (scrollTop !== null && gutter.scrollTop !== scrollTop) gutter.scrollTop = scrollTop;
+      return gutter;
+    }
+    var lines = Object.prototype.toString.call(value) === '[object Array]'
+      ? value
+      : String(value == null ? '' : value).split(/\r?\n/);
+    var count = Math.max(1, lines.length);
+    // Fast path: same line count as last sync means no spans to add or
+    // remove — only per-line comment classes could differ. Refresh classes
+    // in place without touching the DOM structure (no append/remove), and
+    // skip entirely when the text is byte-identical to the last sync.
+    if (gutterState.count === count && gutter.children.length === count) {
+      var sameText = gutterState.hash === edOverlayHash(value);
+      var kids = gutter.children;
+      if (sameText) {
+        if (scrollTop !== null && gutter.scrollTop !== scrollTop) gutter.scrollTop = scrollTop;
+        return gutter;
+      }
+      if (wantComment) {
+        for (var ci = 0; ci < count; ci++) {
+          var lineText = lines[ci] || '';
+          var want = (/^(\/\/|#|\/\*|\*)/.test(lineText.trim())) ? 'ed-line-number is-comment' : 'ed-line-number';
+          if (kids[ci].className !== want) kids[ci].className = want;
+        }
+      }
+      gutterState.hash = edOverlayHash(value);
+      if (scrollTop !== null && gutter.scrollTop !== scrollTop) gutter.scrollTop = scrollTop;
+      return gutter;
+    }
+    gutterState.count = count;
+    gutterState.hash = edOverlayHash(value);
+    if (gutter.childNodes.length !== gutter.children.length) {
+      var n = gutter.firstChild;
+      while (n) {
+        var nx = n.nextSibling;
+        if (n.nodeType === 3) gutter.removeChild(n);
+        n = nx;
+      }
+    }
+    var kids = gutter.children;
+    while (kids.length > count) gutter.removeChild(gutter.lastChild);
+    for (var i = 0; i < count; i++) {
+      var el = kids[i];
+      if (el && el.tagName !== 'SPAN') { gutter.removeChild(el); el = kids[i] || null; }
+      var want = 'ed-line-number';
+      if (wantComment) {
+        var lineText = lines[i] || '';
+        if (/^(\/\/|#|\/\*|\*)/.test(lineText.trim())) want += ' is-comment';
+      }
+      if (!el) {
+        var span = doc.createElement('span');
+        span.className = want;
+        span.textContent = String(i + 1);
+        gutter.appendChild(span);
+      } else {
+        if (el.textContent !== String(i + 1)) el.textContent = String(i + 1);
+        if (el.className !== want) el.className = want;
+      }
+    }
+    if (scrollTop !== null && gutter.scrollTop !== scrollTop) gutter.scrollTop = scrollTop;
+    return gutter;
   }
 
   global.EditorLayout = {
@@ -884,7 +1200,9 @@
     updateExplorerToggleIcon: updateExplorerToggleIcon,
     highlightComments: highlightComments,
     updateOverlay: updateOverlay,
+    syncGutter: syncGutter,
     syncOverlayScroll: syncOverlayScroll,
+    imeTick: imeTick,
     filterTree: filterTree,
     destroy: destroy
   };

@@ -442,12 +442,25 @@
     var line = 1, col = 0;
     if (ta) {
       pos = ta.selectionStart || 0;
-      var before = text.slice(0, pos);
-      var segments = before.split(/\r?\n/);
-      line = segments.length;
-      col = segments[segments.length - 1].length;
+      // O(caret): count breaks only up to the caret, no before-substring.
+      var brk = -1;
+      for (;;) {
+        brk = text.indexOf('\n', brk + 1);
+        if (brk < 0 || brk >= pos) break;
+        line++;
+      }
+      col = pos - (text.lastIndexOf('\n', pos - 1) + 1);
     }
-    var lines = text ? text.split(/\r?\n/).length : 1;
+    // Total lines without splitting: single scan, no segment allocation.
+    var lines = 1;
+    if (text) {
+      var t = -1;
+      for (;;) {
+        t = text.indexOf('\n', t + 1);
+        if (t < 0) break;
+        lines++;
+      }
+    }
     if (global.EditorLayout && typeof global.EditorLayout.updateStatus === 'function') {
       global.EditorLayout.updateStatus(dgn.layoutRoot, { bytes: text.length, lines: lines, words: 0, line: line, column: col });
     }
@@ -472,22 +485,32 @@
   function updateGutterInner() {
     var ta = inputEl(), g = gutterEl();
     if (!g || !ta) return;
-    var lines = ta.value.split(/\r?\n/);
-    var html = '';
-    for (var i = 1; i <= lines.length; i++) {
-      var lineText = lines[i - 1] || '';
-      var trimmed = lineText.trim();
-      var isComment = /^(\/\/|#|\/\*|\*)/.test(trimmed);
-      html += '<span' + (isComment ? ' class="is-comment"' : '') + '>' + i + '</span>\n';
+    // Shared incremental gutter (EditorLayout.syncGutter): append/remove only
+    // the line-count delta instead of rebuilding innerHTML per keystroke.
+    // Also upgrades the spans to .ed-line-number (display:block stacking).
+    if (global.EditorLayout && typeof global.EditorLayout.syncGutter === 'function') {
+      global.EditorLayout.syncGutter(g, ta.value, { scrollTop: ta.scrollTop });
+    } else {
+      var lines = ta.value.split(/\r?\n/);
+      var html = '';
+      for (var i = 1; i <= lines.length; i++) {
+        var lineText = lines[i - 1] || '';
+        var trimmed = lineText.trim();
+        var isComment = /^(\/\/|#|\/\*|\*)/.test(trimmed);
+        html += '<span' + (isComment ? ' class="is-comment"' : '') + '>' + i + '</span>\n';
+      }
+      if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) html = '<span>1</span>\n';
+      g.innerHTML = html;
+      g.scrollTop = ta.scrollTop;
     }
-    if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) html = '<span>1</span>\n';
-    g.innerHTML = html;
-    g.scrollTop = ta.scrollTop;
     updateOverlay();
   }
 
-  function onInput() {
+  function onInput(event) {
     if (dgn.ignoreInput) return;
+    // IME guard (mirrors editor_shell.js): composition keystrokes must not
+    // trigger full-text gutter/status work; one pass runs on compositionend.
+    if (dgn.composing || (event && event.isComposing)) return;
     updateGutterInner();
     updateStatusBar();
   }
@@ -1245,7 +1268,13 @@
     var ta = inputEl();
     if (ta) {
       ta.addEventListener('input', onInput);
-      ta.addEventListener('keyup', function () { updateStatusBar(); });
+      ta.addEventListener('compositionstart', function () { dgn.composing = true; });
+      ta.addEventListener('compositionend', function () { dgn.composing = false; onInput(); });
+      ta.addEventListener('keyup', function (e) {
+        // IME composition keystrokes (229) must not trigger status work.
+        if (dgn.composing || (e && (e.keyCode === 229 || e.key === 'Process' || e.isComposing))) return;
+        updateStatusBar();
+      });
       ta.addEventListener('click', function () { updateStatusBar(); });
       ta.addEventListener('scroll', function () {
         var g = gutterEl();
@@ -1254,13 +1283,15 @@
       });
       ta.addEventListener('keydown', function (e) {
         var mod = e.ctrlKey || e.metaKey;
-        if (e.key === 'Tab') {
+        // keyCode 229 = IME composition keystroke: never hijack it.
+        var imeKey = e.keyCode === 229 || e.key === 'Process';
+        if (!imeKey && e.key === 'Tab') {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
             global.EditorCommands.indent(ta, e.shiftKey);
           }
-        } else if (e.altKey && !mod && e.key === '/') {
+        } else if (!imeKey && e.altKey && !mod && e.key === '/') {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {

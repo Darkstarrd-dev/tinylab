@@ -73,8 +73,11 @@
     else {
       // Toolbar buttons use data-zoom; input + gutter + preview must share scale.
       el.textContent =
-        '#ed-main-input, .ed-syntax-overlay, textarea.ed-input, .ed-input, .ed-main-input, textarea[id^="ed-input-"]{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important; line-height:calc(1.55 * ' + editorScale + ')}\n' +
-        '.ed-line-gutter{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important}\n' +
+        '#ed-main-input, .ed-syntax-overlay, textarea.ed-input, .ed-input, .ed-main-input, textarea[id^="ed-input-"]{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important; line-height:calc(1.5 * ' + editorScale + ')}\n' +
+        /* Gutter line-height MUST track the textarea (1.5*scale): the
+           gutter is scroll-synced 1:1, so divergent line heights drift the
+           numbers apart line by line at any zoom != 1x. */
+        '.ed-line-gutter{font-size:calc(var(--font-code,13px) * ' + editorScale + ') !important; line-height:calc(1.5 * ' + editorScale + ') !important}\n' +
         '.ed-preview-content{font-size:calc(var(--font-base,14px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content h1{font-size:calc((var(--font-base,14px) + 8px) * ' + editorScale + ') !important}\n' +
         '.ed-preview-content h2{font-size:calc((var(--font-base,14px) + 5px) * ' + editorScale + ') !important}\n' +

@@ -8,6 +8,94 @@
   var SAFE_URI = /^(?:(?:https?|mailto|tel):|[\/#]|\.{0,2}\/|[^:]+$)/i;
   var EXTERNAL_URI = /^https?:\/\//i;
 
+  // Heavy-render cache: mermaid SVG layout and hljs highlighting dominate
+  // per-keystroke cost, so both are memoized by exact source hash. A cache
+  // hit injects the stored markup with zero library calls; only blocks whose
+  // source actually changed pay for a re-render. Bounded LRU (oldest evicted
+  // first) so long sessions cannot grow memory without limit.
+  var ED_HEAVY_CACHE_MAX = 96;
+  var edHeavyCache = null; // lazily created Map<string, string>
+  var edMermaidSeq = 0;
+  function edHeavyMap() {
+    if (!edHeavyCache && typeof Map === 'function') edHeavyCache = new Map();
+    return edHeavyCache;
+  }
+  function edHash(value) {
+    // FNV-1a 32-bit over UTF-16 code units: cheap, collision-safe enough
+    // for a render cache (a collision only costs one stale diagram until
+    // the next source change re-renders it).
+    var text = asText(value);
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = (hash * 0x01000193) | 0;
+    }
+    return (hash >>> 0).toString(36) + ':' + text.length;
+  }
+  function edCacheGet(key) {
+    var map = edHeavyMap();
+    if (!map) return null;
+    if (!map.has(key)) return null;
+    var val = map.get(key);
+    map.delete(key);
+    map.set(key, val); // refresh LRU position
+    return val;
+  }
+  function edCacheSet(key, val) {
+    var map = edHeavyMap();
+    if (!map) return;
+    if (map.has(key)) map.delete(key);
+    map.set(key, val);
+    while (map.size > ED_HEAVY_CACHE_MAX) {
+      var oldest = null;
+      map.forEach(function (v, k) { if (oldest === null) oldest = k; });
+      if (oldest === null) break;
+      map.delete(oldest);
+    }
+  }
+  function edMermaidRender(raw) {
+    // Render one mermaid diagram to an SVG string without touching the live
+    // DOM (no layout of throwaway nodes). Prefers the v10+ promise API
+    // `mermaid.render(id, text)`; falls back to `mermaidAPI.render` with a
+    // callback shim for older bundles. A single pathological diagram must
+    // never freeze the window: past 3s the render is abandoned and the
+    // caller shows the source with an error note instead.
+    var ED_MERMAID_TIMEOUT_MS = 3000;
+    return new Promise(function (resolve, reject) {
+      var id = 'ed-mmd-' + (++edMermaidSeq) + '-' + Date.now().toString(36);
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        reject(new Error('mermaid render timed out'));
+      }, ED_MERMAID_TIMEOUT_MS);
+      var done = function (fn, arg) {
+        if (settled) return;
+        settled = true;
+        try { clearTimeout(timer); } catch (e) {}
+        fn(arg);
+      };
+      try {
+        var mm = root.mermaid;
+        if (mm && typeof mm.render === 'function') {
+          var out = mm.render(id, raw);
+          if (out && typeof out.then === 'function') {
+            out.then(function (r) { done(resolve, r && r.svg ? r.svg : String(r)); }, function (e) { done(reject, e); });
+            return;
+          }
+          done(resolve, String(out));
+          return;
+        }
+        var api = mm && mm.mermaidAPI;
+        if (api && typeof api.render === 'function') {
+          api.render(id, raw, function (svg) { done(resolve, svg); });
+          return;
+        }
+        done(reject, new Error('no mermaid render api'));
+      } catch (e) { done(reject, e); }
+    });
+  }
+
   function asText(value) {
     return value == null ? '' : String(value);
   }
@@ -264,18 +352,83 @@
     return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escapeHtml(documentTitle) + '</title></head><body>' + rendered + '</body></html>';
   }
 
-  function highlightCode(rootElement) {
+  function highlightCode(rootElement, opts) {
     if (!rootElement || !rootElement.querySelectorAll) return rootElement;
+    var doc = getDocument();
+    // skipHeavy (large-document budget from the shell): leave code plain and
+    // degrade mermaid diagrams to click-to-render placeholders instead of
+    // paying hljs full-document scan + SVG layout on every pass. The
+    // placeholder re-enters the normal cached path for that single block.
+    if (opts && opts.skipHeavy) {
+      var heavyPres = rootElement.querySelectorAll('pre');
+      heavyPres.forEach(function (pre) {
+        if (pre.dataset.edMmd === '1' || pre.dataset.edHeavySkip === '1') return;
+        var codeEl = pre.querySelector('code');
+        if (!codeEl) return;
+        var cls = codeEl.className || '';
+        var langMatch = cls.match(/(?:language|lang)-([\w-]+)/i);
+        var lang = langMatch ? langMatch[1].toLowerCase() : '';
+        if (lang !== 'mermaid') return;
+        pre.dataset.edHeavySkip = '1';
+        var raw = codeEl.textContent || '';
+        var btn = doc ? doc.createElement('button') : null;
+        if (!btn || !pre.parentNode) return;
+        btn.type = 'button';
+        btn.className = 'ed-mermaid-render-btn';
+        btn.textContent = 'Render diagram (large document mode)';
+        btn.style.cssText = 'display:block;margin:8px 0;padding:6px 12px;cursor:pointer;';
+        btn.setAttribute('data-mermaid-source', raw);
+        btn.addEventListener('click', function () {
+          pre.dataset.edHeavySkip = '0';
+          pre.dataset.edMmd = '0';
+          try { btn.remove(); } catch (eRm) {}
+          highlightCode(rootElement, null);
+        });
+        pre.parentNode.insertBefore(btn, pre.nextSibling);
+        pre.style.display = 'none';
+      });
+      return rootElement;
+    }
 
+    // hljs: highlight each block once per exact source text. The preview
+    // container is rebuilt via innerHTML on every pass, so DOM flags alone
+    // never survive; the source-hash cache is what actually skips work.
+    // Identical code blocks share one entry: repeated snippets cost one
+    // highlight no matter how often they appear in the document.
     if (typeof root.hljs !== 'undefined') {
       var blocks = rootElement.querySelectorAll('pre code');
       blocks.forEach(function (block) {
         if (block.dataset.edHl === '1') return;
-        block.dataset.edHl = '1';
-        try { root.hljs.highlightElement(block); } catch (e) {}
+        var src = block.textContent || '';
+        var key = 'hl:' + edHash(block.className + '\n' + src);
+        var cached = edCacheGet(key);
+        if (cached !== null && cached !== undefined) {
+          // Restore the whole node: highlightElement also mutates the
+          // element's own class list (hljs theme hooks), so innerHTML
+          // alone would lose syntax colors on cache hits.
+        try {
+            var holder = doc.createElement('div');
+            holder.innerHTML = cached;
+            var fresh = holder.firstChild;
+            if (fresh && block.parentNode) {
+              fresh.dataset.edHl = '1';
+              block.parentNode.replaceChild(fresh, block);
+        }
+          } catch (eSwap) {}
+          return;
+        }
+        try {
+          root.hljs.highlightElement(block);
+          block.dataset.edHl = '1';
+          try { edCacheSet(key, block.outerHTML); } catch (eCache) {}
+        } catch (e) {}
       });
     }
 
+    // mermaid: render each diagram once per exact source text, synchronously
+    // injecting the cached SVG on repeats. Async renders resolve into the
+    // same placeholder (guarded by a per-node token so a stale render from
+    // an older keystroke never overwrites a newer source).
     if (typeof root.mermaid !== 'undefined') {
       var pres = rootElement.querySelectorAll('pre');
       pres.forEach(function (pre) {
@@ -285,22 +438,32 @@
         var cls = codeEl.className || '';
         var langMatch = cls.match(/(?:language|lang)-([\w-]+)/i);
         var lang = langMatch ? langMatch[1].toLowerCase() : '';
-        if (lang === 'mermaid') {
-          pre.dataset.edMmd = '1';
-          var raw = codeEl.textContent || '';
-          var placeholder = root.document.createElement('div');
-          placeholder.className = 'ed-mermaid';
-          placeholder.style.cssText = 'padding:12px; border:1px solid var(--glass-border-hover, rgba(255,255,255,0.1)); border-radius:6px; background:rgba(0,0,0,0.15); margin:8px 0; overflow:auto;';
-          placeholder.textContent = raw;
-          pre.parentNode.insertBefore(placeholder, pre.nextSibling);
-          pre.style.display = 'none';
-          try {
-            root.mermaid.run({ nodes: [placeholder], suppressErrors: true });
-          } catch (err) {
-            placeholder.className += ' mermaid-error';
-            placeholder.textContent = '[mermaid] ' + (err && err.message ? err.message : String(err));
-          }
+        if (lang !== 'mermaid') return;
+        pre.dataset.edMmd = '1';
+        var raw = codeEl.textContent || '';
+        var key = 'mmd:' + edHash(raw);
+        var hit = edCacheGet(key);
+        var placeholder = doc ? doc.createElement('div') : null;
+        if (!placeholder) return;
+        placeholder.className = 'ed-mermaid';
+        placeholder.style.cssText = 'padding:12px; border:1px solid var(--glass-border-hover, rgba(255,255,255,0.1)); border-radius:6px; background:rgba(0,0,0,0.15); margin:8px 0; overflow:auto;';
+        pre.parentNode.insertBefore(placeholder, pre.nextSibling);
+        pre.style.display = 'none';
+        if (hit !== null && hit !== undefined) {
+          placeholder.innerHTML = hit;
+          return;
         }
+        placeholder.textContent = raw;
+        var token = (pre.dataset.edMmdToken = String(Date.now()) + Math.random().toString(36).slice(2));
+        edMermaidRender(raw).then(function (svg) {
+          if (pre.dataset.edMmdToken !== token) return; // superseded keystroke
+          try { edCacheSet(key, svg); } catch (eSet) {}
+          if (placeholder.isConnected) placeholder.innerHTML = svg;
+        }, function (err) {
+          if (pre.dataset.edMmdToken !== token) return;
+          placeholder.className += ' mermaid-error';
+          placeholder.textContent = '[mermaid] ' + (err && err.message ? err.message : String(err));
+        });
       });
     }
 

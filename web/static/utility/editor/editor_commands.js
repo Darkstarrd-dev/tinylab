@@ -13,7 +13,7 @@
   }
 
   function snapshot(ta) {
-    var value = String(ta.value == null ? '' : ta.value);
+    var value = ta.value == null ? '' : String(ta.value);
     var start = typeof ta.selectionStart === 'number' ? ta.selectionStart : value.length;
     var end = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : start;
     return {
@@ -55,8 +55,11 @@
     // only call record() once (for example, when the editor receives focus).
     if (typeof ta.addEventListener === 'function') {
       history.listening = true;
-      ta.addEventListener('input', function () {
-        if (!history.suppress) record(ta);
+      ta.addEventListener('input', function (event) {
+        // IME guard (mirrors editor_shell.js): composition keystrokes must
+        // not snapshot value/selection — the browser owns both mid-session,
+        // and full-text reads on 2000-line docs freeze the IME channel.
+        if (!history.suppress && !(event && event.isComposing)) record(ta);
       });
     }
     return history;

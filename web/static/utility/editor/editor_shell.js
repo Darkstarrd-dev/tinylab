@@ -32,6 +32,344 @@
   };
   var shellFind = { visible: false, query: '', replace: '', index: 0, matches: [] };
 
+  // Input scheduling: per-keystroke work must stay cheap. Heavy preview
+  // rendering is debounced (markdown 250ms, html-iframe 700ms), drafts are
+  // debounced separately (800ms), and byte-identical content never
+  // re-renders. Explicit actions (open/save/undo/toggle) keep going through
+  // the synchronous redraw() path below; only the input event is deferred.
+  var shellRender = { timer: 0, draftTimer: 0, lastHash: null, lastHtml: null };
+  // IME perf ring buffer: records the last 32 composition/input timings so
+  // a real (not synthetic) IME stall can be measured in-page. Exposed as
+  // window.__edImePerf; each entry is [phase, ms] where phase is one of
+  // 'comp-start' | 'comp-input' | 'comp-end' | 'input'.
+  var edImePerf = [];
+  function edImeMark(phase, ms) {
+    try {
+      edImePerf.push([phase, Math.round(ms * 10) / 10]);
+      if (edImePerf.length > 32) edImePerf.splice(0, edImePerf.length - 32);
+      if (typeof window !== 'undefined') window.__edImePerf = edImePerf;
+    } catch (ePerf) {}
+  }
+  // Shared composition state, visible to every handler in this module.
+  // Browser hint: compositor heartbeat (trace rounds 5-6) shows 400-1000ms
+  // BeginFrame gaps while composition runs with zero DOM churn; the blind
+  // tick below keeps frames flowing instead of freezing mid-stroke.
+  var shellComposing = false;
+  // IME window (round 16, viewport-anchored): on docs past
+  // IME_WIN_LINES/IME_WIN_BYTES, the session swaps the textarea to the
+  // visible viewport ∪ caret line ± IME_WIN_PAD so the browser lays out
+  // ~150 lines per candidate keystroke instead of 2000 (input-gap 1→3s
+  // linear while handlers run 0.1ms; A/B round 15 proved the window is the
+  // only freeze cure). The old ±8-line caret window visibly reflowed the
+  // doc (transparent textarea IS the display surface): window text painted
+  // against wrong gutter lines and the scrollHeight collapse desynced the
+  // viewport. The viewport window keeps every visible line plus the caret
+  // on screen with pixel-identical scrollTop, so the session is visually
+  // a no-op. The window replaces the [winStart, winStart+winInitLen) span
+  // on commit; text outside is untouched, splice-back exact. Small docs
+  // skip windowing (blind-tick path, verified fine at 300 lines).
+  var IME_WIN_LINES = 500;
+  var IME_WIN_BYTES = 50 * 1024;
+  var IME_WIN_PAD = 60;
+  var imeWin = null;
+  // Pin the caret into the visible viewport after a window splice-back.
+  // Logical-line estimate for mid-doc carets; an at-end caret pins to the
+  // true bottom (exact regardless of wrapping).
+  function edEnsureCaretVisible(input, caret) {
+    if (!input) return;
+    var text = input.value;
+    var pos = (typeof caret === 'number' && caret >= 0) ? caret : text.length;
+    var vh = input.clientHeight || 0;
+    if (vh <= 0) return;
+    if (pos >= text.length - 1) {
+      input.scrollTop = Math.max(0, input.scrollHeight - vh);
+      return;
+    }
+    var lh = 19.5;
+    try {
+      var cs = input.ownerDocument.defaultView.getComputedStyle(input);
+      var plh = parseFloat(cs.lineHeight);
+      if (plh > 0) lh = plh;
+    } catch (eLH) {}
+    var line = 1;
+    var idx = -1;
+    while ((idx = text.indexOf('\n', idx + 1)) >= 0 && idx < pos) line++;
+    var caretTop = (line - 1) * lh;
+    var st = input.scrollTop;
+    if (caretTop < st) input.scrollTop = Math.max(0, caretTop - lh);
+    else if (caretTop + lh > st + vh) input.scrollTop = Math.max(0, caretTop - vh + lh * 2);
+  }
+  // Round 16: viewport-anchored window re-enabled (round-15 A/B: no window
+  // → freeze returns with input-gap 2-4.8s; ±8-line window → jump). All
+  // other session guards stay (overlay display:none, gutter hidden+sliced,
+  // pre-wrap, blind tick).
+  var IME_WIN_ENABLED = true;
+  function imeWindowOpen(input) {
+    if (!IME_WIN_ENABLED) return false;
+    var full = input.value;
+    var lines = 1;
+    var idx = -1;
+    var big = full.length >= IME_WIN_BYTES;
+    if (!big) {
+      while ((idx = full.indexOf('\n', idx + 1)) >= 0) {
+        if (++lines >= IME_WIN_LINES) break;
+      }
+      big = lines >= IME_WIN_LINES;
+    }
+    if (!big) return false;
+    var caret = typeof input.selectionStart === 'number' ? input.selectionStart : full.length;
+    var caretEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : caret;
+    // Viewport-anchored range: visible run ∪ caret line, ±PAD, snapped to
+    // line boundaries. Line-height estimated from computed style (wrap
+    // error only shifts the pad, never correctness: splice-back is by
+    // character offsets, scroll restore below is re-pinned by
+    // edEnsureCaretVisible on commit).
+    var st0 = input.scrollTop || 0;
+    var sl0 = input.scrollLeft || 0;
+    var lh0 = 19.5;
+    try {
+      var cs0 = input.ownerDocument.defaultView.getComputedStyle(input);
+      var plh0 = parseFloat(cs0.lineHeight);
+      if (plh0 > 0) lh0 = plh0;
+      else { var fs0 = parseFloat(cs0.fontSize); if (fs0 > 0) lh0 = fs0 * 1.5; }
+    } catch (eLH0) {}
+    var vh0 = input.clientHeight || 0;
+    if (vh0 <= 0) { try { vh0 = input.ownerDocument.defaultView.innerHeight || 600; } catch (eVH0) { vh0 = 600; } }
+    var caretLine = 1;
+    var ci = -1;
+    while ((ci = full.indexOf('\n', ci + 1)) >= 0 && ci < caret) caretLine++;
+    var totalLines = 1;
+    var ni = -1;
+    while ((ni = full.indexOf('\n', ni + 1)) >= 0) totalLines++;
+    var vStart = Math.floor(st0 / lh0) + 1;
+    if (vStart < 1) vStart = 1;
+    var vEnd = Math.ceil((st0 + vh0) / lh0) + 1;
+    if (vEnd > totalLines) vEnd = totalLines;
+    var winTopLine = Math.min(vStart, caretLine) - IME_WIN_PAD;
+    if (winTopLine < 1) winTopLine = 1;
+    var winBotLine = Math.max(vEnd, caretLine) + IME_WIN_PAD;
+    if (winBotLine > totalLines) winBotLine = totalLines;
+    var winStart = 0;
+    if (winTopLine > 1) {
+      var n = 0;
+      var p = -1;
+      while (n < winTopLine - 1) { p = full.indexOf('\n', p + 1); if (p < 0) break; n++; }
+      winStart = p + 1;
+    }
+    var winEnd = full.length;
+    if (winBotLine < totalLines) {
+      var m = 0;
+      var q = -1;
+      while (m < winBotLine) { q = full.indexOf('\n', q + 1); if (q < 0) break; m++; }
+      if (q >= 0) winEnd = q;
+    }
+    imeWin = {
+      full: full,
+      winStart: winStart,
+      winInitLen: winEnd - winStart,
+      caretStart: caret,
+      caretEnd: caretEnd,
+      scrollTop: st0,
+      scrollLeft: sl0
+    };
+    input.value = full.slice(winStart, winEnd);
+    try {
+      input.setSelectionRange(caret - winStart, caretEnd - winStart);
+    } catch (eSel) {}
+    // Pixel-identical viewport: the window top sits (winTopLine-1)*lh px
+    // into the full doc, so subtract it to keep the same lines on screen.
+    // The caret stays visible by construction (inside viewport ∪ pad).
+    try {
+      input.scrollTop = Math.max(0, st0 - (winTopLine - 1) * lh0);
+      input.scrollLeft = sl0;
+    } catch (eWinScroll) {}
+    // The value swap collapses scrollHeight; some hosts (WebView2) fire a
+    // deferred caret-reveal that yanks the viewport to the window top and
+    // sticks there (blank viewport / composition painted mid-screen). A
+    // trailing rAF pass re-pins the conserved offset after that reveal.
+    if (typeof requestAnimationFrame === 'function') {
+      (function (el, wantTop, wantLeft) {
+        requestAnimationFrame(function () {
+          if (!imeWin) return;
+          try {
+            if (Math.abs(el.scrollTop - wantTop) > 2) el.scrollTop = wantTop;
+            if (Math.abs(el.scrollLeft - wantLeft) > 2) el.scrollLeft = wantLeft;
+          } catch (eWinPin) {}
+        });
+      })(input, Math.max(0, st0 - (winTopLine - 1) * lh0), sl0);
+    }
+    // No gutter/overlay sync here: both are display:none/content-hidden for
+    // the session (is-typing/is-composing), and the commit path re-syncs
+    // after splice-back. Syncing now would pay a full-doc highlight for a
+    // hidden subtree (measured 37ms of the 40ms comp-start in CDP test).
+    // No record here: pushing the window text would poison the undo
+    // stack (post-session Ctrl+Z would "restore" 17 lines over the full
+    // doc). In-session undo stays with the IME itself (see onKey guard).
+    return true;
+  }
+  function imeWindowCommit(input) {
+    if (!imeWin) return false;
+    var winText = input.value;
+    var w = imeWin;
+    imeWin = null;
+    var full = w.full.slice(0, w.winStart) + winText + w.full.slice(w.winStart + w.winInitLen);
+    input.value = full;
+    var caret = w.winStart + winText.length;
+    try {
+      input.setSelectionRange(caret, caret);
+    } catch (eSel) {}
+    try {
+      input.scrollTop = w.scrollTop;
+      input.scrollLeft = w.scrollLeft;
+    } catch (eScroll) {}
+    // The window swap collapses scrollHeight, so the browser's own async
+    // caret-reveal can land mid-doc and stick (bottom caret invisible,
+    // viewport frozen at the old reveal). Restore the old offset first,
+    // then pin the caret visible; a trailing rAF pass wins the race with
+    // the browser's deferred reveal.
+    try { edEnsureCaretVisible(input, caret); } catch (ePin) {}
+    if (typeof requestAnimationFrame === 'function') {
+      (function (el, pos) {
+        requestAnimationFrame(function () {
+          if (imeWin) return;
+          try { edEnsureCaretVisible(el, pos); } catch (ePin2) {}
+        });
+      })(input, caret);
+    }
+    if (global.EditorCommands) global.EditorCommands.record(input);
+    // Gutter/overlay ride the debounced preview pass (300ms): syncing here
+    // would force a full-doc split+highlight in the commit frame. Only the
+    // caret/title tick runs now so the committed text is positioned.
+    updateCaret();
+    schedulePreview();
+    return true;
+  }
+  function imeWindowAbort(input) {
+    if (!imeWin) return;
+    var w = imeWin;
+    imeWin = null;
+    input.value = w.full;
+    try {
+      input.setSelectionRange(w.caretStart, w.caretEnd);
+    } catch (eSel) {}
+    try {
+      input.scrollTop = w.scrollTop;
+      input.scrollLeft = w.scrollLeft;
+    } catch (eScroll) {}
+    try { edEnsureCaretVisible(input, w.caretStart); } catch (ePinA) {}
+  }
+  // edImeHeartbeat: zero-cost compositor signal. A bare rAF request keeps
+  // BeginFrames flowing during an IME session without touching the DOM,
+  // style, or layout at all. Re-armed per input so long sessions (22+
+  // pending chars) never stall on a spent frame; coalesced by the browser
+  // so rapid keystrokes cost one pending callback at a time.
+  var edImeBeatPending = false;
+  function edImeHeartbeat() {
+    if (edImeBeatPending) return;
+    if (typeof requestAnimationFrame !== 'function') return;
+    edImeBeatPending = true;
+    try {
+      // Frame-gap forensics: record the interval between delivered frames
+      // so a real IME freeze shows whether the compositor stopped emitting
+      // frames (>100ms gaps) or kept emitting while input starved.
+      var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      requestAnimationFrame(function () {
+        edImeBeatPending = false;
+        if (t0) {
+          var now = performance.now();
+          var last = edImeHeartbeat._last || 0;
+          if (last && now - last > 100) edImeMark('frame-gap', now - last);
+          edImeHeartbeat._last = now;
+        }
+      });
+    } catch (eBeat) { edImeBeatPending = false; }
+  }
+  function edHashStr(value) {
+    var text = value == null ? '' : String(value);
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = (hash * 0x01000193) | 0;
+    }
+    return (hash >>> 0).toString(36) + ':' + text.length;
+  }
+  function previewVisible() {
+    return !!(shellState.preview || shellState.reader);
+  }
+  function currentIsHtml() {
+    if (shellState.htmlRender) return true;
+    var ext = shellState.currentNode ? edFileExt(shellState.currentNode.name) : 'md';
+    return typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
+  }
+  function scheduleDraft(id, content) {
+    if (!id) return;
+    if (shellRender.draftTimer) { try { clearTimeout(shellRender.draftTimer); } catch (e) {} shellRender.draftTimer = 0; }
+    shellRender.draftTimer = setTimeout(function () {
+      shellRender.draftTimer = 0;
+      // Never persist mid-session: the 800ms draft timer can land inside an
+      // IME session on 2000-line docs (JSON.stringify + localStorage write
+      // on the main thread while TSF owns the caret). Re-arm after the
+      // session ends instead of dropping the write.
+      if (shellComposing) {
+        shellRender.draftTimer = setTimeout(function () {
+          shellRender.draftTimer = 0;
+          if (!shellComposing) scheduleDraftIdle(id, content);
+          else scheduleDraft(id, content);
+        }, 800);
+        return;
+      }
+      scheduleDraftIdle(id, content);
+    }, 800);
+  }
+  function schedulePreview() {
+    if (shellRender.timer) { try { clearTimeout(shellRender.timer); } catch (e) {} shellRender.timer = 0; }
+    // Stop-to-render: the preview only refreshes after keystrokes settle
+    // (markdown 300ms, html-iframe 1200ms), never mid-burst. The typing
+    // passthrough class (see onInput) keeps real glyphs visible meanwhile.
+    var delay = currentIsHtml() ? 1200 : 300;
+    shellRender.timer = setTimeout(function () {
+      shellRender.timer = 0;
+      if (shellState.mode === 'diff') renderDiff(); else renderPreview();
+    }, delay);
+  }
+  function setTyping(on) {
+    if (!shellRoot) return;
+    var wrap = shellRoot.querySelector('.ed-input-wrap');
+    if (!wrap) return;
+    if (on) wrap.classList.add('is-typing');
+    else wrap.classList.remove('is-typing');
+  }
+  function setComposing(on) {
+    if (!shellRoot) return;
+    var wrap = shellRoot.querySelector('.ed-input-wrap');
+    if (!wrap) return;
+    if (on) wrap.classList.add('is-composing');
+    else wrap.classList.remove('is-composing');
+  }
+  function cancelScheduled() {
+    if (shellRender.timer) { try { clearTimeout(shellRender.timer); } catch (e) {} shellRender.timer = 0; }
+    if (shellRender.draftTimer) { try { clearTimeout(shellRender.draftTimer); } catch (e) {} shellRender.draftTimer = 0; }
+    setTyping(false);
+    setComposing(false);
+  }
+
+  // Large-document budget: past ~1500 lines / 150KB the heavy post-pass
+  // (hljs full-document scan + per-block hashing, mermaid SVG layout) is
+  // what freezes the window, so it is skipped and diagrams degrade to
+  // click-to-render placeholders. marked+sanitize still run (pure text).
+  var ED_LARGE_LINES = 1500;
+  var ED_LARGE_BYTES = 150 * 1024;
+  function edIsLargeDoc(content) {
+    var text = content == null ? '' : String(content);
+    if (text.length >= ED_LARGE_BYTES) return true;
+    var lines = 1;
+    var idx = -1;
+    while ((idx = text.indexOf('\n', idx + 1)) >= 0) {
+      if (++lines >= ED_LARGE_LINES) return true;
+    }
+    return false;
+  }
+
   function installFilePickerKeyLock() {
     if (global.__editorFilePickerKeyLockInstalled) return;
     var block = function (event) {
@@ -78,6 +416,31 @@
       if (node.parentId && map[node.parentId] && node.parentId !== node.id) map[node.parentId].children.push(node);
       else roots.push(node);
     });
+    // Sibling dedupe: after an unclean shutdown the backend can return two
+    // live nodes with different ids but the same (parentId, name) — e.g. a
+    // retried create plus its orphan. Both would render as identical rows
+    // that edit the same underlying file. Keep the first, drop the rest,
+    // and warn with both ids so the backend root cause stays locatable.
+    (function dedupeSiblings(list) {
+      var seen = Object.create(null);
+      for (var i = list.length - 1; i >= 0; i--) {
+        var n = list[i];
+        var key = (n.parentId || '') + '\n' + (n.name || '');
+        if (seen[key]) {
+          try {
+            if (typeof console !== 'undefined' && console.warn) {
+              console.warn('[editor] duplicate tree node hidden: kept id=' + seen[key].id + ' dropped id=' + n.id + ' name=' + n.name);
+            }
+          } catch (eWarn) {}
+          list.splice(i, 1);
+        } else {
+          seen[key] = n;
+        }
+      }
+      for (var j = 0; j < list.length; j++) {
+        if (list[j] && list[j].children) dedupeSiblings(list[j].children);
+      }
+    })(roots);
     var expanded = Object.create(null);
     (shellState.expanded || []).forEach(function (id) { expanded[id] = true; });
     function finish(node) {
@@ -105,27 +468,24 @@
     }
   }
 
-  function updateGutter() {
+  function updateGutter(withOverlay) {
     if (!shellRoot) return;
     var gutter = shellRoot.querySelector('#ed-line-gutter');
     var input = currentInput();
     if (!gutter || !input) return;
-    var lines = input.value.split(/\r?\n/);
-    var count = Math.max(1, lines.length);
-    gutter.innerHTML = '';
-    for (var i = 1; i <= count; i++) {
-      var span = global.document.createElement('span');
-      span.className = 'ed-line-number';
-      var lineText = lines[i - 1] || '';
-      var trimmed = lineText.trim();
-      if (/^(\/\/|#|\/\*|\*)/.test(trimmed)) {
-        span.className += ' is-comment';
-      }
-      span.textContent = String(i);
-      gutter.appendChild(span);
+    if (global.EditorLayout && typeof global.EditorLayout.syncGutter === 'function') {
+      // Pass the textarea's real scroll range: wrapped long lines inflate
+      // scrollHeight far beyond count*lh, so the gutter must position its
+      // window by scroll ratio, not by st/lh (which pins the gutter early
+      // near the bottom while the textarea keeps scrolling).
+      var sh = 0, ch = 0;
+      try { sh = input.scrollHeight; ch = input.clientHeight; } catch (eRange) {}
+      global.EditorLayout.syncGutter(gutter, input.value, { scrollTop: input.scrollTop, scrollHeight: sh, clientHeight: ch });
     }
-    gutter.scrollTop = input.scrollTop;
-    updateOverlay();
+    // The comment overlay re-highlights the full text; it rides the debounced
+    // preview pass, not the per-keystroke path. Explicit callers (open, undo,
+    // file switch) pass withOverlay !== false for an immediate sync.
+    if (withOverlay !== false) updateOverlay();
   }
 
   function renderToc(preview) {
@@ -166,10 +526,32 @@
     var preview = shellRoot.querySelector('#ed-main-preview');
     if (!preview) return;
     var content = currentText();
+    if (!previewVisible()) {
+      // Edit-only mode: skip the expensive render entirely; null the hash
+      // so showing the preview again forces a fresh render.
+      shellRender.lastHash = null;
+      updateStatus();
+      updateOverlay();
+      setTyping(false);
+      setComposing(false);
+      return;
+    }
     var ext = shellState.currentNode ? edFileExt(shellState.currentNode.name) : 'md';
     var isHtml = typeof edIsHtmlExt === 'function' ? edIsHtmlExt(ext) : (ext === 'html' || ext === 'htm');
+    var useHtmlBranch = !!(shellState.htmlRender || isHtml);
+    // Byte-identical content (including the md/html branch flag, so the
+    // html-iframe toggle always re-renders) never re-renders.
+    var hash = edHashStr((useHtmlBranch ? 'H' : 'M') + '\n' + content);
+    // Hash hit: nothing to re-render, but the typing passthrough must still
+    // be lifted or the overlay stays display:none forever (e.g. a
+    // compositionend whose committed text matches the last rendered hash).
+    if (hash === shellRender.lastHash) { setTyping(false); setComposing(false); return; }
+    shellRender.lastHash = hash;
+    // Generation token: a newer keystroke schedule cancels this pass's
+    // second frame (heavy post-pass) so stale work never lands.
+    var gen = (shellRender.generation = (shellRender.generation || 0) + 1);
 
-    if (shellState.htmlRender || isHtml) {
+    if (useHtmlBranch) {
       preview.innerHTML = '';
       preview.classList.add('is-html-iframe-mode');
       var iframe = document.createElement('iframe');
@@ -196,15 +578,45 @@
       preview.appendChild(iframe);
       renderToc(preview);
       updateStatus();
+      updateOverlay();
+      setTyping(false);
+      setComposing(false);
       return;
     }
 
-    preview.classList.remove('is-html-iframe-mode');
-    var html = global.EditorMarkdown.renderMarkdown(content);
-    preview.innerHTML = html;
-    global.EditorMarkdown.highlightCode(preview);
-    renderToc(preview);
-    updateStatus();
+    // Frame 1 (sync, cheap): marked+sanitize text pass only. Frame 2
+    // (rAF-deferred, heavy): hljs/mermaid post-pass + TOC + stats + overlay.
+    // Textarea input events get a chance to run between the frames, and a
+    // superseding keystroke (generation mismatch) drops frame 2 entirely.
+    var large = edIsLargeDoc(content);
+    try {
+      preview.classList.remove('is-html-iframe-mode');
+      var html = global.EditorMarkdown.renderMarkdown(content);
+      preview.innerHTML = html;
+    } catch (eText) {
+      preview.innerHTML = '<p><em>Preview unavailable for this content.</em></p>';
+      updateStatus();
+      updateOverlay();
+      setTyping(false);
+      setComposing(false);
+      return;
+    }
+    var runHeavy = function () {
+      if (gen !== shellRender.generation) return; // superseded by newer input
+      try {
+        global.EditorMarkdown.highlightCode(preview, { skipHeavy: large });
+        renderToc(preview);
+      } catch (eHeavy) {}
+      try { updateStatus(); } catch (eStatus) {}
+      try { updateOverlay(); } catch (eOverlay) {}
+      setTyping(false);
+      setComposing(false);
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { requestAnimationFrame(runHeavy); });
+    } else {
+      setTimeout(runHeavy, 0);
+    }
   }
 
   function updateStatus() {
@@ -215,9 +627,20 @@
     var stats = global.EditorMarkdown.getStats(content, preview ? preview.innerHTML : '');
     var selStart = input ? (input.selectionStart || 0) : 0;
     var selEnd = input ? (input.selectionEnd || 0) : 0;
-    var before = input ? content.slice(0, selStart) : '';
-    var line = before ? before.split(/\r?\n/).length : 1;
-    var column = before ? before.length - before.lastIndexOf('\n') : 0;
+    // Line number without slicing the whole prefix: count breaks only up to
+    // the caret. No allocation of the before-caret substring.
+    var line = 1;
+    if (input) {
+      var brk = -1;
+      for (;;) {
+        brk = content.indexOf('\n', brk + 1);
+        if (brk < 0 || brk >= selStart) break;
+        line++;
+      }
+    }
+    // O(caret-line): lastIndexOf with a start position scans only back to
+    // the current line's break instead of slicing/scanning the whole doc.
+    var column = input ? selStart - (content.lastIndexOf('\n', selStart - 1) + 1) : 0;
     var dirty = content !== shellState.original;
     shellState.dirty = dirty;
     var textSel = selStart !== selEnd;
@@ -231,6 +654,45 @@
       column: column,
       chars: stats.chars,
       paragraphs: stats.paragraphs
+    });
+  }
+  // updateCaret: the only status work allowed per keystroke. No getStats
+  // (which re-parses preview.innerHTML into a throwaway div), no title
+  // reflow beyond the dirty marker. Full counts arrive with the debounced
+  // renderPreview pass via updateStatus().
+  function updateCaret() {
+    if (!shellRoot) return;
+    var input = currentInput();
+    var content = input ? input.value : '';
+    var selStart = input ? (input.selectionStart || 0) : 0;
+    var selEnd = input ? (input.selectionEnd || 0) : 0;
+    shellRender.lastCaretSelStart = selStart;
+    shellRender.lastCaretSelEnd = selEnd;
+    // O(caret): count breaks only up to the caret, no before-substring
+    // allocation or full-prefix split. (updateStatus already uses this;
+    // updateCaret was left on the old O(n) path by mistake.)
+    var line = 1;
+    if (input) {
+      var brk = -1;
+      for (;;) {
+        brk = content.indexOf('\n', brk + 1);
+        if (brk < 0 || brk >= selStart) break;
+        line++;
+      }
+    }
+    var column = input ? selStart - (content.lastIndexOf('\n', selStart - 1) + 1) : 0;
+    var dirty = content !== shellState.original;
+    shellState.dirty = dirty;
+    // Skip DOM writes when nothing changed: title/status rewrites every
+    // keystroke cost a reflow each, and 99% of keystrokes only move Ln/Col.
+    var caretKey = (shellState.currentNode && shellState.currentNode.name) + '|' + dirty + '|' + line + '|' + column + '|' + (selStart !== selEnd);
+    if (caretKey === shellRender.lastCaretKey) return;
+    shellRender.lastCaretKey = caretKey;
+    global.EditorLayout.updateTitle(shellRoot, shellState.currentNode && shellState.currentNode.name, dirty);
+    global.EditorLayout.updateStatus(shellRoot, {
+      textSelection: selStart !== selEnd,
+      line: line,
+      column: column
     });
   }
   function shellFindRefresh() {
@@ -400,6 +862,21 @@
       localStorage.setItem('tr_editor_drafts', JSON.stringify(drafts));
     } catch (e) {}
   }
+  // Draft persistence goes through requestIdleCallback (or a 500ms
+  // setTimeout fallback) so a 2000-line JSON.stringify + localStorage write
+  // never lands inside an IME composition session. The latest queued write
+  // wins; earlier ones are dropped by the generation counter.
+  var draftIdleGen = 0;
+  function scheduleDraftIdle(id, content) {
+    if (!id) return;
+    var gen = ++draftIdleGen;
+    var run = function () {
+      if (gen !== draftIdleGen) return;
+      saveDraft(id, content);
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 1500 });
+    else setTimeout(run, 500);
+  }
 
   function getDraft(id) {
     if (!id) return null;
@@ -433,6 +910,16 @@
 
   function loadFile(id, overrideContent) {
     if (!id) return Promise.resolve(false);
+    // Windowed IME session: restore the full text before switching files, or
+    // the uncommitted window (and its stashed full copy) is discarded.
+    if (imeWin) {
+      var loadInput = currentInput();
+      if (loadInput) { try { imeWindowAbort(loadInput); } catch (eWinLoad) {} }
+      else imeWin = null;
+    }
+    cancelScheduled();
+    shellRender.lastHash = null;
+    shellRender.lastCaretKey = null;
     shellState.htmlRender = false;
     return global.EditorWorkspace.getNode(id).then(function (node) {
       if (!node || node.type !== 'file') return false;
@@ -795,6 +1282,11 @@
   function saveWorkspace() {
     var input = currentInput();
     if (!input || !shellState.currentId) return Promise.resolve(false);
+    // Windowed IME session: splice the live window back before reading, or
+    // only the ±8-line window would be persisted and the rest lost.
+    if (imeWin) {
+      try { imeWindowCommit(input); } catch (eWinSave) { try { imeWindowAbort(input); } catch (eAbortSave) {} }
+    }
     var value = input.value;
 
     function doSaveTarget(target) {
@@ -830,6 +1322,9 @@
     return savePromise.then(function (saved) {
       if (!saved) { toast(tr('editorSaveFailed', 'Save failed'), 'error'); return false; }
       removeDraft(shellState.currentId);
+      // A debounced draft write from pre-save keystrokes may still be
+      // pending; drop it or it would resurrect a stale draft after save.
+      if (shellRender.draftTimer) { try { clearTimeout(shellRender.draftTimer); } catch (e) {} shellRender.draftTimer = 0; }
       shellState.original = value;
       shellState.dirty = false;
       updateStatus();
@@ -1302,10 +1797,124 @@
     if (!shellRoot || !input) return;
     var hooks = shellHooks();
     input.addEventListener('paste', handlePasteImage);
-    var onInput = function () { if (global.EditorCommands) global.EditorCommands.record(input); saveDraft(shellState.currentId, input.value); updateGutter(); renderPreview(); };
+    // Per-keystroke path: record undo + cheap gutter delta + caret only.
+    // Draft persistence, comment overlay, and the full markdown/mermaid/hljs
+    // render arrive via schedulePreview's debounced pass.
+    // IME guard: while a CJK composition session is open (isComposing or
+    // between compositionstart/end), the browser owns the textarea value and
+    // selection. Any read of input.value, setSelectionRange, or overlay DOM
+    // rewrite can abort the session — on 2000-line docs the per-keystroke
+    // full-text snapshot/diff freezes the WebView2 IME channel entirely.
+    // So composition input is ignored; one full pass runs on compositionend.
+    var onCompositionStart = function () {
+      var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      shellComposing = true;
+      // Composition must render through the real textarea (not the overlay):
+      // the browser draws the candidate string inside the textarea, but
+      // .ed-main-input is color:transparent so it only shows when .is-typing
+      // removes that. Set it here, not on compositionend.
+      setTyping(true);
+      // Freeze the wrap subtree's rendering for the session (see
+      // .is-composing in style-editor.css): candidate keystrokes stop
+      // paying overlay/gutter paint per keystroke.
+      setComposing(true);
+      // 方案A windowing: shrink the live textarea to the caret window so
+      // candidate keystrokes lay out ~17 lines, not 2000. currentInput()
+      // is a plain querySelector — no value/selection read on the session.
+      var winInput = currentInput();
+      if (winInput) {
+        try { imeWindowOpen(winInput); } catch (eWin) { imeWin = null; }
+      }
+      // A pending debounced preview from pre-session typing must not fire
+      // mid-session: the generation bump below drops its second frame, and
+      // cancelling the first frame keeps marked/sanitize off the main thread
+      // while TSF owns the caret.
+      if (shellRender.timer) { try { clearTimeout(shellRender.timer); } catch (eCancel) {} shellRender.timer = 0; }
+      shellRender.generation = (shellRender.generation || 0) + 1;
+      // rAF heartbeat: a bare frame request keeps the compositor emitting
+      // BeginFrames during the session with zero DOM/style/layout cost
+      // (replaces the old attribute-flip tick, whose setAttribute itself
+      // cost a style recalc per firing on 2000-line docs).
+      edImeHeartbeat._last = 0;
+      edImeHeartbeat._in = 0;
+      edImeHeartbeat();
+      if (t0) edImeMark('comp-start', performance.now() - t0);
+    };
+    var onCompositionEnd = function () {
+      var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      shellComposing = false;
+      // Splice the window back into the full text first (or restore on
+      // failure), then run the normal post-commit pass on the full doc.
+      var endInput = currentInput();
+      if (endInput) {
+        try {
+          if (!imeWindowCommit(endInput)) {
+            if (global.EditorCommands) global.EditorCommands.record(endInput);
+            scheduleDraft(shellState.currentId, endInput.value);
+            updateGutter(false);
+            updateCaret();
+            schedulePreview();
+          } else {
+            scheduleDraft(shellState.currentId, endInput.value);
+            // Windowed commit: the textarea just swapped window text back
+            // to the full doc. Gutter/overlay must re-sync NOW on the full
+            // text, not 300ms later: mid-delay the gutter shows window
+            // line numbers against full text (click-line/edit-line skew)
+            // and Chrome/WebView2 disagree on the deferred scroll pin.
+            try { updateGutter(true); } catch (eGSync) {}
+            updateCaret();
+            schedulePreview();
+          }
+        } catch (eCommit) {
+          try { imeWindowAbort(endInput); } catch (eAbort) {}
+        }
+      }
+      if (t0) edImeMark('comp-end', performance.now() - t0);
+    };
+    var onInput = function (event, skipTyping) {
+      if (shellComposing || (event && event.isComposing)) {
+        // Blind tick: never read input.value/selection here. During an IME
+        // session the browser/TSF owns the caret; reads can stall the
+        // session round-trip (the 1-minute freeze scales with pending
+        // composition length). Write a cheap visibility-kept token through
+        // the layout helper instead so the compositor still gets a frame.
+        var tick0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+        setTyping(true);
+        // Zero-cost heartbeat only: no DOM reads, no attribute writes. The
+        // session-opened heartbeat from compositionstart already covers the
+        // frame signal; re-arm it here in case the session outlives a frame.
+        // Input-gap forensics: record arrival intervals so a real freeze
+        // shows whether input events stopped arriving (>100ms) while frames
+        // kept flowing (input starvation) or frames stopped too (compositor).
+        if (tick0) {
+          var lastIn = edImeHeartbeat._in || 0;
+          if (lastIn && tick0 - lastIn > 100) edImeMark('input-gap', tick0 - lastIn);
+          edImeHeartbeat._in = tick0;
+        }
+        edImeHeartbeat();
+        if (tick0) edImeMark('comp-input', performance.now() - tick0);
+        return;
+      }
+      if (global.EditorCommands) global.EditorCommands.record(input);
+      scheduleDraft(shellState.currentId, input.value);
+      updateGutter(false);
+      updateCaret();
+      // Show real glyphs instantly; the debounced pass clears the class
+      // after the overlay re-syncs (see renderPreview tail). Skipped when
+      // the overlay was just synced (e.g. compositionend) to avoid a
+      // hide-then-restore flicker of fresh overlay content.
+      if (!skipTyping) setTyping(true);
+      schedulePreview();
+    };
     var onScroll = function () {
-      updateGutter();
-      syncOverlayScroll();
+      // During an IME session the caret rectangle is TSF-owned; rewriting
+      // the gutter/overlay scroll here can yank the candidate-window anchor
+      // and stretch the round-trip. Skip everything except the deferred
+      // preview sync below (which is itself a no-op without sync enabled).
+      if (!shellComposing) {
+        updateGutter(false);
+        syncOverlayScroll();
+      }
       if (!shellState.sync || !shellRoot) return;
       var preview = shellRoot.querySelector('#ed-main-preview');
       if (!preview) return;
@@ -1314,32 +1923,50 @@
     };
     var onKey = function (event) {
       var mod = event.ctrlKey || event.metaKey;
+      // keyCode 229 = IME composition keystroke: never hijack it (Tab /
+      // comment / duplicate-line rewrites would abort the session).
+      var imeKey = event.keyCode === 229 || event.key === 'Process';
+      // Treat an explicit 229 as session-open even if compositionstart has
+      // not arrived yet (event ordering differs across IMEs); the blind
+      // tick keeps frames flowing without touching value/selection.
+      if (imeKey && !shellComposing) {
+        shellComposing = true;
+        setTyping(true);
+        if (global.EditorLayout && typeof global.EditorLayout.imeTick === 'function') {
+          global.EditorLayout.imeTick(shellRoot);
+        }
+        return;
+      }
       if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); saveWorkspace(); }
+      // In-session undo/redo belongs to the IME (its own candidate history):
+      // applySnapshot would rewrite input.value under the live composition
+      // and abort the session. Let the event reach the IME untouched.
+      if (shellComposing && (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')) return;
       else if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) triggerRedo(); else triggerUndo(); }
       else if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); triggerRedo(); }
       else if (mod && event.key.toLowerCase() === 'f') { event.preventDefault(); shellFindToggle(); }
-      else if (event.key === 'Tab') {
+      else if (!imeKey && event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
           global.EditorCommands.indent(input, event.shiftKey);
         }
       }
-      else if (event.altKey && !mod && event.key === '/') {
+      else if (!imeKey && event.altKey && !mod && event.key === '/') {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {
           global.EditorCommands.toggleComment(input);
         }
       }
-      else if (event.altKey && event.shiftKey && !mod && (event.key === 'ArrowUp' || event.key === 'Up')) {
+      else if (!imeKey && event.altKey && event.shiftKey && !mod && (event.key === 'ArrowUp' || event.key === 'Up')) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
           global.EditorCommands.duplicateLine(input, 'up');
         }
       }
-      else if (event.altKey && event.shiftKey && !mod && (event.key === 'ArrowDown' || event.key === 'Down')) {
+      else if (!imeKey && event.altKey && event.shiftKey && !mod && (event.key === 'ArrowDown' || event.key === 'Down')) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
@@ -1352,6 +1979,8 @@
       if (link && /^https?:\/\//i.test(link.href)) { event.preventDefault(); global.open(link.href, '_blank', 'noopener,noreferrer'); }
     };
     input.addEventListener('input', onInput);
+    input.addEventListener('compositionstart', onCompositionStart);
+    input.addEventListener('compositionend', onCompositionEnd);
     input.addEventListener('scroll', onScroll);
     input.addEventListener('keydown', onKey);
     var preview = shellRoot.querySelector('#ed-main-preview');
@@ -1394,7 +2023,7 @@
       };
     }
 
-    shellHandlers = { input: onInput, scroll: onScroll, keydown: onKey, previewClick: onClick, preview: preview, inputNode: input };
+    shellHandlers = { input: onInput, scroll: onScroll, keydown: onKey, compStart: onCompositionStart, compEnd: onCompositionEnd, previewClick: onClick, preview: preview, inputNode: input };
     var titleNode = shellRoot.querySelector('#ed-title');
     if (titleNode) {
       titleNode.setAttribute('data-tooltip', tr('editorRename', 'Click to rename'));
@@ -1406,9 +2035,14 @@
   function unbindShell() {
     if (!shellHandlers) return;
     var h = shellHandlers;
-    if (h.inputNode) { h.inputNode.removeEventListener('input', h.input); h.inputNode.removeEventListener('scroll', h.scroll); h.inputNode.removeEventListener('keydown', h.keydown); }
+    if (h.inputNode) { h.inputNode.removeEventListener('input', h.input); h.inputNode.removeEventListener('scroll', h.scroll); h.inputNode.removeEventListener('keydown', h.keydown); h.inputNode.removeEventListener('compositionstart', h.compStart); h.inputNode.removeEventListener('compositionend', h.compEnd); }
     if (h.preview) h.preview.removeEventListener('click', h.previewClick);
     shellHandlers = null;
+    // Windowed IME session: restore the full text before teardown, or the
+    // live window replaces the document on next bind.
+    if (imeWin && h.inputNode) { try { imeWindowAbort(h.inputNode); } catch (eWinUnbind) {} }
+    imeWin = null;
+    cancelScheduled();
   }
 
   function renderEditor(container) {

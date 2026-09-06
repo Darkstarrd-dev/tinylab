@@ -403,7 +403,33 @@
         // also keep isLocal flagged nodes regardless of prefix
         localOnly.push(id);
       });
-      localOnly.forEach(function(id){ nextNodes[id] = memory.nodes[id]; if (memory.contents[id] != null) nextContents[id] = memory.contents[id]; });
+      // Drop shadow twins: a local-only node with the same (parentId, name)
+      // as a disk-backed node is an unpersisted duplicate of that file
+      // (created locally, then the disk snapshot arrived). Disk wins; the
+      // twin is discarded so the tree never shows two identical rows that
+      // edit the same file. True local-only files (no disk twin) are kept.
+      // The dropped twin's content is preserved into the disk node so an
+      // unclean-shutdown draft is not silently lost.
+      localOnly.forEach(function(id){
+        var n = memory.nodes[id];
+        var twinId = Object.keys(nextNodes).filter(function (diskId) {
+          var d = nextNodes[diskId];
+          return d && !d.deleted && d.parentId === n.parentId && d.name === n.name;
+        })[0];
+        if (twinId) {
+          try {
+            if (typeof console !== 'undefined' && console.warn) {
+              console.warn('[editor] shadow twin dropped: local id=' + id + ' merged into disk id=' + twinId + ' name=' + n.name);
+            }
+          } catch (eWarn) {}
+          if (memory.contents[id] != null && memory.contents[id] !== '' && nextContents[twinId] === '') {
+            nextContents[twinId] = memory.contents[id];
+          }
+          return;
+        }
+        nextNodes[id] = n;
+        if (memory.contents[id] != null) nextContents[id] = memory.contents[id];
+      });
       memory.nodes = nextNodes;
       memory.contents = nextContents;
       memory.meta.currentFileId = null;

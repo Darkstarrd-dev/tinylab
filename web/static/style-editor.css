@@ -431,7 +431,11 @@
 .ed-line-gutter {
   flex: 0 0 42px;
   overflow: hidden;
-  padding: 10px 8px 10px 0;
+  /* Top padding MUST equal the textarea/overlay top padding (12px): the
+     gutter is scroll-synced 1:1 with the textarea, so any delta is a
+     permanent line-number offset (OverType alignment rule: identical box
+     model on all layers). */
+  padding: 12px 8px 10px 0;
   text-align: right;
   background: var(--glass-bg);
   border-right: 1px solid var(--glass-border);
@@ -441,6 +445,12 @@
 }
 .ed-line-number {
   display: block;
+}
+.ed-gutter-pad {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
 }
 .ed-line-number.is-comment {
   opacity: 0.4;
@@ -452,6 +462,10 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Layout containment: textarea+overlay reflow stays inside this box and
+     never propagates to the 2000-line page tree (trace showed elementCount
+     2034 full-tree UpdateLayoutTree per keystroke during IME). */
+  contain: strict;
 }
 .ed-syntax-overlay {
   position: absolute;
@@ -508,9 +522,45 @@
   color: transparent !important;
   caret-color: var(--text, #e2e8f0) !important;
 }
+/* Typing passthrough: while keystrokes stream in, the comment overlay is
+   stale by construction (it only refreshes on the debounced pass). Hide it
+   and show the real textarea glyphs so text appears instantly; the debounced
+   pass removes .is-typing after updateOverlay() re-syncs the overlay.
+   display:none (not visibility:hidden): detaches the 2000-line pre-wrap
+   subtree from paint entirely, so the transparent textarea no longer pays
+   per-keystroke layer compositing against a stale overlay during IME. */
+.ed-input-wrap.is-typing .ed-syntax-overlay {
+  display: none;
+}
+.ed-input-wrap.is-typing .ed-main-input {
+  color: var(--text, #e2e8f0) !important;
+}
+/* Composition freeze: while an IME session is open the browser/TSF walks
+   the textarea's layout ancestors per keystroke to anchor the candidate
+   window. content-visibility:hidden skips the wrap subtree's rendering
+   (including the 2000-line overlay/gutter paint) while keeping the caret
+   rectangle queryable, so candidate keystrokes stop paying full-doc cost.
+   The debounced pass removes .is-composing after the session settles. */
+.ed-input-wrap.is-composing .ed-syntax-overlay,
+.ed-input-wrap.is-composing #ed-line-gutter {
+  content-visibility: hidden;
+}
+/* No-wrap during composition: pre-wrap line breaking is the O(n) cost the
+   browser pays per candidate keystroke on 2000-line docs (input-gap
+   1-5s while handlers run 0.1ms). pre disables wrapping so each keystroke
+   lays out one line; the session-end restore reflows once, inside the
+   existing 300ms debounced pass. Horizontal scroll is acceptable mid-IME:
+   the composition string is single-line by construction. */
+.ed-input-wrap.is-composing .ed-main-input {
+  white-space: pre !important;
+  overflow-x: auto;
+}
 .ed-input-wrap .ed-main-input::selection {
   background: rgba(56, 189, 248, 0.3);
   color: transparent !important;
+}
+.ed-input-wrap.is-typing .ed-main-input::selection {
+  color: var(--text, #e2e8f0) !important;
 }
 .ed-preview-content {
   flex: 1 1 auto;
