@@ -87,6 +87,7 @@ function renderTreePanel() {
       headerHTML = '';
     } else {
       headerHTML = '<div class="gallery-tree-header">' +
+        '<button class="gallery-tree-clear-btn" type="button" id="gallery-tree-batch-btn" style="margin-right:auto" data-tooltip="' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '">' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '</button>' +
         '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>' +
         '</div>';
     }
@@ -338,6 +339,12 @@ function renderTreePanel() {
         rs.selectedNodes = galleryState.dirPathList.slice();
       }
       renderTreePanel();
+    };
+    // Batch Convert 按钮 -> 瘦身版原地批量转换弹窗（仅 image 侧标准 Header）
+    var treeBatchBtn = panel.querySelector('#gallery-tree-batch-btn');
+    if (treeBatchBtn) treeBatchBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (typeof window.openTreeBatchConvert === 'function') window.openTreeBatchConvert();
     };
   }
 

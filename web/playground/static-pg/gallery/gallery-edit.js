@@ -248,6 +248,8 @@ function _showProgressSection() {
   if (s) s.style.display = 'block';
   var startBtn = document.getElementById('ge-start-btn');
   if (startBtn) startBtn.disabled = true;
+  var treeStartBtn = document.getElementById('ge-treebatch-start-btn');
+  if (treeStartBtn) treeStartBtn.disabled = true;
   var cp = document.getElementById('ge-console-panel');
   if (cp) { cp.style.display = 'flex'; var logEl = document.getElementById('ge-console-log'); if (logEl) logEl.textContent = ''; var cmdEl = document.getElementById('ge-console-cmd'); if (cmdEl) cmdEl.textContent = ''; }
   requestAnimationFrame(_geSyncConsoleHeight);
@@ -258,6 +260,8 @@ function _hideProgressSection() {
   if (s) s.style.display = 'none';
   var startBtn = document.getElementById('ge-start-btn');
   if (startBtn) startBtn.disabled = false;
+  var treeStartBtn = document.getElementById('ge-treebatch-start-btn');
+  if (treeStartBtn) treeStartBtn.disabled = false;
   var cp = document.getElementById('ge-console-panel');
   if (cp) cp.style.display = 'none';
 }

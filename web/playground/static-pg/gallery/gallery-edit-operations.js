@@ -148,12 +148,15 @@ function _checkFfmpegStatus() {
       };
       var warn = document.getElementById('ge-ffmpeg-warn');
       var startBtn = document.getElementById('ge-start-btn');
+      var treeStartBtn = document.getElementById('ge-treebatch-start-btn');
       if (!_geFfmpegCaps.available) {
         if (warn) warn.style.display = '';
         if (startBtn) startBtn.disabled = true;
+        if (treeStartBtn) treeStartBtn.disabled = true;
       } else {
         if (warn) warn.style.display = 'none';
         if (startBtn && !_editJobId) startBtn.disabled = false;
+        if (treeStartBtn) treeStartBtn.disabled = false;
       }
       _applyFfmpegCapabilityUX();
     })
