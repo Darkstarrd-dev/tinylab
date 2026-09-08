@@ -232,7 +232,13 @@ function pgInitGlobalShortcuts() {
   window._pgGlobalShortcutsBound = true;
 
   document.addEventListener('keydown', function(e) {
-    // 1. Alt + ~ (Backquote / ~) -> focus #pg-input
+    // V2 embed owns its keys: never hijack Alt+digits / Ctrl+digits / Alt+C / Alt+` inside it.
+    try {
+      var t = e.target;
+      if (t && t.closest && t.closest('.pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay, .monaco-editor')) return;
+      var ae = document.activeElement;
+      if (ae && ae.closest && ae.closest('.pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay')) return;
+    } catch (err) { /* closest unavailable */ }
     if (e.altKey && (e.key === '`' || e.key === '~' || e.code === 'Backquote')) {
       e.preventDefault();
       var input = document.getElementById('pg-input');

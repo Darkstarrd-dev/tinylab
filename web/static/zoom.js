@@ -98,11 +98,19 @@
     if (window.EditorV2 && typeof window.EditorV2.setFontScale === 'function') {
       window.EditorV2.setFontScale(editorV2Scale);
     }
+    // Embed surfaces (playground max editor + diff modal) share the same
+    // scale key: push the new size immediately so no reload is needed.
+    if (window.EditorV2Embed && typeof window.EditorV2Embed.refreshFonts === 'function') {
+      try { window.EditorV2Embed.refreshFonts(); } catch (e) { /* embed unavailable */ }
+    }
     try { localStorage.setItem(EDITOR_V2_KEY, String(editorV2Scale)); } catch (e) {}
   }
 
   function getContext() {
     var ae = document.activeElement;
+    if (ae && ae.closest) {
+      if (ae.closest('.pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay')) return 'editorV2';
+    }
     if (!ae) return 'global';
     // Editor V2 (Monaco / tree / preview inside .ed2-root)
     if (ae.closest && ae.closest('.ed2-root')) {
@@ -200,7 +208,7 @@
     if (isInternalZoomTarget(e.target)) return;
     var ctx = getContext();
     if (ctx === 'global' && e.target && e.target.closest) {
-      if (e.target.closest('.ed2-root')) ctx = 'editorV2';
+      if (e.target.closest('.ed2-root, .pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay')) ctx = 'editorV2';
     }
     e.preventDefault();
     var delta = e.deltaY < 0 ? 0.05 : -0.05;
@@ -231,7 +239,7 @@
     e.preventDefault();
     var ctx = getContext();
     if (ctx === 'global' && e.target && e.target.closest) {
-      if (e.target.closest('.ed2-root')) ctx = 'editorV2';
+      if (e.target.closest('.ed2-root, .pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay')) ctx = 'editorV2';
     }
     if (ctx === 'pg') { pgScale = 1; applyPg(); toastScale(ctx, pgScale); }
     else if (ctx === 'editor') { editorScale = 1; applyEditor(); toastScale(ctx, editorScale); }

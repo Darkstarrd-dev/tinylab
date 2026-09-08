@@ -196,6 +196,7 @@ function pgAppendWindow(i) {
 
 // ----- Module: New message send (broadcast) -------------------------
 function pgUserSend() {
+  if (pgState.inputMaximized) pgFlushMaxEditorToInput();
   if (pgState.inputMaximized) {
     pgState.inputMaximized = false;
     pgSyncInputMaximizedState();
@@ -1063,6 +1064,74 @@ function pgToggleInputMaximize() {
   pgSyncInputMaximizedState();
 }
 
+function pgMaxEditorPlaceholder() {
+  return pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'));
+}
+
+function pgSyncMaxEditorToInput(val) {
+  var ta = document.getElementById('pg-input');
+  if (ta && ta.value !== val) ta.value = val;
+  var w = typeof pgWin === 'function' ? pgWin() : null;
+  if (w && w.config) w.config.prompt = val;
+}
+
+function pgFlushMaxEditorToInput() {
+  try {
+    if (typeof window.EditorV2Embed !== 'undefined' && window.EditorV2Embed.isLive('pg-max-editor-host')) {
+      var v = window.EditorV2Embed.readHost('pg-max-editor-host');
+      if (typeof v === 'string') pgSyncMaxEditorToInput(v);
+    }
+  } catch (e) { /* embed unavailable */ }
+  var legacyMax = document.getElementById('pg-max-editor-textarea');
+  var ta = document.getElementById('pg-input');
+  if (legacyMax && ta && ta.value !== legacyMax.value) {
+    ta.value = legacyMax.value;
+    var w2 = typeof pgWin === 'function' ? pgWin() : null;
+    if (w2 && w2.config) w2.config.prompt = legacyMax.value;
+  }
+}
+
+function pgMountMaxEditorV2(wrapperEl, currentVal) {
+  var host = document.getElementById('pg-max-editor-host');
+  if (!host) return false;
+  // Already live: sync external edits without recreating (preserves undo/caret).
+  if (window.EditorV2Embed.isLive('pg-max-editor-host')) {
+    window.EditorV2Embed.setHost('pg-max-editor-host', currentVal);
+    window.EditorV2Embed.layoutHost('pg-max-editor-host');
+    return true;
+  }
+  window.EditorV2Embed.createSingle('pg-max-editor-host', {
+    value: currentVal,
+    filename: 'prompt.txt',
+    placeholder: pgMaxEditorPlaceholder(),
+    wordWrap: 'on',
+    autofocus: true,
+    onChange: pgSyncMaxEditorToInput,
+    onCtrlEnter: function () { pgUserSend(); },
+  }).catch(function () {
+    // Monaco failed: fallback to plain textarea so input is never lost.
+    if (!document.getElementById('pg-max-editor-textarea')) {
+      wrapperEl.innerHTML =
+        '<textarea class="pg-max-editor-textarea" id="pg-max-editor-textarea" placeholder="' + pgEscapeHtml(pgMaxEditorPlaceholder()) + '">' + pgEscapeHtml(currentVal) + '</textarea>';
+      var maxTa = document.getElementById('pg-max-editor-textarea');
+      if (maxTa) {
+        maxTa.focus();
+        maxTa.selectionStart = maxTa.selectionEnd = maxTa.value.length;
+        maxTa.addEventListener('input', function() {
+          pgSyncMaxEditorToInput(maxTa.value);
+        });
+        maxTa.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            pgUserSend();
+          }
+        });
+      }
+    }
+  });
+  return true;
+}
+
 function pgSyncInputMaximizedState() {
   var isMax = !!pgState.inputMaximized;
   var panesEl = document.getElementById('pg-panes');
@@ -1074,6 +1143,28 @@ function pgSyncInputMaximizedState() {
     if (wrapperEl) {
       wrapperEl.style.display = 'flex';
       var currentVal = ta ? ta.value : '';
+      var useV2 = (typeof window.EditorV2Embed !== 'undefined' && window.EditorV2Embed.createSingle);
+      if (useV2) {
+        if (!document.getElementById('pg-max-editor-host')) {
+          // Header kept: title + icon-only restore + V2 font zoom group.
+          wrapperEl.innerHTML =
+            '<div class="pg-max-editor-header">' +
+              '<span class="pg-max-editor-title">' + pgEscapeHtml(pgT('pgMaxEditorTitle')) + '</span>' +
+              '<span class="pg-max-editor-actions">' +
+              '<span class="pg-zoom-group" onclick="event.stopPropagation()" role="group" aria-label="Text size">' +
+                '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.__zoom) window.__zoom.editorV2Step(-0.1);" data-tooltip="Decrease text size" aria-label="Decrease text size">−</button>' +
+                '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.__zoom) window.__zoom.editorV2Reset();" data-tooltip="Reset text size" aria-label="Reset text size">↺</button>' +
+                '<button class="pg-pane-btn pg-zoom-btn" onclick="event.stopPropagation(); if(window.__zoom) window.__zoom.editorV2Step(0.1);" data-tooltip="Increase text size" aria-label="Increase text size">+</button>' +
+              '</span>' +
+              '<button type="button" class="pg-max-editor-restore-btn pg-max-editor-restore-icon" onclick="pgToggleInputMaximize()" data-tooltip="' + pgEscapeHtml(pgT('pgRestoreDefaultView')) + '" aria-label="' + pgEscapeHtml(pgT('pgRestoreDefaultView')) + '">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>' +
+              '</button>' +
+              '</span>' +
+            '</div>' +
+            '<div class="pg-max-editor-host" id="pg-max-editor-host"></div>';
+        }
+        pgMountMaxEditorV2(wrapperEl, currentVal);
+      } else {
       wrapperEl.innerHTML =
         '<div class="pg-max-editor-header">' +
           '<span class="pg-max-editor-title">' + pgEscapeHtml(pgT('pgMaxEditorTitle')) + '</span>' +
@@ -1082,7 +1173,7 @@ function pgSyncInputMaximizedState() {
             '<span>' + pgEscapeHtml(pgT('pgRestoreDefaultView')) + '</span>' +
           '</button>' +
         '</div>' +
-        '<textarea class="pg-max-editor-textarea" id="pg-max-editor-textarea" placeholder="' + pgEscapeHtml(pgState.mode === 'image' ? pgT('pgImagePromptPlaceholder') : (pgState.mode === 'search' ? pgT('pgSearchPlaceholder') : pgT('pgEnterMessage'))) + '">' + pgEscapeHtml(currentVal) + '</textarea>';
+        '<textarea class="pg-max-editor-textarea" id="pg-max-editor-textarea" placeholder="' + pgEscapeHtml(pgMaxEditorPlaceholder()) + '">' + pgEscapeHtml(currentVal) + '</textarea>';
 
       var maxTa = document.getElementById('pg-max-editor-textarea');
       if (maxTa) {
@@ -1098,8 +1189,15 @@ function pgSyncInputMaximizedState() {
           }
         });
       }
+      }
     }
   } else {
+    pgFlushMaxEditorToInput();
+    try {
+      if (typeof window.EditorV2Embed !== 'undefined' && window.EditorV2Embed.disposeHost) {
+        window.EditorV2Embed.disposeHost('pg-max-editor-host');
+      }
+    } catch (e) { /* noop */ }
     if (panesEl) panesEl.style.display = '';
     if (wrapperEl) wrapperEl.style.display = 'none';
     if (ta) ta.focus();
@@ -1188,6 +1286,11 @@ function pgRenderInputBar() {
       if (w2 && w2.config) w2.config.prompt = ta.value;
       var maxTa = document.getElementById('pg-max-editor-textarea');
       if (maxTa && pgState.inputMaximized) maxTa.value = ta.value;
+      try {
+        if (typeof window.EditorV2Embed !== 'undefined' && window.EditorV2Embed.isLive('pg-max-editor-host') && pgState.inputMaximized) {
+          window.EditorV2Embed.setHost('pg-max-editor-host', ta.value);
+        }
+      } catch (e) { /* embed unavailable */ }
     });
     if (pgState.mode === 'search') {
       var activeSearch = typeof pgActiveSearch === 'function' ? pgActiveSearch() : null;

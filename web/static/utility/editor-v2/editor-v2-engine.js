@@ -81,12 +81,17 @@
     if (!window.Ed2Monaco) return;
     const monaco = window.Ed2Monaco;
     const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-    const bg = getRootComputedColor('--bg', isDark ? '#1e1e1e' : '#ffffff');
-    const surface = getRootComputedColor('--surface-page', isDark ? '#252526' : '#f3f3f3');
-    const codeSurface = getRootComputedColor('--code-surface', isDark ? '#1e1e1e' : '#f8f8f8');
+    // Flat (non-gradient) surfaces: --bg is a radial-gradient in every theme,
+    // so editors use --panel-sticky-bg (flat per-variant) with --code-surface fallback.
+    // NOTE: --code-surface is only defined in base dark/light (never per-variant),
+    // so editor/gutter/widget backgrounds use `bg` (--panel-sticky-bg) to follow variants.
+    const bg = getRootComputedColor('--panel-sticky-bg', getRootComputedColor('--code-surface', isDark ? '#1e1e1e' : '#ffffff'));
     const text = getRootComputedColor('--text', isDark ? '#d4d4d4' : '#333333');
     const textMuted = getRootComputedColor('--text-muted', isDark ? '#858585' : '#717171');
     const accent = getRootComputedColor('--accent', '#007acc');
+    const danger = getRootComputedColor('--danger', isDark ? '#f44336' : '#dc2626');
+    const accentGlow = getRootComputedColor('--accent-glow', isDark ? 'rgba(79,195,247,0.30)' : 'rgba(14,165,233,0.20)');
+    const dangerGlow = getRootComputedColor('--danger-glow', isDark ? 'rgba(239,83,80,0.25)' : 'rgba(220,38,38,0.2)');
     const glassBorder = getRootComputedColor('--glass-border', isDark ? '#3c3c3c' : '#e0e0e0');
     const lineHighlight = isDark ? '#ffffff0a' : '#0000000a';
     const selection = isDark ? '#264f78' : '#add6ff';
@@ -99,20 +104,31 @@
       inherit: true,
       rules: [],
       colors: {
-        'editor.background': codeSurface,
+        'editor.background': bg,
         'editor.foreground': text,
         'editorLineNumber.foreground': textMuted,
         'editorLineNumber.activeForeground': text,
         'editor.lineHighlightBackground': lineHighlight,
         'editor.selectionBackground': selection,
-        'editorGutter.background': codeSurface,
+        'editorGutter.background': bg,
         'editorCursor.foreground': accent,
         'editorWhitespace.foreground': textMuted,
-        'editorWidget.background': surface,
+        'editorWidget.background': bg,
         'editorWidget.border': glassBorder,
         'input.background': bg,
         'input.foreground': text,
         'input.border': glassBorder,
+        // DiffEditor inserted/removed line + char colors follow the theme.
+        'diffEditor.insertedTextBackground': accentGlow,
+        'diffEditor.removedTextBackground': dangerGlow,
+        'diffEditor.insertedLineBackground': accentGlow,
+        'diffEditor.removedLineBackground': dangerGlow,
+        'diffEditorGutter.insertedLineBackground': accentGlow,
+        'diffEditorGutter.removedLineBackground': dangerGlow,
+        'diffEditorOverview.insertedForeground': accent,
+        'diffEditorOverview.removedForeground': danger,
+        'editorOverviewRuler.insertedForeground': accent,
+        'editorOverviewRuler.removedForeground': danger,
       }
     });
 

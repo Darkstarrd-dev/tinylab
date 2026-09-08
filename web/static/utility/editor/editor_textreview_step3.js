@@ -91,7 +91,6 @@ function trS3PopulateProviders(models) {
  * @param {object} state trState
  */
 window.trRenderStep3 = function (panel, state) {
-  var collapsed = state.promptCollapsed !== false; // default true
 
   // Ensure system prompt is seeded from backend default if unset
   if (!state.systemPrompt) {
@@ -104,8 +103,7 @@ window.trRenderStep3 = function (panel, state) {
           if (res.builtinPrompt) window.TR_BUILTIN_PROMPT = res.builtinPrompt;
           if (!trState.systemPrompt) {
             trState.systemPrompt = res.systemPrompt;
-            var ta = document.getElementById('tr-s3-prompt');
-            if (ta && !ta.value) ta.value = res.systemPrompt;
+            trStep3RefreshPromptPreview();
             trSave();
           }
         }
@@ -132,29 +130,14 @@ window.trRenderStep3 = function (panel, state) {
             '<div class="tr-s3-total" id="tr-s3-total"></div>' +
           '</div>' +
 
-          // system prompt + auto-retry (collapsible)
-          '<div class="tr-section" id="tr-s3-prompt-section">' +
-            '<h3 class="tr-section-title tr-s3-prompt-head" id="tr-s3-prompt-head" onclick="trStep3TogglePrompt()"' +
-              ' style="cursor:pointer;user-select:none">' +
-              '<span class="tr-s3-chev' + (collapsed ? ' tr-s3-chev-collapsed' : '') + '" id="tr-s3-chev">&#9660;</span> ' +
-              trEscapeHtml(trT('trSystemPrompt')) +
-            '</h3>' +
-            '<div class="tr-s3-prompt-body" id="tr-s3-prompt-body"' +
-              (collapsed ? ' style="display:none"' : '') + '>' +
-              '<textarea class="tr-textarea" id="tr-s3-prompt" placeholder="' +
-                trEscapeHtml(trT('trSystemPromptPlaceholder')) + '" oninput="trStep3OnPromptChange()">' +
-                trEscapeHtml(state.systemPrompt || '') +
-              '</textarea>' +
-              '<div class="tr-s3-prompt-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px;flex-wrap:wrap;">' +
-                '<label class="tr-check" style="margin:0"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
-                  (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
-                '<div style="display:flex;gap:6px;">' +
-                  '<button type="button" class="tr-btn tr-btn-xs" id="tr-s3-prompt-save" onclick="trStep3SaveDefaultPrompt()">' +
-                    trEscapeHtml(trT('trSavePromptDefault')) + '</button>' +
-                  '<button type="button" class="tr-btn tr-btn-xs tr-btn-ghost" id="tr-s3-prompt-reset" onclick="trStep3ResetDefaultPrompt()">' +
-                    trEscapeHtml(trT('trResetPromptDefault')) + '</button>' +
-                '</div>' +
-              '</div>' +
+          // system prompt: single bar — blue Prompt button opens the V2 differ modal; auto-retry sits right
+          '<div class="tr-section tr-s3-promptbar" id="tr-s3-prompt-section">' +
+            '<div class="tr-s3-promptbar-row">' +
+              '<button type="button" class="tr-btn tr-btn-xs tr-btn-primary" id="tr-s3-prompt-edit" onclick="trStep3OpenPromptModal()">' +
+                'Prompt</button>' +
+              '<span class="tr-spacer"></span>' +
+              '<label class="tr-check" style="margin:0"><input type="checkbox" id="tr-s3-autoretry" onchange="trStep3OnAutoRetry()"' +
+                (state.autoRetry ? ' checked' : '') + '> ' + trEscapeHtml(trT('trAutoRetry')) + '</label>' +
             '</div>' +
           '</div>' +
 
@@ -721,11 +704,75 @@ function trS3RenderRuntimeNodes(nodes) {
 
 // ===================== system prompt + auto-retry =====================
 
+function trStep3PromptBaseline() {
+  if (typeof trState.systemPrompt === 'string' && trState.systemPrompt) return trState.systemPrompt;
+  if (window.TR_DEFAULT_PROMPT) return window.TR_DEFAULT_PROMPT;
+  return '';
+}
+
+function trStep3RefreshPromptPreview() {
+  // 单行条无预览区:保留空函数供旧调用点兼容
+}
+
 function trStep3OnPromptChange() {
-  var ta = document.getElementById('tr-s3-prompt');
-  if (!ta) return;
-  trState.systemPrompt = ta.value;
-  trSave();
+  // 单行条无预览区:prompt 只在 V2 differ modal 内编辑,此处仅兼容旧调用
+}
+function trStep3OpenPromptModal() {
+  var baseline = trStep3PromptBaseline();
+  if (!baseline && !trState.systemPrompt) {
+    trApiGet('/text-review/prompt-default').then(function (res) {
+      if (res && res.systemPrompt) {
+        window.TR_DEFAULT_PROMPT = res.systemPrompt;
+        if (res.builtinPrompt) window.TR_BUILTIN_PROMPT = res.builtinPrompt;
+        if (!trState.systemPrompt) {
+          trState.systemPrompt = res.systemPrompt;
+          trSave();
+          trStep3RefreshPromptPreview();
+        }
+      }
+      trStep3OpenPromptModal();
+    });
+    return;
+  }
+  if (typeof window.EditorV2Embed === 'undefined' || !window.EditorV2Embed.openDiffModal) {
+    trToast(trT('trPromptSaveFailed') || 'Editor failed to load', 'error');
+    return;
+  }
+  window.EditorV2Embed.openDiffModal({
+    title: trT('trSystemPrompt'),
+    original: baseline,
+    current: trState.systemPrompt || baseline,
+    filename: 'system-prompt.txt',
+    showSaveDefault: true,
+    showRestoreBuiltIn: true,
+    onSave: function (val) {
+      trState.systemPrompt = val;
+      trSave();
+      trStep3RefreshPromptPreview();
+      trToast(trT('trPromptSaved'), 'success');
+    },
+    onSaveDefault: function (val) {
+      return trApiPost('/text-review/prompt-default', { systemPrompt: val }).then(function (res) {
+        if (res && res.systemPrompt !== undefined) {
+          window.TR_DEFAULT_PROMPT = res.systemPrompt;
+          trState.systemPrompt = val;
+          trSave();
+          trStep3RefreshPromptPreview();
+          trToast(trT('trPromptSaved'), 'success');
+        } else {
+          trToast(trT('trPromptSaveFailed'), 'error');
+        }
+      }, function () {
+        trToast(trT('trPromptSaveFailed'), 'error');
+      });
+    },
+    onRestoreBuiltIn: function () {
+      return trApiGet('/text-review/prompt-default').then(function (res) {
+        if (res && res.builtinPrompt) window.TR_BUILTIN_PROMPT = res.builtinPrompt;
+        return (res && res.builtinPrompt) || window.TR_BUILTIN_PROMPT || '';
+      });
+    },
+  });
 }
 
 function trStep3OnAutoRetry() {
@@ -736,31 +783,23 @@ function trStep3OnAutoRetry() {
 }
 
 /**
- * Toggle the system prompt section collapsed/expanded.
+ * Legacy collapse toggle kept for compat: the section is now a modal entry.
  */
 function trStep3TogglePrompt() {
-  trState.promptCollapsed = !trState.promptCollapsed;
-  var body = document.getElementById('tr-s3-prompt-body');
-  var chev = document.getElementById('tr-s3-chev');
-  if (body) body.style.display = trState.promptCollapsed ? 'none' : '';
-  if (chev) {
-    if (trState.promptCollapsed) chev.classList.add('tr-s3-chev-collapsed');
-    else chev.classList.remove('tr-s3-chev-collapsed');
-  }
-  trSave();
+  trStep3OpenPromptModal();
 }
 
 /**
- * Save current system prompt in textarea as the backend default (persisted to config.yaml).
+ * Save current system prompt as the backend default (persisted to config.yaml).
  */
 function trStep3SaveDefaultPrompt() {
-  var ta = document.getElementById('tr-s3-prompt');
-  var val = ta ? ta.value : (trState.systemPrompt || '');
+  var val = trState.systemPrompt || '';
   trApiPost('/text-review/prompt-default', { systemPrompt: val }).then(function (res) {
     if (res && res.systemPrompt !== undefined) {
       window.TR_DEFAULT_PROMPT = res.systemPrompt;
       trState.systemPrompt = val;
       trSave();
+      trStep3RefreshPromptPreview();
       trToast(trT('trPromptSaved'), 'success');
     } else {
       trToast(trT('trPromptSaveFailed'), 'error');
@@ -771,7 +810,7 @@ function trStep3SaveDefaultPrompt() {
 }
 
 /**
- * Restore textarea and state to built-in system default prompt.
+ * Restore state to built-in system default prompt.
  */
 function trStep3ResetDefaultPrompt() {
   var target = window.TR_BUILTIN_PROMPT;
@@ -788,10 +827,9 @@ function trStep3ResetDefaultPrompt() {
 }
 
 function trS3ApplyResetPrompt(promptText) {
-  var ta = document.getElementById('tr-s3-prompt');
-  if (ta) ta.value = promptText;
   trState.systemPrompt = promptText;
   trSave();
+  trStep3RefreshPromptPreview();
   trToast(trT('trPromptReset'), 'success');
 }
 

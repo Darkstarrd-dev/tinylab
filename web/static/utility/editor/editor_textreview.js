@@ -88,10 +88,7 @@ function trBootstrap() {
   });
   return Promise.all([patsP, promptP]).then(function () {
     trBootstrapDone = true;
-    var ta = document.getElementById('tr-s3-prompt');
-    if (ta && !ta.value && trState.systemPrompt) {
-      ta.value = trState.systemPrompt;
-    }
+    if (typeof trStep3RefreshPromptPreview === 'function') trStep3RefreshPromptPreview();
   });
 }
 

@@ -50,6 +50,10 @@ document.addEventListener('keydown', function(e) {
         return;
       }
     }
+    // V2 embed owns Tab (indent) inside Monaco: skip the modal focus trap there.
+    var inMonaco = (e.target && e.target.closest && e.target.closest('.monaco-editor')) ||
+      (document.activeElement && document.activeElement.closest && document.activeElement.closest('.monaco-editor'));
+    if (inMonaco) return;
     // Collect all focusable elements in the modal (buttons, inputs, textareas, selects)
     var modalFocusables = Array.prototype.slice.call(modal.querySelectorAll('button, input, textarea, select, a[href], .pg-btn, .btn'));
     modalFocusables = modalFocusables.filter(function(b) { return b.offsetParent !== null && !b.disabled; }); // visible & enabled only
@@ -144,37 +148,32 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
-  // ---- Editor V2 Guard: consume events inside active .ed2-root without leaking to QuickSlots/shutdown ----
+  // ---- Editor V2 Guard: consume events inside active .ed2-root / embed hosts without leaking to QuickSlots/shutdown ----
   var ed2Root = document.querySelector('.ed2-root');
-  var isInsideEd2 = ed2Root && (ed2Root.contains(e.target) || (document.activeElement && ed2Root.contains(document.activeElement)));
-  if (e.defaultPrevented || isInsideEd2) {
-    if (e.key === 'Escape') {
-      // Escape in V2 cancels find/selection or closes menu; do not trigger shutdown
-      return;
-    }
-    // If inside V2 editor/menu, do not process global quickslot or shutdown
-    if (isInsideEd2) {
-      return;
-    }
-  }
+  var embedHost = (e.target && e.target.closest) ? (e.target.closest('.pg-max-editor-host, .ed2-embed-host') || null) : null;
+  var aeEmbed = (document.activeElement && document.activeElement.closest) ? document.activeElement.closest('.pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay') : null;
+  var isInsideEd2 = (ed2Root && (ed2Root.contains(e.target) || (document.activeElement && ed2Root.contains(document.activeElement)))) || embedHost || aeEmbed;
 
-  // Number keys 1-9: open quickslot modal (only when not in input and not in gallery/editor/editorV2)
-  if (!isInput) {
-    if (typeof currentPage !== 'undefined' && (currentPage === 'gallery' || currentPage === 'editor' || currentPage === 'editorV2')) {
-      // Gallery/Editor/EditorV2 owns these keys; do not double-trigger quickslot.
-      // QuickSlot modal handles its own keys; skip global processing.
-    } else {
-      var matchedQuickslot = false;
-      for (var n = 1; n <= 9; n++) {
-        if (Shortcuts.matchEvent('global.quickslot-cycle-' + n, e)) {
-          e.preventDefault();
-          if (typeof openQuickSlotModalByOrder === 'function') openQuickSlotModalByOrder(n, true);
-          matchedQuickslot = true;
-          break;
-        }
+  // Number keys 1-9: open quickslot modal ONLY outside text-editing targets.
+  // Monaco (embed/max/full V2), inputs, textareas and contentEditables own digits.
+  var inTextTarget = isInput;
+  try {
+    var kt = e.target;
+    if (kt && kt.closest && kt.closest('.monaco-editor, .pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay, .ed2-root')) inTextTarget = true;
+    var kae = document.activeElement;
+    if (kae && kae.closest && kae.closest('.monaco-editor, .pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay, .ed2-root')) inTextTarget = true;
+  } catch (err) { /* closest unavailable */ }
+  if (!inTextTarget) {
+    var matchedQuickslot = false;
+    for (var n = 1; n <= 9; n++) {
+      if (Shortcuts.matchEvent('global.quickslot-cycle-' + n, e)) {
+        e.preventDefault();
+        if (typeof openQuickSlotModalByOrder === 'function') openQuickSlotModalByOrder(n, true);
+        matchedQuickslot = true;
+        break;
       }
-      if (matchedQuickslot) return;
     }
+    if (matchedQuickslot) return;
   }
   if (demoMenuOpen && (e.key === 'Escape' || Shortcuts.matchEvent('global.shutdown-server', e))) {
     e.preventDefault();

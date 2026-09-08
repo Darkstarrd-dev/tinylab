@@ -229,8 +229,14 @@ function dismissTopModal() {
   setTimeout(function() { if (m.parentNode && m.id !== 'modal-overlay') m.parentNode.removeChild(m); }, 400);
 }
 
-// Right-click anywhere closes the topmost open modal.
+// Right-click anywhere closes the topmost open modal — except inside a V2
+// embed surface (Monaco context menu owns right-click there).
 document.addEventListener('contextmenu', function(e) {
+  if (e.target && e.target.closest) {
+    try {
+      if (e.target.closest('.monaco-editor, .pg-max-editor-host, .ed2-embed-host')) return;
+    } catch (err) { /* closest unavailable */ }
+  }
   if (topOpenModal()) { e.preventDefault(); dismissTopModal(); }
 });
 

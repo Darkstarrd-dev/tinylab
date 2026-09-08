@@ -884,7 +884,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 > - **图片 Asset 规范与生命周期**：untitled 文档资产统一归属 `untitled_imgs/<file>`，命名文档统一归属 `<stem>_imgs/<file>`，存储键去除 `./` 前缀；`editor-v2-preview.js` 维护 `activePreviewBlobUrls` 并在切 tab 及重新渲染前调用 `revokePreviewBlobs()` 释放 ObjectURL，临时图片预览采用精确限定 Markdown/HTML 图片语法的正则替换；Save As 缺失图片报错终止防止丢图。
 > - **Step4 风格 Diff 引擎**：`editor-v2-diff-core.js` 纯函数保持 CRLF/LF 与结尾换行符一致；`editor-v2-diff-worker.js` Web Worker 异步比对；`editor-v2-diff.js` 设 20s 严格超时，超时即强制终止 worker 并呈现独立重试按钮（主线程永不回退计算防 UI 卡死）；修复 `ROW_HEIGHT` 顶层作用域，切回普通文档分支时清除 `previewHost.style.display` 确保预览面板正常恢复；支持 Saved vs Current 基线、Two Tabs、Swap 左右对调、Prev/Next Change 导航与 Reset 重置。
 > - **后端原生 Save As 与错误分类**：`internal/fsutil/save_windows.go`（IFileSaveDialog）仅在 `uint32(hr) == hrUserCancelled` 返回 `("", nil)`，其余错误显式抛出；`internal/fsutil/save_other.go` 精准匹配 macOS osascript `-128` 取消与真实执行错误；`internal/api/editor/documents.go` 严格区分 `validationError` (400) 与 `conflictError` (409)，`writeBundleHTTPError` 映射统一错误响应。
-> - **UI 交互增强与国际化**：全面移除原生 prompt/confirm（含 commands 中的 fallback）改用 `showModalPrompt`/`showModalConfirm`/`window.toast`；Tab 栏支持 HTML5 原生拖拽排序列与右键菜单（Close / Close Others / Close to the Right / Close Saved / Close All）；Explorer 增强树节点展开/折叠、搜索过滤、悬浮按钮与右键 Context Menu（打开/重命名/删除）；i18n 完整覆盖 Selection 顶栏与全套菜单；`UTILITY_TOOLS` 排序对齐将 `editorV2` 排在 `editor` 之后。
+> - **Diff modal 右侧 px 垫高（2026-09-08 截图 5 点）**：弃 `heightInLines` 估算（左行 +2px padding 与两侧换行差异累积漂移），改 `offsetHeight` 实测左块 vs `getTopForLineNumber` 右行实高，差值以 `heightInPx` viewZone 垫在右行下；签名（块号:左高）不变跳过重建，防 350ms 重算抖动；调用经 rAF 合并到布局后，zoom 后重垫，close 清 zone。验证：VM 冒烟无抛错（stub 无多余高度零垫高）；Diff 18/18 + editor/textreview 后端绿；浏览器目验待用户确认。
 ### 18.3 `web/playground/` — Playground 模块（仅 `-tags playground` 内嵌）
 
 | 类别 | 内容 |
