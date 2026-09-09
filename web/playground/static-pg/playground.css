@@ -2004,6 +2004,20 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .gallery-edit-section input[type="file"]::file-selector-button:hover{background:var(--glass-hover);border-color:var(--glass-border-hover);color:var(--text)}
 .gallery-edit-section input[type="range"]{flex:1;min-width:80px;accent-color:var(--accent)}
 
+/* Gallery edit row custom dropdown (Batch Convert) */
+.gallery-edit-row .custom-select-wrapper{position:relative;display:inline-flex;height:32px}
+.gallery-edit-row .custom-select-trigger{height:32px;min-height:32px;max-height:32px;padding:0 22px 0 10px;font-size:12px;font-weight:500;border-radius:var(--radius-sm,6px);text-align:left;justify-content:flex-start;background:var(--input-bg);border:1px solid var(--glass-border);box-sizing:border-box}
+.gallery-edit-row .custom-select-trigger:hover{background:var(--glass-hover);border-color:var(--glass-border-hover)}
+.gallery-edit-row .custom-select-wrapper.open .custom-select-trigger{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+.gallery-edit-row .custom-select-trigger span{text-align:left;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gallery-edit-row .custom-select-trigger svg{right:8px}
+.gallery-edit-row .custom-select-menu{position:absolute !important;top:calc(100% + 4px) !important;left:0 !important;min-width:100% !important;box-sizing:border-box !important;z-index:9999 !important;max-height:220px;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.45)}
+.gallery-edit-row .custom-select-option-link{padding:6px 10px;font-size:12px}
+
+/* Tree Batch Convert modal sizing */
+#ge-treebatch-modal-body{overflow:visible !important;min-height:300px}
+.pg-modal:has(#ge-treebatch-modal-body){width:520px;min-width:520px;min-height:460px}
+
 /* Directory picker button (left side of directory text input) */
 #ge-browse-dir-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:var(--radius-md);background:var(--glass-hover);border:1px solid var(--glass-border);color:var(--text);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all var(--transition-fast)}
 #ge-browse-dir-btn:hover{background:var(--glass-active);border-color:var(--glass-border-hover)}

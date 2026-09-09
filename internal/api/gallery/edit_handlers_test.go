@@ -8,17 +8,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinylab/tinylab/internal/api/apibase"
 	"github.com/tinylab/tinylab/internal/config"
 	"github.com/tinylab/tinylab/internal/console"
 	"github.com/tinylab/tinylab/internal/mediaedit"
+	"github.com/tinylab/tinylab/internal/pathgrant"
 	"github.com/tinylab/tinylab/internal/registry"
 )
 
@@ -659,5 +662,107 @@ func TestGalleryEditZipOutputs_ReleasesOnPackFailure(t *testing.T) {
 	}
 	if _, _, err := st.Open(testOwner, up.AssetID); !archiveIsNotFound(err) {
 		t.Fatalf("frame asset must be released after failed pack, got %v", err)
+	}
+}
+
+// TestGalleryEditStatus_OverwriteRetainsFile verifies that in-place overwrite
+// (including cross-format conversions like png -> webp) retains the output file
+// in the source directory, deletes the original file, sets overwritten=true,
+// and does NOT move the output file to the temp asset store.
+func TestGalleryEditStatus_OverwriteRetainsFile(t *testing.T) {
+	h := newEditTestHandler(t, "")
+	ffmpeg, _, err := h.resolveFfmpeg()
+	if err != nil {
+		t.Skipf("ffmpeg not available: %v", err)
+	}
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	srcPng := filepath.Join(dir, "photo.png")
+	// Generate a valid 16x16 PNG using ffmpeg
+	cmd := exec.Command(ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=blue:s=16x16:d=1", "-frames:v", "1", srcPng)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate test png: %v (%s)", err, out)
+	}
+
+	g, err := h.grants.Grant(testOwner, []pathgrant.Operation{pathgrant.OpRead, pathgrant.OpWrite}, dir, true, false)
+	if err != nil {
+		t.Fatalf("dir grant: %v", err)
+	}
+
+	startBody := map[string]any{
+		"inputGrantId": g.ID,
+		"inputRel":     "photo.png",
+		"operation":    "image_transcode",
+		"overwrite":    true,
+		"params":       map[string]any{"format": "webp", "quality": 90},
+	}
+	raw, err := json.Marshal(startBody)
+	if err != nil {
+		t.Fatalf("marshal start body: %v", err)
+	}
+	resp, err := post(srv.URL+"/edit/start", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("POST /edit/start: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /edit/start: want 200, got %d (%s)", resp.StatusCode, readBody(t, resp))
+	}
+	var startResp struct {
+		JobID string `json:"jobId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&startResp); err != nil {
+		t.Fatalf("decode start resp: %v", err)
+	}
+
+	// Poll status until completed
+	var statusResp struct {
+		Status      string `json:"status"`
+		Overwritten bool   `json:"overwritten"`
+		AssetID     string `json:"assetId"`
+		OutputName  string `json:"outputName"`
+		Error       string `json:"error"`
+	}
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		sResp, err := get(srv.URL + "/edit/status/" + startResp.JobID)
+		if err != nil {
+			t.Fatalf("GET /edit/status: %v", err)
+		}
+		decErr := json.NewDecoder(sResp.Body).Decode(&statusResp)
+		sResp.Body.Close()
+		if decErr != nil {
+			t.Fatalf("decode status resp: %v", decErr)
+		}
+		if statusResp.Status == "completed" || statusResp.Status == "error" {
+			break
+		}
+	}
+
+	if statusResp.Status != "completed" {
+		t.Fatalf("job failed: %s (err: %s)", statusResp.Status, statusResp.Error)
+	}
+	if !statusResp.Overwritten {
+		t.Errorf("expected overwritten=true, got false")
+	}
+	if statusResp.AssetID != "" {
+		t.Errorf("expected empty assetId for overwrite, got %q", statusResp.AssetID)
+	}
+	if statusResp.OutputName != "photo.webp" {
+		t.Errorf("expected outputName=photo.webp, got %q", statusResp.OutputName)
+	}
+
+	// Original PNG must be retained (not deleted on cross-format conversion)
+	if _, err := os.Stat(srcPng); err != nil {
+		t.Errorf("expected original photo.png to be retained, stat err: %v", err)
+	}
+	// Converted photo.webp must exist in the source directory!
+	targetWebp := filepath.Join(dir, "photo.webp")
+	if fi, err := os.Stat(targetWebp); err != nil || fi.Size() == 0 {
+		t.Errorf("expected converted photo.webp to exist in source dir, stat err: %v", err)
 	}
 }

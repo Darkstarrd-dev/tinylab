@@ -114,21 +114,19 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 	if err != nil {
 		return nil, fmt.Errorf("output path: %w", err)
 	}
-	// True in-place replace: when overwriting with a different format, the
-	// output must land at <dir>/<stem><newExt> (ffmpeg picks the encoder by the
-	// output file extension, so writing webp bytes into a .png path would
-	// silently keep the old format). Same format keeps outputPath == inputPath
-	// (BuildOutputPath already returned it), so runJob's temp+rename path
-	// handles the byte-level overwrite. On success the original file is removed
-	// when the extension changed, leaving the new-format file in its place.
-	removeOnSuccess := ""
+	// When overwriting with a different format, the output must land at
+	// <dir>/<stem><newExt> (ffmpeg picks the encoder by the output file
+	// extension). The original file is NOT removed — cross-format conversion
+	// saves the new format in place alongside the source file. The only
+	// case where the source file is replaced is when the target format
+	// matches the source format (same extension, where runJob's temp+rename
+	// overwrites the file).
 	if req.Overwrite {
 		inputBase := filepath.Base(req.InputPath)
 		inputStem := strings.TrimSuffix(inputBase, filepath.Ext(inputBase))
 		candidatePath := filepath.Join(filepath.Dir(req.InputPath), inputStem+ext)
 		if candidatePath != outputPath {
 			outputPath = candidatePath
-			removeOnSuccess = req.InputPath
 		}
 	}
 
@@ -183,6 +181,7 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 		Status:    StatusRunning,
 		Operation: req.Operation,
 		InputPath: req.InputPath,
+		Overwrite: req.Overwrite,
 		StartedAt: time.Now(),
 		cancel:    cancel,
 	}
@@ -192,12 +191,12 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 	m.mu.Unlock()
 	m.trimBounds()
 
-	go m.runJob(ctx, job, ffmpegPath, args, outputPath, sourceDuration, removeOnSuccess)
+	go m.runJob(ctx, job, ffmpegPath, args, outputPath, sourceDuration)
 	return job.Snapshot(), nil
 }
 
 // runJob is the background goroutine that executes ffmpeg and updates the job.
-func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args []string, outputPath string, sourceDuration float64, removeOnSuccess string) {
+func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args []string, outputPath string, sourceDuration float64) {
 	// Release the ffmpeg slot regardless of how the job ended.
 	defer func() { <-m.sem }()
 
@@ -269,9 +268,6 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 	job.Progress = 100
 	job.OutputPath = outputPath
 	job.OutputName = filepath.Base(outputPath)
-	if removeOnSuccess != "" {
-		_ = os.Remove(removeOnSuccess)
-	}
 }
 
 // Get returns a job snapshot by ID. Returns false if not found.

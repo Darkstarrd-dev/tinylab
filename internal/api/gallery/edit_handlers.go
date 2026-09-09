@@ -266,7 +266,11 @@ func (h *Handler) galleryEditStart(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusForbidden, "overwrite requires a write grant on the source file")
 		return
 	}
-	input, err := h.resolveMediaInput(r, req.InputAssetID, req.InputGrantID, req.InputRel, pathgrant.OpRead)
+	op := pathgrant.OpRead
+	if req.Overwrite {
+		op = pathgrant.OpWrite
+	}
+	input, err := h.resolveMediaInput(r, req.InputAssetID, req.InputGrantID, req.InputRel, op)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusForbidden, err.Error())
 		return
@@ -380,7 +384,7 @@ func (h *Handler) galleryEditStatus(w http.ResponseWriter, r *http.Request) {
 		"command":    job.Command,
 	}
 	if job.Status == mediaedit.StatusCompleted && job.OutputPath != "" {
-		if job.OutputPath != job.InputPath {
+		if !job.Overwrite {
 			if assetID, ok := jobOutputs.Load(jobID); ok {
 				resp["assetId"] = assetID
 			} else {
@@ -397,9 +401,7 @@ func (h *Handler) galleryEditStatus(w http.ResponseWriter, r *http.Request) {
 							resp["outputName"] = ref.Name
 							// Remove the stray output file now that the asset
 							// holds a registered copy.
-							if job.OutputPath != job.InputPath {
-								_ = os.Remove(job.OutputPath)
-							}
+							_ = os.Remove(job.OutputPath)
 						}
 					}
 				}

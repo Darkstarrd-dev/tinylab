@@ -29,6 +29,7 @@ type Job struct {
 	InputPath  string      `json:"inputPath"`
 	OutputPath string      `json:"outputPath"` // set on completion
 	OutputName string      `json:"outputName"` // basename, set on completion
+	Overwrite  bool        `json:"overwrite"`
 	Error      string      `json:"error"`      // set on error
 	LogTail    string      `json:"logTail"`    // last ~16KB of ffmpeg stderr+progress
 	Command    string      `json:"command"`    // ffmpeg full command line
@@ -52,6 +53,7 @@ func (j *Job) Snapshot() *Job {
 		InputPath:  j.InputPath,
 		OutputPath: j.OutputPath,
 		OutputName: j.OutputName,
+		Overwrite:  j.Overwrite,
 		Error:      j.Error,
 		Command:    j.Command,
 		StartedAt:  j.StartedAt,

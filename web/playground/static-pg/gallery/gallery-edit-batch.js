@@ -366,33 +366,74 @@ function _pollBatchJob(idx, jobId) {
 }
 
 // _refreshTreeBatchOutputs refreshes gallery items after an in-place
-// (overwrite) tree batch: renames items whose extension changed (png→webp),
-// drops stale blob URLs, and re-renders thumbs/tree/main view. Grant-backed
-// getBlob() refetches fresh bytes lazily.
+// (overwrite) tree batch:
+// - Same format (png→png): invalidates cache for the overwritten item and refreshes thumbs/view.
+// - Cross format (png→webp): retains the original item (which is NOT deleted on disk)
+//   and adds a new item for the converted format to galleryState.items.
 function _refreshTreeBatchOutputs() {
   if (typeof galleryState === 'undefined' || !galleryState.items) return;
   var curChanged = false;
   for (var i = 0; i < _batchJobs.length; i++) {
     var j = _batchJobs[i];
-    if (!j || j.error || !j.overwritten || !j.item) continue;
-    if (j.outputName) {
-      // 跨格式覆盖后磁盘文件名已变（旧文件已删）：同步 rel/path/name，
-      // 否则 getBlob 按旧 rel 取文件会 404。
-      if (j.item.rel) {
-        var sep = Math.max(j.item.rel.lastIndexOf('/'), j.item.rel.lastIndexOf('\\'));
-        var newRel = (sep >= 0 ? j.item.rel.substring(0, sep + 1) : '') + j.outputName;
-        j.item.rel = newRel;
-        j.item.path = newRel;
+    if (!j || j.error || !j.overwritten || !j.item || !j.outputName) continue;
+
+    var sep = Math.max((j.item.rel || '').lastIndexOf('/'), (j.item.rel || '').lastIndexOf('\\'));
+    var newRel = (sep >= 0 ? j.item.rel.substring(0, sep + 1) : '') + j.outputName;
+
+    if (j.item.name === j.outputName) {
+      // 相同格式覆盖：源文件在磁盘上被同名替换，重置该项的 Blob 与缩略图
+      if (j.item.mainURL && j.item.mainURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(j.item.mainURL);
+      if (j.item.thumbURL && j.item.thumbURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(j.item.thumbURL);
+      j.item.mainURL = null;
+      j.item.thumbURL = null;
+      j.item.thumbReady = false;
+      j.item.size = 0;
+      if (galleryState.items[galleryState.index] === j.item) curChanged = true;
+    } else {
+      // 跨格式转换保存：源文件未被删除、仍保存在磁盘上，保留原 item；
+      // 将新转码生成的目标文件加入画廊列表
+      var existing = null;
+      for (var k = 0; k < galleryState.items.length; k++) {
+        if (galleryState.items[k].rel === newRel || galleryState.items[k].name === j.outputName) {
+          existing = galleryState.items[k];
+          break;
+        }
       }
-      j.item.name = j.outputName;
+      if (existing) {
+        if (existing.mainURL && existing.mainURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(existing.mainURL);
+        if (existing.thumbURL && existing.thumbURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(existing.thumbURL);
+        existing.mainURL = null;
+        existing.thumbURL = null;
+        existing.thumbReady = false;
+        existing.size = 0;
+      } else {
+        var newItem = {
+          name: j.outputName,
+          rel: newRel,
+          path: newRel,
+          kind: j.item.kind || 'backend',
+          grantId: j.item.grantId || '',
+          size: 0,
+          thumbReady: false,
+          mainURL: null,
+          thumbURL: null,
+          getBlob: (function(gid, r) {
+            return function() {
+              return fetch('/api/gallery/file?grantId=' + encodeURIComponent(gid) + '&rel=' + encodeURIComponent(r)).then(function(res) {
+                if (!res.ok) throw new Error('file http ' + res.status);
+                return res.blob();
+              });
+            };
+          })(j.item.grantId, newRel)
+        };
+        var itemIdx = galleryState.items.indexOf(j.item);
+        if (itemIdx >= 0) {
+          galleryState.items.splice(itemIdx + 1, 0, newItem);
+        } else {
+          galleryState.items.push(newItem);
+        }
+      }
     }
-    if (j.item.mainURL && j.item.mainURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(j.item.mainURL);
-    if (j.item.thumbURL && j.item.thumbURL.indexOf('blob:') === 0 && typeof FsApi !== 'undefined') FsApi.BlobTracker.revoke(j.item.thumbURL);
-    j.item.mainURL = null;
-    j.item.thumbURL = null;
-    j.item.thumbReady = false;
-    j.item.size = 0;
-    if (galleryState.items[galleryState.index] === j.item) curChanged = true;
   }
   if (typeof renderThumbnails === 'function') renderThumbnails();
   if (typeof renderTreePanel === 'function') renderTreePanel();
@@ -498,6 +539,10 @@ function _onBatchComplete() {
     var firstOutId = outputPaths.length > 0 ? outputPaths[0] : '';
     var openGrant = firstGrant;
     var openRel = firstRel;
+    if (_batchJobs[0] && _batchJobs[0].outputName && _batchJobs[0].item && _batchJobs[0].item.rel) {
+      var sep = Math.max(_batchJobs[0].item.rel.lastIndexOf('/'), _batchJobs[0].item.rel.lastIndexOf('\\'));
+      openRel = (sep >= 0 ? _batchJobs[0].item.rel.substring(0, sep + 1) : '') + _batchJobs[0].outputName;
+    }
     openBtnN.onclick = function() {
       if (firstOutId) { window.open('/api/gallery/file?assetId=' + encodeURIComponent(firstOutId), '_blank'); return; }
       if (openGrant) { _openInFileManager(openGrant, openRel); }
@@ -595,15 +640,37 @@ function _treeBatchTargets() {
   return { writable: writable, skipped: skipped };
 }
 
-function _treeBatchFormatOptions(srcExt) {
-  var formatOptions = ['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif'];
+function _treeBatchFormatSelectHtml(srcExt) {
+  var formatOptions = [
+    { value: 'jpeg', label: 'JPEG' },
+    { value: 'png', label: 'PNG' },
+    { value: 'webp', label: 'WEBP' },
+    { value: 'bmp', label: 'BMP' },
+    { value: 'tiff', label: 'TIFF' },
+    { value: 'gif', label: 'GIF' }
+  ];
   if (srcExt === 'jpg') srcExt = 'jpeg';
-  if (formatOptions.indexOf(srcExt) < 0) srcExt = 'png';
-  var html = '';
+  var has = false;
   for (var i = 0; i < formatOptions.length; i++) {
-    var f = formatOptions[i];
-    html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
+    if (formatOptions[i].value === srcExt) { has = true; break; }
   }
+  if (!has) srcExt = 'png';
+  if (typeof renderCustomSelectHtml === 'function') {
+    return renderCustomSelectHtml(
+      'ge-treebatch-format-wrap',
+      'ge-treebatch-format',
+      formatOptions,
+      srcExt,
+      null,
+      'width:95px;flex:none;height:32px;'
+    );
+  }
+  var html = '<select class="pg-param-row-select" id="ge-treebatch-format" style="width:95px;flex:none">';
+  for (var j = 0; j < formatOptions.length; j++) {
+    var f = formatOptions[j].value;
+    html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + formatOptions[j].label + '</option>';
+  }
+  html += '</select>';
   return html;
 }
 
@@ -662,13 +729,16 @@ window.openTreeBatchConvert = function() {
   html += '<span class="pg-modal-title ge-title-center">' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '</span>';
   html += '<button class="pg-modal-close" onclick="pgCloseModal()">\u2715</button>';
   html += '</div>';
-  html += '<div class="pg-modal-body gallery-edit-body">';
+  html += '<div class="pg-modal-body gallery-edit-body" id="ge-treebatch-modal-body" style="overflow:visible;min-height:300px">';
   html += '<div class="ge-src-info"><div class="ge-src-row ge-src-meta">' + escapeHtml(pgT('geTreeBatchSummary', [String(summary.writable.length)]));
   if (summary.skipped > 0) html += ' · ' + escapeHtml(pgT('geTreeBatchSkipped', [String(summary.skipped)]));
   html += '</div></div>';
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-treebatch-compress"> ' + escapeHtml(T('geCompressZip')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-treebatch-format" style="width:95px;flex:none">' + _treeBatchFormatOptions(srcExt) + '</select>';
+  html += '<div class="gallery-edit-row" style="align-items:center">';
+  html += '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
+  html += '<label class="toggle-switch" for="ge-treebatch-compress" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-treebatch-compress"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-treebatch-compress" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geCompressZip')) + '</label>';
+  html += '</div>';
+  html += _treeBatchFormatSelectHtml(srcExt);
   html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geQuality')) + '</label>';
   html += '<input type="range" id="ge-treebatch-quality" min="0" max="100" value="85" style="width:130px">';
@@ -698,10 +768,16 @@ window.openTreeBatchConvert = function() {
   html += '</div>';
   pgShowModal(html);
   _geEnsureConsole();
-  setTimeout(function() {
+  var applyModalSize = function() {
     var modal = document.querySelector('#pg-modal-overlay .pg-modal');
-    if (modal) { modal.style.width = '520px'; modal.style.minWidth = '520px'; }
-  }, 0);
+    if (modal) {
+      modal.style.width = '520px';
+      modal.style.minWidth = '520px';
+      modal.style.minHeight = '460px';
+    }
+  };
+  applyModalSize();
+  setTimeout(applyModalSize, 0);
   _checkFfmpegStatus();
   _bindTreeBatchDialog(summary);
   var cancelBtn = document.getElementById('ge-cancel-btn');

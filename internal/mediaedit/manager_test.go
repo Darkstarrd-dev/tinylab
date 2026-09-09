@@ -152,15 +152,63 @@ func TestManager_TranscodeImage_Overwrite(t *testing.T) {
 	if job.Status != StatusCompleted {
 		t.Fatalf("expected completed, got %s: %s", job.Status, job.Error)
 	}
-	// Cross-format overwrite ("replace original"): output lands at
-	// <dir>/<stem><newExt> and the original .png is removed on success,
-	// leaving the new-format file in its place.
+	// Cross-format conversion: output lands at <dir>/<stem><newExt>
+	// and the original source.png is retained (not deleted), so both files exist.
 	wantPath := filepath.Join(dir, "source.webp")
 	if job.OutputPath != wantPath {
 		t.Errorf("expected outputPath = %s for cross-format overwrite, got %s", wantPath, job.OutputPath)
 	}
-	if _, err := os.Stat(imgPath); !os.IsNotExist(err) {
-		t.Errorf("expected original %s removed after cross-format overwrite, stat err=%v", imgPath, err)
+	if _, err := os.Stat(imgPath); err != nil {
+		t.Errorf("expected original %s to be retained, stat err=%v", imgPath, err)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Errorf("expected output %s to exist, stat err=%v", wantPath, err)
+	}
+}
+
+func TestManager_TranscodeImage_SameFormatOverwrite(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFfmpeg(t)
+
+	dir := t.TempDir()
+	imgPath := makeTestImage(t, ffmpegPath, dir, "photo.png")
+
+	m := NewManager()
+
+	params := ImageTranscodeParams{Format: "png", ScalePercent: 50}
+	raw, _ := json.Marshal(params)
+
+	req := StartRequest{
+		InputPath: imgPath,
+		Operation: "image_transcode",
+		Overwrite: true,
+		Params:    raw,
+	}
+
+	job, err := m.Start(ffmpegPath, ffprobePath, req)
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	for i := 0; i < 150; i++ {
+		time.Sleep(100 * time.Millisecond)
+		j, ok := m.Get(job.ID)
+		if !ok {
+			t.Fatal("job disappeared")
+		}
+		if j.Status == StatusCompleted || j.Status == StatusError || j.Status == StatusCancelled {
+			job = j
+			break
+		}
+	}
+
+	if job.Status != StatusCompleted {
+		t.Fatalf("expected completed, got %s: %s", job.Status, job.Error)
+	}
+	if job.OutputPath != imgPath {
+		t.Errorf("expected outputPath == imgPath (%s), got %s", imgPath, job.OutputPath)
+	}
+	if _, err := os.Stat(imgPath); err != nil {
+		t.Errorf("expected overwritten %s to exist, stat err=%v", imgPath, err)
 	}
 }
 
