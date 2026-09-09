@@ -18,16 +18,50 @@ import (
 // ErrCancelled is returned when a download is cancelled via context.
 var ErrCancelled = errors.New("cancelled")
 
+type playlistCacheEntry struct {
+	info      *PlaylistInfo
+	expiresAt time.Time
+}
+
+type videoInfoCacheEntry struct {
+	info      *VideoInfo
+	expiresAt time.Time
+}
+
+func clonePlaylistInfo(info *PlaylistInfo) *PlaylistInfo {
+	if info == nil {
+		return nil
+	}
+	cp := &PlaylistInfo{
+		ID:    info.ID,
+		Title: info.Title,
+	}
+	if info.Entries != nil {
+		cp.Entries = make([]PlaylistEntry, len(info.Entries))
+		copy(cp.Entries, info.Entries)
+	}
+	return cp
+}
+
 // Executor 负责单个下载任务的 yt-dlp 进程管理。
 // 移植自 VidBee YtDlpExecutor，简化为不依赖外部队列接口的独立执行器。
 type Executor struct {
-	settings RuntimeSettings
-	logger   *console.Logger
+	settings       RuntimeSettings
+	logger         *console.Logger
+	playlistMu     sync.RWMutex
+	playlistCache  map[string]playlistCacheEntry
+	videoInfoMu    sync.RWMutex
+	videoInfoCache map[string]videoInfoCacheEntry
 }
 
 // NewExecutor 创建执行器。
 func NewExecutor(settings RuntimeSettings, logger *console.Logger) *Executor {
-	return &Executor{settings: settings, logger: logger}
+	return &Executor{
+		settings:       settings,
+		logger:         logger,
+		playlistCache:  make(map[string]playlistCacheEntry),
+		videoInfoCache: make(map[string]videoInfoCacheEntry),
+	}
 }
 
 // Execute 执行一次 yt-dlp 下载，阻塞直到完成或取消。
@@ -176,6 +210,14 @@ func (e *Executor) Execute(ctx context.Context, task *Task, progressCh chan<- Pr
 
 // ExecuteInfo 执行 yt-dlp -j 查询视频信息，返回解析后的 VideoInfo。
 func (e *Executor) ExecuteInfo(ctx context.Context, rawURL string) (*VideoInfo, error) {
+	e.videoInfoMu.RLock()
+	if entry, ok := e.videoInfoCache[rawURL]; ok && time.Now().Before(entry.expiresAt) {
+		e.videoInfoMu.RUnlock()
+		infoCopy := *entry.info
+		return &infoCopy, nil
+	}
+	e.videoInfoMu.RUnlock()
+
 	ytDlpPath, err := e.resolveYtDlpPath()
 	if err != nil {
 		return nil, err
@@ -185,11 +227,34 @@ func (e *Executor) ExecuteInfo(ctx context.Context, rawURL string) (*VideoInfo, 
 	if err != nil {
 		return nil, wrapInfoError(err, stderr)
 	}
-	return parseVideoInfoJSON(out)
+	info, err := parseVideoInfoJSON(out)
+	if err != nil {
+		return nil, err
+	}
+
+	e.videoInfoMu.Lock()
+	if e.videoInfoCache == nil {
+		e.videoInfoCache = make(map[string]videoInfoCacheEntry)
+	}
+	infoCopy := *info
+	e.videoInfoCache[rawURL] = videoInfoCacheEntry{
+		info:      &infoCopy,
+		expiresAt: time.Now().Add(10 * time.Minute),
+	}
+	e.videoInfoMu.Unlock()
+
+	return info, nil
 }
 
 // ExecutePlaylistInfo 执行 yt-dlp -J --flat-playlist 查询播放列表信息。
 func (e *Executor) ExecutePlaylistInfo(ctx context.Context, rawURL string) (*PlaylistInfo, error) {
+	e.playlistMu.RLock()
+	if entry, ok := e.playlistCache[rawURL]; ok && time.Now().Before(entry.expiresAt) {
+		e.playlistMu.RUnlock()
+		return clonePlaylistInfo(entry.info), nil
+	}
+	e.playlistMu.RUnlock()
+
 	ytDlpPath, err := e.resolveYtDlpPath()
 	if err != nil {
 		return nil, err
@@ -199,7 +264,22 @@ func (e *Executor) ExecutePlaylistInfo(ctx context.Context, rawURL string) (*Pla
 	if err != nil {
 		return nil, wrapInfoError(err, stderr)
 	}
-	return parsePlaylistInfoJSON(out)
+	info, err := parsePlaylistInfoJSON(out)
+	if err != nil {
+		return nil, err
+	}
+
+	e.playlistMu.Lock()
+	if e.playlistCache == nil {
+		e.playlistCache = make(map[string]playlistCacheEntry)
+	}
+	e.playlistCache[rawURL] = playlistCacheEntry{
+		info:      clonePlaylistInfo(info),
+		expiresAt: time.Now().Add(10 * time.Minute),
+	}
+	e.playlistMu.Unlock()
+
+	return info, nil
 }
 
 // runCapture 运行 yt-dlp 并捕获全部 stdout 与 stderr。

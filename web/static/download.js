@@ -477,16 +477,17 @@ async function startDownload(cardId, url) {
     container: opts.container,
     downloadDir: resolveDownloadDir()
   };
-  var res = await apiPost('/downloads', body);
-  if (res && res.error) {
-    toast(t('downloadFailed', [res.error]), 'error');
-    return;
-  }
   if (cardId) {
     removeParsedCard(cardId);
   }
   var urlInput = document.getElementById('dl-url');
   if (urlInput) urlInput.value = '';
+
+  var res = await apiPost('/downloads', body);
+  if (res && res.error) {
+    toast(t('downloadFailed', [res.error]), 'error');
+    return;
+  }
   toast(t('downloadStarted'), 'success');
   if (res && res.id) {
     downloadTasksMap[res.id] = res;
@@ -517,31 +518,25 @@ async function startPlaylistDownload(cardId, url) {
     downloadDir: resolveDownloadDir(),
     selectedIndices: indices
   };
+
+  if (cardId) {
+    removeParsedCard(cardId);
+  }
+  var urlInput = document.getElementById('dl-url');
+  if (urlInput) urlInput.value = '';
+
   var res = await apiPost('/downloads/playlist', body);
   if (res && res.error) {
     toast(t('downloadFailed', [res.error]), 'error');
     return;
   }
-  if (cardId) {
-    var cardEl = document.getElementById(cardId);
-    if (cardEl) {
-      var entries = cardEl.querySelector('.dl-playlist-entries');
-      if (entries && entries.style.display !== 'none') {
-        toggleParsedCard(cardId);
-      }
-    }
-  }
-  var urlInput = document.getElementById('dl-url');
-  if (urlInput) urlInput.value = '';
   toast(t('downloadStarted'), 'success');
-  // The backend may return a single id, a list of ids, or a status object.
   var ids = res && res.ids ? res.ids : (res && res.id ? [res.id] : []);
   if (ids.length) {
-    ids.forEach(function(id) {
-      downloadTasksMap[id] = { id: id, status: 'pending', url: url };
-      renderDownloadTask(downloadTasksMap[id], true);
-    });
+    selectedTaskId = ids[0];
+    selectedTaskIds = [ids[0]];
   }
+  await loadDownloadTasks();
 }
 
 // resolveDownloadDir returns the persisted server default download dir.
@@ -609,10 +604,12 @@ async function loadDownloadTasks() {
     downloadTasksMap[task.id] = task;
     renderDownloadTask(task, false);
   });
-  // Default selection: first task (the one rendered first).
-  if (!selectedTaskId && tasks.length) {
+  // Default selection: select active task or fallback to first task.
+  if ((!selectedTaskId || !downloadTasksMap[selectedTaskId]) && tasks.length) {
     selectTask(null, tasks[0].id);
-  } else if (selectedTaskId) {
+  } else if (selectedTaskId && downloadTasksMap[selectedTaskId]) {
+    selectTask(null, selectedTaskId);
+  } else {
     renderTaskDetail();
   }
 }

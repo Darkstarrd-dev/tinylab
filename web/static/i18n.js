@@ -8,7 +8,7 @@ const L = {
     ed2MenuSelectAll: 'Select All', ed2MenuExpandSelection: 'Expand Selection', ed2MenuShrinkSelection: 'Shrink Selection', ed2MenuCopyLineUp: 'Copy Line Up', ed2MenuCopyLineDown: 'Copy Line Down', ed2MenuMoveLineUp: 'Move Line Up', ed2MenuMoveLineDown: 'Move Line Down', ed2MenuDuplicate: 'Duplicate Selection', ed2MenuDuplicateSelection: 'Duplicate Selection',
     ed2MenuAddCursorAbove: 'Add Cursor Above', ed2MenuAddCursorBelow: 'Add Cursor Below', ed2MenuAddCursorsToLineEnds: 'Add Cursors to Line Ends', ed2MenuAddNextOccurrence: 'Add Next Occurrence', ed2MenuAddPrevOccurrence: 'Add Previous Occurrence', ed2MenuAddPreviousOccurrence: 'Add Previous Occurrence', ed2MenuSelectAllOccurrences: 'Select All Occurrences',
     ed2EmbedOriginal: 'Original (A)', ed2EmbedRevised: 'Edited Result (B)', trEditPrompt: 'Edit / Compare',
-    design: 'GameMaker', gameDesigner: 'GameMaker', gameMaker: 'GameMaker', mediaDownload: 'Media Download',
+    design: 'GameMaker', gameDesigner: 'GameMaker', gameMaker: 'GameMaker', mediaDownload: 'Download',
     shutdown: 'Shutdown',
     debugSettings: 'Debug Settings', debugMode: 'Debug Mode',
     debugModeDesc: 'When enabled, request/response details are cached for inspection in the Usage page.',

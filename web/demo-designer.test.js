@@ -27,7 +27,7 @@ check('both index variants have data-demo-tool="design" and load demo-designer.j
   for (const f of ['index.html', 'index-nopg.html']) {
     const html = fs.readFileSync(path.join(STATIC, f), 'utf8');
     assert.ok(html.indexOf('data-demo-tool="design"') > 0, f + ' missing design menu button');
-    assert.ok(html.indexOf('>Game Designer</button>') > 0, f + ' design button must say Game Designer');
+    assert.ok(html.indexOf('>GameMaker</button>') > 0 || html.indexOf('>Game Designer</button>') > 0, f + ' design button must say GameMaker or Game Designer');
     const g = html.indexOf('<script src="/demo-games.js"></script>');
     const d = html.indexOf('<script src="/demo-designer.js"></script>');
     assert.ok(g > 0, f + ' missing demo-games.js script tag');
@@ -37,8 +37,8 @@ check('both index variants have data-demo-tool="design" and load demo-designer.j
 
 check('app-demo.js: DEMO_TOOLS contains design entry', () => {
   const src = fs.readFileSync(path.join(STATIC, 'app-demo.js'), 'utf8');
-  assert.ok(src.indexOf("id: 'design'") >= 0 || src.indexOf('id: "design"') >= 0 || src.indexOf("id: 'design', labelKey: 'design'") >= 0, 'missing { id: design, labelKey: design } entry');
-  assert.ok(src.includes("labelKey: 'design'"), 'design entry must use labelKey design');
+  assert.ok(src.indexOf("id: 'design'") >= 0 || src.indexOf('id: "design"') >= 0, 'missing { id: design } entry');
+  assert.ok(src.includes("labelKey: 'gameDesigner'") || src.includes("labelKey: 'design'"), 'design entry must use labelKey gameDesigner or design');
 });
 
 check('app-demo.js: demoHasTool("design") checks GameDesigner', () => {

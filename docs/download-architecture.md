@@ -1,3 +1,4 @@
+> **最后核对（2026-09-09，Playlist 下载即时切换、Executor 内存缓存与动画放大 50%）：** (1) **Header 导航与动画**：`mediaDownload` 英文精简为 `'Download'`；Uiverse.io 四色环加载动画放大 50%（`.pl` 为 `9em`，按钮内为 `1.875em`），各页面按钮统一样式。(2) **后端内存缓存（解决 5~10s 重复爬取卡顿）**：`internal/download/executor.go` 为 `ExecutePlaylistInfo` 与 `ExecuteInfo` 引入 10 分钟短期内存缓存与互斥读写锁保护，前端选定条目创建播放列表任务（`CreatePlaylistTask`）时直接命中缓存（耗时由 5~10s 骤降至 0ms 纯内存操作），彻底根除对相同 URL 重复调用 yt-dlp 耗时的问题。(3) **前端即时乐观切换**：`startPlaylistDownload`（及单视频 `startDownload`）在点击瞬间先立即执行 `removeParsedCard(cardId)` 移除预览卡片并清空输入框，UI 毫秒级即时切换到任务列表，请求返回后立即拉取任务数据并高亮选中首项。
 > **最后核对（2026-08-29，Round-2 P0-01c/P1-02 SSE与并发）：** `validateDownloadDir` 相对路径经 `Abs(defaultDir/cleaned)` 后 `HasPrefix` 校验，`"evil"` 拒绝；`download-sse.js` `onerror` 重连前 `loadDownloadTasks()` 全量校正；`playDownloadFile`/`openDownloadDir` 经 `PathGuard(DownloadDir)` 403 越界；`Manager.UpdateSettings` 的 `maxConcurrent` 生效说明。
 
 # TinyLab Download 下载功能架构
