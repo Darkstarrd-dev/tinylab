@@ -449,6 +449,40 @@ function toggleCustomSelect(wrapperId, event) {
   if (event) event.stopPropagation();
   var wrapper = document.getElementById(wrapperId);
   if (!wrapper) return;
+  var sel = wrapper.querySelector('select');
+  if (sel && sel.disabled) return;
+  if (wrapper.classList.contains('disabled')) return;
+
+  if (sel) {
+    var realOpts = sel.querySelectorAll('option');
+    var optMap = {};
+    for (var i = 0; i < realOpts.length; i++) {
+      optMap[realOpts[i].value] = {
+        disabled: realOpts[i].disabled,
+        hidden: realOpts[i].style.display === 'none'
+      };
+    }
+    var customOpts = wrapper.querySelectorAll('.custom-select-option');
+    for (var j = 0; j < customOpts.length; j++) {
+      var co = customOpts[j];
+      var val = co.getAttribute('data-value');
+      var st = optMap[val];
+      if (st && st.hidden) {
+        co.style.display = 'none';
+      } else if (st && st.disabled) {
+        co.style.display = '';
+        co.classList.add('disabled');
+        co.style.opacity = '0.4';
+        co.style.pointerEvents = 'none';
+      } else {
+        co.style.display = '';
+        co.classList.remove('disabled');
+        co.style.opacity = '';
+        co.style.pointerEvents = '';
+      }
+    }
+  }
+
   var isOpen = wrapper.classList.contains('open');
   closeAllCustomSelects();
   if (!isOpen) {
@@ -460,11 +494,15 @@ function selectCustomOption(wrapperId, value, labelText) {
   var wrapper = document.getElementById(wrapperId);
   if (!wrapper) return;
   var selectEl = wrapper.querySelector('select');
-  var labelEl = wrapper.querySelector('.custom-select-label');
   if (selectEl) {
+    var opts = selectEl.querySelectorAll('option');
+    for (var i = 0; i < opts.length; i++) {
+      if (opts[i].value === value && opts[i].disabled) return;
+    }
     selectEl.value = value;
     selectEl.dispatchEvent(new Event('change'));
   }
+  var labelEl = wrapper.querySelector('.custom-select-label');
   if (labelEl) {
     labelEl.textContent = labelText;
   }
@@ -486,6 +524,31 @@ function closeAllCustomSelects() {
 }
 
 document.addEventListener('click', closeAllCustomSelects);
+document.addEventListener('change', function(e) {
+  if (!e.target || e.target.tagName !== 'SELECT') return;
+  var wrap = e.target.closest('.custom-select-wrapper');
+  if (!wrap) return;
+  var sel = e.target;
+  var labelEl = wrap.querySelector('.custom-select-label');
+  var opt = sel.selectedOptions ? sel.selectedOptions[0] : null;
+  if (!opt) {
+    var all = sel.querySelectorAll('option');
+    for (var k = 0; k < all.length; k++) {
+      if (all[k].value === sel.value) { opt = all[k]; break; }
+    }
+  }
+  if (opt && labelEl) {
+    labelEl.textContent = opt.textContent;
+  }
+  var customOpts = wrap.querySelectorAll('.custom-select-option');
+  customOpts.forEach(function(co) {
+    if (co.dataset.value === sel.value) {
+      co.classList.add('selected');
+    } else {
+      co.classList.remove('selected');
+    }
+  });
+});
 
 // Global Number Stepper Component (matching Settings Modal)
 // Accepts both the positional form (id, value, min, max, step, extraStyle,

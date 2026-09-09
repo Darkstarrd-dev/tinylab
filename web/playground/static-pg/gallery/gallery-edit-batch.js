@@ -674,6 +674,17 @@ function _treeBatchFormatSelectHtml(srcExt) {
   return html;
 }
 
+function _treeBatchFitStepperHtml() {
+  if (typeof renderStepperHtml === 'function') {
+    return renderStepperHtml('ge-treebatch-fit-val', 1920, { min: 16, max: 16384, step: 64, style: 'width:130px;height:32px;' });
+  }
+  return '<div class="number-stepper" style="width:130px;height:32px;">' +
+    '<button type="button" class="stepper-btn stepper-minus" tabindex="-1" onclick="changeStepper(\'ge-treebatch-fit-val\', -64)">-</button>' +
+    '<input type="number" class="stepper-input" id="ge-treebatch-fit-val" value="1920" min="16" max="16384">' +
+    '<button type="button" class="stepper-btn stepper-plus" tabindex="-1" onclick="changeStepper(\'ge-treebatch-fit-val\', 64)">+</button>' +
+    '</div>';
+}
+
 function _bindTreeBatchDialog(summary) {
   var fmtSelect = document.getElementById('ge-treebatch-format');
   var losslessNote = document.getElementById('ge-treebatch-lossless-note');
@@ -681,6 +692,11 @@ function _bindTreeBatchDialog(summary) {
   var qualityVal = document.getElementById('ge-treebatch-quality-val');
   var scaleInput = document.getElementById('ge-treebatch-scale');
   var scaleVal = document.getElementById('ge-treebatch-scale-val');
+  var scaleGroup = document.getElementById('ge-treebatch-scale-group');
+  var fitCb = document.getElementById('ge-treebatch-fit');
+  var fitStepperWrap = document.getElementById('ge-treebatch-fit-stepper-wrap');
+  var fitValInput = document.getElementById('ge-treebatch-fit-val');
+
   if (fmtSelect && losslessNote) {
     fmtSelect.onchange = function() {
       losslessNote.style.display = (fmtSelect.value === 'png') ? '' : 'none';
@@ -693,6 +709,29 @@ function _bindTreeBatchDialog(summary) {
   if (scaleInput && scaleVal) {
     scaleInput.oninput = function() { scaleVal.textContent = (parseFloat(scaleInput.value) || 100) + '%'; };
   }
+
+  var updateFitScaleState = function() {
+    var fitOn = !!(fitCb && fitCb.checked);
+    if (scaleInput) {
+      scaleInput.disabled = fitOn;
+    }
+    if (scaleGroup) {
+      scaleGroup.style.opacity = fitOn ? '0.45' : '1';
+      scaleGroup.style.pointerEvents = fitOn ? 'none' : '';
+    }
+    if (fitStepperWrap) {
+      fitStepperWrap.style.opacity = fitOn ? '1' : '0.45';
+      fitStepperWrap.style.pointerEvents = fitOn ? '' : 'none';
+    }
+    if (fitValInput) {
+      fitValInput.disabled = !fitOn;
+    }
+  };
+  if (fitCb) {
+    fitCb.onchange = updateFitScaleState;
+    updateFitScaleState();
+  }
+
   var startBtn = document.getElementById('ge-treebatch-start-btn');
   if (startBtn) {
     startBtn.onclick = function() {
@@ -702,15 +741,22 @@ function _bindTreeBatchDialog(summary) {
       var format = fmtSelect ? fmtSelect.value : 'png';
       var quality = qualitySlider ? (parseInt(qualitySlider.value, 10) || 85) : 85;
       var scalePercent = scaleInput ? (parseInt(scaleInput.value, 10) || 100) : 100;
-      var compressCb = document.getElementById('ge-treebatch-compress');
-      var compress = !!(compressCb && compressCb.checked);
-      var params = { format: format, quality: quality, scalePercent: scalePercent, stripMetadata: false };
-      // Compress 开 = 打包输出（沿用现有 zip-outputs 链，需非覆盖拿 assetId）；
-      // 关闭 = tree 全部原地覆盖保存。
-      var dest = compress ? { overwrite: false, outputDir: null } : { overwrite: true, outputDir: null };
+      var fitOn = !!(fitCb && fitCb.checked);
+      var fitTo = (fitOn && fitValInput) ? (parseInt(fitValInput.value, 10) || 0) : 0;
+      if (fitTo < 0) fitTo = 0;
+
+      var params = {
+        format: format,
+        quality: quality,
+        scalePercent: fitTo > 0 ? 100 : scalePercent,
+        fitTo: fitTo,
+        stripMetadata: false
+      };
+      // Tree Batch Convert 始终原地保存（同格式原地覆盖，跨格式同目录下新增并保留源文件）
+      var dest = { overwrite: true, outputDir: null };
       _editMediaType = 'image';
       _editCurrentItem = summary.writable[0] || null;
-      _startBatch('image_transcode', params, dest, compress, summary.writable);
+      _startBatch('image_transcode', params, dest, false, summary.writable);
     };
   }
 }
@@ -734,24 +780,32 @@ window.openTreeBatchConvert = function() {
   if (summary.skipped > 0) html += ' · ' + escapeHtml(pgT('geTreeBatchSkipped', [String(summary.skipped)]));
   html += '</div></div>';
   html += '<div class="gallery-edit-row" style="align-items:center">';
-  html += '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
-  html += '<label class="toggle-switch" for="ge-treebatch-compress" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-treebatch-compress"><span class="toggle-slider"></span></label>';
-  html += '<label for="ge-treebatch-compress" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geCompressZip')) + '</label>';
-  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:8px">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geFormat')) + '</label>';
   html += _treeBatchFormatSelectHtml(srcExt);
-  html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">';
+  html += '</div>';
+  html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px" data-tooltip="' + escapeHtml(T('geFitToTip') || '') + '">';
+  html += '<label class="toggle-switch" for="ge-treebatch-fit" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-treebatch-fit"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-treebatch-fit" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geFitTo') || 'Fit to') + '</label>';
+  html += '<div id="ge-treebatch-fit-stepper-wrap" style="width:130px;transition:opacity 0.15s ease">';
+  html += _treeBatchFitStepperHtml();
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="gallery-edit-row" style="align-items:center">';
+  html += '<div id="ge-treebatch-scale-group" style="display:flex;align-items:center;gap:8px;transition:opacity 0.15s ease">';
+  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
+  html += '<input type="range" id="ge-treebatch-scale" min="10" max="200" value="100" style="width:130px">';
+  html += '<span class="gallery-edit-val" id="ge-treebatch-scale-val" style="min-width:36px">100%</span>';
+  html += '</div>';
+  html += '<div id="ge-treebatch-quality-group" style="margin-left:auto;display:flex;align-items:center;gap:8px">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geQuality')) + '</label>';
   html += '<input type="range" id="ge-treebatch-quality" min="0" max="100" value="85" style="width:130px">';
   html += '<span class="gallery-edit-val" id="ge-treebatch-quality-val" style="min-width:24px;text-align:right">85</span>';
   html += '</div>';
   html += '</div>';
-  html += '<div class="gallery-edit-row" id="ge-treebatch-lossless-note" style="display:none">';
+  html += '<div class="gallery-edit-row" id="ge-treebatch-lossless-note" style="display:none;margin-top:-6px">';
   html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + escapeHtml(T('geQualityHint')) + '</span>';
-  html += '</div>';
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
-  html += '<input type="range" id="ge-treebatch-scale" min="10" max="200" value="100" style="width:130px">';
-  html += '<span class="gallery-edit-val" id="ge-treebatch-scale-val" style="min-width:36px">100%</span>';
   html += '</div>';
   html += '<div class="gallery-edit-section" id="ge-progress-section" style="display:none">';
   html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">';

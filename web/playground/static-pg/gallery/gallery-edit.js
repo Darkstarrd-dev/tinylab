@@ -354,15 +354,21 @@ function _renderSourceInfoRows(prefix) {
 // open at a time). Set Path toggles the output directory; Set Name the output
 // filename / archive name.
 function _renderSetPathRow() {
-  return '<div class="gallery-edit-row">'
-    + '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-setpath"> ' + escapeHtml(T('geSetPath')) + '</label>'
+  return '<div class="gallery-edit-row" style="align-items:center">'
+    + '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">'
+    + '<label class="toggle-switch" for="ge-img-setpath" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-img-setpath"><span class="toggle-slider"></span></label>'
+    + '<label for="ge-img-setpath" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geSetPath')) + '</label>'
+    + '</div>'
     + '<button type="button" class="btn btn-browse" id="ge-browse-dir-btn" data-tooltip="' + escapeHtml(T('geBrowseDir')) + '">' + _geBrowseSvg + '</button>'
     + '<input type="text" id="ge-dest-dir" style="flex:1" placeholder="' + escapeHtml(T('geDestDirPlaceholder')) + '" disabled>'
     + '</div>';
 }
 function _renderSetNameRow() {
-  return '<div class="gallery-edit-row">'
-    + '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-setname"> ' + escapeHtml(T('geSetName')) + '</label>'
+  return '<div class="gallery-edit-row" style="align-items:center">'
+    + '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">'
+    + '<label class="toggle-switch" for="ge-img-setname" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-img-setname"><span class="toggle-slider"></span></label>'
+    + '<label for="ge-img-setname" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geSetName')) + '</label>'
+    + '</div>'
     + '<input type="text" id="ge-img-setname-input" style="flex:1" placeholder="' + escapeHtml(T('geNamePlaceholder')) + '" disabled>'
     + '</div>';
 }
@@ -385,27 +391,55 @@ function _renderImageForm() {
   html += _renderSetNameRow();
 
   // Row 5: Uniform (sequential rename)
-  // img input flex:1 (stretches to fill available space), Digits select right-aligned with top output name input
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-uniform"> ' + escapeHtml(T('geUniform')) + '</label>';
+  html += '<div class="gallery-edit-row" style="align-items:center">';
+  html += '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
+  html += '<label class="toggle-switch" for="ge-img-uniform" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-img-uniform"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-img-uniform" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geUniform')) + '</label>';
+  html += '</div>';
   html += '<input type="text" id="ge-img-uniform-prefix" style="flex:1;min-width:0" value="' + escapeHtml(T('geRenormPrefixPh')) + '" placeholder="' + escapeHtml(T('geRenormPrefixPh')) + '" disabled>';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0 4px 0 12px">' + escapeHtml(T('geRenormDigits')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-img-uniform-digits" style="width:64px;flex:none;text-align:center;text-align-last:center" disabled>';
-  for (var d = 2; d <= 6; d++) {
-    html += '<option value="' + d + '"' + (d === 2 ? ' selected' : '') + '>' + d + '</option>';
+  var digitOptions = [
+    { value: '2', label: '2' },
+    { value: '3', label: '3' },
+    { value: '4', label: '4' },
+    { value: '5', label: '5' },
+    { value: '6', label: '6' }
+  ];
+  if (typeof renderCustomSelectHtml === 'function') {
+    html += renderCustomSelectHtml('ge-img-uniform-digits-wrap', 'ge-img-uniform-digits', digitOptions, '2', null, 'width:64px;flex:none;height:32px;');
+  } else {
+    html += '<select class="pg-param-row-select" id="ge-img-uniform-digits" style="width:64px;flex:none;text-align:center;text-align-last:center" disabled>';
+    for (var d = 2; d <= 6; d++) {
+      html += '<option value="' + d + '"' + (d === 2 ? ' selected' : '') + '>' + d + '</option>';
+    }
+    html += '</select>';
   }
-  html += '</select>';
   html += '</div>';
 
-  // Row 6: Compress (left-aligned, 130px) + Format (right of compress) + Quality (right-aligned)
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check"><input type="checkbox" id="ge-img-compress"> ' + escapeHtml(T('geCompressZip')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-img-format" style="width:95px;flex:none">';
-  for (var i = 0; i < formatOptions.length; i++) {
-    var f = formatOptions[i];
-    html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
+  // Row 6: Compress + Format + Quality
+  html += '<div class="gallery-edit-row" style="align-items:center">';
+  html += '<div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
+  html += '<label class="toggle-switch" for="ge-img-compress" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-img-compress"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-img-compress" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geCompressZip')) + '</label>';
+  html += '</div>';
+  var imgFmtOptions = [
+    { value: 'jpeg', label: 'JPEG' },
+    { value: 'png', label: 'PNG' },
+    { value: 'webp', label: 'WEBP' },
+    { value: 'bmp', label: 'BMP' },
+    { value: 'tiff', label: 'TIFF' },
+    { value: 'gif', label: 'GIF' }
+  ];
+  if (typeof renderCustomSelectHtml === 'function') {
+    html += renderCustomSelectHtml('ge-img-format-wrap', 'ge-img-format', imgFmtOptions, srcExt, null, 'width:95px;flex:none;height:32px;');
+  } else {
+    html += '<select class="pg-param-row-select" id="ge-img-format" style="width:95px;flex:none">';
+    for (var i = 0; i < formatOptions.length; i++) {
+      var f = formatOptions[i];
+      html += '<option value="' + f + '"' + (f === srcExt ? ' selected' : '') + '>' + f.toUpperCase() + '</option>';
+    }
+    html += '</select>';
   }
-  html += '</select>';
   html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geQuality')) + '</label>';
   html += '<input type="range" id="ge-img-quality" min="0" max="100" value="85" style="width:130px">';
@@ -418,13 +452,16 @@ function _renderImageForm() {
   html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + escapeHtml(T('geQualityHint')) + '</span>';
   html += '</div>';
 
-  // Row 7: Scale (left aligned, no %) + Output Dims + Strip Metadata (right aligned)
-  html += '<div class="gallery-edit-row">';
+  // Row 7: Scale + Output Dims + Strip Metadata
+  html += '<div class="gallery-edit-row" style="align-items:center">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
   html += '<input type="range" id="ge-img-scale" min="10" max="200" value="100" style="width:130px">';
   html += '<span class="gallery-edit-val" id="ge-scale-val" style="min-width:36px">100%</span>';
   html += '<span class="gallery-edit-val" id="ge-scale-dims" style="margin-left:4px;color:var(--text-muted)">' + escapeHtml(pgT('geOutputDims', [w, h])) + '</span>';
-  html += '<label class="gallery-edit-check" style="margin-left:auto;margin-right:0"><input type="checkbox" id="ge-img-strip"> ' + escapeHtml(T('geStripMetadata')) + '</label>';
+  html += '<div style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
+  html += '<label class="toggle-switch" for="ge-img-strip" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-img-strip"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-img-strip" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geStripMetadata')) + '</label>';
+  html += '</div>';
   html += '</div>';
 
   return html;
@@ -447,21 +484,22 @@ function _renderVideoTranscodeForm() {
   html += '<div class="gallery-edit-row ge-two-col-row">';
   html += '<div class="ge-col-half" id="ge-vid-codec-col"' + codecColHide + '>';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geCodec')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-codec">';
-  html += '<option value="h264">H.264</option><option value="h265">H.265/HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option><option value="copy">Copy (no re-encode)</option>';
-  html += '</select>';
+  var codecOpts = [
+    { value: 'h264', label: 'H.264' },
+    { value: 'h265', label: 'H.265/HEVC' },
+    { value: 'vp9', label: 'VP9' },
+    { value: 'av1', label: 'AV1' },
+    { value: 'copy', label: 'Copy (no re-encode)' }
+  ];
+  html += renderCustomSelectHtml('ge-vid-codec-wrap', 'ge-vid-codec', codecOpts, 'h264', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geFormat')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-format">';
   var formats = [
-    { v: 'mp4', label: 'MP4' }, { v: 'mkv', label: 'MKV' }, { v: 'webm', label: 'WebM' }, { v: 'mov', label: 'MOV' },
-    { v: 'gif', label: T('geFormatGif') }, { v: 'webp', label: T('geFormatWebp') }
+    { value: 'mp4', label: 'MP4' }, { value: 'mkv', label: 'MKV' }, { value: 'webm', label: 'WebM' }, { value: 'mov', label: 'MOV' },
+    { value: 'gif', label: T('geFormatGif') }, { value: 'webp', label: T('geFormatWebp') }
   ];
-  for (var i = 0; i < formats.length; i++) {
-    html += '<option value="' + formats[i].v + '"' + (formats[i].v === fmt ? ' selected' : '') + '>' + escapeHtml(formats[i].label) + '</option>';
-  }
-  html += '</select>';
+  html += renderCustomSelectHtml('ge-vid-format-wrap', 'ge-vid-format', formats, fmt, null, 'width:100%;height:32px;');
   html += '</div>';
   html += '</div>';
 
@@ -474,15 +512,23 @@ function _renderVideoTranscodeForm() {
   html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-quality-preset-row">';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geQualityTier')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-quality">';
-  html += '<option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option>';
-  html += '</select>';
+  var vidQualityOpts = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' }
+  ];
+  html += renderCustomSelectHtml('ge-vid-quality-wrap', 'ge-vid-quality', vidQualityOpts, 'medium', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('gePreset')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-preset">';
-  html += '<option value="ultrafast">ultrafast</option><option value="fast">fast</option><option value="medium" selected>medium</option><option value="slow">slow</option><option value="veryslow">veryslow</option>';
-  html += '</select>';
+  var vidPresetOpts = [
+    { value: 'ultrafast', label: 'ultrafast' },
+    { value: 'fast', label: 'fast' },
+    { value: 'medium', label: 'medium' },
+    { value: 'slow', label: 'slow' },
+    { value: 'veryslow', label: 'veryslow' }
+  ];
+  html += renderCustomSelectHtml('ge-vid-preset-wrap', 'ge-vid-preset', vidPresetOpts, 'medium', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '</div>';
 
@@ -490,29 +536,33 @@ function _renderVideoTranscodeForm() {
   html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-audio-row">';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geAudioCodec')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-audio-codec">';
-  html += '<option value="aac">AAC</option><option value="opus">Opus</option><option value="mp3">MP3</option><option value="copy">Copy</option><option value="none">None</option>';
-  html += '</select>';
+  var audioCodecOpts = [
+    { value: 'aac', label: 'AAC' },
+    { value: 'opus', label: 'Opus' },
+    { value: 'mp3', label: 'MP3' },
+    { value: 'copy', label: 'Copy' },
+    { value: 'none', label: 'None' }
+  ];
+  html += renderCustomSelectHtml('ge-vid-audio-codec-wrap', 'ge-vid-audio-codec', audioCodecOpts, 'aac', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geAudioBitrate')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-audio-bitrate">';
   var bitrates = ['64k', '96k', '128k', '160k', '192k', '256k', '320k'];
-  for (var b = 0; b < bitrates.length; b++) {
-    var br = bitrates[b];
-    html += '<option value="' + br + '"' + (br === '128k' ? ' selected' : '') + '>' + br + '</option>';
-  }
-  html += '</select>';
+  var bitrateOpts = bitrates.map(function(b) { return { value: b, label: b }; });
+  html += renderCustomSelectHtml('ge-vid-audio-bitrate-wrap', 'ge-vid-audio-bitrate', bitrateOpts, '128k', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '</div>';
 
   // Row 4: Scale + Dims + Strip metadata (video formats only)
-  html += '<div class="gallery-edit-row" id="ge-vid-scale-row">';
+  html += '<div class="gallery-edit-row" id="ge-vid-scale-row" style="align-items:center">';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
   html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="width:130px">';
   html += '<span class="gallery-edit-val" id="ge-vid-scale-val" style="min-width:36px">100%</span>';
   html += '<span class="gallery-edit-val" id="ge-vid-scale-dims" style="margin-left:4px;color:var(--text-muted)">' + escapeHtml(pgT('geOutputDims', [w, h])) + '</span>';
-  html += '<label class="gallery-edit-check" style="margin-left:auto;margin-right:0"><input type="checkbox" id="ge-vid-strip"> ' + escapeHtml(T('geStripMetadata')) + '</label>';
+  html += '<div style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex-shrink:0">';
+  html += '<label class="toggle-switch" for="ge-vid-strip" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-vid-strip"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-vid-strip" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geStripMetadata')) + '</label>';
+  html += '</div>';
   html += '</div>';
 
   // Animated-format param block (GIF / animated WebP)
@@ -538,14 +588,17 @@ function _renderVideoTranscodeForm() {
   html += '</div>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geLoop')) + '</label>';
-  html += '<span style="display:flex;flex:1;min-width:0">';
-  html += '<select class="pg-param-row-select" id="ge-vid-anim-loop-mode" style="flex:1;min-width:0">';
-  html += '<option value="infinite" selected>' + escapeHtml(T('geLoopInfinite')) + '</option>';
-  if (fmt === 'gif') html += '<option value="once">' + escapeHtml(T('geLoopOnce')) + '</option>';
-  html += '<option value="n">' + escapeHtml(T('geLoopRepeatN')) + '</option>';
-  html += '</select>';
-  html += '<input type="number" id="ge-vid-anim-loop-n" min="0" max="65535" step="1" value="1" style="width:56px;margin-left:6px;display:none">';
-  html += '</span>';
+  html += '<div style="display:flex;align-items:center;gap:6px;width:100%">';
+  var loopOpts = [
+    { value: 'infinite', label: T('geLoopInfinite') }
+  ];
+  if (fmt === 'gif') loopOpts.push({ value: 'once', label: T('geLoopOnce') });
+  loopOpts.push({ value: 'n', label: T('geLoopRepeatN') });
+  html += '<div style="flex:1;min-width:0">';
+  html += renderCustomSelectHtml('ge-vid-anim-loop-mode-wrap', 'ge-vid-anim-loop-mode', loopOpts, 'infinite', null, 'width:100%;height:32px;');
+  html += '</div>';
+  html += '<input type="number" id="ge-vid-anim-loop-n" min="0" max="65535" step="1" value="1" style="width:56px;display:none">';
+  html += '</div>';
   html += '</div>';
   html += '</div>';
 
@@ -589,17 +642,24 @@ function _renderVideoTranscodeForm() {
   html += '</div>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geDither')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-vid-anim-dither">';
-  html += '<option value="sierra2_4a" selected>sierra2_4a</option><option value="floyd_steinberg">floyd_steinberg</option><option value="bayer">bayer</option><option value="none">none</option>';
-  html += '</select>';
+  var ditherOpts = [
+    { value: 'sierra2_4a', label: 'sierra2_4a' },
+    { value: 'floyd_steinberg', label: 'floyd_steinberg' },
+    { value: 'bayer', label: 'bayer' },
+    { value: 'none', label: 'none' }
+  ];
+  html += renderCustomSelectHtml('ge-vid-anim-dither-wrap', 'ge-vid-anim-dither', ditherOpts, 'sierra2_4a', null, 'width:100%;height:32px;');
   html += '</div>';
   html += '</div>';
   html += '</div>';
 
   // WebP-only option: lossless
   html += '<div id="ge-vid-anim-webp-opts"' + webpOptsHide + '>';
-  html += '<div class="gallery-edit-row">';
-  html += '<label class="gallery-edit-check" style="margin-left:90px"><input type="checkbox" id="ge-vid-anim-lossless"> ' + escapeHtml(T('geLossless')) + '</label>';
+  html += '<div class="gallery-edit-row" style="align-items:center">';
+  html += '<div style="margin-left:90px;display:inline-flex;align-items:center;gap:8px">';
+  html += '<label class="toggle-switch" for="ge-vid-anim-lossless" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-vid-anim-lossless"><span class="toggle-slider"></span></label>';
+  html += '<label for="ge-vid-anim-lossless" style="font-size:13px;color:var(--text);font-weight:500;cursor:pointer;user-select:none;margin:0">' + escapeHtml(T('geLossless')) + '</label>';
+  html += '</div>';
   html += '</div>';
   html += '</div>';
 
@@ -667,17 +727,26 @@ function _renderVideoTrimForm() {
 
   // Re-encode options
   html += '<div id="ge-trim-reencode-opts" style="display:none">';
-  html += '<div class="gallery-edit-row">';
+  html += '<div class="gallery-edit-row ge-two-col-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geCodec')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-trim-codec">';
-  html += '<option value="h264">H.264</option><option value="h265">H.265/HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option>';
-  html += '</select>';
+  var trimCodecOpts = [
+    { value: 'h264', label: 'H.264' },
+    { value: 'h265', label: 'H.265/HEVC' },
+    { value: 'vp9', label: 'VP9' },
+    { value: 'av1', label: 'AV1' }
+  ];
+  html += renderCustomSelectHtml('ge-trim-codec-wrap', 'ge-trim-codec', trimCodecOpts, 'h264', null, 'width:100%;height:32px;');
   html += '</div>';
-  html += '<div class="gallery-edit-row">';
+  html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geQualityTier')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-trim-quality">';
-  html += '<option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option>';
-  html += '</select>';
+  var trimQualityOpts = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' }
+  ];
+  html += renderCustomSelectHtml('ge-trim-quality-wrap', 'ge-trim-quality', trimQualityOpts, 'medium', null, 'width:100%;height:32px;');
+  html += '</div>';
   html += '</div>';
   html += '</div>';
 
@@ -728,9 +797,11 @@ function _renderVideoSubtitleForm() {
   html += '</div>';
   html += '<div class="gallery-edit-row">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geContainer')) + '</label>';
-  html += '<select class="pg-param-row-select" id="ge-sub-container">';
-  html += '<option value="mkv" selected>MKV</option><option value="mp4">MP4</option>';
-  html += '</select>';
+  var subContainerOpts = [
+    { value: 'mkv', label: 'MKV' },
+    { value: 'mp4', label: 'MP4' }
+  ];
+  html += renderCustomSelectHtml('ge-sub-container-wrap', 'ge-sub-container', subContainerOpts, 'mkv', null, 'width:120px;height:32px;');
   html += '</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;text-align:right">' + escapeHtml(T('geSoftSubNote')) + '</div>';
   html += '</div>';
@@ -797,28 +868,32 @@ function _buildModalHTML() {
     html += _renderVideoTranscodeForm();
     html += '</div>';
 
-    // Block 2: Trim (Optional section with toggle checkbox)
+    // Block 2: Trim (Optional section with toggle switch)
     html += '<div class="gallery-edit-block">';
     html += '<div class="gallery-edit-block-title">';
-    html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
-    html += '<input type="checkbox" id="ge-vid-trim-enable"> ';
+    html += '<div style="display:inline-flex;align-items:center;gap:8px">';
+    html += '<label class="toggle-switch" for="ge-vid-trim-enable" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-vid-trim-enable"><span class="toggle-slider"></span></label>';
+    html += '<label for="ge-vid-trim-enable" style="display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--text);cursor:pointer;user-select:none;margin:0">';
     html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><line x1="20" y1="4" x2="8.12" y2="15.88"></line><line x1="14.47" y1="14.48" x2="20" y2="20"></line><line x1="8.12" y1="8.12" x2="12" y2="12"></line></svg>';
     html += '<span>' + escapeHtml(T('geTrimTab')) + '</span>';
     html += '</label>';
+    html += '</div>';
     html += '</div>';
     html += '<div id="ge-vid-trim-body" style="display:none;margin-top:10px">';
     html += _renderVideoTrimForm();
     html += '</div>';
     html += '</div>';
 
-    // Block 3: Subtitle (Optional section with toggle checkbox)
+    // Block 3: Subtitle (Optional section with toggle switch)
     html += '<div class="gallery-edit-block">';
     html += '<div class="gallery-edit-block-title">';
-    html += '<label class="gallery-edit-check" style="margin:0;font-weight:600;color:var(--text)">';
-    html += '<input type="checkbox" id="ge-vid-sub-enable"> ';
+    html += '<div style="display:inline-flex;align-items:center;gap:8px">';
+    html += '<label class="toggle-switch" for="ge-vid-sub-enable" style="margin:0;cursor:pointer"><input type="checkbox" id="ge-vid-sub-enable"><span class="toggle-slider"></span></label>';
+    html += '<label for="ge-vid-sub-enable" style="display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--text);cursor:pointer;user-select:none;margin:0">';
     html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
     html += '<span>' + escapeHtml(T('geSubtitleTab')) + '</span>';
     html += '</label>';
+    html += '</div>';
     html += '</div>';
     html += '<div id="ge-vid-sub-body" style="display:none;margin-top:10px">';
     html += _renderVideoSubtitleForm();
@@ -1341,12 +1416,40 @@ function _bindModalEvents() {
     if (!loopSel) return;
     var isGifFmt = vidFormat && vidFormat.value === 'gif';
     var prevVal = loopSel.value || 'infinite';
-    var html = '<option value="infinite">' + escapeHtml(T('geLoopInfinite')) + '</option>';
-    if (isGifFmt) html += '<option value="once">' + escapeHtml(T('geLoopOnce')) + '</option>';
-    html += '<option value="n">' + escapeHtml(T('geLoopRepeatN')) + '</option>';
-    loopSel.innerHTML = html;
-    loopSel.value = (prevVal === 'once' && !isGifFmt) ? 'infinite' : prevVal;
-    if (loopN) loopN.style.display = (loopSel.value === 'n') ? '' : 'none';
+    var nextVal = (prevVal === 'once' && !isGifFmt) ? 'infinite' : prevVal;
+
+    var items = [
+      { value: 'infinite', label: T('geLoopInfinite') }
+    ];
+    if (isGifFmt) items.push({ value: 'once', label: T('geLoopOnce') });
+    items.push({ value: 'n', label: T('geLoopRepeatN') });
+
+    var wrap = document.getElementById('ge-vid-anim-loop-mode-wrap');
+    if (wrap) {
+      var selHtml = '';
+      var menuHtml = '';
+      var activeLabel = '';
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var isSel = (it.value === nextVal);
+        if (isSel) activeLabel = it.label;
+        selHtml += '<option value="' + it.value + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(it.label) + '</option>';
+        menuHtml += '<div class="custom-select-option' + (isSel ? ' selected' : '') + '" data-value="' + it.value + '" onclick="selectCustomOption(\'ge-vid-anim-loop-mode-wrap\', \'' + it.value + '\', \'' + escapeHtml(it.label).replace(/'/g, "\\'") + '\')">' + escapeHtml(it.label) + '</div>';
+      }
+      var selectEl = wrap.querySelector('select');
+      var menuEl = wrap.querySelector('.custom-select-menu');
+      var labelEl = wrap.querySelector('.custom-select-label');
+      if (selectEl) { selectEl.innerHTML = selHtml; selectEl.value = nextVal; }
+      if (menuEl) { menuEl.innerHTML = menuHtml; }
+      if (labelEl) { labelEl.textContent = activeLabel; }
+    } else {
+      var html = '<option value="infinite">' + escapeHtml(T('geLoopInfinite')) + '</option>';
+      if (isGifFmt) html += '<option value="once">' + escapeHtml(T('geLoopOnce')) + '</option>';
+      html += '<option value="n">' + escapeHtml(T('geLoopRepeatN')) + '</option>';
+      loopSel.innerHTML = html;
+      loopSel.value = nextVal;
+    }
+    if (loopN) loopN.style.display = (nextVal === 'n') ? '' : 'none';
   }
 
   function _updateVidCodecUI() {
@@ -1365,6 +1468,15 @@ function _bindModalEvents() {
       var sel = vidFormat.value;
       if (sel !== 'gif' && sel !== 'webp' && allowed && allowed.indexOf(sel) < 0) {
         vidFormat.value = allowed[0];
+        vidFormat.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      var fWrap = document.getElementById('ge-vid-format-wrap');
+      if (fWrap && vidFormat) {
+        var selOpt = vidFormat.selectedOptions ? vidFormat.selectedOptions[0] : null;
+        if (selOpt) {
+          var lbl = fWrap.querySelector('.custom-select-label');
+          if (lbl) lbl.textContent = selOpt.textContent;
+        }
       }
     }
     _updateVidFormatUI();

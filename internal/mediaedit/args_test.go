@@ -796,3 +796,68 @@ func TestBuildVideoAnimTrimArgs_Invalid(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildImageTranscodeArgs_FitTo(t *testing.T) {
+	// Standard FitTo
+	params := ImageTranscodeParams{Format: "webp", Quality: 85, FitTo: 1920}
+	raw, _ := json.Marshal(params)
+	args, desc, ext, err := BuildImageTranscodeArgs("/tmp/photo.jpg", raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ext != ".webp" {
+		t.Errorf("expected ext .webp, got %s", ext)
+	}
+	if desc != "webp_q85_fit1920" {
+		t.Errorf("expected desc webp_q85_fit1920, got %s", desc)
+	}
+	expectedVf := "scale='if(gte(iw,ih),1920,-2)':'if(gte(iw,ih),-2,1920)'"
+	foundVf := false
+	for i, a := range args {
+		if a == "-vf" && i+1 < len(args) && args[i+1] == expectedVf {
+			foundVf = true
+			break
+		}
+	}
+	if !foundVf {
+		t.Errorf("expected -vf %s in args: %v", expectedVf, args)
+	}
+
+	// FitTo with odd value: rounded down to even
+	paramsOdd := ImageTranscodeParams{Format: "png", FitTo: 1921}
+	rawOdd, _ := json.Marshal(paramsOdd)
+	argsOdd, _, _, errOdd := BuildImageTranscodeArgs("/tmp/photo.jpg", rawOdd)
+	if errOdd != nil {
+		t.Fatalf("unexpected error: %v", errOdd)
+	}
+	foundOddVf := false
+	for i, a := range argsOdd {
+		if a == "-vf" && i+1 < len(argsOdd) && argsOdd[i+1] == expectedVf {
+			foundOddVf = true
+			break
+		}
+	}
+	if !foundOddVf {
+		t.Errorf("expected -vf %s for odd FitTo in args: %v", expectedVf, argsOdd)
+	}
+
+	// FitTo takes precedence over ScalePercent
+	paramsPrecedence := ImageTranscodeParams{Format: "jpeg", ScalePercent: 50, FitTo: 1024}
+	rawPrec, _ := json.Marshal(paramsPrecedence)
+	argsPrec, _, _, errPrec := BuildImageTranscodeArgs("/tmp/photo.png", rawPrec)
+	if errPrec != nil {
+		t.Fatalf("unexpected error: %v", errPrec)
+	}
+	expectedPrecVf := "scale='if(gte(iw,ih),1024,-2)':'if(gte(iw,ih),-2,1024)'"
+	foundPrecVf := false
+	for i, a := range argsPrec {
+		if a == "-vf" && i+1 < len(argsPrec) && argsPrec[i+1] == expectedPrecVf {
+			foundPrecVf = true
+			break
+		}
+	}
+	if !foundPrecVf {
+		t.Errorf("expected FitTo to take precedence over ScalePercent in args: %v", argsPrec)
+	}
+}
+

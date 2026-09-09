@@ -38,8 +38,18 @@ func BuildImageTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 
 	args := []string{"-i", inputPath}
 
-	// Scale filter.
-	if p.ScalePercent != 100 && p.ScalePercent > 0 {
+	// Scale / Fit to filter.
+	if p.FitTo > 0 {
+		target := p.FitTo
+		if target%2 != 0 {
+			target--
+		}
+		if target < 2 {
+			target = 2
+		}
+		vf := fmt.Sprintf("scale='if(gte(iw,ih),%d,-2)':'if(gte(iw,ih),-2,%d)'", target, target)
+		args = append(args, "-vf", vf)
+	} else if p.ScalePercent != 100 && p.ScalePercent > 0 {
 		ratio := float64(p.ScalePercent) / 100.0
 		vf := fmt.Sprintf("scale='trunc(iw*%g/2)*2':'trunc(ih*%g/2)*2'", ratio, ratio)
 		args = append(args, "-vf", vf)
@@ -70,6 +80,9 @@ func BuildImageTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 	desc := strings.ToLower(p.Format)
 	if p.Quality > 0 {
 		desc = fmt.Sprintf("%s_q%d", desc, p.Quality)
+	}
+	if p.FitTo > 0 {
+		desc = fmt.Sprintf("%s_fit%d", desc, p.FitTo)
 	}
 
 	return args, desc, ext, nil

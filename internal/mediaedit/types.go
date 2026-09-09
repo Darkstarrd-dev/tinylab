@@ -90,9 +90,10 @@ type StartRequest struct {
 
 // ImageTranscodeParams holds options for the image_transcode operation.
 type ImageTranscodeParams struct {
-	Format        string `json:"format"`       // "jpeg"|"png"|"webp"|"bmp"|"tiff"|"gif"
-	Quality       int    `json:"quality"`      // 0-100
-	ScalePercent  int    `json:"scalePercent"` // 10-200; 100=original; 0 means 100
+	Format        string `json:"format"`          // "jpeg"|"png"|"webp"|"bmp"|"tiff"|"gif"
+	Quality       int    `json:"quality"`         // 0-100
+	ScalePercent  int    `json:"scalePercent"`    // 10-200; 100=original; 0 means 100
+	FitTo         int    `json:"fitTo,omitempty"` // if > 0, scale so that the longer side is fitTo (preserving aspect ratio)
 	StripMetadata bool   `json:"stripMetadata"`
 }
 
