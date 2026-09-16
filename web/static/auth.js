@@ -138,7 +138,9 @@ async function handleLogin() {
 
 async function handleExitApp() {
   try { await fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch(e) {}
-  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><h2>TinyLab</h2><p class="muted">Stopped</p></div></div>';
+  // height:100% (not 100vh) — viewport units are multiplied by the global UI
+  // zoom (zoom.js sets html{zoom}), so 100vh would under-fill the window.
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%"><div style="text-align:center"><h2>TinyLab</h2><p class="muted">Stopped</p></div></div>';
 }
 
 function setupHeaderResponsive() {

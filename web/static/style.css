@@ -375,7 +375,10 @@
    --------------------------------------------------------------------- */
 html,body{height:100%}
 body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);background-attachment:fixed;background-size:cover;color:var(--text);font-size:var(--font-base);line-height:1.55;-webkit-font-smoothing:antialiased}
-.app{display:flex;flex-direction:column;width:100%;height:100vh;overflow:hidden}
+/* 100% (not 100vh): the global UI zoom (zoom.js) multiplies viewport units,
+   so a vh-sized shell under-fills the window at zoom != 1 on pages without
+   the playground.css `html,body,.app{height:100%!important}` override. */
+.app{display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden}
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:rgba(128,128,128,0.20);border-radius:3px}
