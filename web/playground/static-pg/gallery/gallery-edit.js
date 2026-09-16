@@ -1790,6 +1790,20 @@ window.triggerMediaEditor = function(mediaType) {
     return;
   }
 
+  // Server-resolvable inputs need no client-side materialization: openMediaEditor
+  // probes and starts jobs by assetId/grantId server-side, so open the modal
+  // immediately. Downloading the whole file via getBlob() + re-uploading it to
+  // /edit/upload-temp BEFORE the modal opens makes open latency scale with file
+  // size (very visible for large videos); the modal itself performs no file op.
+  // Zip entries (kind 'zip') are excluded: a single entry must still be
+  // extracted server-side via /edit/extract-zip-entry below.
+  if (item.assetId || (item.grantId && item.kind !== 'zip')) {
+    if (typeof window.openMediaEditor === 'function') {
+      window.openMediaEditor(item, mediaType);
+    }
+    return;
+  }
+
   // Zip items: extract to temp file via backend, then open editor. Archive-
   // source items (sourceId) resolve through the /api/archive bridge; legacy
   // sessions/on-disk zips keep zipAbsPath/sessionId.

@@ -261,6 +261,27 @@ async function main() {
     assert.deepStrictEqual(plain(viaGrant), { inputGrantId: 'g9', inputRel: 'd.png' });
   });
 
+  // ---- 7b. triggerMediaEditor: grantId video opens without upload ------
+  // Regression: triggerMediaEditor used to route every non-absPath item with
+  // getBlob through a full download + POST /edit/upload-temp BEFORE the modal
+  // opened, so open latency scaled with file size. Backend-grant items are
+  // server-resolvable (openMediaEditor probes/starts by grantId), so they
+  // must pass straight through to openMediaEditor with zero fetches.
+  await check('triggerMediaEditor opens grantId video without upload-temp', async () => {
+    const { sandbox, calls } = makeEnv();
+    loadFiles(sandbox);
+    sandbox.openMediaEditor = capturedOpenMediaEditor(calls);
+    const item = { kind: 'backend', name: 'big.mp4', grantId: 'g1', rel: 'big.mp4', size: 67108864, getBlob: function () { throw new Error('getBlob must not be called for grantId items'); } };
+    sandbox.galleryState = { mediaType: 'video', items: [], index: -1, videoItems: [item], videoIndex: 0 };
+    await sandbox.triggerMediaEditor('video');
+    await waitFor(function () { return calls.opened.length > 0; }, 'openMediaEditor call');
+    assert.strictEqual(calls.opened.length, 1, 'openMediaEditor must be called once');
+    assert.strictEqual(calls.opened[0].item, item, 'grantId item must pass through unmodified');
+    assert.strictEqual(calls.opened[0].mediaType, 'video');
+    assert(!calls.fetches.some(function (f) { return f.url.indexOf('/edit/upload-temp') !== -1; }), 'upload-temp must not be fetched before the modal opens');
+    assert(!calls.fetches.some(function (f) { return f.url.indexOf('/api/gallery/file') !== -1; }), 'file download must not happen before the modal opens');
+  });
+
   // ---- 8. no backend response ever carries tempPath ------------------
   await check('backend stub only ever returns assetId (tempPath removed)', async () => {
     // The stubbed backend in makeEnv returns exactly the real handler shape;
