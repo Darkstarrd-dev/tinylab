@@ -208,6 +208,75 @@ func TestBuildVideoTranscodeArgs_VP9(t *testing.T) {
 	}
 }
 
+func TestBuildVideoTranscodeArgs_AudioOnlyMP3(t *testing.T) {
+	params := VideoTranscodeParams{Container: "mp3", AudioBitrate: "192k"}
+	raw, _ := json.Marshal(params)
+	args, desc, ext, err := BuildVideoTranscodeArgs("/tmp/video.mkv", raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ext != ".mp3" {
+		t.Errorf("expected ext .mp3, got %s", ext)
+	}
+	if desc != "audio_mp3" {
+		t.Errorf("expected desc audio_mp3, got %s", desc)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-vn", "-c:a", "libmp3lame", "-b:a", "192k"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected args to contain %q, got %q", want, joined)
+		}
+	}
+	for _, a := range args {
+		if a == "-c:v" {
+			t.Errorf("audio-only transcode must not set a video codec, got %q", joined)
+		}
+	}
+}
+
+func TestBuildVideoTranscodeArgs_AudioOnlyWAV(t *testing.T) {
+	params := VideoTranscodeParams{Container: "wav"}
+	raw, _ := json.Marshal(params)
+	args, _, ext, err := BuildVideoTranscodeArgs("/tmp/video.mp4", raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ext != ".wav" {
+		t.Errorf("expected ext .wav, got %s", ext)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-vn") {
+		t.Errorf("expected -vn, got %q", joined)
+	}
+	if !strings.Contains(joined, "pcm_s16le") {
+		t.Errorf("expected pcm_s16le, got %q", joined)
+	}
+	if strings.Contains(joined, "-b:a") {
+		t.Errorf("lossless wav must not set a bitrate, got %q", joined)
+	}
+}
+
+func TestBuildVideoTranscodeArgs_AudioOnlyMismatch(t *testing.T) {
+	params := VideoTranscodeParams{Container: "mp3", AudioCodec: "aac"}
+	raw, _ := json.Marshal(params)
+	_, _, _, err := BuildVideoTranscodeArgs("/tmp/video.mp4", raw)
+	if err == nil {
+		t.Fatal("expected error for aac+mp3")
+	}
+	if !strings.Contains(err.Error(), "not compatible") {
+		t.Errorf("expected compatibility error, got: %v", err)
+	}
+}
+
+func TestBuildVideoTranscodeArgs_AudioOnlyNoneRejected(t *testing.T) {
+	params := VideoTranscodeParams{Container: "flac", AudioCodec: "none"}
+	raw, _ := json.Marshal(params)
+	_, _, _, err := BuildVideoTranscodeArgs("/tmp/video.mp4", raw)
+	if err == nil {
+		t.Fatal("expected error for none+flac")
+	}
+}
+
 func TestBuildVideoTrimArgs_Copy(t *testing.T) {
 	params := VideoTrimParams{
 		Start: "00:01:30", Duration: "60", Reencode: false,

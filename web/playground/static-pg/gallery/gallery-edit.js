@@ -472,10 +472,17 @@ function _renderVideoTranscodeForm() {
   var w = probe.width || 0, h = probe.height || 0;
   var fmt = _geVidFormat || 'mp4';
   var isAnimFmt = (fmt === 'gif' || fmt === 'webp');
-  var codecColHide = isAnimFmt ? ' style="display:none"' : '';
+  var isAudioFmt = (fmt === 'mp3' || fmt === 'm4a' || fmt === 'ogg' || fmt === 'opus' || fmt === 'wav' || fmt === 'flac');
+  if (isAudioFmt) { isAnimFmt = false; }
+  var codecColHide = (isAnimFmt || isAudioFmt) ? ' style="display:none"' : '';
   var animBlockHide = isAnimFmt ? '' : ' style="display:none"';
   var gifOptsHide = (fmt === 'gif') ? '' : ' style="display:none"';
   var webpOptsHide = (fmt === 'webp') ? '' : ' style="display:none"';
+  // Audio-only formats (audio track extraction): no video codec/quality/
+  // scale params; the audio row stays visible. _bindModalEvents re-applies
+  // the same visibility via _updateVidFormatUI, these inline flags only
+  // avoid a visible flash on first paint.
+  var audioHide = isAudioFmt ? ' style="display:none"' : '';
 
   var html = '';
 
@@ -497,6 +504,7 @@ function _renderVideoTranscodeForm() {
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geFormat')) + '</label>';
   var formats = [
     { value: 'mp4', label: 'MP4' }, { value: 'mkv', label: 'MKV' }, { value: 'webm', label: 'WebM' }, { value: 'mov', label: 'MOV' },
+    { value: 'mp3', label: 'MP3' }, { value: 'm4a', label: 'M4A' }, { value: 'ogg', label: 'OGG' }, { value: 'opus', label: 'OPUS' }, { value: 'wav', label: 'WAV' }, { value: 'flac', label: 'FLAC' },
     { value: 'gif', label: T('geFormatGif') }, { value: 'webp', label: T('geFormatWebp') }
   ];
   html += renderCustomSelectHtml('ge-vid-format-wrap', 'ge-vid-format', formats, fmt, null, 'width:100%;height:32px;');
@@ -509,7 +517,7 @@ function _renderVideoTranscodeForm() {
   html += '</div>';
 
   // Row 2: Quality + Preset (two columns)
-  html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-quality-preset-row">';
+  html += '<div class="gallery-edit-row ge-two-col-row" id="ge-vid-quality-preset-row"' + audioHide + '>';
   html += '<div class="ge-col-half">';
   html += '<label class="gallery-edit-label">' + escapeHtml(T('geQualityTier')) + '</label>';
   var vidQualityOpts = [
@@ -540,6 +548,8 @@ function _renderVideoTranscodeForm() {
     { value: 'aac', label: 'AAC' },
     { value: 'opus', label: 'Opus' },
     { value: 'mp3', label: 'MP3' },
+    { value: 'flac', label: 'FLAC' },
+    { value: 'wav', label: 'WAV' },
     { value: 'copy', label: 'Copy' },
     { value: 'none', label: 'None' }
   ];
@@ -554,7 +564,7 @@ function _renderVideoTranscodeForm() {
   html += '</div>';
 
   // Row 4: Scale + Dims + Strip metadata (video formats only)
-  html += '<div class="gallery-edit-row" id="ge-vid-scale-row" style="align-items:center">';
+  html += '<div class="gallery-edit-row" id="ge-vid-scale-row"' + (isAudioFmt ? ' style="align-items:center;display:none"' : ' style="align-items:center"') + '>';
   html += '<label class="gallery-edit-label" style="width:auto;margin:0">' + escapeHtml(T('geScalePercent')) + '</label>';
   html += '<input type="range" id="ge-vid-scale" min="10" max="200" value="100" style="width:130px">';
   html += '<span class="gallery-edit-val" id="ge-vid-scale-val" style="min-width:36px">100%</span>';
@@ -1393,19 +1403,111 @@ function _bindModalEvents() {
     return vidFormat && (vidFormat.value === 'gif' || vidFormat.value === 'webp');
   }
 
+  // _isAudioFormat reports whether the selected output is audio-only
+  // (audio track extraction: mp3/m4a/ogg/opus/wav/flac). Audio formats hide
+  // the video codec/quality/scale rows and the animated-param block, keep
+  // the audio row visible, and auto-select the matching audio codec.
+  function _isAudioFormat() {
+    if (!vidFormat) return false;
+    var v = vidFormat.value;
+    return v === 'mp3' || v === 'm4a' || v === 'ogg' || v === 'opus' || v === 'wav' || v === 'flac';
+  }
+
+  // _nativeAudioCodec maps each audio-only container to its native encoder,
+  // mirroring the backend audioNativeCodec map in internal/mediaedit/args.go.
+  function _nativeAudioCodec(fmt) {
+    switch (fmt) {
+      case 'mp3': return 'mp3';
+      case 'm4a': return 'aac';
+      case 'ogg': return 'opus';
+      case 'opus': return 'opus';
+      case 'wav': return 'wav';
+      case 'flac': return 'flac';
+      default: return 'aac';
+    }
+  }
+
+  // _syncAudioCodecOptions filters the audio-codec select by container and
+  // auto-selects the container default (native encoder, except 'copy' which
+  // keeps whatever the select already holds). Bitrate encodes only for
+  // lossy encoders; flac/wav hide the bitrate column.
+  function _syncAudioCodecOptions() {
+    if (!vidFormat) return;
+    var fmtVal = vidFormat.value;
+    var audioCodec = document.getElementById('ge-vid-audio-codec');
+    var bitrateCol = null;
+    var bitrateSel = document.getElementById('ge-vid-audio-bitrate');
+    if (bitrateSel) {
+      var row = document.getElementById('ge-vid-audio-row');
+      var halves = row ? row.querySelectorAll('.ge-col-half') : [];
+      bitrateCol = halves.length > 1 ? halves[1] : null;
+    }
+    if (!_isAudioFormat()) {
+      // Video containers: restore every codec option first (an earlier
+      // audio-only selection may have hidden the non-native ones), then
+      // only toggle the bitrate column for lossless codecs.
+      if (audioCodec) {
+        var allOpts = audioCodec.querySelectorAll('option');
+        for (var k = 0; k < allOpts.length; k++) {
+          allOpts[k].style.display = '';
+        }
+      }
+      // Video containers: lossless codecs have no bitrate either.
+      if (audioCodec && audioCodec.value !== 'copy' && audioCodec.value !== 'none') {
+        var hide = (audioCodec.value === 'flac' || audioCodec.value === 'wav');
+        if (bitrateCol) bitrateCol.style.display = hide ? 'none' : '';
+      } else if (bitrateCol) {
+        bitrateCol.style.display = '';
+      }
+      return;
+    }
+    var native = _nativeAudioCodec(fmtVal);
+    var allowed = [native, 'copy'];
+    if (audioCodec) {
+      var opts = audioCodec.querySelectorAll('option');
+      for (var i = 0; i < opts.length; i++) {
+        var v = opts[i].value;
+        opts[i].style.display = (allowed.indexOf(v) >= 0) ? '' : 'none';
+      }
+      if (allowed.indexOf(audioCodec.value) < 0) {
+        audioCodec.value = native;
+        audioCodec.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      var wrap = document.getElementById('ge-vid-audio-codec-wrap');
+      if (wrap && audioCodec) {
+        var selOpt = audioCodec.selectedOptions ? audioCodec.selectedOptions[0] : null;
+        if (selOpt) {
+          var lbl = wrap.querySelector('.custom-select-label');
+          if (lbl) lbl.textContent = selOpt.textContent;
+        }
+      }
+    }
+    // Lossless outputs (wav/flac) carry no bitrate; copy never re-encodes.
+    if (bitrateCol) {
+      var cur = audioCodec ? audioCodec.value : native;
+      bitrateCol.style.display = (cur === 'wav' || cur === 'flac' || cur === 'copy') ? 'none' : '';
+    }
+  }
+
   // Visibility authority for the transcode form: animated formats hide the
-  // video codec/preset/audio/scale rows and show the animated-param block.
+  // video codec/preset/audio/scale rows and show the animated-param block;
+  // audio-only formats hide video codec/quality/scale + anim block and keep
+  // the audio row visible.
   function _updateVidFormatUI() {
     if (!vidFormat) return;
     var isAnim = _isAnimFormat();
+    var isAudio = _isAudioFormat();
     var c = vidCodec ? vidCodec.value : 'h264';
-    if (vidCodecCol) vidCodecCol.style.display = isAnim ? 'none' : '';
-    if (vidQualityPresetRow) vidQualityPresetRow.style.display = (isAnim || c === 'copy') ? 'none' : '';
-    if (vidAudioRow) vidAudioRow.style.display = (isAnim || c === 'copy') ? 'none' : '';
-    if (vidScaleRow) vidScaleRow.style.display = isAnim ? 'none' : '';
-    if (vidAnimBlock) vidAnimBlock.style.display = isAnim ? '' : 'none';
+    if (vidCodecCol) vidCodecCol.style.display = (isAnim || isAudio) ? 'none' : '';
+    if (vidQualityPresetRow) vidQualityPresetRow.style.display = (isAnim || isAudio || c === 'copy') ? 'none' : '';
+    // copy = remux (server ignores audio params); animated = no audio track;
+    // audio-only keeps the row for codec/bitrate selection.
+    if (vidAudioRow) vidAudioRow.style.display = (isAnim || (!isAudio && c === 'copy')) ? 'none' : '';
+    if (vidScaleRow) vidScaleRow.style.display = (isAnim || isAudio) ? 'none' : '';
+    if (vidAnimBlock) vidAnimBlock.style.display = (isAnim && !isAudio) ? '' : 'none';
     if (vidAnimGifOpts) vidAnimGifOpts.style.display = (vidFormat.value === 'gif') ? '' : 'none';
     if (vidAnimWebpOpts) vidAnimWebpOpts.style.display = (vidFormat.value === 'webp') ? '' : 'none';
+    _syncAudioCodecOptions();
     _syncAnimLoopOptions();
   }
 
@@ -1455,18 +1557,21 @@ function _bindModalEvents() {
   function _updateVidCodecUI() {
     if (!vidCodec) return;
     var c = vidCodec.value;
-    // Filter video formats by codec; gif/webp are codec-independent and are
-    // never hidden (their availability is decided by _checkFfmpegStatus).
+    // Filter video formats by codec; gif/webp/audio-only are codec-
+    // independent and are never hidden (gif/webp availability is decided by
+    // _checkFfmpegStatus; audio-only needs no video codec at all).
     if (vidFormat) {
       var opts = vidFormat.querySelectorAll('option');
       var allowed = (c === 'copy') ? null : ((c === 'h264' || c === 'h265') ? ['mp4','mkv','mov'] : ['webm','mkv']);
       for (var i = 0; i < opts.length; i++) {
         var v = opts[i].value;
-        opts[i].style.display = (!allowed || allowed.indexOf(v) >= 0 || v === 'gif' || v === 'webp') ? '' : 'none';
+        var isAudioV = (v === 'mp3' || v === 'm4a' || v === 'ogg' || v === 'opus' || v === 'wav' || v === 'flac');
+        opts[i].style.display = (!allowed || allowed.indexOf(v) >= 0 || v === 'gif' || v === 'webp' || isAudioV) ? '' : 'none';
       }
       // Auto-select first allowed video format
       var sel = vidFormat.value;
-      if (sel !== 'gif' && sel !== 'webp' && allowed && allowed.indexOf(sel) < 0) {
+      var selIsAudio = (sel === 'mp3' || sel === 'm4a' || sel === 'ogg' || sel === 'opus' || sel === 'wav' || sel === 'flac');
+      if (sel !== 'gif' && sel !== 'webp' && !selIsAudio && allowed && allowed.indexOf(sel) < 0) {
         vidFormat.value = allowed[0];
         vidFormat.dispatchEvent(new Event('change', { bubbles: true }));
       }
@@ -1486,6 +1591,8 @@ function _bindModalEvents() {
     vidFormat.onchange = function() { _geVidFormat = vidFormat.value; _updateVidFormatUI(); };
   }
   if (vidCodec) { vidCodec.onchange = _updateVidCodecUI; }
+  var vidAudioCodec = document.getElementById('ge-vid-audio-codec');
+  if (vidAudioCodec) { vidAudioCodec.onchange = function() { _syncAudioCodecOptions(); }; }
   _updateVidCodecUI();
   _updateVidFormatUI();
 

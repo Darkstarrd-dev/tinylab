@@ -100,11 +100,11 @@ type ImageTranscodeParams struct {
 // VideoTranscodeParams holds options for the video_transcode operation.
 type VideoTranscodeParams struct {
 	Codec         string `json:"codec"`        // "h264"|"h265"|"vp9"|"av1"|"copy"
-	Container     string `json:"container"`    // "mp4"|"mkv"|"webm"|"mov"
+	Container     string `json:"container"`    // "mp4"|"mkv"|"webm"|"mov"|"mp3"|"m4a"|"ogg"|"opus"|"wav"|"flac" (last six are audio-only: video stream dropped with -vn)
 	QualityTier   string `json:"qualityTier"`  // "high"|"medium"|"low"
 	Preset        string `json:"preset"`       // "ultrafast"|"fast"|"medium"|"slow"|"veryslow"
 	ScalePercent  int    `json:"scalePercent"` // 100=original
-	AudioCodec    string `json:"audioCodec"`   // "aac"|"opus"|"mp3"|"copy"|"none"
+	AudioCodec    string `json:"audioCodec"`   // "aac"|"opus"|"mp3"|"flac"|"wav"|"copy"|"none"
 	AudioBitrate  string `json:"audioBitrate"` // e.g. "128k"
 	StripMetadata bool   `json:"stripMetadata"`
 }

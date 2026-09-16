@@ -431,6 +431,22 @@ func mimeForGallery(name string) string {
 		return "video/mp4"
 	case ".webm":
 		return "video/webm"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mov":
+		return "video/quicktime"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a":
+		return "audio/mp4"
+	case ".ogg":
+		return "audio/ogg"
+	case ".opus":
+		return "audio/opus"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
 	case ".zip":
 		return "application/zip"
 	default:

@@ -360,6 +360,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-btn-row{display:flex;gap:6px;flex-wrap:wrap}
 .pg-btn{padding:6px 12px;font-size:var(--font-badge);border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;transition:all var(--transition-fast)}
 .pg-btn:hover{background:var(--glass-hover);border-color:var(--glass-border-hover)}
+.pg-btn:focus,.pg-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .pg-btn.active{background:var(--accent);color:var(--text-on-accent);border-color:var(--accent)}
 .pg-btn:disabled,.pg-btn.disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
 .pg-btn.danger:hover{border-color:var(--danger);color:var(--danger)}

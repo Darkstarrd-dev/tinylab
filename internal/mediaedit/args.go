@@ -129,6 +129,12 @@ var containerExt = map[string]string{
 	"mkv":  ".mkv",
 	"webm": ".webm",
 	"mov":  ".mov",
+	"mp3":  ".mp3",
+	"m4a":  ".m4a",
+	"ogg":  ".ogg",
+	"opus": ".opus",
+	"wav":  ".wav",
+	"flac": ".flac",
 }
 
 var compatibleCodecs = map[string]map[string]bool{
@@ -136,6 +142,31 @@ var compatibleCodecs = map[string]map[string]bool{
 	"webm": {"vp9": true, "av1": true},
 	"mkv":  {"h264": true, "h265": true, "vp9": true, "av1": true},
 	"mov":  {"h264": true, "h265": true},
+}
+
+// audioNativeCodec maps each audio-only container to its native encoder.
+// isAudioOnlyContainer reports whether a container carries audio only
+// (the video stream is dropped with -vn; the video codec is ignored).
+var audioNativeCodec = map[string]string{
+	"mp3": "mp3", "m4a": "aac", "ogg": "opus",
+	"opus": "opus", "wav": "wav", "flac": "flac",
+}
+
+func isAudioOnlyContainer(c string) bool {
+	_, ok := audioNativeCodec[c]
+	return ok
+}
+
+// compatibleAudioCodecs mirrors compatibleCodecs for audio-only containers:
+// the native encoder or a stream copy. Anything else is rejected with a
+// clear error instead of producing an unplayable file.
+var compatibleAudioCodecs = map[string]map[string]bool{
+	"mp3":  {"mp3": true, "copy": true},
+	"m4a":  {"aac": true, "copy": true},
+	"ogg":  {"opus": true, "copy": true},
+	"opus": {"opus": true, "copy": true},
+	"wav":  {"wav": true, "copy": true},
+	"flac": {"flac": true, "copy": true},
 }
 
 // BuildVideoTranscodeArgs returns the ffmpeg args for video_transcode.
@@ -151,7 +182,11 @@ func BuildVideoTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 		p.Preset = "medium"
 	}
 	if p.AudioCodec == "" {
-		p.AudioCodec = "aac"
+		if native, ok := audioNativeCodec[p.Container]; ok {
+			p.AudioCodec = native
+		} else {
+			p.AudioCodec = "aac"
+		}
 	}
 	if p.AudioBitrate == "" {
 		p.AudioBitrate = "128k"
@@ -166,6 +201,42 @@ func BuildVideoTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 	}
 
 	args := []string{"-i", inputPath}
+
+	// Audio-only containers (audio track extraction): drop the video stream
+	// and encode (or copy) audio only. The video codec is ignored, so this
+	// branch runs before the video remux/compatibility checks below.
+	if isAudioOnlyContainer(p.Container) {
+		if p.AudioCodec == "none" {
+			return nil, "", "", fmt.Errorf("audio-only container %s requires an audio codec", p.Container)
+		}
+		allowed, exists := compatibleAudioCodecs[p.Container]
+		if !exists {
+			return nil, "", "", fmt.Errorf("unknown container: %s", p.Container)
+		}
+		if !allowed[p.AudioCodec] {
+			return nil, "", "", fmt.Errorf("audio codec %s is not compatible with container %s", p.AudioCodec, p.Container)
+		}
+		args = append(args, "-vn")
+		switch p.AudioCodec {
+		case "aac":
+			args = append(args, "-c:a", "aac", "-b:a", p.AudioBitrate)
+		case "opus":
+			args = append(args, "-c:a", "libopus", "-b:a", p.AudioBitrate)
+		case "mp3":
+			args = append(args, "-c:a", "libmp3lame", "-b:a", p.AudioBitrate)
+		case "flac":
+			args = append(args, "-c:a", "flac")
+		case "wav":
+			args = append(args, "-c:a", "pcm_s16le")
+		case "copy":
+			args = append(args, "-c:a", "copy")
+		}
+		if p.StripMetadata {
+			args = append(args, "-map_metadata", "-1")
+		}
+		desc := fmt.Sprintf("audio_%s", p.Container)
+		return args, desc, ext, nil
+	}
 
 	if p.Codec == "copy" {
 		args = append(args, "-c", "copy")
@@ -220,6 +291,10 @@ func BuildVideoTranscodeArgs(inputPath string, raw json.RawMessage) ([]string, s
 		args = append(args, "-c:a", "libopus", "-b:a", p.AudioBitrate)
 	case "mp3":
 		args = append(args, "-c:a", "libmp3lame", "-b:a", p.AudioBitrate)
+	case "flac":
+		args = append(args, "-c:a", "flac")
+	case "wav":
+		args = append(args, "-c:a", "pcm_s16le")
 	case "copy":
 		args = append(args, "-c:a", "copy")
 	case "none":

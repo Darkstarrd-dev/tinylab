@@ -262,7 +262,8 @@ function _startVideoJob() {
       _startVideoTrim();
     }
   } else {
-    // Transcode dispatch: animated formats go to their own operations.
+    // Transcode dispatch: animated formats go to their own operations;
+    // audio-only formats stay on video_transcode (backend -vn audio branch).
     var fmt = document.getElementById('ge-vid-format');
     var format = fmt ? fmt.value : '';
     if (format === 'gif') {
