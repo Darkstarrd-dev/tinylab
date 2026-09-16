@@ -1390,3 +1390,228 @@ async function deleteCurrentQuickSlotModel(orderNum) {
   _qsModalRefresh();
   _qsModalDeleteFocused();
 }
+
+// ===================== QuickSlot Preset Modal =====================
+// 与 Header QuickSlot 弹窗 (.qs-modal) 共享视觉样式，用于管理
+// QuickSlot 配置预设的保存、应用和删除。
+
+// --- 状态 ---
+var _qsPresetModalOverlay = null;
+var _qsPresetList = [];
+var _qsPresetFocusIdx = -1;
+
+// --- 打开弹窗 ---
+async function openQuickSlotPresetModal() {
+  closeQuickSlotPresetModal();
+  try {
+    var data = await apiGet('/quickslots/presets');
+    _qsPresetList = (data && data.presets) || [];
+  } catch (e) {
+    toast(t('loadFailed'), 'error');
+    return;
+  }
+  _qsPresetFocusIdx = _qsPresetList.length > 0 ? 0 : -1;
+  var overlay = document.createElement('div');
+  overlay.className = 'qs-modal-overlay';
+  overlay.id = 'qs-preset-modal-overlay';
+  overlay.innerHTML = _qsPresetBuildHtml();
+  document.body.appendChild(overlay);
+  _qsPresetModalOverlay = overlay;
+  requestAnimationFrame(function() { overlay.classList.add('show'); });
+  // 点击遮罩关闭
+  overlay.addEventListener('mousedown', function(e) {
+    if (e.target === overlay) closeQuickSlotPresetModal();
+  });
+}
+
+// --- 构建 HTML ---
+function _qsPresetBuildHtml() {
+  var html = '<div class="qs-modal">';
+  html += _qsPresetBuildInner();
+  html += '</div>';
+  return html;
+}
+
+function _qsPresetBuildInner() {
+  var html = '<div class="qs-modal-title"><span>' + t('qsPreset') + '</span>' +
+    '<button type="button" class="btn btn-sm" onclick="event.stopPropagation();_qsPresetAdd()" data-tooltip="' + escapeHtml(t('qsPresetNamePrompt')) + '">+</button>' +
+    '</div>';
+  html += '<div class="qs-modal-list">';
+  if (_qsPresetList.length === 0) {
+    html += '<div class="qs-modal-item muted">\u2014</div>';
+  } else {
+    for (var i = 0; i < _qsPresetList.length; i++) {
+      var p = _qsPresetList[i];
+      var slotsCount = (p.slots && p.slots.length) || 0;
+      var cls = 'qs-modal-item' + (i === _qsPresetFocusIdx ? ' focused' : '');
+      html += '<div class="' + cls + '" data-idx="' + i + '" ' +
+        'onclick="_qsPresetItemClick(' + i + ')" ' +
+        'oncontextmenu="event.preventDefault();event.stopPropagation();_qsPresetItemDelete(' + i + ')">' +
+        escapeHtml(p.name) + ' <span class="muted" style="font-size:0.85em">(' + slotsCount + ' slots)</span>' +
+        '</div>';
+    }
+  }
+  html += '</div>';
+  html += '<div class="qs-modal-hint">' + t('qsPresetHint') + '</div>';
+  return html;
+}
+
+// --- 刷新焦点 ---
+function _qsPresetRefresh() {
+  if (!_qsPresetModalOverlay) return;
+  var items = _qsPresetModalOverlay.querySelectorAll('.qs-modal-item');
+  for (var i = 0; i < items.length; i++) {
+    var idx = parseInt(items[i].getAttribute('data-idx'), 10);
+    items[i].classList.toggle('focused', idx === _qsPresetFocusIdx);
+  }
+  var focused = _qsPresetModalOverlay.querySelector('.qs-modal-item.focused');
+  if (focused) focused.scrollIntoView({ block: 'nearest' });
+}
+
+// --- 点击事件 ---
+function _qsPresetItemClick(idx) {
+  _qsPresetFocusIdx = idx;
+  _qsPresetRefresh();
+  _qsPresetApply(idx);
+}
+
+function _qsPresetItemDelete(idx) {
+  _qsPresetFocusIdx = idx;
+  _qsPresetRefresh();
+  _qsPresetDeleteFocused();
+}
+
+// --- 保存当前配置为 Preset ---
+async function _qsPresetAdd() {
+  closeQuickSlotPresetModal();
+  var name = await promptModal(t('qsPresetNamePrompt'), '', t('qsPresetNamePlaceholder'));
+  if (!name) return;
+  try {
+    await apiPost('/quickslots/presets', { name: name });
+    toast(t('qsPresetSaved'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// --- 应用 Preset ---
+async function _qsPresetApply(idx) {
+  var preset = _qsPresetList[idx];
+  if (!preset) return;
+  closeQuickSlotPresetModal();
+  try {
+    await apiPost('/quickslots/presets/apply', { name: preset.name });
+    toast(t('qsPresetApplied', [preset.name]), 'success');
+    renderEndpoint(document.getElementById('page-content'));
+    renderHeaderQuickSlots();
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// --- 删除 Preset ---
+async function _qsPresetDeleteFocused() {
+  if (_qsPresetFocusIdx < 0 || _qsPresetFocusIdx >= _qsPresetList.length) return;
+  var preset = _qsPresetList[_qsPresetFocusIdx];
+  if (!preset) return;
+  closeQuickSlotPresetModal();
+  var ok = await confirmModal(t('qsPresetDeleteConfirm', [preset.name]));
+  if (!ok) return;
+  try {
+    await apiDelete('/quickslots/presets/' + encodeURIComponent(preset.name));
+    toast(t('qsPresetDeleted'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// --- 关闭弹窗 ---
+function closeQuickSlotPresetModal() {
+  if (_qsPresetModalOverlay) {
+    _qsPresetModalOverlay.classList.remove('show');
+    var el = _qsPresetModalOverlay;
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+    _qsPresetModalOverlay = null;
+  }
+  _qsPresetList = [];
+  _qsPresetFocusIdx = -1;
+}
+
+function isQuickSlotPresetModalOpen() {
+  return !!_qsPresetModalOverlay;
+}
+
+// --- 键盘事件 (capture phase) ---
+document.addEventListener('keydown', function(e) {
+  if (!_qsPresetModalOverlay) return;
+  // 如果确认弹窗在上层，让它处理
+  var mainOverlay = document.getElementById('modal-overlay');
+  if (mainOverlay && mainOverlay.classList.contains('show')) return;
+
+  var len = _qsPresetList.length;
+  if (len === 0) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeQuickSlotPresetModal();
+    }
+    return;
+  }
+
+  // 方向键导航
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === 'ArrowDown') {
+      _qsPresetFocusIdx = (_qsPresetFocusIdx + 1) % len;
+    } else {
+      _qsPresetFocusIdx = (_qsPresetFocusIdx - 1 + len) % len;
+    }
+    _qsPresetRefresh();
+    return;
+  }
+  // Enter: 应用
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (_qsPresetFocusIdx >= 0 && _qsPresetFocusIdx < len) {
+      _qsPresetApply(_qsPresetFocusIdx);
+    }
+    return;
+  }
+  // Delete: 删除
+  if (e.key === 'Delete') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    _qsPresetDeleteFocused();
+    return;
+  }
+  // +/=: 添加
+  if (e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    _qsPresetAdd();
+    return;
+  }
+  // Escape: 关闭
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeQuickSlotPresetModal();
+    return;
+  }
+}, true);
+
+// 右键点击遮罩背景关闭
+document.addEventListener('contextmenu', function(e) {
+  if (!_qsPresetModalOverlay) return;
+  var mainOverlay = document.getElementById('modal-overlay');
+  if (mainOverlay && mainOverlay.classList.contains('show')) return;
+  if (_qsPresetModalOverlay.contains(e.target)) {
+    if (!e.target.closest('.qs-modal-item')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeQuickSlotPresetModal();
+    }
+  }
+}, true);

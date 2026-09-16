@@ -239,6 +239,22 @@ type QuickSlot struct {
 	SelectedIndex  int      `yaml:"selectedIndex" json:"selectedIndex"`
 }
 
+// QuickSlotPresetSlot captures the model configuration of a single QuickSlot
+// within a preset snapshot.
+type QuickSlotPresetSlot struct {
+	QsID          string   `yaml:"qsId" json:"qsId"`
+	Models        []string `yaml:"models" json:"models"`
+	SelectedIndex int      `yaml:"selectedIndex" json:"selectedIndex"`
+}
+
+// QuickSlotPreset is a named snapshot of all QuickSlot model configurations.
+// Users can save and restore preset configurations to quickly switch between
+// different model setups across all quick slots.
+type QuickSlotPreset struct {
+	Name  string                `yaml:"name" json:"name"`
+	Slots []QuickSlotPresetSlot `yaml:"slots" json:"slots"`
+}
+
 // SecurityConfig controls password protection for the admin UI.
 type SecurityConfig struct {
 	PasswordEnabled   bool   `yaml:"passwordEnabled" json:"passwordEnabled"`
@@ -439,7 +455,8 @@ type Config struct {
 	QuickSlotOnly      bool             `yaml:"quickSlotOnly" json:"quickSlotOnly"`
 	Providers          []Provider       `yaml:"providers" json:"providers"`
 	Combos             []Combo          `yaml:"combos" json:"combos"`
-	QuickSlots         []QuickSlot      `yaml:"quickSlots" json:"quickSlots"`
+	QuickSlots         []QuickSlot       `yaml:"quickSlots" json:"quickSlots"`
+	QuickSlotPresets   []QuickSlotPreset `yaml:"quickSlotPresets,omitempty" json:"quickSlotPresets,omitempty"`
 	Security           SecurityConfig   `yaml:"security" json:"security"`
 	Proxy              ProxyConfig      `yaml:"proxy" json:"proxy"`
 	Server             ServerConfig     `yaml:"server" json:"server"`

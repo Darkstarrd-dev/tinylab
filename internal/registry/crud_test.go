@@ -409,3 +409,97 @@ func TestAliasAndQuickSlotSanitization(t *testing.T) {
 		t.Errorf("quickslot models not properly sanitized, got: %v", gotQS.Models)
 	}
 }
+
+func TestQuickSlotPresets(t *testing.T) {
+	r := New(crudTestConfig())
+	qs1 := config.QuickSlot{
+		ID:            "qs1",
+		Name:          "QS1",
+		Models:        []string{"p1/m1", "p1/m2"},
+		SelectedIndex: 0,
+	}
+	qs2 := config.QuickSlot{
+		ID:            "qs2",
+		Name:          "QS2",
+		Models:        []string{"p1/m3"},
+		SelectedIndex: 0,
+	}
+	r.AddQuickSlot(qs1)
+	r.AddQuickSlot(qs2)
+
+	// 1. 保存快照为 Preset A
+	r.AddQuickSlotPreset("Preset A")
+	presets := r.ListQuickSlotPresets()
+	if len(presets) != 1 || presets[0].Name != "Preset A" {
+		t.Fatalf("expected 1 preset named 'Preset A', got: %v", presets)
+	}
+	if len(presets[0].Slots) != 2 {
+		t.Fatalf("expected 2 slots in preset, got %d", len(presets[0].Slots))
+	}
+
+	// 2. 修改现有 QuickSlot 配置
+	r.UpdateQuickSlot("qs1", config.QuickSlot{
+		Name:          "QS1",
+		Models:        []string{"p1/m99"},
+		SelectedIndex: 0,
+	})
+	r.UpdateQuickSlot("qs2", config.QuickSlot{
+		Name:          "QS2",
+		Models:        []string{"p1/m88", "p1/m77"},
+		SelectedIndex: 1,
+	})
+
+	// 3. 保存快照为 Preset B
+	r.AddQuickSlotPreset("Preset B")
+	if len(r.ListQuickSlotPresets()) != 2 {
+		t.Fatalf("expected 2 presets, got %d", len(r.ListQuickSlotPresets()))
+	}
+
+	// 4. 应用 Preset A，验证是否恢复
+	if !r.ApplyQuickSlotPreset("Preset A") {
+		t.Fatal("ApplyQuickSlotPreset('Preset A') failed")
+	}
+	got1, _ := r.GetQuickSlot("qs1")
+	if len(got1.Models) != 2 || got1.Models[0] != "p1/m1" || got1.SelectedIndex != 0 {
+		t.Errorf("qs1 not restored properly from Preset A: %+v", got1)
+	}
+	got2, _ := r.GetQuickSlot("qs2")
+	if len(got2.Models) != 1 || got2.Models[0] != "p1/m3" || got2.SelectedIndex != 0 {
+		t.Errorf("qs2 not restored properly from Preset A: %+v", got2)
+	}
+
+	// 5. 应用 Preset B，验证是否切换到 B 的配置
+	if !r.ApplyQuickSlotPreset("Preset B") {
+		t.Fatal("ApplyQuickSlotPreset('Preset B') failed")
+	}
+	got1, _ = r.GetQuickSlot("qs1")
+	if len(got1.Models) != 1 || got1.Models[0] != "p1/m99" {
+		t.Errorf("qs1 not restored properly from Preset B: %+v", got1)
+	}
+	got2, _ = r.GetQuickSlot("qs2")
+	if len(got2.Models) != 2 || got2.SelectedIndex != 1 {
+		t.Errorf("qs2 not restored properly from Preset B: %+v", got2)
+	}
+
+	// 6. 应用不存在的 Preset 应返回 false
+	if r.ApplyQuickSlotPreset("NonExistent") {
+		t.Error("ApplyQuickSlotPreset on non-existent preset should return false")
+	}
+
+	// 7. 同名保存应覆盖
+	r.AddQuickSlotPreset("Preset A")
+	if len(r.ListQuickSlotPresets()) != 2 {
+		t.Errorf("expected 2 presets after overwriting 'Preset A', got %d", len(r.ListQuickSlotPresets()))
+	}
+
+	// 8. 删除 Preset
+	if !r.DeleteQuickSlotPreset("Preset A") {
+		t.Fatal("DeleteQuickSlotPreset('Preset A') failed")
+	}
+	if len(r.ListQuickSlotPresets()) != 1 {
+		t.Errorf("expected 1 preset remaining, got %d", len(r.ListQuickSlotPresets()))
+	}
+	if r.DeleteQuickSlotPreset("Preset A") {
+		t.Error("DeleteQuickSlotPreset on already deleted preset should return false")
+	}
+}

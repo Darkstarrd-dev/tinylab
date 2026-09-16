@@ -98,6 +98,7 @@ async function renderEndpoint(c) {
             <div class="settings-panel-header">\
               <span class="settings-panel-title settings-panel-title-clickable" onclick="toggleSettingsSectionCollapse(\'settings-quickslots\')">' + settingsSectionChevron() + t('quickSlots') + '</span>\
               <span style="display:inline-flex;gap:8px;align-items:center">\
+                <button type="button" class="btn btn-sm" onclick="openQuickSlotPresetModal()">' + t('qsPreset') + '</button>\
                 <button type="button" class="btn btn-sm" data-tooltip="' + escapeHtml(t('cleanupStaleDesc')) + '" onclick="cleanupStaleQuickSlots(this)">' + t('cleanupStale') + '</button>\
                 <button type="button" class="btn btn-primary btn-sm" onclick="showAddQuickSlot()">' + t('addQuickSlot') + '</button>\
               </span>\

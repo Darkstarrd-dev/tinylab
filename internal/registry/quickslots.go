@@ -131,3 +131,99 @@ func (r *Registry) DeleteQuickSlot(id string) bool {
 	}
 	return false
 }
+
+// --- QuickSlot Presets ---
+
+// ListQuickSlotPresets returns all saved QuickSlot presets.
+func (r *Registry) ListQuickSlotPresets() []config.QuickSlotPreset {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	out := make([]config.QuickSlotPreset, len(r.config.QuickSlotPresets))
+	copy(out, r.config.QuickSlotPresets)
+	return out
+}
+
+// AddQuickSlotPreset snapshots the current QuickSlot configurations and saves
+// them as a named preset. If a preset with the same name already exists, it is
+// overwritten.
+func (r *Registry) AddQuickSlotPreset(name string) {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	slots := make([]config.QuickSlotPresetSlot, len(r.config.QuickSlots))
+	for i, qs := range r.config.QuickSlots {
+		models := make([]string, len(qs.Models))
+		copy(models, qs.Models)
+		slots[i] = config.QuickSlotPresetSlot{
+			QsID:          qs.ID,
+			Models:        models,
+			SelectedIndex: qs.SelectedIndex,
+		}
+	}
+	// 覆盖同名 preset
+	for i, p := range r.config.QuickSlotPresets {
+		if p.Name == name {
+			r.config.QuickSlotPresets[i].Slots = slots
+			return
+		}
+	}
+	r.config.QuickSlotPresets = append(r.config.QuickSlotPresets, config.QuickSlotPreset{
+		Name:  name,
+		Slots: slots,
+	})
+}
+
+// DeleteQuickSlotPreset removes a preset by name.
+func (r *Registry) DeleteQuickSlotPreset(name string) bool {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	for i, p := range r.config.QuickSlotPresets {
+		if p.Name == name {
+			r.config.QuickSlotPresets = append(
+				r.config.QuickSlotPresets[:i],
+				r.config.QuickSlotPresets[i+1:]...,
+			)
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyQuickSlotPreset restores QuickSlot model configurations from a named
+// preset. Only QuickSlots whose ID matches a slot in the preset are updated;
+// other QuickSlots remain unchanged. Returns true if the preset was found.
+func (r *Registry) ApplyQuickSlotPreset(name string) bool {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	var preset *config.QuickSlotPreset
+	for i := range r.config.QuickSlotPresets {
+		if r.config.QuickSlotPresets[i].Name == name {
+			preset = &r.config.QuickSlotPresets[i]
+			break
+		}
+	}
+	if preset == nil {
+		return false
+	}
+	// 按 qsId 建索引
+	slotMap := make(map[string]*config.QuickSlotPresetSlot, len(preset.Slots))
+	for i := range preset.Slots {
+		slotMap[preset.Slots[i].QsID] = &preset.Slots[i]
+	}
+	for i := range r.config.QuickSlots {
+		s, ok := slotMap[r.config.QuickSlots[i].ID]
+		if !ok {
+			continue
+		}
+		models := make([]string, len(s.Models))
+		copy(models, s.Models)
+		r.config.QuickSlots[i].Models = models
+		idx := s.SelectedIndex
+		if idx < 0 {
+			idx = 0
+		} else if len(models) > 0 && idx >= len(models) {
+			idx = len(models) - 1
+		}
+		r.config.QuickSlots[i].SelectedIndex = idx
+	}
+	return true
+}

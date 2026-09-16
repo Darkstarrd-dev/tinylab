@@ -30,6 +30,11 @@ func (h *Handler) Register(r chi.Router) {
 	r.Patch("/quickslots/{id}/selectedIndex", h.patchQuickSlotSelectedIndex)
 	r.Delete("/quickslots/{id}", h.deleteQuickSlot)
 	r.Post("/quickslots/cleanup", h.cleanupQuickSlots)
+	// QuickSlot Presets
+	r.Get("/quickslots/presets", h.listQuickSlotPresets)
+	r.Post("/quickslots/presets", h.createQuickSlotPreset)
+	r.Post("/quickslots/presets/apply", h.applyQuickSlotPreset)
+	r.Delete("/quickslots/presets/{name}", h.deleteQuickSlotPreset)
 }
 
 // listQuickSlots returns all configured quickslots.
@@ -144,4 +149,78 @@ func (h *Handler) cleanupQuickSlots(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
+}
+
+// --- QuickSlot Presets ---
+
+// listQuickSlotPresets returns all saved QuickSlot presets.
+// GET /api/quickslots/presets
+func (h *Handler) listQuickSlotPresets(w http.ResponseWriter, r *http.Request) {
+	presets := h.d.Reg.ListQuickSlotPresets()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"presets": presets})
+}
+
+// createQuickSlotPreset snapshots current QuickSlot configs into a named preset.
+// POST /api/quickslots/presets
+func (h *Handler) createQuickSlotPreset(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Name == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	h.d.Reg.AddQuickSlotPreset(req.Name)
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// applyQuickSlotPreset restores QuickSlot configs from a named preset.
+// POST /api/quickslots/presets/apply
+func (h *Handler) applyQuickSlotPreset(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if !h.d.Reg.ApplyQuickSlotPreset(req.Name) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "preset not found")
+		return
+	}
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// deleteQuickSlotPreset removes a preset by name.
+// DELETE /api/quickslots/presets/{name}
+func (h *Handler) deleteQuickSlotPreset(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if !h.d.Reg.DeleteQuickSlotPreset(name) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "preset not found")
+		return
+	}
+	cfg := h.d.Reg.Config()
+	if err := h.d.SaveConfigAndReload(&cfg); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
