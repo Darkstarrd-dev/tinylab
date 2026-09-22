@@ -9,10 +9,15 @@ function pgSend(i, assistantIdx) {
   w.lastProvider = '';
   w.lastKey = '';
   w.pendingContent = '';
+  w.pendingContentLen = 0;
   w.pendingReasoning = '';
   w.pendingSources = [];
   w.reasoningStartedAt = null;
   w.reasoningCompletedAt = null;
+  // A new request always follows the output again: the reader may have scrolled
+  // up while the previous reply was streaming.
+  w.msgsPinned = true;
+  w.thinkingBlockOpen = false;
 
   var lastUser = null;
   if (Array.isArray(body.contents)) {
@@ -147,6 +152,36 @@ function pgApplyChunk(i, data, assistantIdx) {
   }
 }
 
+// pgStreamSplitContent classifies the not-yet-classified suffix of
+// `w.pendingContent` (the text that arrived since the last call) and folds the
+// result into the window's stream accumulators:
+//   w.pendingContentLen — length of the classified content prefix of
+//                         w.pendingContent. Everything before it is already
+//                         routed and must not be re-scanned: re-scanning it
+//                         while a think block is open would move earlier answer
+//                         text into reasoning.
+//   w.pendingContent    — classified content + the unclassified tag tail
+//                         (pgMergeChunk's cumulative-chunk heuristic and the
+//                         live group-chat preview both read this as "the reply
+//                         text so far").
+//   w.pendingReasoning  — accumulated reasoning.
+// Returns { content } — the reply text classified so far.
+function pgStreamSplitContent(w) {
+  var text = String(w.pendingContent || '');
+  var known = w.pendingContentLen || 0;
+  var split = pgSplitStreamReasoning(text.slice(known), w);
+  // Rebuild the buffer as classified content + the still-unclassified tail.
+  // It cannot be `text.slice(0, len)` because tags consumed in this pass are
+  // dropped from the buffer, so the offsets no longer line up.
+  w.pendingContentLen = known + split.content.length;
+  w.pendingContent = text.slice(0, known) + split.content + split.tail;
+  if (split.reasoning) {
+    w.pendingReasoning = w.pendingReasoning ? w.pendingReasoning + split.reasoning : split.reasoning;
+    if (!w.reasoningStartedAt) w.reasoningStartedAt = Date.now();
+  }
+  return { content: w.pendingContent.slice(0, w.pendingContentLen) };
+}
+
 function pgApplySourcesFromObject(i, obj) {
   var w = pgWinAt(i);
   if (!obj || typeof obj !== 'object') return;
@@ -178,17 +213,8 @@ function pgFlushRender(i, assistantIdx) {
     if (!w2.streaming) return;
     var msg = w2.messages[assistantIdx];
     if (!msg) return;
-    var split = pgExtractAllReasoning(w2.pendingContent);
-    if (split.reasoning) {
-      w2.pendingReasoning = w2.pendingReasoning
-        ? w2.pendingReasoning + '\n' + split.reasoning
-        : split.reasoning;
-      w2.pendingContent = split.content;
-      if (!w2.reasoningStartedAt) w2.reasoningStartedAt = Date.now();
-    }
-    if (!w2.pendingContent && w2.pendingReasoning) {
-    }
-    msg.content = w2.pendingContent;
+    var split = pgStreamSplitContent(w2);
+    msg.content = split.content;
     msg.reasoning = w2.pendingReasoning;
     msg.sources = w2.pendingSources.slice();
     if (w2.reasoningStartedAt) {
@@ -201,14 +227,14 @@ function pgFlushRender(i, assistantIdx) {
       }
     }
     msg.status = 'streaming';
-    if (w2.reasoningStartedAt && !w2.reasoningCompletedAt && w2.pendingContent) {
+    if (w2.reasoningStartedAt && !w2.reasoningCompletedAt && msg.content) {
       w2.reasoningCompletedAt = Date.now();
       msg.reasoningCompletedAt = w2.reasoningCompletedAt;
       msg.reasoningDurationMs = w2.reasoningCompletedAt - w2.reasoningStartedAt;
     }
     pgRenderBubble(i, assistantIdx);
     pgRenderDebug();
-    pgScrollBottom(i, assistantIdx);
+    pgScrollBottom(i);
     // Group chat modal live-stream hook (guarded; optional module).
     if (typeof pgGcOnStreamChunk === 'function') {
       pgGcOnStreamChunk(i, assistantIdx);
@@ -323,13 +349,11 @@ function pgFinish(i, assistantIdx) {
   w.abortCtrl = null;
   var msg = w.messages[assistantIdx];
   if (msg) {
-    msg.content = w.pendingContent;
-    msg.reasoning = w.pendingReasoning;
-    msg.sources = w.pendingSources.slice();
-    var split = pgExtractAllReasoning(msg.content);
-    if (split.reasoning) msg.reasoning = (msg.reasoning ? msg.reasoning + '\n\n---\n\n' : '') + split.reasoning;
+    var split = pgStreamSplitContent(w);
     msg.content = split.content;
     if (msg.status !== 'error') msg.status = 'complete';
+    msg.reasoning = w.pendingReasoning;
+    msg.sources = w.pendingSources.slice();
     if (w.reasoningStartedAt && !w.reasoningCompletedAt) {
       w.reasoningCompletedAt = Date.now();
     }
@@ -345,14 +369,15 @@ function pgFinish(i, assistantIdx) {
     }
   }
   w.pendingContent = '';
+  w.pendingContentLen = 0;
   w.pendingReasoning = '';
   w.pendingSources = [];
   w.reasoningStartedAt = null;
   w.reasoningCompletedAt = null;
+  w.thinkingBlockOpen = false;
   if (i === 0) pgSave();
   pgRenderBubble(i, assistantIdx);
   pgRenderDebug();
-  pgScrollBottomReasoning(i, assistantIdx);
   pgUpdateInputBar();
   // Auto chat hook: notify round orchestration (guarded; optional module).
   if (typeof pgAutoChatOnFinish === 'function' && pgState.autoChat && pgState.autoChat.isRunning) {
@@ -369,7 +394,7 @@ function pgFail(i, assistantIdx, errMsg, errorCode) {
   if (msg) {
     msg.error = errMsg;
     if (errorCode) msg.errorCode = errorCode;
-    msg.content = pgTextContent(w.pendingContent) ? w.pendingContent : '';
+    msg.content = pgStreamSplitContent(w).content;
     msg.reasoning = w.pendingReasoning;
     msg.status = 'error';
     if (!msg.completedAt) {

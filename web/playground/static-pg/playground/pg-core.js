@@ -20,7 +20,10 @@ var PG_DEFAULT_CFG = {
   model: '',
   temperature: 0.8,
   topP: 1,
-  maxTokens: 0,
+  // Effective Max Tokens default. The field always displays this value (even
+  // while the parameter toggle is off) so the sent default is visible.
+  maxTokens: 8192,
+  minP: 0.05,
   frequencyPenalty: 0,
   presencePenalty: 0,
   seed: '',
@@ -106,6 +109,7 @@ var PG_DEFAULT_PARAMS = {
   temperature: true,
   topP: true,
   maxTokens: false,
+  minP: false,
   frequencyPenalty: true,
   presencePenalty: true,
   seed: false,
@@ -146,10 +150,19 @@ var PG_ICON_DEBUG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 var PG_ICON_SAVE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>';
 var PG_ICON_RESET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>';
 var PG_ICON_INFO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16"></line><circle cx="12" cy="8" r="0.6" fill="currentColor"></circle></svg>';
+// Expand / fullscreen glyph for the HTML preview header button.
+var PG_ICON_EXPAND = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="M21 3l-7 7"></path><path d="M3 21l7-7"></path></svg>';
 // Text-only zoom (−/reset/+): font-size zoom affecting pg input + bubble text.
 var PG_ICON_ZOOM_OUT  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>';
 var PG_ICON_ZOOM_RESET= '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-1.5-5"></path><path d="M21 3v6h-6"></path><path d="M10 8l-2 4 2 4M14 8l2 4-2 4"></path></svg>';
 var PG_ICON_ZOOM_IN   = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>';
+
+// pgBinIcon returns the animated trash SVG shared with the task queue and the
+// download page (defined by pg-image-tasks.js). Wrapped here so callers in
+// other modules never depend on that module's load order.
+function pgBinIcon() {
+  return typeof pgTaskBinSvg === 'function' ? pgTaskBinSvg() : '✕';
+}
 async function pgSaveMarkdownFile(content, filename) {
   if (!content) return;
   filename = filename || ('search_result_' + Date.now() + '.md');

@@ -3,7 +3,7 @@
 // pgOnModelChange, pgOnProtocolFilter,
 // pgOnParam, pgGetImageSubmitCount, pgOnImageSubmitCount, pgStepImageSubmitCount,
 // pgGetImageConcurrency, pgOnImageConcurrency, pgStepImageConcurrency, pgOnImgSizeSelect,
-// pgOnSystemPrompt, pgOnContextLimit, pgToggleParam, pgOnCustomToggle, pgCustomFormat,
+// pgOpenSystemPromptEditor, pgOnContextLimit, pgToggleParam, pgOnCustomToggle, pgCustomFormat,
 // pgOnInputKey, pgIsEditingTarget, pgInitGlobalShortcuts
 function pgOnImagePromptModel(v) { var w = pgWin(); if (!w) return; w.config.imgPromptModel = v || ''; pgSave(); pgRenderSidebar(); }
 // pgApplyActiveQuickSlot applies the selected quickslot model to the active
@@ -89,12 +89,19 @@ function pgOnProtocolFilter(v) {
   pgRenderPanes();
   pgUpdateInputBar();
 }
-function pgOnParam(name, v) {
+function pgOnParam(name, v, step) {
   var w = pgWin();
   if (!w) return;
+  // Max Tokens has no "unset" value: the field always shows the effective
+  // default (8192) while its toggle is off, so an emptied/zeroed field falls
+  // back to that default instead of displaying 0.
+  if (name === 'maxTokens' && !(v > 0)) v = PG_DEFAULT_CFG.maxTokens;
   w.config[name] = v;
   var valEl = document.getElementById('pg-val-' + name);
-  if (valEl) valEl.textContent = typeof v === 'number' ? v.toFixed(2) : v;
+  if (valEl) valEl.textContent = pgParamValText(v, parseFloat(step));
+  // Number inputs are not reformatted in place; re-render so a clamped field
+  // shows the value that was actually stored.
+  if (name === 'maxTokens') pgRenderSidebar();
   pgSave();
 }
 // Manual Canvas per-submission image count. Value/state seam for the
@@ -172,7 +179,35 @@ function pgOnImgSizeSelect(v) {
   if (row) row.style.display = 'none';
   pgOnParam('imgSize', v);
 }
-function pgOnSystemPrompt(v) { var w = pgWin(); if (w) { w.config.systemPrompt = v; pgSave(); } }
+// pgOpenSystemPromptEditor opens the Editor V2 differ modal for the active
+// window's system prompt — the same window (and the same embed API) the Text
+// Review step-3 "Prompt" button uses. The sidebar box is a read-only preview of
+// the prompt and the click target; saving writes the right pane back into the
+// window config and re-renders the panel, so the box always shows the prompt in
+// effect. `original` is the prompt as of opening, so edits diff against it.
+function pgOpenSystemPromptEditor() {
+  var w = pgWin();
+  if (!w) return;
+  if (typeof window.EditorV2Embed === 'undefined' || !window.EditorV2Embed.openDiffModal) {
+    pgToast(pgT('pgSystemPromptEditorFailed'), 'error');
+    return;
+  }
+  var current = w.config.systemPrompt || '';
+  window.EditorV2Embed.openDiffModal({
+    title: pgT('pgSystemPrompt'),
+    original: current,
+    current: current,
+    filename: 'system-prompt.txt',
+    onSave: function (val) {
+      // Monaco models default to CRLF: keep the stored prompt LF-only so the
+      // preview box, the diff baseline and the sent body all agree.
+      w.config.systemPrompt = String(val == null ? '' : val).replace(/\r\n?/g, '\n');
+      pgSave();
+      pgRenderSidebar();
+      pgToast(pgT('pgSystemPromptSaved'), 'success');
+    }
+  });
+}
 function pgOnContextLimit(v) {
   var w = pgWin();
   if (!w) return;
@@ -223,8 +258,12 @@ function pgOnInputKey(e) {
 
 function pgIsEditingTarget(el) {
   if (!el) return false;
+  if (el.isContentEditable) return true;
   var tag = el.tagName ? el.tagName.toLowerCase() : '';
-  return tag === 'input' || tag === 'textarea' || el.isContentEditable;
+  // A read-only textarea is a preview surface (the system-prompt box opens the
+  // differ editor on click), not a text target: global shortcuts still work.
+  if (tag === 'textarea') return !el.readOnly;
+  return tag === 'input';
 }
 
 function pgInitGlobalShortcuts() {

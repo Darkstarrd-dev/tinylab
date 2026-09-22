@@ -418,8 +418,12 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-bubble pre{background:var(--code-surface);border:1px solid var(--border-strong);border-radius:var(--radius-md);padding:10px 12px;overflow-x:auto;margin:8px 0;position:relative}
 .pg-bubble pre code{background:none;border:none;padding:0;font-size:var(--font-code);line-height:1.5;color:var(--code-text)}
 .pg-bubble pre:hover{border-color:var(--accent)}
+/* Code block copy button. Sits in a wrapper around `pre` (which scrolls
+   horizontally) so it stays pinned to the container's corner. */
+.pg-code-block{position:relative;margin:8px 0}
+.pg-code-block pre{margin:0}
 .pg-code-copy{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px;border-radius:var(--radius-sm);border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-secondary);cursor:pointer;opacity:0;transition:opacity var(--transition-fast)}
-.pg-bubble pre:hover .pg-code-copy{opacity:1}
+.pg-code-block:hover .pg-code-copy{opacity:1}
 .pg-code-copy:hover{background:var(--glass-hover);border-color:var(--accent);color:var(--text)}
 
 /* Message metadata: timing + response duration */
@@ -826,10 +830,17 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 
 /* HTML preview (iframe sandbox) */
 .pg-html-preview{margin:8px 0;border:1px solid var(--glass-border);border-radius:var(--radius-md);overflow:hidden;background:#fff}
-.pg-html-preview-title{padding:4px 10px;font-size:11px;color:var(--text-muted);background:var(--glass-hover);border-bottom:1px solid var(--glass-border)}
+.pg-html-preview-title{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px;font-size:11px;color:var(--text-muted);background:var(--glass-hover);border-bottom:1px solid var(--glass-border)}
+.pg-html-preview-expand{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:2px;border:1px solid transparent;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);cursor:pointer;transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast)}
+.pg-html-preview-expand svg{display:block}
+.pg-html-preview-expand:hover{background:var(--glass-hover);border-color:var(--accent);color:var(--accent)}
 .pg-html-preview iframe{width:100%;border:none;background:#fff;display:block}
-
-/* Mermaid container */
+/* Expanded preview modal: near-fullscreen card with the frame filling the body.
+   Scoped as `.pg-modal.pg-modal…` because the base `.pg-modal` rules are
+   declared later in this file and would otherwise win the width/padding. */
+.pg-modal.pg-html-preview-modal{width:1100px;max-width:94vw;height:88vh;min-width:0}
+.pg-modal.pg-html-preview-modal .pg-html-preview-modal-body{padding:0;overflow:hidden;display:flex;background:#fff}
+.pg-modal.pg-html-preview-modal .pg-html-preview-frame{flex:1;width:100%;height:100%;border:none;background:#fff;display:block}
 .pg-mermaid{padding:12px;border:1px solid var(--glass-border-hover);border-radius:var(--radius-md);background:rgba(196,166,255,.06);margin:8px 0;cursor:pointer;overflow:auto;transition:all var(--transition-fast)}
 .pg-mermaid:hover{box-shadow:0 2px 12px rgba(196,166,255,.2);border-color:var(--accent)}
 .pg-mermaid.mermaid-error{color:var(--danger);cursor:default}
@@ -872,8 +883,10 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-autochat-panel .pg-param-row input[type="number"],
 .pg-director-panel .pg-param-row input[type="number"]{height:32px;box-sizing:border-box}
 
-/* System prompt textarea */
-.pg-system-prompt{width:100%;min-height:54px;max-height:120px;padding:8px 10px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-badge);font-family:inherit;resize:vertical}
+/* System prompt textarea: read-only preview of the active prompt; the click
+   target that opens the V2 differ editor (so it reads as a button-like box). */
+.pg-system-prompt{width:100%;min-height:54px;max-height:120px;padding:8px 10px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--input-bg);color:var(--text);font-size:var(--font-badge);font-family:inherit;resize:none;cursor:pointer;transition:border-color var(--transition-fast),background var(--transition-fast)}
+.pg-system-prompt:hover{border-color:var(--accent);background:var(--glass-hover)}
 .pg-system-prompt:focus{outline:none;border-color:var(--accent)}
 
 /* Image url input */
@@ -1014,7 +1027,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-req-table-wrap{flex:1;overflow-y:auto;min-height:0}
 .pg-req-table{width:100%;border-collapse:collapse;font-size:var(--font-badge);font-family:inherit}
 .pg-req-table th{padding:6px 8px;text-align:left;font-weight:600;color:var(--text-secondary);border-bottom:1px solid var(--glass-border);position:sticky;top:0;background:var(--glass-bg);z-index:1;white-space:nowrap}
-.pg-req-table td{padding:4px 8px;border-bottom:1px solid var(--glass-border);color:var(--text-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pg-req-table td{padding:4px 8px;border-bottom:1px solid var(--glass-border);color:var(--text-secondary);font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:middle}
 .pg-req-table tr:hover td{background:var(--glass-hover)}
 .pg-req-time-col{width:9ch}
 .pg-req-row{cursor:pointer}
@@ -1022,6 +1035,16 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-req-title-cell{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 .pg-req-row.active td{background:var(--glass-active);color:var(--text)}
 .pg-req-row.active .pg-req-title-cell{font-weight:600}
+/* Recent-requests row delete button (shares the task-queue bin-button look) */
+.pg-req-del-col{width:1%;text-align:right;padding-left:0 !important}
+.pg-req-del-btn{display:inline-flex;align-items:center;justify-content:center;line-height:0;vertical-align:middle;background:transparent;border:none;color:var(--text-muted);padding:2px;border-radius:var(--radius-sm);cursor:pointer;opacity:0;transition:opacity var(--transition-fast),background var(--transition-fast),color var(--transition-fast)}
+.pg-req-row:hover .pg-req-del-btn{opacity:0.85}
+.pg-req-del-btn:hover{opacity:1 !important;color:var(--danger);background:var(--glass-hover)}
+.pg-req-del-btn .bin-top{width:14px}
+.pg-req-del-btn .bin-bottom{width:12px}
+/* Inline SVGs keep their baseline descender space, which pushed the bin icon
+   above the row text's optical center. */
+.pg-req-del-btn svg{display:block}
 .pg-req-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:var(--font-badge);padding:20px}
 
 /* Task Queue left panel & items */
@@ -1051,6 +1074,13 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-task-clear-all-btn .bin-top,.pg-task-remove-btn .bin-top{width:14px}
 .pg-task-clear-all-btn .bin-bottom,.pg-task-remove-btn .bin-bottom{width:12px}
 
+/* Parameters / System Prompt preset manager: the title-row button opens a card
+   built from the Settings page's Quick Slot preset modal markup/classes
+   (.qs-modal*), so the only playground-specific rule is the enter animation —
+   those transitions are keyed off .qs-modal-overlay, which the playground
+   overlay replaces. */
+.pg-preset-btn{padding:2px 10px;font-size:var(--font-badge);flex:0 0 auto}
+.pg-modal-overlay.show .qs-modal{transform:scale(1) translateY(0)}
 /* Prompt Inspire modal: presets + batch stepper + auto-growing input */
 .pg-inspire-row2{display:flex;gap:10px}
 .pg-inspire-col{flex:1;min-width:0}

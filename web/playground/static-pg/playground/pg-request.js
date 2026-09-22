@@ -152,6 +152,11 @@ function pgBuildBodyForWin(i) {
   };
   if (en.temperature) body.temperature = cfg.temperature;
   if (en.topP) body.top_p = cfg.topP;
+  // top_k / min_p are not OpenAI fields but are accepted by most OpenAI-
+  // compatible upstreams (llama.cpp, vLLM, OpenRouter, …); each is sent only
+  // while its toggle is on.
+  if (en.topK && cfg.topK > 0) body.top_k = cfg.topK;
+  if (en.minP && cfg.minP > 0) body.min_p = cfg.minP;
   if (en.maxTokens && cfg.maxTokens > 0) body.max_tokens = cfg.maxTokens;
   if (en.frequencyPenalty) body.frequency_penalty = cfg.frequencyPenalty;
   if (en.presencePenalty) body.presence_penalty = cfg.presencePenalty;

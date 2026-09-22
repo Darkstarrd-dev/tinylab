@@ -23,6 +23,7 @@ function pgSearchSend(query) {
   w0.streaming = true;
   if (w1) w1.streaming = true;
   w0.abortCtrl = new AbortController();
+  w0.thinkingBlockOpen = false;
   pgRenderMessages(0);
   if (w1) pgRenderMessages(1);
   pgUpdateInputBar();
@@ -99,6 +100,7 @@ function pgSearchSend(query) {
       msg2.searchStep = 'synthesizing';
       msg2.status = 'streaming';
       w3.pendingContent = '';
+      w3.pendingContentLen = 0;
       w3.pendingReasoning = '';
       w3.pendingSources = [];
       w3.reasoningStartedAt = null;
@@ -116,7 +118,7 @@ function pgSearchSend(query) {
       }
       pgRenderBubble(0, w3.messages.length - 1);
       pgRenderBubble(1, w3.messages.length - 1);
-      pgScrollBottom(0, w3.messages.length - 1);
+      pgScrollBottom(0);
 
       // Step 3: Synthesize (streaming)
       var synthBody = {
@@ -204,16 +206,7 @@ function pgSearchFlushRender() {
     var msg = w2.messages[w2.messages.length - 1];
     if (!msg) return;
 
-    if (typeof pgExtractAllReasoning === 'function') {
-      var split = pgExtractAllReasoning(w2.pendingContent);
-      if (split.reasoning) {
-        w2.pendingReasoning = w2.pendingReasoning
-          ? w2.pendingReasoning + '\n' + split.reasoning
-          : split.reasoning;
-        w2.pendingContent = split.content;
-        if (!w2.reasoningStartedAt) w2.reasoningStartedAt = Date.now();
-      }
-    }
+    var split = pgStreamSplitContent(w2);
 
     // DOM existence check — background tab render may fire after container is cleared
     var bubble0 = document.getElementById('pg-bubble-0-' + (w2.messages.length - 1));
@@ -227,12 +220,12 @@ function pgSearchFlushRender() {
       w2.lastRenderedRawLen = rawLen;
       if (bubble0) {
         pgRenderBubble(0, w2.messages.length - 1);
-        pgScrollBottom(0, w2.messages.length - 1);
+        pgScrollBottom(0);
       }
     }
 
     // Right pane (synthesized result) is updated during streaming
-    msg.content = w2.pendingContent;
+    msg.content = split.content;
     msg.reasoning = w2.pendingReasoning;
     if (w2.pendingSources && w2.pendingSources.length) msg.sources = w2.pendingSources.slice();
     if (w2.reasoningStartedAt) {
@@ -244,7 +237,7 @@ function pgSearchFlushRender() {
         msg.reasoningDurationMs = Date.now() - w2.reasoningStartedAt;
       }
     }
-    if (w2.reasoningStartedAt && !w2.reasoningCompletedAt && w2.pendingContent) {
+    if (w2.reasoningStartedAt && !w2.reasoningCompletedAt && msg.content) {
       w2.reasoningCompletedAt = Date.now();
       msg.reasoningCompletedAt = w2.reasoningCompletedAt;
       msg.reasoningDurationMs = w2.reasoningCompletedAt - w2.reasoningStartedAt;
@@ -264,7 +257,7 @@ function pgSearchFlushRender() {
       w1msg.status = msg.status;
     }
     if (bubble1) pgRenderBubble(1, w2.messages.length - 1);
-    if (bubble1) pgScrollBottom(1, w2.messages.length - 1);
+    if (bubble1) pgScrollBottom(1);
   }, 50);
 }
 
@@ -278,16 +271,8 @@ function pgSearchFinish() {
   w0.abortCtrl = null;
   var msg = w0.messages[w0.messages.length - 1];
   if (msg) {
-    if (typeof pgExtractAllReasoning === 'function') {
-      var split = pgExtractAllReasoning(w0.pendingContent);
-      if (split.reasoning) {
-        w0.pendingReasoning = w0.pendingReasoning
-          ? w0.pendingReasoning + '\n' + split.reasoning
-          : split.reasoning;
-        w0.pendingContent = split.content;
-      }
-    }
-    msg.content = w0.pendingContent || msg.content;
+    var split = pgStreamSplitContent(w0);
+    msg.content = split.content || msg.content;
     msg.reasoning = w0.pendingReasoning || msg.reasoning;
     if (w0.pendingSources && w0.pendingSources.length) msg.sources = w0.pendingSources.slice();
     msg.status = 'complete';
@@ -316,6 +301,7 @@ function pgSearchFinish() {
     }
   }
   w0.pendingContent = '';
+  w0.pendingContentLen = 0;
   w0.pendingReasoning = '';
   w0.pendingSources = [];
   // DOM existence check — background tab render may fire after container is cleared

@@ -17,10 +17,17 @@ function makeWin() {
     debugPreviewTimestamp: null,
     renderTimer: null,
     pendingContent: '',
+    // Length of the classified content prefix of pendingContent (see
+    // pgStreamSplitContent): text before it is already routed to content or
+    // reasoning and must not be re-classified on the next flush.
+    pendingContentLen: 0,
     pendingReasoning: '',
     pendingSources: [],
     reasoningStartedAt: null,
     reasoningCompletedAt: null,
+    // Streaming think-tag block state: true while the current request's
+    // content buffer sits inside an unclosed think tag (pgSplitStreamReasoning).
+    thinkingBlockOpen: false,
     image: {
       mode: 'manual', phase: 'empty', draftPrompt: '', submittedPrompt: '',
       activeAssetIndex: -1, generations: [], activeRequestId: '', error: '',
@@ -216,6 +223,10 @@ function pgLoad() {
       }
     }
   } catch (e) { /* corrupt storage */ }
+  // Max Tokens default migration: 0 was the pre-2026-09-22 "unset" sentinel.
+  // The panel now always displays the effective default even while the toggle
+  // is off, so a persisted non-positive value is normalized back to it.
+  if (!(w.config.maxTokens > 0)) w.config.maxTokens = PG_DEFAULT_CFG.maxTokens;
   // Auto chat persisted fields (userName + iterations + delaySeconds + director).
   try {
     var rawAuto = localStorage.getItem(PG_AUTOCHAT_KEY);
@@ -296,8 +307,9 @@ function pgEnsureWindows() {
     var clone = JSON.parse(JSON.stringify(pgState.windows[0]));
     clone.messages = [];
     clone.streaming = false; clone.abortCtrl = null; clone.renderTimer = null;
-    clone.pendingContent = ''; clone.pendingReasoning = ''; clone.pendingSources = [];
+    clone.pendingContent = ''; clone.pendingContentLen = 0; clone.pendingReasoning = ''; clone.pendingSources = [];
     clone.reasoningStartedAt = null; clone.reasoningCompletedAt = null;
+    clone.thinkingBlockOpen = false;
     clone.sseEvents = []; clone.lastProvider = ''; clone.lastKey = '';
     clone.debugTab = 'preview'; clone.debugRequest = ''; clone.debugResponse = '';
     clone.debugTimestamp = null; clone.debugPreview = ''; clone.debugPreviewTimestamp = null;

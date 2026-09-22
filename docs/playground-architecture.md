@@ -1,4 +1,9 @@
+> **最后核对（2026-09-22，System Prompt 面板改为只读预览 + V2 差异编辑器）：** 普通模式侧栏的 System Prompt 框不再就地编辑，改为**当前提示的只读预览 + 编辑入口**（§8.5）：(1) `pg-ui.js::pgRenderSidebar` 渲染 `readonly` 文本框（`onclick="pgOpenSystemPromptEditor()"`、`data-tooltip` = `pgSystemPromptEditHint`，`customMode` 下仍 `disabled`），内容始终是活动窗口的 `config.systemPrompt`——应用 System Prompt 预设后同面板重渲染，框内显示的就是实际随请求发送的提示；(2) 新增 `pg-ui-events.js::pgOpenSystemPromptEditor()` 调用 `window.EditorV2Embed.openDiffModal`（**与 Utility → Text Review → Step 3「Prompt」按钮同一个弹窗**）：`title=pgT('pgSystemPrompt')`、`original=current=`打开时的提示、`filename='system-prompt.txt'`；保存写回 `config.systemPrompt` → `pgSave()` → `pgRenderSidebar()`（框内立即更新）+ toast `pgSystemPromptSaved`，Cancel/✕ 丢弃；不传 `showSaveDefault`/`showRestoreBuiltIn`（Playground 无后端默认提示，embed 对空串 restore 直接忽略）；(3) `pgIsEditingTarget` 把 `readonly` textarea 视为非输入目标，点开框后全局 Alt/Ctrl 快捷键仍生效；(4) 删除原 `pgOnSystemPrompt`（内联 `oninput` 写 config 的旧入口）；i18n 新增 `pgSystemPromptEditHint`/`pgSystemPromptSaved`/`pgSystemPromptEditorFailed`（en+cn）；`playground.css` 的 `.pg-system-prompt` 改 `resize:none` + `cursor:pointer` + hover 高亮。回归 `web/pg-presets.test.js`（19 项）。
 > **最后核对（2026-09-22，Normal 模式左侧会话列表 + 响应气泡指标 + 切页不中断）：** (1) **切页不中断请求**：`pg-lifecycle.js::cleanupPlayground` 不再 `abortCtrl.abort()` 在途流（此前离开页面即断开与服务器的连接），只做 `pgSaveSync`/`pgSaveMode`/停订阅/`pgDirectorReset`；`renderPlayground` 回到页面时沿用同一份内存窗口渲染，流继续写入同一 assistant 消息对象。(2) **对话不再持久化**：`pg-state.js` 移除 `PG_MSG_KEY` 读写（`pgLoad`/`pgSave`/`pgSaveSync`）、`pg-ui.js::pgSetMode` 移除跨模式消息落盘与 `pgNormalizeLoadedMessage`（连同上限常量一并删除），消息与左侧列表仅存内存，退出应用/刷新即清空；`pgLoad` 在 search 模式下保留已停车的 `modeWindows.normal`。(3) **左侧列表改为会话列表（Time + Title 两列）**：`pg-ui-reqleft.js` 重写——`pgConvList` 由客户端在发送时创建（`pgConvTitleFromText` 取前 20 个中文或前 10 个单词），行持有该请求时刻的消息快照，点击 `pgSwitchConversation` 切回该对话（在途生成/图片请求无对话时 toast `pgConvUnavailable`），移除 Latency/Tokens/状态点列；移除 `pgShowReqDetail` 与列表点击弹窗。(4) **请求详情移入响应气泡**：`pg-render.js` 在 assistant 消息的按钮行新增 SVG `PG_ICON_INFO` 按钮（`pgShowRequestInfo` → `pgShowReqEntry`，复用 `info-modal-overlay`/`renderInfoSection`，entry 被淘汰时回退本地消息摘要）。(5) **气泡新增 ttft/gt/in/res/ct/spd 两行**：`pgMetricsBlockHTML` 用 `monitor_state.js` 新增的共享纯函数 `entryMetrics(e, nowMs)` 渲染（Monitor Recent Requests 的 `renderUsageRow` 同源改造，`mergeProcessingEntryFields` 同时被 `monitor_io.js` 与 `pgMergeEntry` 复用），值来自 `/api/monitor/playground` + `/api/monitor/events`（含 `request-tokens`）缓存。(6) **请求↔气泡绑定**：代理响应新增 `X-TinyLab-Request-Id` 头（`proxy/stream.go::setUpstreamIdentityHeaders`），`pg-stream.js::pgCaptureRequestId` 写入 `msg.reqId`；i18n 修复：`pg-core.js::pgT` 先查 `PG_I18N` 再回退宿主 `t()`（此前 `pgDurationSec`/`pgMetaResponse` 等 pg* 键直出键名），并补齐 `pgDurationMs`/`pgDurationSec`/`pgMetaResponse`/`pgReqColTitle`/`pgConvUnavailable`/`pgReqDetailTip`（en+cn）。回归：`web/pg-conversation-list.test.js`（13 项）。
+> **最后核对（2026-09-22，代码块复制按钮 + HTML 预览展开弹窗）：** (1) **代码块复制按钮**：`pg-render.js::pgPostProcessCode` 末尾对每个 `pre` 调 `pgWrapCodeBlock(pre)` —— 把 `pre` 移入新的 `.pg-code-block`（`position:relative`）容器，并在其中追加 `button.pg-code-copy`（文案 `pgCopy`、tooltip `pgCopyCode`，点击 `pgCopyToClipboard(code.textContent, pgCodeCopied)`）。按钮**不能放进 `pre` 内部**：`pre` 带 `overflow-x:auto`，绝对定位的子元素会被 `scrollLeft` 一起拖走。CSS 同步把 `.pg-code-copy`/hover 规则从 `.pg-bubble pre` 迁到 `.pg-code-block`（`.pg-code-block pre{margin:0}`），旧的 `pgRenderBubble` 里那份「给 `.pg-code-copy` 挂 click」的死代码（从未有人创建过该元素）删除。(2) **HTML/SVG 预览展开弹窗**：`pgRenderHtmlPreview` 的标题行改为 flex（左标签 + 右按钮），新增 `button.pg-html-preview-expand`（`PG_ICON_EXPAND`，`pg-core.js` 新增，tooltip `pgHtmlPreviewExpand`），点击调 `pgShowHtmlPreviewModal(html)` → `pgShowModal(html, 'pg-modal pg-html-preview-modal')`，卡片 1100px×88vh、body 内 iframe 填满；iframe 沿用内联预览的 `sandbox=""`（不放开脚本）。按钮用 `addEventListener` 绑定（不把原始标记塞进 onclick 属性）。CSS 用 `.pg-modal.pg-html-preview-modal` 提高特异性覆盖靠后的 `.pg-modal` 规则。回归 `web/pg-code-block.test.js`（6 项）。
+> **最后核对（2026-09-22，Normal 模式四项修复：行删除按钮居中 + Top K 滑块 + 预设弹窗与 Settings 一致 + 流式滚动不再锁底）：** (1) **左栏行删除按钮垂直居中**：`td` 显式 `vertical-align:middle`，`.pg-req-del-btn` 改 `inline-flex` 居中 + `line-height:0`，`.pg-req-del-btn svg{display:block}`——此前 inline-flex 按钮按 `vertical-align:baseline` 对齐，垃圾桶图标组比文字中心低约 4.8px；实测图标组中心与单元格中心重合。(2) **Top K 改滑块**：`pg-ui.js::pgRenderSidebar` 的 `paramRow('topK', 'pgTopK', 1, 100, 1, false)`（Google 与非 Google 分支都改），滑块范围 1–100、步进 1；新增 `pgParamValText(v, step)`（`pg-ui.js`）统一读数格式——整数步进显示 `20`，小数步进仍 `0.70`，`pgOnParam(name, v, step)` 接收 `this.step`。(3) **预设弹窗改用 Settings Quick Slots 的卡片**：`pg-modal.js::pgShowModal(html, cardClass)` 支持替换卡片类；`pg-presets.js::pgPresetBodyHTML` 直接输出 `.qs-modal-title`（标题 + `+` 按钮）/`.qs-modal-list`/`.qs-modal-item`/`.qs-modal-hint` 结构（与 Settings 预设弹窗同款类、同款内边距与圆角），行点击应用、右键删除、无逐行删除按钮、无独立 footer 与 ✕；补齐 ↑↓/Enter/Del/Esc 键盘操作、遮罩点击关闭（`pgPresetFocusIdx` 焦点行高亮）。i18n：`pgPresetHint` 改为与 `qsPresetHint` 同文案，新增 `pgPresetParamCount`（行内 muted `(N params)`），删除不再使用的 `pgPresetDelete`/`pgPresetEmpty`/`pgPresetSaveCurrent`。(4) **流式滚动解绑（可自由上滚）**：新增 `pg-render.js::pgAtBottom/pgBindScrollPin/pgFollowBottom`，`pgScrollBottom(i, force)` 仅在容器「位于底部」时跟随（`w.msgsPinned`，滚动监听维护；`force` 用于新消息/切会话重新钉住，调用点：`pg-ui.js::pgUserSend`、`pg-stream.js::pgSend`、`pg-ui-reqleft.js::pgSwitchConversation`）；reasoning 气泡改为在 `pgRenderBubble` 内 `pgCaptureThinkingScroll`→innerHTML 替换→`pgRestoreThinkingScroll`（钉住时跟随末尾，未钉住时恢复 `msg.thinkingPinned` 记录的阅读位置），删除 `pgScrollBottomReasoning`；`pg-search.js` 三处调用同步。回归 `web/pg-scroll-pin.test.js`（8 项）。
+> **最后核对（2026-09-22，思考气泡两项修复：spinner 动画重启 + reasoning 中途停止显示）：** (1) **reasoning 中途冻结（think 标签模型）**：根因是 `pgFlushRender` 每 50 ms 用无状态的 `pgExtractAllReasoning(w.pendingContent)` 重新推导切分——首次 flush 消费掉开标签后，后续 chunk 不再含标签，其文本被路由进回答气泡，思考气泡停在第一批内容（实测 33 字符后永久冻结，reasoning 文本泄漏到 content）。改为**跨 flush 携带状态的块路由**：`pg-markdown.js::pgSplitStreamReasoning(text, w)` 读/写 `w.thinkingBlockOpen`，块未闭合时其后所有文本都进 reasoning，直到闭合标签；返回 `{content, reasoning, tail}`，`tail` 为可能跨 chunk 被截断的标签残片（如 `</thi` + `nk>`），由 `pg-stream.js::pgStreamSplitContent(w)` 连同 `w.pendingContentLen`（已分类内容前缀长度）一起维护：残片留在缓冲、不渲染，且**已分类前缀不再被重新扫描**（否则块打开时前缀里的回答文本会被二次分类进 reasoning）。`pg-search.js` 的同源路径一并切换。(2) **spinner 每帧重启**：气泡 innerHTML 每次 flush 全量替换，`.pg-thinking-spinner` 元素被重建 → CSS 动画从 0deg 重来（实测仅 0–28°，肉眼为抖动不转）。`pg-render.js::pgRenderBubble` 在重建后按 `msg.reasoningStartedAt` 给新元素写负 `animation-delay`（`PG_SPIN_PERIOD_MS=800`，与 CSS `.8s` 对齐）把相位接回，旋转跨重渲染连续。(3) `pgFinish` 顺带修复被误删的 `msg.status='complete'`（流结束后气泡会一直停在 streaming 态）。(4) 回归 `web/pg-thinking-stream.test.js`（11 项：块路由/跨 chunk 标签/前缀不重扫/spinner 相位）。
+> **最后核对（2026-09-22，Normal 模式 Parameters/System Prompt 预设 + Top K/Min P + Max Tokens 默认 8192 + 会话行删除）：** (1) **预设（新模块 `pg-presets.js`）**：Parameters 与 System Prompt 面板标题行各挂一个 `Preset` 按钮（`pgPresetButton`，与 Settings Quick Slots 表头同款入口），打开共享列表弹窗——点行应用（`pgPresetApply` 写入活动窗口 `config`/`parameterEnabled` 或 `systemPrompt`）、✕ 删除（`pgPresetRemove` → 宿主 `confirmModal`）、`+ Save current`（`pgPresetSaveCurrent` → 宿主 `promptModal` 取名，同名覆盖）；预设存 `localStorage` `tinylab.playground.presets.v1`（`{params:[{name,config,enabled}], system:[{name,text}]}`，用户级跨窗口共享，非数组/坏 JSON 降级为空表）；弹窗先关闭自身再调宿主弹窗（`#modal-overlay` z-index 50 低于 `.pg-modal-overlay` 10000），确认后重开列表。(2) **Parameters 新增 Top K / Min P**：`pg-ui.js` 非 Google 分支插入 `paramRow('topK','pgTopK',1,100,1,true)` 与 `paramRow('minP','pgMinP',0,1,0.01,false)`（`pg-core.js` 新增 `minP:0.05`，`PG_DEFAULT_PARAMS.minP=false`，`topK` 沿用 Google 分支同一字段），`pg-request.js::pgBuildBodyForWin` 在开关开启且值 > 0 时写 `top_k`/`min_p`；Google 分支仍只发 `generationConfig.topK`，不发 `min_p`。(3) **Max Tokens 默认 8192**：`PG_DEFAULT_CFG.maxTokens` 0→8192，`paramRow` 数字输入在开关关闭时也显示该值（此前显示 0）；`pgOnParam` 对 `maxTokens` 做 ≤0/空 → 默认值归一化并重渲染侧栏，`pgLoad` 把历史持久化的 0/非法值迁移回 8192，`paramRow` 的 min 由 0 收紧为 1。(4) **会话行删除**：`pg-ui-reqleft.js::pgConvDelete(rowId)` + 表格第三列垃圾桶按钮（`.pg-req-del-btn`，`event.stopPropagation()` 不触发切换），只移除列表行——活动行清 `pgActiveConvId`，pane 消息与 `pgReqEntryCache` 不动。(5) i18n 新增 `pgMinP`/`pgPreset`/`pgPresetParams`/`pgPresetSystem`/`pgPresetSaveCurrent`/`pgPresetEmpty`/`pgPresetHint`/`pgPresetNamePrompt`/`pgPresetNamePlaceholder`/`pgPresetSaved`/`pgPresetApplied`/`pgPresetDeleted`/`pgPresetDelete`/`pgPresetDeleteConfirm`/`pgConvDeleteTip`（en+cn）；回归 `web/pg-presets.test.js`（17 项）+ 隔离实例 18777 真实浏览器实测。
 > **最后核对（2026-09-16，Gallery 删除弹窗 focus 环 + Video 转码音频格式）：** (1) **删除弹窗 focus 对比度**：`web/playground/static-pg/playground.css` 新增 `.pg-btn:focus/.pg-btn:focus-visible{outline:2px solid var(--accent)}`（此前 `.pg-btn` 无任何 focus 规则，`.focus()` 落到浏览器默认黑色 outline，暗色下对比度差）。(2) **Video 转码音频格式（保存音轨）**：`gallery-edit.js`（`_renderVideoTranscodeForm`）Format 下拉新增 `MP3/M4A/OGG/OPUS/WAV/FLAC` 六个音频-only 选项；选中音频格式时隐藏视频 Codec/Quality/Scale 行与动图参数块，保留音频行并按容器自动选原生编码（mp3→mp3/m4a→aac/ogg·opus→opus/wav→wav/flac→flac），`copy` 保留，`none` 由后端拒绝；flac/wav/copy 隐藏无意义的码率列，`ge-vid-audio-codec` 切换同样触发码率显隐。后端 `internal/mediaedit/args.go` 新增音频-only 分支：`containerExt` 增六个音频扩展，`audioNativeCodec`/`isAudioOnlyContainer`/`compatibleAudioCodecs` 做容器-编码兼容校验（错配如 aac+mp3 直接报错），`-vn` 丢视频流后按编码出音频（aac/opus/mp3 带码率，flac 无码率，wav 走 `pcm_s16le`，copy 直拷，`none` 拒绝），输出 `desc=audio_<container>`；`types.go` 注释同步容器/编码白名单；`edit_handlers.go::mimeForGallery` 补 mkv/mov 六音频 MIME（此前仅 mp4/webm，下载/预览走 `application/octet-stream`）；`args_test.go` 新增 MP3/WAV/错配/none 四用例。`go vet` + `go test ./internal/mediaedit/ ./internal/api/gallery/` + `node --check` 两前端文件 + `gallery-edit-contract.test.js` 全绿。
 > **最后核对（2026-09-16，Gallery 编辑弹窗打开延迟修复）：** `gallery-edit.js::triggerMediaEditor` 新增 assetId/grantId（非 zip）直通分支——服务端可解析的输入直接进 `openMediaEditor`（probe/start 均走 assetId/grantId+rel 服务端解析），不再经 `getBlob()` 全量下载 + `POST /edit/upload-temp` 预传；弹窗本身零文件操作，ffmpeg 仅在 Execute 后运行。大视频打开延迟从与文件大小正相关降为常量。`web/gallery-edit-contract.test.js` 新增回归用例（grantId 视频零 upload-temp/file 拉取直通）。
 > **最后核对（2026-09-09，Gallery 转换弹窗全量适配自定义下拉与 Toggle 开关，Tree Batch 布局优化）：** (1) **Tree Batch Convert 布局优化**：`gallery-edit-batch.js`（`openTreeBatchConvert`）将 Format 选择器与 Fit to 限制长边开关/步进输入框调整至第一行，Fit to 步进框宽度提升至 130px 提供充裕空间；Scale 滑块与 Quality 滑块排布在第二行两端对称；移除 Compress 复选框。(2) **Image Convert 弹窗自定义控件适配**：`gallery-edit.js`（`_renderImageForm`）将 Format 格式下拉与 Set Name 的 Digits 位数下拉全量替换为全局 `renderCustomSelectHtml`；将 Set Path、Set Name、Uniform、Compress 以及 Strip metadata 复选框全量替换为项目自定义 `.toggle-switch` 开关。(3) **Video Convert 弹窗自定义控件适配**：`gallery-edit.js`（`_renderVideoTranscodeForm`、`_renderVideoTrimForm`、`_renderVideoSubtitleForm` 及 `_buildModalHTML`）将 Codec、Format、Quality、Preset、Audio Codec、Audio Bitrate、Loop Mode、Dither、Trim 重新编码 Codec 与 Quality、Subtitle Container 全量替换为 `renderCustomSelectHtml`，并增强 `_syncAnimLoopOptions` 与 `_updateVidCodecUI` 的动态选项重构与选中文本同步；将 Set Path、Set Name、Strip metadata、Lossless、Trim 启用开关、Subtitle 启用开关全量替换为 `.toggle-switch`。(4) **全局自定义下拉能力扩展**：`web/static/app.js`（`toggleCustomSelect`）增强对原生 `<option>` 隐藏（`style.display === 'none'`）与禁用（`disabled`）的双向感知，在展开下拉时自动隐藏过滤掉被上游逻辑屏蔽的格式选项；`playground.css` 完善自定义下拉与禁用光标支持。(5) **验证**：全量 Go 测试 64 包、Node/Bun 契约测试 `gallery-edit-contract.test.js` 与前端 JS 语法检查全绿。
@@ -398,8 +403,8 @@ katex -> marked -> marked-katex-extension -> DOMPurify -> highlight.js -> mermai
 modules:
 pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 -> pg-comfyui -> pg-image-model -> pg-image-inspire -> pg-image-batch
--> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui
--> pg-modal -> pg-lifecycle
+-> pg-autochat -> pg-setup -> pg-director -> pg-search -> pg-render -> pg-ui-params
+-> pg-presets -> pg-ui-reqleft -> pg-ui-events -> pg-ui -> pg-modal -> pg-lifecycle
 -> gallery modules
 
 ```
@@ -421,9 +426,10 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 | `pg-image-batch.js` | Batch 三步 plan/transform/review、natural/tag/json 选择与提示词编译、snapshot-first SSE、pause/resume/stop/retry、Prompt × Variant viewer |
 | `pg-comfyui.js` | 浏览器同源 ComfyUI proxy、workflow 参数与 history polling |
 | `pg-render.js` | Manual Canvas、消息、来源、代码/Mermaid/HTML、debug 渲染、气泡 meta（详情按钮 + ttft/gt/in/res/ct/spd 两行） |
-| `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数、Image mode routing |
-| `pg-ui-reqleft.js` | 左侧会话列表（Time + Title，仅内存）、用量条目缓存（轮询 + SSE）、气泡详情弹窗、指标刷新 |
-| `pg-modal.js` | 调试、图片预览（含 zoom/pan/copy/save/reset）、模型选择等 modal |
+| `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数（Top K / Min P / Max Tokens 8192）、Image mode routing |
+| `pg-presets.js` | Parameters / System Prompt 预设：标题行按钮、列表弹窗（复用 Settings `.qs-modal*` 卡片；点击应用 / 右键删除 / 键盘 ↑↓ Enter Del Esc / 表头 `+` 保存当前）、`tinylab.playground.presets.v1` 读写 |
+| `pg-ui-reqleft.js` | 左侧会话列表（Time + Title + 行删除，仅内存）、用量条目缓存（轮询 + SSE）、气泡详情弹窗、指标刷新 |
+| `pg-modal.js` | `pgShowModal(html, cardClass)`（卡片类可替换）、调试、图片预览（含 zoom/pan/copy/save/reset）、模型选择等 modal |
 | `pg-autochat.js` | 共享时间线、多 Agent 调度、摘要、群聊 modal |
 | `pg-setup.js` | 场景向导、ScenarioProfile、导入导出和应用 |
 | `pg-director.js` | Director 判断、Narrator 生成和生命周期 |
@@ -517,14 +523,19 @@ grid-template-columns: 260px 1fr 320px
 
 左侧面板通过 `pgRenderReqLeft(showReqLeft)` 构建，内容由 `pgRenderConvList()` 渲染。**列表是本次应用运行的会话列表**：行由客户端在发送时创建（`pgConvCreate`，文本请求取 `pgConvTitleFromText(body 中最后一条 user 文本)`，图片请求取图片提示词），持有该请求时刻的消息快照（`w.messages.slice()`，与实时窗口共享消息对象，流式写入即反映到行快照）。行只存内存、不落盘——退出应用或刷新即清空（见 §7）。
 
-表格仅两列：
+表格三列（第三列为删除操作）：
 
 | 列 | 数据字段 | 显示格式 |
 |---|---|---|
 | 时间 | 行 `ts`（发送时刻） | `toLocaleTimeString()` |
 | 标题 | 行 `title` | 前 20 个中文（含日文假名/兼容汉字）字符，或非中日文本的前 10 个单词；超长加 `…` |
+| 删除 | — | 行内垃圾桶按钮（hover 显示，复用任务队列的动画垃圾桶 SVG）→ `pgConvDelete(id)` |
 
 **点击切换对话：** 行 `onclick="pgSwitchConversation(id)"` 把 `w.messages` 替换为该行快照的副本（副本保证后续续聊不会污染快照），并高亮该行为 active。无对话的行（图片请求）提示 `pgConvUnavailable`；有在途生成时提示 `pgGenSwitchLock` 并不切换。原来的行点击详情弹窗（`pgShowReqDetail`）已移除，请求/响应详情改由响应气泡的详情按钮打开（见 §6.3）。
+
+**删除行按钮对齐（2026-09-22）：** `.pg-req-table td` 显式 `vertical-align:middle`，`.pg-req-del-btn` 为 `inline-flex` 居中并置 `line-height:0`，两个 `svg` 置 `display:block`——inline-flex 按钮默认按 `vertical-align:baseline` 对齐，图标组因此比行文字中心低约 4.8px（实测修复后图标组中心与单元格中心重合）。
+
+**删除行（2026-09-22）：** 行右侧垃圾桶按钮调 `pgConvDelete(rowId)`，只从 `pgConvList` 移除该行——被删的若是活动行则清 `pgActiveConvId`（高亮消失，pane 内消息保持原样），`pgReqEntryCache` 的用量条目不受影响，因此已回复气泡的指标行仍可查看。按钮 `onclick` 带 `event.stopPropagation()`，不会触发行的切换对话。列表仅存内存，删除不可撤销。
 
 **用量条目缓存（气泡指标与详情弹窗的数据源）：** `pgReqEntryCache`（id → usage.Entry，上限 200，`pgMergeEntry`/`pgMergeTokenUpdate`）由 `GET /api/monitor/playground?limit=50`（10 秒轮询后备）+ SSE `/api/monitor/events` 的 `request-start` / `request-tokens` / `request-done` 事件喂入；processing 条目的 REST 快照用 `mergeProcessingEntryFields`（`monitor_state.js`，与 Monitor 列表同源）保证 live 字段不回退。有在途条目时 500ms 定时器（`pgReqLeftProcTimer`）重绘气泡指标行。面板本身不再直接渲染条目，因此轮询只服务缓存与指标刷新。
 
@@ -575,6 +586,7 @@ pgState
 |---|---|---|
 | `tinylab.playground.cfg.v2` | window 0 config | 是 |
 | `tinylab.playground.params.v2` | window 0 参数开关 | 是 |
+| `tinylab.playground.presets.v1` | Parameters / System Prompt 预设（`{params:[{name,config,enabled}], system:[{name,text}]}`） | 是（坏 JSON/非数组条目降级为空表） |
 | ~~`tinylab.playground.msg.v2`~~ | **2026-09-22 起不再写入**：对话不持久化（内存态，退出/刷新即清空） |
 | `tinylab.playground.autochat.v1` | 用户名、迭代、延迟、Director 配置 | 仅配置 |
 | `tinylab.playground.scenario.v1` | 最近 ScenarioProfile | 是 |
@@ -623,7 +635,8 @@ sequenceDiagram
 标准 body 包含：
 
 - `model`、`messages`、`stream`；
-- 可选 `temperature`、`top_p`、`max_tokens`；
+- 可选 `temperature`、`top_p`、`top_k`、`min_p`、`max_tokens`（`top_k`/`min_p` 非 OpenAI 标准字段，多数 OpenAI 兼容上游接受；两者仅在开关开启且值 > 0 时发送，Google 分支不发送 `min_p`。`max_tokens` 默认值 8192，开关关闭时省略）；
+- 滑块类参数的读数格式由 `pg-ui.js::pgParamValText(v, step)` 统一：步进 ≥1 的整数参数（`topK` 1–100 步进 1）显示整数（`20`），其余保留两位小数（`0.70`）；`pgOnParam(name, v, step)` 由滑块的 `oninput` 传入 `this.step`。Top K 在 Google 与非 Google 分支都是滑块；
 - 可选 `frequency_penalty`、`presence_penalty`、`seed`；
 - 可选 `thinking: {type: "enabled", budget_tokens: ...}`。
 
@@ -644,7 +657,8 @@ sequenceDiagram
 - `reasoning_content`、`reasoning`、`thinking`、`thought` 进入思考内容；
 - `sources`、`citations`、`web_search_citation`、`web_search` 进入来源列表；
 - `pgMergeChunk` 同时兼容增量 chunk 和累计全文 chunk；
-- 50 ms 定时器将 pending 状态刷入消息 DOM。
+- **think 标签块（2026-09-22 修复）**：`pgSplitStreamReasoning(text, w)` 在每次 flush 时只分类尚未分类的后缀，并把「块是否打开」记在 `w.thinkingBlockOpen` 上——开标签一旦出现，其后所有文本持续路由到 reasoning，直到闭合标签（此前无状态重推导致首个 flush 之后 reasoning 冻结、文本泄漏进 content）。返回的 `tail`（跨 chunk 被截断的标签残片）与 `w.pendingContentLen`（已分类内容前缀长度）由 `pgStreamSplitContent(w)` 维护：残片留在缓冲不渲染，已分类前缀不再重扫；
+- 50 ms 定时器将 pending 状态刷入消息 DOM（`pgStreamSplitContent` 分类 → 写 `msg.content`/`msg.reasoning` → 渲染）；同一次 flush 末尾调用 `pgScrollBottom(i)` 跟随输出，见 §8.4。
 
 它不是完整 SSE 实现：不合并多行 data，也不处理 event/id/retry 字段。
 
@@ -654,10 +668,36 @@ sequenceDiagram
 - Markdown HTML 经 DOMPurify 清洗。
 - 来源 URL 只允许 `http:` / `https:`。
 - Mermaid 以 `securityLevel: strict` 初始化。
-- HTML/SVG 预览使用 sandboxed iframe，不允许脚本执行。
+- HTML/SVG 预览使用 sandboxed iframe，不允许脚本执行；预览标题行右侧的展开按钮（`.pg-html-preview-expand`）把同一份标记放进 `pgShowHtmlPreviewModal` 的近全屏弹窗（1100px × 88vh，iframe 填满 body），弹窗内 iframe 保持同样的 `sandbox=""` 沙箱——只放大视口，不放开脚本。
+- 代码块（含 HTML/SVG/Mermaid 源码块）由 `pgWrapCodeBlock` 包进 `.pg-code-block` 并在右上角挂复制按钮：点击写入剪贴板并 toast `pgCodeCopied`。按钮挂在 `pre` 的**外层**容器上——`pre` 横向滚动，按钮在其内部会被 `scrollLeft` 拖走；平时 `opacity:0`，悬停整块时显示。
 - Provider/Key 响应头、实际请求、原始 SSE/响应进入 debug 视图。
-- Reasoning 气泡使用 `pgRenderMarkdown` 渲染（与 content 相同的 Markdown 管线），无 `max-height`/`overflow-y` 约束，随内容自然增长；reasoning 结束后自动折叠（`collapsed` CSS class），用户可手动展开/折叠。
+- Reasoning 气泡使用 `pgRenderMarkdown` 渲染（与 content 相同的 Markdown 管线）；`.pg-thinking-body` 限制 `max-height:60vh` 并内部滚动，滚动位置由 §8.4 的跟随/保持规则管理；reasoning 结束后自动折叠（`collapsed` CSS class），用户可手动展开/折叠。
+- 流式思考 spinner（`.pg-thinking-spinner`）在每次气泡重渲染后被 `pgRenderBubble` 写负 `animation-delay`（相位按 `msg.reasoningStartedAt` 续接），避免元素重建导致 CSS 动画每 50 ms 从 0deg 重启。
 - 图片预览弹窗（`pgShowImageModal` → `pg-modal-overlay`）支持：鼠标滚轮缩放（以图片中心为轴心，最小不低于 auto-fit 比例）、鼠标拖拽平移、Reset 按钮复位、Copy 按钮（经同源 `/api/image-proxy` 代拉图片字节后 `ClipboardItem` 写入剪贴板，复制的是图片本身而非网址）、Save 按钮（`POST /api/save-image` 保存到 `imgs/` 目录）。弹窗尺寸 90vw × 90vh；auto-fit 由 `transform: scale(fitScale)` 单独负责缩放（大图缩小到正好填满、小图放大铺满窗口）。底部 footer 显示分辨率（`naturalWidth × naturalHeight`）、大小（`pgFormatBytes`，经同源 `/api/image-proxy` 取 Blob 的 `size`）、格式（Blob `type` 或 data: 的 mime）。输入区缩略图和聊天气泡缩略图均可点击打开预览。纯图片结果（无文本）下不再渲染空文本气泡。
+
+### 8.4 流式滚动：只在底部时跟随（2026-09-22 修复）
+
+流式期间消息列表与 reasoning 面板都在持续增长，旧实现每次 flush（约 20 次/秒）无条件 `scrollTop = scrollHeight`，把两份容器都锁死在末尾——用户上滚查看早前内容会被下一次 flush 拽回，等于无法上滚。现在的契约是**仅在容器位于底部时跟随**：
+
+- `pg-render.js::pgAtBottom(el, slack=4)` 判定容器是否在末尾（`slack` 吸收排版取整的几像素）；
+- `pgBindScrollPin(el, onChange)` 给容器挂一次 `scroll` 监听，滚动离开末尾即解钉、滚回末尾即重新钉住（绑定标记在元素上，标记状态放在会被重建的元素之外）；
+- `pgFollowBottom(el, pinned, onChange)` 仅在钉住时 `scrollTop = scrollHeight`；
+- 消息列表：`pgScrollBottom(i, force)`，钉住状态 `w.msgsPinned`（窗口对象，不持久化）。`force` 用于「新输出开始」的边界——`pg-stream.js::pgSend`（新请求）、`pg-ui.js::pgUserSend`（发送前渲染）、`pg-ui-reqleft.js::pgSwitchConversation`（切会话）；其余渲染（编辑/删除消息等）保持用户的阅读位置；
+- reasoning 面板：气泡 HTML 每次 flush 整体替换，`.pg-thinking-body` 元素（连同 `scrollTop`）会被重建。`pgRenderBubble` 在替换前 `pgCaptureThinkingScroll` 取 `{top, pinned}`、替换后 `pgRestoreThinkingScroll` 应用：钉住时跟随末尾，未钉住时恢复该 `top`（否则每次 flush 都会跳回面板顶部）。钉住状态存 `msg.thinkingPinned`；reasoning 结束后的折叠面板不参与滚动。
+- 原 `pgScrollBottomReasoning` 已删除（搜索模式 `pg-search.js` 的三处调用同步改为 `pgScrollBottom`）；回归 `web/pg-scroll-pin.test.js`。
+
+### 8.5 System Prompt 面板：只读预览 + V2 差异编辑器（2026-09-22）
+
+普通模式侧栏 System Prompt 面板的文本框是**当前系统提示的只读预览 + 编辑入口**，提示本身只在差异编辑器里改：
+
+- 面板始终渲染活动窗口的 `config.systemPrompt`（`pg-ui.js::pgRenderSidebar`），空值显示占位符 `pgSystemPromptPlaceholder`；应用 System Prompt 预设后同一面板重渲染，所以框内显示的就是**实际随请求发送的提示**（`pg-request.js` 在无 system role 时前插，见 §8.1）。
+- 框为 `readonly`，`cursor:pointer` + 悬停高亮（`.pg-system-prompt:hover`），`data-tooltip` = `pgSystemPromptEditHint`。点击调用 `pg-ui-events.js::pgOpenSystemPromptEditor()`，打开 **Editor V2 差异编辑器**（`window.EditorV2Embed.openDiffModal`）——即 Utility → Text Review → Step 3「Prompt」按钮所用的同一个弹窗：左侧按右行 1:1 对齐的差异表 + 右侧 Monaco 编辑区 + 统计/↑↓/缩放/✕，footer 为 Cancel / Save。
+- 参数：`title` = `pgT('pgSystemPrompt')`，`original` = `current` = 打开时的 `config.systemPrompt`（编辑过程中左侧表实时显示差异），`filename` = `system-prompt.txt`（Monaco 纯文本）。**Save** 把右栏文本写回 `config.systemPrompt` → `pgSave()` → `pgRenderSidebar()`（框内立即显示新值）+ toast `pgSystemPromptSaved`；**Cancel / ✕** 丢弃（无 toast）。未传 `showSaveDefault` / `showRestoreBuiltIn`：Playground 没有后端默认提示（内置默认即空串，embed 对空串 restore 直接忽略），故这两颗按钮不出现。
+- `customMode`（Custom Body 开启）下框为 `disabled`：此时提示不参与请求，与面板其余控件的置灰语义一致。
+- 编辑器缺失（`window.EditorV2Embed` 未加载）时 toast `pgSystemPromptEditorFailed` 并保留原值。
+- `pg-ui-events.js::pgIsEditingTarget` 把 `readonly` 的 textarea 视为非输入目标：点开框后焦点短暂停在框上时，Alt/Ctrl 全局快捷键仍然生效。
+- 注意：V2 弹窗不响应 Esc（与 Step 3 一致，属 embed 的既有行为），关闭走 footer 的 Cancel / ✕。
+- 回归：`web/pg-presets.test.js`（框的只读/点击/内容、弹窗参数、保存回写与 toast、空提示仍可编辑、缺编辑器降级、`pgIsEditingTarget` 语义）。
 
 ## 9. 自动群聊
 
@@ -789,7 +829,8 @@ Director 和 Narrator 模型可以独立配置；空值回退第一个有模型�
 - `enablePlayground` 默认 true；
 - 显式 false 的配置保存/加载；
 - 旧配置缺字段时的兼容迁移；
-- 通用代理的流式、非流式、重试和响应行为。
+- 通用代理的流式、非流式、重试和响应行为；
+- Playground 前端 VM 契约测试（零依赖 Node VM + 手写 DOM stub，`node web/<name>.test.js`）：`web/pg-conversation-list.test.js`、`web/pg-presets.test.js`（参数默认值/请求体字段/预设存取/会话行删除/System Prompt 只读预览框与 V2 差异编辑器接线）、`web/pg-thinking-stream.test.js`（think 块跨 flush 路由、跨 chunk 标签残片、已分类前缀不重扫、spinner 相位续接）、`web/pg-scroll-pin.test.js`（流式滚动：底部跟随、上滚保持、滚回恢复、新消息重钉、reasoning 面板跨重渲染保持位置）、`web/pg-code-block.test.js`（代码块包装与复制按钮位置/点击复制、HTML 预览展开按钮与沙箱弹窗）、`web/pg-image-*.test.js`、`web/pg-media-render.test.js` 等。
 
 当前缺口：
 
@@ -844,9 +885,16 @@ go build -tags playground -o tinylab-pg.exe .
 - `web/playground/static-pg/playground/pg-image-batch.js`：Batch 三步向导（plan/transform/review）、Stage 4 viewer/sidebar renderer（`pgImageBatchRenderPane`/`pgImageBatchRenderSidebar`/`pgImageBatchRenderCanvas`）、SSE 订阅与 `pgImageBatchCleanup`、`pgImageBatchRestore` 显式恢复（替代 `pgImageBatchOnEnter`，仅由侧栏 Batch Project 点击触发，无自动重入）、`tinylab.playground.imageBatchDraft.v1`/`tinylab.playground.imageBatchActiveProject.v1` 持久化、显式 Stop immediate/after-current、Prompt×Variant 双层导航；`web/static/api.js` 的…
 - `web/playground/static-pg/pg-director.js`：剧情推进；
 - `web/playground/static-pg/pg-markdown.js`、`pg-render.js`：内容安全与渲染（`pg-render.js` 的 `pgMsgInnerHTML` 负责气泡内缩略图（含 image 模式气泡上方编辑输入图、右侧对齐）、空文本气泡剔除、loading 气泡秒级等待计数（`pgTickWaiting`/`pgEnsureWaitingTicker`））；
-- `web/playground/static-pg/pg-ui.js`、`pg-modal.js`、`pg-lifecycle.js`：交互和页面生命周期（`pg-ui.js` 含 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect` 图片参数面板与协议分支+Size 下拉编辑按钮+自定义尺寸输入、`pgRenderImageBlock`/`pgRenderInputThumbs` 图片附加 UI 与输入栏缩略图（image 模式发送前后位移）、发送时将输入图捕获到 `msg.images` 并清空 `config.imageUrls`；`pg-modal.js` 模型选择器支持 `kindFilter` 按 kind 过滤、Image Preview 弹窗 `pgShowImageModal`/`pgInitImageZoom`/`pgCopyImage` 含 auto-fit、footer 分辨率/大小/格式、经同源 `/api/image-proxy` 复制、图片尺寸编辑弹窗 `pgOpenImgSizesModal`/`pgSaveImgSizesModal` 调用 `pgApiPatch` 持久化 `ModelDef.ImgSizes`）；
-- `web/playground/static-pg/playground/pg-ui-reqleft.js`：普通模式左侧**会话列表**（`pgConvCreate`/`pgConvTitleFromText`/`pgSwitchConversation`/`pgRenderConvList`，Time + Title 两列，仅内存）+ 用量条目缓存（`pgMergeEntry`/`pgMergeTokenUpdate`/`pgEntryById`，轮询 + SSE）+ 气泡详情弹窗（`pgShowRequestInfo`/`pgShowReqEntry`，复用 `info-modal-overlay`）+ `pgRefreshBubbleMetrics`；轮询/SSE 生命周期 `pgStartReqLeftPolling`/`pgStopReqLeftPolling`；
-- `web/playground/static-pg/playground.css` 中的 `.pg-mode-toggle`、`.pg-req-left`、`.pg-req-table`：模式切换按钮和左侧面板布局。
+- `web/playground/static-pg/pg-ui.js`、`pg-modal.js`、`pg-lifecycle.js`：交互和页面生命周期（`pg-ui.js` 含 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect` 图片参数面板与协议分支+Size 下拉编辑按钮+自定义尺寸输入、`pgRenderImageBlock`/`pgRenderInputThumbs` 图片附加 UI 与输入栏缩略图（image 模式发送前后位移）、发送时将输入图捕获到 `msg.images` 并清空 `config.imageUrls`；`pg-ui.js` 的 System Prompt 面板为只读预览框（`readonly` + `onclick="pgOpenSystemPromptEditor()"`，见 §8.5）；`pg-modal.js` 模型选择器支持 `kindFilter` 按 kind 过滤、Image Preview 弹窗 `pgShowImageModal`/`pgInitImageZoom`/`pgCopyImage` 含 auto-fit、footer 分辨率/大小/格式、经同源 `/api/image-proxy` 复制、图片尺寸编辑弹窗 `pgOpenImgSizesModal`/`pgSaveImgSizesModal` 调用 `pgApiPatch` 持久化 `ModelDef.ImgSizes`）；
+- `web/playground/static-pg/playground/pg-ui-reqleft.js`：普通模式左侧**会话列表**（`pgConvCreate`/`pgConvTitleFromText`/`pgSwitchConversation`/`pgRenderConvList`，Time + Title 两列，仅内存）+ 用量条目缓存（`pgMergeEntry`/`pgMergeTokenUpdate`/`pgEntryById`，轮询 + SSE）+ 气泡详情弹窗（`pgShowRequestInfo`/`pgShowReqEntry`，复用 `info-modal-overlay`）+ `pgRefreshBubbleMetrics` + 行删除 `pgConvDelete`；轮询/SSE 生命周期 `pgStartReqLeftPolling`/`pgStopReqLeftPolling`；
+- `web/playground/static-pg/playground/pg-markdown.js`：Markdown/KaTeX/DOMPurify 管线 + `pgSplitStreamReasoning`/`pgThinkTagHold`（流式 think 块的跨 flush 状态路由与标签残片处理）；
+- `web/playground/static-pg/playground/pg-stream.js`：`pgStreamSplitContent`（分类已到达文本 + `w.pendingContentLen` 前缀记账）、`pgFlushRender`（50 ms 刷帧）、`pgFinish`/`pgFail`（收尾分类、状态复位、`msg.status='complete'`）；
+- `web/playground/static-pg/playground/pg-render.js`：`pgRenderBubble` 重建气泡后按 `msg.reasoningStartedAt` 续接 spinner 动画相位（`PG_SPIN_PERIOD_MS`）；
+- `web/playground/static-pg/playground/pg-modal.js`：`pgShowModal(html, cardClass)`（卡片类可替换，预设弹窗复用 Settings 的 `.qs-modal`）、调试/媒体弹窗；
+- `web/playground/static-pg/playground/pg-render.js`：`pgAtBottom`/`pgBindScrollPin`/`pgFollowBottom`/`pgScrollBottom`/`pgCaptureThinkingScroll`/`pgRestoreThinkingScroll`（流式滚动跟随与 reasoning 面板位置保持）、`pgRenderBubble` spinner 相位续接、`pgPostProcessCode`+`pgWrapCodeBlock`（代码块容器与复制按钮）、`pgRenderHtmlPreview`+`pgShowHtmlPreviewModal`（内联预览与展开弹窗）；
+- `web/playground/static-pg/playground/pg-presets.js`：Parameters / System Prompt 预设（`pgPresetButton`/`pgPresetOpen`/`pgPresetApply`/`pgPresetSaveCurrent`/`pgPresetRemove`/`pgPresetDelete`/`pgPresetCapture`，`localStorage` `tinylab.playground.presets.v1`，`PG_PRESET_PARAM_KEYS` 为参数面板字段清单）；
+- `web/playground/static-pg/playground/pg-ui-events.js`：`pgOpenSystemPromptEditor()`（System Prompt 面板的只读预览框点击入口 → `window.EditorV2Embed.openDiffModal`，保存写回 `config.systemPrompt` + 重渲染面板；见 §8.5）、`pgIsEditingTarget`（`readonly` textarea 不算输入目标）；
+- `web/playground/static-pg/playground.css` 中的 `.pg-mode-toggle`、`.pg-req-left`、`.pg-req-table`、`.pg-preset-btn`、`.pg-req-del-*`：模式切换按钮、左侧面板布局与预设入口/删除控件（预设弹窗本体沿用 `style-settings.css` 的 `.qs-modal*`）。
 - `web/playground/static-pg/pg-render.js` 中的 `pgMsgMetaInnerHTML`/`pgRenderMsgMeta`/`pgMetricsBlockHTML`：响应气泡按钮行（含详情 SVG 按钮）与 ttft/gt/in/res/ct/spd 两行（值来自 `web/static/monitor/monitor_state.js::entryMetrics`）；
 - `web/playground/static-pg/pg-search.js`：Search 模式 3 步 AI 编排（分类→搜索→综合）、搜索设置面板、结果渲染（含 `pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查防御后台 tab 渲染、`pgSearchSend()` 创建 entry 后立即调用 `pgSaveSearchHistory()`）；
 - `web/playground/static-pg/pg-state.js` 中的 `pgState.mode` 四态含 `'search'` 与 `pgState.search` 子树；
@@ -871,6 +919,11 @@ go build -tags playground -o tinylab-pg.exe .
 | 新增/删除前端模块 | `static-pg/` 子目录、`internal/feature/feature.go`（StaticFiles manifest）、`index.html`、本文模块表 |
 | 修改入口或运行时开关 | 两个 index、`serveUI`、Settings、路由矩阵测试 |
 | 修改请求字段 | `pg-request.js`、`pg-stream.js`、proxy 透传/改写规则；改 Custom Endpoint 须同步 `pg-stream.js` 的 `pgStream`/`pgSendNonStream` fetch URL/headers 与 `pg-core.js` 的 `PG_DEFAULT_CFG`；Normal 模式新增参数（如 reasoning_effort）按此链路：`pg-core.js`（`PG_DEFAULT_CFG`/`PG_DEFAULT_PARAMS`/`PG_REASONING_EFFORT_WIRE` 映射）→ `pg-ui.js`（`pgRenderSidebar` 参数行）→ `pg-request.js`（`pgBuildBodyForWin` 请求体字段）→ `pg-i18n.js` 增补键 |
+| 修改 Normal 模式参数面板 / 预设 | `pg-core.js`（`PG_DEFAULT_CFG` 的 `maxTokens`/`minP`、`PG_DEFAULT_PARAMS`、`pgBinIcon`）、`pg-ui.js`（`pgRenderSidebar` 参数行 + Parameters/System Prompt 标题行 `pgPresetButton`）、`pg-request.js`（`pgBuildBodyForWin` 的 `top_k`/`min_p`）、`pg-ui-events.js`（`pgOnParam(name, v, step)`：maxTokens 归一化 + `pgParamValText` 读数格式）、`pg-state.js`（`pgLoad` maxTokens 迁移）、`pg-presets.js`（`pgPreset*` 存取与应用、`pgPresetBodyHTML` 复用 Settings `.qs-modal*` 卡片、`pgPresetFocusIdx` 键盘导航、`tinylab.playground.presets.v1`）、`pg-modal.js`（`pgShowModal(html, cardClass)`）、`pg-i18n.js`、`playground.css`（`.pg-preset-btn` + `.pg-modal-overlay.show .qs-modal`）、`web/static/index.html` + `internal/feature/feature.go`（静态清单，两者必须同步）、回归 `web/pg-presets.test.js` |
+| 修改 System Prompt 面板 / 差异编辑器 | `pg-ui.js`（`pgRenderSidebar` 的 `sysPrompt` 只读预览框 + `pgPresetButton('system')`）、`pg-ui-events.js`（`pgOpenSystemPromptEditor`：`openDiffModal` 参数与保存回写；`pgIsEditingTarget` 的 `readonly` 语义）、`web/static/utility/editor-v2/editor-v2-embed.js`（**共用 embed，改动会同时影响 Text Review Step 3**）、`pg-i18n.js`（`pgSystemPromptEditHint`/`pgSystemPromptSaved`/`pgSystemPromptEditorFailed`）、`playground.css`（`.pg-system-prompt`）、回归 `web/pg-presets.test.js` |
+| 修改流式思考（reasoning / think 标签） | `pg-markdown.js`（`pgSplitStreamReasoning`/`pgThinkTagHold`：块状态路由与标签残片）、`pg-stream.js`（`pgStreamSplitContent` + `w.pendingContentLen` 前缀记账、`pgApplyChunk` 累积、`pgFlushRender`、`pgFinish`/`pgFail` 收尾与状态复位）、`pg-search.js`（同源 flush/finish 路径）、`pg-state.js`（`pendingContentLen`/`thinkingBlockOpen` 窗口字段与 clone 复位）、`pg-render.js`（`pgRenderBubble` 的 spinner 相位续接 `PG_SPIN_PERIOD_MS` 与 `playground.css` 的 `.pg-thinking-spinner` 周期对齐）、回归 `web/pg-thinking-stream.test.js` |
+| 修改代码块 / HTML 预览渲染 | `pg-render.js`（`pgPostProcessCode` 分支、`pgWrapCodeBlock` 包装+复制按钮、`pgRenderHtmlPreview` 标题行与展开按钮、`pgShowHtmlPreviewModal`）、`pg-core.js`（`PG_ICON_EXPAND`）、`playground.css`（`.pg-code-block`/`.pg-code-copy`/`.pg-html-preview-title`/`.pg-html-preview-expand`/`.pg-modal.pg-html-preview-modal`）、`pg-i18n.js`（`pgCopyCode`/`pgHtmlPreviewExpand`）、回归 `web/pg-code-block.test.js` |
+| 修改流式自动滚动 / 阅读位置 | `pg-render.js`（`pgAtBottom`/`pgBindScrollPin`/`pgFollowBottom`/`pgScrollBottom(i, force)`/`pgCaptureThinkingScroll`/`pgRestoreThinkingScroll`，`pgRenderBubble` 内先取后复原 reasoning 面板滚动）、`pg-stream.js`（`pgFlushRender` 调用、`pgSend` 置 `w.msgsPinned`，`pgFinish` 不再单独滚 reasoning）、`pg-ui.js`（`pgUserSend` 渲染前重钉）、`pg-ui-reqleft.js`（`pgSwitchConversation` 重钉）、`pg-search.js`（三处 `pgScrollBottom`）、`playground.css`（`.pg-thinking-body` 的 `max-height`/`overflow`）、回归 `web/pg-scroll-pin.test.js` |
 | 修改群聊 | timeline schema、视角映射、终止守卫、Director hooks |
 | 修改场景档案 | schema/version、导入迁移、localStorage、应用映射 |
 | 修改持久化 | localStorage key/version、容量限制、多窗口语义 |

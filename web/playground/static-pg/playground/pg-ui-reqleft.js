@@ -96,6 +96,20 @@ function pgConvRowById(id) {
   return null;
 }
 
+// pgConvDelete drops a row from the left panel. The row is only a list entry:
+// the conversation it points at stays in the pane (deleting the active row
+// just clears the active highlight), and the usage entry cache is untouched so
+// bubble metrics for existing replies keep working.
+function pgConvDelete(rowId) {
+  for (var i = 0; i < pgConvList.length; i++) {
+    if (pgConvList[i].id !== rowId) continue;
+    pgConvList.splice(i, 1);
+    if (pgActiveConvId === rowId) pgActiveConvId = 0;
+    pgRenderConvList();
+    return;
+  }
+}
+
 // pgConvBindEntry links a row to its usage entry once the response header
 // carries the proxy-issued request ID.
 function pgConvBindEntry(rowId, entryId) {
@@ -114,6 +128,9 @@ function pgSwitchConversation(rowId) {
   // Copy the array so continuing the conversation appends to the live list
   // only, leaving the row's snapshot intact.
   w.messages = row.messages.slice();
+  // Opening a conversation shows its newest message, whatever the reader had
+  // scrolled to in the previous one.
+  w.msgsPinned = true;
   pgActiveConvId = row.id;
   if (typeof pgRenderMessages === 'function') pgRenderMessages(0);
   if (typeof pgRenderDebug === 'function') pgRenderDebug();
@@ -162,6 +179,7 @@ function pgRenderConvList() {
   var html = '<table class="pg-req-table"><thead><tr>' +
     '<th class="pg-req-time-col">' + pgEscapeHtml(pgT('pgReqColTime')) + '</th>' +
     '<th>' + pgEscapeHtml(pgT('pgReqColTitle')) + '</th>' +
+    '<th class="pg-req-del-col"></th>' +
     '</tr></thead><tbody>';
   for (var i = 0; i < pgConvList.length; i++) {
     var row = pgConvList[i];
@@ -170,6 +188,9 @@ function pgRenderConvList() {
     html += '<tr class="' + cls + '" onclick="pgSwitchConversation(' + row.id + ')" title="' + pgEscapeAttr(row.title) + '">' +
       '<td class="pg-req-time-col">' + pgEscapeHtml(new Date(row.ts).toLocaleTimeString()) + '</td>' +
       '<td class="pg-req-title-cell">' + pgEscapeHtml(row.title) + '</td>' +
+      '<td class="pg-req-del-col">' +
+        '<button type="button" class="pg-req-del-btn btn-icon bin-button" onclick="event.stopPropagation();pgConvDelete(' + row.id + ')" title="' + pgEscapeAttr(pgT('pgConvDeleteTip')) + '" aria-label="' + pgEscapeAttr(pgT('pgConvDeleteTip')) + '">' + pgBinIcon() + '</button>' +
+      '</td>' +
     '</tr>';
   }
   html += '</tbody></table>';

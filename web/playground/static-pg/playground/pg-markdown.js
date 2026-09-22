@@ -176,17 +176,75 @@ function pgSplitReasoning(text) {
   return { content: text, reasoning: reasoning };
 }
 
-function pgExtractAllReasoning(text) {
-  if (text.indexOf(PG_THINK_OPEN) < 0) return { content: text, reasoning: '' };
-  var reasoningParts = [];
-  text = text.replace(PG_THINK_ALL_RE, function(_, inner) {
-    reasoningParts.push(inner);
-    return '';
-  });
-  var openIdx = text.indexOf(PG_THINK_OPEN);
-  if (openIdx >= 0) {
-    reasoningParts.push(text.slice(openIdx + PG_THINK_OPEN.length));
-    text = text.slice(0, openIdx);
+// pgThinkTagHold returns the length of the longest suffix of `text` that is a
+// proper prefix of `tag` (0 when there is none). A tag split across two stream
+// chunks would otherwise be rendered as literal text before the next chunk
+// completes it.
+function pgThinkTagHold(text, tag) {
+  var max = Math.min(tag.length - 1, text.length);
+  for (var n = max; n > 0; n--) {
+    if (text.slice(text.length - n) === tag.slice(0, n)) return n;
   }
-  return { content: text.trim(), reasoning: reasoningParts.join('\n').trim() };
+  return 0;
+}
+
+// pgSplitStreamReasoning routes an incremental content buffer into
+// { content, reasoning, tail } and carries the OPEN think-block state on the
+// window (`w.thinkingBlockOpen`) across flushes.
+//
+// Re-deriving the split from the buffer alone (the removed stateless
+// pgExtractAllReasoning) loses the block state as soon as a flush has consumed
+// the opening tag: the following chunks contain no tag, so their text was
+// routed to the answer bubble and the thinking bubble froze on its first flush
+// while the model kept reasoning. Tracking the open block on the window keeps
+// every chunk up to the closing tag routed to reasoning.
+//
+// `tail` is the trailing text that may still turn out to be part of a tag
+// split across chunks (e.g. "</thi" + "nk>"). The caller must keep it in its
+// pending buffer for the next flush and must not render it yet.
+function pgSplitStreamReasoning(text, w) {
+  if (!text) return { content: '', reasoning: '', tail: '' };
+  var content = '';
+  var parts = [];
+  var tail = '';
+  var rest = text;
+  while (rest) {
+    if (w.thinkingBlockOpen) {
+      var close = rest.indexOf(PG_THINK_CLOSE);
+      if (close < 0) {
+        // An incomplete close tag must not be consumed as reasoning: hold it
+        // back, otherwise the rest of the answer would stay inside the block.
+        var holdClose = pgThinkTagHold(rest, PG_THINK_CLOSE);
+        if (holdClose) {
+          var beforeTail = rest.slice(0, rest.length - holdClose);
+          if (beforeTail) parts.push(beforeTail);
+          tail = rest.slice(rest.length - holdClose);
+        } else {
+          parts.push(rest);
+        }
+        break;
+      }
+      parts.push(rest.slice(0, close));
+      rest = rest.slice(close + PG_THINK_CLOSE.length);
+      w.thinkingBlockOpen = false;
+      continue;
+    }
+    var open = rest.indexOf(PG_THINK_OPEN);
+    if (open < 0) {
+      // A trailing partial tag stays unclassified: consuming it as content
+      // would hide a block whose opening tag spans two chunks.
+      var holdOpen = pgThinkTagHold(rest, PG_THINK_OPEN);
+      if (holdOpen) {
+        content += rest.slice(0, rest.length - holdOpen);
+        tail = rest.slice(rest.length - holdOpen);
+      } else {
+        content += rest;
+      }
+      break;
+    }
+    content += rest.slice(0, open);
+    rest = rest.slice(open + PG_THINK_OPEN.length);
+    w.thinkingBlockOpen = true;
+  }
+  return { content: content, reasoning: parts.join('\n'), tail: tail };
 }

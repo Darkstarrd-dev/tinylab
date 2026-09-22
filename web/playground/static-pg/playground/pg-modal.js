@@ -16,9 +16,13 @@ function pgCloseModal() {
   if (overlay) { overlay.classList.remove('show'); }
 }
 
-function pgShowModal(html) {
+// pgShowModal renders `html` inside the playground modal overlay. `cardClass`
+// replaces the default `.pg-modal` card class so a modal can adopt an existing
+// card style (the preset manager reuses the Settings page's `.qs-modal`) and
+// inherit that element's sizing and chrome.
+function pgShowModal(html, cardClass) {
   var overlay = pgEnsureModalOverlay();
-  overlay.innerHTML = '<div class="pg-modal">' + html + '</div>';
+  overlay.innerHTML = '<div class="' + (cardClass || 'pg-modal') + '">' + html + '</div>';
   requestAnimationFrame(function() { overlay.classList.add('show'); });
 }
 

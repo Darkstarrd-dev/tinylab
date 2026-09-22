@@ -281,8 +281,11 @@ function pgUserSend() {
   }
   for (var i2 = 0; i2 < pgState.splitCount; i2++) {
     if (skipped.indexOf(i2) >= 0) continue;
-    pgRenderMessages(i2);
     var w2 = pgWinAt(i2);
+    // A new message always jumps to the end of the pane, even if the reader
+    // had scrolled up while the previous reply streamed.
+    w2.msgsPinned = true;
+    pgRenderMessages(i2);
     pgSend(i2, w2.messages.length - 1);
   }
   pgSave();
@@ -606,6 +609,16 @@ function pgResetSettings() {
   pgRenderMessages(pgState.activeWin);
   pgToast(pgT('pgCfgReset'), 'success');
 }
+// pgParamValText formats a parameter value for its slider's read-out. Sliders
+// with a whole-number step (step >= 1, e.g. Top K 1..100 step 1) show integers:
+// the toFixed(2) used for the fractional sliders would render "20.00" for a
+// value the user can only reach in whole steps.
+function pgParamValText(v, step) {
+  if (typeof v !== 'number' || !isFinite(v)) return v == null ? '' : String(v);
+  var isInt = typeof step === 'number' && step >= 1 && step % 1 === 0;
+  return isInt ? String(Math.round(v)) : v.toFixed(2);
+}
+
 function pgRenderSidebar() {
   var side = document.getElementById('pg-side');
   if (!side) return;
@@ -724,7 +737,7 @@ function pgRenderSidebar() {
     var valAttr = typeof val === 'number' ? 'value="' + val + '"' : 'value=""';
     var input = isNum
       ? '<input type="number" min="' + min + '" step="' + step + '" ' + valAttr + ' onchange="pgOnParam(\'' + key + '\', this.value==\'\'?0:'+ (min < 0 ? 'parseFloat(this.value)' : 'parseInt(this.value,10)||0') + ')">'
-      : '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" oninput="pgOnParam(\'' + key + '\', parseFloat(this.value))"><span class="pg-val" id="pg-val-' + key + '">' + (typeof val === 'number' ? val.toFixed(2) : val) + '</span>';
+      : '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" oninput="pgOnParam(\'' + key + '\', parseFloat(this.value), this.step)"><span class="pg-val" id="pg-val-' + key + '">' + pgParamValText(val, step) + '</span>';
     return '<div class="pg-param' + (disabled ? ' disabled' : '') + '">' +
       '<button class="pg-toggle' + (on ? ' on' : '') + '" onclick="pgToggleParam(\'' + key + '\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (on ? '✓' : '✕') + '</button>' +
       '<label>' + pgEscapeHtml(pgT(label)) + '</label>' +
@@ -757,7 +770,7 @@ function pgRenderSidebar() {
       '</div>' +
       paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
       paramRow('topP', 'pgTopP', 0, 1, 0.05, false) +
-      paramRow('topK', 'pgTopK', 1, 100, 1, true) +
+      paramRow('topK', 'pgTopK', 1, 100, 1, false) +
       paramRow('maxOutputTokens', 'pgMaxOutputTokens', 1, 65536, 1, true) +
       paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
       paramRow('frequencyPenalty', 'pgFreqPenalty', -2, 2, 0.1, false) +
@@ -786,9 +799,11 @@ function pgRenderSidebar() {
     params =
       paramRow('temperature', 'pgTemperature', 0, 2, 0.1, false) +
       paramRow('topP', 'pgTopP', 0, 1, 0.05, false) +
+      paramRow('topK', 'pgTopK', 1, 100, 1, false) +
+      paramRow('minP', 'pgMinP', 0, 1, 0.01, false) +
       paramRow('frequencyPenalty', 'pgFreqPenalty', -2, 2, 0.1, false) +
       paramRow('presencePenalty', 'pgPresPenalty', -2, 2, 0.1, false) +
-      paramRow('maxTokens', 'pgMaxTokens', 0, 1, 1, true) +
+      paramRow('maxTokens', 'pgMaxTokens', 1, 1, 1, true) +
       paramRow('thinkingBudget', 'pgThinking', 0, 100000, 100, true) +
       '<div class="pg-param' + (!en.reasoningEffort || customMode ? ' disabled' : '') + '">' +
         '<button class="pg-toggle' + (en.reasoningEffort ? ' on' : '') + '" onclick="pgToggleParam(\'reasoningEffort\')" data-tooltip="' + pgEscapeHtml(pgT('pgParamToggle')) + '">' + (en.reasoningEffort ? '✓' : '✕') + '</button>' +
@@ -812,8 +827,11 @@ function pgRenderSidebar() {
   }
 
   // --- System prompt ---
+  // The box is a read-only preview of the active window's current prompt and
+  // the click target that opens the V2 differ editor (the same window the Text
+  // Review step-3 "Prompt" button opens), so the prompt is never edited inline.
   var sysPrompt =
-    '<textarea class="pg-system-prompt" id="pg-sysprompt" placeholder="' + pgEscapeHtml(pgT('pgSystemPromptPlaceholder')) + '" oninput="pgOnSystemPrompt(this.value)"' + (customMode ? ' disabled' : '') + '>' + pgEscapeHtml(cfg.systemPrompt || '') + '</textarea>';
+    '<textarea class="pg-system-prompt" id="pg-sysprompt" readonly placeholder="' + pgEscapeHtml(pgT('pgSystemPromptPlaceholder')) + '" onclick="pgOpenSystemPromptEditor()" data-tooltip="' + pgEscapeAttr(pgT('pgSystemPromptEditHint')) + '"' + (customMode ? ' disabled' : '') + '>' + pgEscapeHtml(cfg.systemPrompt || '') + '</textarea>';
 
   // --- Image URL input ---
   var imgBlock = pgRenderImageBlock(customMode);
@@ -955,8 +973,8 @@ function pgRenderSidebar() {
       winbar +
       autoChatPanels +
       '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSelectModel')) + '</div>' + modelSel + '</div>' +
-      '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgParams')) + '</div>' + params + '</div>' +
-      '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgSystemPrompt')) + '</div>' + sysPrompt + '</div>' +
+      '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('pgParams')) + '</span>' + pgPresetButton('params') + '</div>' + params + '</div>' +
+      '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title"><span>' + pgEscapeHtml(pgT('pgSystemPrompt')) + '</span>' + pgPresetButton('system') + '</div>' + sysPrompt + '</div>' +
       '<div class="pg-panel' + dimCls + '"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgImage')) + '</div>' + imgBlock + '</div>' +
       '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgCustomEndpoint')) + '</div>' + customEp + '</div>' +
       '<div class="pg-panel"><div class="pg-panel-title">' + pgEscapeHtml(pgT('pgCustomBody')) + '</div>' + custom + '</div>' +

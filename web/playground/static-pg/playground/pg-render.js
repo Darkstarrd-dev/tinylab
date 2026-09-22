@@ -38,29 +38,64 @@ function pgRenderMediaPart(u, sp, sf) {
   '</div>';
 }
 
-function pgScrollBottom(i, assistantIdx) {
-  pgScrollBottomReasoning(i, assistantIdx, true);
-  var box = document.getElementById('pg-messages-' + i);
-  if (box) box.scrollTop = box.scrollHeight;
+// pgAtBottom reports whether a scroll container sits at the end of its
+// scrollable content. `slack` absorbs the few pixels the browser's layout
+// rounds off, so a container that is being followed still counts as "at the
+// bottom" right after its content grew.
+function pgAtBottom(el, slack) {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= (slack == null ? 4 : slack);
 }
 
-function pgScrollBottomReasoning(i, assistantIdx, streamingOnly) {
+// pgBindScrollPin keeps a pin flag in sync with the reader's position: a scroll
+// away from the end clears it, scrolling back to the end sets it again. Bound
+// once per element; the flag itself lives on the window/message object because
+// the streaming render replaces these containers.
+function pgBindScrollPin(el, onChange) {
+  if (!el || el.__pgPinBound) return;
+  el.__pgPinBound = true;
+  el.addEventListener('scroll', function() { onChange(pgAtBottom(el)); });
+}
+
+// pgFollowBottom scrolls a container to its end while it is pinned.
+function pgFollowBottom(el, pinned, onChange) {
+  if (!el) return;
+  pgBindScrollPin(el, onChange);
+  if (pinned) el.scrollTop = el.scrollHeight;
+}
+
+// pgScrollBottom keeps the message list at the end of the newest reply. Stream
+// flushes call it ~20x/s, so it only follows a list the reader left at the
+// bottom: scrolling up to read back used to be impossible because the next
+// flush yanked the view down again. `force` re-pins (a new message always jumps
+// to the end).
+function pgScrollBottom(i, force) {
   var w = pgWinAt(i);
-  if (!w) return;
-  if (streamingOnly && !w.streaming) return;
-  if (assistantIdx == null || !w.messages[assistantIdx]) return;
-  try {
-    var bub = document.getElementById('pg-bubble-' + i + '-' + assistantIdx);
-    if (!bub) return;
-    var bodies = bub.querySelectorAll('.pg-thinking-body');
-    for (var k = 0; k < bodies.length; k++) {
-      var b = bodies[k];
-      var pp = b.parentElement;
-      if (pp && pp.classList && !pp.classList.contains('collapsed')) {
-        b.scrollTop = b.scrollHeight;
-      }
-    }
-  } catch (e) {}
+  var box = document.getElementById('pg-messages-' + i);
+  if (!w || !box) return;
+  if (force) w.msgsPinned = true;
+  pgFollowBottom(box, w.msgsPinned !== false, function(pinned) { w.msgsPinned = pinned; });
+}
+
+// pgCaptureThinkingScroll reads the reasoning body's scroll position before
+// pgRenderBubble replaces the bubble HTML (which recreates the element and
+// would otherwise drop the reader back to the top of the reasoning text).
+function pgCaptureThinkingScroll(bub, msg) {
+  var body = bub.querySelector('.pg-thinking-body');
+  if (!body) return null;
+  return { top: body.scrollTop, pinned: msg.thinkingPinned !== false };
+}
+
+// pgRestoreThinkingScroll re-applies that position to the freshly rendered
+// body, or follows the end while the reader is pinned to it.
+function pgRestoreThinkingScroll(bub, msg, prev) {
+  var body = bub.querySelector('.pg-thinking-body');
+  if (!body) return;
+  var parent = body.parentElement;
+  if (parent && parent.classList && parent.classList.contains('collapsed')) return;
+  pgBindScrollPin(body, function(pinned) { msg.thinkingPinned = pinned; });
+  if (prev && !prev.pinned) body.scrollTop = prev.top;
+  else body.scrollTop = body.scrollHeight;
 }
 
 function pgFormatTime(ts) {
@@ -76,6 +111,11 @@ function pgFormatDuration(ms) {
   return pgT('pgDurationSec', [(ms / 1000).toFixed(2)]);
 }
 
+// Period of the streaming thinking spinner (playground.css
+// `.pg-thinking-spinner{animation:pg-spin .8s linear infinite}`). Used to
+// rebase the animation after a re-render so it never restarts from 0deg.
+var PG_SPIN_PERIOD_MS = 800;
+
 function pgRenderBubble(i, idx) {
   var w = pgWinAt(i);
   var wrap = document.getElementById('pg-bubble-' + i + '-' + idx);
@@ -84,17 +124,24 @@ function pgRenderBubble(i, idx) {
   if (!msg) return;
   var isSourceVisible = !!msg.sourceVisible;
   var html = pgMsgInnerHTML(i, idx, msg, isSourceVisible);
+  // The reasoning body is recreated by the swap below; keep the reader's
+  // position (or follow the end) across it.
+  var prevThinkingScroll = pgCaptureThinkingScroll(wrap, msg);
   wrap.innerHTML = html;
+  pgRestoreThinkingScroll(wrap, msg, prevThinkingScroll);
+  // The bubble HTML is replaced on every stream flush (~50 ms), which recreates
+  // the spinner element and restarts its CSS animation from 0deg — the ring
+  // visibly stuttered and never completed a turn. Rebasing the animation with a
+  // negative delay onto the elapsed thinking time keeps the rotation
+  // continuous across re-renders.
+  var spinner = wrap.querySelector('.pg-thinking-spinner');
+  if (spinner && msg.reasoningStartedAt && !msg.reasoningCompletedAt) {
+    spinner.style.animationDelay = '-' + ((Date.now() - msg.reasoningStartedAt) % PG_SPIN_PERIOD_MS) + 'ms';
+  }
   pgRenderMsgMeta(i, idx);
   var isStreaming = msg.status === 'streaming' || msg.status === 'loading';
   pgHighlight(wrap);
   pgPostProcessCode(wrap, isStreaming);
-  wrap.querySelectorAll('.pg-code-copy').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var codeEl = btn.parentElement && btn.parentElement.querySelector('code');
-      pgCopyToClipboard(codeEl ? codeEl.textContent : '', pgT('pgCodeCopied'));
-    });
-  });
   wrap.querySelectorAll('.pg-mermaid').forEach(function(el) {
     el.addEventListener('click', function() { pgOpenMermaidSvg(el); });
   });
@@ -116,7 +163,33 @@ function pgPostProcessCode(container, isStreaming) {
     } else if (lang === 'html' || /^<!DOCTYPE/i.test(raw) || /^<svg/i.test(raw) || /^<\?xml/i.test(raw)) {
       pgRenderHtmlPreview(pre, raw);
     }
+    // Last: the preview/mermaid insertions above anchor on `pre`'s parent, and
+    // wrapping moves `pre` into the code-block container.
+    pgWrapCodeBlock(pre);
   });
+}
+
+// pgWrapCodeBlock puts a rendered code block into a relatively-positioned
+// container with a copy button in its top-right corner. The button must not
+// live inside `pre`: that element scrolls horizontally (`overflow-x:auto`), and
+// an absolutely positioned child would be dragged along by `scrollLeft`.
+function pgWrapCodeBlock(pre) {
+  if (!pre.parentNode || pre.parentNode.classList.contains('pg-code-block')) return;
+  var block = document.createElement('div');
+  block.className = 'pg-code-block';
+  pre.parentNode.insertBefore(block, pre);
+  block.appendChild(pre);
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pg-code-copy';
+  btn.setAttribute('data-tooltip', pgT('pgCopyCode'));
+  btn.setAttribute('aria-label', pgT('pgCopyCode'));
+  btn.textContent = pgT('pgCopy');
+  btn.addEventListener('click', function() {
+    var codeEl = pre.querySelector('code');
+    pgCopyToClipboard(codeEl ? codeEl.textContent : '', pgT('pgCodeCopied'));
+  });
+  block.appendChild(btn);
 }
 
 function pgRenderMermaid(pre, code, isStreaming) {
@@ -180,7 +253,20 @@ function pgRenderHtmlPreview(pre, html) {
   wrap.className = 'pg-html-preview';
   var title = document.createElement('div');
   title.className = 'pg-html-preview-title';
-  title.textContent = pgT('pgHtmlPreview');
+  var titleLabel = document.createElement('span');
+  titleLabel.className = 'pg-html-preview-label';
+  titleLabel.textContent = pgT('pgHtmlPreview');
+  var expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'pg-html-preview-expand';
+  expandBtn.setAttribute('data-tooltip', pgT('pgHtmlPreviewExpand'));
+  expandBtn.setAttribute('aria-label', pgT('pgHtmlPreviewExpand'));
+  expandBtn.innerHTML = typeof PG_ICON_EXPAND !== 'undefined' ? PG_ICON_EXPAND : '⛶';
+  // Bound in JS (not an inline onclick) so the raw markup never has to be
+  // escaped into an attribute.
+  expandBtn.addEventListener('click', function() { pgShowHtmlPreviewModal(html); });
+  title.appendChild(titleLabel);
+  title.appendChild(expandBtn);
   var iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', '');
   iframe.setAttribute('srcDoc', html);
@@ -197,6 +283,22 @@ function pgRenderHtmlPreview(pre, html) {
   wrap.appendChild(title);
   wrap.appendChild(iframe);
   pre.parentNode.insertBefore(wrap, pre.nextSibling);
+}
+
+// pgShowHtmlPreviewModal expands an inline HTML/SVG preview to a near-fullscreen
+// modal. The frame keeps the inline preview's sandbox (no scripts) — the modal
+// only changes the viewport, not what the markup is allowed to do.
+function pgShowHtmlPreviewModal(html) {
+  pgShowModal(
+    '<div class="pg-modal-header">' +
+      '<span class="pg-modal-title">' + pgEscapeHtml(pgT('pgHtmlPreview')) + '</span>' +
+      '<button class="pg-modal-close" onclick="pgCloseModal()">✕</button>' +
+    '</div>' +
+    '<div class="pg-modal-body pg-html-preview-modal-body">' +
+      '<iframe class="pg-html-preview-frame" sandbox="" srcdoc="' + pgEscapeAttr(html) + '"></iframe>' +
+    '</div>',
+    'pg-modal pg-html-preview-modal'
+  );
 }
 
 function pgMsgInnerHTML(i, idx, msg, isSourceVisible) {
