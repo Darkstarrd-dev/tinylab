@@ -334,6 +334,9 @@
   };
 
   window.pgImageExecUnit = function (w, prompt, req, unit, signal, generation) {
+    // Left panel: one row per executed image request (memory only). Image
+    // requests carry no conversation, so the row only records time + title.
+    if (typeof pgConvCreate === 'function') pgConvCreate(pgConvTitleFromText(prompt), null);
     var p;
     if (req.protocol === 'comfyui') {
       p = comfyResult(w, prompt, signal, generation, unit ? unit.seed : null);

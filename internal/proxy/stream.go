@@ -15,6 +15,20 @@ import (
 	"github.com/tinylab/tinylab/internal/util"
 )
 
+// setUpstreamIdentityHeaders advertises which provider/key served the request
+// plus the internal request ID, so clients can correlate a response with its
+// usage/monitor entry. The Playground reads all three: provider/key for the
+// pane header and the request ID to bind a response bubble to its entry.
+func setUpstreamIdentityHeaders(w http.ResponseWriter, sel *rotation.SelectedKey, reqID string) {
+	if sel != nil {
+		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
+		w.Header().Set("X-TinyLab-Key", sel.KeyName)
+	}
+	if reqID != "" {
+		w.Header().Set("X-TinyLab-Request-Id", reqID)
+	}
+}
+
 func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, model string, sel *rotation.SelectedKey, latencyMs int64, reqBody []byte, normalize bool, reqID string, reqHeaders http.Header, upstreamURL string, entryFormat combo.EntryFormat, originalModel, sessionKey string) {
 	defer resp.Body.Close()
 
@@ -37,10 +51,7 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	if sel != nil {
-		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyLab-Key", sel.KeyName)
-	}
+	setUpstreamIdentityHeaders(w, sel, reqID)
 	w.WriteHeader(http.StatusOK)
 
 	// Streaming responses must not be force-terminated by the HTTP server's
@@ -532,10 +543,7 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	if strings.HasPrefix(ct, "image/") {
 		defer resp.Body.Close()
 		w.Header().Set("Content-Type", ct)
-		if sel != nil {
-			w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
-			w.Header().Set("X-TinyLab-Key", sel.KeyName)
-		}
+		setUpstreamIdentityHeaders(w, sel, reqID)
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
 		if sel != nil {
@@ -581,10 +589,7 @@ func (h *Handler) passThroughResponse(w http.ResponseWriter, resp *http.Response
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if sel != nil {
-		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyLab-Key", sel.KeyName)
-	}
+	setUpstreamIdentityHeaders(w, sel, reqID)
 	w.WriteHeader(resp.StatusCode)
 
 	_, werr := w.Write(bodyBytes)

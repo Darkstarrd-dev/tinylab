@@ -85,20 +85,7 @@ function pgRenderBubble(i, idx) {
   var isSourceVisible = !!msg.sourceVisible;
   var html = pgMsgInnerHTML(i, idx, msg, isSourceVisible);
   wrap.innerHTML = html;
-  try {
-    var metaWrap = document.getElementById('pg-msg-' + i + '-' + idx);
-    if (metaWrap) {
-      var metaEl = metaWrap.querySelector('.pg-msg-meta');
-      if (metaEl) {
-        metaEl.innerHTML = pgMsgMetaInnerHTML(i, idx, msg);
-      } else if (msg.role !== 'loading') {
-        var meta = document.createElement('div');
-        meta.className = 'pg-msg-meta' + (msg.role === 'assistant' && idx === w.messages.length - 1 ? ' always-show' : '');
-        meta.innerHTML = pgMsgMetaInnerHTML(i, idx, msg);
-        metaWrap.appendChild(meta);
-      }
-    }
-  } catch (e) { /* meta 更新失败不影响气泡内容 */ }
+  pgRenderMsgMeta(i, idx);
   var isStreaming = msg.status === 'streaming' || msg.status === 'loading';
   pgHighlight(wrap);
   pgPostProcessCode(wrap, isStreaming);
@@ -552,6 +539,9 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
       html += '<button class="pg-action" onclick="pgAppendAssistant(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgAppend')) + '">' + (typeof PG_ICON_APPEND !== 'undefined' ? PG_ICON_APPEND : '+') + '</button>';
       html += '<button class="pg-action" onclick="pgRegenerate(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgRegenerate')) + '">' + PG_ICON_REGEN + '</button>';
     }
+    if (msg.reqId) {
+      html += '<button class="pg-action" onclick="pgShowRequestInfo(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgReqDetailTip')) + '">' + PG_ICON_INFO + '</button>';
+    }
     if (msg.status === 'error') {
       html += '<button class="pg-action" onclick="pgEditPromptForError(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgEditPrompt')) + '">' + PG_ICON_EDIT + '</button>';
     }
@@ -570,7 +560,55 @@ function pgMsgMetaInnerHTML(i, idx, msg) {
     html += '<button class="pg-action danger" onclick="pgActionDelete(' + i + ',' + idx + ')" data-tooltip="' + pgEscapeHtml(pgT('pgDelete')) + '">' + PG_ICON_DELETE + '</button>';
   }
   html += '</div>';
+  if (msg.role === 'assistant' && msg.reqId) {
+    var entry = (typeof pgEntryById === 'function') ? pgEntryById(msg.reqId) : null;
+    if (entry) html += pgMetricsBlockHTML(entry);
+  }
   return html;
+}
+
+// pgMetricsBlockHTML renders the two rows under the action buttons: the
+// ttft/gt/in/res/ct/spd labels and their values, computed from the request's
+// usage entry by the same helper the Monitor's Recent Requests table uses.
+function pgMetricsBlockHTML(entry) {
+  var m = entryMetrics(entry);
+  var cols = [
+    { label: pgT('thTTFT'), tip: pgT('ttTTFT'), value: m.ttft },
+    { label: pgT('thGT'), tip: pgT('ttGT'), value: m.gt },
+    { label: pgT('thIn'), tip: pgT('thInput'), value: String(m.in) },
+    { label: pgT('thRES'), tip: pgT('ttRES'), value: resDisplay(m.res) },
+    { label: pgT('thCT'), tip: pgT('ttCT'), value: String(m.ct) },
+    { label: pgT('thSpd'), tip: pgT('thAvgSpeed'), value: m.spd },
+  ];
+  var head = '', vals = '';
+  for (var i = 0; i < cols.length; i++) {
+    head += '<span data-tooltip="' + pgEscapeHtml(cols[i].tip) + '">' + pgEscapeHtml(cols[i].label) + '</span>';
+    vals += '<span>' + pgEscapeHtml(cols[i].value) + '</span>';
+  }
+  return '<div class="pg-msg-metrics">' +
+    '<div class="pg-msg-metrics-row">' + head + '</div>' +
+    '<div class="pg-msg-metrics-row pg-msg-metrics-values">' + vals + '</div>' +
+  '</div>';
+}
+
+// pgRenderMsgMeta (re)builds a message's meta row — timing, action buttons and,
+// for a request-backed assistant message, the usage metric rows. Called on
+// render and whenever the request's usage entry changes.
+function pgRenderMsgMeta(i, idx) {
+  var w = pgWinAt(i);
+  if (!w || !w.messages[idx]) return;
+  var msg = w.messages[idx];
+  var wrap = document.getElementById('pg-msg-' + i + '-' + idx);
+  if (!wrap) return;
+  var metaEl = wrap.querySelector('.pg-msg-meta');
+  if (!metaEl) {
+    if (msg.role === 'loading') return;
+    metaEl = document.createElement('div');
+    metaEl.className = 'pg-msg-meta' + (msg.role === 'assistant' && idx === w.messages.length - 1 ? ' always-show' : '');
+    wrap.appendChild(metaEl);
+  }
+  var html = pgMsgMetaInnerHTML(i, idx, msg);
+  if (metaEl.innerHTML !== html) metaEl.innerHTML = html;
 }
 
 function pgRenderMessages(i) {

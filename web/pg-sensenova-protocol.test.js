@@ -31,7 +31,12 @@ function makeEnv() {
     Date, Math, Promise, JSON, Object, Array, String, Number, Error,
     parseInt, parseFloat, isNaN, encodeURIComponent, URLSearchParams,
     AbortController, Uint8Array,
-    document: { documentElement: { lang: 'en', getAttribute: function(attr) { return 'en'; } } },
+    document: {
+      documentElement: { lang: 'en', getAttribute: function(attr) { return 'en'; } },
+      // The image path also records a left-panel row per request
+      // (pg-ui-reqleft.js), which looks up its container by id.
+      getElementById: function () { return null; },
+    },
     fetch: function (url, opts) {
       calls.fetches.push({ url: String(url), opts: opts || null });
       const idx = calls.fetches.length;

@@ -92,15 +92,8 @@ function cleanupPlayground() {
     pgAutoChatStop();
   }
   if (typeof pgStopReqLeftPolling === 'function') pgStopReqLeftPolling();
-  for (var i = 0; i < pgState.windows.length; i++) {
-    var w = pgWinAt(i);
-    if (w.streaming) {
-      if (w.abortCtrl) {
-        try { w.abortCtrl.abort(); } catch (e) {}
-        w.abortCtrl = null;
-      }
-      w.streaming = false;
-    }
-  }
+  // In-flight requests keep running: leaving the page must not abort them (the
+  // render on return reads the same in-memory windows, and a finished stream
+  // renders its result there). Only the page's own subscriptions are torn down.
   if (typeof pgDirectorReset === 'function') pgDirectorReset();
 }

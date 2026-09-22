@@ -122,6 +122,107 @@ function formatGenSpeed(outTokens, genMs) {
   return (outTokens / (genMs / 1000)).toFixed(1) + ' tok/s';
 }
 
+// entryMetrics derives the TTFT / GT / IN / RES / CT / SPD columns of a usage
+// row from an entry. Single source of truth for those six numbers: the Monitor
+// Recent Requests table and the Playground response bubbles both render it, so
+// a request reads identically in either surface.
+//
+// TTFT ticks wall-clock until the first token is observed (ttftMs), then
+// freezes. GT anchors on the server-side first-content stamp (firstContentMs)
+// when present, else ts + ttftMs; a finished entry freezes at
+// latencyMs - ttftMs. RES/CT prefer the per-split counters and fall back to the
+// aggregate outputTokens for entries recorded before the split existed.
+//
+// nowMs is injectable for tests. Returns display strings plus the raw anchors
+// the Monitor needs for its per-second tick (genStartMs/genSrc/ttftFrozen).
+function entryMetrics(e, nowMs) {
+  var now = nowMs || Date.now();
+  var processing = e.status === 'processing';
+  var ttftDisplay, ttftFrozen;
+  if (processing) {
+    if (e.ttftMs && e.ttftMs > 0) {
+      ttftDisplay = formatTTFT(e.ttftMs);
+      ttftFrozen = true;
+    } else {
+      var ttftElapsed = now - new Date(e.timestamp).getTime();
+      if (isNaN(ttftElapsed) || ttftElapsed < 0) ttftElapsed = 0;
+      ttftDisplay = formatTTFT(ttftElapsed);
+      ttftFrozen = false;
+    }
+  } else {
+    ttftFrozen = true;
+    ttftDisplay = (e.ttftMs && e.ttftMs > 0) ? formatTTFT(e.ttftMs) : '—';
+  }
+  var genStartMs = null;
+  var genSrc = '';
+  if (e.firstContentMs && e.firstContentMs > 0) {
+    genStartMs = e.firstContentMs;
+    genSrc = 'fcm';
+  } else if (e.ttftMs && e.ttftMs > 0 && e.timestamp) {
+    genStartMs = new Date(e.timestamp).getTime() + e.ttftMs;
+    if (isNaN(genStartMs)) genStartMs = null;
+    if (genStartMs != null) genSrc = 'ttft';
+  }
+  var gtMs = null, gtDisplay, spdDisplay;
+  var inT = (e.inputTokens || 0);
+  var resT = resIsEnc(e.reasoningTokens) ? -1 : (e.reasoningTokens || 0);
+  var ctT = (e.contentTokens || 0);
+  var outT = (e.outputTokens || 0);
+  var resN = resNum(resT);
+  if (outT > 0 && resN + ctT === 0) ctT = outT;
+  var spdBase = resN + ctT > 0 ? resN + ctT : outT;
+  if (processing) {
+    if (genStartMs != null) {
+      gtMs = now - genStartMs;
+      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+      gtDisplay = formatGenTime(gtMs);
+      spdDisplay = formatGenSpeed(spdBase, gtMs);
+    } else {
+      gtDisplay = '—';
+      spdDisplay = '—';
+    }
+  } else {
+    if (genStartMs != null) {
+      gtMs = (e.latencyMs || 0) - (e.ttftMs || 0);
+      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
+    } else {
+      gtMs = e.latencyMs || 0;
+    }
+    gtDisplay = formatGenTime(gtMs);
+    spdDisplay = formatGenSpeed(spdBase, gtMs);
+  }
+  return {
+    ttft: ttftDisplay, gt: gtDisplay, spd: spdDisplay,
+    in: inT, res: resT, ct: ctT,
+    genStartMs: genStartMs, genSrc: genSrc, ttftFrozen: ttftFrozen,
+  };
+}
+
+// mergeProcessingEntryFields lifts the live SSE-driven fields (ttft, tokens,
+// first-content stamp) of a processing entry onto a snapshot that may lag them:
+// REST list snapshots carry older counters than the request-ttft /
+// request-tokens events that arrived in between, and regressing a processing
+// entry makes GT/OUT/SPD jump backwards. Sentinel-aware for RES: "enc" (-1)
+// beats 0/no-info and loses to any counted plaintext. Mutates and returns
+// `incoming`; shared by the Monitor list merge and the Playground entry cache.
+function mergeProcessingEntryFields(existing, incoming) {
+  if (!existing || !incoming) return incoming;
+  if ((existing.ttftMs || 0) > (incoming.ttftMs || 0)) incoming.ttftMs = existing.ttftMs;
+  if ((existing.inputTokens || 0) > (incoming.inputTokens || 0)) incoming.inputTokens = existing.inputTokens;
+  if ((existing.outputTokens || 0) > (incoming.outputTokens || 0)) incoming.outputTokens = existing.outputTokens;
+  var exRes = existing.reasoningTokens, inRes = incoming.reasoningTokens;
+  if (inRes === -1) {
+    if (exRes > 0) incoming.reasoningTokens = exRes;
+  } else if (exRes === -1) {
+    if (!(inRes > 0)) incoming.reasoningTokens = -1;
+  } else if ((exRes || 0) > (inRes || 0)) {
+    incoming.reasoningTokens = exRes;
+  }
+  if ((existing.contentTokens || 0) > (incoming.contentTokens || 0)) incoming.contentTokens = existing.contentTokens;
+  if (existing.firstContentMs && !incoming.firstContentMs) incoming.firstContentMs = existing.firstContentMs;
+  return incoming;
+}
+
 // resIsEnc reports the encrypted-reasoning sentinel: reasoningTokens == -1
 // means opaque reasoning was observed but nothing is countable.
 function resIsEnc(res) {

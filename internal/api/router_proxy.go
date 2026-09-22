@@ -23,7 +23,7 @@ func (rt *Router) registerProxyRoutes(r chi.Router, proxyHandler *proxy.Handler)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Expose-Headers", "X-TinyLab-Provider, X-TinyLab-Key")
+		w.Header().Set("Access-Control-Expose-Headers", "X-TinyLab-Provider, X-TinyLab-Key, X-TinyLab-Request-Id")
 		w.WriteHeader(http.StatusNoContent)
 	})
 

@@ -1,12 +1,124 @@
-// pg-ui-reqleft.js — Request Left polling + render (split from pg-ui.js)
-// Provides: pgReqLeftTimer/pgReqLeftSSE/pgReqLeftProcTimer/pgReqLeftInflight,
-// pgRenderReqLeft, pgStartReqLeftPolling, pgStopReqLeftPolling, pgReqLeftHasProcessing,
-// pgReqLeftEnsureProcTimer, pgReqLeftStopProcTimer, pgReqLeftMergeEntry, pgReqLeftRender,
-// pgFetchReqLeft, pgRenderReqLeftContent, pgReqLeftEntries, pgShowReqDetail
+// pg-ui-reqleft.js — Playground left panel: conversation list + request entry cache.
+//
+// Left panel = this app run's requests: one row per client-initiated request
+// (Time + Title). Rows live in memory only — nothing is persisted — so quitting
+// the app (or reloading the page) clears both the list and every conversation it
+// points at. A chat request's row carries the window's message snapshot for that
+// request, so clicking the row switches the pane back to that conversation; image
+// requests have no conversation and clicking them only reports that.
+//
+// The usage-entry cache (id → usage.Entry) is fed by /api/monitor/playground,
+// the /api/monitor/events SSE stream and the X-TinyLab-Request-Id response header
+// captured per request. It backs the response-bubble request/response modal and
+// the ttft/gt/in/res/ct/spd rows.
+//
+// Provides: pgReqLeftTimer/pgReqLeftSSE/pgReqLeftProcTimer, pgRenderReqLeft,
+// pgStartReqLeftPolling, pgStopReqLeftPolling, pgConvCreate, pgConvBindEntry,
+// pgConvTitleFromText, pgSwitchConversation, pgRenderConvList, pgEntryById,
+// pgMergeEntry, pgRefreshBubbleMetrics, pgShowRequestInfo, pgShowReqEntry
 var pgReqLeftTimer = null;
 var pgReqLeftSSE = null;
 var pgReqLeftProcTimer = null;
-var pgReqLeftInflight = {};  // id → entry, for processing entries from SSE
+
+var PG_CONV_MAX = 50;        // retained conversation rows (newest first)
+var PG_REQ_CACHE_MAX = 200;  // retained usage entries (modal + metrics source)
+
+var pgConvList = [];        // newest first: { id, title, ts, entryId, messages }
+var pgConvSeq = 0;
+var pgActiveConvId = 0;
+var pgReqEntryCache = {};   // entry id → usage entry
+var pgReqEntryOrder = [];   // cache insertion order, for bounded eviction
+
+// pgTitleFromText builds a conversation title: the first 20 CJK characters, or
+// the first 10 words for non-CJK text.
+function pgConvTitleFromText(text) {
+  var s = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  if (!s) return '—';
+  var chars = Array.from(s);
+  if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(s)) {
+    return chars.slice(0, 20).join('') + (chars.length > 20 ? '…' : '');
+  }
+  var words = s.split(' ');
+  return words.slice(0, 10).join(' ') + (words.length > 10 ? '…' : '');
+}
+
+// pgLastUserText returns the text of the request body's last user message,
+// covering both the OpenAI (messages) and Google (contents) body shapes.
+function pgLastUserText(body) {
+  if (!body) return '';
+  var i, m;
+  if (Array.isArray(body.messages)) {
+    for (i = body.messages.length - 1; i >= 0; i--) {
+      m = body.messages[i];
+      if (m && m.role === 'user') {
+        var t = pgTextContent(m.content);
+        if (t) return t;
+      }
+    }
+  }
+  if (Array.isArray(body.contents)) {
+    for (i = body.contents.length - 1; i >= 0; i--) {
+      m = body.contents[i];
+      if (m && m.role === 'user' && Array.isArray(m.parts)) {
+        var s = '';
+        for (var p = 0; p < m.parts.length; p++) {
+          if (m.parts[p] && m.parts[p].text) s += m.parts[p].text;
+        }
+        if (s) return s;
+      }
+    }
+  }
+  return '';
+}
+
+// pgConvCreate prepends a request row. `messages` is the window's message array
+// at send time (null for requests that are not chats); the card is marked active
+// only for chat conversations.
+function pgConvCreate(title, messages) {
+  var row = {
+    id: ++pgConvSeq,
+    title: title || '—',
+    ts: Date.now(),
+    entryId: '',
+    messages: messages || null,
+  };
+  pgConvList.unshift(row);
+  if (pgConvList.length > PG_CONV_MAX) pgConvList.length = PG_CONV_MAX;
+  if (row.messages) pgActiveConvId = row.id;
+  pgRenderConvList();
+  return row;
+}
+
+function pgConvRowById(id) {
+  for (var i = 0; i < pgConvList.length; i++) {
+    if (pgConvList[i].id === id) return pgConvList[i];
+  }
+  return null;
+}
+
+// pgConvBindEntry links a row to its usage entry once the response header
+// carries the proxy-issued request ID.
+function pgConvBindEntry(rowId, entryId) {
+  var row = pgConvRowById(rowId);
+  if (row) row.entryId = entryId || '';
+}
+
+// pgSwitchConversation restores the conversation captured by a row.
+function pgSwitchConversation(rowId) {
+  var row = pgConvRowById(rowId);
+  if (!row) return;
+  if (!row.messages) { pgToast(pgT('pgConvUnavailable'), 'warning'); return; }
+  if (pgIsGenerating()) { pgToast(pgT('pgGenSwitchLock'), 'warning'); return; }
+  var w = pgWinAt(0);
+  if (!w) return;
+  // Copy the array so continuing the conversation appends to the live list
+  // only, leaving the row's snapshot intact.
+  w.messages = row.messages.slice();
+  pgActiveConvId = row.id;
+  if (typeof pgRenderMessages === 'function') pgRenderMessages(0);
+  if (typeof pgRenderDebug === 'function') pgRenderDebug();
+  pgRenderConvList();
+}
 
 function pgRenderReqLeft(showReqLeft) {
   var container = document.getElementById('pg-req-left');
@@ -34,38 +146,58 @@ function pgRenderReqLeft(showReqLeft) {
         '<div class="pg-req-table-wrap" id="pg-req-left-content"></div>' +
       '</div>';
   }
+  pgRenderConvList();
   pgStartReqLeftPolling();
   if (typeof pgRenderTaskQueue === 'function') pgRenderTaskQueue(pgState.mode === 'image');
+}
+
+// pgRenderConvList renders the Time + Title table from pgConvList.
+function pgRenderConvList() {
+  var container = document.getElementById('pg-req-left-content');
+  if (!container) return;
+  if (!pgConvList.length) {
+    container.innerHTML = '<div class="pg-req-empty">' + pgEscapeHtml(pgT('pgReqEmpty')) + '</div>';
+    return;
+  }
+  var html = '<table class="pg-req-table"><thead><tr>' +
+    '<th class="pg-req-time-col">' + pgEscapeHtml(pgT('pgReqColTime')) + '</th>' +
+    '<th>' + pgEscapeHtml(pgT('pgReqColTitle')) + '</th>' +
+    '</tr></thead><tbody>';
+  for (var i = 0; i < pgConvList.length; i++) {
+    var row = pgConvList[i];
+    var cls = 'pg-req-row' + (row.id === pgActiveConvId ? ' active' : '') +
+      (row.messages ? '' : ' pg-req-row-noconv');
+    html += '<tr class="' + cls + '" onclick="pgSwitchConversation(' + row.id + ')" title="' + pgEscapeAttr(row.title) + '">' +
+      '<td class="pg-req-time-col">' + pgEscapeHtml(new Date(row.ts).toLocaleTimeString()) + '</td>' +
+      '<td class="pg-req-title-cell">' + pgEscapeHtml(row.title) + '</td>' +
+    '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
 
 function pgStartReqLeftPolling() {
   pgStopReqLeftPolling();
   pgFetchReqLeft();
   pgReqLeftTimer = setInterval(pgFetchReqLeft, 10000);
-  // SSE for real-time request-start/done events
+  // SSE keeps the entry cache (bubble metrics + detail modal) live.
   try {
     pgReqLeftSSE = new EventSource('/api/monitor/events');
     pgReqLeftSSE.onmessage = function(ev) {
       try {
         var data = JSON.parse(ev.data);
         if (data.type === 'request-start' && data.entry) {
-          var e = data.entry;
-          if (e.source === 'playground') {
-            pgReqLeftInflight[e.id] = e;
-            pgReqLeftMergeEntry(e);
-            pgReqLeftRender();
+          if (data.entry.source === 'playground') {
+            pgMergeEntry(data.entry);
+            pgRefreshBubbleMetrics();
             pgReqLeftEnsureProcTimer();
           }
+        } else if (data.type === 'request-tokens' && data.id) {
+          pgMergeTokenUpdate(data.id, data.entry);
+          pgRefreshBubbleMetrics();
         } else if (data.type === 'request-done' && data.id) {
-          var inflight = pgReqLeftInflight[data.id];
-          if (inflight) {
-            delete pgReqLeftInflight[data.id];
-          }
-          // 仅 merge Playground 来源的完成条目，避免 Recent Requests 的请求漏入
-          if (data.entry && data.entry.source === 'playground') {
-            pgReqLeftMergeEntry(data.entry);
-          }
-          pgReqLeftRender();
+          if (data.entry && data.entry.source === 'playground') pgMergeEntry(data.entry);
+          pgRefreshBubbleMetrics();
           if (!pgReqLeftHasProcessing()) pgReqLeftStopProcTimer();
         }
       } catch (ex) {}
@@ -83,18 +215,20 @@ function pgStopReqLeftPolling() {
     pgReqLeftSSE = null;
   }
   pgReqLeftStopProcTimer();
-  pgReqLeftInflight = {};
 }
 
 function pgReqLeftHasProcessing() {
-  return Object.keys(pgReqLeftInflight).length > 0;
+  for (var id in pgReqEntryCache) {
+    if (pgReqEntryCache[id] && pgReqEntryCache[id].status === 'processing') return true;
+  }
+  return false;
 }
 
 function pgReqLeftEnsureProcTimer() {
   if (pgReqLeftProcTimer) return;
   pgReqLeftProcTimer = setInterval(function() {
     if (pgReqLeftHasProcessing()) {
-      pgReqLeftRender();
+      pgRefreshBubbleMetrics();
     } else {
       pgReqLeftStopProcTimer();
     }
@@ -108,148 +242,149 @@ function pgReqLeftStopProcTimer() {
   }
 }
 
-// Merge an entry into pgReqLeftEntries (replace if same id, else prepend)
-function pgReqLeftMergeEntry(e) {
-  if (!e || !e.id) return;
-  var found = -1;
-  for (var j = 0; j < pgReqLeftEntries.length; j++) {
-    if (pgReqLeftEntries[j].id === e.id) { found = j; break; }
-  }
-  if (found >= 0) {
-    pgReqLeftEntries[found] = e;
-  } else {
-    pgReqLeftEntries.unshift(e);
-  }
-  // Keep list bounded
-  if (pgReqLeftEntries.length > 50) pgReqLeftEntries = pgReqLeftEntries.slice(0, 50);
+function pgEntryById(id) {
+  if (!id) return null;
+  return pgReqEntryCache[id] || null;
 }
 
-// Render the table from pgReqLeftEntries (no data fetch)
-function pgReqLeftRender() {
-  var container = document.getElementById('pg-req-left-content');
-  if (!container) return;
-  var entries = pgReqLeftEntries;
-  if (!entries.length) {
-    container.innerHTML = '<div class="pg-req-empty">' + pgEscapeHtml(pgT('pgReqEmpty')) + '</div>';
-    return;
+// pgMergeEntry stores a usage entry, lifting the live SSE-driven fields of a
+// processing entry onto a REST snapshot that may lag them.
+function pgMergeEntry(e) {
+  if (!e || !e.id) return;
+  var prev = pgReqEntryCache[e.id];
+  if (prev && prev.status === 'processing' && e.status === 'processing') {
+    mergeProcessingEntryFields(prev, e);
   }
-  // Sort by timestamp descending
-  entries = entries.slice().sort(function(a, b) {
-    var ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-    var tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-    return tb - ta;
-  });
-  pgReqLeftEntries = entries;
-  var html = '<table class="pg-req-table"><thead><tr>' +
-    '<th class="pg-req-status-col"></th>' +
-    '<th>' + pgEscapeHtml(pgT('pgReqColTime')) + '</th>' +
-    '<th>' + pgEscapeHtml(pgT('pgReqColLatency')) + '</th>' +
-    '<th>' + pgEscapeHtml(pgT('pgReqColTokens')) + '</th>' +
-    '</tr></thead><tbody>';
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-    var dotCls = 'pg-req-dot';
-    if (e.status === 'success') dotCls += ' pg-req-dot-success';
-    else if (e.status === 'error') dotCls += ' pg-req-dot-error';
-    else if (e.status === 'retry') dotCls += ' pg-req-dot-retry';
-    else dotCls += ' pg-req-dot-processing';
-    var timeStr = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '—';
-    var latStr;
-    if (e.status === 'processing') {
-      latStr = e.timestamp ? ((Date.now() - new Date(e.timestamp).getTime()) / 1000).toFixed(1) + 's' : '—';
-    } else {
-      latStr = e.latencyMs ? (e.latencyMs / 1000).toFixed(1) + 's' : '—';
+  if (!prev) pgReqEntryOrder.push(e.id);
+  pgReqEntryCache[e.id] = e;
+  while (pgReqEntryOrder.length > PG_REQ_CACHE_MAX) {
+    delete pgReqEntryCache[pgReqEntryOrder.shift()];
+  }
+}
+
+// pgMergeTokenUpdate applies a live request-tokens payload (partial entry) to a
+// cached entry.
+function pgMergeTokenUpdate(id, d) {
+  var e = pgReqEntryCache[id];
+  if (!e || !d) return;
+  if (d.inputTokens > 0) e.inputTokens = d.inputTokens;
+  if (d.outputTokens > 0) e.outputTokens = d.outputTokens;
+  if (typeof d.reasoningTokens === 'number') {
+    if (d.reasoningTokens === -1) {
+      if (!(e.reasoningTokens > 0)) e.reasoningTokens = -1;
+    } else if (d.reasoningTokens > (e.reasoningTokens || 0)) {
+      e.reasoningTokens = d.reasoningTokens;
     }
-    var tokStr = (e.status === 'processing') ? '—' : ((e.inputTokens || 0) + '/' + (e.outputTokens || 0));
-    html += '<tr style="cursor:pointer" onclick="pgShowReqDetail(' + i + ')">' +
-      '<td class="pg-req-status-col"><span class="' + dotCls + '"></span></td>' +
-      '<td>' + pgEscapeHtml(timeStr) + '</td>' +
-      '<td>' + pgEscapeHtml(latStr) + '</td>' +
-      '<td>' + pgEscapeHtml(tokStr) + '</td>' +
-    '</tr>';
   }
-  html += '</tbody></table>';
-  container.innerHTML = html;
+  if (d.contentTokens > (e.contentTokens || 0)) e.contentTokens = d.contentTokens;
+  if (d.firstContentMs > 0 && !e.firstContentMs) e.firstContentMs = d.firstContentMs;
 }
 
 function pgFetchReqLeft() {
-  // 使用 Playground 专用端点，数据源已物理隔离（仅含 playground 来源）
+  // Playground-scoped endpoint: the data source is physically isolated
+  // (playground-origin entries only).
   pgApiGet('/monitor/playground?limit=50').then(function(res) {
     var entries = (res && res.entries) || [];
-    // 双保险：仍过滤一次，防止未来数据源变更引入污染
-    entries = entries.filter(function(e) { return e.source === 'playground'; });
-    var seenIds = {};
-    entries.forEach(function(e) { seenIds[e.id] = true; });
-    for (var id in pgReqLeftInflight) {
-      if (!seenIds[id]) {
-        entries.unshift(pgReqLeftInflight[id]);
-      }
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].source === 'playground') pgMergeEntry(entries[i]);
     }
-    pgReqLeftEntries = entries;
-    pgReqLeftRender();
+    pgRefreshBubbleMetrics();
     if (pgReqLeftHasProcessing()) pgReqLeftEnsureProcTimer();
   }).catch(function() {});
 }
 
-function pgRenderReqLeftContent(data) {
-  var entries = (data && data.entries) || [];
-  entries = entries.filter(function(e) { return e.source === 'playground'; });
-  pgReqLeftEntries = entries;
-  pgReqLeftRender();
+// pgRefreshBubbleMetrics re-renders the meta row (buttons + ttft/gt/in/res/ct/spd)
+// of every assistant message whose usage entry just changed.
+function pgRefreshBubbleMetrics() {
+  for (var i = 0; i < pgState.windows.length; i++) {
+    var w = pgState.windows[i];
+    if (!w || !w.messages) continue;
+    for (var idx = 0; idx < w.messages.length; idx++) {
+      var m = w.messages[idx];
+      if (m && m.role === 'assistant' && m.reqId) pgRenderMsgMeta(i, idx);
+    }
+  }
 }
 
-var pgReqLeftEntries = [];
+// pgShowRequestInfo opens the request/response detail modal for the request
+// behind an assistant message.
+function pgShowRequestInfo(i, idx) {
+  var w = pgWinAt(i);
+  var msg = w && w.messages[idx];
+  if (!msg || !msg.reqId) return;
+  pgShowReqEntry(msg.reqId, msg);
+}
 
-async function pgShowReqDetail(idx) {
-  var e = pgReqLeftEntries[idx];
-  if (!e) return;
-  if (e.id) {
-    try {
-      var full = await pgApiGet('/monitor/entry/' + encodeURIComponent(e.id));
-      if (full) e = full;
-    } catch(ex) {}
-  }
+// pgShowReqEntry renders the entry detail modal, preferring the full entry from
+// the server (payloads/headers) and falling back to the cached entry or the
+// local message when the entry has been evicted.
+async function pgShowReqEntry(id, localMsg) {
   var overlay = document.getElementById('info-modal-overlay');
   if (!overlay) return;
   var titleEl = document.getElementById('info-modal-title');
   var bodyEl = document.getElementById('info-modal-body');
   if (!titleEl || !bodyEl) return;
 
-  titleEl.textContent = (e.provider || '?') + ' / ' + (e.model || '?') + ' \u2014 ' + (e.status || 'unknown') + ' (' + formatLatency(e.latencyMs || 0) + ')';
+  var e = null;
+  if (id) {
+    try {
+      var full = await pgApiGet('/monitor/entry/' + encodeURIComponent(id));
+      if (full) e = full;
+    } catch (ex) {}
+    if (!e) e = pgEntryById(id);
+  }
+
+  var summaryData = {};
+  if (id) summaryData['ID'] = id;
+  if (e) {
+    if (e.timestamp) summaryData['Timestamp'] = e.timestamp;
+    if (e.provider) summaryData['Provider'] = e.provider;
+    if (e.model) summaryData['Model'] = e.model;
+    if (e.keyName) summaryData['Key'] = e.keyName;
+    if (e.status) summaryData['Status'] = e.status;
+    if (e.latencyMs !== undefined && e.latencyMs !== null) summaryData['Latency'] = formatLatency(e.latencyMs);
+    if (e.ttftMs) summaryData['TTFT'] = e.ttftMs + 'ms';
+    if (e.inputTokens) summaryData['Input Tokens'] = e.inputTokens;
+    if (e.outputTokens) summaryData['Output Tokens'] = e.outputTokens;
+    if (e.error) summaryData['Error'] = e.error;
+    if (e.upstreamUrl) summaryData['Upstream URL'] = e.upstreamUrl;
+    if (e.respStatus) summaryData['Response Status'] = e.respStatus;
+  } else if (localMsg) {
+    if (localMsg.startedAt) summaryData['Started'] = new Date(localMsg.startedAt).toISOString();
+    if (localMsg.completedAt) summaryData['Completed'] = new Date(localMsg.completedAt).toISOString();
+    if (localMsg.durationMs != null) summaryData['Latency'] = formatLatency(localMsg.durationMs);
+    if (localMsg.status) summaryData['Status'] = localMsg.status;
+    if (localMsg.error) summaryData['Error'] = localMsg.error;
+    summaryData['Note'] = 'usage entry evicted';
+  }
+
+  titleEl.textContent = ((e && e.provider) || '?') + ' / ' + ((e && e.model) || '?') + ' \u2014 ' +
+    ((e && e.status) || (localMsg && localMsg.status) || 'unknown') +
+    ' (' + formatLatency((e && e.latencyMs) || (localMsg && localMsg.durationMs) || 0) + ')';
 
   bodyEl.classList.remove('info-modal-monitor');
   __infoModalSections = [];
   __rawFieldMap = {};
   var html = '';
-
-  var summaryData = {};
-  if (e.id) summaryData['ID'] = e.id;
-  if (e.timestamp) summaryData['Timestamp'] = e.timestamp;
-  if (e.provider) summaryData['Provider'] = e.provider;
-  if (e.model) summaryData['Model'] = e.model;
-  if (e.keyName) summaryData['Key'] = e.keyName;
-  if (e.status) summaryData['Status'] = e.status;
-  if (e.latencyMs !== undefined && e.latencyMs !== null) summaryData['Latency'] = formatLatency(e.latencyMs);
-  if (e.ttftMs) summaryData['TTFT'] = e.ttftMs + 'ms';
-  if (e.inputTokens) summaryData['Input Tokens'] = e.inputTokens;
-  if (e.outputTokens) summaryData['Output Tokens'] = e.outputTokens;
-  if (e.error) summaryData['Error'] = e.error;
-  if (e.upstreamUrl) summaryData['Upstream URL'] = e.upstreamUrl;
-  if (e.respStatus) summaryData['Response Status'] = e.respStatus;
   if (Object.keys(summaryData).length > 0) {
     html += renderInfoSection('Request Info', summaryData);
   }
-  if (e.reqPayload) {
+  if (e && e.reqPayload) {
     html += renderInfoSection('Request', e.reqPayload);
   }
-  if (e.reqHeaders) {
+  if (e && e.reqHeaders) {
     html += renderInfoSection('Request Headers', e.reqHeaders);
   }
-  if (e.respHeaders) {
+  if (e && e.respHeaders) {
     html += renderInfoSection('Response Headers', e.respHeaders);
   }
-  if (e.respPayload) {
+  if (e && e.respPayload) {
     html += renderInfoSection('Response Body', e.respPayload);
+  }
+  if (!e && localMsg) {
+    var text = pgTextContent(localMsg.content);
+    if (text) html += renderInfoSection('Response Body', text);
+    if (localMsg.reasoning) html += renderInfoSection('Reasoning', localMsg.reasoning);
   }
 
   bodyEl.innerHTML = html || '<div class="info-section">' + t('noData') + '</div>';
@@ -259,4 +394,3 @@ async function pgShowReqDetail(idx) {
   bodyEl.setAttribute('tabindex', '-1');
   bodyEl.focus();
 }
-

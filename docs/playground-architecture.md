@@ -1,3 +1,4 @@
+> **最后核对（2026-09-22，Normal 模式左侧会话列表 + 响应气泡指标 + 切页不中断）：** (1) **切页不中断请求**：`pg-lifecycle.js::cleanupPlayground` 不再 `abortCtrl.abort()` 在途流（此前离开页面即断开与服务器的连接），只做 `pgSaveSync`/`pgSaveMode`/停订阅/`pgDirectorReset`；`renderPlayground` 回到页面时沿用同一份内存窗口渲染，流继续写入同一 assistant 消息对象。(2) **对话不再持久化**：`pg-state.js` 移除 `PG_MSG_KEY` 读写（`pgLoad`/`pgSave`/`pgSaveSync`）、`pg-ui.js::pgSetMode` 移除跨模式消息落盘与 `pgNormalizeLoadedMessage`（连同上限常量一并删除），消息与左侧列表仅存内存，退出应用/刷新即清空；`pgLoad` 在 search 模式下保留已停车的 `modeWindows.normal`。(3) **左侧列表改为会话列表（Time + Title 两列）**：`pg-ui-reqleft.js` 重写——`pgConvList` 由客户端在发送时创建（`pgConvTitleFromText` 取前 20 个中文或前 10 个单词），行持有该请求时刻的消息快照，点击 `pgSwitchConversation` 切回该对话（在途生成/图片请求无对话时 toast `pgConvUnavailable`），移除 Latency/Tokens/状态点列；移除 `pgShowReqDetail` 与列表点击弹窗。(4) **请求详情移入响应气泡**：`pg-render.js` 在 assistant 消息的按钮行新增 SVG `PG_ICON_INFO` 按钮（`pgShowRequestInfo` → `pgShowReqEntry`，复用 `info-modal-overlay`/`renderInfoSection`，entry 被淘汰时回退本地消息摘要）。(5) **气泡新增 ttft/gt/in/res/ct/spd 两行**：`pgMetricsBlockHTML` 用 `monitor_state.js` 新增的共享纯函数 `entryMetrics(e, nowMs)` 渲染（Monitor Recent Requests 的 `renderUsageRow` 同源改造，`mergeProcessingEntryFields` 同时被 `monitor_io.js` 与 `pgMergeEntry` 复用），值来自 `/api/monitor/playground` + `/api/monitor/events`（含 `request-tokens`）缓存。(6) **请求↔气泡绑定**：代理响应新增 `X-TinyLab-Request-Id` 头（`proxy/stream.go::setUpstreamIdentityHeaders`），`pg-stream.js::pgCaptureRequestId` 写入 `msg.reqId`；i18n 修复：`pg-core.js::pgT` 先查 `PG_I18N` 再回退宿主 `t()`（此前 `pgDurationSec`/`pgMetaResponse` 等 pg* 键直出键名），并补齐 `pgDurationMs`/`pgDurationSec`/`pgMetaResponse`/`pgReqColTitle`/`pgConvUnavailable`/`pgReqDetailTip`（en+cn）。回归：`web/pg-conversation-list.test.js`（13 项）。
 > **最后核对（2026-09-16，Gallery 删除弹窗 focus 环 + Video 转码音频格式）：** (1) **删除弹窗 focus 对比度**：`web/playground/static-pg/playground.css` 新增 `.pg-btn:focus/.pg-btn:focus-visible{outline:2px solid var(--accent)}`（此前 `.pg-btn` 无任何 focus 规则，`.focus()` 落到浏览器默认黑色 outline，暗色下对比度差）。(2) **Video 转码音频格式（保存音轨）**：`gallery-edit.js`（`_renderVideoTranscodeForm`）Format 下拉新增 `MP3/M4A/OGG/OPUS/WAV/FLAC` 六个音频-only 选项；选中音频格式时隐藏视频 Codec/Quality/Scale 行与动图参数块，保留音频行并按容器自动选原生编码（mp3→mp3/m4a→aac/ogg·opus→opus/wav→wav/flac→flac），`copy` 保留，`none` 由后端拒绝；flac/wav/copy 隐藏无意义的码率列，`ge-vid-audio-codec` 切换同样触发码率显隐。后端 `internal/mediaedit/args.go` 新增音频-only 分支：`containerExt` 增六个音频扩展，`audioNativeCodec`/`isAudioOnlyContainer`/`compatibleAudioCodecs` 做容器-编码兼容校验（错配如 aac+mp3 直接报错），`-vn` 丢视频流后按编码出音频（aac/opus/mp3 带码率，flac 无码率，wav 走 `pcm_s16le`，copy 直拷，`none` 拒绝），输出 `desc=audio_<container>`；`types.go` 注释同步容器/编码白名单；`edit_handlers.go::mimeForGallery` 补 mkv/mov 六音频 MIME（此前仅 mp4/webm，下载/预览走 `application/octet-stream`）；`args_test.go` 新增 MP3/WAV/错配/none 四用例。`go vet` + `go test ./internal/mediaedit/ ./internal/api/gallery/` + `node --check` 两前端文件 + `gallery-edit-contract.test.js` 全绿。
 > **最后核对（2026-09-16，Gallery 编辑弹窗打开延迟修复）：** `gallery-edit.js::triggerMediaEditor` 新增 assetId/grantId（非 zip）直通分支——服务端可解析的输入直接进 `openMediaEditor`（probe/start 均走 assetId/grantId+rel 服务端解析），不再经 `getBlob()` 全量下载 + `POST /edit/upload-temp` 预传；弹窗本身零文件操作，ffmpeg 仅在 Execute 后运行。大视频打开延迟从与文件大小正相关降为常量。`web/gallery-edit-contract.test.js` 新增回归用例（grantId 视频零 upload-temp/file 拉取直通）。
 > **最后核对（2026-09-09，Gallery 转换弹窗全量适配自定义下拉与 Toggle 开关，Tree Batch 布局优化）：** (1) **Tree Batch Convert 布局优化**：`gallery-edit-batch.js`（`openTreeBatchConvert`）将 Format 选择器与 Fit to 限制长边开关/步进输入框调整至第一行，Fit to 步进框宽度提升至 130px 提供充裕空间；Scale 滑块与 Quality 滑块排布在第二行两端对称；移除 Compress 复选框。(2) **Image Convert 弹窗自定义控件适配**：`gallery-edit.js`（`_renderImageForm`）将 Format 格式下拉与 Set Name 的 Digits 位数下拉全量替换为全局 `renderCustomSelectHtml`；将 Set Path、Set Name、Uniform、Compress 以及 Strip metadata 复选框全量替换为项目自定义 `.toggle-switch` 开关。(3) **Video Convert 弹窗自定义控件适配**：`gallery-edit.js`（`_renderVideoTranscodeForm`、`_renderVideoTrimForm`、`_renderVideoSubtitleForm` 及 `_buildModalHTML`）将 Codec、Format、Quality、Preset、Audio Codec、Audio Bitrate、Loop Mode、Dither、Trim 重新编码 Codec 与 Quality、Subtitle Container 全量替换为 `renderCustomSelectHtml`，并增强 `_syncAnimLoopOptions` 与 `_updateVidCodecUI` 的动态选项重构与选中文本同步；将 Set Path、Set Name、Strip metadata、Lossless、Trim 启用开关、Subtitle 启用开关全量替换为 `.toggle-switch`。(4) **全局自定义下拉能力扩展**：`web/static/app.js`（`toggleCustomSelect`）增强对原生 `<option>` 隐藏（`style.display === 'none'`）与禁用（`disabled`）的双向感知，在展开下拉时自动隐藏过滤掉被上游逻辑屏蔽的格式选项；`playground.css` 完善自定义下拉与禁用光标支持。(5) **验证**：全量 Go 测试 64 包、Node/Bun 契约测试 `gallery-edit-contract.test.js` 与前端 JS 语法检查全绿。
@@ -419,14 +420,15 @@ pg-i18n -> pg-core -> pg-state -> pg-markdown -> pg-request -> pg-stream
 | `pg-image-inspire.js` | 仅使用 text helper model 的 Natural/Tag/JSON Prompt Inspire modal |
 | `pg-image-batch.js` | Batch 三步 plan/transform/review、natural/tag/json 选择与提示词编译、snapshot-first SSE、pause/resume/stop/retry、Prompt × Variant viewer |
 | `pg-comfyui.js` | 浏览器同源 ComfyUI proxy、workflow 参数与 history polling |
-| `pg-render.js` | Manual Canvas、消息、来源、代码/Mermaid/HTML、debug 渲染 |
+| `pg-render.js` | Manual Canvas、消息、来源、代码/Mermaid/HTML、debug 渲染、气泡 meta（详情按钮 + ttft/gt/in/res/ct/spd 两行） |
 | `pg-ui.js` | 输入、消息操作、窗口/侧栏/参数、Image mode routing |
+| `pg-ui-reqleft.js` | 左侧会话列表（Time + Title，仅内存）、用量条目缓存（轮询 + SSE）、气泡详情弹窗、指标刷新 |
 | `pg-modal.js` | 调试、图片预览（含 zoom/pan/copy/save/reset）、模型选择等 modal |
 | `pg-autochat.js` | 共享时间线、多 Agent 调度、摘要、群聊 modal |
 | `pg-setup.js` | 场景向导、ScenarioProfile、导入导出和应用 |
 | `pg-director.js` | Director 判断、Narrator 生成和生命周期 |
 | `pg-search.js` | Search 模式：3 步 AI 编排、搜索设置面板、结果渲染 |
-| `pg-lifecycle.js` | render/cleanup；Batch 离开页面只关闭 SSE，不取消后端任务 |
+| `pg-lifecycle.js` | render/cleanup；Batch 离开页面只关闭 SSE，不取消后端任务；离开页面不中止在途聊天请求 |
 | `pg-i18n.js` | Playground 独立中英文字典 + 共享 `T()` 回退 |
 | `playground.css` | 全屏布局、Manual Canvas、Batch、侧栏、modal 与既有模块样式 |
 
@@ -458,11 +460,11 @@ t(key, args?)
 离开 Playground 时 `cleanupPlayground()`：
 
 - **Search 模式（`mode === 'search'`）：** 不 abort 请求（让搜索在后台继续运行），仅调用 `pgSaveSearchHistory()` 持久化 searchHistory + `pgSaveMode()` 保存模式，然后 early return。
-- 停止自动群聊；
-- 停止 Recent Requests 左侧面板的轮询（`pgStopReqLeftPolling`）；
-- abort 每个窗口的在途 fetch；
-- 清除 streaming 标记；
+- 停止自动群聊（`pgAutoChatStop`，仅在群聊运行中）；
+- 停止 Recent Requests 左侧面板的轮询/SSE（`pgStopReqLeftPolling`）；
 - reset Director/Narrator。
+
+**在途请求不中止（2026-09-22 行为变更）：** 普通模式下的流式/非流式 fetch 不再被 abort，离开页面只是拆掉页面自身的订阅；回到 Playground 时 `renderPlayground` 复用同一份内存窗口渲染，仍在跑的流继续写入同一 assistant 消息对象（气泡在无 DOM 时静默跳过重绘）。请求的主动中止只由 Stop 按钮（`pgStop`）、Clear 与 `pgClearWindowMessages` 触发。
 
 CSS 在 Playground 页面禁用主容器滚动，只允许消息区和侧栏内部滚动；宽度不超过 900px 时切为单列。
 
@@ -513,22 +515,31 @@ grid-template-columns: 260px 1fr 320px
   列3: .pg-side         — 右侧栏（不变）
 ```
 
-左侧面板通过 `pgRenderReqLeft(showReqLeft)` 构建，包含标题和可滚动表格。数据来自 `GET /api/monitor/playground?limit=50`（经 `pgApiGet` 适配器），每 10 秒轮询一次（`pgReqLeftTimer`）作为后备。同时通过 SSE 订阅 `/api/monitor/events`，实时接收 `request-start` 和 `request-done` 事件——请求发送即立即出现 processing 条目，完成后即时更新最终状态。processing 条目的 latency 由 500ms 定时器（`pgReqLeftProcTimer`）实时刷新。
+左侧面板通过 `pgRenderReqLeft(showReqLeft)` 构建，内容由 `pgRenderConvList()` 渲染。**列表是本次应用运行的会话列表**：行由客户端在发送时创建（`pgConvCreate`，文本请求取 `pgConvTitleFromText(body 中最后一条 user 文本)`，图片请求取图片提示词），持有该请求时刻的消息快照（`w.messages.slice()`，与实时窗口共享消息对象，流式写入即反映到行快照）。行只存内存、不落盘——退出应用或刷新即清空（见 §7）。
 
-**来源过滤（物理分流 + 前端双保险）：** 后端 `recordUsage` 按 `X-TinyLab-Source` 头分流：`source == "playground"` 的请求写入独立的 `pgUsageBuf`（经 `Handler.SetPgUsage` 注入），其余写入 `usageBuf`；`GET /api/monitor/playground` 仅返回 `pgUsageBuf` 的条目 + playground 来源的 inflight 条目。`GET /api/monitor` 过滤掉 playground 来源的 inflight。前端 `pgFetchReqLeft` 改用 `/api/monitor/playground`，`pgRenderReqLeftContent` 仍过滤 `source === 'playground'` 作双保险。Playground 与管理端 Recent Requests 均始终捕获 payload/headers，不依赖 debug mode。
-
-表格仅显示 4 列，**不依赖 debug mode**，始终可见：
+表格仅两列：
 
 | 列 | 数据字段 | 显示格式 |
 |---|---|---|
-| 状态指示 | `status` | 彩色圆点：success=绿、error=红、retry=黄、processing=蓝(脉冲) |
-| 时间 | `timestamp` | `toLocaleTimeString()` |
-| Latency | `latencyMs` | `(latencyMs/1000).toFixed(1) + 's'`；processing 时实时计算 |
-| Tokens | `inputTokens` / `outputTokens` | `in/out`；processing 时显示 `—` |
+| 时间 | 行 `ts`（发送时刻） | `toLocaleTimeString()` |
+| 标题 | 行 `title` | 前 20 个中文（含日文假名/兼容汉字）字符，或非中日文本的前 10 个单词；超长加 `…` |
 
-离开普通模式或切换到多窗口时，`pgStopReqLeftPolling()` 清除定时器并清空面板内容。`cleanupPlayground()` 也会调用此函数。
+**点击切换对话：** 行 `onclick="pgSwitchConversation(id)"` 把 `w.messages` 替换为该行快照的副本（副本保证后续续聊不会污染快照），并高亮该行为 active。无对话的行（图片请求）提示 `pgConvUnavailable`；有在途生成时提示 `pgGenSwitchLock` 并不切换。原来的行点击详情弹窗（`pgShowReqDetail`）已移除，请求/响应详情改由响应气泡的详情按钮打开（见 §6.3）。
 
-**点击查看详情：** 表格每一行带 `onclick="pgShowReqDetail(i)"`，`pgShowReqDetail` 复用主 UI 的 `info-modal-overlay`（与 Usage 页面 Recent Requests 详情相同的模态），通过 `renderInfoSection` / `buildInfoField`（`info_common.js`）构建内容。管理端 Recent Requests 的六个 section 名称为 `Request Info`、`Request`、`Request Headers`、`Response Headers`、`Status`、`Response Body`，默认全部折叠；除 `Status` 仅支持折叠外，其余五个 section 具备 section 级 Pretty/Raw/Copy，字段级仍具备 Pretty/Raw/Copy，Raw 保留捕获原始字符串；section header 与 field header 两级 sticky。Playground 复用同一 `info_common.js` 兼容边界，不改变共享基础设施其他调用方默认行为。Playground 自身展示该条目的既有字段：Request Info（时间/Provider/模型/Key/状态/延迟/首 Token/Tokens/错误/上游/响应状态）、Request Body、Request Headers、Response Headers、Response Body。**不依赖 debug mode**——服务端始终捕获 payload 和 headers。当前条目缓存于模块变量 `pgReqLeftEntries`。
+**用量条目缓存（气泡指标与详情弹窗的数据源）：** `pgReqEntryCache`（id → usage.Entry，上限 200，`pgMergeEntry`/`pgMergeTokenUpdate`）由 `GET /api/monitor/playground?limit=50`（10 秒轮询后备）+ SSE `/api/monitor/events` 的 `request-start` / `request-tokens` / `request-done` 事件喂入；processing 条目的 REST 快照用 `mergeProcessingEntryFields`（`monitor_state.js`，与 Monitor 列表同源）保证 live 字段不回退。有在途条目时 500ms 定时器（`pgReqLeftProcTimer`）重绘气泡指标行。面板本身不再直接渲染条目，因此轮询只服务缓存与指标刷新。
+
+**来源过滤（物理分流 + 前端双保险）：** 后端 `recordUsage` 按 `X-TinyLab-Source` 头分流：`source == "playground"` 的请求写入独立的 `pgUsageBuf`（经 `Handler.SetPgUsage` 注入），其余写入 `usageBuf`；`GET /api/monitor/playground` 仅返回 `pgUsageBuf` 的条目 + playground 来源的 inflight 条目。`GET /api/monitor` 过滤掉 playground 来源的 inflight。前端 `pgFetchReqLeft` 使用 `/api/monitor/playground` 并再次过滤 `source === 'playground'` 作双保险。Playground 与管理端 Recent Requests 均始终捕获 payload/headers，不依赖 debug mode。
+
+离开普通模式或切换到多窗口时，`pgStopReqLeftPolling()` 清除定时器并清空面板内容。`cleanupPlayground()` 也会调用此函数（但不再中止在途请求，见 §6.1）。
+
+### 6.3 响应气泡的详情按钮与用量行
+
+每条 assistant 消息（普通模式）在气泡下方的 meta 行里渲染：
+
+1. **详情按钮（SVG `PG_ICON_INFO`）**：仅当消息带 `reqId` 时渲染。点击 `pgShowRequestInfo(i, idx)` → `pgShowReqEntry(id, msg)` 打开 `info-modal-overlay`（与 Usage 页 Recent Requests 详情同款），先取 `GET /api/monitor/entry/{id}` 拿完整 payload/headers，失败则退回内存缓存条目，再失败退回本地消息摘要（Status/Latency/Response Body），**不伪造数据**。
+2. **两行用量指标**（`.pg-msg-metrics`）：表头行 `ttft gt in res ct spd` + 数值行，取自该请求的 usage 条目，用 `monitor_state.js` 的 `entryMetrics(e, nowMs)` 计算——与 Monitor Recent Requests 表格同一函数、同一格式（`formatTTFT`/`formatGenTime`/`formatGenSpeed`/`resDisplay`），因此同一请求在 Playground 与 Monitor 显示一致；处理中的条目由 SSE `request-tokens` 与 500ms 定时器刷新。
+
+`reqId` 来自代理响应头 `X-TinyLab-Request-Id`（`internal/proxy/stream.go::setUpstreamIdentityHeaders`，见 `proxy-architecture.md`），由 `pg-stream.js::pgCaptureRequestId` 在 fetch 返回头阶段写入消息。走 Custom Endpoint（绕过代理）的请求没有该头，因此不渲染详情按钮与指标行。meta 行重建由 `pg-render.js::pgRenderMsgMeta` 统一负责（渲染时与指标刷新时都走它）。
 
 ## 7. 状态模型与持久化
 
@@ -564,7 +575,7 @@ pgState
 |---|---|---|
 | `tinylab.playground.cfg.v2` | window 0 config | 是 |
 | `tinylab.playground.params.v2` | window 0 参数开关 | 是 |
-| `tinylab.playground.msg.v2` | window 0 消息 | 受容量裁剪 |
+| ~~`tinylab.playground.msg.v2`~~ | **2026-09-22 起不再写入**：对话不持久化（内存态，退出/刷新即清空） |
 | `tinylab.playground.autochat.v1` | 用户名、迭代、延迟、Director 配置 | 仅配置 |
 | `tinylab.playground.scenario.v1` | 最近 ScenarioProfile | 是 |
 | `tinylab.playground.search.history.v1` | searchHistory 列表（最多 50 条） | 是（不含 streaming 状态） |
@@ -574,10 +585,10 @@ pgState
 
 关键语义：
 
-- **只有 window 0 的普通 config、参数和消息持久化。** window 1–3 在首次进入时克隆 window 0 配置，但清空消息和运行态。
+- **只有 window 0 的普通 config 与参数持久化。** window 1–3 在首次进入时克隆 window 0 配置，但清空消息和运行态。
 - `splitCount`、`activeWin`、timeline、群聊运行状态、回复计数和读游标不持久化。
 - 普通保存有 500 ms debounce。
-- 消息上限：原始 JSON 1 MiB、最多 100 条、单条 content/reasoning 40k 字符、总计约 120k 字符。
+- **消息不持久化（2026-09-22 起）：** 消息列表、左侧会话列表（`pgConvList`）与行快照只存内存，`pgLoad`/`pgSave`/`pgSaveSync`/`pgSetMode` 均不写 `PG_MSG_KEY`（旧 key 不再读取，历史残留数据被忽略）。刷新或重启即回到空对话。
 - ScenarioProfile 独立持久化，但应用到各窗口后的 window 1–3 配置本身不会直接持久化；刷新后可从场景 review 再次应用。
 - **Search 模式持久化：** `searchHistory`（最多 50 条）和 `activeSearchId` 通过 `PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY` 持久化到 localStorage。`pgSearchSend()` 创建 entry 后立即调用 `pgSaveSearchHistory()`；`pgLoad()` 中 mode 加载后立即调用 `pgLoadSearchHistory()` 恢复历史，search 模式下跳过 localStorage messages 加载改用 `pgSyncSearchMessages()` 从 searchHistory 同步消息引用。`cleanupPlayground()` 在 search 模式下 early return 不 abort 请求，仅持久化状态。渲染函数（`pgSearchFlushRender`/`pgSearchFinish`/`pgSearchFail`）检查 DOM 存在性，后台 tab 渲染时容器已被清空则静默跳过。
 
@@ -828,14 +839,15 @@ go build -tags playground -o tinylab-pg.exe .
 - `web/playground/static-pg/pg-state.js`：状态与持久化（含 `pgLoadSearchHistory()`/`pgSaveSearchHistory()`/`pgSearchEntryToJSON()` Search 历史 localStorage 持久化、`PG_SEARCH_HISTORY_KEY`/`PG_SEARCH_ACTIVE_KEY`/`PG_SEARCH_MAX_ENTRIES` 常量）；
 - `web/playground/static-pg/pg-comfyui.js`：ComfyUI 连接、动态工作流参数表单、`/prompt` 提交、`/history` 轮询、`/view` data URL 转换和图片保存。
 - `web/playground/static-pg/pg-request.js`：请求体契约（含 `pgBuildImageBody` 按协议构建 images 请求体；GPT 分支新增 n（1..5）/ response_format（url/b64_json）/ output_format（png/jpeg/webp）/ output_compression（0..100，限 jpeg/webp，保留显式 0）/ user 字段；所有协议均保留 JSON `image_url` 传递 data URL，edits 端点同样以 JSON body 发送，无 multipart 转换；单图=字符串、多图=数组）
-- `web/playground/static-pg/pg-stream.js`：网络和流生命周期（含 `pgSendImage` 根据 imgEndpoint 动态选择 endpoint（edits 走 /v1/images/edits，否则 /v1/images/generations）、`pgPollModelScopeTask` ModelScope 异步轮询）；
+- `web/playground/static-pg/pg-stream.js`：网络和流生命周期（含 `pgSendImage` 根据 imgEndpoint 动态选择 endpoint（edits 走 /v1/images/edits，否则 /v1/images/generations）、`pgPollModelScopeTask` ModelScope 异步轮询、`pgSend` 创建左侧会话行、`pgCaptureRequestId` 从响应头绑定 `msg.reqId`）；
 - `web/playground/static-pg/pg-autochat.js`：群聊事实源和调度；
 - `web/playground/static-pg/playground/pg-image-batch.js`：Batch 三步向导（plan/transform/review）、Stage 4 viewer/sidebar renderer（`pgImageBatchRenderPane`/`pgImageBatchRenderSidebar`/`pgImageBatchRenderCanvas`）、SSE 订阅与 `pgImageBatchCleanup`、`pgImageBatchRestore` 显式恢复（替代 `pgImageBatchOnEnter`，仅由侧栏 Batch Project 点击触发，无自动重入）、`tinylab.playground.imageBatchDraft.v1`/`tinylab.playground.imageBatchActiveProject.v1` 持久化、显式 Stop immediate/after-current、Prompt×Variant 双层导航；`web/static/api.js` 的…
 - `web/playground/static-pg/pg-director.js`：剧情推进；
 - `web/playground/static-pg/pg-markdown.js`、`pg-render.js`：内容安全与渲染（`pg-render.js` 的 `pgMsgInnerHTML` 负责气泡内缩略图（含 image 模式气泡上方编辑输入图、右侧对齐）、空文本气泡剔除、loading 气泡秒级等待计数（`pgTickWaiting`/`pgEnsureWaitingTicker`））；
 - `web/playground/static-pg/pg-ui.js`、`pg-modal.js`、`pg-lifecycle.js`：交互和页面生命周期（`pg-ui.js` 含 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect` 图片参数面板与协议分支+Size 下拉编辑按钮+自定义尺寸输入、`pgRenderImageBlock`/`pgRenderInputThumbs` 图片附加 UI 与输入栏缩略图（image 模式发送前后位移）、发送时将输入图捕获到 `msg.images` 并清空 `config.imageUrls`；`pg-modal.js` 模型选择器支持 `kindFilter` 按 kind 过滤、Image Preview 弹窗 `pgShowImageModal`/`pgInitImageZoom`/`pgCopyImage` 含 auto-fit、footer 分辨率/大小/格式、经同源 `/api/image-proxy` 复制、图片尺寸编辑弹窗 `pgOpenImgSizesModal`/`pgSaveImgSizesModal` 调用 `pgApiPatch` 持久化 `ModelDef.ImgSizes`）；
-- `web/playground/static-pg/pg-ui.js` 中的 `pgRenderReqLeft`/`pgStartReqLeftPolling`/`pgRenderReqLeftContent`/`pgShowReqDetail`：普通模式左侧 Recent Requests 面板（来源过滤 + 点击详情，复用 `info-modal-overlay`）；
+- `web/playground/static-pg/playground/pg-ui-reqleft.js`：普通模式左侧**会话列表**（`pgConvCreate`/`pgConvTitleFromText`/`pgSwitchConversation`/`pgRenderConvList`，Time + Title 两列，仅内存）+ 用量条目缓存（`pgMergeEntry`/`pgMergeTokenUpdate`/`pgEntryById`，轮询 + SSE）+ 气泡详情弹窗（`pgShowRequestInfo`/`pgShowReqEntry`，复用 `info-modal-overlay`）+ `pgRefreshBubbleMetrics`；轮询/SSE 生命周期 `pgStartReqLeftPolling`/`pgStopReqLeftPolling`；
 - `web/playground/static-pg/playground.css` 中的 `.pg-mode-toggle`、`.pg-req-left`、`.pg-req-table`：模式切换按钮和左侧面板布局。
+- `web/playground/static-pg/pg-render.js` 中的 `pgMsgMetaInnerHTML`/`pgRenderMsgMeta`/`pgMetricsBlockHTML`：响应气泡按钮行（含详情 SVG 按钮）与 ttft/gt/in/res/ct/spd 两行（值来自 `web/static/monitor/monitor_state.js::entryMetrics`）；
 - `web/playground/static-pg/pg-search.js`：Search 模式 3 步 AI 编排（分类→搜索→综合）、搜索设置面板、结果渲染（含 `pgSearchFlushRender()`/`pgSearchFinish()`/`pgSearchFail()` DOM 存在检查防御后台 tab 渲染、`pgSearchSend()` 创建 entry 后立即调用 `pgSaveSearchHistory()`）；
 - `web/playground/static-pg/pg-state.js` 中的 `pgState.mode` 四态含 `'search'` 与 `pgState.search` 子树；
 - `web/playground/static-pg/pg-ui.js` 中的 `pgSetMode` search 分支、`pgSearchSend` 调用入口、搜索设置面板渲染；
@@ -871,7 +883,7 @@ go build -tags playground -o tinylab-pg.exe .
 | 修改 Image 模式或图片参数 | `pg-ui.js` 的 `pgRenderImageParams`/`pgGetImgProtocol`/`pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect`、`pg-request.js` 的 `pgBuildImageBody`、`pg-stream.js` 的 `pgSendImage`/`pgPollModelScopeTask`、`pg-core.js` 的 `PG_DEFAULT_CFG` 图片参数 + `pgApiPatch` 桥接、`pg-i18n.js` 图片 i18n key + `pgImgEditSizes`/`pgImgCustomSize` 系列、`proxy/handler.go` 的 `ImagesGenerations`/`PollTask` 及通用代理（`/v1/images/edits` 走同一代理链路）、`proxy/upstream.go` 的 `X-Modelscope-Async-Mode` header 转发、`api/router.go` 的 `/v1/images/generations`、`/v1/tasks/{taskId}`、`/api/image-proxy` 路由 + `PATCH /providers/{id}/models/imgSizes`、`internal/api/image.go` 的 `imageProxy` 端点 |
 | 修改图片尺寸列表 | `pg-modal.js` 的 `pgOpenImgSizesModal`/`pgSaveImgSizesModal`/`pgResetImgSizesTextarea`/`pgImgBuiltinSizesFor`（弹窗编辑+保存）+ `pg-ui.js` 的 `pgImgParamSelectWithEdit`/`pgImgSizeOptionsFor`/`pgOnImgSizeSelect`（下拉渲染+自定义输入）+ `internal/api/providers_models_crud.go` 的 `updateModelImgSizes`（PATCH 端点）+ `internal/registry/models.go` 的 `UpdateModelImgSizes`（写入 `ModelDef.ImgSizes`）+ `internal/config/types.go` 的 `ModelDef.ImgSizes` 字段 + `internal/api/models.go` 的 `modelInfo.ImgSizes`/`providerId`/`realModelId` 回显 + `playground.css` 的 `.pg-img-edit-btn`/`.pg-img-custom-row` 样式 |
 | 修改图片请求超时兜底 | `pg-stream.js` 的 `pgSendImage` 的 `imgTimer`（300s fetch 兜底 `pgFail`）、`pg-render.js` 的 `pgTickWaiting` 的 `pgSafetyNetMs`（300s loading 安全网）；改兜底阈值须同时调两侧并覆盖 4k 实际耗时上限；代理侧 keep-alive 见 `proxy-architecture.md` §8.7 的 `forward.go` keep-alive ticker 与 `compress.go` 绕过列表 |
-| 修改模式切换或左侧面板 | `pgSetMode`、`pgAutoChatToggle`、`pgRenderPanes` 布局类、`pgRenderReqLeft*`、`pgShowReqDetail`、`info-modal-overlay`/`info_common.js`（详情弹窗基础设施）、`.pg-req-left-mode` CSS；改来源过滤须同步 `pg-stream.js` 的 `X-TinyLab-Source` 头与 `recordUsage` 的 `Entry.Source` 回填 + `Handler.SetPgUsage` 注入 + `api/monitor/register.go` `getPlaygroundUsage`；改详情弹窗须同步 `app.js` 的 `topOpenModal`/`dismissTopModal` 对 `pg-modal-overlay` 的 ESC 处理；改 Recent Requests 实时性须同步 SSE 事件处理与 `/api/monitor/events` 后端 |
+| 修改模式切换或左侧面板 | `pgSetMode`、`pgAutoChatToggle`、`pgRenderPanes` 布局类、`pg-ui-reqleft.js`（会话列表 `pgConvCreate`/`pgSwitchConversation`/`pgRenderConvList` + 条目缓存 `pgMergeEntry` + 气泡详情 `pgShowReqEntry`）、`pg-render.js`（`pgMsgMetaInnerHTML`/`pgRenderMsgMeta`/`pgMetricsBlockHTML`）、`pg-stream.js`（`pgSend` 建行、`pgCaptureRequestId`）、`pg-lifecycle.js`（`cleanupPlayground` 不再 abort 在途请求）、`pg-state.js`（对话不持久化）、`info-modal-overlay`/`info_common.js`（详情弹窗基础设施）、`web/static/monitor/monitor_state.js`（`entryMetrics`/`mergeProcessingEntryFields`，与 Monitor Recent Requests 同源）、`.pg-req-left-mode`/`.pg-req-*`/`.pg-msg-metrics` CSS；改来源过滤须同步 `pg-stream.js` 的 `X-TinyLab-Source` 头与 `recordUsage` 的 `Entry.Source` 回填 + `Handler.SetPgUsage` 注入 + `api/monitor/register.go` `getPlaygroundUsage`；改详情弹窗须同步 `app.js` 的 `topOpenModal`/`dismissTopModal` 对 `pg-modal-overlay` 的 ESC 处理；改气泡↔请求绑定须同步代理响应头 `X-TinyLab-Request-Id`（`proxy/stream.go::setUpstreamIdentityHeaders`）与 `api/router_proxy.go` 的 CORS `Expose-Headers`；改 Recent Requests 实时性须同步 SSE 事件处理与 `/api/monitor/events` 后端 |
 | 修改 Image Batch Project 前端生命周期/SSE/重入（08-11 审计修正 + 显式进出） | `pg-image-batch.js`（`pgImageBatchCloseUI` 统一 Close、`pgImageBatchRestore` 显式恢复无自动重入、`pgImageBatchStopImmediate`、`pgImageBatchViewPrompt` 导航、active-project/draft localStorage）、`pg-ui.js`（`pgSetMode` Batch 退出时序且不再自动重入；侧栏 Batch Project↔Return 切换、Batch 激活期隐藏 Clear Chat；`pgGetImageSubmitCount`/`pgOnImageSubmitCount` 手动生成计数缝）、`pg-core.js`（`imgSubmitCount` 默认 1）、`pg-lifecycle.js`（`renderPlayground` 不再自动重入）、`web/static/api.js`（`redactTraceText`/`redactTraceValue`）、本文 §6.1/§7.2、`docs/image_batch_project_flow_review.md` §15.4 |
 | 发布 Playground 变体 | 无 tag/tag 测试、资源 200、完整首页手测 |
 | 修改 Manual Image Canvas / Task Queue / Inspire | `pg-image-tasks.js`（任务队列、pump 调度、per-provider 并发）、`pg-image-model.js`（请求构建与单元执行原语）、`pg-image-inspire.js`、`pg-state.js`（`PG_IMAGE_KEY` 与 per-window generation/asset state）、`pg-render.js`（独立 Canvas 与 flattened history、视图源 `pgImageViewSource`）、`pg-ui.js`（Image routing、Task Queue / Recent Requests 侧栏容器、并发 Stepper）、`pg-stream.js`（generationId+assetId autosave）、`pg-i18n.js`、`playground.css`、`web/static/index.html`、`internal/api/image/register.go` |

@@ -28,6 +28,13 @@ function pgSend(i, assistantIdx) {
   w.debugRequest = JSON.stringify(body, null, 2);
   w.debugResponse = '';
   w.debugTimestamp = new Date().toISOString();
+  // Normal mode: the send opens a left-panel row holding this conversation's
+  // message snapshot (memory only, never persisted), so the row can switch the
+  // pane back to this conversation later.
+  var assistantMsg = w.messages[assistantIdx];
+  if (pgState.mode === 'normal' && assistantMsg && typeof pgConvCreate === 'function') {
+    assistantMsg.convRowId = pgConvCreate(pgConvTitleFromText(pgLastUserText(body)), w.messages.slice()).id;
+  }
 
   if (w.config.stream) {
     pgStream(i, body, assistantIdx);
@@ -58,6 +65,7 @@ function pgStream(i, body, assistantIdx) {
   }).then(function(resp) {
     w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Provider') || '');
     w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Key') || '');
+    pgCaptureRequestId(resp, w, assistantIdx);
     if (!resp.ok || !resp.body) {
       resp.text().then(function(text) {
         var details = pgParseErrorDetails(text);
@@ -229,6 +237,7 @@ function pgSendNonStream(i, body, assistantIdx) {
   }).then(function(resp) {
     w.lastProvider = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Provider') || '');
     w.lastKey = w.config.useCustomEndpoint ? 'custom' : (resp.headers.get('X-TinyLab-Key') || '');
+    pgCaptureRequestId(resp, w, assistantIdx);
     return resp.json().then(function(j) {
       if (!resp.ok) {
         var details = pgParseErrorDetails(JSON.stringify(j));
@@ -473,4 +482,21 @@ function pgAnyWindowHasModel() {
     if (pgWinAt(i).config.model) return true;
   }
   return false;
+}
+
+// pgCaptureRequestId binds the proxy-issued request ID (X-TinyLab-Request-Id)
+// of a response to its assistant message, which is how the bubble finds its
+// usage entry (request/response modal + ttft/gt/in/res/ct/spd rows). Requests
+// sent to a Custom Endpoint bypass the proxy and carry no ID.
+function pgCaptureRequestId(resp, w, assistantIdx) {
+  if (!resp || !resp.headers || typeof resp.headers.get !== 'function') return;
+  var rid = resp.headers.get('X-TinyLab-Request-Id') || '';
+  if (!rid) return;
+  var msg = w.messages[assistantIdx];
+  if (!msg) return;
+  msg.reqId = rid;
+  if (msg.convRowId && typeof pgConvBindEntry === 'function') pgConvBindEntry(msg.convRowId, rid);
+  // The entry normally lands in the cache from the request-start SSE event that
+  // preceded this response; refresh so the metric rows show immediately.
+  if (typeof pgRefreshBubbleMetrics === 'function') pgRefreshBubbleMetrics();
 }

@@ -423,7 +423,7 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-code-copy:hover{background:var(--glass-hover);border-color:var(--accent);color:var(--text)}
 
 /* Message metadata: timing + response duration */
-.pg-msg-meta{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-muted);padding:0 4px;margin-top:4px;min-height:16px}
+.pg-msg-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--text-muted);padding:0 4px;margin-top:4px;min-height:16px}
 .pg-msg-actions{display:flex;gap:4px;opacity:1;transition:opacity var(--transition-fast)}
 .pg-msg:hover .pg-msg-actions{opacity:1}
 .pg-msg-meta.always-show .pg-msg-actions{opacity:1}
@@ -431,6 +431,13 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-action:hover{border-color:var(--glass-border);background:var(--glass-hover);color:var(--text-secondary)}
 .pg-action.danger:hover{border-color:var(--danger);color:var(--danger)}
 @media (max-width:768px){.pg-msg-actions{opacity:1}.pg-action{opacity:1}}
+
+/* Per-response usage rows (ttft / gt / in / res / ct / spd) under the actions,
+   mirroring the Monitor Recent Requests columns. */
+.pg-msg-metrics{flex:1 1 100%;display:flex;flex-direction:column;gap:2px;max-width:560px;padding:2px 0 1px}
+.pg-msg-metrics-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;font-variant-numeric:tabular-nums}
+.pg-msg-metrics-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pg-msg-metrics-values{color:var(--text-secondary)}
 
 /* Reasoning panel */
 .pg-thinking{border:1px solid var(--border-strong);border-radius:var(--radius-md);margin-bottom:6px;overflow:hidden;background:var(--status-warning-bg);box-shadow:0 1px 4px rgba(0,0,0,.06)}
@@ -1009,18 +1016,13 @@ html,body,.app{overflow:hidden !important;height:100% !important}
 .pg-req-table th{padding:6px 8px;text-align:left;font-weight:600;color:var(--text-secondary);border-bottom:1px solid var(--glass-border);position:sticky;top:0;background:var(--glass-bg);z-index:1;white-space:nowrap}
 .pg-req-table td{padding:4px 8px;border-bottom:1px solid var(--glass-border);color:var(--text-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .pg-req-table tr:hover td{background:var(--glass-hover)}
-.pg-req-status-col{width:24px;text-align:center}
-.pg-req-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
-.pg-req-dot-success{background:var(--accent2)}
-.pg-req-dot-error{background:var(--danger)}
-.pg-req-dot-retry{background:var(--warn)}
-.pg-req-dot-processing{background:var(--accent);animation:pg-pulse 1.5s infinite}
+.pg-req-time-col{width:9ch}
+.pg-req-row{cursor:pointer}
+.pg-req-row-noconv{cursor:default}
+.pg-req-title-cell{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.pg-req-row.active td{background:var(--glass-active);color:var(--text)}
+.pg-req-row.active .pg-req-title-cell{font-weight:600}
 .pg-req-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:var(--font-badge);padding:20px}
-.pg-req-detail-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--glass-border);font-size:var(--font-base)}
-.pg-req-detail-k{flex:0 0 110px;color:var(--text-muted);font-weight:600}
-.pg-req-detail-v{flex:1;min-width:0;word-break:break-all;color:var(--text)}
-.pg-req-detail-pre-label{margin:10px 0 4px;font-size:var(--font-badge);color:var(--text-muted);font-weight:600}
-.pg-req-detail-pre{background:var(--code-surface);border:1px solid var(--glass-border);border-radius:var(--radius-md);padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:var(--font-code);color:var(--code-text);max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 
 /* Task Queue left panel & items */
 .pg-task-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--glass-border);cursor:pointer;transition:background var(--transition-fast)}

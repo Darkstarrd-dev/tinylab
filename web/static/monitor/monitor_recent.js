@@ -14,68 +14,15 @@ function renderUsageRow(e, sessionKey, hidden) {
   } else {
     statusInner = dotHtml;
   }
-  // TTFT: frozen on first-token (request-ttft), ticking wall-clock before.
-  var ttftDisplay, ttftFrozen;
-  if (e.status === 'processing') {
-    if (e.ttftMs && e.ttftMs > 0) {
-      ttftDisplay = formatTTFT(e.ttftMs);
-      ttftFrozen = true;
-    } else {
-      var ttftElapsed = Date.now() - new Date(e.timestamp).getTime();
-      if (isNaN(ttftElapsed) || ttftElapsed < 0) ttftElapsed = 0;
-      ttftDisplay = formatTTFT(ttftElapsed);
-      ttftFrozen = false;
-    }
-  } else {
-    ttftFrozen = true;
-    ttftDisplay = (e.ttftMs && e.ttftMs > 0) ? formatTTFT(e.ttftMs) : '—';
-  }
-  // GT anchor priority: server first-content stamp (provider-agnostic local
-  // byte observation) > ts + ttft. Freezes at done via LatencyMs - TTFTMs.
-  var genStartMs = null;
-  var genSrc = '';
-  if (e.firstContentMs && e.firstContentMs > 0) {
-    genStartMs = e.firstContentMs;
-    genSrc = 'fcm';
-  } else if (e.ttftMs && e.ttftMs > 0 && e.timestamp) {
-    genStartMs = new Date(e.timestamp).getTime() + e.ttftMs;
-    if (isNaN(genStartMs)) genStartMs = null;
-    if (genStartMs != null) genSrc = 'ttft';
-  }
-  var gtMs = null, gtDisplay, spdDisplay;
-  var inT = (e.inputTokens || 0);
-  // RES/CT split: prefer per-split fields; fall back to splitting the
-  // aggregate by ratio when only outputTokens exists (old entries).
-  var resT = (typeof resIsEnc === 'function' && resIsEnc(e.reasoningTokens)) ? -1 : (e.reasoningTokens || 0);
-  var ctT = (e.contentTokens || 0);
-  var outT = (e.outputTokens || 0);
-  var resN = (typeof resNum === 'function') ? resNum(resT) : (resT < 0 ? 0 : resT);
-  if (outT > 0 && resN + ctT === 0) ctT = outT;
-  var spdBase = resN + ctT > 0 ? resN + ctT : outT;
-  if (e.status === 'processing') {
-    if (genStartMs != null) {
-      gtMs = Date.now() - genStartMs;
-      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
-      gtDisplay = formatGenTime(gtMs);
-      spdDisplay = formatGenSpeed(spdBase, gtMs);
-    } else {
-      gtDisplay = '—';
-      spdDisplay = '—';
-    }
-  } else {
-    if (genStartMs != null) {
-      gtMs = (e.latencyMs || 0) - (e.ttftMs || 0);
-      if (isNaN(gtMs) || gtMs < 0) gtMs = 0;
-    } else {
-      gtMs = e.latencyMs || 0;
-    }
-    gtDisplay = formatGenTime(gtMs);
-    spdDisplay = formatGenSpeed(spdBase, gtMs);
-  }
+  // TTFT / GT / IN / RES / CT / SPD come from the shared entryMetrics helper
+  // (also used by Playground response bubbles).
+  var m = entryMetrics(e);
+  var ttftDisplay = m.ttft, gtDisplay = m.gt, spdDisplay = m.spd;
+  var inT = m.in, resT = m.res, ctT = m.ct, outT = (e.outputTokens || 0);
   var tsAttr = e.timestamp ? ' data-ts="' + escapeHtml(e.timestamp) + '"' : '';
-  var ttftAttr = (ttftFrozen && e.status === 'processing') ? ' data-ttft="1"' : '';
-  var genAttr = (genStartMs != null) ? ' data-gen-start="' + genStartMs + '"' : '';
-  genAttr += (genSrc ? ' data-gen-src="' + genSrc + '"' : '');
+  var ttftAttr = (m.ttftFrozen && e.status === 'processing') ? ' data-ttft="1"' : '';
+  var genAttr = (m.genStartMs != null) ? ' data-gen-start="' + m.genStartMs + '"' : '';
+  genAttr += (m.genSrc ? ' data-gen-src="' + m.genSrc + '"' : '');
   var outAttr = ' data-out="' + outT + '" data-res="' + resT + '" data-ct="' + ctT + '"';
   var provPrefix = (typeof findProviderPrefix === 'function') ? findProviderPrefix(e) : (e.provider || '');
   var keyShort = (typeof shortKeyName === 'function') ? shortKeyName(e.keyName) : (e.keyName || '');

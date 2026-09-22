@@ -495,14 +495,7 @@ function pgSetMode(mode) {
     if (pgState.modeSplitCounts) {
       pgState.modeSplitCounts[oldMode] = pgState.splitCount;
     }
-    if (oldMode === 'normal') {
-      try {
-        var w0Old = pgState.windows[0];
-        var trimmedOld = (w0Old && w0Old.messages) || [];
-        if (trimmedOld.length > PG_MAX_MSGS) trimmedOld = trimmedOld.slice(-PG_MAX_MSGS);
-        localStorage.setItem(PG_MSG_KEY, JSON.stringify(trimmedOld));
-      } catch (e) {}
-    } else if (oldMode === 'search') {
+    if (oldMode === 'search') {
       if (typeof pgSaveSearchHistory === 'function') pgSaveSearchHistory();
     }
   }
@@ -535,15 +528,8 @@ function pgSetMode(mode) {
     for (var wI = 0; wI < targetSplit; wI++) {
       var seedWin = (typeof makeWin === 'function') ? makeWin() : null;
       if (seedWin && seedCfg) seedWin.config = JSON.parse(JSON.stringify(seedCfg));
-      if (mode === 'normal' && wI === 0 && seedWin) {
-        try {
-          var rawNorm = localStorage.getItem(PG_MSG_KEY);
-          if (rawNorm) {
-            var parsedNorm = JSON.parse(rawNorm);
-            if (Array.isArray(parsedNorm)) seedWin.messages = parsedNorm.map(pgNormalizeLoadedMessage);
-          }
-        } catch (e) {}
-      }
+      // Conversations are not persisted, so a fresh normal-mode window starts
+      // empty (pgLoad).
       pgState.windows.push(seedWin);
     }
     pgState.modeWindows[mode] = pgState.windows;
@@ -1371,24 +1357,4 @@ function pgRemoveInputImage(idx) {
   pgRenderSidebar();
 }
 
-// ----- Event handlers ----------------------------------------------
-function pgNormalizeLoadedMessage(msg) {
-  if (!msg) return msg;
-  if (typeof msg.role !== 'string') msg.role = 'assistant';
-  if (msg.content === undefined) msg.content = '';
-  if (msg.status === undefined) msg.status = 'complete';
-  if (msg.role === 'assistant' && (msg.status === 'streaming' || msg.status === 'loading')) {
-    var hasContent = pgTextContent(msg.content).trim() || (msg.reasoning && msg.reasoning.trim());
-    if (hasContent) {
-      msg.status = 'complete';
-      if (!msg.completedAt) {
-        msg.completedAt = msg.reasoningCompletedAt || msg.startedAt || Date.now();
-      }
-      if (msg.startedAt && !msg.durationMs) {
-        msg.durationMs = msg.completedAt - msg.startedAt;
-      }
-    }
-  }
-  return msg;
-}
 

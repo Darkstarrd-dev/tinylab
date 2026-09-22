@@ -314,10 +314,7 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	if sel != nil {
-		w.Header().Set("X-TinyLab-Provider", sel.Provider.Name)
-		w.Header().Set("X-TinyLab-Key", sel.KeyName)
-	}
+	setUpstreamIdentityHeaders(w, sel, reqID)
 	w.WriteHeader(http.StatusOK)
 	if rc := http.NewResponseController(w); rc != nil {
 		_ = rc.SetWriteDeadline(time.Time{})
@@ -606,6 +603,7 @@ func (h *Handler) passThroughResponsesAsChat(w http.ResponseWriter, resp *http.R
 	}
 	b, _ := json.Marshal(chat)
 	w.Header().Set("Content-Type", "application/json")
+	setUpstreamIdentityHeaders(w, sel, reqID)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(b)
 	if sel != nil {

@@ -2,18 +2,18 @@
 // =====================================================================
 // Playground — interactive chat testing UI.
 // Talks directly to /v1/chat/completions (OpenAI-compatible SSE passthrough).
-// Config + parameterEnabled + messages persist to localStorage (v2 schema).
+// Config + parameterEnabled persist to localStorage (v2 schema); conversations
+// do not — messages live in memory for the app run only.
 // Features: parameterEnabled toggles, seed, image_url multimodal, role
 // toggle (user/assistant/system), system prompt, reasoning duration,
 // sources rendering, show-source/preview, HTML iframe preview, mermaid,
-// message timing, error retry/edit-prompt actions, v2 localStorage.
+// message timing, per-response usage metrics, error retry/edit-prompt actions.
 // Multi-window: split panes (1-4), each with independent conversation.
 // =====================================================================
 
 // ----- Module 1: State management -----------------------------------
 // localStorage v2 schema (hard cut from v1; v1 data is ignored entirely).
 var PG_CFG_KEY = 'tinylab.playground.cfg.v2';
-var PG_MSG_KEY = 'tinylab.playground.msg.v2';
 var PG_PARAM_KEY = 'tinylab.playground.params.v2';
 
 var PG_DEFAULT_CFG = {
@@ -145,6 +145,7 @@ var PG_ICON_ROLE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
 var PG_ICON_DEBUG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"></rect><path d="M19 7l-3 2"></path><path d="M19 11l-3 0"></path><path d="M19 15l-3-2"></path><path d="M8 8H5"></path><path d="M8 12H4"></path><path d="M8 16H5"></path><path d="M12 6V4"></path></svg>';
 var PG_ICON_SAVE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>';
 var PG_ICON_RESET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>';
+var PG_ICON_INFO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16"></line><circle cx="12" cy="8" r="0.6" fill="currentColor"></circle></svg>';
 // Text-only zoom (−/reset/+): font-size zoom affecting pg input + bubble text.
 var PG_ICON_ZOOM_OUT  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>';
 var PG_ICON_ZOOM_RESET= '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-1.5-5"></path><path d="M21 3v6h-6"></path><path d="M10 8l-2 4 2 4M14 8l2 4-2 4"></path></svg>';
@@ -182,11 +183,15 @@ function pgEscapeAttr(s) {
 }
 function pgCopyToClipboard(tx, lb) { return PG_HOST && PG_HOST.copyToClipboard ? PG_HOST.copyToClipboard(tx, lb) : copyToClipboard(tx, lb); }
 function pgT(k, ar) {
-  if (PG_HOST && PG_HOST.t) return PG_HOST.t(k, ar);
+  // PG_I18N is the authoritative dictionary for every playground key; the
+  // host dictionary (web/static/i18n.js) carries only app-level keys. Looking
+  // PG_I18N up first is what makes '{0}s' style pg* keys resolve instead of
+  // falling through to the host t() and rendering the raw key name.
   if (typeof window !== 'undefined' && window.PG_I18N) {
     var lang = document.documentElement.getAttribute('data-lang') || (localStorage && localStorage.getItem('lang')) || 'en';
-    var dict = window.PG_I18N[lang] || window.PG_I18N['en'] || {};
+    var dict = window.PG_I18N[lang] || {};
     var s = dict[k];
+    if (s == null && window.PG_I18N['en']) s = window.PG_I18N['en'][k];
     if (s != null) {
       if (ar && ar.length) {
         return s.replace(/\{(\d+)\}/g, function(_, i) { return ar[+i] != null ? ar[+i] : ''; });
@@ -194,15 +199,11 @@ function pgT(k, ar) {
       return s;
     }
   }
+  // Shared app-level keys (thTime, Cancel, …) live in the host dictionary.
+  if (PG_HOST && PG_HOST.t) return PG_HOST.t(k, ar);
   if (typeof t === 'function') return t(k, ar);
   return k;
 }
-
-// Storage limits (mirrors new-api storage.ts constraints)
-var PG_MAX_MSGS = 100;
-var PG_MAX_MSGS_BYTES = 1024 * 1024;       // 1MB raw string cap
-var PG_MAX_MSG_CHARS = 40000;              // single message content cap
-var PG_MAX_MSGS_CHARS = 120000;            // total loaded content cap
 
 // ----- Media helpers (PDF / Video / Audio / Image) -----------------
 function pgGetMediaType(url) {

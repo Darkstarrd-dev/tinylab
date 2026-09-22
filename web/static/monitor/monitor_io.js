@@ -25,22 +25,10 @@ function mergeUsageEntries(apiEntries) {
       if (existing.__streamingUsage) e.__streamingUsage = existing.__streamingUsage;
       // Monotonic guard: REST snapshots of a processing entry may carry
       // older counters than the SSE-driven live values (ttft/tokens arrive
-      // via request-ttft/request-tokens between polls). Never regress a
-      // processing entry's live fields — GT anchoring and OUT/SPD would
-      // otherwise jump backwards on every refresh. Terminal entries bypass
-      // merge via handleRequestDone direct replace.
+      // via request-ttft/request-tokens between polls). Shared with the
+      // Playground entry cache.
       if (e.status === 'processing' && existing.status === 'processing') {
-        if ((existing.ttftMs || 0) > (e.ttftMs || 0)) e.ttftMs = existing.ttftMs;
-        if ((existing.inputTokens || 0) > (e.inputTokens || 0)) e.inputTokens = existing.inputTokens;
-        if ((existing.outputTokens || 0) > (e.outputTokens || 0)) e.outputTokens = existing.outputTokens;
-        // Sentinel-aware: "enc" (-1) beats 0/no-info, loses to any counted
-        // plaintext; never regress live RES on REST snapshots.
-        var mResE = existing.reasoningTokens, mResN = e.reasoningTokens;
-        if (mResN === -1) { if (mResE > 0) e.reasoningTokens = mResE; }
-        else if (mResE === -1) { if (!(mResN > 0)) e.reasoningTokens = -1; }
-        else if ((mResE || 0) > (mResN || 0)) e.reasoningTokens = mResE;
-        if ((existing.contentTokens || 0) > (e.contentTokens || 0)) e.contentTokens = existing.contentTokens;
-        if (existing.firstContentMs && !(e.firstContentMs)) e.firstContentMs = existing.firstContentMs;
+        mergeProcessingEntryFields(existing, e);
       }
     }
     if (e.id) seenIds[e.id] = true;
