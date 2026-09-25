@@ -36,6 +36,20 @@
   var splitDrag = null;         // active split-line drag on the import preview canvas: { axis, index, canvas, pointerId }
   var draftGeneration = 0;  // bumped on cancel/open/cleanup; stale metadata reads abort silently
 
+  // P0-06 byte budgets. MUST stay plain doubles: the int32 shift form
+  // (`2 << 30` === -2147483648, `4 << 30` === 0) silently rejected every
+  // import — the spinner was raised first and then stranded.
+  var GIF_COMPOSITE_BUDGET_BYTES = 2 * 1024 * 1024 * 1024;  // composited frames, 3 canvases/frame
+  var SAMPLING_BUDGET_BYTES = 4 * 1024 * 1024 * 1024;       // video/GIF sampling, RGBA frames
+
+  function exceedsCompositeBudget(estimatedBytes) {
+    return estimatedBytes > GIF_COMPOSITE_BUDGET_BYTES;
+  }
+
+  function exceedsSamplingBudget(estimatedBytes) {
+    return estimatedBytes > SAMPLING_BUDGET_BYTES;
+  }
+
   // ------------------------------------------------------------------
   // Helper functions
   // ------------------------------------------------------------------
@@ -200,9 +214,8 @@
   // gifuct-js already reports `delay` in milliseconds — no conversion.
   function compositeGifFrames(frames, width, height) {
     // P0-06: pre-check W*H*N*4*3 budget (2GiB) before allocating 3 canvases per frame
-    var budget = 2 << 30;
     var estimated = frames.length * width * height * 4 * 3;
-    if (estimated > budget) throw new Error('Import exceeds budget: ' + estimated + ' > ' + budget + ' bytes ('+frames.length+'x'+width+'x'+height+')');
+    if (exceedsCompositeBudget(estimated)) throw new Error('Import exceeds budget: ' + estimated + ' > ' + GIF_COMPOSITE_BUDGET_BYTES + ' bytes ('+frames.length+'x'+width+'x'+height+')');
     var composited = [];
     var totalMs = 0;
 
@@ -1044,12 +1057,20 @@
     closeModal();
     core.showSpinner(t('gifEditorProcessing', 'Processing...'));
 
-    var scale = currentDraft.scalePercent / 100;
-    var importWidth = Math.max(1, Math.round(currentDraft.sourceWidth * scale)); // P0-06 videoBudget
-    var frameCountEst = Math.max(1, Math.floor((currentDraft.endMs - currentDraft.startMs) * currentDraft.fps / 1000) + 1);
-    var videoBudget = 4 << 30;
-    if (frameCountEst * importWidth * Math.max(1, Math.round(currentDraft.sourceHeight * scale)) * 4 > videoBudget) throw new Error('Video sampling exceeds budget');
-    var importHeight = Math.max(1, Math.round(currentDraft.sourceHeight * scale));
+    // P0-06 sampling budget. Any synchronous rejection here must still drop
+    // the spinner — it is raised above.
+    var importWidth, importHeight;
+    try {
+      var scale = currentDraft.scalePercent / 100;
+      importWidth = Math.max(1, Math.round(currentDraft.sourceWidth * scale));
+      importHeight = Math.max(1, Math.round(currentDraft.sourceHeight * scale));
+      var frameCountEst = Math.max(1, Math.floor((currentDraft.endMs - currentDraft.startMs) * currentDraft.fps / 1000) + 1);
+      if (exceedsSamplingBudget(frameCountEst * importWidth * importHeight * 4)) throw new Error('Video sampling exceeds budget');
+    } catch (budgetErr) {
+      core.hideSpinner();
+      handleCommitError(gen, budgetErr);
+      return;
+    }
 
     var commitPromise;
     if (currentDraft.kind === 'image') {
@@ -1451,7 +1472,12 @@ function commitVideoDraft(width, height) {
     bindEvents: bindEvents,
     cancel: cancelDraft,
     cleanup: cleanup,
-    splitImage: splitImage
+    splitImage: splitImage,
+    // P0-06 budget gates + thresholds, exercised by web/gif-editor-import-budget.test.js
+    exceedsCompositeBudget: exceedsCompositeBudget,
+    exceedsSamplingBudget: exceedsSamplingBudget,
+    GIF_COMPOSITE_BUDGET_BYTES: GIF_COMPOSITE_BUDGET_BYTES,
+    SAMPLING_BUDGET_BYTES: SAMPLING_BUDGET_BYTES
   };
 
   core.registerModule('import', importApi);
