@@ -867,10 +867,28 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `manager.go` | `Manager`（凭据存储 + 账号索引，RWMutex）：11 provider 元数据 `Providers()`、账号 CRUD（`AddAccount`/`Accounts`/`FindAccount`/`UpdateAccount`/`DeleteAccount`）、凭据读写（`SetCredential`/`Credential`，`{"enc": "..."}` 信封 AES-GCM 与 `config.Encrypt/Decrypt` 同源）、前缀存取、模型黑名单 `SetModelDisabled`/`DisabledModels`、限流标记 `UpdateModelRateLimit` |
 | `accountpool.go` | `AccountPool` 选号策略（移植 `src/account-pool.ts` 语义）：enabled + 凭据存在 + 模型限流豁免 + exclude 集合过滤，手动数组顺序即候选优先级；`NewAccountID` 生成 `{provider}-{8hex}` + `{PROVIDER}_ACCOUNT_{HEX}` |
 | `bridge.go` | `Bridge`（registry 桥接）：`SetPrefix`（合法性 `[a-z0-9-]` + 冲突检测 409 + 持久化 + 动态注册/更新）、`SyncKeys`（启用账号×1 Key 回写 Key.Key，零可用 Key 时移除桥接 Provider）、`ClearPrefix`、`Product`/`HasBridgedProvider`、`ConflictError`；`BridgeDeps` 为本地窄接口（结构性满足 `*registry.Registry`） |
-| `products.go` | `RegisterDefaultProducts`（P1 先注册 codearts 产品：BaseURL + 9 条静态模型表含 CONTEXT_WINDOWS 备注）、`RestoreBridges`（启动时重注册存储前缀）、`Manager.Augment`（实现 `proxy.RequestAugmenter`，按 provider 分发到 `SetAugmenter` 注册的适配器，未注册=恒等透传） |
+| `products.go` | `RegisterDefaultProducts`（codearts 9 模型 + buddy 16/workbuddy 23 模型静态表 + products 注册供桥接验证）、`Manager.Augment`（实现 `proxy.RequestAugmenter`，五参含 upstreamModel，按 provider 分发到 `SetAugmenter` 注册的适配器）、`RegisterProviderAugmenters`（buddy 族装配）、`RestoreBridges`（启动时重注册存储前缀） |
 | `httpclient.go` | `HTTPClient` 共用出站客户端（UA/JSON POST+GET/SSE 行流读取复用 `internal/sse.SSELineBuffer`）、`HTTPError`（保留状态码+响应体供错误分类） |
 | `qoderwasm.go` | `//go:embed qoder_auth_wasm.wasm`（298 KB，SHA-256 `6419471E…` 与 ref 副本一致）+ `CompileQoderModule`（wazero 编译缓存；完整 wasm-bindgen 桥 P3.4 落地） |
-| `helpers.go` / `*_test.go` | `jsonUnmarshal` 辅助；`manager_test.go`（凭据加密落盘无明文泄漏、账号 CRUD、黑名单、前缀冲突、桥接注册/移除/恢复、Augment 分发）、`qoderwasm_test.go`（WASM 编译冒烟 + 账号 id 形状） |
+| `helpers.go` / `*_test.go` | `jsonUnmarshal` 辅助；`manager_test.go`（凭据加密落盘无明文泄漏、账号 CRUD、黑名单、前缀冲突、桥接注册/移除/恢复、Augment 分发）、`qoderwasm_test.go`（WASM 编译冒烟 + 账号 id 形状）、`codearts_test.go`（PKCE/JWS/签名结构、augment benefit、mock STS/snap，13 个，P2）、`buddy_test.go`（JWT 兜底/token 解析相对秒换算/UA 分档/URL 装饰/Key 即 access_token/chat 头族/签到业务码/余额精确值/mock 全登录流，10 个，P3.A） |
+
+### 13n.1 P2/P3 provider 适配器文件（2026-10-01 新增）
+
+| 文件 | 职责 |
+|---|---|
+| `codearts_oauth.go` | PKCE（48B base64url+S256）/DPoP（ECDSA P-256 JWK，字段名与 ref types.ts 1:1）/`SignDpopJws`（ES256, dpop+jwt）/终态错误分类（invalid_grant/ExpiredRefreshToken/InvalidDPoPHeader） |
+| `codearts_sign.go` | 华为 `SDK-HMAC-SHA256` 1:1 移植（canonical URI 尾斜杠、x-sdk-date/x-sdk-content-sha256/x-security-token、maas_type 等参与签名、GET 无 content-type、ApplySignedHeaders 跳过 host/content-type） |
+| `codearts_login.go` | 两步式 OAuth：`StartCodeArtsLogin`（回调 server 端口 ≥10000、180s 超时、secret 旧流程 307 回退、portal 结果页重定向）+ `LoginOutcome`（凭据 JSON 通用载荷，provider 无关） |
+| `codearts_refresh.go` | `RefreshCodeArtsAccount`（refreshable 三件套 + domain/user/model_rate_limits 合并）、`RefreshAllCodeArts`（含停用账号，失败留日志）、刷新经 `SetAccountCredentialedHook` → `Bridge.SyncKeys` |
+| `codearts_augment.go` | `CodeArtsAugmentHook`：出站头全量替换为 SDK 签名头 + maas_type: benefit（benefit 兜底集合）+ Chat-Id/Session-Id/lang |
+| `codearts_credits.go` | 每日签到五步流（账户门控/活动列表/可领判定/claim/confirm）+ 余额（usageTotalPackageCredit 总额、Agent-Type 签名后追加）；`identifierOf` 认数字型 campaignId |
+| `sessions.go` | 登录会话进程内注册表（`RegisterLoginSession`/`PeekLoginSession`/`TakeLoginSession`）+ Manager 惰性共享 http client |
+| `buddy.go` | buddy/workbuddy 产品配置（endpoint/ platform/ UA 分档规则）+ X 头族常量 + `BuddyCredential`（字段名与 ref 1:1）+ JWT 过期解析（ms/秒/ISO → JWT exp 兜底） |
+| `buddy_product.go` | CN 16 条 / 国际 23 条静态模型表（只收录 ref 实测可用模型） |
+| `buddy_common.go` | JWT claim readers（exp/iat/nickname/sub，不验签）、stripControlChars、`ParseBuddyTokenData`（expiresIn 相对秒 → JWT iat 基准）、`ParseBuddyAccountData`、`BuildBuddyCredential`（昵称/uid 回退链） |
+| `buddy_auth.go` | 完整登录流（auth/state → 装饰 URL → 轮询 token 11217 → 轮询 account 12151 → 组装；`StartBuddyLogin` 两步式）、`RefreshBuddyAccount`（终态判定 401/403/expired/invalid → refreshable:false） |
+| `buddy_augment.go` | chat 请求出站头全量重签：Bearer + X-Domain（产品优先于凭据快照）+ X-Product-Code + X-Agent-Purpose/X-IDE-Name/X-IDE-Type/X-IDE-Version/X-Product（=归属名）+ 模型分档 UA |
+| `buddy_credits.go` | checkinHeaders（X-Domain 产品优先）、签到 claim（业务码 10001/1001→已领、1002/1003→无资格、以响应体 code 为准——重复领取是 HTTP 400）、余额（`data.Response.Data.Accounts[]` 双层嵌套、readPreciseNumber 精确值优先、Status=3 失效包不计总额、非 JSON 响应带 HTTP 状态指引重新登录） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 

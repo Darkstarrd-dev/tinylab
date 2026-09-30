@@ -39,6 +39,7 @@ type CreditBalance struct {
 // CreditPackage is one credit package entry.
 type CreditPackage struct {
 	Name      string  `json:"name"`
+	Unit      string  `json:"unit,omitempty"`
 	Remaining float64 `json:"remaining"`
 	Total     float64 `json:"total"`
 	Used      float64 `json:"used"`

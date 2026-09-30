@@ -45,6 +45,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Put("/providers/{provider}/models", h.setModelDisabled)
 		// P2: codearts provider-specific flows (login/refresh/claim/balance).
 		h.RegisterCodeArts(r)
+		// P3.1: buddy + workbuddy flows.
+		h.RegisterBuddy(r)
 	})
 }
 

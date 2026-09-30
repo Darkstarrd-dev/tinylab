@@ -25,8 +25,8 @@ var codeartsModels = ModelTable{
 }
 
 // RegisterDefaultProducts installs every provider's static product config.
-// P2/P3 extend this list; unregistered products simply cannot be bridged yet
-// (SetPrefix rejects them with "no product registered").
+// P3 batches extend this list; unregistered products simply cannot be bridged
+// yet (SetPrefix rejects them with "no product registered").
 func RegisterDefaultProducts(b *Bridge) {
 	b.RegisterProduct(Product{
 		Provider:    "codearts",
@@ -34,6 +34,23 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     codeartsBaseURL,
 		Models:      codeartsModels,
 	})
+	for _, provider := range []string{"buddy", "workbuddy"} {
+		p := BuddyProducts()[provider]
+		b.RegisterProduct(Product{
+			Provider:    provider,
+			DisplayName: p.DisplayName + " (Free Hub)",
+			BaseURL:     p.Endpoint,
+			Models:      buddyFallbackModels(provider),
+		})
+	}
+}
+
+// RegisterProviderAugmenters wires the provider-specific augment hooks into
+// the manager (called at app startup after SetAugmenter("codearts", ...)).
+func (m *Manager) RegisterProviderAugmenters() {
+	for id, p := range BuddyProducts() {
+		m.SetAugmenter(id, m.buddyAugment(p))
+	}
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

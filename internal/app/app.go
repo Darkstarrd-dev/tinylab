@@ -169,6 +169,8 @@ func (a *App) buildComponents() error {
 		jethub.RegisterDefaultProducts(a.jethubBridge)
 		// P2: codearts SDK-HMAC augment hook (signature replaces auth headers).
 		jethubMgr.SetAugmenter("codearts", jethubMgr.CodeArtsAugmentHook())
+		// P3.1: buddy/workbuddy attribution hooks.
+		jethubMgr.RegisterProviderAugmenters()
 		a.jethubBridge.RestoreBridges()
 		a.proxyHandler.SetRequestAugmenter(jethubMgr)
 	}

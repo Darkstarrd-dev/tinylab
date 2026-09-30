@@ -53,8 +53,8 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 		// Pump the outcome into persistent storage; the session self-reaps
 		// after the flow settles (timeout included).
 		outcome := <-started.Result
-		if outcome.Err == nil {
-			_ = h.d.Manager.CompleteCodeArtsLogin(id, outcome.Credential)
+		if outcome.Err == nil && outcome.CredentialJSON != nil {
+			_ = h.d.Manager.CompleteCodeArtsLogin(id, outcome.CredentialJSON, outcome.ExpiresAt, outcome.Refreshable)
 		}
 		corejethub.TakeLoginSession(loginID)
 	}()
@@ -66,28 +66,14 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// codeartsStatus GET /api/jethub/codearts/status?loginId= — polls a login
-// flow; done=true when the flow settled (success or failure with error).
+// codeartsStatus GET /api/jethub/codearts/status — polls a login flow by
+// loginId, or lists account snapshots without one.
 func (h *Handler) codeartsStatus(w http.ResponseWriter, r *http.Request) {
-	loginID := r.URL.Query().Get("loginId")
-	sess, ok := corejethub.PeekLoginSession(loginID)
-	if !ok {
-		apibase.WriteAPIError(w, http.StatusNotFound, "unknown or settled loginId")
+	if loginID := r.URL.Query().Get("loginId"); loginID != "" {
+		h.pollLogin(loginID, w, r)
 		return
 	}
-	select {
-	case outcome := <-sess.Started.Result:
-		corejethub.TakeLoginSession(loginID)
-		if outcome.Err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": outcome.Err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": true, "accountId": sess.Account})
-		return
-	default:
-	}
-	acc, _ := h.d.Manager.FindAccount(sess.Account)
-	writeJSON(w, http.StatusOK, map[string]any{"done": false, "accountId": sess.Account, "nickname": acc.Nickname})
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("codearts")})
 }
 
 // codeartsRefresh POST /api/jethub/codearts/refresh {accountId} — renew one

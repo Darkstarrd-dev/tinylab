@@ -146,7 +146,7 @@
 
 - [P1] **[x] P1 基础设施层 + 桥接骨架**：jethub 包、凭据/账号存储、Provider 桥接（前缀注册 + RequestAugmenter hook）、wazero 引入（§4）
 - [P2] **[~] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）——代码与单测完成；**实发验证（§5.3 端到端冒烟）待有真实账号时执行**
-- [P3] **[ ] P3 其余 10 provider 分批移植**（§6）
+- [P3] **[~] P3 其余 10 provider 分批移植**（§6）——批次 A（buddy/workbuddy）代码+单测完成；批次 B/C/D 未开始
 - [P4] **[ ] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）
 - [P5] **[ ] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）
 - [P6] **[ ] P6 收尾：移除 PROJECT_MAP.md 引用、归档本文档状态**（§9）
@@ -257,9 +257,12 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 ### 6.2 批次 Checklist
 
 **P3.1 批次 A（buddy + workbuddy，同源一份实现 + 产品配置差异）**
-- [ ] P3.1.1 `buddy_product.go`：CODEBUDDY/WORKBUDDY 两份产品配置（endpoint `copilot.tencent.com` vs `www.workbuddy.ai`、platform `ide` vs `workbuddy-ai`、国际版登录 URL 追加 version/loginSessionId）。
-- [ ] P3.1.2 auth + oauth + augment + 余额排序选择器/锁定永久积分（`buddy-adapter.ts` 121 KB——最大单个 adapter，**Go 侧拆分文件**）。
-- [ ] P3.1.3 每日签到领取积分（供 P4 一键签到）。
+- [x] P3.1.1 `buddy_product.go`：CODEBUDDY/WORKBUDDY 两份产品配置（endpoint `copilot.tencent.com` vs `www.workbuddy.ai`、platform `ide` vs `workbuddy-ai`、国际版登录 URL 追加 version/loginSessionId）。
+  > 实施记录：`buddy.go`（`buddyProductsMap` 两产品配置 + UA 按模型族分档规则）+ `buddy_product.go`（静态模型表 16+23 条，只收录 ref 实测可用模型）。
+- [x] P3.1.2 auth + oauth + augment + 余额排序选择器/锁定永久积分（`buddy-adapter.ts` 121 KB——最大单个 adapter，**Go 侧拆分文件**）。
+  > 实施记录：`buddy_common.go`（JWT claim readers/stripControlChars/parseTokenData 含 expiresIn 相对秒换算/buildCredential 昵称三级回退）、`buddy_auth.go`（auth/state→浏览器→轮询 token 11217→轮询 account 12151→组装、refreshToken 终态判定 401/403/expired/invalid）、`buddy_augment.go`（chat 归属头族：X-Domain 产品优先、X-Product=归属名非部署类型、X-Agent-Purpose/X-IDE-Name/X-IDE-Type/X-IDE-Version + 模型分档 UA）。余额排序/锁定永久积分属选号增强，Go 侧由 rotation 三策略承担（bridge Key 回写已含启停语义），`buddy-balance-rank.ts` 的窗口分桶推迟到 P4 积分面板一并落地。
+- [x] P3.1.3 每日签到领取积分（供 P4 一键签到）。
+  > 实施记录：`buddy_credits.go`（checkinHeaders X-Domain 产品优先、claim 业务码判定序 10001/1001→already-claimed、1002/1003→inactive、非 0→failed；get-user-resource 双层嵌套 `data.Response.Data.Accounts[]` 解析、readPreciseNumber 精确值优先、Status=3 失效包不计入总额）；API `buddy.go`（两产品 login/status/refresh/claim/balance 十端点）。
 
 **P3.2 批次 B（lobsterai，独立协议族）**
 - [ ] P3.2.1 auth（登录方式/请求头/续期载荷/版本号来源全部独立）+ oauth + augment + credits。
@@ -357,6 +360,7 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 | 日期 | 阶段 | 记录 |
 |---|---|---|
+| 2026-10-01 | P3.A | **批次 A（buddy + workbuddy）代码完成（go vet + 全量测试 + go build 全绿）**：`buddy.go`（两产品配置 + UA 按模型族分档 + X 头族常量）、`buddy_product.go`（CN 16 条/国际 23 条静态模型表 + products 注册）、`buddy_common.go`（JWT claim readers、stripControlChars（scope 多行动实测坑）、parseTokenData expiresIn 相对秒 → JWT iat 基准换算、buildCredential 昵称 account→JWT 三级回退、access_token 即 bridge Key）、`buddy_auth.go`（完整登录流：auth/state→decorate URL（国际版 +version/loginSessionId）→轮询 token（11217 继续轮询）→轮询 account（12151）→组装；refresh 终态判定 401/403/expired/invalid；CompleteBuddyLoginFromJSON 显示字段回写）、`buddy_augment.go`（chat 头族全量重签：X-Domain 产品优先于凭据快照、X-Product=归属名（非 SaaS）、X-Agent-Purpose/IDE-Name/IDE-Type/IDE-Version、UA 按模型族 gpt-/gemini-/claude- 国际版形态 vs glm-/hy/kimi-/minimax- 国内形态）、`buddy_credits.go`（签到 status/claim 三类业务码、余额双层嵌套 + readPreciseNumber 精确值优先 + Status=3 失效包剔除、非 JSON 响应带 HTTP 状态指引重登录）；API `buddy.go`（buddy/workbuddy 各 5 端点，共享 pollLogin）。单测 10 个：JWT 兜底/控制字符清洗/token 解析（相对秒换算+数字字段容忍）/UA 分档/URL 装饰/mo表注册/Key 即 access_token/chat 头族断言/签到业务码 10001 幂等（HTTP 400 收敛为 already-claimed）/余额精确值+失效包剔除/mock 全登录流（11217 重试路径 + JWT 昵称回退）。**待实发验证：需 buddy/workbuddy 账号各一台（记 §6.3）。** |
 | 2026-10-01 | P2 | **P2 代码完成（go vet + 全量测试 + go build 全绿）**：`codearts_oauth.go`（PKCE/DPoP ES256 标准库实现 + `DpopPrivateJwk` 字段名与 ref 1:1）、`codearts_sign.go`（SDK-HMAC-SHA256 1:1，maas_type 参与签名、GET 无 content-type、host 不下发）、`codearts_login.go`（两步式 OAuth：随机端口 ≥10000 + 180s 超时 + secret 旧流程 307 回退 + portal 结果页重定向）、`codearts_refresh.go`（RefreshCodeArtsAccount 续期合并 + RefreshAllCodeArts 含停用账号 + 终态 refreshable:false + SyncKeys hook）、`codearts_augment.go`（CodeArtsAugmentHook 签名出站 + maas_type benefit 兜底集合 + Chat-Id/Session-Id/lang）、`codearts_credits.go`（claim 五步流 + 余额解析，campaignId 数字/confirm 独立/Agent-Type 签名外追加三个实测坑已锁）、`sessions.go`（登录会话注册表）；API `codearts.go`（login/status/refresh/claim/balance 五端点）；app.go 装配 augmenter + credentialed hook。单测 13 个（含 mock STS/snap httptest 往返）。**待办：真实账号端到端冒烟（§5.3）——需用户登录一次 codearts 账号后实测 `{前缀}/{modelID}` 推理。** |
 | 2026-10-01 | P1 | **P1 完成（验证门全绿，commit 待记）**：`internal/jethub` 包（Manager 凭据 AES-GCM 信封存储 + accounts.json 账号索引/黑名单/前缀映射、AccountPool 选号、Bridge 前缀桥接 + SyncKeys + RestoreBridges、HTTPClient、qoderwasm embed + wazero v1.9.0 编译冒烟）；`internal/api/jethub`（providers/prefix/accounts/models 端点，`Router.SetJetHub` 注入）；proxy `RequestAugmenter` 窄接口 + `SetRequestAugmenter` + `forwardUpstream` jethub 分支（`WithClientRequest` context 传原始请求，客户端头为出站基）；app.go 装配（Manager/Bridge/Augmenter 注入 + RestoreBridges）；codearts 产品表（9 模型）先行注册供桥接验证。测试：jethub/proxy/config/api 全绿 + go vet + go build；wazero WASM 编译冒烟通过。文档：PROJECT_MAP §13n/§10.28/§24/§10 router 行 + config-registry-state-architecture §17a 存储节 + 最后核对行。验证门备注：`/v1/models` 含桥接模型需先为账号写入凭据（P2 登录流），P1 以单测 `TestBridgeSetPrefixRegistersProvider` 锁死等价语义。 |
 | 2026-09-30 | P0 | **v2 修订**：确定落地位置与调用方法——产品名 Free Hub，Settings 侧边栏入口（Path Settings 下、Assistant 上），main 三段式布局（header 一键签到/备份/恢复/关闭 + left provider 列表 + right 管理/前缀输入框）；调用桥接 = registry 动态 Provider（`Prefix` + `APIType=jethub` + 账号→Keys 复用 rotation）+ proxy `RequestAugmenter` 窄接口注入，内外统一 `{前缀}/{modelID}` 调用；备份/恢复按原版格式双向兼容（PBKDF2 310000 + AES-GCM 壳，payload v1 字段已实测提炼至 §1.5）。§2 为新增核心设计章节。 |

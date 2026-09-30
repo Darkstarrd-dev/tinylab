@@ -218,23 +218,14 @@ func (m *Manager) RefreshAllCodeArts(ctx context.Context) {
 
 // CompleteCodeArtsLogin persists the outcome of a finished login flow:
 // stores the credential on the account's ref, refreshes display fields and
-// re-syncs the bridged keys. Called by the API layer's login result pump.
-func (m *Manager) CompleteCodeArtsLogin(accountID string, cred *CodeArtsCredential) error {
-	if cred == nil {
-		return fmt.Errorf("jethub: nil credential")
-	}
+// re-syncs the bridged keys (via the SetCredential hook). Called by the API
+// layer's login result pump.
+func (m *Manager) CompleteCodeArtsLogin(accountID string, credentialJSON []byte, expiresAt int64, refreshable bool) error {
 	acc, ok := m.FindAccount(accountID)
 	if !ok {
 		return ErrNotFound
 	}
-	credJSON, err := json.Marshal(cred)
-	if err != nil {
-		return err
-	}
-	if err := m.SetCredential(acc.Provider, acc.CredentialRef, credJSON, codeartsCredentialExpiresAt(cred), codeartsRefreshable(cred)); err != nil {
-		return err
-	}
-	return nil
+	return m.SetCredential(acc.Provider, acc.CredentialRef, credentialJSON, expiresAt, refreshable)
 }
 
 // SetAccountCredentialedHook registers the post-credential callback (the app

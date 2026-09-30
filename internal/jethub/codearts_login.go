@@ -56,10 +56,16 @@ type StartedLogin struct {
 	cancel   context.CancelFunc
 }
 
-// LoginOutcome carries either the persisted credential JSON or the failure.
+// LoginOutcome carries the persisted credential JSON (already encoded by the
+// provider-specific flow) or the failure. Raw JSON keeps the shape
+// provider-agnostic (codearts/buddy/... flows all deliver into it).
 type LoginOutcome struct {
-	Credential *CodeArtsCredential
-	Err        error
+	// CredentialJSON is the provider credential for SetCredential; nil on
+	// failure. ExpiresAt/Refreshable are display hints for the account entry.
+	CredentialJSON []byte
+	ExpiresAt      int64
+	Refreshable    bool
+	Err            error
 }
 
 // Close shuts the callback server (idempotent).
@@ -97,6 +103,18 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 	}
 
 	result := make(chan LoginOutcome, 1)
+	// deliverCredential encodes the credential and pushes the outcome.
+	deliverCredential := func(cred *CodeArtsCredential, err error) {
+		if err != nil {
+			deliver(result, LoginOutcome{Err: err})
+			return
+		}
+		data, err := json.Marshal(cred)
+		deliver(result, LoginOutcome{
+			CredentialJSON: data, ExpiresAt: codeartsCredentialExpiresAt(cred),
+			Refreshable: codeartsRefreshable(cred), Err: err,
+		})
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(CodeArtsRedirectPath, func(w http.ResponseWriter, r *http.Request) {
 		// Legacy ticket fallback: portal redirects back with secret+redirect.
@@ -107,7 +125,7 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 			}
 			http.Redirect(w, r, redirectTo, http.StatusTemporaryRedirect)
 			cred, err := pollCodeArtsTicket(ctx, ticketID, secret, CodeArtsPortalLoginPluginName, CodeArtsPortalLoginPluginVersion)
-			deliver(result, cred, err)
+			deliverCredential(cred, err)
 			return
 		}
 		code := r.URL.Query().Get("code")
@@ -118,12 +136,11 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 		token, err := exchangeCodeArtsAuthorizationCode(ctx, code, pkce.CodeVerifier, port, priv)
 		if err != nil {
 			http.Redirect(w, r, BuildPortalLoginResultURL(false), http.StatusTemporaryRedirect)
-			deliver(result, nil, err)
+			deliverCredential(nil, err)
 			return
 		}
-			http.Redirect(w, r, BuildPortalLoginResultURL(true), http.StatusTemporaryRedirect)
-		cred := CredentialFromTokenResponse(token, pkce, &privJwk)
-		deliver(result, cred, nil)
+		http.Redirect(w, r, BuildPortalLoginResultURL(true), http.StatusTemporaryRedirect)
+		deliverCredential(CredentialFromTokenResponse(token, pkce, &privJwk), nil)
 	})
 
 	server := &http.Server{Handler: mux}
@@ -139,7 +156,7 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 	go func() {
 		select {
 		case <-time.After(codeartsOAuthCallbackTimeout):
-			deliver(result, nil, ErrLoginTimeout)
+			deliver(result, LoginOutcome{Err: ErrLoginTimeout})
 			cancel()
 		case <-ctx.Done():
 		}
@@ -152,9 +169,9 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 	return &StartedLogin{LoginURL: loginURL, Result: result, cancel: cancel}, nil
 }
 
-func deliver(ch chan<- LoginOutcome, cred *CodeArtsCredential, err error) {
+func deliver(ch chan<- LoginOutcome, outcome LoginOutcome) {
 	select {
-	case ch <- LoginOutcome{Credential: cred, Err: err}:
+	case ch <- outcome:
 	default:
 	}
 }
