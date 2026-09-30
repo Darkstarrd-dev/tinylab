@@ -2,6 +2,37 @@ package jethub
 
 import "github.com/tinylab/tinylab/internal/config"
 
+// lobsteraiFallbackModels returns the built-in 19-model catalog (from ref
+// lobsterai-product.ts — "2026-08-06 从 GET /api/models/available 实测拉取").
+// Order preserves the reference table for comparability; contextWindow notes
+// are estimates (the server mostly reports 1M).
+func lobsteraiFallbackModels() ModelTable {
+	md := func(id string) config.ModelDef {
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx ~1M (est)"}
+	}
+	return ModelTable{
+		md("deepseek-v4-flash"),
+		md("deepseek-v4-pro"),
+		md("MiniMax-M3"),
+		md("MiniMax-M2.7"),
+		md("qwen3.7-max"),
+		md("qwen3.7-plus"),
+		md("qwen3.6-plus"),
+		md("qwen3.5-plus-2026-04-20"),
+		md("kimi-k2.7-code"),
+		md("kimi-k2.7-code-highspeed"),
+		md("kimi-k2.6"),
+		md("kimi-k2.5"),
+		md("doubao-seed-2-1-pro-260628"),
+		md("doubao-seed-2-1-turbo-260628"),
+		md("doubao-seed-2-0-code-preview-260215"),
+		md("glm-5.2"),
+		md("glm-5.1"),
+		md("glm-5v-turbo"),
+		md("glm-5"),
+	}
+}
+
 // buddyFallbackModels returns the built-in model catalog for a buddy-family
 // product (from ref product.ts CODEBUDDY_FALLBACK_MODELS /
 // WORKBUDDY_FALLBACK_MODELS — only models verified to actually work are

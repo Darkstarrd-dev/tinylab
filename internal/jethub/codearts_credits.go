@@ -43,6 +43,7 @@ type CreditPackage struct {
 	Remaining float64 `json:"remaining"`
 	Total     float64 `json:"total"`
 	Used      float64 `json:"used"`
+	Active    bool    `json:"active"`
 }
 
 // ClaimOutcome mirrors the plugin's ClaimOutcome union for the UI.

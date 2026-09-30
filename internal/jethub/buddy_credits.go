@@ -185,6 +185,7 @@ func (m *Manager) BuddyBalance(ctx context.Context, provider, accountID string) 
 			Remaining: readPreciseNumber(entry, "CycleCapacityRemain"),
 			Total:     readPreciseNumber(entry, "CycleCapacitySize"),
 			Used:      readPreciseNumber(entry, "CycleCapacityUsed"),
+			Active:    active,
 		}
 		out.Packages = append(out.Packages, pkg)
 		if active {

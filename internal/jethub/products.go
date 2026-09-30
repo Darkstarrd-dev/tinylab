@@ -43,6 +43,13 @@ func RegisterDefaultProducts(b *Bridge) {
 			Models:      buddyFallbackModels(provider),
 		})
 	}
+	// P3.2: lobsterai (chat base = apiBase + /api/proxy/v1).
+	b.RegisterProduct(Product{
+		Provider:    "lobsterai",
+		DisplayName: "LobsterAI (有道)",
+		BaseURL:     lobsteraiProduct.Endpoint,
+		Models:      lobsteraiFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -51,6 +58,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	for id, p := range BuddyProducts() {
 		m.SetAugmenter(id, m.buddyAugment(p))
 	}
+	m.SetAugmenter("lobsterai", m.lobsteraiAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

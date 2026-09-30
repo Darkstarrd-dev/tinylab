@@ -889,6 +889,11 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `buddy_auth.go` | 完整登录流（auth/state → 装饰 URL → 轮询 token 11217 → 轮询 account 12151 → 组装；`StartBuddyLogin` 两步式）、`RefreshBuddyAccount`（终态判定 401/403/expired/invalid → refreshable:false） |
 | `buddy_augment.go` | chat 请求出站头全量重签：Bearer + X-Domain（产品优先于凭据快照）+ X-Product-Code + X-Agent-Purpose/X-IDE-Name/X-IDE-Type/X-IDE-Version/X-Product（=归属名）+ 模型分档 UA |
 | `buddy_credits.go` | checkinHeaders（X-Domain 产品优先）、签到 claim（业务码 10001/1001→已领、1002/1003→无资格、以响应体 code 为准——重复领取是 HTTP 400）、余额（`data.Response.Data.Accounts[]` 双层嵌套、readPreciseNumber 精确值优先、Status=3 失效包不计总额、非 JSON 响应带 HTTP 状态指引重新登录） |
+| `lobsterai.go` | LobsterAI 协议常量（exchange/refresh/models/chat/callback 路径、能力头值）+ `LobsteraiCredential`（uuid/first_keyfrom/latest_keyfrom 身份三件套 1:1）+ `MaskLobsteraiPhoneTail`（手机尾 2 位幂等掩码，两种输入形态归一）+ `lobsteraiEnvelope` 信封 + TokenPayload 四级 UID 回退（user.id→userId→yid→sha256[:16]，不插 JWT sub 中间层）+ `buildLobsteraiCredential`（expiresIn 基准=now）+ `applyLobsteraiRefresh`（身份字段全部沿用，latest_keyfrom 刻意不更新；refreshToken 缺失沿用旧值）+ 四头/chat/models 三套请求头（能力头是 kimi-k3 准入与思考关闭前提） |
+| `lobsterai_auth.go` | `BuildLobsteraiLoginURL`（`{portal}/portal#/login?...` hash 段显式拼装 + source=electron + 编码 redirect_uri + state）、`StartLobsteraiLogin`（本地回调即 exchange、state 不匹配 400、成功 HTML 页对付浏览器、600s 超时）、`CompleteLobsteraiLogin`（掩码昵称落账号）、`RefreshLobsteraiAccount`（匿名 POST + keyfrom 载荷原样回发、终态 refreshable:false） |
+| `lobsterai_augment.go` | chat 出站头全量重签：Bearer 四头 + X-LobsterAI-Client-Capabilities/Version（动态真值版本），body 透传未消费档位 |
+| `lobsterai_credits.go` | 三步签到（slot→context→check_in 七步判定、idempotencyKey 幂等键、creditsGranted→rewardCredits→credits）+ profile-summary 余额（creditItems、label 优先于 type、面值推断=同组有效包 max、负值 clamp、0 且无明细判「查不到」） |
+| `lobsterai_test.go` / `mock_test.go` | 掩码幂等 5 形态、UID 四级、now 基准 expires、refresh 身份沿用断言、三步签到三分支、面值推断/label/过期包排除、登录端到端 mock（匿名 exchange + 5 字段体 + 掩码昵称落库）、终态刷新 refreshable:false |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
