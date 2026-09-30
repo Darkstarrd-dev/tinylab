@@ -26,7 +26,7 @@ func TestForwardUpstream_CustomHeaders(t *testing.T) {
 		Key:     config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
 		KeyName: "Key Main",
 	}
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream failed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestForwardUpstream_CustomHeadersDisabledNoOp(t *testing.T) {
 		Key:     config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
 		KeyName: "Key Main",
 	}
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream failed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestForwardUpstream_CustomHeadersOverrideGenerated(t *testing.T) {
 	}
 	// Streaming path: the generated Accept: text/event-stream must be
 	// overridden by the custom Accept value.
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, true, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, true, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream failed: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestForwardUpstream_CustomHeadersClinePrecedence(t *testing.T) {
 		Key:     config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
 		KeyName: "Key Main",
 	}
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"cline-free/glm-5.2"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"cline-free/glm-5.2"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream failed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestForwardUpstream_CustomHeadersCRLFRejected(t *testing.T) {
 		Key:     config.Key{ID: "key1", Key: "sk-test-key", Name: "Key Main", IsActive: true, Priority: 1},
 		KeyName: "Key Main",
 	}
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{"model":"gpt-4"}`), nil, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream failed: %v", err)
 	}

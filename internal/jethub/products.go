@@ -61,13 +61,10 @@ func (m *Manager) prefixSnapshot() map[string]string {
 	return out
 }
 
-// Augment implements proxy.RequestAugmenter for bridged providers. P1 ships
-// the identity bridge: the body is forwarded unchanged (the registry already
-// carries the account token via Key.Key, so the standard Bearer header is
-// correct for providers whose upstream is OpenAI-compatible). Provider
-// adapters (P2/P3) replace this with per-provider header/body rewriting by
-// registering a RequestAugmenterFunc.
-func (m *Manager) Augment(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+// Augment implements proxy.RequestAugmenter for bridged providers. P2 wires
+// the codearts adapter (SDK-HMAC signing); other providers forward the body
+// unchanged until their P3 adapters register a RequestAugmenterFunc.
+func (m *Manager) Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 	provider, ok := ProviderNameFromID(providerID)
 	if !ok {
 		return body, nil
@@ -78,11 +75,11 @@ func (m *Manager) Augment(r *http.Request, body []byte, providerID, keyID string
 	if fn == nil {
 		return body, nil
 	}
-	return fn(r, body, providerID, keyID)
+	return fn(r, body, providerID, keyID, upstreamModel)
 }
 
 // RequestAugmenterFunc is a provider-specific augment hook.
-type RequestAugmenterFunc func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error)
+type RequestAugmenterFunc func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error)
 
 // SetAugmenter registers a provider-specific augment implementation (called
 // by P2/P3 adapter wiring at app startup).

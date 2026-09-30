@@ -43,6 +43,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Delete("/accounts/{accountID}", h.deleteAccount)
 		r.Get("/providers/{provider}/models", h.listModels)
 		r.Put("/providers/{provider}/models", h.setModelDisabled)
+		// P2: codearts provider-specific flows (login/refresh/claim/balance).
+		h.RegisterCodeArts(r)
 	})
 }
 

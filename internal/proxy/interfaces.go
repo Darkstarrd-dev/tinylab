@@ -131,11 +131,14 @@ type UsageRecorder interface {
 // forwarding. The proxy never imports the augmenter's package — it only knows
 // this interface and the APIType=="jethub" marker.
 type RequestAugmenter interface {
-	// Augment may replace URL/body/headers of the outbound request. providerID
-	// is config.Provider.ID (e.g. jethub-codearts); keyID locates the concrete
-	// account credential. Returning an error fails this forwarding attempt
-	// (counted like a network error by the retry loop).
-	Augment(r *http.Request, body []byte, providerID, keyID string) ([]byte, error)
+	// Augment may replace headers of the outbound request (mutations to r's
+	// header become the outbound header base) and returns the (possibly
+	// rewritten) body. providerID is config.Provider.ID (e.g.
+	// jethub-codearts); keyID locates the concrete account credential;
+	// upstreamModel is the resolved model id from the request body. Returning
+	// an error fails this forwarding attempt (counted like a network error by
+	// the retry loop).
+	Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error)
 }
 
 // QuotaTracker abstracts quota bookkeeping for UI display. It is the exact

@@ -380,12 +380,12 @@ func TestBridgeRestoresFromStorage(t *testing.T) {
 func TestAugmentDispatch(t *testing.T) {
 	m := newTestManager(t).m
 	called := ""
-	m.SetAugmenter("codearts", func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+	m.SetAugmenter("codearts", func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 		called = providerID + "/" + keyID
 		return append(body, []byte(` `)...), nil
 	})
 	req, _ := http.NewRequest(http.MethodPost, "http://x", nil)
-	out, err := m.Augment(req, []byte(`{"a":1}`), "jethub-codearts", "acct")
+	out, err := m.Augment(req, []byte(`{"a":1}`), "jethub-codearts", "acct", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestAugmentDispatch(t *testing.T) {
 		t.Fatalf("body not passed through: %q", out)
 	}
 	// Unregistered provider → body unchanged.
-	out, err = m.Augment(req, []byte(`{"a":1}`), "jethub-qoder", "acct")
+	out, err = m.Augment(req, []byte(`{"a":1}`), "jethub-qoder", "acct", "m")
 	if err != nil || string(out) != `{"a":1}` {
 		t.Fatalf("default dispatch should be identity: %q %v", out, err)
 	}

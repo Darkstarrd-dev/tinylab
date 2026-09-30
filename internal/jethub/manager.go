@@ -3,6 +3,7 @@ package jethub
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -122,6 +123,12 @@ type Manager struct {
 	// augmenters holds per-provider RequestAugmenter implementations (P2/P3
 	// adapters register here; Augment dispatches by provider).
 	augmenters map[string]RequestAugmenterFunc
+	// onAccountCredentialed fires after a credential write so the app can
+	// re-sync bridged keys (wired to Bridge.SyncKeys).
+	onAccountCredentialed func(provider string)
+
+	// sharedClient lazily-built outbound client for adapter management calls.
+	sharedClient *http.Client
 
 	logger Logger
 }
@@ -387,7 +394,15 @@ func (m *Manager) SetCredential(provider, credentialRef string, credentialJSON [
 	if err := m.saveCredentialsLocked(); err != nil {
 		return err
 	}
-	return m.saveAccountsLocked()
+	if err := m.saveAccountsLocked(); err != nil {
+		return err
+	}
+	// Fire the credential hook outside the storage path concern: the app
+	// wires it to Bridge.SyncKeys so bridged keys pick up the new token.
+	if m.onAccountCredentialed != nil {
+		go m.onAccountCredentialed(provider)
+	}
+	return nil
 }
 
 // Credential resolves the stored credential JSON for one account.

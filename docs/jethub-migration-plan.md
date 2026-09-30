@@ -145,7 +145,7 @@
 > 状态标记：`[ ]` 未开始 / `[~]` 进行中 / `[x]` 完成。每阶段完成度在 §4–§9 的分阶段 Checklist 中细化。
 
 - [P1] **[x] P1 基础设施层 + 桥接骨架**：jethub 包、凭据/账号存储、Provider 桥接（前缀注册 + RequestAugmenter hook）、wazero 引入（§4）
-- [P2] **[ ] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）
+- [P2] **[~] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）——代码与单测完成；**实发验证（§5.3 端到端冒烟）待有真实账号时执行**
 - [P3] **[ ] P3 其余 10 provider 分批移植**（§6）
 - [P4] **[ ] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）
 - [P5] **[ ] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）
@@ -220,13 +220,19 @@ go build .
 
 ### 5.2 Checklist
 
-- [ ] P2.1 `internal/jethub/codearts_oauth.go`：`generatePkcePair`（48B base64url + S256）、`generateDpopKeyPair`（ECDSA P-256 + JWK）、`signDpopJws`（ES256 JWS：htm/htu/iat/jti + `typ: dpop+jwt`）——标准库实现替代 jose；单测：JWK round-trip + JWS 可验证。
-- [ ] P2.2 `internal/jethub/codearts_login.go`：本地回调 server（127.0.0.1 随机端口 + `/oauth/callback`）、`buildLoginUrl`、`exchangeAuthorizationCode`/`exchangeRefreshToken`（POST `sts.cn-north-4` 带 DPoP）、终态判定（`invalid_grant`/`ExpiredRefreshToken`/`InvalidDPoPHeader`）；开浏览器走 `fsutil`（补 open/xdg-open 分支）。
-- [ ] P2.3 `internal/jethub/codearts_refresh.go`：静默续期调度（到期前窗口、失败退避、refreshable:false 终态）+ 刷新成功后 `bridge.SyncKeys`。
-- [ ] P2.4 `internal/jethub/codearts_augment.go`：实现该 provider 的 `Augment`——推理请求头族 + `maas_type: benefit` 分支（按模型查静态表）+ 令牌注入；`codearts_sign.go`（SDK-HMAC-SHA256 1:1 移植）供积分签到与后续签名需求复用。
-- [ ] P2.5 `internal/jethub/codearts_product.go`：模型静态表（GLM-5.2 系 / openpangu / deepseek-v4 系 + CONTEXT_WINDOWS），供 bridge 注册 Models 与黑名单过滤。
-- [ ] P2.6 API：`POST /api/jethub/codearts/login`（触发浏览器流）、`GET /api/jethub/codearts/status`、`POST /api/jethub/codearts/claim`（签到）；P1.9 的 CRUD 对 codearts 账号生效。
-- [ ] P2.7 单测：oauth/sign/augment 纯函数单测 + `httptest` mock STS 与推理端点（沿 `internal/api/assistant/assistant_test.go` mock 范式）。
+- [x] P2.1 `internal/jethub/codearts_oauth.go`：`generatePkcePair`（48B base64url + S256）、`generateDpopKeyPair`（ECDSA P-256 + JWK）、`signDpopJws`（ES256 JWS：htm/htu/iat/jti + `typ: dpop+jwt`）——标准库实现替代 jose；单测：JWK round-trip + JWS 可验证。
+- [x] P2.2 `internal/jethub/codearts_login.go`：本地回调 server（127.0.0.1 随机端口 + `/oauth/callback`）、`buildLoginUrl`、`exchangeAuthorizationCode`/`exchangeRefreshToken`（POST `sts.cn-north-4` 带 DPoP）、终态判定（`invalid_grant`/`ExpiredRefreshToken`/`InvalidDPoPHeader`）；开浏览器走 `fsutil`（补 open/xdg-open 分支）。
+  > 实施记录：两步式登录 `StartCodeArtsLogin`（端口 ≥10000 重试、180s 超时、secret 旧流程回退 307、portal 结果页重定向）；开浏览器由 API 层传 `openURL` 回调注入（app 侧接 `fsutil.OpenInBrowser`，open/xdg-open 分支 fsutil 已有）。
+- [x] P2.3 `internal/jethub/codearts_refresh.go`：静默续期调度（到期前窗口、失败退避、refreshable:false 终态）+ 刷新成功后 `bridge.SyncKeys`。
+  > 实施记录：`RefreshCodeArtsAccount`（refreshable 三件套校验 + 合并 domain/user/model_rate_limits）+ `RefreshAllCodeArts`（含停用账号，失败留日志不中断）；ErrRefreshTokenExpired → refreshable:false 终态；凭据写入后经 `SetAccountCredentialedHook`（app 装配接 `Bridge.SyncKeys`）自动同步 Key。周期调度器由 P4 一键签到/打开面板时按需触发 + 后续 P5 视需要加 ticker。
+- [x] P2.4 `internal/jethub/codearts_augment.go`：实现该 provider 的 `Augment`——推理请求头族 + `maas_type: benefit` 分支（按模型查静态表）+ 令牌注入；`codearts_sign.go`（SDK-HMAC-SHA256 1:1 移植）供积分签到与后续签名需求复用。
+  > 实施记录：`CodeArtsAugmentHook` 签名替换出站头（x-sdk-date/x-sdk-content-sha256/x-security-token + maas_type 参与签名）+ Chat-Id/Session-Id/lang 归属头；benefit 兜底集合 `glm-5.3-flash`/`deepseek-v4.1-flash`；body 透传不改。
+- [x] P2.5 `internal/jethub/codearts_product.go`：模型静态表（GLM-5.2 系 / openpangu / deepseek-v4 系 + CONTEXT_WINDOWS），供 bridge 注册 Models 与黑名单过滤。
+  > 实施记录：并入 `products.go` `codeartsModels`（P1 先行注册），CONTEXT_WINDOWS 记于 ModelDef.Note。
+- [x] P2.6 API：`POST /api/jethub/codearts/login`（触发浏览器流）、`GET /api/jethub/codearts/status`、`POST /api/jethub/codearts/claim`（签到）；P1.9 的 CRUD 对 codearts 账号生效。
+  > 实施记录：另含 `POST /codearts/refresh`（账号卡片刷新）与 `GET /codearts/balance`（余额）；login 为两步式（返回 loginId+loginUrl，前端轮询 status）；claim 实现完整五步流（账户门控→活动列表→可领判定→claim→confirm），已还徊 4 个「实测坑」（campaignId 数字、benefitAmount 字段名、AGENT-Type 签名外追加、confirm 不影响结果）。
+- [x] P2.7 单测：oauth/sign/augment 纯函数单测 + `httptest` mock STS 与推理端点（沿 `internal/api/assistant/assistant_test.go` mock 范式）。
+  > 实施记录：`codearts_test.go` 13 个测试（PKCE 形状、JWK round-trip + JWS 结构、终态错误分类、签名头结构/GET 无 content-type、augment benefit 注入 + 缺凭据失败、mock STS 换取/终态、mock snap claim 三分支、登录 URL 形状断言）。
 
 ### 5.3 验证门
 
@@ -351,6 +357,7 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 | 日期 | 阶段 | 记录 |
 |---|---|---|
+| 2026-10-01 | P2 | **P2 代码完成（go vet + 全量测试 + go build 全绿）**：`codearts_oauth.go`（PKCE/DPoP ES256 标准库实现 + `DpopPrivateJwk` 字段名与 ref 1:1）、`codearts_sign.go`（SDK-HMAC-SHA256 1:1，maas_type 参与签名、GET 无 content-type、host 不下发）、`codearts_login.go`（两步式 OAuth：随机端口 ≥10000 + 180s 超时 + secret 旧流程 307 回退 + portal 结果页重定向）、`codearts_refresh.go`（RefreshCodeArtsAccount 续期合并 + RefreshAllCodeArts 含停用账号 + 终态 refreshable:false + SyncKeys hook）、`codearts_augment.go`（CodeArtsAugmentHook 签名出站 + maas_type benefit 兜底集合 + Chat-Id/Session-Id/lang）、`codearts_credits.go`（claim 五步流 + 余额解析，campaignId 数字/confirm 独立/Agent-Type 签名外追加三个实测坑已锁）、`sessions.go`（登录会话注册表）；API `codearts.go`（login/status/refresh/claim/balance 五端点）；app.go 装配 augmenter + credentialed hook。单测 13 个（含 mock STS/snap httptest 往返）。**待办：真实账号端到端冒烟（§5.3）——需用户登录一次 codearts 账号后实测 `{前缀}/{modelID}` 推理。** |
 | 2026-10-01 | P1 | **P1 完成（验证门全绿，commit 待记）**：`internal/jethub` 包（Manager 凭据 AES-GCM 信封存储 + accounts.json 账号索引/黑名单/前缀映射、AccountPool 选号、Bridge 前缀桥接 + SyncKeys + RestoreBridges、HTTPClient、qoderwasm embed + wazero v1.9.0 编译冒烟）；`internal/api/jethub`（providers/prefix/accounts/models 端点，`Router.SetJetHub` 注入）；proxy `RequestAugmenter` 窄接口 + `SetRequestAugmenter` + `forwardUpstream` jethub 分支（`WithClientRequest` context 传原始请求，客户端头为出站基）；app.go 装配（Manager/Bridge/Augmenter 注入 + RestoreBridges）；codearts 产品表（9 模型）先行注册供桥接验证。测试：jethub/proxy/config/api 全绿 + go vet + go build；wazero WASM 编译冒烟通过。文档：PROJECT_MAP §13n/§10.28/§24/§10 router 行 + config-registry-state-architecture §17a 存储节 + 最后核对行。验证门备注：`/v1/models` 含桥接模型需先为账号写入凭据（P2 登录流），P1 以单测 `TestBridgeSetPrefixRegistersProvider` 锁死等价语义。 |
 | 2026-09-30 | P0 | **v2 修订**：确定落地位置与调用方法——产品名 Free Hub，Settings 侧边栏入口（Path Settings 下、Assistant 上），main 三段式布局（header 一键签到/备份/恢复/关闭 + left provider 列表 + right 管理/前缀输入框）；调用桥接 = registry 动态 Provider（`Prefix` + `APIType=jethub` + 账号→Keys 复用 rotation）+ proxy `RequestAugmenter` 窄接口注入，内外统一 `{前缀}/{modelID}` 调用；备份/恢复按原版格式双向兼容（PBKDF2 310000 + AES-GCM 壳，payload v1 字段已实测提炼至 §1.5）。§2 为新增核心设计章节。 |
 | 2026-09-30 | P0 | 完成前置评估（克隆 ref 副本 @ commit cecf376，依赖/增量/平台结论见 §1）；创建本计划文档；PROJECT_MAP.md §19/§23 添加引用。 |

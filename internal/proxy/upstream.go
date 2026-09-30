@@ -57,7 +57,7 @@ func (h *Handler) streamClientFor(sel *rotation.SelectedKey) *http.Client {
 	return h.streamClient
 }
 
-func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey, body []byte, headers http.Header, isStream bool, path string, entryFormat combo.EntryFormat) (*http.Response, error) {
+func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey, body []byte, headers http.Header, isStream bool, path string, entryFormat combo.EntryFormat, upstreamModel string) (*http.Response, error) {
 
 	// Bridged provider hook: providers owned by an external augmenter (e.g.
 	// jethub) get URL/body/headers rewritten just before send. The augmenter
@@ -67,7 +67,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	// classifies and retries/excludes).
 	if sel.Provider.APIType == "jethub" && h.augmenter != nil {
 		if clientReq, _ := ctx.Value(currentClientRequestKey{}).(*http.Request); clientReq != nil {
-			augmented, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID)
+			augmented, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel)
 			if err != nil {
 				return nil, err
 			}

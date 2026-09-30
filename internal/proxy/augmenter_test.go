@@ -16,14 +16,14 @@ import (
 // fakeAugmenter is a configurable RequestAugmenter for the three-state tests.
 type fakeAugmenter struct {
 	// fn, when set, produces (augmentedBody, error).
-	fn func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error)
+	fn func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error)
 }
 
-func (f *fakeAugmenter) Augment(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+func (f *fakeAugmenter) Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 	if f.fn == nil {
 		return body, nil
 	}
-	return f.fn(r, body, providerID, keyID)
+	return f.fn(r, body, providerID, keyID, upstreamModel)
 }
 
 // newJethubTestProvider builds a test handler whose only provider is a
@@ -51,7 +51,7 @@ func TestForwardUpstream_JethubAugmenterReplacesHeaders(t *testing.T) {
 	defer upstream.Close()
 
 	h := newJethubTestProvider(t, upstream.URL)
-	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 		if providerID != "jethub-codearts" || keyID != "acct-1" {
 			t.Errorf("augmenter got providerID=%q keyID=%q", providerID, keyID)
 		}
@@ -68,7 +68,7 @@ func TestForwardUpstream_JethubAugmenterReplacesHeaders(t *testing.T) {
 	}
 	body := []byte(`{"model":"deepseek-v4-flash","messages":[]}`)
 	resp, err := h.forwardUpstream(WithClientRequest(context.Background(), httptest.NewRequest("POST", "/v1/chat/completions", nil)),
-		sel, body, http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+		sel, body, http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestForwardUpstream_JethubAugmenterRewritesBody(t *testing.T) {
 	defer upstream.Close()
 
 	h := newJethubTestProvider(t, upstream.URL)
-	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 		return []byte(`{"encrypted":true,"orig":` + string(body) + `}`), nil
 	}})
 
@@ -102,7 +102,7 @@ func TestForwardUpstream_JethubAugmenterRewritesBody(t *testing.T) {
 		Key:      config.Key{ID: "acct-1", Key: "tok-1"}, KeyName: "Account 1",
 	}
 	resp, err := h.forwardUpstream(WithClientRequest(context.Background(), httptest.NewRequest("POST", "/v1/chat/completions", nil)),
-		sel, []byte(`{"m":1}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+		sel, []byte(`{"m":1}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestForwardUpstream_JethubAugmenterErrorFailsForward(t *testing.T) {
 	defer upstream.Close()
 
 	h := newJethubTestProvider(t, upstream.URL)
-	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 		return nil, errAugmentFailed
 	}})
 
@@ -128,7 +128,7 @@ func TestForwardUpstream_JethubAugmenterErrorFailsForward(t *testing.T) {
 		Key:      config.Key{ID: "acct-1", Key: "tok-1"}, KeyName: "Account 1",
 	}
 	_, err := h.forwardUpstream(WithClientRequest(context.Background(), httptest.NewRequest("POST", "/v1/chat/completions", nil)),
-		sel, []byte(`{}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+		sel, []byte(`{}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err == nil {
 		t.Fatal("expected augmenter error to fail the forward")
 	}
@@ -155,7 +155,7 @@ func TestForwardUpstream_AugmenterSkippedForNormalProviders(t *testing.T) {
 		BaseURL: upstream.URL, IsActive: true,
 		Keys: []config.Key{{ID: "k1", Key: "sk-1", IsActive: true}},
 	}, config.RotationConfig{Strategy: "fill-first", MaxRetries: 1})
-	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID string) ([]byte, error) {
+	h.SetRequestAugmenter(&fakeAugmenter{fn: func(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 		called = true
 		return body, nil
 	}})
@@ -164,7 +164,7 @@ func TestForwardUpstream_AugmenterSkippedForNormalProviders(t *testing.T) {
 		Provider: config.Provider{ID: "normal", BaseURL: upstream.URL},
 		Key:      config.Key{ID: "k1", Key: "sk-1"}, KeyName: "k1",
 	}
-	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI)
+	resp, err := h.forwardUpstream(context.Background(), sel, []byte(`{}`), http.Header{}, false, "/v1/chat/completions", combo.EntryFormatOpenAI, "")
 	if err != nil {
 		t.Fatalf("forwardUpstream: %v", err)
 	}

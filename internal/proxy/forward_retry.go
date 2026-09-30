@@ -228,7 +228,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		// provider augmenter (APIType=="jethub") can read client headers inside
 		// forwardUpstream without changing its signature.
 		fwdCtx := WithClientRequest(r.Context(), r)
-		resp, err := h.forwardUpstream(fwdCtx, sel, upstreamBody, r.Header, isStream, effectivePath, effectiveFormat)
+		resp, err := h.forwardUpstream(fwdCtx, sel, upstreamBody, r.Header, isStream, effectivePath, effectiveFormat, upstreamModel)
 		if err != nil {
 			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel, sessionKey)
 			h.EntryTracker.Remove(reqID)
