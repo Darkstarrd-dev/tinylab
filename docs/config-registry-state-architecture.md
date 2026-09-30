@@ -1,3 +1,5 @@
+> **最后核对（2026-10-01，jethub P1 存储节）：** Free Hub（Jet Hub 移植）新增第三存储位 `{configDir}/jethub/`（`config/paths.go::ResolveJetHubDir`，三段式与 `ResolveAssistantDir` 同款）：`credentials.json`（`{"enc":"<base64 AES-GCM>"}` 信封，密钥复用 `Security.EncryptionKey`，`internal/jethub/manager.go::loadCredentials/saveCredentialsLocked`）与 `accounts.json`（账号索引 + 模型黑名单 + 前缀映射，`fsutil.AtomicWrite` 原子写，非敏感）。该目录**不进 config.yaml/state.yaml**——jethub 数据自成一体，桥接 Provider 本体（`APIType="jethub"`，ID=`jethub-{provider}`）经 `Bridge.SyncKeys` 动态写入 registry 内存态并由 `SaveConfigAndReload` 范式持久化到 config.yaml providers 段。详见 §24 jethub 存储节与 `docs/jethub-migration-plan.md`。
+>
 > **最后核对（2026-09-07，删除后 QuickSlot/Playground 残留修复）：** `registry/combos.go::DeleteCombo` 成功路径补 `sweepStaleQuickSlotModelsLocked()`——删 combo 按名清 quickslot 引用（combo 名是 quickslot 存活判定口径之一），与 `DeleteProvider`/`DeleteModel` 的 `sweepStaleRefsLocked()` 对齐；`sweep_test.go` 新增 `TestDeleteComboSweepsQuickSlots`（删 c1 后 q1 无 `C1` 残留且 `SelectedIndex` 合法）。前端三处删模型路径（`providers-models.js::deleteModelDetail`/`batchKeepSelected`/`batchRemoveSelected`）与 `providers.js::deleteProviderFromList` 成功后无条件调 `renderHeaderQuickSlots()`——此前独立 Providers 页无 `#combo-list` 不触发 `renderEndpoint`，header 按钮残留已删模型名。
 >
 > **最后核对（2026-08-29，Round-2 P0-04 配置并发与原子写）：** `Deps.cfgSaveMu` 串行化 `SaveConfig`/`SaveConfigAndReload`；`fsutil.AtomicWrite` 改随机后缀 `path.tmp.<nanos>` 并镜像确定性 `.tmp` 兼容探针；`config.Load` 经 `findPendingTmp(path.tmp*)` 发现悬空随机文件；`.tmp` 第三分支经 `decodeConfig` 迁移废弃字段。
@@ -394,6 +396,24 @@ flowchart LR
 - **会话 cookie 加固：** `setSessionCookie`（`api/auth.go:164-174`）与登出 cookie（`api/auth.go:151-162`）已设置 `Secure: true`（与 `HttpOnly`、`SameSite=Strict` 配合），`MaxAge` 从 `86400*30`（30 天）改为 `int(sessionMaxAge.Seconds())`（24h），与服务端 `sessionMaxAge` 一致，防止过期 cookie 被重放。
 
 **AnySearch/下载凭据不在加密范围内（2026-08-03 明确）：** 第 8 节所述 key-at-rest 加密仅覆盖 `Provider.Keys`；`AnySearchConfig.APIKey` 及下载 cookies（`DownloadConfig.BrowserCookies` 或 `CookiesPath` 指向的 cookies.txt）均以**明文**存储/使用。本次审计仅记录该边界，未扩展加密。
+
+## 17a. jethub 存储节（2026-10-01 新增，P1）
+
+Free Hub（Jet Hub 移植，`internal/jethub`，见 PROJECT_MAP §13n）在三层归属之外引入一个**独立自管**的存储位，不占用 config.yaml 自有字段、也不进 state.yaml：
+
+| 资产 | 位置 | 形态 | 归属 |
+|---|---|---|---|
+| 账号凭据（access token / refresh token / DPoP JWK…） | `{configDir}/jethub/credentials.json` | `{"enc":"<base64 AES-256-GCM 全量凭据 JSON>"}` 信封（`config.Encrypt/Decrypt` 同源），密钥 = `Security.EncryptionKey` | `internal/jethub/manager.go`（`loadCredentials`/`saveCredentialsLocked`） |
+| 账号索引/昵称/启停/模型黑名单/前缀映射 | `{configDir}/jethub/accounts.json` | 明文 JSON（`fsutil.AtomicWrite` 原子写，非敏感） | 同上（`loadAccounts`/`saveAccountsLocked`） |
+| 桥接 Provider（`ID=jethub-{provider}`、`APIType="jethub"`、Keys=启用账号×1） | config.yaml `providers` 段 + registry 内存态 | 标准 `config.Provider`，经 `Bridge.SyncKeys` 全量重建（Delete+Add 保 Keys/Models 同步）后走 `SaveConfigAndReload` 范式持久化 | `internal/jethub/bridge.go`（写侧）+ registry（读侧） |
+
+**目录定位：** `config/paths.go::ResolveJetHubDir(dir, configDir)`——空→`{configDir}/jethub`、相对拼 configDir、绝对原样（与 `ResolveAssistantDir` 同款三段式）。
+
+**边界与语义：**
+- 凭据落盘**必须**走 AES-GCM 信封（比原插件明文 JSON 更严格，jethub-migration-plan §10 纪律 3）；`EncryptionKey` 未设置时 `SetCredential` 返回 error 而非静默明文落盘。
+- 前缀（`Prefixes[provider]`）是桥接的开关：设置→registry 动态注册；清空/零可用 Key→`DeleteProvider` 移除（存储的前缀保留，重登录后自动重桥接，`RestoreBridges` 启动时重放）。
+- 账号→Key 同步是**全量替换**：`SyncKeys` 每次以当前启用账号重建 `Keys`，rotation 侧经 registry 既有 CRUD 语义获得新的 `KeyRuntimeState`（复用 `reloadStatesLocked` 的指针保留逻辑）。
+- 加密信任边界与 §17 相同：`EncryptionKey` 明文共址于 config.yaml，只防凭据文件被直接拷走，不防能读 config.yaml 的人。
 
 ## 18. 状态模型总览
 

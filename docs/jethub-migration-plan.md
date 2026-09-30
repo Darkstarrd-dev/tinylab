@@ -1,0 +1,356 @@
+# Jet Hub 插件移植实施计划（dsh-codearts-auth → TinyLab）
+
+> **文档性质：** 分步实施计划 + 进度执行文档（progress doc）。本文档是新对话的**唯一启动入口**：新会话只需读本文档 + §「必读上下文」列出的文件，即可接续任意阶段的实施工作。
+>
+> **v2 修订（2026-09-30）：** 按用户决策确定**落地位置与调用方法**——产品名 **Free Hub**，入口在 Settings 页左侧边栏（Path Settings 下方、Assistant 上方），点击后右侧 main 切换为 Free Hub 管理界面；通过**自定义前缀**桥接本项目调用系统（详见 §2）。§2 为本轮新增的核心架构章节，实施前必读。
+>
+> **来源评估：** 前置可行性评估已完成（§1），结论：核心链路零新增依赖；仅 Qoder 加密推理需要 `github.com/tetratelabs/wazero`（stripped 增量 ≈ +3.4 MB）；约 95% 功能全平台可用。
+>
+> **参考副本：** `ref/deepseek-harness-codearts`（gitignored），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`，锁定 commit `cecf3766c9faa0b466605af10faa13d5696fb635`（2026-09-30）。**该目录为只读参考，禁止修改。**
+>
+> **同步约束（强制）：** 每完成一个 Checklist 项，必须在**同一次改动中**勾选该项并在 §11「执行日志」追加一行；每完成一个阶段，更新 §3 主 Checklist 的 `[P*]` 状态标记。全部完成后：按 AGENTS.md 文档同步指令更新受影响的架构文档与 PROJECT_MAP.md，将本文档状态改为「已完成」，并在 PROJECT_MAP.md 中**移除本文档的引用**（§19 docs 表 + §23 占位区如有）。
+
+---
+
+## 1. 前置评估结论（已完成，勿重做）
+
+### 1.1 插件本体
+
+`dsh-codearts-auth` 是 DeepSeek Harness 的 cordis 插件（TypeScript，Node 22+，ESM），提供：
+
+- **11 个 LLM provider 路由**：codearts（华为云）、buddy/workbuddy（腾讯 CodeBuddy 中国/国际版，同源）、lobsterai（有道）、qoder/qodercn（阿里系，同协议族共用 WASM）、trae（字节）、cline、loomy（讯飞）、raccoon（商汤）、minimax（Anthropic Messages 协议族）。每个 provider 含登录/凭据静默续期/账号池/积分签到/SSE 推理透传。
+- **Jet Hub 管理面板**（Web，React）：账号池管理、模型黑名单开关、积分领取、加密备份。
+- **特殊依赖件**：`qoder-auth-wasm.wasm`（298 KB，wasm-bindgen 产物，Qoder 加密推理端点的请求体加密/签名）。
+
+规模：宿主侧 `src/` 103 个 TS 文件 ≈ 53,565 行 / 2.4 MB；客户端 `plugin-src/client/` 12 个 JS ≈ 3,658 行 / 242 KB；locale 2 个 JSON。
+
+### 1.2 依赖评估结论
+
+| 插件依赖 | Go 移植对应 | 新依赖？ |
+|---|---|---|
+| node:http / fetch | `net/http`（项目已有） | ❌ |
+| node:crypto（SHA-256/HMAC/PKCE/随机） | `crypto/sha256`、`crypto/hmac`、`crypto/rand` | ❌ |
+| `jose`（唯一第三方库，仅 `src/oauth.ts`：ES256 DPoP JWK + JWT 签名） | `crypto/ecdsa` + `crypto/elliptic` P-256 + `encoding/base64` + `encoding/json`，自写 JWK/JWS ≈150–200 行 | ❌ |
+| 华为云 `SDK-HMAC-SHA256` 签名（`src/sign.ts`） | 纯 HMAC 组装 | ❌ |
+| SSE 解析（`src/sse.ts` 61 KB） | 项目已有 `internal/sse`，模式同源 | ❌ |
+| node:child_process（3 处：开浏览器、zcode 窗口管理、taskkill） | `internal/fsutil` 已有 Windows 打开器（补 open/xdg-open 分支）；`internal/procutil` | ❌ |
+| node:fs/os/path（凭据持久化、machine_token.json 读取） | `os`/`path/filepath` + 项目已有 AES-GCM 加密持久化（比插件明文 JSON 更安全） | ❌ |
+| WASM 运行时（Qoder 加密推理） | **`github.com/tetratelabs/wazero`**（纯 Go，无 cgo） | ⚠️ 唯一建议引入 |
+| React（客户端面板） | **按 AGENTS.md 约束禁 React，重写为 vanilla JS**（web/static 模式） | ❌（重写工作量） |
+| `@deepseek-ai/cordis`/`dsh-llm`/`dsh-credentials`/`schemastery` | 不移植——替换为本项目 `internal/api` 路由 + `internal/config` + `internal/registry` | ❌ |
+
+### 1.3 编译后增量实测（go1.26.5 / windows-amd64 实测）
+
+| 产物 | 大小 |
+|---|---|
+| tinylab 当前构建（未 strip） | 33,393,664 B |
+| tinylab stripped（`-s -w`） | 27,887,616 B |
+| wazero 最小程序净增量（未 strip / stripped） | ≈ +5.57 MB / **+3.44 MB** |
+| WASM 资源（embed） | +298 KB |
+
+- 不移植 Qoder 加密推理（砍掉 qoder/qodercn 或降级公开端点）：**新增依赖为零**。
+- 完整移植（含 Qoder）：stripped 二进制 **+3.4 MB（约 +12%）** + 298 KB WASM embed。
+
+### 1.4 全平台支持结论
+
+- ✅ 纯网络+文件+密码学逻辑（11 provider 主体、OAuth 回调、DPoP/PKCE、签名、持久化、wazero、Web 面板）：三平台全支持。
+- ⚠️ `zcode-captcha.ts` 验证码窗口管理：Windows（Win32 `WS_EX_TOOLWINDOW`）/ Linux X11（`wmctrl`，作者自注无法真机验证）/ **macOS 无实现** → macOS 降级为普通浏览器标签页打开。
+- ⚠️ Qoder `machine_token.json` 读取依赖本机装有 Qoder IDE（`%APPDATA%` / `Application Support` / `~/.config` 多路径探测）→ 读取不到时优雅降级（跳过积分领取相关功能），不是平台兼容问题。
+
+### 1.5 原版备份格式（P4 备份/恢复兼容目标，实测自源码）
+
+- **加密壳**（`plugin-src/client/backup-crypto.js`，前端 Web Crypto 完成，无第三方依赖）：
+  ```json
+  { "format": "dsh-codearts-auth/backup.encrypted", "kdf": "PBKDF2", "hash": "SHA-256",
+    "iterations": 310000, "salt": "<base64 16B>", "iv": "<base64 12B>", "ciphertext": "<base64 AES-256-GCM>" }
+  ```
+- **明文载荷**（`src/types.ts`：`BACKUP_FORMAT = 'dsh-codearts-auth/backup'`，`BACKUP_VERSION = 1`）：`{ version, exportedAt: ISO, accounts: ProviderAccountEntry[], disabledModels, credentials: Record<credentialRef, 凭据JSON原文字符串> }`；`ProviderAccountEntry = { id: '{provider}-{shortid}', provider, nickname, enabled, credentialRef: '{PROVIDER}_ACCOUNT_{UUID_SHORT}', createdAt }`。
+- **兼容含义**：导出文件须可被原版 Jet Hub 恢复、原版备份可被本功能恢复。凭据 JSON 字段已按 1:1 对齐设计（P1.3），导出时把本项目凭据重新序列化为原字段形态即可；加密/解密在前端用 `crypto.subtle` 实现（与原版同 API，同参数）。
+
+---
+
+## 2. 落地形态与调用架构（核心设计，实施前必读）
+
+### 2.1 产品定位与命名
+
+- 产品名：**Free Hub**（UI 显示名；内部包/文件前缀沿用 `jethub`，不与原版混淆）。
+- 入口：**Settings 页左侧边栏**，`Path Settings` 行下方、`Assistant` 行上方新增一行 `Free Hub`（`web/static/settings/settings.js` 渲染行序：…→ rotation → serverTimeout → appearance → **pathSettings** → **【Free Hub 新行插入此处】** → assistant → …）。
+- 点击后**右侧 main 区域整体切换**为 Free Hub 管理界面（非弹窗）；header 的「关闭」退回初始 Settings main。
+
+### 2.2 Free Hub 界面布局（三段式，全部用本项目组件与 theme tokens）
+
+```
+┌─ Settings 页 main ────────────────────────────────────────────────┐
+│ header: [一键签到] [备份] [恢复]                    [关闭]          │
+├───────────────┬───────────────────────────────────────────────────┤
+│ left pane     │ right pane                                        │
+│ provider 列表 │ ① 设置前缀输入框（prefix → 接入本项目调用系统）      │
+│ (11 个，选中  │ ② 账号池管理：新建账号/删除/启用停用/昵称/状态徽标    │
+│  高亮)        │ ③ 显示列表（模型黑名单开关）                        │
+│               │ ④ 积分：余额/一键领取/有效期/锁定永久积分           │
+└───────────────┴───────────────────────────────────────────────────┘
+```
+
+- **header**：一键签到（遍历有签到能力的已启用账号逐个领取，汇总 toast）、备份（导出 §1.5 兼容格式，密码输入 + `crypto.subtle` 前端加密）、恢复（读取原版兼容格式，字段映射导入）、关闭（main 退回初始 Settings 行视图）。
+- **left pane**：provider 列表（`GET /api/jethub/providers` 元数据 + 各自账号数徽标）；单选切换 right pane。
+- **right pane**：切换 provider 后渲染其管理内容，全部走 `internal/api/jethub` RPC。
+- **样式**：`style-jethub.css` 只用 theme tokens（`var(--…)`），按钮/弹窗/开关复用 `.btn`/`.modal`/`.toggle-switch`/`renderCustomSelectHtml`/`data-tooltip` 体系；**不引入原版 jet-hub-styles.js 的样式**（只作布局参照）。
+
+### 2.3 调用桥接：前缀 → 本项目调用系统（核心机制）
+
+**目标**：Free Hub 账号获取的 API 能力，在本项目内部（Playground/Assistant/任何 `/v1/*` 调用）与外部（任意 OpenAI 兼容客户端）统一通过 **`{前缀}/{modelID}`** 调用。
+
+**机制（复用现有 proxy 前缀解析链，零特殊路径）：**
+
+1. 用户在 right pane 的**前缀输入框**为该 provider 设置前缀（如 `codearts`、`qoder`；全局唯一，校验合法字符 `[a-z0-9-]`，保存时检查与现有 providers/combos/quickslots 不冲突）。
+2. 保存后，jethub 在 `registry` **动态注册/更新一个 `config.Provider`**：
+   - `ID = "jethub-" + provider`（如 `jethub-codearts`），`Prefix = 用户前缀`；
+   - `BaseURL` = 该 provider 的推理 endpoint（来自 product 配置）；
+   - `Keys` = **该 provider 的每个启用账号对应一个 Key**（`Key.Key` = 账号当前 access token，由 jethub Manager 在凭据刷新时同步更新）→ **多账号轮询直接复用 rotation 的三策略/冷却/配额锁**，不另造轮子；
+   - `Models` = 该 provider 静态模型表；
+   - `APIType` = `"jethub"`（新枚举值，标记此 Provider 由 jethub 桥接）。
+3. 调用侧无感知：请求 model=`{前缀}/{modelID}` → `proxy/handler.go::handleProxy` → `util.SplitModel` → `h.providers.GetProviderByPrefix(prefix)`（`registry/providers.go` 现成实现）→ `forwardWithRetry` 标准链路。**内部调用（Playground/Assistant 走自身 `/v1/*`）与外部客户端完全一致。**
+4. **请求增强 hook（关键，依赖倒置）**：jethub 上游需要特殊头/体处理（华为 SDK-HMAC 签名、`maas_type: benefit`、CodeBuddy 头族、Qoder WASM 加密体与签名头透传、Anthropic 协议族原生透传等）。在 `internal/proxy/interfaces.go` 新增窄接口：
+   ```go
+   // RequestAugmenter allows an owner of bridged providers (e.g. jethub) to
+   // rewrite the outbound request just before it is sent. Returned to nil-able;
+   // nil implementation = standard forwarding.
+   type RequestAugmenter interface {
+       // Augment may replace URL/body/headers of the outbound request.
+       // providerID 为 config.Provider.ID（如 jethub-codearts），
+       // keyID 用于定位具体账号凭据。返回 error 则本次转发失败。
+       Augment(r *http.Request, body []byte, providerID, keyID string) ([]byte, error)
+   }
+   ```
+   `Handler` 持有可选 `augmenter RequestAugmenter` 字段（setter 注入，沿 `SetLLMClassifier` 范式）；`forward_retry.go` 发送前对 `APIType=="jethub"` 的 provider 调用之。`internal/app/app.go` 装配时注入 `jethub.Manager`。**proxy 不 import jethub**（与 NIM/owner 同款接口注入范式）。
+5. **凭据刷新与 Key 同步**：jethub Manager 后台调度器刷新 token 后，调用 `registry` 的 Key 更新接口把新 token 写回对应 `Provider.Keys[i].Key`（沿 `UpdateProvider` 合并范式），rotation 无感知。
+6. **模型列表可见性**：`GET /v1/models` 聚合逻辑自动含桥接 Provider 的 Models；「显示列表」黑名单（`disabledModels`）在 jethub 侧过滤 Models 注册表，不改 proxy。
+7. **停用语义**：清空前缀 = 从 registry 移除该桥接 Provider（`DeleteProvider`）；provider 未登录任何账号时前缀框置灰提示。
+
+> ⚠️ minimax（Anthropic 协议族）桥接：走 `IsAnthropic()` 分支（x-api-key 等）由其 APIType/endpoint 形态决定；保持 Anthropic 原生请求体透传，不做协议转换（§10 纪律 2）。
+
+### 2.4 数据归属边界（沿 config/registry/state 三层归属）
+
+| 数据 | 归属 | 存储 |
+|---|---|---|
+| 账号凭据（token/refresh_token/DPoP JWK…） | jethub（敏感，加密） | `{configDir}/jethub/credentials.json`（AES-GCM） |
+| 账号索引/昵称/黑名单/前缀映射 | jethub | `{configDir}/jethub/accounts.json`（原子写，非敏感） |
+| 桥接 Provider（Keys 动态同步自 jethub） | registry | config.yaml providers 段（ID 带 `jethub-` 前缀；`Config.Finalize` 与 reload merge 需容忍其存在） |
+| Free Hub 设置（无独立开关需求） | — | 前缀等即 accounts.json 内容，不进 config.yaml Settings 段（避免 presence-aware PATCH 面扩大） |
+
+---
+
+## 3. 主 Checklist（阶段索引）
+
+> 状态标记：`[ ]` 未开始 / `[~]` 进行中 / `[x]` 完成。每阶段完成度在 §4–§9 的分阶段 Checklist 中细化。
+
+- [P1] **[x] P1 基础设施层 + 桥接骨架**：jethub 包、凭据/账号存储、Provider 桥接（前缀注册 + RequestAugmenter hook）、wazero 引入（§4）
+- [P2] **[ ] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）
+- [P3] **[ ] P3 其余 10 provider 分批移植**（§6）
+- [P4] **[ ] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）
+- [P5] **[ ] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）
+- [P6] **[ ] P6 收尾：移除 PROJECT_MAP.md 引用、归档本文档状态**（§9）
+
+---
+
+## 4. P1 基础设施层 + 桥接骨架
+
+**目标**：建立 `internal/jethub` 包、凭据/账号存储与 **Provider 桥接层**（§2.3 的机制全部在本阶段落地），不实现任何具体 provider 的登录/推理。
+
+### 4.1 必读上下文（实施前）
+
+| 读什么 | 为什么 |
+|---|---|
+| 本文档 §2 | 落地形态与桥接架构（本轮核心） |
+| `PROJECT_MAP.md` §24（速查表） | 定位配置/注册表/API 变更涉及文件 |
+| `docs/config-registry-state-architecture.md` | 三层归属边界、AES-GCM 加密、原子持久化、双锁模型、reload merge |
+| `internal/proxy/interfaces.go` | 窄接口注入范式（RequestAugmenter 依此新增） |
+| `internal/proxy/forward_retry.go` + `internal/proxy/forward_request.go:69-120` | 发送前 hook 插入点与 `GetProviderByPrefix` 解析链 |
+| `internal/registry/providers.go`（`GetProviderByPrefix`/`AddProvider`/`UpdateProvider`） | 桥接 Provider 动态注册与 Key 同步的现成 API |
+| `internal/config/types.go`（`Provider.Prefix`、`APIType`） | 桥接 Provider 的字段形态 |
+| `ref/deepseek-harness-codearts/src/types.ts` | 全部 provider 凭据的字段形状（11 套）+ `ProviderAccountEntry`/`JetHubConfig` |
+| `ref/deepseek-harness-codearts/src/product.ts` + 各 `*-product.ts` | provider 配置驱动模式（endpoint/client_id/模型表/请求头族） |
+| `AGENTS.md`「不要做的事」 | 禁数据库、禁前端框架、禁格式转换 |
+
+### 4.2 Checklist
+
+- [x] P1.1 `internal/jethub/` 包骨架：`manager.go` 定义 `Manager`（持有凭据存储 + 账号索引 + per-provider product 注册表），公共入口 `Providers()`（11 个元数据）/`Accounts(provider)`/`AccessToken(provider, accountID)`/`SignIn(provider, accountID, …)`/`Refresh(ctx)`/`Augment(…)`（实现 RequestAugmenter）。
+  > 实施记录：`Manager` 提供 `Providers()/Accounts()/Credential()/SetCredential()/Augment()`；`SignIn/Refresh` 属 provider 专属流程，按计划 P2.6/P3 落地为具体 provider 端点（P1 仅占位账号 CRUD）。
+- [x] P1.2 `internal/config/paths.go` 加 `ResolveJetHubDir`（镜像 `ResolveAssistantDir` 三段式）；P1.3–P1.4 落盘其下。
+- [x] P1.3 凭据持久化 `internal/jethub/credentials.go`：AES-GCM + 原子写（沿 registry 模式），`map[provider]map[accountID]Credential`，**凭据字段按 `src/types.ts` 1:1 对齐**（这是 §1.5 备份兼容的前提）。
+  > 实施记录：凭据存储并入 `manager.go`（`{"enc": ...}` 信封 + `config.Encrypt/Decrypt` 同源）；凭据以原始 JSON 存储（字段 1:1 由写入方保证），P4.9 备份导出按 ref 原文直出。
+- [x] P1.4 账号索引 `internal/jethub/accounts.go`：`accounts.json`（`ProviderAccountEntry` 语义对齐：id/nickname/enabled/credentialRef/createdAt）+ `disabledModels` 黑名单 + **prefix 映射**（provider→前缀）；`accountpool.go` 移植 `src/account-pool.ts` 选择/轮换语义（Go 惯用法重写，interface + 策略函数）+ 单测。
+  > 实施记录：并入 `manager.go`（accountsFile）+ `accountpool.go`（GetAvailableAccount：enabled+凭据+限流豁免+exclude，手动顺序优先）；单测覆盖 CRUD/黑名单/选号前置。
+- [x] P1.5 **桥接层** `internal/jethub/bridge.go`：`SetPrefix(provider, prefix)`（合法性/冲突校验 + registry 动态 `AddProvider`/更新：ID=`jethub-{provider}`、APIType=`jethub`、Models=静态表、Keys=启用账号×1）；`SyncKeys(provider)`（凭据刷新后回写 Key.Key）；`ClearPrefix(provider)`（DeleteProvider）；单测覆盖注册/同步/移除与冲突拒绝。
+  > 实施记录：`BridgeDeps` 本地窄接口（免 import registry）；零可用 Key 时移除桥接 Provider（存储前缀保留，`RestoreBridges` 启动重放）；冲突检测覆盖 registry Provider 与其他 jethub 前缀两源。
+- [x] P1.6 **proxy hook**：`internal/proxy/interfaces.go` 加 `RequestAugmenter` 接口（§2.3 签名）+ `Handler` 可选字段与 setter；`forward_retry.go` 对 `APIType=="jethub"` 发送前调用；`internal/app/app.go` 装配注入 `Manager`；`internal/proxy` 新增 mock 单测（augmenter 改头/改体/返回错误三态）。
+  > 实施记录：hook 实现在 `forwardUpstream`（upstream.go jethub 分支，`WithClientRequest` 经 context 传原始请求）；客户端头成为出站头基（hop-by-hop 剔除），Content-Type/Authorization 缺省时补默认——P2 SDK-HMAC 签名头可整体替换。三态单测 `augmenter_test.go`。
+- [x] P1.7 通用 HTTP 客户端 `internal/jethub/httpclient.go`：统一 UA/超时/重试骨架/SSE 读取（复用 `internal/sse`）。
+- [x] P1.8 引入 `github.com/tetratelabs/wazero`（v1.12+）；`internal/jethub/qoderwasm.go` 只做 `//go:embed`（把 `ref/.../src/qoder-auth-wasm.wasm` **复制**为 `internal/jethub/qoder_auth_wasm.wasm`）+ `CompileModule` 冒烟测试。
+  > 实施记录：实际引入 wazero **v1.9.0**（当前稳定版，纯 Go 无 cgo，满足意图）；wasm 复制校验 SHA-256 `6419471E…` 与 ref 一致；冒烟测试 `TestCompileQoderModule` 通过。
+- [x] P1.9 API 层 `internal/api/jethub/register.go`：`GET /api/jethub/providers`（元数据+账号数+前缀）、`PUT /api/jethub/{provider}/prefix`、账号 CRUD 最小集（list/create/delete/patch），owner.Middleware，沿项目 API 注册范式挂入 router。
+  > 实施记录：挂 `/api` 鉴权组（owner.Middleware 为资源型端点所需，本组为管理配置面，沿用 providers/keys 同款鉴权边界，未叠加 owner）；`Router.SetJetHub` 注入，未装配时不注册；另含 `GET/PUT models`（黑名单）。
+- [x] P1.10 文档同步：PROJECT_MAP.md §13（jethub 包）、§10（API）、§24（速查表行）；`docs/config-registry-state-architecture.md` 补 jethub 存储节与「最后核对」行。
+
+### 4.3 验证门（P1 完成判定）
+
+```powershell
+go vet ./internal/jethub/... ./internal/proxy/... ./internal/config/... ./internal/api/jethub/...
+go test ./internal/jethub/... ./internal/proxy/... ./internal/api/jethub/...
+go build .
+```
++ wazero 加载 WASM 冒烟通过；`GET /api/jethub/providers` 返回 11 个 provider；为任一 provider 设置假前缀后 registry 中出现 `jethub-{provider}` Provider 且 `GET /v1/models` 含其模型（可调 `/v1/models` 验证，无需真实凭据）。
+
+---
+
+## 5. P2 CodeArts provider（端到端样板）
+
+**目标**：以 codearts（华为云）为样板打通「登录 → 凭据持久化 → 静默续期 → **桥接 Provider 经 `{前缀}/{modelID}` 推理成功**」全链路，验证 §2.3 桥接架构。**这是后续所有 provider 的参照实现。**
+
+### 5.1 必读上下文
+
+| 读什么 | 内容 |
+|---|---|
+| `ref/.../src/oauth.ts` | PKCE + DPoP ES256 + STS token 端点（jose 用法全在此文件，Go 替换点） |
+| `ref/.../src/login.ts` | ticket 流程、本地回调 HTTP server、`child_process` 开浏览器 |
+| `ref/.../src/service.ts` | 凭据调度/静默续期（RefreshTokenExpiredError 终态判定） |
+| `ref/.../src/llm-adapter.ts`（CodeArts 段） | 推理链路：模型表、`maas_type: benefit` 头、上下文窗口表、SSE 消费、华为请求头族 |
+| `ref/.../src/sign.ts` + `src/codearts-credits.ts` | SDK-HMAC-SHA256 签名 + 每日签到（P4 一键签到的第一个实现） |
+| 本文档 §2.3 | 桥接接线（本阶段的收口验证对象） |
+
+### 5.2 Checklist
+
+- [ ] P2.1 `internal/jethub/codearts_oauth.go`：`generatePkcePair`（48B base64url + S256）、`generateDpopKeyPair`（ECDSA P-256 + JWK）、`signDpopJws`（ES256 JWS：htm/htu/iat/jti + `typ: dpop+jwt`）——标准库实现替代 jose；单测：JWK round-trip + JWS 可验证。
+- [ ] P2.2 `internal/jethub/codearts_login.go`：本地回调 server（127.0.0.1 随机端口 + `/oauth/callback`）、`buildLoginUrl`、`exchangeAuthorizationCode`/`exchangeRefreshToken`（POST `sts.cn-north-4` 带 DPoP）、终态判定（`invalid_grant`/`ExpiredRefreshToken`/`InvalidDPoPHeader`）；开浏览器走 `fsutil`（补 open/xdg-open 分支）。
+- [ ] P2.3 `internal/jethub/codearts_refresh.go`：静默续期调度（到期前窗口、失败退避、refreshable:false 终态）+ 刷新成功后 `bridge.SyncKeys`。
+- [ ] P2.4 `internal/jethub/codearts_augment.go`：实现该 provider 的 `Augment`——推理请求头族 + `maas_type: benefit` 分支（按模型查静态表）+ 令牌注入；`codearts_sign.go`（SDK-HMAC-SHA256 1:1 移植）供积分签到与后续签名需求复用。
+- [ ] P2.5 `internal/jethub/codearts_product.go`：模型静态表（GLM-5.2 系 / openpangu / deepseek-v4 系 + CONTEXT_WINDOWS），供 bridge 注册 Models 与黑名单过滤。
+- [ ] P2.6 API：`POST /api/jethub/codearts/login`（触发浏览器流）、`GET /api/jethub/codearts/status`、`POST /api/jethub/codearts/claim`（签到）；P1.9 的 CRUD 对 codearts 账号生效。
+- [ ] P2.7 单测：oauth/sign/augment 纯函数单测 + `httptest` mock STS 与推理端点（沿 `internal/api/assistant/assistant_test.go` mock 范式）。
+
+### 5.3 验证门
+
+```powershell
+go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
+```
++ **端到端冒烟（核心）**：登录拿凭据 → 设置前缀（如 `codearts`）→ `POST /v1/chat/completions` model=`codearts/deepseek-v4-flash` 流式成功（Playground 与 curl 各一次，证明内外调用一致）→ 多账号时验证 rotation 轮询生效 → 删除账号后 Key 同步消失。
+
+---
+
+## 6. P3 其余 10 provider 分批移植
+
+**目标**：按协议相似度分 4 批。每 provider = product 配置 + auth/oauth + refresh + augment（桥接请求增强）+ credits。**每批完成后必须实发验证可推理**（插件 AGENTS.md 反复强调：改错即静默失败）。
+
+### 6.1 必读上下文（全批通用）
+
+- `ref/.../docs/adding-a-new-provider.md`（24 KB）——官方移植方法论，含「判据是 IDE 能否用同一模型」等排查纪律。
+- `ref/.../AGENTS.md` 顶置的各 provider 关键坑（Qoder `business` 字段、Trae 工具消息保留、错误帧抛错等）——**移植前必读对应段落**。
+- `ref/.../src/openai-compat.ts`——OpenAI 兼容 SSE 通用消费器。
+- P2 的 codearts 实现文件——参照实现。
+
+### 6.2 批次 Checklist
+
+**P3.1 批次 A（buddy + workbuddy，同源一份实现 + 产品配置差异）**
+- [ ] P3.1.1 `buddy_product.go`：CODEBUDDY/WORKBUDDY 两份产品配置（endpoint `copilot.tencent.com` vs `www.workbuddy.ai`、platform `ide` vs `workbuddy-ai`、国际版登录 URL 追加 version/loginSessionId）。
+- [ ] P3.1.2 auth + oauth + augment + 余额排序选择器/锁定永久积分（`buddy-adapter.ts` 121 KB——最大单个 adapter，**Go 侧拆分文件**）。
+- [ ] P3.1.3 每日签到领取积分（供 P4 一键签到）。
+
+**P3.2 批次 B（lobsterai，独立协议族）**
+- [ ] P3.2.1 auth（登录方式/请求头/续期载荷/版本号来源全部独立）+ oauth + augment + credits。
+- [ ] P3.2.2 参照 `docs/lobsterai-integration-plan.md`（92 KB 插件自带集成计划，可直接作移植规格书）。
+
+**P3.3 批次 C（trae + cline + raccoon + loomy + minimax）**
+- [ ] P3.3.1 trae（90 KB adapter）：登录/续期/积分 + **工具消息历史保留**（已踩坑：assistant content=null 的 tool_calls 消息不能被过滤器丢弃）。
+- [ ] P3.3.2 cline（OAuth + credits + models + product 四件套；注意 `applyClineHeaders` 已有同类先例）。
+- [ ] P3.3.3 raccoon：QR 扫码登录（`raccoon-qr.ts`）+ 登录页嵌入（`raccoon-login-page.ts`）+ credits。
+- [ ] P3.3.4 loomy：**短信验证码登录**（唯一不能自动续期）、双积分池、新手任务领取、锁定永久积分；微信扫码（`loomy-wechat-login.ts`）视需求裁剪。
+- [ ] P3.3.5 minimax：**Anthropic Messages 协议族**——桥接 Provider 的 augment 走 x-api-key/anthropic-version 头族，**Anthropic 原生请求体透传**（经 `/v1/messages` 入口或其 endpoint），不做协议转换；模型 4 个实测通过，图片输入保持未实现。
+
+**P3.4 批次 D（qoder + qodercn，最复杂，放最后）**
+- [ ] P3.4.1 `qoderwasm.go` 完整 wasm-bindgen 桥（`src/qoder-wasm.ts` 1:1）：wazero 实例化 + import 对象（31 个 `__wbg_*`，含两个方向相反的 getRandomValues）+ 返回值布局（字符串类 `ptr/len/valIdx/isErr`，上下文类 `ptr/errIdx/isErr`）+ `generate_runtime_auth_fields`/`prepareInferRequest`。**改前先读该文件头部注释的三个实测坑。**
+- [ ] P3.4.2 信封剥离（`qoder-envelope.ts`）+ PKCE 设备码轮询（`openapi.qoder.sh`，404=未授权继续轮询，401=错误）+ `machine_id` 续期载荷 + `machine_token.json` 多路径探测。
+- [ ] P3.4.3 加密推理链路（augment 内实现）：`api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`，模型目录 key（`qfmodel`/`dmodel`），请求体**必须带 `business: {type:'agent'}`**，WASM 签名头原样透传，静态 17 模型表，`event: error` 独立错误帧解析。
+- [ ] P3.4.4 qodercn 差异分支（同协议族不同产品配置）。
+- [ ] P3.4.5 credits + 每日领取（100 Credits，UTC+8 10:00 刷新）。
+
+### 6.3 验证门（每批通用）
+
+```powershell
+go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
+```
++ **实发验证**（有账号者）：每 provider 登录 → 设前缀 → `{前缀}/{modelID}` 至少 1 次真实推理成功（流式 + 非流式）+ 1 次凭据续期成功；无账号者至少完成模型列表拉取/登录流程可达性验证。结果记入 §11 日志。
+
+---
+
+## 7. P4 Free Hub 管理界面（Settings 内嵌 + 备份兼容）
+
+**目标**：按 §2.1–§2.2 落地 Settings 内嵌 Free Hub 界面（vanilla JS 重写，**禁 React**），header 四按钮全功能，备份/恢复与原版 Jet Hub 格式**双向兼容**（§1.5）。
+
+### 7.1 必读上下文
+
+- `web/static/settings/settings.js`（侧边栏行序与 main 渲染结构——Free Hub 行插入点与 main 切换的实现位置）
+- `ref/.../plugin-src/client/jet-hub.js`（160 KB——**仅作布局/交互参照**，含账号池/模型开关/积分面板的完整交互语义）
+- `ref/.../plugin-src/client/backup-crypto.js` + `ref/.../src/backup.ts` + `src/types.ts`（备份兼容的精确格式规范，§1.5 已提炼）
+- `ref/.../plugin-src/client/credits-capabilities.js`（22 KB 积分能力矩阵）+ `credit-expiry.js`
+- 本项目范式：`web/static/style.css`（`.settings-row`/`.btn`/`.modal`/`.toggle-switch`/`renderCustomSelectHtml`/`data-tooltip`）、`web/static/settings/settings_assistant.js`（选择器/弹窗范式）、`web/static/utility/story/storymaker.css`（theme tokens 纯用法）
+- `web/assistant-demo.test.js`（Node VM + DOM stub 前端测试范式）
+
+### 7.2 Checklist
+
+- [ ] P4.1 **入口行 + main 切换**：`settings.js` 侧边栏在 Path Settings 行后插入 `Free Hub` 行（`t('freeHub')`/`t('freeHubDesc')`，i18n en+cn）；`openFreeHub()` 隐藏初始 settings main 行容器、渲染 `#free-hub-root`，`closeFreeHub()` 反向恢复（事件解绑，沿 settings 现有切换习惯）。
+- [ ] P4.2 **骨架与样式**：`web/static/jethub.js`（IIFE 无框架：header 三段、left pane provider 列表、right pane 四区）+ `web/static/style-jethub.css`（纯 theme tokens）；`index.html`/`index-nopg.html` 挂脚本；`internal/feature/feature.go` 注册资产。
+- [ ] P4.3 **left pane**：provider 列表渲染（图标/名称/账号数徽标），单选切换 right pane，选中态高亮。
+- [ ] P4.4 **right pane①前缀**：前缀输入框 + 保存/清除（`PUT /api/jethub/{provider}/prefix`），非法字符与冲突的前端校验 + 后端 409；保存成功提示调用格式 `{前缀}/{modelID}`。
+- [ ] P4.5 **right pane②账号池**：新建账号（触发对应 provider 登录流，含短信/QR 类的特殊交互分支）/删除/启停/昵称编辑/状态徽标（凭据有效期、refreshable、最近错误）；拖拽排序可裁剪（非核心）。
+- [ ] P4.6 **right pane③显示列表**：模型黑名单开关（黑名单制：默认全显），写 `PUT /api/jethub/{provider}/models`。
+- [ ] P4.7 **right pane④积分**：余额/每日额度显示、一键领取、领取结果 toast、积分有效期、锁定永久积分按钮（能力按 `credits-capabilities` 矩阵显隐）。
+- [ ] P4.8 **header 一键签到**：遍历有签到能力的启用账号逐个 claim（并发 1 串行），汇总结果 toast（成功 x 失败 y）。
+- [ ] P4.9 **header 备份/恢复（兼容原版格式）**：备份 = 拉取全量账号+凭据+黑名单 → 前端组装原版 payload（`version:1`/`exportedAt`/`accounts`/`disabledModels`/`credentials` ref→JSON 字符串）→ `crypto.subtle` PBKDF2(310000)+AES-GCM 加密壳 → 下载 `.json`；恢复 = 选文件 → 前端解密（兼容两种 format 值：明文 `dsh-codearts-auth/backup` 与加密壳）→ 字段映射导入 RPC（凭据 JSON 原文直存，**不重新序列化改形**）。反向兼容验证：本项目导出文件的字段形态与原版 `BackupPayload` 逐字段比对单测。
+- [ ] P4.10 **header 关闭**：`closeFreeHub()` 退回初始 Settings main。
+- [ ] P4.11 前端契约测试 `web/jethub.test.js`：Node VM + DOM stub——入口行渲染位置（pathSettings 行之后、assistant 行之前）、main 切换/恢复、前缀保存体、备份 payload 字段形态。
+- [ ] P4.12 文档同步：PROJECT_MAP.md §18 补条目、§24 速查表行补前端文件。
+
+### 7.3 验证门
+
+`node --check web/static/jethub.js` + `node web/jethub.test.js` + `go build .` + 浏览器冒烟：Settings → Free Hub 行位置正确 → main 切换 → left/right 交互 → 前缀保存 → 一键签到 → 备份下载 → 恢复原版备份文件（可手工构造）→ 关闭还原。
+
+---
+
+## 8. P5 集成加固
+
+- [ ] P5.1 全量测试：`go test ./...` + `go vet ./...` + 前端契约测试全绿。
+- [ ] P5.2 构建变体验证：`go build -tags "tray webview"`、`./build.ps1 -Variant webview -Playground -Strip`、`build_mac.ps1` 交叉编译（确认 wazero 无 cgo 不破坏 CGO=0）。
+- [ ] P5.3 文档同步（强制）：PROJECT_MAP.md §13/§10/§18/§21/§24 全量对齐；`docs/config-registry-state-architecture.md` 补 jethub 存储节；`docs/proxy-architecture.md` 补 RequestAugmenter hook 与 `jethub` APIType 段。
+- [ ] P5.4 新建 `docs/jethub-architecture.md`（架构基线：Free Hub 落地形态、桥接机制、11 provider 的 endpoint/协议族/签名头族/模型表矩阵 + 源码锚点），PROJECT_MAP.md §19 注册。
+- [ ] P5.5 体积复核：stripped 构建与 §1.3 预估对照（预期 +3.4 MB 左右；偏差 >2 MB 时记录原因）。
+
+---
+
+## 9. P6 收尾
+
+- [ ] P6.1 全部 provider 实发验证结果汇总进 §11。
+- [ ] P6.2 本文 §3 主 Checklist 全部置 `[x]`，文档状态改为「已完成」。
+- [ ] P6.3 **移除 PROJECT_MAP.md 中对本计划的引用**（§19 docs 表中本文件行改为指向 `docs/jethub-architecture.md`；§23 占位区条目按同步约束移入正文模块章节并删除占位行）。
+- [ ] P6.4 AGENTS.md / CLAUDE.md 架构文档清单与 §24 速查表与 jethub-architecture.md 对齐确认。
+
+---
+
+## 10. 纪律与边界（实施全程有效）
+
+1. **ref/ 只读**：`ref/deepseek-harness-codearts` 为 gitignored 参考副本，禁止修改；WASM 文件需要时**复制**进 `internal/jethub/`。
+2. **AGENTS.md 约束不豁免**：无数据库、无前端框架（React 面板必须 vanilla 重写）、无对外鉴权、不实现 OpenAI↔Anthropic 格式转换（minimax 按「透传原生协议体」处理）、日志用 `internal/console.Logger`、错误显式处理不 panic、共享状态 RWMutex。
+3. **凭据安全**：落盘必须走项目 AES-GCM 加密持久化，禁止明文 JSON（比插件原实现更严格）。备份文件例外：那是用户主动导出的、原版格式兼容的加密壳（PBKDF2+AES-GCM，用户口令）。
+4. **proxy 不依赖 jethub**：桥接 hook 走窄接口注入（§2.3），`internal/proxy` 仅认识 `APIType=="jethub"` 与 `RequestAugmenter` 接口，不 import jethub 包。
+5. **静默失败防线**：插件文档记录的全部「改错即静默失败」坑（Qoder business 字段 / 错误帧抛错 / 工具消息保留 / 签名头透传）在对应 augment/adapter 单测中**必须有回归用例锁死**。
+6. **实发验证优先**：单测全绿 ≠ 可用；每个 provider 必须至少一次经 `{前缀}/{modelID}` 的真实推理成功才算完成。
+7. **分批可中断**：P3 各批次相互独立，任何阶段中断后新会话从本文 §3 状态标记 + §11 日志恢复上下文。
+
+---
+
+## 11. 执行日志（append-only，倒序新→旧）
+
+| 日期 | 阶段 | 记录 |
+|---|---|---|
+| 2026-10-01 | P1 | **P1 完成（验证门全绿，commit 待记）**：`internal/jethub` 包（Manager 凭据 AES-GCM 信封存储 + accounts.json 账号索引/黑名单/前缀映射、AccountPool 选号、Bridge 前缀桥接 + SyncKeys + RestoreBridges、HTTPClient、qoderwasm embed + wazero v1.9.0 编译冒烟）；`internal/api/jethub`（providers/prefix/accounts/models 端点，`Router.SetJetHub` 注入）；proxy `RequestAugmenter` 窄接口 + `SetRequestAugmenter` + `forwardUpstream` jethub 分支（`WithClientRequest` context 传原始请求，客户端头为出站基）；app.go 装配（Manager/Bridge/Augmenter 注入 + RestoreBridges）；codearts 产品表（9 模型）先行注册供桥接验证。测试：jethub/proxy/config/api 全绿 + go vet + go build；wazero WASM 编译冒烟通过。文档：PROJECT_MAP §13n/§10.28/§24/§10 router 行 + config-registry-state-architecture §17a 存储节 + 最后核对行。验证门备注：`/v1/models` 含桥接模型需先为账号写入凭据（P2 登录流），P1 以单测 `TestBridgeSetPrefixRegistersProvider` 锁死等价语义。 |
+| 2026-09-30 | P0 | **v2 修订**：确定落地位置与调用方法——产品名 Free Hub，Settings 侧边栏入口（Path Settings 下、Assistant 上），main 三段式布局（header 一键签到/备份/恢复/关闭 + left provider 列表 + right 管理/前缀输入框）；调用桥接 = registry 动态 Provider（`Prefix` + `APIType=jethub` + 账号→Keys 复用 rotation）+ proxy `RequestAugmenter` 窄接口注入，内外统一 `{前缀}/{modelID}` 调用；备份/恢复按原版格式双向兼容（PBKDF2 310000 + AES-GCM 壳，payload v1 字段已实测提炼至 §1.5）。§2 为新增核心设计章节。 |
+| 2026-09-30 | P0 | 完成前置评估（克隆 ref 副本 @ commit cecf376，依赖/增量/平台结论见 §1）；创建本计划文档；PROJECT_MAP.md §19/§23 添加引用。 |

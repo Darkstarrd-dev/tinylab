@@ -22,6 +22,7 @@ import (
 	"github.com/tinylab/tinylab/internal/console"
 	"github.com/tinylab/tinylab/internal/download"
 	"github.com/tinylab/tinylab/internal/feature"
+	"github.com/tinylab/tinylab/internal/jethub"
 	"github.com/tinylab/tinylab/internal/petstate"
 	"github.com/tinylab/tinylab/internal/proxy"
 	"github.com/tinylab/tinylab/internal/registry"
@@ -61,6 +62,9 @@ type App struct {
 	stateManager  *state.Manager
 	statePath     string
 	sm            *ServerManager
+	// Free Hub (jethub) components; nil when the storage dir cannot be created.
+	jethubManager *jethub.Manager
+	jethubBridge  *jethub.Bridge
 
 	// shutdownCtx is cancelled by the API layer (POST /api/shutdown) and by the
 	// host loop, signalling the app to begin graceful shutdown.
@@ -149,6 +153,23 @@ func (a *App) buildComponents() error {
 	if err := a.proxyHandler.SetProxy(cfg.Proxy.Enabled, cfg.Proxy.Host, cfg.Proxy.Port); err != nil {
 		a.logger.Warn("invalid upstream proxy config: %v", err)
 	}
+
+	// Free Hub (jethub): account/credential storage + registry bridge. The
+	// bridge re-registers bridged providers (APIType=jethub) found in the
+	// loaded config so {prefix}/{model} calls work right after startup. The
+	// proxy gets the Manager via the narrow RequestAugmenter interface — the
+	// proxy never imports jethub.
+	jethubDir := config.ResolveJetHubDir("", a.configDir)
+	jethubMgr, err := jethub.NewManager(jethubDir, cfg.Security.EncryptionKey, a.logger)
+	if err != nil {
+		a.logger.Warn("jethub manager disabled: %v", err)
+	} else {
+		a.jethubManager = jethubMgr
+		a.jethubBridge = jethub.NewBridge(jethubMgr, a.reg)
+		jethub.RegisterDefaultProducts(a.jethubBridge)
+		a.jethubBridge.RestoreBridges()
+		a.proxyHandler.SetRequestAugmenter(jethubMgr)
+	}
 	// Download manager (feature_download). In the default build the feature is
 	// always compiled, so the manager is constructed exactly as before; a
 	// future feature_* build profile that disables it skips construction and
@@ -225,6 +246,11 @@ func (a *App) buildComponents() error {
 	// before Routes() so /api/archive handlers and the settings PATCH hook are
 	// populated.
 	a.apiRouter.SetArchiveRunner(a.archiveRunner)
+	// Wire the Free Hub manager/bridge before Routes() so /api/jethub
+	// endpoints are registered (nil pair keeps them off).
+	if a.jethubManager != nil && a.jethubBridge != nil {
+		a.apiRouter.SetJetHub(a.jethubManager, a.jethubBridge)
+	}
 	// Wire the embedded games FS so POST /api/games/seed can materialize
 	// the staged example units on demand. The embed is read once at startup
 	// and never overwritten on disk (SeedGames skips existing dirs).

@@ -67,6 +67,10 @@ type Handler struct {
 	// shrink it to verify the controlled over-budget error without a huge
 	// allocation.
 	maxPassThroughBody int64
+	// augmenter is the optional RequestAugmenter injected by the app layer.
+	// When non-nil it rewrites outbound requests for providers marked
+	// APIType=="jethub" just before they are sent (see forwardUpstream).
+	augmenter RequestAugmenter
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete
@@ -364,6 +368,13 @@ func (h *Handler) TracesDir() string {
 // 列表物理隔离。未注入时 playground 请求回落到 h.usage。
 func (h *Handler) SetPgUsage(r UsageRecorder) {
 	h.pgUsage = r
+}
+
+// SetRequestAugmenter injects the optional RequestAugmenter used by bridged
+// providers (APIType=="jethub"). Follows the SetLLMClassifier setter-injection
+// pattern: the proxy holds the narrow interface only, never the owner package.
+func (h *Handler) SetRequestAugmenter(a RequestAugmenter) {
+	h.augmenter = a
 }
 
 // SweepStaleEntries removes orphan in-flight processing entries older than maxAge,

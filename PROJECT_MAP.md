@@ -351,7 +351,7 @@ OpenAI 兼容透传 + SSE 流式转发 + 重试/故障转移 + 用量记录。�
 
 | 文件 | 职责 |
 |---|---|
-| `router.go` | 核心骨架（495 行）：`Router` 结构 + `New` + `Routes(proxyHandler)` 骨架——middleware/`/v1`+`/api` 骨架、所有 handler 构造、`apiDeps` 构建、`/api` 组的公共/受保护注册、`assistant` 路由装配、最终 `serveUI` 通配与 `chi.Walk` 合约派生。**2026-08-29（P2-07）：** 外围域已拆至同包 4 个 `router_*.go`（`Routes` 仅保留 `rt.registerXxx` 委托，保持路由语义不变；各文件与 `router.go` 同 `package api`、同 `Router` receiver）——详见下方 `router_*` 行 |
+| `router.go` | 核心骨架（495 行）：`Router` 结构 + `New` + `Routes(proxyHandler)` 骨架——middleware/`/v1`+`/api` 骨架、所有 handler 构造、`apiDeps` 构建、`/api` 组的公共/受保护注册、`assistant` 路由装配、最终 `serveUI` 通配与 `chi.Walk` 合约派生。**2026-08-29（P2-07）：** 外围域已拆至同包 4 个 `router_*.go`（`Routes` 仅保留 `rt.registerXxx` 委托，保持路由语义不变；各文件与 `router.go` 同 `package api`、同 `Router` receiver）——详见下方 `router_*` 行。**2026-10-01（jethub P1.9）：** `deps` 增 `jethubManager`/`jethubBridge` 字段 + `SetJetHub` 注入 setter；`Routes` 构造 `jethubapi.Handler` 并在受保护组注册 `/api/jethub`（未注入则跳过注册） |
 | `router_proxy.go` | P2-07 拆出：`registerProxyRoutes`——`/v1/*` CORS 预检 + 全部代理端点（chat/completions/models/images/embeddings/messages/responses/generateContent/tasks）；**位于 AuthMiddleware 之外**（审计 F-12 显式兼容决策：`/v1` 是本地代理入口，无应用层认证） |
 | `router_playground.go` | P2-07 拆出：`registerPlaygroundRoutes`（`/api/save-image`/`/api/image-proxy`/`/api/playground`/`/api/comfyui`/`/api/image-batches` + `RegisterRoot`——均 32MiB body 例外、auth 保护）+ `registerPlaygroundStatic`（`playground.css`/`/vendor/*`/`feature.Assets(RootPlaygroundPG)` 静态资源，门控于 `feature.Playground`） |
 | `router_utility.go` | P2-07 拆出：`registerUtilityRoutes`——`/api/gallery`（500MB 例外、`owner.Middleware`）/`/api/filetransfer`（610MiB body 上限、owner 路由）/`/api/archive`（逐路由 body cap、`owner.Middleware`）/`/api/editor`/`/api/text-review`（32MiB 例外组，门控于 `feature.Gallery`/`FileTransfer`/`Archive`/`Editor`） |
@@ -595,6 +595,14 @@ Playground 追加到日记文件的后端：`POST /api/notes/append {"content":"
 | `register_test.go` | 列表校验跳过 ×4、state 404/PUT/GET 回环/非法 JSON/遍历 id、SeedGames 复制/跳过已存在不覆盖/权限（Windows 感知 0666） |
 
 路由挂载（`internal/api/router.go`）：`/api` 组内 `r.Route("/games", ...)`（继承鉴权 + 1MB cap，含 `POST /seed`）；`r.Get("/games/*")` 磁盘静态（`http.StripPrefix("/games/")` + `http.Dir` + no-store，**不鉴权**，注册在 `serveUI` 通配之前）；启动仅 `MkdirAll(gamesDir)`，**不再自动播种**，由 Designer “Example Unit” 按钮按需 `POST /api/games/seed`（已存在跳过，返回 `{seeded,skipped}`）。插件根目录经 `config.ResolveGamesDir(cfg.GamesDir, configDir)` 解析；内嵌集经 `internal/app/app.go` 启动时 `SetEmbeddedGames(fs.Sub(web.Games,"games"))` 注册。
+
+### 10.28 `internal/api/jethub/` — Free Hub 管理 API（2026-10-01 新增，P1.9）
+
+Free Hub（Jet Hub 移植）管理面端点，挂 `/api` 鉴权组（`r.Route("/jethub", ...)`）。路由经 `Router.SetJetHub(manager, bridge)` 注入（app 装配时调用；未注入则整组不注册）。核心包逻辑见 §13n。
+
+| 文件 | 职责 |
+|---|---|
+| `register.go` | `Handler` + `Deps{Manager,Bridge}` + `Register`：`GET /api/jethub/providers`（11 provider 元数据 + 账号数/启用数/前缀/桥接态）、`PUT/DELETE /api/jethub/{provider}/prefix`（前缀设置与清除；冲突 409、非法 400；内部调 `Bridge.SetPrefix/ClearPrefix` 动态注册 registry Provider）、`GET/POST /api/jethub/{provider}/accounts`（列表/新建占位账号，登录流 P2/P3 附件凭据）、`PATCH/DELETE /api/jethub/accounts/{accountID}`（启停/改名/删除，成功后 `Bridge.SyncKeys` 同步 Key）、`GET/PUT /api/jethub/{provider}/models`（静态模型表 + 黑名单开关，写入后重同步） |
 
 ### 10.22 `internal/gallery/` — Gallery 图片查看器后端（库）
 
@@ -849,6 +857,21 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `context_assembler.go` | `ContextAssembler`：大纲定位、已定稿章节前文摘要/尾部全文拼接、实体设定检索、已采纳推演片段硬约束注入 |
 | `store_test.go` | 单元测试（默认 Prompt 播种、覆盖更新、SyncAll 纯 upsert 安全契约、显式删除、实体 CRUD 与级联删除、坏行容错注入解析） |
 
+## 13n. `internal/jethub/` — Free Hub 账号池与 Provider 桥接（2026-10-01 新增，P1）
+
+Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 11 个第三方 LLM provider 的账号池与凭据，并经 registry 动态桥接为本项目标准 Provider（`APIType="jethub"`，ID=`jethub-{provider}`），内外统一 `{前缀}/{modelID}` 调用。实施计划与进度见 [`docs/jethub-migration-plan.md`](docs/jethub-migration-plan.md)；存储落盘 `{configDir}/jethub/`（`credentials.json` AES-GCM 加密 + `accounts.json` 原子写），经 `config.ResolveJetHubDir` 定位。**proxy 不 import jethub**——桥接走 `proxy.RequestAugmenter` 窄接口注入（`Handler.SetRequestAugmenter`，`APIType=="jethub"` 的 provider 发送前回调）。wazero（纯 Go WASM 运行时）为本包专用依赖（Qoder 加密推理，P3.4 启用）。
+
+| 文件 | 职责 |
+|---|---|
+| `jethub.go` | 包文档 + 常量（`APIType="jethub"`、`IDPrefix="jethub-"`、`ProviderID`/`ProviderNameFromID` 双向换算） |
+| `manager.go` | `Manager`（凭据存储 + 账号索引，RWMutex）：11 provider 元数据 `Providers()`、账号 CRUD（`AddAccount`/`Accounts`/`FindAccount`/`UpdateAccount`/`DeleteAccount`）、凭据读写（`SetCredential`/`Credential`，`{"enc": "..."}` 信封 AES-GCM 与 `config.Encrypt/Decrypt` 同源）、前缀存取、模型黑名单 `SetModelDisabled`/`DisabledModels`、限流标记 `UpdateModelRateLimit` |
+| `accountpool.go` | `AccountPool` 选号策略（移植 `src/account-pool.ts` 语义）：enabled + 凭据存在 + 模型限流豁免 + exclude 集合过滤，手动数组顺序即候选优先级；`NewAccountID` 生成 `{provider}-{8hex}` + `{PROVIDER}_ACCOUNT_{HEX}` |
+| `bridge.go` | `Bridge`（registry 桥接）：`SetPrefix`（合法性 `[a-z0-9-]` + 冲突检测 409 + 持久化 + 动态注册/更新）、`SyncKeys`（启用账号×1 Key 回写 Key.Key，零可用 Key 时移除桥接 Provider）、`ClearPrefix`、`Product`/`HasBridgedProvider`、`ConflictError`；`BridgeDeps` 为本地窄接口（结构性满足 `*registry.Registry`） |
+| `products.go` | `RegisterDefaultProducts`（P1 先注册 codearts 产品：BaseURL + 9 条静态模型表含 CONTEXT_WINDOWS 备注）、`RestoreBridges`（启动时重注册存储前缀）、`Manager.Augment`（实现 `proxy.RequestAugmenter`，按 provider 分发到 `SetAugmenter` 注册的适配器，未注册=恒等透传） |
+| `httpclient.go` | `HTTPClient` 共用出站客户端（UA/JSON POST+GET/SSE 行流读取复用 `internal/sse.SSELineBuffer`）、`HTTPError`（保留状态码+响应体供错误分类） |
+| `qoderwasm.go` | `//go:embed qoder_auth_wasm.wasm`（298 KB，SHA-256 `6419471E…` 与 ref 副本一致）+ `CompileQoderModule`（wazero 编译缓存；完整 wasm-bindgen 桥 P3.4 落地） |
+| `helpers.go` / `*_test.go` | `jsonUnmarshal` 辅助；`manager_test.go`（凭据加密落盘无明文泄漏、账号 CRUD、黑名单、前缀冲突、桥接注册/移除/恢复、Augment 分发）、`qoderwasm_test.go`（WASM 编译冒烟 + 账号 id 形状） |
+
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
 <a id="textreview"></a>AI 长文本清理的进程内会话引擎：一个 `Session` 持有待清理的章节列表与处理节点池，调度器跨节点派发 worker goroutine，经共享代理栈流式清理每章并把增量广播给 SSE 订阅者。支持 pause/resume/stop、单章重处理、以及节点 502-exhausted 时的自动并发 ramp-down（落盘到 `config.yaml`）。会话仅驻内存，**不持久化**（重启清零，已确认决策：无 `state.yaml`）。架构基线见 [`docs/playground-architecture.md`](docs/playground-architecture.md)（AI Text Review 一节）。
@@ -933,6 +956,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | `docs/config-registry-state-architecture.md` | **当前/权威** | Config/Registry/State 基础设施架构基线（三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge、回调去抖、源码锚点） |
 | `docs/manuel/` | **当前/权威（本轮新增）** | Docs 网页截图素材库：四级 `00_common/01_monitor/02_settings/03_playground/04_utility/05_gallery/06_demo`，`138 场景 × zh/en = 276 PNG + 276 WEBP(70) + 276 MD`，`PNG 2880×1800` + `WEBP 70` 平均 `902KB→81KB`（11:1），`generate.md` 方法沉淀（清单推导/拍摄/SEED/文档/转码/验收/变更清单），`README.md` 命名/视口/双语/验收（含 webp），`00_index.md` 138 清单（F1→F6），`scripts/capture.mjs`（`--base/--out/--live`，`headless:shell` 每场景 `navigateTo`/`pgSetMode`）+ `convert-webp.mjs`（`ffmpeg -quality 70` 优先，回退 `sharp`）+ `SEED.md`；来源 `index.html:66-92/app-router:9-26/app-demo:6-10/shortcuts:23-73` |
 | `docs/build-variants.md` | **当前/权威** | 构建变体矩阵（default/tray/webview/debug × playground/strip，13 产物，图标/体积） |
+| `docs/jethub-migration-plan.md` | **执行中/计划（v2）** | Jet Hub 插件移植实施计划（产品名 **Free Hub**）：Settings 侧边栏入口（Path Settings 下/Assistant 上）+ main 三段式管理界面；调用桥接 = registry 动态 Provider（自定义前缀 + `APIType=jethub` + 账号→Keys 复用 rotation）+ proxy `RequestAugmenter` 注入，内外统一 `{前缀}/{modelID}`；备份/恢复兼容原版格式。阶段 P1 基础设施+桥接 → P2 CodeArts 样板 → P3 其余 10 provider → P4 Free Hub 界面 → P5 加固 → P6 收尾（收尾时本行改为指向 `docs/jethub-architecture.md`）。新对话接续实施的唯一入口文件，含分阶段 Checklist 与执行日志；参考副本 `ref/deepseek-harness-codearts` |
 
 ---
 
@@ -967,6 +991,8 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 ## 22. Gitignored 参考副本（非本项目模块）
 
 > 当前无。原 `new-api/`（QuantumNous/new-api 克隆，约 31 MB）参考副本已于 2026-07-31 移除，Playground 模块不再参考该项目。9router 参考副本位于仓库外 `Z:\Playground\9router`（见 AGENTS.md「参考来源」）。
+>
+> **2026-09-30 新增：** `ref/deepseek-harness-codearts`（gitignored）——DeepSeek Harness 插件 `dsh-codearts-auth`（Jet Hub，11 个 LLM provider + Web 管理面板，TS/React）的只读参考克隆，origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`，锁定 commit `cecf3766`。禁止修改；移植计划见 `docs/jethub-migration-plan.md`。移植完成并验证后移除本条目与该目录。
 
 ---
 
@@ -975,6 +1001,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 > 以下为已冻结但尚未实施的功能计划。实施完成后，必须把对应模块、源码锚点和构建边界移入上文，并删除或更新本条目。
 
 - `docs/archive_compatibility_plan.md`：ZIP/7z/RAR 统一 ArchiveCore、Gallery/GIF/Download MediaBridge、严格路径与资源预算、feature build profiles。**P0/P1 已落地**（`internal/archive/` §13e）；**P2 已落地**（`internal/archivetool/` §13f + `internal/api/archive/` §10.24 + `Config.Archive`/Settings presence-aware PATCH + `web/static/media-bridge.js` 交接契约）；**P3 部分落地**：Gallery 后端桥接（`archiveBridge` + `zip-replace`）+ 前端 sourceId 双路径（读取/删除/审核/编辑），**旧 `/api/gallery/zip*` 与 `/edit/zip-outputs|zip-writeback|extract-zip-entry|upload-temp` 端点保留、前端 legacy 调用方未删**（FSAA/拖放/粘贴仍走 zip 会话；计划 §7.2"迁移完成后删除"未执行；**原生 picker `accept` 仍只含 `.zip`**——`gallery-layout.js:15`，.7z/.rar 用户文件导入无前端路径，`isArchiveName` 识别后仍走 zip-only 上传）；**P5 第一阶段已落地**（`internal/feature` §13g manifest + `feature.Enabled` 门控，feature_* tags 未实…）。**2026-08-09（audit_fix 执行后）：** 上述 legacy 端点**后端已全部迁移到 grant/asset/sourceId 合同并 410 拒绝 raw path**（§10.9）——前端 `web/playground/static-pg/gallery/*.js` 已于 2026-08-09 迁移到新合同（`inputAssetId`/`inputGrantId`/`sourceId`/`grantId+rel`，见 `docs/audit_fix.md` 附录 B F-03；仅存永不赋值的 `zipAbsPath`/`rootDirPath` 死分支与单 zip extract→edit 的 `data.tempPath` 残留读——非安全功能缺陷，待修）；`docs/audit_fix.md` 本身为执行中用户文档（见 §19 表新增行）
+- `docs/jethub-migration-plan.md`（2026-09-30 新增，v2）：Jet Hub 插件移植实施计划（产品名 **Free Hub**）——将 dsh-codearts-auth（11 个 LLM provider + 管理界面 + Qoder WASM 加密推理）移植为 `internal/jethub` + `internal/api/jethub` + Settings 内嵌界面。**落地形态**：Settings 侧边栏 Free Hub 行（Path Settings 下/Assistant 上）→ main 三段式（header 一键签到/备份/恢复/关闭 + left provider 列表 + right 管理/前缀输入框）；**调用方法**：registry 动态桥接 Provider（用户自定义前缀 + `APIType=jethub` + 账号→Keys 复用 rotation 轮询）+ proxy `RequestAugmenter` 窄接口注入（proxy 不依赖 jethub），内外统一 `{前缀}/{modelID}` 调用；**备份/恢复兼容原版 Jet Hub 格式**。**尚未开始实施**（P0 评估与 v2 设计已完成，计划与 Checklist 见计划文档 §3–§9）。实施完成后：模块/源码锚点移入正文，本条目与 §19 计划行引用按计划文档 §9 P6 移除（改指 `docs/jethub-architecture.md`）。
 
 ---
 
@@ -989,6 +1016,7 @@ PNG 元数据注入 leaf 包（纯 stdlib）：为图片保存链路提供 Comfy
 | 新增/修改 Demo 游戏插件（含 Game Designer） | gamedemo-progress | `web/games/Unit0{1..6}/`（manifest+入口，6 个分阶段示例，参考 C:/omp/Phaser 改编，中文注释充足）、`web/static/demo-games.js`（TRGames 宿主/adapter/游戏区+__dgames `loadPhaser/injectScript` 缝）、`web/static/demo-designer.js`（GameDesigner：复用 `EditorLayout`、games 作用域编辑+Blob 预览、与 collapse explorer 同列的 `Example Unit` 按钮 `.dgn-example-unit` 按需 `POST /api/games/seed`）、`internal/api/games/register.go`（列表/state KV/按需 seed `POST /seed` + `SeedFromEmbedded/SetEmbeddedGames/CtxWithSrcFS`）、`internal/api/editor/register.go`（`?root=games` 走 `ResolveGamesDir` 的 games 根，目录删除仅顶层递归）、`internal/api/router_demo.go`（`/games/*` 静态，不再自动播种）+ `internal/app/app.go`（启动 `SetEmbeddedGames` 注册内嵌集）、`internal/config/paths.go`（`ResolveGamesDir`）、`web/games.go`（embed `Unit0{1..6}`）、`web/static/vendor/phaser/`（引擎升级时）、`web/static/i18n.js`（`design/designer*` + `designerExample*`）、`web/static/app-demo.js`/`app-router.js`/`index*.html`（`DEMO_TOOLS=[ademo,tilemap,design]`/`case 'design'`/`#demo-menu`） |
 | FileTransfer 临时文件中转 | config-registry-state | `internal/filetransfer/upload.go`（`POST /api/filetransfer/upload` multipart 文件/本机剪贴板路径收集、`package=zip` ZIP Deflate 或 `package=raw` 逐文件直传（`{results[]}` 逐文件结果）、tfLink → tmpfiles.org → temp.sh → Filebin 顺序回退并返回 `retention`；总输入 600 MiB 上限（413）、单文件 500 MiB、20min 整体超时；外部服务失败时返回错误，不保证上传成功）+ `internal/api/router.go`（`/api/filetransfer` 路由组：认证与 610MB body 上限，`POST /upload` 与 `POST /path-info`）+ `web/static/filetransfer.js`（Utility FileTransfer：任意文件拖拽/粘贴、客户端预检（FT_LIMITS 与后端常量同步）、path-info 目录大小刷新与 grant 过期预检、「打包为 ZIP」开关、多链接结果渲染、上传取消、进度阶段化（本地确定→远端 indeterminate）、paste 可编辑目标守卫、Clear、`suspendFileTransfer`/`resumeFileTransfer` 生命周期）+ `web/static/index.html`/`index-nopg.html`（Utility 入口脚本） |
 | 新增/修改 Provider API 类型 | config-registry-state、proxy、rotation | `config/types.go`（`APIType`/`IsNIM`/`IsGeminiOpenAICompat`/`IsCline`）、`config/validate.go`、`rotation/nim.go`、`proxy/forward.go`、`proxy/upstream.go`（`applyClineHeaders` 域名特例请求头注入） |
+| 新增/修改 Free Hub（jethub）桥接/账号池 | jethub-migration-plan、config-registry-state | `internal/jethub/`（§13n：`manager.go` 凭据/账号存储、`accountpool.go` 选号、`bridge.go` 前缀桥接 + `SyncKeys`、`products.go` 产品表 + `Augment` 分发、`httpclient.go`、`qoderwasm.go`）、`internal/api/jethub/register.go`（§10.28 端点）、`internal/api/router.go`（`SetJetHub` 注入 + `/api/jethub` 路由组）、`internal/proxy/interfaces.go`（`RequestAugmenter` 接口）、`internal/proxy/handler.go`（`SetRequestAugmenter`）、`internal/proxy/upstream.go`（`forwardUpstream` jethub 分支 + `WithClientRequest`）、`internal/proxy/forward_retry.go`（context 注入）、`internal/app/app.go`（Manager/Bridge 装配 + `RestoreBridges` + augmenter 注入）、`internal/config/paths.go`（`ResolveJetHubDir`）、`go.mod`（`wazero`） |
 | 新增 Key 轮询策略 | rotation | `rotation/strategy.go`+`selector.go`、`config/types.go`（`RotationConfig`）、`proxy/forward.go`（`forwardWithRetry`） |
 | 新增管理 API 端点 | （对应模块文档）、config-registry-state | `api/router.go`（骨架+鉴权边界，P2-07 后各域细分见 `router_proxy/playground/utility/demo.go`）+ `api/router_*.go`（各域 `registerXxx`）、`api/<域>.go`、`registry/<域>.go` |
 | 新增/修改归档能力（ZIP/7z/RAR） | docs/archive-architecture.md、config-registry-state | `internal/archive/`（§13e：合同/严格路径/预算/ZIP adapter/TempStore）、`internal/archivetool/`（§13f：Resolver/Runner/exec/parse/builders）、`internal/api/archive/register.go`（§10.24 端点，含 **P3 `POST /zip-replace`**）、`internal/api/router.go`（`/api/archive` 路由组 + `SetArchiveRunner` + `ArchiveSettingsFn` 闭包 + **`galleryHandler.SetArchive(archiveHandler)`**）、`internal/app/app.go`（buildComponents 创建 runner + Scavenge + Shutdown Close）、`internal/config/types.go`（`ArchiveConfig`）+ `paths.go`（`ResolveArchiveTempDir`）、`internal/api/settings/register.go`（GET `archive` 对象 + `archivePatch` presence-aware PATCH）、`internal/api/apibase/deps.go`（`ArchiveRunner` 接口 + `ArchiveSettingsFn`）、`internal/api/gallery/register.go`（`archiveBridge` + `SetArchive`） |

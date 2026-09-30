@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/tinylab/tinylab/internal/combo"
@@ -122,6 +123,19 @@ type ComboResolver interface {
 // handler depends on the recording capability rather than *usage.RingBuffer.
 type UsageRecorder interface {
 	Add(e usage.Entry)
+}
+
+// RequestAugmenter allows an owner of bridged providers (e.g. jethub) to
+// rewrite the outbound request just before it is sent. The implementation is
+// injected via Handler.SetRequestAugmenter; nil implementation = standard
+// forwarding. The proxy never imports the augmenter's package — it only knows
+// this interface and the APIType=="jethub" marker.
+type RequestAugmenter interface {
+	// Augment may replace URL/body/headers of the outbound request. providerID
+	// is config.Provider.ID (e.g. jethub-codearts); keyID locates the concrete
+	// account credential. Returning an error fails this forwarding attempt
+	// (counted like a network error by the retry loop).
+	Augment(r *http.Request, body []byte, providerID, keyID string) ([]byte, error)
 }
 
 // QuotaTracker abstracts quota bookkeeping for UI display. It is the exact

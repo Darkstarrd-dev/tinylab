@@ -13,6 +13,27 @@ import (
 	"github.com/tinylab/tinylab/internal/urlutil"
 )
 
+// currentClientRequestKey is the context key used to carry the original client
+// *http.Request through to forwardUpstream for the augmenter hook.
+type currentClientRequestKey struct{}
+
+// WithClientRequest returns a context carrying the original client request so
+// forwardUpstream can hand it to the RequestAugmenter for bridged providers.
+func WithClientRequest(ctx context.Context, r *http.Request) context.Context {
+	return context.WithValue(ctx, currentClientRequestKey{}, r)
+}
+
+// isHopByHopHeader reports whether a header must not be forwarded upstream
+// (RFC 2616 hop-by-hop + Go'shttp transport internals).
+func isHopByHopHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		return true
+	}
+	return false
+}
+
 // upstreamClientFor returns the non-streaming upstream client for sel: the
 // proxy-routed client when sel.Provider.UseProxy is set AND a proxy URL is
 // configured, else the direct client. See clientFor for the timeout handling.
@@ -37,6 +58,52 @@ func (h *Handler) streamClientFor(sel *rotation.SelectedKey) *http.Client {
 }
 
 func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey, body []byte, headers http.Header, isStream bool, path string, entryFormat combo.EntryFormat) (*http.Response, error) {
+
+	// Bridged provider hook: providers owned by an external augmenter (e.g.
+	// jethub) get URL/body/headers rewritten just before send. The augmenter
+	// mutates the client request's headers (its mutations become the outbound
+	// header base — e.g. SDK-HMAC signature headers) and may replace the body.
+	// A returned error is treated as a forwarding failure (the retry loop
+	// classifies and retries/excludes).
+	if sel.Provider.APIType == "jethub" && h.augmenter != nil {
+		if clientReq, _ := ctx.Value(currentClientRequestKey{}).(*http.Request); clientReq != nil {
+			augmented, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID)
+			if err != nil {
+				return nil, err
+			}
+			body = augmented
+			upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
+			req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			// The augmented client headers ARE the outbound headers (minus
+			// hop-by-hop fields); the augmenter's mutations propagate.
+			for k, vs := range clientReq.Header {
+				if isHopByHopHeader(k) {
+					continue
+				}
+				for _, v := range vs {
+					req.Header.Add(k, v)
+				}
+			}
+			// Generated auth/content-type come last so a bridged provider
+			// always has sane defaults; the augmenter may have set its own
+			// Authorization/Content-Type — those win (Set only when absent).
+			if req.Header.Get("Content-Type") == "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			if req.Header.Get("Authorization") == "" {
+				req.Header.Set("Authorization", "Bearer "+sel.Key.Key)
+			}
+			customheaders.Apply(req.Header, sel.Provider.UseCustomHeaders, sel.Provider.CustomHeaders)
+			if isStream {
+				req.Header.Set("Accept", "text/event-stream")
+				return h.streamClientFor(sel).Do(req)
+			}
+			return h.upstreamClientFor(sel).Do(req)
+		}
+	}
 
 	var upstreamURL string
 	var req *http.Request

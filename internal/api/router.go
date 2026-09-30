@@ -29,6 +29,7 @@ import (
 	"github.com/tinylab/tinylab/internal/api/fsbrowse"
 	"github.com/tinylab/tinylab/internal/api/gallery"
 	"github.com/tinylab/tinylab/internal/api/games"
+	jethubapi "github.com/tinylab/tinylab/internal/api/jethub"
 	"github.com/tinylab/tinylab/internal/api/music"
 	"github.com/tinylab/tinylab/internal/api/notes"
 	"github.com/tinylab/tinylab/internal/api/image"
@@ -54,6 +55,7 @@ import (
 	"github.com/tinylab/tinylab/internal/feature"
 	"github.com/tinylab/tinylab/internal/filetransfer"
 	domainimagebatch "github.com/tinylab/tinylab/internal/imagebatch"
+	"github.com/tinylab/tinylab/internal/jethub"
 	"github.com/tinylab/tinylab/internal/proxy"
 	"github.com/tinylab/tinylab/internal/registry"
 	"github.com/tinylab/tinylab/internal/rotation"
@@ -103,6 +105,11 @@ type deps struct {
 
 	// storyStore holds the SQLite database connection pool for Story Maker.
 	storyStore *storymaker.Store
+
+	// jethub wiring: Free Hub manager + registry bridge (nil in tests that
+	// build a Router without the app assembly; routes then stay unregistered).
+	jethubManager *jethub.Manager
+	jethubBridge  *jethub.Bridge
 }
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps and
@@ -235,6 +242,14 @@ func (rt *Router) SetArchiveRunner(runner apibase.ArchiveRunner) {
 	rt.archiveRunner = runner
 }
 
+// SetJetHub wires the Free Hub manager + registry bridge built by the app.
+// Must be called before Routes(); without it the /api/jethub routes stay
+// unregistered.
+func (rt *Router) SetJetHub(m *jethub.Manager, b *jethub.Bridge) {
+	rt.jethubManager = m
+	rt.jethubBridge = b
+}
+
 func (rt *Router) DebugMode() bool {
 	return rt.debugMode.Load()
 }
@@ -351,6 +366,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	}
 	authHandler := auth.NewHandler(apiDeps)
 	anysearchHandler := anysearch.NewHandler(apiDeps)
+	jethubHandler := jethubapi.NewHandler(&jethubapi.Deps{
+		Manager: rt.jethubManager,
+		Bridge:  rt.jethubBridge,
+	})
 	combosHandler := combos.NewHandler(apiDeps)
 	sseHandler := sse.NewHandler(apiDeps)
 	consoleLogsHandler := console_logs.NewHandler(apiDeps)
@@ -458,6 +477,12 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// so this registration is intentionally NOT gated on Playground:
 			// gating it would drop the routes from default builds.
 			anysearchHandler.Register(r)
+			// Free Hub (jethub): provider metadata, prefix bridging, account
+			// CRUD. Handlers nil-check the manager; unset wiring degrades to a
+			// 503 instead of panicking.
+			if rt.jethubManager != nil && rt.jethubBridge != nil {
+				jethubHandler.Register(r)
+			}
 			// Generic OS file/directory picker, shared by assistant/gallery/
 			// download frontends — intentionally NOT gated on feature.Download.
 			fsbrowseHandler.Register(r)

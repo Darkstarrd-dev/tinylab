@@ -142,6 +142,26 @@ func ResolveAssistantDir(dir, configDir string) string {
 	return dir
 }
 
+// ResolveJetHubDir resolves the Free Hub (jethub) data directory. An empty dir
+// falls back to {configDir}/jethub (or "jethub" if configDir is empty); a
+// relative path is joined with configDir; an absolute path is used verbatim.
+// Credentials/accounts storage and prefix mapping live under this directory.
+func ResolveJetHubDir(dir, configDir string) string {
+	if dir == "" {
+		if configDir == "" {
+			return "jethub"
+		}
+		return filepath.Join(configDir, "jethub")
+	}
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, dir)
+	}
+	return dir
+}
+
 // ResolveStoryDir resolves the default story directory. An empty storyDir
 // falls back to {configDir}/Story (or "Story" if configDir is empty); a
 // relative path is joined with configDir; an absolute path is used verbatim.
