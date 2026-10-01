@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）+ **面板登录弹窗的 status 轮询契约**（§3.6 缺陷 19：loomy 的 `/status` 漏了 `loginId` 分支 ⇒ 弹窗永挂；前端 404 静默空转一并收尾）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）+ **面板登录弹窗的 status 轮询契约**（§3.6 缺陷 19：loomy 的 `/status` 漏了 `loginId` 分支 ⇒ 弹窗永挂；前端 404 静默空转一并收尾）+ **模型列表展示形态规范化**（§6.3：一条 `名称 · 倍率` 紧跟裸 id、逐 provider 静态展示名与插件逐条对齐（buddy/workbuddy 补名 + 同名变体标记、cline 补 ` · 免费`、trae 剔除 4 条隐藏项）、点 id 复制 `{prefix}/{id}`、展示名同 provider 内唯一）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -16,7 +16,7 @@
 > - 修改 Loomy 微信扫码登录（协议/流程/页面/公开端点）→ §3.5 + `internal/jethub/loomy_wechat.go`/`loomy_wechat_flow.go` + `internal/api/jethub/loomy.go`（`POST /loomy/login`）+ `web/static/free-hub-loomy-login.html` + `manager.go` 的 `loginModes`
 > - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
 > - 修改/新增 provider 的**推理端点**（出站 URL）→ §6.2 + `internal/jethub/products.go` 的 `Product.InferURL`（**唯一真相源**）+ `bridge.go`（登记即发布）+ `qoder_adapter.go`（Customize 覆盖 + 签名用 URL 改写）+ `probe.go`（探针共用同一管线）；qoder 族例外（URL 由 WASM 算出）
-> - 修改**模型展示名/倍率**（别名、倍率段、促销窗口）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go`
+> - 修改**模型展示名/倍率**（别名、倍率段、促销窗口、同名变体标记）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go` 的 `TestModelDisplayNamesMatchReference`（展示名非空 / 同 provider 内唯一 / 兜底不编造倍率 / 自带倍率不得丢）+ `web/static/jethub.js` 的模型行渲染与 `{prefix}/{id}` 复制
 > - 修改 **jethub 前端 RPC 路径** → §3.2 缺陷 14 + `web/static/jethub.js` + `web/jethub.test.js` 的**全方法路由形状守卫**（从 `internal/api/jethub/*.go` 反推合法形状，改路径必跑）
 > - 修改 **CodeArts 响应判据**（200 + 流内 error_code / 排队重试）→ §6.4 + `internal/jethub/codearts_response.go` + `qoder_adapter.go`（InterceptResponse 分派）+ `internal/proxy/forward_retry.go`（QueueRetryError 的等待与 180 次上限）
 > - 新增/修改 provider 的 **`/status` 端点或面板登录弹窗轮询** → §3.6 + `internal/api/jethub/<provider>.go`（**`loginId` 分支必须有**，否则弹窗永挂）+ `web/static/jethub.js`（`__jethubLoginModal` 的三态判据）+ **`internal/api/jethub/status_login_test.go` 的结构性守卫（逐条 `/status` 路由）+ `web/jethub.test.js` 的弹窗状态机用例**
@@ -49,7 +49,7 @@
 - **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（11 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
 - **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号 · **Use Proxy 开关**（`+ 新建账号` 右侧：`free-hub-proxy-wrap` 标签 + 全局 `.toggle-switch`（同 Upstream Proxy/Provider 详情 useProxy，复用 style-settings.css 不动堆叠规则）；`jethubToggleProxy` PUT `/api/jethub/providers/{provider}/proxy` {enabled}，失败回滚勾选态；per-provider 语义见 §3.2）。结果在通知区显示（tone + 逐条 details 列表）。
 - **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
-- **模型列表**（与本项目 Provider 详情的 Model list 同形态）：纵向行列表（名称 + **倍率徽标**（服务端 `rate` 字段：`x0.75`/`免费`/`x0.2→x0.1`，从 alias/note 解析、**无信息不编造**） + 可复制的模型 id + 删除/恢复单钮）；批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
+- **模型列表**（展示形态与插件的 `ModelToggle` **逐字对齐**，2026-10-01 规范化）：纵向行 = **一条展示串 `模型名称 · 倍率`**（服务端 `name`+`rate` 两个字段合成一条；无倍率时**不补** ` · `）紧跟着**裸的模型 id** + 删除/恢复单钮 —— 插件渲染的就是 `<strong>{model.name}</strong><code>{model.id}</code>`，且 `model.name` 里已含倍率。倍率**无信息不编造**（解析规则与逐 provider 对账见 §6.3）；**点模型 id 复制的是 `{prefix}/{id}`**（与 Settings provider detail 点模型 id 同形，可直接外部调用；未设前缀时退回裸 id）。批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → **先创建占位账号**（POST `/accounts` 拿 `accountId`）再弹发码/验码两步弹窗（提交时按 `accountId` 绑定凭据；**取消 = 删除占位**）。URL 弹窗的取消同样删除占位。无凭据的占位账号在账号卡上显示「登录未完成 · 无凭据」灰徽标（`freeHubNoCredential`），领取/推理账号集都会过滤掉它们。
 - ⚠️ **扫码类 provider（raccoon）的 `loginUrl` 是本地页面**（`/free-hub-login.html?loginId=…`），**不是**二维码内容——后者要被微信扫码打开，用浏览器直接打开只是普通网页、无法鉴权（真实缺陷 11，§3.4）。
 - 样式只用 theme tokens（`var(--…)`），控件复用全局 `.btn`/`.badge`/`.modal`/`.input` 体系。
@@ -335,13 +335,45 @@ trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。�
 
 **本端现状**：模型列表**只有静态表**，没有任何远端目录拉取 ——
 `traeBatchModelsPath`/`lobsteraiModelsPath`/`DecryptQoderModelCatalog`/`raccoonModelCatalog`
-四个常量/函数**零调用**（是「打算做但没接」的痕迹）。故：
+四个常量/函数**零调用**（是「打算做但没接」的痕迹）。
 
-| provider | 与插件的差距 | 本轮处理 |
+**展示名契约（本端，2026-10-01 规范化）**：`GET /jethub/providers/{p}/models` 出
+`{id, name, rate, disabled}`，面板渲染**一条** `name · rate` 再渲染裸 `id` —— 与插件
+`ModelToggle` 的 `<strong>{model.name}</strong><code>{model.id}</code>` 同形同序
+（插件把倍率拼进 `name`，本端拆成两个字段但合成一条串显示；无倍率时**不补** ` · `）。
+`name`/`rate` 的解析优先级：`Alias` 的 `· 尾巴`（是倍率文本才算）→ `Note` 的受支持段
+（`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）。**同 provider 内展示名必须互不相同**
+（这是 ref `variantLabelFor` 存在的唯一理由，已由
+`TestModelDisplayNamesMatchReference` 不变量锁死）。
+
+**模型 id 复制 = `{prefix}/{id}`**（2026-10-01 修正，用户实测要求）：与 Settings 的
+provider detail 点模型 id 得到的结果同形（`web/static/providers-models.js:38/100` 复制
+`prefix/alias||id`），可直接粘进外部客户端调用；该 id 经 `ResolveModelAlias` 解析回
+真实目录 key，故 `{prefix}/{id}` 与 `{prefix}/{alias}` 都可用。未设前缀（未桥接）时
+退回裸 id —— 那种情况下本来也无从调用。
+
+**逐 provider 静态展示名对账（2026-10-01，逐条比对 ref 兜底表与 displayName 函数）**：
+
+| provider | 插件展示名的来源 | 本轮处理 |
 |---|---|---|
-| qoder / qodercn | 3 条促销倍率错（`qmodel_38max` 被显示成「免费」、`qmodel_latest`/`qmodel` 拿采集时刻折后价当唯一价） | **已修**：† |
-| trae | 静态表丢弃了 ref 的 display name（面板显示裸 id）；远端独有的模型（含 0 费档）不在表里；无倍率 | 展示名**已修**；远端目录**未实现** |
-| lobsterai | 缺远端已确认存在的 `kimi-k3`（需 capability 头才下发）/`deepseek-flash`/`glm-5.3-flash`；无倍率 | 三条**已补**；倍率需远端目录（**未实现**） |
+| qoder / qodercn | **纯静态表**（`qoder-product.ts`，插件自身也不拉远端） | 上一轮已修倍率；本轮复查 17+14 条**逐条一致**（含错峰形态） |
+| raccoon | 静态表 `name` 已含倍率（`raccoon-product.ts:218-263`） | 6/6 一致 |
+| loomy | 静态表 `name` 已含 ` · x{n}`（`loomy-product.ts:104-113`） | 8/8 一致 |
+| minimax | 兜底表 `name`（无倍率概念） | 4/4 一致 |
+| cline | `isFree ⇒ name · 免费`（`cline-models.ts:107-109`，5 条全 free） | **已修**：此前 Note 里只写了裸 `free`（不是受支持段）⇒ 面板少了 ` · 免费` |
+| trae | 兜底表 `name`，且**先过滤 `isHidden`**（`trae-adapter.ts:765-769`） | **已修**：剔除 4 条隐藏模型（`browser_use_subagent`/`explore_sub_agent_v13`/`explore_sub_agent_v2`/`summary`，32→28 条 —— 此前面板比插件多 4 条） |
+| buddy / workbuddy | 兜底表 `name`（`product.ts:180-266`/`295-367`）+ 同名撞车变体标记 | **已修**：Alias 补全（此前名字只塞进 Note、Alias 为空 ⇒ 面板显示裸 id）+ 三处变体标记按 ref 算法（公共 id 前缀）固化为 `Hy3 · X`、`Hy4 preview · F`、`Deepseek-V4.1-Flash · SG`。⚠️ **变体前的 ` · ` 不可省**：`displayNameFor` 把整条 suffix 用 ` · ` 接到 name 上，兜底路径后缀就是变体本身 |
+| lobsterai | 兜底表 `name` **逐条等于 id**（`lobsterai-product.ts:184-202`） | 一致（裸 id，**不是**缺陷）；比兜底表多 3 条远端已确认的模型（保留） |
+| codearts | 兜底 `name` 恒为裸 id（`llm-adapter.ts:794`） | 一致（裸 id，无计费字段） |
+
+| provider | 与插件的**剩余**差距 | 处理 |
+|---|---|---|
+| qoder / qodercn | 3 条促销倍率曾错（`qmodel_38max` 被显示成「免费」、`qmodel_latest`/`qmodel` 拿采集时刻折后价当唯一价） | **已修**：†（本轮复查无残留） |
+| trae | 远端独有模型（`solo_agent` 约 66 条）与**倍率**不在表里 | 展示名/隐藏项**已修**；远端目录**未实现** |
+| lobsterai | 远端 26 条与 `costMultiplier` 倍率 | 三条**已补**；其余倍率需远端目录（**未实现**） |
+| buddy / workbuddy | 远端 `credits`/`discountedCredits` 倍率与远端独有模型 | 展示名**已修**；远端目录**未实现** |
+| cline | 远端约 478 条（我们只有 5 条免费兜底） | 静态 5 条**已修**；远端目录**未实现** |
+| codearts | 远端 `model_name`（我们只有 9 条裸 id） | 远端目录**未实现** |
 
 † **qoder 倍率的修法**（判定与 ref `qoderDisplayName`/`promotionActiveNow` 同源）：
 
@@ -354,17 +386,33 @@ trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。�
   （22:00–08:00），与机器时区无关。这样与插件在**两个半天里都一致**（静态写死折后价
   会让用户在窗口外按折扣价预期、实际按原价计费 —— 这正是 ref 的注释所警告的）。
 - 回归：`internal/api/jethub/register_test.go` 的
-  `TestModelDisplayPartsPromotionWindow`（窗口内/外/边界 × 两个时区表达）+
-  `TestQoderModelRatesMatchPlugin`（qoder 与 qodercn 逐条对账，期望值取自 ref
-  `qoder-product.ts`）+ `TestTraeModelsCarryDisplayNames`。
+  `TestModelDisplayParts`（形态表）+ `TestModelDisplayPartsPromotionWindow`
+  （窗口内/外/边界 × 两个时区表达）+ `TestQoderModelRatesMatchPlugin`（qoder 与
+  qodercn 逐条对账，期望值取自 ref `qoder-product.ts`）+
+  **`TestModelDisplayNamesMatchReference`**（2026-10-01 新增：逐 provider 代表条目
+  核对 `名称 · 倍率`，并锁四条不变量 —— 展示名非空 / **同 provider 内展示名互不相同**
+  （ref `variantLabelFor` 的存在理由）/ 兜底路径**不编造倍率** / 自带倍率的 provider
+  **不得缺倍率**；trae 的 4 条隐藏模型必须缺席且恰好 28 条。已反向验证：把
+  `Hy4 preview · F` 改回 `Hy4 preview` ⇒ 两条断言立刻报红）+ `TestTraeModelsCarryDisplayNames`。
 
-**未实现的正确修法（下一步）**：trae 与 lobsterai 的**远端目录拉取**（含解析与失败回退）。
-远端 ID 集合会随服务端变化（ref 明确警告不要把某一刻的远端条目写死），故「把静态表抄长」
-追不上，必须拉远端：trae `POST {agentHost}/api/ide/v1/batch_get_detail_param`（22 个通道 +
-`traeSOLOHeaders`，解析 `function_configs[].config_info_list[]`，倍率在
-`display_contact_config → consumption_rate.data.rate`）、lobsterai
-`GET {apiBase}/api/models/available`（**必须带** `X-LobsterAI-Client-Capabilities:
-kimi-k3-agentic-v1,thinking-level-control-v1`，否则少 `kimi-k3`）。qoder/qodercn 无需远端。
+**未实现的正确修法（下一步）**：**远端目录拉取**（含解析与失败回退）。远端 ID 集合与
+倍率都会随服务端变化（ref 明确警告不要把某一刻的远端条目写死），故「把静态表抄长」
+追不上。逐 provider 端点（本轮逐条核对 ref 的结果）：
+
+| provider | 远端目录 | 关键字段/前置条件 |
+|---|---|---|
+| trae | `POST {agentHost}/api/ide/v1/batch_get_detail_param` | 22 个通道 + `traeSOLOHeaders`，解析 `function_configs[].config_info_list[]`；倍率在 `display_contact_config → consumption_rate.data.rate`（**JSON 字符串，需二次 parse**）；远端约 66 条 |
+| lobsterai | `GET {apiBase}/api/models/available` | **必须带** `X-LobsterAI-Client-Capabilities: kimi-k3-agentic-v1,thinking-level-control-v1`，否则少 `kimi-k3`；倍率 `data[].costMultiplier`（裸数字）；远端约 26 条 |
+| buddy / workbuddy | `GET {endpoint}/v3/config`（企业端点 `/console/enterprises/{scope}/models` 亦下发） | 倍率 `data.models[].credits`（**字符串 `"x0.29"`**）+ `modelPromotions[].discount.discountedCredits`（**`"0.50x"`，x 在后**）；远端 22–30 条 |
+| codearts | `gateway/config` + `/v1/model/builtin` 合并 | 名字取 `model_name`（**无计费字段** —— 永远没有倍率） |
+| cline | `GET /api/v1/models` + `/api/v1/ai/cline/recommended-models` | 免费集来自 `recommended-models` 的 `free` 数组；远端约 478 条 |
+| minimax | `GET {apiHost}/mavis/api/v1/models?region=cn&buildEnv=prod` | 远端快照与我们 4 条一致（无缺口） |
+| raccoon | `GET {apiBase}/api/web/llm/v2/model_catalog` | 远端快照与我们 6 条一致；倍率已在静态表 |
+| loomy | `GET {apiBase}/api/v1/models` | 远端快照与我们 8 条一致；倍率已在静态表 |
+| qoder / qodercn | **不需要** | 插件自身也不拉远端（纯静态表 + WASM 签名端点） |
+
+⚠️ 四家「倍率只有远端才有」= buddy/workbuddy、lobsterai、trae、codearts；cline 的
+` · 免费`、raccoon/loomy 的倍率都在静态表里，离线也显示。
 
 ### 6.4 CodeArts 的「HTTP 200 + 流内 `error_code`」（真实缺陷 17 + 修复）
 
@@ -430,10 +478,10 @@ kimi-k3-agentic-v1,thinking-level-control-v1`，否则少 `kimi-k3`）。qoder/q
 - `internal/api/jethub/login_page_test.go`（6 个）+ `internal/api/jethub_login_page_public_test.go`（2 个）：公开登录页端点（二维码内容/404/状态生命周期/不泄露账号 id）+ **在开启密码保护的真实路由器下**断言 `/api/jethub/login-page` 未被鉴权拦截（404 来自 handler）而 `/api/jethub/providers` 仍 401，静态页与 `raccoon-qr.js` 公开可取（§3.4）。
 - `internal/jethub/inference_url_test.go`（5 个）：**逐 provider 推理端点与参考实现比对**（buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax/codearts/loomy 九条，改产品表即红）+ `Customize` 返回值一致 + qoder 族必须不声明 InferURL + **codearts 签名看到上游路径且原请求未被污染** + `RegisterProduct` 的发布/撤销语义（§6.2）。
 - `internal/jethub/bridge_keys_test.go`（3 个）：**用真实凭据结构体**逐 provider 断言 `accessTokenOf` 非空（缺陷 15 的直接回归 —— 通用假体凭据曾让这个缺陷逃过全部测试）+ codearts Key 取值优先级 + 未注册提取器的 provider 仍走通用 `access_token`。
-- `internal/api/jethub/register_test.go`：`modelDisplayParts` 形态表（12 条，含「裸 FREE ≠ 免费」「FREE (x0.5) 显示 x0.5」）+ **促销窗口**（窗口内/外/边界 × 两个时区表达，锁「与机器时区无关」）+ **qoder/qodercn 倍率逐条对账**（期望值取自 ref `qoder-product.ts`）+ trae 展示名（§6.3）。
+- `internal/api/jethub/register_test.go`：`modelDisplayParts` 形态表（12 条，含「裸 FREE ≠ 免费」「FREE (x0.5) 显示 x0.5」）+ **促销窗口**（窗口内/外/边界 × 两个时区表达，锁「与机器时区无关」）+ **qoder/qodercn 倍率逐条对账**（期望值取自 ref `qoder-product.ts`）+ trae 展示名 + **`TestModelDisplayNamesMatchReference`**（逐 provider 代表条目核对 `名称 · 倍率` + 四条不变量 + trae 隐藏项/条数；已反向验证）——§6.3。
 - `internal/jethub/codearts_response_test.go`（8 个）：**直接用用户 trace 的真实响应体** —— 200 + `81114.429` 限流按排队重试（10s 同 Key）、200 + `4004.200 benefit not found` 显式失败并带出码/文案、400 + `TM.00001041` 并发上限按排队重试、文案兜底三种、其它错误原样透传（body 完整还回）、正常 SSE 流逐字节不变、`error_code` 判据表（§6.4）。
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `internal/api/jethub/status_login_test.go`（2 个）：**每条 `/status` 路由的 `loginId` 契约**（chi.Walk 枚举 + 200 必带 `done` / 404 必带 JSON error）+ loomy 的完整三态与回收后 404（§3.6 缺陷 19）。
-- `web/jethub.test.js`（20 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + **URL 流登录弹窗状态机**（进行中/成功/失败/会话已回收，§3.6）+ Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
+- `web/jethub.test.js`（20 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + **URL 流登录弹窗状态机**（进行中/成功/失败/会话已回收，§3.6）+ Use Proxy 开关（渲染/PUT 体/失败回滚）+ **模型行展示形态 `名称 · 倍率` + 紧邻裸 id + 点 id 复制 `{prefix}/{id}`（无前缀退回裸 id）**（§6.3）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
 - **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。

@@ -2,18 +2,21 @@ package jethub
 
 import "github.com/tinylab/tinylab/internal/config"
 
-// traeFallbackModels returns the 32-entry built-in catalog (ref
-// trae-product.go TRAE_FALLBACK_MODELS, 2026-08 snapshot; order preserved).
-// Hidden/internal models are marked in Note (the registry keeps them for
-// visibility parity; users can blacklist via the models API).
+// traeFallbackModels returns the built-in catalog (ref trae-product.ts:170-201
+// TRAE_FALLBACK_MODELS, 2026-08 snapshot; order preserved).
+//
+// ⚠️ **隐藏模型必须一并剔除**（用户实测「模型显示和插件不一致」的一部分）：
+// ref 的 `staticFallbackModels()`（trae-adapter.ts:765-769）**先 filter
+// `isHidden !== true` 再出表**，故插件面板里从不出现 `browser_use_subagent` /
+// `explore_sub_agent_v13` / `explore_sub_agent_v2` / `summary` 四条 —— 此前我们把
+// 它们留在表里（标 Note `internal`），面板就比插件多四条。
+//
+// ⚠️ 展示名 = ref 的 `name` 字段（**倍率只随远端目录下发**，兜底路径 ref 也只显示
+// 名字：`traeDisplayName` 在 `creditsRate === undefined` 时直接返回 name，
+// trae-adapter.ts:574-585 ⇒ 不编造 `x1`）。
 func traeFallbackModels() ModelTable {
-	md := func(id, name string, hidden ...bool) config.ModelDef {
-		// ⚠️ Alias 必须带上：此前这里**丢弃**了 ref 的 display name，面板只显示
-		// 裸 id（用户实测「trae 模型列表和插件显示不一致」的一部分）。
-		// ⚠️ 不编造倍率：ref 的 trae 兜底表本身没有倍率字段（倍率只随远端目录的
-		// `display_contact_config → consumption_rate.data.rate` 下发），兜底路径
-		// 的 ref 实现同样不显示倍率（§6.3）。
-		return config.ModelDef{ID: id, QuotaType: "limited", Note: noteOf("ctx 200000", hidden), Alias: name}
+	md := func(id, name string) config.ModelDef {
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx 200000", Alias: name}
 	}
 	return ModelTable{
 		md("DeepSeek-V4-Flash-Official", "DeepSeek V4 Flash Official"),
@@ -21,7 +24,6 @@ func traeFallbackModels() ModelTable {
 		md("seed-code-pro-0430", "Seed Code Pro 0430"),
 		md("Doubao-Seed-2.1-Turbo", "Doubao Seed 2.1 Turbo"),
 		md("Doubao-Seed-2.0-Code", "Doubao Seed 2.0 Code"),
-		md("browser_use_subagent", "Browser Use Subagent", true),
 		md("glm-5.2", "GLM-5.2"),
 		md("glm-5-turbo", "GLM-5 Turbo"),
 		md("glm-5", "GLM-5"),
@@ -45,31 +47,26 @@ func traeFallbackModels() ModelTable {
 		md("custom_model_deepseek_chat", "Custom DeepSeek Chat"),
 		md("custom_model_deepseek_reasoner", "Custom DeepSeek Reasoner"),
 		md("custom_model_deepseek_v4", "Custom DeepSeek V4"),
-		md("explore_sub_agent_v13", "Explore Sub Agent V13", true),
-		md("explore_sub_agent_v2", "Explore Sub Agent V2", true),
-		md("summary", "Summary", true),
 	}
-}
-
-// noteOf builds the ModelDef note string.
-func noteOf(base string, hidden []bool) string {
-	if len(hidden) > 0 && hidden[0] {
-		return base + "; internal"
-	}
-	return base
 }
 
 // clineFallbackModels returns the 5 verified free models (ref
-// cline-product.ts CLINE_FALLBACK_MODELS — the free set comes from the remote
-// `recommended-models` free array; these are the snapshot values, including
-// the gemini-3.8-flash maxTokens=65536 correction: 131072 gets 400'd).
+// cline-product.ts:150-199 CLINE_FALLBACK_MODELS — the free set comes from the
+// remote `recommended-models` free array; these are the snapshot values,
+// including the gemini-3.8-flash maxTokens=65536 correction: 131072 gets 400'd).
+//
+// ⚠️ **免费模型必须拼 ` · 免费`**（ref `clineDisplayName`，
+// cline-models.ts:107-109：`model.isFree ? `${name} · 免费` : name`）—— 这 5 条
+// 全部 `isFree: true`（cline-product.ts:155/164/173/190/199），故展示名一律带
+// 后缀；此前只在 Note 里写了个裸 `free`（`modelDisplayParts` **不认**它，
+// 于是面板少了 ` · 免费`）。
 func clineFallbackModels() ModelTable {
-	md := func(id, name, ctx string, extra string) config.ModelDef {
+	md := func(id, name, ctx, extra string) config.ModelDef {
 		note := "ctx " + ctx
 		if extra != "" {
 			note += "; " + extra
 		}
-		return config.ModelDef{ID: id, QuotaType: "unlimited", Note: note, Alias: name}
+		return config.ModelDef{ID: id, QuotaType: "unlimited", Note: note, Alias: name + " · 免费"}
 	}
 	return ModelTable{
 		md("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),

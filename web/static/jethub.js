@@ -717,17 +717,29 @@ function __jethubModelRows(provider) {
   }
   var batch = __jethubState.modelBatch;
   var pid = escapeForJsString(provider.id);
+  // 调用前缀：模型 id 的可复制形态是 `{prefix}/{id}`（与 Settings 的
+  // provider detail 里点模型 id 复制的**同一个值**，可直接粘进外部客户端调用）。
+  // 未设前缀（未桥接）时退回裸 id —— 那种情况下本来也无从调用。
+  var prefix = provider.prefix ? String(provider.prefix) : '';
   return models.map(function(m) {
     var mid = escapeHtml(m.id);
     var midJs = escapeForJsString(m.id);
+    // 展示形态与插件一致：`模型名称 · 倍率`（无倍率时只有名称，绝不补 ` · `），
+    // 紧跟着 `模型 id` —— 插件的面板就是「一条最终展示名 + 裸 id」两段
+    // （ref plugin-src/client/jet-hub.js 的 ModelToggle）：
+    //   <strong>{model.name}</strong><code>{model.id}</code>
+    // 而适配器的 model.name 里已经拼好了倍率（buddy/lobsterai/cline/qoder/
+    // raccoon/loomy/trae 各自的 displayName 函数）。
+    var nameText = (m.name || m.id) + (m.rate ? ' · ' + m.rate : '');
+    var callId = (prefix ? prefix + '/' : '') + m.id;
+    var callIdJs = escapeForJsString(callId);
     var selected = !!__jethubState.modelSelected[m.id];
     var cls = 'free-hub-model-row' + (m.disabled ? ' hidden-model' : '') + (batch && selected ? ' batch-selected' : '');
     var row =
       '<div class="' + cls + '" data-mid="' + mid + '">' +
         (batch ? '<input type="checkbox"' + (selected ? ' checked' : '') + ' onchange="jethubBatchToggle(\'' + midJs + '\')">' : '') +
-        '<span class="free-hub-model-name" data-tooltip="' + escapeAttr(m.id) + '">' + escapeHtml(m.name || m.id) + '</span>' +
-        (m.rate ? '<span class="free-hub-model-rate">' + escapeHtml(m.rate) + '</span>' : '') +
-        '<span class="code free-hub-model-id copyable" onclick="copyToClipboard(\'' + midJs + '\', \'' + midJs + '\')" data-tooltip="' + escapeAttr(t('clickToCopy')) + '">' + mid + '</span>';
+        '<span class="free-hub-model-name" data-tooltip="' + escapeAttr(nameText) + '">' + escapeHtml(nameText) + '</span>' +
+        '<span class="code free-hub-model-id copyable" onclick="copyToClipboard(\'' + callIdJs + '\')" data-tooltip="' + escapeAttr(t('clickToCopy')) + '">' + mid + '</span>';
     if (m.disabled) {
       row += '<span class="badge badge-inactive">' + escapeHtml(t('freeHubHidden')) + '</span>' +
         '<button type="button" class="btn btn-sm" onclick="jethubSetModelHidden(\'' + pid + '\', \'' + midJs + '\', false)">' + escapeHtml(t('freeHubRestoreRow')) + '</button>';

@@ -536,16 +536,34 @@ checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends
   assert.ok(gone.__calls.cleared.length > 0, 'polling a reaped session must stop');
 });
 
-checkAsync('④ model list: vertical rows with rate badges + batch delete + restore-defaults shapes', async () => {
+checkAsync('④ model list: `name · rate` then bare id, prefix-qualified copy, batch delete + restore defaults', async () => {
   const ctx = makeSandbox();
   ctx.openFreeHub();
   await ticks(6);
   let html = ctx.document.getElementById('free-hub-detail').innerHTML;
   assert.ok(html.indexOf('free-hub-model-row') !== -1, 'vertical model rows');
-  assert.ok(html.indexOf('x0.5') !== -1, 'rate badge rendered');
-  assert.ok(html.indexOf('免费') !== -1, 'free badge rendered');
+  // 展示形态与插件一致：一条 `模型名称 · 倍率`，紧跟着裸 id（顺序 = 插件
+  // ModelToggle 的 <strong>{name}</strong><code>{id}</code>）。
+  assert.ok(html.indexOf('Auto · x0.5') !== -1, 'the rate is part of the display name (plugin form)');
+  assert.ok(html.indexOf('Qwen3.8-Flash · 免费') !== -1, 'free models render `名称 · 免费`');
+  assert.ok(html.indexOf('free-hub-model-rate') === -1, 'the separate rate chip is gone (one display string, like the plugin)');
   assert.ok(html.indexOf('已隐藏') !== -1, 'hidden badge for blacklisted model');
   assert.ok(html.indexOf('恢复默认') !== -1, 'restore-defaults button');
+  // 模型 id 复制的是 `{prefix}/{id}`（= Settings provider detail 里点模型 id
+  // 得到的同一个值，可直接用于外部调用）。
+  const copyCall = (html.match(/copyToClipboard\('([^']*)'\)/g) || []);
+  assert.ok(copyCall.indexOf("copyToClipboard('qd/auto')") !== -1, 'copy must be prefix-qualified (qd/auto), got ' + JSON.stringify(copyCall));
+  assert.ok(copyCall.indexOf("copyToClipboard('qd/qfmodel')") !== -1, 'copy must be prefix-qualified (qd/qfmodel)');
+  assert.ok(copyCall.length === 2, 'exactly one copy action per model row, got ' + copyCall.length);
+  assert.ok(html.indexOf('>auto<') !== -1, 'the displayed text stays the bare model id');
+  // 未设前缀（未桥接）的 provider：退回裸 id（无从调用，不编造前缀）
+  const loomy = makeSandbox();
+  loomy.openFreeHub();
+  await ticks(6);
+  loomy.jethubSelect('loomy');
+  await ticks(4);
+  const loomyHtml = loomy.document.getElementById('free-hub-detail').innerHTML;
+  assert.ok(loomyHtml.indexOf("copyToClipboard('auto')") !== -1, 'no prefix → copy the bare id, got ' + JSON.stringify(loomyHtml.match(/copyToClipboard\('([^']*)'\)/g)));
   // batch manage: enter → select → delete selected (the re-render targets the
   // section element directly, which in this sandbox lives in the registry)
   await ctx.jethubToggleBatchMode();

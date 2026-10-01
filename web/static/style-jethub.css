@@ -333,21 +333,15 @@
   opacity: 0.55;
 }
 
+/* 展示名 = `模型名称 · 倍率`（倍率由服务端一并给出，无倍率时只有名称）。
+   与插件同形：展示名紧跟着裸的模型 id（`text-align:left` + `flex:1` 让 id
+   贴住名称，同时把删除/恢复按钮推到行尾）。 */
 .free-hub-model-name {
   flex-shrink: 0;
-  max-width: 40%;
+  max-width: 52%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.free-hub-model-rate {
-  flex-shrink: 0;
-  font-size: 11px;
-  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.3));
-  border-radius: 999px;
-  padding: 0 6px;
-  color: var(--text-secondary, var(--text-muted, #888));
 }
 
 .free-hub-model-id {
@@ -358,7 +352,7 @@
   white-space: nowrap;
   opacity: 0.75;
   font-size: 12px;
-  text-align: right;
+  text-align: left;
 }
 
 .free-hub-model-row .btn,
