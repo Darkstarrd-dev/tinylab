@@ -113,3 +113,65 @@ func TestBackupImportRejectsForeignFormats(t *testing.T) {
 		t.Fatal("foreign version must error")
 	}
 }
+
+// 「锁定永久积分」随备份双向迁移：导出写 permanentLocks（只留 true），导入
+// 整体替换；旧版导出（仅有 loomyPermanentLocked）按原版 locksFromPayload 的
+// 三分支语义落 loomy 一键；两者皆缺省 = 保持当前值。
+func TestBackupPermanentLocksRoundtrip(t *testing.T) {
+	m := newTestManager(t).m
+	if err := m.SetPermanentLocked("buddy", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetPermanentLocked("loomy", true); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := m.ExportBackup()
+	if !payload.PermanentLocks["buddy"] || !payload.PermanentLocks["loomy"] {
+		t.Fatalf("exported locks: %v", payload.PermanentLocks)
+	}
+	// 生成一份带 false 脏值的表，验证导出过滤（sanitize 只留 true）。
+	m2 := newTestManager(t).m
+	payload2 := &BackupPayload{
+		Format: BackupFormat, Version: BackupVersion, ExportedAt: "t",
+		Credentials:    map[string]string{},
+		DisabledModels: map[string]map[string]bool{},
+		PermanentLocks: map[string]bool{"buddy": true, "loomy": false, "workbuddy": true},
+	}
+	if _, _, _, err := m2.ImportBackup(payload2); err != nil {
+		t.Fatal(err)
+	}
+	if !m2.PermanentLocked("buddy") || m2.PermanentLocked("loomy") || !m2.PermanentLocked("workbuddy") {
+		t.Fatalf("lock table after import: %v", m2.PermanentLocksSnapshot())
+	}
+	// 旧版导出：无 permanentLocks 表 + loomyPermanentLocked=true → 只落 loomy。
+	m3 := newTestManager(t).m
+	_ = m3.SetPermanentLocked("buddy", true)
+	trueVal := true
+	payload3 := &BackupPayload{
+		Format: BackupFormat, Version: BackupVersion, ExportedAt: "t",
+		Credentials:          map[string]string{},
+		DisabledModels:       map[string]map[string]bool{},
+		LoomyPermanentLocked: &trueVal,
+	}
+	if _, _, _, err := m3.ImportBackup(payload3); err != nil {
+		t.Fatal(err)
+	}
+	if !m3.PermanentLocked("loomy") || !m3.PermanentLocked("buddy") {
+		t.Fatalf("legacy loomy lock import: %v", m3.PermanentLocksSnapshot())
+	}
+	// 两者皆缺省 → 保持当前值（undefined 语义）。
+	if err := m3.SetPermanentLocked("buddy", false); err != nil {
+		t.Fatal(err)
+	}
+	payload4 := &BackupPayload{
+		Format: BackupFormat, Version: BackupVersion, ExportedAt: "t",
+		Credentials:    map[string]string{},
+		DisabledModels: map[string]map[string]bool{},
+	}
+	if _, _, _, err := m3.ImportBackup(payload4); err != nil {
+		t.Fatal(err)
+	}
+	if !m3.PermanentLocked("loomy") || m3.PermanentLocked("buddy") {
+		t.Fatalf("absent lock fields must keep current state: %v", m3.PermanentLocksSnapshot())
+	}
+}

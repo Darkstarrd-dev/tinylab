@@ -332,6 +332,10 @@ function navigateTo(page) {
     downloadEventSource = null;
   }
   if (page !== 'monitor' && typeof closeConsoleStream === 'function') closeConsoleStream();
+  // Free Hub replaces the settings main area in place; leaving the settings
+  // page (or re-entering it via the nav) must tear that state down, otherwise
+  // the stale active flag blocks re-entry until a full reload.
+  if (typeof closeFreeHub === 'function') closeFreeHub();
   document.querySelectorAll('.nav-item').forEach(function(el) {
     el.classList.toggle('active', el.dataset.page === page || (UTILITY_TOOLS.some(function(tool) { return tool.id === page; }) && el.dataset.page === 'utility') || (GALLERY_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='gallery') || (DEMO_TOOLS.some(function(tool){return tool.id===page;}) && el.dataset.page==='demo'));
   });

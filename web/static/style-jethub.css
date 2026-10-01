@@ -1,7 +1,19 @@
-/* ===================== Free Hub (jethub) — P4 =====================
+/* ===================== Free Hub (jethub) — P4/P6 rework =====================
    Theme tokens only (var(--…)); buttons/badges/modals reuse the global
    .btn/.badge/.modal/.input system — this file adds layout + the few
-   Free-Hub-specific surfaces. */
+   Free-Hub-specific surfaces. The Free Hub root lives INSIDE the settings
+   layout: .free-hub-main takes the place of .settings-panel-right while the
+   settings left sidebar stays visible. */
+
+.free-hub-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding: 12px 16px 16px 16px;
+}
 
 .free-hub {
   display: flex;
@@ -22,10 +34,6 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.free-hub-header-spacer {
-  flex: 1;
 }
 
 .free-hub-body {
@@ -112,6 +120,40 @@
   max-width: 260px;
 }
 
+/* --- action row (刷新积分 / 一键领取积分 / 重测所有 / 重置所有 / 锁定|解锁 / 新建账号) --- */
+
+.free-hub-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* --- notice area (retest/reset/claim/lock results) --- */
+
+.free-hub-notice {
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.free-hub-notice[data-tone="ok"] { border-color: var(--ok, rgba(60, 180, 90, 0.5)); }
+.free-hub-notice[data-tone="warn"] { border-color: var(--warn, rgba(230, 170, 40, 0.6)); }
+.free-hub-notice[data-tone="error"] { border-color: var(--danger, rgba(220, 80, 80, 0.6)); }
+
+.free-hub-notice-details {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+/* --- account cards --- */
+
 .free-hub-accounts {
   display: flex;
   flex-direction: column;
@@ -128,6 +170,10 @@
   gap: 6px;
 }
 
+.free-hub-account[data-enabled="0"] {
+  opacity: 0.62;
+}
+
 .free-hub-account-row {
   display: flex;
   align-items: center;
@@ -135,9 +181,78 @@
   flex-wrap: wrap;
 }
 
+.free-hub-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted, #888);
+  flex-shrink: 0;
+}
+
+.free-hub-dot.on {
+  background: var(--ok, #3cb45a);
+}
+
 .free-hub-account-name {
   font-weight: 600;
   font-size: 13px;
+}
+
+.free-hub-account-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.free-hub-meta-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.free-hub-meta-label {
+  flex-shrink: 0;
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+.free-hub-meta-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.free-hub-expired {
+  color: var(--danger, #dc5050);
+}
+
+.free-hub-credit-total {
+  font-weight: 600;
+}
+
+.free-hub-credit-error {
+  color: var(--danger, #dc5050);
+  font-size: 12px;
+}
+
+.free-hub-rate-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.free-hub-rate-chips-label {
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+.free-hub-rate-chip {
+  border: 1px solid var(--warn, rgba(230, 170, 40, 0.6));
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
 }
 
 .free-hub-account-actions {
@@ -146,26 +261,93 @@
   flex-wrap: wrap;
 }
 
-.free-hub-models {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 4px 12px;
+/* --- model list (vertical rows + batch manage) --- */
+
+.free-hub-models-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.free-hub-model {
-  display: inline-flex;
+.free-hub-models-head .free-hub-section-title {
+  margin-right: auto;
+}
+
+.free-hub-models-hint {
+  font-size: 12px;
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+.free-hub-batch-bar {
+  display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.free-hub-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.free-hub-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
   font-size: 13px;
-  cursor: pointer;
   min-width: 0;
 }
 
-.free-hub-model span {
+.free-hub-model-row:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.1));
+}
+
+.free-hub-model-row.batch-selected {
+  background: var(--bg-active, rgba(128, 128, 128, 0.18));
+}
+
+.free-hub-model-row.hidden-model {
+  opacity: 0.55;
+}
+
+.free-hub-model-name {
+  flex-shrink: 0;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.free-hub-model-rate {
+  flex-shrink: 0;
+  font-size: 11px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.3));
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+.free-hub-model-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+  font-size: 12px;
+  text-align: right;
+}
+
+.free-hub-model-row .btn,
+.free-hub-model-row .badge {
+  flex-shrink: 0;
+}
+
+/* --- balance / claim (kept) --- */
 
 .free-hub-balance {
   min-height: 18px;

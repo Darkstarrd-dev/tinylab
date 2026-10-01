@@ -1,33 +1,59 @@
-// ===================== Free Hub (jethub) management UI (P4) =====================
-// Vanilla JS, no framework. Mounted as a full-main replacement inside
-// #page-content when the Settings sidebar "Free Hub" row is clicked;
-// closeFreeHub() restores the initial settings view.
+// ===================== Free Hub (jethub) management UI (P4/P6 rework) ========
+// Vanilla JS, no framework. Mounted INSIDE the Settings layout: the settings
+// left sidebar stays visible and only the main (right) area is replaced by
+// the header + left-pane|right-pane layout. closeFreeHub() restores the
+// settings view; navigateTo() closes it on page switches (app-router.js).
 //
-// Sections (right pane): ① call prefix → ② account pool → ③ model blacklist
-// → ④ credits. Header: claim-all / backup / restore / close.
+// Right pane sections: ① call prefix → ② action row (刷新积分 / 一键领取积分 /
+// 重测所有 / 重置所有 / 锁定|解锁永久积分 / + 新建账号 — capability-gated like
+// the original plugin) → ③ notice area → ④ account cards (凭据/有效期/积分 +
+// 限额重置 chips + per-card buttons) → ⑤ model list (vertical rows, batch
+// manage, restore-defaults, alias + rate display).
 // All state goes through /api/jethub RPCs; backup payloads are assembled by
-// the server and encrypted/decrypted in the browser (PBKDF2 310000 +
-// AES-GCM — original Jet Hub compatible shell, §1.5).
+// the server and encrypted/decrypted in the browser (PBKDF2 310000 + AES-GCM
+// — original Jet Hub compatible shell, §1.5).
 
 var __jethubActive = false;
 var __jethubState = {
   providers: [], selected: null, accounts: [], models: [],
-  balance: null, balanceLoading: false, pollTimer: null,
+  credits: {}, creditsLoading: false,
+  modelBatch: false, modelSelected: {},
+  pollTimer: null,
 };
 
 function openFreeHub() {
-  if (__jethubActive) return;
+  __jethubOpenFreeHubAsync();
+}
+
+// __jethubOpenFreeHubAsync: the mount path may need to re-render the settings
+// page first (renderEndpoint is async), so the real work lives here.
+async function __jethubOpenFreeHubAsync() {
   var page = document.getElementById('page-content');
   if (!page) return;
+  // Robust re-entry: if a previous Free Hub session was orphaned (its DOM
+  // was wiped by a page switch), tear the stale state down and remount.
+  if (__jethubActive) closeFreeHub();
   var layout = page.querySelector('.settings-layout');
+  if (!layout && typeof renderEndpoint === 'function') {
+    try { await renderEndpoint(page); } catch (e) { /* fall through */ }
+    layout = page.querySelector('.settings-layout');
+  }
+  if (!layout) return;
+  var right = layout.querySelector('.settings-panel-right');
   var root = document.getElementById('free-hub-root');
   if (!root) {
     root = document.createElement('div');
     root.id = 'free-hub-root';
-    page.appendChild(root);
+    root.className = 'free-hub-main';
+    if (right) {
+      right.style.display = 'none'; // only the main area is replaced
+      if (right.nextSibling) layout.insertBefore(root, right.nextSibling);
+      else layout.appendChild(root);
+    } else {
+      layout.appendChild(root);
+    }
   }
   __jethubActive = true;
-  if (layout) layout.style.display = 'none';
   __jethubMount(root);
 }
 
@@ -35,15 +61,11 @@ function closeFreeHub() {
   if (!__jethubActive) return;
   __jethubActive = false;
   if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }
-  var page = document.getElementById('page-content');
   var root = document.getElementById('free-hub-root');
   if (root) root.remove();
-  var layout = page && page.querySelector('.settings-layout');
-  if (layout) {
-    layout.style.display = '';
-  } else if (page && typeof renderEndpoint === 'function') {
-    renderEndpoint(page); // page was re-rendered while Free Hub was open
-  }
+  var page = document.getElementById('page-content');
+  var right = page && page.querySelector('.settings-panel-right');
+  if (right) right.style.display = '';
 }
 
 async function __jethubMount(root) {
@@ -63,13 +85,14 @@ async function __jethubMount(root) {
 }
 
 function __jethubRenderShell(root) {
+  // Header: ALL action buttons left-aligned (claim all / backup / restore /
+  // close) — the original plugin's header row is also a plain left group.
   root.innerHTML =
     '<div class="free-hub">' +
       '<div class="free-hub-header">' +
         '<button type="button" class="btn btn-sm" onclick="jethubClaimAll()">' + escapeHtml(t('freeHubCheckinAll')) + '</button>' +
         '<button type="button" class="btn btn-sm" onclick="jethubBackup()">' + escapeHtml(t('freeHubBackup')) + '</button>' +
         '<button type="button" class="btn btn-sm" onclick="jethubRestorePick()">' + escapeHtml(t('freeHubRestore')) + '</button>' +
-        '<span class="free-hub-header-spacer"></span>' +
         '<button type="button" class="btn btn-sm btn-danger" onclick="closeFreeHub()">' + escapeHtml(t('freeHubClose')) + '</button>' +
       '</div>' +
       '<div class="free-hub-body">' +
@@ -93,8 +116,13 @@ function __jethubRenderProviders() {
 }
 
 async function jethubSelect(providerId) {
+  var providerChanged = __jethubState.selected !== providerId;
   __jethubState.selected = providerId;
-  __jethubState.balance = null;
+  if (providerChanged) {
+    __jethubState.credits = {};
+    __jethubState.modelBatch = false;
+    __jethubState.modelSelected = {};
+  }
   __jethubRenderProviders();
   var detail = document.getElementById('free-hub-detail');
   if (!detail) return;
@@ -107,6 +135,8 @@ async function jethubSelect(providerId) {
     try { modelsData = await apiGet('/jethub/providers/' + encodeURIComponent(providerId) + '/models'); } catch (e) {}
     __jethubState.models = modelsData.models || [];
     __jethubRenderDetail(provider);
+    // Credits load in the background like the original (cards show … then fill).
+    if (provider.hasBalance) __jethubLoadCredits(provider);
   } catch (e) {
     detail.innerHTML = '<div class="free-hub-loading">' + escapeHtml(t('failed', [e.message])) + '</div>';
   }
@@ -126,80 +156,298 @@ function __jethubRenderDetail(provider) {
       '</div>' +
       '<div class="free-hub-hint">' + escapeHtml(t('freeHubPrefixHint')) + '</div>' +
     '</div>' +
-    // ② accounts
+    // ② action row (capability-gated like the original panel header)
+    '<div class="free-hub-section"><div class="free-hub-actions" id="free-hub-actions">' +
+      __jethubActionButtons(provider) +
+    '</div></div>' +
+    // ③ notice area (retest / reset / claim / lock results)
+    '<div id="free-hub-notice"></div>' +
+    // ④ account cards
     '<div class="free-hub-section"><div class="free-hub-section-title">' + escapeHtml(t('freeHubAccountsTitle')) + '</div>' +
-      '<button type="button" class="btn btn-primary btn-sm" onclick="jethubAddAccount(\'' + escapeForJsString(provider.id) + '\')">' + escapeHtml(t('freeHubAddAccount')) + '</button>' +
       '<div id="free-hub-accounts" class="free-hub-accounts">' + __jethubRenderAccounts(provider) + '</div>' +
     '</div>' +
-    // ③ models
-    '<div class="free-hub-section"><div class="free-hub-section-title">' + escapeHtml(t('freeHubModelsTitle')) + '</div>' +
-      '<div class="free-hub-hint">' + escapeHtml(t('freeHubModelsHint')) + '</div>' +
-      '<div class="free-hub-models">' + __jethubRenderModels(provider) + '</div>' +
-    '</div>' +
-    // ④ credits
-    '<div class="free-hub-section"><div class="free-hub-section-title">' + escapeHtml(t('freeHubCreditsTitle')) + '</div>' +
-      __jethubRenderCredits(provider) +
+    // ⑤ models
+    '<div class="free-hub-section" id="free-hub-models-section">' + __jethubModelsSection(provider) + '</div>';
+}
+
+// __jethubActionButtons: 刷新积分 / 一键领取积分 / 重测所有 / 重置所有 /
+// 解锁|锁定永久积分 / + 新建账号 — same order and gating as the original
+// dim-jh-headerActions row.
+function __jethubActionButtons(provider) {
+  var pid = escapeForJsString(provider.id);
+  var html = '';
+  if (provider.hasBalance) {
+    html += '<button type="button" class="btn btn-sm" onclick="jethubRefreshCredits(\'' + pid + '\')">' + escapeHtml(t('freeHubRefreshCredits')) + '</button>';
+  }
+  if (provider.hasCredits) {
+    html += '<button type="button" class="btn btn-sm" onclick="jethubClaimAllProvider(\'' + pid + '\')">' + escapeHtml(t('freeHubClaimAll')) + '</button>';
+  }
+  if (provider.supportsRateLimit !== false) {
+    html += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubRetestAllHelp')) + '" onclick="jethubRetest(\'' + pid + '\', \'\')">' + escapeHtml(t('freeHubRetestAll')) + '</button>';
+    html += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubResetAllHelp')) + '" onclick="jethubReset(\'' + pid + '\', \'\')">' + escapeHtml(t('freeHubResetAll')) + '</button>';
+  }
+  if (provider.canLockPermanent) {
+    html += '<button type="button" class="btn btn-sm' + (provider.permanentLocked ? ' btn-primary' : '') + '" onclick="jethubToggleLock(\'' + pid + '\')">' +
+      escapeHtml(provider.permanentLocked ? t('freeHubUnlockPermanent') : t('freeHubLockPermanent')) + '</button>';
+  }
+  html += '<button type="button" class="btn btn-primary btn-sm" onclick="jethubAddAccount(\'' + pid + '\')">' + escapeHtml(t('freeHubNewAccount')) + '</button>';
+  return html;
+}
+
+// __jethubNotice shows the result of a batch action with a per-item details
+// list (原版 dim-jh-probeNotice / dim-jh-probeDetails).
+function __jethubSetNotice(notice) {
+  var el = document.getElementById('free-hub-notice');
+  if (!el) return;
+  if (!notice) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="free-hub-notice" data-tone="' + escapeAttr(notice.tone || '') + '">' +
+    '<div>' + notice.text + '</div>' +
+    ((notice.details || []).length
+      ? '<ul class="free-hub-notice-details">' + notice.details.map(function(d) { return '<li>' + escapeHtml(d) + '</li>'; }).join('') + '</ul>'
+      : '') +
     '</div>';
 }
+
+// ---------- accounts ----------
 
 function __jethubRenderAccounts(provider) {
   if (__jethubState.accounts.length === 0) {
     return '<div class="free-hub-hint">' + escapeHtml(t('freeHubNoAccounts')) + '</div>';
   }
   return __jethubState.accounts.map(function(a) {
-    var expires = a.expiresAt ? new Date(a.expiresAt).toLocaleString() : t('freeHubNever');
-    var badges = '<span class="badge ' + (a.enabled ? 'badge-active' : 'badge-inactive') + '">' + (a.enabled ? t('enable') : t('disable')) + '</span>';
-    if (a.hasCredential) badges += '<span class="badge badge-active">key</span>';
-    if (a.refreshable) badges += '<span class="badge badge-active">refresh</span>';
-    var buttons =
-      '<button type="button" class="btn btn-sm" onclick="jethubRenameAccount(\'' + escapeForJsString(a.id) + '\')">' + escapeHtml(t('freeHubRename')) + '</button>' +
-      '<button type="button" class="btn btn-sm" onclick="jethubToggleAccount(\'' + escapeForJsString(a.id) + '\')">' + escapeHtml(a.enabled ? t('disable') : t('enable')) + '</button>' +
-      (a.refreshable ? '<button type="button" class="btn btn-sm" onclick="jethubRefreshAccount(\'' + escapeForJsString(a.id) + '\')">' + escapeHtml(t('freeHubRefresh')) + '</button>' : '') +
-      '<button type="button" class="btn btn-sm btn-danger" onclick="jethubDeleteAccount(\'' + escapeForJsString(a.id) + '\')">' + escapeHtml(t('delete')) + '</button>';
-    return '<div class="free-hub-account">' +
-      '<div class="free-hub-account-row"><span class="free-hub-account-name">' + escapeHtml(a.nickname || a.id) + '</span>' + badges + '</div>' +
-      '<div class="free-hub-hint">' + escapeHtml(t('freeHubExpires')) + ': ' + escapeHtml(expires) + '</div>' +
-      '<div class="free-hub-account-actions">' + buttons + '</div>' +
-      '</div>';
+    return __jethubAccountCard(provider, a);
   }).join('');
 }
 
-function __jethubRenderModels(provider) {
-  if (!__jethubState.models.length) {
-    return '<div class="free-hub-hint">' + escapeHtml(t('freeHubModelsEmpty')) + '</div>';
+function __jethubAccountCard(provider, a) {
+  var now = Date.now();
+  var expired = a.expiresAt && a.expiresAt > 0 && a.expiresAt <= now;
+  var expires = a.expiresAt
+    ? __jethubFormatTime(a.expiresAt) + (a.refreshable ? ' · ' + t('freeHubAutoRenew') : '')
+    : t('freeHubUnknown');
+  var badges = '<span class="badge ' + (a.enabled ? 'badge-active' : 'badge-inactive') + '">' + (a.enabled ? t('enable') : t('disable')) + '</span>';
+  if (a.hasCredential) badges += '<span class="badge badge-active">key</span>';
+  if (a.refreshable) badges += '<span class="badge badge-active">refresh</span>';
+
+  // 限额重置 chips: only future markers are displayed, but ANY marker (even
+  // expired) enables the retest/reset buttons (原版 hasAnyLimit 语义).
+  var chips = '';
+  var hasAnyLimit = false;
+  var limits = a.modelRateLimits || {};
+  Object.keys(limits).forEach(function(mid) {
+    if (mid.indexOf('__') === 0) return; // internal bookkeeping keys
+    hasAnyLimit = true;
+    if (limits[mid] > now) {
+      chips += '<span class="free-hub-rate-chip" data-tooltip="' + escapeAttr(t('freeHubRateLimitReset') + ': ' + mid) + '">' +
+        escapeHtml(mid) + ' · ' + escapeHtml(__jethubFormatTime(limits[mid])) + '</span>';
+    }
+  });
+
+  var pid = escapeForJsString(provider.id);
+  var aid = escapeForJsString(a.id);
+  var showRateActions = provider.supportsRateLimit !== false;
+  var buttons = '';
+  if (showRateActions && hasAnyLimit) {
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubRetestHelp')) + '" onclick="jethubRetest(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubRetest')) + '</button>';
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubResetHelp')) + '" onclick="jethubReset(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubReset')) + '</button>';
   }
-  return __jethubState.models.map(function(m) {
-    return '<label class="free-hub-model" data-tooltip="' + escapeAttr(m.id) + '">' +
-      '<input type="checkbox"' + (m.disabled ? '' : ' checked') + ' onchange="jethubToggleModel(\'' + escapeForJsString(provider.id) + '\', \'' + escapeForJsString(m.id) + '\', this.checked)">' +
-      '<span>' + escapeHtml(m.name || m.id) + '</span></label>';
-  }).join('');
+  if (provider.hasCredits && a.enabled && a.hasCredential) {
+    buttons += '<button type="button" class="btn btn-sm" onclick="jethubClaim(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubClaim')) + '</button>';
+  }
+  if (a.refreshable) {
+    buttons += '<button type="button" class="btn btn-sm" onclick="jethubRefreshAccount(\'' + aid + '\')">' + escapeHtml(t('freeHubRefresh')) + '</button>';
+  }
+  buttons += '<button type="button" class="btn btn-sm" onclick="jethubRenameAccount(\'' + aid + '\')">' + escapeHtml(t('freeHubRename')) + '</button>';
+  buttons += '<button type="button" class="btn btn-sm" onclick="jethubToggleAccount(\'' + aid + '\')">' + escapeHtml(a.enabled ? t('disable') : t('enable')) + '</button>';
+  buttons += '<button type="button" class="btn btn-sm btn-danger" onclick="jethubDeleteAccount(\'' + aid + '\')">' + escapeHtml(t('delete')) + '</button>';
+
+  return '<div class="free-hub-account" data-enabled="' + (a.enabled ? '1' : '0') + '">' +
+    '<div class="free-hub-account-row">' +
+      '<span class="free-hub-dot' + (a.enabled ? ' on' : '') + '"></span>' +
+      '<span class="free-hub-account-name">' + escapeHtml(a.nickname || a.id) + '</span>' + badges +
+    '</div>' +
+    '<div class="free-hub-account-meta">' +
+      '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubCredential')) + '</span>' +
+        '<code class="code">' + escapeHtml(a.credentialRef || '-') + '</code></div>' +
+      '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubExpires')) + '</span>' +
+        '<span' + (expired ? ' class="free-hub-expired"' : '') + '>' + escapeHtml(expires) + '</span></div>' +
+      (provider.hasBalance
+        ? '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubCreditsLabel')) + '</span>' +
+            '<span id="free-hub-credit-' + __jethubSanitizeId(a.id) + '">' + __jethubCreditCellHtml(a.id) + '</span></div>'
+        : '') +
+    '</div>' +
+    (chips ? '<div class="free-hub-rate-chips"><span class="free-hub-rate-chips-label">' + escapeHtml(t('freeHubRateLimitReset')) + '</span>' + chips + '</div>' : '') +
+    '<div class="free-hub-account-actions">' + buttons + '</div>' +
+    '</div>';
 }
 
-function __jethubRenderCredits(provider) {
-  if (!provider.hasBalance && !provider.hasCredits) {
-    return '<div class="free-hub-hint">' + escapeHtml(t('freeHubNoCredits')) + '</div>';
-  }
-  var html = '';
-  if (provider.hasBalance) {
-    html += '<button type="button" class="btn btn-sm" onclick="jethubQueryBalance(\'' + escapeForJsString(provider.id) + '\')">' + escapeHtml(t('freeHubRefreshBalance')) + '</button>' +
-      '<div id="free-hub-balance" class="free-hub-balance">' + __jethubRenderBalance() + '</div>';
-  }
-  if (provider.hasCredits) {
-    html += '<div class="free-hub-claim-list">' + __jethubState.accounts.map(function(a) {
-      if (!a.enabled) return '';
-      return '<div class="free-hub-claim-row"><span>' + escapeHtml(a.nickname || a.id) + '</span>' +
-        '<button type="button" class="btn btn-sm" onclick="jethubClaim(\'' + escapeForJsString(provider.id) + '\', \'' + escapeForJsString(a.id) + '\')">' + escapeHtml(t('freeHubClaim')) + '</button></div>';
-    }).join('') + '</div>';
-  }
-  return html;
+function __jethubCreditCellHtml(accountId) {
+  var c = __jethubState.credits[accountId];
+  if (!c || c.loading) return '<span class="free-hub-hint">…</span>';
+  if (c.error) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
+  if (c.total === null || c.total === undefined) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
+  return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total)) + '</span>';
 }
 
-function __jethubRenderBalance() {
-  var b = __jethubState.balance;
-  if (__jethubState.balanceLoading) return '<div class="free-hub-hint">…</div>';
-  if (b === null) return '';
-  if (!b || b.total === undefined) return '<div class="free-hub-hint">' + escapeHtml(t('freeHubBalanceFailed')) + '</div>';
-  return '<div class="free-hub-balance-total">' + escapeHtml(t('freeHubBalance')) + ': ' + escapeHtml(String(b.total)) + '</div>';
+function __jethubUpdateCreditCell(accountId) {
+  var el = document.getElementById('free-hub-credit-' + __jethubSanitizeId(accountId));
+  if (el) el.innerHTML = __jethubCreditCellHtml(accountId);
+}
+
+// __jethubLoadCredits queries the balance of every account that holds a
+// credential (disabled included — the original does the same), updating each
+// card incrementally.
+async function __jethubLoadCredits(provider) {
+  if (!provider || !provider.hasBalance || __jethubState.creditsLoading) return;
+  __jethubState.creditsLoading = true;
+  var pid = provider.id;
+  var accounts = __jethubState.accounts.filter(function(a) { return a.hasCredential; });
+  accounts.forEach(function(a) {
+    __jethubState.credits[a.id] = { loading: true };
+    __jethubUpdateCreditCell(a.id);
+  });
+  for (var i = 0; i < accounts.length; i++) {
+    var a = accounts[i];
+    try {
+      var data = await apiGet('/jethub/' + encodeURIComponent(pid) + '/balance?accountId=' + encodeURIComponent(a.id));
+      __jethubState.credits[a.id] = { total: __jethubBalanceTotal(data.balance) };
+    } catch (e) {
+      __jethubState.credits[a.id] = { error: e.message };
+    }
+    if (__jethubState.selected !== pid) { __jethubState.creditsLoading = false; return; } // provider switched away
+    __jethubUpdateCreditCell(a.id);
+  }
+  __jethubState.creditsLoading = false;
+}
+
+async function jethubRefreshCredits(providerId) {
+  var provider = __jethubState.providers.find(function(p) { return p.id === providerId; });
+  if (!provider) return;
+  __jethubState.creditsLoading = false; // allow a fresh run
+  __jethubSetNotice({ tone: 'info', text: t('freeHubCreditsLoading') });
+  await __jethubLoadCredits(provider);
+  __jethubSetNotice(null);
+}
+
+// balance DTO shape varies per provider; normalize the total defensively
+// (packages[].remaining when present, else total, else null).
+function __jethubBalanceTotal(balance) {
+  if (!balance) return null;
+  if (typeof balance.total !== 'undefined' && balance.total !== null) return balance.total;
+  var total = 0, any = false;
+  var packages = balance.packages || [];
+  packages.forEach(function(p) {
+    var v = Number(p.remaining !== undefined ? p.remaining : p.value);
+    if (!isNaN(v)) { total += v; any = true; }
+  });
+  return any ? total : null;
+}
+
+// __jethubFormatNumber: two decimals for fractional credit values (服务端精确
+// 值是两位, e.g. 247.87), plain integer otherwise (原版 formatCredits).
+function __jethubFormatNumber(value) {
+  var n = Number(value);
+  if (!isFinite(n)) return String(value);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+// __jethubFormatTime mirrors the original formatTime: 已过期 / X 分钟后 /
+// X 小时后 / localized date.
+function __jethubFormatTime(ts) {
+  if (!ts || ts <= 0) return t('freeHubUnknown');
+  var d = new Date(ts);
+  var now = Date.now();
+  if (ts <= now) return t('freeHubExpired');
+  var diff = ts - now;
+  if (diff < 3600000) return t('freeHubInMinutes', [String(Math.round(diff / 60000))]);
+  if (diff < 86400000) return t('freeHubInHours', [String(Math.round(diff / 3600000))]);
+  try { return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  catch (e) { return d.toLocaleString(); }
+}
+
+function __jethubSanitizeId(s) {
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// ---------- action row: claim all / retest / reset / lock ----------
+
+// jethubClaimAllProvider: 一键领取当前 provider 全部已启用账号的每日签到积分。
+async function jethubClaimAllProvider(providerId) {
+  var accounts = __jethubState.accounts.filter(function(a) { return a.enabled && a.hasCredential; });
+  if (accounts.length === 0) { toast(t('freeHubNoAccounts'), 'warning'); return; }
+  __jethubSetNotice({ tone: 'info', text: t('freeHubClaimRunning') });
+  var ok = 0, fail = 0, details = [];
+  for (var i = 0; i < accounts.length; i++) {
+    var a = accounts[i];
+    try {
+      await apiPost('/jethub/' + encodeURIComponent(providerId) + '/claim', { accountId: a.id });
+      ok++;
+    } catch (e) {
+      fail++;
+      details.push((a.nickname || a.id) + ': ' + e.message);
+    }
+  }
+  __jethubSetNotice({
+    tone: fail > 0 ? 'warn' : 'ok',
+    text: t('freeHubClaimDone', [String(ok), String(fail)]),
+    details: details,
+  });
+  var provider = __jethubState.providers.find(function(p) { return p.id === providerId; });
+  if (provider && provider.hasBalance) { __jethubState.creditsLoading = false; await __jethubLoadCredits(provider); }
+}
+
+async function jethubRetest(providerId, accountId) {
+  if (!accountId) {
+    var okgo = await confirmModal(t('freeHubRetestConfirm'));
+    if (!okgo) return;
+  }
+  __jethubSetNotice({ tone: 'info', text: t('freeHubRetestRunning') });
+  try {
+    var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/ratelimits/retest', { accountId: accountId || '' });
+    var details = [];
+    (res.accounts || []).forEach(function(a) {
+      (a.stillLimited || []).forEach(function(m) {
+        details.push((a.nickname || a.accountId) + ' · ' + m.modelId + ': ' + (m.message || t('freeHubStillLimited')));
+      });
+    });
+    var still = 0;
+    (res.accounts || []).forEach(function(a) { still += (a.stillLimited || []).length; });
+    var text = (res.clearedCount > 0 || still > 0)
+      ? t('freeHubRetestDone', [String(res.clearedCount || 0), String(still)])
+      : t('freeHubRetestNone');
+    __jethubSetNotice({ tone: still > 0 ? 'warn' : 'ok', text: text, details: details });
+  } catch (e) {
+    __jethubSetNotice({ tone: 'error', text: t('failed', [e.message]) });
+  }
+  await jethubSelect(providerId);
+}
+
+async function jethubReset(providerId, accountId) {
+  __jethubSetNotice({ tone: 'info', text: t('freeHubResetRunning') });
+  try {
+    var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/ratelimits/reset', { accountId: accountId || '' });
+    __jethubSetNotice({
+      tone: 'ok',
+      text: res.clearedCount > 0 ? t('freeHubResetDone', [String(res.clearedCount)]) : t('freeHubResetNone'),
+    });
+  } catch (e) {
+    __jethubSetNotice({ tone: 'error', text: t('failed', [e.message]) });
+  }
+  await jethubSelect(providerId);
+}
+
+async function jethubToggleLock(providerId) {
+  var provider = __jethubState.providers.find(function(p) { return p.id === providerId; }) || {};
+  var next = !provider.permanentLocked;
+  try {
+    await apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/permanent-lock', { locked: next });
+    provider.permanentLocked = next;
+    __jethubSetNotice({ tone: 'ok', text: next ? t('freeHubLockOn') : t('freeHubLockOff') });
+    var actions = document.getElementById('free-hub-actions');
+    if (actions) actions.innerHTML = __jethubActionButtons(provider);
+  } catch (e) {
+    __jethubSetNotice({ tone: 'error', text: t('failed', [e.message]) });
+  }
 }
 
 // ---------- prefix ----------
@@ -235,7 +483,7 @@ async function jethubClearPrefix(providerId) {
   }
 }
 
-// ---------- accounts ----------
+// ---------- account login / CRUD ----------
 
 async function jethubAddAccount(providerId) {
   var provider = __jethubState.providers.find(function(p) { return p.id === providerId; }) || {};
@@ -357,49 +605,163 @@ async function jethubRefreshAccount(accountId) {
   } catch (e) { toast(t('failed', [e.message]), 'error'); }
 }
 
-// ---------- models ----------
+// ---------- models (vertical list + batch manage + restore defaults) ----------
 
-async function jethubToggleModel(providerId, modelId, enabled) {
+function __jethubModelsSection(provider) {
+  var models = __jethubState.models;
+  var pid = escapeForJsString(provider.id);
+  var html =
+    '<div class="free-hub-models-head">' +
+      '<span class="free-hub-section-title">' + escapeHtml(t('freeHubModelsTitle')) + ' (' + models.length + ')</span>' +
+      '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubModelsHint')) + '" onclick="jethubRestoreDefaultModels(\'' + pid + '\')">' + escapeHtml(t('freeHubRestoreDefaults')) + '</button>' +
+      '<button type="button" class="btn btn-sm" id="free-hub-batch-btn" onclick="jethubToggleBatchMode()">' + escapeHtml(t('freeHubBatchManage')) + '</button>' +
+    '</div>' +
+    '<div class="free-hub-models-hint">' + escapeHtml(t('freeHubModelsHint')) + '</div>' +
+    '<div id="free-hub-batch-bar"></div>' +
+    '<div id="free-hub-model-list" class="free-hub-model-list">' + __jethubModelRows(provider) + '</div>';
+  return html;
+}
+
+function __jethubModelRows(provider) {
+  var models = __jethubState.models;
+  if (!models.length) {
+    return '<div class="free-hub-hint">' + escapeHtml(t('freeHubModelsEmpty')) + '</div>';
+  }
+  var batch = __jethubState.modelBatch;
+  var pid = escapeForJsString(provider.id);
+  return models.map(function(m) {
+    var mid = escapeHtml(m.id);
+    var midJs = escapeForJsString(m.id);
+    var selected = !!__jethubState.modelSelected[m.id];
+    var cls = 'free-hub-model-row' + (m.disabled ? ' hidden-model' : '') + (batch && selected ? ' batch-selected' : '');
+    var row =
+      '<div class="' + cls + '" data-mid="' + mid + '">' +
+        (batch ? '<input type="checkbox"' + (selected ? ' checked' : '') + ' onchange="jethubBatchToggle(\'' + midJs + '\')">' : '') +
+        '<span class="free-hub-model-name" data-tooltip="' + escapeAttr(m.id) + '">' + escapeHtml(m.name || m.id) + '</span>' +
+        (m.rate ? '<span class="free-hub-model-rate">' + escapeHtml(m.rate) + '</span>' : '') +
+        '<span class="code free-hub-model-id copyable" onclick="copyToClipboard(\'' + midJs + '\', \'' + midJs + '\')" data-tooltip="' + escapeAttr(t('clickToCopy')) + '">' + mid + '</span>';
+    if (m.disabled) {
+      row += '<span class="badge badge-inactive">' + escapeHtml(t('freeHubHidden')) + '</span>' +
+        '<button type="button" class="btn btn-sm" onclick="jethubSetModelHidden(\'' + pid + '\', \'' + midJs + '\', false)">' + escapeHtml(t('freeHubRestoreRow')) + '</button>';
+    } else {
+      row += '<button type="button" class="btn btn-sm btn-danger" onclick="jethubSetModelHidden(\'' + pid + '\', \'' + midJs + '\', true)">' + escapeHtml(t('delete')) + '</button>';
+    }
+    row += '</div>';
+    return row;
+  }).join('');
+}
+
+// __jethubRerenderModels redraws only the models section (prefix input, cards
+// and credits stay untouched).
+function __jethubRerenderModels() {
+  var provider = __jethubState.providers.find(function(p) { return p.id === __jethubState.selected; });
+  var section = document.getElementById('free-hub-models-section');
+  if (!provider || !section) return;
+  section.innerHTML = __jethubModelsSection(provider);
+  if (__jethubState.modelBatch) __jethubRenderBatchBar(provider);
+}
+
+function __jethubRenderBatchBar(provider) {
+  var bar = document.getElementById('free-hub-batch-bar');
+  if (!bar) return;
+  if (!__jethubState.modelBatch) { bar.innerHTML = ''; return; }
+  var pid = escapeForJsString(provider.id);
+  var models = __jethubState.models;
+  var allSelected = models.length > 0 && models.every(function(m) { return __jethubState.modelSelected[m.id]; });
+  bar.innerHTML =
+    '<div class="free-hub-batch-bar">' +
+      '<input id="free-hub-model-filter" class="input" placeholder="' + escapeAttr(t('freeHubFilterModels')) + '" style="width:140px" oninput="jethubModelFilter(this.value)">' +
+      '<button type="button" class="btn btn-sm" onclick="jethubModelFilter(\'\')">' + escapeHtml(t('freeHubClearFilter')) + '</button>' +
+      '<button type="button" class="btn btn-sm" onclick="jethubBatchSelectAll()">' + escapeHtml(allSelected ? t('freeHubDeselectAll') : t('freeHubSelectAll')) + '</button>' +
+      '<button type="button" class="btn btn-sm btn-primary" onclick="jethubBatchDeleteSelected(\'' + pid + '\')">' + escapeHtml(t('freeHubBatchDelete')) + '</button>' +
+      '<button type="button" class="btn btn-sm" onclick="jethubToggleBatchMode()">' + escapeHtml(t('cancel')) + '</button>' +
+    '</div>';
+}
+
+async function jethubToggleBatchMode() {
+  __jethubState.modelBatch = !__jethubState.modelBatch;
+  __jethubState.modelSelected = {};
+  __jethubRerenderModels();
+}
+
+function jethubBatchToggle(modelId) {
+  if (__jethubState.modelSelected[modelId]) delete __jethubState.modelSelected[modelId];
+  else __jethubState.modelSelected[modelId] = true;
+  var provider = __jethubState.providers.find(function(p) { return p.id === __jethubState.selected; });
+  __jethubRerenderModels();
+  if (provider) __jethubRenderBatchBar(provider);
+}
+
+function jethubBatchSelectAll() {
+  var models = __jethubState.models;
+  var allSelected = models.length > 0 && models.every(function(m) { return __jethubState.modelSelected[m.id]; });
+  __jethubState.modelSelected = {};
+  if (!allSelected) {
+    models.forEach(function(m) { __jethubState.modelSelected[m.id] = true; });
+  }
+  __jethubRerenderModels();
+}
+
+function jethubModelFilter(value) {
+  var filter = (value || '').trim().toLowerCase();
+  var rows = document.querySelectorAll('#free-hub-model-list [data-mid]');
+  for (var i = 0; i < rows.length; i++) {
+    var mid = (rows[i].getAttribute('data-mid') || '').toLowerCase();
+    rows[i].style.display = (!filter || mid.indexOf(filter) !== -1) ? '' : 'none';
+  }
+  var input = document.getElementById('free-hub-model-filter');
+  if (input && filter && input.value !== value) input.value = value;
+}
+
+async function jethubSetModelHidden(providerId, modelId, hidden) {
   try {
-    await apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/models', { modelId: modelId, disabled: !enabled });
+    await apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/models', { modelId: modelId, disabled: hidden });
+    var m = __jethubState.models.find(function(x) { return x.id === modelId; });
+    if (m) m.disabled = hidden;
+    __jethubRerenderModels();
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
-    jethubSelect(providerId);
+    await __jethubReloadModels(providerId);
   }
 }
 
-// ---------- credits ----------
-
-async function jethubQueryBalance(providerId) {
-  var acc = __jethubState.accounts.find(function(a) { return a.enabled; });
-  if (!acc) { toast(t('freeHubBalanceFailed'), 'error'); return; }
-  __jethubState.balanceLoading = true;
-  var el = document.getElementById('free-hub-balance');
-  if (el) el.innerHTML = '<div class="free-hub-hint">…</div>';
+async function jethubBatchDeleteSelected(providerId) {
+  var ids = Object.keys(__jethubState.modelSelected);
+  if (ids.length === 0) { toast(t('freeHubNoModelsSelected'), 'warning'); return; }
+  var okgo = await confirmModal(t('freeHubBatchDeleteConfirm', [String(ids.length)]));
+  if (!okgo) return;
   try {
-    var data = await apiGet('/jethub/' + encodeURIComponent(providerId) + '/balance?accountId=' + encodeURIComponent(acc.id));
-    __jethubState.balance = __jethubSumBalance(data.balance);
+    await apiPost('/jethub/providers/' + encodeURIComponent(providerId) + '/models/batch-delete', { modelIds: ids });
+    __jethubState.modelSelected = {};
+    toast(t('freeHubModelsDeleted', [String(ids.length)]), 'success');
   } catch (e) {
-    __jethubState.balance = null;
+    toast(t('failed', [e.message]), 'error');
   }
-  __jethubState.balanceLoading = false;
-  el = document.getElementById('free-hub-balance');
-  if (el) el.innerHTML = __jethubRenderBalance();
+  await __jethubReloadModels(providerId);
 }
 
-// balance DTO shape varies per provider; normalize the total defensively
-// (packages[].remaining when present, else total, else unknown).
-function __jethubSumBalance(balance) {
-  if (!balance) return null;
-  if (typeof balance.total !== 'undefined') return balance;
-  var total = 0, any = false;
-  var packages = balance.packages || [];
-  packages.forEach(function(p) {
-    var v = Number(p.remaining !== undefined ? p.remaining : p.value);
-    if (!isNaN(v)) { total += v; any = true; }
-  });
-  return any ? { total: total } : null;
+async function jethubRestoreDefaultModels(providerId) {
+  var okgo = await confirmModal(t('freeHubRestoreDefaultsConfirm'));
+  if (!okgo) return;
+  try {
+    await apiDelete('/jethub/providers/' + encodeURIComponent(providerId) + '/models');
+    __jethubState.modelSelected = {};
+    toast(t('freeHubModelsRestored'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+  await __jethubReloadModels(providerId);
 }
+
+async function __jethubReloadModels(providerId) {
+  try {
+    var d = await apiGet('/jethub/providers/' + encodeURIComponent(providerId) + '/models');
+    __jethubState.models = d.models || [];
+  } catch (e) { /* keep the current list on refetch failure */ }
+  __jethubRerenderModels();
+}
+
+// ---------- credits claim (single account, kept from P4) ----------
 
 async function jethubClaim(providerId, accountId) {
   try {
@@ -412,6 +774,8 @@ async function jethubClaim(providerId, accountId) {
     toast(/already|claimed|已领|幂等|alreadyProcessed/i.test(msg) ? t('freeHubClaimNone') : t('failed', [msg]), 'error');
   }
 }
+
+// ---------- header claim-all (kept from P4) ----------
 
 async function jethubClaimAll() {
   toast(t('freeHubCheckinRunning'));
@@ -479,7 +843,6 @@ async function jethubRestore(file) {
     var data = await apiPost('/jethub/backup/import', { payload: payload });
     toast(t('freeHubRestoreDone', [String(data.imported), String(data.skipped)]), 'success');
     // refresh provider badges + current detail
-    var page = document.getElementById('page-content');
     var root = document.getElementById('free-hub-root');
     if (__jethubActive && root) __jethubMount(root);
   } catch (e) {

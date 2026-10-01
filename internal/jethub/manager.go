@@ -82,13 +82,18 @@ type accountEntry struct {
 }
 
 // accountsFile is the persisted shape of accounts.json: account index +
-// model blacklist + prefix mapping. It intentionally mirrors the original
-// JetHubConfig semantics (§1.5) so backup import/export stays compatible.
+// model blacklist + prefix mapping + permanent-credit locks. It intentionally
+// mirrors the original JetHubConfig semantics (§1.5) so backup import/export
+// stays compatible.
 type accountsFile struct {
-	Accounts       []accountEntry            `json:"accounts"`
+	Accounts []accountEntry `json:"accounts"`
 	DisabledModels map[string]map[string]bool `json:"disabledModels,omitempty"`
 	// Prefixes maps provider id → user-defined call prefix ("" = not bridged).
 	Prefixes map[string]string `json:"prefixes,omitempty"`
+	// PermanentLocks marks providers whose selection should only consume
+	// soon-expiring credits (原版「锁定永久积分」provider 级开关；备份里的
+	// permanentLocks 表)。Only true values are meaningful.
+	PermanentLocks map[string]bool `json:"permanentLocks,omitempty"`
 }
 
 // Account is the public view of one account entry.
@@ -165,6 +170,9 @@ func NewManager(dir, encryptionKey string, logger Logger) (*Manager, error) {
 	if err := m.loadCredentials(); err != nil {
 		return nil, err
 	}
+	if m.accounts.PermanentLocks == nil {
+		m.accounts.PermanentLocks = map[string]bool{}
+	}
 	return m, nil
 }
 
@@ -190,6 +198,9 @@ func (m *Manager) loadAccounts() error {
 	}
 	if af.Prefixes == nil {
 		af.Prefixes = map[string]string{}
+	}
+	if af.PermanentLocks == nil {
+		af.PermanentLocks = map[string]bool{}
 	}
 	m.accounts = af
 	return nil
@@ -469,6 +480,138 @@ func (m *Manager) UpdateModelRateLimit(accountID, modelID string, resetAtMs int6
 		return m.saveAccountsLocked()
 	}
 	return ErrNotFound
+}
+
+// ClearAccountModelRateLimit removes one rate-limit marker from an account.
+func (m *Manager) ClearAccountModelRateLimit(accountID, modelID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.accounts.Accounts {
+		if m.accounts.Accounts[i].ID != accountID {
+			continue
+		}
+		if m.accounts.Accounts[i].ModelRateLimits == nil {
+			return nil
+		}
+		delete(m.accounts.Accounts[i].ModelRateLimits, modelID)
+		return m.saveAccountsLocked()
+	}
+	return ErrNotFound
+}
+
+// ClearModelRateLimits removes every rate-limit marker of a provider's
+// accounts (accountID "" = all accounts), skipping internal bookkeeping keys
+// (isBookkeepingRateLimitKey). Returns the number of cleared markers.
+func (m *Manager) ClearModelRateLimits(provider, accountID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cleared := 0
+	for i := range m.accounts.Accounts {
+		e := &m.accounts.Accounts[i]
+		if e.Provider != provider {
+			continue
+		}
+		if accountID != "" && e.ID != accountID {
+			continue
+		}
+		if len(e.ModelRateLimits) == 0 {
+			continue
+		}
+		for modelID := range e.ModelRateLimits {
+			if !isBookkeepingRateLimitKey(modelID) {
+				cleared++
+			}
+		}
+		e.ModelRateLimits = nil
+	}
+	if cleared == 0 {
+		return 0, nil
+	}
+	return cleared, m.saveAccountsLocked()
+}
+
+// PermanentLocked reports whether a provider's permanent-credit lock is on
+// (原版「锁定永久积分」开关，仅 {loomy, buddy, workbuddy} 暴露该能力).
+func (m *Manager) PermanentLocked(provider string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.accounts.PermanentLocks[provider] == true
+}
+
+// PermanentLocksSnapshot returns a sanitized copy of the lock table (only
+// true entries — matching the original's sanitizePermanentLocks backup form).
+func (m *Manager) PermanentLocksSnapshot() map[string]bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := map[string]bool{}
+	for p, v := range m.accounts.PermanentLocks {
+		if v {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+// SetPermanentLocked toggles a provider's permanent-credit lock and persists it.
+func (m *Manager) SetPermanentLocked(provider string, locked bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if locked {
+		m.accounts.PermanentLocks[provider] = true
+	} else {
+		delete(m.accounts.PermanentLocks, provider)
+	}
+	return m.saveAccountsLocked()
+}
+
+// ClearDisabledModels resets a provider's model blacklist (原版「恢复默认」：
+// 所有模型重新显示并回到桥接供应商的模型列表).
+func (m *Manager) ClearDisabledModels(provider string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.accounts.DisabledModels[provider]; !ok {
+		return nil
+	}
+	delete(m.accounts.DisabledModels, provider)
+	return m.saveAccountsLocked()
+}
+
+// SetModelsDisabled applies the blacklist flag to many models in one write
+// (batch delete/restore) and persists once.
+func (m *Manager) SetModelsDisabled(provider string, modelIDs []string, disabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(modelIDs) == 0 {
+		return nil
+	}
+	perProvider := m.accounts.DisabledModels[provider]
+	if perProvider == nil {
+		perProvider = map[string]bool{}
+	}
+	changed := false
+	for _, id := range modelIDs {
+		if id == "" {
+			continue
+		}
+		if disabled {
+			if !perProvider[id] {
+				perProvider[id] = true
+				changed = true
+			}
+		} else if perProvider[id] {
+			delete(perProvider, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if len(perProvider) == 0 {
+		delete(m.accounts.DisabledModels, provider)
+	} else {
+		m.accounts.DisabledModels[provider] = perProvider
+	}
+	return m.saveAccountsLocked()
 }
 
 // toAccount / accountEntryFromAccount convert between the storage and public

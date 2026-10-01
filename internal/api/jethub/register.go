@@ -7,6 +7,8 @@ package jethub
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +45,13 @@ func (h *Handler) Register(r chi.Router) {
 		r.Delete("/accounts/{accountID}", h.deleteAccount)
 		r.Get("/providers/{provider}/models", h.listModels)
 		r.Put("/providers/{provider}/models", h.setModelDisabled)
+		r.Post("/providers/{provider}/models/batch-delete", h.batchDeleteModels)
+		r.Delete("/providers/{provider}/models", h.restoreDefaultModels)
+		// Rate-limit markers (原版 account.retest/reset 家族) + the
+		// permanent-credit lock toggle (原版 credits.permanentLock).
+		r.Post("/providers/{provider}/ratelimits/retest", h.retestRateLimits)
+		r.Post("/providers/{provider}/ratelimits/reset", h.resetRateLimits)
+		r.Put("/providers/{provider}/permanent-lock", h.setPermanentLock)
 		// P2: codearts provider-specific flows (login/refresh/claim/balance).
 		h.RegisterCodeArts(r)
 		// P3.1: buddy + workbuddy flows.
@@ -113,6 +122,26 @@ type providerDTO struct {
 	EnabledAccounts int      `json:"enabledAccounts"`
 	Prefix          string   `json:"prefix"`
 	Bridged         bool     `json:"bridged"`
+	// 能力位（决定详情页按钮行的渲染，与原版能力矩阵同语义）：
+	// SupportsRateLimit — 该渠道会返回限流错误（loomy 不会：积分耗尽静默降级
+	// 扣永久积分，重测/重置对它无意义且白烧额度，ref RATE_LIMIT_CAPABILITIES）；
+	// CanLockPermanent — 有「临时/永久」两个可分的积分池
+	// （原版 PERMANENT_LOCK_PROVIDERS = {loomy, buddy, workbuddy}）。
+	SupportsRateLimit bool `json:"supportsRateLimit"`
+	CanLockPermanent  bool `json:"canLockPermanent"`
+	PermanentLocked   bool `json:"permanentLocked"`
+}
+
+// permanentLockProviders mirrors the original PERMANENT_LOCK_PROVIDERS set
+// (ref src/jet-hub-rpc.ts): only these have two separable credit pools.
+var permanentLockProviders = map[string]bool{
+	"loomy": true, "buddy": true, "workbuddy": true,
+}
+
+// rateLimitExemptProviders mirrors the original RATE_LIMIT_CAPABILITIES — the
+// only provider known NOT to return rate-limit errors.
+var rateLimitExemptProviders = map[string]bool{
+	"loomy": true,
 }
 
 func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +160,9 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 			Prefix:          h.d.Manager.Prefix(meta.ID),
 		}
 		dto.Bridged = dto.Prefix != "" && h.d.Bridge != nil && h.d.Bridge.HasBridgedProvider(meta.ID)
+		dto.SupportsRateLimit = !rateLimitExemptProviders[meta.ID]
+		dto.CanLockPermanent = permanentLockProviders[meta.ID]
+		dto.PermanentLocked = h.d.Manager.PermanentLocked(meta.ID)
 		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
@@ -266,7 +298,9 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // listModels GET /api/jethub/{provider}/models — the static product table
-// with the per-model disabled flag for the UI blacklist toggles.
+// with the per-model disabled flag for the UI blacklist toggles. `rate`
+// carries the billing-rate suffix parsed from the product tables (原版倍率
+// 显示：x0.75 / 免费 / x0.2→x0.1；无倍率信息时为空串，不编造).
 func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
 	prod, ok := h.d.Bridge.Product(provider)
@@ -278,14 +312,57 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	type modelEntry struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
+		Rate     string `json:"rate,omitempty"`
 		Disabled bool   `json:"disabled"`
 	}
 	out := make([]modelEntry, 0, len(prod.Models))
 	for _, md := range prod.Models {
-		out = append(out, modelEntry{ID: md.ID, Name: modelDisplayName(md), Disabled: disabled[md.ID]})
+		name, rate := modelDisplayParts(md)
+		out = append(out, modelEntry{ID: md.ID, Name: name, Rate: rate, Disabled: disabled[md.ID]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": out})
 }
+
+// modelDisplayParts splits a model definition into (display name, rate):
+//   - raccoon/loomy tables already embed the rate in the Alias
+//     ("GLM-5-3 · x0.75" / "SenseNova-6.8-Flash · 免费") — split it off;
+//   - qoder/træ style tables carry the rate as a Note segment ("x2", "FREE (x0)")
+//     — parse it there;
+//   - no rate info anywhere → rate "" and the name falls back to the id
+//     (never invent a rate: 编造倍率比不显示更糟, ref buddy.ts).
+func modelDisplayParts(md config.ModelDef) (name, rate string) {
+	src := md.Alias
+	if src == "" {
+		return md.ID, ""
+	}
+	// Alias-embedded form: "Name · rate"
+	if idx := strings.Index(src, "·"); idx >= 0 {
+		tail := strings.TrimSpace(src[idx+len("·"):])
+		if isRateText(tail) {
+			return strings.TrimSpace(src[:idx]), tail
+		}
+	}
+	// Note segments: "ctx 1048576; x2; efforts …" / "FREE (x0); …"
+	for _, seg := range strings.Split(md.Note, ";") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		if isRateText(seg) {
+			return src, seg
+		}
+		if seg == "FREE" || strings.HasPrefix(seg, "FREE (") {
+			return src, "免费"
+		}
+	}
+	return src, ""
+}
+
+// rateTextRe matches the normalized rate suffixes used across the product
+// tables: x0.75, x1, x0.2→x0.1 (promotion price), 免费 (free).
+var rateTextRe = regexp.MustCompile(`^x\d+(\.\d+)?(→x\d+(\.\d+)?)?$|^免费$`)
+
+func isRateText(s string) bool { return rateTextRe.MatchString(s) }
 
 type setModelDisabledRequest struct {
 	ModelID  string `json:"modelId"`
@@ -322,12 +399,111 @@ func (h *Handler) setModelDisabled(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// modelDisplayName picks Alias when set (matching /v1/models display rules).
-func modelDisplayName(md config.ModelDef) string {
-	if md.Alias != "" {
-		return md.Alias
+// batchDeleteModels POST /api/jethub/{provider}/models/batch-delete
+// {modelIds: [...]} — blacklist many models in one write (batch manage
+// 「删除所选」), then re-sync the bridged provider once.
+func (h *Handler) batchDeleteModels(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	var req struct {
+		ModelIDs []string `json:"modelIds"`
 	}
-	return md.ID
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.ModelIDs) == 0 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "modelIds required")
+		return
+	}
+	if _, ok := h.d.Bridge.Product(provider); !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "no product registered for provider")
+		return
+	}
+	if err := h.d.Manager.SetModelsDisabled(provider, req.ModelIDs, true); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if h.d.Manager.Prefix(provider) != "" {
+		_ = h.d.Bridge.SyncKeys(provider)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// restoreDefaultModels DELETE /api/jethub/{provider}/models — clear the whole
+// blacklist (原版「恢复默认」：所有模型回到显示列表).
+func (h *Handler) restoreDefaultModels(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if _, ok := h.d.Bridge.Product(provider); !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "no product registered for provider")
+		return
+	}
+	if err := h.d.Manager.ClearDisabledModels(provider); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if h.d.Manager.Prefix(provider) != "" {
+		_ = h.d.Bridge.SyncKeys(provider)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type rateLimitsRequest struct {
+	AccountID string `json:"accountId"`
+}
+
+// retestRateLimits POST /api/jethub/{provider}/ratelimits/retest — one minimal
+// real message per marked (account, model); success clears the marker.
+// Consumes a little model quota (the UI confirms before calling).
+func (h *Handler) retestRateLimits(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if !corejethub.ProviderExists(provider) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	var req rateLimitsRequest
+	_ = json.NewDecoder(r.Body).Decode(&req) // body optional (all accounts)
+	res, err := h.d.Bridge.RetestRateLimits(r.Context(), provider, req.AccountID)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// resetRateLimits POST /api/jethub/{provider}/ratelimits/reset — clear the
+// markers without any request (原版 RESET 语义).
+func (h *Handler) resetRateLimits(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if !corejethub.ProviderExists(provider) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	var req rateLimitsRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	res, err := h.d.Bridge.ResetRateLimits(provider, req.AccountID)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// setPermanentLock PUT /api/jethub/{provider}/permanent-lock {locked} —
+// provider-level「锁定永久积分」switch (persisted; travels in backups).
+func (h *Handler) setPermanentLock(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if !permanentLockProviders[provider] {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "provider does not support the permanent-credit lock")
+		return
+	}
+	var req struct {
+		Locked *bool `json:"locked"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Locked == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "locked (bool) required")
+		return
+	}
+	if err := h.d.Manager.SetPermanentLocked(provider, *req.Locked); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "locked": *req.Locked})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

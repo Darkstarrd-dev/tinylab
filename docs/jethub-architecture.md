@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P3 批次 A–D + P4 全部落地；对应 P1–P4 源码状态）
+> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -9,15 +9,16 @@
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
 > - 修改备份格式 → §7 + `internal/jethub/backup.go`（与原版格式**双向兼容**，改动即破坏兼容，须先读 ref types.ts）
-> - 修改 Free Hub UI 布局/入口 → §3 + `web/static/jethub.js`/`settings.js`/`i18n.js`
+> - 修改 Free Hub UI 布局/入口/详情页/模型列表 → §3 + `web/static/jethub.js`/`settings.js`/`i18n.js`/`style-jethub.css`/`app-router.js`
+> - 修改限流重测/重置探针或永久锁 → §3.1 + `internal/jethub/probe.go`/`ratelimits.go`/`manager.go` + `internal/api/jethub/register.go`
 
 ## 1. 模块组成与边界
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
 | 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、11 provider 适配、WASM 桥、备份 |
-| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers/prefix/accounts/models + 每 provider login/status/refresh/claim/balance + backup export/import |
-| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页 |
+| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import |
+| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（15 项） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
 | 装配 | `internal/app/app.go` | Manager/Bridge 构造、`RestoreBridges` 启动重桥、augmenter 注入 proxy Handler |
 
@@ -33,10 +34,21 @@
 ## 3. Free Hub UI（Settings 内嵌）
 
 - **入口**：Settings 侧边栏 `Free Hub` 行——Path Settings 行后、Assistant 行前（`settings.js` `#free-hub-entry`，契约测试锁位置）；i18n `freeHub*` en+cn。
-- **main 切换**：`openFreeHub()` 隐藏 `.settings-layout` 渲染 `#free-hub-root`；`closeFreeHub()` 反向恢复（轮询定时器一并清理）。
-- **布局三段式**：header（一键签到/备份/恢复/关闭）+ left pane（11 provider 列表，账号数徽标单选）+ right pane 四区（调用前缀 / 账号池 / 模型黑名单 / 积分）。
+- **main 区内嵌（不整页替换）**：`openFreeHub()` **保留 `.settings-panel-left`（Settings 侧边栏）**，仅隐藏 `.settings-panel-right` 并在 `.settings-layout` 内其后面挂 `#free-hub-root.free-hub-main`（占 main 位）；`closeFreeHub()` 反向恢复（轮询定时器一并清理）。若 layout 不存在（页面被换走后重进）会先 `renderEndpoint` 重渲染再挂载。
+- **切页生命周期**：`navigateTo`（`app-router.js`）调用 `closeFreeHub()`——页面切换会整体清空 `#page-content`，不清标志会导致再次进入 Free Hub 被陈旧 `__jethubActive` 守卫挡住（修复过的真实缺陷：必须重启 App/Ctrl+F5 才能恢复）；`openFreeHub` 侧另有兜底——active 时先执行一次 close 再重挂。
+- **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（11 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
+- **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号。结果在通知区显示（tone + 逐条 details 列表）。
+- **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
+- **模型列表**（与本项目 Provider 详情的 Model list 同形态）：纵向行列表（名称 + **倍率徽标**（服务端 `rate` 字段：`x0.75`/`免费`/`x0.2→x0.1`，从 alias/note 解析、**无信息不编造**） + 可复制的模型 id + 删除/恢复单钮）；批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → 发码/验码两步弹窗。
 - 样式只用 theme tokens（`var(--…)`），控件复用全局 `.btn`/`.badge`/`.modal`/`.input` 体系。
+
+### 3.1 限流标记重测/重置 + 永久积分锁（后端）
+
+- **标记数据**：`accountEntry.ModelRateLimits`（model id → 重置时刻 ms）。本端推理链路写入的是 rotation 的 per-model 锁；该表当前主要来自**原版备份导入**（携带原插件的限流状态），重测/重置即是对这份数据的操作。内部记账键（`__` 前缀，如 trae 的签到代次）不参与重测/计数/渲染。
+- **重测** `POST /api/jethub/{provider}/ratelimits/retest` `{accountId?}`（`Bridge.RetestRateLimits`）：对每个标记的 (账号, 模型) 经 `Bridge.ProbeAccountModel`（`probe.go`）**真实发送一条最小消息**（OpenAI 体；minimax 走 `/v1/messages` + Anthropic 体；max_tokens=16）。探针**复用代理的 augmenter/customizer 管线**（`Manager.Customize`——codearts HMAC、qoder WASM、trae SOLO 都由各自 augmenter 完成，探针零协议实现）；URL 用 `urlutil.BuildUpstreamURL(base, entryPath)`，qoder 族由 Customizer 返回完整加密端点覆盖。HTTP 200 → 清除该标记；非 200 → 保留并在响应 `accounts[].stillLimited[]` 带原因（含状态码 + 截断报文）。会消耗少量额度——前端「重测所有」先确认。
+- **重置** `POST /api/jethub/{provider}/ratelimits/reset` `{accountId?}`：直接清除（跳过 `__` 键），不发任何请求。
+- **永久积分锁** `PUT /api/jethub/{provider}/permanent-lock` `{locked}`：provider 级开关（`accounts.json` 的 `permanentLocks` 表，仅 true 值有意义），能力白名单 {loomy, buddy, workbuddy}（原版 `PERMANENT_LOCK_PROVIDERS`）；`GET /providers` 每项带 `supportsRateLimit`/`canLockPermanent`/`permanentLocked`。⚠️ **选号侧的「锁定后只消耗临时积分」策略未移植**（需要对选号注入积分池感知）——开关持久化 + 随备份迁移已可用，语义见 §7。
 
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
@@ -80,10 +92,11 @@
 
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 
-- 载荷 `BackupPayload`（`internal/jethub/backup.go`）与 ref `types.ts` **逐字段同构**：`{format:"dsh-codearts-auth/backup", version:1, exportedAt, credentials: ref→JSON 原文字符串, accounts: ProviderAccountEntry[], disabledModels}`。
+- 载荷 `BackupPayload`（`internal/jethub/backup.go`）与 ref `types.ts` **逐字段同构**：`{format:"dsh-codearts-auth/backup", version:1, exportedAt, credentials: ref→JSON 原文字符串, accounts: ProviderAccountEntry[], disabledModels, permanentLocks?}`。
 - **加密壳在浏览器**（`crypto.subtle`，与原版 backup-crypto.js 同参数：PBKDF2 310000 / SHA-256 / AES-256-GCM / salt 16B / iv 12B，`format: dsh-codearts-auth/backup.encrypted`）；明文载荷由 Go 组装/导入（`GET /api/jethub/backup/export`、`POST /api/jethub/backup/import`）。
 - 导入语义：账号按**原 id upsert**（幂等）、凭据 JSON **原文直存不重新序列化**、黑名单整体替换、格式/版本硬校验拒绝；导入后全桥接 provider SyncKeys。
-- 原版可选字段 `permanentLocks`/`loomyPermanentLocked`（锁定永久积分）本端未实现，导出不写、导入忽略。
+- **permanentLocks（锁定永久积分）已实现双向迁移**：导出写 sanitize 后的表（只留 true，恒有该键）；导入按原版 `locksFromPayload` 三分支——有表→整体替换（过滤脏值）、仅有旧版 `loomyPermanentLocked`→只落 loomy、两者皆无→保持当前值。
+- 实测兼容性：原插件导出的备份已由用户**实际导入成功**（2026-10-02）；反向（本端导出→原插件导入）为源码级逐字段推证。
 
 ## 8. 错误语义（两条通道共用一套判据，`qoder_queue.go`）
 

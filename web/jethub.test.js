@@ -1,12 +1,18 @@
 // web/jethub.test.js
-// Zero-dependency Node behavioral test for the Free Hub UI (P4).
+// Zero-dependency Node behavioral test for the Free Hub UI (P4/P6 rework).
 // Loads the REAL web/static/jethub.js in a VM sandbox with DOM/API stubs and
 // proves: (1) page wiring — entry row position, script/CSS tags, feature
-// manifest registration; (2) main switch open/close restores the settings
-// view; (3) mount → provider select → prefix save request shape; (4) backup
-// shell crypto (PBKDF2 310000 + AES-GCM) roundtrip and WRONG-password
-// rejection; (5) restore path: encrypted original-shell container → decrypt →
-// import request body is the original-format payload.
+// manifest registration; (2) the reworked mount: settings LEFT sidebar stays
+// visible, only the main (right) area is replaced, and re-entry after a page
+// switch remounts instead of being blocked by the stale active flag;
+// (3) header: all four buttons in one left-aligned group (no right-aligned
+// close); (4) provider detail: capability-gated action row + account cards
+// with credential/expiry/credits/rate-limit chips; (5) model list: vertical
+// rows with rate badges, batch delete and restore-defaults request shapes;
+// (6) prefix save request shape; (7) backup shell crypto (PBKDF2 310000 +
+// AES-GCM) roundtrip and WRONG-password rejection; (8) restore path:
+// encrypted original-shell container → decrypt → import request body is the
+// original-format payload.
 // Run:  node web/jethub.test.js
 'use strict';
 
@@ -38,6 +44,15 @@ check('i18n.js defines freeHub keys in BOTH en and cn dictionaries', () => {
   const src = fs.readFileSync(path.join(__dirname, 'static/i18n.js'), 'utf8');
   const count = (src.match(/freeHubDesc:/g) || []).length;
   assert.strictEqual(count, 2, 'freeHubDesc must exist exactly twice (en + cn), got ' + count);
+  for (const key of ['freeHubRefreshCredits', 'freeHubRetestAll', 'freeHubLockPermanent', 'freeHubRestoreDefaults', 'freeHubBatchManage']) {
+    const c = (src.match(new RegExp(key + ':', 'g')) || []).length;
+    assert.strictEqual(c, 2, key + ' must exist exactly twice (en + cn), got ' + c);
+  }
+});
+
+check('app-router.js closes Free Hub on page switches (re-entry bug fix)', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'static/app-router.js'), 'utf8');
+  assert.ok(src.includes('closeFreeHub()'), 'navigateTo must tear down Free Hub state');
 });
 
 check('both index variants mount jethub.js + style-jethub.css', () => {
@@ -59,10 +74,11 @@ const src = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
 
 function makeEl(tag) {
   return {
-    tagName: tag || 'div', style: {}, children: [], id: '',
+    tagName: tag || 'div', style: { display: '' }, children: [], id: '', className: '',
     innerHTML: '', value: '', textContent: '', href: '', download: '', type: '',
     classList: { add() {}, remove() {}, contains() { return false; } },
     appendChild(c) { this.children.push(c); },
+    insertBefore(c, ref) { const i = ref ? this.children.indexOf(ref) : -1; if (i === -1) this.children.push(c); else this.children.splice(i, 0, c); },
     remove() {},
     querySelector() { return null; },
     querySelectorAll() { return []; },
@@ -76,53 +92,86 @@ function makeEl(tag) {
 function makeSandbox() {
   const registry = {};
   const page = makeEl('div'); page.id = 'page-content';
-  const layout = makeEl('div'); page.children.push(layout);
-  page.querySelector = function(sel) { return sel === '.settings-layout' ? layout : null; };
+  const layout = makeEl('div');
+  const right = makeEl('div'); right.className = 'settings-panel-right';
+  layout.children.push(right);
+  page.children.push(layout);
+  page.querySelector = function(sel) {
+    if (sel === '.settings-layout') return layout;
+    if (sel === '.settings-panel-right') return right;
+    return null;
+  };
+  layout.querySelector = function(sel) { return sel === '.settings-panel-right' ? right : null; };
   registry['page-content'] = page;
   const overlay = makeEl('div'); overlay.id = 'modal-overlay';
   registry['modal-overlay'] = overlay;
 
-  const calls = { apiGet: [], apiPost: [], apiPut: [], apiDelete: [], toast: [] };
+  const calls = { apiGet: [], apiPost: [], apiPut: [], apiDelete: [], apiPatch: [], toast: [] };
   const providers = [
-    { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true },
-    { id: 'codearts', displayName: 'CodeArts Agent', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: '', bridged: false },
+    { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true, supportsRateLimit: true, canLockPermanent: false, permanentLocked: false },
+    { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['sms'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true },
   ];
-  const accounts = [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: 1893456000000, credentialRef: 'QODER_ACCOUNT_1' }];
-  const models = [{ id: 'auto', name: 'Auto', disabled: false }, { id: 'qfmodel', name: 'Qwen3.8-Flash', disabled: true }];
+  const accounts = [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_1', modelRateLimits: { qfmodel: Date.now() + 3600000, stale: Date.now() - 3600000 } }];
+  const models = [{ id: 'auto', name: 'Auto', rate: 'x0.5', disabled: false }, { id: 'qfmodel', name: 'Qwen3.8-Flash', rate: '免费', disabled: true }];
 
   let promptQueue = [];
   async function apiGet(p) {
     calls.apiGet.push(p);
     if (p === '/jethub/providers') return { providers };
+    if (p.indexOf('/balance') !== -1) return { balance: { total: 123.45 } };
     if (p.indexOf('/accounts') !== -1) return { accounts };
     if (p.indexOf('/models') !== -1) return { models };
     if (p === '/jethub/backup/export') {
-      return { payload: { format: 'dsh-codearts-auth/backup', version: 1, exportedAt: '2026-01-01T00:00:00Z', credentials: { R1: '{"access_token":"t"}' }, accounts: [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, credentialRef: 'R1', createdAt: 1, refreshable: true }], disabledModels: { qoder: { auto: true } } }, warnings: [] };
+      return { payload: { format: 'dsh-codearts-auth/backup', version: 1, exportedAt: '2026-01-01T00:00:00Z', credentials: { R1: '{"access_token":"t"}' }, accounts: [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, credentialRef: 'R1', createdAt: 1, refreshable: true }], disabledModels: { qoder: { auto: true } }, permanentLocks: { qoder: true } }, warnings: [] };
     }
     return {};
   }
-  async function apiPost(p, body) { calls.apiPost.push([p, body]); return { ok: true, imported: 1, skipped: 0, outcome: { claimed: true } }; }
+  async function apiPost(p, body) { calls.apiPost.push([p, body]); if (p.endsWith('/retest')) return { clearedCount: 1, accounts: [{ accountId: 'qoder-1', stillLimited: [{ modelId: 'qfmodel', message: 'HTTP 429: limited' }] }] }; return { ok: true, imported: 1, skipped: 0, outcome: { claimed: true } }; }
   async function apiPut(p, body) { calls.apiPut.push([p, body]); return { ok: true }; }
   async function apiDelete(p) { calls.apiDelete.push(p); return { ok: true }; }
-  async function apiPatch(p, body) { calls.apiPatch = calls.apiPatch || []; calls.apiPatch.push([p, body]); return { ok: true }; }
+  async function apiPatch(p, body) { calls.apiPatch.push([p, body]); return { ok: true }; }
 
   const ctx = {
     console,
     document: {
-      getElementById(id) { if (!registry[id]) registry[id] = makeEl('div'); return registry[id]; },
+      // ⚠️ 'free-hub-root' must follow real DOM semantics (null when absent):
+      // openFreeHub() gates the right-panel replacement behind its existence.
+      // Everything else auto-creates like the old sandbox did.
+      getElementById(id) {
+        if (id === 'free-hub-root' && !registry[id]) return null;
+        if (!registry[id]) registry[id] = makeEl('div');
+        return registry[id];
+      },
       createElement(tag) { return makeEl(tag); },
       querySelector() { return null; },
     },
     t(key, args) {
-      const table = { loading: '加载中…', enable: '启用', disable: '停用', delete: '删除', cancel: '取消', confirm: '确认',
+      const table = { loading: '加载中…', enable: '启用', disable: '停用', delete: '删除', cancel: '取消', confirm: '确认', clickToCopy: '点击复制',
         freeHubCheckinAll: '一键签到', freeHubBackup: '备份', freeHubRestore: '恢复', freeHubClose: '关闭',
         freeHubPrefixTitle: '调用前缀', freeHubPrefixSave: '保存前缀', freeHubPrefixClear: '清除前缀', freeHubPrefixHint: 'h', freeHubPrefixSaved: '已保存 {0}/{1}',
         freeHubPrefixInvalid: '非法', freeHubPrefixCleared: '已清除', freeHubAccountsTitle: '账号池', freeHubAddAccount: '新增账号',
         freeHubNoAccounts: '无', freeHubRename: '改名', freeHubExpires: '有效期', freeHubNever: '未知', freeHubRefresh: '续期',
         freeHubLoginTitle: '登录', freeHubLoginHint: 'h', freeHubLoginOpen: '打开', freeHubLoginWaiting: '等待',
-        freeHubModelsTitle: '模型', freeHubModelsHint: 'h', freeHubModelsEmpty: '空', freeHubCreditsTitle: '积分',
+        freeHubModelsTitle: '模型列表', freeHubModelsHint: 'h', freeHubModelsEmpty: '空', freeHubCreditsTitle: '积分',
         freeHubNoCredits: '无', freeHubRefreshBalance: '查询', freeHubBalance: '余额', freeHubClaim: '领取',
         freeHubBalanceFailed: '失败', freeHubClaimOk: '领取成功：{0}', freeHubRestorePwd: '口令', freeHubBackupPwd: '口令',
+        freeHubRefreshCredits: '刷新积分', freeHubClaimAll: '一键领取积分', freeHubClaimRunning: '领取中…',
+        freeHubClaimDone: '领取完成：成功 {0}，失败 {1}', freeHubNewAccount: '+ 新建账号',
+        freeHubRetestAll: '重测所有', freeHubResetAll: '重置所有', freeHubRetest: '重测', freeHubReset: '重置',
+        freeHubRetestHelp: 'h', freeHubResetHelp: 'h', freeHubRetestAllHelp: 'h', freeHubResetAllHelp: 'h',
+        freeHubRetestConfirm: '继续？', freeHubRetestRunning: '重测中…', freeHubRetestDone: '重测完成：清除 {0}，仍受限 {1}',
+        freeHubRetestNone: '没有可重测的限流标记', freeHubStillLimited: '仍受限',
+        freeHubResetRunning: '清除中…', freeHubResetDone: '已清除 {0} 条限流标记', freeHubResetNone: '没有可清除的限流标记',
+        freeHubLockPermanent: '锁定永久积分', freeHubUnlockPermanent: '解锁永久积分',
+        freeHubLockOn: '已锁定', freeHubLockOff: '已解锁',
+        freeHubCredential: '凭据', freeHubAutoRenew: '自动续期', freeHubCreditsLabel: '积分',
+        freeHubUnknown: '未知', freeHubExpired: '已过期', freeHubInMinutes: '{0} 分钟后', freeHubInHours: '{0} 小时后',
+        freeHubCreditFailed: '查询失败', freeHubCreditsLoading: '正在查询积分…', freeHubRateLimitReset: '限额重置',
+        freeHubRestoreDefaults: '恢复默认', freeHubRestoreDefaultsConfirm: '恢复？', freeHubBatchManage: '批量管理',
+        freeHubBatchDelete: '删除所选', freeHubSelectAll: '全选', freeHubDeselectAll: '取消全选',
+        freeHubFilterModels: '筛选模型', freeHubClearFilter: '清除', freeHubHidden: '已隐藏', freeHubRestoreRow: '恢复',
+        freeHubBatchDeleteConfirm: '隐藏 {0} 个？', freeHubModelsDeleted: '已隐藏 {0} 个模型',
+        freeHubModelsRestored: '已恢复默认', freeHubNoModelsSelected: '未选择模型',
         failed: '失败 {0}' };
       const v = table[key] !== undefined ? table[key] : key;
       if (args && args.length) return v.replace(/\{(\d)\}/g, (m, i) => args[Number(i)] !== undefined ? args[Number(i)] : m);
@@ -143,7 +192,7 @@ function makeSandbox() {
     Blob: function(parts) { this.parts = parts; },
     URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
     TextEncoder, TextDecoder,
-    __calls: calls, __providers: providers, __promptQueue: promptQueue, __layout: layout, __page: page,
+    __calls: calls, __providers: providers, __promptQueue: promptQueue, __layout: layout, __right: right, __page: page, __registry: registry,
   };
   promptQueue = ctx.__promptQueue;
   vm.createContext(ctx);
@@ -156,20 +205,117 @@ const ticks = async (n) => { for (let i = 0; i < n; i++) await tick(); };
 
 console.log('free hub behavior (VM):');
 
-checkAsync('openFreeHub hides the settings layout, mounts providers; closeFreeHub restores', async () => {
+checkAsync('① mount replaces ONLY the main area: settings sidebar stays, right panel hidden, close restores', async () => {
   const ctx = makeSandbox();
   ctx.openFreeHub();
   await ticks(4);
   assert.strictEqual(ctx.__jethubActive, true, 'must be active');
-  assert.strictEqual(ctx.__layout.style.display, 'none', 'settings layout hidden');
+  assert.strictEqual(ctx.__layout.style.display, '', 'settings layout (sidebar) must stay visible');
+  assert.strictEqual(ctx.__right.style.display, 'none', 'only the right panel is replaced');
   const providersEl = ctx.document.getElementById('free-hub-providers');
   assert.ok(providersEl.innerHTML.indexOf('Qoder') !== -1, 'provider list rendered');
-  const detailEl = ctx.document.getElementById('free-hub-detail');
-  assert.ok(detailEl.innerHTML.indexOf('value="qd"') !== -1, 'prefix input prefilled from provider DTO');
-  assert.ok(detailEl.innerHTML.indexOf('Qwen3.8-Flash') !== -1, 'model list rendered');
   ctx.closeFreeHub();
   assert.strictEqual(ctx.__jethubActive, false, 'must be inactive');
-  assert.strictEqual(ctx.__layout.style.display, '', 'settings layout restored');
+  assert.strictEqual(ctx.__right.style.display, '', 'right panel restored');
+});
+
+checkAsync('① re-entering Free Hub after a page switch (orphaned state) remounts instead of being blocked', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  // Simulate the reported bug path: the user switches to another page. The
+  // router wipes #page-content (destroying the Free Hub DOM) — without the
+  // fix the stale __jethubActive flag blocked all re-entry until reload.
+  delete ctx.__registry['free-hub-root'];
+  assert.strictEqual(ctx.__jethubActive, true, 'stale flag as left by a page switch without the router hook');
+  ctx.openFreeHub();
+  await ticks(4);
+  assert.strictEqual(ctx.__jethubActive, true, 'must be active again');
+  const providersEl = ctx.document.getElementById('free-hub-providers');
+  assert.ok(providersEl.innerHTML.indexOf('Qoder') !== -1, 'provider list must render after re-entry');
+});
+
+check('② header: all four buttons in one left-aligned group (no spacer / right-aligned close)', () => {
+  assert.ok(!src.includes('free-hub-header-spacer'), 'the flex spacer pushing Close right must be gone');
+  const shell = src.match(/free-hub-header">([\s\S]*?)<\/div>/);
+  assert.ok(shell, 'header markup found');
+  const group = shell[1];
+  const buttons = (group.match(/<button/g) || []).length;
+  assert.strictEqual(buttons, 4, 'header must contain exactly claim-all + backup + restore + close, got ' + buttons);
+  const closeIdx = group.indexOf("closeFreeHub()");
+  const restoreIdx = group.indexOf("jethubRestorePick()");
+  assert.ok(restoreIdx !== -1 && closeIdx > restoreIdx, 'close sits inline after the action buttons');
+});
+
+checkAsync('③ detail: capability-gated action row (refresh/claim/retest/reset/lock/new)', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(6);
+  const detail = ctx.document.getElementById('free-hub-detail');
+  const html = detail.innerHTML;
+  assert.ok(html.indexOf('刷新积分') !== -1, '刷新积分 button');
+  assert.ok(html.indexOf('一键领取积分') !== -1, '一键领取积分 button');
+  assert.ok(html.indexOf('重测所有') !== -1, '重测所有 button');
+  assert.ok(html.indexOf('重置所有') !== -1, '重置所有 button');
+  assert.ok(html.indexOf('+ 新建账号') !== -1, '+ 新建账号 button');
+  // loomy hides retest/reset (no rate limiting) but shows the lock toggle
+  await ctx.jethubSelect('loomy');
+  await ticks(2);
+  const loomyHtml = ctx.document.getElementById('free-hub-detail').innerHTML;
+  assert.ok(loomyHtml.indexOf('解锁永久积分') !== -1, 'locked provider shows 解锁永久积分');
+  assert.ok(loomyHtml.indexOf('重测所有') === -1, 'loomy must not render 重测所有');
+  assert.ok(loomyHtml.indexOf('重置所有') === -1, 'loomy must not render 重置所有');
+});
+
+checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips + per-card retest/reset', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(6);
+  const html = ctx.document.getElementById('free-hub-detail').innerHTML;
+  assert.ok(html.indexOf('QODER_ACCOUNT_1') !== -1, 'credential ref displayed');
+  assert.ok(html.indexOf('限额重置') !== -1, 'rate-limit chip row label');
+  assert.ok(html.indexOf('qfmodel') !== -1, 'limited model chip');
+  assert.ok(html.indexOf('重测') !== -1 && html.indexOf('重置') !== -1, 'per-card retest/reset buttons');
+  // per-account credits: the balance RPC ran and the credit cell element was
+  // updated (in this string-DOM sandbox the cell lives in the registry).
+  const creditCell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.ok(creditCell && creditCell.innerHTML.indexOf('123.45') !== -1, 'per-account credits fetched and rendered');
+  assert.ok(ctx.__calls.apiGet.some((p) => p.indexOf('/jethub/qoder/balance?accountId=qoder-1') === 0), 'balance RPC per account');
+  // retest endpoint shape (all accounts)
+  await ctx.jethubRetest('qoder', '');
+  const retest = ctx.__calls.apiPost.find(([p]) => p === '/jethub/qoder/ratelimits/retest');
+  assert.ok(retest && JSON.stringify(retest[1]) === JSON.stringify({ accountId: '' }), 'retest POST body');
+  // reset endpoint shape (single account)
+  await ctx.jethubReset('qoder', 'qoder-1');
+  const reset = ctx.__calls.apiPost.find(([p]) => p === '/jethub/qoder/ratelimits/reset');
+  assert.ok(reset && JSON.stringify(reset[1]) === JSON.stringify({ accountId: 'qoder-1' }), 'reset POST body');
+});
+
+checkAsync('④ model list: vertical rows with rate badges + batch delete + restore-defaults shapes', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(6);
+  let html = ctx.document.getElementById('free-hub-detail').innerHTML;
+  assert.ok(html.indexOf('free-hub-model-row') !== -1, 'vertical model rows');
+  assert.ok(html.indexOf('x0.5') !== -1, 'rate badge rendered');
+  assert.ok(html.indexOf('免费') !== -1, 'free badge rendered');
+  assert.ok(html.indexOf('已隐藏') !== -1, 'hidden badge for blacklisted model');
+  assert.ok(html.indexOf('恢复默认') !== -1, 'restore-defaults button');
+  // batch manage: enter → select → delete selected (the re-render targets the
+  // section element directly, which in this sandbox lives in the registry)
+  await ctx.jethubToggleBatchMode();
+  const sectionEl = ctx.__registry['free-hub-models-section'];
+  assert.ok(sectionEl && sectionEl.innerHTML.indexOf('批量管理') !== -1, 'batch mode re-rendered the section');
+  const barEl = ctx.__registry['free-hub-batch-bar'];
+  assert.ok(barEl && barEl.innerHTML.indexOf('删除所选') !== -1, 'batch bar rendered');
+  ctx.jethubBatchToggle('auto');
+  await ctx.jethubBatchDeleteSelected('qoder');
+  const batch = ctx.__calls.apiPost.find(([p]) => p === '/jethub/providers/qoder/models/batch-delete');
+  assert.ok(batch && JSON.stringify(batch[1]) === JSON.stringify({ modelIds: ['auto'] }), 'batch delete POST body');
+  // restore defaults
+  await ctx.jethubRestoreDefaultModels('qoder');
+  const restore = ctx.__calls.apiDelete.find((p) => p === '/jethub/providers/qoder/models');
+  assert.ok(restore, 'restore-defaults DELETE clears the blacklist');
 });
 
 checkAsync('prefix save validates client-side and PUTs the body to the provider route', async () => {
@@ -239,6 +385,7 @@ async function apiExportLikePayload() {
     credentials: { R1: '{"access_token":"t"}' },
     accounts: [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, credentialRef: 'R1', createdAt: 1, refreshable: true }],
     disabledModels: { qoder: { auto: true } },
+    permanentLocks: { loomy: true },
   };
 }
 

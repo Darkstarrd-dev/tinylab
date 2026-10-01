@@ -26,10 +26,10 @@ const (
 //     不重新序列化，避免字段丢失或变形）；
 //   - accounts 是账号池索引（accountEntry 与原版 ProviderAccountEntry 同构，
 //     见 manager.go 的注释）；
-//   - disabledModels 是模型黑名单（provider → 模型 id → true）。
-//
-// 原版的可选字段 permanentLocks/loomyPermanentLocked（锁定永久积分开关）
-// 本端未实现该功能，导出时不写（原版导入视为缺省）；导入时忽略。
+//   - disabledModels 是模型黑名单（provider → 模型 id → true）；
+//   - permanentLocks 是「锁定永久积分」provider 级开关（仅 true 值有效，
+//     与原版 sanitizePermanentLocks 一致）；loomyPermanentLocked 是旧版
+//     Loomy 专用兼容字段（仅在没有 permanentLocks 表时生效）。
 type BackupPayload struct {
 	Format         string                     `json:"format"`
 	Version        int                        `json:"version"`
@@ -37,6 +37,10 @@ type BackupPayload struct {
 	Credentials    map[string]string          `json:"credentials"`
 	Accounts       []accountEntry             `json:"accounts"`
 	DisabledModels map[string]map[string]bool `json:"disabledModels"`
+	PermanentLocks map[string]bool            `json:"permanentLocks,omitempty"`
+	// LoomyPermanentLocked mirrors ref types.ts 的 legacy 兼容字段（指针区分
+	// 缺省与 false；原版 locksFromPayload 的三分支语义）。
+	LoomyPermanentLocked *bool `json:"loomyPermanentLocked,omitempty"`
 }
 
 // ExportBackup assembles the original-compatible plaintext payload. Warnings
@@ -61,6 +65,14 @@ func (m *Manager) ExportBackup() (*BackupPayload, []string) {
 	if disabled == nil {
 		disabled = map[string]map[string]bool{}
 	}
+	// Sanitized lock copy (true values only) — caller holds m.mu.RLock, so
+	// read the map inline instead of via the locking snapshot helper.
+	locks := map[string]bool{}
+	for p, v := range m.accounts.PermanentLocks {
+		if v {
+			locks[p] = true
+		}
+	}
 	return &BackupPayload{
 		Format:         BackupFormat,
 		Version:        BackupVersion,
@@ -68,6 +80,7 @@ func (m *Manager) ExportBackup() (*BackupPayload, []string) {
 		Credentials:    credentials,
 		Accounts:       accounts,
 		DisabledModels: disabled,
+		PermanentLocks: locks,
 	}, warnings
 }
 
@@ -127,6 +140,34 @@ func (m *Manager) ImportBackup(payload *BackupPayload) (imported, skipped int, w
 		disabled = map[string]map[string]bool{}
 	}
 	m.accounts.DisabledModels = disabled
+
+	// 「锁定永久积分」：镜像原版 locksFromPayload 的三分支语义——
+	//   ① 有 permanentLocks 表 → 消费该表（整体替换，脏值过滤）；
+	//   ② 仅有 loomyPermanentLocked（旧版导出）→ 只落 loomy 一键；
+	//   ③ 两者皆无 → undefined = 保持当前值不变。
+	if payload.PermanentLocks != nil {
+		locks := map[string]bool{}
+		for p, v := range payload.PermanentLocks {
+			if v { // 脏值过滤与原版 sanitizePermanentLocks 一致：只留 true
+				locks[p] = true
+			}
+		}
+		m.accounts.PermanentLocks = locks
+	} else if payload.LoomyPermanentLocked != nil {
+		locks := map[string]bool{}
+		for p := range m.accounts.PermanentLocks {
+			if p != "loomy" {
+				locks[p] = m.accounts.PermanentLocks[p]
+			}
+		}
+		if *payload.LoomyPermanentLocked {
+			locks["loomy"] = true
+		}
+		m.accounts.PermanentLocks = locks
+	}
+	if m.accounts.PermanentLocks == nil {
+		m.accounts.PermanentLocks = map[string]bool{}
+	}
 
 	if err := m.saveAccountsLocked(); err != nil {
 		return imported, skipped, warnings, err
