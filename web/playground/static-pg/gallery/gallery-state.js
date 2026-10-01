@@ -90,6 +90,12 @@ function formatTime(secs) {
 }
 
 function escapeHtml(s) {
+  // Guard against self-recursion: a top-level `function escapeHtml` shares the
+  // same global binding as window.escapeHtml, so assigning this wrapper to
+  // window would call itself forever. Fall back to the inline implementation.
+  if (window.escapeHtml === escapeHtml) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
   return window.escapeHtml(s);
 }
 
