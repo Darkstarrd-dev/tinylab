@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-chi/chi/v5"
+	"github.com/tinylab/tinylab/internal/api/apibase"
 	domain "github.com/tinylab/tinylab/internal/imagebatch"
 	"net/http"
 	"time"
@@ -15,17 +16,17 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "projectID")
 	if !pathID(id) {
-		errJSON(w, 400, "invalid project id")
+		apibase.WriteAPIError(w, 400, "invalid project id")
 		return
 	}
 	p, err := h.manager.Get(r.Context(), id)
 	if err != nil {
-		errJSON(w, 404, "project not found")
+		apibase.WriteAPIError(w, 404, "project not found")
 		return
 	}
 	ch, err := h.manager.Subscribe(r.Context(), id)
 	if err != nil {
-		errJSON(w, 500, "events unavailable")
+		apibase.WriteAPIError(w, 500, "events unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

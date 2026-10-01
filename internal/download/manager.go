@@ -116,7 +116,7 @@ func (m *Manager) Started() bool {
 // CreateTask 创建单个下载任务并加入队列。
 // 返回任务 ID。
 func (m *Manager) CreateTask(input CreateTaskInput) string {
-	id := generateID()
+	id := newTaskID()
 	now := time.Now()
 	task := &Task{
 		ID:            id,
@@ -233,8 +233,8 @@ func isTerminal(s TaskStatus) bool {
 	return s == StatusCompleted || s == StatusError || s == StatusCancelled
 }
 
-// generateID 生成 8 字节随机十六进制任务 ID。
-func generateID() string {
+// newTaskID 生成 8 字节随机十六进制任务 ID。
+func newTaskID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand 失败极罕见，退化为时间随机。

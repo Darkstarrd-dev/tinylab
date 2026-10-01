@@ -31,6 +31,7 @@ sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 sandbox.self = sandbox;
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), sandbox, { filename: 'core-util.js' });
 vm.runInContext(markedSource, sandbox, { filename: 'marked.min.js' });
 vm.runInContext(markdownSource, sandbox, { filename: 'pg-markdown.js' });
 

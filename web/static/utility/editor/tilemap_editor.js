@@ -380,7 +380,7 @@
     if(selInfo) selInfo.textContent='GID '+state.selectedGid+' · Tool '+state.tool+' · Layer '+(m.layers[state.selectedLayer]?m.layers[state.selectedLayer].name:'-');
   }
 
-  function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function escapeHtml(s){ return window.escapeHtml(s); }
 
   function bindCanvas(){
     if(!canvas) return;

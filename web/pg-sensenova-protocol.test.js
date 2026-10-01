@@ -108,6 +108,8 @@ function makeEnv() {
 
   // Load pg-core.js, pg-i18n.js, pg-ui.js (+ params/reqleft/events), pg-modal.js, pg-request.js, pg-image-model.js, pg-image-tasks.js
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
+  // core-util.js lives in the host static root, not the pg playground dir.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), ctx, { filename: 'core-util.js' });
   const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-ui-params.js', 'pg-ui-reqleft.js', 'pg-ui-events.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
   for (const f of files) {
     const code = fs.readFileSync(path.join(dir, f), 'utf8');

@@ -291,9 +291,7 @@
   }
 
   function escapeHtml(s) {
-    if (typeof global.escapeHtml === 'function') return global.escapeHtml(s);
-    if (typeof global.edEscapeHtml === 'function') return global.edEscapeHtml(s);
-    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return window.escapeHtml(s);
   }
 
   function inputEl() { return dgn.layoutRoot && dgn.layoutRoot.querySelector('#ed-main-input'); }

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/tinylab/tinylab/internal/api/apibase"
 	domain "github.com/tinylab/tinylab/internal/imagebatch"
 )
 
@@ -31,15 +32,15 @@ type helperChatResponse struct {
 func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 	var in domain.PlanInput
 	if err := decodeJSON(r, &in); err != nil {
-		errJSON(w, http.StatusBadRequest, "invalid JSON")
+		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if err := in.Validate(); err != nil {
-		errJSON(w, http.StatusBadRequest, err.Error())
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if h.d == nil || h.d.ProxyHandler == nil {
-		errJSON(w, http.StatusServiceUnavailable, "helper model unavailable")
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, "helper model unavailable")
 		return
 	}
 	prompt := fmt.Sprintf("Create a JSON image plan for these requirements: %s\nUse this as the default negative prompt unless an item specifies otherwise: %s\nDefault quantity: %d\nReturn {\"title\":string,\"items\":[{\"id\":unique alphanumeric string (max 128 chars)\",\"title\":string,\"naturalPrompt\":string,\"negativePrompt\":string,\"quantity\":integer 1-100}]}", in.Requirements, in.DefaultNegativePrompt, in.DefaultQuantity)
@@ -52,19 +53,19 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := h.callHelper(r.Context(), in.HelperModel, sys, prompt)
 	if err != nil {
-		errJSON(w, http.StatusBadGateway, "helper model request failed: "+err.Error())
+		apibase.WriteAPIError(w, http.StatusBadGateway, "helper model request failed: "+err.Error())
 		return
 	}
 	var out domain.PlanOutput
 	if err := decodeStrictContent(content, &out); err != nil {
-		errJSON(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
+		apibase.WriteAPIError(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
 		return
 	}
 	if err := out.Validate(); err != nil {
-		errJSON(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
+		apibase.WriteAPIError(w, http.StatusBadGateway, "helper model returned invalid plan: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) callHelper(ctx context.Context, model, sysPrompt, prompt string) (string, error) {

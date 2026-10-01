@@ -229,7 +229,7 @@ func (h *Handler) speedTestCombo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Pick the first active key.
-		key := firstActiveKey(provider)
+		key := apibase.FirstActiveKey(provider)
 		if key == nil {
 			inputs = append(inputs, comboSpeedTestInput{
 				fullId:   m,
@@ -589,16 +589,6 @@ func probeComboModel(ctx context.Context, h *Handler, input comboSpeedTestInput,
 	h.d.ProxyHandler.TraceMgmtCall("probe:combo:provider="+input.provider.ID+":model="+input.modelId+":key="+input.key.ID, "probe", "probe", input.modelId, input.provider.Name, chatURL, httpReq.Header, bodyBytes, resp.StatusCode, resp.Header, nil, "", time.Since(t0).Milliseconds())
 	res.Score = tokensPerSec / (1 + float64(ttftMs)/1500.0)
 	return res
-}
-
-// firstActiveKey returns the first active key for a provider, or nil if none found.
-func firstActiveKey(provider *config.Provider) *config.Key {
-	for i := range provider.Keys {
-		if provider.Keys[i].IsActive {
-			return &provider.Keys[i]
-		}
-	}
-	return nil
 }
 
 // extractContentFromSSE extracts the text content (both delta.content and

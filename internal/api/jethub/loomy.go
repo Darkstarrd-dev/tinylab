@@ -65,7 +65,7 @@ func (h *Handler) loomyLogin(w http.ResponseWriter, r *http.Request) {
 	go corejethub.SettleAndCleanup(sess, nil)
 	h.d.Manager.OpenURLWithBrowser(pageURL)
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  pageURL,
@@ -87,7 +87,7 @@ func (h *Handler) loomySmsSend(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"msgid": msgid})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"msgid": msgid})
 }
 
 // loomySmsSubmit POST {accountId, phone, code, msgid} — completes login,
@@ -107,7 +107,7 @@ func (h *Handler) loomySmsSubmit(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "accountId": req.AccountID})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "accountId": req.AccountID})
 }
 
 // loomyStatus GET — flow poll via loginId, or account snapshot.
@@ -125,7 +125,7 @@ func (h *Handler) loomyStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("loomy")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("loomy")})
 }
 
 // loomyProbe POST {accountId} — verify without renewing (Loomy cannot renew;
@@ -142,7 +142,7 @@ func (h *Handler) loomyProbe(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // loomyClaim POST — daily quota RESET trigger (alreadyProcessed →
@@ -160,7 +160,7 @@ func (h *Handler) loomyClaim(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 }
 
 // loomyBalance GET — two pools (permanent + daily) as separate packages.
@@ -171,7 +171,7 @@ func (h *Handler) loomyBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }
 
 // loomyOnboardingStatus GET {accountId} — 8-task state + earned/total.
@@ -182,7 +182,7 @@ func (h *Handler) loomyOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "earned": earned, "total": total})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "earned": earned, "total": total})
 }
 
 // loomyOnboardingClaim POST — complete all pending tasks (idempotent).
@@ -205,7 +205,7 @@ func (h *Handler) loomyOnboardingClaim(w http.ResponseWriter, r *http.Request) {
 	if skipped == nil {
 		skipped = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
 		"claimed": claimed, "skipped": skipped, "earned": earned, "total": total,
 	})
 }

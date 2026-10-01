@@ -54,7 +54,7 @@ func (h *Handler) startBuddyFlow(provider string, w http.ResponseWriter, r *http
 	// Single-winner pump: settles the outcome, persists on success, deletes
 	// the placeholder on failure. The status poll reads via SessionStatus.
 	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteBuddyLogin
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -70,7 +70,7 @@ func (h *Handler) buddyStatus(provider string) http.HandlerFunc {
 			h.pollLogin(loginID, w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
 	}
 }
 
@@ -87,20 +87,20 @@ func (h *Handler) pollLogin(loginID string, w http.ResponseWriter, r *http.Reque
 		// reaps late), or a bogus id. The UI treats 404 as "no transition" —
 		// the settled outcome stays readable for loginSessionGracePeriod
 		// after the flow ends, so a live poll always sees done:true first.
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "unknown or settled loginId"})
+		apibase.WriteJSON(w, http.StatusNotFound, map[string]any{"error": "unknown or settled loginId"})
 		return
 	}
 	done, success, errMsg := corejethub.SessionStatus(sess)
 	if !done {
 		acc, _ := h.d.Manager.FindAccount(sess.Account)
-		writeJSON(w, http.StatusOK, map[string]any{"done": false, "accountId": sess.Account, "nickname": acc.Nickname})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": false, "accountId": sess.Account, "nickname": acc.Nickname})
 		return
 	}
 	if !success {
-		writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": true, "accountId": sess.Account})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": true, "accountId": sess.Account})
 }
 
 // buddyRefresh POST — silent renewal of one account credential.
@@ -117,7 +117,7 @@ func (h *Handler) buddyRefresh(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
 
@@ -136,7 +136,7 @@ func (h *Handler) buddyClaim(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 	}
 }
 
@@ -149,7 +149,7 @@ func (h *Handler) buddyBalance(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 	}
 }
 

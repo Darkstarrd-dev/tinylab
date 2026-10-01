@@ -49,7 +49,7 @@ func (h *Handler) clineLogin(w http.ResponseWriter, r *http.Request) {
 	// Single-winner pump + background context (the WorkOS device poll must
 	// outlive this handler — r.Context() dies with the response).
 	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteClineLogin
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -63,7 +63,7 @@ func (h *Handler) clineStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("cline")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("cline")})
 }
 
 // clineRefresh POST — silent renewal.
@@ -79,7 +79,7 @@ func (h *Handler) clineRefresh(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // clineBalance GET — raw micro-USD-ish balance + scaled credits.
@@ -90,5 +90,5 @@ func (h *Handler) clineBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance, "rawBalance": raw})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance, "rawBalance": raw})
 }

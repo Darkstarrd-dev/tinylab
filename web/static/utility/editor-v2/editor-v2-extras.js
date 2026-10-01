@@ -8,11 +8,7 @@
   let currentCodeEditor = null;
   let activeAbortController = null;
 
-  function escapeHtml(str) {
-    return (str || '').replace(/[&<>"']/g, m => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[m]));
-  }
+  function escapeHtml(str) { return window.escapeHtml(str); }
 
   function getActiveTab() {
     return window.EditorV2 ? window.EditorV2.getActiveTab() : null;

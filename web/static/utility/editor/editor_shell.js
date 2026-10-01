@@ -819,9 +819,7 @@
     preview.innerHTML = html;
   }
 
-  function escapeHtml(value) {
-    return text(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  function escapeHtml(value) { return window.escapeHtml(text(value)); }
 
   function escapeAttr(value) {
     return text(value).replace(/"/g, '&quot;');

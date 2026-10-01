@@ -50,7 +50,7 @@ func (h *Handler) traeLogin(w http.ResponseWriter, r *http.Request) {
 	// Single-winner pump; the callback server + timeout goroutine run on the
 	// background context (StartTraeLogin) so they outlive this handler.
 	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteTraeLogin
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -64,7 +64,7 @@ func (h *Handler) traeStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("trae")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("trae")})
 }
 
 // traeRefresh POST — ExchangeToken renewal.
@@ -80,7 +80,7 @@ func (h *Handler) traeRefresh(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // traeClaim POST — daily check-in (9074 device rotation handled internally).
@@ -97,7 +97,7 @@ func (h *Handler) traeClaim(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 }
 
 // traeBalance GET — ent usage balance.
@@ -108,5 +108,5 @@ func (h *Handler) traeBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }

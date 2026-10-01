@@ -16,10 +16,7 @@ var CODE_EXTS = {
   md:1, markdown:1
 };
 
-function edEscapeHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+function edEscapeHtml(s) { return window.escapeHtml(s); }
 
 function edFileExt(name) {
   if (!name) return '';

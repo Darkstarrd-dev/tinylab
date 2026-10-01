@@ -18,10 +18,7 @@ function trApiDelete(p) {
   if (typeof apiDelete === 'function') return apiDelete(p);
   return fetch('/api' + p, { method:'DELETE' }).then(function (r) { return r.json(); });
 }
-function trEscapeHtml(s) {
-  if (typeof escapeHtml === 'function') return escapeHtml(s);
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+function trEscapeHtml(s) { return window.escapeHtml(s); }
 function trToast(m, ty) { if (typeof toast === 'function') toast(m, ty); }
 function trT(k, ar) {
   if (ar !== undefined && !Array.isArray(ar)) ar = [ar];

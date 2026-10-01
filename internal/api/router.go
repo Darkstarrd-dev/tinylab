@@ -334,9 +334,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 
 	rt.registerProxyRoutes(r, proxyHandler)
 
-	// Profiling endpoints (/debug/pprof/*)
-	r.Mount("/debug/pprof", pprofRouter())
-
 	// Build the shared Deps for sub-packages.
 	apiDeps := &apibase.Deps{
 		Reg:               rt.reg,
@@ -420,7 +417,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 				// Music transcode carries raw audio bytes (up to 200 MiB), not JSON — the
 				// global 1 MiB cap would make it unusable. Bypass here; the handler
 				// enforces its own 200 MiB MaxBytesReader.
-				if r.URL.Path == "/api/music/transcode" || strings.HasPrefix(r.URL.Path, "/api/music/transcode?") {
+				// (URL.Path never contains the query string, so a
+				// HasPrefix(...+"?") arm here would be dead code.)
+				if r.URL.Path == "/api/music/transcode" {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -443,6 +442,11 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		// --- Protected routes (auth required) ---
 		r.Group(func(r chi.Router) {
 			r.Use(authMW)
+
+			// Profiling endpoints (/debug/pprof/*) — gated behind the same auth
+			// as the management UI. With password protection off, authMW is a
+			// pass-through and local debugging keeps working unchanged.
+			r.Mount("/debug/pprof", pprofRouter())
 
 			settingsHandler.Register(r)
 

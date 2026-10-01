@@ -21,8 +21,7 @@ var logsSelectedReq = null;   // currently selected request detail
 // ===================== helpers =====================
 
 function logsEscapeHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return window.escapeHtml(s);
 }
 
 function logsFormatTs(ts) {

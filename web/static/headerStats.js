@@ -2,7 +2,7 @@
 var headerStatsEventSource = null;
 var headerStatsRefreshScheduled = false;
 var headerStatsReconnectTimer = null;
-var headerStatsReconnectDelay = 1000;
+var headerStatsBackoffState = { delay: 1000 };
 
 function applyHeaderStatLabels() {
   var labels = ['totalRequests', 'success', 'errors', 'avgLatency', 'totalInput', 'totalOutput'];
@@ -36,20 +36,16 @@ async function refreshHeaderStats() {
 
 function scheduleHeaderStatsReconnect() {
   if (headerStatsReconnectTimer) return;
-  var jitter = 0.8 + Math.random() * 0.4;
-  var delay = Math.round(headerStatsReconnectDelay * jitter);
-  headerStatsReconnectTimer = setTimeout(function() {
+  window.sseBackoff.schedule(function() {
     headerStatsReconnectTimer = null;
     startHeaderStatsSSE();
-    headerStatsReconnectDelay = Math.min(headerStatsReconnectDelay * 2, 30000);
-  }, delay);
+  }, headerStatsBackoffState);
+  headerStatsReconnectTimer = headerStatsBackoffState.timer;
 }
 
 function startHeaderStatsSSE() {
-  if (headerStatsReconnectTimer) {
-    clearTimeout(headerStatsReconnectTimer);
-    headerStatsReconnectTimer = null;
-  }
+  clearTimeout(headerStatsReconnectTimer);
+  headerStatsReconnectTimer = null;
   if (headerStatsEventSource) {
     try { headerStatsEventSource.close(); } catch(e) {}
     headerStatsEventSource = null;
@@ -58,11 +54,9 @@ function startHeaderStatsSSE() {
   var es = new EventSource('/api/monitor/events');
   headerStatsEventSource = es;
   es.onopen = function() {
-    headerStatsReconnectDelay = 1000;
-    if (headerStatsReconnectTimer) {
-      clearTimeout(headerStatsReconnectTimer);
-      headerStatsReconnectTimer = null;
-    }
+    window.sseBackoff.reset(headerStatsBackoffState);
+    clearTimeout(headerStatsReconnectTimer);
+    headerStatsReconnectTimer = null;
   };
   es.onerror = function() {
     try { es.close(); } catch(e) {}

@@ -188,9 +188,11 @@ function pgApiPatch(p, b)    { return PG_HOST && PG_HOST.apiPatch ? PG_HOST.apiP
 function pgToast(m, ty)      { return PG_HOST && PG_HOST.toast ? PG_HOST.toast(m, ty) : toast(m, ty); }
 function pgEscapeHtml(s)     {
   if (PG_HOST && PG_HOST.escapeHtml) return PG_HOST.escapeHtml(s);
-  if (typeof escapeHtml === 'function') return escapeHtml(s);
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return window.escapeHtml(s);
 }
+// pgEscapeAttr is intentionally NOT a window.escapeHtml delegate: it escapes
+// quotes first (attribute-context ordering) and does not treat empty strings
+// as '' short-circuit. Keep it when touching the HTML escaper.
 function pgEscapeAttr(s) {
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }

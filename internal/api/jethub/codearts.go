@@ -56,7 +56,7 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 	go corejethub.SettleAndCleanup(sess, func(o corejethub.LoginOutcome) error {
 		return h.d.Manager.CompleteCodeArtsLogin(id, o.CredentialJSON, o.ExpiresAt, o.Refreshable)
 	})
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -71,7 +71,7 @@ func (h *Handler) codeartsStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("codearts")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("codearts")})
 }
 
 // codeartsRefresh POST /api/jethub/codearts/refresh {accountId} — renew one
@@ -88,7 +88,7 @@ func (h *Handler) codeartsRefresh(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // codeartsClaim POST /api/jethub/codearts/claim {accountId} — daily credit
@@ -106,7 +106,7 @@ func (h *Handler) codeartsClaim(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 }
 
 // codeartsBalance GET /api/jethub/codearts/balance?accountId= — credit
@@ -118,5 +118,5 @@ func (h *Handler) codeartsBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }

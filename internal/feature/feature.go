@@ -137,7 +137,7 @@ func registerDefaults() {
 		Description: "Proxy/Config/Registry/Rotation/Usage + Monitor/Settings management surface. Never pruned.",
 		StaticRoot:  RootStatic,
 		StaticFiles: []string{
-			"api.js", "app.js", "auth.js", "combos.js", "console.js",
+			"api.js", "app.js", "auth.js", "combos.js", "console.js", "core-util.js",
 			"fs-api.js", "headerStats.js", "i18n.js", "info_common.js",
 			"jethub.js", "style-jethub.css", "raccoon-qr.js", "free-hub-login.html",
 			"free-hub-loomy-login.html",

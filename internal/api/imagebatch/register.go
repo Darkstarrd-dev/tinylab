@@ -57,12 +57,6 @@ func (h *Handler) RegisterRoot(r chi.Router) {
 	r.Get("/api/image-batches", h.list)
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-func errJSON(w http.ResponseWriter, status int, msg string) { apibase.WriteAPIError(w, status, msg) }
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -80,7 +74,7 @@ func pathID(s string) bool {
 }
 func requireManager(h *Handler, w http.ResponseWriter) bool {
 	if h.manager == nil {
-		errJSON(w, http.StatusServiceUnavailable, "image batch service unavailable")
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, "image batch service unavailable")
 		return false
 	}
 	return true

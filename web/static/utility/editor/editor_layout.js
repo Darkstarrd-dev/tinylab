@@ -180,14 +180,7 @@
     'save':'editorSave', 'edit':'editorEditMode', 'diff':'editorDiff', 'toggle':'editorToggle'
   };
 
-  function escapeHtml(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+  function escapeHtml(s) { return window.escapeHtml(s); }
 
   function filterTree(nodes, query) {
     if (!query || typeof query !== 'string' || !query.trim()) return nodes;

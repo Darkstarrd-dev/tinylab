@@ -106,10 +106,50 @@ func (d *Deps) SaveConfigAndReload(cfg *config.Config) error {
 }
 
 // WriteAPIError writes a JSON error envelope with the given HTTP status.
+// Envelope conventions: HTTP API errors are {"error": msg} with a 4xx/5xx
+// status; SSE streams use event:error frames instead (a transport-level
+// contract owned by the SSE emitters, e.g. storymaker/register.go). "ok":
+// false bodies with 200 are reserved for soft business outcomes (e.g. a
+// login flow that completed but was declined), never for malformed requests.
 func WriteAPIError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// WriteJSON writes v as a JSON response with the given status.
+func WriteJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// GetIntQuery reads an integer query parameter with a default fallback.
+func GetIntQuery(r *http.Request, key string, defaultVal int) int {
+	s := r.URL.Query().Get(key)
+	if s == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(s)
+	// Negative values fall back to the default (matches monitor/providers
+	// semantics where limit/offset must not be negative).
+	if err != nil || n < 0 {
+		return defaultVal
+	}
+	return n
+}
+
+// FirstActiveKey returns the first active key for a provider, or nil.
+func FirstActiveKey(provider *config.Provider) *config.Key {
+	if provider == nil {
+		return nil
+	}
+	for i := range provider.Keys {
+		if provider.Keys[i].IsActive {
+			return &provider.Keys[i]
+		}
+	}
+	return nil
 }
 
 // ManagementClient returns the HTTP client used for provider management

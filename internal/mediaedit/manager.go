@@ -174,7 +174,7 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	id := generateID()
+	id := newJobID()
 
 	job := &Job{
 		ID:        id,
@@ -303,8 +303,8 @@ func (m *Manager) ProbeMedia(ffprobePath, path string) (*ProbeResult, error) {
 	return Probe(ffprobePath, path)
 }
 
-// generateID returns an 8-byte random hex string (16 hex chars).
-func generateID() string {
+// newJobID returns an 8-byte random hex string (16 hex chars).
+func newJobID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand failure is extremely rare; fall back to time.

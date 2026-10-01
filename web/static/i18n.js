@@ -1,7 +1,7 @@
 // ===================== Translation System =====================
 const L = {
   en: {
-    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', music: 'Music', tilemap: 'Map Editor', tilemapEditor: 'Map Editor', textReview: 'Text Review', utilityReview: 'Text Review', review: 'Text Review', utilityEditorV2: 'Text Editor V2',
+    endpoint: 'Settings', settings: 'Settings', providers: 'Providers', combos: 'Combos', monitor: 'Monitor', console: 'Console', playground: 'Playground', gallery: 'Gallery', music: 'Music', tilemap: 'Map Editor', tilemapEditor: 'Map Editor', textReview: 'Text Review', utilityReview: 'Text Review', review: 'Text Review', utilityEditorV2: 'Text Editor',
     ed2MenuFile: 'File', ed2MenuEdit: 'Edit', ed2MenuSelection: 'Selection',
     ed2MenuNewFile: 'New File…', ed2MenuNewTextFile: 'New Text File', ed2MenuOpenFile: 'Open File…', ed2MenuSave: 'Save', ed2MenuSaveAs: 'Save As…', ed2MenuSaveAll: 'Save All', ed2MenuClose: 'Close Editor', ed2MenuCloseAll: 'Close All Editors',
     ed2MenuUndo: 'Undo', ed2MenuRedo: 'Redo', ed2MenuCut: 'Cut', ed2MenuCopy: 'Copy', ed2MenuPaste: 'Paste', ed2MenuFind: 'Find', ed2MenuReplace: 'Replace', ed2MenuGoToLine: 'Go to Line…', ed2MenuToggleLineComment: 'Toggle Line Comment', ed2MenuToggleBlockComment: 'Toggle Block Comment', ed2MenuIndent: 'Indent', ed2MenuOutdent: 'Outdent',
@@ -1166,7 +1166,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     clearTraceDone: '已清除 {0} 个追踪文件',
     traceEnableConfirm: '开启请求追踪后，每个代理请求（及内部 LLM 调用：文本审校、图片审核、探测、combo 速测）将以一个约 1MB 的 JSONL 文件保存到 traces/ 目录，便于调试排查。请求头中的 Key 会脱敏（保留末 4 位）；base64 图片内容不保存。超过保留天数的文件自动删除，总量受磁盘上限约束。是否继续？',
     saved: '已保存',
-    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校', review: '文本审校', utilityEditorV2: '文本编辑器 V2',
+    endpoint: '设置', settings: '设置', providers: '服务商', combos: '模型组', monitor: '监控', console: '控制台', playground: '测试', gallery: '图片库', textReview: '文本审校', utilityReview: '文本审校', review: '文本审校', utilityEditorV2: '文本编辑器',
     ed2MenuFile: '文件', ed2MenuEdit: '编辑', ed2MenuSelection: '选择',
     ed2MenuNewFile: '新建文件…', ed2MenuNewTextFile: '新建文本文档', ed2MenuOpenFile: '打开文件…', ed2MenuSave: '保存', ed2MenuSaveAs: '另存为…', ed2MenuSaveAll: '全部保存', ed2MenuClose: '关闭编辑器', ed2MenuCloseAll: '关闭所有编辑器',
     ed2MenuUndo: '撤销', ed2MenuRedo: '恢复', ed2MenuCut: '剪切', ed2MenuCopy: '复制', ed2MenuPaste: '粘贴', ed2MenuFind: '查找', ed2MenuReplace: '替换', ed2MenuGoToLine: '跳转到行…', ed2MenuToggleLineComment: '切换行注释', ed2MenuToggleBlockComment: '切换块注释', ed2MenuIndent: '增加缩进', ed2MenuOutdent: '减少缩进',
@@ -2328,16 +2328,10 @@ function t(key, args, fallback) {
 }
 
 // tEscapeHtml escapes characters that are unsafe inside HTML text or
-// attribute values. Local copy so i18n.js does not depend on the load order
-// of app.js (where escapeHtml is defined). The implementation mirrors
-// app.js::escapeHtml to avoid behavioral drift.
+// attribute values. Delegates to the canonical window.escapeHtml in
+// core-util.js (loaded first; i18n.js must not re-implement it).
 function tEscapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  return window.escapeHtml(s);
 }
 
 function currentLang() {

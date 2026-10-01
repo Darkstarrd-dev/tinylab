@@ -96,11 +96,7 @@
     return Date.now() + Math.random();
   }
 
-  function escapeHtml(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
+  function escapeHtml(s) { return window.escapeHtml(s); }
 
   function formatDurationMs(ms) {
     if (!ms || isNaN(ms) || ms < 0) ms = 0;

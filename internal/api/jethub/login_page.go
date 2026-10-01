@@ -72,7 +72,7 @@ func (h *Handler) loginPageData(w http.ResponseWriter, r *http.Request) {
 	} else {
 		payload["qr"] = sess.Started.QRContent
 	}
-	writeJSON(w, http.StatusOK, payload)
+	apibase.WriteJSON(w, http.StatusOK, payload)
 }
 
 // loginPageStatus GET ?loginId= — passive poll (the pump owns the channel).
@@ -83,15 +83,15 @@ func (h *Handler) loginPageStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	done, success, errMsg := corejethub.SessionStatus(sess)
 	if !done {
-		writeJSON(w, http.StatusOK, map[string]any{"done": false})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": false})
 		return
 	}
 	if !success {
-		writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
 		return
 	}
 	// ⚠️ 不回 accountId（保护组外的响应只暴露登录是否完成）。
-	writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": true})
 }
 
 // loginPageSession resolves the loginId to a live session that has a QR page.
@@ -170,7 +170,7 @@ func (h *Handler) loginPagePoll(w http.ResponseWriter, r *http.Request) {
 	if errMsg != "" {
 		out["message"] = errMsg
 	}
-	writeJSON(w, http.StatusOK, out)
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 // loginPageComplete POST {loginId, action, phone, code} — the loomy bind-phone
@@ -201,18 +201,18 @@ func (h *Handler) loginPageComplete(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case "send_sms":
 		if err := flow.SendBindSms(r.Context(), req.Phone); err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+			apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "verify_sms":
 		if err := flow.VerifyBind(r.Context(), req.Phone, req.Code); err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+			apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "done": true})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "done": true})
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "未知 action: " + req.Action})
+		apibase.WriteAPIError(w, http.StatusBadRequest, "unknown action: "+req.Action)
 	}
 }
 

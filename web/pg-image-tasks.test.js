@@ -99,6 +99,7 @@ function makeEnv() {
 
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), sandbox, { filename: 'core-util.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-core.js'), 'utf8'), sandbox, { filename: 'pg-core.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-i18n.js'), 'utf8'), sandbox, { filename: 'pg-i18n.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'pg-image-model.js'), 'utf8'), sandbox, { filename: 'pg-image-model.js' });

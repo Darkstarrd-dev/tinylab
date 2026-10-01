@@ -334,11 +334,7 @@
     setupScrollSync();
   }
 
-  function escapeHtml(str) {
-    return (str || '').replace(/[&<>"']/g, m => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[m]));
-  }
+  function escapeHtml(str) { return window.escapeHtml(str); }
 
   window.EditorV2Preview = {
     init,

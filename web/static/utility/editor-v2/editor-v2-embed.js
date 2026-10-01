@@ -26,11 +26,7 @@
     return host.id;
   }
 
-  function escapeHtml(str) {
-    return (str || '').replace(/[&<>"']/g, function (m) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
-    });
-  }
+  function escapeHtml(str) { return window.escapeHtml(str); }
 
   function tr(k, fallback) {
     try {

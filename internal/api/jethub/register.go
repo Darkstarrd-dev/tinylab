@@ -85,7 +85,7 @@ func (h *Handler) Register(r chi.Router) {
 // it with the user passphrase before download.
 func (h *Handler) backupExport(w http.ResponseWriter, r *http.Request) {
 	payload, warnings := h.d.Manager.ExportBackup()
-	writeJSON(w, http.StatusOK, map[string]any{"payload": payload, "warnings": warnings})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"payload": payload, "warnings": warnings})
 }
 
 // backupImport POST — upsert accounts by original id, store credential JSON
@@ -108,7 +108,7 @@ func (h *Handler) backupImport(w http.ResponseWriter, r *http.Request) {
 			_ = h.d.Bridge.SyncKeys(p.ID)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "imported": imported, "skipped": skipped, "warnings": warnings,
 	})
 }
@@ -173,7 +173,7 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 		dto.PermanentLocked = h.d.Manager.PermanentLocked(meta.ID)
 		out = append(out, dto)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
 type prefixRequest struct {
@@ -196,7 +196,7 @@ func (h *Handler) setPrefix(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "prefix": h.d.Manager.Prefix(provider)})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "prefix": h.d.Manager.Prefix(provider)})
 }
 
 // clearPrefix DELETE /api/jethub/{provider}/prefix — unbridge.
@@ -206,7 +206,7 @@ func (h *Handler) clearPrefix(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type proxyToggleRequest struct {
@@ -236,7 +236,7 @@ func (h *Handler) setProxyEnabled(w http.ResponseWriter, r *http.Request) {
 	if h.d.Manager.Prefix(provider) != "" && h.d.Bridge != nil {
 		_ = h.d.Bridge.SyncKeys(provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "proxyEnabled": *req.Enabled})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "proxyEnabled": *req.Enabled})
 }
 
 func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +245,7 @@ func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "unknown provider")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
 }
 
 type createAccountRequest struct {
@@ -276,7 +276,7 @@ func (h *Handler) createAccount(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"accountId": id, "credentialRef": credentialRef})
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{"accountId": id, "credentialRef": credentialRef})
 }
 
 type patchAccountRequest struct {
@@ -313,7 +313,7 @@ func (h *Handler) patchAccount(w http.ResponseWriter, r *http.Request) {
 	if acc, ok := h.d.Manager.FindAccount(accountID); ok && h.d.Manager.Prefix(acc.Provider) != "" {
 		_ = h.d.Bridge.SyncKeys(acc.Provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // deleteAccount DELETE /api/jethub/accounts/{accountID} — removes the entry,
@@ -332,7 +332,7 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if h.d.Manager.Prefix(acc.Provider) != "" {
 		_ = h.d.Bridge.SyncKeys(acc.Provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // listModels GET /api/jethub/{provider}/models — the static product table
@@ -358,7 +358,7 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		name, rate := modelDisplayParts(md)
 		out = append(out, modelEntry{ID: md.ID, Name: name, Rate: rate, Disabled: disabled[md.ID]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": out})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"models": out})
 }
 
 // modelDisplayParts splits a model definition into (display name, rate):
@@ -531,7 +531,7 @@ func (h *Handler) setModelDisabled(w http.ResponseWriter, r *http.Request) {
 	if h.d.Manager.Prefix(provider) != "" {
 		_ = h.d.Bridge.SyncKeys(provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"disabledModels": h.d.Manager.DisabledModels(provider),
 	})
@@ -560,7 +560,7 @@ func (h *Handler) batchDeleteModels(w http.ResponseWriter, r *http.Request) {
 	if h.d.Manager.Prefix(provider) != "" {
 		_ = h.d.Bridge.SyncKeys(provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // restoreDefaultModels DELETE /api/jethub/{provider}/models — clear the whole
@@ -578,7 +578,7 @@ func (h *Handler) restoreDefaultModels(w http.ResponseWriter, r *http.Request) {
 	if h.d.Manager.Prefix(provider) != "" {
 		_ = h.d.Bridge.SyncKeys(provider)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type rateLimitsRequest struct {
@@ -601,7 +601,7 @@ func (h *Handler) retestRateLimits(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	apibase.WriteJSON(w, http.StatusOK, res)
 }
 
 // resetRateLimits POST /api/jethub/{provider}/ratelimits/reset — clear the
@@ -619,7 +619,7 @@ func (h *Handler) resetRateLimits(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	apibase.WriteJSON(w, http.StatusOK, res)
 }
 
 // setPermanentLock PUT /api/jethub/{provider}/permanent-lock {locked} —
@@ -641,11 +641,5 @@ func (h *Handler) setPermanentLock(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "locked": *req.Locked})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "locked": *req.Locked})
 }

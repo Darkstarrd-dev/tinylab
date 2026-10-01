@@ -8,11 +8,7 @@
   let currentDiffTab = null;
   const ROW_HEIGHT = 22; // estimated row height for virtual scroll & change navigation
 
-  function escapeHtml(str) {
-    return (str || '').replace(/[&<>"']/g, m => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[m]));
-  }
+  function escapeHtml(str) { return window.escapeHtml(str); }
 
   /**
    * Computes diff using Web Worker for large files (>1000 lines), or main thread fallback.

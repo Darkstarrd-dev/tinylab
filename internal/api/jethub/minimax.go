@@ -76,7 +76,7 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	// nothing extra (CompleteMinimaxLogin already ran), deletes the
 	// placeholder on failure, records the outcome for the status poll.
 	go corejethub.SettleAndCleanup(sess, nil)
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -90,7 +90,7 @@ func (h *Handler) minimaxStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("minimax")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("minimax")})
 }
 
 // minimaxRefresh POST — silent renewal.
@@ -106,7 +106,7 @@ func (h *Handler) minimaxRefresh(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // minimaxClaim POST — daily check-in (timezone_id required query param).
@@ -124,7 +124,7 @@ func (h *Handler) minimaxClaim(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 }
 
 // minimaxBalance GET — Σ remaining_amount (total_count is the record COUNT,
@@ -136,5 +136,5 @@ func (h *Handler) minimaxBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }

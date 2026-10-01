@@ -100,14 +100,7 @@
     return value == null ? '' : String(value);
   }
 
-  function escapeHtml(value) {
-    return asText(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+  function escapeHtml(value) { return window.escapeHtml(asText(value)); }
 
   function getDocument() {
     return root.document || (typeof document !== 'undefined' ? document : null);

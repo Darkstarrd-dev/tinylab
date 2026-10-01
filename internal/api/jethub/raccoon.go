@@ -66,7 +66,7 @@ func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 	// Session registered → the page can already read its QR payload.
 	h.d.Manager.OpenURLWithBrowser(pageURL)
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -80,7 +80,7 @@ func (h *Handler) raccoonStatus(w http.ResponseWriter, r *http.Request) {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("raccoon")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("raccoon")})
 }
 
 // raccoonSmsSend POST {phone, captchaParam} — sends an AES-encrypted SMS.
@@ -97,7 +97,7 @@ func (h *Handler) raccoonSmsSend(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // raccoonSmsSubmit POST {accountId, phone, code} — completes SMS login.
@@ -115,7 +115,7 @@ func (h *Handler) raccoonSmsSubmit(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "accountId": req.AccountID})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "accountId": req.AccountID})
 }
 
 // raccoonRefresh POST — silent renewal.
@@ -131,7 +131,7 @@ func (h *Handler) raccoonRefresh(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // raccoonClaim POST — desktop login reward (idempotent-once).
@@ -148,7 +148,7 @@ func (h *Handler) raccoonClaim(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 }
 
 // raccoonBalance GET — points/v1/balance.
@@ -159,5 +159,5 @@ func (h *Handler) raccoonBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 }

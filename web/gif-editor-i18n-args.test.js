@@ -93,6 +93,9 @@ function makeContext(lang) {
   };
   sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
+  // The gif wrapper t() path touches window.escapeHtml (core-util.js) via the
+  // parameterized-message escape step.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), ctx, { filename: 'core-util.js' });
   vm.runInContext(I18N_SRC + '\n;globalThis.__L = L; globalThis.__t = t;', ctx);
   // The module wrapper references window.t — point it at the real global t.
   vm.runInContext('window.t = __t;', ctx);

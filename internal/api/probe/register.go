@@ -138,7 +138,7 @@ func (h *Handler) probeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := firstActiveKey(provider)
+	key := apibase.FirstActiveKey(provider)
 	if key == nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "no active key for this provider")
 		return
@@ -932,14 +932,4 @@ func probeResultToMap(res ProbeResult) map[string]any {
 // contextWithOverallTimeout returns a child context bounded by overall.
 func contextWithOverallTimeout(r *http.Request, overall time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), overall)
-}
-
-// firstActiveKey returns the first active key for a provider, or nil if none found.
-func firstActiveKey(provider *config.Provider) *config.Key {
-	for i := range provider.Keys {
-		if provider.Keys[i].IsActive {
-			return &provider.Keys[i]
-		}
-	}
-	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -38,19 +37,6 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/monitor/reset-quota", h.resetQuota)
 }
 
-// getIntQuery reads an integer query parameter with a default fallback.
-func getIntQuery(r *http.Request, key string, defaultVal int) int {
-	valStr := r.URL.Query().Get(key)
-	if valStr == "" {
-		return defaultVal
-	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil || val < 0 {
-		return defaultVal
-	}
-	return val
-}
-
 // decInFlightForKeyID decrements InFlight on the key runtime state whose ID
 // matches keyID. The usage entry only carries the key ID, not its provider,
 // so matching scans the providers' keys; key IDs are unique per provider in
@@ -80,8 +66,8 @@ func (h *Handler) decInFlightForKey(keyID, providerID string) {
 // --- Usage ---
 
 func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
-	limit := getIntQuery(r, "limit", 500)
-	offset := getIntQuery(r, "offset", 0)
+	limit := apibase.GetIntQuery(r, "limit", 500)
+	offset := apibase.GetIntQuery(r, "offset", 0)
 
 	// 兜底清理：将超过 10 分钟仍未完成的 processing 条目标记为 error
 	if h.d.ProxyHandler != nil && h.d.ProxyHandler.EntryTracker != nil {
@@ -163,8 +149,8 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 // getPlaygroundUsage 返回 Playground 来源的请求列表（独立 ring + playground
 // 来源的在途条目），供 Playground 页面左侧列表消费。与 /api/monitor 物理隔离。
 func (h *Handler) getPlaygroundUsage(w http.ResponseWriter, r *http.Request) {
-	limit := getIntQuery(r, "limit", 50)
-	offset := getIntQuery(r, "offset", 0)
+	limit := apibase.GetIntQuery(r, "limit", 50)
+	offset := apibase.GetIntQuery(r, "offset", 0)
 
 	var ringEntries []internalusage.Entry
 	if h.d.PgUsage != nil {

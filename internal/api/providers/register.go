@@ -402,7 +402,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := firstActiveKey(provider)
+	key := apibase.FirstActiveKey(provider)
 	if key == nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "no active key for this provider")
 		return
@@ -886,28 +886,4 @@ func (h *Handler) deleteProviderModel(w http.ResponseWriter, r *http.Request) {
 	} else {
 		apibase.WriteAPIError(w, http.StatusNotFound, "model not found")
 	}
-}
-
-// --- Helpers ---
-
-func firstActiveKey(provider *config.Provider) *config.Key {
-	for i := range provider.Keys {
-		if provider.Keys[i].IsActive {
-			return &provider.Keys[i]
-		}
-	}
-	return nil
-}
-
-// getIntQuery reads an integer query parameter with a default fallback.
-func getIntQuery(r *http.Request, key string, defaultVal int) int {
-	valStr := r.URL.Query().Get(key)
-	if valStr == "" {
-		return defaultVal
-	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil || val < 0 {
-		return defaultVal
-	}
-	return val
 }

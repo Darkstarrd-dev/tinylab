@@ -14,12 +14,6 @@ import (
 	"github.com/tinylab/tinylab/internal/storymaker"
 )
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
-}
-
 func timestampNow() int64 {
 	return time.Now().UnixMilli()
 }
@@ -118,7 +112,7 @@ func (h *Handler) getBooks(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get books: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"books": books})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"books": books})
 }
 
 func (h *Handler) createBook(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +155,7 @@ func (h *Handler) createBook(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt: now,
 		})
 	}
-	writeJSON(w, http.StatusOK, book)
+	apibase.WriteJSON(w, http.StatusOK, book)
 }
 
 func (h *Handler) patchBook(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +178,7 @@ func (h *Handler) patchBook(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "patch book: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	apibase.WriteJSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) deleteBook(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +191,7 @@ func (h *Handler) deleteBook(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete book: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) exportBook(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +223,7 @@ func (h *Handler) getOutline(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get outline: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outline": outline})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"outline": outline})
 }
 
 func (h *Handler) appendOutline(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +243,7 @@ func (h *Handler) appendOutline(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "append outline: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // sseFlusher sets up SSE headers and returns flusher.
@@ -613,7 +607,7 @@ func (h *Handler) generateCard(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "parse generated card json: "+err.Error()+", raw: "+resp)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"card": cardData})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"card": cardData})
 }
 
 func (h *Handler) generateCardProfiles(w http.ResponseWriter, r *http.Request) {
@@ -666,7 +660,7 @@ func (h *Handler) generateCardProfiles(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "parse profiles json: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) generateCardsBatch(w http.ResponseWriter, r *http.Request) {
@@ -715,7 +709,7 @@ func (h *Handler) generateCardsBatch(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "parse cards batch json: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cards": cards})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"cards": cards})
 }
 
 func (h *Handler) generateCardImagePrompts(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +762,7 @@ func (h *Handler) generateCardImagePrompts(w http.ResponseWriter, r *http.Reques
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "parse prompts json: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) simulateCharacter(w http.ResponseWriter, r *http.Request) {
@@ -1039,7 +1033,7 @@ func (h *Handler) finalizeChapter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) checkConsistency(w http.ResponseWriter, r *http.Request) {
@@ -1139,7 +1133,7 @@ func (h *Handler) checkConsistency(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
 		"status": out.Status,
 		"issues": savedIssues,
 	})
@@ -1183,7 +1177,7 @@ func (h *Handler) getPrompt(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get prompt: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"key": key, "content": prompt})
+	apibase.WriteJSON(w, http.StatusOK, map[string]string{"key": key, "content": prompt})
 }
 
 func (h *Handler) putPrompt(w http.ResponseWriter, r *http.Request) {
@@ -1203,7 +1197,7 @@ func (h *Handler) putPrompt(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "set prompt: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getCards(w http.ResponseWriter, r *http.Request) {
@@ -1213,7 +1207,7 @@ func (h *Handler) getCards(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get cards: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cards": cards})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"cards": cards})
 }
 
 func (h *Handler) saveCard(w http.ResponseWriter, r *http.Request) {
@@ -1246,7 +1240,7 @@ func (h *Handler) saveCard(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save card: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	apibase.WriteJSON(w, http.StatusOK, c)
 }
 
 func (h *Handler) deleteCard(w http.ResponseWriter, r *http.Request) {
@@ -1259,7 +1253,7 @@ func (h *Handler) deleteCard(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete card: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getChapters(w http.ResponseWriter, r *http.Request) {
@@ -1269,7 +1263,7 @@ func (h *Handler) getChapters(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get chapters: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"chapters": chapters})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"chapters": chapters})
 }
 
 func (h *Handler) saveChapter(w http.ResponseWriter, r *http.Request) {
@@ -1289,7 +1283,7 @@ func (h *Handler) saveChapter(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save chapter: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	apibase.WriteJSON(w, http.StatusOK, c)
 }
 
 func (h *Handler) patchChapter(w http.ResponseWriter, r *http.Request) {
@@ -1350,7 +1344,7 @@ func (h *Handler) patchChapter(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save chapter: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, existing)
+	apibase.WriteJSON(w, http.StatusOK, existing)
 }
 
 func (h *Handler) deleteChapter(w http.ResponseWriter, r *http.Request) {
@@ -1363,7 +1357,7 @@ func (h *Handler) deleteChapter(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete chapter: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getArchitecture(w http.ResponseWriter, r *http.Request) {
@@ -1378,10 +1372,10 @@ func (h *Handler) getArchitecture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if arch == nil {
-		writeJSON(w, http.StatusOK, map[string]any{})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
-	writeJSON(w, http.StatusOK, arch)
+	apibase.WriteJSON(w, http.StatusOK, arch)
 }
 
 func (h *Handler) saveArchitecture(w http.ResponseWriter, r *http.Request) {
@@ -1402,7 +1396,7 @@ func (h *Handler) saveArchitecture(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save arch: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, arch)
+	apibase.WriteJSON(w, http.StatusOK, arch)
 }
 
 func (h *Handler) getScenes(w http.ResponseWriter, r *http.Request) {
@@ -1412,7 +1406,7 @@ func (h *Handler) getScenes(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get scenes: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scenes": scenes})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"scenes": scenes})
 }
 
 func (h *Handler) saveScene(w http.ResponseWriter, r *http.Request) {
@@ -1434,7 +1428,7 @@ func (h *Handler) saveScene(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save scene: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, sc)
+	apibase.WriteJSON(w, http.StatusOK, sc)
 }
 
 func (h *Handler) deleteScene(w http.ResponseWriter, r *http.Request) {
@@ -1447,7 +1441,7 @@ func (h *Handler) deleteScene(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete scene: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getFragments(w http.ResponseWriter, r *http.Request) {
@@ -1457,7 +1451,7 @@ func (h *Handler) getFragments(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get fragments: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"fragments": fragments})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"fragments": fragments})
 }
 
 func (h *Handler) saveFragment(w http.ResponseWriter, r *http.Request) {
@@ -1479,7 +1473,7 @@ func (h *Handler) saveFragment(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save fragment: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, f)
+	apibase.WriteJSON(w, http.StatusOK, f)
 }
 
 func (h *Handler) deleteFragment(w http.ResponseWriter, r *http.Request) {
@@ -1492,7 +1486,7 @@ func (h *Handler) deleteFragment(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete fragment: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getIssues(w http.ResponseWriter, r *http.Request) {
@@ -1502,7 +1496,7 @@ func (h *Handler) getIssues(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get issues: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"issues": issues})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"issues": issues})
 }
 
 func (h *Handler) patchIssue(w http.ResponseWriter, r *http.Request) {
@@ -1542,7 +1536,7 @@ func (h *Handler) patchIssue(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save issue: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, existing)
+	apibase.WriteJSON(w, http.StatusOK, existing)
 }
 
 func (h *Handler) getStateEvents(w http.ResponseWriter, r *http.Request) {
@@ -1552,7 +1546,7 @@ func (h *Handler) getStateEvents(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get state events: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"stateEvents": events})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"stateEvents": events})
 }
 
 func (h *Handler) getMergeCandidates(w http.ResponseWriter, r *http.Request) {
@@ -1561,7 +1555,7 @@ func (h *Handler) getMergeCandidates(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "get merge candidates: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mergeCandidates": candidates})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"mergeCandidates": candidates})
 }
 
 func (h *Handler) saveMergeCandidate(w http.ResponseWriter, r *http.Request) {
@@ -1580,7 +1574,7 @@ func (h *Handler) saveMergeCandidate(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "save merge candidate: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, mc)
+	apibase.WriteJSON(w, http.StatusOK, mc)
 }
 
 func (h *Handler) deleteMergeCandidate(w http.ResponseWriter, r *http.Request) {
@@ -1593,5 +1587,5 @@ func (h *Handler) deleteMergeCandidate(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, "delete merge candidate: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

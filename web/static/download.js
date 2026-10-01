@@ -693,16 +693,9 @@ function applyContainerOptions(type) {
   if (labelEl && match) labelEl.textContent = labelOf(match);
 }
 
-// taskListItemHtml returns the compact left-side list row for a task.
-function formatBytes(bytes) {
-  if (!bytes || bytes <= 0) return '0 B';
-  var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  var i = Math.floor(Math.log(bytes) / Math.log(1024));
-  if (i < 0) i = 0;
-  if (i >= units.length) i = units.length - 1;
-  var value = bytes / Math.pow(1024, i);
-  return (i === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[i];
-}
+// formatBytes now lives in core-util.js (window.formatBytes) — the single
+// shared implementation for the host UI and playground.
+var formatBytes = function (bytes) { return window.formatBytes(bytes); };
 
 // formatSpeed formats a bytes/sec rate.
 function formatSpeed(bytesPerSec) {

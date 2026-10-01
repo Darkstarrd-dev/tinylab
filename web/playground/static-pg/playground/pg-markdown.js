@@ -32,10 +32,7 @@ function pgInitMarker() {
 }
 
 function pgMarkdownEscapeHtml(value) {
-  if (typeof pgEscapeHtml === 'function') return pgEscapeHtml(value == null ? '' : String(value));
-  return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-  });
+  return window.escapeHtml(value);
 }
 
 function pgMarkdownSafeHref(rawHref) {

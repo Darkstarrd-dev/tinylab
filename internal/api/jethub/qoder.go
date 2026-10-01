@@ -80,7 +80,7 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 	// Single-winner pump: records the outcome for the status poll and deletes
 	// the placeholder account when the flow failed (no credential-less entry).
 	go corejethub.SettleAndCleanup(sess, nil)
-	writeJSON(w, http.StatusCreated, map[string]any{
+	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
 		"loginUrl":  started.LoginURL,
@@ -95,7 +95,7 @@ func (h *Handler) qoderStatus(provider string) http.HandlerFunc {
 			h.pollLogin(loginID, w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
 	}
 }
 
@@ -113,7 +113,7 @@ func (h *Handler) qoderRefresh(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
 
@@ -133,7 +133,7 @@ func (h *Handler) qoderClaim(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"outcome": outcome})
 	}
 }
 
@@ -146,6 +146,6 @@ func (h *Handler) qoderBalance(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"balance": balance})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
 	}
 }

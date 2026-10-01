@@ -473,10 +473,10 @@ function pgImageProxyURL(url) {
 }
 
 function pgFormatBytes(n) {
+  // Delegate to the shared implementation (core-util.js); the '—' for
+  // missing values stays pg-specific.
   if (n === null || n === undefined || isNaN(n)) return '—';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1024 / 1024).toFixed(2) + ' MB';
+  return window.formatBytes(n);
 }
 
 function pgExtFromUrl(url) {

@@ -11,12 +11,15 @@ function isDownloadActive() {
   return true;
 }
 
+var downloadBackoffState = { delay: 3000 };
+
 function scheduleDownloadReconnect() {
   if (downloadReconnectTimer || !isDownloadActive()) return;
-  downloadReconnectTimer = setTimeout(function () {
+  window.sseBackoff.schedule(function () {
     downloadReconnectTimer = null;
     if (isDownloadActive()) connectDownloadSSE();
-  }, 3000);
+  }, downloadBackoffState);
+  downloadReconnectTimer = downloadBackoffState.timer;
 }
 
 // connectDownloadSSE subscribes to the download event stream with auto-reconnect.

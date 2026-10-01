@@ -86,9 +86,7 @@ function _batchOriginLabel() {
 // _formatSize renders a byte count as B/KB/MB.
 function _formatSize(b) {
   if (!b || b <= 0) return '';
-  if (b < 1024) return b + ' B';
-  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
-  return (b / 1048576).toFixed(1) + ' MB';
+  return window.formatBytes(b);
 }
 
 // _updateImageSourceInfo populates the two-row source-info block from the

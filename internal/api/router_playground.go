@@ -95,7 +95,9 @@ func (rt *Router) registerPlaygroundRoutes(
 // feature is compiled into the binary. Must be called before the catch-all
 // serveUI route so specific patterns win.
 func (rt *Router) registerPlaygroundStatic(r chi.Router) {
-	if !feature.Enabled(feature.Playground) {
+	// Match serveUI's selection matrix: when the playground is compiled in but
+	// disabled at runtime, neither the API routes nor the static assets mount.
+	if !feature.Enabled(feature.Playground) || !rt.reg.Config().EnablePlayground {
 		return
 	}
 	pgStatic, err := fs.Sub(web.PlaygroundStatic, "playground/static-pg")
