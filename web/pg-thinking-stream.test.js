@@ -88,7 +88,7 @@ function makeEnv() {
 
   const files = [
     'web/static/core-util.js',
-    'web/playground/static-pg/playground/pg-i18n.js',
+    'web/static/i18n.js',
     'web/playground/static-pg/playground/pg-core.js',
     'web/playground/static-pg/playground/pg-state.js',
     'web/playground/static-pg/playground/pg-markdown.js',

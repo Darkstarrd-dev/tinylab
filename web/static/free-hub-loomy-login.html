@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Free Hub 登录</title>
+<title>Free Hub · fhLoginTitle</title>
 <!--
   Free Hub 本地登录页 —— Loomy（讯飞）**微信扫码**。
 
@@ -55,26 +55,107 @@
 <body>
   <div class="card">
     <h1 id="page-title">使用微信扫码登录</h1>
-    <div class="qr" id="qr-box"><span class="qr-placeholder">二维码加载中…</span></div>
+    <div class="qr" id="qr-box"><span class="qr-placeholder" data-fh="fhLoginQrLoading"></span></div>
     <p class="sub" id="qr-hint">打开微信扫一扫，扫描下方二维码</p>
-    <div class="status" id="status">正在准备…</div>
+    <div class="status" id="status" data-fh="fhLoginPreparing"></div>
 
     <div id="phoneForm">
-      <label for="phone">首次使用需绑定手机号</label>
+      <label for="phone" data-fh="fhLoginBindPhoneLabel"></label>
       <div class="row">
-        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入 11 位手机号">
-        <button id="sendBtn" type="button">获取验证码</button>
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="" data-fh-ph="fhLoginBindPhonePlaceholder">
+        <button id="sendBtn" type="button" data-fh="fhLoginBindSendCode"></button>
       </div>
-      <label for="code">验证码</label>
-      <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="请输入 6 位验证码">
-      <button class="wide" id="verifyBtn" type="button">完成绑定并登录</button>
+      <label for="code" data-fh="fhLoginBindCodeLabel"></label>
+      <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="" data-fh-ph="fhLoginBindCodePlaceholder">
+      <button class="wide" id="verifyBtn" type="button" data-fh="fhLoginBindSubmit"></button>
       <div class="form-status" id="formStatus"></div>
     </div>
   </div>
 
 <script>
+// free-hub-i18n.js — tiny standalone dictionary for the login pages (they do
+// not load the host i18n.js). Loomy variant with the bind-phone keys.
+window.FH_I18N = {
+  en: {
+    fhLoginTitle: 'Sign in with WeChat',
+    fhLoginQrLoading: 'Loading QR code…',
+    fhLoginQrHint: 'Open WeChat and scan the QR code below',
+    fhLoginPreparing: 'Preparing…',
+    fhLoginMissingId: 'Missing loginId — click "New Account" in Free Hub again',
+    fhLoginGone: 'This sign-in does not exist or has ended',
+    fhLoginNoQr: 'This login method has no QR code to display',
+    fhLoginConnFailed: 'Cannot reach TinyLab (has the app exited?)',
+    fhLoginSuccess: 'Signed in — you can close this window',
+    fhLoginFailed: 'Sign-in failed',
+    fhLoginBindPhoneLabel: 'First-time use requires binding a phone number',
+    fhLoginBindPhonePlaceholder: 'Enter an 11-digit phone number',
+    fhLoginBindSendCode: 'Get code',
+    fhLoginBindCodeLabel: 'Verification code',
+    fhLoginBindCodePlaceholder: 'Enter the 6-digit code',
+    fhLoginBindSubmit: 'Bind and sign in',
+    fhLoginBindInvalidPhone: 'Enter a valid 11-digit phone number',
+    fhLoginBindSending: 'Sending…',
+    fhLoginBindCodeSent: 'Code sent — check your SMS',
+    fhLoginBindSendFailed: 'Send failed, please retry',
+    fhLoginBindSendFailedNet: 'Send failed, please check your network and retry',
+    fhLoginBindCodeRequired: 'Enter the verification code',
+    fhLoginBindSigningIn: 'Signing in…',
+    fhLoginBindCodeWrong: 'Incorrect verification code, please retry',
+    fhLoginBindSignFailedNet: 'Sign-in failed, please check your network and retry',
+    fhLoginQrImageAlt: 'WeChat sign-in QR code',
+    fhLoginQrLoadFailed: 'QR failed to load (network/proxy issue?)',
+    fhLoginScannedConfirm: 'Scanned — confirm on your phone…',
+    fhLoginCancelled: 'You cancelled authorization — close this window and retry',
+    fhLoginQrExpired: 'QR expired — close this window and start again',
+    fhLoginScannedBind: 'Scanned — please bind your phone number'
+  },
+  cn: {
+    fhLoginTitle: '使用微信扫码登录',
+    fhLoginQrLoading: '二维码加载中…',
+    fhLoginQrHint: '打开微信扫一扫，扫描下方二维码',
+    fhLoginPreparing: '正在准备…',
+    fhLoginMissingId: '缺少 loginId —— 请从 Free Hub 重新点击「新建账号」',
+    fhLoginGone: '登录会话不存在或已结束',
+    fhLoginNoQr: '该登录方式没有可展示的二维码',
+    fhLoginConnFailed: '无法连接 TinyLab（应用是否已退出？）',
+    fhLoginSuccess: '登录成功，可以关闭此窗口了',
+    fhLoginFailed: '登录失败',
+    fhLoginBindPhoneLabel: '首次使用需绑定手机号',
+    fhLoginBindPhonePlaceholder: '请输入 11 位手机号',
+    fhLoginBindSendCode: '获取验证码',
+    fhLoginBindCodeLabel: '验证码',
+    fhLoginBindCodePlaceholder: '请输入 6 位验证码',
+    fhLoginBindSubmit: '完成绑定并登录',
+    fhLoginBindInvalidPhone: '请输入有效的 11 位手机号',
+    fhLoginBindSending: '发送中…',
+    fhLoginBindCodeSent: '验证码已发送，请查收短信',
+    fhLoginBindSendFailed: '发送失败，请重试',
+    fhLoginBindSendFailedNet: '发送失败，请检查网络后重试',
+    fhLoginBindCodeRequired: '请输入验证码',
+    fhLoginBindSigningIn: '登录中…',
+    fhLoginBindCodeWrong: '验证码不正确，请重试',
+    fhLoginBindSignFailedNet: '登录失败，请检查网络后重试',
+    fhLoginQrImageAlt: '微信登录二维码',
+    fhLoginQrLoadFailed: '二维码加载失败（可能是网络/代理问题）',
+    fhLoginScannedConfirm: '已扫码，请在手机上确认…',
+    fhLoginCancelled: '你已取消授权，请关闭窗口后重试',
+    fhLoginQrExpired: '二维码已失效，请关闭窗口后重新发起登录',
+    fhLoginScannedBind: '扫码成功，请绑定手机号'
+  }
+};
+window.fhT = function (key) {
+  var lang = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'cn' : 'en';
+  var dict = window.FH_I18N[lang] || window.FH_I18N.en;
+  return dict[key] || window.FH_I18N.en[key] || key;
+};
+</script>
+<script>
 (function () {
   'use strict';
+
+  document.title = 'Free Hub — ' + fhT('fhLoginTitle');
+    document.querySelectorAll('[data-fh]').forEach(function (el) { el.textContent = fhT(el.getAttribute('data-fh')); });
+  document.querySelectorAll('[data-fh-ph]').forEach(function (el) { el.setAttribute('placeholder', fhT(el.getAttribute('data-fh-ph'))); });
 
   var params = new URLSearchParams(window.location.search);
   var loginId = params.get('loginId') || '';
@@ -101,7 +182,7 @@
   function stop() { stopped = true; }
 
   if (loginId === '') {
-    setStatus('缺少 loginId —— 请从 Free Hub 重新点击「新建账号」', 'err');
+    setStatus(fhT('fhLoginMissingId'), 'err');
     return;
   }
 
@@ -110,25 +191,26 @@
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (!data || !data.ok) {
-        setStatus((data && data.error) || '登录会话不存在或已结束', 'err');
+        setStatus((data && data.error) || fhT('fhLoginGone'), 'err');
         return;
       }
-      if (data.title) { document.getElementById('page-title').textContent = data.title; }
+      var titleKey = data.provider ? ('fhLoginTitle_' + data.provider) : null;
+      document.getElementById('page-title').textContent = (titleKey && fhT(titleKey) !== titleKey) ? fhT(titleKey) : (data.title || fhT('fhLoginTitle'));
       if (data.hint) { document.getElementById('qr-hint').textContent = data.hint; }
       if (!data.qrImage) {
-        setStatus('该登录方式没有可展示的二维码', 'err');
+        setStatus(fhT('fhLoginNoQr'), 'err');
         return;
       }
       qrBox.innerHTML = '';
       var img = document.createElement('img');
-      img.alt = '微信登录二维码';
+      img.alt = fhT('fhLoginQrImageAlt');
       img.src = data.qrImage;
-      img.onerror = function () { setStatus('二维码加载失败（可能是网络/代理问题）', 'err'); };
+      img.onerror = function () { setStatus(fhT('fhLoginQrLoadFailed'), 'err'); };
       qrBox.appendChild(img);
-      setStatus('等待扫码…');
+      setStatus(fhT('fhLoginWaitingScan'));
       poll();
     })
-    .catch(function () { setStatus('无法连接 TinyLab（应用是否已退出？）', 'err'); });
+    .catch(function () { setStatus(fhT('fhLoginConnFailed'), 'err'); });
 
   // ---- 轮询：每次调用推进一次上游长轮询（宿主侧执行） ----
   function poll() {
@@ -138,36 +220,36 @@
       .then(function (data) {
         if (stopped) { return; }
         if (!data || !data.ok) {
-          setStatus((data && data.error) || '登录会话不存在或已结束', 'err');
+          setStatus((data && data.error) || fhT('fhLoginGone'), 'err');
           stop();
           return;
         }
         var stage = data.stage;
         if (stage === 'done') {
           stop();
-          setStatus('登录成功，可以关闭此窗口了', 'ok');
+          setStatus(fhT('fhLoginSuccess'), 'ok');
           setTimeout(function () { window.close(); }, 1200);
           return;
         }
         if (stage === 'need_phone') {
           stop();
-          setStatus('扫码成功，请绑定手机号');
+          setStatus(fhT('fhLoginScannedBind'));
           formEl.setAttribute('data-show', '1');
           phoneEl.focus();
           return;
         }
         if (stage === 'cancelled') {
           stop();
-          setStatus(data.message || '你已取消授权，请关闭窗口后重试', 'err');
+          setStatus(data.message || fhT('fhLoginCancelled'), 'err');
           return;
         }
         if (stage === 'expired') {
           stop();
-          setStatus(data.message || '二维码已失效，请关闭窗口后重新发起登录', 'err');
+          setStatus(data.message || fhT('fhLoginQrExpired'), 'err');
           return;
         }
-        if (stage === 'scanned') { setStatus('已扫码，请在手机上确认…'); }
-        else { setStatus('等待扫码…'); }
+        if (stage === 'scanned') { setStatus(fhT('fhLoginScannedConfirm')); }
+        else { setStatus(fhT('fhLoginWaitingScan')); }
         setTimeout(poll, 500);
       })
       .catch(function () {
@@ -187,35 +269,35 @@
 
   sendBtn.addEventListener('click', function () {
     var phone = (phoneEl.value || '').replace(/\D/g, '');
-    if (phone.length !== 11) { setFormStatus('请输入有效的 11 位手机号'); return; }
+    if (phone.length !== 11) { setFormStatus(fhT('fhLoginBindInvalidPhone')); return; }
     phoneEl.value = phone;
     sendBtn.disabled = true;
-    setFormStatus('发送中…');
+    setFormStatus(fhT('fhLoginBindSending'));
     complete({ action: 'send_sms', phone: phone })
       .then(function (data) {
-        if (data && data.ok) { setFormStatus('验证码已发送，请查收短信', 'ok'); }
-        else { setFormStatus((data && data.message) || '发送失败，请重试'); }
+        if (data && data.ok) { setFormStatus(fhT('fhLoginBindCodeSent'), 'ok'); }
+        else { setFormStatus((data && data.message) || fhT('fhLoginBindSendFailed')); }
       })
-      .catch(function () { setFormStatus('发送失败，请检查网络后重试'); })
+      .catch(function () { setFormStatus(fhT('fhLoginBindSendFailedNet')); })
       .finally(function () { sendBtn.disabled = false; });
   });
 
   verifyBtn.addEventListener('click', function () {
     var phone = (phoneEl.value || '').replace(/\D/g, '');
     var code = (codeEl.value || '').replace(/\D/g, '');
-    if (code.length === 0) { setFormStatus('请输入验证码'); return; }
+    if (code.length === 0) { setFormStatus(fhT('fhLoginBindCodeRequired')); return; }
     verifyBtn.disabled = true;
-    setFormStatus('登录中…');
+    setFormStatus(fhT('fhLoginBindSigningIn'));
     complete({ action: 'verify_sms', phone: phone, code: code })
       .then(function (data) {
         if (data && data.ok) {
-          setFormStatus('登录成功，可以关闭此窗口了', 'ok');
+          setFormStatus(fhT('fhLoginSuccess'), 'ok');
           setTimeout(function () { window.close(); }, 1200);
         } else {
-          setFormStatus((data && data.message) || '验证码不正确，请重试');
+          setFormStatus((data && data.message) || fhT('fhLoginBindCodeWrong'));
         }
       })
-      .catch(function () { setFormStatus('登录失败，请检查网络后重试'); })
+      .catch(function () { setFormStatus(fhT('fhLoginBindSignFailedNet')); })
       .finally(function () { verifyBtn.disabled = false; });
   });
 })();

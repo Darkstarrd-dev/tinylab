@@ -7,7 +7,7 @@ import "embed"
 // Static embeds the core UI assets (the admin SPA: app/api/i18n/endpoint/providers/
 // combos/usage/console JS, style.css, logos, favicons, manifest, and a no-playground
 // index.html variant). Playground-specific assets (vendor JS/CSS, KaTeX fonts,
-// playground.js, playground.css, pg-i18n.js) are NOT in this FS; they live in
+// playground.js, playground.css) are NOT in this FS; they live in
 // web/playground/static-pg and are only embedded when the `playground` build tag
 // is set. See web/playground/embed_playground.go and embed_playground_stub.go.
 //

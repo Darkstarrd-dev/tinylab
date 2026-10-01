@@ -13,7 +13,7 @@
 //
 // Dictionaries:
 //   web/static/i18n.js                          const L = { en: {...}, cn: {...} }
-//   web/playground/static-pg/playground/pg-i18n.js   window.PG_I18N = { en: {...}, cn: {...} }
+//   (the former pg-i18n.js was merged into L in the G1 refactor)
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
@@ -24,11 +24,6 @@ const DICTS = [
     file: 'web/static/i18n.js',
     label: 'host',
     // top-level locale block: newline + exactly-2-space indent + `en:`/`cn:`
-    localeRe: (loc) => new RegExp('\\n  ' + loc + ':\\s*\\{'),
-  },
-  {
-    file: 'web/playground/static-pg/playground/pg-i18n.js',
-    label: 'pg',
     localeRe: (loc) => new RegExp('\\n  ' + loc + ':\\s*\\{'),
   },
 ];
@@ -265,6 +260,72 @@ if (mode === 'check') {
   const f = check(false);
   console.log(f === 0 ? 'CHECK OK (0 failures)' : `CHECK FAILED: ${f} failures`);
   process.exit(f === 0 ? 0 : 1);
+} else if (mode === 'check-hardcoded') {
+  // --hardcoded audit: flag CJK UI strings in web JS/HTML that are NOT inside
+  // a t()/T()/trT()/pgT()/fhT() call, a data-i18n attribute, an HTML comment,
+  // or the known whitelist (LLM prompts / domain content / theme names).
+  const cjk = /[\u3400-\u9FFF]/;
+  const walkAll = (d, acc) => {
+    let list; try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return acc; }
+    for (const e of list) {
+      if (/vendor|node_modules|\.git|tools/.test(e.name)) continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walkAll(p, acc);
+      else if (/\.(js|html)$/.test(e.name)) acc.push(p);
+    }
+    return acc;
+  };
+  const whitelist = [
+    'pg-director.js', 'pg-setup.js', 'story-rolechat.js', 'story-batch.js',
+    'story-m0.js', 'story-m1.js', 'story-m2.js', 'story-m3.js', 'story-m4.js', 'story-m5.js',
+    'storymaker.js', 'story-home.js', 'theme.js', 'demo-designer.js',
+    'pg-image-batch.js', 'pg-autochat.js', 'pg-search.js', 'sprite-pet.js',
+    'i18n.js', 'core-util.js', 'free-hub-login.html', 'free-hub-loomy-login.html',
+    'i18n-lint.mjs',
+  ];
+  // Category C whitelist notes (verified 2026-10-01, G2 scope C):
+  // - editor_textreview_*.js / editor_shell.js: `‖ '中文'` fallback style with
+  //   existing dict keys — remaining CJK is fallback literals beside t() calls
+  //   on adjacent lines (category A/B), scheduled with the tr* cleanup in a
+  //   dedicated pass; converting line-by-line here risks editor regressions.
+  // - editor-v2-extras.js: AI task systemPrompt/userPromptTpl are Chinese LLM
+  //   prompts (domain content per plan); their labels are converted.
+  // - editor-v2-diff.js residuals: Monaco diff editor aria/tooltip phrases and
+  //   decision statuses already routed through t() on adjacent lines.
+  // - games/Unit*/main.js: game plugins are vendored domain content (plan: 不要触碰 games/).
+  // - raccoon-qr.js: vendor-style QR helper (origin annotations).
+  // - sprite-pet.html: pet page declares the chat iframe content; strings are
+  //   prompts/status data, converted keys live in sprite.js.
+  // - pg-render.js / pg-comfyui.js / gallery-meta.js / pg-ui-params.js:
+  //   classifier keyword lists ('负'/'正' matching against model output) and
+  //   size labels derived from backend data — matching semantics, not UI text.
+  // - settings_assistant_model.js / settings_modal.js / editor-v2.js /
+  //   editor-v2-embed.js: toast/title fallbacks already behind t()/tr() with
+  //   dict keys; residual CJK is the fallback argument itself.
+  let count = 0;
+  for (const f of walkAll(path.join(ROOT, 'web'), [])) {
+    const rel = path.relative(ROOT, f).replace(/\\/g, '/');
+    if (whitelist.some((w) => rel.endsWith(w))) continue;
+    const lines = fs.readFileSync(f, 'utf8').split('\n');
+    let inBlock = false;
+    lines.forEach((ln, i) => {
+      const tr = ln.trim();
+      if (inBlock) { if (/\*\//.test(tr)) inBlock = false; return; }
+      if (/^\/\*/.test(tr) && !/\*\//.test(tr)) { inBlock = true; return; }
+      if (tr.startsWith('//') || tr.startsWith('*') || tr.startsWith('<!--')) return;
+      if (!cjk.test(ln)) return;
+      // Trailing line comments are maintainer notes, not UI text. Strip them
+      // (naively but safely enough: comments never contain quotes here).
+      const codeOnly = ln.replace(/(^|[^:'"])\/\/.*$/, '$1');
+      if (!cjk.test(codeOnly)) return;
+      const hasI18n = /\b(?:window\.)?(?:t|T|trT|pgT|fhT)\s*\(/.test(ln) || /shared\.fns\.t\s*\(/.test(ln) || /data-i18n/.test(ln) || /data-fh/.test(ln);
+      if (hasI18n) return;
+      count++;
+      console.log(`HARDCODED ${rel}:${i + 1}  ${tr.trim().slice(0, 110)}`);
+    });
+  }
+  console.log(`HARDCODED-SCAN: ${count} line(s) outside whitelist`);
+  process.exit(0);
 } else if (mode === '--prune') {
   const f = check(true);
   process.exit(0);

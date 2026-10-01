@@ -110,7 +110,8 @@ function makeEnv() {
   const dir = path.join(__dirname, 'playground', 'static-pg', 'playground');
   // core-util.js lives in the host static root, not the pg playground dir.
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), ctx, { filename: 'core-util.js' });
-  const files = ['pg-core.js', 'pg-i18n.js', 'pg-ui.js', 'pg-ui-params.js', 'pg-ui-reqleft.js', 'pg-ui-events.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/i18n.js'), 'utf8'), ctx, { filename: 'i18n.js' });
+  const files = ['pg-core.js', 'pg-ui.js', 'pg-ui-params.js', 'pg-ui-reqleft.js', 'pg-ui-events.js', 'pg-modal.js', 'pg-request.js', 'pg-image-model.js', 'pg-image-tasks.js'];
   for (const f of files) {
     const code = fs.readFileSync(path.join(dir, f), 'utf8');
     vm.runInContext(code, ctx, { filename: f });
@@ -202,7 +203,8 @@ async function run() {
 
   await check('SenseNova i18n keys are present in both EN and CN', () => {
     const { sandbox } = makeEnv();
-    const i18n = sandbox.PG_I18N;
+    // G1 merged pg* keys into the host L dictionary.
+    const i18n = sandbox.L;
     const requiredKeys = [
       'pgSnWatermark', 'pgSnWatermarkOn', 'pgSnWatermarkOff',
       'pgSnPromptExtend', 'pgSnPromptExtendOn', 'pgSnPromptExtendOff'

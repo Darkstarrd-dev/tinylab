@@ -153,7 +153,7 @@ func registerDefaults() {
 		Description: "Playground SPA + attached backends (comfyui proxy, image batch, anysearch). Static assets only with the playground build tag.",
 		StaticRoot:  RootPlaygroundPG,
 		StaticFiles: []string{
-			"playground/playground.js", "playground/pg-i18n.js",
+			"playground/playground.js",
 			"playground/pg-core.js", "playground/pg-state.js", "playground/pg-markdown.js",
 			"playground/pg-request.js", "playground/pg-stream.js", "playground/pg-comfyui.js", "playground/pg-image-model.js", "playground/pg-image-tasks.js", "playground/pg-image-inspire.js", "playground/pg-image-batch.js", "playground/pg-autochat.js",
 			"playground/pg-render.js", "playground/pg-ui-params.js", "playground/pg-presets.js", "playground/pg-ui-reqleft.js", "playground/pg-ui-events.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",

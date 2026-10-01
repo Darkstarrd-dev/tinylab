@@ -64,6 +64,7 @@ function makeEl(tag) {
 
 const document = {
   readyState: 'complete',
+  documentElement: { getAttribute: () => 'en' },
   body: { appendChild() {} },
   createElement: makeEl,
   getElementById(id) { return idMap[id]; },
@@ -105,6 +106,8 @@ const sandbox = {
   document,
   window,
   console,
+  // i18n.js t() reads document.documentElement at load time.
+  documentElement: { getAttribute: () => 'en' },
   // sprite.js references these as free vars (browser globals), not window.*:
   localStorage: window.localStorage,
   setTimeout: window.setTimeout,
@@ -112,8 +115,10 @@ const sandbox = {
   fetch: () => Promise.reject(new Error('no fetch in test')),
 };
 vm.createContext(sandbox);
-const SRC = fs.readFileSync(path.join(__dirname, 'static/sprite.js'), 'utf8');
-vm.runInContext(SRC, sandbox, { filename: 'sprite.js' });
+// sprite.js now calls t('sprite*') at init time → load the dictionary first.
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/core-util.js'), 'utf8'), sandbox, { filename: 'core-util.js' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/i18n.js'), 'utf8'), sandbox, { filename: 'i18n.js' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'static/sprite.js'), 'utf8'), sandbox, { filename: 'sprite.js' });
 
 check('init: dock created + positioned (default right, centered)', () => {
   assert.ok(idMap['sprite-dock'], 'dock element created');

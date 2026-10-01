@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Free Hub 登录</title>
+<title>Free Hub · fhLoginTitle</title>
 <!--
   Free Hub 本地登录页（扫码类 provider）。
 
@@ -37,16 +37,72 @@
 </head>
 <body>
   <div class="card">
-    <h1 id="page-title">登录</h1>
-    <div class="qr" id="qr-box"><span class="qr-placeholder">二维码加载中…</span></div>
+    <h1 id="page-title" data-fh="fhLoginTitle"></h1>
+    <div class="qr" id="qr-box"><span class="qr-placeholder" data-fh="fhLoginQrLoading"></span></div>
     <p class="sub" id="qr-hint">打开微信扫一扫，扫描上方二维码</p>
-    <div class="status" id="status">正在准备…</div>
+    <div class="status" id="status" data-fh="fhLoginPreparing"></div>
   </div>
 
+
+<script>
+// free-hub-i18n.js — tiny standalone dictionary for the two login pages
+// (they do not load the host i18n.js). provider-specific titles come from
+// the data payload; dict falls back by key.
+window.FH_I18N = {
+  en: {
+    fhLoginTitle: 'Sign in',
+    fhLoginQrLoading: 'Loading QR code…',
+    fhLoginQrHint: 'Open WeChat and scan the QR code above',
+    fhLoginPreparing: 'Preparing…',
+    fhLoginMissingId: 'Missing loginId — click "New Account" in Free Hub again',
+    fhLoginGone: 'This sign-in does not exist or has ended',
+    fhLoginNoQr: 'This login method has no QR code to display',
+    fhLoginQrFailed: 'QR generation failed: ',
+    fhLoginWaitingScan: 'Waiting for scan…',
+    fhLoginConnFailed: 'Cannot reach TinyLab (has the app exited?)',
+    fhLoginSuccess: 'Signed in — you can close this window',
+    fhLoginFailed: 'Sign-in failed',
+    fhLoginSubmit: 'Submit',
+    fhLoginPhonePlaceholder: 'Phone number',
+    fhLoginCodePlaceholder: 'SMS code',
+    fhLoginSendCode: 'Send code',
+    fhLoginBindTitle: 'Bind your account',
+    fhLoginInvalidCode: 'Invalid verification code',
+  },
+  cn: {
+    fhLoginTitle: '登录',
+    fhLoginQrLoading: '二维码加载中…',
+    fhLoginQrHint: '打开微信扫一扫，扫描上方二维码',
+    fhLoginPreparing: '正在准备…',
+    fhLoginMissingId: '缺少 loginId —— 请从 Free Hub 重新点击「新建账号」',
+    fhLoginGone: '登录会话不存在或已结束',
+    fhLoginNoQr: '该登录方式没有可展示的二维码',
+    fhLoginQrFailed: '二维码生成失败：',
+    fhLoginWaitingScan: '等待扫码…',
+    fhLoginConnFailed: '无法连接 TinyLab（应用是否已退出？）',
+    fhLoginSuccess: '登录成功，可以关闭此窗口了',
+    fhLoginFailed: '登录失败',
+    fhLoginSubmit: '提交',
+    fhLoginPhonePlaceholder: '手机号',
+    fhLoginCodePlaceholder: '短信验证码',
+    fhLoginSendCode: '发送验证码',
+    fhLoginBindTitle: '绑定账号',
+    fhLoginInvalidCode: '验证码错误',
+  }
+};
+window.fhT = function (key) {
+  var lang = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'cn' : 'en';
+  var dict = window.FH_I18N[lang] || window.FH_I18N.en;
+  return dict[key] || window.FH_I18N.en[key] || key;
+};
+</script>
 <script src="/raccoon-qr.js"></script>
 <script>
 (function () {
   'use strict';
+
+  document.title = 'Free Hub — ' + fhT('fhLoginTitle');
+    document.querySelectorAll('[data-fh]').forEach(function (el) { el.textContent = fhT(el.getAttribute('data-fh')); });
 
   var POLL_INTERVAL_MS = 2000;
   var params = new URLSearchParams(window.location.search);
@@ -73,7 +129,7 @@
   }
 
   if (loginId === '') {
-    fail('缺少 loginId —— 请从 Free Hub 重新点击「新建账号」');
+    fail(fhT('fhLoginMissingId'));
     return;
   }
 
@@ -82,27 +138,28 @@
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (!data || !data.ok) {
-        fail((data && data.error) || '登录会话不存在或已结束');
+        fail((data && data.error) || fhT('fhLoginGone'));
         return;
       }
-      if (data.title) { document.getElementById('page-title').textContent = data.title; }
+      var titleKey = data.provider ? ('fhLoginTitle_' + data.provider) : null;
+      document.getElementById('page-title').textContent = (titleKey && fhT(titleKey) !== titleKey) ? fhT(titleKey) : (data.title || fhT('fhLoginTitle'));
       if (data.hint) { document.getElementById('qr-hint').textContent = data.hint; }
       if (!data.qr) {
-        fail('该登录方式没有可展示的二维码');
+        fail(fhT('fhLoginNoQr'));
         return;
       }
       try {
         qrBox.innerHTML = window.RaccoonQR.renderQrSvg(data.qr, { size: 220 });
       } catch (e) {
-        fail('二维码生成失败：' + (e && e.message ? e.message : e));
+        fail(fhT('fhLoginQrFailed') + (e && e.message ? e.message : e));
         return;
       }
-      setStatus('等待扫码…');
+      setStatus(fhT('fhLoginWaitingScan'));
       timer = setInterval(poll, POLL_INTERVAL_MS);
       poll();
     })
     .catch(function () {
-      fail('无法连接 TinyLab（应用是否已退出？）');
+      fail(fhT('fhLoginConnFailed'));
     });
 
   function poll() {
@@ -111,11 +168,11 @@
       .then(function (data) {
         if (!data) { return; }
         if (data.done) {
-          if (data.success) { succeed('登录成功，可以关闭此窗口了'); }
-          else { fail(data.error || '登录失败'); }
+          if (data.success) { succeed(fhT('fhLoginSuccess')); }
+          else { fail(data.error || fhT('fhLoginFailed')); }
           return;
         }
-        setStatus('等待扫码…');
+        setStatus(fhT('fhLoginWaitingScan'));
       })
       .catch(function () { /* 轮询偶发失败不打断（下一次继续） */ });
   }

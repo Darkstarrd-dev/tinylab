@@ -46,7 +46,7 @@ function makeEnv() {
 
   const files = [
     'web/static/core-util.js',
-    'web/playground/static-pg/playground/pg-i18n.js',
+    'web/static/i18n.js',
     'web/playground/static-pg/playground/pg-core.js',
     'web/playground/static-pg/playground/pg-render.js'
   ];
@@ -129,8 +129,9 @@ async function runAll() {
   });
 
   await check('i18n translations contain all required media keys', () => {
-    const cn = env.PG_I18N.cn;
-    const en = env.PG_I18N.en;
+    // G1 merged the pg* keys into the host L dictionary.
+    const cn = env.L.cn;
+    const en = env.L.en;
     const requiredKeys = [
       'pgPdfPreview', 'pgVideoPreview', 'pgAudioPreview',
       'pgPdfDoc', 'pgVideoFile', 'pgAudioFile',

@@ -81,7 +81,7 @@ function makeEnv(lang) {
 
   const files = [
     'web/static/core-util.js',
-    'web/playground/static-pg/playground/pg-i18n.js',
+    'web/static/i18n.js',
     'web/playground/static-pg/playground/pg-core.js',
     'web/static/monitor/monitor_state.js',
     'web/playground/static-pg/playground/pg-ui-reqleft.js',
@@ -293,7 +293,11 @@ async function runAll() {
   await check('i18n: shared app keys still fall through to the host dictionary', () => {
     const env = makeEnv();
     env.t = (k) => (k === 'thTTFT' ? 'TTFT-host' : k);
-    assert.strictEqual(env.pgT('thTTFT'), 'TTFT-host');
+    // G1 merged pg* keys into L; pgT reads window.L first, so a shared key
+    // resolves from the same dictionary as t() — no separate PG dict anymore.
+    assert.strictEqual(env.pgT('thTTFT'), env.L.en.thTTFT);
+    // A key that exists in NEITHER dictionary falls back to the t() stub.
+    assert.strictEqual(env.pgT('noSuchKeyXyz'), 'noSuchKeyXyz');
     assert.strictEqual(env.pgT('pgDurationSec', ['2']), '2s', 'pg keys must not reach the host dictionary');
   });
 

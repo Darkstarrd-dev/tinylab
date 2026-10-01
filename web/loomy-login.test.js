@@ -48,7 +48,11 @@ check('page structure matches the plugin (image QR + hidden bind-phone form)', (
   assert.ok(PAGE.includes('createElement(\'img\')') || PAGE.includes('<img'), 'QR must be an <img> (WeChat serves a JPEG — it cannot be re-encoded client-side)');
   assert.ok(PAGE.includes('img.src = data.qrImage'), 'the image src must come from the payload (uuid stays host-side)');
   assert.ok(PAGE.includes('#phoneForm') && PAGE.includes('data-show'), 'bind-phone form must exist and start hidden');
-  assert.ok(PAGE.includes('首次使用需绑定手机号'), 'form label must explain why the phone is needed');
+  // G2 i18n: the label text moved into the FH_I18N dict; the page references
+  // it via data-fh="fhLoginBindPhoneLabel" (the dict still carries the
+  // 中文 explanation of why the phone is needed).
+  assert.ok(PAGE.includes('data-fh="fhLoginBindPhoneLabel"') && PAGE.includes('首次使用需绑定手机号'),
+    'form label must explain why the phone is needed');
   assert.ok(PAGE.includes('need_phone'), 'page must handle the need_phone stage');
   assert.ok(PAGE.includes("action: 'send_sms'") && PAGE.includes("action: 'verify_sms'"), 'both bind actions must be sent');
   assert.ok(PAGE.includes('window.close()'), 'page must close itself after success');

@@ -117,17 +117,17 @@ function openModelPickerModal(currentValue, onSelect) {
     overlay.innerHTML =
       '<div class="modal" style="max-width:480px; width:90%; max-height:80vh; display:flex; flex-direction:column;">' +
         '<div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">' +
-          '<span>选择 AI 模型 (Model)</span>' +
+          '<span>' + t('modelPickerTitle') + '</span>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="picker-close" style="padding:2px 8px;">✕</button>' +
         '</div>' +
         '<div style="margin-top:10px;">' +
-          '<input type="text" class="input" id="picker-filter" placeholder="搜索过滤模型 (Filter models)..." style="width:100%; box-sizing:border-box;" />' +
+          '<input type="text" class="input" id="picker-filter" placeholder="' + escapeAttr(t('modelPickerFilter')) + '" style="width:100%; box-sizing:border-box;" />' +
         '</div>' +
         '<div id="picker-list" style="margin-top:10px; flex:1; overflow-y:auto; max-height:360px; display:flex; flex-direction:column; gap:4px; padding-right:4px;">' +
         '</div>' +
         '<div class="modal-footer" style="margin-top:12px;">' +
-          '<button type="button" class="btn btn-ghost" id="picker-cancel">取消</button>' +
-          '<button type="button" class="btn btn-primary" id="picker-confirm">确定</button>' +
+          '<button type="button" class="btn btn-ghost" id="picker-cancel">' + t('cancel') + '</button>' +
+          '<button type="button" class="btn btn-primary" id="picker-confirm">' + t('confirm') + '</button>' +
         '</div>' +
       '</div>';
     overlay.classList.add('show');
@@ -145,7 +145,7 @@ function openModelPickerModal(currentValue, onSelect) {
         return !query || it.id.toLowerCase().indexOf(query) >= 0 || it.name.toLowerCase().indexOf(query) >= 0;
       });
       if (filtered.length === 0) {
-        listEl.innerHTML = '<div style="padding:16px; text-align:center; opacity:0.6; font-size:13px;">无匹配模型</div>';
+        listEl.innerHTML = '<div style="padding:16px; text-align:center; opacity:0.6; font-size:13px;">' + t('modelPickerNoMatch') + '</div>';
         return;
       }
       filtered.forEach(function(it) {

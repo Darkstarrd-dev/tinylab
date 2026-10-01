@@ -198,15 +198,14 @@ function pgEscapeAttr(s) {
 }
 function pgCopyToClipboard(tx, lb) { return PG_HOST && PG_HOST.copyToClipboard ? PG_HOST.copyToClipboard(tx, lb) : copyToClipboard(tx, lb); }
 function pgT(k, ar) {
-  // PG_I18N is the authoritative dictionary for every playground key; the
-  // host dictionary (web/static/i18n.js) carries only app-level keys. Looking
-  // PG_I18N up first is what makes '{0}s' style pg* keys resolve instead of
-  // falling through to the host t() and rendering the raw key name.
-  if (typeof window !== 'undefined' && window.PG_I18N) {
-    var lang = document.documentElement.getAttribute('data-lang') || (localStorage && localStorage.getItem('lang')) || 'en';
-    var dict = window.PG_I18N[lang] || {};
+  // All playground keys (pg*) live in the host L dictionary since the G1
+  // merge; looking pg keys up directly keeps '{0}s'-style keys resolving
+  // without falling through to host t() and rendering the raw key name.
+  if (typeof window !== 'undefined' && window.L) {
+    var lang = document.documentElement.getAttribute('data-lang') || 'en';
+    var dict = window.L[lang] || window.L['en'] || {};
     var s = dict[k];
-    if (s == null && window.PG_I18N['en']) s = window.PG_I18N['en'][k];
+    if (s == null && window.L['en']) s = window.L['en'][k];
     if (s != null) {
       if (ar && ar.length) {
         return s.replace(/\{(\d+)\}/g, function(_, i) { return ar[+i] != null ? ar[+i] : ''; });
@@ -214,7 +213,7 @@ function pgT(k, ar) {
       return s;
     }
   }
-  // Shared app-level keys (thTime, Cancel, …) live in the host dictionary.
+  // Shared app-level keys (thTime, Cancel, …) also live in L; t handles them.
   if (PG_HOST && PG_HOST.t) return PG_HOST.t(k, ar);
   if (typeof t === 'function') return t(k, ar);
   return k;

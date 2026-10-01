@@ -13,7 +13,7 @@
     messages: [
       {
         role: 'assistant',
-        content: '你好！我是 TinyLab 小精灵。我可以帮你快速跳转页面、查询模型配额、清理日志、打包归档等。有什么我可以帮你的吗？',
+        content: t('spriteWelcome'),
         tools: []
       }
     ]
@@ -137,7 +137,7 @@
       '  </svg>',
       '  <span id="sprite-unread-badge" class="sprite-unread-badge" style="display:none;">0</span>',
       '</div>',
-      '<span class="sprite-dock-label">小精灵</span>'
+      '<span class="sprite-dock-label">' + t('spriteDockLabel') + '</span>'
     ].join('');
     dock.addEventListener('mousedown', dockMouseDown);
     document.body.appendChild(dock);
@@ -155,30 +155,30 @@
       '  <div class="sprite-modal-header">',
       '    <div class="sprite-modal-title">',
       '      <div class="sprite-avatar-mini">✨</div>',
-      '      <span>TinyLab 智能助理</span>',
+      '      <span>' + t('spriteHeaderTitle') + '</span>',
       '    </div>',
       '    <div class="sprite-modal-actions">',
-      '      <button class="sprite-btn-icon" title="释放小精灵到界面" onclick="window.releaseSpriteChar()">',
+      '      <button class="sprite-btn-icon" title="' + t('spriteBtnRelease') + '" onclick="window.releaseSpriteChar()">',
       '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
       '      </button>',
-      '      <button class="sprite-btn-icon" title="清空对话" onclick="window.clearSpriteHistory()">',
+      '      <button class="sprite-btn-icon" title="' + t('spriteBtnClear') + '" onclick="window.clearSpriteHistory()">',
       '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
       '      </button>',
-      '      <button class="sprite-btn-icon sprite-btn-close" title="关闭" onclick="window.closeSpriteModal()">&times;</button>',
+      '      <button class="sprite-btn-icon sprite-btn-close" title="' + t('spriteBtnClose') + '" onclick="window.closeSpriteModal()">&times;</button>',
       '    </div>',
       '  </div>',
       '  <div class="sprite-modal-body">',
       '    <div id="sprite-chat-messages" class="sprite-chat-messages"></div>',
       '    <div class="sprite-quick-chips">',
-      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'查看配额\')">📊 查看配额</button>',
-      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'打开我的笔记文件\')">📝 打开笔记</button>',
-      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'定时清理过期的日志\')">🧹 清理日志</button>',
-      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'看看我配置了哪些provider\')">⚡ 查看 Provider</button>',
+      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'查看配额\')">' + t('spriteChipQuota') + '</button>',
+      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'打开我的笔记文件\')">' + t('spriteChipNotes') + '</button>',
+      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'定时清理过期的日志\')">' + t('spriteChipCleanLogs') + '</button>',
+      '      <button type="button" class="sprite-chip" onclick="window.sendSpriteQuickIntent(\'看看我配置了哪些provider\')">' + t('spriteChipProviders') + '</button>',
       '    </div>',
       '  </div>',
       '  <div class="sprite-modal-footer">',
       '    <form id="sprite-chat-form" onsubmit="window.handleSpriteSubmit(event)">',
-      '      <input type="text" id="sprite-chat-input" placeholder="输入意图，例如：帮我生成一张猫的图片 / 查看监控..." autocomplete="off">',
+      '      <input type="text" id="sprite-chat-input" placeholder="' + t('spriteInputPlaceholder') + '" autocomplete="off">',
       '      <button type="submit" id="sprite-send-btn" class="sprite-send-btn" aria-label="Send">',
       '        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
       '      </button>',
@@ -213,12 +213,12 @@
     bubbleEl.style.display = 'none';
     bubbleEl.innerHTML = [
       '<div class="sprite-bubble-content">',
-      '  <div id="sprite-bubble-text" class="sprite-bubble-text">有什么我可以帮你的？</div>',
+      '  <div id="sprite-bubble-text" class="sprite-bubble-text">' + t('spriteBubbleGreeting') + '</div>',
       '  <div class="sprite-bubble-input-wrap">',
-      '    <input type="text" id="sprite-bubble-input" placeholder="输入指令..." onkeydown="if(event.key===\'Enter\')window.sendBubbleIntent()">',
-      '    <button type="button" class="sprite-bubble-send" onclick="window.sendBubbleIntent()">发送</button>',
+      '    <input type="text" id="sprite-bubble-input" placeholder="' + t('spriteBubblePlaceholder') + '" onkeydown="if(event.key===\'Enter\')window.sendBubbleIntent()">',
+      '    <button type="button" class="sprite-bubble-send" onclick="window.sendBubbleIntent()">' + t('spriteBubbleSend') + '</button>',
       '  </div>',
-      '  <button type="button" class="sprite-bubble-dock-btn" onclick="window.dockSpriteChar()">收起</button>',
+      '  <button type="button" class="sprite-bubble-dock-btn" onclick="window.dockSpriteChar()">' + t('spriteBubbleDock') + '</button>',
       '</div>'
     ].join('');
     document.body.appendChild(bubbleEl);
@@ -264,16 +264,16 @@
           var actions = '<div class="sprite-tool-actions">';
 
           if (tool.navigateTo) {
-            actions += '<button type="button" class="sprite-action-btn primary" onclick="window.navigateToRoute(\'' + tool.navigateTo + '\')">跳转页面</button>';
+            actions += '<button type="button" class="sprite-action-btn primary" onclick="window.navigateToRoute(\'' + tool.navigateTo + '\')">' + t('spriteActionJump') + '</button>';
           }
           if (tool.actionable) {
-            actions += '<button type="button" class="sprite-action-btn" onclick="window.executeSpriteAction(\'' + tool.tool + '\', this)">执行动作</button>';
+            actions += '<button type="button" class="sprite-action-btn" onclick="window.executeSpriteAction(\'' + tool.tool + '\', this)">' + t('spriteActionRun') + '</button>';
           }
           actions += '</div>';
 
           if (tool.executed) {
             var statusClass = (tool.status >= 200 && tool.status < 300) ? 'success' : 'error';
-            actions += '<div class="sprite-tool-exec-status ' + statusClass + '">执行结果: ' + (tool.error || '已成功执行 (' + tool.status + ')') + '</div>';
+            actions += '<div class="sprite-tool-exec-status ' + statusClass + '">' + t('spriteActionResultPrefix') + (tool.error || t('spriteActionOk') + tool.status + ')') + '</div>';
           }
 
           card.innerHTML = header + desc + actions;
@@ -355,9 +355,9 @@
     })
     .then(function(data) {
       var tools = data.tools || [];
-      var replyText = '为你找到以下对应能力与操作：';
+      var replyText = t('spriteFoundCapabilities');
       if (tools.length === 0) {
-        replyText = '未能识别到直接相关的工具或操作，你可以尝试换个表达方式。';
+        replyText = t('spriteNoMatch');
       }
       spriteState.messages.push({
         role: 'assistant',
@@ -369,7 +369,7 @@
     .catch(function(err) {
       spriteState.messages.push({
         role: 'assistant',
-        content: '分派请求失败: ' + err.message,
+        content: t('spriteDispatchFailed') + err.message,
         tools: []
       });
       renderSpriteMessages();
@@ -386,14 +386,14 @@
       navigateTo(route);
     }
     if (typeof showToast === 'function') {
-      showToast('已跳转到 ' + route, 'info');
+      showToast(t('spriteJumpedTo') + route, 'info');
     }
   }
 
   function executeSpriteAction(toolName, btn) {
     if (btn) {
       btn.disabled = true;
-      btn.innerText = '执行中...';
+      btn.innerText = t('spriteRunning');
     }
     fetch('/api/assistant/dispatch', {
       method: 'POST',
@@ -404,25 +404,25 @@
     .then(function(data) {
       if (btn) {
         btn.disabled = false;
-        btn.innerText = '已执行';
+        btn.innerText = t('spriteExecuted');
       }
       var executedTool = (data.tools && data.tools[0]) || {};
       if (typeof showToast === 'function') {
         if (executedTool.status >= 200 && executedTool.status < 300) {
-          showToast('执行成功: ' + toolName, 'success');
+          showToast(t('spriteExecOk') + toolName, 'success');
         } else {
-          showToast('执行完成 (' + (executedTool.status || 200) + ')', 'info');
+          showToast(t('spriteExecDone') + (executedTool.status || 200) + ')', 'info');
         }
       }
-      sendSpriteIntent('查看刚刚的操作结果');
+      sendSpriteIntent(t('spriteViewResult'));
     })
     .catch(function(err) {
       if (btn) {
         btn.disabled = false;
-        btn.innerText = '执行失败';
+        btn.innerText = t('spriteExecFailed');
       }
       if (typeof showToast === 'function') {
-        showToast('执行失败: ' + err.message, 'error');
+        showToast(t('spriteExecFailedMsg') + err.message, 'error');
       }
     });
   }
@@ -438,7 +438,7 @@
       charEl.style.top = (window.innerHeight - 150) + 'px';
     }
     if (dockEl) dockEl.style.display = 'none';
-    showBubble('小精灵已释放！点击桌面可移动，点击我可打开对话气泡。');
+    showBubble(t('spriteReleased'));
   }
 
   function dockSpriteChar() {
@@ -456,7 +456,7 @@
     var bubbleEl = document.getElementById('sprite-bubble');
     if (!bubbleEl) return;
     if (bubbleEl.style.display === 'none' || !bubbleEl.style.display) {
-      showBubble('有什么指令需要我执行吗？');
+      showBubble(t('spriteAskCommand'));
     } else {
       bubbleEl.style.display = 'none';
     }
@@ -489,7 +489,7 @@
     if (!text) return;
     input.value = '';
 
-    showBubble('正在执行意图: ' + text + '...');
+    showBubble(t('spriteRunningIntent') + text + '...');
     fetch('/api/assistant/dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -499,17 +499,17 @@
     .then(function(data) {
       var tools = data.tools || [];
       if (tools.length > 0) {
-        var t = tools[0];
-        showBubble('已匹配能力: ' + t.tool + ' (' + t.method + ' ' + t.path + ')');
-        if (t.navigateTo) {
-          setTimeout(function() { navigateToRoute(t.navigateTo); }, 1000);
+        var firstTool = tools[0];
+        showBubble(t('spriteMatchedCapability') + firstTool.tool + ' (' + firstTool.method + ' ' + firstTool.path + ')');
+        if (firstTool.navigateTo) {
+          setTimeout(function() { navigateToRoute(firstTool.navigateTo); }, 1000);
         }
       } else {
-        showBubble('未能匹配到具体工具。');
+        showBubble(t('spriteNoToolMatched'));
       }
     })
     .catch(function(err) {
-      showBubble('分派失败: ' + err.message);
+      showBubble(t('spriteDispatchError') + err.message);
     });
   }
 
@@ -530,7 +530,7 @@
   function clearSpriteHistory() {
     spriteState.messages = [{
       role: 'assistant',
-      content: '对话记录已清空。有什么可以帮你的？',
+      content: t('spriteHistoryCleared'),
       tools: []
     }];
     renderSpriteMessages();
@@ -561,7 +561,7 @@
 
     spriteState.messages.push({
       role: 'assistant',
-      content: '🔔 [' + (evt.title || '通知') + '] ' + (evt.message || ''),
+      content: '🔔 [' + (evt.title || t('spriteNotifyTitle')) + '] ' + (evt.message || ''),
       tools: []
     });
     renderSpriteMessages();
@@ -569,7 +569,7 @@
     if (spriteState.mode === 'char') {
       showBubble(evt.message || evt.title);
     } else if (typeof showToast === 'function') {
-      showToast('[' + (evt.title || '小精灵') + '] ' + evt.message, evt.level || 'info');
+      showToast('[' + (evt.title || t('spriteBubbleName')) + '] ' + evt.message, evt.level || 'info');
     }
   }
 

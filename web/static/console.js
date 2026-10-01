@@ -204,11 +204,11 @@ function logTimestampMs(timeStr) {
 function formatRelativeTime(tsMs) {
   var diff = Date.now() - tsMs;
   if (diff < 0) diff = 0;
-  if (diff < 5000) return '刚刚';
-  if (diff < 60000) return Math.floor(diff / 1000) + 's前';
-  if (diff < 3600000) return Math.floor(diff / 60000) + 'm前';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h前';
-  return Math.floor(diff / 86400000) + 'd前';
+  if (diff < 5000) return t('relJustNow');
+  if (diff < 60000) return t('relSecondsAgo', [String(Math.floor(diff / 1000))]);
+  if (diff < 3600000) return t('relMinutesAgo', [String(Math.floor(diff / 60000))]);
+  if (diff < 86400000) return t('relHoursAgo', [String(Math.floor(diff / 3600000))]);
+  return t('relDaysAgo', [String(Math.floor(diff / 86400000))]);
 }
 
 function refreshConsoleRelativeTimes() {
