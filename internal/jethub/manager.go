@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/tinylab/tinylab/internal/config"
@@ -120,9 +121,13 @@ type Manager struct {
 	mu sync.RWMutex
 
 	dir string
-	// key is the base64 AES key used for credentials.json ("" = generate on
-	// first save).
+	// key is the jethub-owned AES key for credentials.json (always present;
+	// created on first use under {dir}/key). NOT cfg.Security.EncryptionKey —
+	// that one belongs to password protection and can be cleared/rotated.
 	key string
+	// legacyKey is the config-provided key, used ONLY to migrate credentials
+	// written by an older build that encrypted with it (may be "").
+	legacyKey string
 
 	accounts accountsFile
 	// credentials maps provider → accountID → credential JSON value.
@@ -159,11 +164,21 @@ type Logger interface {
 // NewManager creates a Manager rooted at dir (resolved by
 // config.ResolveJetHubDir). Missing directories/files are created lazily on
 // first save; a fresh manager starts with an empty state.
-func NewManager(dir, encryptionKey string, logger Logger) (*Manager, error) {
+//
+// ⚠️ Credential encryption key (real defect): the key used to be
+// cfg.Security.EncryptionKey, whose lifecycle belongs to **password
+// protection** — disabling that feature clears it, and setting a password
+// rotates it. Every user without password protection (the default) therefore
+// could never store a credential: the first successful login ended with
+// "jethub: no encryption key available for credentials storage". The manager
+// now owns its key in {dir}/key (0600, same AES-256-GCM primitive);
+// legacyKey (the config key, possibly "") is only used to migrate credentials
+// that an older build encrypted with it.
+func NewManager(dir, legacyKey string, logger Logger) (*Manager, error) {
 	m := &Manager{
-		dir:         dir,
-		key:         encryptionKey,
-		logger:      logger,
+		dir:       dir,
+		legacyKey: legacyKey,
+		logger:    logger,
 		credentials: map[string]map[string]json.RawMessage{},
 		augmenters:  map[string]RequestAugmenterFunc{},
 		accounts: accountsFile{
@@ -174,6 +189,11 @@ func NewManager(dir, encryptionKey string, logger Logger) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("jethub: create dir: %w", err)
 	}
+	key, err := m.loadOrCreateKey()
+	if err != nil {
+		return nil, err
+	}
+	m.key = key
 	if err := m.loadAccounts(); err != nil {
 		return nil, err
 	}
@@ -187,6 +207,29 @@ func NewManager(dir, encryptionKey string, logger Logger) (*Manager, error) {
 		m.accounts.ProxyEnabled = map[string]bool{}
 	}
 	return m, nil
+}
+
+// keyPath is the jethub-owned credential encryption key file.
+func (m *Manager) keyPath() string { return filepath.Join(m.dir, "key") }
+
+// loadOrCreateKey reads {dir}/key, generating and persisting one on first use.
+// The file is created 0600 (workspace-local secret; never travels in backups).
+func (m *Manager) loadOrCreateKey() (string, error) {
+	if data, err := os.ReadFile(m.keyPath()); err == nil {
+		if key := strings.TrimSpace(string(data)); key != "" {
+			return key, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("jethub: read key: %w", err)
+	}
+	key, err := config.GenerateKey()
+	if err != nil {
+		return "", fmt.Errorf("jethub: generate credential key: %w", err)
+	}
+	if err := fsutil.AtomicWrite(m.keyPath(), []byte(key), 0600); err != nil {
+		return "", fmt.Errorf("jethub: write key: %w", err)
+	}
+	return key, nil
 }
 
 func (m *Manager) accountsPath() string { return filepath.Join(m.dir, "accounts.json") }
@@ -241,10 +284,18 @@ func (m *Manager) loadCredentials() error {
 	if env.Enc == "" {
 		return nil
 	}
-	if m.key == "" {
-		return fmt.Errorf("jethub: credentials file exists but no encryption key available")
-	}
 	plain, err := config.Decrypt(m.key, env.Enc)
+	migrated := false
+	if err != nil && m.legacyKey != "" {
+		// Older builds encrypted with cfg.Security.EncryptionKey. If that key
+		// still decrypts the file, adopt the data and re-encrypt under the
+		// jethub-owned key (one-way migration; a later password change can no
+		// longer orphan the credentials).
+		if legacyPlain, legacyErr := config.Decrypt(m.legacyKey, env.Enc); legacyErr == nil {
+			plain, err = legacyPlain, nil
+			migrated = true
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("jethub: decrypt credentials: %w", err)
 	}
@@ -253,6 +304,14 @@ func (m *Manager) loadCredentials() error {
 		return fmt.Errorf("jethub: parse credentials: %w", err)
 	}
 	m.credentials = creds
+	if migrated {
+		if m.logger != nil {
+			m.logger.Info("[jethub] 凭据已从 config 加密密钥迁移到 Free Hub 自持密钥")
+		}
+		if err := m.saveCredentialsLocked(); err != nil {
+			return fmt.Errorf("jethub: migrate credentials: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -273,6 +332,8 @@ func (m *Manager) saveCredentialsLocked() error {
 		return err
 	}
 	if m.key == "" {
+		// Unreachable since the key is self-provisioned at construction
+		// (NewManager → loadOrCreateKey); kept as a defensive guard.
 		return fmt.Errorf("jethub: no encryption key available for credentials storage")
 	}
 	enc, err := config.Encrypt(m.key, string(plain))

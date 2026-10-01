@@ -96,6 +96,14 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
     const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
     assert.ok(go.includes('SettleAndCleanup(sess'), f + ' must pump the outcome via SettleAndCleanup');
   }
+  // Every login handler must auto-open the authorization page: the flows that
+  // live in Manager Start*Login functions do it internally, but the two that
+  // are inline in the API handler (minimax, qoder) must call the opener
+  // themselves — minimax shipped without it (reported defect).
+  for (const f of ['minimax.go', 'qoder.go']) {
+    const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
+    assert.ok(go.includes('OpenURLWithBrowser('), f + ' must auto-open the login page (OpenURLWithBrowser)');
+  }
   // The app must wire the browser opener + the post-credential sync hook:
   // auto-open the login page like the original plugin, and refresh the
   // bridged provider's keys when a credential lands (else the new account

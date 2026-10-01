@@ -27,8 +27,9 @@
 
 ## 2. 存储层（`{configDir}/jethub/`，`config.ResolveJetHubDir`）
 
-- `credentials.json`：`{provider → credentialRef → 凭据 JSON}` 整体 AES-GCM 加密信封（`{"enc":"..."}`），密钥与 config 加密同源；**凭据字段按 ref `src/types.ts` 1:1**（备份兼容的前提）。
-- `accounts.json`：账号索引 + 模型黑名单 + 前缀映射（`accountsFile`，与原版 JetHubConfig 同构——§1.5 备份兼容前提）。
+- `credentials.json`：`{provider → credentialRef → 凭据 JSON}` 整体 AES-GCM 加密信封（`{"enc":"..."}`）；**加密密钥是 Free Hub 自持的 `{dir}/key`（0600，首次使用时生成）**。
+- ⚠️ **密钥归属（真实缺陷，2026-10-02）**：早期实现直接用 `config.Security.EncryptionKey`，而那把钥匙的生命周期属于**密码保护**——关闭密码保护会**清空**它（`api/settings/register.go`），设置密码又会**轮换**它。于是**任何未开密码保护的安装（默认状态）都无法保存凭据**：登录走到落盘一步必然报 `jethub: no encryption key available for credentials storage`（用户实测 minimax 报障）。现在密钥由 Free Hub 自持，与密码保护彻底解耦；传入的 config 密钥仅作**一次性迁移**用（若旧文件能用 config 密钥解开则采纳并改用自持密钥重加密，之后即使密码保护被关闭/轮换也不受影响）。
+- `accounts.json`：账号索引 + 模型黑名单 + 前缀映射 + `permanentLocks` + `proxyEnabled`（`accountsFile`，与原版 JetHubConfig 同构——§1.5 备份兼容前提）。**账号索引不需要密钥**（这也是为什么本缺陷下"账号能建、凭据存不下"的表现具有高度辨识度）。
 - 两者均 `fsutil.AtomicWrite` 原子写；`Manager` RWMutex 双锁。
 - `machine_id` 类设备标识是**插件生成并随凭据持久化的随机 UUID**（qoder）或确定性派生（trae），非硬件指纹。
 
@@ -145,7 +146,8 @@
 ## 9. 测试与已知限制
 
 - `internal/jethub/sessions_test.go`（6 个）：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照 + 宽限期 reap + `SetProxyURL` 代理分派（httptest 伪代理端点验证请求确实走代理）+ `ProxyEnabled` 开关分派 client 并跨 reload 持久化。
-- `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **5 个新用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、camelCase token）——§3.3。
+- `internal/jethub/credentials_key_test.go`（5 个）：**空 config 密钥下凭据可存**（本次报错的直接回归）+ 自持密钥稳定且不等于 config 密钥 + config 密钥旧文件迁移（迁移后无 config 密钥也能读）+ 无法解密时必须显式报错 + 浏览器 opener 被调用。
+- `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **8 个诊断用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、未知 error 码带出码+描述+出站、纯文本 400 带出响应体+出站、invalid_client 专门文案、camelCase token）——§3.3。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
 - **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。

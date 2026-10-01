@@ -47,6 +47,10 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	started := corejethub.NewStartedLoginWithChannel(grant.VerificationURIComplete, resultCh)
 	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
 	corejethub.RegisterLoginSession(loginID, sess)
+	// Auto-open the verification URL like the other providers (this flow is
+	// inline in the handler rather than a Manager Start*Login function, so it
+	// must open the browser itself — the dialog link stays as a fallback).
+	h.d.Manager.OpenURLWithBrowser(grant.VerificationURIComplete)
 	// ⚠️ Background context, not r.Context(): the poll must outlive this
 	// handler (the request context is canceled the moment the response is
 	// written — binding the poll to it aborted every login before the user
