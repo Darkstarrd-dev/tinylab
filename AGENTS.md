@@ -61,6 +61,9 @@ TinyLab 是一个轻量级 LLM API 代理与本地工具集，单二进制交付
 
 > 本地参考副本位于 `Z:\Playground\9router`，实施过程中作为业务逻辑参考。不要修改该目录。
 
+`ref/` 目录（theia-master、deepseek-harness-codearts、universal-web-api-main）为只读第三方
+参考代码，禁止修改、禁止纳入本项目构建。
+
 ## 技术栈
 
 - **语言:** Go 1.25+
@@ -97,7 +100,7 @@ TinyLab 通过 build tag + 链接器 flag 提供 default / tray / webview / debu
 ```powershell
 # webview + playground + stripped：托盘常驻 + WebView2 独立窗口 + 最小体积
 ./build.ps1 -Variant webview -Playground -Strip
-# 产出 dist/tinylab-webview-pg-stripped.exe (~16 MB)
+# 产出 dist/tinylab-webview-pg-stripped.exe（实测 ~31 MB，2026-10-01）
 ```
 
 ### mac/Linux
@@ -133,7 +136,8 @@ HTTP server 仅监听 localhost。任意 API Key 或无 Key 均可访问 `/v1/*`
 - `config.yaml` 存储 providers + combos + settings
 - `state.yaml` 存储 key/combo 运行时状态（冷却级别、模型锁、轮转索引、exhausted key 配额上限），重启恢复
 - `state.yaml` 写入使用 500ms 去抖 + 临时文件 rename 保证原子性
-- Usage 和 console logs 仅存内存，重启清零
+- Usage 和 console logs 仅存内存，重启清零。请求追踪（Trace，默认关闭）持久化为
+  `traces/*.jsonl`，受 retain-days / max-disk 约束（见 settings 的 Request Tracing）
 - 所有文件写入均用临时文件 + rename 保证原子性
 
 ### 3. OpenAI 兼容透传
@@ -141,7 +145,9 @@ HTTP server 仅监听 localhost。任意 API Key 或无 Key 均可访问 `/v1/*`
 例外: 当 provider.injectStreamOptions 为 true 且请求为流式时，自动注入 stream_options.include_usage。
 
 ### 4. SSE 流式透传
-使用 `http.Flusher` 逐 chunk 转发上游 SSE 响应。不解析、不修改 SSE 内容。
+使用 `http.Flusher` 逐 chunk 转发上游 SSE 响应。不解析、不修改 SSE 内容；
+例外：Gemini thinking 签名回填与 usage 捕获（`proxy/signature_cache.go`、
+`proxy/stream.go`）需要解析并回填特定字段。
 
 ### 5. Key 轮询策略 (移植自 9router `src/sse/services/auth.js`)
 - **fill-first:** 按 priority ASC 排序，取第一个可用 key
@@ -168,7 +174,9 @@ HTTP server 仅监听 localhost。任意 API Key 或无 Key 均可访问 `/v1/*`
 ## 编码规范
 
 - Go 标准格式 (`gofmt` / `goimports`)
-- 错误处理: 错误必须显式处理，不使用 panic
+- 错误处理: 错误必须显式处理，不使用 panic。例外（均为有意为之的契约/边界）:
+  init 期契约校验（`internal/feature` 的 manifest 一致性检查）、WASM 异常传播
+  （`jethub` qoderwasm_bridge 的 recover 桥）、crypto/rand 失败（owner/assistant/sheet）。
 - 并发: 共享状态用 `sync.RWMutex` 保护
 - 日志: 使用 `internal/console.Logger`，不直接用 `log` 标准库（仅在 main.go 启动/关闭阶段 Logger 不可用时允许 `log.Fatalf` 回退）
 - 注释: 导出函数需有文档注释
@@ -180,6 +188,8 @@ HTTP server 仅监听 localhost。任意 API Key 或无 Key 均可访问 `/v1/*`
 - 不要引入前端框架 (React, Vue, 等)
 - 不要实现对外暴露的鉴权 (JWT, OAuth 等面向多用户的认证体系)
 - 允许实现本地密码保护：用于防止本地 `config.yaml` 中的明文 API Key 被直接读取，登录应用需输入密码。初始状态未设置密码时仍可直接打开应用（`Security.PasswordEnabled=false` 时跳过登录页，参考 commit `b99c245`）
-- 不要实现格式转换 (OpenAI ↔ Anthropic)
+- 不要实现格式转换 (OpenAI ↔ Anthropic)。代理核心 `/v1/*` 不做格式转换；
+  Free Hub（jethub）provider 协议桥按上游原生协议适配（如 minimax 的
+  Anthropic Messages 桥），属上游协议差异适配而非格式转换。
 - 不要实现 Token Saver (RTK, Headroom, Caveman, Ponytail)
 - 不要修改 `Z:\Playground\9router` 目录中的任何文件

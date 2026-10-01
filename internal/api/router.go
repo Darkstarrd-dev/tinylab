@@ -393,7 +393,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		}
 		remote := domainimagebatch.NewRemoteGenerator(rt.proxyHandler)
 		generator := domainimagebatch.NewProtocolGenerator(remote)
-		manager := domainimagebatch.NewManager(store, generator)
+		manager, err := domainimagebatch.NewManager(store, generator)
+		if err != nil {
+			return apimagebatch.NewHandler(apiDeps, nil)
+		}
 		return apimagebatch.NewHandler(apiDeps, manager)
 	}()
 	traceHandler := trace.NewHandler(apiDeps)

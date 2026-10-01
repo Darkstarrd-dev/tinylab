@@ -1,3 +1,7 @@
+// Package archive implements pure, in-process archive primitives (ZIP
+// read/write adapters, path/charset normalisation, budget accounting,
+// temp-store). Format-specific invocation of external tools lives in the
+// sibling package internal/archivetool.
 package archive
 
 import (

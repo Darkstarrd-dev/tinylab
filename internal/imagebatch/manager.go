@@ -58,7 +58,9 @@ type runtime struct {
 	subs    map[chan Event]struct{}
 }
 
-func NewManager(store any, generator ImageGenerator) *Manager {
+// NewManager wires a Manager over the given store. An unsupported store type
+// is a programming error surfaced as an error, not a panic.
+func NewManager(store any, generator ImageGenerator) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var st Store
 	switch s := store.(type) {
@@ -67,9 +69,10 @@ func NewManager(store any, generator ImageGenerator) *Manager {
 	case *ProjectStore:
 		st = managerStore{s}
 	default:
-		panic("imagebatch: invalid store")
+		cancel()
+		return nil, errors.New("imagebatch: invalid store")
 	}
-	return &Manager{store: st, generator: generator, runtimes: map[string]*runtime{}, ctx: ctx, cancel: cancel}
+	return &Manager{store: st, generator: generator, runtimes: map[string]*runtime{}, ctx: ctx, cancel: cancel}, nil
 }
 
 func (m *Manager) Create(ctx context.Context, p *Project) (*Project, error) {

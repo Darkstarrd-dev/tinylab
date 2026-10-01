@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -75,7 +74,8 @@ func (m *ServerManager) startLocked() {
 	}
 	if err != nil {
 		FeedbackFatalError(m.configDir, fmt.Sprintf("listen %s failed: %v", m.addr, err))
-		log.Fatalf("server error: %v", err)
+		m.logger.Error("server error: %v", err)
+		os.Exit(1)
 	}
 
 	go func() {
@@ -85,7 +85,8 @@ func (m *ServerManager) startLocked() {
 				FeedbackFatalError(m.configDir, fmt.Sprintf("端口 %s 已被占用，可能已有另一个 TinyLab 实例在运行", m.addr))
 			}
 			FeedbackFatalError(m.configDir, fmt.Sprintf("server error: %v", err))
-			log.Fatalf("server error: %v", err)
+			m.logger.Error("server error: %v", err)
+			os.Exit(1)
 		}
 	}()
 }

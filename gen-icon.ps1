@@ -1,4 +1,4 @@
-# gen-icon.ps1 - Generate a multi-size favicon.ico from web/static/logo.png
+# gen-icon.ps1 - Generate a multi-size favicon.ico from web/static/logo-sm.png
 #
 # Embeds 7 sizes (16/24/32/48/64/128/256) into a single ICO container so that
 # the .exe icon, taskbar, Alt+Tab, jumplist, and systray all pick a sharp
@@ -9,10 +9,10 @@
 #
 # Usage:
 #   ./gen-icon.ps1                       # default paths
-#   ./gen-icon.ps1 -Source web/static/logo.png -Out web/static/favicon.ico
+#   ./gen-icon.ps1 -Source web/static/logo-sm.png -Out web/static/favicon.ico
 
 param(
-    [string]$Source = "web/static/logo.png",
+    [string]$Source = "web/static/logo-sm.png",
     [string]$Out    = "web/static/favicon.ico"
 )
 

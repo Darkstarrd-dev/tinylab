@@ -18,7 +18,10 @@ func TestSchedulerPersistsFailureDetailsAndTerminalStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewManager(store, failingBatchGenerator{err: errors.New("provider rejected request: 400")})
+	m, err := NewManager(store, failingBatchGenerator{err: errors.New("provider rejected request: 400")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := validProject()
 	p.ProjectID = "imgproj_fail"
 	p.Slug = "failure-details"

@@ -1,3 +1,6 @@
+// Package archivetool drives external archive executables (7z/ISO/RAR-style
+// CLIs): discovery, exec, parse, status mapping and build instructions.
+// Pure in-process ZIP primitives live in the sibling package internal/archive.
 package archivetool
 
 import (
