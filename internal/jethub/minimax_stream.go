@@ -642,14 +642,14 @@ func minimaxRewriteErrorBody(resp *http.Response) (io.Reader, int64, error) {
 	return bytes.NewReader(body), 0, nil
 }
 
-// minimaxPeekFirstDataLine reads src until the first `data:` line, returning
+// peekFirstSSEDataLine reads src until the first `data:` line, returning
 // every consumed byte (to be replayed into the converter) and the line itself.
 //
 // ⚠️ 不能直接复用 qoderPeekFirstDataLine：它只取**第一行**，而 Anthropic 的
 // 错误帧是 `event: error` + `data: {...}` 两行 —— 只看第一行会漏掉错误，
 // 于是「HTTP 200 + 流内错误」被当成正常流（Qoder 那条「干净地停止、无任何
 // 报错」的同型陷阱）。
-func minimaxPeekFirstDataLine(src io.Reader) (peeked []byte, dataLine string, err error) {
+func peekFirstSSEDataLine(src io.Reader) (peeked []byte, dataLine string, err error) {
 	var acc []byte
 	buf := make([]byte, 16_384)
 	for {
@@ -692,7 +692,7 @@ func (m *Manager) minimaxInterceptResponse(clientReq *http.Request, resp *http.R
 		return nil, 0, nil
 	}
 	// 错误帧恒在第一帧：在内容到达客户端之前截住，重试才干净。
-	peeked, firstLine, _ := minimaxPeekFirstDataLine(resp.Body)
+	peeked, firstLine, _ := peekFirstSSEDataLine(resp.Body)
 	if msg, ok := minimaxFirstErrorFrame(firstLine); ok {
 		_ = resp.Body.Close()
 		return nil, 0, fmt.Errorf("minimax: 流内错误：%s", msg)

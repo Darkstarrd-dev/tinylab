@@ -213,6 +213,11 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 	if provider == "minimax" {
 		return m.minimaxInterceptResponse(clientReq, resp, upstreamModel, isStream)
 	}
+	if provider == "codearts" {
+		// CodeArts 用 HTTP 200 + 流内 `error_code` 表达限流/排队/权益错误
+		// （用户实测：客户端只看到空回复）。见 codearts_response.go。
+		return m.codeartsInterceptResponse(resp, upstreamModel, isStream)
+	}
 	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil
 	}
