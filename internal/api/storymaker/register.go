@@ -302,23 +302,7 @@ func (h *Handler) generateArchInput(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m0-arch-input")
 	}
 
-	userParts := []string{}
-	if body.Topic != "" {
-		userParts = append(userParts, "灵感/主题："+body.Topic)
-	}
-	if body.Genre != "" {
-		userParts = append(userParts, "偏好类型："+body.Genre)
-	}
-	if body.Chapters > 0 {
-		userParts = append(userParts, fmt.Sprintf("预估总章节数：%d", body.Chapters))
-	}
-	if body.Guidance != "" {
-		userParts = append(userParts, "已有思路/梗概："+body.Guidance)
-	}
-	userPrompt := strings.Join(userParts, "\n")
-	if userPrompt == "" {
-		userPrompt = "请自由发挥创意，生成一个有趣的小说创作方向。"
-	}
+	userPrompt := storymaker.BuildDirectionInputPrompt(body.Topic, body.Genre, body.Guidance, body.Chapters)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -361,18 +345,7 @@ func (h *Handler) generateArch(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m0-arch")
 	}
 
-	userParts := []string{"主题：" + strings.TrimSpace(body.Topic)}
-	if body.Genre != "" {
-		userParts = append(userParts, "类型："+body.Genre)
-	}
-	if body.Chapters > 0 {
-		userParts = append(userParts, fmt.Sprintf("预估总章节数：%d", body.Chapters))
-	}
-	if body.Guidance != "" {
-		userParts = append(userParts, "核心梗概 / 指导："+body.Guidance)
-	}
-	userParts = append(userParts, "", "请按工作方法与输出格式，生成这部小说的总体架构。")
-	userPrompt := strings.Join(userParts, "\n")
+	userPrompt := storymaker.BuildArchitecturePrompt(body.Topic, body.Genre, body.Guidance, body.Chapters)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -428,18 +401,7 @@ func (h *Handler) generateBlueprint(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m0-blueprint")
 	}
 
-	userParts := []string{
-		"【已确认的小说架构】",
-		strings.TrimSpace(body.Architecture),
-		"",
-	}
-	if strings.TrimSpace(body.ExistingDirectory) != "" {
-		userParts = append(userParts, fmt.Sprintf("【已有章节目录（请保持连贯，从第 %d 章续写）】\n%s", begin, strings.TrimSpace(body.ExistingDirectory)))
-	} else {
-		userParts = append(userParts, fmt.Sprintf("本次从第 %d 章开始生成。", begin))
-	}
-	userParts = append(userParts, "", fmt.Sprintf("全书共约 %d 章，本次生成第 %d–%d 章的蓝图（不超过 20 章）。", total, begin, end), "请按输出格式逐章生成。")
-	userPrompt := strings.Join(userParts, "\n")
+	userPrompt := storymaker.BuildBlueprintPrompt(body.Architecture, total, begin, end, body.ExistingDirectory)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -573,22 +535,11 @@ func (h *Handler) generateCard(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m2-card-single")
 	}
 
-	isEnrich := body.Mode == "enrich"
-	userParts := []string{
-		fmt.Sprintf("实体类型（type）：%s", strings.TrimSpace(body.Type)),
+	existing := ""
+	if body.Mode == "enrich" {
+		existing = body.ExistingCard
 	}
-	if isEnrich {
-		userParts = append(userParts, "模式：enrich（在已有卡片基础上丰富扩写）", "\n【已有卡片内容】\n"+body.ExistingCard)
-	} else {
-		userParts = append(userParts, "模式：create（从零创作）")
-	}
-	if strings.TrimSpace(body.Instruction) != "" {
-		userParts = append(userParts, "\n【用户描述/指令】\n"+strings.TrimSpace(body.Instruction))
-	} else {
-		userParts = append(userParts, "\n【用户描述/指令】\n（用户未提供具体描述）请自由随机创作一个该类型的设定：自行决定全部细节（姓名/外貌/性格/能力/背景等），追求新颖、有记忆点、避免俗套与雷同。")
-	}
-	userParts = append(userParts, "\n请按输出格式生成单个 JSON 对象。")
-	userPrompt := strings.Join(userParts, "\n")
+	userPrompt := storymaker.BuildCardSinglePrompt(body.Type, body.Instruction, existing)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -635,8 +586,7 @@ func (h *Handler) generateCardProfiles(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m2-card-profiles")
 	}
 
-	userPrompt := fmt.Sprintf("实体类型：%s\n需要的侧写数量：%d\n整体要求/主题：%s\n\n请按输出格式输出单个 JSON 对象。",
-		body.Type, body.Count, body.Instruction)
+	userPrompt := storymaker.BuildCardProfilesPrompt(body.Type, body.Count, body.Instruction)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -801,28 +751,23 @@ func (h *Handler) simulateCharacter(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m3-simulate")
 	}
 
-	userParts := []string{}
+	simCtx := storymaker.SimulateContext{}
 	if ctx.Scene != nil {
-		userParts = append(userParts, "# 当前场景", "环境："+ctx.Scene.Desc, "目标："+ctx.Scene.Goal, "前情："+ctx.Scene.PrevSummary, "")
+		simCtx.SceneDesc = ctx.Scene.Desc
+		simCtx.SceneGoal = ctx.Scene.Goal
+		simCtx.ScenePrevSummary = ctx.Scene.PrevSummary
 	}
 	if ctx.TargetCharacter != nil {
-		userParts = append(userParts, "# 目标角色", "姓名："+ctx.TargetCharacter.Name, "设定："+ctx.TargetCharacter.Description, "语言风格："+ctx.TargetCharacter.StyleNote, "")
-		if len(ctx.TargetCharacter.StyleExamples) > 0 {
-			userParts = append(userParts, "台词示例："+strings.Join(ctx.TargetCharacter.StyleExamples, " / "))
-		}
+		simCtx.TargetCharacterName = ctx.TargetCharacter.Name
+		simCtx.TargetCharacterDescription = ctx.TargetCharacter.Description
+		simCtx.TargetCharacterStyleNote = ctx.TargetCharacter.StyleNote
+		simCtx.TargetCharacterStyleExamples = ctx.TargetCharacter.StyleExamples
 	}
-	if len(ctx.PresentCharacters) > 0 {
-		names := make([]string, len(ctx.PresentCharacters))
-		for idx, c := range ctx.PresentCharacters {
-			names[idx] = c.Name
-		}
-		userParts = append(userParts, "# 在场其他角色："+strings.Join(names, "、"), "")
+	for _, c := range ctx.PresentCharacters {
+		simCtx.PresentCharacterNames = append(simCtx.PresentCharacterNames, c.Name)
 	}
-	if len(ctx.AdoptedFragments) > 0 {
-		userParts = append(userParts, "# 本场景已有片段：", strings.Join(ctx.AdoptedFragments, "\n"), "")
-	}
-	userParts = append(userParts, "请直接输出该角色的自然反应片段（200-400字）。")
-	userPrompt := strings.Join(userParts, "\n")
+	simCtx.AdoptedFragments = ctx.AdoptedFragments
+	userPrompt := storymaker.BuildSimulatePrompt(simCtx)
 
 	for i := 0; i < body.CandidateCount; i++ {
 		candIdx := i
@@ -970,19 +915,7 @@ func (h *Handler) finalizeChapter(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m5-finalize")
 	}
 
-	userParts := []string{
-		"【本章正文】",
-		body.ChapterText,
-		"",
-	}
-	if body.ExistingGlobalSummary != "" {
-		userParts = append(userParts, "【现有全局摘要】\n"+body.ExistingGlobalSummary, "")
-	}
-	if body.ExistingStates != "" {
-		userParts = append(userParts, "【现有角色状态】\n"+body.ExistingStates, "")
-	}
-	userParts = append(userParts, "请按输出格式生成定稿 JSON 对象。")
-	userPrompt := strings.Join(userParts, "\n")
+	userPrompt := storymaker.BuildFinalizePrompt(body.ChapterText, body.ExistingGlobalSummary, body.ExistingStates)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
@@ -1061,22 +994,7 @@ func (h *Handler) checkConsistency(w http.ResponseWriter, r *http.Request) {
 		sysPrompt, _ = h.Store.GetPrompt("m5-consistency")
 	}
 
-	userParts := []string{
-		"【待审校章节正文】",
-		body.ChapterText,
-		"",
-	}
-	if body.Architecture != "" {
-		userParts = append(userParts, "【小说架构】\n"+body.Architecture, "")
-	}
-	if body.CharacterStates != "" {
-		userParts = append(userParts, "【角色状态】\n"+body.CharacterStates, "")
-	}
-	if body.PreviousSummary != "" {
-		userParts = append(userParts, "【前文摘要】\n"+body.PreviousSummary, "")
-	}
-	userParts = append(userParts, "请进行三维度审校，按输出格式生成 JSON。")
-	userPrompt := strings.Join(userParts, "\n")
+	userPrompt := storymaker.BuildConsistencyPrompt(body.ChapterText, body.Architecture, body.CharacterStates, body.PreviousSummary)
 
 	messages := []ChatMessage{
 		{Role: "system", Content: sysPrompt},
