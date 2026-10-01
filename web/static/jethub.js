@@ -571,20 +571,38 @@ function __jethubLoginModal(providerId, created) {
     }).catch(function() { jethubSelect(providerId); });
   };
   document.getElementById('free-hub-login-cancel').onclick = stop;
-  var statusEl = document.getElementById('free-hub-login-status');
+  // 轮询结束（成功/失败/会话已回收）都要收尾：停 timer + 关弹窗 + 刷新列表。
+  var finish = function(toastText, tone) {
+    if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }
+    overlay.classList.remove('show'); overlay.innerHTML = '';
+    if (toastText) toast(toastText, tone);
+    jethubSelect(providerId);
+  };
   __jethubState.pollTimer = setInterval(async function() {
     try {
       var st = await apiGet('/jethub/' + encodeURIComponent(providerId) + '/status?loginId=' + encodeURIComponent(created.loginId));
-      if (st.error) { statusEl.textContent = st.error; return; } // settled & reaped (404): keep the last visible state
-      if (st.done) {
-        if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }
-        overlay.classList.remove('show'); overlay.innerHTML = '';
+      // ⚠️ 判据顺序即契约：先认 `done`（服务端 pollLogin 的三态：false=进行中、
+      // true+success、true+error=已失败），**再**看 `error`。两者的 `error` 字段
+      // 长相相同但语义完全不同 —— 已结算的失败是 `{done:true,success:false,error}`
+      // （必须带原因收尾），而会话已回收是 `{error:"unknown or settled loginId"}`
+      // 且**没有** `done`（结果再也读不到了）。
+      if (st.done === true) {
         if (st.success) {
-          toast(t('freeHubLoginOk'), 'success');
+          finish(t('freeHubLoginOk'), 'success');
         } else {
-          toast(t('freeHubLoginFailed', [st.error || '']), 'error');
+          finish(t('freeHubLoginFailed', [st.error || '']), 'error');
         }
-        jethubSelect(providerId);
+        return;
+      }
+      if (st.done === false) return; // 进行中：继续轮询
+      if (st.error) {
+        // 404 = 会话已被回收（结算后 30s 宽限期内没被观察到，或 id 已失效）：
+        // **必须收尾**。此前这里只把错误文案写进状态行、然后继续每 2s 空转 ——
+        // 用户看到的就是「弹窗长时间没有任何反应、账号也没刷新」，而登录可能
+        // 其实已经成功、凭据已经落盘（真实缺陷 19 的第二道症状；第一道是服务端
+        // 漏了 loginId 分支，见 internal/api/jethub/loomy.go 的 loomyStatus）。
+        // 会话没了就再也读不到结果，只能让用户看列表（成功则账号卡已在列表里）。
+        finish(t('freeHubLoginGone'), 'error');
       }
     } catch (e) { /* transient poll failure: keep polling */ }
   }, 2000);

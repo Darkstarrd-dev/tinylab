@@ -110,8 +110,21 @@ func (h *Handler) loomySmsSubmit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "accountId": req.AccountID})
 }
 
-// loomyStatus GET — account snapshot (refreshable always false).
+// loomyStatus GET — flow poll via loginId, or account snapshot.
+//
+// ⚠️ **`loginId` 分支不是可选项**（真实缺陷 19）：面板的 Provider Login modal 轮的
+// 是 `GET /jethub/{provider}/status?loginId=…`，只有这个分支会回
+// `{done,success,error}`。loomy 此前漏了它（其余 9 个 provider 都有），于是每次
+// 轮询都拿到账号快照 `{"accounts":[…]}` ⇒ 前端 `st.done` 恒为 undefined ⇒ **modal
+// 永远停在「等待登录」**（用户实测：微信网页里已经验证通过、凭据也落盘了，项目内
+// 弹窗却一动不动、账号卡也不刷新；30s 后会话被回收，下一次轮询变 404，仍然只是
+// 静默空转）。回归见 status_login_test.go 的结构性守卫（对**每一条** `/status`
+// 路由断言它必须认 `loginId`）。
 func (h *Handler) loomyStatus(w http.ResponseWriter, r *http.Request) {
+	if loginID := r.URL.Query().Get("loginId"); loginID != "" {
+		h.pollLogin(loginID, w, r)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("loomy")})
 }
 

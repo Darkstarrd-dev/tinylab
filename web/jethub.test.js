@@ -174,10 +174,15 @@ function makeSandbox() {
   const overlay = makeEl('div'); overlay.id = 'modal-overlay';
   registry['modal-overlay'] = overlay;
 
-  const calls = { apiGet: [], apiPost: [], apiPut: [], apiDelete: [], apiPatch: [], toast: [] };
+  const calls = { apiGet: [], apiPost: [], apiPut: [], apiDelete: [], apiPatch: [], toast: [], intervals: [], cleared: [] };
+  // login-status poll responses are scripted per test (see __setStatusResponse):
+  // the modal's whole lifecycle hangs off this one response shape.
+  let statusResponse = null;
   const providers = [
     { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true, supportsRateLimit: true, canLockPermanent: false, permanentLocked: false, proxyEnabled: true },
-    { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['sms'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true, proxyEnabled: false },
+    // ⚠️ loomy 的 loginModes 是 ['url']（真实缺陷 18 后与后端一致）：面板走浏览器
+    // 弹窗页 + 轮询，不再有内嵌短信表单。
+    { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true, proxyEnabled: false },
   ];
   const accounts = [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_1', modelRateLimits: { qfmodel: Date.now() + 3600000, stale: Date.now() - 3600000 } }];
   const models = [{ id: 'auto', name: 'Auto', rate: 'x0.5', disabled: false }, { id: 'qfmodel', name: 'Qwen3.8-Flash', rate: '免费', disabled: true }];
@@ -185,6 +190,7 @@ function makeSandbox() {
   let promptQueue = [];
   async function apiGet(p) {
     calls.apiGet.push(p);
+    if (p.indexOf('/status?loginId=') !== -1) return statusResponse || {};
     if (p === '/jethub/providers') return { providers };
     if (p.indexOf('/balance') !== -1) return { balance: { total: 123.45 } };
     if (p.indexOf('/accounts') !== -1) return { accounts };
@@ -194,7 +200,7 @@ function makeSandbox() {
     }
     return {};
   }
-  async function apiPost(p, body) { calls.apiPost.push([p, body]); if (p.endsWith('/retest')) return { clearedCount: 1, accounts: [{ accountId: 'qoder-1', stillLimited: [{ modelId: 'qfmodel', message: 'HTTP 429: limited' }] }] }; return { ok: true, imported: 1, skipped: 0, outcome: { claimed: true } }; }
+  async function apiPost(p, body) { calls.apiPost.push([p, body]); if (p.endsWith('/login')) return { accountId: 'loomy-1', loginId: 'L1', loginUrl: 'http://127.0.0.1/free-hub-loomy-login.html?loginId=L1', loginMode: 'url' }; if (p.endsWith('/retest')) return { clearedCount: 1, accounts: [{ accountId: 'qoder-1', stillLimited: [{ modelId: 'qfmodel', message: 'HTTP 429: limited' }] }] }; return { ok: true, imported: 1, skipped: 0, outcome: { claimed: true } }; }
   async function apiPut(p, body) { calls.apiPut.push([p, body]); return { ok: true }; }
   async function apiDelete(p) { calls.apiDelete.push(p); return { ok: true }; }
   async function apiPatch(p, body) { calls.apiPatch.push([p, body]); return { ok: true }; }
@@ -254,7 +260,11 @@ function makeSandbox() {
     confirmModal: async () => true,
     promptModal: async () => (promptQueue.length ? promptQueue.shift() : null),
     apiGet, apiPost, apiPut, apiDelete, apiPatch,
-    setInterval: () => 0, clearInterval: () => {},
+    // The login modal's poll runs on setInterval: capture the callbacks so the
+    // tests can drive the status transitions deterministically (the real timer
+    // is a no-op here).
+    setInterval: (fn, ms) => { calls.intervals.push([fn, ms]); return calls.intervals.length; },
+    clearInterval: (id) => { calls.cleared.push(id); },
     setTimeout: (fn) => 0,
     crypto: nodeCrypto.webcrypto,
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
@@ -263,6 +273,7 @@ function makeSandbox() {
     URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
     TextEncoder, TextDecoder,
     __calls: calls, __providers: providers, __promptQueue: promptQueue, __layout: layout, __right: right, __page: page, __registry: registry,
+    __setStatusResponse: (v) => { statusResponse = v; },
   };
   promptQueue = ctx.__promptQueue;
   vm.createContext(ctx);
@@ -469,6 +480,60 @@ checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips 
   await ctx.jethubReset('qoder', 'qoder-1');
   const reset = ctx.__calls.apiPost.find(([p]) => p === '/jethub/providers/qoder/ratelimits/reset');
   assert.ok(reset && JSON.stringify(reset[1]) === JSON.stringify({ accountId: 'qoder-1' }), 'reset POST body');
+});
+
+checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends it too — never a silent forever-poll', async () => {
+  // 真实缺陷 19 的第二道症状：登录其实已经成功（凭据落盘、账号卡也进了列表），
+  // 但弹窗一动不动。第一道在服务端（loomy 的 /status 漏了 loginId 分支，见
+  // internal/api/jethub/status_login_test.go）；这里锁前端这一半 —— 只要会话没了
+  // （结算 30s 宽限期后回收 ⇒ 404），就必须**收尾**（停轮询 + 关弹窗 + 刷新列表 +
+  // 明确提示），而不是把错误文案写进状态行后每 2s 空转到天荒地老。
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  await ctx.jethubAddAccount('loomy');
+  await ticks(1);
+  const overlay = ctx.document.getElementById('modal-overlay');
+  assert.ok(overlay.innerHTML.indexOf('free-hub-login-status') !== -1, 'URL flow must open the login modal');
+  assert.strictEqual(ctx.__calls.apiPost[0][0], '/jethub/loomy/login', 'URL flow must start the server login, not create the account itself');
+  const [poll, interval] = ctx.__calls.intervals[0];
+  assert.strictEqual(interval, 2000, 'the modal polls the login status every 2s');
+
+  // 未结算 ⇒ 保持打开（不误判）
+  ctx.__setStatusResponse({ done: false, accountId: 'loomy-1' });
+  await poll();
+  assert.ok(overlay.innerHTML.indexOf('free-hub-login-status') !== -1, 'a pending flow must keep the modal open');
+
+  // 结算成功 ⇒ 关弹窗 + 成功提示 + 停轮询 + 刷新列表
+  ctx.__setStatusResponse({ done: true, success: true, accountId: 'loomy-1' });
+  await poll();
+  assert.strictEqual(overlay.innerHTML, '', 'a settled login must close the modal');
+  assert.ok(ctx.__calls.toast.some(([m]) => m === 'freeHubLoginOk'), 'success toast must fire');
+  assert.ok(ctx.__calls.cleared.length > 0, 'the poll timer must be cleared');
+  assert.ok(ctx.__calls.apiGet.some((p) => p === '/jethub/providers'), 'the account list must be refreshed');
+
+  // 结算失败 ⇒ 关弹窗 + 带原因的错误提示
+  const fail = makeSandbox();
+  fail.openFreeHub();
+  await ticks(4);
+  await fail.jethubAddAccount('loomy');
+  await ticks(1);
+  fail.__setStatusResponse({ done: true, success: false, error: 'loomy: 你已取消授权' });
+  await fail.__calls.intervals[0][0]();
+  assert.strictEqual(fail.document.getElementById('modal-overlay').innerHTML, '', 'a failed login must close the modal');
+  assert.ok(fail.__calls.toast.some(([m]) => m === 'freeHubLoginFailed'), 'failure toast must fire');
+
+  // 会话已回收（404）⇒ 也必须收尾（此前只写状态行、继续静默轮询）
+  const gone = makeSandbox();
+  gone.openFreeHub();
+  await ticks(4);
+  await gone.jethubAddAccount('loomy');
+  await ticks(1);
+  gone.__setStatusResponse({ error: 'unknown or settled loginId' });
+  await gone.__calls.intervals[0][0]();
+  assert.strictEqual(gone.document.getElementById('modal-overlay').innerHTML, '', 'a reaped session must close the modal');
+  assert.ok(gone.__calls.toast.some(([m]) => m === 'freeHubLoginGone'), 'the user needs an explicit "session ended" hint');
+  assert.ok(gone.__calls.cleared.length > 0, 'polling a reaped session must stop');
 });
 
 checkAsync('④ model list: vertical rows with rate badges + batch delete + restore-defaults shapes', async () => {
