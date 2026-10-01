@@ -613,18 +613,26 @@ function __jethubSmsModal(providerId, accountId) {
     }).catch(function() { jethubSelect(providerId); });
   };
   document.getElementById('free-hub-sms-cancel').onclick = close;
+  // ⚠️ msgid 是发码与提交之间的**唯一关联**（loomy 的 /login/phone/checkCode 必填，
+  // 缺了会得到一个毫不相关的「msgid 无效」）。此前前端把发码响应丢掉、提交时也不带
+  // msgid ⇒ 这条短信路径必然失败。
+  var smsMsgID = '';
   document.getElementById('free-hub-sms-send').onclick = async function() {
     try {
-      await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login/sms/send', { phone: document.getElementById('free-hub-sms-phone').value.trim() });
+      var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login/sms/send', { phone: document.getElementById('free-hub-sms-phone').value.trim() });
+      smsMsgID = (res && res.msgid) || '';
+      if (!smsMsgID) { toast(t('failed', [t('freeHubSmsNoMsgID')]), 'error'); return; }
       toast(t('freeHubSmsSend'), 'success');
     } catch (e) { toast(t('failed', [e.message]), 'error'); }
   };
   document.getElementById('free-hub-sms-submit').onclick = async function() {
+    if (!smsMsgID) { toast(t('failed', [t('freeHubSmsSendFirst')]), 'error'); return; }
     try {
       await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login/sms/submit', {
         accountId: accountId,
         phone: document.getElementById('free-hub-sms-phone').value.trim(),
         code: document.getElementById('free-hub-sms-code').value.trim(),
+        msgid: smsMsgID,
       });
       overlay.classList.remove('show'); overlay.innerHTML = '';
       toast(t('freeHubLoginOk'), 'success');

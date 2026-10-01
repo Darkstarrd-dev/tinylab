@@ -367,6 +367,30 @@ checkAsync('⑤ Use Proxy toggle right of +New Account: project toggle-switch, P
   assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'error' && m.indexOf('boom') !== -1), 'failure toast shown');
 });
 
+// jethubRouteTable parses every chi route declaration in internal/api/jethub/*.go
+// into "METHOD /canonical/path" keys (dynamic segments — {param} or a literal
+// provider name — become '*'). Shared by the UI path guard and the login-page
+// literal guard below.
+function jethubRouteTable() {
+  const dir = path.join(__dirname, '..', 'internal/api/jethub');
+  const managerGo = fs.readFileSync(path.join(__dirname, '..', 'internal/jethub/manager.go'), 'utf8');
+  const providers = new Set([...managerGo.matchAll(/\{ID: "([a-z]+)"/g)].map((m) => m[1]));
+  const canon = (p) => p.split('/').map((seg) => {
+    if (seg === '{}' || /^\{.*\}$/.test(seg) || providers.has(seg)) return '*';
+    return seg;
+  }).join('/');
+  const table = new Set();
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.go') || f.endsWith('_test.go')) continue;
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/r\.(Get|Post|Put|Patch|Delete)\("(\/[^"]*)"/g)) {
+      const p = m[2].startsWith('/jethub') ? m[2] : '/jethub' + m[2];
+      table.add(m[1].toUpperCase() + ' ' + canon(p));
+    }
+  }
+  return { table, canon, providers };
+}
+
 check('⑤ frontend jethub paths match the backend route table (404 regression guard, ALL methods)', () => {
   // Regression for the reported "Failed: HTTP 404 (non-JSON body)" family. Three
   // real defects came from this one class, all of them *plain-text* chi 404s:
@@ -378,27 +402,8 @@ check('⑤ frontend jethub paths match the backend route table (404 regression g
   // through — now EVERY api<Method>('/jethub/...') call is cross-checked against
   // the chi route declarations parsed out of internal/api/jethub/*.go.
   const api = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
-  const dir = path.join(__dirname, '..', 'internal/api/jethub');
-  // Provider-specific route families are declared with LITERAL provider names
-  // (`r.Get("/cline/balance", …)`) while the UI builds them dynamically
-  // (`'/jethub/' + providerId + '/balance'`) — so a provider-name segment must
-  // canonicalise to `*` on both sides.
-  const managerGo = fs.readFileSync(path.join(__dirname, '..', 'internal/jethub/manager.go'), 'utf8');
-  const providers = new Set([...managerGo.matchAll(/\{ID: "([a-z]+)"/g)].map((m) => m[1]));
+  const { table: backend, canon, providers } = jethubRouteTable();
   assert.ok(providers.size >= 10, 'expected the 11-provider table, got ' + [...providers].join(','));
-  const canon = (p) => p.split('/').map((seg) => {
-    if (seg === '{}' || /^\{.*\}$/.test(seg) || providers.has(seg)) return '*';
-    return seg;
-  }).join('/');
-  const backend = new Set();
-  for (const f of fs.readdirSync(dir)) {
-    if (!f.endsWith('.go') || f.endsWith('_test.go')) continue;
-    const src = fs.readFileSync(path.join(dir, f), 'utf8');
-    for (const m of src.matchAll(/r\.(Get|Post|Put|Patch|Delete)\("(\/[^"]*)"/g)) {
-      const p = m[2].startsWith('/jethub') ? m[2] : '/jethub' + m[2];
-      backend.add(m[1].toUpperCase() + ' ' + canon(p));
-    }
-  }
   assert.ok(backend.size > 20, 'expected a substantial jethub route table, got ' + backend.size);
 
   // Normalise both concatenation forms: `'/a/' + encodeURIComponent(x) + '/b'`
@@ -415,6 +420,31 @@ check('⑤ frontend jethub paths match the backend route table (404 regression g
     if (!backend.has(key)) misses.push(key);
   }
   assert.deepStrictEqual(misses, [], 'these UI calls have no matching backend route (plain-text 404): ' + misses.join(', '));
+});
+
+check('⑤ login pages + public page payloads reference registered /api/jethub routes', () => {
+  // The scan-login pages are static assets whose calls are NOT covered by the
+  // jethub.js guard above — a typo there only shows up in a browser. Same for
+  // the `qrImage` URL the Go handler hands to the page. Both are checked here
+  // against the real route table (method-agnostic: a wrong METHOD still fails
+  // the path match only when no route uses that path at all).
+  const { table, canon } = jethubRouteTable();
+  const paths = new Set();
+  for (const f of ['free-hub-login.html', 'free-hub-loomy-login.html']) {
+    const src = fs.readFileSync(path.join(__dirname, 'static', f), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    for (const m of src.matchAll(/['"](\/api\/jethub\/[^'"?]*)/g)) paths.add(m[1]);
+  }
+  const goPage = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub/login_page.go'), 'utf8');
+  for (const m of goPage.matchAll(/"(\/api\/jethub\/[^"?]*)"/g)) paths.add(m[1]);
+  assert.ok(paths.size >= 3, 'expected the login-page endpoints, got ' + [...paths].join(','));
+
+  const registered = new Set([...table].map((k) => k.split(' ').slice(1).join(' ')));
+  const misses = [];
+  for (const p of paths) {
+    const shape = canon(p.replace(/^\/api/, ''));
+    if (!registered.has(shape)) misses.push(p + ' → ' + shape);
+  }
+  assert.deepStrictEqual(misses, [], 'login-page paths with no registered route: ' + misses.join(', '));
 });
 
 checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips + per-card retest/reset', async () => {

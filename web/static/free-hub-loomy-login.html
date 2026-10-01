@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Hub 登录</title>
+<!--
+  Free Hub 本地登录页 —— Loomy（讯飞）**微信扫码**。
+
+  ⚠️ 为什么单独一页（用户实测报障）：「loomy 新建账号」在插件里是**弹出浏览器窗口**
+  的微信扫码页，而此前 TinyLab 用的是项目内 modal 让大家手输手机号 + 验证码 —— 与
+  插件行为不符。参考实现的主路径是微信扫码（`startWechatLogin()` → 本地弹窗页），
+  短信只是**无 UI 的备用 RPC**。
+
+  ⚠️ 本页与 raccoon 的 `free-hub-login.html` **刻意分开**：那边是「文本二维码内容 →
+  浏览器端画 SVG + 单一终态」；这边是「微信下发的 JPEG + 扫码后可能需要绑手机号的
+  中间态」，混用会把 raccoon 一起拖进回归。
+
+  ⚠️ 本页是**公开**静态资源（无鉴权）：它可能在一个没有管理 UI cookie 的浏览器里被
+  打开。所有数据都靠 `loginId`（128 位随机、一次性）换取；二维码图片由宿主代理，
+  uuid / rcode / msgid / session 一律留在宿主侧（响应里没有这些字段）。
+-->
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: #f5f6f8; color: #1f2329; }
+  .card { background: #fff; border-radius: 12px; padding: 20px 24px 24px;
+          box-shadow: 0 4px 24px rgba(0,0,0,.08); text-align: center; width: 320px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .qr { width: 220px; height: 220px; display: flex; align-items: center; justify-content: center;
+        margin: 0 auto; border: 1px solid #eceef1; border-radius: 8px; padding: 6px;
+        box-sizing: content-box; background: #fff; }
+  .qr img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .qr-placeholder { font-size: 12px; color: #8a9099; padding: 0 12px; }
+  .sub { font-size: 12px; color: #8a9099; margin: 10px 0 0; }
+  .status { margin-top: 12px; font-size: 13px; color: #4e5969; min-height: 20px; }
+  .status[data-tone="ok"] { color: #0f9d58; font-weight: 600; }
+  .status[data-tone="err"] { color: #d93026; }
+  #phoneForm { display: none; margin-top: 16px; text-align: left; }
+  #phoneForm[data-show="1"] { display: block; }
+  label { display: block; font-size: 12px; color: #8a9099; margin: 0 0 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px; margin-bottom: 10px;
+          border: 1px solid #d9dde3; border-radius: 6px; }
+  .row { display: flex; gap: 8px; }
+  .row input { margin-bottom: 10px; }
+  button { padding: 9px 12px; font-size: 14px; border: 0; border-radius: 6px;
+           background: #8E6BF2; color: #fff; cursor: pointer; white-space: nowrap; }
+  button:disabled { background: #c9cdd4; cursor: not-allowed; }
+  button.wide { width: 100%; }
+  .form-status { font-size: 12px; color: #d93026; min-height: 18px; margin-top: 2px; }
+  .form-status[data-tone="ok"] { color: #0f9d58; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="page-title">使用微信扫码登录</h1>
+    <div class="qr" id="qr-box"><span class="qr-placeholder">二维码加载中…</span></div>
+    <p class="sub" id="qr-hint">打开微信扫一扫，扫描下方二维码</p>
+    <div class="status" id="status">正在准备…</div>
+
+    <div id="phoneForm">
+      <label for="phone">首次使用需绑定手机号</label>
+      <div class="row">
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入 11 位手机号">
+        <button id="sendBtn" type="button">获取验证码</button>
+      </div>
+      <label for="code">验证码</label>
+      <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="请输入 6 位验证码">
+      <button class="wide" id="verifyBtn" type="button">完成绑定并登录</button>
+      <div class="form-status" id="formStatus"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(window.location.search);
+  var loginId = params.get('loginId') || '';
+  var statusEl = document.getElementById('status');
+  var formStatusEl = document.getElementById('formStatus');
+  var qrBox = document.getElementById('qr-box');
+  var formEl = document.getElementById('phoneForm');
+  var phoneEl = document.getElementById('phone');
+  var codeEl = document.getElementById('code');
+  var sendBtn = document.getElementById('sendBtn');
+  var verifyBtn = document.getElementById('verifyBtn');
+  var stopped = false;
+
+  function setStatus(text, tone) {
+    statusEl.textContent = text;
+    if (tone) { statusEl.setAttribute('data-tone', tone); }
+    else { statusEl.removeAttribute('data-tone'); }
+  }
+  function setFormStatus(text, tone) {
+    formStatusEl.textContent = text || '';
+    if (tone) { formStatusEl.setAttribute('data-tone', tone); }
+    else { formStatusEl.removeAttribute('data-tone'); }
+  }
+  function stop() { stopped = true; }
+
+  if (loginId === '') {
+    setStatus('缺少 loginId —— 请从 Free Hub 重新点击「新建账号」', 'err');
+    return;
+  }
+
+  // ---- 页面数据（二维码图片地址 + 文案） ----
+  fetch('/api/jethub/login-page?loginId=' + encodeURIComponent(loginId))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) {
+        setStatus((data && data.error) || '登录会话不存在或已结束', 'err');
+        return;
+      }
+      if (data.title) { document.getElementById('page-title').textContent = data.title; }
+      if (data.hint) { document.getElementById('qr-hint').textContent = data.hint; }
+      if (!data.qrImage) {
+        setStatus('该登录方式没有可展示的二维码', 'err');
+        return;
+      }
+      qrBox.innerHTML = '';
+      var img = document.createElement('img');
+      img.alt = '微信登录二维码';
+      img.src = data.qrImage;
+      img.onerror = function () { setStatus('二维码加载失败（可能是网络/代理问题）', 'err'); };
+      qrBox.appendChild(img);
+      setStatus('等待扫码…');
+      poll();
+    })
+    .catch(function () { setStatus('无法连接 TinyLab（应用是否已退出？）', 'err'); });
+
+  // ---- 轮询：每次调用推进一次上游长轮询（宿主侧执行） ----
+  function poll() {
+    if (stopped) { return; }
+    fetch('/api/jethub/login-page/poll?loginId=' + encodeURIComponent(loginId))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (stopped) { return; }
+        if (!data || !data.ok) {
+          setStatus((data && data.error) || '登录会话不存在或已结束', 'err');
+          stop();
+          return;
+        }
+        var stage = data.stage;
+        if (stage === 'done') {
+          stop();
+          setStatus('登录成功，可以关闭此窗口了', 'ok');
+          setTimeout(function () { window.close(); }, 1200);
+          return;
+        }
+        if (stage === 'need_phone') {
+          stop();
+          setStatus('扫码成功，请绑定手机号');
+          formEl.setAttribute('data-show', '1');
+          phoneEl.focus();
+          return;
+        }
+        if (stage === 'cancelled') {
+          stop();
+          setStatus(data.message || '你已取消授权，请关闭窗口后重试', 'err');
+          return;
+        }
+        if (stage === 'expired') {
+          stop();
+          setStatus(data.message || '二维码已失效，请关闭窗口后重新发起登录', 'err');
+          return;
+        }
+        if (stage === 'scanned') { setStatus('已扫码，请在手机上确认…'); }
+        else { setStatus('等待扫码…'); }
+        setTimeout(poll, 500);
+      })
+      .catch(function () {
+        // 长轮询偶发失败不终止（下一次继续）。
+        if (!stopped) { setTimeout(poll, 2000); }
+      });
+  }
+
+  // ---- 绑手机号（失败就地提示、允许重试；不终止流程） ----
+  function complete(body) {
+    return fetch('/api/jethub/login-page/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ loginId: loginId }, body))
+    }).then(function (r) { return r.json(); });
+  }
+
+  sendBtn.addEventListener('click', function () {
+    var phone = (phoneEl.value || '').replace(/\D/g, '');
+    if (phone.length !== 11) { setFormStatus('请输入有效的 11 位手机号'); return; }
+    phoneEl.value = phone;
+    sendBtn.disabled = true;
+    setFormStatus('发送中…');
+    complete({ action: 'send_sms', phone: phone })
+      .then(function (data) {
+        if (data && data.ok) { setFormStatus('验证码已发送，请查收短信', 'ok'); }
+        else { setFormStatus((data && data.message) || '发送失败，请重试'); }
+      })
+      .catch(function () { setFormStatus('发送失败，请检查网络后重试'); })
+      .finally(function () { sendBtn.disabled = false; });
+  });
+
+  verifyBtn.addEventListener('click', function () {
+    var phone = (phoneEl.value || '').replace(/\D/g, '');
+    var code = (codeEl.value || '').replace(/\D/g, '');
+    if (code.length === 0) { setFormStatus('请输入验证码'); return; }
+    verifyBtn.disabled = true;
+    setFormStatus('登录中…');
+    complete({ action: 'verify_sms', phone: phone, code: code })
+      .then(function (data) {
+        if (data && data.ok) {
+          setFormStatus('登录成功，可以关闭此窗口了', 'ok');
+          setTimeout(function () { window.close(); }, 1200);
+        } else {
+          setFormStatus((data && data.message) || '验证码不正确，请重试');
+        }
+      })
+      .catch(function () { setFormStatus('登录失败，请检查网络后重试'); })
+      .finally(function () { verifyBtn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

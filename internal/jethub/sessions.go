@@ -206,6 +206,10 @@ type LoginSession struct {
 	Manager *Manager
 	Started *StartedLogin
 	Account string
+	// Extra carries provider-specific flow state that the public login page
+	// must be able to reach by loginId (currently the loomy WeChat QR flow:
+	// uuid/rcode/msgid live host-side only). nil for every other provider.
+	Extra any
 
 	// recorded outcome (guarded by settleMu; written only by
 	// SettleAndCleanup, read by SessionStatus).

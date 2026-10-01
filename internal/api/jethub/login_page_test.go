@@ -3,6 +3,7 @@ package jethub
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,6 +169,64 @@ func TestRaccoonLoginPageURL(t *testing.T) {
 	}
 	if strings.Contains(got, "xiaohuanxiong.com") {
 		t.Fatal("the page URL must never be the QR content (reported defect: opening it cannot authenticate)")
+	}
+}
+
+// TestLoomyLoginPageURL: loomy 用**独立页面**（微信下发的二维码是 JPEG，不能像
+// raccoon 那样把文本交给浏览器端画），且页面 URL 必须指向它。
+func TestLoomyLoginPageURL(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/jethub/loomy/login", nil)
+	req.Host = "127.0.0.1:8080"
+	got := loomyLoginPageURL(req, "l1")
+	want := "http://127.0.0.1:8080/free-hub-loomy-login.html?loginId=l1&provider=loomy"
+	if got != want {
+		t.Fatalf("loomy page URL = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "open.weixin.qq.com") {
+		t.Fatal("the page URL must be the local page, not the WeChat auth page")
+	}
+}
+
+// TestLoginPageLabelsCoverLoomy: 页面标题/提示要有 loomy 分支（否则回退成「登录 loomy」）。
+func TestLoginPageLabelsCoverLoomy(t *testing.T) {
+	title, hint := loginPageLabels("loomy")
+	if !strings.Contains(title, "微信") || !strings.Contains(title, "Loomy") {
+		t.Fatalf("loomy title = %q", title)
+	}
+	if !strings.Contains(hint, "微信") {
+		t.Fatalf("loomy hint = %q", hint)
+	}
+}
+
+// TestLoomyOnlyEndpointsRejectOtherSessions: qr-image / poll / complete 只服务
+// loomy 的微信流程；其他会话必须明确拒绝（不能 500，也不能静默返回空）。
+func TestLoomyOnlyEndpointsRejectOtherSessions(t *testing.T) {
+	srv, m := newPublicPageHandler(t)
+	registerQRLoginSession(t, m, "raccoon-1", "acc-9", "https://xiaohuanxiong.com/login/mp?code=x")
+
+	cases := []struct {
+		name   string
+		method string
+		url    string
+		body   string
+	}{
+		{"qr-image", http.MethodGet, "/api/jethub/login-page/qr-image?loginId=raccoon-1", ""},
+		{"poll", http.MethodGet, "/api/jethub/login-page/poll?loginId=raccoon-1", ""},
+		{"complete", http.MethodPost, "/api/jethub/login-page/complete", `{"loginId":"raccoon-1","action":"send_sms","phone":"13011111111"}`},
+	}
+	for _, tc := range cases {
+		var body io.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.url, body))
+		if rec.Code == http.StatusOK {
+			t.Errorf("%s: must not succeed for a non-loomy session (%s)", tc.name, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "error") {
+			t.Errorf("%s: refusal must be a JSON error, got %s", tc.name, rec.Body.String())
+		}
 	}
 }
 

@@ -43,7 +43,7 @@ var defaultProviders = []ProviderMeta{
 	{ID: "qodercn", DisplayName: "Qoder 中国版", Description: "阿里系 Qoder（中国版）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "trae", DisplayName: "TRAE", Description: "字节跳动 TRAE", HasCredits: true, LoginModes: []string{"url"}},
 	{ID: "cline", DisplayName: "Cline", Description: "Cline API", LoginModes: []string{"url"}},
-	{ID: "loomy", DisplayName: "Loomy", Description: "讯飞 Loomy", HasCredits: true, HasBalance: true, LoginModes: []string{"sms", "qr"}},
+	{ID: "loomy", DisplayName: "Loomy", Description: "讯飞 Loomy", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "raccoon", DisplayName: "Raccoon", Description: "商汤小浣熊", HasCredits: true, LoginModes: []string{"url", "qr"}},
 	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax（Anthropic 协议族）", HasCredits: true, LoginModes: []string{"url"}},
 }

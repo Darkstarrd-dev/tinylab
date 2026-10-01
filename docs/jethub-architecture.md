@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -13,6 +13,7 @@
 > - 修改限流重测/重置探针或永久锁 → §3.1 + `internal/jethub/probe.go`/`ratelimits.go`/`manager.go` + `internal/api/jethub/register.go`
 > - 修改 jethub 出站代理分派（`SetProxyURL`/`SetPackageProxyURL`/`ProxyEnabled`）→ §3.2 + `internal/jethub/sessions.go`/`codearts_login.go`/`bridge.go` + `internal/app/app.go`
 > - 修改 MiniMax 推理协议（端点 / OpenAI⇄Anthropic 转换 / 思考档位判据 / SSE 映射）→ §6.1 + `internal/jethub/minimax_convert.go`/`minimax_stream.go`/`minimax_credits.go`（augmenter）+ `qoder_adapter.go`（Customize/InterceptResponse 分派）+ `probe.go`
+> - 修改 Loomy 微信扫码登录（协议/流程/页面/公开端点）→ §3.5 + `internal/jethub/loomy_wechat.go`/`loomy_wechat_flow.go` + `internal/api/jethub/loomy.go`（`POST /loomy/login`）+ `web/static/free-hub-loomy-login.html` + `manager.go` 的 `loginModes`
 > - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
 > - 修改/新增 provider 的**推理端点**（出站 URL）→ §6.2 + `internal/jethub/products.go` 的 `Product.InferURL`（**唯一真相源**）+ `bridge.go`（登记即发布）+ `qoder_adapter.go`（Customize 覆盖 + 签名用 URL 改写）+ `probe.go`（探针共用同一管线）；qoder 族例外（URL 由 WASM 算出）
 > - 修改**模型展示名/倍率**（别名、倍率段、促销窗口）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go`
@@ -111,6 +112,42 @@
 - **安全边界**（与参考插件一致）：宿主侧/服务端持有全部敏感状态（`qrcode_code`、凭据），页面只做展示与轮询；页面文本里**没有**任何凭据字样。
 - ⚠️ **未移植**：`canceled` 时参考实现会**换一个新 code 并刷新页面上的二维码**，本端仍按「扫码已取消」终止本次登录（用户重开一次即可）；页面也**没有**参考实现的短信 Tab（本端短信走独立弹窗，需要阿里云滑块参数，尚未打通）。
 
+### 3.5 Loomy 微信扫码登录页（真实缺陷 18 —— 行为与插件不符）
+
+**用户实测报障**：「loomy 渠道的添加不是弹窗打开浏览器，而变成了直接在项目内的 modal
+弹窗中要求输入电话号码和验证码，与插件中的行为不符」。
+
+**插件的真实行为**（ref：`jet-hub-rpc.ts` 的 loomy 分支 + `loomy-wechat-login.ts`）：
+`+新建账号` → 写占位账号 → `startWechatLogin()`（起本地服务器）→ 返回**本地页 URL** →
+`window.open`；页面是**单卡片、无 Tab**：微信二维码 + 状态，**手机号表单只在「微信已扫码
+但讯飞侧未绑手机号」时**才出现。⚠️ 插件面板**从不**渲染短信表单 —— `login.sendSms` /
+`login.submitSms` 是**无 UI 的休眠备用 RPC**（早期那个短信表单分支因**顺序死锁**已被删除）。
+
+**本端实现**（复用 §3.4 的公开页机制，但**独立页面**：loomy 的二维码是微信下发的 **JPEG
+图片**，不能用文本→SVG 那条路，混用会把 raccoon 拖进回归）：
+
+| 件 | 位置 | 要点 |
+|---|---|---|
+| 协议层 | `internal/jethub/loomy_wechat.go` | 授权页 URL（appid `wx18d60be432287cf8` + **官方白名单 redirect_uri** + `#wechat_redirect`）、uuid 正则提取（img 主路径 + 长轮询兜底）、二维码图片（**按魔数**认 jpeg/png/gif）、长轮询 `long.open.weixin.qq.com/connect/l/qrconnect`（**405=已确认带 code / 404=已扫码待确认** —— 参考实现曾读反，导致扫码后永远等不到 code）、`bind/auth`·`bind/skip`·`bind/sendMsg`·`bind/checkCode` 四步 |
+| 流程 | `internal/jethub/loomy_wechat_flow.go` | 宿主侧状态机（uuid/rcode/bind/nickname/msgid **只在此**）+ **页面驱动**：页面每轮调一次公开 poll 端点 → 宿主执行一次微信长轮询并推进；`need_phone` 中间态；5 分钟总超时；cancelled/expired **立即结算**（比参考更紧一档：参考要等总超时才 reject，占位账号会多挂 5 分钟） |
+| API | `internal/api/jethub/loomy.go` | `POST /loomy/login`（占位账号 → 起流程 → 注册会话 → **开浏览器** → 返回页面 URL）；`/loomy/status` 复用 `pollLogin` |
+| 公开页端点 | `internal/api/jethub/login_page.go` | `GET /jethub/login-page`（`qrImage` 指向下一条）、`GET …/qr-image`（**宿主代理微信图片**：uuid 不外泄、浏览器不必直连微信）、`GET …/poll`、`POST …/complete`（`send_sms`/`verify_sms`，契约 `{ok}`/`{ok:false,message}`/`{ok:true,done:true}`）。⚠️ 响应里**不得**出现 rcode/msgid/session/userid/accountId |
+| 页面 | `web/static/free-hub-loomy-login.html` | 图片二维码 + 隐藏的绑手机表单 + 轮询中间态；失败就地提示、**允许重试**（不终止流程，字段与 `verify_sms` 返回的 phone 优先） |
+| 面板 | `internal/jethub/manager.go` | loomy 的 `loginModes` 从 `["sms","qr"]` 改为 **`["url"]`** —— 否则前端仍先命中 `sms` 分支弹旧 modal（`web/static/jethub.js` 的分派是「先 sms 后 url」）。`/loomy/login/sms/*` 保留为休眠备用路径 |
+
+**回归**：`internal/jethub/loomy_wechat_test.go`（12 个：URL 构造、uuid 两条正则与严格
+字符集、图片魔数、**errcode→状态全表（含 405 无 code 的异常形态与网络降级）**、取不到 uuid
+必须报错、非图片必须报错、绑手机全流程（凭据+昵称「Loomy 尾4」）、`bind=1` 走 skip 且昵称
+优先微信昵称、**验证码输错可重试**、cancelled/expired 立即结算、5 分钟超时）+
+`internal/api/jethub/login_page_test.go`（loomy 页面 URL、标签、仅 loomy 的端点必须拒绝
+其他会话）+ `web/loomy-login.test.js`（8 项：页面只用公开端点且不含秘密、结构对齐插件、
+Go 侧接线与顺序契约、协议判据存在的静态守卫、`loginModes` 守卫、manifest 登记）。
+
+**⚠️ 未移植/已知边界**：① 插件的「二维码失效自动换码刷新」本端也没有（只提示重开）；
+② 短信备用路径的 msgid 仍由调用方在请求体里回传（插件存宿主 Map；`/loomy/login/sms/*`
+是无 UI 的备用面，前端 modal 已无 provider 使用它）；③ 微信链路的真机验证只有参考实现的
+一次人工实测、四步 bind 只有 mock 单测 —— 本端同样**未经真机验证**。
+
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
 1. 用户为 provider 设**调用前缀**（全局唯一，`[a-z0-9-]{1,32}`）→ `Bridge.SetPrefix` 校验冲突（409）+ 持久化。
@@ -145,7 +182,7 @@
 | trae | **SOLO 私有协议** `{agentHost}/api/agent/v3/llm_utils_chat`（⚠️ 响应仍是 SOLO SSE，转换未实现，§6.2） | 回调双流程（token 直传 + PKCE 并行） | `Cloud-IDE-JWT` + X-* 头族 + OpenAI→SOLO body 转换 | ExchangeToken 轮换 | 签到（9074 设备级限流→代次派生绕开） |
 | cline | OpenAI 兼容 `{apiBase}/api/v1/chat/completions` | WorkOS 设备码 | `Bearer workos:<jwt>` 前缀必须保留 | 驼峰 `{refreshToken,grantType}` | 余额（`usr-` id） |
 | raccoon | OpenAI 兼容 `{base}/api/web/llm/v2/chat/completions` + extra_body.thinking | 微信 QR + 短信 | AES-128-CFB 手机加密 + Bearer | 200003 终态 | 登录奖励 + 新手礼包 |
-| loomy | OpenAI 兼容 `{apiBase}/chat/completions` | **短信验证码**（不可静默续期，诚实 `refreshable:false`） | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
+| loomy | OpenAI 兼容 `{apiBase}/chat/completions` | **微信扫码**（本地弹窗页 + 长轮询；首次登录绑手机号，§3.5）；短信为**无 UI 备用** | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
 | minimax | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（§6.1：进站 OpenAI 时双向转换；进站 `/v1/messages` 时原生透传） | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version、无 x-api-key） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 
@@ -346,4 +383,4 @@ kimi-k3-agentic-v1,thinking-level-control-v1`，否则少 `kimi-k3`）。qoder/q
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路未移植「失效自动换码」、且与参考一样只有 mock 单测（§3.5）；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。

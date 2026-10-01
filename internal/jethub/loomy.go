@@ -268,10 +268,13 @@ func (m *Manager) SendLoomySmsCode(ctx context.Context, phone string) (string, e
 	return msgid, nil
 }
 
-// LoomyLoginResult is the SMS login outcome.
+// LoomyLoginResult is the login outcome (SMS or WeChat path).
 type LoomyLoginResult struct {
 	Session string
 	UserID  string
+	// Phone is only present on the WeChat bind path (bind/checkCode returns it);
+	// the bind/skip path (already bound) leaves it EMPTY — ref 同款。
+	Phone string
 }
 
 // LoginLoomyBySmsCode completes the SMS login ({session,userid}).
