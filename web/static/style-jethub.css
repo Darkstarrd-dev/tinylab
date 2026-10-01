@@ -120,13 +120,30 @@
   max-width: 260px;
 }
 
-/* --- action row (刷新积分 / 一键领取积分 / 重测所有 / 重置所有 / 锁定|解锁 / 新建账号) --- */
+/* --- action row (刷新积分 / 一键领取积分 / 重测所有 / 重置所有 / 锁定|解锁 / 新建账号 / Use Proxy 开关) --- */
 
 .free-hub-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+/* Use Proxy toggle（+ 新建账号 右侧）：标签 + 全局 .toggle-switch 开关。
+   复用全局开关的全部堆叠/动画规则（style-settings.css），这里只排布。 */
+.free-hub-proxy-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+.free-hub-proxy-label {
+  font-size: 13px;
+  color: var(--text-secondary, rgba(128, 128, 128, 0.9));
+  cursor: default;
+  white-space: nowrap;
 }
 
 /* --- notice area (retest/reset/claim/lock results) --- */

@@ -3,7 +3,6 @@ package jethub
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -95,6 +94,10 @@ type accountsFile struct {
 	// soon-expiring credits (原版「锁定永久积分」provider 级开关；备份里的
 	// permanentLocks 表)。Only true values are meaningful.
 	PermanentLocks map[string]bool `json:"permanentLocks,omitempty"`
+	// ProxyEnabled marks providers whose login/credits/inference outbound
+	// calls route through the global upstream proxy (per-provider Use Proxy
+	// toggle; absent = direct).
+	ProxyEnabled map[string]bool `json:"proxyEnabled,omitempty"`
 }
 
 // Account is the public view of one account entry.
@@ -136,8 +139,8 @@ type Manager struct {
 	// fsutil.OpenInBrowser); login flows invoke it with the login URL.
 	browserOpener func(url string)
 
-	// sharedClient lazily-built outbound client for adapter management calls.
-	sharedClient *http.Client
+	// sharedClients lazily-built outbound clients (direct + proxy-routed).
+	sharedClients jethubClients
 	// proxyURL is the global upstream proxy for jethub outbound calls (wired
 	// from config by the app; nil = direct). Immutable once set.
 	proxyURL *url.URL
@@ -180,6 +183,9 @@ func NewManager(dir, encryptionKey string, logger Logger) (*Manager, error) {
 	if m.accounts.PermanentLocks == nil {
 		m.accounts.PermanentLocks = map[string]bool{}
 	}
+	if m.accounts.ProxyEnabled == nil {
+		m.accounts.ProxyEnabled = map[string]bool{}
+	}
 	return m, nil
 }
 
@@ -208,6 +214,9 @@ func (m *Manager) loadAccounts() error {
 	}
 	if af.PermanentLocks == nil {
 		af.PermanentLocks = map[string]bool{}
+	}
+	if af.ProxyEnabled == nil {
+		af.ProxyEnabled = map[string]bool{}
 	}
 	m.accounts = af
 	return nil

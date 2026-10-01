@@ -234,7 +234,7 @@ func (m *Manager) postLoomyAccount(ctx context.Context, path string, param map[s
 	tctx, cancel := context.WithTimeout(ctx, loomyTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("loomy").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("讯飞账号请求失败（%s）：%w", path, err)
 	}
@@ -323,7 +323,7 @@ func (m *Manager) probeLoomyCredential(ctx context.Context, cred *LoomyCredentia
 	for k, v := range loomyBusinessHeaders(cred.AccessToken) {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("loomy").Do(req)
 	if err != nil {
 		return fmt.Errorf("Loomy 凭据探测网络失败：%w", err)
 	}

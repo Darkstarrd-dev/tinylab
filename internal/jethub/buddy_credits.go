@@ -60,7 +60,7 @@ func (m *Manager) buddyPostCredit(ctx context.Context, cred *BuddyCredential, p 
 	for k, v := range buddyCheckinHeaders(cred, p) {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient(p.ID).Do(req)
 	if err != nil {
 		return nil, err
 	}

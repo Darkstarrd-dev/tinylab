@@ -171,8 +171,9 @@ function __jethubRenderDetail(provider) {
 }
 
 // __jethubActionButtons: 刷新积分 / 一键领取积分 / 重测所有 / 重置所有 /
-// 解锁|锁定永久积分 / + 新建账号 — same order and gating as the original
-// dim-jh-headerActions row.
+// 解锁|锁定永久积分 / + 新建账号 / Use Proxy 开关 — same order and gating as
+// the original dim-jh-headerActions row; the proxy toggle sits right of
+// + 新建账号（per-provider: 登录/积分/推理出站走代理还是直连）.
 function __jethubActionButtons(provider) {
   var pid = escapeForJsString(provider.id);
   var html = '';
@@ -191,7 +192,33 @@ function __jethubActionButtons(provider) {
       escapeHtml(provider.permanentLocked ? t('freeHubUnlockPermanent') : t('freeHubLockPermanent')) + '</button>';
   }
   html += '<button type="button" class="btn btn-primary btn-sm" onclick="jethubAddAccount(\'' + pid + '\')">' + escapeHtml(t('freeHubNewAccount')) + '</button>';
+  // Use Proxy toggle（项目自定义 toggle-switch 样式，同 Upstream Proxy /
+  // Provider 详情 useProxy——标签在开关左侧，复用全局 .toggle-switch 不动其
+  // 堆叠规则）：per-provider 登录/积分/推理出站走代理还是直连。
+  var on = provider.proxyEnabled === true;
+  html += '<span class="free-hub-proxy-wrap">' +
+    '<span class="free-hub-proxy-label" data-tooltip="' + escapeAttr(t('freeHubUseProxyHint')) + '">' + escapeHtml(t('freeHubUseProxy')) + '</span>' +
+    '<label class="toggle-switch" data-tooltip="' + escapeAttr(t('freeHubUseProxyHint')) + '">' +
+      '<input type="checkbox" onchange="jethubToggleProxy(\'' + pid + '\', this.checked)"' + (on ? ' checked' : '') + '>' +
+      '<span class="toggle-slider"></span>' +
+    '</label>' +
+    '</span>';
   return html;
+}
+
+// jethubToggleProxy PUT /jethub/{provider}/proxy — 登录/积分/推理出站的
+// per-provider 代理开关；桥接 provider 的 UseProxy 由后端 SyncKeys 一并写入。
+async function jethubToggleProxy(providerId, enabled) {
+  try {
+    var r = await apiPut('/jethub/' + encodeURIComponent(providerId) + '/proxy', { enabled: !!enabled });
+    if (r.error) throw new Error(r.error);
+    var p = __jethubState.providers.find(function(x) { return x.id === providerId; });
+    if (p) p.proxyEnabled = !!enabled;
+    toast(enabled ? t('freeHubProxyOn') : t('freeHubProxyOff'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+    jethubSelect(__jethubState.selected); // revert the checkbox to stored state
+  }
 }
 
 // __jethubNotice shows the result of a batch action with a per-item details

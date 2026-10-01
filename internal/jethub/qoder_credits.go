@@ -94,6 +94,8 @@ func qoderCreditsHeaders(cred *QoderCredential, p *qoderProductConfig) map[strin
 }
 
 // qoderEnvelopeRequest performs a /sash/ GET/POST; non-2xx/401/403 mapped.
+// The product config carries the provider id (qoder | qodercn) for the
+// per-provider proxy pick.
 func (m *Manager) qoderEnvelopeRequest(ctx context.Context, cred *QoderCredential, p *qoderProductConfig, method, path, body string) (map[string]any, error) {
 	var reader io.Reader
 	if body != "" || method == http.MethodPost {
@@ -112,7 +114,7 @@ func (m *Manager) qoderEnvelopeRequest(ctx context.Context, cred *QoderCredentia
 	tctx, cancel := context.WithTimeout(ctx, qoderCreditsTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient(p.ID).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +429,7 @@ func (m *Manager) SubmitQoderDeviceLogin(ctx context.Context, provider, accountI
 		return fmt.Errorf("jethub: unknown qoder product %q", provider)
 	}
 	session := createQoderDeviceSession(machineID)
-	payload, err := m.PollQoderDeviceToken(ctx, session, p)
+	payload, err := m.PollQoderDeviceToken(ctx, provider, session, p)
 	if err != nil {
 		return err
 	}
@@ -478,8 +480,9 @@ func (m *Manager) RefreshQoderAccount(ctx context.Context, provider, accountID s
 	if !QoderRefreshable(&cred) {
 		return ErrRefreshTokenExpired
 	}
+	p := qoderProduct(provider)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		qoderProduct(provider).OpenAPIBase+qoderRefreshPath, strReader(QoderRefreshBody(&cred)))
+		p.OpenAPIBase+qoderRefreshPath, strReader(QoderRefreshBody(&cred)))
 	if err != nil {
 		return err
 	}
@@ -488,7 +491,7 @@ func (m *Manager) RefreshQoderAccount(ctx context.Context, provider, accountID s
 	tctx, cancel := context.WithTimeout(ctx, qoderCreditsTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient(p.ID).Do(req)
 	if err != nil {
 		return fmt.Errorf("jethub: qoder refresh 网络失败：%w", err)
 	}

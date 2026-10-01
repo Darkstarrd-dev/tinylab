@@ -33,7 +33,7 @@ func (m *Manager) lobsteraiRequest(ctx context.Context, cred *LobsteraiCredentia
 	for k, v := range lobsteraiAuthHeaders(cred, "application/json") {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("lobsterai").Do(req)
 	if err != nil {
 		return nil, err
 	}

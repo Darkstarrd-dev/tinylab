@@ -218,7 +218,7 @@ func (m *Manager) raccoonRequest(ctx context.Context, cred *RaccoonCredential, m
 	req.Header.Set("X-Raccoon-Language", "zh")
 	req.Header.Set("X-Client-Platform", raccoonClientPlatform)
 	req.Header.Set("X-Client-Version", raccoonClientVersion)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("raccoon").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("raccoon: 请求失败：%w", err)
 	}

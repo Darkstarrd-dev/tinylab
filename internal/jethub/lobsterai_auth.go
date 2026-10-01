@@ -61,7 +61,7 @@ func (m *Manager) exchangeLobsteraiAuthCode(ctx context.Context, code string, se
 	}
 	tctx, cancel := context.WithTimeout(ctx, lobsteraiRequestTimeout)
 	defer cancel()
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("lobsterai").Do(req)
 	_ = tctx
 	_ = cancel
 	if err != nil {
@@ -114,7 +114,7 @@ func (m *Manager) lobsteraiRefreshOnce(ctx context.Context, cred *LobsteraiCrede
 	for k, v := range lobsteraiAnonymousHeaders() {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("lobsterai").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("LobsterAI refresh 网络失败：%w", err)
 	}

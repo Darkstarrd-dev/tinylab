@@ -167,8 +167,8 @@ function makeSandbox() {
 
   const calls = { apiGet: [], apiPost: [], apiPut: [], apiDelete: [], apiPatch: [], toast: [] };
   const providers = [
-    { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true, supportsRateLimit: true, canLockPermanent: false, permanentLocked: false },
-    { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['sms'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true },
+    { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true, supportsRateLimit: true, canLockPermanent: false, permanentLocked: false, proxyEnabled: true },
+    { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['sms'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true, proxyEnabled: false },
   ];
   const accounts = [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_1', modelRateLimits: { qfmodel: Date.now() + 3600000, stale: Date.now() - 3600000 } }];
   const models = [{ id: 'auto', name: 'Auto', rate: 'x0.5', disabled: false }, { id: 'qfmodel', name: 'Qwen3.8-Flash', rate: '免费', disabled: true }];
@@ -216,6 +216,8 @@ function makeSandbox() {
         freeHubBalanceFailed: '失败', freeHubClaimOk: '领取成功：{0}', freeHubRestorePwd: '口令', freeHubBackupPwd: '口令',
         freeHubRefreshCredits: '刷新积分', freeHubClaimAll: '一键领取积分', freeHubClaimRunning: '领取中…',
         freeHubClaimDone: '领取完成：成功 {0}，失败 {1}', freeHubNewAccount: '+ 新建账号',
+        freeHubNoCredential: '登录未完成 · 无凭据',
+        freeHubUseProxy: '走代理', freeHubUseProxyHint: 'h', freeHubProxyOn: '已启用走代理', freeHubProxyOff: '已关闭走代理',
         freeHubRetestAll: '重测所有', freeHubResetAll: '重置所有', freeHubRetest: '重测', freeHubReset: '重置',
         freeHubRetestHelp: 'h', freeHubResetHelp: 'h', freeHubRetestAllHelp: 'h', freeHubResetAllHelp: 'h',
         freeHubRetestConfirm: '继续？', freeHubRetestRunning: '重测中…', freeHubRetestDone: '重测完成：清除 {0}，仍受限 {1}',
@@ -324,6 +326,36 @@ checkAsync('③ detail: capability-gated action row (refresh/claim/retest/reset/
   assert.ok(loomyHtml.indexOf('解锁永久积分') !== -1, 'locked provider shows 解锁永久积分');
   assert.ok(loomyHtml.indexOf('重测所有') === -1, 'loomy must not render 重测所有');
   assert.ok(loomyHtml.indexOf('重置所有') === -1, 'loomy must not render 重置所有');
+});
+
+checkAsync('⑤ Use Proxy toggle right of +New Account: project toggle-switch, PUT body, revert on failure', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(6);
+  const detail = ctx.document.getElementById('free-hub-detail');
+  const html = detail.innerHTML;
+  assert.ok(html.indexOf('走代理') !== -1, 'Use Proxy label rendered');
+  assert.ok(html.indexOf('toggle-switch') !== -1, 'project custom toggle-switch style');
+  // qoder has proxyEnabled: true → checked; the toggle sits after the
+  // + 新建账号 button in the same action row.
+  const actionIdx = html.indexOf('free-hub-actions');
+  const newBtnIdx = html.indexOf('+ 新建账号', actionIdx);
+  const toggleIdx = html.indexOf('toggle-switch', actionIdx);
+  assert.ok(newBtnIdx !== -1 && toggleIdx > newBtnIdx, 'toggle must sit right of + 新建账号');
+  assert.ok(/jethubToggleProxy\('qoder', this\.checked\)"\s*checked/.test(html), 'qoder toggle rendered checked');
+  // Flip loomy's toggle: PUT body {enabled:true} + success toast.
+  await ctx.jethubSelect('loomy');
+  await ticks(2);
+  await ctx.jethubToggleProxy('loomy', true);
+  const put = ctx.__calls.apiPut.find(([p]) => p === '/jethub/loomy/proxy');
+  assert.ok(put && JSON.stringify(put[1]) === JSON.stringify({ enabled: true }), 'proxy PUT body');
+  assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'success' && m === '已启用走代理'), 'success toast');
+  // Failure reverts: apiPut failing → checkbox state refreshes via select.
+  const origApiPut = ctx.apiPut;
+  ctx.apiPut = async function(p, body) { return { error: 'boom' }; };
+  await ctx.jethubToggleProxy('loomy', true);
+  ctx.apiPut = origApiPut;
+  assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'error' && m.indexOf('boom') !== -1), 'failure toast shown');
 });
 
 checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips + per-card retest/reset', async () => {

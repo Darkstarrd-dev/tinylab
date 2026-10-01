@@ -184,7 +184,7 @@ func (m *Manager) StartMinimaxDeviceAuthorization(ctx context.Context) (*minimax
 	tctx, cancel := context.WithTimeout(ctx, minimaxOAuthTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("minimax").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("MiniMax 设备码申请失败（网络）：%w", err)
 	}
@@ -284,7 +284,7 @@ func (m *Manager) minimaxTokenPOST(ctx context.Context, form map[string]string) 
 	tctx, cancel := context.WithTimeout(ctx, minimaxOAuthTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("minimax").Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

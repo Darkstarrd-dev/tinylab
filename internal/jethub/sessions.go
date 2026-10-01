@@ -24,61 +24,99 @@ func reapAfterGrace(id string) {
 	}()
 }
 
-// httpClient lazily builds the shared outbound client used by provider
-// adapters for signed GET/POST management calls (30s budget, aligned with the
-// plugin's REQUEST_TIMEOUT_MS).
+// jethubClients bundles the two lazily-built outbound clients: direct and
+// proxy-routed. One pair per Manager keeps timeouts consistent across
+// providers; httpClient(provider) picks by the per-provider Use Proxy toggle.
+type jethubClients struct {
+	direct *http.Client
+	proxy  *http.Client
+}
+
+// directClientLocked lazily builds the direct outbound client (env proxy
+// default).
+func (m *Manager) directClientLocked() *http.Client {
+	if m.sharedClients.direct == nil {
+		m.sharedClients.direct = &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{}}
+	}
+	return m.sharedClients.direct
+}
+
+// proxyClientLocked lazily builds the proxy-routed outbound client. Without
+// a configured proxy URL it degrades to the direct client (toggle on +
+// no proxy configured = the toggle cannot route anywhere).
+func (m *Manager) proxyClientLocked() *http.Client {
+	if m.sharedClients.proxy == nil {
+		if u := m.proxyURL; u != nil {
+			m.sharedClients.proxy = &http.Client{
+				Timeout:   30 * time.Second,
+				Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+			}
+		} else {
+			m.sharedClients.proxy = m.directClientLocked()
+		}
+	}
+	return m.sharedClients.proxy
+}
+
+// httpClient(provider) returns the outbound client for one provider's
+// login/credits/renewal calls: proxy-routed when the provider's Use Proxy
+// toggle is on (and a global proxy URL is configured), direct otherwise.
 //
-// ⚠️ Proxy awareness (real defect, cline login): the transport defaults to
+// ⚠️ Proxy awareness (real defects, cline login): the transport defaults to
 // http.ProxyFromEnvironment, which only honors HTTP(S)_PROXY env vars — and
 // those are empty for the app process. A user whose machine reaches these
 // upstreams through the local routing proxy (Windows system proxy on
 // 127.0.0.1:2080, mirrored into config.yaml proxy.enabled) gets TLS
 // handshake timeouts from the Go app while browser/DSH-undici flows through
 // the proxy just fine. The manager therefore carries an explicit proxy URL
-// (wired from config by the app, SetProxyURL) that wins over the env.
-func (m *Manager) httpClient() *http.Client {
+// (wired from config by the app, SetProxyURL), and the per-provider toggle
+// picks between the two clients.
+func (m *Manager) httpClient(provider string) *http.Client {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.sharedClient == nil {
-		transport := &http.Transport{} // ProxyFromEnvironment default
-		if u := m.proxyURLValueLocked(); u != nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
-		m.sharedClient = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	if m.accounts.ProxyEnabled[provider] {
+		return m.proxyClientLocked()
 	}
-	return m.sharedClient
+	return m.directClientLocked()
 }
 
-// proxyURLValueLocked returns the currently configured proxy URL (caller
-// holds m.mu; the value itself is immutable once set).
-func (m *Manager) proxyURLValueLocked() *url.URL {
-	if m.proxyURL == nil {
-		return nil
-	}
-	return m.proxyURL
+// ProxyEnabled reports the provider's Use Proxy toggle.
+func (m *Manager) ProxyEnabled(provider string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.accounts.ProxyEnabled[provider]
 }
 
-// SetProxyURL configures the global upstream proxy for all jethub outbound
-// calls (login/token/credits/renewal). Pass "http://host:port" (the shape
-// proxy.SetProxy already produces) or "" to disable. Must be called before
-// the first outbound request (app assembly); later calls are best-effort:
-// the shared client is rebuilt only if it has not been created yet.
+// SetProxyEnabled flips the provider's Use Proxy toggle (persisted; travels
+// in accounts.json like prefixes/locks).
+func (m *Manager) SetProxyEnabled(provider string, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.accounts.ProxyEnabled == nil {
+		m.accounts.ProxyEnabled = map[string]bool{}
+	}
+	m.accounts.ProxyEnabled[provider] = enabled
+	return m.saveAccountsLocked()
+}
+
+// SetProxyURL configures the global upstream proxy URL for the proxy-routed
+// client (wired from config.Proxy by the app). Pass "" to disable. Resets the
+// lazily-built pair so the next outbound call picks up the new routing.
 func (m *Manager) SetProxyURL(raw string) error {
 	raw = strings.TrimSpace(raw)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if raw == "" {
-		m.mu.Lock()
 		m.proxyURL = nil
-		m.mu.Unlock()
+		m.sharedClients = jethubClients{}
 		return nil
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("jethub: invalid proxy URL %q: %w", raw, err)
 	}
-	m.mu.Lock()
 	m.proxyURL = u
-	m.sharedClient = nil // rebuild lazily with the proxy transport
-	m.mu.Unlock()
+	m.sharedClients = jethubClients{} // rebuild lazily with the proxy transport
 	return nil
 }
 

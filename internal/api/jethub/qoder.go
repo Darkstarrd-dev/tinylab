@@ -56,7 +56,7 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 	// ⚠️ 后台轮询用独立 context：handler 返回后 r.Context() 即被取消，
 	// 设备码轮询要等用户在浏览器里完成授权（数十秒到数分钟）。
 	go func() {
-		payload, err := h.d.Manager.PollQoderDeviceToken(context.Background(), flow.Session, flow.Product)
+		payload, err := h.d.Manager.PollQoderDeviceToken(context.Background(), provider, flow.Session, flow.Product)
 		if err != nil {
 			corejethub.DeliverLoginOutcome(resultCh, corejethub.LoginOutcome{Err: err})
 			return

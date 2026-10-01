@@ -231,16 +231,21 @@ func (b *Bridge) SyncKeys(provider string) error {
 		IsActive: len(keys) > 0,
 		Keys:     keys,
 		Models:   models,
+		// Use Proxy follows the Free Hub per-provider toggle (the same flag
+		// routes login/credits outbound calls) — the proxy pipeline then
+		// honors it for inference (clientFor checks p.UseProxy).
+		UseProxy: b.m.ProxyEnabled(provider),
 	}
 
 	if existing, ok := b.reg.GetProvider(id); ok {
 		// Preserve rotation strategy overrides the user may have set on the
-		// bridged provider via the normal settings UI.
+		// bridged provider via the normal settings UI. ⚠️ UseProxy is NOT
+		// preserved: the Free Hub toggle is the single source of truth
+		// (SyncKeys writes it above).
 		p.RotationStrategy = existing.RotationStrategy
 		p.StickyLimit = existing.StickyLimit
 		p.InjectStreamOpts = existing.InjectStreamOpts
 		p.NormalizeStreamChunks = existing.NormalizeStreamChunks
-		p.UseProxy = existing.UseProxy
 		p.MaxRetriesOverride = existing.MaxRetriesOverride
 		p.RetryIntervalOverrideSec = existing.RetryIntervalOverrideSec
 		p.CooldownOverrideSec = existing.CooldownOverrideSec

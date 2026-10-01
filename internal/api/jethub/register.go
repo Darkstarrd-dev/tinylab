@@ -39,6 +39,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Get("/providers", h.listProviders)
 		r.Put("/providers/{provider}/prefix", h.setPrefix)
 		r.Delete("/providers/{provider}/prefix", h.clearPrefix)
+		// Per-provider Use Proxy toggle (login/credits/inference outbound).
+		r.Put("/providers/{provider}/proxy", h.setProxyEnabled)
 		r.Get("/providers/{provider}/accounts", h.listAccounts)
 		r.Post("/providers/{provider}/accounts", h.createAccount)
 		r.Patch("/accounts/{accountID}", h.patchAccount)
@@ -122,6 +124,10 @@ type providerDTO struct {
 	EnabledAccounts int      `json:"enabledAccounts"`
 	Prefix          string   `json:"prefix"`
 	Bridged         bool     `json:"bridged"`
+	// ProxyEnabled — 该 provider 的 Use Proxy 开关：登录/积分/推理出站是否走
+	// 全局上游代理（config.Proxy）。true 时新建账号的鉴权流、续期/签到/余额
+	// 请求与桥接后的 /v1/* 推理全部走代理；false 直连。
+	ProxyEnabled bool `json:"proxyEnabled"`
 	// 能力位（决定详情页按钮行的渲染，与原版能力矩阵同语义）：
 	// SupportsRateLimit — 该渠道会返回限流错误（loomy 不会：积分耗尽静默降级
 	// 扣永久积分，重测/重置对它无意义且白烧额度，ref RATE_LIMIT_CAPABILITIES）；
@@ -160,6 +166,7 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 			Prefix:          h.d.Manager.Prefix(meta.ID),
 		}
 		dto.Bridged = dto.Prefix != "" && h.d.Bridge != nil && h.d.Bridge.HasBridgedProvider(meta.ID)
+		dto.ProxyEnabled = h.d.Manager.ProxyEnabled(meta.ID)
 		dto.SupportsRateLimit = !rateLimitExemptProviders[meta.ID]
 		dto.CanLockPermanent = permanentLockProviders[meta.ID]
 		dto.PermanentLocked = h.d.Manager.PermanentLocked(meta.ID)
@@ -199,6 +206,36 @@ func (h *Handler) clearPrefix(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type proxyToggleRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// setProxyEnabled PUT /api/jethub/{provider}/proxy {enabled} — the per-provider
+// Use Proxy toggle: persists the flag (Manager.SetProxyEnabled), re-syncs the
+// bridged provider (SyncKeys writes UseProxy so /v1/* inference follows).
+func (h *Handler) setProxyEnabled(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if !corejethub.ProviderExists(provider) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	var req proxyToggleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "enabled (bool) required")
+		return
+	}
+	if err := h.d.Manager.SetProxyEnabled(provider, *req.Enabled); err != nil {
+		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Inference follows the toggle: SyncKeys writes UseProxy on the bridged
+	// provider (the proxy pipeline checks p.UseProxy per request).
+	if h.d.Manager.Prefix(provider) != "" && h.d.Bridge != nil {
+		_ = h.d.Bridge.SyncKeys(provider)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "proxyEnabled": *req.Enabled})
 }
 
 func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {

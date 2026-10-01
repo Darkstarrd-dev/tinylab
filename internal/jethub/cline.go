@@ -327,7 +327,7 @@ func (m *Manager) RequestClineDeviceAuthorization(ctx context.Context) (*clineDe
 	tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("cline").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("Cline：设备码授权失败（网络）：%w", err)
 	}

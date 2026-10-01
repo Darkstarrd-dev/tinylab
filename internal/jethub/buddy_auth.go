@@ -17,7 +17,7 @@ import (
 // buddyTokenOnce polls auth/token then login/account and assembles the
 // credential (full login flow minus the browser opening).
 func (m *Manager) buddyTokenOnce(ctx context.Context, p *BuddyProduct, state string, token *BuddyTokenData) (*BuddyCredential, error) {
-	client := m.httpClient()
+	client := m.httpClient(p.ID)
 	deadline := time.Now().Add(buddyLoginTimeout)
 	tokenURL := p.Endpoint + buddyAuthTokenPath + "?state=" + urlQueryEscape(state)
 	tokenHeaders := map[string]string{
@@ -94,7 +94,7 @@ func (m *Manager) StartBuddyLogin(ctx context.Context, provider string, accountI
 	if !ok {
 		return nil, fmt.Errorf("jethub: unknown buddy product %q", provider)
 	}
-	state, err := BuddyFetchAuthState(ctx, m.httpClient(), p)
+	state, err := BuddyFetchAuthState(ctx, m.httpClient(p.ID), p)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (m *Manager) RefreshBuddyAccount(ctx context.Context, provider, accountID s
 		headers[buddyHeaderEnterpriseID] = cred.EnterpriseID
 		headers[buddyHeaderTenantID] = cred.EnterpriseID
 	}
-	status, body, err := buddyPostJSON(ctx, m.httpClient(), url, headers, "")
+	status, body, err := buddyPostJSON(ctx, m.httpClient(p.ID), url, headers, "")
 	if err != nil {
 		return fmt.Errorf("jethub: buddy refresh network error: %w", err)
 	}

@@ -195,7 +195,7 @@ func (m *Manager) RefreshTraeAccount(ctx context.Context, accountID string) erro
 	tctx, cancel := context.WithTimeout(ctx, traeRequestTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("trae").Do(req)
 	if err != nil {
 		return fmt.Errorf("TRAE ExchangeToken 失败：%w", err)
 	}
@@ -332,7 +332,7 @@ func (m *Manager) traeUGPost(ctx context.Context, url string, headers map[string
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("trae").Do(req)
 	if err != nil {
 		return nil, err
 	}

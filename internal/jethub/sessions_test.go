@@ -157,28 +157,25 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 func FindTestAccount(m *Manager, id string) (Account, bool) { return m.FindAccount(id) }
 
 // TestSetProxyURLRewiresOutboundClient: SetProxyURL must make the manager's
-// outbound client route through the proxy (real defect: a machine reaching
+// proxy-routed client send through the proxy (real defect: a machine reaching
 // the upstreams only through the local routing proxy got TLS handshake
 // timeouts because the Go client dialed direct).
 func TestSetProxyURLRewiresOutboundClient(t *testing.T) {
 	env := newTestManager(t)
 
-	// Direct client first (nil proxy), then configure the proxy: the client
-	// is rebuilt lazily so the wiring applies to subsequent outbound calls.
 	if err := env.m.SetProxyURL(""); err != nil {
 		t.Fatal(err)
 	}
-	c1 := env.m.httpClient()
 	if err := env.m.SetProxyURL("http://127.0.0.1:2080"); err != nil {
 		t.Fatal(err)
 	}
-	c2 := env.m.httpClient()
-	if c1 == c2 {
-		t.Fatal("SetProxyURL must rebuild the shared client")
+	// The toggle routes cline through the proxy pair.
+	if err := env.m.SetProxyEnabled("cline", true); err != nil {
+		t.Fatal(err)
 	}
 
-	// The rebuilt client must actually send requests through the proxy: an
-	// httptest server acts as the proxy endpoint; if the request arrives
+	// The proxy-routed client must actually send requests through the proxy:
+	// an httptest server acts as the proxy endpoint; if the request arrives
 	// there, the transport honors the proxy URL.
 	var seenPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,19 +190,59 @@ func TestSetProxyURLRewiresOutboundClient(t *testing.T) {
 	}
 	env.m.mu.Lock()
 	env.m.proxyURL = proxyURL
-	env.m.sharedClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	env.m.sharedClients = jethubClients{proxy: &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}}
 	env.m.mu.Unlock()
 
 	req, err := http.NewRequest(http.MethodGet, "http://target.example.com/ping", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := env.m.httpClient().Do(req)
+	resp, err := env.m.httpClient("cline").Do(req)
 	if err != nil {
 		t.Fatalf("proxied request failed: %v", err)
 	}
 	resp.Body.Close()
 	if seenPath != "http://target.example.com/ping" {
 		t.Fatalf("proxy saw %q, want absolute-form target URL", seenPath)
+	}
+}
+
+// TestProxyTogglePicksClient: the per-provider Use Proxy toggle decides
+// between the direct and the proxy-routed client, and the setting persists.
+func TestProxyTogglePicksClient(t *testing.T) {
+	env := newTestManager(t)
+	if env.m.ProxyEnabled("cline") {
+		t.Fatal("default must be direct")
+	}
+	// Without a global proxy URL the toggle-on degrades to direct (nothing to
+	// route through) — configure one first so the proxy pair is a real client.
+	if err := env.m.SetProxyURL("http://127.0.0.1:2080"); err != nil {
+		t.Fatal(err)
+	}
+	direct := env.m.httpClient("cline")
+
+	// Toggle cline on: the client must change (proxy-routed pair).
+	if err := env.m.SetProxyEnabled("cline", true); err != nil {
+		t.Fatal(err)
+	}
+	if !env.m.ProxyEnabled("cline") {
+		t.Fatal("toggle not persisted in memory")
+	}
+	routed := env.m.httpClient("cline")
+	if direct == routed {
+		t.Fatal("proxy-enabled provider must get the proxy client")
+	}
+	// qoder (toggle off) still gets the direct client.
+	if env.m.httpClient("qoder") != direct {
+		t.Fatal("toggle-off provider must keep the direct client")
+	}
+
+	// Persisted across a reload (NewManager over the same dir).
+	reloaded, err := NewManager(env.dir, env.key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.ProxyEnabled("cline") {
+		t.Fatal("proxy toggle must persist across reload")
 	}
 }

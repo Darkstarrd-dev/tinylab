@@ -30,7 +30,7 @@ func (m *Manager) minimaxEnvelope(ctx context.Context, cred *MinimaxCredential, 
 	tctx, cancel := context.WithTimeout(ctx, minimaxRequestTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("minimax").Do(req)
 	if err != nil {
 		return nil, -1, err.Error(), false
 	}

@@ -45,7 +45,7 @@ func (m *Manager) pollClineWorkOsTokens(ctx context.Context, grant *clineDeviceA
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 		req = req.WithContext(tctx)
-		resp, reqErr := m.httpClient().Do(req)
+		resp, reqErr := m.httpClient("cline").Do(req)
 		cancel()
 		if reqErr != nil {
 			failures++
@@ -169,7 +169,7 @@ func (m *Manager) registerClineTokens(ctx context.Context, workOSAccess, workOSR
 	tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("cline").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("Cline：token 注册失败（网络）：%w", err)
 	}
@@ -239,7 +239,7 @@ func (m *Manager) RefreshClineAccount(ctx context.Context, accountID string) err
 	tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("cline").Do(req)
 	if err != nil {
 		return fmt.Errorf("Cline refresh 网络失败：%w", err)
 	}
@@ -294,7 +294,7 @@ func (m *Manager) ClineBalance(ctx context.Context, accountID string) (*CreditBa
 	tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("cline").Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -99,11 +99,16 @@ func (b *Bridge) ProbeAccountModel(ctx context.Context, provider, accountID, mod
 		return fmt.Errorf("jethub: probe request: %w", err)
 	}
 	send.Header = req.Header
-	client := b.m.httpClient()
+	client := b.m.httpClient(provider)
 	if client.Timeout < probeTimeout {
 		// The shared 30s client is fine for most probes; qoder WASM signing
-		// plus queue delays can exceed it, so give the probe its own budget.
-		client = &http.Client{Timeout: probeTimeout}
+		// plus queue delays can exceed it, so give the probe its own budget —
+		// keeping the provider's proxy choice via the same transport.
+		tr := client.Transport
+		if tr == nil {
+			tr = http.DefaultTransport
+		}
+		client = &http.Client{Timeout: probeTimeout, Transport: tr}
 	}
 	resp, err := client.Do(send)
 	if err != nil {

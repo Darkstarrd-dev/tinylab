@@ -375,7 +375,7 @@ func (m *Manager) exchangeTraeCallback(ctx context.Context, callback *traeCallba
 		tctx, cancel := context.WithTimeout(ctx, traeRequestTimeout)
 		defer cancel()
 		req = req.WithContext(tctx)
-		resp, err := m.httpClient().Do(req)
+		resp, err := m.httpClient("trae").Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("TRAE ExchangeToken 失败：%w", err)
 		}
@@ -419,7 +419,7 @@ func (m *Manager) exchangeTraeCallback(ctx context.Context, callback *traeCallba
 	for k, v := range uHeaders {
 		req2.Header.Set(k, v)
 	}
-	resp2, err := m.httpClient().Do(req2)
+	resp2, err := m.httpClient("trae").Do(req2)
 	if err == nil {
 		raw, _ := io.ReadAll(io.LimitReader(resp2.Body, 1<<20))
 		resp2.Body.Close()

@@ -256,7 +256,7 @@ func TestPollQoderDeviceToken404KeepsPolling(t *testing.T) {
 
 	m := newTestManager(t).m
 	session := createQoderDeviceSession("mid")
-	payload, err := m.PollQoderDeviceToken(context.Background(), session, qoderProducts["qoder"])
+	payload, err := m.PollQoderDeviceToken(context.Background(), "qoder", session, qoderProducts["qoder"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestPollQoderDeviceToken5xxImmediate(t *testing.T) {
 	restoreQoderOpenAPIBase(t, srv.URL)
 	m := newTestManager(t).m
 	session := createQoderDeviceSession("mid")
-	if _, err := m.PollQoderDeviceToken(context.Background(), session, qoderProducts["qoder"]); err == nil {
+	if _, err := m.PollQoderDeviceToken(context.Background(), "qoder", session, qoderProducts["qoder"]); err == nil {
 		t.Fatal("5xx must fail immediately (not poll forever)")
 	}
 }

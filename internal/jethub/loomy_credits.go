@@ -34,7 +34,7 @@ func (m *Manager) loomyRequest(ctx context.Context, cred *LoomyCredential, metho
 	tctx, cancel := context.WithTimeout(ctx, loomyTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("loomy").Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("loomy: 请求失败（%s）：%w", path, err)
 	}

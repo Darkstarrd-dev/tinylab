@@ -1,16 +1,17 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算）
+> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
 > **变更维护清单（改动时必须同步本文）：**
-> - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束**
+> - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
 > - 修改备份格式 → §7 + `internal/jethub/backup.go`（与原版格式**双向兼容**，改动即破坏兼容，须先读 ref types.ts）
-> - 修改 Free Hub UI 布局/入口/详情页/模型列表 → §3 + `web/static/jethub.js`/`settings.js`/`i18n.js`/`style-jethub.css`/`app-router.js`
+> - 修改 Free Hub UI 布局/入口/详情页/模型列表/Use Proxy 开关 → §3 + `web/static/jethub.js`/`settings.js`/`i18n.js`/`style-jethub.css`/`app-router.js`
 > - 修改限流重测/重置探针或永久锁 → §3.1 + `internal/jethub/probe.go`/`ratelimits.go`/`manager.go` + `internal/api/jethub/register.go`
+> - 修改 jethub 出站代理分派（`SetProxyURL`/`SetPackageProxyURL`/`ProxyEnabled`）→ §3.2 + `internal/jethub/sessions.go`/`codearts_login.go`/`bridge.go` + `internal/app/app.go`
 
 ## 1. 模块组成与边界
 
@@ -18,7 +19,7 @@
 |---|---|---|
 | 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、11 provider 适配、WASM 桥、备份 |
 | API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import |
-| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（17 项） |
+| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（18 项） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
 | 装配 | `internal/app/app.go` | Manager/Bridge 构造、`RestoreBridges` 启动重桥、augmenter 注入 proxy Handler |
 
@@ -37,7 +38,7 @@
 - **main 区内嵌（不整页替换）**：`openFreeHub()` **保留 `.settings-panel-left`（Settings 侧边栏）**，仅隐藏 `.settings-panel-right` 并在 `.settings-layout` 内其后面挂 `#free-hub-root.free-hub-main`（占 main 位）；`closeFreeHub()` 反向恢复（轮询定时器一并清理）。若 layout 不存在（页面被换走后重进）会先 `renderEndpoint` 重渲染再挂载。
 - **切页生命周期**：`navigateTo`（`app-router.js`）调用 `closeFreeHub()`——页面切换会整体清空 `#page-content`，不清标志会导致再次进入 Free Hub 被陈旧 `__jethubActive` 守卫挡住（修复过的真实缺陷：必须重启 App/Ctrl+F5 才能恢复）；`openFreeHub` 侧另有兜底——active 时先执行一次 close 再重挂。
 - **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（11 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
-- **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号。结果在通知区显示（tone + 逐条 details 列表）。
+- **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号 · **Use Proxy 开关**（`+ 新建账号` 右侧：`free-hub-proxy-wrap` 标签 + 全局 `.toggle-switch`（同 Upstream Proxy/Provider 详情 useProxy，复用 style-settings.css 不动堆叠规则）；`jethubToggleProxy` PUT `/{provider}/proxy` {enabled}，失败回滚勾选态；per-provider 语义见 §3.2 缺陷 5）。结果在通知区显示（tone + 逐条 details 列表）。
 - **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
 - **模型列表**（与本项目 Provider 详情的 Model list 同形态）：纵向行列表（名称 + **倍率徽标**（服务端 `rate` 字段：`x0.75`/`免费`/`x0.2→x0.1`，从 alias/note 解析、**无信息不编造**） + 可复制的模型 id + 删除/恢复单钮）；批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → **先创建占位账号**（POST `/accounts` 拿 `accountId`）再弹发码/验码两步弹窗（提交时按 `accountId` 绑定凭据；**取消 = 删除占位**）。URL 弹窗的取消同样删除占位。无凭据的占位账号在账号卡上显示「登录未完成 · 无凭据」灰徽标（`freeHubNoCredential`），领取/推理账号集都会过滤掉它们。
@@ -58,7 +59,17 @@
 2. **双消费者竞争**：status 轮询（`pollLogin`）与 API 层 pump goroutine 都直接读 `LoginSession.Started.Result`（容量 1 的缓冲 channel），先到者独占 outcome，另一方永久挂起。修复（`internal/jethub/sessions.go`）：**单赢家纪律** —— 只有 pump（`SettleAndCleanup`）读 channel 并记录结果（`settled` 状态 + `SessionStatus` 只读快照）；status 轮询改读记录态。
 3. **结算即 reap（弹窗永远停在等待）**：pump 结算后立即 reap session 的话，2s 轮询的下一次请求必然 404 —— `done:true` 转换永远不会被前端观察到，即使后端已成功。修复：结算后保留 `loginSessionGracePeriod`（30s，若干轮询间隔）再 reap。
 4. **凭据落盘后桥接 Key 不刷新（prefix 检索不到）**：`SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层**从未接线**（git 历史确认：hook 定义了但无人调用）——登录成功后桥接 provider 的 Keys 永远不更新，新账号对 `{prefix}/{model}` 路由不可见；备份导入能工作只是因为 `backupImport` 显式重同步。修复：`app.go` 装配 `SetAccountCredentialedHook(→ Bridge.SyncKeys)`。同时接线 `SetBrowserOpener(→ fsutil.OpenInBrowser)`：+新建账号自动打开默认浏览器授权页（对齐原插件；弹窗内链接保留为手动兜底）。
-5. **出站调用不走全局代理（`TLS handshake timeout`）**：jethub 的出站 client 默认 `ProxyFromEnvironment`，而 app 进程的 `HTTP(S)_PROXY` 是空的 —— 在「上游必须经本地路由代理」的机器上（Windows 系统代理 `127.0.0.1:2080`，镜像进 `config.yaml` `proxy.enabled`），Go 直连被 TLS 干扰掐死，而浏览器/DSH（undici 认系统代理）都正常。修复：`app.go` 把 `config.Proxy` 换算成 `http://host:port` 接线 `Manager.SetProxyURL`（重建共享 client）+ `SetPackageProxyURL`（codearts 回调 token 交换的包级 client 一并重定向）。普通 provider 的 `useProxy` 语义不变——jethub 出站**统一**跟随全局代理开关。
+5. **出站调用不走全局代理（`TLS handshake timeout`）**：jethub 的出站 client 默认 `ProxyFromEnvironment`，而 app 进程的 `HTTP(S)_PROXY` 是空的 —— 在「上游必须经本地路由代理」的机器上（Windows 系统代理 `127.0.0.1:2080`，镜像进 `config.yaml` `proxy.enabled`），Go 直连被 TLS 干扰掐死，而浏览器/DSH（undici 认系统代理）都正常。修复：`app.go` 把 `config.Proxy` 换算成 `http://host:port` 接线 `Manager.SetProxyURL`（重建共享 client）+ `SetPackageProxyURL`（codearts 回调 token 交换的包级 client 一并重定向）。
+
+**per-provider Use Proxy 开关（2026-10-02 新增）**：
+
+- **状态**：`accounts.json` 的 `ProxyEnabled` 表（provider → bool，缺席 = 直连；随重启/备份同文件持久化）。`PUT /api/jethub/{provider}/proxy` `{enabled}` 持久化并重同步桥接。
+- **三条出站路径都跟随该开关**：
+  1. **登录/积分/续期/余额出站**（jethub 自发请求）：`Manager.httpClient(provider)` 在 direct/proxy 两个懒建 client 间按 `ProxyEnabled` 分派 —— 全部 provider 适配器的 ~30 个调用点已逐个传入 provider id（probe 探针克隆 client 时保留同 Transport）；
+  2. **桥接后的 `/v1/*` 推理**：`Bridge.SyncKeys` 写 `config.Provider.UseProxy = ProxyEnabled(provider)`（**不再保留 registry 旧值**——开关是唯一事实源），proxy 管线 `clientFor` 按其分派；
+  3. **codearts 回调 token 交换**：包级 `callbackClient` 经 `SetPackageProxyURL` 重定向 transport，开关状态由 `codeartsProxyEnabled` 在发起登录时按该 provider 的 toggle 设置。
+- ⚠️ **开关打开但全局代理未配置（`config.Proxy.enabled=false` 或 host/port 空）= 直连降级**（`proxyClientLocked` 回退 direct）——没有可路由的代理时开关不生效。
+- ⚠️ **`SetProxyURL` 必须在首次出站调用前接线**（app 装配序）；client 对在开关切换后懒重建，无需进程重启。
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
 
@@ -121,6 +132,6 @@
 
 ## 9. 测试与已知限制
 
-- `internal/jethub/sessions_test.go`：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照。
-- `web/jethub.test.js`（17 项）：登录流 context 纪律静态守卫（§3.2）+ SMS 占位账号创建/取消清理 + 其余 UI 行为。
+- `internal/jethub/sessions_test.go`（6 个）：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照 + 宽限期 reap + `SetProxyURL` 代理分派（httptest 伪代理端点验证请求确实走代理）+ `ProxyEnabled` 开关分派 client 并跨 reload 持久化。
+- `web/jethub.test.js`（18 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ 其余 UI 行为。
 - **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。

@@ -67,7 +67,7 @@ func (m *Manager) codeartsSignedGet(ctx context.Context, cred *CodeArtsCredentia
 	for k, v := range extraUnsigned {
 		req.Header.Set(k, v)
 	}
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("codearts").Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (m *Manager) codeartsSignedPost(ctx context.Context, cred *CodeArtsCredenti
 	}
 	ApplySignedHeaders(req.Header.Set, signed)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("codearts").Do(req)
 	if err != nil {
 		return nil, err
 	}

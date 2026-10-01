@@ -273,7 +273,7 @@ func BuildQoderPollURL(session *qoderDeviceSession, p *qoderProductConfig) strin
 // path returns 401, so 404 is the business-layer not-ready signal). Network
 // failures tolerate qoderPollMaxFailures consecutive; other non-2xx (5xx) is
 // a server fault, not "waiting".
-func (m *Manager) PollQoderDeviceToken(ctx context.Context, session *qoderDeviceSession, p *qoderProductConfig) (*qoderTokenPayload, error) {
+func (m *Manager) PollQoderDeviceToken(ctx context.Context, provider string, session *qoderDeviceSession, p *qoderProductConfig) (*qoderTokenPayload, error) {
 	pollURL := BuildQoderPollURL(session, p)
 	deadline := nowMillis() + int64(qoderLoginTimeout)
 	failures := 0
@@ -288,7 +288,7 @@ func (m *Manager) PollQoderDeviceToken(ctx context.Context, session *qoderDevice
 			return nil, err
 		}
 		req.Header.Set("Accept", "application/json")
-		resp, err := m.httpClient().Do(req)
+		resp, err := m.httpClient(provider).Do(req)
 		if err != nil {
 			failures++
 			if failures >= qoderPollMaxFailures {
@@ -328,7 +328,7 @@ func (m *Manager) FetchQoderUserNickname(ctx context.Context, cred *QoderCredent
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+QoderBearerToken(cred))
-	resp, err := m.httpClient().Do(req)
+	resp, err := m.httpClient("qoder").Do(req)
 	if err != nil {
 		return ""
 	}
