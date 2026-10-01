@@ -45,7 +45,7 @@
 - **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
 - **模型列表**（与本项目 Provider 详情的 Model list 同形态）：纵向行列表（名称 + **倍率徽标**（服务端 `rate` 字段：`x0.75`/`免费`/`x0.2→x0.1`，从 alias/note 解析、**无信息不编造**） + 可复制的模型 id + 删除/恢复单钮）；批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → **先创建占位账号**（POST `/accounts` 拿 `accountId`）再弹发码/验码两步弹窗（提交时按 `accountId` 绑定凭据；**取消 = 删除占位**）。URL 弹窗的取消同样删除占位。无凭据的占位账号在账号卡上显示「登录未完成 · 无凭据」灰徽标（`freeHubNoCredential`），领取/推理账号集都会过滤掉它们。
-- ⚠️ **扫码类 provider（raccoon）的 `loginUrl` 是本地页面**（`/free-hub-login.html?loginId=…`），**不是**二维码内容——后者要被微信扫码打开，用浏览器直接打开只是普通网页、无法鉴权（真实缺陷 7，§3.4）。
+- ⚠️ **扫码类 provider（raccoon）的 `loginUrl` 是本地页面**（`/free-hub-login.html?loginId=…`），**不是**二维码内容——后者要被微信扫码打开，用浏览器直接打开只是普通网页、无法鉴权（真实缺陷 11，§3.4）。
 - 样式只用 theme tokens（`var(--…)`），控件复用全局 `.btn`/`.badge`/`.modal`/`.input` 体系。
 
 ### 3.1 限流标记重测/重置 + 永久积分锁（后端）
@@ -89,9 +89,9 @@
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
 
-### 3.4 本地扫码登录页（raccoon，真实缺陷 7 + 修复）
+### 3.4 本地扫码登录页（raccoon，真实缺陷 11 + 修复）
 
-- **真实缺陷 7（用户实测报障）**：「raccoon 渠道新建账号打开的网页不对，和插件里同渠道打开的不是一个页面，无法进行鉴权」。根因：首版把**二维码内容**当成页面打开了 —— `BuildRaccoonQrURL` 产出的是 `https://xiaohuanxiong.com/login/mp?code=<32位hex>&appname=商汤小浣熊官网`，它是**要被微信扫一扫打开的地址**；浏览器打开它只是官网的一个普通页面，与本次登录会话无关（该 code 永远不会回到 `success`）。参考插件从不打开它：它起本地 HTTP 服务承载弹窗页，页内渲染同一个 URL 的二维码（`ref/src/raccoon-login-page.ts`、`raccoon-qr.ts`）。
+- **真实缺陷 11（用户实测报障）**：「raccoon 渠道新建账号打开的网页不对，和插件里同渠道打开的不是一个页面，无法进行鉴权」。根因：首版把**二维码内容**当成页面打开了 —— `BuildRaccoonQrURL` 产出的是 `https://xiaohuanxiong.com/login/mp?code=<32位hex>&appname=商汤小浣熊官网`，它是**要被微信扫一扫打开的地址**；浏览器打开它只是官网的一个普通页面，与本次登录会话无关（该 code 永远不会回到 `success`）。参考插件从不打开它：它起本地 HTTP 服务承载弹窗页，页内渲染同一个 URL 的二维码（`ref/src/raccoon-login-page.ts`、`raccoon-qr.ts`）。
 - **本端实现**：不另起监听端口，改用本进程已有的 HTTP 服务 ——
   - `web/static/free-hub-login.html`：**静态页**（公开资源，无需 cookie）；从查询串取 `loginId`，向公开端点取二维码内容，用 `raccoon-qr.js` 在浏览器端画二维码，每 2s 轮询状态，成功后显示「登录成功，可以关闭此窗口」并尝试 `window.close()`。
   - `web/static/raccoon-qr.js`：**零依赖二维码编码器**（byte 模式 / 纠错等级 M / 版本 1–10，逐行移植自 ref `raccoon-qr.ts`；见「为什么在浏览器端」）。`web/raccoon-qr.test.js` 用**参考实现产出的黄金指纹**（SHA-256 of the module matrix）锁死移植保真度 —— 画错的二维码只能靠手机复现，代价极高，故不能只测「有输出」。
@@ -140,9 +140,9 @@
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
 
-### 6.1 MiniMax 推理协议桥（Anthropic Messages；真实缺陷 8 + 修复）
+### 6.1 MiniMax 推理协议桥（Anthropic Messages；真实缺陷 10 + 修复）
 
-- **真实缺陷 8（用户实测报障，trace `r28I4T2cXFlA-1`）**：`provider=MiniMax Code` 的请求打到 `https://agent.minimax.cn/v1/chat/completions`，上游回 **404 + Next.js HTML**（`__next_error__` / `NEXT_NOT_FOUND`）。两处根因：
+- **真实缺陷 10（用户实测报障，trace `r28I4T2cXFlA-1`）**：`provider=MiniMax Code` 的请求打到 `https://agent.minimax.cn/v1/chat/completions`，上游回 **404 + Next.js HTML**（`__next_error__` / `NEXT_NOT_FOUND`）。两处根因：
   1. **端点路径错**：MiniMax 推理端点是 `POST {apiHost}/mavis/api/v1/llm/v1/messages`（Anthropic Messages，ref `minimax-product.ts` 的 `MINIMAX_INFER_PATH`，2026-09-29 真机实测），而产品表把 `BaseURL` 填成了 host 根 —— jethub 的 URL 由 `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` 构造，于是变成 `{host}/v1/chat/completions`。⚠️ 也**不能**靠带路径的 BaseURL 解决：`urlutil` 会把结尾的 `/v1/messages` 当已知端点后缀**剥掉**再拼进站路径。故改由 `Manager.Customize` 显式返回完整 URL（与 qoder 族同一机制、不同来源）。
   2. **没有协议转换**：上游只讲 Anthropic Messages，而进站是 OpenAI chat-completions（本项目不做格式转换的红线**只约束代理核心**；桥接 provider 的差异一律收敛在各自的 augmenter/自定义钩子里，trae 的 SOLO、qoder 的 WASM 加密体同例）。
 - **四条路径（按进站协议 × 是否流式）**：
