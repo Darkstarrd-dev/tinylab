@@ -86,6 +86,22 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     minimaxProduct.APIHost,
 		Models:      minimaxFallbackModels(),
 	})
+	// P3.4: qoder + qodercn (encrypted inference via the embedded WASM;
+	// BaseURL = the encrypted-infer host — a DIFFERENT host from the public
+	// api2-v2 endpoint).
+	for _, provider := range []string{"qoder", "qodercn"} {
+		p := qoderProducts[provider]
+		models := qoderFallbackModels()
+		if provider == "qodercn" {
+			models = qoderCNFallbackModels()
+		}
+		b.RegisterProduct(Product{
+			Provider:    provider,
+			DisplayName: p.DisplayName + " (Free Hub)",
+			BaseURL:     p.EncryptedInferBase,
+			Models:      models,
+		})
+	}
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into

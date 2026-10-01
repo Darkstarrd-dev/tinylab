@@ -12,6 +12,10 @@ import (
 	"github.com/tinylab/tinylab/internal/util"
 )
 
+// maxQueueAttempts caps queue-wait resends per client request (the jethub
+// convention: 10s delay cap × 180 ≈ 30min upper bound).
+const maxQueueAttempts = 180
+
 // retryState holds mutable state across retry iterations.
 type retryState struct {
 	excludeKeyIDs  []string
@@ -20,6 +24,10 @@ type retryState struct {
 	consecutive5xx int
 	maxRetries     int
 	requestLogged  bool
+	// queueAttempts counts queue-wait resends (server-specified transient
+	// delays, e.g. Qoder 10605). Capped independently of maxRetries: queueing
+	// is normal operation, not a failure — 10s cap × 180 attempts ≈ 30min.
+	queueAttempts int
 }
 
 // requestHeaders safely extracts request headers, returning nil when the

@@ -4,14 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/tinylab/tinylab/internal/combo"
 	"github.com/tinylab/tinylab/internal/customheaders"
 	"github.com/tinylab/tinylab/internal/rotation"
 	"github.com/tinylab/tinylab/internal/urlutil"
 )
+
+// readCloserOf wraps an interceptor-returned reader with the original body's
+// closer: the interceptor replaced the content, but the proxy still owns the
+// connection close.
+func readCloserOf(r io.Reader, orig io.Closer) io.ReadCloser {
+	return struct {
+		io.Reader
+		io.Closer
+	}{r, orig}
+}
 
 // currentClientRequestKey is the context key used to carry the original client
 // *http.Request through to forwardUpstream for the augmenter hook.
@@ -67,12 +79,28 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	// classifies and retries/excludes).
 	if sel.Provider.APIType == "jethub" && h.augmenter != nil {
 		if clientReq, _ := ctx.Value(currentClientRequestKey{}).(*http.Request); clientReq != nil {
-			augmented, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel)
-			if err != nil {
+			augmented := body
+			upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
+			// Optional richer customizer: bridged providers whose outbound
+			// URL is not derivable from the entry path (encrypted-inference
+			// endpoints) supply the full URL. outURL == "" → default.
+			if cu, ok := h.augmenter.(RequestCustomizer); ok {
+				outURL, outBody, err := cu.Customize(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel)
+				if err != nil {
+					return nil, err
+				}
+				if outURL != "" {
+					upstreamURL = outURL
+				}
+				if outBody != nil {
+					augmented = outBody
+				}
+			} else if augmented2, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel); err != nil {
 				return nil, err
+			} else {
+				augmented = augmented2
 			}
 			body = augmented
-			upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
 			req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
 			if err != nil {
 				return nil, err
@@ -97,11 +125,34 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 				req.Header.Set("Authorization", "Bearer "+sel.Key.Key)
 			}
 			customheaders.Apply(req.Header, sel.Provider.UseCustomHeaders, sel.Provider.CustomHeaders)
+			var resp *http.Response
 			if isStream {
 				req.Header.Set("Accept", "text/event-stream")
-				return h.streamClientFor(sel).Do(req)
+				resp, err = h.streamClientFor(sel).Do(req)
+			} else {
+				resp, err = h.upstreamClientFor(sel).Do(req)
 			}
-			return h.upstreamClientFor(sel).Do(req)
+			if err != nil {
+				return nil, err
+			}
+			// Optional response-side interception (envelope stripping /
+			// queue / billing classification) before anything reaches the
+			// client.
+			if ri, ok := h.augmenter.(ResponseInterceptor); ok {
+				outBody, retryAfterMs, ierr := ri.InterceptResponse(clientReq, resp, sel.Provider.ID, sel.Key.ID, upstreamModel, isStream)
+				if ierr != nil {
+					_ = resp.Body.Close()
+					return nil, ierr
+				}
+				if retryAfterMs > 0 {
+					_ = resp.Body.Close()
+					return nil, &QueueRetryError{RetryAfter: time.Duration(retryAfterMs) * time.Millisecond}
+				}
+				if outBody != nil {
+					resp.Body = readCloserOf(outBody, resp.Body)
+				}
+			}
+			return resp, nil
 		}
 	}
 

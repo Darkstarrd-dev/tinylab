@@ -143,3 +143,67 @@ func minimaxFallbackModels() ModelTable {
 		md("MiniMax-M2.7", "M2.7", "200000", "max 128000; thinking forced_on"),
 	}
 }
+
+// qoderFallbackModels returns the 17-key international catalog (ref
+// qoder-product.ts QODER_FALLBACK_MODELS — decrypted from the local
+// catalog-v6; ids are CATALOG KEYS accepted ONLY by the encrypted endpoint).
+// contextWindow = the TOP tier of context_config (zX() checks tier-table
+// MEMBERSHIP only); priceFactor 0 = free (legal value, not missing).
+func qoderFallbackModels() ModelTable {
+	md := func(id, name, ctx, extra string) config.ModelDef {
+		note := "ctx " + ctx
+		if extra != "" {
+			note += "; " + extra
+		}
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: note, Alias: name}
+	}
+	return ModelTable{
+		md("auto", "Auto", "200000", "x0.5; no tier table"),
+		md("ultimate", "Ultimate", "1000000", "x2; efforts xhigh/high/low/max/medium; default high; can disable"),
+		md("performance", "Performance", "1000000", "x1.1; efforts xhigh/high/low/max/medium; default medium; can disable"),
+		md("efficient", "Efficient", "1000000", "x0.3"),
+		md("smodel", "Sonus", "1000000", "x8; efforts xhigh/high/low/max/medium; default high; NO disable"),
+		md("cmodel", "Cantus", "1000000", "x4; efforts xhigh/high/low/max/medium; default high; NO disable"),
+		md("qmodel_38max", "Qwen3.8-Max", "1000000", "FREE; efforts xhigh/low/medium; default xhigh (CN=medium); can disable"),
+		md("qfmodel", "Qwen3.8-Flash", "1000000", "FREE (x0); efforts xhigh/low/medium; default medium; can disable"),
+		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.1; NO efforts — disable-only"),
+		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.04; NO efforts — disable-only"),
+		md("kmodel_latest", "Kimi-K3", "1000000", "x1.4; efforts high/low/max; default max"),
+		md("kmodel", "Kimi-K2.8-Preview", "1000000", "x0.8; efforts high/low/max; default max"),
+		md("gmodel", "GLM-5.3", "1000000", "x0.8; efforts high/low/max; default max"),
+		md("gfmodel", "GLM-5.3-Flash", "1000000", "x0.1; efforts high/max; default max"),
+		md("dmodel", "DeepSeek-V4-Pro", "1000000", "x0.5; efforts high/max; default max; can disable"),
+		md("dfmodel", "DeepSeek-Flash", "1000000", "x0.1; efforts high/max/low; default max; can disable"),
+		md("mmodel", "MiniMax-M3", "1000000", "x0.2"),
+	}
+}
+
+// qoderCNFallbackModels returns the 14-key CN catalog (E6 evidence; CN
+// EXCLUDES ultimate/performance/efficient/smodel/cmodel — reusing the intl
+// table would offer 5 models the CN endpoint does not know; CN-only
+// q37fmodel/gm51model added; mmodel is MiniMax-M2.7 here).
+func qoderCNFallbackModels() ModelTable {
+	md := func(id, name, ctx, extra string) config.ModelDef {
+		note := "ctx " + ctx
+		if extra != "" {
+			note += "; " + extra
+		}
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: note, Alias: name}
+	}
+	return ModelTable{
+		md("auto", "Auto", "200000", "x0.5; no thinking_config"),
+		md("qmodel_38max", "Qwen3.8-Max", "1000000", "FREE; efforts xhigh/low/medium; default medium; can disable"),
+		md("qfmodel", "Qwen3.8-Flash", "1000000", "FREE (x0); measured 983,490 / range error [1,983616]; efforts xhigh/low/medium; default medium; can disable"),
+		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.1; NO efforts — disable-only"),
+		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.04; NO efforts — disable-only"),
+		md("q37fmodel", "Qwen3.7-Flash", "1000000", "x0.1; CN-only; NO thinking_config"),
+		md("dmodel", "DeepSeek-V4-Pro", "1000000", "measured 852,951 (tier says 1M — keep 1M); x0.5; efforts high/max; default max; can disable"),
+		md("dfmodel", "DeepSeek-Flash", "1000000", "measured 999,991; x0.1; efforts high/max/low; default max; can disable"),
+		md("gmodel", "GLM-5.3", "1000000", "x0.8; efforts high/low/max; default max; NO disable"),
+		md("gfmodel", "GLM-5.3-Flash", "1000000", "x0.1; efforts high/max; default max; NO disable"),
+		md("gm51model", "GLM-5.2", "1000000", "x0.6; CN-only; efforts high/max; default max; can disable"),
+		md("kmodel_latest", "Kimi-K3", "1000000", "x1.4; efforts high/low/max; default max; NO disable"),
+		md("kmodel", "Kimi-K2.8-Preview", "1000000", "x0.8; efforts high/low/max; default max"),
+		md("mmodel", "MiniMax-M2.7", "200000", "x0.2; CN value (intl=M3); only-200K tier; NO thinking_config"),
+	}
+}

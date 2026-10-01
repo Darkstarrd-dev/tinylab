@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"io"
 	"net/http"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/tinylab/tinylab/internal/config"
 	"github.com/tinylab/tinylab/internal/keystate"
 	"github.com/tinylab/tinylab/internal/rotation"
+	"github.com/tinylab/tinylab/internal/upstreamerr"
 	"github.com/tinylab/tinylab/internal/usage"
 )
 
@@ -148,3 +150,43 @@ type QuotaTracker interface {
 	Update(providerName, model, keyID, keyName string, modelLimit, modelRemaining, activeKeyCount int)
 	RemoveKey(providerName, model, keyID string)
 }
+
+// RequestCustomizer is an OPTIONAL richer augment capability: bridged
+// providers whose outbound URL is not derivable from the entry path (e.g.
+// encrypted-inference endpoints whose full URL comes out of a signing WASM)
+// supply it. When the injected augmenter implements this interface, the proxy
+// tries Customize FIRST; a returned outURL of "" means "no customization" and
+// falls back to the standard BaseURL+path construction (with Augment's header
+// mutations still applied).
+type RequestCustomizer interface {
+	// Customize returns the full outbound URL ("" = default) and the possibly
+	// rewritten body. Header mutations follow the Augment contract: mutations
+	// on r's header become the outbound header base.
+	Customize(r *http.Request, body []byte, providerID, keyID, upstreamModel string) (outURL string, outBody []byte, err error)
+}
+
+// ResponseInterceptor is the response-side counterpart of the augmenter: it
+// inspects the raw upstream response of a bridged provider BEFORE it reaches
+// the client. Implemented by the same injected owner (e.g. jethub); the
+// proxy only knows this interface.
+type ResponseInterceptor interface {
+	// InterceptResponse inspects resp. Outcomes:
+	//   - (nil, 0, nil): forward resp unchanged;
+	//   - (outBody, 0, nil): forward outBody instead of resp.Body (envelope
+	//     stripping / peek readers); the interceptor must NOT close resp.Body;
+	//   - (nil, retryAfterMs, nil): transient queue signal — the retry loop
+	//     waits retryAfterMs and re-sends with the SAME key;
+	//   - (nil, 0, err): failed attempt (classified by the retry loop).
+	// The interceptor may consume resp.Body; the proxy still owns the Close.
+	InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (outBody io.Reader, retryAfterMs int64, err error)
+}
+
+// QueueRetryError asks the retry loop to wait RetryAfter and resend with the
+// SAME key (server-specified transient queue delay, e.g. Qoder 10605).
+// Defined in the neutral leaf package upstreamerr so the bridge can build it
+// without importing proxy (the proxy never imports the augmenter's package).
+type QueueRetryError = upstreamerr.QueueRetryError
+
+// BillingLockError reports a per-model quota exhaustion on this key (Qoder:
+// UTC+8 day end). Same neutral-package rationale as QueueRetryError.
+type BillingLockError = upstreamerr.BillingLockError

@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -230,6 +232,63 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		fwdCtx := WithClientRequest(r.Context(), r)
 		resp, err := h.forwardUpstream(fwdCtx, sel, upstreamBody, r.Header, isStream, effectivePath, effectiveFormat, upstreamModel)
 		if err != nil {
+			// Server-specified queue delay (e.g. Qoder 10605): wait and resend
+			// with the SAME key. Not a key failure — no cooldown, no
+			// exclusion. Attempts are capped (10s cap × 180 ≈ 30min).
+			var qre *QueueRetryError
+			if errors.As(err, &qre) {
+				state.queueAttempts++
+				if state.queueAttempts > maxQueueAttempts {
+					h.EntryTracker.Remove(reqID)
+					if keyState != nil {
+						keyState.DecInFlight()
+					}
+					h.InflightUpdates.Signal()
+					writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("upstream queue timeout (%d attempts)", maxQueueAttempts))
+					return false, reqID
+				}
+				wait := qre.RetryAfter
+				if wait <= 0 {
+					wait = time.Second
+				}
+				h.logger.Warn("[%s] %s/%s: 排队中（服务端要求等 %s，第 %d 次）→ 等待后重试同一 Key", logTag, dispName, upstreamModel, wait, state.queueAttempts)
+				select {
+				case <-r.Context().Done():
+					h.logger.Debug("[%s] client canceled during queue wait", logTag)
+					h.EntryTracker.Remove(reqID)
+					if keyState != nil {
+						keyState.DecInFlight()
+					}
+					h.InflightUpdates.Signal()
+					return false, reqID
+				case <-time.After(wait):
+				}
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				continue
+			}
+			// Per-model quota exhaustion on this key (e.g. Qoder billing 110):
+			// lock key+model until the business-defined instant (UTC+8 day end
+			// for Qoder) and switch to the next key.
+			var ble *BillingLockError
+			if errors.As(err, &ble) {
+				until := ble.Until
+				if until.IsZero() {
+					until = time.Now().Add(time.Hour)
+				}
+				h.logger.Warn("[%s] %s/%s: Key %s 额度受限（%s）→ 标记至 %s 后切换", logTag, dispName, upstreamModel, sel.KeyName, ble.Error(), until.Format("15:04:05"))
+				h.cooldown.MarkRateLimited(providerID, sel.Key.ID, upstreamModel, time.Until(until))
+				state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				continue
+			}
 			h.handleNetworkError(sel, providerID, upstreamModel, err, state, reqID, upstreamBody, r.Header, upstreamURL, originalModel, sessionKey)
 			h.EntryTracker.Remove(reqID)
 			// DecInFlight before continue — cannot use defer in for loop (would
