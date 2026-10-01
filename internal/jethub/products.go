@@ -64,6 +64,14 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     clineProduct.APIBase,
 		Models:      clineFallbackModels(),
 	})
+	// P3.3.3: raccoon (chat base = xiaohuanxiong.com, OpenAI-compatible SSE
+	// + extra_body.thinking dialect).
+	b.RegisterProduct(Product{
+		Provider:    "raccoon",
+		DisplayName: "Raccoon (商汤)",
+		BaseURL:     raccoonAPIBase,
+		Models:      raccoonFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -75,6 +83,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("lobsterai", m.lobsteraiAugment)
 	m.SetAugmenter("trae", m.traeAugment)
 	m.SetAugmenter("cline", m.clineAugment)
+	m.SetAugmenter("raccoon", m.raccoonAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

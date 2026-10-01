@@ -76,3 +76,26 @@ func clineFallbackModels() ModelTable {
 		md("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
 	}
 }
+
+// raccoonFallbackModels returns the 6 visible models (ref racoon-product.ts
+// RACCOON_FALLBACK_MODELS, 2026-09-26 实测 model_catalog snapshot; order
+// preserved). ⚠️ No `Raccoon-Auto` (client i18n entry — chat/completions
+// 404s) and no visible:false internal raccoon-* models.
+func raccoonFallbackModels() ModelTable {
+	md := func(id, name, ctx, extra string) config.ModelDef {
+		note := "ctx " + ctx
+		if extra != "" {
+			note += "; " + extra
+		}
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: note, Alias: name}
+	}
+	return ModelTable{
+		md("sn-sensenova-6-8-flash", "SenseNova-6.8-Flash · 免费", "256000", "max 63999; free"),
+		md("sn-sensenova-6-8-flash-lite", "SenseNova-6.8-Flash-Lite · 免费", "256000", "max 63999; free"),
+		md("sn-glm-5-3", "GLM-5-3 · x0.75", "1000000", "max 100000"),
+		// ⚠️ 1 倍也要显示（用户报障：ide 是 1 倍，倍率必须可见）。
+		md("sn-kimi-k3", "Kimi-K3 · x1", "1000000", "max 100000"),
+		md("sn-glm-5-3-flash", "GLM-5-3-Flash · x0.2→x0.1", "1000000", "max 100000"),
+		md("sn-deepseek-v4-1-flash", "DeepSeek-V4.1-Flash · x0.25", "1000000", "max 100000"),
+	}
+}

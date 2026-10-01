@@ -901,6 +901,9 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `trae_model.go` / `trae_test.go` | 32 条模型表（internal 条目 Note 标记）+ cline 5 条免费表（gemini maxTokens=65536 修正）；单测 15 个：SOLO 转换 4（含工具历史保留陷阱）、SSE 解析聚合 2、回调双流程 4、乱码、设备派生 2、展示名、过期序、Exchange mock 2（轮换分支 + jwt-token 免 Exchange 分支） |
 | `cline.go` | 第七套独立产品配置（WorkOS 设备码 + 驼峰续期 + `Bearer workos:<jwt>` 前缀必须保留——剥掉 401 文案误导）+ `clineBearerValue` 幂等补前缀 + `clineCredential`（余额必须 `usr-` accountId，JWT sub 实测 400）+ 时间戳三形态 + `{success,data}` 信封判据 + `clineBalanceScale` 具名常量 |
 | `cline_auth.go` | 设备码授权（form-encoded client_id、三字段齐备校验、verification_uri_complete 优先）+ 轮询状态机（pending 非 2xx+error 继续、slow_down 累积 +1s、denied/expired/invalid_grant 终态、网络失败容忍 5 次、interval 下限 1s）+ `registerClineTokens`（驼峰体）+ `RefreshClineAccount`（终态 refreshable:false、身份字段保留）+ `ClineBalance` + `clineAugment`（头族替换 + body 透传） |
+| `raccoon.go` | 四 API 前缀（auth/llm/points/desktop）+ `RaccoonCredential` 1:1 + `EncryptRaccoonPhone`（AES-128-CFB NoPadding+随机 IV，Base64(iv‖ct)，公开常量密钥）+ QR code 32hex + `/login/mp` 公开页 URL + 统一信封（HTTP 200+非 0 code 也是失败） |
+| `raccoon_provider.go` | QR 轮询状态机（**任何异常降级 pending**——异常不中断 2s 轮询、无 token success 防卡死、误判 canceled 会刷新用户正在扫的码）+ 短信登录（captcha_param 必需/AES 手机）+ `RefreshRaccoonCredential`（无新 refresh_token 沿用旧值、200003 终态）+ `FetchRaccoonUserInfo`（失败空对象）+ `ClaimRaccoonLoginReward`（幂等一次性 granted:false→already-claimed）+ `RaccoonOnboardingClaimed`（biz_type+event_name 双判据）+ `RaccoonAugment`（reasoning_effort→`extra_body.thinking` 唯一有效通道）+ `RaccoonDisplayName`（1 倍也显示/0=免费/促销箭头）+ 6 模型表 |
+| `raccoon_test.go` | 加密确定性（固定 IV）/QR URL/轮询 5 形态降级/refresh 沿用/终态/奖励幂等/礼包双判据/思考映射/augment 注入/倍率 4 形态/短信 mock 全流程（AES 体 + 手机优先昵称） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
