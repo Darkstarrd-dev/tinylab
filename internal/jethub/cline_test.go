@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -331,6 +332,121 @@ func TestPollClineUnexpectedJSONShapeNamesKeys(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "organization_id") || !strings.Contains(msg, "pending_authentication_token") {
 		t.Fatalf("error must name the JSON keys, got: %s", msg)
+	}
+}
+
+// TestPollClineUnknownErrorCodeNamesCodeAndEgress: an unrecognized WorkOS error
+// code must surface the code + description + egress — the previous message
+// ("轮询失败（HTTP 400）") dropped all of it because errorDetailOf does not
+// read error_description.
+func TestPollClineUnknownErrorCodeNamesCodeAndEgress(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"teapot_error","error_description":"who knows"}`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil {
+		t.Fatal("unknown error code must fail")
+	}
+	msg := err.Error()
+	for _, want := range []string{"HTTP 400", "error=teapot_error", "who knows", "出站="} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error must contain %q, got: %s", want, msg)
+		}
+	}
+}
+
+// TestPollClineInvalidClientExplained: the live-probed invalid_client shape
+// (wrong client_id / mangled body) gets an actionable message.
+func TestPollClineInvalidClientExplained(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_client","error_description":"Invalid client id."}`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil {
+		t.Fatal("invalid_client must fail")
+	}
+	msg := err.Error()
+	for _, want := range []string{"HTTP 400", "Invalid client id.", "中间层", "出站="} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error must contain %q, got: %s", want, msg)
+		}
+	}
+}
+
+// TestPollClinePlainBody400NamesEgressAndBody: a 400 whose body has no `error`
+// field (HTML/plain from a middlebox) must name the body and the egress path.
+func TestPollClinePlainBody400NamesEgressAndBody(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`upstream rejected (plain text)`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil {
+		t.Fatal("plain 400 must fail")
+	}
+	msg := err.Error()
+	for _, want := range []string{"HTTP 400", "upstream rejected", "非 JSON", "出站="} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error must contain %q, got: %s", want, msg)
+		}
+	}
+}
+
+// TestClineEgressNoteReflectsToggle: the egress note must report direct/proxy
+// truthfully — it is the clue that tells whether a middlebox or the configured
+// proxy shaped the response.
+func TestClineEgressNoteReflectsToggle(t *testing.T) {
+	env := newTestManager(t)
+	if got := env.m.clineEgressNote("cline"); !strings.Contains(got, "直连") {
+		t.Fatalf("toggle off → 直连, got %q", got)
+	}
+	if err := env.m.SetProxyURL("http://127.0.0.1:2080"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.m.SetProxyEnabled("cline", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.m.clineEgressNote("cline"); !strings.Contains(got, "127.0.0.1:2080") {
+		t.Fatalf("toggle on → proxy URL, got %q", got)
+	}
+	// Toggle on but no global proxy configured: honest degraded note.
+	if err := env.m.SetProxyURL(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.m.clineEgressNote("cline"); !strings.Contains(got, "降级直连") {
+		t.Fatalf("toggle on + no proxy → degraded note, got %q", got)
+	}
+}
+
+// TestJethubTransportIsHTTP11: the outbound transport must not negotiate h2 —
+// the reference implementation (Node undici) speaks HTTP/1.1 only, and the
+// reported intermittency (TLS timeout → empty 2xx → 400 without an error code)
+// points at middlebox h2 handling. Locked so the decision is not silently lost.
+func TestJethubTransportIsHTTP11(t *testing.T) {
+	tr := newJethubTransport(nil)
+	if tr.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 must be false (h1-only)")
+	}
+	if tr.TLSNextProto == nil || len(tr.TLSNextProto) != 0 {
+		t.Fatal("TLSNextProto must be a non-nil empty map to disable h2 upgrade")
+	}
+	proxyURL, err := url.Parse("http://127.0.0.1:2080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trProxy := newJethubTransport(proxyURL); trProxy.Proxy == nil {
+		t.Fatal("proxy transport must carry the Proxy func")
 	}
 }
 

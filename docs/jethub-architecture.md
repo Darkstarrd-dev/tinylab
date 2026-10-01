@@ -78,7 +78,10 @@
 - ⚠️ **判据只看响应体的 `error` 字段，不看状态码**（修复）：原先写成「2xx ⇒ 成功，否则按 error 分派」，一旦服务端/中间层给出 **2xx + `error`**（pending/slow_down）就会被误判为成功分支并报出误导性的「WorkOS token 响应缺少必要字段」——用户实测报障即此文案。现在先判 `error`（pending/slow_down 继续轮询、denied/expired/invalid_grant 终态、其余报错），再判 2xx 成功。
 - ⚠️ **错误信息必须携带真实响应**（修复）：`json.Unmarshal` 失败原先被静默忽略，于是「非 JSON / 空体」（例如本地代理或网关回 200 + HTML）统统呈现为「缺少必要字段」，把病因藏起来。现在 `clineBodySnippet` 会带上 `HTTP 状态码 + 响应体截断`（非 JSON 前缀、空体标注「空响应体」）并在 JSON 可解析时**列出顶层键名**（`clineJSONKeys`），同时写 `logger.Warn`。设备码授权与 token 注册两处同样补上了响应体。
 - token 字段兼容 snake_case 与 camelCase（`access_token`/`accessToken`）——WorkOS 各端点命名并不统一。
-- 回归用例（`internal/jethub/cline_test.go`）：`TestPollClinePendingOnHTTP200`（2xx+pending 继续轮询，反向验证原实现会误报）、`TestPollClineNonJSONBodySurfacesPayload`（HTML 体必须点名）、`TestPollClineEmptyBodySurfacesPayload`、`TestPollClineUnexpectedJSONShapeNamesKeys`（列出键名）、`TestPollClineCamelCaseTokens`。
+- 回归用例（`internal/jethub/cline_test.go`）：`TestPollClinePendingOnHTTP200`（2xx+pending 继续轮询，反向验证原实现会误报）、`TestPollClineNonJSONBodySurfacesPayload`（HTML 体必须点名）、`TestPollClineEmptyBodySurfacesPayload`、`TestPollClineUnexpectedJSONShapeNamesKeys`（列出键名）、`TestPollClineUnknownErrorCodeNamesCodeAndEgress`（未识别 error 码必须报出码+描述+出站）、`TestPollClinePlainBody400NamesEgressAndBody`（无 error 字段的 400 必须报出响应体+出站）、`TestPollClineInvalidClientExplained`、`TestPollClineCamelCaseTokens`。
+- **实测的 WorkOS 400 形态（只读探针，2026-10-02）**：未授权 = `authorization_pending`（400）；device code 无效/过期/**已用过** = `invalid_grant`；client_id 不对 = `invalid_client`「Invalid client id.」；grant_type 不对 = `invalid_client`「Invalid client secret.」。⚠️ **`errorDetailOf` 不读 `error_description`**——default 分支曾因此只输出「轮询失败（HTTP 400）」而丢掉全部线索；现已改为显式带出 `error` 码 + 描述。
+- ⚠️ **错误信息一律附带「出站路径」**（`clineEgressNote`：直连 / 代理 `<url>` / 开关已开但代理未配置而降级直连）：响应体被中间层改写是首要嫌疑，出站模式一眼可辨，用户据此切换 Use Proxy 即可对照验证。
+- ⚠️ **出站 transport 强制 HTTP/1.1**（`newJethubTransport`：`ForceAttemptHTTP2:false` + 非 nil 空 `TLSNextProto`）：参考实现（Node undici 的 fetch = DSH 插件）默认只讲 HTTP/1.1，而 Go 会经 ALPN 协商 h2。用户环境对同一对端出现**间歇性三种异常**（TLS handshake timeout → 2xx 空体 → 400 无 error 码）而 Node/浏览器全正常，中间层对 h2 的处理是首要嫌疑；管理类调用负载极小，退回 1.1 无损失且与已验证可用的参考实现在协议层对齐（`TestJethubTransportIsHTTP11` 锁定该决定）。同时给 WorkOS 两个请求补 `Accept: application/json`（部分中间层据此决定返回 JSON 还是 HTML 错误页）。
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
 

@@ -45,6 +45,8 @@ func (m *Manager) pollClineWorkOsTokens(ctx context.Context, grant *clineDeviceA
 			return "", "", reqErr
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		// 部分中间层按 Accept 决定返回 JSON 还是 HTML 错误页。
+		req.Header.Set("Accept", "application/json")
 		tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 		req = req.WithContext(tctx)
 		resp, reqErr := m.httpClient("cline").Do(req)
@@ -78,12 +80,27 @@ func (m *Manager) pollClineWorkOsTokens(ctx context.Context, grant *clineDeviceA
 			intervalMs += 1000
 			clineSleep(ctx, intervalMs)
 			continue
-		case "access_denied", "expired_token", "invalid_grant":
-			return "", "", fmt.Errorf("Cline：%s", firstNonEmpty(jsonStringField(payload, "error_description"), "WorkOS 授权失败"))
+		case "access_denied", "expired_token":
+			return "", "", fmt.Errorf("Cline：%s（%s）", firstNonEmpty(jsonStringField(payload, "error_description"), "WorkOS 授权失败"), m.clineEgressNote("cline"))
+		case "invalid_grant":
+			// 实测：device code 无效/过期/**已被用过**（例如同一码被第二次交换）。
+			return "", "", fmt.Errorf("Cline：%s（%s）",
+				firstNonEmpty(jsonStringField(payload, "error_description"), "device code 无效、已过期或已被使用"), m.clineEgressNote("cline"))
+		case "invalid_client":
+			// 实测：client_id / client_secret 不匹配（或被中间层改写请求体）。
+			return "", "", fmt.Errorf("Cline：WorkOS 拒绝客户端标识（HTTP %d，%s）—— client_id 不匹配或请求被中间层改写（%s）",
+				resp.StatusCode, firstNonEmpty(jsonStringField(payload, "error_description"), "invalid_client"), m.clineEgressNote("cline"))
 		case "":
 			// no error field → fall through to the success / status judgement
 		default:
-			return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
+			// ⚠️ 绝不吞掉原因：报出 error 码 + 描述（原来这里只带 errorDetailOf，
+			// 对带 error_description 的响应返回空串，于是报错毫无信息量）。
+			desc := firstNonEmpty(jsonStringField(payload, "error_description"), errorDetailOf(payload))
+			if m.logger != nil {
+				m.logger.Warn("[cline] authenticate 未识别错误：HTTP %d error=%s desc=%s", resp.StatusCode, errCode, desc)
+			}
+			return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d，error=%s）%s（%s）",
+				resp.StatusCode, errCode, desc, m.clineEgressNote("cline"))
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -100,19 +117,48 @@ func (m *Manager) pollClineWorkOsTokens(ctx context.Context, grant *clineDeviceA
 				if m.logger != nil {
 					m.logger.Warn("[cline] authenticate 响应异常：HTTP %d 体=%s", resp.StatusCode, snippet)
 				}
-				return "", "", fmt.Errorf("Cline：WorkOS token 响应缺少必要字段（HTTP %d，响应体：%s）", resp.StatusCode, snippet)
+				return "", "", fmt.Errorf("Cline：WorkOS token 响应缺少必要字段（HTTP %d，响应体：%s；%s）",
+					resp.StatusCode, snippet, m.clineEgressNote("cline"))
 			}
 			return access, refresh, nil
 		}
-		return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
+		// 非 2xx 且响应体里没有可识别的 error 字段（例如中间层回 400 + HTML）
+		// ——必须把状态码与响应体原文带出来，否则无从判断。
+		snippet := clineBodySnippet(raw, jsonErr)
+		if jsonErr == nil {
+			snippet += "（JSON 键：" + clineJSONKeys(payload) + "）"
+		}
+		if m.logger != nil {
+			m.logger.Warn("[cline] authenticate 非 2xx 无 error 字段：HTTP %d 体=%s", resp.StatusCode, snippet)
+		}
+		return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d，响应体：%s；%s）",
+			resp.StatusCode, snippet, m.clineEgressNote("cline"))
 	}
-	return "", "", fmt.Errorf("Cline：登录等待已超时，请重新发起登录")
+	return "", "", fmt.Errorf("Cline：登录等待已超时，请重新发起登录（%s）", m.clineEgressNote("cline"))
 }
 
 // ctxWithTimeout applies a per-call deadline and returns the cancel together
 // with the context (poduje callers defer it explicitly).
 func ctxWithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, d)
+}
+
+// clineEgressNote describes the egress path used for one provider's outbound
+// calls (direct / proxy / proxy-configured-but-degraded). Included in login
+// failure messages: a mangled response body is almost always a middlebox
+// artifact, and knowing the egress makes that obvious at a glance.
+func (m *Manager) clineEgressNote(provider string) string {
+	m.mu.RLock()
+	useProxy := m.accounts.ProxyEnabled[provider]
+	proxyURL := m.proxyURL
+	m.mu.RUnlock()
+	if !useProxy {
+		return "出站=直连"
+	}
+	if proxyURL == nil {
+		return "出站=代理开关已开但全局代理未配置（降级直连）"
+	}
+	return "出站=代理 " + proxyURL.String()
 }
 
 // clineSleep waits respecting context cancellation.
@@ -240,10 +286,14 @@ func (m *Manager) registerClineTokens(ctx context.Context, workOSAccess, workOSR
 	// non-JSON/HTML 2xx (proxy interference) is diagnosable in one round.
 	if success, _ := payload["success"].(bool); !success || parsed.AccessToken == "" {
 		snippet := clineBodySnippet(raw, jsonErr)
+		if jsonErr == nil {
+			snippet += "（JSON 键：" + clineJSONKeys(payload) + "）"
+		}
 		if m.logger != nil {
 			m.logger.Warn("[cline] register 响应异常：HTTP %d 体=%s", resp.StatusCode, snippet)
 		}
-		return nil, fmt.Errorf("Cline：token 注册响应无效（HTTP %d，响应体：%s）", resp.StatusCode, snippet)
+		return nil, fmt.Errorf("Cline：token 注册响应无效（HTTP %d，响应体：%s；%s）",
+			resp.StatusCode, snippet, m.clineEgressNote("cline"))
 	}
 	return parsed, nil
 }

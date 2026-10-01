@@ -324,6 +324,7 @@ func (m *Manager) RequestClineDeviceAuthorization(ctx context.Context) (*clineDe
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 	tctx, cancel := context.WithTimeout(ctx, clineHTTPTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
@@ -349,8 +350,12 @@ func (m *Manager) RequestClineDeviceAuthorization(ctx context.Context) (*clineDe
 		out.VerificationURIComplete = complete
 	}
 	if out.DeviceCode == "" || out.UserCode == "" || out.VerificationURI == "" {
-		return nil, fmt.Errorf("Cline：设备码授权响应缺少必要字段（HTTP %d，响应体：%s）",
-			resp.StatusCode, clineBodySnippet(raw, jsonErr))
+		snippet := clineBodySnippet(raw, jsonErr)
+		if jsonErr == nil {
+			snippet += "（JSON 键：" + clineJSONKeys(payload) + "）"
+		}
+		return nil, fmt.Errorf("Cline：设备码授权响应缺少必要字段（HTTP %d，响应体：%s；%s）",
+			resp.StatusCode, snippet, m.clineEgressNote("cline"))
 	}
 	return out, nil
 }

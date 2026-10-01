@@ -2,6 +2,7 @@ package jethub
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -24,6 +25,27 @@ func reapAfterGrace(id string) {
 	}()
 }
 
+// newJethubTransport builds the outbound transport for jethub management calls
+// (login/token/credits/renewal/probe).
+//
+// ⚠️ 强制 HTTP/1.1（`ForceAttemptHTTP2:false` + 空的 `TLSNextProto`）：
+// 参考实现（Node undici 的 fetch，即 DSH 插件）默认只讲 HTTP/1.1，而 Go 会经
+// ALPN 协商 h2。用户实测环境里 Go 侧对同一对端出现间歇性异常——TLS handshake
+// timeout → 2xx 空体 → 400 无 error 码——而 Node/浏览器全部正常；中间层对 h2
+// 的处理是首要嫌疑（浏览器走系统代理，undici 走 1.1）。管理类调用负载极小，
+// 退回 1.1 没有实际损失，且与「已验证可用的参考实现」在协议层对齐。
+func newJethubTransport(proxyURL *url.URL) *http.Transport {
+	tr := &http.Transport{
+		ForceAttemptHTTP2: false,
+		// 非 nil 的空 map = 禁止 h2 自动升级（net/http 的约定）。
+		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}
+	if proxyURL != nil {
+		tr.Proxy = http.ProxyURL(proxyURL)
+	}
+	return tr
+}
+
 // jethubClients bundles the two lazily-built outbound clients: direct and
 // proxy-routed. One pair per Manager keeps timeouts consistent across
 // providers; httpClient(provider) picks by the per-provider Use Proxy toggle.
@@ -32,11 +54,10 @@ type jethubClients struct {
 	proxy  *http.Client
 }
 
-// directClientLocked lazily builds the direct outbound client (env proxy
-// default).
+// directClientLocked lazily builds the direct outbound client.
 func (m *Manager) directClientLocked() *http.Client {
 	if m.sharedClients.direct == nil {
-		m.sharedClients.direct = &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{}}
+		m.sharedClients.direct = &http.Client{Timeout: 30 * time.Second, Transport: newJethubTransport(nil)}
 	}
 	return m.sharedClients.direct
 }
@@ -49,7 +70,7 @@ func (m *Manager) proxyClientLocked() *http.Client {
 		if u := m.proxyURL; u != nil {
 			m.sharedClients.proxy = &http.Client{
 				Timeout:   30 * time.Second,
-				Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+				Transport: newJethubTransport(u),
 			}
 		} else {
 			m.sharedClients.proxy = m.directClientLocked()
