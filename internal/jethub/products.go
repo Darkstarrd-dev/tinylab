@@ -1,7 +1,9 @@
 package jethub
 
 import (
+	"context"
 	"net/http"
+	"strings"
 )
 
 // CHAT_API_BASE is the CodeArts inference endpoint (P2 uses the same base for
@@ -27,12 +29,24 @@ var codeartsModels = ModelTable{
 // RegisterDefaultProducts installs every provider's static product config.
 // P3 batches extend this list; unregistered products simply cannot be bridged
 // yet (SetPrefix rejects them with "no product registered").
+//
+// ⚠️ **InferURL 是出站推理端点的唯一真相**（`Product.InferURL` 的注释解释了
+// 为什么不能用 BaseURL + 进站路径）：BaseURL 只用于 registry 展示与探针的
+// 兜底构造，真实推理一律走 InferURL。每个值都有参考实现的端点依据（逐条注释），
+// 并由 `inference_url_test.go` 的 `TestInferenceEndpoints` 锁死。
+// qoder/qodercn 不在此列 —— 它们的 URL 由内嵌 WASM 算出（`qoderCustomize`）。
 func RegisterDefaultProducts(b *Bridge) {
 	b.RegisterProduct(Product{
 		Provider:    "codearts",
 		DisplayName: "CodeArts Agent (Free Hub)",
 		BaseURL:     codeartsBaseURL,
-		Models:      codeartsModels,
+		// ref llm-adapter.ts：`${CHAT_API_BASE}/chat/completions`。
+		// ⚠️ 必须显式声明：codearts 的 augmenter 用 `r.URL.String()` 做
+		// SDK-HMAC 签名，而代理交给 augmenter 的是**客户端**请求（进站路径
+		// `/v1/chat/completions`）—— 声明 InferURL 后 Customize 会把 URL 改写为
+		// 上游地址再调 augmenter，签名才算的是上游路径（ref 签的是上游 URL）。
+		InferURL: codeartsBaseURL + "/chat/completions",
+		Models:   codeartsModels,
 	})
 	for _, provider := range []string{"buddy", "workbuddy"} {
 		p := BuddyProducts()[provider]
@@ -40,7 +54,10 @@ func RegisterDefaultProducts(b *Bridge) {
 			Provider:    provider,
 			DisplayName: p.DisplayName + " (Free Hub)",
 			BaseURL:     p.Endpoint,
-			Models:      buddyFallbackModels(provider),
+			// ref buddy-adapter.ts：`${endpoint}/v2/chat/completions`
+			// （buddyChatPath；此前该常量零调用，出站 URL 被拼成 /v1/… → 404）。
+			InferURL: p.Endpoint + buddyChatPath,
+			Models:   buddyFallbackModels(provider),
 		})
 	}
 	// P3.2: lobsterai (chat base = apiBase + /api/proxy/v1).
@@ -48,21 +65,32 @@ func RegisterDefaultProducts(b *Bridge) {
 		Provider:    "lobsterai",
 		DisplayName: "LobsterAI (有道)",
 		BaseURL:     lobsteraiProduct.Endpoint,
-		Models:      lobsteraiFallbackModels(),
+		// ref lobsterai-adapter.ts：`${apiBase}/api/proxy/v1/chat/completions`。
+		InferURL: lobsteraiProduct.Endpoint + lobsteraiChatPath,
+		Models:   lobsteraiFallbackModels(),
 	})
 	// P3.3: trae (agent host for chat, ug host for credits; three-host split).
 	b.RegisterProduct(Product{
 		Provider:    "trae",
 		DisplayName: traeProduct.DisplayName + " (Free Hub)",
 		BaseURL:     traeAgentHost,
-		Models:      traeFallbackModels(),
+		// ref trae.ts：`POST /api/agent/v3/llm_utils_chat`（SOLO 私有协议，
+		// traeChatPath）。⚠️ 该路径末尾不是 chat/completions，任何 BaseURL 都
+		// 表达不了（必被拼成 …/v3/chat/completions）。
+		// ⚠️ 响应仍是 SOLO 自定义 SSE，本端**尚未**实现 SOLO→OpenAI 转换
+		// （见 docs/jethub-architecture.md §6.2）：URL 修好后 trae 仍不可用于
+		// OpenAI 客户端，需要时再补响应桥。
+		InferURL: traeAgentHost + traeChatPath,
+		Models:   traeFallbackModels(),
 	})
 	// P3.3.2: cline (OpenAI-compatible, no conversion).
 	b.RegisterProduct(Product{
 		Provider:    "cline",
 		DisplayName: "Cline (Free Hub)",
 		BaseURL:     clineProduct.APIBase,
-		Models:      clineFallbackModels(),
+		// ref cline-product.ts：CLINE_CHAT_PATH = `/api/v1/chat/completions`。
+		InferURL: clineProduct.APIBase + clineChatPath,
+		Models:   clineFallbackModels(),
 	})
 	// P3.3.3: raccoon (chat base = xiaohuanxiong.com, OpenAI-compatible SSE
 	// + extra_body.thinking dialect).
@@ -70,25 +98,38 @@ func RegisterDefaultProducts(b *Bridge) {
 		Provider:    "raccoon",
 		DisplayName: "Raccoon (商汤)",
 		BaseURL:     raccoonAPIBase,
-		Models:      raccoonFallbackModels(),
+		// ref raccoon-adapter.ts：`${apiBase}/api/web/llm/v2/chat/completions`
+		// （raccoonChatPath）。用户实测 trace r28I5FsAVgWK-2：拼成
+		// {host}/v1/chat/completions 被 nginx 回 405 Not Allowed。
+		InferURL: raccoonInferURL(),
+		Models:   raccoonFallbackModels(),
 	})
 	// P3.3.4: loomy (standard OpenAI chat; no renewal — SMS re-login only).
 	b.RegisterProduct(Product{
 		Provider:    "loomy",
 		DisplayName: "Loomy (讯飞)",
 		BaseURL:     loomyProduct.APIBase,
-		Models:      loomyFallbackModels(),
+		// ref loomy-adapter.ts：`${apiBase}/chat/completions`（apiBase 自带
+		// /api/v1，故这里只需追加 /chat/completions）。显式声明而非依赖
+		// urlutil 的版本段启发式 —— 后者一旦被改就会静默拼错。
+		InferURL: loomyProduct.APIBase + "/chat/completions",
+		Models:   loomyFallbackModels(),
 	})
 	// P3.3.5: minimax (Anthropic Messages native passthrough — no conversion).
 	b.RegisterProduct(Product{
 		Provider:    "minimax",
 		DisplayName: "MiniMax Code",
 		BaseURL:     minimaxProduct.APIHost,
-		Models:      minimaxFallbackModels(),
+		// ref minimax-product.ts：MINIMAX_INFER_PATH =
+		// `/mavis/api/v1/llm/v1/messages`。⚠️ 必须显式声明：该 base 以
+		// `/v1/messages` 结尾，urlutil 会把它当端点后缀**剥掉**，拼出
+		// `…/mavis/api/v1/llm/chat/completions`（用户实测 404）。
+		InferURL: minimaxInferURL(),
+		Models:   minimaxFallbackModels(),
 	})
 	// P3.4: qoder + qodercn (encrypted inference via the embedded WASM;
 	// BaseURL = the encrypted-infer host — a DIFFERENT host from the public
-	// api2-v2 endpoint).
+	// api2-v2 endpoint). ⚠️ 不设 InferURL：完整 URL（含查询串）由 WASM 算出。
 	for _, provider := range []string{"qoder", "qodercn"} {
 		p := qoderProducts[provider]
 		models := qoderFallbackModels()
@@ -172,4 +213,62 @@ func (m *Manager) SetAugmenter(provider string, fn RequestAugmenterFunc) {
 		m.augmenters = map[string]RequestAugmenterFunc{}
 	}
 	m.augmenters[provider] = fn
+}
+
+// SetInferURL declares the FULL outbound inference endpoint for a provider
+// (called by Bridge.RegisterProduct with Product.InferURL).
+//
+// ⚠️ 为什么需要一张表而不是「BaseURL + 进站路径」：见 `Product.InferURL` 的
+// 注释（整族 404/405 缺陷）。空 URL = 撤销声明（回到 urlutil 推导）。
+func (m *Manager) SetInferURL(provider, url string) {
+	url = strings.TrimSpace(url)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.inferURLs == nil {
+		m.inferURLs = map[string]string{}
+	}
+	if url == "" {
+		delete(m.inferURLs, provider)
+		return
+	}
+	m.inferURLs[provider] = url
+}
+
+// inferURLFor reports the declared full inference endpoint for a provider.
+func (m *Manager) inferURLFor(provider string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	url, ok := m.inferURLs[provider]
+	return url, ok && url != ""
+}
+
+// clientEntryPathKey carries the ORIGINAL client entry path through the
+// augmenter call.
+//
+// ⚠️ 为什么需要它：Customize 为了让**签名类** augmenter（codearts 的 SDK-HMAC
+// 签的是 `r.URL.String()`）看到上游地址，会把交给 augmenter 的请求对象换成
+// 上游 URL（浅拷贝，原请求对象不动）。但同一个对象也是「进站协议」的唯一线索
+// （minimax 靠它区分 OpenAI / Anthropic 两条转换路径）—— 覆盖后会把它误判成
+// Anthropic 进站、跳过协议转换。故把原始路径随 context 一起带过去。
+type clientEntryPathKey struct{}
+
+// withClientEntryPath attaches the client's original entry path.
+func withClientEntryPath(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, clientEntryPathKey{}, path)
+}
+
+// clientEntryPathOf returns the client's original entry path: the context value
+// set by Customize when it rewrote the URL, else r.URL.Path (direct calls in
+// tests / flows that never rewrote it).
+func clientEntryPathOf(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if p, ok := r.Context().Value(clientEntryPathKey{}).(string); ok && p != "" {
+		return p
+	}
+	if r.URL != nil {
+		return r.URL.Path
+	}
+	return ""
 }

@@ -8,6 +8,55 @@ import (
 	"testing"
 )
 
+// --- 出站 URL（真实缺陷：{host}/v1/chat/completions → nginx 405） ---
+
+// TestRaccoonCustomizeReturnsChatEndpoint: Product.BaseURL 是 host 根，而真实
+// 聊天端点是 {base}/api/web/llm/v2/chat/completions（用户实测 trace
+// r28I5FsAVgWK-2：打到 {host}/v1/chat/completions 被 nginx 回 405 Not Allowed）。
+// Customize 必须显式覆盖为完整端点。
+func TestRaccoonCustomizeReturnsChatEndpoint(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	})
+	restoreRaccoonAPIBase(t, srv.URL)
+
+	m := newSeedRaccoonManager(t)
+	// 生产装配：产品表登记即声明 InferURL（Customize 据此覆盖出站 URL）。
+	RegisterDefaultProducts(NewBridge(m, newFakeRegistry()))
+	m.SetAugmenter("raccoon", m.raccoonAugment)
+	id := firstRaccoonAccount(t, m)
+
+	req, _ := http.NewRequest(http.MethodPost, "https://xiaohuanxiong.com/v1/chat/completions", nil)
+	outURL, outBody, err := m.Customize(req, []byte(`{"model":"sn-sensenova-6-8-flash-lite","messages":[]}`),
+		"jethub-raccoon", id, "sn-sensenova-6-8-flash-lite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := srv.URL + "/api/web/llm/v2/chat/completions"
+	if outURL != want {
+		t.Fatalf("customize URL = %q, want %q", outURL, want)
+	}
+	if strings.Contains(outURL, "/v1/chat/completions") {
+		t.Fatal("the OpenAI entry path must never be appended to the raccoon host root (405 defect)")
+	}
+	if req.Header.Get("Authorization") != "Bearer rtok" {
+		t.Fatalf("augmenter must still set the raccoon header family, got %q", req.Header.Get("Authorization"))
+	}
+	if req.Header.Get("X-Client-Platform") == "" {
+		t.Fatal("raccoon client headers missing")
+	}
+	// 进站 Anthropic 路径也落同一个端点（raccoon 只有这一个聊天端点）。
+	req2, _ := http.NewRequest(http.MethodPost, "https://xiaohuanxiong.com/v1/messages", nil)
+	altURL, _, err := m.Customize(req2, outBody, "jethub-raccoon", id, "sn-sensenova-6-8-flash-lite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if altURL != want {
+		t.Fatalf("any entry must land on the chat endpoint, got %q", altURL)
+	}
+}
+
 // --- AES-128-CFB 手机号加密（100003 params_encryted_error 的防线） ---
 
 func TestEncryptRaccoonPhone(t *testing.T) {

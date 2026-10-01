@@ -64,6 +64,9 @@ data: {"type":"message_stop"}
 
 func TestMinimaxCustomizeReturnsFullInferURL(t *testing.T) {
 	m := newSeedMinimaxManager(t)
+	// 生产装配：RegisterDefaultProducts 把 Product.InferURL 发布给 Manager
+	// （Customize 据此覆盖出站 URL）。
+	RegisterDefaultProducts(NewBridge(m, newFakeRegistry()))
 	m.SetAugmenter("minimax", m.minimaxAugment) // app 装配时注册（RegisterProviderAugmenters）
 	id := firstMinimaxAccount(t, m)
 	req, _ := http.NewRequest(http.MethodPost, "https://agent.minimax.cn/v1/chat/completions", nil)

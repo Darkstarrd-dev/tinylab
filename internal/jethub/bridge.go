@@ -52,6 +52,19 @@ type Product struct {
 	DisplayName string
 	// BaseURL is the inference endpoint requests are forwarded to.
 	BaseURL string
+	// InferURL is the FULL inference endpoint (scheme+host+path) for providers
+	// whose real endpoint is NOT "BaseURL + 进站路径".
+	//
+	// ⚠️ 这是**整族真实缺陷**的收敛点（用户实测 raccoon 405 / minimax 404）：
+	// 出站 URL 由 `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` 构造，而多数
+	// 产品的 BaseURL 只能填 host 根（目录/积分等端点共用它），真实推理路径又是
+	// provider 私有的（`/api/web/llm/v2/chat/completions`、`/v2/chat/completions`、
+	// `/api/agent/v3/llm_utils_chat`…），于是拼出来必然是错的（404/405），
+	// 而且**带路径的 BaseURL 也救不了** —— urlutil 会先剥掉已知端点后缀再拼。
+	// 非空时 Manager.Customize 原样返回它（qoder 族例外：URL 由 WASM 算出）。
+	//
+	// 空值 = 该产品的端点确实等于 BaseURL + 进站路径（codearts / loomy）。
+	InferURL string
 	// Models is the static model table registered on the bridged provider.
 	Models ModelTable
 }
@@ -63,8 +76,15 @@ func NewBridge(m *Manager, reg BridgeDeps) *Bridge {
 
 // RegisterProduct installs/updates a provider's static product config.
 // Existing prefixes stay untouched; call SetPrefix to (re)bridge.
+//
+// ⚠️ InferURL 会被登记到 Manager（`Customize` 用它覆盖出站 URL），故产品表是
+// 端点真相的**单一来源** —— 改这里即改推理端点，测试 `TestInferenceEndpoints`
+// 逐 provider 与参考实现比对。
 func (b *Bridge) RegisterProduct(p Product) {
 	b.products[p.Provider] = p
+	// 总是发布（空值 = 撤销声明）：产品表的最后一次登记即端点真相，避免
+	// 「重新登记一个不带 InferURL 的产品」留下过期端点。
+	b.m.SetInferURL(p.Provider, p.InferURL)
 }
 
 // Product returns the registered product config for a provider.

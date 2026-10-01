@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -14,6 +14,7 @@
 > - 修改 jethub 出站代理分派（`SetProxyURL`/`SetPackageProxyURL`/`ProxyEnabled`）→ §3.2 + `internal/jethub/sessions.go`/`codearts_login.go`/`bridge.go` + `internal/app/app.go`
 > - 修改 MiniMax 推理协议（端点 / OpenAI⇄Anthropic 转换 / 思考档位判据 / SSE 映射）→ §6.1 + `internal/jethub/minimax_convert.go`/`minimax_stream.go`/`minimax_credits.go`（augmenter）+ `qoder_adapter.go`（Customize/InterceptResponse 分派）+ `probe.go`
 > - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
+> - 修改/新增 provider 的**推理端点**（出站 URL）→ §6.2 + `internal/jethub/products.go` 的 `Product.InferURL`（**唯一真相源**）+ `bridge.go`（登记即发布）+ `qoder_adapter.go`（Customize 覆盖 + 签名用 URL 改写）+ `probe.go`（探针共用同一管线）；qoder 族例外（URL 由 WASM 算出）
 
 ## 1. 模块组成与边界
 
@@ -103,11 +104,11 @@
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
 1. 用户为 provider 设**调用前缀**（全局唯一，`[a-z0-9-]{1,32}`）→ `Bridge.SetPrefix` 校验冲突（409）+ 持久化。
-2. `Bridge.SyncKeys` 在 registry **动态注册** `config.Provider`：`ID=jethub-{provider}`、`Prefix=用户前缀`、`BaseURL=product 推理端点`、`Keys=启用账号×1`（`Key.Key`=access token，凭据刷新时同步）、`Models=静态模型表`（黑名单过滤）、`APIType="jethub"`。
+2. `Bridge.SyncKeys` 在 registry **动态注册** `config.Provider`：`ID=jethub-{provider}`、`Prefix=用户前缀`、`BaseURL=product 展示/兜底基址`、`Keys=启用账号×1`（`Key.Key`=access token，凭据刷新时同步）、`Models=静态模型表`（黑名单过滤）、`APIType="jethub"`。⚠️ **真实出站 URL 不是 BaseURL 拼出来的**：由 `Product.InferURL` 显式声明、`Customize` 覆盖（见 §6.2 —— BaseURL 只是 registry 展示与 urlutil 兜底）。
 3. 调用侧无感知：`model={前缀}/{modelID}` 走 `handleProxy` → `GetProviderByPrefix` → `forwardWithRetry` 标准链路；**多账号轮询直接复用 rotation 三策略/冷却/配额锁**，不另造轮子。
 4. **请求增强 hook（依赖倒置）**——三个窄接口，全部可选、结构性注入：
    - `RequestAugmenter.Augment(r, body, providerID, keyID, upstreamModel)`：改写出站头基与 body（十协议族中 9 个用这一层）。
-   - `RequestCustomizer.Customize(...)`（可选，qoder 族）：返回 **WASM 决定的完整出站 URL** + 加密体；空 URL 回退默认构造。
+   - `RequestCustomizer.Customize(...)`（可选，所有已声明 `InferURL` 的 provider + qoder 族）：返回**完整出站 URL** + 改写后的 body；空 URL 回退默认构造。⚠️ 调用 augmenter 时它把请求对象的 URL 换成上游地址（浅拷贝）并保留原始进站路径于 context（§6.2 缺陷 13）。
    - `ResponseInterceptor.InterceptResponse(clientReq, resp, ...)`（可选，qoder 族）：响应到达客户端前 peek 首帧分类 + 信封剥离 reader 替换 `resp.Body`。
    - 跨边界信号：`upstreamerr.QueueRetryError{RetryAfter}`（排队——**同 Key** 等待重发，10s 封顶 × 180 次，不排除不冷却）、`upstreamerr.BillingLockError{Until}`（per-model 配额耗尽——`MarkRateLimited` 锁到业务时间点后切号；Qoder=UTC+8 当日 24:00）。
 5. 认证失败（401/业务码 105）在适配层**先续期凭据**再报错换路——这是唯一该走 refresh 的情形。
@@ -126,15 +127,15 @@
 
 ## 6. 11 provider 矩阵（端点/协议族/签名/积分）
 
-| provider | 协议族/推理端点 | 登录 | 出站签名/头族要点 | 续期 | 积分 |
+| provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
-| codearts | OpenAI 兼容 `snap-access…/api/v2` | 两步 OAuth（随机端口回调 + PKCE/DPoP） | `SDK-HMAC-SHA256`（maas_type 参与签名）+ benefit 兜底 | refresh_token | 签到五步流 + 余额 |
-| buddy / workbuddy | OpenAI 兼容（CN/国际双产品，endpoint 不同） | 轮询登录流（11217 继续/12151 账号） | Bearer + X-Domain/X-Product/X-Agent-* 头族 + 按模型族 UA | refresh（终态判定） | 签到（10001 幂等）+ 双层嵌套余额 |
-| lobsterai | OpenAI 兼容 | 本地回调两步 | Bearer 四头 + Client-Capabilities（kimi-k3 准入前提） | 匿名 POST + keyfrom | 三步签到 + profile-summary 余额 |
-| trae | **SOLO 私有协议**（agent host） | 回调双流程（token 直传 + PKCE 并行） | `Cloud-IDE-JWT` + X-* 头族 + OpenAI→SOLO body 转换 | ExchangeToken 轮换 | 签到（9074 设备级限流→代次派生绕开） |
-| cline | OpenAI 兼容 `api.cline.bot` | WorkOS 设备码 | `Bearer workos:<jwt>` 前缀必须保留 | 驼峰 `{refreshToken,grantType}` | 余额（`usr-` id） |
-| raccoon | OpenAI 兼容 + extra_body.thinking | 微信 QR + 短信 | AES-128-CFB 手机加密 + Bearer | 200003 终态 | 登录奖励 + 新手礼包 |
-| loomy | OpenAI 兼容 | **短信验证码**（不可静默续期，诚实 `refreshable:false`） | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
+| codearts | OpenAI 兼容 `snap-access…/api/v2/chat/completions` | 两步 OAuth（随机端口回调 + PKCE/DPoP） | `SDK-HMAC-SHA256`（maas_type 参与签名；**签的是上游 URL**，§6.2）+ benefit 兜底 | refresh_token | 签到五步流 + 余额 |
+| buddy / workbuddy | OpenAI 兼容 `{endpoint}/v2/chat/completions`（CN `copilot.tencent.com` / 国际 `www.workbuddy.ai`） | 轮询登录流（11217 继续/12151 账号） | Bearer + X-Domain/X-Product/X-Agent-* 头族 + 按模型族 UA | refresh（终态判定） | 签到（10001 幂等）+ 双层嵌套余额 |
+| lobsterai | OpenAI 兼容 `{apiBase}/api/proxy/v1/chat/completions` | 本地回调两步 | Bearer 四头 + Client-Capabilities（kimi-k3 准入前提） | 匿名 POST + keyfrom | 三步签到 + profile-summary 余额 |
+| trae | **SOLO 私有协议** `{agentHost}/api/agent/v3/llm_utils_chat`（⚠️ 响应仍是 SOLO SSE，转换未实现，§6.2） | 回调双流程（token 直传 + PKCE 并行） | `Cloud-IDE-JWT` + X-* 头族 + OpenAI→SOLO body 转换 | ExchangeToken 轮换 | 签到（9074 设备级限流→代次派生绕开） |
+| cline | OpenAI 兼容 `{apiBase}/api/v1/chat/completions` | WorkOS 设备码 | `Bearer workos:<jwt>` 前缀必须保留 | 驼峰 `{refreshToken,grantType}` | 余额（`usr-` id） |
+| raccoon | OpenAI 兼容 `{base}/api/web/llm/v2/chat/completions` + extra_body.thinking | 微信 QR + 短信 | AES-128-CFB 手机加密 + Bearer | 200003 终态 | 登录奖励 + 新手礼包 |
+| loomy | OpenAI 兼容 `{apiBase}/chat/completions` | **短信验证码**（不可静默续期，诚实 `refreshable:false`） | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
 | minimax | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（§6.1：进站 OpenAI 时双向转换；进站 `/v1/messages` 时原生透传） | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version、无 x-api-key） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 
@@ -162,6 +163,64 @@
 - **探针（重测按钮）同路**：`probeEntryPath("minimax")` 给 `/v1/messages` + Anthropic 体，`Customize` 把 URL 覆盖为完整端点，augmenter 补 `stream:true` —— 与真实推理共用同一条管线。
 - ⚠️ **未实测/未移植**：M3 的 `on`/`none` 之外无档位；非流式聚合的**响应**形状未经真机验证（参考实现从未发过非流式请求，上游只有流式分支）；思考块在 Anthropic 非流式聚合里被丢弃（无签名，回传会被拒）；`tool_choice:"none"` 不下发（Anthropic 无对应形态）。
 
+### 6.2 推理端点必须逐 provider 显式声明（真实缺陷 12/13 + 修复）
+
+**缺陷 12（整族，用户实测 raccoon 405 触发排查）**：桥接 provider 的出站 URL 原由
+`urlutil.BuildUpstreamURL(BaseURL, 进站路径)` 构造，而多数产品的 `BaseURL` **只能**填
+host 根（登录/签到/积分端点共用它）—— 于是真实推理路径永远拼不出来：
+
+| provider | 拼出来的（错） | 真实端点（ref 依据） |
+|---|---|---|
+| buddy / workbuddy | `{endpoint}/v1/chat/completions` | `{endpoint}/v2/chat/completions`（buddy-adapter.ts:1621） |
+| lobsterai | `{host}/v1/chat/completions` | `{apiBase}/api/proxy/v1/chat/completions`（lobsterai-adapter.ts:11） |
+| trae | `{host}/v1/chat/completions` | `{agentHost}/api/agent/v3/llm_utils_chat`（trae.ts:44） |
+| cline | `{host}/v1/chat/completions` | `{apiBase}/api/v1/chat/completions`（cline-product.ts:301） |
+| raccoon | `{host}/v1/chat/completions`（nginx **405**） | `{base}/api/web/llm/v2/chat/completions`（raccoon-adapter.ts:431） |
+| minimax | `{host}/v1/chat/completions`（Next.js **404**） | `{host}/mavis/api/v1/llm/v1/messages`（minimax-product.ts:192） |
+
+**指纹**：`buddyChatPath`/`lobsteraiChatPath`/`traeChatPath`/`clineChatPath` 四个常量在 Go 里
+**定义了但零调用** —— 路径从未进入出站链路。`BaseURL` 也救不了这些情况：`urlutil`
+会先把结尾的已知端点后缀（`/v1/chat/completions`、`/v1/messages`…）**剥掉**再拼进站
+路径，所以 minimax 那种「填完整端点」反而变成 `…/llm/chat/completions`。
+
+**修复（唯一真相源）**：
+
+1. `Product.InferURL`（`bridge.go`）声明该 provider 的**完整**推理端点；
+   `RegisterProduct` 登记即发布给 `Manager`（`SetInferURL`），**产品表是端点真相的
+   单一来源**。qoder/qodercn 不声明（完整 URL 含查询串，由内嵌 WASM 算出）。
+2. `Manager.Customize` 对已声明的 provider 原样返回该 URL（`Config` 之外的路径不再
+   依赖 urlutil 启发式）；`probe.go` 的探针共用同一条管线，故「重测」与真实推理的
+   端点天然一致（缺陷修复前两者**都**是错的）。
+3. **`/v1/messages` 进站**：只有 minimax 是 Anthropic 原生；其它 provider 无 Anthropic
+   端点，修完 chat 入口也**不要**指望该入口。
+
+**缺陷 13（codearts 签名路径，同一轮审计发现）**：`codearts_augment.go` 用
+`r.URL.String()` 做 SDK-HMAC 签名，而代理交给 augmenter 的是**客户端**请求对象
+（进站路径 `/v1/chat/completions`），参考实现签的是**上游 URL**（`/api/v2/chat/completions`）
+—— canonical URI 不一致 ⇒ 真机应当验签失败；而探针因为自建上游 URL 反而签对，
+症状是「**重测通过、正常调用失败**」（很好的诊断指纹）。修复：`Customize` 在调用
+augmenter 前把 URL 换成完整上游地址 —— 用 `r.WithContext(...)` 的**浅拷贝**（Header map
+共享，augmenter 的头改写仍然落到代理读的 `clientReq.Header`）并只改拷贝的 URL，
+原请求对象不被污染；**原始进站路径随 context 传给 augmenter**（`clientEntryPathOf`），
+因为 URL 被改写后它就不再是进站协议的线索 —— minimax 靠它区分 OpenAI/Anthropic
+两条转换路径（不改写 context 的话 OpenAI 进站会被误判成 Anthropic 原生透传，
+协议转换被静默跳过）。
+
+**顺带的诊断改进**：`forward_retry.go` 现在用 `resp.Request.URL`（net/http 记录的真实
+出站请求）覆盖 trace/用量里的 URL。此前记录的是 Customize **之前**的猜测值 ——
+raccoon/minimax 两次报障的 trace 里那个 URL 其实**从未被请求过**，白费了一轮排查。
+
+**回归**：`internal/jethub/inference_url_test.go` —— 逐 provider 与参考实现端点比对
+（`TestInferenceEndpoints`，改产品表即红）+ 每个 provider 的 `Customize` 返回值 +
+qoder 族必须**不**声明 + codearts 签名看到的是上游路径且原请求未被污染 +
+`RegisterProduct` 的发布/撤销语义。
+
+**⚠️ trae 的剩余缺口（未修）**：trae 的响应是 SOLO 自定义 SSE（`output`/`token_usage`/
+`done`/`error`），本端**只有** `trae_solo.go` 的解析/聚合工具（`parseTraeSSELine`/
+`aggregateTraeSSE`，目前仅被测试使用），**没有**接到 `InterceptResponse` —— 即 URL 修好后
+trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。补齐需要一条 SOLO→OpenAI
+的流式转换 reader（参考 `minimax_stream.go` 的形状）。
+
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 
 - 载荷 `BackupPayload`（`internal/jethub/backup.go`）与 ref `types.ts` **逐字段同构**：`{format:"dsh-codearts-auth/backup", version:1, exportedAt, credentials: ref→JSON 原文字符串, accounts: ProviderAccountEntry[], disabledModels, permanentLocks?}`。
@@ -186,7 +245,8 @@
 - `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **8 个诊断用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、未知 error 码带出码+描述+出站、纯文本 400 带出响应体+出站、invalid_client 专门文案、camelCase token）——§3.3。
 - `internal/jethub/minimax_convert_test.go`（14 个）：出站 URL 必须由 Customize 覆盖为完整推理端点 + 其他 provider 不受影响 + Anthropic 进站原样透传（只补 stream）+ OpenAI→Anthropic 富体（system 折叠/图片 base64/tool_use+tool_result/tools+tool_choice/max_tokens 默认/相邻同角色合并/远程图片显式报错）+ **思考三态判据表**（12 例：M3.1 拒 disabled、M3 只能 on|none、M2.7 不声明、未知模型不声明）+ 流式转换（reasoning/content/tool_calls/usage/finish）+ **截断流冲刷**（stop_reason=length、usage 不丢）+ 非流式两种聚合 + 首帧错误拦截 + 错误体改写保留 `insufficient_balance`（§6.1）。
 - `internal/api/jethub/login_page_test.go`（6 个）+ `internal/api/jethub_login_page_public_test.go`（2 个）：公开登录页端点（二维码内容/404/状态生命周期/不泄露账号 id）+ **在开启密码保护的真实路由器下**断言 `/api/jethub/login-page` 未被鉴权拦截（404 来自 handler）而 `/api/jethub/providers` 仍 401，静态页与 `raccoon-qr.js` 公开可取（§3.4）。
+- `internal/jethub/inference_url_test.go`（5 个）：**逐 provider 推理端点与参考实现比对**（buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax/codearts/loomy 九条，改产品表即红）+ `Customize` 返回值一致 + qoder 族必须不声明 InferURL + **codearts 签名看到上游路径且原请求未被污染** + `RegisterProduct` 的发布/撤销语义（§6.2）。
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。

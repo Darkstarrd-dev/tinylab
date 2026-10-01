@@ -137,6 +137,12 @@ type Manager struct {
 	// augmenters holds per-provider RequestAugmenter implementations (P2/P3
 	// adapters register here; Augment dispatches by provider).
 	augmenters map[string]RequestAugmenterFunc
+// inferURLs holds per-provider FULL inference endpoints declared by the
+// product table (Product.InferURL). Customize returns them verbatim —
+// without this, `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` produces the
+// wrong path for every product whose BaseURL is a host root (the raccoon
+// 405 / minimax 404 defect family).
+	inferURLs map[string]string
 	// onAccountCredentialed fires after a credential write so the app can
 	// re-sync bridged keys (wired to Bridge.SyncKeys).
 	onAccountCredentialed func(provider string)

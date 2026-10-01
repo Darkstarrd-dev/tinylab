@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -75,31 +76,50 @@ func qoderInferSessionFor(provider, accountID string, cred *QoderCredential, hos
 	return inf, nil
 }
 
-// Customize implements proxy.RequestCustomizer. qoder/qodercn return the
-// encrypted-inference URL, minimax returns its FULL Anthropic Messages
-// endpoint (a path-bearing BaseURL would be mangled by urlutil); every other
-// bridged provider falls through to its Augment hook with outURL == "" (the
-// proxy then builds the default URL).
+// Customize implements proxy.RequestCustomizer. Only qoder/qodercn customize
+// (outURL != ""); every other bridged provider falls through to its Augment
+// hook with outURL == "" (the proxy then builds the default URL).
+//
+// ⚠️ 出站 URL 的真相有**三个来源**，优先级如下：
+//  1. qoder 族 —— WASM 算出的加密推理端点（下面第一支）；
+//  2. `Manager.inferURLFor(provider)` —— 产品表 `Product.InferURL` 显式声明的
+//     完整端点（buddy/workbuddy、lobsterai、trae、cline、raccoon、minimax 都
+//     属于这一类：BaseURL 是 host 根，真实路径是 provider 私有的，靠
+//     `urlutil.BuildUpstreamURL` 拼必错）；
+//  3. 默认 —— `BaseURL + 进站路径`（codearts / loomy：它们的 BaseURL 自带
+//     版本路径段，拼出来正好对）。
 func (m *Manager) Customize(r *http.Request, body []byte, providerID, keyID, upstreamModel string) (string, []byte, error) {
 	provider, ok := ProviderNameFromID(providerID)
 	if !ok {
 		out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
 		return "", out, err
 	}
-	switch provider {
-	case "qoder", "qodercn":
+	if provider == "qoder" || provider == "qodercn" {
 		return m.qoderCustomize(r, body, provider, keyID, upstreamModel)
-	case "minimax":
-		// ⚠️ MiniMax 推理端点是 /mavis/api/v1/llm/v1/messages，**不能**靠
-		// BaseURL 表达：urlutil 会把结尾的 /v1/messages 当作已知端点后缀剥掉
-		// 再拼进站路径，最终落到 {host}/v1/chat/completions → 上游 404
-		// （用户实测 trace r28I4T2cXFlA-1 的 Next.js 404 页）。故这里显式返回
-		// 完整 URL，body 交给 augmenter（含 OpenAI→Anthropic 转换）。
-		out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
+	}
+	// 显式声明的完整推理端点（见 Product.InferURL 的注释：整族 404/405 缺陷）。
+	if full, declared := m.inferURLFor(provider); declared {
+		// ⚠️ 让**签名类** augmenter 看到上游 URL：代理交给 augmenter 的是客户端
+		// 请求对象，其 URL 是进站路径（`/v1/chat/completions`），而 codearts 的
+		// SDK-HMAC 签的是 `r.URL.String()`，参考实现签的是完整上游 URL
+		// （canonical URI 不一致 ⇒ 真机验签会失败，而探针因为自建上游 URL 反而
+		// 签对 —— 「重测通过但正常调用 401」就是它）。
+		//
+		// 用**浅拷贝**（r.WithContext：Header map 共享 → augmenter 的头改写仍然
+		// 落到代理读的 clientReq.Header 上）+ 只改拷贝的 URL：原请求对象不被
+		// 污染，而原始进站路径随 context 一起传下去（minimax 靠它判进站协议）。
+		augReq := r
+		if r.URL != nil {
+			if parsed, perr := url.Parse(full); perr == nil {
+				augReq = r.WithContext(withClientEntryPath(r.Context(), r.URL.Path))
+				augReq.URL = parsed
+			}
+		}
+		out, err := m.Augment(augReq, body, providerID, keyID, upstreamModel)
 		if err != nil {
 			return "", nil, err
 		}
-		return minimaxInferURL(), out, nil
+		return full, out, nil
 	}
 	out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
 	return "", out, err

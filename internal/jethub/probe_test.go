@@ -131,7 +131,9 @@ func TestProbeAccountModelMinimaxPath(t *testing.T) {
 	if err := m.SetCredential("minimax", mmRef, []byte(`{"access_token":"mm-tok"}`), 0, false); err != nil {
 		t.Fatal(err)
 	}
-	b.RegisterProduct(Product{Provider: "minimax", DisplayName: "t", BaseURL: upstream.URL})
+	// 产品表登记 = 声明完整推理端点（minimax 的 host 根 + 固定路径拼不出来）。
+	// restoreMinimaxAPIHost 已把 APIHost 指向 mock，故 InferURL 落在 mock 上。
+	RegisterDefaultProducts(b)
 
 	if err := b.ProbeAccountModel(context.Background(), "minimax", mmID, "MiniMax-M3"); err != nil {
 		t.Fatalf("minimax probe: %v", err)

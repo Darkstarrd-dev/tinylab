@@ -41,6 +41,14 @@ const (
 // raccoonAPIBase is a var so tests can repoint it at a mock server.
 var raccoonAPIBase = "https://xiaohuanxiong.com"
 
+// raccoonInferURL is the FULL chat-completions endpoint. ⚠️ 不能只靠
+// Product.BaseURL：它填的是 host 根（目录/积分等端点的公共前缀），而
+// urlutil.BuildUpstreamURL 会按进站路径拼出 {host}/v1/chat/completions ——
+// 实测被 nginx 回 405 Not Allowed（用户 trace r28I5FsAVgWK-2），真实端点是
+// {base}/api/web/llm/v2/chat/completions（ref raccoon-adapter.ts）。故
+// Manager.Customize 用本函数覆盖出站 URL。
+func raccoonInferURL() string { return raccoonAPIBase + raccoonChatPath }
+
 // raccoonAuthPrefix is a var (same test hook rationale).
 var raccoonAuthPrefix = "/api/web/auth/v1"
 

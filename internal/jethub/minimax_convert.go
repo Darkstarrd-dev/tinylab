@@ -653,11 +653,9 @@ func minimaxFirstErrorFrame(firstLine string) (message string, ok bool) {
 	return msg, true
 }
 
-// minimaxEntryPathOf is a tiny helper so the augmenter and tests can read the
-// client entry path without nil checks scattered around.
+// minimaxEntryPathOf is a tiny helper so tests can read the *client* entry path
+// without nil checks scattered around. ⚠️ 生产路径用 `clientEntryPathOf`：
+// Customize 会把 augmenter 看到的 URL 换成上游地址，原始进站路径只在 context 里。
 func minimaxEntryPathOf(r *http.Request) string {
-	if r == nil || r.URL == nil {
-		return ""
-	}
-	return r.URL.Path
+	return clientEntryPathOf(r)
 }

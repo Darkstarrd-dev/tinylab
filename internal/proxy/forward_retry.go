@@ -231,6 +231,16 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 		// forwardUpstream without changing its signature.
 		fwdCtx := WithClientRequest(r.Context(), r)
 		resp, err := h.forwardUpstream(fwdCtx, sel, upstreamBody, r.Header, isStream, effectivePath, effectiveFormat, upstreamModel)
+		// Bridged providers may override the outbound URL (Manager.Customize —
+		// WASM-computed encrypted endpoints, provider-private inference paths).
+		// net/http records the request that produced the response, so use it
+		// for the trace/monitor URL: otherwise the recorded URL is the
+		// pre-Customize guess that was never actually requested (the raccoon
+		// 405 / minimax 404 traces showed a fabricated URL, which cost a
+		// diagnosis round).
+		if resp != nil && resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.Host != "" {
+			upstreamURL = resp.Request.URL.String()
+		}
 		if err != nil {
 			// Server-specified queue delay (e.g. Qoder 10605): wait and resend
 			// with the SAME key. Not a key failure — no cooldown, no
