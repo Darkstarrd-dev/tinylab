@@ -33,6 +33,8 @@ func lobsteraiFallbackModels() ModelTable {
 	}
 }
 
+// RegisterDefaultProducts doc anchor: the trae table lives in trae_model.go.
+
 // buddyFallbackModels returns the built-in model catalog for a buddy-family
 // product (from ref product.ts CODEBUDDY_FALLBACK_MODELS /
 // WORKBUDDY_FALLBACK_MODELS — only models verified to actually work are

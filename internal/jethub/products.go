@@ -50,6 +50,13 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     lobsteraiProduct.Endpoint,
 		Models:      lobsteraiFallbackModels(),
 	})
+	// P3.3: trae (agent host for chat, ug host for credits; three-host split).
+	b.RegisterProduct(Product{
+		Provider:    "trae",
+		DisplayName: traeProduct.DisplayName + " (Free Hub)",
+		BaseURL:     traeAgentHost,
+		Models:      traeFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -59,6 +66,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 		m.SetAugmenter(id, m.buddyAugment(p))
 	}
 	m.SetAugmenter("lobsterai", m.lobsteraiAugment)
+	m.SetAugmenter("trae", m.traeAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

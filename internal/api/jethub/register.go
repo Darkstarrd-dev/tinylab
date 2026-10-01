@@ -49,6 +49,8 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterBuddy(r)
 		// P3.2: lobsterai flows.
 		h.RegisterLobsterai(r)
+		// P3.3: trae flows.
+		h.RegisterTrae(r)
 	})
 }
 

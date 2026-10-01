@@ -894,6 +894,11 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `lobsterai_augment.go` | chat 出站头全量重签：Bearer 四头 + X-LobsterAI-Client-Capabilities/Version（动态真值版本），body 透传未消费档位 |
 | `lobsterai_credits.go` | 三步签到（slot→context→check_in 七步判定、idempotencyKey 幂等键、creditsGranted→rewardCredits→credits）+ profile-summary 余额（creditItems、label 优先于 type、面值推断=同组有效包 max、负值 clamp、0 且无明细判「查不到」） |
 | `lobsterai_test.go` / `mock_test.go` | 掩码幂等 5 形态、UID 四级、now 基准 expires、refresh 身份沿用断言、三步签到三分支、面值推断/label/过期包排除、登录端到端 mock（匿名 exchange + 5 字段体 + 掩码昵称落库）、终态刷新 refreshable:false |
+| `trae.go` | TRAE 三 host 拆分（agent/ug/oauth/console）+ 产品配置（clientId `en1oxy7wnw8j9n`、appVersion 0.1.52、function `solo_work_lite`）+ `TraeCredential`（machine_id/device_id 登录生成永久持久化 + NonPlainTextMobile 消歧）+ Cloud-IDE-JWT 头族三套（SOLO 三 token 头/Ug/VSCode 形态完整签到头族）+ hex32 机器/签到设备生成与 SHA-256 派生（9074 设备级限流绕开）+ seededStream 确定性流（15 位设备号/market uuid/64hex session） |
+| `trae_auth.go` | 回调解析**双流程**（token 直传无 code + PKCE code 识别为合法并行流程点名不误判）+ `parseJsonParam` 双重编码容忍 + `fixNicknameMojibake`（latin1 双重解码、无 CJK 回退 用户+uid末4）+ TenantID 字段名 + `exchangeTraeCallback` 两分支（ExchangeToken 轮换 / userJwt.Token 兜底不走）+ GetUserInfo 容错回填（uid 整体采信 + NonPlainTextMobile）+ 展示名手机→邮箱→ScreenName→uid |
+| `trae_solo.go` | OpenAI→SOLO body 转换（content 字符串→text-parts、config_name+model 双字段 + `__dev` 剥除、**assistant content=null tool_calls 保留**（实测坑回归）、tool_choice 归一化、tools.parameters→JSON string）+ SOLO 响应事件解析（output/token_usage/done/error）+ function_call↔function 双向映射 + namespace/partial_arguments 清理 + 聚合 `aggregateTraeSSE` |
+| `trae_provider.go` | 两步式登录（18080 占用回退随机端口、auth_callback_url 参数名、回调分派）、`RefreshTraeAccount`（ExchangeToken 轮换）、`ClaimTraeDaily`（9074 代次轮换重试 ×5、Ug 头）、`TraeBalance`（ent usage）、`traeAugment`（OpenAI→SOLO 转换 + 头族替换）、`traeCheckinHeaders`（VSCode 形态完整头族，user_id 确定性派生） |
+| `trae_model.go` / `trae_test.go` | 32 条模型表（internal 条目 Note 标记）；单测 15 个：SOLO 转换 4（含工具历史保留陷阱）、SSE 解析聚合 2、回调双流程 4、乱码、设备派生 2、展示名、过期序、Exchange mock 2（轮换分支 + jwt-token 免 Exchange 分支） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
