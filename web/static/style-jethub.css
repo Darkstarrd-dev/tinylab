@@ -107,6 +107,8 @@
 .free-hub-hint {
   font-size: 12px;
   color: var(--text-secondary, var(--text-muted, #888));
+  /* 登录错误现在会带上真实响应体（诊断用）——长串必须能折行，不能撑破弹窗 */
+  overflow-wrap: anywhere;
 }
 
 .free-hub-prefix-row {

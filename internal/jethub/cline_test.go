@@ -248,6 +248,110 @@ func TestPollClineAccessDeniedTerminal(t *testing.T) {
 	}
 }
 
+// TestPollClinePendingOnHTTP200: WorkOS normally answers pending with 400, but
+// a 2xx + `error` body must still be treated as "keep polling" — the previous
+// "2xx ⇒ success" ordering reported it as a bogus "missing fields" failure
+// (real defect reported by the user: 「WorkOS token 响应缺少必要字段」).
+func TestPollClinePendingOnHTTP200(t *testing.T) {
+	var calls int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			// 200 + error — the shape that used to abort the login.
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"error":"authorization_pending","error_description":"still pending"}`))
+			return
+		}
+		w.Write([]byte(`{"access_token":"workos:at","refresh_token":"rt"}`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	access, refresh, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err != nil {
+		t.Fatalf("200+pending must keep polling, got %v", err)
+	}
+	if access != "workos:at" || refresh != "rt" || calls < 2 {
+		t.Fatalf("second poll must succeed: calls=%d access=%q refresh=%q", calls, access, refresh)
+	}
+}
+
+// TestPollClineNonJSONBodySurfacesPayload: a 2xx whose body is not the token
+// JSON (empty body / HTML from a proxy or gateway) must report the status and
+// the body — not a bare "缺少必要字段" that hides the cause.
+func TestPollClineNonJSONBodySurfacesPayload(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<html><body>blocked by proxy</body></html>`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil {
+		t.Fatal("non-JSON 2xx must fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "非 JSON") || !strings.Contains(msg, "blocked by proxy") {
+		t.Fatalf("error must carry the real body, got: %s", msg)
+	}
+	if !strings.Contains(msg, "HTTP 200") {
+		t.Fatalf("error must carry the status, got: %s", msg)
+	}
+}
+
+// TestPollClineEmptyBodySurfacesPayload: an empty 2xx body is a distinct,
+// equally opaque failure — must say so explicitly.
+func TestPollClineEmptyBodySurfacesPayload(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil || !strings.Contains(err.Error(), "空响应体") {
+		t.Fatalf("empty 2xx body must be reported explicitly: %v", err)
+	}
+}
+
+// TestPollClineUnexpectedJSONShapeNamesKeys: a valid-JSON 2xx without tokens
+// must name the keys the server actually sent (decisive diagnostics).
+func TestPollClineUnexpectedJSONShapeNamesKeys(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"pending_authentication_token":"pat","organization_id":"org_1"}`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	_, _, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err == nil {
+		t.Fatal("token-less 2xx must fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "organization_id") || !strings.Contains(msg, "pending_authentication_token") {
+		t.Fatalf("error must name the JSON keys, got: %s", msg)
+	}
+}
+
+// TestPollClineCamelCaseTokens: token fields are accepted in camelCase too
+// (WorkOS user-management responses vary across endpoints/versions).
+func TestPollClineCamelCaseTokens(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"accessToken":"workos:cc","refreshToken":"cc-rt"}`))
+	})
+	restoreClineWorkOSBase(t, srv.URL)
+	grant := &clineDeviceAuthorization{DeviceCode: "dc", UserCode: "uc", VerificationURI: "u", IntervalMs: 1000, ExpiresInMs: 30000}
+	m := newTestManager(t).m
+	access, refresh, err := m.pollClineWorkOsTokens(context.Background(), grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access != "workos:cc" || refresh != "cc-rt" {
+		t.Fatalf("camelCase tokens not accepted: %q %q", access, refresh)
+	}
+}
+
 // --- 余额：accountId（usr-）而非 JWT sub（user- 400 实测） ---
 
 func TestClineBalanceUsesAccountID(t *testing.T) {

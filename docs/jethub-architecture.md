@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle）
+> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -72,6 +72,14 @@
 - ⚠️ **`SetProxyURL` 必须在首次出站调用前接线**（app 装配序）；client 对在开关切换后懒重建，无需进程重启。
 - ⚠️ **前端路径必须与后端路由同形**（真实缺陷 6，用户报障「Use Proxy 开关不可用：`Failed: HTTP 404 (non-JSON body)`」）：首版前端 PUT `/jethub/{provider}/proxy`，而后端注册在 `/jethub/providers/{provider}/proxy` —— chi 找不到路由直接回 `404 page not found` **纯文本**（故前端 `r.json()` 失败，显示的就是 non-JSON 提示）。聚合路由族统一形状：`/jethub/providers/{provider}/{prefix|proxy|accounts|models|ratelimits/*|permanent-lock}` 与 `/jethub/accounts/{accountID}`。**双端回归**：`internal/api/jethub/register_route_test.go`（真 chi 路由级：正确形状 200+JSON，旧错误形状必须 404；缺字段 400；未知 provider 404 带 JSON error）+ `web/jethub.test.js` 静态守卫（遍历 `jethub.js` 的 `apiPut('/jethub/…')`，断言路径必带 `providers/`/`accounts/` 段）。
 
+### 3.3 Cline WorkOS 轮询的判据与诊断（2026-10-02）
+
+- **pending 的真实形态（本机实测）**：`POST https://api.workos.com/user_management/authenticate` 在用户未授权时返回 **400** + `{"error":"authorization_pending","error_description":"…"}`；用 `urn%3A…` 转义与未转义体实测结果一致（故编码不是变量）。成功为 `200 {access_token, refresh_token, …}`。
+- ⚠️ **判据只看响应体的 `error` 字段，不看状态码**（修复）：原先写成「2xx ⇒ 成功，否则按 error 分派」，一旦服务端/中间层给出 **2xx + `error`**（pending/slow_down）就会被误判为成功分支并报出误导性的「WorkOS token 响应缺少必要字段」——用户实测报障即此文案。现在先判 `error`（pending/slow_down 继续轮询、denied/expired/invalid_grant 终态、其余报错），再判 2xx 成功。
+- ⚠️ **错误信息必须携带真实响应**（修复）：`json.Unmarshal` 失败原先被静默忽略，于是「非 JSON / 空体」（例如本地代理或网关回 200 + HTML）统统呈现为「缺少必要字段」，把病因藏起来。现在 `clineBodySnippet` 会带上 `HTTP 状态码 + 响应体截断`（非 JSON 前缀、空体标注「空响应体」）并在 JSON 可解析时**列出顶层键名**（`clineJSONKeys`），同时写 `logger.Warn`。设备码授权与 token 注册两处同样补上了响应体。
+- token 字段兼容 snake_case 与 camelCase（`access_token`/`accessToken`）——WorkOS 各端点命名并不统一。
+- 回归用例（`internal/jethub/cline_test.go`）：`TestPollClinePendingOnHTTP200`（2xx+pending 继续轮询，反向验证原实现会误报）、`TestPollClineNonJSONBodySurfacesPayload`（HTML 体必须点名）、`TestPollClineEmptyBodySurfacesPayload`、`TestPollClineUnexpectedJSONShapeNamesKeys`（列出键名）、`TestPollClineCamelCaseTokens`。
+
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
 
 ## 4. 调用桥接（核心机制，零特殊调用路径）
@@ -134,6 +142,7 @@
 ## 9. 测试与已知限制
 
 - `internal/jethub/sessions_test.go`（6 个）：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照 + 宽限期 reap + `SetProxyURL` 代理分派（httptest 伪代理端点验证请求确实走代理）+ `ProxyEnabled` 开关分派 client 并跨 reload 持久化。
+- `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **5 个新用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、camelCase token）——§3.3。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
 - **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。

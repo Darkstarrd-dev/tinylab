@@ -334,7 +334,7 @@ func (m *Manager) RequestClineDeviceAuthorization(ctx context.Context) (*clineDe
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var payload map[string]any
-	_ = json.Unmarshal(raw, &payload)
+	jsonErr := json.Unmarshal(raw, &payload)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Cline：设备码授权失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
 	}
@@ -349,7 +349,8 @@ func (m *Manager) RequestClineDeviceAuthorization(ctx context.Context) (*clineDe
 		out.VerificationURIComplete = complete
 	}
 	if out.DeviceCode == "" || out.UserCode == "" || out.VerificationURI == "" {
-		return nil, fmt.Errorf("Cline：设备码授权响应缺少必要字段")
+		return nil, fmt.Errorf("Cline：设备码授权响应缺少必要字段（HTTP %d，响应体：%s）",
+			resp.StatusCode, clineBodySnippet(raw, jsonErr))
 	}
 	return out, nil
 }

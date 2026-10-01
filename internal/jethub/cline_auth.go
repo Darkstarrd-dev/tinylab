@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -58,32 +60,51 @@ func (m *Manager) pollClineWorkOsTokens(ctx context.Context, grant *clineDeviceA
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 		var payload map[string]any
-		_ = json.Unmarshal(raw, &payload)
+		jsonErr := json.Unmarshal(raw, &payload)
 		failures = 0
 
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			access := jsonStringField(payload, "access_token")
-			refresh := jsonStringField(payload, "refresh_token")
-			if access == "" || refresh == "" {
-				// 2xx without tokens = server anomaly (NOT "waiting for user")
-				// to avoid an infinite loop.
-				return "", "", fmt.Errorf("Cline：WorkOS token 响应缺少必要字段")
-			}
-			return access, refresh, nil
-		}
-		switch jsonStringField(payload, "error") {
+		// ⚠️ 状态机判据只看响应体的 `error` 字段，**不看状态码**：
+		// WorkOS 的 pending 实测是 400 + error（见 TestPollClineWorkOsTokensStates），
+		// 但把它写成「2xx 才算成功、其余按 error 分派」会在遇到 2xx + error
+		// 的形态时误入成功分支并报「缺少必要字段」——那正是用户实测到的
+		// 误导性报错（真实缺陷）。先判 error，再判 2xx 成功。
+		switch errCode := jsonStringField(payload, "error"); errCode {
 		case "authorization_pending":
-			// ⚠️ Not an error: the user has not clicked authorize yet.
+			// ⚠️ 不是错误：用户还没在浏览器里点授权。继续轮询。
 			clineSleep(ctx, intervalMs)
+			continue
 		case "slow_down":
 			// Accumulate (source `intervalSeconds += 1`), never reset.
 			intervalMs += 1000
 			clineSleep(ctx, intervalMs)
+			continue
 		case "access_denied", "expired_token", "invalid_grant":
 			return "", "", fmt.Errorf("Cline：%s", firstNonEmpty(jsonStringField(payload, "error_description"), "WorkOS 授权失败"))
+		case "":
+			// no error field → fall through to the success / status judgement
 		default:
 			return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
 		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			access := firstNonEmpty(jsonStringField(payload, "access_token"), jsonStringField(payload, "accessToken"))
+			refresh := firstNonEmpty(jsonStringField(payload, "refresh_token"), jsonStringField(payload, "refreshToken"))
+			if access == "" || refresh == "" {
+				// ⚠️ Include the real body: a 2xx whose body is not the expected
+				// token JSON (非 JSON / 空体，例如被本地代理改写) previously
+				// surfaced as a bare "缺少必要字段" with the cause hidden.
+				snippet := clineBodySnippet(raw, jsonErr)
+				if jsonErr == nil {
+					snippet += "（JSON 键：" + clineJSONKeys(payload) + "）"
+				}
+				if m.logger != nil {
+					m.logger.Warn("[cline] authenticate 响应异常：HTTP %d 体=%s", resp.StatusCode, snippet)
+				}
+				return "", "", fmt.Errorf("Cline：WorkOS token 响应缺少必要字段（HTTP %d，响应体：%s）", resp.StatusCode, snippet)
+			}
+			return access, refresh, nil
+		}
+		return "", "", fmt.Errorf("Cline：WorkOS token 轮询失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
 	}
 	return "", "", fmt.Errorf("Cline：登录等待已超时，请重新发起登录")
 }
@@ -103,6 +124,39 @@ func clineSleep(ctx context.Context, ms int64) {
 	case <-ctx.Done():
 	case <-time.After(time.Duration(ms) * time.Millisecond):
 	}
+}
+
+// clineBodySnippet renders a short, log-safe view of a response body for error
+// messages. Non-JSON bodies are the interesting case (a proxy or gateway can
+// answer 200 with HTML/an empty body, which previously surfaced as a bare
+// "缺少必要字段" and hid the real cause).
+func clineBodySnippet(raw []byte, jsonErr error) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" {
+		return "(空响应体)"
+	}
+	if jsonErr != nil {
+		s = "(非 JSON) " + s
+	}
+	if len(s) > 240 {
+		s = s[:240] + "…"
+	}
+	return s
+}
+
+// clineJSONKeys lists the top-level keys of a parsed payload (sorted) so an
+// unexpected-but-valid JSON shape names itself in the error instead of leaving
+// us guessing which fields the server actually sent.
+func clineJSONKeys(payload map[string]any) string {
+	if len(payload) == 0 {
+		return "(无键)"
+	}
+	keys := make([]string, 0, len(payload))
+	for k := range payload {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 // StartClineLogin runs the two-step device-code login: request grant →
@@ -176,15 +230,20 @@ func (m *Manager) registerClineTokens(ctx context.Context, workOSAccess, workOSR
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var payload map[string]any
-	_ = json.Unmarshal(raw, &payload)
+	jsonErr := json.Unmarshal(raw, &payload)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Cline：token 注册失败（HTTP %d）%s", resp.StatusCode, errorDetailOf(payload))
 	}
 	parsed := parseClineTokenPayload(payload)
 	// ⚠️ Judgement is success && data.accessToken (a bare token reading
-	// would treat a failure envelope as success).
+	// would treat a failure envelope as success). The body is included so a
+	// non-JSON/HTML 2xx (proxy interference) is diagnosable in one round.
 	if success, _ := payload["success"].(bool); !success || parsed.AccessToken == "" {
-		return nil, fmt.Errorf("Cline：token 注册响应无效")
+		snippet := clineBodySnippet(raw, jsonErr)
+		if m.logger != nil {
+			m.logger.Warn("[cline] register 响应异常：HTTP %d 体=%s", resp.StatusCode, snippet)
+		}
+		return nil, fmt.Errorf("Cline：token 注册响应无效（HTTP %d，响应体：%s）", resp.StatusCode, snippet)
 	}
 	return parsed, nil
 }
