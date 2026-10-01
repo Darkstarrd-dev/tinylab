@@ -51,6 +51,8 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterLobsterai(r)
 		// P3.3: trae flows.
 		h.RegisterTrae(r)
+		// P3.3.2: cline flows (WorkOS device-code login).
+		h.RegisterCline(r)
 	})
 }
 

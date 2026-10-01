@@ -57,6 +57,13 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     traeAgentHost,
 		Models:      traeFallbackModels(),
 	})
+	// P3.3.2: cline (OpenAI-compatible, no conversion).
+	b.RegisterProduct(Product{
+		Provider:    "cline",
+		DisplayName: "Cline (Free Hub)",
+		BaseURL:     clineProduct.APIBase,
+		Models:      clineFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -67,6 +74,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	}
 	m.SetAugmenter("lobsterai", m.lobsteraiAugment)
 	m.SetAugmenter("trae", m.traeAugment)
+	m.SetAugmenter("cline", m.clineAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

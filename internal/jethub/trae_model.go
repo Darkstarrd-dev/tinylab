@@ -53,3 +53,26 @@ func noteOf(base string, hidden []bool) string {
 	}
 	return base
 }
+
+// clineFallbackModels returns the 5 verified free models (ref
+// cline-product.ts CLINE_FALLBACK_MODELS — the free set comes from the remote
+// `recommended-models` free array; these are the snapshot values, including
+// the gemini-3.8-flash maxTokens=65536 correction: 131072 gets 400'd).
+func clineFallbackModels() ModelTable {
+	md := func(id, name, ctx string, extra string) config.ModelDef {
+		note := "ctx " + ctx
+		if extra != "" {
+			note += "; " + extra
+		}
+		return config.ModelDef{ID: id, QuotaType: "unlimited", Note: note, Alias: name}
+	}
+	return ModelTable{
+		md("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),
+		md("cline-free/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576", "max 131072; free"),
+		md("cline-free/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "1048576", "max 131072; free"),
+		// ⚠️ maxTokens 是 65536 不是 131072（实测 400: supported range is
+		// [1, 65537)——真实缺陷回归值）。
+		md("cline-free/gemini-3.8-flash", "Gemini 3.8 Flash", "1048576", "max 65536; free"),
+		md("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
+	}
+}

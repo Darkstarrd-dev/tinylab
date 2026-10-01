@@ -898,7 +898,9 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `trae_auth.go` | 回调解析**双流程**（token 直传无 code + PKCE code 识别为合法并行流程点名不误判）+ `parseJsonParam` 双重编码容忍 + `fixNicknameMojibake`（latin1 双重解码、无 CJK 回退 用户+uid末4）+ TenantID 字段名 + `exchangeTraeCallback` 两分支（ExchangeToken 轮换 / userJwt.Token 兜底不走）+ GetUserInfo 容错回填（uid 整体采信 + NonPlainTextMobile）+ 展示名手机→邮箱→ScreenName→uid |
 | `trae_solo.go` | OpenAI→SOLO body 转换（content 字符串→text-parts、config_name+model 双字段 + `__dev` 剥除、**assistant content=null tool_calls 保留**（实测坑回归）、tool_choice 归一化、tools.parameters→JSON string）+ SOLO 响应事件解析（output/token_usage/done/error）+ function_call↔function 双向映射 + namespace/partial_arguments 清理 + 聚合 `aggregateTraeSSE` |
 | `trae_provider.go` | 两步式登录（18080 占用回退随机端口、auth_callback_url 参数名、回调分派）、`RefreshTraeAccount`（ExchangeToken 轮换）、`ClaimTraeDaily`（9074 代次轮换重试 ×5、Ug 头）、`TraeBalance`（ent usage）、`traeAugment`（OpenAI→SOLO 转换 + 头族替换）、`traeCheckinHeaders`（VSCode 形态完整头族，user_id 确定性派生） |
-| `trae_model.go` / `trae_test.go` | 32 条模型表（internal 条目 Note 标记）；单测 15 个：SOLO 转换 4（含工具历史保留陷阱）、SSE 解析聚合 2、回调双流程 4、乱码、设备派生 2、展示名、过期序、Exchange mock 2（轮换分支 + jwt-token 免 Exchange 分支） |
+| `trae_model.go` / `trae_test.go` | 32 条模型表（internal 条目 Note 标记）+ cline 5 条免费表（gemini maxTokens=65536 修正）；单测 15 个：SOLO 转换 4（含工具历史保留陷阱）、SSE 解析聚合 2、回调双流程 4、乱码、设备派生 2、展示名、过期序、Exchange mock 2（轮换分支 + jwt-token 免 Exchange 分支） |
+| `cline.go` | 第七套独立产品配置（WorkOS 设备码 + 驼峰续期 + `Bearer workos:<jwt>` 前缀必须保留——剥掉 401 文案误导）+ `clineBearerValue` 幂等补前缀 + `clineCredential`（余额必须 `usr-` accountId，JWT sub 实测 400）+ 时间戳三形态 + `{success,data}` 信封判据 + `clineBalanceScale` 具名常量 |
+| `cline_auth.go` | 设备码授权（form-encoded client_id、三字段齐备校验、verification_uri_complete 优先）+ 轮询状态机（pending 非 2xx+error 继续、slow_down 累积 +1s、denied/expired/invalid_grant 终态、网络失败容忍 5 次、interval 下限 1s）+ `registerClineTokens`（驼峰体）+ `RefreshClineAccount`（终态 refreshable:false、身份字段保留）+ `ClineBalance` + `clineAugment`（头族替换 + body 透传） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 
