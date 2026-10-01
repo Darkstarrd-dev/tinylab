@@ -8,7 +8,12 @@ import "github.com/tinylab/tinylab/internal/config"
 // visibility parity; users can blacklist via the models API).
 func traeFallbackModels() ModelTable {
 	md := func(id, name string, hidden ...bool) config.ModelDef {
-		return config.ModelDef{ID: id, QuotaType: "limited", Note: noteOf("ctx 200000", hidden)}
+		// ⚠️ Alias 必须带上：此前这里**丢弃**了 ref 的 display name，面板只显示
+		// 裸 id（用户实测「trae 模型列表和插件显示不一致」的一部分）。
+		// ⚠️ 不编造倍率：ref 的 trae 兜底表本身没有倍率字段（倍率只随远端目录的
+		// `display_contact_config → consumption_rate.data.rate` 下发），兜底路径
+		// 的 ref 实现同样不显示倍率（§6.3）。
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: noteOf("ctx 200000", hidden), Alias: name}
 	}
 	return ModelTable{
 		md("DeepSeek-V4-Flash-Official", "DeepSeek V4 Flash Official"),
@@ -164,10 +169,10 @@ func qoderFallbackModels() ModelTable {
 		md("efficient", "Efficient", "1000000", "x0.3"),
 		md("smodel", "Sonus", "1000000", "x8; efforts xhigh/high/low/max/medium; default high; NO disable"),
 		md("cmodel", "Cantus", "1000000", "x4; efforts xhigh/high/low/max/medium; default high; NO disable"),
-		md("qmodel_38max", "Qwen3.8-Max", "1000000", "FREE; efforts xhigh/low/medium; default xhigh (CN=medium); can disable"),
+		md("qmodel_38max", "Qwen3.8-Max", "1000000", "x0.5; promo 22:00-08:00 x0.2; efforts xhigh/low/medium; default xhigh (CN=medium); can disable"),
 		md("qfmodel", "Qwen3.8-Flash", "1000000", "FREE (x0); efforts xhigh/low/medium; default medium; can disable"),
-		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.1; NO efforts — disable-only"),
-		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.04; NO efforts — disable-only"),
+		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.5; promo 22:00-08:00 x0.1; NO efforts — disable-only"),
+		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.1; promo 22:00-08:00 x0.04; NO efforts — disable-only"),
 		md("kmodel_latest", "Kimi-K3", "1000000", "x1.4; efforts high/low/max; default max"),
 		md("kmodel", "Kimi-K2.8-Preview", "1000000", "x0.8; efforts high/low/max; default max"),
 		md("gmodel", "GLM-5.3", "1000000", "x0.8; efforts high/low/max; default max"),
@@ -192,10 +197,10 @@ func qoderCNFallbackModels() ModelTable {
 	}
 	return ModelTable{
 		md("auto", "Auto", "200000", "x0.5; no thinking_config"),
-		md("qmodel_38max", "Qwen3.8-Max", "1000000", "FREE; efforts xhigh/low/medium; default medium; can disable"),
+		md("qmodel_38max", "Qwen3.8-Max", "1000000", "x0.5; promo 22:00-08:00 x0.2; efforts xhigh/low/medium; default medium; can disable"),
 		md("qfmodel", "Qwen3.8-Flash", "1000000", "FREE (x0); measured 983,490 / range error [1,983616]; efforts xhigh/low/medium; default medium; can disable"),
-		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.1; NO efforts — disable-only"),
-		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.04; NO efforts — disable-only"),
+		md("qmodel_latest", "Qwen3.7-Max", "1000000", "x0.5; promo 22:00-08:00 x0.1; NO efforts — disable-only"),
+		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.1; promo 22:00-08:00 x0.04; NO efforts — disable-only"),
 		md("q37fmodel", "Qwen3.7-Flash", "1000000", "x0.1; CN-only; NO thinking_config"),
 		md("dmodel", "DeepSeek-V4-Pro", "1000000", "measured 852,951 (tier says 1M — keep 1M); x0.5; efforts high/max; default max; can disable"),
 		md("dfmodel", "DeepSeek-Flash", "1000000", "measured 999,991; x0.1; efforts high/max/low; default max; can disable"),

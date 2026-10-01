@@ -6,11 +6,20 @@ import "github.com/tinylab/tinylab/internal/config"
 // lobsterai-product.ts — "2026-08-06 从 GET /api/models/available 实测拉取").
 // Order preserves the reference table for comparability; contextWindow notes
 // are estimates (the server mostly reports 1M).
+//
+// ⚠️ 与插件面板的**已知差距**（用户实测「lobsterAI 模型显示和插件中不一致」）：
+// 插件面板走**远端目录** `GET {apiBase}/api/models/available`（远端 26 条，
+// 带 `costMultiplier` 倍率；且必须带 `X-LobsterAI-Client-Capabilities` 头才会
+// 下发 `kimi-k3`）。本端**尚未实现**该拉取（§6.3），故这里只补上远端已确认存在、
+// 兜底表原本缺失的三条；倍率仍无法显示（ref 的兜底表刻意不含 costMultiplier）。
 func lobsteraiFallbackModels() ModelTable {
 	md := func(id string) config.ModelDef {
 		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx ~1M (est)"}
 	}
 	return ModelTable{
+		md("kimi-k3"),        // 需 capability 头才下发（ref lobsterai.ts:535-539）
+		md("deepseek-flash"), // 远端 id 与 deepseek-v4-flash 不同，两者并存
+		md("glm-5.3-flash"),
 		md("deepseek-v4-flash"),
 		md("deepseek-v4-pro"),
 		md("MiniMax-M3"),

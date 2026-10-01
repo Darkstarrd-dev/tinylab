@@ -228,6 +228,42 @@ func contains(s, sub string) bool {
 	return len(s) >= len(sub) && indexOfStr(s, sub) >= 0
 }
 
+// init registers the codearts key extractor.
+//
+// ⚠️ **真实缺陷（用户实测「codearts agent 可添加，但按 prefix 取不到模型、无法
+// 调用」）**：CodeArts 凭据是 SDK-HMAC 的 `access_key_id`/`secret_access_key`/
+// `security_token`，**根本没有 `access_token` 字段**，于是通用提取器返回空串 →
+// `Bridge.SyncKeys` 跳过该账号 → 可用 Key 数为 0 → **桥接 provider 被整个移除**
+// （前缀还存着，但 registry 里没有对应 provider：模型列表看不到、`{prefix}/{model}`
+// 也无从路由）。其它 10 个 provider 的凭据都自带 `access_token`（或已注册专属
+// 提取器），只有 codearts 是“无令牌”的签名型凭据。
+//
+// 这里用 `security_token`（临时凭据，本质就是令牌；退一步用 access_key_id）。
+// ⚠️ 它**不参与出站鉴权**：codearts 的 augmenter 用 ak/sk 重新签名并覆盖全部出站
+// 头，`Key.Key` 只用于轮询选号、用量归属与日志遮蔽。
+func init() {
+	RegisterTokenExtractor("codearts", func(cred jsonRaw) (string, error) {
+		var c CodeArtsCredential
+		if err := jsonUnmarshal(cred, &c); err != nil {
+			return "", errors.New("jethub: parse codearts credential: " + err.Error())
+		}
+		if c.SecurityToken != "" {
+			return c.SecurityToken, nil
+		}
+		if c.AccessKeyID != "" {
+			return c.AccessKeyID, nil
+		}
+		// 兜底：非真实形状的凭据（手写/旧夹具）若带 access_token 则用它。让账号
+		// 仍被桥接，由 augmenter 报「凭据不完整（需重新登录）」这种**明确**错误，
+		// 而不是静默把 provider 从 registry 摘掉（那正是本缺陷的症状）。
+		var generic struct {
+			AccessToken string `json:"access_token"`
+		}
+		_ = jsonUnmarshal(cred, &generic)
+		return generic.AccessToken, nil
+	})
+}
+
 func indexOfStr(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

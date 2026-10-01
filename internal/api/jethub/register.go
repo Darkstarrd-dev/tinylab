@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -367,7 +368,26 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 //     — parse it there;
 //   - no rate info anywhere → rate "" and the name falls back to the id
 //     (never invent a rate: 编造倍率比不显示更糟, ref buddy.ts).
+//
+// ⚠️ Note 里的三种受支持段（其余散文段忽略）：
+//
+//	x0.5                 基础倍率（"免费" 亦属此列）
+//	FREE (x0)            免费（**仅当括号里的倍率是 0**）
+//	promo 22:00-08:00 x0.2
+//	                     促销段：窗口内展示 `基础→折后`，窗口外只展示基础倍率
+//
+// ⚠️ 裸 `FREE` 段**不再**当成「免费」：ref 的 `isFree` 只表示「有免费额度」，
+// 展示上是否显示「免费」完全取决于 `priceFactor === 0`（ref qoder-adapter.ts
+// 的 qoderDisplayName：`if (model.priceFactor === 0) return … · 免费`）。此前把它
+// 无条件当免费，导致 `Qwen3.8-Max`（实为 x0.5→x0.2）被显示成「免费」——用户实测
+// 报障「倍率显示和插件中不一致」。
 func modelDisplayParts(md config.ModelDef) (name, rate string) {
+	return modelDisplayPartsAt(md, time.Now())
+}
+
+// modelDisplayPartsAt is modelDisplayParts with an injectable clock (the
+// promotion window must be testable on both sides).
+func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) {
 	src := md.Alias
 	if src == "" {
 		return md.ID, ""
@@ -379,27 +399,103 @@ func modelDisplayParts(md config.ModelDef) (name, rate string) {
 			return strings.TrimSpace(src[:idx]), tail
 		}
 	}
-	// Note segments: "ctx 1048576; x2; efforts …" / "FREE (x0); …"
+	base := ""
+	promoRate := ""
+	var winStart, winEnd int
+	havePromoWindow := false
 	for _, seg := range strings.Split(md.Note, ";") {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue
 		}
 		if isRateText(seg) {
-			return src, seg
+			if base == "" || base == "免费" {
+				base = seg
+			}
+			continue
 		}
-		if seg == "FREE" || strings.HasPrefix(seg, "FREE (") {
-			return src, "免费"
+		if m := freeRateRe.FindStringSubmatch(seg); m != nil {
+			// `FREE (x0)` ⇒ 免费；`FREE (x1.5)` ⇒ 有免费额度但按 x1.5 计费
+			// （倍率非 0 就不能显示成免费 —— 这正是 qmodel_38max 的误标来源）。
+			if v, err := strconv.ParseFloat(m[1], 64); err == nil && v == 0 {
+				base = "免费"
+			} else {
+				base = "x" + m[1]
+			}
+			continue
+		}
+		if m := promoRe.FindStringSubmatch(seg); m != nil {
+			start, end, ok := parsePromoWindow(m[1])
+			if ok {
+				promoRate, winStart, winEnd, havePromoWindow = m[2], start, end, true
+			}
 		}
 	}
-	return src, ""
+	// 免费优先于促销（ref 同序：priceFactor === 0 ⇒ 免费，不看窗口）。
+	if base == "免费" {
+		return src, "免费"
+	}
+	if base == "" {
+		return src, ""
+	}
+	if promoRate != "" && havePromoWindow && promotionActiveAt(winStart, winEnd, now) {
+		return src, base + "→" + promoRate
+	}
+	return src, base
 }
 
 // rateTextRe matches the normalized rate suffixes used across the product
 // tables: x0.75, x1, x0.2→x0.1 (promotion price), 免费 (free).
 var rateTextRe = regexp.MustCompile(`^x\d+(\.\d+)?(→x\d+(\.\d+)?)?$|^免费$`)
 
+// freeRateRe matches the `FREE (xN)` note segment: the parenthesised value is
+// the multiplier (`FREE (x0)` = free, `FREE (x1.5)` = free-quota flag but
+// billed at x1.5 — only a literal zero may render as 免费).
+var freeRateRe = regexp.MustCompile(`^FREE \(x(\d+(?:\.\d+)?)\)$`)
+
+// promoRe matches a promotion segment: `promo 22:00-08:00 x0.2`.
+var promoRe = regexp.MustCompile(`^promo\s+(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s+(x\d+(?:\.\d+)?)$`)
+
 func isRateText(s string) bool { return rateTextRe.MatchString(s) }
+
+// parsePromoWindow parses "HH:MM-HH:MM" into minutes-of-day.
+func parsePromoWindow(spec string) (start, end int, ok bool) {
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	toMinutes := func(hhmm string) (int, bool) {
+		m := regexp.MustCompile(`^(\d{1,2}):(\d{2})$`).FindStringSubmatch(strings.TrimSpace(hhmm))
+		if m == nil {
+			return 0, false
+		}
+		h, _ := strconv.Atoi(m[1])
+		min, _ := strconv.Atoi(m[2])
+		if h >= 24 || min >= 60 {
+			return 0, false
+		}
+		return h*60 + min, true
+	}
+	start, okStart := toMinutes(parts[0])
+	end, okEnd := toMinutes(parts[1])
+	if !okStart || !okEnd {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+// promotionActiveAt reports whether the promotion window covers `now`, in
+// **UTC+8 wall time** (the catalog's timezone; identical rule to the
+// reference implementation's promotionActiveNow, incl. cross-midnight
+// windows such as 22:00-08:00).
+func promotionActiveAt(start, end int, now time.Time) bool {
+	utc8 := now.UTC().Add(8 * time.Hour)
+	minutes := utc8.Hour()*60 + utc8.Minute()
+	if start <= end {
+		return minutes >= start && minutes < end
+	}
+	return minutes >= start || minutes < end
+}
 
 type setModelDisabledRequest struct {
 	ModelID  string `json:"modelId"`

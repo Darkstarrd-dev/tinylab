@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -15,6 +15,8 @@
 > - 修改 MiniMax 推理协议（端点 / OpenAI⇄Anthropic 转换 / 思考档位判据 / SSE 映射）→ §6.1 + `internal/jethub/minimax_convert.go`/`minimax_stream.go`/`minimax_credits.go`（augmenter）+ `qoder_adapter.go`（Customize/InterceptResponse 分派）+ `probe.go`
 > - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
 > - 修改/新增 provider 的**推理端点**（出站 URL）→ §6.2 + `internal/jethub/products.go` 的 `Product.InferURL`（**唯一真相源**）+ `bridge.go`（登记即发布）+ `qoder_adapter.go`（Customize 覆盖 + 签名用 URL 改写）+ `probe.go`（探针共用同一管线）；qoder 族例外（URL 由 WASM 算出）
+> - 修改**模型展示名/倍率**（别名、倍率段、促销窗口）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go`
+> - 修改 **jethub 前端 RPC 路径** → §3.2 缺陷 14 + `web/static/jethub.js` + `web/jethub.test.js` 的**全方法路由形状守卫**（从 `internal/api/jethub/*.go` 反推合法形状，改路径必跑）
 
 ## 1. 模块组成与边界
 
@@ -75,7 +77,12 @@
   3. **codearts 回调 token 交换**：包级 `callbackClient` 经 `SetPackageProxyURL` 重定向 transport，开关状态由 `codeartsProxyEnabled` 在发起登录时按该 provider 的 toggle 设置。
 - ⚠️ **开关打开但全局代理未配置（`config.Proxy.enabled=false` 或 host/port 空）= 直连降级**（`proxyClientLocked` 回退 direct）——没有可路由的代理时开关不生效。
 - ⚠️ **`SetProxyURL` 必须在首次出站调用前接线**（app 装配序）；client 对在开关切换后懒重建，无需进程重启。
-- ⚠️ **前端路径必须与后端路由同形**（真实缺陷 6，用户报障「Use Proxy 开关不可用：`Failed: HTTP 404 (non-JSON body)`」）：首版前端 PUT `/jethub/{provider}/proxy`，而后端注册在 `/jethub/providers/{provider}/proxy` —— chi 找不到路由直接回 `404 page not found` **纯文本**（故前端 `r.json()` 失败，显示的就是 non-JSON 提示）。聚合路由族统一形状：`/jethub/providers/{provider}/{prefix|proxy|accounts|models|ratelimits/*|permanent-lock}` 与 `/jethub/accounts/{accountID}`。**双端回归**：`internal/api/jethub/register_route_test.go`（真 chi 路由级：正确形状 200+JSON，旧错误形状必须 404；缺字段 400；未知 provider 404 带 JSON error）+ `web/jethub.test.js` 静态守卫（遍历 `jethub.js` 的 `apiPut('/jethub/…')`，断言路径必带 `providers/`/`accounts/` 段）。
+- ⚠️ **前端路径必须与后端路由同形**（真实缺陷 6，用户报障「Use Proxy 开关不可用：`Failed: HTTP 404 (non-JSON body)`」）：首版前端 PUT `/jethub/{provider}/proxy`，而后端注册在 `/jethub/providers/{provider}/proxy` —— chi 找不到路由直接回 `404 page not found` **纯文本**（故前端 `r.json()` 失败，显示的就是 non-JSON 提示）。聚合路由族统一形状：`/jethub/providers/{provider}/{prefix|proxy|accounts|models|ratelimits/*|permanent-lock}` 与 `/jethub/accounts/{accountID}`。**双端回归**：`internal/api/jethub/register_route_test.go`（真 chi 路由级：正确形状 200+JSON，旧错误形状必须 404；缺字段 400；未知 provider 404 带 JSON error）+ `web/jethub.test.js` 静态守卫。
+- ⚠️ **同一类形状错误的第二次复发（真实缺陷 14，loomy 实测「添加账号报 `Failed: HTTP 404 (non-JSON body)`」）**：前端还有三处漏带 `providers/` 段 ——
+  1. **SMS 占位账号创建** `POST /jethub/{provider}/accounts`（真值 `/jethub/providers/{provider}/accounts`）。loomy 是**唯一** `sms` 登录模式的 provider，所以只有它踩到（raccoon 走 url/qr，不进这个分支）；
+  2. **限流重测** `POST /jethub/{provider}/ratelimits/retest`（「重测所有」按钮）；
+  3. **限流重置** `POST /jethub/{provider}/ratelimits/reset`。
+  根因是**旧守卫只扫 `apiPut` 字面量**，而这三处都是 `apiPost`（且旧测试还把错误形状当成期望值锁住了 —— 与缺陷 6 那次同一个坑）。修复：三处路径补齐；守卫重写为**全方法**（`apiGet/Post/Put/Patch/Delete`）且**从 Go 侧路由声明反推**合法形状（解析 `internal/api/jethub/*.go` 的 `r.(Get|Post|Put|Patch|Delete)("/…")`，把 `{param}` 与已知 provider 名都归一成 `*`），逐条比对前端调用；缺一条就列出全部不匹配项。已做反向验证（把任一路径改回错误形状 → 守卫立即报出该 (方法, 形状)）。
 
 ### 3.3 Cline WorkOS 轮询的判据与诊断（2026-10-01）
 
@@ -89,6 +96,8 @@
 - ⚠️ **出站 transport 强制 HTTP/1.1**（`newJethubTransport`：`ForceAttemptHTTP2:false` + 非 nil 空 `TLSNextProto`）：参考实现（Node undici 的 fetch = DSH 插件）默认只讲 HTTP/1.1，而 Go 会经 ALPN 协商 h2。用户环境对同一对端出现**间歇性三种异常**（TLS handshake timeout → 2xx 空体 → 400 无 error 码）而 Node/浏览器全正常，中间层对 h2 的处理是首要嫌疑；管理类调用负载极小，退回 1.1 无损失且与已验证可用的参考实现在协议层对齐（`TestJethubTransportIsHTTP11` 锁定该决定）。同时给 WorkOS 两个请求补 `Accept: application/json`（部分中间层据此决定返回 JSON 还是 HTML 错误页）。
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
+
+**缺陷 15（codearts 无 `access_token` ⇒ 桥接 provider 被静默摘除）**：用户实测「codearts agent 可添加，但按 prefix 取不到模型、无法调用」。根因：`Bridge.SyncKeys` 对每个启用账号取 `accessTokenOf(provider, cred)`，取不到就跳过；可用 Key 数为 0 时**桥接 provider 被整个移除**（前缀还在，但 registry 里没有 provider ⇒ 模型列表看不到、`{prefix}/{model}` 无从路由）。而 codearts 的凭据是 SDK-HMAC 的 `access_key_id`/`secret_access_key`/`security_token`，**没有 `access_token` 字段**，通用提取器恒返回空串 —— 其余 10 个 provider 都自带 `access_token` 或已注册专属提取器，只有它是「无令牌」签名型凭据。修复：注册 codearts 专属提取器（`security_token` 优先、退一步 `access_key_id`；再兜底 `access_token` 以让手写/旧夹具凭据仍被桥接，由 augmenter 报「凭据不完整」这种明确错误）。⚠️ 该 Key **不参与出站鉴权**：codearts 的 augmenter 用 ak/sk 重签并覆盖全部出站头，`Key.Key` 只用于轮询选号/用量归属/日志遮蔽。回归 `internal/jethub/bridge_keys_test.go`：**用真实凭据结构体**逐 provider 断言能取出非空 Key（此前的测试夹具用通用 `{"access_token":…}`，恰好能过通用提取器 —— 这正是缺陷逃过测试的原因）。
 
 ### 3.4 本地扫码登录页（raccoon，真实缺陷 11 + 修复）
 
@@ -221,6 +230,52 @@ qoder 族必须**不**声明 + codearts 签名看到的是上游路径且原请�
 trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。补齐需要一条 SOLO→OpenAI
 的流式转换 reader（参考 `minimax_stream.go` 的形状）。
 
+### 6.3 模型列表与倍率：静态表 vs 插件的远端目录（真实缺陷 16 + 部分修复）
+
+**插件的模型列表从哪来**（本轮逐条核对 ref）：
+
+- 面板调 `model.list` RPC（`jet-hub-rpc.ts`），**优先取适配器 `listAllModels()`**；
+  面板只渲染 `name` —— **倍率是各适配器拼进 `name` 的文本**，不是独立字段
+  （`trae-adapter.ts` / `qoder-adapter.ts` / `lobsterai-adapter.ts` 三家同款）。
+- **trae / lobsterai = 远端目录优先 + 静态兜底**；**qoder / qodercn = 纯静态表**
+  （ref 明说模型列表端点需 WASM 签名，故不发请求，表即采集时刻快照）。
+- 倍率字段：trae = `display_contact_config`（JSON 字符串）→ `consumption_rate.data.rate`；
+  lobsterai = `costMultiplier`（裸数字）；qoder = `priceFactor` + `promotion{before, discount, window}`。
+  免费只在倍率**恰为 0** 时成立。
+
+**本端现状**：模型列表**只有静态表**，没有任何远端目录拉取 ——
+`traeBatchModelsPath`/`lobsteraiModelsPath`/`DecryptQoderModelCatalog`/`raccoonModelCatalog`
+四个常量/函数**零调用**（是「打算做但没接」的痕迹）。故：
+
+| provider | 与插件的差距 | 本轮处理 |
+|---|---|---|
+| qoder / qodercn | 3 条促销倍率错（`qmodel_38max` 被显示成「免费」、`qmodel_latest`/`qmodel` 拿采集时刻折后价当唯一价） | **已修**：† |
+| trae | 静态表丢弃了 ref 的 display name（面板显示裸 id）；远端独有的模型（含 0 费档）不在表里；无倍率 | 展示名**已修**；远端目录**未实现** |
+| lobsterai | 缺远端已确认存在的 `kimi-k3`（需 capability 头才下发）/`deepseek-flash`/`glm-5.3-flash`；无倍率 | 三条**已补**；倍率需远端目录（**未实现**） |
+
+† **qoder 倍率的修法**（判定与 ref `qoderDisplayName`/`promotionActiveNow` 同源）：
+
+- 免费判据收紧：**只有倍率恰为 0** 才显示「免费」（`FREE (x0)`）。裸 `FREE` 段只表示
+  「有免费额度」，显示上必须看倍率 —— 此前无条件当免费，把 `Qwen3.8-Max`
+  （实为 `x0.5→x0.2`）显示成「免费」（用户实测报障）。倍率非 0 的 `FREE (x1.5)`
+  现在会显示 `x1.5` 而不是丢信息。
+- 促销窗口：Note 新增受支持段 `promo HH:MM-HH:MM xN`（基础倍率仍是同条目的 `xM` 段）：
+  窗口内展示 `xM→xN`，窗口外只展示 `xM`；窗口按 **UTC+8 墙上时间**判定、支持跨零点
+  （22:00–08:00），与机器时区无关。这样与插件在**两个半天里都一致**（静态写死折后价
+  会让用户在窗口外按折扣价预期、实际按原价计费 —— 这正是 ref 的注释所警告的）。
+- 回归：`internal/api/jethub/register_test.go` 的
+  `TestModelDisplayPartsPromotionWindow`（窗口内/外/边界 × 两个时区表达）+
+  `TestQoderModelRatesMatchPlugin`（qoder 与 qodercn 逐条对账，期望值取自 ref
+  `qoder-product.ts`）+ `TestTraeModelsCarryDisplayNames`。
+
+**未实现的正确修法（下一步）**：trae 与 lobsterai 的**远端目录拉取**（含解析与失败回退）。
+远端 ID 集合会随服务端变化（ref 明确警告不要把某一刻的远端条目写死），故「把静态表抄长」
+追不上，必须拉远端：trae `POST {agentHost}/api/ide/v1/batch_get_detail_param`（22 个通道 +
+`traeSOLOHeaders`，解析 `function_configs[].config_info_list[]`，倍率在
+`display_contact_config → consumption_rate.data.rate`）、lobsterai
+`GET {apiBase}/api/models/available`（**必须带** `X-LobsterAI-Client-Capabilities:
+kimi-k3-agentic-v1,thinking-level-control-v1`，否则少 `kimi-k3`）。qoder/qodercn 无需远端。
+
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 
 - 载荷 `BackupPayload`（`internal/jethub/backup.go`）与 ref `types.ts` **逐字段同构**：`{format:"dsh-codearts-auth/backup", version:1, exportedAt, credentials: ref→JSON 原文字符串, accounts: ProviderAccountEntry[], disabledModels, permanentLocks?}`。
@@ -246,7 +301,9 @@ trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。�
 - `internal/jethub/minimax_convert_test.go`（14 个）：出站 URL 必须由 Customize 覆盖为完整推理端点 + 其他 provider 不受影响 + Anthropic 进站原样透传（只补 stream）+ OpenAI→Anthropic 富体（system 折叠/图片 base64/tool_use+tool_result/tools+tool_choice/max_tokens 默认/相邻同角色合并/远程图片显式报错）+ **思考三态判据表**（12 例：M3.1 拒 disabled、M3 只能 on|none、M2.7 不声明、未知模型不声明）+ 流式转换（reasoning/content/tool_calls/usage/finish）+ **截断流冲刷**（stop_reason=length、usage 不丢）+ 非流式两种聚合 + 首帧错误拦截 + 错误体改写保留 `insufficient_balance`（§6.1）。
 - `internal/api/jethub/login_page_test.go`（6 个）+ `internal/api/jethub_login_page_public_test.go`（2 个）：公开登录页端点（二维码内容/404/状态生命周期/不泄露账号 id）+ **在开启密码保护的真实路由器下**断言 `/api/jethub/login-page` 未被鉴权拦截（404 来自 handler）而 `/api/jethub/providers` 仍 401，静态页与 `raccoon-qr.js` 公开可取（§3.4）。
 - `internal/jethub/inference_url_test.go`（5 个）：**逐 provider 推理端点与参考实现比对**（buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax/codearts/loomy 九条，改产品表即红）+ `Customize` 返回值一致 + qoder 族必须不声明 InferURL + **codearts 签名看到上游路径且原请求未被污染** + `RegisterProduct` 的发布/撤销语义（§6.2）。
+- `internal/jethub/bridge_keys_test.go`（3 个）：**用真实凭据结构体**逐 provider 断言 `accessTokenOf` 非空（缺陷 15 的直接回归 —— 通用假体凭据曾让这个缺陷逃过全部测试）+ codearts Key 取值优先级 + 未注册提取器的 provider 仍走通用 `access_token`。
+- `internal/api/jethub/register_test.go`：`modelDisplayParts` 形态表（12 条，含「裸 FREE ≠ 免费」「FREE (x0.5) 显示 x0.5」）+ **促销窗口**（窗口内/外/边界 × 两个时区表达，锁「与机器时区无关」）+ **qoder/qodercn 倍率逐条对账**（期望值取自 ref `qoder-product.ts`）+ trae 展示名（§6.3）。
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。

@@ -367,23 +367,54 @@ checkAsync('⑤ Use Proxy toggle right of +New Account: project toggle-switch, P
   assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'error' && m.indexOf('boom') !== -1), 'failure toast shown');
 });
 
-check('⑤ frontend jethub paths match the backend route table (404 regression guard)', () => {
-  // Regression for the reported "Failed: HTTP 404 (non-JSON body)": the toggle
-  // called /jethub/{provider}/proxy while the route is registered under
-  // /jethub/providers/{provider}/proxy (chi then answers 404 text/plain).
+check('⑤ frontend jethub paths match the backend route table (404 regression guard, ALL methods)', () => {
+  // Regression for the reported "Failed: HTTP 404 (non-JSON body)" family. Three
+  // real defects came from this one class, all of them *plain-text* chi 404s:
+  //   - PUT /jethub/{provider}/proxy            (needs the providers/ segment)
+  //   - POST /jethub/{provider}/accounts        (SMS placeholder creation; only
+  //     loomy uses the sms login mode, which is why only it reported the error)
+  //   - POST /jethub/{provider}/ratelimits/*    (retest/reset buttons)
+  // The old guard only looked at apiPut literals, so the apiPost ones slipped
+  // through — now EVERY api<Method>('/jethub/...') call is cross-checked against
+  // the chi route declarations parsed out of internal/api/jethub/*.go.
   const api = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
-  const routesGo = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub/register.go'), 'utf8');
-  // Every `apiPut('/jethub/<seg>/...')` the UI issues must have a matching
-  // chi route declaration (same literal path shape).
-  const putPaths = [...api.matchAll(/apiPut\('(\/jethub\/[^']+)'/g)].map((m) => m[1]);
-  assert.ok(putPaths.length > 0, 'jethub.js must issue PUT requests');
-  for (const p of putPaths) {
-    const shape = p.replace(/\$\{[^}]*\}/g, '{provider}').replace(/' \+[^']*$/, '');
-    assert.ok(shape.indexOf('/jethub/providers/') === 0 || shape.indexOf('/jethub/accounts/') === 0,
-      'PUT path must carry the providers/accounts segment: ' + p);
+  const dir = path.join(__dirname, '..', 'internal/api/jethub');
+  // Provider-specific route families are declared with LITERAL provider names
+  // (`r.Get("/cline/balance", …)`) while the UI builds them dynamically
+  // (`'/jethub/' + providerId + '/balance'`) — so a provider-name segment must
+  // canonicalise to `*` on both sides.
+  const managerGo = fs.readFileSync(path.join(__dirname, '..', 'internal/jethub/manager.go'), 'utf8');
+  const providers = new Set([...managerGo.matchAll(/\{ID: "([a-z]+)"/g)].map((m) => m[1]));
+  assert.ok(providers.size >= 10, 'expected the 11-provider table, got ' + [...providers].join(','));
+  const canon = (p) => p.split('/').map((seg) => {
+    if (seg === '{}' || /^\{.*\}$/.test(seg) || providers.has(seg)) return '*';
+    return seg;
+  }).join('/');
+  const backend = new Set();
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.go') || f.endsWith('_test.go')) continue;
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/r\.(Get|Post|Put|Patch|Delete)\("(\/[^"]*)"/g)) {
+      const p = m[2].startsWith('/jethub') ? m[2] : '/jethub' + m[2];
+      backend.add(m[1].toUpperCase() + ' ' + canon(p));
+    }
   }
-  assert.ok(routesGo.includes('r.Put("/providers/{provider}/proxy"'), 'backend proxy route registered under /providers/{provider}/proxy');
-  assert.ok(api.includes("apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/proxy'"), 'toggle must PUT /jethub/providers/{provider}/proxy');
+  assert.ok(backend.size > 20, 'expected a substantial jethub route table, got ' + backend.size);
+
+  // Normalise both concatenation forms: `'/a/' + encodeURIComponent(x) + '/b'`
+  // and the trailing `'/a/' + encodeURIComponent(x)` (no following literal).
+  const norm = api
+    .replace(/' \+ encodeURIComponent\([^)]*\) \+ '/g, '{}')
+    .replace(/' \+ encodeURIComponent\([^)]*\)/g, '{}');
+  const calls = [...norm.matchAll(/api(Get|Post|Put|Patch|Delete)\('(\/jethub\/[^')]*)/g)];
+  assert.ok(calls.length > 15, 'expected many jethub RPC calls, got ' + calls.length);
+  const misses = [];
+  for (const [, method, rawPath] of calls) {
+    const pathOnly = rawPath.split('?')[0].replace(/\/$/, '');
+    const key = method.toUpperCase() + ' ' + canon(pathOnly);
+    if (!backend.has(key)) misses.push(key);
+  }
+  assert.deepStrictEqual(misses, [], 'these UI calls have no matching backend route (plain-text 404): ' + misses.join(', '));
 });
 
 checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips + per-card retest/reset', async () => {
@@ -400,13 +431,13 @@ checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips 
   const creditCell = ctx.__registry['free-hub-credit-qoder-1'];
   assert.ok(creditCell && creditCell.innerHTML.indexOf('123.45') !== -1, 'per-account credits fetched and rendered');
   assert.ok(ctx.__calls.apiGet.some((p) => p.indexOf('/jethub/qoder/balance?accountId=qoder-1') === 0), 'balance RPC per account');
-  // retest endpoint shape (all accounts)
+  // retest endpoint shape (all accounts) — providers/ segment required
   await ctx.jethubRetest('qoder', '');
-  const retest = ctx.__calls.apiPost.find(([p]) => p === '/jethub/qoder/ratelimits/retest');
+  const retest = ctx.__calls.apiPost.find(([p]) => p === '/jethub/providers/qoder/ratelimits/retest');
   assert.ok(retest && JSON.stringify(retest[1]) === JSON.stringify({ accountId: '' }), 'retest POST body');
   // reset endpoint shape (single account)
   await ctx.jethubReset('qoder', 'qoder-1');
-  const reset = ctx.__calls.apiPost.find(([p]) => p === '/jethub/qoder/ratelimits/reset');
+  const reset = ctx.__calls.apiPost.find(([p]) => p === '/jethub/providers/qoder/ratelimits/reset');
   assert.ok(reset && JSON.stringify(reset[1]) === JSON.stringify({ accountId: 'qoder-1' }), 'reset POST body');
 });
 

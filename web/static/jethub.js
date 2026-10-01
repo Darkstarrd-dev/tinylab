@@ -437,7 +437,7 @@ async function jethubRetest(providerId, accountId) {
   }
   __jethubSetNotice({ tone: 'info', text: t('freeHubRetestRunning') });
   try {
-    var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/ratelimits/retest', { accountId: accountId || '' });
+    var res = await apiPost('/jethub/providers/' + encodeURIComponent(providerId) + '/ratelimits/retest', { accountId: accountId || '' });
     var details = [];
     (res.accounts || []).forEach(function(a) {
       (a.stillLimited || []).forEach(function(m) {
@@ -459,7 +459,7 @@ async function jethubRetest(providerId, accountId) {
 async function jethubReset(providerId, accountId) {
   __jethubSetNotice({ tone: 'info', text: t('freeHubResetRunning') });
   try {
-    var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/ratelimits/reset', { accountId: accountId || '' });
+    var res = await apiPost('/jethub/providers/' + encodeURIComponent(providerId) + '/ratelimits/reset', { accountId: accountId || '' });
     __jethubSetNotice({
       tone: 'ok',
       text: res.clearedCount > 0 ? t('freeHubResetDone', [String(res.clearedCount)]) : t('freeHubResetNone'),
@@ -525,7 +525,11 @@ async function jethubAddAccount(providerId) {
     // SMS 流程没有服务端 login session：先创建占位账号，验证码提交时才能
     // 绑定凭据。用户取消时删除占位（不留无凭据的死账号）。
     try {
-      var created = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/accounts', {});
+      // ⚠️ 路由族形状：账号端点挂在 `/jethub/providers/{provider}/accounts`
+      // （聚合路由族统一带 `providers/` 段，见 docs/jethub-architecture.md §3.2
+      // 缺陷 6）。loomy 是唯一 sms 登录模式，故此前只有它踩到这个 404（chi 回
+      // 纯文本 → `Failed: HTTP 404 (non-JSON body)`）。
+      var created = await apiPost('/jethub/providers/' + encodeURIComponent(providerId) + '/accounts', {});
       if (created.error) { toast(t('failed', [created.error]), 'error'); return; }
       __jethubSmsModal(providerId, created.accountId);
     } catch (e) {
