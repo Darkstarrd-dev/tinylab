@@ -99,4 +99,3 @@ func (rt *Router) registerUtilityRoutes(
 		}
 	})
 }
-

@@ -87,7 +87,7 @@ func (m *Manager) LoomyCreditBalance(ctx context.Context, accountID string) (*Cr
 		total = permanent + daily
 	}
 	return &CreditBalance{
-		Total:    total,
+		Total: total,
 		Packages: []CreditPackage{
 			{Name: "永久积分", Unit: "积分", Remaining: permanent, Total: permanent, Active: true},
 			{Name: "每日赠送", Unit: "积分", Remaining: daily, Total: daily, Active: true},
@@ -135,7 +135,6 @@ func (m *Manager) ClaimLoomyDaily(ctx context.Context, accountID string) (*Claim
 // their own classification. (Currently unused; kept for the onboarding
 // extension path.)
 
-
 // --- 新手任务（一次性，独立于每日签到） ---
 
 // loomyOnboardingTasks is the 8-task table (1:1 from the client
@@ -145,14 +144,14 @@ var loomyOnboardingTasks = map[string]struct {
 	Title  string
 	Points float64
 }{
-	"first_message":   {"发送你的第一条消息", 500},
-	"pick_skill":      {"试试选择一个技能", 1000},
-	"generate_ppt":    {"生成第一份 PPT", 1500},
-	"set_schedule":    {"设置定时任务", 1000},
-	"install_skill":   {"在技能广场安装一个技能", 1500},
+	"first_message":    {"发送你的第一条消息", 500},
+	"pick_skill":       {"试试选择一个技能", 1000},
+	"generate_ppt":     {"生成第一份 PPT", 1500},
+	"set_schedule":     {"设置定时任务", 1000},
+	"install_skill":    {"在技能广场安装一个技能", 1500},
 	"configure_remote": {"配置远程控制", 1000},
-	"create_soul":     {"创建你的第一个搭子", 1500},
-	"share_soul":      {"把搭子分享给朋友", 2000},
+	"create_soul":      {"创建你的第一个搭子", 1500},
+	"share_soul":       {"把搭子分享给朋友", 2000},
 }
 
 // LoomyOnboardingStatus returns the 8-task completion state + earned total.

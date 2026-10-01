@@ -216,7 +216,7 @@ func minimaxPanelToStatus(days *[]minimaxSigninDay) *MinimaxCheckinStatus {
 		target = claimable
 	}
 	return &MinimaxCheckinStatus{
-		Active: true,
+		Active:         true,
 		TodayCheckedIn: claimedToday,
 		StreakDays:     minimaxStreak(days),
 		DailyCredit:    targetPoints(target), // ⚠️ points 总数，不相加 bonus_points
@@ -327,7 +327,7 @@ func (m *Manager) MinimaxBalance(ctx context.Context, accountID string) (*Credit
 }
 
 // looseAmount parses money amounts tolerating string forms ("800.00").
-// ⚠️ Empty string → nil (Number('') = 0 would misread empty as zero).
+// ⚠️ Empty string → nil (Number(”) = 0 would misread empty as zero).
 func looseAmount(v any) *float64 {
 	switch t := v.(type) {
 	case float64:

@@ -135,8 +135,10 @@ func TestPollRaccoonQrLoginAnomalyDegradesToPending(t *testing.T) {
 	cases := []http.HandlerFunc{
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) },           // 网络/网关错误
 		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"code":1001,"message":"x"}`)) }, // 业务码非 0
-		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"code":0,"data":{"status":"success"}}`)) }, // 无 token 的 success
-		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{invalid`)) },                    // 非 JSON
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"code":0,"data":{"status":"success"}}`))
+		}, // 无 token 的 success
+		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{invalid`)) },                             // 非 JSON
 		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"code":0,"data":{"status":"weird"}}`)) }, // 未知 status
 	}
 	for i, h := range cases {

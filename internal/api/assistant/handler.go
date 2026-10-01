@@ -473,5 +473,3 @@ var (
 	petTriggerHook atomic.Value // func(string)(string,bool)
 	petStateHook   atomic.Value // func()string
 )
-
-

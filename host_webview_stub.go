@@ -13,8 +13,8 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} { return nil }
 
 // i18n + assistant toggle stubs (webview tag absent — no webview binding, menu i18n is a no-op).
 func setTrayConsoleItem(m interface{}) {}
-func setTrayQuitItem(m interface{}) {}
+func setTrayQuitItem(m interface{})    {}
 
 func applyTrayLang(lang string) {}
-func currentTrayLang() string { return "en" }
-func setTrayLang(lang string) {}
+func currentTrayLang() string   { return "en" }
+func setTrayLang(lang string)   {}

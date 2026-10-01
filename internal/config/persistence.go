@@ -172,9 +172,11 @@ func loadAfterTmpApply(path string) (*Config, bool) {
 // "assistant.spritesheetFps" / "assistant.spritesheetPath" were replaced in
 // 624cd3b by assistant.actions[] (multi-action spritesheet editor); old
 // config.yaml files carrying flat keys such as
-//   assistant:
-//     spritesheetPath: C:\x\y.png
-//     spritesheetFps: 8
+//
+//	assistant:
+//	  spritesheetPath: C:\x\y.png
+//	  spritesheetFps: 8
+//
 // previously crashed startup with "field spritesheetFps not found". They
 // should auto-migrate (strip legacy keys) like the other deprecated paths.
 var deprecatedFieldPaths = [][]string{

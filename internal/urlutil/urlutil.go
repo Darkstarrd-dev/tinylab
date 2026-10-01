@@ -203,4 +203,3 @@ func BuildGoogleGenerateContentURL(baseURL, model string, isStream bool) string 
 	// No version segment found -> inject "/v1beta".
 	return normalized + "/v1beta/models/" + model + action
 }
-

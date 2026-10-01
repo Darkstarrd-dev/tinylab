@@ -39,11 +39,11 @@ type QoderRuntimeAuthFields struct {
 
 // QoderWasmUserInfo feeds the WASM context.
 type QoderWasmUserInfo struct {
-	UID               string
+	UID                string
 	SecurityOauthToken string
-	OrganizationID    string
-	OrganizationTags  []string
-	DataPolicyAgreed  bool
+	OrganizationID     string
+	OrganizationTags   []string
+	DataPolicyAgreed   bool
 }
 
 // JS-object stand-ins. The wasm never inspects fields — it only asks type
@@ -115,9 +115,9 @@ func qoderWasmAsInt(v any) int {
 
 // qoderGlue holds the instantiated module state.
 type qoderGlue struct {
-	mu       sync.Mutex
-	instance api.Module
-	objects  []any // JS-object heap (1024 undefineds + 4 sentinels)
+	mu        sync.Mutex
+	instance  api.Module
+	objects   []any // JS-object heap (1024 undefineds + 4 sentinels)
 	firstFree int
 }
 
@@ -162,7 +162,7 @@ func qoderRuntimeAuthPayload(user QoderWasmUserInfo) string {
 		tags = []string{}
 	}
 	b, _ := json.Marshal(map[string]any{
-		"uid":                 user.UID,
+		"uid":                  user.UID,
 		"security_oauth_token": user.SecurityOauthToken,
 		"organization_id":      user.OrganizationID,
 		"organization_tags":    tags,
@@ -244,6 +244,7 @@ type qoderHostFunction struct {
 // getRandomValues layouts are preserved verbatim (TRAP 1):
 //   - d49329ff89a07af1(ptr, len) WRITES wasm memory;
 //   - c44a50d8cfdaebeb(objIdx, argIdx) CALLS the JS object.
+//
 // Swapping them Rust-panics `unreachable`.
 func qoderHostFunctions(g *qoderGlue) []qoderHostFunction {
 	return []qoderHostFunction{

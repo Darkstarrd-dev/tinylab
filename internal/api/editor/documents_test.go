@@ -453,4 +453,3 @@ func TestEditorSaveDocument_ValidationAndConflictClassification(t *testing.T) {
 		t.Fatalf("expected 409 conflict for asset with different content, got %d: %s", recConflict.Code, recConflict.Body.String())
 	}
 }
-

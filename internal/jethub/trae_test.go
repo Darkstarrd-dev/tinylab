@@ -70,7 +70,7 @@ func TestTransformToSOLOBodyKeepsToolMessages(t *testing.T) {
 			map[string]any{"role": "tool", "content": "out", "tool_call_id": "c1"},
 		},
 		"tools": []any{map[string]any{
-			"type": "function",
+			"type":     "function",
 			"function": map[string]any{"name": "bash", "parameters": map[string]any{"type": "object"}},
 		}},
 	}, "solo_work_lite")

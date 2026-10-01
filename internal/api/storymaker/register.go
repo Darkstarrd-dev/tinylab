@@ -234,7 +234,7 @@ func (h *Handler) getOutline(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) appendOutline(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		BookID string                  `json:"bookId"`
+		BookID string                   `json:"bookId"`
 		Nodes  []storymaker.OutlineNode `json:"nodes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -671,9 +671,9 @@ func (h *Handler) generateCardProfiles(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) generateCardsBatch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Model        string `json:"model"`
-		Type         string `json:"type"`
-		Profiles     []struct {
+		Model    string `json:"model"`
+		Type     string `json:"type"`
+		Profiles []struct {
 			Name  string `json:"name"`
 			Brief string `json:"brief"`
 		} `json:"profiles"`
@@ -773,10 +773,10 @@ func (h *Handler) generateCardImagePrompts(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) simulateCharacter(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Model             string                   `json:"model"`
-		Context           storymaker.AssembleInput `json:"context"`
-		CandidateCount    int                      `json:"candidateCount,omitempty"`
-		SystemPrompt      string                   `json:"systemPrompt,omitempty"`
+		Model          string                   `json:"model"`
+		Context        storymaker.AssembleInput `json:"context"`
+		CandidateCount int                      `json:"candidateCount,omitempty"`
+		SystemPrompt   string                   `json:"systemPrompt,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid json: "+err.Error())

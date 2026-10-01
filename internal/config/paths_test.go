@@ -176,4 +176,3 @@ func TestResolveStoryDir(t *testing.T) {
 		})
 	}
 }
-

@@ -15,14 +15,14 @@ var reactionsJSON []byte
 
 // Reaction specifies one active perception -> action/notification rule.
 type Reaction struct {
-	When         string `json:"when"`                   // "task.done", "model.unavailable", "schedule", "todo.due"
-	Area         string `json:"area,omitempty"`         // "download", "imagebatch", "model", "todo", etc.
-	Status       string `json:"status,omitempty"`       // "completed", "failed"
+	When         string `json:"when"`             // "task.done", "model.unavailable", "schedule", "todo.due"
+	Area         string `json:"area,omitempty"`   // "download", "imagebatch", "model", "todo", etc.
+	Status       string `json:"status,omitempty"` // "completed", "failed"
 	ThresholdSec int    `json:"thresholdSec,omitempty"`
-	Then         string `json:"then"`                   // "notify", "dispatch:<tool>"
+	Then         string `json:"then"` // "notify", "dispatch:<tool>"
 	Msg          string `json:"msg,omitempty"`
 	Auto         bool   `json:"auto,omitempty"`
-	AutoSwitch   string `json:"autoSwitch,omitempty"`   // "suggest", "auto"
+	AutoSwitch   string `json:"autoSwitch,omitempty"` // "suggest", "auto"
 }
 
 // ReactionsContract contains declared reactions.

@@ -7,12 +7,12 @@
 // next/prev without adjacent preload and without streaming URLs.
 //
 // The harness:
-//  1) scans the real gallery source (gallery-video.js, gallery-io.js,
+//  1. scans the real gallery source (gallery-video.js, gallery-io.js,
 //     fs_handlers.go) for optimisation signals so later iterations that add
 //     preload / direct streaming URLs automatically score lower;
-//  2) executes a deterministic workload (creates 3 x 2 MiB fixtures, reads
+//  2. executes a deterministic workload (creates 3 x 2 MiB fixtures, reads
 //     and checksums them) so the bench is not compile-only;
-//  3) emits METRIC lines with a modelled p50/p95 derived from the signals +
+//  3. emits METRIC lines with a modelled p50/p95 derived from the signals +
 //     a fixed throughput model (deterministic, no wall-clock noise).
 //
 // Primary metric: gallery_video_switch_p50_ms (lower is better).

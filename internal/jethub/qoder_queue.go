@@ -85,8 +85,9 @@ func isQueueBusinessCode(code any) bool {
 
 // ParseQueueError extracts queue info from a response body / error-frame
 // message. ⚠️ BOTH input shapes must be supported:
-//   1. outer envelope {"code":"10605","message":"{…}"} — HTTP 403 branch;
-//   2. inner message {"isQueued":true,…} — SSE frame data.message (NO code!).
+//  1. outer envelope {"code":"10605","message":"{…}"} — HTTP 403 branch;
+//  2. inner message {"isQueued":true,…} — SSE frame data.message (NO code!).
+//
 // Requiring the code would silently disable shape 2 (the first fix's
 // regression — the sleep probe showed 0 waits). Judgement: code hit OR
 // queue-marker fields present. ⚠️ isQueued===true must NOT be required:

@@ -117,14 +117,14 @@ func main() {
 	}
 	a, drift := contract.BuildAssistant(routeSet, true /* model routing wired */)
 
-// --- Dimension 4: reply correctness (behavioral Classify + navigation wiring) ---
-// A correct reply is correct tool classification AND a working "jump to page"
-// action — navigateToRoute must call the app router (navigateTo), and
-// resolveNavigationPage must return valid app page ids (not no-op hashes).
-behavioural, correctRows := scoreCorrectness(a, routeSet)
-navWired, navRows := scoreNavigationWired()
-correctness := (behavioural*float64(len(correctnessScenarios)) + navWired*float64(len(navRows))) /
-	float64(len(correctnessScenarios)+len(navRows))
+	// --- Dimension 4: reply correctness (behavioral Classify + navigation wiring) ---
+	// A correct reply is correct tool classification AND a working "jump to page"
+	// action — navigateToRoute must call the app router (navigateTo), and
+	// resolveNavigationPage must return valid app page ids (not no-op hashes).
+	behavioural, correctRows := scoreCorrectness(a, routeSet)
+	navWired, navRows := scoreNavigationWired()
+	correctness := (behavioural*float64(len(correctnessScenarios)) + navWired*float64(len(navRows))) /
+		float64(len(correctnessScenarios)+len(navRows))
 
 	// --- Dimensions 1,2,3,5: structural source scans ---
 	settings, settingsRows := scoreSettingsCoverage()
@@ -323,7 +323,6 @@ func containsAnyCI(hay string, needles []string) bool {
 	return false
 }
 
-
 // --- Dimension 1: Assistant settings entry (model, spritesheet, ...) --------
 
 func scoreSettingsCoverage() (float64, []feat) {
@@ -361,6 +360,7 @@ func scoreDockInteractivity() (float64, []feat) {
 	}
 	return dimensionScore(feats), feats
 }
+
 // --- Dimension 3: LLM-assisted dispatch (model classifier + fallback) ------
 
 func scoreLLMDispatch() (float64, []feat) {

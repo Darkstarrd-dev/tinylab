@@ -35,11 +35,11 @@ type ticketResponse struct {
 		ExpiresAtAlt  string `json:"expiresAt"`
 	} `json:"credential"`
 	Result *struct {
-		AccessKeyID   string `json:"accessKeyId"`
+		AccessKeyID     string `json:"accessKeyId"`
 		SecretAccessKey string `json:"secretAccessKey"`
-		SecurityToken string `json:"securityToken"`
-		Expiration    string `json:"expiration"`
-		ExpiresAt     string `json:"expiresAt"`
+		SecurityToken   string `json:"securityToken"`
+		Expiration      string `json:"expiration"`
+		ExpiresAt       string `json:"expiresAt"`
 	} `json:"result"`
 	DomainID string `json:"domain_id"`
 	UserID   string `json:"user_id"`

@@ -50,19 +50,19 @@ const (
 
 // BuddyProduct is one CodeBuddy-family product's differential config.
 type BuddyProduct struct {
-	ID               string // "buddy" | "workbuddy"
-	Platform         string
-	Endpoint         string
-	APIDomain        string
-	DisplayName      string
-	ProductCode      string
-	UserAgent        string
-	AttributionName  string
-	ClientVersion    string
-	CLIVersion       string
-	CredPrefix       string // credential ref prefix: BUDDY_ / WORKBUDDY_
-	AppendSession    bool
-	PluginVersion    string
+	ID              string // "buddy" | "workbuddy"
+	Platform        string
+	Endpoint        string
+	APIDomain       string
+	DisplayName     string
+	ProductCode     string
+	UserAgent       string
+	AttributionName string
+	ClientVersion   string
+	CLIVersion      string
+	CredPrefix      string // credential ref prefix: BUDDY_ / WORKBUDDY_
+	AppendSession   bool
+	PluginVersion   string
 	// UA rules by model family (international version splits CN/Intl models).
 	UAByModelFamily []buddyUARule
 }
@@ -153,8 +153,8 @@ func buddyTokenExpiryMs(cred *BuddyCredential) int64 {
 
 // jwtExpiresAtMs / jwtIssuedAtMs / jwtNickname / jwtSubject read claims from
 // an access token without verification (display + scheduling only).
-func jwtExpiresAtMs(token string) int64  { return jwtClaimMs(token, "exp") }
-func jwtIssuedAtMs(token string) int64   { return jwtClaimMs(token, "iat") }
+func jwtExpiresAtMs(token string) int64 { return jwtClaimMs(token, "exp") }
+func jwtIssuedAtMs(token string) int64  { return jwtClaimMs(token, "iat") }
 func jwtNickname(token string) string {
 	for _, key := range []string{"nickname", "preferred_username", "name"} {
 		if v := jwtClaimString(token, key); v != "" {

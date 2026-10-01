@@ -408,4 +408,3 @@ func TestRingBuffer_ByID(t *testing.T) {
 		t.Fatalf("expected to find req-2, got %+v (ok=%v)", got2, ok)
 	}
 }
-

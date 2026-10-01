@@ -62,12 +62,12 @@ func TestBuddyTokenExpiryMs(t *testing.T) {
 func TestParseBuddyTokenDataRelativeExpiresIn(t *testing.T) {
 	token := mustJWT(t, map[string]any{"exp": 2000000000.0, "iat": 1700000000.0})
 	data := ParseBuddyTokenData(map[string]any{
-		"accessToken":       token,
-		"refreshToken":      "rt-1",
-		"expiresIn":         3600.0, // relative seconds
-		"refreshExpiresIn":  7200.0,
-		"scope":             "profile\n offline_access", // control chars
-		"tokenType":         123.0,                      // number-typed fields tolerated
+		"accessToken":      token,
+		"refreshToken":     "rt-1",
+		"expiresIn":        3600.0, // relative seconds
+		"refreshExpiresIn": 7200.0,
+		"scope":            "profile\n offline_access", // control chars
+		"tokenType":        123.0,                      // number-typed fields tolerated
 	})
 	if token == "" {
 		t.Fatal("test token empty")

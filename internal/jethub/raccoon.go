@@ -21,13 +21,13 @@ import (
 // CFB phone transport encryption (public constant, not a security boundary),
 // `extra_body.thinking` as the ONLY working reasoning channel.
 const (
-	raccoonLLMPrefix      = "/api/web/llm/v2"
-	raccoonPointsPrefix   = "/api/web/points/v1"
-	raccoonDesktopPrefix  = "/api/web/desktop/v1"
-	raccoonChatPath       = raccoonLLMPrefix + "/chat/completions"
-	raccoonModelCatalog   = raccoonLLMPrefix + "/model_catalog"
-	raccoonBalancePath    = raccoonPointsPrefix + "/balance"
-	raccoonGrantReward    = raccoonDesktopPrefix + "/login/points/grant"
+	raccoonLLMPrefix     = "/api/web/llm/v2"
+	raccoonPointsPrefix  = "/api/web/points/v1"
+	raccoonDesktopPrefix = "/api/web/desktop/v1"
+	raccoonChatPath      = raccoonLLMPrefix + "/chat/completions"
+	raccoonModelCatalog  = raccoonLLMPrefix + "/model_catalog"
+	raccoonBalancePath   = raccoonPointsPrefix + "/balance"
+	raccoonGrantReward   = raccoonDesktopPrefix + "/login/points/grant"
 	// raccoonPhoneCipherSecret: 公开常量（客户端逆向所得，非安全边界）。
 	raccoonPhoneCipherSecret = "senseraccoon2023"
 	raccoonRequestTimeout    = 60 * time.Second
@@ -63,7 +63,7 @@ const (
 // RaccoonCredential mirrors ref raccoon.ts. access_token is the shared
 // identity field name (findAccountIdByCredential reads it for non-codearts).
 type RaccoonCredential struct {
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	// ExpiresAt: ms string derived from the JWT exp; the JWT fallback is
 	// REQUIRED (old/hand-imported credentials omit it — silently skipping
@@ -253,8 +253,8 @@ func credentialFromRaccoonEnvelope(env *raccoonEnvelope) (*RaccoonCredential, er
 		return nil, fmt.Errorf("raccoon: 登录响应缺少 access_token")
 	}
 	cred := &RaccoonCredential{
-		AccessToken:  access,
-		RefreshToken: jsonStringField(env.Data, "refresh_token"),
+		AccessToken:    access,
+		RefreshToken:   jsonStringField(env.Data, "refresh_token"),
 		OfficeIdentity: jsonStringField(env.Data, "office_identity"),
 	}
 	if expMs := jwtExpiresAtMs(access); expMs > 0 {

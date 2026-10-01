@@ -30,10 +30,10 @@ func setSnapBase(u string) { codeartsSnapBase = func() string { return u } }
 
 // CreditBalance is the provider-agnostic balance snapshot for the UI.
 type CreditBalance struct {
-	Total    float64          `json:"total"`
-	Packages []CreditPackage  `json:"packages"`
-	IsCredit bool             `json:"isCreditPackage"`
-	Detail   map[string]any   `json:"detail,omitempty"`
+	Total    float64         `json:"total"`
+	Packages []CreditPackage `json:"packages"`
+	IsCredit bool            `json:"isCreditPackage"`
+	Detail   map[string]any  `json:"detail,omitempty"`
 }
 
 // CreditPackage is one credit package entry.

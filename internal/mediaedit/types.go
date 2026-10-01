@@ -30,9 +30,9 @@ type Job struct {
 	OutputPath string      `json:"outputPath"` // set on completion
 	OutputName string      `json:"outputName"` // basename, set on completion
 	Overwrite  bool        `json:"overwrite"`
-	Error      string      `json:"error"`      // set on error
-	LogTail    string      `json:"logTail"`    // last ~16KB of ffmpeg stderr+progress
-	Command    string      `json:"command"`    // ffmpeg full command line
+	Error      string      `json:"error"`   // set on error
+	LogTail    string      `json:"logTail"` // last ~16KB of ffmpeg stderr+progress
+	Command    string      `json:"command"` // ffmpeg full command line
 	logBuf     *tailBuffer // unexported, live log buffer reference (not serialized)
 	StartedAt  time.Time   `json:"startedAt"`
 	FinishedAt time.Time   `json:"finishedAt"`

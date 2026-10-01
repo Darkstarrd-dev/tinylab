@@ -48,17 +48,17 @@ type minimaxConfig struct {
 
 // Signin day statuses / claim results / panel scenes (asar enums).
 const (
-	minimaxStatusActive     = 1
-	minimaxStatusClaimable  = 2
-	minimaxStatusClaimed    = 3
-	minimaxStatusDisabled   = 4
-	minimaxClaimClaimed     = 1
-	minimaxClaimAlready     = 2
-	minimaxSceneUnknown     = 0
-	minimaxSceneFirst       = 1
-	minimaxSceneActive      = 2
-	minimaxSceneCompleted   = 3
-	minimaxSceneBroken      = 4
+	minimaxStatusActive    = 1
+	minimaxStatusClaimable = 2
+	minimaxStatusClaimed   = 3
+	minimaxStatusDisabled  = 4
+	minimaxClaimClaimed    = 1
+	minimaxClaimAlready    = 2
+	minimaxSceneUnknown    = 0
+	minimaxSceneFirst      = 1
+	minimaxSceneActive     = 2
+	minimaxSceneCompleted  = 3
+	minimaxSceneBroken     = 4
 )
 
 // MinimaxCredential mirrors ref minimax.ts. ⚠️ access_token is NOT a JWT
@@ -77,7 +77,7 @@ type MinimaxCredential struct {
 }
 
 // MinimaxExpiresAtMs: numeric-only parsing (' 123 '/'123abc'/'1e12' are
-// ILLEGAL — Number('') silently → 0 and Number(' 123 ') → 123 both break the
+// ILLEGAL — Number(”) silently → 0 and Number(' 123 ') → 123 both break the
 // semantics); ≤1e12 = seconds → ms (a seconds value read as ms would be 1970
 // ⇒ permanently expired + pointless renewals); JWT fallback for future
 // JWT-issuing upstreams (currently never hits).
@@ -309,7 +309,7 @@ func (m *Manager) PollMinimaxDeviceToken(ctx context.Context, grant *minimaxDevi
 		case <-timeAfter(time.Duration(intervalMs) * time.Millisecond):
 		}
 		payload, status, err := m.minimaxTokenPOST(ctx, map[string]string{
-			"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
 			"device_code": grant.DeviceCode, "client_id": minimaxProduct.ClientID,
 			"code_verifier": grant.CodeVerifier,
 		})

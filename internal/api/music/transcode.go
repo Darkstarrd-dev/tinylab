@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	maxTranscodeOutput      = 300 << 20        // 300 MiB output cap
-	maxTranscodeDuration    = 5 * time.Minute  // per-transcode deadline
+	maxTranscodeOutput      = 300 << 20       // 300 MiB output cap
+	maxTranscodeDuration    = 5 * time.Minute // per-transcode deadline
 	maxTranscodeConcurrency = 2
 )
 

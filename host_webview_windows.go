@@ -123,7 +123,7 @@ var trayConsoleItem *systray.MenuItem
 var trayQuitItem *systray.MenuItem
 
 func setTrayConsoleItem(m *systray.MenuItem) { trayConsoleItem = m; applyTrayLang(currentTrayLang()) }
-func setTrayQuitItem(m *systray.MenuItem) { trayQuitItem = m; applyTrayLang(currentTrayLang()) }
+func setTrayQuitItem(m *systray.MenuItem)    { trayQuitItem = m; applyTrayLang(currentTrayLang()) }
 
 // Helpers restored (no tray button, but still needed for settings toggle callbacks).
 func terminateAllPetWindows() {
@@ -706,11 +706,12 @@ var (
 	petWndOnce sync.Once
 	// petMu guards petWindows; wndProc (any window's thread) and shutdown
 	// (systray thread) both touch it.
-	petMu      sync.Mutex
-	petWindows = map[uintptr]*petWindow{}
+	petMu       sync.Mutex
+	petWindows  = map[uintptr]*petWindow{}
 	petCreateMu sync.Mutex
 	petEnvOnce  sync.Once
 )
+
 type petWindow struct {
 	hctx     *app.HostContext
 	hwnd     uintptr
@@ -1054,5 +1055,3 @@ type tagMONITORINFO struct {
 	rcWork    windows.Rect
 	dwFlags   uint32
 }
-
-

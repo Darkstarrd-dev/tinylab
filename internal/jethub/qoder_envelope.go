@@ -47,10 +47,10 @@ func qoderEnvelopeInnerText(payload string) (string, bool) {
 // stream (line-wise transform; non-data lines like `event: error` pass
 // through for diagnostics; `[DONE]` passes through).
 type qoderEnvelopeReader struct {
-	src    io.Reader
-	in     []byte // unprocessed input (may start with peeked bytes)
-	out    []byte // processed output pending delivery
-	eof    bool
+	src     io.Reader
+	in      []byte // unprocessed input (may start with peeked bytes)
+	out     []byte // processed output pending delivery
+	eof     bool
 	flushed bool
 }
 

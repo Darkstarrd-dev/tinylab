@@ -17,11 +17,11 @@ import (
 // qoder-product.ts. Distinctive: PKCE device-code polling (NO local port),
 // renewal body needs machine_id, encrypted inference via embedded WASM.
 const (
-	qoderDeviceSelectPath = "/device/selectAccounts" // authBase
-	qoderPollPath         = "/api/v1/deviceToken/poll" // openApiBase
-	qoderRefreshPath      = "/api/v1/deviceToken/refresh" // openApiBase
-	qoderUserinfoPath     = "/api/v1/userinfo" // openApiBase
-	qoderPublicChatPath   = "/model/v1/chat/completions" // inferBase (公开端点)
+	qoderDeviceSelectPath  = "/device/selectAccounts"                             // authBase
+	qoderPollPath          = "/api/v1/deviceToken/poll"                           // openApiBase
+	qoderRefreshPath       = "/api/v1/deviceToken/refresh"                        // openApiBase
+	qoderUserinfoPath      = "/api/v1/userinfo"                                   // openApiBase
+	qoderPublicChatPath    = "/model/v1/chat/completions"                         // inferBase (公开端点)
 	qoderEncryptedChatPath = "/algo/api/v2/service/pro/sse/agent_chat_generation" // encryptedInferBase
 
 	qoderLoginTimeout    = 5 * timeMinute
@@ -54,15 +54,15 @@ func randIntn(n int) int {
 
 // qoderProductConfig is one Qoder product's differential config.
 type qoderProductConfig struct {
-	ID                string
-	DisplayName       string
-	AuthBase          string
-	OpenAPIBase       string
-	InferBase         string
+	ID                 string
+	DisplayName        string
+	AuthBase           string
+	OpenAPIBase        string
+	InferBase          string
 	EncryptedInferBase string
-	ClientID          string
-	UserAgentPrefix   string
-	SashClientType    string
+	ClientID           string
+	UserAgentPrefix    string
+	SashClientType     string
 }
 
 // qoderProducts: two products, same protocol family (shared implementation —
@@ -73,7 +73,7 @@ var qoderProducts = map[string]*qoderProductConfig{
 		AuthBase: "https://qoder.com", OpenAPIBase: "https://openapi.qoder.sh",
 		// ⚠️ inferBase ≠ encryptedInferBase hosts! (api2-v2 vs api2 — mixing 404s.)
 		InferBase: "https://api2-v2.qoder.sh", EncryptedInferBase: "https://api2.qoder.sh",
-		ClientID: "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb", // = J_a (prod; G_a is test-only)
+		ClientID:        "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb", // = J_a (prod; G_a is test-only)
 		UserAgentPrefix: "qoder", SashClientType: "10",
 	},
 	"qodercn": {
@@ -82,7 +82,7 @@ var qoderProducts = map[string]*qoderProductConfig{
 		// ⚠️ CN has NO public OpenAI endpoint (503s) — inferBase is a
 		// dead-config marker equal to encryptedInferBase; never request it.
 		InferBase: "https://gateway.qoder.com.cn", EncryptedInferBase: "https://gateway.qoder.com.cn",
-		ClientID: "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa", // CN asar Vpe.authClientIds.prod
+		ClientID:        "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa", // CN asar Vpe.authClientIds.prod
 		UserAgentPrefix: "qoder", SashClientType: "10",
 	},
 }

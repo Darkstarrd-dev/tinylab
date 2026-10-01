@@ -125,10 +125,10 @@ var sessions sync.Map // map[string]*Session
 
 // P1-03c: bounds to prevent unbounded growth.
 const (
-	MaxSessions      = 50
-	MaxSessionBytes  = 50 << 20 // ~50 MiB aggregate RawText+Cleaned estimate
-	SessionTTL       = 2 * time.Hour
-	SweepInterval    = 15 * time.Minute
+	MaxSessions     = 50
+	MaxSessionBytes = 50 << 20 // ~50 MiB aggregate RawText+Cleaned estimate
+	SessionTTL      = 2 * time.Hour
+	SweepInterval   = 15 * time.Minute
 )
 
 var sweepOnce sync.Once

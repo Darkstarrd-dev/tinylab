@@ -107,15 +107,15 @@ func buildQoderInferPayload(ask *qoderInferAsk) map[string]any {
 	}
 
 	payload := map[string]any{
-		"request_id":       ask.RequestID,
-		"request_set_id":   ask.RequestID,
-		"chat_record_id":   ask.RequestID,
-		"session_id":       ask.SessionID,
-		"stream":           true,
-		"chat_task":        "FREE_INPUT",
+		"request_id":     ask.RequestID,
+		"request_set_id": ask.RequestID,
+		"chat_record_id": ask.RequestID,
+		"session_id":     ask.SessionID,
+		"stream":         true,
+		"chat_task":      "FREE_INPUT",
 		"chat_context": map[string]any{
-			"text":       text,
-			"features":   []any{},
+			"text":     text,
+			"features": []any{},
 			"extra": map[string]any{
 				"context":         []any{},
 				"modelConfig":     map[string]any{"key": ask.ModelKey, "is_reasoning": isReasoning},
@@ -264,7 +264,7 @@ func qoderSanitizeMessage(msg map[string]any) qoderInferMessage {
 }
 
 // qoderContentText extracts the text of a content value: string → itself;
-// multimodal array → the text parts joined '' (image parts contribute
+// multimodal array → the text parts joined ” (image parts contribute
 // nothing but stay in the message content).
 func qoderContentText(content any) string {
 	switch v := content.(type) {
@@ -345,12 +345,12 @@ var qoderModelMetas = map[string]map[string]qoderModelMeta{
 		"q37fmodel":     {Ctx: 1_000_000, Reasoning: true, Vl: true},
 		"dmodel":        {Ctx: 1_000_000, Reasoning: true, Vl: true},
 		// ⚠️ CN 的 is_reasoning 为 false（国际版为 true）。
-		"dfmodel":   {Ctx: 1_000_000, Reasoning: false, Vl: true},
-		"gmodel":    {Ctx: 1_000_000, Reasoning: true, Vl: true},
-		"gfmodel":   {Ctx: 1_000_000, Reasoning: true, Vl: true},
-		"gm51model": {Ctx: 1_000_000, Reasoning: true, Vl: true},
+		"dfmodel":       {Ctx: 1_000_000, Reasoning: false, Vl: true},
+		"gmodel":        {Ctx: 1_000_000, Reasoning: true, Vl: true},
+		"gfmodel":       {Ctx: 1_000_000, Reasoning: true, Vl: true},
+		"gm51model":     {Ctx: 1_000_000, Reasoning: true, Vl: true},
 		"kmodel_latest": {Ctx: 1_000_000, Reasoning: false, Vl: true},
-		"kmodel":    {Ctx: 1_000_000, Reasoning: true, Vl: true},
+		"kmodel":        {Ctx: 1_000_000, Reasoning: true, Vl: true},
 		// ⚠️ CN mmodel 是 MiniMax-M2.7（intl 是 M3）且 is_vl=false。
 		"mmodel": {Ctx: 200_000, Reasoning: false, Vl: false},
 	},

@@ -37,6 +37,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/model-presets", h.getModelPresets)
 	r.Put("/model-presets", h.putModelPresets)
 }
+
 // Events returns the EventBroadcaster for serving SSE.
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	h.events.ServeSSE(w, r)

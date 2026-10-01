@@ -69,14 +69,14 @@ func ProviderExists(id string) bool {
 // compatibility): id/provider/nickname/enabled/credentialRef/createdAt plus the
 // runtime display fields (expiresAt/refreshable/modelRateLimits).
 type accountEntry struct {
-	ID            string            `json:"id"`
-	Provider      string            `json:"provider"`
-	Nickname      string            `json:"nickname"`
-	Enabled       bool              `json:"enabled"`
-	CredentialRef string            `json:"credentialRef"`
-	CreatedAt     int64             `json:"createdAt"`
-	ExpiresAt     int64             `json:"expiresAt,omitempty"`
-	Refreshable   bool              `json:"refreshable"`
+	ID            string `json:"id"`
+	Provider      string `json:"provider"`
+	Nickname      string `json:"nickname"`
+	Enabled       bool   `json:"enabled"`
+	CredentialRef string `json:"credentialRef"`
+	CreatedAt     int64  `json:"createdAt"`
+	ExpiresAt     int64  `json:"expiresAt,omitempty"`
+	Refreshable   bool   `json:"refreshable"`
 	// ModelRateLimits maps model id → reset timestamp (ms since epoch).
 	// 0/absent = not rate limited.
 	ModelRateLimits map[string]int64 `json:"modelRateLimits,omitempty"`
@@ -87,7 +87,7 @@ type accountEntry struct {
 // mirrors the original JetHubConfig semantics (§1.5) so backup import/export
 // stays compatible.
 type accountsFile struct {
-	Accounts []accountEntry `json:"accounts"`
+	Accounts       []accountEntry             `json:"accounts"`
 	DisabledModels map[string]map[string]bool `json:"disabledModels,omitempty"`
 	// Prefixes maps provider id → user-defined call prefix ("" = not bridged).
 	Prefixes map[string]string `json:"prefixes,omitempty"`
@@ -103,16 +103,16 @@ type accountsFile struct {
 
 // Account is the public view of one account entry.
 type Account struct {
-	ID            string            `json:"id"`
-	Provider      string            `json:"provider"`
-	Nickname      string            `json:"nickname"`
-	Enabled       bool              `json:"enabled"`
-	CredentialRef string            `json:"credentialRef"`
-	CreatedAt     int64             `json:"createdAt"`
-	ExpiresAt     int64             `json:"expiresAt,omitempty"`
-	Refreshable   bool              `json:"refreshable"`
+	ID              string           `json:"id"`
+	Provider        string           `json:"provider"`
+	Nickname        string           `json:"nickname"`
+	Enabled         bool             `json:"enabled"`
+	CredentialRef   string           `json:"credentialRef"`
+	CreatedAt       int64            `json:"createdAt"`
+	ExpiresAt       int64            `json:"expiresAt,omitempty"`
+	Refreshable     bool             `json:"refreshable"`
 	ModelRateLimits map[string]int64 `json:"modelRateLimits,omitempty"`
-	HasCredential bool              `json:"hasCredential"`
+	HasCredential   bool             `json:"hasCredential"`
 }
 
 // Manager owns the jethub account/credential storage and the provider bridge.
@@ -137,11 +137,11 @@ type Manager struct {
 	// augmenters holds per-provider RequestAugmenter implementations (P2/P3
 	// adapters register here; Augment dispatches by provider).
 	augmenters map[string]RequestAugmenterFunc
-// inferURLs holds per-provider FULL inference endpoints declared by the
-// product table (Product.InferURL). Customize returns them verbatim —
-// without this, `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` produces the
-// wrong path for every product whose BaseURL is a host root (the raccoon
-// 405 / minimax 404 defect family).
+	// inferURLs holds per-provider FULL inference endpoints declared by the
+	// product table (Product.InferURL). Customize returns them verbatim —
+	// without this, `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` produces the
+	// wrong path for every product whose BaseURL is a host root (the raccoon
+	// 405 / minimax 404 defect family).
 	inferURLs map[string]string
 	// onAccountCredentialed fires after a credential write so the app can
 	// re-sync bridged keys (wired to Bridge.SyncKeys).
@@ -182,9 +182,9 @@ type Logger interface {
 // that an older build encrypted with it.
 func NewManager(dir, legacyKey string, logger Logger) (*Manager, error) {
 	m := &Manager{
-		dir:       dir,
-		legacyKey: legacyKey,
-		logger:    logger,
+		dir:         dir,
+		legacyKey:   legacyKey,
+		logger:      logger,
 		credentials: map[string]map[string]json.RawMessage{},
 		augmenters:  map[string]RequestAugmenterFunc{},
 		accounts: accountsFile{

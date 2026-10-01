@@ -779,7 +779,7 @@ func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request
 		if strings.Contains(err.Error(), "too large") {
 			apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, err.Error())
 		} else {
-		apibase.WriteAPIError(w, http.StatusInternalServerError, "read archive: "+err.Error())
+			apibase.WriteAPIError(w, http.StatusInternalServerError, "read archive: "+err.Error())
 		}
 		return
 	}
@@ -831,8 +831,8 @@ func (h *Handler) galleryEditZipWriteback(w http.ResponseWriter, r *http.Request
 		if readErr != nil {
 			if archive.IsBudgetExceeded(readErr) {
 				apibase.WriteAPIError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("replacement %q exceeds entry budget %d: %v", key, perEntryCap, readErr))
-		return
-	}
+				return
+			}
 			apibase.WriteAPIError(w, http.StatusBadRequest, "read entry asset "+e.AssetID+": "+readErr.Error())
 			return
 		}

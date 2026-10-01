@@ -91,4 +91,3 @@ func (m *Manager) credentialForAccount(provider, keyID string) (*CodeArtsCredent
 	}
 	return &cred, nil
 }
-

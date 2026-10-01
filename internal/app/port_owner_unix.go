@@ -11,9 +11,9 @@ import (
 
 // PortOwner describes the process that owns a port.
 type PortOwner struct {
-	PID          int
-	Name         string // process name
-	Path         string // full executable path
+	PID       int
+	Name      string // process name
+	Path      string // full executable path
 	IsTinyLab bool   // name or path contains "tinylab" / "tr-pg"
 }
 

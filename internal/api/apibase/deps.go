@@ -33,7 +33,7 @@ import (
 // domains need. Each sub-package's Register function receives a *Deps, and the
 // parent internal/api package creates it from its own deps struct.
 type Deps struct {
-	cfgSaveMu sync.Mutex
+	cfgSaveMu    sync.Mutex
 	Reg          *registry.Registry
 	ConfigPath   string
 	Usage        *usage.RingBuffer

@@ -24,9 +24,9 @@ type RetestAccountResult struct {
 
 // RetestResult aggregates a retest/reset run.
 type RetestResult struct {
-	ClearedCount int                    `json:"clearedCount"`
-	Accounts     []RetestAccountResult  `json:"accounts,omitempty"`
-	Skipped      []string               `json:"skipped,omitempty"`
+	ClearedCount int                   `json:"clearedCount"`
+	Accounts     []RetestAccountResult `json:"accounts,omitempty"`
+	Skipped      []string              `json:"skipped,omitempty"`
 }
 
 // ResetRateLimits clears markers without any network traffic (accountID "" =

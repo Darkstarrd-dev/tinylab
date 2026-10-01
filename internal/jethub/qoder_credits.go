@@ -19,8 +19,8 @@ import (
 // Cosy-MachineToken/MachineType (either alone degrades to 1 VIEW_DETAILS
 // row, claimable:false — misreported as "今天已领").
 const (
-	qoderUsagePath     = "/sash/api/v2/me/usage"
-	qoderCampaignsPath = "/sash/api/v1/me/campaigns"
+	qoderUsagePath      = "/sash/api/v2/me/usage"
+	qoderCampaignsPath  = "/sash/api/v1/me/campaigns"
 	qoderCreditsTimeout = 15 * time.Second
 	// NotActivatedHint is the actionable message for accounts that have
 	// never opened daily-claim on the Qoder side (real user report: a fresh
@@ -81,10 +81,10 @@ func resolveQoderMachineIdentity() *qoderMachineIdentity {
 // qoderCreditsHeaders assembles the /sash/ header set.
 func qoderCreditsHeaders(cred *QoderCredential, p *qoderProductConfig) map[string]string {
 	h := map[string]string{
-		"Accept":           "application/json",
-		"Authorization":    "Bearer " + QoderBearerToken(cred),
-		"Cosy-ClientType":  p.SashClientType,
-		"User-Agent":       "Qoder",
+		"Accept":          "application/json",
+		"Authorization":   "Bearer " + QoderBearerToken(cred),
+		"Cosy-ClientType": p.SashClientType,
+		"User-Agent":      "Qoder",
 	}
 	if identity := resolveQoderMachineIdentity(); identity != nil {
 		h["Cosy-MachineToken"] = identity.Token

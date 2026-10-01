@@ -52,11 +52,11 @@ func (m *Manager) buddyTokenOnce(ctx context.Context, p *BuddyProduct, state str
 
 	accURL := p.Endpoint + buddyLoginAccPath + "?state=" + urlQueryEscape(state)
 	accHeaders := map[string]string{
-		buddyHeaderDomain:          firstNonEmpty(token.Domain, p.APIDomain),
-		"Authorization":            "Bearer " + token.AccessToken,
-		buddyHeaderNoUserID:        "true",
-		buddyHeaderNoEnterpriseID:  "true",
-		"User-Agent":               p.UserAgent,
+		buddyHeaderDomain:         firstNonEmpty(token.Domain, p.APIDomain),
+		"Authorization":           "Bearer " + token.AccessToken,
+		buddyHeaderNoUserID:       "true",
+		buddyHeaderNoEnterpriseID: "true",
+		"User-Agent":              p.UserAgent,
 	}
 	var account *BuddyAccountData
 	for account == nil {

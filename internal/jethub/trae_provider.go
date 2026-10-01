@@ -232,8 +232,8 @@ func traeCheckinHeaders(cred *TraeCredential, userID string) map[string]string {
 	seed := firstNonEmpty(userID, cred.UID)
 	return map[string]string{
 		"Content-Type": "application/json", "Accept": "*/*",
-		"User-Agent": "VSCode 1.107.1 (TRAE SOLO CN)",
-		"Authorization": "Cloud-IDE-JWT " + cred.AccessToken,
+		"User-Agent":         "VSCode 1.107.1 (TRAE SOLO CN)",
+		"Authorization":      "Cloud-IDE-JWT " + cred.AccessToken,
 		"X-Market-Client-Id": "VSCode 1.107.1",
 		"X-Market-User-Id":   traeSeededUUID(seed, "market"),
 		"X-User-Region":      "CN",

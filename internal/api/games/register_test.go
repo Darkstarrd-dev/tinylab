@@ -260,12 +260,12 @@ func TestStateIDValidation(t *testing.T) {
 
 func TestSeedGames(t *testing.T) {
 	src := fstest.MapFS{
-		"alpha/game.json":    &fstest.MapFile{Data: []byte(`{"id":"alpha","title":"Alpha","version":"1","entry":"main.js"}`)},
-		"alpha/main.js":      &fstest.MapFile{Data: []byte("console.log('alpha')")},
-		"alpha/audio/t.wav":  &fstest.MapFile{Data: []byte("WAV")},
-		"beta/game.json":     &fstest.MapFile{Data: []byte(`{"id":"beta","title":"Beta","version":"1","entry":"src/run.js"}`)},
-		"beta/src/run.js":    &fstest.MapFile{Data: []byte("console.log('beta')")},
-		"readme.txt":         &fstest.MapFile{Data: []byte("not a game")},
+		"alpha/game.json":   &fstest.MapFile{Data: []byte(`{"id":"alpha","title":"Alpha","version":"1","entry":"main.js"}`)},
+		"alpha/main.js":     &fstest.MapFile{Data: []byte("console.log('alpha')")},
+		"alpha/audio/t.wav": &fstest.MapFile{Data: []byte("WAV")},
+		"beta/game.json":    &fstest.MapFile{Data: []byte(`{"id":"beta","title":"Beta","version":"1","entry":"src/run.js"}`)},
+		"beta/src/run.js":   &fstest.MapFile{Data: []byte("console.log('beta')")},
+		"readme.txt":        &fstest.MapFile{Data: []byte("not a game")},
 	}
 	gamesDir := filepath.Join(t.TempDir(), "games")
 	if err := os.MkdirAll(gamesDir, 0o755); err != nil {

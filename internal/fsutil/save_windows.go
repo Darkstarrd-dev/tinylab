@@ -32,14 +32,14 @@ func SaveFilePickerAt(filter, initialDir, suggestedName string) (string, error) 
 	defer runtime.UnlockOSThread()
 
 	const (
-		vtblShow         = 3  // IModalWindow::Show
-		vtblSetFileTypes = 4  // IFileDialog::SetFileTypes
-		vtblSetOptions   = 9  // IFileDialog::SetOptions
-		vtblGetOptions   = 10 // IFileDialog::GetOptions
-		vtblSetFolder    = 12 // IFileDialog::SetFolder
-		vtblSetFileName  = 15 // IFileDialog::SetFileName
-		vtblGetResult    = 20 // IFileDialog::GetResult
-		vtblGetDisplayName = 5 // IShellItem::GetDisplayName
+		vtblShow           = 3  // IModalWindow::Show
+		vtblSetFileTypes   = 4  // IFileDialog::SetFileTypes
+		vtblSetOptions     = 9  // IFileDialog::SetOptions
+		vtblGetOptions     = 10 // IFileDialog::GetOptions
+		vtblSetFolder      = 12 // IFileDialog::SetFolder
+		vtblSetFileName    = 15 // IFileDialog::SetFileName
+		vtblGetResult      = 20 // IFileDialog::GetResult
+		vtblGetDisplayName = 5  // IShellItem::GetDisplayName
 	)
 
 	ole32 := windows.NewLazySystemDLL("ole32.dll")

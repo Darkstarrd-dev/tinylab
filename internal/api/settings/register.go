@@ -266,7 +266,11 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			var m1, m2 map[string]any
 			_ = json.Unmarshal(b1, &m1)
 			_ = json.Unmarshal(b2, &m2)
-			for k, v := range m2 { if v != nil { m1[k] = v } }
+			for k, v := range m2 {
+				if v != nil {
+					m1[k] = v
+				}
+			}
 			bb, _ := json.Marshal(m1)
 			_ = json.Unmarshal(bb, &merged)
 		}
@@ -639,23 +643,26 @@ func applyAssistantUpdates(cfg *config.Config, patch *assistantPatch) {
 		case petToggleCh <- ctxEnabled:
 		default:
 			// 队列满：以最新状态覆盖队尾
-			select { case <-petToggleCh: default: }
+			select {
+			case <-petToggleCh:
+			default:
+			}
 			petToggleCh <- ctxEnabled
-				}
+		}
 	}
 }
 
 var petToggleCh = make(chan bool, 4)
 
 func init() {
-		go func() {
+	go func() {
 		for enabled := range petToggleCh {
-			if (enabled) {
-				if (!petstate.ShowAll()) {
+			if enabled {
+				if !petstate.ShowAll() {
 					petstate.Open()
 				}
 			} else {
-				if (!petstate.HideAll()) {
+				if !petstate.HideAll() {
 					petstate.CloseAll()
 				}
 			}
@@ -670,22 +677,23 @@ func init() {
 				// 若队列在本次处理期间又进了新值，则以新值再做一次
 				select {
 				case v := <-petToggleCh:
-					if (v) {
-						if (!petstate.ShowAll()) {
-					petstate.Open()
-				}
-			} else {
-						if (!petstate.HideAll()) {
-					petstate.CloseAll()
-			}
-	}
+					if v {
+						if !petstate.ShowAll() {
+							petstate.Open()
+						}
+					} else {
+						if !petstate.HideAll() {
+							petstate.CloseAll()
+						}
+					}
 				default:
 				}
 				break
 			}
+		}
+	}()
 }
-		}()
-}
+
 // validateProxyConfig checks that the proxy host and port are well-formed when
 // proxying is enabled. Port must be a numeric value in [1,65535].
 func validateProxyConfig(p config.ProxyConfig) error {

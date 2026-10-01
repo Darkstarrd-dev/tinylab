@@ -82,7 +82,7 @@ func TestQoderWasmStringLayoutRoundTrip(t *testing.T) {
 	// 大载荷（2KB uid）经 write → call → read 的完整往返。
 	big := strings.Repeat("x", 2048)
 	fields, err := g.generateRuntimeAuthFields(
-		`{"uid":"`+big+`","security_oauth_token":"t"}`)
+		`{"uid":"` + big + `","security_oauth_token":"t"}`)
 	if err != nil {
 		t.Fatalf("big payload round trip: %v", err)
 	}

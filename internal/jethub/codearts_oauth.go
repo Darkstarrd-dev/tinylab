@@ -188,16 +188,16 @@ type CodeArtsCredential struct {
 	DpopPrivateJwk  *DpopPrivateJwk `json:"dpop_private_key_jwk,omitempty"`
 	// ModelRateLimits is framework-attached runtime metadata preserved across
 	// refreshes (same field as the plugin).
-	ModelRateLimits map[string]any  `json:"model_rate_limits,omitempty"`
+	ModelRateLimits map[string]any `json:"model_rate_limits,omitempty"`
 }
 
 // CodeArtsTokenResponse is /v1/oauth2/tokens response (subset used).
 type CodeArtsTokenResponse struct {
 	Credentials *struct {
-		AccessKeyID   string `json:"access_key_id"`
+		AccessKeyID     string `json:"access_key_id"`
 		SecretAccessKey string `json:"secret_access_key"`
-		SecurityToken string `json:"security_token"`
-		Expiration    string `json:"expiration"`
+		SecurityToken   string `json:"security_token"`
+		Expiration      string `json:"expiration"`
 	} `json:"credentials"`
 	RefreshToken string `json:"refresh_token"`
 	Error        string `json:"error"`

@@ -447,31 +447,31 @@ type AssistantPreset struct {
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Port               int              `yaml:"port" json:"port"`
-	ConsoleLogMaxLines int              `yaml:"consoleLogMaxLines" json:"consoleLogMaxLines"`
-	UsageRingSize      int              `yaml:"usageRingSize" json:"usageRingSize"`
-	Rotation           RotationConfig   `yaml:"rotation" json:"rotation"`
-	EnablePlayground   bool             `yaml:"enablePlayground" json:"enablePlayground"`
-	QuickSlotOnly      bool             `yaml:"quickSlotOnly" json:"quickSlotOnly"`
-	Providers          []Provider       `yaml:"providers" json:"providers"`
-	Combos             []Combo          `yaml:"combos" json:"combos"`
+	Port               int               `yaml:"port" json:"port"`
+	ConsoleLogMaxLines int               `yaml:"consoleLogMaxLines" json:"consoleLogMaxLines"`
+	UsageRingSize      int               `yaml:"usageRingSize" json:"usageRingSize"`
+	Rotation           RotationConfig    `yaml:"rotation" json:"rotation"`
+	EnablePlayground   bool              `yaml:"enablePlayground" json:"enablePlayground"`
+	QuickSlotOnly      bool              `yaml:"quickSlotOnly" json:"quickSlotOnly"`
+	Providers          []Provider        `yaml:"providers" json:"providers"`
+	Combos             []Combo           `yaml:"combos" json:"combos"`
 	QuickSlots         []QuickSlot       `yaml:"quickSlots" json:"quickSlots"`
 	QuickSlotPresets   []QuickSlotPreset `yaml:"quickSlotPresets,omitempty" json:"quickSlotPresets,omitempty"`
-	Security           SecurityConfig   `yaml:"security" json:"security"`
-	Proxy              ProxyConfig      `yaml:"proxy" json:"proxy"`
-	Server             ServerConfig     `yaml:"server" json:"server"`
-	Download           DownloadConfig   `yaml:"download" json:"download"`
-	Shortcuts          ShortcutsConfig  `yaml:"shortcuts,omitempty" json:"shortcuts,omitempty"`
-	ReviewPresets      []ReviewPreset   `yaml:"reviewPresets,omitempty" json:"reviewPresets,omitempty"`
-	AnySearch          AnySearchConfig  `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
-	Trace              TraceConfig      `yaml:"trace" json:"trace"`
-	ImageSaveDir       string           `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
-	DocDir             string           `yaml:"docDir,omitempty" json:"docDir,omitempty"`
-	GamesDir           string           `yaml:"gamesDir,omitempty" json:"gamesDir,omitempty"`
-	Theme              ThemeConfig      `yaml:"theme,omitempty" json:"theme,omitempty"`
-	TextReview         TextReviewConfig `yaml:"textReview,omitempty" json:"textReview,omitempty"`
-	Archive            ArchiveConfig    `yaml:"archive,omitempty" json:"archive,omitempty"`
-	Assistant          AssistantConfig  `yaml:"assistant,omitempty" json:"assistant,omitempty"`
+	Security           SecurityConfig    `yaml:"security" json:"security"`
+	Proxy              ProxyConfig       `yaml:"proxy" json:"proxy"`
+	Server             ServerConfig      `yaml:"server" json:"server"`
+	Download           DownloadConfig    `yaml:"download" json:"download"`
+	Shortcuts          ShortcutsConfig   `yaml:"shortcuts,omitempty" json:"shortcuts,omitempty"`
+	ReviewPresets      []ReviewPreset    `yaml:"reviewPresets,omitempty" json:"reviewPresets,omitempty"`
+	AnySearch          AnySearchConfig   `yaml:"anySearch,omitempty" json:"anySearch,omitempty"`
+	Trace              TraceConfig       `yaml:"trace" json:"trace"`
+	ImageSaveDir       string            `yaml:"imageSaveDir,omitempty" json:"imageSaveDir,omitempty"`
+	DocDir             string            `yaml:"docDir,omitempty" json:"docDir,omitempty"`
+	GamesDir           string            `yaml:"gamesDir,omitempty" json:"gamesDir,omitempty"`
+	Theme              ThemeConfig       `yaml:"theme,omitempty" json:"theme,omitempty"`
+	TextReview         TextReviewConfig  `yaml:"textReview,omitempty" json:"textReview,omitempty"`
+	Archive            ArchiveConfig     `yaml:"archive,omitempty" json:"archive,omitempty"`
+	Assistant          AssistantConfig   `yaml:"assistant,omitempty" json:"assistant,omitempty"`
 	// MusicDir is the default directory for downloaded music and playlists.
 	// Empty means {configDir}/Musics. Relative paths are resolved against
 	// configDir; absolute paths are used verbatim. Managed via

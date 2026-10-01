@@ -233,11 +233,11 @@ func tailString(s string, n int) string {
 
 // traeExchangeResult is the ExchangeToken Result section.
 type traeExchangeResult struct {
-	AccessToken        string
-	RefreshToken       string
-	TokenExpireAt      float64
-	TokenExpireDur     float64
-	RefreshExpireAt    float64
+	AccessToken     string
+	RefreshToken    string
+	TokenExpireAt   float64
+	TokenExpireDur  float64
+	RefreshExpireAt float64
 }
 
 // parseTraeExchangeResponse reads `{Result:{Token,TokenExpireAt,...}}`.
@@ -261,10 +261,10 @@ func parseTraeExchangeResponse(data map[string]any) *traeExchangeResult {
 		return nil
 	}
 	return &traeExchangeResult{
-		AccessToken:   access,
-		RefreshToken:  firstNonEmpty(traeJSONString(result, "RefreshToken"), traeJSONString(result, "refreshToken")),
-		TokenExpireAt: firstNonEmptyFloat(jsonNumberField(result, "TokenExpireAt"), jsonNumberField(result, "tokenExpireAt")),
-		TokenExpireDur: firstNonEmptyFloat(jsonNumberField(result, "TokenExpireDuration"), jsonNumberField(result, "tokenExpireDuration")),
+		AccessToken:     access,
+		RefreshToken:    firstNonEmpty(traeJSONString(result, "RefreshToken"), traeJSONString(result, "refreshToken")),
+		TokenExpireAt:   firstNonEmptyFloat(jsonNumberField(result, "TokenExpireAt"), jsonNumberField(result, "tokenExpireAt")),
+		TokenExpireDur:  firstNonEmptyFloat(jsonNumberField(result, "TokenExpireDuration"), jsonNumberField(result, "tokenExpireDuration")),
 		RefreshExpireAt: firstNonEmptyFloat(jsonNumberField(result, "RefreshExpireAt"), jsonNumberField(result, "refreshExpireAt")),
 	}
 }
@@ -296,8 +296,8 @@ func parseTraeUserInfoResponse(data map[string]any) *traeUserInfoResult {
 		return nil
 	}
 	return &traeUserInfoResult{
-		UID: uid,
-		ScreenName: firstNonEmpty(traeJSONString(result, "ScreenName"), traeJSONString(result, "screenName"), uid),
+		UID:          uid,
+		ScreenName:   firstNonEmpty(traeJSONString(result, "ScreenName"), traeJSONString(result, "screenName"), uid),
 		EnterpriseID: firstNonEmpty(traeJSONString(result, "EnterpriseID"), traeJSONString(result, "enterpriseId")),
 		// ⚠️ Field names are NonPlainTextMobile/NonPlainTextEmail — verified
 		// on four real accounts (2026-09-27).
@@ -328,14 +328,14 @@ func traeExpiryString(exchange *traeExchangeResult, nowMs int64) string {
 // the login session, never from a response).
 func buildTraeCredential(exchange *traeExchangeResult, userInfo *traeUserInfoResult, machineID, deviceID string, nowMs int64) *TraeCredential {
 	cred := &TraeCredential{
-		AccessToken: exchange.AccessToken,
+		AccessToken:  exchange.AccessToken,
 		RefreshToken: exchange.RefreshToken,
-		ExpiresAt:   traeExpiryString(exchange, nowMs),
-		UID:         userInfo.UID,
-		Nickname:    userInfo.ScreenName,
-		MachineID:   machineID,
-		DeviceID:    deviceID,
-		Enterprise:  userInfo.EnterpriseID,
+		ExpiresAt:    traeExpiryString(exchange, nowMs),
+		UID:          userInfo.UID,
+		Nickname:     userInfo.ScreenName,
+		MachineID:    machineID,
+		DeviceID:     deviceID,
+		Enterprise:   userInfo.EnterpriseID,
 	}
 	cred.Phone = userInfo.Phone
 	cred.Email = userInfo.Email

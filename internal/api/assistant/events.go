@@ -11,11 +11,11 @@ import (
 // Event represents an assistant proactive notification or progress event.
 type Event struct {
 	ID        string         `json:"id"`
-	Type      string         `json:"type"`                // "notify", "task_done", "model_alert", "todo_due", "dispatch_progress"
-	Area      string         `json:"area,omitempty"`      // "download", "imagebatch", "model", "todo", "trace", "system"
+	Type      string         `json:"type"`           // "notify", "task_done", "model_alert", "todo_due", "dispatch_progress"
+	Area      string         `json:"area,omitempty"` // "download", "imagebatch", "model", "todo", "trace", "system"
 	Title     string         `json:"title"`
 	Message   string         `json:"message"`
-	Level     string         `json:"level"`               // "info", "success", "warning", "error"
+	Level     string         `json:"level"` // "info", "success", "warning", "error"
 	Timestamp int64          `json:"timestamp"`
 	Data      map[string]any `json:"data,omitempty"`
 }

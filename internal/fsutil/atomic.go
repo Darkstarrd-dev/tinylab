@@ -57,7 +57,7 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 		}
 		// Direct write succeeded; random .tmp is kept for crash recovery.
 		// Also mirror to deterministic path+".tmp" so callers probing the
-			// canonical name (tests, legacy Load) find the recovery copy.
+		// canonical name (tests, legacy Load) find the recovery copy.
 		_ = os.WriteFile(path+".tmp", data, perm)
 		return nil
 	}

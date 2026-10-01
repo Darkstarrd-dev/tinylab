@@ -20,10 +20,10 @@ const (
 	clineRegisterPath           = "/api/v1/auth/register"             // WorkOS→Cline token
 	clineRefreshPath            = "/api/v1/auth/refresh"
 	clineChatPath               = "/api/v1/chat/completions"
-	clineModelsPath          = "/api/v1/models"
-	clineMePath              = "/api/v1/users/me"
-	clineBalancePathFmt      = "/api/v1/users/%s/balance"
-	clineHTTPTimeout         = 30 * time.Second
+	clineModelsPath             = "/api/v1/models"
+	clineMePath                 = "/api/v1/users/me"
+	clineBalancePathFmt         = "/api/v1/users/%s/balance"
+	clineHTTPTimeout            = 30 * time.Second
 	// Device-auth expires/interval are default fallbacks for the server's
 	// expires_in/interval fields (seconds in the response).
 	clineDeviceAuthExpires  = 300 * time.Second

@@ -177,4 +177,3 @@ func ResolveStoryDir(storyDir, configDir string) string {
 	}
 	return filepath.Join(configDir, storyDir)
 }
-

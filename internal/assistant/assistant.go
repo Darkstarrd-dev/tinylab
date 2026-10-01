@@ -60,7 +60,6 @@ func (r *ToolRegistry) Resolve(name string) (ToolSpec, bool) {
 // Count returns the number of registered tools.
 func (r *ToolRegistry) Count() int { return len(r.tools) }
 
-
 // classifyRule maps an intent to a set of tools the rule contributes when it
 // fires. A rule fires when the intent contains at least one of any (OR), all
 // of all (AND), and none of none (NOT); each empty clause is satisfied

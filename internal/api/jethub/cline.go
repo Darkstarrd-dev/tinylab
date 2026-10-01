@@ -50,10 +50,10 @@ func (h *Handler) clineLogin(w http.ResponseWriter, r *http.Request) {
 	// outlive this handler — r.Context() dies with the response).
 	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteClineLogin
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"accountId":    id,
-		"loginId":      loginID,
-		"loginUrl":     started.LoginURL,
-		"loginMode":    "url",
+		"accountId": id,
+		"loginId":   loginID,
+		"loginUrl":  started.LoginURL,
+		"loginMode": "url",
 	})
 }
 

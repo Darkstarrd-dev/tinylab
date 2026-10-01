@@ -55,6 +55,10 @@ tmp/
 
 # Runtime lock file (PID for single-instance lock)
 .tinylab.lock
+.tinyrouter.lock
+
+# Large binary kept locally only (user manual archive)
+docs/manuel.rar
 
 # Harness-local agent/skill artifacts (Oh My Pi / Claude skills), not project content
 .agents/

@@ -31,13 +31,13 @@ const (
 // takes the PRODUCT value first (credential.domain is a stale snapshot).
 func buddyCheckinHeaders(cred *BuddyCredential, p *BuddyProduct) map[string]string {
 	headers := map[string]string{
-		"Authorization":       "Bearer " + cred.AccessToken,
-		"Accept":              "application/json",
-		"Content-Type":        "application/json",
-		buddyHeaderDomain:     firstNonEmpty(p.APIDomain, cred.Domain),
-		buddyHeaderProduct:    buddyDeploymentType,
+		"Authorization":        "Bearer " + cred.AccessToken,
+		"Accept":               "application/json",
+		"Content-Type":         "application/json",
+		buddyHeaderDomain:      firstNonEmpty(p.APIDomain, cred.Domain),
+		buddyHeaderProduct:     buddyDeploymentType,
 		buddyHeaderProductCode: p.ProductCode,
-		"User-Agent":          p.UserAgent,
+		"User-Agent":           p.UserAgent,
 	}
 	if cred.UserID != "" {
 		headers["X-User-Id"] = cred.UserID

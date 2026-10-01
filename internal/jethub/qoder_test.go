@@ -72,10 +72,10 @@ func TestParseQueueErrorNonQueue(t *testing.T) {
 
 func TestQueueDelayMS(t *testing.T) {
 	cases := []struct {
-		name  string
-		info  *QueueInfo
-		want  int64
-		ok    bool
+		name string
+		info *QueueInfo
+		want int64
+		ok   bool
 	}{
 		{"seconds", &QueueInfo{RetryAfterSeconds: 2, HasDelay: false}, 2000, true},
 		{"ms priority", &QueueInfo{RetryAfterMs: 1500, RetryAfterSeconds: 30, HasDelay: true}, 1500, true},

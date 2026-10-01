@@ -64,10 +64,10 @@ type lobsteraiActivitySlot struct {
 // from "no activity available" which is an inactive outcome).
 func (m *Manager) fetchLobsteraiSlot(ctx context.Context, cred *LobsteraiCredential) (*lobsteraiActivitySlot, error) {
 	q := urlValues{
-		"placement":          lobsteraiSlotPlacement,
-		"clientVersion":      lobsteraiProduct.ClientVersion,
+		"placement":           lobsteraiSlotPlacement,
+		"clientVersion":       lobsteraiProduct.ClientVersion,
 		"containerApiVersion": lobsteraiSlotAPIVersion,
-		"platform":           lobsteraiSlotPlatform,
+		"platform":            lobsteraiSlotPlatform,
 	}
 	body, err := m.lobsteraiRequest(ctx, cred, lobsteraiSlotPath+"?"+q.encode(), http.MethodGet, "")
 	if err != nil {

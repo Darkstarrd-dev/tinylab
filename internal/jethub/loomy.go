@@ -44,11 +44,11 @@ var loomyProduct = &loomyConfig{
 }
 
 type loomyConfig struct {
-	APIBase        string
-	AccountBase    string
-	AccessKeyID    string
+	APIBase         string
+	AccountBase     string
+	AccessKeyID     string
 	AccessKeySecret string
-	AppID          string
+	AppID           string
 }
 
 // LoomyCredential mirrors ref loomy.ts. access_token = the 32-hex session.

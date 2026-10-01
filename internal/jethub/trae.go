@@ -107,21 +107,21 @@ func traeSOLOHeaders(cred *TraeCredential, stream bool, machineIDGeneration int)
 	}
 	h := map[string]string{
 		"Content-Type": "application/json", "Accept": accept,
-		"User-Agent":   traeProduct.UserAgent,
-		"Authorization": "Cloud-IDE-JWT " + cred.AccessToken,
-		"X-Cloudide-Token": cred.AccessToken,
-		"X-Ide-Token":      cred.AccessToken,
-		"X-Uid":            cred.UID,
-		"X-App-Id":         traeProduct.AppID,
-		"X-App-Version":    "default",
-		"X-Ide-Version":    traeProduct.AppVersion,
-		"X-Ide-Version-Code":     traeProduct.AppVersionCode,
-		"X-App-Version-Code":     traeProduct.AppVersionCode,
-		"X-Ide-Version-Type":     "stable",
-		"X-Device-Type":          "macos",
-		"X-OS-Version":           traeProduct.OSVersion,
-		"X-Device-Brand":         traeProduct.DeviceBrand,
-		"Request-Traffic-Type":   "prod",
+		"User-Agent":           traeProduct.UserAgent,
+		"Authorization":        "Cloud-IDE-JWT " + cred.AccessToken,
+		"X-Cloudide-Token":     cred.AccessToken,
+		"X-Ide-Token":          cred.AccessToken,
+		"X-Uid":                cred.UID,
+		"X-App-Id":             traeProduct.AppID,
+		"X-App-Version":        "default",
+		"X-Ide-Version":        traeProduct.AppVersion,
+		"X-Ide-Version-Code":   traeProduct.AppVersionCode,
+		"X-App-Version-Code":   traeProduct.AppVersionCode,
+		"X-Ide-Version-Type":   "stable",
+		"X-Device-Type":        "macos",
+		"X-OS-Version":         traeProduct.OSVersion,
+		"X-Device-Brand":       traeProduct.DeviceBrand,
+		"Request-Traffic-Type": "prod",
 	}
 	if cred.MachineID != "" {
 		h["X-Machine-Id"] = DeriveRotatingMachineID(cred.MachineID, machineIDGeneration)
@@ -136,7 +136,7 @@ func traeSOLOHeaders(cred *TraeCredential, stream bool, machineIDGeneration int)
 func traeUgHeaders(cred *TraeCredential, checkinDeviceGeneration int) map[string]string {
 	h := map[string]string{
 		"Content-Type": "application/json", "Accept": "application/json",
-		"User-Agent":   traeProduct.UserAgent,
+		"User-Agent":    traeProduct.UserAgent,
 		"Authorization": "Cloud-IDE-JWT " + cred.AccessToken,
 		"X-User-Region": "CN",
 	}

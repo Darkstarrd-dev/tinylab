@@ -50,4 +50,3 @@ type Cleaner interface {
 type RawCleaner interface {
 	CleanWithRaw(ctx context.Context, node config.TextReviewNode, systemPrompt, content string, onChunk func(delta string), onRaw func(section, delta string)) CleanResult
 }
-

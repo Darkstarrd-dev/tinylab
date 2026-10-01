@@ -52,5 +52,7 @@ type simpleError struct{ msg string }
 
 func (e *simpleError) Error() string { return e.msg }
 
-func errAccountNotFound(id string) error    { return &simpleError{"jethub: account " + id + " not found"} }
-func errCredentialMissing(id string) error { return &simpleError{"jethub: credential missing for " + id} }
+func errAccountNotFound(id string) error { return &simpleError{"jethub: account " + id + " not found"} }
+func errCredentialMissing(id string) error {
+	return &simpleError{"jethub: credential missing for " + id}
+}

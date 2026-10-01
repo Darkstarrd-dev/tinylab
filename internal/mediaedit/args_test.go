@@ -929,4 +929,3 @@ func TestBuildImageTranscodeArgs_FitTo(t *testing.T) {
 		t.Errorf("expected FitTo to take precedence over ScalePercent in args: %v", argsPrec)
 	}
 }
-

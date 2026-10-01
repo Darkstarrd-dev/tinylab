@@ -1,9 +1,8 @@
 package music
 
 import (
-	"context"
-	"time"
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tinylab/tinylab/internal/api/apibase"
 	"github.com/tinylab/tinylab/internal/outbound"

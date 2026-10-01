@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"net/url"
-		"path/filepath"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -29,14 +29,14 @@ import (
 	"github.com/tinylab/tinylab/internal/api/fsbrowse"
 	"github.com/tinylab/tinylab/internal/api/gallery"
 	"github.com/tinylab/tinylab/internal/api/games"
-	jethubapi "github.com/tinylab/tinylab/internal/api/jethub"
-	"github.com/tinylab/tinylab/internal/api/music"
-	"github.com/tinylab/tinylab/internal/api/notes"
 	"github.com/tinylab/tinylab/internal/api/image"
 	apimagebatch "github.com/tinylab/tinylab/internal/api/imagebatch"
+	jethubapi "github.com/tinylab/tinylab/internal/api/jethub"
 	"github.com/tinylab/tinylab/internal/api/keys"
 	"github.com/tinylab/tinylab/internal/api/models"
 	apimonitor "github.com/tinylab/tinylab/internal/api/monitor"
+	"github.com/tinylab/tinylab/internal/api/music"
+	"github.com/tinylab/tinylab/internal/api/notes"
 	playgroundapi "github.com/tinylab/tinylab/internal/api/playground"
 	"github.com/tinylab/tinylab/internal/api/probe"
 	"github.com/tinylab/tinylab/internal/api/providers"
@@ -519,7 +519,6 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	}
 
 	rt.registerUtilityRoutes(r, authHandler, editorHandler, textReviewHandler, galleryHandler, fileTransferHandler, archiveHandler, storyMakerHandler)
-
 
 	rt.registerPlaygroundStatic(r)
 

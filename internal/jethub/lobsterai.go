@@ -13,21 +13,21 @@ import (
 // authCode exchange, no PKCE/DPoP; identity fields (uuid/firstKeyfrom)
 // generated client-side and replayed on every refresh.
 const (
-	lobsteraiExchangePath    = "/api/auth/exchange"
-	lobsteraiRefreshPath     = "/api/auth/refresh"
-	lobsteraiModelsPath      = "/api/models/available"
-	lobsteraiChatPath        = "/api/proxy/v1/chat/completions"
-	lobsteraiCallbackPath    = "/auth/callback"
-	lobsteraiRequestTimeout  = 30 * timeSecond
-	lobsteraiLoginTimeout    = 10 * timeMinute
-	lobsteraiSlotPath        = "/api/client-activities/slot"
-	lobsteraiActivitiesPath  = "/api/client-activities"
-	lobsteraiProfilePath     = "/api/user/profile-summary"
-	lobsteraiSlotPlacement   = "desktop_sidebar"
-	lobsteraiSlotAPIVersion  = "2"
-	lobsteraiSlotPlatform    = "win32"
+	lobsteraiExchangePath     = "/api/auth/exchange"
+	lobsteraiRefreshPath      = "/api/auth/refresh"
+	lobsteraiModelsPath       = "/api/models/available"
+	lobsteraiChatPath         = "/api/proxy/v1/chat/completions"
+	lobsteraiCallbackPath     = "/auth/callback"
+	lobsteraiRequestTimeout   = 30 * timeSecond
+	lobsteraiLoginTimeout     = 10 * timeMinute
+	lobsteraiSlotPath         = "/api/client-activities/slot"
+	lobsteraiActivitiesPath   = "/api/client-activities"
+	lobsteraiProfilePath      = "/api/user/profile-summary"
+	lobsteraiSlotPlacement    = "desktop_sidebar"
+	lobsteraiSlotAPIVersion   = "2"
+	lobsteraiSlotPlatform     = "win32"
 	lobsteraiClientVersionAPI = "https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update"
-	lobsteraiFallbackVersion = "2026.9.4"
+	lobsteraiFallbackVersion  = "2026.9.4"
 )
 
 // LobsteraiProduct is the single-product config (parallel to BuddyProduct on
@@ -151,13 +151,13 @@ func lobsteraiEnvelope(body map[string]any) (data map[string]any, code int64, me
 
 // lobsteraiTokenPayload is the exchange/refresh token section.
 type lobsteraiTokenPayload struct {
-	AccessToken string
+	AccessToken  string
 	RefreshToken string
-	ExpiresIn   float64
-	UserID      string
-	YID         string
-	AccountUser string
-	Nickname    string
+	ExpiresIn    float64
+	UserID       string
+	YID          string
+	AccountUser  string
+	Nickname     string
 }
 
 func parseLobsteraiTokenPayload(data map[string]any) *lobsteraiTokenPayload {
