@@ -206,11 +206,13 @@ function __jethubActionButtons(provider) {
   return html;
 }
 
-// jethubToggleProxy PUT /jethub/{provider}/proxy — 登录/积分/推理出站的
-// per-provider 代理开关；桥接 provider 的 UseProxy 由后端 SyncKeys 一并写入。
+// jethubToggleProxy PUT /jethub/providers/{provider}/proxy — 登录/积分/推理
+// 出站的 per-provider 代理开关；桥接 provider 的 UseProxy 由后端 SyncKeys
+// 一并写入。⚠️ 路径必须带 `providers/` 段（与 prefix/permanent-lock 同形），
+// 漏掉会命中 chi 的 404 page not found（非 JSON 体 → 前端显示 HTTP 404）。
 async function jethubToggleProxy(providerId, enabled) {
   try {
-    var r = await apiPut('/jethub/' + encodeURIComponent(providerId) + '/proxy', { enabled: !!enabled });
+    var r = await apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/proxy', { enabled: !!enabled });
     if (r.error) throw new Error(r.error);
     var p = __jethubState.providers.find(function(x) { return x.id === providerId; });
     if (p) p.proxyEnabled = !!enabled;

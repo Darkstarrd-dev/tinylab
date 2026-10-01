@@ -347,7 +347,7 @@ checkAsync('⑤ Use Proxy toggle right of +New Account: project toggle-switch, P
   await ctx.jethubSelect('loomy');
   await ticks(2);
   await ctx.jethubToggleProxy('loomy', true);
-  const put = ctx.__calls.apiPut.find(([p]) => p === '/jethub/loomy/proxy');
+  const put = ctx.__calls.apiPut.find(([p]) => p === '/jethub/providers/loomy/proxy');
   assert.ok(put && JSON.stringify(put[1]) === JSON.stringify({ enabled: true }), 'proxy PUT body');
   assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'success' && m === '已启用走代理'), 'success toast');
   // Failure reverts: apiPut failing → checkbox state refreshes via select.
@@ -356,6 +356,25 @@ checkAsync('⑤ Use Proxy toggle right of +New Account: project toggle-switch, P
   await ctx.jethubToggleProxy('loomy', true);
   ctx.apiPut = origApiPut;
   assert.ok(ctx.__calls.toast.some(([m, ty]) => ty === 'error' && m.indexOf('boom') !== -1), 'failure toast shown');
+});
+
+check('⑤ frontend jethub paths match the backend route table (404 regression guard)', () => {
+  // Regression for the reported "Failed: HTTP 404 (non-JSON body)": the toggle
+  // called /jethub/{provider}/proxy while the route is registered under
+  // /jethub/providers/{provider}/proxy (chi then answers 404 text/plain).
+  const api = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
+  const routesGo = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub/register.go'), 'utf8');
+  // Every `apiPut('/jethub/<seg>/...')` the UI issues must have a matching
+  // chi route declaration (same literal path shape).
+  const putPaths = [...api.matchAll(/apiPut\('(\/jethub\/[^']+)'/g)].map((m) => m[1]);
+  assert.ok(putPaths.length > 0, 'jethub.js must issue PUT requests');
+  for (const p of putPaths) {
+    const shape = p.replace(/\$\{[^}]*\}/g, '{provider}').replace(/' \+[^']*$/, '');
+    assert.ok(shape.indexOf('/jethub/providers/') === 0 || shape.indexOf('/jethub/accounts/') === 0,
+      'PUT path must carry the providers/accounts segment: ' + p);
+  }
+  assert.ok(routesGo.includes('r.Put("/providers/{provider}/proxy"'), 'backend proxy route registered under /providers/{provider}/proxy');
+  assert.ok(api.includes("apiPut('/jethub/providers/' + encodeURIComponent(providerId) + '/proxy'"), 'toggle must PUT /jethub/providers/{provider}/proxy');
 });
 
 checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips + per-card retest/reset', async () => {
