@@ -49,7 +49,8 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 	loginID := corejethub.NewLoginSessionID()
 	resultCh := make(chan corejethub.LoginOutcome, 1)
 	started := corejethub.NewStartedLoginWithChannel(flow.LoginURL, resultCh)
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
 	// ⚠️ 后台轮询用独立 context：handler 返回后 r.Context() 即被取消，
 	// 设备码轮询要等用户在浏览器里完成授权（数十秒到数分钟）。
 	go func() {
@@ -74,6 +75,9 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 			Refreshable:    corejethub.QoderRefreshable(cred),
 		})
 	}()
+	// Single-winner pump: records the outcome for the status poll and deletes
+	// the placeholder account when the flow failed (no credential-less entry).
+	go corejethub.SettleAndCleanup(sess, nil)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,

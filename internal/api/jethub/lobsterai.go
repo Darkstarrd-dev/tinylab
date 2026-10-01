@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -37,14 +38,18 @@ func (h *Handler) lobsteraiLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartLobsteraiLogin(r.Context(), id, nil)
+	started, err := h.d.Manager.StartLobsteraiLogin(context.Background(), id, nil)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	loginID := corejethub.NewLoginSessionID()
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// Single-winner pump; the callback server + timeout goroutine run on the
+	// background context (StartLobsteraiLogin) so they outlive this handler.
+	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteLobsteraiLogin
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,

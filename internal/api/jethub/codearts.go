@@ -48,16 +48,14 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	loginID := corejethub.NewLoginSessionID()
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
-	go func() {
-		// Pump the outcome into persistent storage; the session self-reaps
-		// after the flow settles (timeout included).
-		outcome := <-started.Result
-		if outcome.Err == nil && outcome.CredentialJSON != nil {
-			_ = h.d.Manager.CompleteCodeArtsLogin(id, outcome.CredentialJSON, outcome.ExpiresAt, outcome.Refreshable)
-		}
-		corejethub.TakeLoginSession(loginID)
-	}()
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// Single-winner pump: records the outcome for the status poll, deletes
+	// the placeholder on failure. The flow itself persists via
+	// CompleteCodeArtsLogin (already encoded into the delivered credential).
+	go corejethub.SettleAndCleanup(sess, func(o corejethub.LoginOutcome) error {
+		return h.d.Manager.CompleteCodeArtsLogin(id, o.CredentialJSON, o.ExpiresAt, o.Refreshable)
+	})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,

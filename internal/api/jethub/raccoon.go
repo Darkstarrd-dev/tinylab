@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -25,6 +26,11 @@ func (h *Handler) RegisterRaccoon(r chi.Router) {
 
 // raccoonLogin POST — QR flow (client-generated 32-hex code; UI renders the
 // WeChat login page itself and polls status with loginId).
+//
+// ⚠️ The background poll MUST NOT hang off r.Context(): the handler returns
+// right after this response, and net/http cancels the request context at that
+// moment — a r.Context()-bound poll aborts before the user even opens the
+// QR page (the "placeholder account, credential never lands" defect).
 func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 	id, credentialRef := corejethub.NewAccountID("raccoon")
 	if err := h.d.Manager.AddAccount(corejethub.Account{
@@ -35,14 +41,20 @@ func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartRaccoonQRLogin(r.Context(), id, nil)
+	started, err := h.d.Manager.StartRaccoonQRLogin(context.Background(), id, nil)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	loginID := corejethub.NewLoginSessionID()
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// Fire-and-forget pump: settles the outcome, records it for the status
+	// poll and deletes the placeholder on failure. The flow persists the
+	// credential itself via CompleteRaccoonLogin, so nothing extra here.
+	go corejethub.SettleAndCleanup(sess, nil)
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,

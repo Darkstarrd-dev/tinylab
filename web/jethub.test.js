@@ -69,6 +69,53 @@ check('feature.go registers the two assets on the Core feature', () => {
   assert.ok(src.includes('"style-jethub.css"'), 'feature manifest missing style-jethub.css');
 });
 
+check('login handlers never bind a background flow to r.Context() (+new-account regression)', () => {
+  // Regression for the reported defect: "+new account immediately created a
+  // placeholder; the credential never landed because the background poll
+  // died with the canceled request context". Every Start*Login / background
+  // poll call in the API layer must pass context.Background().
+  const cases = [
+    ['internal/api/jethub/raccoon.go', 'StartRaccoonQRLogin(context.Background()'],
+    ['internal/api/jethub/cline.go', 'StartClineLogin(context.Background()'],
+    ['internal/api/jethub/trae.go', 'StartTraeLogin(context.Background()'],
+    ['internal/api/jethub/lobsterai.go', 'StartLobsteraiLogin(context.Background()'],
+    ['internal/api/jethub/buddy.go', 'StartBuddyLogin(context.Background()'],
+    ['internal/api/jethub/minimax.go', 'PollMinimaxDeviceToken(context.Background()'],
+    ['internal/api/jethub/qoder.go', 'PollQoderDeviceToken(context.Background()'],
+  ];
+  for (const [f, needle] of cases) {
+    const go = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    assert.ok(go.includes(needle), f + ' must start its login flow with context.Background(), not r.Context()');
+    // No login start may ever reference the request context again.
+    const startCalls = go.match(/Start\w*Login\(r\.Context\(\)|Poll\w*Token\(r\.Context\(\)/g);
+    assert.ok(!startCalls, f + ' still binds a login flow to r.Context(): ' + startCalls);
+  }
+  // Every login handler registers a single-winner pump so the status poll
+  // never races the pump for the flow's outcome channel.
+  for (const f of ['raccoon.go', 'cline.go', 'trae.go', 'lobsterai.go', 'buddy.go', 'minimax.go', 'qoder.go', 'codearts.go']) {
+    const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
+    assert.ok(go.includes('SettleAndCleanup(sess'), f + ' must pump the outcome via SettleAndCleanup');
+  }
+});
+
+check('account card marks credential-less placeholders; SMS modal creates the account itself', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
+  assert.ok(src.includes('freeHubNoCredential'), 'placeholder accounts must show the no-credential badge');
+  // SMS providers have no server-side login session: the UI must create the
+  // placeholder account before the modal opens (otherwise sms/submit has no
+  // accountId to attach the credential to).
+  const addAccount = src.match(/async function jethubAddAccount[\s\S]*?\n}/);
+  assert.ok(addAccount, 'jethubAddAccount found');
+  assert.ok(addAccount[0].includes("/accounts'"), 'SMS path must POST /accounts to create the placeholder first');
+  assert.ok(addAccount[0].includes('__jethubSmsModal(providerId, created.accountId)'), 'SMS modal must receive the new accountId');
+  // Both modals must clean up the placeholder when the user cancels.
+  const loginModal = src.match(/function __jethubLoginModal[\s\S]*?\n\nfunction/);
+  assert.ok(loginModal && loginModal[0].includes("apiDelete('/jethub/accounts/'"), 'login modal cancel must delete the placeholder');
+  const smsModal = src.match(/function __jethubSmsModal[\s\S]*?\n\nasync function/);
+  assert.ok(smsModal && smsModal[0].includes("apiDelete('/jethub/accounts/'"), 'SMS modal cancel must delete the placeholder');
+  assert.ok(smsModal[0].includes('accountId: accountId'), 'SMS submit must send accountId');
+});
+
 // --- VM sandbox ---
 const src = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
 

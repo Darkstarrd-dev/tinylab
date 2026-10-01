@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -36,14 +37,18 @@ func (h *Handler) clineLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartClineLogin(r.Context(), id, nil)
+	started, err := h.d.Manager.StartClineLogin(context.Background(), id, nil)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	loginID := corejethub.NewLoginSessionID()
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// Single-winner pump + background context (the WorkOS device poll must
+	// outlive this handler — r.Context() dies with the response).
+	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteClineLogin
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId":    id,
 		"loginId":      loginID,

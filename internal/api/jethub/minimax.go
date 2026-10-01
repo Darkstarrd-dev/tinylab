@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -44,9 +45,14 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	// until the user authorizes, then delivers the outcome.
 	resultCh := make(chan corejethub.LoginOutcome, 1)
 	started := corejethub.NewStartedLoginWithChannel(grant.VerificationURIComplete, resultCh)
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// ⚠️ Background context, not r.Context(): the poll must outlive this
+	// handler (the request context is canceled the moment the response is
+	// written — binding the poll to it aborted every login before the user
+	// even opened the verification URL).
 	go func() {
-		cred, err := h.d.Manager.PollMinimaxDeviceToken(r.Context(), grant)
+		cred, err := h.d.Manager.PollMinimaxDeviceToken(context.Background(), grant)
 		if err != nil {
 			corejethub.DeliverLoginOutcome(resultCh, corejethub.LoginOutcome{Err: err})
 			return
@@ -62,6 +68,10 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 			Refreshable:    corejethub.MinimaxRefreshable(cred),
 		})
 	}()
+	// Single-winner pump (the poll goroutine above is the producer): persists
+	// nothing extra (CompleteMinimaxLogin already ran), deletes the
+	// placeholder on failure, records the outcome for the status poll.
+	go corejethub.SettleAndCleanup(sess, nil)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,

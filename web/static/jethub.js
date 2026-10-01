@@ -226,7 +226,12 @@ function __jethubAccountCard(provider, a) {
     ? __jethubFormatTime(a.expiresAt) + (a.refreshable ? ' · ' + t('freeHubAutoRenew') : '')
     : t('freeHubUnknown');
   var badges = '<span class="badge ' + (a.enabled ? 'badge-active' : 'badge-inactive') + '">' + (a.enabled ? t('enable') : t('disable')) + '</span>';
-  if (a.hasCredential) badges += '<span class="badge badge-active">key</span>';
+  if (!a.hasCredential) {
+    // 占位账号（登录未完成/失败残留）：凭据从未落盘，无法使用。
+    badges += '<span class="badge badge-inactive">' + escapeHtml(t('freeHubNoCredential')) + '</span>';
+  } else {
+    badges += '<span class="badge badge-active">key</span>';
+  }
   if (a.refreshable) badges += '<span class="badge badge-active">refresh</span>';
 
   // 限额重置 chips: only future markers are displayed, but ANY marker (even
@@ -488,14 +493,23 @@ async function jethubClearPrefix(providerId) {
 async function jethubAddAccount(providerId) {
   var provider = __jethubState.providers.find(function(p) { return p.id === providerId; }) || {};
   if ((provider.loginModes || []).indexOf('sms') !== -1) {
-    __jethubSmsModal(providerId);
+    // SMS 流程没有服务端 login session：先创建占位账号，验证码提交时才能
+    // 绑定凭据。用户取消时删除占位（不留无凭据的死账号）。
+    try {
+      var created = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/accounts', {});
+      if (created.error) { toast(t('failed', [created.error]), 'error'); return; }
+      __jethubSmsModal(providerId, created.accountId);
+    } catch (e) {
+      toast(t('failed', [e.message]), 'error');
+    }
     return;
   }
   // url / qr modes share the URL + poll modal (qr providers hand back the
   // login page URL the same way).
   try {
-    var created = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login', {});
-    __jethubLoginModal(providerId, created);
+    var started = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login', {});
+    if (started.error) { toast(t('failed', [started.error]), 'error'); return; }
+    __jethubLoginModal(providerId, started);
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
   }
@@ -515,27 +529,35 @@ function __jethubLoginModal(providerId, created) {
       '<div class="modal-footer"><button type="button" class="btn btn-ghost" id="free-hub-login-cancel">' + escapeHtml(t('cancel')) + '</button></div>' +
     '</div>';
   overlay.classList.add('show');
-  var stop = function() { if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; } overlay.classList.remove('show'); overlay.innerHTML = ''; };
+  // 取消 = 放弃登录：停轮询 + 删除占位账号（服务端失败路径同样会删）。
+  var stop = function() {
+    if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }
+    overlay.classList.remove('show'); overlay.innerHTML = '';
+    apiDelete('/jethub/accounts/' + encodeURIComponent(created.accountId)).then(function() {
+      jethubSelect(providerId);
+    }).catch(function() { jethubSelect(providerId); });
+  };
   document.getElementById('free-hub-login-cancel').onclick = stop;
   var statusEl = document.getElementById('free-hub-login-status');
   __jethubState.pollTimer = setInterval(async function() {
     try {
       var st = await apiGet('/jethub/' + encodeURIComponent(providerId) + '/status?loginId=' + encodeURIComponent(created.loginId));
+      if (st.error) { statusEl.textContent = st.error; return; } // settled & reaped (404): keep the last visible state
       if (st.done) {
-        stop();
+        if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }
+        overlay.classList.remove('show'); overlay.innerHTML = '';
         if (st.success) {
           toast(t('freeHubLoginOk'), 'success');
-          jethubSelect(providerId);
         } else {
           toast(t('freeHubLoginFailed', [st.error || '']), 'error');
-          jethubSelect(providerId); // the placeholder account is cleaned up server-side when it failed hard
         }
+        jethubSelect(providerId);
       }
     } catch (e) { /* transient poll failure: keep polling */ }
   }, 2000);
 }
 
-function __jethubSmsModal(providerId) {
+function __jethubSmsModal(providerId, accountId) {
   var overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
   overlay.innerHTML =
@@ -550,7 +572,13 @@ function __jethubSmsModal(providerId) {
       '<button type="button" class="btn btn-primary" id="free-hub-sms-submit">' + escapeHtml(t('freeHubSmsSubmit')) + '</button></div>' +
     '</div>';
   overlay.classList.add('show');
-  var close = function() { overlay.classList.remove('show'); overlay.innerHTML = ''; };
+  // 取消 = 放弃登录：删除占位账号（凭据从未落盘，留着也无法使用）。
+  var close = function() {
+    overlay.classList.remove('show'); overlay.innerHTML = '';
+    apiDelete('/jethub/accounts/' + encodeURIComponent(accountId)).then(function() {
+      jethubSelect(providerId);
+    }).catch(function() { jethubSelect(providerId); });
+  };
   document.getElementById('free-hub-sms-cancel').onclick = close;
   document.getElementById('free-hub-sms-send').onclick = async function() {
     try {
@@ -561,10 +589,11 @@ function __jethubSmsModal(providerId) {
   document.getElementById('free-hub-sms-submit').onclick = async function() {
     try {
       await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login/sms/submit', {
+        accountId: accountId,
         phone: document.getElementById('free-hub-sms-phone').value.trim(),
         code: document.getElementById('free-hub-sms-code').value.trim(),
       });
-      close();
+      overlay.classList.remove('show'); overlay.innerHTML = '';
       toast(t('freeHubLoginOk'), 'success');
       jethubSelect(providerId);
     } catch (e) { toast(t('failed', [e.message]), 'error'); }

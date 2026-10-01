@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -41,21 +42,18 @@ func (h *Handler) startBuddyFlow(provider string, w http.ResponseWriter, r *http
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartBuddyLogin(r.Context(), provider, id, nil)
+	started, err := h.d.Manager.StartBuddyLogin(context.Background(), provider, id, nil)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	loginID := corejethub.NewLoginSessionID()
-	corejethub.RegisterLoginSession(loginID, &corejethub.LoginSession{Started: started, Account: id})
-	go func() {
-		outcome := <-started.Result
-		if outcome.Err == nil && outcome.CredentialJSON != nil {
-			_ = h.d.Manager.CompleteBuddyLoginFromJSON(id, outcome.CredentialJSON, outcome.ExpiresAt, outcome.Refreshable)
-		}
-		corejethub.TakeLoginSession(loginID)
-	}()
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	corejethub.RegisterLoginSession(loginID, sess)
+	// Single-winner pump: settles the outcome, persists on success, deletes
+	// the placeholder on failure. The status poll reads via SessionStatus.
+	go corejethub.SettleAndCleanup(sess, nil) // flow persists via CompleteBuddyLogin
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,
 		"loginId":   loginID,
@@ -77,25 +75,30 @@ func (h *Handler) buddyStatus(provider string) http.HandlerFunc {
 }
 
 // pollLogin is the shared login-flow poll (codearts + buddy products).
+// pollLogin GET ?loginId= — UI status poll for an in-flight login flow.
+// ⚠️ Passive reader: the login handler's pump goroutine (SettleAndCleanup)
+// is the only consumer of the flow's Result channel; this handler reads the
+// recorded outcome through SessionStatus. Polling the channel directly would
+// race the pump for the single buffered outcome (one side would hang).
 func (h *Handler) pollLogin(loginID string, w http.ResponseWriter, r *http.Request) {
 	sess, ok := corejethub.PeekLoginSession(loginID)
 	if !ok {
-		apibase.WriteAPIError(w, http.StatusNotFound, "unknown or settled loginId")
+		// Settled (pump removed it) or never existed — report done:false and
+		// let the UI fall back to the account list refresh.
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "unknown or settled loginId"})
 		return
 	}
-	select {
-	case outcome := <-sess.Started.Result:
-		corejethub.TakeLoginSession(loginID)
-		if outcome.Err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": outcome.Err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": true, "accountId": sess.Account})
+	done, success, errMsg := corejethub.SessionStatus(sess)
+	if !done {
+		acc, _ := h.d.Manager.FindAccount(sess.Account)
+		writeJSON(w, http.StatusOK, map[string]any{"done": false, "accountId": sess.Account, "nickname": acc.Nickname})
 		return
-	default:
 	}
-	acc, _ := h.d.Manager.FindAccount(sess.Account)
-	writeJSON(w, http.StatusOK, map[string]any{"done": false, "accountId": sess.Account, "nickname": acc.Nickname})
+	if !success {
+		writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"done": true, "success": true, "accountId": sess.Account})
 }
 
 // buddyRefresh POST — silent renewal of one account credential.
