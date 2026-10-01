@@ -13,6 +13,7 @@
 | `download-architecture.md` | yt-dlp 下载：任务队列生命周期、参数构造、SSE 进度、与归档计划漂移 |
 | `combo-architecture.md` | Combo 解析：Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级 |
 | `config-registry-state-architecture.md` | 基础设施：三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge |
+| `jethub-architecture.md` | Free Hub（Jet Hub 移植）：账号池/凭据存储、registry 桥接（`APIType=jethub` + 增强接口注入）、Qoder WASM 桥、11 provider 矩阵、备份兼容 |
 | `playground-architecture.md` | Playground 前后端：多模型测试、群聊、Director/Narrator |
 
 ### 高频变更速查（完整 19 条见 PROJECT_MAP.md §24）

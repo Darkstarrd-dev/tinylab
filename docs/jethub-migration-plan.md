@@ -371,10 +371,14 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 ## 9. P6 收尾
 
-- [ ] P6.1 全部 provider 实发验证结果汇总进 §11。
+- [x] P6.1 全部 provider 实发验证结果汇总进 §11。
+  > 实施记录（2026-10-01）：**无账号降级路径（§6.3）已全部执行**——12 个上游主机 TCP 可达性 ✓（codearts/buddy/workbuddy/lobsterai/trae(`trae-api-cn.mchost.guru`)/raccoon(`xiaohuanxiong.com`)/qoder api2+openapi/qodercn gateway+openapi/minimax/cline，host 以 products 配置为准）+ **qoder 双站设备码轮询真实实发**：`openapi.qoder.sh`/`openapi.qoder.com.cn` 对随机 nonce 均回 **HTTP 404**——正是「未就绪=继续轮询」的业务信号（轮询契约实测验证）。**真实推理验证待有账号的用户执行**（每 provider 登录 → 设前缀 → `{前缀}/{modelID}` 至少一次；免费模型建议：qoder `qmodel_38max`/`qfmodel`、codearts `glm-5.3-flash`），结果追加 §11。
 - [ ] P6.2 本文 §3 主 Checklist 全部置 `[x]`，文档状态改为「已完成」。
+  > ⚠️ 待 P6.1 的真实推理验证由用户完成后执行（§10.6：单测全绿 ≠ 可用）。
 - [ ] P6.3 **移除 PROJECT_MAP.md 中对本计划的引用**（§19 docs 表中本文件行改为指向 `docs/jethub-architecture.md`；§23 占位区条目按同步约束移入正文模块章节并删除占位行）。
-- [ ] P6.4 AGENTS.md / CLAUDE.md 架构文档清单与 §24 速查表与 jethub-architecture.md 对齐确认。
+  > ⚠️ 同上，与 P6.2 一并执行。
+- [x] P6.4 AGENTS.md / CLAUDE.md 架构文档清单与 §24 速查表与 jethub-architecture.md 对齐确认。
+  > 实施记录（2026-10-01）：两份指令文件的架构文档清单均新增 `jethub-architecture.md` 行；§24 Free Hub 速查行已含全量源码（含前端 + `/backup/*`）；§19 已注册基线文档。
 
 ---
 
@@ -394,6 +398,7 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 | 日期 | 阶段 | 记录 |
 |---|---|---|
+| 2026-10-01 | P6.1+P6.4 | **P6 部分收口（可达性降级路径 + 指令文件对齐）**：P6.1 无账号降级路径（§6.3）全部执行——**12 个上游主机 TCP 全可达**（codearts snap-access 55ms / buddy copilot.tencent 7ms / workbuddy 87ms / lobsterai / trae `trae-api-cn.mchost.guru` 22ms / raccoon `xiaohuanxiong.com` 52ms / qoder api2 30ms+openapi 43ms / qodercn gateway 21ms+openapi 28ms / minimax 54ms / cline 272ms；host 以 products 配置为准——探针首跑曾猜错 trae/raccoon 主机名，已按代码改正）+ **qoder 双站轮询真实实发**：随机 nonce 均回 HTTP 404 =「未就绪继续轮询」业务信号实测成立（国际版+中国版同一行为，进一步印证同协议族）；探针 `tmp/live_probe`（一次性，不入库）。P6.4 AGENTS.md/CLAUDE.md 架构文档清单新增 `jethub-architecture.md` 行，§24/§19 已对齐。**剩余：真实推理验证（需用户账号）→ P6.2 主表全勾 → P6.3 移除计划引用。** |
 | 2026-10-01 | P5 | **P5 集成加固完成（全量门禁 + 构建变体 + 架构文档 + 体积复核）**：P5.1 `go vet ./...` 0 输出 + `go test ./...` **52 包全 ok 0 FAIL** + `go build .` ✓ + 前端契约测试（jethub 9 条 + assistant-demo 全绿）；P5.2 `CGO_ENABLED=0` ✓（wazero 纯 Go 无 cgo 破坏）+ `go build -tags "tray webview"` ✓ + darwin/arm64 交叉编译 ✓；P5.3 config-registry §17a（P1 已落，核对无误）+ proxy-architecture 新增「最后核对 2026-10-01」+ **§7.1a jethub 桥接增强钩子**节；P5.4 新建 `docs/jethub-architecture.md`（八章 + 变更维护清单 + provider 矩阵）+ PROJECT_MAP §19 注册；P5.5 体积实测 **baseline 26.33MB → stripped 29.89MB = +3.56MB**（`git archive` P1 前提交真机构建对照，§1.3 预估 3.4MB 偏差 0.16MB 容差内）。 |
 | 2026-10-01 | P4 | **P4 Free Hub 管理界面完成（node --check + 契约测试 9 条 + go vet/test/build 全绿）**：`web/static/jethub.js`（vanilla JS：openFreeHub/closeFreeHub main 切换恢复 + header 一键签到/备份/恢复/关闭 + left pane provider 列表 + right pane 四区——前缀（前端 `[a-z0-9-]` 校验、PUT/DELETE）/账号池（url/sms 登录分支弹窗 + 2s 轮询 + 改名/启停/删除/续期）/模型黑名单 checkbox/积分余额+领取）+ `style-jethub.css`（纯 theme tokens）+ 两份 index 挂载 + feature.go Core manifest 注册；`settings.js` 入口行插 Path Settings 与 Assistant 之间（i18n en+cn 各 40+ 键）；**备份双向兼容**：`internal/jethub/backup.go`（ExportBackup/ImportBackup——载荷逐字段同构原版 BackupPayload、凭据按 ref 原文直存、账号原 id upsert 幂等、黑名单整体替换、格式/版本硬校验；Go 单测 4 条锁逐字段比对+跨管理器往返+幂等+外来格式拒绝）+ 浏览器加密壳（PBKDF2 310000/SHA-256/AES-256-GCM，同原版 backup-crypto.js 参数）+ 端点 `/api/jethub/backup/export|import`（导入后全桥接 SyncKeys）；`web/jethub.test.js` 9 条（Node VM + DOM stub + Node webcrypto 真跑 crypto.subtle——行位置/双字典/index 挂载/manifest/main 切换/前缀 PUT 体/壳字段/错口令拒绝/加密恢复往返；**首跑抓到真 bug**：`__jethubSelect` 函数名笔误）。**待浏览器冒烟（§7.3）+ 实发验证。** |
 | 2026-10-01 | P3.D | **批次 D（qoder + qodercn，WASM 加密推理）代码完成——批次 P3 全部收口（go vet + 全量测试 + go build 全绿）**：`qoderwasm_bridge.go`（31 导入 wasm-bindgen 桥 + 对象堆哨兵含独立 null + LAYOUT A/B + **实测首要坑**：getrandom 探测链三路全空 → Rust panic=abort 直落裸 `unreachable` 不经 throw —— crypto 必须返回 stand-in 强制浏览器分支；`__wbg_set_08463`=对象方法 set/prototypesetcall 方向=对象→wasm 内存/subarray 接收方=堆对象/static accessor 必须推对象；导出节直读核对 `qodercontext_prepareInferRequest` 全名 + `requestresult_url` 栈指针在前 + `model_cache_decrypt` machineId 必填）、`qoder.go`/`qoder_credits.go`（PKCE + 404=未就绪轮询 + userinfo 昵称 + refresh 沿用身份字段 + `/sash/` 四头（ClientType'10'+machine 头成对）+ 余额三包 + 领取幂等 replayed + UTC+8 日界算术）、`qoder_payload.go`（buildQoderInferPayload 复刻 G4A：business 必填/tools 恒数组/多模态 content 保留/tool_calls 历史保留/空 description 不出现 + 两站模型 meta 表）、`qoder_envelope.go`（剥壳 + 保真转发 code/message/type + `(n>0,io.EOF)` 同返 peek 坑）、`qoder_adapter.go`（**窄接口架构**：proxy.RequestCustomizer 定制 WASM 出站 URL+加密体+签名头替换、proxy.ResponseInterceptor 首帧 peek 分类 + 信封剥离 reader；跨边界错误放 `internal/upstreamerr`：排队→同 Key 等待重发（10s×180）、计费 110→per-model 锁 UTC+8 当日 24:00 切号）、`qoderwasm.go`+`qoder_auth_wasm.wasm`（298,606B 嵌入）、模型表 17+14、API `qoder.go` 双产品五端点（后台轮询独立 context——handler 返回即取消 r.Context()）。单测 33 个（含真实二进制端到端加密往返 + 排队/计费/认证/重复四类分类 + 双通道拦截）。**待实发验证：需 qoder/qodercn 账号（§6.3）。** |
