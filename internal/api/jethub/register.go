@@ -55,6 +55,8 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterCline(r)
 		// P3.3.3: raccoon flows (WeChat QR + SMS login).
 		h.RegisterRaccoon(r)
+		// P3.3.4: loomy flows (SMS login; no renewal).
+		h.RegisterLoomy(r)
 	})
 }
 

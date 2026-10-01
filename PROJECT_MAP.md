@@ -904,6 +904,7 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `raccoon.go` | 四 API 前缀（auth/llm/points/desktop）+ `RaccoonCredential` 1:1 + `EncryptRaccoonPhone`（AES-128-CFB NoPadding+随机 IV，Base64(iv‖ct)，公开常量密钥）+ QR code 32hex + `/login/mp` 公开页 URL + 统一信封（HTTP 200+非 0 code 也是失败） |
 | `raccoon_provider.go` | QR 轮询状态机（**任何异常降级 pending**——异常不中断 2s 轮询、无 token success 防卡死、误判 canceled 会刷新用户正在扫的码）+ 短信登录（captcha_param 必需/AES 手机）+ `RefreshRaccoonCredential`（无新 refresh_token 沿用旧值、200003 终态）+ `FetchRaccoonUserInfo`（失败空对象）+ `ClaimRaccoonLoginReward`（幂等一次性 granted:false→already-claimed）+ `RaccoonOnboardingClaimed`（biz_type+event_name 双判据）+ `RaccoonAugment`（reasoning_effort→`extra_body.thinking` 唯一有效通道）+ `RaccoonDisplayName`（1 倍也显示/0=免费/促销箭头）+ 6 模型表 |
 | `raccoon_test.go` | 加密确定性（固定 IV）/QR URL/轮询 5 形态降级/refresh 沿用/终态/奖励幂等/礼包双判据/思考映射/augment 注入/倍率 4 形态/短信 mock 全流程（AES 体 + 手机优先昵称） |
+| `loomy.go` / `loomy_credits.go` / `loomy_test.go` | Loomy（讯飞）双 base（业务/账号）+ CAccount HMAC-SHA1 签名 1:1（9 段拼串**末尾两空段不可去**、空 body md5=空串、RFC3986 补转、query 不排序、`account` 前缀、签名与发送同串）+ 字符串 code 信封（业务失败恒 HTTP 200）+ `LoomyRefreshable()` **恒 false**（无 refresh 端点诚实标记）+ expires_at 本地 14 天推算 + 探测（只读 points/records；100002 终态、网络失败非终态）+ 两池余额（永久/每日分开、只读端点防意外签到）+ 每日额度重置语义（alreadyProcessed 幂等→already-claimed）+ 新手任务真实 8 key 表（合计 10000，本地现算 earned）+ `loomyAugment`（chat 双头 Authorization Bearer 带前缀 + token 头）+ 8 模型表（`名称 · x倍率` 规范化） |
 
 ## 17a. `internal/textreview/` — AI 文本清理引擎（in-process session engine）
 

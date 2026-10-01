@@ -72,6 +72,13 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     raccoonAPIBase,
 		Models:      raccoonFallbackModels(),
 	})
+	// P3.3.4: loomy (standard OpenAI chat; no renewal — SMS re-login only).
+	b.RegisterProduct(Product{
+		Provider:    "loomy",
+		DisplayName: "Loomy (讯飞)",
+		BaseURL:     loomyProduct.APIBase,
+		Models:      loomyFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -84,6 +91,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("trae", m.traeAugment)
 	m.SetAugmenter("cline", m.clineAugment)
 	m.SetAugmenter("raccoon", m.raccoonAugment)
+	m.SetAugmenter("loomy", m.loomyAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

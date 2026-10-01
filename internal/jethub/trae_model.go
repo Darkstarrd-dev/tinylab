@@ -99,3 +99,23 @@ func raccoonFallbackModels() ModelTable {
 		md("sn-deepseek-v4-1-flash", "DeepSeek-V4.1-Flash · x0.25", "1000000", "max 100000"),
 	}
 }
+
+// loomyFallbackModels returns the 8 chat models (2026-09-26 实测 models
+// snapshot; order preserved; names normalized to `name · x{rate}` form).
+// spark-x contextWindow divergence noted (server declares 1M; the Loomy
+// client forces 262144 locally — server value kept per the reference).
+func loomyFallbackModels() ModelTable {
+	md := func(id, name, ctx string) config.ModelDef {
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx " + ctx + "; efforts none/low/medium/high/xhigh; default high", Alias: name}
+	}
+	return ModelTable{
+		md("deepseek-v4-flash-0731", "DeepSeek V4 Flash 0731 · x3.0", "1048576"),
+		md("MiniMax-M3", "MiniMax M3 · x4.0", "1048576"),
+		md("Kimi-k2.6", "Kimi k2.6 · x6.5", "262144"),
+		md("qwen-3.8-max", "Qwen 3.8 Max · x12.0", "1000000"),
+		md("GLM-5.3-Flash", "GLM 5.3 Flash · x0.8", "1048576"),
+		md("qwen3.8-flash", "qwen 3.8 flash · x0.8", "1000000"),
+		md("spark-x", "Spark X2.5 · x0.1", "1048576"),
+		md("mimo-v2.5", "MiMo V2.5 · x3.3", "1048576"),
+	}
+}
