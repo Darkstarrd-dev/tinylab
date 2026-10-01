@@ -103,6 +103,11 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
   const appGo = fs.readFileSync(path.join(__dirname, '..', 'internal/app/app.go'), 'utf8');
   assert.ok(appGo.includes('SetBrowserOpener('), 'app must wire SetBrowserOpener (auto-open the login page)');
   assert.ok(appGo.includes('SetAccountCredentialedHook('), 'app must wire SetAccountCredentialedHook (SyncKeys after login)');
+  // The app must also route jethub outbound calls through the configured
+  // global proxy (real defect: direct dial got TLS handshake timeouts on
+  // machines whose upstream access runs through the local routing proxy).
+  assert.ok(appGo.includes('SetProxyURL(proxyRaw)'), 'app must wire jethubMgr.SetProxyURL from config.Proxy');
+  assert.ok(appGo.includes('jethub.SetPackageProxyURL(proxyRaw)'), 'app must wire jethub.SetPackageProxyURL (codearts callback client)');
 });
 
 check('account card marks credential-less placeholders; SMS modal creates the account itself', () => {

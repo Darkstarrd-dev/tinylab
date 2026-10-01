@@ -890,11 +890,12 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 
 | 约束 | 内容 |
 |---|---|
-| 背景 | 登录为两步式：login handler 立即返回 `loginUrl`+`loginId`，后台轮询/回调等用户浏览器授权（数十秒~分钟）。曾同时存在四个缺陷（实测复现：占位账号立即出现、浏览器不自动打开、弹窗永远停在等待、凭据永不落盘/prefix 检索不到） |
+| 背景 | 登录为两步式：login handler 立即返回 `loginUrl`+`loginId`，后台轮询/回调等用户浏览器授权（数十秒~分钟）。曾同时存在五个缺陷（实测复现：占位账号立即出现、浏览器不自动打开、弹窗永远停在等待、凭据永不落盘、TLS handshake timeout/prefix 检索不到） |
 | 缺陷 1 | `Start*Login(r.Context())` / 后台 `Poll*(r.Context())` —— handler 响应后请求 context 被取消，后台轮询当场夭折。修复：**一律 `context.Background()`**（qoder 最早注释此坑，其余 6 个 provider 全部中招）；`web/jethub.test.js` 静态守卫逐文件锁定 |
 | 缺陷 2 | status 轮询与 API 层 pump 都直读 `Started.Result`（容量 1），先到者独占、另一方永久挂起。修复：**单赢家纪律**——仅 `SettleAndCleanup`（§13n.1 sessions.go）读 channel，`pollLogin` 改读 `SessionStatus` 记录态；失败/持久化失败删除占位账号 |
 | 缺陷 3 | 结算后立即 reap session → 2s 轮询的下一次请求 404，前端永远看不到 `done:true`（后端已成功也白搭）。修复：`loginSessionGracePeriod`（30s）后再 reap（`reapAfterGrace`） |
 | 缺陷 4 | `SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层从未接线——登录成功后桥接 Keys 永不刷新，新账号 prefix 检索不到（备份导入能工作只因 backupImport 显式重同步）。修复：`app.go` 接线 `SetAccountCredentialedHook(→ Bridge.SyncKeys)` + `SetBrowserOpener(→ OpenBrowser)`（+新建账号自动打开默认浏览器授权页，对齐原插件；弹窗内链接保留为手动兜底） |
+| 缺陷 5 | jethub 出站 client 默认 `ProxyFromEnvironment` 而进程 env 为空 —— 在「上游必须经本地路由代理」的机器（系统代理 `127.0.0.1:2080` 镜像进 `config.yaml`）上 Go 直连被 TLS 掐死（cline 登录报 `TLS handshake timeout`），浏览器/DSH（undici 认系统代理）正常。修复：`app.go` 接线 `SetProxyURL`（Manager 共享 client）+ `SetPackageProxyURL`（codearts 回调 client）——jethub 出站统一跟随 `config.Proxy` 全局开关 |
 | 前端配合 | SMS 流程（loomy/raccoon 短信）无服务端 login session：前端先 `POST /accounts` 创建占位再弹 SMS 弹窗（提交带 `accountId`）；两种登录弹窗取消时 `DELETE /accounts/{id}` 清占位；无凭据占位显示 `freeHubNoCredential` 灰徽标且不进推理/领取账号集 |
 
 ### 13n.1 P2/P3 provider 适配器文件（2026-10-01 新增）

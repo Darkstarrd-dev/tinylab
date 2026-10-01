@@ -2,6 +2,9 @@ package jethub
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -152,3 +155,57 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 
 // FindTestAccount is a test-only alias of Manager.FindAccount.
 func FindTestAccount(m *Manager, id string) (Account, bool) { return m.FindAccount(id) }
+
+// TestSetProxyURLRewiresOutboundClient: SetProxyURL must make the manager's
+// outbound client route through the proxy (real defect: a machine reaching
+// the upstreams only through the local routing proxy got TLS handshake
+// timeouts because the Go client dialed direct).
+func TestSetProxyURLRewiresOutboundClient(t *testing.T) {
+	env := newTestManager(t)
+
+	// Direct client first (nil proxy), then configure the proxy: the client
+	// is rebuilt lazily so the wiring applies to subsequent outbound calls.
+	if err := env.m.SetProxyURL(""); err != nil {
+		t.Fatal(err)
+	}
+	c1 := env.m.httpClient()
+	if err := env.m.SetProxyURL("http://127.0.0.1:2080"); err != nil {
+		t.Fatal(err)
+	}
+	c2 := env.m.httpClient()
+	if c1 == c2 {
+		t.Fatal("SetProxyURL must rebuild the shared client")
+	}
+
+	// The rebuilt client must actually send requests through the proxy: an
+	// httptest server acts as the proxy endpoint; if the request arrives
+	// there, the transport honors the proxy URL.
+	var seenPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.String() // absolute-form for proxied requests
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	proxyURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.m.mu.Lock()
+	env.m.proxyURL = proxyURL
+	env.m.sharedClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	env.m.mu.Unlock()
+
+	req, err := http.NewRequest(http.MethodGet, "http://target.example.com/ping", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := env.m.httpClient().Do(req)
+	if err != nil {
+		t.Fatalf("proxied request failed: %v", err)
+	}
+	resp.Body.Close()
+	if seenPath != "http://target.example.com/ping" {
+		t.Fatalf("proxy saw %q, want absolute-form target URL", seenPath)
+	}
+}

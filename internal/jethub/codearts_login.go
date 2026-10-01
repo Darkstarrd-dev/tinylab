@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -292,5 +293,63 @@ func codeartsTokenRequest(ctx context.Context, form map[string]string, priv *ecd
 }
 
 // callbackClient is the client used by the callback server's outbound token
-// exchanges (bounded, shared).
-var callbackClient = &http.Client{Timeout: 70 * time.Second}
+// exchanges (bounded, shared). ⚠️ Proxy: the jethub package's proxyURLVar is
+// consulted by jethubTransportProxy — the API layer wires the app config so
+// codearts token exchanges follow the same routing as every other provider.
+var callbackClient = &http.Client{Timeout: 70 * time.Second, Transport: jethubTransport()}
+
+// jethubTransport is the shared transport honoring the package-level proxy
+// (set via SetPackageProxyURL from the app assembly). Default = env proxy.
+var (
+	proxyMu      sync.RWMutex
+	proxyURLPkg  *url.URL
+	proxyClients []*http.Client
+)
+
+// SetPackageProxyURL configures the proxy for jethub clients that live
+// outside the Manager (codearts callback client). Existing clients built by
+// this package are re-pointed at a new transport honoring the URL.
+func SetPackageProxyURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
+	if raw == "" {
+		proxyURLPkg = nil
+	} else {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("jethub: invalid package proxy URL %q: %w", raw, err)
+		}
+		proxyURLPkg = u
+	}
+	tr := &http.Transport{}
+	if proxyURLPkg != nil {
+		tr.Proxy = http.ProxyURL(proxyURLPkg)
+	}
+	// Rebuild every client registered so far (they are immutable wrappers).
+	for _, c := range proxyClients {
+		c.Transport = tr
+	}
+	return nil
+}
+
+// jethubTransport returns a transport honoring the current package proxy.
+func jethubTransport() *http.Transport {
+	proxyMu.RLock()
+	defer proxyMu.RUnlock()
+	tr := &http.Transport{}
+	if proxyURLPkg != nil {
+		tr.Proxy = http.ProxyURL(proxyURLPkg)
+	}
+	return tr
+}
+
+// registerProxyClient tracks a package-level client so SetPackageProxyURL can
+// rewire its transport later.
+func registerProxyClient(c *http.Client) {
+	proxyMu.Lock()
+	proxyClients = append(proxyClients, c)
+	proxyMu.Unlock()
+}
+
+func init() { registerProxyClient(callbackClient) }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -137,6 +138,9 @@ type Manager struct {
 
 	// sharedClient lazily-built outbound client for adapter management calls.
 	sharedClient *http.Client
+	// proxyURL is the global upstream proxy for jethub outbound calls (wired
+	// from config by the app; nil = direct). Immutable once set.
+	proxyURL *url.URL
 
 	logger Logger
 }

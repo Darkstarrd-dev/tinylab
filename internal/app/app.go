@@ -167,6 +167,22 @@ func (a *App) buildComponents() error {
 		a.jethubManager = jethubMgr
 		a.jethubBridge = jethub.NewBridge(jethubMgr, a.reg)
 		jethub.RegisterDefaultProducts(a.jethubBridge)
+		// ⚠️ Global upstream proxy for jethub outbound calls (login/token/
+		// credits). Without this the Go client dials direct — a machine that
+		// reaches these upstreams through the local routing proxy (system
+		// proxy mirrored into config.yaml) gets TLS handshake timeouts, while
+		// browser/DSH flows through the proxy just fine (real defect: cline
+		// login "token 注册失败（网络）：TLS handshake timeout").
+		proxyRaw := ""
+		if cfg.Proxy.Enabled && cfg.Proxy.Host != "" && cfg.Proxy.Port != "" {
+			proxyRaw = fmt.Sprintf("http://%s:%s", cfg.Proxy.Host, cfg.Proxy.Port)
+		}
+		if err := jethubMgr.SetProxyURL(proxyRaw); err != nil {
+			a.logger.Warn("[jethub] invalid proxy config for outbound calls: %v", err)
+		}
+		if err := jethub.SetPackageProxyURL(proxyRaw); err != nil {
+			a.logger.Warn("[jethub] invalid proxy config (package clients): %v", err)
+		}
 		// ⚠️ Post-credential sync hook: without this a finished login stores
 		// the credential but the bridged provider's Keys never refresh — the
 		// new account is invisible to {prefix}/{model} routing (backup import

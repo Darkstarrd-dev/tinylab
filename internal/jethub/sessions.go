@@ -3,7 +3,9 @@ package jethub
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,13 +27,59 @@ func reapAfterGrace(id string) {
 // httpClient lazily builds the shared outbound client used by provider
 // adapters for signed GET/POST management calls (30s budget, aligned with the
 // plugin's REQUEST_TIMEOUT_MS).
+//
+// ⚠️ Proxy awareness (real defect, cline login): the transport defaults to
+// http.ProxyFromEnvironment, which only honors HTTP(S)_PROXY env vars — and
+// those are empty for the app process. A user whose machine reaches these
+// upstreams through the local routing proxy (Windows system proxy on
+// 127.0.0.1:2080, mirrored into config.yaml proxy.enabled) gets TLS
+// handshake timeouts from the Go app while browser/DSH-undici flows through
+// the proxy just fine. The manager therefore carries an explicit proxy URL
+// (wired from config by the app, SetProxyURL) that wins over the env.
 func (m *Manager) httpClient() *http.Client {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sharedClient == nil {
-		m.sharedClient = &http.Client{Timeout: 30 * time.Second}
+		transport := &http.Transport{} // ProxyFromEnvironment default
+		if u := m.proxyURLValueLocked(); u != nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+		m.sharedClient = &http.Client{Timeout: 30 * time.Second, Transport: transport}
 	}
 	return m.sharedClient
+}
+
+// proxyURLValueLocked returns the currently configured proxy URL (caller
+// holds m.mu; the value itself is immutable once set).
+func (m *Manager) proxyURLValueLocked() *url.URL {
+	if m.proxyURL == nil {
+		return nil
+	}
+	return m.proxyURL
+}
+
+// SetProxyURL configures the global upstream proxy for all jethub outbound
+// calls (login/token/credits/renewal). Pass "http://host:port" (the shape
+// proxy.SetProxy already produces) or "" to disable. Must be called before
+// the first outbound request (app assembly); later calls are best-effort:
+// the shared client is rebuilt only if it has not been created yet.
+func (m *Manager) SetProxyURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		m.mu.Lock()
+		m.proxyURL = nil
+		m.mu.Unlock()
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("jethub: invalid proxy URL %q: %w", raw, err)
+	}
+	m.mu.Lock()
+	m.proxyURL = u
+	m.sharedClient = nil // rebuild lazily with the proxy transport
+	m.mu.Unlock()
+	return nil
 }
 
 // strReader is a tiny strings.NewReader alias for readability.

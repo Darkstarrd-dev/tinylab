@@ -52,12 +52,13 @@
 
 ### 3.2 登录流生命周期（+新建账号 的真实缺陷与修复）
 
-登录是**两步式**：login handler 立即返回 `loginUrl` + `loginId`，后台轮询/回调等用户在浏览器完成授权（数十秒到数分钟）。这条结构曾引出四个真实缺陷（用户实测复现：占位账号立即出现、浏览器不自动打开、弹窗永远停在等待、凭据永不落盘/prefix 检索不到）：
+登录是**两步式**：login handler 立即返回 `loginUrl` + `loginId`，后台轮询/回调等用户在浏览器完成授权（数十秒到数分钟）。这条结构曾引出五个真实缺陷（用户实测复现：占位账号立即出现、浏览器不自动打开、弹窗永远停在等待、凭据永不落盘、`TLS handshake timeout`/prefix 检索不到）：
 
 1. **请求上下文绑定**：`Start*Login(r.Context(), …)` / 后台 `Poll*(r.Context(), …)` —— handler 写完响应后 `net/http` 立即取消请求 context，后台轮询当场夭折。修复：**所有登录流一律 `context.Background()`**（raccoon/cline/trae/lobsterai/buddy/minimax/qoder；codearts 流自身已是 Background）。qoder 最早注释了这个坑但其余 provider 全部中招。`web/jethub.test.js` 有静态守卫（逐文件断言 `context.Background()` + 禁止 `Start*Login(r.Context())`）。
 2. **双消费者竞争**：status 轮询（`pollLogin`）与 API 层 pump goroutine 都直接读 `LoginSession.Started.Result`（容量 1 的缓冲 channel），先到者独占 outcome，另一方永久挂起。修复（`internal/jethub/sessions.go`）：**单赢家纪律** —— 只有 pump（`SettleAndCleanup`）读 channel 并记录结果（`settled` 状态 + `SessionStatus` 只读快照）；status 轮询改读记录态。
 3. **结算即 reap（弹窗永远停在等待）**：pump 结算后立即 reap session 的话，2s 轮询的下一次请求必然 404 —— `done:true` 转换永远不会被前端观察到，即使后端已成功。修复：结算后保留 `loginSessionGracePeriod`（30s，若干轮询间隔）再 reap。
 4. **凭据落盘后桥接 Key 不刷新（prefix 检索不到）**：`SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层**从未接线**（git 历史确认：hook 定义了但无人调用）——登录成功后桥接 provider 的 Keys 永远不更新，新账号对 `{prefix}/{model}` 路由不可见；备份导入能工作只是因为 `backupImport` 显式重同步。修复：`app.go` 装配 `SetAccountCredentialedHook(→ Bridge.SyncKeys)`。同时接线 `SetBrowserOpener(→ fsutil.OpenInBrowser)`：+新建账号自动打开默认浏览器授权页（对齐原插件；弹窗内链接保留为手动兜底）。
+5. **出站调用不走全局代理（`TLS handshake timeout`）**：jethub 的出站 client 默认 `ProxyFromEnvironment`，而 app 进程的 `HTTP(S)_PROXY` 是空的 —— 在「上游必须经本地路由代理」的机器上（Windows 系统代理 `127.0.0.1:2080`，镜像进 `config.yaml` `proxy.enabled`），Go 直连被 TLS 干扰掐死，而浏览器/DSH（undici 认系统代理）都正常。修复：`app.go` 把 `config.Proxy` 换算成 `http://host:port` 接线 `Manager.SetProxyURL`（重建共享 client）+ `SetPackageProxyURL`（codearts 回调 token 交换的包级 client 一并重定向）。普通 provider 的 `useProxy` 语义不变——jethub 出站**统一**跟随全局代理开关。
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
 
