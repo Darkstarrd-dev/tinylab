@@ -18,16 +18,19 @@ func timeAfter(d time.Duration) <-chan time.Time {
 // Raccoon Manager services (ref raccoon-auth.ts / raccoon-credits.ts /
 // raccoon-adapter.ts).
 
-// StartRaccoonQRLogin generates a QR code, returns the WeChat login page URL,
-// and pumps the background poll into the login session.
-func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID string, openURL func(string)) (*StartedLogin, error) {
+// StartRaccoonQRLogin generates a QR code and returns the two-step flow.
+//
+// ⚠️ `pageURL` 是**本地登录页**的地址（/free-hub-login.html?loginId=…），不是
+// 二维码内容。参考实现同样是自建页面：二维码内容
+// （`{base}/login/mp?code=…&appname=…`）必须被**微信扫码**打开，直接用浏览器
+// 打开那串 URL 是普通网页、无法鉴权（用户实测报障 2026-10-01）。故这里把两者
+// 分开：LoginURL = 浏览器要打开的页面，QRContent = 页面要画的二维码内容。
+//
+// 浏览器由调用方在会话注册**之后**打开（见 API 层）：先注册再开页面，避免
+// 页面抢在会话登记前请求数据端点拿到 404。
+func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID, pageURL string) (*StartedLogin, error) {
 	code := GenerateRaccoonQrCode()
-	loginURL := BuildRaccoonQrURL(code)
-	// Auto-open like the original plugin (explicit openURL wins if given).
-	m.openURLWithBrowser(loginURL)
-	if openURL != nil {
-		go openURL(loginURL)
-	}
+	qrContent := BuildRaccoonQrURL(code)
 	result := make(chan LoginOutcome, 1)
 	go func() {
 		deadline := timeNowPlus(raccoonLoginTimeout)
@@ -63,7 +66,7 @@ func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID string, ope
 			// pending/logging → keep polling.
 		}
 	}()
-	return &StartedLogin{LoginURL: loginURL, Result: result}, nil
+	return &StartedLogin{LoginURL: pageURL, QRContent: qrContent, Result: result}, nil
 }
 
 // CompleteRaccoonLogin persists the credential + display info. ⚠️ The

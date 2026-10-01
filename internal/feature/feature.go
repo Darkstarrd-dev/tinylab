@@ -139,7 +139,7 @@ func registerDefaults() {
 		StaticFiles: []string{
 			"api.js", "app.js", "auth.js", "combos.js", "console.js",
 			"fs-api.js", "headerStats.js", "i18n.js", "info_common.js",
-			"jethub.js", "style-jethub.css",
+			"jethub.js", "style-jethub.css", "raccoon-qr.js", "free-hub-login.html",
 			"monitor/monitor.js", "monitor/monitor_io.js", "monitor/monitor_modal.js",
 			"monitor/monitor_quota.js", "monitor/monitor_recent.js", "monitor/monitor_state.js",
 			"providers.js", "providers-detail.js", "providers-keys.js", "providers-models.js", "quickslots.js",

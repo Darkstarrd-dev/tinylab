@@ -432,6 +432,14 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		// --- Public routes + auth middleware ---
 		authMW := authHandler.Register(r)
 
+		// Free Hub 本地扫码登录页的数据源：**必须**在保护组之外 —— 页面是在系统
+		// 默认浏览器里打开的，那个浏览器可能没有管理 UI 的 cookie（密码保护开启
+		// 时挂进保护组会让页面 401/跳登录页）。访问控制是 loginId（128 位随机、
+		// 一次性），响应不含 token/凭据。
+		if rt.jethubManager != nil && rt.jethubBridge != nil {
+			jethubHandler.RegisterPublicLoginPage(r)
+		}
+
 		// --- Protected routes (auth required) ---
 		r.Group(func(r chi.Router) {
 			r.Use(authMW)

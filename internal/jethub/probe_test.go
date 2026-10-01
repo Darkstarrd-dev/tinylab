@@ -102,8 +102,10 @@ func TestProbeAccountModelBearerFallback(t *testing.T) {
 	}
 }
 
-// TestProbeAccountModelMinimaxPath: minimax is Anthropic-native — the probe
-// must hit /v1/messages with a messages-shaped body.
+// TestProbeAccountModelMinimaxPath: minimax is Anthropic-native AND its
+// endpoint is the FULL /mavis/api/v1/llm/v1/messages path (the host root would
+// make the proxy append the OpenAI entry path and 404 — reported defect). The
+// probe body is Anthropic-shaped and must stay that way (stream:true added).
 func TestProbeAccountModelMinimaxPath(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
@@ -114,8 +116,13 @@ func TestProbeAccountModelMinimaxPath(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer upstream.Close()
+	restoreMinimaxAPIHost(t, upstream.URL)
 
 	b, m, _, _ := newTestBridge(t)
+	// 生产装配（internal/app）在启动时注册全部 provider augmenter；探针走的是
+	// 同一条 Customize/Augment 管线，测试也必须注册，否则 minimax 的请求体
+	// 转换不会生效。
+	m.SetAugmenter("minimax", m.minimaxAugment)
 	mmID, mmRef := NewAccountID("minimax")
 	if err := m.AddAccount(Account{ID: mmID, Provider: "minimax", Nickname: "mm",
 		Enabled: true, CredentialRef: mmRef, CreatedAt: 1}); err != nil {
@@ -129,11 +136,14 @@ func TestProbeAccountModelMinimaxPath(t *testing.T) {
 	if err := b.ProbeAccountModel(context.Background(), "minimax", mmID, "MiniMax-M3"); err != nil {
 		t.Fatalf("minimax probe: %v", err)
 	}
-	if gotPath != "/v1/messages" {
-		t.Fatalf("minimax entry path: %q", gotPath)
+	if gotPath != minimaxInferPath {
+		t.Fatalf("minimax probe path: %q (want %q)", gotPath, minimaxInferPath)
 	}
 	if gotBody["max_tokens"] == nil || gotBody["messages"] == nil {
 		t.Fatalf("anthropic body shape: %v", gotBody)
+	}
+	if gotBody["stream"] != true {
+		t.Fatalf("probe body must be forced to stream:true (upstream has no non-stream branch): %v", gotBody)
 	}
 }
 

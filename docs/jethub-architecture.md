@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据）
+> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
 > Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
 >
@@ -12,14 +12,16 @@
 > - 修改 Free Hub UI 布局/入口/详情页/模型列表/Use Proxy 开关 → §3 + `web/static/jethub.js`/`settings.js`/`i18n.js`/`style-jethub.css`/`app-router.js`
 > - 修改限流重测/重置探针或永久锁 → §3.1 + `internal/jethub/probe.go`/`ratelimits.go`/`manager.go` + `internal/api/jethub/register.go`
 > - 修改 jethub 出站代理分派（`SetProxyURL`/`SetPackageProxyURL`/`ProxyEnabled`）→ §3.2 + `internal/jethub/sessions.go`/`codearts_login.go`/`bridge.go` + `internal/app/app.go`
+> - 修改 MiniMax 推理协议（端点 / OpenAI⇄Anthropic 转换 / 思考档位判据 / SSE 映射）→ §6.1 + `internal/jethub/minimax_convert.go`/`minimax_stream.go`/`minimax_credits.go`（augmenter）+ `qoder_adapter.go`（Customize/InterceptResponse 分派）+ `probe.go`
+> - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
 
 ## 1. 模块组成与边界
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
 | 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、11 provider 适配、WASM 桥、备份 |
-| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import |
-| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（19 项） |
+| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
+| 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（19 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
 | 装配 | `internal/app/app.go` | Manager/Bridge 构造、`RestoreBridges` 启动重桥、augmenter 注入 proxy Handler |
 
@@ -28,7 +30,7 @@
 ## 2. 存储层（`{configDir}/jethub/`，`config.ResolveJetHubDir`）
 
 - `credentials.json`：`{provider → credentialRef → 凭据 JSON}` 整体 AES-GCM 加密信封（`{"enc":"..."}`）；**加密密钥是 Free Hub 自持的 `{dir}/key`（0600，首次使用时生成）**。
-- ⚠️ **密钥归属（真实缺陷，2026-10-02）**：早期实现直接用 `config.Security.EncryptionKey`，而那把钥匙的生命周期属于**密码保护**——关闭密码保护会**清空**它（`api/settings/register.go`），设置密码又会**轮换**它。于是**任何未开密码保护的安装（默认状态）都无法保存凭据**：登录走到落盘一步必然报 `jethub: no encryption key available for credentials storage`（用户实测 minimax 报障）。现在密钥由 Free Hub 自持，与密码保护彻底解耦；传入的 config 密钥仅作**一次性迁移**用（若旧文件能用 config 密钥解开则采纳并改用自持密钥重加密，之后即使密码保护被关闭/轮换也不受影响）。
+- ⚠️ **密钥归属（真实缺陷，2026-10-01）**：早期实现直接用 `config.Security.EncryptionKey`，而那把钥匙的生命周期属于**密码保护**——关闭密码保护会**清空**它（`api/settings/register.go`），设置密码又会**轮换**它。于是**任何未开密码保护的安装（默认状态）都无法保存凭据**：登录走到落盘一步必然报 `jethub: no encryption key available for credentials storage`（用户实测 minimax 报障）。现在密钥由 Free Hub 自持，与密码保护彻底解耦；传入的 config 密钥仅作**一次性迁移**用（若旧文件能用 config 密钥解开则采纳并改用自持密钥重加密，之后即使密码保护被关闭/轮换也不受影响）。
 - `accounts.json`：账号索引 + 模型黑名单 + 前缀映射 + `permanentLocks` + `proxyEnabled`（`accountsFile`，与原版 JetHubConfig 同构——§1.5 备份兼容前提）。**账号索引不需要密钥**（这也是为什么本缺陷下"账号能建、凭据存不下"的表现具有高度辨识度）。
 - 两者均 `fsutil.AtomicWrite` 原子写；`Manager` RWMutex 双锁。
 - `machine_id` 类设备标识是**插件生成并随凭据持久化的随机 UUID**（qoder）或确定性派生（trae），非硬件指纹。
@@ -43,12 +45,13 @@
 - **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
 - **模型列表**（与本项目 Provider 详情的 Model list 同形态）：纵向行列表（名称 + **倍率徽标**（服务端 `rate` 字段：`x0.75`/`免费`/`x0.2→x0.1`，从 alias/note 解析、**无信息不编造**） + 可复制的模型 id + 删除/恢复单钮）；批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → **先创建占位账号**（POST `/accounts` 拿 `accountId`）再弹发码/验码两步弹窗（提交时按 `accountId` 绑定凭据；**取消 = 删除占位**）。URL 弹窗的取消同样删除占位。无凭据的占位账号在账号卡上显示「登录未完成 · 无凭据」灰徽标（`freeHubNoCredential`），领取/推理账号集都会过滤掉它们。
+- ⚠️ **扫码类 provider（raccoon）的 `loginUrl` 是本地页面**（`/free-hub-login.html?loginId=…`），**不是**二维码内容——后者要被微信扫码打开，用浏览器直接打开只是普通网页、无法鉴权（真实缺陷 7，§3.4）。
 - 样式只用 theme tokens（`var(--…)`），控件复用全局 `.btn`/`.badge`/`.modal`/`.input` 体系。
 
 ### 3.1 限流标记重测/重置 + 永久积分锁（后端）
 
 - **标记数据**：`accountEntry.ModelRateLimits`（model id → 重置时刻 ms）。本端推理链路写入的是 rotation 的 per-model 锁；该表当前主要来自**原版备份导入**（携带原插件的限流状态），重测/重置即是对这份数据的操作。内部记账键（`__` 前缀，如 trae 的签到代次）不参与重测/计数/渲染。
-- **重测** `POST /api/jethub/{provider}/ratelimits/retest` `{accountId?}`（`Bridge.RetestRateLimits`）：对每个标记的 (账号, 模型) 经 `Bridge.ProbeAccountModel`（`probe.go`）**真实发送一条最小消息**（OpenAI 体；minimax 走 `/v1/messages` + Anthropic 体；max_tokens=16）。探针**复用代理的 augmenter/customizer 管线**（`Manager.Customize`——codearts HMAC、qoder WASM、trae SOLO 都由各自 augmenter 完成，探针零协议实现）；URL 用 `urlutil.BuildUpstreamURL(base, entryPath)`，qoder 族由 Customizer 返回完整加密端点覆盖。HTTP 200 → 清除该标记；非 200 → 保留并在响应 `accounts[].stillLimited[]` 带原因（含状态码 + 截断报文）。会消耗少量额度——前端「重测所有」先确认。
+- **重测** `POST /api/jethub/{provider}/ratelimits/retest` `{accountId?}`（`Bridge.RetestRateLimits`）：对每个标记的 (账号, 模型) 经 `Bridge.ProbeAccountModel`（`probe.go`）**真实发送一条最小消息**（OpenAI 体；minimax 走 `/v1/messages` + Anthropic 体，且由 Customizer 覆盖为完整推理端点，§6.1；max_tokens=16）。探针**复用代理的 augmenter/customizer 管线**（`Manager.Customize`——codearts HMAC、qoder WASM、trae SOLO、minimax 协议桥都由各自 augmenter 完成，探针零协议实现）；URL 用 `urlutil.BuildUpstreamURL(base, entryPath)`，qoder 族与 minimax 由 Customizer 返回完整端点覆盖。HTTP 200 → 清除该标记；非 200 → 保留并在响应 `accounts[].stillLimited[]` 带原因（含状态码 + 截断报文）。会消耗少量额度——前端「重测所有」先确认。
 - **重置** `POST /api/jethub/{provider}/ratelimits/reset` `{accountId?}`：直接清除（跳过 `__` 键），不发任何请求。
 - **永久积分锁** `PUT /api/jethub/{provider}/permanent-lock` `{locked}`：provider 级开关（`accounts.json` 的 `permanentLocks` 表，仅 true 值有意义），能力白名单 {loomy, buddy, workbuddy}（原版 `PERMANENT_LOCK_PROVIDERS`）；`GET /providers` 每项带 `supportsRateLimit`/`canLockPermanent`/`permanentLocked`。⚠️ **选号侧的「锁定后只消耗临时积分」策略未移植**（需要对选号注入积分池感知）——开关持久化 + 随备份迁移已可用，语义见 §7。
 
@@ -62,7 +65,7 @@
 4. **凭据落盘后桥接 Key 不刷新（prefix 检索不到）**：`SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层**从未接线**（git 历史确认：hook 定义了但无人调用）——登录成功后桥接 provider 的 Keys 永远不更新，新账号对 `{prefix}/{model}` 路由不可见；备份导入能工作只是因为 `backupImport` 显式重同步。修复：`app.go` 装配 `SetAccountCredentialedHook(→ Bridge.SyncKeys)`。同时接线 `SetBrowserOpener(→ fsutil.OpenInBrowser)`：+新建账号自动打开默认浏览器授权页（对齐原插件；弹窗内链接保留为手动兜底）。
 5. **出站调用不走全局代理（`TLS handshake timeout`）**：jethub 的出站 client 默认 `ProxyFromEnvironment`，而 app 进程的 `HTTP(S)_PROXY` 是空的 —— 在「上游必须经本地路由代理」的机器上（Windows 系统代理 `127.0.0.1:2080`，镜像进 `config.yaml` `proxy.enabled`），Go 直连被 TLS 干扰掐死，而浏览器/DSH（undici 认系统代理）都正常。修复：`app.go` 把 `config.Proxy` 换算成 `http://host:port` 接线 `Manager.SetProxyURL`（重建共享 client）+ `SetPackageProxyURL`（codearts 回调 token 交换的包级 client 一并重定向）。
 
-**per-provider Use Proxy 开关（2026-10-02 新增）**：
+**per-provider Use Proxy 开关（2026-10-01 新增）**：
 
 - **状态**：`accounts.json` 的 `ProxyEnabled` 表（provider → bool，缺席 = 直连；随重启/备份同文件持久化）。`PUT /api/jethub/providers/{provider}/proxy` `{enabled}` 持久化并重同步桥接。
 - **三条出站路径都跟随该开关**：
@@ -73,18 +76,29 @@
 - ⚠️ **`SetProxyURL` 必须在首次出站调用前接线**（app 装配序）；client 对在开关切换后懒重建，无需进程重启。
 - ⚠️ **前端路径必须与后端路由同形**（真实缺陷 6，用户报障「Use Proxy 开关不可用：`Failed: HTTP 404 (non-JSON body)`」）：首版前端 PUT `/jethub/{provider}/proxy`，而后端注册在 `/jethub/providers/{provider}/proxy` —— chi 找不到路由直接回 `404 page not found` **纯文本**（故前端 `r.json()` 失败，显示的就是 non-JSON 提示）。聚合路由族统一形状：`/jethub/providers/{provider}/{prefix|proxy|accounts|models|ratelimits/*|permanent-lock}` 与 `/jethub/accounts/{accountID}`。**双端回归**：`internal/api/jethub/register_route_test.go`（真 chi 路由级：正确形状 200+JSON，旧错误形状必须 404；缺字段 400；未知 provider 404 带 JSON error）+ `web/jethub.test.js` 静态守卫（遍历 `jethub.js` 的 `apiPut('/jethub/…')`，断言路径必带 `providers/`/`accounts/` 段）。
 
-### 3.3 Cline WorkOS 轮询的判据与诊断（2026-10-02）
+### 3.3 Cline WorkOS 轮询的判据与诊断（2026-10-01）
 
 - **pending 的真实形态（本机实测）**：`POST https://api.workos.com/user_management/authenticate` 在用户未授权时返回 **400** + `{"error":"authorization_pending","error_description":"…"}`；用 `urn%3A…` 转义与未转义体实测结果一致（故编码不是变量）。成功为 `200 {access_token, refresh_token, …}`。
 - ⚠️ **判据只看响应体的 `error` 字段，不看状态码**（修复）：原先写成「2xx ⇒ 成功，否则按 error 分派」，一旦服务端/中间层给出 **2xx + `error`**（pending/slow_down）就会被误判为成功分支并报出误导性的「WorkOS token 响应缺少必要字段」——用户实测报障即此文案。现在先判 `error`（pending/slow_down 继续轮询、denied/expired/invalid_grant 终态、其余报错），再判 2xx 成功。
 - ⚠️ **错误信息必须携带真实响应**（修复）：`json.Unmarshal` 失败原先被静默忽略，于是「非 JSON / 空体」（例如本地代理或网关回 200 + HTML）统统呈现为「缺少必要字段」，把病因藏起来。现在 `clineBodySnippet` 会带上 `HTTP 状态码 + 响应体截断`（非 JSON 前缀、空体标注「空响应体」）并在 JSON 可解析时**列出顶层键名**（`clineJSONKeys`），同时写 `logger.Warn`。设备码授权与 token 注册两处同样补上了响应体。
 - token 字段兼容 snake_case 与 camelCase（`access_token`/`accessToken`）——WorkOS 各端点命名并不统一。
 - 回归用例（`internal/jethub/cline_test.go`）：`TestPollClinePendingOnHTTP200`（2xx+pending 继续轮询，反向验证原实现会误报）、`TestPollClineNonJSONBodySurfacesPayload`（HTML 体必须点名）、`TestPollClineEmptyBodySurfacesPayload`、`TestPollClineUnexpectedJSONShapeNamesKeys`（列出键名）、`TestPollClineUnknownErrorCodeNamesCodeAndEgress`（未识别 error 码必须报出码+描述+出站）、`TestPollClinePlainBody400NamesEgressAndBody`（无 error 字段的 400 必须报出响应体+出站）、`TestPollClineInvalidClientExplained`、`TestPollClineCamelCaseTokens`。
-- **实测的 WorkOS 400 形态（只读探针，2026-10-02）**：未授权 = `authorization_pending`（400）；device code 无效/过期/**已用过** = `invalid_grant`；client_id 不对 = `invalid_client`「Invalid client id.」；grant_type 不对 = `invalid_client`「Invalid client secret.」。⚠️ **`errorDetailOf` 不读 `error_description`**——default 分支曾因此只输出「轮询失败（HTTP 400）」而丢掉全部线索；现已改为显式带出 `error` 码 + 描述。
+- **实测的 WorkOS 400 形态（只读探针，2026-10-01）**：未授权 = `authorization_pending`（400）；device code 无效/过期/**已用过** = `invalid_grant`；client_id 不对 = `invalid_client`「Invalid client id.」；grant_type 不对 = `invalid_client`「Invalid client secret.」。⚠️ **`errorDetailOf` 不读 `error_description`**——default 分支曾因此只输出「轮询失败（HTTP 400）」而丢掉全部线索；现已改为显式带出 `error` 码 + 描述。
 - ⚠️ **错误信息一律附带「出站路径」**（`clineEgressNote`：直连 / 代理 `<url>` / 开关已开但代理未配置而降级直连）：响应体被中间层改写是首要嫌疑，出站模式一眼可辨，用户据此切换 Use Proxy 即可对照验证。
 - ⚠️ **出站 transport 强制 HTTP/1.1**（`newJethubTransport`：`ForceAttemptHTTP2:false` + 非 nil 空 `TLSNextProto`）：参考实现（Node undici 的 fetch = DSH 插件）默认只讲 HTTP/1.1，而 Go 会经 ALPN 协商 h2。用户环境对同一对端出现**间歇性三种异常**（TLS handshake timeout → 2xx 空体 → 400 无 error 码）而 Node/浏览器全正常，中间层对 h2 的处理是首要嫌疑；管理类调用负载极小，退回 1.1 无损失且与已验证可用的参考实现在协议层对齐（`TestJethubTransportIsHTTP11` 锁定该决定）。同时给 WorkOS 两个请求补 `Accept: application/json`（部分中间层据此决定返回 JSON 还是 HTML 错误页）。
 
 > 占位账号语义：`POST /accounts` 或 login handler 创建的占位（无凭据）在完成前**可见但明确标注**（灰徽标），且从不进入推理/领取账号集；登录失败或用户取消都会将其删除。
+
+### 3.4 本地扫码登录页（raccoon，真实缺陷 7 + 修复）
+
+- **真实缺陷 7（用户实测报障）**：「raccoon 渠道新建账号打开的网页不对，和插件里同渠道打开的不是一个页面，无法进行鉴权」。根因：首版把**二维码内容**当成页面打开了 —— `BuildRaccoonQrURL` 产出的是 `https://xiaohuanxiong.com/login/mp?code=<32位hex>&appname=商汤小浣熊官网`，它是**要被微信扫一扫打开的地址**；浏览器打开它只是官网的一个普通页面，与本次登录会话无关（该 code 永远不会回到 `success`）。参考插件从不打开它：它起本地 HTTP 服务承载弹窗页，页内渲染同一个 URL 的二维码（`ref/src/raccoon-login-page.ts`、`raccoon-qr.ts`）。
+- **本端实现**：不另起监听端口，改用本进程已有的 HTTP 服务 ——
+  - `web/static/free-hub-login.html`：**静态页**（公开资源，无需 cookie）；从查询串取 `loginId`，向公开端点取二维码内容，用 `raccoon-qr.js` 在浏览器端画二维码，每 2s 轮询状态，成功后显示「登录成功，可以关闭此窗口」并尝试 `window.close()`。
+  - `web/static/raccoon-qr.js`：**零依赖二维码编码器**（byte 模式 / 纠错等级 M / 版本 1–10，逐行移植自 ref `raccoon-qr.ts`；见「为什么在浏览器端」）。`web/raccoon-qr.test.js` 用**参考实现产出的黄金指纹**（SHA-256 of the module matrix）锁死移植保真度 —— 画错的二维码只能靠手机复现，代价极高，故不能只测「有输出」。
+  - `internal/api/jethub/login_page.go`：`GET /api/jethub/login-page?loginId=` → `{ok,provider,title,hint,qr}`；`GET …/login-page/status?loginId=` → `{done,success,error}`。**两条都挂在鉴权中间件之外**（`internal/api/router.go` 紧跟 `authHandler.Register(r)`）——页面是在**系统默认浏览器**里打开的，那里面没有管理 UI 的 cookie；开了密码保护的安装若把它挂进保护组，页面直接 401/跳登录页，「无法鉴权」会以另一种形式复发。访问控制交给 `loginId`（128 位随机、一次性、随会话 30s 宽限期一起回收），响应**不含** token/凭据/账号 id。
+- **协议分工**：`StartedLogin.LoginURL` = 本地页面（浏览器打开的东西）；新增 `StartedLogin.QRContent` = 二维码内容（页面画的东西）。`StartRaccoonQRLogin(ctx, accountID, pageURL)` 同时产出两者，**不再自己开浏览器** —— API handler 在**注册完会话之后**才 `OpenURLWithBrowser(pageURL)`（顺序即契约：先开页面会让页面抢在登记前请求数据端点而拿到 404）。
+- **安全边界**（与参考插件一致）：宿主侧/服务端持有全部敏感状态（`qrcode_code`、凭据），页面只做展示与轮询；页面文本里**没有**任何凭据字样。
+- ⚠️ **未移植**：`canceled` 时参考实现会**换一个新 code 并刷新页面上的二维码**，本端仍按「扫码已取消」终止本次登录（用户重开一次即可）；页面也**没有**参考实现的短信 Tab（本端短信走独立弹窗，需要阿里云滑块参数，尚未打通）。
 
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
@@ -121,10 +135,32 @@
 | cline | OpenAI 兼容 `api.cline.bot` | WorkOS 设备码 | `Bearer workos:<jwt>` 前缀必须保留 | 驼峰 `{refreshToken,grantType}` | 余额（`usr-` id） |
 | raccoon | OpenAI 兼容 + extra_body.thinking | 微信 QR + 短信 | AES-128-CFB 手机加密 + Bearer | 200003 终态 | 登录奖励 + 新手礼包 |
 | loomy | OpenAI 兼容 | **短信验证码**（不可静默续期，诚实 `refreshable:false`） | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
-| minimax | **Anthropic Messages 原生透传** | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
+| minimax | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（§6.1：进站 OpenAI 时双向转换；进站 `/v1/messages` 时原生透传） | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version、无 x-api-key） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
+
+### 6.1 MiniMax 推理协议桥（Anthropic Messages；真实缺陷 8 + 修复）
+
+- **真实缺陷 8（用户实测报障，trace `r28I4T2cXFlA-1`）**：`provider=MiniMax Code` 的请求打到 `https://agent.minimax.cn/v1/chat/completions`，上游回 **404 + Next.js HTML**（`__next_error__` / `NEXT_NOT_FOUND`）。两处根因：
+  1. **端点路径错**：MiniMax 推理端点是 `POST {apiHost}/mavis/api/v1/llm/v1/messages`（Anthropic Messages，ref `minimax-product.ts` 的 `MINIMAX_INFER_PATH`，2026-09-29 真机实测），而产品表把 `BaseURL` 填成了 host 根 —— jethub 的 URL 由 `urlutil.BuildUpstreamURL(BaseURL, 进站路径)` 构造，于是变成 `{host}/v1/chat/completions`。⚠️ 也**不能**靠带路径的 BaseURL 解决：`urlutil` 会把结尾的 `/v1/messages` 当已知端点后缀**剥掉**再拼进站路径。故改由 `Manager.Customize` 显式返回完整 URL（与 qoder 族同一机制、不同来源）。
+  2. **没有协议转换**：上游只讲 Anthropic Messages，而进站是 OpenAI chat-completions（本项目不做格式转换的红线**只约束代理核心**；桥接 provider 的差异一律收敛在各自的 augmenter/自定义钩子里，trae 的 SOLO、qoder 的 WASM 加密体同例）。
+- **四条路径（按进站协议 × 是否流式）**：
+
+  | 进站 | 是否流式 | 出站 | 响应 |
+  |---|---|---|---|
+  | `/v1/messages`（Anthropic 客户端） | 是 | 原样透传（只补 `stream:true`） | **字节级透传**（「Anthropic Messages 原生透传」） |
+  | `/v1/messages` | 否 | 同上 | 聚合成 Anthropic `message` 对象（⚠️ 不含 thinking 块，见下） |
+  | `/v1/chat/completions` 家族 | 是 | OpenAI → Anthropic 请求体（`minimax_convert.go`） | Anthropic SSE → OpenAI `chat.completion.chunk`（`minimax_stream.go`） |
+  | `/v1/chat/completions` 家族 | 否 | 同上 | 聚合成 OpenAI `chat.completion` |
+
+  上游**只有流式分支**（ref 恒发 `stream: true`），故出站一律 `stream:true`，再由上表决定对客户端呈现什么。
+- **请求体转换要点**（判据源自 ref `minimax-messages.ts`，2026-09-29 实测）：`system`/`developer` 消息提到顶层 `system` 字符串（多条按序以空行拼接；**绝不**下发 system 角色消息）；`role:"tool"` → user 消息内的 `tool_result` 块（Anthropic 没有 `role:"tool"`）；assistant `tool_calls` → `tool_use` 块（`arguments` 解析失败/空 → `{}` 但**块必须保留**，否则后续 `tool_result` 变孤儿块被拒）；`tools[].function.parameters` → `tools[].input_schema`；图片只接受 `data:` URL → `{type:"image",source:{type:"base64",…}}`（上游明确拒绝 `image_url`，远程 URL **显式报错**不静默丢图）；历史 `reasoning_content` **不回传**（无签名 thinking 会被拒）；`max_tokens` 是 Anthropic 必填 —— 进站缺省时按模型上限补（四个模型均 128000，未知模型 8192）；相邻同角色消息**合并**（Anthropic 要求角色交替，而 OpenAI 历史常不满足）。
+- **思考档位三态**（`minimaxThinkingPlan`，与 ref 同序判定）：`none` → `{type:"disabled"}`；`on` → `{type:"adaptive"}`；`M3.1*` 前缀 ⇒ **强制 adaptive**（传 disabled 会被服务端硬拒 400/2013）；其余有档位值 ⇒ adaptive + `output_config.effort`；**无档位 ⇒ 整个 `thinking` 键都不发**（安全默认，实测 200）。档位必须先过**声明侧门禁**（`minimaxDeclaredEfforts`）：M3.1 = 6 档 `default/low/medium/high/xhigh/max`；M3 = 仅 `on`/`none`（远端无 `effort_options`，不要凭空补档位）；M2.7 系 = **不声明**（forced_on，传 disabled 会被静默忽略）；未知模型 = 不声明 ⇒ 客户端给的档位一律丢弃。⚠️ 两端判据必须同源，否则「UI 给了选项、请求却丢掉」。
+- **响应转换要点**：`message_start` → 首帧带 `role:"assistant"` + 收 `usage.input_tokens`/`cache_*`；`content_block_delta` 的 `text_delta`→`content`、`thinking_delta`→`reasoning_content`、`input_json_delta`→`tool_calls[].function.arguments` 片段；**`signature_delta` 必须丢弃**（否则回答里出现一串十六进制）；`message_delta` → `stop_reason`（`tool_use`→`tool_calls`、`max_tokens`→`length`、`refusal`/未知/缺失→`stop`，**不编成 error**）+ `usage.output_tokens`/`thinking_tokens`（`thinking_tokens` 是 output 的**子集**，只映射 `reasoning_tokens` 不累加）；收尾发 finish 帧 + `choices:[]` 的 usage 帧（本项目用量统计读它）+ `[DONE]`。**流结束必须冲刷 buffer 余量** —— 截断流里携带 `stop_reason`/`usage` 的收尾帧就在最后一行（ref 修过的真实缺陷：症状是 `max_tokens` 被误报成 stop、usage 恒 0）。prompt_tokens 口径 = `input_tokens + cache_read + cache_creation`（OpenAI 无缓存列，分开存会让用量被低估）。
+- **错误通道**：非 2xx 的 Anthropic 错误体改写成 OpenAI 形状，但**保留原始 `type` 字符串**（402 的 `insufficient_balance_error` 是 `rotation.IsBalanceExhausted` 的判据，丢了就不会锁 key），状态码不变（分类仍由 rotation 按状态码做）。**错误帧恒在第一帧** ⇒ 拦截器 peek 首个 `data:` 行（⚠️ Anthropic 的错误帧是 `event: error` + `data:` 两行，不能只 peek 第一行，否则重演 Qoder「干净地停止、无任何报错」）并让本次尝试失败以触发重试；200 但**没有任何内容块** ⇒ 显式报错（静默空回复比报错更糟）。
+- **探针（重测按钮）同路**：`probeEntryPath("minimax")` 给 `/v1/messages` + Anthropic 体，`Customize` 把 URL 覆盖为完整端点，augmenter 补 `stream:true` —— 与真实推理共用同一条管线。
+- ⚠️ **未实测/未移植**：M3 的 `on`/`none` 之外无档位；非流式聚合的**响应**形状未经真机验证（参考实现从未发过非流式请求，上游只有流式分支）；思考块在 Anthropic 非流式聚合里被丢弃（无签名，回传会被拒）；`tool_choice:"none"` 不下发（Anthropic 无对应形态）。
 
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 
@@ -132,7 +168,7 @@
 - **加密壳在浏览器**（`crypto.subtle`，与原版 backup-crypto.js 同参数：PBKDF2 310000 / SHA-256 / AES-256-GCM / salt 16B / iv 12B，`format: dsh-codearts-auth/backup.encrypted`）；明文载荷由 Go 组装/导入（`GET /api/jethub/backup/export`、`POST /api/jethub/backup/import`）。
 - 导入语义：账号按**原 id upsert**（幂等）、凭据 JSON **原文直存不重新序列化**、黑名单整体替换、格式/版本硬校验拒绝；导入后全桥接 provider SyncKeys。
 - **permanentLocks（锁定永久积分）已实现双向迁移**：导出写 sanitize 后的表（只留 true，恒有该键）；导入按原版 `locksFromPayload` 三分支——有表→整体替换（过滤脏值）、仅有旧版 `loomyPermanentLocked`→只落 loomy、两者皆无→保持当前值。
-- 实测兼容性：原插件导出的备份已由用户**实际导入成功**（2026-10-02）；反向（本端导出→原插件导入）为源码级逐字段推证。
+- 实测兼容性：原插件导出的备份已由用户**实际导入成功**（2026-10-01）；反向（本端导出→原插件导入）为源码级逐字段推证。
 
 ## 8. 错误语义（两条通道共用一套判据，`qoder_queue.go`）
 
@@ -148,6 +184,9 @@
 - `internal/jethub/sessions_test.go`（6 个）：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照 + 宽限期 reap + `SetProxyURL` 代理分派（httptest 伪代理端点验证请求确实走代理）+ `ProxyEnabled` 开关分派 client 并跨 reload 持久化。
 - `internal/jethub/credentials_key_test.go`（5 个）：**空 config 密钥下凭据可存**（本次报错的直接回归）+ 自持密钥稳定且不等于 config 密钥 + config 密钥旧文件迁移（迁移后无 config 密钥也能读）+ 无法解密时必须显式报错 + 浏览器 opener 被调用。
 - `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **8 个诊断用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、未知 error 码带出码+描述+出站、纯文本 400 带出响应体+出站、invalid_client 专门文案、camelCase token）——§3.3。
+- `internal/jethub/minimax_convert_test.go`（14 个）：出站 URL 必须由 Customize 覆盖为完整推理端点 + 其他 provider 不受影响 + Anthropic 进站原样透传（只补 stream）+ OpenAI→Anthropic 富体（system 折叠/图片 base64/tool_use+tool_result/tools+tool_choice/max_tokens 默认/相邻同角色合并/远程图片显式报错）+ **思考三态判据表**（12 例：M3.1 拒 disabled、M3 只能 on|none、M2.7 不声明、未知模型不声明）+ 流式转换（reasoning/content/tool_calls/usage/finish）+ **截断流冲刷**（stop_reason=length、usage 不丢）+ 非流式两种聚合 + 首帧错误拦截 + 错误体改写保留 `insufficient_balance`（§6.1）。
+- `internal/api/jethub/login_page_test.go`（6 个）+ `internal/api/jethub_login_page_public_test.go`（2 个）：公开登录页端点（二维码内容/404/状态生命周期/不泄露账号 id）+ **在开启密码保护的真实路由器下**断言 `/api/jethub/login-page` 未被鉴权拦截（404 来自 handler）而 `/api/jethub/providers` 仍 401，静态页与 `raccoon-qr.js` 公开可取（§3.4）。
+- `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `web/jethub.test.js`（19 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；minimax 非流式聚合的响应形状未经真机验证（§6.1）。

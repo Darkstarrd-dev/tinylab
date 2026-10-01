@@ -24,8 +24,16 @@ func (h *Handler) RegisterRaccoon(r chi.Router) {
 	r.Get("/raccoon/balance", h.raccoonBalance)
 }
 
-// raccoonLogin POST — QR flow (client-generated 32-hex code; UI renders the
-// WeChat login page itself and polls status with loginId).
+// raccoonLogin POST — QR flow.
+//
+// ⚠️ 打开的必须是**本地登录页**（/free-hub-login.html），不是二维码内容：
+// `https://xiaohuanxiong.com/login/mp?code=…&appname=…` 是要被**微信扫码**打开
+// 的地址，直接用浏览器打开它只是普通网页、无法鉴权（用户实测报障
+// 2026-10-01：「打开的网页不对，和插件里同渠道打开的不是一个页面」）。参考插件
+// 同样是自建弹窗页：渲染二维码 + 轮询状态 + 成功后自动关闭。
+//
+// ⚠️ 顺序也是契约：**先注册会话再开浏览器** —— 反过来的话页面可能抢在登记之前
+// 请求数据端点，拿到 404 后停在「登录会话不存在」。
 //
 // ⚠️ The background poll MUST NOT hang off r.Context(): the handler returns
 // right after this response, and net/http cancels the request context at that
@@ -41,19 +49,22 @@ func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartRaccoonQRLogin(context.Background(), id, nil)
+	loginID := corejethub.NewLoginSessionID()
+	pageURL := raccoonLoginPageURL(r, loginID)
+	started, err := h.d.Manager.StartRaccoonQRLogin(context.Background(), id, pageURL)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	loginID := corejethub.NewLoginSessionID()
 	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
 	corejethub.RegisterLoginSession(loginID, sess)
 	// Fire-and-forget pump: settles the outcome, records it for the status
 	// poll and deletes the placeholder on failure. The flow persists the
 	// credential itself via CompleteRaccoonLogin, so nothing extra here.
 	go corejethub.SettleAndCleanup(sess, nil)
+	// Session registered → the page can already read its QR payload.
+	h.d.Manager.OpenURLWithBrowser(pageURL)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,

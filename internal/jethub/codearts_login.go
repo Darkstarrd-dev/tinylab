@@ -53,8 +53,13 @@ func BuildPortalLoginResultURL(succeeded bool) string {
 // immediately, then awaits Result.
 type StartedLogin struct {
 	LoginURL string
-	Result   <-chan LoginOutcome
-	cancel   context.CancelFunc
+	// QRContent is the payload the QR code must encode, when the provider's
+	// login is scan-based (raccoon). It is NOT a page URL: the local
+	// /free-hub-login.html page renders LoginURL for the browser and reads
+	// QRContent to draw the QR. Empty for every other provider.
+	QRContent string
+	Result    <-chan LoginOutcome
+	cancel    context.CancelFunc
 	// resultCh is the writable side of Result (SetResult rewires it for
 	// device-code flows that deliver from a custom goroutine).
 	resultCh chan LoginOutcome

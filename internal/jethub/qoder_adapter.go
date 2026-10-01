@@ -75,16 +75,34 @@ func qoderInferSessionFor(provider, accountID string, cred *QoderCredential, hos
 	return inf, nil
 }
 
-// Customize implements proxy.RequestCustomizer. Only qoder/qodercn customize
-// (outURL != ""); every other bridged provider falls through to its Augment
-// hook with outURL == "" (the proxy then builds the default URL).
+// Customize implements proxy.RequestCustomizer. qoder/qodercn return the
+// encrypted-inference URL, minimax returns its FULL Anthropic Messages
+// endpoint (a path-bearing BaseURL would be mangled by urlutil); every other
+// bridged provider falls through to its Augment hook with outURL == "" (the
+// proxy then builds the default URL).
 func (m *Manager) Customize(r *http.Request, body []byte, providerID, keyID, upstreamModel string) (string, []byte, error) {
 	provider, ok := ProviderNameFromID(providerID)
-	if !ok || (provider != "qoder" && provider != "qodercn") {
+	if !ok {
 		out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
 		return "", out, err
 	}
-	return m.qoderCustomize(r, body, provider, keyID, upstreamModel)
+	switch provider {
+	case "qoder", "qodercn":
+		return m.qoderCustomize(r, body, provider, keyID, upstreamModel)
+	case "minimax":
+		// ⚠️ MiniMax 推理端点是 /mavis/api/v1/llm/v1/messages，**不能**靠
+		// BaseURL 表达：urlutil 会把结尾的 /v1/messages 当作已知端点后缀剥掉
+		// 再拼进站路径，最终落到 {host}/v1/chat/completions → 上游 404
+		// （用户实测 trace r28I4T2cXFlA-1 的 Next.js 404 页）。故这里显式返回
+		// 完整 URL，body 交给 augmenter（含 OpenAI→Anthropic 转换）。
+		out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
+		if err != nil {
+			return "", nil, err
+		}
+		return minimaxInferURL(), out, nil
+	}
+	out, err := m.Augment(r, body, providerID, keyID, upstreamModel)
+	return "", out, err
 }
 
 // qoderCustomize builds the encrypted request: client OpenAI body → payload
@@ -162,12 +180,20 @@ func qoderModelDisplayName(provider, modelID string) string {
 	return modelID
 }
 
-// InterceptResponse implements proxy.ResponseInterceptor for the qoder family
-// (HTTP 403 channel + SSE in-stream channel — ONE implementation, both call
-// sites; forking them is how the SSE channel got missed the first time).
+// InterceptResponse implements proxy.ResponseInterceptor for the bridged
+// providers that need a response-side hook: the qoder family (HTTP 403
+// channel + SSE in-stream channel — ONE implementation, both call sites;
+// forking them is how the SSE channel got missed the first time) and minimax
+// (Anthropic SSE → OpenAI chunk conversion).
 func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (io.Reader, int64, error) {
 	provider, ok := ProviderNameFromID(providerID)
-	if !ok || (provider != "qoder" && provider != "qodercn") {
+	if !ok {
+		return nil, 0, nil
+	}
+	if provider == "minimax" {
+		return m.minimaxInterceptResponse(clientReq, resp, upstreamModel, isStream)
+	}
+	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil
 	}
 	return m.qoderInterceptResponse(resp, provider, keyID, upstreamModel, isStream)

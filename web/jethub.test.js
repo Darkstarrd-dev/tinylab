@@ -97,10 +97,11 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
     assert.ok(go.includes('SettleAndCleanup(sess'), f + ' must pump the outcome via SettleAndCleanup');
   }
   // Every login handler must auto-open the authorization page: the flows that
-  // live in Manager Start*Login functions do it internally, but the two that
-  // are inline in the API handler (minimax, qoder) must call the opener
+  // live in Manager Start*Login functions do it internally, but the inline
+  // ones (minimax, qoder) and the scan-login page (raccoon: the local page URL
+  // only exists once the handler knows the request host) must call the opener
   // themselves — minimax shipped without it (reported defect).
-  for (const f of ['minimax.go', 'qoder.go']) {
+  for (const f of ['minimax.go', 'qoder.go', 'raccoon.go']) {
     const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
     assert.ok(go.includes('OpenURLWithBrowser('), f + ' must auto-open the login page (OpenURLWithBrowser)');
   }

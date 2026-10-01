@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Hub 登录</title>
+<!--
+  Free Hub 本地登录页（扫码类 provider）。
+
+  ⚠️ 为什么需要这个页面（用户实测报障 2026-10-01）：「新建账号」原先直接打开
+  `https://xiaohuanxiong.com/login/mp?code=...` —— 那串 URL 是**二维码的内容**
+  （要被微信扫码后打开），不是给人用浏览器看的页面，所以「无法进行鉴权」。
+  参考插件同样是自建页面：宿主侧渲染二维码 + 轮询状态 + 成功后自动关闭。
+
+  ⚠️ 本页是**公开**静态资源（无鉴权）：它可能在一个没有管理 UI cookie 的浏览器
+  里被打开。所有数据都靠 `loginId`（128 位随机、一次性）换取，页面本身不含任何
+  凭据或密钥。
+-->
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: #f5f6f8; color: #1f2329; }
+  .card { background: #fff; border-radius: 12px; padding: 20px 24px 24px;
+          box-shadow: 0 4px 24px rgba(0,0,0,.08); text-align: center; width: 320px; }
+  h1 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
+  .qr { width: 220px; height: 220px; display: flex; align-items: center; justify-content: center;
+        margin: 0 auto; border: 1px solid #eceef1; border-radius: 8px; padding: 6px;
+        box-sizing: content-box; background: #fff; }
+  .qr svg { display: block; width: 100%; height: 100%; }
+  .qr-placeholder { font-size: 12px; color: #8a9099; padding: 0 12px; }
+  .sub { font-size: 12px; color: #8a9099; margin: 10px 0 0; }
+  .status { margin-top: 12px; font-size: 13px; color: #4e5969; min-height: 20px; }
+  .status[data-tone="ok"] { color: #0f9d58; font-weight: 600; }
+  .status[data-tone="err"] { color: #d93026; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="page-title">登录</h1>
+    <div class="qr" id="qr-box"><span class="qr-placeholder">二维码加载中…</span></div>
+    <p class="sub" id="qr-hint">打开微信扫一扫，扫描上方二维码</p>
+    <div class="status" id="status">正在准备…</div>
+  </div>
+
+<script src="/raccoon-qr.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var POLL_INTERVAL_MS = 2000;
+  var params = new URLSearchParams(window.location.search);
+  var loginId = params.get('loginId') || '';
+  var statusEl = document.getElementById('status');
+  var qrBox = document.getElementById('qr-box');
+  var timer = null;
+
+  function setStatus(text, tone) {
+    statusEl.textContent = text;
+    if (tone) { statusEl.setAttribute('data-tone', tone); }
+    else { statusEl.removeAttribute('data-tone'); }
+  }
+
+  function fail(message) {
+    if (timer) { clearInterval(timer); timer = null; }
+    setStatus(message || '登录失败', 'err');
+  }
+
+  function succeed(message) {
+    if (timer) { clearInterval(timer); timer = null; }
+    setStatus(message, 'ok');
+    setTimeout(function () { window.close(); }, 1200);
+  }
+
+  if (loginId === '') {
+    fail('缺少 loginId —— 请从 Free Hub 重新点击「新建账号」');
+    return;
+  }
+
+  // 一次性随机 loginId 作为凭据（页面本身无鉴权，也可能在无 cookie 的浏览器打开）。
+  fetch('/api/jethub/login-page?loginId=' + encodeURIComponent(loginId))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) {
+        fail((data && data.error) || '登录会话不存在或已结束');
+        return;
+      }
+      if (data.title) { document.getElementById('page-title').textContent = data.title; }
+      if (data.hint) { document.getElementById('qr-hint').textContent = data.hint; }
+      if (!data.qr) {
+        fail('该登录方式没有可展示的二维码');
+        return;
+      }
+      try {
+        qrBox.innerHTML = window.RaccoonQR.renderQrSvg(data.qr, { size: 220 });
+      } catch (e) {
+        fail('二维码生成失败：' + (e && e.message ? e.message : e));
+        return;
+      }
+      setStatus('等待扫码…');
+      timer = setInterval(poll, POLL_INTERVAL_MS);
+      poll();
+    })
+    .catch(function () {
+      fail('无法连接 TinyLab（应用是否已退出？）');
+    });
+
+  function poll() {
+    fetch('/api/jethub/login-page/status?loginId=' + encodeURIComponent(loginId))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data) { return; }
+        if (data.done) {
+          if (data.success) { succeed('登录成功，可以关闭此窗口了'); }
+          else { fail(data.error || '登录失败'); }
+          return;
+        }
+        setStatus('等待扫码…');
+      })
+      .catch(function () { /* 轮询偶发失败不打断（下一次继续） */ });
+  }
+})();
+</script>
+</body>
+</html>

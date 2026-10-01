@@ -315,8 +315,17 @@ func TestMinimaxAugmentHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != `{"model":"MiniMax-M3","messages":[]}` {
-		t.Fatal("Anthropic native body passes through unchanged (no conversion)")
+	// 进站 Anthropic（/v1/messages 结尾，探针也走这条）→ body 原样透传，只补
+	// stream:true：上游只实现了流式分支，而 Anthropic 的 stream 缺省是 false。
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed["model"] != "MiniMax-M3" || parsed["stream"] != true {
+		t.Fatalf("Anthropic native body must pass through with stream:true, got %s", out)
+	}
+	if _, ok := parsed["messages"]; !ok {
+		t.Fatalf("messages must be preserved: %s", out)
 	}
 	if req.Header.Get("Authorization") != "Bearer mmoat_tok" {
 		t.Fatalf("bearer wrong: %q", req.Header.Get("Authorization"))

@@ -348,9 +348,13 @@ func looseAmount(v any) *float64 {
 	return nil
 }
 
-// minimaxAugment: Anthropic Messages native passthrough — x-api-key family
-// is NOT used; only Authorization Bearer + no anthropic-version (verified
-// unnecessary). Body unchanged (no protocol conversion — AGENTS.md 纪律).
+// minimaxAugment: header family swap (Authorization Bearer only — no
+// x-api-key, and NO anthropic-version: 实测不需要，ref minimax.ts 同款判据)
+// plus the protocol bridge.
+//
+// ⚠️ 进站 `/v1/messages`（Anthropic 原生）→ body 原样透传（只补 stream:true：
+// 上游只实现了流式分支）；进站 OpenAI chat-completions 家族 → 转成 Anthropic
+// Messages 体（用户实测：直接把 OpenAI 体发给上游会 404/参数错）。
 func (m *Manager) minimaxAugment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 	cred, err := m.minimaxCredentialFor(keyID)
 	if err != nil {
@@ -362,7 +366,7 @@ func (m *Manager) minimaxAugment(r *http.Request, body []byte, providerID, keyID
 	for k, v := range MinimaxInferHeaders(cred) {
 		r.Header.Set(k, v)
 	}
-	return body, nil
+	return minimaxBuildRequest(minimaxIsAnthropicEntry(minimaxEntryPathOf(r)), body, upstreamModel)
 }
 
 // minimaxCredentialFor resolves + parses a minimax credential.
