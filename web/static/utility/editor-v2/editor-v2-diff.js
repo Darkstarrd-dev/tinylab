@@ -118,29 +118,29 @@
             <i class="codicon codicon-diff"></i>
             <span>${escapeHtml(tab.name)}</span>
           </span>
-          <span id="ed2-diff-stats" style="color: var(--text-muted); font-size: 11px;">计算差异中...</span>
+          <span id="ed2-diff-stats" style="color: var(--text-muted); font-size: 11px;">${t('ed2DiffComputing')}</span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-prev" title="上一处差异 (Previous Change)">
+          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-prev" title="${t('ed2DiffPrevTitle')}">
             <i class="codicon codicon-arrow-up"></i>
           </button>
-          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-next" title="下一处差异 (Next Change)">
+          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-next" title="${t('ed2DiffNextTitle')}">
             <i class="codicon codicon-arrow-down"></i>
           </button>
-          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-reset" title="重置决策为默认采纳">
-            <i class="codicon codicon-clear-all"></i> 重置
+          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-reset" title="${t('ed2DiffResetDecision')}">
+            <i class="codicon codicon-clear-all"></i> ${t('ed2DiffReset')}
           </button>
-          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-refresh" title="重新计算与刷新快照">
-            <i class="codicon codicon-refresh"></i> 刷新
+          <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-refresh" title="${t('ed2DiffRecalc')}">
+            <i class="codicon codicon-refresh"></i> ${t('ed2DiffRefresh')}
           </button>
           <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-accept-all" disabled>
-            <i class="codicon codicon-check"></i> 全部采纳 (B)
+            <i class="codicon codicon-check"></i> ${t('ed2DiffAcceptAll')}
           </button>
           <button class="btn btn-secondary btn-sm" id="ed2-diff-btn-reject-all" disabled>
-            <i class="codicon codicon-discard"></i> 全部保留 (A)
+            <i class="codicon codicon-discard"></i> ${t('ed2DiffKeepAll')}
           </button>
           <button class="btn btn-primary btn-sm" id="ed2-diff-btn-open-result" disabled>
-            <i class="codicon codicon-export"></i> 打开采纳结果为新标签
+            <i class="codicon codicon-export"></i> ${t('ed2DiffOpenResult')}
           </button>
         </div>
       </div>
@@ -165,7 +165,7 @@
       } catch (err) {
         if (currentDiffTab !== tab) return;
         const stats = activeDiffContainer.querySelector('#ed2-diff-stats');
-        if (stats) stats.textContent = '计算失败';
+        if (stats) stats.textContent = t('ed2DiffCalcFailed');
         const table = activeDiffContainer.querySelector('#ed2-diff-table');
         if (table) {
           table.innerHTML = `
@@ -274,7 +274,7 @@
         }
         renderRowsVirtual(tab);
         updateDiffStats(tab);
-        if (window.toast) window.toast('已重置全部决策', 'info');
+        if (window.toast) window.toast(t('ed2DiffResetDone'), 'info');
       };
     }
 
@@ -290,7 +290,7 @@
         tab.rows = null;
         tab.decisions.clear();
         await renderDiffTab(tab, activeDiffContainer.parentElement);
-        if (window.toast) window.toast('已刷新 Diff 快照', 'info');
+        if (window.toast) window.toast(t('ed2DiffRefreshDone'), 'info');
       };
     }
 
@@ -299,7 +299,7 @@
         if (r.type !== 'context') tab.decisions.set(r.id, 'accept');
       }
       renderRowsVirtual(tab);
-      if (window.toast) window.toast('已全部设为采纳修改 (B)', 'info');
+      if (window.toast) window.toast(t('ed2DiffAllAccept'), 'info');
     };
 
     btnRejectAll.onclick = () => {
@@ -307,7 +307,7 @@
         if (r.type !== 'context') tab.decisions.set(r.id, 'reject');
       }
       renderRowsVirtual(tab);
-      if (window.toast) window.toast('已全部设为保留原版 (A)', 'info');
+      if (window.toast) window.toast(t('ed2DiffAllKeep'), 'info');
     };
 
     btnOpenResult.onclick = () => {
@@ -315,7 +315,7 @@
       const newTab = window.EditorV2.createUntitledTab(assembledText);
       newTab.name = `Result of ${tab.name.replace(/^Diff:\s*/, '')}`;
       window.EditorV2.renderTabs();
-      if (window.toast) window.toast('已在新标签页中打开比较采纳结果', 'success');
+      if (window.toast) window.toast(t('ed2DiffOpenedNewTab'), 'success');
     };
   }
 
@@ -376,8 +376,8 @@
         } else {
           const isAccept = dec === 'accept';
           ctrlCell = `
-            <button class="ed2-diff-ctrl-btn ${isAccept ? 'active-accept' : ''}" data-act="accept" data-row="${rowId}" title="采纳右侧 (B)">B</button>
-            <button class="ed2-diff-ctrl-btn ${!isAccept ? 'active-reject' : ''}" data-act="reject" data-row="${rowId}" title="保留左侧 (A)">A</button>
+            <button class="ed2-diff-ctrl-btn ${isAccept ? 'active-accept' : ''}" data-act="accept" data-row="${rowId}" title="${t('ed2DiffAcceptRight')}">B</button>
+            <button class="ed2-diff-ctrl-btn ${!isAccept ? 'active-reject' : ''}" data-act="reject" data-row="${rowId}" title="${t('ed2DiffKeepLeft')}">A</button>
           `;
         }
 
@@ -454,7 +454,7 @@
         <div class="modal-body" style="padding: 16px 0; display: flex; flex-direction: column; gap: 14px;">
           <!-- Mode Tabs -->
           <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color, #333); padding-bottom: 8px;">
-            <button class="btn ${hasBaseline ? 'btn-primary' : 'btn-secondary'} btn-sm" id="ed2-diff-mode-saved" ${hasBaseline ? '' : 'disabled'} title="${hasBaseline ? '对比磁盘已保存快照与当前未保存修改' : '当前文档无磁盘基线（未保存或新建文档）'}">
+            <button class="btn ${hasBaseline ? 'btn-primary' : 'btn-secondary'} btn-sm" id="ed2-diff-mode-saved" ${hasBaseline ? '' : 'disabled'} title="${hasBaseline ? t('ed2DiffBaselineSaved') : t('ed2DiffBaselineNone')}">
               已保存 vs 当前草稿 (Saved vs Current)
             </button>
             <button class="btn ${hasBaseline ? 'btn-secondary' : 'btn-primary'} btn-sm" id="ed2-diff-mode-custom">
@@ -487,7 +487,7 @@
                 ${tabs.map(t => `<option value="${t.id}" ${t.id === activeTab?.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
                 <option value="__custom__">-- 手动输入或粘贴文本 --</option>
               </select>
-              <textarea class="input" id="ed2-diff-custom-left" rows="4" placeholder="在此粘贴原文档内容..." style="width: 100%; box-sizing: border-box; margin-top: 6px; display: none; font-size: 12px; font-family: monospace;"></textarea>
+              <textarea class="input" id="ed2-diff-custom-left" rows="4" placeholder="${t('ed2DiffPasteOriginal')}" style="width: 100%; box-sizing: border-box; margin-top: 6px; display: none; font-size: 12px; font-family: monospace;"></textarea>
             </div>
 
             <!-- Right Side (B / Revised) -->
@@ -497,7 +497,7 @@
                 ${tabs.map((t, idx) => `<option value="${t.id}" ${idx === 1 ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
                 <option value="__custom__" ${tabs.length <= 1 ? 'selected' : ''}>-- 手动输入或粘贴文本 --</option>
               </select>
-              <textarea class="input" id="ed2-diff-custom-right" rows="4" placeholder="在此粘贴修改后的文档内容..." style="width: 100%; box-sizing: border-box; margin-top: 6px; ${tabs.length <= 1 ? 'display: block;' : 'display: none;'} font-size: 12px; font-family: monospace;"></textarea>
+              <textarea class="input" id="ed2-diff-custom-right" rows="4" placeholder="${t('ed2DiffPasteRevised')}" style="width: 100%; box-sizing: border-box; margin-top: 6px; ${tabs.length <= 1 ? 'display: block;' : 'display: none;'} font-size: 12px; font-family: monospace;"></textarea>
             </div>
           </div>
         </div>

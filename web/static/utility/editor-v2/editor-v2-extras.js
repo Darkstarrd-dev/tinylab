@@ -113,12 +113,12 @@
       currentCodeEditor.focus();
 
       if (window.toast) {
-        window.toast(`已插入图片: ${filename}`, 'success');
+        window.toast(t('ed2ImgInserted', [filename]), 'success');
       }
     } catch (err) {
       console.error('[EditorV2Extras] Failed to process image:', err);
       if (window.toast) {
-        window.toast('处理图片失败: ' + err.message, 'error');
+        window.toast(t('ed2ImgProcessFailed') + err.message, 'error');
       }
     }
   }
@@ -168,7 +168,7 @@
         const blob = await res.blob();
         tab.assets.set(rel, blob);
       } else {
-        throw new Error(`无法读取引用的图片 "${rel}" (${res.status} ${res.statusText})`);
+        throw new Error(t('ed2ImgRefReadFailed', [rel, String(res.status), res.statusText]));
       }
     }
   }
@@ -185,42 +185,42 @@
         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
           <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
             <i class="codicon codicon-file-media"></i>
-            <span>插入图片 (Insert Image)</span>
+            <span>${t('ed2ImgModalTitle')}</span>
           </h3>
           <button class="ed2-icon-btn" id="ed2-img-modal-close" style="font-size: 16px;">×</button>
         </div>
         <div class="modal-body" style="padding: 16px 0; display: flex; flex-direction: column; gap: 14px;">
           <!-- Local Upload Drop Zone -->
           <div>
-            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">本地图片 (支持粘贴、拖拽或点击选择)</label>
+            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">${t('ed2ImgLocalLabel')}</label>
             <div id="ed2-img-drop-zone" style="border: 2px dashed var(--border-color, #444); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; background: var(--bg-hover, rgba(255,255,255,0.03));">
               <i class="codicon codicon-cloud-upload" style="font-size: 28px; display: block; margin-bottom: 6px; opacity: 0.7;"></i>
-              <div style="font-size: 13px; color: var(--text-base, #eee);">点击选择本地图片或拖入文件</div>
-              <div style="font-size: 11px; color: var(--text-muted, #888); margin-top: 4px;">将自动压缩为高质量 WebP 并存入当前文档资产</div>
+              <div style="font-size: 13px; color: var(--text-base, #eee);">${t('ed2ImgLocalHint')}</div>
+              <div style="font-size: 11px; color: var(--text-muted, #888); margin-top: 4px;">${t('ed2ImgLocalNote')}</div>
               <input type="file" id="ed2-img-file-input" accept="image/*" style="display: none;" />
             </div>
           </div>
 
           <div style="display: flex; align-items: center; gap: 8px; opacity: 0.5; font-size: 11px;">
             <div style="flex: 1; height: 1px; background: var(--border-color, #444);"></div>
-            <span>或者输入网络图片</span>
+            <span>${t('ed2ImgOrUrl')}</span>
             <div style="flex: 1; height: 1px; background: var(--border-color, #444);"></div>
           </div>
 
           <!-- Web URL -->
           <div>
-            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">图片 URL</label>
+            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">${t('ed2ImgUrlLabel')}</label>
             <input type="text" class="input" id="ed2-img-url" placeholder="https://example.com/image.png" style="width: 100%; box-sizing: border-box;" />
           </div>
           <div>
-            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">替代文本 (Alt Text)</label>
-            <input type="text" class="input" id="ed2-img-alt" placeholder="图片说明" style="width: 100%; box-sizing: border-box;" />
+            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">${t('ed2ImgAltLabel')}</label>
+            <input type="text" class="input" id="ed2-img-alt" placeholder="${t('ed2ImgCaptionTitle')}" style="width: 100%; box-sizing: border-box;" />
           </div>
         </div>
 
         <div class="modal-actions" style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button class="btn btn-ghost" id="ed2-img-btn-cancel">取消</button>
-          <button class="btn btn-primary" id="ed2-img-btn-insert-url">插入网络图片</button>
+          <button class="btn btn-ghost" id="ed2-img-btn-cancel">${t('ed2EmbedCancel')}</button>
+          <button class="btn btn-primary" id="ed2-img-btn-insert-url">${t('ed2ImgInsertUrl')}</button>
         </div>
       </div>
     `;
@@ -268,7 +268,7 @@
     overlay.querySelector('#ed2-img-btn-insert-url').onclick = () => {
       const url = urlInput.value.trim();
       if (!url) {
-        if (window.toast) window.toast('请输入网络图片 URL', 'warning');
+        if (window.toast) window.toast(t('ed2ImgUrlRequired'), 'warning');
         return;
       }
       const alt = altInput.value.trim() || 'image';
@@ -363,7 +363,7 @@
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
             <label style="font-size: 12px; font-weight: 600; white-space: nowrap;">选择模型 (Model):</label>
             <button type="button" class="btn btn-outline" id="ed2-ai-model-btn" style="flex: 1; display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; font-size: 12px;">
-              <span id="ed2-ai-model-label" style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(selectedModel || '-- 点击选择 AI 模型 --')}</span>
+              <span id="ed2-ai-model-label" style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(selectedModel || t('ed2AiChooseModel'))}</span>
               <span style="opacity: 0.6; font-size: 10px;">▼</span>
             </button>
           </div>
@@ -415,7 +415,7 @@
           </div>
 
           <div style="display: flex; gap: 6px;">
-            ${hasSelection ? `<button class="btn btn-secondary" id="ed2-ai-btn-replace" disabled>替换选区</button>` : ''}
+            ${hasSelection ? `<button class="btn btn-secondary" id="ed2-ai-btn-replace" disabled>' + t('ed2AiReplaceSelection') + '</button>` : ''}
             <button class="btn btn-secondary" id="ed2-ai-btn-insert" disabled>插入光标</button>
             <button class="btn btn-secondary" id="ed2-ai-btn-new-tab" disabled>新建标签</button>
             <button class="btn btn-ghost" id="ed2-ai-btn-cancel">关闭</button>
@@ -476,12 +476,12 @@
     // Streaming Generation
     async function startGeneration() {
       if (!selectedModel) {
-        if (window.toast) window.toast('请先选择 AI 模型', 'warning');
+        if (window.toast) window.toast(t('ed2AiModelRequired'), 'warning');
         return;
       }
       const userPrompt = promptInput.value.trim();
       if (!userPrompt) {
-        if (window.toast) window.toast('请输入提示词要求', 'warning');
+        if (window.toast) window.toast(t('ed2AiPromptRequired'), 'warning');
         return;
       }
 
@@ -493,7 +493,7 @@
 
       accumulatedReply = '';
       outputBox.textContent = '';
-      statusTag.textContent = '生成中...';
+      statusTag.textContent = t('ed2AiGenerating');
       statusTag.style.color = 'var(--accent-color, #6366f1)';
       btnGenerate.style.display = 'none';
       btnStop.style.display = 'inline-flex';
@@ -554,16 +554,16 @@
           }
         }
 
-        statusTag.textContent = '完成';
+        statusTag.textContent = t('ed2AiDone');
         statusTag.style.color = 'var(--color-success, #10b981)';
       } catch (err) {
         if (err.name === 'AbortError') {
-          statusTag.textContent = '已停止';
+          statusTag.textContent = t('ed2AiStopped');
           statusTag.style.color = 'var(--text-muted, #888)';
         } else {
-          statusTag.textContent = '生成失败';
+          statusTag.textContent = t('ed2AiFailed');
           statusTag.style.color = 'var(--color-error, #ef4444)';
-          outputBox.textContent = '错误: ' + err.message;
+          outputBox.textContent = t('ed2AiError') + err.message;
         }
       } finally {
         activeAbortController = null;
@@ -593,7 +593,7 @@
         }]);
         currentCodeEditor.pushUndoStop();
         currentCodeEditor.focus();
-        if (window.toast) window.toast('已替换选中文本', 'success');
+        if (window.toast) window.toast(t('ed2AiReplacedSelection'), 'success');
       };
     }
 
@@ -610,7 +610,7 @@
       }]);
       currentCodeEditor.pushUndoStop();
       currentCodeEditor.focus();
-      if (window.toast) window.toast('已插入生成结果', 'success');
+      if (window.toast) window.toast(t('ed2AiInsertedResult'), 'success');
     };
 
     btnNewTab.onclick = () => {
@@ -618,7 +618,7 @@
       cleanup();
       if (window.EditorV2 && window.EditorV2.createUntitledTab) {
         window.EditorV2.createUntitledTab(accumulatedReply);
-        if (window.toast) window.toast('已在新标签页中打开生成内容', 'success');
+        if (window.toast) window.toast(t('ed2AiOpenedNewTab'), 'success');
       }
     };
 

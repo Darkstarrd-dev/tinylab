@@ -301,7 +301,7 @@
       else if (rows[i].type === 'del') dels++;
       else if (rows[i].type === 'mod') mods++;
     }
-    return '共 ' + rows.length + ' 行 (+' + adds + ', -' + dels + ', ~' + mods + ')';
+    return tr('ed2EmbedLines', rows.length + ' (+' + adds + ', -' + dels + ', ~' + mods + ')');
   }
 
   /**
@@ -327,15 +327,15 @@
     overlay.innerHTML =
       '<div class="modal ed2-embed-diff-modal" role="dialog" aria-label="' + escapeHtml(title) + '">' +
         '<div class="modal-title ed2-embed-diff-head"><span class="ed2-embed-diff-title">' + escapeHtml(title) + '</span>' +
-        '<span class="ed2-embed-diff-stats" data-role="stats">计算中…</span>' +
+        '<span class="ed2-embed-diff-stats" data-role="stats">' + tr('ed2EmbedComputing') + '</span>' +
         '<span class="ed2-embed-diff-nav">' +
-        '<button class="pg-pane-btn pg-zoom-btn" data-act="prev" title="上一处差异" aria-label="Previous change">↑</button>' +
-        '<button class="pg-pane-btn pg-zoom-btn" data-act="next" title="下一处差异" aria-label="Next change">↓</button>' +
+        '<button class="pg-pane-btn pg-zoom-btn" data-act="prev" title="' + tr('ed2EmbedPrevDiff') + '" aria-label="Previous change">↑</button>' +
+        '<button class="pg-pane-btn pg-zoom-btn" data-act="next" title="' + tr('ed2EmbedNextDiff') + '" aria-label="Next change">↓</button>' +
         '</span>' +
         '<span class="pg-zoom-group ed2-embed-zoom-pill" role="group" aria-label="Text size">' +
-        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-out" title="减小字号" aria-label="Decrease text size">−</button>' +
-        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-reset" title="恢复默认字号" aria-label="Reset text size">↺</button>' +
-        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-in" title="增大字号" aria-label="Increase text size">+</button>' +
+        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-out" title="' + tr('ed2EmbedFontSmaller') + '" aria-label="Decrease text size">−</button>' +
+        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-reset" title="' + tr('ed2EmbedFontReset') + '" aria-label="Reset text size">↺</button>' +
+        '<button class="pg-pane-btn pg-zoom-btn" data-act="zoom-in" title="' + tr('ed2EmbedFontLarger') + '" aria-label="Increase text size">+</button>' +
         '</span>' +
         '<button type="button" class="btn btn-ghost btn-sm" data-act="close" aria-label="Close">✕</button></div>' +
         '<div class="ed2-embed-diff-body">' +
@@ -395,7 +395,7 @@
       if (closed || !rightModel) return;
       if (!window.EditorV2DiffCore) {
         var st0 = statsEl();
-        if (st0) st0.textContent = 'Diff 内核未加载';
+        if (st0) st0.textContent = tr('ed2DiffEngineMissing');
         return;
       }
       var rightVal = rightModel.getValue();
@@ -403,7 +403,7 @@
         rows = window.EditorV2DiffCore.compare(baseOriginal, rightVal, window.Diff);
       } catch (err) {
         var stErr = statsEl();
-        if (stErr) stErr.textContent = 'Diff 计算失败: ' + (err.message || err);
+        if (stErr) stErr.textContent = tr('ed2DiffCalcFailedMsg') + (err.message || err);
         return;
       }
       var st = statsEl();
@@ -856,7 +856,7 @@
     }).catch(function (err) {
       if (closed) return;
       var st = statsEl();
-      if (st) st.textContent = '编辑器加载失败: ' + (err.message || err);
+      if (st) st.textContent = tr('ed2EmbedLoadFailed') + (err.message || err);
     });
 
     return { close: cleanup, element: overlay };

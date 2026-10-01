@@ -591,13 +591,13 @@ window.deleteItemPrompt = function() {
            (it.kind === 'fs' && !!it.handle);
   });
   var html = '<div style="text-align:center;padding:8px">' +
-    '<div style="font-size:15px;margin-bottom:8px">删除 ' + marked.length + ' 张标注图片？</div>' +
-    '<div style="font-size:12px;color:#888;margin-bottom:14px">来自 ' + marked.length + ' 个文件</div>' +
-    '<button class="pg-btn" id="del-from-list" style="margin:4px">从列表中移除</button>';
+    '<div style="font-size:15px;margin-bottom:8px">' + T('gfDelAnnotatedTitle', [String(marked.length)]) + '</div>' +
+    '<div style="font-size:12px;color:#888;margin-bottom:14px">' + T('gfDelFromFiles', [String(marked.length)]) + '</div>' +
+    '<button class="pg-btn" id="del-from-list" style="margin:4px">' + T('gfDelRemoveList') + '</button>';
   if (anyDiskCapable) {
-    html += '<button class="pg-btn" id="del-from-disk" style="margin:4px">从磁盘移除</button>';
+    html += '<button class="pg-btn" id="del-from-disk" style="margin:4px">' + T('gfDelRemoveDisk') + '</button>';
   }
-  html += '<button class="pg-btn" id="del-cancel" style="margin:4px">取消</button></div>';
+  html += '<button class="pg-btn" id="del-cancel" style="margin:4px">' + T('gfDelCancel') + '</button></div>';
   pgShowModal(html);
   setTimeout(function() { var cb = document.getElementById('del-cancel'); if (cb) cb.focus(); }, 30);
   document.getElementById('del-from-list').onclick = function() {
@@ -724,12 +724,12 @@ async function deleteMarkedFromDisk(marked) {
   removeItemsByFilter(function(it) { return it.markedForDeletion; });
   // 提示
   if (errors.length) {
-    showMsg('部分删除失败: ' + errors[0]);
+    showMsg(T('gfDelPartialFail') + errors[0]);
     console.warn('deleteMarkedFromDisk errors:', errors);
   } else if (plainCount > 0) {
-    showMsg('已从磁盘移除（' + plainCount + ' 个无磁盘能力项仅从列表移除）');
+    showMsg(T('gfDelDiskPartial', [String(plainCount)]));
   } else {
-    showMsg('已从磁盘移除');
+    showMsg(T('gfDelRemovedDisk'));
   }
 }
 // toggleReviewItemMark toggles the deletion mark for the current item and
@@ -832,13 +832,13 @@ function deleteCurrentVideo() {
 
   var label = targetVItem.name || targetVItem.path || 'Video';
   var html = '<div style="text-align:center;padding:8px">' +
-    '<div style="font-size:15px;margin-bottom:8px">删除视频？</div>' +
+    '<div style="font-size:15px;margin-bottom:8px">' + T('gfDelVideoTitle') + '</div>' +
     '<div style="font-size:12px;color:#888;margin-bottom:14px;word-break:break-all">' + escapeHtml(label) + '</div>' +
-    '<button class="pg-btn" id="zip-del-list" style="margin:4px">从列表中移除</button>';
+    '<button class="pg-btn" id="zip-del-list" style="margin:4px">' + T('gfDelRemoveList') + '</button>';
   if (canDiskDelete) {
-    html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">从磁盘移除</button>';
+    html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">' + T('gfDelRemoveDisk') + '</button>';
   }
-  html += '<button class="pg-btn" id="zip-del-cancel" style="margin:4px">取消</button></div>';
+  html += '<button class="pg-btn" id="zip-del-cancel" style="margin:4px">' + T('gfDelCancel') + '</button></div>';
   pgShowModal(html);
   setTimeout(function() { var cb = document.getElementById('zip-del-cancel'); if (cb) cb.focus(); }, 30);
 
@@ -849,7 +849,7 @@ function deleteCurrentVideo() {
     } else if (vItem) {
       removeVideoItem(vi);
     }
-    showMsg('已从列表移除');
+    showMsg(T('gfDelRemovedList'));
   };
   document.getElementById('zip-del-cancel').onclick = function() { pgCloseModal(); };
   if (canDiskDelete) {
@@ -870,10 +870,10 @@ function deleteCurrentVideo() {
           }
           if (inItems && itemIdx >= 0) removeItem(itemIdx);
           else if (vItem) removeVideoItem(vi);
-          showMsg('已从磁盘移除');
+          showMsg(T('gfDelRemovedDisk'));
         } catch (e) {
           console.warn('deleteCurrentVideo disk failed:', e);
-          showMsg('删除失败: ' + (e && e.message ? e.message : e));
+          showMsg(T('gfDelFailed') + (e && e.message ? e.message : e));
           if (inItems && itemIdx >= 0) removeItem(itemIdx);
           else if (vItem) removeVideoItem(vi);
         }
@@ -922,16 +922,16 @@ window.deleteZipPrompt = function() {
   var fileCount = nodeItems.length;
 
   // Show modal
-  var warn = isParent ? '<div style="font-size:13px;color:#c0392b;margin-bottom:8px">⚠ 警告：此节点含子目录，删除将移除所有下属内容</div>' : '';
-  var label = nodeType === 'zip-root' ? '此压缩包' : (nodeType === 'disk-root' ? '此文件夹' : '此节点');
+  var warn = isParent ? '<div style="font-size:13px;color:#c0392b;margin-bottom:8px">' + T('gfDelSubdirWarn') + '</div>' : '';
+  var label = nodeType === 'zip-root' ? T('gfLabelZip') : (nodeType === 'disk-root' ? T('gfLabelFolder') : T('gfLabelNode'));
   var html = '<div style="text-align:center;padding:8px">' +
     warn +
-    '<div style="font-size:15px;margin-bottom:8px">删除' + label + '（' + fileCount + ' 个文件）？</div>' +
+    '<div style="font-size:15px;margin-bottom:8px">' + T('gfDelNodeTitle', [label, String(fileCount)]) + '</div>' +
     '<div style="font-size:12px;color:#888;margin-bottom:14px;word-break:break-all">' + pgEscapeHtml(curDir) + '</div>' +
-    '<button class="pg-btn" id="zip-del-list" style="margin:4px">从列表中移除</button>';
+    '<button class="pg-btn" id="zip-del-list" style="margin:4px">' + T('gfDelRemoveList') + '</button>';
   var canDisk = canNodeDiskDelete(nodeType, item, rootHandle);
-  if (canDisk) html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">从磁盘移除</button>';
-  html += '<button class="pg-btn" id="zip-del-cancel" style="margin:4px">取消</button></div>';
+  if (canDisk) html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">' + T('gfDelRemoveDisk') + '</button>';
+  html += '<button class="pg-btn" id="zip-del-cancel" style="margin:4px">' + T('gfDelCancel') + '</button></div>';
   pgShowModal(html);
   setTimeout(function() { var cb = document.getElementById('zip-del-cancel'); if (cb) cb.focus(); }, 30);
   document.getElementById('zip-del-list').onclick = function() {
@@ -973,7 +973,7 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
       } else if (item.zipFileHandle) {
         await item.zipFileHandle.remove();
       } else {
-        showMsg('此节点无法从磁盘移除'); return;
+        showMsg(T('gfDelNodeNoDisk')); return;
       }
     } else if (nodeType === 'zip-subdir') {
       var subItems = nodeItems.filter(function(it) { return it.kind === 'zip'; });
@@ -984,7 +984,7 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
       if (item.sourceId) {
         // Archive-source pack: one atomic zip-replace dropping the whole
         // subdirectory, then persist the rewritten bytes to the FSAA handle.
-        if (!subPaths.length) { showMsg('此节点无法从磁盘移除'); return; }
+        if (!subPaths.length) { showMsg(T('gfDelNodeNoDisk')); return; }
         try {
           var newBytes = await _zipReplaceDeleteEntries(item.sourceId, subPaths);
           await _writePackBytesToHandle(item.zipFileHandle, newBytes);
@@ -1032,7 +1032,7 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
       } else if (rootHandle) {
         await rootHandle.remove({ recursive: true });
       } else {
-        showMsg('此节点无法从磁盘移除'); return;
+        showMsg(T('gfDelNodeNoDisk')); return;
       }
     } else if (nodeType === 'disk-subdir') {
       // Delete the subdirectory
@@ -1052,10 +1052,10 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
         }
         await dirHandle.remove({ recursive: true });
       } else {
-        showMsg('此节点无法从磁盘移除'); return;
+        showMsg(T('gfDelNodeNoDisk')); return;
       }
     } else {
-      showMsg('此节点无法从磁盘移除');
+      showMsg(T('gfDelNodeNoDisk'));
       return;
     }
   } catch (e) {
@@ -1064,9 +1064,9 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
   // Remove this node's items from the list (regardless of disk success)
   removeItemsByFilter(function(it) { return nodeItems.indexOf(it) >= 0; });
   if (errors.length) {
-    showMsg('部分删除失败，已从列表移除');
+    showMsg(T('gfDelPartialListOnly'));
     console.warn('deleteNodeFromDisk errors:', errors);
   } else {
-    showMsg('已从磁盘移除');
+    showMsg(T('gfDelRemovedDisk'));
   }
 }
