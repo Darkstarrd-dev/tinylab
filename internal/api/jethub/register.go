@@ -57,6 +57,8 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterRaccoon(r)
 		// P3.3.4: loomy flows (SMS login; no renewal).
 		h.RegisterLoomy(r)
+		// P3.3.5: minimax flows (Anthropic-family device login).
+		h.RegisterMinimax(r)
 	})
 }
 

@@ -79,6 +79,13 @@ func RegisterDefaultProducts(b *Bridge) {
 		BaseURL:     loomyProduct.APIBase,
 		Models:      loomyFallbackModels(),
 	})
+	// P3.3.5: minimax (Anthropic Messages native passthrough — no conversion).
+	b.RegisterProduct(Product{
+		Provider:    "minimax",
+		DisplayName: "MiniMax Code",
+		BaseURL:     minimaxProduct.APIHost,
+		Models:      minimaxFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -92,6 +99,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("cline", m.clineAugment)
 	m.SetAugmenter("raccoon", m.raccoonAugment)
 	m.SetAugmenter("loomy", m.loomyAugment)
+	m.SetAugmenter("minimax", m.minimaxAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

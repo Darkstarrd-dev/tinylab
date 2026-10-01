@@ -119,3 +119,27 @@ func loomyFallbackModels() ModelTable {
 		md("mimo-v2.5", "MiMo V2.5 · x3.3", "1048576"),
 	}
 }
+
+// minimaxFallbackModels returns the 4 verified models (ref
+// minimax-product.ts; order = remote model_order). ⚠️ MUST include
+// M3.1-Flash-Preview (absent from the client's built-in static table — a
+// fallback-table omission would hide the user's active model on remote
+// failure). Only M3.1-Flash-Preview has effortOptions — inventing efforts
+// for the others is a guess (the Qoder qmodel lesson). contextWindow = the
+// TOP tier of context_window_options (not limit.context — 512K would trigger
+// compaction far earlier than the official capability).
+func minimaxFallbackModels() ModelTable {
+	md := func(id, name, ctx, extra string) config.ModelDef {
+		note := "ctx " + ctx
+		if extra != "" {
+			note += "; " + extra
+		}
+		return config.ModelDef{ID: id, QuotaType: "unlimited", Note: note, Alias: name}
+	}
+	return ModelTable{
+		md("MiniMax-M3.1-Flash-Preview", "M3.1-Flash-Preview", "1000000", "max 128000; img; efforts default/low/medium/high/xhigh/max; thinking forced_on"),
+		md("MiniMax-M3", "M3", "1000000", "max 128000; img; thinking switchable (no efforts — on/off only)"),
+		md("MiniMax-M2.7-highspeed", "M2.7-highspeed", "200000", "max 128000; thinking forced_on (disabled silently ignored)"),
+		md("MiniMax-M2.7", "M2.7", "200000", "max 128000; thinking forced_on"),
+	}
+}

@@ -54,6 +54,21 @@ type StartedLogin struct {
 	LoginURL string
 	Result   <-chan LoginOutcome
 	cancel   context.CancelFunc
+	// resultCh is the writable side of Result (SetResult rewires it for
+	// device-code flows that deliver from a custom goroutine).
+	resultCh chan LoginOutcome
+}
+
+// SetResult constructs a StartedLogin-style flow around an existing channel
+// (device-code flows deliver from a custom goroutine, not a callback server).
+// Use NewStartedLoginWithChannel instead of mutating after construction.
+func NewStartedLoginWithChannel(loginURL string, ch chan LoginOutcome) *StartedLogin {
+	return &StartedLogin{LoginURL: loginURL, Result: ch, resultCh: ch}
+}
+
+// deliverOutcomes exposes deliver for API-layer device flows.
+func DeliverLoginOutcome(ch chan<- LoginOutcome, outcome LoginOutcome) {
+	deliver(ch, outcome)
 }
 
 // LoginOutcome carries the persisted credential JSON (already encoded by the
