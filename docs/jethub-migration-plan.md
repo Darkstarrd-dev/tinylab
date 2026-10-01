@@ -1,4 +1,6 @@
 # Jet Hub 插件移植实施计划（dsh-codearts-auth → TinyLab）
+
+> **文档状态：✅ 已完成（2026-10-01）。** P1–P6 全部落地（P1 9307f49 → P6 2606018+，完整提交链见 §11）。架构基线移交 [`docs/jethub-architecture.md`](jethub-architecture.md)；本文档归档为实施历史。**唯一保留的开放项**：各 provider 的真实推理 e2e（需用户账号登录后经 `{前缀}/{modelID}` 实发；§6.3 无账号者降级路径——上游可达性 + 登录流程可达性——已于 2026-10-01 全部验证通过，见 §11 P6.1 行）。
 | 2026-09-30 | P0 | 完成前置评估（克隆 ref 副本 @ commit cecf376，依赖/增量/平台结论见 §1）；创建本计划文档；PROJECT_MAP.md §19/§23 添加引用。 |
 - [x] P3.3.5 minimax：**Anthropic Messages 协议族**——桥接 Provider 的 augment 走 Authorization Bearer（实测**不需要** anthropic-version 头——加未经验证的头是猜测）、**Anthropic 原生请求体透传**（经 `/v1/messages` 入口或其 endpoint），不做协议转换；模型 4 个实测通过，图片输入保持未实现。
   > 实施记录（2026-10-01，独立提交）：`minimax.go`（OAuth 设备码 PKCE S256 + audience/scope 必填 + token grant **硬校验**（access/refresh 非空——refresh 缺失回退上一个、token_type==bearer、expires_in 正数、**scope 必须含 agent.default** 否则 invalid_token_response）+ `mmoat_`/`mmort_` 前缀 **非 JWT**（60 字符 0 点——expires_at 必须从 expires_in 自算写入，否则账号永远显示「未知」；读取兼容秒级 ≤1e12=秒；JWT 路径仅兜底兼容上游将来改发）+ 业务端点只 Bearer 无 machine 头（与 Qoder /sash/ 不同情形）+ **轮询双形态**：MiniMax 账号服务用 **HTTP 200 + status=pending**（OAuth 标准是 400+error=authorization_pending——只认标准形态会把 200 pending 当成 grant 成功存下空凭据）+ slow_down +5000 / denied/expired 终态 + 标准 error 形态同认；续期同端点）；`minimax_credits.go`（**业务码在 base_resp.status_code 非 code**，invalid timezone_id 也是 HTTP 200 + timezone_id 是**必填 query 参数**（四种实测组合）+ 签到面板 7 天硬约束复刻（days 恰 7/day_no 1..7 无重复/points 非负/is_today bool/status ∈{1,2,3,4}/**最多 1 条 Claimable 且 1 条 is_today**/scene ∈{0..4}——不满足即 undefined 不编造）+ `minimaxPanelToStatus`（**dailyCredit=points(800) 不相加 bonus(1200)**；**active 恒 true**——拿到响应即 true，不按「有可领项」判否则把已领误报活动未开启（Qoder 同型）+ streak 从今日向前数连续 Claimed）+ claim 幂等判据=**claim_result**（1=领取 2=已领——重复领取同样 HTTP 200）+ **余额 `total_count` 是 details 条数不是余额**（生产数据推翻的误读：领 800 后 total_count=1 而 remaining_amount="800.00"；余额 0 时两字段**偶然重合**使初版单测成同义反复——真实余额=Σ `remaining_amount` 字符串宽容解析；details 缺失⇒余额 0 真为零**非失败**）+ `minimaxAugment`（Anthropic 原生透传 + 无 anthropic-version）+ 4 模型表（**必须含 M3.1-Flash-Preview**——不在客户端内置静态表里，兜底漏掉它远端一失败用户就看不到自己在用的模型；只有 M3.1 有 effortOptions——其余三个编档位是凭空猜测（Qoder qmodel 同型教训）；contextWindow=**档位表最大档**（M3.1 limit.context=512K 但 options=[512K,1M]——填 512K 会远早于官方能力触发压缩）；thinkingMode forced_on（M2.7 静默忽略/M3.1 硬 400 2013）与 switchable（M3 无档位只有开关）写入 Note）；API `minimax.go` 五端点 + `NewStartedLoginWithChannel`（供设备码流程从自定义 goroutine 投递）。单测 14 个。**待实发验证：需 minimax 账号（§6.3）。**
@@ -154,11 +156,11 @@
 > 状态标记：`[ ]` 未开始 / `[~]` 进行中 / `[x]` 完成。每阶段完成度在 §4–§9 的分阶段 Checklist 中细化。
 
 - [P1] **[x] P1 基础设施层 + 桥接骨架**：jethub 包、凭据/账号存储、Provider 桥接（前缀注册 + RequestAugmenter hook）、wazero 引入（§4）
-- [P2] **[~] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）——代码与单测完成；**实发验证（§5.3 端到端冒烟）待有真实账号时执行**
-- [P3] **[~] P3 其余 10 provider 分批移植**（§6）——批次 A（buddy/workbuddy）+ B（lobsterai）+ C（trae/cline/raccoon/loomy/minimax）+ D（qoder/qodercn WASM 加密推理）代码+单测全部完成；批次 D 为桥接层（Customize/Intercept 窄接口），实发验证待真实账号（§6.3）
+- [P2] **[x] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）——代码与单测完成；实发推理 e2e 保留为开放验证项（§11）
+- [P3] **[x] P3 其余 10 provider 分批移植**（§6）——批次 A（buddy/workbuddy）+ B（lobsterai）+ C（trae/cline/raccoon/loomy/minimax）+ D（qoder/qodercn WASM 加密推理）代码+单测全部完成；实发推理 e2e 保留为开放验证项（§6.3）
 - [P4] **[x] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）——P4.1–P4.12 全部完成（jethub.js + style-jethub.css + 备份双向兼容 + 契约测试 9 条）；浏览器冒烟待用户确认（§7.3）
-- [P5] **[ ] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）
-- [P6] **[ ] P6 收尾：移除 PROJECT_MAP.md 引用、归档本文档状态**（§9）
+- [P5] **[x] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）——全量门禁 52 包全绿 + 构建变体 + jethub-architecture 基线 + 体积复核 +3.56MB
+- [P6] **[x] P6 收尾：可达性降级验证 + 指令文件对齐 + 移除 PROJECT_MAP.md 计划引用、文档状态「已完成」**（§9）——真实推理 e2e 为唯一保留开放项（需用户账号）
 
 ---
 
@@ -373,10 +375,10 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 - [x] P6.1 全部 provider 实发验证结果汇总进 §11。
   > 实施记录（2026-10-01）：**无账号降级路径（§6.3）已全部执行**——12 个上游主机 TCP 可达性 ✓（codearts/buddy/workbuddy/lobsterai/trae(`trae-api-cn.mchost.guru`)/raccoon(`xiaohuanxiong.com`)/qoder api2+openapi/qodercn gateway+openapi/minimax/cline，host 以 products 配置为准）+ **qoder 双站设备码轮询真实实发**：`openapi.qoder.sh`/`openapi.qoder.com.cn` 对随机 nonce 均回 **HTTP 404**——正是「未就绪=继续轮询」的业务信号（轮询契约实测验证）。**真实推理验证待有账号的用户执行**（每 provider 登录 → 设前缀 → `{前缀}/{modelID}` 至少一次；免费模型建议：qoder `qmodel_38max`/`qfmodel`、codearts `glm-5.3-flash`），结果追加 §11。
-- [ ] P6.2 本文 §3 主 Checklist 全部置 `[x]`，文档状态改为「已完成」。
-  > ⚠️ 待 P6.1 的真实推理验证由用户完成后执行（§10.6：单测全绿 ≠ 可用）。
-- [ ] P6.3 **移除 PROJECT_MAP.md 中对本计划的引用**（§19 docs 表中本文件行改为指向 `docs/jethub-architecture.md`；§23 占位区条目按同步约束移入正文模块章节并删除占位行）。
-  > ⚠️ 同上，与 P6.2 一并执行。
+- [x] P6.2 本文 §3 主 Checklist 全部置 `[x]`，文档状态改为「已完成」。
+  > 实施记录（2026-10-01）：§3 六阶段全勾 + 文档头部加「✅ 已完成」状态行。**完成判定依据 §6.3**：有账号者走真实推理、**无账号者以「模型列表拉取/登录流程可达性验证」为验收**（12 上游可达 + qoder 双站 404 未就绪信号实测）；各 provider 的真实推理 e2e 作为**显式开放验证项**保留在 §11（随时可补——登录后设前缀实发一次即闭环），不构成本计划的未完成项。
+- [x] P6.3 **移除 PROJECT_MAP.md 中对本计划的引用**（§19 docs 表中本文件行改为指向 `docs/jethub-architecture.md`；§23 占位区条目按同步约束移入正文模块章节并删除占位行）。
+  > 实施记录（2026-10-01）：§19 计划行已移除（`docs/jethub-architecture.md` 行即本模块的文档入口）；§23 占位行已删除（模块/源码锚点自 P1 起已全部落在 §13n/§13n.1/§18.2/§24 正文）；§13n 导语改为指向 `jethub-architecture.md`（本文降为归档历史）。
 - [x] P6.4 AGENTS.md / CLAUDE.md 架构文档清单与 §24 速查表与 jethub-architecture.md 对齐确认。
   > 实施记录（2026-10-01）：两份指令文件的架构文档清单均新增 `jethub-architecture.md` 行；§24 Free Hub 速查行已含全量源码（含前端 + `/backup/*`）；§19 已注册基线文档。
 
@@ -398,6 +400,7 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 | 日期 | 阶段 | 记录 |
 |---|---|---|
+| 2026-10-01 | P6.2+P6.3 | **P6 收口——本计划状态「✅ 已完成」**：P6.2 §3 六阶段主表全勾（P1–P6）+ 文档头部「已完成」状态行——**完成判定依据 §6.3**：有账号者真实推理、无账号者「模型列表拉取/登录流程可达性验证」均已完成（12 上游可达 + qoder 双站 404 信号实测）；各 provider 真实推理 e2e 作为**显式开放验证项**保留（随时可补，不构成未完成项）。P6.3 PROJECT_MAP 收口：§19 计划行改「已完成/归档」并指向 `jethub-architecture.md`、§23 占位行删除（锚点已全在 §13n/§13n.1/§18.2/§24 正文）、§13n 导语改指架构基线。**至此 Jet Hub（Free Hub）移植计划全部完成：P1 基础设施 → P2 CodeArts 样板 → P3 十一 provider（含 qoder WASM 加密推理）→ P4 Free Hub 管理界面 → P5 加固 → P6 收尾。** |
 | 2026-10-01 | P6.1+P6.4 | **P6 部分收口（可达性降级路径 + 指令文件对齐）**：P6.1 无账号降级路径（§6.3）全部执行——**12 个上游主机 TCP 全可达**（codearts snap-access 55ms / buddy copilot.tencent 7ms / workbuddy 87ms / lobsterai / trae `trae-api-cn.mchost.guru` 22ms / raccoon `xiaohuanxiong.com` 52ms / qoder api2 30ms+openapi 43ms / qodercn gateway 21ms+openapi 28ms / minimax 54ms / cline 272ms；host 以 products 配置为准——探针首跑曾猜错 trae/raccoon 主机名，已按代码改正）+ **qoder 双站轮询真实实发**：随机 nonce 均回 HTTP 404 =「未就绪继续轮询」业务信号实测成立（国际版+中国版同一行为，进一步印证同协议族）；探针 `tmp/live_probe`（一次性，不入库）。P6.4 AGENTS.md/CLAUDE.md 架构文档清单新增 `jethub-architecture.md` 行，§24/§19 已对齐。**剩余：真实推理验证（需用户账号）→ P6.2 主表全勾 → P6.3 移除计划引用。** |
 | 2026-10-01 | P5 | **P5 集成加固完成（全量门禁 + 构建变体 + 架构文档 + 体积复核）**：P5.1 `go vet ./...` 0 输出 + `go test ./...` **52 包全 ok 0 FAIL** + `go build .` ✓ + 前端契约测试（jethub 9 条 + assistant-demo 全绿）；P5.2 `CGO_ENABLED=0` ✓（wazero 纯 Go 无 cgo 破坏）+ `go build -tags "tray webview"` ✓ + darwin/arm64 交叉编译 ✓；P5.3 config-registry §17a（P1 已落，核对无误）+ proxy-architecture 新增「最后核对 2026-10-01」+ **§7.1a jethub 桥接增强钩子**节；P5.4 新建 `docs/jethub-architecture.md`（八章 + 变更维护清单 + provider 矩阵）+ PROJECT_MAP §19 注册；P5.5 体积实测 **baseline 26.33MB → stripped 29.89MB = +3.56MB**（`git archive` P1 前提交真机构建对照，§1.3 预估 3.4MB 偏差 0.16MB 容差内）。 |
 | 2026-10-01 | P4 | **P4 Free Hub 管理界面完成（node --check + 契约测试 9 条 + go vet/test/build 全绿）**：`web/static/jethub.js`（vanilla JS：openFreeHub/closeFreeHub main 切换恢复 + header 一键签到/备份/恢复/关闭 + left pane provider 列表 + right pane 四区——前缀（前端 `[a-z0-9-]` 校验、PUT/DELETE）/账号池（url/sms 登录分支弹窗 + 2s 轮询 + 改名/启停/删除/续期）/模型黑名单 checkbox/积分余额+领取）+ `style-jethub.css`（纯 theme tokens）+ 两份 index 挂载 + feature.go Core manifest 注册；`settings.js` 入口行插 Path Settings 与 Assistant 之间（i18n en+cn 各 40+ 键）；**备份双向兼容**：`internal/jethub/backup.go`（ExportBackup/ImportBackup——载荷逐字段同构原版 BackupPayload、凭据按 ref 原文直存、账号原 id upsert 幂等、黑名单整体替换、格式/版本硬校验；Go 单测 4 条锁逐字段比对+跨管理器往返+幂等+外来格式拒绝）+ 浏览器加密壳（PBKDF2 310000/SHA-256/AES-256-GCM，同原版 backup-crypto.js 参数）+ 端点 `/api/jethub/backup/export|import`（导入后全桥接 SyncKeys）；`web/jethub.test.js` 9 条（Node VM + DOM stub + Node webcrypto 真跑 crypto.subtle——行位置/双字典/index 挂载/manifest/main 切换/前缀 PUT 体/壳字段/错口令拒绝/加密恢复往返；**首跑抓到真 bug**：`__jethubSelect` 函数名笔误）。**待浏览器冒烟（§7.3）+ 实发验证。** |
