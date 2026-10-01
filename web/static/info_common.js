@@ -279,7 +279,7 @@ function toggleInfoView(btn, view) {
 
 function infoCopyFeedback(btn) {
   var orig = btn.textContent;
-  btn.textContent = t('copied');
+  btn.textContent = t('copiedBtn');
   setTimeout(function() { btn.textContent = orig; }, 1500);
 }
 

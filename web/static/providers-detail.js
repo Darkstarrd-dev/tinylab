@@ -100,7 +100,7 @@ function renderDetailRotation(p) {
   el.innerHTML = '\
     <div class="detail-block">\
       <div class="section-title">' + t('rotationSection') + '</div>\
-      <p class="muted mb-12">' + t('rotationDesc') + '</p>\
+      <p class="muted mb-12">' + t('rotationProviderDesc') + '</p>\
       <div class="form-group mb-16">\
         <label for="r-strategy">' + t('strategy') + '</label>\
         ' + renderCustomSelectHtml('pr-strategy-wrap', 'r-strategy', [

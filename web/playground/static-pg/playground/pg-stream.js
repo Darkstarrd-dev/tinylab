@@ -248,7 +248,7 @@ function pgSendNonStream(i, body, assistantIdx) {
   w.abortCtrl = new AbortController();
   pgUpdateInputBar();
   var isGoogleNS = (typeof pgGetTextProtocol === 'function') && pgGetTextProtocol(w.config.model) === 'google';
-  var url = isGoogleNS ? '/v1beta/models/' + encodeURIComponent(w.config.model) + ':generateContent' : '/v1/chat/completions'; // P1-01b
+  var url = isGoogleNS ? '/v1/generateContent' : '/v1/chat/completions';
   var headers = { 'Content-Type': 'application/json', 'X-TinyLab-Source': 'playground' };
   if (w.config.useCustomEndpoint && w.config.customEndpoint && w.config.customEndpoint.trim()) {
     url = w.config.customEndpoint.trim();

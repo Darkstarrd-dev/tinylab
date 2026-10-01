@@ -89,7 +89,7 @@ var pgState = {
       maxNarrations: 0,       // max narrator injections (0 = infinite)
     },
   },
-  search: { maxResults: 5, apiKey: '' },
+  search: { maxResults: 5, hasApiKey: false },
   // Search history: in-memory list of per-search conversations.
   // Each entry: { id: number, query: string, messages: [...], ts: number }
   // The active search's messages are mirrored into w.messages for rendering.

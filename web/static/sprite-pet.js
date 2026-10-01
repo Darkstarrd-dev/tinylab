@@ -373,6 +373,11 @@ var petSM = (function () {
       frameH: (def.frameH || (def.img ? def.img.naturalHeight : 0)) / rows,
       mirror: !!def.mirror
     };
+    // Keep the documented fallback chain alive: defaultName() resolves
+    // idle-aliases first, then the first-registered action (order[0]).
+    // 197f35c dropped this push, so a non-idle first action never activated
+    // (current stayed null → sprite hidden, settings panel listed no names).
+    order.push(name);
     if (!current) { play(defaultName(), true); startLoop(); }
     return true;
   }

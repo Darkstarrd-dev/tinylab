@@ -24,7 +24,11 @@ const path = require('path');
 const vm = require('vm');
 
 const I18N_SRC = fs.readFileSync(path.join(__dirname, 'static/i18n.js'), 'utf8');
-const MODULE_SRC = fs.readFileSync(path.join(__dirname, 'static/gif-editor/gif-editor.js'), 'utf8');
+// d7af8ae moved the confirm-dialog call sites into gif-editor-actions.js /
+// gif-editor-input.js; the t() wrapper stayed in gif-editor.js.
+const WRAPPER_SRC = fs.readFileSync(path.join(__dirname, 'static/gif-editor/gif-editor.js'), 'utf8');
+const MODULE_SRC = fs.readFileSync(path.join(__dirname, 'static/gif-editor/gif-editor-actions.js'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, 'static/gif-editor/gif-editor-input.js'), 'utf8');
 const EXPORT_SRC = fs.readFileSync(path.join(__dirname, 'static/gif-editor/gif-editor-export.js'), 'utf8');
 
 let failures = 0;
@@ -40,15 +44,15 @@ function check(name, fn) {
 
 // Extract the module-local wrapper: `function t(key, args, fallback) { ... }`.
 function extractWrapper(src) {
-  const start = src.indexOf('function t(key, args, fallback)');
+  const start = WRAPPER_SRC.indexOf('function t(key, args, fallback)');
   assert.ok(start >= 0, 'module wrapper not found');
-  const brace = src.indexOf('{', start);
+  const brace = WRAPPER_SRC.indexOf('{', start);
   let depth = 0;
-  for (let i = brace; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') {
+  for (let i = brace; i < WRAPPER_SRC.length; i++) {
+    if (WRAPPER_SRC[i] === '{') depth++;
+    else if (WRAPPER_SRC[i] === '}') {
       depth--;
-      if (depth === 0) return src.slice(start, i + 1);
+      if (depth === 0) return WRAPPER_SRC.slice(start, i + 1);
     }
   }
   throw new Error('unbalanced wrapper braces');
@@ -57,7 +61,8 @@ function extractWrapper(src) {
 // Extract the real `message: t('gifEditor<Key>', ...)` expression from the
 // source by scanning to the matching close paren of the t(...) call.
 function extractMessageExpr(src, key) {
-  const anchor = "message: t('" + key + "'";
+  // Call sites use the shared.fns.t wrapper (d7af8ae split).
+  const anchor = "shared.fns.t('" + key + "'";
   const start = src.indexOf(anchor);
   assert.ok(start >= 0, 'call site for ' + key + ' not found in module source');
   let depth = 0;
@@ -65,7 +70,8 @@ function extractMessageExpr(src, key) {
     if (src[i] === '(') depth++;
     else if (src[i] === ')') {
       depth--;
-      if (depth === 0) return src.slice(start + 'message: '.length, i + 1);
+      // Shared call shape is `shared.fns.t(...)` — evaluate as global t(...).
+      if (depth === 0) return src.slice(start + 'shared.fns.'.length, i + 1);
     }
   }
   throw new Error('unbalanced parens for ' + key);

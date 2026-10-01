@@ -54,7 +54,18 @@ function makeEl() {
   const listeners = {};
   return {
     style: {}, children: [],
-    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
+    classList: {
+      _s: new Set(),
+      add(c) { this._s.add(c); },
+      remove(c) { this._s.delete(c); },
+      contains(c) { return this._s.has(c); },
+      // faf59ad uses classList.toggle('has-sprite'/'no-sprite'/'chat-left').
+      toggle(c, force) {
+        const on = force === undefined ? !this._s.has(c) : !!force;
+        if (on) this._s.add(c); else this._s.delete(c);
+        return on;
+      },
+    },
     _listeners: listeners,
     addEventListener(t, fn) { (listeners[t] = listeners[t] || []).push(fn); },
     removeEventListener() {},

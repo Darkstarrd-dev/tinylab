@@ -352,8 +352,14 @@ function pgSearchSaveKey() {
   var input = document.getElementById('pg-search-key-input');
   if (!input) return;
   var key = input.value.trim();
+  if (key === '') {
+    if (!pgState.search.hasApiKey) return;
+    if (!window.confirm(pgT('pgSearchKeyClearConfirm'))) return;
+  }
   pgApiPatch('/settings', { anySearch: { apiKey: key } }).then(function() {
-    pgState.search.apiKey = key;
+    pgState.search.hasApiKey = key !== '';
+    var keyInput = document.getElementById('pg-search-key-input');
+    if (keyInput) keyInput.placeholder = pgState.search.hasApiKey ? pgT('pgSearchKeyMasked') : pgT('pgSearchApiKeyHint');
     pgToast(pgT('pgSearchKeySaved'), 'success');
   }).catch(function() {
     pgToast(pgT('pgSearchError'), 'error');
@@ -363,10 +369,13 @@ function pgSearchSaveKey() {
 function pgSearchLoadSettings() {
   pgApiGet('/settings').then(function(res) {
     if (res && res.anySearch) {
-      pgState.search.apiKey = res.anySearch.apiKey || '';
+      pgState.search.hasApiKey = !!(res.anySearch && res.anySearch.hasApiKey);
       pgState.search.maxResults = res.anySearch.maxResults || 5;
       var keyInput = document.getElementById('pg-search-key-input');
-      if (keyInput) keyInput.value = pgState.search.apiKey;
+      if (keyInput) {
+        keyInput.value = '';
+        keyInput.placeholder = pgState.search.hasApiKey ? pgT('pgSearchKeyMasked') : pgT('pgSearchApiKeyHint');
+      }
       var slider = document.getElementById('pg-search-slider');
       if (slider) {
         slider.value = pgState.search.maxResults;
@@ -378,11 +387,11 @@ function pgSearchLoadSettings() {
 }
 
 function pgRenderSearchSettings(cfg) {
-  var keyVal = pgState.search.apiKey || '';
   var maxVal = pgState.search.maxResults || 5;
+  var keyPlaceholder = pgState.search.hasApiKey ? pgT('pgSearchKeyMasked') : pgT('pgSearchApiKeyHint');
   return '<div class="pg-search-settings">' +
     '<div class="pg-search-key-row">' +
-      '<input type="password" class="pg-search-key-input" id="pg-search-key-input" value="' + pgEscapeHtml(keyVal) + '" placeholder="' + pgEscapeHtml(pgT('pgSearchApiKeyHint')) + '">' +
+      '<input type="password" class="pg-search-key-input" id="pg-search-key-input" value="" placeholder="' + pgEscapeHtml(keyPlaceholder) + '">' +
       '<button class="pg-search-save-btn" onclick="pgSearchSaveKey()">' + pgEscapeHtml(pgT('pgSearchSaveKey')) + '</button>' +
     '</div>' +
     '<div class="pg-search-slider-row">' +

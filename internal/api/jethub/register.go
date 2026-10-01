@@ -387,6 +387,11 @@ func modelDisplayParts(md config.ModelDef) (name, rate string) {
 
 // modelDisplayPartsAt is modelDisplayParts with an injectable clock (the
 // promotion window must be testable on both sides).
+// rateFree 是倍率显示哨兵（展示域字符串，非业务判据）：仅在本解析器、
+// rateTextRe 与 register_test.go 断言中出现。i18n 化只允许在前端展示边缘
+// 进行，禁止改动此值。
+const rateFree = "免费"
+
 func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) {
 	src := md.Alias
 	if src == "" {
@@ -409,7 +414,7 @@ func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) 
 			continue
 		}
 		if isRateText(seg) {
-			if base == "" || base == "免费" {
+			if base == "" || base == rateFree {
 				base = seg
 			}
 			continue
@@ -418,7 +423,7 @@ func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) 
 			// `FREE (x0)` ⇒ 免费；`FREE (x1.5)` ⇒ 有免费额度但按 x1.5 计费
 			// （倍率非 0 就不能显示成免费 —— 这正是 qmodel_38max 的误标来源）。
 			if v, err := strconv.ParseFloat(m[1], 64); err == nil && v == 0 {
-				base = "免费"
+				base = rateFree
 			} else {
 				base = "x" + m[1]
 			}
@@ -432,8 +437,8 @@ func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) 
 		}
 	}
 	// 免费优先于促销（ref 同序：priceFactor === 0 ⇒ 免费，不看窗口）。
-	if base == "免费" {
-		return src, "免费"
+	if base == rateFree {
+		return src, rateFree
 	}
 	if base == "" {
 		return src, ""
@@ -446,7 +451,7 @@ func modelDisplayPartsAt(md config.ModelDef, now time.Time) (name, rate string) 
 
 // rateTextRe matches the normalized rate suffixes used across the product
 // tables: x0.75, x1, x0.2→x0.1 (promotion price), 免费 (free).
-var rateTextRe = regexp.MustCompile(`^x\d+(\.\d+)?(→x\d+(\.\d+)?)?$|^免费$`)
+var rateTextRe = regexp.MustCompile(`^x\d+(\.\d+)?(→x\d+(\.\d+)?)?$|^` + rateFree + `$`)
 
 // freeRateRe matches the `FREE (xN)` note segment: the parenthesised value is
 // the multiplier (`FREE (x0)` = free, `FREE (x1.5)` = free-quota flag but
