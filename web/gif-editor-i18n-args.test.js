@@ -193,13 +193,13 @@ check('string args are never treated as substitution arrays', function () {
   assert.strictEqual(localT('gifEditorAlertRangeEmpty', 'x'), '选定范围内没有帧！');
 });
 // --- Smoke-flagged key coverage: Set Latency / Delete Range / Keep Range / Even / Uneven ---
-check('gifEditorSetLatency resolves in en (smoke probe)', function () {
+check('gifEditorGlobalDelay (Set Latency button) resolves in en (smoke probe)', function () {
   const ctx = makeContext('en');
-  assert.strictEqual(vm.runInContext('__t(\'gifEditorSetLatency\')', ctx), 'Set Latency');
+  assert.strictEqual(vm.runInContext('__t(\'gifEditorGlobalDelay\')', ctx), 'Set Latency');
 });
-check('gifEditorSetLatency resolves in cn (smoke probe)', function () {
+check('gifEditorGlobalDelay (Set Latency button) resolves in cn (smoke probe)', function () {
   const ctx = makeContext('cn');
-  assert.strictEqual(vm.runInContext('__t(\'gifEditorSetLatency\')', ctx), '设置延迟');
+  assert.strictEqual(vm.runInContext('__t(\'gifEditorGlobalDelay\')', ctx), '设置延迟');
 });
 check('smoke-flagged cn labels are translated, not raw English', function () {
   const ctx = makeContext('cn');

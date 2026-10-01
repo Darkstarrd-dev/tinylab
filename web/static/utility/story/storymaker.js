@@ -1,6 +1,6 @@
 // web/static/utility/story/storymaker.js — Story Maker Shell and Navigation
 // Dependency load order:
-// vendor/diff.min.js -> utility/editor/editor.js -> editor_textreview_diff.js -> storymaker.js -> story sub-pages
+// vendor/diff.min.js -> utility/editor/editor_diff_core.js -> editor_textreview_diff.js -> storymaker.js -> story sub-pages
 
 (function() {
   'use strict';

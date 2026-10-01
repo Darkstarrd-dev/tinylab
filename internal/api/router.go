@@ -103,7 +103,8 @@ type deps struct {
 	upstreamTimeoutFn func(int)
 	stateSaveFunc     func()
 
-	// storyStore holds the SQLite database connection pool for Story Maker.
+	// storyStore is the Story Maker JSON-file-group store (internal/storymaker.Store,
+	// one .json file per table).
 	storyStore *storymaker.Store
 
 	// jethub wiring: Free Hub manager + registry bridge (nil in tests that
@@ -112,10 +113,9 @@ type deps struct {
 	jethubBridge  *jethub.Bridge
 }
 
-// Router wires up HTTP routes for the admin API. It embeds the shared deps and
-// handler methods live in the per-domain files that have not yet been extracted
-// to sub-packages (settings.go, providers.go, keys.go, combos.go, quickslots.go,
-// usage.go, quota.go, model_keys.go, probe.go).
+// Router wires up HTTP routes for the admin API. It embeds the shared deps;
+// handler methods live in the internal/api/<domain> sub-packages (30 of them);
+// the root package keeps only route assembly.
 type Router struct {
 	deps
 }

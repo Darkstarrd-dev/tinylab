@@ -1,6 +1,6 @@
 // web/static/utility/story/story-m3.js — M3 Character Simulation
 // Dependency load order:
-// vendor/diff.min.js -> utility/editor/editor.js -> editor_textreview_diff.js -> storymaker.js -> story-home.js -> story-m0.js -> story-m2.js -> story-m3.js
+// vendor/diff.min.js -> utility/editor/editor_diff_core.js -> editor_textreview_diff.js -> storymaker.js -> story-home.js -> story-m0.js -> story-m2.js -> story-m3.js
 
 (function() {
   'use strict';

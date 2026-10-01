@@ -435,7 +435,8 @@ func (h *Handler) petTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Ask the host to Eval petSM.dispatch(event) on the pet window, if any.
-	// The host registers a hook via petstate.SetPetTrigger.
+	// (The desktop pet is driven by settings → petstate → host callbacks; the
+	// assistant API does not trigger the pet directly.)
 	if fn, ok := petTriggerHook.Load().(func(string) (string, bool)); ok && fn != nil {
 		if state, ok2 := fn(req.Event); ok2 {
 			w.Header().Set("Content-Type", "application/json")
@@ -463,20 +464,14 @@ func (h *Handler) petState(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "state": state})
 }
 
-// petTriggerHook / petStateHook are set by the host (host_webview_windows.go)
+// petTriggerHook / petStateHook may be set by the host (host_webview_windows.go)
 // so the assistant API can Eval inside the pet webview without importing the
-// host package (which would create a cycle).
+// host package (which would create a cycle). Currently no host registers them:
+// the pet is driven by settings → petstate → host callbacks instead, and both
+// handlers fall back to a graceful no when unset.
 var (
 	petTriggerHook atomic.Value // func(string)(string,bool)
 	petStateHook   atomic.Value // func()string
 )
 
-// SetPetTriggerHook registers the host hook for petTrigger/petState.
-func SetPetTriggerHook(trigger func(string) (string, bool), state func() string) {
-	if trigger != nil {
-		petTriggerHook.Store(trigger)
-	}
-	if state != nil {
-		petStateHook.Store(state)
-	}
-}
+

@@ -177,7 +177,7 @@ func TestAssetsGroupedByRoot(t *testing.T) {
 		"vendor/utility-editor/diff-match-patch/diff-match-patch.js", "vendor/utility-editor/turndown/turndown.js",
 		"vendor/utility-editor/dompurify/purify.min.js",
 		"utility/editor/editor-state.js", "utility/editor/editor_workspace.js", "utility/editor/editor_commands.js",
-		"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor.js",
+		"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor_diff_core.js",
 		"utility/editor/editor_shell.js", "utility/editor/editor-logs.js",
 		"utility/editor/editor_textreview_step3.js", "utility/editor/editor_textreview.js", "utility/editor/review.js",
 	} {

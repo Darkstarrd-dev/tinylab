@@ -330,9 +330,10 @@
   }
 
   // Example bundle — on-demand creation of staged demo projects.
-  // 旧版：前端内嵌 5 个 Unit 的 main 字符串并逐文件 POST /api/editor/save，
+  // 旧版「前端内嵌 5 个 Unit 的 main 字符串并逐文件 POST /api/editor/save」
   // 已替换为按需调用 POST /api/games/seed（内嵌 Unit01~06 由后端 embed 提供，
-  // 已存在的不覆盖）。按钮在 navLeft 的 collapse explorer 同列。
+  // 已存在的不覆盖）；POST /api/editor/save 仍服务于编辑器自身的 dgnSave/
+  // 新建文件路径。按钮在 navLeft 的 collapse explorer 同列。
   function isInputFocusGlobally() {
     var tag = document.activeElement ? document.activeElement.tagName : '';
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);

@@ -1,6 +1,6 @@
 // web/static/utility/story/story-rolechat.js — Role Chat Engine
 // Dependency load order:
-// vendor/diff.min.js -> utility/editor/editor.js -> editor_textreview_diff.js -> storymaker.js -> story sub-pages -> story-rolechat.js
+// vendor/diff.min.js -> utility/editor/editor_diff_core.js -> editor_textreview_diff.js -> storymaker.js -> story sub-pages -> story-rolechat.js
 
 (function() {
   'use strict';

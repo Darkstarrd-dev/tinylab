@@ -222,7 +222,7 @@ func registerDefaults() {
 			"vendor/utility-editor/dompurify/purify.min.js",
 			// Utility Editor modules (state -> workspace -> commands -> markdown -> layout -> editor -> shell -> logs).
 			"utility/editor/editor-state.js", "utility/editor/editor_workspace.js", "utility/editor/editor_commands.js",
-			"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor.js",
+			"utility/editor/editor_markdown.js", "utility/editor/editor_layout.js", "utility/editor/editor_diff_core.js",
 			"utility/editor/editor_shell.js", "utility/editor/editor-logs.js",
 			// Editor V2 (Monaco engine + modules)
 			"style-editor-v2.css",

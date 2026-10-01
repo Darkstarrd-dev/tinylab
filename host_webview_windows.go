@@ -9,7 +9,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -23,20 +22,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// addWebviewMenuItem adds an "打开独立窗口" item to the tray menu and wires its
-// click channel to launch a native WebView2 window per click. Only compiled when
-// the `webview` build tag is set.
+// addWebviewMenuItem adds a "重新打开独立窗口" item to the tray menu; each click
+// terminates every open window first, then rebuilds one. Only compiled when the
+// `webview` build tag is set.
 //
 // Returns interface{} so the caller (host_tray_windows.go) stays build-tag-
 // agnostic; the matching stub when `webview` is absent returns nil.
 func addWebviewMenuItem(hctx *app.HostContext) interface{} {
-	hctxGlob = hctx
 	// “打开独立窗口”已无意义：关闭窗口的 X 现在就是退出（w.Run 后 systray.Quit 带动
 	// 整个进程退出），仅关窗不退出的旧前后端解耦语义已失效，故移除该条目。
 	mRestart := systray.AddMenuItem("重新打开独立窗口", "当窗口卡死或已关闭时重新打开")
 	trayRestartItem = mRestart
 	go runWebviewRestartLoop(hctx, mRestart)
-	registerTrayLangBinding()
 	applyTrayLang(currentTrayLang())
 	go openWebviewAfterReady(hctx)
 	go func() {
@@ -45,10 +42,9 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 		terminateAllWebviews()
 	}()
 	petstate.SetCloseAll(terminateAllPetWindows)
-	petstate.SetOpen(openPetIfNeeded)
+	petstate.SetOpen(func() { openPetIfNeeded(hctx) })
 	petstate.SetHideAll(func() bool { return setPetWindowVisible(false) })
 	petstate.SetShowAll(func() bool { return setPetWindowVisible(true) })
-	registerPetTriggerHook(hctx)
 	return mRestart
 }
 
@@ -90,13 +86,6 @@ func setTrayLang(lang string) {
 	trayLangMu.Lock()
 	trayLang = lang
 	trayLangMu.Unlock()
-}
-var trayLangHandlerRegistered bool
-func registerTrayLangBinding() {
-	if trayLangHandlerRegistered {
-		return
-	}
-	trayLangHandlerRegistered = true
 }
 func applyTrayLang(lang string) {
 	cn := lang == "cn"
@@ -156,7 +145,7 @@ func hasAnyWebview() bool {
 	return n > 0
 }
 
-func openPetIfNeeded() {
+func openPetIfNeeded(hctx *app.HostContext) {
 	if !petstate.Enabled() {
 		return
 	}
@@ -170,7 +159,7 @@ func openPetIfNeeded() {
 	if hasWindow {
 		return
 	}
-	go openPetWindow(hctxGlob)
+	go openPetWindow(hctx)
 }
 func setPetWindowVisible(show bool) bool {
 	var hwnd uintptr
@@ -220,24 +209,10 @@ func terminateAllWebviews() {
 	}
 }
 
-// openWebviewAfterReady waits briefly for the HTTP server to be listening, then
-// launches the first native window. Launched in a goroutine so systray.Run can
-// block the main goroutine concurrently.
+// openWebviewAfterReady starts the first window directly; the HTTP server is
+// already started by main before runHostLoop.
 func openWebviewAfterReady(hctx *app.HostContext) {
-	// The HTTP server is started just before runHostLoop, but on a slow boot it
-	// may not yet be bound. Polling gctx.consoleURL is overkill; a short sleep is
-	// enough since the server goroutine has already been scheduled by main.
 	openWebviewWindow(hctx)
-}
-
-// runWebviewClickLoop listens for clicks on the "独立窗口" menu item and launches
-// a new WebView2 window on each click. The window runs in its own goroutine;
-// closing it only ends that goroutine, not the whole process.
-func runWebviewClickLoop(hctx *app.HostContext, m *systray.MenuItem) {
-	for range m.ClickedCh {
-		// 在独立 goroutine 中排队创建，避免托盘线程被 webviewWindowMu 阻塞
-		go openWebviewWindow(hctx)
-	}
 }
 
 // webviewWindowMu serializes window creation: jchv/go-webview2 is not designed
@@ -728,7 +703,6 @@ func setTransparentBackground(ctrl *edge.ICoreWebView2Controller) error {
 // (drag/close/scale) use chrome.webview.postMessage — the Bind host-object API
 // is not available on the raw edge.Chromium.
 var (
-	hctxGlob   *app.HostContext
 	petWndOnce sync.Once
 	// petMu guards petWindows; wndProc (any window's thread) and shutdown
 	// (systray thread) both touch it.
@@ -736,7 +710,6 @@ var (
 	petWindows = map[uintptr]*petWindow{}
 	petCreateMu sync.Mutex
 	petEnvOnce  sync.Once
-	petLastState atomic.Value // string — latest petSM state pushed via postMessage
 )
 type petWindow struct {
 	hctx     *app.HostContext
@@ -820,9 +793,8 @@ func petOnMessage(pw *petWindow, msg string) {
 	}
 	switch m.Type {
 	case "state":
-		if m.State != "" {
-			petLastState.Store(m.State)
-		}
+		// State pushes are informational; no host-side reader (the settings
+		// panel polls /api/assistant/pet-state instead).
 	case "dragstart":
 		pw.dragging = true
 		pw.dragCur.X, pw.dragCur.Y = petCursorPos()
@@ -1083,26 +1055,4 @@ type tagMONITORINFO struct {
 	dwFlags   uint32
 }
 
-// registerPetTriggerHook wires settings state-machine panel triggers
-func registerPetTriggerHook(hctx *app.HostContext) { tryRegisterPetHook() }
-func tryRegisterPetHook() {
-	if setter := petHookSetter; setter != nil {
-		setter(func(evt string) (string, bool) { return petEvalTrigger(evt) }, func() string { return petEvalState() })
-	}
-}
-var petHookSetter func(trigger func(string)(string,bool), state func()string)
-func petEvalTrigger(evt string)(string,bool){
-	petMu.Lock()
-	var target *edge.Chromium
-	for _,pw:=range petWindows{ if pw!=nil && pw.chromium!=nil { target=pw.chromium; break } }
-	petMu.Unlock()
-	if target==nil{ return "",false }
-	esc:=""
-	for _,ch:=range evt{ if ch=='\''||ch=='\\'{esc+="\\"}; esc+=string(ch) }
-	target.Eval("try{window.__petTrigger?window.__petTrigger('"+esc+"'):petSM&&petSM.dispatch('"+esc+"')}catch(e){}")
-	return evt,true
-}
-func petEvalState()string{
-	if v:=petLastState.Load(); v!=nil { if s,ok:=v.(string); ok { return s } }
-	return ""
-}
+
