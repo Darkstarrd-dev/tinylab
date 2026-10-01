@@ -46,6 +46,9 @@ async function renderEndpoint(c) {
         <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('pathSettingsDesc')) + '" onclick="openPathModal()">' + t('pathSettings') + '</span>\
         </div>\
+        <div class="settings-row" id="free-hub-entry">\
+          <span class="settings-row-title" data-tooltip="' + escapeHtml(t('freeHubDesc')) + '" onclick="openFreeHub()">' + t('freeHub') + '</span>\
+        </div>\
         <div class="settings-row">\
           <span class="settings-row-title" data-tooltip="' + escapeHtml(t('assistantSettingsDesc')) + '" onclick="openAssistantModal()">' + t('assistantSettings') + '</span>\
           <label class="toggle-switch settings-row-toggle" data-tooltip="' + escapeHtml(t('assistantSettingsDesc')) + '"><input type="checkbox" id="assistant-toggle"' + (s.assistant && s.assistant.enabled === false ? '' : ' checked') + ' onchange="toggleAssistant(this.checked)"><span class="toggle-slider"></span></label>\

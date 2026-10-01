@@ -1,0 +1,196 @@
+/* ===================== Free Hub (jethub) — P4 =====================
+   Theme tokens only (var(--…)); buttons/badges/modals reuse the global
+   .btn/.badge/.modal/.input system — this file adds layout + the few
+   Free-Hub-specific surfaces. */
+
+.free-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.free-hub-loading {
+  color: var(--text-secondary, var(--text-muted, #888));
+  padding: 24px;
+  text-align: center;
+}
+
+.free-hub-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.free-hub-header-spacer {
+  flex: 1;
+}
+
+.free-hub-body {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.free-hub-left {
+  width: 230px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.free-hub-provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  color: var(--text-primary, inherit);
+}
+
+.free-hub-provider:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.12));
+}
+
+.free-hub-provider.selected {
+  background: var(--bg-active, rgba(128, 128, 128, 0.18));
+  border-color: var(--border-color, rgba(128, 128, 128, 0.25));
+}
+
+.free-hub-provider-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.free-hub-right {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.free-hub-section {
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.free-hub-section-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary, inherit);
+}
+
+.free-hub-hint {
+  font-size: 12px;
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+
+.free-hub-prefix-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.free-hub-prefix-row .input {
+  max-width: 260px;
+}
+
+.free-hub-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.free-hub-account {
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.free-hub-account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.free-hub-account-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.free-hub-account-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.free-hub-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px 12px;
+}
+
+.free-hub-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.free-hub-model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.free-hub-balance {
+  min-height: 18px;
+}
+
+.free-hub-balance-total {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.free-hub-claim-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.free-hub-claim-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.free-hub-login-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--accent, #4a9eff);
+}

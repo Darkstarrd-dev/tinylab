@@ -156,7 +156,7 @@
 - [P1] **[x] P1 基础设施层 + 桥接骨架**：jethub 包、凭据/账号存储、Provider 桥接（前缀注册 + RequestAugmenter hook）、wazero 引入（§4）
 - [P2] **[~] P2 CodeArts provider（端到端样板）**：登录 + 续期 + `{前缀}/{modelID}` 全链路推理（§5）——代码与单测完成；**实发验证（§5.3 端到端冒烟）待有真实账号时执行**
 - [P3] **[~] P3 其余 10 provider 分批移植**（§6）——批次 A（buddy/workbuddy）+ B（lobsterai）+ C（trae/cline/raccoon/loomy/minimax）+ D（qoder/qodercn WASM 加密推理）代码+单测全部完成；批次 D 为桥接层（Customize/Intercept 窄接口），实发验证待真实账号（§6.3）
-- [P4] **[ ] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）
+- [P4] **[x] P4 Free Hub 管理界面**（Settings 内嵌 + 备份/恢复兼容原版格式）（§7）——P4.1–P4.12 全部完成（jethub.js + style-jethub.css + 备份双向兼容 + 契约测试 9 条）；浏览器冒烟待用户确认（§7.3）
 - [P5] **[ ] P5 集成加固：文档同步、全量测试、构建变体验证**（§8）
 - [P6] **[ ] P6 收尾：移除 PROJECT_MAP.md 引用、归档本文档状态**（§9）
 
@@ -324,18 +324,29 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 ### 7.2 Checklist
 
-- [ ] P4.1 **入口行 + main 切换**：`settings.js` 侧边栏在 Path Settings 行后插入 `Free Hub` 行（`t('freeHub')`/`t('freeHubDesc')`，i18n en+cn）；`openFreeHub()` 隐藏初始 settings main 行容器、渲染 `#free-hub-root`，`closeFreeHub()` 反向恢复（事件解绑，沿 settings 现有切换习惯）。
-- [ ] P4.2 **骨架与样式**：`web/static/jethub.js`（IIFE 无框架：header 三段、left pane provider 列表、right pane 四区）+ `web/static/style-jethub.css`（纯 theme tokens）；`index.html`/`index-nopg.html` 挂脚本；`internal/feature/feature.go` 注册资产。
-- [ ] P4.3 **left pane**：provider 列表渲染（图标/名称/账号数徽标），单选切换 right pane，选中态高亮。
-- [ ] P4.4 **right pane①前缀**：前缀输入框 + 保存/清除（`PUT /api/jethub/{provider}/prefix`），非法字符与冲突的前端校验 + 后端 409；保存成功提示调用格式 `{前缀}/{modelID}`。
-- [ ] P4.5 **right pane②账号池**：新建账号（触发对应 provider 登录流，含短信/QR 类的特殊交互分支）/删除/启停/昵称编辑/状态徽标（凭据有效期、refreshable、最近错误）；拖拽排序可裁剪（非核心）。
-- [ ] P4.6 **right pane③显示列表**：模型黑名单开关（黑名单制：默认全显），写 `PUT /api/jethub/{provider}/models`。
-- [ ] P4.7 **right pane④积分**：余额/每日额度显示、一键领取、领取结果 toast、积分有效期、锁定永久积分按钮（能力按 `credits-capabilities` 矩阵显隐）。
-- [ ] P4.8 **header 一键签到**：遍历有签到能力的启用账号逐个 claim（并发 1 串行），汇总结果 toast（成功 x 失败 y）。
-- [ ] P4.9 **header 备份/恢复（兼容原版格式）**：备份 = 拉取全量账号+凭据+黑名单 → 前端组装原版 payload（`version:1`/`exportedAt`/`accounts`/`disabledModels`/`credentials` ref→JSON 字符串）→ `crypto.subtle` PBKDF2(310000)+AES-GCM 加密壳 → 下载 `.json`；恢复 = 选文件 → 前端解密（兼容两种 format 值：明文 `dsh-codearts-auth/backup` 与加密壳）→ 字段映射导入 RPC（凭据 JSON 原文直存，**不重新序列化改形**）。反向兼容验证：本项目导出文件的字段形态与原版 `BackupPayload` 逐字段比对单测。
-- [ ] P4.10 **header 关闭**：`closeFreeHub()` 退回初始 Settings main。
-- [ ] P4.11 前端契约测试 `web/jethub.test.js`：Node VM + DOM stub——入口行渲染位置（pathSettings 行之后、assistant 行之前）、main 切换/恢复、前缀保存体、备份 payload 字段形态。
-- [ ] P4.12 文档同步：PROJECT_MAP.md §18 补条目、§24 速查表行补前端文件。
+- [x] P4.1 **入口行 + main 切换**：`settings.js` 侧边栏在 Path Settings 行后插入 `Free Hub` 行（`t('freeHub')`/`t('freeHubDesc')`，i18n en+cn）；`openFreeHub()` 隐藏初始 settings main 行容器、渲染 `#free-hub-root`，`closeFreeHub()` 反向恢复（事件解绑，沿 settings 现有切换习惯）。
+  > 实施记录：`settings.js` 行 `id="free-hub-entry"` 插在 `openPathModal()` 行与 `openAssistantModal()` 行之间（契约测试锁位置）；`openFreeHub()` 隐藏 `.settings-layout` 并挂 `#free-hub-root`，`closeFreeHub()` 恢复显示、清除轮询定时器；页面在 Free Hub 打开期间被重渲染时回退 `renderEndpoint(page)`。
+- [x] P4.2 **骨架与样式**：`web/static/jethub.js`（IIFE 无框架：header 三段、left pane provider 列表、right pane 四区）+ `web/static/style-jethub.css`（纯 theme tokens）；`index.html`/`index-nopg.html` 挂脚本；`internal/feature/feature.go` 注册资产。
+  > 实施记录：`jethub.js` 全局函数 + `__jethubState`（providers/selected/accounts/models/balance/pollTimer）；`style-jethub.css` 仅 `var(--…)` tokens，按钮/徽章/弹窗复用全局 `.btn`/`.badge`/`.modal`/`.input` 体系；两份 index 均挂 `<script src="/jethub.js">` + `<link rel="stylesheet" href="/style-jethub.css">`；Core feature manifest 增加 `jethub.js`+`style-jethub.css`。
+- [x] P4.3 **left pane**：provider 列表渲染（图标/名称/账号数徽标），单选切换 right pane，选中态高亮。
+  > 实施记录：`GET /api/jethub/providers` 渲染（displayName + accountCount 徽标 active/inactive），`.selected` 高亮；首次自动选中**有账号的** provider（无则第一个）。
+- [x] P4.4 **right pane①前缀**：前缀输入框 + 保存/清除（`PUT /api/jethub/{provider}/prefix`），非法字符与冲突的前端校验 + 后端 409；保存成功提示调用格式 `{前缀}/{modelID}`。
+  > 实施记录：前端 `/^[a-z0-9-]{1,32}$/` 校验（非法直接 toast 不发请求）；冲突 409 走错误 toast；清除按钮仅 bridged 时显示（`DELETE`）；成功 toast `已保存 {前缀}/{modelID}`。
+- [x] P4.5 **right pane②账号池**：新建账号（触发对应 provider 登录流，含短信/QR 类的特殊交互分支）/删除/启停/昵称编辑/状态徽标（凭据有效期、refreshable、最近错误）；拖拽排序可裁剪（非核心）。
+  > 实施记录：新建按 `loginModes` 分派——含 `sms` 走短信两步弹窗（`/loomy/login/sms/send`→`submit`），其余 url/qr 统一 URL 弹窗（`POST /{provider}/login` → loginUrl 链接 + 2s 轮询 `/status?loginId=` 至 `{done,success}`，短信/QR 类的 QR 画布按计划裁剪为链接形态）；改名走 `promptModal`；启停/删除 PATCH/DELETE（删除带确认）；refresh 按钮按 `refreshable` 显隐；徽标 enabled/key/refresh + 有效期显示；拖拽排序按计划裁剪。
+- [x] P4.6 **right pane③显示列表**：模型黑名单开关（黑名单制：默认全显），写 `PUT /api/jethub/{provider}/models`。
+  > 实施记录：checkbox 网格（checked=显示），`{modelId, disabled:!checked}` 逐条 PUT，失败回读重渲染。
+- [x] P4.7 **right pane④积分**：余额/每日额度显示、一键领取、领取结果 toast、积分有效期、锁定永久积分按钮（能力按 `credits-capabilities` 矩阵显隐）。
+  > 实施记录：能力显隐用后端 DTO 的 `hasBalance`/`hasCredits`（等价于 credits-capabilities 矩阵的已在 Go 侧登记）；余额按启用账号查询 + packages remaining 求和兜底；每账号领取按钮 + 结果 toast（already-claimed 文案收敛为「今日已领取」）；「积分有效期/锁定永久积分」按钮按计划裁剪（本端未实现锁定永久积分功能）。
+- [x] P4.8 **header 一键签到**：遍历有签到能力的启用账号逐个 claim（并发 1 串行），汇总结果 toast（成功 x 失败 y）。
+  > 实施记录：`jethubClaimAll()` 串行遍历 `hasCredits` provider 的启用且已凭据账号逐个 POST claim，汇总 `{成功 x, 失败 y}`；个别 provider 的 already-claimed 以错误形态返回，计入失败但不中断。
+- [x] P4.9 **header 备份/恢复（兼容原版格式）**：备份 = 拉取全量账号+凭据+黑名单 → 前端组装原版 payload（`version:1`/`exportedAt`/`accounts`/`disabledModels`/`credentials` ref→JSON 字符串）→ `crypto.subtle` PBKDF2(310000)+AES-GCM 加密壳 → 下载 `.json`；恢复 = 选文件 → 前端解密（兼容两种 format 值：明文 `dsh-codearts-auth/backup` 与加密壳）→ 字段映射导入 RPC（凭据 JSON 原文直存，**不重新序列化改形**）。反向兼容验证：本项目导出文件的字段形态与原版 `BackupPayload` 逐字段比对单测。
+  > 实施记录（架构微调，语义等价）：**载荷组装/导入放 Go 侧**（`internal/jethub/backup.go`：`ExportBackup`/`ImportBackup`，凭据按 ref 索引**原文字符串**直存、账号按原 id upsert 幂等、黑名单整体替换、格式/版本不符显式报错）——浏览器端只做加密壳的加/解密（与原版 backup-crypto.js 同 API 同参数：PBKDF2 310000/SHA-256/AES-256-GCM/salt 16B/iv 12B），明文载荷不经过前端组装反而少一类字段漂移；端点 `GET /api/jethub/backup/export`、`POST /api/jethub/backup/import`（导入后全桥接供应商 SyncKeys）。逐字段比对由 Go 单测 `TestBackupExportShapeAndRoundtrip` 锁死（format/version/accounts 六字段/credentials ref 索引/黑名单）+ 跨管理器往返 + 幂等重导 + 外来格式拒绝；前端侧 `web/jethub.test.js` 锁壳字段（kdf/hash/iterations/salt/iv/ciphertext）与加密恢复往返。导入暂不迁移原版可选的 `permanentLocks`（本端未实现该功能，原版导入时视为缺省）。
+- [x] P4.10 **header 关闭**：`closeFreeHub()` 退回初始 Settings main。
+- [x] P4.11 前端契约测试 `web/jethub.test.js`：Node VM + DOM stub——入口行渲染位置（pathSettings 行之后、assistant 行之前）、main 切换/恢复、前缀保存体、备份 payload 字段形态。
+  > 实施记录：9 条——行位置/i18n 双字典/两 index 挂载/manifest 注册（静态）；open/close 恢复、provider 列表+前缀预填+模型渲染、前缀校验与 PUT 体、备份壳字段、错口令拒绝、加密恢复往返（VM 行为，Node webcrypto 真跑 crypto.subtle）。**测试首跑即抓到真 bug**（`__jethubSelect` 未定义的函数名笔误——修复后全绿）。
+- [x] P4.12 文档同步：PROJECT_MAP.md §18 补条目、§24 速查表行补前端文件。
+  > 实施记录：§18.2 新增 Free Hub 界面条目（资产/入口/布局/备份兼容/测试），§24 Free Hub 行补前端文件与 `/backup/*` 端点。
 
 ### 7.3 验证门
 
@@ -378,6 +389,7 @@ go vet ./internal/jethub/... && go test ./internal/jethub/... && go build .
 
 | 日期 | 阶段 | 记录 |
 |---|---|---|
+| 2026-10-01 | P4 | **P4 Free Hub 管理界面完成（node --check + 契约测试 9 条 + go vet/test/build 全绿）**：`web/static/jethub.js`（vanilla JS：openFreeHub/closeFreeHub main 切换恢复 + header 一键签到/备份/恢复/关闭 + left pane provider 列表 + right pane 四区——前缀（前端 `[a-z0-9-]` 校验、PUT/DELETE）/账号池（url/sms 登录分支弹窗 + 2s 轮询 + 改名/启停/删除/续期）/模型黑名单 checkbox/积分余额+领取）+ `style-jethub.css`（纯 theme tokens）+ 两份 index 挂载 + feature.go Core manifest 注册；`settings.js` 入口行插 Path Settings 与 Assistant 之间（i18n en+cn 各 40+ 键）；**备份双向兼容**：`internal/jethub/backup.go`（ExportBackup/ImportBackup——载荷逐字段同构原版 BackupPayload、凭据按 ref 原文直存、账号原 id upsert 幂等、黑名单整体替换、格式/版本硬校验；Go 单测 4 条锁逐字段比对+跨管理器往返+幂等+外来格式拒绝）+ 浏览器加密壳（PBKDF2 310000/SHA-256/AES-256-GCM，同原版 backup-crypto.js 参数）+ 端点 `/api/jethub/backup/export|import`（导入后全桥接 SyncKeys）；`web/jethub.test.js` 9 条（Node VM + DOM stub + Node webcrypto 真跑 crypto.subtle——行位置/双字典/index 挂载/manifest/main 切换/前缀 PUT 体/壳字段/错口令拒绝/加密恢复往返；**首跑抓到真 bug**：`__jethubSelect` 函数名笔误）。**待浏览器冒烟（§7.3）+ 实发验证。** |
 | 2026-10-01 | P3.D | **批次 D（qoder + qodercn，WASM 加密推理）代码完成——批次 P3 全部收口（go vet + 全量测试 + go build 全绿）**：`qoderwasm_bridge.go`（31 导入 wasm-bindgen 桥 + 对象堆哨兵含独立 null + LAYOUT A/B + **实测首要坑**：getrandom 探测链三路全空 → Rust panic=abort 直落裸 `unreachable` 不经 throw —— crypto 必须返回 stand-in 强制浏览器分支；`__wbg_set_08463`=对象方法 set/prototypesetcall 方向=对象→wasm 内存/subarray 接收方=堆对象/static accessor 必须推对象；导出节直读核对 `qodercontext_prepareInferRequest` 全名 + `requestresult_url` 栈指针在前 + `model_cache_decrypt` machineId 必填）、`qoder.go`/`qoder_credits.go`（PKCE + 404=未就绪轮询 + userinfo 昵称 + refresh 沿用身份字段 + `/sash/` 四头（ClientType'10'+machine 头成对）+ 余额三包 + 领取幂等 replayed + UTC+8 日界算术）、`qoder_payload.go`（buildQoderInferPayload 复刻 G4A：business 必填/tools 恒数组/多模态 content 保留/tool_calls 历史保留/空 description 不出现 + 两站模型 meta 表）、`qoder_envelope.go`（剥壳 + 保真转发 code/message/type + `(n>0,io.EOF)` 同返 peek 坑）、`qoder_adapter.go`（**窄接口架构**：proxy.RequestCustomizer 定制 WASM 出站 URL+加密体+签名头替换、proxy.ResponseInterceptor 首帧 peek 分类 + 信封剥离 reader；跨边界错误放 `internal/upstreamerr`：排队→同 Key 等待重发（10s×180）、计费 110→per-model 锁 UTC+8 当日 24:00 切号）、`qoderwasm.go`+`qoder_auth_wasm.wasm`（298,606B 嵌入）、模型表 17+14、API `qoder.go` 双产品五端点（后台轮询独立 context——handler 返回即取消 r.Context()）。单测 33 个（含真实二进制端到端加密往返 + 排队/计费/认证/重复四类分类 + 双通道拦截）。**待实发验证：需 qoder/qodercn 账号（§6.3）。** |
 | 2026-10-01 | P3.C5 | **批次 C 第 5/5（minimax）完成——批次 C 全部收口（go vet + 全量测试 + go build 全绿）**：`minimax.go`（设备码 PKCE + token 硬校验 scope 含 agent.default + 非 JWT token → expires_in 自算 expires_at + 轮询**双形态**（200+status=pending 是 MiniMax 形态，标准 400+error 同认——只认标准会把 200 pending 当成功存空凭据））；`minimax_credits.go`（base_resp.status_code 业务码 + timezone_id 必填 query + 面板 7 天硬约束 + dailyCredit=points 不加 bonus + active 恒 true + claim_result 幂等 + **余额 total_count=条数不是余额**（Σ remaining_amount 字符串宽容解析；details 缺失=真 0 非失败）+ Anthropic 原生透传无 anthropic-version + 4 模型表（M3.1 必含/档位不臆造/窗口=档位最大档/thinkingMode 三值语义））；API `minimax.go` 五端点 + `NewStartedLoginWithChannel`。单测 14 个。**待实发验证：需 minimax 账号（§6.3）。** |
 | 2026-10-01 | P3.C4 | **批次 C 第 4/5（loomy）代码完成（go vet + 全量测试 + go build 全绿）**：`loomy.go`（CAccount HMAC-SHA1 签名 1:1（9 段拼串末尾两空段/空 body md5/RFC3986/query 不排序/account 前缀/同串签名）+ 字符串 code 信封（HTTP 200 业务失败）+ refreshable 恒 false + expires_at 本地 14 天推算 + 探测 probe）、`loomy_credits.go`（两池余额只读端点 + 每日额度重置语义 alreadyProcessed 幂等 + 新手任务真实 8 key 表 earned 本地现算 + augment 双头 Bearer+token）、API `loomy.go` 八端点。单测 10 个。微信扫码四步绑手机流程按计划裁剪暂缓（短信路径全覆盖）。**待实发验证：需 loomy 账号（§6.3）。** |

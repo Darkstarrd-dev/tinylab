@@ -61,6 +61,43 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterMinimax(r)
 		// P3.4: qoder + qodercn flows (PKCE device-code login, shared impl).
 		h.RegisterQoder(r)
+		// P4.9: backup export/import (original-format payload; the browser
+		// adds/removes the PBKDF2+AES-GCM encrypted shell).
+		r.Get("/backup/export", h.backupExport)
+		r.Post("/backup/import", h.backupImport)
+	})
+}
+
+// backupExport GET — assembles the original-compatible plaintext payload
+// (format/version/credentials/accounts/disabledModels); the browser encrypts
+// it with the user passphrase before download.
+func (h *Handler) backupExport(w http.ResponseWriter, r *http.Request) {
+	payload, warnings := h.d.Manager.ExportBackup()
+	writeJSON(w, http.StatusOK, map[string]any{"payload": payload, "warnings": warnings})
+}
+
+// backupImport POST — upsert accounts by original id, store credential JSON
+// verbatim, replace the blacklist; re-syncs every bridged provider.
+func (h *Handler) backupImport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Payload *corejethub.BackupPayload `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Payload == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "payload required")
+		return
+	}
+	imported, skipped, warnings, err := h.d.Manager.ImportBackup(req.Payload)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	for _, p := range corejethub.Providers() {
+		if h.d.Manager.Prefix(p.ID) != "" {
+			_ = h.d.Bridge.SyncKeys(p.ID)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "imported": imported, "skipped": skipped, "warnings": warnings,
 	})
 }
 
