@@ -23,6 +23,8 @@ func timeAfter(d time.Duration) <-chan time.Time {
 func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID string, openURL func(string)) (*StartedLogin, error) {
 	code := GenerateRaccoonQrCode()
 	loginURL := BuildRaccoonQrURL(code)
+	// Auto-open like the original plugin (explicit openURL wins if given).
+	m.openURLWithBrowser(loginURL)
 	if openURL != nil {
 		go openURL(loginURL)
 	}

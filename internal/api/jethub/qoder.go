@@ -46,6 +46,8 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// Auto-open like the original plugin (dialog link stays as fallback).
+	h.d.Manager.OpenURLWithBrowser(flow.LoginURL)
 	loginID := corejethub.NewLoginSessionID()
 	resultCh := make(chan corejethub.LoginOutcome, 1)
 	started := corejethub.NewStartedLoginWithChannel(flow.LoginURL, resultCh)

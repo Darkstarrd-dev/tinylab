@@ -34,8 +34,10 @@ func TestSettleAndCleanupFailureDeletesPlaceholder(t *testing.T) {
 		_, ok := FindTestAccount(env.m, id)
 		return !ok
 	})
-	if _, still := PeekLoginSession(sess.Key); still {
-		t.Fatal("session not reaped after settle")
+	// ⚠️ The session stays observable through the grace period (the UI poll
+	// must be able to read the outcome), so it is NOT reaped immediately.
+	if _, still := PeekLoginSession(sess.Key); !still {
+		t.Fatal("session reaped before the UI could observe the outcome")
 	}
 	done, success, msg := SessionStatus(sess)
 	if !done || success || msg != "扫码登录超时" {
@@ -68,8 +70,9 @@ func TestSettleAndCleanupSuccessKeepsAccount(t *testing.T) {
 	if _, ok := FindTestAccount(env.m, id); !ok {
 		t.Fatal("successful flow deleted the account")
 	}
-	if _, still := PeekLoginSession(sess.Key); still {
-		t.Fatal("session not reaped after success")
+	// The session stays observable through the grace period (not reaped yet).
+	if _, still := PeekLoginSession(sess.Key); !still {
+		t.Fatal("session reaped before the UI could observe the outcome")
 	}
 	if done, success, _ := SessionStatus(sess); !done || !success {
 		t.Fatalf("status after success = (%v, %v), want (true, true)", done, success)
@@ -108,6 +111,31 @@ func TestSessionStatusUnsettled(t *testing.T) {
 	if done, success, msg := SessionStatus(sess); done || success || msg != "" {
 		t.Fatalf("fresh session = (%v,%v,%q), want all zero", done, success, msg)
 	}
+}
+
+// TestSessionReapedAfterGrace: the settled session stays in the registry for
+// the UI poll's grace period, then is reaped (real defect: immediate reap
+// made the 2s poller 404 and the dialog never observed done:true).
+func TestSessionReapedAfterGrace(t *testing.T) {
+	resultCh := make(chan LoginOutcome, 1)
+	sess := &LoginSession{Key: "test-grace", Started: NewStartedLoginWithChannel("u", resultCh)}
+	RegisterLoginSession(sess.Key, sess)
+	go SettleAndCleanup(sess, nil)
+	resultCh <- LoginOutcome{Err: errors.New("x")}
+
+	// Immediately after settle: still observable.
+	waitFor(t, 2*time.Second, func() bool {
+		_, _, _ = SessionStatus(sess)
+		return func() bool { _, ok := PeekLoginSession(sess.Key); return ok }()
+	})
+	if _, ok := PeekLoginSession(sess.Key); !ok {
+		t.Fatal("session reaped before the grace period elapsed")
+	}
+	// After the grace period: reaped.
+	waitFor(t, loginSessionGracePeriod+2*time.Second, func() bool {
+		_, ok := PeekLoginSession(sess.Key)
+		return !ok
+	})
 }
 
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {

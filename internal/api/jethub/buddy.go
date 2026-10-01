@@ -83,8 +83,10 @@ func (h *Handler) buddyStatus(provider string) http.HandlerFunc {
 func (h *Handler) pollLogin(loginID string, w http.ResponseWriter, r *http.Request) {
 	sess, ok := corejethub.PeekLoginSession(loginID)
 	if !ok {
-		// Settled (pump removed it) or never existed — report done:false and
-		// let the UI fall back to the account list refresh.
+		// Not in the registry: settled and past the grace period (the pump
+		// reaps late), or a bogus id. The UI treats 404 as "no transition" —
+		// the settled outcome stays readable for loginSessionGracePeriod
+		// after the flow ends, so a live poll always sees done:true first.
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "unknown or settled loginId"})
 		return
 	}

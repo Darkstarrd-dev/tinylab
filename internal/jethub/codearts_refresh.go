@@ -235,3 +235,29 @@ func (m *Manager) SetAccountCredentialedHook(fn func(provider string)) {
 	defer m.mu.Unlock()
 	m.onAccountCredentialed = fn
 }
+
+// SetBrowserOpener registers the OS "open URL in default browser" callback
+// (the app wires it to fsutil.OpenInBrowser). Login flows call it with the
+// authorization URL so the flow matches the original plugin: +new account →
+// browser opens automatically. nil (tests) keeps the URL UI-only.
+func (m *Manager) SetBrowserOpener(fn func(url string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.browserOpener = fn
+}
+
+// openURLWithBrowser invokes the registered browser opener asynchronously and
+// never fails the login on an opener error (the URL stays in the dialog).
+func (m *Manager) openURLWithBrowser(url string) {
+	m.mu.RLock()
+	fn := m.browserOpener
+	m.mu.RUnlock()
+	if fn == nil {
+		return
+	}
+	go func() { fn(url) }()
+}
+
+// OpenURLWithBrowser is the exported alias for the API layer (qoder's flow
+// builds its URL in a start function without an opener hook of its own).
+func (m *Manager) OpenURLWithBrowser(url string) { m.openURLWithBrowser(url) }

@@ -178,10 +178,20 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 	}()
 
 	loginURL := BuildOAuthLoginURL(port, pkce, ticketID)
+	// Auto-open like the original plugin. StartCodeArtsLogin is a package
+	// function (no manager receiver), so the browser hook must be passed in —
+	// the API layer routes it through StartCodeArtsLoginWithBrowser.
 	if openURL != nil {
 		go openURL(loginURL)
 	}
 	return &StartedLogin{LoginURL: loginURL, Result: result, cancel: cancel}, nil
+}
+
+// StartCodeArtsLoginWithBrowser starts the codearts OAuth flow and opens the
+// authorization URL through the manager's registered browser opener (app
+// wiring = fsutil.OpenInBrowser). This is the variant the API layer uses.
+func (m *Manager) StartCodeArtsLoginWithBrowser() (*StartedLogin, error) {
+	return StartCodeArtsLogin(func(url string) { m.openURLWithBrowser(url) })
 }
 
 func deliver(ch chan<- LoginOutcome, outcome LoginOutcome) {

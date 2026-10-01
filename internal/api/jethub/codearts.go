@@ -41,7 +41,7 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := corejethub.StartCodeArtsLogin(nil)
+	started, err := h.d.Manager.StartCodeArtsLoginWithBrowser()
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())

@@ -83,6 +83,8 @@ func (m *Manager) StartTraeLogin(ctx context.Context, accountID string, openURL 
 		}
 	}()
 
+	// Auto-open like the original plugin (explicit openURL wins if given).
+	m.openURLWithBrowser(loginURL)
 	if openURL != nil {
 		go openURL(loginURL)
 	}

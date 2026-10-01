@@ -96,6 +96,13 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
     const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
     assert.ok(go.includes('SettleAndCleanup(sess'), f + ' must pump the outcome via SettleAndCleanup');
   }
+  // The app must wire the browser opener + the post-credential sync hook:
+  // auto-open the login page like the original plugin, and refresh the
+  // bridged provider's keys when a credential lands (else the new account
+  // stays invisible to {prefix}/{model} routing).
+  const appGo = fs.readFileSync(path.join(__dirname, '..', 'internal/app/app.go'), 'utf8');
+  assert.ok(appGo.includes('SetBrowserOpener('), 'app must wire SetBrowserOpener (auto-open the login page)');
+  assert.ok(appGo.includes('SetAccountCredentialedHook('), 'app must wire SetAccountCredentialedHook (SyncKeys after login)');
 });
 
 check('account card marks credential-less placeholders; SMS modal creates the account itself', () => {

@@ -131,6 +131,9 @@ type Manager struct {
 	// onAccountCredentialed fires after a credential write so the app can
 	// re-sync bridged keys (wired to Bridge.SyncKeys).
 	onAccountCredentialed func(provider string)
+	// browserOpener opens a URL in the default browser (wired to
+	// fsutil.OpenInBrowser); login flows invoke it with the login URL.
+	browserOpener func(url string)
 
 	// sharedClient lazily-built outbound client for adapter management calls.
 	sharedClient *http.Client

@@ -890,9 +890,11 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 
 | 约束 | 内容 |
 |---|---|
-| 背景 | 登录为两步式：login handler 立即返回 `loginUrl`+`loginId`，后台轮询/回调等用户浏览器授权（数十秒~分钟）。曾同时存在两个缺陷（raccoon/cline 实测复现：占位账号立即出现、凭据永不落盘） |
+| 背景 | 登录为两步式：login handler 立即返回 `loginUrl`+`loginId`，后台轮询/回调等用户浏览器授权（数十秒~分钟）。曾同时存在四个缺陷（实测复现：占位账号立即出现、浏览器不自动打开、弹窗永远停在等待、凭据永不落盘/prefix 检索不到） |
 | 缺陷 1 | `Start*Login(r.Context())` / 后台 `Poll*(r.Context())` —— handler 响应后请求 context 被取消，后台轮询当场夭折。修复：**一律 `context.Background()`**（qoder 最早注释此坑，其余 6 个 provider 全部中招）；`web/jethub.test.js` 静态守卫逐文件锁定 |
 | 缺陷 2 | status 轮询与 API 层 pump 都直读 `Started.Result`（容量 1），先到者独占、另一方永久挂起。修复：**单赢家纪律**——仅 `SettleAndCleanup`（§13n.1 sessions.go）读 channel，`pollLogin` 改读 `SessionStatus` 记录态；失败/持久化失败删除占位账号 |
+| 缺陷 3 | 结算后立即 reap session → 2s 轮询的下一次请求 404，前端永远看不到 `done:true`（后端已成功也白搭）。修复：`loginSessionGracePeriod`（30s）后再 reap（`reapAfterGrace`） |
+| 缺陷 4 | `SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层从未接线——登录成功后桥接 Keys 永不刷新，新账号 prefix 检索不到（备份导入能工作只因 backupImport 显式重同步）。修复：`app.go` 接线 `SetAccountCredentialedHook(→ Bridge.SyncKeys)` + `SetBrowserOpener(→ OpenBrowser)`（+新建账号自动打开默认浏览器授权页，对齐原插件；弹窗内链接保留为手动兜底） |
 | 前端配合 | SMS 流程（loomy/raccoon 短信）无服务端 login session：前端先 `POST /accounts` 创建占位再弹 SMS 弹窗（提交带 `accountId`）；两种登录弹窗取消时 `DELETE /accounts/{id}` 清占位；无凭据占位显示 `freeHubNoCredential` 灰徽标且不进推理/领取账号集 |
 
 ### 13n.1 P2/P3 provider 适配器文件（2026-10-01 新增）
@@ -902,10 +904,10 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | `codearts_oauth.go` | PKCE（48B base64url+S256）/DPoP（ECDSA P-256 JWK，字段名与 ref types.ts 1:1）/`SignDpopJws`（ES256, dpop+jwt）/终态错误分类（invalid_grant/ExpiredRefreshToken/InvalidDPoPHeader） |
 | `codearts_sign.go` | 华为 `SDK-HMAC-SHA256` 1:1 移植（canonical URI 尾斜杠、x-sdk-date/x-sdk-content-sha256/x-security-token、maas_type 等参与签名、GET 无 content-type、ApplySignedHeaders 跳过 host/content-type） |
 | `codearts_login.go` | 两步式 OAuth：`StartCodeArtsLogin`（回调 server 端口 ≥10000、180s 超时、secret 旧流程 307 回退、portal 结果页重定向）+ `LoginOutcome`（凭据 JSON 通用载荷，provider 无关） |
-| `codearts_refresh.go` | `RefreshCodeArtsAccount`（refreshable 三件套 + domain/user/model_rate_limits 合并）、`RefreshAllCodeArts`（含停用账号，失败留日志）、刷新经 `SetAccountCredentialedHook` → `Bridge.SyncKeys` |
+| `codearts_refresh.go` | `RefreshCodeArtsAccount`（refreshable 三件套 + domain/user/model_rate_limits 合并）、`RefreshAllCodeArts`（含停用账号，失败留日志）、刷新经 `SetAccountCredentialedHook` → `Bridge.SyncKeys`（app.go 装配接线）；`SetBrowserOpener`/`OpenURLWithBrowser` 登录页自动打开 |
 | `codearts_augment.go` | `CodeArtsAugmentHook`：出站头全量替换为 SDK 签名头 + maas_type: benefit（benefit 兜底集合）+ Chat-Id/Session-Id/lang |
 | `codearts_credits.go` | 每日签到五步流（账户门控/活动列表/可领判定/claim/confirm）+ 余额（usageTotalPackageCredit 总额、Agent-Type 签名后追加）；`identifierOf` 认数字型 campaignId |
-| `sessions.go` | 登录会话进程内注册表（`RegisterLoginSession`/`PeekLoginSession`/`TakeLoginSession`）+ `LoginSession`（Key/Manager + settled 记录态）+ **单赢家结算**（`SettleAndCleanup` pump：唯一 Result 消费者，记录 `SessionStatus` 快照、失败/持久化失败→删除占位账号、成功→complete 回调、结算后 reap）+ Manager 惰性共享 http client；测试 `sessions_test.go`（三路径 + 未结算快照） |
+| `sessions.go` | 登录会话进程内注册表（`RegisterLoginSession`/`PeekLoginSession`/`TakeLoginSession`）+ `LoginSession`（Key/Manager + settled 记录态）+ **单赢家结算**（`SettleAndCleanup` pump：唯一 Result 消费者，记录 `SessionStatus` 快照、失败/持久化失败→删除占位账号、成功→complete 回调、结算后 `reapAfterGrace`（30s，前端轮询必须能观察到 done）再 reap）+ Manager 惰性共享 http client + `SetBrowserOpener`/`openURLWithBrowser`（登录页自动打开）；测试 `sessions_test.go`（四路径 + 未结算快照 + 宽限期 reap） |
 | `buddy.go` | buddy/workbuddy 产品配置（endpoint/ platform/ UA 分档规则）+ X 头族常量 + `BuddyCredential`（字段名与 ref 1:1）+ JWT 过期解析（ms/秒/ISO → JWT exp 兜底） |
 | `buddy_product.go` | CN 16 条 / 国际 23 条静态模型表（只收录 ref 实测可用模型） |
 | `buddy_common.go` | JWT claim readers（exp/iat/nickname/sub，不验签）、stripControlChars、`ParseBuddyTokenData`（expiresIn 相对秒 → JWT iat 基准）、`ParseBuddyAccountData`、`BuildBuddyCredential`（昵称/uid 回退链） |

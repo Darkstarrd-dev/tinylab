@@ -167,6 +167,24 @@ func (a *App) buildComponents() error {
 		a.jethubManager = jethubMgr
 		a.jethubBridge = jethub.NewBridge(jethubMgr, a.reg)
 		jethub.RegisterDefaultProducts(a.jethubBridge)
+		// ⚠️ Post-credential sync hook: without this a finished login stores
+		// the credential but the bridged provider's Keys never refresh — the
+		// new account is invisible to {prefix}/{model} routing (backup import
+		// worked only because backupImport re-syncs explicitly). Fires async
+		// from SetCredential, outside the storage lock.
+		jethubMgr.SetAccountCredentialedHook(func(provider string) {
+			if err := a.jethubBridge.SyncKeys(provider); err != nil {
+				a.logger.Warn("[jethub] %s bridged keys sync failed: %v", provider, err)
+			}
+		})
+		// Auto-open the authorization URL in the default browser on +new
+		// account (matches the original plugin flow; the dialog link stays
+		// as a manual fallback).
+		jethubMgr.SetBrowserOpener(func(url string) {
+			if err := OpenBrowser(url); err != nil {
+				a.logger.Info("[jethub] auto-open login page failed: %v", err)
+			}
+		})
 		// P2: codearts SDK-HMAC augment hook (signature replaces auth headers).
 		jethubMgr.SetAugmenter("codearts", jethubMgr.CodeArtsAugmentHook())
 		// P3.1: buddy/workbuddy attribution hooks.

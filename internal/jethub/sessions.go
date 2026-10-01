@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+// loginSessionGracePeriod is how long a settled session stays observable
+// before the pump reaps it (several poll intervals; session state is tiny).
+const loginSessionGracePeriod = 30 * time.Second
+
+// reapAfterGrace removes the session entry once the UI poll had a chance to
+// observe the settled outcome (several poll intervals; entries are tiny).
+func reapAfterGrace(id string) {
+	go func() {
+		<-time.After(loginSessionGracePeriod)
+		TakeLoginSession(id)
+	}()
+}
+
 // httpClient lazily builds the shared outbound client used by provider
 // adapters for signed GET/POST management calls (30s budget, aligned with the
 // plugin's REQUEST_TIMEOUT_MS).
@@ -137,7 +150,11 @@ func SettleAndCleanup(sess *LoginSession, complete func(LoginOutcome) error) {
 	sess.settledErr = outcome.Err
 	sess.settleMu.Unlock()
 
-	TakeLoginSession(sess.Key)
+	// Reap only after a grace period: the UI polls every ~2s, so removing
+	// the entry immediately would make the poller's next request 404 and the
+	// "done" transition would never be observed — the dialog would hang on
+	// "waiting" even though the login finished (real defect recorded).
+	reapAfterGrace(sess.Key)
 	if outcome.Err != nil {
 		if sess.Manager != nil {
 			_ = sess.Manager.DeleteAccount(sess.Account)

@@ -204,6 +204,8 @@ func (m *Manager) StartLobsteraiLogin(ctx context.Context, accountID string, ope
 	}()
 
 	loginURL := BuildLobsteraiLoginURL(port, state)
+	// Auto-open like the original plugin (explicit openURL wins if given).
+	m.openURLWithBrowser(loginURL)
 	if openURL != nil {
 		go openURL(loginURL)
 	}
