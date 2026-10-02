@@ -648,6 +648,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     password: 'Password',
     // Gallery keys
     galleryClearTitle: 'Clear (C)',
+    galleryTreeSort: 'Sort', galleryTreeSortName: 'Name', galleryTreeSortSize: 'Size', galleryTreeSortPlayTime: 'Play Time',
     galleryReviewBtn: 'AI Review',
     galleryReviewHeader: 'AI Review',
     galleryReviewPreset: 'Preset',
@@ -1269,6 +1270,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     gfLabelFolder: 'this folder',
     gfLabelNode: 'this node',
     gfDelNodeTitle: 'Delete {0} ({1} files)?',
+    gfTreeSelDelTitle: 'Delete {0} files in {1} selected nodes?',
 
     // Sprite assistant page (converted from hardcoded strings, G2)
     spriteWelcome: 'Hi! I am the TinyLab assistant. I can jump between pages, check model quotas, clean logs, package archives and more. How can I help?',
@@ -2112,6 +2114,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     password: '密码',
     // Gallery keys
     galleryClearTitle: '清空 (C)',
+    galleryTreeSort: '排序', galleryTreeSortName: '文件名', galleryTreeSortSize: '文件大小', galleryTreeSortPlayTime: '播放时间',
     galleryReviewBtn: 'AI 审核',
     galleryReviewHeader: 'AI 审核',
     galleryReviewPreset: '预设',
@@ -2875,6 +2878,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     gfLabelFolder: '此文件夹',
     gfLabelNode: '此节点',
     gfDelNodeTitle: '删除{0}（{1} 个文件）？',
+    gfTreeSelDelTitle: '删除 {1} 个选中节点内的 {0} 个文件？',
 
     spriteWelcome: '你好！我是 TinyLab 小精灵。我可以帮你快速跳转页面、查询模型配额、清理日志、打包归档等。有什么我可以帮你的吗？',
     spriteDockLabel: '小精灵',

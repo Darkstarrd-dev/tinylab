@@ -776,7 +776,11 @@ function appendItems(out) {
 function appendVideoItems(outVid) {
   if (!outVid.length) return;
   var hadNoVideos = (galleryState.videoItems.length === 0);
-  sortItems(outVid);
+  // Video items must not go through sortItems(): the image tree sort option
+  // (size/created/playTime aggregates) is meaningless for the video list.
+  outVid.sort(function(a, b) {
+    return naturalComparePath(a.path, b.path);
+  });
   galleryState.videoItems = galleryState.videoItems.concat(outVid);
   updateVideoDirStructure();
   if (hadNoVideos) {

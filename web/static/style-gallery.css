@@ -20,6 +20,8 @@
 .gallery-tree-node .tree-icon{font-size:13px;opacity:0.8;flex-shrink:0}
 .gallery-tree-node .tree-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gallery-tree-node .tree-count{font-size:10px;opacity:0.6;font-family:monospace;flex-shrink:0}
+.gallery-tree-node.review-selected{background:var(--glass-hover);color:var(--text)}
+.gallery-tree-node .tree-select-check{font-size:12px;flex-shrink:0;opacity:0.9}
 .gallery-main-area{flex:1 1 auto;display:flex;flex-direction:column;height:100%;min-width:0;gap:0}
 .gallery-main{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:var(--bg-card);border:none;border-radius:0;overflow:hidden;position:relative}
 .gallery-main-split{display:flex;flex-direction:row;gap:0}
@@ -51,6 +53,13 @@
 .gallery-interval-item:hover{background:var(--glass-hover);color:var(--text)}
 .gallery-interval-item.active{background:var(--accent-glow);color:var(--accent);font-weight:600}
 .gallery-key-hint{font-size:10px;color:var(--text-muted);opacity:0.7;font-family:monospace}
+
+/* Image tree sort control: hover dropdown opens downward from the tree
+   header (right-aligned so it stays inside the narrow panel). */
+.gallery-sort-wrapper{position:relative;flex-shrink:0}
+.gallery-sort-wrapper .gallery-interval-dropdown{bottom:auto;top:calc(100% + 8px);left:auto;right:0;transform:translateY(-4px)}
+.gallery-sort-wrapper:hover .gallery-interval-dropdown{opacity:1;visibility:visible;transform:translateY(0)}
+.tree-sort-info{font-size:10px;opacity:0.75;font-family:monospace;flex-shrink:0;color:var(--text-muted)}
 
 .gallery-empty{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;color:var(--text-muted);text-align:center;padding:20px}
 .gallery-empty .gallery-empty-icon{font-size:44px;color:var(--text-muted);opacity:0.4;margin-bottom:12px;font-family:monospace}

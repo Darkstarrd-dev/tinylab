@@ -26,6 +26,58 @@ function updateDirStructure() {
   renderTreePanel();
 }
 
+// ---------- tree multi-selection (batch delete) -------------------
+// Ctrl+click toggles a node, Shift+click selects the dirPathList range from
+// the anchor node, plain click with an active selection clears it. Selected
+// nodes render a ☑/☐ prefix (same markup as the AI Review select mode).
+
+function clearTreeSelection() {
+  resetTreeSelection();
+  renderTreePanel();
+}
+
+function toggleTreeSelectionNode(dir) {
+  var sel = galleryState.treeSel;
+  var pos = sel.nodes.indexOf(dir);
+  if (pos >= 0) sel.nodes.splice(pos, 1);
+  else sel.nodes.push(dir);
+  sel.anchor = dir;
+  renderTreePanel();
+}
+
+function rangeTreeSelectionNodes(dir) {
+  var sel = galleryState.treeSel;
+  var list = galleryState.dirPathList;
+  var anchor = sel.anchor;
+  if ((anchor === null || anchor === undefined) && galleryState.curDirPath) anchor = galleryState.curDirPath;
+  var ai = list.indexOf(anchor);
+  if (ai < 0 && anchor === 'Root') ai = list.indexOf('');
+  var bi = list.indexOf(dir);
+  if (bi < 0 && dir === 'Root') bi = list.indexOf('');
+  if (ai < 0 || bi < 0) {
+    sel.nodes = [dir];
+    sel.anchor = dir;
+    renderTreePanel();
+    return;
+  }
+  var lo = Math.min(ai, bi);
+  var hi = Math.max(ai, bi);
+  sel.nodes = [];
+  for (var i = lo; i <= hi; i++) sel.nodes.push(list[i]);
+  renderTreePanel();
+}
+
+// itemsUnderTreeNode enumerates the items of a tree node's whole subtree
+// ('' = Root node → every item).
+function itemsUnderTreeNode(dir) {
+  if (dir === '') return galleryState.items.slice();
+  return galleryState.items.filter(function(it) {
+    var d = getDirPath(it.path);
+    if (d === 'Root') return false;
+    return d === dir || d.indexOf(dir + '/') === 0;
+  });
+}
+
 function toggleTreePanel() {
   // In split mode, detect which pane actually has DOM focus (via Tab or
   // button clicks) and sync galleryState.focus before toggling. This
@@ -58,6 +110,51 @@ function toggleTreePanel() {
   renderTreePanel();
 }
 
+// buildTreeSortControlHTML renders the image tree sort button plus its hover
+// dropdown (reuses the autoplay interval-dropdown pattern). Only embedded in
+// the standard image header; video/select/review headers stay untouched.
+function buildTreeSortControlHTML() {
+  var cfg = galleryState.imageTreeSort || { key: 'name', dir: 1 };
+  var label = T('galleryTreeSort') || 'Sort';
+  var opts = [
+    { key: 'name', label: T('galleryTreeSortName') || 'Name' },
+    { key: 'size', label: T('galleryTreeSortSize') || 'Size' },
+    { key: 'playTime', label: T('galleryTreeSortPlayTime') || 'Play Time' }
+  ];
+  var dirs = [
+    { d: 1, arrow: '↑' },
+    { d: -1, arrow: '↓' }
+  ];
+  var items = '';
+  for (var i = 0; i < opts.length; i++) {
+    for (var j = 0; j < dirs.length; j++) {
+      var act = (cfg.key === opts[i].key && cfg.dir === dirs[j].d) ? ' active' : '';
+      items += '<div class="gallery-interval-item' + act + '" data-sort-key="' + opts[i].key + '" data-sort-dir="' + dirs[j].d + '">' +
+                 '<span>' + dirs[j].arrow + ' ' + escapeHtml(opts[i].label) + '</span>' +
+               '</div>';
+    }
+  }
+  return '<div class="gallery-sort-wrapper">' +
+           '<button type="button" id="gallery-tree-sort-btn" class="gallery-tree-clear-btn" data-tooltip="' + escapeHtml(label) + '">' + GALLERY_ICONS.sort + '</button>' +
+           '<div class="gallery-interval-dropdown" id="gallery-tree-sort-dropdown">' + items + '</div>' +
+         '</div>';
+}
+
+// treeSortSuffixFor builds the per-directory suffix shown right of the node
+// count when a non-name image tree sort is active:
+//   size → prettySize, playTime → zero-padded seconds (≥3 digits).
+function treeSortSuffixFor(dirKey, aggs, sortKey) {
+  if (!sortKey || sortKey === 'name') return '';
+  var a = aggs[dirKey] || { size: 0, playMs: 0 };
+  if (sortKey === 'size') return prettySize(a.size);
+  if (sortKey === 'playTime') {
+    var s = String(Math.floor(a.playMs / 1000));
+    while (s.length < 3) s = '0' + s;
+    return s;
+  }
+  return '';
+}
+
 function renderTreePanel() {
   var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
   var panel = document.getElementById(isVidActive ? 'gallery-video-tree-panel' : 'gallery-tree-panel');
@@ -87,8 +184,9 @@ function renderTreePanel() {
       headerHTML = '';
     } else {
       headerHTML = '<div class="gallery-tree-header">' +
-        '<button class="gallery-tree-clear-btn" type="button" id="gallery-tree-batch-btn" style="margin-right:auto" data-tooltip="' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '">' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '</button>' +
-        '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + T('galleryReviewBtn') + '</button>' +
+        '<button class="gallery-tree-clear-btn" type="button" id="gallery-tree-batch-btn" style="margin-right:auto" data-tooltip="' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '">' + GALLERY_ICONS.batchConvert + '</button>' +
+        '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + GALLERY_ICONS.aiReview + '</button>' +
+        buildTreeSortControlHTML() +
         '</div>';
     }
   }
@@ -203,6 +301,9 @@ function renderTreePanel() {
         }
       }
 
+      var treeSortKey = (galleryState.imageTreeSort && galleryState.imageTreeSort.key) || 'name';
+      var treeAggs = (treeSortKey === 'name') ? null : dirAggregates(galleryState.items);
+
       var htmlImg = '';
       for (var t = 0; t < treeOrder.length; t++) {
         var tKey = treeOrder[t];
@@ -215,6 +316,11 @@ function renderTreePanel() {
         } else if (tKey === '') {
           icon = '🖼';
         }
+        var sortSpan = '';
+        if (treeAggs) {
+          var sortInfo = treeSortSuffixFor(tKey, treeAggs, treeSortKey);
+          if (sortInfo) sortSpan = '<span class="tree-sort-info">' + escapeHtml(sortInfo) + '</span>';
+        }
 
         if (rs.selectMode) {
           // A) 节点选择模式
@@ -224,7 +330,7 @@ function renderTreePanel() {
                        '<span class="tree-select-check">' + checkIcon + '</span>' +
                        '<span class="tree-icon">' + icon + '</span>' +
                        '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
-                       '<span class="tree-count">' + node.count + '</span>' +
+                       '<span class="tree-count">' + node.count + '</span>' + sortSpan +
                      '</div>';
         } else if (rs.active) {
           // B) 审核模式（运行中/已完成）
@@ -241,16 +347,20 @@ function renderTreePanel() {
             htmlImg += '<div class="gallery-tree-node' + isFocusedNode + '" data-dir="' + escapeHtml(tKey) + '" data-review-node="true" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
                          '<span class="tree-icon">' + statusIcon + '</span>' +
                          '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
-                         '<span class="tree-count">' + (nMatches > 0 ? nMatches : '') + '</span>' +
+                         '<span class="tree-count">' + (nMatches > 0 ? nMatches : '') + '</span>' + sortSpan +
                        '</div>';
           }
         } else {
           // C) 标准模式
           var isActive = (tKey === galleryState.curDirPath) ? ' active' : '';
-          htmlImg += '<div class="gallery-tree-node' + isActive + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
+          var isSel = galleryState.treeSel.nodes.length > 0 && galleryState.treeSel.nodes.indexOf(tKey) >= 0;
+          var checkSpan = isSel ? '<span class="tree-select-check">☑</span>'
+            : (galleryState.treeSel.nodes.length > 0 ? '<span class="tree-select-check">☐</span>' : '');
+          htmlImg += '<div class="gallery-tree-node' + isActive + (isSel ? ' review-selected' : '') + '" data-dir="' + escapeHtml(tKey) + '" data-first-idx="' + node.firstIndex + '" style="padding-left:' + indent + 'px" data-tooltip="' + escapeHtml(tKey || 'Root') + '">' +
+                       checkSpan +
                        '<span class="tree-icon">' + icon + '</span>' +
                        '<span class="tree-name">' + escapeHtml(node.name) + '</span>' +
-                       '<span class="tree-count">' + node.count + '</span>' +
+                       '<span class="tree-count">' + node.count + '</span>' + sortSpan +
                      '</div>';
         }
       }
@@ -346,6 +456,34 @@ function renderTreePanel() {
       if (e) { e.preventDefault(); e.stopPropagation(); }
       if (typeof window.openTreeBatchConvert === 'function') window.openTreeBatchConvert();
     };
+    // 排序下拉（独立 id 绑定：树内 .gallery-tree-clear-btn 被共享绑定，
+    // 不能依赖 class 选择器）。点击选项写入 imageTreeSort 并全量重排。
+    var sortDropdown = panel.querySelector('#gallery-tree-sort-dropdown');
+    if (sortDropdown) {
+      sortDropdown.onclick = function(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        var item = e.target.closest('[data-sort-key]');
+        if (!item) return;
+        var k = item.getAttribute('data-sort-key');
+        var d = parseInt(item.getAttribute('data-sort-dir'), 10);
+        if (!k || isNaN(d)) return;
+        galleryState.imageTreeSort = { key: k, dir: d };
+        if (!galleryState.items.length) { renderTreePanel(); return; }
+        var curItem = galleryState.items[galleryState.index] || null;
+        sortItems(galleryState.items);
+        if (curItem) {
+          for (var ri = 0; ri < galleryState.items.length; ri++) {
+            if (galleryState.items[ri] === curItem) { galleryState.index = ri; break; }
+          }
+        }
+        updateDirStructure();
+        updateCurrentFolderItems(galleryState.index);
+        renderThumbnails();
+        if (galleryState.index >= 0 && galleryState.index < galleryState.items.length) {
+          renderActive(galleryState.index);
+        }
+      };
+    }
   }
 
   if (needVideoNodeBinding) {
@@ -418,6 +556,18 @@ function renderTreePanel() {
             var fIdx = parseInt(node.getAttribute('data-first-idx'), 10);
             if (!isNaN(fIdx)) targetIdx = fIdx;
           }
+          if (e && (e.ctrlKey || e.metaKey)) {
+            // Ctrl+click: add/remove this node in the multi-selection.
+            toggleTreeSelectionNode(dir);
+          } else if (e && e.shiftKey) {
+            // Shift+click: select the range from the anchor node to this one.
+            rangeTreeSelectionNodes(dir);
+          } else if (galleryState.treeSel.nodes.length) {
+            // Plain click while a selection is active: drop the whole
+            // selection, then navigate normally.
+            clearTreeSelection();
+          }
+          // Thumbnails follow the final clicked node in every case.
           if (targetIdx >= 0) setActive(targetIdx);
         };
       });
@@ -516,6 +666,8 @@ function clearActiveSideTree(forceVid) {
   galleryState.dirPathList = [];
   galleryState.currentFolderIndices = [];
   galleryState.currentSubIndex = -1;
+  resetPlayTime();
+  resetTreeSelection();
   updateDirStructure();
   renderThumbnails();
   renderActive(-1);
@@ -704,6 +856,7 @@ function updateInfo(item, info, countStr) {
 
 function setActive(index) {
   if (!galleryState.items.length) return;
+  if (galleryState.autoplayTimer) flushPlayTime();
   galleryState.index = index;
   // Point the shared zipSessionId at the currently-viewed pack (AI Review and
   // the getItemBlob fallback read it) and bump the session's LRU position so
@@ -712,11 +865,24 @@ function setActive(index) {
   // in-memory zip sessions are touched. Fire-and-forget; a 404 just means
   // rehydrateZipSession will recreate it on next entry fetch.
   var cur = galleryState.items[index];
+  if (galleryState.autoplayTimer && cur) beginPlayTime(cur.path);
   if (cur && cur.kind === 'zip' && cur.sessionId && !cur.sourceId) {
     galleryState.zipSessionId = cur.sessionId;
     fetch('/api/gallery/zip/' + encodeURIComponent(cur.sessionId) + '/touch', { method: 'POST' }).catch(function() {});
   }
-  renderActive(index);
+  // Live re-sort while autoplay runs with playTime sort: aggregates include
+  // the just-started interval; keep index pointing at the same item.
+  if (galleryState.autoplayTimer && cur &&
+      galleryState.imageTreeSort && galleryState.imageTreeSort.key === 'playTime') {
+    sortItems(galleryState.items);
+    for (var ri = 0; ri < galleryState.items.length; ri++) {
+      if (galleryState.items[ri] === cur) { galleryState.index = ri; break; }
+    }
+    updateDirStructure();
+    updateCurrentFolderItems(galleryState.index);
+    renderThumbnails();
+  }
+  renderActive(galleryState.index);
 }
 
 // ---------- deletion interactions ------------------------------------------
@@ -852,6 +1018,8 @@ function removeItemsByFilter(filterFn) {
   }
   renderThumbnails();
   renderTreePanel();
+  // Selected dirs may be gone after removal; drop the selection.
+  resetTreeSelection();
   return removed.length;
 }
 

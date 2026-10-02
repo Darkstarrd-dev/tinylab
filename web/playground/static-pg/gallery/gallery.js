@@ -58,6 +58,8 @@ window.renderGallery = function(container) {
  */
 window.cleanupGallery = function() {
   stopAutoplay();
+  // Watch-time counters are page-scoped: leaving the Gallery resets them.
+  resetPlayTime();
   // Release hidden video preload cache (bounded 4, but must not leak across navigations)
   try {
     if (typeof videoPreloadCache !== 'undefined' && videoPreloadCache && videoPreloadCache.map) {

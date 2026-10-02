@@ -18,6 +18,8 @@ function stopAutoplay() {
     clearInterval(galleryState.autoplayTimer);
     galleryState.autoplayTimer = null;
   }
+  // Fold the final partial watch interval before declaring autoplay stopped.
+  flushPlayTime();
   galleryState.autoplayOn = false;
   var btn = document.getElementById('gallery-autoplay-btn');
   if (btn) {
@@ -222,7 +224,9 @@ function onFullscreenKey(e) {
   if (k === 'Delete') {
     e.preventDefault(); e.stopPropagation();
     if (e.shiftKey) {
-      if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
+      if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
+        window.showTreeSelDeletePrompt();
+      } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
     } else if (e.ctrlKey) {
       if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
     } else {
@@ -398,7 +402,9 @@ function onGalleryKeyDown(e) {
   if (k === 'Delete') {
     e.preventDefault(); e.stopPropagation();
     if (e.shiftKey) {
-      if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
+      if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
+        window.showTreeSelDeletePrompt();
+      } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
     } else if (e.ctrlKey) {
       if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
     } else {
@@ -948,6 +954,106 @@ window.deleteZipPrompt = function() {
   }
 };
 
+
+// showTreeSelDeletePrompt batch-removes the image-tree nodes multi-selected
+// via Ctrl+click / Shift+click (galleryState.treeSel). "Remove from list"
+// drops every item under the selected subtrees via removeItemsByFilter;
+// "Delete from disk" additionally runs the per-node deleteNodeFromDisk flow
+// for each selected top-level node (skipped for the Root node, whose items
+// may span unrelated grants). Shared Shift+Del entry with deleteZipPrompt.
+window.showTreeSelDeletePrompt = function() {
+  var sel = galleryState.treeSel;
+  if (!sel.nodes.length || !galleryState.items.length) return;
+
+  // Drop nodes contained in another selected node's subtree (parent covers
+  // the child; '' covers everything).
+  var nodes = [];
+  for (var i = 0; i < sel.nodes.length; i++) {
+    var n = sel.nodes[i];
+    var contained = false;
+    for (var j = 0; j < sel.nodes.length; j++) {
+      if (j === i) continue;
+      var m = sel.nodes[j];
+      if (m === '' || n.indexOf(m + '/') === 0) { contained = true; break; }
+    }
+    if (!contained) nodes.push(n);
+  }
+
+  var perNode = [];
+  var total = 0;
+  for (var k = 0; k < nodes.length; k++) {
+    var items = itemsUnderTreeNode(nodes[k]);
+    if (!items.length) continue;
+    perNode.push({ dir: nodes[k], items: items });
+    total += items.length;
+  }
+  if (!perNode.length) { clearTreeSelection(); return; }
+
+  var anyDisk = perNode.some(function(pn) {
+    if (pn.dir === '') return false; // Root spans unrelated grants: list only
+    var rep = pn.items[0];
+    if (isArchiveName(pn.dir) || rep.kind === 'zip') return !!(rep.zipFileHandle || rep.grantId);
+    return !!(rep.rootDirHandle || rep.rootDirPath);
+  });
+
+  var html = '<div style="text-align:center;padding:8px">' +
+    '<div style="font-size:15px;margin-bottom:8px">' + T('gfTreeSelDelTitle', [String(total), String(perNode.length)]) + '</div>' +
+    '<button class="pg-btn" id="zip-del-list" style="margin:4px">' + T('gfDelRemoveList') + '</button>';
+  if (anyDisk) html += '<button class="pg-btn" id="zip-del-disk" style="margin:4px">' + T('gfDelRemoveDisk') + '</button>';
+  html += '<button class="pg-btn" id="zip-del-cancel" style="margin:4px">' + T('gfDelCancel') + '</button></div>';
+  pgShowModal(html);
+  setTimeout(function() { var cb = document.getElementById('zip-del-cancel'); if (cb) cb.focus(); }, 30);
+
+  var all = [];
+  for (var p = 0; p < perNode.length; p++) {
+    for (var q = 0; q < perNode[p].items.length; q++) all.push(perNode[p].items[q]);
+  }
+
+  document.getElementById('zip-del-list').onclick = function() {
+    pgCloseModal();
+    removeItemsByFilter(function(it) { return all.indexOf(it) >= 0; });
+    clearTreeSelection();
+  };
+  document.getElementById('zip-del-cancel').onclick = function() { pgCloseModal(); };
+  if (anyDisk) {
+    document.getElementById('zip-del-disk').onclick = function() {
+      pgCloseModal();
+      (async function() {
+        for (var d = 0; d < perNode.length; d++) {
+          var pn = perNode[d];
+          if (pn.dir === '') continue; // list-only (handled below)
+          // Re-resolve: an ancestor's disk delete may already have removed
+          // this node's items from the list.
+          pn.items = itemsUnderTreeNode(pn.dir).filter(function(it) { return galleryState.items.indexOf(it) >= 0; });
+          if (!pn.items.length) continue;
+          var rep = pn.items[0];
+          var nodeType, packId = null, rootHandle = null;
+          if (isArchiveName(pn.dir)) {
+            nodeType = 'zip-root';
+            packId = _packId(rep);
+          } else if (rep.kind === 'zip') {
+            nodeType = 'zip-subdir';
+            packId = _packId(rep);
+          } else {
+            nodeType = 'disk-subdir';
+            rootHandle = rep.rootDirHandle || null;
+            if (!rep.rootDirPath && !rootHandle) continue; // not disk-capable
+          }
+          await deleteNodeFromDisk(nodeType, rep, pn.dir, packId, rootHandle, pn.items);
+        }
+        // Root-node items (if selected) and any stragglers: list-only removal.
+        var rest = [];
+        for (var r = 0; r < all.length; r++) {
+          if (galleryState.items.indexOf(all[r]) >= 0) rest.push(all[r]);
+        }
+        if (rest.length) {
+          removeItemsByFilter(function(it) { return rest.indexOf(it) >= 0; });
+        }
+        clearTreeSelection();
+      })();
+    };
+  }
+};
 
 // deleteNodeFromDisk removes the given node from disk based on its type.
 // For zip-root: removes the entire zip file via zipFileHandle.remove().

@@ -118,6 +118,125 @@ function sortItems(items) {
   items.sort(function(a, b) {
     return naturalComparePath(a.path, b.path);
   });
+  var arranged = applyImageTreeSort(items);
+  for (var si = 0; si < arranged.length; si++) items[si] = arranged[si];
+}
+
+// flushPlayTime folds the in-flight watch interval into playSeconds.
+// Only meaningful while fullscreen autoplay is running (autoplayTimer set);
+// stopping autoplay flushes the final partial interval.
+function flushPlayTime() {
+  if (galleryState.playStartedAt && galleryState.playActivePath) {
+    var fp = galleryState.playActivePath;
+    galleryState.playSeconds[fp] = (galleryState.playSeconds[fp] || 0) +
+      (Date.now() - galleryState.playStartedAt) / 1000;
+  }
+  galleryState.playStartedAt = null;
+}
+
+// beginPlayTime starts counting watch time for one item path.
+function beginPlayTime(path) {
+  galleryState.playStartedAt = Date.now();
+  galleryState.playActivePath = path;
+}
+
+// resetPlayTime wipes all watch counters (Clear list / page cleanup).
+function resetPlayTime() {
+  galleryState.playSeconds = {};
+  galleryState.playStartedAt = null;
+  galleryState.playActivePath = null;
+}
+
+// resetTreeSelection wipes the image-tree multi-selection (Ctrl+click /
+// Shift+click nodes for batch delete).
+function resetTreeSelection() {
+  galleryState.treeSel.nodes = [];
+  galleryState.treeSel.anchor = null;
+}
+
+// dirAggregates folds items into per-directory aggregates keyed by every
+// directory-level path prefix of item.path (so parent dirs accumulate their
+// whole subtree). size = total bytes, playMs = total autoplay watch time
+// (including the in-flight interval). '' holds the grand totals for Root.
+function dirAggregates(items) {
+  var aggs = {};
+  var activeMs = 0;
+  var activePath = null;
+  if (galleryState.playStartedAt && galleryState.playActivePath && galleryState.autoplayTimer) {
+    activeMs = Date.now() - galleryState.playStartedAt;
+    activePath = galleryState.playActivePath;
+  }
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var p = it.path || '';
+    var fSize = it.size || 0;
+    var fPlay = (galleryState.playSeconds[p] || 0) * 1000;
+    if (activePath && p === activePath) fPlay += activeMs;
+    var segs = p.split('/');
+    var acc = '';
+    for (var s = 0; s < segs.length - 1; s++) {
+      acc = acc ? (acc + '/' + segs[s]) : segs[s];
+      var a = aggs[acc];
+      if (!a) a = aggs[acc] = { size: 0, playMs: 0 };
+      a.size += fSize;
+      a.playMs += fPlay;
+    }
+    var ra = aggs[''];
+    if (!ra) ra = aggs[''] = { size: 0, playMs: 0 };
+    ra.size += fSize;
+    ra.playMs += fPlay;
+  }
+  return aggs;
+}
+
+// applyImageTreeSort rearranges name-sorted items to match the image tree
+// sort option: sibling directories ordered by the selected aggregate, direct
+// files kept in name order under their directory (DFS output).
+// key 'name' keeps the natural path order (fully reversed for dir -1).
+function applyImageTreeSort(items) {
+  var cfg = galleryState.imageTreeSort || { key: 'name', dir: 1 };
+  if (!cfg.key || cfg.key === 'name') {
+    return cfg.dir === -1 ? items.slice().reverse() : items.slice();
+  }
+  var aggs = dirAggregates(items);
+  var mul = (cfg.dir === -1) ? -1 : 1;
+  function aggVal(dirPath) {
+    var a = aggs[dirPath];
+    if (!a) return 0;
+    if (cfg.key === 'size') return a.size;
+    if (cfg.key === 'playTime') return a.playMs;
+    return 0;
+  }
+  var root = { files: [], dirs: {} };
+  for (var i = 0; i < items.length; i++) {
+    var segs = (items[i].path || '').split('/');
+    var node = root;
+    for (var s = 0; s < segs.length - 1; s++) {
+      var nm = segs[s];
+      if (!node.dirs[nm]) node.dirs[nm] = { files: [], dirs: {} };
+      node = node.dirs[nm];
+    }
+    node.files.push(items[i]);
+  }
+  var out = [];
+  function emit(node, prefix) {
+    for (var f = 0; f < node.files.length; f++) out.push(node.files[f]);
+    var names = [];
+    for (var nm in node.dirs) names.push(nm);
+    names.sort(function(a, b) {
+      var va = aggVal(prefix ? prefix + '/' + a : a);
+      var vb = aggVal(prefix ? prefix + '/' + b : b);
+      var d = (va - vb) * mul;
+      if (d !== 0) return d;
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    for (var n = 0; n < names.length; n++) {
+      var child = names[n];
+      emit(node.dirs[child], prefix ? prefix + '/' + child : child);
+    }
+  }
+  emit(root, '');
+  return out;
 }
 
 function showMsg(text, targetPaneId) {
@@ -195,6 +314,17 @@ var galleryState = {
   dirPathList: [],
   currentFolderIndices: [],
   currentSubIndex: -1,
+  // Image tree sort option (memory only): key 'name'|'created'|'size'|'playTime',
+  // dir 1 = asc / -1 = desc. Drives sortItems() and the tree panel dropdown.
+  imageTreeSort: { key: 'name', dir: 1 },
+  // Per-file fullscreen-autoplay watch time in seconds (float, key: item.path).
+  // In-memory only: cleared by Clear list, cleanupGallery, or app restart.
+  playSeconds: {},
+  playStartedAt: null,   // Date.now() baseline of the in-flight interval
+  playActivePath: null,  // item.path currently being watched
+  // Image tree multi-selection (memory only): nodes = selected dir keys,
+  // anchor = Ctrl+click origin for Shift+click ranges. Used for batch delete.
+  treeSel: { nodes: [], anchor: null },
   // AI Review 状态
   reviewState: {
     active: false,           // 是否正在审核或已审核完成
@@ -262,6 +392,9 @@ var GALLERY_ICONS = {
   video: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
   fullscreen: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>',
   edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>',
+  batchConvert: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+  aiReview: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  sort: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>',
   metaInfo: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
 };
 
