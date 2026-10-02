@@ -29,6 +29,7 @@ import (
 	"github.com/tinylab/tinylab/internal/rotation"
 	"github.com/tinylab/tinylab/internal/state"
 	"github.com/tinylab/tinylab/internal/usage"
+	"github.com/tinylab/tinylab/internal/webhub"
 	"github.com/tinylab/tinylab/web"
 )
 
@@ -65,6 +66,12 @@ type App struct {
 	// Free Hub (jethub) components; nil when the storage dir cannot be created.
 	jethubManager *jethub.Manager
 	jethubBridge  *jethub.Bridge
+	// Web Hub (webhub) components; nil when the data dir cannot be created.
+	webhubManager *webhub.Manager
+	webhubBridge  *webhub.Bridge
+	// webhubProfile is the persistent browser profile dir (login state lives
+	// here). Set alongside webhubManager.
+	webhubProfile string
 
 	// shutdownCtx is cancelled by the API layer (POST /api/shutdown) and by the
 	// host loop, signalling the app to begin graceful shutdown.
@@ -206,11 +213,35 @@ func (a *App) buildComponents() error {
 		// P3.1: buddy/workbuddy attribution hooks.
 		jethubMgr.RegisterProviderAugmenters()
 		a.jethubBridge.RestoreBridges()
-		a.proxyHandler.SetRequestAugmenter(jethubMgr)
 		// R1-2: codearts renewal scheduler — startup pass + 30min ticker
 		// (ref cf5edab / index.ts). Without it an expired token stays expired
 		// until the user clicks 续期 on the account card.
 		jethubMgr.StartRefreshScheduler(a.shutdownCtx)
+	}
+	// Web Hub (webhub): site rules + browser-driven bridge. Unlike jethub it
+	// stores NO credential (the login state lives in the browser profile), so
+	// it only needs a data dir. A missing/unusable dir disables the Web Hub
+	// while everything else keeps running.
+	webhubDir := config.ResolveWebHubDir("", a.configDir)
+	webhubMgr, err := webhub.NewManager(webhubDir, a.logger)
+	if err != nil {
+		a.logger.Warn("webhub manager disabled: %v", err)
+	} else {
+		a.webhubManager = webhubMgr
+		webhubMgr.SetBrowserOpener(func(url string) error {
+			if err := OpenBrowser(url); err != nil {
+				a.logger.Info("[webhub] open site failed: %v", err)
+				return err
+			}
+			return nil
+		})
+		a.webhubBridge = webhub.NewBridge(webhubMgr, a.reg)
+		// Re-register sites that already have a stored prefix so
+		// {prefix}/{modelID} works right after startup.
+		a.webhubBridge.RestoreBridges()
+		// The profile dir is FIXED and persistent: the user signs in once and
+		// the login survives restarts (a temp dir would force a re-login).
+		a.webhubProfile = webhub.ResolveProfileDir("", webhubDir)
 	}
 	// Download manager (feature_download). In the default build the feature is
 	// always compiled, so the manager is constructed exactly as before; a
@@ -293,6 +324,11 @@ func (a *App) buildComponents() error {
 	if a.jethubManager != nil && a.jethubBridge != nil {
 		a.apiRouter.SetJetHub(a.jethubManager, a.jethubBridge)
 	}
+	// Wire the Web Hub manager/bridge before Routes() so /api/webhub
+	// endpoints are registered (nil pair keeps them off).
+	if a.webhubManager != nil && a.webhubBridge != nil {
+		a.apiRouter.SetWebHub(a.webhubManager, a.webhubBridge)
+	}
 	// Wire the embedded games FS so POST /api/games/seed can materialize
 	// the staged example units on demand. The embed is read once at startup
 	// and never overwritten on disk (SeedGames skips existing dirs).
@@ -305,6 +341,17 @@ func (a *App) buildComponents() error {
 	a.proxyHandler.SetLogRequestsProvider(a.apiRouter.LogRequests)
 	a.proxyHandler.SetRequestLogDir(config.ResolveTraceDir(cfg.Trace.LogDir, a.configDir))
 	a.proxyHandler.SetQuickSlotOnlyProvider(a.apiRouter.QuickSlotOnly)
+
+	// ⚠️ Bridged-provider augmenter: the proxy exposes ONE slot, but both hubs
+	// need it. Install the dispatcher AFTER both hubs are built (otherwise
+	// whichever was wired first would be silently replaced). A hub that failed
+	// to construct stays nil and never receives calls.
+	if a.jethubManager != nil || a.webhubBridge != nil {
+		a.proxyHandler.SetRequestAugmenter(&bridgedAugmenter{
+			jethub: a.jethubManager,
+			webhub: a.webhubBridge,
+		})
+	}
 
 	// Start the trace retention sweep goroutine. It runs every hour
 	// and deletes trace files older than RetainDays, enforcing MaxDiskMB.
@@ -426,6 +473,27 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 		}()
 	}
 
+	// Web Hub: bring up the CDP endpoint in the background. It is intentionally
+	// NOT fatal — a machine with no Chromium (or a blocked debug port) keeps
+	// every other feature; the UI reports "browser not connected" and the
+	// status endpoint stays honest. Launching also must not block startup: a
+	// cold Chrome start takes seconds.
+	if a.webhubManager != nil && a.webhubProfile != "" {
+		go func() {
+			wsURL, launched, err := webhub.Connect(a.webhubProfile, webhub.DefaultPort, false)
+			if err != nil {
+				a.logger.Warn("[webhub] browser unavailable: %v", err)
+				return
+			}
+			a.webhubManager.SetEndpoint(wsURL)
+			if launched {
+				a.logger.Info("[webhub] browser launched on :%d", webhub.DefaultPort)
+			} else {
+				a.logger.Info("[webhub] attached to the running browser on :%d", webhub.DefaultPort)
+			}
+		}()
+	}
+
 	// Block on the host loop until shutdown is requested (signal or UI or tray quit).
 	// runHostLoop (and its shutdown wiring) is implemented per build tag in host_*.go.
 	// Seed the pet switches from the initial config; the settings PATCH keeps
@@ -477,6 +545,12 @@ func (a *App) Shutdown(_ context.Context) error {
 	if a.lockFile != nil {
 		a.lockFile.Close()
 		_ = os.Remove(a.lockPath)
+	}
+	if a.webhubManager != nil {
+		// Detach sessions only — the browser process is deliberately left
+		// running (see webhub.Connect): it holds the user's login state and
+		// possibly their own tabs.
+		a.webhubManager.Sessions().Close()
 	}
 	if a.archiveRunner != nil {
 		if err := a.archiveRunner.Close(); err != nil {

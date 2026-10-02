@@ -162,6 +162,29 @@ func ResolveJetHubDir(dir, configDir string) string {
 	return dir
 }
 
+// ResolveWebHubDir resolves the Web Hub (webhub) data directory. An empty dir
+// falls back to {configDir}/webhub (or "webhub" if configDir is empty); a
+// relative path is joined with configDir; an absolute path is used verbatim.
+//
+// The browser profile (which holds the user's site login state) lives under
+// this directory — see internal/webhub.ResolveProfileDir. It must be a real,
+// persistent directory: a temp dir would force a re-login on every start.
+func ResolveWebHubDir(dir, configDir string) string {
+	if dir == "" {
+		if configDir == "" {
+			return "webhub"
+		}
+		return filepath.Join(configDir, "webhub")
+	}
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, dir)
+	}
+	return dir
+}
+
 // ResolveStoryDir resolves the default story directory. An empty storyDir
 // falls back to {configDir}/Story (or "Story" if configDir is empty); a
 // relative path is joined with configDir; an absolute path is used verbatim.

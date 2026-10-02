@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -78,7 +79,12 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	// header base — e.g. SDK-HMAC signature headers) and may replace the body.
 	// A returned error is treated as a forwarding failure (the retry loop
 	// classifies and retries/excludes).
-	if sel.Provider.APIType == "jethub" && h.augmenter != nil {
+	//
+	// webhub (APIType=="webhub") is bridged too, but it has NO BaseURL — there
+	// is no endpoint to dial. Its customizer drives a browser page and the
+	// interceptor supplies the response body, so it takes the
+	// endpoint-less branch below rather than a real HTTP send.
+	if isBridgedAugmenterType(sel.Provider.APIType) && h.augmenter != nil {
 		if clientReq, _ := ctx.Value(currentClientRequestKey{}).(*http.Request); clientReq != nil {
 			augmented := body
 			upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
@@ -102,6 +108,16 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 				augmented = augmented2
 			}
 			body = augmented
+
+			// Endpoint-less bridge (webhub): the customizer produced no URL and
+			// the provider has no BaseURL, so there is nothing to dial. Hand
+			// the request to the interceptor, which serves it from the browser
+			// page and returns the response body. Without this branch the
+			// proxy would POST to a URL built from an empty BaseURL.
+			if upstreamURL == "" || strings.TrimSpace(sel.Provider.BaseURL) == "" {
+				return h.serveBridgedWithoutEndpoint(ctx, clientReq, sel, body, isStream, upstreamModel)
+			}
+
 			req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
 			if err != nil {
 				return nil, err
@@ -233,6 +249,47 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 		return h.streamClientFor(sel).Do(req)
 	}
 	return h.upstreamClientFor(sel).Do(req)
+}
+
+// isBridgedAugmenterType reports whether an APIType is owned by the injected
+// bridged-provider augmenter. jethub (HTTP protocol bridge) and webhub
+// (browser page driver) are both bridged; everything else is a normal provider
+// with a real upstream.
+func isBridgedAugmenterType(apiType string) bool {
+	return apiType == "jethub" || apiType == "webhub"
+}
+
+// serveBridgedWithoutEndpoint serves a bridged provider that has no HTTP
+// endpoint (webhub): the interceptor drives the real work (operating a browser
+// page) and returns the response body, which is wrapped in a synthetic
+// *http.Response so the rest of the pipeline (usage recording, streaming,
+// status handling) behaves exactly as it does for a real upstream.
+func (h *Handler) serveBridgedWithoutEndpoint(ctx context.Context, clientReq *http.Request, sel *rotation.SelectedKey, body []byte, isStream bool, upstreamModel string) (*http.Response, error) {
+	ri, ok := h.augmenter.(ResponseInterceptor)
+	if !ok {
+		return nil, fmt.Errorf("webhub: bridged provider %s has no endpoint and the augmenter cannot serve it", sel.Provider.ID)
+	}
+	// A placeholder response: the interceptor replaces its body. Status must
+	// be 200 so the pipeline treats it as a successful upstream response; real
+	// failures come back as an error from InterceptResponse and are classified
+	// by the retry loop like any other attempt failure.
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+	}
+	outBody, retryAfterMs, err := ri.InterceptResponse(clientReq, resp, sel.Provider.ID, sel.Key.ID, upstreamModel, isStream)
+	if err != nil {
+		return nil, err
+	}
+	if retryAfterMs > 0 {
+		return nil, &QueueRetryError{RetryAfter: time.Duration(retryAfterMs) * time.Millisecond}
+	}
+	if outBody == nil {
+		return nil, fmt.Errorf("webhub: bridge produced no response body")
+	}
+	resp.Body = readCloserOf(outBody, io.NopCloser(strings.NewReader("")))
+	resp.Request = &http.Request{Method: "POST", URL: &url.URL{Scheme: "webhub", Host: sel.Provider.ID, Path: "/" + upstreamModel}}
+	return resp, nil
 }
 
 // buildUpstreamRequest constructs an upstream POST request for a provider

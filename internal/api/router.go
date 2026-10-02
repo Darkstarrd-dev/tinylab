@@ -47,6 +47,7 @@ import (
 	storymakerapi "github.com/tinylab/tinylab/internal/api/storymaker"
 	"github.com/tinylab/tinylab/internal/api/textreview"
 	"github.com/tinylab/tinylab/internal/api/trace"
+	webhubapi "github.com/tinylab/tinylab/internal/api/webhub"
 	"github.com/tinylab/tinylab/internal/assistant"
 	"github.com/tinylab/tinylab/internal/combo"
 	"github.com/tinylab/tinylab/internal/config"
@@ -61,6 +62,7 @@ import (
 	"github.com/tinylab/tinylab/internal/rotation"
 	"github.com/tinylab/tinylab/internal/storymaker"
 	"github.com/tinylab/tinylab/internal/usage"
+	"github.com/tinylab/tinylab/internal/webhub"
 	"github.com/tinylab/tinylab/web"
 )
 
@@ -111,6 +113,11 @@ type deps struct {
 	// build a Router without the app assembly; routes then stay unregistered).
 	jethubManager *jethub.Manager
 	jethubBridge  *jethub.Bridge
+
+	// webhub wiring: Web Hub manager + registry bridge (nil in tests or when
+	// the browser/data dir is unavailable; routes then stay unregistered).
+	webhubManager *webhub.Manager
+	webhubBridge  *webhub.Bridge
 }
 
 // Router wires up HTTP routes for the admin API. It embeds the shared deps;
@@ -250,6 +257,14 @@ func (rt *Router) SetJetHub(m *jethub.Manager, b *jethub.Bridge) {
 	rt.jethubBridge = b
 }
 
+// SetWebHub wires the Web Hub manager + registry bridge built by the app.
+// Must be called before Routes(); without it the /api/webhub routes stay
+// unregistered (nil pair keeps them off, same pattern as jethub).
+func (rt *Router) SetWebHub(m *webhub.Manager, b *webhub.Bridge) {
+	rt.webhubManager = m
+	rt.webhubBridge = b
+}
+
 func (rt *Router) DebugMode() bool {
 	return rt.debugMode.Load()
 }
@@ -366,6 +381,10 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 	jethubHandler := jethubapi.NewHandler(&jethubapi.Deps{
 		Manager: rt.jethubManager,
 		Bridge:  rt.jethubBridge,
+	})
+	webhubHandler := webhubapi.NewHandler(&webhubapi.Deps{
+		Manager: rt.webhubManager,
+		Bridge:  rt.webhubBridge,
 	})
 	combosHandler := combos.NewHandler(apiDeps)
 	sseHandler := sse.NewHandler(apiDeps)
@@ -500,6 +519,12 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 			// 503 instead of panicking.
 			if rt.jethubManager != nil && rt.jethubBridge != nil {
 				jethubHandler.Register(r)
+			}
+			// Web Hub (webhub): site metadata, prefix bridging, status/probe.
+			// Handlers nil-check the manager; unset wiring degrades to a 503
+			// instead of panicking.
+			if rt.webhubManager != nil && rt.webhubBridge != nil {
+				webhubHandler.Register(r)
 			}
 			// Generic OS file/directory picker, shared by assistant/gallery/
 			// download frontends — intentionally NOT gated on feature.Download.

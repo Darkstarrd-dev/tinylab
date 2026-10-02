@@ -1,0 +1,58 @@
+/* ===================== Web Hub (webhub) — Free Hub 内嵌站点组 ==============
+   只新增 Web Hub 自己的样式：左栏的分割线 + 站点组标题，以及右侧的站点状态
+   行。其余全部复用 .free-hub-* tokens（与 jethub 同款观感，不另起一套）。 */
+
+/* 左栏分割线：上方 = jethub provider（账号桥接），下方 = webhub 站点
+   （浏览器驱动）。分割线带小标题，让人一眼看出两组机制不同。 */
+.free-hub-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 2px 6px;
+  color: var(--text-secondary, rgba(128, 128, 128, 0.85));
+}
+
+.free-hub-divider::before,
+.free-hub-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-color, rgba(128, 128, 128, 0.28));
+}
+
+.free-hub-divider span {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 站点徽标：站点语义（未启用/未连接/已就绪/未登录），不是 jethub 的账号数 */
+.badge-warn {
+  background: rgba(255, 167, 38, 0.14);
+  color: #ffa726;
+}
+
+.badge-warn::before {
+  background: #ffa726;
+}
+
+/* 右侧站点状态行 */
+.webhub-status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.webhub-status-key {
+  color: var(--text-secondary, rgba(128, 128, 128, 0.85));
+  flex-shrink: 0;
+}
+
+.webhub-status-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

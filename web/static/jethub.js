@@ -74,6 +74,11 @@ async function __jethubMount(root) {
     var data = await apiGet('/jethub/providers');
     __jethubState.providers = data.providers || [];
     __jethubState.selected = null;
+    // Web Hub 站点组与 jethub provider 共用同一块左栏与单选态；加载失败只让
+    // 站点组为空，不影响 Free Hub 本体（两个 Hub 互相独立）。
+    if (typeof webhubLoadSites === 'function') {
+      try { await webhubLoadSites(); } catch (e) { /* webhub unreachable */ }
+    }
     __jethubRenderShell(root);
     var first = __jethubState.providers.find(function(p) { return p.accountCount > 0; }) || __jethubState.providers[0];
     if (first) jethubSelect(first.id);
@@ -113,11 +118,16 @@ function __jethubRenderProviders() {
       '<span class="badge ' + (p.accountCount > 0 ? 'badge-active' : 'badge-inactive') + '">' + p.accountCount + '</span>' +
       '</div>';
   }).join('');
+  // 分割线下方 = Web Hub 站点组（浏览器驱动，与上方「账号桥接」机制不同）。
+  // 只在 webhub.js 已加载时插入，未加载时左栏维持原样。
+  if (typeof webhubRenderSiteGroup === 'function') webhubRenderSiteGroup();
 }
 
 async function jethubSelect(providerId) {
   var providerChanged = __jethubState.selected !== providerId;
   __jethubState.selected = providerId;
+  // 选中 jethub provider 时清掉 webhub 的选中态（共用同一单选态）。
+  if (typeof __webhubState !== 'undefined') __webhubState.selected = null;
   if (providerChanged) {
     __jethubState.credits = {};
     __jethubState.modelBatch = false;

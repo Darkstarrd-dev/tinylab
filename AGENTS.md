@@ -17,6 +17,8 @@
 |`playground-architecture.md`|Playground 前后端：多模型测试、群聊、Director/Narrator|
 |`gamedemo-progress.md`|Demo 页游戏插件：磁盘插件契约（game.json/TRGames/host adapter）、`/api/games*`+`/games/*`+seed、热更新工作流、Phaser v4 注意事项、边界与代价|
 |`jethub-upstream-sync.md`|Free Hub 上游同步（周期性流程文档）：判定原则（搬/不搬+三条硬判据）、每轮 SOP、不搬清单、待办 R1-*、轮次日志、当前 pin|
+|`webhub-architecture.md`|Web Hub（webhub，浏览器页面驱动桥）：与 jethub 的机制差异、P0 验证结论与三个已修缺陷、Free Hub 页面内嵌 UI（分割线+call prefix）、模型 ID 设计、workflow 引擎与双通道监听、站点矩阵|
+|`webhub-upstream-sync.md`|Web Hub 上游同步（周期性流程文档）：**同步站点规则事实而非代码**（上游 Python，本项目 Go 重实现）、判定原则、每轮 SOP、不搬清单、待办 W1-*、轮次日志、当前 pin|
 
 ### 高频变更速查（完整 19 条见 PROJECT_MAP.md §24）
 
@@ -63,8 +65,14 @@ TinyLab 是一个轻量级 LLM API 代理与本地工具集，单二进制交付
 
 > 本地参考副本位于 `Z:\Playground\9router`，实施过程中作为业务逻辑参考。不要修改该目录。
 
-`ref/` 目录（theia-master、deepseek-harness-codearts、universal-web-api-main）为只读第三方
+`ref/` 目录（theia-master、deepseek-harness-codearts、universal-web-api）为只读第三方
 参考代码，禁止修改、禁止纳入本项目构建。
+
+> **2026-10-02：** `ref/universal-web-api`（UWA v3.0.0）为 Web Hub 的参考克隆，
+> **仅移植逻辑与规则数据，不使用 Python 技术栈**（Go + chromedp 重实现）。
+> 旧的 zip 解压副本 `ref/universal-web-api-main`（v2.9.8，无 `.git`）已被取代，建议删除。
+> 详见 [`docs/webhub-architecture.md`](docs/webhub-architecture.md) 与
+> [`docs/archive/webhub-migration-plan.md`](docs/archive/webhub-migration-plan.md)。
 
 ## 技术栈
 
