@@ -119,7 +119,7 @@ func (h *Handler) handleProxy(w http.ResponseWriter, r *http.Request, path strin
 	// NIM providers must not participate in Combo routing: the model name
 	// carries a nv/* prefix and never matches a combo name, so no combo
 	// resolution is attempted for them — fall through to the forward path.
-	if ok, _ := h.forwardWithRetry(w, r, providerID, upstreamModel, path, bodyBytes, parsed, isStream, msgCount, "", provider.Name, entryFormat, originalModel, sessionKey); !ok {
-		writeError(w, http.StatusBadGateway, "all keys exhausted")
+	if ok, reqID := h.forwardWithRetry(w, r, providerID, upstreamModel, path, bodyBytes, parsed, isStream, msgCount, "", provider.Name, entryFormat, originalModel, sessionKey); !ok {
+		writeProxyError(w, reqID, nil, http.StatusBadGateway, "all keys exhausted")
 	}
 }

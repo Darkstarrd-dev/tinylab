@@ -15,7 +15,8 @@
 // Provides: pgReqLeftTimer/pgReqLeftSSE/pgReqLeftProcTimer, pgRenderReqLeft,
 // pgStartReqLeftPolling, pgStopReqLeftPolling, pgConvCreate, pgConvBindEntry,
 // pgConvTitleFromText, pgSwitchConversation, pgRenderConvList, pgEntryById,
-// pgMergeEntry, pgRefreshBubbleMetrics, pgShowRequestInfo, pgShowReqEntry
+// pgMergeEntry, pgRefreshBubbleMetrics, pgShowRequestInfo, pgShowReqEntry,
+// pgMergeTTFTUpdate
 var pgReqLeftTimer = null;
 var pgReqLeftSSE = null;
 var pgReqLeftProcTimer = null;
@@ -216,6 +217,9 @@ function pgStartReqLeftPolling() {
         } else if (data.type === 'request-tokens' && data.id) {
           pgMergeTokenUpdate(data.id, data.entry);
           pgRefreshBubbleMetrics();
+        } else if (data.type === 'request-ttft' && data.id) {
+          pgMergeTTFTUpdate(data.id, data.entry);
+          pgRefreshBubbleMetrics();
         } else if (data.type === 'request-done' && data.id) {
           if (data.entry && data.entry.source === 'playground') pgMergeEntry(data.entry);
           pgRefreshBubbleMetrics();
@@ -223,6 +227,10 @@ function pgStartReqLeftPolling() {
         }
       } catch (ex) {}
     };
+    // EventSource auto-reconnects: re-sync once on (re)connect so a
+    // request-done missed while the tab was away is picked up immediately
+    // instead of waiting for the 10s REST poll.
+    pgReqLeftSSE.onopen = function() { pgFetchReqLeft(); };
   } catch (e) {}
 }
 
@@ -299,6 +307,19 @@ function pgMergeTokenUpdate(id, d) {
   }
   if (d.contentTokens > (e.contentTokens || 0)) e.contentTokens = d.contentTokens;
   if (d.firstContentMs > 0 && !e.firstContentMs) e.firstContentMs = d.firstContentMs;
+}
+
+// pgMergeTTFTUpdate applies a live request-ttft payload (partial entry) to a
+// cached entry, mirroring the Monitor's request-ttft handling
+// (monitor_io.js:handleRequestTTFT): only a positive ttftMs is accepted, it is
+// written once and never regressed, and no other field is touched. Without
+// this the bubble's TTFT keeps ticking from the entry timestamp until the 10s
+// REST poll freezes it.
+function pgMergeTTFTUpdate(id, d) {
+  var e = pgReqEntryCache[id];
+  if (!e || !d) return;
+  if (!(d.ttftMs > 0)) return;
+  if (!(e.ttftMs > 0)) e.ttftMs = d.ttftMs;
 }
 
 function pgFetchReqLeft() {

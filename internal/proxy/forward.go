@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tinylab/tinylab/internal/logredact"
+	"github.com/tinylab/tinylab/internal/rotation"
 )
 
 // resolveDisplayModel returns the best display name for console logs:
@@ -187,6 +188,18 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 			"type":    "proxy_error",
 		},
 	})
+}
+
+// writeProxyError writes a proxy-local error response carrying the request ID
+// identity header, so a client that correlates responses with usage entries
+// (the Playground bubble) can still bind its ⓘ detail view when the request
+// failed before/without any upstream response. sel may be nil (no key was
+// selected); only the request ID is advertised then.
+func writeProxyError(w http.ResponseWriter, reqID string, sel *rotation.SelectedKey, status int, msg string) {
+	if reqID != "" || sel != nil {
+		setUpstreamIdentityHeaders(w, sel, reqID)
+	}
+	writeError(w, status, msg)
 }
 
 func maskURL(url string) string {

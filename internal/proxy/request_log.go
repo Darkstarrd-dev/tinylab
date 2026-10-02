@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinylab/tinylab/internal/fsutil"
 	"github.com/tinylab/tinylab/internal/logredact"
 	"github.com/tinylab/tinylab/internal/rotation"
 )
@@ -402,8 +405,10 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 
 // SweepTraces runs the trace retention sweep. It deletes index and request
 // files older than retainDays and enforces MaxDiskMB by deleting the oldest
-// request files when the total traces/ dir size exceeds the cap. It runs
-// once immediately, then every hour until ctx is cancelled.
+// files when the total traces/ dir size exceeds the cap. Whenever a
+// req/<reqID>.jsonl detail file is evicted, the matching lines are also
+// removed from every index-*.jsonl file. It runs once immediately, then
+// every hour until ctx is cancelled.
 func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
 	if h.TracesDir() == "" {
 		return
@@ -426,10 +431,20 @@ func (h *Handler) SweepTraces(ctx context.Context, retainDays, maxDiskMB int) {
 }
 
 // SweepTracesOnce performs a single retention sweep pass.
+//
+// Evicting a req/<reqID>.jsonl detail file also purges that reqID's lines
+// from every index-*.jsonl file. Without that step the index keeps
+// advertising requests whose detail file is gone, so the Log Reader lists
+// ghost rows whose detail view 404s.
 func (h *Handler) SweepTracesOnce(retainDays, maxDiskMB int) {
 	tracesDir := h.TracesDir()
 	now := time.Now()
 	cutoff := now.Add(-time.Duration(retainDays) * 24 * time.Hour)
+
+	// reqIDs whose detail file is removed in this pass (age-based or
+	// disk-cap based); their index lines are purged after the deletion
+	// phases. Index files deleted in this pass are not recorded here.
+	deletedReqIDs := make(map[string]struct{})
 
 	type fileEntry struct {
 		path    string
@@ -496,6 +511,7 @@ func (h *Handler) SweepTracesOnce(retainDays, maxDiskMB int) {
 		if fe.reqID != "" && fe.modTime.Before(cutoff) {
 			_ = os.Remove(fe.path)
 			attemptCounter.Delete(fe.reqID)
+			deletedReqIDs[fe.reqID] = struct{}{}
 		}
 	}
 
@@ -525,9 +541,145 @@ func (h *Handler) SweepTracesOnce(retainDays, maxDiskMB int) {
 			remainingSize -= fe.size
 			if fe.reqID != "" {
 				attemptCounter.Delete(fe.reqID)
+				deletedReqIDs[fe.reqID] = struct{}{}
 			}
 		}
 	}
+
+	purgeIndexLines(tracesDir, deletedReqIDs)
+}
+
+// purgeIndexLines rewrites every tracesDir/index-*.jsonl file that contains a
+// line for one of the evicted reqIDs (or a line whose detail file no longer
+// exists at all — see filterIndexFile), keeping every other line. Lines that
+// do not parse as a JSON object carrying a reqID are preserved verbatim, so a
+// sweep can never destroy data it cannot understand. The directory is re-read
+// here (rather than reusing the sweep's earlier listing) because index files
+// may have been deleted in between.
+//
+// Files with no matching line are left untouched. A rewritten file gets a
+// fresh mtime: that is intentional. The file now reflects the surviving req
+// files, and the next disk-cap pass orders candidates by mtime, so a fresh
+// mtime keeps a still-useful index from being evicted ahead of the detail
+// files it describes.
+func purgeIndexLines(tracesDir string, deletedReqIDs map[string]struct{}) {
+	entries, err := os.ReadDir(tracesDir)
+	if err != nil {
+		return
+	}
+	reqDir := filepath.Join(tracesDir, "req")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "index-") || !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		path := filepath.Join(tracesDir, name)
+		kept, changed, err := filterIndexFile(path, reqDir, deletedReqIDs)
+		if err != nil || !changed {
+			continue
+		}
+		_ = fsutil.AtomicWrite(path, kept, 0o644)
+	}
+}
+
+// traceIndexReconcileGrace keeps an index line whose detail file is missing
+// while the line is younger than this: writeRequestLog appends the index line
+// before the detail file, so a sweep racing a just-started request could
+// otherwise drop the index row of a request whose file is about to appear.
+// Evictions (age or disk cap) always target older entries, so the grace costs
+// nothing for real ghosts.
+const traceIndexReconcileGrace = 10 * time.Minute
+
+// filterIndexFile streams an index file line by line and returns its content
+// with the lines whose reqID is in deleted removed, plus lines whose detail
+// file req/<reqID>.jsonl no longer exists (and whose timestamp is older than
+// traceIndexReconcileGrace) — those are ghosts left by earlier evictions or by
+// manual file deletion. changed reports whether at least one line was dropped;
+// when it is false the caller must not rewrite the file.
+func filterIndexFile(path, reqDir string, deleted map[string]struct{}) (kept []byte, changed bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if reqID, ok := indexLineReqID(line); ok {
+			if _, drop := deleted[reqID]; drop {
+				changed = true
+				continue
+			}
+			if indexLineIsGhost(reqDir, reqID, line) {
+				changed = true
+				continue
+			}
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+	return buf.Bytes(), changed, nil
+}
+
+// indexLineReqID extracts the reqID field from a raw index JSONL line. It
+// returns ok=false for blank, non-object, or truncated lines, which callers
+// preserve verbatim.
+func indexLineReqID(line []byte) (string, bool) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", false
+	}
+	var probe struct {
+		ReqID string `json:"reqID"`
+	}
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
+		return "", false
+	}
+	return probe.ReqID, true
+}
+
+// indexLineIsGhost reports whether an index line advertises a request whose
+// detail file is gone and is old enough that the missing file cannot be a
+// write-order race (index line appended before the detail file).
+func indexLineIsGhost(reqDir, reqID string, line []byte) bool {
+	if reqID == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(reqDir, reqID+".jsonl")); err == nil {
+		return false
+	} else if !os.IsNotExist(err) {
+		return false // unreadable for another reason: keep the line
+	}
+	ts, ok := indexLineTS(line)
+	if !ok {
+		return false // no parsable timestamp: preserve rather than guess
+	}
+	return time.Since(ts) > traceIndexReconcileGrace
+}
+
+// indexLineTS extracts and parses the RFC3339Nano timestamp of a raw index
+// line. ok=false for missing or unparsable values.
+func indexLineTS(line []byte) (time.Time, bool) {
+	var probe struct {
+		TS string `json:"ts"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(line), &probe); err != nil || probe.TS == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, probe.TS)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
 }
 
 // maskSecret masks a secret header value. If the value contains a space

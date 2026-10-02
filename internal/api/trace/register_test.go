@@ -13,8 +13,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinylab/tinylab/internal/api/apibase"
+	"github.com/tinylab/tinylab/internal/config"
 	"github.com/tinylab/tinylab/internal/console"
 	"github.com/tinylab/tinylab/internal/proxy"
+	"github.com/tinylab/tinylab/internal/registry"
 	"github.com/tinylab/tinylab/internal/usage"
 )
 
@@ -24,6 +26,32 @@ func setupTraceTest(t *testing.T) (string, *chi.Mux) {
 	ph := proxy.New(nil, nil, nil, usage.New(100), usage.NewQuotaTracker(), console.New(100), 0)
 	ph.SetRequestLogDir(tracesDir)
 	deps := &apibase.Deps{ProxyHandler: ph, Logger: console.New(100)}
+	h := NewHandler(deps)
+	r := chi.NewRouter()
+	r.Route("/api/traces", h.Register)
+	return tracesDir, r
+}
+
+// setupTraceTestWithCredentials mirrors setupTraceTest but wires a registry
+// with provider keys that exercise trace credential masking: a one-character
+// placeholder ("1") that must be ignored, and a realistic long key that must
+// still be masked.
+func setupTraceTestWithCredentials(t *testing.T) (string, *chi.Mux) {
+	t.Helper()
+	tracesDir := t.TempDir()
+	ph := proxy.New(nil, nil, nil, usage.New(100), usage.NewQuotaTracker(), console.New(100), 0)
+	ph.SetRequestLogDir(tracesDir)
+	cfg := &config.Config{Providers: []config.Provider{{
+		ID:       "p1",
+		Name:     "Prov1",
+		APIType:  "openai-compatible",
+		IsActive: true,
+		Keys: []config.Key{
+			{ID: "k1", Name: "placeholder", Key: "1", IsActive: true},
+			{ID: "k2", Name: "real", Key: "sk-long-secret-1234", IsActive: true},
+		},
+	}}}
+	deps := &apibase.Deps{ProxyHandler: ph, Logger: console.New(100), Reg: registry.New(cfg)}
 	h := NewHandler(deps)
 	r := chi.NewRouter()
 	r.Route("/api/traces", h.Register)
@@ -874,6 +902,88 @@ func TestTraceReq_TransparentRecord(t *testing.T) {
 	}
 	if got := headerVal("X-Masked"); got != "***abcd" {
 		t.Errorf("already-masked header should pass through unchanged, got %q", got)
+	}
+}
+
+// TestTraceIndex_StructuralFieldsSurviveMasking is a regression test for the
+// one-character provider key that used to be applied as a credential: every
+// "1" in the record was rewritten to "******", corrupting the timestamp (which
+// the frontend feeds to new Date()), the request id (which the detail lookup
+// uses), and the record type. Structural fields must pass through verbatim
+// while real, long credentials stay masked.
+func TestTraceIndex_StructuralFieldsSurviveMasking(t *testing.T) {
+	tracesDir, r := setupTraceTestWithCredentials(t)
+	const longKey = "sk-long-secret-1234"
+	const ts = "2026-10-02T16:01:20.3804329+08:00"
+	const reqID = "r1x-1"
+	writeIndexFile(t, tracesDir, "20261002", []string{
+		mustJSON(map[string]any{
+			"type": "index", "ts": ts, "reqID": reqID,
+			"model": "m-1", "status": "success", "body": "auth " + longKey,
+		}),
+	})
+	writeReqFile(t, tracesDir, reqID, []string{
+		mustJSON(map[string]any{"type": "attempt", "ts": ts, "reqID": reqID, "n": 1, "status": "success"}),
+	})
+
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/index?date=20261002", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rawBody := rr.Body.String()
+	if strings.Contains(rawBody, longKey) {
+		t.Error("index response leaked the raw long credential")
+	}
+	if !strings.Contains(rawBody, ts) {
+		t.Errorf("index response rewrote the timestamp, want %q in %s", ts, rawBody)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	lines, ok := resp["lines"].([]any)
+	if !ok || len(lines) != 1 {
+		t.Fatalf("expected 1 index line, got %v", resp["lines"])
+	}
+	rec, ok := lines[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected an index record object, got %T", lines[0])
+	}
+	if got := s(rec, "ts"); got != ts {
+		t.Errorf("ts rewritten by masking: got %q, want %q", got, ts)
+	}
+	if got := s(rec, "reqID"); got != reqID {
+		t.Errorf("reqID rewritten by masking: got %q, want %q", got, reqID)
+	}
+	if got := s(rec, "type"); got != "index" {
+		t.Errorf("type rewritten by masking: got %q, want %q", got, "index")
+	}
+	if got := s(rec, "model"); got != "m-1" {
+		t.Errorf("model corrupted by the short credential: got %q, want %q", got, "m-1")
+	}
+	if got := s(rec, "body"); got != "auth ******" {
+		t.Errorf("long credential not masked: got %q, want %q", got, "auth ******")
+	}
+
+	// The intact reqID must resolve the detail file (the pre-fix behavior was a
+	// masked id that 404'd as "swept or not found").
+	drr := httptest.NewRecorder()
+	r.ServeHTTP(drr, httptest.NewRequest(http.MethodGet, "/api/traces/req/"+reqID, nil))
+	if drr.Code != http.StatusOK {
+		t.Fatalf("expected detail 200 for intact reqID, got %d: %s", drr.Code, drr.Body.String())
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(drr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("invalid detail JSON: %v", err)
+	}
+	detailLines, ok := detail["lines"].([]any)
+	if !ok || len(detailLines) != 1 {
+		t.Fatalf("expected 1 detail line, got %v", detail["lines"])
+	}
+	if got := s(detailLines[0].(map[string]any), "ts"); got != ts {
+		t.Errorf("detail ts rewritten by masking: got %q, want %q", got, ts)
 	}
 }
 

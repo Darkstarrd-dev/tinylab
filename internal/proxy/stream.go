@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +15,16 @@ import (
 	"github.com/tinylab/tinylab/internal/sse"
 	"github.com/tinylab/tinylab/internal/util"
 )
+
+// streamDoneGrace is how long streamResponse keeps reading an OpenAI-format
+// stream after relaying data: [DONE] before force-closing the upstream body.
+// [DONE] is the protocol's terminal marker, but some gateways keep the socket
+// open afterwards; waiting for that EOF used to stall recordUsage (and the
+// request-done broadcast that freezes the UI's GT/SPD columns) for minutes
+// after the client had already seen the reply finish. The grace still lets a
+// nonstandard trailing usage chunk land; an upstream that closes promptly
+// hits EOF first and never waits.
+const streamDoneGrace = 500 * time.Millisecond
 
 // setUpstreamIdentityHeaders advertises which provider/key served the request
 // plus the internal request ID, so clients can correlate a response with its
@@ -154,9 +165,23 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	// so we synthesize the missing terminator at stream end (see below).
 	var streamSawDone bool
 	var streamSawFinish bool
+	// armDoneClose force-closes the upstream body streamDoneGrace after the
+	// OpenAI terminal marker was relayed: [DONE] ends the stream by protocol,
+	// but some gateways keep the socket open afterwards. Without the close,
+	// recordUsage (and the request-done broadcast that freezes the UI's
+	// GT/speed columns) waited for upstream EOF — minutes on such gateways.
+	// The grace still lets a nonstandard trailing usage chunk land; an
+	// upstream that closes promptly hits EOF first and never waits.
+	var doneCloseOnce sync.Once
+	armDoneClose := func() {
+		doneCloseOnce.Do(func() {
+			time.AfterFunc(streamDoneGrace, func() { _ = resp.Body.Close() })
+		})
+	}
 	noteChunk := func(payload string) {
 		if payload == "[DONE]" {
 			streamSawDone = true
+			armDoneClose()
 		} else if strings.Contains(payload, `"finish_reason":"`) {
 			// A quoted string value means a real terminal reason
 			// ("stop"|"length"|"content_filter"|"tool_calls"); the common

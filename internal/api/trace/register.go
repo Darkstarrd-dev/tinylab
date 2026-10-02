@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tinylab/tinylab/internal/api/apibase"
@@ -112,9 +113,22 @@ func stringField(record map[string]any, key string) string {
 }
 
 func (h *Handler) normalizeTraceRecord(record map[string]any) map[string]any {
+	// Structural fields carry meaning by their exact bytes: the frontend parses
+	// ts into a Date, uses reqID for detail lookups, and switches on type.
+	// Stash them and restore after masking so a credential that happens to be a
+	// digit or a short token cannot rewrite them.
+	structural := make(map[string]any, len(traceStructuralFields))
+	for _, field := range traceStructuralFields {
+		if value, ok := record[field]; ok {
+			structural[field] = value
+		}
+	}
 	credentials := h.traceCredentials()
 	if masked, ok := maskTraceValue(record, credentials).(map[string]any); ok {
 		record = masked
+	}
+	for field, value := range structural {
+		record[field] = value
 	}
 	for _, field := range []string{"reqHeaders", "respHeaders"} {
 		if headers, ok := record[field].(map[string]any); ok {
@@ -129,6 +143,16 @@ func (h *Handler) normalizeTraceRecord(record map[string]any) map[string]any {
 	return record
 }
 
+// traceStructuralFields are the record keys that must pass through credential
+// masking verbatim.
+var traceStructuralFields = []string{"ts", "reqID", "type"}
+
+// minTraceCredentialLen is the shortest provider key value used for trace
+// masking. Single-character or short placeholder keys ("1", "sk-", ...) match
+// inside unrelated text and would corrupt structural fields such as timestamps
+// and request ids, so they are skipped.
+const minTraceCredentialLen = 8
+
 func (h *Handler) traceCredentials() []string {
 	if h.d == nil || h.d.Reg == nil {
 		return nil
@@ -137,9 +161,10 @@ func (h *Handler) traceCredentials() []string {
 	var credentials []string
 	for _, provider := range cfg.Providers {
 		for _, key := range provider.Keys {
-			if key.Key != "" {
-				credentials = append(credentials, key.Key)
+			if key.Key == "" || utf8.RuneCountInString(key.Key) < minTraceCredentialLen {
+				continue
 			}
+			credentials = append(credentials, key.Key)
 		}
 	}
 	return credentials

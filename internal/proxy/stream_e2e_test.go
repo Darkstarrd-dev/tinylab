@@ -192,3 +192,48 @@ func (c *cancelReader) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 }
+
+// TestStreamResponse_DoneClosesLingeringUpstream pins the post-[DONE] body
+// close: an upstream that relays data: [DONE] but keeps the connection open
+// must not stall streamResponse (and with it recordUsage + the request-done
+// broadcast that freezes the UI's GT/SPD columns) until that upstream EOF.
+func TestStreamResponse_DoneClosesLingeringUpstream(t *testing.T) {
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		_, _ = pw.Write([]byte("data: [DONE]\n\n"))
+		// Simulate a gateway that keeps the socket open after the terminal
+		// marker: hold the write side well past streamDoneGrace.
+		time.Sleep(10 * time.Second)
+		_ = pw.Close()
+	}()
+	defer pr.Close()
+
+	h := newTestHandlerWithCustomProvider(t, sseTestProvider("http://localhost:9999"),
+		config.RotationConfig{Strategy: "fill-first", MaxRetries: 0, BackoffMaxSec: 300})
+	w := httptest.NewRecorder()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"text/event-stream"}},
+		Body:       pr,
+	}
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		h.streamResponse(w, resp, "gpt-4", sseSelectedKey(), 5, []byte("{}"), false, "test-done-linger", nil, "", combo.EntryFormatOpenAI, "", "")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("streamResponse still blocked 5s after [DONE]; lingering upstream not closed")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("streamResponse took %v after [DONE], want ~%v", elapsed, streamDoneGrace)
+	}
+	if out := w.Body.String(); !strings.Contains(out, "data: [DONE]") {
+		t.Errorf("terminal marker not relayed to client: %q", out)
+	}
+}

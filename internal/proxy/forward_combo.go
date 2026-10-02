@@ -21,24 +21,30 @@ func (h *Handler) handleCombo(w http.ResponseWriter, r *http.Request, comboName 
 	comboLabel := fmt.Sprintf("[combo:%s] ", comboName)
 	switch plan.Strategy {
 	case "fallback":
+		lastReqID := ""
 		for _, target := range plan.Targets {
-			if ok, _ := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey); ok {
+			ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey)
+			if ok {
 				return
 			}
+			lastReqID = id
 		}
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
+		writeProxyError(w, lastReqID, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 	case "round-robin":
 		target := plan.Targets[0]
-		if ok, _ := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey); !ok {
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
+		if ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey); !ok {
+			writeProxyError(w, id, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 		}
 	case "greedy-squirrel":
+		lastReqID := ""
 		for _, target := range plan.Targets {
-			if ok, _ := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey); ok {
+			ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey)
+			if ok {
 				return
 			}
+			lastReqID = id
 		}
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
+		writeProxyError(w, lastReqID, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown combo strategy: %s", plan.Strategy))
 	}

@@ -96,7 +96,12 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 				} else {
 					h.logger.Error("[%s] no available keys for %s/%s（所有 key 已耗尽，返回 502）", logTag, dispName, upstreamModel)
 				}
-				return false, ""
+				// Record the terminal failure so the request stays visible in
+				// Monitor/Playground (with its error) instead of leaving only a
+				// bare 502 body. No key was selected, so the entry carries no
+				// key identity; the response still advertises the request ID.
+				h.recordNoKeyFailure(reqID, dispName, upstreamModel, "no available keys (all keys exhausted)", r.Header, sessionKey)
+				return false, reqID
 			}
 		}
 
@@ -182,8 +187,8 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 					upstreamBody = nb
 				} else {
 					h.logger.Error("failed to marshal upstream body: %v", err)
-					writeError(w, http.StatusInternalServerError, "internal marshalling error")
-					return false, ""
+					writeProxyError(w, reqID, sel, http.StatusInternalServerError, "internal marshalling error")
+					return false, reqID
 				}
 			}
 		}
@@ -254,7 +259,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 						keyState.DecInFlight()
 					}
 					h.InflightUpdates.Signal()
-					writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("upstream queue timeout (%d attempts)", maxQueueAttempts))
+					writeProxyError(w, reqID, sel, http.StatusServiceUnavailable, fmt.Sprintf("upstream queue timeout (%d attempts)", maxQueueAttempts))
 					return false, reqID
 				}
 				wait := qre.RetryAfter
@@ -296,7 +301,7 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 						keyState.DecInFlight()
 					}
 					h.InflightUpdates.Signal()
-					writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("upstream retry limit exceeded (%d attempts)", maxSameKeyRetries))
+					writeProxyError(w, reqID, sel, http.StatusServiceUnavailable, fmt.Sprintf("upstream retry limit exceeded (%d attempts)", maxSameKeyRetries))
 					return false, reqID
 				}
 				if skre.Header != "" {

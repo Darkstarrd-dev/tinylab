@@ -377,6 +377,11 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 		if ct == "" {
 			ct = "application/json"
 		}
+		// Advertise provider/key/request ID on pass-through errors too: the
+		// Playground binds a response bubble (and its ⓘ request-detail view)
+		// through X-TinyLab-Request-Id, and a failed request is exactly when
+		// the detail view matters most.
+		setUpstreamIdentityHeaders(w, sel, reqID)
 		w.Header().Set("Content-Type", ct)
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)

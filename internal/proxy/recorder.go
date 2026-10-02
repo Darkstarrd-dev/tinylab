@@ -145,6 +145,40 @@ func (h *Handler) recordUsage(id string, provider, model string, sel *rotation.S
 	}
 }
 
+// recordNoKeyFailure records a terminal proxy-local failure where no key could
+// be selected (all keys cooling down / exhausted / inactive). recordUsage
+// cannot serve this path — it dereferences the selected key — so this writes
+// the same ring entry + request-done broadcast shape with no key identity,
+// keeping the request visible in Monitor and Playground with its error.
+func (h *Handler) recordNoKeyFailure(id, providerName, model, errMsg string, reqHeaders http.Header, sessionKey string) {
+	entry := usage.Entry{
+		ID:         id,
+		Timestamp:  time.Now(),
+		Provider:   providerName,
+		Model:      model,
+		Status:     "error",
+		Error:      errMsg,
+		SessionKey: sessionKey,
+	}
+	if reqHeaders != nil {
+		entry.Source = reqHeaders.Get("X-TinyLab-Source")
+	}
+	if entry.Source == "playground" && h.pgUsage != nil {
+		h.pgUsage.Add(entry)
+	} else {
+		h.usage.Add(entry)
+	}
+	if raw := MarshalEntryJSONLight(entry); raw != nil {
+		h.RequestUpdates.Broadcast(RequestEvent{
+			Type:   "request-done",
+			ID:     id,
+			Status: "error",
+			Entry:  raw,
+		})
+	}
+	h.UsageUpdates.Signal()
+}
+
 // parseAndUpdateQuota extracts rate-limit info from upstream response headers
 // and stores it in the key's runtime state.
 func (h *Handler) parseAndUpdateQuota(sel *rotation.SelectedKey, providerID, model string, headers http.Header) {
