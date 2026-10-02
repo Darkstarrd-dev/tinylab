@@ -12,7 +12,7 @@
 >
 > **边界纪律：** `internal/proxy` **不 import webhub**，与 jethub 同款（AGENTS.md 红线）。桥接走窄接口注入，`APIType=="webhub"` 标记识别。
 >
-> **最后核对：** 2026-10-02（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。同日用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2）
+> **最后核对：** 2026-10-03（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。10-02 用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2；10-03 缺陷 21：相对 `--user-data-dir` 静默失败 ⇒ 目录解析一律 absolutize + 启动诊断——§2.3）
 
 ---
 
@@ -77,6 +77,12 @@ P0 原型（`tmp/p0-webhub/`，gitignored）实测：
    真机复验：状态首查失败 → 恢复浏览器后 status 返回 `connected:true`；open 后 status 返回 `attached:true` + 站点 tab URL。
 
 > 关联（jethub 侧同日回归）：`SyncKeys` 的 DeleteProvider+AddProvider 刷新窗口触发 registry sweep，把 combo/quickslot 里的 `{prefix}/{model}` 引用清掉（用户实测：combo 里 FreeHub 模型重启后消失）。修法见 [`jethub-architecture.md`](jethub-architecture.md) 缺陷 17 与 `Registry.UpsertProvider`。
+
+### 2.3 缺陷 21（2026-10-03 用户实测）：相对 `--user-data-dir` ⇒ Chrome 静默失败
+
+- **现象**：Web Sites 点击后右侧详情不渲染、每次点击弹一个空浏览器窗口、多击卡顿，日志恒为 `browser unavailable: webhub: devtools not ready on port 9333 after 20s`。
+- **根因**：app 以**相对 configDir** 启动时（双击启动、config 发现基于进程 CWD 的部署形态），`ResolveWebHubDir`/`ResolveProfileDir` 把 `webhub\webhub\profile` 这样的**相对路径**原样拼进 Chrome 命令行。Chrome 141 对相对 `--user-data-dir` **静默失败**：stub 进程 ~60ms 退出码 0、零 stderr、profile 不创建、调试端口不绑定——外部表现就是 20s 超时，且每次 status/open 重试再弹一次窗口。
+- **修法**：① `config.ResolveWebHubDir` 与 `webhub.ResolveProfileDir` 结果一律 `filepath.Abs`（回归守卫 `TestResolveProfileDirAlwaysAbsolute`）；② `Launch` 增加诊断：启动即失败的 browser 进程会捕获 pid/退出码/**stderr 尾行**（`--enable-logging=stderr`），失败错误从「not ready after 20s」变成能直接看到 Chrome 自述原因的一行；隔离实例带凭据复现 → 修复后启动 1s 内 `browser launched on :9333`，status `connected:true` → open → `attached:true`。
 
 ---
 

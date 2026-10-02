@@ -170,19 +170,25 @@ func ResolveJetHubDir(dir, configDir string) string {
 // this directory — see internal/webhub.ResolveProfileDir. It must be a real,
 // persistent directory: a temp dir would force a re-login on every start.
 func ResolveWebHubDir(dir, configDir string) string {
+	abs := func(p string) string {
+		if a, err := filepath.Abs(p); err == nil {
+			return a
+		}
+		return p
+	}
 	if dir == "" {
 		if configDir == "" {
-			return "webhub"
+			return abs("webhub")
 		}
-		return filepath.Join(configDir, "webhub")
+		return abs(filepath.Join(configDir, "webhub"))
 	}
 	if filepath.IsAbs(dir) {
 		return dir
 	}
 	if configDir != "" {
-		return filepath.Join(configDir, dir)
+		return abs(filepath.Join(configDir, dir))
 	}
-	return dir
+	return abs(dir)
 }
 
 // ResolveStoryDir resolves the default story directory. An empty storyDir

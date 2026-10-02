@@ -1,6 +1,7 @@
 package webhub
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
+	"time"
 )
 
 // ErrNoBrowser is returned when no Chromium-based browser can be located. The
@@ -117,6 +121,9 @@ func LaunchArgs(spec LaunchSpec) []string {
 		"--user-data-dir=" + spec.ProfileDir,
 		"--no-first-run",
 		"--no-default-browser-check",
+		// Startup decisions (profile lock, forward-to-existing, devtools bind)
+		// go to stderr; Launch captures it so a failed wait can say why.
+		"--enable-logging=stderr",
 		// Removes the navigator.webdriver flag most sites sniff for.
 		"--disable-blink-features=AutomationControlled",
 	}
@@ -183,6 +190,57 @@ func FetchEndpoint(port int) (string, error) {
 	return info.WebSocketDebuggerURL, nil
 }
 
+// launchDiag captures what happened to the exec'd browser process so a
+// "devtools not ready" failure can say WHY: a browser that exits instantly
+// (profile lock, bad flag, forwarding to another instance) and one that is
+// still running but slow need different remedies.
+type launchDiag struct {
+	pid    int
+	bin    string
+	args   []string
+	done   bool          // process exited before the wait ended
+	err    error         // exec.Wait error (nil on clean exit 0)
+	code   int           // process exit code (meaningful only when done && err == nil)
+	stderr string        // captured stderr tail (chrome logs startup errors here)
+	after  time.Duration // time to exit; meaningless when !done
+}
+
+var (
+	diagMu   sync.Mutex
+	lastDiag *launchDiag
+)
+
+func setDiag(d *launchDiag) {
+	diagMu.Lock()
+	lastDiag = d
+	diagMu.Unlock()
+}
+
+// lastLaunchDiag returns a human-readable one-line summary of the most recent
+// browser launch outcome ("" when nothing recorded yet).
+func lastLaunchDiag() string {
+	diagMu.Lock()
+	defer diagMu.Unlock()
+	if lastDiag == nil {
+		return ""
+	}
+	d := lastDiag
+	if !d.done {
+		return fmt.Sprintf("browser pid %d still running (no exit yet)", d.pid)
+	}
+	msg := fmt.Sprintf("browser pid %d exited after %v (code %d, err %v)", d.pid, d.after.Round(time.Millisecond), d.code, d.err)
+	msg += fmt.Sprintf("; cmd: %s %v", d.bin, d.args)
+	if t := strings.TrimSpace(d.stderr); t != "" {
+		lines := strings.Split(t, "\n")
+		tail := lines[len(lines)-1]
+		if len(tail) > 200 {
+			tail = tail[:200]
+		}
+		msg += "; stderr: " + tail
+	}
+	return msg
+}
+
 // The caller owns the process (kill it on shutdown, or leave it alone — see
 // LaunchPolicy). It does not wait for the DevTools endpoint; use
 // WaitForDevTools for that.
@@ -197,8 +255,27 @@ func Launch(spec LaunchSpec) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("webhub: profile dir: %w", err)
 	}
 	cmd := exec.Command(spec.Bin, LaunchArgs(spec)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("webhub: start %s: %w", spec.Bin, err)
 	}
+	d := &launchDiag{pid: cmd.Process.Pid}
+	d.bin = spec.Bin
+	d.args = cmd.Args[1:]
+	started := time.Now()
+	setDiag(d)
+	go func() {
+		werr := cmd.Wait()
+		diagMu.Lock()
+		d.done = true
+		d.after = time.Since(started)
+		if ee, ok := werr.(*exec.ExitError); ok {
+			d.code = ee.ExitCode()
+		}
+		d.err = werr
+		d.stderr = stderr.String()
+		diagMu.Unlock()
+	}()
 	return cmd, nil
 }

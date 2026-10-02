@@ -121,17 +121,40 @@ func TestCandidatePathsCoverPlatform(t *testing.T) {
 
 // profile 目录必须是持久固定目录（登录态跨进程存活）。
 func TestResolveProfileDir(t *testing.T) {
-	if got := ResolveProfileDir("", "/cfg"); got != filepath.Join("/cfg", "webhub", "profile") {
-		t.Fatalf("default = %q", got)
-	}
-	if got := ResolveProfileDir("custom", "/cfg"); got != filepath.Join("/cfg", "custom") {
-		t.Fatalf("relative = %q", got)
-	}
-	abs, err := filepath.Abs(filepath.Join(t.TempDir(), "profile"))
+	wantDefault, err := filepath.Abs(filepath.Join("/cfg", "webhub", "profile"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := ResolveProfileDir("", "/cfg"); got != wantDefault {
+		t.Fatalf("default = %q", got)
+	}
+	wantCustom, err := filepath.Abs(filepath.Join("/cfg", "custom"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveProfileDir("custom", "/cfg"); got != wantCustom {
+		t.Fatalf("relative = %q", got)
+	}
+	abs := filepath.Join(t.TempDir(), "profile")
 	if got := ResolveProfileDir(abs, "/cfg"); got != abs {
 		t.Fatalf("absolute = %q, want %q", got, abs)
+	}
+}
+
+// 缺陷 21（2026-10-03）：app 以相对 configDir 启动时，profile 目录曾以相对
+// 路径进入 Chrome 的 --user-data-dir=，Chrome 静默失败（~60ms 退出码 0，
+// 无日志、不建 profile、不绑调试端口）⇒ 永远 "devtools not ready"。
+// 解析结果必须是绝对路径。
+func TestResolveProfileDirAlwaysAbsolute(t *testing.T) {
+	// 模拟相对 configDir：传入 "."（app 以 CWD 发现 config 的部署形态）。
+	for _, dir := range []string{"", ".", "webhub"} {
+		got := ResolveProfileDir(dir, ".")
+		if !filepath.IsAbs(got) {
+			t.Fatalf("ResolveProfileDir(%q, \".\") = %q, want absolute", dir, got)
+		}
+	}
+	// configDir 为空的兜底分支同样必须绝对。
+	if got := ResolveProfileDir("", ""); !filepath.IsAbs(got) {
+		t.Fatalf("ResolveProfileDir(\"\", \"\") = %q, want absolute", got)
 	}
 }

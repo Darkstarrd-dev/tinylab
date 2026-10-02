@@ -291,5 +291,9 @@ func WaitForDevTools(port int, timeout time.Duration) error {
 		}
 		time.Sleep(devtoolsPollInterval)
 	}
-	return fmt.Errorf("webhub: devtools not ready on port %d after %s", port, timeout)
+	err := fmt.Errorf("webhub: devtools not ready on port %d after %s", port, timeout)
+	if diag := lastLaunchDiag(); diag != "" {
+		err = fmt.Errorf("%w (%s)", err, diag)
+	}
+	return err
 }
