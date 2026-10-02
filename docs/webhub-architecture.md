@@ -12,7 +12,7 @@
 >
 > **边界纪律：** `internal/proxy` **不 import webhub**，与 jethub 同款（AGENTS.md 红线）。桥接走窄接口注入，`APIType=="webhub"` 标记识别。
 >
-> **最后核对：** 2026-10-02（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态）
+> **最后核对：** 2026-10-02（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。同日用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2）
 
 ---
 
@@ -68,6 +68,16 @@ P0 原型（`tmp/p0-webhub/`，gitignored）实测：
 
 > **P0 附带教训**：原型曾把非目标 tab（DSH GUI 的 `127.0.0.1:20199`）导航到 DeepSeek。**正式实现必须按域名精确匹配 tab，绝不复用非目标标签页**（§4.3）。
 
+### 2.2 上线后用户实测回归（2026-10-02，两例 webhub 侧）
+
+1. **站点组重复渲染**：保存前缀触发 `webhubRefresh` → `webhubRenderSiteGroup` 直接 `insertAdjacentHTML` 追加，而 `__jethubRenderProviders` 末尾也会调它 → 同一份站点组出现两份且状态同步。
+   **修法**：渲染幂等化——插入前先移除旧 `[data-webhub-row]` 节点（分割线 + 行都带标记）；删除 `webhubSelect`/`webhubRefresh` 里对它的直接调用（jethub 渲染器已含）。回归守卫：`web/webhub.test.js`（连续渲染/选择/刷新后分割线必须恰一份）。
+2. **Site Status 永不 connected/attached**：启动时一次性 `Connect` 失败后**永不重试**（端点永远为空），且「打开站点」开在**系统浏览器**——既无 CDP 端点、profile 也不同，登录态落不进 webhub profile。
+   **修法**：① 懒连接自愈 `Manager.EnsureBrowser`（单飞 + 3s 节流；status/open/probe 都先调）；② `Manager.ResolveSite` 在 status 时 rescan：端点失效即清空重连、发现站点 tab 即附着（绝不复用非目标 tab）；③ `SessionManager.OpenTab`——「打开站点」改为在 **webhub 浏览器**内开站点标签页（持久 profile，登录一次跨进程存活）；④ status 响应新增 `browserError`，页面把「浏览器起不来」的原因直接写出来（页面可排障）。
+   真机复验：状态首查失败 → 恢复浏览器后 status 返回 `connected:true`；open 后 status 返回 `attached:true` + 站点 tab URL。
+
+> 关联（jethub 侧同日回归）：`SyncKeys` 的 DeleteProvider+AddProvider 刷新窗口触发 registry sweep，把 combo/quickslot 里的 `{prefix}/{model}` 引用清掉（用户实测：combo 里 FreeHub 模型重启后消失）。修法见 [`jethub-architecture.md`](jethub-architecture.md) 缺陷 17 与 `Registry.UpsertProvider`。
+
 ---
 
 ## 3. Free Hub 页面内的 UI（Settings 内嵌，与 jethub 同入口）
@@ -97,8 +107,8 @@ P0 原型（`tmp/p0-webhub/`，gitignored）实测：
 | 区 | 内容 |
 |---|---|
 | ① **调用前缀** | 与 jethub 同款 `PUT/DELETE /api/webhub/{site}/prefix`，`[a-z0-9-]{1,32}`，冲突 409 |
-| ② **站点状态** | 浏览器连接 · 登录态 · 就绪标记 · 上次成功时间 |
-| ③ **操作按钮行** | 打开站点（系统浏览器）/ 检测就绪 / 停用 / 移除前缀 |
+| ② **站点状态** | 浏览器连接（懒连接自愈：status 时 `EnsureBrowser`/`ResolveSite` 重连 + rescan 附着）· 登录态 · 就绪标记 · 上次成功时间 · 起不来时直接显示 `browserError` |
+| ③ **操作按钮行** | 打开站点（**webhub 浏览器内**开站点标签页，供用户在持久 profile 里登录）/ 检测就绪 / 停用 / 移除前缀 |
 | ④ **模型 ID 列表** | 该站点暴露的 `{prefix}/{modelID}` 串，点击复制 |
 | ⑤ **通知区** | tone + 逐条 details（复用 jethub 通知区） |
 

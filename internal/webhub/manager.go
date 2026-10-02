@@ -1,6 +1,7 @@
 package webhub
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -73,6 +74,9 @@ type Manager struct {
 	mu   sync.RWMutex
 	dir  string
 	path string
+	// profileDir is the persistent browser profile dir (login state lives
+	// here); Connect launches with it when nothing listens on the port.
+	profileDir string
 	// state is the persisted user state.
 	state SiteState
 	// sessions is the browser attachment surface (may be nil when the browser
@@ -81,10 +85,15 @@ type Manager struct {
 	// probeFn runs a readiness probe for a site (injected; defaults to
 	// Probe). Kept as a field so tests can substitute a fake.
 	probeFn func(site string) error
-	// browserOpener opens a URL in the system browser (wired to
-	// fsutil.OpenInBrowser by the app).
-	browserOpener func(url string) error
-	logger        Logger
+	// ensureMu serializes lazy browser connects (single-flight); lastEnsure/
+	// lastEnsureErr throttle repeated attempts when no browser is available.
+	ensureMu      sync.Mutex
+	lastEnsure    time.Time
+	lastEnsureErr error
+	// connectFn is the browser bring-up hook (Connect by default; tests
+	// inject a stub so unit tests never launch a real browser).
+	connectFn func(profileDir string, port int, headless bool) (wsURL string, launched bool, err error)
+	logger    Logger
 }
 
 // NewManager loads (or creates) the webhub state file under dir.
@@ -93,10 +102,11 @@ func NewManager(dir string, logger Logger) (*Manager, error) {
 		return nil, fmt.Errorf("webhub: data dir: %w", err)
 	}
 	m := &Manager{
-		dir:      dir,
-		path:     filepath.Join(dir, "sites.json"),
-		sessions: NewSessionManager(""),
-		logger:   logger,
+		dir:        dir,
+		path:       filepath.Join(dir, "sites.json"),
+		profileDir: ResolveProfileDir("", dir),
+		sessions:   NewSessionManager(""),
+		logger:     logger,
 	}
 	m.state.Prefixes = map[string]string{}
 	m.state.LastOK = map[string]int64{}
@@ -149,21 +159,6 @@ func (m *Manager) saveLocked() error {
 // Sessions exposes the session manager (API layer uses it for open/status).
 func (m *Manager) Sessions() *SessionManager { return m.sessions }
 
-// SetBrowserOpener wires the "open this URL in the system browser" hook the
-// open-site endpoint uses (wired to fsutil.OpenInBrowser by the app).
-func (m *Manager) SetBrowserOpener(fn func(url string) error) {
-	m.mu.Lock()
-	m.browserOpener = fn
-	m.mu.Unlock()
-}
-
-// BrowserOpener returns the current opener (nil when unwired).
-func (m *Manager) BrowserOpener() func(url string) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.browserOpener
-}
-
 // SetLogger replaces the logger (the app wires *console.Logger).
 func (m *Manager) SetLogger(l Logger) {
 	m.mu.Lock()
@@ -183,6 +178,115 @@ func (m *Manager) SetProbeFn(fn func(site string) error) {
 	m.mu.Lock()
 	m.probeFn = fn
 	m.mu.Unlock()
+}
+
+// browserRetryInterval throttles lazy connect attempts: a machine without a
+// usable browser must not launch-start on every status poll.
+const browserRetryInterval = 3 * time.Second
+
+// EnsureBrowser brings the CDP endpoint up if it is not up yet. It is the
+// lazy counterpart of the app's startup connect: a browser that failed to
+// launch at startup (or was closed since) self-heals on the next
+// status/open/probe call. Single-flight and throttled.
+func (m *Manager) EnsureBrowser() error {
+	if m.sessions.Endpoint() != "" {
+		return nil
+	}
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
+	if m.sessions.Endpoint() != "" {
+		return nil // a concurrent ensure won the race
+	}
+	if !m.lastEnsure.IsZero() && time.Since(m.lastEnsure) < browserRetryInterval {
+		return m.lastEnsureErr
+	}
+	m.lastEnsure = time.Now()
+	connect := m.connectFn
+	if connect == nil {
+		connect = Connect
+	}
+	wsURL, launched, err := connect(m.profileDir, DefaultPort, false)
+	if err != nil {
+		m.lastEnsureErr = err
+		if m.logger != nil {
+			m.logger.Warn("[webhub] browser unavailable: %v", err)
+		}
+		return err
+	}
+	m.lastEnsureErr = nil
+	m.SetEndpoint(wsURL)
+	if m.logger != nil {
+		if launched {
+			m.logger.Info("[webhub] browser launched on :%d", DefaultPort)
+		} else {
+			m.logger.Info("[webhub] attached to the running browser on :%d", DefaultPort)
+		}
+	}
+	return nil
+}
+
+// SetConnectFn overrides the browser bring-up hook (tests inject a stub so
+// unit tests never launch a real browser).
+func (m *Manager) SetConnectFn(fn func(profileDir string, port int, headless bool) (wsURL string, launched bool, err error)) {
+	m.mu.Lock()
+	m.connectFn = fn
+	m.mu.Unlock()
+}
+
+// BrowserError returns the last lazy-connect failure ("") when the browser is
+// up. The status endpoint surfaces it so the page can explain WHY nothing is
+// connected instead of a bare 未连接 (页面可排障).
+func (m *Manager) BrowserError() string {
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
+	if m.sessions.Endpoint() != "" {
+		return ""
+	}
+	if m.lastEnsureErr == nil {
+		return ""
+	}
+	return m.lastEnsureErr.Error()
+}
+
+// ResolveSite reports live connectivity for a site: it lazily (re)connects
+// the browser, reuses the cached session when one exists, and otherwise scans
+// the browser's tabs and attaches the site's own tab when present. It never
+// opens or navigates a tab (OpenTab is the explicit user-driven path).
+//
+// connected=false also covers a stale endpoint — the browser was closed or
+// restarted since the last attach; the endpoint is cleared so this or the
+// next call re-connects.
+func (m *Manager) ResolveSite(site string) (connected, attached bool, tabURL string) {
+	domain := normalizeDomain(site)
+	if err := m.EnsureBrowser(); err != nil {
+		return false, false, ""
+	}
+	if att, url := m.sessions.Status(domain); att {
+		return true, true, url
+	}
+	tab, err := m.sessions.FindTab(context.Background(), domain)
+	if err != nil {
+		// Endpoint stale: drop it and try one reconnect within this call.
+		m.SetEndpoint("")
+		if m.logger != nil {
+			m.logger.Warn("[webhub] browser endpoint stale, re-connecting: %v", err)
+		}
+		if err := m.EnsureBrowser(); err != nil {
+			return false, false, ""
+		}
+		if tab, err = m.sessions.FindTab(context.Background(), domain); err != nil {
+			m.SetEndpoint("")
+			return false, false, ""
+		}
+	}
+	if tab == nil {
+		return true, false, ""
+	}
+	if _, err := m.sessions.Open(context.Background(), domain); err != nil {
+		return true, false, tab.URL
+	}
+	_, url := m.sessions.Status(domain)
+	return true, true, url
 }
 
 // probeFnLocked returns the active probe implementation.

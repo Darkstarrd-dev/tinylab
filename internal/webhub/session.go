@@ -244,6 +244,29 @@ func (m *SessionManager) Open(ctx context.Context, site string) (*Session, error
 // Context returns the CDP context bound to the session's tab.
 func (s *Session) Context() context.Context { return s.runCtx }
 
+// OpenTab opens url as a new page tab in the attached browser. This backs the
+// site detail pane's "Open Site" action — the user's explicit way to reach
+// the (login) page inside the webhub browser, whose persistent profile keeps
+// the session. Driver/probe flows never open tabs behind the user's back.
+func (m *SessionManager) OpenTab(ctx context.Context, rawURL string) error {
+	m.mu.RLock()
+	wsURL := m.wsURL
+	m.mu.RUnlock()
+	if wsURL == "" {
+		return ErrNotConnected
+	}
+	runCtx, cancel := context.WithTimeout(ctx, attachTimeout)
+	defer cancel()
+	allocCtx, cancelAlloc := chromedp.NewRemoteAllocator(runCtx, wsURL)
+	defer cancelAlloc()
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer cancelBrowser()
+	return chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := target.CreateTarget(rawURL).Do(ctx)
+		return err
+	}))
+}
+
 // ErrNotConnected is returned when no CDP endpoint is configured (the browser
 // was never launched / never found).
 var ErrNotConnected = fmt.Errorf("webhub: browser not connected")

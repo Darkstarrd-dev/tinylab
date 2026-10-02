@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tinylab/tinylab/internal/config"
@@ -67,6 +68,56 @@ func (r *Registry) AddProvider(p config.Provider) {
 			ModelLocks:  make(map[string]time.Time),
 			ModelStatus: make(map[string]string),
 			ModelErrors: make(map[string]string),
+		}
+	}
+}
+
+// UpsertProvider inserts p, or — when a provider with the same ID already
+// exists — replaces it IN PLACE. It is the refresh path for dynamically
+// bridged providers (jethub accounts, webhub sites) whose Keys/Models change
+// on every sync: unlike DeleteProvider+AddProvider it never fires the
+// stale-reference sweep, because a refresh keeps the provider registered —
+// combo/quickslot refs that resolved before the refresh must survive it
+// (regression 2026-10-02: the delete+add cycle swept {prefix}/{model} refs
+// out of combos at every startup sync).
+//
+// Callers preserve user-mutable overrides (rotation strategy, retry/cooldown
+// overrides, …) on p before upserting, exactly as with UpdateProvider.
+func (r *Registry) UpsertProvider(p config.Provider) {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	replaced := false
+	for i := range r.config.Providers {
+		if r.config.Providers[i].ID == p.ID {
+			r.config.Providers[i] = p
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		r.config.Providers = append(r.config.Providers, p)
+	}
+	// Reconcile per-key runtime state with the new key set: keep states of
+	// surviving keys (cooldown/lock/backoff survive a refresh), init the new
+	// ones, drop the vanished ones.
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	live := make(map[string]bool, len(p.Keys))
+	for _, k := range p.Keys {
+		key := p.ID + "/" + k.ID
+		live[key] = true
+		if _, ok := r.states[key]; !ok {
+			r.states[key] = &keystate.KeyRuntimeState{
+				ModelLocks:  make(map[string]time.Time),
+				ModelStatus: make(map[string]string),
+				ModelErrors: make(map[string]string),
+			}
+		}
+	}
+	prefix := p.ID + "/"
+	for key := range r.states {
+		if strings.HasPrefix(key, prefix) && !live[key] {
+			delete(r.states, key)
 		}
 	}
 }

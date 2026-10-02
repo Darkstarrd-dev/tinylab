@@ -210,6 +210,13 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
   四种响应 —— 进行中（保持打开）/ 成功（关弹窗 + `freeHubLoginOk` + 停表 + 刷新列表）/
   失败（`freeHubLoginFailed`）/ 会话已回收（关弹窗 + `freeHubLoginGone` + 停表）。
 
+### 3.6.1 缺陷 20（2026-10-02）：SyncKeys 刷新窗口触发 registry sweep ⇒ combo/quickslot 模型引用被清
+
+- **现象（用户实测）**：Combo 加入 FreeHub 模型，退出 app 重新进入后模型消失（「状态不会被保存」）。
+- **根因**：`SyncKeys` 刷新桥接 provider 走 `DeleteProvider(id)` + `AddProvider(p)`，而 `DeleteProvider` 内联 `sweepStaleRefsLocked()`——删除窗口内该前缀在 registry 缺席，combo/quickslot 里所有 `{prefix}/{model}` 引用（含别名形态，如 `lom/GLM 5.3 Flash · x0.8`）被当成失效引用清掉；provider 随后重新注册也救不回来。启动时 `RestoreBridges` 对每个账号跑一遍 `SyncKeys` ⇒ **每次重启必触发**（config.yaml 里已持久化的 jethub provider 让 `GetProvider` 命中、走删除分支）。隔离实例复现：带凭据启动后 `combo.models == []`。
+- **修复**：registry 新增 `UpsertProvider`（原地替换 Keys/Models + keystate 对账：幸存 key 保留冷却/锁状态、新 key 初始化、消失 key 清理，**不触发 sweep**——刷新语义上 provider 从未离开）；jethub `SyncKeys` 与 webhub `SyncProvider` 两处刷新路径全部改走它。回归：`internal/registry/providers_upsert_test.go` 3 个（原地替换不 sweep / 缺席即插入 / 幸存 key 运行时状态保留）+ `providers_test.go` 假 registry 补 `UpsertProvider`。真机复验：同配置重启后 combo 模型存活（`lom/GLM 5.3 Flash · x0.8` 保留）。
+- **波及**：webhub 桥同构（`SyncProvider` 同为 delete+add）——同批修复；webhub 侧用户尚未建 combo 引用，未受实害。
+
 ### 3.7 codearts 自动续期（R1-2，ref cf5edab）
 
 - **调度器**：`Manager.StartRefreshScheduler`（app 装配时以 `a.shutdownCtx` 启动）——启动首轮 + 每 30 分钟一轮（ref index.ts）；目前只对 **codearts** 生效（其它 provider 只有面板「续期」按钮）。

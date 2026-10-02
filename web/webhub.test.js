@@ -109,10 +109,34 @@ check('no new sidebar row is added (requirement 1)', () => {
 function makeCtx(sites) {
   const calls = [];
   const els = {};
-  const mkEl = (id) => ({
-    id, innerHTML: '', textContent: '', value: '',
-    insertAdjacentHTML(pos, html) { this.innerHTML += html; calls.push(['insert', id, html]); },
-  });
+  // Per-context snapshot: webhubSelect writes back status fields onto the
+  // site objects — tests must never observe each other's mutations.
+  const siteSnapshot = JSON.parse(JSON.stringify(sites));
+  const mkEl = (id) => {
+    // Minimal chunked element: insertAdjacentHTML appends a chunk; remove()
+    // stubs retire a whole chunk. Faithful enough for the site-group render,
+    // whose real DOM flow is "remove every [data-webhub-row] node, then
+    // insert the group again".
+    const el = {
+      id, textContent: '', value: '',
+      _chunks: [''], _removed: new Set(),
+      get innerHTML() {
+        return this._chunks.map((c, i) => (this._removed.has(i) ? '' : c)).join('');
+      },
+      set innerHTML(v) { this._chunks = [v]; this._removed = new Set(); },
+      insertAdjacentHTML(pos, html) { this._chunks.push(html); calls.push(['insert', id, html]); },
+      querySelectorAll(sel) {
+        if (sel !== '[data-webhub-row]') return [];
+        const stubs = [];
+        this._chunks.forEach((c, i) => {
+          const n = (c.match(/data-webhub-row/g) || []).length;
+          for (let k = 0; k < n; k++) stubs.push({ remove: () => this._removed.add(i) });
+        });
+        return stubs;
+      },
+    };
+    return el;
+  };
   const ctx = {
     console,
     document: {
@@ -151,7 +175,7 @@ function makeCtx(sites) {
     toast: () => {},
     copyToClipboard: () => {},
     formatDateTime: (d) => String(d),
-    apiGet: async (p) => { calls.push(['GET', p]); if (p === '/webhub/sites') return { sites }; return {}; },
+    apiGet: async (p) => { calls.push(['GET', p]); if (p === '/webhub/sites') return { sites: siteSnapshot }; return {}; },
     apiPut: async (p, b) => { calls.push(['PUT', p, b]); return { ok: true, modelIds: ['ds/chat.deepseek.com'] }; },
     apiPost: async (p, b) => { calls.push(['POST', p, b]); return { ok: true }; },
     apiDelete: async (p) => { calls.push(['DELETE', p]); return { ok: true }; },
@@ -183,6 +207,30 @@ checkAsync('site group renders below a divider, above nothing else', async () =>
   assert.ok(divIdx !== -1 && firstSite !== -1 && divIdx < firstSite, 'sites must come AFTER the divider');
   // Both sites present.
   assert.ok(html.includes('chatgpt.com'), 'all sites must render');
+});
+
+checkAsync('site group render is IDEMPOTENT (prefix save refresh must not duplicate)', async () => {
+  const ctx = makeCtx(SITES);
+  vm.runInContext(read('static/webhub.js'), ctx, { filename: 'webhub.js' });
+  // Regression 2026-10-02: saving a prefix ran webhubRefresh → the group was
+  // appended again → a second synced "Web Sites" list appeared.
+  vm.runInContext('(async()=>{ await webhubLoadSites(); webhubRenderSiteGroup(); webhubRenderSiteGroup(); webhubRenderSiteGroup(); })()', ctx);
+  await new Promise((r) => setImmediate(r));
+  const html = ctx.__els['free-hub-providers'].innerHTML;
+  const dividers = (html.match(/free-hub-divider/g) || []).length;
+  assert.strictEqual(dividers, 1, 'repeat renders must not stack the site group, got ' + dividers);
+});
+
+checkAsync('webhubSelect and webhubRefresh do not stack the site group', async () => {
+  const ctx = makeCtx(SITES);
+  vm.runInContext(read('static/webhub.js'), ctx, { filename: 'webhub.js' });
+  // __jethubRenderProviders re-inserts the group itself (jethub.js:123), so
+  // an extra direct call after it stacked a duplicate copy.
+  vm.runInContext('(async()=>{ await webhubLoadSites(); webhubRenderSiteGroup(); await webhubSelect("chatgpt.com"); await webhubRefresh(); await webhubRefresh(); })()', ctx);
+  await new Promise((r) => setImmediate(r));
+  const html = ctx.__els['free-hub-providers'].innerHTML;
+  const dividers = (html.match(/free-hub-divider/g) || []).length;
+  assert.strictEqual(dividers, 1, 'select/refresh must leave exactly one site group, got ' + dividers);
 });
 
 checkAsync('badges use site semantics, not account counts', async () => {

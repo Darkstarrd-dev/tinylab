@@ -16,6 +16,7 @@ type BridgeDeps interface {
 	GetProviderByPrefix(prefix string) (*config.Provider, bool)
 	GetProvider(id string) (*config.Provider, bool)
 	AddProvider(p config.Provider)
+	UpsertProvider(p config.Provider)
 	UpdateProvider(id string, updates config.Provider) bool
 	DeleteProvider(id string) bool
 	HasProvider(id string) bool
@@ -184,11 +185,12 @@ func (b *Bridge) SyncProvider(site string) error {
 		p.MaxRetriesOverride = existing.MaxRetriesOverride
 		p.RetryIntervalOverrideSec = existing.RetryIntervalOverrideSec
 		p.CooldownOverrideSec = existing.CooldownOverrideSec
-		b.reg.UpdateProvider(p.ID, p)
-		// UpdateProvider does not replace Keys/Models — replace explicitly so
-		// the registry stays authoritative (Models change when presets change).
-		b.reg.DeleteProvider(p.ID)
-		b.reg.AddProvider(p)
+		// In-place replace so the registry stays authoritative (Models change
+		// when presets change). ⚠️ Must NOT go through DeleteProvider+AddProvider:
+		// DeleteProvider fires the stale-reference sweep and would wipe
+		// {prefix}/{modelID} refs from combos/quickslots on every sync
+		// (regression 2026-10-02).
+		b.reg.UpsertProvider(p)
 		return nil
 	}
 	b.reg.AddProvider(p)

@@ -33,10 +33,16 @@ async function webhubLoadSites() {
 function webhubRenderSiteGroup() {
   var el = document.getElementById('free-hub-providers');
   if (!el) return;
+  // Idempotent: drop the previous group (divider + rows) before re-inserting.
+  // __jethubRenderProviders wipes the container anyway, but a stray call
+  // without it must never stack a second "Web Sites" list (regression
+  // 2026-10-02: prefix save → refresh → duplicated site group).
+  var stale = el.querySelectorAll('[data-webhub-row]');
+  for (var r = 0; r < stale.length; r++) stale[r].remove();
   if (!__webhubState.sites.length) return;
-  var html = '<div class="free-hub-divider"><span>' + escapeHtml(t('webHubGroup')) + '</span></div>';
+  var html = '<div class="free-hub-divider" data-webhub-row="1"><span>' + escapeHtml(t('webHubGroup')) + '</span></div>';
   html += __webhubState.sites.map(function (s) {
-    return '<div class="free-hub-provider' + (s.id === __webhubState.selected ? ' selected' : '') + '"' +
+    return '<div class="free-hub-provider' + (s.id === __webhubState.selected ? ' selected' : '') + '" data-webhub-row="1"' +
       ' onclick="webhubSelect(\'' + escapeForJsString(s.id) + '\')">' +
       '<span class="free-hub-provider-name">' + escapeHtml(s.displayName || s.id) + '</span>' +
       webhubStatusBadge(s) +
@@ -58,8 +64,9 @@ function webhubStatusBadge(s) {
 async function webhubSelect(siteId) {
   __webhubState.selected = siteId;
   // Re-render the left pane so the shared single-selection stays correct.
+  // __jethubRenderProviders already re-inserts the site group below the
+  // divider — an extra webhubRenderSiteGroup() here stacked a duplicate.
   __jethubRenderProviders();
-  webhubRenderSiteGroup();
   var detail = document.getElementById('free-hub-detail');
   if (!detail) return;
   var site = __webhubState.sites.find(function (x) { return x.id === siteId; }) || {};
@@ -68,6 +75,7 @@ async function webhubSelect(siteId) {
     site.connected = st.connected; site.ready = st.attached;
     site.tabUrl = st.tabUrl; site.lastOkMs = st.lastOkMs;
     site.prefix = st.prefix; site.bridged = st.bridged;
+    site.browserError = st.browserError;
   } catch (e) { /* keep the list snapshot */ }
   webhubRenderDetail(site);
 }
@@ -117,13 +125,16 @@ function webhubStatusRows(site) {
     [t('webHubAttached'), site.ready ? t('yes') : t('no')],
     [t('webHubLastOk'), site.lastOkMs ? formatDateTime(new Date(site.lastOkMs)) : t('webHubNeverOk')],
   ];
-  if (site.tabUrl) rows.push([t('webHubAttached'), escapeHtml(site.tabUrl)]);
+  if (site.tabUrl) rows.push([t('webHubTab'), escapeHtml(site.tabUrl)]);
   var html = rows.map(function (r) {
     return '<div class="webhub-status-row"><span class="webhub-status-key">' + r[0] + '</span>' +
       '<span class="webhub-status-val">' + r[1] + '</span></div>';
   }).join('');
   if (site.hasSelectors === false) {
     html += '<div class="free-hub-hint">' + escapeHtml(t('webHubNoSelectors')) + '</div>';
+  }
+  if (!site.connected && site.browserError) {
+    html += '<div class="free-hub-hint">' + escapeHtml(t('webHubBrowserError', [site.browserError])) + '</div>';
   }
   return html;
 }
@@ -207,7 +218,6 @@ async function webhubRefresh() {
   await webhubLoadSites();
   __webhubState.selected = sel;
   __jethubRenderProviders();
-  webhubRenderSiteGroup();
   var site = __webhubState.sites.find(function (x) { return x.id === sel; });
   if (site) webhubRenderDetail(site);
 }

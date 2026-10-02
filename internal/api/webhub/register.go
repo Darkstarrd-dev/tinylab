@@ -76,23 +76,27 @@ func (h *Handler) siteStatus(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "unknown site "+site)
 		return
 	}
-	connected, attached, tabURL := h.d.Manager.Status(site)
+	connected, attached, tabURL := h.d.Manager.ResolveSite(site)
 	apibase.WriteJSON(w, http.StatusOK, map[string]any{
-		"id":        corewebhub.NormalizeSite(site),
-		"connected": connected,
-		"attached":  attached,
-		"tabUrl":    tabURL,
-		"lastOkMs":  h.d.Manager.LastOK(site),
-		"prefix":    h.d.Manager.Prefix(site),
-		"bridged":   h.d.Bridge.HasBridgedProvider(site),
+		"id":           corewebhub.NormalizeSite(site),
+		"connected":    connected,
+		"attached":     attached,
+		"tabUrl":       tabURL,
+		"lastOkMs":     h.d.Manager.LastOK(site),
+		"prefix":       h.d.Manager.Prefix(site),
+		"bridged":      h.d.Bridge.HasBridgedProvider(site),
+		"browserError": h.d.Manager.BrowserError(),
 	})
 }
 
-// openSite POST /api/webhub/sites/{site}/open — opens the site in the system
-// browser so the user can sign in.
+// openSite POST /api/webhub/sites/{site}/open — opens the site as a tab in
+// the webhub browser (launching/attaching it if needed) so the user can sign
+// in there. The system browser is useless for webhub: its profile is not the
+// persistent webhub profile and it has no CDP endpoint to drive.
 //
 // ⚠️ 这是 webhub 唯一的「登录」入口，且它只是开个页面：本项目无法也不需要
-// 编程式登录（登录态属于用户自己的浏览器 profile）。
+// 编程式登录。登录态落在 webhub 持久 profile（{configDir}/webhub/profile）
+// 里——一次登录，跨进程存活。
 func (h *Handler) openSite(w http.ResponseWriter, r *http.Request) {
 	if !h.ready(w) {
 		return
@@ -103,12 +107,11 @@ func (h *Handler) openSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := corewebhub.SiteURL(site)
-	opener := h.d.Manager.BrowserOpener()
-	if opener == nil {
-		apibase.WriteJSON(w, http.StatusOK, map[string]any{"url": url, "opened": false})
+	if err := h.d.Manager.EnsureBrowser(); err != nil {
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	if err := opener(url); err != nil {
+	if err := h.d.Manager.Sessions().OpenTab(r.Context(), url); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -166,6 +169,10 @@ func (h *Handler) probeSite(w http.ResponseWriter, r *http.Request) {
 	site := chi.URLParam(r, "site")
 	if !corewebhub.SiteExists(site) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "unknown site "+site)
+		return
+	}
+	if err := h.d.Manager.EnsureBrowser(); err != nil {
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	started := time.Now()

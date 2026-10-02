@@ -33,8 +33,9 @@ func (f *fakeRegistry) GetProvider(id string) (*config.Provider, bool) {
 	return &p, ok
 }
 
-func (f *fakeRegistry) AddProvider(p config.Provider) { f.providers[p.ID] = p }
-func (f *fakeRegistry) HasProvider(id string) bool    { _, ok := f.providers[id]; return ok }
+func (f *fakeRegistry) AddProvider(p config.Provider)    { f.providers[p.ID] = p }
+func (f *fakeRegistry) UpsertProvider(p config.Provider) { f.providers[p.ID] = p }
+func (f *fakeRegistry) HasProvider(id string) bool       { _, ok := f.providers[id]; return ok }
 func (f *fakeRegistry) DeleteProvider(id string) bool {
 	_, ok := f.providers[id]
 	delete(f.providers, id)
@@ -67,6 +68,11 @@ func newRouteTestHandler(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
+	// Never launch a real browser from a route test: status/open/probe lazily
+	// connect, so the stub must fail fast and honestly.
+	m.SetConnectFn(func(string, int, bool) (string, bool, error) {
+		return "", false, corewebhub.ErrNoBrowser
+	})
 	// A conflict source: another provider already owning "taken".
 	reg := &fakeRegistry{providers: map[string]config.Provider{
 		"other": {ID: "other", Prefix: "taken"},

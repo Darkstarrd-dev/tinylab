@@ -228,13 +228,6 @@ func (a *App) buildComponents() error {
 		a.logger.Warn("webhub manager disabled: %v", err)
 	} else {
 		a.webhubManager = webhubMgr
-		webhubMgr.SetBrowserOpener(func(url string) error {
-			if err := OpenBrowser(url); err != nil {
-				a.logger.Info("[webhub] open site failed: %v", err)
-				return err
-			}
-			return nil
-		})
 		a.webhubBridge = webhub.NewBridge(webhubMgr, a.reg)
 		// Re-register sites that already have a stored prefix so
 		// {prefix}/{modelID} works right after startup.
@@ -480,17 +473,10 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 	// cold Chrome start takes seconds.
 	if a.webhubManager != nil && a.webhubProfile != "" {
 		go func() {
-			wsURL, launched, err := webhub.Connect(a.webhubProfile, webhub.DefaultPort, false)
-			if err != nil {
-				a.logger.Warn("[webhub] browser unavailable: %v", err)
-				return
-			}
-			a.webhubManager.SetEndpoint(wsURL)
-			if launched {
-				a.logger.Info("[webhub] browser launched on :%d", webhub.DefaultPort)
-			} else {
-				a.logger.Info("[webhub] attached to the running browser on :%d", webhub.DefaultPort)
-			}
+			// EnsureBrowser logs launched/attached itself; failure keeps the
+			// feature degraded, and every status/open/probe call retries
+			// lazily (Manager.EnsureBrowser).
+			_ = a.webhubManager.EnsureBrowser()
 		}()
 	}
 

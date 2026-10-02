@@ -78,18 +78,6 @@ func (m *Manager) ProbeDetail(site string) (ProbeResult, error) {
 	return res, nil
 }
 
-// Status reports a site's live state without sending a message (no cost, no
-// site turn consumed): whether the browser is reachable and whether a tab of
-// the site is attached.
-func (m *Manager) Status(site string) (connected, attached bool, tabURL string) {
-	if m.sessions == nil {
-		return false, false, ""
-	}
-	connected = m.sessions.Endpoint() != ""
-	attached, tabURL = m.sessions.Status(normalizeDomain(site))
-	return connected, attached, tabURL
-}
-
 // clip shortens s to at most n runes with an ellipsis marker.
 func clip(s string, n int) string {
 	runes := []rune(strings.TrimSpace(s))

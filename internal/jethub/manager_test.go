@@ -56,7 +56,8 @@ func (f *fakeRegistry) GetProvider(id string) (*config.Provider, bool) {
 	return &p, ok
 }
 
-func (f *fakeRegistry) AddProvider(p config.Provider) { f.providers[p.ID] = p }
+func (f *fakeRegistry) AddProvider(p config.Provider)    { f.providers[p.ID] = p }
+func (f *fakeRegistry) UpsertProvider(p config.Provider) { f.providers[p.ID] = p }
 
 func (f *fakeRegistry) UpdateProvider(id string, updates config.Provider) bool {
 	if _, ok := f.providers[id]; !ok {
