@@ -141,6 +141,69 @@ type augmentError struct{}
 
 func (*augmentError) Error() string { return "augment failed" }
 
+// dropRetryBridge is a bridged-provider stub implementing both Augment and
+// InterceptResponse: the first attempt is rejected with a SameKeyRetryError
+// carrying the header to drop; the retry (marker present) succeeds.
+type dropRetryBridge struct {
+	attempts             int
+	markerSeenOnRetry    bool
+	markerLeakedUpstream bool
+}
+
+func (d *dropRetryBridge) Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
+	d.attempts++
+	if r.Header.Get(RetryDropHeaderMarker) != "" {
+		d.markerSeenOnRetry = true
+	}
+	return body, nil
+}
+
+func (d *dropRetryBridge) InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (io.Reader, int64, error) {
+	if clientReq.Header.Get(RetryDropHeaderMarker) == "" {
+		return nil, 0, &SameKeyRetryError{Header: "maas_type", Reason: "test: drop the rejected header"}
+	}
+	return nil, 0, nil
+}
+
+// TestForwardWithRetry_SameKeyRetryDropsHeader: a bridge-originated
+// SameKeyRetryError must resend immediately with the SAME key, write the
+// loopback marker for the bridge's augmenter, and never leak the marker
+// upstream (the header copy guard).
+func TestForwardWithRetry_SameKeyRetryDropsHeader(t *testing.T) {
+	bridge := &dropRetryBridge{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(RetryDropHeaderMarker) != "" {
+			bridge.markerLeakedUpstream = true
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	h := newJethubTestProvider(t, upstream.URL)
+	h.SetRequestAugmenter(bridge)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	parsed := map[string]any{"model": "deepseek-v4-flash", "messages": []any{}}
+	ok, _ := h.forwardWithRetry(w, req, "jethub-codearts", "deepseek-v4-flash", "/v1/chat/completions", nil, parsed, false, 1, "", "CodeArts", combo.EntryFormatOpenAI, "", "")
+	if !ok {
+		t.Fatalf("forwardWithRetry failed: %d %s", w.Code, w.Body.String())
+	}
+	if bridge.attempts != 2 {
+		t.Fatalf("expected exactly 2 attempts (1 reject + 1 retry), got %d", bridge.attempts)
+	}
+	if !bridge.markerSeenOnRetry {
+		t.Fatal("the loopback marker must be visible to the augmenter on the retry")
+	}
+	if bridge.markerLeakedUpstream {
+		t.Fatal("the loopback marker must never reach the upstream")
+	}
+	if got := req.Header.Get(RetryDropHeaderMarker); got != "maas_type" {
+		t.Fatalf("marker = %q, want maas_type on the client request", got)
+	}
+}
+
 // Non-jethub providers must NOT invoke the augmenter.
 func TestForwardUpstream_AugmenterSkippedForNormalProviders(t *testing.T) {
 	called := false

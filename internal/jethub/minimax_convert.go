@@ -366,14 +366,51 @@ func minimaxTextOf(content any) string {
 	return ""
 }
 
+// minimaxToolResultBlock is one parsed OpenAI `role:"tool"` message: the
+// Anthropic tool_result block plus the tool_use id it claims.
+type minimaxToolResultBlock struct {
+	id    string
+	block map[string]any
+}
+
+// minimaxPlannedMessage is one parsed OpenAI message (system/developer already
+// dropped) plus the pairing metadata the second pass needs.
+type minimaxPlannedMessage struct {
+	role   string // "assistant" | "user"
+	blocks []any
+	// useIDs：本条消息里 tool_use 的 id，顺序与 blocks 中出现的一致（assistant）。
+	useIDs []string
+	// result：本条是 role:"tool" 时的 tool_result 块（其余角色为 nil）。
+	result *minimaxToolResultBlock
+}
+
 // minimaxConvertMessages maps the OpenAI message list onto Anthropic
 // messages: one content-block array per message, tool results folded into the
 // following user message (Anthropic has NO role:"tool"), consecutive
 // same-role messages coalesced (the Anthropic protocol expects alternating
 // roles; OpenAI histories routinely violate that).
+//
+// ⚠️ 2026-10-02（上游 commit c74e0c2 的同源真实缺陷）：Anthropic 拒绝**孤儿**
+// 工具块 —— 没有 tool_result 的 tool_use、指向不存在 tool_use 的 tool_result
+// 都会被上游拒（实测 `400 invalid params ... tool call result does not follow
+// tool call (2013)`）。故本函数分三阶段：
+//
+//  1. 解析每条消息成块，收集全部 tool_use / tool_result 的 id；
+//  2. 按 id 配对（ref src/sse.ts resolveToolPairing 的口径）：两侧都出现过的
+//     id 才保留，孤儿一律剔除；
+//  3. 每条 tool_result 落在**它的宿主 assistant 之后**的那条 user 消息里
+//     （ref src/minimax-messages.ts commitPending 的「成对提交」口径）。
+//
+// ⚠️ 输入是 OpenAI wire（`role:"tool"` 一等消息 + 顶层 `tool_call_id`），
+// 故不移植 ref 的 normalizeHarnessMessages 形状归一化 —— 这里本就是那个形状。
 func minimaxConvertMessages(raw any) ([]any, error) {
 	list, _ := raw.([]any)
-	var out []any
+
+	// 阶段 1：逐条解析成块并收集 id。⚠️ role:"tool" 缺 tool_call_id 仍然**显式
+	// 报错**（进站报文错误，与配对无关）；孤儿结果才是静默剔除。
+	var planned []minimaxPlannedMessage
+	allUseIDs := map[string]bool{}
+	allResultIDs := map[string]bool{}
 	for _, item := range list {
 		msg, ok := item.(map[string]any)
 		if !ok {
@@ -384,19 +421,130 @@ func minimaxConvertMessages(raw any) ([]any, error) {
 		case "system", "developer":
 			continue // 已提到顶层 system
 		}
-		anthropicRole := "user"
-		if role == "assistant" {
-			anthropicRole = "assistant"
-		}
 		blocks, err := minimaxMessageBlocks(msg, role)
 		if err != nil {
 			return nil, err
 		}
-		if len(blocks) == 0 {
+		pm := minimaxPlannedMessage{role: "user", blocks: blocks}
+		if role == "assistant" {
+			pm.role = "assistant"
+		}
+		if role == "tool" {
+			// role:"tool" 恒定只产出唯一一个 tool_result 块（见 minimaxMessageBlocks）；
+			// 配对 id 直接取块里的 tool_use_id，保证与下发的块严格同源。
+			if len(blocks) == 1 {
+				if block, ok := blocks[0].(map[string]any); ok {
+					id, _ := block["tool_use_id"].(string)
+					pm.result = &minimaxToolResultBlock{id: id, block: block}
+					allResultIDs[id] = true
+				}
+			}
+		} else {
+			for _, b := range blocks {
+				bm, ok := b.(map[string]any)
+				if !ok || bm["type"] != "tool_use" {
+					continue
+				}
+				id, _ := bm["id"].(string)
+				pm.useIDs = append(pm.useIDs, id)
+				allUseIDs[id] = true
+			}
+		}
+		planned = append(planned, pm)
+	}
+
+	// 阶段 2a：配对集合 —— 只有 id 在 tool_use 与 tool_result 两侧都出现过才保留。
+	//
+	// ⚠️ 与 ref 的口径差异：ref 的 resolveToolPairing 对「一批 tool_calls 里只要有
+	// 一个拿不到结果就整批剔除」（DSH 的批次语义）；这里按 id **逐个**判定 ——
+	// Anthropic 的协议判据本来就是「每个 tool_use 各自要有紧跟的 tool_result」，
+	// 逐个剔除能多保留可用的那半上下文，且不会留下无结果的 tool_use。
+	kept := map[string]bool{}
+	for id := range allUseIDs {
+		if allResultIDs[id] {
+			kept[id] = true
+		}
+	}
+
+	// 阶段 2b：宿主判定 —— 每个配好对的 id 由**哪一条** assistant 承载 tool_use。
+	// 正常历史取「该 id 首个结果之前最近的那条」；结果出现在调用之前的畸形历史
+	// 退化为「最早含该 id 的那条」，其结果随之下移到宿主之后（协议只认
+	// tool_result 紧跟产生它的 assistant，位置倒置无法表达，丢弃又会白丢一轮上下文）。
+	firstResult := map[string]int{}
+	for i, pm := range planned {
+		if pm.result == nil {
+			continue
+		}
+		if _, seen := firstResult[pm.result.id]; !seen {
+			firstResult[pm.result.id] = i
+		}
+	}
+	owner := map[string]int{}
+	for i, pm := range planned {
+		if pm.role != "assistant" {
+			continue
+		}
+		for _, id := range pm.useIDs {
+			if !kept[id] {
+				continue
+			}
+			// 候选只保留「不晚于首个结果」的那条，取其中最靠后（最贴近结果）的。
+			if _, seen := owner[id]; !seen || i <= firstResult[id] {
+				owner[id] = i
+			}
+		}
+	}
+
+	// 阶段 2c：按宿主收集结果块（保持进站顺序；同一个 id 的多条结果全部保留，
+	// 合并进同一条 user 消息）。
+	ownedResults := map[int][]any{}
+	for _, pm := range planned {
+		if pm.result == nil || !kept[pm.result.id] {
+			continue // 孤儿 tool_result：丢弃（否则上游 400/2013）
+		}
+		o := owner[pm.result.id]
+		ownedResults[o] = append(ownedResults[o], pm.result.block)
+	}
+
+	// 阶段 3：装配。assistant 与它的结果**成对**提交（顺序恒为
+	// assistant(tool_use) → user(tool_result)），user 消息仍按同角色合并。
+	var out []any
+	for i, pm := range planned {
+		if pm.role == "assistant" {
+			blocks := make([]any, 0, len(pm.blocks))
+			for _, b := range pm.blocks {
+				bm, _ := b.(map[string]any)
+				if bm != nil && bm["type"] == "tool_use" {
+					id, _ := bm["id"].(string)
+					// 孤儿 tool_use（没有结果）剔除；同一 id 落在多条 assistant 上时
+					// 只有宿主那条能拿到紧跟其后的 tool_result，其余必成孤儿。
+					if !kept[id] || owner[id] != i {
+						continue
+					}
+				}
+				blocks = append(blocks, b)
+			}
+			if len(blocks) == 0 {
+				// 正文为空且 tool_use 全被剔除 → 整条 assistant 丢弃（空块会被上游拒）。
+				// ⚠️ 它不可能拥有结果：宿主判据要求该条仍持有对应的 tool_use。
+				continue
+			}
+			out = minimaxAppendMessage(out, "assistant", blocks)
+			// ⚠️ 成对提交：tool_result 必须紧跟产生它的 assistant（协议判据）。
+			if results := ownedResults[i]; len(results) > 0 {
+				out = minimaxAppendMessage(out, "user", results)
+			}
+			continue
+		}
+		if pm.result != nil {
+			// 结果已随宿主 assistant 下发（阶段 2c），此处不重复。
+			continue
+		}
+		if len(pm.blocks) == 0 {
 			// 空消息整条丢弃（ref：content 块为空则丢弃）—— 回传空块会被拒。
 			continue
 		}
-		out = minimaxAppendMessage(out, anthropicRole, blocks)
+		out = minimaxAppendMessage(out, "user", pm.blocks)
 	}
 	return out, nil
 }
@@ -466,7 +614,8 @@ func minimaxMessageBlocks(msg map[string]any, role string) ([]any, error) {
 	}
 
 	// assistant 的 tool_calls → tool_use 块（⚠️ 必须保留：丢了会让后续
-	// tool_result 变成孤儿块，上游 400）。
+	// tool_result 变成孤儿块，上游 400）。孤儿 tool_use（没有对应结果的）
+	// 由 minimaxConvertMessages 统一按 id 剔除，这里不做配对判断。
 	if calls, ok := msg["tool_calls"].([]any); ok {
 		for i, rawCall := range calls {
 			call, ok := rawCall.(map[string]any)

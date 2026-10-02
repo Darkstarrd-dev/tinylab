@@ -1,5 +1,13 @@
 package jethub
 
+// ⚠️ 本文件是**共享的 Anthropic Messages ↔ OpenAI 桥**，不只服务 minimax：
+// zcode（R2）的上游同样是 Anthropic Messages（`/zcode-plan/anthropic/v1/messages`），
+// 响应侧直接复用这里的转换器与聚合器（`newMinimaxSSEReader` /
+// `minimaxAggregateSSE` / `peekFirstSSEDataLine` / `minimaxFirstErrorFrame`）。
+// 符号名保留 minimax 前缀是历史原因（改名会牵动大量已测代码），但**任何改动
+// 都必须同时考虑两个消费方**——尤其 usage 折叠口径（OpenAI 的 prompt_tokens
+// 含缓存命中，与 DSH 的 StreamChunk 口径不同，这里按 OpenAI 语义折叠）。
+
 import (
 	"bytes"
 	"encoding/json"

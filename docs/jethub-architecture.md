@@ -1,11 +1,21 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-01（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）+ **面板登录弹窗的 status 轮询契约**（§3.6 缺陷 19：loomy 的 `/status` 漏了 `loginId` 分支 ⇒ 弹窗永挂；前端 404 静默空转一并收尾）+ **模型列表展示形态规范化**（§6.3：一条 `名称 · 倍率` 紧跟裸 id、逐 provider 静态展示名与插件逐条对齐（buddy/workbuddy 补名 + 同名变体标记、cline 补 ` · 免费`、trae 剔除 4 条隐藏项）、点 id 复制 `{prefix}/{id}`、展示名同 provider 内唯一）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）+ **面板登录弹窗的 status 轮询契约**（§3.6 缺陷 19：loomy 的 `/status` 漏了 `loginId` 分支 ⇒ 弹窗永挂；前端 404 静默空转一并收尾）+ **模型列表展示形态规范化**（§6.3：一条 `名称 · 倍率` 紧跟裸 id、逐 provider 静态展示名与插件逐条对齐（buddy/workbuddy 补名 + 同名变体标记、cline 补 ` · 免费`、trae 剔除 4 条隐藏项）、点 id 复制 `{prefix}/{id}`、展示名同 provider 内唯一）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
 >
-> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（11 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止修改**；每份移植实现的语义权威）。
+> **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
+>
+> **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + 官方客户端凭据导入（AES-256-GCM）+ token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 凭据解密 / 余额 / 目录 / 推理 200（无 3012）见 §6.7。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
+>
+> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（13 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
 >
 > **变更维护清单（改动时必须同步本文）：**
 > - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
+> - **执行上游同步（拉取/分诊/推进 pin/新增 provider 评估）→ [`docs/jethub-upstream-sync.md`](jethub-upstream-sync.md)**（判定原则 + 每轮 SOP + 不搬清单 + 待办 R1-* + 轮次日志；pin 与当前待办见该文 §6/§7）
+> - 新增/修改 **OpenCode Zen** 适配（指纹形状/门禁工具/错误分类/匿名通道/模型可见性/非流式聚合）→ §3.8 + §6.5 + `internal/jethub/opencode.go`/`opencode_augment.go` + `products.go`（`Product.AnonymousKey`/`ModelFilter`）+ `bridge.go`（匿名 Key 优先级/可见性过滤）
+> - 修改 **codearts 续期**（终态判据/镜像对账/per-credential 串行/30min 调度器）→ §3.7 + `internal/jethub/codearts_refresh.go`/`codearts_oauth.go`
+> - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`）+ `internal/proxy/forward_retry.go`
+> - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
+> - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、官方凭据解密、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
 > - 修改备份格式 → §7 + `internal/jethub/backup.go`（与原版格式**双向兼容**，改动即破坏兼容，须先读 ref types.ts）
@@ -25,7 +35,7 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、11 provider 适配、WASM 桥、备份 |
+| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、13 provider 适配、WASM 桥、备份 |
 | API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
 | 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（20 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
@@ -46,7 +56,7 @@
 - **入口**：Settings 侧边栏 `Free Hub` 行——Path Settings 行后、Assistant 行前（`settings.js` `#free-hub-entry`，契约测试锁位置）；i18n `freeHub*` en+cn。
 - **main 区内嵌（不整页替换）**：`openFreeHub()` **保留 `.settings-panel-left`（Settings 侧边栏）**，仅隐藏 `.settings-panel-right` 并在 `.settings-layout` 内其后面挂 `#free-hub-root.free-hub-main`（占 main 位）；`closeFreeHub()` 反向恢复（轮询定时器一并清理）。若 layout 不存在（页面被换走后重进）会先 `renderEndpoint` 重渲染再挂载。
 - **切页生命周期**：`navigateTo`（`app-router.js`）调用 `closeFreeHub()`——页面切换会整体清空 `#page-content`，不清标志会导致再次进入 Free Hub 被陈旧 `__jethubActive` 守卫挡住（修复过的真实缺陷：必须重启 App/Ctrl+F5 才能恢复）；`openFreeHub` 侧另有兜底——active 时先执行一次 close 再重挂。
-- **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（11 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
+- **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（13 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
 - **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号 · **Use Proxy 开关**（`+ 新建账号` 右侧：`free-hub-proxy-wrap` 标签 + 全局 `.toggle-switch`（同 Upstream Proxy/Provider 详情 useProxy，复用 style-settings.css 不动堆叠规则）；`jethubToggleProxy` PUT `/api/jethub/providers/{provider}/proxy` {enabled}，失败回滚勾选态；per-provider 语义见 §3.2）。结果在通知区显示（tone + 逐条 details 列表）。
 - **账号卡**：状态点 + 名称 + 徽标（启用/key/refresh）；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· 积分（**逐账号**余额，挂载/刷新积分时并发逐个查询，错误显示「查询失败」不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取积分 · 续期 · 改名 · 停用|启用 · 删除。
 - **模型列表**（展示形态与插件的 `ModelToggle` **逐字对齐**，2026-10-01 规范化）：纵向行 = **一条展示串 `模型名称 · 倍率`**（服务端 `name`+`rate` 两个字段合成一条；无倍率时**不补** ` · `）紧跟着**裸的模型 id** + 删除/恢复单钮 —— 插件渲染的就是 `<strong>{model.name}</strong><code>{model.id}</code>`，且 `model.name` 里已含倍率。倍率**无信息不编造**（解析规则与逐 provider 对账见 §6.3）；**点模型 id 复制的是 `{prefix}/{id}`**（与 Settings provider detail 点模型 id 同形，可直接外部调用；未设前缀时退回裸 id）。批量管理 → 筛选 / 全选|取消全选 / **删除所选**（批量进黑名单，一次写盘 + 一次 SyncKeys）/ 取消；**恢复默认** = 清空黑名单（黑名单语义：删除=隐藏，恢复默认全部找回，被删项灰显带「已隐藏」徽标保持可逆）。
@@ -200,6 +210,20 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
   四种响应 —— 进行中（保持打开）/ 成功（关弹窗 + `freeHubLoginOk` + 停表 + 刷新列表）/
   失败（`freeHubLoginFailed`）/ 会话已回收（关弹窗 + `freeHubLoginGone` + 停表）。
 
+### 3.7 codearts 自动续期（R1-2，ref cf5edab）
+
+- **调度器**：`Manager.StartRefreshScheduler`（app 装配时以 `a.shutdownCtx` 启动）——启动首轮 + 每 30 分钟一轮（ref index.ts）；目前只对 **codearts** 生效（其它 provider 只有面板「续期」按钮）。
+- **判据读凭据，不读 `refreshable`**：`codeartsRefreshable`（refresh_token + code_verifier + DPoP JWK 三件套）+ `codeartsShouldRefreshNow`（到期前 1 小时窗口，ref `REFRESH_LEAD_MS`；到期不可解析 ⇒ 立即刷新）。`refreshable` 只是**镜像**：每轮按凭据对账、值变化才写盘（被误标下一轮自愈）——拿它当调度判据会让被误标的账号**永不进入续期循环**（真实缺陷：重启也没用）。
+- **per-credentialRef 串行 + 锁内重读**：`codeartsRefreshLocks`（sync.Map）让调度器与手动「续期」不会并发消费同一份 refresh_token（华为 STS 换新即作废旧的那一份 ⇒ 并发必然「1 成功 N invalid_grant」）；锁内重读后仍在有效期内 ⇒ 直接跳过（少烧一次 token）。
+- **终态只留 `invalid_grant` / `ExpiredRefreshToken`**：`InvalidDPoPHeader` 移出（它只说明「这一次 DPoP proof 不合格」，与 refresh_token 能否使用无关）；判终态前先重读凭据——若 refresh_token 已被他处换新，视为「别人已经续成功」，不作废账号。真终态才写 `refreshable=false`（且只在值变化时写）。
+
+### 3.8 apikey 登录模式与匿名通道（opencode，R1-7）
+
+- **登录模式 `apikey`**（`ProviderMeta.LoginModes`）：前端 `jethubAddAccount` 命中后弹粘贴框（`__jethubApiKeyModal`），提交 `POST /api/jethub/opencode/login`（`{apiKey,nickname?}` 或 `{anonymous:true}`）；**没有 loginId/轮询**，因此 opencode **没有 `/status` 端点**（`status_login_test.go` 的枚举守卫自动跳过它）。
+- **匿名通道 = 池里的一条普通账号**（凭据 `{"api_key":"public"}`，昵称「匿名通道」，`refreshable=false` 诚实标记）——排序/停用/删除全部复用既有机制；`AddOpencodeAccount` 幂等（重复添加返回 `reused:true`，同 key 不重复建条目）。
+- **模型可见性**（`Product.ModelFilter` → `opencodeVisibleModels`）：没有 keyed 账号时只暴露 7 条免费模型（匿名通道送付费模型必然 401/403）；加任一 keyed 账号后恢复全表 14 条。**匿名 Key 殿后**：`SyncKeys` 给 `Product.AnonymousKey` 的 Key 置 `Priority=100`，fill-first 先试账号槽。
+- ⚠️ **与 ref 的差异（有意）**：ref 在「首次启用」自动补一条匿名槽，本端改为**显式按钮**（TinyLab 没有 per-provider 的 enable 事件，自动写入用户账号池会在从未使用 opencode 的安装里制造噪音）；ref 的 per-account 代理与指纹代次轮换未移植（本端用 provider 级 Use Proxy；指纹固定 generation=0）。
+
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
 1. 用户为 provider 设**调用前缀**（全局唯一，`[a-z0-9-]{1,32}`）→ `Bridge.SetPrefix` 校验冲突（409）+ 持久化。
@@ -224,7 +248,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
 - 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。
 
-## 6. 11 provider 矩阵（端点/协议族/签名/积分）
+## 6. 13 provider 矩阵（端点/协议族/签名/积分）
 
 | provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
@@ -237,6 +261,8 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 | loomy | OpenAI 兼容 `{apiBase}/chat/completions` | **微信扫码**（本地弹窗页 + 长轮询；首次登录绑手机号，§3.5）；短信为**无 UI 备用** | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
 | minimax | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（§6.1：进站 OpenAI 时双向转换；进站 `/v1/messages` 时原生透传） | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version、无 x-api-key） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
+| opencode | OpenAI 兼容 `https://opencode.ai/zen/v1/chat/completions`（§6.5） | **API Key 粘贴**（唯一非浏览器登录，§3.8）；匿名通道 = 字面量 `public` | Bearer `<api_key>` + `x-opencode-project/session/request/client` 指纹头 + UA；**免费通道形状门禁**（stream + `bash`/`read` 工具，augmenter 注入） | —（粘贴的 key 无续期；匿名槽 refreshable=false） | —（无积分面；额度错误按响应体类型名分类 → per-model 锁/换号，§6.5） |
+| zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）；或**导入官方客户端凭据**（`~/.zcode/v2/credentials.json` 的 AES-256-GCM 解密，零操作可用） | 官方客户端头族（`X-Device-Mid` 硬需求 + `X-ZCode-App-Version`/`X-Release-Channel`/`X-Client-*`/`anthropic-version`）+ **请求体官方身份块 + 首轮日期块**（3012 准入） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取（`billing/claim`，**必带 captcha**，§6.7） |
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
 
@@ -261,6 +287,8 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - **错误通道**：非 2xx 的 Anthropic 错误体改写成 OpenAI 形状，但**保留原始 `type` 字符串**（402 的 `insufficient_balance_error` 是 `rotation.IsBalanceExhausted` 的判据，丢了就不会锁 key），状态码不变（分类仍由 rotation 按状态码做）。**错误帧恒在第一帧** ⇒ 拦截器 peek 首个 `data:` 行（⚠️ Anthropic 的错误帧是 `event: error` + `data:` 两行，不能只 peek 第一行，否则重演 Qoder「干净地停止、无任何报错」）并让本次尝试失败以触发重试；200 但**没有任何内容块** ⇒ 显式报错（静默空回复比报错更糟）。
 - **探针（重测按钮）同路**：`probeEntryPath("minimax")` 给 `/v1/messages` + Anthropic 体，`Customize` 把 URL 覆盖为完整端点，augmenter 补 `stream:true` —— 与真实推理共用同一条管线。
 - ⚠️ **未实测/未移植**：M3 的 `on`/`none` 之外无档位；非流式聚合的**响应**形状未经真机验证（参考实现从未发过非流式请求，上游只有流式分支）；思考块在 Anthropic 非流式聚合里被丢弃（无签名，回传会被拒）；`tool_choice:"none"` 不下发（Anthropic 无对应形态）。
+
+- **tool 配对不变量（R1-5，ref c74e0c2）**：孤儿 `tool_use`/`tool_result` 一律剔除；assistant(tool_use) 与它的 tool_result **成对提交**（结果紧跟宿主 assistant 之后的 user 消息，同批合并进同一条，不跨 assistant 边界累积）。Anthropic 三种 400/2013 形态（连续 user、结果错位、空 assistant 丢锚点）由此消除。⚠️ ref 同提交的「一等 tool 消息」形状归一化属 DSH 宿主专属（我们的进站是 OpenAI/Anthropic 线协议），**不移植**。
 
 ### 6.2 推理端点必须逐 provider 显式声明（真实缺陷 12/13 + 修复）
 
@@ -372,7 +400,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 | trae | 远端独有模型（`solo_agent` 约 66 条）与**倍率**不在表里 | 展示名/隐藏项**已修**；远端目录**未实现** |
 | lobsterai | 远端 26 条与 `costMultiplier` 倍率 | 三条**已补**；其余倍率需远端目录（**未实现**） |
 | buddy / workbuddy | 远端 `credits`/`discountedCredits` 倍率与远端独有模型 | 展示名**已修**；远端目录**未实现** |
-| cline | 远端约 478 条（我们只有 5 条免费兜底） | 静态 5 条**已修**；远端目录**未实现** |
+| cline | 远端约 478 条（我们只有静态表） | 静态表已并入 models.dev 快照（5 免费 + 18 条 `cline-pass`，R1-6，ref caf675e）；远端目录**未实现** |
 | codearts | 远端 `model_name`（我们只有 9 条裸 id） | 远端目录**未实现** |
 
 † **qoder 倍率的修法**（判定与 ref `qoderDisplayName`/`promotionActiveNow` 同源）：
@@ -436,10 +464,18 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
     requests|排队|限流`）⇒ 与 ref 一致：**等 10s 后用同一个 Key 重发整个请求**（不冷却、
     不换号），上限由代理的 `maxQueueAttempts`（180 次 ≈ 30 分钟）兜底。这正是 ref 对
     `TM.00001041` 的处理方式。
-  - **其它**（如 `benefit not found`）⇒ **让本次尝试显式失败**并带上上游 `error_code` +
-    `error_msg`，由代理按分类换号/重试/把真实原因报给客户端 —— 而不是返回一个空回复。
+  - **`InferHub.4004.200 benefit not found`（R1-1，ref 3bf2be7）**：积分制账号（无
+    benefit 包）带 `maas_type: benefit` 必被拒，而**同一模型不带该头可正常出流** ⇒
+    去掉该头**同 Key 重试一次**（`upstreamerr.SameKeyRetryError` + 回环标记
+    `RetryDropHeaderMarker`：重试循环写标记 → augmenter 跳过该头 → 拦截器据标记判定
+    「已经试过」，第二次仍是该码才按真实失败处理）。**其它**错误 ⇒ **让本次尝试显式失败**
+    并带上上游 `error_code` + `error_msg`，由代理按分类换号/重试/把真实原因报给客户端
+    —— 而不是返回一个空回复。
 - **400 的排队文案兜底**（ref `isQueueError` 的非 `TM.00001041` 分支）：`peak usage` /
   `try again after` / `peak hours` / `high demand` / `too many requests` 同样按排队处理。
+- **输出上限收敛（R1-4，ref 916c647/da0a2ad）**：`deepseek-v4-flash|pro` 与 `GLM-5.2`
+  实测拒绝 128000 ⇒ augmenter 把 `max_tokens`/`max_completion_tokens` 收敛到 65536
+  （`min` 语义；其它模型与未超限值**字节级不变**）。
 - 其它错误**原样透传**（代理统一分类），且 peek/读取过的 body 会**完整还回** `resp.Body`；
   正常 SSE 流经 peek 后**逐字节不变**（两条都有回归锁）。
 - ⚠️ **未移植**：ref 对「未命中文案的 400」还会探测 `api/v1/queue/status`
@@ -451,6 +487,67 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
   `prompt_cache_key` 跨调用生效），而 ref 是**每次适配器实例随机 UUID**（会话级）。这是
   有意的差异，与本缺陷无关（并发上限是账号维度的）。
 - 回归：`internal/jethub/codearts_response_test.go`（8 个，其中 4 个直接用上表的真实响应体）。
+
+### 6.5 OpenCode Zen 协议要点（R1-7，ref 分支 `feat/opencode-provider` @ 7dd3422）
+
+- **形状即门禁**：匿名通道（`Bearer public`）要求 body 带 `stream:true` 且 `tools` 含 `bash`/`read`（描述固定「Reserved for the host runtime; do not call it.」）——augmenter 对**所有**通道注入（认证通道多注入无害，官方 CLI 本就带全套工具）；`tool_choice:"none"` **只在原本一个工具都没有时**补（覆盖真实工具的 tool_choice 会让模型无法调用工具）。
+- **指纹头**：`x-opencode-project`（40hex = sha1("git-remote:opencode/"+sha256(identity+generation))）、`x-opencode-session`（**`ses_` + 12 位小写 hex + 14 位 base62** —— 尾段 26 写成随机段会让匿名通道一律 403 FreeTierError）、`x-opencode-request`（`req_`+32hex，每请求随机）、`x-opencode-client: cli`、UA `opencode/1.18.22`。出站头集**整体替换**客户端头（客户端自带的 Authorization 不得泄漏）。
+- **错误分类以响应体类型名为准，状态码只作辅助**（额度错误常带 401/403）：`FreeUsageLimitError`/`GoUsageLimitError`/402 `Insufficient account funds` ⇒ `upstreamerr.BillingLockError`（锁 key+model 后换号；无 `retry-after` 时按 24h，有则用服务端值、封顶 30min、**0 合法**）；`FreeTierError` ⇒ 显式报错（形状门禁，换 key/换出口无效）；其余交回代理按状态码分类（429 走既有 Retry-After 路径）。
+- **上游只有流式**（stream:true 是门禁的一半）：非流式客户端由拦截器把 SSE 聚合为 `chat.completion`（content/reasoning_content/tool_calls 拼接/usage/finish_reason；清 Content-Length）。流式客户端字节级透传。
+- ⚠️ **未移植**：ref 的远端目录拉取（5 分钟 TTL + 按实测可达性过滤）、per-account 代理、指纹代次轮换（本端 generation 固定 0）。本端模型表 = ref 兜底表 14 条（`ling-3.0-flash-fin-free` 两条通道都不可达，ref 已移除）。
+
+### 6.6 Qoder 每日活动刷新窗口（R1-3，ref 1b65a5c B1）
+
+- 活动每日 **10:00（UTC+8）** 刷新（服务端原文）。**刷新前**看到的 `CLAIMED` 属于**昨天**那一轮 ⇒ `ClaimQoderDailyCheckin` 返回 `inactive` + 「今天的每日活动尚未刷新…」提示（`CoversToday=false`），而不是「今天已领取」；刷新前领到的是**昨日补领** ⇒ 如实报 `claimed` 但标 `CoversToday=false`。
+- 判据用**算术平移 UTC+8**（复用 `QoderBillingUTCOffsetMS`），不取本机时区（出差/改时区会一天判两次或漏判）。
+- 前端「领取积分」toast 优先显示 `outcome.message`（服务端文案是判据所在：「未刷新」与「已领取」不能混）。
+
+### 6.7 ZCode（智谱 z.ai 免费额度通道）协议要点（R2，ref `src/zcode*.ts` @ e06283c）
+
+- **3012 准入是请求体内容检查，不是头检查**：`system` 必须是**块数组**且前两块为官方身份块
+  （`cliPrefix` 42 字符 + stable 2856 UTF-16 码元；文本逐字内置在 `zcode_identity_text.go`，
+  以字符数 + sha256 双锁，见 `zcode_identity_test.go`），首轮 user 消息的 content 数组最前面
+  必须插 `<system-reminder>` 日期块（本地时区 ISO 日期）。缺任一项 ⇒ 上游回
+  `{code:3012,"request has been blocked due to unusual activity."}`，且**有账号冷却惩罚**
+  （30 分钟 → 24h 内第 3 次起 24h → 5 次停用）。故 3012 走代理的 **pass-through** 通道
+  （拦截器把状态归一化为 400）：不重试、不冷却 key、不切号 —— 否则同一个请求体会把整池账号的
+  惩罚次数一起推高。
+- **captcha 只与领取有关**：3.14.4 起推理不再校验（ref 实测 6/6、8/8 不带验证头 200），
+  本端推理侧**不产出 captcha**（撞 3007 时显式报错并给出人话提示）。`billing/claim` **始终
+  强制索要** ⇒ 本端用**本地载体页**：`/api/jethub/zcode/carrier`（公开路由，一次性 128 位
+  token、页面不含任何凭据）在用户浏览器里跑阿里云 SDK 的**无感验证**，param 回传
+  `/carrier/contribute`；param 门槛 ≥200 字符 / base64 JSON / `certifyId` 非空 /
+  `securityToken` ≥50（不满足必得 3007，宁可不发）。每个 plan 现产一个新 param（一次性）。
+- **错误分类全按正文业务码**（只看状态码会把语义混掉）：`3009` 并发限流 → 同号退避 1.5s×n
+  （预算 2 次，**不切号、不标记**；用尽后原样透传）；`1005`/`1113` 额度用尽 →
+  `BillingLockError` 锁 账号×模型 至 UTC+8 次日 24:00 并切号；`3007`/`3012` → 显式报错
+  （pass-through，见上）；`1002`/401 → 提示重新登录（401 交回代理按既有规则冷却+切号）。
+- **空流 = 无权益**：上游对「该账号在该模型上无权益」的形态是 **HTTP 200 + 空流**
+  （实测 150–200ms 返回；链路卡住的空流是超时级耗时）。拦截器按「入口 → EOF 的墙钟」区分：
+  快空 ⇒ 标记 账号×模型 并切号；慢空 ⇒ 可重试错误；只有 ping 帧的流同样算空。
+- **凭据静态**：JWT 无 `exp`、无续期端点 ⇒ `refreshable=false`；「刷新」只做**逐账号对账**
+  （读自己的 ref、写自己的 ref）—— ref 踩过「A 的凭据被写进 B 的 ref」把整池串掉的真实缺陷
+  （症状是面板显示 0 额度而官方客户端正常），本端在 `ZcodeRefreshAccount` 显式复刻该纪律。
+- **官方客户端凭据导入**（`~/.zcode/v2/credentials.json`）：`enc:v1:<iv>.<tag>.<data>`
+  （三段 base64url、AES-256-GCM、无 AAD、IV 12B / Tag 16B）；密钥 = `sha256(ZCODE_CREDENTIAL_SECRET)`
+  或 `sha256("zcode-credential-fallback:" + node平台 + ":" + homedir + ":" + 用户名)`。
+  ⚠️ 两处 Node↔Go 差异必须各做一次映射（都实测踩过）：Node 的 platform 是 **`win32`**（Go 的
+  `windows` 会算出不同密钥）、Node 的 username 是 **SAM 名**（Go 的 `user.Current().Username`
+  带域前缀 `HOST\user`）——带域前缀 ⇒ GCM 认证失败，去前缀 ⇒ 解密成功。`device_mid` 取自同目录
+  `telemetry-state.json`（缺它凭据不可用，与 ref 同判据）。
+- **模型目录**：`data.builtinModels` 有**两种实测形状**（ref 记录为「键为序号的对象」，
+  2026-10-02 真机抓到的是**数组**）⇒ 两种都接受（只认一种会得到「0 个模型」的假阴性）。
+  静态兜底表只列 `GLM-5.3-Flash` / `GLM-5.3`（`GLM-5-Turbo`/`GLM-5.2` 在 Start Plan 下实测
+  空响应）；档位 `low/high/max` 只经 `output_config.effort` 下发（**不是** `reasoning_effort`），
+  且只发模型声明过的档位；tools 的 prompt-cache 断点只打在**最后一个**工具上。
+- **已真机验证（2026-10-02，本机官方客户端凭据）**：`/oauth/cli/init` 返回真实 `bigmodel.cn`
+  授权 URL + 2s 轮询间隔（首轮 poll = pending）；凭据文件解密成功（jwt 231 字符）；
+  `billing/balance` 200；`client/configs` 的目录两条与 ref 数值逐项一致（1,000,000 / 128,000、
+  vision 仅 Flash、levels low/high/max、default max）；推理请求 **200**（无 3012/3001 —— 身份块
+  与头族通过上游检查），该账号无 plan ⇒ 空流被正确判为「无权益」并标记切号。
+- ⚠️ **未实现**：推理侧 captcha 产出（撞 3007 只报错）；ref 的 `serializeUpstream` +
+  `modelGapMs` 并发门（本端靠 3009 退避重试兜底，不做跨请求串行）；远端目录的进程内缓存与
+  30s 冷却门（目录拉取只在被调用时发生）。
 
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 
@@ -484,4 +581,9 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `internal/api/jethub/status_login_test.go`（2 个）：**每条 `/status` 路由的 `loginId` 契约**（chi.Walk 枚举 + 200 必带 `done` / 404 必带 JSON error）+ loomy 的完整三态与回收后 404（§3.6 缺陷 19）。
 - `web/jethub.test.js`（20 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + **URL 流登录弹窗状态机**（进行中/成功/失败/会话已回收，§3.6）+ Use Proxy 开关（渲染/PUT 体/失败回滚）+ **模型行展示形态 `名称 · 倍率` + 紧邻裸 id + 点 id 复制 `{prefix}/{id}`（无前缀退回裸 id）**（§6.3）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）。
+- `internal/jethub/codearts_refresh_test.go`（9 个）：`shouldRefreshNow` 窗口（未知到期/1h 内/远期）、误标 `refreshable=false` 自愈、远期跳过、材料缺失对账 false、同凭据并发只发一次请求、`InvalidDPoPHeader` 非终态、真终态不损坏凭据、augment 去头标记跨头部重写存活、`max_tokens` 收敛（§3.7/§6.4）。
+- `internal/jethub/qoder_window_test.go`（3 个）：10:00（UTC+8）窗口判据、刷新前 `CLAIMED` ≠ 今天已领、刷新前领取 `coversToday=false`（§6.6）。
+- `internal/jethub/opencode_test.go`（10 个）：指纹/会话/请求 id 形状、门禁注入（stream + bash/read + tool_choice 规则）、错误分类与 retry-after 策略（0 合法/封顶/默认值）、模型表 14 条与免费集合、账号添加去重与 Key 提取器、augment 头整体替换、拦截器映射（BillingLock/FreeTier/透传 + body 还原）、非流式 SSE 聚合（content/tool_calls 拼接/usage/finish）、匿名槽殿后 + 付费可见性（bridge）（§3.8/§6.5）。
+- `internal/proxy/augmenter_test.go::TestForwardWithRetry_SameKeyRetryDropsHeader`：bridge 发起的同 Key 重发 —— 重发一次、回环标记对 augmenter 可见、标记不泄漏上游（§6.4）。
+- `internal/api/jethub/opencode_test.go`：apikey/匿名登录端点（200/去重 reused/空 key 400/账号列表）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）；**zcode 的推理链路已验证到「请求被上游接受（200、无 3012/3001）+ 无权益空流被正确判定」**，但**有内容的正向流**与**每日领取的载体页**需要带 plan 的账号才能真机走通（§6.7）；zcode 推理侧 captcha 产出与并发门未实现（§6.7）。

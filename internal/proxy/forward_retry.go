@@ -280,6 +280,36 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 				h.InflightUpdates.Signal()
 				continue
 			}
+			// Bridge-applied same-key retry (e.g. CodeArts 4004.200: drop the
+			// rejected `maas_type` header once and resend). The error carries
+			// the header name; write it into the loopback marker on the shared
+			// client request so the bridge's augmenter omits it on the next
+			// attempt (and its interceptor can tell "already retried").
+			// Immediate, same key, no exclusion.
+			var skre *SameKeyRetryError
+			if errors.As(err, &skre) {
+				state.sameKeyRetries++
+				if state.sameKeyRetries > maxSameKeyRetries {
+					h.logger.Error("[%s] %s/%s: same-key retry limit exceeded (%d)", logTag, dispName, upstreamModel, maxSameKeyRetries)
+					h.EntryTracker.Remove(reqID)
+					if keyState != nil {
+						keyState.DecInFlight()
+					}
+					h.InflightUpdates.Signal()
+					writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("upstream retry limit exceeded (%d attempts)", maxSameKeyRetries))
+					return false, reqID
+				}
+				if skre.Header != "" {
+					r.Header.Set(RetryDropHeaderMarker, skre.Header)
+				}
+				h.logger.Warn("[%s] %s/%s: 上游拒绝后同 Key 重发（丢弃 %s，第 %d 次）: %s", logTag, dispName, upstreamModel, skre.Header, state.sameKeyRetries, skre.Reason)
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				continue
+			}
 			// Per-model quota exhaustion on this key (e.g. Qoder billing 110):
 			// lock key+model until the business-defined instant (UTC+8 day end
 			// for Qoder) and switch to the next key.

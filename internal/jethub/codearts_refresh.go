@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -131,17 +132,8 @@ func pollCodeArtsTicket(ctx context.Context, ticketID, secret, pluginName, plugi
 // codeartsCredentialExpiresAt parses expires_at into a ms timestamp; a
 // missing/unparsable value falls back to +24h (aligned with the plugin).
 func codeartsCredentialExpiresAt(cred *CodeArtsCredential) int64 {
-	if cred != nil && cred.ExpiresAt != "" {
-		if t, err := time.Parse(time.RFC3339, cred.ExpiresAt); err == nil {
-			return t.UnixMilli()
-		}
-		// Huawei emits "2006-01-02T15:04:05Z07:00"-ish without strict RFC3339
-		// sometimes; try a couple of common layouts.
-		for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02 15:04:05"} {
-			if t, err := time.Parse(layout, cred.ExpiresAt); err == nil {
-				return t.UnixMilli()
-			}
-		}
+	if ms, ok := codeartsExpiryMs(cred); ok {
+		return ms
 	}
 	return time.Now().Add(24 * time.Hour).UnixMilli()
 }
@@ -152,6 +144,70 @@ func codeartsRefreshable(cred *CodeArtsCredential) bool {
 	return cred != nil && cred.RefreshToken != "" && cred.CodeVerifier != "" && cred.DpopPrivateJwk != nil
 }
 
+// codeartsRefreshLead mirrors ref REFRESH_LEAD_MS (refresh.ts): renew when the
+// access credential expires within one hour.
+const codeartsRefreshLead = time.Hour
+
+// codeartsRefreshSchedulerInterval mirrors the plugin's 30-minute scheduler
+// round (ref index.ts, including the startup first round).
+const codeartsRefreshSchedulerInterval = 30 * time.Minute
+
+// codeartsExpiryMs parses the credential expiry into a ms timestamp;
+// ok=false when missing/unparsable. Huawei emits "2006-01-02T15:04:05Z07:00"
+// -ish strings without strict RFC3339 sometimes; a couple of common layouts
+// are tried.
+func codeartsExpiryMs(cred *CodeArtsCredential) (int64, bool) {
+	if cred == nil || cred.ExpiresAt == "" {
+		return 0, false
+	}
+	if t, err := time.Parse(time.RFC3339, cred.ExpiresAt); err == nil {
+		return t.UnixMilli(), true
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, cred.ExpiresAt); err == nil {
+			return t.UnixMilli(), true
+		}
+	}
+	return 0, false
+}
+
+// codeartsShouldRefreshNow mirrors ref shouldRefreshNow (expiry-sync.ts):
+// an unknown expiry counts as "refresh now"; otherwise renew only when the
+// credential expires within the lead window.
+func codeartsShouldRefreshNow(cred *CodeArtsCredential, nowMs int64) bool {
+	exp, ok := codeartsExpiryMs(cred)
+	if !ok {
+		return true
+	}
+	return exp-nowMs <= codeartsRefreshLead.Milliseconds()
+}
+
+// lockCodeartsRefresh serializes refreshes per credentialRef (ref cf5edab):
+// the scheduler and the manual refresh button must not consume the SAME
+// refresh_token concurrently — Huawei STS invalidates the old one when it
+// issues a new credential, so a concurrent loser would read a spurious
+// invalid_grant (and, before this fix, mark the account dead).
+func (m *Manager) lockCodeartsRefresh(ref string) func() {
+	v, _ := m.codeartsRefreshLocks.LoadOrStore(ref, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// codeartsCredential reads + parses the stored credential of an account
+// (nil, nil when absent).
+func (m *Manager) codeartsCredential(acc *Account) (*CodeArtsCredential, error) {
+	raw, ok := m.Credential(acc.Provider, acc.CredentialRef)
+	if !ok {
+		return nil, nil
+	}
+	var cred CodeArtsCredential
+	if err := jsonUnmarshal(raw, &cred); err != nil {
+		return nil, fmt.Errorf("jethub: parse credential %s: %w", acc.ID, err)
+	}
+	return &cred, nil
+}
+
 // RefreshCodeArtsAccount renews one stored credential via refresh_token and
 // writes the merged credential back (preserving domain_id/user_id/user_name
 // and model_rate_limits like the plugin's refreshCredential).
@@ -160,17 +216,43 @@ func (m *Manager) RefreshCodeArtsAccount(ctx context.Context, accountID string) 
 	if !ok {
 		return ErrNotFound
 	}
-	raw, ok := m.Credential(acc.Provider, acc.CredentialRef)
-	if !ok {
+	cred, err := m.codeartsCredential(&acc)
+	if err != nil {
+		return err
+	}
+	if cred == nil {
 		return fmt.Errorf("jethub: credential missing for %s", accountID)
 	}
-	var cred CodeArtsCredential
-	if err := jsonUnmarshal(raw, &cred); err != nil {
-		return fmt.Errorf("jethub: parse credential %s: %w", accountID, err)
-	}
-	if !codeartsRefreshable(&cred) {
+	if !codeartsRefreshable(cred) {
 		return fmt.Errorf("jethub: 无 refresh_token，请重新登录")
 	}
+
+	// 串行 + 锁内重读：另一个调用者可能刚续期成功（STS 换新会作废旧
+	// refresh_token，并发消费必然「1 成功 N invalid_grant」）。
+	unlock := m.lockCodeartsRefresh(acc.CredentialRef)
+	defer unlock()
+	latest, err := m.codeartsCredential(&acc)
+	if err != nil {
+		return err
+	}
+	if latest == nil || !codeartsRefreshable(latest) {
+		return fmt.Errorf("jethub: 无 refresh_token，请重新登录")
+	}
+	// 锁内重读后仍在有效期内 ⇒ 不发请求（ref cf5edab：续期只在到期前窗口内
+	// 发生；这同时让「等锁期间已被他处续好」的第二个调用者少烧一次
+	// refresh_token —— 华为 STS 换新会作废旧的那一份）。
+	if !codeartsShouldRefreshNow(latest, nowMillis()) {
+		if m.logger != nil {
+			m.logger.Info("[jethub] codearts 账号 %s 凭据仍在有效期内（可能已被他处续期），跳过本次续期请求", accountID)
+		}
+		return nil
+	}
+	return m.refreshCodeArtsLocked(ctx, &acc, latest)
+}
+
+// refreshCodeArtsLocked performs the exchange + persistence. The caller holds
+// the per-credentialRef lock.
+func (m *Manager) refreshCodeArtsLocked(ctx context.Context, acc *Account, cred *CodeArtsCredential) error {
 	priv, err := KeyPairFromStoredJwk(*cred.DpopPrivateJwk)
 	if err != nil {
 		return err
@@ -178,9 +260,22 @@ func (m *Manager) RefreshCodeArtsAccount(ctx context.Context, accountID string) 
 	token, err := ExchangeCodeArtsRefreshToken(ctx, cred.RefreshToken, cred.CodeVerifier, priv)
 	if err != nil {
 		if err == ErrRefreshTokenExpired {
+			// 判终态前先重读（ref cf5edab 第 2 条）：若 refresh_token 已被他处
+			// 换新，那是「别人已经续成功」（服务端烧的是旧的那一份），不是
+			// 「本账号不可续期」—— 不作废账号。
+			if latest, rerr := m.codeartsCredential(acc); rerr == nil && latest != nil && latest.RefreshToken != cred.RefreshToken {
+				if m.logger != nil {
+					m.logger.Warn("[jethub] codearts 账号 %s: refresh_token 已被他处续期，本次 invalid_grant 不按终态处理", acc.ID)
+				}
+				return nil
+			}
 			// Terminal: mark the account non-refreshable so the scheduler and
-			// UI stop treating it as renewable.
-			_ = m.UpdateAccount(accountID, func(a *Account) { a.Refreshable = false })
+			// UI stop treating it as renewable. Only write when the value
+			// changes — the account file is rewritten as a whole and the
+			// scheduler runs every 30min.
+			if acc.Refreshable {
+				_ = m.UpdateAccount(acc.ID, func(a *Account) { a.Refreshable = false })
+			}
 		}
 		return err
 	}
@@ -193,19 +288,32 @@ func (m *Manager) RefreshCodeArtsAccount(ctx context.Context, accountID string) 
 	if err != nil {
 		return err
 	}
-	if err := m.SetCredential(acc.Provider, acc.CredentialRef, merged, codeartsCredentialExpiresAt(refreshed), codeartsRefreshable(refreshed)); err != nil {
-		return err
-	}
-	return nil
+	return m.SetCredential(acc.Provider, acc.CredentialRef, merged, codeartsCredentialExpiresAt(refreshed), codeartsRefreshable(refreshed))
 }
 
-// RefreshAllCodeArts renews every refreshable codearts account (including
-// disabled ones — disabled only affects selection, not credential health).
-// Single-account failures are logged and do not abort the loop.
+// RefreshAllCodeArts renews every codearts account whose credential material
+// is complete and whose access token expires within the lead window
+// (including disabled ones — disabled only affects selection, not credential
+// health).
+//
+// ⚠️ `refreshable` 只是**凭据材料的镜像**：每轮按凭据对账（被误标的账号在
+// 下一轮自愈），绝不能拿它当调度判据（ref cf5edab 第 1 条：把调度建在它上面
+// 会让被误标的账号永不进入续期循环，重启也没用）。Single-account failures are
+// logged and do not abort the loop.
 func (m *Manager) RefreshAllCodeArts(ctx context.Context) {
-	accounts := m.Accounts("codearts")
-	for _, acc := range accounts {
-		if !acc.Refreshable {
+	for _, acc := range m.Accounts("codearts") {
+		cred, err := m.codeartsCredential(&acc)
+		if err != nil {
+			if m.logger != nil {
+				m.logger.Warn("[jethub] codearts 账号 %s 凭据解析失败: %v", acc.ID, err)
+			}
+			continue
+		}
+		want := codeartsRefreshable(cred)
+		if acc.Refreshable != want {
+			_ = m.UpdateAccount(acc.ID, func(a *Account) { a.Refreshable = want })
+		}
+		if !want || !codeartsShouldRefreshNow(cred, nowMillis()) {
 			continue
 		}
 		if err := m.RefreshCodeArtsAccount(ctx, acc.ID); err != nil {
@@ -214,6 +322,26 @@ func (m *Manager) RefreshAllCodeArts(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// StartRefreshScheduler runs the codearts renewal loop until ctx is done: one
+// pass immediately (the plugin's startup first round) and then every 30
+// minutes (ref index.ts). Failures never surface to the user — they are
+// logged and retried next round.
+func (m *Manager) StartRefreshScheduler(ctx context.Context) {
+	go func() {
+		m.RefreshAllCodeArts(ctx)
+		ticker := time.NewTicker(codeartsRefreshSchedulerInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.RefreshAllCodeArts(ctx)
+			}
+		}
+	}()
 }
 
 // CompleteCodeArtsLogin persists the outcome of a finished login flow:

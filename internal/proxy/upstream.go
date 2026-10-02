@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/tinylab/tinylab/internal/combo"
@@ -106,9 +107,10 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 				return nil, err
 			}
 			// The augmented client headers ARE the outbound headers (minus
-			// hop-by-hop fields); the augmenter's mutations propagate.
+			// hop-by-hop fields and the loopback retry marker); the augmenter's
+			// mutations propagate.
 			for k, vs := range clientReq.Header {
-				if isHopByHopHeader(k) {
+				if isHopByHopHeader(k) || strings.EqualFold(k, RetryDropHeaderMarker) {
 					continue
 				}
 				for _, v := range vs {

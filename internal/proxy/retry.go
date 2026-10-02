@@ -16,6 +16,11 @@ import (
 // convention: 10s delay cap × 180 ≈ 30min upper bound).
 const maxQueueAttempts = 180
 
+// maxSameKeyRetries caps SameKeyRetryError resends per client request. The
+// bridge guards its own retry (e.g. CodeArts drops the rejected benefit
+// header exactly once), so this is a loop-safety net, not an expected path.
+const maxSameKeyRetries = 4
+
 // retryState holds mutable state across retry iterations.
 type retryState struct {
 	excludeKeyIDs  []string
@@ -28,6 +33,9 @@ type retryState struct {
 	// delays, e.g. Qoder 10605). Capped independently of maxRetries: queueing
 	// is normal operation, not a failure — 10s cap × 180 attempts ≈ 30min.
 	queueAttempts int
+	// sameKeyRetries counts SameKeyRetryError resends (bridge-applied fixes,
+	// e.g. dropping a rejected signed header once). Immediate, same key.
+	sameKeyRetries int
 }
 
 // requestHeaders safely extracts request headers, returning nil when the

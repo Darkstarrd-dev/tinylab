@@ -407,6 +407,9 @@ func TestClaimQoderDailyReplayedIdempotent(t *testing.T) {
 func TestClaimQoderEmptyListIsInactive(t *testing.T) {
 	m := newSeedQoderManager(t)
 	id := firstQoderAccount(t, m)
+	// ⚠️ 固定时钟到刷新之后（12:00 UTC+8）：刷新前（10:00 前）同样的 CLAIMED
+	// 行属于昨天那一轮，判定是 inactive + 「尚未刷新」（见 qoder_window_test.go）。
+	pinQoderNow(t, utc8Ms(12, 0))
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// 列表空 + 已有 CLAIMED 行 → 已领（抓包实证：领取后行变 CLAIMED）。
 		w.Write([]byte(`{"showCampaign":false,"claimable":false,"campaigns":[{"campaignId":"c-1","actionType":"CLAIM_BENEFIT","claimStatus":"CLAIMED"}]}`))

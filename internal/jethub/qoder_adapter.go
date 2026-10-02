@@ -216,7 +216,17 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 	if provider == "codearts" {
 		// CodeArts 用 HTTP 200 + 流内 `error_code` 表达限流/排队/权益错误
 		// （用户实测：客户端只看到空回复）。见 codearts_response.go。
-		return m.codeartsInterceptResponse(resp, upstreamModel, isStream)
+		return m.codeartsInterceptResponse(clientReq, resp, upstreamModel, isStream)
+	}
+	if provider == "opencode" {
+		// opencode：额度错误带 401/403 也必须按**响应体语义**分类（状态码会
+		// 把「额度用尽」误报成「key 失效」）；非流式客户端由本端聚合 SSE。
+		return m.opencodeInterceptResponse(clientReq, resp, upstreamModel, isStream)
+	}
+	if provider == "zcode" {
+		// zcode：Anthropic SSE → OpenAI 转换 + 业务码分类（3009/1005/1113/
+		// 3007/3012/1002，判据全在正文——状态码会把并发限流与额度耗尽混为一谈）。
+		return m.zcodeInterceptResponse(clientReq, resp, keyID, upstreamModel, isStream)
 	}
 	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil

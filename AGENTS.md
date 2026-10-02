@@ -13,9 +13,10 @@
 | `download-architecture.md` | yt-dlp 下载：任务队列生命周期、参数构造、SSE 进度、与归档计划漂移 |
 | `combo-architecture.md` | Combo 解析：Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级 |
 | `config-registry-state-architecture.md` | 基础设施：三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge |
-|`jethub-architecture.md`|Free Hub（Jet Hub 移植）：账号池/凭据存储、registry 桥接（`APIType=jethub` 前缀 Provider + 三个可选增强接口注入）、Qoder WASM 加密推理桥、11 provider 协议族矩阵、备份双向兼容|
+|`jethub-architecture.md`|Free Hub（Jet Hub 移植）：账号池/凭据存储、registry 桥接（`APIType=jethub` 前缀 Provider + 三个可选增强接口注入）、Qoder WASM 加密推理桥、13 provider 协议族矩阵（含 R2 的 ZCode）、备份双向兼容|
 |`playground-architecture.md`|Playground 前后端：多模型测试、群聊、Director/Narrator|
 |`gamedemo-progress.md`|Demo 页游戏插件：磁盘插件契约（game.json/TRGames/host adapter）、`/api/games*`+`/games/*`+seed、热更新工作流、Phaser v4 注意事项、边界与代价|
+|`jethub-upstream-sync.md`|Free Hub 上游同步（周期性流程文档）：判定原则（搬/不搬+三条硬判据）、每轮 SOP、不搬清单、待办 R1-*、轮次日志、当前 pin|
 
 ### 高频变更速查（完整 19 条见 PROJECT_MAP.md §24）
 
@@ -31,6 +32,7 @@
 | 新增/修改路径设置弹窗/浏览初始目录 | download、config-registry-state、fsutil | `web/static/download.js`（`openPathSettingsModal` 共享弹窗 + 键盘陷阱 + 浏览锁）+ `internal/api/settings/register.go`（`getSettings` + `configDir` + `trace.logDir` + 指针字段按需合并）+ `internal/fsutil/open_windows.go`（`OpenFilePickerAt`+`SetFolder`） |
 | 修改运行时状态持久化 | config-registry-state | `state/manager.go`+`state.go`、`registry/state.go`（`KeySnapshot` 新增 `ExhaustedModelLimits map[string]int`，持久化 `ModelRemaining==0` 的 model→limit 子集） |
 | 新增/修改 Demo 游戏插件 | gamedemo-progress | `web/games/<id>/`（manifest+入口）、`web/static/demo-games.js`（TRGames 宿主/adapter）、`internal/api/games/register.go`（列表/state KV/seed）、`internal/api/router.go`（`/games/*` 静态+seed）、`internal/config/paths.go`（`ResolveGamesDir`） |
+| 执行 Free Hub 上游同步（拉取/分诊/推进 pin/新增 provider 评估） | jethub-upstream-sync、jethub-architecture | `ref/deepseek-harness-codearts`（`git fetch`/`git checkout`，禁止手工编辑）+ `docs/jethub-upstream-sync.md`（§3 SOP/§6 待办 R1-*/§7 日志）+ 落点随待办项（`internal/jethub/`、`internal/api/jethub/`、`web/static/jethub.js`） |
 | 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/monitor/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`；`getModelKeys` 含 `providerId` 与 in-use pin 感知）、`web/static/monitor_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key、第一列 dot/timer+状态徽标并列、per-key quota/input/output 列；`quotaKeyRowClick` Ctrl+点击 pause/resume、Shift+点击 pin 活跃 Key）、`api/keys/register.go`（`activateKey`）、`usage/accumulator.go`（`KeyStatEntry.InputTokens/OutputTokens`）、`rotation/selector.go`（`manualPins`）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。

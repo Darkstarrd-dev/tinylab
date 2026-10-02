@@ -320,6 +320,11 @@ function __jethubCreditCellHtml(accountId) {
   if (!c || c.loading) return '<span class="free-hub-hint">…</span>';
   if (c.error) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
   if (c.total === null || c.total === undefined) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
+  // token 计量的渠道（zcode：上游 unit_type="token"）按 M/K 量级显示 ——
+  // 裸数字会被当成积分（上游注释记的用户报障原话：1 亿 token 显示成 94539275）。
+  if (c.unit === 'token') {
+    return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatTokens(c.total) + ' tokens') + '</span>';
+  }
   return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total)) + '</span>';
 }
 
@@ -344,7 +349,7 @@ async function __jethubLoadCredits(provider) {
     var a = accounts[i];
     try {
       var data = await apiGet('/jethub/' + encodeURIComponent(pid) + '/balance?accountId=' + encodeURIComponent(a.id));
-      __jethubState.credits[a.id] = { total: __jethubBalanceTotal(data.balance) };
+      __jethubState.credits[a.id] = { total: __jethubBalanceTotal(data.balance), unit: __jethubBalanceUnit(data.balance) };
     } catch (e) {
       __jethubState.credits[a.id] = { error: e.message };
     }
@@ -375,6 +380,26 @@ function __jethubBalanceTotal(balance) {
     if (!isNaN(v)) { total += v; any = true; }
   });
   return any ? total : null;
+}
+
+// __jethubBalanceUnit: 计量单位（zcode 的 token；其余渠道无 unit 字段 ⇒ ''）。
+function __jethubBalanceUnit(balance) {
+  if (!balance) return '';
+  var packages = balance.packages || [];
+  for (var i = 0; i < packages.length; i++) {
+    if (packages[i].unit) return packages[i].unit;
+  }
+  return '';
+}
+
+// __jethubFormatTokens renders a token count with an M/K magnitude suffix
+// (1e6 → 94.54M). 上游额度以 token 计，裸数字在界面上与"积分"无法区分。
+function __jethubFormatTokens(value) {
+  var n = Number(value);
+  if (!isFinite(n)) return String(value);
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
 }
 
 // __jethubFormatNumber: two decimals for fractional credit values (服务端精确
@@ -521,6 +546,12 @@ async function jethubClearPrefix(providerId) {
 
 async function jethubAddAccount(providerId) {
   var provider = __jethubState.providers.find(function(p) { return p.id === providerId; }) || {};
+  if ((provider.loginModes || []).indexOf('apikey') !== -1) {
+    // opencode（R1-7）：粘贴 API Key，或添加匿名通道 —— 没有浏览器流、没有
+    // loginId/轮询，提交即落库（首个非浏览器登录模式）。
+    __jethubApiKeyModal(providerId);
+    return;
+  }
   if ((provider.loginModes || []).indexOf('sms') !== -1) {
     // SMS 流程没有服务端 login session：先创建占位账号，验证码提交时才能
     // 绑定凭据。用户取消时删除占位（不留无凭据的死账号）。
@@ -657,6 +688,44 @@ function __jethubSmsModal(providerId, accountId) {
       jethubSelect(providerId);
     } catch (e) { toast(t('failed', [e.message]), 'error'); }
   };
+}
+
+// apikey 登录模式（opencode）：粘贴 Zen API Key；或添加匿名通道（无需 Key，
+// 仅免费模型）。⚠️ 端点与其它 provider 的 `/jethub/{provider}/login` 同形，
+// 只是 body 语义不同（无 loginId ⇒ 不需要弹窗轮询）。
+function __jethubApiKeyModal(providerId) {
+  var overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:480px;">' +
+      '<div class="modal-title">' + escapeHtml(t('freeHubApiKeyTitle')) + '</div>' +
+      '<div class="modal-body" style="margin-top:12px;">' +
+        '<div class="free-hub-hint">' + escapeHtml(t('freeHubApiKeyHint')) + '</div>' +
+        '<input type="text" class="input" id="free-hub-apikey" placeholder="' + escapeAttr(t('freeHubApiKeyPlaceholder')) + '" style="width:100%;margin-top:8px">' +
+        '<input type="text" class="input" id="free-hub-apikey-nick" placeholder="' + escapeAttr(t('freeHubApiKeyNickname')) + '" style="width:100%;margin-top:8px">' +
+        '<div class="free-hub-hint" style="margin-top:12px">' + escapeHtml(t('freeHubAnonHint')) + '</div>' +
+        '<button type="button" class="btn btn-sm" id="free-hub-anon-add" style="margin-top:6px">' + escapeHtml(t('freeHubAnonAdd')) + '</button>' +
+      '</div>' +
+      '<div class="modal-footer"><button type="button" class="btn btn-ghost" id="free-hub-apikey-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+      '<button type="button" class="btn btn-primary" id="free-hub-apikey-submit">' + escapeHtml(t('freeHubApiKeySubmit')) + '</button></div>' +
+    '</div>';
+  overlay.classList.add('show');
+  var close = function() { overlay.classList.remove('show'); overlay.innerHTML = ''; };
+  document.getElementById('free-hub-apikey-cancel').onclick = close;
+  var submit = async function(body) {
+    try {
+      var res = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login', body);
+      close();
+      toast(res && res.reused ? t('freeHubApiKeyReused') : t('freeHubLoginOk'), 'success');
+      jethubSelect(providerId);
+    } catch (e) { toast(t('failed', [e.message]), 'error'); }
+  };
+  document.getElementById('free-hub-apikey-submit').onclick = function() {
+    var key = document.getElementById('free-hub-apikey').value.trim();
+    if (!key) { toast(t('failed', [t('freeHubApiKeyEmpty')]), 'error'); return; }
+    submit({ apiKey: key, nickname: document.getElementById('free-hub-apikey-nick').value.trim() });
+  };
+  document.getElementById('free-hub-anon-add').onclick = function() { submit({ anonymous: true }); };
 }
 
 async function jethubRenameAccount(accountId) {
@@ -867,6 +936,14 @@ async function jethubClaim(providerId, accountId) {
   try {
     var data = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/claim', { accountId: accountId });
     var outcome = data.outcome || {};
+    // 服务端的 outcome.message 是**判据所在**（例如 Qoder「今天的每日活动尚未
+    // 刷新（每日 10:00 UTC+8）」与「今天已领取」是两件不同的事；误报已领会让人
+    // 真的错过当天额度）。有 message 就照实显示，按 kind 决定色调。
+    if (outcome.message) {
+      var tone = outcome.kind === 'failed' ? 'error' : (outcome.kind === 'claimed' ? 'success' : 'info');
+      toast(outcome.message, tone);
+      return;
+    }
     var granted = (outcome.claimed !== undefined ? outcome.claimed : outcome.claimResults) || outcome.status;
     toast(t('freeHubClaimOk', [typeof granted === 'object' ? JSON.stringify(granted).slice(0, 120) : String(granted || t('freeHubClaimNone'))]), 'success');
   } catch (e) {

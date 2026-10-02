@@ -86,15 +86,23 @@ func TestDpopJwkRoundTrip(t *testing.T) {
 }
 
 func TestClassifyTokenErrorTerminal(t *testing.T) {
-	for _, code := range []string{"", "ExpiredRefreshToken", "InvalidDPoPHeader"} {
+	// invalid_grant 恒为终态；ExpiredRefreshToken 也是。
+	for _, code := range []string{"", "ExpiredRefreshToken"} {
 		resp := &CodeArtsTokenResponse{Error: "invalid_grant", ErrorCode: code}
 		if err := ClassifyTokenError(resp); err != ErrRefreshTokenExpired {
 			t.Fatalf("invalid_grant (%s) must be terminal, got %v", code, err)
 		}
 	}
-	transient := &CodeArtsTokenResponse{Error: "server_error", ErrorCode: "SomethingElse"}
-	if err := ClassifyTokenError(transient); err == ErrRefreshTokenExpired {
-		t.Fatal("non-terminal error misclassified")
+	// ⚠️ InvalidDPoPHeader 不是终态（ref cf5edab）：它只说明**这一次** DPoP proof
+	// 没通过校验（时钟偏差 / proof 被判重放 / 网关抖动），与 refresh_token 还能不能
+	// 用无关 —— 当终态会把材料完好的账号一步标死、重启也不自愈。
+	for _, resp := range []*CodeArtsTokenResponse{
+		{Error: "invalid_request", ErrorCode: "InvalidDPoPHeader"},
+		{Error: "server_error", ErrorCode: "SomethingElse"},
+	} {
+		if err := ClassifyTokenError(resp); err == ErrRefreshTokenExpired {
+			t.Fatalf("non-terminal error misclassified as terminal: %+v", resp)
+		}
 	}
 }
 

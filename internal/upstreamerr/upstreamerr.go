@@ -28,3 +28,30 @@ func (e *BillingLockError) Error() string {
 	}
 	return "upstream billing lock until " + e.Until.Format(time.RFC3339)
 }
+
+// RetryDropHeaderMarker is an internal, loopback-only marker header used
+// between the retry loop and a bridged provider's own augmenter: when the
+// retry loop resends because of a SameKeyRetryError it writes the offending
+// header's name here on the shared client request; the provider's augmenter
+// reads it (and omits that header) and its interceptor reads it to tell
+// "already retried once". The proxy skips this header when copying client
+// headers upstream, so it can never leak to an upstream.
+const RetryDropHeaderMarker = "X-Tinylab-Internal-Retry-Drop"
+
+// SameKeyRetryError asks the retry loop to resend immediately with the SAME
+// key after dropping Header: the fix is applied by the provider's own bridge
+// code (e.g. CodeArts drops a signed `maas_type` header once after the
+// upstream rejects it with a benefit-not-found error frame), not by switching
+// keys. No wait, no cooldown, no exclusion.
+type SameKeyRetryError struct {
+	// Header is the outbound header to omit on the resend ("" = none).
+	Header string
+	Reason string
+}
+
+func (e *SameKeyRetryError) Error() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return "upstream same-key retry (drop header " + e.Header + ")"
+}

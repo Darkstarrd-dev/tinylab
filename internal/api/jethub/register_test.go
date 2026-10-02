@@ -195,7 +195,8 @@ func TestTraeModelsCarryDisplayNames(t *testing.T) {
 //
 // 本测试同时锁住四条不变量（它们才是这类偏差的通用判据）：
 //  1. 每个 provider 的每条模型都有非空展示名（绝不退化渲染成裸 id，除非 ref 的
-//     兜底 name 本身就是 id —— codearts/lobsterai）；
+//     兜底 name 本身就是 id —— codearts/lobsterai，以及 models.dev 里
+//     `name === id` 的 cline-pass/glm-5.3-flash）；
 //  2. **同一 provider 内展示名互不相同** —— 这是 ref `variantLabelFor` 存在的
 //     唯一理由（同名撞车会让用户无法区分条目）；撞车时变体标记的算法是「取撞车组
 //     id 的公共前缀、剩余部分转大写」；
@@ -236,6 +237,21 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 			"cline-free/deepseek-v4.1-flash":        "DeepSeek V4.1 Flash · 免费",
 			"cline-free/gemini-3.8-flash":           "Gemini 3.8 Flash · 免费",
 			"cline-free/muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · 免费",
+			// cline-pass/*（订阅制，**不是**免费 ⇒ 不带后缀）：ref caf675e 用
+			// models.dev 的 `cline-pass` 块补的可读名（网关只下发裸 id）。
+			// 前四条是网关 `recommended-models.clinePass` **完全没下发**的
+			// （用户报障「cline-pass 部分模型列表不全」的根因）。
+			"cline-pass/kimi-k2.6":         "Kimi K2.6",         // ← 网关缺
+			"cline-pass/glm-5.2":           "GLM-5.2",           // ← 网关缺
+			"cline-pass/kimi-k2.7-code":    "Kimi K2.7 Code",    // ← 网关缺
+			"cline-pass/deepseek-v4-flash": "DeepSeek V4 Flash", // ← 网关缺
+			// 网关把 id 当名字下发的条目 ⇒ 用 models.dev 的可读名替换。
+			"cline-pass/deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+			// 免费与订阅是**两个不同条目**：同名不同 id，免费那条带 ` · 免费`。
+			"cline-pass/mimo-v2.6-flash": "MiMo-V2.6-Flash",
+			// ⚠️ models.dev 给这条的 `name` 就是裸 id（无可读名可抄）⇒ 上游
+			// 合并后同样显示裸 id，此处不编造。
+			"cline-pass/glm-5.3-flash": "cline-pass/glm-5.3-flash",
 		},
 		"trae": {
 			"DeepSeek-V4-Flash-Official": "DeepSeek V4 Flash Official", // trae-product.ts:170
@@ -262,6 +278,9 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		// 窗口变化的条目（`hasRate` 那条不变量另行保证促销项也有倍率）。
 		"qoder":   {"qfmodel": "Qwen3.8-Flash · 免费", "mmodel": "MiniMax-M3 · x0.2", "ultimate": "Ultimate · x2"},
 		"qodercn": {"mmodel": "MiniMax-M2.7 · x0.2", "q37fmodel": "Qwen3.7-Flash · x0.1", "gm51model": "GLM-5.2 · x0.6"},
+		// opencode（R1-7）：免费模型带「· 免费」标记（本地表判定；远端不下发
+		// 免费标记，表外一律 false），付费模型无倍率信息。
+		"opencode": {"big-pickle": "Big Pickle · 免费", "deepseek-v4-flash": "DeepSeek V4 Flash"},
 	}
 	// 兜底路径没有倍率的 provider（rate 必须为空）。
 	noRate := map[string]bool{"buddy": true, "workbuddy": true, "trae": true, "lobsterai": true, "codearts": true, "minimax": true}

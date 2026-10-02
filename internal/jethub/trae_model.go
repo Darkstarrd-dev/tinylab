@@ -50,32 +50,84 @@ func traeFallbackModels() ModelTable {
 	}
 }
 
-// clineFallbackModels returns the 5 verified free models (ref
-// cline-product.ts:150-199 CLINE_FALLBACK_MODELS — the free set comes from the
-// remote `recommended-models` free array; these are the snapshot values,
-// including the gemini-3.8-flash maxTokens=65536 correction: 131072 gets 400'd).
+// clineFallbackModels returns the cline catalog: the 5 verified free models
+// (ref cline-product.ts:150-199 CLINE_FALLBACK_MODELS — the free set comes from
+// the remote `recommended-models` free array; these are the snapshot values,
+// including the gemini-3.8-flash maxTokens=65536 correction: 131072 gets 400'd)
+// followed by the 18 `cline-pass/*` subscription models.
+//
+// ⚠️ **cline-pass 目录来自 models.dev**（ref caf675e：`applyModelsDevCatalog`
+// 把 `https://models.dev/api.json` 的 `cline-pass` provider 块并进模型目录）——
+// 网关 `recommended-models.clinePass` **只下发 14 条**，缺 `kimi-k2.6` /
+// `glm-5.2` / `kimi-k2.7-code` / `deepseek-v4-flash`（用户报障「cline-pass
+// 部分模型列表不全」的根因：这 4 条在本端**根本不存在**，既看不到也选不到），
+// 且网关给 cline-pass 的 `name` **就是 id 本身**（`name === 'cline-pass/…'`）
+// ⇒ 面板里全是裸 id；models.dev 有可读名（`DeepSeek V4.1 Flash`）。
+//
+// 快照：`https://models.dev/api.json` 的 `cline-pass` 块（18 条），抓取日期
+// **2026-10-02**（与 ref 实测的 2026-09-30 同为 18 条）。取值口径 = ref caf675e：
+//  1. 只取 `name` 与 `limit.context`；⚠️ **不取 `limit.output`** —— 那是要真的
+//     写进请求体 `max_tokens` 的值，ref 明令不碰（本仓库有过据印象填大值 →
+//     vertex/google 400 的历史）；
+//  2. 图片能力**不落表**：本端 ModelDef 没有该字段，且代理对图片一律透传
+//     （ref 用 `modalities.input` 含 `image` 判定，词表只夹取 text/image）；
+//  3. 免费集合在前（ref `mergeClineModels` 第 1 步），cline-pass 按 models.dev
+//     块内顺序；
+//  4. `cline-pass/glm-5.3-flash` 的 `name` 在 models.dev 里**就是裸 id**
+//     （上游合并后同样显示裸 id），故照抄，不编造人类可读名。
 //
 // ⚠️ **免费模型必须拼 ` · 免费`**（ref `clineDisplayName`，
 // cline-models.ts:107-109：`model.isFree ? `${name} · 免费` : name`）—— 这 5 条
 // 全部 `isFree: true`（cline-product.ts:155/164/173/190/199），故展示名一律带
 // 后缀；此前只在 Note 里写了个裸 `free`（`modelDisplayParts` **不认**它，
 // 于是面板少了 ` · 免费`）。
+//
+// ⚠️ cline-pass **不是免费**（ref cline-models.ts:150-153：`clinePass` 是订阅制
+// 额度，不是 free 集合）⇒ 展示名**不带** ` · 免费`，也**不编造倍率**（远端两个
+// 目录端点都不下发倍率）；QuotaType 用 `limited`（订阅额度，ref 的
+// `mergeClineModels` 只把它排在免费之后）。
 func clineFallbackModels() ModelTable {
-	md := func(id, name, ctx, extra string) config.ModelDef {
+	free := func(id, name, ctx, extra string) config.ModelDef {
 		note := "ctx " + ctx
 		if extra != "" {
 			note += "; " + extra
 		}
 		return config.ModelDef{ID: id, QuotaType: "unlimited", Note: note, Alias: name + " · 免费"}
 	}
+	// cline-pass/*：展示名 = models.dev 的 `name`，Note 只记上下文窗口。
+	pass := func(id, name, ctx string) config.ModelDef {
+		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx " + ctx, Alias: name}
+	}
 	return ModelTable{
-		md("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),
-		md("cline-free/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576", "max 131072; free"),
-		md("cline-free/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "1048576", "max 131072; free"),
+		// ── 免费模型（远端 `free` 数组实测 2026-09-25，共 5 个）──
+		free("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),
+		free("cline-free/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576", "max 131072; free"),
+		free("cline-free/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "1048576", "max 131072; free"),
 		// ⚠️ maxTokens 是 65536 不是 131072（实测 400: supported range is
 		// [1, 65537)——真实缺陷回归值）。
-		md("cline-free/gemini-3.8-flash", "Gemini 3.8 Flash", "1048576", "max 65536; free"),
-		md("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
+		free("cline-free/gemini-3.8-flash", "Gemini 3.8 Flash", "1048576", "max 65536; free"),
+		free("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
+		// ── cline-pass/*（models.dev `cline-pass` 块快照 2026-10-02，18 条，
+		//    块内顺序；`← 网关缺` 的四条是 caf675e 补进来的）──
+		pass("cline-pass/mimo-v2.6-pro", "MiMo-V2.6-Pro", "1048576"),
+		pass("cline-pass/qwen3.7-max", "Qwen3.7 Max", "1000000"),
+		pass("cline-pass/mimo-v2.5", "MiMo-V2.5", "1048576"),
+		// ⚠️ models.dev 给这条的 `name` 就是裸 id（没有可读名可抄）。
+		pass("cline-pass/glm-5.3-flash", "cline-pass/glm-5.3-flash", "1000000"),
+		pass("cline-pass/qwen3.8-max", "Qwen3.8 Max", "1000000"),
+		pass("cline-pass/kimi-k3", "Kimi K3", "1048576"),
+		pass("cline-pass/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "1000000"),
+		pass("cline-pass/kimi-k2.6", "Kimi K2.6", "262144"), // ← 网关缺
+		pass("cline-pass/mimo-v2.5-pro", "MiMo-V2.5-Pro", "1048576"),
+		pass("cline-pass/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576"),
+		pass("cline-pass/minimax-m3", "MiniMax-M3", "1048576"),
+		pass("cline-pass/glm-5.2", "GLM-5.2", "1000000"), // ← 网关缺
+		pass("cline-pass/deepseek-v4-pro", "DeepSeek V4 Pro", "1000000"),
+		pass("cline-pass/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576"),
+		pass("cline-pass/glm-5.3", "GLM-5.3", "1000000"),
+		pass("cline-pass/kimi-k2.7-code", "Kimi K2.7 Code", "262144"), // ← 网关缺
+		pass("cline-pass/qwen3.7-plus", "Qwen3.7 Plus", "1000000"),
+		pass("cline-pass/deepseek-v4-flash", "DeepSeek V4 Flash", "1000000"), // ← 网关缺
 	}
 }
 

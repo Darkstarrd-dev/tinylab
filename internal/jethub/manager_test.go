@@ -89,11 +89,11 @@ func (f *fakeRegistry) ListProviders() []config.Provider {
 
 func TestProvidersMetadata(t *testing.T) {
 	metas := Providers()
-	if len(metas) != 11 {
-		t.Fatalf("expected 11 providers, got %d", len(metas))
+	if len(metas) != 13 {
+		t.Fatalf("expected 13 providers, got %d", len(metas))
 	}
-	if !ProviderExists("codearts") || !ProviderExists("minimax") {
-		t.Fatal("codearts/minimax should be known providers")
+	if !ProviderExists("codearts") || !ProviderExists("minimax") || !ProviderExists("opencode") || !ProviderExists("zcode") {
+		t.Fatal("codearts/minimax/opencode/zcode should be known providers")
 	}
 	if ProviderExists("nope") {
 		t.Fatal("unknown provider should not exist")

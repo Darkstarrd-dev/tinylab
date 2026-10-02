@@ -6,7 +6,53 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/tinylab/tinylab/internal/upstreamerr"
 )
+
+// codeartsMaxOutputCap is the upstream-verified output ceiling for the capped
+// models (ref 916c647 / da0a2ad, 实测 2026-10-01): deepseek-v4-flash,
+// deepseek-v4-pro and GLM-5.2 all REJECT 128000 with INVALID_REQUEST while
+// 65536 works. Other models are untouched.
+const codeartsMaxOutputCap = 65536
+
+// codeartsCappedModel reports whether the model is subject to the output cap.
+func codeartsCappedModel(model string) bool {
+	switch model {
+	case "GLM-5.2", "deepseek-v4-flash", "deepseek-v4-pro":
+		return true
+	}
+	return false
+}
+
+// codeartsClampMaxTokens caps max_tokens / max_completion_tokens on the
+// outbound body for the capped models (ref normalizeMaxTokens semantics:
+// min(value, 65536)). Returns the original slice when nothing changes so the
+// common path keeps byte-for-byte passthrough.
+func codeartsClampMaxTokens(body []byte, model string) []byte {
+	if len(body) == 0 || !codeartsCappedModel(model) {
+		return body
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+	changed := false
+	for _, field := range []string{"max_tokens", "max_completion_tokens"} {
+		if v, ok := obj[field].(float64); ok && v > codeartsMaxOutputCap {
+			obj[field] = float64(codeartsMaxOutputCap)
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return out
+}
 
 // CodeArts benefit-model fallback set (ref src/models.ts
 // CODEARTS_BENEFIT_FALLBACK). Requests for these models must carry
@@ -36,16 +82,24 @@ func (m *Manager) CodeArtsAugmentHook() RequestAugmenterFunc {
 // Contract notes (from ref llm-adapter.ts):
 //   - extra signed headers (maas_type) must also be sent verbatim;
 //   - Chat-Id/Session-Id/lang headers are appended after signing;
-//   - the body is forwarded unchanged (OpenAI-compatible passthrough).
+//   - the body is forwarded unchanged except the output cap for the capped
+//     models (ref 916c647/da0a2ad).
+//
+// R1-1 (ref 3bf2be7): when the retry loop resends after a benefit-not-found
+// rejection it marks the client request with the header to drop; this hook
+// then omits `maas_type` for that attempt. The marker must survive the header
+// wipe below (the interceptor reads it to tell "already retried once").
 func (m *Manager) codeartsAugment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
 	cred, err := m.credentialForAccount("codearts", keyID)
 	if err != nil {
 		return nil, err
 	}
+	dropHeader := retryDropHeaderOf(r)
 	extra := map[string]string{}
-	if isCodeArtsBenefitModel(upstreamModel) {
+	if isCodeArtsBenefitModel(upstreamModel) && dropHeader != "maas_type" {
 		extra["maas_type"] = "benefit"
 	}
+	body = codeartsClampMaxTokens(body, upstreamModel)
 	signed, err := SignHuaweiRequest(cred.AccessKeyID, cred.SecretAccessKey, cred.SecurityToken, "POST", r.URL.String(), body, extra)
 	if err != nil {
 		return nil, err
@@ -61,6 +115,9 @@ func (m *Manager) codeartsAugment(r *http.Request, body []byte, providerID, keyI
 	r.Header.Set("Session-Id", chatSessionID(keyID))
 	r.Header.Set("lang", "en")
 	r.Header.Set("Authorization", signed["Authorization"])
+	if dropHeader != "" {
+		r.Header.Set(upstreamerr.RetryDropHeaderMarker, dropHeader)
+	}
 	return body, nil
 }
 

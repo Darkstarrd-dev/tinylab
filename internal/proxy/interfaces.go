@@ -176,6 +176,11 @@ type ResponseInterceptor interface {
 	//     stripping / peek readers); the interceptor must NOT close resp.Body;
 	//   - (nil, retryAfterMs, nil): transient queue signal — the retry loop
 	//     waits retryAfterMs and re-sends with the SAME key;
+	//   - (nil, 0, *upstreamerr.SameKeyRetryError): resend immediately with the
+	//     SAME key after dropping the named header (the retry loop writes it into
+	//     RetryDropHeaderMarker on the client request so the bridge's augmenter
+	//     can apply the fix; the bridge's interceptor uses the same marker to
+	//     tell "already retried once");
 	//   - (nil, 0, err): failed attempt (classified by the retry loop).
 	// The interceptor may consume resp.Body; the proxy still owns the Close.
 	InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (outBody io.Reader, retryAfterMs int64, err error)
@@ -190,3 +195,15 @@ type QueueRetryError = upstreamerr.QueueRetryError
 // BillingLockError reports a per-model quota exhaustion on this key (Qoder:
 // UTC+8 day end). Same neutral-package rationale as QueueRetryError.
 type BillingLockError = upstreamerr.BillingLockError
+
+// SameKeyRetryError asks the retry loop to resend immediately with the SAME
+// key after dropping a rejected header (the bridge applies the fix on the
+// resend via RetryDropHeaderMarker). Same neutral-package rationale as
+// QueueRetryError.
+type SameKeyRetryError = upstreamerr.SameKeyRetryError
+
+// RetryDropHeaderMarker is the loopback-only marker header the retry loop
+// writes on the client request when handling a SameKeyRetryError; bridged
+// augmenters/interceptors read it. Re-exported for the proxy's own header
+// copy guard.
+const RetryDropHeaderMarker = upstreamerr.RetryDropHeaderMarker

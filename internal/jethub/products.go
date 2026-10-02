@@ -143,6 +143,29 @@ func RegisterDefaultProducts(b *Bridge) {
 			Models:      models,
 		})
 	}
+	// R1-7: opencode (OpenCode Zen; ref branch feat/opencode-provider @ 7dd3422).
+	// Anonymous channel = the literal `public` key; paid models are hidden until
+	// a keyed account exists (ModelFilter).
+	b.RegisterProduct(Product{
+		Provider:    "opencode",
+		DisplayName: "OpenCode Zen (Free Hub)",
+		BaseURL:     opencodeBaseURL,
+		// ref opencode-product.ts：chatPath = `/v1/chat/completions`。
+		InferURL:     opencodeBaseURL + opencodeChatPath,
+		Models:       opencodeModels,
+		AnonymousKey: opencodeAnonymousKey,
+		ModelFilter:  opencodeVisibleModels,
+	})
+	// R2: zcode (智谱 z.ai 免费额度通道；Anthropic Messages 协议).
+	// ⚠️ InferURL 必须显式声明：路径不是 "BaseURL + 进站路径"，且带路径的
+	// BaseURL 会被 urlutil 剥后缀（minimax 踩过同款 404）。
+	b.RegisterProduct(Product{
+		Provider:    "zcode",
+		DisplayName: "ZCode (智谱)",
+		BaseURL:     zcodeOrigin,
+		InferURL:    zcodePlanMessagesURL,
+		Models:      zcodeFallbackModels(),
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -157,6 +180,8 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("raccoon", m.raccoonAugment)
 	m.SetAugmenter("loomy", m.loomyAugment)
 	m.SetAugmenter("minimax", m.minimaxAugment)
+	m.SetAugmenter("opencode", m.opencodeAugment)
+	m.SetAugmenter("zcode", m.zcodeAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

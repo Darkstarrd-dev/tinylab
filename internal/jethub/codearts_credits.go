@@ -51,6 +51,12 @@ type ClaimOutcome struct {
 	Kind    string  `json:"kind"` // claimed | already-claimed | inactive | failed
 	Credit  float64 `json:"credit,omitempty"`
 	Message string  `json:"message,omitempty"`
+	// CoversToday reports whether this outcome belongs to TODAY'S round
+	// (nil = yes). Qoder's daily campaign refreshes at 10:00 UTC+8: before
+	// that instant a CLAIMED row / a successful claim belongs to yesterday's
+	// round (ref 1b65a5c) — reporting it as "today" makes users miss a whole
+	// day's credits.
+	CoversToday *bool `json:"coversToday,omitempty"`
 }
 
 // codeartsSignedGet performs a signed GET returning the parsed JSON object.

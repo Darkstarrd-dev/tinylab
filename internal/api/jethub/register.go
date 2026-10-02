@@ -73,6 +73,11 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterMinimax(r)
 		// P3.4: qoder + qodercn flows (PKCE device-code login, shared impl).
 		h.RegisterQoder(r)
+		// R1-7: opencode flows (pasted API key / anonymous channel).
+		h.RegisterOpencode(r)
+		// R2: zcode flows (CLI device login / local-credential import /
+		// balance / daily claim with the local captcha carrier page).
+		h.RegisterZcode(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)

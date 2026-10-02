@@ -25,6 +25,9 @@ var expectedInferenceEndpoints = map[string]string{
 	"raccoon":   raccoonAPIBase + raccoonChatPath,              // ref raccoon-adapter.ts:431
 	"loomy":     loomyProduct.APIBase + "/chat/completions",    // ref loomy-adapter.ts:487
 	"minimax":   minimaxProduct.APIHost + minimaxInferPath,     // ref minimax-product.ts:192
+	// ref opencode-product.ts（分支 feat/opencode-provider @ 7dd3422）：
+	// baseUrl + chatPath = `https://opencode.ai/zen/v1/chat/completions`。
+	"opencode": opencodeBaseURL + opencodeChatPath,
 }
 
 // newInferenceURLManager wires the real product table onto a throwaway bridge.

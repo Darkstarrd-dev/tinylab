@@ -440,6 +440,9 @@ func (rt *Router) Routes(proxyHandler *proxy.Handler) http.Handler {
 		// 一次性），响应不含 token/凭据。
 		if rt.jethubManager != nil && rt.jethubBridge != nil {
 			jethubHandler.RegisterPublicLoginPage(r)
+			// ZCode 领取的 captcha 载体页同样必须公开：它由系统浏览器打开，
+			// 访问控制是 128 位随机一次性 token，页面不含任何凭据。
+			jethubHandler.RegisterPublicZcodeCarrier(r)
 		}
 
 		// --- Protected routes (auth required) ---

@@ -46,6 +46,12 @@ var defaultProviders = []ProviderMeta{
 	{ID: "loomy", DisplayName: "Loomy", Description: "讯飞 Loomy", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "raccoon", DisplayName: "Raccoon", Description: "商汤小浣熊", HasCredits: true, LoginModes: []string{"url", "qr"}},
 	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax（Anthropic 协议族）", HasCredits: true, LoginModes: []string{"url"}},
+	// R1-7: OpenCode Zen — the first non-browser login (pasted API key) plus a
+	// zero-key anonymous channel (`public`, free models only).
+	{ID: "opencode", DisplayName: "OpenCode Zen", Description: "OpenCode Zen（匿名免费 + API Key）", LoginModes: []string{"apikey"}},
+	// R2: ZCode (智谱 z.ai 免费额度通道) — Anthropic Messages 协议 + 官方
+	// CLI 设备授权登录；额度按 token 计（billing/balance 的桶）。
+	{ID: "zcode", DisplayName: "ZCode", Description: "智谱 z.ai（Anthropic 协议族；CLI 设备授权）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 }
 
 // Providers returns the static provider metadata list (a copy).
@@ -149,6 +155,12 @@ type Manager struct {
 	// browserOpener opens a URL in the default browser (wired to
 	// fsutil.OpenInBrowser); login flows invoke it with the login URL.
 	browserOpener func(url string)
+
+	// codeartsRefreshLocks serializes credential renewals per credentialRef
+	// (ref cf5edab): concurrent refreshes would consume the same refresh_token
+	// and Huawei STS invalidates the old one on success, so a concurrent loser
+	// reads a spurious invalid_grant.
+	codeartsRefreshLocks sync.Map
 
 	// sharedClients lazily-built outbound clients (direct + proxy-routed).
 	sharedClients jethubClients

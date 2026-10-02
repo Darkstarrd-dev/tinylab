@@ -207,6 +207,10 @@ func (a *App) buildComponents() error {
 		jethubMgr.RegisterProviderAugmenters()
 		a.jethubBridge.RestoreBridges()
 		a.proxyHandler.SetRequestAugmenter(jethubMgr)
+		// R1-2: codearts renewal scheduler — startup pass + 30min ticker
+		// (ref cf5edab / index.ts). Without it an expired token stays expired
+		// until the user clicks 续期 on the account card.
+		jethubMgr.StartRefreshScheduler(a.shutdownCtx)
 	}
 	// Download manager (feature_download). In the default build the feature is
 	// always compiled, so the manager is constructed exactly as before; a

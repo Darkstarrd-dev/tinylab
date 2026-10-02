@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tinylab/tinylab/internal/upstreamerr"
 )
 
 // CodeArts 响应侧：**HTTP 200 + 流内 `error_code` 也是失败**，以及并发排队
@@ -32,9 +34,30 @@ import (
 //   - 处理方式：**等 QUEUE_RETRY_DELAY_MS (10s) 后用同一个 Key 重发整个请求**
 //     （不冷却、不换号、不等待 `working`），上限由代理的 `maxQueueAttempts`
 //     （180 次 ≈ 30 分钟）兜底。
+//
+// ⚠️ `InferHub.4004.200 benefit not found` 的处置（ref 3bf2be7，2026-10-01）：
+// 积分制账号（没有 benefit 免费额度包）带 `maas_type: benefit` 会被 200 + 该码
+// 拒绝，而**同一模型不带该头可以正常出流** ⇒ 去掉该头**同 Key 重试一次**
+// （`upstreamerr.SameKeyRetryError` + 回环标记，见 augmenter）。标记已在却仍是
+// 该码 ⇒ 不是「缺 benefit 包」这一种情形，按真实失败处理（避免与真实失败互相
+// 掩盖）。
 
 // codeartsQueueErrorDelay mirrors ref QUEUE_RETRY_DELAY_MS.
 const codeartsQueueErrorDelay = 10 * time.Second
+
+// codeartsBenefitNotFoundCode is the stable failure code for "this account has
+// no benefit package" (ref BENEFIT_NOT_FOUND_CODE / CODEARTS_BENEFIT_NOT_FOUND_ERROR_CODE).
+const codeartsBenefitNotFoundCode = "InferHub.4004.200"
+
+// retryDropHeaderOf reads the loopback retry marker the proxy retry loop sets
+// on the client request when it resends because of a SameKeyRetryError; ""
+// when absent (nil-safe for tests).
+func retryDropHeaderOf(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return r.Header.Get(upstreamerr.RetryDropHeaderMarker)
+}
 
 // codeartsQueueBodyRe mirrors the non-TM.00001041 half of the reference
 // isQueueError predicate.
@@ -87,7 +110,7 @@ func codeartsErrorFrame(payload string) (code, msg string, ok bool) {
 //
 // Streaming is the norm here, but the same body shape can arrive on the
 // non-stream path, so both are inspected.
-func (m *Manager) codeartsInterceptResponse(resp *http.Response, upstreamModel string, isStream bool) (io.Reader, int64, error) {
+func (m *Manager) codeartsInterceptResponse(clientReq *http.Request, resp *http.Response, upstreamModel string, isStream bool) (io.Reader, int64, error) {
 	queueRetryMs := int64(codeartsQueueErrorDelay / time.Millisecond)
 
 	if resp.StatusCode >= 400 {
@@ -116,6 +139,18 @@ func (m *Manager) codeartsInterceptResponse(resp *http.Response, upstreamModel s
 		_ = resp.Body.Close()
 		if isCodeArtsSSEQueueCode(code) {
 			return nil, queueRetryMs, nil
+		}
+		// 该账号没有 benefit 包（积分制账户）：去掉 `maas_type: benefit` 后
+		// 同一 Key 重试一次（ref 3bf2be7）。重试循环把「丢弃该头」写进回环标记，
+		// augmenter 在下次尝试时跳过它；标记已在 ⇒ 已经试过，按真实失败处理。
+		if code == codeartsBenefitNotFoundCode && isCodeArtsBenefitModel(upstreamModel) && retryDropHeaderOf(clientReq) != "maas_type" {
+			if msg == "" {
+				msg = "no error_msg"
+			}
+			return nil, 0, &upstreamerr.SameKeyRetryError{
+				Header: "maas_type",
+				Reason: fmt.Sprintf("codearts: %s %s (retrying without maas_type)", code, msg),
+			}
 		}
 		// 非排队错误（如 `InferHub.4004.200 benefit not found`）：让本次尝试失败，
 		// 由代理按错误分类处理（换号/重试/把真实原因报给客户端），而不是返回

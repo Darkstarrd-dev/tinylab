@@ -206,7 +206,13 @@ type CodeArtsTokenResponse struct {
 }
 
 // ErrRefreshTokenExpired marks terminal refresh failure (invalid_grant /
-// ExpiredRefreshToken / InvalidDPoPHeader) — the scheduler stops renewing.
+// ExpiredRefreshToken) — the scheduler stops renewing.
+//
+// ⚠️ `InvalidDPoPHeader` 已从终态移除（ref cf5edab，真实缺陷）：它只说明
+// 「这一次 DPoP proof 没通过校验」（时钟偏差让 iat 落窗外 / proof 被判重放 /
+// 网关抖动），与 refresh_token 还能不能用无关。当终态的代价是把材料完好
+// （refresh_token 还有十几天寿命、code_verifier 与 DPoP 私钥都在）的账号一步
+// 标死、重启也不自愈；当普通失败的代价只是下一轮再试一次 HTTP 请求。
 var ErrRefreshTokenExpired = errors.New("jethub: refresh token expired")
 
 // ClassifyTokenError maps a token endpoint failure to the terminal
@@ -217,8 +223,7 @@ func ClassifyTokenError(resp *CodeArtsTokenResponse) error {
 	}
 	msg := fmt.Sprintf("jethub: token request failed: %s %s", resp.Error, resp.ErrorCode)
 	if resp.Error == "invalid_grant" ||
-		contains(resp.ErrorCode, "ExpiredRefreshToken") ||
-		contains(resp.ErrorCode, "InvalidDPoPHeader") {
+		contains(resp.ErrorCode, "ExpiredRefreshToken") {
 		return ErrRefreshTokenExpired
 	}
 	return errors.New(msg)

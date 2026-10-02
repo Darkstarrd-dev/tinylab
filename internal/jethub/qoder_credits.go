@@ -27,7 +27,38 @@ const (
 	// GitHub-auth account shows "没有可领取的活动"; the truth is the account
 	// has no campaign because it never logged in via the official client).
 	NotActivatedHint = "该账号尚未在 Qoder 侧开通每日领取（每日 100 Credits）。请先用 Qoder 官方客户端登录一次该账号，开通后再回来领取。"
+	// QoderCampaignRefreshHourUTC8 is the daily campaign refresh hour (UTC+8).
+	// Server-side description verbatim: "每日 10:00（UTC+8）刷新，领取后 30 天有效"
+	// (ref 1b65a5c). Before this hour the campaign list still belongs to
+	// YESTERDAY's round — a CLAIMED row only means yesterday was claimed.
+	QoderCampaignRefreshHourUTC8 = 10
+	// NotRefreshedYetHint is the actionable message for "today's round has not
+	// been published yet". ⚠️ 必须与 NotActivatedHint 区分：前者等一会儿就好
+	// （可重试），后者要用户去官方客户端操作；判错的方向是「误报已领」——
+	// 那会让用户真的错过今天的额度。
+	NotRefreshedYetHint = "今天的每日活动尚未刷新（每日 10:00（UTC+8）刷新），当前看到的是昨天那一轮，请稍后再来领取。"
 )
+
+// qoderNowMs is the clock used by the campaign-window check (var so tests can
+// pin the moment).
+var qoderNowMs = nowMillis
+
+// boolPtr returns a pointer to v (ClaimOutcome.CoversToday is tri-state).
+// ⚠️ 保留辅助函数而非 `new(v)`：模块 go 指令是 1.25（`new(expr)` 需要 1.26
+// 语言版本；工具链虽是 1.26.5，-lang 仍按 go.mod 取 1.25）。go.mod 升到 1.26
+// 后应改为 `new(false)` 并删除本函数。
+func boolPtr(v bool) *bool { return &v }
+
+// hasQoderCampaignRefreshedToday reports whether today's campaign round has
+// been published (UTC+8 10:00 boundary).
+//
+// **必须用算术平移而不是本机时区**：活动按 UTC+8 结算，取本机时区会让用户
+// 出差 / 改系统时区时得到错的答案（偏东会提前把当天记为已处理、真漏领；偏西
+// 会一天判两次）。口径与 qoder_queue.go 的 QoderBillingUTCOffsetMS 一致。
+func hasQoderCampaignRefreshedToday(nowMs int64) bool {
+	utc8 := time.UnixMilli(nowMs + QoderBillingUTCOffsetMS).UTC()
+	return utc8.Hour() >= QoderCampaignRefreshHourUTC8
+}
 
 // qoderMachineIdentity is the parsed machine_token.json record.
 type qoderMachineIdentity struct {
@@ -315,6 +346,9 @@ func (m *Manager) ClaimQoderDailyCheckin(ctx context.Context, provider, accountI
 	if parsed == nil {
 		return &ClaimOutcome{Kind: "failed", Message: "活动列表响应形状不对"}, nil
 	}
+	// 活动每日 10:00（UTC+8）刷新（服务端原文，ref 1b65a5c）：**刷新前**看到的
+	// CLAIMED 属于昨天那一轮，不能判「今天已领」（误报会让当天额度整天漏领）。
+	refreshedToday := hasQoderCampaignRefreshedToday(qoderNowMs())
 	targets := qoderClaimableCampaigns(parsed)
 	if len(targets) == 0 {
 		claimedBefore := false
@@ -325,6 +359,9 @@ func (m *Manager) ClaimQoderDailyCheckin(ctx context.Context, provider, accountI
 			}
 		}
 		if claimedBefore {
+			if !refreshedToday {
+				return &ClaimOutcome{Kind: "inactive", Message: NotRefreshedYetHint, CoversToday: boolPtr(false)}, nil
+			}
 			return &ClaimOutcome{Kind: "already-claimed", Message: "今天已领取"}, nil
 		}
 		usage, usageErr := m.qoderEnvelopeRequest(ctx, cred, qoderProduct(provider), http.MethodGet, qoderUsagePath, "")
@@ -347,10 +384,20 @@ func (m *Manager) ClaimQoderDailyCheckin(ctx context.Context, provider, accountI
 		}
 	}
 	if total > 0 {
-		return &ClaimOutcome{Kind: "claimed", Credit: total}, nil
+		out := &ClaimOutcome{Kind: "claimed", Credit: total}
+		if !refreshedToday {
+			// 刷新前领到的是昨天那条补领：如实报「领取成功」，但标记不属于今天
+			// 这一轮（ref coversToday:false）。
+			out.CoversToday = boolPtr(false)
+			out.Message = "领取成功（昨日额度；今日 10:00（UTC+8）后刷新）"
+		}
+		return out, nil
 	}
 	if firstError != "" {
 		return &ClaimOutcome{Kind: "failed", Message: firstError}, nil
+	}
+	if !refreshedToday {
+		return &ClaimOutcome{Kind: "inactive", Message: NotRefreshedYetHint, CoversToday: boolPtr(false)}, nil
 	}
 	return &ClaimOutcome{Kind: "already-claimed", Message: "今天已领取"}, nil
 }

@@ -67,6 +67,16 @@ type Product struct {
 	InferURL string
 	// Models is the static model table registered on the bridged provider.
 	Models ModelTable
+	// AnonymousKey (optional) marks the credential value of the product's
+	// anonymous channel (opencode: the literal `public`). Keys carrying it are
+	// registered with a higher Priority so fill-first tries real accounts
+	// first — the anonymous channel only serves free models, so a paid-model
+	// request that starts there always burns one failed attempt.
+	AnonymousKey string
+	// ModelFilter (optional) narrows the registered model list using live
+	// manager state (opencode: paid models are hidden while no keyed account
+	// exists — the anonymous channel cannot serve them, ref listModels).
+	ModelFilter func(m *Manager, provider string, models []config.ModelDef) []config.ModelDef
 }
 
 // NewBridge creates the registry bridge.
@@ -209,12 +219,20 @@ func (b *Bridge) SyncKeys(provider string) error {
 		if err != nil || token == "" {
 			continue
 		}
+		priority := 0
+		if prod.AnonymousKey != "" && token == prod.AnonymousKey {
+			// 匿名槽殿后（只是位置，不是特权降级）：fill-first 按 priority ASC
+			// 取第一个可用 key —— 账号槽优先，收费模型才不会先撞一次必然 401
+			// 的匿名尝试。
+			priority = 100
+		}
 		keys = append(keys, config.Key{
 			ID:       a.ID,
 			Key:      token,
 			Name:     accountKeyName(provider, a),
 			IsActive: true,
 			Account:  a.Nickname,
+			Priority: priority,
 		})
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
@@ -240,6 +258,11 @@ func (b *Bridge) SyncKeys(provider string) error {
 			}
 		}
 		models = filtered
+	}
+	// Provider-specific visibility (opencode: hide paid models without a keyed
+	// account — the anonymous channel only serves free models).
+	if prod.ModelFilter != nil {
+		models = prod.ModelFilter(b.m, provider, models)
 	}
 
 	p := config.Provider{
