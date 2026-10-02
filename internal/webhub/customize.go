@@ -119,9 +119,18 @@ func (b *Bridge) InterceptResponse(clientReq *http.Request, resp *http.Response,
 		ctx = clientReq.Context()
 	}
 	ctx, cancel := context.WithTimeout(ctx, turnTimeout)
-	defer cancel()
+	// ⚠️ CANCEL OWNERSHIP (2026-10-03 用户实测缺陷 22): a streaming turn drives
+	// the browser page from a background goroutine and InterceptResponse
+	// returns as soon as the pipe reader exists — `defer cancel()` here killed
+	// the context at return, so the driver's very first page read failed with
+	// "context canceled" (the client saw the role chunk, then an error frame).
+	// The non-streaming path calls Chat synchronously, so it keeps defer; the
+	// streaming path hands ownership to the goroutine, which cancels when the
+	// turn finishes (or when the client disconnects — parent ctx cancellation
+	// propagates either way).
 
 	if !turn.isStream {
+		defer cancel()
 		out, err := b.driver.Chat(ctx, ChatRequest{
 			Site:   turn.site,
 			Preset: turn.preset,
@@ -144,7 +153,10 @@ func (b *Bridge) InterceptResponse(clientReq *http.Request, resp *http.Response,
 	// streams it to the client verbatim, so the chunk shape must be exactly
 	// OpenAI's (see response.go).
 	pr, pw := io.Pipe()
-	go b.streamTurn(ctx, pw, turn)
+	go func() {
+		defer cancel()
+		b.streamTurn(ctx, pw, turn)
+	}()
 	if resp != nil {
 		resp.Header.Set("Content-Type", "text/event-stream")
 	}

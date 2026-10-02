@@ -26,6 +26,9 @@ const driverRequestTimeout = 600 * time.Second
 type Driver struct {
 	sessions *SessionManager
 	manager  *Manager
+	// chatHook replaces the whole turn when set (tests only: it lets a test
+	// observe the context the turn actually runs on).
+	chatHook func(ctx context.Context, req ChatRequest) (ChatResult, error)
 
 	mu sync.Mutex
 	// queues holds one serialized worker per site.
@@ -156,6 +159,9 @@ func (d *Driver) Chat(ctx context.Context, req ChatRequest) (ChatResult, error) 
 	}
 	if req.Prompt == "" {
 		return res, fmt.Errorf("webhub: empty prompt")
+	}
+	if hook := d.chatHook; hook != nil {
+		return hook(ctx, req)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, driverRequestTimeout)

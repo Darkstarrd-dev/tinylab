@@ -12,7 +12,7 @@
 >
 > **边界纪律：** `internal/proxy` **不 import webhub**，与 jethub 同款（AGENTS.md 红线）。桥接走窄接口注入，`APIType=="webhub"` 标记识别。
 >
-> **最后核对：** 2026-10-03（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。10-02 用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2；10-03 缺陷 21：相对 `--user-data-dir` 静默失败 ⇒ 目录解析一律 absolutize + 启动诊断——§2.3）
+> **最后核对：** 2026-10-03（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。10-02 用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2；10-03 缺陷 21 相对 `--user-data-dir` 静默失败 ⇒ 目录解析一律 absolutize + 启动诊断——§2.3；缺陷 22 流式回合 context 被提前 cancel ⇒ cancel 归属分流——§2.4）
 
 ---
 
@@ -83,6 +83,14 @@ P0 原型（`tmp/p0-webhub/`，gitignored）实测：
 - **现象**：Web Sites 点击后右侧详情不渲染、每次点击弹一个空浏览器窗口、多击卡顿，日志恒为 `browser unavailable: webhub: devtools not ready on port 9333 after 20s`。
 - **根因**：app 以**相对 configDir** 启动时（双击启动、config 发现基于进程 CWD 的部署形态），`ResolveWebHubDir`/`ResolveProfileDir` 把 `webhub\webhub\profile` 这样的**相对路径**原样拼进 Chrome 命令行。Chrome 141 对相对 `--user-data-dir` **静默失败**：stub 进程 ~60ms 退出码 0、零 stderr、profile 不创建、调试端口不绑定——外部表现就是 20s 超时，且每次 status/open 重试再弹一次窗口。
 - **修法**：① `config.ResolveWebHubDir` 与 `webhub.ResolveProfileDir` 结果一律 `filepath.Abs`（回归守卫 `TestResolveProfileDirAlwaysAbsolute`）；② `Launch` 增加诊断：启动即失败的 browser 进程会捕获 pid/退出码/**stderr 尾行**（`--enable-logging=stderr`），失败错误从「not ready after 20s」变成能直接看到 Chrome 自述原因的一行；隔离实例带凭据复现 → 修复后启动 1s 内 `browser launched on :9333`，status `connected:true` → open → `attached:true`。
+
+### 2.4 缺陷 22（2026-10-03 用户实测）：流式回合的 context 被提前 cancel
+
+- **现象**：站点已 `connected/attached`，但一次调用只吐出首帧 role chunk，紧接着 `{"error":{"message":"context canceled"}}`（**0.2s 内失败**，根本没碰到页面）。
+- **根因**：`Bridge.InterceptResponse` 用 `defer cancel()`，而流式路径启动 `streamTurn` goroutine 后**立即返回** pipe reader——cancel 在返回瞬间生效，goroutine 里 driver 的第一次页面/CDP 读取就命中已取消的 ctx（`Chat` → `sessions.Open` → `FindTab` 首帧即死）。客户端看到的正是「role 帧 + error 帧」。
+- **修法**：**cancel 归属分流**——非流式 `Chat` 是同步调用，保持 `defer cancel()`；流式把 cancel 交给 goroutine（`go func(){ defer cancel(); b.streamTurn(...) }()`），回合结束才取消。客户端断连仍由父 ctx 传播，不会泄漏。
+- **回归守卫**：`internal/webhub/customize_cancel_test.go` 2 个（流式回合的 ctx 必须活过 `InterceptResponse` 返回 / 非流式必须在返回时取消不泄漏）。**已反向验证**：回退修复后第一条立刻报 `turn context already dead … context canceled`。
+- **A/B 真机复验**（同一 scratch 目录 + 同一份登录 profile，只换二进制）：修复前 `list targets: … dial tcp 127.0.0.1:9333: operation was canceled`；修复后进入真实页面流程，报 `FILL_INPUT: no element matches "textarea"`（该副本 profile 停在 `/sign_in`，属预期）——即回合已真正进入驱动阶段。
 
 ---
 
