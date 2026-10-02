@@ -61,6 +61,15 @@ func TestRunWorkflowFillPressStream(t *testing.T) {
 // P0 缺陷①：文本必须经原生 setter 写入，且写入后校验长度。
 // React 受控组件吞掉 SendKeys 的历史缺陷正是靠这条守住。
 func TestFillInputVerifiesWrite(t *testing.T) {
+	// 缺陷 23（2026-10-03）：注入脚本必须调用 PropertyDescriptor 的 .set，
+	// 不能把描述符本身当函数调（真实页面抛 TypeError）。fakePage 已按脚本
+	// 形状拒绝错误写法；这里再做一次静态断言，错误改回时立刻可读地红。
+	if !strings.Contains(insertTextScript, "setter.set.call(el, text)") {
+		t.Fatal("insertTextScript must invoke the descriptor's .set (setter.set.call), not the descriptor itself")
+	}
+	if strings.Contains(insertTextScript, "setter.call(") {
+		t.Fatal("insertTextScript calls the PropertyDescriptor itself — that is a TypeError in the page")
+	}
 	p := newFakePage()
 	p.add("#box")
 	if err := FillInput(p, "#box", "你好, world"); err != nil {

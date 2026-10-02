@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -216,3 +217,57 @@ func TestUnwiredDegradesTo503(t *testing.T) {
 		t.Fatalf("503 must be JSON: %q", rec.Body.String())
 	}
 }
+
+// 缺陷 24（2026-10-03 用户要求）：浏览器实例**只**由用户点「打开站点」拉起。
+//
+// 启动 app 时不再自动开 Chrome；status/probe 是只读报告，绝不能触发启动
+// （此前 status 会惰性重连，于是「看一眼状态」就弹出一个空白 Chrome 窗口）。
+// 这两条把「status/probe 不得调 connectFn」钉在 HTTP 层。
+func TestStatusAndProbeNeverLaunchBrowser(t *testing.T) {
+	srv := newCountingRouteTestHandler(t)
+	site := corewebhub.NormalizeSite("chat.deepseek.com")
+
+	rec := httptest.NewRecorder()
+	srv.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/webhub/sites/"+site+"/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", rec.Code)
+	}
+	if srv.connects() != 0 {
+		t.Fatalf("status launched the browser (%d connect calls), want 0", srv.connects())
+	}
+
+	rec2 := httptest.NewRecorder()
+	srv.h.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/api/webhub/sites/"+site+"/probe", nil))
+	if rec2.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST probe without a browser = %d, want 503", rec2.Code)
+	}
+	if srv.connects() != 0 {
+		t.Fatalf("probe launched the browser (%d connect calls), want 0", srv.connects())
+	}
+}
+
+// countingRouteTestHandler 与 newRouteTestHandler 同形，但统计 connect 次数。
+func newCountingRouteTestHandler(t *testing.T) *countingRouteTest {
+	t.Helper()
+	m, err := corewebhub.NewManager(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	var n int32
+	m.SetConnectFn(func(string, int, bool) (string, bool, error) {
+		atomic.AddInt32(&n, 1)
+		return "ws://127.0.0.1:9333/devtools/browser/stub", true, nil
+	})
+	reg := &fakeRegistry{providers: map[string]config.Provider{}}
+	h := NewHandler(&Deps{Manager: m, Bridge: corewebhub.NewBridge(m, reg)})
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) { h.Register(r) })
+	return &countingRouteTest{h: r, n: &n}
+}
+
+type countingRouteTest struct {
+	h http.Handler
+	n *int32
+}
+
+func (c *countingRouteTest) connects() int { return int(atomic.LoadInt32(c.n)) }

@@ -12,7 +12,7 @@
 >
 > **边界纪律：** `internal/proxy` **不 import webhub**，与 jethub 同款（AGENTS.md 红线）。桥接走窄接口注入，`APIType=="webhub"` 标记识别。
 >
-> **最后核对：** 2026-10-03（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。10-02 用户实测回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2；10-03 缺陷 21 相对 `--user-data-dir` 静默失败 ⇒ 目录解析一律 absolutize + 启动诊断——§2.3；缺陷 22 流式回合 context 被提前 cancel ⇒ cancel 归属分流——§2.4）
+> **最后核对：** 2026-10-03（P1–P5 收口：核心包/workflow/UI/桥接落地 + 回归全绿 + 实施计划归档转正式基线；12 站点真机验证待登录态。10-02 回归修复：站点组幂等渲染、懒连接自愈 + Open Site 改 webhub 浏览器内开页 + `browserError` 透出——§2.2；10-03 缺陷 21 相对 `--user-data-dir` 静默失败 ⇒ 目录解析 absolutize + 启动诊断——§2.3；缺陷 22 流式回合 context 提前取消 ⇒ cancel 归属分流——§2.4；缺陷 23 FILL_INPUT 用错 PropertyDescriptor ⇒ 取 `.set` 再 call、缺陷 24 浏览器只由「打开站点」拉起（status/probe 纯报告）——§2.5）
 
 ---
 
@@ -91,6 +91,11 @@ P0 原型（`tmp/p0-webhub/`，gitignored）实测：
 - **修法**：**cancel 归属分流**——非流式 `Chat` 是同步调用，保持 `defer cancel()`；流式把 cancel 交给 goroutine（`go func(){ defer cancel(); b.streamTurn(...) }()`），回合结束才取消。客户端断连仍由父 ctx 传播，不会泄漏。
 - **回归守卫**：`internal/webhub/customize_cancel_test.go` 2 个（流式回合的 ctx 必须活过 `InterceptResponse` 返回 / 非流式必须在返回时取消不泄漏）。**已反向验证**：回退修复后第一条立刻报 `turn context already dead … context canceled`。
 - **A/B 真机复验**（同一 scratch 目录 + 同一份登录 profile，只换二进制）：修复前 `list targets: … dial tcp 127.0.0.1:9333: operation was canceled`；修复后进入真实页面流程，报 `FILL_INPUT: no element matches "textarea"`（该副本 profile 停在 `/sign_in`，属预期）——即回合已真正进入驱动阶段。
+
+### 2.5 缺陷 23 + 24（2026-10-03 用户实测）：value setter 误用 + 启动即弹浏览器
+
+1. **FILL_INPUT 全站崩溃（缺陷 23）**：注入脚本把 `Object.getOwnPropertyDescriptor` 返回的 **PropertyDescriptor** 当函数调（`setter.call(el, text)`）——真实页面抛 `TypeError: setter.call is not a function`，deepseek/arena.ai 等**所有** textarea/input 站点在第一步就死。修法：取描述符的 `.set` 再 call（`setter.set.call(el, text)`）。守卫：`TestFillInputVerifiesWrite` 静态断言脚本形状 + fakePage **按脚本形状拒绝**旧写法（回归立刻红，而非假装写入成功）；真机复验：在验证实例打开的真实 React 页（`/sign_in` 的 input）上 `FILL-OK`。
+2. **启动即弹浏览器（缺陷 24，用户要求的行为契约）**：app 启动路径调了 `EnsureBrowser` ⇒ Chrome（连空白页）自动弹出；status 的惰性重连也会「看一眼状态」就拉起浏览器。修正：**浏览器实例只由用户点「打开站点」（`POST /api/webhub/sites/{site}/open`）触发**——① 删除启动路径的 `EnsureBrowser`；② `ResolveSite`（status 用）改为**纯报告**：端点为空/失效 ⇒ 清空并报 `connected=false`，绝不重连；③ probe 同样不启动，浏览器未连接时直接 503（UI 提示先打开站点）。守卫：`TestResolveSiteNeverLaunchesBrowser` + `TestResolveSiteAttachesOwnTabOnly`（webhub 层）+ `TestStatusAndProbeNeverLaunchBrowser`（HTTP 层，反向验证过）。`EnsureBrowser` 现在只有 `openSite` 一个调用点。
 
 ---
 

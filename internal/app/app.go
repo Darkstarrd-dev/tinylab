@@ -466,19 +466,15 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 		}()
 	}
 
-	// Web Hub: bring up the CDP endpoint in the background. It is intentionally
-	// NOT fatal — a machine with no Chromium (or a blocked debug port) keeps
-	// every other feature; the UI reports "browser not connected" and the
-	// status endpoint stays honest. Launching also must not block startup: a
-	// cold Chrome start takes seconds.
-	if a.webhubManager != nil && a.webhubProfile != "" {
-		go func() {
-			// EnsureBrowser logs launched/attached itself; failure keeps the
-			// feature degraded, and every status/open/probe call retries
-			// lazily (Manager.EnsureBrowser).
-			_ = a.webhubManager.EnsureBrowser()
-		}()
-	}
+	// Web Hub: NO browser is launched at startup (2026-10-03 用户要求，缺陷 24)。
+	// webhub 是「浏览器驱动」的供应商——启动 app 就弹出一个 Chrome 窗口（还会
+	// 打开空白页）既打扰用户，也会让人误以为 app 依赖它。浏览器实例只在用户
+	// 明确点击站点面板的「打开站点」时启动/打开（POST /api/webhub/sites/
+	// {site}/open → openSite → EnsureBrowser + OpenTab）；status/probe 一律
+	// 只做**惰性状态报告**，绝不触发启动。
+	//
+	// 这一点由 `internal/webhub` 的 EnsureBrowser 调用点保证：只有 openSite
+	// 调它。改动此处前先看 register.go 的注释。
 
 	// Block on the host loop until shutdown is requested (signal or UI or tray quit).
 	// runHostLoop (and its shutdown wiring) is implemented per build tag in host_*.go.

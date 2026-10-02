@@ -28,6 +28,14 @@ var ErrInputTruncated = errors.New("webhub: prompt was truncated by the page")
 // HTMLTextAreaElement, input → HTMLInputElement, else the generic
 // HTMLElement/Node value setter) because a contenteditable div needs a
 // different write path entirely (below).
+//
+// ⚠️ 缺陷 23（2026-10-03 用户实测）：注入脚本曾写成 `setter.call(el, text)`，
+// 而 setter 是 `Object.getOwnPropertyDescriptor` 返回的 **PropertyDescriptor**
+// （{get, set, ...}）不是函数——页面侧直接抛 `TypeError: setter.call is not
+// a function`，deepseek/arena.ai 等所有 textarea/input 站点在 FILL_INPUT
+// 第一步就死。正确写法是取描述符里的 `.set` 再 call。回归守卫：
+// `TestInsertScriptUsesDescriptorSetter`（脚本静态断言）+ `FillInput` 两个
+// 用例（fakePage 只对含 `setter.set.call` 的脚本承认写入成功）。
 const insertTextScript = `(function(sel, text){
 	var el = document.querySelector(sel);
 	if (!el) return 'no-element';
@@ -49,7 +57,7 @@ const insertTextScript = `(function(sel, text){
 	else if (window.HTMLElement && el instanceof window.HTMLElement) proto = window.HTMLElement.prototype;
 	var setter = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
 	if (!setter || !setter.set) return 'no-setter';
-	setter.call(el, text);
+	setter.set.call(el, text);
 	el.dispatchEvent(new Event('input', {bubbles:true}));
 	el.dispatchEvent(new Event('change', {bubbles:true}));
 	return 'ok';

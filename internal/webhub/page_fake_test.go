@@ -83,6 +83,12 @@ func (f *fakePage) Eval(script string, out any) error {
 	case strings.Contains(script, "Object.getOwnPropertyDescriptor"):
 		// Native-setter write: the value lands verbatim (this is the whole
 		// point of the fix — a value written through the setter is kept).
+		// ⚠️ 缺陷 23：脚本必须走 `setter.set.call(...)`（PropertyDescriptor
+		// 的 .set），写成 `setter.call(...)` 在真实页面上是 TypeError ——
+		// 这里按「脚本形状」拒绝，让回归立刻变红而不是假装写入成功。
+		if !strings.Contains(script, "setter.set.call") {
+			return fmt.Errorf("fill script does not invoke the descriptor setter: %s", script)
+		}
 		sel, _ := extractJSArg(script, 0)
 		txt, _ := extractJSArg(script, 1)
 		f.mu.Lock()

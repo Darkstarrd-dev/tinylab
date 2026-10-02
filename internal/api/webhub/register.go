@@ -171,8 +171,11 @@ func (h *Handler) probeSite(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusNotFound, "unknown site "+site)
 		return
 	}
-	if err := h.d.Manager.EnsureBrowser(); err != nil {
-		apibase.WriteAPIError(w, http.StatusServiceUnavailable, err.Error())
+	// ⚠️ 缺陷 24（2026-10-03）：不启动浏览器。检测是「消耗一次真实回复」的
+	// 动作，浏览器必须已经由用户点「打开站点」拉起；否则直接报不可用，
+	// 让 UI 提示先打开站点（而不是偷偷弹出 Chrome）。
+	if h.d.Manager.Sessions().Endpoint() == "" {
+		apibase.WriteAPIError(w, http.StatusServiceUnavailable, corewebhub.ErrNotConnected.Error())
 		return
 	}
 	started := time.Now()

@@ -248,17 +248,22 @@ func (m *Manager) BrowserError() string {
 	return m.lastEnsureErr.Error()
 }
 
-// ResolveSite reports live connectivity for a site: it lazily (re)connects
-// the browser, reuses the cached session when one exists, and otherwise scans
-// the browser's tabs and attaches the site's own tab when present. It never
-// opens or navigates a tab (OpenTab is the explicit user-driven path).
+// ResolveSite reports live connectivity for a site: reuses the cached session
+// when one exists, and otherwise scans the browser's tabs and attaches the
+// site's own tab when present. It never opens or navigates a tab — OpenTab
+// (POST .../open, the user's explicit "Open Site" click) is the only path
+// that does.
 //
-// connected=false also covers a stale endpoint — the browser was closed or
-// restarted since the last attach; the endpoint is cleared so this or the
-// next call re-connects.
+// ⚠️ 缺陷 24（2026-10-03 用户要求）：它**不启动浏览器**（不调
+// EnsureBrowser）。此前 status 会惰性启动，于是「看一下状态」就把 Chrome
+// 拉起来（还弹空白页），也解释了 app 一启动就弹窗（启动路径里另有
+// EnsureBrowser，已移除）。浏览器实例现在只由 openSite 触发。
+//
+// 已连接的浏览器被关掉时：端点失效 ⇒ 清空并报 connected=false（下一次
+// open 会重新拉起）。
 func (m *Manager) ResolveSite(site string) (connected, attached bool, tabURL string) {
 	domain := normalizeDomain(site)
-	if err := m.EnsureBrowser(); err != nil {
+	if m.sessions.Endpoint() == "" {
 		return false, false, ""
 	}
 	if att, url := m.sessions.Status(domain); att {
@@ -266,18 +271,13 @@ func (m *Manager) ResolveSite(site string) (connected, attached bool, tabURL str
 	}
 	tab, err := m.sessions.FindTab(context.Background(), domain)
 	if err != nil {
-		// Endpoint stale: drop it and try one reconnect within this call.
+		// Endpoint stale (browser closed/restarted): drop it and report
+		// disconnected. No relaunch here — see the doc comment.
 		m.SetEndpoint("")
 		if m.logger != nil {
-			m.logger.Warn("[webhub] browser endpoint stale, re-connecting: %v", err)
+			m.logger.Warn("[webhub] browser endpoint stale, clearing it: %v", err)
 		}
-		if err := m.EnsureBrowser(); err != nil {
-			return false, false, ""
-		}
-		if tab, err = m.sessions.FindTab(context.Background(), domain); err != nil {
-			m.SetEndpoint("")
-			return false, false, ""
-		}
+		return false, false, ""
 	}
 	if tab == nil {
 		return true, false, ""
