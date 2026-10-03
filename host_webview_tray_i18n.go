@@ -4,27 +4,26 @@ package main
 
 import (
 	"sync"
-	"time"
 
 	"fyne.io/systray"
 	"github.com/tinylab/tinylab/internal/app"
 	"github.com/tinylab/tinylab/internal/petstate"
 )
 
-// addWebviewMenuItem adds a "重新打开独立窗口" item to the tray menu; each click
-// terminates every open window first, then rebuilds one. Only compiled when the
-// `webview` build tag is set.
+// addWebviewMenuItem adds the "开启/关闭控制台" toggle item to the tray menu:
+// clicking opens the WebView2 console window when none is open, and closes it
+// with plain window-close semantics (app keeps running in the tray) when one
+// is. The app itself quits only via the tray Quit item, the UI Shutdown
+// button, or an OS signal. The app does NOT auto-open a window at startup:
+// tray-only is the default state.
 //
 // Returns interface{} so the caller (host_tray_windows.go) stays build-tag-
 // agnostic; the matching stub when `webview` is absent returns nil.
 func addWebviewMenuItem(hctx *app.HostContext) interface{} {
-	// “打开独立窗口”已无意义：关闭窗口的 X 现在就是退出（w.Run 后 systray.Quit 带动
-	// 整个进程退出），仅关窗不退出的旧前后端解耦语义已失效，故移除该条目。
-	mRestart := systray.AddMenuItem("重新打开独立窗口", "当窗口卡死或已关闭时重新打开")
-	trayRestartItem = mRestart
-	go runWebviewRestartLoop(hctx, mRestart)
+	mToggle := systray.AddMenuItem("开启控制台", "打开管理界面窗口")
+	trayWebviewItem = mToggle
+	go runWebviewToggleLoop(hctx, mToggle)
 	applyTrayLang(currentTrayLang())
-	go openWebviewAfterReady(hctx)
 	go func() {
 		<-hctx.Quit()
 		hctx.Logger.Info("terminating webview windows (UI)")
@@ -34,33 +33,38 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	petstate.SetOpen(func() { openPetIfNeeded(hctx) })
 	petstate.SetHideAll(func() bool { return setPetWindowVisible(false) })
 	petstate.SetShowAll(func() bool { return setPetWindowVisible(true) })
-	return mRestart
+	return mToggle
 }
 
-func runWebviewRestartLoop(hctx *app.HostContext, m *systray.MenuItem) {
+// runWebviewToggleLoop dispatches "开启/关闭控制台" clicks by toggling the
+// console window. Runs in its own goroutine since systray.Run is blocking the
+// main goroutine.
+func runWebviewToggleLoop(hctx *app.HostContext, m *systray.MenuItem) {
 	for range m.ClickedCh {
-		hctx.Logger.Info("tray: reopen/recover webview — kill current then respawn")
-		// 独立 goroutine：绝不把托盘线程堵在卡死窗口的 Terminate 上
-		go func() {
-			// 无论是否有窗口，先终止一切（有则消、无则空）。Terminate 本身带超时。
-			terminateAllWebviews()
-			// 等待窗体 pump 退出后再 respawn，避免 CreateWindow 与 WM_DESTROY 竞争。
-			deadline := time.Now().Add(2 * time.Second)
-			for time.Now().Before(deadline) && hasAnyWebview() {
-				time.Sleep(80 * time.Millisecond)
-			}
+		if hasAnyWebview() {
+			hctx.Logger.Info("tray: closing console window")
+			// Independent goroutine: never park the menu loop on a wedged
+			// window's Terminate (terminateAllWebviews has per-window timeouts).
+			go terminateAllWebviews()
+		} else {
+			hctx.Logger.Info("tray: opening console window")
 			go openWebviewWindow(hctx)
-		}()
+		}
 	}
 }
 
-// Tray i18n: the host receives lang='en'|'cn' from JS via the onTrayLang binding
-// (called from i18n.js setLang), then updates every native menu title/tooltip.
-// Persist last lang so new windows started after a language switch get the right labels.
+// onWebviewCountChanged refreshes tray labels after a console window opened or
+// closed so the toggle item reflects the new state ("开启控制台" vs "关闭控
+// 制台"). Called from openWebviewWindow strictly outside webviewMu.
+func onWebviewCountChanged() {
+	applyTrayLang(currentTrayLang())
+}
 
-// Tray i18n: the host receives lang='en'|'cn' from JS via the onTrayLang binding
-// (called from i18n.js setLang), then updates every native menu title/tooltip.
-// Persist last lang so new windows started after a language switch get the right labels.
+// Tray i18n: the host receives lang='en'|'cn' from JS via the setTrayLang
+// binding (bound in host_webview_window.go; the injected init script pushes
+// the document's data-lang on load and on every change), then updates every
+// native menu title/tooltip. Language is process-local: after a restart the
+// menu stays on "en" until a console window pushes the persisted UI language.
 var trayLangMu sync.RWMutex
 
 var trayLang = "en"
@@ -83,24 +87,36 @@ func setTrayLang(lang string) {
 	trayLangMu.Unlock()
 }
 
+// applyTrayLang rewrites every tray label for lang. The console toggle item is
+// state-aware: a console window is open → "关闭控制台", none → "开启控制台".
 func applyTrayLang(lang string) {
 	cn := lang == "cn"
-	if trayRestartItem != nil {
+	if trayBrowserItem != nil {
 		if cn {
-			trayRestartItem.SetTitle("重新打开独立窗口")
-			trayRestartItem.SetTooltip("当窗口卡死或已关闭时重新打开")
+			trayBrowserItem.SetTitle("开启浏览器")
+			trayBrowserItem.SetTooltip("在浏览器中打开管理界面")
 		} else {
-			trayRestartItem.SetTitle("Reopen Window")
-			trayRestartItem.SetTooltip("Reopen the independent window")
+			trayBrowserItem.SetTitle("Open Browser")
+			trayBrowserItem.SetTooltip("Open the admin UI in your browser")
 		}
 	}
-	if trayConsoleItem != nil {
-		if cn {
-			trayConsoleItem.SetTitle("打开控制台")
-			trayConsoleItem.SetTooltip("在浏览器中打开管理界面")
+	if trayWebviewItem != nil {
+		if hasAnyWebview() {
+			if cn {
+				trayWebviewItem.SetTitle("关闭控制台")
+				trayWebviewItem.SetTooltip("关闭管理界面窗口（App 继续在托盘运行）")
+			} else {
+				trayWebviewItem.SetTitle("Close Console")
+				trayWebviewItem.SetTooltip("Close the console window (app stays in tray)")
+			}
 		} else {
-			trayConsoleItem.SetTitle("Open Console")
-			trayConsoleItem.SetTooltip("Open the admin UI in your browser")
+			if cn {
+				trayWebviewItem.SetTitle("开启控制台")
+				trayWebviewItem.SetTooltip("打开管理界面窗口")
+			} else {
+				trayWebviewItem.SetTitle("Open Console")
+				trayWebviewItem.SetTooltip("Open the console window")
+			}
 		}
 	}
 	if trayQuitItem != nil {
@@ -114,14 +130,12 @@ func applyTrayLang(lang string) {
 	}
 }
 
-var trayRestartItem *systray.MenuItem
+var trayBrowserItem *systray.MenuItem
 
-var trayConsoleItem *systray.MenuItem
+var trayWebviewItem *systray.MenuItem
 
 var trayQuitItem *systray.MenuItem
 
-func setTrayConsoleItem(m *systray.MenuItem) { trayConsoleItem = m; applyTrayLang(currentTrayLang()) }
+func setTrayBrowserItem(m *systray.MenuItem) { trayBrowserItem = m; applyTrayLang(currentTrayLang()) }
 
 func setTrayQuitItem(m *systray.MenuItem) { trayQuitItem = m; applyTrayLang(currentTrayLang()) }
-
-// Helpers restored (no tray button, but still needed for settings toggle callbacks).

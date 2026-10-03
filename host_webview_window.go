@@ -9,7 +9,6 @@ import (
 	"time"
 	"unsafe"
 
-	"fyne.io/systray"
 	"github.com/jchv/go-webview2"
 	"github.com/jchv/go-webview2/pkg/edge"
 	"github.com/tinylab/tinylab/internal/app"
@@ -51,15 +50,6 @@ func terminateAllWebviews() {
 			}
 		}(w)
 	}
-}
-
-// openWebviewAfterReady starts the first window directly; the HTTP server is
-// already started by main before runHostLoop.
-
-// openWebviewAfterReady starts the first window directly; the HTTP server is
-// already started by main before runHostLoop.
-func openWebviewAfterReady(hctx *app.HostContext) {
-	openWebviewWindow(hctx)
 }
 
 // webviewWindowMu serializes window creation: jchv/go-webview2 is not designed
@@ -164,14 +154,17 @@ func openWebviewWindow(hctx *app.HostContext) {
 	}
 	w.SetTitle("TinyLab V" + app.Version)
 
-	// Register this window so shutdown can terminate it immediately.
+	// Register this window so shutdown can terminate it immediately and so the
+	// tray toggle item can track open/close state.
 	webviewMu.Lock()
 	webviews[uintptr(w.Window())] = w
 	webviewMu.Unlock()
+	onWebviewCountChanged()
 	defer func() {
 		webviewMu.Lock()
 		delete(webviews, uintptr(w.Window()))
 		webviewMu.Unlock()
+		onWebviewCountChanged()
 	}()
 
 	var (
@@ -393,10 +386,9 @@ func openWebviewWindow(hctx *app.HostContext) {
 	}
 
 	// w.Run() pumps Win32 messages for this thread until the window is closed.
-	// 行为：点 X 即退出整个 app（用户明确不保留“只关窗不退出”的旧语义）。
-	// 随后 runWebviewRestartLoop 可以用 Tray 菜单重新打开新窗口。
+	// 行为：点 X 仅关闭本窗口，App 继续驻留托盘（2026-10-03 用户需求）；
+	// 再开走托盘“开启控制台”。退出仅由托盘“退出”、UI Shutdown、OS 信号触发。
 	w.Run()
-	systray.Quit()
 }
 
 type tagPOINT struct {

@@ -1,6 +1,6 @@
 # 构建变体 (Build Variants)
 
-> 最后核对：2026-09-03（构建脚本自动解析 rsrc：GOBIN/GOPATH 回退 + 缺失自动安装）
+> 最后核对：2026-10-03（托盘/webview 语义重构：启动仅托盘、X 关窗不退出、菜单「开启浏览器」+「开启/关闭控制台」动态开关 + i18n）
 
 TinyLab 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 macOS 构建产物。Windows 下用 `build.ps1` 一键产出变体；macOS 双架构用 `build_mac.ps1` 交叉编译。
 
@@ -37,8 +37,8 @@ TinyLab 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 ma
 | Variant | 行为 | tags | ldflags | CGO |
 |---|---|---|---|---|
 | `default` | console 窗口 + 自动打开浏览器(当前行为) | — | — | 无 |
-| `tray` | 系统托盘常驻,无 console 窗口,右键菜单"打开控制台/退出" | `tray` | `-H windowsgui` | 无 |
-| `webview` | tray + WebView2 原生窗口右键菜单多一项"打开独立窗口"(Win10/11 自带 Runtime,纯 Go) | `tray,webview` | `-H windowsgui` | 无 |
+| `tray` | 系统托盘常驻,无 console 窗口,右键菜单"开启浏览器/退出" | `tray` | `-H windowsgui` | 无 |
+| `webview` | tray + 托盘菜单多一项"开启/关闭控制台"动态开关;启动不开窗(默认仅托盘,API 照常),关窗不退出进程(Win10/11 自带 Runtime,纯 Go) | `tray,webview` | `-H windowsgui` | 无 |
 | `debug` | 全 DWARF/console 窗口,供 `dlv` 调试;Playground/Strip 被忽略 | — | — | 无 |
 
 ## 关键开关
@@ -50,7 +50,7 @@ TinyLab 通过 build tag + 链接器 flag 组合，提供 Windows、Linux 与 ma
 
 - **无 tag** = 当前行为(console 窗口 + 浏览器),`go build -o tinylab .` 与 `./build.ps1` 等价
 - **`-tags tray`** = 切换到 `host_tray_windows.go`,引入 `fyne.io/systray`;无此 tag 用 `host_console.go`
-- **`-tags "tray,webview"`** = tray 基础上引入 `host_webview_windows.go` + `jchv/go-webview2`;托盘菜单多一项"打开独立窗口",在 Win10/11 上用 WebView2 Runtime 弹出原生窗口加载 admin UI;关闭窗口不退出进程,仍可再次打开
+- **`-tags "tray,webview"`** = tray 基础上引入 `host_webview_window.go`/`host_webview_tray_i18n.go`/`host_webview_pet.go` + `jchv/go-webview2`;托盘菜单多一项「开启/关闭控制台」(按 `hasAnyWebview()` 动态切换文案,语言由 JS `setTrayLang` 推送、默认英文),点击打开/关闭 WebView2 原生窗口加载 admin UI;**启动不自动开窗(默认仅托盘驻留,API 路由照常);点 X/WM_CLOSE 仅关窗不退出进程**,可随时从托盘再开;退出仅由托盘「退出」、UI Shutdown(POST /api/shutdown)、OS 信号触发
 - **`-tags playground`** = 切换到 `web/embed_playground.go`,内嵌 Playground 资产;无此 tag 用 `web/embed_playground_stub.go`
 
 

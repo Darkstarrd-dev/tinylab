@@ -51,10 +51,10 @@ func runHostLoop(hctx *app.HostContext) {
 		systray.SetTitle("TinyLab")
 		systray.SetTooltip("TinyLab — lightweight LLM API proxy")
 
-		mOpen := systray.AddMenuItem("打开控制台", "Open the admin UI in your browser")
-		setTrayConsoleItem(mOpen)
-		// "打开独立窗口" entry is only present when the `webview` tag is set;
-		// otherwise addWebviewMenuItem is nil-typed and the menu skips it.
+		mOpen := systray.AddMenuItem("开启浏览器", "Open the admin UI in your browser")
+		setTrayBrowserItem(mOpen)
+		// "开启/关闭控制台" toggle entry is only present when the `webview` tag
+		// is set; otherwise addWebviewMenuItem is nil-typed and the menu skips it.
 		_ = addWebviewMenuItem(hctx)
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("退出", "Quit TinyLab")
