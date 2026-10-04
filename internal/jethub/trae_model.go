@@ -99,13 +99,14 @@ func clineFallbackModels() ModelTable {
 		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx " + ctx, Alias: name}
 	}
 	return ModelTable{
-		// ── 免费模型（远端 `free` 数组实测 2026-09-25，共 5 个）──
+		// ── 免费模型（远端 `free` 数组实测 2026-09-25 共 5 个；2026-10-03
+		//    复测只剩 4 个：`cline-free/gemini-3.8-flash` 已被上游下线
+		//    （recommended-models 的 free 数组不含 + 直连 404 model not
+		//    found，ref 51d6093）。别照抄旧表把它加回来——它 65536 那条
+		//    maxTokens 实测值是当时的，模型本身已不存在）──
 		free("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),
 		free("cline-free/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576", "max 131072; free"),
 		free("cline-free/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "1048576", "max 131072; free"),
-		// ⚠️ maxTokens 是 65536 不是 131072（实测 400: supported range is
-		// [1, 65537)——真实缺陷回归值）。
-		free("cline-free/gemini-3.8-flash", "Gemini 3.8 Flash", "1048576", "max 65536; free"),
 		free("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
 		// ── cline-pass/*（models.dev `cline-pass` 块快照 2026-10-02，18 条，
 		//    块内顺序；`← 网关缺` 的四条是 caf675e 补进来的）──

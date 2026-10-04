@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinylab/tinylab/internal/upstreamerr"
 )
@@ -167,6 +168,87 @@ func TestCodeartsErrorFramePredicate(t *testing.T) {
 		code, _, ok := codeartsErrorFrame(tc.payload)
 		if ok != tc.wantOK || code != tc.wantCode {
 			t.Errorf("%q → (%q, %v), want (%q, %v)", tc.payload, code, ok, tc.wantCode, tc.wantOK)
+		}
+	}
+}
+
+// ── R3-1（ref 784210d / ae0c9b0，2026-10-04 上游同步）──────────────────────────
+
+// TestCodeartsQuotaExhaustedIsBillingLockNotQueue: 真实额度帧
+// （HTTP 200 + SSE `InferHub.4291.200` "insufficient quota"）必须判为**额度用尽**
+// （BillingLockError，锁 key+model 至 UTC+8 当日 24:00），而不是可重试的排队——
+// 旧正则的裸 `429` 子串会命中 `4291` 前缀，把确定性失败送进 10s×180 次
+// （30 分钟）静默重试循环、界面零输出（上游真实报障，ref 784210d）。
+func TestCodeartsQuotaExhaustedIsBillingLockNotQueue(t *testing.T) {
+	m := newCodeartsTestManager(t)
+	body := `data:{"text":"[DONE]","error_code":"InferHub.4291.200","error_msg":"insufficient quota","details":[{"modelId":"deepseek-v4.1-flash"}]}` + "\n\n"
+	_, retryMs, err := m.codeartsInterceptResponse(nil, codeartsResp(200, body), "deepseek-v4.1-flash", true)
+	if retryMs != 0 {
+		t.Fatalf("quota exhaustion must NOT be a queue wait, got retryAfter=%dms", retryMs)
+	}
+	ble, ok := err.(*upstreamerr.BillingLockError)
+	if !ok {
+		t.Fatalf("quota exhaustion must surface as BillingLockError, got %T: %v", err, err)
+	}
+	if ble.Until.Before(time.Now()) {
+		t.Fatalf("billing lock Until must be in the future (UTC+8 midnight), got %v", ble.Until)
+	}
+	// Until 必须落在「下一个 UTC+8 自然日 24:00」：把 Until 平移 +8h 后
+	// 应正好是某个 UTC 日的 00:00（整点），且在 1~24 小时之间。
+	utc8 := ble.Until.UTC().Add(8 * time.Hour)
+	if utc8.Hour() != 0 || utc8.Minute() != 0 || utc8.Second() != 0 {
+		t.Fatalf("Until must be UTC+8 midnight, got %v (+8h = %v)", ble.Until, utc8)
+	}
+}
+
+// TestCodeartsQuotaExhaustedNonSSEChannel: 上游同样可能以 4xx 下发额度错误——
+// 两条通道都接（ref 784210d「AGENTS.md 铁律」），按报文语义而不是状态码分类。
+func TestCodeartsQuotaExhaustedNonSSEChannel(t *testing.T) {
+	m := newCodeartsTestManager(t)
+	body := `{"error_code":"InferHub.4291.200","error_msg":"insufficient quota"}`
+	_, retryMs, err := m.codeartsInterceptResponse(nil, codeartsResp(400, body), "deepseek-v4.1-flash", true)
+	if retryMs != 0 {
+		t.Fatalf("4xx quota error must not queue-retry, got retryAfter=%dms", retryMs)
+	}
+	if _, ok := err.(*upstreamerr.BillingLockError); !ok {
+		t.Fatalf("4xx quota error must be BillingLockError, got %T: %v", err, err)
+	}
+}
+
+// TestCodeartsQuotaExhaustedMessageFallback: 万一上游换码值，`insufficient quota`
+// 文案兜底仍要命中（ref 同款，与 zcode/qoder 既有做法一致）。
+func TestCodeartsQuotaExhaustedMessageFallback(t *testing.T) {
+	if !isCodeArtsSSEQuotaExhausted("InferHub.SomeNew.777", "Insufficient_Quota for today") {
+		t.Fatal("message fallback must catch insufficient-quota wording regardless of code")
+	}
+	if isCodeArtsSSEQuotaExhausted("TM.00001041", "并发会话数已达上限") {
+		t.Fatal("queue errors must not classify as quota exhaustion")
+	}
+}
+
+// TestCodearts429BoundaryAnchoring: `429` 判据必须锚定为**独立数字**——
+// `…81114.429`（结尾）与 `429 `（后接空格）命中，`4291` 不命中。
+// ⚠️ 反向验证：把 codeartsSSEQueueCodeRe 的 `(^|[^0-9])429([^0-9]|$)` 改回裸
+// `429` 本测试必须变红（只靠调用点顺序兜不住边界——end-to-end 用例不会红，
+// 边界就成了没人守的装饰，ref 784210d 的原话）。
+func TestCodearts429BoundaryAnchoring(t *testing.T) {
+	matches := func(code string) bool { return isCodeArtsSSEQueueCode(code) }
+	for _, code := range []string{
+		"InferHub.ModelArts.81114.429", // 结尾（真实 trace）
+		"InferHub.429 x",               // 后接空格
+		"429",                          // 全等
+		"x429",                         // 前面是字母（[^0-9] 边界）
+	} {
+		if !matches(code) {
+			t.Errorf("%q must still classify as queue/rate-limit", code)
+		}
+	}
+	for _, code := range []string{
+		"InferHub.4291.200", // 额度耗尽：不得命中排队正则
+		"1429",              // 4291 同型：数字边界内不命中
+	} {
+		if matches(code) {
+			t.Errorf("%q must NOT match the queue regex (429 is a standalone number)", code)
 		}
 	}
 }

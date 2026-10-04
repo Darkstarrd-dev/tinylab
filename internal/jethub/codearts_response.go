@@ -64,7 +64,34 @@ func retryDropHeaderOf(r *http.Request) string {
 var codeartsQueueBodyRe = regexp.MustCompile(`(?i)peak\s+usage|try\s+again\s+after|peak\s+hours|high\s+demand|too\s+many\s+requests`)
 
 // codeartsSSEQueueCodeRe mirrors the reference isSseQueueErrorCode pattern.
-var codeartsSSEQueueCodeRe = regexp.MustCompile(`(?i)81111|81114|TPM|429|rate.?limit|too many requests|排队|限流`)
+// ⚠️ `429` must be anchored as a STANDALONE number — `(^|[^0-9])429([^0-9]|$)`
+// (ref 784210d, 2026-10-02 real-user incident): the quota-exhausted code
+// `InferHub.4291.200` has `4291` which a bare `429` substring matches, sending
+// a deterministic daily-quota failure into the 10s×180 retry loop (30 minutes
+// of silent retries, zero output). `…81114.429` (trailing) and `429 Too Many
+// Requests` (space) still match; `4291` does not.
+var codeartsSSEQueueCodeRe = regexp.MustCompile(`(?i)81111|81114|TPM|(^|[^0-9])429([^0-9]|$)|rate.?limit|too many requests|排队|限流`)
+
+// codeartsQuotaExhaustedCodeRe / codeartsQuotaExhaustedMsgRe mirror the
+// reference isSseQuotaExhaustedErrorCode (ref 784210d): code substring `4291`
+// (deliberately not full-equality — the server assigns the suffix, other
+// `InferHub.4291.xxx` tails should still classify) plus an
+// `insufficient quota` message fallback in case the code value ever changes.
+// ⚠️ Must be checked BEFORE isCodeArtsSSEQueueCode at every call site.
+var (
+	codeartsQuotaExhaustedCodeRe = regexp.MustCompile(`4291`)
+	codeartsQuotaExhaustedMsgRe  = regexp.MustCompile(`(?i)insufficient[\s_-]+quota`)
+)
+
+// isCodeArtsSSEQuotaExhausted reports whether an error code/message means
+// "quota exhausted" — a DETERMINISTIC daily-settled failure. Retrying is
+// pointless (the same result after 180 attempts); the key+model must be
+// billing-locked until UTC+8 midnight and the account switched, mirroring
+// qoder's `110` / opencode quota handling.
+func isCodeArtsSSEQuotaExhausted(code, msg string) bool {
+	return codeartsQuotaExhaustedCodeRe.MatchString(code) ||
+		codeartsQuotaExhaustedMsgRe.MatchString(msg)
+}
 
 // isCodeArtsQueueError reports whether an HTTP error body means "queued /
 // concurrency limit" (⚠️ 400 only, same as the reference).
@@ -116,6 +143,18 @@ func (m *Manager) codeartsInterceptResponse(clientReq *http.Request, resp *http.
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		body := string(raw)
+		// 额度用尽（不可重试，ref 784210d）：必须排在排队判据**之前**——
+		// `insufficient quota` 这类文案若被限流判据先接走，就会被当成
+		// 「重试可自愈」，而它其实是按自然日结算的确定性失败。实测该码
+		// 主要走 SSE 通道（HTTP 200），但服务端同样可能以 4xx 下发——
+		// 两条通道都接，避免哪天改了形态就漏。
+		if isCodeArtsSSEQuotaExhausted(body, body) {
+			_ = resp.Body.Close()
+			return nil, 0, &upstreamerr.BillingLockError{
+				Until:  time.UnixMilli(NextUtc8DayStartMs(nowMillis())),
+				Reason: fmt.Sprintf("codearts: 模型 %s 的免费额度（benefit）已用尽（预计 UTC+8 当日 24:00 重置），可改用其它模型或切换账号", upstreamModel),
+			}
+		}
 		if isCodeArtsQueueError(resp.StatusCode, body) {
 			// 排队/并发上限：等 10s 后用同一个 Key 重发（ref 同款；由代理的
 			// maxQueueAttempts 兜 30 分钟上限）。
@@ -137,6 +176,19 @@ func (m *Manager) codeartsInterceptResponse(clientReq *http.Request, resp *http.
 	}
 	if code, msg, ok := codeartsErrorFrame(payload); ok {
 		_ = resp.Body.Close()
+		// 额度用尽（`InferHub.4291.200`，不可重试）：必须排在排队判据之前
+		// （否则 4291 命中排队正则的 429 前缀 → 30 分钟静默重试零输出，
+		// ref 784210d 的真实报障）。锁 key+model 至 UTC+8 当日 24:00 并换号，
+		// 与 qoder 的 110 / opencode 额度错误同款。
+		if isCodeArtsSSEQuotaExhausted(code, msg) {
+			if msg == "" {
+				msg = "insufficient quota"
+			}
+			return nil, 0, &upstreamerr.BillingLockError{
+				Until:  time.UnixMilli(NextUtc8DayStartMs(nowMillis())),
+				Reason: fmt.Sprintf("codearts: %s %s（模型 %s 免费额度已用尽，预计 UTC+8 当日 24:00 重置）", code, msg, upstreamModel),
+			}
+		}
 		if isCodeArtsSSEQueueCode(code) {
 			return nil, queueRetryMs, nil
 		}

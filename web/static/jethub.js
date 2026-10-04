@@ -335,6 +335,10 @@ function __jethubCreditCellHtml(accountId) {
   if (c.unit === 'token') {
     return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatTokens(c.total) + ' tokens') + '</span>';
   }
+  // 百分比配额窗口（gemini：5 小时 / 周两窗口的剩余比例；**不是**积分）。
+  if (c.unit === '%') {
+    return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total) + '%') + '</span>';
+  }
   return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total)) + '</span>';
 }
 

@@ -78,6 +78,9 @@ func (h *Handler) Register(r chi.Router) {
 		// R2: zcode flows (CLI device login / local-credential import /
 		// balance / daily claim with the local captcha carrier page).
 		h.RegisterZcode(r)
+		// R3-3: gemini flows (Google OAuth browser-callback login /
+		// refresh / quota windows).
+		h.RegisterGemini(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)

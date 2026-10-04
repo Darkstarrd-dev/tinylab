@@ -231,11 +231,12 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 			"gpt-6-astra":            "GPT-6-Astra",
 		},
 		"cline": {
-			// cline-models.ts:107-109 `isFree ? name + ' · 免费' : name`；5 条全部 isFree。
+			// cline-models.ts:107-109 `isFree ? name + ' · 免费' : name`；免费条目。
 			"stealth/space-bunny-alpha":             "Space Bunny Alpha · 免费",
+			// （2026-10-03 起免费清单只剩 4 条：cline-free/gemini-3.8-flash 已被上游
+			// 下线，ref 51d6093——见 trae_model.go 的表注释。）
 			"cline-free/mimo-v2.6-flash":            "MiMo-V2.6-Flash · 免费",
 			"cline-free/deepseek-v4.1-flash":        "DeepSeek V4.1 Flash · 免费",
-			"cline-free/gemini-3.8-flash":           "Gemini 3.8 Flash · 免费",
 			"cline-free/muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · 免费",
 			// cline-pass/*（订阅制，**不是**免费 ⇒ 不带后缀）：ref caf675e 用
 			// models.dev 的 `cline-pass` 块补的可读名（网关只下发裸 id）。
@@ -281,6 +282,8 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		// opencode（R1-7）：免费模型带「· 免费」标记（本地表判定；远端不下发
 		// 免费标记，表外一律 false），付费模型无倍率信息。
 		"opencode": {"big-pickle": "Big Pickle · 免费", "deepseek-v4-flash": "DeepSeek V4 Flash"},
+		// gemini（R3-3）：单模型静态表，无倍率概念（配额窗口制）。
+		"gemini": {"gemini-3.8-flash": "Gemini 3.8 Flash"},
 	}
 	// 兜底路径没有倍率的 provider（rate 必须为空）。
 	noRate := map[string]bool{"buddy": true, "workbuddy": true, "trae": true, "lobsterai": true, "codearts": true, "minimax": true}

@@ -4,9 +4,9 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `e06283c`（2026-10-02，R1 分诊基线；初版移植基线 `cecf376` 的语义记录见归档计划 [`archive/jethub-migration-plan.md`](archive/jethub-migration-plan.md)——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `ff5e37d`（2026-10-04，R3 分诊基线；前序 pin：R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
 >
-> **本轮侦察（2026-10-02）：** master `cecf376` → `e06283c`：**58 commits / 146 文件 / +29,049 −857**（31 个提交触 `src/`）；另有**未合并分支** `feat/opencode-provider`（`7dd3422`，新 provider，与 master 差 34 文件 / +4,779）。→ 首轮待办见 §6。
+> **本轮侦察（2026-10-04，R3）：** master `e06283c` → `ff5e37d`：**85 commits / 150 文件 / +31,751 −1,453**（44 个提交触 `src/`）。R1 时的未合并分支 `feat/opencode-provider` 已合入 master（`1ee3f7e`），其后有 5 个 opencode 修复（思考档位/能力表/contextWindow，触 UI 与远端能力链，架构无关不搬，见 §5）。master 新增 **Gemini Code Assist provider**（`e061b21`，第 14 家，~4,600 行 TS + 172 例单测）与 **zcode 双通道 + zai 渠道**。新 tag `0.2.0-rc.2`（= `530c747`，R3 范围内）。→ 本轮待办见 §6 R3。
 >
 > **关联：** 架构基线与变更维护清单 [`jethub-architecture.md`](jethub-architecture.md)；源码锚点 PROJECT_MAP §13n / §10.28 / §18.2 / §22 / §24。
 
@@ -115,6 +115,14 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | 自动签到（每日首启 / 状态灯 / 结果常驻） | `f10408c` / `68caef3` / `38ec411` | 保留手动「一键签到」；自动签到属面板行为（其中跨日界记账判据已拆出为 R1-3，排除表模式见 R1-9） |
 | 位置参数陷阱修补 | `AGENTS.md`（6 次复发） | 本项目守卫为枚举式，结构性免疫（§4） |
 | 备份格式扩展 / RPC 面板类型 | `types.ts` 的 RPC 与面板类型 | 备份兼容已锁定（架构 §7）；RPC 类型不参与本项目 |
+| R3：OpenAI Responses 出口（`/v1/responses`）+ 用量口径 + 状态码穿透 + 错误帧门禁 + 腾讯系 system 指纹改写 + reasoning-efforts 对照表 | `c19917a` / `ab80924` / `b7bd789` / `9920f56` / `ff5e37d` / `6507462`（`src/openai-gateway/`） | 上游网关出口行为；TinyLab 本体即代理（`/v1/*` 直通），无网关出口层。其中 9920f56 的教训（流式错误帧 status 必须带状态码门禁，否则 200 被读成成功）已在 R3-1 的判据对齐中吸收 |
+| R3：opencode 思考档位 / 远端能力表（models.dev 拉取+缓存）/ contextWindow / 档位 UI | `0774492` / `530c747` / `1960870` / `8b1283a` | R1-7 移植决策已定：档位/能力表价值在 DSH 模型选择器 UI（efforts 下拉、准入校验），TinyLab 无该 UI；图片能力代理本就透传（R1-6 记录）。models.dev 5MB 拉取+磁盘缓存的成本不成比例 |
+| R3：loop-guard 思考循环自动续跑 | `afcaafe` / `601a056`（`src/loop-recovery.ts`） | DSH 宿主回合引擎行为；TinyLab 代理不驱动会话回合 |
+| R3：gemini 面板族（测试按钮/配额行/昵称/账号卡片） | `0969ce2` / `c2c94db` / `5544417` 等 | 面板 UI；实现 Gemini provider 时（R3-3）再按需取材 |
+| R3：zcode 面板/浏览器族（登录渠道弹窗、浏览器探测 darwin 候选链、spawn 守卫、provider-card 槽冲突） | `6b7548b` / `15ccae5`③ / `dc58525` / `b64a9c8` / `e99e30a` | 面板与桌面窗口载体行为 |
+| R3：zcode 双通道（start-plan/coding-plan）+ zai 渠道（2026-10-04 用户决定不搬） | `0fcd929` / `15ccae5`①② / `6b7548b`（`src/zcode-transport.ts`） | 协议事实但本端无需求方：当前账号均为 start-plan/bigmodel 通道；coding-plan 的 api-key 换取链与 zai 渠道在无订阅账号时不可验证。将来出现 coding-plan/zai 账号时按本行锚点重估 |
+| R3：buddy 限流误报「未登录」 | `d77e716`（`src/account-pool.ts`） | 修的是 DSH `resolveCredential` 兜底链的报错语义（空候选→MISSING_CREDENTIAL 误报）；TinyLab 选号在 rotation，空候选语义不同（无此兜底链） |
+| R3：AGENTS.md 增补 1,650 行 | `e06283c..ff5e37d` 多个提交 | 宿主实测坑记录；相关事实已随各 R3 条目落入本项目文档 |
 
 ---
 
@@ -227,9 +235,41 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 
 **未覆盖**：有内容的正向流（需带 plan 的账号）；领取载体页真机（同上）；推理侧 captcha 产出。
 
+---
+
+### R3（pin `e06283c` → `ff5e37d`，2026-10-04 分诊）
+
+> 分诊记录（2026-10-04）：85 commits（44 触 `src/`）逐条归类；merge 提交（`1ee3f7e` opencode 分支、`6c02081` trae 闸门、`afcaafe` loop-guard、`9184cd8`/`3906736` 面板族）已按 `git diff <merge>^1 <merge>` 展开。openai-gateway 出口族 / 面板 UI / 桌面载体 / 宿主回合引擎归 §5。本轮实施 R3-1 + R3-2；R3-3 记录待办（R3-4 当日由用户决定移入 §5 不搬）。
+
+#### R3-1 codearts：`InferHub.4291.200` 额度用尽判据（**不可重试**）+ `429` 边界锚定 ✅
+
+- 上游：`784210d`/`ae0c9b0`（`src/llm-adapter.ts`）——两层缺陷：① `isSseQueueErrorCode` 的 `429` 是**无边界子串**，额度耗尽码 `InferHub.4291.200` 的 `4291` 命中 `429` 前缀，被误判成「可重试的排队限流」→ 每 10s 重试、上限 180 次（30 分钟）静默重试、界面零输出（真实报障实测 25s 内 4 次 chat + 3 次排队探测、0 chunk）；② 额度用尽与排队/限流是**本质不同**的两件事（额度按 UTC+8 自然日结算，重试无意义），必须有独立判据 `isSseQuotaExhaustedErrorCode`（子串 `4291` + 文案兜底 `insufficient quota`）+ 独立处理（标记模型级限流到 UTC+8 当日 24:00 + 换号 + 都耗尽则如实报错带预计解禁时间）。
+- 本项目现状（分诊时核实）：`codearts_response.go:67` 的 `codeartsSSEQueueCodeRe` 含裸 `429`——**同型缺陷原样存在**（`InferHub.4291.200` 会命中排队分支，进入 10s×180 次静默重试）；4xx 通道同理（上游在非 SSE 通道也补了判据，两条通道都接）。
+- 落点：`internal/jethub/codearts_response.go`（429 边界锚定为独立数字 + `isCodeArtsSSEQuotaExhausted` 判据 + 优先于排队判定；命中 ⇒ `upstreamerr.BillingLockError{Until: NextUtc8DayStartMs}`，与 qoder `110`/opencode 额度同款——proxy 重试链据此锁 key+model 并换号）；HTTP 400 通道的 `insufficient quota` 文案兜底一并接入。
+- 验收：单测（`InferHub.4291.200` 判额度不判排队；`81114.429` 仍判排队；`4291` 不再命中排队正则（反向验证：改回裸 429 必须变红）；额度命中产出 BillingLockError 且 Until=UTC+8 24:00；400 + `insufficient quota` 同判）。
+
+#### R3-2 cline：删除已下线的 `cline-free/gemini-3.8-flash` 兜底条目 ✅
+
+- 上游：`51d6093`（`src/cline-product.ts`）——直连复测（2026-10-03）：recommended-models 的 free 数组只剩 4 条，`POST /api/v1/chat/completions model=cline-free/gemini-3.8-flash` 回 404 `model not found`。兜底表留着它 = 模型列表里一个**永远 404** 的免费条目。
+- 本项目现状：`trae_model.go:108` 的 `clineFallbackModels()` 仍含该条（R1-6 并表时快照）。
+- 落点：删 `internal/jethub/trae_model.go` 条目 + 同步 `internal/api/jethub/register_test.go` 的 display-name 期望（23 → 22 条）。
+- 验收：`go test ./internal/jethub/ ./internal/api/jethub/` 全绿；表内不再含该 id。
+
+#### R3-3 新 provider：Gemini Code Assist（第 14 家）✅
+
+- 上游：`e061b21` + 其后 14 个 gemini 修复提交（`src/gemini-*.ts` 7 文件 ~4,600 行 + 172 例单测）。Google Cloud Code Assist 上游，OAuth 授权码（本地回调，无 PKCE）+ refresh 续期 + `cloudcode-pa.googleapis.com` 双层信封（`{model, project, request:{…}, requestId, userAgent}`，**map 键必须字母序**——Go `encoding/json` 天然满足，移植反而免疫）+ 5 个身份头逐字写死 + 模型名带档位后缀（`gemini-3.8-flash-high`，裸名 404）+ 思考档位/预算自由旋钮 + `includeThoughts:false` 是假关（不提供 none 档）+ thoughtSignature 跨轮回填（独立缓存，**不放 state.yaml**——整文件替换语义会覆盖丢失）+ 签名被拒去签重试一次（不换号）+ 403/404/429 先翻端点再换号、401 先续期（只一次）+ 配额百分比口径（`remainingFraction`，total 恒 100）+ 5 小时窗口限流切账号 + lite 模型恒 404 不暴露。
+> **实施记录（2026-10-04）**：落地清单逐项对齐——product 表（`gemini.go`，InferURL=daily+`streamGenerateContent`，`inference_url_test.go` 锁定）→ OAuth 浏览器回调登录（`gemini_oauth.go`：先监听后拼 URL/state 校验/client_secret 必带）+ refresh 续期（per-credential 串行，R1-2 同款锁）→ augmenter（`gemini_convert.go`：身份五头 + 信封构造，OpenAI→双层信封，工具 schema 白名单清洗）→ 响应 InterceptResponse（Cloud Code SSE→OpenAI chunk / 聚合，签名缓存进程内收集回填）→ credits（`gemini_credits.go`：`retrieveUserQuotaSummary` **sandbox** 端点 + body 带 `project` + bucketId 判据 + 百分比窗口）→ API（`/gemini/login|status|refresh|cancel|balance`，loginId 分支被 chi.Walk 守卫覆盖）→ 前端 `'%'` 单位显示。
+> **与 ref 的有意差异**：① 签名缓存**进程内不落盘**（ref 落盘是因 DSH 每请求重建适配器；本端 Manager 常驻）② 无端点轮换/换号层（proxy 重试链 + rotation 已承担；ref 的 `includeThoughts` 恒真/假名 404 判据全保留）③ 档位经**带档位的模型名**（`gemini-3.8-flash-<tier>`）选择而非 DSH efforts 下拉（等价机制）④ 金标准字节断言取**前缀+后缀+字段序**（requestId 随机段无法逐字节，判据强度等价）。
+> 回归 `gemini_test.go`（14 个：金标准信封/档位预算/未知 id 拒绝/角色与工具配对/图片 data-URL 门禁/schema 清洗/凭据过期/签名键/请求 id 形状/SSE 转换/thought→reasoning/错误帧/聚合/嵌套字母序）。
+
+#### R3-4 zcode：双通道（start-plan/coding-plan）+ zai 渠道——不搬（2026-10-04 用户决定）
+
+> 已移入 §5（判定锚点见该表）。上游事实存档：`0fcd929`（zai 渠道：ready 解析接 `data.zai` 分支）+ `15ccae5`（双通道传输层：start-plan=积分走 `zcode.z.ai`，coding-plan=订阅走 `api.z.ai` + OAuth token 换 api-key 四步 GET 流；选路按模型归属、start-plan 优先）。触发重估的条件：用户出现 coding-plan 订阅或 z.ai 国际版账号。
+
 ## 7. 轮次日志
 
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
 |---|---|---|---|---|
 | R1 | 2026-10-02 | `cecf376` → `e06283c` | master 58 commits / 146 文件（31 触 src/）+ 分支 `feat/opencode-provider` 盘点；**R1-1..R1-7 全部实施** | 可搬 7 项全部落地（codearts 去头重试/续期判据+调度器/输出上限、qoder 刷新窗口、minimax 配对、cline 目录 23 条、opencode provider）；参考 2 项（R1-8/R1-9）留待未来；不搬 7 类入 §5；pin `e06283c`（分支未合并，不推进）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 通过 + 前端 `node web/jethub.test.js` 全绿 + opencode 匿名通道真机 200（curl 与端内 augmenter 各一次） |
 | R2 | 2026-10-02 | `e06283c`（不变） | **用户报障触发的重估**：ZCode provider 从 §5 不搬清单移出并整条移植（§6.1） | 新增 13 号 provider（Anthropic Messages 桥 + 3012 身份块/日期块 + CLI 设备授权登录 + 官方凭据解密导入 + token 桶余额 + 本地载体页 captcha 领取）；真机验证：登录 init / 凭据解密 / 余额 200 / 目录数值与 ref 一致 / 推理 200（无 3012）；未覆盖：有内容的正向流与领取载体页（需带 plan 账号）。新事实（目录两种形状、Node↔Go 密钥映射、身份块文本须随上游复核）已写入架构 §6.7（本节 §6 R2） |
+| R3 | 2026-10-04 | `e06283c` → `ff5e37d` | master 85 commits / 150 文件（44 触 src/）；R1 的 opencode 分支已合入（其后 5 个修复归 UI 链不搬）；**R3-1 + R3-2 + R3-3 实施**（同日用户追加），R3-4 移入 §5 不搬，不搬 8 类 | R3-1 codearts 4291 额度判据（BillingLockError 至 UTC+8 24:00 + 换 key）+ 429 独立数字锚定（反向验证必红）；R3-2 cline 删已下线 `cline-free/gemini-3.8-flash`（免费 5→4）；**R3-3 新增 Gemini Code Assist provider（第 14 家）**：OAuth 浏览器回调登录 + 双层信封桥（身份五头/字母序/金标准前缀断言）+ SSE→OpenAI 响应桥 + 签名回填 + sandbox 配额窗口（百分比）+ API/前端接线。`zcode-identity.ts` 未变（已核实）。验证：`go build ./...` + 全量 `go test ./internal/...` 全绿（gemini_test.go 14 例；providers 计数 13→14；chi.Walk 守卫含 gemini） |
