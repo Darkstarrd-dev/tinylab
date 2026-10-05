@@ -155,6 +155,16 @@ func (m *Manager) RefreshRaccoonAccount(ctx context.Context, accountID string) e
 
 // RaccoonBalance GET /points/v1/balance (read-only; safe to call when
 // opening the panel).
+//
+// ⚠️ 字段名是 `available_points`（ref raccoon-credits.ts）。本端原先读的是
+// `balance` —— 那个字段**并不存在**；因为该渠道的能力位一直误登记为
+// `HasBalance: false`，面板从不调用它，所以缺陷从未显现（用户报障原文：
+// 「Minimax, DSH 里会显示 credits 数字，Tinylab 里不会显示」）。
+//
+// ⚠️ 各池**分开作 package**：让用户看出「奖励 / 每日 / 会员 / 充值」是独立来源
+// —— 它们的有效期与回补规则都不同（每日积分每日刷新、充值积分长期有效）。
+// 只显示合计会丢掉最关键的信息：**今天有多少会作废**。面板据此显示
+// 「长期 X · 每日 Y」（池名分桶，ref formatPoolSplitLine 的 DAILY_POOL_NAMES）。
 func (m *Manager) RaccoonBalance(ctx context.Context, accountID string) (*CreditBalance, error) {
 	cred, err := m.raccoonCredentialFor(accountID)
 	if err != nil {
@@ -168,10 +178,56 @@ func (m *Manager) RaccoonBalance(ctx context.Context, accountID string) (*Credit
 	if env.Code != 0 || env.Data == nil {
 		return nil, env.err("余额查询失败")
 	}
-	out := &CreditBalance{Packages: []CreditPackage{}}
-	out.Total = roundCredits(jsonNumberField(env.Data, "balance"))
-	out.IsCredit = true
-	return out, nil
+	// `available_points` 是**核心字段**：没有它就说明响应形状不对 —— 不编造数字
+	// （字段缺失时 readNumber 会伪装成 0，把「查不到」说成「已用光」）。
+	return raccoonBalanceFromPools(env.Data)
+}
+
+// raccoonBalanceFromPools maps the points pools to the provider-agnostic
+// CreditBalance (纯函数，便于单测；不碰网络).
+func raccoonBalanceFromPools(data map[string]any) (*CreditBalance, error) {
+	available, ok := raccoonPointsField(data, "available_points")
+	if !ok {
+		return nil, fmt.Errorf("jethub: raccoon 余额响应缺少 available_points 字段")
+	}
+	packages := []CreditPackage{}
+	addPool := func(label, key string, requirePositive bool) {
+		value, ok := raccoonPointsField(data, key)
+		if !ok || (requirePositive && value <= 0) {
+			return
+		}
+		packages = append(packages, CreditPackage{
+			Name: label, Unit: "积分",
+			Remaining: roundCredits(value), Total: roundCredits(value), Active: true,
+		})
+	}
+	addPool("奖励积分", "reward_points", false)
+	addPool("每日积分", "daily_points", false)
+	addPool("会员积分", "monthly_points", true)
+	addPool("充值积分", "topup_points", false)
+	if len(packages) == 0 {
+		// 极端情形（服务端只给总额不给分项）也要有至少一个包，否则面板空列表。
+		packages = append(packages, CreditPackage{
+			Name: "可用积分", Unit: "积分",
+			Remaining: roundCredits(available), Total: roundCredits(available), Active: true,
+		})
+	}
+	// 无「已失效」概念（服务端不分失效池）。
+	return &CreditBalance{Total: roundCredits(available), Packages: packages, IsCredit: true}, nil
+}
+
+// raccoonPointsField reads a numeric points field, distinguishing
+// 「字段缺失」(false) from「值为 0」(true, 0) —— 两者语义完全不同。
+func raccoonPointsField(data map[string]any, key string) (float64, bool) {
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return 0, false
+	}
+	value, ok := raw.(float64)
+	if !ok {
+		return 0, false
+	}
+	return value, true
 }
 
 // ClaimRaccoonLoginReward claims the desktop login reward. ⚠️ NOT a daily

@@ -18,6 +18,13 @@ const APIType = "jethub"
 // in the registry (e.g. "jethub-codearts").
 const IDPrefix = "jethub-"
 
+// anonymousKeyPriorityBase is the rotation priority floor for a provider's
+// anonymous channel(s): they always sort **after** every keyed account, in the
+// user's stored order among themselves (see Bridge.SyncKeys). It is a position,
+// not a privilege downgrade — the anonymous account can still be reordered,
+// disabled and deleted like any other.
+const anonymousKeyPriorityBase = 100
+
 // ProviderID returns the bridged provider ID for a jethub provider name.
 func ProviderID(provider string) string { return IDPrefix + provider }
 

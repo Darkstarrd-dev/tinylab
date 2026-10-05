@@ -149,6 +149,10 @@ func (h *Handler) buddyClaim(provider string) http.HandlerFunc {
 }
 
 // buddyBalance GET — credit balance for one account.
+//
+// ⚠️ `windowDays` 与 `balance` **并列**回传（ref RpcCreditsBalancesResponse 同
+// 形状）：面板据此把资源包分成「长期 / 临时」两桶 —— 距扣费截止不足该天数的算
+// 临时（再不用就作废，优先消耗）。窗口必须由后端给出，前端不得写死。
 func (h *Handler) buddyBalance(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		accountID := r.URL.Query().Get("accountId")
@@ -157,7 +161,10 @@ func (h *Handler) buddyBalance(provider string) http.HandlerFunc {
 			apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{
+			"balance":    balance,
+			"windowDays": corejethub.ExpiringWindowDays(),
+		})
 	}
 }
 

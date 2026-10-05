@@ -44,6 +44,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Put("/providers/{provider}/proxy", h.setProxyEnabled)
 		r.Get("/providers/{provider}/accounts", h.listAccounts)
 		r.Post("/providers/{provider}/accounts", h.createAccount)
+		// 拖拽排序：顺序即选号优先级（桥接按位置分配 Priority）。
+		r.Put("/providers/{provider}/accounts/order", h.reorderAccounts)
 		r.Patch("/accounts/{accountID}", h.patchAccount)
 		r.Delete("/accounts/{accountID}", h.deleteAccount)
 		r.Get("/providers/{provider}/models", h.listModels)
@@ -149,6 +151,37 @@ type providerDTO struct {
 	SupportsRateLimit bool `json:"supportsRateLimit"`
 	CanLockPermanent  bool `json:"canLockPermanent"`
 	PermanentLocked   bool `json:"permanentLocked"`
+	// ClaimKind 是「领取」按钮的**语义**（原版能力矩阵里 `dailyCheckin` 与
+	// `onboardingTasks` 是两个彼此独立的位，不能互相推断）：
+	//   - "daily"      = 每日签到：每天都有收益，按钮文案是「领取」；
+	//   - "onboarding" = **一次性**奖励：每号只能领一次（raccoon 的桌面端登录
+	//     奖励只有这一个端点，本端把它落在领取按钮上）。
+	// 混用会让用户以为每天都能再领一次，于是每天点一次必然 already-claimed 的请求。
+	ClaimKind string `json:"claimKind"`
+	// SupportsOnboardingTasks 表示该渠道**另有**独立的一次性任务端点
+	// （原版 `onboardingTasks`；目前只有 loomy：8 个任务合计 10000 分）。为真时
+	// 卡片上额外渲染一个独立按钮 —— 与每日签到是**两件事**，混进「一键签到」会
+	// 每天对已领完的账号发 8 个必然 alreadyCompleted 的请求。
+	SupportsOnboardingTasks bool `json:"supportsOnboardingTasks"`
+}
+
+// onboardingTaskProviders mirrors the original CREDITS_CAPABILITIES.onboardingTasks
+// set (ref credits-capabilities.js)：**一次性**奖励渠道。
+var onboardingTaskProviders = map[string]bool{
+	"loomy": true, "raccoon": true,
+}
+
+// claimKindOf mirrors the original split between dailyCheckin and
+// onboardingTasks: a provider whose ONLY claim endpoint is a one-time reward
+// must not be labelled as a daily check-in.
+func claimKindOf(provider string) string {
+	// raccoon 的「每日 300 积分」由**服务端按日自动发放**（账单里
+	// `biz_type: daily_grant`），**没有可选调用的签到端点** —— 它登记在
+	// onboardingTasks 上，故这里如实标成一次性。
+	if provider == "raccoon" {
+		return "onboarding"
+	}
+	return "daily"
 }
 
 // permanentLockProviders mirrors the original PERMANENT_LOCK_PROVIDERS set
@@ -158,9 +191,22 @@ var permanentLockProviders = map[string]bool{
 }
 
 // rateLimitExemptProviders mirrors the original RATE_LIMIT_CAPABILITIES — the
-// only provider known NOT to return rate-limit errors.
+// providers whose rate limiting is NOT governed by the per-card retest/reset
+// buttons. 登记判据见 ref credits-capabilities.js：答「这个按钮点下去，能不能
+// 让用户**少**受限一次？」，答否即登记。两个子类的理由**不同**：
+//
+//   - loomy：**根本不返回限流错误**（今日赠送额度用完后静默降级去扣永久积分）
+//     ⇒ 重测永远测不出东西、重置没有标记可清，重测还会白烧额度；
+//   - gemini：**限流是服务端配额窗口制**（5 小时 + 周窗口），本地标记清掉、
+//     重测通过，配额本身一点没恢复 ⇒ 按钮只剩「白烧本就紧张的窗口配额」与
+//     「把受限账号放回池里再撞一次 429」两种副作用。
+//
+// ⚠️ 漏登记的后果与额度能力位相反：多渲染两个按钮不会报错，但会让用户对
+// gemini 反复白烧配额（用户报障原文：「重测按钮你确认过会发请求吗，为什么响应
+// 这么快？可以移除吗」）。
 var rateLimitExemptProviders = map[string]bool{
-	"loomy": true,
+	"loomy":  true,
+	"gemini": true,
 }
 
 func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +229,11 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 		dto.SupportsRateLimit = !rateLimitExemptProviders[meta.ID]
 		dto.CanLockPermanent = permanentLockProviders[meta.ID]
 		dto.PermanentLocked = h.d.Manager.PermanentLocked(meta.ID)
+		dto.ClaimKind = claimKindOf(meta.ID)
+		// 「另有一次性任务端点」只在确实**同时**有每日签到时才是独立按钮：
+		// raccoon 的领取本身就是那个一次性端点，再渲染第二个按钮会让同一个动作
+		// 出现两次（且其中一个必然 already-claimed）。
+		dto.SupportsOnboardingTasks = onboardingTaskProviders[meta.ID] && dto.ClaimKind == "daily"
 		out = append(out, dto)
 	}
 	apibase.WriteJSON(w, http.StatusOK, map[string]any{"providers": out})
@@ -258,6 +309,41 @@ func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
+}
+
+// reorderAccounts PUT /api/jethub/providers/{provider}/accounts/order
+//
+//	{"accountIds": ["a","b","c"]}   ← 必须恰好是该 provider 的全部账号
+//
+// 顺序即**选号优先级**：桥接时按池内位置分配 key 的 Priority（fill-first 取
+// priority ASC 的第一个），故这次改动**直接决定下一条请求用哪个账号**。
+// 改完必须 SyncKeys，否则注册表里还是旧顺序（面板看着换了、实际没换）。
+func (h *Handler) reorderAccounts(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if !corejethub.ProviderExists(provider) {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	var req struct {
+		AccountIDs []string `json:"accountIds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.AccountIDs) == 0 {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "accountIds required")
+		return
+	}
+	if err := h.d.Manager.ReorderAccounts(provider, req.AccountIDs); err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if h.d.Manager.Prefix(provider) != "" && h.d.Bridge != nil {
+		if err := h.d.Bridge.SyncKeys(provider); err != nil {
+			apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "accounts": h.d.Manager.Accounts(provider),
+	})
 }
 
 type createAccountRequest struct {

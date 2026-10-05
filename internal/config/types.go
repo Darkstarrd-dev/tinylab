@@ -26,6 +26,17 @@ type Key struct {
 	Priority int    `yaml:"priority" json:"priority"`
 	IsActive bool   `yaml:"isActive" json:"isActive"`
 	Account  string `yaml:"account,omitempty" json:"account,omitempty"`
+	// Proxy is this key's **own egress proxy** (`http://host:port`; empty =
+	// follow the provider's Use Proxy setting, then direct).
+	//
+	// 为什么是 key 级而不是 provider 级：有些上游按**出口 IP** 限额（opencode 的
+	// 匿名通道即如此），同一个 provider 的多个账号要各自拿到独立额度，就只能各自
+	// 走一条出口。provider 级的 Use Proxy 做不到这件事。
+	//
+	// ⚠️ **默认为空 ⇒ 行为与本次改动之前逐字节相同**（只有显式设置过的 key 才会
+	// 走独立的出口 transport）。Free Hub 的 per-account 代理由 `SyncKeys` 写在这
+	// 里；手写的 provider 也可以直接填。
+	Proxy string `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 
 // Protocol values identify the upstream API protocols that a model is known

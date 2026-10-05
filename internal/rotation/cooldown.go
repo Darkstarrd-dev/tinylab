@@ -217,6 +217,7 @@ func (s *Selector) MarkDailyQuotaLocked(providerID, keyID, model string, body st
 	if s.onStateChange != nil {
 		s.onStateChange()
 	}
+	s.noteRateLimit(keyID, model, unlock)
 	return unlock
 }
 
@@ -239,6 +240,7 @@ func (s *Selector) MarkBalanceLocked(providerID, keyID, model, body string) time
 	if s.onStateChange != nil {
 		s.onStateChange()
 	}
+	s.noteRateLimit(keyID, model, unlock)
 	return unlock
 }
 
@@ -260,6 +262,7 @@ func (s *Selector) MarkRateLimited(providerID, keyID, model string, duration tim
 	if s.onStateChange != nil {
 		s.onStateChange()
 	}
+	s.noteRateLimit(keyID, model, unlock)
 	return unlock
 }
 

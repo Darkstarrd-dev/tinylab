@@ -163,6 +163,10 @@ func geminiPackageOf(label string, window *geminiQuotaWindow) CreditPackage {
 		Total:     100,
 		Used:      100 - remaining,
 		Active:    true,
+		// 窗口的重置时刻进明细（ref makeQuotaPackage 的 cycleEndTime = resetTime）：
+		// 面板 hover 显示「重置于 …」。配额是**滚动重置**的额度，不是按月结算的
+		// 套餐周期 —— 用「本周期至」会让人以为要等一个月。
+		CycleEndTime: window.ResetTime,
 	}
 }
 
@@ -278,4 +282,151 @@ func truncateRunes(s string, n int) string {
 		return string(runes)
 	}
 	return string(runes[:n])
+}
+
+// ── 账号规格（loadCodeAssist）─────────────────────────────────────────────────
+
+// GeminiAccountTier 是面板「账号规格」那一行的内容（`Pro` / `Free` / `Ultra`）。
+//
+// ⚠️ 档位来自 `loadCodeAssist`，与配额是**两个端点**（ref 同款：并行发、搭同一次
+// 读数回来）。取不到时整行为空 —— 它是附注信息，不该制造一条无法修复的提示。
+type GeminiAccountTier struct {
+	// Label 是面板短标签（只放得下一个词）。
+	Label string `json:"label"`
+	// Title 是上游原文（`Google AI Pro（g1-pro-tier）`），hover 才看得到。
+	Title string `json:"title"`
+}
+
+// geminiTierLabel: 档位 id/名 → 面板短标签。
+//
+// ⚠️ 顺序有意义：`Ultra` → `Pro` → `Free`。上游把「Pro 但已降级」也叫
+// `free-tier`（`Antigravity Starter Quota`），故不能只看 id 的 `-tier` 后缀。
+func geminiTierLabel(id, name string) string {
+	combined := strings.ToLower(id + " " + name)
+	switch {
+	case strings.Contains(combined, "ultra"):
+		return "Ultra"
+	case strings.Contains(combined, "pro"):
+		return "Pro"
+	case strings.Contains(combined, "free"):
+		return "Free"
+	}
+	if name != "" {
+		return name
+	}
+	return id
+}
+
+// parseGeminiAccountTier 从 loadCodeAssist 响应里解出账号规格。
+//
+// ⚠️ 只读 `paidTier` / `currentTier` 的 `id` / `name`（`paidTier` 优先：两个档位
+// 的 `currentTier` 恒为 `{id:'free-tier',name:'Antigravity'}`，真正区分「有没有
+// Google AI Pro」的是 `paidTier`）。响应里的 description、privacyNotice、
+// allowedTiers **一个都不要展示**。
+func parseGeminiAccountTier(payload any) *GeminiAccountTier {
+	root, ok := payload.(map[string]any)
+	if !ok {
+		return nil
+	}
+	pick := func(raw any) (string, string, bool) {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return "", "", false
+		}
+		id, _ := m["id"].(string)
+		name, _ := m["name"].(string)
+		if id == "" && name == "" {
+			return "", "", false
+		}
+		return id, name, true
+	}
+	id, name, ok := pick(root["paidTier"])
+	if !ok {
+		id, name, ok = pick(root["currentTier"])
+	}
+	if !ok {
+		return nil
+	}
+	title := name
+	switch {
+	case id != "" && name != "":
+		title = name + "（" + id + "）"
+	case title == "":
+		title = id
+	}
+	return &GeminiAccountTier{Label: geminiTierLabel(id, name), Title: title}
+}
+
+// geminiTierCache 与配额同款 TTL（面板挂载时两条请求都发；档位几乎不变，
+// 缓存只为省掉每次切 provider 的那一次往返）。
+var geminiTierCache = struct {
+	sync.Mutex
+	entries map[string]geminiCachedTier
+}{entries: map[string]geminiCachedTier{}}
+
+type geminiCachedTier struct {
+	at   time.Time
+	tier *GeminiAccountTier
+}
+
+// GeminiAccountTier reads the account spec (ref requestAccountTier).
+//
+// ⚠️ 请求体是**逐字常量** geminiLoadAssistBd（对齐抓包，38 字节）—— 不要"顺手"
+// 把 project 塞进去，原版抓包明确它不带。
+// ⚠️ 任何失败都返回 nil（面板不渲染那一行），**不编造**、也不抛错：档位取不到
+// 与「这个账号有问题」是两回事。
+func (m *Manager) GeminiAccountTier(ctx context.Context, accountID string) (*GeminiAccountTier, error) {
+	cred, err := m.geminiCredentialFor(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if cred.AccessToken == "" {
+		return nil, fmt.Errorf("%s", geminiUnauthorizedMessage)
+	}
+	now := time.Now()
+	geminiTierCache.Lock()
+	if cached, ok := geminiTierCache.entries[cred.AccessToken]; ok && now.Sub(cached.at) < geminiCreditsTTL {
+		geminiTierCache.Unlock()
+		return cached.tier, nil
+	}
+	geminiTierCache.Unlock()
+
+	tier := m.geminiRequestAccountTier(ctx, cred)
+	geminiTierCache.Lock()
+	geminiTierCache.entries[cred.AccessToken] = geminiCachedTier{at: now, tier: tier}
+	geminiTierCache.Unlock()
+	return tier, nil
+}
+
+// geminiRequestAccountTier performs the loadCodeAssist call (best effort).
+func (m *Manager) geminiRequestAccountTier(ctx context.Context, cred *GeminiCredential) *GeminiAccountTier {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		geminiEndpointSandbox+geminiLoadAssistP, strings.NewReader(geminiLoadAssistBd))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+cred.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range geminiIdentityHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := m.httpClient("gemini").Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload any
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	return parseGeminiAccountTier(payload)
 }

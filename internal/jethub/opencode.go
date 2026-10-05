@@ -194,6 +194,114 @@ func opencodeKeyTail(apiKey string) string {
 	return apiKey[len(apiKey)-4:]
 }
 
+// opencodeFingerprintGeneration resolves the effective fingerprint generation
+// of one account: the **account entry** is authoritative, the credential's own
+// generation is only a floor (ref 的接线约定：`max(本字段, 凭据内代次)`).
+//
+// 只存**整数代次**而不是新指纹本体：project id 由 `(identity, generation)` 唯一
+// 决定，故换代次即可整体换一份新 project id，无需让调用方拼哈希（与 trae 的
+// 签到设备代次同款取舍）。
+func (m *Manager) opencodeFingerprintGeneration(accountID string, cred *OpencodeCredential) int {
+	generation := 0
+	if cred != nil && cred.Fingerprint != nil && cred.Fingerprint.Generation > generation {
+		generation = cred.Fingerprint.Generation
+	}
+	if acc, ok := m.FindAccount(accountID); ok && acc.OpencodeFingerprintGeneration > generation {
+		generation = acc.OpencodeFingerprintGeneration
+	}
+	return generation
+}
+
+// RotateOpencodeFingerprint bumps the account's fingerprint generation by one
+// and returns the new value —— 用于「怀疑多个账号被关联时」换一份 project id。
+//
+// ⚠️ 与「换出口代理」是**两种独立的分离手段**：指纹分离不增加配额（匿名通道按
+// 出口 IP 限额），代理分离才会。面板上两个按钮并列，文案不得把它们混为一谈。
+func (m *Manager) RotateOpencodeFingerprint(accountID string) (int, error) {
+	acc, ok := m.FindAccount(accountID)
+	if !ok || acc.Provider != "opencode" {
+		return 0, errAccountNotFound(accountID)
+	}
+	next := acc.OpencodeFingerprintGeneration + 1
+	if err := m.UpdateAccount(accountID, func(a *Account) {
+		a.OpencodeFingerprintGeneration = next
+	}); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+// OpencodeChannelBalance reports the **channel availability** of one opencode
+// account — NOT a credit number (ref jet-hub-rpc.ts 的 OPENCODE 分支).
+//
+// ## 为什么不是 `balance: false`（真实缺陷，2026-10-02 上游改）
+//
+// Zen 是**按量计费**的网关，早期据此判「没有可查询的余额」并把能力登记成
+// false —— 那会把整个额度行挡死，用户看到的是「opencode 没有额度」，而 Zen
+// 明明有额度（耗尽会回 `402 Insufficient account funds`）。可它**没有公开的
+// 余额 API**（上游实测 `/zen/v1/` 下 15 条候选路径全部 404，只回官网 HTML）。
+//
+// ## 改后的口径
+//
+// 展示**我们真正测得到的东西**：该通道当前是否可用、是否有模型处于限额冷却。
+// 数据全部来自**本地状态**（账号 `enabled` + `modelRateLimits`），**零网络请求**
+// —— 因此这个函数不会失败，也不会因为上游抖动而产生噪音。
+//
+// 语义映射（**不伪装成余额**）：
+//   - `Total` = 当前可用通道数（0 或 1），单位固定「通道」；
+//   - 处于限额冷却时把 1 放进 `ExpiredTotal`，面板显示「另有 1 已失效」
+//     ——与其它渠道的「已失效资源包」口径一致，前端逻辑无需为它特判。
+//
+// 返回的 `error` 文案（「已停用」/「限额中，<时刻> 恢复」）由调用方与 balance
+// 一起回给前端：它是**状态**而不是查询失败，两者必须能同时出现。
+func (m *Manager) OpencodeChannelBalance(accountID string) (*CreditBalance, string, error) {
+	acc, ok := m.FindAccount(accountID)
+	if !ok || acc.Provider != "opencode" {
+		return nil, "", errAccountNotFound(accountID)
+	}
+	now := nowMillis()
+	limitedUntil := int64(0)
+	limitedModels := 0
+	for modelID, resetAt := range acc.ModelRateLimits {
+		if isBookkeepingRateLimitKey(modelID) {
+			continue
+		}
+		if resetAt > limitedUntil {
+			limitedUntil = resetAt
+		}
+		// 只数**尚未到期**的限额（已过期的标记不构成「限额中」）。
+		if resetAt > now {
+			limitedModels++
+		}
+	}
+	available := 0.0
+	if acc.Enabled && limitedUntil <= now {
+		available = 1
+	}
+	name := "可用通道"
+	if limitedModels > 0 {
+		name = fmt.Sprintf("%d 个模型限额中", limitedModels)
+	}
+	out := &CreditBalance{
+		Total: available,
+		Packages: []CreditPackage{{
+			Name: name, Unit: "通道",
+			Remaining: available, Total: available, Active: true,
+		}},
+	}
+	if acc.Enabled && limitedUntil > now {
+		out.ExpiredTotal = 1
+	}
+	switch {
+	case !acc.Enabled:
+		return out, "已停用", nil
+	case limitedUntil > now:
+		// 与其它渠道的「查询失败」文案区分：这是**状态**，不是故障。
+		return out, "限额中，" + time.UnixMilli(limitedUntil).Format("2006-01-02 15:04") + " 恢复", nil
+	}
+	return out, "", nil
+}
+
 // --- Model table (ref OPENCODE_FALLBACK_MODELS, 实测 2026-10-01) ---
 
 // opencodeFreeModels is the set the ANONYMOUS channel may use (`Bearer public`);

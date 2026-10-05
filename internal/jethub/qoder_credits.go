@@ -237,10 +237,21 @@ func qoderToPackage(name string, quota any) *CreditPackage {
 	if remainingRaw < 0 {
 		remainingRaw = 0
 	}
-	return &CreditPackage{
+	pkg := &CreditPackage{
 		Name: name, Unit: firstNonEmpty(jsonStringField(entry, "unit"), "credits"),
 		Remaining: remainingRaw, Total: total, Used: used, Active: true,
 	}
+	// 到期时间：**专用资源包**带 `expiresAt` / `expires_at`（ISO 字符串，实测），
+	// 套餐额度与普通资源包没有独立到期（统一「领取后 30 天」是活动规则而非包字段）。
+	// 字段缺失 ⇒ **不设**到期（面板显示「长期」），而不是编一个日期。
+	expires := firstNonEmpty(jsonStringField(entry, "expiresAt"), jsonStringField(entry, "expires_at"))
+	if expires != "" {
+		pkg.ExpiresAt = expires
+		if ms := parseISOTime(strings.Replace(expires, " ", "T", 1)); ms > 0 {
+			pkg.DeductionEndTime = ms
+		}
+	}
+	return pkg
 }
 
 // qoderCampaign is one campaigns[] entry.

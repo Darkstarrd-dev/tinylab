@@ -99,7 +99,11 @@ func (b *Bridge) ProbeAccountModel(ctx context.Context, provider, accountID, mod
 		return fmt.Errorf("jethub: probe request: %w", err)
 	}
 	send.Header = req.Header
-	client := b.m.httpClient(provider)
+	// ⚠️ 探针必须走**该账号自己**的出口（`httpClientForAccount`），不是 provider 级
+	// 的：per-account 代理的存在意义就是「让这个账号看起来来自另一个 IP」，探针从
+	// 别的出口发出去，探测结论与真实流量就不是同一件事（例如匿名通道的额度按出口
+	// IP 计，用错出口会得到错误的「仍受限 / 已恢复」判定）。
+	client := b.m.httpClientForAccount(provider, accountID)
 	if client.Timeout < probeTimeout {
 		// The shared 30s client is fine for most probes; qoder WASM signing
 		// plus queue delays can exceed it, so give the probe its own budget —

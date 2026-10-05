@@ -194,7 +194,8 @@ function __jethubActionButtons(provider) {
     html += '<button type="button" class="btn btn-sm" onclick="jethubRefreshCredits(\'' + pid + '\')">' + escapeHtml(t('freeHubRefreshCredits')) + '</button>';
   }
   if (provider.hasCredits) {
-    html += '<button type="button" class="btn btn-sm" onclick="jethubClaimAllProvider(\'' + pid + '\')">' + escapeHtml(t('freeHubClaimAll')) + '</button>';
+    html += '<button type="button" class="btn btn-sm" onclick="jethubClaimAllProvider(\'' + pid + '\')">' +
+      escapeHtml(provider.claimKind === 'onboarding' ? t('freeHubClaimOnboardingAll') : t('freeHubClaimAll')) + '</button>';
   }
   if (provider.supportsRateLimit !== false) {
     html += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubRetestAllHelp')) + '" onclick="jethubRetest(\'' + pid + '\', \'\')">' + escapeHtml(t('freeHubRetestAll')) + '</button>';
@@ -256,9 +257,96 @@ function __jethubRenderAccounts(provider) {
   if (__jethubState.accounts.length === 0) {
     return '<div class="free-hub-hint">' + escapeHtml(t('freeHubNoAccounts')) + '</div>';
   }
-  return __jethubState.accounts.map(function(a) {
+  var cards = __jethubState.accounts.map(function(a) {
     return __jethubAccountCard(provider, a);
   }).join('');
+  // 顺序会真实影响自动选号，必须让用户知道（仅在两个以上账号时显示）。
+  var hint = __jethubState.accounts.length > 1
+    ? '<div class="free-hub-hint free-hub-order-hint">' + escapeHtml(t('freeHubOrderHint')) + '</div>'
+    : '';
+  return cards + hint;
+}
+
+// ---------- 账号拖拽排序（顺序 = 选号优先级）----------
+
+// __jethubDragStart / __jethubDragEnd 记/清当前被拖的账号。
+// ⚠️ 用 state 而不是只靠 dataTransfer：部分浏览器在 dragover 阶段读不到
+// data（安全限制），只依赖它会拿不到被拖项。
+function __jethubDragStart(e, accountId) {
+  __jethubState.dragAccountId = accountId;
+  if (e && e.dataTransfer) {
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', accountId);
+    } catch (err) { /* 老浏览器：忽略，state 已记住 */ }
+  }
+}
+
+function __jethubDragOver(e) {
+  // 必须 preventDefault，否则浏览器不认这是一个可放置目标（drop 不会触发）。
+  if (e && e.preventDefault) e.preventDefault();
+  if (e && e.dataTransfer) { try { e.dataTransfer.dropEffect = 'move'; } catch (err) {} }
+}
+
+function __jethubDragEnd() {
+  __jethubState.dragAccountId = null;
+}
+
+// __jethubDrop 把被拖账号移到目标位置，并把**完整顺序表**提交给服务端。
+//
+// ⚠️ 提交整个列表而不是「移动的第 N 项」：服务端据此做集合相等校验（不重不漏），
+// 一次不完整的拖拽会被明确拒绝，而不是悄悄打乱用户已排好的顺序。
+async function __jethubDrop(e, targetId) {
+  if (e && e.preventDefault) e.preventDefault();
+  var dragged = __jethubState.dragAccountId;
+  __jethubState.dragAccountId = null;
+  if (!dragged || dragged === targetId) return;
+  var ids = __jethubState.accounts.map(function(a) { return a.id; });
+  var from = ids.indexOf(dragged);
+  var to = ids.indexOf(targetId);
+  if (from < 0 || to < 0) return;
+  ids.splice(from, 1);
+  ids.splice(to, 0, dragged);
+  var provider = __jethubState.selected;
+  try {
+    var res = await apiPut('/jethub/providers/' + encodeURIComponent(provider) + '/accounts/order', { accountIds: ids });
+    if (res && res.accounts) {
+      // 服务端会重算 rotationOrder（匿名通道恒殿后），故以它的返回为准 ——
+      // 用本地 ids 顺序渲染会让序号与实际选号次序不一致。
+      __jethubState.accounts = res.accounts;
+    }
+    __jethubRerenderAccounts();
+    toast(t('freeHubOrderSaved'), 'success');
+  } catch (err) {
+    toast(t('failed', [err.message]), 'error');
+    __jethubRerenderAccounts(); // 回到服务端的真实顺序
+  }
+}
+
+// __jethubRerenderAccounts 只重画账号卡片区（不动前缀/模型列表/提示区）。
+function __jethubRerenderAccounts() {
+  var el = document.getElementById('free-hub-accounts');
+  if (!el) return;
+  var provider = __jethubState.providers.find(function(p) { return p.id === __jethubState.selected; }) || {};
+  el.innerHTML = __jethubRenderAccounts(provider);
+}
+
+// __jethubIsAnonymousAccount: opencode 的匿名通道。
+//
+// ⚠️ 判据优先用服务端的 `anonymous` 字段（由**凭据内容**判定，权威）；id 前缀只作
+// 兜底（ref 的契约形状是 `opencode-anon-`，而本端的账号 id 是 `{provider}-{8hex}`，
+// 前缀判据在本端**永远不命中** —— 只写前缀会让标签静默消失）。
+function __jethubIsAnonymousAccount(a) {
+  if (a && a.anonymous === true) return true;
+  return String((a && a.id) || '').indexOf('opencode-anon-') === 0;
+}
+
+// __jethubClaimLabel: 「领取」按钮的文案随**语义**走。
+// 把一次性奖励写成「领取」会让用户每天点一次必然 already-claimed 的请求
+// （ref 的能力矩阵把 dailyCheckin 与 onboardingTasks 分成两个独立位，正是为此）。
+function __jethubClaimLabel(provider) {
+  if (provider && provider.claimKind === 'onboarding') return t('freeHubClaimOnboarding');
+  return t('freeHubClaim');
 }
 
 function __jethubAccountCard(provider, a) {
@@ -275,6 +363,13 @@ function __jethubAccountCard(provider, a) {
     badges += '<span class="badge badge-active">key</span>';
   }
   if (a.refreshable) badges += '<span class="badge badge-active">refresh</span>';
+  // opencode 匿名通道：它不需要 key、只用于免费模型，且额度按**出口 IP** 计。
+  // 标出来是为了让用户知道「这条不是登录账号」，以及为什么给它们配不同代理才会
+  // 各自获得独立额度（ref 的同款标签与 tooltip）。
+  if (provider.id === 'opencode' && __jethubIsAnonymousAccount(a)) {
+    badges += '<span class="badge badge-active" data-tooltip="' + escapeAttr(t('freeHubAnonymousHint')) + '">' +
+      escapeHtml(t('freeHubAnonymous')) + '</span>';
+  }
 
   // 限额重置 chips: only future markers are displayed, but ANY marker (even
   // expired) enables the retest/reset buttons (原版 hasAnyLimit 语义).
@@ -299,7 +394,22 @@ function __jethubAccountCard(provider, a) {
     buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubResetHelp')) + '" onclick="jethubReset(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubReset')) + '</button>';
   }
   if (provider.hasCredits && a.enabled && a.hasCredential) {
-    buttons += '<button type="button" class="btn btn-sm" onclick="jethubClaim(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubClaim')) + '</button>';
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubClaimHelp')) + '" onclick="jethubClaim(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(__jethubClaimLabel(provider)) + '</button>';
+  }
+  // 一次性任务端点（原版 onboardingTasks）。只在**另有**每日签到的渠道上出现
+  // （见后端 claimKind / supportsOnboardingTasks 的注释）：与每日签到是两件事。
+  if (provider.supportsOnboardingTasks && a.enabled && a.hasCredential) {
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubOnboardingHelp')) + '" onclick="jethubClaimOnboarding(\'' + pid + '\', \'' + aid + '\')">' + escapeHtml(t('freeHubOnboarding')) + '</button>';
+  }
+  // 出口代理 + 指纹轮换（仅 opencode：**两种独立的「账号分离」手段**）。
+  // ⚠️ 文案必须说清「不设会怎样」：看到「代理」按钮很容易当成锦上添花，实际不设
+  // = 与其它账号共用同一出口（同一份额度）；而**指纹分离不增加配额**，只有独立出口
+  // 才会 —— 两个按钮不能混为一谈（ref 的同款 tooltip）。
+  if (provider.id === 'opencode' && a.hasCredential) {
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' +
+      escapeAttr(a.opencodeProxy ? t('freeHubProxyCurrent', [a.opencodeProxy]) : t('freeHubProxyHelp')) +
+      '" onclick="jethubSetAccountProxy(\'' + aid + '\')">' + escapeHtml(t('freeHubAccountProxy')) + '</button>';
+    buttons += '<button type="button" class="btn btn-sm" data-tooltip="' + escapeAttr(t('freeHubFingerprintHelp')) + '" onclick="jethubRotateFingerprint(\'' + aid + '\')">' + escapeHtml(t('freeHubFingerprint')) + '</button>';
   }
   if (a.refreshable) {
     buttons += '<button type="button" class="btn btn-sm" onclick="jethubRefreshAccount(\'' + aid + '\')">' + escapeHtml(t('freeHubRefresh')) + '</button>';
@@ -308,19 +418,45 @@ function __jethubAccountCard(provider, a) {
   buttons += '<button type="button" class="btn btn-sm" onclick="jethubToggleAccount(\'' + aid + '\')">' + escapeHtml(a.enabled ? t('disable') : t('enable')) + '</button>';
   buttons += '<button type="button" class="btn btn-sm btn-danger" onclick="jethubDeleteAccount(\'' + aid + '\')">' + escapeHtml(t('delete')) + '</button>';
 
-  return '<div class="free-hub-account" data-enabled="' + (a.enabled ? '1' : '0') + '">' +
+  var sid = __jethubSanitizeId(a.id);
+  // 拖拽排序只在两个以上账号时可用（一个账号没有顺序可言，句柄只会是噪音）。
+  // ⚠️ 顺序 = **自动选号优先级**，会真实改变下一条请求走哪个账号 —— 故句柄上
+  // 必须带提示，否则用户「拖了有什么用」无从得知（ref 的 dim-jh-orderHint 同款）。
+  var reorderable = __jethubState.accounts.length > 1;
+
+  return '<div class="free-hub-account" data-enabled="' + (a.enabled ? '1' : '0') + '"' +
+    (reorderable
+      ? ' draggable="true" ondragstart="__jethubDragStart(event, \'' + aid + '\')"' +
+        ' ondragover="__jethubDragOver(event)" ondrop="__jethubDrop(event, \'' + aid + '\')"' +
+        ' ondragend="__jethubDragEnd(event)"'
+      : '') + '>' +
     '<div class="free-hub-account-row">' +
+      (reorderable
+        ? '<span class="free-hub-account-order" data-tooltip="' + escapeAttr(t('freeHubOrderHint')) + '">' +
+            escapeHtml(String(Number(a.rotationOrder || 0) + 1)) + '</span>'
+        : '') +
       '<span class="free-hub-dot' + (a.enabled ? ' on' : '') + '"></span>' +
-      '<span class="free-hub-account-name">' + escapeHtml(a.nickname || a.id) + '</span>' + badges +
+      '<span class="free-hub-account-name"' + (a.accountName ? ' data-tooltip="' + escapeAttr(a.accountName) + '"' : '') + '>' + escapeHtml(a.nickname || a.id) + '</span>' + badges +
+      // 手机号（仅 zcode：由 17 位 user_id 前 11 位派生，上游从不下发手机号字段）
+      // ——取不到就没有这个元素，不显示占位符。
+      (a.phone ? '<span class="free-hub-account-phone">' + escapeHtml(a.phone) + '</span>' : '') +
     '</div>' +
     '<div class="free-hub-account-meta">' +
       '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubCredential')) + '</span>' +
         '<code class="code">' + escapeHtml(a.credentialRef || '-') + '</code></div>' +
       '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubExpires')) + '</span>' +
         '<span' + (expired ? ' class="free-hub-expired"' : '') + '>' + escapeHtml(expires) + '</span></div>' +
+      // 账号规格（目前只有 Gemini 有：Pro / Free / Ultra）。默认隐藏，余额拉回来
+      // 才显示 —— 取不到档位时**整行不出现**（不显示「未知」也不报错：它只是一栏
+      // 附注信息，不该制造一条无法修复的提示）。
       (provider.hasBalance
-        ? '<div class="free-hub-meta-row"><span class="free-hub-meta-label">' + escapeHtml(t('freeHubCreditsLabel')) + '</span>' +
-            '<span id="free-hub-credit-' + __jethubSanitizeId(a.id) + '">' + __jethubCreditCellHtml(a.id) + '</span></div>'
+        ? '<div class="free-hub-meta-row" id="free-hub-tier-row-' + sid + '" style="display:none">' +
+            '<span class="free-hub-meta-label">' + escapeHtml(t('freeHubAccountTier')) + '</span>' +
+            '<span id="free-hub-tier-' + sid + '"></span></div>'
+        : '') +
+      (provider.hasBalance
+        ? '<div class="free-hub-meta-row"><span class="free-hub-meta-label" id="free-hub-credit-label-' + sid + '">' + escapeHtml(__jethubCreditLabel(__jethubCreditUnit(a.id))) + '</span>' +
+            '<span id="free-hub-credit-' + sid + '">' + __jethubCreditCellHtml(a.id) + '</span></div>'
         : '') +
     '</div>' +
     (chips ? '<div class="free-hub-rate-chips"><span class="free-hub-rate-chips-label">' + escapeHtml(t('freeHubRateLimitReset')) + '</span>' + chips + '</div>' : '') +
@@ -331,23 +467,86 @@ function __jethubAccountCard(provider, a) {
 function __jethubCreditCellHtml(accountId) {
   var c = __jethubState.credits[accountId];
   if (!c || c.loading) return '<span class="free-hub-hint">…</span>';
-  if (c.error) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
-  if (c.total === null || c.total === undefined) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
-  // token 计量的渠道（zcode：上游 unit_type="token"）按 M/K 量级显示 ——
-  // 裸数字会被当成积分（上游注释记的用户报障原话：1 亿 token 显示成 94539275）。
-  if (c.unit === 'token') {
-    return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatTokens(c.total) + ' tokens') + '</span>';
+  if (c.error) {
+    // `error` 有两种来源，**都如实显示**（不要把后者也写成「查询失败」）：
+    //   - 真失败：网络/凭据/响应形状（API 抛错或 5xx）；
+    //   - **状态**：opencode 的「已停用」/「限额中，<时刻> 恢复」—— 那是 200
+    //     响应里的正常内容（额度本身就是「通道可用性」，见 OpencodeChannelBalance）。
+    // 完整原因放 title，卡片上只放一行（原版同款：`data-tone=warn` + title）。
+    return '<span class="free-hub-credit-error" title="' + escapeAttr(c.error) + '">' +
+      escapeHtml(c.error) + '</span>';
   }
-  // 百分比配额窗口（gemini：5 小时 / 周两窗口的剩余比例；**不是**积分）。
-  if (c.unit === '%') {
-    return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total) + '%') + '</span>';
+  var balance = c.balance;
+  if (!balance) return '<span class="free-hub-credit-error">' + escapeHtml(t('freeHubCreditFailed')) + '</span>';
+  var packages = balance.packages || [];
+  var unit = c.unit || '';
+  var format = function(value) { return __jethubFormatUnits(value, unit); };
+  var now = Date.now();
+  var total = __jethubBalanceTotal(balance);
+  // 逐窗口百分比（配额单位）优先于均值 —— 均值是上游根本不存在的数（见
+  // __jethubQuotaLine 的注释）。
+  var quotaLine = __jethubQuotaLine(packages, unit);
+  var activeCount = 0;
+  packages.forEach(function(p) { if (p && p.active) activeCount++; });
+  // 两种分桶互斥：有「当日刷新池」的走池名分桶，其余走到期时间分桶。
+  var poolLine = __jethubPoolSplitLine(packages, format, __jethubState.selected === 'loomy' ? t('freeHubCreditPermanent') : t('freeHubCreditLongTerm'));
+  var expiryLine = poolLine ? null : __jethubExpirySplitLine(__jethubSplitByExpiry(packages, c.windowDays, now), format);
+  // 明细进 title（配额口径用「重置于」，资源包口径列每个包 + 到期日）。
+  var detail = __jethubQuotaDetail(packages, unit) || __jethubPackageTooltip(packages, format, now);
+
+  var html = '<span class="free-hub-credit-value"' + (detail ? ' title="' + escapeAttr(detail) + '"' : '') + '>' +
+    '<strong class="free-hub-credit-total">' + escapeHtml(quotaLine !== null ? quotaLine : format(total)) + '</strong>';
+  if (poolLine) {
+    html += '<span class="free-hub-credit-pools">' + escapeHtml(poolLine) + '</span>';
+  } else if (expiryLine) {
+    html += '<span class="free-hub-credit-pools" data-tooltip="' +
+      escapeAttr(t('freeHubCreditExpiryHint', [String(c.windowDays)])) + '">' + escapeHtml(expiryLine) + '</span>';
   }
-  return '<span class="free-hub-credit-total">' + escapeHtml(__jethubFormatNumber(c.total)) + '</span>';
+  // 配额单位下**不渲染**「N/M 个资源包有效」：它的两个「包」是 5 小时窗口与周
+  // 窗口，不是资源包 —— 说「2/2 个资源包有效」既没信息量又误导（ref 用户报障
+  // 原文：「不要渲染 / 2/2 个资源包有效」）。
+  if (quotaLine === null && !poolLine && !expiryLine && packages.length > 1) {
+    html += '<span class="free-hub-credit-packages">' +
+      escapeHtml(t('freeHubCreditPackages', [String(activeCount), String(packages.length)])) + '</span>';
+  }
+  if (Number(balance.expiredTotal) > 0) {
+    html += '<span class="free-hub-credit-expired">' +
+      escapeHtml(t('freeHubCreditExpired', [format(balance.expiredTotal)])) + '</span>';
+  }
+  return html + '</span>';
+}
+
+// __jethubCreditUnit: 当前已知的计量单位（尚未拉到余额时为空串 ⇒ 标签回落「积分」，
+// 与 ref unitLabel 的兜底分支同口径）。
+function __jethubCreditUnit(accountId) {
+  var c = __jethubState.credits[accountId];
+  return (c && c.unit) || '';
 }
 
 function __jethubUpdateCreditCell(accountId) {
   var el = document.getElementById('free-hub-credit-' + __jethubSanitizeId(accountId));
   if (el) el.innerHTML = __jethubCreditCellHtml(accountId);
+  // 标签**随单位走**（ZCode 是 Token、Gemini 是额度、其余是积分）—— 写死「积分」
+  // 会把 token 余额说成积分（真实缺陷：上游用户报障「智谱 plan 给的不是积分是
+  // tokens」）。
+  var label = document.getElementById('free-hub-credit-label-' + __jethubSanitizeId(accountId));
+  if (label) label.textContent = __jethubCreditLabel(__jethubCreditUnit(accountId));
+  // 账号规格：有值才把整行显示出来（取不到 ⇒ 保持隐藏，不显示「未知」）。
+  var c = __jethubState.credits[accountId];
+  var tier = c && c.extra && c.extra.accountTier;
+  var row = document.getElementById('free-hub-tier-row-' + __jethubSanitizeId(accountId));
+  var cell = document.getElementById('free-hub-tier-' + __jethubSanitizeId(accountId));
+  if (row && cell) {
+    if (tier && tier.label) {
+      row.style.display = '';
+      cell.textContent = tier.label;
+      cell.setAttribute('title', tier.title || tier.label);
+    } else {
+      row.style.display = 'none';
+      cell.textContent = '';
+      cell.removeAttribute('title');
+    }
+  }
 }
 
 // __jethubLoadCredits queries the balance of every account that holds a
@@ -366,7 +565,20 @@ async function __jethubLoadCredits(provider) {
     var a = accounts[i];
     try {
       var data = await apiGet('/jethub/' + encodeURIComponent(pid) + '/balance?accountId=' + encodeURIComponent(a.id));
-      __jethubState.credits[a.id] = { total: __jethubBalanceTotal(data.balance), unit: __jethubBalanceUnit(data.balance) };
+      __jethubState.credits[a.id] = {
+        // 整个 balance 都要留着：分桶 / 明细 / 失效额度都要读 packages，
+        // 只留 total 会让这些信息在卡片上无法恢复（原版同样整份带回）。
+        balance: data.balance,
+        // `error` 与 balance **并列**：opencode 的「已停用 / 限额中」是 200 里的
+        // 正常内容，必须能与余额同时显示。
+        error: data.error || '',
+        unit: __jethubBalanceUnit(data.balance),
+        windowDays: (data.windowDays === undefined ? null : data.windowDays),
+        // `extra` 是逐账号的**附加读数**（目前只有 Gemini 的账号规格 Pro/Free/
+        // Ultra 走这里），与 balance **并列**、必须原样带上 —— 漏掉它卡片就永远
+        // 不显示那一行，而后端看不出任何异常。
+        extra: data.extra || null,
+      };
     } catch (e) {
       __jethubState.credits[a.id] = { error: e.message };
     }
@@ -385,38 +597,236 @@ async function jethubRefreshCredits(providerId) {
   __jethubSetNotice(null);
 }
 
-// balance DTO shape varies per provider; normalize the total defensively
-// (packages[].remaining when present, else total, else null).
+// balance DTO shape varies per provider; normalize the total defensively.
+// ⚠️ 只有 total **非正**而包里有余额时才回退为求和：服务端的 total 口径与包明细
+// 不一致时（个别渠道不填 total），显示 0 会把「其实还有额度」说成「已用光」。
 function __jethubBalanceTotal(balance) {
   if (!balance) return null;
-  if (typeof balance.total !== 'undefined' && balance.total !== null) return balance.total;
-  var total = 0, any = false;
-  var packages = balance.packages || [];
-  packages.forEach(function(p) {
-    var v = Number(p.remaining !== undefined ? p.remaining : p.value);
-    if (!isNaN(v)) { total += v; any = true; }
+  var total = Number(balance.total);
+  if (isFinite(total) && total > 0) return total;
+  var sum = 0, any = false;
+  (balance.packages || []).forEach(function(p) {
+    var v = Number(p && p.remaining !== undefined ? p.remaining : null);
+    if (!isNaN(v)) { sum += v; any = true; }
   });
-  return any ? total : null;
+  if (any && sum > 0) return sum;
+  return isFinite(total) ? total : null;
 }
 
-// __jethubBalanceUnit: 计量单位（zcode 的 token；其余渠道无 unit 字段 ⇒ ''）。
+// __jethubBalanceUnit: 计量单位（zcode 的 token / gemini 的 %；其余渠道无 unit
+// 字段 ⇒ ''）。⚠️ 取**首个有单位的包**（同一 provider 的包单位一致；混合单位时
+// 以第一个为准，避免标签在两行之间闪烁）。
 function __jethubBalanceUnit(balance) {
   if (!balance) return '';
   var packages = balance.packages || [];
   for (var i = 0; i < packages.length; i++) {
-    if (packages[i].unit) return packages[i].unit;
+    if (packages[i] && packages[i].unit) return packages[i].unit;
   }
   return '';
 }
 
+// ---------- credits: 单位口径与分桶（ref credits-format.js / credit-expiry.js） ----------
+
+// __jethubCreditLabel: 单位 → 展示名。**只有三类**（ref unitLabel）：
+//   token → Token；% → 额度；其余（含空串/未登记）→ 积分。
+// ⚠️ 这是 unit 字段的**唯一消费点** —— 加新单位时改这里，不要在渲染处写
+// `if (provider === 'zcode')` 那种分支（会漏掉别的渠道，且标签会各写一份）。
+function __jethubCreditLabel(unit) {
+  if (unit === 'token') return t('freeHubUnitToken');
+  if (unit === '%') return t('freeHubUnitQuota');
+  return t('freeHubCreditsLabel');
+}
+
+// __jethubFormatQuota: 配额百分比 → `95%`（四舍五入到整数）。
+// ⚠️ 不能复用 formatNumber：配额读数是 94.5（两窗口均值），补两位小数会显示成
+// 「94.50」——在「额度」标签下那是**假精度**，用户会读成 94.5 个积分。
+function __jethubFormatQuota(value) {
+  var n = Number(value);
+  if (!isFinite(n)) return String(value);
+  return String(Math.round(n)) + '%';
+}
+
+// __jethubFormatUnits: 按单位选择格式化函数（ref formatUnits 的唯一消费点）。
+function __jethubFormatUnits(value, unit) {
+  if (unit === 'token') return __jethubFormatTokens(value);
+  if (unit === '%') return __jethubFormatQuota(value);
+  return __jethubFormatNumber(value);
+}
+
+// __jethubQuotaLine: 配额窗口**逐窗口**一行（ref formatQuotaLine）：
+// 「5 小时窗口 95% · 周窗口 99%」。
+// ⚠️ 主行显示逐窗口读数而**不是均值**：均值（94.5）既不是上游给的数，在「额度」
+// 标签下更会被读成 94.5 个积分（ref 用户报障原文：「95 积分；为什么显示的是积分
+// 不是额度」）。⚠️ 逐窗口用各自的 remaining，**不做求和**（百分比没有「一共」）。
+// 非配额单位返回 null ⇒ 调用方原样走积分/token 分支，零影响。
+function __jethubQuotaLine(packages, unit) {
+  if (unit !== '%' || !packages || !packages.length) return null;
+  var parts = [];
+  packages.forEach(function(pkg) {
+    if (!pkg) return;
+    var value = __jethubFormatQuota(pkg.remaining);
+    if (value === null) return;
+    parts.push((pkg.name || t('freeHubCreditUnnamed')) + ' ' + value);
+  });
+  return parts.length ? parts.join(' · ') : null;
+}
+
+// __jethubQuotaDetail: 配额窗口的 hover 明细（每包一行）。
+// ⚠️ **只在配额单位下生效**（非 `%` 一律返回 null ⇒ 调用方走资源包明细）：
+// 配额读数用 `剩余 / 总额` 渲染会被读成「95 个积分，一共 100 个」——而真相是
+// 「还剩 95%」。窗口的重置时刻用「重置于」而不是「本周期至」（配额是滚动重置，
+// 不是月度套餐）。
+function __jethubQuotaDetail(packages, unit) {
+  if (unit !== '%' || !packages || !packages.length) return null;
+  var lines = [];
+  packages.forEach(function(pkg) {
+    if (!pkg) return;
+    var reset = pkg.cycleEndTime ? ' · ' + t('freeHubCreditResetsAt') + ' ' + pkg.cycleEndTime : '';
+    lines.push((pkg.name || t('freeHubCreditUnnamed')) + '：' + t('freeHubCreditRemaining') + ' ' +
+      __jethubFormatQuota(pkg.remaining) + reset);
+  });
+  return lines.length ? lines.join('\n') : null;
+}
+
+// 当日刷新池的已知池名（ref DAILY_POOL_NAMES）—— 用**名字**识别而不是下标：
+// Raccoon 的池是按「服务端给了哪个字段」动态拼的，下标会错位。
+var __jethubDailyPoolNames = ['每日赠送', '每日积分'];
+
+function __jethubFindDailyPool(packages) {
+  var list = packages || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && __jethubDailyPoolNames.indexOf(list[i].name) !== -1) return list[i];
+  }
+  return null;
+}
+
+// __jethubPoolSplitLine: 池名分桶（loomy / raccoon）→「长期 X · 每日 Y」。
+// 只显示合计会丢掉最关键的信息：**今天有多少会作废**。
+function __jethubPoolSplitLine(packages, format, longTermLabel) {
+  var daily = __jethubFindDailyPool(packages);
+  if (!daily) return null;
+  var rest = 0;
+  (packages || []).forEach(function(pkg) {
+    if (!pkg || pkg === daily) return;
+    if (pkg.active !== true) return;
+    var v = Number(pkg.remaining);
+    if (isFinite(v) && v > 0) rest += v;
+  });
+  return longTermLabel + ' ' + format(rest) + ' · ' + t('freeHubCreditDaily') + ' ' +
+    format(Number(daily.remaining) || 0);
+}
+
+// __jethubPackageExpiryMs: 包的到期时刻（ms）；null = 没有到期概念（显示「长期」）。
+// 来源优先序（ref packageExpiryMs）：deductionEndTime（后端已归一化的毫秒）>
+// expiresAt（字符串，给未归一化的包兜底）。**两处（显示与排序）必须共用它**，
+// 否则会出现「显示说 9/30 到期、排序却按别的字段排」。
+function __jethubPackageExpiryMs(pkg) {
+  if (!pkg) return null;
+  var deduction = Number(pkg.deductionEndTime);
+  if (isFinite(deduction) && deduction > 0) return deduction;
+  if (pkg.expiresAt) {
+    var ms = Date.parse(String(pkg.expiresAt).replace(' ', 'T'));
+    if (isFinite(ms) && ms > 0) return ms;
+  }
+  return null;
+}
+
+// __jethubSplitByExpiry: 按「会不会近期作废」分两桶（ref splitCreditsByExpiry）。
+// ⚠️ 分类是**当前时刻的函数**：宿主长期开着、时间只向前流，永远现算、不缓存。
+// ⚠️ 窗口不可用（null/undefined）时返回 null ⇒ 调用方不渲染分类行 —— 不能把
+// `Number(null)===0` 当成「窗口 0 天」，那会凭空渲染一行假的「临时 0 · 长期 N」。
+// ⚠️ 到期时间**未知**归「长期」（保守方向：宁可少用，不可误烧长期积分）。
+function __jethubSplitByExpiry(packages, windowDays, now) {
+  if (windowDays === null || windowDays === undefined || windowDays === '') return null;
+  var days = Number(windowDays);
+  if (!isFinite(days) || days < 0) return null;
+  var windowMs = days * 86400000;
+  var expiring = 0, permanent = 0;
+  (packages || []).forEach(function(pkg) {
+    // 失效包跳过：服务端仍会返回它的余额，但那部分扣不到。
+    if (!pkg || pkg.active !== true) return;
+    var remaining = Number(pkg.remaining);
+    if (!isFinite(remaining) || remaining <= 0) return;
+    var end = Number(pkg.deductionEndTime);
+    var known = isFinite(end) && end > 0;
+    if (known && end - now < windowMs) expiring += remaining;
+    else permanent += remaining;
+  });
+  return { expiring: expiring, permanent: permanent };
+}
+
+function __jethubExpirySplitLine(split, format) {
+  if (!split) return null;
+  // 「长期」在前、「临时」在后 —— 与「永久 … · 每日 …」同一顺序，两个渠道的
+  // 卡片读起来才对齐。用词是「长期」不是「永久」：这些额度都有到期日，只是较远。
+  return t('freeHubCreditLongTerm') + ' ' + format(split.permanent) + ' · ' +
+    t('freeHubCreditTemporary') + ' ' + format(split.expiring);
+}
+
+// __jethubPackageExpiryText: 单个包的到期展示（绝对日期 + 相对天数）。
+function __jethubPackageExpiryText(pkg, now) {
+  var end = __jethubPackageExpiryMs(pkg);
+  if (end === null) return t('freeHubCreditLongTerm');
+  var d = new Date(end);
+  var date = d.getFullYear() + '-' + __jethubPad2(d.getMonth() + 1) + '-' + __jethubPad2(d.getDate());
+  var days = Math.ceil((end - now) / 86400000);
+  if (days <= 0) return date + t('freeHubCreditExpiredSuffix');
+  return date + '（' + t('freeHubCreditDaysLeft', [String(days)]) + '）';
+}
+
+function __jethubPad2(n) { return (n < 10 ? '0' : '') + n; }
+
+// __jethubPackageTooltip: 资源包列表（账号名 hover）。
+// 三条过滤规则（命中任一即不显示）：已消耗完（remaining<=0）、已过期、已失效
+// （active===false）。⚠️ **必须在 now 上现算**，不能只判 active —— 实测各家的
+// active 口径不一致（TRAE / Qoder 的 active 恒为 true，压根没有这个维度）。
+// 排序：最快到期在最上（未知到期沉底），同一到期时刻按剩余量降序。
+// 截断：最多 12 行，其余汇总成一行给出合计剩余（不丢总量信息）。
+function __jethubPackageTooltip(packages, format, now) {
+  if (!packages || !packages.length) return null;
+  var at = isFinite(now) ? now : Date.now();
+  var usable = packages.filter(function(pkg) {
+    if (!pkg || pkg.active === false) return false;
+    var remaining = Number(pkg.remaining);
+    if (!isFinite(remaining) || remaining <= 0) return false;
+    var end = __jethubPackageExpiryMs(pkg);
+    if (end !== null && end <= at) return false;
+    return true;
+  });
+  if (!usable.length) return null;
+  usable.sort(function(a, b) {
+    var ea = __jethubPackageExpiryMs(a), eb = __jethubPackageExpiryMs(b);
+    var ka = ea === null ? Infinity : ea, kb = eb === null ? Infinity : eb;
+    if (ka !== kb) return ka - kb;
+    return (Number(b.remaining) || 0) - (Number(a.remaining) || 0);
+  });
+  var maxRows = 12;
+  var lines = usable.slice(0, maxRows).map(function(pkg) {
+    return (pkg.name || t('freeHubCreditUnnamed')) + '  ' +
+      format(Number(pkg.remaining) || 0) + ' / ' + format(Number(pkg.total) || 0) + '  ' +
+      __jethubPackageExpiryText(pkg, at);
+  });
+  var rest = usable.slice(maxRows);
+  if (rest.length) {
+    var sum = 0;
+    rest.forEach(function(p) { sum += (Number(p.remaining) || 0); });
+    lines.push('…' + t('freeHubCreditMorePackages', [String(rest.length)]) +
+      (sum > 0 ? t('freeHubCreditMoreSum', [format(sum)]) : ''));
+  }
+  return lines.join('\n');
+}
+
 // __jethubFormatTokens renders a token count with an M/K magnitude suffix
-// (1e6 → 94.54M). 上游额度以 token 计，裸数字在界面上与"积分"无法区分。
+// (1e6 → 94.54M). 上游额度以 token 计，裸数字在界面上与"积分"无法区分
+// （ref 用户报障原话：1 亿 token 显示成 94539275）。
+// ⚠️ 小数位**固定两位**（`94.54M` 而不是 `94.5M`）：token 余额的百位变化对用户
+// 有意义（差 0.04M = 4 万 token），一位小数会把它们抹平（ref formatTokens 同款）。
 function __jethubFormatTokens(value) {
   var n = Number(value);
   if (!isFinite(n)) return String(value);
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return String(n);
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+  return String(Math.round(n));
 }
 
 // __jethubFormatNumber: two decimals for fractional credit values (服务端精确
@@ -1154,6 +1564,57 @@ async function jethubClaim(providerId, accountId) {
   } catch (e) {
     var msg = (e && e.message) || '';
     toast(/already|claimed|已领|幂等|alreadyProcessed/i.test(msg) ? t('freeHubClaimNone') : t('failed', [msg]), 'error');
+  }
+}
+
+// jethubClaimOnboarding: 一次性新手任务（仅 loomy；8 个任务合计 10000 分，每号
+// 只能领一次）。⚠️ 与「一键领取积分」（每日签到）是**不同**的操作：混在一起会让
+// 每天对已领完的账号发 8 个必然 alreadyCompleted 的请求。
+async function jethubClaimOnboarding(providerId, accountId) {
+  __jethubSetNotice({ tone: 'info', text: t('freeHubClaimRunning') });
+  try {
+    var data = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/onboarding/claim', { accountId: accountId });
+    var claimed = (data && (data.claimed || data.claimedTasks)) || [];
+    var earned = data && data.earned;
+    __jethubSetNotice({
+      tone: 'success',
+      text: t('freeHubOnboardingDone', [String(claimed.length || 0), String(earned === undefined ? 0 : earned)]),
+    });
+  } catch (e) {
+    __jethubSetNotice({ tone: 'error', text: t('failed', [e.message]) });
+  }
+}
+
+// jethubSetAccountProxy: 设置/清除该账号自己的出口代理（仅 opencode）。
+//
+// ⚠️ 空串 = **清除**（回到与其它无代理账号共享本机出口），这是一个合法且常用的
+// 操作，不能因为「输入为空」就当成取消。
+async function jethubSetAccountProxy(accountId) {
+  var account = __jethubState.accounts.find(function(a) { return a.id === accountId; }) || {};
+  var value = await promptModal(t('freeHubAccountProxy'), account.opencodeProxy || '', t('freeHubAccountProxyHint'));
+  if (value === null) return; // 用户取消（区别于「输入空串 = 清除」）
+  try {
+    var res = await apiPut('/jethub/opencode/proxy', { accountId: accountId, proxy: String(value).trim() });
+    if (res && res.accounts) __jethubState.accounts = res.accounts;
+    __jethubRerenderAccounts();
+    toast(String(value).trim() ? t('freeHubAccountProxySaved') : t('freeHubAccountProxyCleared'), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// jethubRotateFingerprint: 轮换 opencode 账号的指纹（+1 代次 ⇒ 新 project id）。
+// ⚠️ 与「换出口代理」不同：**指纹分离不增加配额**（匿名通道按出口 IP 限额）。
+async function jethubRotateFingerprint(accountId) {
+  var ok = await confirmModal(t('freeHubFingerprintConfirm'));
+  if (!ok) return;
+  try {
+    var res = await apiPost('/jethub/opencode/fingerprint/rotate', { accountId: accountId });
+    if (res && res.accounts) __jethubState.accounts = res.accounts;
+    __jethubRerenderAccounts();
+    toast(t('freeHubFingerprintDone', [String((res && res.generation) || 0)]), 'success');
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
   }
 }
 

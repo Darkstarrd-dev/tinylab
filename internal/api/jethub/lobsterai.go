@@ -116,5 +116,10 @@ func (h *Handler) lobsteraiBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
+		"balance": balance,
+		// LobsterAI 的每个资源包都带 `expiresAt`（已归一化到 deductionEndTime）
+		// ⇒ 面板按到期远近分「长期 / 临时」（ref 同款）；窗口语义与 buddy 共用。
+		"windowDays": corejethub.ExpiringWindowDays(),
+	})
 }

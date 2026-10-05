@@ -116,5 +116,10 @@ func (h *Handler) traeBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{
+		"balance": balance,
+		// TRAE 的资源包带条目级 `expire_time`（秒 → 毫秒）⇒ 面板按「长期 / 临时」
+		// 分桶显示（ref 同款：TRAE 与 buddy 系共用同一个窗口环境变量）。
+		"windowDays": corejethub.ExpiringWindowDays(),
+	})
 }

@@ -137,6 +137,13 @@ func (h *Handler) geminiCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // geminiBalance GET — quota windows（5 小时 / 周，百分比；非积分）。
+//
+// ⚠️ 账号规格（Pro / Free / Ultra）搭这趟车回来，放在与 `balance` **并列**的
+// `extra.accountTier` 上（ref RpcCreditsBalanceExtra 同款形状）：它不属于余额
+// 语义，塞进 CreditBalance 会让所有逐账号余额断言跟着膨胀；且这类附加读数注定
+// 还会增加（每加一个 provider 就多一批字段）。
+// 取不到档位（上游改协议 / 网络失败 / 非 Gemini）时 `extra` 缺席 ⇒ 面板**整行
+// 不渲染**，既不显示「未知」也不报错。
 func (h *Handler) geminiBalance(w http.ResponseWriter, r *http.Request) {
 	accountID := r.URL.Query().Get("accountId")
 	balance, err := h.d.Manager.GeminiBalance(r.Context(), accountID)
@@ -144,7 +151,11 @@ func (h *Handler) geminiBalance(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	apibase.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance})
+	out := map[string]any{"balance": balance}
+	if tier, terr := h.d.Manager.GeminiAccountTier(r.Context(), accountID); terr == nil && tier != nil {
+		out["extra"] = map[string]any{"accountTier": tier}
+	}
+	apibase.WriteJSON(w, http.StatusOK, out)
 }
 
 // geminiFlows tracks started OAuth flows by loginId（cancel 路由用）。

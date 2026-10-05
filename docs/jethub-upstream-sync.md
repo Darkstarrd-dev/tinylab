@@ -4,9 +4,11 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `ff5e37d`（2026-10-04，R3 分诊基线；前序 pin：R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `2e8bb86`（2026-10-05，R4 分诊基线；前序 pin：R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
 >
-> **本轮侦察（2026-10-04，R3）：** master `e06283c` → `ff5e37d`：**85 commits / 150 文件 / +31,751 −1,453**（44 个提交触 `src/`）。R1 时的未合并分支 `feat/opencode-provider` 已合入 master（`1ee3f7e`），其后有 5 个 opencode 修复（思考档位/能力表/contextWindow，触 UI 与远端能力链，架构无关不搬，见 §5）。master 新增 **Gemini Code Assist provider**（`e061b21`，第 14 家，~4,600 行 TS + 172 例单测）与 **zcode 双通道 + zai 渠道**。新 tag `0.2.0-rc.2`（= `530c747`，R3 范围内）。→ 本轮待办见 §6 R3。
+> **本轮侦察（2026-10-05，R4）：** master `ff5e37d` → `2e8bb86`：**6 commits / 26 文件**，全部集中在 zcode + 文档。三条实质结论：① `2e8bb86` **BREAKING** —— 上游以**安全理由整体删除**「读本机 ZCode 客户端凭据」的旁路（本端有同一条路，用户同日决定**删除**）；② `c94e659` 复测修正两条旧说法：3012 的 HTTP 状态是 **405 不是 403**、日期块**不是**判据；③ `77fbf6c` captcha region 必须与产 param 的配置同源（本端结构上免疫）。`src/zcode-identity.ts` 本轮**只改注释**（逐行过滤非注释增删 = 空）⇒ 身份块文本与 sha256/长度**无需重新提取**。→ 本轮待办见 §6 R4。
+>
+> **本轮同时完成的卡片信息对齐（P0–P2）：** 用户报障「Zcode 在 DSH 里显示限额重置与准确时间、Tinylab 里不显示」「Minimax 在 DSH 里显示 credits 数字、Tinylab 里不显示（不止这一个）」。根因两条：① `ProviderMeta.HasBalance` 与实现脱节（minimax/raccoon/trae/cline 的余额后端早已实现且路由已挂，能力位却是 false）；② **全仓没有任何代码写账号级限流标记**（唯一写入方是内部记账键 + 备份导入），故「限额重置」那一行恒为空。逐项清单与判据见 §6 R4。
 >
 > **关联：** 架构基线与变更维护清单 [`jethub-architecture.md`](jethub-architecture.md)；源码锚点 PROJECT_MAP §13n / §10.28 / §18.2 / §22 / §24。
 
@@ -124,6 +126,11 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R3：zcode 双通道（start-plan/coding-plan）+ zai 渠道（2026-10-04 用户决定不搬） | `0fcd929` / `15ccae5`①② / `6b7548b`（`src/zcode-transport.ts`） | 协议事实但本端无需求方：当前账号均为 start-plan/bigmodel 通道；coding-plan 的 api-key 换取链与 zai 渠道在无订阅账号时不可验证。将来出现 coding-plan/zai 账号时按本行锚点重估 |
 | R3：buddy 限流误报「未登录」 | `d77e716`（`src/account-pool.ts`） | 修的是 DSH `resolveCredential` 兜底链的报错语义（空候选→MISSING_CREDENTIAL 误报）；TinyLab 选号在 rotation，空候选语义不同（无此兜底链） |
 | R3：AGENTS.md 增补 1,650 行 | `e06283c..ff5e37d` 多个提交 | 宿主实测坑记录；相关事实已随各 R3 条目落入本项目文档 |
+| R4：zcode 3012 可观测诊断模块 `src/zcode-diagnostics.ts` | `c94e659` | 它把「账号序号 / 进程内成败计数 / 最近成功时间 / 距上条 / **实测**身份块字符数 / 日期块有无 / HTTP 状态」打进错误文案，服务于 **DSH 侧多账号并发**的现场取证。**事实部分已吸收**（405 不是 403、日期块非判据、身份块 2898 字符 = 42+2856 —— 本端身份块长度与判据本就一致，见架构 §6.7）；诊断行本身属面板/宿主行为，本端单机面板无「账号序号 vs 请求」的对照需求。**重估触发条件**：本端出现「身份块达标仍 3012」的报障且需要用户侧取证模板时，按本行锚点取材 |
+| R4：zcode captcha region 同源修复 | `77fbf6c` | **本端结构上免疫**，无需搬运：本端的 `zcodeCaptchaParam{Param, Region}` 的 Region 来自**产 param 的那一份配置**（`zcodeMintCaptchaParam(ctx, config, …)` → `Region: config.Region`），且 config 在 plan 循环**之前**取一次（上游修法正是「配置成为唯一真相源」）。⚠️ 本端无 captcha 推理侧产出（撞 3007 直接报错），故上游那条「组头时恒写 `captchaRegion ?? 'cn'`」的同型第二实例在本端**不存在** |
+| R4：zcode Linux 浏览器探测候选链 | `892187d` / `22f3031` | 本端登录走 CLI 设备授权流（纯 HTTP），**没有**「探测本机浏览器可执行文件」那条链路；本端的浏览器选择是另一套（`internal/browserlaunch`，用户显式选择 × 会话模式，见架构 §3.9） |
+| R4：zcode coding-plan key 取用接线 | `2e8bb86`（顺带修好） | R3-4 已由用户决定**不搬** coding-plan / zai 通道，故本端没有该取用点 —— 上游这次是修「`fetchCodingPlanApiKey` 建好却零调用方」的断链，前提（coding-plan 通道）在本端不存在。本端原先照抄留下的两个 `zcodeKeyFragmentPlan*` 死常量已随 R4 一并删除 |
+| R1-7 旧差异「opencode 无 per-account 代理」 | R4-0 **反转为已实现**（用户要求全量对齐） | 原判据是「本端推理出站由 proxy 层决定，per-key 出口要动代理核心」。R4-0 做了这件事：`config.Key.Proxy` + 按代理串缓存的 transport + `upstreamClientFor`/`streamClientFor` 的 per-key 分支。**安全边界**：`Key.Proxy` 默认空 ⇒ 未设置的 provider/key 走原路径，逐字节不变（`perkey_proxy_test.go` 两条断言分别锁「设了的会绕」与「没设的不绕」） |
 
 ---
 
@@ -189,7 +196,7 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 - [ ] 前置：实施前复查分支是否已合并 master（合并则以 master 为基准并重跑一次 `pin..master` 分诊）。
 - [ ] 落点：`internal/jethub/opencode*.go`、`products.go`、`bridge.go`（合成槽）、`internal/api/jethub/opencode.go`、`web/static/jethub.js`、文档（架构 §6 矩阵 + PROJECT_MAP）。
 - [x] 验收：单测（槽序列 / 免费模型门禁 / 错误分类 / 指纹形状 / 凭据结构）+ 真机（匿名免费模型一条；付费 key 一条如有）。
-  > **实施记录（2026-10-02）**：`internal/jethub/opencode.go` + `opencode_augment.go`（凭据/指纹/门禁/错误分类/SSE 聚合/账号添加）+ `products.go`（`Product.AnonymousKey`/`ModelFilter` 两个可选钩子）+ `bridge.go`（匿名 Key `Priority=100` 殿后 + 可见性过滤）+ API `POST /api/jethub/opencode/login` + 前端 apikey 弹窗（`__jethubApiKeyModal`，含「添加匿名通道」按钮）+ i18n en/cn。**真机验证**：匿名通道 `Bearer public` + 门禁形状对 `big-pickle` 实发 HTTP 200 SSE（curl 与**本端 augmenter 产出**各一次）。⚠️ **与 ref 的有意差异**：① 匿名槽改为**显式按钮**添加（ref 在首次启用自动补；TinyLab 无 per-provider enable 事件，自动写入会在未使用 opencode 的安装制造噪音）② 无 per-account 代理（用 provider 级 Use Proxy）③ 指纹固定 generation=0（无代次轮换 UI）④ session id 按账号稳定（ref 按会话缓存；形状门禁一致）⑤ 付费可见性已实现（无 keyed 账号只列 7 条免费）。回归 `opencode_test.go`（10 个）+ `internal/api/jethub/opencode_test.go`（1 个）+ 前端路由形状守卫自动覆盖新路径。
+  > **实施记录（2026-10-02）**：`internal/jethub/opencode.go` + `opencode_augment.go`（凭据/指纹/门禁/错误分类/SSE 聚合/账号添加）+ `products.go`（`Product.AnonymousKey`/`ModelFilter` 两个可选钩子）+ `bridge.go`（匿名 Key `Priority=100` 殿后 + 可见性过滤）+ API `POST /api/jethub/opencode/login` + 前端 apikey 弹窗（`__jethubApiKeyModal`，含「添加匿名通道」按钮）+ i18n en/cn。**真机验证**：匿名通道 `Bearer public` + 门禁形状对 `big-pickle` 实发 HTTP 200 SSE（curl 与**本端 augmenter 产出**各一次）。⚠️ **与 ref 的有意差异**：① 匿名槽改为**显式按钮**添加（ref 在首次启用自动补；TinyLab 无 per-provider enable 事件，自动写入会在未使用 opencode 的安装制造噪音）② ~~无 per-account 代理（用 provider 级 Use Proxy）~~ **R4-0 已补做**（见 §6 R4-0 的 P2-J2'）③ ~~指纹固定 generation=0（无代次轮换 UI）~~ **R4-0 已补做**（账号条目持代次，面板有「指纹」按钮）④ session id 按账号稳定（ref 按会话缓存；形状门禁一致）⑤ 付费可见性已实现（无 keyed 账号只列 7 条免费）。回归 `opencode_test.go`（10 个）+ `internal/api/jethub/opencode_test.go`（1 个）+ 前端路由形状守卫自动覆盖新路径。
 
 ### R1-8 参考设计：远端模型目录 gate（未来实现用）
 
@@ -267,10 +274,57 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 
 > 已移入 §5（判定锚点见该表）。上游事实存档：`0fcd929`（zai 渠道：ready 解析接 `data.zai` 分支）+ `15ccae5`（双通道传输层：start-plan=积分走 `zcode.z.ai`，coding-plan=订阅走 `api.z.ai` + OAuth token 换 api-key 四步 GET 流；选路按模型归属、start-plan 优先）。触发重估的条件：用户出现 coding-plan 订阅或 z.ai 国际版账号。
 
-## 7. 轮次日志
+#### R4-0 账号卡片信息对齐（P0–P2，2026-10-05，用户报障驱动并全量实施）
 
+> **触发**：用户报障「Zcode，DSH 里会显示限额重置的信息和准确时间，Tinylab 里不会显示」「Minimax, DSH 里会显示 credits 数字，Tinylab 里不会显示（**不止这一个，还有不少也都不显示 credits 数字**）」，并要求「完整的信息对齐」。**判定原则 §2 三条硬判据全过**：卡片显示的是服务端事实 + 本端数据，且不做会直接造成用户可见的信息缺失。
+
+| # | 现象 | 根因（实测） | 落点 |
+|---|---|---|---|
+| P0-A | minimax / raccoon / trae / cline 四家**永不显示额度数字** | `ProviderMeta.HasBalance` 与实现脱节：四家的余额后端与 `/balance` 路由早已存在，能力位却是 false（该位是前端渲染额度行与「刷新积分」的**唯一**门控） | `internal/jethub/manager.go`（四家补 `HasBalance: true`）+ `internal/api/jethub/balance_capability_test.go`（**双向**守卫：路由有⇒标志必须有、标志有⇒路由必须有） |
+| P0-B | 额度标签恒为「积分」 | 前端写死 `freeHubCreditsLabel`；而 `unit` 已传到前端却只用于格式化数字 | `web/static/jethub.js` 的 `__jethubCreditLabel` 三态（`token`→Token、`%`→额度、其余→积分，ref `unitLabel`）+ 标签随余额回填 |
+| P0-C | Gemini 显示的是**两窗口平均值**（上游根本不存在的数） | `geminiBalanceOf` 的 `total = sum/2`；ref 已因此报障并把主行改成**逐窗口百分比** | 前端 `__jethubQuotaLine`/`__jethubQuotaDetail`（「5 小时窗口 90% · 周窗口 99%」，明细带「重置于」） |
+| P0-J1 | Gemini 显示「重测 / 重置」两个必然无效的按钮 | 例外表只有 loomy | `internal/api/jethub/register.go` 的 `rateLimitExemptProviders` += gemini（配额窗口制：清标记/重测都不恢复配额，按钮只剩白烧配额与放回池里再撞一次） |
+| 额外 | opencode 完全不显示额度行 | Zen **没有公开余额 API**（15 条候选路径全 404），ref 因此把能力位登记为「通道可用性」并使用**本地状态、零网络请求** | 新增 `Manager.OpencodeChannelBalance`（通道是否可用 + 是否限额冷却 ⇒ `Total`/`ExpiredTotal`/`expiredTotal`）+ `GET /api/jethub/opencode/balance`（200 里带 `error` 表示**状态**而非失败） |
+| P1-I | **ZCode 那条的真正根因**：「限额重置」行对所有渠道恒为空 | 全仓**没有任何代码**写账号级 `ModelRateLimits` —— 唯一调用点是 trae 的内部记账键（UI 按 `__` 前缀过滤掉）；额度/限流错误一律走 `BillingLockError` → rotation 的 key 冷却 | `rotation.Selector.SetRateLimitObserver`（注入式观察者，rotation **不依赖** jethub）+ 四条写锁路径（`MarkRateLimited`/`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkNIM429`）都通知 + `app.go` 组合根映射到 `Manager.UpdateModelRateLimit`。**写回规则**：只延长不缩短（ref `account-pool.ts:1047`），空模型名拒收 |
+| P1-I' | 重测说「仍受限」而卡片一条都不显示 | 重测只报结果、**不更新**解禁时刻；滚动窗口下旧时刻过期即被前端隐藏 | `internal/jethub/ratelimits.go` 的 `parseRateLimitResetTime`（ref `RESET_TIME_PATTERN`，中英两种句式 + **捕获**时区）+ 命中即写回 |
+| P1-F/G/H | 只有一行合计数字：无「长期 / 临时」分桶、无资源包 hover 明细、无「另有 N 已失效」 | `CreditPackage` **没有任何到期字段**（buddy 解析出 `DeductionEndTime` 又只用来判 active、lobsterai 的 `expiresAt` 同理），`CreditBalance` 无 `expiredTotal` | DTO 扩展（`deductionEndTime`/`expiresAt`/`cycleEndTime`/`expiredTotal`/`windowDays`）+ 各 provider 填充（buddy/lobsterai/qoder 专用包/zcode 桶/gemini 窗口重置/trae 整张包表）+ 前端 `__jethubSplitByExpiry`/`__jethubPackageTooltip`/`__jethubPoolSplitLine` |
+| P1-E | loomy 的两池、raccoon 的四池都不显示 | loomy 后端**已产出**两个池却被合计掩盖；raccoon 只读一个**并不存在**的 `balance` 字段（真实字段是 `available_points` + 四个池） | 前端池名分桶（`每日赠送`/`每日积分` ⇒「长期 X · 每日 Y」）+ raccoon 按池建包 |
+| P1-D | Gemini 不显示「账号规格」（Pro/Free/Ultra） | 从未取 `loadCodeAssist`（常量已定义但零调用） | `gemini_credits.go` 的档位解析（`paidTier` 优先、`currentTier` 兜底、Ultra→Pro→Free 顺序）+ `extra.accountTier` + 卡片独立一行（取不到则**整行不渲染**） |
+| P2-K | 账号顺序无法调整（拖拽排序缺失） | 池内顺序**就是**选号优先级，但 `SyncKeys` 里一句 `sort.Slice(keys, …ID < …ID)` 把它按 ID 字典序重排 ⇒ 「拖到第一位」对路由层完全无效 | `Manager.ReorderAccounts`（**严格集合相等**校验）+ `PUT /providers/{provider}/accounts/order`（改完 SyncKeys）+ key Priority 按池内位置（匿名恒殿后，与卡片序号同一套编号）+ 前端拖拽与序号徽标 |
+| P2-J2 | opencode 无「指纹」按钮（且指纹代次恒 0） | `opencodeFingerprintGeneration` 字段不存在；augment 直接用凭据里的 projectID（**ref 明确的静默失效形态**：代次涨了 id 不变） | 账号条目加代次字段（落盘 + 备份兼容）+ `max(条目, 凭据)` 重新派生 + `POST /opencode/fingerprint/rotate` + 卡片按钮 |
+| P2-J2' | opencode 无法给单个账号配出口（匿名额度按出口 IP 计 ⇒ 多账号共用同一份额度） | 本端此前把它记为「有意差异」（推理出站由 proxy 层按 **provider** 级 `UseProxy` 决定，没有 key 级出口的概念） | `config.Key.Proxy`（**默认空 ⇒ 默认路径逐字节不变**）+ `proxy.Handler.keyProxyClientsFor`（按代理串缓存独立 transport）+ `upstreamClientFor`/`streamClientFor` 的 per-key 分支（**优先于 provider 级**）+ `bridge.SyncKeys` 写 `Proxy` + `Manager.SetAccountProxy`（空串=清除、非法值当场报错）+ `PUT /opencode/proxy` + 卡片「代理」按钮；探针改走 `httpClientForAccount`（否则探测结论与真实流量不同源） |
+| P2-J3/J4 | loomy 的「新手任务」后端已实现却**前端零入口**；raccoon 的一次性奖励被写成「领取」（像每日签到） | `dailyCheckin` 与 `onboardingTasks` 是原版能力矩阵里**两个彼此独立**的位，本端只搬了一半 | provider DTO 加 `claimKind`（daily/onboarding）与 `supportsOnboardingTasks` + 卡片按语义分文案与按钮（loomy 两个独立按钮、raccoon 单按钮改文案） |
+| P2-L | 匿名通道无标记；无手机号/账号名派生显示 | — | `Account.anonymous`（**凭据内容**判定，非 id 前缀 —— 本端 id 形如 `{provider}-{8hex}`，前缀判据永不命中）+ 「匿名」标签与 tooltip；`Account.accountName`/`phone`（zcode 手机号由 user_id 前 11 位派生）+ 额度失败时把**原因**放进 title |
+| 额外 | **不再有**「R1-7 的 per-account 代理差异」 | 见 P2-J2' | 该差异条目已从 §5 / 架构 §6.5 的「有意差异」里**移除**（改为已实现） |
+
+**与 ref 的差异（有意）**：① ref 的「测试」按钮（无条件探活，仅 gemini）未搬（本端探针复用代理管线，无对应端点）。② 断网/失败时 ref 显示 `查询失败` 的位置，本端显示**原因**（更接近 ref 的 `title` 语义但更显眼）。~~opencode per-account 出口代理未接线~~ —— **R4-0 当日补做**（见下条）。
+
+**R4-0 追加：opencode 的 per-account 出口代理已接线**（原先按 R1-7 记为有意差异）。落点：`config.Key.Proxy`（key 级出口，**默认空 ⇒ 默认路径逐字节不变**）+ `proxy.Handler.keyProxyClientsFor`（按代理串缓存独立 transport，连接池按出口隔离）+ `upstreamClientFor`/`streamClientFor` 的 per-key 分支（**per-key 优先于 provider 级开关**）+ `bridge.SyncKeys` 写 `Proxy` + `Manager.SetAccountProxy`（空串=清除，非法值当场报错）+ `PUT /api/jethub/opencode/proxy` + 面板「代理」按钮（tooltip 说明**不设会与其它账号共用同一出口 = 同一份额度**，且与「指纹」分开：**指纹分离不增加配额**）。探针同样改走 `httpClientForAccount` —— 从别的出口探测会得到与真实流量不同的结论。判据见 `internal/proxy/perkey_proxy_test.go`（设了的绕、没设的不绕、优先于 provider 级、非法回落直连）与 `internal/jethub/account_proxy_test.go`。
+
+#### R4-1 zcode：删除「读本机官方客户端凭据」整条路径（**BREAKING，用户决定**）
+
+- **上游**：`2e8bb86`（`src/zcode.ts` 597→178 行、`src/zcode-auth.ts`、`src/jet-hub-rpc.ts`，净减约 700 行）。理由三条：① **安全**（官方用 sha256(平台+家目录+用户名) 派生 AES-256-GCM 密钥，算法公开可复现 ⇒ 那条路等价于「任何本地进程都能解密 ZCode 登录凭据」）；② **正确性**（zai 渠道下双重失效：两个渠道的 `user_info` **结构**不同，导入结果 `user_id` 恒缺、标签退化成「设备xxxxxxxx」）；③ **一致性**（插件本就有完整可用的 OAuth 流程）。
+- **本项目现状（分诊时核实）**：`zcodeImportLocalCredential`（`zcode.go`）就是同一条路径，且 **issue 描述的同一缺陷确实存在**（只认 `oauth:bigmodel:user_info`，zai 凭据会得到空 `user_id` + `设备xxxxxxxx`）；另有 `zcodeDetectAppVersion` 会读官方安装目录的清单文件。
+- **本轮动作（用户 2026-10-05 决定：「删除」）**：删除 `zcodeImportLocalCredential` / `ZcodeImportLocalAccount` / `POST /api/jethub/zcode/import`、整套凭据文件解密（`enc:v1:` 前缀 `/` 派生密钥 `/` `ZCODE_CREDENTIAL_SECRET`）、`user_info` 解析、安装目录探测与版本清单解析、以及**零调用的** `zcodeKeyFragmentPlan*` 死常量。插件登录的 `AppVersion` 留空 ⇒ 回落内置常量（ref 同款）。
+- **验收**：`TestZcodeNeverReadsLocalClientData`（**扫源码字面量** —— 断言某个函数不存在，对新写的读取函数无效；判据串在测试里拼接，避免守卫自己命中自己；已反向验证：注释里留一个 `credentials.json` 都会变红）+ `TestZcodeImportRouteIsGone`（**反向**回归：`POST /zcode/import` 必须 404，其余四条路由仍在）。
+- ⚠️ **对用户的影响（如实告知）**：「装了官方客户端并登录过 ⇒ 零操作可用」的行为**没有了**，需要在 Free Hub 点一次「登录」走设备授权流；**存量凭据不受影响**，照常工作。
+
+#### R4-2 zcode：两条旧说法的订正（事实修正，无代码改动）
+
+- **上游**：`c94e659`（`src/zcode-identity.ts` 文件头 + `src/zcode-diagnostics.ts` 新增）。
+- **事实 1**：3012 的 HTTP 状态是 **405**，不是 403（按 403 排查会走到「鉴权/权限」的错误分支；响应体还带 `logid`，向用户索取现场时优先要它）。**本端影响**：无功能影响 —— 本端的 zcode 分类**只看响应体业务码**（`zcodeIsRiskBlocked` 匹配 `3012`），状态码不参与判据；仅订正了 `zcode_response.go` 的注释。
+- **事实 2**：**日期块不是判据**（去掉照样 200），它与身份块是「必要非充分」。本端仍照发（官方如此、零成本），注释已注明不要再把它当「3012 的最后一个开关」。
+- **核实**：`src/zcode-identity.ts` 本轮**只改注释**（逐行过滤非注释增删 = 空）⇒ `zcode_identity_text.go` 的文本与 sha256/长度**不需要**重新提取（架构 §6.7 那条「每轮必查」的红线本轮通过）。
+
+#### R4-3 收口
+
+- pin 推进 `ff5e37d` → `2e8bb86`；PROJECT_MAP §22 / §19 / §24 同步。
+- 不搬项入 §5（诊断模块 / Linux 浏览器链 / coding-plan 接线）；region 同源与 405 两条以「本端免疫 + 事实订正」入 §5 与架构 §6.7。
+
+## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
 |---|---|---|---|---|
 | R1 | 2026-10-02 | `cecf376` → `e06283c` | master 58 commits / 146 文件（31 触 src/）+ 分支 `feat/opencode-provider` 盘点；**R1-1..R1-7 全部实施** | 可搬 7 项全部落地（codearts 去头重试/续期判据+调度器/输出上限、qoder 刷新窗口、minimax 配对、cline 目录 23 条、opencode provider）；参考 2 项（R1-8/R1-9）留待未来；不搬 7 类入 §5；pin `e06283c`（分支未合并，不推进）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 通过 + 前端 `node web/jethub.test.js` 全绿 + opencode 匿名通道真机 200（curl 与端内 augmenter 各一次） |
 | R2 | 2026-10-02 | `e06283c`（不变） | **用户报障触发的重估**：ZCode provider 从 §5 不搬清单移出并整条移植（§6.1） | 新增 13 号 provider（Anthropic Messages 桥 + 3012 身份块/日期块 + CLI 设备授权登录 + 官方凭据解密导入 + token 桶余额 + 本地载体页 captcha 领取）；真机验证：登录 init / 凭据解密 / 余额 200 / 目录数值与 ref 一致 / 推理 200（无 3012）；未覆盖：有内容的正向流与领取载体页（需带 plan 账号）。新事实（目录两种形状、Node↔Go 密钥映射、身份块文本须随上游复核）已写入架构 §6.7（本节 §6 R2） |
 | R3 | 2026-10-04 | `e06283c` → `ff5e37d` | master 85 commits / 150 文件（44 触 src/）；R1 的 opencode 分支已合入（其后 5 个修复归 UI 链不搬）；**R3-1 + R3-2 + R3-3 实施**（同日用户追加），R3-4 移入 §5 不搬，不搬 8 类 | R3-1 codearts 4291 额度判据（BillingLockError 至 UTC+8 24:00 + 换 key）+ 429 独立数字锚定（反向验证必红）；R3-2 cline 删已下线 `cline-free/gemini-3.8-flash`（免费 5→4）；**R3-3 新增 Gemini Code Assist provider（第 14 家）**：OAuth 浏览器回调登录 + 双层信封桥（身份五头/字母序/金标准前缀断言）+ SSE→OpenAI 响应桥 + 签名回填 + sandbox 配额窗口（百分比）+ API/前端接线。`zcode-identity.ts` 未变（已核实）。验证：`go build ./...` + 全量 `go test ./internal/...` 全绿（gemini_test.go 14 例；providers 计数 13→14；chi.Walk 守卫含 gemini） |
+| R4 | 2026-10-05 | `ff5e37d` → `2e8bb86` | master 6 commits / 26 文件（全部 zcode + 文档）；**用户报障驱动的卡片信息全量对齐（P0–P2，§6 R4-0）+ R4-1 zcode 本机凭据路径删除 + R4-2 两条旧说法订正**，不搬 3 类入 §5 | **P0**：四家 `HasBalance` 开关补正（minimax/raccoon/trae/cline）+ 单位标签三态 + Gemini 逐窗口百分比 + gemini 排除重测/重置 + opencode「通道可用性」额度行（本地状态、零网络）；**P1**：限额重置标记**首次真正写入**（rotation 观察者 × 四条写锁路径 + app 组合根注入）+ 重测写回新解禁时刻（中英两种句式 + 捕获时区）+ `CreditPackage` 到期字段/`expiredTotal`/`windowDays`/`extra.accountTier` + 各 provider 填充 + 前端临时/长期分桶、资源包 hover 明细、失效额度、池名分桶、账号规格行；**P2**：账号拖拽排序（顺序=选号优先级，删掉 `SyncKeys` 的 ID 重排）+ opencode 指纹轮换（代次为权威）+ **opencode per-account 出口代理接线（`config.Key.Proxy` + per-key transport，默认空 ⇒ 原路径逐字节不变）** + loomy 新手任务入口 + raccoon 一次性奖励文案 + 匿名标记与账号名/手机号派生；**R4-1 删除** zcode 本机凭据导入（含安装目录探测，源码字面量守卫 + 路由反向回归）；**R4-2** 订正 3012 是 405、日期块非判据（本端按响应体判码故功能免疫）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node web/jethub.test.js` 全绿（含 5 组新用例：额度单位/分桶、排序、provider 专属卡片、通道状态、出口代理）；关键项已做反向验证（能力位、观察者、重测写回、指纹、per-key 代理、本机读取守卫） |

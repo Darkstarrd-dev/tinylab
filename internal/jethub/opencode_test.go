@@ -433,6 +433,81 @@ func TestOpencodeBridgeAnonymousLastAndPaidVisibility(t *testing.T) {
 	}
 }
 
+// TestOpencodeFingerprintRotation: 「轮换指纹」必须真的换掉 project id。
+//
+// ⚠️ 判据链是「账号条目的代次是权威，凭据里的代次只是下限」
+// （ref：`max(本字段, 凭据内代次)` 重新派生，**不得**直接透传凭据里的 project id）
+// —— 否则代次涨了而 project id 不变，且不报错，是最难排查的一类静默失效。
+//
+// 反向验证：把 opencodeAugment 里改回 `deriveOpencodeProjectID(identity, 0)` 并透传
+// `cred.Fingerprint.ProjectID`，本用例第二条断言立刻变红。
+func TestOpencodeFingerprintRotation(t *testing.T) {
+	m := newTestManager(t).m
+	id, _, err := m.AddOpencodeAccount("sk-fp-0001", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 抓取一次请求头里的 project id（同一条凭证、同一代次必须稳定）。
+	projectIDAfter := func() string {
+		req := httptest.NewRequest(http.MethodPost, "https://tinylab.local/v1/chat/completions", nil)
+		if _, err := m.opencodeAugment(req, []byte(`{"model":"big-pickle","messages":[]}`), "jethub-opencode", id, "big-pickle"); err != nil {
+			t.Fatal(err)
+		}
+		return req.Header.Get("X-Opencode-Project")
+	}
+	before := projectIDAfter()
+	if before == "" {
+		t.Fatal("project id header missing")
+	}
+	if again := projectIDAfter(); again != before {
+		t.Fatalf("project id must be stable within a generation: %q vs %q", before, again)
+	}
+	// 轮换代次 ⇒ 新 project id。
+	generation, err := m.RotateOpencodeFingerprint(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation != 1 {
+		t.Fatalf("generation = %d, want 1", generation)
+	}
+	after := projectIDAfter()
+	if after == before {
+		t.Fatal("rotating the fingerprint MUST produce a new project id (代次涨了而 id 不变 = 静默失效)")
+	}
+	// 代次落盘（重启后不会退回 0）。
+	m2, err := NewManager(m.dir, m.key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc, ok := m2.FindAccount(id); !ok || acc.OpencodeFingerprintGeneration != 1 {
+		t.Fatalf("generation must persist: %+v", acc)
+	}
+	// 凭据里的代次是**下限**：凭据写 5 时以 5 为准（即使条目里是 1）。
+	acc, _ := m.FindAccount(id)
+	cred, _ := m.Credential("opencode", acc.CredentialRef)
+	var parsed OpencodeCredential
+	if err := json.Unmarshal(cred, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	parsed.Fingerprint = &OpencodeFingerprint{ProjectID: "stale-from-credential", Generation: 5}
+	raw, _ := json.Marshal(parsed)
+	if err := m.SetCredential("opencode", acc.CredentialRef, raw, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	fromCredential := projectIDAfter()
+	if fromCredential == after {
+		t.Fatal("the credential generation is a FLOOR: a higher value must win")
+	}
+	// 但凭据里那个**过期的 projectID 字符串**绝不能被直接透传。
+	if fromCredential == "stale-from-credential" {
+		t.Fatal("the stored projectID must never be passed through verbatim (代次才是权威)")
+	}
+	// 未知账号 ⇒ 显式报错。
+	if _, err := m.RotateOpencodeFingerprint("nope"); err == nil {
+		t.Fatal("unknown account must error")
+	}
+}
+
 // mustReadAll reads an interceptor-returned reader (test helper).
 func mustReadAll(t *testing.T, r io.Reader) []byte {
 	t.Helper()
@@ -441,4 +516,91 @@ func mustReadAll(t *testing.T, r io.Reader) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// TestOpencodeChannelBalanceIsLocalState: opencode 的「余额」是**通道可用性**，
+// 全部来自本地状态、零网络请求。
+//
+// 覆盖三种形态（判据与 ref jet-hub-rpc.ts 的 OPENCODE 分支逐条对齐）：
+//  1. 启用且无未到期标记 ⇒ 可用通道 1、无 error；
+//  2. 有未到期标记 ⇒ 通道 0、expiredTotal 1、error 带**恢复时刻**；
+//  3. 已停用 ⇒ 通道 0、error「已停用」。
+//
+// ⚠️ 反向验证：把 available 的判据改成只看 enabled（丢掉限额分支），第 2 条
+// 会变红 —— 那正是「限额中的通道被当成可用」的原始缺陷。
+func TestOpencodeChannelBalanceIsLocalState(t *testing.T) {
+	env := newTestManager(t)
+	m := env.m
+	id, _, err := m.AddOpencodeAccount("sk-chan-0001", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ① 干净状态。
+	bal, notice, err := m.OpencodeChannelBalance(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("a healthy channel must carry no notice, got %q", notice)
+	}
+	if bal.Total != 1 || len(bal.Packages) != 1 || bal.Packages[0].Unit != "通道" {
+		t.Fatalf("unexpected balance: %+v", bal)
+	}
+	if bal.Packages[0].Name != "可用通道" || bal.ExpiredTotal != 0 {
+		t.Fatalf("unexpected package/no expired: %+v", bal)
+	}
+
+	// ② 未到期的限流标记 ⇒ 不可用 + 恢复时刻写进 error。
+	future := nowMillis() + 3600_000
+	if err := m.UpdateModelRateLimit(id, "big-pickle", future); err != nil {
+		t.Fatal(err)
+	}
+	bal, notice, err = m.OpencodeChannelBalance(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal.Total != 0 || bal.ExpiredTotal != 1 {
+		t.Fatalf("a limited channel must read total=0 expiredTotal=1: %+v", bal)
+	}
+	if bal.Packages[0].Name != "1 个模型限额中" {
+		t.Fatalf("package name must name the limited count: %+v", bal.Packages[0])
+	}
+	if !strings.Contains(notice, "限额中") || !strings.Contains(notice, "恢复") {
+		t.Fatalf("notice must say 限额中 + 恢复时刻, got %q", notice)
+	}
+
+	// ③ 过期的标记不算「限额中」（仍可用）。
+	// ⚠️ 必须先清掉②的标记：`UpdateModelRateLimit` 只延长不缩短（同一次限流会在
+	// 多条路径上重复上报），直接把时刻改到过去会被正确忽略。
+	if err := m.ClearAccountModelRateLimit(id, "big-pickle"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpdateModelRateLimit(id, "big-pickle", nowMillis()-1000); err != nil {
+		t.Fatal(err)
+	}
+	bal, notice, err = m.OpencodeChannelBalance(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal.Total != 1 || notice != "" {
+		t.Fatalf("an expired marker must not keep the channel unavailable: %+v %q", bal, notice)
+	}
+
+	// ④ 停用 ⇒ 不可用，且理由是「已停用」而不是「限额中」。
+	if err := m.UpdateAccount(id, func(a *Account) { a.Enabled = false }); err != nil {
+		t.Fatal(err)
+	}
+	bal, notice, err = m.OpencodeChannelBalance(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal.Total != 0 || notice != "已停用" {
+		t.Fatalf("disabled channel: total=%v notice=%q, want 0/已停用", bal.Total, notice)
+	}
+
+	// ⑤ 未知账号 ⇒ 显式报错（不是静默返回 0）。
+	if _, _, err := m.OpencodeChannelBalance("nope"); err == nil {
+		t.Fatal("unknown account must error")
+	}
 }

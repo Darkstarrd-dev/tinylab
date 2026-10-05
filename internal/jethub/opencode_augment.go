@@ -34,10 +34,12 @@ func (m *Manager) opencodeAugment(r *http.Request, body []byte, providerID, keyI
 	if isAnonymousOpencodeKey(cred.APIKey) {
 		identity = accountID
 	}
-	projectID := deriveOpencodeProjectID(identity, 0)
-	if cred.Fingerprint != nil && cred.Fingerprint.ProjectID != "" {
-		projectID = cred.Fingerprint.ProjectID
-	}
+	// ⚠️ **代次以账号条目为权威**，凭据里的 `fingerprint` 只作兜底
+	// （ref 的接线约定：`max(本字段, 凭据内代次)` 重新派生，**不得**直接透传凭据里
+	// 的 project id）—— 否则用户点了「轮换指纹」后代次涨了、project id 却纹丝不动，
+	// 而且不报错，是最难排查的一类静默失效。
+	generation := m.opencodeFingerprintGeneration(accountID, cred)
+	projectID := deriveOpencodeProjectID(identity, generation)
 	shaped, err := opencodeShapeBody(body)
 	if err != nil {
 		return nil, err

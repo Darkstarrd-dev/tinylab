@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -71,6 +72,10 @@ type Handler struct {
 	// When non-nil it rewrites outbound requests for providers marked
 	// APIType=="jethub" just before they are sent (see forwardUpstream).
 	augmenter RequestAugmenter
+	// keyProxyMu guards keyProxyClients (per-key egress proxy clients, built on
+	// first use — see keyProxyClientsFor).
+	keyProxyMu      sync.Mutex
+	keyProxyClients map[string]*keyProxyClientSet
 }
 
 // New constructs a proxy Handler from capability interfaces rather than concrete
@@ -210,6 +215,51 @@ func (h *Handler) SetProxy(enabled bool, host, port string) error {
 	}
 	h.proxyURL.Store(u)
 	return nil
+}
+
+// keyProxyClientSet is the cached client pair for one per-key egress proxy.
+type keyProxyClientSet struct {
+	plain  *http.Client // non-streaming（Timeout 由 clientFor 按当前设置套用）
+	stream *http.Client // streaming（无 Timeout，连接生命周期跟随请求 context）
+}
+
+// keyProxyClientsFor returns (and lazily builds) the client pair for a key's
+// own egress proxy. ok=false means the raw value is unusable ⇒ 调用方按「没有
+// per-key 代理」处理（回落 provider 级开关 → 直连）。
+//
+// ⚠️ 只有**显式设置过** per-key 代理的 key 才会走到这里；绝大多数请求
+// （`sel.Key.Proxy == ""`）连一次 map 查找都不做 —— 这是本次改动的安全边界：
+// 默认路径与加这个能力之前逐字节相同。
+//
+// ⚠️ 非法值**不报错、只忽略**：代理串是用户手输的（Free Hub 的输入框），一个拼错
+// 的地址不该让整个 key 变成不可用 —— 回落直连至少还能用，且面板上的「额度按出口
+// IP 计」提示会让用户发现没生效。解析失败时不缓存（下次仍会重试解析）。
+func (h *Handler) keyProxyClientsFor(raw string) (*keyProxyClientSet, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	h.keyProxyMu.Lock()
+	defer h.keyProxyMu.Unlock()
+	if set, ok := h.keyProxyClients[raw]; ok {
+		return set, true
+	}
+	pu, err := url.Parse(raw)
+	if err != nil || pu.Host == "" || (pu.Scheme != "http" && pu.Scheme != "https") {
+		return nil, false
+	}
+	// 每个代理串一份独立 Transport：连接池按出口隔离（复用 provider 级的直连
+	// transport 会把两种出口的连接混在同一个池里，等于没换出口）。
+	tr := newUpstreamTransport(func(*http.Request) (*url.URL, error) { return pu, nil })
+	set := &keyProxyClientSet{
+		plain:  &http.Client{Transport: tr, Timeout: time.Duration(h.upstreamTimeoutSec.Load()) * time.Second},
+		stream: &http.Client{Transport: tr},
+	}
+	if h.keyProxyClients == nil {
+		h.keyProxyClients = map[string]*keyProxyClientSet{}
+	}
+	h.keyProxyClients[raw] = set
+	return set, true
 }
 
 // clientFor returns the non-streaming upstream client honoring the current

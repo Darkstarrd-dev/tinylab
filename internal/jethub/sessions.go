@@ -101,6 +101,74 @@ func (m *Manager) httpClient(provider string) *http.Client {
 	return m.directClientLocked()
 }
 
+// httpClientForAccount is httpClient plus the account's **own** egress proxy
+// (currently only opencode's `opencodeProxy`): per-account 优先于 provider 级
+// 开关 —— 账号自己的出口是更具体的意图。
+//
+// ⚠️ 未设置 per-account 代理时**直接返回 httpClient 的结果**（同一个 *http.Client
+// 实例），故既有路径的行为与性能都不变。
+// ⚠️ 非法代理串**忽略并回落**（用户手输的值不该让账号变成不可用）—— 与
+// proxy.keyProxyClientsFor 的判据一致。
+func (m *Manager) httpClientForAccount(provider, accountID string) *http.Client {
+	raw := m.accountProxy(accountID)
+	if raw == "" {
+		return m.httpClient(provider)
+	}
+	pu, err := url.Parse(raw)
+	if err != nil || pu.Host == "" || (pu.Scheme != "http" && pu.Scheme != "https") {
+		return m.httpClient(provider)
+	}
+	m.keyProxyMu.Lock()
+	defer m.keyProxyMu.Unlock()
+	if c, ok := m.keyProxyClients[raw]; ok {
+		return c
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = func(*http.Request) (*url.URL, error) { return pu, nil }
+	c := &http.Client{Transport: tr, Timeout: 60 * time.Second}
+	if m.keyProxyClients == nil {
+		m.keyProxyClients = map[string]*http.Client{}
+	}
+	m.keyProxyClients[raw] = c
+	return c
+}
+
+// accountProxy returns an account's own egress proxy ("" = none).
+func (m *Manager) accountProxy(accountID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := range m.accounts.Accounts {
+		if m.accounts.Accounts[i].ID == accountID {
+			return strings.TrimSpace(m.accounts.Accounts[i].OpencodeProxy)
+		}
+	}
+	return ""
+}
+
+// SetAccountProxy stores an account's own egress proxy ("" clears it).
+//
+// ⚠️ 空串是**合法值**（用户显式清除了代理，回到「与其它无代理账号共享本机出口」），
+// 不可用 falsy 判据把它与「未设置」混为一谈 —— 那会让面板上的「清除代理」点了没
+// 反应（ref ProviderAccountEntry.opencodeProxy 的同款注释）。
+func (m *Manager) SetAccountProxy(accountID, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		pu, err := url.Parse(raw)
+		if err != nil || pu.Host == "" || (pu.Scheme != "http" && pu.Scheme != "https") {
+			return fmt.Errorf("jethub: 代理地址必须是 http(s)://host:port 形式，收到 %q", raw)
+		}
+	}
+	err := m.UpdateAccount(accountID, func(a *Account) { a.OpencodeProxy = raw })
+	if err != nil {
+		return err
+	}
+	// 让下一次出站立刻按新出口走（缓存的 transport 是按代理串索引的，清掉即可）。
+	m.keyProxyMu.Lock()
+	m.keyProxyClients = nil
+	m.keyProxyMu.Unlock()
+	return nil
+}
+
 // ProxyEnabled reports the provider's Use Proxy toggle.
 func (m *Manager) ProxyEnabled(provider string) bool {
 	m.mu.RLock()

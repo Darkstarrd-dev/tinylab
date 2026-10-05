@@ -112,32 +112,34 @@ func TestZcodeStatusUnknownLoginID(t *testing.T) {
 	}
 }
 
-func TestZcodeImportWithoutClientReportsReason(t *testing.T) {
-	// 隔离所有凭据候选根：本机真实装了官方客户端，不隔离的话这条测试会
-	// 直接导入真机凭据（非决定性 + 泄漏到测试环境）。
-	root := t.TempDir()
-	t.Setenv("ZCODE_DATA_BASE_DIR", root)
-	t.Setenv("USERPROFILE", root)
-	t.Setenv("HOME", root)
-	t.Setenv("APPDATA", root)
-	t.Setenv("LOCALAPPDATA", root)
+// TestZcodeImportRouteIsGone: 「导入官方客户端本机凭据」的端点已整体删除
+// （2026-10-05，用户决定，对齐上游 2e8bb86）。
+//
+// ⚠️ 这是一条**反向**回归：它锁的不是行为而是**不存在**。留着正向用例（「导入
+// 失败时给出原因」）会暗示这条路还在，将来很容易被顺手修回来。
+// 源码级的守卫在 internal/jethub/zcode_local_read_test.go（扫字面量）。
+func TestZcodeImportRouteIsGone(t *testing.T) {
 	h := newZcodeTestHandler(t)
 	r := chi.NewRouter()
 	h.RegisterZcode(r)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/zcode/import", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("import status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /zcode/import = %d, want 404 —— 该端点必须保持删除状态（凭据只有 OAuth 设备授权流一条来源）", rec.Code)
 	}
-	var parsed map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if ok, _ := parsed["ok"].(bool); ok {
-		t.Fatalf("import must not succeed without an official client: %s", rec.Body.String())
-	}
-	if reason, _ := parsed["reason"].(string); !strings.Contains(reason, "credentials.json") {
-		t.Fatalf("reason must explain what was missing: %q", reason)
+	// 登录 / 刷新 / 额度 / 领取四条必须仍在（删的是导入那一条）。
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/zcode/status"},
+		{http.MethodGet, "/zcode/balance?accountId=x"},
+	} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+		if rec.Code == http.StatusNotFound {
+			t.Errorf("%s %s must stay registered", route.method, route.path)
+		}
 	}
 }
 

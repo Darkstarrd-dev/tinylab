@@ -3,7 +3,6 @@ package jethub
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/tinylab/tinylab/internal/config"
@@ -208,6 +207,17 @@ func (b *Bridge) SyncKeys(provider string) error {
 
 	accounts := b.m.Accounts(provider)
 	var keys []config.Key
+	// ⚠️ **顺序即选号优先级**（原版拖拽排序的语义）：账号池里的条目顺序由用户
+	// 决定（Manager.ReorderAccounts），这里必须原样保留 —— 先前的一句
+	// `sort.Slice(keys, …keys[i].ID < keys[j].ID)` 会把它按 ID 字典序重排，
+	// 于是「拖到第一位」在路由层**完全没有效果**（用户可见的功能缺失）。
+	//
+	// ⚠️ 排序：非匿名账号按池内顺序拿 0..n-1；匿名通道**恒殿后**
+	// （100+），理由是 fill-first 按 priority ASC 取第一个可用 key —— 匿名槽
+	// 只能服务免费模型，排前面会让收费模型先撞一次必然 401 的匿名尝试。
+	// 这是位置而非特权降级：匿名账号在池内仍可被拖动/停用/删除。
+	nextAnon := 0
+	nextKeyed := 0
 	for _, a := range accounts {
 		if !a.Enabled {
 			continue
@@ -220,12 +230,15 @@ func (b *Bridge) SyncKeys(provider string) error {
 		if err != nil || token == "" {
 			continue
 		}
-		priority := 0
+		// 优先级与 Manager.withRotationOrder 用**同一套编号**（0..n-1 给带 key 的
+		// 账号、100+ 给匿名）：卡片上显示的序号就是选择器实际用的优先级。用池内下标
+		// 会在匿名槽占位时留下空洞，让「卡片显示 1、实际优先级 1」这种偏差永远对不上。
+		priority := nextKeyed
 		if prod.AnonymousKey != "" && token == prod.AnonymousKey {
-			// 匿名槽殿后（只是位置，不是特权降级）：fill-first 按 priority ASC
-			// 取第一个可用 key —— 账号槽优先，收费模型才不会先撞一次必然 401
-			// 的匿名尝试。
-			priority = 100
+			priority = anonymousKeyPriorityBase + nextAnon
+			nextAnon++
+		} else {
+			nextKeyed++
 		}
 		keys = append(keys, config.Key{
 			ID:       a.ID,
@@ -234,9 +247,12 @@ func (b *Bridge) SyncKeys(provider string) error {
 			IsActive: true,
 			Account:  a.Nickname,
 			Priority: priority,
+			// 账号自己的出口代理（目前只有 opencode 有）：写进 key，代理主干按
+			// `sel.Key.Proxy` 选 per-key transport（见 proxy.upstreamClientFor）。
+			// 空串 = 跟随 provider 级 Use Proxy 开关，再退到直连。
+			Proxy: a.OpencodeProxy,
 		})
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
 
 	// Zero usable keys: drop the bridged provider entirely. The stored prefix
 	// stays so a later login/SetPrefix re-bridges automatically.

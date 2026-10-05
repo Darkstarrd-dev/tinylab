@@ -215,6 +215,17 @@ func (a *App) buildComponents() error {
 		jethubMgr.SetAugmenter("codearts", jethubMgr.CodeArtsAugmentHook())
 		// P3.1: buddy/workbuddy attribution hooks.
 		jethubMgr.RegisterProviderAugmenters()
+		// 限额重置标记的**唯一写入链路**：rotation 每次写 key×model 锁
+		// （429 冷却 / 日配额锁 / 402 余额锁 / NIM 阶梯 / BillingLockError）
+		// 都通知到这里，转成 Free Hub 账号卡片上的 `ModelRateLimits`。
+		//
+		// ⚠️ 桥接 key 的 ID 就是账号 ID（bridge.SyncKeys 用 `ID: a.ID`），故这里
+		// 直接按 keyID 落库；**非 Free Hub 的 key 会拿到 ErrNotFound**，那是正常
+		// 路径（本机自配的 provider 没有账号条目），忽略即可 —— 不能因为找不到
+		// 账号就改走别的记账方式，否则又会分裂出第二份真相。
+		a.selector.SetRateLimitObserver(func(keyID, modelID string, untilMs int64) {
+			_ = jethubMgr.UpdateModelRateLimit(keyID, modelID, untilMs)
+		})
 		a.jethubBridge.RestoreBridges()
 		// R1-2: codearts renewal scheduler — startup pass + 30min ticker
 		// (ref cf5edab / index.ts). Without it an expired token stays expired

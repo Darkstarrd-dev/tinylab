@@ -4,10 +4,13 @@ package jethub
 //
 //	POST /api/jethub/zcode/login      CLI 设备授权流（返回 loginId + 授权 URL，后台轮询）
 //	GET  /api/jethub/zcode/status     ?loginId= 轮询登录；否则账号快照
-//	POST /api/jethub/zcode/import     导入官方客户端本机凭据（零操作可用路径）
 //	POST /api/jethub/zcode/refresh    重读该账号自己的凭据（对账；ZCode 无续期）
 //	GET  /api/jethub/zcode/balance    ?accountId= 逐模型 token 额度桶
 //	POST /api/jethub/zcode/claim      领取每日活动（captcha 走本地载体页）
+//
+// ⚠️ 2026-10-05 起**不存在**「导入官方客户端本机凭据」的端点（原 POST /zcode/import
+// 已删除）：凭据只有一条来源 —— 本插件自己的 OAuth 设备授权流。理由见
+// Manager 的包注释与 docs/jethub-upstream-sync.md R4。
 //
 // 公开路由（鉴权组之外，浏览器直接打开）：
 //
@@ -33,7 +36,6 @@ import (
 func (h *Handler) RegisterZcode(r chi.Router) {
 	r.Post("/zcode/login", h.zcodeLogin)
 	r.Get("/zcode/status", h.zcodeStatus)
-	r.Post("/zcode/import", h.zcodeImport)
 	r.Post("/zcode/refresh", h.zcodeRefresh)
 	r.Get("/zcode/balance", h.zcodeBalance)
 	r.Post("/zcode/claim", h.zcodeClaim)
@@ -111,28 +113,6 @@ func (h *Handler) zcodeStatus(w http.ResponseWriter, r *http.Request) {
 	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("zcode")})
 }
 
-// zcodeImport POST — 导入官方客户端本机凭据（装了官方客户端并登录过的机器零操作可用）。
-func (h *Handler) zcodeImport(w http.ResponseWriter, r *http.Request) {
-	id, cred, err := h.d.Manager.ZcodeImportLocalAccount()
-	if err != nil {
-		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if id == "" {
-		apibase.WriteJSON(w, http.StatusOK, map[string]any{
-			"ok": false,
-			"reason": "未找到官方 ZCode 客户端的凭据（~/.zcode/v2/credentials.json + telemetry-state.json）；" +
-				"请用「登录」按钮走设备授权流。",
-		})
-		return
-	}
-	label := ""
-	if cred != nil {
-		label = cred.AccountLabel
-	}
-	apibase.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "accountId": id, "label": label})
-}
-
 // zcodeRefresh POST — 重读该账号自己的凭据（无续期；见 Manager 的注释）。
 func (h *Handler) zcodeRefresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -170,14 +150,22 @@ func (h *Handler) zcodeBalance(w http.ResponseWriter, r *http.Request) {
 		if bucket.HasAvailable {
 			remaining = bucket.AvailableUnits
 		}
-		out.Packages = append(out.Packages, corejethub.CreditPackage{
+		pkg := corejethub.CreditPackage{
 			Name:      bucket.ShowName,
 			Unit:      bucket.UnitType,
 			Remaining: remaining,
 			Total:     bucket.TotalUnits,
 			Used:      bucket.UsedUnits,
 			Active:    remaining > 0,
-		})
+		}
+		// ⚠️ `expires_at` 是**秒级** Unix 时间戳（实测 1790000000），必须 ×1000
+		// 才落到毫秒 —— 不乘的话到期日会显示在 1970 年。透传两个字段：
+		// DeductionEndTime 给排序/分桶用（毫秒），ExpiresAt 给显示用（ISO 字符串）。
+		if bucket.ExpiresAt > 0 {
+			pkg.DeductionEndTime = bucket.ExpiresAt * 1000
+			pkg.ExpiresAt = time.Unix(bucket.ExpiresAt, 0).UTC().Format(time.RFC3339)
+		}
+		out.Packages = append(out.Packages, pkg)
 	}
 	if balance.Enterprise {
 		out.Detail = map[string]any{"enterprise": true}

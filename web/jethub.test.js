@@ -175,7 +175,12 @@ function makeEl(tag) {
     querySelector() { return null; },
     querySelectorAll() { return []; },
     click() {},
-    setAttribute() {},
+    // 属性要真的存下来：账号规格那一行靠 title 带上游原文（hover 才看得到），
+    // 空实现会让「档位渲染了没有」这类断言失去意义。
+    attributes: {},
+    setAttribute(k, v) { this.attributes[k] = String(v); },
+    getAttribute(k) { return this.attributes[k] !== undefined ? this.attributes[k] : null; },
+    removeAttribute(k) { delete this.attributes[k]; },
     files: null,
     onchange: null,
   };
@@ -202,13 +207,21 @@ function makeSandbox() {
   // login-status poll responses are scripted per test (see __setStatusResponse):
   // the modal's whole lifecycle hangs off this one response shape.
   let statusResponse = null;
+  // 额度响应可替换：默认是最小形状（只有 total），个别用例改成带 packages /
+  // unit / windowDays / expiredTotal 的完整形状，用来验证单位标签、配额逐窗口、
+  // 临时/长期分桶与「另有 N 已失效」这四条渲染支路。
+  let balanceResponse = { balance: { total: 123.45 } };
   const providers = [
     { id: 'qoder', displayName: 'Qoder', accountCount: 1, enabledAccounts: 1, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: 'qd', bridged: true, supportsRateLimit: true, canLockPermanent: false, permanentLocked: false, proxyEnabled: true },
     // ⚠️ loomy 的 loginModes 是 ['url']（真实缺陷 18 后与后端一致）：面板走浏览器
     // 弹窗页 + 轮询，不再有内嵌短信表单。
     { id: 'loomy', displayName: 'Loomy', accountCount: 0, enabledAccounts: 0, hasBalance: true, hasCredits: true, loginModes: ['url'], prefix: '', bridged: false, supportsRateLimit: false, canLockPermanent: true, permanentLocked: true, proxyEnabled: false },
   ];
-  const accounts = [{ id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_1', modelRateLimits: { qfmodel: Date.now() + 3600000, stale: Date.now() - 3600000 } }];
+  const accounts = [
+    { id: 'qoder-1', provider: 'qoder', nickname: '小七', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_1', rotationOrder: 0, modelRateLimits: { qfmodel: Date.now() + 3600000, stale: Date.now() - 3600000 } },
+    // 第二个账号：让拖拽排序（顺序 = 选号优先级）有可验证的落点。
+    { id: 'qoder-2', provider: 'qoder', nickname: '小八', enabled: true, hasCredential: true, refreshable: true, expiresAt: Date.now() + 7200000, credentialRef: 'QODER_ACCOUNT_2', rotationOrder: 1, modelRateLimits: {} },
+  ];
   const models = [{ id: 'auto', name: 'Auto', rate: 'x0.5', disabled: false }, { id: 'qfmodel', name: 'Qwen3.8-Flash', rate: '免费', disabled: true }];
 
   let promptQueue = [];
@@ -224,7 +237,7 @@ function makeSandbox() {
       sessions: ['shared', 'private', 'isolated'],
       prefs: { browser: 'edge', session: 'isolated' },
     };
-    if (p.indexOf('/balance') !== -1) return { balance: { total: 123.45 } };
+    if (p.indexOf('/balance') !== -1) return balanceResponse;
     if (p.indexOf('/accounts') !== -1) return { accounts };
     if (p.indexOf('/models') !== -1) return { models };
     if (p === '/jethub/backup/export') {
@@ -233,7 +246,22 @@ function makeSandbox() {
     return {};
   }
   async function apiPost(p, body) { calls.apiPost.push([p, body]); if (p.endsWith('/login')) return { accountId: 'loomy-1', loginId: 'L1', loginUrl: 'http://127.0.0.1/free-hub-loomy-login.html?loginId=L1', loginMode: 'url' }; if (p.endsWith('/retest')) return { clearedCount: 1, accounts: [{ accountId: 'qoder-1', stillLimited: [{ modelId: 'qfmodel', message: 'HTTP 429: limited' }] }] }; return { ok: true, imported: 1, skipped: 0, outcome: { claimed: true } }; }
-  async function apiPut(p, body) { calls.apiPut.push([p, body]); return { ok: true }; }
+  async function apiPut(p, body) {
+    calls.apiPut.push([p, body]);
+    // 排序端点回传**服务端重算过**的账号表（rotationOrder 由后端给）——与真实
+    // handler 一致，前端据此渲染序号。
+    if (p.endsWith('/accounts/order')) {
+      const ids = (body && body.accountIds) || [];
+      const reordered = ids.map((id, i) => {
+        const acc = accounts.find((a) => a.id === id);
+        return Object.assign({}, acc, { rotationOrder: i });
+      }).filter(Boolean);
+      accounts.length = 0;
+      reordered.forEach((a) => accounts.push(a));
+      return { ok: true, accounts };
+    }
+    return { ok: true };
+  }
   async function apiDelete(p) { calls.apiDelete.push(p); return { ok: true }; }
   async function apiPatch(p, body) { calls.apiPatch.push([p, body]); return { ok: true }; }
 
@@ -275,6 +303,22 @@ function makeSandbox() {
         freeHubCredential: '凭据', freeHubAutoRenew: '自动续期', freeHubCreditsLabel: '积分',
         freeHubUnknown: '未知', freeHubExpired: '已过期', freeHubInMinutes: '{0} 分钟后', freeHubInHours: '{0} 小时后',
         freeHubCreditFailed: '查询失败', freeHubCreditsLoading: '正在查询积分…', freeHubRateLimitReset: '限额重置',
+        freeHubUnitToken: 'Token', freeHubUnitQuota: '额度', freeHubAccountTier: '账号规格',
+        freeHubOrderHint: '拖动卡片可调整顺序。顺序即自动选号优先级。', freeHubOrderSaved: '账号顺序已保存',
+        freeHubClaimHelp: '领取该账号今日的积分额度', freeHubClaimOnboarding: '领取奖励', freeHubClaimOnboardingAll: '一键领取奖励',
+        freeHubOnboarding: '新手任务', freeHubOnboardingHelp: '一次性新手任务', freeHubOnboardingDone: '新手任务：领取 {0} 项，获得 {1} 积分',
+        freeHubFingerprint: '指纹', freeHubFingerprintHelp: '轮换指纹', freeHubFingerprintConfirm: '轮换？', freeHubFingerprintDone: '指纹已轮换（代次 {0}）',
+        freeHubAnonymous: '匿名', freeHubAnonymousHint: '匿名通道：额度按出口 IP 计算',
+        freeHubAccountProxy: '代理', freeHubProxyHelp: '不设置则与其它账号共享本机出口 IP',
+        freeHubProxyCurrent: '出口代理：{0}（点击修改）', freeHubAccountProxyHint: 'http://host:port',
+        freeHubAccountProxySaved: '账号代理已保存', freeHubAccountProxyCleared: '账号代理已清除',
+        freeHubCreditUnnamed: '未命名', freeHubCreditRemaining: '剩余', freeHubCreditResetsAt: '重置于',
+        freeHubCreditLongTerm: '长期', freeHubCreditTemporary: '临时',
+        freeHubCreditDaily: '每日', freeHubCreditPermanent: '永久',
+        freeHubCreditPackages: '{0}/{1} 个资源包有效', freeHubCreditExpired: '另有 {0} 已失效',
+        freeHubCreditExpiryHint: '临时 = 距扣费截止不足 {0} 天；长期 = 其余额度',
+        freeHubCreditExpiredSuffix: '（已过期）', freeHubCreditDaysLeft: '{0} 天后',
+        freeHubCreditMorePackages: '另有 {0} 个包', freeHubCreditMoreSum: '，合计剩余 {0}',
         freeHubRestoreDefaults: '恢复默认', freeHubRestoreDefaultsConfirm: '恢复？', freeHubBatchManage: '批量管理',
         freeHubBatchDelete: '删除所选', freeHubSelectAll: '全选', freeHubDeselectAll: '取消全选',
         freeHubFilterModels: '筛选模型', freeHubClearFilter: '清除', freeHubHidden: '已隐藏', freeHubRestoreRow: '恢复',
@@ -328,6 +372,7 @@ function makeSandbox() {
     TextEncoder, TextDecoder,
     __calls: calls, __providers: providers, __promptQueue: promptQueue, __layout: layout, __right: right, __page: page, __registry: registry,
     __setStatusResponse: (v) => { statusResponse = v; },
+    __setBalanceResponse: (v) => { balanceResponse = v; },
   };
   promptQueue = ctx.__promptQueue;
   vm.createContext(ctx);
@@ -534,6 +579,260 @@ checkAsync('③ account card: credential/expiry/credits meta + rate-limit chips 
   await ctx.jethubReset('qoder', 'qoder-1');
   const reset = ctx.__calls.apiPost.find(([p]) => p === '/jethub/providers/qoder/ratelimits/reset');
   assert.ok(reset && JSON.stringify(reset[1]) === JSON.stringify({ accountId: 'qoder-1' }), 'reset POST body');
+});
+
+checkAsync('③ account order: drag to reorder submits the FULL list and renders the server rotationOrder', async () => {
+  // 顺序 = 自动选号优先级（桥接时按池内位置分配 key 的 Priority）。三条判据：
+  //   ① 卡片上有**选号序号**（用服务端的 rotationOrder，不是列表下标 —— 匿名通道
+  //      恒殿后，两者会不一致）；
+  //   ② 拖动后提交的是**完整顺序表**（服务端据此做集合相等校验，一次不完整的
+  //      拖拽会被明确拒绝，而不是悄悄打乱已排好的顺序）；
+  //   ③ 重新渲染用服务端返回的账号表（而不是本地 ids 顺序）。
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  ctx.jethubSelect('qoder');
+  await ticks(3);
+
+  // 卡片是作为 detail 的 innerHTML 字符串渲染的（本沙箱不解析 HTML），故初始
+  // 断言读 detail；拖拽后的重渲染只重画账号区，读 __registry 里的那个元素。
+  let html = ctx.__registry['free-hub-detail'].innerHTML;
+  assert.ok(html.indexOf('free-hub-account-order') !== -1, 'cards must show the selection-priority number, got ' + html);
+  assert.ok(html.indexOf('拖动卡片可调整顺序') !== -1, 'the reorder hint must be visible (顺序即选号优先级)');
+  assert.ok(/draggable="true"/.test(html), 'cards must be draggable when there is more than one account');
+
+  // 把 qoder-2 拖到 qoder-1 的位置 ⇒ 期望顺序 [qoder-2, qoder-1]。
+  ctx.__jethubDragStart({ dataTransfer: null }, 'qoder-2');
+  await ctx.__jethubDrop({ preventDefault() {}, dataTransfer: null }, 'qoder-1');
+  await ticks(2);
+
+  const order = ctx.__calls.apiPut.find(([p]) => p === '/jethub/providers/qoder/accounts/order');
+  assert.ok(order, 'the reorder must PUT to the accounts/order endpoint');
+  // ⚠️ 用 JSON 比较而不是 deepStrictEqual：沙箱里的对象来自另一个 realm，原型不同，
+  // deepStrictEqual 会因原型不等而失败（本文件既有的 REST 断言同款写法）。
+  assert.strictEqual(JSON.stringify(order[1]), JSON.stringify({ accountIds: ['qoder-2', 'qoder-1'] }),
+    'the FULL ids list must be submitted (not a single move), got ' + JSON.stringify(order[1]));
+  assert.strictEqual(JSON.stringify(Array.from(ctx.__jethubState.accounts, (a) => a.id)), JSON.stringify(['qoder-2', 'qoder-1']),
+    'the re-render must use the server response order');
+  assert.ok(ctx.__calls.toast.some(([m]) => m === '账号顺序已保存'), 'a success toast must confirm the new order');
+
+  // 序号必须来自服务端（rotationOrder），不是列表下标。
+  html = ctx.__registry['free-hub-accounts'].innerHTML;
+  const numbers = Array.from(html.match(/free-hub-account-order"[^>]*>([^<]*)</g) || [])
+    .map((s) => s.replace(/.*>/, '').replace('<', ''));
+  assert.strictEqual(JSON.stringify(numbers), JSON.stringify(['1', '2']),
+    'the badges must follow rotationOrder, got ' + JSON.stringify(numbers));
+
+  // 被拖到自己的位置 = 无操作（不发请求）。
+  const before = ctx.__calls.apiPut.length;
+  ctx.__jethubDragStart({ dataTransfer: null }, 'qoder-1');
+  await ctx.__jethubDrop({ preventDefault() {}, dataTransfer: null }, 'qoder-1');
+  await ticks(1);
+  assert.strictEqual(ctx.__calls.apiPut.length, before, 'dropping onto itself must not call the API');
+});
+
+checkAsync('③ credits row: unit label follows the unit + per-window quota + 临时/长期 + 失效额度', async () => {
+  // 这一组锁的是「账号卡片额度行」与上游 ref 的信息对齐（四条独立支路）：
+  //   ① 单位标签三态（token → Token、% → 额度、其余 → 积分）—— 写死「积分」会把
+  //      ZCode 的 token 余额说成积分（上游用户报障原文）；
+  //   ② 配额单位下显示**逐窗口百分比**而不是两窗口均值（均值是上游不存在的数）；
+  //   ③ 带 windowDays 时按到期时间分「临时 / 长期」两桶；
+  //   ④ expiredTotal > 0 时提示「另有 N 已失效」（不能并进总额）。
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  ctx.jethubSelect('qoder');
+  await ticks(2);
+
+  // ① token 单位：标签变 Token，数字按 M 量级（不是裸 94539275）。
+  ctx.__setBalanceResponse({
+    balance: { total: 94539275, isCreditPackage: false, packages: [{ name: 'GLM-5.3-Flash', unit: 'token', remaining: 94539275, total: 100000000, used: 5460725, active: true }] },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  let label = ctx.__registry['free-hub-credit-label-qoder-1'];
+  let cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.strictEqual(label.textContent, 'Token', 'a token balance must be labelled Token, not 积分');
+  assert.ok(cell.innerHTML.indexOf('94.54M') !== -1, 'token magnitude formatting (94.54M), got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('94539275') === -1, 'raw token count must not leak into the card');
+
+  // ② 配额单位：逐窗口百分比，**不显示均值**。
+  ctx.__setBalanceResponse({
+    balance: {
+      total: 94.5, isCreditPackage: false,
+      packages: [
+        { name: '5 小时窗口', unit: '%', remaining: 90, total: 100, used: 10, active: true, cycleEndTime: '2026-01-01T05:00:00Z' },
+        { name: '周窗口', unit: '%', remaining: 99, total: 100, used: 1, active: true, cycleEndTime: '2026-01-05T00:00:00Z' },
+      ],
+    },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  label = ctx.__registry['free-hub-credit-label-qoder-1'];
+  cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.strictEqual(label.textContent, '额度', 'a quota balance must be labelled 额度, not 积分');
+  assert.ok(cell.innerHTML.indexOf('5 小时窗口 90%') !== -1 && cell.innerHTML.indexOf('周窗口 99%') !== -1,
+    'quota windows must be listed per-window, got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('94.5') === -1 && cell.innerHTML.indexOf('94.50') === -1,
+    'the fabricated average must not be shown, got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('个资源包有效') === -1,
+    'quota windows are not resource packages — no "N/M packages" line');
+  assert.ok(cell.innerHTML.indexOf('重置于') !== -1, 'hover detail must say 重置于 (quota resets, not monthly cycles)');
+
+  // ③ 到期分桶：距扣费截止 2 天 < windowDays 15 ⇒ 临时；另一包 400 天后 ⇒ 长期。
+  const now = Date.now();
+  ctx.__setBalanceResponse({
+    // windowDays 与 balance **并列**（provider 级的一个值，走响应顶层 —— 与 ref
+    // credits.balances 的 `{accounts, windowDays}` 同口径）。
+    windowDays: 15,
+    balance: {
+      total: 300, isCreditPackage: true,
+      packages: [
+        { name: 'Bonus Pack', unit: 'credit', remaining: 100, total: 100, used: 0, active: true, deductionEndTime: now + 2 * 86400000 },
+        { name: 'Free Plan', unit: 'credit', remaining: 200, total: 200, used: 0, active: true, deductionEndTime: now + 400 * 86400000 },
+      ],
+    },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.ok(cell.innerHTML.indexOf('长期 200 · 临时 100') !== -1,
+    'expiry split must read 长期 200 · 临时 100, got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('2/2 个资源包有效') === -1, 'the split line replaces the package-count line');
+
+  // 有窗口天数才分桶：没有 windowDays 时回到「N/M 个资源包有效」，不得凭空造分类行。
+  ctx.__setBalanceResponse({
+    balance: {
+      total: 300, isCreditPackage: true,
+      packages: [
+        { name: 'A', unit: 'credit', remaining: 100, total: 100, used: 0, active: true },
+        { name: 'B', unit: 'credit', remaining: 200, total: 200, used: 0, active: true },
+      ],
+    },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.ok(cell.innerHTML.indexOf('2/2 个资源包有效') !== -1, 'no windowDays ⇒ package-count line, got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('临时') === -1, 'no windowDays ⇒ no fabricated expiry split');
+
+  // ④ 失效额度单独一行（不并进总额）。
+  ctx.__setBalanceResponse({
+    balance: {
+      total: 100, isCreditPackage: true, expiredTotal: 50,
+      packages: [{ name: 'A', unit: 'credit', remaining: 100, total: 100, used: 0, active: true }],
+    },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.ok(cell.innerHTML.indexOf('另有 50 已失效') !== -1, 'expired credit must be called out, got ' + cell.innerHTML);
+  assert.ok(cell.innerHTML.indexOf('>100<') !== -1, 'expired credit must NOT be folded into the total');
+
+  // ⑤ 账号规格（Gemini 的 Pro/Free/Ultra）：有值才显示整行，title 带上游原文；
+  //    取不到档位时整行保持隐藏（不显示「未知」）。
+  ctx.__setBalanceResponse({
+    balance: { total: 95, packages: [{ name: '5 小时窗口', unit: '%', remaining: 95, total: 100, used: 5, active: true }] },
+    extra: { accountTier: { label: 'Pro', title: 'Google AI Pro（g1-pro-tier）' } },
+  });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  const tierRow = ctx.__registry['free-hub-tier-row-qoder-1'];
+  const tierCell = ctx.__registry['free-hub-tier-qoder-1'];
+  assert.ok(tierRow && tierCell, 'the tier row must exist for balance-capable providers');
+  assert.strictEqual(tierRow.style.display, '', 'a resolved tier must show the row');
+  assert.strictEqual(tierCell.textContent, 'Pro', 'the short label goes on the card');
+  assert.strictEqual(tierCell.getAttribute('title'), 'Google AI Pro（g1-pro-tier）', 'the upstream original goes in the title');
+
+  ctx.__setBalanceResponse({ balance: { total: 95, packages: [{ name: '5 小时窗口', unit: '%', remaining: 95, total: 100, used: 5, active: true }] } });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  assert.strictEqual(tierRow.style.display, 'none', 'no tier ⇒ the row stays hidden (never 未知)');
+  assert.strictEqual(tierCell.textContent, '', 'no tier ⇒ no text');
+});
+
+checkAsync('③ credits row: 200-with-error (opencode channel state) shows the reason, not 查询失败', async () => {
+  // opencode 的「余额」是**通道可用性**：Zen 没有公开的余额 API，所以后端在 200
+  // 响应里同时回 `{balance, error}`（error = 已停用 / 限额中，<时刻> 恢复）。
+  // 那是**状态**而不是查询失败 —— 显示成「查询失败」会让用户以为功能坏了。
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  ctx.jethubSelect('qoder');
+  await ticks(2);
+  ctx.__setBalanceResponse({ balance: { total: 0, packages: [] }, error: '限额中，2026-01-01 15:04 恢复' });
+  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
+  await ticks(2);
+  const cell = ctx.__registry['free-hub-credit-qoder-1'];
+  assert.ok(cell && cell.innerHTML.indexOf('限额中') !== -1, 'the state reason must be shown, got ' + (cell && cell.innerHTML));
+  assert.ok(cell.innerHTML.indexOf('查询失败') === -1, 'a state must not be rendered as a query failure');
+  assert.ok(cell.innerHTML.indexOf('title="限额中') !== -1, 'the full reason belongs in the title');
+});
+
+checkAsync('③ account card: 匿名标记 / 一次性奖励文案 / 新手任务与指纹按钮（provider 专属）', async () => {
+  // 四件「按 provider 分支」的事，都必须体现在卡片上：
+  //   ① opencode 匿名通道打「匿名」标签并解释「额度按出口 IP 计」；
+  //   ② 一次性奖励渠道（raccoon）的按钮文案**不能**写成「领取」——那会让用户每天
+  //      点一次必然 already-claimed 的请求（ref 把 dailyCheckin 与 onboardingTasks
+  //      分成两个独立位正是为此）；
+  //   ③ 另有一次性任务端点的渠道（loomy）多一个独立「新手任务」按钮；
+  //   ④ opencode 有「指纹」按钮（**没有**代理按钮：本端没有 per-account 出口，
+  //      出站走 provider 级 Use Proxy —— 这是记录在案的有意差异）。
+  const ctx = makeSandbox();
+
+  const anon = ctx.__jethubAccountCard(
+    { id: 'opencode', hasBalance: true, hasCredits: false, supportsRateLimit: true },
+    { id: 'opencode-1', nickname: '匿名通道', enabled: true, hasCredential: true, anonymous: true, credentialRef: 'OPENCODE_ACCOUNT_1' });
+  assert.ok(anon.indexOf('>匿名<') !== -1, 'opencode anonymous channel must be tagged, got ' + anon);
+  assert.ok(anon.indexOf('出口 IP') !== -1, 'the tag must explain that quota follows the egress IP');
+  assert.ok(anon.indexOf('jethubRotateFingerprint') !== -1, 'opencode must offer fingerprint rotation');
+  assert.ok(anon.indexOf('jethubSetAccountProxy') !== -1, 'opencode must offer its own egress proxy (quota follows the egress IP)');
+  assert.ok(anon.indexOf('共享本机出口 IP') !== -1, 'the proxy button must explain what happens when it is NOT set');
+
+  const raccoon = ctx.__jethubAccountCard(
+    { id: 'raccoon', hasBalance: true, hasCredits: true, supportsRateLimit: true, claimKind: 'onboarding' },
+    { id: 'raccoon-1', nickname: '小浣熊', enabled: true, hasCredential: true, credentialRef: 'RACCOON_ACCOUNT_1' });
+  assert.ok(raccoon.indexOf('领取奖励') !== -1, 'a one-time reward must not be labelled as a daily claim, got ' + raccoon);
+  assert.ok(raccoon.indexOf('>领取<') === -1, 'the generic daily-claim label must not appear for raccoon');
+
+  const loomy = ctx.__jethubAccountCard(
+    { id: 'loomy', hasBalance: true, hasCredits: true, supportsRateLimit: false, claimKind: 'daily', supportsOnboardingTasks: true },
+    { id: 'loomy-1', nickname: '讯飞', enabled: true, hasCredential: true, credentialRef: 'LOOMY_ACCOUNT_1' });
+  assert.ok(loomy.indexOf('新手任务') !== -1, 'loomy must expose the separate one-time onboarding button, got ' + loomy);
+  assert.ok(loomy.indexOf('jethubClaimOnboarding') !== -1, 'the onboarding button must call its own endpoint');
+  // 每日签到与一次性任务**两个按钮并存**（不是二选一）。
+  assert.ok(loomy.indexOf('jethubClaim(') !== -1 && loomy.indexOf('jethubClaimOnboarding(') !== -1,
+    'daily claim and onboarding must be two independent buttons');
+});
+
+checkAsync('③ opencode 出口代理：空串是「清除」而不是取消（PUT 体必须带上它）', async () => {
+  // ⚠️ 这条锁的是一个容易写错的边界：代理输入框清空 = 用户要**移除**代理（回到共享
+  // 本机出口），而 promptModal 返回 null 才是取消。把空串当取消，面板上的「清除代理」
+  // 就会点了没反应（ref ProviderAccountEntry.opencodeProxy 的同款注释）。
+  const ctx = makeSandbox();
+  ctx.__jethubState.accounts = [{ id: 'opencode-1', opencodeProxy: 'http://127.0.0.1:2080', hasCredential: true, enabled: true }];
+
+  ctx.__promptQueue.push('http://127.0.0.1:3080');
+  await ctx.jethubSetAccountProxy('opencode-1');
+  let put = ctx.__calls.apiPut.find(([p]) => p === '/jethub/opencode/proxy');
+  assert.ok(put, '设置代理必须 PUT 到 /jethub/opencode/proxy');
+  assert.strictEqual(JSON.stringify(put[1]), JSON.stringify({ accountId: 'opencode-1', proxy: 'http://127.0.0.1:3080' }),
+    '设置路径的请求体，got ' + JSON.stringify(put[1]));
+
+  // 空串 ⇒ 仍然发请求（清除），不是取消。
+  ctx.__promptQueue.push('   ');
+  await ctx.jethubSetAccountProxy('opencode-1');
+  const puts = ctx.__calls.apiPut.filter(([p]) => p === '/jethub/opencode/proxy');
+  assert.strictEqual(puts.length, 2, '空串必须发一次「清除」请求，而不是被当成取消');
+  assert.strictEqual(JSON.stringify(puts[1][1]), JSON.stringify({ accountId: 'opencode-1', proxy: '' }),
+    '清除路径必须送空串（且已 trim）');
+  assert.ok(ctx.__calls.toast.some(([m]) => m === '账号代理已清除'), '清除必须有明确反馈');
+
+  // null（用户按取消）⇒ 一个请求都不发。
+  const before = ctx.__calls.apiPut.length;
+  ctx.__promptQueue.push(null);
+  await ctx.jethubSetAccountProxy('opencode-1');
+  assert.strictEqual(ctx.__calls.apiPut.length, before, '取消不得发请求');
 });
 
 checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends it too — never a silent forever-poll', async () => {

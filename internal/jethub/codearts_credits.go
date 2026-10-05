@@ -33,10 +33,26 @@ type CreditBalance struct {
 	Total    float64         `json:"total"`
 	Packages []CreditPackage `json:"packages"`
 	IsCredit bool            `json:"isCreditPackage"`
-	Detail   map[string]any  `json:"detail,omitempty"`
+	// ExpiredTotal is the remaining credit sitting in INACTIVE packages.
+	//
+	// ⚠️ 单独给出而不是并进 Total：服务端仍会把它们下发，但那部分扣不到。
+	// 面板据此显示「另有 N 已失效」——既不误导（不并进总额）也不丢信息。
+	// （ref src/credits.ts 的 CreditBalance.expiredTotal；本端原先算了又丢掉。）
+	ExpiredTotal float64        `json:"expiredTotal"`
+	Detail       map[string]any `json:"detail,omitempty"`
 }
 
 // CreditPackage is one credit package entry.
+//
+// 三个到期字段的分工（与 ref src/credits.ts 的 CreditPackage 逐字段对应）：
+//   - DeductionEndTime：**扣费截止**（ms）。这才是「这批额度什么时候作废」的
+//     判据，前端拿它分「临时 / 长期」两桶。实测有效包的 ExpiredTime 一律为空，
+//     只有真失效后才回填；而 CycleEndTime 是套餐的月度周期，用它会把
+//     「每月刷新、8 年后才扣费截止」的套餐误判成快作废。
+//   - ExpiresAt：包自身的失效时间（ISO 字符串，"" = 无固定失效时间）。
+//   - CycleEndTime：本计费周期结束（显示用字符串；配额窗口（gemini）放
+//     「重置于」的时刻）。
+// 三者都可缺省；**_缺省 = 没有该概念**，调用方不得当成「已过期」。
 type CreditPackage struct {
 	Name      string  `json:"name"`
 	Unit      string  `json:"unit,omitempty"`
@@ -44,6 +60,14 @@ type CreditPackage struct {
 	Total     float64 `json:"total"`
 	Used      float64 `json:"used"`
 	Active    bool    `json:"active"`
+	// DeductionEndTime is the instant after which this package's credit can no
+	// longer be spent (ms since epoch; 0 = server sent none ⇒ 长期).
+	DeductionEndTime int64 `json:"deductionEndTime,omitempty"`
+	// ExpiresAt is the package's own expiry (ISO-ish display string; "" = none).
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	// CycleEndTime is the current billing period end / quota window reset time
+	// (display string; "" = none).
+	CycleEndTime string `json:"cycleEndTime,omitempty"`
 }
 
 // ClaimOutcome mirrors the plugin's ClaimOutcome union for the UI.

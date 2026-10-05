@@ -275,8 +275,10 @@ func (m *Manager) CompleteZcodeLogin(accountID string, result *zcodeLoginResult)
 		BigmodelAccessToken: result.BigmodelAccessToken,
 		AccountLabel:        result.DisplayName,
 		AccountName:         result.DisplayName,
-		AppVersion:          zcodeDetectAppVersion(),
-		Source:              "plugin",
+		// ⚠️ **不再探测本机官方客户端的版本**（2026-10-05 对齐上游 2e8bb86）：
+		// 探版本要读官方安装目录下的清单文件，与「不读本机 ZCode 客户端数据」是同
+		// 一条红线。留空 ⇒ `zcodeAppVersion()` 回落到内置常量（ref 同款）。
+		Source: "plugin",
 	}
 	cred.Phone = zcodePhoneFromUserID(cred.UserID)
 	raw, err := json.Marshal(cred)
@@ -341,32 +343,3 @@ func (m *Manager) ZcodeRefreshAccount(accountID string) error {
 	return m.SetCredential("zcode", acc.CredentialRef, encoded, 0, false)
 }
 
-// ZcodeImportLocalAccount imports the official client's credential as a new
-// account (the "零操作可用" path: 装了官方客户端并登录过的机器直接可用).
-// Returns the created account id, or "" when no importable credential exists.
-func (m *Manager) ZcodeImportLocalAccount() (string, *ZcodeCredential, error) {
-	cred := zcodeImportLocalCredential()
-	if cred == nil {
-		return "", nil, nil
-	}
-	id, ref := NewAccountID("zcode")
-	raw, err := json.Marshal(cred)
-	if err != nil {
-		return "", nil, err
-	}
-	if err := m.AddAccount(Account{
-		ID:            id,
-		Provider:      "zcode",
-		Nickname:      zcodeCredentialLabel(cred),
-		Enabled:       true,
-		CredentialRef: ref,
-		CreatedAt:     nowMillis(),
-	}); err != nil {
-		return "", nil, err
-	}
-	if err := m.SetCredential("zcode", ref, raw, 0, false); err != nil {
-		_ = m.DeleteAccount(id)
-		return "", nil, err
-	}
-	return id, cred, nil
-}

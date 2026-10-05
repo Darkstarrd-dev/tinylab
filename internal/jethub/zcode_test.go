@@ -1,20 +1,15 @@
 package jethub
 
-// ZCode 核心层测试：3012 身份块逐字锁定、凭据解密、device_mid、展示字段、
-// 模型表与档位门禁。
+// ZCode 核心层测试：3012 身份块逐字锁定、device_mid、模型表与档位门禁、头族。
+//
+// ⚠️ 「官方客户端凭据文件导入」相关的用例已随该能力整体删除（2026-10-05，对齐上游
+// 2e8bb86）—— 取而代之的是 `zcode_local_read_test.go` 的**源码字面量扫描**守卫
+// （断言函数不存在对新写的读取函数无效）。
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -124,98 +119,6 @@ func fixedZcodeDate() time.Time {
 	return time.Date(2026, 10, 2, 12, 0, 0, 0, time.Local)
 }
 
-// --- 凭据解密 ---
-
-func zcodeEncryptForTest(t *testing.T, plain string, key [32]byte) string {
-	t.Helper()
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		t.Fatal(err)
-	}
-	iv := make([]byte, 12)
-	if _, err := rand.Read(iv); err != nil {
-		t.Fatal(err)
-	}
-	sealed := gcm.Seal(nil, iv, []byte(plain), nil)
-	data := sealed[:len(sealed)-16]
-	tag := sealed[len(sealed)-16:]
-	return zcodeCredentialPrefix +
-		base64.RawURLEncoding.EncodeToString(iv) + "." +
-		base64.RawURLEncoding.EncodeToString(tag) + "." +
-		base64.RawURLEncoding.EncodeToString(data)
-}
-
-func TestZcodeCredentialDecryptRoundTrip(t *testing.T) {
-	t.Setenv(zcodeCredentialSecretEnv, "test-secret")
-	key := sha256.Sum256([]byte("test-secret"))
-	ciphertext := zcodeEncryptForTest(t, `{"hello":"世界"}`, key)
-	plain, err := zcodeDecryptCredentialValue(ciphertext)
-	if err != nil {
-		t.Fatalf("decrypt: %v", err)
-	}
-	if plain != `{"hello":"世界"}` {
-		t.Fatalf("plaintext = %q", plain)
-	}
-	// 明文直通（无前缀）。
-	if out, err := zcodeDecryptCredentialValue("plain-value"); err != nil || out != "plain-value" {
-		t.Fatalf("plaintext passthrough failed: %q %v", out, err)
-	}
-	// 格式非法。
-	if _, err := zcodeDecryptCredentialValue(zcodeCredentialPrefix + "abc"); err == nil {
-		t.Fatal("malformed ciphertext must error")
-	}
-	// 密钥不匹配（GCM 认证失败）。
-	other := sha256.Sum256([]byte("other-secret"))
-	if _, err := zcodeDecryptCredentialValue(zcodeEncryptForTest(t, "x", other)); err == nil {
-		t.Fatal("wrong key must fail authentication")
-	}
-}
-
-// 官方客户端的密钥派生：env 覆盖 → sha256(secret)；否则
-// sha256("zcode-credential-fallback:" + nodePlatform + ":" + homedir + ":" + username)。
-// ⚠️ platform 必须是 Node 的取值（win32），Go 的 windows 会算出不同的密钥。
-func TestZcodeCredentialKeyDerivation(t *testing.T) {
-	t.Setenv(zcodeCredentialSecretEnv, "abc")
-	if got, want := zcodeCredentialKey(), sha256.Sum256([]byte("abc")); got != want {
-		t.Fatalf("env override key mismatch")
-	}
-	t.Setenv(zcodeCredentialSecretEnv, "")
-	key := zcodeCredentialKey()
-	home, _ := os.UserHomeDir()
-	platform := "linux"
-	if runtime.GOOS == "windows" {
-		platform = "win32"
-	}
-	// 用户名取当前用户（与实现同源），只断言前缀与形状，避免环境差异。
-	if len(key) != 32 {
-		t.Fatalf("fallback key length = %d", len(key))
-	}
-	_ = home
-	_ = platform
-	// 同一进程内两次派生必须一致（决定性）。
-	if zcodeCredentialKey() != key {
-		t.Fatal("key derivation must be deterministic")
-	}
-}
-
-func TestZcodePickCredentialSkipsUndecryptable(t *testing.T) {
-	t.Setenv(zcodeCredentialSecretEnv, "k")
-	key := sha256.Sum256([]byte("k"))
-	table := map[string]string{
-		"uuid-1:zcodejwttoken": zcodeCredentialPrefix + "broken.value.here",
-		"uuid-2:zcodejwttoken": zcodeEncryptForTest(t, "jwt-abc", key),
-	}
-	if got := zcodePickCredential(table, zcodeKeyFragmentJWT); got != "jwt-abc" {
-		t.Fatalf("pick = %q, want the first decryptable value", got)
-	}
-	if got := zcodePickCredential(table, "oauth:bigmodel:user_info"); got != "" {
-		t.Fatalf("missing fragment must yield empty, got %q", got)
-	}
-}
 
 // --- device_mid ---
 
@@ -234,53 +137,6 @@ func TestZcodeDeviceMidShape(t *testing.T) {
 	}
 }
 
-// --- 展示字段（ref REAL_USER_INFO 形状）---
-
-const zcodeRealUserInfo = `{"id":"15951790100986814","username":"mylzscy4","displayName":"mylzscy4",` +
-	`"rawProfile":{"user_id":"15951790100986814","email":"","avatar":"","name":"mylzscy4","zcodeProfileSchemaVersion":2}}`
-
-func TestZcodeIdentityFromUserInfo(t *testing.T) {
-	name, userID := zcodeIdentityFromUserInfo(zcodeRealUserInfo)
-	if name != "mylzscy4" {
-		t.Fatalf("name = %q", name)
-	}
-	if userID != "15951790100986814" {
-		t.Fatalf("userID = %q", userID)
-	}
-	// ⚠️ 展示名（displayName）进的是 account_name；account_label 的判据是
-	// phone/mobile/name/nickname/email 这些**顶层**字段，真实 user_info 一个都没有
-	// ⇒ 落到 id 末 6 位（ref labelFromUserInfo 逐字如此）。
-	if got := zcodeLabelFromUserInfo(zcodeRealUserInfo); got != "id:986814" {
-		t.Fatalf("label = %q, want id:986814 (no top-level phone/name/email in the real payload)", got)
-	}
-	if got := zcodePhoneFromUserID(userID); got != "159****0100" {
-		t.Fatalf("masked phone = %q, want 159****0100 (first 11 digits of the user id)", got)
-	}
-	// 非手机号形态的 id：不编造。
-	if got := zcodePhoneFromUserID("25951790100986814"); got != "" {
-		t.Fatalf("invalid prefix must yield empty, got %q", got)
-	}
-	if got := zcodePhoneFromUserID("123"); got != "" {
-		t.Fatalf("short id must yield empty, got %q", got)
-	}
-	// 纯数字展示名 → 尾号。
-	label := zcodeLabelFromUserInfo(`{"phone":"13800001111"}`)
-	if label != "尾号1111" {
-		t.Fatalf("numeric label = %q, want 尾号1111", label)
-	}
-}
-
-func TestZcodeVersionFromManifest(t *testing.T) {
-	if got := zcodeVersionFromManifest(`{"version": "3.14.4", "channel":"stable"}`); got != "3.14.4" {
-		t.Fatalf("manifest version = %q", got)
-	}
-	if got := zcodeVersionFromManifest(`{"version": "not-semver"}`); got != "" {
-		t.Fatalf("non-semver must be rejected, got %q", got)
-	}
-	if got := zcodeVersionFromManifest(`{}`); got != "" {
-		t.Fatalf("missing version must be empty, got %q", got)
-	}
-}
 
 // --- 模型表与档位门禁 ---
 
@@ -308,63 +164,6 @@ func TestZcodeFallbackModelsAndEffortGate(t *testing.T) {
 	}
 	if !zcodeModelSupportsImage["GLM-5.3-Flash"] || zcodeModelSupportsImage["GLM-5.3"] {
 		t.Fatal("image capability table drifted")
-	}
-}
-
-// --- 官方凭据文件导入 ---
-
-func TestZcodeImportLocalCredential(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("ZCODE_DATA_BASE_DIR", root)
-	t.Setenv("APPDATA", "")
-	t.Setenv("LOCALAPPDATA", "")
-	// ⚠️ homedir 也在候选根里（官方默认 dataBaseDir = homedir）—— 不隔离它，
-	// 本机真实安装的 ~/.zcode/v2/telemetry-state.json 会被读进来（本机确实装着
-	// 官方客户端），测试就不再决定性。
-	t.Setenv("USERPROFILE", root)
-	t.Setenv("HOME", root)
-	t.Setenv(zcodeCredentialSecretEnv, "import-secret")
-	key := sha256.Sum256([]byte("import-secret"))
-
-	dir := filepath.Join(root, ".zcode", "v2")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	table := map[string]string{
-		"aaa:zcodejwttoken":               zcodeEncryptForTest(t, "jwt-value", key),
-		"bbb:oauth:bigmodel:access_token": zcodeEncryptForTest(t, "bigmodel-token", key),
-		"ccc:oauth:bigmodel:user_info":    zcodeEncryptForTest(t, zcodeRealUserInfo, key),
-	}
-	raw, _ := json.Marshal(table)
-	if err := os.WriteFile(filepath.Join(dir, "credentials.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "telemetry-state.json"), []byte(`{"deviceMid":"11111111-2222-4333-8444-555555555555"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cred := zcodeImportLocalCredential()
-	if cred == nil {
-		t.Fatal("import returned nil for a valid credentials file")
-	}
-	if cred.ZcodeJWT != "jwt-value" || cred.DeviceMid != "11111111-2222-4333-8444-555555555555" {
-		t.Fatalf("imported credential wrong: %#v", cred)
-	}
-	if cred.Source != "ide" || cred.UserID != "15951790100986814" || cred.AccountName != "mylzscy4" {
-		t.Fatalf("identity fields wrong: %#v", cred)
-	}
-	if cred.Phone != "159****0100" {
-		t.Fatalf("phone = %q", cred.Phone)
-	}
-	if !cred.usable() {
-		t.Fatal("imported credential must be usable")
-	}
-
-	// 缺 telemetry-state.json ⇒ 不可用（device_mid 是硬需求）。
-	if err := os.Remove(filepath.Join(dir, "telemetry-state.json")); err != nil {
-		t.Fatal(err)
-	}
-	if got := zcodeImportLocalCredential(); got != nil {
-		t.Fatalf("missing device_mid must make the file unusable, got %#v", got)
 	}
 }
 

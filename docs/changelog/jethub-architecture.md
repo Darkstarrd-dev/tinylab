@@ -2,6 +2,31 @@
 
 > 本文件存放 `docs/jethub-architecture.md` 顶部「最后核对」行的历史流水与变更过程叙述（最新在上）。正文只保留当前态事实。
 
+## 2026-10-05 · 账号卡片信息全量对齐（R4-0，P0–P2）+ 删除 ZCode 本机凭据路径（R4-1）
+
+**背景（用户报障原文）**：「Zcode，DSH 里会显示限额重置的信息和准确时间，Tinylab 里不会显示」「Minimax, DSH 里会显示 credits 数字，Tinylab 里不会显示（不止这一个，还有不少也都不显示 credits 数字）」，并要求与 DSH 面板完成**完整的信息对齐**。逐项读完 ref 的 `plugin-src/client/{jet-hub,credits-format,credit-expiry,quota-format,credits-capabilities}.js` 与本端 `web/static/jethub.js` + `internal/jethub/*` 后，归因到**两条根因**，其余是它们的下游：
+
+1. **`ProviderMeta.HasBalance` 与实现脱节**：minimax / raccoon / trae / cline 四家的余额后端（`MinimaxBalance`/`RaccoonBalance`/`TraeBalance`/`ClineBalance`）与 `/balance` 路由**早就存在**，但能力位是 false。该位是前端渲染额度行与「刷新积分」按钮的**唯一**门控，且漏登记**不会报错** —— 表现为「这几个渠道没有积分」。opencode 则是真的没有实现（Zen 没有公开余额 API）。
+2. **全仓没有任何代码写账号级限流标记**：`Manager.UpdateModelRateLimit` 的唯一调用点是 trae 的内部记账键 `__trae_checkin_gen__`，而前端按 `__` 前缀主动过滤掉 ⇒ 卡片上的「限额重置」行**对所有渠道恒为空**。所有额度/限流错误都走 `BillingLockError` → rotation 层的 key 冷却，与 jethub 的账号标记是两套存储。这就是 ZCode 那条报障的真正根因（不是 zcode 特有的问题）。
+
+**实现要点（按批次）：**
+
+- **P0**：四家 `HasBalance` 补正 + `internal/api/jethub/balance_capability_test.go` 的**双向**守卫（路由有 ⇒ 标志必须有；标志有 ⇒ 路由必须有；新增 provider 自动纳入，因为它是 `chi.Walk` 枚举而不是手写表）。单位标签三态（`token`→Token / `%`→额度 / 其余→积分 —— ref `unitLabel`）—— 标签**随余额回填**，因为渲染卡片时还不知道单位。Gemini 主行改成**逐窗口百分比**（`total = 两窗口平均` 是上游根本不存在的数，ref 已因此报障并修掉；本端 `geminiBalanceOf` 的均值保留为兜底）。gemini 移入 `rateLimitExemptProviders`（配额窗口制，重测/重置只剩白烧配额与「放回池里再撞一次」两种副作用）。
+- **额外项**：opencode「通道可用性」额度行 —— `OpencodeChannelBalance` 全部来自**本地状态**（`enabled` + `modelRateLimits`），**零网络请求**；`Total` = 可用通道数（单位「通道」），限额中的通道数放进 `ExpiredTotal`（面板显示「另有 N 已失效」，与其它渠道口径一致）；API 的 200 响应里额外带 `error`（「已停用」/「限额中，<时刻> 恢复」）——那是**状态**而不是失败，前端必须能同时显示。
+- **P1（限额重置）**：`rotation.Selector.SetRateLimitObserver` 注入式观察者（rotation **不依赖** jethub，与 `SetStateHook` 同款分层），四条写锁路径（`MarkRateLimited`/`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkNIM429`）每次写 key×model 锁都通知；组合根 `internal/app/app.go` 把它映射到 `Manager.UpdateModelRateLimit`（非 Free Hub 的 key 会拿到 `ErrNotFound`，那是正常路径）。写入规则**只延长不缩短**（同一次限流会在多条路径上重复上报，后到的不能把解禁时刻往前提）；空模型名拒收（会落下一个 UI 上「没有模型名」的 chip）。另补：重测仍受限时把上游给的**新**解禁时刻写回（`parseRateLimitResetTime`，中英两种句式 + **捕获**时区，不写死 UTC+8）—— 限流是滚动窗口，不更新的话旧时刻一过期，卡片那一行就会凭空消失，出现「重测说仍受限、卡片却一条都不显示」的矛盾。
+- **P1（额度行的其余信息）**：`CreditPackage` 新增 `deductionEndTime`/`expiresAt`/`cycleEndTime`，`CreditBalance` 新增 `expiredTotal`；各 provider 把原先**解析出来又丢掉**的字段填上（buddy 的 `DeductionEndTime`、lobsterai 的 `expiresAt`、qoder 专用包的 `expiresAt`、zcode 桶的 `expires_at`（**秒**→毫秒）、gemini 窗口的 `resetTime`）。trae 的余额**整条重写**：请求体必须是 `{"require_usage":true,"req_source":2}`、必须用**完整客户端头**（`traeCheckinHeaders`，此前是零调用的死代码）、余额在**顶层** `user_entitlement_pack_list`（旧版猜的 `data.totalCredits/creditRemain/remain` 三个键都不存在）、到期是**秒级** `expire_time`。raccoon 同样修正：字段是 `available_points`（旧版读的 `balance` 并不存在），四个池分开建包。前端补齐临时/长期分桶、池名分桶、资源包 hover 明细（只用还能用的包、最快到期在上、最多 12 行 + 汇总）、失效额度、账号规格行。
+- **P2**：账号**拖拽排序 = 选号优先级** —— 池内顺序本来就是优先级，但 `SyncKeys` 里一句 `sort.Slice(keys, …ID < …ID)` 把它按 ID 字典序重排，于是「拖到第一位」对路由层**完全无效**；改为按池内位置分配 `Priority`（匿名通道恒殿后，与卡片上显示的 `rotationOrder` 用**同一套编号**），并新增 `Manager.ReorderAccounts`（**严格集合相等**校验）+ `PUT /providers/{provider}/accounts/order`（改完 SyncKeys）。opencode 指纹轮换（账号条目的代次为**权威**、凭据里的只是下限 —— ref 明确记的静默失效形态是「代次涨了 project id 却不变」）。loomy 的新手任务按钮（后端早有、前端零入口）、raccoon 的一次性奖励文案（`claimKind`）、opencode 匿名标记（判据用**凭据内容**而不是 id 前缀 —— 本端 id 形如 `{provider}-{8hex}`，ref 的 `opencode-anon-` 前缀判据在这里永不命中）、账号名/手机号派生显示、额度失败时把原因放进 title。
+- **R4-1（用户决定：删除）**：整体删除「读本机官方客户端凭据」旁路（上游 `2e8bb86` 以安全理由删除同一条路）。删除范围：凭据文件解密（`enc:v1:` / 派生密钥 / `ZCODE_CREDENTIAL_SECRET`）、`user_info` 解析、`telemetry-state.json` 读取、**官方安装目录的版本清单探测**（同一条红线）、`ZcodeImportLocalAccount`、`POST /api/jethub/zcode/import`、以及两个**零调用的** coding-plan 死常量。守卫是 `zcode_local_read_test.go` 的**源码字面量扫描**（断言某个函数不存在，对新写的读取函数无效；判据串在测试里拼接，避免守卫自己命中自己；反向验证时只在注释里留一个文件名就变红）+ `TestZcodeImportRouteIsGone`（在路由层锁「不存在」）。
+- **R4-2**：订正两条旧说法 —— 3012 的 HTTP 状态是 **405 不是 403**、日期块**不是**判据。本端的 zcode 分类只看响应体业务码，故**功能免疫**，仅改注释；`src/zcode-identity.ts` 本轮只改注释（逐行过滤非注释增删 = 空）⇒ 身份块文本与 sha256/长度无需重新提取。
+
+**已知取舍与未做项：**
+
+- **opencode per-account 出口代理已补做**（同日，用户要求全量对齐）：原先按 R1-7 记为「有意差异」（本端推理出站由 proxy 层按 **provider** 级 `UseProxy` 决定，没有 key 级出口的概念）。做法是把它做成**纯增量**：`config.Key.Proxy` 默认为空 ⇒ 未设代理的 provider/key 走原路径逐字节不变；`proxy.Handler.keyProxyClientsFor` 按代理串缓存独立 transport（连接池按出口隔离）；`upstreamClientFor`/`streamClientFor` 加 per-key 分支且**优先于 provider 级**；`bridge.SyncKeys` 把账号的 `opencodeProxy` 写进 key；探针也改走 `httpClientForAccount`（从别的出口探测会得到与真实流量不同源的结论）。判据见 §3.10 与 `perkey_proxy_test.go` 的两条断言 —— 其中「**没设的不绕**」才是这个能力的**安全边界**。
+- ref 的「测试」按钮（无条件探活，仅 gemini）未搬：本端探针复用代理管线，没有对应的独立端点。
+- **`windowDays` 目前只用于展示分桶**：「锁定永久积分」的**选号侧**语义（只消耗近期作废的积分）仍未移植（R1-9 记录在案），`PermanentLocks` 只落了 provider 级开关的持久化。
+
+**验证：** `go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node web/jethub.test.js` 27 项全绿。关键项都做了**反向验证**（把修复改回去必须变红）：能力位守卫、观察者通知、重测写回时刻、指纹轮换、本机读取守卫。前方证据与逐项根因另见 [`../jethub-upstream-sync.md`](../jethub-upstream-sync.md) §6 R4-0/R4-1/R4-2。
+
 ## 2026-10-05 · 登录浏览器与会话模式（+新建账号 先选后开）
 
 **背景：** Free Hub 的 `+ 新建账号` 一直把授权页交给系统 shell（`fsutil.OpenInBrowser` → `rundll32 url.dll,FileProtocolHandler`），即**默认浏览器 + 共享登录态**。本模块的主用途是同一 provider 多账号，而浏览器通常已登录账号 A ⇒ 新建出的账号静默复用 A 的身份；账号池只按 `Account.ID` 去重（`manager.go::AddAccount`），**没有按 provider 身份的去重**，重复凭据不会被任何机制拦住。用户提出的三个待定方向（隐私模式 / 指定非默认浏览器 / 指定浏览器 + 其隐私模式）需要在真机上先做可行性判定，再落到 `+新建账号` 弹窗里让用户选。

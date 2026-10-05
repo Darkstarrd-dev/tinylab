@@ -49,9 +49,17 @@ func isHopByHopHeader(name string) bool {
 }
 
 // upstreamClientFor returns the non-streaming upstream client for sel: the
+// **per-key** egress client when the key carries its own proxy, else the
 // proxy-routed client when sel.Provider.UseProxy is set AND a proxy URL is
 // configured, else the direct client. See clientFor for the timeout handling.
+//
+// ⚠️ 顺序有意义：per-key 代理**优先于** provider 级开关（账号自己的出口是更具体
+// 的意图；两者同时存在时以账号为准），而 provider 级开关**优先于**直连。
+// 未设置 per-key 代理时走的就是原路径 —— 默认行为不变。
 func (h *Handler) upstreamClientFor(sel *rotation.SelectedKey) *http.Client {
+	if set, ok := h.keyProxyClientsFor(sel.Key.Proxy); ok {
+		return h.clientFor(set.plain)
+	}
 	if sel.Provider.UseProxy {
 		if pu, _ := h.proxyURL.Load().(*url.URL); pu != nil {
 			return h.clientFor(h.proxyClient)
@@ -63,6 +71,9 @@ func (h *Handler) upstreamClientFor(sel *rotation.SelectedKey) *http.Client {
 // streamClientFor returns the streaming upstream client for sel (unbounded
 // timeout; connection lifecycle follows the request context).
 func (h *Handler) streamClientFor(sel *rotation.SelectedKey) *http.Client {
+	if set, ok := h.keyProxyClientsFor(sel.Key.Proxy); ok {
+		return set.stream
+	}
 	if sel.Provider.UseProxy {
 		if pu, _ := h.proxyURL.Load().(*url.URL); pu != nil {
 			return h.proxyStream

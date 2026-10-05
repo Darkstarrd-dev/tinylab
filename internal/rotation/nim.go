@@ -174,6 +174,7 @@ func (s *Selector) MarkNIM429(providerID, keyID, model string) time.Time {
 	if s.onStateChange != nil {
 		s.onStateChange()
 	}
+	s.noteRateLimit(keyID, model, unlock)
 	return unlock
 }
 

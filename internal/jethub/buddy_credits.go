@@ -186,6 +186,14 @@ func (m *Manager) BuddyBalance(ctx context.Context, provider, accountID string) 
 			Total:     readPreciseNumber(entry, "CycleCapacitySize"),
 			Used:      readPreciseNumber(entry, "CycleCapacityUsed"),
 			Active:    active,
+			// ⚠️ 到期字段必须透传，不能只用来判 active 就丢掉：面板的
+			// 「临时 / 长期」分桶与资源包 hover 明细都靠它。判「会不会近期作废」
+			// 只能看 DeductionEndTime（扣费截止），**不是** ExpiredTime（有效包里
+			// 恒为空串，只在真失效后回填）也不是 CycleEndTime（套餐是月度周期，
+			// 实测「Free Plan」的周期剩 2 天而扣费截止在 8 年后 —— 取错字段会把
+			// 长期积分说成快作废）。
+			DeductionEndTime: deductionEnd,
+			ExpiresAt:        expiredTime,
 		}
 		out.Packages = append(out.Packages, pkg)
 		if active {
@@ -196,7 +204,9 @@ func (m *Manager) BuddyBalance(ctx context.Context, provider, accountID string) 
 	}
 	out.Total = roundCredits(total)
 	out.IsCredit = true
-	_ = expired // surfaced via package list; total only counts active packages
+	// 已失效包的剩余额度**单独给出**而不是并进 Total：服务端仍会返回那部分，
+	// 但实际扣不到。面板据此显示「另有 N 已失效」。
+	out.ExpiredTotal = roundCredits(expired)
 	return out, nil
 }
 

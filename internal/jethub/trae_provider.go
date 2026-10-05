@@ -296,31 +296,116 @@ func (m *Manager) ClaimTraeDaily(ctx context.Context, accountID string) (*ClaimO
 }
 
 // TraeBalance queries the credit balance (ent usage).
+//
+// ⚠️ 三处必须照上游来（ref trae-credits.ts fetchTraeCreditBalance；本端旧版三处
+// 都不对，只因能力位误登记为 `HasBalance: false` 才从未暴露）：
+//
+//  1. **必须用完整客户端头**（`traeCheckinHeaders`，含基于 user_id 的确定性设备
+//     身份），不是 UG 那套最小头 —— 上游注释明写「关键差异与签到相同：使用完整
+//     客户端头 + 基于 user_id 的设备身份」。
+//  2. 请求体是 `{"require_usage":true,"req_source":2}`（**不是** `{}`）。
+//  3. 余额在**顶层** `user_entitlement_pack_list` —— 每项
+//     `entitlement_base_info.quota.credits_limit` 是本周期总额、
+//     `usage.credits_amount` 是已用、`expire_time`（**秒级**）是到期时刻。
+//     旧版猜的 `data.totalCredits/creditRemain/remain` 三个键都不存在。
+//
+// ⚠️ 到期时刻决定面板的「临时 / 长期」分桶，故必须透传 DeductionEndTime。
 func (m *Manager) TraeBalance(ctx context.Context, accountID string) (*CreditBalance, error) {
 	cred, err := m.traeCredentialFor(accountID)
 	if err != nil {
 		return nil, err
 	}
-	headers := traeUgHeaders(cred, 0)
-	body, err := m.traeUGPost(ctx, traeEntUsagePath, headers, "{}")
+	headers := traeCheckinHeaders(cred, cred.UID)
+	body, err := m.traeUGPost(ctx, traeEntUsagePath, headers, traeEntUsageBody)
 	if err != nil {
 		return nil, err
 	}
-	if int(bodyCode(body)) != 0 {
-		return nil, fmt.Errorf("jethub: trae usage code=%d: %s", bodyCode(body), bodyMessage(body))
-	}
-	out := &CreditBalance{Packages: []CreditPackage{}}
-	data := bodyData(body)
-	if data != nil {
-		for _, key := range []string{"totalCredits", "creditRemain", "remain"} {
-			if v := jsonNumberField(data, key); v > 0 {
-				out.Total = v
-				break
-			}
+	packs := traeEntitlementPacks(body)
+	if len(packs) == 0 {
+		// 只有确实拿不到包时，业务码才是「有信息量的失败原因」；反过来先判码会把
+		// 「码非零但包正常」误判成失败。
+		if code := int(bodyCode(body)); code != 0 {
+			return nil, fmt.Errorf("jethub: trae usage code=%d: %s", code, bodyMessage(body))
 		}
+		return nil, fmt.Errorf("jethub: trae 余额响应没有资源包（形状与预期不符）")
 	}
+	return traePackagesFromEntries(packs)
+}
+
+// traePackagesFromEntries converts `user_entitlement_pack_list` entries into
+// the provider-agnostic CreditBalance (纯函数，便于单测；不碰网络).
+func traePackagesFromEntries(packs []any) (*CreditBalance, error) {
+	out := &CreditBalance{Packages: []CreditPackage{}}
+	var total float64
+	for _, raw := range packs {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		base, _ := entry["entitlement_base_info"].(map[string]any)
+		if base == nil {
+			continue
+		}
+		quota, _ := base["quota"].(map[string]any)
+		if quota == nil {
+			continue
+		}
+		limit := jsonNumberField(quota, "credits_limit")
+		if limit <= 0 {
+			continue
+		}
+		var used float64
+		if usage, ok := entry["usage"].(map[string]any); ok {
+			used = jsonNumberField(usage, "credits_amount")
+		}
+		if used < 0 {
+			used = 0
+		}
+		if used > limit {
+			used = limit
+		}
+		// ⚠️ 包名用 `display_desc`（实测「每月登录赠送」/「签到奖励」/「免费」），
+		// 不是 `base.name` —— 后者实测为 undefined，旧代码会全部回退成「资源包」。
+		pkg := CreditPackage{
+			Name:      firstNonEmpty(jsonStringField(base, "display_desc"), jsonStringField(entry, "display_desc"), "资源包"),
+			Unit:      "credits",
+			Remaining: limit - used,
+			Total:     limit,
+			Used:      used,
+			Active:    true,
+		}
+		// ⚠️ expire_time 是**秒级** Unix 时间戳：秒 → 毫秒必须 ×1000，不乘会让
+		// 到期日落在 1970 年（实测 1790783999 = 2026-09-30 23:59:59）。
+		if expireSec := jsonNumberField(entry, "expire_time"); expireSec > 0 {
+			pkg.DeductionEndTime = int64(expireSec) * 1000
+		}
+		out.Packages = append(out.Packages, pkg)
+		total += pkg.Remaining
+	}
+	if len(out.Packages) == 0 {
+		return nil, fmt.Errorf("jethub: trae 余额响应里的资源包全部无额度")
+	}
+	out.Total = roundCredits(total)
 	out.IsCredit = true
 	return out, nil
+}
+
+// traeEntUsageBody is the verbatim ent-usage request body (ref：`require_usage`
+// 才让服务端下发 usage 与资源包明细；`req_source: 2` 标识来源）。
+const traeEntUsageBody = `{"require_usage":true,"req_source":2}`
+
+// traeEntitlementPacks reads the entitlement pack list from the response top
+// level, tolerating an envelope (`data.…`) in case the gateway wraps it.
+func traeEntitlementPacks(body map[string]any) []any {
+	if list, ok := body["user_entitlement_pack_list"].([]any); ok && len(list) > 0 {
+		return list
+	}
+	if data, ok := body["data"].(map[string]any); ok {
+		if list, ok := data["user_entitlement_pack_list"].([]any); ok {
+			return list
+		}
+	}
+	return nil
 }
 
 // traeUGPost performs an Ug-family POST with the given headers.

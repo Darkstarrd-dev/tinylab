@@ -205,6 +205,10 @@ func (m *Manager) LobsteraiBalance(ctx context.Context, accountID string) (*Cred
 			Used:      0,
 			// 无 Status 字段：有 expiresAt 且已过期才算失效。
 			Active: !(expMs > 0 && time.Now().UnixMilli() >= expMs),
+			// 到期时刻如实透传：面板的资源包 hover 明细按它显示日期并升序排列
+			// （本端原先只用它判 active，值被丢掉 ⇒ 明细排不出「最快到期在上」）。
+			DeductionEndTime: expMs,
+			ExpiresAt:        expiresAt,
 		})
 	}
 	// 面值推断（显示 100/100 而非 100/0）：同组有效包剩余量最大值当面值。

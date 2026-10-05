@@ -273,8 +273,13 @@ func (m *Manager) zcodeHandleBusinessCode(code string, resp *http.Response, keyI
 // as-is, no retry, no key cooldown/exclusion.
 //
 // ⚠️ 这是本端唯一能表达「硬停 + 不罚 key」的机制（代理只有 400/422 走透传）：
-// 3012/3007 若按原状态（403/429 等）分类，会触发冷却+切号 → 下一个账号收到
-// **同一个请求体**再撞一次 3012，把整池账号的惩罚次数一起推高。
+// 3012/3007 若按原状态分类，会触发冷却+切号 → 下一个账号收到**同一个请求体**
+// 再撞一次 3012，把整池账号的惩罚次数一起推高。
+//
+// ⚠️ 3012 的原状态实测是 **405**（不是 403；上游 2026-10-03 复测修正，见 ref
+// c94e659 与 zcode-identity.ts 文件头）。本端的分类**只看响应体**（3012/3007 的
+// 业务码），状态码不参与判据，故对这条修正是功能性免疫 —— 但排查时别按 403 找，
+// 现场的响应体里还带 logid，向用户索取时优先要它。
 func zcodeRewriteAsClientError(resp *http.Response, message string) {
 	resp.StatusCode = http.StatusBadRequest
 	zcodeRewriteErrorBody(resp, message, "zcode_client_error")

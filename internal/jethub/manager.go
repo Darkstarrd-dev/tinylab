@@ -3,6 +3,7 @@ package jethub
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -41,14 +42,27 @@ var defaultProviders = []ProviderMeta{
 	{ID: "lobsterai", DisplayName: "LobsterAI", Description: "有道 LobsterAI", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "qoder", DisplayName: "Qoder", Description: "阿里系 Qoder（国际版）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "qodercn", DisplayName: "Qoder 中国版", Description: "阿里系 Qoder（中国版）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
-	{ID: "trae", DisplayName: "TRAE", Description: "字节跳动 TRAE", HasCredits: true, LoginModes: []string{"url"}},
-	{ID: "cline", DisplayName: "Cline", Description: "Cline API", LoginModes: []string{"url"}},
+	// ⚠️ HasBalance 必须与「余额实现 + `/balance` 路由」同步 —— 它是前端
+	// 渲染额度行与「刷新积分」按钮的**唯一**门控（`provider.hasBalance`）。
+	// 漏登记不会报错，只会让该渠道**永远不显示额度数字**（用户可见损失，
+	// 且从后端看不出任何异常）。`TestProviderBalanceCapabilitiesMatchImplementation`
+	// 守住本表与实现不漂移。
+	{ID: "trae", DisplayName: "TRAE", Description: "字节跳动 TRAE", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
+	// Cline 只有余额、**没有签到**（后端无签到接口；`HasCredits` 必须保持 false，
+	// 否则面板会渲染一个必然失败的「一键领取积分」）。
+	{ID: "cline", DisplayName: "Cline", Description: "Cline API", HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "loomy", DisplayName: "Loomy", Description: "讯飞 Loomy", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
-	{ID: "raccoon", DisplayName: "Raccoon", Description: "商汤小浣熊", HasCredits: true, LoginModes: []string{"url", "qr"}},
-	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax（Anthropic 协议族）", HasCredits: true, LoginModes: []string{"url"}},
+	// raccoon 的「领取」是**一次性登录奖励**（`onboardingTasks` 语义），不是每日
+	// 签到 —— 后端无签到端点，服务端按日自动发放每日积分。
+	{ID: "raccoon", DisplayName: "Raccoon", Description: "商汤小浣熊", HasCredits: true, HasBalance: true, LoginModes: []string{"url", "qr"}},
+	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax（Anthropic 协议族）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	// R1-7: OpenCode Zen — the first non-browser login (pasted API key) plus a
 	// zero-key anonymous channel (`public`, free models only).
-	{ID: "opencode", DisplayName: "OpenCode Zen", Description: "OpenCode Zen（匿名免费 + API Key）", LoginModes: []string{"apikey"}},
+	//
+	// ⚠️ 它的「余额」不是远端数字：Zen 没有公开的余额 API（实测 15 条候选路径
+	// 全 404）。本端如实展示**真正测得到的东西** —— 通道当前是否可用、是否处于
+	// 限额冷却，数据全部来自本地状态、零网络请求（OpencodeChannelBalance）。
+	{ID: "opencode", DisplayName: "OpenCode Zen", Description: "OpenCode Zen（匿名免费 + API Key）", HasBalance: true, LoginModes: []string{"apikey"}},
 	// R2: ZCode (智谱 z.ai 免费额度通道) — Anthropic Messages 协议 + 官方
 	// CLI 设备授权登录；额度按 token 计（billing/balance 的桶）。
 	{ID: "zcode", DisplayName: "ZCode", Description: "智谱 z.ai（Anthropic 协议族；CLI 设备授权）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
@@ -90,6 +104,19 @@ type accountEntry struct {
 	// ModelRateLimits maps model id → reset timestamp (ms since epoch).
 	// 0/absent = not rate limited.
 	ModelRateLimits map[string]int64 `json:"modelRateLimits,omitempty"`
+	// OpencodeFingerprintGeneration is the opencode fingerprint generation
+	// (ref ProviderAccountEntry.opencodeFingerprintGeneration).
+	//
+	// 只存**整数代次**而不是指纹本体：project id 由 `(identity, 代次)` 唯一决定，
+	// 用户点「轮换指纹」时 +1 即可整体换一份新的 project id。
+	OpencodeFingerprintGeneration int `json:"opencodeFingerprintGeneration,omitempty"`
+	// OpencodeProxy is the account's egress proxy (ref
+	// ProviderAccountEntry.opencodeProxy)。
+	//
+	// ⚠️ 本端**仅原样保留**（备份双向兼容：原版导出的条目带这个字段，丢掉就是
+	// 静默的数据损失），尚未接线 —— 本端没有 per-account 出口，出站走 provider
+	// 级的 Use Proxy 开关（见 docs/jethub-upstream-sync.md §5 的有意差异条目）。
+	OpencodeProxy string `json:"opencodeProxy,omitempty"`
 }
 
 // accountsFile is the persisted shape of accounts.json: account index +
@@ -123,6 +150,39 @@ type Account struct {
 	Refreshable     bool             `json:"refreshable"`
 	ModelRateLimits map[string]int64 `json:"modelRateLimits,omitempty"`
 	HasCredential   bool             `json:"hasCredential"`
+	// RotationOrder 是**生效的选号优先级**（0 起，越小越先被选中），由池内顺序
+	// 算出，**不持久化**（顺序本身就是真相）。
+	//
+	// ⚠️ 它不等于池内下标：桥接时匿名通道恒殿后（见 Bridge.SyncKeys），故面板上
+	// 的序号必须用这个字段，而不是列表下标 —— 否则用户看到的序号与实际的选号
+	// 次序不一致（拖到第一位却仍最后一个被选中，正是最难排查的那类误解）。
+	RotationOrder int `json:"rotationOrder"`
+
+	// OpencodeFingerprintGeneration / OpencodeProxy are the per-account opencode
+	// dimensions (ref ProviderAccountEntry 的同名字段)：指纹代次可轮换，
+	// 出口代理原样保留（尚未接线，见 accountEntry 的注释）。
+	OpencodeFingerprintGeneration int    `json:"opencodeFingerprintGeneration,omitempty"`
+	OpencodeProxy                 string `json:"opencodeProxy,omitempty"`
+	// Anonymous marks the provider's anonymous channel (opencode 的 `public`).
+	// 面板据此打「匿名」标签并解释「额度按出口 IP 计」。
+	//
+	// ⚠️ 它由**凭据内容**判定（昵称可被用户改，改了不该改变它是匿名通道这个事实），
+	// 与 ref 的 `opencode-anon-` id 前缀判据等价 —— 本端的账号 id 是
+	// `{provider}-{8hex}`，不带 anon 段，故前缀判据在这里**永远不命中**。
+	Anonymous bool `json:"anonymous,omitempty"`
+	// AccountName / Phone 是从**凭据**现读出来的展示值（ref
+	// ProviderAccountStatus.accountName / phone）：账号池条目不存它们（凭据可能在
+	// 别处被更新），故属于「状态」而非「存储」。
+	//
+	// ⚠️ 取不到就不设字段（宁可不显示，也不猜）：zcode 的手机号由 17 位 user_id
+	// 的前 11 位派生（上游从不下发手机号字段），前缀不像手机号时手机号为空。
+	AccountName string `json:"accountName,omitempty"`
+	Phone       string `json:"phone,omitempty"`
+
+	// anonymous marks the provider's anonymous channel (opencode 的 `public`).
+	// Unexported: it only feeds RotationOrder's computation and must never be
+	// serialized (凭据内容不是对外契约的一部分).
+	anonymous bool
 }
 
 // Manager owns the jethub account/credential storage and the provider bridge.
@@ -176,6 +236,11 @@ type Manager struct {
 	// proxyURL is the global upstream proxy for jethub outbound calls (wired
 	// from config by the app; nil = direct). Immutable once set.
 	proxyURL *url.URL
+	// keyProxyMu guards keyProxyClients: per-account egress proxy clients, built
+	// on first use (see httpClientForAccount). 空 map = 没有任何账号设过自己的
+	// 出口，此时出站走 provider 级开关（与加这个能力之前完全一致）。
+	keyProxyMu      sync.Mutex
+	keyProxyClients map[string]*http.Client
 
 	logger Logger
 }
@@ -383,6 +448,10 @@ func (m *Manager) saveCredentialsLocked() error {
 }
 
 // Accounts lists accounts of one provider (HasCredential filled in).
+//
+// ⚠️ **返回顺序 = 池内顺序 = 选号优先级**（用户拖拽排序的结果）。面板按这个
+// 顺序渲染卡片，桥接按同一个顺序分配 `Priority` —— 顺序是唯一真相，不存在第二份
+// 「排序表」。
 func (m *Manager) Accounts(provider string) []Account {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -391,16 +460,145 @@ func (m *Manager) Accounts(provider string) []Account {
 		if a.Provider != provider {
 			continue
 		}
-		acc := Account{
-			ID: a.ID, Provider: a.Provider, Nickname: a.Nickname,
-			Enabled: a.Enabled, CredentialRef: a.CredentialRef,
-			CreatedAt: a.CreatedAt, ExpiresAt: a.ExpiresAt,
-			Refreshable: a.Refreshable, ModelRateLimits: a.ModelRateLimits,
-		}
+		// ⚠️ 用 toAccount() 而不是手写字段列表：手写会随字段增加而**静默漏拷**
+		// （真实踩过：新增 per-account 出口代理后这里没跟着加，于是面板显示已设置、
+		// 桥接的 key 上却是空的 —— 看起来生效、实际没生效）。
+		acc := a.toAccount()
 		_, acc.HasCredential = m.credentials[provider][a.CredentialRef]
+		acc.anonymous = m.isAnonymousAccountLocked(provider, a.CredentialRef)
+		acc.Anonymous = acc.anonymous
+		acc.AccountName, acc.Phone = m.credentialDisplayLocked(provider, a.CredentialRef)
 		out = append(out, acc)
 	}
-	return out
+	return withRotationOrder(out)
+}
+
+// isAnonymousAccountLocked reports whether the credential behind ref is the
+// provider product's anonymous channel key (opencode: the literal `public`).
+// Must be called with m.mu held.
+func (m *Manager) isAnonymousAccountLocked(provider, ref string) bool {
+	anon := anonymousKeyFor(provider)
+	if anon == "" {
+		return false
+	}
+	raw, ok := m.credentials[provider][ref]
+	if !ok || len(raw) == 0 {
+		return false
+	}
+	var cred struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := jsonUnmarshal(raw, &cred); err != nil {
+		return false
+	}
+	return cred.APIKey == anon
+}
+
+// credentialDisplayLocked derives the display-only values a card can show from
+// the credential itself (accountName / masked phone). Must be called with m.mu
+// held. Returns ("", "") when the provider has nothing extra to show.
+//
+// ⚠️ 刻意**只做 zcode**：其余渠道的凭据里没有比 `nickname` 更好的展示值
+// （登录时已经写了可读标签），凭空多读一份凭据只会多一条无用分支。
+func (m *Manager) credentialDisplayLocked(provider, ref string) (accountName, phone string) {
+	if provider != "zcode" {
+		return "", ""
+	}
+	raw, ok := m.credentials[provider][ref]
+	if !ok || len(raw) == 0 {
+		return "", ""
+	}
+	var cred ZcodeCredential
+	if err := jsonUnmarshal(raw, &cred); err != nil {
+		return "", ""
+	}
+	// AccountLabel 优先（登录时写的可读标签），其次 AccountName。
+	return firstNonEmpty(cred.AccountLabel, cred.AccountName), cred.Phone
+}
+
+// anonymousKeyFor returns the provider's anonymous-channel key literal, or ""
+// when the provider has no anonymous channel (the product registry owns the
+// value; this is the one place the account layer needs it).
+func anonymousKeyFor(provider string) string {
+	if provider == "opencode" {
+		return opencodeAnonymousKey
+	}
+	return ""
+}
+
+// withRotationOrder fills RotationOrder for a provider's account list: keyed
+// accounts take 0..n-1 in pool order, anonymous ones follow (100+) — the same
+// rule Bridge.SyncKeys applies to the rotation keys, so the number shown on the
+// card is the number the selector actually uses.
+func withRotationOrder(accounts []Account) []Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	order := 0
+	anonOrder := anonymousKeyPriorityBase
+	for i := range accounts {
+		if accounts[i].anonymous {
+			accounts[i].RotationOrder = anonOrder
+			anonOrder++
+			continue
+		}
+		accounts[i].RotationOrder = order
+		order++
+	}
+	return accounts
+}
+
+// ReorderAccounts rewrites the pool order of one provider's accounts to match
+// ids. The order **is** the rotation priority (桥接时按位置分配 Priority），故这
+// 是「拖拽调整选号顺序」的唯一写入口。
+//
+// ⚠️ 严格校验集合相等：ids 必须**恰好**是该 provider 的全部账号（不重不漏）。
+// 宽松处理（只搬给定的那几个、其余追加在后）会让一次不完整的拖拽把用户排好的
+// 顺序**部分**打乱，且无法察觉 —— 宁可明确报错。
+func (m *Manager) ReorderAccounts(provider string, ids []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current := map[string]*accountEntry{}
+	count := 0
+	for i := range m.accounts.Accounts {
+		if m.accounts.Accounts[i].Provider != provider {
+			continue
+		}
+		current[m.accounts.Accounts[i].ID] = &m.accounts.Accounts[i]
+		count++
+	}
+	if count == 0 {
+		return fmt.Errorf("jethub: provider %q 没有账号", provider)
+	}
+	if len(ids) != count {
+		return fmt.Errorf("jethub: 顺序表必须包含全部 %d 个账号（收到 %d 个）", count, len(ids))
+	}
+	seen := map[string]bool{}
+	reordered := make([]accountEntry, 0, len(ids))
+	for _, id := range ids {
+		entry, ok := current[id]
+		if !ok {
+			return fmt.Errorf("jethub: 账号 %q 不属于 %s", id, provider)
+		}
+		if seen[id] {
+			return fmt.Errorf("jethub: 顺序表里有重复的账号 %q", id)
+		}
+		seen[id] = true
+		reordered = append(reordered, *entry)
+	}
+	// 保持其它 provider 的相对位置：把它们插回原来的槽位上。
+	out := make([]accountEntry, 0, len(m.accounts.Accounts))
+	next := 0
+	for _, existing := range m.accounts.Accounts {
+		if existing.Provider != provider {
+			out = append(out, existing)
+			continue
+		}
+		out = append(out, reordered[next])
+		next++
+	}
+	m.accounts.Accounts = out
+	return m.saveAccountsLocked()
 }
 
 // AddAccount appends a new account entry (login flows call this after
@@ -589,12 +787,27 @@ func (m *Manager) DisabledModels(provider string) map[string]bool {
 }
 
 // UpdateModelRateLimit records a per-account/per-model rate-limit reset time.
+//
+// ⚠️ 已有**更长（或等长）**的标记时直接返回、不改写：限流是**滚动窗口**，同一次
+// 限流会在多个路径上被重复上报（proxy 的 429 分支 + BillingLockError 分支），
+// 每次都写会把解禁时刻往后推、并做一次无意义的原子写盘。语义与 ref
+// account-pool.ts 的 `updateModelRateLimit`（「已有更长的限流标记」跳过）一致。
+//
+// ⚠️ 调用方是 proxy 的限流锁观察者（见 rotation.Selector.SetRateLimitObserver），
+// 对**非 Free Hub** 的 key 会拿到 ErrNotFound —— 那是正常路径，调用方忽略即可。
 func (m *Manager) UpdateModelRateLimit(accountID, modelID string, resetAtMs int64) error {
+	if modelID == "" {
+		// 空模型名会落下一个脏键（ref account-pool.ts:51 记的同型坑）。
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.accounts.Accounts {
 		if m.accounts.Accounts[i].ID != accountID {
 			continue
+		}
+		if existing, ok := m.accounts.Accounts[i].ModelRateLimits[modelID]; ok && existing >= resetAtMs {
+			return nil
 		}
 		if m.accounts.Accounts[i].ModelRateLimits == nil {
 			m.accounts.Accounts[i].ModelRateLimits = map[string]int64{}
@@ -745,6 +958,8 @@ func (e accountEntry) toAccount() Account {
 		Enabled: e.Enabled, CredentialRef: e.CredentialRef,
 		CreatedAt: e.CreatedAt, ExpiresAt: e.ExpiresAt,
 		Refreshable: e.Refreshable, ModelRateLimits: e.ModelRateLimits,
+		OpencodeFingerprintGeneration: e.OpencodeFingerprintGeneration,
+		OpencodeProxy:                 e.OpencodeProxy,
 	}
 }
 
@@ -754,5 +969,7 @@ func accountEntryFromAccount(a Account) accountEntry {
 		Enabled: a.Enabled, CredentialRef: a.CredentialRef,
 		CreatedAt: a.CreatedAt, ExpiresAt: a.ExpiresAt,
 		Refreshable: a.Refreshable, ModelRateLimits: a.ModelRateLimits,
+		OpencodeFingerprintGeneration: a.OpencodeFingerprintGeneration,
+		OpencodeProxy:                 a.OpencodeProxy,
 	}
 }

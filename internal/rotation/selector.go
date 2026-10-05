@@ -50,6 +50,19 @@ type Selector struct {
 	// debounce; losing such state on a crash only degrades scheduling
 	// heuristics, never correctness (cooldown locks still use onStateChange).
 	onStatsChange func()
+
+	// rateLimitObserver, when set, is notified of every per-key/per-model lock
+	// written by the cooldown / daily-quota / balance-lock paths.
+	//
+	// 为什么需要它：锁本身只活在 rotation 的 KeyState 里，而 Free Hub 的**账号
+	// 卡片**要显示「限额重置：<模型> · <解禁时刻>」——那份数据在
+	// `accountEntry.ModelRateLimits`。没有这条通知，卡片上的限额行**永远是空
+	// 的**（本端此前的真实状态：唯一写入方是备份导入）。
+	//
+	// 注入方是组合根（internal/app），故 rotation 不依赖 jethub（与
+	// onStateChange 同款的分层做法）。
+	rateLimitMu       sync.RWMutex
+	rateLimitObserver func(keyID, modelID string, untilMs int64)
 }
 
 func New(reg KeyStateProvider, settings *config.RotationConfig) *Selector {
@@ -69,6 +82,30 @@ func (s *Selector) SetStatsHook(fn func()) {
 	if fn != nil {
 		s.onStatsChange = fn
 	}
+}
+
+// SetRateLimitObserver installs the per-key/per-model lock observer (see the
+// field comment). Passing nil clears it. Safe to call at any time.
+//
+// ⚠️ 观察者**不得**在锁内做重活：它在 `MarkRateLimited` /
+// `MarkDailyQuotaLocked` 等路径上被同步调用（那些方法自身持有 key state 锁）。
+// 组合根注入的实现只做一次 map 更新 + 原子写文件。
+func (s *Selector) SetRateLimitObserver(fn func(keyID, modelID string, untilMs int64)) {
+	s.rateLimitMu.Lock()
+	s.rateLimitObserver = fn
+	s.rateLimitMu.Unlock()
+}
+
+// noteRateLimit fans a freshly written lock out to the observer (no-op when
+// none is installed — 未接 Free Hub 的构建不该因此多任何分支)。
+func (s *Selector) noteRateLimit(keyID, modelID string, until time.Time) {
+	s.rateLimitMu.RLock()
+	fn := s.rateLimitObserver
+	s.rateLimitMu.RUnlock()
+	if fn == nil || until.IsZero() {
+		return
+	}
+	fn(keyID, modelID, until.UnixMilli())
 }
 
 // SetManualKey pins keyID as the manual active key for providerID (monitor UI
