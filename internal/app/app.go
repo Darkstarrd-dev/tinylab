@@ -535,6 +535,12 @@ func (a *App) Shutdown(_ context.Context) error {
 		// Force-close: drop the listener and kill all active connections now.
 		a.sm.ForceClose()
 	}
+	if a.proxyHandler != nil {
+		// Drain the buffered trace writer (F-10): pending JSONL lines are
+		// held up to traceFlushDebounce in memory; a clean exit must land
+		// them before the process goes away.
+		a.proxyHandler.FlushTraces()
+	}
 	if a.stateManager != nil {
 		if err := a.stateManager.FlushSync(); err != nil {
 			a.logger.Warn("failed to flush state: %v", err)

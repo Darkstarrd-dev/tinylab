@@ -1,3 +1,12 @@
+## 2026-10-05 — F-10 trace 落盘缓冲批量
+
+- 新增 `internal/proxy/trace_writer.go::bufferedTraceWriter`：`enqueue`（marshal + 绑定目标路径入内存 FIFO）→ `traceFlushDebounce`=2s `time.AfterFunc` 去抖 → `flush` 按路径分组整批 `appendFileBatch`（单次 open(O_APPEND|O_CREATE|O_WRONLY,0644)+write+close）；同文件行序不变（request 行先于 attempt 行）；失败整批丢弃 + Warn（重试破坏行序，sweep 容忍缺行）。
+- `request_log.go`：`writeRequestLog`/`TraceMgmtCall` 六处 `appendJSONLine` 调用改 `h.traceBuf().enqueue`，`appendJSONLine` 函数删除；request 行只写一次的 `os.Stat` 探测改 `count==1`（缓冲行磁盘不可见；reqID 进程内唯一，语义等价，每 attempt 少一次 syscall）。
+- 接线：`handler.go` 新增 `traceWriter`/`traceMu` 字段 + `traceBuf()` lazy init（零值 Handler 兼容）+ `FlushTraces`；`SetRequestLogDir` 重指向先 Flush（行已绑定旧路径）；`app.go::Shutdown` 调 `FlushTraces`（崩溃丢失窗口 ≤2s，诊断数据）。
+- 边界自洽（不持句柄设计）：跨日 flush 各落各的日期 index 文件（路径 enqueue 时绑定）；sweep 删文件/目录切换后 flush 自然按 O_CREATE 重建或落旧路径；sweep 与 flush 并发语义与直写时同构（F-11 结论不变）。
+- 回归：新增 `trace_writer_test.go` 五用例——flush 前不落盘 / 按文件批量 + FIFO 序 / 跨日 index 分组 / 并发 enqueue + 并发 flush（8×50 行全落盘）/ 端到端 `writeRequestLog` 缓冲契约；既有 `request_log_test.go` 四用例（JSONL/FullBodies/AppendSecondAttempt/MgmtCall）补 `h.FlushTraces()` 后再断言文件。
+- 同步：本文核对行 + §11.1 新增 F-10 bullet + §17.1 锚点 + §18 维护清单行；PROJECT_MAP 核对行 + §4 `request_log.go` 行更新 + `trace_writer.go` 新行；ProjectAnalysis F-10/§3.10/头部轮次/§6 日志。
+
 # docs/proxy-architecture.md — 核对流水归档
 
 ## 2026-10-05 — F-05 桥接出站头空白基底

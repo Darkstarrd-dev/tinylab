@@ -58,6 +58,11 @@ type Handler struct {
 	quickSlotOnlyProvider func() bool
 	logRequestsProvider   func() bool
 	requestLogDir         atomic.Value // string; settable at runtime via SetRequestLogDir
+	// traceWriter batches trace JSONL lines in memory and appends them in
+	// one open/write/close per file per flush window (F-10). Lazily created
+	// via traceBuf so zero-value Handlers (test harnesses) work too.
+	traceWriter *bufferedTraceWriter
+	traceMu     sync.Mutex
 	// upstreamTimeoutSec holds the current non-streaming upstream timeout in
 	// seconds. It is atomic because SetUpstreamTimeout (settings PATCH) can
 	// run concurrently with in-flight requests; the pre-built clients' Timeout
@@ -111,6 +116,7 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 		EntryTracker:    NewEntryTracker(),
 		hardLimit:       NewHardLimiter(),
 		sigCache:        NewSignatureCache(),
+		traceWriter:     newBufferedTraceWriter(logger),
 	}
 	h.upstreamTimeoutSec.Store(int64(upstreamTimeoutSec))
 	h.proxyURL.Store((*url.URL)(nil))
@@ -420,7 +426,28 @@ func (h *Handler) logRequests() bool {
 }
 
 func (h *Handler) SetRequestLogDir(dir string) {
+	// Drain pending lines first: they were serialized with file paths inside
+	// the old directory and must land there, not under the new one.
+	h.traceBuf().Flush()
 	h.requestLogDir.Store(dir)
+}
+
+// traceBuf returns the buffered trace writer, creating it on first use so
+// Handlers built without New (some test harnesses) still function.
+func (h *Handler) traceBuf() *bufferedTraceWriter {
+	h.traceMu.Lock()
+	defer h.traceMu.Unlock()
+	if h.traceWriter == nil {
+		h.traceWriter = newBufferedTraceWriter(h.logger)
+	}
+	return h.traceWriter
+}
+
+// FlushTraces synchronously appends all buffered trace lines to disk. Called
+// on shutdown so the ≤traceFlushDebounce in-memory window cannot lose trace
+// data on a clean exit.
+func (h *Handler) FlushTraces() {
+	h.traceBuf().Flush()
 }
 
 // TracesDir returns the directory where two-tier JSONL trace files are

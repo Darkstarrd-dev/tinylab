@@ -146,13 +146,14 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 
 	// Write index line to index-YYYYMMDD.jsonl (append).
 	indexPath := filepath.Join(tracesDir, "index-"+dateStr+".jsonl")
-	if err := appendJSONLine(indexPath, indexLine); err != nil {
-		h.logger.Warn("writeRequestLog: failed to append index line: %v", err)
-	}
+	tw := h.traceBuf()
+	tw.enqueue(indexPath, indexLine)
 
-	// Write request line once (on first call for this reqID).
+	// Write request line once (on the first recordUsage call for this reqID;
+	// count==1 identifies it in-process, replacing the previous os.Stat probe
+	// which cannot see lines still held in the flush buffer — F-10).
 	reqFilePath := filepath.Join(reqDir, reqID+".jsonl")
-	if _, err := os.Stat(reqFilePath); os.IsNotExist(err) {
+	if count == 1 {
 		// Build masked request headers.
 		maskedReqHeaders := h.maskHeaderMap(reqHeaders, credential)
 
@@ -177,9 +178,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 			OutputTokens:    outputTokens,
 		}
 
-		if err := appendJSONLine(reqFilePath, requestLine); err != nil {
-			h.logger.Warn("writeRequestLog: failed to write request line: %v", err)
-		}
+		tw.enqueue(reqFilePath, requestLine)
 	}
 
 	// Build attempt line.
@@ -211,28 +210,7 @@ func (h *Handler) writeRequestLog(reqID, provider, model string, sel *rotation.S
 		KeyName:       sel.KeyName,
 	}
 
-	if err := appendJSONLine(reqFilePath, attemptLine); err != nil {
-		h.logger.Warn("writeRequestLog: failed to append attempt line: %v", err)
-	}
-}
-
-// appendJSONLine appends a JSON-encoded line to the file at path.
-// It creates the file if it does not exist. Partial last lines are
-// tolerated (debug data).
-func appendJSONLine(path string, line any) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	data, err := json.Marshal(line)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = f.Write(data)
-	return err
+	tw.enqueue(reqFilePath, attemptLine)
 }
 
 // parseBodyForJSON returns the body as a parsed JSON value if it is
@@ -359,7 +337,8 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 	}
 
 	indexPath := filepath.Join(tracesDir, "index-"+dateStr+".jsonl")
-	_ = appendJSONLine(indexPath, indexLine)
+	tw := h.traceBuf()
+	tw.enqueue(indexPath, indexLine)
 
 	// Request line.
 	maskedReqHeaders := h.maskHeaderMap(reqHeaders, credential)
@@ -377,7 +356,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 		ReqBody:         parseBodyForJSON(reqBody),
 		LatencyMs:       latencyMs,
 	}
-	_ = appendJSONLine(reqFilePath, requestLine)
+	tw.enqueue(reqFilePath, requestLine)
 
 	// Attempt line.
 	maskedRespHeaders := h.maskHeaderMap(respHeaders, credential)
@@ -400,7 +379,7 @@ func (h *Handler) TraceMgmtCall(label, provenance, source, model, provider, upst
 		LatencyMs:   latencyMs,
 		N:           1,
 	}
-	_ = appendJSONLine(reqFilePath, attemptLine)
+	tw.enqueue(reqFilePath, attemptLine)
 }
 
 // SweepTraces runs the trace retention sweep. It deletes index and request

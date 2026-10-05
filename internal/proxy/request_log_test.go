@@ -129,6 +129,9 @@ func TestWriteRequestLog_JSONL(t *testing.T) {
 		"textreview:clean",
 	)
 
+	// Trace writes are buffered (F-10); drain before asserting on files.
+	h.FlushTraces()
+
 	// Find the index file.
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
@@ -238,6 +241,7 @@ func TestWriteRequestLog_PreservesFullBodies(t *testing.T) {
 	respBody := []byte(`{"b64_json":"` + large + `"}`)
 	h.writeRequestLog("req-full", "provider", "gpt-4", sel, "success", 1, 0, 1, 1, "", reqBody, respBody, nil, 200, nil, "https://upstream/v1", "gpt-4", "sess", "success", "")
 
+	h.FlushTraces()
 	reqLines, err := readJSONLLines(filepath.Join(tmpDir, "req", "req-full.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -323,6 +327,7 @@ func TestWriteRequestLog_AppendSecondAttempt(t *testing.T) {
 		"textreview:clean",
 	)
 
+	h.FlushTraces()
 	reqFilePath := filepath.Join(tmpDir, "req", "req-append-1.jsonl")
 	reqLines, err := readJSONLLines(reqFilePath)
 	if err != nil {
@@ -400,6 +405,8 @@ func TestTraceMgmtCall(t *testing.T) {
 		"",
 		100,
 	)
+
+	h.FlushTraces()
 
 	// Find index file.
 	entries, err := os.ReadDir(tmpDir)

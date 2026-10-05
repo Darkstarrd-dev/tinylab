@@ -1,3 +1,8 @@
+## 2026-10-05 — F-10 trace 落盘缓冲批量
+
+- §4 proxy 文件表：`request_log.go` 行更新（`count==1` 判定 + 经 `trace_writer.go` 缓冲落盘）+ 新增 `trace_writer.go` 行（`bufferedTraceWriter` 契约）。
+- 核对行替换为 F-10 摘要（F-05 叙述下移 changelog）。
+
 # PROJECT_MAP.md — 核对流水归档
 
 ## 2026-10-05 — F-05 桥接出站头空白基底（第 17 轮）

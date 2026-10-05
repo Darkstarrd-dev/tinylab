@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 17 轮（F-05 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 18 轮（F-10 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -403,12 +403,16 @@ usage/token 提取本就逐行增量进行、不依赖该缓冲）；③ Ring �
 
 ### 3.10 Trace 落盘（✅ 第 8 轮核实）
 
-**写入路径（✅ `request_log.go::writeRequestLog`）：** 每个 attempt 3 类写——
-① index 行追加到 `index-YYYYMMDD.jsonl`（**每次 attempt 都追加一行**，Attempts=count）；
-② 首次 attempt 建 `req/<reqID>.jsonl` 写 request 行（含完整 masked reqBody）；③ 每 attempt
-追加 attempt 行（含完整 masked respBody）。均为 `O_APPEND` 直写，**无缓冲、无批量**——
-一次请求 N 个 attempt = 1 + N + N 行、≥2N 次小文件写（每行一次 open/write/close）。
-默认关闭（`logRequests()` 运行时开关）；开启后写放大与请求 QPS、body 大小成正比。
+**写入路径（✅ `request_log.go::writeRequestLog` + `trace_writer.go`，第 18 轮 F-10 修复）：**
+每个 attempt 3 类行——① index 行（`index-YYYYMMDD.jsonl`，**每次 attempt 都追加一行**，
+Attempts=count）；② 首次 attempt 的 request 行（含完整 masked reqBody）；③ 每 attempt 的
+attempt 行（含完整 masked respBody）。**缓冲批量写（F-10 修复后）：** 三类行先 marshal 入
+`bufferedTraceWriter` 内存 FIFO（每行绑定 enqueue 时刻的目标路径），2s 去抖（`traceFlushDebounce`）
+整批 flush——按路径分组、同文件行序不变，每 flush 窗口**每文件一次** `open(O_APPEND)+write+close`
+（修复前每行一次）。"request 行只写一次"以 `count == 1` 判定（reqID 进程内唯一），不再 `os.Stat`。
+失败整批丢弃 + Warn（sweep 容忍缺行）；崩溃丢失窗口 ≤2s（诊断数据），`App.Shutdown` →
+`FlushTraces` 落盘兜底，`SetRequestLogDir` 重指向前先 Flush 旧目录。默认关闭
+（`logRequests()` 运行时开关）；开启后落盘频次与 QPS 正比、但 syscall 数与文件数成正比而非行数。
 
 **sweep 正确性（✅ `SweepTracesOnce`）：** 每小时一次（启动先跑一次）；按 retainDays
 删旧 index/req 文件；MaxDiskMB 超限时按 mtime 从旧到新删；**req 详情文件被删时同步从
@@ -579,11 +583,24 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-10 🟢 Trace 开启时每 attempt 多次 open/write/close 小文件写，无缓冲批量
 
 - **维度：** 资源 / 性能
-- **状态：** ✅ 机制已核实 · 🧪 写放大量未实测（与 QPS/body 正比）
-- **证据：** `appendJSONLine` 每行独立 `OpenFile(O_APPEND)+Write+Close`（`request_log.go:240-258`）；
+- **状态：** ✅ **已修复（2026-10-05，第 18 轮）**——内存缓冲 + 2s 去抖批量 flush，
+  每 flush 窗口每文件一次 open/write/close。回归 `internal/proxy/trace_writer_test.go`
+  （五用例），全量 `go test ./...` + `go build`/`go vet` 绿
+- **证据（修复前）：** `appendJSONLine` 每行独立 `OpenFile(O_APPEND)+Write+Close`（`request_log.go:240-258`）；
   每 attempt 写 index 行 + attempt 行两个文件各一次。开启 trace 的高频使用下 syscalls
   密集，但 trace 默认关闭、属诊断场景，实际影响有限。
-- **方向：** 若将来默认开启或高频使用：按文件句柄缓冲 + 定期 flush，或 bufio.Writer。
+- **修复实现（第 18 轮）：** ① 新增 `internal/proxy/trace_writer.go::bufferedTraceWriter`：
+  行先 marshal 入内存 FIFO（每行绑定 enqueue 时刻的目标路径——跨日切换 flush 时各行仍落
+  自己的日期文件），`time.AfterFunc` 2s 去抖整批 flush；flush 按路径分组、同文件行序不变
+  （request 行先于 attempt 行），每组一次 `open(O_APPEND)+write+close`，失败整批丢弃并 Warn
+  （重试会破坏与后续 flush 的行序，sweep 本就容忍缺行）。② `writeRequestLog`/`TraceMgmtCall`
+  三处 `appendJSONLine` 改 `enqueue`（`appendJSONLine` 删除）；"request 行只写一次"的
+  `os.Stat` 探测改为 `count == 1`（缓冲中的行磁盘上不可见，reqID 进程内唯一，语义等价，
+  且每 attempt 少一次 syscall）。③ 关停接线：`Handler.FlushTraces` + `App.Shutdown` 落盘
+  （崩溃丢失窗口 ≤2s，诊断数据可接受）；`SetRequestLogDir` 重指向 trace 目录前先 Flush
+  旧目录挂起行。④ 不持句柄设计（boring 优先）：日切换/目录切换/文件被 sweep 删除三种边界
+  都自然成立，无需句柄失效检测；sweep 与写路径的并发语义与修复前同构（F-11 结论不变）。
+  `Handler` 侧 lazy init（`traceBuf()`），零值 Handler（部分测试 harness）不受影响。
 
 ### F-11 🟢 SweepTracesOnce 全程持锁与否/与写路径并发
 
@@ -640,3 +657,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 15 | 2026-10-05 | F-08 修复（用户指定）：状态持久化分级——`state/manager.go` 新增 `ScheduleStatsWrite`/`flushStats`（`statsPending`/`statsTimer`/`statsDebounce=30s`，双定时器互不取消、同写全量快照，`FlushSync` 停双定时器+同步全量）；rotation `selector.go`/`nim.go` 与 combo `resolver.go` 新增 `SetStatsHook`（`onStatsChange`），四个统计态触发点（SelectKey 成功、RotateToBack、OnNIMRequestSuccess、rotateTargets）改调 stats 钩子，五个关键态触发点（MarkUnavailableWithOverride/ClearError/MarkNIM429/MarkDailyQuotaLocked/MarkBalanceLocked/MarkRateLimited）不动；`app.go` 组合根接线；新增 `state/manager_stats_test.go` 三用例 + `rotation/stateclass_test.go` 两用例 + `combo` 一用例；文档同步（本文 F-08/§3.5/头部轮次/§6、rotation-architecture §2/§9/§14/§15/核对行、config-registry-state-architecture 核对行、PROJECT_MAP §4/§11 + 核对行、双 changelog） | F-08 ✅ 已修复：稳态选 key 零磁盘写（30s 统计态窗口兜底），关键态 500ms 契约不变，统计态崩溃丢失窗口 ≤30s 且无正确性影响；不新增用户可见配置；全量 `go test ./...` 绿 |
 | 16 | 2026-10-05 | F-04 修复（用户指定）：`forward_retry.go` 重构——单次 attempt 抽为 `forwardAttempt`（参数收拢进 `attemptContext`，含 per-call `retryState` 与 inject/strip 标志），`EntryTracker.Remove`+`DecInFlight`+`InflightUpdates.Signal` 三件套改为函数内**单一 defer**（原循环内手写约 10 处 + marshal 失败分支漏 `DecInFlight`）；`forwardWithRetry` 契约改三态 `attemptResult{next: retry/stop/abort, written, terminal}`——queue 超限/sameKey 超限的 503 与 marshal 500 按 `written=true` 返回，调用方不再叠加 502 / combo 不再继续下一目标；key 耗尽以 `terminal=errNoKeysAvailable` 显式表达；冷却等待抽出 `attemptContext.selectKey`；`handleProxy`/`handleCombo` 零改动；新增 `internal/proxy/forward_finalization_test.go` 五用例（marshal 失败 in-flight 释放+不冷却+不再继续、sameKey 超限 written 契约、handleProxy 全耗尽单次 502、combo fallback 全败单次 502、queue 等待中取消静默退出）；文档同步（本文 F-04/§3.3/头部轮次/§6、proxy-architecture 正文四处+核对行、PROJECT_MAP §4 forward_retry 条目、changelog） | F-04 ✅ 已修复：收尾漏配对结构性消除（defer 全路径覆盖），三态返回契约消灭重复响应；测试侧坑——marshal 失败触发用 `math.NaN()`（`UnsupportedValueError`；孤代理 `\uD800` 会被 encoding/json 替换为 U+FFFD 不报错）、桥接 SameKeyRetryError 需实现完整 `RequestAugmenter`+`ResponseInterceptor` 双接口且 provider `APIType=jethub`；全量 proxy suite + `go test ./...` 绿 |
 | 17 | 2026-10-05 | F-05 修复（用户指定）：`upstream.go` 桥接分支改为**框架级空白基底出站头**——每次 attempt 以 `clientReq.WithContext` 浅拷贝（URL/Context 原样：codearts SDK-HMAC 签 `r.URL`、取消经 ctx 传播）+ `Header` 换空白 map，仅回播两个 loopback 标记（`RetryDropHeaderMarker`、`X-TinyLab-WebHub-Turn`——proxy 不 import webhub，字面量重复声明同 upstreamerr 中立性理由）；Augment/Customize/InterceptResponse/无端点分支统一传桥接请求；出站头 = augmenter 写入快照（仅剥标记），客户端头结构性进不了桥接上游；`isHopByHopHeader` 随旧拷贝循环删除（hop-by-hop 在空白基底天然不存在）；`Authorization`/`Content-Type` 缺省补齐语义不变（回落=key 凭据）；jethub 12 处 `Header.Del` 全删循环移除 + 5 处旧契约测试断言更新（buddy/cline/zcode/opencode/qoder）；契约注释同步（interfaces.go/webhub）；新增 `internal/proxy/bridge_headers_test.go` 四用例；文档同步（本文 F-05/头部/§6、proxy-architecture §7.1a + 核对行 + changelog、jethub-architecture §4 + 核对行 + changelog、PROJECT_MAP 核对行 + changelog） | F-05 ✅ 已修复：约定脆弱性消除——新增 augmenter 不写全删循环也不可能泄漏客户端凭据；combo 跨桥接目标 attempt 间零残留；全量 `go test ./internal/...` + `go build`/`go vet` 绿 |
+| 18 | 2026-10-05 | F-10 修复（用户指定）：新增 `internal/proxy/trace_writer.go::bufferedTraceWriter`——trace JSONL 行 marshal 入内存 FIFO（每行绑定 enqueue 时刻目标路径，跨日 flush 各落各的日期文件），2s 去抖（`traceFlushDebounce`）整批 flush：按路径分组、同文件行序不变、每窗口每文件一次 open(O_APPEND)+write+close（原每行一次），失败整批丢弃+Warn；`writeRequestLog`/`TraceMgmtCall` 三处 `appendJSONLine` 改 enqueue（函数删除），request 行只写一次改 `count==1` 判定（不再 os.Stat，reqID 进程内唯一语义等价）；关停接线 `Handler.FlushTraces`+`App.Shutdown`（崩溃丢失窗口 ≤2s 诊断可接受），`SetRequestLogDir` 重指向前先 Flush 旧目录；不持句柄——日切换/目录切换/sweep 删文件三边界自然成立，sweep 并发语义与修复前同构（F-11 不变）；Handler lazy init（`traceBuf()`）兼容零值测试 harness；新增 `trace_writer_test.go` 五用例（flush 前不落盘/按文件批量+FIFO/跨日分组/并发 enqueue 竞态/端到端缓冲契约），既有四用例补 FlushTraces 后断言；文档同步（本文 F-10/§3.10/头部/§6、proxy-architecture 核对行+§11 相关节、PROJECT_MAP 核对行+§4 proxy 条目、changelog） | F-10 ✅ 已修复：trace 开启时每 flush 窗口每文件一次小写（原每行一次），请求路径零新增锁竞争；全量 `go test ./...` + `go build`/`go vet` 绿 |
