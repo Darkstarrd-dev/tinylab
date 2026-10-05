@@ -9,6 +9,13 @@ var lockCountdownInterval = null;
 var quotaBarItems = {};
 var keyDetailCache = {};          // key "provider/model" -> { data, ts }
 var KEY_DETAIL_TTL = 3000;         // reuse _lastPerKeyRefresh throttle window
+// Free Hub 渠道级余额合计（QuotaMonitor 的 Provider 列追加读数）：
+// `{ "<jethub短id>": { groups:[{unit,total}], okCount, failedCount } }`，
+// 由 `/api/jethub/balances` 填充（后端已带 120s TTL 缓存）。
+var providerBalances = {};
+var providerBalancesAt = 0;        // 上次成功/尝试拉取的时刻（60s 节流用）
+var PROVIDER_BALANCE_TTL = 60000;  // 与 ref 徽标 BADGE_POLL_MS 同值
+var _providerBalancesInFlight = null;
 var usageDebugMode = false;
 var traceEnabled = false;
 var usageVisibilityHandler = null;

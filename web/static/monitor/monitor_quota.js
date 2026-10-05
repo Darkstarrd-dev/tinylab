@@ -1,6 +1,118 @@
 // ===== Quota Monitor table =====
 
 
+// --- Provider 列的渠道余额读数（Free Hub 聚合，ref 用量徽标同款口径） ---
+//
+// 数据来自 `GET /api/jethub/balances`：每个渠道一份**归一单位**的余额合计
+// （token / 积分），后端已按 ref creditGroupsOf 的口径求和（失败账号不进合计）
+// 并带 120s TTL 缓存。这里只负责「找到该 provider 的读数并格式化」。
+//
+// ⚠️ 只对 Free Hub 桥接渠道显示（`apiType === 'jethub'`）：普通 API Key 渠道
+// 没有余额端点，硬查只会得到 404 与空白。
+
+// jethubProviderIdOf 把 QuotaMonitor 的 provider（**名称或 ID**，/monitor/quotas
+// 两种形态都可能出现）解析成 Free Hub 短 id（`jethub-zcode` → `zcode`）。
+// 返回 '' 表示「不是可查余额的桥接渠道」。
+function jethubProviderIdOf(provider) {
+  if (!provider || typeof providersCache === 'undefined' || !providersCache) return '';
+  for (var i = 0; i < providersCache.length; i++) {
+    var p = providersCache[i];
+    if (!p || (p.name !== provider && p.id !== provider)) continue;
+    // 非桥接渠道直接判否：不要顺着名字去猜（用户手建的 provider 也可能叫
+    // 「ZCode」，但它没有 Free Hub 账号池，查余额是错的）。
+    if (p.apiType !== 'jethub') return '';
+    var id = String(p.id || '');
+    return id.indexOf('jethub-') === 0 ? id.slice('jethub-'.length) : '';
+  }
+  return '';
+}
+
+// formatProviderBalanceReading 把一个单位分组的合计格式化成读数文案。
+//
+// ⚠️ 复用 Free Hub 的格式化函数（`jethub.js` 的 `__jethubFormatUnits`）而不是
+// 在 Monitor 里另写一份：token 的两位小数（`30.09M`）与积分的整数/两位小数
+// 是**全站唯一口径**（对应 ref credits-format.js），两份实现必然漂移。
+// 按用户口径**不带单位字样**（不显示 Token，也不显示「积分」）。
+function formatProviderBalanceReading(group) {
+  if (!group) return '';
+  var value = Number(group.total);
+  if (!isFinite(value)) return '';
+  if (typeof __jethubFormatUnits !== 'function') return '';
+  return String(__jethubFormatUnits(value, group.unit === 'token' ? 'token' : ''));
+}
+
+// providerBalanceReading 返回某 provider 的读数 `{ text, title }`，没有可显示
+// 的读数时返回 null（非桥接渠道 / 未桥接 / 未拉到 / 全部账号读取失败）。
+function providerBalanceReading(provider) {
+  var pid = jethubProviderIdOf(provider);
+  if (!pid) return null;
+  var sum = providerBalances[pid];
+  if (!sum || !sum.groups || !sum.groups.length) return null;
+  var parts = [];
+  for (var i = 0; i < sum.groups.length; i++) {
+    var one = formatProviderBalanceReading(sum.groups[i]);
+    if (one !== '') parts.push(one);
+  }
+  if (parts.length === 0) return null;
+  // 单元格里只放**第一组**（混合单位是极罕见形态：同一渠道的账号分属两种量纲，
+  // 按用户口径不并排堆数字）；title 里给全部组，信息不丢。
+  var text = parts[0];
+  var title = t('quotaProviderBalanceTitle', [parts.join(' · ')]);
+  if (sum.failedCount > 0) {
+    title += ' · ' + t('quotaProviderBalancePartial', [String(sum.failedCount)]);
+  }
+  return { text: text, title: title };
+}
+
+// updateProviderBalanceCells 把内存里的读数刷进所有已渲染的 Provider 单元格。
+// 行是增量创建/复用的（updateQuotaTable），故本函数必须可重复调用。
+function updateProviderBalanceCells() {
+  var cells = document.querySelectorAll('.quota-td-provider[data-provider]');
+  for (var i = 0; i < cells.length; i++) {
+    var span = cells[i].querySelector('.quota-provider-balance');
+    if (!span) continue;
+    var reading = providerBalanceReading(cells[i].getAttribute('data-provider'));
+    if (!reading) {
+      // 清空而不是留旧值：渠道被停用/账号删光后，残留的旧数字比空白更误导。
+      if (span.textContent !== '') span.textContent = '';
+      if (span.title !== '') span.removeAttribute('title');
+      continue;
+    }
+    if (span.textContent !== reading.text) span.textContent = reading.text;
+    if (span.title !== reading.title) span.title = reading.title;
+  }
+}
+
+// refreshProviderBalances 拉一次渠道级合计。失败**静默**（保留内存里的上一次
+// 读数）：余额是补语，不该为它弹错或打断 Monitor 的其它渲染。
+async function refreshProviderBalances() {
+  if (_providerBalancesInFlight) return _providerBalancesInFlight;
+  _providerBalancesInFlight = (async function() {
+    try {
+      var data = await apiGet('/jethub/balances');
+      providerBalances = (data && data.balances) || {};
+      updateProviderBalanceCells();
+    } catch (e) {
+      // Free Hub 未接线时该路由不存在（404）——与服务器不可达同款：留空即可。
+    }
+  })().finally(function() { _providerBalancesInFlight = null; });
+  return _providerBalancesInFlight;
+}
+
+// providerBalanceTick 由既有的 1s 计数节奏驱动，内部按 PROVIDER_BALANCE_TTL
+// 节流（60s，与 ref 徽标 BADGE_POLL_MS 同值）；后端另有 120s TTL，故真实的
+// 上游余额请求最多每两分钟一轮 —— Monitor 的 5s 配额轮询绝不会打穿上游。
+function providerBalanceTick() {
+  if (typeof currentPage !== 'undefined' && currentPage !== 'monitor') return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  var now = Date.now();
+  if (providerBalancesAt && now - providerBalancesAt < PROVIDER_BALANCE_TTL) return;
+  // 先打点再发请求：in-flight 期间不重复触发（失败也按 60s 退避）。
+  providerBalancesAt = now;
+  refreshProviderBalances();
+}
+
+
 function formatQuotaCell(bar) {
   var capacity = bar.hasQuota ? String(bar.totalCapacity) : '\u221e';
   var html = '<span class="quota-success">' + (bar.successCount || 0) + '</span>' +
@@ -28,7 +140,7 @@ function renderQuotaRow(bar) {
     rowHtml += ' onclick="toggleQuotaRowExpand(\'' + pEsc + '\',\'' + mEsc + '\')"';
   }
   rowHtml += '>\
-    <td>' + chevronHtml + escapeHtml(bar.provider) + '</td>\
+    <td class="quota-td-provider" data-provider="' + escapeAttr(bar.provider) + '">' + chevronHtml + escapeHtml(bar.provider) + '<span class="quota-provider-balance"></span></td>\
     <td>' + escapeHtml(displayModelName(bar.model, bar.alias || bar.model)) + '</td>\
     <td class="quota-td-quota">' + quotaHtml + '</td>\
     <td>' + formatCompactTokens(bar.inputTokens) + '</td>\
@@ -180,7 +292,11 @@ function updateQuotaTable(bars) {
     lockCountdownInterval = setInterval(function() {
       updateLockCountdowns();
       updateKeyTimers();
+      // 渠道余额读数搭这趟 1s 节奏的车（内部 60s 节流）：不再为它单开一个
+      // 定时器与一套启停逻辑（stopUsageRefresh 已负责清掉本 interval）。
+      providerBalanceTick();
     }, 1000);
+    providerBalanceTick(); // 首屏立刻拉一次，不等第一拍
   }
   // sort: active first, then provider/model
   var sorted = bars.slice().sort(function(a, b) {
@@ -260,6 +376,8 @@ function updateQuotaTable(bars) {
   if (sorted.length === 0) {
     tbody.innerHTML = '<tr class="quota-empty"><td colspan="8" style="text-align:center;color:var(--text-muted)">' + escapeHtml(t('noQuota')) + '</td></tr>';
   }
+  // 本趟新建的行是空槽 —— 余额读数已在内存里时当场填上（否则要等下一轮 60s）。
+  updateProviderBalanceCells();
   scheduleMonitorTableAutoFit();
 }
 

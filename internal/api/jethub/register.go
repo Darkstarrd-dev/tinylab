@@ -38,6 +38,11 @@ func NewHandler(d *Deps) *Handler { return &Handler{d: d} }
 func (h *Handler) Register(r chi.Router) {
 	r.Route("/jethub", func(r chi.Router) {
 		r.Get("/providers", h.listProviders)
+		// 渠道级余额合计（Monitor 页 QuotaMonitor 的「Provider · 余额」读数）。
+		// ⚠️ 路径是 `/balances` 而不是照搬逐账号的 `/balance` —— 后者被
+		// `balanceRoutes()`（balance_capability_test.go）当作「逐账号额度端点」枚举，
+		// 混进去会让能力位守卫把合计端点误读成一个渠道。
+		r.Get("/balances", h.providerBalances)
 		r.Put("/providers/{provider}/prefix", h.setPrefix)
 		r.Delete("/providers/{provider}/prefix", h.clearPrefix)
 		// Per-provider Use Proxy toggle (login/credits/inference outbound).

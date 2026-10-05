@@ -1,4 +1,36 @@
-## 2026-10-05 — F-10 trace 落盘缓冲批量
+## 2026-10-06 — QuotaMonitor Provider 列余额读数（Free Hub 渠道级合计）
+
+- 需求（用户）：对齐 DSH 插件输入区徽标（`ZCode (智谱) • 94.54MToken`）——Monitor 页 QuotaMonitor 的
+  **Provider 列**追加读数，**小两号字体**；积分显示数量（`3000`），token 加 M（`30.09M`），不显示
+  「Token」；每行都显示、gemini 的 `%` 跳过、60s 前端 + 120s 后端（用户确认）。
+- 数据侧落在 jethub（过程叙述见 `docs/changelog/jethub-architecture.md` 同日条目）：
+  `internal/jethub/balance_summary.go`（归一单位求和 / 失败账号不进合计 / 成功 120s·全失败 15s
+  TTL / 空轮次不缓存 / 账号与凭据变更即失效）+ `internal/api/jethub/balances.go`
+  （`GET /api/jethub/balances`；路径**不叫** `/balance`，避免被 `balance_capability_test.go`
+  当作逐账号端点枚举）。本文侧三处落点：
+- 前端 `web/static/monitor/monitor_quota.js`：`renderQuotaRow` 的 Provider 单元格加
+  `<span class="quota-provider-balance">` 空槽 + `data-provider`（供增量补写）；`updateQuotaTable`
+  末尾调 `updateProviderBalanceCells()`（新建的行立刻填上内存里的读数，不必等下一轮 60s）；
+  `providerBalanceTick()` 挂进**既有的 1s 计数 interval**（不新开定时器、不新增启停逻辑，
+  `stopUsageRefresh` 已负责清理），内部 60s 节流；`jethubProviderIdOf` 只认
+  `providersCache` 里 `apiType === 'jethub'` 的条目（不按名字猜）；读取失败**静默**并保留上一次
+  读数（Free Hub 未接线 ⇒ 该路由 404，与服务器不可达同款）。
+- `web/static/monitor/monitor_state.js`（`providerBalances`/`providerBalancesAt`/`PROVIDER_BALANCE_TTL`
+  /in-flight 去重）+ `web/static/style-monitor.css`（`.quota-table .quota-provider-balance`
+  = `--font-badge`「小两号」+ 次级色 + `tabular-nums`，`:empty{display:none}` 不留 6px 空隙）+
+  `web/static/i18n.js`（`quotaProviderBalanceTitle`/`quotaProviderBalancePartial` en+cn 各一份）。
+- 口径单一来源：格式化**复用** `jethub.js` 的 `__jethubFormatUnits`（不在 Monitor 里另写 M/K），
+  由 `web/monitor-quota-balance.test.js` 的静态守卫锁死。⚠️ 脚本加载顺序有意义：`jethub.js`
+  必须先于 `monitor_quota.js`（两份 index 变体均已断言）。
+- 回归：`web/monitor-quota-balance.test.js` 11 项（静态接线 5 + VM 行为 6，真实格式化函数抽进
+  沙箱后断言 `30.09M`/`94.54M`/`1.00M`/`3000`/`2066.84`、混合单位只显示首组而 title 带全部组、
+  失败账号只在 tooltip、旧读数被清空）；反向验证：单位映射改错 ⇒ 3 条红。`go vet ./...` 干净 +
+  全量 `go test ./...` 绿 + `node web/jethub.test.js` 全绿。
+- 同步：本文核对行 + §17 维护清单新增本行；`docs/jethub-architecture.md` §6.9（新小节，五条口径
+  表 + 四条实现约束）+ 模块表 + 维护清单 + 核对行；PROJECT_MAP 核对行 + §10.28（`balances.go` 行）
+  + §13n（`balance_summary.go` 行）+ §24 速查表新行。
+
+
 
 - 新增 `internal/proxy/trace_writer.go::bufferedTraceWriter`：`enqueue`（marshal + 绑定目标路径入内存 FIFO）→ `traceFlushDebounce`=2s `time.AfterFunc` 去抖 → `flush` 按路径分组整批 `appendFileBatch`（单次 open(O_APPEND|O_CREATE|O_WRONLY,0644)+write+close）；同文件行序不变（request 行先于 attempt 行）；失败整批丢弃 + Warn（重试破坏行序，sweep 容忍缺行）。
 - `request_log.go`：`writeRequestLog`/`TraceMgmtCall` 六处 `appendJSONLine` 调用改 `h.traceBuf().enqueue`，`appendJSONLine` 函数删除；request 行只写一次的 `os.Stat` 探测改 `count==1`（缓冲行磁盘不可见；reqID 进程内唯一，语义等价，每 attempt 少一次 syscall）。

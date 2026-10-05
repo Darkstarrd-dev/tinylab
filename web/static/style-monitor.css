@@ -260,6 +260,11 @@
 .quota-table .quota-capacity{color:var(--text-secondary)}
 .quota-table .quota-error-badge{display:inline-block;margin-left:6px;padding:0 5px;border-radius:var(--radius-xs);background:rgba(239,83,80,0.15);color:var(--danger);font-size:var(--font-badge);font-weight:700;line-height:1.5}
 .quota-table .quota-td-latency,.quota-table .quota-td-speed{font-variant-numeric:tabular-nums}
+/* Provider 列追加的**渠道级余额**读数（Free Hub 聚合；ref 用量徽标同款口径）。
+   字号是「小两号」：--font-badge 比 --font-base 小 2.5px，且随全局字号档位缩放。
+   空槽隐藏（非桥接渠道 / 没拉到读数时不留 6px 空隙）。 */
+.quota-table .quota-provider-balance{font-size:var(--font-badge);color:var(--text-muted);margin-left:6px;font-variant-numeric:tabular-nums}
+.quota-table .quota-provider-balance:empty{display:none}
 .quota-table .model-key-metric{font-family:'Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:var(--font-badge);font-variant-numeric:tabular-nums;white-space:nowrap}
 .quota-table .metric-live{color:var(--accent2);font-weight:700}
 /* Per-key expand sub-rows */

@@ -604,6 +604,9 @@ func (m *Manager) ReorderAccounts(provider string, ids []string) error {
 // AddAccount appends a new account entry (login flows call this after
 // generating the id/credentialRef pair).
 func (m *Manager) AddAccount(a Account) error {
+	// 账号集变化 ⇒ 渠道级余额合计（Monitor 用）失效。⚠️ 必须在取状态锁**之前**
+	// 调用：balanceMu 与 m.mu 不得嵌套获取（见 InvalidateBalanceSummary 的锁序注释）。
+	InvalidateBalanceSummary("")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Idempotent guard: duplicate ids are rejected.
@@ -663,6 +666,8 @@ var ErrNotFound = fmt.Errorf("jethub: account not found")
 
 // UpdateAccount patches nickname/enabled/expiresAt/refreshable of an account.
 func (m *Manager) UpdateAccount(id string, patch func(*Account)) error {
+	// enabled 开关直接改变「哪些账号参与余额合计」⇒ 合计失效（锁序同 AddAccount）。
+	InvalidateBalanceSummary("")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.accounts.Accounts {
@@ -693,6 +698,8 @@ func (m *Manager) DeleteAccount(id string) error {
 
 // deleteAccountEntry is the locked half of DeleteAccount.
 func (m *Manager) deleteAccountEntry(id string) error {
+	// 账号集变化 ⇒ 余额合计失效（同 AddAccount 的锁序要求）。
+	InvalidateBalanceSummary("")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, a := range m.accounts.Accounts {
@@ -711,6 +718,9 @@ func (m *Manager) deleteAccountEntry(id string) error {
 // SetCredential stores the credential JSON for an account ref and refreshes
 // the account's expiresAt/refreshable display fields.
 func (m *Manager) SetCredential(provider, credentialRef string, credentialJSON []byte, expiresAt int64, refreshable bool) error {
+	// 新凭据 = 该账号第一次「查得到余额」（登录流程先落账号、后落凭据）⇒ 合计
+	// 失效，让 Monitor 立刻显示读数而不是等满 120s（锁序同 AddAccount）。
+	InvalidateBalanceSummary("")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.credentials[provider] == nil {

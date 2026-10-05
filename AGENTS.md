@@ -20,7 +20,7 @@
 |`webhub-architecture.md`|Web Hub（webhub，浏览器页面驱动桥）：与 jethub 的机制差异、P0 验证结论与三个已修缺陷、Free Hub 页面内嵌 UI（分割线+call prefix）、模型 ID 设计、workflow 引擎与双通道监听、站点矩阵|
 |`webhub-upstream-sync.md`|Web Hub 上游同步（周期性流程文档）：**同步站点规则事实而非代码**（上游 Python，本项目 Go 重实现）、判定原则、每轮 SOP、不搬清单、待办 W1-*、轮次日志、当前 pin|
 
-### 高频变更速查（完整 19 条见 PROJECT_MAP.md §24）
+### 高频变更速查（完整表见 PROJECT_MAP.md §24）
 
 | 变更任务 | 先读文档 | 涉及源码 |
 |---|---|---|
@@ -36,6 +36,7 @@
 | 新增/修改 Demo 游戏插件 | gamedemo-progress | `web/games/<id>/`（manifest+入口）、`web/static/demo-games.js`（TRGames 宿主/adapter）、`internal/api/games/register.go`（列表/state KV/seed）、`internal/api/router.go`（`/games/*` 静态+seed）、`internal/config/paths.go`（`ResolveGamesDir`） |
 | 执行 Free Hub 上游同步（拉取/分诊/推进 pin/新增 provider 评估） | jethub-upstream-sync、jethub-architecture | `ref/deepseek-harness-codearts`（`git fetch`/`git checkout`，禁止手工编辑）+ `docs/jethub-upstream-sync.md`（§3 SOP/§6 待办 R1-*/§7 日志）+ 落点随待办项（`internal/jethub/`、`internal/api/jethub/`、`web/static/jethub.js`） |
 | 修改用量统计/配额监控显示 | proxy、config-registry-state | `proxy/recorder.go`+`entry_tracker.go`、`api/monitor/register.go`（`getQuotas` 从 per-key `ModelQuotas` 重算 `TotalUsed`/`TotalCapacity`；`getModelKeys` 含 `providerId` 与 in-use pin 感知）、`web/static/monitor_quota.js`（`formatQuotaCell` 显示 `success/capacity`+error badge；`renderQuotaKeyRows` 跳过 exhausted key、第一列 dot/timer+状态徽标并列、per-key quota/input/output 列；`quotaKeyRowClick` Ctrl+点击 pause/resume、Shift+点击 pin 活跃 Key）、`api/keys/register.go`（`activateKey`）、`usage/accumulator.go`（`KeyStatEntry.InputTokens/OutputTokens`）、`rotation/selector.go`（`manualPins`）、`web/static/style.css`（`.quota-success`/`.quota-error-badge` 类） |
+| 修改 QuotaMonitor **Provider 列的余额读数**（Free Hub 渠道级合计，2026-10-06 新增） | jethub-architecture（§6.9）、proxy-architecture | `internal/jethub/balance_summary.go`（`BalanceSummaryOf`：归一单位 token/credit 分组求和、失败账号不进合计、成功 120s·全失败 15s TTL、空轮次不缓存、`InvalidateBalanceSummary` 挂账号/凭据变更）+ `internal/api/jethub/balances.go`（`GET /api/jethub/balances`，**路径不得改成 `/balance`**）+ `web/static/monitor/monitor_quota.js`（`jethubProviderIdOf` 靠 `apiType==='jethub'` 判定、`providerBalanceTick` 60s 节流搭既有 1s 节奏、格式化**复用** `jethub.js` 的 `__jethubFormatUnits`）+ `web/static/monitor/monitor_state.js`+`style-monitor.css`（`.quota-provider-balance` = `--font-badge`）+ `web/static/i18n.js`（`quotaProviderBalance*` en+cn）+ `internal/jethub/balance_summary_test.go`/`internal/api/jethub/balances_test.go`/`web/monitor-quota-balance.test.js` |
 
 > 模块文件清单与 build tag 矩阵详见 PROJECT_MAP.md §1–§21；涉及结构变更时须同步更新该文件。
 

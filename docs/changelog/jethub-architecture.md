@@ -1,5 +1,48 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-06 — 渠道级余额合计（Monitor 页 Provider 列读数，§6.9）
+
+- 需求（用户）：对齐 DSH 插件输入区那枚用量徽标（`ZCode (智谱) • 94.54MToken`）——在 TinyLab
+  Monitor 页 QuotaMonitor 的 **Provider 列**追加信息，**小两号字体**；积分渠道显示积分数量
+  （`3000`），token 额度加 M（`30.09M`），**不显示「Token」字样**。四个口径经用户确认：每行都
+  显示、gemini 的 `%` 跳过、混合单位不考虑、60s 前端 + 120s 后端。
+- 新增 `internal/jethub/balance_summary.go`：`BalanceSummaryOf(ctx, provider)` → 遍历**启用且有
+  凭据**的账号 → `balanceForAccount` **单点分发**（ref `qoderFamily` 注册表同思路：cline 多返
+  raw、opencode 多返 notice、zcode 桶结果经新抽出的 `zcodeBalanceToCredit` 映射，签名差异全在
+  这一处收敛）→ `normalizedBalanceUnit` 归一到 `token`/`credit` 两类分组求和；`%` 与「通道」
+  返回 false（不可累加）；失败账号只记 `failedCount`。
+- **TTL 两档 + 一条非显然规则**：成功 120s / **全失败** 15s（ref 徽标宿主侧同款）；但
+  「一个能查的账号都没有」的空轮次**不入缓存** —— 登录流程是「先落账号、后落凭据」，缓存它
+  会让刚登录成功的渠道在 Monitor 上空白两分钟。反向验证：把该早退改成 `&& false` ⇒
+  `TestBalanceSummaryCredentialArrivalShowsImmediately` 变红（该用例**绕过 SetCredential**
+  直接写 credentials map，专门排除「靠缓存失效兜住」这条旁路）。
+- 缓存失效：`InvalidateBalanceSummary` 挂 `AddAccount`/`deleteAccountEntry`/`UpdateAccount`/
+  `SetCredential`，**一律在取 `m.mu` 之前**调用（`balanceMu` 与 `m.mu` 不得嵌套；锁序写进
+  函数的文档注释）。
+- 新增 `internal/api/jethub/balances.go`：`GET /api/jethub/balances`。⚠️ 路径刻意**不叫
+  `/balance`** —— `balance_capability_test.go` 的 `balanceRoutes()` 按 `/balance` 后缀枚举
+  「逐账号额度端点」，混进去会让能力位守卫把合计端点误读成一个渠道。`nonAggregatableProviders`
+  跳过 gemini（**不查**，省一次必然被丢弃的上游请求；聚合层的 `normalizedBalanceUnit` 是第二层
+  防线）；`Groups` 为空的渠道整体不出现在响应里；30s 总超时（卡住的上游不会挂死浏览器请求，
+  超时后本轮按失败缓存 15s）。
+- 前端 `web/static/monitor/monitor_quota.js`：Provider 单元格加 `<span class="quota-provider-balance">`
+  空槽（`:empty` 隐藏）；`jethubProviderIdOf` 经 `/api/providers` 的 `apiType === 'jethub'`
+  判定并把 `jethub-zcode` 还原成短 id —— **绝不按名字猜**（用户手建的普通 provider 也可能叫
+  「ZCode」，但它没有 Free Hub 账号池）；`providerBalanceTick` **搭既有 1s 计数节奏**（复用
+  `lockCountdownInterval`，`stopUsageRefresh` 已负责清理），内部 60s 节流；失败**静默**并保留
+  上一次读数（Free Hub 未接线时该路由 404，与服务器不可达同款处理）。
+- 口径单一来源：读数格式化**复用** `jethub.js` 的 `__jethubFormatUnits`，不在 Monitor 里再写
+  一份 M/K（否则 token 的两位小数必然漂移）。CSS 用 `--font-badge`（比 `--font-base` 小 2.5px，
+  即用户说的「小两号」，且随全局字号档位缩放）+ `:empty{display:none}`。
+- 回归：`internal/jethub/balance_summary_test.go`(10：聚合/失败不画 0/两档 TTL/空轮次不缓存/
+  单位归一张量/zcode×1000/JSON 契约/失效重查/no-accounts) + `internal/api/jethub/balances_test.go`
+  (2：路由与守门 + opencode「通道」与 gemini 必不出现) + `web/monitor-quota-balance.test.js`
+  (11：把 jethub.js 的**真实**格式化函数按花括号配对抽进 VM 沙箱，端到端断言 `30.09M`/`94.54M`/
+  `1.00M`/`3000`/`2066.84`，另含混合单位只显示首组而 title 带全部组、失败账号只在 tooltip、
+  旧读数被清空，以及 CSS/i18n/脚本加载顺序静态守卫）。已做反向验证：单位映射改错 ⇒ 3 条红。
+- 验证：`go vet ./...` 干净 + 全量 `go test ./...` 绿（含 `internal/jethub` 56s）+ `node
+  web/monitor-quota-balance.test.js` 10/10 + `node web/jethub.test.js` 全绿。
+
 ## 2026-10-05 — F-05 桥接出站头空白基底（proxy §7.1a 契约变更）
 
 - proxy 侧契约变更落点见 `docs/changelog/proxy-architecture.md` 同日条目；对 jethub 的影响：`Augment`/`Customize` 收到的 `r.Header` 为空白基底，写入即出站集合。

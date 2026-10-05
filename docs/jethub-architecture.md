@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-05（**F-05 桥接出站头空白基底（proxy 侧 §7.1a 契约变更）**：`RequestAugmenter.Augment`/`Customize` 收到的 `r.Header` 从『客户端头全量拷贝』改为**代理新建空白基底**（仅回播 loopback 标记），augmenter 写入即出站集合——§4.4 已更新；各 provider augmenter 的 `for k := range r.Header { Del(k) }` 全删循环**已移除**（12 处：buddy/cline/codearts/gemini/lobsterai/loomy/minimax/opencode/qoder/raccoon/trae/zcode），新增 augmenter **不得也不再**手工清头；客户端凭据结构性进不了桥接上游（ProjectAnalysis F-05 结案，回归 `proxy/bridge_headers_test.go`）。上轮：账号卡片信息全量对齐（R4-0，P0–P2）+ 删除 ZCode 本机凭据路径（R4-1）：额度行门控 `ProviderMeta.HasBalance` 补正四家（minimax/raccoon/trae/cline）+ opencode「通道可用性」额度行；单位标签三态、Gemini 逐窗口百分比、`CreditPackage` 到期字段、前端临时/长期分桶等，见 changelog。
+> **最后核对：** 2026-10-06（**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。上轮：**F-05 桥接出站头空白基底（proxy 侧 §7.1a 契约变更）**：`RequestAugmenter.Augment`/`Customize` 收到的 `r.Header` 从『客户端头全量拷贝』改为**代理新建空白基底**（仅回播 loopback 标记），augmenter 写入即出站集合——§4.4 已更新；各 provider augmenter 的 `for k := range r.Header { Del(k) }` 全删循环**已移除**（12 处：buddy/cline/codearts/gemini/lobsterai/loomy/minimax/opencode/qoder/raccoon/trae/zcode），新增 augmenter **不得也不再**手工清头；客户端凭据结构性进不了桥接上游（ProjectAnalysis F-05 结案，回归 `proxy/bridge_headers_test.go`）。
 >
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
@@ -13,6 +13,7 @@
 > **变更维护清单（改动时必须同步本文）：**
 > - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
 > - **修改账号卡片显示的信息（额度行门控/单位标签/分桶/hover 明细/账号规格/序号/按钮/匿名标记）→ §3 + `internal/jethub/manager.go`（`ProviderMeta.HasBalance` 是前端渲染额度行的**唯一**门控）+ `codearts_credits.go`（`CreditBalance`/`CreditPackage` DTO）+ 各 `*_credits.go`/`*_provider.go`（填充到期字段与池）+ `credit_window.go` + `web/static/jethub.js`/`i18n.js`/`style-jethub.css` + **`internal/api/jethub/balance_capability_test.go`（能力位↔路由双向守卫、领取语义位）+ `internal/jethub/credit_fields_test.go` + `web/jethub.test.js` 三组用例**
+> - **修改渠道级余额合计 / Monitor 页 Provider 列的余额读数 → §6.9 + `internal/jethub/balance_summary.go`（归一单位求和、失败账号不进合计、两档 TTL、空轮次不缓存、`InvalidateBalanceSummary` 的锁序）+ `internal/api/jethub/balances.go`（`GET /api/jethub/balances`，**路径不得改成 `/balance`**）+ `web/static/monitor/monitor_quota.js`（`jethubProviderIdOf` 靠 `apiType==='jethub'` 判定，**不靠名字猜**；格式化**复用** `jethub.js` 的 `__jethubFormatUnits`，不得另写 M/K 口径）+ `style-monitor.css` + `web/monitor-quota-balance.test.js`**
 > - **修改账号顺序/选号优先级（拖拽排序）→ §3 + `Manager.ReorderAccounts` + `PUT /providers/{provider}/accounts/order` + `bridge.go::SyncKeys`（key `Priority` 按池内位置；**不得**再按 ID 重排）+ 前端拖拽与序号徽标 + `internal/jethub/order_test.go`**
 > - **修改 per-key 出口代理（opencode per-account proxy）→ §3.10 + `internal/config/types.go`（`Key.Proxy`）+ `internal/proxy/handler.go`（`keyProxyClientsFor`）+ `internal/proxy/upstream.go`（`upstreamClientFor`/`streamClientFor` 的 per-key 分支，**优先级高于 provider 级**）+ `internal/jethub/bridge.go`（`SyncKeys` 写 `Proxy`）+ `internal/jethub/sessions.go`（`SetAccountProxy`/`httpClientForAccount`）+ `internal/api/jethub/opencode.go`（`PUT /opencode/proxy`）+ `internal/jethub/probe.go`（探针同源）+ 前端「代理」按钮 + **`internal/proxy/perkey_proxy_test.go`（设了会绕 + **没设的不绕**）与 `internal/jethub/account_proxy_test.go`**
 > - **修改限额重置标记的写入链路 → §3.1 + `internal/rotation/selector.go`（`SetRateLimitObserver`）+ `cooldown.go`/`nim.go`（四条写锁路径）+ `internal/app/app.go`（组合根注入）+ `manager.go::UpdateModelRateLimit`（只延长不缩短）+ `ratelimits.go::parseRateLimitResetTime` + `internal/rotation/ratelimit_observer_test.go`**
@@ -43,8 +44,8 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、13 provider 适配、WASM 桥、备份 |
-| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
+| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、13 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
+| API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + **`/balances` 渠道级合计（§6.9）** + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
 | 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（20 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
 | 装配 | `internal/app/app.go` | Manager/Bridge 构造、`RestoreBridges` 启动重桥、augmenter 注入 proxy Handler |
@@ -701,6 +702,56 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
   `status_login_test.go`（chi.Walk 含 gemini）+ `register_test.go`（display-name 表）。
   ⚠️ **未真机验证**：OAuth 流与推理 200 需要真实 Google 账号（实施判据全部来自 ref
   实测记录）；金标准信封按 ref 353 字节用例的前缀+字段序断言（requestId 随机段不逐字节）。
+
+## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
+
+**目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。
+对齐参考插件会话输入区那枚用量徽标（`ZCode (智谱) • 94.54MToken`），在该列**追加渠道级
+余额**（小两号、次级色）——用户在原页面就能看到「这个渠道还剩多少」，不必切到 Free Hub。
+
+**链路**：
+
+```
+Monitor（web/static/monitor/monitor_quota.js）
+  providerBalanceTick()        ← 搭既有 1s 计数节奏，内部 60s 节流（ref BADGE_POLL_MS 同值）
+  → GET /api/jethub/balances   ← 一次拿全部渠道的合计（不为 13 渠道 × N 账号发几十个请求）
+  → Manager.BalanceSummaryOf(provider)   ← 后端两档 TTL：成功 120s / 全失败 15s
+  → balanceForAccount()        ← 单点分发到各渠道既有余额实现（签名差异在此收敛）
+  → 归一单位分组求和 → BalanceGroup{unit,total} + okCount + failedCount
+```
+
+**五条口径（全部对齐 ref `credits-format.js` / `badge-model.js`）**：
+
+| 规则 | 依据 |
+|---|---|
+| **单位归一两类**：`token` 一类；`credit`/`credits`/「积分」/空串归 `credit` | ref `normalizeUnit` 只返回两类；同一渠道服务端会混拼（实测 WorkBuddy 的 `credit`/`credits`），按原值分组会渲染出两个「积分」 |
+| **不跨量纲求和**：ZCode 是 token、其余是积分，两者并列而非相加 | ref 文件头铁律：归一化只收敛同义拼法 |
+| **失败的账号不进合计**，只记 `failedCount`（前端进 title） | ref `creditGroupsOf`：把失败画成 0 会被读成「额度用光」 |
+| **`%`（gemini）与「通道」（opencode）不可累加 ⇒ 整体跳过** | 窗口是并行百分比（两个号各 50% 加起来是 100%？）；「通道可用性」不是余额。跳过同时省掉一次必然被丢弃的上游请求 |
+| **只统计启用 + 有凭据的账号** | 与 ref 徽标「仅启用账号」同口径；无凭据的账号**连查都不查**（它不是「读数失败」） |
+
+**四条实现约束**（每条都有回归守着）：
+
+1. **空轮次不入缓存**：登录是「先落账号、后落凭据」，中间那一轮「一个能查的账号都没有」。
+   缓存它会让刚登录成功的渠道在 Monitor 上空白 120s —— `balance_summary_test.go` 有一条
+   **绕过 `SetCredential`**（直接写 credentials map）的用例专门排除这条旁路。
+2. **账号/凭据一变即失效**：`AddAccount`/`DeleteAccount`/`UpdateAccount`/`SetCredential`
+   调 `InvalidateBalanceSummary`（乐观失效：代价是一次重查，收益是立即正确）。
+   ⚠️ 调用点必须在**取 `m.mu` 之前**：`balanceMu` 与 `m.mu` 不得嵌套获取。
+3. **`%` 不查询但仍然安全**：即使 gemini 的 `%` 包漏进聚合层，`normalizedBalanceUnit`
+   也会拒掉它（两层防线：端点层不查、聚合层不认）。
+4. **格式化是全站唯一口径**：Monitor **复用** `jethub.js` 的 `__jethubFormatUnits`
+   （`web/monitor-quota-balance.test.js` 断言 `monitor_quota.js` 里**不得**再出现一份
+   `toFixed(2)+'M'`），故两处的 `30.09M` 不可能漂移。
+
+**前端识别渠道的方式**：`jethubProviderIdOf` 经 `/api/providers` 的 DTO 判定
+`apiType === 'jethub'` 并把 `jethub-zcode` 还原成 `zcode` —— **绝不按名字猜**：用户手建的
+普通 provider 也可能叫「ZCode」，但它没有 Free Hub 账号池，查余额是错的。
+
+**端点**：`GET /api/jethub/balances` → `{"balances":{"<短id>":{"groups":[{unit,total}],"okCount":N,"failedCount":M}}}`
+（`Groups` 为空的渠道整体不出现；30s 总超时兜底）。⚠️ 路径**不叫 `/balance`**：那个形状被
+`balance_capability_test.go` 当作「逐账号额度端点」枚举，混进去会让能力位守卫把一个合计
+端点误读成一个渠道。
 
 ## 7. 备份/恢复（与原版 Jet Hub 双向兼容）
 

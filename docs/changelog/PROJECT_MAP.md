@@ -1,3 +1,14 @@
+## 2026-10-06 — QuotaMonitor Provider 列余额读数（Free Hub 渠道级合计）
+
+- §13n（`internal/jethub/`）文件表：新增 `balance_summary.go` 行（`BalanceSummaryOf` 口径、两档 TTL、
+  空轮次不缓存、`InvalidateBalanceSummary` 的锁序、回归清单）。
+- §10.28（`internal/api/jethub/`）文件表：新增 `balances.go` 行（`GET /api/jethub/balances`；⚠️ 路径
+  不叫 `/balance` 的原因、`nonAggregatableProviders` 跳过 gemini、`Groups` 为空的渠道不出现、
+  30s 总超时）。
+- §24 速查表：新增「修改 QuotaMonitor Provider 列的余额读数」一行（后端 `balance_summary.go` +
+  `balances.go`；前端 `monitor_quota.js`/`monitor_state.js`/`style-monitor.css`/`i18n.js`；三个测试文件）。
+- 核对行替换为本次摘要（F-10 叙述下移本文件）。
+
 ## 2026-10-05 — F-10 trace 落盘缓冲批量
 
 - §4 proxy 文件表：`request_log.go` 行更新（`count==1` 判定 + 经 `trace_writer.go` 缓冲落盘）+ 新增 `trace_writer.go` 行（`bufferedTraceWriter` 契约）。
