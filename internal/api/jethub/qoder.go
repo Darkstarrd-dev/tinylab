@@ -30,7 +30,13 @@ func (h *Handler) RegisterQoder(r chi.Router) {
 // qoderLogin POST — device flow start + background poll; loginId tracks it.
 // ⚠️ machine_id 是插件生成的持久化随机 UUID（非硬件指纹）。
 func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
 	id, credentialRef := corejethub.NewAccountID(provider)
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	machineID := corejethub.QoderRandomMachineID()
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: provider, Nickname: id,
@@ -47,7 +53,7 @@ func (h *Handler) qoderLogin(provider string, w http.ResponseWriter, r *http.Req
 		return
 	}
 	// Auto-open like the original plugin (dialog link stays as fallback).
-	h.d.Manager.OpenURLWithBrowser(flow.LoginURL)
+	h.d.Manager.OpenURLWithBrowser(flow.LoginURL, opt)
 	loginID := corejethub.NewLoginSessionID()
 	resultCh := make(chan corejethub.LoginOutcome, 1)
 	started := corejethub.NewStartedLoginWithChannel(flow.LoginURL, resultCh)

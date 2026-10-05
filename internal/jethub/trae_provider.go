@@ -83,8 +83,8 @@ func (m *Manager) StartTraeLogin(ctx context.Context, accountID string, openURL 
 		}
 	}()
 
-	// Auto-open like the original plugin (explicit openURL wins if given).
-	m.openURLWithBrowser(loginURL)
+	// Auto-open in the browser/session the user picked (single open: the
+	// manager no longer opens on its own, so the callback is the only entry).
 	if openURL != nil {
 		go openURL(loginURL)
 	}

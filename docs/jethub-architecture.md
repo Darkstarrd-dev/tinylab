@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-02（P1–P4 + UI 对齐原版插件重做 + **登录流生命周期修复 + per-provider 走代理开关 + Cline 轮询判据/诊断 + MiniMax 推理协议桥 + 本地扫码登录页 + 推理端点整族修复 + 前端路由形状二修 + codearts Key 提取 + 模型倍率对齐 + CodeArts 流内错误判据**：main 区内嵌布局 / 详情页按钮行+账号卡 / 模型列表纵向批量 / 限流重测重置 / 永久锁存储+备份 / 后台登录轮询脱离请求上下文 + 占位账号单赢家结算 + 出站代理跟随 + Use Proxy toggle + WorkOS 轮询按 error 字段判据 + minimax 出站 URL/请求体/响应流三处协议转换 + raccoon 扫码改由本地页面承载 + buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax 推理端点显式声明（§6.2）+ codearts 签名路径修正 + trace 记录真实出站 URL + 前端 jethub 路径全方法守卫（§3.2 缺陷 14）+ codearts 无 access_token 的 Key 提取（§3.2 缺陷 15）+ qoder/qodercn 促销倍率与 trae 展示名（§6.3）+ codearts 200/400 流内 error_code 的排队与失败判据（§6.4）+ loomy 微信扫码登录（§3.5）+ **面板登录弹窗的 status 轮询契约**（§3.6 缺陷 19：loomy 的 `/status` 漏了 `loginId` 分支 ⇒ 弹窗永挂；前端 404 静默空转一并收尾）+ **模型列表展示形态规范化**（§6.3：一条 `名称 · 倍率` 紧跟裸 id、逐 provider 静态展示名与插件逐条对齐（buddy/workbuddy 补名 + 同名变体标记、cline 补 ` · 免费`、trae 剔除 4 条隐藏项）、点 id 复制 `{prefix}/{id}`、展示名同 provider 内唯一）；⚠️ 日期按实际提交时间校正，此前文档误记为 10-02）
+> **最后核对：** 2026-10-05（**登录浏览器与会话模式（§3.9）**：+新建账号 弹窗**先选后开** —— 浏览器轴（系统默认 / 已探测的 Chrome·Edge·Brave·Vivaldi·Opera·Firefox / 自定义 exe 路径）× 会话轴（共享登录态 / 隐私窗口 / 独立配置目录）；选择随 login 请求送达，服务端**同步校验 + 异步开页**。新增 `internal/browserlaunch`（候选路径探测 + 家族 flag 表 + 注册表默认浏览器解析 + 启动）与 `internal/jethub/login_open.go`（偏好落 `{dir}/login-open.json`、`isolated` 每账号 `browser-profiles/<id>`、账号删除尽力清理）；新增 `GET /api/jethub/login-browsers` + `POST /api/jethub/open-login-url`；管理器不再自行开页（回调成为唯一入口，同时消除潜在双开）。历次核对流水见 [`changelog/jethub-architecture.md`](changelog/jethub-architecture.md)。）
 >
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
@@ -32,7 +32,8 @@
 > - 修改**模型展示名/倍率**（别名、倍率段、促销窗口、同名变体标记）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go` 的 `TestModelDisplayNamesMatchReference`（展示名非空 / 同 provider 内唯一 / 兜底不编造倍率 / 自带倍率不得丢）+ `web/static/jethub.js` 的模型行渲染与 `{prefix}/{id}` 复制
 > - 修改 **jethub 前端 RPC 路径** → §3.2 缺陷 14 + `web/static/jethub.js` + `web/jethub.test.js` 的**全方法路由形状守卫**（从 `internal/api/jethub/*.go` 反推合法形状，改路径必跑）
 > - 修改 **CodeArts 响应判据**（200 + 流内 error_code / 排队重试）→ §6.4 + `internal/jethub/codearts_response.go` + `qoder_adapter.go`（InterceptResponse 分派）+ `internal/proxy/forward_retry.go`（QueueRetryError 的等待与 180 次上限）
-> - 新增/修改 provider 的 **`/status` 端点或面板登录弹窗轮询** → §3.6 + `internal/api/jethub/<provider>.go`（**`loginId` 分支必须有**，否则弹窗永挂）+ `web/static/jethub.js`（`__jethubLoginModal` 的三态判据）+ **`internal/api/jethub/status_login_test.go` 的结构性守卫（逐条 `/status` 路由）+ `web/jethub.test.js` 的弹窗状态机用例**
+> - 新增/修改 provider 的 **`/status` 端点或面板登录弹窗轮询** → §3.6 + `internal/api/jethub/<provider>.go`（**`loginId` 分支必须有**，否则弹窗永挂）+ `web/static/jethub.js`（`__jethubLoginWaitingModal` 的三态判据）+ **`internal/api/jethub/status_login_test.go` 的结构性守卫（逐条 `/status` 路由）+ `web/jethub.test.js` 的弹窗状态机用例**
+> - 修改**登录浏览器/会话模式**（浏览器轴 / 会话轴 / 隐私窗口 flag 表 / 独立配置目录 / +新建账号 先选后开 / `login-browsers`+`open-login-url` 端点）→ §3.9 + `internal/browserlaunch/`（家族表 + 候选路径 + 默认浏览器解析）+ `internal/jethub/login_open.go`（偏好/校验/开页/目录清理）+ `internal/jethub/codearts_refresh.go`（`SetBrowserOpener`/`OpenURLWithBrowser` 签名）+ `internal/api/jethub/login_open.go` + **各 provider login handler（选择校验必须先于建号）** + `web/static/jethub.js`（`__jethubLoginModal` 选择步 / `jethubLoginConfirm` / `__jethubLoginWaitingModal` 等待步）+ `internal/app/app.go`（`SetBrowserOpener` 接线）
 
 ## 1. 模块组成与边界
 
@@ -81,7 +82,7 @@
 1. **请求上下文绑定**：`Start*Login(r.Context(), …)` / 后台 `Poll*(r.Context(), …)` —— handler 写完响应后 `net/http` 立即取消请求 context，后台轮询当场夭折。修复：**所有登录流一律 `context.Background()`**（raccoon/cline/trae/lobsterai/buddy/minimax/qoder；codearts 流自身已是 Background）。qoder 最早注释了这个坑但其余 provider 全部中招。`web/jethub.test.js` 有静态守卫（逐文件断言 `context.Background()` + 禁止 `Start*Login(r.Context())`）。
 2. **双消费者竞争**：status 轮询（`pollLogin`）与 API 层 pump goroutine 都直接读 `LoginSession.Started.Result`（容量 1 的缓冲 channel），先到者独占 outcome，另一方永久挂起。修复（`internal/jethub/sessions.go`）：**单赢家纪律** —— 只有 pump（`SettleAndCleanup`）读 channel 并记录结果（`settled` 状态 + `SessionStatus` 只读快照）；status 轮询改读记录态。
 3. **结算即 reap（弹窗永远停在等待）**：pump 结算后立即 reap session 的话，2s 轮询的下一次请求必然 404 —— `done:true` 转换永远不会被前端观察到，即使后端已成功。修复：结算后保留 `loginSessionGracePeriod`（30s，若干轮询间隔）再 reap。
-4. **凭据落盘后桥接 Key 不刷新（prefix 检索不到）**：`SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层**从未接线**（git 历史确认：hook 定义了但无人调用）——登录成功后桥接 provider 的 Keys 永远不更新，新账号对 `{prefix}/{model}` 路由不可见；备份导入能工作只是因为 `backupImport` 显式重同步。修复：`app.go` 装配 `SetAccountCredentialedHook(→ Bridge.SyncKeys)`。同时接线 `SetBrowserOpener(→ fsutil.OpenInBrowser)`：+新建账号自动打开默认浏览器授权页（对齐原插件；弹窗内链接保留为手动兜底）。
+4. **凭据落盘后桥接 Key 不刷新（prefix 检索不到）**：`SetCredential` 的 `onAccountCredentialed` hook 在 app 装配层**从未接线**（git 历史确认：hook 定义了但无人调用）——登录成功后桥接 provider 的 Keys 永远不更新，新账号对 `{prefix}/{model}` 路由不可见；备份导入能工作只是因为 `backupImport` 显式重同步。修复：`app.go` 装配 `SetAccountCredentialedHook(→ Bridge.SyncKeys)`。同时接线 `SetBrowserOpener`：+新建账号自动打开授权页（对齐原插件；弹窗内链接保留为手动兜底）。⚠️ 2026-10-05 起 opener 改为**按请求携带浏览器/会话选择**（签名 `func(url string, opt OpenOptions)`，app 接到 `Manager.OpenLoginURL`），见 §3.9。
 5. **出站调用不走全局代理（`TLS handshake timeout`）**：jethub 的出站 client 默认 `ProxyFromEnvironment`，而 app 进程的 `HTTP(S)_PROXY` 是空的 —— 在「上游必须经本地路由代理」的机器上（Windows 系统代理 `127.0.0.1:2080`，镜像进 `config.yaml` `proxy.enabled`），Go 直连被 TLS 干扰掐死，而浏览器/DSH（undici 认系统代理）都正常。修复：`app.go` 把 `config.Proxy` 换算成 `http://host:port` 接线 `Manager.SetProxyURL`（重建共享 client）+ `SetPackageProxyURL`（codearts 回调 token 交换的包级 client 一并重定向）。
 
 **per-provider Use Proxy 开关（2026-10-01 新增）**：
@@ -233,6 +234,45 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - **匿名通道 = 池里的一条普通账号**（凭据 `{"api_key":"public"}`，昵称「匿名通道」，`refreshable=false` 诚实标记）——排序/停用/删除全部复用既有机制；`AddOpencodeAccount` 幂等（重复添加返回 `reused:true`，同 key 不重复建条目）。
 - **模型可见性**（`Product.ModelFilter` → `opencodeVisibleModels`）：没有 keyed 账号时只暴露 7 条免费模型（匿名通道送付费模型必然 401/403）；加任一 keyed 账号后恢复全表 14 条。**匿名 Key 殿后**：`SyncKeys` 给 `Product.AnonymousKey` 的 Key 置 `Priority=100`，fill-first 先试账号槽。
 - ⚠️ **与 ref 的差异（有意）**：ref 在「首次启用」自动补一条匿名槽，本端改为**显式按钮**（TinyLab 没有 per-provider 的 enable 事件，自动写入用户账号池会在从未使用 opencode 的安装里制造噪音）；ref 的 per-account 代理与指纹代次轮换未移植（本端用 provider 级 Use Proxy；指纹固定 generation=0）。
+
+### 3.9 登录浏览器与会话模式（+新建账号 先选后开，2026-10-05）
+
+**动因（真实用途，不是洁癖）**：此前所有登录页都交给系统 shell（`fsutil.OpenInBrowser` → `rundll32 url.dll,FileProtocolHandler`），等于**默认浏览器的共享登录态**。本模块的主用途是**同一 provider 多账号**，而浏览器通常已登录账号 A ⇒ 新建出来的账号静默复用 A 的身份；账号池只按 `Account.ID` 去重（`manager.go` 的 `AddAccount`），**没有任何按 provider 身份的去重**，重复凭据不会被拦。
+
+**两个正交维度**（弹窗里同时给选，记住上次选择为下次默认）：
+
+| 轴 | 取值 | 行为 |
+|---|---|---|
+| 浏览器 | `default` | 系统默认浏览器（注册表 `UserChoice→ProgId→shell\open\command` 解析 exe） |
+| | 已探测 id（`chrome`/`edge`/`brave`/`vivaldi`/`opera`/`chromium`/`firefox`） | 直接执行该 exe（`browserlaunch.Detect` 候选路径 + PATH 回退） |
+| | `custom` + `browserPath` | 用户指定的任意 exe |
+| 会话 | `shared`（默认） | 复用该浏览器已有登录态；**默认浏览器 + shared 仍走旧的 shell 路径**（零行为变化） |
+| | `private` | 隐私窗口（`--incognito` / `--inprivate` / `--private` / `-private-window`） |
+| | `isolated` | 每账号一个持久 `--user-data-dir={dir}/browser-profiles/<accountID>`（隔离**且**重启后仍在） |
+
+**三问的评估结论（本机真机实测：Chrome 141 / Edge 154 / WebView2 Runtime 154，默认浏览器 Chrome）**
+
+1. **可否在隐私模式下登录鉴权**：✅ 可行。鉴权链路与浏览器无关 —— 回环回调（`http://127.0.0.1:<port>`）、设备码轮询、本地扫码页三种形态都能在隐私窗口里完成（实测：Edge `--inprivate` 窗口成功加载本地 `127.0.0.1` 页面并回连本服务）。代价是**每次都要手输账号 + 2FA**（隐私窗口不读已保存的密码），且**扩展在隐私窗口被禁用**（企业 SSO / 设备信任类扩展会失效）；无痕会话随最后一个隐私窗口关闭而消失。
+2. **可否指定非默认浏览器**：✅ 可行，且最省事。`exe <url>` 即可；那个浏览器自己的登录态决定是否需要手动登录。
+3. **可否指定浏览器 + 它的隐私模式**：✅ 可行，唯一新增的是**按内核族给 flag**。
+4. **Windows 没有「用默认浏览器打开隐私窗口」的接口**：shell/`ShellExecute` 都不支持带参数，所以隐私模式必须自己解析 exe 并拼参数。**flag 名不统一，写错会静默退化成普通窗口**（实测：Edge 154 不认识 `--incognito`，无报错、无退出码，直接开了一个普通窗口）。flag 能穿过「转发给已运行实例」（实测：Chrome 已开着时第二次 `--incognito` 仍落在 off-the-record 存储里），所以用户开着浏览器不影响。⚠️ Chrome 141 的隐私窗口**标题已不含 "Incognito"**，外部无法确认是否真进了隐私模式 ⇒ 未知内核一律**拒绝**，绝不假装成功。
+5. **已评估并否决**：内嵌 WebView2 的 `IsInPrivateModeEnabled`（当前 pin 的 `jchv/go-webview2` 完全未暴露 ControllerOptions/InPrivate，需自写裸 COM；只在 webview 变体存在；且 **Google 拒绝内嵌 WebView 登录**（`disallowed_useragent`），会直接打死 gemini 及任何 Google SSO 渠道）。
+
+**实现落点**
+
+- `internal/browserlaunch/`（新包，无 jethub 概念）：`Detect()` 候选路径 + PATH 回退、`FamilyOf/PrivateArgs` 家族表、`DefaultBrowser()`（Windows 注册表；mac/Linux 无零依赖查询 ⇒ 返回空，由调用方明确拒绝而不是静默开普通窗口）、`BuildArgs/Open`（相对 `--user-data-dir` 一律 absolutize —— 相对路径会让 Chrome 静默失败，同 webhub 缺陷 21）。`prepare()` 按平台隐藏控制台窗口；**从不 Wait、从不杀浏览器**。
+- `internal/jethub/login_open.go`：`OpenOptions{Browser,BrowserPath,Session,AccountID}`、`normalizeOpenOptions`（请求 → 偏好 → 旧默认）、`ValidateOpenOptions`（**不启动进程**的同步校验，复用 `BuildArgs` 做 flag 判定）、`ResolveOpenBrowser`、`OpenLoginURL`、`IsolatedProfileDir`（id 净化成单一路径段，杜绝 `..`）、偏好文件 `{dir}/login-open.json`（独立文件：备份导入不得重置本地偏好，`accounts.json` 的备份兼容形态也不受影响）、`DeleteAccount` 后**异步尽力**清理该账号的独立配置目录（浏览器在跑 ⇒ 删不掉是预期，绝不为此杀进程）。
+- 管理器 opener 签名改为 `func(url string, opt OpenOptions)`；**flow 内部不再自行开页**，改为 API 层传入的 mode-bound 闭包（`StartClineLogin`/`StartBuddyLogin`/`StartLobsteraiLogin`/`StartTraeLogin` 复用既有 `openURL` 形参，`StartGeminiLogin`/`StartCodeArtsLoginWithBrowser` 新增选择参数，qoder/minimax/raccoon/loomy/zcode 仍在 handler 里直接 `OpenURLWithBrowser(url, opt)`）——同时修掉「管理器先开一次 + 回调再开一次」的潜在双开。
+- API：`GET /api/jethub/login-browsers`（已装浏览器 + 系统默认 + 三种会话 + 记住的选择）、`POST /api/jethub/open-login-url`（**同步**开页并回报错误：用户点了「重新打开登录页」就该知道结果）。每个 login handler 建号**之前**做 `prepareLoginOpen`（校验 + 记住选择），失败 400 —— 否则用户看到的是「弹窗一直等待、浏览器什么都没开」。
+- 前端：`jethubAddAccount` → **选择步**（`__jethubLoginModal`：浏览器轴 + 会话轴 + 自定义路径行。两个下拉都走**项目自定义组件** `renderCustomSelectHtml`（`app.js`；基础样式在 `style-download.css`，经 `style.css` `@import` 全局可用，`style.css` 另有 `.modal .custom-select-*` 覆盖）——原生 `<select>` 只作为组件内部的隐藏取值载体，**不得**直接渲染原生 `<select>`（真实返工：首版用了 `<select class="input">`，弹窗里是被浏览器原生样式渲染的）。内核未知时隐私项禁用并给出提示；此步**还没有占位账号**，取消即关闭）→ `jethubLoginConfirm`（带 `{browser,browserPath,session}` POST `/jethub/{provider}/login`）→ **等待步**（`__jethubLoginWaitingModal`：原三态轮询 + 取消删占位 + 「重新打开登录页」走服务端 `open-login-url`）。⚠️ 等待步不能只留 `<a target="_blank">`：那是 UI 宿主（console = 默认浏览器 / webview = 被 `openExternalURL` 拦到默认浏览器）决定用哪个浏览器，选定模式会失效；链接保留为手动兜底。
+
+**语义边界与已知限制**
+
+- `private` 的语义就是「未登录」：便利性（浏览器已登录 ⇒ 一点即授权）必然消失，换来的是账号隔离。**多账号首选 `isolated`**：既隔离又持久，且不受无痕策略影响。
+- 企业策略可以把无痕模式禁掉（`IncognitoModeAvailability`/`InPrivateModeAvailability`），此时浏览器会**静默**按普通窗口打开 —— 本端无法检测，界面上无法承诺隐私性（已在文档与提示文案中如实说明；本机策略位为空，无痕可用）。
+- 未知内核的 fork（如各类国产 Chromium 换壳）**拒绝**隐私模式（无法确认 flag），但 `shared`/`isolated` 仍可用（不依赖 flag 名）。
+- macOS 上 `open -a … --args` 对**已运行**实例不传参数：必须直接执行 `.app/Contents/MacOS/<bin>`（`browserlaunch` 的候选路径即为此形态）；本机无法实测，属待真机验证项。
+- `isolated` 会在 `{dir}/browser-profiles/<accountID>` 落一份完整浏览器配置（Chrome 一份配置约百 MB 级）：只有主动选择该模式的账号才会产生，账号删除时尽力回收。
 
 ## 4. 调用桥接（核心机制，零特殊调用路径）
 
@@ -644,7 +684,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 ## 9. 测试与已知限制
 
 - `internal/jethub/sessions_test.go`（6 个）：SettleAndCleanup 三路径（失败删占位 / 成功保留 / complete 失败删占位）+ `SessionStatus` 未结算快照 + 宽限期 reap + `SetProxyURL` 代理分派（httptest 伪代理端点验证请求确实走代理）+ `ProxyEnabled` 开关分派 client 并跨 reload 持久化。
-- `internal/jethub/credentials_key_test.go`（5 个）：**空 config 密钥下凭据可存**（本次报错的直接回归）+ 自持密钥稳定且不等于 config 密钥 + config 密钥旧文件迁移（迁移后无 config 密钥也能读）+ 无法解密时必须显式报错 + 浏览器 opener 被调用。
+- `internal/jethub/credentials_key_test.go`（5 个）：**空 config 密钥下凭据可存**（本次报错的直接回归）+ 自持密钥稳定且不等于 config 密钥 + config 密钥旧文件迁移（迁移后无 config 密钥也能读）+ 无法解密时必须显式报错 + 浏览器 opener 被调用**且拿到请求里的浏览器/会话选择**（§3.9）。
 - `internal/jethub/cline_test.go`：轮询状态机（400 pending/slow_down 继续、denied 终态）+ **8 个诊断用例**（2xx+pending 不被误判、非 JSON 体点名、空体点名、意外 JSON 形状列出键名、未知 error 码带出码+描述+出站、纯文本 400 带出响应体+出站、invalid_client 专门文案、camelCase token）——§3.3。
 - `internal/jethub/minimax_convert_test.go`（14 个）：出站 URL 必须由 Customize 覆盖为完整推理端点 + 其他 provider 不受影响 + Anthropic 进站原样透传（只补 stream）+ OpenAI→Anthropic 富体（system 折叠/图片 base64/tool_use+tool_result/tools+tool_choice/max_tokens 默认/相邻同角色合并/远程图片显式报错）+ **思考三态判据表**（12 例：M3.1 拒 disabled、M3 只能 on|none、M2.7 不声明、未知模型不声明）+ 流式转换（reasoning/content/tool_calls/usage/finish）+ **截断流冲刷**（stop_reason=length、usage 不丢）+ 非流式两种聚合 + 首帧错误拦截 + 错误体改写保留 `insufficient_balance`（§6.1）。
 - `internal/api/jethub/login_page_test.go`（6 个）+ `internal/api/jethub_login_page_public_test.go`（2 个）：公开登录页端点（二维码内容/404/状态生命周期/不泄露账号 id）+ **在开启密码保护的真实路由器下**断言 `/api/jethub/login-page` 未被鉴权拦截（404 来自 handler）而 `/api/jethub/providers` 仍 401，静态页与 `raccoon-qr.js` 公开可取（§3.4）。
@@ -655,10 +695,12 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。
 - `internal/api/jethub/status_login_test.go`（2 个）：**每条 `/status` 路由的 `loginId` 契约**（chi.Walk 枚举 + 200 必带 `done` / 404 必带 JSON error）+ loomy 的完整三态与回收后 404（§3.6 缺陷 19）。
-- `web/jethub.test.js`（20 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + **URL 流登录弹窗状态机**（进行中/成功/失败/会话已回收，§3.6）+ Use Proxy 开关（渲染/PUT 体/失败回滚）+ **模型行展示形态 `名称 · 倍率` + 紧邻裸 id + 点 id 复制 `{prefix}/{id}`（无前缀退回裸 id）**（§6.3）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
+- `web/jethub.test.js`（21 项）：登录流 context 纪律静态守卫（§3.2）+ app.go 必须接线 SyncKeys/browser/proxy 三 hook + SMS 占位账号创建/取消清理 + **URL 流登录弹窗状态机**（进行中/成功/失败/会话已回收，§3.6）+ **+新建账号 的浏览器/会话选择步（§3.9）** + Use Proxy 开关（渲染/PUT 体/失败回滚）+ **模型行展示形态 `名称 · 倍率` + 紧邻裸 id + 点 id 复制 `{prefix}/{id}`（无前缀退回裸 id）**（§6.3）+ **前端 jethub 路径与后端路由表形状守卫** + 其余 UI 行为。
 - `internal/jethub/codearts_refresh_test.go`（9 个）：`shouldRefreshNow` 窗口（未知到期/1h 内/远期）、误标 `refreshable=false` 自愈、远期跳过、材料缺失对账 false、同凭据并发只发一次请求、`InvalidDPoPHeader` 非终态、真终态不损坏凭据、augment 去头标记跨头部重写存活、`max_tokens` 收敛（§3.7/§6.4）。
 - `internal/jethub/qoder_window_test.go`（3 个）：10:00（UTC+8）窗口判据、刷新前 `CLAIMED` ≠ 今天已领、刷新前领取 `coversToday=false`（§6.6）。
 - `internal/jethub/opencode_test.go`（10 个）：指纹/会话/请求 id 形状、门禁注入（stream + bash/read + tool_choice 规则）、错误分类与 retry-after 策略（0 合法/封顶/默认值）、模型表 14 条与免费集合、账号添加去重与 Key 提取器、augment 头整体替换、拦截器映射（BillingLock/FreeTier/透传 + body 还原）、非流式 SSE 聚合（content/tool_calls 拼接/usage/finish）、匿名槽殿后 + 付费可见性（bridge）（§3.8/§6.5）。
 - `internal/proxy/augmenter_test.go::TestForwardWithRetry_SameKeyRetryDropsHeader`：bridge 发起的同 Key 重发 —— 重发一次、回环标记对 augmenter 可见、标记不泄漏上游（§6.4）。
 - `internal/api/jethub/opencode_test.go`：apikey/匿名登录端点（200/去重 reused/空 key 400/账号列表）。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）；**zcode 的推理链路已验证到「请求被上游接受（200、无 3012/3001）+ 无权益空流被正确判定」**，但**有内容的正向流**与**每日领取的载体页**需要带 plan 的账号才能真机走通（§6.7）；zcode 推理侧 captcha 产出与并发门未实现（§6.7）。
+- `internal/browserlaunch/browserlaunch_test.go`（13 个）+ `internal/jethub/login_open_test.go`（11 个）+ `internal/api/jethub/login_open_test.go`（6 个）：**家族 flag 表**（Edge 必须 `--inprivate`、**不得** `--incognito`；未知家族不得声称支持隐私模式）+ `BuildArgs` 的拒绝矩阵（无 exe 却要隐私/独立配置、隐私与独立配置互斥、Firefox 无 `--user-data-dir`）+ 相对 `--user-data-dir` absolutize + 探测表（候选路径/PATH 回退/去重/顺序）+ 默认浏览器命令解析（带引号/不带引号含空格/空命令）+ 选择归一化（请求→偏好→旧默认）+ `ValidateOpenOptions`（未知浏览器/目录/未知会话/未知内核+隐私 拒绝；**不建目录**）+ 偏好往返与损坏文件不致命 + 独立配置目录净化（`../` 不得逃逸）与**越界路径不清理** + 账号删除后目录尽力清理 + API 端点形状（三条会话模式/浏览器行）+ **建号前拒绝**（不可用浏览器 ⇒ 400 且账号池仍为空）+ `open-login-url` 的全部拒绝分支（§3.9）。
+- `web/jethub.test.js` 新增「login dialog: browser/session axes ride the login RPC」用例：选择步渲染两轴与记住的偏好 + **确认前不得有任何 POST**（服务端在建号时开页）+ 选择步取消不删账号 + 确认携带 `{browser,browserPath,session}` + 等待步轮询 + 「重新打开登录页」走服务端端点 + 内核未知时隐私项判定（§3.9）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）；**zcode 的推理链路已验证到「请求被上游接受（200、无 3012/3001）+ 无权益空流被正确判定」**，但**有内容的正向流**与**每日领取的载体页**需要带 plan 的账号才能真机走通（§6.7）；zcode 推理侧 captcha 产出与并发门未实现（§6.7）。**登录浏览器/会话模式（§3.9）**：隐私窗口必然是「未登录」状态（每次手输账号 + 2FA、扩展被禁用 ⇒ 企业 SSO 可能不可用），企业策略禁用无痕时浏览器**静默**按普通窗口打开（本端无法检测）；内核未知的 fork 拒绝隐私模式；macOS 的 `open -a … --args` 对已运行实例不传参数（实现上直接执行 bundle 内二进制，待真机验证）。

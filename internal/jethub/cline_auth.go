@@ -206,7 +206,7 @@ func clineJSONKeys(payload map[string]any) string {
 }
 
 // StartClineLogin runs the two-step device-code login: request grant →
-// (open the verification URL in the default browser) → background poll →
+// (open the verification URL in the chosen browser) → background poll →
 // register → persist via CompleteClineLogin.
 func (m *Manager) StartClineLogin(ctx context.Context, accountID string, openURL func(string)) (*StartedLogin, error) {
 	grant, err := m.RequestClineDeviceAuthorization(ctx)
@@ -217,8 +217,12 @@ func (m *Manager) StartClineLogin(ctx context.Context, accountID string, openURL
 	if grant.VerificationURIComplete != "" {
 		loginURL = grant.VerificationURIComplete
 	}
-	// Auto-open like the original plugin (explicit openURL wins if given).
-	m.openURLWithBrowser(loginURL)
+	// Auto-open in the browser/session the user picked: the API layer always
+	// passes a mode-bound closure (nil = no opener registered — unit tests).
+	// ⚠️ 不开两次：管理器不再自行开页，回调是唯一入口。
+	if openURL != nil {
+		go openURL(loginURL)
+	}
 	result := make(chan LoginOutcome, 1)
 	go func() {
 		access, refresh, err := m.pollClineWorkOsTokens(ctx, grant)

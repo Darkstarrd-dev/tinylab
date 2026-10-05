@@ -650,8 +650,10 @@ func init() {
 }
 
 // zcodeOpenURL opens a URL with the platform browser (thin wrapper so the
-// login/claim paths share one call site).
-func (m *Manager) zcodeOpenURL(url string) { m.OpenURLWithBrowser(url) }
+// login/claim paths share one call site). The captcha carrier page is a
+// background action with no per-request choice, so the zero value — i.e. the
+// remembered browser/session preference — applies.
+func (m *Manager) zcodeOpenURL(url string) { m.OpenURLWithBrowser(url, OpenOptions{}) }
 
 // zcodeClientFor returns the outbound client honoring the provider's Use
 // Proxy toggle (same policy as every other provider's management calls).

@@ -75,12 +75,14 @@ check('Go: loomy login open the LOCAL page (not the QR content)', () => {
   assert.ok(LOOMY_API.includes('h.loomyLogin'), 'loomy must expose POST /loomy/login (the panel path)');
   assert.ok(LOOMY_API.includes('StartLoomyWechatLogin'), 'the WeChat flow must be started by the handler');
   assert.ok(LOOMY_API.includes('loomyLoginPageURL'), 'loginUrl must be the local page');
-  assert.ok(LOOMY_API.includes('OpenURLWithBrowser(pageURL)'), 'the browser must be opened (after session registration)');
+  // The open call carries the browser/session selection of the request (zero
+  // value = the remembered preference) — see docs/jethub-architecture.md §3.9.
+  assert.ok(LOOMY_API.includes('OpenURLWithBrowser(pageURL, opt)'), 'the browser must be opened (after session registration)');
   assert.ok(LOOMY_API.includes('context.Background()'), 'the flow must NOT hang off r.Context()');
   assert.ok(API.includes('/free-hub-loomy-login.html'), 'the page URL must point at the loomy page');
   // 顺序契约：先注册会话，再开浏览器。
   const reg = LOOMY_API.indexOf('RegisterLoginSession(loginID, sess)');
-  const open = LOOMY_API.indexOf('OpenURLWithBrowser(pageURL)');
+  const open = LOOMY_API.indexOf('OpenURLWithBrowser(pageURL, opt)');
   assert.ok(reg !== -1 && open !== -1 && reg < open, 'register the session BEFORE opening the browser');
 });
 

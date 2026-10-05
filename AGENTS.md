@@ -13,7 +13,7 @@
 | `download-architecture.md` | yt-dlp 下载：任务队列生命周期、参数构造、SSE 进度、与归档计划漂移 |
 | `combo-architecture.md` | Combo 解析：Resolve 算法、三种策略目标排序、greedy-squirrel 配额层级 |
 | `config-registry-state-architecture.md` | 基础设施：三层归属边界、原子持久化、AES-GCM 加密、双锁模型、reload merge |
-|`jethub-architecture.md`|Free Hub（Jet Hub 移植）：账号池/凭据存储、registry 桥接（`APIType=jethub` 前缀 Provider + 三个可选增强接口注入）、Qoder WASM 加密推理桥、13 provider 协议族矩阵（含 R2 的 ZCode）、备份双向兼容|
+|`jethub-architecture.md`|Free Hub（Jet Hub 移植）：账号池/凭据存储、registry 桥接（`APIType=jethub` 前缀 Provider + 三个可选增强接口注入）、Qoder WASM 加密推理桥、13 provider 协议族矩阵（含 R2 的 ZCode）、备份双向兼容、登录浏览器/会话模式（§3.9：+新建账号 选浏览器×会话）|
 |`playground-architecture.md`|Playground 前后端：多模型测试、群聊、Director/Narrator|
 |`gamedemo-progress.md`|Demo 页游戏插件：磁盘插件契约（game.json/TRGames/host adapter）、`/api/games*`+`/games/*`+seed、热更新工作流、Phaser v4 注意事项、边界与代价|
 |`jethub-upstream-sync.md`|Free Hub 上游同步（周期性流程文档）：判定原则（搬/不搬+三条硬判据）、每轮 SOP、不搬清单、待办 R1-*、轮次日志、当前 pin|

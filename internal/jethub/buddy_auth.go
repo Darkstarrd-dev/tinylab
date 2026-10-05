@@ -99,8 +99,8 @@ func (m *Manager) StartBuddyLogin(ctx context.Context, provider string, accountI
 		return nil, err
 	}
 	loginURL := DecorateBuddyLoginURL(state.AuthURL, p)
-	// Auto-open like the original plugin (explicit openURL wins if given).
-	m.openURLWithBrowser(loginURL)
+	// Auto-open in the browser/session the user picked (single open: the
+	// manager no longer opens on its own, so the callback is the only entry).
 	if openURL != nil {
 		go openURL(loginURL)
 	}

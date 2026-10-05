@@ -99,8 +99,9 @@ func (s *StartedLogin) Close() {
 // StartCodeArtsLogin starts the OAuth callback server on a random port
 // >=10000 and returns the login URL immediately (two-step login, matching
 // the plugin's startOAuthFlow). The result resolves on success/timeout.
-// openURL, when non-nil, is invoked with the login URL (the app passes
-// fsutil.OpenInBrowser); failures to open do not abort the flow.
+// openURL, when non-nil, is invoked with the login URL (the app passes a
+// closure bound to the requested browser/session via
+// StartCodeArtsLoginWithBrowser); failures to open do not abort the flow.
 func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 	pkce, err := GeneratePkcePair()
 	if err != nil {
@@ -194,10 +195,11 @@ func StartCodeArtsLogin(openURL func(string)) (*StartedLogin, error) {
 }
 
 // StartCodeArtsLoginWithBrowser starts the codearts OAuth flow and opens the
-// authorization URL through the manager's registered browser opener (app
-// wiring = fsutil.OpenInBrowser). This is the variant the API layer uses.
-func (m *Manager) StartCodeArtsLoginWithBrowser() (*StartedLogin, error) {
-	return StartCodeArtsLogin(func(url string) { m.openURLWithBrowser(url) })
+// authorization URL through the manager's registered browser opener (app wiring
+// = Manager.OpenLoginURL). opt carries the browser/session the user picked in
+// the +新建账号 dialog (zero value = the remembered preference).
+func (m *Manager) StartCodeArtsLoginWithBrowser(opt OpenOptions) (*StartedLogin, error) {
+	return StartCodeArtsLogin(func(url string) { m.openURLWithBrowser(url, opt) })
 }
 
 func deliver(ch chan<- LoginOutcome, outcome LoginOutcome) {

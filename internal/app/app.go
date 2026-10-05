@@ -200,12 +200,15 @@ func (a *App) buildComponents() error {
 				a.logger.Warn("[jethub] %s bridged keys sync failed: %v", provider, err)
 			}
 		})
-		// Auto-open the authorization URL in the default browser on +new
-		// account (matches the original plugin flow; the dialog link stays
-		// as a manual fallback).
-		jethubMgr.SetBrowserOpener(func(url string) {
-			if err := OpenBrowser(url); err != nil {
-				a.logger.Info("[jethub] auto-open login page failed: %v", err)
+		// Auto-open the authorization URL in the browser the user picked in the
+		// +新建账号 dialog: browser axis (default / a detected browser / a
+		// custom exe) × session axis (shared login state / private window /
+		// dedicated isolated profile). The old unconditional "system default
+		// browser + shared profile" is now one of those choices; the dialog
+		// link stays as a manual fallback.
+		jethubMgr.SetBrowserOpener(func(url string, opt jethub.OpenOptions) {
+			if err := jethubMgr.OpenLoginURL(url, opt); err != nil {
+				a.logger.Info("[jethub] open login page failed: %v", err)
 			}
 		})
 		// P2: codearts SDK-HMAC augment hook (signature replaces auth headers).

@@ -364,28 +364,37 @@ func (m *Manager) SetAccountCredentialedHook(fn func(provider string)) {
 	m.onAccountCredentialed = fn
 }
 
-// SetBrowserOpener registers the OS "open URL in default browser" callback
-// (the app wires it to fsutil.OpenInBrowser). Login flows call it with the
-// authorization URL so the flow matches the original plugin: +new account →
-// browser opens automatically. nil (tests) keeps the URL UI-only.
-func (m *Manager) SetBrowserOpener(fn func(url string)) {
+// SetBrowserOpener registers the "open the login page in the chosen browser"
+// callback. internal/app wires it to Manager.OpenLoginURL (the built-in
+// launcher, incl. private windows and per-account isolated profiles); nil (unit
+// tests) means no browser is launched at all, so tests never pop windows.
+//
+// The OpenOptions carry the browser/session the user picked in the +新建账号
+// dialog; the zero value means "the remembered preference".
+func (m *Manager) SetBrowserOpener(fn func(url string, opt OpenOptions)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.browserOpener = fn
 }
 
-// openURLWithBrowser invokes the registered browser opener asynchronously and
-// never fails the login on an opener error (the URL stays in the dialog).
-func (m *Manager) openURLWithBrowser(url string) {
+// openURLWithBrowser invokes the registered opener asynchronously. It never
+// fails the login on an opener error (the dialog keeps the link as a manual
+// fallback) — the *selection* is validated synchronously by the API layer
+// before the flow starts, so an unusable choice is a 4xx, not a silent no-op.
+func (m *Manager) openURLWithBrowser(url string, opt OpenOptions) {
 	m.mu.RLock()
 	fn := m.browserOpener
 	m.mu.RUnlock()
 	if fn == nil {
 		return
 	}
-	go func() { fn(url) }()
+	go func() { fn(url, opt) }()
 }
 
-// OpenURLWithBrowser is the exported alias for the API layer (qoder's flow
-// builds its URL in a start function without an opener hook of its own).
-func (m *Manager) OpenURLWithBrowser(url string) { m.openURLWithBrowser(url) }
+// OpenURLWithBrowser is the API layer's entry point: the handlers that build the
+// login URL inline (minimax/qoder/raccoon/loomy/zcode) and background actions
+// call it with the selection from the request (zero value = remembered
+// preference).
+func (m *Manager) OpenURLWithBrowser(url string, opt OpenOptions) {
+	m.openURLWithBrowser(url, opt)
+}

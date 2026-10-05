@@ -38,7 +38,13 @@ func (h *Handler) RegisterLoomy(r chi.Router) {
 // 端点而拿到 404）。
 // ⚠️ 后台流程绝不能挂 r.Context()（handler 返回后请求 context 立即被取消）。
 func (h *Handler) loomyLogin(w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
 	id, credentialRef := corejethub.NewAccountID("loomy")
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "loomy", Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
@@ -63,7 +69,7 @@ func (h *Handler) loomyLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	corejethub.RegisterLoginSession(loginID, sess)
 	go corejethub.SettleAndCleanup(sess, nil)
-	h.d.Manager.OpenURLWithBrowser(pageURL)
+	h.d.Manager.OpenURLWithBrowser(pageURL, opt)
 
 	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,

@@ -28,7 +28,13 @@ func (h *Handler) RegisterGemini(r chi.Router) {
 // 跟踪轮询。后台 goroutine 等回调并换令牌（⚠️ 必须 background context：
 // r.Context() 在响应写回即取消——minimax 登录同款教训）。
 func (h *Handler) geminiLogin(w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
 	id, credentialRef := corejethub.NewAccountID("gemini")
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "gemini", Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
@@ -37,7 +43,7 @@ func (h *Handler) geminiLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	flow, err := h.d.Manager.StartGeminiLogin()
+	flow, err := h.d.Manager.StartGeminiLogin(opt)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())

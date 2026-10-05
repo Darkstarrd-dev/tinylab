@@ -50,6 +50,10 @@ func (h *Handler) Register(r chi.Router) {
 		r.Put("/providers/{provider}/models", h.setModelDisabled)
 		r.Post("/providers/{provider}/models/batch-delete", h.batchDeleteModels)
 		r.Delete("/providers/{provider}/models", h.restoreDefaultModels)
+		// 登录浏览器/会话模式（+新建账号 弹窗）：可用浏览器列表 + 记住的偏好，
+		// 以及「重新打开登录页」的显式开页端点。
+		r.Get("/login-browsers", h.loginBrowsers)
+		r.Post("/open-login-url", h.openLoginURL)
 		// Rate-limit markers (原版 account.retest/reset 家族) + the
 		// permanent-credit lock toggle (原版 credits.permanentLock).
 		r.Post("/providers/{provider}/ratelimits/retest", h.retestRateLimits)

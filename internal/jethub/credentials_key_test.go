@@ -133,20 +133,30 @@ func TestCredentialMigrationSkippedWhenUndecryptable(t *testing.T) {
 	}
 }
 
-// TestBrowserOpenerInvoked: login flows auto-open the authorization URL (the
-// minimax handler calls OpenURLWithBrowser directly; the others go through
-// their Start*Login functions with the same manager hook).
+// TestBrowserOpenerInvoked: the login page opener is invoked with the URL **and**
+// the browser/session selection of the request (handlers that build the URL
+// inline call OpenURLWithBrowser directly; the Start*Login family goes through
+// the mode-bound closures the API layer passes in).
 func TestBrowserOpenerInvoked(t *testing.T) {
 	env := newTestManager(t)
-	got := make(chan string, 1)
-	env.m.SetBrowserOpener(func(url string) { got <- url })
+	type opened struct {
+		url string
+		opt OpenOptions
+	}
+	got := make(chan opened, 1)
+	env.m.SetBrowserOpener(func(url string, opt OpenOptions) { got <- opened{url, opt} })
 
-	env.m.OpenURLWithBrowser("https://example.com/device?user_code=ABCD")
+	env.m.OpenURLWithBrowser("https://example.com/device?user_code=ABCD", OpenOptions{
+		Browser: "edge", Session: SessionPrivate, AccountID: "qoder-1",
+	})
 
 	select {
-	case url := <-got:
-		if url != "https://example.com/device?user_code=ABCD" {
-			t.Fatalf("opener got %q", url)
+	case o := <-got:
+		if o.url != "https://example.com/device?user_code=ABCD" {
+			t.Fatalf("opener got %q", o.url)
+		}
+		if o.opt.Browser != "edge" || o.opt.Session != SessionPrivate || o.opt.AccountID != "qoder-1" {
+			t.Fatalf("the browser/session selection must reach the opener, got %+v", o.opt)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("browser opener was not invoked")

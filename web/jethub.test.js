@@ -129,12 +129,36 @@ check('account card marks credential-less placeholders; SMS modal creates the ac
   assert.ok(addAccount, 'jethubAddAccount found');
   assert.ok(addAccount[0].includes("/accounts'"), 'SMS path must POST /accounts to create the placeholder first');
   assert.ok(addAccount[0].includes('__jethubSmsModal(providerId, created.accountId)'), 'SMS modal must receive the new accountId');
-  // Both modals must clean up the placeholder when the user cancels.
-  const loginModal = src.match(/function __jethubLoginModal[\s\S]*?\n\nfunction/);
-  assert.ok(loginModal && loginModal[0].includes("apiDelete('/jethub/accounts/'"), 'login modal cancel must delete the placeholder');
+  // The placeholder cleanup lives in the WAITING step now: the browser/session
+  // chooser runs BEFORE the login RPC, so at that point no account exists and
+  // cancelling must not touch the API.
+  const waitingModal = src.match(/function __jethubLoginWaitingModal[\s\S]*?\n\nfunction/);
+  assert.ok(waitingModal && waitingModal[0].includes("apiDelete('/jethub/accounts/'"), 'the waiting modal cancel must delete the placeholder');
+  const chooseModal = src.match(/function __jethubLoginModal[\s\S]*?\n\n\/\//);
+  assert.ok(chooseModal, '__jethubLoginModal found');
+  assert.ok(!chooseModal[0].includes('apiDelete('), 'the choose step runs before the account exists: cancel must not delete anything');
   const smsModal = src.match(/function __jethubSmsModal[\s\S]*?\n\nasync function/);
   assert.ok(smsModal && smsModal[0].includes("apiDelete('/jethub/accounts/'"), 'SMS modal cancel must delete the placeholder');
   assert.ok(smsModal[0].includes('accountId: accountId'), 'SMS submit must send accountId');
+});
+
+check('login dialog uses the project custom-select component, not a native dropdown', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'static/jethub.js'), 'utf8');
+  const choose = src.match(/function __jethubLoginModal[\s\S]*?\n\n\/\//);
+  assert.ok(choose, '__jethubLoginModal found');
+  assert.ok(choose[0].includes('renderCustomSelectHtml('), 'the browser/session pickers must use renderCustomSelectHtml (app.js component)');
+  // `\s` (not `[\s>]`) so the design-comment's `<select>` mention is not a hit:
+  // only real element markup (`<select class=…`) counts.
+  assert.ok(!/<select\s/.test(choose[0]), 'the dialog must not render a bare native <select> — the component owns the hidden one');
+  assert.ok(choose[0].includes("renderCustomSelectHtml('free-hub-login-browser-wrap'"), 'the browser axis must use the component');
+  assert.ok(choose[0].includes("renderCustomSelectHtml('free-hub-login-session-wrap'"), 'the session axis must use the component');
+  assert.ok(choose[0].includes('__jethubSyncLoginForm()'), 'the hidden native selects must dispatch into the sync handler');
+  // The component's base styles live in style-download.css (imported by
+  // style.css) and the in-modal overrides in style.css: losing either silently
+  // turns the dropdown back into an unstyled box.
+  const styleCss = fs.readFileSync(path.join(__dirname, 'static/style.css'), 'utf8');
+  assert.ok(styleCss.includes('@import url("style-download.css")'), 'style.css must keep importing the component base styles');
+  assert.ok(styleCss.includes('.modal .custom-select-trigger'), 'the in-modal custom-select overrides must stay in style.css');
 });
 
 // --- VM sandbox ---
@@ -192,6 +216,14 @@ function makeSandbox() {
     calls.apiGet.push(p);
     if (p.indexOf('/status?loginId=') !== -1) return statusResponse || {};
     if (p === '/jethub/providers') return { providers };
+    // Browser/session axis of the +New Account dialog (installed browsers + the
+    // OS default + the remembered selection).
+    if (p === '/jethub/login-browsers') return {
+      browsers: [{ id: 'edge', label: 'Microsoft Edge', family: 'edge', path: 'C:/Edge/msedge.exe', privateOk: true, privateFlag: '--inprivate', profileOk: true }],
+      defaultBrowser: { path: 'C:/Chrome/chrome.exe', label: 'Google Chrome', family: 'chrome', privateOk: true, privateFlag: '--incognito' },
+      sessions: ['shared', 'private', 'isolated'],
+      prefs: { browser: 'edge', session: 'isolated' },
+    };
     if (p.indexOf('/balance') !== -1) return { balance: { total: 123.45 } };
     if (p.indexOf('/accounts') !== -1) return { accounts };
     if (p.indexOf('/models') !== -1) return { models };
@@ -256,6 +288,28 @@ function makeSandbox() {
     escapeHtml: (s) => String(s),
     escapeAttr: (s) => String(s),
     escapeForJsString: (s) => String(s).replace(/'/g, "\\'"),
+    // The project's custom-select component lives in app.js, which this sandbox
+    // does not load. Stub it with the SAME DOM contract as the real
+    // renderCustomSelectHtml (wrapper + trigger + menu + hidden native <select>
+    // carrying the value and the onchange dispatch) so the dialog's real call
+    // path — and any regression back to a bare native <select> — is visible here.
+    renderCustomSelectHtml(wrapperId, selectId, options, selectedValue, onChangeHandler) {
+      const parts = options.map((opt) => {
+        const val = typeof opt === 'object' ? opt.value : opt;
+        const label = typeof opt === 'object' ? opt.label : opt;
+        return { val, label, sel: String(val) === String(selectedValue) };
+      });
+      const rows = parts.map((p) => '<div class="custom-select-option' + (p.sel ? ' selected' : '') +
+        '" data-value="' + p.val + '"><span class="custom-select-option-link">' + p.label + '</span></div>').join('');
+      const optsHtml = parts.map((p) => '<option value="' + p.val + '"' + (p.sel ? ' selected' : '') + '>' + p.label + '</option>').join('');
+      const selText = parts.filter((p) => p.sel).map((p) => p.label)[0] || String(selectedValue);
+      return '<div class="custom-select-wrapper" id="' + wrapperId + '">' +
+        '<div class="custom-select-trigger" onclick="toggleCustomSelect(\'' + wrapperId + '\', event)">' +
+        '<span class="custom-select-label">' + selText + '</span></div>' +
+        '<div class="custom-select-menu">' + rows + '</div>' +
+        '<select id="' + selectId + '"' + (onChangeHandler ? ' onchange="' + onChangeHandler + '"' : '') + ' style="display:none;">' + optsHtml + '</select>' +
+        '</div>';
+    },
     toast(msg, type) { calls.toast.push([msg, type]); },
     confirmModal: async () => true,
     promptModal: async () => (promptQueue.length ? promptQueue.shift() : null),
@@ -492,6 +546,9 @@ checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends
   ctx.openFreeHub();
   await ticks(4);
   await ctx.jethubAddAccount('loomy');
+  await ticks(2);
+  // Step 1 (choose browser/session) → step 2 (login RPC + waiting + poll).
+  await ctx.jethubLoginConfirm('loomy');
   await ticks(1);
   const overlay = ctx.document.getElementById('modal-overlay');
   assert.ok(overlay.innerHTML.indexOf('free-hub-login-status') !== -1, 'URL flow must open the login modal');
@@ -517,6 +574,8 @@ checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends
   fail.openFreeHub();
   await ticks(4);
   await fail.jethubAddAccount('loomy');
+  await ticks(2);
+  await fail.jethubLoginConfirm('loomy');
   await ticks(1);
   fail.__setStatusResponse({ done: true, success: false, error: 'loomy: 你已取消授权' });
   await fail.__calls.intervals[0][0]();
@@ -528,12 +587,74 @@ checkAsync('③ login modal (URL flow): settles on done, and a GONE session ends
   gone.openFreeHub();
   await ticks(4);
   await gone.jethubAddAccount('loomy');
+  await ticks(2);
+  await gone.jethubLoginConfirm('loomy');
   await ticks(1);
   gone.__setStatusResponse({ error: 'unknown or settled loginId' });
   await gone.__calls.intervals[0][0]();
   assert.strictEqual(gone.document.getElementById('modal-overlay').innerHTML, '', 'a reaped session must close the modal');
   assert.ok(gone.__calls.toast.some(([m]) => m === 'freeHubLoginGone'), 'the user needs an explicit "session ended" hint');
   assert.ok(gone.__calls.cleared.length > 0, 'polling a reaped session must stop');
+});
+
+checkAsync('③ login dialog: browser/session axes ride the login RPC; reopen goes through the server', async () => {
+  const ctx = makeSandbox();
+  ctx.openFreeHub();
+  await ticks(4);
+  await ctx.jethubAddAccount('loomy');
+  await ticks(2);
+  const overlay = ctx.document.getElementById('modal-overlay');
+  // Step 1 renders both axes with the PROJECT custom-select component (a bare
+  // native <select> is the reported regression).
+  assert.ok(overlay.innerHTML.indexOf('custom-select-wrapper') !== -1, 'the dialog must use .custom-select-wrapper');
+  assert.ok(overlay.innerHTML.indexOf('custom-select-trigger') !== -1, 'the dialog must use the project trigger');
+  assert.ok(overlay.innerHTML.indexOf('custom-select-menu') !== -1, 'the dialog must use the project menu');
+  assert.ok(overlay.innerHTML.indexOf('<select class="input"') === -1, 'no bare native dropdown in the dialog');
+  assert.ok(overlay.innerHTML.indexOf('onchange="__jethubSyncLoginForm()"') !== -1, 'the pickers must dispatch into the sync handler');
+  assert.ok(overlay.innerHTML.indexOf('free-hub-login-browser') !== -1, 'the dialog must offer the browser axis');
+  assert.ok(overlay.innerHTML.indexOf('free-hub-login-session') !== -1, 'the dialog must offer the session axis');
+  assert.ok(overlay.innerHTML.indexOf('value="edge" selected') !== -1, 'the remembered browser must be pre-selected');
+  assert.ok(overlay.innerHTML.indexOf('value="isolated" selected') !== -1, 'the remembered session must be pre-selected');
+  assert.ok(overlay.innerHTML.indexOf('Microsoft Edge') !== -1, 'detected browsers must be listed');
+  // ⚠️ Nothing may be created before the user confirms: the server opens the
+  // page while creating the placeholder, so the choice must precede the RPC.
+  assert.strictEqual(ctx.__calls.apiPost.length, 0, 'no login RPC before confirming the dialog');
+
+  // Cancel at the choose step: no account exists yet ⇒ no API call at all.
+  ctx.document.getElementById('free-hub-login-cancel').onclick();
+  assert.strictEqual(ctx.__calls.apiDelete.length, 0, 'cancelling the choose step must not delete anything');
+  assert.strictEqual(overlay.innerHTML, '', 'cancelling closes the dialog');
+
+  // Step 2: the axes are sent with the login RPC, then the dialog waits.
+  await ctx.jethubAddAccount('loomy');
+  await ticks(2);
+  ctx.document.getElementById('free-hub-login-browser').value = 'edge';
+  ctx.document.getElementById('free-hub-login-session').value = 'private';
+  await ctx.jethubLoginConfirm('loomy');
+  await ticks(1);
+  const login = ctx.__calls.apiPost[0];
+  assert.strictEqual(login[0], '/jethub/loomy/login');
+  assert.strictEqual(JSON.stringify(login[1]), JSON.stringify({ browser: 'edge', browserPath: '', session: 'private' }));
+  assert.ok(overlay.innerHTML.indexOf('free-hub-login-status') !== -1, 'the waiting step shows the status line');
+  assert.strictEqual(ctx.__calls.intervals.length, 1, 'the waiting step polls');
+
+  // Reopen must go through the SERVER with the same selection: a plain
+  // <a target="_blank"> would be opened by the UI host, ignoring the choice.
+  await ctx.document.getElementById('free-hub-login-reopen').onclick();
+  const reopen = ctx.__calls.apiPost.find(([p]) => p === '/jethub/open-login-url');
+  assert.ok(reopen, 'reopen must call the server endpoint');
+  assert.strictEqual(reopen[1].browser, 'edge');
+  assert.strictEqual(reopen[1].session, 'private');
+  assert.strictEqual(reopen[1].url, 'http://127.0.0.1/free-hub-loomy-login.html?loginId=L1');
+
+  // Private mode is only offered when the engine's switch is known (an unknown
+  // fork would silently open a NORMAL window — the measured Edge --incognito trap).
+  assert.strictEqual(ctx.__jethubLoginPrivateOk({ def: {}, browsers: [] }, 'default'), false);
+  assert.strictEqual(ctx.__jethubLoginPrivateOk({ def: { privateOk: true }, browsers: [] }, 'default'), true);
+  assert.strictEqual(ctx.__jethubLoginPrivateOk({ def: {}, browsers: [{ id: 'x', privateOk: false }] }, 'x'), false);
+  assert.strictEqual(ctx.__jethubLoginPrivateOk({ def: {}, browsers: [{ id: 'edge', privateOk: true }] }, 'edge'), true);
+  assert.strictEqual(ctx.__jethubLoginPrivateOk({ def: {}, browsers: [] }, 'custom'), true,
+    'a custom path is classified by the server (it owns the engine table)');
 });
 
 checkAsync('④ model list: `name · rate` then bare id, prefix-qualified copy, batch delete + restore defaults', async () => {

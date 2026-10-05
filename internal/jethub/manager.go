@@ -156,9 +156,14 @@ type Manager struct {
 	// onAccountCredentialed fires after a credential write so the app can
 	// re-sync bridged keys (wired to Bridge.SyncKeys).
 	onAccountCredentialed func(provider string)
-	// browserOpener opens a URL in the default browser (wired to
-	// fsutil.OpenInBrowser); login flows invoke it with the login URL.
-	browserOpener func(url string)
+	// browserOpener opens a login URL in the browser/session chosen for this
+	// request (wired by internal/app to Manager.OpenLoginURL). nil (unit tests)
+	// = no browser is launched at all.
+	browserOpener func(url string, opt OpenOptions)
+	// loginOpen is the remembered browser/session selection — the +新建账号
+	// dialog pre-selects it. Persisted in {dir}/login-open.json (its own file:
+	// a backup import must not reset a local UI preference).
+	loginOpen OpenOptions
 
 	// codeartsRefreshLocks serializes credential renewals per credentialRef
 	// (ref cf5edab): concurrent refreshes would consume the same refresh_token
@@ -227,6 +232,11 @@ func NewManager(dir, legacyKey string, logger Logger) (*Manager, error) {
 	}
 	if m.accounts.ProxyEnabled == nil {
 		m.accounts.ProxyEnabled = map[string]bool{}
+	}
+	// Cosmetic preference: a missing/corrupt file degrades to the legacy
+	// default browser rather than failing startup.
+	if err := m.loadLoginOpenPrefs(); err != nil && logger != nil {
+		logger.Warn("[jethub] %v", err)
 	}
 	return m, nil
 }
@@ -469,8 +479,22 @@ func (m *Manager) UpdateAccount(id string, patch func(*Account)) error {
 	return ErrNotFound
 }
 
-// DeleteAccount removes an account entry and its credential.
+// DeleteAccount removes an account entry and its credential. The account's
+// dedicated browser profile (Session == "isolated" logins) is dropped on a
+// best-effort basis afterwards — never while holding the state lock, and never
+// by killing a browser (a running one keeps its files locked; the directory is
+// left behind in that case, which is harmless).
 func (m *Manager) DeleteAccount(id string) error {
+	profileDir := m.IsolatedProfileDir(id)
+	if err := m.deleteAccountEntry(id); err != nil {
+		return err
+	}
+	go m.cleanupIsolatedProfile(profileDir)
+	return nil
+}
+
+// deleteAccountEntry is the locked half of DeleteAccount.
+func (m *Manager) deleteAccountEntry(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, a := range m.accounts.Accounts {

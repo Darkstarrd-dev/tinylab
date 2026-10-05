@@ -120,6 +120,7 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R3：loop-guard 思考循环自动续跑 | `afcaafe` / `601a056`（`src/loop-recovery.ts`） | DSH 宿主回合引擎行为；TinyLab 代理不驱动会话回合 |
 | R3：gemini 面板族（测试按钮/配额行/昵称/账号卡片） | `0969ce2` / `c2c94db` / `5544417` 等 | 面板 UI；实现 Gemini provider 时（R3-3）再按需取材 |
 | R3：zcode 面板/浏览器族（登录渠道弹窗、浏览器探测 darwin 候选链、spawn 守卫、provider-card 槽冲突） | `6b7548b` / `15ccae5`③ / `dc58525` / `b64a9c8` / `e99e30a` | 面板与桌面窗口载体行为 |
+| 登录浏览器/会话模式（隐私窗口 / 指定非默认浏览器 / 独立配置目录，2026-10-05） | 无 —— 上游把登录页一律交给宿主（外挂 Chromium + DSH 桌面窗口，即上一行） | **本端自研的本地增强，不是移植对象**：TinyLab 面向同 provider 多账号，而系统默认浏览器的共享登录态会让「新建账号」静默复用已登录账号（账号池只按 `Account.ID` 去重）。判定：上游无等价机制 ⇒ 不搬其实现（外挂 Chromium/桌面载体），只按本端需求实现；将来上游若出现等价机制，按本行锚点重估。落点与真机结论见架构 §3.9 + [`docs/changelog/jethub-architecture.md`](changelog/jethub-architecture.md) |
 | R3：zcode 双通道（start-plan/coding-plan）+ zai 渠道（2026-10-04 用户决定不搬） | `0fcd929` / `15ccae5`①② / `6b7548b`（`src/zcode-transport.ts`） | 协议事实但本端无需求方：当前账号均为 start-plan/bigmodel 通道；coding-plan 的 api-key 换取链与 zai 渠道在无订阅账号时不可验证。将来出现 coding-plan/zai 账号时按本行锚点重估 |
 | R3：buddy 限流误报「未登录」 | `d77e716`（`src/account-pool.ts`） | 修的是 DSH `resolveCredential` 兜底链的报错语义（空候选→MISSING_CREDENTIAL 误报）；TinyLab 选号在 rotation，空候选语义不同（无此兜底链） |
 | R3：AGENTS.md 增补 1,650 行 | `e06283c..ff5e37d` 多个提交 | 宿主实测坑记录；相关事实已随各 R3 条目落入本项目文档 |

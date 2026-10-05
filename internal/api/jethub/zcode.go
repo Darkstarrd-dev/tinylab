@@ -49,12 +49,18 @@ func (h *Handler) RegisterPublicZcodeCarrier(r chi.Router) {
 
 // zcodeLogin POST — CLI 设备授权流：立刻拿到 authorize_url（后台轮询到 ready）。
 func (h *Handler) zcodeLogin(w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
+	id, credentialRef := corejethub.NewAccountID("zcode")
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	flow, err := h.d.Manager.StartZcodeLogin(r.Context())
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	id, credentialRef := corejethub.NewAccountID("zcode")
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "zcode", Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
@@ -69,7 +75,7 @@ func (h *Handler) zcodeLogin(w http.ResponseWriter, r *http.Request) {
 	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
 	corejethub.RegisterLoginSession(loginID, sess)
 	// 自动打开授权页（对话框里的链接是兜底）。
-	h.d.Manager.OpenURLWithBrowser(flow.AuthorizeURL)
+	h.d.Manager.OpenURLWithBrowser(flow.AuthorizeURL, opt)
 	// ⚠️ 后台 context：轮询必须活过这个 handler（请求 context 在响应写完即取消，
 	// 绑上去会让每次登录在用户还没打开授权页时就中止 —— minimax 的同款注释）。
 	go func() {

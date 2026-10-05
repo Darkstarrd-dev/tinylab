@@ -26,9 +26,17 @@ func (h *Handler) RegisterCodeArts(r chi.Router) {
 func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Nickname string `json:"nickname"`
+		loginOpenFields
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	id, credentialRef := corejethub.NewAccountID("codearts")
+	// 选择校验在建号之前：不可用的浏览器/会话必须是 400，而不是「弹窗一直等待、
+	// 浏览器什么都没开」。
+	opt, err := h.prepareLoginOpen(req.loginOpenFields, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	nickname := req.Nickname
 	if nickname == "" {
 		nickname = id
@@ -41,7 +49,7 @@ func (h *Handler) codeartsLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartCodeArtsLoginWithBrowser()
+	started, err := h.d.Manager.StartCodeArtsLoginWithBrowser(opt)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())

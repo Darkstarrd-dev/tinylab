@@ -25,9 +25,15 @@ func (h *Handler) RegisterCline(r chi.Router) {
 func (h *Handler) clineLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Nickname string `json:"nickname"`
+		loginOpenFields
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	id, credentialRef := corejethub.NewAccountID("cline")
+	opt, err := h.prepareLoginOpen(req.loginOpenFields, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	nickname := firstNonEmptyStr(req.Nickname, id)
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "cline", Nickname: nickname,
@@ -37,7 +43,9 @@ func (h *Handler) clineLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	started, err := h.d.Manager.StartClineLogin(context.Background(), id, nil)
+	started, err := h.d.Manager.StartClineLogin(context.Background(), id, func(u string) {
+		h.d.Manager.OpenURLWithBrowser(u, opt)
+	})
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())

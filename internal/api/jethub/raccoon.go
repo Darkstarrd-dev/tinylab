@@ -40,7 +40,13 @@ func (h *Handler) RegisterRaccoon(r chi.Router) {
 // moment — a r.Context()-bound poll aborts before the user even opens the
 // QR page (the "placeholder account, credential never lands" defect).
 func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
 	id, credentialRef := corejethub.NewAccountID("raccoon")
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "raccoon", Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
@@ -64,7 +70,7 @@ func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 	// credential itself via CompleteRaccoonLogin, so nothing extra here.
 	go corejethub.SettleAndCleanup(sess, nil)
 	// Session registered → the page can already read its QR payload.
-	h.d.Manager.OpenURLWithBrowser(pageURL)
+	h.d.Manager.OpenURLWithBrowser(pageURL, opt)
 
 	apibase.WriteJSON(w, http.StatusCreated, map[string]any{
 		"accountId": id,

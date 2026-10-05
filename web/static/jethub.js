@@ -19,6 +19,9 @@ var __jethubState = {
   credits: {}, creditsLoading: false,
   modelBatch: false, modelSelected: {},
   pollTimer: null,
+  // 浏览器轴/会话轴（+新建账号 弹窗）：choices = 服务端探测结果（可用浏览器 +
+  // 系统默认 + 记住的偏好），loginChoice = 本次选择（「重新打开登录页」复用）。
+  loginChoices: null, loginChoice: null,
 };
 
 function openFreeHub() {
@@ -584,23 +587,199 @@ async function jethubAddAccount(providerId) {
   }
   // url / qr modes share the URL + poll modal (qr providers hand back the
   // login page URL the same way).
+  //
+  // ⚠️ 先选后开：开页发生在**服务端建号那一刻**（handler 按请求里的选择调
+  // OpenURLWithBrowser），所以浏览器/会话必须在 login 请求之前选好 —— 先建号
+  // 再问用户就会开错页（或开两次）。
   try {
-    var started = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login', {});
-    if (started.error) { toast(t('failed', [started.error]), 'error'); return; }
-    __jethubLoginModal(providerId, started);
+    __jethubState.loginChoices = await __jethubLoadLoginChoices();
+    __jethubState.loginChoice = null;
+    __jethubLoginModal(providerId);
   } catch (e) {
     toast(t('failed', [e.message]), 'error');
   }
 }
 
-function __jethubLoginModal(providerId, created) {
+// __jethubLoadLoginChoices loads the browser axis (installed browsers + the OS
+// default + the remembered selection). Any failure degrades to the legacy
+// default (system browser, shared session): this RPC must never block a login.
+async function __jethubLoadLoginChoices() {
+  var out = { browsers: [], def: {}, prefs: {} };
+  try {
+    var r = await apiGet('/jethub/login-browsers');
+    if (r && !r.error) {
+      out.browsers = r.browsers || [];
+      out.def = r.defaultBrowser || {};
+      out.prefs = r.prefs || {};
+    }
+  } catch (e) { /* degrade to the legacy default */ }
+  return out;
+}
+
+// __jethubLoginPrivateOk: whether the private session can be offered for a
+// browser axis value. A custom path cannot be classified in the browser (the
+// server owns the engine table), so it stays selectable and any refusal comes
+// back as a clear error on confirm.
+function __jethubLoginPrivateOk(choices, browser) {
+  if (browser === 'default') return !!(choices.def || {}).privateOk;
+  var hit = (choices.browsers || []).filter(function(b) { return b.id === browser; })[0];
+  if (hit) return !!hit.privateOk;
+  return true;
+}
+
+// __jethubSetOptionDisabled：`renderCustomSelectHtml` 不支持 per-option disabled，
+// 所以把状态写在**隐藏的原生 `<option>`** 上（`toggleCustomSelect` 每次展开都会
+// 按原生 option 重新同步自定义行的禁用态），同时立刻镜像到自定义行，避免「展开前
+// 看着能点」。被禁用的项选不动：`selectCustomOption` 会拒绝。
+function __jethubSetOptionDisabled(selectId, value, disabled) {
+  var sel = document.getElementById(selectId);
+  if (!sel) return;
+  var opts = sel.querySelectorAll ? sel.querySelectorAll('option') : [];
+  for (var i = 0; i < opts.length; i++) {
+    if (opts[i].value === value) opts[i].disabled = !!disabled;
+  }
+  var wrap = sel.parentNode; // .custom-select-wrapper
+  var rows = (wrap && wrap.querySelectorAll) ? wrap.querySelectorAll('.custom-select-option') : [];
+  for (var j = 0; j < rows.length; j++) {
+    if (rows[j].getAttribute('data-value') !== value) continue;
+    if (disabled) {
+      rows[j].classList.add('disabled');
+      rows[j].style.opacity = '0.4';
+      rows[j].style.pointerEvents = 'none';
+    } else {
+      rows[j].classList.remove('disabled');
+      rows[j].style.opacity = '';
+      rows[j].style.pointerEvents = '';
+    }
+  }
+}
+
+// __jethubSyncLoginForm: keeps the custom-path row, the private option and the
+// session hint in sync with the current selects. Wired as the hidden native
+// selects' onchange (the project's custom-select component dispatches change on
+// pick), so it runs for real user picks — not just for programmatic ones.
+function __jethubSyncLoginForm() {
+  var choices = __jethubState.loginChoices || { browsers: [], def: {}, prefs: {} };
+  var bSel = document.getElementById('free-hub-login-browser');
+  var sSel = document.getElementById('free-hub-login-session');
+  if (!bSel || !sSel) return;
+  var pathRow = document.getElementById('free-hub-login-path-row');
+  if (pathRow) pathRow.style.display = (bSel.value === 'custom') ? '' : 'none';
+  var ok = __jethubLoginPrivateOk(choices, bSel.value);
+  __jethubSetOptionDisabled('free-hub-login-session', 'private', !ok);
+  if (!ok && sSel.value === 'private') {
+    // 该内核的隐私开关未知 ⇒ 退回共享登录态（更新隐藏 select + 触发标签）。
+    sSel.value = 'shared';
+    if (typeof selectCustomOption === 'function') {
+      selectCustomOption('free-hub-login-session-wrap', 'shared', t('freeHubLoginSessionShared'));
+    }
+  }
+  var warn = document.getElementById('free-hub-login-warn');
+  if (warn) warn.textContent = ok ? '' : t('freeHubLoginPrivateOff');
+  var hint = document.getElementById('free-hub-login-session-hint');
+  if (hint) {
+    hint.textContent = sSel.value === 'private' ? t('freeHubLoginPrivateHint')
+      : (sSel.value === 'isolated' ? t('freeHubLoginIsolatedHint') : '');
+  }
+}
+
+// __jethubReadLoginChoice reads the two axes from the dialog.
+function __jethubReadLoginChoice() {
+  var b = document.getElementById('free-hub-login-browser');
+  var s = document.getElementById('free-hub-login-session');
+  var p = document.getElementById('free-hub-login-browser-path');
+  var browser = (b && b.value) || 'default';
+  return {
+    browser: browser,
+    browserPath: browser === 'custom' ? ((p && p.value) || '').trim() : '',
+    session: (s && s.value) || 'shared',
+  };
+}
+
+// __jethubLoginModal: 步骤 1 —— 选择浏览器（默认 / 已检测到的 / 自定义路径）与
+// 会话模式（共享登录态 / 隐私窗口 / 独立配置）。此时**还没有占位账号**（建号
+// 发生在确认之后），所以取消只是关闭弹窗。
+function __jethubLoginModal(providerId) {
   var overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
+  var choices = __jethubState.loginChoices || { browsers: [], def: {}, prefs: {} };
+  var prefs = choices.prefs || {};
+  var selBrowser = prefs.browser || 'default';
+  var selSession = prefs.session || 'shared';
+  var defLabel = t('freeHubLoginBrowserDefault') + (choices.def && choices.def.label ? ' — ' + choices.def.label : '');
+
+  // 两个下拉都用项目自定义组件（`renderCustomSelectHtml`，app.js）——原生
+  // `<select>` 只在组件内部作隐藏的取值载体（`.modal .custom-select-*` 的样式
+  // 见 style.css，基础样式在 style-download.css，经 style.css @import 全局可用）。
+  var browserOpts = [{ value: 'default', label: defLabel }];
+  (choices.browsers || []).forEach(function(b) {
+    browserOpts.push({ value: b.id, label: b.label });
+  });
+  browserOpts.push({ value: 'custom', label: t('freeHubLoginBrowserCustom') });
+
+  var sessionOpts = [
+    { value: 'shared', label: t('freeHubLoginSessionShared') },
+    { value: 'private', label: t('freeHubLoginSessionPrivate') },
+    { value: 'isolated', label: t('freeHubLoginSessionIsolated') },
+  ];
+
   overlay.innerHTML =
-    '<div class="modal" style="max-width:480px;">' +
+    '<div class="modal" style="max-width:520px;">' +
+      '<div class="modal-title">' + escapeHtml(t('freeHubLoginTitle')) + '</div>' +
+      '<div class="modal-body" style="margin-top:12px;">' +
+        '<div class="free-hub-hint">' + escapeHtml(t('freeHubLoginChooseHint')) + '</div>' +
+        '<label class="free-hub-hint" style="display:block;margin-top:10px">' + escapeHtml(t('freeHubLoginBrowser')) + '</label>' +
+        renderCustomSelectHtml('free-hub-login-browser-wrap', 'free-hub-login-browser', browserOpts, selBrowser, '__jethubSyncLoginForm()') +
+        '<div id="free-hub-login-path-row" style="display:none;margin-top:8px">' +
+          '<input type="text" class="input" id="free-hub-login-browser-path" placeholder="' + escapeAttr(t('freeHubLoginBrowserPath')) + '" style="width:100%">' +
+        '</div>' +
+        '<label class="free-hub-hint" style="display:block;margin-top:10px">' + escapeHtml(t('freeHubLoginSession')) + '</label>' +
+        renderCustomSelectHtml('free-hub-login-session-wrap', 'free-hub-login-session', sessionOpts, selSession, '__jethubSyncLoginForm()') +
+        '<div id="free-hub-login-session-hint" class="free-hub-hint"></div>' +
+        '<div id="free-hub-login-warn" class="free-hub-hint"></div>' +
+      '</div>' +
+      '<div class="modal-footer"><button type="button" class="btn btn-ghost" id="free-hub-login-cancel">' + escapeHtml(t('cancel')) + '</button>' +
+      '<button type="button" class="btn btn-primary" id="free-hub-login-confirm">' + escapeHtml(t('freeHubLoginConfirm')) + '</button></div>' +
+    '</div>';
+  overlay.classList.add('show');
+  // 取消 = 放弃：没有占位账号需要清理（尚未建号）。
+  document.getElementById('free-hub-login-cancel').onclick = function() {
+    overlay.classList.remove('show'); overlay.innerHTML = '';
+  };
+  document.getElementById('free-hub-login-confirm').onclick = function() { jethubLoginConfirm(providerId); };
+  __jethubSyncLoginForm();
+}
+
+// jethubLoginConfirm: 步骤 2 —— 带上选择发起登录（服务端据此建号并开页），然后
+// 切到等待态轮询。选择不可用时服务端返回 400 并带上原因（弹窗保持打开可改选）。
+async function jethubLoginConfirm(providerId) {
+  var choice = __jethubReadLoginChoice();
+  if (choice.browser === 'custom' && !choice.browserPath) {
+    toast(t('freeHubLoginBrowserPath'), 'error');
+    return;
+  }
+  try {
+    var created = await apiPost('/jethub/' + encodeURIComponent(providerId) + '/login', choice);
+    if (created && created.error) { toast(t('failed', [created.error]), 'error'); return; }
+    __jethubState.loginChoice = choice;
+    __jethubLoginWaitingModal(providerId, created);
+  } catch (e) {
+    toast(t('failed', [e.message]), 'error');
+  }
+}
+
+// __jethubLoginWaitingModal: 步骤 3 —— 等待授权（轮询 status）。取消 = 放弃登录：
+// 停轮询 + 删除占位账号（服务端失败路径同样会删）。
+function __jethubLoginWaitingModal(providerId, created) {
+  var overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  var choice = __jethubState.loginChoice || {};
+  overlay.innerHTML =
+    '<div class="modal" style="max-width:520px;">' +
       '<div class="modal-title">' + escapeHtml(t('freeHubLoginTitle')) + '</div>' +
       '<div class="modal-body" style="margin-top:12px;">' +
         '<div class="free-hub-hint">' + escapeHtml(t('freeHubLoginHint')) + '</div>' +
+        '<button type="button" class="btn btn-sm" id="free-hub-login-reopen" style="margin-top:8px">' + escapeHtml(t('freeHubLoginReopen')) + '</button>' +
         '<a class="free-hub-login-link" href="' + escapeAttr(created.loginUrl || '') + '" target="_blank" rel="noopener">' + escapeHtml(t('freeHubLoginOpen')) + '</a>' +
         '<div id="free-hub-login-status" class="free-hub-hint">' + escapeHtml(t('freeHubLoginWaiting')) + '</div>' +
       '</div>' +
@@ -616,6 +795,18 @@ function __jethubLoginModal(providerId, created) {
     }).catch(function() { jethubSelect(providerId); });
   };
   document.getElementById('free-hub-login-cancel').onclick = stop;
+  // 重新打开：走服务端（按本次选择开页）。⚠️ 不能只用 <a target="_blank">——那由
+  // UI 宿主决定浏览器（webview 变体里还会被拦到系统默认浏览器），选定的模式会失效。
+  document.getElementById('free-hub-login-reopen').onclick = function() {
+    apiPost('/jethub/open-login-url', {
+      url: created.loginUrl || '',
+      browser: choice.browser || 'default',
+      browserPath: choice.browserPath || '',
+      session: choice.session || 'shared'
+    }).then(function(r) {
+      if (r && r.error) toast(t('failed', [r.error]), 'error');
+    }).catch(function(e) { toast(t('failed', [e.message]), 'error'); });
+  };
   // 轮询结束（成功/失败/会话已回收）都要收尾：停 timer + 关弹窗 + 刷新列表。
   var finish = function(toastText, tone) {
     if (__jethubState.pollTimer) { clearInterval(__jethubState.pollTimer); __jethubState.pollTimer = null; }

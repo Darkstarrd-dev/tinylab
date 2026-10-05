@@ -25,7 +25,13 @@ func (h *Handler) RegisterMinimax(r chi.Router) {
 
 // minimaxLogin POST — device grant + background poll; loginId tracks it.
 func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
+	sel := decodeLoginOpen(r)
 	id, credentialRef := corejethub.NewAccountID("minimax")
+	opt, err := h.prepareLoginOpen(sel, id)
+	if err != nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.d.Manager.AddAccount(corejethub.Account{
 		ID: id, Provider: "minimax", Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
@@ -50,7 +56,7 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	// Auto-open the verification URL like the other providers (this flow is
 	// inline in the handler rather than a Manager Start*Login function, so it
 	// must open the browser itself — the dialog link stays as a fallback).
-	h.d.Manager.OpenURLWithBrowser(grant.VerificationURIComplete)
+	h.d.Manager.OpenURLWithBrowser(grant.VerificationURIComplete, opt)
 	// ⚠️ Background context, not r.Context(): the poll must outlive this
 	// handler (the request context is canceled the moment the response is
 	// written — binding the poll to it aborted every login before the user

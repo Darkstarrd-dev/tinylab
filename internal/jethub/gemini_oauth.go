@@ -104,14 +104,15 @@ func (f *GeminiLoginFlow) Wait(ctx context.Context, m *Manager) (*GeminiCredenti
 func (f *GeminiLoginFlow) Close() { f.flow.close() }
 
 // StartGeminiLogin starts an OAuth flow: listen first (硬约束 2), build the
-// URL, open the browser. The caller waits via flow.Wait.
-func (m *Manager) StartGeminiLogin() (*GeminiLoginFlow, error) {
+// URL, open the browser with the browser/session selection from the +新建账号
+// dialog (zero value = remembered preference). The caller waits via flow.Wait.
+func (m *Manager) StartGeminiLogin(opt OpenOptions) (*GeminiLoginFlow, error) {
 	flow, err := m.startGeminiOAuthFlow()
 	if err != nil {
 		return nil, err
 	}
 	loginURL := flow.buildGeminiAuthURL()
-	m.OpenURLWithBrowser(loginURL)
+	m.OpenURLWithBrowser(loginURL, opt)
 	return &GeminiLoginFlow{LoginURL: loginURL, flow: flow}, nil
 }
 
