@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 13 轮（F-03 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 14 轮（F-06 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -279,13 +279,13 @@ state.yaml 快照写（🧪 写放大量 = 快照体积 × 2 QPS，未量化，�
 | ticker goroutine | `done := make(chan struct{})` + `defer close(done)` + `defer ticker.Stop()`，无泄漏 | ✅ |
 | 客户端断开检测 | 每行 `w.Write` 失败 → `clientDisconnected=true` → break；**200 头已发出，断开后无法再故障转移**（结构性：SSE 一旦开始透传就只能终止） | ✅ |
 | SSE 行缓冲 `SSELineBuffer` | 预算 1 MiB/行、8 MiB 总量，超限 `streamAborted` 受控中止（F-14 机制） | ✅ `sse.go:15-19` |
-| `sseBuf`（usage 捕获副本） | **全量累积整个流，无上限**——大输出（含 base64 图片流出）时单请求内存 ≈ 响应体总大小 | ✅ `stream.go:231,525` |
+| `sseBuf`（usage 捕获副本） | **已限界（F-06 修复，第 14 轮）**：`cappedBodyBuffer` 保留头部 256 KiB + 真实总字节计数（`capture_buffer.go`），超限时以截断信封写入 ring；usage/token 逐行增量提取不依赖该缓冲 | ✅ `stream.go:82,542-545`、`responses_translate.go:326,502-505` |
 | 合成终止符 | 上游不发 finish/[DONE]（opencode.ai）时代 client 补发，仅 OpenAI 格式 | ✅ `stream.go:460-494` |
 | `sigCache`（Gemini 签名） | TTL 10min + LRU 上限 + Put 时惰性驱逐，读不续期；无后台 goroutine | ✅ `signature_cache.go:22-84` |
 | token 计数 | atomic + 200ms 节流广播（≤5/s），read 单 goroutine 写 / ticker goroutine 读 | ✅ |
 
 **Q5 部分结案（✅）：** 流式路径按请求增长的资源中，sigCache 有界、ticker/AfterFunc
-有正确停止路径、SSELineBuffer 有预算；**唯一无界的是 `sseBuf`**（归并入 F-06）。
+有正确停止路径、SSELineBuffer 有预算；原唯一无界项 `sseBuf` 已随 F-06 修复限界（第 14 轮）。
 `passThroughResponse` 有 256 MiB 预算拒绝（`maxPassThroughBodyBytes`，`stream.go:37-41`）。
 
 ### 3.7 Combo 解析与重试的交互（✅ 第 5 轮核实）
@@ -363,8 +363,8 @@ augmenter 直接改 `r.Header`——安全性完全依赖"每个 augmenter 记�
 | # | 写入点 | 容量/清理 | 触发时机 |
 |---|---|---|---|
 | 1 | `console.Logger` ring（`console/logger.go:21`，maxLines 默认 200，条数限界） | 覆盖写 | REQUEST/SEND/PROXY/错误行 |
-| 2 | `usageBuf` RingBuffer（`app.go:148`，容量 `cfg.UsageRingSize` 默认 500） | 条数限界，**单条含完整 masked req/resp body + 双侧 headers** | 每 attempt 的 `recordUsage`（error/retry 各一条） |
-| 3 | `pgUsageBuf`（容量 50，Source=playground 分流） | 同上 | 同上 |
+| 2 | `usageBuf` RingBuffer（`app.go:148`，容量 `cfg.UsageRingSize` 默认 500） | 条数 + **字节双限界**（`DefaultRingByteBudget` 64 MiB，`usage/ring.go:50`）；单条 payload ≤256 KiB 截断信封（F-06 修复，第 14 轮） | 每 attempt 的 `recordUsage`（error/retry 各一条） |
+| 3 | `pgUsageBuf`（容量 50，Source=playground 分流） | 同上（默认字节预算 64 MiB 不约束 50 条上限） | 同上 |
 | 4 | `EntryTracker`（processing map） | `Remove` 每 attempt 收尾 + `SweepStale` 兜底（1min 扫、5min 心跳过期，`app.go:354`） | Register（start）/Remove（done） |
 | 5 | Trace JSONL（`traces/index-YYYYMMDD.jsonl` + `req/<id>.jsonl`，运行时开关） | `SweepTraces`（retainDays + MaxDiskMB 删最旧，`app.go:352`） | 每 attempt 一行 + 每 attempt 详情 |
 | 6 | `RequestUpdates` Broadcaster（buf 256）request-start/done | 满即丢（per-subscriber 非阻塞） | start/done/tokens |
@@ -372,16 +372,22 @@ augmenter 直接改 `r.Header`——安全性完全依赖"每个 augmenter 记�
 | 8 | `Inflight` tracker（流式字节） | defer 注销 | 流式 |
 | 9 | `hardLimit` 窗口（`hardlimit.go`，per-provider `[]hlEvent` 60s 滑窗） | `cleanExpired` 滚动淘汰 | WaitAndReserve/Reconcile |
 
-**F-06 完全结案（✅）：** Ring 条数限界确认——`usageBuf` 500 / `pgUsageBuf` 50，
-`Entry.ReqPayload`/`RespPayload` 存**完整 masked body**（`recorder.go:110-118`）。
-内存上界 ≈ 500 × (≤32 MiB req + 响应体) + 50 × 同样——极端理论值很大，实际受单请求
-body 上限与典型响应大小约束；**SSE 广播侧是轻量通道**（`MarshalEntryJSONLight` 剥离
-payload 后才广播，`entry_tracker.go:170-177`），不放大。核心风险仍是 #2 Ring 本体。
+**F-06 已修复（第 14 轮）：** 原结论——Ring 条数限界、单条存完整 masked body，
+内存上界 ≈ 条数 × 单条完整体积。修复后三层限界：① `captureBody` 256 KiB 截断
+（`maxCapturedBodyBytes`，`recorder.go:213`），超限包装为自描述截断信封
+（`marshalTruncatedBody`：`{"raw","truncated","truncatedBytes","totalBytes"}`）；
+② 流式 `sseBuf` 改 `cappedBodyBuffer`（保留头部 256 KiB + 真实总字节计数，
+usage/token 提取本就逐行增量进行、不依赖该缓冲）；③ Ring 增加字节预算
+（`usage/ring.go::NewWithByteBudget` + `evictOverBudgetLocked`，超预算淘汰最旧、
+保留最新、淘汰槽位清零释放内存，`Clear`/`Resize` 同步维护 byteTotal）。
+**SSE 广播侧是轻量通道**（`MarshalEntryJSONLight` 剥离 payload 后才广播，
+`entry_tracker.go:170-177`），不放大。**行为变更：** Trace 开启时，流式响应体
+超过 256 KiB 的部分不再落盘（捕获缓冲本身有界）；非流式 trace 仍记完整 body。
 
 **Q5 完全结案（✅）：** 按请求/attempt 增长的内存结构全部有界或清理：
 `attemptCounter`（defer + SweepTraces 双清）、`EntryTracker`（Remove+SweepStale）、
 `hardLimit` 窗口（cleanExpired）、`sigCache`（LRU+TTL）、Ring（条数）。唯一"无界"项是
-单条 Entry 体积（→F-06 方向：captureBody 截断）。
+单条 Entry 体积——已于第 14 轮随 F-06 修复（captureBody 256 KiB 截断 + Ring 字节预算）。
 
 **广播器语义（✅ `broadcaster.go`）：** per-subscriber 缓冲 + 非阻塞投递（满即丢）——
 慢订阅者不阻塞请求路径、不泄漏（unsubscribe 幂等关闭）；代价是 UI 慢时事件静默丢失。
@@ -494,10 +500,10 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-06 🟠 内存观测数据按"条数"限界，单条可携带完整请求/响应体
 
 - **维度：** 资源
-- **状态：** ✅ 完全结案（第 4 轮流式 + 第 7 轮 Ring，§3.9）
-- **证据：** ① 每个 attempt 把完整请求体（≤32 MiB）掩码复制进 `processingEntry.ReqPayload`，`captureBody` 只做 base64 图片掩码 + JSON 包装，**不截断**（`recorder.go:207-216`）；② 流式路径 `sseBuf` 全量累积整个上游响应（`stream.go:79,231,525`），**无上限**（非流式路径反而有 256 MiB 拒绝预算）；③ Ring：`usageBuf` 500 条 / `pgUsageBuf` 50 条，条数限界、尾部淘汰，`Entry.ReqPayload/RespPayload` 为完整 masked body（`app.go:148-150`、`recorder.go:110-118`、§3.9 表 #2/#3）。理论内存 ≈ 条数 × 单条完整体积（含 base64 图片、长推理输出）。
-- **影响：** 重负载下 Recent Requests 的内存占用以"最近 500 个大响应体"为上界；Playground 并发长流式时可叠加。是"运行 7 天内存增长"最可能的实锚点之一。
-- **方向：** `captureBody` 加体积上限（如 256 KiB 截断标记）；`sseBuf` 滚动只留尾部 + usage 提取靠前；Ring 侧按累计字节限界。
+- **状态：** ✅ **已修复（2026-10-05，第 14 轮）**——三层限界：单条 payload 256 KiB 截断信封 + 流式捕获缓冲封顶 + Ring 64 MiB 字节预算。回归 `internal/proxy/capture_body_test.go`（captureBody 欠额/超额/掩码序、截断信封幂等、流式端到端全量透传+尾部 usage 提取、大请求体截断）+ `internal/usage/ring_bytebudget_test.go`（字节淘汰/单条超额保留/头计入/Clear+Resize 账目一致），全量 `go test ./...` 绿。
+- **证据（修复前）：** ① 每个 attempt 把完整请求体（≤32 MiB）掩码复制进 `processingEntry.ReqPayload`，`captureBody` 只做 base64 图片掩码 + JSON 包装，**不截断**；② 流式路径 `sseBuf` 全量累积整个上游响应，**无上限**（非流式路径反而有 256 MiB 拒绝预算）；③ Ring：`usageBuf` 500 条 / `pgUsageBuf` 50 条，条数限界、尾部淘汰，`Entry.ReqPayload/RespPayload` 为完整 masked body。理论内存 ≈ 条数 × 单条完整体积（含 base64 图片、长推理输出）。
+- **影响（修复前）：** 重负载下 Recent Requests 的内存占用以"最近 500 个大响应体"为上界；Playground 并发长流式时可叠加。是"运行 7 天内存增长"最可能的实锚点之一。
+- **修复实现（第 14 轮）：** ① `recorder.go`：`maxCapturedBodyBytes = 256 << 10`；`captureBody` 对超额 body 保留头部并经 `marshalTruncatedBody` 包装为合法 JSON 信封（`{"raw","truncated","truncatedBytes","totalBytes"}`，复用既有 `{"raw"}` 包装形状，前端 modal 无需改动）；`isTruncationEnvelope` 探测（`truncated`+`raw`+`totalBytes` 三字段）使信封幂等——流式预包装的信封经过 `recordUsage` 的 captureBody 不会被二次截断（否则 totalBytes 被中间长度污染）；掩码先于截断（纯图片撑大的 body 掩码后回落欠额、不截断）。② 新增 `capture_buffer.go::cappedBodyBuffer`（保留头部 cap 字节 + 计数真实总量），`stream.go`/`responses_translate.go` 的 `sseBuf` 替换之；流末若 `Truncated()` 则以真实总字节预包装——usage/token/签名提取本就逐行增量进行（`util.ExtractTokens`/`parseAnthropicSSEUsage`/`extractThoughtSignature`），与捕获缓冲解耦，客户端透传字节流不受影响。③ `usage/ring.go`：`RingBuffer` 增加 `byteTotal`/`byteBudget`（`NewWithByteBudget`，`New` 默认 `DefaultRingByteBudget = 64 MiB`）；`entryBytes` 估算（payload + headers 键值 + 256 固定）；`Add` 覆盖槽位先减账、超预算经 `evictOverBudgetLocked` 从最旧淘汰（保留最新、槽位清零释放 payload 内存）；`Clear` 清零全部槽位（原实现只复位游标，payload 残留至覆盖）、`Resize` 重建后重算并执行预算。条数预算管典型流量，字节预算只在病态大 payload 时触发：典型 entry 数 KB → 500 条 ≈ 数 MB，远不及 64 MiB；极端 entry ≈ 512 KiB（双侧截断信封+转义）→ 预算允许 ~120 条。**行为变更：** Trace 开启时流式响应体超过 256 KiB 的部分不再落盘（捕获缓冲本身有界，尾部字节在 recordUsage 时已不存在）；非流式 trace 仍记完整 body（writeRequestLog 在 captureBody 之前调用）。
 
 ### F-07 🟢 Combo round-robin 策略失败时不 fallback
 
@@ -586,3 +592,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 11 | 2026-10-05 | F-01 修复（用户指定）：`forward_retry.go` 循环顶部 + 上游错误分支最前、`forward_combo.go` 三策略目标间/502 前、`forward_request.go` 502 前共四处 `r.Context().Err()` 短路；新增 `internal/proxy/forward_cancel_test.go` 双用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 三条目） | F-01 ✅ 已修复：取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 key）；对照组证明真实网络错误仍冷却；全量 proxy suite 绿 |
 | 12 | 2026-10-05 | F-02 修复（用户指定）：新增 `internal/proxy/stream_timeout.go`（`doStream` 首字节超时 120s 默认 → 网络错误分支切 key；`idleTimeoutBody` 空闲超时 300s 默认 → `StreamIdleTimeoutError` 中止流记 error 不冷却 key）；`config.Provider` 新增 `StreamTTFBTimeoutSec`/`StreamIdleTimeoutSec`（nil=默认、≤0=禁用）+ UpdateProvider 合并 + ProviderDTO；`stream.go`/`responses_translate.go` 读循环 errors.As 识别；新增 `internal/proxy/stream_timeout_test.go` 三用例 | F-02 ✅ 已修复：悬挂上游首字节超时触发故障转移、半开流空闲超时释放 goroutine/连接；proxy+config+registry+api 全量套件绿 |
 | 13 | 2026-10-05 | F-03 修复（用户指定）：`handler.go::New` 改用 `newUpstreamTransport`（克隆 `http.DefaultTransport`）构造双专属 Transport——direct `Proxy=nil` 真直连（不再响应 `HTTP(S)_PROXY`）、proxy 仅认 `SetProxy` 显式设置；池化 `MaxIdleConns=256`/`MaxIdleConnsPerHost=32`（原默认 2）+ 继承 30s 拨号/10s TLS/90s 空闲超时（原零值 proxyTransport 皆无）；六 client 两侧共享池，不再共享 `http.DefaultTransport`；新增 `internal/proxy/upstream_transport_test.go` 两用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 + 本文 §3.3/§3.8） | F-03 ✅ 已修复：连接池专属化、零值 proxyTransport 超时补齐、"直连"与环境代理脱钩；全量 proxy suite + `go build`/`go vet` 绿 |
+| 14 | 2026-10-05 | F-06 修复（用户指定）：`recorder.go` `captureBody` 加 256 KiB 截断（`maxCapturedBodyBytes` + `marshalTruncatedBody` 自描述信封 + `isTruncationEnvelope` 幂等探测防二次截断）；新增 `capture_buffer.go::cappedBodyBuffer`（头部保留+真实总字节计数）替换 `stream.go`/`responses_translate.go` 的无界 `sseBuf`；`usage/ring.go` 增加字节预算（`NewWithByteBudget`/`DefaultRingByteBudget` 64 MiB/`entryBytes`/`evictOverBudgetLocked`，`Clear` 顺带修 payload 残留清零）；新增 `capture_body_test.go` 六用例 + `ring_bytebudget_test.go` 四用例；文档同步（proxy-architecture §11.1 漂移段落更正 + 核对行、PROJECT_MAP §4/§6 三条目 + 核对行、双 changelog、本文 §3.6/§3.9/F-06） | F-06 ✅ 已修复：单条 payload ≤256 KiB（截断信封）、在途流式捕获 ≤256 KiB、Ring 累计 ≤64 MiB；测试侧坑——截断信封经 JSON 转义后仍可能超额需幂等直通（否则 totalBytes 被中间长度污染）、`forwardWithRetry` 测试调用需显式传 bodyBytes（nil 时 ReqPayload 为空）；全量 `go test ./...` 绿 |

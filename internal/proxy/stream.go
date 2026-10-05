@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -77,7 +76,10 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	buf := make([]byte, 32*1024)
 	totalOutput := 0
 	sb := sse.NewSSELineBuffer(0, 0)
-	var sseBuf bytes.Buffer
+	// F-06: bounded diagnostic capture of the SSE body. Token/usage/signature
+	// extraction below is incremental per line and unaffected by the cap; only
+	// the end-of-stream payload retained in the usage ring is capped.
+	sseBuf := newCappedBodyBuffer(maxCapturedBodyBytes)
 	var lastEntryRefresh time.Time
 	// inputTokens/outputTokens/contentCharsTotal are atomic: the read loop
 	// (single goroutine) stores them while a background ticker goroutine loads
@@ -538,6 +540,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	dspModel := resolveDisplayModel(sel.Provider.Name, model, originalModel, h.aliases)
 	h.logger.Info("\U0001f300 [STREAM] %s | %s | %dms | %d", sel.Provider.Name, dspModel, totalLatencyMs, resp.StatusCode)
 	sseBody := sseBuf.Bytes()
+	if sseBuf.Truncated() {
+		sseBody = marshalTruncatedBody(sseBody, sseBuf.Total())
+	}
 	status := "success"
 	errMsg := ""
 	if streamAborted {

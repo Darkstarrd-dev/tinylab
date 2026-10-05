@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -323,7 +322,8 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 
 	buf := make([]byte, 32*1024)
 	sb := sse.NewSSELineBuffer(0, 0)
-	var sseBuf bytes.Buffer
+	// F-06: bounded diagnostic capture of the SSE body (see stream.go).
+	sseBuf := newCappedBodyBuffer(maxCapturedBodyBytes)
 	var clientDisconnected bool
 	var streamAborted bool
 	// streamIdleTimeoutErr records an F-02 idle-timeout abort (see
@@ -500,6 +500,9 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	}
 	totalLatencyMs := latencyMs + time.Since(streamStart).Milliseconds()
 	sseBody := sseBuf.Bytes()
+	if sseBuf.Truncated() {
+		sseBody = marshalTruncatedBody(sseBody, sseBuf.Total())
+	}
 	status := "success"
 	errMsg := ""
 	if streamAborted {

@@ -204,12 +204,58 @@ func (h *Handler) parseAndUpdateQuota(sel *rotation.SelectedKey, providerID, mod
 	h.quotaTracker.Update(sel.Provider.Name, model, sel.Key.ID, sel.Key.Name, snap.ModelLimit, snap.ModelRemaining, activeKeyCount)
 }
 
+// maxCapturedBodyBytes caps how much of a request/response body is retained
+// in the in-memory observability surfaces (usage rings, EntryTracker). Larger
+// bodies are truncated to this prefix and wrapped by marshalTruncatedBody so
+// the retained payload stays valid, self-describing JSON (F-06). Full
+// untruncated bodies remain available in the JSONL traces when request
+// logging is enabled: recordUsage invokes writeRequestLog before captureBody.
+const maxCapturedBodyBytes = 256 << 10
+
 func captureBody(body []byte) json.RawMessage {
 	body = maskBase64Images(body)
+	if len(body) > maxCapturedBodyBytes {
+		if isTruncationEnvelope(body) {
+			return append(json.RawMessage(nil), body...)
+		}
+		return json.RawMessage(marshalTruncatedBody(body[:maxCapturedBodyBytes], int64(len(body))))
+	}
 	if json.Valid(body) {
 		return append(json.RawMessage(nil), body...)
 	}
 	wrapped, err := json.Marshal(map[string]string{"raw": string(body)})
+	if err != nil {
+		return nil
+	}
+	return wrapped
+}
+
+// isTruncationEnvelope reports whether body is already a marshalTruncatedBody
+// envelope. The streaming paths pre-wrap their capped capture buffer before
+// recordUsage runs; without this check captureBody would nest a second
+// truncation around the envelope and corrupt its totalBytes marker.
+func isTruncationEnvelope(body []byte) bool {
+	var probe struct {
+		Truncated  bool    `json:"truncated"`
+		Raw        *string `json:"raw"`
+		TotalBytes *int64  `json:"totalBytes"`
+	}
+	return json.Unmarshal(body, &probe) == nil && probe.Truncated && probe.Raw != nil && probe.TotalBytes != nil
+}
+
+// marshalTruncatedBody wraps the retained head of an over-budget body in a
+// small valid-JSON envelope carrying the truncation marker. Shared by
+// captureBody (non-stream paths, total == observed length) and the streaming
+// capture buffer (total == true upstream byte count, head == retained
+// prefix). The "raw" field keeps the existing non-JSON wrapper shape so the
+// monitor modal renders truncated payloads like any other raw body.
+func marshalTruncatedBody(head []byte, total int64) []byte {
+	wrapped, err := json.Marshal(map[string]any{
+		"raw":            string(head),
+		"truncated":      true,
+		"truncatedBytes": total - int64(len(head)),
+		"totalBytes":     total,
+	})
 	if err != nil {
 		return nil
 	}

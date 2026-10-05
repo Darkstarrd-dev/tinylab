@@ -43,28 +43,68 @@ type UsageStore interface {
 	Add(entry Entry)
 }
 
+// DefaultRingByteBudget bounds the cumulative retained payload bytes of a
+// ring (F-06). The count limit governs typical traffic; the byte budget only
+// evicts when entries carry large captured payloads, capping worst-case
+// memory at the budget instead of count × unbounded body size.
+const DefaultRingByteBudget = 64 << 20 // 64 MiB
+
 // RingBuffer is a fixed-size circular buffer for usage entries. It also
 // embeds an Accumulator that keeps process-level cumulative statistics which
 // are not affected by ring eviction.
 type RingBuffer struct {
-	mu      sync.RWMutex
-	entries []Entry
-	head    int
-	size    int
-	max     int
-	acc     *Accumulator
+	mu         sync.RWMutex
+	entries    []Entry
+	head       int
+	size       int
+	max        int
+	byteTotal  int64
+	byteBudget int64
+	acc        *Accumulator
 }
 
-// New creates a RingBuffer with the given capacity.
+// New creates a RingBuffer with the given capacity and the default byte
+// budget.
 func New(max int) *RingBuffer {
+	return NewWithByteBudget(max, DefaultRingByteBudget)
+}
+
+// NewWithByteBudget creates a RingBuffer with an explicit byte budget. The
+// byte budget bounds the sum of entryBytes over retained entries; the newest
+// entry is always kept even if it alone exceeds the budget.
+func NewWithByteBudget(max int, byteBudget int64) *RingBuffer {
 	if max <= 0 {
 		max = 500
 	}
-	return &RingBuffer{
-		entries: make([]Entry, max),
-		max:     max,
-		acc:     NewAccumulator(),
+	if byteBudget <= 0 {
+		byteBudget = DefaultRingByteBudget
 	}
+	return &RingBuffer{
+		entries:    make([]Entry, max),
+		max:        max,
+		byteBudget: byteBudget,
+		acc:        NewAccumulator(),
+	}
+}
+
+// entryBytes estimates the retained footprint of an entry for byte-budget
+// accounting. Captured payloads dominate; headers are summed by key/value
+// length and everything else gets a flat allowance.
+func entryBytes(e Entry) int64 {
+	n := int64(len(e.ReqPayload) + len(e.RespPayload) + len(e.Error) + len(e.UpstreamURL) + 256)
+	for k, vs := range e.ReqHeaders {
+		n += int64(len(k))
+		for _, v := range vs {
+			n += int64(len(v))
+		}
+	}
+	for k, vs := range e.RespHeaders {
+		n += int64(len(k))
+		for _, v := range vs {
+			n += int64(len(v))
+		}
+	}
+	return n
 }
 
 // Add appends an entry to the buffer and feeds it to the accumulator.
@@ -72,10 +112,32 @@ func (rb *RingBuffer) Add(entry Entry) {
 	rb.acc.Record(entry)
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
+	if rb.size == rb.max {
+		// The slot about to be overwritten holds the oldest entry.
+		rb.byteTotal -= entryBytes(rb.entries[rb.head])
+	}
 	rb.entries[rb.head] = entry
 	rb.head = (rb.head + 1) % rb.max
 	if rb.size < rb.max {
 		rb.size++
+	}
+	rb.byteTotal += entryBytes(entry)
+	// Byte-budget eviction: drop oldest entries until under budget, always
+	// keeping the entry just added. Evicted slots are zeroed so their payload
+	// memory is actually released.
+	rb.evictOverBudgetLocked()
+}
+
+// evictOverBudgetLocked drops oldest entries while the retained byte total
+// exceeds the budget, always keeping at least the newest entry. Evicted slots
+// are zeroed so their payload memory is actually released. Caller must hold
+// the write lock.
+func (rb *RingBuffer) evictOverBudgetLocked() {
+	for rb.byteTotal > rb.byteBudget && rb.size > 1 {
+		oldest := (rb.head - rb.size + rb.max) % rb.max
+		rb.byteTotal -= entryBytes(rb.entries[oldest])
+		rb.entries[oldest] = Entry{}
+		rb.size--
 	}
 }
 
@@ -134,8 +196,12 @@ func (rb *RingBuffer) ModelStats() []ModelStatEntry {
 func (rb *RingBuffer) Clear() {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
+	for i := range rb.entries {
+		rb.entries[i] = Entry{}
+	}
 	rb.head = 0
 	rb.size = 0
+	rb.byteTotal = 0
 }
 
 // Resize changes the buffer capacity.
@@ -153,6 +219,7 @@ func (rb *RingBuffer) Resize(newMax int) {
 	rb.max = newMax
 	rb.size = 0
 	rb.head = 0
+	rb.byteTotal = 0
 	for i := len(old) - 1; i >= 0; i-- {
 		e := old[i]
 		rb.entries[rb.head] = e
@@ -160,7 +227,9 @@ func (rb *RingBuffer) Resize(newMax int) {
 		if rb.size < rb.max {
 			rb.size++
 		}
+		rb.byteTotal += entryBytes(e)
 	}
+	rb.evictOverBudgetLocked()
 }
 
 // Size returns the current number of entries in the ring buffer.
