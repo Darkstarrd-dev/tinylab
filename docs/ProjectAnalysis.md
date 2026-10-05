@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 15 轮（F-08 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 16 轮（F-04 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -153,8 +153,8 @@ flowchart TD
 | 入口解析 | `forward_request.go:15-48` | 32 MiB `MaxBytesReader`，整体读入 + `json.Unmarshal` 成 `map[string]any`；`sessionKey` 指纹 |
 | 模型解析 | `forward_request.go:50-117` | combo → quickslot → combo（quickslot 可指向 combo）→ `SplitModel` → prefix 查 provider → 循环剥离重复前缀 → 别名解析 |
 | Combo 分发 | `forward_combo.go:22-50` | fallback / greedy-squirrel 逐目标调用 `forwardWithRetry`；**round-robin 只取 `Targets[0]`，失败直接 502** |
-| 单目标重试 | `forward_retry.go:64-437` | 无限 `for` 循环；终止依赖：各错误分支向 `excludeKeyIDs` 追加，直至 `SelectKey` 失败；或有界计数器（queue ≤180、sameKey ≤4、stream_options 剥离 1 次） |
-| 收尾 | 每个分支手写 | `EntryTracker.Remove` + `DecInFlight` + `InflightUpdates.Signal()` 三件套，在循环内重复约 10 处（不能用 `defer`） |
+| 单目标重试 | `forward_retry.go`（`forwardWithRetry` + `forwardAttempt`） | 无限 `for` 循环；终止依赖：各错误分支向 `excludeKeyIDs` 追加，直至 `SelectKey` 失败；或有界计数器（queue ≤180、sameKey ≤4、stream_options 剥离 1 次）。第 16 轮（F-04）起单次 attempt 抽为 `forwardAttempt`（`attemptContext` 携参），返回三态 `attemptResult{next: retry/stop/abort, written, terminal}` |
+| 收尾 | `forwardAttempt` 单一 `defer` | `EntryTracker.Remove` + `DecInFlight` + `InflightUpdates.Signal()` 三件套由 attempt 函数内的**一个 `defer` 统一执行**（第 16 轮 F-04；原循环内手写约 10 处、marshal 分支漏 `DecInFlight` 的脆弱模式已消除）；key 选择失败路径不进 defer 作用域，无需清理 |
 | 上游构造 | `upstream.go:177-251` | Anthropic / Responses / Google / 默认 OpenAI 四分支；仅透传 `User-Agent` 与两个 ModelScope 头；`customheaders.Apply` + cline 特例 |
 | 桥接构造 | `upstream.go:87-175` | jethub/webhub：**客户端全部请求头作为出站头基底**；augmenter 可直接改 `r.Header`；`ResponseInterceptor` 可转为 Queue 重试 |
 | 流式回传 | `stream.go:43-154` | `Inflight.Register`（defer 注销）→ 写 200 → 清除写 deadline → 250ms ticker goroutine（`defer close(done)` 正确停止）→ `[DONE]` 后 500ms `AfterFunc` 关上游 body |
@@ -492,10 +492,27 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-04 🟢 重试循环的收尾逻辑手工配对，已发现一处遗漏
 
 - **维度：** 维护成本 / 状态
-- **状态：** ✅
-- **证据：** `Remove + DecInFlight + Signal` 在 `forward_retry.go` 中重复约 10 次。marshal 失败分支（`forward_retry.go:186-191`）在 `IncInFlight`（L111）之后直接返回，**未 `DecInFlight`**；且返回 `(false, reqID)` 后调用方 `handleProxy` 会再写一次 502（重复 `WriteHeader`），combo fallback 则会继续尝试下一目标。
-- **影响：** 该分支实际几乎不可触发（由 JSON 解出的 map 再 marshal 不会失败），但说明"每加一个分支就要记得收尾"的模式脆弱——过去新增的 Queue/SameKey/BillingLock 分支都是这样逐个补的。
+- **状态：** ✅ **已修复（2026-10-05，第 16 轮）**——单 attempt 抽为 `forwardAttempt`，收尾三件套统一进一个 `defer`；`forwardWithRetry` 改三态返回契约。回归 `internal/proxy/forward_finalization_test.go`（5 用例），全量 proxy suite + `go test ./...` 绿
+- **证据（修复前）：** `Remove + DecInFlight + Signal` 在 `forward_retry.go` 中重复约 10 次。marshal 失败分支在 `IncInFlight` 之后直接返回，**未 `DecInFlight`**；且返回 `(false, reqID)` 后调用方 `handleProxy` 会再写一次 502（重复 `WriteHeader`），combo fallback 则会继续尝试下一目标。同类"先写响应再 `return false`"的重复响应缺陷也在 queue 超时（503）与 sameKey 超限（503）两分支存在。
+- **影响（修复前）：** 该分支实际几乎不可触发（由 JSON 解出的 map 再 marshal 不会失败），但说明"每加一个分支就要记得收尾"的模式脆弱——过去新增的 Queue/SameKey/BillingLock 分支都是这样逐个补的。
 - **方向：** 把"单次 attempt"抽成独立函数，以 `defer` 统一收尾；返回值区分"已写响应 / 可继续 / 终止"三态。
+- **修复实现（第 16 轮）：** ① `forward_retry.go` 拆为 `forwardWithRetry`（外层循环 +
+  取消检查 + 三态分发）→ `attemptContext`（per-call 不可变参数 + 可变态：`state`、
+  inject/strip 标志）→ `forwardAttempt`（单次 attempt：`selectKey` → `IncInFlight` →
+  **defer 统一收尾 `EntryTracker.Remove`+`DecInFlight`+`Signal`** → body 改写 →
+  上游调用 → 全部错误/成功分支）。`defer` 覆盖所有退出路径：marshal 分支漏
+  `DecInFlight`、循环内 10 处手写三件套、"Entry 未注册时提前 return"（Remove 为
+  no-op）均结构性消除；② **三态契约** `attemptResult{next, written, terminal}`：
+  `outcomeRetry`（清理完毕选下一 key）/ `outcomeStop`（停止；`written=true` 表示响应
+  已提交——2xx、上游 4xx pass-through、循环自写的 500 marshal / 503 queue 超限 /
+  503 sameKey 超限；调用方不得叠加 502、combo 不得再试下一目标）/ `outcomeAbort`
+  （客户端取消静默退出）。`forwardWithRetry` 返回契约收敛为：`(true, reqID)`=已写
+  响应、`(false, "")`=取消静默、`(false, reqID)`=key 耗尽（terminal=
+  `errNoKeysAvailable`，循环已 `recordNoKeyFailure`）；③ queue 超限与 sameKey 超限
+  的 503 改按 `written=true` 返回——修复重复 `WriteHeader` 与"503 后 combo 继续
+  打下一目标"两个行为缺陷；④ 冷却等待（`SonestCooldown` ≤30s）抽出为
+  `attemptContext.selectKey`，未选中 key 不进 defer 作用域；`handleProxy`/
+  `handleCombo` 无需改动（本就按返回值分支）。
 
 ### F-05 🟢 桥接 provider 共享并修改客户端请求头（与已修复的 parsed 泄漏同类）
 
@@ -621,3 +638,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 13 | 2026-10-05 | F-03 修复（用户指定）：`handler.go::New` 改用 `newUpstreamTransport`（克隆 `http.DefaultTransport`）构造双专属 Transport——direct `Proxy=nil` 真直连（不再响应 `HTTP(S)_PROXY`）、proxy 仅认 `SetProxy` 显式设置；池化 `MaxIdleConns=256`/`MaxIdleConnsPerHost=32`（原默认 2）+ 继承 30s 拨号/10s TLS/90s 空闲超时（原零值 proxyTransport 皆无）；六 client 两侧共享池，不再共享 `http.DefaultTransport`；新增 `internal/proxy/upstream_transport_test.go` 两用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 + 本文 §3.3/§3.8） | F-03 ✅ 已修复：连接池专属化、零值 proxyTransport 超时补齐、"直连"与环境代理脱钩；全量 proxy suite + `go build`/`go vet` 绿 |
 | 14 | 2026-10-05 | F-06 修复（用户指定）：`recorder.go` `captureBody` 加 256 KiB 截断（`maxCapturedBodyBytes` + `marshalTruncatedBody` 自描述信封 + `isTruncationEnvelope` 幂等探测防二次截断）；新增 `capture_buffer.go::cappedBodyBuffer`（头部保留+真实总字节计数）替换 `stream.go`/`responses_translate.go` 的无界 `sseBuf`；`usage/ring.go` 增加字节预算（`NewWithByteBudget`/`DefaultRingByteBudget` 64 MiB/`entryBytes`/`evictOverBudgetLocked`，`Clear` 顺带修 payload 残留清零）；新增 `capture_body_test.go` 六用例 + `ring_bytebudget_test.go` 四用例；文档同步（proxy-architecture §11.1 漂移段落更正 + 核对行、PROJECT_MAP §4/§6 三条目 + 核对行、双 changelog、本文 §3.6/§3.9/F-06） | F-06 ✅ 已修复：单条 payload ≤256 KiB（截断信封）、在途流式捕获 ≤256 KiB、Ring 累计 ≤64 MiB；测试侧坑——截断信封经 JSON 转义后仍可能超额需幂等直通（否则 totalBytes 被中间长度污染）、`forwardWithRetry` 测试调用需显式传 bodyBytes（nil 时 ReqPayload 为空）；全量 `go test ./...` 绿 |
 | 15 | 2026-10-05 | F-08 修复（用户指定）：状态持久化分级——`state/manager.go` 新增 `ScheduleStatsWrite`/`flushStats`（`statsPending`/`statsTimer`/`statsDebounce=30s`，双定时器互不取消、同写全量快照，`FlushSync` 停双定时器+同步全量）；rotation `selector.go`/`nim.go` 与 combo `resolver.go` 新增 `SetStatsHook`（`onStatsChange`），四个统计态触发点（SelectKey 成功、RotateToBack、OnNIMRequestSuccess、rotateTargets）改调 stats 钩子，五个关键态触发点（MarkUnavailableWithOverride/ClearError/MarkNIM429/MarkDailyQuotaLocked/MarkBalanceLocked/MarkRateLimited）不动；`app.go` 组合根接线；新增 `state/manager_stats_test.go` 三用例 + `rotation/stateclass_test.go` 两用例 + `combo` 一用例；文档同步（本文 F-08/§3.5/头部轮次/§6、rotation-architecture §2/§9/§14/§15/核对行、config-registry-state-architecture 核对行、PROJECT_MAP §4/§11 + 核对行、双 changelog） | F-08 ✅ 已修复：稳态选 key 零磁盘写（30s 统计态窗口兜底），关键态 500ms 契约不变，统计态崩溃丢失窗口 ≤30s 且无正确性影响；不新增用户可见配置；全量 `go test ./...` 绿 |
+| 16 | 2026-10-05 | F-04 修复（用户指定）：`forward_retry.go` 重构——单次 attempt 抽为 `forwardAttempt`（参数收拢进 `attemptContext`，含 per-call `retryState` 与 inject/strip 标志），`EntryTracker.Remove`+`DecInFlight`+`InflightUpdates.Signal` 三件套改为函数内**单一 defer**（原循环内手写约 10 处 + marshal 失败分支漏 `DecInFlight`）；`forwardWithRetry` 契约改三态 `attemptResult{next: retry/stop/abort, written, terminal}`——queue 超限/sameKey 超限的 503 与 marshal 500 按 `written=true` 返回，调用方不再叠加 502 / combo 不再继续下一目标；key 耗尽以 `terminal=errNoKeysAvailable` 显式表达；冷却等待抽出 `attemptContext.selectKey`；`handleProxy`/`handleCombo` 零改动；新增 `internal/proxy/forward_finalization_test.go` 五用例（marshal 失败 in-flight 释放+不冷却+不再继续、sameKey 超限 written 契约、handleProxy 全耗尽单次 502、combo fallback 全败单次 502、queue 等待中取消静默退出）；文档同步（本文 F-04/§3.3/头部轮次/§6、proxy-architecture 正文四处+核对行、PROJECT_MAP §4 forward_retry 条目、changelog） | F-04 ✅ 已修复：收尾漏配对结构性消除（defer 全路径覆盖），三态返回契约消灭重复响应；测试侧坑——marshal 失败触发用 `math.NaN()`（`UnsupportedValueError`；孤代理 `\uD800` 会被 encoding/json 替换为 U+FFFD 不报错）、桥接 SameKeyRetryError 需实现完整 `RequestAugmenter`+`ResponseInterceptor` 双接口且 provider `APIType=jethub`；全量 proxy suite + `go test ./...` 绿 |

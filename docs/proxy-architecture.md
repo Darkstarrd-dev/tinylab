@@ -1,6 +1,6 @@
 # TinyLab Proxy 代理核心架构
 
-> **最后核对（2026-10-05，单行摘要）：** F-06 修复——内存观测数据三层限界：① `recorder.go::captureBody` 对超 256 KiB（`maxCapturedBodyBytes`）的 req/resp body 保留头部并包装为自描述截断信封（`marshalTruncatedBody`：`{"raw","truncated","truncatedBytes","totalBytes"}`；`isTruncationEnvelope` 幂等探测防流式预包装被二次截断），掩码先于截断；② 流式 `sseBuf` 由无界 `bytes.Buffer` 换成 `capture_buffer.go::cappedBodyBuffer`（头部 256 KiB + 真实总字节计数），流末超限即预包装——usage/token/签名逐行增量提取不受影响，客户端透传不截断；③ `usage/ring.go::RingBuffer` 增加字节预算（`NewWithByteBudget`/`DefaultRingByteBudget` 64 MiB，`evictOverBudgetLocked` 淘汰最旧并清零槽位，`Clear`/`Resize` 维护账目）。行为变更：Trace 开启时流式响应体超 256 KiB 部分不再落盘（捕获缓冲有界）；非流式 trace 仍完整。回归 `internal/proxy/capture_body_test.go` + `internal/usage/ring_bytebudget_test.go`。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-10-05，单行摘要）：** F-04 修复——重试循环收尾统一：`forward_retry.go` 拆为 `forwardWithRetry`（外层循环：取消检查 + 三态分发）→ `attemptContext`（per-call 参数 + 可变态）→ `forwardAttempt`（单次 attempt：`selectKey`（SonestCooldown ≤30s 等待抽出）→ IncInFlight → **defer 统一收尾 `EntryTracker.Remove`+`DecInFlight`+`InflightUpdates.Signal`**（原循环内手写约 10 处、marshal 失败分支漏 `DecInFlight` 的脆弱模式结构性消除）→ body 改写 → 上游调用 → 全部分支）；`forwardWithRetry`/`forwardAttempt` 契约改三态 `attemptResult{next: retry/stop/abort, written, terminal}`（`errNoKeysAvailable` 显式表达 key 耗尽）——queue 超限/sameKey 超限的 503 与 marshal 500 按 `written=true` 返回，**调用方不再叠加 502、combo fallback 不再继续下一目标**（修复重复 WriteHeader）；`handleProxy`/`handleCombo` 零改动。回归 `internal/proxy/forward_finalization_test.go` 五用例。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档…
 
 ## 1. 范围与结论
 
@@ -204,9 +204,9 @@ flowchart TD
 
 1. **入口与解析：** `ChatCompletions`（handler.go:156-158）调用 `handleProxy(w, r, "/v1/chat/completions")`；`handleProxy`（forward.go:14-91）先用 `http.MaxBytesReader` 限制请求体 32 MiB（forward.go:17），读全部 body 并 `json.Unmarshal`（forward.go:18-28），强制校验非空 `model`（forward.go:30-34），其余字段原则上透传。
 2. **模型解析分支：** 命中 combo 名 → `handleCombo`（forward.go:46-49）；命中 quickslot → 取 `qs.Models[qs.SelectedIndex]`（越界回退 0，forward.go:51-63）；否则 `util.SplitModel` 拆 `provider/model`，再 `GetProviderByPrefix` 解析为真实 provider ID（forward.go:65-77），然后 `ResolveModelAlias` 将 alias 解析为真实 model ID（forward.go:79-83）。
-3. **`forwardWithRetry` 循环（forward.go:130-276）：** 每次迭代 `SelectKey`（forward.go:141），标记 key in-flight（forward.go:148-151），写 request-start 事件（forward.go:186-208），调用 `forwardUpstream`（forward.go:211）。根据返回分流：网络错误 → `handleNetworkError` → `continue`（forward.go:213-223）；429 → `handle429` → `continue`（forward.go:225-233）；`>=400` → `handleUpstreamError` → `continue`（forward.go:235-243）；2xx → `ClearError`、更新 quota、NIM 成功计数，然后按 `isStream` 进入 `streamResponse` 或 `passThroughResponse` 并返回 `true`（forward.go:245-274）。
+3. **`forwardWithRetry` 循环（forward_retry.go）：** 每次迭代调用 `forwardAttempt`（F-04，第 16 轮：单次 attempt 独立函数，`attemptContext` 携带 per-call 参数与 `retryState`/inject-strip 可变态）：`attemptContext.selectKey` 选 key（含 SonestCooldown ≤30s 冷却等待）→ 标记 key in-flight → **defer 统一收尾**（`EntryTracker.Remove`+`DecInFlight`+`InflightUpdates.Signal`，全退出路径覆盖）→ 写 request-start 事件 → `forwardUpstream`。按结果分流：网络错误 → `handleNetworkError` → `outcomeRetry`；429 → `handle429` → `outcomeRetry`；`>=400` → `handleUpstreamError`（pass-through 时 `written=true` 停止，否则 `outcomeRetry`）；2xx → `ClearError`、更新 quota、NIM 成功计数，然后按 `isStream` 进入 `streamResponse` 或 `passThroughResponse` 并 `written=true` 停止。
 4. **流式 vs 非流式：** 流式走 `streamResponse`（stream.go:138-307）逐块转发并 flush；非流式走 `passThroughResponse`（stream.go:309-341）整段读取后写出。
-5. **重试循环：** 循环在 `forwardWithRetry` 顶层的 `for {}`（forward.go:140）中持续，直到成功返回或所有 key 耗尽（`excludeKeyIDs` 覆盖全部可用 key 后 `SelectKey` 报错，forward.go:141-145）。
+5. **重试循环与三态契约：** 循环在 `forwardWithRetry` 顶层的 `for {}` 中持续，直到成功返回或所有 key 耗尽（`excludeKeyIDs` 覆盖全部可用 key 后 `SelectKey` 报错）。`forwardAttempt` 返回三态 `attemptResult{next, written, terminal}`（F-04，第 16 轮）：`outcomeRetry`（清理完毕选下一 key）/ `outcomeStop`（停止；`written=true` 表示响应已提交——2xx、上游 4xx pass-through、循环自写的 500 marshal / 503 queue 超限 / 503 sameKey 超限；调用方不得叠加 502）/ `outcomeAbort`（客户端取消静默退出）。`forwardWithRetry` 对外返回契约：`(true, reqID)`=已写响应、`(false, "")`=取消静默、`(false, reqID)`=key 耗尽（terminal=`errNoKeysAvailable`，循环已 `recordNoKeyFailure`）。
 
 ## 6. 模型解析
 
@@ -290,7 +290,7 @@ flowchart TD
 
    关键约束：**Anthropic 分支不设置 `Authorization` 头**（upstream.go:91-94 条件分支 + 仅 `setAnthropicHeaders` 在构造上游请求时调用），避免把 anthropic key 误放进 `Authorization` 字段。
 
-### 7.4 Body 改写（在 forwardWithRetry 内，forward.go:130-179）
+### 7.4 Body 改写（在 forwardWithRetry 的 forwardAttempt 内，forward_retry.go）
 
 在每次 `forwardUpstream` 之前、选定 key 之后改写 `parsed` map 并重新 `json.Marshal`：
 
@@ -427,7 +427,7 @@ type retryState struct {
 
 ### 9.2 三个错误处理器
 
-- **handleNetworkError（retry.go:61-70）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。**例外（F-01）：** 客户端取消（`context.Canceled`）不进本处理器——`forwardWithRetry` 在循环顶部与上游错误分支最前先判 `r.Context().Err()`，命中即清理三件套后静默返回；`handleCombo` 三策略的目标间/502 写出前与 `handleProxy` 的 502 写出前同样以 ctx 检查短路（回归 `forward_cancel_test.go`）。
+- **handleNetworkError（retry.go）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。**例外（F-01）：** 客户端取消（`context.Canceled`）不进本处理器——`forwardWithRetry` 在循环顶部与上游错误分支最前先判 `r.Context().Err()`，命中即 `outcomeAbort` 静默返回（in-flight/entry 清理由 `forwardAttempt` 的 defer 统一执行，F-04）；`handleCombo` 三策略的目标间/502 写出前与 `handleProxy` 的 502 写出前同样以 ctx 检查短路（回归 `forward_cancel_test.go`）。
 - **handle429（retry.go:73-258）：** 区分多类 429：
   - **NIM 429：** `MarkNIM429` + 冷却阶梯 + 排除当前 key + 切 key（retry.go:82-91）。
   - **配额头（adapter）：** 解析 `ParseHeaders` 更新 quota；`ModelExhausted` → `MarkDailyQuotaLocked` 并排除（retry.go:94-121）。
