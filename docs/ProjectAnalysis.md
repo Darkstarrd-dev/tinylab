@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 12 轮（F-02 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 13 轮（F-03 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -83,7 +83,7 @@
 | A4 | P1 | **流式路径资源生命周期**：`stream.go` 读循环、断开检测、`[DONE]` 强关、`responses_translate.go` 同构路径 | ✅ 第 4 轮完成（§3.6），F-06 升级为 ✅，Q5 部分结案 |
 | A5 | P1 | **Combo 解析与重试的交互**：combo 多目标 × 每目标多 key × 冷却等待 30s 的最坏耗时；round-robin 不 fallback 是否有意（F-07） | ✅ 第 5 轮完成（§3.7），F-07 结案，Q3 定量结案 |
 | A6 | P1 | **旁路调用识别**：哪些模块不走 `/v1/*` 主干直接打上游 | ✅ 第 6 轮完成（§3.8），Q1/Q7 结案，F-05 部分定论 |
-| A7 | P1 | **上游 HTTP 客户端配置**：Transport 连接池/超时/代理环境变量的实际行为（F-02、F-03 的影响量化） | ✅ 第 6 轮完成（§3.8），F-03 修正 |
+| A7 | P1 | **上游 HTTP 客户端配置**：Transport 连接池/超时/代理环境变量的实际行为（F-02、F-03 的影响量化） | ✅ 第 6 轮完成（§3.8）；F-03 已于第 13 轮修复 |
 | B1 | P1 | **调度衍生的可观测性数据流**：一次请求会写入哪些地方（Console / Ring / pgRing / EntryTracker / Trace / SSE 广播），各自容量与清理；F-06 核实 | ✅ 第 7 轮完成（§3.9），F-06 完全结案，Q5 完全结案 |
 | B2 | P2 | **Trace 落盘**：写放大、`attemptCounter` 等内存表的增长、sweep 正确性、磁盘满/损坏行为 | ✅ 第 8 轮完成（§3.10），新增 F-10/F-11 |
 | B3 | P2 | **EntryTracker / Broadcaster**：慢订阅者、订阅泄漏、`SweepStale` 兜底语义 | ✅ 第 9 轮完成（§3.11），范围①②全部完成 |
@@ -160,15 +160,17 @@ flowchart TD
 | 流式回传 | `stream.go:43-154` | `Inflight.Register`（defer 注销）→ 写 200 → 清除写 deadline → 250ms ticker goroutine（`defer close(done)` 正确停止）→ `[DONE]` 后 500ms `AfterFunc` 关上游 body |
 | 上下文传播 | `forward_retry.go:237`、`upstream.go:121/205/212` | 上游请求使用客户端 `r.Context()`：**客户端断开 → 上游请求被取消**（Q4 前半部分答案） |
 
-**HTTP 客户端配置（✅ `handler.go:109-127`）：**
+**HTTP 客户端配置（✅ `handler.go::New` + `newUpstreamTransport`，F-03 修复后，第 13 轮）：**
 
 | 客户端 | Transport | 总超时 | 用途 |
 |---|---|---|---|
-| `client` | `nil` → `http.DefaultTransport` | `upstreamTimeoutSec`（默认 300s，按需克隆） | 非流式直连 |
-| `streamClient` | `nil` → `http.DefaultTransport` | 无 `Timeout`；**首字节/空闲超时由 `doStream` 按 provider 施加（F-02 修复，第 12 轮）** | 流式直连 |
-| `proxyClient` | 零值 `http.Transport{Proxy: …}` | 同上 300s | 非流式走代理 |
-| `proxyStream` | 同上 | 同上（`doStream` TTFB/idle） | 流式走代理 |
-| `mgmtClient` / `mgmtProxyClient` | 默认 / 代理 | 15s | probe / 测速 |
+| `client` | directTransport（专属共享池，`Proxy=nil`） | `upstreamTimeoutSec`（默认 300s，按需克隆） | 非流式直连 |
+| `streamClient` | 同上共享 | 无 `Timeout`；**首字节/空闲超时由 `doStream` 按 provider 施加（F-02 修复，第 12 轮）** | 流式直连 |
+| `proxyClient` | proxyTransport（专属共享池，仅显式代理） | 同上 300s | 非流式走代理 |
+| `proxyStream` | 同上共享 | 同上（`doStream` TTFB/idle） | 流式走代理 |
+| `mgmtClient` / `mgmtProxyClient` | direct / proxy 共享池 | 15s | probe / 测速 |
+
+两个专属 Transport 均克隆自 `http.DefaultTransport`（继承 30s 拨号 / 10s TLS 握手 / 90s 空闲超时 / HTTP/2），池化上调为 `MaxIdleConns=256` / `MaxIdleConnsPerHost=32`（F-03 ①③）；direct 的 `Proxy=nil` 使 `UseProxy=false` 不再受进程 `HTTP(S)_PROXY` 影响（F-03 ②），主干不再与 `http.DefaultClient` 用户共享池。
 
 ### 3.4 重试 / 故障转移状态机（✅ 第 2 轮核实）
 
@@ -348,11 +350,11 @@ augmenter 直接改 `r.Header`——安全性完全依赖"每个 augmenter 记�
 "约定脆弱"。
 
 **A7 客户端配置补充核实（✅ `upstream.go:54-71`）：**
-- `UseProxy=true` 且配置了 proxyURL 才用 proxyClient/proxyStream；**UseProxy=false 时
-  语义正确**——因为 direct 客户端用默认 Transport 的 `ProxyFromEnvironment`，环境变量
-  仍生效，但 UI 语义（"走/不走代理"开关）指的显式代理，F-03 第②点维持：进程继承
-  `HTTPS_PROXY` 时"直连"仍走环境代理。
-- `clientFor` 按需克隆注入 `Timeout`（非流式）；流式无超时（F-02 维持）。
+- `UseProxy=true` 且配置了 proxyURL 才用 proxyClient/proxyStream；**UseProxy=false 的
+  "直连"语义已于第 13 轮修正（F-03）**——direct Transport `Proxy=nil`，进程继承
+  `HTTP(S)_PROXY` 不再影响直连，与 UI"走/不走代理"开关语义一致。
+- `clientFor` 按需克隆注入 `Timeout`（非流式）；流式无 `Timeout`（F-02 已由 `doStream`
+  施加首字节/空闲超时）。
 
 ### 3.9 可观测性数据流（✅ 第 7 轮核实）
 
@@ -468,10 +470,10 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-03 🟠 上游连接池使用默认值，且"直连"实际受环境代理变量影响
 
 - **维度：** 运行时 / 性能
-- **状态：** ✅ 配置已核实 · ⚠️ 影响待量化（A7）
-- **证据：** `client`/`streamClient` 使用 `http.DefaultTransport`（`handler.go:109-114`）：`MaxIdleConnsPerHost` 默认 2，`Proxy: ProxyFromEnvironment`；`proxyTransport` 为零值 Transport（`handler.go:118`），`IdleConnTimeout=0`（空闲连接永不过期）、`MaxIdleConnsPerHost` 同样为 2。
-- **影响：** ① 同一上游并发 >2 时，多余连接用完即关，下次重新 TCP+TLS 握手，增加 TTFT；② `UseProxy=false` 的 provider 若进程继承了 `HTTPS_PROXY`（终端启动时常见），实际仍走代理，与 UI 语义不符；③ DefaultTransport 与进程内其他使用 `http.DefaultClient` 的代码共享连接池。
-- **方向：** 为代理主干定义专属 Transport（显式连接池上限、空闲超时、握手超时、明确的代理策略）。
+- **状态：** ✅ **已修复（2026-10-05，第 13 轮）**——主干双专属 Transport：direct `Proxy=nil` 真直连、proxy 仅认显式设置；池化 256/32 + 30s 拨号/10s TLS/90s 空闲超时。回归 `internal/proxy/upstream_transport_test.go`（专属池/共享关系/超时常量 + 环境代理忽略契约两用例，全量 proxy suite 绿）
+- **证据（修复前）：** `client`/`streamClient` 使用 `http.DefaultTransport`（`handler.go:109-114`）：`MaxIdleConnsPerHost` 默认 2，`Proxy: ProxyFromEnvironment`；`proxyTransport` 为零值 Transport（`handler.go:118`），`IdleConnTimeout=0`（空闲连接永不过期）、`MaxIdleConnsPerHost` 同样为 2。
+- **影响（修复前）：** ① 同一上游并发 >2 时，多余连接用完即关，下次重新 TCP+TLS 握手，增加 TTFT；② `UseProxy=false` 的 provider 若进程继承了 `HTTPS_PROXY`（终端启动时常见），实际仍走代理，与 UI 语义不符；③ DefaultTransport 与进程内其他使用 `http.DefaultClient` 的代码共享连接池。
+- **修复实现（第 13 轮）：** ① `handler.go::New` 改用 `newUpstreamTransport`（`http.DefaultTransport.(*http.Transport).Clone()`，继承 30s 拨号 / 10s TLS 握手 / 90s 空闲超时 / `ForceAttemptHTTP2`）构造两个专属 Transport：directTransport `Proxy=nil`（`UseProxy=false` 真直连，环境代理变量不再被咨询）、proxyTransport 仅从 `SetProxy` 的原子 `proxyURL` 取显式代理；② 池化上调 `MaxIdleConns=256` / `MaxIdleConnsPerHost=32`（常量 `upstreamMaxIdleConns`/`upstreamMaxIdleConnsPerHost`）；③ 六个 client 按两侧共享池（client+streamClient+mgmtClient 共享 direct；proxyClient+proxyStream+mgmtProxyClient 共享 proxy），主干不再与 `http.DefaultClient` 用户共享；④ 零值 proxyTransport 的三项缺失（拨号/TLS 握手/空闲超时）由 Clone 继承补齐。**行为变更：** 依赖"不设 UseProxy、靠环境变量走代理"的隐式用法失效，需在 Settings 显式配置代理。**测试侧说明：** `ProxyFromEnvironment` 对 loopback 豁免且结果按进程缓存，故回归断言 Transport 字段契约（`Proxy==nil` / proxy func 解析值）而非端到端拨号。
 
 ### F-04 🟢 重试循环的收尾逻辑手工配对，已发现一处遗漏
 
@@ -583,3 +585,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 10 | 2026-10-05 | §4.1 文档维护债处理（用户指定）：三文件流水剥离至 `docs/changelog/`、AGENTS.md 流程修正（核对行替换式）、PROJECT_MAP 结构修整（重排/解撞/合并重复节）、12 块并行保守压实 | §4.1 结案（✅）：457/159/306 KB → 306/99/152 KB；token 集合零丢失、标题字节一致、锚点抽查 37 处零真实失效；新规则写入 AGENTS.md「最后核对行维护规则」 |
 | 11 | 2026-10-05 | F-01 修复（用户指定）：`forward_retry.go` 循环顶部 + 上游错误分支最前、`forward_combo.go` 三策略目标间/502 前、`forward_request.go` 502 前共四处 `r.Context().Err()` 短路；新增 `internal/proxy/forward_cancel_test.go` 双用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 三条目） | F-01 ✅ 已修复：取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 key）；对照组证明真实网络错误仍冷却；全量 proxy suite 绿 |
 | 12 | 2026-10-05 | F-02 修复（用户指定）：新增 `internal/proxy/stream_timeout.go`（`doStream` 首字节超时 120s 默认 → 网络错误分支切 key；`idleTimeoutBody` 空闲超时 300s 默认 → `StreamIdleTimeoutError` 中止流记 error 不冷却 key）；`config.Provider` 新增 `StreamTTFBTimeoutSec`/`StreamIdleTimeoutSec`（nil=默认、≤0=禁用）+ UpdateProvider 合并 + ProviderDTO；`stream.go`/`responses_translate.go` 读循环 errors.As 识别；新增 `internal/proxy/stream_timeout_test.go` 三用例 | F-02 ✅ 已修复：悬挂上游首字节超时触发故障转移、半开流空闲超时释放 goroutine/连接；proxy+config+registry+api 全量套件绿 |
+| 13 | 2026-10-05 | F-03 修复（用户指定）：`handler.go::New` 改用 `newUpstreamTransport`（克隆 `http.DefaultTransport`）构造双专属 Transport——direct `Proxy=nil` 真直连（不再响应 `HTTP(S)_PROXY`）、proxy 仅认 `SetProxy` 显式设置；池化 `MaxIdleConns=256`/`MaxIdleConnsPerHost=32`（原默认 2）+ 继承 30s 拨号/10s TLS/90s 空闲超时（原零值 proxyTransport 皆无）；六 client 两侧共享池，不再共享 `http.DefaultTransport`；新增 `internal/proxy/upstream_transport_test.go` 两用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 + 本文 §3.3/§3.8） | F-03 ✅ 已修复：连接池专属化、零值 proxyTransport 超时补齐、"直连"与环境代理脱钩；全量 proxy suite + `go build`/`go vet` 绿 |

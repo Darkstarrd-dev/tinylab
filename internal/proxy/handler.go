@@ -106,26 +106,48 @@ func New(reg ModelResolver, selector KeyProvider, comboRes ComboResolver, usageB
 		EntryTracker:    NewEntryTracker(),
 		hardLimit:       NewHardLimiter(),
 		sigCache:        NewSignatureCache(),
-		client: &http.Client{
-			Timeout: upstreamTimeout,
-		},
-		// 流式请求由 r.Context() 控制连接生命周期（1.5 已传播 context），
-		// 不设 Timeout 以避免 300s 后强制中断长 SSE 流（P3.13）。
-		streamClient: &http.Client{},
 	}
 	h.upstreamTimeoutSec.Store(int64(upstreamTimeoutSec))
 	h.proxyURL.Store((*url.URL)(nil))
-	proxyTransport := &http.Transport{
-		Proxy: func(*http.Request) (*url.URL, error) {
-			u, _ := h.proxyURL.Load().(*url.URL)
-			return u, nil
-		},
-	}
+	// F-03：代理主干用专属 Transport，不再共享/回退 http.DefaultTransport。
+	// directTransport.Proxy=nil —— UseProxy=false 的"直连"是真直连，不响应
+	// 进程继承的 HTTP(S)_PROXY 环境变量；proxyTransport 只认设置里的显式代理。
+	directTransport := newUpstreamTransport(nil)
+	proxyTransport := newUpstreamTransport(func(*http.Request) (*url.URL, error) {
+		u, _ := h.proxyURL.Load().(*url.URL)
+		return u, nil
+	})
+	h.client = &http.Client{Transport: directTransport, Timeout: upstreamTimeout}
+	// 流式请求由 r.Context() 控制连接生命周期（1.5 已传播 context），
+	// 不设 Timeout 以避免 300s 后强制中断长 SSE 流（P3.13）。
+	h.streamClient = &http.Client{Transport: directTransport}
 	h.proxyClient = &http.Client{Transport: proxyTransport, Timeout: upstreamTimeout}
 	h.proxyStream = &http.Client{Transport: proxyTransport}
-	h.mgmtClient = &http.Client{Timeout: 15 * time.Second}
+	h.mgmtClient = &http.Client{Transport: directTransport, Timeout: 15 * time.Second}
 	h.mgmtProxyClient = &http.Client{Transport: proxyTransport, Timeout: 15 * time.Second}
 	return h
+}
+
+// 主干上游连接池调参（F-03）：默认值 2 的 MaxIdleConnsPerHost 在同一上游并发
+// >2（Playground 群聊/图片批量/Assistant 回环叠加）时让多余连接用完即关、下次
+// 重新 TCP+TLS 握手，直接抬高 TTFT。
+const (
+	upstreamMaxIdleConns        = 256
+	upstreamMaxIdleConnsPerHost = 32
+)
+
+// newUpstreamTransport builds a dedicated Transport for the proxy main line by
+// cloning http.DefaultTransport (inheriting its dial/TLS-handshake/idle timeouts
+// and HTTP/2 support) and overriding the proxy policy and idle-pool sizing.
+// proxy == nil means truly direct: environment HTTP(S)_PROXY variables are NOT
+// honored. Unlike the former zero-value proxyTransport, the result always has a
+// dial timeout (30s), TLS handshake timeout (10s) and idle-conn timeout (90s).
+func newUpstreamTransport(proxy func(*http.Request) (*url.URL, error)) *http.Transport {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = proxy
+	tr.MaxIdleConns = upstreamMaxIdleConns
+	tr.MaxIdleConnsPerHost = upstreamMaxIdleConnsPerHost
+	return tr
 }
 
 // ManagementClient returns the HTTP client for management probes (model import,
