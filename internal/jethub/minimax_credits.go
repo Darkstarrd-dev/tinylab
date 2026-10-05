@@ -360,9 +360,6 @@ func (m *Manager) minimaxAugment(r *http.Request, body []byte, providerID, keyID
 	if err != nil {
 		return nil, err
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range MinimaxInferHeaders(cred) {
 		r.Header.Set(k, v)
 	}

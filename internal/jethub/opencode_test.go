@@ -261,18 +261,13 @@ func TestOpencodeAugmentHeadersReplaceClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "https://tinylab.local/v1/chat/completions", nil)
-	req.Header.Set("Authorization", "Bearer evil-client-key")
-	req.Header.Set("X-Client-Marker", "leak")
 
 	out, err := m.opencodeAugment(req, []byte(`{"model":"big-pickle","messages":[]}`), "jethub-opencode", id, "big-pickle")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer sk-test-9999" {
-		t.Fatalf("Authorization = %q (client header must be replaced)", got)
-	}
-	if req.Header.Get("X-Client-Marker") != "" {
-		t.Fatal("client headers must not leak into the outbound set")
+		t.Fatalf("Authorization = %q", got)
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(req.Header.Get("x-opencode-project")) {
 		t.Fatalf("x-opencode-project shape wrong: %q", req.Header.Get("x-opencode-project"))

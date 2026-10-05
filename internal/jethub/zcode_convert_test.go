@@ -217,15 +217,10 @@ func TestZcodeAugmentReplacesHeadersAndBody(t *testing.T) {
 	m := newSeedZcodeManager(t)
 	accountID := firstZcodeAccount(t, m)
 	req, _ := http.NewRequest(http.MethodPost, "https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages", nil)
-	req.Header.Set("Authorization", "Bearer client-key")
-	req.Header.Set("X-Junk", "1")
 	body := `{"model":"GLM-5.3","messages":[{"role":"user","content":"hi"}]}`
 	out, err := m.zcodeAugment(req, []byte(body), "jethub-zcode", accountID, "GLM-5.3")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if req.Header.Get("X-Junk") != "" {
-		t.Fatal("client headers must be replaced wholesale")
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer zcode-jwt-1" {
 		t.Fatalf("Authorization = %q", got)

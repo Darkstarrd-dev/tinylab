@@ -44,9 +44,6 @@ func (m *Manager) opencodeAugment(r *http.Request, body []byte, providerID, keyI
 	if err != nil {
 		return nil, err
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range opencodeHeaders(projectID, opencodeSessionIDFor(keyID), newOpencodeRequestID()) {
 		r.Header.Set(k, v)
 	}

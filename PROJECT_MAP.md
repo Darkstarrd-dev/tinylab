@@ -2,7 +2,7 @@
 
 > **项目入口文档。** 此文件是 TinyLab 的"活地图"：项目启动 / 接手 / 评审时首先读取此文件以了解模块分布与文件归属。
 >
-> **最后核对（2026-10-05，F-04 重试循环收尾统一）：** `internal/proxy/forward_retry.go` 重构（审计 F-04 修复，第 16 轮）：单次 attempt 抽为 `forwardAttempt`（参数收拢 `attemptContext`；冷却等待 `SonestCooldown` ≤30s 抽出 `selectKey`），收尾三件套 `EntryTracker.Remove`+`DecInFlight`+`InflightUpdates.Signal` 改函数内**单一 defer**（原循环内手写约 10 处 + marshal 失败分支漏 `DecInFlight` 的脆弱模式结构性消除）；`forwardWithRetry`/`forwardAttempt` 契约改三态 `attemptResult{next: retry/stop/abort, written, terminal}`（`errNoKeysAvailable` 显式表达 key 耗尽）——queue 超限/sameKey 超限的 503 与 marshal 500 按 `written=true` 返回，**调用方不再叠加 502、combo fallback 不再继续下一目标**（修复重复 WriteHeader）；`handleProxy`/`handleCombo` 零改动；§7 `forward_retry.go` 条目同步更新。回归 `internal/proxy/forward_finalization_test.go` 五用例，全量 `go test ./...` 绿。过程叙述见 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-10-05，F-05 桥接出站头空白基底）：** `internal/proxy/upstream.go` 桥接分支（审计 F-05 修复，第 17 轮）：每次 attempt 构造桥接请求（`clientReq.WithContext` 浅拷贝 + `Header` 空白 map + 回播 `RetryDropHeaderMarker`/`X-TinyLab-WebHub-Turn` 两 loopback 标记；新常量 `webhubTurnHeaderName`），Augment/Customize/InterceptResponse/无端点分支传桥接请求，出站头 = augmenter 写入快照——客户端头结构性进不了桥接上游；`isHopByHopHeader` 删除；`internal/jethub` 12 处 `Header.Del` 全删循环移除、5 处旧契约测试断言更新；新增 `internal/proxy/bridge_headers_test.go` 四用例；契约注释同步（interfaces.go、webhub/customize.go）。上轮：F-04 重试循环收尾统一（forward_retry.go 三态契约，见 changelog）。
 >
 > **同步约束（必须遵守）：** 项目推进过程中，凡涉及以下变更，必须**同一次改动中同步更新本文件**对应条目，使本文件始终代表项目的真实结构：
 > - 新增 / 删除 / 重命名 任意源码文件或目录

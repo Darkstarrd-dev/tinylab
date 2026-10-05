@@ -133,13 +133,16 @@ type UsageRecorder interface {
 // forwarding. The proxy never imports the augmenter's package — it only knows
 // this interface and the APIType=="jethub" marker.
 type RequestAugmenter interface {
-	// Augment may replace headers of the outbound request (mutations to r's
-	// header become the outbound header base) and returns the (possibly
-	// rewritten) body. providerID is config.Provider.ID (e.g.
-	// jethub-codearts); keyID locates the concrete account credential;
-	// upstreamModel is the resolved model id from the request body. Returning
-	// an error fails this forwarding attempt (counted like a network error by
-	// the retry loop).
+	// Augment may set headers of the outbound request and returns the
+	// (possibly rewritten) body. r is a per-attempt bridge request: same URL
+	// and Context as the client request, but a BLANK header map (F-05) —
+	// writes to r.Header ARE the outbound header set, and client-supplied
+	// headers cannot leak upstream by construction. Only the loopback
+	// markers (RetryDropHeaderMarker, the webhub turn header) are pre-seeded.
+	// providerID is config.Provider.ID (e.g. jethub-codearts); keyID locates
+	// the concrete account credential; upstreamModel is the resolved model id
+	// from the request body. Returning an error fails this forwarding attempt
+	// (counted like a network error by the retry loop).
 	Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error)
 }
 
@@ -161,7 +164,7 @@ type QuotaTracker interface {
 type RequestCustomizer interface {
 	// Customize returns the full outbound URL ("" = default) and the possibly
 	// rewritten body. Header mutations follow the Augment contract: mutations
-	// on r's header become the outbound header base.
+	// on r's header become the outbound header set (r starts blank, F-05).
 	Customize(r *http.Request, body []byte, providerID, keyID, upstreamModel string) (outURL string, outBody []byte, err error)
 }
 

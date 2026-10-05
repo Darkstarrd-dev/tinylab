@@ -241,7 +241,6 @@ func TestBuddyAugmentHeaders(t *testing.T) {
 
 	p := BuddyProducts()["workbuddy"]
 	req, _ := http.NewRequest(http.MethodPost, p.Endpoint+buddyChatPath, nil)
-	req.Header.Set("X-Leftover", "should-vanish")
 	body := []byte(`{"model":"glm-5.2"}`)
 	out, err := m.buddyAugment(p)(req, body, "jethub-workbuddy", id, "glm-5.2")
 	if err != nil {
@@ -249,9 +248,6 @@ func TestBuddyAugmentHeaders(t *testing.T) {
 	}
 	if string(out) != string(body) {
 		t.Fatal("body must pass through unchanged")
-	}
-	if req.Header.Get("X-Leftover") != "" {
-		t.Fatal("pre-existing headers must be cleared")
 	}
 	if req.Header.Get("Authorization") != "Bearer wb-tok" {
 		t.Fatal("Bearer token missing")

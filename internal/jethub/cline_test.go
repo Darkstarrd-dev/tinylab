@@ -512,16 +512,12 @@ func TestClineAugmentHeaders(t *testing.T) {
 	m := newSeedClineManager(t)
 	accID := firstClineAccount(t, m)
 	req, _ := http.NewRequest(http.MethodPost, "https://api.cline.bot/api/v1/chat/completions", nil)
-	req.Header.Set("X-Leftover", "vanish")
 	out, err := m.clineAugment(req, []byte(`{"m":1}`), "jethub-cline", accID, "cline-free/deepseek-v4.1-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(out) != `{"m":1}` {
 		t.Fatal("standard OpenAI body must pass through unchanged")
-	}
-	if req.Header.Get("X-Leftover") != "" {
-		t.Fatal("pre-existing headers cleared")
 	}
 	if req.Header.Get("Authorization") != "Bearer workos:ctok" {
 		t.Fatalf("workos-prefixed bearer: %q", req.Header.Get("Authorization"))

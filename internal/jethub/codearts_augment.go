@@ -106,9 +106,6 @@ func (m *Manager) codeartsAugment(r *http.Request, body []byte, providerID, keyI
 	}
 	// Replace the outbound header set with the signed headers (they ARE the
 	// request identity for Huawei APIG) + attribution headers.
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	ApplySignedHeaders(r.Header.Set, signed)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Chat-Id", chatSessionID(keyID))

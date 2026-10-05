@@ -25,9 +25,6 @@ func (m *Manager) buddyAugment(p *BuddyProduct) RequestAugmenterFunc {
 			return nil, errCredentialMissing(keyID)
 		}
 		// Full header reset: the signed/attribution set IS the request identity.
-		for k := range r.Header {
-			r.Header.Del(k)
-		}
 		r.Header.Set("Authorization", "Bearer "+cred.AccessToken)
 		r.Header.Set("Content-Type", "application/json")
 		// X-Domain: product config wins (credential.domain is a login-time

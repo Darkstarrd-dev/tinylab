@@ -1,5 +1,10 @@
 # PROJECT_MAP.md — 核对流水归档
 
+## 2026-10-05 — F-05 桥接出站头空白基底（第 17 轮）
+
+- `internal/proxy/upstream.go` 桥接分支重构（桥接请求 + 空白 Header 基底 + `webhubTurnHeaderName` 常量；`isHopByHopHeader` 删除）；`internal/jethub` 12 处全删循环移除、5 处测试断言更新；新增 `internal/proxy/bridge_headers_test.go`。
+- 上一轮（F-04，第 16 轮）：`forward_retry.go` 收尾统一，见此前条目。
+
 > 本文件是 `PROJECT_MAP.md` 顶部「最后核对」流水的冷归档（2026-10-05 剥离）。内容为历史变更记录，项目事实以正文当前态为准；日常阅读与 AI 加载无需读取本文件。新变更的过程叙述按时间序**追加到本文件顶部**（最新在上）。
 
 > **最后核对（2026-10-05，F-08 状态持久化分级双去抖）：** `internal/state/manager.go` 新增统计态第二去抖通道——`DefaultStatsDebounce`（30s）+ `statsPending`/`statsTimer` + `ScheduleStatsWrite`/`flushStats`，与关键态 `ScheduleWrite`/`flushNow`（500ms）互不取消、任一触发经 `writeMu` 串行写同一份全量快照（快照格式与恢复语义零变更）；`FlushSync` 同时停双定时器并同步全量（关闭时统计态丢失窗口 ≤30s）。触发点分级：关键态六处锁/退避/配额锁写入不变（`MarkUnavailableWithOverride`/`ClearError`/`MarkNIM429`/`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkRateLimited`）；统计态四处改走 30s 通道——`SelectKey` 成功（`LastUsedAt`/`ConsecCount`）、`RotateToBack`（failover 队列）、`OnNIMRequestSuccess`（NIM 计数）、combo `rotateTargets`（粘性索引），经 rotation/combo 新增的 `SetStatsHook`（`onStatsChange`，nil-safe）+ `app.go` 组合根接线。效果：稳态高 QPS 选 key 不再每 500ms 全量写 state.yaml。回归 `internal/state/manager_stats_test.go` 三用例 + `internal/rotation/stateclass_test.go` 两用例 + combo `TestRotateTargets_StatsHookNotCriticalHook`，全量 `go test ./...` 绿（55 包 ok）。同步 §4 rotation/state 条目与 §24 新增行；机制细节见 `docs/changelog/rotation-architecture.md` 与 `docs/changelog/config-registry-state-architecture.md` 同日条目，审计结论见 `docs/ProjectAnalysis.md` F-08。

@@ -323,9 +323,6 @@ func (m *Manager) raccoonAugment(r *http.Request, body []byte, providerID, keyID
 			}
 		}
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	_ = cred
 	// raccoonHeaders: Bearer + X-Org-Code + language/platform.
 	req2 := *r

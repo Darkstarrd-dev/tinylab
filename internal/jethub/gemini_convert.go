@@ -41,9 +41,6 @@ func (m *Manager) geminiAugment(r *http.Request, body []byte, providerID, keyID,
 		}
 		// 续期失败不阻塞：让请求发出去，401 由响应侧分类（ref 同口径）。
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range geminiIdentityHeaders() {
 		r.Header.Set(k, v)
 	}

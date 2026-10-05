@@ -234,9 +234,6 @@ func (m *Manager) loomyAugment(r *http.Request, body []byte, providerID, keyID, 
 	if err != nil {
 		return nil, err
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range loomyChatHeaders(cred.AccessToken) {
 		r.Header.Set(k, v)
 	}

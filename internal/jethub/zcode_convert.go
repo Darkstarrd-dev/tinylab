@@ -35,9 +35,6 @@ func (m *Manager) zcodeAugment(r *http.Request, body []byte, providerID, keyID, 
 	if err != nil {
 		return nil, err
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range zcodeHeaders(cred, true, nil) {
 		r.Header.Set(k, v)
 	}

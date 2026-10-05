@@ -27,9 +27,6 @@ func (m *Manager) lobsteraiAugment(r *http.Request, body []byte, providerID, key
 	}
 	// Full header reset: the four-header + capability set IS the identity
 	// (X-Domain/X-Product family would mis-attribute).
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range lobsteraiChatHeaders(&cred, lobsteraiProduct.ClientVersion) {
 		r.Header.Set(k, v)
 	}

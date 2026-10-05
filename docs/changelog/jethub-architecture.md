@@ -1,5 +1,12 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-05 — F-05 桥接出站头空白基底（proxy §7.1a 契约变更）
+
+- proxy 侧契约变更落点见 `docs/changelog/proxy-architecture.md` 同日条目；对 jethub 的影响：`Augment`/`Customize` 收到的 `r.Header` 为空白基底，写入即出站集合。
+- 移除 12 处 augmenter `for k := range r.Header { Del(k) }` 全删循环（buddy/cline/codearts/gemini_convert/lobsterai/loomy/minimax/opencode/qoder_adapter/raccoon/trae/zcode）。
+- 更新 5 处旧契约测试断言（buddy_test X-Leftover、cline_test X-Leftover、zcode_convert_test X-Junk、opencode_test evil-client、qoder_adapter_test X-Client-Noise）——wholesale-replacement 保证已上移 proxy 框架层，由 `proxy/bridge_headers_test.go` 承接。
+- jethub 套件全绿（57s）。
+
 > 本文件存放 `docs/jethub-architecture.md` 顶部「最后核对」行的历史流水与变更过程叙述（最新在上）。正文只保留当前态事实。
 
 ## 2026-10-05 · 账号卡片信息全量对齐（R4-0，P0–P2）+ 删除 ZCode 本机凭据路径（R4-1）

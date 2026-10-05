@@ -451,9 +451,6 @@ func (m *Manager) clineAugment(r *http.Request, body []byte, providerID, keyID, 
 	if cred.AccessToken == "" {
 		return nil, errCredentialMissing(keyID)
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range clineHeaders(&cred, false) {
 		r.Header.Set(k, v)
 	}

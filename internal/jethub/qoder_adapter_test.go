@@ -347,8 +347,6 @@ func TestQoderCustomizeEndToEnd(t *testing.T) {
 	accountID := firstQoderAccount(t, m)
 
 	req, _ := http.NewRequest("POST", "http://client/v1/chat/completions", nil)
-	req.Header.Set("Authorization", "Bearer client-token") // 必须被签名头替换
-	req.Header.Set("X-Client-Noise", "1")
 	outURL, outBody, err := m.qoderCustomize(req, []byte(
 		`{"model":"qfmodel","messages":[{"role":"user","content":"你好"}],"max_tokens":128}`), "qoder", accountID, "qfmodel")
 	if err != nil {
@@ -366,9 +364,6 @@ func TestQoderCustomizeEndToEnd(t *testing.T) {
 	if auth == "" || auth == "Bearer client-token" || strings.HasPrefix(auth, "Bearer ") && !strings.Contains(auth, "COSY.") {
 		// WASM 签名头是 Bearer COSY.<载荷>.<签名> —— 普通 Bearer 覆盖会 403。
 		t.Fatalf("Authorization must be the WASM COSY signature, got %q", auth)
-	}
-	if req.Header.Get("X-Client-Noise") != "" {
-		t.Fatal("client headers must be cleared before the signed set")
 	}
 	// ⚠️ outBody 是 WASM 加密产物（自定义编码），不是 JSON —— 「解析不出
 	// JSON 且非空」恰恰是加密成功的证据。

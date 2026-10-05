@@ -37,16 +37,12 @@ func WithClientRequest(ctx context.Context, r *http.Request) context.Context {
 	return context.WithValue(ctx, currentClientRequestKey{}, r)
 }
 
-// isHopByHopHeader reports whether a header must not be forwarded upstream
-// (RFC 2616 hop-by-hop + Go'shttp transport internals).
-func isHopByHopHeader(name string) bool {
-	switch http.CanonicalHeaderKey(name) {
-	case "Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
-		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
-		return true
-	}
-	return false
-}
+// webhubTurnHeaderName is the loopback-only header the webhub bridge uses to
+// carry its per-attempt turn token from Customize to InterceptResponse. The
+// proxy does not import the webhub package (dependency inversion), so the
+// literal is duplicated here — same neutrality rationale as
+// RetryDropHeaderMarker (upstreamerr). Must match webhub.turnHeaderName.
+const webhubTurnHeaderName = "X-TinyLab-WebHub-Turn"
 
 // upstreamClientFor returns the non-streaming upstream client for sel: the
 // **per-key** egress client when the key carries its own proxy, else the
@@ -86,10 +82,10 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 
 	// Bridged provider hook: providers owned by an external augmenter (e.g.
 	// jethub) get URL/body/headers rewritten just before send. The augmenter
-	// mutates the client request's headers (its mutations become the outbound
-	// header base — e.g. SDK-HMAC signature headers) and may replace the body.
-	// A returned error is treated as a forwarding failure (the retry loop
-	// classifies and retries/excludes).
+	// writes headers onto a per-attempt bridge request with a blank header
+	// base (F-05: its writes ARE the outbound set; client headers cannot leak)
+	// and may replace the body. A returned error is treated as a forwarding
+	// failure (the retry loop classifies and retries/excludes).
 	//
 	// webhub (APIType=="webhub") is bridged too, but it has NO BaseURL — there
 	// is no endpoint to dial. Its customizer drives a browser page and the
@@ -97,13 +93,34 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	// endpoint-less branch below rather than a real HTTP send.
 	if isBridgedAugmenterType(sel.Provider.APIType) && h.augmenter != nil {
 		if clientReq, _ := ctx.Value(currentClientRequestKey{}).(*http.Request); clientReq != nil {
+			// F-05: build the per-attempt bridge request from a BLANK header
+			// map. The client request object is shared across every retry and
+			// combo target, so handing it to the augmenter with its real
+			// headers made credential containment depend on every augmenter
+			// remembering to wipe r.Header first. The augmenter now sees a
+			// blank-slate header base (plus the loopback-only markers it
+			// reads); its writes ARE the outbound headers, snapshotted below —
+			// client-supplied headers cannot reach the bridged upstream by
+			// construction. URL/Context are preserved (signing reads r.URL;
+			// cancellation propagates via ctx).
+			bridgeReq := clientReq.WithContext(clientReq.Context())
+			bridgeReq.Header = make(http.Header)
+			if drop := clientReq.Header.Get(RetryDropHeaderMarker); drop != "" {
+				bridgeReq.Header.Set(RetryDropHeaderMarker, drop)
+			}
+			// The webhub bridge carries its per-attempt turn token on the
+			// request header (set by Customize, read by InterceptResponse);
+			// seed it so that flow keeps working.
+			if turn := clientReq.Header.Get(webhubTurnHeaderName); turn != "" {
+				bridgeReq.Header.Set(webhubTurnHeaderName, turn)
+			}
 			augmented := body
 			upstreamURL := urlutil.BuildUpstreamURL(sel.Provider.BaseURL, path)
 			// Optional richer customizer: bridged providers whose outbound
 			// URL is not derivable from the entry path (encrypted-inference
 			// endpoints) supply the full URL. outURL == "" → default.
 			if cu, ok := h.augmenter.(RequestCustomizer); ok {
-				outURL, outBody, err := cu.Customize(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel)
+				outURL, outBody, err := cu.Customize(bridgeReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel)
 				if err != nil {
 					return nil, err
 				}
@@ -113,7 +130,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 				if outBody != nil {
 					augmented = outBody
 				}
-			} else if augmented2, err := h.augmenter.Augment(clientReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel); err != nil {
+			} else if augmented2, err := h.augmenter.Augment(bridgeReq, body, sel.Provider.ID, sel.Key.ID, upstreamModel); err != nil {
 				return nil, err
 			} else {
 				augmented = augmented2
@@ -126,18 +143,18 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 			// page and returns the response body. Without this branch the
 			// proxy would POST to a URL built from an empty BaseURL.
 			if upstreamURL == "" || strings.TrimSpace(sel.Provider.BaseURL) == "" {
-				return h.serveBridgedWithoutEndpoint(ctx, clientReq, sel, body, isStream, upstreamModel)
+				return h.serveBridgedWithoutEndpoint(ctx, bridgeReq, sel, body, isStream, upstreamModel)
 			}
 
 			req, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(body))
 			if err != nil {
 				return nil, err
 			}
-			// The augmented client headers ARE the outbound headers (minus
-			// hop-by-hop fields and the loopback retry marker); the augmenter's
-			// mutations propagate.
-			for k, vs := range clientReq.Header {
-				if isHopByHopHeader(k) || strings.EqualFold(k, RetryDropHeaderMarker) {
+			// The augmenter's writes ARE the outbound headers (F-05: built on
+			// a blank base, so nothing client-supplied can leak through).
+			// Loopback-only markers never leave the process.
+			for k, vs := range bridgeReq.Header {
+				if strings.EqualFold(k, RetryDropHeaderMarker) || strings.EqualFold(k, webhubTurnHeaderName) {
 					continue
 				}
 				for _, v := range vs {
@@ -168,7 +185,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 			// queue / billing classification) before anything reaches the
 			// client.
 			if ri, ok := h.augmenter.(ResponseInterceptor); ok {
-				outBody, retryAfterMs, ierr := ri.InterceptResponse(clientReq, resp, sel.Provider.ID, sel.Key.ID, upstreamModel, isStream)
+				outBody, retryAfterMs, ierr := ri.InterceptResponse(bridgeReq, resp, sel.Provider.ID, sel.Key.ID, upstreamModel, isStream)
 				if ierr != nil {
 					_ = resp.Body.Close()
 					return nil, ierr

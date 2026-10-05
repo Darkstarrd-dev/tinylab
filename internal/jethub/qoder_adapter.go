@@ -173,9 +173,6 @@ func (m *Manager) qoderCustomize(r *http.Request, body []byte, provider, account
 	if err != nil {
 		return "", nil, err
 	}
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range prepared.Headers {
 		r.Header.Set(k, v)
 	}

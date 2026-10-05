@@ -477,9 +477,6 @@ func (m *Manager) traeAugment(r *http.Request, body []byte, providerID, keyID, u
 		return nil, err
 	}
 	// Header family swap: Cloud-IDE-JWT + trio token headers.
-	for k := range r.Header {
-		r.Header.Del(k)
-	}
 	for k, v := range traeSOLOHeaders(cred, true, 0) {
 		r.Header.Set(k, v)
 	}
