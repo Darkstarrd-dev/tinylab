@@ -8,6 +8,13 @@ import (
 	"github.com/tinylab/tinylab/internal/console"
 )
 
+// DefaultStatsDebounce is the debounce window for stats-class state writes
+// (ScheduleStatsWrite): rotation counters and other best-effort persistence
+// whose loss on a crash only degrades scheduling heuristics, never correctness.
+// Critical changes (cooldown locks, backoff levels, quota locks) keep the
+// 500ms window via ScheduleWrite.
+const DefaultStatsDebounce = 30 * time.Second
+
 // Manager coordinates debounced writes of runtime state to the state.yaml file.
 // It uses function callbacks to extract and restore state from registry/combo,
 // avoiding circular imports.
@@ -24,11 +31,19 @@ type Manager struct {
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
-	pending bool
-	timer   *time.Timer
-	closed  bool
+	// pending/timer track critical-class writes (ScheduleWrite); statsPending/
+	// statsTimer track stats-class writes (ScheduleStatsWrite). Both timers
+	// fire the same full-snapshot flush; they never cancel each other, so a
+	// pending critical write keeps its 500ms deadline even if stats writes
+	// are coalescing around it.
+	pending      bool
+	timer        *time.Timer
+	statsPending bool
+	statsTimer   *time.Timer
+	closed       bool
 
-	debounce time.Duration
+	debounce      time.Duration
+	statsDebounce time.Duration
 }
 
 // ManagerOption configures a Manager callback.
@@ -62,9 +77,10 @@ func WithProbeStateProvider(snapshotFn func() map[string]*ProbeRecord, restoreFn
 // whose methods are safe to call but do nothing.
 func NewManager(path string, logger *console.Logger, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		path:     path,
-		logger:   logger,
-		debounce: 500 * time.Millisecond,
+		path:          path,
+		logger:        logger,
+		debounce:      500 * time.Millisecond,
+		statsDebounce: DefaultStatsDebounce,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -91,6 +107,28 @@ func (m *Manager) ScheduleWrite() {
 	}
 }
 
+// ScheduleStatsWrite schedules a debounced flush for stats-class state
+// changes (rotation counters, combo indices). It uses a longer window than
+// ScheduleWrite (DefaultStatsDebounce) because losing such state on a crash
+// only resets best-effort scheduling heuristics. Callers may invoke this on
+// every request; the debounce bounds the write rate to ~1 write per window.
+func (m *Manager) ScheduleStatsWrite() {
+	if m == nil || m.path == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return
+	}
+
+	if !m.statsPending {
+		m.statsPending = true
+		m.statsTimer = time.AfterFunc(m.statsDebounce, m.flushStats)
+	}
+}
+
 // flushNow captures the current runtime state and writes it to disk.
 func (m *Manager) flushNow() {
 	m.mu.Lock()
@@ -99,6 +137,20 @@ func (m *Manager) flushNow() {
 		return
 	}
 	m.pending = false
+	m.mu.Unlock()
+	m.flushNowLocked()
+}
+
+// flushStats is the stats-class timer callback. It writes the same full
+// snapshot; a concurrently pending critical timer is left alone so critical
+// changes keep their shorter deadline.
+func (m *Manager) flushStats() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.statsPending = false
 	m.mu.Unlock()
 	m.flushNowLocked()
 }
@@ -155,7 +207,11 @@ func (m *Manager) FlushSync() error {
 	if m.timer != nil {
 		m.timer.Stop()
 	}
+	if m.statsTimer != nil {
+		m.statsTimer.Stop()
+	}
 	m.pending = false
+	m.statsPending = false
 	m.mu.Unlock()
 
 	m.flushNowLocked()

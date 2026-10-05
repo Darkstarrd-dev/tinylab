@@ -1,4 +1,4 @@
-> **最后核对（2026-10-01，jethub P1 存储节）：** Free Hub（Jet Hub 移植）新增第三存储位 `{configDir}/jethub/`（`config/paths.go::ResolveJetHubDir`，三段式与 `ResolveAssistantDir` 同款）：`credentials.json`（`{"enc":"<base64 AES-GCM>"}` 信封，密钥复用 `Security.EncryptionKey`，`internal/jethub/manager.go::loadCredentials/saveCredentialsLocked`）与 `accounts.json`（账号索引 + 模型黑名单 + 前缀映射，`fsutil.AtomicWrite` 原子写，非敏感）。该目录**不进 config.yaml/state.yaml**——jethub 数据自成一体，桥接 Provider 本体（`APIType="jethub"`，ID=`jethub-{provider}`）经 `Bridge.SyncKeys` 动态写入 registry 内存态并由 `SaveConfigAndReload` 范式持久化到 config.yaml providers 段。详见 §24 jethub 存储节与 `docs/jethub-migration-plan.md`。
+> **最后核对（2026-10-05，F-08 状态持久化分级）：** `state.Manager` 新增统计态第二去抖通道——`ScheduleStatsWrite`/`flushStats`（`statsPending`/`statsTimer`/`statsDebounce`=`DefaultStatsDebounce` 30s），与关键态 `ScheduleWrite`/`flushNow`（500ms）互不取消、任一触发都经 `writeMu` 串行写同一份全量快照，快照格式与恢复语义零变更；`FlushSync` 同时停双定时器并同步写全量（关闭时统计态丢失窗口 ≤30s）。rotation/combo 侧 `SetStatsHook`（`onStatsChange`）承接统计态触发点（SelectKey 成功、RotateToBack、OnNIMRequestSuccess、combo rotateTargets），app.go 组合根接线。稳态高 QPS 选 key 不再每 500ms 触发 state.yaml 全量写。此前：2026-10-01 jethub P1 存储节（过程叙述见 docs/changelog/config-registry-state-architecture.md）。
 >
 > **最后核对（2026-09-07，删除后 QuickSlot/Playground 残留修复）：** `registry/combos.go::DeleteCombo` 成功路径补 `sweepStaleQuickSlotModelsLocked()`——删 combo 按名清 quickslot 引用（combo 名是 quickslot 存活判定口径之一），与 `DeleteProvider`/`DeleteModel` 的 `sweepStaleRefsLocked()` 对齐；`sweep_test.go` 新增 `TestDeleteComboSweepsQuickSlots`（删 c1 后 q1 无 `C1` 残留且 `SelectedIndex` 合法）。前端三处删模型路径（`providers-models.js::deleteModelDetail`/`batchKeepSelected`/`batchRemoveSelected`）与 `providers.js::deleteProviderFromList` 成功后无条件调 `renderHeaderQuickSlots()`——此前独立 Providers 页无 `#combo-list` 不触发 `renderEndpoint`，header 按钮残留已删模型名。
 >
@@ -98,7 +98,7 @@ flowchart TD
     REG -->|"SnapshotKeyStates / RestoreKeyState (回调签名)"| STT
     CR -->|"encryptKeysCopy / Decrypt"| P
     STT -.->|"回调依赖 func 签名, 不 import registry"| REG
-    M -->|"500ms 去抖 -> flushNow -> Save"| IO
+    M -->|"关键态 500ms / 统计态 30s 去抖 (F-08 双通道)"| IO
 ```
 
 **依赖方向：** `registry → state`（registry import state，state.go:8），`state → 不 import registry`。`config` 被 registry 与 state 间接消费（`config.Config`/`config.Provider` 等作为纯数据类型）；`state` 不依赖 `config` 包的具体类型，只依赖本包内 `Snapshot`/`KeySnapshot`/`ComboSnapshot`，从而与 registry 完全解耦。
@@ -320,13 +320,15 @@ type Manager struct {
     timer   *time.Timer
     closed  bool
 
-    debounce time.Duration // 默认 500ms
+    debounce      time.Duration // 关键态去抖，默认 500ms
+    statsDebounce time.Duration // 统计态去抖（F-08），默认 DefaultStatsDebounce=30s
 }
 ```
 
 - **回调选项（manager.go:36-49）：** `WithKeyStateProvider(snapshotFn, restoreFn)` 与 `WithComboStateProvider(snapshotFn, restoreFn)` 注入四处 func。app.go:164-165 把它们接到 `reg.SnapshotKeyStates`/`reg.RestoreKeyState` 与 `comboRes.SnapshotComboStates`/`comboRes.RestoreComboState`。
-- **`NewManager`（manager.go:53-63）：** `debounce=500ms`；`path` 为空则成 **noop**（所有方法安全空转，见 `TestManagerNoop`）。
-- **`ScheduleWrite`（manager.go:67-82）：** path 空/`closed` 直接返回；首调（非 pending）时置 `pending=true` 并启 `time.AfterFunc(debounce, flushNow)`——**窗口内多次调用被合并为一次写**。
+- **`NewManager`（manager.go）：** `debounce=500ms`、`statsDebounce=DefaultStatsDebounce`（30s）；`path` 为空则成 **noop**（所有方法安全空转，见 `TestManagerNoop`）。
+- **`ScheduleWrite`（manager.go）：** 关键态通道。path 空/`closed` 直接返回；首调（非 pending）时置 `pending=true` 并启 `time.AfterFunc(debounce, flushNow)`——**窗口内多次调用被合并为一次写**。
+- **`ScheduleStatsWrite`（manager.go，F-08 新增）：** 统计态通道，与 `ScheduleWrite` 同构（独立 `statsPending`/`statsTimer`，30s 窗口合并），触发 `flushStats`。**两通道定时器互不取消**：统计态去抖进行中不会推迟关键态 500ms 契约，反之亦然；任一 timer 触发都调用同一 `flushNowLocked` 写全量快照（`writeMu` 串行化，不会交叉撕裂）。
 - **`flushNow`（manager.go:85-119）：** 取 `mu` 清 `pending`，建 `Snapshot{Version, SavedAt, Keys, Combos}`，通过 `keySnapshotFn`/`comboSnapshotFn` 抽取快照，落 `writeMu` 后调 `Save`；失败仅 `logger.Warn`（**不返回 error**）。
 - **`flushNowLocked`（manager.go:122-148）：** 与 `flushNow` 同逻辑但**不经 pending 守卫**，供 `FlushSync` 直接调用。
 - **`FlushSync`（manager.go:152-170）：** 停 timer、清 `pending`、调 `flushNowLocked`、置 `closed=true`（幂等，可多次调用）。**用于进程关闭时立即落盘**。
@@ -336,7 +338,7 @@ type Manager struct {
 
 ## 15. 持久化流
 
-完整写流：运行时状态变更（rotation/combo）→ 上层触发 `Manager.ScheduleWrite()` → **500ms 去抖合并** → `flushNow` 经回调 `SnapshotKeyStates`/`SnapshotComboStates` 抽取快照 → `state.Save`（`.tmp` + rename）→ `state.yaml`。
+**完整写流：** 运行时状态变更（rotation/combo）→ 上层按变更性质分流：**关键态**（冷却锁/退避/配额锁/NIM 429）触发 `ScheduleWrite()` → 500ms 去抖 → `flushNow`；**统计态**（选 key 计数/队列顺序/NIM 成功计数/combo 索引）触发 `ScheduleStatsWrite()` → 30s 去抖 → `flushStats`（F-08，2026-10-05）。两通道经回调 `SnapshotKeyStates`/`SnapshotComboStates` 抽取同一份全量快照 → `state.Save`（`.tmp` + rename）→ `state.yaml`。
 
 ```mermaid
 sequenceDiagram
@@ -360,7 +362,7 @@ sequenceDiagram
 
 **config.yaml vs state.yaml 分工：** 前者存**定义 + 全局设置**（providers/keys/models/combos/quickslots/security/proxy/server/download/rotation + port）；后者只存**可持久化的运行时子集**（key 的冷却/锁定/退避/NIM 计数、combo 的轮转索引）。`ModelErrors`/`InFlight`/`ModelQuotas` **两处都不持久化**（snapshotKeyState 排除 + KeySnapshot 无字段）。
 
-**关闭路径：** 进程退出经 `FlushSync` 立即落盘并 `closed=true`，保证 debounce 窗口内的待写数据被强制写出。
+**关闭路径：** 进程退出经 `FlushSync` 立即落盘并 `closed=true`——**同时停关键态与统计态两个 pending timer**（F-08），保证两类 debounce 窗口内的待写数据被强制写出（统计态丢失窗口上限 30s，而非"永不落盘"）。
 
 ## 16. Reload 流
 
@@ -457,7 +459,7 @@ Free Hub（Jet Hub 移植，`internal/jethub`，见 PROJECT_MAP §13n）在三�
 ## 20. 已知约束与风险
 
 1. **state 版本无迁移：** `CurrentVersion=1`（state.go:13），`Load` 不校验 `Version`（state.go:48-71 直接 `yaml.Unmarshal`），未来若改格式旧快照会被静默误读。
-2. **debounce 合并丢弃中间态：** `ScheduleWrite` 在 500ms 窗口内只保留最后一次触发（manager.go:78-81），窗口内崩溃会丢失“最新一次”之前的所有待写（仅最后一次 timer 会落盘，但进程若在 fire 前崩则全丢）——属有意为之的取舍。
+2. **debounce 合并丢弃中间态：** `ScheduleWrite` 在 500ms 窗口内只保留最后一次触发（manager.go），窗口内崩溃会丢失“最新一次”之前的所有待写（仅最后一次 timer 会落盘，但进程若在 fire 前崩则全丢）——属有意为之的取舍。**F-08 后统计态丢失面扩大**：旋转计数（LastUsedAt/ConsecCount/RotatedAt/NIM 计数/combo 索引）走 30s 通道，崩溃最多回退 30s 的计数；丢失后果仅为调度启发式重置，无正确性影响（rotation-architecture.md §15 #14）。
 3. **flushNow 在 fire 时刻才抓拍：** 快照在 `time.AfterFunc` 回调触发时（而非 `ScheduleWrite` 调用时）经回调抽取（manager.go:101-112），故 debounce 窗口内的最新状态会被捕捉，但窗口结束后的变更需下一次 ScheduleWrite。
 4. **原子 rename 的 Windows 回退语义不一致：** `config.Save` 在 rename + 直写双失败时**返回 error**（persistence.go:100），调用方会处理；`state.Save` 双失败同样**返回 error**（state.go:90），但其唯一调用方 `manager.flushNow`/`flushNowLocked` 仅 `logger.Warn`（manager.go:116/145）后丢弃——故对进程而言失败被静默记录、不向上传播，目标持续被锁时**静默丢状态**。
 5. **`.tmp` 恢复基于 mtime：** Load 仅当 `.tmp.ModTime().After(path.ModTime())` 才应用（persistence.go:28）；时钟回拨/跨时区挂载可能导致较新改动被误判为过期残留而删除（47-50）。
@@ -506,7 +508,7 @@ Free Hub（Jet Hub 移植，`internal/jethub`，见 PROJECT_MAP §13n）在三�
 
 ### 21.4 state 包测试（state_test.go）
 
-`TestLoadSaveRoundtrip`、`TestLoadMissingFile`、`TestLoadInvalidYAML`、`TestManagerNoop`（nil / 空 path 安全）、`TestManagerFlushSync`、`TestManagerScheduleWrite`（实测 500ms 去抖）、`TestRestoreRoundtrip`。覆盖 state.go:11-96 与 manager.go:36-200 全路径。
+`TestLoadSaveRoundtrip`、`TestLoadMissingFile`、`TestLoadInvalidYAML`、`TestManagerNoop`（nil / 空 path 安全）、`TestManagerFlushSync`、`TestManagerScheduleWrite`（实测 500ms 去抖）、`TestRestoreRoundtrip`；**F-08 新增 `manager_stats_test.go`**：`TestManagerStatsDebounceClass`（统计态 300ms 内不落盘 + 关键态 500ms 落盘 + 纯统计态不触发关键去抖）、`TestManagerStatsWriteEventuallyFlushes`（纯统计态最终落盘）、`TestManagerFlushSyncCancelsStatsTimer`（关闭取消统计态 timer、单次快照）。覆盖 state.go:11-96 与 manager.go 全路径。
 
 ### 21.5 settings PATCH 测试（register_test.go，2026-08-03 新增）
 
@@ -568,7 +570,7 @@ go build -o tinylab .
 **internal/state：**
 - `manager.go`：Manager(14-32)、ManagerOption(33-35)、WithKeyStateProvider/WithComboStateProvider(36-51)、WithProbeStateProvider(53-59)、NewManager(63-73)、ScheduleWrite(77-92)、flushNow(95-104)、flushNowLocked(110-145，快照提取在 writeMu 内)、FlushSync(149-168)、Restore(170-240)、probeSnapshotFn/probeRestoreFn(22-23)。
 - `state.go`：CurrentVersion(11-14)、Snapshot(17-26，含 Probes map)、KeySnapshot(25-38)、ComboSnapshot(41-44)、ProbeDetail(29-37)、ProbeRecord(38-49)、Load(48-71)、Save(79-96)。
-- `manager.go`：Manager(14-30)、ManagerOption(33)、WithKeyStateProvider/WithComboStateProvider(36-49)、WithProbeStateProvider(53-55，注入 probe 快照/恢复回调，flushNow 纳入 Probes 125/162)、NewManager(53-63)、ScheduleWrite(67-82)、flushNow(85-119)、flushNowLocked(122-148)、FlushSync(152-170)、Restore(173-200)、probeSnapshotFn/probeRestoreFn(22-23)。
+- `manager.go`：Manager(17-47，含 `pending`/`timer` 关键态 + `statsPending`/`statsTimer` 统计态双通道 F-08)、ManagerOption、WithKeyStateProvider/WithComboStateProvider、WithProbeStateProvider（注入 probe 快照/恢复回调，flushNowLocked 纳入 Probes）、NewManager（debounce 500ms + statsDebounce DefaultStatsDebounce 30s）、ScheduleWrite（关键态）、ScheduleStatsWrite（统计态，F-08）、flushNow、flushStats（F-08）、flushNowLocked（快照提取在 writeMu 内）、FlushSync（停双 timer + closed）、Restore、probeSnapshotFn/probeRestoreFn。
 
 ## 23. 变更维护清单
 
@@ -580,7 +582,7 @@ go build -o tinylab .
 | 修改加密 | `crypto.go`（GenerateKey/Encrypt/Decrypt/encryptKeysCopy(77-96，失败阻断 Save)）+ `defaults.go` 解密分支(130-144) + `types.go` SecurityConfig(150-154) |
 | 修改 `KeyRuntimeState` 字段 | `keystate/state.go` `KeyRuntimeState`（类型 + 自带锁方法）+ `registry/state.go` `snapshotKeyState`/`RestoreKeyState`（同步持久化子集）+ `state.go` `KeySnapshot`(25-38)（同步持久化子集）；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
 | 修改 reload merge | `registry.go` reloadStatesLocked(28-54) + `reload_merge_test.go`（TestReload_MergesStates） |
-| 修改去抖 | `manager.go` ScheduleWrite(77-92)/flushNow(95-104)/flushNowLocked(110-145)/FlushSync(149-168)（快照提取在 writeMu 内） |
+| 修改去抖 | `manager.go` ScheduleWrite/ScheduleStatsWrite（F-08 统计态 30s）/flushNow/flushStats/flushNowLocked/FlushSync（快照提取在 writeMu 内；双通道互不取消）；触发点分级见 rotation-architecture.md §18「修改状态持久化分级/钩子接线」 |
 | 修改回调接线 | `app.go` WithKeyStateProvider/WithComboStateProvider(164-165) 与 registry/combo 的 Snapshot*/Restore* 实现 |
 | Provider 自定义请求头配置 | `config/types.go`（`Provider.UseCustomHeaders`/`CustomHeaders`，YAML/JSON `useCustomHeaders`/`customHeaders`）+ `registry/providers.go::UpdateProvider` + `internal/customheaders/customheaders.go`；旧配置字段缺省为 false/nil，`omitempty` 保持旧 config.yaml 简洁 |
 | 修改校验 | `validate.go` validateProviders(10-42)（仅告警，注意重复 prefix 不阻断，第 20 节 #9）+ `validatePort`(18)（端口范围 1-65535 告警，defaults.go:75 finalizeConfig 调用） |

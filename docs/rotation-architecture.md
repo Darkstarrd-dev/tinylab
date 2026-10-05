@@ -1,4 +1,4 @@
-> **最后核对（2026-08-31，Provider 级 Retry/Cooldown override）：** `Provider` 新增三个 `*int` 指针字段 `MaxRetriesOverride` / `RetryIntervalOverrideSec` / `CooldownOverrideSec`（types.go，omitempty 零值兼容）；`cooldown.go` 新增 `MarkUnavailableWithOverride(..., overrideSec *int)`——非 nil 时以固定 `overrideSec` 秒（clamp≥1）替换 `pow2(BackoffLevel)` 指数退避，普通 `MarkUnavailable` 传 nil 保持原行为；`selector.go::OnKeyFailure` 读 `Provider.CooldownOverrideSec` 传入；`isKeyAvailable`/`SonestCooldown` 读锁内存储值自动反映覆盖。**覆盖优先级：** provider 级 `MaxRetriesOverride`（clamp 1-20，retry.go::maxRetriesFor）> 全局 `RotationConfig.MaxRetries`（≤0→5）；均匀间隔 `RetryIntervalOverrideSec`（clamp 0-60s）仅替换 `handle429`/`handleUpstreamError` 的**通用退避段**（HasQuota `BackoffSequence` + 5xx 退避），NIM ladder / quota 头 `ModelExhausted` 每日锁 / SenseNova entitlement 300m / rpm 60s + tpm 15s **固定段不被覆盖**（proxy 域，详见 proxy-architecture.md §7.4）。与既有 `effectiveStrategy`/`effectiveStickyLimit`（Provider 级覆盖全局）同模式。
+> **最后核对（2026-10-05，F-08 状态持久化分级）：** `Selector` 新增 `onStatsChange` 钩子（`SetStatsHook`，selector.go）——统计态变更（`SelectKey` 成功路径的 `LastUsedAt`/`ConsecCount`、`RotateToBack` 的 failover 队列顺序、`OnNIMRequestSuccess` 的 NIM 计数）改调 stats 钩子，由 `app.go` 接到 `state.Manager.ScheduleStatsWrite`（30s 去抖，`DefaultStatsDebounce`）；关键态变更（`MarkUnavailableWithOverride`/`ClearError`/`MarkNIM429`/`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkRateLimited`）仍走 `onStateChange`→`ScheduleWrite`（500ms 去抖）不变。双通道定时器互不取消、同写全量快照，`FlushSync` 停双定时器并同步全量。稳态高 QPS 选 key 不再触发每 500ms 一次的 state.yaml 全量写。此前：2026-08-31 Provider 级 Retry/Cooldown override（过程叙述见 docs/changelog/rotation-architecture.md）。
 >
 > **最后核对（2026-08-29，Round-2 P1-07/NIM与currentKey对齐）：** `monitor/currentKey` 与 `SelectKey` 语义对齐——NIM 使能时以 `WaitNIMInterval==0` 过滤候选，`ManualKey` pin 优先；`Entry.ProviderID` 新增并参与 `decInFlightForKey` 精确匹配，跨 Provider KeyID 碰撞不再误扣。
 ﻿# TinyLab Rotation Key 轮询架构
@@ -19,8 +19,8 @@
 
 `internal/rotation/` 是 TinyLab 的 **Key 轮询（Rotation）模块**，承载 provider 下多个 key 的选取与 per-key 运行时记账：冷却（cooldown）、指数退避（backoff）、配额锁（daily-quota / balance / rate-limit）、NIM 请求计数与节流、以及上游速率限制响应头的解析。它自身不处理 HTTP 转发、SSE、用量记录或管理接口。
 
-- **谁调用它：** `internal/proxy/` 通过 `KeyProvider` 接口（proxy/interfaces.go:27-38）注入 `*rotation.Selector`，在 `forwardWithRetry` 循环中调用 `SelectKey`、`OnKeyFailure`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429`、`MarkDailyQuotaLocked`、`MarkRateLimited`、`MarkBalanceLocked`、`ClearError`、`Settings`；`internal/app/app.go` 作为组合根构造 `Selector` 并调用 `SetStateHook` 将状态变更回调挂到 `state.yaml` 持久化（selector.go:36-39）。
-- **它调用谁：** `keystate`（`*keystate.KeyRuntimeState` 类型 + 自带锁方法）、`config`（配置与 `Provider.IsNIM()` 判定）；经 `KeyStateProvider` 接口（selector.go）取得 provider 定义与 per-key 运行时状态——接口由 `*registry.Registry` 结构性满足（`app.go` 组合根注入），故 rotation **不 import registry**。rotation 不直接写磁盘；状态持久化由注入的 `onStateChange` 钩子旁路触发。
+- **谁调用它：** `internal/proxy/` 通过 `KeyProvider` 接口（proxy/interfaces.go:27-38）注入 `*rotation.Selector`，在 `forwardWithRetry` 循环中调用 `SelectKey`、`OnKeyFailure`、`WaitNIMInterval`、`OnNIMRequestSuccess`、`MarkNIM429`、`MarkDailyQuotaLocked`、`MarkRateLimited`、`MarkBalanceLocked`、`ClearError`、`Settings`；`internal/app/app.go` 作为组合根构造 `Selector` 并调用 `SetStateHook`（关键态→500ms 去抖）与 `SetStatsHook`（统计态→30s 去抖）把状态变更回调挂到 `state.yaml` 持久化（selector.go）。
+- **它调用谁：** `keystate`（`*keystate.KeyRuntimeState` 类型 + 自带锁方法）、`config`（配置与 `Provider.IsNIM()` 判定）；经 `KeyStateProvider` 接口（selector.go）取得 provider 定义与 per-key 运行时状态——接口由 `*registry.Registry` 结构性满足（`app.go` 组合根注入），故 rotation **不 import registry**。rotation 不直接写磁盘；状态持久化由注入的 `onStateChange`（关键态：锁/退避/配额锁）与 `onStatsChange`（统计态：选 key 计数/队列顺序/NIM 计数）两个钩子旁路触发（F-08 分级，2026-10-05）。
 
 ```mermaid
 flowchart LR
@@ -72,11 +72,12 @@ type Selector struct {
     settings   *config.RotationConfig
     settingsMu sync.RWMutex
 
-    onStateChange func() // injected by main.go for state persistence
+    onStateChange func() // critical-class persistence: locks/backoff/quota locks (500ms debounce)
+    onStatsChange func() // stats-class persistence: rotation counters (30s debounce, F-08)
 }
 ```
 
-`New(reg, settings)` 仅把两个指针存入，不分配运行时状态（selector.go:32-34）。`SetStateHook`（selector.go:36-39）注入 `onStateChange` 回调，每当 per-key 状态变更后调用，供上层持久化 `state.yaml`。
+`New(reg, settings)` 仅把两个指针存入，不分配运行时状态（selector.go:32-34）。`SetStateHook`（selector.go）注入 `onStateChange` 回调——**关键态**变更（任何 `ModelLocks`/`BackoffLevel`/锁状态写入）后调用，供上层持久化 `state.yaml`（500ms 去抖）；`SetStatsHook` 注入 `onStatsChange`——**统计态**变更（`LastUsedAt`/`ConsecCount`/`RotatedAt`/NIM 计数等旋转计数）后调用（30s 去抖，F-08 分级）。两钩子均为 nil-safe（未设置则该级变更不触发持久化回调，状态本身仍照常写入内存）。
 
 ### 3.3 归属边界：状态归 registry，rotation 只可变
 
@@ -102,10 +103,10 @@ proxy 通过 `KeyProvider`（proxy/interfaces.go:27-38）调用以下方法，`*
 
 | 方法 | 实现位置 | 行为（一行） |
 |---|---|---|
-| `SelectKey(providerID, model, excludeKeyIDs)` | selector.go:47-108 | 按 provider 构建候选，套用策略选 key，更新 `LastUsedAt`/`ConsecCount`，触发 `onStateChange` |
+| `SelectKey(providerID, model, excludeKeyIDs)` | selector.go:47-108 | 按 provider 构建候选，套用策略选 key，更新 `LastUsedAt`/`ConsecCount`，触发 `onStatsChange`（统计态，F-08） |
 | `WaitNIMInterval(providerID, keyID)` | nim.go:41-59 | 返回该 key 还需等待的最小发送间隔（`min_interval_ms`），无前次发送返回 0 |
 | `ClearError(providerID, keyID, model)` | cooldown.go:51-68 | 删除该 model 的 `ModelLocks`/`ModelStatus`/`ModelErrors`，无残留锁时 `BackoffLevel` 归零 |
-| `OnNIMRequestSuccess(providerID, keyID, model)` | nim.go:64-83 | NIM 计数 +1、刷新 `NIMLastSendTime`，达阈值则计数清零并 `RotatedAt=now` |
+| `OnNIMRequestSuccess(providerID, keyID, model)` | nim.go:64-83 | NIM 计数 +1、刷新 `NIMLastSendTime`，达阈值则计数清零并 `RotatedAt=now`（统计态持久化，F-08） |
 | `Settings()` | selector.go:148-152 | 读 `settingsMu.RLock` 返回 `*config.RotationConfig` 副本 |
 | `OnKeyFailure(providerID, keyID, model, statusCode, body)` | selector.go:113-129 | 策略感知失败处理：NIM 429→`MarkNIM429`；failover→`RotateToBack`；其余→`MarkUnavailable` |
 | `MarkNIM429(providerID, keyID, model)` | nim.go:89-121 | NIM 429 阶梯冷却，设 `ModelLocks[model]`，重置 24h 并 `RotatedAt=now` |
@@ -160,7 +161,7 @@ rotation 模块不负责 usage 提取，但本协议相关的提取路径如下�
 7. **策略分发：** `switch s.effectiveStrategy(provider)`（selector.go:137-144）：`"round-robin"`→`selectRoundRobin`、`"failover"`→`selectRotation`、默认→`selectFillFirst`。
 8. **未选中 → 错误：** `!chosenOk` 返回 `"no available keys"`（selector.go:146-148）。
 9. **状态更新：** 重新 `GetKeyState(chosen)`，加锁置 `LastUsedAt=now`、`ConsecCount++`（selector.go:149-155）。
-10. **持久化回调：** `s.onStateChange != nil` 时调用（selector.go:156-158）。
+10. **持久化回调（统计态）：** `s.onStatsChange != nil` 时调用（F-08：此路径只变更旋转计数，无锁，走 30s 去抖的统计态通道，稳态高 QPS 不再触发每 500ms 全量写）。
 11. **返回：** `&SelectedKey{Provider:*provider, Key:chosen, KeyName:chosen.Name}`（selector.go:159）。
 
 ```mermaid
@@ -187,7 +188,7 @@ flowchart TD
     K3 --> L
     L -->|"否"| E3["error: no available keys"]
     L -->|"是"| M["更新 LastUsedAt/ConsecCount (97-103)"]
-    M --> N["onStateChange 回调 (104-106)"]
+    M --> N["onStatsChange 回调·统计态 (F-08)"]
     N --> O["返回 SelectedKey (107)"]
 ```
 
@@ -206,7 +207,7 @@ flowchart TD
 | `round-robin` | `selectRoundRobin`（strategy.go:79-130） | 当前候选中 `LastUsedAt` 最新者若 `ConsecCount < stickyLimit` 则粘住；否则选 `LastUsedAt` 最旧者（LRU），并 `resetConsecCount` |
 | `failover` | `selectRotation`（strategy.go:39-64） | 按 `RotatedAt` ASC（零值=从未失败=最优先）排序，平局 `Priority` ASC；成功不轮转，失败后由调用方 `RotateToBack` 置 `RotatedAt=now` |
 
-- **failover 旋转：** `RotateToBack`（selector.go:134-146）只设 `RotatedAt=now` 与 `ModelErrors[model]`，**不**置 `ModelLock`，故该 key 仍可用、待其自然回到队首再试。
+- **failover 旋转：** `RotateToBack`（selector.go:134-146）只设 `RotatedAt=now` 与 `ModelErrors[model]`，**不**置 `ModelLock`，故该 key 仍可用、待其自然回到队首再试。持久化为统计态（`onStatsChange`，F-08）——无锁写入，崩溃后队列顺序从磁盘快照重启，丢失后果仅为轮转次序回退。
 - **round-robin 粘性重置：** `selectRoundRobin` 切换到 LRU key 时调用 `resetConsecCount` 把新 key 的 `ConsecCount` 清零（strategy.go:125-128）。
 
 ```mermaid
@@ -474,6 +475,7 @@ flowchart TD
 11. **nextCSTMidnight05 时区回退：** 依赖 `Asia/Shanghai` tzdata，缺失时回退固定 +08:00（cooldown.go:131-134）；极端环境（tzdata 错误）可能导致边界偏移。
 12. **ClassifyError 贪婪子串匹配：** 任意 body 子串包含即命中（error_rules.go:62、68），如正常文本恰含 “capacity” 等词会被误分类为退避。
 13. **IsDailyQuota429 要求 body 含 model：** 必须 `strings.Contains(lower(body), lower(model))`（cooldown.go:127），model 字符串未出现在 body 时即使确为每日配额 429 也会漏判。
+14. **统计态持久化尽力而为（F-08，2026-10-05 起）：** 旋转计数（`LastUsedAt`/`ConsecCount`/`RotatedAt`/NIM 计数/combo 索引）经 `onStatsChange` 走 30s 去抖通道（`ScheduleStatsWrite`），崩溃丢失窗口 ≤30s；丢失后果仅是调度启发式重置（sticky 回 index 0、NIM 计数提前重置、failover 队列顺序回退），无正确性影响。关键态（锁/退避/配额锁）仍走 500ms 通道不受影响。
 
 ## 16. 测试与验证现状
 
@@ -486,6 +488,7 @@ flowchart TD
 | `error_rules_test.go` | `ClassifyError` 文本优先于状态、余额每日锁、状态码回退（401→Cooldown 120）、瞬态回退、”request not allowed“→Cooldown 5s |
 | `nim_test.go` | NIM failover 计数达阈值后切 key、`RotateNoCooldown` 全池重置、MarkNIM429 阶梯冷却与封顶、24h 后等级重置、`WaitNIMInterval` 最小间隔、计数+429 混合态下 `filterNIMCandidates` 重置 |
 | `ratelimit_test.go` | `GetAdapter` modelscope→ModelScopeAdapter / 默认→NoopAdapter、`ModelScopeAdapter.ParseHeaders` 正常/耗尽/无头、`NoopAdapter.ParseHeaders` 返回 nil、`atoiSafe` |
+| `stateclass_test.go`（F-08，2026-10-05） | 持久化分级钩子分类：`TestStateChangeHookClasses` 逐方法断言 critical（MarkUnavailable/ClearError/MarkRateLimited/MarkBalanceLocked/MarkDailyQuotaLocked）与 stats（SelectKey/RotateToBack）走向；`TestSelectKeyNoCriticalWriteUnderLoad` 100 次连续选 key 零 critical 触发 |
 
 ### 16.2 已测 vs 未测
 
@@ -493,7 +496,7 @@ flowchart TD
 - **未充分覆盖（按源码锚点）：**
   - **`effectiveStrategy` 覆盖解析：** provider 级 `RotationStrategy` 优先于全局的分支（strategy.go:133-135）无专门单测，现有测试只经全局 `Strategy` 间接覆盖。
   - **`Settings` / `UpdateSettings`：** 配置读写（selector.go:148-158）无测试。
-  - **`SetStateHook`：** `onStateChange` 钩子触发（selector.go:36-39、104-106）无任何测试验证其被调用。
+  - ~~**`SetStateHook`：** `onStateChange` 钩子触发无任何测试验证其被调用~~ **已补（2026-10-05，F-08）：** `stateclass_test.go::TestStateChangeHookClasses` 逐方法断言关键态/统计态钩子分类（MarkUnavailable/ClearError/MarkRateLimited/MarkBalanceLocked/MarkDailyQuotaLocked→critical；SelectKey/RotateToBack→stats）+ `TestSelectKeyNoCriticalWriteUnderLoad`（100 次连续选 key 零关键钩子触发）。
   - **`MarkRateLimited` 包内调用：** 固定时长冷却（cooldown.go:186-202）无测试。
   - **`BackoffMaxSec=0` 回退：** 封顶为 0 时回退 300s 的分支（cooldown.go:35-37）未测（测试 fixture 固定用 240）。
   - **跨 model 的 BackoffLevel 耦合：** `BackoffLevel` 全局共享、仅全清时归零（第 15 节 #2）无测试。
@@ -514,7 +517,7 @@ go build -o tinylab .
 
 本包（internal/rotation）：
 
-- `selector.go`：KeyStateProvider 接口（16-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（23-32）、Selector 结构体（34-48，`reg KeyStateProvider` 非 `*registry.Registry`，含 `manualMu`/`manualPins` 人工 pin 字段 39-45）、New（50-52）、SetStateHook（55-57）、SetManualKey/ManualKey（64-81，人工 pin 读写，内存态不持久化）、SelectedKey、SelectKey 算法（89-160，含 pin 优先分支 127-135）、IsNIMEnabled、OnKeyFailure 分发、RotateToBack、Settings、UpdateSettings、编译期检查。
+- `selector.go`：KeyStateProvider 接口（16-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（23-32）、Selector 结构体（34-53，`reg KeyStateProvider` 非 `*registry.Registry`，含 `manualMu`/`manualPins` 人工 pin 字段、`onStateChange` 关键态钩子 + `onStatsChange` 统计态钩子 F-08）、New（56-58）、SetStateHook（61-63）、SetStatsHook（65-74）、SetManualKey/ManualKey、SelectedKey、SelectKey 算法（含 pin 优先分支；成功路径触发 `onStatsChange` 统计态）、IsNIMEnabled、OnKeyFailure 分发、RotateToBack（统计态触发）、Settings、UpdateSettings、编译期检查。
 - `strategy.go`：selectRotation（39-64）、selectFillFirst（66-77）、selectRoundRobin（79-130）、effectiveStrategy（132-137）、effectiveStickyLimit（139-144）。
 - `cooldown.go`：CooldownManager 接口（14-36，**含 `SonestCooldown` + `CooldownInfo`**）、MarkUnavailable（38-65）、ClearError（67-86）、isKeyAvailable（88-110）、BackoffSequence、IsDailyQuota429、nextCSTMidnight05、MarkDailyQuotaLocked、MarkBalanceLocked、MarkRateLimited、SonestCooldown（220-263，最早未排除 key 的 `ModelLocks[model]` 到期 + keyName/reason）、编译期检查。
 - `error_rules.go`：ErrorAction（8-16，**含 `ActionPassThrough`**）、ErrorRule（18-24）、DefaultErrorRules（28-66，**含 `{StatusCode:400/422, Action:ActionPassThrough}` + 文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`**）、DefaultTransientCooldownSec（69）、ClassifyError（73-89，先文本后状态）、IsBalanceExhausted（95-101）。
@@ -541,6 +544,7 @@ go build -o tinylab .
 | 修改 NIM | nim.go（getNIMSettings/getModelNIMOverride/getEffectiveNIMSettings/WaitNIMInterval/OnNIMRequestSuccess/MarkNIM429/filterNIMCandidates）+ config NIMSettings（121-126）+ ModelNIMOverride（40-48）+ IsNIM（102-107）+ selector.go IsNIMEnabled + OnKeyFailure NIM 分支 + proxy 层 IsNIMEnabled 门控（forward.go、retry.go） |
 | 修改速率限制头 | ratelimit.go 各 Adapter（36-56）+ adapterRegistry（59-64）+ GetAdapter（71-80） |
 | 修改运行时状态字段 | `keystate/state.go` KeyRuntimeState(26-51) + `registry/state.go` snapshotKeyState(76-102)/RestoreKeyState(113-146) + state.yaml 快照/恢复；rotation 函数签名 `*keystate.KeyRuntimeState`（cooldown.go/nim.go/strategy.go）+ `proxy/interfaces.go` `ModelResolver.GetKeyState` 返回类型 |
+| 修改状态持久化分级/钩子接线（F-08） | `state/manager.go` `ScheduleWrite`/`ScheduleStatsWrite`/`flushNow`/`flushStats`/`FlushSync` + `DefaultStatsDebounce`；rotation `selector.go` `SetStateHook`/`SetStatsHook` + 各触发点钩子归类（MarkUnavailableWithOverride/ClearError/MarkNIM429/MarkDailyQuotaLocked/MarkBalanceLocked/MarkRateLimited→critical；SelectKey 成功/RotateToBack/OnNIMRequestSuccess→stats）+ combo `resolver.go` `SetStateHook`/`SetStatsHook`/rotateTargets；组合根 `app.go` `SetStateHook`/`SetStatsHook` 接线；测试 `stateclass_test.go` + `manager_stats_test.go` |
 | 修改人工指定活跃 Key（Monitor Shift+点击 pin） | selector.go `manualPins`/`manualMu`（39-45）+ `SetManualKey`（64-72）/`ManualKey`（77-81）+ SelectKey pin 优先分支（127-135）；api/keys/register.go `activateKey`（`POST /providers/{id}/keys/{kid}/activate`）；api/monitor/register.go `currentKey`/`getModelKeys` in-use pin 感知；前端 `web/static/monitor/monitor_quota.js` `quotaKeyRowClick` |
 | 新增/修改 Anthropic 协议路由（combo 入口过滤，已移除） | combo/resolver.go `Resolve(name, entryFormat)` **不再**做 `entryFormat==EntryFormatAnthropic` 的 `IsAnthropic()` 过滤（原 103-118 已删除，现 resolver.go:70-135 对所有 entryFormat 返回同一 target 集合）；EntryFormat 类型（14-25，新增 `EntryFormatOpenAIResponses` 22-25）；rotation 的 SelectKey / 冷却 / 退避 / 配额锁对三入口 provider 复用同一套机制（selector.go:47-108、cooldown.go、error_rules.go，不按协议分支） |
 | 软策略修正 / Responses 路由 / 单协议探测 | combo/resolver.go 移除 anthropic `IsAnthropic()` 过滤 + 保留 `entryFormat` 参数（供未来扩展）；config/types.go `ModelDef.Protocols`（50）+ `Protocol*` 常量（31-37）+ validate.go `validateModelDef`；proxy/forward.go 删除入口协议严格匹配（§13.1）+ upstream.go 三分支 + stream.go `parseAnthropicSSEUsage`（415-450）；api/probe_model.go `testProviderModelProto` 单协议单次探测（**不持久化**）+ probe_common.go `normalizeProbeBaseURL` + `buildProbeURL`/`buildAnthropicURL` 归一化修复 + probe_proto_test.go；前端 providers.js/combos.js/quickslots.js 串行调用三次实现三协议探测；registry `UpdateModelProtocols` + `UpdateProbeRecord`/`GetProbeRecord`/`SnapshotProbeRecords`/`RestoreProbeRecord` + `WithProbeStateProvider`（app.go:166） |

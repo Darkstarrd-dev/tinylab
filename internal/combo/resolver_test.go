@@ -84,6 +84,37 @@ func TestResolve_RoundRobin_Sticky(t *testing.T) {
 	}
 }
 
+// TestRotateTargets_StatsHookNotCriticalHook guards the F-08 persistence-class
+// split: combo rotation-position changes are stats-class and must hit only the
+// stats hook, never the critical hook (which is reserved for cooldown locks).
+func TestRotateTargets_StatsHookNotCriticalHook(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "p1", Prefix: "provA", Name: "A"},
+		{ID: "p2", Prefix: "provB", Name: "B"},
+	}
+	c := config.Combo{
+		ID: "c1", Name: "rr", Strategy: "round-robin",
+		Models: []string{"provA/model-a", "provB/model-b"},
+	}
+	r := New(testRegistryWithProviders(providers, c))
+
+	var critical, stats int
+	r.SetStateHook(func() { critical++ })
+	r.SetStatsHook(func() { stats++ })
+
+	for i := range 5 {
+		if _, err := r.Resolve("rr", EntryFormatOpenAI); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if stats == 0 {
+		t.Fatal("rotation changes did not reach the stats hook")
+	}
+	if critical != 0 {
+		t.Fatalf("rotation changes hit the critical hook %d times, want 0", critical)
+	}
+}
+
 // TestResolve_RoundRobin_UsesConfiguredStickyLimit guards F-19: round-robin
 // target rotation must honor the configured rotation.stickyLimit instead of a
 // hardcoded 3. With stickyLimit=2 the first target must be reused for exactly

@@ -45,6 +45,11 @@ type Selector struct {
 	manualPins map[string]string // providerID -> pinned key ID
 
 	onStateChange func() // injected by main.go for state persistence
+	// onStatsChange is invoked for best-effort persistence of stats-class
+	// changes (rotation counters). The registry wiring maps it to a long
+	// debounce; losing such state on a crash only degrades scheduling
+	// heuristics, never correctness (cooldown locks still use onStateChange).
+	onStatsChange func()
 }
 
 func New(reg KeyStateProvider, settings *config.RotationConfig) *Selector {
@@ -54,6 +59,16 @@ func New(reg KeyStateProvider, settings *config.RotationConfig) *Selector {
 // SetStateHook sets a callback that is called when key runtime state changes.
 func (s *Selector) SetStateHook(fn func()) {
 	s.onStateChange = fn
+}
+
+// SetStatsHook sets the callback for stats-class persistence (rotation
+// counters: LastUsedAt/ConsecCount/RotatedAt/NIM counts). Passing nil keeps
+// the previous value; with no hook ever set, stats changes are simply not
+// persisted beyond the 30s window.
+func (s *Selector) SetStatsHook(fn func()) {
+	if fn != nil {
+		s.onStatsChange = fn
+	}
 }
 
 // SetManualKey pins keyID as the manual active key for providerID (monitor UI
@@ -153,8 +168,11 @@ func (s *Selector) SelectKey(providerID, model string, excludeKeyIDs []string) (
 		state.ConsecCount++
 		state.Unlock()
 	}
-	if s.onStateChange != nil {
-		s.onStateChange()
+	// Stats-class only: no cooldown lock changed. Persist via the long-debounce
+	// stats hook so steady QPS no longer forces a state.yaml write every 500ms
+	// (F-08). Failure/cooldown paths use onStateChange (500ms debounce).
+	if s.onStatsChange != nil {
+		s.onStatsChange()
 	}
 	return &SelectedKey{Provider: *provider, Key: chosen, KeyName: chosen.Name}, nil
 }
@@ -194,8 +212,11 @@ func (s *Selector) RotateToBack(providerID, keyID, model string, statusCode int,
 	defer state.Unlock()
 	state.RotatedAt = time.Now()
 	state.ModelErrors[model] = fmt.Sprintf("%d: %s", statusCode, truncate(body, 200))
-	if s.onStateChange != nil {
-		s.onStateChange()
+	// Stats-class: no lock, only rotation order (RotatedAt) + an informational
+	// error note. Long-debounce persistence is acceptable — on crash the
+	// failover queue restarts from the on-disk order.
+	if s.onStatsChange != nil {
+		s.onStatsChange()
 	}
 }
 

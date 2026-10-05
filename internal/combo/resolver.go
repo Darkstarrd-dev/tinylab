@@ -47,6 +47,7 @@ type Resolver struct {
 	state map[string]*comboState // combo name → rotation state
 
 	onStateChange func() // injected by main.go for state persistence
+	onStatsChange func() // best-effort persistence for rotation counters
 	logger        Logger
 }
 
@@ -164,8 +165,11 @@ func (r *Resolver) rotateTargets(comboName string, targets []ModelTarget) []Mode
 		st.consecCount = 1
 	}
 
-	if r.onStateChange != nil {
-		r.onStateChange()
+	// Stats-class: combo rotation position only. Persisted best-effort via the
+	// long-debounce stats hook — losing it on a crash restarts the sticky
+	// rotation from index 0, which is harmless (F-08).
+	if r.onStatsChange != nil {
+		r.onStatsChange()
 	}
 
 	// Rotate slice so current index is first
@@ -193,6 +197,16 @@ func (r *Resolver) SetStateHook(fn func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onStateChange = fn
+}
+
+// SetStatsHook sets the callback for stats-class persistence (combo rotation
+// indices). Passing nil keeps the previous value.
+func (r *Resolver) SetStatsHook(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fn != nil {
+		r.onStatsChange = fn
+	}
 }
 
 // SnapshotComboStates returns a map of combo snapshot data keyed by combo ID.

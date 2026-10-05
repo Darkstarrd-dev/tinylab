@@ -281,6 +281,11 @@ func (a *App) buildComponents() error {
 		)
 		a.selector.SetStateHook(a.stateManager.ScheduleWrite)
 		a.comboRes.SetStateHook(a.stateManager.ScheduleWrite)
+		// Stats-class changes (rotation counters, combo indices) use the
+		// long-debounce stats hook so steady QPS does not force a state.yaml
+		// write every 500ms (F-08).
+		a.selector.SetStatsHook(a.stateManager.ScheduleStatsWrite)
+		a.comboRes.SetStatsHook(a.stateManager.ScheduleStatsWrite)
 	}
 
 	// Archive runner: shared ZIP/7z/RAR capability (Gallery/GIF/pack), gated on

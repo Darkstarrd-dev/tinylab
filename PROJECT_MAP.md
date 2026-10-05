@@ -2,7 +2,7 @@
 
 > **项目入口文档。** 此文件是 TinyLab 的"活地图"：项目启动 / 接手 / 评审时首先读取此文件以了解模块分布与文件归属。
 >
-> **最后核对（2026-10-05，单行摘要）：** F-06 修复——内存观测数据三层限界：`proxy/recorder.go::captureBody` 单条 req/resp body 截断 256 KiB 并包装自描述信封（`marshalTruncatedBody`/`isTruncationEnvelope` 幂等）；新增 `proxy/capture_buffer.go::cappedBodyBuffer` 替换流式无界 `sseBuf`（头部 256 KiB + 真实总字节，usage/token 逐行增量提取不受影响）；`usage/ring.go::RingBuffer` 增加字节预算（`NewWithByteBudget`/`DefaultRingByteBudget` 64 MiB + `evictOverBudgetLocked` 清零槽位淘汰）。行为变更：Trace 开启时超限流式响应体仅头部落盘。回归 `internal/proxy/capture_body_test.go` + `internal/usage/ring_bytebudget_test.go`。历次核对流水已归档至 `docs/changelog/PROJECT_MAP.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-10-05，单行摘要）：** F-08 修复——状态持久化分级双去抖：`state/manager.go` 新增 `ScheduleStatsWrite`/`flushStats`（`DefaultStatsDebounce` 30s，`statsPending`/`statsTimer` 独立于关键态 500ms 通道、互不取消、同写全量快照，`FlushSync` 停双定时器）；rotation `selector.go`/`nim.go` 与 combo `resolver.go` 新增 `SetStatsHook`（`onStatsChange`），统计态触发点（SelectKey 成功/RotateToBack/OnNIMRequestSuccess/rotateTargets）改走 30s 通道，关键态（锁/退避/配额锁）仍走 500ms。稳态高 QPS 选 key 不再每 500ms 全量写 state.yaml。回归 `internal/state/manager_stats_test.go` + `internal/rotation/stateclass_test.go` + combo 钩子用例。历次核对流水已归档至 `docs/changelog/PROJECT_MAP.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
 >
 > **同步约束（必须遵守）：** 项目推进过程中，凡涉及以下变更，必须**同一次改动中同步更新本文件**对应条目，使本文件始终代表项目的真实结构：
 > - 新增 / 删除 / 重命名 任意源码文件或目录
@@ -139,13 +139,13 @@
 
 | 文件 | 职责 |
 |---|---|
-| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子；定义 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）——`Selector.reg` 字段类型为该接口，故 rotation **不 import registry**（改 import `keystate`）；`manualPins`/`manualMu` 人工活跃 Key pin（内存态不持久化），`SetManualKey`/`ManualKey`，`SelectKey` 在 NIM 过滤后、策略分发前优先命中可用 pin；`OnKeyFailure` 读 `Provider.CooldownOverrideSec` 传 `MarkUnavailableWithOverride`（selector.go:182） |
+| `selector.go` | `KeySelector` 接口 + `Selector`：组合 key 选择与冷却；`SelectKey`/`OnKeyFailure`/`IsNIMEnabled`/NIM 钩子；定义 `KeyStateProvider` 接口（`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）——`Selector.reg` 字段类型为该接口，故 rotation **不 import registry**（改 import `keystate`）；`manualPins`/`manualMu` 人工活跃 Key pin（内存态不持久化），`SetManualKey`/`ManualKey`，`SelectKey` 在 NIM 过滤后、策略分发前优先命中可用 pin；`OnKeyFailure` 读 `Provider.CooldownOverrideSec` 传 `MarkUnavailableWithOverride`；**F-08 双钩子**：`SetStateHook`（关键态 500ms）+ `SetStatsHook`（统计态 30s）——SelectKey 成功/RotateToBack 走 stats，锁/退避走 critical |
 | `strategy.go` | 轮询策略（fill-first / round-robin / failover）+ stickyLimit |
 | `cooldown.go` | 指数退避（1s→240s），429 日配额锁至次日 CST 00:05，per-model 锁；`IsDailyQuota429` 需 body 同时含 quota 关键字 + 日额度/耗尽标记（exceeded/daily/today/tomorrow）且无 `try again in` 时长提示才判定（普通 429 不再误锁到次日 00:05）；`CooldownManager` 接口的 `SonestCooldown(providerID, model, excludeKeyIDs)` + `CooldownInfo`（最早 `ModelLocks[model]` 到期 + keyName/reason），供 proxy "无可用 key" 时等待最近冷却到期而非即时 502；`MarkUnavailableWithOverride(..., overrideSec *int)`——非 nil 时以固定 `overrideSec` 秒（clamp≥1）替换指数退避，普通 `MarkUnavailable` 传 nil（cooldown.go:38-48） |
 | `ratelimit.go` | 每 key 请求速率记账 |
 | `error_rules.go` | 上游错误分类（transient vs fatal，429/5xx 规则）；`ActionPassThrough`（请求格式 4xx → 原样返回客户端，不重试/不锁/不排除，key 健康），400/422 默认 `ActionPassThrough`（文本规则优先可覆盖），聚合器规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`（聚合器自身上游瞬时失败 → 重试）；区间规则 `{StatusMin:500, StatusMax:599, Action:ActionBackoff}`（未映射 5xx → 短退避切 key，不再落 30s 瞬态冷却锁） |
 | `nim.go` | NVIDIA NIM 限速：per-key 请求计数、min interval、429 冷却阶梯、自动检测、`getEffectiveNIMSettings`/`getModelNIMOverride`、per-model `ModelNIMOverride` 支持；三个 NIM 路径（`WaitNIMInterval`/`OnNIMRequestSuccess`/`MarkNIM429`）先读配置（cfgMu RLock 释放）再锁 key state（ks.mu），消除 cfgMu→stateMu→ks.mu→cfgMu 死锁环 |
-| `selector_test.go` / `cooldown_test.go` / `ratelimit_test.go` / `error_rules_test.go` / `nim_test.go` | 测试 |
+| `selector_test.go` / `cooldown_test.go` / `ratelimit_test.go` / `error_rules_test.go` / `nim_test.go` / `stateclass_test.go`（F-08 钩子分级矩阵 + 稳态选 key 零 critical 写） | 测试 |
 
 ---
 
@@ -538,8 +538,8 @@ Web Hub 管理面端点，挂 `/api` **鉴权组**（`r.Route("/webhub", ...)`�
 | 文件 | 职责 |
 |---|---|
 | `state.go` | `Snapshot`/`KeySnapshot`/`ComboSnapshot`/`ProbeRecord`/`ProbeDetail` 类型+YAML 序列化；`CurrentVersion=1`；`Snapshot.Probes map[string]*ProbeRecord`（不含请求/响应 body）；`Save` 委托 `fsutil.AtomicWrite` 原子写；`KeySnapshot` 含结构化 `ProviderID`/`KeyID` + `EncodeSnapshotKey`（长度前缀编码，非 `providerID::keyID` 拼接）；私有 `decodeSnapshotKey` 兼容回读 legacy 拼接 |
-| `manager.go` | `Manager`：500ms 去抖 + 定时器 + 原子写（经回调快照避免 import cycle）；快照提取在 `writeMu` 内，防并发 FlushSync 旧覆盖新；`Restore` 解析顺序 结构化 → 长度前缀 → legacy `::` 拆分（key 与 probe 记录同一顺序） |
-| `state_test.go` | 测试 |
+| `manager.go` | `Manager`：**F-08 双通道去抖**——`ScheduleWrite`（关键态 500ms：冷却锁/退避/配额锁）+ `ScheduleStatsWrite`（统计态 30s，`DefaultStatsDebounce`：选 key 计数/队列顺序/NIM 计数/combo 索引），双定时器互不取消、任一触发经 `writeMu` 串行写同一份全量快照（经回调快照避免 import cycle）；快照提取在 `writeMu` 内，防并发 FlushSync 旧覆盖新；`FlushSync` 停双定时器并同步全量；`Restore` 解析顺序 结构化 → 长度前缀 → legacy `::` 拆分（key 与 probe 记录同一顺序） |
+| `state_test.go` / `manager_stats_test.go`（F-08 双通道去抖时序/统计态兜底落盘/关闭取消 timer） | 测试 |
 
 ---
 
@@ -1056,6 +1056,7 @@ Jet Hub 插件移植（产品名 **Free Hub**）的核心基础设施：管理 1
 | 新增/修改路径能力合同（grant/asset/owner） | archive、playground、config-registry-state | `internal/owner/owner.go`（`Middleware`/`From`）+ `internal/pathgrant/pathgrant.go`（`Store.Grant`/`Resolve`/`ResolveChild`/`Rebind`/`StrictRel`）+ `internal/api/editor/register.go`（`fileId`/`pathGrantId`/`renameTarget`）+ `internal/api/gallery/*`（grant/asset/sourceId 合同）+ `internal/filetransfer/upload.go`（grantId 上传）+ `internal/archive/tempstore.go`（owner 参数化 + 配额）+ `internal/api/archive/register.go`（`ResolveSource(ownerID,id)`）
 | 修改 NIM 限速 | rotation | `rotation/nim.go`+`selector.go`（`IsNIMEnabled`）、`config/types.go`（`NIMSettings`+`ModelNIMOverride`）、`proxy/retry.go`（429 分发）、`proxy/interfaces.go`（`KeyProvider`）、`proxy/forward.go`（NIM 门控） |
 | 修改配额锁/冷却退避 | rotation | `rotation/cooldown.go`、`config/defaults.go`（`BackoffMaxSec`） |
+| 修改状态持久化分级/钩子接线（F-08） | rotation、config-registry-state | `state/manager.go`（`ScheduleWrite` 500ms 关键态 + `ScheduleStatsWrite` 30s 统计态双通道）、`rotation/selector.go`（`SetStateHook`/`SetStatsHook` + 触发点分级）、`rotation/nim.go`（`OnNIMRequestSuccess` stats / `MarkNIM429` critical）、`combo/resolver.go`（`SetStatsHook`/rotateTargets）、`app.go`（组合根接线）、`state/manager_stats_test.go` + `rotation/stateclass_test.go`；触发点分级矩阵见 rotation-architecture.md §18 |
 | 新增 Provider 限速头解析 | rotation | `rotation/ratelimit.go`（adapter）、`proxy/recorder.go` |
 | 修改下载参数/任务生命周期 | download | `download/args.go`+`executor.go`+`manager.go`、`internal/api/download/register.go`、`web/static/download.js` |
 | 修改前端页面/资产 | PROJECT_MAP §18 | web/static/<page>.js（占位符）、`web/static/utility/editor/*`（Editor：`editor-state.js`/`editor_workspace.js`/`editor_commands.js`/`editor_markdown.js`/`editor_layout.js`/`editor_diff_core.js`/`editor_shell.js`/`editor-logs.js`/`tilemap_editor.js`（首个 Editor 类别：TileMap Editor，Tiled JSON→Phaser，`renderEditor` 包裹注入类别 Tab）；独立 Text Review wrapper 与 wizard）、`web/static/vendor/utility-editor/*`（各依赖许可证）、`web/static/index.html`、`web/static/index-nopg.html`、`internal/feature/feature.go` 的 RootStatic manifest |

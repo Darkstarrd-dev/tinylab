@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 14 轮（F-06 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 15 轮（F-08 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -253,10 +253,18 @@ key 耗尽——F-01 完整成立）。
 上限 300s，level≤15），直到该 key 某个 model 出现一次 2xx `ClearError` 且无其他锁；
 ② failover 策略完全绕过退避系统（只排队），F-01 在 failover 下只影响队列顺序，不产生锁。
 
-**`onStateChange` 持久化频率（✅）：** 回调 = `state.Manager.ScheduleWrite`
-（500ms 去抖 + 临时文件 rename，`state/manager.go:67,75-90`）。触发点比想象密集：
-**每次 SelectKey 成功都触发**（不只失败/冷却），即高 QPS 下每 500ms 一次全量
-state.yaml 快照写（🧪 写放大量 = 快照体积 × 2 QPS，未量化，归 B2 复核）。
+**`onStateChange` 持久化分级（✅，第 15 轮 F-08 修复后）：** 两级双去抖通道——
+**关键态**钩子 `onStateChange` → `state.Manager.ScheduleWrite`（500ms 去抖 + 临时
+文件 rename，语义与修复前一致）：冷却/退避（`MarkUnavailableWithOverride`）、锁清除
+（`ClearError`）、NIM 429 阶梯（`MarkNIM429`）、日锁/余额锁/固定冷却
+（`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkRateLimited`）；**统计态**钩子
+`onStatsChange` → `ScheduleStatsWrite`（30s 去抖，`DefaultStatsDebounce`）：
+选 key 成功（`LastUsedAt`/`ConsecCount`）、failover 队列（`RotateToBack`）、
+NIM 成功计数（`OnNIMRequestSuccess`）、combo 粘性索引（`rotateTargets`）。两个
+定时器互不取消，任一触发都写同一份全量快照（`writeMu` 串行化）；`FlushSync` 关闭时
+同时停双定时器并同步写全量。**修复前**：每次 SelectKey 成功都触发 500ms 通道，
+持续负载下每 500ms 一次全量 state.yaml 快照写；修复后稳态选 key 不再触达磁盘
+（30s 窗口兜底 + 关闭全量落盘，统计态崩溃丢失窗口 ≤30s、丢失后果仅调度启发式重置）。
 
 **`isKeyAvailable` 的锁内删除副作用（✅ `cooldown.go::isKeyAvailable`）：** 可用性
 **检查**函数顺带做过期锁清理（`delete(ModelLocks/Status/Errors)`）——读路径带写语义，
@@ -513,13 +521,32 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-08 🟠 每次成功选 key 都触发 state.yaml 去抖写，高 QPS 下持续全量快照
 
 - **维度：** 资源 / 性能
-- **状态：** ✅ 代码路径已核实（§3.5）· 🧪 写放大未量化（归 B2）
-- **证据：** `SelectKey` 末尾无条件 `onStateChange()`（`selector.go:148-151`），回调为
+- **状态：** ✅ **已修复（2026-10-05，第 15 轮）**——持久化分级：关键态 500ms / 统计态 30s 双去抖。
+  回归 `internal/state/manager_stats_test.go`（双通道时序/取消/兜底三用例）+
+  `internal/rotation/stateclass_test.go`（钩子分类矩阵 + 稳态负载零关键写）+
+  `internal/combo/resolver_test.go` 补一用例，全量 `go test ./...` 绿
+- **证据（修复前）：** `SelectKey` 末尾无条件 `onStateChange()`（`selector.go:148-151`），回调为
   500ms 去抖全量快照写（`state/manager.go:75-90`）。选 key 成功也写——`LastUsedAt`
   /`ConsecCount` 确实变了，但意味着持续负载下 state.yaml 每 500ms 重写一次，
   与 key 数、probe 记录数成正比；SSD 写放大 + 崩溃窗口常开。
-- **方向：** 把"必须持久化"（锁、配额）与"尽力持久化"（LastUsedAt 等统计数据）
-  分级，后者可拉长去抖或丢失。
+- **修复实现（第 15 轮）：** 按崩溃后丢失的后果把状态变更分两级，落点在钩子层而非
+  Manager 逐字段 diff（保守方案，快照格式与恢复语义零变更）：
+  ① **关键态（500ms 去抖，原 `ScheduleWrite` 不变）**——`MarkUnavailableWithOverride`
+  （ModelLock+BackoffLevel）、`ClearError`（锁清除/复位）、`MarkNIM429`（NIM 冷却阶梯）、
+  `MarkDailyQuotaLocked` / `MarkBalanceLocked` / `MarkRateLimited`（日锁/余额锁/固定冷却）：
+  这些状态崩溃丢失会把"本应冷却的 key 立刻再打一轮"或丢失配额锁语义；
+  ② **统计态（新增 30s 去抖 `ScheduleStatsWrite`）**——`SelectKey` 成功路径
+  （`LastUsedAt`/`ConsecCount`）、`RotateToBack`（failover 队列顺序）、
+  `OnNIMRequestSuccess`（NIM 计数）、combo `rotateTargets`（粘性轮转索引）：
+  丢失后果仅是调度启发式从头开始（sticky 轮转回 index 0、NIM 计数提前重置），
+  无正确性影响。
+  实现面：`state/manager.go` 新增 `statsPending`/`statsTimer`/`statsDebounce`（30s）+
+  `ScheduleStatsWrite`/`flushStats`——两个定时器互不取消，任一触发都写同一份全量快照，
+  `writeMu` 串行化，关键态 500ms 延迟契约不变；`FlushSync`（进程关闭）同时停两个
+  定时器并同步写全量（统计态丢失窗口上限 30s，而非"永不落盘"）。
+  rotation/combo 侧新增 `SetStatsHook`（`onStatsChange`），上述四个统计态触发点改调
+  stats 钩子；其余五个关键态触发点不动。`app.go` 组合根把 stats 钩子接到
+  `ScheduleStatsWrite`。**不新增任何用户可见配置**（两级窗口均为常量）。
 
 ### F-09 🟢 ClearError 的跨 model 复位条件可能拉长退避恢复
 
@@ -593,3 +620,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 12 | 2026-10-05 | F-02 修复（用户指定）：新增 `internal/proxy/stream_timeout.go`（`doStream` 首字节超时 120s 默认 → 网络错误分支切 key；`idleTimeoutBody` 空闲超时 300s 默认 → `StreamIdleTimeoutError` 中止流记 error 不冷却 key）；`config.Provider` 新增 `StreamTTFBTimeoutSec`/`StreamIdleTimeoutSec`（nil=默认、≤0=禁用）+ UpdateProvider 合并 + ProviderDTO；`stream.go`/`responses_translate.go` 读循环 errors.As 识别；新增 `internal/proxy/stream_timeout_test.go` 三用例 | F-02 ✅ 已修复：悬挂上游首字节超时触发故障转移、半开流空闲超时释放 goroutine/连接；proxy+config+registry+api 全量套件绿 |
 | 13 | 2026-10-05 | F-03 修复（用户指定）：`handler.go::New` 改用 `newUpstreamTransport`（克隆 `http.DefaultTransport`）构造双专属 Transport——direct `Proxy=nil` 真直连（不再响应 `HTTP(S)_PROXY`）、proxy 仅认 `SetProxy` 显式设置；池化 `MaxIdleConns=256`/`MaxIdleConnsPerHost=32`（原默认 2）+ 继承 30s 拨号/10s TLS/90s 空闲超时（原零值 proxyTransport 皆无）；六 client 两侧共享池，不再共享 `http.DefaultTransport`；新增 `internal/proxy/upstream_transport_test.go` 两用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 + 本文 §3.3/§3.8） | F-03 ✅ 已修复：连接池专属化、零值 proxyTransport 超时补齐、"直连"与环境代理脱钩；全量 proxy suite + `go build`/`go vet` 绿 |
 | 14 | 2026-10-05 | F-06 修复（用户指定）：`recorder.go` `captureBody` 加 256 KiB 截断（`maxCapturedBodyBytes` + `marshalTruncatedBody` 自描述信封 + `isTruncationEnvelope` 幂等探测防二次截断）；新增 `capture_buffer.go::cappedBodyBuffer`（头部保留+真实总字节计数）替换 `stream.go`/`responses_translate.go` 的无界 `sseBuf`；`usage/ring.go` 增加字节预算（`NewWithByteBudget`/`DefaultRingByteBudget` 64 MiB/`entryBytes`/`evictOverBudgetLocked`，`Clear` 顺带修 payload 残留清零）；新增 `capture_body_test.go` 六用例 + `ring_bytebudget_test.go` 四用例；文档同步（proxy-architecture §11.1 漂移段落更正 + 核对行、PROJECT_MAP §4/§6 三条目 + 核对行、双 changelog、本文 §3.6/§3.9/F-06） | F-06 ✅ 已修复：单条 payload ≤256 KiB（截断信封）、在途流式捕获 ≤256 KiB、Ring 累计 ≤64 MiB；测试侧坑——截断信封经 JSON 转义后仍可能超额需幂等直通（否则 totalBytes 被中间长度污染）、`forwardWithRetry` 测试调用需显式传 bodyBytes（nil 时 ReqPayload 为空）；全量 `go test ./...` 绿 |
+| 15 | 2026-10-05 | F-08 修复（用户指定）：状态持久化分级——`state/manager.go` 新增 `ScheduleStatsWrite`/`flushStats`（`statsPending`/`statsTimer`/`statsDebounce=30s`，双定时器互不取消、同写全量快照，`FlushSync` 停双定时器+同步全量）；rotation `selector.go`/`nim.go` 与 combo `resolver.go` 新增 `SetStatsHook`（`onStatsChange`），四个统计态触发点（SelectKey 成功、RotateToBack、OnNIMRequestSuccess、rotateTargets）改调 stats 钩子，五个关键态触发点（MarkUnavailableWithOverride/ClearError/MarkNIM429/MarkDailyQuotaLocked/MarkBalanceLocked/MarkRateLimited）不动；`app.go` 组合根接线；新增 `state/manager_stats_test.go` 三用例 + `rotation/stateclass_test.go` 两用例 + `combo` 一用例；文档同步（本文 F-08/§3.5/头部轮次/§6、rotation-architecture §2/§9/§14/§15/核对行、config-registry-state-architecture 核对行、PROJECT_MAP §4/§11 + 核对行、双 changelog） | F-08 ✅ 已修复：稳态选 key 零磁盘写（30s 统计态窗口兜底），关键态 500ms 契约不变，统计态崩溃丢失窗口 ≤30s 且无正确性影响；不新增用户可见配置；全量 `go test ./...` 绿 |

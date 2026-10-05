@@ -129,8 +129,10 @@ func (s *Selector) OnNIMRequestSuccess(providerID, keyID, model string) {
 		state.NIMRequestCount = 0
 		state.RotatedAt = time.Now()
 	}
-	if s.onStateChange != nil {
-		s.onStateChange()
+	// Stats-class: request counter + send timestamp. Losing these on a crash
+	// restarts the NIM rotation cycle early — best-effort persistence (F-08).
+	if s.onStatsChange != nil {
+		s.onStatsChange()
 	}
 }
 
