@@ -23,26 +23,45 @@ func (h *Handler) handleCombo(w http.ResponseWriter, r *http.Request, comboName 
 	case "fallback":
 		lastReqID := ""
 		for _, target := range plan.Targets {
+			// Client canceled between targets: stop instead of burning the
+			// next target's keys with a dead context (F-01).
+			if r.Context().Err() != nil {
+				return
+			}
 			ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey)
 			if ok {
 				return
 			}
 			lastReqID = id
+		}
+		if r.Context().Err() != nil {
+			return
 		}
 		writeProxyError(w, lastReqID, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 	case "round-robin":
 		target := plan.Targets[0]
 		if ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey); !ok {
+			if r.Context().Err() != nil {
+				return
+			}
 			writeProxyError(w, id, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 		}
 	case "greedy-squirrel":
 		lastReqID := ""
 		for _, target := range plan.Targets {
+			// Client canceled between targets: stop instead of burning the
+			// next target's keys with a dead context (F-01).
+			if r.Context().Err() != nil {
+				return
+			}
 			ok, id := h.forwardWithRetry(w, r, target.ProviderID, target.Model, path, bodyBytes, parsed, isStream, msgCount, comboLabel, "", entryFormat, "", sessionKey)
 			if ok {
 				return
 			}
 			lastReqID = id
+		}
+		if r.Context().Err() != nil {
+			return
 		}
 		writeProxyError(w, lastReqID, nil, http.StatusBadGateway, fmt.Sprintf("all keys exhausted for combo: %s", comboName))
 	default:

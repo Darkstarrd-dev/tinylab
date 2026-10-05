@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 9 轮（B3 EntryTracker / Broadcaster）｜**最后更新：** 2026-10-03
+> **当前轮次：** 第 11 轮（F-01 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -436,8 +436,8 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-01 🔴 客户端取消被当作"网络错误"，会冷却 Key 并继续轮询剩余 Key
 
 - **维度：** 故障恢复 / 状态
-- **状态：** ✅ 代码路径已核实（第 2 轮补强：5 处等待点均有 ctx 检查，但循环顶部与
-  `handleNetworkError` 缺失，见 §3.4 末段）· 🧪 未实测复现
+- **状态：** ✅ **已修复（2026-10-05，第 11 轮）**——取消即静默退出。回归
+  `internal/proxy/forward_cancel_test.go`（取消组 + 真实网络错误对照组，全量 proxy suite 绿）
 - **证据链：**
   1. 上游请求绑定客户端 context（`forward_retry.go:237`）。客户端在**收到响应头之前**断开（非流式全程；流式的 TTFT 前阶段）→ `Do` 返回 `context canceled`。
   2. 错误进入通用分支 `handleNetworkError`（`forward_retry.go:337`），该函数**不区分取消**：调用 `OnKeyFailure(..., 0, err)` 并把 key 加入排除表（`retry.go:110-115`）。
@@ -447,6 +447,14 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
   6. 例外：配置了 HardLimit 的 provider 会在 `WaitAndReserve(r.Context())` 处提前退出（`forward_retry.go:130`）。
 - **影响：** Playground 点"停止"、客户端自身超时、IDE 插件取消补全等**日常操作**，可能把一个 provider/model 下的全部 key 推入退避；连续发生时 `BackoffLevel` 叠加；Recent Requests 中出现 N 条伪"网络错误"。用户感知可能是"偶尔莫名所有 key 在冷却"。
 - **方向：** 取消不是 key 故障——在循环顶部与错误分支先判断 `r.Context().Err()`，命中即静默退出（不冷却、不排除、不重复记录）；combo 目标间同理。
+- **修复实现（第 11 轮）：** ① `forward_retry.go` 循环顶部（`SelectKey` 前）判取消 →
+  `(false,"")` 静默返回（循环顶部无持有：各分支 `continue` 前已清理三件套）；② 上游错误
+  分支在任何错误分类（Queue/SameKey/BillingLock/网络错误）前先判取消 → 清理
+  `EntryTracker.Remove`+`DecInFlight`+`Signal` 后返回——不冷却、不排除、不写 error usage；
+  ③ `forward_combo.go` fallback/greedy 目标间与循环后 502 写出前、round-robin 失败 502 前
+  短路；④ `forward_request.go` 的 502 写出前短路。仅留 Debug 级日志。测试侧坑：mock 上游
+  须先读尽 request body，net/http 才启动后台连接读检测对端关闭，否则 server 端 ctx 不随
+  取消传播、`httptest.Server.Close` 挂起。
 
 ### F-02 🟠 流式请求没有任何超时；上游"挂起"时永不触发故障转移
 
@@ -572,3 +580,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 8 | 2026-10-03 | B2：通读 `request_log.go:63-270`（writeRequestLog/appendJSONLine/parseBodyForJSON）、`SweepTraces/SweepTracesOnce/purgeIndexLines`（363-560+） | §3.10（✅）；新增 F-10（逐行 open/write/close 写放大）、F-11（sweep 无锁并发语义核实为自洽）；确认幽灵请求已修、attemptCounter 双清理 |
 | 9 | 2026-10-03 | B3：`api/sse/register.go:80-110`、`console_logs/register.go:68-73`、`assistant/events.go`、`download/register.go:350` 订阅点；`handler.go::SweepStaleEntries/StartEntryTrackerSweeper` | §3.11（✅）：无订阅泄漏（4 类订阅点 defer 解绑幂等）、慢订阅者满即丢 + version-lag 补偿、SweepStale 兜底覆盖 handler 消失场景。**范围①②（API 调度 + 衍生 debug/日志）的 A1–A7、B1–B3 全部完成** |
 | 10 | 2026-10-05 | §4.1 文档维护债处理（用户指定）：三文件流水剥离至 `docs/changelog/`、AGENTS.md 流程修正（核对行替换式）、PROJECT_MAP 结构修整（重排/解撞/合并重复节）、12 块并行保守压实 | §4.1 结案（✅）：457/159/306 KB → 306/99/152 KB；token 集合零丢失、标题字节一致、锚点抽查 37 处零真实失效；新规则写入 AGENTS.md「最后核对行维护规则」 |
+| 11 | 2026-10-05 | F-01 修复（用户指定）：`forward_retry.go` 循环顶部 + 上游错误分支最前、`forward_combo.go` 三策略目标间/502 前、`forward_request.go` 502 前共四处 `r.Context().Err()` 短路；新增 `internal/proxy/forward_cancel_test.go` 双用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 三条目） | F-01 ✅ 已修复：取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 key）；对照组证明真实网络错误仍冷却；全量 proxy suite 绿 |

@@ -62,6 +62,14 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 	}
 
 	for {
+		// Client cancellation is not a key failure (F-01): exit silently —
+		// no cooldown, no exclusion, no spurious error record. Nothing is
+		// held at loop top: every branch below cleans up
+		// (EntryTracker.Remove + DecInFlight + Signal) before continue.
+		if r.Context().Err() != nil {
+			h.logger.Debug("[%s] client canceled, stop retry loop", logTag)
+			return false, ""
+		}
 		sel, err := h.keySel.SelectKey(providerID, upstreamModel, state.excludeKeyIDs)
 		if err != nil {
 			// All available keys are momentarily unavailable. Before returning an
@@ -247,6 +255,18 @@ func (h *Handler) forwardWithRetry(w http.ResponseWriter, r *http.Request, provi
 			upstreamURL = resp.Request.URL.String()
 		}
 		if err != nil {
+			// Client cancellation surfaces here as a Do error (context
+			// canceled). It says nothing about key health (F-01): clean up
+			// and exit silently — no cooldown, no exclusion, no error record.
+			if r.Context().Err() != nil {
+				h.logger.Debug("[%s] client canceled, upstream request aborted", logTag)
+				h.EntryTracker.Remove(reqID)
+				if keyState != nil {
+					keyState.DecInFlight()
+				}
+				h.InflightUpdates.Signal()
+				return false, ""
+			}
 			// Server-specified queue delay (e.g. Qoder 10605): wait and resend
 			// with the SAME key. Not a key failure — no cooldown, no
 			// exclusion. Attempts are capped (10s cap × 180 ≈ 30min).

@@ -1,6 +1,6 @@
 # TinyLab Proxy 代理核心架构
 
-> **最后核对（2026-10-02，单行摘要）：** 失败响应身份头补齐（`writeProxyError`）+ 无可用 key 可见化 + Trace 驱逐一致性 + [DONE] 后强制收尾；jethub 桥接三可选增强接口。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-10-05，单行摘要）：** F-01 修复——客户端取消（`r.Context().Err()`）不再被当作网络错误：`forwardWithRetry` 循环顶部与上游错误分支最前、combo 目标间、502 写出点共四处短路，取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 Key）；回归 `forward_cancel_test.go`（取消组 + 连接拒绝对照组）。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
 
 ## 1. 范围与结论
 
@@ -256,7 +256,7 @@ flowchart TD
 2. **`RequestCustomizer.Customize(...) (outURL, outBody, err)`**（可选）：出站 URL 不由 `BaseURL+entryPath` 可推导时（qoder 加密端点的路径+查询串由 WASM 给出），返回完整 URL；`outURL==""` 回退默认构造。实现方（`Manager.Customize`）对非 qoder provider 内部落回 `Augment` 语义。
 3. **`ResponseInterceptor.InterceptResponse(...) (outBody io.Reader, retryAfterMs int64, err error)`**（可选）：上游响应在写回客户端**之前**拦截。三种结局：`outBody` 替换 `resp.Body`（qoder 信封剥离流）；`retryAfterMs>0` → 折算为 `*upstreamerr.QueueRetryError` 返回（重试循环**同 Key** 等待重发，`maxQueueAttempts=180` 封顶，不排除不冷却）；`err` 为失败尝试——其中 `*upstreamerr.BillingLockError` 触发 `MarkRateLimited(key, model, until)` per-model 锁 + exclude 后切号。
 
-`forwardWithRetry`（forward_retry.go）错误分支先 `errors.As` 识别两类类型化错误再落 `handleNetworkError`：排队等待尊重 `r.Context()` 取消；计费锁时间由业务侧给出（Qoder=UTC+8 当日 24:00）。跨边界错误类型放 `internal/upstreamerr` 中性叶子包，避免 jethub→proxy 的反向 import。
+`forwardWithRetry`（forward_retry.go）错误分支先判客户端取消（`r.Context().Err() != nil` → 清理后静默退出，不冷却/不排除/不记 error usage，F-01），再 `errors.As` 识别两类类型化错误后落 `handleNetworkError`：排队等待尊重 `r.Context()` 取消；计费锁时间由业务侧给出（Qoder=UTC+8 当日 24:00）。循环顶部（`SelectKey` 之前）同样先判取消——防止取消后的空转轮询把剩余 key 逐个误冷却。跨边界错误类型放 `internal/upstreamerr` 中性叶子包，避免 jethub→proxy 的反向 import。
 
 ### 7.2 URL 构造（委托 `internal/urlutil`）
 
@@ -426,7 +426,7 @@ type retryState struct {
 
 ### 9.2 三个错误处理器
 
-- **handleNetworkError（retry.go:61-70）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。
+- **handleNetworkError（retry.go:61-70）：** 记录错误，`OnKeyFailure(...,0,...)`，`excludeKeyIDs` 追加当前 key，`recordUsage("error")`，重置 `temp429Retries`/`tpmWaitRetries`，**继续下一 key**。**例外（F-01）：** 客户端取消（`context.Canceled`）不进本处理器——`forwardWithRetry` 在循环顶部与上游错误分支最前先判 `r.Context().Err()`，命中即清理三件套后静默返回；`handleCombo` 三策略的目标间/502 写出前与 `handleProxy` 的 502 写出前同样以 ctx 检查短路（回归 `forward_cancel_test.go`）。
 - **handle429（retry.go:73-258）：** 区分多类 429：
   - **NIM 429：** `MarkNIM429` + 冷却阶梯 + 排除当前 key + 切 key（retry.go:82-91）。
   - **配额头（adapter）：** 解析 `ParseHeaders` 更新 quota；`ModelExhausted` → `MarkDailyQuotaLocked` 并排除（retry.go:94-121）。
@@ -603,6 +603,7 @@ Google Gemini OpenAI-compatible 端点在 tool-call 往返时要求 `tool_calls`
 |---|---|
 | `handler_test.go` | `forwardUpstream` 成功/网络错误/UA 透传/流式 Accept 头；`BuildUpstreamURL`；`maskURL`；`normalizeBaseURL`；`forwardWithRetry` 网络错误；`SelectKey` 集成；`handleProxy` 无效/缺失/非法 JSON/坏格式 model；`ChatCompletions` 成功；`maxRetries` 默认/自定义；`recordUsage`；重试耗尽；`writeError`；`stream_options` 注入；`ListModels`；`parseAndUpdateQuota`；流式请求；combo fallback；成功往返；调试模式与捕获；`ManagementClient` 直连/经代理；`SetProxy`；`UseProxy` 启用/禁用 |
 | `retry_test.go` | `handle429` 每日配额/限流/瞬态/NIM 冷却/经 body 文本锁定/已有排除/ModelScope 耗尽/最大重试耗尽；`handleUpstreamError` 401/500/403/402/404/无 body；`handleNetworkError`；`logRequest`；`BackoffSequence`；`classifySenseNova429` 未知/rpm/tpm/短 body；`isSenseNovaEntitlementExhausted` URL 门控与 body 匹配；`excludeSameAccountKeys` 空/有 account |
+| `forward_cancel_test.go` | F-01 回归：`TestForwardWithRetry_ClientCancel_DoesNotCooldownOrPollKeys`（挂起上游 + 在途取消 → 恰好 1 次上游命中、两 key 零锁零退避零 in-flight、usage ring 零条目、EntryTracker 清空）；对照组 `TestForwardWithRetry_RealNetworkError_StillCoolsKeys`（连接拒绝 → 两 key 仍冷却+排除+记 per-key error，证明取消豁免不吞真实网络错误） |
 | `stream_test.go` | `SSELineBuffer` 正常/跨块/数据跨块/剩余/空；SSE `data:` 带/不带空格；`ExtractTokens` 多 chunk/无 usage/total_tokens 回退；`normalizeSSEChunk` choices-null/error 透传/`[DONE]`/合法数组/空行/末 usage 保留 |
 | `stream_e2e_test.go` | `streamResponse` 非 normalize 无重复 / normalize 路径 / token 提取 / 客户端取消 |
 | `stream_signature_e2e_test.go` | `TestStreamSignature_RoundTrip`：Gemini 签名捕获→回填闭环 |
