@@ -14,6 +14,13 @@ config.yaml.tmp
 # State persistence (generated at runtime)
 state.yaml
 
+# Free Hub / Web Hub runtime data dirs (created when the app runs with the repo
+# root as CWD: {configDir}/jethub or ./jethub). jethub/key is the credential
+# encryption key — a local secret that must never enter history.
+# ⚠️ Root-anchored on purpose: a bare `jethub/` would also match the tracked
+# source tree internal/jethub/ and could silently hide new files there.
+/jethub/
+
 # Go workspace
 go.work
 go.work.sum
