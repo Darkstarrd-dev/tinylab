@@ -146,7 +146,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 			var resp *http.Response
 			if isStream {
 				req.Header.Set("Accept", "text/event-stream")
-				resp, err = h.streamClientFor(sel).Do(req)
+				resp, err = h.doStream(h.streamClientFor(sel), req, sel)
 			} else {
 				resp, err = h.upstreamClientFor(sel).Do(req)
 			}
@@ -246,7 +246,7 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 	applyClineHeaders(req, sel)
 
 	if isStream {
-		return h.streamClientFor(sel).Do(req)
+		return h.doStream(h.streamClientFor(sel), req, sel)
 	}
 	return h.upstreamClientFor(sel).Do(req)
 }

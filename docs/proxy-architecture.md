@@ -1,6 +1,6 @@
 # TinyLab Proxy 代理核心架构
 
-> **最后核对（2026-10-05，单行摘要）：** F-01 修复——客户端取消（`r.Context().Err()`）不再被当作网络错误：`forwardWithRetry` 循环顶部与上游错误分支最前、combo 目标间、502 写出点共四处短路，取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 Key）；回归 `forward_cancel_test.go`（取消组 + 连接拒绝对照组）。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-10-05，单行摘要）：** F-02 修复——流式上游不再是零超时盲区：`stream_timeout.go` 的 `doStream` 为两个流式 `Do` 点施加**首字节超时**（默认 120s，超时走网络错误分支退避+换 key）与**流空闲超时**（默认 300s，按字节到达重置，超时中止流并记 `stream idle timeout` error、不冷却 key）；per-provider 覆盖 `config.Provider.StreamTTFBTimeoutSec/StreamIdleTimeoutSec`（nil=默认、≤0=禁用）。历次核对流水已归档至 `docs/changelog/proxy-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
 
 ## 1. 范围与结论
 
@@ -126,8 +126,8 @@ flowchart LR
 | `usage` | `UsageRecorder` | 用量记录 |
 | `quotaTracker` | `QuotaTracker` | quota 展示 |
 | `logger` | `Logger` | 日志输出 |
-| `client` / `streamClient` | `*http.Client` | 直连：非流式 300s 超时 / 流式无超时 |
-| `proxyClient` / `proxyStream` | `*http.Client` | 经代理：非流式 300s 超时 / 流式无超时 |
+| `client` / `streamClient` | `*http.Client` | 直连：非流式 300s 超时 / 流式无 `Timeout`（首字节+空闲超时由 `doStream` 施加，见 §7 末） |
+| `proxyClient` / `proxyStream` | `*http.Client` | 经代理：非流式 300s 超时 / 流式无 `Timeout`（同上 `doStream`） |
 | `mgmtClient` / `mgmtProxyClient` | `*http.Client` | 管理探测（模型导入/连通性/测试），15s 超时，后者经代理 |
 | `proxyURL` | `atomic.Value` | 当前代理 `*url.URL`，nil 表示不走代理 |
 | `UsageUpdates` / `InflightUpdates` / `RequestUpdates` | `*Broadcaster` | 三类事件广播 |
@@ -245,6 +245,7 @@ flowchart TD
 - **cline 特例（`Provider.IsCline()`，BaseURL 含 "api.cline.bot"）：** 无条件注入 `x-client-type: cline-cli`（upstream.go:57-60 调 `applyClineHeaders`，122-128；常量 117-120），覆盖客户端原值。`cline-free/*` 免费模型无此头会被上游 403；付费模型不依赖此头，带上无害。
 - 流式请求额外设置 `Accept: text/event-stream`（upstream.go:100-102）。
 - **client 选择：** `sel.Provider.UseProxy` 且代理 URL 非空 → 代理 client；否则直连 client（upstream.go:104-113）。流式用 `proxyStream`/`streamClient`，非流式用 `proxyClient`/`client`（upstream.go:114-120）。
+- **流式超时（F-02）：** 两个流式 `Do` 点（桥接分支与普通分支）均经 `stream_timeout.go::doStream` 施加双边界——**首字节超时**（`StreamTTFBTimeoutSec`，nil=默认 120s、≤0=禁用）以派生 ctx + timer 实现，超时返回 `stream first-byte timeout` 错误并走 `handleNetworkError` 网络错误分支（退避+排除+换 key，故障转移覆盖"已建连不回响应头"的挂起）；**流空闲超时**（`StreamIdleTimeoutSec`，nil=默认 300s、≤0=禁用）以 `idleTimeoutBody` 包装 `resp.Body`，每次成功 Read 重置窗口，触发即 cancel 派生 ctx 使阻塞 Read 返回 `StreamIdleTimeoutError`——`streamResponse`/`streamResponsesAsChat` 识别后记录 status=error / decision=`stream idle timeout`（200 已提交客户端，结构性无法 failover；目的是释放 goroutine/连接并如实记录，**不冷却 key**）。空闲窗口按字节到达重置，SSE 注释/心跳/reasoning delta 均算活动，推理模型长思考期不受影响。客户端取消（F-01）与本机制互不干扰：派生 ctx 只被自己的 timer cancel，`r.Context().Err()` 检查仍先行拦截。
 
   > 注意：上游构造分支由 `entryFormat` 决定（软策略，见 §3.3），`sel.Provider.IsAnthropic()` 不参与分支判定（upstream.go:76）。OpenAI 专用透传头（`User-Agent`/Modelscope 头）对 anthropic 一并设置（upstream.go:88-99），幂等——Anthropic 上游会忽略它们；关键区别是 anthropic 分支**绝不设置 `Authorization`**，改用 `x-api-key`（§7.3）。Responses 分支鉴权头与 OpenAI Chat 一致（`Authorization: Bearer`）。
 

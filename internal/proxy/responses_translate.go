@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -325,6 +326,10 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	var sseBuf bytes.Buffer
 	var clientDisconnected bool
 	var streamAborted bool
+	// streamIdleTimeoutErr records an F-02 idle-timeout abort (see
+	// streamResponse): byte-level silence past the configured window is an
+	// error, not a clean EOF.
+	var streamIdleTimeoutErr error
 	// Live token counters are atomic: the read loop stores them while a
 	// background ticker goroutine loads them to push live updates to the
 	// Recent Requests OUT column, mirroring streamResponse (stream.go).
@@ -463,6 +468,15 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 			break
 		}
 		if err != nil {
+			var ite *StreamIdleTimeoutError
+			if errors.As(err, &ite) {
+				streamIdleTimeoutErr = ite
+				provName := ""
+				if sel != nil {
+					provName = sel.Provider.Name
+				}
+				h.logger.Warn("[%s] %s/%s: %v → 中止流并记录错误 (responses→chat)", reqID, provName, model, ite)
+			}
 			break
 		}
 	}
@@ -494,11 +508,16 @@ func (h *Handler) streamResponsesAsChat(w http.ResponseWriter, resp *http.Respon
 	} else if clientDisconnected {
 		status = "error"
 		errMsg = "client disconnected"
+	} else if streamIdleTimeoutErr != nil {
+		status = "error"
+		errMsg = streamIdleTimeoutErr.Error()
 	}
 	streamDecision := "success"
 	switch {
 	case streamAborted:
 		streamDecision = "line buffer exceeded"
+	case streamIdleTimeoutErr != nil:
+		streamDecision = "stream idle timeout"
 	case status == "error":
 		streamDecision = "client disconnected"
 	}

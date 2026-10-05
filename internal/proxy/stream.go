@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -158,6 +159,11 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	// line (F-14): the upstream is emitting garbage beyond the line/buffer
 	// cap, so the stream is closed and usage is recorded with an error.
 	var streamAborted bool
+	// streamIdleTimeoutErr records an F-02 idle-timeout abort: the upstream
+	// went byte-silent past the configured window, so the watchdog canceled
+	// the read. Distinct from a clean EOF — the attempt is recorded as an
+	// error instead of a truncated "success".
+	var streamIdleTimeoutErr error
 	// Terminal-marker tracking: some upstreams (notably opencode.ai's
 	// /v1/chat/completions) stream content but never emit the standard
 	// finish_reason chunk or data: [DONE] sentinel - the connection just
@@ -413,6 +419,15 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 			break
 		}
 		if err != nil {
+			var ite *StreamIdleTimeoutError
+			if errors.As(err, &ite) {
+				streamIdleTimeoutErr = ite
+				provName := ""
+				if sel != nil {
+					provName = sel.Provider.Name
+				}
+				h.logger.Warn("[%s] %s/%s: %v → 中止流并记录错误", reqID, provName, model, ite)
+			}
 			remaining := sb.Remaining()
 			if remaining != "" {
 				if normalize {
@@ -531,11 +546,16 @@ func (h *Handler) streamResponse(w http.ResponseWriter, resp *http.Response, mod
 	} else if clientDisconnected {
 		status = "error"
 		errMsg = "client disconnected"
+	} else if streamIdleTimeoutErr != nil {
+		status = "error"
+		errMsg = streamIdleTimeoutErr.Error()
 	}
 	streamDecision := "success"
 	switch {
 	case streamAborted:
 		streamDecision = "line buffer exceeded"
+	case streamIdleTimeoutErr != nil:
+		streamDecision = "stream idle timeout"
 	case status == "error":
 		streamDecision = "client disconnected"
 	}

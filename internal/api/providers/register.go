@@ -54,6 +54,8 @@ type ProviderDTO struct {
 	MaxRetriesOverride       *int                      `json:"maxRetriesOverride"`
 	RetryIntervalOverrideSec *int                      `json:"retryIntervalOverrideSec"`
 	CooldownOverrideSec      *int                      `json:"cooldownOverrideSec"`
+	StreamTTFBTimeoutSec     *int                      `json:"streamTTFBTimeoutSec,omitempty"`
+	StreamIdleTimeoutSec     *int                      `json:"streamIdleTimeoutSec,omitempty"`
 	UseProxy                 bool                      `json:"useProxy,omitempty"`
 	AllowPrivateNetwork      bool                      `json:"allowPrivateNetwork,omitempty"`
 	UseCustomHeaders         bool                      `json:"useCustomHeaders,omitempty"`
@@ -84,6 +86,8 @@ func toProviderDTO(p config.Provider) ProviderDTO {
 		MaxRetriesOverride:       p.MaxRetriesOverride,
 		RetryIntervalOverrideSec: p.RetryIntervalOverrideSec,
 		CooldownOverrideSec:      p.CooldownOverrideSec,
+		StreamTTFBTimeoutSec:     p.StreamTTFBTimeoutSec,
+		StreamIdleTimeoutSec:     p.StreamIdleTimeoutSec,
 		UseProxy:                 p.UseProxy,
 		AllowPrivateNetwork:      p.AllowPrivateNetwork,
 		UseCustomHeaders:         p.UseCustomHeaders,

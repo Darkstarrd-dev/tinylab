@@ -140,6 +140,19 @@ type Provider struct {
 	// (pow2 capped by BackoffMaxSec) with a fixed duration (clamped >=1s).
 	// nil = keep the exponential backoff.
 	CooldownOverrideSec *int `yaml:"cooldownOverrideSec,omitempty" json:"cooldownOverrideSec"`
+	// StreamTTFBTimeoutSec bounds the wait for a streaming upstream's response
+	// headers (dial → request sent → first response bytes). A timeout is a
+	// transient key failure: the key is cooled and the retry loop fails over
+	// (F-02). nil = default (120s); <=0 = disabled.
+	StreamTTFBTimeoutSec *int `yaml:"streamTTFBTimeoutSec,omitempty" json:"streamTTFBTimeoutSec,omitempty"`
+	// StreamIdleTimeoutSec bounds the gap between chunks of an established
+	// stream. A timeout aborts the stream and records an error (the 200 was
+	// already committed to the client, so no failover is possible), freeing
+	// the handler goroutine and the upstream connection (F-02). SSE
+	// keep-alive comments/heartbeats count as activity and reset the window,
+	// so long reasoning phases that still emit bytes are unaffected.
+	// nil = default (300s); <=0 = disabled.
+	StreamIdleTimeoutSec *int `yaml:"streamIdleTimeoutSec,omitempty" json:"streamIdleTimeoutSec,omitempty"`
 	// UseProxy routes this provider's upstream requests through the global
 	// upstream proxy (Config.Proxy) when enabled.
 	UseProxy bool `yaml:"useProxy,omitempty" json:"useProxy,omitempty"`

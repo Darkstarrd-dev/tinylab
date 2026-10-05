@@ -144,6 +144,8 @@ func (r *Registry) UpdateProvider(id string, updates config.Provider) bool {
 			r.config.Providers[i].MaxRetriesOverride = updates.MaxRetriesOverride
 			r.config.Providers[i].RetryIntervalOverrideSec = updates.RetryIntervalOverrideSec
 			r.config.Providers[i].CooldownOverrideSec = updates.CooldownOverrideSec
+			r.config.Providers[i].StreamTTFBTimeoutSec = updates.StreamTTFBTimeoutSec
+			r.config.Providers[i].StreamIdleTimeoutSec = updates.StreamIdleTimeoutSec
 			// 注意：Keys 和 Models 不在此更新——前者通过 createKey/updateKey/deleteKey
 			// API 操作，后者通过 addProviderModel 等 API 操作，避免误覆盖。
 			return true

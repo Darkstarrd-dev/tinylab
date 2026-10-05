@@ -3,7 +3,7 @@
 > **性质：** 架构审计的**活文档**，不是重构方案，也不是一次性报告。每一轮只推进一小步，
 > 推进后立即回填本文档。**本文档不修改任何代码。**
 >
-> **当前轮次：** 第 11 轮（F-01 修复）｜**最后更新：** 2026-10-05
+> **当前轮次：** 第 12 轮（F-02 修复）｜**最后更新：** 2026-10-05
 > **路线状态：** 用户指定范围（① API 调度 A1–A7 + ② 衍生 debug/日志 B1–B3）**已全部完成**；
 > C1 及新登记问题见 §2/§5，待用户指示是否继续。
 
@@ -165,9 +165,9 @@ flowchart TD
 | 客户端 | Transport | 总超时 | 用途 |
 |---|---|---|---|
 | `client` | `nil` → `http.DefaultTransport` | `upstreamTimeoutSec`（默认 300s，按需克隆） | 非流式直连 |
-| `streamClient` | `nil` → `http.DefaultTransport` | **无** | 流式直连 |
+| `streamClient` | `nil` → `http.DefaultTransport` | 无 `Timeout`；**首字节/空闲超时由 `doStream` 按 provider 施加（F-02 修复，第 12 轮）** | 流式直连 |
 | `proxyClient` | 零值 `http.Transport{Proxy: …}` | 同上 300s | 非流式走代理 |
-| `proxyStream` | 同上 | **无** | 流式走代理 |
+| `proxyStream` | 同上 | 同上（`doStream` TTFB/idle） | 流式走代理 |
 | `mgmtClient` / `mgmtProxyClient` | 默认 / 代理 | 15s | probe / 测速 |
 
 ### 3.4 重试 / 故障转移状态机（✅ 第 2 轮核实）
@@ -459,10 +459,11 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 ### F-02 🟠 流式请求没有任何超时；上游"挂起"时永不触发故障转移
 
 - **维度：** 边缘场景 / 故障恢复
-- **状态：** ✅ 配置已核实 · ⚠️ 影响待量化（A7）
+- **状态：** ✅ **已修复（2026-10-05，第 12 轮）**——首字节超时触发切 key 故障转移；流空闲超时中止悬挂流并记 error。回归 `internal/proxy/stream_timeout_test.go`（TTFB 切 key / idle 中止 / 解析契约三用例，全量 proxy suite 绿）
 - **证据：** `streamClient`/`proxyStream` 无 `Timeout`（`handler.go:114/125`）；`proxyTransport` 为零值，无 `ResponseHeaderTimeout`、无拨号/TLS 握手超时（`handler.go:118-123`）；流式开始后还主动清除了服务端写 deadline（`stream.go:72-74`）。重试循环只对**错误**作出反应。
 - **影响：** 上游已建连但迟迟不返回响应头，或流到一半停止发送却不关连接（半开 TCP、网关卡死）时：不会切 key、不会 fallback 到 combo 下一目标，handler goroutine 与上游连接一直挂着，直到客户端自己放弃。对"调度器"而言，这是**故障转移覆盖不到的盲区**。非流式有 300s 总超时，但同样意味着最坏 300s 才切换。
 - **方向：** 区分"首字节超时"和"流空闲超时"（可 per-provider 配置），超时归类为可切 key 的瞬时错误；注意与推理模型长思考期的兼容（以 SSE 注释/心跳是否到达判定空闲）。
+- **修复实现（第 12 轮）：** ① 新增 `internal/proxy/stream_timeout.go`：`doStream` 包装两个流式 `Do` 点（`upstream.go` 桥接分支与普通分支）——**首字节超时**（默认 120s）用派生 ctx + timer 实现，`timer.Stop()` 失败（计时器已触发）统一返回 `stream first-byte timeout` 错误，进入 `handleNetworkError` 网络错误分支：退避 + 排除 + 换 key（客户端取消仍由 F-01 的 `r.Context().Err()` 检查先行拦截，互不干扰）；② **流空闲超时**（默认 300s）用 `idleTimeoutBody` 包装 `resp.Body`：每次成功 Read 重置计时器，触发即 cancel 派生 ctx 解除阻塞中的 Read，错误改报 `StreamIdleTimeoutError`；`streamResponse`/`streamResponsesAsChat` 读循环 `errors.As` 识别后记录 status=error / decision=`stream idle timeout`（200 已提交，结构性无法 failover，目的是释放 goroutine/连接并如实记录），**不冷却 key**（已交付部分数据，不作为路由健康证据）；③ per-provider 覆盖：`config.Provider.StreamTTFBTimeoutSec`/`StreamIdleTimeoutSec`（`*int`，nil=默认、≤0=禁用），`UpdateProvider` 合并 + `ProviderDTO` 暴露；④ 推理模型兼容：空闲窗口按**字节到达**重置，SSE 注释/心跳/reasoning delta 均算活动；⑤ webhub 无端点桥接分支不经过 Do，不受影响。
 
 ### F-03 🟠 上游连接池使用默认值，且"直连"实际受环境代理变量影响
 
@@ -581,3 +582,4 @@ sweep 实际只覆盖"handler goroutine 整体消失"的极端情况（panic 被
 | 9 | 2026-10-03 | B3：`api/sse/register.go:80-110`、`console_logs/register.go:68-73`、`assistant/events.go`、`download/register.go:350` 订阅点；`handler.go::SweepStaleEntries/StartEntryTrackerSweeper` | §3.11（✅）：无订阅泄漏（4 类订阅点 defer 解绑幂等）、慢订阅者满即丢 + version-lag 补偿、SweepStale 兜底覆盖 handler 消失场景。**范围①②（API 调度 + 衍生 debug/日志）的 A1–A7、B1–B3 全部完成** |
 | 10 | 2026-10-05 | §4.1 文档维护债处理（用户指定）：三文件流水剥离至 `docs/changelog/`、AGENTS.md 流程修正（核对行替换式）、PROJECT_MAP 结构修整（重排/解撞/合并重复节）、12 块并行保守压实 | §4.1 结案（✅）：457/159/306 KB → 306/99/152 KB；token 集合零丢失、标题字节一致、锚点抽查 37 处零真实失效；新规则写入 AGENTS.md「最后核对行维护规则」 |
 | 11 | 2026-10-05 | F-01 修复（用户指定）：`forward_retry.go` 循环顶部 + 上游错误分支最前、`forward_combo.go` 三策略目标间/502 前、`forward_request.go` 502 前共四处 `r.Context().Err()` 短路；新增 `internal/proxy/forward_cancel_test.go` 双用例；文档同步（proxy-architecture 正文 + 双 changelog + PROJECT_MAP §4 三条目） | F-01 ✅ 已修复：取消即静默退出（不冷却/不排除/不记 error usage/不轮询剩余 key）；对照组证明真实网络错误仍冷却；全量 proxy suite 绿 |
+| 12 | 2026-10-05 | F-02 修复（用户指定）：新增 `internal/proxy/stream_timeout.go`（`doStream` 首字节超时 120s 默认 → 网络错误分支切 key；`idleTimeoutBody` 空闲超时 300s 默认 → `StreamIdleTimeoutError` 中止流记 error 不冷却 key）；`config.Provider` 新增 `StreamTTFBTimeoutSec`/`StreamIdleTimeoutSec`（nil=默认、≤0=禁用）+ UpdateProvider 合并 + ProviderDTO；`stream.go`/`responses_translate.go` 读循环 errors.As 识别；新增 `internal/proxy/stream_timeout_test.go` 三用例 | F-02 ✅ 已修复：悬挂上游首字节超时触发故障转移、半开流空闲超时释放 goroutine/连接；proxy+config+registry+api 全量套件绿 |
