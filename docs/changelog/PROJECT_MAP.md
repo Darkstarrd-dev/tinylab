@@ -1,3 +1,10 @@
+## 2026-10-07 — zcode 领取载体页开页浏览器固定 default+shared
+
+- §13n（`internal/jethub/`）文件表：`zcode*.go` 行追加 `zcodeOpenURL` 显式固定 default+shared、
+  不得改回零值的红线 + `zcode_test.go` 回归清单补载体页开页选项断言。
+- 核对行替换为本次摘要（QuotaMonitor 余额读数叙述下移本文件上一条）。
+- 过程细节与排查结论见 docs/changelog/jethub-architecture.md 2026-10-07 条目。
+
 ## 2026-10-06 — QuotaMonitor Provider 列余额读数（Free Hub 渠道级合计）
 
 - §13n（`internal/jethub/`）文件表：新增 `balance_summary.go` 行（`BalanceSummaryOf` 口径、两档 TTL、

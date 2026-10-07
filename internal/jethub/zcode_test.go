@@ -119,7 +119,6 @@ func fixedZcodeDate() time.Time {
 	return time.Date(2026, 10, 2, 12, 0, 0, 0, time.Local)
 }
 
-
 // --- device_mid ---
 
 func TestZcodeDeviceMidShape(t *testing.T) {
@@ -136,7 +135,6 @@ func TestZcodeDeviceMidShape(t *testing.T) {
 		seen[mid] = true
 	}
 }
-
 
 // --- 模型表与档位门禁 ---
 
@@ -214,5 +212,45 @@ func TestZcodeHeaders(t *testing.T) {
 	withCaptcha := zcodeHeaders(cred, true, &zcodeCaptchaParam{Param: "p", Region: "cn"})
 	if withCaptcha["x-aliyun-captcha-verify-param"] != "p" || withCaptcha["x-aliyun-captcha-verify-region"] != "cn" {
 		t.Fatalf("captcha headers missing: %#v", withCaptcha)
+	}
+}
+
+// --- 领取载体页的浏览器选择（2026-10-07 报障回归） ---
+
+// TestZcodeOpenURLPinsDefaultBrowser: zcodeOpenURL 是领取载体页（后台动作）的
+// 唯一开页入口，它必须**显式固定**「系统默认浏览器 + 共享会话」，而**不是**传
+// 零值。零值会被 normalizeOpenOptions 用「记住的 +新建账号 偏好」补齐——那是为
+// 登录流设计的（登录才需要登录态）；载体页跑的是阿里云无感验证、页面不含任何
+// 凭据（领取 JWT 在服务端），根本不需要登录态。真实故障链（2026-10-07）：
+// 用户给某渠道登录时选了 Edge → login-open.json 记住 edge → zcode 领取的载体页
+// 跟着落到 Edge（系统默认其实是 Chrome）→ 无感验证在 Edge 里失败。回归锁两件事：
+// ① 开页选项恒为 default+shared（不随偏好漂移）；② 即便记住的偏好是别的浏览器，
+// 该路径也不继承它。
+func TestZcodeOpenURLPinsDefaultBrowser(t *testing.T) {
+	env := newTestManager(t)
+	type opened struct {
+		url string
+		opt OpenOptions
+	}
+	got := make(chan opened, 1)
+	env.m.SetBrowserOpener(func(url string, opt OpenOptions) { got <- opened{url, opt} })
+	// 模拟报障现场：登录偏好记住的是 Edge（继承它就是复现缺陷）。
+	if err := env.m.SetLoginOpenPrefs(OpenOptions{Browser: "edge", Session: SessionShared}); err != nil {
+		t.Fatal(err)
+	}
+
+	env.m.zcodeOpenURL("http://127.0.0.1:20102/api/jethub/zcode/carrier?token=t")
+
+	select {
+	case o := <-got:
+		if o.url != "http://127.0.0.1:20102/api/jethub/zcode/carrier?token=t" {
+			t.Fatalf("opener got %q", o.url)
+		}
+		// ⚠ 必须是显式的 default+shared，而不是零值（零值=继承偏好）。
+		if o.opt.Browser != BrowserDefault || o.opt.Session != SessionShared {
+			t.Fatalf("carrier page must pin default+shared (edge preference leaked), got %+v", o.opt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("browser opener was not invoked")
 	}
 }

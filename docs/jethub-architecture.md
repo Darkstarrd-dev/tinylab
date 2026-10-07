@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-06（**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。上轮：**F-05 桥接出站头空白基底（proxy 侧 §7.1a 契约变更）**：`RequestAugmenter.Augment`/`Customize` 收到的 `r.Header` 从『客户端头全量拷贝』改为**代理新建空白基底**（仅回播 loopback 标记），augmenter 写入即出站集合——§4.4 已更新；各 provider augmenter 的 `for k := range r.Header { Del(k) }` 全删循环**已移除**（12 处：buddy/cline/codearts/gemini/lobsterai/loomy/minimax/opencode/qoder/raccoon/trae/zcode），新增 augmenter **不得也不再**手工清头；客户端凭据结构性进不了桥接上游（ProjectAnalysis F-05 结案，回归 `proxy/bridge_headers_test.go`）。
+> **最后核对：** 2026-10-07（**zcode 领取载体页的开页浏览器固定 default+shared（§6.7）**：`zcodeOpenURL` 从零值改为显式 `OpenOptions{Browser: BrowserDefault, Session: SessionShared}` —— 零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），载体页本不需要登录态却跟着用户的 Edge 登录选择走（2026-10-07 报障：载体页在 Edge 里无感验证失败，系统默认浏览器是 Chrome）；登录流（API 层 `zcodeLogin`）仍传用户当次选择，仅此后台路径固定功能上线前的旧行为。回归 `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过）。上轮：**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。
 >
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
@@ -22,7 +22,7 @@
 > - 修改 **codearts 续期**（终态判据/镜像对账/per-credential 串行/30min 调度器）→ §3.7 + `internal/jethub/codearts_refresh.go`/`codearts_oauth.go`
 > - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛 / 4291 额度用尽 + 429 独立数字锚定）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`/`BillingLockError`）+ `internal/proxy/forward_retry.go`
 > - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
-> - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
+> - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256；**`zcodeOpenURL` 的开页选项必须保持显式 default+shared，不得改回零值**——零值继承登录浏览器偏好，见 §6.7 与 `TestZcodeOpenURLPinsDefaultBrowser`）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
 > - 新增/修改 **Gemini Code Assist** 适配（双层信封/身份五头/档位后缀/schema 白名单/签名回填/OAuth 回调/配额窗口）→ §6.8 + `internal/jethub/gemini*.go`（信封字母序与金标准字节断言不可放松；`gemini_test.go` 金标准用例是唯一防线）+ `internal/api/jethub/gemini.go` + `web/static/jethub.js`（`%` 单位显示）
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
@@ -614,6 +614,14 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
   token、页面不含任何凭据）在用户浏览器里跑阿里云 SDK 的**无感验证**，param 回传
   `/carrier/contribute`；param 门槛 ≥200 字符 / base64 JSON / `certifyId` 非空 /
   `securityToken` ≥50（不满足必得 3007，宁可不发）。每个 plan 现产一个新 param（一次性）。
+  ⚠️ 载体页的开页浏览器**显式固定** default+shared（`zcodeOpenURL`），**不得**传零值：
+  零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），而那个偏好是
+  为登录流设计的（登录才需要登录态）——载体页不含凭据、领取 JWT 在服务端，本就**不需要
+  任何登录态**（反证：DSH 内部载体用全新无 cookie 的内存 partition 也能产出 param）。
+  2026-10-07 真实故障：用户登录某渠道时选了 Edge → `login-open.json` 记住 edge →
+  载体页跟着落到 Edge（系统默认是 Chrome）→ 无感验证在 Edge 里失败。载体页不弹时的
+  排查方向：浏览器差异（代理路由/风控指纹），不是登录态。回归
+  `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过：改回零值即红）。
 - **错误分类全按正文业务码**（只看状态码会把语义混掉）：`3009` 并发限流 → 同号退避 1.5s×n
   （预算 2 次，**不切号、不标记**；用尽后原样透传）；`1005`/`1113` 额度用尽 →
   `BillingLockError` 锁 账号×模型 至 UTC+8 次日 24:00 并切号；`3007`/`3012` → 显式报错

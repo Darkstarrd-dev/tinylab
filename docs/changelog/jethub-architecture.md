@@ -1,5 +1,33 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-07 — zcode 领取载体页不再继承登录浏览器偏好（§6.7）
+
+- 报障：zcode 渠道领取积分不可用——弹出的浏览器窗口打开的是本地载体页
+  （`/api/jethub/zcode/carrier?token=…`），页面停在阿里云无感验证报错；而 DSH
+  插件里领取正常，且 DSH 领取后 tinylab 再点领取就不再弹窗。
+- 排查结论（用户猜测「Edge 上没有 zcode 登录态」只对了一半）：
+  - **对的一半**：`zcodeOpenURL`（`internal/jethub/zcode.go`）传的是零值
+    `OpenOptions{}`，被 `normalizeOpenOptions`（login_open.go）用「记住的
+    +新建账号 偏好」补齐。运行时实例 `C:\Tools\TinyLab` 的
+    `jethub/login-open.json` 实测为 `{browser: edge, session: shared}`
+    （2026-10-05 用户给某渠道登录时选了 Edge；系统默认浏览器是 Chrome）——
+    载体页因此跟着落到 Edge。
+  - **错的一半**：失败与登录态无关。载体页不含任何凭据（领取 JWT 在服务端），
+    反证：DSH 内部载体用全新无 cookie 的内存 partition 也能产出 param。Edge 里
+    卡住的是阿里云无感验证本身（浏览器差异：代理路由/风控指纹）——「DSH 领取后
+    tinylab 不再报错」只是短路：`ZcodeClaimDaily` 先查可领活动，DSH 已把今天的
+    领掉 ⇒ 0 个 plan ⇒ 直接返回、走不到开浏览器那步（按日结算，跨渠道共享）。
+- 修复：`zcodeOpenURL` 显式固定 `OpenOptions{Browser: BrowserDefault,
+  Session: SessionShared}`（= §3.9 功能上线前的旧行为：shell → 系统默认浏览器 +
+  共享会话）。登录流（API 层 `zcodeLogin`）仍传用户当次选择，**仅此后台路径**
+  脱离「登录浏览器偏好」。`login-open.json` 里的 Edge 偏好保留不动（它只影响
+  登录弹窗的默认勾选）。
+- 回归：`TestZcodeOpenURLPinsDefaultBrowser`（internal/jethub/zcode_test.go）——
+  先 `SetLoginOpenPrefs({edge, shared})` 模拟报障现场，断言 `zcodeOpenURL` 到达
+  opener 的选项恒为显式 default+shared。反向验证过：把实现临时改回零值 ⇒ 用例红
+  （`got {Browser: Session:}`，偏好泄漏被当场抓住）。
+- 顺带：`zcode_test.go` 两处改动前就存在的连续空行（gofmt 报警）清理。
+
 ## 2026-10-06 — 渠道级余额合计（Monitor 页 Provider 列读数，§6.9）
 
 - 需求（用户）：对齐 DSH 插件输入区那枚用量徽标（`ZCode (智谱) • 94.54MToken`）——在 TinyLab

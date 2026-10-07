@@ -287,10 +287,20 @@ func init() {
 }
 
 // zcodeOpenURL opens a URL with the platform browser (thin wrapper so the
-// login/claim paths share one call site). The captcha carrier page is a
-// background action with no per-request choice, so the zero value — i.e. the
-// remembered browser/session preference — applies.
-func (m *Manager) zcodeOpenURL(url string) { m.OpenURLWithBrowser(url, OpenOptions{}) }
+// login/claim paths share one call site). ⚠️ It pins **default browser +
+// shared session** explicitly instead of passing the zero value: the zero
+// value inherits the remembered +新建账号 preference (login_open.go
+// normalizeOpenOptions), which is the wrong default here — the claim carrier
+// page is a background action that runs the Aliyun SDK's traceless
+// verification and needs NO login state (the claim JWT lives server-side).
+// Inheriting a login-oriented preference made the carrier page follow the
+// user's Edge login choice (2026-10-07 报障) even though the system default
+// browser was Chrome. The login flow (zcodeLogin in internal/api/jethub) keeps
+// passing the per-request user choice; only this background path pins the
+// pre-feature behavior (shell → OS default browser, shared profile).
+func (m *Manager) zcodeOpenURL(url string) {
+	m.OpenURLWithBrowser(url, OpenOptions{Browser: BrowserDefault, Session: SessionShared})
+}
 
 // zcodeClientFor returns the outbound client honoring the provider's Use
 // Proxy toggle (same policy as every other provider's management calls).
