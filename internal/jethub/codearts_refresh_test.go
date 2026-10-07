@@ -254,12 +254,19 @@ func TestCodeartsAugmentDropsBenefitHeaderOnRetry(t *testing.T) {
 	}
 }
 
-// --- R1-4: 输出上限收敛（ref 916c647/da0a2ad） ---
+// --- R1-4: 输出上限收敛（ref 916c647/da0a2ad，R5 由 5334547 扩集合） ---
 
-// TestCodeartsClampMaxTokens: 三个实测拒绝 128000 的模型收敛到 65536（两个字段
+// TestCodeartsClampMaxTokens: 实测拒绝 128000 的模型收敛到 65536（两个字段
 // 都管）；未超限与其它模型**字节级不变**。
+//
+// ⚠️ 模型集合必须与 codeartsCappedModel 一致：R5 加入了 glm-5.3-flash 与
+// deepseek-v4.1-flash（ref 5334547 把网关的收敛集合扩到这两个）。反向验证：
+// 把任一条目从 codeartsCappedModel 摘掉，本用例立刻变红。
 func TestCodeartsClampMaxTokens(t *testing.T) {
-	for _, model := range []string{"GLM-5.2", "deepseek-v4-flash", "deepseek-v4-pro"} {
+	for _, model := range []string{
+		"GLM-5.2", "deepseek-v4-flash", "deepseek-v4-pro",
+		"glm-5.3-flash", "deepseek-v4.1-flash",
+	} {
 		for _, field := range []string{"max_tokens", "max_completion_tokens"} {
 			in := []byte(`{"model":"x","` + field + `":128000}`)
 			out := codeartsClampMaxTokens(in, model)
@@ -275,7 +282,7 @@ func TestCodeartsClampMaxTokens(t *testing.T) {
 	for _, tc := range []struct{ model, body string }{
 		{"GLM-5.2", `{"max_tokens":32768}`},
 		{"GLM-5.1", `{"max_tokens":128000}`},
-		{"deepseek-v4.1-flash", `{"max_tokens":128000}`},
+		{"GLM-5.3", `{"max_tokens":128000}`},
 	} {
 		if out := codeartsClampMaxTokens([]byte(tc.body), tc.model); string(out) != tc.body {
 			t.Fatalf("%s %s must stay byte-identical, got %s", tc.model, tc.body, out)

@@ -133,11 +133,11 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R4：zcode Linux 浏览器探测候选链 | `892187d` / `22f3031` | 本端登录走 CLI 设备授权流（纯 HTTP），**没有**「探测本机浏览器可执行文件」那条链路；本端的浏览器选择是另一套（`internal/browserlaunch`，用户显式选择 × 会话模式，见架构 §3.9） |
 | R4：zcode coding-plan key 取用接线 | `2e8bb86`（顺带修好） | R3-4 已由用户决定**不搬** coding-plan / zai 通道，故本端没有该取用点 —— 上游这次是修「`fetchCodingPlanApiKey` 建好却零调用方」的断链，前提（coding-plan 通道）在本端不存在。本端原先照抄留下的两个 `zcodeKeyFragmentPlan*` 死常量已随 R4 一并删除 |
 | R1-7 旧差异「opencode 无 per-account 代理」 | R4-0 **反转为已实现**（用户要求全量对齐） | 原判据是「本端推理出站由 proxy 层决定，per-key 出口要动代理核心」。R4-0 做了这件事：`config.Key.Proxy` + 按代理串缓存的 transport + `upstreamClientFor`/`streamClientFor` 的 per-key 分支。**安全边界**：`Key.Proxy` 默认空 ⇒ 未设置的 provider/key 走原路径，逐字节不变（`perkey_proxy_test.go` 两条断言分别锁「设了的会绕」与「没设的不绕」） |
-
----
 | **Gemini 渠道相关的一切（永久排除，2026-10-07 用户决定）** | `d9d0683` / `66753b4` / `ee0f730` / `e061b21` 族（`src/gemini*.ts` 7 文件 + 172 例单测） | **本端已整体删除该渠道**（R5-1：其 OAuth client 常量被 GitHub Push Protection 判为密钥、阻塞全部 `git push`，用户决定删渠道而非 unblock）。渠道不存在 ⇒ 协议事实、配额语义、模型目录、sessionId 派生、签名漂移兜底等全部无落点。**不再逐条评估**；若将来重新引入该渠道，须先解决密钥托管（env / 用户自备 client）再按本行锚点重估 |
+| R5：记账 / Token 计数簇 12 条（`token-ledger*` 四期 + 三轮审计 + 宿主接线 + 面板图表） | `1ebad41` / `3e62a87` / `f510c88` / `eb0b7d0` / `b5170d8` / `e0df049` / `c10de34` / `a12ed03` / `dd5b591` / `648496a` / `a0f0940` / `d5b73ca` | 上游插件的**本地 Token 记账功能**（非协议/服务端事实），接线点全在 `dsh-llm` 与 `openai-gateway` 出口层（§5 已锁定）。本端 `internal/usage` + Monitor SPD/GT/TTFT 列 + `traces/` 日轮转已覆盖等价能力；`a0f0940` 的 TPS 分母塌缩教训本端结构性免疫（三处守卫实测）。见 §6 R5-2 |
+| R5：DSH 宿主 / 面板专属项（buddy 成长面板与部署副本、buddy 图片能力三态与白名单、auto 选型、TRAE/LobsterAI 永久积分锁、RPC refresh 语义、调度器武装门） | `9462051` / `09fe2eb` / `97397a3` / `e60e555` / `f498586` / `e52f091` / `29f6bad` / `3de9312` / `570b0b3` / `68fb567` / `ac805a3` / `ba419ad` / `e784201` | 逐条理由见 §6 R5-3 / R5-4：或属宿主接线/面板行为，或本端已有等价实现（空候选 502、mark→exclude 无条件执行、九个刷新端点一律 502、`StartRefreshScheduler` 已无条件武装）。**其中三条纪律记入 R1-8 参考**（「未知 ≠ 不支持」/「目录重看 ≥10s 节流」/「等目录恢复才解决的错误不得进可重试集合」） |
 
-## 6. 待办与实施记录（R1：pin `cecf376` → `e06283c`；R2：ZCode 重估）
+## 6. 待办与实施记录（R1：`cecf376` → `e06283c`；R2：ZCode 重估；R3：→ `ff5e37d`；R4：→ `2e8bb86`；R5：→ `e73cd2f`）
 
 > 分诊记录（2026-10-02）：31 个触 `src/` 的提交逐条归类；merge 提交 `4ce4a6e`（= `0ca8256` 族）/`4a62e84`（= cline 面板族）已展开核对。未深读的提交均为面板 / 测试 / 文档 / zcode 类，归 §5。每条 R1 在实施时先读对应 ref 文件与上游测试，再动手。
 >
@@ -207,6 +207,24 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 - [ ] 本项目现状：模型列表纯静态（架构 §6.3「远端目录未实现」是已知缺口，trae/lobsterai/buddy/cline 四家的倍率只有远端才有）。
 - [ ] 本轮动作：**不实施**；作为将来实现远端目录时的正确形态参考（实施时在架构 §6.3 引用本行）。
 
+#### R1-8 追加（R5 分诊产物，2026-10-07）：远端目录落地时的四条硬纪律
+
+本轮 buddy 图片能力簇与 cline 兜底表簇产出了四条**与本端 R1-8 缺口直接相关**的纪律，
+全部来自上游实测（实施远端模型目录时必须照抄，不要重新发明）：
+
+1. **「未知 ≠ 不支持」**：能力字段缺席表示**未知**，必须省略该字段，**不得**投影成「不支持」
+   （ref 09fe2eb：把未知投影成 `[text]` 会让贴图在宿主侧被静默丢掉）。本端将来加图片能力字段
+   时同款：无信息就不写字段，代理本就透传图片。
+2. **目录重看节流 ≥10s**：`RemoteCatalogGate.sinceLastAttemptMs`（ref 09fe2eb）—— 失败的目录
+   拉取不得每请求重试；但**兜底表不写缓存**（R1-8 原始判据）。
+3. **「等目录恢复才解决」的错误不得进可重试集合**：ref e60e555 实测把能力未知的贴图错误码
+   放进 `DEFAULT_RETRYABLE_CODES`（含 `TRANSPORT`）会导致白重试 5 次并放大目录拉取 6 倍。
+   本端等价物是 `internal/upstreamerr` 的类型化重试信号 —— 加新信号前先问「重试能不能解决」。
+4. **兜底表并入必须有条件**：ref b0352fc —— 远端成功下发目录时，兜底表只用于给「远端仍认识」的
+   条目补元数据，远端已不认识的（= 上游已下架）**不再新增**；判据用 `remote.entries.length > 0`
+   而非 `freeIds.length > 0`（后者在上游把免费模型**全部**下架时合法为空，只看它会把「全撤」
+   误判成「端点挂掉」，反而保留整张失效表）。本端无合并层，此条在实现远端目录时适用。
+
 ### R1-9（可选参考）自动签到排除表 / 永久锁选号语义
 
 - [ ] 上游：`f10408c` / `1b65a5c` B2（有代价的 provider 须在**调用前**排除，事后来不及）/ `71ecbdd`（免费模型不被「锁定永久积分」拦下）。
@@ -273,27 +291,6 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 > **与 ref 的有意差异**：① 签名缓存**进程内不落盘**（ref 落盘是因 DSH 每请求重建适配器；本端 Manager 常驻）② 无端点轮换/换号层（proxy 重试链 + rotation 已承担；ref 的 `includeThoughts` 恒真/假名 404 判据全保留）③ 档位经**带档位的模型名**（`gemini-3.8-flash-<tier>`）选择而非 DSH efforts 下拉（等价机制）④ 金标准字节断言取**前缀+后缀+字段序**（requestId 随机段无法逐字节，判据强度等价）。
 > 回归 `gemini_test.go`（14 个：金标准信封/档位预算/未知 id 拒绝/角色与工具配对/图片 data-URL 门禁/schema 清洗/凭据过期/签名键/请求 id 形状/SSE 转换/thought→reasoning/错误帧/聚合/嵌套字母序）。
 
-#### R5-1 Gemini Code Assist 渠道：整体移除（**BREAKING，用户决定**）✅
-
-- **触发**：`git push` 被 GitHub Push Protection 拒绝（`GH013`），命中的是
-  `internal/jethub/gemini_oauth.go:33/36` 的两个常量 —— Google OAuth **client_id / client_secret**
-  （`geminiDefaultClientID` / `geminiDefaultClientSecret`，R3-3 从 ref 逐字移植的「上游 Cloud Code
-  客户端固有公开常量」）。提交 `f2a6fee`（R3-3 引入）与 `e294d4e`（同文件再动）各命中一次。
-- **决定（用户，2026-10-07）**：**不移交 unblock、不改走环境变量，直接删除整个渠道**；并要求
-  **此后不再同步该渠道的上游数据**（见 §5 的新条目）。
-- **删除范围**：`internal/jethub/gemini{,_convert,_credits,_oauth,_test}.go` + `internal/api/jethub/gemini.go`
-  六个文件；`manager.go` 元数据、`products.go`（product 表 + `SetAugmenter`）、`qoder_adapter.go`
-  的拦截器分派、`register.go` 的路由挂载与 `rateLimitExemptProviders` 条目；前端配额单位（`%`）
-  整条渲染链 + 账号规格行 + 四个 i18n 键；`internal/api/jethub/balances.go` 的
-  `nonAggregatableProviders` 表。provider 数 14 → **13**。详见架构 §6.8（已改为删除记录）。
-- **保留**：代理核心的 Gemini `thought_signature` 回填（服务用户**自建**的
-  `generativelanguage.googleapis.com/v1beta/openai` Provider，与 Free Hub 渠道无关）——
-  它同时是 `internal/urlutil` 的 Google 路径派生用例，一并保留。
-- **上游数据处置**：`src/gemini*.ts`（7 文件）与其 172 例单测**不再纳入分诊范围**；
-  上游后续任何 gemini 提交（如本轮的 `d9d0683` / `66753b4` / `ee0f730`）一律**不搬、不再评估**。
-- **验收**：`go build ./...` + `go vet ./...` + 全量 `go test ./internal/...` 全绿；
-  `node web/jethub.test.js` 全绿；`git grep -i gemini` 在 Free Hub 相关面零残留（除上述保留项与文档）。
-
 #### R3-4 zcode：双通道（start-plan/coding-plan）+ zai 渠道——不搬（2026-10-04 用户决定）
 
 > 已移入 §5（判定锚点见该表）。上游事实存档：`0fcd929`（zai 渠道：ready 解析接 `data.zai` 分支）+ `15ccae5`（双通道传输层：start-plan=积分走 `zcode.z.ai`，coding-plan=订阅走 `api.z.ai` + OAuth token 换 api-key 四步 GET 流；选路按模型归属、start-plan 优先）。触发重估的条件：用户出现 coding-plan 订阅或 z.ai 国际版账号。
@@ -344,6 +341,47 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 
 - pin 推进 `ff5e37d` → `2e8bb86`；PROJECT_MAP §22 / §19 / §24 同步。
 - 不搬项入 §5（诊断模块 / Linux 浏览器链 / coding-plan 接线）；region 同源与 405 两条以「本端免疫 + 事实订正」入 §5 与架构 §6.7。
+
+### R5（pin `2e8bb86` → `e73cd2f`，2026-10-07 分诊）
+
+> 分诊记录（2026-10-07）：105 commits（69 触 `src/`）分四簇并行侦察（记账 / 轮询限流 / buddy 成长与模型目录 / zcode 与响应判据）。
+> **上游数据永久排除一项**：gemini 渠道（§5 + R5-1）。其余结论如下，`[~]` 表示已分诊未实施（带 commit 锚点，下一轮不重复分诊）。
+
+#### R5-1 Gemini Code Assist 渠道：整体移除（**BREAKING，用户决定**）✅
+
+> 见上文 §5 新增的永久排除条目与架构 §6.8 的删除记录。上游 `src/gemini*.ts` 及其单测**不再纳入分诊范围**。
+
+#### R5-2 记账 / Token 计数簇（12 条）：整体不搬 ✅（分诊结论）
+
+- 上游：`1ebad41`（第 1 期全 provider 计数 + `src/token-ledger.ts` 新增）`3e62a87`（第 2 期账号维度 + 日聚合落盘）`f510c88`（第 3 期 TTFT 与 tok/s）`eb0b7d0`（第 4 期历史视图 + 面板）`b5170d8`/`e0df049`/`c10de34`（三轮审计修复）`a12ed03`/`dd5b591`/`648496a`（宿主接线测试与修复）`a0f0940`/`d5b73ca`（度量口径与图表修正）。
+- **不搬理由**：该簇是上游插件自建的**本地 Token 记账功能**，不是协议/服务端事实；接线点全在 `dsh-llm`（`prepareCall`→`call.stream`）与 `src/openai-gateway/*` 出口层（§5 已锁定）。本端已有等价能力：`internal/usage` 记账 + Monitor 的 SPD/GT/TTFT 列 + `traces/` 日轮转 per-request 持久化（含失败请求与 `error` 字段）。
+- **口径教训已结构性免疫**（无需动作）：`a0f0940` 的「982.5 tok/s」源于 TPS 分母塌缩，本端 live SPD 有 `genMs<200` 守卫（`monitor_state.js`）、终端 AvgSpeed 是 `total/total` 聚合而非比率均值（`usage/accumulator.go`）、live key 速率有 `elapsed<2s` 守卫（`proxy/inflight.go`）。
+
+#### R5-3 轮询 / 换号 / 限流判据簇（11 条）：部分实施
+
+- **可搬（P1，四条并为一项）**：`0abaf1a` + `51ded6a` + `7b524ff` + `1623538` —— **raccoon / loomy / trae 的 HTTP 200 内嵌错误帧分类判据族**。上游两文件自述「业务失败也可能以 HTTP 200 + SSE 内嵌错误帧返回」（协议事实）；本端这三家**没有 `InterceptResponse` 分支**（`qoder_adapter.go` 对未列 provider 直通）⇒ 内嵌帧不分类、不冷却、不换号，限额行也不写。换号机制本身不搬（本端 `proxy` 重试链 + rotation 已等价且更强），搬的是**错误帧 → 类别 → 动作**的判据。落点：`internal/jethub/raccoon_provider.go`、`loomy.go` 新增 interceptor（仿 `opencode` 的）+ `qoder_adapter.go` 分派加分支；`trae` 部分随响应桥（`products.go` 自述未实现 SOLO→OpenAI 转换）落地。判据细节实施时 `git show 0abaf1a` 复核。
+- **可搬（独立）**：`edbe1f6` —— **trae 通道白名单是服务端事实**（同一模型只在列出它的通道里可调用，发错通道流内 4001）。本端双重缺口：请求侧对所有模型硬编码 `solo_work_lite`（`trae_provider.go`）、静态模型表无通道字段（`trae_model.go`）。模型表修剪独立有价值（防列出必然 4001 的模型）。
+- **已实施 ✅**：`5334547` + `cfd7851` —— codearts flash 族输出上限收敛（与 R1-4 同判例）。本端 `codeartsClampMaxTokens`/`codeartsCappedModel` 原覆盖 `deepseek-v4-flash|pro` + `GLM-5.2`；按上游扩至 **`glm-5.3-flash` + `deepseek-v4.1-flash`**（`internal/jethub/codearts_augment.go`，cap 恒 65536）。回归 `codearts_refresh_test.go` 的 clamp 纯函数与 augmenter 端到端用例已覆盖新集合。
+- **不搬**：`ba419ad`（「模型级限流误报未登录」是 DSH `resolveCredential` 兜底链问题，§5 已有 R3 `d77e716` 判例；本端空候选 → 502 + SonestCooldown，且 R4-0 P1-I 观察者已写卡片限额行）；`e784201`（「失败前标记最后一个耗尽账号」本端 mark→exclude 在每次尝试点无条件执行，不存在末账号漏标路径）；`68fb567`（DSH 面板 RPC；其语义内核「失败必须显式失败」本端九个刷新端点已满足，一律 502）；`ac805a3`（「续期调度器无条件武装」本端 `StartRefreshScheduler` 已是该形态，即 R1-2 ④ 已移植语义）。
+
+#### R5-4 buddy 成长 / 失效模型剔除 / auto 选型 / 永久锁簇（15 条）：部分实施
+
+- **可搬（高优先）**：`29a42ea` —— **模型饱和 `14003` 被误判成账号额度限流**。纯服务端事实：HTTP 429 + `{"code":14003,"msg":"too many requests","actions":["SWITCH_MODEL",…]}`（`actions` 无换号选项，报文自证模型级）；与 `6004`（账号额度限流，带重置时刻）动作相反。⚠️ 本端确有同型误判：buddy 无响应判据层，代理 429 分支 + rotation 观察者会对**任意** 429 写 `(account,model)` 标记并换号 ⇒ 14003 会逐个锁死整池。落点：`internal/jethub/buddy_response.go` 新建（仿 `zcode_response.go` 的同号退避 + `codearts_response.go` 的「先专项后通用」顺序），注册 ResponseInterceptor；`6004` 既有行为不得回退。
+- **可搬（高价值）**：`f8748fa` —— **已失效模型的运行时实证剔除**（修「下架模型仍显示免费」），正是 R1-8 缺口中**不需要远端目录的那一半**。判据 = **阳性证据**（只认明确的「模型不存在」文案，中英各形态；一律不认额度/限流/认证/权限/排队/网络/参数错误，也不收「不可用」）。为何不用远端目录比对：cline 远端可比对，但 buddy 系远端刻意残缺（比对会删掉可用模型），qoder 无端点 ⇒ 运行时阳性证据是唯一安全通用层。记录按 `(provider,model)` 原子写 + **必须有 TTL**（默认 30 天，被剔除的模型用户选不到、无法靠成功自愈，只能过期回收）。落点：`internal/jethub/deadmodels.go` 新建 + 模型表出口过滤 + proxy 错误路径与 probe 的 404 喂记录；误判代价不对称（可用模型被藏），反例组必须多于正例组。
+- **已实施 ✅**：`b0352fc` —— cline 兜底表不再复活已下架免费模型：`cline-free/deepseek-v4.1-flash` 已于 2026-10-05 被上游从 `free` 数组移除（free 4→**3**，直连回 404 `model not found`），本端 `internal/jethub/trae_model.go::clineFallbackModels` 已删除该条（与 R3-2 删 `gemini-3.8-flash` 同型）。⚠️ **有条件并入的机制不搬**：上游同时修了 `mergeClineModels` 的无条件兜底表并入（本端模型列表是**纯静态表**、无远端合并层，见 R1-8 缺口），该修复的判据（用 `remote.entries.length > 0` 而非 `freeIds.length > 0`）记入 R1-8 参考。
+- **可搬（新能力，工作量大）**：`b21b159` + `f7bacac` + `041f467` —— **buddy 成长中心任务**（`src/buddy-growth.ts` 2566 行 + 476 行测试）。服务端事实：双任务端点 schema 不同必须合并读、`claim` 走 `claimBase`（CodeBuddy 中国版 = `www.workbuddy.cn`，**≠** API 域）、`requestModelId` 与 `requestModelName` 必须分离、`Expert_team_use_3` 按专家按天去重须轮换、`LEVEL_UNREACHABLE` 四项服务端只记 status 不记 progress（结构性 clientOnly）、凭据被删归 `inactive` 不计 `failed`。**建议裁剪**：首轮只做「任务列表合并读 + 扫尾补领 + claim」（不依赖 22 项遥测事件矩阵，性价比最高）。`041f467` 另给两条硬约束：`workbuddy`（国际版）后端**根本没有成长中心** ⇒ 不登记；`claimBase`/`webBase` 缺配置必须**显式报错**、不得让 `String(undefined)` 拼出的 URL 发出去。落点：`internal/jethub/buddy_growth.go` 新建 + `buddy_credits.go` 编排 + `buddy_product.go` 字段。
+- **不搬**：`9462051`（被 `b21b159` 取代的部署副本）；`09fe2eb`/`97397a3`/`e60e555`（buddy 图片能力三态 + 白名单放宽 + 错误码可重试性——本端模型列表纯静态、无 per-model 图片门禁、`ModelDef` 无图片能力字段且代理对图片一律透传，见 R1-6 实施记录；**三条纪律记入 R1-8 参考**：远端目录落地时「未知 ≠ 不支持」、「目录重看 ≥10s 节流」、「等目录恢复才解决的错误不得进可重试集合」）；`f498586`/`e52f091`/`29f6bad`（auto 单一模型跨 provider 选型——本端 combo `greedy-squirrel` 已等价）；`3de9312`/`570b0b3`（TRAE/LobsterAI 永久积分锁——上游新增，本端架构 §3.1 已记「永久锁未移植选号侧语义」）。
+
+#### R5-5 qoder 信封心跳帧 + zcode 判据 / 超时 / 诊断簇：部分实施
+
+- **已实施 ✅**：`1846449`（issue IKJOZ8）—— **qoder 信封心跳帧不得判成业务错误，判据改为解析 JSON 结构**。本端 `internal/jethub/qoder_envelope.go` 与上游修复前**逐字同构**（`!strings.Contains(inner, "'choices'")` 即判业务错误），两个方向相反的缺陷都在：① `body: null` 序列化成 `null` → 不含 choices → **心跳帧被当业务错误**（模型正常回完内容却报失败，且该类错误可重试 ⇒ 白重发整轮对话）；② 错误文案里恰好含 `"choices"` 的帧被当正常帧**静默透传**。另发现同型第三处：`usage`-only 帧（`stream_options.include_usage` 的末帧）也被误判成错误。
+  - 落点：新增 `qoderClassifyInner`（三态结构判据：chunk / error / heartbeat）+ `qoderTransformSSELine` 与 `qoderFlushSSELine` 消费点（心跳**整帧丢弃**，不透传 `data: null` —— 透传会让消费侧读 `.error` 抛未包装的 TypeError）+ `qoder_adapter.go` 的 peek 首帧分类改用**同一处**判据（HTTP 层与 SSE 层不得各有一套）。
+  - 回归：`TestQoderHeartbeatFrameIsNotAnError`（6 种心跳形态必丢 + 3 种 chunk 形态 + 5 种 error 形态）+ `TestQoderHeartbeatFrameAtFlushIsDropped`。**反向验证已做**：把判据改回子串嗅探，两条用例立刻变红并复现出 `data: {"message":"null","type":"model_error"}` 的原始缺陷形态。
+- **不搬（结构性免疫，逐条已核实）**：`e73cd2f`/`e9173b9`（边缘 CDN HTML 错误页判据——本端 live 分类 `zcodeBusinessCodeOf` 只认 JSON 码对象，HTML 页取不到 code 即透传，误封号侧免疫）；`4169d06`（空闲超时 vs 整轮墙钟——本端 F-02 已是每字节续期的 idle 超时 + 流式清除 `WriteTimeout`，无整轮墙钟）；`d2d09f3`（取凭据先于读 `currentAccountId`——本端 `zcodeAugment` 以 keyID 直解凭据，身份与凭据同源，无独立 Map 顺序依赖）；`4d947d2`/`cc4a40d`（签到按单位分列——本端一键签到只计 ok/fail、无跨单位金额汇总，`ClaimOutcome` 也无 `Unit` 字段）；macOS 藏窗族（`f045052`/`2fe8541`/`e0835ab`——本端无「藏窗口」链路）；三个仅测试提交（`ee867d1`/`8ffe214`/`9f133b0`）。
+- **待定**：`9922777`（领取路径 3012 补齐文案与诊断 + 6 处判据缺陷）—— 本端领取路径确有 `zcodeDescribeClaimCode` 缺 3012 条目与 `ClaimZcodePlan` 非 JSON 时 raw dump 的形态，需实施时 `git show 9922777` 逐条核对判据后再定。
+
+
+> 分诊进行中（并行侦察），结论落地后补入本节。
 
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |

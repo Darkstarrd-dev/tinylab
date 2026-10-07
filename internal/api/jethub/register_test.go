@@ -232,11 +232,13 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		},
 		"cline": {
 			// cline-models.ts:107-109 `isFree ? name + ' · 免费' : name`；免费条目。
-			"stealth/space-bunny-alpha":             "Space Bunny Alpha · 免费",
+			"stealth/space-bunny-alpha": "Space Bunny Alpha · 免费",
 			// （2026-10-03 起免费清单只剩 4 条：cline-free/gemini-3.8-flash 已被上游
 			// 下线，ref 51d6093——见 trae_model.go 的表注释。）
-			"cline-free/mimo-v2.6-flash":            "MiMo-V2.6-Flash · 免费",
-			"cline-free/deepseek-v4.1-flash":        "DeepSeek V4.1 Flash · 免费",
+			"cline-free/mimo-v2.6-flash": "MiMo-V2.6-Flash · 免费",
+			// （2026-10-05 起只剩 3 条：cline-free/deepseek-v4.1-flash 也被下架，
+			// ref b0352fc——同上表注释。付费侧的 cline-pass/deepseek-v4.1-flash
+			// 仍在，别把两者混为一谈。）
 			"cline-free/muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · 免费",
 			// cline-pass/*（订阅制，**不是**免费 ⇒ 不带后缀）：ref caf675e 用
 			// models.dev 的 `cline-pass` 块补的可读名（网关只下发裸 id）。

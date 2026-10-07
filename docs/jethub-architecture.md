@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**R5：整体移除 Gemini Code Assist 渠道（§6.8）** —— 该渠道的
+> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
 > Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
 > 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
 > §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
@@ -330,7 +330,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - **实测首要坑（排障必读）**：getrandom 源探测链 `globalThis.crypto → msCrypto → process/Node` 三路全空时 Rust panic，panic=abort 下直落**裸 `unreachable`**、完全不经过 `__wbindgen_throw`——修法是 `__wbg_crypto_*` 必须返回非 undefined 的 crypto stand-in 强制走浏览器分支（随机填充落 d493 内存导入）。
 - 每账号一个 WASM 上下文（token 指纹失效重建）；加密推理链：`generate_runtime_auth_fields`（uid+security_oauth_token → encrypt_user_info+key）→ `qodercontext_new(sp, machine, ver, userInfo, meta)` → `qodercontext_prepareInferRequest(sp, ctx, host, body, modelKey, source)` → `requestresult_headers/url/body`。
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
-- 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。
+- 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；内层帧按 **JSON 结构三态分类**（`qoderClassifyInner`，R5 / ref 1846449）——`chunk`（有 `choices`（含空数组）或 `usage`）/ `error`（显式 `code`/`message`/`error`/`statusCodeValue`/`type`，或压根不是 JSON）/ `heartbeat`（`null`、空串、`{}`、裸标量、数组）。⚠️ **心跳帧整帧丢弃**，不得透传（`data: null` 会让消费侧读 `.error` 抛未包装的 TypeError、绕过全部错误归类）。错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。**HTTP 层 peek 首帧分类与 SSE 层必须共用同一处判据**（曾各写一份字符串嗅探 `"choices"`，两个方向都会错：心跳帧被误判成业务错误 / 错误文案含 `"choices"` 时被静默透传）。
 
 ## 6. 13 provider 矩阵（端点/协议族/签名/积分）
 
@@ -473,7 +473,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 | raccoon | 静态表 `name` 已含倍率（`raccoon-product.ts:218-263`） | 6/6 一致 |
 | loomy | 静态表 `name` 已含 ` · x{n}`（`loomy-product.ts:104-113`） | 8/8 一致 |
 | minimax | 兜底表 `name`（无倍率概念） | 4/4 一致 |
-| cline | `isFree ⇒ name · 免费`（`cline-models.ts:107-109`，免费条目全 free；2026-10-03 起免费清单 **5→4**——`cline-free/gemini-3.8-flash` 已被上游下线，ref 51d6093） | **已修**：此前 Note 里只写了裸 `free`（不是受支持段）⇒ 面板少了 ` · 免费` |
+| cline | `isFree ⇒ name · 免费`（`cline-models.ts:107-109`，免费条目全 free；2026-10-03 起免费清单 **5→4**——`cline-free/gemini-3.8-flash` 已被上游下线，ref 51d6093；**2026-10-05 再 4→3**——`cline-free/deepseek-v4.1-flash` 同样下架，ref b0352fc） | **已修**：此前 Note 里只写了裸 `free`（不是受支持段）⇒ 面板少了 ` · 免费` |
 | trae | 兜底表 `name`，且**先过滤 `isHidden`**（`trae-adapter.ts:765-769`） | **已修**：剔除 4 条隐藏模型（`browser_use_subagent`/`explore_sub_agent_v13`/`explore_sub_agent_v2`/`summary`，32→28 条 —— 此前面板比插件多 4 条） |
 | buddy / workbuddy | 兜底表 `name`（`product.ts:180-266`/`295-367`）+ 同名撞车变体标记 | **已修**：Alias 补全（此前名字只塞进 Note、Alias 为空 ⇒ 面板显示裸 id）+ 三处变体标记按 ref 算法（公共 id 前缀）固化为 `Hy3 · X`、`Hy4 preview · F`、`Deepseek-V4.1-Flash · SG`。⚠️ **变体前的 ` · ` 不可省**：`displayNameFor` 把整条 suffix 用 ` · ` 接到 name 上，兜底路径后缀就是变体本身 |
 | lobsterai | 兜底表 `name` **逐条等于 id**（`lobsterai-product.ts:184-202`） | 一致（裸 id，**不是**缺陷）；比兜底表多 3 条远端已确认的模型（保留） |
@@ -485,7 +485,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 | trae | 远端独有模型（`solo_agent` 约 66 条）与**倍率**不在表里 | 展示名/隐藏项**已修**；远端目录**未实现** |
 | lobsterai | 远端 26 条与 `costMultiplier` 倍率 | 三条**已补**；其余倍率需远端目录（**未实现**） |
 | buddy / workbuddy | 远端 `credits`/`discountedCredits` 倍率与远端独有模型 | 展示名**已修**；远端目录**未实现** |
-| cline | 远端约 478 条（我们只有静态表） | 静态表已并入 models.dev 快照（4 免费 + 18 条 `cline-pass`；R1-6 ref caf675e 并入 5 免费，R3-2 ref 51d6093 删已下线的 gemini-3.8-flash）；远端目录**未实现** |
+| cline | 远端约 478 条（我们只有静态表） | 静态表已并入 models.dev 快照（**3 免费** + 18 条 `cline-pass`；R1-6 ref caf675e 并入 5 免费，R3-2 ref 51d6093 删已下线的 gemini-3.8-flash，R5 ref b0352fc 再删 deepseek-v4.1-flash）；远端目录**未实现** |
 | codearts | 远端 `model_name`（我们只有 9 条裸 id） | 远端目录**未实现** |
 
 † **qoder 倍率的修法**（判定与 ref `qoderDisplayName`/`promotionActiveNow` 同源）：
@@ -558,9 +558,11 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
     —— 而不是返回一个空回复。
 - **400 的排队文案兜底**（ref `isQueueError` 的非 `TM.00001041` 分支）：`peak usage` /
   `try again after` / `peak hours` / `high demand` / `too many requests` 同样按排队处理。
-- **输出上限收敛（R1-4，ref 916c647/da0a2ad）**：`deepseek-v4-flash|pro` 与 `GLM-5.2`
-  实测拒绝 128000 ⇒ augmenter 把 `max_tokens`/`max_completion_tokens` 收敛到 65536
-  （`min` 语义；其它模型与未超限值**字节级不变**）。
+- **输出上限收敛（R1-4，ref 916c647/da0a2ad；R5 由 5334547 扩集合）**：`deepseek-v4-flash|pro`、
+  `GLM-5.2`、`glm-5.3-flash`、`deepseek-v4.1-flash` 实测拒绝 128000 ⇒ augmenter 把
+  `max_tokens`/`max_completion_tokens` 收敛到 65536（`min` 语义；其它模型与未超限值
+  **字节级不变**）。集合由 `codeartsCappedModel` 单点定义，回归 `TestCodeartsClampMaxTokens`
+  逐条锁定（摘掉任一条目即变红）。
 - 其它错误**原样透传**（代理统一分类），且 peek/读取过的 body 会**完整还回** `resp.Body`；
   正常 SSE 流经 peek 后**逐字节不变**（两条都有回归锁）。
 - ⚠️ **未移植**：ref 对「未命中文案的 400」还会探测 `api/v1/queue/status`

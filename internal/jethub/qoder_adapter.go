@@ -279,7 +279,10 @@ func (m *Manager) qoderInterceptResponse(resp *http.Response, provider, accountI
 	if first != "" && strings.HasPrefix(first, "data:") {
 		payload := strings.TrimSpace(strings.TrimPrefix(first, "data:"))
 		if payload != "[DONE]" {
-			if inner, ok := qoderEnvelopeInnerText(payload); ok && !strings.Contains(inner, `"choices"`) && !strings.Contains(inner, "[DONE]") {
+			// ⚠️ 判据与转换路径**同一处**（qoderClassifyInner 的结构分类）：
+			// 用字符串嗅探 `"choices"` 会把 `body: null` 的心跳帧误判成业务
+			// 错误（ref 1846449 / issue IKJOZ8）。
+			if inner, ok := qoderEnvelopeInnerText(payload); ok && qoderClassifyInner(inner) == qoderInnerError {
 				ms, perr, handled := qoderClassifyErrorFrame(inner)
 				if handled {
 					if perr == errQoderAuth {

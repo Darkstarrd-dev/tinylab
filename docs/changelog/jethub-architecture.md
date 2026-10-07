@@ -1,5 +1,38 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-07 — R5 上游同步第一步：qoder 心跳帧 + codearts 上限集合 + cline 兜底表
+
+三处上游事实落地（同一轮 R5 分诊，逐条来自 `git show <sha>` 实测，非推测）：
+
+1. **qoder 信封内层帧改 JSON 结构三态分类**（ref `1846449` / issue IKJOZ8）。
+   本端 `internal/jethub/qoder_envelope.go` 与上游修复前**逐字同构**
+   （`!strings.Contains(inner, "\"choices\"")` 即判业务错误），两个方向相反的缺陷都在：
+   ① `body: null` 序列化成 `null` → 不含 choices → **心跳帧被当业务错误**
+   （模型正常回完内容却报失败，且该类错误可重试 ⇒ 白重发整轮对话）；
+   ② 错误文案里恰好含 `"choices"` 的帧被当正常帧**静默透传**。
+   同型第三处是本端自己发现的：`usage`-only 帧（`stream_options.include_usage` 的末帧）
+   也被误判成错误。
+   - 新增 `qoderClassifyInner`（chunk / error / heartbeat 三态）替代两处字符串嗅探：
+     `qoderTransformSSELine`（心跳**整帧丢弃**，不透传 `data: null`）、`qoderFlushSSELine`、
+     以及 `qoder_adapter.go` 的 peek 首帧分类 —— **HTTP 层与 SSE 层现在共用同一处判据**。
+   - 回归 `TestQoderHeartbeatFrameIsNotAnError` + `TestQoderHeartbeatFrameAtFlushIsDropped`。
+     **反向验证已做**：判据改回子串嗅探后两条立刻变红，并复现出原始缺陷形态
+     `data: {"message":"null","type":"model_error"}`。
+2. **codearts 输出上限收敛集合扩展**（ref `5334547`，R1-4 的增量对齐）。
+   `codeartsCappedModel` 由 `GLM-5.2`/`deepseek-v4-flash`/`deepseek-v4-pro` 扩至加入
+   `glm-5.3-flash` 与 `deepseek-v4.1-flash`（cap 恒 65536）。`TestCodeartsClampMaxTokens`
+   改为逐条锁定该集合（摘掉任一条目即变红）。
+3. **cline 兜底表删除已下架的 `cline-free/deepseek-v4.1-flash`**（ref `b0352fc`）。
+   上游 2026-10-05 复测 `free` 数组 4→3，该模型直连回 404 `model not found`；
+   本端静态表留着它 = 面板上一个「看着免费、一点就 404」的条目，且**重启也不会自愈**
+   （本端表是静态的）。与 R3-2 删 `gemini-3.8-flash` 同型。
+   上游同提交还修了 `mergeClineModels` 的无条件兜底表并入 —— **该机制本端不存在**
+   （模型列表纯静态、无远端合并层），其判据（用 `remote.entries.length > 0` 而非
+   `freeIds.length > 0`）记入同步文档 R1-8 追加的四条远端目录纪律。
+
+验收：`go build ./...` + `go vet ./...` 干净；全量 `go test ./internal/...` 通过；
+`node web/jethub.test.js` 27 项全绿。
+
 ## 2026-10-07 — R5：整体移除 Gemini Code Assist 渠道（§6.8）
 
 - **触发**：`git push` 被 GitHub Push Protection 拒绝（`GH013`）。报错点名两处，都是

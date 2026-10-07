@@ -128,12 +128,67 @@ func qoderTransformSSELine(line string) []byte {
 		// 不是信封 → 原样透传（容错：服务端某天直接回标准帧）。
 		return []byte("data: " + payload + "\n")
 	}
-	if !strings.Contains(inner, `"choices"`) && !strings.Contains(inner, "[DONE]") {
-		// 业务错误：内层是错误 JSON 而非 choices → 保真转发
-		// {code?, message, type:'model_error'}。
+	switch qoderClassifyInner(inner) {
+	case qoderInnerHeartbeat:
+		// 心跳/空帧（`body: null` / 空串 / `{}`）→ **整帧丢弃**。
+		// ⚠️ 不能原样透传：`data: null` 会让消费侧 JSON.parse 得到 null，
+		// 读 `.error` 抛未包装的 TypeError，绕过全部错误归类。
+		return nil
+	case qoderInnerError:
+		// 业务错误：保真转发 {code?, message, type:'model_error'}。
 		return []byte("data: " + qoderFaithfulErrorFrame(inner) + "\n")
 	}
 	return []byte("data: " + inner + "\n")
+}
+
+// qoderInnerKind is the STRUCTURAL classification of one inner frame.
+//
+// ⚠️ 旧实现是字符串嗅探（`!strings.Contains(inner, "\"choices\"")` 即判业务
+// 错误），有两个方向相反的缺陷（ref 1846449 / issue IKJOZ8）：
+//  1. `body: null` 经序列化变成 `null` → 「不含 choices」→ **心跳帧被当成
+//     业务错误** ⇒ 模型正常回完内容却报失败（且该类错误可重试，白重发整轮）。
+//  2. 错误文案里恰好含 `"choices"` 的帧会被当正常帧**静默透传**。
+type qoderInnerKind int
+
+const (
+	qoderInnerChunk qoderInnerKind = iota
+	qoderInnerError
+	qoderInnerHeartbeat
+)
+
+// qoderClassifyInner classifies one inner frame by JSON structure.
+func qoderClassifyInner(inner string) qoderInnerKind {
+	trimmed := strings.TrimSpace(inner)
+	if trimmed == "" {
+		return qoderInnerHeartbeat
+	}
+	// 保留旧的子串语义（含 `[DONE]` 即视为正常帧），避免回归。
+	if strings.Contains(trimmed, "[DONE]") {
+		return qoderInnerChunk
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		// 解析不了的原文：按业务错误处理（保持旧行为，如纯文本错误体）。
+		return qoderInnerError
+	}
+	obj, isObj := parsed.(map[string]any)
+	if !isObj {
+		// ⚠️ `null` 与裸标量/数组：无任何可消费内容 ⇒ 心跳。
+		return qoderInnerHeartbeat
+	}
+	// ⚠️ `choices: []` 也算正常帧（stream_options.include_usage 的末帧形态）。
+	if _, ok := obj["choices"]; ok {
+		return qoderInnerChunk
+	}
+	if _, ok := obj["usage"]; ok {
+		return qoderInnerChunk
+	}
+	for _, key := range []string{"code", "message", "error", "statusCodeValue", "type"} {
+		if _, ok := obj[key]; ok {
+			return qoderInnerError
+		}
+	}
+	return qoderInnerHeartbeat
 }
 
 // qoderFlushSSELine handles a trailing partial line at stream end (ref
@@ -144,6 +199,11 @@ func qoderFlushSSELine(rest string) []byte {
 	}
 	inner, ok := qoderEnvelopeInnerText(strings.TrimSpace(rest[len("data:"):]))
 	if !ok {
+		return nil
+	}
+	// ⚠️ 心跳帧必须丢弃，不能原样透传（ref 1846449 的 P6）：透传后是
+	// `data: null` → 消费器解析出 null → 读 `.error` 抛未包装的 TypeError。
+	if qoderClassifyInner(inner) == qoderInnerHeartbeat {
 		return nil
 	}
 	return []byte("data: " + inner + "\n")

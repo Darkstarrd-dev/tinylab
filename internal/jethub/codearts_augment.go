@@ -11,15 +11,17 @@ import (
 )
 
 // codeartsMaxOutputCap is the upstream-verified output ceiling for the capped
-// models (ref 916c647 / da0a2ad, 实测 2026-10-01): deepseek-v4-flash,
-// deepseek-v4-pro and GLM-5.2 all REJECT 128000 with INVALID_REQUEST while
-// 65536 works. Other models are untouched.
+// models (ref 916c647 / da0a2ad 实测 2026-10-01，R5 由 5334547 扩集合):
+// deepseek-v4-flash、deepseek-v4-pro、GLM-5.2、glm-5.3-flash、
+// deepseek-v4.1-flash 都会拒绝 128000（INVALID_REQUEST），65536 可用。
+// 其它模型不动。
 const codeartsMaxOutputCap = 65536
 
 // codeartsCappedModel reports whether the model is subject to the output cap.
 func codeartsCappedModel(model string) bool {
 	switch model {
-	case "GLM-5.2", "deepseek-v4-flash", "deepseek-v4-pro":
+	case "GLM-5.2", "deepseek-v4-flash", "deepseek-v4-pro",
+		"glm-5.3-flash", "deepseek-v4.1-flash":
 		return true
 	}
 	return false

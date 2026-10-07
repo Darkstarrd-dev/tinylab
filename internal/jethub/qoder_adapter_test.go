@@ -375,3 +375,61 @@ func TestQoderCustomizeEndToEnd(t *testing.T) {
 		t.Fatalf("body must be the ENCRYPTED payload (not plain JSON): %q", string(outBody))
 	}
 }
+
+// --- 心跳帧不得判成业务错误（ref 1846449 / issue IKJOZ8） ---
+
+// TestQoderHeartbeatFrameIsNotAnError 锁定**结构判据**替换字符串嗅探。
+//
+// 旧实现是 `!strings.Contains(inner, "\"choices\"")` 即判业务错误，两个方向
+// 相反的缺陷：
+//   - `body: null` 序列化成 `null` → 不含 choices → **心跳帧被当业务错误**
+//     ⇒ 模型正常回完内容却报失败（且该类错误可重试，白重发整轮对话）；
+//   - 错误文案里恰好含 `"choices"` 的帧被当正常帧**静默透传**。
+//
+// 反向验证：把 qoderClassifyInner 的 choices/usage 分支换成子串嗅探，本用例
+// 必须变红（`null`/`{}` 会落到 error 分支产出 model_error 帧）。
+func TestQoderHeartbeatFrameIsNotAnError(t *testing.T) {
+	heartbeats := []string{`null`, ``, `{}`, `[]`, `123`, `"x"`}
+	for _, hb := range heartbeats {
+		stream := "data:" + innerEnvelopeBody(t, hb) + "\n"
+		r := newQoderEnvelopeReader(strings.NewReader(stream), nil)
+		out, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("%q: read: %v", hb, err)
+		}
+		if got := string(out); got != "" {
+			t.Errorf("heartbeat %q must be DROPPED, got %q", hb, got)
+		}
+		if kind := qoderClassifyInner(hb); kind != qoderInnerHeartbeat {
+			t.Errorf("%q must classify as heartbeat, got %v", hb, kind)
+		}
+	}
+
+	// 正常帧形态：choices（含空数组）与 usage-only 都必须是 chunk。
+	for _, chunk := range []string{`{"choices":[]}`, `{"usage":{"total_tokens":1}}`, `{"choices":[{"delta":{"content":"Q"}}]}`} {
+		if kind := qoderClassifyInner(chunk); kind != qoderInnerChunk {
+			t.Errorf("%q must classify as chunk, got %v", chunk, kind)
+		}
+	}
+
+	// 错误帧形态：显式错误字段或非 JSON 原文都必须是 error。
+	for _, bad := range []string{`{"code":"10605"}`, `{"message":"boom"}`, `{"error":"x"}`, `{"type":"model_error"}`, `not json`} {
+		if kind := qoderClassifyInner(bad); kind != qoderInnerError {
+			t.Errorf("%q must classify as error, got %v", bad, kind)
+		}
+	}
+}
+
+// TestQoderHeartbeatFrameAtFlushIsDropped 锁尾部半行的同款判据（ref P6）：
+// 透传 `data: null` 会让消费侧解析出 null、读 `.error` 抛未包装的 TypeError，
+// 绕过全部错误归类。
+func TestQoderHeartbeatFrameAtFlushIsDropped(t *testing.T) {
+	if out := qoderFlushSSELine("data:" + innerEnvelopeBody(t, `null`)); out != nil {
+		t.Fatalf("heartbeat at flush must be dropped, got %q", out)
+	}
+	// 正常帧在 flush 时仍必须透传（不能把整条尾部一起丢掉）。
+	out := qoderFlushSSELine("data:" + innerEnvelopeBody(t, `{"choices":[{"delta":{"content":"Q"}}]}`))
+	if !strings.Contains(string(out), `"choices"`) {
+		t.Fatalf("a real chunk at flush must survive, got %q", out)
+	}
+}
