@@ -47,7 +47,7 @@ Furthermore, TinyLab deeply integrates a multi-mode Playground (supporting AI we
 
 ## Detailed Feature Guide & Shortcuts
 
-TinyLab provides rich keyboard shortcut support. Core shortcuts across Global, Playground, and Gallery can be **customized and rebound** on the **Settings → Shortcut Settings** page (defaults live in memory; only overrides are written to `config.yaml`).
+TinyLab provides rich keyboard shortcut support. Core shortcuts across Global, Playground, and Gallery, plus the Systray **system-wide global hotkeys**, can be **customized and rebound** on the **Settings → Shortcut Settings** page (defaults live in memory; only overrides are written to `config.yaml`).
 
 ### 1. Page Navigation & System Shortcuts (*Customizable*)
 
@@ -105,7 +105,18 @@ TinyLab provides rich keyboard shortcut support. Core shortcuts across Global, P
 
 ---
 
-### 4. Modal & Popup Interaction Shortcuts
+### 4. Systray System-Wide Global Hotkeys (*Customizable*, Windows)
+
+These are **OS-level global hotkeys** (not in-app shortcuts): they fire even when TinyLab is not focused — even when another app is in the foreground — and while the app runs the combo is captured system-wide (other apps cannot use it). Changes apply immediately after saving, no restart needed. `Open Console` is only registered in webview builds (mirroring the tray menu item's existence). If another application already registered the combo, that hotkey stays inactive (visible in logs).
+
+| Shortcut | Default Binding | Description |
+|---|---|---|
+| `Ctrl+Shift+T` | `Ctrl+Shift+T` (*Customizable*) | **Open Browser**: open the admin UI in the default browser (same as the tray "Open Browser" item) |
+| `Ctrl+Alt+Shift+T` | `Ctrl+Alt+Shift+T` (*Customizable*) | **Open/Close Console**: open or close the WebView2 console window (same as the tray "Open/Close Console" toggle) |
+
+---
+
+### 5. Modal & Popup Interaction Shortcuts
 
 - **QuickSlot Selection Popup**:
   - `1`–`9`: Move focus to model index (resets 1s auto-close timer);

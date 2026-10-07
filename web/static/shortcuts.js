@@ -59,6 +59,15 @@ var SHORTCUT_PRESETS = {
     'gallery.toggle-tree':      { key: 't', label: 'Toggle tree panel' },
     'gallery.clear-tree':       { key: 'c', label: 'Clear focused tree (tree open only)' },
     'gallery.exit-fullscreen':  { key: 'Escape', label: 'Exit fullscreen (Enter also works)' }
+  },
+  // Systray: OS-level GLOBAL hotkeys (Windows RegisterHotKey via
+  // internal/hotkey), not in-app keydown actions. They fire even when TinyLab
+  // is not focused, and while the app runs the combo is captured system-wide.
+  // Defaults MUST stay in sync with defaultBindings in internal/hotkey/hotkey.go
+  // (web/systray-shortcuts.test.js guards the mirror).
+  systray: {
+    'systray.open-browser': { key: 't', ctrlOrCmd: true, shift: true, label: 'Open Browser' },
+    'systray.open-console': { key: 't', ctrlOrCmd: true, alt: true, shift: true, label: 'Open Console' }
   }
 };
 
@@ -69,7 +78,8 @@ var SHORTCUT_PRESETS = {
 var SHORTCUT_REGIONS = [
   { id: 'global',     label: 'Global' },
   { id: 'playground', label: 'Playground' },
-  { id: 'gallery',    label: 'Gallery' }
+  { id: 'gallery',    label: 'Gallery' },
+  { id: 'systray',    label: 'Systray' }
 ];
 
 // ----- Override storage (in-memory cache; persisted via PATCH /settings) -----
@@ -249,7 +259,10 @@ var Shortcuts = {
       else parts.push('Ctrl');
     }
     if (b.alt) parts.push('Alt');
-    if (b.shift && b.key.length > 1) parts.push('Shift'); // only show Shift for multi-char keys
+    // Shift is always shown when set: systray entries are OS-level global
+    // hotkeys where the modifier state matters even on single-letter keys
+    // (Ctrl+Alt+Shift+T must not display as "Ctrl+Alt+T").
+    if (b.shift) parts.push('Shift');
     var k = b.key;
     if (k === ' ') k = 'Space';
     else if (k.length === 1) k = k.toUpperCase();

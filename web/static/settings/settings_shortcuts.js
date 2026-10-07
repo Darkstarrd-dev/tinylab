@@ -56,7 +56,9 @@ function scRegionTabs() {
   var regions = Shortcuts.getAllRegions();
   var hasPg = (typeof window.__hasPlayground === 'boolean') ? window.__hasPlayground : true;
   return regions.filter(function(r) {
-    if (r.id === 'global') return true;
+    // Global + systray are always shown; systray holds OS-level global
+    // hotkeys (inert on non-Windows builds, but still configurable).
+    if (r.id === 'global' || r.id === 'systray') return true;
     return hasPg;
   });
 }
@@ -71,6 +73,7 @@ function openShortcutsModal() {
     var label = r.id === 'global' ? t('shortcutTabGlobal')
       : r.id === 'playground' ? t('shortcutTabPlayground')
       : r.id === 'gallery' ? t('shortcutTabGallery')
+      : r.id === 'systray' ? t('shortcutTabSystray')
       : r.label;
     return '<button type="button" class="sc-tab' + (i === 0 ? ' active' : '') + '" data-sc-tab="' + r.id + '" onclick="setScTab(\'' + r.id + '\')">' + escapeHtml(label) + '</button>';
   }).join('');
@@ -135,7 +138,12 @@ function renderScList(regionId) {
   if (!container) return;
   var actionIds = scRegionActions(regionId);
   var rows = actionIds.map(function(actionId) { return renderScRow(actionId); }).join('');
-  container.innerHTML = '<div class="sc-list">' + rows + '</div>';
+  // The systray region holds OS-level global hotkeys, not in-app shortcuts —
+  // spell the semantics out so users know why the combos behave differently.
+  var note = regionId === 'systray'
+    ? '<p class="muted" style="margin:0 0 8px">' + escapeHtml(t('shortcutSystrayNote')) + '</p>'
+    : '';
+  container.innerHTML = note + '<div class="sc-list">' + rows + '</div>';
 }
 
 function scActionLabel(actionId) {

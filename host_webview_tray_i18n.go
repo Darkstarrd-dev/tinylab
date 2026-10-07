@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/systray"
 	"github.com/tinylab/tinylab/internal/app"
+	"github.com/tinylab/tinylab/internal/hotkey"
 	"github.com/tinylab/tinylab/internal/petstate"
 )
 
@@ -17,12 +18,19 @@ import (
 // button, or an OS signal. The app does NOT auto-open a window at startup:
 // tray-only is the default state.
 //
+// The "Open Console" systray global hotkey (Settings → Shortcut Settings →
+// Systray, default Ctrl+Alt+Shift+T) triggers the same toggle — wired here
+// because only the webview variant has a console window. On tray-only/console
+// builds no handler is registered, and internal/hotkey then never registers
+// that combo with the OS, leaving it free for other applications.
+//
 // Returns interface{} so the caller (host_tray_windows.go) stays build-tag-
 // agnostic; the matching stub when `webview` is absent returns nil.
 func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 	mToggle := systray.AddMenuItem("开启控制台", "打开管理界面窗口")
 	trayWebviewItem = mToggle
 	go runWebviewToggleLoop(hctx, mToggle)
+	hotkey.SetActionHandler(hotkey.ActionOpenConsole, func() { toggleConsoleWindow(hctx) })
 	applyTrayLang(currentTrayLang())
 	go func() {
 		<-hctx.Quit()
@@ -41,15 +49,23 @@ func addWebviewMenuItem(hctx *app.HostContext) interface{} {
 // main goroutine.
 func runWebviewToggleLoop(hctx *app.HostContext, m *systray.MenuItem) {
 	for range m.ClickedCh {
-		if hasAnyWebview() {
-			hctx.Logger.Info("tray: closing console window")
-			// Independent goroutine: never park the menu loop on a wedged
-			// window's Terminate (terminateAllWebviews has per-window timeouts).
-			go terminateAllWebviews()
-		} else {
-			hctx.Logger.Info("tray: opening console window")
-			go openWebviewWindow(hctx)
-		}
+		toggleConsoleWindow(hctx)
+	}
+}
+
+// toggleConsoleWindow is the shared body of the tray toggle item and the
+// "Open Console" systray global hotkey: open the console window when none is
+// up, close all when one is. Window operations spawn their own goroutines so
+// a wedged window can never park the caller (tray menu loop or hotkey pump).
+func toggleConsoleWindow(hctx *app.HostContext) {
+	if hasAnyWebview() {
+		hctx.Logger.Info("console toggle: closing console window")
+		// Independent goroutine: never park the menu loop on a wedged
+		// window's Terminate (terminateAllWebviews has per-window timeouts).
+		go terminateAllWebviews()
+	} else {
+		hctx.Logger.Info("console toggle: opening console window")
+		go openWebviewWindow(hctx)
 	}
 }
 

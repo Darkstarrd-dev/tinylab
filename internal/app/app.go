@@ -22,6 +22,7 @@ import (
 	"github.com/tinylab/tinylab/internal/console"
 	"github.com/tinylab/tinylab/internal/download"
 	"github.com/tinylab/tinylab/internal/feature"
+	"github.com/tinylab/tinylab/internal/hotkey"
 	"github.com/tinylab/tinylab/internal/jethub"
 	"github.com/tinylab/tinylab/internal/petstate"
 	"github.com/tinylab/tinylab/internal/proxy"
@@ -502,6 +503,21 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 	petstate.SetEnabled(a.cfg.Assistant.PetEnabled())
 	petstate.SetDebug(a.cfg.Assistant.Debug)
 
+	// Systray global hotkeys (Windows RegisterHotKey; internal/hotkey): the
+	// "Open Browser" action is wired for every build; "Open Console" is wired
+	// by the webview host (host_webview_tray_i18n.go) since only that variant
+	// has a console window — actions without a handler are never registered,
+	// so their combos stay free for other apps. Overrides come from
+	// config.yaml `shortcuts` and are re-applied live from the settings
+	// convergence path (convergeRuntime → hotkey.SetBindings).
+	hotkey.SetActionHandler(hotkey.ActionOpenBrowser, func() {
+		if err := OpenBrowser(fmt.Sprintf("http://%s", a.addr)); err != nil {
+			a.logger.Info("failed to open browser from global hotkey: %v", err)
+		}
+	})
+	hotkey.SetBindings(a.cfg.Shortcuts)
+	hotkey.Start(a.logger)
+
 	hctx := &HostContext{
 		Logger:     a.logger,
 		ConsoleURL: fmt.Sprintf("http://%s", a.addr),
@@ -525,6 +541,9 @@ func (a *App) Run(hostLoop HostLoopFunc) error {
 // regardless of in-flight requests. It never returns an error, so a shutdown
 // timeout can never surface as a startup-failure dialog.
 func (a *App) Shutdown(_ context.Context) error {
+	// Release the systray global hotkeys (best effort — the OS also releases
+	// them when the process exits).
+	hotkey.Stop()
 	if a.sm != nil {
 		// Best-effort graceful drain; ignore any error and never surface it.
 		shortCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

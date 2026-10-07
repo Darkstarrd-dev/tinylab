@@ -1,3 +1,12 @@
+## 2026-10-08 — Systray 系统全局热键（Settings → Shortcut Settings 新增分区）
+
+- §13r（新章节）：`internal/hotkey/` 包文件表（`hotkey.go` 纯逻辑/`hotkey_windows.go` RegisterHotKey 消息泵/`hotkey_other.go` stub/`hotkey_test.go`）与行为边界（生效绑定=覆盖 ?? 内置默认、无 handler 不向 OS 注册、Start 前 Set* 仅状态、Ctrl+Shift+T 系统级占用浏览器恢复标签页）。
+- §1：`host_webview_tray_i18n.go` 行更新——toggle 主体抽出 `toggleConsoleWindow`（托盘菜单与全局热键共用），`addWebviewMenuItem` 接线 `hotkey.SetActionHandler(ActionOpenConsole)`。
+- §2：`app.go` 行追加 `Run` 的热键接线（Open Browser handler + SetBindings + Start）与 `Shutdown → hotkey.Stop()`。
+- §18.2：`settings_shortcuts.js` 行更新——systray 分区（`scRegionTabs` 恒显示 + `shortcutSystrayNote` 区域说明）。
+- §24：两条「修改全局快捷键/键映射」行补 `internal/hotkey/` 消费方与 systray 分区锚点。
+- 核对行替换为本次摘要（zcode 载体页叙述下移本文件上一条 / docs/changelog/jethub-architecture.md）。
+
 ## 2026-10-07 — zcode 领取载体页开页浏览器固定 default+shared
 
 - §13n（`internal/jethub/`）文件表：`zcode*.go` 行追加 `zcodeOpenURL` 显式固定 default+shared、

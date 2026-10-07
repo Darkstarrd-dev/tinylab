@@ -2,6 +2,16 @@
 
 > 本文件存放 `docs/config-registry-state-architecture.md` 顶部「最后核对」行的历史流水与变更过程叙述（最新在上）。正文只保留当前态事实。
 
+## 2026-10-08 · Systray 快捷键分区（OS 级全局热键，配置链路零 schema 变更）
+
+**需求：** Settings → Shortcut Settings 弹窗新增 Systray 分区，两个 **系统全局**（OS 级，非 App 内）热键：Open Browser = Ctrl+Shift+T、Open Console = Ctrl+Alt+Shift+T，功能对应托盘菜单的两个选项，保存后即时生效。
+
+**配置侧结论：** `ShortcutBinding`/`ShortcutsConfig`/`Config.Shortcuts` 与 GET/PATCH 流转**原样复用**，无任何 schema/API 改动——systray 只是两个新 action ID（`systray.open-browser`/`systray.open-console`）写进既有覆盖 map；`finalizeConfig` 的 nil→空 map 归一继续兜底。
+
+**新增消费方（internal/hotkey/，PROJECT_MAP §13r）：** 生效绑定 = 用户覆盖 ?? Go 侧 `defaultBindings` 内置默认（镜像前端 `web/static/shortcuts.js` systray 预设，`web/systray-shortcuts.test.js` 同时断言两侧防漂移）；`convergeRuntime` 尾部 `hotkey.SetBindings(cfg.Shortcuts)` 使 settings PATCH 与 POST /api/reload 双路径即时重注册（app.Run 启动时同样调用 + `hotkey.Start`）；无 handler 的 action（如 tray-only 构建的 Open Console）不向 OS 注册，组合键让给其他程序。
+
+**核对行替换：** F-08 状态持久化分级叙述下移本文件上一条。
+
 ## 2026-10-05 · F-08 状态持久化分级（Manager 双去抖通道）
 
 **背景：** `docs/ProjectAnalysis.md` F-08——每次成功选 key 都触发 `ScheduleWrite`（500ms 去抖全量快照写），高 QPS 下 state.yaml 每 500ms 重写一次。修复方向：把"必须持久化"（锁、配额）与"尽力持久化"（统计数据）分级。

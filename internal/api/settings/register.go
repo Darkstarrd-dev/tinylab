@@ -19,6 +19,7 @@ import (
 	"github.com/tinylab/tinylab/internal/config"
 	"github.com/tinylab/tinylab/internal/download"
 	"github.com/tinylab/tinylab/internal/fsutil"
+	"github.com/tinylab/tinylab/internal/hotkey"
 	"github.com/tinylab/tinylab/internal/petstate"
 	"github.com/tinylab/tinylab/internal/procutil"
 )
@@ -549,6 +550,11 @@ func (h *Handler) convergeRuntime(cfg config.Config) {
 	if h.d.ArchiveSettingsFn != nil {
 		h.d.ArchiveSettingsFn(cfg.Archive)
 	}
+	// Systray global hotkeys follow the shortcuts overrides. convergeRuntime
+	// is the single convergence point for settings PATCH and POST /api/reload
+	// (E-1), so rebinding a hotkey takes effect without an app restart. The
+	// hotkey package ignores non-systray action IDs.
+	hotkey.SetBindings(cfg.Shortcuts)
 }
 
 // applyThemeUpdates merges the non-empty theme fields from a settings PATCH.
