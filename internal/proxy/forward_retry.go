@@ -404,6 +404,16 @@ func (h *Handler) forwardAttempt(at *attemptContext, w http.ResponseWriter, r *h
 	if resp != nil && resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.Host != "" {
 		upstreamURL = resp.Request.URL.String()
 	}
+	// The model demonstrably works (2xx): clear any runtime "model gone" record
+	// so a previously-delisted model that came back is offered again instead of
+	// waiting out the whole TTL (R5, ref f8748fa).
+	if err == nil && resp != nil && resp.StatusCode < 400 {
+		if mf, ok := at.h.augmenter.(interface {
+			ForgetModelGoneByProviderID(providerID, model string)
+		}); ok {
+			mf.ForgetModelGoneByProviderID(at.providerID, at.upstreamModel)
+		}
+	}
 	if err != nil {
 		// Client cancellation surfaces here as a Do error (context
 		// canceled). It says nothing about key health (F-01): silent exit —

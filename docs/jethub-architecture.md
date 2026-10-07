@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；⑥ 401/403 认证失败改为「只换号、不写冷却」（`ActionRotateOnly`；网关侧授权故障不得被放大成整池封禁，ref 0abaf1a）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
+> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；⑥ 401/403 认证失败改为「只换号、不写冷却」（`ActionRotateOnly`；网关侧授权故障不得被放大成整池封禁，ref 0abaf1a）；⑦ 已失效模型的运行时实证剔除（阳性证据 + 30 天 TTL + 成功即忘；§6.11，ref f8748fa）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
 > Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
 > 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
 > §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
@@ -25,6 +25,7 @@
 > - **执行上游同步（拉取/分诊/推进 pin/新增 provider 评估）→ [`docs/jethub-upstream-sync.md`](jethub-upstream-sync.md)**（判定原则 + 每轮 SOP + 不搬清单 + 待办 R1-*~R5-* + 轮次日志；pin 与当前待办见该文 §6/§7）
 > - 新增/修改 **OpenCode Zen** 适配（指纹形状/门禁工具/错误分类/匿名通道/模型可见性/非流式聚合）→ §3.8 + §6.5 + `internal/jethub/opencode.go`/`opencode_augment.go` + `products.go`（`Product.AnonymousKey`/`ModelFilter`）+ `bridge.go`（匿名 Key 优先级/可见性过滤）
 > - 修改 **codearts 续期**（终态判据/镜像对账/per-credential 串行/30min 调度器）→ §3.7 + `internal/jethub/codearts_refresh.go`/`codearts_oauth.go`
+> - 修改 **已失效模型的实证剔除**（记录/剔除/TTL/出口过滤）→ §6.11 + `internal/jethub/deadmodels.go`（判据取保守：泛词不认、排除词优先、**不收「不可用」**）+ `internal/proxy/interfaces.go`（`ModelGoneReporter` 可选钩子）+ `internal/proxy/retry.go`（上报）+ `internal/proxy/forward_retry.go`（成功即忘）+ `internal/jethub/bridge.go::SyncKeys` 与 `internal/api/jethub/register.go::listModels`（**两处出口都要过滤**，新建切片）+ `internal/jethub/deadmodels_test.go` + `internal/proxy/augmenter_test.go` 两条行为级用例
 > - 修改 **buddy 响应判据**（模型饱和 14003 与账号额度限流分流）→ §6.10 + `internal/jethub/buddy_response.go`（判据取窄：泛词不认、`status<400` 不认文案）+ `internal/upstreamerr/upstreamerr.go`（`ModelSaturationError`）+ `internal/proxy/forward_retry.go`（同 Key 等待重试分支，**先于** BillingLockError 判）+ `internal/proxy/interfaces.go`（别名 + 接口契约）+ **`internal/jethub/buddy_response_test.go` 与 `internal/proxy/augmenter_test.go::TestForwardWithRetry_ModelSaturationDoesNotLockKey`（反向验证过的行为级防线）**
 > - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛 / 4291 额度用尽 + 429 独立数字锚定）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`/`BillingLockError`）+ `internal/proxy/forward_retry.go`
 > - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
@@ -732,6 +733,42 @@ GitHub Push Protection 判定为泄露密钥（`GH013`，`Google OAuth Client ID
 - **回归**：`buddy_response_test.go`（判据边界 13 例 / 拦截器三态 / 分派接线）
   + `proxy/augmenter_test.go::TestForwardWithRetry_ModelSaturationDoesNotLockKey`（行为级：
   尝试 3 次、429 文案、无 `ModelLock`、无 `BackoffLevel`、in-flight 清零）。两条都已**反向验证**。
+
+### 6.11 已失效模型的运行时实证剔除（R5，ref f8748fa）
+
+**上游报障**：用户在 Free Hub 选中 cline 的 `cline-free/deepseek-v4.1-flash`，每轮都失败
+`cline: model not found HTTP_404` —— 账号、余额、网络都正常。该模型**已被上游从 `free` 数组
+移除**，但列表里仍显示它、并且仍标着「免费」：用户拿到一个**看着可用、一点就 404** 的条目。
+根因是各 provider 的**兜底模型表是编译期快照**，上游下架模型时它不会自己变。
+
+**为什么不能用「远端目录里没有 ⇒ 已下架」**（判据只在远端**完整权威**时成立）：
+
+| provider | 远端目录 | 目录比对可用 |
+|---|---|---|
+| cline | `free` 数组完整权威 | ✅（本端用 R3-2/R5 的**手工表同步**代替） |
+| buddy / workbuddy | **已知残缺**（CLI token 13 别名 vs IDE 20 个） | ❌ 会删掉可用模型 |
+| qoder / qodercn | 无（端点需 WASM 签名） | ❌ 无数据可比对 |
+
+⇒ 唯一**跨 provider 安全**的判据是**阳性证据**：这个模型**真的**请求失败并返回「模型不存在」
+时才记。**不从残缺目录反推**（本端远端目录本就未实现，见 §6.3）。
+
+**实现**：`internal/jethub/deadmodels.go`（判据 + 存储）+ `proxy/interfaces.go` 的
+`ModelGoneReporter`（可选钩子，proxy **不** import jethub）+ `proxy/retry.go` 上报 +
+`proxy/forward_retry.go` 成功路径清除 + 两个出口过滤（`bridge.go::SyncKeys`、
+`api/jethub/register.go::listModels`）。
+
+- **判据必须保守**（误判代价**不对称**：可用模型被藏且用户**无法自行恢复** —— 选不到 ⇒
+  不可能再成功 ⇒ 记录不会自清）：6 条正例正则要求「model」与「不存在」语义同现；
+  13 条排除词优先（限流/额度/积分/余额/认证/鉴权/凭据/排队/繁忙…）；**刻意不收「不可用」**
+  （账号类报错也这么说）。「模型」与「不存在」之间的窗口放宽到 32 字符以容纳整个 model id。
+- **TTL 是必需的**（默认 30 天，`TINYLAB_DEAD_MODEL_TTL_DAYS` 覆盖，`0`=永不过期）：被剔除的
+  模型用户**选不到**，不可能靠「再成功一次」自愈，只能靠过期回收。
+- **成功即忘**：模型答 2xx ⇒ 记录作废（模型回来了不必等满 TTL）。
+- **损坏文件退化为空表**（而不是「全部失效」）：宁可多显示一个失效模型，也不能藏掉可用模型。
+- ⚠️ **过滤必须新建切片**（不能 `models[:0]`）：上游 `ModelFilter` 可能返回产品表子切片，
+  原地写会污染产品表。
+- **回归**：`deadmodels_test.go`（12 正例 / 21 反例 / 记录→过滤→过期链路 / TTL=0 / 损坏降级 /
+  SyncKeys 出口）+ `proxy/augmenter_test.go` 的两条行为级用例。**三处反向验证已做**。
 
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。

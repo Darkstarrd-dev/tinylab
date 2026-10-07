@@ -219,3 +219,19 @@ type ModelSaturationError = upstreamerr.ModelSaturationError
 // augmenters/interceptors read it. Re-exported for the proxy's own header
 // copy guard.
 const RetryDropHeaderMarker = upstreamerr.RetryDropHeaderMarker
+
+// ModelGoneReporter is the optional hook the proxy calls when an upstream
+// response is **positive evidence** that the MODEL itself no longer exists
+// ("model not found" style, as opposed to an account/quota/auth failure).
+//
+// Rationale (R5, ref f8748fa): a bridged provider's fallback model table is a
+// compile-time snapshot and cannot follow upstream delistings, so a delisted
+// model keeps being offered and fails with 404 on every request. The owner
+// records it and stops listing it.
+//
+// ⚠️ Implementations MUST apply their own conservative criteria — the proxy
+// passes the raw message, and a false positive hides a working model from the
+// user with no way to recover it by hand.
+type ModelGoneReporter interface {
+	ReportModelGone(providerID, model, message string)
+}

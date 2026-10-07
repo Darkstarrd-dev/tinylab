@@ -313,3 +313,80 @@ func TestForwardWithRetry_ModelSaturationDoesNotLockKey(t *testing.T) {
 		t.Fatalf("expected EntryTracker cleaned up, got %d stale entries", len(tracked))
 	}
 }
+
+// deadModelBridge implements Augment + the optional ModelGoneReporter /
+// success-path forget hooks so a real retry loop can be driven end to end.
+type deadModelBridge struct {
+	reported []string
+	forgot   []string
+}
+
+func (d *deadModelBridge) Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
+	return body, nil
+}
+
+func (d *deadModelBridge) ReportModelGone(providerID, model, message string) {
+	d.reported = append(d.reported, providerID+"/"+model+" :: "+message)
+}
+
+func (d *deadModelBridge) ForgetModelGoneByProviderID(providerID, model string) {
+	d.forgot = append(d.forgot, providerID+"/"+model)
+}
+
+// TestForwardWithRetry_ReportsModelGoneOn404 是「已失效模型运行时实证剔除」的
+// **行为级**防线（R5, ref f8748fa）：真实 404 必须被上报给 bridge，否则下架的
+// 模型会永远留在列表里、每轮都 404。
+//
+// 反向验证：删掉 forward_retry.go 的 ReportModelGone 调用 ⇒ 本用例立刻变红。
+func TestForwardWithRetry_ReportsModelGoneOn404(t *testing.T) {
+	bridge := &deadModelBridge{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":{"message":"model not found"}}`))
+	}))
+	defer upstream.Close()
+
+	h := newJethubTestProvider(t, upstream.URL)
+	h.SetRequestAugmenter(bridge)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	parsed := map[string]any{"model": "gone-model", "messages": []any{}}
+	h.forwardWithRetry(w, req, "jethub-codearts", "gone-model", "/v1/chat/completions", nil, parsed, false, 1, "", "CodeArts", combo.EntryFormatOpenAI, "", "")
+
+	if len(bridge.reported) == 0 {
+		t.Fatal("a real 404 'model not found' must be reported to the bridge (else the model stays listed forever)")
+	}
+	if !strings.Contains(bridge.reported[0], "gone-model") || !strings.Contains(bridge.reported[0], "model not found") {
+		t.Fatalf("the report must carry provider/model/message, got %q", bridge.reported[0])
+	}
+}
+
+// TestForwardWithRetry_ForgetsModelGoneOnSuccess 锁成功路径：模型能答 2xx ⇒ 记录
+// 必须被清掉，否则一个回来的模型要等满 TTL 才会重新出现。
+func TestForwardWithRetry_ForgetsModelGoneOnSuccess(t *testing.T) {
+	bridge := &deadModelBridge{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	h := newJethubTestProvider(t, upstream.URL)
+	h.SetRequestAugmenter(bridge)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	parsed := map[string]any{"model": "revived-model", "messages": []any{}}
+	h.forwardWithRetry(w, req, "jethub-codearts", "revived-model", "/v1/chat/completions", nil, parsed, false, 1, "", "CodeArts", combo.EntryFormatOpenAI, "", "")
+
+	if len(bridge.forgot) == 0 {
+		t.Fatal("a 2xx response must clear the dead-model record")
+	}
+	if !strings.Contains(bridge.forgot[0], "revived-model") {
+		t.Fatalf("the forget must name the model, got %q", bridge.forgot[0])
+	}
+	if len(bridge.reported) != 0 {
+		t.Fatalf("a 2xx response must not report the model as gone, got %v", bridge.reported)
+	}
+}

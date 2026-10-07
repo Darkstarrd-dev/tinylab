@@ -1,5 +1,37 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-07 — R5 上游同步第五步：已失效模型的运行时实证剔除
+
+**上游事实**（ref `f8748fa`）：用户选中 cline 的 `cline-free/deepseek-v4.1-flash`，每轮
+`model not found HTTP_404`，而列表里它仍标着「免费」。根因是各 provider 的兜底模型表是
+**编译期快照**，上游下架模型时它不会自己变。
+
+**为什么不能改成「远端目录比对」**：那个判据只在远端**完整权威**时成立。本端三类情况：
+cline 可用（本端用 R3-2/R5 的手工表同步代替）、buddy/workbuddy **已知残缺**（目录比对会删掉
+可用模型）、qoder/qodercn 无端点。⇒ 唯一跨 provider 安全的判据是**阳性证据**。
+
+**实现**：
+- `internal/jethub/deadmodels.go`（新）：判据（6 条正例正则 + 13 条排除词）+ 独立文档
+  `{jethubDir}/dead-models.json`（原子写）+ TTL 30 天（`TINYLAB_DEAD_MODEL_TTL_DAYS`
+  覆盖，`0`=永不过期）+ 损坏文件退化为**空表**。
+- `internal/proxy/interfaces.go`：`ModelGoneReporter` 可选钩子（proxy 不 import jethub）。
+- `internal/proxy/retry.go`：`handleUpstreamError` 上报原始错误文案（判据由 owner 自己守）。
+- `internal/proxy/forward_retry.go`：**成功路径清除**（模型答 2xx ⇒ 记录作废）。
+- 两个出口过滤：`bridge.go::SyncKeys`（注册表模型表）+ `api/jethub/register.go::listModels`
+  （面板列表）。⚠️ 过滤用**新建切片**而非 `models[:0]` —— 上游 ModelFilter 可能返回产品表
+  子切片，原地写会污染产品表。
+
+**判据为什么必须保守**（误判代价不对称：可用模型被藏且用户**无法自行恢复**）：反例组数
+（21）多于正例组（12）；**刻意不收「不可用」**（账号类报错也这么说）；「模型」与「不存在」
+之间的窗口放宽到 32 字符以容纳整个 model id。
+
+**反向验证（三处，都实做）**：
+1. `isModelGoneError` 强制 false ⇒ 3 条用例变红。
+2. 上报钩子强制不命中 ⇒ `TestForwardWithRetry_ReportsModelGoneOn404` 变红。
+3. 成功清除钩子强制不命中 ⇒ `TestForwardWithRetry_ForgetsModelGoneOnSuccess` 变红。
+
+验收：`go build`/`go vet` 干净；全量 `go test ./internal/...` 通过。
+
 ## 2026-10-07 — R5 上游同步第三步：buddy 模型饱和 14003 与账号额度限流分流
 
 **上游事实**（ref `29a42ea`，逐字来自 `git show`）：buddy 的模型饱和业务码 `14003` 也是

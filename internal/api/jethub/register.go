@@ -446,6 +446,9 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	disabled := h.d.Manager.DisabledModels(provider)
+	// Runtime-verified dead models (R5, ref f8748fa): 静态兜底表是编译期快照，
+	// 上游下架模型时它不会自己变 —— 实证记录过的模型不再播报。
+	gone := h.d.Manager.DeadModels(provider)
 	type modelEntry struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -454,6 +457,9 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]modelEntry, 0, len(prod.Models))
 	for _, md := range prod.Models {
+		if gone[md.ID] {
+			continue
+		}
 		name, rate := modelDisplayParts(md)
 		out = append(out, modelEntry{ID: md.ID, Name: name, Rate: rate, Disabled: disabled[md.ID]})
 	}

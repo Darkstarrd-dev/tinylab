@@ -375,6 +375,15 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 
 	rule := rotation.ClassifyError(resp.StatusCode, bodyStr)
 
+	// Positive evidence that the MODEL no longer exists (R5, ref f8748fa): a
+	// bridged provider's fallback table is a compile-time snapshot, so a
+	// delisted model keeps being offered and 404s forever. Report it so the
+	// owner stops listing it. The owner applies the conservative criteria
+	// (this call is unconditional; account/quota/auth failures must not match).
+	if mgr, ok := h.augmenter.(ModelGoneReporter); ok {
+		mgr.ReportModelGone(providerID, model, bodyStr)
+	}
+
 	// Pass-through: the request itself is malformed (400/422 request-validation).
 	// The key is healthy — retrying the SAME request on another key 400s again, and
 	// locking the key would punish a healthy key + block all concurrent requests

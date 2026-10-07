@@ -281,6 +281,21 @@ func (b *Bridge) SyncKeys(provider string) error {
 	if prod.ModelFilter != nil {
 		models = prod.ModelFilter(b.m, provider, models)
 	}
+	// Runtime-verified dead models (R5, ref f8748fa): a model that actually
+	// failed with "model not found" is no longer offered — the static fallback
+	// table is a compile-time snapshot and cannot follow upstream delistings.
+	if gone := b.m.deadModelsFor(provider); len(gone) > 0 {
+		// ⚠️ 必须**新建**切片，不能复用 `models[:0]`：上游的 ModelFilter 可能
+		// 返回 prod.Models 的子切片，原地写会污染产品表（下一次 SyncKeys 看到
+		// 的就不再是原始表）。
+		filtered := make([]config.ModelDef, 0, len(models))
+		for _, md := range models {
+			if !gone[md.ID] {
+				filtered = append(filtered, md)
+			}
+		}
+		models = filtered
+	}
 
 	p := config.Provider{
 		ID:       id,
