@@ -184,6 +184,10 @@ type ResponseInterceptor interface {
 	//     RetryDropHeaderMarker on the client request so the bridge's augmenter
 	//     can apply the fix; the bridge's interceptor uses the same marker to
 	//     tell "already retried once");
+	//   - (nil, 0, *upstreamerr.ModelSaturationError): MODEL-level backpressure
+	//     (every account hits the same wall, e.g. buddy 14003) — the retry loop
+	//     waits and retries the SAME key with NO lock and NO key switch, so the
+	//     pool is never poisoned by a model-level signal;
 	//   - (nil, 0, err): failed attempt (classified by the retry loop).
 	// The interceptor may consume resp.Body; the proxy still owns the Close.
 	InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (outBody io.Reader, retryAfterMs int64, err error)
@@ -204,6 +208,11 @@ type BillingLockError = upstreamerr.BillingLockError
 // resend via RetryDropHeaderMarker). Same neutral-package rationale as
 // QueueRetryError.
 type SameKeyRetryError = upstreamerr.SameKeyRetryError
+
+// ModelSaturationError reports MODEL-level backpressure (every account hits
+// the same wall): the retry loop waits and retries the SAME key — no lock, no
+// key switch. Same neutral-package rationale as QueueRetryError.
+type ModelSaturationError = upstreamerr.ModelSaturationError
 
 // RetryDropHeaderMarker is the loopback-only marker header the retry loop
 // writes on the client request when handling a SameKeyRetryError; bridged

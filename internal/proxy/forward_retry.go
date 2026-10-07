@@ -458,6 +458,39 @@ func (h *Handler) forwardAttempt(at *attemptContext, w http.ResponseWriter, r *h
 			at.h.logger.Warn("[%s] %s/%s: 上游拒绝后同 Key 重发（丢弃 %s，第 %d 次）: %s", at.logTag, at.dispName, at.upstreamModel, skre.Header, at.state.sameKeyRetries, skre.Reason)
 			return attemptResult{next: outcomeRetry}
 		}
+		// Model-level saturation (e.g. buddy 14003): every account hits the
+		// same wall, so switching keys is useless AND writing a per-key lock
+		// is actively harmful — the fallback cooldown would lock the whole
+		// pool (ref 29a42ea: 4 healthy accounts all locked for 1h by one
+		// model-saturation 429). Wait and retry the SAME key a bounded
+		// number of times; on exhaustion report "switch model".
+		// ⚠️ 该分支必须在 BillingLockError 之前判（饱和错误不写锁、不换号）。
+		var mse *ModelSaturationError
+		if errors.As(err, &mse) {
+			at.state.saturationRetries++
+			if at.state.saturationRetries > maxSaturationRetries {
+				at.h.logger.Warn("[%s] %s/%s: 模型饱和重试耗尽（%d 次）→ 报错指向换模型", at.logTag, at.dispName, at.upstreamModel, maxSaturationRetries)
+				msg := mse.Reason
+				if msg == "" {
+					msg = fmt.Sprintf("模型 %s 当前请求量饱和，请换模型或稍后重试", at.upstreamModel)
+				}
+				writeProxyError(w, at.reqID, sel, http.StatusTooManyRequests, msg)
+				return attemptResult{next: outcomeStop, written: true}
+			}
+			wait := mse.RetryAfter
+			if wait <= 0 {
+				wait = 2 * time.Second
+			}
+			at.h.logger.Warn("[%s] %s/%s: 模型饱和（等待 %s 后重试同一 Key，第 %d/%d 次）",
+				at.logTag, at.dispName, at.upstreamModel, wait, at.state.saturationRetries, maxSaturationRetries)
+			select {
+			case <-r.Context().Done():
+				at.h.logger.Debug("[%s] client canceled during model-saturation wait", at.logTag)
+				return attemptResult{next: outcomeAbort}
+			case <-time.After(wait):
+			}
+			return attemptResult{next: outcomeRetry}
+		}
 		// Per-model quota exhaustion on this key (e.g. Qoder billing 110):
 		// lock key+model until the business-defined instant (UTC+8 day end
 		// for Qoder) and switch to the next key.

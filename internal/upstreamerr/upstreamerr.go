@@ -29,6 +29,32 @@ func (e *BillingLockError) Error() string {
 	return "upstream billing lock until " + e.Until.Format(time.RFC3339)
 }
 
+// ModelSaturationError reports that the MODEL (not the account) is saturated:
+// every account hits the same wall, so switching keys is useless and writing a
+// per-key rate-limit lock is actively harmful (it would lock the whole pool for
+// the fallback cooldown). The retry loop keeps the SAME key, waits RetryAfter,
+// and retries a bounded number of times; on exhaustion it fails with a message
+// that points at "switch model", never "account quota".
+//
+// 上游实例（ref 29a42ea / issue：buddy 首次用 space-bunny 就报「所有账号均受限」）：
+// buddy 的模型饱和业务码 `14003` 也是 **HTTP 429**，报文自证是模型级
+// （`actions: ["SWITCH_MODEL", …]`，**没有**换号选项；`displayMsg.zh` =
+// 「模型繁忙，请换模型或稍后重试」）。修复前它落进通用 429 分支 ⇒ 给**每个**
+// 账号写一条兜底冷却标记（报文无「将在…重置」）⇒ 整池被锁。
+type ModelSaturationError struct {
+	// RetryAfter is how long to wait before retrying the SAME key.
+	RetryAfter time.Duration
+	// Reason is the user-facing explanation (must name the model).
+	Reason string
+}
+
+func (e *ModelSaturationError) Error() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return "upstream model saturated: retry after " + e.RetryAfter.String()
+}
+
 // RetryDropHeaderMarker is an internal, loopback-only marker header used
 // between the retry loop and a bridged provider's own augmenter: when the
 // retry loop resends because of a SameKeyRetryError it writes the offending

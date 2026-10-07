@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinylab/tinylab/internal/combo"
 	"github.com/tinylab/tinylab/internal/config"
@@ -234,5 +235,81 @@ func TestForwardUpstream_AugmenterSkippedForNormalProviders(t *testing.T) {
 	resp.Body.Close()
 	if called {
 		t.Fatal("augmenter must not run for non-jethub providers")
+	}
+}
+
+// saturationBridge rejects every attempt with a ModelSaturationError (the
+// buddy 14003 signal): the retry loop must wait and retry the SAME key, then
+// fail with 429 — never cooling or excluding the key.
+type saturationBridge struct {
+	attempts int
+}
+
+func (s *saturationBridge) Augment(r *http.Request, body []byte, providerID, keyID, upstreamModel string) ([]byte, error) {
+	s.attempts++
+	return body, nil
+}
+
+func (s *saturationBridge) InterceptResponse(clientReq *http.Request, resp *http.Response, providerID, keyID, upstreamModel string, isStream bool) (io.Reader, int64, error) {
+	return nil, 0, &ModelSaturationError{
+		RetryAfter: time.Millisecond, // 测试不真等 2s
+		Reason:     "模型 space-bunny 当前请求量饱和——请换模型或稍后重试",
+	}
+}
+
+// TestForwardWithRetry_ModelSaturationDoesNotLockKey 是 buddy 14003 的**行为级**
+// 防线（ref 29a42ea 的核心缺陷）：模型饱和**不得**写限流标记、**不得**换号 ——
+// 否则一个模型级信号会把整个账号池逐个锁死。
+//
+// 反向验证：把 forward_retry.go 的 ModelSaturationError 分支删掉（= 修复前
+// 行为），饱和错误会落进通用 handleNetworkError 路径 ⇒ 本用例的
+// 「无 ModelLock / 无 BackoffLevel」两条断言立刻变红。
+func TestForwardWithRetry_ModelSaturationDoesNotLockKey(t *testing.T) {
+	bridge := &saturationBridge{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	h := newJethubTestProvider(t, upstream.URL)
+	h.SetRequestAugmenter(bridge)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	parsed := map[string]any{"model": "space-bunny", "messages": []any{}}
+	ok, _ := h.forwardWithRetry(w, req, "jethub-codearts", "space-bunny", "/v1/chat/completions", nil, parsed, false, 1, "", "Buddy", combo.EntryFormatOpenAI, "", "")
+	if !ok {
+		t.Fatalf("expected written=true (the 429 was written), got status %d", w.Code)
+	}
+	// 饱和用尽后必须报 429（不是 502/503），文案指向换模型。
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 for model saturation", w.Code)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "换模型") {
+		t.Fatalf("the saturation message must point at switching model, got %q", body)
+	}
+	// 重试预算：maxSaturationRetries=2 ⇒ 共 3 次尝试（1 + 2 次重试）。
+	if bridge.attempts != maxSaturationRetries+1 {
+		t.Fatalf("attempts = %d, want %d (1 initial + %d same-key retries)",
+			bridge.attempts, maxSaturationRetries+1, maxSaturationRetries)
+	}
+
+	// ⚠️ 核心断言：key 必须**没有**被冷却、**没有**模型锁、**没有**进排除集。
+	ks := h.reg.GetKeyState("jethub-codearts", "acct-1")
+	if ks == nil {
+		t.Fatal("expected key state for acct-1")
+	}
+	if locks := len(ks.ModelLocks); locks != 0 {
+		t.Fatalf("model saturation must NOT write a model lock (got %d) — it would lock the whole pool", locks)
+	}
+	if ks.BackoffLevel != 0 {
+		t.Fatalf("model saturation must NOT raise the backoff level (got %d)", ks.BackoffLevel)
+	}
+	if got := getInFlight(t, ks); got != 0 {
+		t.Fatalf("in-flight leaked on the saturation branch (got %d)", got)
+	}
+	if tracked := h.EntryTracker.All(); len(tracked) != 0 {
+		t.Fatalf("expected EntryTracker cleaned up, got %d stale entries", len(tracked))
 	}
 }

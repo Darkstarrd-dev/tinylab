@@ -1,5 +1,36 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-07 — R5 上游同步第三步：buddy 模型饱和 14003 与账号额度限流分流
+
+**上游事实**（ref `29a42ea`，逐字来自 `git show`）：buddy 的模型饱和业务码 `14003` 也是
+**HTTP 429**，报文自证是模型级 —— `actions: ["SWITCH_MODEL","SUBMIT_FEEDBACK","RETRY"]`，
+**没有**换号选项。
+
+**本端缺陷**（同型原样存在）：buddy 族原本没有响应判据层（`buddy_augment.go` 只改请求头），
+于是 14003 落进代理的通用 429 分支 ⇒ 对**每个**账号写一条兜底冷却标记并换号 ⇒ 一个模型级
+信号把整个账号池逐个锁死。上游实测：4 个互不相干的腾讯 uid 在 20 秒内全部被写 `space-bunny`
+标记，解禁时刻全是「写入 + 兜底 1 小时」（服务端根本没给时刻）。
+
+**实现**：
+- `internal/jethub/buddy_response.go`（新文件）：`buddyIsModelSaturation`（业务码 `14003`
+  数字/字符串两形态 + 四条**窄**文案；泛词不认、`status<400` 一律不认文案）
+  + `buddyInterceptResponse`（只在 `status>=400` 时读正文；非饱和错误**把正文还回**
+  `resp.Body` 交给通用分类，`6004` 行为不得回退）。
+- `internal/upstreamerr/upstreamerr.go`：新增 `ModelSaturationError`（中性叶子包，
+  与 `QueueRetryError`/`BillingLockError` 同款理由）。
+- `internal/proxy/forward_retry.go`：新增同 Key 等待重试分支（`maxSaturationRetries=2`，
+  2s→4s），**先于** `BillingLockError` 判 —— **不写锁、不换号、不进排除集**；用尽报 429
+  且文案指向「换模型」。`internal/proxy/interfaces.go` 补别名与接口契约。
+- `internal/jethub/qoder_adapter.go`：分派 buddy/workbuddy。
+
+**反向验证（两条，都实做）**：
+1. `buddyIsModelSaturation` 强制返回 false ⇒ 4 条用例变红。
+2. `forward_retry.go` 的 `ModelSaturationError` 分支强制不命中 ⇒ 失败输出确凿打印
+   `网络错误（模型 … 饱和）→ 退避后切换` + `no available keys … 502` —— 即修复前的
+   整池锁死形态，不是同义反复。
+
+验收：`go build`/`go vet` 干净；全量 `go test ./internal/...` 通过。
+
 ## 2026-10-07 — R5 上游同步第一步：qoder 心跳帧 + codearts 上限集合 + cline 兜底表
 
 三处上游事实落地（同一轮 R5 分诊，逐条来自 `git show <sha>` 实测，非推测）：

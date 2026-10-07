@@ -21,6 +21,12 @@ const maxQueueAttempts = 180
 // header exactly once), so this is a loop-safety net, not an expected path.
 const maxSameKeyRetries = 4
 
+// maxSaturationRetries caps ModelSaturationError resends per client request
+// (ref 29a42ea: 2 linear backoffs 2s→4s, always the same credential). Model
+// saturation is a transient upstream backpressure signal — a couple of waits
+// often suffice, and a longer budget would just hold the client.
+const maxSaturationRetries = 2
+
 // retryState holds mutable state across retry iterations.
 type retryState struct {
 	excludeKeyIDs  []string
@@ -36,6 +42,9 @@ type retryState struct {
 	// sameKeyRetries counts SameKeyRetryError resends (bridge-applied fixes,
 	// e.g. dropping a rejected signed header once). Immediate, same key.
 	sameKeyRetries int
+	// saturationRetries counts ModelSaturationError resends (model-level
+	// backpressure, e.g. buddy 14003). Wait + same key, never a key lock.
+	saturationRetries int
 }
 
 // requestHeaders safely extracts request headers, returning nil when the

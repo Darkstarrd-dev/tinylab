@@ -210,6 +210,12 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 	if provider == "minimax" {
 		return m.minimaxInterceptResponse(clientReq, resp, upstreamModel, isStream)
 	}
+	if provider == "buddy" || provider == "workbuddy" {
+		// buddy 族：**模型饱和 14003 也是 HTTP 429**，必须先于通用 429 分支
+		// 识别（否则一个模型级信号会把整个账号池逐个锁死 —— ref 29a42ea 的
+		// 用户报障「第一次用 space-bunny 就报所有账号均受限」）。
+		return m.buddyInterceptResponse(resp, upstreamModel)
+	}
 	if provider == "codearts" {
 		// CodeArts 用 HTTP 200 + 流内 `error_code` 表达限流/排队/权益错误
 		// （用户实测：客户端只看到空回复）。见 codearts_response.go。

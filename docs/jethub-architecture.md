@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
+> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
 > Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
 > 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
 > §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
@@ -25,6 +25,7 @@
 > - **执行上游同步（拉取/分诊/推进 pin/新增 provider 评估）→ [`docs/jethub-upstream-sync.md`](jethub-upstream-sync.md)**（判定原则 + 每轮 SOP + 不搬清单 + 待办 R1-*~R5-* + 轮次日志；pin 与当前待办见该文 §6/§7）
 > - 新增/修改 **OpenCode Zen** 适配（指纹形状/门禁工具/错误分类/匿名通道/模型可见性/非流式聚合）→ §3.8 + §6.5 + `internal/jethub/opencode.go`/`opencode_augment.go` + `products.go`（`Product.AnonymousKey`/`ModelFilter`）+ `bridge.go`（匿名 Key 优先级/可见性过滤）
 > - 修改 **codearts 续期**（终态判据/镜像对账/per-credential 串行/30min 调度器）→ §3.7 + `internal/jethub/codearts_refresh.go`/`codearts_oauth.go`
+> - 修改 **buddy 响应判据**（模型饱和 14003 与账号额度限流分流）→ §6.10 + `internal/jethub/buddy_response.go`（判据取窄：泛词不认、`status<400` 不认文案）+ `internal/upstreamerr/upstreamerr.go`（`ModelSaturationError`）+ `internal/proxy/forward_retry.go`（同 Key 等待重试分支，**先于** BillingLockError 判）+ `internal/proxy/interfaces.go`（别名 + 接口契约）+ **`internal/jethub/buddy_response_test.go` 与 `internal/proxy/augmenter_test.go::TestForwardWithRetry_ModelSaturationDoesNotLockKey`（反向验证过的行为级防线）**
 > - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛 / 4291 额度用尽 + 429 独立数字锚定）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`/`BillingLockError`）+ `internal/proxy/forward_retry.go`
 > - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
 > - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256；**`zcodeOpenURL` 的开页选项必须保持显式 default+shared，不得改回零值**——零值继承登录浏览器偏好，见 §6.7 与 `TestZcodeOpenURLPinsDefaultBrowser`）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
@@ -696,6 +697,41 @@ GitHub Push Protection 判定为泄露密钥（`GH013`，`Google OAuth Client ID
 - **不影响**：代理核心的 **Gemini thought_signature 回填**（`internal/proxy/signature_cache.go`
   等）—— 那条链路服务的是用户**自建**的 `generativelanguage.googleapis.com/v1beta/openai`
   Provider（`Provider.IsGeminiOpenAICompat`），与 Free Hub 渠道无关，代码与测试原样保留。
+
+### 6.10 Buddy 模型饱和（14003）必须与账号额度限流分流（R5，ref 29a42ea）
+
+**上游用户报障**：第一次用 `buddy/space-bunny` 就报「模型 space-bunny 所有账号均受限」，
+而 4 个账号凭据全部有效、服务端对该模型实测可用。
+
+**根因**：模型饱和业务码 `14003` 也是 **HTTP 429**，报文自证是模型级 ——
+`actions: ["SWITCH_MODEL","SUBMIT_FEEDBACK","RETRY"]`，**没有**换号选项。通用 429 分支
+对任何 429 都写一条 per-key 限流标记并换号 ⇒ 一个模型级信号把**整个账号池**逐个锁死
+（上游实测：4 个互不相干的腾讯 uid 在 20 秒内全部被写 `space-bunny` 标记，解禁时刻全是
+「写入 + 兜底 1 小时」= 服务端没给时刻）。
+
+| | 额度限流 `6004` | 模型饱和 `14003` |
+|---|---|---|
+| 语义 | 该**账号**在该模型上额度用完 | 该**模型**此刻整体饱和 |
+| 换号 | **有效** | **无益**（所有账号撞同一堵墙） |
+| 写限流标记 | **必须** | **绝对不许**（会锁整池） |
+| 建议 | 等解禁 / 换账号 | **换模型** / 稍后重试 |
+
+**实现**：`internal/jethub/buddy_response.go`（判据 + 拦截器）→
+`upstreamerr.ModelSaturationError` → `proxy/forward_retry.go` 的**同 Key 等待重试**分支。
+
+- **判据取窄**（ref `isModelSaturationError` 同口径）：业务码 `14003`（数字/字符串两种形态）
+  **或**四条窄文案（`模型繁忙` / `请求量饱和` / `model busy` / `currently saturated`）。
+  ⚠️ 泛词（裸 `busy` / `saturated`）**不认**，且 `status < 400` 时一律不认文案 —— 否则模型正文里
+  正常讨论「服务器繁忙时应当重试」会被误判。
+- **判据顺序就是修复本体**：拦截器在 `resp.StatusCode >= 400` 时才读正文，饱和错误直接返回
+  `ModelSaturationError`，**先于**代理的通用 429 分支；非饱和错误把正文**还回** `resp.Body`，
+  让 `6004` 的换号 + 标记行为原样保留。
+- **重试语义**：同 Key 等待重试，`maxSaturationRetries = 2`（2s→4s 线性，ref 同值），
+  **不写锁、不换号、不进排除集**；用尽报 **429**（不是 502/503），文案指向「换模型」。
+  与 zcode `3009 model concurrency limit exceeded` 同型。
+- **回归**：`buddy_response_test.go`（判据边界 13 例 / 拦截器三态 / 分派接线）
+  + `proxy/augmenter_test.go::TestForwardWithRetry_ModelSaturationDoesNotLockKey`（行为级：
+  尝试 3 次、429 文案、无 `ModelLock`、无 `BackoffLevel`、in-flight 清零）。两条都已**反向验证**。
 
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。
