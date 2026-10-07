@@ -1,5 +1,35 @@
 # jethub-architecture.md — 变更日志
 
+## 2026-10-07 — R5：整体移除 Gemini Code Assist 渠道（§6.8）
+
+- **触发**：`git push` 被 GitHub Push Protection 拒绝（`GH013`）。报错点名两处，都是
+  `internal/jethub/gemini_oauth.go` 的常量：第 33 行 `geminiDefaultClientID`、第 36 行
+  `geminiDefaultClientSecret`。命中的提交是 `f2a6fee`（R3-3 引入该渠道）与 `e294d4e`
+  （同文件再动）。
+- **为什么不是「误报」**：这两个常量确实是 R3-3 从 ref 逐字移植的「上游 Cloud Code 客户端
+  固有公开常量」（原生应用公开安装的 secret），注释里已写明。但 GitHub 的规则按模式匹配，
+  不接受该解释，且**仓库规则不允许任何 secret 形状的字符串进入 main**。
+- **决定（用户，2026-10-07）**：不走 unblock 流程、不改走环境变量，**直接删除整个渠道**；
+  并要求**此后不再同步该渠道的上游数据**（同步文档 §5 新增永久排除条目）。
+- **删除范围**（`git grep -i gemini` 已确认 Free Hub 面零残留）：
+  - 源码：`internal/jethub/gemini{,_convert,_credits,_oauth,_test}.go`、`internal/api/jethub/gemini.go`。
+  - 接线：`manager.go::defaultProviders`、`products.go`（product 表 + `SetAugmenter`）、
+    `qoder_adapter.go::InterceptResponse` 分派、`register.go::RegisterGemini` 与
+    `rateLimitExemptProviders` 条目。
+  - 前端：配额单位（`%`）整条渲染链（`__jethubCreditLabel` 的 `%` 档、`__jethubFormatQuota`、
+    `__jethubQuotaLine`、`__jethubQuotaDetail`）、账号规格行（`extra.accountTier` 的 DOM 与
+    更新逻辑）、四个 i18n 键（`freeHubUnitQuota`/`freeHubAccountTier`/`freeHubCreditRemaining`/
+    `freeHubCreditResetsAt`，en+cn 双字典）。
+  - 后端聚合：`internal/api/jethub/balances.go` 的 `nonAggregatableProviders` 表（唯一用途是
+    为该渠道的百分比窗口省一次必然被丢弃的请求）。
+- **保留**：`balance_summary.go::normalizedBalanceUnit` 的 `%`/「通道」不可累加守卫（同时守着
+  opencode 的「通道」，且是将来窗口制渠道的第一道防线）；代理核心的 Gemini
+  `thought_signature` 回填（`internal/proxy/signature_cache.go` 等，服务用户**自建**的
+  `generativelanguage.googleapis.com/v1beta/openai` Provider，与 Free Hub 渠道无关）。
+- **provider 数 14 → 13**；`TestProvidersMetadata` 新增「gemini 必须不再是已知渠道」的反向断言。
+- **验收**：`go build ./...` + `go vet ./...` + 全量 `go test ./internal/...` 全绿；
+  `node web/jethub.test.js` 全绿（27 项）。
+
 ## 2026-10-07 — zcode 领取载体页不再继承登录浏览器偏好（§6.7）
 
 - 报障：zcode 渠道领取积分不可用——弹出的浏览器窗口打开的是本地载体页

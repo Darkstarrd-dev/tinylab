@@ -1,6 +1,11 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**zcode 领取载体页的开页浏览器固定 default+shared（§6.7）**：`zcodeOpenURL` 从零值改为显式 `OpenOptions{Browser: BrowserDefault, Session: SessionShared}` —— 零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），载体页本不需要登录态却跟着用户的 Edge 登录选择走（2026-10-07 报障：载体页在 Edge 里无感验证失败，系统默认浏览器是 Chrome）；登录流（API 层 `zcodeLogin`）仍传用户当次选择，仅此后台路径固定功能上线前的旧行为。回归 `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过）。上轮：**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。
+> **最后核对：** 2026-10-07（**R5：整体移除 Gemini Code Assist 渠道（§6.8）** —— 该渠道的
+> Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
+> 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
+> §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
+> （`%`）渲染与「账号规格」行、`freeHubUnitQuota`/`freeHubAccountTier`/`freeHubCreditRemaining`/
+> `freeHubCreditResetsAt` 四个 i18n 键。上轮：**zcode 领取载体页的开页浏览器固定 default+shared（§6.7）**：`zcodeOpenURL` 从零值改为显式 `OpenOptions{Browser: BrowserDefault, Session: SessionShared}` —— 零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），载体页本不需要登录态却跟着用户的 Edge 登录选择走（2026-10-07 报障：载体页在 Edge 里无感验证失败，系统默认浏览器是 Chrome）；登录流（API 层 `zcodeLogin`）仍传用户当次选择，仅此后台路径固定功能上线前的旧行为。回归 `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过）。上轮：**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。
 >
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
@@ -8,7 +13,7 @@
 >
 > **R3 上游同步落地（2026-10-04，dsh-codearts-auth @ `ff5e37d`）：** ① codearts `InferHub.4291.200` 额度用尽判据（**不可重试**，`BillingLockError` 锁 key+model 至 UTC+8 当日 24:00）+ `429` 排队判据锚定为独立数字（裸子串会把 `4291` 误判成排队 → 30 分钟静默重试零输出，§6.4，ref 784210d/ae0c9b0）；② cline 删除已下线的 `cline-free/gemini-3.8-flash`（免费清单 5→4，ref 51d6093）；③ **新增 Gemini Code Assist provider（第 14 家，§6.8）**——OAuth 浏览器回调登录 + 双层信封协议桥 + sandbox 配额窗口（ref e061b21 族）。zcode 双通道+zai 渠道经用户决定**不搬**（同步文档 §5）；`zcode-identity.ts` 未变（已核实）。分诊明细见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R3。
 >
-> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
+> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（上游 14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`，**本端覆盖 13 家**（gemini 已于 R5 移除，见 §6.8）。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
 >
 > **变更维护清单（改动时必须同步本文）：**
 > - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
@@ -23,7 +28,7 @@
 > - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛 / 4291 额度用尽 + 429 独立数字锚定）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`/`BillingLockError`）+ `internal/proxy/forward_retry.go`
 > - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
 > - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256；**`zcodeOpenURL` 的开页选项必须保持显式 default+shared，不得改回零值**——零值继承登录浏览器偏好，见 §6.7 与 `TestZcodeOpenURLPinsDefaultBrowser`）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
-> - 新增/修改 **Gemini Code Assist** 适配（双层信封/身份五头/档位后缀/schema 白名单/签名回填/OAuth 回调/配额窗口）→ §6.8 + `internal/jethub/gemini*.go`（信封字母序与金标准字节断言不可放松；`gemini_test.go` 金标准用例是唯一防线）+ `internal/api/jethub/gemini.go` + `web/static/jethub.js`（`%` 单位显示）
+
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
 > - 修改备份格式 → §7 + `internal/jethub/backup.go`（与原版格式**双向兼容**，改动即破坏兼容，须先读 ref types.ts）
@@ -67,19 +72,18 @@
 - **切页生命周期**：`navigateTo`（`app-router.js`）调用 `closeFreeHub()`——页面切换会整体清空 `#page-content`，不清标志会导致再次进入 Free Hub 被陈旧 `__jethubActive` 守卫挡住（修复过的真实缺陷：必须重启 App/Ctrl+F5 才能恢复）；`openFreeHub` 侧另有兜底——active 时先执行一次 close 再重挂。
 - **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（13 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
 - **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号 · **Use Proxy 开关**（`+ 新建账号` 右侧：`free-hub-proxy-wrap` 标签 + 全局 `.toggle-switch`（同 Upstream Proxy/Provider 详情 useProxy，复用 style-settings.css 不动堆叠规则）；`jethubToggleProxy` PUT `/api/jethub/providers/{provider}/proxy` {enabled}，失败回滚勾选态；per-provider 语义见 §3.2）。结果在通知区显示（tone + 逐条 details 列表）。
-- **账号卡**：状态点 + **选号序号**（两个以上账号时显示；值为服务端 `rotationOrder`，**不是列表下标** —— 匿名通道恒殿后，两者会不一致）+ 名称（有派生账号名时挂 tooltip）+ **手机号**（仅 zcode，由 17 位 user_id 前 11 位派生）+ 徽标（启用/key/refresh/**匿名**（opencode 匿名通道，tooltip 解释「额度按出口 IP 计」，判据见下））；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· **账号规格**（仅 Gemini 有 Pro/Free/Ultra，取不到时**整行不渲染**）· **额度行**（**逐账号**余额，挂载/刷新积分时并发逐个查询；失败时显示**原因**且不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置；数据来源见 §3.1）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取（文案随 `claimKind` 走：一次性奖励渠道写作「领取奖励」）· **新手任务**（`supportsOnboardingTasks`，仅 loomy：与每日签到是**两件事**，故独立按钮）· **代理 + 指纹**（仅 opencode，见下）· 续期 · 改名 · 停用|启用 · 删除。整卡可**拖拽排序**（顺序 = 选号优先级，见下）。
+- **账号卡**：状态点 + **选号序号**（两个以上账号时显示；值为服务端 `rotationOrder`，**不是列表下标** —— 匿名通道恒殿后，两者会不一致）+ 名称（有派生账号名时挂 tooltip）+ **手机号**（仅 zcode，由 17 位 user_id 前 11 位派生）+ 徽标（启用/key/refresh/**匿名**（opencode 匿名通道，tooltip 解释「额度按出口 IP 计」，判据见下））；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· **额度行**（**逐账号**余额，挂载/刷新积分时并发逐个查询；失败时显示**原因**且不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置；数据来源见 §3.1）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取（文案随 `claimKind` 走：一次性奖励渠道写作「领取奖励」）· **新手任务**（`supportsOnboardingTasks`，仅 loomy：与每日签到是**两件事**，故独立按钮）· **代理 + 指纹**（仅 opencode，见下）· 续期 · 改名 · 停用|启用 · 删除。整卡可**拖拽排序**（顺序 = 选号优先级，见下）。
 - **opencode 的两种「账号分离」手段（两个独立按钮，文案不得混为一谈）**：
   - **出口代理**（`PUT /api/jethub/opencode/proxy`）：匿名通道的额度按**出口 IP** 计 ⇒ 只有给各账号各配一条出口，才会各自拿到独立额度。**不设 = 与其它未设代理的账号共享本机出口（共用同一份额度）** —— tooltip 必须说明这一点（否则「代理」看起来像锦上添花）。空串是**合法值**（显式清除），`promptModal` 返回 `null` 才是取消 —— 把空串当取消会让「清除代理」点了没反应。非法值**当场报错**（静默不生效比报错更糟）。
   - **指纹轮换**（`POST /api/jethub/opencode/fingerprint/rotate`）：账号条目的**代次 +1**，project id 由 `(identity, 代次)` 重新派生。⚠️ **指纹分离不增加配额**（只有换出口才会）。代次以**账号条目**为权威、凭据里的只是下限（ref 记的静默失效形态正是「代次涨了 project id 却不变」）。
   - 端到端链路：账号条目（`opencodeProxy` / `opencodeFingerprintGeneration`，均落 `accounts.json` 且随备份迁移）→ `bridge.SyncKeys` 把代理写进 `config.Key.Proxy` → 代理主干按 `sel.Key.Proxy` 选 per-key transport（见 §3.10）；指纹在 augmenter 里派生。探针也走**该账号自己的**出口（`httpClientForAccount`）—— 从别的出口探测会得到与真实流量不同的结论。
 - **额度行的显示规则**（R4-0，与 ref `credits-format.js`/`credit-expiry.js` 对齐）：
   - **门控**：`provider.hasBalance` 是渲染整行与「刷新积分」按钮的**唯一**开关，它来自后端 `ProviderMeta.HasBalance`。⚠️ 漏登记**不会报错**，只会让该渠道**永远不显示额度数字**（本端真实缺陷：minimax/raccoon/trae/cline 四家的余额后端与路由早已存在，能力位却是 false）。`internal/api/jethub/balance_capability_test.go` 做**双向**守卫（路由有 ⇒ 标志必须有；标志有 ⇒ 路由必须有）。
-  - **单位三态**：标签与数字都按 `packages[].unit` 走 —— `token` → 「Token」+ `94.54M` 量级；`%` → 「额度」+ 整数百分比；其余（含空串）→ 「积分」。写死「积分」会把 token 余额说成积分（上游用户报障原话：「智谱 plan 给的不是积分是 tokens」）。
-  - **配额窗口（Gemini）**：主行显示**逐窗口百分比**（「5 小时窗口 90% · 周窗口 99%」），**不显示两窗口均值** —— 均值是上游根本不存在的数，且在「额度」标签下会被读成 94.5 个积分（上游用户报障原文）。hover 明细用「重置于 …」而不是「本周期至」（配额是滚动重置）。配额单位下**不渲染**「N/M 个资源包有效」。
+  - **单位两态**：标签与数字都按 `packages[].unit` 走 —— `token` → 「Token」+ `94.54M` 量级；其余（含空串）→ 「积分」。写死「积分」会把 token 余额说成积分（上游用户报障原话：「智谱 plan 给的不是积分是 tokens」）。⚠️ **R5 起不再有 `%` → 「额度」一档**：唯一来源是已删除的 gemini 配额窗口；后端 `normalizedBalanceUnit` 仍保留 `%` 不可累加的守卫，将来再出现窗口制渠道时需在前端 `__jethubCreditLabel`/`__jethubFormatUnits` 各补一档。
   - **分桶**（两种互斥）：有当日刷新池的渠道（loomy `每日赠送` / raccoon `每日积分`）走**池名分桶** →「长期 X · 每日 Y」（loomy 的另一个池标签是「永久」）；其余走到期时间分桶 →「长期 Y · 临时 X」（judged by `deductionEndTime` 距今天数是否小于 `windowDays`）。⚠️ 分桶是**渲染时现算**（宿主长期开着、时间只向前流，缓存会让越线的包继续被当成长期）；窗口天数由后端回传（`windowDays`，可被 `DSH_BUDDY_EXPIRING_WINDOW_DAYS` 覆盖），前端**不得**写死。
   - **资源包 hover 明细**（账号名/状态标签）：只列**还能用**的包（剩余 > 0、未过期、未失效），按**最快到期在上**排序，最多 12 行，其余汇总成「…另有 N 个包，合计剩余 X」。
   - **失效额度**：`balance.expiredTotal > 0` 时单独一行「另有 N 已失效」——**不并进总额**（那部分服务端仍下发但扣不到）。
-  - **账号规格**：`extra.accountTier`（目前只有 Gemini 走这里）；缺席 ⇒ 整行不渲染（不显示「未知」也不报错）。
+  - **附加读数 `extra`**：与 `balance` **并列**的逐账号附加字段，前端**原样透传**（`__jethubLoadCredits` 的 `extra`）—— ⚠️ 漏带它后端看不出任何异常、界面却永远少一行。R5 之前唯一的消费者是 Gemini 的账号规格（`extra.accountTier`，Pro/Free/Ultra），随该渠道一并移除；保留透传是为下一个带附加读数的渠道。
 - **拖拽排序 = 选号优先级**（R4-0）：池内顺序**就是**优先级，桥接时按位置分配 key 的 `Priority`（fill-first 取最小者），故拖动会真实改变下一条请求走哪个账号。⚠️ `SyncKeys` 里曾有一句 `sort.Slice(keys, …ID < …ID)` 把它按 ID 字典序重排 ⇒「拖到第一位」对路由层**完全无效**（已删除，`TestReorderAccountsIsTheRotationPriority` 守着）。提交的是**完整顺序表**（`PUT /providers/{provider}/accounts/order`），服务端做**集合相等**校验（不重不漏）—— 宽松处理会让一次不完整的拖拽把用户排好的顺序**部分**打乱且无法察觉。
 - **匿名通道恒殿后**：非匿名账号按池内顺序拿 `0..n-1`，匿名通道从 100 起（`anonymousKeyPriorityBase`）—— fill-first 会取第一个可用 key，匿名槽排前面会让收费模型先撞一次必然 401 的匿名尝试。这是**位置**而非特权降级：匿名账号仍可被拖动/停用/删除。账号 DTO 的 `anonymous` 由**凭据内容**判定（`api_key == "public"`），不用 id 前缀 —— 本端 id 形如 `{provider}-{8hex}`，ref 的 `opencode-anon-` 前缀判据在这里**永远不命中**。
 - 登录流按 provider `loginModes` 分派：`url`/`qr` → 登录 URL 弹窗 + 2s 轮询（`{done,success}` 契约）；`sms` → **先创建占位账号**（POST `/accounts` 拿 `accountId`）再弹发码/验码两步弹窗（提交时按 `accountId` 绑定凭据；**取消 = 删除占位**）。URL 弹窗的取消同样删除占位。无凭据的占位账号在账号卡上显示「登录未完成 · 无凭据」灰徽标（`freeHubNoCredential`），领取/推理账号集都会过滤掉它们。
@@ -281,7 +285,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 
 - `internal/browserlaunch/`（新包，无 jethub 概念）：`Detect()` 候选路径 + PATH 回退、`FamilyOf/PrivateArgs` 家族表、`DefaultBrowser()`（Windows 注册表；mac/Linux 无零依赖查询 ⇒ 返回空，由调用方明确拒绝而不是静默开普通窗口）、`BuildArgs/Open`（相对 `--user-data-dir` 一律 absolutize —— 相对路径会让 Chrome 静默失败，同 webhub 缺陷 21）。`prepare()` 按平台隐藏控制台窗口；**从不 Wait、从不杀浏览器**。
 - `internal/jethub/login_open.go`：`OpenOptions{Browser,BrowserPath,Session,AccountID}`、`normalizeOpenOptions`（请求 → 偏好 → 旧默认）、`ValidateOpenOptions`（**不启动进程**的同步校验，复用 `BuildArgs` 做 flag 判定）、`ResolveOpenBrowser`、`OpenLoginURL`、`IsolatedProfileDir`（id 净化成单一路径段，杜绝 `..`）、偏好文件 `{dir}/login-open.json`（独立文件：备份导入不得重置本地偏好，`accounts.json` 的备份兼容形态也不受影响）、`DeleteAccount` 后**异步尽力**清理该账号的独立配置目录（浏览器在跑 ⇒ 删不掉是预期，绝不为此杀进程）。
-- 管理器 opener 签名改为 `func(url string, opt OpenOptions)`；**flow 内部不再自行开页**，改为 API 层传入的 mode-bound 闭包（`StartClineLogin`/`StartBuddyLogin`/`StartLobsteraiLogin`/`StartTraeLogin` 复用既有 `openURL` 形参，`StartGeminiLogin`/`StartCodeArtsLoginWithBrowser` 新增选择参数，qoder/minimax/raccoon/loomy/zcode 仍在 handler 里直接 `OpenURLWithBrowser(url, opt)`）——同时修掉「管理器先开一次 + 回调再开一次」的潜在双开。
+- 管理器 opener 签名改为 `func(url string, opt OpenOptions)`；**flow 内部不再自行开页**，改为 API 层传入的 mode-bound 闭包（`StartClineLogin`/`StartBuddyLogin`/`StartLobsteraiLogin`/`StartTraeLogin` 复用既有 `openURL` 形参，`StartCodeArtsLoginWithBrowser` 新增选择参数——R5 之前 `StartGeminiLogin` 同款，随渠道删除；qoder/minimax/raccoon/loomy/zcode 仍在 handler 里直接 `OpenURLWithBrowser(url, opt)`）——同时修掉「管理器先开一次 + 回调再开一次」的潜在双开。
 - API：`GET /api/jethub/login-browsers`（已装浏览器 + 系统默认 + 三种会话 + 记住的选择）、`POST /api/jethub/open-login-url`（**同步**开页并回报错误：用户点了「重新打开登录页」就该知道结果）。每个 login handler 建号**之前**做 `prepareLoginOpen`（校验 + 记住选择），失败 400 —— 否则用户看到的是「弹窗一直等待、浏览器什么都没开」。
 - 前端：`jethubAddAccount` → **选择步**（`__jethubLoginModal`：浏览器轴 + 会话轴 + 自定义路径行。两个下拉都走**项目自定义组件** `renderCustomSelectHtml`（`app.js`；基础样式在 `style-download.css`，经 `style.css` `@import` 全局可用，`style.css` 另有 `.modal .custom-select-*` 覆盖）——原生 `<select>` 只作为组件内部的隐藏取值载体，**不得**直接渲染原生 `<select>`（真实返工：首版用了 `<select class="input">`，弹窗里是被浏览器原生样式渲染的）。内核未知时隐私项禁用并给出提示；此步**还没有占位账号**，取消即关闭）→ `jethubLoginConfirm`（带 `{browser,browserPath,session}` POST `/jethub/{provider}/login`）→ **等待步**（`__jethubLoginWaitingModal`：原三态轮询 + 取消删占位 + 「重新打开登录页」走服务端 `open-login-url`）。⚠️ 等待步不能只留 `<a target="_blank">`：那是 UI 宿主（console = 默认浏览器 / webview = 被 `openExternalURL` 拦到默认浏览器）决定用哪个浏览器，选定模式会失效；链接保留为手动兜底。
 
@@ -328,7 +332,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
 - 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。
 
-## 6. 14 provider 矩阵（端点/协议族/签名/积分）
+## 6. 13 provider 矩阵（端点/协议族/签名/积分）
 
 | provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
@@ -343,7 +347,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 | opencode | OpenAI 兼容 `https://opencode.ai/zen/v1/chat/completions`（§6.5） | **API Key 粘贴**（唯一非浏览器登录，§3.8）；匿名通道 = 字面量 `public` | Bearer `<api_key>` + `x-opencode-project/session/request/client` 指纹头 + UA；**免费通道形状门禁**（stream + `bash`/`read` 工具，augmenter 注入） | —（粘贴的 key 无续期；匿名槽 refreshable=false） | —（无积分面；额度错误按响应体类型名分类 → per-model 锁/换号，§6.5） |
 | zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）—— ⚠️ **R4-1 起这是唯一来源**（原先的「导入官方客户端凭据」已删除，理由见 §6.7） | 官方客户端头族（`X-Device-Mid` 硬需求 + `X-ZCode-App-Version`/`X-Release-Channel`/`X-Client-*`/`anthropic-version`）+ **请求体官方身份块 + 首轮日期块**（3012 准入） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取（`billing/claim`，**必带 captcha**，§6.7） |
-| gemini | **Cloud Code 双层信封**（非 OpenAI 非 Anthropic）`POST {daily}/v1internal:streamGenerateContent?alt=sse`（§6.8；配额/档位走 sandbox） | **Google OAuth** authorization_code（本地 loopback 回调 + id_token 解身份；client_secret 必带，§6.8） | 身份五头逐字（`antigravity/4.3.0 (cmdc-pak)` 族）+ 信封逐层**字母序** + `requestId=agent/<ms>/<8hex>`；流式不带 `Accept` | refresh_token（Google 偶尔轮换须回写；per-credential 串行） | **配额窗口**（`gemini-5h`/`gemini-weekly` 百分比，非积分；§6.8） |
+
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
 
@@ -661,58 +665,37 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
   `modelGapMs` 并发门（本端靠 3009 退避重试兜底，不做跨请求串行）；远端目录的进程内缓存与
   30s 冷却门（目录拉取只在被调用时发生）。
 
-### 6.8 Gemini Code Assist（Google Cloud Code Assist 免费线）协议要点（R3-3，ref `src/gemini*.ts` @ ff5e37d）
+### 6.8 （空位：Gemini Code Assist 已于 R5 整体移除）
 
-**文件**：`internal/jethub/gemini.go`（常量/凭据/字母序/模型表/schema 清洗/签名键）、
-`gemini_oauth.go`（OAuth 流 + 令牌端点）、`gemini_convert.go`（请求信封 + 响应桥 + 续期）、
-`gemini_credits.go`（配额窗口）；API `internal/api/jethub/gemini.go`。
+**2026-10-07（R5）：** 该渠道（R3-3 移植，原 §6.8）**整体删除**，本节不再保留实现说明。
 
-- **端点与身份**：推理 `POST {daily}/v1internal:streamGenerateContent?alt=sse`（InferURL 显式
-  声明——路径含方法名与查询串）；配额与档位走 **sandbox** 端点（ref `baseFor` 的路由，不
-  "顺手统一"）。身份五头逐字写死（`User-Agent: antigravity/4.3.0 (cmdc-pak)` /
-  `x-client-name: antigravity` / `x-client-version: 4.3.0` / `x-machine-id: cmdc-pak` /
-  `x-vscode-sessionid: proxy`），**不带** `x-goog-api-key`/`x-goog-api-client`；流式请求
-  **刻意不带 `Accept`**（抓包一致）。伪装 UA 只用于 Cloud Code 端点；令牌端点是标准 Google
-  OAuth，不设伪装。
-- **双层信封**：`{model, project, request:{contents, generationConfig, sessionId, …},
-  requestId, userAgent}`，**逐层字母序序列化**（`geminiMarshalAlphabetical`；
-  `requestId` 形如 `agent/<ms>/<8hex>` 每请求随机；`sessionId` 恒预置常量
-  `3124275334370613369`）。`project` 恒 `aicode-consumers`（凭据的
-  `cloudaicompanionProject` 优先）。
-- **模型与档位**：静态表只 1 条 `gemini-3.8-flash`（lite 恒 404 不暴露）；档位
-  `low/medium/high/tiered`（默认 medium）经**带档位的模型名**选择（`gemini-3.8-flash-<tier>`
-  即上游准入钥匙——裸名 404）；未知 id 直接拒绝（上游对假名 200 静默跑 3.8 的实测教训）。
-  `includeThoughts` **恒 true**（「关思考」是假关）；tiered 不发 `thinkingBudget`；
-  预算 low=1000 / medium=4000 / high=10000（实测是自由旋钮，名字只是标签）。
-- **消息映射**：role 只有 `user`/`model`；system → `systemInstruction`；历史 reasoning 不回传；
-  `functionResponse` 以 **name** 配对（先扫全消息建 id→name 表；空 name 整块丢弃）；
-  图片仅接受 `data:` URL（进站 http URL 显式报错，防 SSRF 的既有口径）；工具 schema 走
-  白名单清洗（白名单外的键上游**硬 400**；type 数组收敛 + nullable；enum 含非字符串整删）。
-- **thoughtSignature**：functionCall 上的签名按「工具名 + 规范化参数」进程内缓存并回填
-  （键 = `sha256("tool:"+name + NUL + args[:512])` 前 16 hex，与 ref 逐字一致）。⚠️ **与 ref
-  的差异**：不落盘（ref 落盘是因 DSH 每请求重建适配器；本端 Manager 常驻）。
-- **登录**：Google OAuth authorization_code（本地 loopback 回调，动态端口 + RFC 8252）。三条
-  硬约束：① 先监听再拼 URL（端口回退会 redirect_uri_mismatch）② 回调 state 必须校验
-  ③ exchange/refresh 必须带 `client_secret`（漏了报 `client_secret is missing`，症状是
-  「浏览器授权成功但账号不出现」）。身份从 `id_token` 解（不验签，仅展示）；Google 偶尔
-  轮换 refresh_token，响应给了新值必须回写。续期 per-credentialRef 串行（R1-2 同款锁 +
-  锁内重读）。
-- **配额**：`retrieveUserQuotaSummary`（sandbox），请求体**必须带 `project`**（`{}` 对第二个
-  账号 403 SUBSCRIPTION_REQUIRED；字段名是 `project` 不是 `cloudaicompanionProject`）。
-  只认 `gemini-5h` / `gemini-weekly` 两个 bucketId（**不按 displayName**）；`resetTime`
-  不可解析 ⇒ 整条丢弃（不编造永不过期的窗口）。单位是**百分比**（前端 `%` 显示），
-  total 取两窗口平均——这不是积分。60s 缓存按 access_token 键。
-- **接线**：`/api/jethub/gemini/login|status|refresh|cancel|balance`（loginId 分支被
-  `status_login_test.go` 的 chi.Walk 守卫覆盖）；`InterceptResponse` 分派 gemini →
-  Cloud Code SSE→OpenAI chunk（流式）/ 聚合 chat.completion（非流式）；错误帧恒在首帧
-  peek 判定。
-- **回归**：`gemini_test.go`（14 个）+ `inference_url_test.go`（gemini InferURL 锁定）+
-  `status_login_test.go`（chi.Walk 含 gemini）+ `register_test.go`（display-name 表）。
-  ⚠️ **未真机验证**：OAuth 流与推理 200 需要真实 Google 账号（实施判据全部来自 ref
-  实测记录）；金标准信封按 ref 353 字节用例的前缀+字段序断言（requestId 随机段不逐字节）。
+**删除原因**：`gemini_oauth.go` 内置的 Google OAuth **client_id / client_secret** 常量被
+GitHub Push Protection 判定为泄露密钥（`GH013`，`Google OAuth Client ID` +
+`Google OAuth Client Secret`），**阻塞本仓库全部 `git push`**。该 client 是上游 Cloud Code
+客户端的固有公开常量（不是本项目的凭据），但 GitHub 的规则按模式匹配、不接受该解释；用户
+决定**直接移除整个渠道**而不是走 unblock 流程，并要求**此后不再同步该渠道的上游数据**
+（同步文档 §5 已登记）。
+
+**删除范围**（`git grep -i gemini` 已确认无残留）：
+
+- 源码：`internal/jethub/gemini.go`、`gemini_convert.go`、`gemini_credits.go`、`gemini_oauth.go`、
+  `gemini_test.go`、`internal/api/jethub/gemini.go`（六个文件整体删除）。
+- 接线：`manager.go::defaultProviders` 元数据、`products.go`（product 表 + `SetAugmenter`）、
+  `qoder_adapter.go::InterceptResponse` 的 gemini 分派、`register.go::RegisterGemini` 路由挂载
+  与 `rateLimitExemptProviders` 条目。
+- 前端：额度行的**配额单位（`%`）渲染链**（`__jethubCreditLabel` 的 `%` 档、
+  `__jethubFormatQuota`/`__jethubQuotaLine`/`__jethubQuotaDetail`）、**账号规格行**
+  （`extra.accountTier` 的 DOM 与更新逻辑）、四个 i18n 键（`freeHubUnitQuota`/
+  `freeHubAccountTier`/`freeHubCreditRemaining`/`freeHubCreditResetsAt`，en+cn 双字典）。
+- 后端聚合：`internal/api/jethub/balances.go` 的 `nonAggregatableProviders` 表（唯一用途是
+  为 gemini 的百分比窗口省一次必然被丢弃的请求）。
+- **保留**：`internal/jethub/balance_summary.go::normalizedBalanceUnit` 的 `%`/「通道」
+  不可累加守卫（它同时守着 opencode 的「通道」，且是将来再出现窗口制渠道时的第一道防线）。
+- **不影响**：代理核心的 **Gemini thought_signature 回填**（`internal/proxy/signature_cache.go`
+  等）—— 那条链路服务的是用户**自建**的 `generativelanguage.googleapis.com/v1beta/openai`
+  Provider（`Provider.IsGeminiOpenAICompat`），与 Free Hub 渠道无关，代码与测试原样保留。
 
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
-
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。
 对齐参考插件会话输入区那枚用量徽标（`ZCode (智谱) • 94.54MToken`），在该列**追加渠道级
 余额**（小两号、次级色）——用户在原页面就能看到「这个渠道还剩多少」，不必切到 Free Hub。
@@ -735,7 +718,7 @@ Monitor（web/static/monitor/monitor_quota.js）
 | **单位归一两类**：`token` 一类；`credit`/`credits`/「积分」/空串归 `credit` | ref `normalizeUnit` 只返回两类；同一渠道服务端会混拼（实测 WorkBuddy 的 `credit`/`credits`），按原值分组会渲染出两个「积分」 |
 | **不跨量纲求和**：ZCode 是 token、其余是积分，两者并列而非相加 | ref 文件头铁律：归一化只收敛同义拼法 |
 | **失败的账号不进合计**，只记 `failedCount`（前端进 title） | ref `creditGroupsOf`：把失败画成 0 会被读成「额度用光」 |
-| **`%`（gemini）与「通道」（opencode）不可累加 ⇒ 整体跳过** | 窗口是并行百分比（两个号各 50% 加起来是 100%？）；「通道可用性」不是余额。跳过同时省掉一次必然被丢弃的上游请求 |
+| **`%` 与「通道」（opencode）不可累加 ⇒ 整体跳过** | 窗口是并行百分比（两个号各 50% 加起来是 100%？）；「通道可用性」不是余额。⚠️ R5 删除 gemini 后 `%` 已无来源，但**守卫保留**（`normalizedBalanceUnit`），`%` 是将来任何窗口制渠道的第一道防线 |
 | **只统计启用 + 有凭据的账号** | 与 ref 徽标「仅启用账号」同口径；无凭据的账号**连查都不查**（它不是「读数失败」） |
 
 **四条实现约束**（每条都有回归守着）：
@@ -746,8 +729,10 @@ Monitor（web/static/monitor/monitor_quota.js）
 2. **账号/凭据一变即失效**：`AddAccount`/`DeleteAccount`/`UpdateAccount`/`SetCredential`
    调 `InvalidateBalanceSummary`（乐观失效：代价是一次重查，收益是立即正确）。
    ⚠️ 调用点必须在**取 `m.mu` 之前**：`balanceMu` 与 `m.mu` 不得嵌套获取。
-3. **`%` 不查询但仍然安全**：即使 gemini 的 `%` 包漏进聚合层，`normalizedBalanceUnit`
-   也会拒掉它（两层防线：端点层不查、聚合层不认）。
+3. **`%` 仍然安全**：即使某个渠道的 `%` 包漏进聚合层，`normalizedBalanceUnit`
+   也会拒掉它。⚠️ R5 起 `internal/api/jethub/balances.go` 的 `nonAggregatableProviders`
+   表已随 gemini 删除（它唯一的作用是为该渠道省一次必然被丢弃的上游请求），
+   故现在只剩**聚合层这一道**防线。
 4. **格式化是全站唯一口径**：Monitor **复用** `jethub.js` 的 `__jethubFormatUnits`
    （`web/monitor-quota-balance.test.js` 断言 `monitor_quota.js` 里**不得**再出现一份
    `toFixed(2)+'M'`），故两处的 `30.09M` 不可能漂移。
@@ -798,8 +783,8 @@ Monitor（web/static/monitor/monitor_quota.js）
 - `internal/jethub/opencode_test.go`（10 个）：指纹/会话/请求 id 形状、门禁注入（stream + bash/read + tool_choice 规则）、错误分类与 retry-after 策略（0 合法/封顶/默认值）、模型表 14 条与免费集合、账号添加去重与 Key 提取器、augment 头整体替换、拦截器映射（BillingLock/FreeTier/透传 + body 还原）、非流式 SSE 聚合（content/tool_calls 拼接/usage/finish）、匿名槽殿后 + 付费可见性（bridge）（§3.8/§6.5）。
 - `internal/proxy/augmenter_test.go::TestForwardWithRetry_SameKeyRetryDropsHeader`：bridge 发起的同 Key 重发 —— 重发一次、回环标记对 augmenter 可见、标记不泄漏上游（§6.4）。
 - `internal/api/jethub/opencode_test.go`：apikey/匿名登录端点（200/去重 reused/空 key 400/账号列表）。
-- `internal/api/jethub/balance_capability_test.go`（3 个）：**能力位 ↔ 路由双向守卫**（路由有 ⇒ `HasBalance` 必须有，反向亦然；并锚定 minimax/raccoon/trae/cline/opencode 五家必须登记 —— 已反向验证：临时摘掉 cline 的标志立刻变红）+ Gemini/loomy 的 `supportsRateLimit` 例外 + **领取语义位**（raccoon = `onboarding` 且不再渲染独立新手任务按钮；loomy = `daily` + 独立新手任务；workbuddy 无签到）。
-- `internal/jethub/credit_fields_test.go`（7 个）：buddy 到期字段与 `expiredTotal`、trae 顶层 `user_entitlement_pack_list`（名字取 `display_desc`、`expire_time` **秒**→毫秒、越界 clamp、信封兼容）、raccoon 四池（`available_points` 缺失必须报错而不是显示 0）、Gemini 档位解析（`paidTier` 优先 / Ultra→Pro→Free 顺序 / 取不到返回 nil）、Gemini 窗口重置时刻进明细、`windowDays` 环境变量（`0` 是合法值）、qoder 专用包到期。
+- `internal/api/jethub/balance_capability_test.go`（3 个）：**能力位 ↔ 路由双向守卫**（路由有 ⇒ `HasBalance` 必须有，反向亦然；并锚定 minimax/raccoon/trae/cline/opencode 五家必须登记 —— 已反向验证：临时摘掉 cline 的标志立刻变红）+ loomy 的 `supportsRateLimit` 例外（R5 起唯一一家；gemini 条目随渠道删除）+ **领取语义位**（raccoon = `onboarding` 且不再渲染独立新手任务按钮；loomy = `daily` + 独立新手任务；workbuddy 无签到）。
+- `internal/jethub/credit_fields_test.go`（5 个）：buddy 到期字段与 `expiredTotal`、trae 顶层 `user_entitlement_pack_list`（名字取 `display_desc`、`expire_time` **秒**→毫秒、越界 clamp、信封兼容）、raccoon 四池（`available_points` 缺失必须报错而不是显示 0）、`windowDays` 环境变量（`0` 是合法值）、qoder 专用包到期。（R5 移除的两个 gemini 用例：档位解析、窗口重置时刻进明细。）
 - `internal/jethub/ratelimits_test.go`（3 个）：解禁时刻文案解析（中英两种句式 + 负偏移 + 半时区 + 无时区不猜）、**重测把上游新的解禁时刻写回**（已反向验证）、`UpdateModelRateLimit` 只延长不缩短 + 空模型名拒收 + 未知账号 `ErrNotFound`。
 - `internal/rotation/ratelimit_observer_test.go`：四条写锁路径都通知观察者、观察者拿到的时刻与写入的一致、未安装观察者时安全 no-op、未知 key 不产生通知。
 - `internal/jethub/order_test.go`（3 个）：池内顺序＝选号优先级（含重启后仍生效 + 桥接 key `Priority` 跟随位置；已反向验证：把 ID 重排加回去立刻变红）、顺序表集合相等校验（少/多/重复/陌生人一律拒绝且不改动现状）、匿名通道恒殿后但仍可拖动。

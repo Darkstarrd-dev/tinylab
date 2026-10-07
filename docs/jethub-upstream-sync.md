@@ -4,7 +4,9 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `2e8bb86`（2026-10-05，R4 分诊基线；前序 pin：R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `e73cd2f`（2026-10-07，R5 分诊基线；前序 pin：R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+>
+> **本轮侦察（2026-10-07，R5）：** master `2e8bb86` → `e73cd2f`：**105 commits / 167 文件（69 触 `src/`）**，横跨记账（token-ledger 四期）、buddy 成长中心、失效模型剔除、auto 选型、永久积分锁定、限流判据收窄、zcode 判据与超时、openai-gateway 出口族、面板族与大量测试。**本轮首件事是渠道移除**：`git push` 被 GitHub Push Protection 拒绝（GH013），命中 gemini 渠道的 Google OAuth client 常量 ⇒ 用户决定**整体删除该渠道**并把 gemini 上游数据**永久移出同步范围**（§5 新条目 + §6 R5-1）。分诊结论（R5-2 起逐条勾销）见 §6；不搬项入 §5。
 >
 > **本轮侦察（2026-10-05，R4）：** master `ff5e37d` → `2e8bb86`：**6 commits / 26 文件**，全部集中在 zcode + 文档。三条实质结论：① `2e8bb86` **BREAKING** —— 上游以**安全理由整体删除**「读本机 ZCode 客户端凭据」的旁路（本端有同一条路，用户同日决定**删除**）；② `c94e659` 复测修正两条旧说法：3012 的 HTTP 状态是 **405 不是 403**、日期块**不是**判据；③ `77fbf6c` captcha region 必须与产 param 的配置同源（本端结构上免疫）。`src/zcode-identity.ts` 本轮**只改注释**（逐行过滤非注释增删 = 空）⇒ 身份块文本与 sha256/长度**无需重新提取**。→ 本轮待办见 §6 R4。
 >
@@ -133,6 +135,7 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R1-7 旧差异「opencode 无 per-account 代理」 | R4-0 **反转为已实现**（用户要求全量对齐） | 原判据是「本端推理出站由 proxy 层决定，per-key 出口要动代理核心」。R4-0 做了这件事：`config.Key.Proxy` + 按代理串缓存的 transport + `upstreamClientFor`/`streamClientFor` 的 per-key 分支。**安全边界**：`Key.Proxy` 默认空 ⇒ 未设置的 provider/key 走原路径，逐字节不变（`perkey_proxy_test.go` 两条断言分别锁「设了的会绕」与「没设的不绕」） |
 
 ---
+| **Gemini 渠道相关的一切（永久排除，2026-10-07 用户决定）** | `d9d0683` / `66753b4` / `ee0f730` / `e061b21` 族（`src/gemini*.ts` 7 文件 + 172 例单测） | **本端已整体删除该渠道**（R5-1：其 OAuth client 常量被 GitHub Push Protection 判为密钥、阻塞全部 `git push`，用户决定删渠道而非 unblock）。渠道不存在 ⇒ 协议事实、配额语义、模型目录、sessionId 派生、签名漂移兜底等全部无落点。**不再逐条评估**；若将来重新引入该渠道，须先解决密钥托管（env / 用户自备 client）再按本行锚点重估 |
 
 ## 6. 待办与实施记录（R1：pin `cecf376` → `e06283c`；R2：ZCode 重估）
 
@@ -270,6 +273,27 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 > **与 ref 的有意差异**：① 签名缓存**进程内不落盘**（ref 落盘是因 DSH 每请求重建适配器；本端 Manager 常驻）② 无端点轮换/换号层（proxy 重试链 + rotation 已承担；ref 的 `includeThoughts` 恒真/假名 404 判据全保留）③ 档位经**带档位的模型名**（`gemini-3.8-flash-<tier>`）选择而非 DSH efforts 下拉（等价机制）④ 金标准字节断言取**前缀+后缀+字段序**（requestId 随机段无法逐字节，判据强度等价）。
 > 回归 `gemini_test.go`（14 个：金标准信封/档位预算/未知 id 拒绝/角色与工具配对/图片 data-URL 门禁/schema 清洗/凭据过期/签名键/请求 id 形状/SSE 转换/thought→reasoning/错误帧/聚合/嵌套字母序）。
 
+#### R5-1 Gemini Code Assist 渠道：整体移除（**BREAKING，用户决定**）✅
+
+- **触发**：`git push` 被 GitHub Push Protection 拒绝（`GH013`），命中的是
+  `internal/jethub/gemini_oauth.go:33/36` 的两个常量 —— Google OAuth **client_id / client_secret**
+  （`geminiDefaultClientID` / `geminiDefaultClientSecret`，R3-3 从 ref 逐字移植的「上游 Cloud Code
+  客户端固有公开常量」）。提交 `f2a6fee`（R3-3 引入）与 `e294d4e`（同文件再动）各命中一次。
+- **决定（用户，2026-10-07）**：**不移交 unblock、不改走环境变量，直接删除整个渠道**；并要求
+  **此后不再同步该渠道的上游数据**（见 §5 的新条目）。
+- **删除范围**：`internal/jethub/gemini{,_convert,_credits,_oauth,_test}.go` + `internal/api/jethub/gemini.go`
+  六个文件；`manager.go` 元数据、`products.go`（product 表 + `SetAugmenter`）、`qoder_adapter.go`
+  的拦截器分派、`register.go` 的路由挂载与 `rateLimitExemptProviders` 条目；前端配额单位（`%`）
+  整条渲染链 + 账号规格行 + 四个 i18n 键；`internal/api/jethub/balances.go` 的
+  `nonAggregatableProviders` 表。provider 数 14 → **13**。详见架构 §6.8（已改为删除记录）。
+- **保留**：代理核心的 Gemini `thought_signature` 回填（服务用户**自建**的
+  `generativelanguage.googleapis.com/v1beta/openai` Provider，与 Free Hub 渠道无关）——
+  它同时是 `internal/urlutil` 的 Google 路径派生用例，一并保留。
+- **上游数据处置**：`src/gemini*.ts`（7 文件）与其 172 例单测**不再纳入分诊范围**；
+  上游后续任何 gemini 提交（如本轮的 `d9d0683` / `66753b4` / `ee0f730`）一律**不搬、不再评估**。
+- **验收**：`go build ./...` + `go vet ./...` + 全量 `go test ./internal/...` 全绿；
+  `node web/jethub.test.js` 全绿；`git grep -i gemini` 在 Free Hub 相关面零残留（除上述保留项与文档）。
+
 #### R3-4 zcode：双通道（start-plan/coding-plan）+ zai 渠道——不搬（2026-10-04 用户决定）
 
 > 已移入 §5（判定锚点见该表）。上游事实存档：`0fcd929`（zai 渠道：ready 解析接 `data.zai` 分支）+ `15ccae5`（双通道传输层：start-plan=积分走 `zcode.z.ai`，coding-plan=订阅走 `api.z.ai` + OAuth token 换 api-key 四步 GET 流；选路按模型归属、start-plan 优先）。触发重估的条件：用户出现 coding-plan 订阅或 z.ai 国际版账号。
@@ -328,3 +352,4 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R2 | 2026-10-02 | `e06283c`（不变） | **用户报障触发的重估**：ZCode provider 从 §5 不搬清单移出并整条移植（§6.1） | 新增 13 号 provider（Anthropic Messages 桥 + 3012 身份块/日期块 + CLI 设备授权登录 + 官方凭据解密导入 + token 桶余额 + 本地载体页 captcha 领取）；真机验证：登录 init / 凭据解密 / 余额 200 / 目录数值与 ref 一致 / 推理 200（无 3012）；未覆盖：有内容的正向流与领取载体页（需带 plan 账号）。新事实（目录两种形状、Node↔Go 密钥映射、身份块文本须随上游复核）已写入架构 §6.7（本节 §6 R2） |
 | R3 | 2026-10-04 | `e06283c` → `ff5e37d` | master 85 commits / 150 文件（44 触 src/）；R1 的 opencode 分支已合入（其后 5 个修复归 UI 链不搬）；**R3-1 + R3-2 + R3-3 实施**（同日用户追加），R3-4 移入 §5 不搬，不搬 8 类 | R3-1 codearts 4291 额度判据（BillingLockError 至 UTC+8 24:00 + 换 key）+ 429 独立数字锚定（反向验证必红）；R3-2 cline 删已下线 `cline-free/gemini-3.8-flash`（免费 5→4）；**R3-3 新增 Gemini Code Assist provider（第 14 家）**：OAuth 浏览器回调登录 + 双层信封桥（身份五头/字母序/金标准前缀断言）+ SSE→OpenAI 响应桥 + 签名回填 + sandbox 配额窗口（百分比）+ API/前端接线。`zcode-identity.ts` 未变（已核实）。验证：`go build ./...` + 全量 `go test ./internal/...` 全绿（gemini_test.go 14 例；providers 计数 13→14；chi.Walk 守卫含 gemini） |
 | R4 | 2026-10-05 | `ff5e37d` → `2e8bb86` | master 6 commits / 26 文件（全部 zcode + 文档）；**用户报障驱动的卡片信息全量对齐（P0–P2，§6 R4-0）+ R4-1 zcode 本机凭据路径删除 + R4-2 两条旧说法订正**，不搬 3 类入 §5 | **P0**：四家 `HasBalance` 开关补正（minimax/raccoon/trae/cline）+ 单位标签三态 + Gemini 逐窗口百分比 + gemini 排除重测/重置 + opencode「通道可用性」额度行（本地状态、零网络）；**P1**：限额重置标记**首次真正写入**（rotation 观察者 × 四条写锁路径 + app 组合根注入）+ 重测写回新解禁时刻（中英两种句式 + 捕获时区）+ `CreditPackage` 到期字段/`expiredTotal`/`windowDays`/`extra.accountTier` + 各 provider 填充 + 前端临时/长期分桶、资源包 hover 明细、失效额度、池名分桶、账号规格行；**P2**：账号拖拽排序（顺序=选号优先级，删掉 `SyncKeys` 的 ID 重排）+ opencode 指纹轮换（代次为权威）+ **opencode per-account 出口代理接线（`config.Key.Proxy` + per-key transport，默认空 ⇒ 原路径逐字节不变）** + loomy 新手任务入口 + raccoon 一次性奖励文案 + 匿名标记与账号名/手机号派生；**R4-1 删除** zcode 本机凭据导入（含安装目录探测，源码字面量守卫 + 路由反向回归）；**R4-2** 订正 3012 是 405、日期块非判据（本端按响应体判码故功能免疫）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node web/jethub.test.js` 全绿（含 5 组新用例：额度单位/分桶、排序、provider 专属卡片、通道状态、出口代理）；关键项已做反向验证（能力位、观察者、重测写回、指纹、per-key 代理、本机读取守卫） |
+| R5 | 2026-10-07 | `2e8bb86` → `e73cd2f` | master 105 commits / 167 文件（69 触 `src/`）；**R5-1 整体移除 Gemini Code Assist 渠道（用户决定，push 阻塞驱动）** + R5-2 起按分簇分诊结果实施可搬项 | **R5-1**：gemini 渠道六个源文件 + 全部接线（product 表/augmenter/拦截器分派/API 路由/`rateLimitExemptProviders`）+ 前端配额单位（`%`）渲染链与账号规格行 + 四个 i18n 键 + `nonAggregatableProviders` 表；provider 14 → 13；上游该渠道数据永久移出同步范围（§5）。回归：`go build`/`go vet`/全量 `go test ./internal/...` + `node web/jethub.test.js` 全绿，`git grep -i gemini` 在 Free Hub 面零残留。R5-2 见同节 |

@@ -308,11 +308,10 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     freeHubUnknown: 'unknown', freeHubExpired: 'expired', freeHubInMinutes: 'in {0} min', freeHubInHours: 'in {0} h',
     freeHubCreditFailed: 'query failed', freeHubCreditsLoading: 'Querying credits…',
     freeHubRateLimitReset: 'Rate-limit reset',
-    // 额度行的单位口径（ref credits-format.js 的 unitLabel 三态）：ZCode 是 token、
-    // Gemini 是配额百分比，其余才是积分。**标签必须随单位走** —— 把 token 说成
-    // 「Credits」正是上游记录的用户报障。
-    freeHubUnitToken: 'Token', freeHubUnitQuota: 'Quota',
-    freeHubAccountTier: 'Tier',
+    // 额度行的单位口径（ref credits-format.js 的 unitLabel）：ZCode 是 token、
+    // 其余才是积分。**标签必须随单位走** —— 把 token 说成「Credits」正是上游记录
+    // 的用户报障。
+    freeHubUnitToken: 'Token',
     freeHubOrderHint: 'Drag the cards to reorder. The order IS the auto-selection priority: the account listed first is used first (the anonymous channel always goes last).',
     freeHubOrderSaved: 'Account order saved',
     // 「领取」的语义：一次性奖励与每日签到是两件事（ref 的能力矩阵把它们分成
@@ -330,7 +329,7 @@ resetQuota: 'Reset Quota', confirmResetQuota: 'Clear all cooldown timers and quo
     freeHubProxyCurrent: 'Egress proxy: {0} (click to change; clear the field to remove it)',
     freeHubAccountProxyHint: 'http://host:port — the account’s outbound traffic goes through this proxy. Clear it to share the machine’s default egress again.',
     freeHubAccountProxySaved: 'Account proxy saved', freeHubAccountProxyCleared: 'Account proxy cleared',
-    freeHubCreditUnnamed: 'unnamed', freeHubCreditRemaining: 'remaining', freeHubCreditResetsAt: 'resets at',
+    freeHubCreditUnnamed: 'unnamed',
     freeHubCreditLongTerm: 'long-term', freeHubCreditTemporary: 'expiring',
     freeHubCreditDaily: 'daily', freeHubCreditPermanent: 'permanent',
     freeHubCreditPackages: '{0}/{1} packages active', freeHubCreditExpired: '{0} more expired',
@@ -1813,11 +1812,10 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     freeHubUnknown: '未知', freeHubExpired: '已过期', freeHubInMinutes: '{0} 分钟后', freeHubInHours: '{0} 小时后',
     freeHubCreditFailed: '查询失败', freeHubCreditsLoading: '正在查询积分…',
     freeHubRateLimitReset: '限额重置',
-    // 额度行的单位口径（ref credits-format.js 的 unitLabel 三态）：ZCode 是 token、
-    // Gemini 是配额百分比，其余才是积分。**标签必须随单位走** —— 把 token 说成
-    // 「积分」正是上游记录的用户报障（「智谱 plan 给的不是积分是 tokens」）。
-    freeHubUnitToken: 'Token', freeHubUnitQuota: '额度',
-    freeHubAccountTier: '账号规格',
+    // 额度行的单位口径（ref credits-format.js 的 unitLabel）：ZCode 是 token、
+    // 其余才是积分。**标签必须随单位走** —— 把 token 说成「积分」正是上游记录的
+    // 用户报障（「智谱 plan 给的不是积分是 tokens」）。
+    freeHubUnitToken: 'Token',
     freeHubOrderHint: '拖动卡片可调整顺序（也可直接拖整张卡片）。顺序即自动选号优先级，排在前面的账号优先使用（匿名通道恒殿后）。',
     freeHubOrderSaved: '账号顺序已保存',
     // 「领取」的语义：一次性奖励与每日签到是两件事（ref 的能力矩阵把它们分成
@@ -1836,7 +1834,7 @@ resetQuota: '重置配额', confirmResetQuota: '清空所有冷却计时器和�
     freeHubProxyCurrent: '出口代理：{0}（点击修改；清空输入框即移除）',
     freeHubAccountProxyHint: 'http://host:port —— 该账号的出站流量走这条代理。清空即回到与其它账号共享本机出口。',
     freeHubAccountProxySaved: '账号代理已保存', freeHubAccountProxyCleared: '账号代理已清除',
-    freeHubCreditUnnamed: '未命名', freeHubCreditRemaining: '剩余', freeHubCreditResetsAt: '重置于',
+    freeHubCreditUnnamed: '未命名',
     freeHubCreditLongTerm: '长期', freeHubCreditTemporary: '临时',
     freeHubCreditDaily: '每日', freeHubCreditPermanent: '永久',
     freeHubCreditPackages: '{0}/{1} 个资源包有效', freeHubCreditExpired: '另有 {0} 已失效',

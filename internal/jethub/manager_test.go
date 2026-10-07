@@ -90,11 +90,16 @@ func (f *fakeRegistry) ListProviders() []config.Provider {
 
 func TestProvidersMetadata(t *testing.T) {
 	metas := Providers()
-	if len(metas) != 14 {
-		t.Fatalf("expected 14 providers, got %d", len(metas))
+	if len(metas) != 13 {
+		t.Fatalf("expected 13 providers, got %d", len(metas))
 	}
-	if !ProviderExists("codearts") || !ProviderExists("minimax") || !ProviderExists("opencode") || !ProviderExists("zcode") || !ProviderExists("gemini") {
-		t.Fatal("codearts/minimax/opencode/zcode/gemini should be known providers")
+	if !ProviderExists("codearts") || !ProviderExists("minimax") || !ProviderExists("opencode") || !ProviderExists("zcode") {
+		t.Fatal("codearts/minimax/opencode/zcode should be known providers")
+	}
+	// R5：gemini 渠道整体移除（上游同步范围同步排除），它不得再被当成已知渠道
+	// —— 否则残留的账号/前缀会走回一条已删掉实现的路。
+	if ProviderExists("gemini") {
+		t.Fatal("gemini must no longer be a known provider (R5 removed the channel)")
 	}
 	if ProviderExists("nope") {
 		t.Fatal("unknown provider should not exist")

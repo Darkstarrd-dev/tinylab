@@ -165,63 +165,6 @@ func TestRaccoonBalancePools(t *testing.T) {
 	}
 }
 
-// TestGeminiAccountTierParse: 档位短标签与上游原文（hover 用）。
-// ⚠️ 顺序有意义：Ultra → Pro → Free —— 上游把「Pro 但已降级」也叫 free-tier。
-func TestGeminiAccountTierParse(t *testing.T) {
-	cases := []struct {
-		name  string
-		body  string
-		label string
-		title string
-	}{
-		{"paidTier pro", `{"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"},"currentTier":{"id":"free-tier","name":"Antigravity"}}`, "Pro", "Google AI Pro（g1-pro-tier）"},
-		{"paidTier ultra", `{"paidTier":{"id":"g1-ultra-tier","name":"Google AI Ultra"}}`, "Ultra", "Google AI Ultra（g1-ultra-tier）"},
-		// 没有 paidTier 时用 currentTier 兜底。
-		{"currentTier only", `{"currentTier":{"id":"free-tier","name":"Antigravity Starter Quota"}}`, "Free", "Antigravity Starter Quota（free-tier）"},
-	}
-	for _, c := range cases {
-		var payload any
-		if err := json.Unmarshal([]byte(c.body), &payload); err != nil {
-			t.Fatal(err)
-		}
-		tier := parseGeminiAccountTier(payload)
-		if tier == nil {
-			t.Fatalf("%s: tier must parse", c.name)
-		}
-		if tier.Label != c.label || tier.Title != c.title {
-			t.Fatalf("%s: got %+v, want %s / %s", c.name, tier, c.label, c.title)
-		}
-	}
-	// 取不到档位 ⇒ nil（面板**整行不渲染**，不显示「未知」）。
-	for _, body := range []string{`{}`, `{"paidTier":{}}`, `[]`, `"x"`} {
-		var payload any
-		_ = json.Unmarshal([]byte(body), &payload)
-		if tier := parseGeminiAccountTier(payload); tier != nil {
-			t.Fatalf("body %s must yield no tier, got %+v", body, tier)
-		}
-	}
-}
-
-// TestGeminiPackageCarriesResetTime: 配额窗口的重置时刻进明细（「重置于 …」）。
-func TestGeminiPackageCarriesResetTime(t *testing.T) {
-	five := &geminiQuotaWindow{BucketID: geminiBucketFiveHour, ResetTime: "2026-01-01T05:00:00Z", RemainingFraction: 0.9}
-	weekly := &geminiQuotaWindow{BucketID: geminiBucketWeekly, ResetTime: "2026-01-05T00:00:00Z", RemainingFraction: 1}
-	bal := geminiBalanceOf(five, weekly)
-	if len(bal.Packages) != 2 {
-		t.Fatalf("packages = %d", len(bal.Packages))
-	}
-	if bal.Packages[0].Unit != "%" || bal.Packages[0].Remaining != 90 {
-		t.Fatalf("quota package wrong: %+v", bal.Packages[0])
-	}
-	if bal.Packages[0].CycleEndTime != "2026-01-01T05:00:00Z" {
-		t.Fatalf("quota package must carry the window reset time, got %q", bal.Packages[0].CycleEndTime)
-	}
-	// total 仍是两窗口均值（面板主行改显示逐窗口百分比，均值只作兜底）。
-	if bal.Total != 95 {
-		t.Fatalf("total = %v, want 95 (mean)", bal.Total)
-	}
-}
-
 // TestExpiringWindowDaysEnv: 窗口天数可由环境变量覆盖，且 `0` 是合法值
 // （不能用 `||` 静默换成默认值 —— 那会让「没有临时积分一档」变成 15 天）。
 func TestExpiringWindowDaysEnv(t *testing.T) {

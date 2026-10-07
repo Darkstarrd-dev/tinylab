@@ -225,11 +225,6 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 		// 3007/3012/1002，判据全在正文——状态码会把并发限流与额度耗尽混为一谈）。
 		return m.zcodeInterceptResponse(clientReq, resp, keyID, upstreamModel, isStream)
 	}
-	if provider == "gemini" {
-		// gemini（R3-3）：Cloud Code SSE → OpenAI chunk 转换（上游帧是
-		// {"response":{candidates,usageMetadata}} 双层信封；错误帧恒在首帧）。
-		return m.geminiInterceptResponse(clientReq, resp, upstreamModel, isStream)
-	}
 	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil
 	}

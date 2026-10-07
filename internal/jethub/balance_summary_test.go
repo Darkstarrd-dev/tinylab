@@ -218,7 +218,7 @@ func TestNormalizedBalanceUnit(t *testing.T) {
 		{"credits 拼法", &CreditBalance{Packages: []CreditPackage{{Unit: "credits", Remaining: 5}}}, "credit", true},
 		{"中文积分", &CreditBalance{Packages: []CreditPackage{{Unit: "积分", Remaining: 5}}}, "credit", true},
 		{"空串归积分", &CreditBalance{Packages: []CreditPackage{{Remaining: 5}}}, "credit", true},
-		{"gemini 百分比不可累加", &CreditBalance{Packages: []CreditPackage{{Unit: "%", Remaining: 95}}}, "", false},
+		{"百分比不可累加", &CreditBalance{Packages: []CreditPackage{{Unit: "%", Remaining: 95}}}, "", false},
 		{"opencode 通道不可累加", &CreditBalance{Packages: []CreditPackage{{Unit: "通道", Remaining: 1}}}, "", false},
 		{"minimax 无包有 Total", &CreditBalance{Total: 800, IsCredit: true}, "credit", true},
 		{"zcode 企业版无数字", &CreditBalance{}, "", false},

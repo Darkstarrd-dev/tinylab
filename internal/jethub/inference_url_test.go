@@ -28,9 +28,6 @@ var expectedInferenceEndpoints = map[string]string{
 	// ref opencode-product.ts（分支 feat/opencode-provider @ 7dd3422）：
 	// baseUrl + chatPath = `https://opencode.ai/zen/v1/chat/completions`。
 	"opencode": opencodeBaseURL + opencodeChatPath,
-	// R3-3 ref gemini.ts：GEMINI_STREAM_PATH = `/v1internal:streamGenerateContent?alt=sse`
-	//（路径含方法名与查询串，任何 BaseURL 拼法都表达不了 → 必须显式 InferURL）。
-	"gemini": geminiEndpointDaily + geminiStreamPath,
 }
 
 // newInferenceURLManager wires the real product table onto a throwaway bridge.

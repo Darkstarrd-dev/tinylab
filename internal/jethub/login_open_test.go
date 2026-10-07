@@ -172,14 +172,14 @@ func TestValidateOpenOptionsFillsFromPrefs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set prefs: %v", err)
 	}
-	opt, err := env.m.ValidateOpenOptions(OpenOptions{AccountID: "gemini-1"})
+	opt, err := env.m.ValidateOpenOptions(OpenOptions{AccountID: "zcode-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opt.Browser != BrowserCustom || opt.BrowserPath != chrome || opt.Session != SessionIsolated {
 		t.Fatalf("empty request must inherit the remembered choice, got %+v", opt)
 	}
-	if opt.AccountID != "gemini-1" {
+	if opt.AccountID != "zcode-1" {
 		t.Fatalf("the per-attempt account id must be preserved, got %+v", opt)
 	}
 }

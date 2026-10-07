@@ -72,13 +72,9 @@ func TestEveryProviderStatusHonorsLoginID(t *testing.T) {
 		t.Fatalf("walked only %d status routes (%v) — the enumeration is broken, not the code", len(routes), routes)
 	}
 	sawLoomy := false
-	sawGemini := false
 	for _, route := range routes {
 		if strings.Contains(route, "/loomy/") {
 			sawLoomy = true
-		}
-		if strings.Contains(route, "/gemini/") {
-			sawGemini = true
 		}
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, route+"?loginId=defect-guard-unknown", nil)
@@ -105,9 +101,6 @@ func TestEveryProviderStatusHonorsLoginID(t *testing.T) {
 	}
 	if !sawLoomy {
 		t.Fatalf("no loomy status route found in %v", routes)
-	}
-	if !sawGemini {
-		t.Fatalf("no gemini status route found in %v (R3-3)", routes)
 	}
 }
 

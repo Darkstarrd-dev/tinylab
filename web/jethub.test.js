@@ -303,7 +303,7 @@ function makeSandbox() {
         freeHubCredential: '凭据', freeHubAutoRenew: '自动续期', freeHubCreditsLabel: '积分',
         freeHubUnknown: '未知', freeHubExpired: '已过期', freeHubInMinutes: '{0} 分钟后', freeHubInHours: '{0} 小时后',
         freeHubCreditFailed: '查询失败', freeHubCreditsLoading: '正在查询积分…', freeHubRateLimitReset: '限额重置',
-        freeHubUnitToken: 'Token', freeHubUnitQuota: '额度', freeHubAccountTier: '账号规格',
+        freeHubUnitToken: 'Token',
         freeHubOrderHint: '拖动卡片可调整顺序。顺序即自动选号优先级。', freeHubOrderSaved: '账号顺序已保存',
         freeHubClaimHelp: '领取该账号今日的积分额度', freeHubClaimOnboarding: '领取奖励', freeHubClaimOnboardingAll: '一键领取奖励',
         freeHubOnboarding: '新手任务', freeHubOnboardingHelp: '一次性新手任务', freeHubOnboardingDone: '新手任务：领取 {0} 项，获得 {1} 积分',
@@ -312,7 +312,7 @@ function makeSandbox() {
         freeHubAccountProxy: '代理', freeHubProxyHelp: '不设置则与其它账号共享本机出口 IP',
         freeHubProxyCurrent: '出口代理：{0}（点击修改）', freeHubAccountProxyHint: 'http://host:port',
         freeHubAccountProxySaved: '账号代理已保存', freeHubAccountProxyCleared: '账号代理已清除',
-        freeHubCreditUnnamed: '未命名', freeHubCreditRemaining: '剩余', freeHubCreditResetsAt: '重置于',
+        freeHubCreditUnnamed: '未命名',
         freeHubCreditLongTerm: '长期', freeHubCreditTemporary: '临时',
         freeHubCreditDaily: '每日', freeHubCreditPermanent: '永久',
         freeHubCreditPackages: '{0}/{1} 个资源包有效', freeHubCreditExpired: '另有 {0} 已失效',
@@ -631,13 +631,14 @@ checkAsync('③ account order: drag to reorder submits the FULL list and renders
   assert.strictEqual(ctx.__calls.apiPut.length, before, 'dropping onto itself must not call the API');
 });
 
-checkAsync('③ credits row: unit label follows the unit + per-window quota + 临时/长期 + 失效额度', async () => {
-  // 这一组锁的是「账号卡片额度行」与上游 ref 的信息对齐（四条独立支路）：
-  //   ① 单位标签三态（token → Token、% → 额度、其余 → 积分）—— 写死「积分」会把
+checkAsync('③ credits row: unit label follows the unit + 临时/长期 + 失效额度', async () => {
+  // 这一组锁的是「账号卡片额度行」与上游 ref 的信息对齐（三条独立支路）：
+  //   ① 单位标签两态（token → Token、其余 → 积分）—— 写死「积分」会把
   //      ZCode 的 token 余额说成积分（上游用户报障原文）；
-  //   ② 配额单位下显示**逐窗口百分比**而不是两窗口均值（均值是上游不存在的数）；
-  //   ③ 带 windowDays 时按到期时间分「临时 / 长期」两桶；
-  //   ④ expiredTotal > 0 时提示「另有 N 已失效」（不能并进总额）。
+  //   ② 带 windowDays 时按到期时间分「临时 / 长期」两桶；
+  //   ③ expiredTotal > 0 时提示「另有 N 已失效」（不能并进总额）。
+  // （R5 之前这里还有「配额单位逐窗口百分比」与「账号规格 Pro/Free/Ultra」两条，
+  // 二者唯一来源都是已删除的 gemini 渠道。）
   const ctx = makeSandbox();
   ctx.openFreeHub();
   await ticks(4);
@@ -650,36 +651,13 @@ checkAsync('③ credits row: unit label follows the unit + per-window quota + �
   });
   await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
   await ticks(2);
-  let label = ctx.__registry['free-hub-credit-label-qoder-1'];
+  const label = ctx.__registry['free-hub-credit-label-qoder-1'];
   let cell = ctx.__registry['free-hub-credit-qoder-1'];
   assert.strictEqual(label.textContent, 'Token', 'a token balance must be labelled Token, not 积分');
   assert.ok(cell.innerHTML.indexOf('94.54M') !== -1, 'token magnitude formatting (94.54M), got ' + cell.innerHTML);
   assert.ok(cell.innerHTML.indexOf('94539275') === -1, 'raw token count must not leak into the card');
 
-  // ② 配额单位：逐窗口百分比，**不显示均值**。
-  ctx.__setBalanceResponse({
-    balance: {
-      total: 94.5, isCreditPackage: false,
-      packages: [
-        { name: '5 小时窗口', unit: '%', remaining: 90, total: 100, used: 10, active: true, cycleEndTime: '2026-01-01T05:00:00Z' },
-        { name: '周窗口', unit: '%', remaining: 99, total: 100, used: 1, active: true, cycleEndTime: '2026-01-05T00:00:00Z' },
-      ],
-    },
-  });
-  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
-  await ticks(2);
-  label = ctx.__registry['free-hub-credit-label-qoder-1'];
-  cell = ctx.__registry['free-hub-credit-qoder-1'];
-  assert.strictEqual(label.textContent, '额度', 'a quota balance must be labelled 额度, not 积分');
-  assert.ok(cell.innerHTML.indexOf('5 小时窗口 90%') !== -1 && cell.innerHTML.indexOf('周窗口 99%') !== -1,
-    'quota windows must be listed per-window, got ' + cell.innerHTML);
-  assert.ok(cell.innerHTML.indexOf('94.5') === -1 && cell.innerHTML.indexOf('94.50') === -1,
-    'the fabricated average must not be shown, got ' + cell.innerHTML);
-  assert.ok(cell.innerHTML.indexOf('个资源包有效') === -1,
-    'quota windows are not resource packages — no "N/M packages" line');
-  assert.ok(cell.innerHTML.indexOf('重置于') !== -1, 'hover detail must say 重置于 (quota resets, not monthly cycles)');
-
-  // ③ 到期分桶：距扣费截止 2 天 < windowDays 15 ⇒ 临时；另一包 400 天后 ⇒ 长期。
+  // ② 到期分桶：距扣费截止 2 天 < windowDays 15 ⇒ 临时；另一包 400 天后 ⇒ 长期。
   const now = Date.now();
   ctx.__setBalanceResponse({
     // windowDays 与 balance **并列**（provider 级的一个值，走响应顶层 —— 与 ref
@@ -716,7 +694,7 @@ checkAsync('③ credits row: unit label follows the unit + per-window quota + �
   assert.ok(cell.innerHTML.indexOf('2/2 个资源包有效') !== -1, 'no windowDays ⇒ package-count line, got ' + cell.innerHTML);
   assert.ok(cell.innerHTML.indexOf('临时') === -1, 'no windowDays ⇒ no fabricated expiry split');
 
-  // ④ 失效额度单独一行（不并进总额）。
+  // ③ 失效额度单独一行（不并进总额）。
   ctx.__setBalanceResponse({
     balance: {
       total: 100, isCreditPackage: true, expiredTotal: 50,
@@ -728,27 +706,6 @@ checkAsync('③ credits row: unit label follows the unit + per-window quota + �
   cell = ctx.__registry['free-hub-credit-qoder-1'];
   assert.ok(cell.innerHTML.indexOf('另有 50 已失效') !== -1, 'expired credit must be called out, got ' + cell.innerHTML);
   assert.ok(cell.innerHTML.indexOf('>100<') !== -1, 'expired credit must NOT be folded into the total');
-
-  // ⑤ 账号规格（Gemini 的 Pro/Free/Ultra）：有值才显示整行，title 带上游原文；
-  //    取不到档位时整行保持隐藏（不显示「未知」）。
-  ctx.__setBalanceResponse({
-    balance: { total: 95, packages: [{ name: '5 小时窗口', unit: '%', remaining: 95, total: 100, used: 5, active: true }] },
-    extra: { accountTier: { label: 'Pro', title: 'Google AI Pro（g1-pro-tier）' } },
-  });
-  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
-  await ticks(2);
-  const tierRow = ctx.__registry['free-hub-tier-row-qoder-1'];
-  const tierCell = ctx.__registry['free-hub-tier-qoder-1'];
-  assert.ok(tierRow && tierCell, 'the tier row must exist for balance-capable providers');
-  assert.strictEqual(tierRow.style.display, '', 'a resolved tier must show the row');
-  assert.strictEqual(tierCell.textContent, 'Pro', 'the short label goes on the card');
-  assert.strictEqual(tierCell.getAttribute('title'), 'Google AI Pro（g1-pro-tier）', 'the upstream original goes in the title');
-
-  ctx.__setBalanceResponse({ balance: { total: 95, packages: [{ name: '5 小时窗口', unit: '%', remaining: 95, total: 100, used: 5, active: true }] } });
-  await ctx.__jethubLoadCredits(ctx.__jethubState.providers.find((p) => p.id === 'qoder'));
-  await ticks(2);
-  assert.strictEqual(tierRow.style.display, 'none', 'no tier ⇒ the row stays hidden (never 未知)');
-  assert.strictEqual(tierCell.textContent, '', 'no tier ⇒ no text');
 });
 
 checkAsync('③ credits row: 200-with-error (opencode channel state) shows the reason, not 查询失败', async () => {

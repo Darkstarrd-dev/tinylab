@@ -63,9 +63,6 @@ func TestProviderBalancesRouteAndGating(t *testing.T) {
 		if !capable[id] {
 			t.Errorf("%s: reading returned for a provider whose HasBalance is false", id)
 		}
-		if nonAggregatableProviders[id] {
-			t.Errorf("%s: non-aggregatable provider must never appear", id)
-		}
 		if len(sum.Groups) == 0 {
 			t.Errorf("%s: a reading with no groups must be omitted, not returned empty", id)
 		}
@@ -75,8 +72,9 @@ func TestProviderBalancesRouteAndGating(t *testing.T) {
 // TestProviderBalancesSkipsNonAggregatableChannels 锁两条**不显示**的渠道：
 //
 //   - opencode：有账号、读得到（本地状态、零网络），但单位是「通道」——
-//     那不是可累加的余额，不得出现在 Monitor 的余额读数里；
-//   - gemini：读数是配额窗口百分比，**不查**（连请求都不发）。
+//     那不是可累加的余额，不得出现在 Monitor 的余额读数里。
+//
+// （R5 之前这里还锁 gemini 的配额百分比窗口；该渠道整体移除后只剩 opencode 一条。）
 func TestProviderBalancesSkipsNonAggregatableChannels(t *testing.T) {
 	srv, m := newStatusHandler(t)
 	// 匿名 opencode 账号：零网络即可建，且读数确实读得到（Total=1）。
@@ -86,8 +84,5 @@ func TestProviderBalancesSkipsNonAggregatableChannels(t *testing.T) {
 	payload := getBalances(t, srv)
 	if _, ok := payload.Balances["opencode"]; ok {
 		t.Fatalf("opencode 的「通道」不是可累加余额，必须被略过: %+v", payload.Balances["opencode"])
-	}
-	if _, ok := payload.Balances["gemini"]; ok {
-		t.Fatal("gemini 的百分比窗口不可累加，必须被略过")
 	}
 }

@@ -282,8 +282,6 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		// opencode（R1-7）：免费模型带「· 免费」标记（本地表判定；远端不下发
 		// 免费标记，表外一律 false），付费模型无倍率信息。
 		"opencode": {"big-pickle": "Big Pickle · 免费", "deepseek-v4-flash": "DeepSeek V4 Flash"},
-		// gemini（R3-3）：单模型静态表，无倍率概念（配额窗口制）。
-		"gemini": {"gemini-3.8-flash": "Gemini 3.8 Flash"},
 	}
 	// 兜底路径没有倍率的 provider（rate 必须为空）。
 	noRate := map[string]bool{"buddy": true, "workbuddy": true, "trae": true, "lobsterai": true, "codearts": true, "minimax": true}

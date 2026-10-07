@@ -98,13 +98,14 @@ func TestProviderBalanceCapabilitiesMatchImplementation(t *testing.T) {
 	}
 }
 
-// TestGeminiRateLimitActionsExempt 锁定「配额窗口制渠道不渲染重测/重置」。
+// TestRateLimitActionsExempt 锁定「重测/重置按钮对哪些渠道不渲染」。
 //
-// gemini 的限流是**服务端配额窗口制**：清掉本地标记、重测通过，配额一点没恢复，
-// 下一次请求立刻又是 429 —— 这组按钮对它只剩「白烧配额」与「把受限账号放回池里
-// 再撞一次」两种副作用（ref RATE_LIMIT_CAPABILITIES.gemini = false）。
-// loomy 是另一个子类（**根本不返回限流错误**），它本来就在例外表里。
-func TestGeminiRateLimitActionsExempt(t *testing.T) {
+// loomy 是唯一的子类：**根本不返回限流错误**（今日赠送额度用完后静默降级去扣
+// 永久积分）⇒ 重测永远测不出东西、重置没有标记可清，按钮只剩白烧额度。
+//
+// （R3-3 曾把 gemini 也登记在此：它的限流是服务端配额窗口制，重测/重置同样只会
+// 白烧配额。R5 删除该渠道后本条只剩 loomy。）
+func TestRateLimitActionsExempt(t *testing.T) {
 	srv, _ := newStatusHandler(t)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/jethub/providers", nil))
@@ -125,10 +126,9 @@ func TestGeminiRateLimitActionsExempt(t *testing.T) {
 		got[p.ID] = p.SupportsRateLimit
 	}
 	for provider, want := range map[string]bool{
-		"gemini": false, // 配额窗口制：按钮只剩副作用
-		"loomy":  false, // 根本不返回限流错误
-		"qoder":  true,  // 会回 429/额度错误，重测/重置有意义
-		"zcode":  true,
+		"loomy": false, // 根本不返回限流错误
+		"qoder": true,  // 会回 429/额度错误，重测/重置有意义
+		"zcode": true,
 	} {
 		value, ok := got[provider]
 		if !ok {

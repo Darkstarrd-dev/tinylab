@@ -89,9 +89,6 @@ func (h *Handler) Register(r chi.Router) {
 		// R2: zcode flows (CLI device login / local-credential import /
 		// balance / daily claim with the local captcha carrier page).
 		h.RegisterZcode(r)
-		// R3-3: gemini flows (Google OAuth browser-callback login /
-		// refresh / quota windows).
-		h.RegisterGemini(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)
@@ -198,20 +195,19 @@ var permanentLockProviders = map[string]bool{
 // rateLimitExemptProviders mirrors the original RATE_LIMIT_CAPABILITIES — the
 // providers whose rate limiting is NOT governed by the per-card retest/reset
 // buttons. 登记判据见 ref credits-capabilities.js：答「这个按钮点下去，能不能
-// 让用户**少**受限一次？」，答否即登记。两个子类的理由**不同**：
+// 让用户**少**受限一次？」，答否即登记：
 //
 //   - loomy：**根本不返回限流错误**（今日赠送额度用完后静默降级去扣永久积分）
-//     ⇒ 重测永远测不出东西、重置没有标记可清，重测还会白烧额度；
-//   - gemini：**限流是服务端配额窗口制**（5 小时 + 周窗口），本地标记清掉、
-//     重测通过，配额本身一点没恢复 ⇒ 按钮只剩「白烧本就紧张的窗口配额」与
-//     「把受限账号放回池里再撞一次 429」两种副作用。
+//     ⇒ 重测永远测不出东西、重置没有标记可清，重测还会白烧额度。
+//
+// （R3-3 的 gemini 曾同在此表：它的限流是服务端配额窗口制，重测/重置只会白烧
+// 配额。R5 删除该渠道后条目一并移除。）
 //
 // ⚠️ 漏登记的后果与额度能力位相反：多渲染两个按钮不会报错，但会让用户对
-// gemini 反复白烧配额（用户报障原文：「重测按钮你确认过会发请求吗，为什么响应
+// loomy 反复白烧额度（用户报障原文：「重测按钮你确认过会发请求吗，为什么响应
 // 这么快？可以移除吗」）。
 var rateLimitExemptProviders = map[string]bool{
-	"loomy":  true,
-	"gemini": true,
+	"loomy": true,
 }
 
 func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {

@@ -166,16 +166,6 @@ func RegisterDefaultProducts(b *Bridge) {
 		InferURL:    zcodePlanMessagesURL,
 		Models:      zcodeFallbackModels(),
 	})
-	// R3-3: gemini (Google Cloud Code Assist 免费线；双层信封协议，
-	// InferURL 指向 daily 端点的流式路径——路径含 `:streamGenerateContent`
-	// 且带查询串，任何 BaseURL 拼法都表达不了)。
-	b.RegisterProduct(Product{
-		Provider:    "gemini",
-		DisplayName: "Gemini Code Assist",
-		BaseURL:     geminiEndpointDaily,
-		InferURL:    geminiEndpointDaily + geminiStreamPath,
-		Models:      geminiFallbackModels(),
-	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -192,7 +182,6 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("minimax", m.minimaxAugment)
 	m.SetAugmenter("opencode", m.opencodeAugment)
 	m.SetAugmenter("zcode", m.zcodeAugment)
-	m.SetAugmenter("gemini", m.geminiAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

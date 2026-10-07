@@ -26,32 +26,27 @@ import (
 // 超时后本轮按失败缓存（15s），下一次轮询即恢复。
 const balanceSummaryTimeout = 30 * time.Second
 
-// nonAggregatableProviders lists the channels that HAVE a balance capability but
-// whose reading cannot be summed across accounts: gemini 的读数是配额窗口
-// 百分比（5 小时 / 周窗口），跨账号求和没有语义（两个号各 50% 加起来是
-// 100%？）。跳过它同时也**省掉一次必然被丢弃的上游请求**。
-//
-// ⚠️ 其余渠道的「不可累加单位」（opencode 的「通道」可用性）不需要在这里列名：
-// 聚合层按包单位过滤（internal/jethub/balance_summary.go 的 normalizedBalanceUnit）。
-var nonAggregatableProviders = map[string]bool{"gemini": true}
-
 // providerBalances GET — 每个渠道的归一单位余额合计（Monitor 用）。
 //
 // 响应形状：`{"balances":{"zcode":{"groups":[{"unit":"token","total":30095000}],
 // "okCount":2,"failedCount":0}}}`。
 //
-// 三条跳过规则（都**不发上游请求**）：
+// 两条跳过规则（都**不发上游请求**）：
 //   - `!HasBalance`：该渠道没有余额能力（能力位是唯一门控，见 manager.go）；
-//   - `nonAggregatableProviders`：没有可求和的读数（gemini）；
 //   - `Groups` 为空的渠道（全部账号读取失败 / opencode 的「通道」不可累加 /
 //     账号全停用）：没有数字可显示，前端据此留空。
+//
+// ⚠️ **不可累加单位不需要在这里列名**：聚合层按包单位过滤
+// （internal/jethub/balance_summary.go 的 normalizedBalanceUnit —— `%` 与「通道」
+// 一律不进合计）。R5 之前这里另有一张 `nonAggregatableProviders` 表，唯一用途是
+// 为 gemini 的配额百分比窗口省掉一次必然被丢弃的请求；该渠道删除后表已移除。
 func (h *Handler) providerBalances(w http.ResponseWriter, r *http.Request) {
 	out := map[string]*corejethub.BalanceSummary{}
 	if h.d.Manager != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), balanceSummaryTimeout)
 		defer cancel()
 		for _, meta := range corejethub.Providers() {
-			if !meta.HasBalance || nonAggregatableProviders[meta.ID] {
+			if !meta.HasBalance {
 				continue
 			}
 			sum, err := h.d.Manager.BalanceSummaryOf(ctx, meta.ID)

@@ -66,10 +66,6 @@ var defaultProviders = []ProviderMeta{
 	// R2: ZCode (智谱 z.ai 免费额度通道) — Anthropic Messages 协议 + 官方
 	// CLI 设备授权登录；额度按 token 计（billing/balance 的桶）。
 	{ID: "zcode", DisplayName: "ZCode", Description: "智谱 z.ai（Anthropic 协议族；CLI 设备授权）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
-	// R3-3: Gemini Code Assist（Google Cloud Code Assist 免费线）— 双层信封
-	// 协议 + Google OAuth 浏览器回调登录；配额是 5 小时/周两个窗口的百分比
-	//（不是积分，故不提供签到）。
-	{ID: "gemini", DisplayName: "Gemini Code Assist", Description: "Google Cloud Code Assist（OAuth 浏览器回调；配额窗口制）", HasBalance: true, LoginModes: []string{"url"}},
 }
 
 // Providers returns the static provider metadata list (a copy).
