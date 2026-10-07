@@ -417,6 +417,10 @@ func (h *Handler) handleUpstreamError(w http.ResponseWriter, resp *http.Response
 	case rotation.ActionTransient:
 		h.cooldown.MarkRateLimited(providerID, sel.Key.ID, model, time.Duration(rotation.DefaultTransientCooldownSec)*time.Second)
 		consequence = fmt.Sprintf("→ 冷却 %ds 后切换", rotation.DefaultTransientCooldownSec)
+	case rotation.ActionRotateOnly:
+		// Auth failure: switch to the next key but write NO cooldown (ref
+		// 0abaf1a). A gateway-wide 401 must not be amplified into a pool lock.
+		consequence = "→ 认证失败：仅换号，不写冷却标记"
 	}
 
 	state.excludeKeyIDs = append(state.excludeKeyIDs, sel.Key.ID)

@@ -13,6 +13,7 @@ const (
 	ActionDailyQuota                     // daily quota lock (until next CST 00:05)
 	ActionTransient                      // transient cooldown (default 30s)
 	ActionPassThrough                    // request-shape client error (4xx): return upstream error to client as-is, do not retry/lock/exclude — key is healthy
+	ActionRotateOnly                     // auth failure (401/403): switch to the next key WITHOUT writing any cooldown — the account's credential may be bad while the pool holds healthy ones, but a gateway-wide auth fault must not be amplified into a whole-pool lock
 )
 
 // ErrorRule defines one error classification rule.
@@ -51,9 +52,14 @@ var DefaultErrorRules = []ErrorRule{
 	{BodyMatch: "upstream request failed", Action: ActionBackoff},
 
 	// --- Status-based rules (fallback when text doesn't match) ---
-	{StatusCode: 401, Action: ActionCooldown, CooldownSec: 120},
+	// 401/403 = auth failures. 换号与写冷却是**两件事**（ref 0abaf1a 的
+	// 2026-10-06 全池被封事故）：网关侧授权校验故障会对**全池**回 401，
+	// 若此时写冷却，一次请求内的换号循环会把每个账号都封上（上游实测：
+	// 6 个号各封 24h ⇒ 整个 provider 死一天）。认证失败是**账号态**而不是
+	// 「该模型冷却」，故只换号、不写标记。
+	{StatusCode: 401, Action: ActionRotateOnly},
 	{StatusCode: 402, Action: ActionCooldown, CooldownSec: 120},
-	{StatusCode: 403, Action: ActionCooldown, CooldownSec: 120},
+	{StatusCode: 403, Action: ActionRotateOnly},
 	{StatusCode: 404, Action: ActionCooldown, CooldownSec: 120},
 	// 400/422 are request-validation client errors per HTTP semantics: the
 	// request is malformed (bad param, invalid value, wrong shape), the KEY is

@@ -21,13 +21,15 @@ func TestClassifyError_BalanceDailyQuota(t *testing.T) {
 }
 
 func TestClassifyError_StatusCodeFallback(t *testing.T) {
-	// 401 with no recognizable body -> ActionCooldown (status 401 rule).
+	// 401 with no recognizable body -> ActionRotateOnly (status 401 rule).
+	// ⚠️ R5（ref 0abaf1a）：认证失败**只换号、不写冷却** —— 网关侧授权校验
+	// 故障会对全池回 401，写冷却会把整池封死（上游实测 6 个号各封 24h）。
 	r := ClassifyError(401, `{"error":"unauthorized"}`)
-	if r.Action != ActionCooldown {
-		t.Errorf("401 unauthorized -> action=%v, want ActionCooldown", r.Action)
+	if r.Action != ActionRotateOnly {
+		t.Errorf("401 unauthorized -> action=%v, want ActionRotateOnly", r.Action)
 	}
-	if r.CooldownSec != 120 {
-		t.Errorf("401 cooldown = %d, want 120", r.CooldownSec)
+	if r.CooldownSec != 0 {
+		t.Errorf("401 must carry NO cooldown, got %d", r.CooldownSec)
 	}
 }
 
@@ -83,10 +85,19 @@ func TestClassifyError_400AggregatorTransientRetries(t *testing.T) {
 	}
 }
 
-func TestClassifyError_401StillCooldown(t *testing.T) {
-	// 401 is a key/auth problem → ActionCooldown 120s (NOT pass-through).
+// TestClassifyError_AuthRotatesWithoutCooldown 锁「换号与写冷却是两件事」：
+// 401/403 必须只换号、**不写冷却**（ref 0abaf1a 的 2026-10-06 全池被封事故）。
+//
+// 反向验证：把 401/403 规则改回 ActionCooldown，本用例立刻变红。
+func TestClassifyError_AuthRotatesWithoutCooldown(t *testing.T) {
+	// 401 is a key/auth problem → ActionRotateOnly (NOT pass-through, NOT cooldown).
 	r := ClassifyError(401, `{"error":"invalid api key"}`)
-	if r.Action != ActionCooldown || r.CooldownSec != 120 {
-		t.Errorf("401 -> action=%v cooldown=%d, want ActionCooldown/120", r.Action, r.CooldownSec)
+	if r.Action != ActionRotateOnly || r.CooldownSec != 0 {
+		t.Errorf("401 -> action=%v cooldown=%d, want ActionRotateOnly/0", r.Action, r.CooldownSec)
+	}
+	// 403 同款：网关侧授权故障（如 raccoon 的 200003 authorization_verify_error）。
+	r403 := ClassifyError(403, `{"code":"200003","message":"authorization_verify_error"}`)
+	if r403.Action != ActionRotateOnly || r403.CooldownSec != 0 {
+		t.Errorf("403 -> action=%v cooldown=%d, want ActionRotateOnly/0", r403.Action, r403.CooldownSec)
 	}
 }

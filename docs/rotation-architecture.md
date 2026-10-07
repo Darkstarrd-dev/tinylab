@@ -1,6 +1,6 @@
 > **最后核对（2026-10-05，F-08 状态持久化分级）：** `Selector` 新增 `onStatsChange` 钩子（`SetStatsHook`，selector.go）——统计态变更（`SelectKey` 成功路径的 `LastUsedAt`/`ConsecCount`、`RotateToBack` 的 failover 队列顺序、`OnNIMRequestSuccess` 的 NIM 计数）改调 stats 钩子，由 `app.go` 接到 `state.Manager.ScheduleStatsWrite`（30s 去抖，`DefaultStatsDebounce`）；关键态变更（`MarkUnavailableWithOverride`/`ClearError`/`MarkNIM429`/`MarkDailyQuotaLocked`/`MarkBalanceLocked`/`MarkRateLimited`）仍走 `onStateChange`→`ScheduleWrite`（500ms 去抖）不变。双通道定时器互不取消、同写全量快照，`FlushSync` 停双定时器并同步全量。稳态高 QPS 选 key 不再触发每 500ms 一次的 state.yaml 全量写。此前：2026-08-31 Provider 级 Retry/Cooldown override（过程叙述见 docs/changelog/rotation-architecture.md）。
 >
-> **最后核对（2026-08-29，Round-2 P1-07/NIM与currentKey对齐）：** `monitor/currentKey` 与 `SelectKey` 语义对齐——NIM 使能时以 `WaitNIMInterval==0` 过滤候选，`ManualKey` pin 优先；`Entry.ProviderID` 新增并参与 `decInFlightForKey` 精确匹配，跨 Provider KeyID 碰撞不再误扣。
+> **最后核对（2026-10-07，R5：401/403 改为「只换号、不写冷却」）：** 新增第 6 个动作 `ActionRotateOnly`，并把 401/403 从 `ActionCooldown 120s` 改为它 —— **换号与写冷却是两件事**（ref 0abaf1a 的 2026-10-06 全池被封事故：网关对全池回 401，写冷却让一次请求把 6 个号各封 24h）。上轮（2026-08-29，Round-2 P1-07/NIM与currentKey对齐）： `monitor/currentKey` 与 `SelectKey` 语义对齐——NIM 使能时以 `WaitNIMInterval==0` 过滤候选，`ManualKey` pin 优先；`Entry.ProviderID` 新增并参与 `decInFlightForKey` 精确匹配，跨 Provider KeyID 碰撞不再误扣。
 ﻿# TinyLab Rotation Key 轮询架构
 
 > **文档定位：** `internal/rotation/` 包实现的 canonical 架构事实基线。后续设计、排障和代码评审应先读取本文，再按“源码锚点”核对本次变更涉及的局部代码。
@@ -13,7 +13,7 @@
 
 > **2026-07-18 更新（软策略修正 + Responses 路由 + 多协议探测）：** (1) **移除 anthropic 入口的 target 过滤**——`Resolver.Resolve(name, entryFormat)` 不再对 `entryFormat == EntryFormatAnthropic` 做 `IsAnthropic()` 过滤（resolver.go:103-118 已删除），现对所有 `entryFormat` 返回同一 target 集合；`entryFormat` 参数保留但不再被消费（供未来扩展）。(2) **新增 OpenAI Responses 入口** `EntryFormatOpenAIResponses`（resolver.go:22-25），与 OpenAI Chat / Anthropic 并列。(3) **协议感知 usage 提取**——OpenAI Chat / Responses 入口走 `util.ExtractTokens`；Anthropic 入口走 `parseAnthropicSSEUsage`（`internal/proxy/stream.go:415-450`）提取 `message_start`/`message_delta` 的 input/output tokens 并复用 `recordUsage`。(4) **多协议探测**——`api/probe_model.go`+`probe_common.go` 三协议并发探测，结果写回 `config.ModelDef.Protocols` 与 `state.yaml` 的 `probes` map。rotation 仍对协议无感知，Key 轮询/冷却/退避对三入口完全复用同一套机制。详见 §4.4、§5（usage）、§17、§18。
 >
-> **2026-07-26 更新（`ActionPassThrough` + 400/422 默认 + `SonestCooldown`，行为变更）：** 错误分类新增第 5 个动作 `ActionPassThrough`——上游 4xx 请求格式错误（key 健康）原样返回客户端，proxy 不重试/不锁/不排除 key。`DefaultErrorRules` 新增状态规则 `{StatusCode:400, Action:ActionPassThrough}`、`{StatusCode:422, Action:ActionPassThrough}`（401/402/403 仍 `ActionCooldown` 120s，404 仍 `ActionCooldown` 120s，429 仍 `ActionBackoff`）；新增文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`（聚合器自身上游瞬时失败 → 重试，文本规则优先于状态规则可覆盖 400/422 默认）。`ClassifyError` 先文本后状态的优先级不变。`CooldownManager` 接口新增 `SonestCooldown(providerID, model, excludeKeyIDs) (CooldownInfo, bool)` + `CooldownInfo{Deadline, KeyID, KeyName, Reason}`：返回 provider 下未排除、当前 `ModelLocks[model]` 仍锁定（到期在未来）的 key 中最早到期者；已过期锁视为可用（跳过），供 proxy "无可用 key" 时等待最近冷却到期而非即时 502。`*rotation.Selector` 结构性满足新接口，`proxy.New` 签名不变。
+> **2026-07-26 更新（`ActionPassThrough` + 400/422 默认 + `SonestCooldown`，行为变更）：** 错误分类新增第 5 个动作 `ActionPassThrough`——上游 4xx 请求格式错误（key 健康）原样返回客户端，proxy 不重试/不锁/不排除 key。`DefaultErrorRules` 新增状态规则 `{StatusCode:400, Action:ActionPassThrough}`、`{StatusCode:422, Action:ActionPassThrough}`（⚠️ 当时的 401/403 `ActionCooldown` 已在 2026-10-07 R5 改为 `ActionRotateOnly`——见文首最后核对行；402/404 仍 `ActionCooldown` 120s，429 仍 `ActionBackoff`）；新增文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`（聚合器自身上游瞬时失败 → 重试，文本规则优先于状态规则可覆盖 400/422 默认）。`ClassifyError` 先文本后状态的优先级不变。`CooldownManager` 接口新增 `SonestCooldown(providerID, model, excludeKeyIDs) (CooldownInfo, bool)` + `CooldownInfo{Deadline, KeyID, KeyName, Reason}`：返回 provider 下未排除、当前 `ModelLocks[model]` 仍锁定（到期在未来）的 key 中最早到期者；已过期锁视为可用（跳过），供 proxy "无可用 key" 时等待最近冷却到期而非即时 502。`*rotation.Selector` 结构性满足新接口，`proxy.New` 签名不变。
 
 ## 1. 范围与结论
 
@@ -323,9 +323,9 @@ type ErrorRule struct {
 | 8 | body 含 `overloaded` | ActionBackoff | — |
 | 9 | body 含 `insufficient_balance` | ActionDailyQuota | — |
 | 10 | body 含 `insufficient balance` | ActionDailyQuota | — |
-| 11 | status `401` | ActionCooldown | 120 |
+| 11 | status `401` | **ActionRotateOnly** | — |
 | 12 | status `402` | ActionCooldown | 120 |
-| 13 | status `403` | ActionCooldown | 120 |
+| 13 | status `403` | **ActionRotateOnly** | — |
 | 14 | status `404` | ActionCooldown | 120 |
 | 15 | status `429` | ActionBackoff | — |
 | 16 | status `500`-`599`（区间） | ActionBackoff | — |
@@ -485,7 +485,7 @@ flowchart TD
 |---|---|
 | `selector_test.go` | `selectFillFirst` 选最低优先级、排除 key、跳过非活跃 key、跳过冷却 key；`selectRoundRobin` 粘性至 limit、切到 LRU、首用选首 key、三 key 粘性耗尽切换；`selectRotation`（failover）首选调最低优先级、失败后 `RotateToBack`、队列循环、fill-first 仍走 `MarkUnavailable` |
 | `cooldown_test.go` | `MarkUnavailable` 指数退避（含 429 BackoffLevel=3）、`ClearError` 清单 model 锁 / 保留他 model 锁并保 `BackoffLevel`、`isKeyAvailable` 过期锁清扫、`IsDailyQuota429`、`MarkDailyQuotaLocked`、`MarkBalanceLocked`、`IsBalanceExhausted`、`nextCSTMidnight05`、`BackoffSequence` |
-| `error_rules_test.go` | `ClassifyError` 文本优先于状态、余额每日锁、状态码回退（401→Cooldown 120）、瞬态回退、”request not allowed“→Cooldown 5s |
+| `error_rules_test.go` | `ClassifyError` 文本优先于状态、余额每日锁、状态码回退（401/403→**ActionRotateOnly**，无冷却）、瞬态回退、”request not allowed“→Cooldown 5s |
 | `nim_test.go` | NIM failover 计数达阈值后切 key、`RotateNoCooldown` 全池重置、MarkNIM429 阶梯冷却与封顶、24h 后等级重置、`WaitNIMInterval` 最小间隔、计数+429 混合态下 `filterNIMCandidates` 重置 |
 | `ratelimit_test.go` | `GetAdapter` modelscope→ModelScopeAdapter / 默认→NoopAdapter、`ModelScopeAdapter.ParseHeaders` 正常/耗尽/无头、`NoopAdapter.ParseHeaders` 返回 nil、`atoiSafe` |
 | `stateclass_test.go`（F-08，2026-10-05） | 持久化分级钩子分类：`TestStateChangeHookClasses` 逐方法断言 critical（MarkUnavailable/ClearError/MarkRateLimited/MarkBalanceLocked/MarkDailyQuotaLocked）与 stats（SelectKey/RotateToBack）走向；`TestSelectKeyNoCriticalWriteUnderLoad` 100 次连续选 key 零 critical 触发 |
@@ -520,7 +520,7 @@ go build -o tinylab .
 - `selector.go`：KeyStateProvider 接口（16-19，`GetProvider`/`GetKeyState`，`*registry.Registry` 结构性满足）、KeySelector 接口（23-32）、Selector 结构体（34-53，`reg KeyStateProvider` 非 `*registry.Registry`，含 `manualMu`/`manualPins` 人工 pin 字段、`onStateChange` 关键态钩子 + `onStatsChange` 统计态钩子 F-08）、New（56-58）、SetStateHook（61-63）、SetStatsHook（65-74）、SetManualKey/ManualKey、SelectedKey、SelectKey 算法（含 pin 优先分支；成功路径触发 `onStatsChange` 统计态）、IsNIMEnabled、OnKeyFailure 分发、RotateToBack（统计态触发）、Settings、UpdateSettings、编译期检查。
 - `strategy.go`：selectRotation（39-64）、selectFillFirst（66-77）、selectRoundRobin（79-130）、effectiveStrategy（132-137）、effectiveStickyLimit（139-144）。
 - `cooldown.go`：CooldownManager 接口（14-36，**含 `SonestCooldown` + `CooldownInfo`**）、MarkUnavailable（38-65）、ClearError（67-86）、isKeyAvailable（88-110）、BackoffSequence、IsDailyQuota429、nextCSTMidnight05、MarkDailyQuotaLocked、MarkBalanceLocked、MarkRateLimited、SonestCooldown（220-263，最早未排除 key 的 `ModelLocks[model]` 到期 + keyName/reason）、编译期检查。
-- `error_rules.go`：ErrorAction（8-16，**含 `ActionPassThrough`**）、ErrorRule（18-24）、DefaultErrorRules（28-66，**含 `{StatusCode:400/422, Action:ActionPassThrough}` + 文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`**）、DefaultTransientCooldownSec（69）、ClassifyError（73-89，先文本后状态）、IsBalanceExhausted（95-101）。
+- `error_rules.go`：ErrorAction（8-17，**含 `ActionPassThrough` + `ActionRotateOnly`**）、ErrorRule（18-24）、DefaultErrorRules（28-67，**含 `{StatusCode:400/422, Action:ActionPassThrough}`、`{StatusCode:401/403, Action:ActionRotateOnly}` + 文本规则 `{BodyMatch:"upstream request failed", Action:ActionBackoff}`**）、DefaultTransientCooldownSec（69）、ClassifyError（73-89，先文本后状态）、IsBalanceExhausted（95-101）。
 - `nim.go`：getNIMDefaults（xx-xx）、getNIMSettings（xx-xx）、getModelNIMOverride（xx-xx）、getEffectiveNIMSettings（xx-xx）、WaitNIMInterval（xx-xx）、OnNIMRequestSuccess（xx-xx）、MarkNIM429（xx-xx）、isNIMCandidateAvailable（xx-xx）、resetNIMRequestCount（xx-xx）、filterNIMCandidates（xx-xx）。
 - `ratelimit.go`：QuotaSnapshot（13-18）、HasQuota/ModelExhausted（21-28）、RatelimitAdapter（31-33）、ModelScopeAdapter（36-49）、NoopAdapter（52-56）、adapterRegistry（59-64）、GetAdapter（71-80）、atoiSafe（82-85）。
 
@@ -539,7 +539,7 @@ go build -o tinylab .
 | 新增/修改策略 | strategy.go（selectFillFirst/selectRoundRobin/selectRotation）+ effectiveStrategy（132-137）+ config RotationStrategy/StickyLimit/默认值（types.go:83-84、defaults.go:44-52） |
 | 修改冷却 / 退避 | cooldown.go MarkUnavailable（22-49）与 BackoffSequence（96-113）+ BackoffMaxSec（34-37、defaults.go:49）；注意两套系统相互独立 |
 | 修改配额锁 | nextCSTMidnight05（130-141）+ MarkDailyQuotaLocked（143-159）/ MarkBalanceLocked（165-181）+ IsDailyQuota429（123-128） |
-| 修改错误分类 | error_rules.go DefaultErrorRules（28-66，含 `ActionPassThrough` + 400/422 默认 + `upstream request failed` 文本规则）+ ClassifyError（73-89，先文本后状态）+ IsBalanceExhausted（95-101）+ DefaultTransientCooldownSec（69）；proxy 侧 `retry.go` `handleUpstreamError` 按 `ActionPassThrough` 原样转发 4xx + 其余动作按 Backoff/Cooldown/DailyQuota/Transient 锁/排除 |
+| 修改错误分类 | error_rules.go DefaultErrorRules（28-66，含 `ActionPassThrough` + 400/422 默认 + `upstream request failed` 文本规则）+ ClassifyError（73-89，先文本后状态）+ IsBalanceExhausted（95-101）+ DefaultTransientCooldownSec（69）；proxy 侧 `retry.go` `handleUpstreamError` 按 `ActionPassThrough` 原样转发 4xx + 按 `ActionRotateOnly` **只排除不写冷却** + 其余动作按 Backoff/Cooldown/DailyQuota/Transient 锁/排除 |
 | 修改冷却等待查询 | cooldown.go `SonestCooldown`（220-263）+ `CooldownInfo`（30-36）+ CooldownManager 接口（14-36）+ proxy `interfaces.go` `CooldownManager.SonestCooldown` + `forward_retry.go` `SelectKey` 失败时调用等待最近冷却到期 |
 | 修改 NIM | nim.go（getNIMSettings/getModelNIMOverride/getEffectiveNIMSettings/WaitNIMInterval/OnNIMRequestSuccess/MarkNIM429/filterNIMCandidates）+ config NIMSettings（121-126）+ ModelNIMOverride（40-48）+ IsNIM（102-107）+ selector.go IsNIMEnabled + OnKeyFailure NIM 分支 + proxy 层 IsNIMEnabled 门控（forward.go、retry.go） |
 | 修改速率限制头 | ratelimit.go 各 Adapter（36-56）+ adapterRegistry（59-64）+ GetAdapter（71-80） |

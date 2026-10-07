@@ -142,6 +142,11 @@ func TestHandle429_Transient(t *testing.T) {
 	}
 }
 
+// TestHandleUpstreamError_401 锁「认证失败只换号、不写冷却」（ref 0abaf1a）。
+//
+// ⚠️ 反向验证：把 401 规则改回 ActionCooldown（或把 ActionRotateOnly 分支接到
+// MarkRateLimited），本用例立刻变红 —— 修复前的行为是给该 key 写一条模型锁，
+// 网关侧全池 401 时一次请求就会把每个账号都封上。
 func TestHandleUpstreamError_401(t *testing.T) {
 	h := newTestHandler(t)
 	sel := newSelectedKey()
@@ -169,14 +174,14 @@ func TestHandleUpstreamError_401(t *testing.T) {
 	backoffLevel := keyState.BackoffLevel
 	keyState.Unlock()
 
-	if status != "cooldown" {
-		t.Fatalf("expected status 'cooldown' for 401, got %s", status)
+	if status == "cooldown" {
+		t.Fatalf("401 must NOT cool the key (gateway-wide auth faults would lock the whole pool), got %s", status)
 	}
-	if !hasLock {
-		t.Fatal("expected ModelLock after 401 cooldown")
+	if hasLock {
+		t.Fatal("401 must NOT write a ModelLock — 认证失败是账号态而非模型冷却")
 	}
 	if backoffLevel != 0 {
-		t.Fatalf("expected BackoffLevel 0 for ActionCooldown, got %d", backoffLevel)
+		t.Fatalf("expected BackoffLevel 0 for ActionRotateOnly, got %d", backoffLevel)
 	}
 	if len(state.excludeKeyIDs) == 0 || state.excludeKeyIDs[0] != "key1" {
 		t.Fatal("expected key1 in excludeKeyIDs after upstream error")
@@ -250,11 +255,14 @@ func TestHandleUpstreamError_403(t *testing.T) {
 	}
 	keyState.Unlock()
 
-	if status != "cooldown" {
-		t.Fatalf("expected status 'cooldown' for 403, got %s", status)
+	// ⚠️ R5（ref 0abaf1a）：403 与 401 同款 —— 只换号、不写冷却。raccoon 的
+	// `200003 authorization_verify_error` 就是网关侧授权校验故障，对全池回 403；
+	// 写冷却会把整池封死。
+	if status == "cooldown" {
+		t.Fatalf("403 must NOT cool the key, got %s", status)
 	}
-	if !hasLock {
-		t.Fatal("expected ModelLock after 403 cooldown")
+	if hasLock {
+		t.Fatal("403 must NOT write a ModelLock — 认证失败是账号态而非模型冷却")
 	}
 }
 

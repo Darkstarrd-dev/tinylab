@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
+> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；⑥ 401/403 认证失败改为「只换号、不写冷却」（`ActionRotateOnly`；网关侧授权故障不得被放大成整池封禁，ref 0abaf1a）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
 > Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
 > 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
 > §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
