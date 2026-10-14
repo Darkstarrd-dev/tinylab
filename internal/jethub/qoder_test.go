@@ -364,6 +364,10 @@ func TestQoderNotActivatedHint(t *testing.T) {
 func TestClaimQoderDailyReplayedIdempotent(t *testing.T) {
 	m := newSeedQoderManager(t)
 	id := firstQoderAccount(t, m)
+	// ⚠️ 时钟必须钉住：领取路径受 10:00（UTC+8）刷新窗口影响，真实时钟在
+	// 刷新前跑本测试会拿到 inactive（TestClaimQoderEmptyListIsInactive 的
+	// 同款处理 —— 2026-10-15 01:35 UTC+8 实测踩中）。
+	pinQoderNow(t, utc8Ms(12, 0))
 	// 场景 1：有可领活动 → 领取成功。
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/campaigns") {

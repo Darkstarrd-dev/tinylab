@@ -166,6 +166,34 @@ func RegisterDefaultProducts(b *Bridge) {
 		InferURL:    zcodePlanMessagesURL,
 		Models:      zcodeFallbackModels(),
 	})
+	// R6: OfficeAce — the outbound URL is per-account (`maasBaseUrl` from the
+	// credential, 华为按账号下发专属网关), so the Customize branch
+	// (officeaceCustomize) computes it; the static InferURL below is the
+	// display/fallback value only (still declared: probe 构造兜底 URL 与
+	// inference_url_test 锁值都需要它).
+	b.RegisterProduct(Product{
+		Provider:    "officeace",
+		DisplayName: "OfficeAce (Free Hub)",
+		BaseURL:     officeaceDefaultBaseURL,
+		InferURL:    officeaceDefaultBaseURL + officeaceChatPath,
+		Models:      officeaceModelTable,
+	})
+	// R6: Accio（阿里 Accio Work）— the outbound URL carries the per-request
+	// `sg_k=md5(requestId)` query that ALSO rides in the body, so the URL is
+	// computed by the accioCustomize branch (qoder-family rationale); the
+	// static InferURL below is the display/fallback value only. Models come
+	// from the remote catalog (ModelsFor) with the offline fallback table as
+	// the static snapshot.
+	b.RegisterProduct(Product{
+		Provider:    "accio",
+		DisplayName: "Accio (阿里) (Free Hub)",
+		BaseURL:     accioGatewayBase,
+		// ⚠️ accioGatewayBase 是 var（测试可指向 mock）；产品表登记发生在
+		// 启动期，运行期不再变 —— 与探针兜底构造共用同一份真相。
+		InferURL:  accioGatewayBase + accioLLMPath,
+		Models:    accioFallbackModelTable,
+		ModelsFor: AccioModelsFor,
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -182,6 +210,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("minimax", m.minimaxAugment)
 	m.SetAugmenter("opencode", m.opencodeAugment)
 	m.SetAugmenter("zcode", m.zcodeAugment)
+	m.SetAugmenter("officeace", m.OfficeaceAugmentHook())
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

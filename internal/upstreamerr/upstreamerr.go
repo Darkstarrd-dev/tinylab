@@ -64,6 +64,14 @@ func (e *ModelSaturationError) Error() string {
 // headers upstream, so it can never leak to an upstream.
 const RetryDropHeaderMarker = "X-Tinylab-Internal-Retry-Drop"
 
+// NoDefaultAuthHeader is an internal, loopback-only marker header a bridged
+// provider's augmenter sets to veto the proxy's default
+// `Authorization: Bearer <key>` fill: accio carries its token INSIDE the
+// request body and an Authorization header is actively wrong there (upstream
+// answers HTTP 200 + in-stream 402, ref accio.ts 实测). The proxy skips the
+// marker when copying headers upstream, so it can never leak.
+const NoDefaultAuthHeader = "X-Tinylab-No-Default-Auth"
+
 // SameKeyRetryError asks the retry loop to resend immediately with the SAME
 // key after dropping Header: the fix is applied by the provider's own bridge
 // code (e.g. CodeArts drops a signed `maas_type` header once after the

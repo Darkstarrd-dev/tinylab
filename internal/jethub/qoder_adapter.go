@@ -97,6 +97,18 @@ func (m *Manager) Customize(r *http.Request, body []byte, providerID, keyID, ups
 	if provider == "qoder" || provider == "qodercn" {
 		return m.qoderCustomize(r, body, provider, keyID, upstreamModel)
 	}
+	// R6: officeace 的出站 URL **按账号**算（凭据里的 maasBaseUrl 是华为
+	// 下发的专属网关，打默认域是 401 APIG.1009，ref §5.7）—— 不能走下面
+	// 的静态 InferURL 分支，同 qoder 族由 Customize 算 URL。
+	if provider == "officeace" {
+		return m.officeaceCustomize(r, body, provider, keyID, upstreamModel)
+	}
+	// R6: accio 的出站 URL 带 per-request `sg_k=md5(requestId)` 查询串，而
+	// requestId 同时写进 body —— URL 与 body 共享同一次随机，静态 InferURL
+	// 表达不了这个耦合（qoder 族同理由）。
+	if provider == "accio" {
+		return m.accioCustomize(r, body, provider, keyID, upstreamModel)
+	}
 	// 显式声明的完整推理端点（见 Product.InferURL 的注释：整族 404/405 缺陷）。
 	if full, declared := m.inferURLFor(provider); declared {
 		// ⚠️ 让**签名类** augmenter 看到上游 URL：代理交给 augmenter 的是客户端
@@ -230,6 +242,11 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 		// zcode：Anthropic SSE → OpenAI 转换 + 业务码分类（3009/1005/1113/
 		// 3007/3012/1002，判据全在正文——状态码会把并发限流与额度耗尽混为一谈）。
 		return m.zcodeInterceptResponse(clientReq, resp, keyID, upstreamModel, isStream)
+	}
+	if provider == "accio" {
+		// accio：Gemini 风格顶层帧 → OpenAI chunk / Anthropic event 转换 +
+		// 流内 error_code 分类（"200" 成功哨兵、"402" 计费锁；HTTP 402 同义）。
+		return m.accioInterceptResponse(clientReq, resp, upstreamModel, isStream)
 	}
 	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil

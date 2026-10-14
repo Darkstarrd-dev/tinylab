@@ -82,6 +82,7 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
     ['internal/api/jethub/buddy.go', 'StartBuddyLogin(context.Background()'],
     ['internal/api/jethub/minimax.go', 'PollMinimaxDeviceToken(context.Background()'],
     ['internal/api/jethub/qoder.go', 'PollQoderDeviceToken(context.Background()'],
+    ['internal/api/jethub/officeace.go', 'StartOfficeaceLogin(context.Background()'],
   ];
   for (const [f, needle] of cases) {
     const go = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
@@ -92,7 +93,7 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
   }
   // Every login handler registers a single-winner pump so the status poll
   // never races the pump for the flow's outcome channel.
-  for (const f of ['raccoon.go', 'cline.go', 'trae.go', 'lobsterai.go', 'buddy.go', 'minimax.go', 'qoder.go', 'codearts.go']) {
+  for (const f of ['raccoon.go', 'cline.go', 'trae.go', 'lobsterai.go', 'buddy.go', 'minimax.go', 'qoder.go', 'codearts.go', 'zcode.go', 'officeace.go']) {
     const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
     assert.ok(go.includes('SettleAndCleanup(sess'), f + ' must pump the outcome via SettleAndCleanup');
   }
@@ -101,7 +102,7 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
   // ones (minimax, qoder) and the scan-login page (raccoon: the local page URL
   // only exists once the handler knows the request host) must call the opener
   // themselves — minimax shipped without it (reported defect).
-  for (const f of ['minimax.go', 'qoder.go', 'raccoon.go']) {
+  for (const f of ['minimax.go', 'qoder.go', 'raccoon.go', 'officeace.go']) {
     const go = fs.readFileSync(path.join(__dirname, '..', 'internal/api/jethub', f), 'utf8');
     assert.ok(go.includes('OpenURLWithBrowser('), f + ' must auto-open the login page (OpenURLWithBrowser)');
   }

@@ -1,6 +1,7 @@
 package jethub
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -24,6 +25,10 @@ func (m *Manager) buddyAugment(p *BuddyProduct) RequestAugmenterFunc {
 		if cred.AccessToken == "" {
 			return nil, errCredentialMissing(keyID)
 		}
+		body, err := buddyStripReasoningEffort(acc.Provider, body)
+		if err != nil {
+			return nil, err
+		}
 		// Full header reset: the signed/attribution set IS the request identity.
 		r.Header.Set("Authorization", "Bearer "+cred.AccessToken)
 		r.Header.Set("Content-Type", "application/json")
@@ -43,6 +48,32 @@ func (m *Manager) buddyAugment(p *BuddyProduct) RequestAugmenterFunc {
 		r.Header.Set("User-Agent", resolveBuddyUserAgent(p, upstreamModel))
 		return body, nil
 	}
+}
+
+// buddyStripReasoningEffort drops `reasoning_effort` for the workbuddy channel
+// (ref buddy-adapter.ts suppressesProseWhenEffortSent, 2026-10-13/14 实测).
+//
+// ⚠️ 这是**服务端事实**而不是面板偏好：workbuddy 的 deepseek-v4.1-flash 带 tools
+// 时一旦下发 `reasoning_effort`，工具调用前的正文前言会被上游整段吞掉（`text`
+// 块恒 0）；buddy 无此缺陷，故只对 workbuddy 生效，且只在键存在时才改写 body
+// （无该键时字节级透传，避免无谓重排 JSON）。
+func buddyStripReasoningEffort(provider string, body []byte) ([]byte, error) {
+	if provider != "workbuddy" || len(body) == 0 {
+		return body, nil
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	if _, ok := parsed["reasoning_effort"]; !ok {
+		return body, nil
+	}
+	delete(parsed, "reasoning_effort")
+	out, err := json.Marshal(parsed)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 type simpleError struct{ msg string }

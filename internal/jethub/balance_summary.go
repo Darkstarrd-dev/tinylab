@@ -202,6 +202,10 @@ func (m *Manager) balanceForAccount(ctx context.Context, provider, accountID str
 	case "opencode":
 		balance, _, err := m.OpencodeChannelBalance(accountID)
 		return balance, err
+	case "officeace":
+		return m.OfficeaceBalance(ctx, accountID)
+	case "accio":
+		return m.AccioBalance(ctx, accountID)
 	default:
 		return nil, errAccountNotFound(provider)
 	}

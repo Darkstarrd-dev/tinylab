@@ -331,6 +331,8 @@ func (m *Manager) RefreshAllCodeArts(ctx context.Context) {
 func (m *Manager) StartRefreshScheduler(ctx context.Context) {
 	go func() {
 		m.RefreshAllCodeArts(ctx)
+		m.RefreshAllOfficeace(ctx)
+		m.RefreshAllAccio(ctx)
 		ticker := time.NewTicker(codeartsRefreshSchedulerInterval)
 		defer ticker.Stop()
 		for {
@@ -339,6 +341,8 @@ func (m *Manager) StartRefreshScheduler(ctx context.Context) {
 				return
 			case <-ticker.C:
 				m.RefreshAllCodeArts(ctx)
+				m.RefreshAllOfficeace(ctx)
+				m.RefreshAllAccio(ctx)
 			}
 		}
 	}()

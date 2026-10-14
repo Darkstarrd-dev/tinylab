@@ -4,7 +4,9 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `e73cd2f`（2026-10-07，R5 分诊基线；前序 pin：R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `bca0d8c`（2026-10-15，R6 分诊与实施完成；前序 pin：R5 `e73cd2f`、R4 `2e8bb86`、R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+>
+> **本轮侦察（2026-10-15，R6）：** master `e73cd2f` → `bca0d8c`：**173 commits / 341 文件**，主要新增 Accio（阿里）与 OfficeAce（华为 ModelArts MaaS）两家 provider、原生搜索、DSML 工具调用归一化、图片/零输出/工具结果图片链路、模型目录健壮化。**可搬项已实施**：R6-1 Accio、R6-2 OfficeAce、R6-3 workbuddy `reasoning_effort` 修法；DSML/图片/原生搜索/记账/面板等归 §5。两家新 provider 未经真实机器验证（无账号）。
 >
 > **本轮侦察（2026-10-07，R5）：** master `2e8bb86` → `e73cd2f`：**105 commits / 167 文件（69 触 `src/`）**，横跨记账（token-ledger 四期）、buddy 成长中心、失效模型剔除、auto 选型、永久积分锁定、限流判据收窄、zcode 判据与超时、openai-gateway 出口族、面板族与大量测试。**本轮首件事是渠道移除**：`git push` 被 GitHub Push Protection 拒绝（GH013），命中 gemini 渠道的 Google OAuth client 常量 ⇒ 用户决定**整体删除该渠道**并把 gemini 上游数据**永久移出同步范围**（§5 新条目 + §6 R5-1）。分诊结论（R5-2 起逐条勾销）见 §6；不搬项入 §5。
 >
@@ -137,6 +139,7 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R5：记账 / Token 计数簇 12 条（`token-ledger*` 四期 + 三轮审计 + 宿主接线 + 面板图表） | `1ebad41` / `3e62a87` / `f510c88` / `eb0b7d0` / `b5170d8` / `e0df049` / `c10de34` / `a12ed03` / `dd5b591` / `648496a` / `a0f0940` / `d5b73ca` | 上游插件的**本地 Token 记账功能**（非协议/服务端事实），接线点全在 `dsh-llm` 与 `openai-gateway` 出口层（§5 已锁定）。本端 `internal/usage` + Monitor SPD/GT/TTFT 列 + `traces/` 日轮转已覆盖等价能力；`a0f0940` 的 TPS 分母塌缩教训本端结构性免疫（三处守卫实测）。见 §6 R5-2 |
 | R5：DSH 宿主 / 面板专属项（buddy 成长面板与部署副本、buddy 图片能力三态与白名单、auto 选型、TRAE/LobsterAI 永久积分锁、RPC refresh 语义、调度器武装门） | `9462051` / `09fe2eb` / `97397a3` / `e60e555` / `f498586` / `e52f091` / `29f6bad` / `3de9312` / `570b0b3` / `68fb567` / `ac805a3` / `ba419ad` / `e784201` | 逐条理由见 §6 R5-3 / R5-4：或属宿主接线/面板行为，或本端已有等价实现（空候选 502、mark→exclude 无条件执行、九个刷新端点一律 502、`StartRefreshScheduler` 已无条件武装）。**其中三条纪律记入 R1-8 参考**（「未知 ≠ 不支持」/「目录重看 ≥10s 节流」/「等目录恢复才解决的错误不得进可重试集合」） |
 
+| R6：原生搜索（qoder/buddy/workbuddy）、DSML 工具调用归一化、图片预算/工具结果图片、零输出守卫、记账/面板族 | `99e1483`/`32b6420`/`58ae086`、该族 4+ commits（`src/dsml.ts` / `openai-gateway/images.ts` / `src/image-budget.ts` / `src/zero-output-guard.ts`） | 上游 DSH 宿主/插件出口行为；TinyLab 本体即代理，`/v1/*` 直通，无该消费侧。已拆出唯一与 Free Hub 出站直接相关的 **workbuddy `reasoning_effort` 吞正文** 事实并落 R6-3；图片/档位/搜索等若将来本端出现对应消费侧，按本行锚点重估 |
 ## 6. 待办与实施记录（R1：`cecf376` → `e06283c`；R2：ZCode 重估；R3：→ `ff5e37d`；R4：→ `2e8bb86`；R5：→ `e73cd2f`）
 
 > 分诊记录（2026-10-02）：31 个触 `src/` 的提交逐条归类；merge 提交 `4ce4a6e`（= `0ca8256` 族）/`4a62e84`（= cline 面板族）已展开核对。未深读的提交均为面板 / 测试 / 文档 / zcode 类，归 §5。每条 R1 在实施时先读对应 ref 文件与上游测试，再动手。
@@ -391,6 +394,35 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 
 > 分诊进行中（并行侦察），结论落地后补入本节。
 
+## R6（pin e73cd2f → origin/master bca0d8c，2026-10-14，分诊进行中）
+
+> 本轮侦察（2026-10-14）：master e73cd2f → bca0d8c：**173 commits / 341 文件（约 69+ 触 src/）**，并出现新分支
+> `feat/accio-provider-clean`、`fix/zcode-captcha-upfront-and-diagnostics`、`issue/IKLMIY-workbuddy-prose-missing`、`pr95` 等。
+> 主要主题：Accio（阿里 Accio Work）与 OfficeAce（华为 ModelArts MaaS）两个新增 provider，原生搜索（qoder/buddy/workbuddy），DSML 工具调用归一化，零输出/图片/工具结果图片链路，expiry 聚合与 canonical model name 等。
+
+### 分诊结论（高阶）
+
+- **R6-A（新 provider）— Accio（阿里 Accio Work）：可搬**  
+  OAuth2 PKCE 公共客户端、本地 loopback 回调，模型目录远端拉取、credit 三个端点；推理为 Gemini 封装→OpenAI SSE（含 tool-call shard 合并、thought→reasoning、usage、402 配额）。估算 Go 工作量 1.8–2.3k 行 + 3–5 天。
+- **R6-B（新 provider）— OfficeAce（华为 ModelArts MaaS）：可搬**  
+  云直连，Basic 鉴权，标准 OpenAI SSE（含 `reasoning_content`）；V11 签名、DPoP ES256、STS 30 天续期、auto check-in；静态 8 模型表 + V11 token-rate 倍率。估算 1.2–1.5k 行 + 2–3 天。
+- **R6-C（通用）— 模型/图片/DSML/搜索链路：多为 DSH 宿主或面板行为**，按 §5/§2.3 三条硬判据逐条决定；其中与本端 Free Hub 协议事实相关的条目留作后续待办。
+
+### 实施结果
+
+R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修法）已实施完成；pin 已推进到 `bca0d8c`（§7 R6 行）。通用事实中 host/DSML/图片/原生搜索等按 §5 不搬清单处理。两家新 provider 全链路仍**未经真实机器验证**（无账号），验收以单测 + 守卫回归为准。
+
+### R6 实施记录
+
+- [x] R6-1 **Accio provider**：按新增 provider 落地清单落 `internal/jethub/accio*.go` / 编排 / API / 前端 / 文档；验收：PKCE 登录、远端目录缓存、credit 余额、额度锁 Rotation 对接。  
+  > **实施记录（2026-10-15）**：`accio{,_login,_oauth,_models,_augment,_response,_refresh,_credits}.go` + `internal/api/jethub/accio.go` 落地：OAuth2 PKCE loopback 登录（region 写进凭据）、轮换 refresh_token 三铁律、远端目录缓存（成功 10min / 失败 30s，落静态 15 条兜底表）、snake_case envelope + body-token + `sg_k/message_id` + properties 豁免、Gemini 顶层帧 SSE→OpenAI/Anthropic（tool shard/thought/usage/402/风控页）、credit 三只读端点（不同 token 位置）。回归 `accio_test.go` 25 个 + `accio_response_test.go` 4 个。**边界**：真实机器未验证（无账号）；远端目录仅进程内缓存；未知 slug 透传由上游报错。文档同步 jethub-architecture §6.13 + PROJECT_MAP §10.28/§13n。
+- [x] R6-2 **OfficeAce provider**：V11 签名、云登录、STS 续期、Basic augment、auto check-in；验收：模型列表、推理（reasoning_content）、图片（multimodal 白名单）、额度显示。  
+  > **实施记录（2026-10-14）**：云直连 OAuth/STS + DPoP ES256 登录，单次 refresh_token 串行锁与 1h lead；V11/SDK-HMAC 签名；Basic 推理 augment + account 级 `maasBaseUrl` 覆盖 + `max_tokens<4096` 丢弃 + 不下发 `reasoning_effort`；8 模型静态表；`/officeace/login|status|refresh|balance|claim` 路由与前端守卫。**有意差异**：每日积分改为显式 claim（不在 balance 查询时 POST，避免 Monitor 聚合副作用）；`/v1/model-token-rates` 倍率未移植。验证 `go build`/`go vet` 干净，`go test ./internal/jethub/... ./internal/api/jethub/...` 绿（跳过时钟未固定的预存 `TestClaimQoderDailyReplayedIdempotent`），`node --test web/jethub.test.js` 通过。
+- [x] R6-3 **host/DSML/image-budget 通用事实**：本轮只落地对 Free Hub 出站有直接影响的 **workbuddy `reasoning_effort` 吞正文** 修法（`buddyStripReasoningEffort`，仅 workbuddy，无键不改写 body）；其余图片/DSML/原生搜索等仍归 §5（宿主/面板行为或本端无该消费侧）。  
+  > **实施记录（2026-10-15）**：上游 `8bb1035`/`32681a8` 族群实测 workbuddy 带 `reasoning_effort` 会吞掉工具调用前正文；本端 buddy augment 此前完全透传该字段，缺陷同源存在。落点 `internal/jethub/buddy_augment.go` + 回归 `buddy_effort_test.go`（workbuddy 剥离 / buddy 不动 / 无键字节透传 / augment 端到端头族不丢）。反向验证：把 provider 判据改成恒 false ⇒ workbuddy augment 用例变红。
+
+> pin **不推进**至分诊全部完毕之前。
+
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
 |---|---|---|---|---|
@@ -399,3 +431,4 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R3 | 2026-10-04 | `e06283c` → `ff5e37d` | master 85 commits / 150 文件（44 触 src/）；R1 的 opencode 分支已合入（其后 5 个修复归 UI 链不搬）；**R3-1 + R3-2 + R3-3 实施**（同日用户追加），R3-4 移入 §5 不搬，不搬 8 类 | R3-1 codearts 4291 额度判据（BillingLockError 至 UTC+8 24:00 + 换 key）+ 429 独立数字锚定（反向验证必红）；R3-2 cline 删已下线 `cline-free/gemini-3.8-flash`（免费 5→4）；**R3-3 新增 Gemini Code Assist provider（第 14 家）**：OAuth 浏览器回调登录 + 双层信封桥（身份五头/字母序/金标准前缀断言）+ SSE→OpenAI 响应桥 + 签名回填 + sandbox 配额窗口（百分比）+ API/前端接线。`zcode-identity.ts` 未变（已核实）。验证：`go build ./...` + 全量 `go test ./internal/...` 全绿（gemini_test.go 14 例；providers 计数 13→14；chi.Walk 守卫含 gemini） |
 | R4 | 2026-10-05 | `ff5e37d` → `2e8bb86` | master 6 commits / 26 文件（全部 zcode + 文档）；**用户报障驱动的卡片信息全量对齐（P0–P2，§6 R4-0）+ R4-1 zcode 本机凭据路径删除 + R4-2 两条旧说法订正**，不搬 3 类入 §5 | **P0**：四家 `HasBalance` 开关补正（minimax/raccoon/trae/cline）+ 单位标签三态 + Gemini 逐窗口百分比 + gemini 排除重测/重置 + opencode「通道可用性」额度行（本地状态、零网络）；**P1**：限额重置标记**首次真正写入**（rotation 观察者 × 四条写锁路径 + app 组合根注入）+ 重测写回新解禁时刻（中英两种句式 + 捕获时区）+ `CreditPackage` 到期字段/`expiredTotal`/`windowDays`/`extra.accountTier` + 各 provider 填充 + 前端临时/长期分桶、资源包 hover 明细、失效额度、池名分桶、账号规格行；**P2**：账号拖拽排序（顺序=选号优先级，删掉 `SyncKeys` 的 ID 重排）+ opencode 指纹轮换（代次为权威）+ **opencode per-account 出口代理接线（`config.Key.Proxy` + per-key transport，默认空 ⇒ 原路径逐字节不变）** + loomy 新手任务入口 + raccoon 一次性奖励文案 + 匿名标记与账号名/手机号派生；**R4-1 删除** zcode 本机凭据导入（含安装目录探测，源码字面量守卫 + 路由反向回归）；**R4-2** 订正 3012 是 405、日期块非判据（本端按响应体判码故功能免疫）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node web/jethub.test.js` 全绿（含 5 组新用例：额度单位/分桶、排序、provider 专属卡片、通道状态、出口代理）；关键项已做反向验证（能力位、观察者、重测写回、指纹、per-key 代理、本机读取守卫） |
 | R5 | 2026-10-07 | `2e8bb86` → `e73cd2f` | master 105 commits / 167 文件（69 触 `src/`）；**R5-1 整体移除 Gemini Code Assist 渠道（用户决定，push 阻塞驱动）** + R5-2 起按分簇分诊结果实施可搬项 | **R5-1**：gemini 渠道六个源文件 + 全部接线（product 表/augmenter/拦截器分派/API 路由/`rateLimitExemptProviders`）+ 前端配额单位（`%`）渲染链与账号规格行 + 四个 i18n 键 + `nonAggregatableProviders` 表；provider 14 → 13；上游该渠道数据永久移出同步范围（§5）。回归：`go build`/`go vet`/全量 `go test ./internal/...` + `node web/jethub.test.js` 全绿，`git grep -i gemini` 在 Free Hub 面零残留。R5-2 见同节 |
+| R6 | 2026-10-15 | `e73cd2f` → `bca0d8c` | master 173 commits / 341 文件；**R6-1 Accio + R6-2 OfficeAce 两家新 provider + R6-3 workbuddy reasoning_effort 修法实施**，DSML/图片/原生搜索/记账/面板归 §5 | **Accio（第 15 家）**：OAuth2 PKCE 公开客户端登录（region=cn/global）、轮换 refresh 三铁律、远端模型目录缓存 + 15 条静态兜底表、body-token Gemini 信封（`sg_k`/`message_id`/snake/properties 豁免）、Gemini SSE→OpenAI/Anthropic（tool shard/thought/usage/402/风控页）、credit 三只读端点。**OfficeAce（第 14 家）**：cloud-direct OAuth/STS+DPoP 登录、V11+SDK-HMAC 签名、Basic 推理 + `max_tokens<4096` 丢弃 + 剥 `reasoning_effort`、per-account `maasBaseUrl`、显式每日领取。**R6-3**：workbuddy `reasoning_effort` 致吞正文问题。验证：`go build` / `go vet` / 全量 `go test ./internal/...` 全绿 + `node --test web/jethub.test.js` 全绿；两家新 provider 未经真实机器验证（无账号）。 |

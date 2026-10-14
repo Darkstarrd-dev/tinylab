@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinylab/tinylab/internal/upstreamerr"
 	"github.com/tinylab/tinylab/internal/urlutil"
 )
 
@@ -42,6 +43,29 @@ func probeEntryPath(provider, model string) (string, []byte) {
 			"messages":   []map[string]string{{"role": "user", "content": "ping"}},
 		})
 		return "/v1/messages", body
+	}
+	if provider == "officeace" {
+		// ref 只发流式请求（officeace-adapter.ts 恒 stream:true）；探针只看
+		// HTTP 状态码并丢弃 body，SSE 响应照常成立。max_tokens 会低于
+		// officeaceAdjustBody 的 4096 下限被丢弃（端点默认上限兜底）——探针
+		// 语义不变（能路由 + 能出 200 就是通）。
+		body, _ := json.Marshal(map[string]any{
+			"model":    model,
+			"stream":   true,
+			"messages": []map[string]string{{"role": "user", "content": "ping"}},
+		})
+		return "/v1/chat/completions", body
+	}
+	if provider == "accio" {
+		// ref 只发流式请求（accio-adapter.ts 恒 stream:true）；探针只看 HTTP
+		// 状态码并丢弃 body。⚠️ 不带 max_tokens：Accio body 无此字段（上限
+		// 由服务端配额管），多发的字段虽然不至于报错，但保持与 ref 同形。
+		body, _ := json.Marshal(map[string]any{
+			"model":    model,
+			"stream":   true,
+			"messages": []map[string]string{{"role": "user", "content": "ping"}},
+		})
+		return "/v1/chat/completions", body
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model":      model,
@@ -83,8 +107,11 @@ func (b *Bridge) ProbeAccountModel(ctx context.Context, provider, accountID, mod
 		body = outBody
 	}
 	// Mirrors the proxy default: when the augmenter did not set an
-	// Authorization, fall back to the account's bearer token.
-	if req.Header.Get("Authorization") == "" {
+	// Authorization, fall back to the account's bearer token. ⚠️ accio 例外：
+	// 它的 augmenter 用 NoDefaultAuthHeader 明确否决 Bearer（token 走 body，
+	// 头上放恒 200+流内 402）—— 探针必须尊重同一否决，否则探出的结论与真实
+	// 流量不是同一件事。
+	if req.Header.Get("Authorization") == "" && req.Header.Get(upstreamerr.NoDefaultAuthHeader) == "" {
 		if acc, ok := b.m.FindAccount(accountID); ok {
 			if cred, ok := b.m.Credential(provider, acc.CredentialRef); ok {
 				if token, tokErr := accessTokenOf(provider, cred); tokErr == nil && token != "" {

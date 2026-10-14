@@ -1,4 +1,47 @@
+## 2026-10-15 — R6：新增 Accio provider（第 15 家）
+
+**上游事实**（ref `src/accio-*.ts` + `docs/agent-notes/providers-accio.md` @ origin/master）：阿里 Accio Work 通道，gateway 恒为 `https://phoenix-gw.alibaba.com`，region（cn/global）只是登录页域名。登录是标准 OAuth2 + PKCE 公开客户端 `accio-work`，推理是 Gemini 风格 SSE（token 放 body、顶层帧、`sg_k`/`message_id`/snake_case envelope），模型目录远端拉取（`modelCode` 非人类可读，对外用展示名 slug），积分是 credit 三只读端点。
+
+**实现**：
+- `internal/jethub/accio.go`（新）：端点常量、凭据结构（`expiresAt` 秒→ms 归一）、`accioToSnake`（`properties` 子树豁免、工具参数 JSON 串保真）、body 构造器与头族（无 Authorization）、15 条静态兜底表 + slug↔modelCode 映射。
+- `internal/jethub/accio_login.go` + `accio_oauth.go`（新）：PKCE loopback 登录（state 原样比对 → token 兑换 → best-effort userinfo 回填）、公开客户端授权 URL 拼装、token 信封解析与终态判据。
+- `internal/jethub/accio_models.go`（新）：远端目录 `POST /api/llm/config/v2`（token 键 body）+ 进程内缓存（成功 10min / 失败 30s + 并发去重）；无凭据/失败回落静态兜底表。
+- `internal/jethub/accio_augment.go`（新）：OpenAI/Anthropic 进站 → Accio envelope；`accioCustomize` 产出带 `sg_k=md5(requestId)` 的完整出站 URL 并否决默认 Bearer 兜底。
+- `internal/jethub/accio_response.go`（新）：顶层帧 SSE→OpenAI/Anthropic；thought→reasoning、tool shard 合并、终帧 usage/finish 保留、402→`BillingLockError`、非 event-stream 200 显式报错、截断流冲刷。
+- `internal/jethub/accio_refresh.go`（新）：refresh_token 轮换 + codearts/officeace 同款串行/重读/终判前三规则。
+- `internal/jethub/accio_credits.go`（新）：三只读端点（userinfo POST body；subscription/quota GET query）、信封判据（`success!==false`、数字/字符串 `401`/`NOT_LOGIN`）、桶存在性语义（0 留、缺席不产行、remaining 读不到跳过）。
+- `internal/api/jethub/accio.go`（新）：login/status/refresh/balance 四个端点。
+- 接线：manager defaultProviders/probe/refresh/products/qoder adapter/inference_url_test/web 守卫。
+
+**测试**：`internal/jethub/accio_test.go` 25 个 + `internal/jethub/accio_response_test.go` 4 个；`go build ./...`、`go vet ./...`、全量 `go test ./internal/...` 与 `node --test web/jethub.test.js` 均通过（全量跑时未跳过任何用例）。
+
+**已知限制**：Accio 全链路未经真实机器验证（无该账号）；远端目录只做进程内缓存，不落盘；`referral` 桶 `remaining` 读不到按数据不足跳过。
+
 # jethub-architecture.md — 变更日志
+
+## 2026-10-15 — R6：新增 OfficeAce provider（第 14 家）
+
+**上游事实**（ref `src/officeace-{auth,product,adapter}.ts` + `docs/agent-notes/providers-officeace.md` @ e73cd2f，全部实测结论）：华为 ModelArts MaaS「果办」云直连通道，推理走 `POST {maasBaseUrl}/v2/chat/completions`（Basic `base64(model_app_key:secret)`，标准 OpenAI SSE）；管理面 V11-HMAC-SHA256 签名。
+
+**实现**：
+- `internal/jethub/officeace.go`（新）：凭据结构（camelCase 字段与 ref 1:1，备份双向兼容；`expiresAt` 是 ISO 字符串**不做** ms/s 归一化）、登录链五步（匿名 state 注册 → authui 授权页（service= 包裹 authorize URL）→ 匿名 code 轮询（202/404=未就绪）→ STS+DPoP 换发 → SDK-HMAC permission-validate 取 MaaS Basic 对 + `maasBaseUrl`）、`RunOfficeaceLogin` 后台泵入口、`CompleteOfficeaceLogin`（昵称 `OfficeAce ` + accountId 前 8 位）、桥接 Key 提取器（modelAppKey 优先，codearts 缺陷 15 同款防线）。
+- `internal/jethub/officeace_sign.go`（新）：V11 签名器三条铁律（GET 不签 Content-Type / 派生 key 用 **hex 字符串**的 UTF-8 字节 / LF 分隔符 + canonical 头块**双 LF** + 路径强制尾斜杠 + RFC3986 编码集）+ SDK-HMAC 签名器（bare secret 作 key，无 scope 派生）。region/service 硬编码 `cn-southwest-2`/`apic`（ref 同款已知缺口）。
+- `internal/jethub/officeace_refresh.go`（新）：one-time refresh_token 三铁律（per-credentialRef 串行 + lead-time 1h 跳过 + 判终态前重读）；STS 换新**立即落盘**；modelInfo 刷新失败不回滚 STS；`Refreshable` 镜像自愈；调度挂在既有 codearts 30min 调度器。
+- `internal/jethub/officeace_credits.go`（新）：`GET /v1/subscription` 余额（套餐桶 `officeace_points` + bonus 桶 + 过期桶归 `ExpiredTotal`；trial 桶无固定到期不臆造；单位恒 `token`）+ `POST /v1/subscription/bonus/claim`（POST 必带 Content-Type；空桶=already-claimed）。⚠️ **有意的差异**：ref 在每次余额查询前自动签到 —— GET 触发 mutating POST 会被 Monitor 聚合每分钟隐式触发，故本端拆成**显式** `POST /api/jethub/officeace/claim`，代价是用户不点「领取」会错过当日积分（积分当日作废）。`/v1/model-token-rates` 未移植（可选增强，无 UI 需求）。
+- `internal/jethub/officeace_augment.go`（新）：Basic 鉴权 + body 两条微调（`max_tokens` 低于 4096 直接丢弃——思考链烧小预算致空回复；剥 `reasoning_effort`——服务端白名单校验，绝不注入）+ 其余近透传，无 DSML、无协议转换器；`officeaceInferURL`（per-account `maasBaseUrl` 优先，凭据缺失回落声明值让 augmenter 报权威错误）；`officeaceCustomize`（Customize 分支，同 qoder 族按账号算 URL）；8 模型静态表（multimodal 只标实测通过的 deepseek-v4.1-flash / kimi-k2.6）。
+- `internal/api/jethub/officeace.go`（新）：`POST /officeace/login`（`prepareLoginOpen` 建号前校验 → `StartOfficeaceLogin(context.Background())` → `OpenURLWithBrowser` → 后台 `RunOfficeaceLogin(context.Background())` 泵 → `SettleAndCleanup`）；`GET /officeace/status`（loginId 双语义）；`POST /officeace/refresh`；`GET /officeace/balance`；`POST /officeace/claim`。
+- 接线：`manager.go`（defaultProviders 第 14 行 + `officeaceRefreshLocks`）、`products.go`（产品表 + augmenter 注册）、`qoder_adapter.go`（Customize officeace 分支）、`codearts_refresh.go`（调度器并跑）、`probe.go`（探针 body `stream:true`、不带 max_tokens）、`balance_summary.go`（分发 case）、`inference_url_test.go`（声明端点锁值）、`web/jethub.test.js`（context 纪律 + SettleAndCleanup + OpenURLWithBrowser 守卫列表；顺带补了此前缺失的 `zcode.go`）。
+
+**测试**：`internal/jethub/officeace_test.go` 16 个（签名形状重放——时钟 pin 后逐字节重算 stringToSign 含双 LF/hex-key 反证、URI 编码集、登录链全 mock 端到端、code 轮询解析表、body 微调、Customize URL 三分支、续期三规则（含 invalid_grant 判终态前重读）、余额解析、claim 两分支、模型表、桥接提取器、探针 body）+ 既有结构守卫自动覆盖（`TestEveryProviderStatusHonorsLoginID` / `TestProviderBalanceCapabilitiesMatchImplementation`）。
+
+**已知限制**：签名未经真机验证（无公开测试向量，锁的是 ref 算法结构）；region 硬编码 `cn-southwest-2`（账号若分到别的 region scope 与 Host 会一起错，ref §6 未守卫，本端如实保留）；探针流式路径未真机验证；每日领取依赖用户手动点击。
+
+## 2026-10-07 — R5 上游同步第一步+载体页（原「最后核对」行归档）
+
+> 以下为被 R6 替换的前两轮「最后核对」行内容（R5 第一步：Gemini 渠道删除；上轮：zcode 载体页开页固定；上轮：渠道级余额合计）。
+
+**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）**：① 整体移除 Gemini Code Assist 渠道（§6.8 空位）：Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档 §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位（`%`）渲染与「账号规格」行、`freeHubUnitQuota`/`freeHubAccountTier`/`freeHubCreditRemaining`/`freeHubCreditResetsAt` 四个 i18n 键。② zcode 领取载体页的开页浏览器固定 default+shared（§6.7）：`zcodeOpenURL` 从零值改为显式 `OpenOptions{Browser: BrowserDefault, Session: SessionShared}` —— 零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），载体页本不需要登录态却跟着用户的 Edge 登录选择走（2026-10-07 报障：载体页在 Edge 里无感验证失败，系统默认浏览器是 Chrome）；登录流（API 层 `zcodeLogin`）仍传用户当次选择，仅此后台路径固定功能上线前的旧行为。回归 `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过）。③ 渠道级余额合计供 Monitor 页使用（§6.9）：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。
+（同轮 R5 其余子项——buddy 14003 分流、只换号不写冷却、失效模型剔除、codearts 输出上限、cline 兜底表——见下一条。）
 
 ## 2026-10-07 — R5 上游同步第五步：已失效模型的运行时实证剔除
 

@@ -89,6 +89,12 @@ func (h *Handler) Register(r chi.Router) {
 		// R2: zcode flows (CLI device login / local-credential import /
 		// balance / daily claim with the local captcha carrier page).
 		h.RegisterZcode(r)
+		// R6: officeace flows (cloud-direct login + anonymous code poll /
+		// STS refresh / V11 subscription balance / explicit daily claim).
+		h.RegisterOfficeace(r)
+		// R6: accio flows (PKCE loopback login with region / refresh /
+		// read-only credit balance — no daily claim endpoint upstream).
+		h.RegisterAccio(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)
@@ -449,14 +455,20 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	// Runtime-verified dead models (R5, ref f8748fa): 静态兜底表是编译期快照，
 	// 上游下架模型时它不会自己变 —— 实证记录过的模型不再播报。
 	gone := h.d.Manager.DeadModels(provider)
+	// Dynamic model source wins (accio: remote catalog with offline fallback);
+	// the static product snapshot is the default.
+	models := prod.Models
+	if prod.ModelsFor != nil {
+		models = prod.ModelsFor(h.d.Manager)
+	}
 	type modelEntry struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
 		Rate     string `json:"rate,omitempty"`
 		Disabled bool   `json:"disabled"`
 	}
-	out := make([]modelEntry, 0, len(prod.Models))
-	for _, md := range prod.Models {
+	out := make([]modelEntry, 0, len(models))
+	for _, md := range models {
 		if gone[md.ID] {
 			continue
 		}

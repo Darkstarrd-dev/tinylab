@@ -1,12 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-07（**R5 上游同步第一步（dsh-codearts-auth `2e8bb86` → `e73cd2f`）：① 整体移除 Gemini Code Assist 渠道（§6.8，见该行后半）；② qoder 信封内层帧改 JSON 结构三态分类、心跳帧整帧丢弃（§5，ref 1846449）；⑤ buddy 模型饱和 14003 与账号额度限流分流（不写锁/不换号，同 Key 退避重试；§6.10，ref 29a42ea）；⑥ 401/403 认证失败改为「只换号、不写冷却」（`ActionRotateOnly`；网关侧授权故障不得被放大成整池封禁，ref 0abaf1a）；⑦ 已失效模型的运行时实证剔除（阳性证据 + 30 天 TTL + 成功即忘；§6.11，ref f8748fa）；③ codearts 输出上限收敛集合扩至 glm-5.3-flash + deepseek-v4.1-flash（§6.4，ref 5334547）；④ cline 兜底表删已下架的 cline-free/deepseek-v4.1-flash（免费 4→3，ref b0352fc）** —— 该渠道的
-> Google OAuth client 常量被 GitHub Push Protection 判为密钥（GH013），阻塞 `git push`；
-> 用户决定直接删除该渠道及其全部实现，并**此后不再同步该渠道的相关上游数据**（同步文档
-> §5）。provider 数 14 → 13；同时删除的还有 `nonAggregatableProviders` 表、前端配额单位
-> （`%`）渲染与「账号规格」行、`freeHubUnitQuota`/`freeHubAccountTier`/`freeHubCreditRemaining`/
-> `freeHubCreditResetsAt` 四个 i18n 键。上轮：**zcode 领取载体页的开页浏览器固定 default+shared（§6.7）**：`zcodeOpenURL` 从零值改为显式 `OpenOptions{Browser: BrowserDefault, Session: SessionShared}` —— 零值会被 `normalizeOpenOptions` 用「记住的 +新建账号 偏好」补齐（§3.9），载体页本不需要登录态却跟着用户的 Edge 登录选择走（2026-10-07 报障：载体页在 Edge 里无感验证失败，系统默认浏览器是 Chrome）；登录流（API 层 `zcodeLogin`）仍传用户当次选择，仅此后台路径固定功能上线前的旧行为。回归 `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过）。上轮：**渠道级余额合计供 Monitor 页使用（§6.9）**：新增 `internal/jethub/balance_summary.go::Manager.BalanceSummaryOf` —— 遍历**启用且有凭据**的账号，经 `balanceForAccount` 单点分发到 12 个渠道余额实现，按**归一单位**（`token` / 其余含 `credit`·`credits`·「积分」→`credit`）分组求和；读取失败的账号只记 `failedCount`、**不进合计也不画成 0**；`%`（gemini 配额窗口）与「通道」（opencode 可用性）不可累加故整体跳过。缓存成功 120s / **全失败** 15s，「一个能查的账号都没有」的空轮次**不入缓存**（登录是先落账号后落凭据，缓存它会让读数空白两分钟）；`InvalidateBalanceSummary` 由账号/凭据四类变更在**取状态锁之前**调用（`balanceMu` 与 `m.mu` 不得嵌套）。新端点 `GET /api/jethub/balances`（`internal/api/jethub/balances.go`；⚠️ 路径**不叫** `/balance` —— 那个形状被 `balance_capability_test.go` 当逐账号端点枚举）。Monitor 侧见 `web/static/monitor/monitor_quota.js` 的 Provider 列读数（小两号）。
->
+> **最后核对：** 2026-10-15（**R6：新增两家 provider —— OfficeAce（华为 ModelArts MaaS 云直连，ref `src/officeace-{auth,product,adapter}.ts` @ e73cd2f）与 Accio（阿里 Accio Work，ref `src/accio-*.ts`）**——OfficeAce：cloud-direct OAuth/STS+DPoP、Basic 推理、`max_tokens<4096` 丢弃、剥 `reasoning_effort`、per-account `maasBaseUrl`、V11 余额 + 显式领取；Accio：OAuth2 PKCE、body-token Gemini 推理、Gemini SSE→OpenAI 转换、远端目录 + 静态兜底、credit 三只读端点。新增协议要点见 §6.12 / §6.13；两者真实机器验证仍待账号，见 §9。）
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
 > **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 余额 / 目录 / 推理 200（无 3012）见 §6.7。⚠️ **R4-1（2026-10-05）删除了「导入官方客户端凭据」旁路**（安全/正确性/一致性三条理由见 §6.7）。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
@@ -51,7 +45,7 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、13 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
+| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、14 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
 | API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + **`/balances` 渠道级合计（§6.9）** + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
 | 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（20 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
@@ -72,7 +66,7 @@
 - **入口**：Settings 侧边栏 `Free Hub` 行——Path Settings 行后、Assistant 行前（`settings.js` `#free-hub-entry`，契约测试锁位置）；i18n `freeHub*` en+cn。
 - **main 区内嵌（不整页替换）**：`openFreeHub()` **保留 `.settings-panel-left`（Settings 侧边栏）**，仅隐藏 `.settings-panel-right` 并在 `.settings-layout` 内其后面挂 `#free-hub-root.free-hub-main`（占 main 位）；`closeFreeHub()` 反向恢复（轮询定时器一并清理）。若 layout 不存在（页面被换走后重进）会先 `renderEndpoint` 重渲染再挂载。
 - **切页生命周期**：`navigateTo`（`app-router.js`）调用 `closeFreeHub()`——页面切换会整体清空 `#page-content`，不清标志会导致再次进入 Free Hub 被陈旧 `__jethubActive` 守卫挡住（修复过的真实缺陷：必须重启 App/Ctrl+F5 才能恢复）；`openFreeHub` 侧另有兜底——active 时先执行一次 close 再重挂。
-- **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（13 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
+- **布局三段式**：header（一键签到 / 备份 / 恢复 / 关闭，**四按钮一列左对齐**，无右推 spacer）+ left pane（14 provider 列表，账号数徽标单选）+ right pane 五区（调用前缀 / **操作按钮行** / 通知区 / 账号卡 / 模型列表）。
 - **详情页操作按钮行**（能力门控与原版 dim-jh-headerActions 一致）：刷新积分（`hasBalance`）· 一键领取积分（`hasCredits`）· 重测所有 + 重置所有（`supportsRateLimit`，loomy 不渲染——它不限流，重测只会白烧额度）· 解锁|锁定永久积分（`canLockPermanent` = {loomy, buddy, workbuddy}）· + 新建账号 · **Use Proxy 开关**（`+ 新建账号` 右侧：`free-hub-proxy-wrap` 标签 + 全局 `.toggle-switch`（同 Upstream Proxy/Provider 详情 useProxy，复用 style-settings.css 不动堆叠规则）；`jethubToggleProxy` PUT `/api/jethub/providers/{provider}/proxy` {enabled}，失败回滚勾选态；per-provider 语义见 §3.2）。结果在通知区显示（tone + 逐条 details 列表）。
 - **账号卡**：状态点 + **选号序号**（两个以上账号时显示；值为服务端 `rotationOrder`，**不是列表下标** —— 匿名通道恒殿后，两者会不一致）+ 名称（有派生账号名时挂 tooltip）+ **手机号**（仅 zcode，由 17 位 user_id 前 11 位派生）+ 徽标（启用/key/refresh/**匿名**（opencode 匿名通道，tooltip 解释「额度按出口 IP 计」，判据见下））；元信息行 = 凭据 ref（code）· 有效期（`X 分钟后/小时后`/日期，过期红字 + `· 自动续期`）· **额度行**（**逐账号**余额，挂载/刷新积分时并发逐个查询；失败时显示**原因**且不阻塞其它卡）；「限额重置」芯片行（仅未到期标记显示，任一标记存在即启用重测/重置；数据来源见 §3.1）；按钮行 = 重测 / 重置（单账号，仅有标记时可用）· 领取（文案随 `claimKind` 走：一次性奖励渠道写作「领取奖励」）· **新手任务**（`supportsOnboardingTasks`，仅 loomy：与每日签到是**两件事**，故独立按钮）· **代理 + 指纹**（仅 opencode，见下）· 续期 · 改名 · 停用|启用 · 删除。整卡可**拖拽排序**（顺序 = 选号优先级，见下）。
 - **opencode 的两种「账号分离」手段（两个独立按钮，文案不得混为一谈）**：
@@ -334,7 +328,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
 - 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；内层帧按 **JSON 结构三态分类**（`qoderClassifyInner`，R5 / ref 1846449）——`chunk`（有 `choices`（含空数组）或 `usage`）/ `error`（显式 `code`/`message`/`error`/`statusCodeValue`/`type`，或压根不是 JSON）/ `heartbeat`（`null`、空串、`{}`、裸标量、数组）。⚠️ **心跳帧整帧丢弃**，不得透传（`data: null` 会让消费侧读 `.error` 抛未包装的 TypeError、绕过全部错误归类）。错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。**HTTP 层 peek 首帧分类与 SSE 层必须共用同一处判据**（曾各写一份字符串嗅探 `"choices"`，两个方向都会错：心跳帧被误判成业务错误 / 错误文案含 `"choices"` 时被静默透传）。
 
-## 6. 13 provider 矩阵（端点/协议族/签名/积分）
+## 6. 15 provider 矩阵（端点/协议族/签名/积分）
 
 | provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
@@ -349,6 +343,8 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 | opencode | OpenAI 兼容 `https://opencode.ai/zen/v1/chat/completions`（§6.5） | **API Key 粘贴**（唯一非浏览器登录，§3.8）；匿名通道 = 字面量 `public` | Bearer `<api_key>` + `x-opencode-project/session/request/client` 指纹头 + UA；**免费通道形状门禁**（stream + `bash`/`read` 工具，augmenter 注入） | —（粘贴的 key 无续期；匿名槽 refreshable=false） | —（无积分面；额度错误按响应体类型名分类 → per-model 锁/换号，§6.5） |
 | zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）—— ⚠️ **R4-1 起这是唯一来源**（原先的「导入官方客户端凭据」已删除，理由见 §6.7） | 官方客户端头族（`X-Device-Mid` 硬需求 + `X-ZCode-App-Version`/`X-Release-Channel`/`X-Client-*`/`anthropic-version`）+ **请求体官方身份块 + 首轮日期块**（3012 准入） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取（`billing/claim`，**必带 captcha**，§6.7） |
+| officeace | **标准 OpenAI 兼容** `POST {maasBaseUrl}/v2/chat/completions`（per-account 专属网关，§6.12）——无转换器、无 DSML，SSE 原样透传 | **cloud-direct OAuth**：匿名 state 注册 → authui 授权页 → 匿名 code 轮询（§6.12） | `Basic base64(model_app_key:secret)` + 管理面 **V11-HMAC-SHA256** / 步⑤ **SDK-HMAC-SHA256**（§6.12） | refresh_token（**一次性**；per-ref 串行 + lead-time + 判终态前重读，§6.12） | 余额 = **token 桶**（V11 `GET /v1/subscription`，恒打默认域）；每日领取 = **显式** `POST /officeace/claim`（ref 是余额查询前自动签到——有意降级，§6.12） |
+| accio | **Gemini 风格 SSE** `POST phoenix-gw.alibaba.com/api/adk/llm/generateContent?sg_k=md5(requestId)`（§6.13）——顶层帧 + 工具 shard 合并，无 `[DONE]` | **OAuth2 PKCE 公开客户端**（`accio-work`；本地 loopback 回调，region=cn/global，§6.13） | **无 Authorization**：`token` 放 body + `utdid`/`version`/`appKey=OneChat`/`sgcookie` + `message_id`/`request_id`（§6.13） | refresh_token **轮换**；per-ref 串行 + lead-time + 判终态前重读（§6.13） | credit 三只读端点（userinfo POST body；subscription/quota GET query）；无签到端 |
 
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
@@ -770,6 +766,110 @@ GitHub Push Protection 判定为泄露密钥（`GH013`，`Google OAuth Client ID
 - **回归**：`deadmodels_test.go`（12 正例 / 21 反例 / 记录→过滤→过期链路 / TTL=0 / 损坏降级 /
   SyncKeys 出口）+ `proxy/augmenter_test.go` 的两条行为级用例。**三处反向验证已做**。
 
+### 6.12 OfficeAce（华为 ModelArts MaaS 云直连）协议要点（R6，ref `src/officeace-*.ts` @ e73cd2f）
+
+**登录链（完全公开可自走，无需果办客户端；`officeace.go` + API 层 `officeace.go`）**：
+
+| 步 | 端点 | 要点 |
+|---|---|---|
+| ① | `POST {claw}/v1/claw/auth/state` | 匿名登记 state —— **必须用云侧发的**（回调匹配自制 state 永远找不到） |
+| ② | `https://auth.huaweicloud.com/authui/login.html?service=<authorize>` | PKCE（S256）+ DPoP ES256 密钥在 ① 后现生成；authorize 参数 `client_id=pdp5_for_agentarts`（公开客户端无 secret） |
+| ③ | `GET {claw}/v1/claw/auth/code?state=` | 匿名轮询（无浏览器 cookie 参与 ⇒ 窗口可关）；**202/404=未就绪继续轮**，2s 间隔、5min 预算 |
+| ④ | `POST sts.cn-north-4…/v1/oauth2/tokens` | code+verifier+DPoP（无 `ath` —— 尚无 access token，RFC 9449 正确形态）换 STS + **一次性** refresh_token |
+| ⑤ | `GET {claw}/v1/claw/client-permission-validate`（SDK-HMAC） | `subscription.model_info.model_auth_info.model_app_key/secret` ⇒ MaaS Basic 对；`model_api_url_base` ⇒ **per-account `maasBaseUrl`** |
+
+**推理**：`POST {maasBaseUrl}/v2/chat/completions`，`Authorization: Basic base64(model_app_key:secret)`，
+`Accept: text/event-stream` —— **标准 OpenAI SSE，无协议转换器、无 DSML**。body 只允许两条微调：
+
+1. **`max_tokens` 下限 4096（低于直接丢弃字段）**：全系模型带思考链且思考 token 计入
+   `max_tokens` 预算 —— 小预算被思考烧光、正文 0 字、`finish_reason=length`（外部表现
+   「回复是空的」）。低于下限**丢弃**交给端点默认上限，≥4096 才透传。
+2. **剥 `reasoning_effort`，绝不注入**：不下发时思考照跑（该字段关不掉思考），服务端对
+   档位有白名单校验（`off`/垃圾值 → 400 ModelArts.81001）。
+
+⚠️ **出站 URL 按账号算**：华为**按账号下发专属网关**（`modelgw-NNNN.…`），打默认域是
+401 APIG.1009（ref §5.7 阻断级缺陷）。`officeaceCustomize`（`Customize` 的 officeace 分支，
+同 qoder 族机制）每请求从凭据解析；凭据缺失时**回落声明值并让 augmenter 报
+「凭据不完整」**——URL 选择不得抢在 augmenter 前面把病因换成 404。产品表仍显式声明
+`InferURL`（探针兜底构造 + `inference_url_test.go` 锁值）。
+
+**V11 签名三条铁律**（`officeace_sign.go`，各自都曾导致 APIG.0301）：
+
+1. **GET 请求不发 Content-Type**（多这一个头签名串多一行必不匹配；POST 必带且值恒
+   `application/json;charset=utf8`）；
+2. **派生 key 用 hex 字符串的 UTF-8 字节**：`HMAC(HMAC(ak,sk), scope||0x01)[:32]` →
+   `.toString('hex')` → 该 hex 字符串才是最终 HMAC key（raw bytes 是错的）；
+3. **LF 分隔符 + canonical 头块双 LF**（每行自带 `\n`、join 再插一个 `\n`）+ canonical
+   路径**强制尾斜杠** + RFC3986 unreserved 编码集（Go `url.QueryEscape` 空格转 `+` 不等价）。
+   region/service 硬编码 `cn-southwest-2`/`apic`（ref 同款已知缺口：账号分到别的 region 时
+   scope 与 Host 一起错，ref 未守卫，本端如实保留）。
+
+**续期（`officeace_refresh.go`）**：refresh_token **一次性**（换新即作废旧值）⇒ codearts
+cf5edab 三铁律照搬：per-credentialRef 串行 + 锁内重读 + 1h lead-time 跳过（调度 30min 一轮，
+STS 寿命 ~2h）；**换新成功立即落盘**（落盘前被打断 = 新 token 永久丢失）；invalid_grant 时
+**判终态前重读**（磁盘 token 已换 ⇒ 他处续期成功，不作废）；`modelInfo` 刷新失败不回滚 STS。
+调度并挂在既有 codearts `StartRefreshScheduler`。
+
+**余额/领取**：`GET {默认域}/v1/subscription`（套餐桶 `sku_attr_code=="officeace_points"`
++ bonus 桶；过期桶归 `ExpiredTotal`；trial 桶无固定到期**不臆造**；单位恒 `token`）。
+⚠️ **有意的差异**：ref 在**每次余额查询前**自动签到 —— GET 触发 mutating POST 会被
+Monitor 的渠道级聚合每分钟隐式触发，副作用不可见；本端拆成**显式** `POST
+/api/jethub/officeace/claim`（claimKind=daily，面板「领取」按钮），代价是用户不点会错过
+当日积分（**积分当日作废**）。`/v1/model-token-rates`（可选倍率面）未移植。
+⚠️ 管理面**永远打默认域**，不跟随 `maasBaseUrl`（两个 host 都要求 IAM 签名，「为统一」
+改成 MaaS 域会把余额一起打挂，ref §5.7 范围守卫）。
+
+**探针**：`probeEntryPath("officeace")` 发 `stream:true`、不带 `max_tokens`（ref 只发流式；
+低于下限的 max_tokens 反正会被丢弃）。
+
+### 6.13 Accio（阿里 Accio Work）协议要点（R6，ref `src/accio-*.ts`）
+
+**登录（`accio_login.go`，OAuth2 + PKCE 公开客户端）**：
+
+- region 只是**登录页域名**参数（`cn` = `www.accio-ai.com`，`global` = `zh.accio.com`）；gateway 恒为
+  `https://phoenix-gw.alibaba.com`，故 region 写进凭据而不是第二个 provider id。
+- 回调监听 `127.0.0.1` 随机端口，授权 URL 必带 `return_url/state/code_challenge/
+  code_challenge_method=S256/client_id=accio-work/ttid/language`；callback 先做 **state 原样比对**，再兑换授权码。
+- token 兑换/续期返回的 `expiresAt` 是**秒**（这里统一归一成 ms）。
+- 登录后 best-effort 读 `POST /api/auth/userinfo` 回填身份（失败静默，不阻断登录）。
+
+**推理（`accio_augment.go` + `accio_response.go`，Gemini 风格 SSE）**：
+
+- 出站 `POST {gateway}/api/adk/llm/generateContent?sg_k=md5(requestId)`。
+- **token 走 body**，绝不放 Authorization（放了恒 HTTP 200 + 流内 402）；请求头只带
+  `utdid/version/appKey=OneChat/sgcookie`，并且用 `upstreamerr.NoDefaultAuthHeader`
+  否决代理默认 Bearer 兜底。
+- body 为 snake_case 信封：`empid/tenant/iai_tag` 必须是空串，`message_id` 必填，
+  `system_instruction` 是**字符串**（对象形态恒 200 + 流内 400），`properties` 子树不参与
+  camel→snake 转换，工具参数保持原始 JSON 字符串。
+- 客户端模型 id 是展示名 slug（`qwen-3-8-flash`），上行由 `accioModelCodeOf` 映射回
+  `modelCode`；未知 id 原样透传（手写 modelCode 也能直接用）。
+- 响应是**顶层帧**（不是 candidates[]），不发 `[DONE]`：`parts[].thought` → reasoning，
+  正常 `parts[].text` → content，`function_call` 拆帧必须合并（首帧空参数不得泄漏，
+  后续 `args_json` 前缀链取最后、否则拼接；与分片同帧到达的 usage/finish 不得丢）。
+- 错误判据先于吸收/归一化：`error_code:"200"` 是成功哨兵，`402` → 计费锁至次日
+  UTC+8 00:05，其余错误按显式失败；200 非 `text/event-stream`（风控 HTML）必须报错。
+
+**模型目录（`accio_models.go`）**：远端 `POST /api/llm/config/v2`（token 放 body，键名
+`token`）优先，成功缓存 10 分钟、失败/空冷却 30 秒；无凭据/失败回落 15 条静态兜底表
+（ref `FALLBACK_MODELS`，2026-10-12 快照）。`visible!==true`、空 `modelCode` 剔除；
+倍率升序、缺倍率垫底（0 是合法值，用存在标记判断）。
+
+**积分（`accio_credits.go`，三个只读端点）**：`/api/auth/userinfo` 是 POST、token 放 body；
+`currentSubscription` / `quota` 是 GET、token 放 query。响应信封 `success!==false` 即成功，
+HTTP 401/403 或 code/message `401`/`NOT_LOGIN` ⇒ 未登录。积分桶存在即留行（`remaining:0`
+也留），缺席不产生行，存在但 `remaining` 读不到则跳过（宁缺勿编 0）；单位 `credit`。
+
+**续期（`accio_refresh.go`）**：refresh_token 会**轮换**，沿用 codearts/officeace 三规则：
+per-credentialRef 串行 + 锁内重读 + 判终态前重读（凭据被他处换新视为已续成功）。
+
+**测试**：`accio_test.go`（25 个）+ `accio_response_test.go`（4 个）：区域归一 / PKCE URL /
+`expiresAt` 量纲 / 终态与轮换 / 串行三规则 / 目录解析与排序 / slug round-trip /
+远程目录 token 键与缓存 / body 与 properties / sg_k 与 message_id / Customize URL+body /
+积分信封与桶语义 / 三端点传参 / 探针 stream / SSE 工具 shard、usage、402 锁定与空响应守卫。
+**已知限制**：全链路未经真实机器验证；远端目录对未登录/失败进程内缓存，无磁盘缓存；
+`referral` 桶 `remaining` 读不到时按「数据不足」跳过而非显示 0。
+
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。
 对齐参考插件会话输入区那枚用量徽标（`ZCode (智谱) • 94.54MToken`），在该列**追加渠道级
@@ -780,7 +880,7 @@ GitHub Push Protection 判定为泄露密钥（`GH013`，`Google OAuth Client ID
 ```
 Monitor（web/static/monitor/monitor_quota.js）
   providerBalanceTick()        ← 搭既有 1s 计数节奏，内部 60s 节流（ref BADGE_POLL_MS 同值）
-  → GET /api/jethub/balances   ← 一次拿全部渠道的合计（不为 13 渠道 × N 账号发几十个请求）
+  → GET /api/jethub/balances   ← 一次拿全部渠道的合计（不为 14 渠道 × N 账号发几十个请求）
   → Manager.BalanceSummaryOf(provider)   ← 后端两档 TTL：成功 120s / 全失败 15s
   → balanceForAccount()        ← 单点分发到各渠道既有余额实现（签名差异在此收敛）
   → 归一单位分组求和 → BalanceGroup{unit,total} + okCount + failedCount
@@ -869,4 +969,5 @@ Monitor（web/static/monitor/monitor_quota.js）
 - `internal/jethub/account_proxy_test.go`：账号代理落到**桥接的 key** 上（已反向验证：删掉 `SyncKeys` 里的 `Proxy` 赋值立刻变红）+ 默认时出站 client 与 provider 级是**同一个实例**（默认路径不变）+ 落盘与重启保持 + 空串是合法清除 + 非法值当场拒绝且不改动现状 + 未知账号报错。
 - `internal/browserlaunch/browserlaunch_test.go`（13 个）+ `internal/jethub/login_open_test.go`（11 个）+ `internal/api/jethub/login_open_test.go`（6 个）：**家族 flag 表**（Edge 必须 `--inprivate`、**不得** `--incognito`；未知家族不得声称支持隐私模式）+ `BuildArgs` 的拒绝矩阵（无 exe 却要隐私/独立配置、隐私与独立配置互斥、Firefox 无 `--user-data-dir`）+ 相对 `--user-data-dir` absolutize + 探测表（候选路径/PATH 回退/去重/顺序）+ 默认浏览器命令解析（带引号/不带引号含空格/空命令）+ 选择归一化（请求→偏好→旧默认）+ `ValidateOpenOptions`（未知浏览器/目录/未知会话/未知内核+隐私 拒绝；**不建目录**）+ 偏好往返与损坏文件不致命 + 独立配置目录净化（`../` 不得逃逸）与**越界路径不清理** + 账号删除后目录尽力清理 + API 端点形状（三条会话模式/浏览器行）+ **建号前拒绝**（不可用浏览器 ⇒ 400 且账号池仍为空）+ `open-login-url` 的全部拒绝分支（§3.9）。
 - `web/jethub.test.js` 新增「login dialog: browser/session axes ride the login RPC」用例：选择步渲染两轴与记住的偏好 + **确认前不得有任何 POST**（服务端在建号时开页）+ 选择步取消不删账号 + 确认携带 `{browser,browserPath,session}` + 等待步轮询 + 「重新打开登录页」走服务端端点 + 内核未知时隐私项判定（§3.9）。
-- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）；**zcode 的推理链路已验证到「请求被上游接受（200、无 3012/3001）+ 无权益空流被正确判定」**，但**有内容的正向流**与**每日领取的载体页**需要带 plan 的账号才能真机走通（§6.7）；zcode 推理侧 captcha 产出与并发门未实现（§6.7）。**登录浏览器/会话模式（§3.9）**：隐私窗口必然是「未登录」状态（每次手输账号 + 2FA、扩展被禁用 ⇒ 企业 SSO 可能不可用），企业策略禁用无痕时浏览器**静默**按普通窗口打开（本端无法检测）；内核未知的 fork 拒绝隐私模式；macOS 的 `open -a … --args` 对已运行实例不传参数（实现上直接执行 bundle 内二进制，待真机验证）。
+- `internal/jethub/officeace_test.go`（16 个）：**V11 签名形状重放**（时钟 pin 后逐字节重算 stringToSign —— 锁死 GET 不签 Content-Type / hex 派生 key（附 raw-bytes 反证）/ 双 LF 头块 / 尾斜杠 / RFC3986 编码集）+ SDK-HMAC bare-secret 重放 + state 注册与授权 URL 拼装（S256 challenge 对账）+ code 轮询解析表（202/404=pending、非字符串=pending）+ **登录链全 mock 端到端**（state→202→code→STS→permission-validate，DPoP 复用与 ISO 到期直传）+ body 微调（4096 边界/reasoning_effort/逐字节透传）+ Basic 头 + Customize URL 三分支（per-account 网关胜出 / 默认回落 / 凭据缺失仍回落且 augmenter 报错）+ 续期三规则（换新落盘保留 MaaS 对与 DPoP、fresh 跳过不发请求、invalid_grant 判终态前重读两分支）+ RefreshAll 自愈 + 余额解析（套餐/bonus/过期/trial 桶）+ claim 两分支（POST 必带 Content-Type）+ 模型表 8 条与多模态白名单 + 桥接提取器（modelAppKey）+ 探针 body（stream:true 无 max_tokens）。
+- **已知限制**：SMS 弹窗流程（loomy/raccoon 短信）无服务端 login session——占位账号由**前端**创建，若用户直接关页（非点取消）会留下无凭据占位（灰徽标可见，可手动删除；不影响推理/领取）。扫码登录页未移植「取消后换码刷新」，也没有短信 Tab（§3.4）；loomy 的微信链路**主流程已真机验证通过**（2026-10-01，§3.5/§3.6）、未移植「失效自动换码」；minimax 非流式聚合的响应形状未经真机验证（§6.1）；**trae 缺 SOLO→OpenAI 响应转换**（§6.2）；**trae/lobsterai 缺远端模型目录拉取**（模型列表只是静态子集、无倍率，§6.3）；buddy/workbuddy/lobsterai/trae/cline/raccoon 的推理链路**已修 URL 但尚无真机验证**（每个 provider 发一条 `{前缀}/{模型}` 即可确认）；**zcode 的推理链路已验证到「请求被上游接受（200、无 3012/3001）+ 无权益空流被正确判定」**，但**有内容的正向流**与**每日领取的载体页**需要带 plan 的账号才能真机走通（§6.7）；zcode 推理侧 captcha 产出与并发门未实现（§6.7）；**officeace 全链路未经真机验证**——签名只有 ref 算法结构重放（上游无公开测试向量）、region 硬编码 `cn-southwest-2`（账号分到别的 region 时 scope 与 Host 一起错，ref 同款缺口）、探针流式路径未真机测过、每日领取依赖手动点击（自动签到有意降级，§6.12）。**登录浏览器/会话模式（§3.9）**：隐私窗口必然是「未登录」状态（每次手输账号 + 2FA、扩展被禁用 ⇒ 企业 SSO 可能不可用），企业策略禁用无痕时浏览器**静默**按普通窗口打开（本端无法检测）；内核未知的 fork 拒绝隐私模式；macOS 的 `open -a … --args` 对已运行实例不传参数（实现上直接执行 bundle 内二进制，待真机验证）。

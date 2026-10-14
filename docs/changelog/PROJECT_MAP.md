@@ -1,3 +1,16 @@
+## 2026-10-15 — R6 PROJECT_MAP 结构同步（OfficeAce + Accio）
+
+- §10.28 文件表：`internal/api/jethub/` 新增 `officeace.go` 行（第 14 家）与 Accio provider 文件行（`accio*.go`：登录/模型目录/推理/SSE 转换/续期/积分端点）。
+- §13n 文件表：`internal/jethub/` 新增 OfficeAce 六个文件行与 Accio 八个文件行；provider 计数 14 → 15。
+- 核对行替换为 R6 摘要（第 14/15 家：OfficeAce 云直连 Basic + Accio PKCE/Gemini-SSE）。
+- 过程叙述归档至 docs/changelog/jethub-architecture.md。
+
+# PROJECT_MAP.md — 变更日志
+
+## 2026-10-08（原「最后核对」行归档，被 2026-10-15 R6 替换）
+
+> **最后核对（2026-10-08，Systray 系统全局热键）：** Settings → Shortcut Settings 弹窗新增 **Systray 分区**（`systray.open-browser`=Ctrl+Shift+T / `systray.open-console`=Ctrl+Alt+Shift+T，OS 级全局热键而非 App 内快捷键）。新增 `internal/hotkey/` 包（§13r，仿 petstate 桥接规避 import 环）：Windows `RegisterHotKey` 专用 LockOSThread 消息泵，`WM_HOTKEY` 派发 + `WM_APP+1` 重注册唤醒，无 handler 的 action 不向 OS 注册（组合键让给其他程序），注册冲突 Warn 不致命。接线：`app.Run`（Open Browser handler，Windows 全构建生效；Shutdown→Stop）、`convergeRuntime`（PATCH 与 /api/reload 双路径 → `hotkey.SetBindings` 即时生效）、`addWebviewMenuItem`（Open Console handler → 抽出的 `toggleConsoleWindow`，与托盘 toggle 共用）。前端 `shortcuts.js` 新增 systray 预设（与 `hotkey.go` defaultBindings 互为镜像，`web/systray-shortcuts.test.js` 双向守护）+ `formatBinding` 恒显 Shift（修复 Ctrl+Alt+Shift+T 显示为 Ctrl+Alt+T）+ `settings_shortcuts.js` systray Tab 恒显示与区域说明。回归 `internal/hotkey/hotkey_test.go`。上一轮：zcode 领取载体页开页浏览器固定 default+shared（docs/changelog/jethub-architecture.md 与 docs/changelog/PROJECT_MAP.md）。
+（其「上一轮」子项此前已归档至 docs/changelog/jethub-architecture.md。）
 ## 2026-10-08 — Systray 系统全局热键（Settings → Shortcut Settings 新增分区）
 
 - §13r（新章节）：`internal/hotkey/` 包文件表（`hotkey.go` 纯逻辑/`hotkey_windows.go` RegisterHotKey 消息泵/`hotkey_other.go` stub/`hotkey_test.go`）与行为边界（生效绑定=覆盖 ?? 内置默认、无 handler 不向 OS 注册、Start 前 Set* 仅状态、Ctrl+Shift+T 系统级占用浏览器恢复标签页）。

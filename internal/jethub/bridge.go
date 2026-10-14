@@ -67,6 +67,13 @@ type Product struct {
 	InferURL string
 	// Models is the static model table registered on the bridged provider.
 	Models ModelTable
+	// ModelsFor (optional) is the dynamic model-table source: when set, the
+	// CURRENT table is resolved through it at every SyncKeys instead of the
+	// static Models snapshot (accio: the upstream modelCode catalog is
+	// remotely fetched and non-human-readable, so the offline fallback table
+	// is only a last resort). Return the static table when the dynamic source
+	// is unavailable.
+	ModelsFor func(m *Manager) ModelTable
 	// AnonymousKey (optional) marks the credential value of the product's
 	// anonymous channel (opencode: the literal `public`). Keys carrying it are
 	// registered with a higher Priority so fill-first tries real accounts
@@ -262,8 +269,20 @@ func (b *Bridge) SyncKeys(provider string) error {
 	}
 
 	id := ProviderID(provider)
-	models := make([]config.ModelDef, len(prod.Models))
-	copy(models, prod.Models)
+	// Dynamic model source wins (accio: remote catalog with offline fallback);
+	// the static snapshot is the default. ⚠️ Both paths MUST land in a fresh
+	// slice: the blacklist filter below reuses `models[:0]` in place, and a
+	// ModelsFor result may alias a cached or package-level table (accio's
+	// fallback table is a var) — filtering in place would corrupt it.
+	var models ModelTable
+	if prod.ModelsFor != nil {
+		src := prod.ModelsFor(b.m)
+		models = make([]config.ModelDef, len(src))
+		copy(models, src)
+	} else {
+		models = make([]config.ModelDef, len(prod.Models))
+		copy(models, prod.Models)
+	}
 	// Apply the model blacklist: hidden models are removed from the registry
 	// model list (visibility only — routing is not affected by prefix models).
 	disabled := b.m.DisabledModels(provider)

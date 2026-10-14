@@ -154,7 +154,8 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 			// a blank base, so nothing client-supplied can leak through).
 			// Loopback-only markers never leave the process.
 			for k, vs := range bridgeReq.Header {
-				if strings.EqualFold(k, RetryDropHeaderMarker) || strings.EqualFold(k, webhubTurnHeaderName) {
+				if strings.EqualFold(k, RetryDropHeaderMarker) || strings.EqualFold(k, webhubTurnHeaderName) ||
+					strings.EqualFold(k, NoDefaultAuthHeader) {
 					continue
 				}
 				for _, v := range vs {
@@ -167,7 +168,11 @@ func (h *Handler) forwardUpstream(ctx context.Context, sel *rotation.SelectedKey
 			if req.Header.Get("Content-Type") == "" {
 				req.Header.Set("Content-Type", "application/json")
 			}
-			if req.Header.Get("Authorization") == "" {
+			// NoDefaultAuthHeader vetoes the default Bearer fill (accio: the
+			// token rides in the body; a header is an in-stream 402). The
+			// marker lives on bridgeReq (it is stripped from req above), so
+			// the veto is consulted there.
+			if req.Header.Get("Authorization") == "" && bridgeReq.Header.Get(NoDefaultAuthHeader) == "" {
 				req.Header.Set("Authorization", "Bearer "+sel.Key.Key)
 			}
 			customheaders.Apply(req.Header, sel.Provider.UseCustomHeaders, sel.Provider.CustomHeaders)

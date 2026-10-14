@@ -28,6 +28,14 @@ var expectedInferenceEndpoints = map[string]string{
 	// ref opencode-product.ts（分支 feat/opencode-provider @ 7dd3422）：
 	// baseUrl + chatPath = `https://opencode.ai/zen/v1/chat/completions`。
 	"opencode": opencodeBaseURL + opencodeChatPath,
+	// R6: officeace 的真实出站 URL 按**账号**算（凭据 maasBaseUrl 优先，
+	// officeaceCustomize）；这里锁的是声明值/兜底值 —— 凭据读不到时
+	// officeaceInferURL 回落此端点（ref officeace-product.ts）。
+	"officeace": officeaceDefaultBaseURL + officeaceChatPath,
+	// R6: accio 的真实出站 URL 带 per-request `?sg_k=md5(requestId)` 查询串
+	// （与 body 里的 requestId 共享同一次随机）；这里锁的是声明值/兜底值，
+	// Customize 部分（sg_k 形状）由 accio_test.go 的 TestAccioInferenceURL 锁。
+	"accio": accioGatewayBase + accioLLMPath,
 }
 
 // newInferenceURLManager wires the real product table onto a throwaway bridge.
@@ -59,6 +67,12 @@ func TestInferenceEndpoints(t *testing.T) {
 			t.Errorf("%s: InferURL = %q, want %q", provider, got, want)
 		}
 		// Customize 必须把**完整端点**交给代理（而非靠 urlutil 推导）。
+		// ⚠️ accio 例外：它的 Customize 走 accioCustomize（需要凭据 + 产出带
+		// sg_k 查询串的 per-request URL）——由 accio_test.go 的专用测试覆盖，
+		// 这里只锁声明值。
+		if provider == "accio" {
+			continue
+		}
 		outURL, _, err := m.Customize(req, []byte(`{"model":"x","messages":[]}`), ProviderID(provider), "acct", "x")
 		if err != nil {
 			t.Errorf("%s: customize: %v", provider, err)

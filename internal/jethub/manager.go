@@ -33,8 +33,9 @@ type ProviderMeta struct {
 	LoginModes []string `json:"loginModes,omitempty"`
 }
 
-// defaultProviders is the 11-provider registry from the migration plan §1.1.
-// P2/P3 fill in per-provider behavior; the metadata list is stable from P1.
+// defaultProviders is the provider registry (P1 listed 11; R1/R2/R6 added
+// opencode, zcode, officeace). P2/P3 fill in per-provider behavior; the
+// metadata list is stable.
 var defaultProviders = []ProviderMeta{
 	{ID: "codearts", DisplayName: "CodeArts Agent", Description: "华为云 CodeArts", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	{ID: "buddy", DisplayName: "CodeBuddy", Description: "腾讯 CodeBuddy（中国版）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
@@ -66,6 +67,12 @@ var defaultProviders = []ProviderMeta{
 	// R2: ZCode (智谱 z.ai 免费额度通道) — Anthropic Messages 协议 + 官方
 	// CLI 设备授权登录；额度按 token 计（billing/balance 的桶）。
 	{ID: "zcode", DisplayName: "ZCode", Description: "智谱 z.ai（Anthropic 协议族；CLI 设备授权）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
+	// R6: OfficeAce（华为 ModelArts MaaS 云直连）— cloud-direct OAuth +
+	// 匿名 code 轮询；额度按 token 计（V11 签名的 /v1/subscription）。
+	{ID: "officeace", DisplayName: "OfficeAce", Description: "华为 ModelArts MaaS（云直连）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
+	// R6: Accio（阿里 Accio Work）— 标准 OAuth2 + PKCE 公开客户端；token 走
+	// body（头上放 Bearer 恒 200+流内 402）；额度只读（credit 计，无签到）。
+	{ID: "accio", DisplayName: "Accio (阿里)", Description: "阿里 Accio Work（阿里云 AI 门户）", HasCredits: false, HasBalance: true, LoginModes: []string{"url"}},
 }
 
 // Providers returns the static provider metadata list (a copy).
@@ -226,6 +233,19 @@ type Manager struct {
 	// and Huawei STS invalidates the old one on success, so a concurrent loser
 	// reads a spurious invalid_grant.
 	codeartsRefreshLocks sync.Map
+
+	// officeaceRefreshLocks is the officeace twin of codeartsRefreshLocks:
+	// the STS refresh_token is ONE-TIME (successful exchange invalidates it),
+	// so renewals must be serialized per credentialRef with a re-read inside
+	// the lock (officeace_refresh.go, ref officeace-auth.ts §2 铁律).
+	officeaceRefreshLocks sync.Map
+
+	// accioRefreshLocks is the accio twin of the two maps above: the refresh
+	// endpoint ROTATES the refresh_token (successful renewal invalidates the
+	// old one), so concurrent refreshes of the same credentialRef would race
+	// "1 success N invalid_grant" — serialize per ref with a re-read inside
+	// the lock (accio_refresh.go).
+	accioRefreshLocks sync.Map
 
 	// sharedClients lazily-built outbound clients (direct + proxy-routed).
 	sharedClients jethubClients

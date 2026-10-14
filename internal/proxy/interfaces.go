@@ -220,6 +220,12 @@ type ModelSaturationError = upstreamerr.ModelSaturationError
 // copy guard.
 const RetryDropHeaderMarker = upstreamerr.RetryDropHeaderMarker
 
+// NoDefaultAuthHeader is the loopback-only marker header a bridged augmenter
+// sets to veto the proxy's default `Authorization: Bearer <key>` fill (accio:
+// token rides in the body; a header makes the upstream answer 200 + in-stream
+// 402). Re-exported for the proxy's own header copy guard.
+const NoDefaultAuthHeader = upstreamerr.NoDefaultAuthHeader
+
 // ModelGoneReporter is the optional hook the proxy calls when an upstream
 // response is **positive evidence** that the MODEL itself no longer exists
 // ("model not found" style, as opposed to an account/quota/auth failure).
