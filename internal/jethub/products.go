@@ -127,6 +127,30 @@ func RegisterDefaultProducts(b *Bridge) {
 		InferURL: minimaxInferURL(),
 		Models:   minimaxFallbackModels(),
 	})
+	// R7-1: minimaxintl (MiniMax Code 国际版; Anthropic Messages protocol).
+	b.RegisterProduct(Product{
+		Provider:    "minimaxintl",
+		DisplayName: "MiniMax Code (国际版)",
+		BaseURL:     minimaxIntlProduct.APIHost,
+		InferURL:    MinimaxInferURLFor("minimaxintl"),
+		Models:      minimaxFallbackModels(),
+	})
+	// R7-2: modelscope (ModelScope 魔搭; OpenAI compatible chat).
+	b.RegisterProduct(Product{
+		Provider:    "modelscope",
+		DisplayName: "ModelScope (魔搭)",
+		BaseURL:     modelscopeBaseURL,
+		InferURL:    modelscopeBaseURL + modelscopeChatPath,
+		Models:      modelscopeFallbackModels(),
+	})
+	// R7-3: autoclaw (AutoClaw 智谱清言桌面端; OpenAI compatible chat with dynamic sign).
+	b.RegisterProduct(Product{
+		Provider:    "autoclaw",
+		DisplayName: "AutoClaw (智谱)",
+		BaseURL:     autoclawAPIBase,
+		InferURL:    autoclawAPIBase + autoclawChatPath,
+		Models:      autoclawFallbackModels(),
+	})
 	// P3.4: qoder + qodercn (encrypted inference via the embedded WASM;
 	// BaseURL = the encrypted-infer host — a DIFFERENT host from the public
 	// api2-v2 endpoint). ⚠️ 不设 InferURL：完整 URL（含查询串）由 WASM 算出。
@@ -208,7 +232,10 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("raccoon", m.raccoonAugment)
 	m.SetAugmenter("loomy", m.loomyAugment)
 	m.SetAugmenter("minimax", m.minimaxAugment)
+	m.SetAugmenter("minimaxintl", m.minimaxAugment)
 	m.SetAugmenter("opencode", m.opencodeAugment)
+	m.SetAugmenter("modelscope", m.modelscopeAugment)
+	m.SetAugmenter("autoclaw", m.autoclawAugment)
 	m.SetAugmenter("zcode", m.zcodeAugment)
 	m.SetAugmenter("officeace", m.OfficeaceAugmentHook())
 }

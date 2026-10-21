@@ -44,9 +44,9 @@ func TestBuddyStripReasoningEffortWorkbuddyOnly(t *testing.T) {
 	}
 }
 
-// TestWorkbuddyAugmentStripsReasoningEffort: augment 端到端 —— workbuddy 出站
-// 不带 reasoning_effort，其余头族仍完整。
-func TestWorkbuddyAugmentStripsReasoningEffort(t *testing.T) {
+// TestWorkbuddyAugmentPreservesReasoningEffort: R7（ref e261cd6 / 1361706）
+// workbuddy 出站必须保留 reasoning_effort，以保证思考输出（thinking）正常工作。
+func TestWorkbuddyAugmentPreservesReasoningEffort(t *testing.T) {
 	m := newTestManager(t).m
 	id, ref := NewAccountID("workbuddy")
 	_ = m.AddAccount(Account{ID: id, Provider: "workbuddy", Enabled: true, CredentialRef: ref})
@@ -60,10 +60,10 @@ func TestWorkbuddyAugmentStripsReasoningEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(out), "reasoning_effort") {
-		t.Fatalf("workbuddy augment must strip reasoning_effort: %s", out)
+	if !strings.Contains(string(out), "reasoning_effort") {
+		t.Fatalf("workbuddy augment must PRESERVE reasoning_effort: %s", out)
 	}
 	if req.Header.Get("Authorization") != "Bearer wb-tok" {
-		t.Fatalf("buddy headers lost after body rewrite: %v", req.Header)
+		t.Fatalf("buddy headers lost after augment: %v", req.Header)
 	}
 }

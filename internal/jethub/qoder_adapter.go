@@ -219,7 +219,7 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 	if !ok {
 		return nil, 0, nil
 	}
-	if provider == "minimax" {
+	if provider == "minimax" || provider == "minimaxintl" {
 		return m.minimaxInterceptResponse(clientReq, resp, upstreamModel, isStream)
 	}
 	if provider == "buddy" || provider == "workbuddy" {

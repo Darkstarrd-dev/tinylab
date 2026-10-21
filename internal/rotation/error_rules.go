@@ -44,6 +44,17 @@ var DefaultErrorRules = []ErrorRule{
 	// it as a hard daily lock instead of a transient cooldown.
 	{BodyMatch: "insufficient_balance", Action: ActionDailyQuota},
 	{BodyMatch: "insufficient balance", Action: ActionDailyQuota},
+	// Loomy daily quota exhaustion (ref 2945203): 14018 Credits exhausted.
+	// 每日赠送额度按 UTC+8 自然日重置，锁至次日 CST 00:05，而不是滑动 24h 冷却。
+	{BodyMatch: "14018", Action: ActionDailyQuota},
+	{BodyMatch: "credits exhausted", Action: ActionDailyQuota},
+	// WorkBuddy channel verification failure (ref eeda381): 11128 with "conversation id missing".
+	// 网关对特定账号回 HTTP 400 {"code":11128,"msg":"conversation id missing"}，换号即可放行，且不应写冷却。
+	{BodyMatch: "conversation id missing", Action: ActionRotateOnly},
+	// Buddy/WorkBuddy safety policy rejection (ref 89f53be): 11140 request illegal (now HTTP 400).
+	// 拦截按账号生效（同一请求在其他账号可 200），写 30 分钟冷却并换号。
+	{BodyMatch: "11140", Action: ActionCooldown, CooldownSec: 1800},
+	{BodyMatch: "request illegal", Action: ActionCooldown, CooldownSec: 1800},
 	// Aggregator (newapi/2api-style) reporting its OWN upstream failed — the
 	// request shape was fine, the aggregator's backend transiently errored.
 	// Retrying on another key (multi-key) can help, so treat as backoff

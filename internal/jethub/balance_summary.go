@@ -191,7 +191,7 @@ func (m *Manager) balanceForAccount(ctx context.Context, provider, accountID str
 		return m.LoomyCreditBalance(ctx, accountID)
 	case "raccoon":
 		return m.RaccoonBalance(ctx, accountID)
-	case "minimax":
+	case "minimax", "minimaxintl":
 		return m.MinimaxBalance(ctx, accountID)
 	case "zcode":
 		balance, err := m.ZcodeBalance(ctx, accountID)
@@ -206,6 +206,10 @@ func (m *Manager) balanceForAccount(ctx context.Context, provider, accountID str
 		return m.OfficeaceBalance(ctx, accountID)
 	case "accio":
 		return m.AccioBalance(ctx, accountID)
+	case "modelscope":
+		return m.ModelscopeBalance(ctx, accountID)
+	case "autoclaw":
+		return m.AutoclawBalance(ctx, accountID)
 	default:
 		return nil, errAccountNotFound(provider)
 	}

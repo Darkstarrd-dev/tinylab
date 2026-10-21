@@ -16,7 +16,7 @@ import (
 // handling. ⚠️ The business code lives at base_resp.status_code (NOT code),
 // and `invalid timezone_id` also arrives as HTTP 200 — status-only reading
 // would treat it as success. Never throws (batch callers count by kind).
-func (m *Manager) minimaxEnvelope(ctx context.Context, cred *MinimaxCredential, method, url, body string) (map[string]any, int64, string, bool) {
+func (m *Manager) minimaxEnvelope(ctx context.Context, provider string, cred *MinimaxCredential, method, url, body string) (map[string]any, int64, string, bool) {
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if body != "" {
 		req, err = http.NewRequestWithContext(ctx, method, url, strReader(body))
@@ -30,7 +30,7 @@ func (m *Manager) minimaxEnvelope(ctx context.Context, cred *MinimaxCredential, 
 	tctx, cancel := context.WithTimeout(ctx, minimaxRequestTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient("minimax").Do(req)
+	resp, err := m.httpClient(provider).Do(req)
 	if err != nil {
 		return nil, -1, err.Error(), false
 	}
@@ -69,8 +69,8 @@ func unwrapEnvelopeData(payload map[string]any) map[string]any {
 
 // minimaxWithTimezone appends timezone_id — a REQUIRED query param (measured:
 // header placement is invalid, missing errors, illegal zone names error).
-func minimaxWithTimezone(path, timezoneID string) string {
-	return minimaxProduct.APIHost + path + "?timezone_id=" + urlQueryEscape(timezoneID)
+func minimaxWithTimezone(cfg *minimaxConfig, path, timezoneID string) string {
+	return cfg.APIHost + path + "?timezone_id=" + urlQueryEscape(timezoneID)
 }
 
 // MinimaxTimezoneID: the signin settles by the CLIENT-REPORTED timezone
@@ -240,12 +240,17 @@ func todayPointsIf(claimed bool, today *minimaxSigninDay) float64 {
 
 // MinimaxSigninStatus queries the panel (timezone_id REQUIRED).
 func (m *Manager) MinimaxSigninStatus(ctx context.Context, accountID, timezoneID string) (*MinimaxCheckinStatus, error) {
+	acc, ok := m.FindAccount(accountID)
+	if !ok || (acc.Provider != "minimax" && acc.Provider != "minimaxintl") {
+		return nil, errAccountNotFound(accountID)
+	}
 	cred, err := m.minimaxCredentialFor(accountID)
 	if err != nil {
 		return nil, err
 	}
-	payload, code, msg, ok := m.minimaxEnvelope(ctx, cred, http.MethodGet,
-		minimaxWithTimezone(minimaxSigninStatusPath, MinimaxTimezoneID(timezoneID)), "")
+	cfg := MinimaxConfigFor(acc.Provider)
+	payload, code, msg, ok := m.minimaxEnvelope(ctx, acc.Provider, cred, http.MethodGet,
+		minimaxWithTimezone(cfg, minimaxSigninStatusPath, MinimaxTimezoneID(timezoneID)), "")
 	if !ok {
 		return nil, fmt.Errorf("minimax: %s（%d）", msg, code)
 	}
@@ -259,12 +264,17 @@ func (m *Manager) MinimaxSigninStatus(ctx context.Context, accountID, timezoneID
 // ClaimMinimaxDaily claims the daily check-in. ⚠️ Idempotence = claim_result
 // (1=claimed, 2=already), NOT the HTTP status (repeat claims are also 200).
 func (m *Manager) ClaimMinimaxDaily(ctx context.Context, accountID, timezoneID string) (*ClaimOutcome, error) {
+	acc, ok := m.FindAccount(accountID)
+	if !ok || (acc.Provider != "minimax" && acc.Provider != "minimaxintl") {
+		return &ClaimOutcome{Kind: "failed", Message: errAccountNotFound(accountID).Error()}, nil
+	}
 	cred, err := m.minimaxCredentialFor(accountID)
 	if err != nil {
 		return &ClaimOutcome{Kind: "failed", Message: err.Error()}, nil
 	}
-	payload, code, msg, ok := m.minimaxEnvelope(ctx, cred, http.MethodPost,
-		minimaxWithTimezone(minimaxSigninClaimPath, MinimaxTimezoneID(timezoneID)), "{}")
+	cfg := MinimaxConfigFor(acc.Provider)
+	payload, code, msg, ok := m.minimaxEnvelope(ctx, acc.Provider, cred, http.MethodPost,
+		minimaxWithTimezone(cfg, minimaxSigninClaimPath, MinimaxTimezoneID(timezoneID)), "{}")
 	if !ok {
 		return &ClaimOutcome{Kind: "failed", Message: fmt.Sprintf("%s（%d）", msg, code)}, nil
 	}
@@ -298,12 +308,17 @@ func fieldMap(data map[string]any, key string) map[string]any {
 // amounts — looseAmount tolerates both forms). details missing ⇒ 0 (truly
 // zero), NOT a failure.
 func (m *Manager) MinimaxBalance(ctx context.Context, accountID string) (*CreditBalance, error) {
+	acc, ok := m.FindAccount(accountID)
+	if !ok || (acc.Provider != "minimax" && acc.Provider != "minimaxintl") {
+		return nil, errAccountNotFound(accountID)
+	}
 	cred, err := m.minimaxCredentialFor(accountID)
 	if err != nil {
 		return nil, err
 	}
-	payload, code, msg, ok := m.minimaxEnvelope(ctx, cred, http.MethodGet,
-		minimaxProduct.APIHost+minimaxCreditDetails, "")
+	cfg := MinimaxConfigFor(acc.Provider)
+	payload, code, msg, ok := m.minimaxEnvelope(ctx, acc.Provider, cred, http.MethodGet,
+		cfg.APIHost+minimaxCreditDetails, "")
 	if !ok {
 		return nil, fmt.Errorf("minimax: %s（%d）", msg, code)
 	}
@@ -369,10 +384,10 @@ func (m *Manager) minimaxAugment(r *http.Request, body []byte, providerID, keyID
 // minimaxCredentialFor resolves + parses a minimax credential.
 func (m *Manager) minimaxCredentialFor(accountID string) (*MinimaxCredential, error) {
 	acc, ok := m.FindAccount(accountID)
-	if !ok || acc.Provider != "minimax" {
+	if !ok || (acc.Provider != "minimax" && acc.Provider != "minimaxintl") {
 		return nil, errAccountNotFound(accountID)
 	}
-	raw, ok := m.Credential("minimax", acc.CredentialRef)
+	raw, ok := m.Credential(acc.Provider, acc.CredentialRef)
 	if !ok {
 		return nil, errCredentialMissing(accountID)
 	}
@@ -432,7 +447,7 @@ func (m *Manager) RefreshMinimaxAccount(ctx context.Context, accountID string) e
 	if !MinimaxRefreshable(&cred) {
 		return ErrRefreshTokenExpired
 	}
-	refreshed, err := m.RefreshMinimaxCredential(ctx, &cred)
+	refreshed, err := m.RefreshMinimaxCredentialFor(ctx, acc.Provider, &cred)
 	if err != nil {
 		return err
 	}

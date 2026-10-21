@@ -29,11 +29,31 @@ const (
 	minimaxOAuthTimeout     = 20 * time.Second
 )
 
-// minimaxProduct is the product config.
+// minimaxProduct is the China product config.
 var minimaxProduct = &minimaxConfig{
 	AccountHost: "https://account.minimax.cn", APIHost: "https://agent.minimax.cn",
 	Region: "cn", BuildEnv: "prod", ClientID: "mcode-public",
 	Audience: "agent-backend", Scope: "agent.default",
+}
+
+// minimaxIntlProduct is the international product config (ref minimax-product.ts MINIMAX_INTL).
+var minimaxIntlProduct = &minimaxConfig{
+	AccountHost: "https://account.minimax.io", APIHost: "https://agent.minimax.io",
+	Region: "en", BuildEnv: "prod", ClientID: "mcode-public",
+	Audience: "agent-backend", Scope: "agent.default",
+}
+
+// MinimaxConfigFor returns the product config for minimax or minimaxintl.
+func MinimaxConfigFor(provider string) *minimaxConfig {
+	if provider == "minimaxintl" {
+		return minimaxIntlProduct
+	}
+	return minimaxProduct
+}
+
+// MinimaxInferURLFor returns the full inference endpoint for the provider.
+func MinimaxInferURLFor(provider string) string {
+	return MinimaxConfigFor(provider).APIHost + minimaxInferPath
 }
 
 type minimaxConfig struct {
@@ -163,19 +183,25 @@ func parseMinimaxDeviceAuthorization(payload map[string]any) *minimaxDeviceAutho
 	}
 }
 
-// StartMinimaxDeviceAuthorization requests the device grant (PKCE S256 body).
+// StartMinimaxDeviceAuthorization requests the device grant (PKCE S256 body) for China station.
 func (m *Manager) StartMinimaxDeviceAuthorization(ctx context.Context) (*minimaxDeviceAuthorization, error) {
+	return m.StartMinimaxDeviceAuthorizationFor(ctx, "minimax")
+}
+
+// StartMinimaxDeviceAuthorizationFor requests the device grant for minimax or minimaxintl.
+func (m *Manager) StartMinimaxDeviceAuthorizationFor(ctx context.Context, provider string) (*minimaxDeviceAuthorization, error) {
+	cfg := MinimaxConfigFor(provider)
 	verifier, challenge, err := createMinimaxPKCE()
 	if err != nil {
 		return nil, err
 	}
 	form := map[string]string{
-		"client_id": minimaxProduct.ClientID, "scope": minimaxProduct.Scope,
-		"audience": minimaxProduct.Audience, "code_challenge": challenge,
+		"client_id": cfg.ClientID, "scope": cfg.Scope,
+		"audience": cfg.Audience, "code_challenge": challenge,
 		"code_challenge_method": "S256",
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		minimaxProduct.AccountHost+minimaxDeviceCodePath, strReader(urlFormEncode(form)))
+		cfg.AccountHost+minimaxDeviceCodePath, strReader(urlFormEncode(form)))
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +210,7 @@ func (m *Manager) StartMinimaxDeviceAuthorization(ctx context.Context) (*minimax
 	tctx, cancel := context.WithTimeout(ctx, minimaxOAuthTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient("minimax").Do(req)
+	resp, err := m.httpClient(provider).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("MiniMax 设备码申请失败（网络）：%w", err)
 	}
@@ -273,9 +299,10 @@ func hexEncodeLower(b []byte) string {
 }
 
 // minimaxTokenPOST posts a form body to the token endpoint.
-func (m *Manager) minimaxTokenPOST(ctx context.Context, form map[string]string) (map[string]any, int, error) {
+func (m *Manager) minimaxTokenPOST(ctx context.Context, provider string, form map[string]string) (map[string]any, int, error) {
+	cfg := MinimaxConfigFor(provider)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		minimaxProduct.AccountHost+minimaxTokenPath, strReader(urlFormEncode(form)))
+		cfg.AccountHost+minimaxTokenPath, strReader(urlFormEncode(form)))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -284,7 +311,7 @@ func (m *Manager) minimaxTokenPOST(ctx context.Context, form map[string]string) 
 	tctx, cancel := context.WithTimeout(ctx, minimaxOAuthTimeout)
 	defer cancel()
 	req = req.WithContext(tctx)
-	resp, err := m.httpClient("minimax").Do(req)
+	resp, err := m.httpClient(provider).Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -295,11 +322,14 @@ func (m *Manager) minimaxTokenPOST(ctx context.Context, form map[string]string) 
 	return payload, resp.StatusCode, nil
 }
 
-// PollMinimaxDeviceToken polls until tokens arrive. ⚠️ BOTH "waiting" forms
-// are recognized (MiniMax's account service uses HTTP 200 + status=pending —
-// unlike the OAuth-standard 400 + error=authorization_pending; treating a 200
-// pending as success would store an empty credential).
+// PollMinimaxDeviceToken polls until tokens arrive for minimax China station.
 func (m *Manager) PollMinimaxDeviceToken(ctx context.Context, grant *minimaxDeviceAuthorization) (*MinimaxCredential, error) {
+	return m.PollMinimaxDeviceTokenFor(ctx, "minimax", grant)
+}
+
+// PollMinimaxDeviceTokenFor polls until tokens arrive for minimax or minimaxintl.
+func (m *Manager) PollMinimaxDeviceTokenFor(ctx context.Context, provider string, grant *minimaxDeviceAuthorization) (*MinimaxCredential, error) {
+	cfg := MinimaxConfigFor(provider)
 	deadline := nowMillis() + grant.ExpiresInSec*1000
 	intervalMs := grant.IntervalSec * 1000
 	for nowMillis() < deadline {
@@ -308,9 +338,9 @@ func (m *Manager) PollMinimaxDeviceToken(ctx context.Context, grant *minimaxDevi
 			return nil, ctx.Err()
 		case <-timeAfter(time.Duration(intervalMs) * time.Millisecond):
 		}
-		payload, status, err := m.minimaxTokenPOST(ctx, map[string]string{
+		payload, status, err := m.minimaxTokenPOST(ctx, provider, map[string]string{
 			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
-			"device_code": grant.DeviceCode, "client_id": minimaxProduct.ClientID,
+			"device_code": grant.DeviceCode, "client_id": cfg.ClientID,
 			"code_verifier": grant.CodeVerifier,
 		})
 		if err != nil {
@@ -349,10 +379,16 @@ func (m *Manager) PollMinimaxDeviceToken(ctx context.Context, grant *minimaxDevi
 
 // RefreshMinimaxCredential renews via the same token endpoint.
 func (m *Manager) RefreshMinimaxCredential(ctx context.Context, previous *MinimaxCredential) (*MinimaxCredential, error) {
-	payload, status, err := m.minimaxTokenPOST(ctx, map[string]string{
+	return m.RefreshMinimaxCredentialFor(ctx, "minimax", previous)
+}
+
+// RefreshMinimaxCredentialFor renews via the same token endpoint for minimax or minimaxintl.
+func (m *Manager) RefreshMinimaxCredentialFor(ctx context.Context, provider string, previous *MinimaxCredential) (*MinimaxCredential, error) {
+	cfg := MinimaxConfigFor(provider)
+	payload, status, err := m.minimaxTokenPOST(ctx, provider, map[string]string{
 		"grant_type": "refresh_token", "refresh_token": previous.RefreshToken,
-		"client_id": minimaxProduct.ClientID, "scope": minimaxProduct.Scope,
-		"audience": minimaxProduct.Audience,
+		"client_id": cfg.ClientID, "scope": cfg.Scope,
+		"audience": cfg.Audience,
 	})
 	if err != nil {
 		return nil, err
@@ -363,13 +399,15 @@ func (m *Manager) RefreshMinimaxCredential(ctx context.Context, previous *Minima
 	return parseMinimaxTokenGrant(payload, previous.RefreshToken)
 }
 
-// init registers the minimax token extractor.
+// init registers the minimax token extractors.
 func init() {
-	RegisterTokenExtractor("minimax", func(cred jsonRaw) (string, error) {
+	extractor := func(cred jsonRaw) (string, error) {
 		var c MinimaxCredential
 		if err := jsonUnmarshal(cred, &c); err != nil {
 			return "", fmt.Errorf("jethub: parse minimax credential: %w", err)
 		}
 		return c.AccessToken, nil
-	})
+	}
+	RegisterTokenExtractor("minimax", extractor)
+	RegisterTokenExtractor("minimaxintl", extractor)
 }

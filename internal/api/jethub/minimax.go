@@ -12,35 +12,44 @@ import (
 	corejethub "github.com/tinylab/tinylab/internal/jethub"
 )
 
-// RegisterMinimax mounts the minimax routes (P3.3.5): device-code login +
-// signin + credit balance. Inference is Anthropic-native passthrough via the
-// bridged provider (no conversion).
+// RegisterMinimax mounts the minimax routes (P3.3.5 / R7-1): device-code login +
+// signin + credit balance for minimax and minimaxintl. Inference is Anthropic-native
+// passthrough via the bridged provider (no conversion).
 func (h *Handler) RegisterMinimax(r chi.Router) {
-	r.Post("/minimax/login", h.minimaxLogin)
-	r.Get("/minimax/status", h.minimaxStatus)
-	r.Post("/minimax/refresh", h.minimaxRefresh)
-	r.Post("/minimax/claim", h.minimaxClaim)
-	r.Get("/minimax/balance", h.minimaxBalance)
+	h.registerMinimaxRoutes(r, "minimax")
+	h.registerMinimaxRoutes(r, "minimaxintl")
 }
 
-// minimaxLogin POST — device grant + background poll; loginId tracks it.
-func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) registerMinimaxRoutes(r chi.Router, provider string) {
+	r.Post("/"+provider+"/login", func(w http.ResponseWriter, req *http.Request) {
+		h.minimaxLoginFor(w, req, provider)
+	})
+	r.Get("/"+provider+"/status", func(w http.ResponseWriter, req *http.Request) {
+		h.minimaxStatusFor(w, req, provider)
+	})
+	r.Post("/"+provider+"/refresh", h.minimaxRefresh)
+	r.Post("/"+provider+"/claim", h.minimaxClaim)
+	r.Get("/"+provider+"/balance", h.minimaxBalance)
+}
+
+// minimaxLoginFor POST — device grant + background poll; loginId tracks it.
+func (h *Handler) minimaxLoginFor(w http.ResponseWriter, r *http.Request, provider string) {
 	sel := decodeLoginOpen(r)
-	id, credentialRef := corejethub.NewAccountID("minimax")
+	id, credentialRef := corejethub.NewAccountID(provider)
 	opt, err := h.prepareLoginOpen(sel, id)
 	if err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.d.Manager.AddAccount(corejethub.Account{
-		ID: id, Provider: "minimax", Nickname: id,
+		ID: id, Provider: provider, Nickname: id,
 		Enabled: true, CredentialRef: credentialRef,
 		CreatedAt: time.Now().UnixMilli(),
 	}); err != nil {
 		apibase.WriteAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	grant, err := h.d.Manager.StartMinimaxDeviceAuthorization(r.Context())
+	grant, err := h.d.Manager.StartMinimaxDeviceAuthorizationFor(r.Context(), provider)
 	if err != nil {
 		_ = h.d.Manager.DeleteAccount(id)
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
@@ -62,7 +71,7 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	// written — binding the poll to it aborted every login before the user
 	// even opened the verification URL).
 	go func() {
-		cred, err := h.d.Manager.PollMinimaxDeviceToken(context.Background(), grant)
+		cred, err := h.d.Manager.PollMinimaxDeviceTokenFor(context.Background(), provider, grant)
 		if err != nil {
 			corejethub.DeliverLoginOutcome(resultCh, corejethub.LoginOutcome{Err: err})
 			return
@@ -90,13 +99,13 @@ func (h *Handler) minimaxLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// minimaxStatus GET — flow poll via loginId, or account snapshot.
-func (h *Handler) minimaxStatus(w http.ResponseWriter, r *http.Request) {
+// minimaxStatusFor GET — flow poll via loginId, or account snapshot.
+func (h *Handler) minimaxStatusFor(w http.ResponseWriter, r *http.Request, provider string) {
 	if loginID := r.URL.Query().Get("loginId"); loginID != "" {
 		h.pollLogin(loginID, w, r)
 		return
 	}
-	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts("minimax")})
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"accounts": h.d.Manager.Accounts(provider)})
 }
 
 // minimaxRefresh POST — silent renewal.

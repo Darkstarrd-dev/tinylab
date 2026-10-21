@@ -1,3 +1,12 @@
+## 2026-10-21 — R7 Free Hub 上游同步至 `b0940ca`（MiniMax 国际版 + ModelScope + AutoClaw）
+
+- §10.28 文件表：`internal/api/jethub/` 新增 `modelscope.go`（魔搭 API Key 登录/魔粒余额/36 款模型）与 `autoclaw.go`（智谱清言桌面端短信验证码登录/余额/签到/状态双语义）。
+- §13n 文件表：`internal/jethub/` 新增 `modelscope.go`（扁平 tools 转 function 包装规避 400 校验错误）与 `autoclaw.go`（动态 MD5 签名/X-Version 2.1.1 校验/406 前缀绕过与 max_tokens 门禁）；provider 计数 15 → 18。
+- §22 常驻同步基线：更新 `ref/deepseek-harness-codearts` pin 为 `b0940ca`（前序 `e73cd2f`）。
+- 错误规则：`internal/rotation/error_rules.go` 新增 11128（RotateOnly）、11140（Cooldown 1800s）、14018（DailyQuota）。
+- 思考模型：撤销 WorkBuddy reasoning_effort 剥离以优先保障思考 token。
+- 架构与地图核对行替换为 R7 摘要。过程叙述归档至 docs/changelog/jethub-architecture.md 与本文件。
+
 ## 2026-10-15 — R6 PROJECT_MAP 结构同步（OfficeAce + Accio）
 
 - §10.28 文件表：`internal/api/jethub/` 新增 `officeace.go` 行（第 14 家）与 Accio provider 文件行（`accio*.go`：登录/模型目录/推理/SSE 转换/续期/积分端点）。

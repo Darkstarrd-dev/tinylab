@@ -1,13 +1,13 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-15（**R6：新增两家 provider —— OfficeAce（华为 ModelArts MaaS 云直连，ref `src/officeace-{auth,product,adapter}.ts` @ e73cd2f）与 Accio（阿里 Accio Work，ref `src/accio-*.ts`）**——OfficeAce：cloud-direct OAuth/STS+DPoP、Basic 推理、`max_tokens<4096` 丢弃、剥 `reasoning_effort`、per-account `maasBaseUrl`、V11 余额 + 显式领取；Accio：OAuth2 PKCE、body-token Gemini 推理、Gemini SSE→OpenAI 转换、远端目录 + 静态兜底、credit 三只读端点。新增协议要点见 §6.12 / §6.13；两者真实机器验证仍待账号，见 §9。）
+> **最后核对：** 2026-10-21（**R7：Free Hub 上游同步至 `b0940ca`，新增三家 provider —— MiniMax 国际版（minimaxintl，Anthropic Messages 协议族双站点）、ModelScope（魔搭，modelscope，API Key 凭据/魔粒余额/扁平工具转 function 规避 400/36 兜底模型）、AutoClaw（智谱清言桌面端，autoclaw，短信验证码登录/动态 MD5 签名/X-Version 2.1.1 校验/406 前缀绕过与 max_tokens 门禁/4 确证模型）；撤销 WorkBuddy reasoning_effort 剥离（DeepSeek 思考优先于 preamble）；Rotation 错误分类 11128/11140/14018；OfficeAce 窗口实测订正；Qoder 补充 dfmodel/mmodel；讯飞 AstronStudio(astudio) 按不搬清单归档。当前覆盖 18 家 provider。**）
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
 > **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 余额 / 目录 / 推理 200（无 3012）见 §6.7。⚠️ **R4-1（2026-10-05）删除了「导入官方客户端凭据」旁路**（安全/正确性/一致性三条理由见 §6.7）。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
 >
 > **R3 上游同步落地（2026-10-04，dsh-codearts-auth @ `ff5e37d`）：** ① codearts `InferHub.4291.200` 额度用尽判据（**不可重试**，`BillingLockError` 锁 key+model 至 UTC+8 当日 24:00）+ `429` 排队判据锚定为独立数字（裸子串会把 `4291` 误判成排队 → 30 分钟静默重试零输出，§6.4，ref 784210d/ae0c9b0）；② cline 删除已下线的 `cline-free/gemini-3.8-flash`（免费清单 5→4，ref 51d6093）；③ **新增 Gemini Code Assist provider（第 14 家，§6.8）**——OAuth 浏览器回调登录 + 双层信封协议桥 + sandbox 配额窗口（ref e061b21 族）。zcode 双通道+zai 渠道经用户决定**不搬**（同步文档 §5）；`zcode-identity.ts` 未变（已核实）。分诊明细见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R3。
 >
-> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（上游 14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`，**本端覆盖 13 家**（gemini 已于 R5 移除，见 §6.8）。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
+> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（上游 14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`，**本端覆盖 18 家**（gemini 已于 R5 移除，见 §6.8）。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
 >
 > **变更维护清单（改动时必须同步本文）：**
 > - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
@@ -45,7 +45,7 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、14 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
+| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、18 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
 | API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + **`/balances` 渠道级合计（§6.9）** + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
 | 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（20 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
@@ -328,7 +328,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
 - 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；内层帧按 **JSON 结构三态分类**（`qoderClassifyInner`，R5 / ref 1846449）——`chunk`（有 `choices`（含空数组）或 `usage`）/ `error`（显式 `code`/`message`/`error`/`statusCodeValue`/`type`，或压根不是 JSON）/ `heartbeat`（`null`、空串、`{}`、裸标量、数组）。⚠️ **心跳帧整帧丢弃**，不得透传（`data: null` 会让消费侧读 `.error` 抛未包装的 TypeError、绕过全部错误归类）。错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。**HTTP 层 peek 首帧分类与 SSE 层必须共用同一处判据**（曾各写一份字符串嗅探 `"choices"`，两个方向都会错：心跳帧被误判成业务错误 / 错误文案含 `"choices"` 时被静默透传）。
 
-## 6. 15 provider 矩阵（端点/协议族/签名/积分）
+## 6. 18 provider 矩阵（端点/协议族/签名/积分）
 
 | provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
@@ -340,11 +340,14 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 | raccoon | OpenAI 兼容 `{base}/api/web/llm/v2/chat/completions` + extra_body.thinking | 微信 QR + 短信 | AES-128-CFB 手机加密 + Bearer | 200003 终态 | 登录奖励 + 新手礼包 |
 | loomy | OpenAI 兼容 `{apiBase}/chat/completions` | **微信扫码**（本地弹窗页 + 长轮询；首次登录绑手机号，§3.5）；短信为**无 UI 备用** | CAccount HMAC-SHA1 双头 | —（无） | 双积分池 + 新手任务 |
 | minimax | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（§6.1：进站 OpenAI 时双向转换；进站 `/v1/messages` 时原生透传） | 设备码（scope 硬校验 agent.default） | `mmoat_` 非 JWT + Authorization Bearer（无 anthropic-version、无 x-api-key） | refresh 回退上一个 | 签到（timezone_id 必填）+ Σ remaining_amount |
+| minimaxintl | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（国际版 `api.minimaxi.chat`，§6.14） | 设备码（海外 scope agent.default） | 与 minimax 相同协议族，出站打海外域名 | refresh 回退上一个 | 签到（timezone_id 必填）+ 余额 |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 | opencode | OpenAI 兼容 `https://opencode.ai/zen/v1/chat/completions`（§6.5） | **API Key 粘贴**（唯一非浏览器登录，§3.8）；匿名通道 = 字面量 `public` | Bearer `<api_key>` + `x-opencode-project/session/request/client` 指纹头 + UA；**免费通道形状门禁**（stream + `bash`/`read` 工具，augmenter 注入） | —（粘贴的 key 无续期；匿名槽 refreshable=false） | —（无积分面；额度错误按响应体类型名分类 → per-model 锁/换号，§6.5） |
 | zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）—— ⚠️ **R4-1 起这是唯一来源**（原先的「导入官方客户端凭据」已删除，理由见 §6.7） | 官方客户端头族（`X-Device-Mid` 硬需求 + `X-ZCode-App-Version`/`X-Release-Channel`/`X-Client-*`/`anthropic-version`）+ **请求体官方身份块 + 首轮日期块**（3012 准入） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取（`billing/claim`，**必带 captcha**，§6.7） |
 | officeace | **标准 OpenAI 兼容** `POST {maasBaseUrl}/v2/chat/completions`（per-account 专属网关，§6.12）——无转换器、无 DSML，SSE 原样透传 | **cloud-direct OAuth**：匿名 state 注册 → authui 授权页 → 匿名 code 轮询（§6.12） | `Basic base64(model_app_key:secret)` + 管理面 **V11-HMAC-SHA256** / 步⑤ **SDK-HMAC-SHA256**（§6.12） | refresh_token（**一次性**；per-ref 串行 + lead-time + 判终态前重读，§6.12） | 余额 = **token 桶**（V11 `GET /v1/subscription`，恒打默认域）；每日领取 = **显式** `POST /officeace/claim`（ref 是余额查询前自动签到——有意降级，§6.12） |
 | accio | **Gemini 风格 SSE** `POST phoenix-gw.alibaba.com/api/adk/llm/generateContent?sg_k=md5(requestId)`（§6.13）——顶层帧 + 工具 shard 合并，无 `[DONE]` | **OAuth2 PKCE 公开客户端**（`accio-work`；本地 loopback 回调，region=cn/global，§6.13） | **无 Authorization**：`token` 放 body + `utdid`/`version`/`appKey=OneChat`/`sgcookie` + `message_id`/`request_id`（§6.13） | refresh_token **轮换**；per-ref 串行 + lead-time + 判终态前重读（§6.13） | credit 三只读端点（userinfo POST body；subscription/quota GET query）；无签到端 |
+| modelscope | OpenAI 兼容 `POST https://api-inference.modelscope.cn/v1/chat/completions`（§6.15） | **API Key 粘贴**（`AddModelscopeAccount`） | Bearer `<token>`；扁平工具定义强制包装成 `{type: "function", function: tm}`（规避 400 校验错误） | —（API Key 无自动续期） | 余额 = 魔粒积分（`GET /api/v1/users/moli/account`） |
+| autoclaw | OpenAI 兼容 `POST https://chatglm.cn/api/v1/chat/completions`（§6.16） | **短信验证码登录**（两步 SMS，15 天免密 Cookie，`app_id: 1000000000`） | `X-App-Id`/`X-Timestamp`/`X-Sign` 动态 MD5 签名 + `X-Version: 2.1.1`（硬性校验）；首条 prompt 强制包含固定前缀且 `max_tokens >= 10000`（规避 406 拦截） | —（Cookie 长效，支持手动 refresh） | 余额 = `GET /api/v1/user/account`；每日签到（`POST /api/v1/user/sign_in`） |
 
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
@@ -869,6 +872,32 @@ per-credentialRef 串行 + 锁内重读 + 判终态前重读（凭据被他处�
 积分信封与桶语义 / 三端点传参 / 探针 stream / SSE 工具 shard、usage、402 锁定与空响应守卫。
 **已知限制**：全链路未经真实机器验证；远端目录对未登录/失败进程内缓存，无磁盘缓存；
 `referral` 桶 `remaining` 读不到时按「数据不足」跳过而非显示 0。
+
+### 6.14 MiniMax 国际版（minimaxintl）双站点支持
+- **背景与分流**：MiniMax 官方推出海外/国际版独立站点（`https://api.minimaxi.chat` 与用户控制台 `https://agent.minimaxi.com`），协议与国内版（`api.minimax.chat`）同属 Anthropic Messages 协议族。
+- **配置分发**：`minimax.go` 中通过 `MinimaxConfigFor(provider)` 分发：国内版 `minimax` 与国际版 `minimaxintl` 具有各自独立的登录 client_id、OAuth 端点、推理端点与积分查询接口。
+- **协议转换复用**：`qoder_adapter.go` 与 `minimax_credits.go` 共享 `minimaxInterceptResponse`、`minimaxConvertRequest` 与流式 SSE 解析器，支持双站统一的工具调用配对与思考档位映射。
+
+### 6.15 ModelScope（魔搭，modelscope）协议要点
+- **凭据与登录**：采用 API Key 静态凭据录入（`AddModelscopeAccount`），无 OAuth 刷新流程。
+- **推理端点与请求增强**：
+  - 端点：`POST https://api-inference.modelscope.cn/v1/chat/completions`。
+  - **工具扁平包装**（`modelscopeAugment`）：部分客户端/SDK 下发的 `tools` 为顶层扁平对象（`{name, description, parameters}`），ModelScope 上游网关对此类扁平结构返回 400 参数格式校验错误。Augmenter 自动检测并规范化封装为 OpenAI 规范的嵌套对象：`{"type": "function", "function": tm}`。
+- **模型目录**：内置 36 款主流开源大模型兜底列表（DeepSeek-V3 / R1 / Qwen2.5 全系列 / GLM-4 / Llama-3.3 等），展示倍率与 context 窗口。
+- **魔粒余额查询**：`GET /api/v1/users/moli/account`，解析 `Data.Balance` / `Data.Total`，以 `credit` 格式呈现魔粒数。
+
+### 6.16 AutoClaw（智谱清言桌面端，autoclaw）协议要点
+- **凭据与短信登录**：
+  - 智谱清言 AutoClaw 桌面端专用短信验证码登录体系（`app_id: 1000000000`）。
+  - 两步 SMS 流程：`SendAutoclawSmsCode` 发送短信验证码；`SubmitAutoclawSmsCode` 校验验证码，获取 15 天免密长效 Cookie。
+- **出站校验与安全签名**（`autoclawAugment`）：
+  - **动态 MD5 签名**：每次出站请求计算 `sign = MD5(app_id + "&" + timestamp + "&" + app_key)`，注入 `X-App-Id`、`X-Timestamp`、`X-Sign` 请求头。
+  - **客户端版本锁死**：必须包含 `X-Version: 2.1.1` 请求头。缺少该请求头或版本不匹配，上游网关直接返回 HTTP 500 且响应体为空。
+  - **406 拦截绕过**：AutoClaw 服务端对对话首句内容有白名单门禁，非清言桌面端模板会触发 HTTP 406。Augmenter 确保对话的首条 system 消息包含固定前缀：`You are AutoClaw. Answer the user directly and concisely`。
+  - **Token 门禁**：上游要求 `max_tokens` 必须充足，请求中如未指定或小于 10000，Augmenter 自动兜底补足至 10000。
+- **确证模型与积分**：
+  - 静态表收录 4 款官方确证模型：`zai_glm-5.3-flash`（免费 x0）、`zaicoding_glm-5.3`（x1）、`zai_auto`（x1）、`zai_auto-fast`（x1）。
+  - 余额读取 `GET https://chatglm.cn/api/v1/user/account`，每日签到领取 `POST https://chatglm.cn/api/v1/user/sign_in`。
 
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。

@@ -82,6 +82,7 @@ Qwen3.6-27B-DSpark.gguf
 # Runtime games and game data
 /games/
 /gamedata/
+/Story/
 
 # Editor V2 build tool dependencies
 tools/editor-v2/node_modules/

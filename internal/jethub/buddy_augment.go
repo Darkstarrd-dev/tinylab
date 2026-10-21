@@ -25,10 +25,10 @@ func (m *Manager) buddyAugment(p *BuddyProduct) RequestAugmenterFunc {
 		if cred.AccessToken == "" {
 			return nil, errCredentialMissing(keyID)
 		}
-		body, err := buddyStripReasoningEffort(acc.Provider, body)
-		if err != nil {
-			return nil, err
-		}
+		// ⚠️ R7（上游 commit e261cd6 / 1361706）：撤回对 workbuddy 剥离 reasoning_effort 的修改。
+		// 实测虽然下发 reasoning_effort 会在部分带工具的场景吞正文前言，但不下发它会导致
+		// workbuddy 的 deepseek-v4.1-flash 完全无法输出思考（usage.reasoning_tokens 恒为 0）。
+		// 用户明确取舍：「思考优先于前言，宁可使用有思考输出的」，故保持字节级透传。
 		// Full header reset: the signed/attribution set IS the request identity.
 		r.Header.Set("Authorization", "Bearer "+cred.AccessToken)
 		r.Header.Set("Content-Type", "application/json")

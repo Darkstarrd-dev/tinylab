@@ -103,7 +103,7 @@ func TestQoderModelRatesMatchPlugin(t *testing.T) {
 				"qfmodel":       "免费",
 				"auto":          "x0.5",
 				"smodel":        "x8",
-				"dfmodel":       "x0.1",
+				"dfmodel":       "免费",
 			},
 			outRate: map[string]string{
 				"qmodel_38max":  "x0.5",
@@ -279,7 +279,7 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		// `x原价` 与 `x原价→x折后` 之间切换 —— 精确值由
 		// TestModelDisplayPartsPromotionWindow 用固定时钟锁；这里只核对不随
 		// 窗口变化的条目（`hasRate` 那条不变量另行保证促销项也有倍率）。
-		"qoder":   {"qfmodel": "Qwen3.8-Flash · 免费", "mmodel": "MiniMax-M3 · x0.2", "ultimate": "Ultimate · x2"},
+		"qoder":   {"qfmodel": "Qwen3.8-Flash · 免费", "mmodel": "MiniMax-M3.1-Flash · x0.1", "ultimate": "Ultimate · x2"},
 		"qodercn": {"mmodel": "MiniMax-M2.7 · x0.2", "q37fmodel": "Qwen3.7-Flash · x0.1", "gm51model": "GLM-5.2 · x0.6"},
 		// opencode（R1-7）：免费模型带「· 免费」标记（本地表判定；远端不下发
 		// 免费标记，表外一律 false），付费模型无倍率信息。

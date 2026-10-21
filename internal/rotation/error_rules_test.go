@@ -101,3 +101,28 @@ func TestClassifyError_AuthRotatesWithoutCooldown(t *testing.T) {
 		t.Errorf("403 -> action=%v cooldown=%d, want ActionRotateOnly/0", r403.Action, r403.CooldownSec)
 	}
 }
+
+func TestClassifyError_ConversationIDMissingRotatesWithoutCooldown(t *testing.T) {
+	// 400 + "conversation id missing" (workbuddy 11128 渠道校验) -> ActionRotateOnly (ref eeda381)
+	r := ClassifyError(400, `{"code":11128,"msg":"conversation id missing"}`)
+	if r.Action != ActionRotateOnly || r.CooldownSec != 0 {
+		t.Errorf("400 conversation id missing -> action=%v cooldown=%d, want ActionRotateOnly/0", r.Action, r.CooldownSec)
+	}
+}
+
+func TestClassifyError_11140PolicyBlockedCooldown(t *testing.T) {
+	// 400 + "11140 request illegal" (buddy 安全策略拦截) -> ActionCooldown 1800s (ref 89f53be)
+	r := ClassifyError(400, `{"code":11140,"msg":"request illegal"}`)
+	if r.Action != ActionCooldown || r.CooldownSec != 1800 {
+		t.Errorf("400 11140 request illegal -> action=%v cooldown=%d, want ActionCooldown/1800", r.Action, r.CooldownSec)
+	}
+}
+
+func TestClassifyError_LoomyCreditsExhaustedDailyQuota(t *testing.T) {
+	// 402 + "14018 Credits exhausted" (loomy 额度用尽) -> ActionDailyQuota (ref 2945203)
+	r := ClassifyError(402, `{"error":{"message":"14018 Credits exhausted"}}`)
+	if r.Action != ActionDailyQuota {
+		t.Errorf("402 14018 credits exhausted -> action=%v, want ActionDailyQuota", r.Action)
+	}
+}
+

@@ -229,8 +229,8 @@ func qoderFallbackModels() ModelTable {
 		md("gmodel", "GLM-5.3", "1000000", "x0.8; efforts high/low/max; default max"),
 		md("gfmodel", "GLM-5.3-Flash", "1000000", "x0.1; efforts high/max; default max"),
 		md("dmodel", "DeepSeek-V4-Pro", "1000000", "x0.5; efforts high/max; default max; can disable"),
-		md("dfmodel", "DeepSeek-Flash", "1000000", "x0.1; efforts high/max/low; default max; can disable"),
-		md("mmodel", "MiniMax-M3", "1000000", "x0.2"),
+		md("dfmodel", "DeepSeek-Flash", "1000000", "FREE (x0); efforts high/max/low; default max; can disable"),
+		md("mmodel", "MiniMax-M3.1-Flash", "1000000", "x0.1; alias MiniMax-M3"),
 	}
 }
 
@@ -254,7 +254,7 @@ func qoderCNFallbackModels() ModelTable {
 		md("qmodel", "Qwen3.7-Plus", "1000000", "x0.1; promo 22:00-08:00 x0.04; NO efforts — disable-only"),
 		md("q37fmodel", "Qwen3.7-Flash", "1000000", "x0.1; CN-only; NO thinking_config"),
 		md("dmodel", "DeepSeek-V4-Pro", "1000000", "measured 852,951 (tier says 1M — keep 1M); x0.5; efforts high/max; default max; can disable"),
-		md("dfmodel", "DeepSeek-Flash", "1000000", "measured 999,991; x0.1; efforts high/max/low; default max; can disable"),
+		md("dfmodel", "DeepSeek-Flash", "1000000", "FREE (x0); measured 999,991; efforts high/max/low; default max; can disable"),
 		md("gmodel", "GLM-5.3", "1000000", "x0.8; efforts high/low/max; default max; NO disable"),
 		md("gfmodel", "GLM-5.3-Flash", "1000000", "x0.1; efforts high/max; default max; NO disable"),
 		md("gm51model", "GLM-5.2", "1000000", "x0.6; CN-only; efforts high/max; default max; can disable"),

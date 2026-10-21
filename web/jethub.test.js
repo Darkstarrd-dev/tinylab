@@ -80,7 +80,7 @@ check('login handlers never bind a background flow to r.Context() (+new-account 
     ['internal/api/jethub/trae.go', 'StartTraeLogin(context.Background()'],
     ['internal/api/jethub/lobsterai.go', 'StartLobsteraiLogin(context.Background()'],
     ['internal/api/jethub/buddy.go', 'StartBuddyLogin(context.Background()'],
-    ['internal/api/jethub/minimax.go', 'PollMinimaxDeviceToken(context.Background()'],
+    ['internal/api/jethub/minimax.go', 'PollMinimaxDeviceTokenFor(context.Background()'],
     ['internal/api/jethub/qoder.go', 'PollQoderDeviceToken(context.Background()'],
     ['internal/api/jethub/officeace.go', 'StartOfficeaceLogin(context.Background()'],
   ];

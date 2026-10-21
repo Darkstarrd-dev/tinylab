@@ -1246,8 +1246,10 @@ function __jethubApiKeyModal(providerId) {
         '<div class="free-hub-hint">' + escapeHtml(t('freeHubApiKeyHint')) + '</div>' +
         '<input type="text" class="input" id="free-hub-apikey" placeholder="' + escapeAttr(t('freeHubApiKeyPlaceholder')) + '" style="width:100%;margin-top:8px">' +
         '<input type="text" class="input" id="free-hub-apikey-nick" placeholder="' + escapeAttr(t('freeHubApiKeyNickname')) + '" style="width:100%;margin-top:8px">' +
-        '<div class="free-hub-hint" style="margin-top:12px">' + escapeHtml(t('freeHubAnonHint')) + '</div>' +
-        '<button type="button" class="btn btn-sm" id="free-hub-anon-add" style="margin-top:6px">' + escapeHtml(t('freeHubAnonAdd')) + '</button>' +
+        (providerId === 'opencode'
+          ? '<div class="free-hub-hint" style="margin-top:12px">' + escapeHtml(t('freeHubAnonHint')) + '</div>' +
+            '<button type="button" class="btn btn-sm" id="free-hub-anon-add" style="margin-top:6px">' + escapeHtml(t('freeHubAnonAdd')) + '</button>'
+          : '') +
       '</div>' +
       '<div class="modal-footer"><button type="button" class="btn btn-ghost" id="free-hub-apikey-cancel">' + escapeHtml(t('cancel')) + '</button>' +
       '<button type="button" class="btn btn-primary" id="free-hub-apikey-submit">' + escapeHtml(t('freeHubApiKeySubmit')) + '</button></div>' +
@@ -1268,7 +1270,10 @@ function __jethubApiKeyModal(providerId) {
     if (!key) { toast(t('failed', [t('freeHubApiKeyEmpty')]), 'error'); return; }
     submit({ apiKey: key, nickname: document.getElementById('free-hub-apikey-nick').value.trim() });
   };
-  document.getElementById('free-hub-anon-add').onclick = function() { submit({ anonymous: true }); };
+  var anonAdd = document.getElementById('free-hub-anon-add');
+  if (anonAdd) {
+    anonAdd.onclick = function() { submit({ anonymous: true }); };
+  }
 }
 
 async function jethubRenameAccount(accountId) {

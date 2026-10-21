@@ -4,7 +4,9 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `bca0d8c`（2026-10-15，R6 分诊与实施完成；前序 pin：R5 `e73cd2f`、R4 `2e8bb86`、R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `b0940ca`（2026-10-21，R7 分诊与实施完成；前序 pin：R6 `bca0d8c`、R5 `e73cd2f`、R4 `2e8bb86`、R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+>
+> **本轮侦察（2026-10-21，R7）：** master `bca0d8c` → `b0940ca`：**216 commits / 380+ 文件**，主要新增 MiniMax 国际版（minimaxintl）、ModelScope（魔搭，modelscope）、AutoClaw（智谱清言，autoclaw）、AStudio（讯飞，astudio）等 provider；处理方式包括 WorkBuddy `reasoning_effort` 回退（DeepSeek 思考优先）、Rotation 错误分类（11128/11140/14018）；可用模型包括 OfficeAce 窗口订正、Qoder 免费/低倍率模型补充、ModelScope 36 模型与 AutoClaw 4 模型。**可搬项已实施**：R7-1 minimaxintl、R7-2 modelscope、R7-3 autoclaw、R7-4 处理方式与模型表同步；R7-5 astudio 按不搬清单分诊归档。
 >
 > **本轮侦察（2026-10-15，R6）：** master `e73cd2f` → `bca0d8c`：**173 commits / 341 文件**，主要新增 Accio（阿里）与 OfficeAce（华为 ModelArts MaaS）两家 provider、原生搜索、DSML 工具调用归一化、图片/零输出/工具结果图片链路、模型目录健壮化。**可搬项已实施**：R6-1 Accio、R6-2 OfficeAce、R6-3 workbuddy `reasoning_effort` 修法；DSML/图片/原生搜索/记账/面板等归 §5。两家新 provider 未经真实机器验证（无账号）。
 >
@@ -421,7 +423,23 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 - [x] R6-3 **host/DSML/image-budget 通用事实**：本轮只落地对 Free Hub 出站有直接影响的 **workbuddy `reasoning_effort` 吞正文** 修法（`buddyStripReasoningEffort`，仅 workbuddy，无键不改写 body）；其余图片/DSML/原生搜索等仍归 §5（宿主/面板行为或本端无该消费侧）。  
   > **实施记录（2026-10-15）**：上游 `8bb1035`/`32681a8` 族群实测 workbuddy 带 `reasoning_effort` 会吞掉工具调用前正文；本端 buddy augment 此前完全透传该字段，缺陷同源存在。落点 `internal/jethub/buddy_augment.go` + 回归 `buddy_effort_test.go`（workbuddy 剥离 / buddy 不动 / 无键字节透传 / augment 端到端头族不丢）。反向验证：把 provider 判据改成恒 false ⇒ workbuddy augment 用例变红。
 
-> pin **不推进**至分诊全部完毕之前。
+## R7（pin bca0d8c → origin/master b0940ca，2026-10-21，实施完成）
+
+> 本轮侦察（2026-10-21）：master bca0d8c → b0940ca：**216 commits / 380+ 文件**。
+> 主要主题：MiniMax 国际版（minimaxintl）、ModelScope（魔搭，modelscope）、AutoClaw（智谱清言桌面端，autoclaw）、AStudio（讯飞 AstronStudio，astudio）等 provider；
+> 处理方式包括 WorkBuddy `reasoning_effort` 撤销剥离（DeepSeek 思考优先于 preamble）、Rotation 错误分类增强（11128/11140/14018）；
+> 可用模型包括 OfficeAce 窗口测定订正、Qoder 免费/低倍率模型补充、ModelScope 36 模型与 AutoClaw 4 模型。
+
+### R7 实施记录
+
+- [x] R7-1 **MiniMax 国际版（minimaxintl）**：Anthropic Messages 协议族；与国内版共享 100% 协议与鉴权格式，仅域名（account.minimax.io / agent.minimax.io）及 region（en）不同；提供双站点配置、InferURL、设备码登录、静默续期、额度查询与每日签到路由。
+- [x] R7-2 **ModelScope 魔搭社区（modelscope）**：OpenAI 兼容推理，长期 API Key 凭据（ms-…）；提供独立魔粒余额端点（https://www.modelscope.cn/openapi/v1/magicubes/balance）；augmenter 自动完成扁平工具定义向 `{type:"function", function:{...}}` 的规范化包装以避免上游 400；登记 36 个兜底模型表。
+- [x] R7-3 **AutoClaw 智谱清言（autoclaw）**：智谱清言桌面端加速网关直连，短信验证码登录与凭据存储；动态 MD5 签名 `MD5(appId + '&' + timestamp + '&' + appKey)`；header 头族注入（含 X-Version: 2.1.1 硬校验头）；406 白名单拦截绕过（首条 message 注入精确前缀 `You are AutoClaw. Answer the user directly and concisely`）；max_tokens 下限 10000 钳制；积分钱包余额与每日签到；登记 4 个确证模型表。
+- [x] R7-4 **处理方式与可用模型同步**：
+  - WorkBuddy `reasoning_effort` 撤销剥离（对齐上游 `e261cd6`/`1361706`）：DeepSeek 推理模型依赖 `reasoning_effort` 产生 thinking token，思考优先于工具调用前 preamble 散文。
+  - Rotation 错误规则增强：新增 11128 `ActionRotateOnly` (conversation id missing), 11140 `ActionCooldown 1800s` (request illegal), 14018 `ActionDailyQuota` (credits exhausted)。
+  - OfficeAce 模型表实测窗口修正（glm-5.3 1048576, glm-5.2 1044480, deepseek-v4.1-flash 1048576 max 393216 等）；Qoder 补入 `dfmodel` (Free x0) 与 `mmodel` (MiniMax-M3.1-Flash x0.1)。
+- [x] R7-5 **AStudio（讯飞 AstronStudio）分诊**：AStudio 依赖本地 Electron 客户端微信扫码与本地 session 导入（astron-session.json），属 §5 桌面窗口/本地 session 专属，暂不移植为 HTTP API 代理，列入 §5 不搬清单并归档。
 
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
@@ -432,3 +450,4 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 | R4 | 2026-10-05 | `ff5e37d` → `2e8bb86` | master 6 commits / 26 文件（全部 zcode + 文档）；**用户报障驱动的卡片信息全量对齐（P0–P2，§6 R4-0）+ R4-1 zcode 本机凭据路径删除 + R4-2 两条旧说法订正**，不搬 3 类入 §5 | **P0**：四家 `HasBalance` 开关补正（minimax/raccoon/trae/cline）+ 单位标签三态 + Gemini 逐窗口百分比 + gemini 排除重测/重置 + opencode「通道可用性」额度行（本地状态、零网络）；**P1**：限额重置标记**首次真正写入**（rotation 观察者 × 四条写锁路径 + app 组合根注入）+ 重测写回新解禁时刻（中英两种句式 + 捕获时区）+ `CreditPackage` 到期字段/`expiredTotal`/`windowDays`/`extra.accountTier` + 各 provider 填充 + 前端临时/长期分桶、资源包 hover 明细、失效额度、池名分桶、账号规格行；**P2**：账号拖拽排序（顺序=选号优先级，删掉 `SyncKeys` 的 ID 重排）+ opencode 指纹轮换（代次为权威）+ **opencode per-account 出口代理接线（`config.Key.Proxy` + per-key transport，默认空 ⇒ 原路径逐字节不变）** + loomy 新手任务入口 + raccoon 一次性奖励文案 + 匿名标记与账号名/手机号派生；**R4-1 删除** zcode 本机凭据导入（含安装目录探测，源码字面量守卫 + 路由反向回归）；**R4-2** 订正 3012 是 405、日期块非判据（本端按响应体判码故功能免疫）。验证：`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node web/jethub.test.js` 全绿（含 5 组新用例：额度单位/分桶、排序、provider 专属卡片、通道状态、出口代理）；关键项已做反向验证（能力位、观察者、重测写回、指纹、per-key 代理、本机读取守卫） |
 | R5 | 2026-10-07 | `2e8bb86` → `e73cd2f` | master 105 commits / 167 文件（69 触 `src/`）；**R5-1 整体移除 Gemini Code Assist 渠道（用户决定，push 阻塞驱动）** + R5-2 起按分簇分诊结果实施可搬项 | **R5-1**：gemini 渠道六个源文件 + 全部接线（product 表/augmenter/拦截器分派/API 路由/`rateLimitExemptProviders`）+ 前端配额单位（`%`）渲染链与账号规格行 + 四个 i18n 键 + `nonAggregatableProviders` 表；provider 14 → 13；上游该渠道数据永久移出同步范围（§5）。回归：`go build`/`go vet`/全量 `go test ./internal/...` + `node web/jethub.test.js` 全绿，`git grep -i gemini` 在 Free Hub 面零残留。R5-2 见同节 |
 | R6 | 2026-10-15 | `e73cd2f` → `bca0d8c` | master 173 commits / 341 文件；**R6-1 Accio + R6-2 OfficeAce 两家新 provider + R6-3 workbuddy reasoning_effort 修法实施**，DSML/图片/原生搜索/记账/面板归 §5 | **Accio（第 15 家）**：OAuth2 PKCE 公开客户端登录（region=cn/global）、轮换 refresh 三铁律、远端模型目录缓存 + 15 条静态兜底表、body-token Gemini 信封（`sg_k`/`message_id`/snake/properties 豁免）、Gemini SSE→OpenAI/Anthropic（tool shard/thought/usage/402/风控页）、credit 三只读端点。**OfficeAce（第 14 家）**：cloud-direct OAuth/STS+DPoP 登录、V11+SDK-HMAC 签名、Basic 推理 + `max_tokens<4096` 丢弃 + 剥 `reasoning_effort`、per-account `maasBaseUrl`、显式每日领取。**R6-3**：workbuddy `reasoning_effort` 致吞正文问题。验证：`go build` / `go vet` / 全量 `go test ./internal/...` 全绿 + `node --test web/jethub.test.js` 全绿；两家新 provider 未经真实机器验证（无账号）。 |
+| R7 | 2026-10-21 | `bca0d8c` → `b0940ca` | master 216 commits / 380+ 文件；**R7-1 minimaxintl + R7-2 modelscope + R7-3 autoclaw 三家新 provider + R7-4 处理方式与模型表同步实施**，R7-5 astudio 归 §5 | **minimaxintl（第 16 家）**：MiniMax 国际站，Anthropic Messages 协议族，双站点产品配置与 InferURL、设备码登录、静默续期、额度查询与每日签到。**modelscope（第 17 家）**：魔搭社区，OpenAI 兼容推理，长期 API Key 凭据，魔粒余额端点（`/openapi/v1/magicubes/balance`），扁平工具转 `{type:"function"}` 规避 400，36 兜底模型表。**autoclaw（第 18 家）**：智谱清言桌面端网关，短信验证码登录，动态 MD5 签名，X-Version: 2.1.1 校验头，406 前缀绕过与 max_tokens 门禁，积分钱包余额与每日签到，4 确证模型表。**R7-4**：撤销 workbuddy 剥离 `reasoning_effort`（DeepSeek 思考优先于 preamble）；Rotation 错误分类（11128/11140/14018）；OfficeAce 窗口实测订正；Qoder 补充 dfmodel(Free x0)/mmodel(x0.1)。**R7-5**：astudio（讯飞 AstronStudio）依赖 Electron 微信扫码/本地 session 导入归 §5 不搬。验证：`go build` 干净，全量 `go test ./...` 与 `node --test web/jethub.test.js` 全绿。 |

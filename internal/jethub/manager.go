@@ -56,7 +56,8 @@ var defaultProviders = []ProviderMeta{
 	// raccoon 的「领取」是**一次性登录奖励**（`onboardingTasks` 语义），不是每日
 	// 签到 —— 后端无签到端点，服务端按日自动发放每日积分。
 	{ID: "raccoon", DisplayName: "Raccoon", Description: "商汤小浣熊", HasCredits: true, HasBalance: true, LoginModes: []string{"url", "qr"}},
-	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax（Anthropic 协议族）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
+	{ID: "minimax", DisplayName: "MiniMax Code", Description: "MiniMax 中国版（Anthropic 协议族）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
+	{ID: "minimaxintl", DisplayName: "MiniMax Code (国际版)", Description: "MiniMax 国际版（Anthropic 协议族）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 	// R1-7: OpenCode Zen — the first non-browser login (pasted API key) plus a
 	// zero-key anonymous channel (`public`, free models only).
 	//
@@ -73,6 +74,10 @@ var defaultProviders = []ProviderMeta{
 	// R6: Accio（阿里 Accio Work）— 标准 OAuth2 + PKCE 公开客户端；token 走
 	// body（头上放 Bearer 恒 200+流内 402）；额度只读（credit 计，无签到）。
 	{ID: "accio", DisplayName: "Accio (阿里)", Description: "阿里 Accio Work（阿里云 AI 门户）", HasCredits: false, HasBalance: true, LoginModes: []string{"url"}},
+	// R7-2: ModelScope 魔搭社区 — API Key 凭据，OpenAI 兼容推理端点，魔粒余额端点。
+	{ID: "modelscope", DisplayName: "ModelScope (魔搭)", Description: "阿里达摩院魔搭社区（API Key 凭据）", HasBalance: true, LoginModes: []string{"apikey"}},
+	// R7-3: AutoClaw (智谱清言桌面端) — 手机号短信登录，动态 MD5 签名，积分钱包余额，每日签到。
+	{ID: "autoclaw", DisplayName: "AutoClaw (智谱)", Description: "智谱清言桌面端（手机号短信登录）", HasCredits: true, HasBalance: true, LoginModes: []string{"sms"}},
 }
 
 // Providers returns the static provider metadata list (a copy).

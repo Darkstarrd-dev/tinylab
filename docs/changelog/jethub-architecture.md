@@ -1,3 +1,28 @@
+## 2026-10-21 — R7：Free Hub 上游同步（pin `b0940ca`），新增 minimaxintl / modelscope / autoclaw（第 16/17/18 家）
+
+**上游事实**（ref `b0940ca` @ origin/master）：
+- **MiniMax 国际版（minimaxintl）**：与国内版共享 100% 协议族（Anthropic Messages API，mmoat_ 格式凭据，设备码授信），仅域名（account.minimax.io / agent.minimax.io）及 region（en）不同。
+- **ModelScope 魔搭社区（modelscope）**：阿里达摩院社区通道，OpenAI 兼容推理，长期 API Key 凭据（ms-…）。魔粒余额端点位于独立主机 `https://www.modelscope.cn/openapi/v1/magicubes/balance`。上游真实事故：扁平工具参数被 400 校验拦截，必须包装成 `{type:"function", function:{...}}`。36 个兜底模型表。
+- **AutoClaw 智谱清言（autoclaw）**：智谱清言桌面端加速网关直连，手机号短信验证码登录。动态 MD5 签名 `MD5(appId + '&' + timestamp + '&' + appKey)`。推理请求必须携带 `X-Version: 2.1.1` 硬校验头（缺之 500 空响应）。406 拦截硬绕过：首条 message 必须精确为 system 且包含 `You are AutoClaw. Answer the user directly and concisely`；max_tokens 钳制不低于 10000 官方门禁。积分钱包余额与每日签到。
+- **WorkBuddy `reasoning_effort` 回退（`e261cd6`/`1361706`）**：此前剥离导致 DeepSeek 推理模型思考 token 清零（0/10），上游实测权衡「思考输出优先于工具调用前 preamble 散文」，故撤销剥离。
+- **Rotation 错误规则增强**：11128 `ActionRotateOnly` (conversation id missing), 11140 `ActionCooldown 1800s` (request illegal), 14018 `ActionDailyQuota` (credits exhausted)。
+- **模型表测定订正**：OfficeAce 上下文窗口按实测订正（glm-5.3 1048576, glm-5.2 1044480, deepseek-v4.1-flash 1048576 等）；Qoder 补入 `dfmodel` (Free x0) 与 `mmodel` (x0.1)。
+- **AStudio 分诊**：讯飞 AstronStudio (AStudio) 依赖 Electron 桌面客户端微信扫码与本地 session 文件导入（astron-session.json），属桌面窗口/本地 session 专属，暂不移植为纯 HTTP API 代理，列入不搬清单。
+
+**实现**：
+- `internal/jethub/minimax.go` + `minimax_credits.go`：支持双站点配置、InferURL、设备码登录、静默续期、额度查询与每日签到。
+- `internal/jethub/modelscope.go` + `internal/api/jethub/modelscope.go`：模型表、API Key 登录去重、augmenter 工具规范化、魔粒余额查询。
+- `internal/jethub/autoclaw.go` + `internal/api/jethub/autoclaw.go`：模型表、短信验证码发送与兑换、动态 MD5 签名头注入、406 前缀绕过与 max_tokens 门禁、积分钱包余额与每日签到。
+- `internal/jethub/manager.go`：`defaultProviders` 扩充至 18 家。
+- `internal/jethub/products.go`：注册产品与 augmenter。
+- `internal/jethub/balance_summary.go`：接入 `minimaxintl`, `modelscope`, `autoclaw` 余额汇总。
+- `internal/jethub/buddy_augment.go`：撤销 workbuddy `reasoning_effort` 剥离。
+- `internal/rotation/error_rules.go`：加入 11128, 11140, 14018 分类规则。
+- `web/static/jethub.js`：apikey 模态框仅对 opencode 显示匿名通道入口。
+
+**测试**：
+`go test ./...` 全库通过，`node --test web/jethub.test.js` 全绿，`go build .` 编译成功。
+
 ## 2026-10-15 — R6：新增 Accio provider（第 15 家）
 
 **上游事实**（ref `src/accio-*.ts` + `docs/agent-notes/providers-accio.md` @ origin/master）：阿里 Accio Work 通道，gateway 恒为 `https://phoenix-gw.alibaba.com`，region（cn/global）只是登录页域名。登录是标准 OAuth2 + PKCE 公开客户端 `accio-work`，推理是 Gemini 风格 SSE（token 放 body、顶层帧、`sg_k`/`message_id`/snake_case envelope），模型目录远端拉取（`modelCode` 非人类可读，对外用展示名 slug），积分是 credit 三只读端点。

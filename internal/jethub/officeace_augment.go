@@ -128,14 +128,14 @@ func (m *Manager) OfficeaceAugmentHook() RequestAugmenterFunc {
 // ⚠️ 网关 /v2/models 返回平台目录但不返回能力元数据 —— multimodal 是**逐模型
 // 实测**结论（2026-10-13，1×1 PNG 实测：deepseek-v4.1-flash 与 kimi-k2.6 接受
 // 图片输入，其余 400）：只登记实测通过的，未测的宁可漏报（ref multimodal 注）。
-// ctx/out 记进 Note（本端 ModelDef 无独立字段的既有口径，同 codearts 表）。
+// ctx/out 记进 Note（2026-10-15 真机实测取证，见 upstream commit 83ced0d）。
 var officeaceModelTable = ModelTable{
-	{ID: "glm-5.3", Alias: "GLM-5.3", QuotaType: "limited", Note: "ctx 202752; out 131072"},
-	{ID: "glm-5.2", Alias: "GLM-5.2", QuotaType: "limited", Note: "ctx 202752; out 131072"},
-	{ID: "glm-5.1", Alias: "GLM-5.1", QuotaType: "limited", Note: "ctx 202752; out 131072"},
-	{ID: "deepseek-v4.1-flash", Alias: "DeepSeek-V4.1-Flash", QuotaType: "limited", Note: "ctx 196608; out 131072; image in"},
-	{ID: "deepseek-v4-flash", Alias: "DeepSeek-V4-Flash", QuotaType: "limited", Note: "ctx 196608; out 131072"},
-	{ID: "kimi-k2.6", Alias: "Kimi-K2.6", QuotaType: "limited", Note: "ctx 196608; out 131072; image in"},
+	{ID: "glm-5.3", Alias: "GLM-5.3", QuotaType: "limited", Note: "ctx 1048576; out 131072"},
+	{ID: "glm-5.2", Alias: "GLM-5.2", QuotaType: "limited", Note: "ctx 1044480; out 131072"},
+	{ID: "glm-5.1", Alias: "GLM-5.1", QuotaType: "limited", Note: "ctx 196608; out 131072"},
+	{ID: "deepseek-v4.1-flash", Alias: "DeepSeek-V4.1-Flash", QuotaType: "limited", Note: "ctx 1048576; out 393216; image in"},
+	{ID: "deepseek-v4-flash", Alias: "DeepSeek-V4-Flash", QuotaType: "limited", Note: "ctx 1044480; out 393216"},
+	{ID: "kimi-k2.6", Alias: "Kimi-K2.6", QuotaType: "limited", Note: "ctx 262144; out 131072; image in"},
 	{ID: "qwen3-32b", Alias: "Qwen3-32B", QuotaType: "limited", Note: "ctx 131072; out 65536"},
 	{ID: "qwen3-30b-a3b", Alias: "Qwen3-30B-A3B", QuotaType: "limited", Note: "ctx 131072; out 65536"},
 }

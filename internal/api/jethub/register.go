@@ -95,6 +95,10 @@ func (h *Handler) Register(r chi.Router) {
 		// R6: accio flows (PKCE loopback login with region / refresh /
 		// read-only credit balance — no daily claim endpoint upstream).
 		h.RegisterAccio(r)
+		// R7-2: modelscope flows (pasted API key / balance).
+		h.RegisterModelscope(r)
+		// R7-3: autoclaw flows (SMS login / balance / claim / refresh).
+		h.RegisterAutoclaw(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)
