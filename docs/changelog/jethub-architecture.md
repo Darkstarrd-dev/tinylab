@@ -1,3 +1,27 @@
+## 2026-10-23 — R8：Loomy 远端模型目录落地（用户报障驱动）
+
+**用户报障**：上游 Loomy 渠道可用的模型在 Free Hub 里没有。根因：上游的 Loomy 模型列表是**远端实时**的
+（`src/loomy-adapter.ts` 的 `parseLoomyRemoteModels` + `index.ts` 注入的 `fetchRemoteModels`），
+2026-10-08 commit `02653ea` 起远端 chat 条目从 8 条涨到 9 条（新增 `DeepSeek-V4.1-Flash`）；
+本端此前只搬了 `loomy-product.ts` 的静态兜底表 8 条，无任何远端目录拉取（§6 R1-8 登记的缺口）。
+
+**实现**：
+- 新增 `internal/jethub/loomy_models.go`：`loomyParseRemoteModels`（只留 `type===chat`；接受裸数组与
+  `{data:[...]}`；`loomySplitRate`/`loomyDisplayName` 名称规范化，两种形态且幂等）+ `loomyContextWindow`/
+  `loomySupportsImage` 覆盖表（spark-x 真实 262144、qwen-3.8-max 图片补报；查表归一、**不改对外 id**）+
+  进程内缓存（成功 10min / 失败 30s / 并发去重 / **兜底不写缓存**）+ `loomyFetchModels`（token 头）+
+  `LoomyModelsFor`（远端优先、离线回落静态兜底表）。
+- `internal/jethub/products.go`：loomy 的 `Product` 加 `ModelsFor: LoomyModelsFor`（`SyncKeys` 与
+  `GET /jethub/{provider}/models` 共用，与 accio 同型）。
+- `internal/jethub/trae_model.go`：`loomyFallbackModels` 的 `spark-x` `ctx` 由 1048576 订正为覆盖表真实值
+  **262144**（远端虚报 1M；ref IKJW31）。
+- 新增 `internal/jethub/loomy_models_test.go`（12 例），四处反向验证：① 去掉上下文覆盖 ⇒ 两条变红；
+  ② 去掉图片覆盖 ⇒ 两条变红；③ `LoomyModelsFor` 恒返回兜底表 ⇒ `TestLoomyModelsForRemoteFirst` 变红；
+  ④ 摘掉 `ModelsFor` 接线 ⇒ `TestLoomyProductWiresModelsFor` 变红。
+
+**验证**：`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node --test web/jethub.test.js` 全绿 +
+`go build` 正常。**无账号真机验证**（loomy 目录拉取需真实凭据；判据以单测 + 反向验证为准）。
+
 ## 2026-10-21 — R7：Free Hub 上游同步（pin `b0940ca`），新增 minimaxintl / modelscope / autoclaw（第 16/17/18 家）
 
 **上游事实**（ref `b0940ca` @ origin/master）：

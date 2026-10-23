@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-21（**R7：Free Hub 上游同步至 `b0940ca`，新增三家 provider —— MiniMax 国际版（minimaxintl，Anthropic Messages 协议族双站点）、ModelScope（魔搭，modelscope，API Key 凭据/魔粒余额/扁平工具转 function 规避 400/36 兜底模型）、AutoClaw（智谱清言桌面端，autoclaw，短信验证码登录/动态 MD5 签名/X-Version 2.1.1 校验/406 前缀绕过与 max_tokens 门禁/4 确证模型）；撤销 WorkBuddy reasoning_effort 剥离（DeepSeek 思考优先于 preamble）；Rotation 错误分类 11128/11140/14018；OfficeAce 窗口实测订正；Qoder 补充 dfmodel/mmodel；讯飞 AstronStudio(astudio) 按不搬清单归档。当前覆盖 18 家 provider。**）
+> **最后核对：** 2026-10-23（**R8：Loomy 远端模型目录落地 + 兜底表窗口订正**——用户报障「上游 Loomy 渠道可用的模型在 Free Hub 不可用」（上游 2026-10-08 起新增 `DeepSeek-V4.1-Flash`，本端静态表只有 8 条）⇒ 新增 `internal/jethub/loomy_models.go`：`GET {apiBase}/models`（token 头）解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + 上下文/图片覆盖表（spark-x=262144、qwen-3.8-max 图片补报）+ 进程内缓存（成功 10min/失败 30s/并发去重/兜底不缓存）+ `LoomyModelsFor` 接线到 `Product.ModelsFor`（`SyncKeys` 与 `/models` API 共用，离线回落静态兜底表）；静态兜底表 `spark-x` 的 `ctx` 由 1048576 订正为覆盖表真实值 262144。回归 `internal/jethub/loomy_models_test.go`（12 例）+ 四处反向验证。覆盖仍是 18 家 provider。**）
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
 > **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 余额 / 目录 / 推理 200（无 3012）见 §6.7。⚠️ **R4-1（2026-10-05）删除了「导入官方客户端凭据」旁路**（安全/正确性/一致性三条理由见 §6.7）。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
@@ -33,6 +33,7 @@
 > - 修改 jethub 出站代理分派（`SetProxyURL`/`SetPackageProxyURL`/`ProxyEnabled`）→ §3.2 + `internal/jethub/sessions.go`/`codearts_login.go`/`bridge.go` + `internal/app/app.go`
 > - 修改 MiniMax 推理协议（端点 / OpenAI⇄Anthropic 转换 / 思考档位判据 / SSE 映射）→ §6.1 + `internal/jethub/minimax_convert.go`/`minimax_stream.go`/`minimax_credits.go`（augmenter）+ `qoder_adapter.go`（Customize/InterceptResponse 分派）+ `probe.go`
 > - 修改 Loomy 微信扫码登录（协议/流程/页面/公开端点）→ §3.5 + `internal/jethub/loomy_wechat.go`/`loomy_wechat_flow.go` + `internal/api/jethub/loomy.go`（`POST /loomy/login`）+ `web/static/free-hub-loomy-login.html` + `manager.go` 的 `loginModes`
+> - **修改 Loomy 模型目录（远端目录拉取 / 名称规范化 / 上下文与图片覆盖表 / 缓存闸门 / 兜底表订正）→ §6.3.1 + `internal/jethub/loomy_models.go`（`LoomyModelsFor` + `loomyParseRemoteModels` + `loomySplitRate`/`loomyDisplayName` + `loomyContextWindow`/`loomySupportsImage` + 进程内缓存）+ `internal/jethub/products.go`（`Product.ModelsFor`）+ `internal/jethub/trae_model.go`（`loomyFallbackModels`）+ `internal/jethub/loomy_models_test.go`**
 > - 修改扫码登录页（页面/二维码/公开端点）→ §3.4 + `web/static/free-hub-login.html`/`raccoon-qr.js` + `internal/api/jethub/login_page.go` + `internal/api/router.go`（**公开挂载点**）+ `internal/jethub/raccoon_provider.go`
 > - 修改/新增 provider 的**推理端点**（出站 URL）→ §6.2 + `internal/jethub/products.go` 的 `Product.InferURL`（**唯一真相源**）+ `bridge.go`（登记即发布）+ `qoder_adapter.go`（Customize 覆盖 + 签名用 URL 改写）+ `probe.go`（探针共用同一管线）；qoder 族例外（URL 由 WASM 算出）
 > - 修改**模型展示名/倍率**（别名、倍率段、促销窗口、同名变体标记）→ §6.3 + `internal/jethub/*_model.go`/`buddy_product.go` 的静态表 + `internal/api/jethub/register.go` 的 `modelDisplayParts`（受支持段：`xN` / `FREE (xN)` / `promo HH:MM-HH:MM xN`）+ `register_test.go` 的 `TestModelDisplayNamesMatchReference`（展示名非空 / 同 provider 内唯一 / 兜底不编造倍率 / 自带倍率不得丢）+ `web/static/jethub.js` 的模型行渲染与 `{prefix}/{id}` 复制
@@ -447,7 +448,10 @@ trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。�
   lobsterai = `costMultiplier`（裸数字）；qoder = `priceFactor` + `promotion{before, discount, window}`。
   免费只在倍率**恰为 0** 时成立。
 
-**本端现状**：模型列表**只有静态表**，没有任何远端目录拉取 ——
+**本端现状（2026-10-23 更新）**：模型列表以静态表为主，**loomy 已落地远端目录拉取**
+（`internal/jethub/loomy_models.go` 的 `LoomyModelsFor` + 进程内缓存，R1-8 的既定形态，
+与 accio 同型）——上游 Loomy 渠道滚动新增的 chat 模型（2026-10-08 起
+`DeepSeek-V4.1-Flash`）会即时出现在面板，静态兜底表只在离线/失败时顶替。
 `traeBatchModelsPath`/`lobsteraiModelsPath`/`DecryptQoderModelCatalog`/`raccoonModelCatalog`
 四个常量/函数**零调用**（是「打算做但没接」的痕迹）。
 
@@ -472,7 +476,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 |---|---|---|
 | qoder / qodercn | **纯静态表**（`qoder-product.ts`，插件自身也不拉远端） | 上一轮已修倍率；本轮复查 17+14 条**逐条一致**（含错峰形态） |
 | raccoon | 静态表 `name` 已含倍率（`raccoon-product.ts:218-263`） | 6/6 一致 |
-| loomy | 静态表 `name` 已含 ` · x{n}`（`loomy-product.ts:104-113`） | 8/8 一致 |
+| loomy | 静态表 `name` 已含 ` · x{n}`（`loomy-product.ts:104-113`）；**远端目录优先**（`loomy-adapter.ts` 的 `parseLoomyRemoteModels`） | 兜底 8/8 一致；**远端目录已实现**（R8） |
 | minimax | 兜底表 `name`（无倍率概念） | 4/4 一致 |
 | cline | `isFree ⇒ name · 免费`（`cline-models.ts:107-109`，免费条目全 free；2026-10-03 起免费清单 **5→4**——`cline-free/gemini-3.8-flash` 已被上游下线，ref 51d6093；**2026-10-05 再 4→3**——`cline-free/deepseek-v4.1-flash` 同样下架，ref b0352fc） | **已修**：此前 Note 里只写了裸 `free`（不是受支持段）⇒ 面板少了 ` · 免费` |
 | trae | 兜底表 `name`，且**先过滤 `isHidden`**（`trae-adapter.ts:765-769`） | **已修**：剔除 4 条隐藏模型（`browser_use_subagent`/`explore_sub_agent_v13`/`explore_sub_agent_v2`/`summary`，32→28 条 —— 此前面板比插件多 4 条） |
@@ -488,6 +492,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 | buddy / workbuddy | 远端 `credits`/`discountedCredits` 倍率与远端独有模型 | 展示名**已修**；远端目录**未实现** |
 | cline | 远端约 478 条（我们只有静态表） | 静态表已并入 models.dev 快照（**3 免费** + 18 条 `cline-pass`；R1-6 ref caf675e 并入 5 免费，R3-2 ref 51d6093 删已下线的 gemini-3.8-flash，R5 ref b0352fc 再删 deepseek-v4.1-flash）；远端目录**未实现** |
 | codearts | 远端 `model_name`（我们只有 9 条裸 id） | 远端目录**未实现** |
+| loomy | 远端 chat 模型会滚动新增（2026-10-08 起 `DeepSeek-V4.1-Flash`），静态表只 8 条 | **已修**：远端目录拉取（`LoomyModelsFor`）+ 兜底表 spark-x 窗口订正 |
 
 † **qoder 倍率的修法**（判定与 ref `qoderDisplayName`/`promotionActiveNow` 同源）：
 
@@ -509,7 +514,7 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
   **不得缺倍率**；trae 的 4 条隐藏模型必须缺席且恰好 28 条。已反向验证：把
   `Hy4 preview · F` 改回 `Hy4 preview` ⇒ 两条断言立刻报红）+ `TestTraeModelsCarryDisplayNames`。
 
-**未实现的正确修法（下一步）**：**远端目录拉取**（含解析与失败回退）。远端 ID 集合与
+**远端目录拉取的修法**（**loomy 已落地**，见 §6.3.1；其余 provider 未实现）：远端 ID 集合与
 倍率都会随服务端变化（ref 明确警告不要把某一刻的远端条目写死），故「把静态表抄长」
 追不上。逐 provider 端点（本轮逐条核对 ref 的结果）：
 
@@ -522,11 +527,48 @@ provider detail 点模型 id 得到的结果同形（`web/static/providers-model
 | cline | `GET /api/v1/models` + `/api/v1/ai/cline/recommended-models` | 免费集来自 `recommended-models` 的 `free` 数组；远端约 478 条 |
 | minimax | `GET {apiHost}/mavis/api/v1/models?region=cn&buildEnv=prod` | 远端快照与我们 4 条一致（无缺口） |
 | raccoon | `GET {apiBase}/api/web/llm/v2/model_catalog` | 远端快照与我们 6 条一致；倍率已在静态表 |
-| loomy | `GET {apiBase}/api/v1/models` | 远端快照与我们 8 条一致；倍率已在静态表 |
+| loomy | `GET {apiBase}/api/v1/models`（`loomy_models.go`，token 头；成功 10min/失败 30s 缓存 + 并发去重；**已实现** R8） | 远端 chat 模型优先（含滚动新增项）；倍率从远端 `name` 解析；spark-x 按覆盖表 262144 |
 | qoder / qodercn | **不需要** | 插件自身也不拉远端（纯静态表 + WASM 签名端点） |
 
 ⚠️ 四家「倍率只有远端才有」= buddy/workbuddy、lobsterai、trae、codearts；cline 的
 ` · 免费`、raccoon/loomy 的倍率都在静态表里，离线也显示。
+
+#### 6.3.1 Loomy 远端目录已落地（R8，2026-10-23，用户报障驱动）
+
+**用户报障**：上游 Loomy 渠道里可用的模型（尤其 2026-10-08 起新增的
+`DeepSeek-V4.1-Flash`）在 Free Hub 里不可用 —— 面板永远停在静态兜底表的 8 条。
+根因：本端只搬了 `loomy-product.ts` 的静态兜底表，而**上游的模型列表是远端实时**的
+（`loomy-adapter.ts` 的 `parseLoomyRemoteModels` + `fetchRemoteModels`），静态表只在
+远端失败时顶替。
+
+**落地（`internal/jethub/loomy_models.go`，R1-8 的既定形态，与 accio 同型）**：
+
+- **解析**：`GET {apiBase}/models`，**token 头**（业务端点；Bearer 会 100002）；
+  接受裸数组与 `{data:[...]}` 两种形态；只保留 `type === 'chat'`（**不能**看
+  `input_modalities` —— 多个 chat 模型的输入模态含 image，那是输入多模态不是生图模型）。
+- **名称规范化**：`loomySplitRate`/`loomyDisplayName` 1:1 对齐 ref
+  （认末尾括号 `（x4.0）`/`(x12.0)`/`(x0.8)` 与已规范化的 `name · xN` 两种形态，**幂等**）。
+- **覆盖表**：`spark-x` 上下文窗口按真实值 **262144**（远端虚报 1M，ref IKJW31）；
+  `qwen-3.8-max` 图片能力补报（远端漏报 text、实测能读图，2026-10-14 报障）。
+  两张表查表**归一**（大小写/空白不敏感），且**绝不改对外 `model.id`**。
+- **缓存**：进程内，成功 ~10min / 失败 ~30s 冷却 / **并发去重**；**兜底表不得写进
+  缓存**（一次瞬时失败会让它永久固化 —— ref 明确警告过的原缺陷）。
+- **接线**：`Product.ModelsFor = LoomyModelsFor`（`products.go`），`SyncKeys` 与
+  `GET /jethub/{provider}/models` 共用；离线/失败回落 `loomyFallbackModels()`。
+- **兜底表订正**：`spark-x` 的 `ctx` 由 1048576 改为覆盖表的真实值 **262144**（与远端
+  静态表的 `LOOMY_CONTEXT_WINDOW_OVERRIDES` 对齐）。
+
+**回归**：`internal/jethub/loomy_models_test.go`（12 例）：拆分两种形态 + 幂等、
+上下文/图片覆盖表（大小写/空白/非通配/键归一守卫）、远端解析（过滤非 chat / 裸数组 /
+畸形输入）、spark-x 兜底表窗口、缓存命中、失败冷却 + 兜底不缓存、离线回落、远端优先
+（含 `DeepSeek-V4.1-Flash`）、`ModelsFor` 接线。**反向验证已做四处**：① 去掉上下文窗口
+覆盖 ⇒ `TestLoomyContextWindowOverride` + `TestLoomyParseRemoteModels` 变红；② 去掉图片
+覆盖 ⇒ 两条变红；③ `LoomyModelsFor` 恒返回兜底表 ⇒ `TestLoomyModelsForRemoteFirst`
+变红（输出确凿打印出 8 条兜底表）；④ 摘掉 `ModelsFor` 接线 ⇒ `TestLoomyProductWiresModelsFor`
+变红。
+
+> **仍未实现**：buddy/workbuddy、lobsterai、trae、cline、codearts、minimax、raccoon 的
+> 远端目录仍缺（上表逐家列出端点与字段）；本端只对 loomy 落地了动态目录。
 
 ### 6.4 CodeArts 的「HTTP 200 + 流内 `error_code`」（真实缺陷 17 + 修复）
 
@@ -977,6 +1019,7 @@ Monitor（web/static/monitor/monitor_quota.js）
 - `internal/jethub/inference_url_test.go`（5 个）：**逐 provider 推理端点与参考实现比对**（buddy/workbuddy/lobsterai/trae/cline/raccoon/minimax/codearts/loomy 九条，改产品表即红）+ `Customize` 返回值一致 + qoder 族必须不声明 InferURL + **codearts 签名看到上游路径且原请求未被污染** + `RegisterProduct` 的发布/撤销语义（§6.2）。
 - `internal/jethub/bridge_keys_test.go`（3 个）：**用真实凭据结构体**逐 provider 断言 `accessTokenOf` 非空（缺陷 15 的直接回归 —— 通用假体凭据曾让这个缺陷逃过全部测试）+ codearts Key 取值优先级 + 未注册提取器的 provider 仍走通用 `access_token`。
 - `internal/api/jethub/register_test.go`：`modelDisplayParts` 形态表（12 条，含「裸 FREE ≠ 免费」「FREE (x0.5) 显示 x0.5」）+ **促销窗口**（窗口内/外/边界 × 两个时区表达，锁「与机器时区无关」）+ **qoder/qodercn 倍率逐条对账**（期望值取自 ref `qoder-product.ts`）+ trae 展示名 + **`TestModelDisplayNamesMatchReference`**（逐 provider 代表条目核对 `名称 · 倍率` + 四条不变量 + trae 隐藏项/条数；已反向验证）——§6.3。
+- `internal/jethub/loomy_models_test.go`（12 个，§6.3.1）：`loomySplitRate`/`loomyDisplayName` 两种形态 + 幂等 + 无倍率不补分隔符；上下文/图片覆盖表（spark-x 真实值 / qwen-3.8-max 补报 / 大小写与空白归一 / 未登记不误放行 / 键已归一的机器守卫）；`loomyParseRemoteModels`（过滤非 chat / 裸数组与 `{data}` 两形态 / 畸形输入不抛）；兜底表 spark-x 窗口；**缓存命中 / 失败冷却 + 兜底不缓存**；离线回落 8 条；远端优先（含 `DeepSeek-V4.1-Flash`）；`ModelsFor` 接线。**四处反向验证**（见 §6.3.1）。
 - `internal/jethub/codearts_response_test.go`（8 个）：**直接用用户 trace 的真实响应体** —— 200 + `81114.429` 限流按排队重试（10s 同 Key）、200 + `4004.200 benefit not found` 显式失败并带出码/文案、400 + `TM.00001041` 并发上限按排队重试、文案兜底三种、其它错误原样透传（body 完整还回）、正常 SSE 流逐字节不变、`error_code` 判据表（§6.4）。
 - `web/raccoon-qr.test.js`（6 项）：二维码矩阵**黄金指纹**（由 ref TS 实现产出）+ 结构（finder/确定性/8 掩码互异/容量与参数报错）+ 页面只依赖公开端点且不含凭据字样 + feature 清单登记 + **路由挂载位置守卫**（`RegisterPublicLoginPage(` 必须出现在 `r.Use(authMW)` 之前）——§3.4。
 - `internal/api/jethub/register_route_test.go`（3 个）：真 chi 路由级 —— proxy 开关路径形状（正确 200+JSON / 旧错误形状 404）+ 参数校验（缺字段 400、未知 provider 404 带 JSON error）+ `GET /providers` 携带 `proxyEnabled`。

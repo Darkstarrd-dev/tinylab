@@ -1,3 +1,9 @@
+## 2026-10-23 — R8 Loomy 远端模型目录落地 + 兜底表窗口订正
+
+- §13n 文件表：`internal/jethub/` 新增 `loomy_models.go`（远端目录拉取：`GET {apiBase}/models` token 头解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + `loomyContextWindow`/`loomySupportsImage` 覆盖表 + 进程内缓存 10min/30s/并发去重/兜底不缓存 + `LoomyModelsFor`）；`loomy.go`/`loomy_credits.go` 行加挂该文件；`trae_model.go` 的 `loomyFallbackModels` 的 spark-x `ctx` 由 1048576 订正为 262144。
+- §24 速查表：新增「修改 **Loomy 模型目录**」行（后端落点 + 测试 + 其余 provider 远端目录仍未实现的边界）；「修改模型展示名/倍率」行的远端目录清单中标记 **loomy 已实现 R8**。
+- 架构与地图核对行替换为 R8 摘要。过程叙述归档至 docs/changelog/jethub-architecture.md 与本文件。
+
 ## 2026-10-21 — R7 Free Hub 上游同步至 `b0940ca`（MiniMax 国际版 + ModelScope + AutoClaw）
 
 - §10.28 文件表：`internal/api/jethub/` 新增 `modelscope.go`（魔搭 API Key 登录/魔粒余额/36 款模型）与 `autoclaw.go`（智谱清言桌面端短信验证码登录/余额/签到/状态双语义）。

@@ -114,6 +114,11 @@ func RegisterDefaultProducts(b *Bridge) {
 		// urlutil 的版本段启发式 —— 后者一旦被改就会静默拼错。
 		InferURL: loomyProduct.APIBase + "/chat/completions",
 		Models:   loomyFallbackModels(),
+		// 远端目录（`GET /api/v1/models`）动态拉取：上游新增的 chat 模型
+		// （如 DeepSeek-V4.1-Flash）必须即时出现在面板，静态兜底表只在离线时顶替。
+		// ⚠️ 与 accio 同型（R1-8 的既定形态）；`LoomyModelsFor` 内部有 10min/30s
+		// 缓存与并发去重。
+		ModelsFor: LoomyModelsFor,
 	})
 	// P3.3.5: minimax (Anthropic Messages native passthrough — no conversion).
 	b.RegisterProduct(Product{

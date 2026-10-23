@@ -441,6 +441,26 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
   - OfficeAce 模型表实测窗口修正（glm-5.3 1048576, glm-5.2 1044480, deepseek-v4.1-flash 1048576 max 393216 等）；Qoder 补入 `dfmodel` (Free x0) 与 `mmodel` (MiniMax-M3.1-Flash x0.1)。
 - [x] R7-5 **AStudio（讯飞 AstronStudio）分诊**：AStudio 依赖本地 Electron 客户端微信扫码与本地 session 导入（astron-session.json），属 §5 桌面窗口/本地 session 专属，暂不移植为 HTTP API 代理，列入 §5 不搬清单并归档。
 
+### R8（2026-10-23，**报障驱动补做**：Loomy 远端模型目录落地）
+
+> **触发（用户报障）**：「Free Hub 上游 `https://gitee.com/iJetLi/deepseek-harness-codearts` 的 Loomy 渠道中可用的模型，在 Free Hub 中不可用，对比并进行更新、修复」。
+>
+> **根因**：上游的 Loomy 模型列表是**远端实时**的（`src/loomy-adapter.ts` 的 `parseLoomyRemoteModels` + `index.ts` 注入的 `fetchRemoteModels`，2026-10-08 commit `02653ea` 起远端 chat 条目从 8 条涨到 9 条，新增 `DeepSeek-V4.1-Flash`）；本端此前只搬了 `loomy-product.ts` 的**静态兜底表**（8 条），没有任何远端目录拉取 ⇒ 面板永远停在 8 条，用户看到「模型列表缺项」。这正是 §6 R1-8 登记的「远端目录未实现」缺口在 loomy 上的兑现。
+>
+> **判据（§2 三条硬判据全过）**：① 可独立运行（Go 侧 `GET {apiBase}/models` + token 头，无需 DSH 宿主）；② 是**服务端事实**（模型目录由上游滚动下发）；③ 用户可见损失（上游新增的模型在本端不可选/不可调用）。
+
+| # | 落点 | 说明 |
+|---|---|---|
+| R8-1 | `internal/jethub/loomy_models.go`（新增） | `loomyParseRemoteModels`（只留 `type===chat`；接受裸数组与 `{data:[...]}`；`loomySplitRate`/`loomyDisplayName` 名称规范化两种形态且幂等）+ `loomyContextWindow`/`loomySupportsImage` 覆盖表（spark-x 真实 262144、qwen-3.8-max 图片补报；查表归一、**不改对外 id**）+ 进程内缓存（成功 10min / 失败 30s / 并发去重 / **兜底不写缓存**）+ `loomyFetchModels`（token 头）+ `LoomyModelsFor` |
+| R8-2 | `internal/jethub/products.go` | loomy 的 `Product` 加 `ModelsFor: LoomyModelsFor`（`SyncKeys` 与 `GET /jethub/{provider}/models` 共用，与 accio 同型） |
+| R8-3 | `internal/jethub/trae_model.go` | `loomyFallbackModels` 的 `spark-x` `ctx` 由 1048576 订正为覆盖表真实值 **262144**（远端虚报 1M；ref IKJW31） |
+| R8-4 | `internal/jethub/loomy_models_test.go`（新增，12 例） | 拆分两种形态 + 幂等；覆盖表大小写/空白/非通配/键归一；远端解析（过滤非 chat / 两形态 / 畸形不抛）；兜底表 spark-x 窗口；缓存命中；失败冷却 + 兜底不缓存；离线回落；远端优先（含 `DeepSeek-V4.1-Flash`）；`ModelsFor` 接线。**反向验证四处**：① 去掉上下文覆盖 ⇒ 两条变红；② 去掉图片覆盖 ⇒ 两条变红；③ `LoomyModelsFor` 恒返回兜底表 ⇒ `TestLoomyModelsForRemoteFirst` 变红；④ 摘掉 `ModelsFor` 接线 ⇒ `TestLoomyProductWiresModelsFor` 变红 |
+| R8-5 | 文档 | `jethub-architecture.md` §6.3（现状/表格/新增 §6.3.1）+ 最后核对行 + 变更维护清单 + 测试清单；`PROJECT_MAP.md` §13n loomy 行 + §24 新增「修改 Loomy 模型目录」行 + 最后核对行 |
+
+> **验收**：`go vet ./...` 干净 + 全量 `go test ./...` 全绿（含 `internal/jethub` 的 12 例新用例）+ `node --test web/jethub.test.js` 全绿 + `go build` 产物正常。**无账号真机验证**（loomy 目录拉取需要真实登录凭据；判据以单测 + 反向验证为准，与 upstream-sync §3 S4 的既有口径一致）。
+>
+> **仍未完成**：buddy/workbuddy、lobsterai、trae、cline、codearts、minimax、raccoon 的远端目录仍缺（§6 R1-8 表逐家列出端点与字段）；本端只对 loomy 落地了动态目录。
+
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
 |---|---|---|---|---|
@@ -451,3 +471,4 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 | R5 | 2026-10-07 | `2e8bb86` → `e73cd2f` | master 105 commits / 167 文件（69 触 `src/`）；**R5-1 整体移除 Gemini Code Assist 渠道（用户决定，push 阻塞驱动）** + R5-2 起按分簇分诊结果实施可搬项 | **R5-1**：gemini 渠道六个源文件 + 全部接线（product 表/augmenter/拦截器分派/API 路由/`rateLimitExemptProviders`）+ 前端配额单位（`%`）渲染链与账号规格行 + 四个 i18n 键 + `nonAggregatableProviders` 表；provider 14 → 13；上游该渠道数据永久移出同步范围（§5）。回归：`go build`/`go vet`/全量 `go test ./internal/...` + `node web/jethub.test.js` 全绿，`git grep -i gemini` 在 Free Hub 面零残留。R5-2 见同节 |
 | R6 | 2026-10-15 | `e73cd2f` → `bca0d8c` | master 173 commits / 341 文件；**R6-1 Accio + R6-2 OfficeAce 两家新 provider + R6-3 workbuddy reasoning_effort 修法实施**，DSML/图片/原生搜索/记账/面板归 §5 | **Accio（第 15 家）**：OAuth2 PKCE 公开客户端登录（region=cn/global）、轮换 refresh 三铁律、远端模型目录缓存 + 15 条静态兜底表、body-token Gemini 信封（`sg_k`/`message_id`/snake/properties 豁免）、Gemini SSE→OpenAI/Anthropic（tool shard/thought/usage/402/风控页）、credit 三只读端点。**OfficeAce（第 14 家）**：cloud-direct OAuth/STS+DPoP 登录、V11+SDK-HMAC 签名、Basic 推理 + `max_tokens<4096` 丢弃 + 剥 `reasoning_effort`、per-account `maasBaseUrl`、显式每日领取。**R6-3**：workbuddy `reasoning_effort` 致吞正文问题。验证：`go build` / `go vet` / 全量 `go test ./internal/...` 全绿 + `node --test web/jethub.test.js` 全绿；两家新 provider 未经真实机器验证（无账号）。 |
 | R7 | 2026-10-21 | `bca0d8c` → `b0940ca` | master 216 commits / 380+ 文件；**R7-1 minimaxintl + R7-2 modelscope + R7-3 autoclaw 三家新 provider + R7-4 处理方式与模型表同步实施**，R7-5 astudio 归 §5 | **minimaxintl（第 16 家）**：MiniMax 国际站，Anthropic Messages 协议族，双站点产品配置与 InferURL、设备码登录、静默续期、额度查询与每日签到。**modelscope（第 17 家）**：魔搭社区，OpenAI 兼容推理，长期 API Key 凭据，魔粒余额端点（`/openapi/v1/magicubes/balance`），扁平工具转 `{type:"function"}` 规避 400，36 兜底模型表。**autoclaw（第 18 家）**：智谱清言桌面端网关，短信验证码登录，动态 MD5 签名，X-Version: 2.1.1 校验头，406 前缀绕过与 max_tokens 门禁，积分钱包余额与每日签到，4 确证模型表。**R7-4**：撤销 workbuddy 剥离 `reasoning_effort`（DeepSeek 思考优先于 preamble）；Rotation 错误分类（11128/11140/14018）；OfficeAce 窗口实测订正；Qoder 补充 dfmodel(Free x0)/mmodel(x0.1)。**R7-5**：astudio（讯飞 AstronStudio）依赖 Electron 微信扫码/本地 session 导入归 §5 不搬。验证：`go build` 干净，全量 `go test ./...` 与 `node --test web/jethub.test.js` 全绿。 |
+| R8 | 2026-10-23 | `b0940ca`（不变） | **报障驱动补做**：Loomy 远端模型目录落地 + 兜底表 spark-x 窗口订正；无新 pin（上游修复 commit `02653ea` 早已在 pin 之前） | 新增 `internal/jethub/loomy_models.go`（`GET {apiBase}/models` token 头解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + 覆盖表 + 进程内缓存 10min/30s/并发去重/兜底不缓存 + `LoomyModelsFor`）；`products.go` 接线 `ModelsFor`；`trae_model.go` 的 spark-x ctx 1048576→262144；新增 `loomy_models_test.go`（12 例）+ 四处反向验证；文档同步架构 §6.3/§6.3.1、PROJECT_MAP §13n/§24/最后核对。**`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node --test web/jethub.test.js` 全绿 + `go build` 正常**；无账号真机验证（loomy 目录拉取需真实凭据） |

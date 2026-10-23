@@ -158,8 +158,10 @@ func raccoonFallbackModels() ModelTable {
 
 // loomyFallbackModels returns the 8 chat models (2026-09-26 实测 models
 // snapshot; order preserved; names normalized to `name · x{rate}` form).
-// spark-x contextWindow divergence noted (server declares 1M; the Loomy
-// client forces 262144 locally — server value kept per the reference).
+// ⚠️ 这是**离线兜底表**（ref loomy-product.ts 的 LOOMY_FALLBACK_MODELS）：
+// 在线时由 `LoomyModelsFor` 的远端目录覆盖（上游会滚动新增 chat 模型，
+// 2026-10-08 起 `DeepSeek-V4.1-Flash`），所以本表**刻意不抄远端新增项**。
+// spark-x 上下文窗口按覆盖表的真实值 262144（远端虚报 1M；ref IKJW31）。
 func loomyFallbackModels() ModelTable {
 	md := func(id, name, ctx string) config.ModelDef {
 		return config.ModelDef{ID: id, QuotaType: "limited", Note: "ctx " + ctx + "; efforts none/low/medium/high/xhigh; default high", Alias: name}
@@ -171,7 +173,7 @@ func loomyFallbackModels() ModelTable {
 		md("qwen-3.8-max", "Qwen 3.8 Max · x12.0", "1000000"),
 		md("GLM-5.3-Flash", "GLM 5.3 Flash · x0.8", "1048576"),
 		md("qwen3.8-flash", "qwen 3.8 flash · x0.8", "1000000"),
-		md("spark-x", "Spark X2.5 · x0.1", "1048576"),
+		md("spark-x", "Spark X2.5 · x0.1", "262144"),
 		md("mimo-v2.5", "MiMo V2.5 · x3.3", "1048576"),
 	}
 }
