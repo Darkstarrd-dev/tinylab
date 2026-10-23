@@ -184,6 +184,14 @@ func DeleteZipEntry(data []byte, identifier string) ([]byte, Manifest, error) {
 
 	// --- Validate constraints ---
 	for _, f := range z.File {
+		// Reject entries whose path escapes the archive root (e.g. leading
+		// "../"). CleanZipPath only normalizes separators/"." segments; it does
+		// not strip a leading "..", so an unchecked entry name could still
+		// resolve outside the intended boundary once written back to disk.
+		cleaned := CleanZipPath(f.Name)
+		if cleaned == ".." || strings.HasPrefix(cleaned, "../") || path.IsAbs(f.Name) {
+			return nil, Manifest{}, fmt.Errorf("%w: entry %q escapes archive root", ErrEntryNotFound, f.Name)
+		}
 		if f.Method != zip.Store {
 			return nil, Manifest{}, fmt.Errorf("%w: entry %q uses method %d",
 				ErrUnsupportedMethod, f.Name, f.Method)
