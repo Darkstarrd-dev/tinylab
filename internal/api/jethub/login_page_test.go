@@ -233,7 +233,21 @@ func TestLoomyOnlyEndpointsRejectOtherSessions(t *testing.T) {
 // TestStartRaccoonQRLoginSeparatesPageFromQRContent: LoginURL is the page,
 // QRContent is the WeChat login URL, and the page opens only after the caller
 // registered the session (the API layer owns that ordering).
+//
+// ⚠️ 必须打 mock：登录流程会真的发请求（2026-10-23 起还多了一次服务端票据
+// 申请），单测直连上游既慢又会在离线环境漂移。
 func TestStartRaccoonQRLoginSeparatesPageFromQRContent(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/iam/v1/auth/mp/qrcode" {
+			_, _ = io.WriteString(w, `{"code":"OK","data":{"qrcode_code":"qr-777","scan_path":"/login/mp","expires_in":300,"poll_interval":2}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"code":"OK","data":{"status":"pending"}}`)
+	}))
+	defer mock.Close()
+	restore := corejethub.SetRaccoonAPIBaseForTest(mock.URL)
+	defer restore()
+
 	m, err := corejethub.NewManager(t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -242,13 +256,32 @@ func TestStartRaccoonQRLoginSeparatesPageFromQRContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if flow, ok := started.Extra.(*corejethub.RaccoonQRFlow); ok && flow != nil {
+		defer flow.Close()
+	}
 	if started.LoginURL != "http://127.0.0.1/free-hub-login.html?loginId=x" {
 		t.Fatalf("LoginURL must be the local page: %q", started.LoginURL)
 	}
-	if !strings.HasPrefix(started.QRContent, "https://xiaohuanxiong.com/login/mp?code=") {
-		t.Fatalf("QRContent must be the scannable WeChat URL: %q", started.QRContent)
+	if !strings.HasPrefix(started.QRContent, mock.URL+"/login/mp?code=qr-777") {
+		t.Fatalf("QRContent must be the scannable login URL built from the server ticket: %q", started.QRContent)
 	}
-	if !strings.Contains(started.QRContent, "appname=") {
-		t.Fatalf("QRContent must carry the appname param: %q", started.QRContent)
+	if !strings.Contains(started.QRContent, "appname=") || !strings.Contains(started.QRContent, "source=platform") {
+		t.Fatalf("QRContent must carry appname + source params: %q", started.QRContent)
+	}
+}
+
+// 短信第 1 步：手机号形状在打上游之前就要拦下（页面据此就地提示）。
+func TestLoginPageSmsSendRejectsBadPhone(t *testing.T) {
+	srv, m := newPublicPageHandler(t)
+	registerQRLoginSession(t, m, "login-sms", "acc-sms", "https://xiaohuanxiong.com/login/mp?code=x")
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"loginId":"login-sms","phone":"123","captchaToken":"t"}`)
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/jethub/login-page/sms/send", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sms/send = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "11 位手机号") {
+		t.Fatalf("bad phone must be rejected before hitting upstream: %s", rec.Body.String())
 	}
 }

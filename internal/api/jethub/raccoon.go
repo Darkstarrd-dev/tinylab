@@ -63,7 +63,7 @@ func (h *Handler) raccoonLogin(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteAPIError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager}
+	sess := &corejethub.LoginSession{Started: started, Account: id, Manager: h.d.Manager, Extra: started.Extra}
 	corejethub.RegisterLoginSession(loginID, sess)
 	// Fire-and-forget pump: settles the outcome, records it for the status
 	// poll and deletes the placeholder on failure. The flow persists the

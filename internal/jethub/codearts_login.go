@@ -59,7 +59,11 @@ type StartedLogin struct {
 	// QRContent to draw the QR. Empty for every other provider.
 	QRContent string
 	Result    <-chan LoginOutcome
-	cancel    context.CancelFunc
+	// Extra carries provider-specific live state for the local login page.
+	// raccoon: *RaccoonQRFlow (current QR ticket + SMS verification id, so the
+	// page can re-render a refreshed QR and complete the SMS step).
+	Extra  any
+	cancel context.CancelFunc
 	// resultCh is the writable side of Result (SetResult rewires it for
 	// device-code flows that deliver from a custom goroutine).
 	resultCh chan LoginOutcome
@@ -75,6 +79,18 @@ func NewStartedLoginWithChannel(loginURL string, ch chan LoginOutcome) *StartedL
 // deliverOutcomes exposes deliver for API-layer device flows.
 func DeliverLoginOutcome(ch chan<- LoginOutcome, outcome LoginOutcome) {
 	deliver(ch, outcome)
+}
+
+// Deliver hands an outcome to the flow's own result channel from outside the
+// flow goroutine (raccoon's SMS step settles the same session as the QR pump).
+// Non-blocking: the buffered channel normally has a single consumer, and a
+// second outcome (e.g. the pump finishing right after the SMS login) must not
+// deadlock the handler.
+func (s *StartedLogin) Deliver(outcome LoginOutcome) {
+	if s == nil || s.resultCh == nil {
+		return
+	}
+	deliver(s.resultCh, outcome)
 }
 
 // LoginOutcome carries the persisted credential JSON (already encoded by the

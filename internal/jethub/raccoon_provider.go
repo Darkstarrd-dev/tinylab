@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,7 +19,7 @@ func timeAfter(d time.Duration) <-chan time.Time {
 // Raccoon Manager services (ref raccoon-auth.ts / raccoon-credits.ts /
 // raccoon-adapter.ts).
 
-// StartRaccoonQRLogin generates a QR code and returns the two-step flow.
+// StartRaccoonQRLogin starts the two-step scan flow.
 //
 // ⚠️ `pageURL` 是**本地登录页**的地址（/free-hub-login.html?loginId=…），不是
 // 二维码内容。参考实现同样是自建页面：二维码内容
@@ -28,45 +29,228 @@ func timeAfter(d time.Duration) <-chan time.Time {
 //
 // 浏览器由调用方在会话注册**之后**打开（见 API 层）：先注册再开页面，避免
 // 页面抢在会话登记前请求数据端点拿到 404。
+//
+// 2026-10-23（用户报障「手机扫码后显示二维码过期或已被使用」）：**码必须由
+// 服务端下发**（`POST /api/iam/v1/auth/mp/qrcode`）。旧流程的自造 32 位 hex 码
+// 在旧接口上仍回 pending（所以轮询看起来正常），但现网扫码页只认服务端下发的
+// `qr-<uuid>` 码 ⇒ 一律判无效。详见 raccoon_identity.go 的文件头。新接口不可用
+// 时才回落旧流程。
 func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID, pageURL string) (*StartedLogin, error) {
-	code := GenerateRaccoonQrCode()
-	qrContent := BuildRaccoonQrURL(code)
-	result := make(chan LoginOutcome, 1)
-	go func() {
-		deadline := timeNowPlus(raccoonLoginTimeout)
-		for {
-			if nowMillis() > deadline {
-				deliver(result, LoginOutcome{Err: fmt.Errorf("raccoon: 扫码登录超时（5 分钟）")})
-				return
-			}
-			select {
-			case <-ctx.Done():
-				deliver(result, LoginOutcome{Err: ctx.Err()})
-				return
-			case <-timeAfter(raccoonQRPollInterval):
-			}
-			status, cred, _ := m.PollRaccoonQrLogin(ctx, code)
-			switch status {
-			case raccoonQRStatusCanceled:
-				deliver(result, LoginOutcome{Err: fmt.Errorf("raccoon: 扫码已取消")})
-				return
-			case raccoonQRStatusSuccess:
-				if err := m.CompleteRaccoonLogin(accountID, cred); err != nil {
-					deliver(result, LoginOutcome{Err: err})
-					return
-				}
-				credJSON, _ := json.Marshal(cred)
-				deliver(result, LoginOutcome{
-					CredentialJSON: credJSON,
-					ExpiresAt:      RaccoonExpiresAtMs(cred),
-					Refreshable:    RaccoonRefreshable(cred),
-				})
-				return
-			}
-			// pending/logging → keep polling.
+	flow := newRaccoonQRFlow()
+	if ticket, err := m.CreateRaccoonQRTicket(ctx); err == nil {
+		flow.update(RaccoonQRURL(ticket), ticket, false)
+	} else {
+		// 兜底：旧流程（本地自造码）。只在新接口整体不可用时走到这里 ——
+		// 它至少不比修复前更差（旧接口仍接受任意 code）。
+		code := GenerateRaccoonQrCode()
+		flow.update(BuildRaccoonQrURL(code), &RaccoonQRTicket{
+			Code:         code,
+			ScanPath:     raccoonQRLegacyScanPath,
+			ExpiresIn:    raccoonLoginTimeout,
+			PollInterval: raccoonQRPollInterval,
+		}, true)
+		if m.logger != nil {
+			m.logger.Warn("[jethub] raccoon 二维码票据申请失败，回落旧扫码流程: %v", err)
 		}
-	}()
-	return &StartedLogin{LoginURL: pageURL, QRContent: qrContent, Result: result}, nil
+	}
+	result := make(chan LoginOutcome, 1)
+	go m.raccoonQRPump(flow, accountID, result)
+	return &StartedLogin{
+		LoginURL:  pageURL,
+		QRContent: flow.QRContent(),
+		Result:    result,
+		Extra:     flow,
+	}, nil
+}
+
+// RaccoonQRFlow 是一次 raccoon 登录页的宿主侧活状态：当前二维码内容（票据
+// 过期或用户取消时**自动换新码**，页面下一轮 status 轮询即可换图），以及短信
+// 登录的 verification_id。
+//
+// ⚠️ 页面（公开 HTTP 端点）与泵 goroutine 都会读写它 ⇒ 全部走锁；`done` 用来
+// 在流程落定后让泵停下（短信登录成功时也用它 —— 否则泵会继续轮询二维码）。
+type RaccoonQRFlow struct {
+	mu     sync.Mutex
+	qr     string
+	ticket *RaccoonQRTicket
+	legacy bool
+
+	verificationID string
+	phone          string
+
+	done chan struct{}
+	once sync.Once
+}
+
+func newRaccoonQRFlow() *RaccoonQRFlow { return &RaccoonQRFlow{done: make(chan struct{})} }
+
+// QRContent 返回当前二维码内容（页面首次渲染与换码后重新渲染都读它）。
+func (f *RaccoonQRFlow) QRContent() string {
+	if f == nil {
+		return ""
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.qr
+}
+
+// SMSState 返回短信登录已登记的 (phone, verificationID)。
+func (f *RaccoonQRFlow) SMSState() (phone, verificationID string) {
+	if f == nil {
+		return "", ""
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.phone, f.verificationID
+}
+
+func (f *RaccoonQRFlow) rememberSMS(phone, verificationID string) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.phone, f.verificationID = phone, verificationID
+}
+
+func (f *RaccoonQRFlow) update(qr string, ticket *RaccoonQRTicket, legacy bool) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.qr, f.ticket, f.legacy = qr, ticket, legacy
+}
+
+// snapshot 返回当前票据（码、轮询间隔、到期时刻、是否旧流程）。
+func (f *RaccoonQRFlow) snapshot() (code string, interval time.Duration, expiresAt int64, legacy bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	interval = raccoonQRPollInterval
+	legacy = f.legacy
+	if f.ticket == nil {
+		return "", interval, 0, legacy
+	}
+	if f.ticket.PollInterval > 0 {
+		interval = f.ticket.PollInterval
+	}
+	if f.ticket.ExpiresIn > 0 {
+		expiresAt = timeNowPlus(f.ticket.ExpiresIn)
+	}
+	return f.ticket.Code, interval, expiresAt, legacy
+}
+
+// stop 让泵停止（幂等；只允许在结果已送达之后调用）。
+func (f *RaccoonQRFlow) stop() {
+	if f == nil {
+		return
+	}
+	f.once.Do(func() { close(f.done) })
+}
+
+// Close stops the QR pump. Exported for callers/tests that own the flow's
+// lifetime (the page itself has no way to cancel).
+func (f *RaccoonQRFlow) Close() { f.stop() }
+
+// raccoonQRPump 轮询扫码状态：票据到期/用户取消 ⇒ 换新码；成功 ⇒ 落库并送达。
+func (m *Manager) raccoonQRPump(flow *RaccoonQRFlow, accountID string, result chan LoginOutcome) {
+	ctx := context.Background()
+	deadline := timeNowPlus(raccoonLoginTimeout)
+	for {
+		code, interval, expiresAt, legacy := flow.snapshot()
+		select {
+		case <-flow.done:
+			return
+		case <-timeAfter(interval):
+		}
+		if nowMillis() > deadline {
+			deliver(result, LoginOutcome{Err: fmt.Errorf("raccoon: 扫码登录超时（5 分钟）")})
+			flow.stop()
+			return
+		}
+		if expiresAt > 0 && nowMillis() >= expiresAt {
+			m.raccoonRenewQR(flow, ctx)
+			continue
+		}
+		var status string
+		var cred *RaccoonCredential
+		if legacy {
+			status, cred, _ = m.PollRaccoonQrLogin(ctx, code)
+		} else {
+			status, cred = m.PollRaccoonQRTicket(ctx, code)
+		}
+		switch status {
+		case raccoonQRStatusCanceled:
+			if legacy {
+				deliver(result, LoginOutcome{Err: fmt.Errorf("raccoon: 扫码已取消")})
+				flow.stop()
+				return
+			}
+			// 新流程：这次授权被取消（或码失效）⇒ 换新码继续等，不打断页面。
+			m.raccoonRenewQR(flow, ctx)
+		case raccoonQRStatusSuccess:
+			if err := m.CompleteRaccoonLogin(accountID, cred); err != nil {
+				deliver(result, LoginOutcome{Err: err})
+				flow.stop()
+				return
+			}
+			credJSON, _ := json.Marshal(cred)
+			deliver(result, LoginOutcome{
+				CredentialJSON: credJSON,
+				ExpiresAt:      RaccoonExpiresAtMs(cred),
+				Refreshable:    RaccoonRefreshable(cred),
+			})
+			flow.stop()
+			return
+		}
+	}
+}
+
+// raccoonRenewQR 换一张新票据（过期 / 取消）。失败时保留旧码，下一轮再试。
+func (m *Manager) raccoonRenewQR(flow *RaccoonQRFlow, ctx context.Context) {
+	ticket, err := m.CreateRaccoonQRTicket(ctx)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.Warn("[jethub] raccoon 二维码换码失败（沿用旧码）: %v", err)
+		}
+		return
+	}
+	flow.update(RaccoonQRURL(ticket), ticket, false)
+}
+
+// SendRaccoonSmsForFlow 下发短信验证码并把 verification_id 记在流程上（页面
+// 的「获取验证码」）。
+func (m *Manager) SendRaccoonSmsForFlow(ctx context.Context, flow *RaccoonQRFlow, phone, captchaToken string) error {
+	verificationID, err := m.SendRaccoonSMS(ctx, phone, captchaToken)
+	if err != nil {
+		return err
+	}
+	flow.rememberSMS(phone, verificationID)
+	return nil
+}
+
+// SubmitRaccoonSmsForFlow 完成短信登录：校验 → 落库 → 送达页面流程（并让二维码
+// 泵停下）。
+func (m *Manager) SubmitRaccoonSmsForFlow(ctx context.Context, started *StartedLogin, flow *RaccoonQRFlow, accountID, smsCode string) error {
+	phone, verificationID := flow.SMSState()
+	if verificationID == "" {
+		return fmt.Errorf("raccoon: 请先获取短信验证码")
+	}
+	cred, err := m.LoginRaccoonWithSMSVerification(ctx, phone, verificationID, smsCode)
+	if err != nil {
+		return err
+	}
+	if err := m.CompleteRaccoonLogin(accountID, cred); err != nil {
+		return err
+	}
+	credJSON, _ := json.Marshal(cred)
+	started.Deliver(LoginOutcome{
+		CredentialJSON: credJSON,
+		ExpiresAt:      RaccoonExpiresAtMs(cred),
+		Refreshable:    RaccoonRefreshable(cred),
+	})
+	flow.stop()
+	return nil
 }
 
 // CompleteRaccoonLogin persists the credential + display info. ⚠️ The

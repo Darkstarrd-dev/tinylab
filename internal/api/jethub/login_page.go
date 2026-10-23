@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -41,6 +43,9 @@ func (h *Handler) RegisterPublicLoginPage(r chi.Router) {
 	r.Get("/jethub/login-page/qr-image", h.loginPageQRImage)
 	r.Get("/jethub/login-page/poll", h.loginPagePoll)
 	r.Post("/jethub/login-page/complete", h.loginPageComplete)
+	// raccoon 短信登录（与二维码同一条会话；页面无鉴权，凭 loginId 访问）。
+	r.Post("/jethub/login-page/sms/send", h.loginPageSmsSend)
+	r.Post("/jethub/login-page/sms/login", h.loginPageSmsLogin)
 }
 
 // loginPageData GET ?loginId= — the QR payload + labels for the page.
@@ -70,28 +75,139 @@ func (h *Handler) loginPageData(w http.ResponseWriter, r *http.Request) {
 		payload["qrImage"] = "/api/jethub/login-page/qr-image?loginId=" + url.QueryEscape(sess.Key)
 		payload["bindForm"] = true
 	} else {
-		payload["qr"] = sess.Started.QRContent
+		payload["qr"] = raccoonQRContent(sess)
+		if flow := raccoonFlowOf(sess); flow != nil {
+			// 上游同款双入口：微信扫码 / 短信登录。短信需要阿里云滑块产物。
+			payload["sms"] = true
+			payload["captchaScene"] = corejethub.RaccoonCaptchaScene
+			payload["captchaPrefix"] = corejethub.RaccoonCaptchaPrefix
+		}
 	}
 	apibase.WriteJSON(w, http.StatusOK, payload)
 }
 
+// raccoonFlowOf extracts the raccoon scan/SMS flow (nil for other providers).
+func raccoonFlowOf(sess *corejethub.LoginSession) *corejethub.RaccoonQRFlow {
+	flow, _ := sess.Extra.(*corejethub.RaccoonQRFlow)
+	return flow
+}
+
+// raccoonQRContent returns the LIVE QR payload: the flow renews the ticket when
+// it expires (or the user cancels in WeChat), so the page must read through it
+// instead of the snapshot taken at StartRaccoonQRLogin.
+func raccoonQRContent(sess *corejethub.LoginSession) string {
+	if flow := raccoonFlowOf(sess); flow != nil {
+		if qr := flow.QRContent(); qr != "" {
+			return qr
+		}
+	}
+	if sess.Started != nil {
+		return sess.Started.QRContent
+	}
+	return ""
+}
+
 // loginPageStatus GET ?loginId= — passive poll (the pump owns the channel).
+//
+// raccoon 的 payload 里还带**当前**二维码：票据过期/被取消后宿主会自动换码，
+// 页面据此换图（否则用户只能盯着一个已经失效的码）。
 func (h *Handler) loginPageStatus(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.loginPageSession(w, r)
 	if !ok {
 		return
 	}
+	out := map[string]any{}
+	if flow := raccoonFlowOf(sess); flow != nil {
+		if qr := flow.QRContent(); qr != "" {
+			out["qr"] = qr
+		}
+	}
 	done, success, errMsg := corejethub.SessionStatus(sess)
 	if !done {
-		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": false})
+		out["done"] = false
+		apibase.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 	if !success {
-		apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": false, "error": errMsg})
+		out["done"] = true
+		out["success"] = false
+		out["error"] = errMsg
+		apibase.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 	// ⚠️ 不回 accountId（保护组外的响应只暴露登录是否完成）。
-	apibase.WriteJSON(w, http.StatusOK, map[string]any{"done": true, "success": true})
+	out["done"] = true
+	out["success"] = true
+	apibase.WriteJSON(w, http.StatusOK, out)
+}
+
+// raccoonPhoneRe 是短信登录的手机号形状（上游同款：11 位大陆号）。
+var raccoonPhoneRe = regexp.MustCompile(`^1[3-9]\d{9}$`)
+
+// loginPageSmsSend POST {loginId, phone, captchaToken} — raccoon 短信第 1 步。
+// 与二维码同一条会话：成功后 verification_id 记在流程上，页面不接触它。
+func (h *Handler) loginPageSmsSend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		LoginID      string `json:"loginId"`
+		Phone        string `json:"phone"`
+		CaptchaToken string `json:"captchaToken"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LoginID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "loginId required")
+		return
+	}
+	if !raccoonPhoneRe.MatchString(strings.TrimSpace(req.Phone)) {
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "请输入有效的 11 位手机号"})
+		return
+	}
+	sess, ok := corejethub.PeekLoginSession(req.LoginID)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown or settled loginId")
+		return
+	}
+	flow := raccoonFlowOf(sess)
+	if flow == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "this login session does not support SMS")
+		return
+	}
+	// ⚠️ 单步失败**不终止**流程（滑块过期/验证码输错很常见）：把原因回给页面，
+	// 让它就地提示并允许重试。
+	if err := h.d.Manager.SendRaccoonSmsForFlow(r.Context(), flow, strings.TrimSpace(req.Phone), req.CaptchaToken); err != nil {
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// loginPageSmsLogin POST {loginId, code} — raccoon 短信第 2 步（完成后会话结算）。
+func (h *Handler) loginPageSmsLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		LoginID string `json:"loginId"`
+		Code    string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LoginID == "" {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "loginId required")
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "请输入验证码"})
+		return
+	}
+	sess, ok := corejethub.PeekLoginSession(req.LoginID)
+	if !ok {
+		apibase.WriteAPIError(w, http.StatusNotFound, "unknown or settled loginId")
+		return
+	}
+	flow := raccoonFlowOf(sess)
+	if flow == nil {
+		apibase.WriteAPIError(w, http.StatusBadRequest, "this login session does not support SMS")
+		return
+	}
+	if err := h.d.Manager.SubmitRaccoonSmsForFlow(r.Context(), sess.Started, flow, sess.Account, strings.TrimSpace(req.Code)); err != nil {
+		apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	apibase.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "done": true})
 }
 
 // loginPageSession resolves the loginId to a live session that has a QR page.

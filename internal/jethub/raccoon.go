@@ -41,6 +41,15 @@ const (
 // raccoonAPIBase is a var so tests can repoint it at a mock server.
 var raccoonAPIBase = "https://xiaohuanxiong.com"
 
+// SetRaccoonAPIBaseForTest repoints the upstream base and returns the restore
+// func. It exists because the API-layer tests (a different package) need the
+// same hermetic mock-server treatment: 登录流程会真的发请求，单测里必须能拦。
+func SetRaccoonAPIBaseForTest(base string) func() {
+	old := raccoonAPIBase
+	raccoonAPIBase = base
+	return func() { raccoonAPIBase = old }
+}
+
 // raccoonInferURL is the FULL chat-completions endpoint. ⚠️ 不能只靠
 // Product.BaseURL：它填的是 host 根（目录/积分等端点的公共前缀），而
 // urlutil.BuildUpstreamURL 会按进站路径拼出 {host}/v1/chat/completions ——
@@ -147,6 +156,10 @@ func hexEncodeBase64(data []byte) string {
 }
 
 // GenerateRaccoonQrCode: 16 random bytes → 32 lowercase hex.
+//
+// ⚠️ 这是**旧**流程的客户端自造码（2026-10-23 起现网扫码页只认服务端下发的
+// `qr-<uuid>` 码，自造码会被判「二维码过期或已被使用」）。保留它只为兜底与
+// 存量单测，生产路径走 `CreateRaccoonQRTicket`（见 raccoon_identity.go）。
 func GenerateRaccoonQrCode() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -158,11 +171,16 @@ func GenerateRaccoonQrCode() string {
 	return hex.EncodeToString(b[:])
 }
 
-// BuildRaccoonQrURL: `{base}/login/mp?code=...&appname=商汤小浣熊官网` — a
-// public page; scanning completes the authorization in WeChat and the server
-// marks the code success.
+// raccoonQRLegacyScanPath 是扫码页路径。新流程用服务端下发的 `scan_path`
+// （当前同值），旧流程只能写死。
+const raccoonQRLegacyScanPath = "/login/mp"
+
+// BuildRaccoonQrURL 拼旧流程的二维码内容：`{base}/login/mp?code=...&appname=...`。
+// ⚠️ 缺 `source=platform`（现网扫码页按来源分支）⇒ 已不适用于生产，见
+// RaccoonQRURL。
 func BuildRaccoonQrURL(code string) string {
-	return raccoonAPIBase + "/login/mp?code=" + urlQueryEscape(code) + "&appname=" + urlQueryEscape("商汤小浣熊官网")
+	return raccoonAPIBase + raccoonQRLegacyScanPath + "?code=" + urlQueryEscape(code) +
+		"&appname=" + urlQueryEscape("商汤小浣熊官网")
 }
 
 // raccoonEnvelope is the unified business envelope (HTTP 200 + non-zero code
@@ -172,6 +190,10 @@ type raccoonEnvelope struct {
 	Message string
 	Details string
 	Data    map[string]any
+	// RawCode keeps the original `code` when it is a **string** (IAM 身份接口
+	// 用 `"OK"` / `"AUTH_QRCODE_EXPIRED"` 这类枚举，Code 会归一成 0 ⇒ 看上去
+	// 恒成功，详见 raccoon_identity.go 的文件头）。
+	RawCode string
 }
 
 // parseRaccoonEnvelope: code=HTTP status when the body carries no code and
@@ -183,6 +205,9 @@ func parseRaccoonEnvelope(payload map[string]any, status int) *raccoonEnvelope {
 		env.Message = bodyMessage(payload)
 		env.Details = jsonStringField(payload, "details")
 		env.Data, _ = payload["data"].(map[string]any)
+		if raw, ok := payload["code"].(string); ok {
+			env.RawCode = raw
+		}
 	}
 	if env.Code == 0 && status >= 400 {
 		env.Code = int64(status)

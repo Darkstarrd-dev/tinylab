@@ -5,16 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Free Hub · fhLoginTitle</title>
 <!--
-  Free Hub 本地登录页（扫码类 provider）。
+  Free Hub 本地登录页（扫码 / 短信类 provider）。
 
   ⚠️ 为什么需要这个页面（用户实测报障 2026-10-01）：「新建账号」原先直接打开
   `https://xiaohuanxiong.com/login/mp?code=...` —— 那串 URL 是**二维码的内容**
   （要被微信扫码后打开），不是给人用浏览器看的页面，所以「无法进行鉴权」。
-  参考插件同样是自建页面：宿主侧渲染二维码 + 轮询状态 + 成功后自动关闭。
 
   ⚠️ 本页是**公开**静态资源（无鉴权）：它可能在一个没有管理 UI cookie 的浏览器
   里被打开。所有数据都靠 `loginId`（128 位随机、一次性）换取，页面本身不含任何
   凭据或密钥。
+
+  ⚠️ 2026-10-23：新增**短信登录**入口（与上游界面一致：微信扫码 / 短信登录）。
+  短信需要阿里云滑块产物（`captcha_token`），故本页加载官方滑块脚本；脚本加载
+  失败时会退化「直接发送」，让服务端回明确原因（`captcha_verify_error`）。
 -->
 <style>
   :root { color-scheme: light; }
@@ -24,6 +27,12 @@
   .card { background: #fff; border-radius: 12px; padding: 20px 24px 24px;
           box-shadow: 0 4px 24px rgba(0,0,0,.08); text-align: center; width: 320px; }
   h1 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
+  .tabs { display: flex; gap: 8px; margin: 0 0 14px; }
+  .tabs button { flex: 1; padding: 8px 0; font-size: 13px; border: 1px solid #e5e6eb; border-radius: 8px;
+                 background: #fff; color: #4e5969; cursor: pointer; font-family: inherit; }
+  .tabs button[data-active="1"] { border-color: #1f2329; color: #1f2329; font-weight: 600; }
+  .pane { display: none; }
+  .pane[data-show="1"] { display: block; }
   .qr { width: 220px; height: 220px; display: flex; align-items: center; justify-content: center;
         margin: 0 auto; border: 1px solid #eceef1; border-radius: 8px; padding: 6px;
         box-sizing: content-box; background: #fff; }
@@ -33,14 +42,43 @@
   .status { margin-top: 12px; font-size: 13px; color: #4e5969; min-height: 20px; }
   .status[data-tone="ok"] { color: #0f9d58; font-weight: 600; }
   .status[data-tone="err"] { color: #d93026; }
+  label { display: block; text-align: left; font-size: 12px; color: #4e5969; margin: 10px 0 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 9px 10px; font-size: 14px;
+          border: 1px solid #e5e6eb; border-radius: 8px; font-family: inherit; }
+  input:focus { outline: none; border-color: #1f2329; }
+  .row { display: flex; gap: 8px; align-items: stretch; }
+  .row input { flex: 1; min-width: 0; }
+  .row button { white-space: nowrap; padding: 0 12px; }
+  button.primary { width: 100%; margin-top: 12px; padding: 10px 0; font-size: 14px; border: 0;
+                   border-radius: 8px; background: #1f2329; color: #fff; cursor: pointer; font-family: inherit; }
+  button.primary:disabled { opacity: .55; cursor: default; }
+  #captcha-element { margin-top: 8px; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1 id="page-title" data-fh="fhLoginTitle"></h1>
-    <div class="qr" id="qr-box"><span class="qr-placeholder" data-fh="fhLoginQrLoading"></span></div>
-    <p class="sub" id="qr-hint">打开微信扫一扫，扫描上方二维码</p>
-    <div class="status" id="status" data-fh="fhLoginPreparing"></div>
+    <div class="tabs" id="tabs" hidden>
+      <button id="tab-qr" type="button" data-active="1" data-fh="fhLoginTabQr"></button>
+      <button id="tab-sms" type="button" data-active="0" data-fh="fhLoginTabSms"></button>
+    </div>
+    <div class="pane" id="pane-qr" data-show="1">
+      <div class="qr" id="qr-box"><span class="qr-placeholder" data-fh="fhLoginQrLoading"></span></div>
+      <p class="sub" id="qr-hint" data-fh="fhLoginQrHint"></p>
+      <div class="status" id="status" data-fh="fhLoginPreparing"></div>
+    </div>
+    <div class="pane" id="pane-sms" data-show="0">
+      <label for="phone" data-fh="fhLoginPhonePlaceholder"></label>
+      <div class="row">
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel">
+        <button class="primary" id="send-code" type="button" data-fh="fhLoginSendCode"></button>
+      </div>
+      <div id="captcha-element"></div>
+      <label for="sms-code" data-fh="fhLoginCodePlaceholder"></label>
+      <input id="sms-code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <button class="primary" id="do-login" type="button" data-fh="fhLoginSubmit"></button>
+      <div class="status" id="sms-status"></div>
+    </div>
   </div>
 
 
@@ -68,6 +106,14 @@ window.FH_I18N = {
     fhLoginSendCode: 'Send code',
     fhLoginBindTitle: 'Bind your account',
     fhLoginInvalidCode: 'Invalid verification code',
+    fhLoginTabQr: 'WeChat QR',
+    fhLoginTabSms: 'SMS',
+    fhLoginPhoneInvalid: 'Enter a valid 11-digit phone number',
+    fhLoginSending: 'Sending…',
+    fhLoginSmsSent: 'Code sent — check your SMS',
+    fhLoginSmsFailed: 'Send failed, please retry',
+    fhLoginSigningIn: 'Signing in…',
+    fhLoginCaptchaMissing: 'Captcha widget unavailable — trying to send directly…'
   },
   cn: {
     fhLoginTitle: '登录',
@@ -82,12 +128,20 @@ window.FH_I18N = {
     fhLoginConnFailed: '无法连接 TinyLab（应用是否已退出？）',
     fhLoginSuccess: '登录成功，可以关闭此窗口了',
     fhLoginFailed: '登录失败',
-    fhLoginSubmit: '提交',
+    fhLoginSubmit: '登录',
     fhLoginPhonePlaceholder: '手机号',
     fhLoginCodePlaceholder: '短信验证码',
-    fhLoginSendCode: '发送验证码',
+    fhLoginSendCode: '获取验证码',
     fhLoginBindTitle: '绑定账号',
     fhLoginInvalidCode: '验证码错误',
+    fhLoginTabQr: '微信扫码',
+    fhLoginTabSms: '短信登录',
+    fhLoginPhoneInvalid: '请输入有效的 11 位手机号',
+    fhLoginSending: '发送中…',
+    fhLoginSmsSent: '验证码已发送，请查收短信',
+    fhLoginSmsFailed: '发送失败，请重试',
+    fhLoginSigningIn: '登录中…',
+    fhLoginCaptchaMissing: '验证码组件未加载，正在尝试直接发送…'
   }
 };
 window.fhT = function (key) {
@@ -97,6 +151,7 @@ window.fhT = function (key) {
 };
 </script>
 <script src="/raccoon-qr.js"></script>
+<script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
 <script>
 (function () {
   'use strict';
@@ -110,6 +165,7 @@ window.fhT = function (key) {
   var statusEl = document.getElementById('status');
   var qrBox = document.getElementById('qr-box');
   var timer = null;
+  var currentQr = '';
 
   function setStatus(text, tone) {
     statusEl.textContent = text;
@@ -119,7 +175,7 @@ window.fhT = function (key) {
 
   function fail(message) {
     if (timer) { clearInterval(timer); timer = null; }
-    setStatus(message || '登录失败', 'err');
+    setStatus(message || fhT('fhLoginFailed'), 'err');
   }
 
   function succeed(message) {
@@ -128,10 +184,35 @@ window.fhT = function (key) {
     setTimeout(function () { window.close(); }, 1200);
   }
 
+  function renderQr(content) {
+    if (!content || content === currentQr) { return true; }
+    try {
+      qrBox.innerHTML = window.RaccoonQR.renderQrSvg(content, { size: 220 });
+      currentQr = content;
+      return true;
+    } catch (e) {
+      fail(fhT('fhLoginQrFailed') + (e && e.message ? e.message : e));
+      return false;
+    }
+  }
+
   if (loginId === '') {
     fail(fhT('fhLoginMissingId'));
     return;
   }
+
+  // ── Tab 切换（短信入口只在服务端声明支持时出现）──
+  var tabs = document.getElementById('tabs');
+  var paneQr = document.getElementById('pane-qr');
+  var paneSms = document.getElementById('pane-sms');
+  function selectTab(sms) {
+    document.getElementById('tab-qr').setAttribute('data-active', sms ? '0' : '1');
+    document.getElementById('tab-sms').setAttribute('data-active', sms ? '1' : '0');
+    paneQr.setAttribute('data-show', sms ? '0' : '1');
+    paneSms.setAttribute('data-show', sms ? '1' : '0');
+  }
+  document.getElementById('tab-qr').addEventListener('click', function () { selectTab(false); });
+  document.getElementById('tab-sms').addEventListener('click', function () { selectTab(true); });
 
   // 一次性随机 loginId 作为凭据（页面本身无鉴权，也可能在无 cookie 的浏览器打开）。
   fetch('/api/jethub/login-page?loginId=' + encodeURIComponent(loginId))
@@ -148,11 +229,10 @@ window.fhT = function (key) {
         fail(fhT('fhLoginNoQr'));
         return;
       }
-      try {
-        qrBox.innerHTML = window.RaccoonQR.renderQrSvg(data.qr, { size: 220 });
-      } catch (e) {
-        fail(fhT('fhLoginQrFailed') + (e && e.message ? e.message : e));
-        return;
+      if (!renderQr(data.qr)) { return; }
+      if (data.sms) {
+        tabs.hidden = false;
+        initSms(data);
       }
       setStatus(fhT('fhLoginWaitingScan'));
       timer = setInterval(poll, POLL_INTERVAL_MS);
@@ -172,9 +252,110 @@ window.fhT = function (key) {
           else { fail(data.error || fhT('fhLoginFailed')); }
           return;
         }
+        // 宿主换码（票据过期/被取消）后页面立即换图，避免扫一个已失效的码。
+        if (data.qr && data.qr !== currentQr) {
+          if (renderQr(data.qr)) { setStatus(fhT('fhLoginWaitingScan')); }
+          return;
+        }
         setStatus(fhT('fhLoginWaitingScan'));
       })
       .catch(function () { /* 轮询偶发失败不打断（下一次继续） */ });
+  }
+
+  // ── 短信登录：手机号 → 阿里云滑块 → 下发验证码 → 验证码登录 ──
+  function initSms(data) {
+    var phoneInput = document.getElementById('phone');
+    var codeInput = document.getElementById('sms-code');
+    var sendBtn = document.getElementById('send-code');
+    var loginBtn = document.getElementById('do-login');
+    var smsStatus = document.getElementById('sms-status');
+    var captchaReady = false;
+    var pendingSend = false;
+
+    function setSmsStatus(text, tone) {
+      smsStatus.textContent = text || '';
+      if (tone) { smsStatus.setAttribute('data-tone', tone); }
+      else { smsStatus.removeAttribute('data-tone'); }
+    }
+
+    function sendSms(captchaToken) {
+      var phone = (phoneInput.value || '').trim();
+      if (!/^1[3-9][0-9]{9}$/.test(phone)) {
+        setSmsStatus(fhT('fhLoginPhoneInvalid'), 'err');
+        return;
+      }
+      sendBtn.disabled = true;
+      setSmsStatus(fhT('fhLoginSending'));
+      fetch('/api/jethub/login-page/sms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginId: loginId, phone: phone, captchaToken: captchaToken || '' })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res && res.ok) { setSmsStatus(fhT('fhLoginSmsSent'), 'ok'); }
+        else { setSmsStatus((res && res.message) || fhT('fhLoginSmsFailed'), 'err'); }
+      }).catch(function () {
+        setSmsStatus(fhT('fhLoginSmsFailed'), 'err');
+      }).finally(function () {
+        sendBtn.disabled = false;
+      });
+    }
+
+    function initCaptcha() {
+      if (typeof window.initAliyunCaptcha !== 'function') { return false; }
+      window.initAliyunCaptcha({
+        SceneId: data.captchaScene || '',
+        prefix: data.captchaPrefix || '',
+        mode: 'popup',
+        element: '#captcha-element',
+        button: '#send-code',
+        captchaVerifyCallback: function (captchaToken) {
+          pendingSend = true;
+          sendSms(captchaToken);
+          return { captchaResult: true, bizResult: true };
+        },
+        onBizResultCallback: function () { return null; },
+        getInstance: function () { return null; },
+        slideStyle: { width: 300, height: 40 },
+        language: (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'cn' : 'en'
+      });
+      return true;
+    }
+
+    captchaReady = initCaptcha();
+
+    sendBtn.addEventListener('click', function () {
+      if (!captchaReady) { captchaReady = initCaptcha(); }
+      if (!captchaReady || pendingSend) { return; }
+      // 脚本未加载（离线/被拦截）：退化为直接提交，让服务端回明确原因
+      // （实测会回 captcha 校验失败，页面据此提示用户）。
+      if (!captchaReady) {
+        setSmsStatus(fhT('fhLoginCaptchaMissing'));
+        sendSms('');
+      }
+    });
+
+    loginBtn.addEventListener('click', function () {
+      var code = (codeInput.value || '').trim();
+      if (!code) { setSmsStatus(fhT('fhLoginInvalidCode'), 'err'); return; }
+      loginBtn.disabled = true;
+      setSmsStatus(fhT('fhLoginSigningIn'));
+      fetch('/api/jethub/login-page/sms/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginId: loginId, code: code })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res && res.ok) {
+          setSmsStatus(fhT('fhLoginSuccess'), 'ok');
+          setTimeout(function () { window.close(); }, 1200);
+        } else {
+          setSmsStatus((res && res.message) || fhT('fhLoginInvalidCode'), 'err');
+        }
+      }).catch(function () {
+        setSmsStatus(fhT('fhLoginSmsFailed'), 'err');
+      }).finally(function () {
+        loginBtn.disabled = false;
+      });
+    });
   }
 })();
 </script>
