@@ -459,6 +459,18 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	// Runtime-verified dead models (R5, ref f8748fa): 静态兜底表是编译期快照，
 	// 上游下架模型时它不会自己变 —— 实证记录过的模型不再播报。
 	gone := h.d.Manager.DeadModels(provider)
+	// 强制刷新：当请求 ?refresh=1 时清空远端缓存并重新拉取（对齐上游 catalog.refresh 机制）
+	if r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true" {
+		switch provider {
+		case "raccoon":
+			corejethub.InvalidateRaccoonCatalogCache()
+		case "loomy":
+			corejethub.InvalidateLoomyCatalogCache()
+		case "accio":
+			corejethub.InvalidateAccioCatalogCache()
+		}
+		_ = h.d.Bridge.SyncKeys(provider)
+	}
 	// Dynamic model source wins (accio: remote catalog with offline fallback);
 	// the static product snapshot is the default.
 	models := prod.Models

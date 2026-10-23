@@ -1,3 +1,72 @@
+## 2026-10-23 — Raccoon IAM confirmation 激活与全渠道模型动态刷新机制（用户实测驱动）
+
+**用户报障**：
+1. 「raccoon渠道登录后，显示 `raccoon: iam_confirm_required: IAM confirmation required`」
+2. 「raccoon渠道，上游项目jet hub中有DeepSeek-V4.1-Flash-1017可选，FreeHub中没有，修复这个问题，以及其他渠道（比如loomy渠道中，上游项目有Spark-X2.6)，同步上游项目中的模型更新方式」
+
+**根因诊断与定位**：
+1. **小浣熊业务网关 200901 IAM 会话拦截**：
+   - 无论是扫码、短信还是密码登录，通过商汤统一身份认证（IAM）拿到 Bearer Token 之后，直接访问小浣熊业务网关（`/api/web/...`，包括积分余额 `/points/v1/balance`、模型目录 `/llm/v2/model_catalog`、推理聊天 `/llm/v2/chat/completions`）时，网关要求会话必须已经过 IAM 会话确认激活。
+   - 若未经激活，网关接口统一拦截并返回 `HTTP 400` + JSON 信封 `code: 200901, message: "iam_confirm_required: IAM confirmation required"`。
+   - 逆向小浣熊 Web 客户端核心 bundle（`428.js`）证实了官方机制：在调用任意业务 API 前或遭遇 `200901` 拦截时，客户端会自动请求 `POST /api/web/auth/v1/iam/confirm`（body `{}`），激活当前 token 对应的小浣熊业务会话。
+2. **模型缺失与更新机制脱节**：
+   - 远端模型目录接口 `/llm/v2/model_catalog` 在登录后拉取时遭遇上述 `200901` 报错，静默降级回落至静态 6 条兜底表，导致远端动态上架的 `sn-deepseek-v4-1-flash-1017`（展示名 `DeepSeek-V4.1-Flash-1017`）无法被拉取到。
+   - 上游项目建立了 20 分钟定期模型刷新机制（`createModelCatalogRefresher`）以及手动/事件刷新，而本端缺乏主动刷新触发链路，导致动态渠道（raccoon、loomy、accio）模型更新滞后。同时 loomy 缺少对上游新增 `spark-x2.6` / `spark-x2.6-preview` 256K 上下文窗口的覆盖。
+
+**修复实现**：
+- **IAM Confirmation 协议与透明自愈**：
+  - `internal/jethub/raccoon_identity.go`：新增 `ConfirmRaccoonIAM(ctx, token)`，出站发送 `POST /api/web/auth/v1/iam/confirm`，激活 token 业务会话。
+  - `internal/jethub/raccoon_provider.go`：在 `CompleteRaccoonLogin` 账号凭据落盘后，立即主动执行 `ConfirmRaccoonIAM` 激活会话并清除旧缓存。
+  - `internal/jethub/raccoon.go`：在 `raccoonRequest` 统一请求入口中建立 200901 透明自愈重试机制——捕获到 `200901` 或 `iam_confirm_required` 时，透明调用 `ConfirmRaccoonIAM` 激活会话并自动重发原请求。
+- **全渠道模型动态更新机制同步上游**：
+  - `internal/jethub/raccoon_models.go`、`loomy_models.go`、`accio_models.go`：新增并导出 `InvalidateRaccoonCatalogCache()`、`InvalidateLoomyCatalogCache()`、`InvalidateAccioCatalogCache()` 缓存清空入口。
+  - `internal/jethub/loomy_models.go`：在 `loomyContextWindowOverrides` 补全 `spark-x2.6` 与 `spark-x2.6-preview` 真实上下文窗口覆盖（262,144）。
+  - `internal/api/jethub/register.go`：`/models` 接口支持 `?refresh=1` / `?refresh=true` 参数，强制清空远端目录缓存重新拉取并触发 `Bridge.SyncKeys(provider)` 自动同步注册表。
+  - `web/static/jethub.js`：前端在账号完成登录以及点击「刷新积分」后，联动向 `/models?refresh=1` 发起刷新请求，实现界面与模型目录即时同步。
+  - `internal/jethub/codearts_refresh.go`：在后台生命周期调度器中新增对齐上游的 20 分钟定期模型刷新机制 `RefreshAllCatalogs`（`modelCatalogRefreshInterval = 20 * time.Minute`），后台静默定时同步最新模型上架并通知注册表。
+- **单测健全**：
+  - `internal/jethub/raccoon_identity_test.go`：新增 `TestConfirmRaccoonIAM` 和 `TestRaccoonRequestAutoHeals200901IAMConfirmRequired` 自愈测试。
+
+**验证结果**：
+- `go test -count=1 ./internal/jethub ./internal/api/jethub` PASS。
+- 全量 `go test ./internal/...` PASS。
+- 全量 `bun test web` PASS。
+
+## 2026-10-23 — Raccoon 微信扫码「iam出错」与短信登录无法输入/获取验证码修复（用户实测驱动）
+
+**用户报障**：「当前 raccoon 扫二维码仍然 iam 出错，短信验证打开的网页无法输入电话号码，获取验证码」。
+
+**根因诊断与定位**：
+1. **微信扫码手机报「iam出错」**：
+   - `internal/jethub/raccoon_identity.go` 的 `raccoonIAMRequest` 原先复用了桌面端出站请求逻辑，出站 Header 携带了桌面客户端特有的 `X-Client-Platform: desktop-windows` 和 `X-Client-Version: v1.0.35`。
+   - 而二维码 URL 参数为 `source=platform`（对应 Web 端平台认证）。当用户在微信小程序/手机端扫码授权时，商汤统一身份认证中心（IAM）检测到票据创建平台（desktop）与扫码来源（Web 平台）冲突，直接在手机端抛出 `IamError`。
+   - 同时 `RaccoonQRFlow.snapshot()` 每次动态计算 `now + expiresIn`，导致二维码自然过期检测失效、无法及时自动换码。
+2. **短信登录「无法输入电话号码」**：
+   - 在 `web/static/free-hub-login.html` 中，`.row`（flex 容器）内的获取验证码按钮 `<button class="primary" id="send-code">` 挂载了 `.primary` 类。
+   - `button.primary` 定义了 `width: 100%; margin-top: 12px;` 覆盖了 `.row button`，导致按钮在 flex 容器中撑满宽度，前面的手机号输入框 `<input id="phone">` 被 flex 容器严重挤压至宽度仅约 22 像素，用户无法正常点击与输入。
+3. **短信「无法获取验证码」**：
+   - 后端 `SendRaccoonSMS` 出站请求发送的是明文手机号。小浣熊统一身份认证中心接口严格要求手机号必须经 AES-128-CFB 加密（密钥 `senseraccoon2023`，IV 随机 16 字节，Base64 输出），否则服务端返回 `100003 params_encryted_error` 拒绝下发验证码。
+   - 前端缺乏手机号前置格式校验（`^1[3-9]\d{9}$`）与 60s 倒计时节流，容易空发或误弹滑块。
+
+**修复实现**：
+- **后端出站纯净化与传输加密**（`internal/jethub/raccoon_identity.go`）：
+  - `raccoonIAMRequest` 改用纯净的 Web 标头（标准 `Accept` / `Accept-Language` / `Content-Type`），剔除 `X-Client-Platform` 与 `X-Client-Version` 桌面端标头，彻底杜绝平台冲突引起的手机端「iam出错」。
+  - `SendRaccoonSMS` 与 `LoginRaccoonWithSMSVerification` 全面接入 `EncryptRaccoonPhone`（AES-128-CFB NoPadding Base64，密钥 `senseraccoon2023`），解决加密格式校验报错。
+  - `internal/jethub/raccoon_provider.go` 中 `RaccoonQRFlow` 引入绝对时间戳 `expiresAt`，确保二维码到期后平滑自动换码。
+- **前端页面与样式修复**（`web/static/free-hub-login.html`）：
+  - 增加 `.row button.primary { width: auto; margin-top: 0; min-width: 96px; padding: 0 12px; font-size: 13px; flex-shrink: 0; }` 样式，恢复输入框弹性宽度并消除垂直边距偏移，确保手机号输入框完全正常点击输入。
+  - 补充 `placeholder` 国际化支持，手机号与验证码输入框展示友好的占位文案。
+  - 优化短信交互：在捕获阶段（useCapture）拦截未输入或非法手机号，避免误弹阿里云滑块；发送成功后启动 60 秒倒计时防刷。
+- **单测与安全守卫守护**：
+  - `internal/jethub/raccoon_identity_test.go`：适配手机号密文解密断言与请求头纯净性校验，确保所有 IAM 请求不带桌面端标记。
+  - `web/raccoon-qr.test.js`：精准排除合法的 `captchaToken` 人机验证入参，同时守卫公开登录页面无管理 UI 凭据泄露。
+
+**验证结果**：
+- `go test ./internal/jethub -v -run "TestRaccoon"` 全部 35 例通过。
+- `go test ./internal/api/jethub -v` 全部 38 例通过。
+- `go test ./...` 全量通过。
+- `bun test web` 全量前端单测（含 `web/raccoon-qr.test.js`、`web/jethub.test.js`）全部通过。
+
 ## 2026-10-23 — R9：Raccoon 远端模型目录落地（用户报障驱动）
 
 **用户报障**：「Free Hub 的 provider Raccoon，上游项目有 `DeepSeek-V4.1-Flash-1017` 模型可用，

@@ -152,6 +152,9 @@ const codeartsRefreshLead = time.Hour
 // round (ref index.ts, including the startup first round).
 const codeartsRefreshSchedulerInterval = 30 * time.Minute
 
+// modelCatalogRefreshInterval mirrors ref model-catalog.ts createModelCatalogRefresher (20 min).
+const modelCatalogRefreshInterval = 20 * time.Minute
+
 // codeartsExpiryMs parses the credential expiry into a ms timestamp;
 // ok=false when missing/unparsable. Huawei emits "2006-01-02T15:04:05Z07:00"
 // -ish strings without strict RFC3339 sometimes; a couple of common layouts
@@ -324,6 +327,21 @@ func (m *Manager) RefreshAllCodeArts(ctx context.Context) {
 	}
 }
 
+// RefreshAllCatalogs 刷新各动态模型 provider 的远端目录并同步到注册表（对齐上游 catalog-refresher 20 分钟周期）。
+func (m *Manager) RefreshAllCatalogs(ctx context.Context) {
+	InvalidateRaccoonCatalogCache()
+	InvalidateLoomyCatalogCache()
+	InvalidateAccioCatalogCache()
+	m.mu.Lock()
+	hook := m.onAccountCredentialed
+	m.mu.Unlock()
+	if hook != nil {
+		hook("raccoon")
+		hook("loomy")
+		hook("accio")
+	}
+}
+
 // StartRefreshScheduler runs the codearts renewal loop until ctx is done: one
 // pass immediately (the plugin's startup first round) and then every 30
 // minutes (ref index.ts). Failures never surface to the user — they are
@@ -335,6 +353,8 @@ func (m *Manager) StartRefreshScheduler(ctx context.Context) {
 		m.RefreshAllAccio(ctx)
 		ticker := time.NewTicker(codeartsRefreshSchedulerInterval)
 		defer ticker.Stop()
+		catalogTicker := time.NewTicker(modelCatalogRefreshInterval)
+		defer catalogTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -343,6 +363,8 @@ func (m *Manager) StartRefreshScheduler(ctx context.Context) {
 				m.RefreshAllCodeArts(ctx)
 				m.RefreshAllOfficeace(ctx)
 				m.RefreshAllAccio(ctx)
+			case <-catalogTicker.C:
+				m.RefreshAllCatalogs(ctx)
 			}
 		}
 	}()

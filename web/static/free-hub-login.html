@@ -49,6 +49,7 @@
   .row { display: flex; gap: 8px; align-items: stretch; }
   .row input { flex: 1; min-width: 0; }
   .row button { white-space: nowrap; padding: 0 12px; }
+  .row button.primary { width: auto; margin-top: 0; min-width: 96px; padding: 0 12px; font-size: 13px; flex-shrink: 0; }
   button.primary { width: 100%; margin-top: 12px; padding: 10px 0; font-size: 14px; border: 0;
                    border-radius: 8px; background: #1f2329; color: #fff; cursor: pointer; font-family: inherit; }
   button.primary:disabled { opacity: .55; cursor: default; }
@@ -68,14 +69,14 @@
       <div class="status" id="status" data-fh="fhLoginPreparing"></div>
     </div>
     <div class="pane" id="pane-sms" data-show="0">
-      <label for="phone" data-fh="fhLoginPhonePlaceholder"></label>
+      <label for="phone" data-fh="fhLoginPhoneLabel"></label>
       <div class="row">
-        <input id="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel">
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" data-fh-placeholder="fhLoginPhonePlaceholder">
         <button class="primary" id="send-code" type="button" data-fh="fhLoginSendCode"></button>
       </div>
       <div id="captcha-element"></div>
-      <label for="sms-code" data-fh="fhLoginCodePlaceholder"></label>
-      <input id="sms-code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <label for="sms-code" data-fh="fhLoginCodeLabel"></label>
+      <input id="sms-code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" data-fh-placeholder="fhLoginCodePlaceholder">
       <button class="primary" id="do-login" type="button" data-fh="fhLoginSubmit"></button>
       <div class="status" id="sms-status"></div>
     </div>
@@ -101,8 +102,10 @@ window.FH_I18N = {
     fhLoginSuccess: 'Signed in — you can close this window',
     fhLoginFailed: 'Sign-in failed',
     fhLoginSubmit: 'Submit',
-    fhLoginPhonePlaceholder: 'Phone number',
-    fhLoginCodePlaceholder: 'SMS code',
+    fhLoginPhoneLabel: 'Phone number',
+    fhLoginPhonePlaceholder: 'Enter 11-digit phone number',
+    fhLoginCodeLabel: 'SMS verification code',
+    fhLoginCodePlaceholder: 'Enter 6-digit code',
     fhLoginSendCode: 'Send code',
     fhLoginBindTitle: 'Bind your account',
     fhLoginInvalidCode: 'Invalid verification code',
@@ -129,8 +132,10 @@ window.FH_I18N = {
     fhLoginSuccess: '登录成功，可以关闭此窗口了',
     fhLoginFailed: '登录失败',
     fhLoginSubmit: '登录',
-    fhLoginPhonePlaceholder: '手机号',
-    fhLoginCodePlaceholder: '短信验证码',
+    fhLoginPhoneLabel: '手机号',
+    fhLoginPhonePlaceholder: '请输入 11 位手机号',
+    fhLoginCodeLabel: '短信验证码',
+    fhLoginCodePlaceholder: '请输入 6 位短信验证码',
     fhLoginSendCode: '获取验证码',
     fhLoginBindTitle: '绑定账号',
     fhLoginInvalidCode: '验证码错误',
@@ -157,7 +162,8 @@ window.fhT = function (key) {
   'use strict';
 
   document.title = 'Free Hub — ' + fhT('fhLoginTitle');
-    document.querySelectorAll('[data-fh]').forEach(function (el) { el.textContent = fhT(el.getAttribute('data-fh')); });
+  document.querySelectorAll('[data-fh]').forEach(function (el) { el.textContent = fhT(el.getAttribute('data-fh')); });
+  document.querySelectorAll('[data-fh-placeholder]').forEach(function (el) { el.placeholder = fhT(el.getAttribute('data-fh-placeholder')); });
 
   var POLL_INTERVAL_MS = 2000;
   var params = new URLSearchParams(window.location.search);
@@ -270,12 +276,30 @@ window.fhT = function (key) {
     var loginBtn = document.getElementById('do-login');
     var smsStatus = document.getElementById('sms-status');
     var captchaReady = false;
-    var pendingSend = false;
+    var countdownTimer = null;
 
     function setSmsStatus(text, tone) {
       smsStatus.textContent = text || '';
       if (tone) { smsStatus.setAttribute('data-tone', tone); }
       else { smsStatus.removeAttribute('data-tone'); }
+    }
+
+    function startCountdown(sec) {
+      if (countdownTimer) { clearInterval(countdownTimer); }
+      var remain = sec;
+      sendBtn.disabled = true;
+      sendBtn.textContent = remain + 's';
+      countdownTimer = setInterval(function () {
+        remain--;
+        if (remain <= 0) {
+          clearInterval(countdownTimer);
+          countdownTimer = null;
+          sendBtn.disabled = false;
+          sendBtn.textContent = fhT('fhLoginSendCode');
+        } else {
+          sendBtn.textContent = remain + 's';
+        }
+      }, 1000);
     }
 
     function sendSms(captchaToken) {
@@ -291,48 +315,66 @@ window.fhT = function (key) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ loginId: loginId, phone: phone, captchaToken: captchaToken || '' })
       }).then(function (r) { return r.json(); }).then(function (res) {
-        if (res && res.ok) { setSmsStatus(fhT('fhLoginSmsSent'), 'ok'); }
-        else { setSmsStatus((res && res.message) || fhT('fhLoginSmsFailed'), 'err'); }
+        if (res && res.ok) {
+          setSmsStatus(fhT('fhLoginSmsSent'), 'ok');
+          startCountdown(60);
+        } else {
+          setSmsStatus((res && res.message) || fhT('fhLoginSmsFailed'), 'err');
+          sendBtn.disabled = false;
+        }
       }).catch(function () {
         setSmsStatus(fhT('fhLoginSmsFailed'), 'err');
-      }).finally(function () {
         sendBtn.disabled = false;
       });
     }
 
     function initCaptcha() {
       if (typeof window.initAliyunCaptcha !== 'function') { return false; }
-      window.initAliyunCaptcha({
-        SceneId: data.captchaScene || '',
-        prefix: data.captchaPrefix || '',
-        mode: 'popup',
-        element: '#captcha-element',
-        button: '#send-code',
-        captchaVerifyCallback: function (captchaToken) {
-          pendingSend = true;
-          sendSms(captchaToken);
-          return { captchaResult: true, bizResult: true };
-        },
-        onBizResultCallback: function () { return null; },
-        getInstance: function () { return null; },
-        slideStyle: { width: 300, height: 40 },
-        language: (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'cn' : 'en'
-      });
-      return true;
+      try {
+        window.initAliyunCaptcha({
+          SceneId: data.captchaScene || '',
+          prefix: data.captchaPrefix || '',
+          mode: 'popup',
+          element: '#captcha-element',
+          button: '#send-code',
+          captchaVerifyCallback: function (captchaToken) {
+            sendSms(captchaToken);
+            return { captchaResult: true, bizResult: true };
+          },
+          onBizResultCallback: function () { return null; },
+          getInstance: function () { return null; },
+          slideStyle: { width: 300, height: 40 },
+          language: (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'cn' : 'en'
+        });
+        return true;
+      } catch (e) {
+        return false;
+      }
     }
 
     captchaReady = initCaptcha();
 
-    sendBtn.addEventListener('click', function () {
+    // 在捕获阶段校验手机号，防止未输入或非法手机号时弹出滑块
+    sendBtn.addEventListener('click', function (e) {
+      if (countdownTimer) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
+      var phone = (phoneInput.value || '').trim();
+      if (!/^1[3-9][0-9]{9}$/.test(phone)) {
+        setSmsStatus(fhT('fhLoginPhoneInvalid'), 'err');
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
       if (!captchaReady) { captchaReady = initCaptcha(); }
-      if (!captchaReady || pendingSend) { return; }
       // 脚本未加载（离线/被拦截）：退化为直接提交，让服务端回明确原因
-      // （实测会回 captcha 校验失败，页面据此提示用户）。
       if (!captchaReady) {
         setSmsStatus(fhT('fhLoginCaptchaMissing'));
         sendSms('');
       }
-    });
+    }, true);
 
     loginBtn.addEventListener('click', function () {
       var code = (codeInput.value || '').trim();

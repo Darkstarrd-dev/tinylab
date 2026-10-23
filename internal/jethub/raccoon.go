@@ -264,7 +264,19 @@ func (m *Manager) raccoonRequest(ctx context.Context, cred *RaccoonCredential, m
 		}
 		return nil, fmt.Errorf("raccoon: 响应不是 JSON（HTTP %d）", resp.StatusCode)
 	}
-	return parseRaccoonEnvelope(parsed, resp.StatusCode), nil
+	env := parseRaccoonEnvelope(parsed, resp.StatusCode)
+	// ⚠️ 200901 自愈：小浣熊业务接口提示 iam_confirm_required 时，
+	// 自动调用一次 ConfirmRaccoonIAM 激活业务会话并重试当前请求。
+	if (env.Code == 200901 || env.Message == "iam_confirm_required" || strings.Contains(env.Details, "IAM confirmation required")) &&
+		cred != nil && cred.AccessToken != "" && !strings.Contains(url, "/iam/confirm") {
+		if ctx.Value("raccoon_iam_confirmed") == nil {
+			if confirmErr := m.ConfirmRaccoonIAM(ctx, cred.AccessToken); confirmErr == nil {
+				retryCtx := context.WithValue(ctx, "raccoon_iam_confirmed", true)
+				return m.raccoonRequest(retryCtx, cred, method, url, body)
+			}
+		}
+	}
+	return env, nil
 }
 
 // credentialFromEnvelope extracts the credential; a missing access_token

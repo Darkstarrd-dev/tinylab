@@ -101,9 +101,13 @@ func loomyDisplayName(raw string) string {
 // --- 覆盖表（ref loomy-product.ts：远端与兜底表两条路径同一判据） ---
 
 // loomyContextWindowOverrides 是逐模型的上下文窗口硬覆盖。
-// ⚠️ spark-x：远端虚报 1048576，官方客户端本地表与上游墙位都是 262144
+// ⚠️ spark-x 族：远端虚报 1048576，官方客户端本地表与上游墙位都是 262144
 // （Gitee IKJW31）。查表键必须小写（loomyCatalogKey 归一）。
-var loomyContextWindowOverrides = map[string]int{"spark-x": 262_144}
+var loomyContextWindowOverrides = map[string]int{
+	"spark-x":             262_144,
+	"spark-x2.6":         262_144,
+	"spark-x2.6-preview": 262_144,
+}
 
 // loomyImageCapabilityOverrides 是「远端漏报但实测能读图」的补报表。
 // ⚠️ 只放实测确认的个案；qwen-3.8-max 远端只下发 text 却实测读得出图
@@ -238,6 +242,15 @@ var loomyCatalogCache = struct {
 	failed   bool
 	inflight bool
 }{}
+
+// InvalidateLoomyCatalogCache 清空 Loomy 远端目录缓存（账号登录/变动或手动刷新时调用）。
+func InvalidateLoomyCatalogCache() {
+	loomyCatalogCache.mu.Lock()
+	defer loomyCatalogCache.mu.Unlock()
+	loomyCatalogCache.models = nil
+	loomyCatalogCache.fetched = time.Time{}
+	loomyCatalogCache.failed = false
+}
 
 // loomyFetchModels 拉取一次远端目录（token 头 —— 业务端点；Bearer 会 100002）。
 func (m *Manager) loomyFetchModels(ctx context.Context, token string) ([]loomyRemoteModel, error) {

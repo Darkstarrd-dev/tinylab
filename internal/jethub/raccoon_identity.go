@@ -39,6 +39,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -54,6 +55,7 @@ const (
 	raccoonIAMSMSendPath     = "/sms/send"
 	raccoonIAMSMSLoginPath   = "/auth/login/sms"
 	raccoonIAMAccountPath    = "/account"
+	raccoonIAMConfirmPath    = "/iam/confirm"
 	raccoonIAMSMSNationCode  = "86"
 	raccoonIAMSMSScene       = "login"
 	raccoonQRSourcePlatform  = "platform"
@@ -113,15 +115,41 @@ func (m *Manager) raccoonIAMRequest(ctx context.Context, method, path, body stri
 }
 
 // raccoonIAMRequestAs 是带 Bearer 的变体（`/account` 这类需要登录态的读端点）。
+//
+// ⚠️ 独立出站管线：**不能带 Desktop 客户端专用的平台 Header**（如
+// `X-Client-Platform: desktop-windows` 或 `X-Client-Version`），否则小浣熊
+// IAM 认证中心会把生成的票据归属到桌面端，导致手机微信扫码时报平台冲突（用户
+// 实测报障「当前 raccoon 扫二维码仍然 iam 出错」）。IAM 接口仅需标准的 Web Headers。
 func (m *Manager) raccoonIAMRequestAs(ctx context.Context, method, path, body, token string) (map[string]any, error) {
-	var cred *RaccoonCredential
-	if token != "" {
-		cred = &RaccoonCredential{AccessToken: token}
+	var reader io.Reader
+	if body != "" {
+		reader = strReader(body)
 	}
-	env, err := m.raccoonRequest(ctx, cred, method, raccoonAPIBase+raccoonIAMPrefix+path, body)
+	url := raccoonAPIBase + raccoonIAMPrefix + path
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := m.httpClient("raccoon").Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("raccoon: 身份接口请求失败：%w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return nil, fmt.Errorf("raccoon: 凭据已失效（HTTP %d），请重新登录", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("raccoon: 身份接口响应不是 JSON（HTTP %d）", resp.StatusCode)
+	}
+	env := parseRaccoonEnvelope(parsed, resp.StatusCode)
 	if env.Data == nil {
 		return nil, env.err("身份接口返回空数据")
 	}
@@ -214,12 +242,16 @@ func (m *Manager) CancelRaccoonQRTicket(ctx context.Context, code string) {
 
 // SendRaccoonSMS 下发短信验证码（`POST /sms/send`）。
 //
-// ⚠️ 手机号走**明文**（IAM 与旧 desktop 接口不同，后者要求 AES-128-CFB 加密）；
+// ⚠️ 手机号必须走 AES-128-CFB 加密（小浣熊统一身份认证中心要求）；
 // `captcha_token` 是阿里云滑块产物的**必需项**（空/伪造一律 400）。
 func (m *Manager) SendRaccoonSMS(ctx context.Context, phone, captchaToken string) (string, error) {
+	encryptedPhone, err := EncryptRaccoonPhone(phone, nil)
+	if err != nil {
+		return "", fmt.Errorf("raccoon: 加密手机号失败：%w", err)
+	}
 	body, _ := json.Marshal(map[string]string{
 		"nation_code":   raccoonIAMSMSNationCode,
-		"phone":         phone,
+		"phone":         encryptedPhone,
 		"captcha_token": captchaToken,
 		"scene":         raccoonIAMSMSScene,
 	})
@@ -237,9 +269,13 @@ func (m *Manager) SendRaccoonSMS(ctx context.Context, phone, captchaToken string
 // LoginRaccoonWithSMSVerification 用手机号 + 验证码完成登录
 // （`POST /auth/login/sms`）。
 func (m *Manager) LoginRaccoonWithSMSVerification(ctx context.Context, phone, verificationID, smsCode string) (*RaccoonCredential, error) {
+	encryptedPhone, err := EncryptRaccoonPhone(phone, nil)
+	if err != nil {
+		return nil, fmt.Errorf("raccoon: 加密手机号失败：%w", err)
+	}
 	body, _ := json.Marshal(map[string]string{
 		"nation_code":       raccoonIAMSMSNationCode,
-		"phone":             phone,
+		"phone":             encryptedPhone,
 		"verification_id":   verificationID,
 		"verification_code": smsCode,
 	})
@@ -287,4 +323,45 @@ func (m *Manager) FetchRaccoonAccountInfo(ctx context.Context, cred *RaccoonCred
 	return jsonStringField(user, "platform_user_id"),
 		jsonStringField(user, "name"),
 		jsonStringField(user, "phone")
+}
+
+// ConfirmRaccoonIAM 向小浣熊业务网关确认 IAM 会话（`POST /api/web/auth/v1/iam/confirm`）。
+//
+// ⚠️ 小浣熊架构硬约束：通过 IAM 登录（微信扫码或短信）签发的 access_token，在访问业务接口
+// （`/api/web/...`，包括余额 / 模型目录 / 聊天推理）之前，必须先调此端点进行业务会话确认；
+// 否则服务端业务网关统一报错 200901（`iam_confirm_required: IAM confirmation required`）。
+func (m *Manager) ConfirmRaccoonIAM(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("jethub: raccoon confirm token empty")
+	}
+	url := raccoonAPIBase + raccoonAuthPrefix + raccoonIAMConfirmPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader("{}"))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Raccoon-Language", "zh")
+
+	resp, err := m.httpClient("raccoon").Do(req)
+	if err != nil {
+		return fmt.Errorf("jethub: raccoon iam confirm: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("jethub: raccoon iam confirm read body: %w", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return fmt.Errorf("jethub: raccoon iam confirm json decode: %w", err)
+	}
+	env := parseRaccoonEnvelope(payload, resp.StatusCode)
+	if env.Code != 0 {
+		return env.err("IAM 会话确认失败")
+	}
+	return nil
 }

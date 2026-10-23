@@ -114,8 +114,10 @@ check('login page references the QR asset and only public endpoints', () => {
   assert.ok(PAGE_SRC.includes('window.close()'), 'page must close itself after a successful login');
   assert.ok(PAGE_SRC.includes('RaccoonQR.renderQrSvg'), 'page must render the QR client-side');
   // 页面在无 cookie 的浏览器里打开：绝不能要求管理 UI 的凭据，也不能泄露 token。
+  // 短信登录包含第三方人机验证入参（captchaToken），不属于管理 UI 凭据。
+  const sanitized = PAGE_SRC.toLowerCase().replace(/captcha_?token/g, '');
   for (const needle of ['token', 'credential', 'Authorization', 'password']) {
-    assert.ok(!PAGE_SRC.toLowerCase().includes(needle.toLowerCase()),
+    assert.ok(!sanitized.includes(needle.toLowerCase()),
       'the public page must not mention ' + needle);
   }
 });

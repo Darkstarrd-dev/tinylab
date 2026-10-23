@@ -70,10 +70,11 @@ func (m *Manager) StartRaccoonQRLogin(ctx context.Context, accountID, pageURL st
 // ⚠️ 页面（公开 HTTP 端点）与泵 goroutine 都会读写它 ⇒ 全部走锁；`done` 用来
 // 在流程落定后让泵停下（短信登录成功时也用它 —— 否则泵会继续轮询二维码）。
 type RaccoonQRFlow struct {
-	mu     sync.Mutex
-	qr     string
-	ticket *RaccoonQRTicket
-	legacy bool
+	mu        sync.Mutex
+	qr        string
+	ticket    *RaccoonQRTicket
+	legacy    bool
+	expiresAt int64
 
 	verificationID string
 	phone          string
@@ -120,6 +121,10 @@ func (f *RaccoonQRFlow) update(qr string, ticket *RaccoonQRTicket, legacy bool) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.qr, f.ticket, f.legacy = qr, ticket, legacy
+	f.expiresAt = 0
+	if ticket != nil && ticket.ExpiresIn > 0 {
+		f.expiresAt = timeNowPlus(ticket.ExpiresIn)
+	}
 }
 
 // snapshot 返回当前票据（码、轮询间隔、到期时刻、是否旧流程）。
@@ -128,14 +133,12 @@ func (f *RaccoonQRFlow) snapshot() (code string, interval time.Duration, expires
 	defer f.mu.Unlock()
 	interval = raccoonQRPollInterval
 	legacy = f.legacy
+	expiresAt = f.expiresAt
 	if f.ticket == nil {
-		return "", interval, 0, legacy
+		return "", interval, expiresAt, legacy
 	}
 	if f.ticket.PollInterval > 0 {
 		interval = f.ticket.PollInterval
-	}
-	if f.ticket.ExpiresIn > 0 {
-		expiresAt = timeNowPlus(f.ticket.ExpiresIn)
 	}
 	return f.ticket.Code, interval, expiresAt, legacy
 }
@@ -268,6 +271,14 @@ func (m *Manager) CompleteRaccoonLogin(accountID string, cred *RaccoonCredential
 	if err := m.SetCredential(acc.Provider, acc.CredentialRef, credJSON, RaccoonExpiresAtMs(cred), RaccoonRefreshable(cred)); err != nil {
 		return err
 	}
+	// ⚠️ IAM 会话确认：必须在访问业务接口前激活会话，防止后续查询余额和拉取目录报 200901 iam_confirm_required
+	if cred.AccessToken != "" {
+		if err := m.ConfirmRaccoonIAM(context.Background(), cred.AccessToken); err != nil && m.logger != nil {
+			m.logger.Warn("[jethub] raccoon 登录后 IAM 会话确认失败: %v", err)
+		}
+	}
+	// 清空目录缓存，确保后续能立即拉到最新远端模型目录（如 -1017）
+	InvalidateRaccoonCatalogCache()
 	// user_info 补齐展示信息（失败不阻塞——只影响昵称显示）。
 	userID, nickname, officeIdentity, phone := m.FetchRaccoonUserInfo(context.Background(), cred)
 	if officeIdentity != "" && cred.OfficeIdentity == "" {

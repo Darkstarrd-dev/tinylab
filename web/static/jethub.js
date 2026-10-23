@@ -564,6 +564,14 @@ async function jethubRefreshCredits(providerId) {
   if (!provider) return;
   __jethubState.creditsLoading = false; // allow a fresh run
   __jethubSetNotice({ tone: 'info', text: t('freeHubCreditsLoading') });
+  try {
+    var modelsData = await apiGet('/jethub/providers/' + encodeURIComponent(providerId) + '/models?refresh=1');
+    if (modelsData && modelsData.models) {
+      __jethubState.models = modelsData.models;
+      var modelsSec = document.getElementById('free-hub-models-section');
+      if (modelsSec) modelsSec.innerHTML = __jethubModelsSection(provider);
+    }
+  } catch (e) {}
   await __jethubLoadCredits(provider);
   __jethubSetNotice(null);
 }
@@ -1163,6 +1171,13 @@ function __jethubLoginWaitingModal(providerId, created) {
       if (st.done === true) {
         if (st.success) {
           finish(t('freeHubLoginOk'), 'success');
+          apiGet('/jethub/providers/' + encodeURIComponent(providerId) + '/models?refresh=1').then(function(m) {
+            if (m && m.models) {
+              __jethubState.models = m.models;
+              var modelsSec = document.getElementById('free-hub-models-section');
+              if (modelsSec) modelsSec.innerHTML = __jethubModelsSection(provider);
+            }
+          }).catch(function() {});
         } else {
           finish(t('freeHubLoginFailed', [st.error || '']), 'error');
         }

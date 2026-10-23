@@ -6,6 +6,8 @@ package jethub
 // 「二维码过期或已被使用」—— 旧流程的自造码不被现网扫码页接受）。
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -13,6 +15,27 @@ import (
 	"testing"
 	"time"
 )
+
+// decryptRaccoonPhone 测试专用辅助：解密 AES-128-CFB 手机号密文
+func decryptRaccoonPhone(encrypted string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) <= 16 {
+		return "", fmt.Errorf("payload too short")
+	}
+	iv := raw[:16]
+	ciphertext := raw[16:]
+	block, err := aes.NewCipher([]byte(raccoonPhoneCipherSecret))
+	if err != nil {
+		return "", err
+	}
+	stream := cipher.NewCFBDecrypter(block, iv)
+	plaintext := make([]byte, len(ciphertext))
+	stream.XORKeyStream(plaintext, ciphertext)
+	return string(plaintext), nil
+}
 
 // raccoonTestJWT 造一个只带 exp 的假 JWT（jwtExpiresAtMs 不校验签名）。
 func raccoonTestJWT(exp int64) string {
@@ -42,8 +65,10 @@ func TestRaccoonQRURLUsesScanPathAndSource(t *testing.T) {
 
 func TestRaccoonCreateQRTicketParsesServerTicket(t *testing.T) {
 	var gotPath, gotBody string
+	var gotHeader http.Header
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotHeader = r.Header.Clone()
 		buf := make([]byte, 64)
 		n, _ := r.Body.Read(buf)
 		gotBody = string(buf[:n])
@@ -58,6 +83,9 @@ func TestRaccoonCreateQRTicketParsesServerTicket(t *testing.T) {
 	}
 	if gotPath != "/api/iam/v1/auth/mp/qrcode" {
 		t.Fatalf("path = %s", gotPath)
+	}
+	if p := gotHeader.Get("X-Client-Platform"); p != "" {
+		t.Fatalf("CreateQRTicket must not contain X-Client-Platform, got %q", p)
 	}
 	if strings.TrimSpace(gotBody) != "{}" {
 		t.Fatalf("body = %q (want empty object)", gotBody)
@@ -251,15 +279,18 @@ func TestRaccoonSMSSendAndLogin(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Unix()
 	token := raccoonTestJWT(exp)
 	var sendBody, loginBody string
+	var sendHeaders, loginHeaders http.Header
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		buf := make([]byte, 512)
 		n, _ := r.Body.Read(buf)
 		switch r.URL.Path {
 		case "/api/iam/v1/sms/send":
 			sendBody = string(buf[:n])
+			sendHeaders = r.Header.Clone()
 			_, _ = w.Write([]byte(`{"code":"OK","data":{"verification_id":"ver-1","expires_in":300,"retry_after":60}}`))
 		case "/api/iam/v1/auth/login/sms":
 			loginBody = string(buf[:n])
+			loginHeaders = r.Header.Clone()
 			_, _ = w.Write([]byte(`{"code":"OK","data":{"access_token":"` + token + `","token_type":"bearer"}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -275,10 +306,22 @@ func TestRaccoonSMSSendAndLogin(t *testing.T) {
 	if err := m.SendRaccoonSmsForFlow(ctxBackground(), flow, "13011111111", "captcha-tok"); err != nil {
 		t.Fatalf("send sms: %v", err)
 	}
-	for _, want := range []string{`"phone":"13011111111"`, `"captcha_token":"captcha-tok"`, `"nation_code":"86"`, `"scene":"login"`} {
+	if p := sendHeaders.Get("X-Client-Platform"); p != "" {
+		t.Fatalf("IAM request must not contain X-Client-Platform, got %q", p)
+	}
+	for _, want := range []string{`"captcha_token":"captcha-tok"`, `"nation_code":"86"`, `"scene":"login"`} {
 		if !strings.Contains(sendBody, want) {
 			t.Fatalf("send body %s must contain %s", sendBody, want)
 		}
+	}
+	var sendReq struct {
+		Phone string `json:"phone"`
+	}
+	if err := jsonUnmarshal([]byte(sendBody), &sendReq); err != nil {
+		t.Fatalf("unmarshal send body: %v", err)
+	}
+	if decrypted, err := decryptRaccoonPhone(sendReq.Phone); err != nil || decrypted != "13011111111" {
+		t.Fatalf("decrypted send phone = %q (err: %v)", decrypted, err)
 	}
 	if phone, id := flow.SMSState(); phone != "13011111111" || id != "ver-1" {
 		t.Fatalf("SMS state = %q / %q", phone, id)
@@ -287,10 +330,22 @@ func TestRaccoonSMSSendAndLogin(t *testing.T) {
 	if err := m.SubmitRaccoonSmsForFlow(ctxBackground(), started, flow, accountID, "123456"); err != nil {
 		t.Fatalf("sms login: %v", err)
 	}
-	for _, want := range []string{`"verification_id":"ver-1"`, `"verification_code":"123456"`, `"phone":"13011111111"`} {
+	if p := loginHeaders.Get("X-Client-Platform"); p != "" {
+		t.Fatalf("IAM login request must not contain X-Client-Platform, got %q", p)
+	}
+	for _, want := range []string{`"verification_id":"ver-1"`, `"verification_code":"123456"`} {
 		if !strings.Contains(loginBody, want) {
 			t.Fatalf("login body %s must contain %s", loginBody, want)
 		}
+	}
+	var loginReq struct {
+		Phone string `json:"phone"`
+	}
+	if err := jsonUnmarshal([]byte(loginBody), &loginReq); err != nil {
+		t.Fatalf("unmarshal login body: %v", err)
+	}
+	if decrypted, err := decryptRaccoonPhone(loginReq.Phone); err != nil || decrypted != "13011111111" {
+		t.Fatalf("decrypted login phone = %q (err: %v)", decrypted, err)
 	}
 	// 结果送达页面流程（泵已停，不会再有第二个结果）。
 	select {
@@ -313,6 +368,74 @@ func TestRaccoonSMSSendAndLogin(t *testing.T) {
 	}
 	if cred.AccessToken != token {
 		t.Fatalf("persisted token = %q", cred.AccessToken)
+	}
+}
+
+// --- IAM Confirmation (解决 200901 iam_confirm_required) ---
+
+func TestConfirmRaccoonIAM(t *testing.T) {
+	var gotPath, gotMethod, gotAuth string
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{}}`))
+	})
+	restoreRaccoonAPIBase(t, srv.URL)
+
+	m := newTestManager(t).m
+	if err := m.ConfirmRaccoonIAM(ctxBackground(), "test-token-123"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if gotPath != "/api/web/auth/v1/iam/confirm" || gotMethod != http.MethodPost {
+		t.Fatalf("path = %s, method = %s", gotPath, gotMethod)
+	}
+	if gotAuth != "Bearer test-token-123" {
+		t.Fatalf("auth = %s", gotAuth)
+	}
+}
+
+func TestRaccoonRequestAutoHeals200901IAMConfirmRequired(t *testing.T) {
+	var confirmCalled bool
+	var callCount int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/web/auth/v1/iam/confirm":
+			confirmCalled = true
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{}}`))
+		case "/api/web/points/v1/balance":
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code":200901,"message":"iam_confirm_required","details":"IAM confirmation required","data":{}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"available_points":888}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	restoreRaccoonAPIBase(t, srv.URL)
+
+	m := newTestManager(t).m
+	cred := &RaccoonCredential{AccessToken: "iam-jwt-token"}
+	env, err := m.raccoonRequest(ctxBackground(), cred, http.MethodGet, srv.URL+"/api/web/points/v1/balance", "")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if !confirmCalled {
+		t.Fatal("200901 must trigger ConfirmRaccoonIAM")
+	}
+	if callCount != 2 {
+		t.Fatalf("expected 2 calls, got %d", callCount)
+	}
+	if env.Code != 0 {
+		t.Fatalf("expected healed env.Code == 0, got %d", env.Code)
+	}
+	if val, ok := env.Data["available_points"].(float64); !ok || val != 888 {
+		t.Fatalf("expected available_points 888, got %v", env.Data["available_points"])
 	}
 }
 

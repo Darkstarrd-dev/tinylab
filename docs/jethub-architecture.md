@@ -1,6 +1,6 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-23（**R9：Raccoon 远端模型目录落地**——用户报障「上游 raccoon 有 `DeepSeek-V4.1-Flash-1017`，Free Hub 里没有」：上游列表是远端实时（`raccoon-auth.ts` `fetchModels` + `parseRaccoonModelCatalog`），2026-10-21 起滚动上架同族新版本 `sn-deepseek-v4-1-flash-1017`，本端此前只有 6 条静态兜底表（2026-09-26 快照）⇒ 新增 `internal/jethub/raccoon_models.go`：复用 `raccoonRequest` 的 `GET {apiBase}/api/web/llm/v2/model_catalog`（20s 超时、`code == 0` 才算成功）+ `raccoonModelsFromData`（只取 `type === 'chat'` 组、**id 在 `name` 字段**、显式 `visible:false` 剔除、去重保序）+ `raccoonMultiplier`（**缺失传 -1，不得当 0 显示成免费**）+ `raccoonSupportsImageWith`/`raccoonTextOnlyModels`（**默认支持识图、不看 `tags.vision`**，按基础 id 剥 `-\d{4}$` 命中纯文本集合）+ 进程内缓存（成功 10min/失败 30s/并发去重/无凭据不打上游/兜底不缓存）+ `RaccoonModelsFor` 接线 `Product.ModelsFor`（`SyncKeys` 与 `/models` API 共用，离线回落 6 条兜底表；⚠️ 兜底表刻意不抄新条目）。仅影响列表可见性（raccoon 路由不依赖模型表，手敲 `{prefix}/{id}` 本来就能调）。回归 `internal/jethub/raccoon_models_test.go`（12 例，含 `-1017` 条目回归）+ 三处反向验证。覆盖仍是 18 家 provider。**）
+> **最后核对：** 2026-10-23（**Raccoon IAM 会话激活与全渠道模型动态刷新机制落地**——① Raccoon 登录后报 200901 `iam_confirm_required` 根因：小浣熊业务网关拦截未激活会话；修复：`internal/jethub/raccoon_identity.go` 新增 `ConfirmRaccoonIAM` 调 `POST /api/web/auth/v1/iam/confirm`，`raccoonRequest` 建立 200901 透明自愈重发，`CompleteRaccoonLogin` 登录完成主动激活。② Raccoon `DeepSeek-V4.1-Flash-1017` 及 Loomy `Spark-X2.6` 等模型更新同步：远端目录解封后自动返回 `sn-deepseek-v4-1-flash-1017`；`internal/api/jethub/register.go` 的 `/models` 支持 `?refresh=1` 联动清除缓存并 `SyncKeys`，前端登录及刷新积分时主动刷新；`internal/jethub/codearts_refresh.go` 引入对齐上游的 20 分钟定期模型刷新调度器；`internal/jethub/loomy_models.go` 补齐 `spark-x2.6` 256K 上下文覆盖。单测全绿，覆盖仍是 18 家 provider。过程叙述见 docs/changelog/jethub-architecture.md。）
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
 > **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 余额 / 目录 / 推理 200（无 3012）见 §6.7。⚠️ **R4-1（2026-10-05）删除了「导入官方客户端凭据」旁路**（安全/正确性/一致性三条理由见 §6.7）。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
@@ -137,16 +137,19 @@
 
 **缺陷 15（codearts 无 `access_token` ⇒ 桥接 provider 被静默摘除）**：用户实测「codearts agent 可添加，但按 prefix 取不到模型、无法调用」。根因：`Bridge.SyncKeys` 对每个启用账号取 `accessTokenOf(provider, cred)`，取不到就跳过；可用 Key 数为 0 时**桥接 provider 被整个移除**（前缀还在，但 registry 里没有 provider ⇒ 模型列表看不到、`{prefix}/{model}` 无从路由）。而 codearts 的凭据是 SDK-HMAC 的 `access_key_id`/`secret_access_key`/`security_token`，**没有 `access_token` 字段**，通用提取器恒返回空串 —— 其余 10 个 provider 都自带 `access_token` 或已注册专属提取器，只有它是「无令牌」签名型凭据。修复：注册 codearts 专属提取器（`security_token` 优先、退一步 `access_key_id`；再兜底 `access_token` 以让手写/旧夹具凭据仍被桥接，由 augmenter 报「凭据不完整」这种明确错误）。⚠️ 该 Key **不参与出站鉴权**：codearts 的 augmenter 用 ak/sk 重签并覆盖全部出站头，`Key.Key` 只用于轮询选号/用量归属/日志遮蔽。回归 `internal/jethub/bridge_keys_test.go`：**用真实凭据结构体**逐 provider 断言能取出非空 Key（此前的测试夹具用通用 `{"access_token":…}`，恰好能过通用提取器 —— 这正是缺陷逃过测试的原因）。
 
-### 3.4 本地扫码登录页（raccoon，真实缺陷 11 + 修复）
+### 3.4 本地扫码与短信登录页（raccoon，真实缺陷 11 及其修复）
 
 - **真实缺陷 11（用户实测报障）**：「raccoon 渠道新建账号打开的网页不对，和插件里同渠道打开的不是一个页面，无法进行鉴权」。根因：首版把**二维码内容**当成页面打开了 —— `BuildRaccoonQrURL` 产出的是 `https://xiaohuanxiong.com/login/mp?code=<32位hex>&appname=商汤小浣熊官网`，它是**要被微信扫一扫打开的地址**；浏览器打开它只是官网的一个普通页面，与本次登录会话无关（该 code 永远不会回到 `success`）。参考插件从不打开它：它起本地 HTTP 服务承载弹窗页，页内渲染同一个 URL 的二维码（`ref/src/raccoon-login-page.ts`、`raccoon-qr.ts`）。
 - **本端实现**：不另起监听端口，改用本进程已有的 HTTP 服务 ——
-  - `web/static/free-hub-login.html`：**静态页**（公开资源，无需 cookie）；从查询串取 `loginId`，向公开端点取二维码内容，用 `raccoon-qr.js` 在浏览器端画二维码，每 2s 轮询状态，成功后显示「登录成功，可以关闭此窗口」并尝试 `window.close()`。
+  - `web/static/free-hub-login.html`：**静态页**（公开资源，无需 cookie）；从查询串取 `loginId`，向公开端点取二维码内容，用 `raccoon-qr.js` 在浏览器端画二维码，每 2s 轮询状态，成功后显示「登录成功，可以关闭此窗口」并尝试 `window.close()`。支持微信扫码与短信验证双 Tab。
   - `web/static/raccoon-qr.js`：**零依赖二维码编码器**（byte 模式 / 纠错等级 M / 版本 1–10，逐行移植自 ref `raccoon-qr.ts`；见「为什么在浏览器端」）。`web/raccoon-qr.test.js` 用**参考实现产出的黄金指纹**（SHA-256 of the module matrix）锁死移植保真度 —— 画错的二维码只能靠手机复现，代价极高，故不能只测「有输出」。
-  - `internal/api/jethub/login_page.go`：`GET /api/jethub/login-page?loginId=` → `{ok,provider,title,hint,qr}`；`GET …/login-page/status?loginId=` → `{done,success,error}`。**两条都挂在鉴权中间件之外**（`internal/api/router.go` 紧跟 `authHandler.Register(r)`）——页面是在**系统默认浏览器**里打开的，那里面没有管理 UI 的 cookie；开了密码保护的安装若把它挂进保护组，页面直接 401/跳登录页，「无法鉴权」会以另一种形式复发。访问控制交给 `loginId`（128 位随机、一次性、随会话 30s 宽限期一起回收），响应**不含** token/凭据/账号 id。
+  - `internal/api/jethub/login_page.go`：`GET /api/jethub/login-page?loginId=` → `{ok,provider,title,hint,qr,sms}`；`GET …/login-page/status?loginId=` → `{done,success,error}`；`POST …/login-page/sms/send` 与 `POST …/login-page/sms/login`。**全部挂在鉴权中间件之外**（`internal/api/router.go` 紧跟 `authHandler.Register(r)`）——页面是在**系统默认浏览器**里打开的，那里面没有管理 UI 的 cookie；开了密码保护的安装若把它挂进保护组，页面直接 401/跳登录页，「无法鉴权」会以另一种形式复发。访问控制交给 `loginId`（128 位随机、一次性、随会话 30s 宽限期一起回收），响应**不含** token/凭据/账号 id。
 - **协议分工**：`StartedLogin.LoginURL` = 本地页面（浏览器打开的东西）；新增 `StartedLogin.QRContent` = 二维码内容（页面画的东西）。`StartRaccoonQRLogin(ctx, accountID, pageURL)` 同时产出两者，**不再自己开浏览器** —— API handler 在**注册完会话之后**才 `OpenURLWithBrowser(pageURL)`（顺序即契约：先开页面会让页面抢在登记前请求数据端点而拿到 404）。
-- **安全边界**（与参考插件一致）：宿主侧/服务端持有全部敏感状态（`qrcode_code`、凭据），页面只做展示与轮询；页面文本里**没有**任何凭据字样。
-- ⚠️ **未移植**：`canceled` 时参考实现会**换一个新 code 并刷新页面上的二维码**，本端仍按「扫码已取消」终止本次登录（用户重开一次即可）；页面也**没有**参考实现的短信 Tab（本端短信走独立弹窗，需要阿里云滑块参数，尚未打通）。
+- **手机扫码与短信认证的关键边界（2026-10-23 修复）**：
+  - ① **IAM 纯净请求头**：商汤统一身份认证中心（IAM）接口对出站 Header 有严格平台匹配校验。二维码 URL 带 `source=platform`（Web 平台），如果出站请求携带桌面端标头（`X-Client-Platform: desktop-windows`），手机授权时服务端会报「iam出错」。因此所有 IAM 接口出站均使用纯净 Web 标头。
+  - ② **手机号传输加密**：小浣熊 IAM 规范严格要求手机号必须经 AES-128-CFB 加密（密钥 `senseraccoon2023`，IV 随机 16 字节，Base64 输出），否则返回 `100003 params_encryted_error`。
+  - ③ **弹窗布局与交互防刷**：`.row button.primary` 样式必须覆盖宽度与外边距（避免 flex-shrink 压缩手机号输入框至无法点击）；前端在捕获阶段拦截不合法手机号以阻止误弹阿里云滑块，并在下发短信后启动 60 秒倒计时防刷。
+- **安全边界**（与参考插件一致）：宿主侧/服务端持有全部敏感状态（`qrcode_code`、凭据），页面只做展示与轮询；公开页面绝对禁止泄露管理 UI 凭据或 session token。
 
 ### 3.5 Loomy 微信扫码登录页（真实缺陷 18 —— 行为与插件不符）
 

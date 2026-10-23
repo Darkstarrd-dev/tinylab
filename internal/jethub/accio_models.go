@@ -48,6 +48,15 @@ var accioCatalogCache = struct {
 	inflight bool
 }{}
 
+// InvalidateAccioCatalogCache 清空 Accio 远端目录缓存（账号登录/变动或手动刷新时调用）。
+func InvalidateAccioCatalogCache() {
+	accioCatalogCache.mu.Lock()
+	defer accioCatalogCache.mu.Unlock()
+	accioCatalogCache.models = nil
+	accioCatalogCache.fetched = time.Time{}
+	accioCatalogCache.failed = false
+}
+
 // accioParseCatalog parses `data[].modelList[]`（ref parseAccioCatalog +
 // normalizeAccioModel —— 本包唯一一份目录解析）。
 func accioParseCatalog(raw []byte) []accioModelEntry {

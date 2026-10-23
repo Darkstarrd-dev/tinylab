@@ -202,6 +202,15 @@ var raccoonCatalogCache = struct {
 	inflight bool
 }{}
 
+// InvalidateRaccoonCatalogCache 清空 Raccoon 远端目录缓存（账号登录/变动或手动刷新时调用）。
+func InvalidateRaccoonCatalogCache() {
+	raccoonCatalogCache.mu.Lock()
+	defer raccoonCatalogCache.mu.Unlock()
+	raccoonCatalogCache.models = nil
+	raccoonCatalogCache.fetched = time.Time{}
+	raccoonCatalogCache.failed = false
+}
+
 // raccoonFetchCatalog 发一次目录请求（GET，凭据走 raccoonRequest 的统一头）。
 func (m *Manager) raccoonFetchCatalog(ctx context.Context, cred *RaccoonCredential) ([]raccoonRemoteModel, error) {
 	tctx, cancel := context.WithTimeout(ctx, raccoonCatalogHTTPTimeout)

@@ -1,3 +1,34 @@
+## 2026-10-23 — Raccoon IAM 会话激活与全渠道模型动态刷新机制（用户实测驱动）
+
+- **诊断**：
+  1. 用户报障「raccoon渠道登录后，显示 `raccoon: iam_confirm_required: IAM confirmation required`」：小浣熊商汤统一身份认证（IAM）换取 Bearer Token 后，直接访问小浣熊业务网关（`/api/web/...`）必须先调用 `POST /api/web/auth/v1/iam/confirm` 激活业务会话，否则业务网关统一拦截并返回 HTTP 400 + Code 200901 `iam_confirm_required`。
+  2. 用户报障「raccoon渠道，上游项目jet hub中有DeepSeek-V4.1-Flash-1017可选，FreeHub中没有，修复这个问题，以及其他渠道（比如loomy渠道中，上游项目有Spark-X2.6)，同步上游项目中的模型更新方式」：登录后遭遇 200901 导致模型目录拉取失败降级至旧静态表，且缺少对齐上游的定期刷新机制与前端联动刷新机制；loomy 上下文覆盖表缺少 `spark-x2.6`。
+- **实现**：
+  - `internal/jethub/raccoon_identity.go`：新增 `ConfirmRaccoonIAM(ctx, token)`，出站发送 `POST /api/web/auth/v1/iam/confirm` 激活会话。
+  - `internal/jethub/raccoon_provider.go`：登录完成凭据落盘后主动调用 `ConfirmRaccoonIAM` 并清空旧模型缓存。
+  - `internal/jethub/raccoon.go`：在 `raccoonRequest` 统一入口建立 200901 透明自愈重试机制，捕获 200901 后自动执行会话激活并无缝重发原请求。
+  - `internal/jethub/raccoon_models.go`、`loomy_models.go`、`accio_models.go`：导出动态缓存清空入口。
+  - `internal/jethub/loomy_models.go`：补齐 `spark-x2.6` / `spark-x2.6-preview` 真实 256K 上下文覆盖。
+  - `internal/api/jethub/register.go`：`/models` 接口支持 `?refresh=1` / `?refresh=true` 联动刷新缓存并触发 `Bridge.SyncKeys`。
+  - `web/static/jethub.js`：登录成功与刷新积分时联动请求 `/models?refresh=1`。
+  - `internal/jethub/codearts_refresh.go`：后台启动对齐上游的 20 分钟定期模型刷新调度器（`RefreshAllCatalogs`）。
+  - `internal/jethub/raccoon_identity_test.go`：增加 IAM confirm 与 200901 请求自愈用例。
+- **验证**：全量 Go 单测（`go test ./internal/...`）与全量前端单测（`bun test web`）全部通过。
+
+## 2026-10-23 — Raccoon 微信扫码「iam出错」与短信登录无法输入/获取验证码修复（用户实测驱动）
+
+- **诊断**：用户报障「当前 raccoon 扫二维码仍然 iam 出错，短信验证打开的网页无法输入电话号码，获取验证码」。
+  1. 微信扫码报「iam出错」：出站 IAM 请求复用了 `m.raccoonRequest`，携带了桌面端特有的 `X-Client-Platform: desktop-windows`，与扫码 URL 参数 `source=platform`（Web端）产生平台鉴权冲突；且 `RaccoonQRFlow.snapshot()` 动态计算 `now + expiresIn` 导致二维码自然过期检测失效。
+  2. 短信「无法输入电话号码」：`web/static/free-hub-login.html` 中 `button.primary` 定义的 `width: 100%; margin-top: 12px;` 覆盖了 `.row button`，使按钮撑满容器宽度，导致手机号输入框 `<input id="phone">` 被挤压至仅 22 像素宽，用户无法正常点击与输入。
+  3. 短信「无法获取验证码」：出站请求直接发送明文手机号，小浣熊统一认证中心接口严格要求手机号经 AES-128-CFB 加密（密钥 `senseraccoon2023`，IV 随机 16 字节，Base64 输出），否则报 `100003 params_encryted_error`；前端缺乏手机号前置格式校验与 60s 倒计时节流。
+- **实现**：
+  - `internal/jethub/raccoon_identity.go`：`raccoonIAMRequest` 改用纯净 Web 标准标头（`Accept`/`Accept-Language`/`Content-Type`），剔除 desktop 平台标头；`SendRaccoonSMS` 与 `LoginRaccoonWithSMSVerification` 全面接入 `EncryptRaccoonPhone`（AES-128-CFB NoPadding Base64，密钥 `senseraccoon2023`）。
+  - `internal/jethub/raccoon_provider.go`：`RaccoonQRFlow` 引入绝对时间戳 `expiresAt`，确保二维码到期后平滑自动换码。
+  - `web/static/free-hub-login.html`：增加 `.row button.primary` 规则覆盖宽度与边距，恢复手机号输入框弹性宽度；补齐 `placeholder` 国际化文案支持；捕获阶段（useCapture）拦截未输入或非法手机号以阻止误弹阿里云滑块，下发短信后开启 60 秒倒计时防刷。
+  - `internal/jethub/raccoon_identity_test.go`：适配密文解密断言与请求头纯净性校验。
+  - `web/raccoon-qr.test.js`：排除合法的 `captchaToken` 人机验证入参，同时守卫公开登录页面无管理 UI 凭据泄露。
+- **验证**：`go test ./internal/jethub/... ./internal/api/jethub/...` 全绿；全量 `go test ./...` 与 `bun test web` 全绿。
+
 ## 2026-10-23 — R9 Raccoon 远端模型目录落地（用户报障驱动）
 
 - **诊断**：报障「provider Raccoon 上游有 `DeepSeek-V4.1-Flash-1017`、Free Hub 没有」。上游列表远端实时
