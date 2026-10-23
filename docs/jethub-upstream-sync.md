@@ -208,9 +208,9 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 
 ### R1-8 参考设计：远端模型目录 gate（未来实现用）
 
-- [ ] 上游：`0ca8256`（`src/remote-catalog-gate.ts` + 10 个消费点）——并发去重 + 失败/空结果冷却 + **兜底表不写缓存**（原缺陷：一次瞬时失败让 provider 整个进程生命周期只剩兜底模型）。
-- [ ] 本项目现状：模型列表纯静态（架构 §6.3「远端目录未实现」是已知缺口，trae/lobsterai/buddy/cline 四家的倍率只有远端才有）。
-- [ ] 本轮动作：**不实施**；作为将来实现远端目录时的正确形态参考（实施时在架构 §6.3 引用本行）。
+- [x] 上游：`0ca8256`（`src/remote-catalog-gate.ts` + 10 个消费点）——并发去重 + 失败/空结果冷却 + **兜底表不写缓存**（原缺陷：一次瞬时失败让 provider 整个进程生命周期只剩兜底模型）。**已按此形态落地三家**：accio（R6）、loomy（R8，架构 §6.3.1）、raccoon（R9，架构 §6.3.2）。
+- [ ] 本项目现状：`accio` / `loomy` / `raccoon` 已有远端目录（`Product.ModelsFor`）；其余仍是纯静态表（架构 §6.3「远端目录未实现」，trae/lobsterai/buddy/workbuddy/cline/codearts/minimax 的倍率只有远端才有）。
+- [ ] 本轮动作：**部分实施**（同上）；未落地的 provider 仍按下面四条硬纪律照抄实现，不要重新发明。
 
 #### R1-8 追加（R5 分诊产物，2026-10-07）：远端目录落地时的四条硬纪律
 
@@ -459,7 +459,27 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 
 > **验收**：`go vet ./...` 干净 + 全量 `go test ./...` 全绿（含 `internal/jethub` 的 12 例新用例）+ `node --test web/jethub.test.js` 全绿 + `go build` 产物正常。**无账号真机验证**（loomy 目录拉取需要真实登录凭据；判据以单测 + 反向验证为准，与 upstream-sync §3 S4 的既有口径一致）。
 >
-> **仍未完成**：buddy/workbuddy、lobsterai、trae、cline、codearts、minimax、raccoon 的远端目录仍缺（§6 R1-8 表逐家列出端点与字段）；本端只对 loomy 落地了动态目录。
+> **仍未完成**：buddy/workbuddy、lobsterai、trae、cline、codearts、minimax 的远端目录仍缺（§6 R1-8 表逐家列出端点与字段）；本端已对 loomy（R8）与 raccoon（R9）落地动态目录。
+
+### R9（2026-10-23，**报障驱动补做**：Raccoon 远端模型目录落地）
+
+> **触发（用户报障）**：「Free Hub 中的 provider Raccoon，上游项目有 `DeepSeek-V4.1-Flash-1017` 模型可用，Free Hub 中没有，找出问题并进行修复」。
+>
+> **根因**：与 R8 同型。上游 raccoon 的模型列表是**远端实时**的（`src/raccoon-auth.ts` 的 `fetchModels` + `parseRaccoonModelCatalog`，经 `src/raccoon-adapter.ts` 的 `createModelCatalog` / `RemoteCatalogGate` 转发）；2026-10-21 起远端把同族新版本 `sn-deepseek-v4-1-flash-1017`（展示名 `DeepSeek-V4.1-Flash-1017`）滚上目录。本端此前只搬了 `src/raccoon-product.ts` 的**静态兜底表 6 条**（2026-09-26 快照），`internal/jethub/raccoon.go` 的 `raccoonModelCatalog` 常量**零调用** ⇒ 面板恒 6 条。注意上游的静态兜底表**同样没有** `-1017`，差别只在有没有远端目录 —— 所以修法不是「往表里加一行」（ref 明确警告静态表必然腐坏，且该条目倍率无实测依据）。
+>
+> **影响面澄清**：raccoon 的**路由不依赖模型表**（`Product.InferURL` 独立），用户当时手敲 `raccoon/sn-deepseek-v4-1-flash-1017` 已能调通；缺陷在**列表可见性**与后续滚动上架的模型。
+>
+> **判据（§2 三条硬判据全过）**：① 可独立运行（Go 侧 `GET /api/web/llm/v2/model_catalog` + Bearer，无需 DSH 宿主）；② 是**服务端事实**（目录由上游滚动下发）；③ 用户可见损失（上游新增模型在本端不可选）。
+
+| # | 落点 | 说明 |
+|---|---|---|
+| R9-1 | `internal/jethub/raccoon_models.go`（新增） | 复用 `m.raccoonRequest`（与推理同一条出站管线）`GET {apiBase}/api/web/llm/v2/model_catalog`（20s 超时、`code == 0` 才算成功）+ `raccoonModelsFromData`/`raccoonNormalizeModel`（只取第一个 `type === 'chat'` 组；**id 取远端 `name` 字段**、展示名取 `description`；**只有显式 `visible === false` 才剔除**；去重保序）+ `raccoonMultiplier`（⚠️ **缺失传 -1**，不得用 `jsonNumberField` 把缺失当 0 显示成「免费」）+ `raccoonSupportsImageWith`/`raccoonTextOnlyModels`（**默认支持识图、不看 `tags.vision`**；纯文本按**基础 id** 命中，剥 `-\d{4}$` 只用于查表、不进 id 也不进展示名）+ 进程内缓存（成功 10min / 失败·空 30s / 并发去重 / **无凭据不发请求** / **兜底不写缓存**）+ `RaccoonModelsFor` |
+| R9-2 | `internal/jethub/products.go` | raccoon 的 `Product` 加 `ModelsFor: RaccoonModelsFor`（`SyncKeys` 与 `GET /jethub/providers/raccoon/models` 共用，与 loomy/accio 同型） |
+| R9-3 | 静态兜底表（`trae_model.go::raccoonFallbackModels`）**不动** | 刻意不把 `-1017` 抄进表：静态表是 2026-09-26 的实测快照，缺项由远端目录补；写死无实测依据的倍率等于把猜测当价格展示 |
+| R9-4 | `internal/jethub/raccoon_models_test.go`（新增，12 例） | 目录解析（10 条含 3 条 `visible:false` ⇒ 7 条 / 顺序照抄远端 / 去重 / 非 chat 组不混入）；**`-1017` 回归**（id 与带版本号的展示名都在）；倍率四形态含**缺失 ≠ 免费**；归一边角；图片默认 + 注入式纯文本集合（家族版本命中 / `-101` 不误伤 / 显式带后缀条目不牵连兄弟）；缓存命中 / 失败冷却 + 兜底不缓存 / 无凭据不打上游 / **并发去重**（在途时后来者回落、上游只被打一次）；远端 7 条压过兜底 6 条；离线回落；`ModelsFor` 接线。**反向验证三处**：① 摘掉 `ModelsFor` 接线 ⇒ `TestRaccoonProductWiresModelsFor` 变红；② `RaccoonModelsFor` 恒返回兜底 ⇒ `TestRaccoonModelsForPrefersRemote` 变红（打印 6 条兜底、`-1017` 缺席）；③ 倍率缺失改走 `jsonNumberField` ⇒ `TestRaccoonMissingMultiplierIsNotFree` + `TestRaccoonNormalizeEdgeCases` 变红（输出 `"No-Rate · 免费"`） |
+| R9-5 | 文档 | `jethub-architecture.md` §6.3（现状/两张表/端点表）+ 新增 §6.3.2 + 最后核对行 + 变更维护清单 + 测试清单；`PROJECT_MAP.md` §13n raccoon 行 + §24 新增「修改 Raccoon 模型目录」行并订正 loomy 行的「仍未实现」清单 + 最后核对行；本文档 R1-8 追加与轮次日志 |
+
+> **验收**：`go vet ./internal/jethub ./internal/api/jethub` 干净 + 全量 `go test ./...` 全绿（含 `internal/jethub` 的 12 例新用例）+ 三处反向验证如上。**无账号真机验证**（目录拉取需真实 raccoon 登录凭据；与 R8 同一口径）。R1-8 的四条硬纪律逐条落到实现与用例里（未知≠不支持 / 失败冷却与并发去重 / 兜底不缓存 / 无凭据不打上游）。
 
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
@@ -472,3 +492,4 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 | R6 | 2026-10-15 | `e73cd2f` → `bca0d8c` | master 173 commits / 341 文件；**R6-1 Accio + R6-2 OfficeAce 两家新 provider + R6-3 workbuddy reasoning_effort 修法实施**，DSML/图片/原生搜索/记账/面板归 §5 | **Accio（第 15 家）**：OAuth2 PKCE 公开客户端登录（region=cn/global）、轮换 refresh 三铁律、远端模型目录缓存 + 15 条静态兜底表、body-token Gemini 信封（`sg_k`/`message_id`/snake/properties 豁免）、Gemini SSE→OpenAI/Anthropic（tool shard/thought/usage/402/风控页）、credit 三只读端点。**OfficeAce（第 14 家）**：cloud-direct OAuth/STS+DPoP 登录、V11+SDK-HMAC 签名、Basic 推理 + `max_tokens<4096` 丢弃 + 剥 `reasoning_effort`、per-account `maasBaseUrl`、显式每日领取。**R6-3**：workbuddy `reasoning_effort` 致吞正文问题。验证：`go build` / `go vet` / 全量 `go test ./internal/...` 全绿 + `node --test web/jethub.test.js` 全绿；两家新 provider 未经真实机器验证（无账号）。 |
 | R7 | 2026-10-21 | `bca0d8c` → `b0940ca` | master 216 commits / 380+ 文件；**R7-1 minimaxintl + R7-2 modelscope + R7-3 autoclaw 三家新 provider + R7-4 处理方式与模型表同步实施**，R7-5 astudio 归 §5 | **minimaxintl（第 16 家）**：MiniMax 国际站，Anthropic Messages 协议族，双站点产品配置与 InferURL、设备码登录、静默续期、额度查询与每日签到。**modelscope（第 17 家）**：魔搭社区，OpenAI 兼容推理，长期 API Key 凭据，魔粒余额端点（`/openapi/v1/magicubes/balance`），扁平工具转 `{type:"function"}` 规避 400，36 兜底模型表。**autoclaw（第 18 家）**：智谱清言桌面端网关，短信验证码登录，动态 MD5 签名，X-Version: 2.1.1 校验头，406 前缀绕过与 max_tokens 门禁，积分钱包余额与每日签到，4 确证模型表。**R7-4**：撤销 workbuddy 剥离 `reasoning_effort`（DeepSeek 思考优先于 preamble）；Rotation 错误分类（11128/11140/14018）；OfficeAce 窗口实测订正；Qoder 补充 dfmodel(Free x0)/mmodel(x0.1)。**R7-5**：astudio（讯飞 AstronStudio）依赖 Electron 微信扫码/本地 session 导入归 §5 不搬。验证：`go build` 干净，全量 `go test ./...` 与 `node --test web/jethub.test.js` 全绿。 |
 | R8 | 2026-10-23 | `b0940ca`（不变） | **报障驱动补做**：Loomy 远端模型目录落地 + 兜底表 spark-x 窗口订正；无新 pin（上游修复 commit `02653ea` 早已在 pin 之前） | 新增 `internal/jethub/loomy_models.go`（`GET {apiBase}/models` token 头解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + 覆盖表 + 进程内缓存 10min/30s/并发去重/兜底不缓存 + `LoomyModelsFor`）；`products.go` 接线 `ModelsFor`；`trae_model.go` 的 spark-x ctx 1048576→262144；新增 `loomy_models_test.go`（12 例）+ 四处反向验证；文档同步架构 §6.3/§6.3.1、PROJECT_MAP §13n/§24/最后核对。**`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node --test web/jethub.test.js` 全绿 + `go build` 正常**；无账号真机验证（loomy 目录拉取需真实凭据） |
+| R9 | 2026-10-23 | `b0940ca`（不变） | **报障驱动补做**：Raccoon 远端模型目录落地（`DeepSeek-V4.1-Flash-1017` 缺失）；无新 pin（上游早已有远端目录，本端只搬了静态兜底表） | 新增 `internal/jethub/raccoon_models.go`（复用 `raccoonRequest` 的 `GET /api/web/llm/v2/model_catalog`、`code==0` 信封、只取 `type==='chat'` 组、**id 在 `name` 字段**、显式 `visible:false` 剔除、去重保序；`raccoonMultiplier` **缺失传 -1**；图片默认支持不看 `tags.vision`，纯文本按基础 id 剥 `-\d{4}$`；缓存 10min/30s/并发去重/无凭据不打上游/兜底不缓存 + `RaccoonModelsFor`）；`products.go` 接线 `ModelsFor`；**静态兜底表刻意不加 `-1017`**；新增 `raccoon_models_test.go`（12 例，含 `-1017` 回归）+ 三处反向验证；文档同步架构 §6.3/§6.3.2、PROJECT_MAP §13n/§24/最后核对、本文档 R1-8 追加重写。**`go vet` 干净 + 全量 `go test ./...` 全绿**；无账号真机验证（目录拉取需 raccoon 真实凭据）。raccoon 路由不依赖模型表 ⇒ 修复只影响列表可见性 |

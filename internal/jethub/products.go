@@ -103,6 +103,13 @@ func RegisterDefaultProducts(b *Bridge) {
 		// {host}/v1/chat/completions 被 nginx 回 405 Not Allowed。
 		InferURL: raccoonInferURL(),
 		Models:   raccoonFallbackModels(),
+		// 远端目录（`GET /api/web/llm/v2/model_catalog`）动态拉取：上游会滚动上架
+		// 同族新版本（2026-10-21 起 `sn-deepseek-v4-1-flash-1017`，展示名
+		// `DeepSeek-V4.1-Flash-1017`），静态 6 条兜底表（2026-09-26 快照）只在
+		// 远端失败时顶替。用户报障「上游有 DeepSeek-V4.1-Flash-1017，Free Hub 里没有」
+		// 的根因就是此前只搬了兜底表。⚠️ 与 loomy/accio 同型（R1-8 既定形态）；
+		// `RaccoonModelsFor` 内部有 10min/30s 缓存与并发去重。
+		ModelsFor: RaccoonModelsFor,
 	})
 	// P3.3.4: loomy (standard OpenAI chat; no renewal — SMS re-login only).
 	b.RegisterProduct(Product{

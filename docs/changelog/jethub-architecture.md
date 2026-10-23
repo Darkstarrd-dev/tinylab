@@ -1,3 +1,45 @@
+## 2026-10-23 — R9：Raccoon 远端模型目录落地（用户报障驱动）
+
+**用户报障**：「Free Hub 的 provider Raccoon，上游项目有 `DeepSeek-V4.1-Flash-1017` 模型可用，
+Free Hub 中没有」。诊断：本端 raccoon 的模型列表只有 `raccoonFallbackModels()` 的 **6 条静态快照**
+（2026-09-26 采集，写在 `trae_model.go`），而 `raccoon.go` 里 `raccoonModelCatalog` 常量
+**零调用**——上游的列表是远端实时的（`src/raccoon-auth.ts` 的 `fetchModels` +
+`parseRaccoonModelCatalog`，经 `src/raccoon-adapter.ts` 的 `createModelCatalog` 转发），
+2026-10-21 起远端把同族新版本 `sn-deepseek-v4-1-flash-1017`（展示名 `DeepSeek-V4.1-Flash-1017`）
+上架，目录于是多出一条；上游 `src/raccoon-product.ts` 的 6 条兜底表**同样没有**这条，
+差别只在「有没有远端目录」。这正是 §6.3 / jethub-upstream-sync §6 R1-8 登记的缺口在 raccoon
+上的兑现（同型缺陷此前已在 loomy 上修过一次，R8）。
+⚠️ 顺带确认的影响面：raccoon 的**路由不依赖模型表**（`InferURL` 独立），所以用户当时手敲
+`raccoon/sn-deepseek-v4-1-flash-1017` 其实已经能调通——缺陷只在**列表可见性**与后续上架的模型。
+
+**曾走过的岔路（记在这里以免重犯）**：直觉修法是「往静态表里加一行 `sn-deepseek-v4-1-flash-1017`」。
+不采纳：ref 明确警告静态表必然腐坏（远端会持续滚动上架同族版本），且该条目的真实倍率我们
+没有实测依据——写死一个数字就是把猜测当价格展示给用户。修法只能是**动态目录**。
+
+**实现**（`internal/jethub/raccoon_models.go`，与 loomy/accio 同型 = R1-8 的既定形态）：
+- 出站复用 `m.raccoonRequest`（探针与推理共用同一条管线：Bearer + `X-Org-Code` +
+  `X-Client-Device-ID` + `X-Raccoon-Language: zh` + `m.httpClient("raccoon")`），
+  `GET {raccoonAPIBase}/api/web/llm/v2/model_catalog`，20s 超时（ref `AbortSignal.timeout(20_000)`）。
+- 信封 `code == 0` 才算成功（HTTP 200 + 非 0 业务码也是失败）；解析只取 `data.categories[]`
+  里**第一个** `type === 'chat'` 的组，**id 取远端 `name` 字段**、展示名取 `description`（缺失回退 id），
+  **只有显式 `visible === false` 才剔除**（实测 3 条 `raccoon-*` 内部模型），按 id 去重、保留远端顺序。
+- 倍率走已有 `RaccoonDisplayName`；⚠️ 新增 `raccoonMultiplier` 而非 `jsonNumberField`——后者对缺失
+  字段回 0，会把「没取到倍率」渲染成「· 免费」，用户会当价格读（反向验证已做）。
+- 窗口 `params.context_window`（回退顶层）/ `params.max_tokens` 只取正整数写进 `Note`。
+- 图片能力**默认支持**，不看 `tags.vision`（那是客户端 Raccoon-Auto 选模偏好，不是服务端能力契约；
+  实测无 vision 标签的 `sn-deepseek-v4-1-flash` / `sn-glm-5-3-flash` 都能读图）。纯文本模型登记在
+  `raccoonTextOnlyModels`（当前空集）显式禁掉，按**基础 id** 命中（剥 `-\d{4}$`）——同族滚版本会原样
+  继承标签，按完整 id 写白名单必然漏禁。剥后缀**只用于查这张表**，不进请求 id、不进展示名。
+- 缓存：进程内，成功 10min / 失败·空结果 30s 冷却 / 并发去重（等待者直接回落兜底表）/
+  **没有可用凭据时不发请求** / **兜底表不写缓存**。
+- 接线：`products.go` raccoon 的 `Product` 加 `ModelsFor: RaccoonModelsFor`。
+
+**回归**：`internal/jethub/raccoon_models_test.go`（12 例，含 `-1017` 条目正向断言、倍率缺失
+不等于免费、注入式纯文本集合、缓存三态、离线回落、`ModelsFor` 接线）。**三处反向验证已做**：
+摘掉接线 ⇒ 接线守卫变红；`RaccoonModelsFor` 恒返回兜底 ⇒ 远端优先用例变红（打印 6 条兜底、
+`-1017` 缺席）；倍率缺失改走 `jsonNumberField` ⇒ 两条用例变红（输出 `"No-Rate · 免费"`）。
+`go vet` 干净、全量 `go test ./...` 全绿。
+
 ## 2026-10-23 — R8：Loomy 远端模型目录落地（用户报障驱动）
 
 **用户报障**：上游 Loomy 渠道可用的模型在 Free Hub 里没有。根因：上游的 Loomy 模型列表是**远端实时**的

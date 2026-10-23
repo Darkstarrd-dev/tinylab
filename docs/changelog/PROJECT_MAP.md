@@ -1,3 +1,23 @@
+## 2026-10-23 — R9 Raccoon 远端模型目录落地（用户报障驱动）
+
+- **诊断**：报障「provider Raccoon 上游有 `DeepSeek-V4.1-Flash-1017`、Free Hub 没有」。上游列表远端实时
+  （`src/raccoon-auth.ts` `fetchModels` + `parseRaccoonModelCatalog`，经 `src/raccoon-adapter.ts` 的
+  `createModelCatalog`/`RemoteCatalogGate`），2026-10-21 起滚动上架同族新版本 `sn-deepseek-v4-1-flash-1017`；
+  本端只搬了 `raccoon-product.ts` 的 6 条静态快照（2026-09-26），`raccoon.go` 的 `raccoonModelCatalog` 常量
+  在 Go 侧**零调用**——与 R8 的 loomy 同型（§6 R1-8 缺口的第二次兑现）。
+- **走过的岔路**：直觉是「往 `raccoonFallbackModels()` 加一行」。不采纳——ref 明确警告静态表必然腐坏，
+  且该条目真实倍率无实测依据（写死就是把猜测当价格给用户）。修法只能是动态目录。
+- **影响面**：raccoon 的推理 URL 由 `Product.InferURL` 独立给出、路由不看模型表 ⇒ 缺陷只在**列表可见性**
+  与后续上架的模型（用户当时手敲 `raccoon/sn-deepseek-v4-1-flash-1017` 已能调通）。
+- §13n 文件表：`internal/jethub/` 新增 `raccoon_models.go` / `raccoon_models_test.go` 行（远端 `model_catalog`
+  解析判据、倍率缺失传 -1、图片默认支持不看 `tags.vision`、缓存三态、`ModelsFor` 接线）。
+- §24 速查表：新增「修改 **Raccoon 模型目录**」行；原「修改 Loomy 模型目录」行里的「仍未实现」清单去掉
+  raccoon，并改为「已落地 accio（R6）/loomy（R8）/raccoon（R9）」。
+- 兜底表 `raccoonFallbackModels()` **刻意不动**（不加 `-1017`），与 ref 的静态表快照纪律一致。
+- 核对行替换为 R9 摘要；过程叙述归档至 docs/changelog/jethub-architecture.md 与本文件。
+- 验证：`go vet ./internal/jethub ./internal/api/jethub` 干净 + 全量 `go test ./...` 全绿；三处反向验证
+  （摘接线 / 恒返回兜底 / 倍率缺失改走 `jsonNumberField`）均确认变红后复原。
+
 ## 2026-10-23 — R8 Loomy 远端模型目录落地 + 兜底表窗口订正
 
 - §13n 文件表：`internal/jethub/` 新增 `loomy_models.go`（远端目录拉取：`GET {apiBase}/models` token 头解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + `loomyContextWindow`/`loomySupportsImage` 覆盖表 + 进程内缓存 10min/30s/并发去重/兜底不缓存 + `LoomyModelsFor`）；`loomy.go`/`loomy_credits.go` 行加挂该文件；`trae_model.go` 的 `loomyFallbackModels` 的 spark-x `ctx` 由 1048576 订正为 262144。
