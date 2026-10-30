@@ -198,10 +198,17 @@ func (h *Handler) zcodeClaim(w http.ResponseWriter, r *http.Request) {
 	outcome := corejethub.ClaimOutcome{Kind: "inactive", Message: report.Message}
 	var claimed, failed int
 	var messages []string
+	var granted float64
+	var grantedUnit string
 	for _, plan := range report.Plans {
 		switch {
 		case plan.OK:
 			claimed++
+			// 额度制：发放量以 token 计（plan.entitlements），不是积分。
+			granted += plan.GrantUnits
+			if plan.UnitType != "" {
+				grantedUnit = plan.UnitType
+			}
 			if plan.Message != "" {
 				messages = append(messages, plan.Message)
 			}
@@ -209,6 +216,10 @@ func (h *Handler) zcodeClaim(w http.ResponseWriter, r *http.Request) {
 			failed++
 			messages = append(messages, plan.Message)
 		}
+	}
+	if granted > 0 {
+		outcome.Credit = granted
+		outcome.Unit = grantedUnit
 	}
 	switch {
 	case claimed > 0 && failed == 0:

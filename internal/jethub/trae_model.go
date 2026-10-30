@@ -108,6 +108,11 @@ func clineFallbackModels() ModelTable {
 		//    同源教训见 R3-2（删 gemini-3.8-flash）──
 		free("stealth/space-bunny-alpha", "Space Bunny Alpha", "1000000", "max 524288; free"),
 		free("cline-free/mimo-v2.6-flash", "MiMo-V2.6-Flash", "1048576", "max 131072; free"),
+		// R10（上游 0eeea3c，2026-10-21 远端 free 数组实测在册）：只补元数据，
+		// 不是新增模型。cline 网关缺省 max_tokens=4096 会**静默截断**长回答
+		// （实测 finish_reason=length / 4096 tokens），故本表必须声明默认预算
+		// 131072，并由 clineAugment 在请求未指定时真正写进 body。
+		free("cline-free/minimax-m3.1-flash", "Minimax M3.1 Flash", "1048576", "max 131072; free"),
 		free("cline-free/muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", "1048576", "max 943718; free"),
 		// ── cline-pass/*（models.dev `cline-pass` 块快照 2026-10-02，18 条，
 		//    块内顺序；`← 网关缺` 的四条是 caf675e 补进来的）──

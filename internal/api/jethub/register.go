@@ -99,6 +99,8 @@ func (h *Handler) Register(r chi.Router) {
 		h.RegisterModelscope(r)
 		// R7-3: autoclaw flows (SMS login / balance / claim / refresh).
 		h.RegisterAutoclaw(r)
+		// R10: codely flows (device-code login / refresh / balance / check-in).
+		h.RegisterCodely(r)
 		// P4.9: backup export/import (original-format payload; the browser
 		// adds/removes the PBKDF2+AES-GCM encrypted shell).
 		r.Get("/backup/export", h.backupExport)

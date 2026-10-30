@@ -246,7 +246,12 @@ func modelscopeFallbackModels() ModelTable {
 	}
 	return ModelTable{
 		// DeepSeek 系
-		md("deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek-V4.1-Flash (魔搭)", "1048576", true, "none"),
+		// ⚠️ 2026-10-26（R10，upstream 9ffd65e / issue #12）：无后缀的
+		// `deepseek-ai/DeepSeek-V4.1-Flash` 在魔搭侧已下线（报障者取证：HTTP 400
+		// `has no provider supported`），当前在服务的是日期快照 `-1017`。
+		// 静态兜底表在远端目录失败时就是「可调用清单」，登记已下线 id 会让用户
+		// 选中后必然 400 ⇒ 只登记在服务的快照。
+		md("deepseek-ai/DeepSeek-V4.1-Flash-1017", "DeepSeek-V4.1-Flash (魔搭)", "1048576", true, "none"),
 		md("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek-V4-Pro (魔搭)", "1048576", false, ""),
 		md("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek-V4-Flash-0731 (魔搭)", "1048576", false, ""),
 		md("deepseek-ai/DeepSeek-V4-Pro-0813", "DeepSeek-V4-Pro-0813 (魔搭)", "1048576", false, ""),

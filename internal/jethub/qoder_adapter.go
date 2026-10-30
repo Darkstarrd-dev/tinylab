@@ -248,6 +248,12 @@ func (m *Manager) InterceptResponse(clientReq *http.Request, resp *http.Response
 		// 流内 error_code 分类（"200" 成功哨兵、"402" 计费锁；HTTP 402 同义）。
 		return m.accioInterceptResponse(clientReq, resp, upstreamModel, isStream)
 	}
+	if provider == "codely" {
+		// codely：402 = 积分预算耗尽 ⇒ 锁到 UTC+8 次日 24:00（不是通用 120s），
+		// 其余状态交给代理常规分类。
+		retryMs, err := m.codelyInterceptResponse(resp, keyID, upstreamModel)
+		return nil, retryMs, err
+	}
 	if provider != "qoder" && provider != "qodercn" {
 		return nil, 0, nil
 	}

@@ -35,6 +35,8 @@ func (m *Manager) zcodeAugment(r *http.Request, body []byte, providerID, keyID, 
 	if err != nil {
 		return nil, err
 	}
+	// 并发自保：按 (账号, 模型) 的最小间隔（ref serializeUpstream + modelGapMs）。
+	zcodeWaitModelGap(r.Context(), keyID, upstreamModel)
 	for k, v := range zcodeHeaders(cred, true, nil) {
 		r.Header.Set(k, v)
 	}
@@ -111,8 +113,10 @@ func zcodeBuildRequest(anthropicEntry bool, body []byte, upstreamModel string, n
 		// 不完全对齐，上游实测只认工具表本身）。
 	}
 
-	out["system"] = zcodeSystemBlocks(callerSystem, zcodeCwd(), model)
-	out["messages"] = zcodeWithContextPrefix(messages, now)
+	out["system"] = zcodeSystemBlocks(zcodeCwd(), model)
+	// 调用方 system 不进 system 块，而是注入首轮 user（ref withCallerSystem；
+	// 第 4 个 system 块会让上游回 405+3012，与长度无关）。
+	out["messages"] = zcodeWithCallerSystem(zcodeWithContextPrefix(messages, now), callerSystem)
 
 	// 思考档位：只在模型声明的档位内下发 `output_config.effort`
 	// （ref zcode-adapter.ts:750-757；未知档位/未声明模型一律丢弃 —— 下发未知

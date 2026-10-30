@@ -351,6 +351,15 @@ func (m *Manager) zcodeClaimOnePlan(ctx context.Context, cred *ZcodeCredential, 
 		if outcome.Message == "" {
 			outcome.Message = zcodeDescribeClaimCode(outcome.Code)
 		}
+		if outcome.OK {
+			// 领取成功/已领取 ⇒ 携带额度（面板不再显示「+0」）+ 回报 confirm
+			// （营销来源的 plan；不回报会让服务端每轮重复投放、白烧设备级 captcha）。
+			outcome.GrantUnits = plan.GrantUnits
+			outcome.UnitType = plan.UnitType
+			if plan.MarketingCampaignID != "" {
+				_ = m.zcodeReportMarketingAction(ctx, cred, plan.MarketingCampaignID, "confirm")
+			}
+		}
 		return outcome, nil
 	}
 	return nil, fmt.Errorf("zcode: captcha 连续两次被拒（3007）")

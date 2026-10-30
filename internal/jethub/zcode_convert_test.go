@@ -72,23 +72,19 @@ func TestZcodeBuildRequestOpenAIEntry(t *testing.T) {
 	if _, ok := parsed["tool_choice"]; ok {
 		t.Fatal("zcode must never send tool_choice (ref 从不发)")
 	}
-	// system：4 块（cli/stable/env/caller），caller 在最后。
+	// system：恒 3 块（cli/stable/env）；调用方 system 进 messages（ref 9893e91）。
 	system, _ := parsed["system"].([]any)
-	if len(system) != 4 {
-		t.Fatalf("system blocks = %d, want 4", len(system))
+	if len(system) != 3 {
+		t.Fatalf("system blocks = %d, want 3 (第 4 块会让上游 405+3012)", len(system))
 	}
-	caller := system[3].(map[string]any)["text"].(string)
-	if caller != "SYS-PROMPT" {
-		t.Fatalf("caller system = %q", caller)
-	}
-	// 首轮 user 消息带日期块（数组插入，不是文本拼接）。
+	// 首轮 user 消息带日期块（数组插入，不是文本拼接）+ 调用方 system 在末尾。
 	messages, _ := parsed["messages"].([]any)
 	if len(messages) != 1 {
 		t.Fatalf("messages = %d, want 1 (system 已提到顶层)", len(messages))
 	}
 	first := messages[0].(map[string]any)
 	content, _ := first["content"].([]any)
-	if len(content) != 2 {
+	if len(content) != 3 {
 		t.Fatalf("first user content = %#v", first["content"])
 	}
 	if !strings.HasPrefix(content[0].(map[string]any)["text"].(string), "<system-reminder>") {
@@ -96,6 +92,9 @@ func TestZcodeBuildRequestOpenAIEntry(t *testing.T) {
 	}
 	if content[1].(map[string]any)["text"] != "你好" {
 		t.Fatalf("user text = %#v", content[1])
+	}
+	if content[2].(map[string]any)["text"] != "SYS-PROMPT" {
+		t.Fatalf("caller system must be injected into messages, got %#v", content[2])
 	}
 	// tools：扁平 input_schema + 只有最后一个打断点。
 	tools, _ := parsed["tools"].([]any)
@@ -170,16 +169,16 @@ func TestZcodeBuildRequestAnthropicEntryStillRewritten(t *testing.T) {
 		t.Fatal("upstream only implements the streaming branch — stream must be forced true")
 	}
 	system, _ := parsed["system"].([]any)
-	if len(system) != 4 {
-		t.Fatalf("system blocks = %d, want 4", len(system))
-	}
-	if got := system[3].(map[string]any)["text"]; got != "CALLER-A\n\nCALLER-B" {
-		t.Fatalf("caller system flattening wrong: %q", got)
+	if len(system) != 3 {
+		t.Fatalf("system blocks = %d, want 3", len(system))
 	}
 	messages, _ := parsed["messages"].([]any)
 	content, _ := messages[0].(map[string]any)["content"].([]any)
-	if len(content) != 2 || !strings.HasPrefix(content[0].(map[string]any)["text"].(string), "<system-reminder>") {
+	if len(content) != 3 || !strings.HasPrefix(content[0].(map[string]any)["text"].(string), "<system-reminder>") {
 		t.Fatalf("date block must be prepended on the Anthropic entry too: %#v", content)
+	}
+	if got := content[2].(map[string]any)["text"]; got != "CALLER-A\n\nCALLER-B" {
+		t.Fatalf("caller system flattening wrong: %q", got)
 	}
 	if cfg, _ := parsed["output_config"].(map[string]any); cfg["effort"] != "max" {
 		t.Fatalf("output_config = %#v", parsed["output_config"])

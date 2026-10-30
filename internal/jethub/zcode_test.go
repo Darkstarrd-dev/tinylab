@@ -26,18 +26,18 @@ func TestZcodeIdentityTextMatchesReference(t *testing.T) {
 	if zcodeIdentityCLIPrefix != "You are ZCode, an interactive coding agent" {
 		t.Fatalf("cliPrefix text drifted: %q", zcodeIdentityCLIPrefix)
 	}
-	if got := len(zcodeIdentityStableSections); got != 3 {
-		t.Fatalf("stable sections = %d, want 3", got)
+	if got := len(zcodeIdentityStableSections); got != 2 {
+		t.Fatalf("stable sections = %d, want 2 (官方 2026-10-23 起不再有 # Working style)", got)
 	}
 	stable := zcodeStableText()
-	// ⚠️ 参考实现的 2856 是 JS 的 UTF-16 码元数；Go 的 len() 是 UTF-8 字节数
-	// （文本含 em-dash 等非 ASCII，每字符 3 字节）⇒ 2860 字节才是同一份文本。
-	if len(stable) != 2860 {
-		t.Fatalf("stable len = %d bytes, want 2860 (2856 UTF-16 units)", len(stable))
+	// ⚠️ 参考实现的 2590 是 JS 的 UTF-16 码元数；Go 的 len() 是 UTF-8 字节数
+	// （文本含 em-dash 等非 ASCII）⇒ 2594 字节才是同一份文本。
+	if len(stable) != 2594 {
+		t.Fatalf("stable len = %d bytes, want 2594 (2590 UTF-16 units)", len(stable))
 	}
 	sum := sha256.Sum256([]byte(stable))
-	if hex.EncodeToString(sum[:]) != "3fdb43778fddc6a482c91725268a712774d5a090366e2a0df200369fed9f60ef" {
-		t.Fatalf("stable sha256 drifted — the identity text no longer matches ref zcode-identity.ts @ e06283c")
+	if hex.EncodeToString(sum[:]) != "135a288c4616306ef3c084312f0568be7e20997b9261626c85309d75fa00144c" {
+		t.Fatalf("stable sha256 drifted — the identity text no longer matches ref zcode-identity.ts @ 9ffd65e")
 	}
 	cliSum := sha256.Sum256([]byte(zcodeIdentityCLIPrefix))
 	if hex.EncodeToString(cliSum[:]) != "46dd360a22c87a92dfdf29ae2c3011b0f9a014209a7b607f8fcd17a920e5eafa" {
@@ -46,9 +46,10 @@ func TestZcodeIdentityTextMatchesReference(t *testing.T) {
 }
 
 func TestZcodeSystemBlocksShape(t *testing.T) {
-	blocks := zcodeSystemBlocks("caller prompt", t.TempDir(), "GLM-5.3")
-	if len(blocks) != 4 {
-		t.Fatalf("blocks = %d, want 4 (cli + stable + env + caller)", len(blocks))
+	// ★ 恒为 3 块（ref 9893e91 实测：第 4 块 = 405+3012，与长度无关）。
+	blocks := zcodeSystemBlocks(t.TempDir(), "GLM-5.3")
+	if len(blocks) != 3 {
+		t.Fatalf("blocks = %d, want 3 (cli + stable + env)", len(blocks))
 	}
 	first := blocks[0].(map[string]any)
 	if first["text"] != zcodeIdentityCLIPrefix {
@@ -65,20 +66,43 @@ func TestZcodeSystemBlocksShape(t *testing.T) {
 	if !strings.Contains(env, "# Environment") || !strings.Contains(env, "powered by the model named zcode/GLM-5.3") {
 		t.Fatalf("environment block malformed: %q", env)
 	}
-	last := blocks[3].(map[string]any)
-	if last["text"] != "caller prompt" {
-		t.Fatalf("caller system must be appended LAST")
+	if cc, ok := blocks[2].(map[string]any)["cache_control"].(map[string]any); !ok || cc["type"] != "ephemeral" {
+		t.Fatalf("env block must carry the ephemeral cache breakpoint")
 	}
-	if cc, ok := last["cache_control"].(map[string]any); !ok || cc["type"] != "ephemeral" {
-		t.Fatalf("last block must carry the ephemeral cache breakpoint")
+}
+
+// TestZcodeCallerSystemGoesToMessages: 调用方 system 绝不进 system 数组，
+// 而是首轮 user 的最后一个 text 块（排在日期块之后、幂等）。
+func TestZcodeCallerSystemGoesToMessages(t *testing.T) {
+	messages := []any{map[string]any{"role": "user", "content": "你好"}}
+	out := zcodeWithCallerSystem(zcodeWithContextPrefix(messages, fixedZcodeDate()), "caller rules")
+	first := out[0].(map[string]any)
+	if role, _ := first["role"].(string); role != "user" {
+		t.Fatalf("first message role = %q", role)
 	}
-	// 空 caller → 3 块，断点仍在最后一块。
-	blocks = zcodeSystemBlocks("   ", t.TempDir(), "GLM-5.3")
-	if len(blocks) != 3 {
-		t.Fatalf("blank caller must not add a block, got %d", len(blocks))
+	content := first["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("content blocks = %d, want 3 (date + text + caller)", len(content))
 	}
-	if _, ok := blocks[2].(map[string]any)["cache_control"]; !ok {
-		t.Fatal("env block must carry the breakpoint when the caller block is absent")
+	if text := content[0].(map[string]any)["text"].(string); !strings.HasPrefix(text, "<system-reminder>") {
+		t.Fatalf("date block must stay first, got %q", text)
+	}
+	if text := content[2].(map[string]any)["text"].(string); text != "caller rules" {
+		t.Fatalf("caller system must be the LAST block, got %q", text)
+	}
+	// 幂等
+	again := zcodeWithCallerSystem(out, "caller rules")
+	if got := len(again[0].(map[string]any)["content"].([]any)); got != 3 {
+		t.Fatalf("caller injection must be idempotent, got %d blocks", got)
+	}
+	// 空值 / 首条非 user ⇒ 原样
+	fresh := []any{map[string]any{"role": "user", "content": "你好"}}
+	if got := zcodeWithCallerSystem(zcodeWithContextPrefix(fresh, fixedZcodeDate()), "   "); len(got[0].(map[string]any)["content"].([]any)) != 2 {
+		t.Fatal("blank caller must not add a block")
+	}
+	sysFirst := []any{map[string]any{"role": "assistant", "content": "hi"}}
+	if got := zcodeWithCallerSystem(sysFirst, "rules"); got[0].(map[string]any)["content"] != "hi" {
+		t.Fatal("non-user first message must be left untouched")
 	}
 }
 
@@ -183,27 +207,45 @@ func TestZcodeHeaders(t *testing.T) {
 	cred := &ZcodeCredential{ZcodeJWT: "jwt-1", DeviceMid: "mid-1", AppVersion: "3.14.9"}
 	headers := zcodeHeaders(cred, true, nil)
 	checks := map[string]string{
-		"User-Agent":          "ZCode/3.14.9",
-		"HTTP-Referer":        "https://zcode.z.ai",
-		"X-ZCode-App-Version": "3.14.9",
-		"X-Release-Channel":   "stable",
-		"X-Client-Language":   "zh-CN",
-		"X-Client-Timezone":   "Asia/Shanghai",
-		"X-Device-Mid":        "mid-1",
-		"X-Platform":          "win32",
-		"X-Os-Category":       "windows",
-		"anthropic-version":   "2023-06-01",
-		"Content-Type":        "application/json",
-		"Authorization":       "Bearer jwt-1",
+		// 官方 3.16.3 抓包：版本门控到 3.16.3；release-channel/platform 逐字对齐。
+		"User-Agent":           "ZCode/3.16.3",
+		"HTTP-Referer":         "https://zcode.z.ai",
+		"X-Title":              "Z Code@electron",
+		"X-ZCode-App-Version":  "3.16.3",
+		"X-Release-Channel":    "production",
+		"X-Client-Language":    "zh-CN",
+		"X-Client-Timezone":    "Asia/Shanghai",
+		"X-Device-Mid":         "mid-1",
+		"X-Platform":           "win32-x64",
+		"X-Os-Category":        "windows",
+		"X-ZCode-Agent":        "glm",
+		"X-ZCode-Session-Type": "other",
+		"anthropic-version":    "2023-06-01",
+		"Content-Type":         "application/json",
+		"Authorization":        "Bearer jwt-1",
 	}
 	for key, want := range checks {
 		if got := headers[key]; got != want {
 			t.Fatalf("header %s = %q, want %q", key, got, want)
 		}
 	}
-	// 缺省版本回落常量；json=false 不带 Content-Type；captcha 头成对出现。
+	if headers["X-Os-Version"] == "" {
+		t.Fatal("X-Os-Version must be present (platform triple is self-consistent)")
+	}
+	if headers["X-Session-Id"] == "" || headers["X-Request-Id"] == "" || headers["X-ZCode-Trace-Id"] == "" {
+		t.Fatalf("missing fingerprint headers: %#v", headers)
+	}
+	// session id 进程级稳定；request/trace id 每请求新。
+	second := zcodeHeaders(cred, true, nil)
+	if second["X-Session-Id"] != headers["X-Session-Id"] {
+		t.Fatal("X-Session-Id must be stable within the process")
+	}
+	if second["X-Request-Id"] == headers["X-Request-Id"] || second["X-ZCode-Trace-Id"] == headers["X-ZCode-Trace-Id"] {
+		t.Fatal("request/trace ids must be fresh per request")
+	}
+	// 缺省版本 ⇒ 门控到 3.16.3；json=false 不带 Content-Type；captcha 头成对出现。
 	fallback := zcodeHeaders(&ZcodeCredential{ZcodeJWT: "j", DeviceMid: "m"}, false, nil)
-	if fallback["User-Agent"] != "ZCode/"+zcodeAppVersionFallback {
+	if fallback["User-Agent"] != "ZCode/"+zcodeVersionGatedMinAppVersion {
 		t.Fatalf("fallback UA = %q", fallback["User-Agent"])
 	}
 	if _, ok := fallback["Content-Type"]; ok {
@@ -212,6 +254,35 @@ func TestZcodeHeaders(t *testing.T) {
 	withCaptcha := zcodeHeaders(cred, true, &zcodeCaptchaParam{Param: "p", Region: "cn"})
 	if withCaptcha["x-aliyun-captcha-verify-param"] != "p" || withCaptcha["x-aliyun-captcha-verify-region"] != "cn" {
 		t.Fatalf("captcha headers missing: %#v", withCaptcha)
+	}
+}
+
+// TestZcodeAppVersionGate: 版本门控只抬不降；脏值不得进头 / URL。
+func TestZcodeAppVersionGate(t *testing.T) {
+	cases := []struct {
+		stored, clean, gated string
+	}{
+		{"", "3.14.3", "3.16.3"},
+		{"3.14.9", "3.14.9", "3.16.3"},
+		{"3.16.2", "3.16.2", "3.16.3"},
+		{"3.16.3", "3.16.3", "3.16.3"},
+		{"3.17.0", "3.17.0", "3.17.0"},
+		{"3.016.3", "3.14.3", "3.16.3"},                 // 前导零 = 脏值，且不得绕过门控
+		{"3.16.3-beta.1", "3.14.3", "3.16.3"},           // 非纯数字
+		{"3.16.3\r\nX-Injected: 1", "3.14.3", "3.16.3"}, // 头注入
+		{" 3.16.4 ", "3.16.4", "3.16.4"},                // 仅首尾空白
+	}
+	for _, tc := range cases {
+		cred := &ZcodeCredential{AppVersion: tc.stored}
+		if got := cred.zcodeAppVersion(); got != tc.clean {
+			t.Fatalf("stored %q clean version = %q, want %q", tc.stored, got, tc.clean)
+		}
+		if got := cred.zcodeGatedAppVersion(); got != tc.gated {
+			t.Fatalf("stored %q gated version = %q, want %q", tc.stored, got, tc.gated)
+		}
+	}
+	if zcodeCompareAppVersion("3.16.3", "3.16.3") != 0 || zcodeCompareAppVersion("3.9.0", "3.16.3") >= 0 {
+		t.Fatal("semver comparison drifted")
 	}
 }
 

@@ -14,16 +14,39 @@ const codeartsBaseURL = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v2
 // codeartsModels is the static model table (P2.5, populated already so the
 // P1 bridge verification can register a bridged provider whose models appear
 // in /v1/models). Context windows are recorded in Note for the UI.
+//
+// ⚠️ 2026-10-21（R10，上游 5aca46a）订正：两个目录端点都**不下发**窗口，
+// 权威值是 IDE 内核日志的 `inferhub-provider.models[*].limit.context`：
+//   - GLM-5.2 由 202752 改为 **1048576**（10-21 起上游改 1M）；
+//   - glm-5.3 新增 **1048576**；
+//   - glm-5.2-sft-harmony **202752**；
+//   - openpangu-2.0-flash/-pro **524288**；
+//   - deepseek-v4.1-flash 由 1000000 改为 **1048576**。
+//
+// ⚠️ 2026-10-30（R11，上游 master `3f0f48c`/`d1386ef` 的 2026-10-27 全表实测校准）：
+//   - **新增 `deepseek-v4.1-flash-1017`**（与 `deepseek-v4.1-flash` 是后端两个
+//     **独立注册**的模型，`/v1/model/builtin` 同时下发；窗口同为 1048576）；
+//   - 新增 `kimi-k3`；
+//   - 删除实测 404 的 `GLM-5`（InferHub.002002009）、`glm-5.3-flash`
+//     （002002009，仅按 benefit 通道注册）、`deepseek-v4-pro`（ModelArts.81009）；
+//   - `GLM-5.1` / `deepseek-v4-flash` 虽不在 builtin 目录里，但实测 200 ⇒ 保留
+//     （「不在残缺目录里」≠「不可用」）。
+//
+// 旧值 202752 会让上下文占用比封顶 100%、自动压缩阈值降到 ~162K（静默后果）。
+// ⚠️ 上游还有 4 个 VL 模型（kimi-k2.6-vl / Qwen3-VL-235B）**刻意不列**：上下文小、
+// 不支持工具调用，IDE 只把它们用于 analyzeImage 工具；列出来会给出一个不能当
+// agent 主模型的条目。
 var codeartsModels = ModelTable{
-	{ID: "GLM-5.2", QuotaType: "limited", Note: "ctx 202752"},
+	{ID: "GLM-5.2", QuotaType: "limited", Note: "ctx 1048576"},
 	{ID: "GLM-5.1", QuotaType: "limited"},
-	{ID: "GLM-5", QuotaType: "limited"},
-	{ID: "glm-5.3-flash", QuotaType: "unlimited", Note: "ctx 1048576; benefit"},
-	{ID: "openpangu-2.0-flash", QuotaType: "limited"},
-	{ID: "openpangu-2.0-pro", QuotaType: "limited"},
+	{ID: "glm-5.3", QuotaType: "limited", Note: "ctx 1048576"},
+	{ID: "glm-5.2-sft-harmony", QuotaType: "limited", Note: "ctx 202752"},
+	{ID: "openpangu-2.0-flash", QuotaType: "limited", Note: "ctx 524288"},
+	{ID: "openpangu-2.0-pro", QuotaType: "limited", Note: "ctx 524288"},
 	{ID: "deepseek-v4-flash", QuotaType: "unlimited", Note: "ctx 1048576"},
-	{ID: "deepseek-v4-pro", QuotaType: "unlimited", Note: "ctx 1048576"},
-	{ID: "deepseek-v4.1-flash", QuotaType: "unlimited", Note: "ctx 1000000; benefit"},
+	{ID: "deepseek-v4.1-flash", QuotaType: "unlimited", Note: "ctx 1048576; benefit"},
+	{ID: "deepseek-v4.1-flash-1017", QuotaType: "limited", Note: "ctx 1048576"},
+	{ID: "kimi-k3", QuotaType: "limited"},
 }
 
 // RegisterDefaultProducts installs every provider's static product config.
@@ -230,6 +253,17 @@ func RegisterDefaultProducts(b *Bridge) {
 		Models:    accioFallbackModelTable,
 		ModelsFor: AccioModelsFor,
 	})
+	// R10: Codely（Unity 团结引擎）— 推理是 OpenAI 兼容网关，但每个请求都要
+	// 先换发 sk- CLI key 再 HMAC 签名（见 codelyAugment）。目录走远端
+	// `/api/model-status`（ModelsFor），静态 8 条兜底。
+	b.RegisterProduct(Product{
+		Provider:    "codely",
+		DisplayName: "Codely (Unity) (Free Hub)",
+		BaseURL:     codelyAPIBase,
+		InferURL:    codelyChatHost + "/chat/completions",
+		Models:      CodelyFallbackModels(),
+		ModelsFor:   CodelyModelsFor,
+	})
 }
 
 // RegisterProviderAugmenters wires the provider-specific augment hooks into
@@ -250,6 +284,7 @@ func (m *Manager) RegisterProviderAugmenters() {
 	m.SetAugmenter("autoclaw", m.autoclawAugment)
 	m.SetAugmenter("zcode", m.zcodeAugment)
 	m.SetAugmenter("officeace", m.OfficeaceAugmentHook())
+	m.SetAugmenter("codely", m.codelyAugment)
 }
 
 // RestoreBridges re-registers every stored prefix found in accounts.json.

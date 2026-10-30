@@ -236,6 +236,9 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 			// （2026-10-03 起免费清单只剩 4 条：cline-free/gemini-3.8-flash 已被上游
 			// 下线，ref 51d6093——见 trae_model.go 的表注释。）
 			"cline-free/mimo-v2.6-flash": "MiMo-V2.6-Flash · 免费",
+			// R10（2026-10-21 远端 free 数组实测在册，ref 0eeea3c）：新补的免费条目；
+			// 缺省 max_tokens=4096 会静默截断，默认预算由 clineAugment 写入。
+			"cline-free/minimax-m3.1-flash": "Minimax M3.1 Flash · 免费",
 			// （2026-10-05 起只剩 3 条：cline-free/deepseek-v4.1-flash 也被下架，
 			// ref b0352fc——同上表注释。付费侧的 cline-pass/deepseek-v4.1-flash
 			// 仍在，别把两者混为一谈。）
@@ -263,7 +266,7 @@ func TestModelDisplayNamesMatchReference(t *testing.T) {
 		},
 		// 兜底路径的 name **就是 id**（ref 逐条如此），不编造人类可读名。
 		"lobsterai": {"kimi-k3": "kimi-k3", "doubao-seed-2-1-pro-260628": "doubao-seed-2-1-pro-260628"},
-		"codearts":  {"glm-5.3-flash": "glm-5.3-flash", "deepseek-v4.1-flash": "deepseek-v4.1-flash"},
+		"codearts":  {"deepseek-v4.1-flash-1017": "deepseek-v4.1-flash-1017", "deepseek-v4.1-flash": "deepseek-v4.1-flash", "kimi-k3": "kimi-k3"},
 		"minimax":   {"MiniMax-M3.1-Flash-Preview": "M3.1-Flash-Preview", "MiniMax-M2.7": "M2.7"},
 		"raccoon": {
 			"sn-glm-5-3":             "GLM-5-3 · x0.75",

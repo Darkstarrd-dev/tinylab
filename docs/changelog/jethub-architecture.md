@@ -1,3 +1,78 @@
+## 2026-10-30 — R11 codearts 模型目录校准（用户报障：缺 `deepseek-v4.1-flash-1017`）
+
+**用户报障**：「检查各个渠道模型列表，当前 codearts 渠道未见 `deepseek-v4.1-flash-1017` 模型，而上游项目中有」。
+
+**根因**：本端 codearts 没有远端目录，列表只来自静态表；R10 同步时的表只有 `deepseek-v4.1-flash`。
+上游 2026-10-27 的 `3f0f48c`（IKQY27）把 `deepseek-v4.1-flash-1017` 作为**独立注册模型**
+补进 `DEFAULT_MODELS`（`/v1/model/builtin` 同时下发父 id 与 `-1017`；旧实现把末尾 `-NNNN`
+当日期后缀剥掉后撞 id 被去重丢弃），并在 `d1386ef` 补了「已下架」全量目录判据。
+
+**改动**：
+- `internal/jethub/products.go::codeartsModels`：补 `deepseek-v4.1-flash-1017`（ctx 1048576）
+  与 `kimi-k3`；删 `GLM-5`/`glm-5.3-flash`/`deepseek-v4-pro`（2026-10-27 逐条真机 404）；
+  保留 `GLM-5.1`/`deepseek-v4-flash`（不在 builtin 目录但 200）。表 11→10 条，与上游
+  `DEFAULT_MODELS` 逐条一致。
+- `internal/jethub/codearts_test.go`：新增 `TestCodeartsModelTableMatchesMeasuredCatalog`
+  （10 条在册、3 条不得复活、`-1017` ctx 1M、总数 10）。
+- `internal/api/jethub/register_test.go`：展示名对账代表条目改为 `-1017`/`deepseek-v4.1-flash`/`kimi-k3`。
+
+**全渠道核对**：上游自 `9ffd65e` 起只有 codearts 模型表变化（`llm-adapter.ts`/`models.ts`）；
+modelscope 的 `-1017` 分支修复本端已实现，cline 仅注释，canonical-models 只影响聚合键；
+其余 provider 兜底表无上游 diff（滚动新增由远端目录覆盖）。
+**上游 master 已到 `6fa7472`（38 commits，含新 provider Magicrew），本轮未推进 pin。**
+
+**验证**：`go build ./...` 干净；`go test ./internal/jethub ./internal/api/jethub` 全绿。
+⚠️ 静态表变更需重启或重新 SyncKeys 后才进入桥接 Provider 的 `/v1/models`。
+
+## 2026-10-29 — R10 上游同步（pin `9ffd65e`）：新增 Codely + ZCode 405 修复 + 模型事实
+
+**背景**：`ref/deepseek-harness-codearts` 自 `b0940ca` 起 master 87 commits（110 文件 / +15.5k），
+另有 `fix/modelscope-dated-snapshot` 分支 66 commits（src +8.6k）—— 分支 tip `9ffd65e` 是新的
+同步 pin。用户要求「同步上游更新到 Free Hub 模块」。
+
+**可搬并实施**：
+
+1. **ZCode 405 风控簇（分支 `0636d55`/`3824e33`/`9893e91`/`758a20b`）**——用户报障级：
+   - 身份块按官方 2026-10-23 版**重新程序化提取**：stable 由 2856 → **2590** UTF-16 码元
+     （删 `# Working style`，desktop 段新增 `### Interactive views`），sha256/字节数同步；
+     旧文本线上表现为 `405 unusual activity`。
+   - `system` **恒为 3 块**：调用方 system 追加成第 4 块会必然 405+3012（与长度无关）⇒
+     新 `zcodeWithCallerSystem` 把它注入首轮 user（日期块之后、幂等）。
+   - 请求头 10 → **18**：`production`/`win32-x64` 两个错值订正，补 `X-Title`/`X-Os-Version`/
+     `X-ZCode-Agent`/`X-Session-Id`（进程稳定）/`X-ZCode-Session-Type`/request/trace id；
+     版本门控 `max(凭据, 3.16.3)`（只抬不降），脏版本不得进头/URL。
+   - **405 恒不可重试**：无权威业务码的 405 归一化 400（pass-through），文案与行为同轴；
+     业务码优先（`1005`+405 仍是额度）且必须在 HTML 页判断之前。
+   - 并发间隔：`glm-5.3` 350ms、`glm-5.3-flash` **500ms**（0 → 500；IKQ4B4「并发开多就全废」），
+     按 (账号, 模型) 串行、请求取消可释放。
+   - 每日领取并入**营销投放**：`GET /marketing/touch`（版本门控）→ 与 preview 按 planId
+     合并（preview 优先、campaign id 借用、priority 降序）；领取成功/已领取后
+     `POST /marketing/touch/action confirm`（失败绝不回报）；营销额度同单位求和
+     （1024：3 亿+2 亿=5 亿）；preview 侧补 `entitlements[0]`（面板不再「+0」）。
+2. **Codely（第 19 家，master `b69e673`/`357f1f7`/`a1a487a`）**：设备码登录、refresh
+   （不轮换）、每请求换发 `sk-` cli key + HMAC-SHA256 签名（LF 分隔、pathname-only）、
+   远端 `model-status` 目录（成功 10min/失败 30s/并发去重/兜底不缓存）、积分逐桶余额、
+   两步签到、402 积分锁到 UTC+8 次日。签名固定向量取 ref 单测（`codely_test.go`）。
+3. **codearts（`5aca46a` 等）**：窗口表按 IDE 日志权威值订正（GLM-5.2 202752→1048576、
+   glm-5.3 新增 1M、openpangu 524288、deepseek-v4.1-flash 1048576）；新增 glm-5.3 /
+   glm-5.2-sft-harmony 条目。图片/analyzeImage/压缩代理拒发按不搬清单登记。
+4. **cline（`0eeea3c`）**：补 `cline-free/minimax-m3.1-flash`（免费，ctx 1048576）；
+   `clineAugment` 在缺 `max_tokens` 时按兜底表 `max` 写入默认预算（网关缺省 4096 会静默截断），
+   用户已指定则不覆盖（字节级透传）。
+5. **modelscope（`9ffd65e` / issue #12）**：无后缀 `DeepSeek-V4.1-Flash` 已下线 ⇒ 表内改登记
+   当前快照 `-1017`；测试反向锁「旧 id 不得再出现」。
+6. **raccoon（`3ff5163`）**：图片能力「默认支持 + 纯文本黑名单」——本端 R9 已按此实现，**确认对齐**。
+7. **autoclaw（`b8bbb46`）**：`zai_glm-5.3-flash` 的 isFree 失实——本端模型表使用 QuotaType
+   `limited`、无 isFree 分组，**无落点**；文档补「目录缺失 ≠ 不扣费」。
+
+**未实施（以 commit 锚点留在同步文档 §6 R10）**：minimax 身份继承/昵称与强制登录 URL；
+qoder 错误分表/免费模型永久锁/per-account 代理/积分并发；trae 流内 `event:error` 分类与
+图片排序（本端进站形状不同，结构免疫）；codearts analyzeImage/模态声明/压缩代理分类；
+记账与 credit-expiry 聚合口径；Codely cli-key 401 预检换号（本端 502 + 明确文案）。
+
+**验证**：`go vet ./internal/jethub ./internal/api/jethub` 干净；`go test ./internal/jethub
+./internal/api/jethub` 全绿；`node --test web/jethub.test.js` 全绿。过程见同步文档 §6 R10 / §7。
+
 ## 2026-10-23 — Raccoon IAM confirmation 激活与全渠道模型动态刷新机制（用户实测驱动）
 
 **用户报障**：

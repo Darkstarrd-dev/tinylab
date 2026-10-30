@@ -4,7 +4,9 @@
 >
 > **上游：** `ref/deepseek-harness-codearts`（gitignored 只读副本，允许 `git fetch`/`git checkout` 同步操作，**禁止手工编辑**），origin `https://gitee.com/iJetLi/deepseek-harness-codearts.git`。
 >
-> **当前 pin：** `b0940ca`（2026-10-21，R7 分诊与实施完成；前序 pin：R6 `bca0d8c`、R5 `e73cd2f`、R4 `2e8bb86`、R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+> **当前 pin：** `9ffd65e`（2026-10-26，R10 分诊与实施完成 —— 分支 `fix/modelscope-dated-snapshot` tip，含 master `301f6bc` 之后 66 commits；前序 pin：R7 `b0940ca`、R6 `bca0d8c`、R5 `e73cd2f`、R4 `2e8bb86`、R3 `ff5e37d`、R1/R2 `e06283c`、初版 `cecf376`——**pin 只影响后续同步的判据来源，已移植实现的语义不随 pin 移动**）。
+>
+> **本轮侦察（2026-10-29，R10）：** master `b0940ca` → `301f6bc`（87 commits / 110 文件 / +15.5k）+ 分支 `fix/modelscope-dated-snapshot` `301f6bc` → `9ffd65e`（66 commits / src +8.6k）。主题：**Codely（Unity 团结引擎）新渠道**、**ZCode 官方 3.16.3 身份块/18 头/405 风控**、codearts 图片与窗口、qoder 免费模型锁与错误分表、minimax 登录身份、trae 流内错误、cline 默认输出预算、ModelScope 日期快照、记账/credit-expiry 口径。**可搬已实施**：R10-1 ZCode 405 簇、R10-2 Codely provider、R10-3 codearts 窗口、R10-4 cline 预算、R10-5 modelscope 快照、R10-6 对齐确认（raccoon/autoclaw）。未实施项与 commit 锚点见 §6 R10。
 >
 > **本轮侦察（2026-10-21，R7）：** master `bca0d8c` → `b0940ca`：**216 commits / 380+ 文件**，主要新增 MiniMax 国际版（minimaxintl）、ModelScope（魔搭，modelscope）、AutoClaw（智谱清言，autoclaw）、AStudio（讯飞，astudio）等 provider；处理方式包括 WorkBuddy `reasoning_effort` 回退（DeepSeek 思考优先）、Rotation 错误分类（11128/11140/14018）；可用模型包括 OfficeAce 窗口订正、Qoder 免费/低倍率模型补充、ModelScope 36 模型与 AutoClaw 4 模型。**可搬项已实施**：R7-1 minimaxintl、R7-2 modelscope、R7-3 autoclaw、R7-4 处理方式与模型表同步；R7-5 astudio 按不搬清单分诊归档。
 >
@@ -142,6 +144,12 @@ git log --oneline <pin>..origin/<branch>                         # 分支单独�
 | R5：DSH 宿主 / 面板专属项（buddy 成长面板与部署副本、buddy 图片能力三态与白名单、auto 选型、TRAE/LobsterAI 永久积分锁、RPC refresh 语义、调度器武装门） | `9462051` / `09fe2eb` / `97397a3` / `e60e555` / `f498586` / `e52f091` / `29f6bad` / `3de9312` / `570b0b3` / `68fb567` / `ac805a3` / `ba419ad` / `e784201` | 逐条理由见 §6 R5-3 / R5-4：或属宿主接线/面板行为，或本端已有等价实现（空候选 502、mark→exclude 无条件执行、九个刷新端点一律 502、`StartRefreshScheduler` 已无条件武装）。**其中三条纪律记入 R1-8 参考**（「未知 ≠ 不支持」/「目录重看 ≥10s 节流」/「等目录恢复才解决的错误不得进可重试集合」） |
 
 | R6：原生搜索（qoder/buddy/workbuddy）、DSML 工具调用归一化、图片预算/工具结果图片、零输出守卫、记账/面板族 | `99e1483`/`32b6420`/`58ae086`、该族 4+ commits（`src/dsml.ts` / `openai-gateway/images.ts` / `src/image-budget.ts` / `src/zero-output-guard.ts`） | 上游 DSH 宿主/插件出口行为；TinyLab 本体即代理，`/v1/*` 直通，无该消费侧。已拆出唯一与 Free Hub 出站直接相关的 **workbuddy `reasoning_effort` 吞正文** 事实并落 R6-3；图片/档位/搜索等若将来本端出现对应消费侧，按本行锚点重估 |
+| R10：codearts `analyzeImage` 工具 / 逐模型模态声明 / 图片 VL 白名单 | `1b380bf` / `3822180` / `9acddc7` / `376ae14` / `813e7fa` / `f41036b` / `a777741` | `analyzeImage` 是 **DSH 宿主工具**（先让 VL 模型看图 → 把结果当文字交给主模型），本端无工具运行面；VL 模型被上游**刻意排除在对话目录外**（上下文小、不支持工具调用）。本端推理是 OpenAI 直通，图片本就透传，普通模型收图会拿到上游明确的 406。逐模型模态声明无落点（`ModelDef` 无该字段） |
+| R10：codearts 本机压缩代理拒发签名请求的单列分类 | `7c1ae77`（bili / IKQ7AP） | 触发条件是用户自装 bili 类 compress-or-refuse 代理。本端 403 走 `ActionRotateOnly`（不刷凭据、不写冷却），且错误正文原样透传（marker 不丢）；缺的只是「单列错误码 + 可执行文案」。收益窄、无法本机复现 ⇒ 仅登记 |
+| R10：qoder 免费模型永久锁 / 错误分表 / per-account 出口代理 / 积分并发 | `1ed05e2` / `d02bf10` / `551a44b` / `fbed6d0` / `c5dbf3f` / `618a090` / `d55a41e` / `5140ea8` / `df7cae3` / `63a5c3f` | ① 本端**从未移植永久积分锁**（`creditLock` 概念不存在）⇒ 免费模型被误拦无落点；② 401/403 已统一 `ActionRotateOnly`（不写冷却），错误分表价值主要在 DSH 适配器内循环；③ per-account 代理在本端是 provider 级开关（qoder/qodercn 是两个 provider），同一渠道多账号共用出口属已知边界；④ 积分「一直读取中」是面板并发/文案，本端 `/balance` 逐个账号请求且失败带原因。**重估触发**：用户出现国际版 SNI 阻断且需同 provider 双出口时，按 `618a090` 取材（`config.Key.Proxy` 与 `SetAccountProxy` 已在，接线成本低） |
+| R10：minimax 登录强制重登 URL / 续期身份继承 / 登录昵称 | `889769c` / `2278f89` / `cb6ee35` | ① 本端登录已有「浏览器 × 会话模式」（§3.9），新建账号可选独立配置目录 ⇒ 旧会话复用问题已有等价手段；forcedLoginUrl 是更好的默认，但需要新增一个无 cookie 的上游请求与登录页两跳，未实施。② 本端 `MinimaxCredential` **没有** `user_id`/`nickname` 字段（登录从不查 `/v1/api/user/info`）⇒ 续期覆盖不会丢身份（无身份可丢），但也没有同账号去重。③ 昵称属展示增强，未实施。**待办**：若用户报「同一账号可无限建卡」或「卡片只有内部 id」，按 `cb6ee35` + `889769c` 补身份查询、凭据 `user_id`、续期继承与建号去重 |
+| R10：trae 流内 `event:error` 结构化分类 / 多 tool_call 图片排序 | `63a5c3f` / `0cb0140` | ① 流内错误分类（4001/4006/1005）本端无 trae 响应拦截器，SSE 错误帧原样透传（HTTP 200 已发出）；补它需要新写 trae SSE 解析层。② 图片排序缺陷源于上游把「工具结果内嵌图片」抽成 user 消息并插在 `role:tool` 之前 —— 本端 `transformToSOLOBody` **不做图片抽取**，tool 消息形状原样保留 ⇒ **结构免疫**（不是已修，是没有该路径） |
+| R10：credit-expiry / aggregate-expiry 分档与单渠道折算口径 | `301f6bc` / `458ec4e` / `ea3ff34` / `a67d439` / `3ff5163` / `9b9dd45` | 上游是**面板端**聚合（三档合计=total、独立池不进分档、`deductionEndTime` 用 `Number()`）。本端合计在 `balance_summary.go`（按单位分组求和）与前端 `__jethubSplitByExpiry` 各自实现，语义接近但未逐条对齐；改动会同时影响 Monitor 与卡片两处读数，需单独一轮带数据验证。**已确认对齐**：raccoon 图片「默认支持 + 纯文本黑名单」本端 R9 即此形态（`3ff5163` 是对同一结论的再次确认） |
 ## 6. 待办与实施记录（R1：`cecf376` → `e06283c`；R2：ZCode 重估；R3：→ `ff5e37d`；R4：→ `2e8bb86`；R5：→ `e73cd2f`）
 
 > 分诊记录（2026-10-02）：31 个触 `src/` 的提交逐条归类；merge 提交 `4ce4a6e`（= `0ca8256` 族）/`4a62e84`（= cline 面板族）已展开核对。未深读的提交均为面板 / 测试 / 文档 / zcode 类，归 §5。每条 R1 在实施时先读对应 ref 文件与上游测试，再动手。
@@ -481,6 +489,92 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 
 > **验收**：`go vet ./internal/jethub ./internal/api/jethub` 干净 + 全量 `go test ./...` 全绿（含 `internal/jethub` 的 12 例新用例）+ 三处反向验证如上。**无账号真机验证**（目录拉取需真实 raccoon 登录凭据；与 R8 同一口径）。R1-8 的四条硬纪律逐条落到实现与用例里（未知≠不支持 / 失败冷却与并发去重 / 兜底不缓存 / 无凭据不打上游）。
 
+## R10（pin `b0940ca` → `9ffd65e`，2026-10-29，实施完成）
+
+> **范围**：master `b0940ca` → `301f6bc`（87 commits / 110 文件 / +15.5k）+ 分支
+> `fix/modelscope-dated-snapshot` `301f6bc` → `9ffd65e`（66 commits / src +8.6k / 新测试 ~26k）。
+> 87 个提交里大量是 merge 提交与同一修复的多分支重放；按主题去重后分诊为：ZCode 405 簇、
+> Codely 新渠道、codearts 图片/窗口、qoder、minimax、trae、cline、autoclaw、modelscope、
+> 记账/credit-expiry、面板/构建/测试。
+
+### R10 实施记录
+
+- [x] **R10-1 ZCode 405 风控簇**（`0636d55`/`3824e33`/`9893e91`/`758a20b` + `689a2b1`/`b24514b`）
+  > 身份块按官方 2026-10-23 版**程序化重提取**：stable 2856 → **2590** UTF-16 码元（删
+  > `# Working style`，desktop 新增 `### Interactive views`），`zcode_identity_text.go` 与
+  > `TestZcodeIdentityTextMatchesReference`（sha256/字节数）同步。`zcodeSystemBlocks` **恒 3 块**，
+  > 新 `zcodeWithCallerSystem` 把调用方 system 注入首轮 user（日期块之后、幂等）。头族 10 → 18
+  > （`production`/`win32-x64`/`X-Title`/`X-Os-Version`/`X-ZCode-Agent`/`X-Session-Id`/
+  > `X-ZCode-Session-Type`/request+trace id），版本门控 `max(凭据, 3.16.3)`，脏版本拦截。
+  > 405 无业务码 ⇒ 归一化 400 硬停（文案说「不会自动重试/更换账号无效」）；业务码优先。
+  > 并发间隔 `glm-5.3` 350ms / `glm-5.3-flash` 500ms（`zcode_gate.go`，按 key×model 串行）。
+  > 领取并入营销投放（`zcode_marketing.go`：递归扫描 deliveries、同单位额度求和、preview ∪
+  > marketing 去重合并、成功/已领取后 confirm）；preview 补 `entitlements[0]`，面板不再「+0」。
+  > 回归：`zcode_test.go`（身份/块数/调用方注入/头族/版本门控）、`zcode_convert_test.go`
+  > （恒 3 块 + caller 入 messages）、`zcode_response_test.go`（405 五格 + 1005/3012 邻位）、
+  > `zcode_gate_test.go`（间隔/不同账号不阻塞/取消）、`zcode_marketing_test.go`（解析/去重/
+  > 额度求和/confirm 判据）。**反向验证**：405 判据改为恒 false ⇒ `TestZcodeIntercept405IsHardStop`
+  > 立刻变红（实得 status 405 / want 400），已还原。
+- [x] **R10-2 Codely（第 19 家）**（master `b69e673`/`357f1f7`/`a1a487a`/`b25ae2e`）
+  > `internal/jethub/codely.go`（凭据/模型表/续期）+ `codely_auth.go`（设备码三步 + JWT exp）+
+  > `codely_sign.go`（HMAC 派生/签名/换发 key 分档）+ `codely_models.go`（`/api/model-status`
+  > 远端目录，10min/30s/并发去重/兜底不缓存）+ `codely_credits.go`（逐桶余额/两步签到/402 锁）+
+  > `codely_augment.go`（换发 + 签名头）+ `internal/api/jethub/codely.go`（login/status/refresh/
+  > balance/claim）+ `products.go`/`manager.go`/`register.go` 接线。
+  > 回归 `codely_test.go`（ref 签名固定向量、LF/query、JWT、设备码/交换解析、目录、余额多桶、
+  > 签到 reward、8 条兜底模型、Product/ModelsFor 接线）。
+  > ⚠️ 与 ref 差异：cli-key 换发 401 时本端不静默换号（代理只在拿到上游响应后换号），
+  > 返回 502 + 明确「请重新登录」。
+- [x] **R10-3 codearts 窗口表**（`5aca46a`）：GLM-5.2 202752→1048576、新增 glm-5.3 与
+  > glm-5.2-sft-harmony、openpangu 524288、deepseek-v4.1-flash 1048576；图片/analyzeImage/
+  > 压缩代理按 §5 登记。
+- [x] **R10-4 cline 默认输出预算**（`0eeea3c`）：补 `cline-free/minimax-m3.1-flash`（ctx 1048576、
+  > 默认 131072）；`clineApplyDefaultMaxTokens` 在缺 `max_tokens` 时按表写入（缺省 4096 会静默
+  > 截断），用户已指定则字节级透传。
+- [x] **R10-5 modelscope 日期快照**（`9ffd65e`）：兜底表改登记 `DeepSeek-V4.1-Flash-1017`；
+  > 测试反向锁旧 id 不再出现。
+- [x] **R10-6 对齐确认**：raccoon 图片默认支持 + 纯文本黑名单（R9 已实现，`3ff5163` 再确认）；
+  > autoclaw `zai_glm-5.3-flash` isFree 失实（本端 QuotaType=limited，无 isFree 分组，无落点）。
+
+### R10 未实施（保留锚点，下一轮不重复分诊）
+
+见 §5 的 6 条 R10 行：codearts analyzeImage/模态、codearts 压缩代理分类、qoder 错误分表/
+per-account 代理、minimax 身份/强制登录、trae 流内错误分类、credit-expiry 聚合口径。
+Codely 的 401 预检换号作为已知差异记录在架构 §6.17。
+
+## R11（2026-10-30，**报障驱动补做**：codearts 模型目录校准 + 全渠道模型列表核对）
+
+> **触发（用户报障）**：「检查各个渠道模型列表，当前 codearts 渠道未见
+> `deepseek-v4.1-flash-1017` 模型，而上游项目中有」。
+>
+> **根因**：本端 codearts 是**静态表**，上次同步（R10）时上游 master 还没有这次校准；
+> 上游 2026-10-27 的 `3f0f48c`（IKQY27）+ `d1386ef` 才把 `deepseek-v4.1-flash-1017`
+> 作为**独立注册模型**补进 `DEFAULT_MODELS`，并删除 3 条实测 404 的旧条目。
+> 旧表只有 `deepseek-v4.1-flash`，没有 `-1017`。
+>
+> **判据（§2 三条硬判据全过）**：① 可独立运行（纯模型 id 事实，无宿主依赖）；
+> ② 服务端事实（同一 `/v1/model/builtin` 同时下发两个 id，chat 端点分别 200）；
+> ③ 用户可见损失（IDE 已更新 1017，本端列表没有 ⇒ 选不到）。
+>
+> | # | 落点 | 说明 |
+> |---|---|---|
+> | R11-1 | `internal/jethub/products.go`（`codeartsModels`） | 补 `deepseek-v4.1-flash-1017`（ctx 1048576）+ `kimi-k3`；删 `GLM-5` / `glm-5.3-flash` / `deepseek-v4-pro`（均实测 404）；保留 `GLM-5.1` / `deepseek-v4-flash`（不在目录但 200）。表 11 → **10 条**，与上游 `DEFAULT_MODELS` 逐条一致 |
+> | R11-2 | `internal/jethub/codearts_test.go` | `TestCodeartsModelTableMatchesMeasuredCatalog`：逐条在册 + 逐条不得复活 + `-1017` ctx 1M + 总数 10 |
+> | R11-3 | `internal/api/jethub/register_test.go` | 展示名对账代表条目改为 `-1017` / `deepseek-v4.1-flash` / `kimi-k3` |
+> | R11-4 | 文档 | 架构 §6.4 新增「2026-10-27 全表校准（R11）」+ 最后核对行；本文档 R11 段 + §7 日志 |
+>
+> **全渠道核对结论**：上游自 `9ffd65e` 以来只有 codearts 的模型表发生变化
+> （`llm-adapter.ts`/`models.ts`）；`modelscope`（分支修复）、`cline`（注释）、
+> `canonical-models`（聚合键）其余改动不影响本端静态列表；raccoon/loomy/qoder/
+> buddy/workbuddy/trae/zcode/officeace/accio/autoclaw/codely 的兜底表无上游 diff
+> （滚动新增由各自的远端目录覆盖）。**上游 master 已推进到 `6fa7472`**（38 commits，
+> 新增 Magicrew provider、codearts 续期/目录修复、autoclaw/minimax 续期审计等），
+> 本轮**未推进 pin、未做完整分诊** —— 下一轮例行同步从 `9ffd65e..6fa7472` 开始。
+>
+> **验证**：`go test ./internal/jethub ./internal/api/jethub` 全绿；`go build ./...` 干净。
+> ⚠️ 本端 codearts 无远端目录，列表变更需**重启/重新 SyncKeys** 后才会出现在桥接
+> Provider 的 `/v1/models`。
+
 ## 7. 轮次日志
 | 轮次 | 日期 | pin 前 → 后 | 范围 | 结论 |
 |---|---|---|---|---|
@@ -493,3 +587,5 @@ R6-1（Accio）、R6-2（OfficeAce）与 R6-3（workbuddy `reasoning_effort` 修
 | R7 | 2026-10-21 | `bca0d8c` → `b0940ca` | master 216 commits / 380+ 文件；**R7-1 minimaxintl + R7-2 modelscope + R7-3 autoclaw 三家新 provider + R7-4 处理方式与模型表同步实施**，R7-5 astudio 归 §5 | **minimaxintl（第 16 家）**：MiniMax 国际站，Anthropic Messages 协议族，双站点产品配置与 InferURL、设备码登录、静默续期、额度查询与每日签到。**modelscope（第 17 家）**：魔搭社区，OpenAI 兼容推理，长期 API Key 凭据，魔粒余额端点（`/openapi/v1/magicubes/balance`），扁平工具转 `{type:"function"}` 规避 400，36 兜底模型表。**autoclaw（第 18 家）**：智谱清言桌面端网关，短信验证码登录，动态 MD5 签名，X-Version: 2.1.1 校验头，406 前缀绕过与 max_tokens 门禁，积分钱包余额与每日签到，4 确证模型表。**R7-4**：撤销 workbuddy 剥离 `reasoning_effort`（DeepSeek 思考优先于 preamble）；Rotation 错误分类（11128/11140/14018）；OfficeAce 窗口实测订正；Qoder 补充 dfmodel(Free x0)/mmodel(x0.1)。**R7-5**：astudio（讯飞 AstronStudio）依赖 Electron 微信扫码/本地 session 导入归 §5 不搬。验证：`go build` 干净，全量 `go test ./...` 与 `node --test web/jethub.test.js` 全绿。 |
 | R8 | 2026-10-23 | `b0940ca`（不变） | **报障驱动补做**：Loomy 远端模型目录落地 + 兜底表 spark-x 窗口订正；无新 pin（上游修复 commit `02653ea` 早已在 pin 之前） | 新增 `internal/jethub/loomy_models.go`（`GET {apiBase}/models` token 头解析 + `loomySplitRate`/`loomyDisplayName` 名称规范化 + 覆盖表 + 进程内缓存 10min/30s/并发去重/兜底不缓存 + `LoomyModelsFor`）；`products.go` 接线 `ModelsFor`；`trae_model.go` 的 spark-x ctx 1048576→262144；新增 `loomy_models_test.go`（12 例）+ 四处反向验证；文档同步架构 §6.3/§6.3.1、PROJECT_MAP §13n/§24/最后核对。**`go vet ./...` 干净 + 全量 `go test ./...` 全绿 + `node --test web/jethub.test.js` 全绿 + `go build` 正常**；无账号真机验证（loomy 目录拉取需真实凭据） |
 | R9 | 2026-10-23 | `b0940ca`（不变） | **报障驱动补做**：Raccoon 远端模型目录落地（`DeepSeek-V4.1-Flash-1017` 缺失）；无新 pin（上游早已有远端目录，本端只搬了静态兜底表） | 新增 `internal/jethub/raccoon_models.go`（复用 `raccoonRequest` 的 `GET /api/web/llm/v2/model_catalog`、`code==0` 信封、只取 `type==='chat'` 组、**id 在 `name` 字段**、显式 `visible:false` 剔除、去重保序；`raccoonMultiplier` **缺失传 -1**；图片默认支持不看 `tags.vision`，纯文本按基础 id 剥 `-\d{4}$`；缓存 10min/30s/并发去重/无凭据不打上游/兜底不缓存 + `RaccoonModelsFor`）；`products.go` 接线 `ModelsFor`；**静态兜底表刻意不加 `-1017`**；新增 `raccoon_models_test.go`（12 例，含 `-1017` 回归）+ 三处反向验证；文档同步架构 §6.3/§6.3.2、PROJECT_MAP §13n/§24/最后核对、本文档 R1-8 追加重写。**`go vet` 干净 + 全量 `go test ./...` 全绿**；无账号真机验证（目录拉取需 raccoon 真实凭据）。raccoon 路由不依赖模型表 ⇒ 修复只影响列表可见性 |
+| R10 | 2026-10-29 | `b0940ca` → `9ffd65e`（master `301f6bc` + 分支 66 commits） | master 87 commits / 110 文件 / +15.5k + 分支 66 commits / src +8.6k；**R10-1 ZCode 405 簇 + R10-2 Codely 新 provider + R10-3 codearts 窗口 + R10-4 cline 预算 + R10-5 modelscope 快照 + R10-6 对齐确认**；未实施 6 类归 §5 | **ZCode**：身份块 2856→2590 重提取、system 恒 3 块 + 调用方 system 入 messages、18 头 + 版本门控、405 硬停、flash 并发 500ms、营销投放领取（confirm 回报 + 额度求和 + preview entitlements）。**Codely（第 19 家）**：设备码登录、refresh 不轮换、每请求换发 sk- key + HMAC（LF/pathname）、model-status 目录、逐桶积分、两步签到、402 日锁。**codearts** 窗口表订正；**cline** 默认预算 131072 + 新免费模型；**modelscope** 改 `-1017`；raccoon/autoclaw 确认对齐。验证：`go vet ./internal/jethub ./internal/api/jethub` 干净 + `go test ./internal/jethub ./internal/api/jethub` 全绿 + `node --test web/jethub.test.js` 全绿；Codely/ZCode 新语义均无真机账号验证（判据以单测 + ref 实测记录为准） |
+| R11 | 2026-10-30 | `9ffd65e`（不变；master 已到 `6fa7472`，未推进 pin） | **报障驱动补做**：codearts 模型表按上游 2026-10-27 真机全表校准补 `deepseek-v4.1-flash-1017` + `kimi-k3`、删 3 条 404；全渠道模型列表核对（其余无漂移）；发现 master 新增 38 commits（Magicrew provider 等）留待下轮 | `codeartsModels` 11 → 10 条（与 ref `DEFAULT_MODELS` 一致），`-1017` ctx 1048576；新增 `TestCodeartsModelTableMatchesMeasuredCatalog`；展示名对账同步；文档架构 §6.4 + 同步文档 R11。`go build ./...` 干净 + `go test ./internal/jethub ./internal/api/jethub` 全绿。⚠️ 静态表变更需重启/重新 SyncKeys 才进 `/v1/models` |

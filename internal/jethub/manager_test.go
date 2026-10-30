@@ -90,10 +90,10 @@ func (f *fakeRegistry) ListProviders() []config.Provider {
 
 func TestProvidersMetadata(t *testing.T) {
 	metas := Providers()
-	if len(metas) != 18 {
-		t.Fatalf("expected 18 providers, got %d", len(metas))
+	if len(metas) != 19 {
+		t.Fatalf("expected 19 providers, got %d", len(metas))
 	}
-	for _, p := range []string{"codearts", "minimax", "minimaxintl", "opencode", "zcode", "officeace", "accio", "modelscope", "autoclaw"} {
+	for _, p := range []string{"codearts", "minimax", "minimaxintl", "opencode", "zcode", "officeace", "accio", "modelscope", "autoclaw", "codely"} {
 		if !ProviderExists(p) {
 			t.Fatalf("%s should be known provider", p)
 		}

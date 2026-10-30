@@ -186,7 +186,46 @@ func (m *Manager) zcodeClassifyErrorResponse(resp *http.Response, keyID, upstrea
 			return out, retryMs, err
 		}
 	}
+	// ★ 405 恒不可重试（ref 758a20b，Gitee IKQ4B4 实测）。
+	//
+	// 405 在 ZCode 从不是「HTTP 方法不允许」—— 它是**风控拦截的专属状态码**
+	// （裸请求 / 无身份块都是 405+3012）。上游有时把它包成边缘 HTML 页
+	// （`<title>405</title>`，无业务码、无风控语义）⇒ 若交给代理的通用分类会
+	// 被判成可重试 5xx/4xx，白重试 5 轮、每轮都真实打到上游，并加重账号冷却
+	// 惩罚（30min → 24h → 停用）。
+	//
+	// 位置两个邻位都不能错：必须在「有权威业务码」之后（`{"code":1005}`+405
+	// 是额度耗尽，不是风控），且在 HTML 页判断之前（405 最常见的形态就是 HTML）。
+	// 归 400 透传 = 不重试、不冷却、不换号（与 3012/3007 同一机制）。
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		zcodeRewriteAsClientError(resp, zcodeMethodNotAllowedMessage(text))
+		return nil, 0, nil
+	}
 	return nil, 0, nil
+}
+
+// zcodeLooksLikeESAPage reports whether the response came from Alibaba Cloud ESA
+// (ZCode's edge CDN): `data-spm` is its analytics attribute, `aliyuncs.com` its
+// asset domain (ref looksLikeZcodeEsaPage).
+func zcodeLooksLikeESAPage(body string) bool {
+	lower := strings.ToLower(body)
+	return strings.Contains(lower, "data-spm") || strings.Contains(lower, "aliyuncs.com")
+}
+
+// zcodeMethodNotAllowedMessage is the 405 hard-stop text. 文案与归类必须同轴：
+// 若仍写「建议稍后重试」，用户会按文案重试而行为上永远不会重试（ref 实测
+// 「重试了 3 个 5 次都没用」）。ESA 边缘页只影响措辞，不改变「不重试」。
+func zcodeMethodNotAllowedMessage(body string) string {
+	if zcodeLooksLikeESAPage(body) {
+		return "HTTP 405：上游风控拦截（边缘 CDN 返回 HTML 错误页，请求未到达 ZCode 服务端）。" +
+			"该错误**不会自动重试**，也**与账号余额/凭据有效性无关**（更换账号无效）；" +
+			"405 在 ZCode 是风控专属状态码，重试会加重账号冷却惩罚（30 分钟起，反复触发升级到 24 小时乃至停用）。" +
+			"请更换出口网络或稍后再试。"
+	}
+	return "HTTP 405：上游风控拦截（请求未到达 ZCode 服务端）。" +
+		"该错误**不会自动重试**：405 在 ZCode 是风控拦截的专属状态码，" +
+		"重试会加重账号冷却惩罚（30 分钟起，反复触发升级到 24 小时乃至停用）。" +
+		"**更换账号无效**（与账号余额、凭据有效性无关），请更换出口网络或稍后再试。"
 }
 
 // zcodeBusinessCodeOf extracts the business code from an error body

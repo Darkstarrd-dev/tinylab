@@ -97,6 +97,68 @@ func TestZcodeInterceptQuotaLocksAccountUntilDayEnd(t *testing.T) {
 	}
 }
 
+func TestZcodeIntercept405IsHardStop(t *testing.T) {
+	m := newSeedZcodeManager(t)
+	accountID := firstZcodeAccount(t, m)
+	req, _ := http.NewRequest(http.MethodPost, "https://localhost/v1/chat/completions", nil)
+
+	// ① 405 + 边缘 HTML 页（无业务码、无风控语义）：必须硬停、不重试。
+	html := `<!DOCTYPE html><html><head><title>405</title></head><body>blocked</body></html>`
+	resp := &http.Response{StatusCode: 405, Body: io.NopCloser(strings.NewReader(html)), Header: http.Header{}}
+	out, retryMs, err := m.zcodeInterceptResponse(req, resp, accountID, "GLM-5.3", true)
+	if err != nil || out != nil || retryMs != 0 {
+		t.Fatalf("405 must hard-stop without retry (out=%v retryMs=%d err=%v)", out, retryMs, err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("405 normalized to %d, want 400 (pass-through, no cooldown)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	msg := string(body)
+	for _, want := range []string{"405", "不会自动重试", "更换账号无效", "冷却惩罚"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("405 message must contain %q, got %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "边缘 CDN") {
+		t.Fatal("plain 405 page must not borrow the ESA-specific wording")
+	}
+
+	// ② 405 + 权威业务码 ⇒ 业务码优先（1005 仍是额度耗尽，不是风控）。
+	resp = &http.Response{StatusCode: 405, Body: io.NopCloser(strings.NewReader(`{"code":1005,"msg":"exceed quota limit"}`)), Header: http.Header{}}
+	_, _, err = m.zcodeInterceptResponse(req, resp, accountID, "GLM-5.3", true)
+	var lock *upstreamerr.BillingLockError
+	if !errors.As(err, &lock) {
+		t.Fatalf("1005+405 must stay quota exhaustion (mark + switch), got %v", err)
+	}
+
+	// ③ 405 + 3012 ⇒ 仍走风控文案（不冒充 405 页文案）。
+	resp = &http.Response{StatusCode: 405, Body: io.NopCloser(strings.NewReader(`{"code":3012}`)), Header: http.Header{}}
+	_, _, _ = m.zcodeInterceptResponse(req, resp, accountID, "GLM-5.3", true)
+	body, _ = io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "3012") {
+		t.Fatalf("3012+405 must keep the risk-block message, got %s", body)
+	}
+
+	// ④ ESA 边缘页（data-spm / aliyuncs.com）⇒ 措辞区分，但同样不重试。
+	esa := `<html><body data-spm="x"><script src="https://cdn.aliyuncs.com/x.js"></script></body></html>`
+	resp = &http.Response{StatusCode: 405, Body: io.NopCloser(strings.NewReader(esa)), Header: http.Header{}}
+	_, retryMs, _ = m.zcodeInterceptResponse(req, resp, accountID, "GLM-5.3", true)
+	if retryMs != 0 || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("ESA 405 must still hard-stop, got status %d retry %d", resp.StatusCode, retryMs)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "边缘 CDN") || !strings.Contains(string(body), "不会自动重试") {
+		t.Fatalf("ESA 405 wording drifted: %s", body)
+	}
+
+	// ⑤ 非 405 的边缘页（5xx 瞬断）仍交给代理常规分类（可重试路径保留）。
+	resp = &http.Response{StatusCode: 502, Body: io.NopCloser(strings.NewReader(html)), Header: http.Header{}}
+	_, retryMs, _ = m.zcodeInterceptResponse(req, resp, accountID, "GLM-5.3", true)
+	if retryMs != 0 || resp.StatusCode != 502 {
+		t.Fatalf("502 must pass through untouched, got status %d retry %d", resp.StatusCode, retryMs)
+	}
+}
+
 func TestZcodeInterceptRiskBlockStopsWithoutKeyPunishment(t *testing.T) {
 	m := newSeedZcodeManager(t)
 	accountID := firstZcodeAccount(t, m)

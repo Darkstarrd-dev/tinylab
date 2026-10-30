@@ -390,5 +390,40 @@ func TestBuildOAuthLoginURLShape(t *testing.T) {
 	}
 }
 
+// TestCodeartsModelTableMatchesMeasuredCatalog: 2026-10-27 上游全表实测校准
+// （ref master 3f0f48c / d1386ef）。判据是「真机能不能调通」，不是「在不在
+// builtin 目录里」—— GLM-5.1 与 deepseek-v4-flash 不在目录里但实测 200。
+func TestCodeartsModelTableMatchesMeasuredCatalog(t *testing.T) {
+	ids := map[string]codeartsModelRow{}
+	for _, m := range codeartsModels {
+		ids[m.ID] = codeartsModelRow{note: m.Note, quota: m.QuotaType}
+	}
+	for _, want := range []string{
+		"GLM-5.2", "GLM-5.1", "glm-5.3", "glm-5.2-sft-harmony",
+		"openpangu-2.0-flash", "openpangu-2.0-pro",
+		"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-1017",
+		"kimi-k3",
+	} {
+		if _, ok := ids[want]; !ok {
+			t.Fatalf("model %q missing from codearts table (upstream 2026-10-27 实测在册)", want)
+		}
+	}
+	for _, gone := range []string{"GLM-5", "glm-5.3-flash", "deepseek-v4-pro"} {
+		if _, ok := ids[gone]; ok {
+			t.Fatalf("model %q must be removed (实测 404，ref master 2026-10-27)", gone)
+		}
+	}
+	// -1017 与父 id 是两个独立注册的模型，窗口同为 1M（缺它只算半修）。
+	if !strings.Contains(ids["deepseek-v4.1-flash-1017"].note, "1048576") {
+		t.Fatalf("-1017 ctx note = %q, want 1048576", ids["deepseek-v4.1-flash-1017"].note)
+	}
+	// 目录总条数：10 条（与 ref DEFAULT_MODELS 一致）。
+	if len(codeartsModels) != 10 {
+		t.Fatalf("codearts models = %d, want 10", len(codeartsModels))
+	}
+}
+
+type codeartsModelRow struct{ note, quota string }
+
 // silence unused warnings for ecdsa import used indirectly
 var _ = ecdsa.PrivateKey{}

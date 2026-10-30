@@ -454,6 +454,49 @@ func (m *Manager) clineAugment(r *http.Request, body []byte, providerID, keyID, 
 	for k, v := range clineHeaders(&cred, false) {
 		r.Header.Set(k, v)
 	}
-	// Body passthrough (standard OpenAI protocol — no conversion).
-	return body, nil
+	// Body passthrough (standard OpenAI protocol — no conversion), except the
+	// silent-truncation guard below: cline's gateway defaults to max_tokens=4096
+	// when the field is absent, and it TRUNCATES long answers without an error
+	// (measured: finish_reason=length, completion_tokens=4096). The fallback
+	// table's `max` values are the default budgets the official client fills in
+	// (ref 0eeea3c).
+	return clineApplyDefaultMaxTokens(body, upstreamModel), nil
+}
+
+// clineDefaultMaxTokens is the default output budget per cline free model
+// (ref cline-product.ts fallback `maxTokens`; the official client writes it
+// into the request when the caller did not specify one).
+var clineDefaultMaxTokens = map[string]int{
+	"stealth/space-bunny-alpha":             524288,
+	"cline-free/mimo-v2.6-flash":            131072,
+	"cline-free/muse-spark-1.3-contributor": 943718,
+	"cline-free/minimax-m3.1-flash":         131072,
+}
+
+// clineApplyDefaultMaxTokens fills `max_tokens` when the caller did not send
+// one (and `max_completion_tokens` is absent too). Byte-identical passthrough
+// for every other model / already-budgeted request.
+func clineApplyDefaultMaxTokens(body []byte, model string) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	if _, ok := clineDefaultMaxTokens[model]; !ok {
+		return body
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
+		return body
+	}
+	if _, has := payload["max_tokens"]; has {
+		return body
+	}
+	if _, has := payload["max_completion_tokens"]; has {
+		return body
+	}
+	payload["max_tokens"] = clineDefaultMaxTokens[model]
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return updated
 }

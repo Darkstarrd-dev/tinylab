@@ -52,6 +52,7 @@ type CreditBalance struct {
 //   - ExpiresAt：包自身的失效时间（ISO 字符串，"" = 无固定失效时间）。
 //   - CycleEndTime：本计费周期结束（显示用字符串；配额窗口（gemini）放
 //     「重置于」的时刻）。
+//
 // 三者都可缺省；**_缺省 = 没有该概念**，调用方不得当成「已过期」。
 type CreditPackage struct {
 	Name      string  `json:"name"`
@@ -72,9 +73,12 @@ type CreditPackage struct {
 
 // ClaimOutcome mirrors the plugin's ClaimOutcome union for the UI.
 type ClaimOutcome struct {
-	Kind    string  `json:"kind"` // claimed | already-claimed | inactive | failed
-	Credit  float64 `json:"credit,omitempty"`
-	Message string  `json:"message,omitempty"`
+	Kind   string  `json:"kind"` // claimed | already-claimed | inactive | failed
+	Credit float64 `json:"credit,omitempty"`
+	// Unit qualifies the credit: "" = 积分 (default), "token" = 额度制渠道
+	// （ZCode）. 前端据此格式化，绝不把 1 亿 token 显示成 1 亿积分。
+	Unit    string `json:"unit,omitempty"`
+	Message string `json:"message,omitempty"`
 	// CoversToday reports whether this outcome belongs to TODAY'S round
 	// (nil = yes). Qoder's daily campaign refreshes at 10:00 UTC+8: before
 	// that instant a CLAIMED row / a successful claim belongs to yesterday's

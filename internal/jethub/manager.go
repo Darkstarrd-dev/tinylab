@@ -78,6 +78,9 @@ var defaultProviders = []ProviderMeta{
 	{ID: "modelscope", DisplayName: "ModelScope (魔搭)", Description: "阿里达摩院魔搭社区（API Key 凭据）", HasBalance: true, LoginModes: []string{"apikey"}},
 	// R7-3: AutoClaw (智谱清言桌面端) — 手机号短信登录，动态 MD5 签名，积分钱包余额，每日签到。
 	{ID: "autoclaw", DisplayName: "AutoClaw (智谱)", Description: "智谱清言桌面端（手机号短信登录）", HasCredits: true, HasBalance: true, LoginModes: []string{"sms"}},
+	// R10: Codely（Unity 团结引擎）— 自有设备码轮询登录；推理先换发 sk- CLI key
+	// 再做 HMAC 签名。额度以积分计（usage/summary），每日签到走 points/check-in。
+	{ID: "codely", DisplayName: "Codely (Unity)", Description: "Unity 团结引擎（设备码登录 + HMAC 签名推理）", HasCredits: true, HasBalance: true, LoginModes: []string{"url"}},
 }
 
 // Providers returns the static provider metadata list (a copy).

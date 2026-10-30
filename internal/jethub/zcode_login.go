@@ -66,7 +66,7 @@ func zcodeLoginHeaders(flowSecret string, withJSON bool) map[string]string {
 		"User-Agent":          "ZCode/" + zcodeAppVersionFallback,
 		"HTTP-Referer":        zcodeOrigin,
 		"X-ZCode-App-Version": zcodeAppVersionFallback,
-		"X-Platform":          "win32",
+		"X-Platform":          "win32-x64",
 	}
 	if withJSON {
 		headers["Content-Type"] = "application/json"
@@ -342,4 +342,3 @@ func (m *Manager) ZcodeRefreshAccount(accountID string) error {
 	}
 	return m.SetCredential("zcode", acc.CredentialRef, encoded, 0, false)
 }
-

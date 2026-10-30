@@ -39,6 +39,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -75,8 +78,19 @@ const (
 )
 
 // zcodeAppVersionFallback is the client version sent in headers when the
-// installed official client cannot be probed (ref ZCODE_APP_VERSION_FALLBACK).
+// installed official client cannot be probed (ref ZCODE_APP_VERSION_FALLBACK;
+// ⚠️ 不随官方升级整体抬高 —— 推理路径的既有实测结论都是在 3.14.3 上取的).
 const zcodeAppVersionFallback = "3.14.3"
+
+// zcodeVersionGatedMinAppVersion is the minimum version the official client
+// requires for the version-gated paths (ref ZCODE_VERSION_GATED_MIN_APP_VERSION).
+// 营销投放查询与领取低于它会被静默降级（投放为空 / 1004 no permission）。
+const zcodeVersionGatedMinAppVersion = "3.16.3"
+
+// zcodeStableSessionID is the process-level pseudo session id (ref
+// ZCODE_STABLE_SESSION_ID): official client has one per conversation; we have no
+// conversation layer, so one per process is closer to reality than per request.
+var zcodeStableSessionID = zcodeNewDeviceMid()
 
 // zcodeCaptchaFallback is the built-in captcha config, used when the remote
 // config cannot be fetched (ref ZCODE_CAPTCHA_FALLBACK; config-fetch failure
@@ -125,12 +139,74 @@ func (c *ZcodeCredential) usable() bool {
 	return c != nil && c.ZcodeJWT != "" && c.DeviceMid != ""
 }
 
-// zcodeAppVersion resolves the version header value.
+// zcodeAppVersion resolves the **clean** credential version (query/body sites).
+//
+// ⚠️ 凭据里的 app_version 会原样进 User-Agent / 头 / URL query。脏值
+// （`3.16.3\r\nX-Injected: 1`、空串、`3.016.3`）既可能让头写入抛错，也会被
+// 版本门控当成「更大/等值」绕过门控（ref 2026-10-25 审计实测）。故非干净
+// semver 一律回落兜底常量（ref zcodeCredentialAppVersion）。
 func (c *ZcodeCredential) zcodeAppVersion() string {
-	if c != nil && c.AppVersion != "" {
-		return c.AppVersion
+	if c != nil && zcodeValidAppVersion(c.AppVersion) {
+		return strings.TrimSpace(c.AppVersion)
 	}
 	return zcodeAppVersionFallback
+}
+
+// zcodeGatedAppVersion is the version used in **headers** (ref
+// zcodeVersionGatedAppVersion): max(clean credential version, 3.16.3).
+//
+// 只抬不降 —— 用户若在更新的官方客户端上登录（凭据写着 3.17.x），用他自己的
+// 版本号。⚠️ 不改凭据本身（那会让推理路径的既有实测结论一起作废）。
+func (c *ZcodeCredential) zcodeGatedAppVersion() string {
+	version := c.zcodeAppVersion()
+	if version == zcodeAppVersionFallback {
+		return zcodeVersionGatedMinAppVersion
+	}
+	if zcodeCompareAppVersion(version, zcodeVersionGatedMinAppVersion) < 0 {
+		return zcodeVersionGatedMinAppVersion
+	}
+	return version
+}
+
+// zcodeValidAppVersion mirrors ref ZCODE_APP_VERSION_PATTERN:
+// `major.minor.patch`, digits only, no leading zeros.
+func zcodeValidAppVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return false
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || (len(part) > 1 && part[0] == '0') {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// zcodeCompareAppVersion compares two valid `major.minor.patch` versions.
+func zcodeCompareAppVersion(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		ai, _ := strconv.Atoi(as[i])
+		bi, _ := strconv.Atoi(bs[i])
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
+	}
+	return 0
 }
 
 // zcodePhoneFromUserID derives the masked phone from the 17-digit user id.
@@ -154,22 +230,40 @@ func zcodePhoneFromUserID(userID string) string {
 
 // ── 请求头 ───────────────────────────────────────────────────────────────────
 
-// zcodeHeaders builds the official-client header family (ref buildZcodeHeaders,
-// verbatim). ⚠️ 这些头不是 3012 的判据（判据是请求体 system），但 X-Device-Mid
-// 是 billing 全家桶的**硬需求**（缺它 400 code 3001）。
+// zcodeHeaders builds the official-client header family (ref buildZcodeHeaders @
+// 9ffd65e, 2026-10-25 真机抓包逐字对齐).
+//
+// ## 为什么从 10 个头扩到 18 个（R10）
+//
+// 官方 GUI 的一次 `/v1/messages` 带 18 个头；本端此前只有 10 个，且
+// `X-Release-Channel`（stable ✗ → production）与 `X-Platform`
+// （win32 ✗ → win32-x64）两个值与官方不符。叠加旧版本号后，推理请求在
+// 官方 3.16.3 上线后稳定 `405 + unusual activity`（跨账号、跨会话）。
+//
+// ⚠️ `X-Device-Mid` 仍是 billing 全家桶的硬需求（缺它 400 code 3001）。
+// ⚠️ `X-Os-Version` 必须与 `X-Platform`/`X-Os-Category` 同源：非 Windows
+// 宿主上三者一起伪装（ref zcodeClientPlatform；只换其中一个反而自相矛盾）。
 func zcodeHeaders(cred *ZcodeCredential, withJSON bool, captcha *zcodeCaptchaParam) map[string]string {
-	version := cred.zcodeAppVersion()
+	version := cred.zcodeGatedAppVersion()
+	platform, osCategory, osVersion := zcodeClientPlatform()
 	headers := map[string]string{
-		"User-Agent":          "ZCode/" + version,
-		"HTTP-Referer":        zcodeOrigin,
-		"X-ZCode-App-Version": version,
-		"X-Release-Channel":   "stable",
-		"X-Client-Language":   "zh-CN",
-		"X-Client-Timezone":   "Asia/Shanghai",
-		"X-Device-Mid":        cred.DeviceMid,
-		"X-Platform":          "win32",
-		"X-Os-Category":       "windows",
-		"anthropic-version":   "2023-06-01",
+		"User-Agent":           "ZCode/" + version,
+		"HTTP-Referer":         zcodeOrigin,
+		"X-Title":              "Z Code@electron",
+		"X-ZCode-App-Version":  version,
+		"X-Release-Channel":    "production",
+		"X-Client-Language":    "zh-CN",
+		"X-Client-Timezone":    "Asia/Shanghai",
+		"X-Device-Mid":         cred.DeviceMid,
+		"X-Platform":           platform,
+		"X-Os-Category":        osCategory,
+		"X-Os-Version":         osVersion,
+		"X-ZCode-Agent":        "glm",
+		"X-Session-Id":         zcodeStableSessionID,
+		"X-ZCode-Session-Type": "other",
+		"X-Request-Id":         zcodeNewDeviceMid(),
+		"X-ZCode-Trace-Id":     zcodeNewDeviceMid(),
+		"anthropic-version":    "2023-06-01",
 	}
 	if withJSON {
 		headers["Content-Type"] = "application/json"
@@ -182,6 +276,20 @@ func zcodeHeaders(cred *ZcodeCredential, withJSON bool, captcha *zcodeCaptchaPar
 		headers["x-aliyun-captcha-verify-region"] = captcha.Region
 	}
 	return headers
+}
+
+// zcodeSpoofOSVersion is the OS release advertised on non-Windows hosts (ref
+// ZCODE_SPOOF_PLATFORM; the platform triple must stay self-consistent).
+const zcodeSpoofOSVersion = "10.0.26100"
+
+// zcodeClientPlatform returns the platform triple that must stay self-consistent.
+// Windows hosts report their real OS release; other hosts spoof the official
+// Windows shape (ref zcodeClientPlatform + ZCODE_SPOOF_PLATFORM).
+func zcodeClientPlatform() (platform, osCategory, osVersion string) {
+	if runtime.GOOS == "windows" {
+		return "win32-x64", "windows", zcodeOSVersion()
+	}
+	return "win32-x64", "windows", zcodeSpoofOSVersion
 }
 
 // zcodeCredentialFor resolves + parses a zcode credential by account id.

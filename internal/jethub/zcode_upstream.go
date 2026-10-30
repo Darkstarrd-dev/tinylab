@@ -60,11 +60,19 @@ type zcodeRemoteModel struct {
 	DefaultLevel  string
 }
 
-// zcodeClaimablePlan is one `data.plans[]` entry.
+// zcodeClaimablePlan is one claimable plan (from `billing/preview` or the
+// marketing deliveries; ref ZcodeClaimablePlan).
 type zcodeClaimablePlan struct {
 	PlanID   string
 	Priority float64
 	Name     string
+	// GrantUnits / UnitType describe the reward (marketing sums ALL same-unit
+	// entitlements; preview takes only the first — see zcode_marketing.go).
+	GrantUnits float64
+	UnitType   string
+	// MarketingCampaignID is set only for plans discovered through
+	// `GET /api/v1/marketing/touch`; used to report `confirm` after a claim.
+	MarketingCampaignID string
 }
 
 // zcodeClaimOutcome is one claim attempt.
@@ -75,15 +83,30 @@ type zcodeClaimOutcome struct {
 	AlreadyClaimed bool
 	HTTPStatus     int
 	Message        string
+	// GrantUnits / UnitType describe what the plan grants (token, not credit —
+	// 上游是额度制；前端按 unit 格式化，绝不把 token 当积分汇总).
+	GrantUnits float64
+	UnitType   string
 }
 
 // zcodeGet performs a GET with the zcode header family.
 func (m *Manager) zcodeGet(ctx context.Context, cred *ZcodeCredential, endpoint string, captcha *zcodeCaptchaParam) (int, []byte, error) {
+	return m.zcodeGetVersion(ctx, cred, endpoint, "", captcha)
+}
+
+// zcodeGetVersion is zcodeGet with an optional app-version override (only the
+// version-gated paths pass one: marketing touch; ref buildZcodeHeaders).
+func (m *Manager) zcodeGetVersion(ctx context.Context, cred *ZcodeCredential, endpoint, appVersion string, captcha *zcodeCaptchaParam) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return 0, nil, err
 	}
-	for k, v := range zcodeHeaders(cred, false, captcha) {
+	headers := zcodeHeaders(cred, false, captcha)
+	if appVersion != "" {
+		headers["X-ZCode-App-Version"] = appVersion
+		headers["User-Agent"] = "ZCode/" + appVersion
+	}
+	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := m.zcodeClientFor().Do(req)
@@ -376,9 +399,21 @@ func (m *Manager) ReportZcodeActivation(ctx context.Context, cred *ZcodeCredenti
 	}
 }
 
-// FetchZcodeClaimablePlans lists the plans the account can claim right now
-// (sorted by priority descending, matching the reference).
+// FetchZcodeClaimablePlans lists the plans the account can claim right now,
+// merging the billing preview with the marketing deliveries (the 1024-style
+// campaigns live ONLY in marketing/touch — preview reports an empty array for
+// them, indistinguishable from "no campaign today").
 func (m *Manager) FetchZcodeClaimablePlans(ctx context.Context, cred *ZcodeCredential) ([]zcodeClaimablePlan, error) {
+	preview, err := m.fetchZcodePreviewPlans(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
+	// 营销是补充来源：失败一律降级为空（绝不影响 preview 主路径）。
+	return zcodeMergeClaimablePlans(preview, m.FetchZcodeMarketingPlans(ctx, cred)), nil
+}
+
+// fetchZcodePreviewPlans is the billing/preview source (the original path).
+func (m *Manager) fetchZcodePreviewPlans(ctx context.Context, cred *ZcodeCredential) ([]zcodeClaimablePlan, error) {
 	endpoint := zcodeBillingPreviewURL + "?app_version=" + url.QueryEscape(cred.zcodeAppVersion()) + "&platform=win32"
 	status, raw, err := m.zcodeGet(ctx, cred, endpoint, nil)
 	if err != nil {
@@ -391,13 +426,21 @@ func (m *Manager) FetchZcodeClaimablePlans(ctx context.Context, cred *ZcodeCrede
 }
 
 // zcodeParseClaimablePlans is the pure parse step.
+//
+// 额度取自 `entitlements[0].grant_units`（plan 顶层没有额度字段）——
+// 不读它 ⇒ 面板显示「+0」（ref 2026-10-03 实测）。preview 每个 plan 实测只有
+// 一条 entitlement；营销来源另有求和口径，见 zcode_marketing.go。
 func zcodeParseClaimablePlans(raw []byte) []zcodeClaimablePlan {
 	var parsed struct {
 		Data *struct {
 			Plans []struct {
-				PlanID   string  `json:"plan_id"`
-				Priority float64 `json:"priority"`
-				Name     string  `json:"name"`
+				PlanID       string  `json:"plan_id"`
+				Priority     float64 `json:"priority"`
+				Name         string  `json:"name"`
+				Entitlements []struct {
+					UnitType   string   `json:"unit_type"`
+					GrantUnits *float64 `json:"grant_units"`
+				} `json:"entitlements"`
 			} `json:"plans"`
 		} `json:"data"`
 	}
@@ -409,9 +452,16 @@ func zcodeParseClaimablePlans(raw []byte) []zcodeClaimablePlan {
 		if strings.TrimSpace(item.PlanID) == "" {
 			continue
 		}
-		plans = append(plans, zcodeClaimablePlan{PlanID: item.PlanID, Priority: item.Priority, Name: item.Name})
+		plan := zcodeClaimablePlan{PlanID: item.PlanID, Priority: item.Priority, Name: item.Name}
+		if len(item.Entitlements) > 0 {
+			plan.UnitType = item.Entitlements[0].UnitType
+			if item.Entitlements[0].GrantUnits != nil {
+				plan.GrantUnits = *item.Entitlements[0].GrantUnits
+			}
+		}
+		plans = append(plans, plan)
 	}
-	sort.SliceStable(plans, func(i, j int) bool { return plans[i].Priority > plans[j].Priority })
+	zcodeSortPlansByPriority(plans)
 	return plans
 }
 

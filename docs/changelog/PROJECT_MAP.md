@@ -1,3 +1,21 @@
+## 2026-10-30 — R11 codearts 模型表校准（补 `deepseek-v4.1-flash-1017`）
+
+- **触发**：用户报障 codearts 缺 `deepseek-v4.1-flash-1017`（上游有）。
+- **上游依据**：master `3f0f48c`（IKQY27）/`d1386ef` 的 2026-10-27 真机全表：该 id 与
+  `deepseek-v4.1-flash` 是**两个独立注册模型**（同一 builtin 目录下发，chat 均 200），
+  窗口同为 1048576；`GLM-5`/`glm-5.3-flash`/`deepseek-v4-pro` 实测 404 已删；
+  `GLM-5.1`/`deepseek-v4-flash` 不在目录但 200 保留。
+- **落点**：`internal/jethub/products.go::codeartsModels`（11→10 条）+ `codearts_test.go`
+  新守卫 + `register_test.go` 展示名对账；架构 §6.4/最后核对；同步文档 R11。
+- **全渠道**：其余 provider 自 `9ffd65e` 无模型表 diff；master 38 commits（含 Magicrew）
+  未推进 pin。
+
+## 2026-10-29 — R10 上游同步：Codely 第 19 家 + ZCode 405 + 模型事实
+
+- **范围**：`ref/deepseek-harness-codearts` pin `b0940ca` → `9ffd65e`（master 87 commits + 分支 66 commits）。新增/修改文件与锚点：`internal/jethub/codely*.go`、`internal/api/jethub/codely.go`、`zcode_identity_text.go`（stable 2590）、`zcode_identity.go`/`zcode.go`/`zcode_response.go`/`zcode_gate.go`/`zcode_marketing.go`、`products.go`（codearts 窗口 + Codely 产品）、`cline_auth.go`/`trae_model.go`（默认预算与新免费模型）、`modelscope.go`（`-1017`）。
+- **判定**：Codely 可独立运行（设备码 + HTTP 签名，无 DSH 宿主依赖）⇒ 新 provider；ZCode 405 是服务端事实且有账号冷却惩罚 ⇒ 必修；codearts analyzeImage/模态、qoder 永久锁/per-account 代理、minimax 强制登录/身份、trae 流内错误、credit-expiry 聚合按不搬/待办登记（`docs/jethub-upstream-sync.md` §5/§6 R10）。
+- **文档同步**：本文件 §19 表、§13n/§13n.1 文件表、§22 pin、§24 速查（新增 ZCode/Codely 两行）与顶部「最后核对」；`docs/jethub-architecture.md` §6 矩阵/§6.3/§6.4/§6.7/§6.15/§6.17；同步文档 pin/R10 段/§7 日志。
+
 ## 2026-10-23 — Raccoon IAM 会话激活与全渠道模型动态刷新机制（用户实测驱动）
 
 - **诊断**：

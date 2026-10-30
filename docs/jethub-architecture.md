@@ -1,13 +1,13 @@
 # Free Hub (jethub) 架构
 
-> **最后核对：** 2026-10-23（**Raccoon IAM 会话激活与全渠道模型动态刷新机制落地**——① Raccoon 登录后报 200901 `iam_confirm_required` 根因：小浣熊业务网关拦截未激活会话；修复：`internal/jethub/raccoon_identity.go` 新增 `ConfirmRaccoonIAM` 调 `POST /api/web/auth/v1/iam/confirm`，`raccoonRequest` 建立 200901 透明自愈重发，`CompleteRaccoonLogin` 登录完成主动激活。② Raccoon `DeepSeek-V4.1-Flash-1017` 及 Loomy `Spark-X2.6` 等模型更新同步：远端目录解封后自动返回 `sn-deepseek-v4-1-flash-1017`；`internal/api/jethub/register.go` 的 `/models` 支持 `?refresh=1` 联动清除缓存并 `SyncKeys`，前端登录及刷新积分时主动刷新；`internal/jethub/codearts_refresh.go` 引入对齐上游的 20 分钟定期模型刷新调度器；`internal/jethub/loomy_models.go` 补齐 `spark-x2.6` 256K 上下文覆盖。单测全绿，覆盖仍是 18 家 provider。过程叙述见 docs/changelog/jethub-architecture.md。）
+> **最后核对：** 2026-10-30（**R11 模型目录校准（报障驱动）**：codearts 静态表按上游 master `3f0f48c`/`d1386ef` 的 2026-10-27 真机全表校准——补 `deepseek-v4.1-flash-1017`（与父 id **独立注册**、ctx 1048576，不得当日期后缀裁掉）+ `kimi-k3`，删实测 404 的 `GLM-5`/`glm-5.3-flash`/`deepseek-v4-pro`，保留 `GLM-5.1`/`deepseek-v4-flash`；回归 `TestCodeartsModelTableMatchesMeasuredCatalog`。其余渠道模型列表经核对无漂移（动态渠道由远端目录覆盖，modelscope/codely/cline 已在 R10 对齐）。上游 master 已推进到 `6fa7472`（新增 Magicrew provider 等 38 commits），本轮**未推进 pin**、未分诊。过程叙述见 docs/changelog/jethub-architecture.md。）
 > **R1 上游同步落地（2026-10-02，dsh-codearts-auth @ `e06283c` / 分支 `7dd3422`）：** codearts 4004.200 去 `maas_type` 同 Key 重试一次（§6.4，ref 3bf2be7）+ 输出上限收敛 65536（§6.4，ref 916c647/da0a2ad）+ 续期终态判据/refreshable 镜像/per-credential 串行/30min 调度器（§3.7，ref cf5edab）；qoder 每日活动 10:00（UTC+8）刷新窗口（§6.6，ref 1b65a5c）；minimax tool 孤儿剔除与 assistant/结果配对不变量（§6.1，ref c74e0c2）；cline 静态表并入 models.dev 18 条（§6.3，ref caf675e）；**新增 OpenCode Zen provider**（apikey 登录模式 §3.8 + 协议要点 §6.5，ref 分支 7dd3422；匿名通道已真机验证 200）。上游同步流程与 R1 待办勾销见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md)。
 >
 > **R2 落地（2026-10-02）：新增 ZCode provider（智谱 z.ai 免费额度通道）** —— 13 个 provider。Anthropic Messages 协议桥 + 3012 准入身份块/日期块（逐字内置、sha256 锁死）+ 官方 CLI 设备授权登录 + token 桶余额 + 本地载体页 captcha 的每日领取；真机验证：登录 init / 余额 / 目录 / 推理 200（无 3012）见 §6.7。⚠️ **R4-1（2026-10-05）删除了「导入官方客户端凭据」旁路**（安全/正确性/一致性三条理由见 §6.7）。上游同步中该 provider 原判「不搬」（captcha 依赖桌面窗口）—— R2 重估的依据与差异记录见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R2。
 >
 > **R3 上游同步落地（2026-10-04，dsh-codearts-auth @ `ff5e37d`）：** ① codearts `InferHub.4291.200` 额度用尽判据（**不可重试**，`BillingLockError` 锁 key+model 至 UTC+8 当日 24:00）+ `429` 排队判据锚定为独立数字（裸子串会把 `4291` 误判成排队 → 30 分钟静默重试零输出，§6.4，ref 784210d/ae0c9b0）；② cline 删除已下线的 `cline-free/gemini-3.8-flash`（免费清单 5→4，ref 51d6093）；③ **新增 Gemini Code Assist provider（第 14 家，§6.8）**——OAuth 浏览器回调登录 + 双层信封协议桥 + sandbox 配额窗口（ref e061b21 族）。zcode 双通道+zai 渠道经用户决定**不搬**（同步文档 §5）；`zcode-identity.ts` 未变（已核实）。分诊明细见 [`jethub-upstream-sync.md`](jethub-upstream-sync.md) §6 R3。
 >
-> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（上游 14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`，**本端覆盖 18 家**（gemini 已于 R5 移除，见 §6.8）。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
+> Free Hub 是 DeepSeek Harness 插件 `dsh-codearts-auth`（上游 14 个第三方 LLM provider 的账号池 + Web 管理面板，TS/React）的 TinyLab 原生移植：产品名 **Free Hub**，内部包前缀沿用 `jethub`，**本端覆盖 19 家**（gemini 已于 R5 移除，见 §6.8）。只读参考副本位于 `ref/deepseek-harness-codearts`（**禁止手工编辑**；每份移植实现的语义权威）。
 >
 > **变更维护清单（改动时必须同步本文）：**
 > - 新增/修改 provider 适配（登录/续期/签名头族/模型表）→ §6 矩阵 + `internal/jethub/` 对应文件；**登录流必须走 §3.2 的独立 context + SettleAndCleanup 约束 + `httpClient(provider)` 代理分派**
@@ -23,7 +23,8 @@
 > - 修改 **buddy 响应判据**（模型饱和 14003 与账号额度限流分流）→ §6.10 + `internal/jethub/buddy_response.go`（判据取窄：泛词不认、`status<400` 不认文案）+ `internal/upstreamerr/upstreamerr.go`（`ModelSaturationError`）+ `internal/proxy/forward_retry.go`（同 Key 等待重试分支，**先于** BillingLockError 判）+ `internal/proxy/interfaces.go`（别名 + 接口契约）+ **`internal/jethub/buddy_response_test.go` 与 `internal/proxy/augmenter_test.go::TestForwardWithRetry_ModelSaturationDoesNotLockKey`（反向验证过的行为级防线）**
 > - 修改 **codearts 响应判据**（4004.200 去头重试 / 输出上限收敛 / 4291 额度用尽 + 429 独立数字锚定）→ §6.4 + `internal/jethub/codearts_response.go`/`codearts_augment.go` + `internal/upstreamerr`（`SameKeyRetryError`/`RetryDropHeaderMarker`/`BillingLockError`）+ `internal/proxy/forward_retry.go`
 > - 修改 **qoder 每日活动窗口**（10:00 UTC+8 刷新前不判已领）→ §6.6 + `internal/jethub/qoder_credits.go`
-> - 新增/修改 **ZCode** 适配（3012 身份块/日期块、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256；**`zcodeOpenURL` 的开页选项必须保持显式 default+shared，不得改回零值**——零值继承登录浏览器偏好，见 §6.7 与 `TestZcodeOpenURLPinsDefaultBrowser`）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
+> - 新增/修改 **ZCode** 适配（3012/405 身份块/日期块、18 头族与版本门控、system 恒 3 块 + 调用方 system 入 messages、并发间隔、营销投放领取、设备授权登录、token 桶余额、captcha 载体页领取、错误码分类）→ §6.7 + `internal/jethub/zcode*.go`（`zcode_identity_text.go` 是**生成文件**：上游改身份块文本时必须按 ref `src/zcode-identity.ts` 重新提取并更新测试里的 sha256；**`zcodeOpenURL` 的开页选项必须保持显式 default+shared，不得改回零值**——零值继承登录浏览器偏好，见 §6.7 与 `TestZcodeOpenURLPinsDefaultBrowser`）+ `internal/api/jethub/zcode.go`（含公开载体路由）+ `web/static/jethub.js`（token 量级渲染）。⚠️ **不得重新引入任何「读本机官方客户端数据」的能力**（凭据文件/遥测状态/安装清单）：`zcode_local_read_test.go` 扫源码字面量守着，理由见 §6.7
+> - 新增/修改 **Codely（Unity 团结引擎）** 适配（设备码登录/续期/换发 cli_api_key/HMAC 签名/远端目录/积分/签到）→ §6.17 + `internal/jethub/codely*.go` + `internal/api/jethub/codely.go` + `products.go`/`manager.go`。⚠️ 签名串的**分隔符必须是 LF**、`x-litellm-session-id` 必填、cli key 与 Bearer 必须同源：`codely_test.go` 用 ref 固定向量锁死
 
 > - 修改代理桥接接口（RequestAugmenter/RequestCustomizer/ResponseInterceptor）或重试语义 → §4 + `internal/proxy/interfaces.go`/`forward_retry.go`/`upstream.go`
 > - 修改 Qoder WASM 桥（导入表/导出封装/对象堆）→ §5 + `internal/jethub/qoderwasm_bridge.go`
@@ -47,7 +48,7 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、18 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
+| 核心 | `internal/jethub/` | 账号/凭据存储、账号池、registry 桥接、19 provider 适配、WASM 桥、备份、**渠道级余额合计（§6.9）** |
 | API | `internal/api/jethub/` | `/api/jethub/*` RPC（§10.28 PROJECT_MAP）：providers（含能力位）/prefix/accounts/models（单/批量/恢复默认）+ ratelimits retest/reset + permanent-lock + 每 provider login/status/refresh/claim/balance + **`/balances` 渠道级合计（§6.9）** + backup export/import；**每个 `<provider>/status` 都必须同时服务两种语义**（带 `loginId`=登录流轮询 `{done,success,error}`，不带=账号快照，§3.6）；**另有两条挂在鉴权组之外的公开端点**（`GET /api/jethub/login-page`[`/status`]，扫码登录页的数据源，§3.4） |
 | 前端 | `web/static/jethub.js` + `style-jethub.css` | Free Hub 管理界面（vanilla JS，无框架），入口嵌在 Settings 页、main 区内嵌布局（§3）；行为测试 `web/jethub.test.js`（20 项）；扫码登录页 `free-hub-login.html` + `raccoon-qr.js`（测试 `web/raccoon-qr.test.js`，§3.4） |
 | 跨边界错误 | `internal/upstreamerr/` | `QueueRetryError`/`BillingLockError`（proxy 与 jethub 各自 import 的中性叶子包） |
@@ -333,7 +334,7 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 - 出站 URL = WASM 给出的 `https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`（⚠️ 与公开端点 host `api2-v2` **不同**，混用 404）。
 - 响应解包（`qoder_envelope.go`）：每帧信封 `{headers,body,statusCodeValue,statusCode}` 剥壳；内层帧按 **JSON 结构三态分类**（`qoderClassifyInner`，R5 / ref 1846449）——`chunk`（有 `choices`（含空数组）或 `usage`）/ `error`（显式 `code`/`message`/`error`/`statusCodeValue`/`type`，或压根不是 JSON）/ `heartbeat`（`null`、空串、`{}`、裸标量、数组）。⚠️ **心跳帧整帧丢弃**，不得透传（`data: null` 会让消费侧读 `.error` 抛未包装的 TypeError、绕过全部错误归类）。错误帧**保真转发** `{code,message,type:'model_error'}`（code 独立、message 不拼后缀——否则排队二次解析拿不到延迟）。**HTTP 层 peek 首帧分类与 SSE 层必须共用同一处判据**（曾各写一份字符串嗅探 `"choices"`，两个方向都会错：心跳帧被误判成业务错误 / 错误文案含 `"choices"` 时被静默透传）。
 
-## 6. 18 provider 矩阵（端点/协议族/签名/积分）
+## 6. 19 provider 矩阵（端点/协议族/签名/积分）
 
 | provider | 协议族/推理端点（真实出站 URL，§6.2） | 登录 | 出站签名/头族要点 | 续期 | 积分 |
 |---|---|---|---|---|---|
@@ -348,11 +349,12 @@ bind/checkCode → 落盘）全部成功**，唯一没发生的是「面板被�
 | minimaxintl | **Anthropic Messages** `POST /mavis/api/v1/llm/v1/messages`（国际版 `api.minimaxi.chat`，§6.14） | 设备码（海外 scope agent.default） | 与 minimax 相同协议族，出站打海外域名 | refresh 回退上一个 | 签到（timezone_id 必填）+ 余额 |
 | qoder / qodercn | **加密端点**（WASM 签名体，§5；同协议族双产品） | PKCE 设备码轮询（404=未就绪继续） | COSY 签名头原样透传 + `/sash/` 四头 | refresh_token + machine_id | 余额三包 + 每日领取（replayed 幂等） |
 | opencode | OpenAI 兼容 `https://opencode.ai/zen/v1/chat/completions`（§6.5） | **API Key 粘贴**（唯一非浏览器登录，§3.8）；匿名通道 = 字面量 `public` | Bearer `<api_key>` + `x-opencode-project/session/request/client` 指纹头 + UA；**免费通道形状门禁**（stream + `bash`/`read` 工具，augmenter 注入） | —（粘贴的 key 无续期；匿名槽 refreshable=false） | —（无积分面；额度错误按响应体类型名分类 → per-model 锁/换号，§6.5） |
-| zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）—— ⚠️ **R4-1 起这是唯一来源**（原先的「导入官方客户端凭据」已删除，理由见 §6.7） | 官方客户端头族（`X-Device-Mid` 硬需求 + `X-ZCode-App-Version`/`X-Release-Channel`/`X-Client-*`/`anthropic-version`）+ **请求体官方身份块 + 首轮日期块**（3012 准入） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取（`billing/claim`，**必带 captcha**，§6.7） |
+| zcode | **Anthropic Messages** `POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`（§6.7） | 官方 **CLI 设备授权流**（`/oauth/cli/init` → 浏览器授权 → `/oauth/cli/poll/{flow_id}`，纯 HTTP）—— ⚠️ **R4-1 起这是唯一来源**（原先的「导入官方客户端凭据」已删除，理由见 §6.7） | 官方 3.16.3 **18 头**（`X-Device-Mid` 硬需求；`X-Release-Channel: production`、`X-Platform: win32-x64`、`X-Session-Id` 进程级稳定、request/trace 每请求新）+ **请求体身份块（42+2590）+ 首轮日期块；`system` 恒为 3 块**（调用方 system 注入首轮 user，§6.7） | —（**不可续期**：JWT 无 exp；401/1002 → 提示重新登录） | 余额 = **token 桶**（`billing/balance`，逐模型 `show_name`）；每日领取 = preview ∪ marketing 两个来源（`billing/claim`，**必带 captcha**，§6.7） |
 | officeace | **标准 OpenAI 兼容** `POST {maasBaseUrl}/v2/chat/completions`（per-account 专属网关，§6.12）——无转换器、无 DSML，SSE 原样透传 | **cloud-direct OAuth**：匿名 state 注册 → authui 授权页 → 匿名 code 轮询（§6.12） | `Basic base64(model_app_key:secret)` + 管理面 **V11-HMAC-SHA256** / 步⑤ **SDK-HMAC-SHA256**（§6.12） | refresh_token（**一次性**；per-ref 串行 + lead-time + 判终态前重读，§6.12） | 余额 = **token 桶**（V11 `GET /v1/subscription`，恒打默认域）；每日领取 = **显式** `POST /officeace/claim`（ref 是余额查询前自动签到——有意降级，§6.12） |
 | accio | **Gemini 风格 SSE** `POST phoenix-gw.alibaba.com/api/adk/llm/generateContent?sg_k=md5(requestId)`（§6.13）——顶层帧 + 工具 shard 合并，无 `[DONE]` | **OAuth2 PKCE 公开客户端**（`accio-work`；本地 loopback 回调，region=cn/global，§6.13） | **无 Authorization**：`token` 放 body + `utdid`/`version`/`appKey=OneChat`/`sgcookie` + `message_id`/`request_id`（§6.13） | refresh_token **轮换**；per-ref 串行 + lead-time + 判终态前重读（§6.13） | credit 三只读端点（userinfo POST body；subscription/quota GET query）；无签到端 |
 | modelscope | OpenAI 兼容 `POST https://api-inference.modelscope.cn/v1/chat/completions`（§6.15） | **API Key 粘贴**（`AddModelscopeAccount`） | Bearer `<token>`；扁平工具定义强制包装成 `{type: "function", function: tm}`（规避 400 校验错误） | —（API Key 无自动续期） | 余额 = 魔粒积分（`GET /api/v1/users/moli/account`） |
 | autoclaw | OpenAI 兼容 `POST https://chatglm.cn/api/v1/chat/completions`（§6.16） | **短信验证码登录**（两步 SMS，15 天免密 Cookie，`app_id: 1000000000`） | `X-App-Id`/`X-Timestamp`/`X-Sign` 动态 MD5 签名 + `X-Version: 2.1.1`（硬性校验）；首条 prompt 强制包含固定前缀且 `max_tokens >= 10000`（规避 406 拦截） | —（Cookie 长效，支持手动 refresh） | 余额 = `GET /api/v1/user/account`；每日签到（`POST /api/v1/user/sign_in`） |
+| codely | OpenAI 兼容 `POST https://codely-litellm.tuanjie.cn/v1/chat/completions`（§6.17） | **自有设备码轮询**（`/auth/device/initiate|poll|exchange`，纯 HTTP、无本地端口） | **每请求先 GET `/api/api-token/cli-api-key` 换发 `sk-` key，再 HMAC-SHA256 签名**（`X-Codely-Signature`：`v1.<ts>.<b64url>`，签名串 `v1\npathname\nts`，LF 分隔；`x-litellm-session-id` 必填）+ `codely-cli` UA | refresh_token（**不轮换**；per-account 手动/定时） | 余额 = `GET /api/user/usage/summary`（逐桶，`remaining_points` 是字符串）；每日签到 = `POST /api/points/check-in/init` → `POST /api/points/check-in` |
 
 
 模型表全部为**静态兜底表**（`*_model.go`/`products.go`），收录 ref 实测可用的目录 key；qoder 双站表**不能互相套用**（CN 独有/缺失条目 + per-model is_reasoning/is_vl 差异）。
@@ -459,6 +461,12 @@ trae 仍不能用于 OpenAI 客户端（会收到无法解析的事件流）。�
 raccoon 2026-10-21 起 `sn-deepseek-v4-1-flash-1017`）会即时出现在面板，静态兜底表只在
 离线/失败时顶替。`traeBatchModelsPath`/`lobsteraiModelsPath`/`DecryptQoderModelCatalog`
 三个常量/函数**零调用**（是「打算做但没接」的痕迹）。
+
+**R10 增量**：codely 也接入了远端目录（`/api/model-status`，但它只是**运行状态**端点，
+只取 `modelGroup`；见 §6.17）。cline 的**默认输出预算**必须由 augmenter 写进请求体：
+网关在缺 `max_tokens` 时缺省 **4096** 且**静默截断**长回答（实测 `finish_reason=length`），
+故 `clineAugment` 按兜底表 `max` 值补默认值（`cline-free/minimax-m3.1-flash` 等 4 条，
+131072/524288/943718）；用户已指定的预算字节级透传、绝不覆盖。
 
 **展示名契约（本端，2026-10-01 规范化）**：`GET /jethub/providers/{p}/models` 出
 `{id, name, rate, disabled}`，面板渲染**一条** `name · rate` 再渲染裸 `id` —— 与插件
@@ -661,6 +669,32 @@ raccoon 的路由不依赖模型表，用户当时手敲 `raccoon/sn-deepseek-v4
   `max_tokens`/`max_completion_tokens` 收敛到 65536（`min` 语义；其它模型与未超限值
   **字节级不变**）。集合由 `codeartsCappedModel` 单点定义，回归 `TestCodeartsClampMaxTokens`
   逐条锁定（摘掉任一条目即变红）。
+- **上下文窗口表订正（R10，ref 5aca46a）**：CodeArts 两个目录端点都**不下发**窗口，权威值是
+  IDE 内核日志的 `inferhub-provider.models[*].limit.context`：`GLM-5.2` 由 202752 → **1048576**
+  （10-21 起上游改 1M）、`glm-5.3` 新增 1048576、`glm-5.2-sft-harmony` 202752、
+  `openpangu-2.0-flash/-pro` 524288、`deepseek-v4.1-flash` 1000000 → **1048576**。旧值会让
+  上下文占用比封顶 100%、自动压缩阈值降到 ~162K（静默）。本端窗口只记在 `Note`（无 DSH
+  占用条），但数值仍按权威值订正。
+- **模型目录 2026-10-27 全表校准（R11，ref master `3f0f48c`/`d1386ef`，issue IKQY27）**：
+  `deepseek-v4.1-flash-1017` 与 `deepseek-v4.1-flash` 是后端**两个独立注册的模型**
+  （`/v1/model/builtin` 同时下发；chat 端点都能 200），**不得**把 `-1017` 当日期后缀裁掉
+  或去重 —— 旧行为正是「IDE 已更新 1017、列表没更新」的根因。本端静态表补
+  `deepseek-v4.1-flash-1017`（ctx **1048576**，缺它只是半修）与 `kimi-k3`；删除实测 404 的
+  `GLM-5` / `glm-5.3-flash`（仅按 benefit 通道注册）/ `deepseek-v4-pro`；保留实测 200 的
+  `GLM-5.1` / `deepseek-v4-flash`（「不在残缺目录里」≠「不可用」）。判据是**真机能不能调通**，
+  不是「在不在 builtin 目录里」。回归 `TestCodeartsModelTableMatchesMeasuredCatalog`。
+- **图片输入与 analyzeImage（R10，ref 1b380bf/3822180/9acdd9）**：上游把 VL 模型
+  （`kimi-k2.6-vl` / `Qwen3-VL-235B`）**刻意排除在对话目录外**（上下文小、不支持工具调用），
+  只供 IDE 的 `analyzeImage` 工具间接调用；普通模型收图恒 `001001020.406 not multimodal`。
+  本端 `InferenceURL` 是 OpenAI 直通，**图片本就透传**（用户给普通模型发图会拿到上游明确的
+  406），故不移植 `analyze-image.ts`（宿主工具，且其空 `parameters` 在 buddy/workbuddy/trae
+  上分别触发 400/4027）。同样不移植「按模型声明模态」——本端 `ModelDef` 无该字段。
+- **本机压缩代理拒发签名请求（R10，ref 7c1ae77 / IKQ7AP）**：bili 之类的 compress-or-refuse
+  代理会以 **403 + `bili_resign_unavailable`** 拒绝「正文被改写过、签名失效」的请求。
+  ref 把它单列成 `PROXY_REFUSED_SIGNED`（不刷凭据、不重发、不换号）。本端 403 走
+  `ActionRotateOnly`（不刷凭据、不写冷却），但会**逐个试号**后才失败；且上游错误正文原样
+  透传（marker 不丢）。**未移植**：单列分类与「代理拒发」文案。触发条件需用户自装 bili，
+  当前仅登记。
 - 其它错误**原样透传**（代理统一分类），且 peek/读取过的 body 会**完整还回** `resp.Body`；
   正常 SSE 流经 peek 后**逐字节不变**（两条都有回归锁）。
 - ⚠️ **未移植**：ref 对「未命中文案的 400」还会探测 `api/v1/queue/status`
@@ -702,16 +736,35 @@ raccoon 的路由不依赖模型表，用户当时手敲 `raccoon/sn-deepseek-v4
 - 判据用**算术平移 UTC+8**（复用 `QoderBillingUTCOffsetMS`），不取本机时区（出差/改时区会一天判两次或漏判）。
 - 前端「领取积分」toast 优先显示 `outcome.message`（服务端文案是判据所在：「未刷新」与「已领取」不能混）。
 
-### 6.7 ZCode（智谱 z.ai 免费额度通道）协议要点（R2，ref `src/zcode*.ts` @ e06283c）
+### 6.7 ZCode（智谱 z.ai 免费额度通道）协议要点（R2 + R10，ref `src/zcode*.ts` @ 9ffd65e）
 
-- **3012 准入是请求体内容检查，不是头检查**：`system` 必须是**块数组**且前两块为官方身份块
-  （`cliPrefix` 42 字符 + stable 2856 UTF-16 码元；文本逐字内置在 `zcode_identity_text.go`，
-  以字符数 + sha256 双锁，见 `zcode_identity_test.go`），首轮 user 消息的 content 数组最前面
-  必须插 `<system-reminder>` 日期块（本地时区 ISO 日期）。缺任一项 ⇒ 上游回
-  `{code:3012,"request has been blocked due to unusual activity."}`，且**有账号冷却惩罚**
-  （30 分钟 → 24h 内第 3 次起 24h → 5 次停用）。故 3012 走代理的 **pass-through** 通道
-  （拦截器把状态归一化为 400）：不重试、不冷却 key、不切号 —— 否则同一个请求体会把整池账号的
-  惩罚次数一起推高。
+- **3012/405 准入是请求体内容检查，不是头检查**：`system` 必须是**块数组且恒为 3 块**
+  （`cliPrefix` 42 字符 + stable **2590** UTF-16 码元 + `# Environment` 段；文本逐字内置在
+  `zcode_identity_text.go`，以字符数 + sha256 双锁，见 `zcode_identity_test.go`）。
+  ⚠️ **R10（2026-10-25，ref `0636d55`/`9893e91`）**：官方 2026-10-23 升级后 stable 段由
+  「identity + desktop + `# Working style`」（2856）变成「identity + desktop（新增
+  `### Interactive views`）」（2590）；**旧文本在线上表现为 405 unusual activity**。
+  且调用方 system **绝不能再追加成第 4 块** —— 实测块数才是判据，与第 4 块长度无关
+  （2 KB 与 25 KB 都 405）；调用方内容改注入**首轮 user 消息**（排在日期块之后、幂等）后
+  同一请求 200，模型照样读到约定。3012/405 都走代理的 **pass-through** 通道（拦截器把状态
+  归一化为 400）：不重试、不冷却 key、不切号 —— 否则同一个请求体会把整池账号的惩罚次数一起推高。
+- **请求头必须逐字对齐官方 3.16.3（18 头）**（ref `3824e33`）：
+  `X-Release-Channel: production`（旧值 `stable` ✗）、`X-Platform: win32-x64`（旧值
+  `win32` ✗）、`X-Title: Z Code@electron`、`X-Os-Version`、`X-ZCode-Agent: glm`、
+  `X-Session-Id`（进程级稳定 UUID）、`X-ZCode-Session-Type: other`、`X-Request-Id` /
+  `X-ZCode-Trace-Id`（每请求新）。版本号走 `zcodeGatedAppVersion`（凭据版本与 **3.16.3**
+  取较大者，只抬不降）；query/body 仍用**干净凭据版本**（脏值会注入换行/绕过门控）。
+  非 Windows 宿主上 `X-Platform`/`X-Os-Category`/`X-Os-Version` **三者一起伪装**
+  （`10.0.26100`）；Windows 上报真实 `10.0.<build>`。
+- **405 恒不可重试**（ref `758a20b`，Gitee IKQ4B4）：405 在 ZCode 从不是「方法不允许」，
+  而是**风控拦截的专属状态码**（裸请求/无身份块都是 405+3012）。上游有时把它包成边缘 HTML
+  页 ⇒ 若交给通用分类会白重试 5 轮并加重账号冷却。判据位置：**有权威业务码之后**（`1005`+405
+  仍是额度耗尽）、**HTML 页判断之前**；命中 ⇒ 归一化 400 + 文案明确「不会自动重试 / 更换账号
+  无效」（与行为同轴，不能再说「稍后重试」）。
+- **并发自保：按 (账号, 模型) 的最小间隔**（ref `modelGapMs` + `serializeUpstream`）：
+  `glm-5.3` 350ms、`glm-5.3-flash` **500ms**（原 0 的前提是串行单发；开并发后 gap=0 只保证
+  「不重叠」不保证间隔 ⇒ 密集连发 ⇒ 429+3009 ⇒ 适配器退避放大 ⇒ 风控 405「全废」）。
+  闸门按 key×model 串行并在请求取消时释放；未知模型不做人为减速。
 - **captcha 只与领取有关**：3.14.4 起推理不再校验（ref 实测 6/6、8/8 不带验证头 200），
   本端推理侧**不产出 captcha**（撞 3007 时显式报错并给出人话提示）。`billing/claim` **始终
   强制索要** ⇒ 本端用**本地载体页**：`/api/jethub/zcode/carrier`（公开路由，一次性 128 位
@@ -728,8 +781,18 @@ raccoon 的路由不依赖模型表，用户当时手敲 `raccoon/sn-deepseek-v4
   `TestZcodeOpenURLPinsDefaultBrowser`（反向验证过：改回零值即红）。
 - **错误分类全按正文业务码**（只看状态码会把语义混掉）：`3009` 并发限流 → 同号退避 1.5s×n
   （预算 2 次，**不切号、不标记**；用尽后原样透传）；`1005`/`1113` 额度用尽 →
-  `BillingLockError` 锁 账号×模型 至 UTC+8 次日 24:00 并切号；`3007`/`3012` → 显式报错
-  （pass-through，见上）；`1002`/401 → 提示重新登录（401 交回代理按既有规则冷却+切号）。
+  `BillingLockError` 锁 账号×模型 至 UTC+8 次日 24:00 并切号；`3007`/`3012`/无码 `405` → 显式
+  报错（pass-through，见上；405 文案必须说「不会自动重试」）；`1002`/401 → 提示重新登录
+  （401 交回代理按既有规则换号、不写冷却）。
+- **每日领取 = preview ∪ marketing 两个来源**（R10，ref `689a2b1`）：1024 等活动**不在**
+  `billing/preview`（该账号 preview 恒空，与「今天没活动」同形），只在
+  `GET /api/v1/marketing/touch` 的横幅按钮 `claim_zcode_plan{plan_id}` 里。合并按 planId
+  去重、preview 优先（只借 marketing 的 `campaign_id`）、priority 降序。营销查询与**领取**
+  都必须按请求抬版本（3.14.3 → 投放空 / claim `1004 no permission`；只抬查询 = 看得到领不到）。
+  领取成功/已领取后回报 `POST /marketing/touch/action {campaign_id, action_type:"confirm"}`
+  （不回报 ⇒ 服务端每轮重复投放，为已领 plan 白烧一次设备级 captcha）；**失败绝不回报**
+  （否则用户白丢一次机会，cancel 从不发送）。营销 plan 的额度要把 `entitlements[]` **同单位
+  求和**（1024 是 3 亿 + 2 亿 = 5 亿；只取第一条少报 2 亿），preview 路径仍取第一条。
 - **空流 = 无权益**：上游对「该账号在该模型上无权益」的形态是 **HTTP 200 + 空流**
   （实测 150–200ms 返回；链路卡住的空流是超时级耗时）。拦截器按「入口 → EOF 的墙钟」区分：
   快空 ⇒ 标记 账号×模型 并切号；慢空 ⇒ 可重试错误；只有 ping 帧的流同样算空。
@@ -761,9 +824,8 @@ raccoon 的路由不依赖模型表，用户当时手敲 `raccoon/sn-deepseek-v4
   `billing/balance` 200；`client/configs` 的目录两条与 ref 数值逐项一致（1,000,000 / 128,000、
   vision 仅 Flash、levels low/high/max、default max）；推理请求 **200**（无 3012/3001 —— 身份块
   与头族通过上游检查），该账号无 plan ⇒ 空流被正确判为「无权益」并标记切号。
-- ⚠️ **未实现**：推理侧 captcha 产出（撞 3007 只报错）；ref 的 `serializeUpstream` +
-  `modelGapMs` 并发门（本端靠 3009 退避重试兜底，不做跨请求串行）；远端目录的进程内缓存与
-  30s 冷却门（目录拉取只在被调用时发生）。
+- ⚠️ **未实现**：推理侧 captcha 产出（撞 3007 只报错）；远端目录的进程内缓存与 30s 冷却门
+  （目录拉取只在被调用时发生）。
 
 ### 6.8 （空位：Gemini Code Assist 已于 R5 整体移除）
 
@@ -980,8 +1042,15 @@ per-credentialRef 串行 + 锁内重读 + 判终态前重读（凭据被他处�
 - **推理端点与请求增强**：
   - 端点：`POST https://api-inference.modelscope.cn/v1/chat/completions`。
   - **工具扁平包装**（`modelscopeAugment`）：部分客户端/SDK 下发的 `tools` 为顶层扁平对象（`{name, description, parameters}`），ModelScope 上游网关对此类扁平结构返回 400 参数格式校验错误。Augmenter 自动检测并规范化封装为 OpenAI 规范的嵌套对象：`{"type": "function", "function": tm}`。
-- **模型目录**：内置 36 款主流开源大模型兜底列表（DeepSeek-V3 / R1 / Qwen2.5 全系列 / GLM-4 / Llama-3.3 等），展示倍率与 context 窗口。
-- **魔粒余额查询**：`GET /api/v1/users/moli/account`，解析 `Data.Balance` / `Data.Total`，以 `credit` 格式呈现魔粒数。
+- **模型目录**：内置 36 款兜底模型（ref `MODELSCOPE_FALLBACK_MODELS` 快照）。⚠️ **R10
+  （上游 `9ffd65e` / issue #12）**：`deepseek-ai/DeepSeek-V4.1-Flash` **无后缀 id 已下线**
+  （报障者取证：HTTP 400 `has no provider supported`），当前在服务的是日期快照
+  `deepseek-ai/DeepSeek-V4.1-Flash-1017` ⇒ 表内只登记后者（静态表在远端失败时就是「可调用
+  清单」，留旧 id 会让用户选中后必然 400）。目录端点不下发能力字段，图片能力目前只体现在
+  Note（代理对图片一律透传）。
+- **魔粒余额查询**：`GET https://www.modelscope.cn/openapi/v1/magicubes/balance`（**不在**
+  api-inference 主机上），Bearer + Referer；解析 `data.total_balance` / `available_balance`
+  以 `credit` 呈现。
 
 ### 6.16 AutoClaw（智谱清言桌面端，autoclaw）协议要点
 - **凭据与短信登录**：
@@ -993,8 +1062,44 @@ per-credentialRef 串行 + 锁内重读 + 判终态前重读（凭据被他处�
   - **406 拦截绕过**：AutoClaw 服务端对对话首句内容有白名单门禁，非清言桌面端模板会触发 HTTP 406。Augmenter 确保对话的首条 system 消息包含固定前缀：`You are AutoClaw. Answer the user directly and concisely`。
   - **Token 门禁**：上游要求 `max_tokens` 必须充足，请求中如未指定或小于 10000，Augmenter 自动兜底补足至 10000。
 - **确证模型与积分**：
-  - 静态表收录 4 款官方确证模型：`zai_glm-5.3-flash`（免费 x0）、`zaicoding_glm-5.3`（x1）、`zai_auto`（x1）、`zai_auto-fast`（x1）。
+  - 静态表收录 4 款官方确证模型：`zai_glm-5.3-flash`（**实测每次请求扣约 1 积分**——上游 `isFree` 曾误标 true，R10 按真机实测订正：目录缺失 ≠ 不扣费）、`zaicoding_glm-5.3`（x1）、`zai_auto`（x1）、`zai_auto-fast`（x1）。
   - 余额读取 `GET https://chatglm.cn/api/v1/user/account`，每日签到领取 `POST https://chatglm.cn/api/v1/user/sign_in`。
+
+### 6.17 Codely（Unity 团结引擎，codely）协议要点（R10，ref `src/codely-*.ts` @ 301f6bc）
+
+- **登录 = 自有设备码轮询**（纯 HTTP，无本地回调端口）：
+  `POST /auth/device/initiate` `{provider:"unity", client_name:"codely-vscode", auth_from:"vscode-codely"}`
+  → `{auth_request_token, user_code, verification_uri(_complete), interval, expires_in}`；
+  `GET /auth/device/poll?auth_request_token=…` 状态机 `pending`（继续）/`slow_down`（间隔累计
+  +1s）/`authorized`（带 `authorization_code`）/`completed|denied|expired`（终态）；
+  `POST /auth/device/exchange {authorization_code}` → `{access_token, refresh_token}`。
+  昵称 `GET /auth/external/me`（尽力而为，失败不阻塞）。⚠️ exchange 响应**没有** `expires_in`：
+  过期时刻从 access_token 的 **JWT `exp`** 解码，解不出就缺省（绝不编造）。
+- **续期**：`POST /auth/refresh {refresh_token}` → 新 access_token；⚠️ `refresh_token`
+  **不轮换**（连续三次返回同值），缺省时沿用旧值。
+- **推理 = OpenAI 兼容 + 每请求换发 key + HMAC 签名**：
+  `GET /api/api-token/cli-api-key`（Bearer access_token，必须 GET；POST 回 405）→
+  `{cli_api_key, user_id, rpm, tpm}`。签名：
+  `signingKey = HMAC_SHA256(HMAC_SHA256(SECRET, "codely-signing-v1"), cli_api_key)`；
+  `sig = HMAC_SHA256(signingKey, "v1\n" + pathname + "\n" + ts).base64url`；
+  头值 `v1.<ts>.<sig>`，另有 `Authorization: Bearer <cli_api_key>`、`codely-cli` UA、
+  **必填** `x-litellm-session-id`（不参与签名）。⚠️ **分隔符必须是 LF**：`|`（官方二进制旧
+  代码）与 `\r\n`（npm 包转义展示）实测都 401；签名只覆盖 pathname（body/query 不参与）。
+  SECRET 是官方客户端共用的 32 字节常量（账号隔离靠各自换发的 cli_api_key）。
+  ⚠️ 换发失败必须分档：**401/403 = 凭据失效**（提示重新登录）；**网络/5xx/429 = transient**
+  （不记账号冷却 —— ref 实测一次 DNS 抖动曾把整池锁到次日 0 点）；2xx 缺字段 = 协议变更。
+- **模型目录**：`GET /api/model-status`（Bearer）是**运行状态**端点，只取 `modelGroup` 当 id
+  （**不把 status 拼进名字**，分钟级状态会让目录漂移）；进程内缓存成功 10min / 失败 30s /
+  并发去重 / 兜底表不写缓存；静态兜底 8 条（逐字来自实测 `modelGroup`，不编造展示名）。
+- **积分**：`GET /api/user/usage/summary` → `remaining_points` 是**字符串**，`details[]` 是
+  逐桶结构（多桶账号不能只看顶层）；读不出报错、不显示 0。签到：
+  `POST /api/points/check-in/init`（只读）→ 仅 `can_check_in === true` 才
+  `POST /api/points/check-in`；执行响应不返回本次数额，取 init 里
+  `levels[status=CURRENT].reward_summary`（"+300"），解析不出则 credit=0 + 提示看余额。
+- **402 = 积分预算耗尽** ⇒ `BillingLockError` 锁 账号×模型 至 UTC+8 次日 24:00（按日解冻），
+  不是通用 120s 冷却；其余状态交给代理常规分类（401 只换号、429 退避、5xx 退避）。
+- ⚠️ 已知差异：cli-key 换发遇到 401 时本端**不像 ref 那样在适配器内换号**（代理的换号只在
+  拿到上游 HTTP 响应后发生），表现为 502 + 明确「请重新登录」——不静默、不误锁。
 
 ## 6.9 渠道级余额合计（Monitor 页 Provider 列的读数）
 **目的**：TinyLab 的 Monitor 页配额表按 provider/model 分行，Provider 列此前只有渠道名。

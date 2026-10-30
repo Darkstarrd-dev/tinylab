@@ -17,11 +17,14 @@ func TestModelscopeFallbackModels(t *testing.T) {
 	foundDeepseek := false
 	foundQwen := false
 	for _, m := range models {
-		if m.ID == "deepseek-ai/DeepSeek-V4.1-Flash" {
+		if m.ID == "deepseek-ai/DeepSeek-V4.1-Flash-1017" {
 			foundDeepseek = true
 			if !strings.Contains(m.Note, "1048576") || !strings.Contains(m.Note, "image") || !strings.Contains(m.Note, "efforts none") {
-				t.Fatalf("DeepSeek-V4.1-Flash note drifted: %s", m.Note)
+				t.Fatalf("DeepSeek-V4.1-Flash-1017 note drifted: %s", m.Note)
 			}
+		}
+		if m.ID == "deepseek-ai/DeepSeek-V4.1-Flash" {
+			t.Fatal("已下线的无后缀 id 不得登记（选中后必然 400 has no provider supported）")
 		}
 		if m.ID == "Qwen/Qwen3.8-Flash-Next" {
 			foundQwen = true
@@ -84,14 +87,14 @@ func TestModelscopeAugment(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost, "http://localhost/v1/chat/completions", nil)
 	rawBody := []byte(`{
-		"model": "deepseek-ai/DeepSeek-V4.1-Flash",
+		"model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
 		"messages": [{"role": "user", "content": "hi"}],
 		"tools": [
 			{"name": "fetch", "description": "get url", "parameters": {"type": "object"}}
 		]
 	}`)
 
-	augmented, err := mgr.modelscopeAugment(req, rawBody, "jethub-modelscope", id, "deepseek-ai/DeepSeek-V4.1-Flash")
+	augmented, err := mgr.modelscopeAugment(req, rawBody, "jethub-modelscope", id, "deepseek-ai/DeepSeek-V4.1-Flash-1017")
 	if err != nil {
 		t.Fatalf("augment failed: %v", err)
 	}
