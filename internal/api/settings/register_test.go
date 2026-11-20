@@ -1,10 +1,14 @@
 package settings
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/tinylab/tinylab/internal/config"
 )
 
@@ -234,5 +238,77 @@ func TestAssistantPatchModelAndActions(t *testing.T) {
 	}
 	if loaded.Assistant.Model != "openai/new" || len(loaded.Assistant.Actions) != 1 || loaded.Assistant.Actions[0].Fps != 10 {
 		t.Errorf("assistant block lost in round-trip: %+v", loaded.Assistant)
+	}
+}
+
+func TestGalleryExcludeSettingsGetAndPartialPatch(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.GalleryExclude = config.GalleryExcludeConfig{
+		Enabled: true,
+		Scope:   config.GalleryExcludeScopeHead,
+		Count:   7,
+	}
+	d := buildConvergeDeps(t, cfg)
+	if err := config.Save(d.ConfigPath, cfg); err != nil {
+		t.Fatalf("Save initial config: %v", err)
+	}
+
+	h := NewHandler(d)
+	r := chi.NewRouter()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// 1. GET /settings exposes galleryExclude.
+	getResp, err := http.Get(srv.URL + "/settings")
+	if err != nil {
+		t.Fatalf("GET /settings: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /settings status = %d, want 200", getResp.StatusCode)
+	}
+	var gotSettings struct {
+		GalleryExclude config.GalleryExcludeConfig `json:"galleryExclude"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&gotSettings); err != nil {
+		t.Fatalf("decode GET /settings: %v", err)
+	}
+	if gotSettings.GalleryExclude != cfg.GalleryExclude {
+		t.Fatalf("GET galleryExclude = %+v, want %+v", gotSettings.GalleryExclude, cfg.GalleryExclude)
+	}
+
+	// 2. Partial PATCH toggling enabled=false preserves scope & count.
+	patchReq, _ := http.NewRequest(http.MethodPatch, srv.URL+"/settings", bytes.NewBufferString(`{"galleryExclude":{"enabled":false}}`))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchResp, err := http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatalf("PATCH /settings: %v", err)
+	}
+	patchResp.Body.Close()
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH /settings status = %d, want 200", patchResp.StatusCode)
+	}
+	cur := d.Reg.Config().GalleryExclude
+	if cur.Enabled || cur.Scope != config.GalleryExcludeScopeHead || cur.Count != 7 {
+		t.Fatalf("after partial PATCH got %+v, want {Enabled:false Scope:head Count:7}", cur)
+	}
+
+	// 3. Invalid scope and count return 400.
+	for _, body := range []string{
+		`{"galleryExclude":{"scope":"middle"}}`,
+		`{"galleryExclude":{"count":0}}`,
+		`{"galleryExclude":{"count":100001}}`,
+	} {
+		badReq, _ := http.NewRequest(http.MethodPatch, srv.URL+"/settings", bytes.NewBufferString(body))
+		badReq.Header.Set("Content-Type", "application/json")
+		badResp, err := http.DefaultClient.Do(badReq)
+		if err != nil {
+			t.Fatalf("bad PATCH: %v", err)
+		}
+		badResp.Body.Close()
+		if badResp.StatusCode != http.StatusBadRequest {
+			t.Errorf("PATCH %s status = %d, want 400", body, badResp.StatusCode)
+		}
 	}
 }

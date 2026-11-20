@@ -183,8 +183,11 @@ function renderTreePanel() {
     if (isVidActive) {
       headerHTML = '';
     } else {
+      var exOn = !!(galleryState.exclude && galleryState.exclude.config && galleryState.exclude.config.enabled);
+      var exTip = (typeof getExcludeButtonTooltip === 'function') ? getExcludeButtonTooltip() : (T('galleryExcludeBtn') || 'Exclude Hash');
       headerHTML = '<div class="gallery-tree-header">' +
-        '<button class="gallery-tree-clear-btn" type="button" id="gallery-tree-batch-btn" style="margin-right:auto" data-tooltip="' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '">' + GALLERY_ICONS.batchConvert + '</button>' +
+        '<button class="gallery-tree-clear-btn" type="button" id="gallery-tree-batch-btn" data-tooltip="' + escapeHtml(T('geTreeBatchConvert') || 'Batch Convert') + '">' + GALLERY_ICONS.batchConvert + '</button>' +
+        '<button class="gallery-tree-clear-btn' + (exOn ? ' active' : '') + '" type="button" id="gallery-exclude-btn" style="margin-right:auto" data-tooltip="' + escapeHtml(exTip) + '">' + GALLERY_ICONS.excludeHash + '</button>' +
         '<button class="gallery-tree-clear-btn' + (rs.selectMode ? ' active' : '') + '" type="button" id="gallery-ai-review-btn" data-tooltip="' + T('galleryReviewBtn') + '">' + GALLERY_ICONS.aiReview + '</button>' +
         buildTreeSortControlHTML() +
         '</div>';
@@ -431,13 +434,6 @@ function renderTreePanel() {
       };
     }
   } else {
-    // 标准 Clear 按钮
-    var clearBtn = panel.querySelector('.gallery-tree-clear-btn');
-    if (clearBtn) clearBtn.onclick = function(e) {
-      if (e) { e.preventDefault(); e.stopPropagation(); }
-      clearActiveSideTree();
-    };
-
     // AI Review 按钮 -> 点击同时展开面板并进入节点选择模式
     var aiBtn = panel.querySelector('#gallery-ai-review-btn');
     if (aiBtn) aiBtn.onclick = function(e) {
@@ -456,6 +452,12 @@ function renderTreePanel() {
       if (e) { e.preventDefault(); e.stopPropagation(); }
       if (typeof window.openTreeBatchConvert === 'function') window.openTreeBatchConvert();
     };
+    // Exclude Hash 设置按钮
+    var excludeBtn = panel.querySelector('#gallery-exclude-btn');
+    if (excludeBtn) excludeBtn.onclick = function(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (typeof openGalleryExcludeModal === 'function') openGalleryExcludeModal();
+    };
     // 排序下拉（独立 id 绑定：树内 .gallery-tree-clear-btn 被共享绑定，
     // 不能依赖 class 选择器）。点击选项写入 imageTreeSort 并全量重排。
     var sortDropdown = panel.querySelector('#gallery-tree-sort-dropdown');
@@ -470,6 +472,7 @@ function renderTreePanel() {
         galleryState.imageTreeSort = { key: k, dir: d };
         if (!galleryState.items.length) { renderTreePanel(); return; }
         var curItem = galleryState.items[galleryState.index] || null;
+        if (galleryState.rawItems && galleryState.rawItems.length) sortItems(galleryState.rawItems);
         sortItems(galleryState.items);
         if (curItem) {
           for (var ri = 0; ri < galleryState.items.length; ri++) {
@@ -591,7 +594,7 @@ function releaseZipSessions(removedItems) {
     if (it.sourceId) srcIds[it.sourceId] = true;
     else if (it.sessionId) sids[it.sessionId] = true;
   }
-  var survivors = (galleryState.items || []).concat(galleryState.videoItems || []);
+  var survivors = ((galleryState.rawItems && galleryState.rawItems.length) ? galleryState.rawItems : (galleryState.items || [])).concat(galleryState.videoItems || []);
   var aliveSrc = {};
   var aliveSess = {};
   for (var j = 0; j < survivors.length; j++) {
@@ -649,12 +652,13 @@ function clearActiveSideTree(forceVid) {
     return;
   }
 
-  var cleared = galleryState.items.slice();
+  var cleared = (galleryState.rawItems && galleryState.rawItems.length) ? galleryState.rawItems.slice() : galleryState.items.slice();
   for (var j = 0; j < cleared.length; j++) {
     var im = cleared[j];
     if (im && im.mainURL && String(im.mainURL).indexOf('blob:') === 0) FsApi.BlobTracker.revoke(im.mainURL);
     if (im && im.thumbURL && String(im.thumbURL).indexOf('blob:') === 0) FsApi.BlobTracker.revoke(im.thumbURL);
   }
+  if (typeof syncRawItemsClear === 'function') syncRawItemsClear();
   galleryState.items = [];
   // Free the backend zip sessions of the cleared packs immediately (no
   // surviving items reference them, so all are released).
@@ -765,12 +769,19 @@ function renderThumbnails() {
       var div = document.createElement('div');
       div.className = 'gallery-thumb' + (idx === galleryState.index ? ' active' : '');
       if (item.markedForDeletion) div.classList.add('thumb-marked-for-deletion');
+      if (item._excludedByHash) div.classList.add('thumb-excluded-hash');
       div.dataset.idx = String(idx);
       var img = document.createElement('img');
       img.className = 'gallery-thumb-img';
       img.alt = '';
       item.thumbImgEl = img;
       div.appendChild(img);
+      if (item._excludedByHash) {
+        var badge = document.createElement('span');
+        badge.className = 'thumb-exclude-badge';
+        badge.textContent = (typeof T === 'function' ? T('galleryExcludeBadge') : '') || 'EXC';
+        div.appendChild(badge);
+      }
       div.addEventListener('click', function() { setActive(idx); });
       wrap.appendChild(div);
       item.thumbDivEl = div;
@@ -804,6 +815,7 @@ function renderActive(index) {
 
   if (!item) {
     updateDeleteOverlay(null);
+    if (typeof updateExcludeIndicator === 'function') updateExcludeIndicator(null);
     if (imgEl) imgEl.removeAttribute('src');
     if (pathEl) { pathEl.textContent = '-'; pathEl.removeAttribute('data-tooltip'); }
     if (info) info.textContent = '0 / 0';
@@ -812,6 +824,7 @@ function renderActive(index) {
   }
 
   updateDeleteOverlay(item);
+  if (typeof updateExcludeIndicator === 'function') updateExcludeIndicator(item);
 
   var displayPath = item.path || item.name || '';
   if (pathEl) {
@@ -883,6 +896,9 @@ function setActive(index) {
     renderThumbnails();
   }
   renderActive(galleryState.index);
+  if (cur && typeof checkExcludeForDir === 'function') {
+    checkExcludeForDir(getDirPath(cur.path));
+  }
 }
 
 // ---------- deletion interactions ------------------------------------------
@@ -939,6 +955,7 @@ function removeItem(removedIndex) {
   }
   // Splice
   galleryState.items.splice(removedIndex, 1);
+  if (item && typeof syncRawItemsRemove === 'function') syncRawItemsRemove([item]);
   // Release the backend zip session if no surviving item still references it.
   if (item && item.kind === 'zip') releaseZipSessions([item]);
   // Adjust current index (no wrap)
@@ -990,6 +1007,7 @@ function removeItemsByFilter(filterFn) {
   // Determine current item's fate (by reference)
   var curItem = galleryState.items[galleryState.index];
   galleryState.items = kept;
+  if (typeof syncRawItemsRemove === 'function') syncRawItemsRemove(removed);
   // Release backend zip sessions whose packs are fully removed (no kept item
   // still references them). Sibling entries of a partially-removed pack keep
   // their session alive. Must run after the splice so survivors are read from

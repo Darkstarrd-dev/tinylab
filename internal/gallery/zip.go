@@ -2,6 +2,8 @@ package gallery
 
 import (
 	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -215,4 +217,60 @@ func contentTypeForExt(name string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// MatchZipEntries checks only the specified relative zip entry paths against
+// store using a two-stage cascade: ZIP central-directory Size + CRC32 first
+// (zero decompression), then streaming SHA-256 verification on candidates only.
+func MatchZipEntries(reader io.ReaderAt, size int64, entryPaths []string, store *ExcludeStore) ([]string, map[string]string, error) {
+	matched := make([]string, 0)
+	matchedHashes := make(map[string]string)
+	if store == nil || store.Count() == 0 || len(entryPaths) == 0 {
+		return matched, matchedHashes, nil
+	}
+	z, err := zip.NewReader(reader, size)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open zip: %w", err)
+	}
+	byPath := make(map[string]*zip.File, len(z.File))
+	for _, f := range z.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		clean := CleanZipPath(decodeZipName(f.Name))
+		if _, dup := byPath[clean]; !dup {
+			byPath[clean] = f
+		}
+	}
+	seen := make(map[string]bool, len(entryPaths))
+	for _, rawPath := range entryPaths {
+		if rawPath == "" || seen[rawPath] {
+			continue
+		}
+		seen[rawPath] = true
+		f := byPath[CleanZipPath(rawPath)]
+		if f == nil {
+			continue
+		}
+		entrySize := int64(f.UncompressedSize64)
+		if !store.MightMatch(entrySize, f.CRC32, true) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		h := sha256.New()
+		n, copyErr := io.Copy(h, io.LimitReader(rc, maxZipEntrySize+1))
+		_ = rc.Close()
+		if copyErr != nil || n > maxZipEntrySize {
+			continue
+		}
+		sha := hex.EncodeToString(h.Sum(nil))
+		if store.HasSHA256(sha) {
+			matched = append(matched, rawPath)
+			matchedHashes[rawPath] = sha
+		}
+	}
+	return matched, matchedHashes, nil
 }

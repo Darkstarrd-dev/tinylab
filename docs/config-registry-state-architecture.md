@@ -1,4 +1,4 @@
-> **最后核对（2026-10-08，Systray 快捷键分区 → OS 级全局热键）：** `ShortcutsConfig` 零 schema 变更，新增 action IDs `systray.open-browser`（默认 Ctrl+Shift+T）/`systray.open-console`（默认 Ctrl+Alt+Shift+T）——由新增 `internal/hotkey/` 包消费为 Windows `RegisterHotKey` 系统全局热键（生效绑定 = 用户覆盖 ?? Go 侧内置默认镜像；无 handler 的 action 不向 OS 注册；`convergeRuntime` 尾部新增 `hotkey.SetBindings(cfg.Shortcuts)`，settings PATCH 与 /api/reload 双路径保存即时生效）。前端 `web/static/shortcuts.js` 的 systray 预设是 Go 侧 `defaultBindings` 的镜像（`web/systray-shortcuts.test.js` 双向守护）。此前：2026-10-05 F-08 状态持久化分级（过程叙述见 docs/changelog/config-registry-state-architecture.md）。
+> **最后核对（2026-11-20，GalleryExcludeConfig 配置与向后兼容）：** 新增 `GalleryExcludeConfig{Enabled, Scope, Count}`（`Config.GalleryExclude`，`yaml/json:"galleryExclude,omitempty"`）持久化 Gallery Hash 排除开关与扫描范围（默认 `Enabled:true, Scope:"tail", Count:10`）；`finalizeConfig` 字节探测 `"galleryExclude"` 使缺失该段的旧 `config.yaml` 零报错兼容并默认启用；`internal/api/settings/register.go` `GET /settings` 暴露与 `PATCH /settings` presence-aware `galleryExcludePatch` 合并（校验 `scope` ∈ `all/head/tail`、`count` ∈ `1..100000`）。过程叙述见 docs/changelog/config-registry-state-architecture.md。
 >
 > **最后核对（2026-09-07，删除后 QuickSlot/Playground 残留修复）：** `registry/combos.go::DeleteCombo` 成功路径补 `sweepStaleQuickSlotModelsLocked()`——删 combo 按名清 quickslot 引用（combo 名是 quickslot 存活判定口径之一），与 `DeleteProvider`/`DeleteModel` 的 `sweepStaleRefsLocked()` 对齐；`sweep_test.go` 新增 `TestDeleteComboSweepsQuickSlots`（删 c1 后 q1 无 `C1` 残留且 `SelectedIndex` 合法）。前端三处删模型路径（`providers-models.js::deleteModelDetail`/`batchKeepSelected`/`batchRemoveSelected`）与 `providers.js::deleteProviderFromList` 成功后无条件调 `renderHeaderQuickSlots()`——此前独立 Providers 页无 `#combo-list` 不触发 `renderEndpoint`，header 按钮残留已删模型名。
 >
@@ -126,7 +126,8 @@ flowchart TD
 | `AssistantConfig` | types.go（2026-08-19 新增；**2026-08-24 Action 化**，`Config.Assistant`，`yaml/json:"assistant,omitempty"`） | `Model` / `Actions []AssistantAction`——`Model` 为模型辅助意图分类所用模型 id（provider-prefix/model 或 combo 名），空=仅关键词 fallback。`AssistantAction{Name,SpritesheetPath,Cols,Rows,FrameStart,FrameEnd,Fps}` 定义一个精灵动画：spritesheet 按 Cols×Rows 网格分割、行主序 0 基编号（左上=0），播放 `[FrameStart,FrameEnd]` 帧于 Fps；`finalizeConfig` 归一 cols/rows≥1、frameStart≥0、frameEnd≥frameStart、fps≤0→8（旧顶层 `SpritesheetPath`/`SpritesheetFps` 字段已移除，旧 config 值被忽略）。PATCH 为 presence-aware `assistantPatch`（`Model *string` + `Actions *[]AssistantAction` 整表替换，经 `applyAssistantUpdates` 合并） |
 | `ShortcutBinding` | types.go:248-257 | 一个用户覆盖的键盘绑定：`Key`（必填，如 `F6`/`Enter`/`m`/` ` — space）/ `CtrlOrCmd`（平台无关修饰，macOS 时 match `metaKey`，其它平台 match `ctrlKey`）/ `Alt` / `Shift`（均 `omitempty`）。仅记录被覆盖的项；与系统预设相等的绑定不写入磁盘 |
 | `ShortcutsConfig` | types.go:263 | `map[string]ShortcutBinding`，键为 action ID（如 `global.goto-usage`、`pg.send-message`、`gallery.toggle-split`），值为 `ShortcutBinding`。空（非 nil）map = 无覆盖；`finalizeConfig` 把 nil 归一为空 map 以保证 JSON 输出 `{}` 而非 `null` |
-| `Config` | types.go:266-281 | 顶层：上述所有子结构 + `Port` / `ConsoleLogMaxLines` / `UsageRingSize` / `EnablePlayground` / `QuickSlotOnly`（`bool`，`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）/ `Providers` / `Combos` / `QuickSlots` / `Shortcuts`（`ShortcutsConfig`，`yaml/json:"shortcuts,omitempty"`，仅存用户覆盖；未出现该段时回退前端系统预设）/ `Archive`（`ArchiveConfig`，`yaml/json:"archive,omitempty"`，2026-08-06 新增，见上表行）/ `Assistant`（`AssistantConfig`，`yaml/json:"assistant,omitempty"`，2026-08-19 新增，见上表行） |
+| `GalleryExcludeConfig` | types.go | `Enabled` / `Scope`（`all`/`head`/`tail`）/ `Count`（1..100000，默认 10）：控制 Gallery Hash 排除开关与包级切片扫描范围；常量 `GalleryExcludeScopeAll`/`Head`/`Tail`、`DefaultGalleryExcludeCount=10` |
+| `Config` | types.go:266-281 | 顶层：上述所有子结构 + `Port` / `ConsoleLogMaxLines` / `UsageRingSize` / `EnablePlayground` / `QuickSlotOnly`（`bool`，`yaml/json:"quickSlotOnly"`，控制 `/v1/models` 仅返回 QuickSlot 模型）/ `Providers` / `Combos` / `QuickSlots` / `Shortcuts`（`ShortcutsConfig`，`yaml/json:"shortcuts,omitempty"`，仅存用户覆盖；未出现该段时回退前端系统预设）/ `Archive`（`ArchiveConfig`，`yaml/json:"archive,omitempty"`，2026-08-06 新增，见上表行）/ `Assistant`（`AssistantConfig`，`yaml/json:"assistant,omitempty"`，2026-08-19 新增，见上表行）/ `GalleryExclude`（`GalleryExcludeConfig`，`yaml/json:"galleryExclude,omitempty"`，2026-11-20 新增，见上表行） |
 
 **`ModelDef` 的双重反序列化：** 为兼容旧配置，`ModelDef` 同时支持标量字符串与映射节点——`UnmarshalYAML`（types.go:38-51）遇到 `ScalarNode` 时把值赋给 `ID`、`QuotaType` 留空；`UnmarshalJSON`（types.go:54-71）对以 `"` 开头的字节流按字符串解析，否则按对象解析。
 
@@ -155,7 +156,8 @@ flowchart TD
 - `EnablePlayground=true`；
 - `Providers`/`Combos`/`QuickSlots` 为空切片（非 nil）；
 - `Server=DefaultServerConfig()`；
-- `Download`：`Enabled=true`、`ConcurrentFragments=4`、`MaxConcurrent=3`。
+- `Download`：`Enabled=true`、`ConcurrentFragments=4`、`MaxConcurrent=3`；
+- `GalleryExclude`：`Enabled=true`、`Scope="tail"`、`Count=10`。
 
 ### 5.3 finalizeConfig 回填逻辑（defaults.go:69-146）
 
@@ -163,6 +165,7 @@ flowchart TD
 
 - **端口 / 日志行数 / ring 大小归零回填**（70-78）：`Port=20128`、`ConsoleLogMaxLines=200`、`UsageRingSize=500`。
 - **`enablePlayground` 字节级探测**（82-84）：仅当 `raw` 中**不含**字面量 “enablePlayground” 时才默认 `true`——避免旧配置零值（false）静默隐藏 playground。
+- **`galleryExclude` 字节级探测 + 范围归一化**（`FinalizeGalleryExcludeConfig`）：当 `raw` 中**不含** `"galleryExclude"` 时回填 `Enabled=true`（老 `config.yaml` 无该段也能零报错启动并默认开启，用户显式 `enabled: false` 原样保留）；`Scope` 非 `all`/`head`/`tail` 时归一为 `"tail"`，`Count<=0` 回填 `10`、`>100000` 钳位至 `100000`。
 - **`state_persist` 字节级探测**（87-89）：仅当 `StatePersist==false` **且** `raw` 不含 “state_persist” 时回填 `true`，防止用户显式 `false` 被覆盖。
 - **`state_path` 空值回填**（90-92）：空则置 “state.yaml”。
 - **server 超时回填**（95）：调 `FinalizeServerConfig(&cfg.Server)`。
@@ -596,3 +599,4 @@ go build -o tinylab .
 | 修改 Config() 拷贝语义 | `internal/registry/registry.go::Config`/`cloneConfig`（JSON round-trip 深拷贝）+ `deepcopy_test.go`；handler 不得再依赖浅拷贝共享切片 |
 | 清理 combo/quickslot 无效引用 | `internal/registry/sweep.go`（新增：`SweepStaleComboModels`/`SweepStaleQuickSlotModels`/`SweepStaleModelRefs`，quickslot `SelectedIndex` 跟随存活模型/钳制）+ `DeleteProvider`/`DeleteModel`/`DeleteCombo` 成功路径内联 sweep（`DeleteCombo` 仅 sweep quickslot 侧 combo 名引用；handler 层 `SaveConfigAndReload` 持久化）+ `POST /api/combos/cleanup`（`api/combos/register.go::cleanupCombos`）+ `POST /api/quickslots/cleanup`（`api/quickslots/register.go::cleanupQuickSlots`）；前端 `web/static/settings/settings.js` 双 header 清理按钮 + `combos.js::cleanupStaleCombos` + `quickslots.js::cleanupStaleQuickSlots` + `quickslots.js::_qsModalSort`（弹窗标题栏排序按钮，按模型 id 字典序即 provider 缩写首字母优先，focus/selected 跟随模型）+ `i18n.js`（`cleanupStale*`/`qsSort*` en+cn）+ 删除后 header 即时刷新（`providers-models.js` 单删/批量双路径 + `providers.js::deleteProviderFromList`，成功后无条件 `renderHeaderQuickSlots()`） |
 | 修改 state key 序列化 | `internal/state/state.go`（`KeySnapshot.ProviderID/KeyID` + `EncodeSnapshotKey`/`decodeSnapshotKey`）+ `internal/state/manager.go::Restore`（结构化→长度前缀→legacy `::`）+ `internal/registry/state.go`（`SnapshotKeyStates`/`probeRecordKey`）+ `state_key_test.go` |
+| 新增/修改 `GalleryExcludeConfig` | `internal/config/types.go`（`GalleryExcludeConfig` + `Config.GalleryExclude` + `GalleryExcludeScopeAll`/`Head`/`Tail` + `DefaultGalleryExcludeCount=10`）+ `internal/config/defaults.go`（`DefaultConfig`/`FinalizeGalleryExcludeConfig`/`finalizeConfig` 字节级探测 `"galleryExclude"` 向后兼容）+ `internal/api/settings/register.go`（`getSettings` + `galleryExcludePatch`/`validateGalleryExcludePatch`/`applyGalleryExcludeUpdates`）+ `internal/config/gallery_exclude_test.go` + `internal/api/settings/register_test.go::TestGalleryExcludeSettingsGetAndPartialPatch` |

@@ -226,7 +226,7 @@ func TestAssetsPlaygroundPGExactOrder(t *testing.T) {
 		"playground/pg-render.js", "playground/pg-ui-params.js", "playground/pg-presets.js", "playground/pg-ui-reqleft.js", "playground/pg-ui-events.js", "playground/pg-ui.js", "playground/pg-modal.js", "playground/pg-lifecycle.js",
 		"playground/pg-setup.js", "playground/pg-director.js", "playground/pg-search.js",
 		"gallery/gallery-state.js", "gallery/gallery-io.js", "gallery/gallery-layout.js",
-		"gallery/gallery-tree.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
+		"gallery/gallery-tree.js", "gallery/gallery-exclude.js", "gallery/gallery-review.js", "gallery/gallery-video.js", "gallery/gallery-fullscreen.js",
 		"gallery/gallery-meta.js",
 		"gallery/gallery-edit.js", "gallery/gallery-edit-operations.js", "gallery/gallery-edit-batch.js", "gallery/gallery.js",
 	}

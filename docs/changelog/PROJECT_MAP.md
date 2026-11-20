@@ -1,3 +1,8 @@
+## 2026-11-20 — Gallery Hash 排除（excludehash.txt / 广告尾图屏蔽）
+
+- **触发**：用户需求——在 Gallery 中通过极轻量的确定性图片哈希记录（`{configDir}/excludehash.txt`）屏蔽图包末尾广告图，支持包开启时懒检定（全量/前 N/后 N，按自然文件名升序切片），支持 `P`（排除+防重）/ `Alt+P`（关闭状态下移除）/ `Ctrl+Alt+P`（切换开关）快捷键，并将 `galleryExclude` 配置向后兼容地持久化到 `config.yaml`。
+- **落点**：`internal/config/`（`types.go::GalleryExcludeConfig`、`defaults.go::FinalizeGalleryExcludeConfig` 与字节级 `"galleryExclude"` 向后兼容探测、`gallery_exclude_test.go`）、`internal/api/settings/`（`register.go` 暴露与 presence-aware `galleryExcludePatch`、`register_test.go::TestGalleryExcludeSettingsGetAndPartialPatch`）、`internal/gallery/`（`exclude_store.go::ExcludeStore` `Size→CRC32→SHA-256` 级联预筛选 + `AtomicWrite`、`zip.go::MatchZipEntries`、`exclude_store_test.go`）、`internal/api/gallery/`（`register.go` + `exclude_handlers.go` 4 端点 `/api/gallery/exclude-hashes{,/add,/remove,/check}`、`exclude_handlers_test.go`）、`internal/feature/`（`feature.go`/`feature_test.go` 注册 `gallery/gallery-exclude.js`）、前端（`web/static/shortcuts.js`、`web/static/i18n.js`、`web/static/style-gallery.css`、`web/static/index.html`、`web/playground/static-pg/gallery/{gallery-state,gallery-exclude,gallery-layout,gallery-io,gallery-tree,gallery-fullscreen,gallery-edit-batch,gallery}.js`）与 `web/gallery-exclude.test.js`，以及相关文档与核对流水。
+
 ## 2026-11-20 — Gallery Batch Convert 批量调度 429 失效修复
 
 - **触发**：用户报障 Gallery 中 Batch Convert 批量处理大文件夹时大部分失败、仅部分成功，成功数量随待处理总数量呈线性比例，小于一定数量（$\le 4$）则全成功。

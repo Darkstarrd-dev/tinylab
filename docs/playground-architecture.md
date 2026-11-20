@@ -2,7 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。
 > **当前导航覆盖（2026-08-08）：** 后续 Utility 重组已将顶层 Download/GIF 收入 Utility；F5 打开 Utility 菜单，F4 直达 Gallery。下方 2026-07-26 导航条目保留为历史叙述，不代表当前入口。
-> **最后核对（2026-11-20，单行摘要）：** 修复 Gallery Batch Convert 大批量仅部分成功且成功数与总数成线性比例的调度缺陷——前端 `gallery-edit-batch.js` 改用并发 4 滑动窗口 Worker Pool 端到端等待任务完成后再领取下一项（+ 429 退避重试、递增轮询、补回 `j.done=true`、`_batchSeq` 代数令牌防取消/重入串扰、移除覆盖全局的 `runWithConcurrency`），`cleanupMediaEditor` 切页不中断批次、`_geResumeActive` 不重复轮询；后端 `internal/mediaedit/manager.go::runJob` 用 `sync.Once` + LIFO defer 在 `job.mu.Unlock()` 前归还并发槽位。历次核对流水已归档至 `docs/changelog/playground-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-11-20，单行摘要）：** 新增 Gallery Hash 排除功能（`{configDir}/excludehash.txt` TSV 原子持久化 + `config.yaml::galleryExclude` 向后兼容开关/范围），后端 `internal/gallery/exclude_store.go::ExcludeStore` + `zip.go::MatchZipEntries` 实现 `Size→CRC32→SHA-256` 级联预筛选，`internal/api/gallery/exclude_handlers.go` 挂 `/api/gallery/exclude-hashes{,/add,/remove,/check}` 4 路由；前端 `gallery-state.js` 分离 `rawItems`/`items`，`gallery-exclude.js` 在开包切换时按自然文件名升序切片做包级懒检定并就地投影过滤，Batch Convert 右侧新增 `#gallery-exclude-btn` 图标按钮及弹窗，`shortcuts.js` 绑定 `P`/`Alt+P`/`Ctrl+Alt+P`。历次核对流水已归档至 `docs/changelog/playground-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
 
 ## 1. 范围与结论
 
@@ -171,6 +171,10 @@ Playground 后端相关职责只有三类：
 | `POST /api/gallery/edit/zip-outputs` | 将多个转换结果打包为 zip（可选 `zipName`） | 管理 session | 无上限 |
 | `POST /api/gallery/edit/zip-writeback` | 原子回写压缩包中的转换结果 | 管理 session | 无上限 |
 | `POST /api/gallery/open-folder` | 打开系统文件管理器目录 | 管理 session | 无上限 |
+| `GET /api/gallery/exclude-hashes` | 返回 `galleryExclude` 配置及 `{configDir}/excludehash.txt` 摘要（数量/size 集合/hasUnsized） | 管理 session | 无上限 |
+| `POST /api/gallery/exclude-hashes/add` | 计算/接收条目指纹并幂等写入 `excludehash.txt` | 管理 session | 1 MiB（handler 限流） |
+| `POST /api/gallery/exclude-hashes/remove` | 按 `sha256` 或条目引用从 `excludehash.txt` 移除记录 | 管理 session | 1 MiB（handler 限流） |
+| `POST /api/gallery/exclude-hashes/check` | 对 zip/sourceId/grantId/hashes 切片执行 `Size→CRC32→SHA-256` 排除匹配 | 管理 session | 1 MiB（handler 限流） |
 
 前端源码中的 `pgApiGet('/models')` 经宿主 `apiGet` 自动加 `/api`，实际请求是 `/api/models`。聊天相关代码直接 `fetch('/v1/chat/completions')`。
 
@@ -823,7 +827,7 @@ zip、tiff 及文件系统操作需后端参与：
 ### 全屏交互
 进入全屏后**仅**键盘操作：`←` 前一张 / `→` 或 `Space` 下一张 / `Esc` / `Enter` 退出全屏 / `1`-`9` 设置 9 档间隔时间（按序映射到 1/2/3/5/10/15/30/60/120 秒）/ `a` 切换自动播放。capture 阶段绑定 keydown（`galleryState.keyHandler = onFullscreenKey`，`document.addEventListener('keydown', ..., true)`）以拦截 app.js 全局 F1-F6。
 
-> 2026-07-19：除 1-9（间隔档位，全屏内仍硬编码不可自定义）外的全屏键经 `web/static/shortcuts.js` 注册中心分发，`onFullscreenKey` 与 `onGalleryKeyDown` 走 `Shortcuts.matchEvent('gallery.<actionID>', e)`：`gallery.prev`/`gallery.next`/`gallery.prev-folder`/`gallery.next-folder`/`gallery.toggle-autoplay`/`gallery.toggle-fullscreen`/`gallery.toggle-tree`/`gallery.exit-fullscreen`/`gallery.toggle-split`/`gallery.toggle-media`/`gallery.switch-focus`。视频激活时 `ArrowLeft/Right/Up/Down/Space/1-9`（媒体控制：倒退 10 秒、上一/下一视频、音量、暂停）保持硬编码，**刻意不纳入自定义**避免与全局 quickslot 1-9（弹出模型选择 modal）跨区域冲突；`Space`/`PageUp`/`PageDown` 仍走通用导览分支作为快捷的同义键。详见 §16.x（快捷键注册中心）与 §23“变更维护清单”。
+> 2026-07-19：除 1-9（间隔档位，全屏内仍硬编码不可自定义）外的全屏键经 `web/static/shortcuts.js` 注册中心分发，`onFullscreenKey` 与 `onGalleryKeyDown` 走 `Shortcuts.matchEvent('gallery.<actionID>', e)`：`gallery.prev`/`gallery.next`/`gallery.prev-folder`/`gallery.next-folder`/`gallery.toggle-autoplay`/`gallery.toggle-fullscreen`/`gallery.toggle-tree`/`gallery.exit-fullscreen`/`gallery.toggle-split`/`gallery.toggle-media`/`gallery.switch-focus`/**`gallery.exclude-hash` (`P`) / `gallery.unexclude-hash` (`Alt+P`) / `gallery.toggle-exclude` (`Ctrl+Alt+P`)**（`matchEvent` 在 `altKey` 按下产生死键字符时按 `e.code === 'Key' + ...` 兜底识别）。视频激活时 `ArrowLeft/Right/Up/Down/Space/1-9`（媒体控制：倒退 10 秒、上一/下一视频、音量、暂停）保持硬编码，**刻意不纳入自定义**避免与全局 quickslot 1-9（弹出模型选择 modal）跨区域冲突；`Space`/`PageUp`/`PageDown` 仍走通用导览分支作为快捷的同义键。详见 §16.x（快捷键注册中心）与 §23“变更维护清单”。
 
 > 2026-07-26：Gallery & Usage UI 矩形无缝化重构与交互优化：(1) Usage 和 Gallery 页面容器为 `gap: 0`、`padding: 0`、圆角 `border-radius: 0`，1px `--glass-border` 分割网格，Usage 页 `repeat(2, minmax(0, 1fr))` 保证分辨率/DPI 切换时 50/50 不破坏并重绘趋势图（SVG 堆叠柱）；(2) 视频 hover 控制栏单行，进度条非全屏时贴底常驻；(3) `gallery-io.js` 调用 File System Access API 发起 `requestPermission` 前先弹居中提示模态框 (`showPermissionNoticeModal`) 说明读写权限用途；(4) 全屏 `.gallery-bottom` 控制栏不再固定 `height: 42px`、为 `height: auto`，动态包裹 104px 缩略图与 42px 操作栏，仅当鼠标滑入底部热区时进度条与操作栏合体 Overlay 浮现。涉及 `web/static/style.css`、`web/static/monitor.js`、`web/playground/static-pg/gallery/gallery-layout.js`、`web/playground/static-pg/gallery/gallery-video.js`、`web/playground/static-pg/gallery/gallery-io.js`。
 
@@ -902,12 +906,22 @@ Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径
 - **原生 picker 不含 .7z/.rar**：`gallery-layout.js:15` `input.accept = 'image/*,video/*,.zip'`——文件选择器无法选中 .7z/.rar。
 - **用户导入 7z/RAR 无前端路径**：`gallery-state.js::isArchiveName` 已识别 `.7z`/`.rar`，但 `gallery-io.js` 的导入分类把一切 `isArchiveName` 命中都归为 `'zipfile'` 走 `/api/gallery/zip` zip-only 上传（`.7z/.rar` 上传会失败或产生垃圾条目）。7z/RAR 的 list/read 能力只在 `/api/archive` API 层可用（`/api/archive/sources` 可登记 7z/RAR 并返回 manifest），前端浏览器导入路径未接外部工具——计划 §8.2 的 "gallery-layout 文件 picker 同步 .7z/.rar" 与 §P3 的 7z/RAR 浏览**未实施**。
 
+### Hash 排除（gallery-exclude.js，2026-11-20）
+
+针对图包尾部广告图提供的轻量确定性哈希屏蔽机制（零 LLM 调用，仅本地指纹精确比对）：
+
+- **存储格式与级联预筛选（`internal/gallery/exclude_store.go` + `zip.go::MatchZipEntries`）**：哈希记录以人类可读 TSV 行 `<sha256>\t<size>\t<crc32_hex>\t# <name> <ts>` 持久化至 `{configDir}/excludehash.txt`（兼容用户手工追加的裸 `<sha256>` 行），经 `fsutil.AtomicWrite` 原子落盘；内存索引 `sizeSet` / `crc32Set` / `sha256Map` 实现三级预筛选（`Size` → ZIP 中央目录 `CRC32` → 仅候选条目解压/读盘计算 `SHA-256`）。
+- **配置与向后兼容（`config.yaml::galleryExclude`）**：`GalleryExcludeConfig{Enabled, Scope, Count}` 默认 `{true, "tail", 10}`；缺失 `galleryExclude` 段的旧 `config.yaml` 零报错加载并默认开启。经 `/api/settings` `GET/PATCH` presence-aware 读写。
+- **包级懒检定与非破坏投影（`gallery-exclude.js`）**：`galleryState.rawItems` 持有完整导入条目，`items` 为展示投影列表。开启图包时 `setActive` 触发 `checkExcludeForDir(dirKey)`，`getPackExcludeSlice` 恒以 `naturalComparePath` 升序切片（`tail`/`head`/`all` 不受 UI 排序方式影响）。排除开启时隐藏匹配图片；关闭时保留显示全部图片并在匹配缩略图上渲染角标、主视图顶部显示 `#gallery-exclude-indicator`。
+- **入口与快捷键**：侧栏顶部 Batch Convert 右侧 `#gallery-exclude-btn`（图标按钮）打开配置弹窗；`shortcuts.js` 注册 `gallery.exclude-hash`（`P` 排除并幂等防重）、`gallery.unexclude-hash`（`Alt+P` 在关闭态移除记录）、`gallery.toggle-exclude`（`Ctrl+Alt+P` 即时开关投影）。
+
 ### 源码锚点
 - `web/playground/static-pg/gallery/gallery.js`（playground 静态资源，由 embed_playground.go 注入）
+- `web/playground/static-pg/gallery/gallery-exclude.js`（Gallery Hash 排除逻辑、`rawItems→items` 投影与设置弹窗；注册于 `feature.go` Gallery `StaticFiles` 及 `web/static/index.html`）
 - `web/playground/static-pg/gallery/gallery-review.js`（AI Review 独立面板模块）
 - `web/playground/static-pg/gallery/gallery-meta.js`（元数据侧边栏：toggle 开关右侧 1/3 侧边栏、媒体左移等比缩放、Prompt 全显 + 其余折叠、客户端解析 PNG tEXt / MP4 元数据、capture 阶段 ESC 关闭）
-- `internal/gallery/{gallery,zip,tiff,review}.go` + 测试
-- `internal/api/gallery/`（7 文件子包：register.go/session_store.go/fs_handlers.go/zip_handlers.go/review_engine.go/review_handlers.go/edit_handlers.go）
+- `internal/gallery/{gallery,zip,tiff,review,exclude_store}.go` + 测试
+- `internal/api/gallery/`（8 文件子包：register.go/session_store.go/fs_handlers.go/zip_handlers.go/exclude_handlers.go/review_engine.go/review_handlers.go/edit_handlers.go）
 - `internal/api/review_presets.go`（ReviewPreset HTTP CRUD）
 - `internal/registry/review_presets.go`（ReviewPreset CRUD 数据层）
 - `internal/api/router.go::Gallery` 路由块与 `pgJSFiles`
@@ -916,6 +930,7 @@ Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径
 ### 变更维护清单
 | 触发变更 | 涉及源码 |
 |---|---|
+| 修改 Gallery Hash 排除（excludehash / 懒检定 / 弹窗 / 快捷键） | `internal/gallery/exclude_store.go`（`ExcludeStore` TSV 解析/写盘/`MightMatch`）+ `zip.go::MatchZipEntries` + `internal/api/gallery/{register,exclude_handlers}.go` + `internal/config/{types,defaults}.go`（`GalleryExcludeConfig`）+ `internal/api/settings/register.go` + `web/playground/static-pg/gallery/{gallery-state,gallery-exclude,gallery-io,gallery-layout,gallery-tree,gallery-fullscreen,gallery-edit-batch,gallery}.js` + `web/static/{shortcuts,i18n,style-gallery,index.html}` + `internal/feature/feature.go` + `web/gallery-exclude.test.js` |
 | 修改 Gallery 后端 ZIP 路径导入 | `internal/api/gallery/zip_handlers.go::galleryZipFromPath`（解析/校验 `{path}` 后从磁盘创建会话）+ `internal/api/gallery/register_test.go`（成功、缺路径和 malformed JSON 回归测试）+ `web/playground/static-pg/gallery/gallery-io.js`（`onPaste`/`loadBackendPaths` 调用契约） |
 | 修改磁盘删除/写回操作 | `web/playground/static-pg/gallery/gallery-fullscreen.js`（`deleteMarkedFromDisk`/`deleteNodeFromDisk`/`deleteCurrentVideo`）、`internal/api/gallery/fs_handlers.go`（`galleryDeleteFs`/`galleryZipWriteback`）+ `zip_handlers.go`（`galleryZipWriteback`）、`internal/fsutil/clipboard_*.go` |
 | 修改 zip 解压格式或上传限制 | `internal/gallery/zip.go`、`internal/api/gallery/zip_handlers.go::galleryListZip`（500MB 上限） |

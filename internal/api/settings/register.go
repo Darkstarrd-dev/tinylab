@@ -85,7 +85,8 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			"rarPath":      cfg.Archive.RarPath,
 			"tempDir":      cfg.Archive.TempDir,
 		},
-		"assistant": cfg.Assistant,
+		"assistant":      cfg.Assistant,
+		"galleryExclude": cfg.GalleryExclude,
 	})
 }
 
@@ -125,14 +126,15 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			APIKey     *string `json:"apiKey"`
 			MaxResults *int    `json:"maxResults"`
 		} `json:"anySearch"`
-		Theme        *config.ThemeConfig `json:"theme"`
-		ImageSaveDir *string             `json:"imageSaveDir"`
-		DocDir       *string             `json:"docDir"`
-		GamesDir     *string             `json:"gamesDir"`
-		MusicDir     *string             `json:"musicDir"`
-		StoryDir     *string             `json:"storyDir"`
-		Archive      *archivePatch       `json:"archive"`
-		Assistant    *assistantPatch     `json:"assistant"`
+		Theme          *config.ThemeConfig  `json:"theme"`
+		ImageSaveDir   *string              `json:"imageSaveDir"`
+		DocDir         *string              `json:"docDir"`
+		GamesDir       *string              `json:"gamesDir"`
+		MusicDir       *string              `json:"musicDir"`
+		StoryDir       *string              `json:"storyDir"`
+		Archive        *archivePatch        `json:"archive"`
+		Assistant      *assistantPatch      `json:"assistant"`
+		GalleryExclude *galleryExcludePatch `json:"galleryExclude"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		apibase.WriteAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -350,6 +352,13 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if updates.Assistant != nil {
 		applyAssistantUpdates(&cfg, updates.Assistant)
+	}
+	if updates.GalleryExclude != nil {
+		if err := validateGalleryExcludePatch(updates.GalleryExclude); err != nil {
+			apibase.WriteAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		applyGalleryExcludeUpdates(&cfg, updates.GalleryExclude)
 	}
 	if updates.ImageSaveDir != nil {
 		cfg.ImageSaveDir = *updates.ImageSaveDir
@@ -599,6 +608,50 @@ func applyArchiveUpdates(cfg *config.Config, patch *archivePatch) {
 	if patch.TempDir != nil {
 		cfg.Archive.TempDir = *patch.TempDir
 	}
+}
+
+// galleryExcludePatch carries the presence-aware Gallery exclude settings
+// accepted by PATCH /api/settings so toggling enabled never wipes scope/count.
+type galleryExcludePatch struct {
+	Enabled *bool   `json:"enabled"`
+	Scope   *string `json:"scope"`
+	Count   *int    `json:"count"`
+}
+
+func validateGalleryExcludePatch(patch *galleryExcludePatch) error {
+	if patch == nil {
+		return nil
+	}
+	if patch.Scope != nil {
+		s := strings.ToLower(strings.TrimSpace(*patch.Scope))
+		switch s {
+		case config.GalleryExcludeScopeAll, config.GalleryExcludeScopeHead, config.GalleryExcludeScopeTail:
+		default:
+			return fmt.Errorf("invalid galleryExclude.scope: %q (must be all, head, or tail)", *patch.Scope)
+		}
+	}
+	if patch.Count != nil {
+		if *patch.Count < 1 || *patch.Count > 100000 {
+			return fmt.Errorf("invalid galleryExclude.count: %d (must be between 1 and 100000)", *patch.Count)
+		}
+	}
+	return nil
+}
+
+func applyGalleryExcludeUpdates(cfg *config.Config, patch *galleryExcludePatch) {
+	if patch == nil {
+		return
+	}
+	if patch.Enabled != nil {
+		cfg.GalleryExclude.Enabled = *patch.Enabled
+	}
+	if patch.Scope != nil {
+		cfg.GalleryExclude.Scope = strings.ToLower(strings.TrimSpace(*patch.Scope))
+	}
+	if patch.Count != nil {
+		cfg.GalleryExclude.Count = *patch.Count
+	}
+	config.FinalizeGalleryExcludeConfig(&cfg.GalleryExclude)
 }
 
 // assistantPatch is a presence-aware partial update for AssistantConfig:

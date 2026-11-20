@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/tinylab/tinylab/internal/api/apibase"
 	"github.com/tinylab/tinylab/internal/archive"
+	gallerylib "github.com/tinylab/tinylab/internal/gallery"
 	"github.com/tinylab/tinylab/internal/mediaedit"
 	"github.com/tinylab/tinylab/internal/owner"
 	"github.com/tinylab/tinylab/internal/pathgrant"
@@ -78,6 +79,8 @@ type Handler struct {
 	// when the frontend never asks (F-27).
 	tempFiles *tempRegistry
 
+	excludeStore *gallerylib.ExcludeStore
+
 	assetsOnce sync.Once
 	assets     *archive.TempStore
 	assetsErr  error
@@ -85,14 +88,30 @@ type Handler struct {
 
 // NewHandler creates a new gallery Handler with per-instance state.
 func NewHandler(d *apibase.Deps) *Handler {
+	var proxy proxyCaller
+	var excludePath string
+	if d != nil {
+		proxy = d.ProxyHandler
+		if d.ConfigPath != "" {
+			excludePath = filepath.Join(filepath.Dir(d.ConfigPath), "excludehash.txt")
+		}
+	}
+	excludeStore, err := gallerylib.NewExcludeStore(excludePath)
+	if err != nil {
+		if d != nil && d.Logger != nil {
+			d.Logger.Warn("gallery: failed to load exclude hash file %s: %v (using memory-only store)", excludePath, err)
+		}
+		excludeStore, _ = gallerylib.NewExcludeStore("")
+	}
 	return &Handler{
-		d:         d,
-		sessions:  newGallerySessionStore(),
-		media:     mediaedit.NewManager(),
-		proxy:     d.ProxyHandler,
-		grants:    pathgrant.NewStore(0),
-		uploadSem: make(chan struct{}, galleryMaxConcurrentUploads),
-		tempFiles: newTempRegistry(),
+		d:            d,
+		sessions:     newGallerySessionStore(),
+		media:        mediaedit.NewManager(),
+		proxy:        proxy,
+		grants:       pathgrant.NewStore(0),
+		uploadSem:    make(chan struct{}, galleryMaxConcurrentUploads),
+		tempFiles:    newTempRegistry(),
+		excludeStore: excludeStore,
 	}
 }
 
@@ -154,6 +173,11 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/edit/zip-writeback", h.galleryEditZipWriteback)
 	r.Post("/paste-paths", h.galleryPastePaths)
 	r.Post("/clear", h.galleryClear)
+	// Exclude-hash endpoints.
+	r.Get("/exclude-hashes", h.galleryGetExcludeHashes)
+	r.Post("/exclude-hashes/add", h.galleryAddExcludeHash)
+	r.Post("/exclude-hashes/remove", h.galleryRemoveExcludeHash)
+	r.Post("/exclude-hashes/check", h.galleryCheckExcludeHashes)
 }
 
 func (h *Handler) galleryClear(w http.ResponseWriter, r *http.Request) {

@@ -242,6 +242,24 @@ function onFullscreenKey(e) {
 
   var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
 
+  if (Shortcuts.matchEvent('gallery.toggle-exclude', e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (!e.repeat && typeof toggleGalleryExclude === 'function') toggleGalleryExclude();
+    return;
+  }
+  if (!isVidActive) {
+    if (Shortcuts.matchEvent('gallery.unexclude-hash', e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat && typeof unexcludeCurrentImage === 'function') unexcludeCurrentImage();
+      return;
+    }
+    if (Shortcuts.matchEvent('gallery.exclude-hash', e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat && typeof excludeCurrentImage === 'function') excludeCurrentImage();
+      return;
+    }
+  }
+
   if (isVidActive) {
     var vidEl = document.getElementById('gallery-main-video');
     var curItem = galleryState.videoItems[galleryState.videoIndex];
@@ -419,6 +437,24 @@ function onGalleryKeyDown(e) {
   }
 
   var isVidActive = (galleryState.viewMode === 'split') ? (galleryState.focus === 'video') : (galleryState.mediaType === 'video');
+
+  if (Shortcuts.matchEvent('gallery.toggle-exclude', e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (!e.repeat && typeof toggleGalleryExclude === 'function') toggleGalleryExclude();
+    return;
+  }
+  if (!isVidActive) {
+    if (Shortcuts.matchEvent('gallery.unexclude-hash', e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat && typeof unexcludeCurrentImage === 'function') unexcludeCurrentImage();
+      return;
+    }
+    if (Shortcuts.matchEvent('gallery.exclude-hash', e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat && typeof excludeCurrentImage === 'function') excludeCurrentImage();
+      return;
+    }
+  }
 
   // AI Review 模式下的方向键/空格键重定向
   var isReviewNav = galleryState.reviewState.active &&
@@ -888,6 +924,31 @@ function deleteCurrentVideo() {
   }
 }
 
+function _rawNodePredicate(curDir, item, nodeType, packId, rootHandle) {
+  if (nodeType === 'zip-root') {
+    return function(it) { return it && it.kind === 'zip' && _packId(it) === packId; };
+  }
+  if (nodeType === 'zip-subdir') {
+    return function(it) { return it && it.kind === 'zip' && _packId(it) === packId && (it.path || '').startsWith(curDir + '/'); };
+  }
+  if (nodeType === 'disk-root') {
+    return function(it) {
+      return it && ((it.kind === 'fs' && it.rootDirHandle === rootHandle) ||
+        (item && item.kind === 'backend' && item.grantId && it.kind === 'backend' && it.grantId === item.grantId));
+    };
+  }
+  if (nodeType === 'disk-subdir') {
+    return function(it) {
+      if (!it) return false;
+      var inDir = (getDirPath(it.path) === curDir || (it.path || '').startsWith(curDir + '/'));
+      if (!inDir) return false;
+      return (it.kind === 'fs' && it.rootDirHandle === rootHandle) ||
+        (item && item.kind === 'backend' && item.grantId && it.kind === 'backend' && it.grantId === item.grantId);
+    };
+  }
+  return null;
+}
+
 // Shift+Del: node-level delete — delete the parent directory node of the
 // current image, or the current video itself.
 window.deleteZipPrompt = function() {
@@ -942,6 +1003,8 @@ window.deleteZipPrompt = function() {
   setTimeout(function() { var cb = document.getElementById('zip-del-cancel'); if (cb) cb.focus(); }, 30);
   document.getElementById('zip-del-list').onclick = function() {
     pgCloseModal();
+    var pred = _rawNodePredicate(curDir, item, nodeType, packId, rootHandle);
+    if (pred && typeof syncRawItemsRemoveByPredicate === 'function') syncRawItemsRemoveByPredicate(pred);
     // Remove this node's items from the list
     removeItemsByFilter(function(it) { return nodeItems.indexOf(it) >= 0; });
   };
@@ -1011,6 +1074,17 @@ window.showTreeSelDeletePrompt = function() {
 
   document.getElementById('zip-del-list').onclick = function() {
     pgCloseModal();
+    if (typeof syncRawItemsRemoveByPredicate === 'function') {
+      syncRawItemsRemoveByPredicate(function(it) {
+        if (!it) return false;
+        var d = getDirPath(it.path);
+        for (var ni = 0; ni < perNode.length; ni++) {
+          var nd = perNode[ni].dir;
+          if (nd === '' || d === nd || d.indexOf(nd + '/') === 0) return true;
+        }
+        return false;
+      });
+    }
     removeItemsByFilter(function(it) { return all.indexOf(it) >= 0; });
     clearTreeSelection();
   };
@@ -1168,6 +1242,10 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
     errors.push(e.message || String(e));
   }
   // Remove this node's items from the list (regardless of disk success)
+  if (nodeType !== 'zip-subdir') {
+    var pred = _rawNodePredicate(curDir, item, nodeType, packId, rootHandle);
+    if (pred && typeof syncRawItemsRemoveByPredicate === 'function') syncRawItemsRemoveByPredicate(pred);
+  }
   removeItemsByFilter(function(it) { return nodeItems.indexOf(it) >= 0; });
   if (errors.length) {
     showMsg(T('gfDelPartialListOnly'));

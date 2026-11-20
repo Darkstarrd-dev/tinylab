@@ -202,6 +202,7 @@ function buildPanelHTML(type, isSplit) {
       '<div class="gallery-empty-hint">' + escapeHtml(T('Drop/Paste/Open') || 'Drop / Paste / Open') + '</div>' +
     '</div>' +
     '<div class="gallery-delete-overlay" id="gallery-delete-overlay"></div>' +
+    '<div class="gallery-exclude-indicator" id="gallery-exclude-indicator"></div>' +
     '<div class="gallery-meta-sidebar" id="gallery-meta-sidebar"></div>'
 
   var treeId = isVid ? 'gallery-video-tree-panel' : 'gallery-tree-panel';

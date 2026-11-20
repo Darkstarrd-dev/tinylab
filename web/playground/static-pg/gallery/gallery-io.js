@@ -108,10 +108,13 @@ function rehydrateZipSession(item) {
         var aData = await aRes.json();
         newId = aData.sourceId;
         if (newId && oldId) {
-          // Migrate all items of the expired pack to the fresh source.
-          for (var a = 0; a < galleryState.items.length; a++) {
-            var ait = galleryState.items[a];
-            if (ait && ait.kind === 'zip' && ait.sourceId === oldId) ait.sourceId = newId;
+          // Migrate all items of the expired pack to the fresh source (both raw and visible).
+          var srcLists = [galleryState.rawItems || [], galleryState.items || []];
+          for (var sl = 0; sl < srcLists.length; sl++) {
+            for (var a = 0; a < srcLists[sl].length; a++) {
+              var ait = srcLists[sl][a];
+              if (ait && ait.kind === 'zip' && ait.sourceId === oldId) ait.sourceId = newId;
+            }
           }
         }
         return newId;
@@ -146,10 +149,13 @@ function rehydrateZipSession(item) {
         newId = zd.sessionId;
       }
       if (newId && oldId) {
-        // Migrate all items of the evicted pack to the fresh session.
-        for (var i = 0; i < galleryState.items.length; i++) {
-          var it = galleryState.items[i];
-          if (it && it.kind === 'zip' && it.sessionId === oldId) it.sessionId = newId;
+        // Migrate all items of the evicted pack to the fresh session (both raw and visible).
+        var sessLists = [galleryState.rawItems || [], galleryState.items || []];
+        for (var sl2 = 0; sl2 < sessLists.length; sl2++) {
+          for (var i = 0; i < sessLists[sl2].length; i++) {
+            var it = sessLists[sl2][i];
+            if (it && it.kind === 'zip' && it.sessionId === oldId) it.sessionId = newId;
+          }
         }
       }
       return newId;
@@ -387,11 +393,23 @@ async function loadNextZipChunk() {
 
 function appendNewItems(newItems) {
   sortItems(newItems);
-  galleryState.items = galleryState.items.concat(newItems);
+  if (typeof syncRawItemsAppend === 'function') {
+    galleryState.items = syncRawItemsAppend(newItems);
+  } else {
+    galleryState.items = galleryState.items.concat(newItems);
+  }
   updateDirStructure();
   renderThumbnails();
   if (galleryState.index >= 0 && galleryState.index < galleryState.items.length) {
     renderActive(galleryState.index);
+  }
+  if (galleryState.curDirPath && typeof checkExcludeForDir === 'function') {
+    for (var ni = 0; ni < newItems.length; ni++) {
+      if (getDirPath(newItems[ni].path) === galleryState.curDirPath) {
+        checkExcludeForDir(galleryState.curDirPath);
+        break;
+      }
+    }
   }
 }
 
@@ -744,6 +762,7 @@ async function addArchive(file, out, zipFileHandle) {
 function finalizeItems(out) {
   clearObjectURLs();
   if (!out.length) {
+    if (typeof syncRawItemsClear === 'function') syncRawItemsClear();
     galleryState.items = [];
     galleryState.index = -1;
     updateDirStructure();
@@ -752,7 +771,11 @@ function finalizeItems(out) {
     return;
   }
   sortItems(out);
-  galleryState.items = out;
+  if (typeof syncRawItemsReplace === 'function') {
+    galleryState.items = syncRawItemsReplace(out);
+  } else {
+    galleryState.items = out;
+  }
   galleryState.index = -1;
   updateDirStructure();
   renderThumbnails();
@@ -762,7 +785,11 @@ function finalizeItems(out) {
 function appendItems(out) {
   if (!out.length) return;
   sortItems(out);
-  galleryState.items = galleryState.items.concat(out);
+  if (typeof syncRawItemsAppend === 'function') {
+    galleryState.items = syncRawItemsAppend(out);
+  } else {
+    galleryState.items = galleryState.items.concat(out);
+  }
   updateDirStructure();
   renderThumbnails();
   if (galleryState.index >= 0 && galleryState.index < galleryState.items.length) {

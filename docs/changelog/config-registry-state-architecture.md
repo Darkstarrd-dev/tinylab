@@ -2,6 +2,12 @@
 
 > 本文件存放 `docs/config-registry-state-architecture.md` 顶部「最后核对」行的历史流水与变更过程叙述（最新在上）。正文只保留当前态事实。
 
+## 2026-11-20 · GalleryExcludeConfig（Gallery Hash 排除配置与向后兼容默认）
+
+**需求：** 为 Gallery Hash 排除功能新增持久化配置 `galleryExclude`（`enabled` 开关、`scope`: `"tail"|"head"|"all"`、`count`: 扫描数量），要求老版本不含该段的 `config.yaml` 启动零报错并默认启用（`enabled: true, scope: "tail", count: 10`），Settings 支持只开关或部分字段 PATCH。
+
+**配置实现：** `internal/config/types.go` 新增 `GalleryExcludeConfig`（`yaml/json:"galleryExclude,omitempty"`）与 `Config.GalleryExclude`；`internal/config/defaults.go` 在 `DefaultConfig()` 与 `FinalizeGalleryExcludeConfig` 设为 `Enabled: true, Scope: "tail", Count: 10`；`finalizeConfig(cfg, raw)` 通过 `!bytes.Contains(raw, []byte("galleryExclude"))` 区分「老配置缺省该段 → 默认 Enabled=true」与「用户显式 `enabled: false`」，随后统一归一化 `Scope`/`Count`（`count` 钳位 1..100000）。Settings API（`internal/api/settings/register.go`）在 `getSettings` 返回 `galleryExclude` 并在 `updateSettings` 使用全指针 presence-aware `galleryExcludePatch`（校验 `scope` ∈ `all/head/tail`、`count` ∈ `[1, 100000]`，无效值返回 400）。哈希数据本身不进 `config.yaml` 或 `state.yaml`，而是存入独立可读 TSV `{configDir}/excludehash.txt`（`internal/gallery/exclude_store.go`）。
+
 ## 2026-10-08 · Systray 快捷键分区（OS 级全局热键，配置链路零 schema 变更）
 
 **需求：** Settings → Shortcut Settings 弹窗新增 Systray 分区，两个 **系统全局**（OS 级，非 App 内）热键：Open Browser = Ctrl+Shift+T、Open Console = Ctrl+Alt+Shift+T，功能对应托盘菜单的两个选项，保存后即时生效。

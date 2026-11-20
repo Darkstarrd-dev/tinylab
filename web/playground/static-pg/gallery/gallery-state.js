@@ -266,6 +266,7 @@ function showMsg(text, targetPaneId) {
 
 // ---------- state ------------------------------------------------
 var galleryState = {
+  rawItems: [],
   items: [],
   index: -1,
   videoItems: [],
@@ -325,6 +326,17 @@ var galleryState = {
   // Image tree multi-selection (memory only): nodes = selected dir keys,
   // anchor = Ctrl+click origin for Shift+click ranges. Used for batch delete.
   treeSel: { nodes: [], anchor: null },
+  // Hash-based image exclusion state (persisted config + excludehash.txt summary).
+  exclude: {
+    loaded: false,
+    config: { enabled: true, scope: 'tail', count: 10 },
+    count: 0,
+    sizes: {},
+    hasUnsized: false,
+    version: 0,
+    checkedPacks: {},
+    inFlightAction: false
+  },
   // AI Review 状态
   reviewState: {
     active: false,           // 是否正在审核或已审核完成
@@ -395,6 +407,7 @@ var GALLERY_ICONS = {
   batchConvert: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
   aiReview: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   sort: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>',
+  excludeHash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>',
   metaInfo: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
 };
 
@@ -412,7 +425,7 @@ function clearObjectURLs() {
     galleryState.objectURLs.length = 0;
   }
   // Revoke and null out all item-level blob URLs to prevent stale references
-  var allItems = (galleryState.items || []).concat(galleryState.videoItems || []);
+  var allItems = (galleryState.rawItems || []).concat(galleryState.items || [], galleryState.videoItems || []);
   for (var i = 0; i < allItems.length; i++) {
     var item = allItems[i];
     if (item) {

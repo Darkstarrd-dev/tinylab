@@ -12,6 +12,7 @@
 window.renderGallery = function(container) {
   try {
     renderInitial(container);
+    if (typeof loadExcludeHashState === 'function') loadExcludeHashState();
 
     // Restore tree panel UI state if tree was open
     var panel = document.getElementById('gallery-tree-panel');

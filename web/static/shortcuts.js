@@ -58,7 +58,10 @@ var SHORTCUT_PRESETS = {
     'gallery.toggle-fullscreen':{ key: 'f', label: 'Toggle fullscreen' },
     'gallery.toggle-tree':      { key: 't', label: 'Toggle tree panel' },
     'gallery.clear-tree':       { key: 'c', label: 'Clear focused tree (tree open only)' },
-    'gallery.exit-fullscreen':  { key: 'Escape', label: 'Exit fullscreen (Enter also works)' }
+    'gallery.exit-fullscreen':  { key: 'Escape', label: 'Exit fullscreen (Enter also works)' },
+    'gallery.exclude-hash':     { key: 'p', label: 'Exclude image by hash' },
+    'gallery.unexclude-hash':   { key: 'p', alt: true, label: 'Remove image from exclude hash' },
+    'gallery.toggle-exclude':   { key: 'p', ctrlOrCmd: true, alt: true, label: 'Toggle exclude hash filter' }
   },
   // Systray: OS-level GLOBAL hotkeys (Windows RegisterHotKey via
   // internal/hotkey), not in-app keydown actions. They fire even when TinyLab
@@ -173,7 +176,9 @@ var Shortcuts = {
     // Single-letter/F-key/named keys all compare case-insensitively against
     // event.key when the binding has no shift modifier requirement.
     if (b.key.length === 1 && /[a-z0-9]/i.test(b.key)) {
-      return e.key.toLowerCase() === b.key.toLowerCase() || e.key === b.key;
+      if (e.key.toLowerCase() === b.key.toLowerCase() || e.key === b.key) return true;
+      if (e.altKey && /[a-z]/i.test(b.key) && e.code === 'Key' + b.key.toUpperCase()) return true;
+      return false;
     }
     // Arrow keys / 'Tab' / 'Escape' / 'Enter' / 'Space' etc. compare verbatim
     // but tolerate 'Spacebar' (legacy) for ' '.

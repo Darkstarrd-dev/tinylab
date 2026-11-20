@@ -545,6 +545,17 @@ function _refreshTreeBatchOutputs() {
         } else {
           galleryState.items.push(newItem);
         }
+        if (galleryState.rawItems) {
+          var rawIdx = galleryState.rawItems.indexOf(j.item);
+          if (rawIdx >= 0) {
+            galleryState.rawItems.splice(rawIdx + 1, 0, newItem);
+          } else {
+            galleryState.rawItems.push(newItem);
+          }
+          if (galleryState.exclude && galleryState.exclude.checkedPacks && typeof getDirPath === 'function') {
+            delete galleryState.exclude.checkedPacks[getDirPath(newItem.path)];
+          }
+        }
       }
     }
   }

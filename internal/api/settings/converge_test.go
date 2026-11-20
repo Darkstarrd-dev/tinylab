@@ -32,6 +32,7 @@ func buildConvergeDeps(t *testing.T, cfg *config.Config) *apibase.Deps {
 		Logger:        logger,
 		ProxyHandler:  proxyHandler,
 		Selector:      sel,
+		DebugMode:     &atomic.Bool{},
 		QuickSlotOnly: &atomic.Bool{},
 		LogRequests:   &atomic.Bool{},
 	}

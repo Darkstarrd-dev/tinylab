@@ -66,6 +66,31 @@ func DefaultConfig() *Config {
 			ConcurrentFragments: 4,
 			MaxConcurrent:       3,
 		},
+		GalleryExclude: GalleryExcludeConfig{
+			Enabled: true,
+			Scope:   GalleryExcludeScopeTail,
+			Count:   DefaultGalleryExcludeCount,
+		},
+	}
+}
+
+// FinalizeGalleryExcludeConfig normalizes GalleryExcludeConfig fields so partial
+// or hand-edited configs always retain valid scope and positive bounded count.
+func FinalizeGalleryExcludeConfig(g *GalleryExcludeConfig) {
+	if g == nil {
+		return
+	}
+	scope := strings.ToLower(strings.TrimSpace(g.Scope))
+	switch scope {
+	case GalleryExcludeScopeAll, GalleryExcludeScopeHead, GalleryExcludeScopeTail:
+		g.Scope = scope
+	default:
+		g.Scope = GalleryExcludeScopeTail
+	}
+	if g.Count <= 0 {
+		g.Count = DefaultGalleryExcludeCount
+	} else if g.Count > 100000 {
+		g.Count = 100000
 	}
 }
 
@@ -304,5 +329,13 @@ func finalizeConfig(cfg *Config, raw []byte) *Config {
 	if cfg.Trace.MaxDiskMB == 0 {
 		cfg.Trace.MaxDiskMB = 500
 	}
+	// GalleryExclude defaults. If the `galleryExclude:` section is absent from
+	// an older config.yaml, default Enabled to true (empty excludehash.txt still
+	// short-circuits with zero effect). When present, preserve explicit enabled: false.
+	hasGalleryExcludeSection := bytes.Contains(raw, []byte("\ngalleryExclude:")) || bytes.HasPrefix(raw, []byte("galleryExclude:"))
+	if !hasGalleryExcludeSection {
+		cfg.GalleryExclude.Enabled = true
+	}
+	FinalizeGalleryExcludeConfig(&cfg.GalleryExclude)
 	return cfg
 }
