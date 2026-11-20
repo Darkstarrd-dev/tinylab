@@ -1,3 +1,9 @@
+## 2026-11-20 — Gallery Batch Convert 批量调度 429 失效修复
+
+- **触发**：用户报障 Gallery 中 Batch Convert 批量处理大文件夹时大部分失败、仅部分成功，成功数量随待处理总数量呈线性比例，小于一定数量（$\le 4$）则全成功。
+- **根因**：后端 `internal/mediaedit/manager.go` 限制 `maxConcurrentJobs = 4`（超限即返 HTTP 429）；前端 `gallery-edit-batch.js` 的 `runBatchBatch(start + 4)` 未等待 `_pollBatchJob` 完成只等 `/edit/start` 返回 `jobId`（~1–5ms），瞬间发起后续批次导致撞穿 429。另存在 `_pollBatchJob` 遗漏 `j.done = true`、顶部 `runWithConcurrency` 覆盖全局函数、`runJob` 释放 `sem` 晚于 `job.mu.Unlock()`、缺失 `_batchSeq` 取消/切页保护四处问题。
+- **落点**：`web/playground/static-pg/gallery/gallery-edit-batch.js`（移除全局 `runWithConcurrency`，改用 `_BATCH_CONCURRENCY = 4` Worker Pool 端到端等待 + `_startBatchItemWithRetry` 429 退避 + `_waitBatchJob` 递增轮询与 `j.done = true` + `_batchSeq` 令牌）、`gallery-edit-operations.js`（`_cancelJob` 调 `_cancelBatchScheduler`）、`gallery-edit.js`（`_geResumeActive` / `cleanupMediaEditor` 生命周期对齐）、`internal/mediaedit/manager.go`（`runJob` `sync.Once` + LIFO 先释放 `sem` 再解锁 `job.mu`）、`internal/mediaedit/manager_semaphore_test.go`、`web/gallery-edit-contract.test.js`、`docs/playground-architecture.md`（正文 + changelog）与 `PROJECT_MAP.md`（顶部核对行 + §10.9a + §24）。
+
 ## 2026-10-30 — R11 codearts 模型表校准（补 `deepseek-v4.1-flash-1017`）
 
 - **触发**：用户报障 codearts 缺 `deepseek-v4.1-flash-1017`（上游有）。

@@ -169,6 +169,66 @@ func TestManagerConcurrencyLimit_CancelImmediatelyReleasesSlot(t *testing.T) {
 	}
 }
 
+func fastFakeFFmpeg(t *testing.T) string {
+	t.Helper()
+	le := "\n"
+	name := "fast-ffmpeg"
+	var content string
+	if runtime.GOOS == "windows" {
+		le = "\r\n"
+		name += ".bat"
+		content = "@echo off" + le + "exit /b 1" + le
+	} else {
+		content = "#!/bin/sh" + le + "exit 1" + le
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		t.Fatalf("write fast fake ffmpeg: %v", err)
+	}
+	return path
+}
+
+// TestManagerConcurrencyLimit_SlotReleasedBeforeTerminalVisible verifies that
+// once Manager.Get reports a terminal job status, the semaphore slot has
+// already been returned (no microsecond race where the next Start sees 429).
+func TestManagerConcurrencyLimit_SlotReleasedBeforeTerminalVisible(t *testing.T) {
+	m := NewManager()
+	ffmpegPath := fastFakeFFmpeg(t)
+	req := semaphoreTestRequest(t)
+
+	for round := range 10 {
+		ids := make([]string, 0, maxConcurrentJobs)
+		for i := range maxConcurrentJobs {
+			job, err := m.Start(ffmpegPath, "", req)
+			if err != nil {
+				t.Fatalf("round %d job %d Start failed: %v (sem=%d)", round, i, err, len(m.sem))
+			}
+			ids = append(ids, job.ID)
+		}
+
+		deadline := time.Now().Add(10 * time.Second)
+		for _, id := range ids {
+			for {
+				j, ok := m.Get(id)
+				if !ok {
+					t.Fatalf("round %d job %s disappeared", round, id)
+				}
+				if j.Status == StatusCompleted || j.Status == StatusError || j.Status == StatusCancelled {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("round %d job %s did not finish in time (status=%s)", round, id, j.Status)
+				}
+				runtime.Gosched()
+			}
+		}
+
+		if got := len(m.sem); got != 0 {
+			t.Fatalf("round %d: semaphore occupancy = %d immediately after terminal Get(), want 0", round, got)
+		}
+	}
+}
+
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(d)

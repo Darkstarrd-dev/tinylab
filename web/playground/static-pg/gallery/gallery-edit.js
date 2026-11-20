@@ -1760,10 +1760,9 @@ function _geResumeActive() {
     if (cp) cp.style.display = 'flex';
     var startBtn = document.getElementById('ge-start-btn');
     if (startBtn) startBtn.disabled = true;
-    for (var i = 0; i < _batchJobs.length; i++) {
-      var j = _batchJobs[i];
-      if (j && !j.done && j.jobId) _pollBatchJob(i, j.jobId);
-    }
+    var treeStartBtn = document.getElementById('ge-treebatch-start-btn');
+    if (treeStartBtn) treeStartBtn.disabled = true;
+    if (typeof _updateBatchProgressUI === 'function') _updateBatchProgressUI();
   }
   _geWatchConsoleHeight();
   _geSyncConsoleHeight();
@@ -1874,7 +1873,9 @@ window.openMediaEditor = async function(item, mediaType) {
 window.cleanupMediaEditor = function() {
   _stopPolling();
   _editJobId = null;
-  _geBatchPollingEnabled = false;
+  if (!_geActiveJob || _geActiveJob.kind !== 'batch') {
+    _geBatchPollingEnabled = false;
+  }
   if (_geConsoleRO) { try { _geConsoleRO.disconnect(); } catch (e) {} _geConsoleRO = null; }
 };
 

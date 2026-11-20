@@ -1,5 +1,3 @@
-/* P1-04a concurrency limiter: cap batch to 6 concurrent ops to avoid 429 */
-function runWithConcurrency(tasks, cap, fn){ cap=Math.max(1, cap||6); return new Promise(function(resolve,reject){ var i=0, active=0, results=[], failed=null; function next(){ if(failed) return; while(active<cap && i<tasks.length){ (function(idx){ var t=tasks[idx]; active++; Promise.resolve(fn(t, idx)).then(function(r){results[idx]=r; active--; if(i>=tasks.length && active===0) resolve(results); else next();}, function(e){ failed=e; reject(e);}); })(i++); } if(i>=tasks.length && active===0) resolve(results); } next(); }); }
 // gallery-edit-batch.js — batch convert/compress flow, archive mode, zip-outputs/zip-writeback integration.
 // Split from gallery-edit.js (refactor Fix 5).
 // Backend: internal/api/gallery/edit_handlers.go (zip-outputs/zip-writeback).
@@ -194,6 +192,44 @@ var _batchCompress = false;
 // digits, renameName }) so _onBatchComplete (which runs async after all jobs
 // finish and the controls may have been reset) can still honour them.
 var _batchCfg = null;
+var _BATCH_CONCURRENCY = 4;
+var _batchPollDelays = [100, 150, 300, 600];
+var _batchRetryDelays = [150, 300, 600, 1000];
+var _batchMax429Retries = 40;
+var _batchSeq = 0;
+var _batchTimers = [];
+
+function _clearBatchTimers() {
+  for (var i = 0; i < _batchTimers.length; i++) {
+    clearTimeout(_batchTimers[i].tid);
+    try { _batchTimers[i].resolve(); } catch (e) {}
+  }
+  _batchTimers = [];
+}
+
+function _cancelBatchScheduler() {
+  _batchSeq++;
+  _clearBatchTimers();
+}
+
+function _batchDelay(ms, seq) {
+  if (seq !== _batchSeq) return Promise.resolve();
+  return new Promise(function(resolve) {
+    var entry = { tid: null, resolve: resolve };
+    entry.tid = setTimeout(function() {
+      var idx = _batchTimers.indexOf(entry);
+      if (idx >= 0) _batchTimers.splice(idx, 1);
+      resolve();
+    }, ms);
+    _batchTimers.push(entry);
+  });
+}
+
+function _updateBatchProgressUI() {
+  _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
+  var bar = document.getElementById('ge-progress-bar');
+  if (bar) bar.value = _batchTotal > 0 ? Math.round((_batchDone / _batchTotal) * 100) : 0;
+}
 
 // _resolveBatchInput resolves the server-side input descriptor for a single
 // batch item, mirroring the per-item resolution triggerMediaEditor() already
@@ -236,6 +272,105 @@ function _resolveBatchInput(it) {
   return Promise.reject(new Error('no disk path'));
 }
 
+function _startBatchItemWithRetry(seq, body) {
+  function send(attempt) {
+    if (seq !== _batchSeq) return Promise.resolve({ cancelled: true });
+    return fetch('/api/gallery/edit/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (seq !== _batchSeq) {
+          if (r.ok && d && d.jobId) {
+            fetch('/api/gallery/edit/cancel/' + encodeURIComponent(d.jobId), { method: 'POST' }).catch(function() {});
+          }
+          return { cancelled: true };
+        }
+        if (r.status === 429 && attempt < _batchMax429Retries) {
+          var delay = _batchRetryDelays[Math.min(attempt, _batchRetryDelays.length - 1)];
+          return _batchDelay(delay, seq).then(function() {
+            return send(attempt + 1);
+          });
+        }
+        if (!r.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  return send(0);
+}
+
+function _waitBatchJob(seq, idx, jobId) {
+  return new Promise(function(resolve) {
+    function poll(attempt) {
+      if (seq !== _batchSeq) { resolve(); return; }
+      var j0 = _batchJobs[idx];
+      if (!j0 || j0.done) { resolve(); return; }
+      fetch('/api/gallery/edit/status/' + encodeURIComponent(jobId))
+        .then(function(r) {
+          return r.json().catch(function() { return {}; }).then(function(data) {
+            return { ok: r.ok, status: r.status, data: data };
+          });
+        })
+        .then(function(res) {
+          if (seq !== _batchSeq) { resolve(); return; }
+          var j = _batchJobs[idx];
+          if (!j || j.done) { resolve(); return; }
+          var data = res.data || {};
+          if (!res.ok) {
+            j.done = true;
+            j.error = data.error || ('HTTP ' + res.status);
+            _batchDone++;
+            _updateBatchProgressUI();
+            resolve();
+            return;
+          }
+          if (data.command || data.logTail) {
+            var block = _geConsoleBlock(jobId, (j.item && j.item.name) || '');
+            if (block) {
+              var cmdEl = block.querySelector('.ge-console-block-cmd');
+              if (cmdEl && data.command) cmdEl.textContent = '$ ' + data.command;
+              var logEl = block.querySelector('.ge-console-block-log');
+              if (logEl && data.logTail) { logEl.textContent = data.logTail; logEl.scrollTop = logEl.scrollHeight; }
+            }
+          }
+          if (data.status === 'running') {
+            var delay = _batchPollDelays[Math.min(attempt, _batchPollDelays.length - 1)];
+            _batchDelay(delay, seq).then(function() {
+              poll(attempt + 1);
+            });
+            return;
+          }
+          j.done = true;
+          if (data.status === 'completed') {
+            j.overwritten = !!data.overwritten;
+            j.assetId = data.assetId;
+            j.outputName = data.outputName;
+          } else {
+            j.error = data.error || data.status || 'failed';
+          }
+          _batchDone++;
+          _updateBatchProgressUI();
+          resolve();
+        })
+        .catch(function(err) {
+          if (seq === _batchSeq) {
+            var j = _batchJobs[idx];
+            if (j && !j.done) {
+              j.done = true;
+              j.error = (err && err.message) || String(err);
+              _batchDone++;
+              _updateBatchProgressUI();
+            }
+          }
+          resolve();
+        });
+    }
+    poll(0);
+  });
+}
+
 function _startBatch(op, params, dest, compress, targets) {
   var siblings = (targets && targets.length) ? targets : _getSiblingImages();
   if (siblings.length === 0) {
@@ -243,6 +378,8 @@ function _startBatch(op, params, dest, compress, targets) {
     if (re0) { re0.innerHTML = '<div class="gallery-edit-result" style="border-color:var(--danger)"><span style="color:var(--danger);font-weight:600">' + escapeHtml(T('geNoBatchItems')) + '</span></div>'; re0.style.display = 'block'; }
     return;
   }
+  var seq = ++_batchSeq;
+  _clearBatchTimers();
   _batchJobs = [];
   _batchTotal = siblings.length;
   _batchDone = 0;
@@ -273,7 +410,7 @@ function _startBatch(op, params, dest, compress, targets) {
   var resultEl = document.getElementById('ge-result-area');
   if (resultEl) { resultEl.innerHTML = ''; resultEl.style.display = 'none'; }
   _showProgressSection();
-  _setProgressStatus(pgT('geBatchProgress', ['0', String(_batchTotal)]), false);
+  _updateBatchProgressUI();
 
   for (var i = 0; i < siblings.length; i++) {
     var it = siblings[i];
@@ -283,86 +420,62 @@ function _startBatch(op, params, dest, compress, targets) {
       : (_batchTotal === 1 && _batchCfg && _batchCfg.renameName ? _batchCfg.renameName : '');
     _batchJobs.push(job);
   }
-  // P1-04a: cap batch concurrency to 4 to avoid 429 burst.
-  (function runBatchBatch(start) {
-    var batch = _batchJobs.slice(start, start + 4);
-    if (batch.length === 0) return;
-    var offset = start;
-    Promise.all(batch.map(function(job, j) {
-      var idx = offset + j;
-      var item = siblings[idx];
-      var outStem = job.outStem;
-      return _resolveBatchInput(item).then(function(inputPath) {
-        var ow = !!(dest && dest.overwrite);
-        var body = { inputAssetId: inputPath.inputAssetId, inputGrantId: inputPath.inputGrantId, inputRel: inputPath.inputRel, operation: op, overwrite: ow, params: params };
-        if (outStem && !ow) body.outputName = outStem;
-        return fetch('/api/gallery/edit/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }).then(function(r) {
-          return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status)); return d; });
-        });
-      }).then(function(data) {
-        var j = _batchJobs[idx];
-        if (!j) return;
-        j.jobId = data.jobId;
-        _pollBatchJob(idx, data.jobId);
-      }).catch(function(err) {
-        var j = _batchJobs[idx];
-        if (!j) return;
-        j.done = true;
-        j.error = err.message || String(err);
-        _batchDone++;
-        _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
-        if (_batchDone >= _batchTotal) _onBatchComplete();
-      });
-    })).then(function() {
-      runBatchBatch(start + 4);
-    });
-  })(0);
-}
 
-function _pollBatchJob(idx, jobId) {
-  var j0 = _batchJobs[idx];
-  if (!j0 || j0.done) return;
-  if (j0.polling) return;
-  j0.polling = true;
-  fetch('/api/gallery/edit/status/' + encodeURIComponent(jobId))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+  // Sliding-window worker pool capped at _BATCH_CONCURRENCY (matches server
+  // maxConcurrentJobs = 4): each worker waits for its ffmpeg job to finish
+  // before claiming the next item, preventing /edit/start 429 bursts.
+  var concurrency = Math.min(_BATCH_CONCURRENCY, _batchJobs.length);
+  var nextIdx = 0;
+  function runWorker() {
+    if (seq !== _batchSeq || nextIdx >= _batchJobs.length) {
+      return Promise.resolve();
+    }
+    var idx = nextIdx++;
+    var job = _batchJobs[idx];
+    var item = siblings[idx];
+    var outStem = job.outStem;
+    return _resolveBatchInput(item).then(function(inputPath) {
+      if (seq !== _batchSeq) return { cancelled: true };
+      var ow = !!(dest && dest.overwrite);
+      var body = {
+        inputAssetId: inputPath.inputAssetId,
+        inputGrantId: inputPath.inputGrantId,
+        inputRel: inputPath.inputRel,
+        operation: op,
+        overwrite: ow,
+        params: params
+      };
+      if (outStem && !ow) body.outputName = outStem;
+      return _startBatchItemWithRetry(seq, body);
+    }).then(function(data) {
+      if (seq !== _batchSeq || !data || data.cancelled) return;
       var j = _batchJobs[idx];
-      if (j) j.polling = false;
-      if (!j) return;
-      if (data.status === 'running') {
-        var block = _geConsoleBlock(jobId, (j.item && j.item.name) || '');
-        if (block) {
-          var cmdEl = block.querySelector('.ge-console-block-cmd');
-          if (cmdEl && data.command) cmdEl.textContent = '$ ' + data.command;
-          var logEl = block.querySelector('.ge-console-block-log');
-          if (logEl && data.logTail) { logEl.textContent = data.logTail; logEl.scrollTop = logEl.scrollHeight; }
-        }
-        if (_geBatchPollingEnabled && !j.done) setTimeout(function() { _pollBatchJob(idx, jobId); }, 600);
-      } else {
-        if (data.status === 'completed') {
-          j.overwritten = !!data.overwritten;
-          j.assetId = data.assetId;
-          j.outputName = data.outputName;
-        } else {
-          j.error = data.error || data.status;
-        }
-        _batchDone++;
-        _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
-        if (_batchDone >= _batchTotal) _onBatchComplete();
-      }
-    })
-    .catch(function(err) {
+      if (!j || j.done) return;
+      j.jobId = data.jobId;
+      return _waitBatchJob(seq, idx, data.jobId);
+    }).catch(function(err) {
+      if (seq !== _batchSeq) return;
       var j = _batchJobs[idx];
-      if (j) { j.polling = false; j.done = true; j.error = err.message || String(err); }
+      if (!j || j.done) return;
+      j.done = true;
+      j.error = (err && err.message) || String(err);
       _batchDone++;
-      _setProgressStatus(pgT('geBatchProgress', [String(_batchDone), String(_batchTotal)]), false);
-      if (_batchDone >= _batchTotal) _onBatchComplete();
+      _updateBatchProgressUI();
+    }).then(function() {
+      if (seq !== _batchSeq) return;
+      return runWorker();
     });
+  }
+
+  var workers = [];
+  for (var w = 0; w < concurrency; w++) {
+    workers.push(runWorker());
+  }
+  Promise.all(workers).then(function() {
+    if (seq !== _batchSeq) return;
+    _clearBatchTimers();
+    _onBatchComplete();
+  });
 }
 
 // _refreshTreeBatchOutputs refreshes gallery items after an in-place

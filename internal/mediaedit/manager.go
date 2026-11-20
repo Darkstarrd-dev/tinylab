@@ -198,7 +198,9 @@ func (m *Manager) Start(ffmpegPath, ffprobePath string, req StartRequest) (*Job,
 // runJob is the background goroutine that executes ffmpeg and updates the job.
 func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args []string, outputPath string, sourceDuration float64) {
 	// Release the ffmpeg slot regardless of how the job ended.
-	defer func() { <-m.sem }()
+	var releaseOnce sync.Once
+	releaseSem := func() { releaseOnce.Do(func() { <-m.sem }) }
+	defer releaseSem()
 
 	stderrTail := newTailBuffer(16 * 1024) // 16KB
 
@@ -226,6 +228,9 @@ func (m *Manager) runJob(ctx context.Context, job *Job, ffmpegPath string, args 
 
 	job.mu.Lock()
 	defer job.mu.Unlock()
+	// Release the concurrency slot BEFORE unlocking job.mu (LIFO defer order) so
+	// any caller observing a terminal status via Get() sees a free slot immediately.
+	defer releaseSem()
 
 	job.LogTail = stderrTail.Read()
 	job.logBuf = nil

@@ -127,6 +127,174 @@ function capturedOpenMediaEditor(calls) {
   return capture;
 }
 
+// makeBatchEnv creates an isolated sandbox with a realistic 4-slot server
+// concurrency gate (HTTP 429 on slot exhaustion) and minimal progress DOM stubs
+// to exercise _startBatch, _cancelJob, and _geResumeActive end to end.
+function makeBatchEnv(simOpts) {
+  simOpts = simOpts || {};
+  const { sandbox, calls } = makeEnv();
+  const elements = {};
+  [
+    'pg-modal-overlay',
+    'ge-result-area',
+    'ge-progress-section',
+    'ge-progress-bar',
+    'ge-progress-text',
+    'ge-console-panel',
+    'ge-console-log',
+    'ge-console-cmd',
+    'ge-start-btn',
+    'ge-treebatch-start-btn',
+  ].forEach(function (id) {
+    elements[id] = {
+      id: id,
+      style: {},
+      value: 0,
+      textContent: '',
+      innerHTML: '',
+      disabled: false,
+      scrollTop: 0,
+      scrollHeight: 0,
+      classList: { add: function () {}, remove: function () {}, toggle: function () {} },
+      setAttribute: function () {},
+      getAttribute: function () { return null; },
+      querySelector: function () { return null; },
+      appendChild: function () {},
+      getBoundingClientRect: function () { return { height: 400 }; },
+    };
+  });
+
+  sandbox.document.getElementById = function (id) { return elements[id] || null; };
+  sandbox.document.querySelector = function () { return null; };
+  sandbox.document.createElement = function () {
+    return {
+      className: '',
+      textContent: '',
+      setAttribute: function () {},
+      appendChild: function () {},
+      querySelector: function () { return null; },
+    };
+  };
+  sandbox.pgT = function (k, args) {
+    return args && args.length ? (String(k) + ':' + args.join('/')) : String(k);
+  };
+
+  const sim = {
+    semLimit: simOpts.semLimit || 4,
+    activeSlots: 0,
+    peakActive: 0,
+    externalHeld: simOpts.externalHeld || 0,
+    forceInitial429s: simOpts.forceInitial429s || 0,
+    status429Count: 0,
+    completedCount: 0,
+    starts: [],
+    cancels: [],
+    statusPolls: {},
+    jobs: {},
+    seq: 0,
+  };
+
+  sandbox.fetch = function (url, opts) {
+    const u = String(url);
+    calls.fetches.push({ url: u, opts: opts || null });
+
+    if (u === '/api/gallery/edit/start') {
+      const body = JSON.parse((opts && opts.body) || '{}');
+      const startIndex = sim.starts.length;
+      sim.starts.push(body);
+      if (sim.forceInitial429s > 0) {
+        sim.forceInitial429s--;
+        sim.status429Count++;
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          json: function () { return Promise.resolve({ error: 'too many concurrent media jobs, retry later' }); },
+        });
+      }
+      if (sim.activeSlots + sim.externalHeld >= sim.semLimit) {
+        sim.status429Count++;
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          json: function () { return Promise.resolve({ error: 'too many concurrent media jobs, retry later' }); },
+        });
+      }
+      const jobId = 'job-' + (++sim.seq);
+      sim.activeSlots++;
+      if (sim.activeSlots > sim.peakActive) sim.peakActive = sim.activeSlots;
+      const dur = simOpts.durationFn ? simOpts.durationFn(startIndex, body) : 20;
+      const job = { id: jobId, status: 'running', overwritten: !!body.overwrite, timer: null };
+      job.timer = setTimeout(function () {
+        if (job.status !== 'running') return;
+        sim.activeSlots--;
+        job.status = 'completed';
+        sim.completedCount++;
+        if (simOpts.onJobComplete) simOpts.onJobComplete(sim, job);
+      }, dur);
+      sim.jobs[jobId] = job;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: function () { return Promise.resolve({ jobId: jobId }); },
+      });
+    }
+
+    if (u.indexOf('/api/gallery/edit/status/') === 0) {
+      const jobId = decodeURIComponent(u.slice('/api/gallery/edit/status/'.length));
+      const job = sim.jobs[jobId];
+      sim.statusPolls[jobId] = (sim.statusPolls[jobId] || 0) + 1;
+      if (!job) {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: function () { return Promise.resolve({ error: 'job not found' }); },
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: function () {
+          return Promise.resolve({
+            id: jobId,
+            status: job.status,
+            progress: job.status === 'completed' ? 100 : 50,
+            overwritten: job.overwritten,
+            outputName: 'out_' + jobId + '.webp',
+            assetId: job.overwritten ? '' : ('asset-' + jobId),
+          });
+        },
+      });
+    }
+
+    if (u.indexOf('/api/gallery/edit/cancel/') === 0) {
+      const jobId = decodeURIComponent(u.slice('/api/gallery/edit/cancel/'.length));
+      sim.cancels.push(jobId);
+      const job = sim.jobs[jobId];
+      if (job && job.status === 'running') {
+        clearTimeout(job.timer);
+        sim.activeSlots--;
+        job.status = 'cancelled';
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 204,
+        json: function () { return Promise.reject(new Error('no body')); },
+      });
+    }
+
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      json: function () { return Promise.resolve({ error: 'unexpected fetch ' + u }); },
+    });
+  };
+
+  loadFiles(sandbox);
+  sandbox._batchPollDelays = [5, 10];
+  sandbox._batchRetryDelays = [5, 10];
+  return { sandbox, calls, elements, sim };
+}
+
 async function main() {
   // ---- 1. single zip extract-to-edit (archive-source item) -----------
   await check('single zip extract-to-edit resolves by assetId (sourceId item)', async () => {
@@ -297,6 +465,122 @@ async function main() {
     const extractCall = calls.fetches.find(function (f) { return f.url.indexOf('/edit/extract-zip-entry') !== -1; });
     assert(extractCall, 'extract-zip-entry must be fetched');
     assert(!('tempPath' in extractCall), 'backend response shape has no tempPath');
+  });
+
+  // ---- 9. batch 20 items: non-uniform durations within 4-slot cap ------
+  await check('batch 20 items complete 20/0 within 4-slot cap and zero 429s', async () => {
+    const { sandbox, elements, sim } = makeBatchEnv({
+      durationFn: function (idx) { return 8 + (idx % 5) * 7; },
+    });
+    const items = [];
+    for (let i = 0; i < 20; i++) {
+      items.push({ kind: 'backend', name: 'img_' + i + '.png', grantId: 'g1', rel: 'img_' + i + '.png' });
+    }
+    sandbox._startBatch('image_transcode', { format: 'webp', quality: 85 }, { overwrite: true, outputDir: null }, false, items);
+
+    await waitFor(function () {
+      return sandbox._geActiveJob === null && elements['ge-result-area'].innerHTML.indexOf('geBatchDone:') !== -1;
+    }, 'batch 20 completion', 5000);
+
+    assert.strictEqual(sim.starts.length, 20, 'all 20 items must start once');
+    assert.strictEqual(sim.completedCount, 20, 'all 20 items must complete');
+    assert.strictEqual(sim.status429Count, 0, '4-worker pool must not hit 429 when slots are free');
+    assert(sim.peakActive <= 4 && sim.peakActive >= 2, 'peak concurrency expected 2..4, got ' + sim.peakActive);
+    assert(elements['ge-result-area'].innerHTML.indexOf('geBatchDone:20/0') !== -1, 'expected geBatchDone:20/0 in ' + elements['ge-result-area'].innerHTML);
+    assert.strictEqual(elements['ge-progress-bar'].value, 100);
+  });
+
+  // ---- 10. batch 429 contention backoff retries and succeeds -----------
+  await check('batch retries 429 responses under slot contention and completes 10/0', async () => {
+    const { sandbox, elements, sim } = makeBatchEnv({
+      externalHeld: 2,
+      forceInitial429s: 4,
+      durationFn: function () { return 15; },
+    });
+    setTimeout(function () { sim.externalHeld = 0; }, 45);
+    const items = [];
+    for (let i = 0; i < 10; i++) {
+      items.push({ kind: 'backend', name: 'p_' + i + '.png', grantId: 'g1', rel: 'p_' + i + '.png' });
+    }
+    sandbox._startBatch('image_transcode', { format: 'webp', quality: 85 }, { overwrite: true, outputDir: null }, false, items);
+
+    await waitFor(function () {
+      return sandbox._geActiveJob === null && elements['ge-result-area'].innerHTML.indexOf('geBatchDone:') !== -1;
+    }, 'batch 429 retry completion', 5000);
+
+    assert(sim.status429Count >= 4, 'expected 429s to occur before backoff retry, got ' + sim.status429Count);
+    assert.strictEqual(sim.completedCount, 10, 'all 10 items must succeed after 429 backoff');
+    assert(elements['ge-result-area'].innerHTML.indexOf('geBatchDone:10/0') !== -1, 'expected geBatchDone:10/0 in ' + elements['ge-result-area'].innerHTML);
+  });
+
+  // ---- 11. batch cancel mid-flight isolates subsequent batch -----------
+  await check('batch cancel mid-flight stops pending items and isolates next batch', async () => {
+    const { sandbox, elements, sim } = makeBatchEnv({
+      durationFn: function () { return 80; },
+    });
+    const batch1 = [];
+    for (let i = 0; i < 12; i++) {
+      batch1.push({ kind: 'backend', name: 'c_' + i + '.png', grantId: 'g1', rel: 'c_' + i + '.png' });
+    }
+    sandbox._startBatch('image_transcode', { format: 'webp' }, { overwrite: true, outputDir: null }, false, batch1);
+    await waitFor(function () { return sim.starts.length === 4; }, 'first 4 jobs started');
+
+    sandbox._cancelJob();
+    await new Promise(function (r) { setTimeout(r, 45); });
+
+    assert.strictEqual(sim.cancels.length, 4, 'active 4 jobs must be cancelled');
+    assert.strictEqual(sim.starts.length, 4, 'remaining 8 items must not fire /edit/start after cancel');
+    assert.strictEqual(sim.activeSlots, 0, 'all cancelled slots must drain');
+    assert.strictEqual(sandbox._geActiveJob, null);
+    assert.strictEqual(elements['ge-result-area'].innerHTML.indexOf('geBatchDone:'), -1, 'cancelled batch must not render completion');
+
+    // Start a clean second batch immediately in the same VM state.
+    const batch2 = [];
+    for (let j = 0; j < 6; j++) {
+      batch2.push({ kind: 'backend', name: 'n_' + j + '.png', grantId: 'g1', rel: 'n_' + j + '.png' });
+    }
+    sandbox._startBatch('image_transcode', { format: 'webp' }, { overwrite: true, outputDir: null }, false, batch2);
+    await waitFor(function () {
+      return sandbox._geActiveJob === null && elements['ge-result-area'].innerHTML.indexOf('geBatchDone:') !== -1;
+    }, 'second batch completion', 5000);
+
+    assert.strictEqual(sim.starts.length, 10, '4 cancelled + 6 new starts');
+    assert.strictEqual(sim.completedCount, 6, 'all 6 items of new batch must complete');
+    assert(elements['ge-result-area'].innerHTML.indexOf('geBatchDone:6/0') !== -1, 'expected geBatchDone:6/0');
+  });
+
+  // ---- 12. _geResumeActive while running does not duplicate counts -----
+  await check('_geResumeActive during active batch keeps exact completion count and disables tree Start', async () => {
+    const { sandbox, elements, sim } = makeBatchEnv({
+      durationFn: function (i) { return i < 4 ? 35 : 15; },
+    });
+    const items = [];
+    for (let i = 0; i < 8; i++) {
+      items.push({ kind: 'backend', name: 'r_' + i + '.png', grantId: 'g1', rel: 'r_' + i + '.png' });
+    }
+    sandbox._startBatch('image_transcode', { format: 'webp' }, { overwrite: true, outputDir: null }, false, items);
+    await waitFor(function () { return sim.starts.length === 4; }, '4 jobs started');
+
+    sandbox._geResumeActive();
+    assert.strictEqual(elements['ge-treebatch-start-btn'].disabled, true, 'tree batch Start must stay disabled on resume');
+    assert.strictEqual(elements['ge-start-btn'].disabled, true, 'edit Start must stay disabled on resume');
+
+    await waitFor(function () {
+      return sandbox._geActiveJob === null && elements['ge-result-area'].innerHTML.indexOf('geBatchDone:') !== -1;
+    }, 'resumed batch completion', 5000);
+
+    assert.strictEqual(sim.completedCount, 8);
+    assert(elements['ge-result-area'].innerHTML.indexOf('geBatchDone:8/0') !== -1, 'expected geBatchDone:8/0 in ' + elements['ge-result-area'].innerHTML);
+    assert.strictEqual(elements['ge-treebatch-start-btn'].disabled, false, 'tree batch Start re-enables on completion');
+  });
+
+  // ---- 13. gallery-edit scripts must not overwrite global runWithConcurrency ----
+  await check('loading gallery-edit scripts preserves existing global runWithConcurrency', async () => {
+    const { sandbox } = makeEnv();
+    const sentinel = function existingRunWithConcurrency() {};
+    sandbox.runWithConcurrency = sentinel;
+    loadFiles(sandbox);
+    assert.strictEqual(sandbox.runWithConcurrency, sentinel, 'gallery-edit-batch.js must not overwrite global runWithConcurrency');
   });
 
   console.log(failures === 0 ? '\ngallery-edit-contract.test.js: all checks passed' : '\ngallery-edit-contract.test.js: ' + failures + ' check(s) failed');

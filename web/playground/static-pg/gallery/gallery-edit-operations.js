@@ -55,6 +55,7 @@ function _addOutputToGallery(outputName, outputPath, outputURL) {
 // ---------- cancel job ----------------------------------------------
 function _cancelJob() {
   if (_geActiveJob && _geActiveJob.kind === 'batch') {
+    if (typeof _cancelBatchScheduler === 'function') _cancelBatchScheduler();
     _geBatchPollingEnabled = false;
     if (_batchJobs && _batchJobs.length) {
       for (var i = 0; i < _batchJobs.length; i++) {

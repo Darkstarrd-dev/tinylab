@@ -2,7 +2,7 @@
 
 > **文档定位：** Playground 前后端实现的 canonical 架构事实基线。
 > **当前导航覆盖（2026-08-08）：** 后续 Utility 重组已将顶层 Download/GIF 收入 Utility；F5 打开 Utility 菜单，F4 直达 Gallery。下方 2026-07-26 导航条目保留为历史叙述，不代表当前入口。
-> **最后核对（2026-10-02，单行摘要）：** Gallery Image DirectoryTree 排序选项 + autoplay 观看时长统计 + 气泡 TTFT 中途冻结修复 + 失败请求详情可达。历次核对流水已归档至 `docs/changelog/playground-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
+> **最后核对（2026-11-20，单行摘要）：** 修复 Gallery Batch Convert 大批量仅部分成功且成功数与总数成线性比例的调度缺陷——前端 `gallery-edit-batch.js` 改用并发 4 滑动窗口 Worker Pool 端到端等待任务完成后再领取下一项（+ 429 退避重试、递增轮询、补回 `j.done=true`、`_batchSeq` 代数令牌防取消/重入串扰、移除覆盖全局的 `runWithConcurrency`），`cleanupMediaEditor` 切页不中断批次、`_geResumeActive` 不重复轮询；后端 `internal/mediaedit/manager.go::runJob` 用 `sync.Once` + LIFO defer 在 `job.mu.Unlock()` 前归还并发槽位。历次核对流水已归档至 `docs/changelog/playground-architecture.md`；本行每次变更**替换**而非追加，过程叙述写入归档文件。
 
 ## 1. 范围与结论
 
@@ -936,7 +936,7 @@ Gallery 现支持**两类 zip 包条目**并存（后端桥接 + 前端双路径
 
 ### Gallery 媒体编辑器（ffmpeg）
 
-Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js` 三文件，`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 逐条解析临时磁盘路径再转码、`_resolveBatchInput` 复用 extract-zip-entry/upload-temp）。后端由 `internal/mediaedit/` leaf 包实现，HTTP 端点为 `internal/api/gallery/edit_handlers.go` 的 9 个 edit handler；动画输出与动画 trim 走 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation，FFmpeg 能力由 `ProbeFfmpegCaps` 分字段探测（`ffmpeg-status` 6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`），缺 encoder/decoder 只禁用对应能力，后端 Start 前再复核。
+Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、字幕烧录的能力，并支持「转换文件夹/压缩包内全部图片」的批量处理（`gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js` 三文件，`gallery-edit.js` 的 `_getSiblingImages` 按条目 kind 分组定位兄弟项、`_startBatch` 通过 4 并发滑动窗口 Worker Pool 端到端串行 `_resolveBatchInput` → `_startBatchItemWithRetry`（429 退避重试）→ `_waitBatchJob`（递增轮询直至终态并置 `j.done = true`）逐项推进、`_batchSeq` 代数令牌防取消与重入串扰）。后端由 `internal/mediaedit/` leaf 包实现（`Manager` 全局并发上限 `maxConcurrentJobs = 4`，超限立即返回 `ErrTooManyJobs` → HTTP 429；`runJob` 先释放槽位再解锁 `job.mu`），HTTP 端点为 `internal/api/gallery/edit_handlers.go` 的 edit handler；动画输出与动画 trim 走 `video_to_gif`/`video_to_webp`/`video_anim_trim` 三 operation，FFmpeg 能力由 `ProbeFfmpegCaps` 分字段探测（`ffmpeg-status` 6 字段 `{available,path,error,gif,webpAnim,webpAnimDecode}`），缺 encoder/decoder 只禁用对应能力，后端 Start 前再复核。
 #### API 端点（`/api/gallery/edit/*`）
 
 | 端点 | 方法 | 请求体 | 响应 |
@@ -996,9 +996,9 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 | 修改质量/编码参数默认值 | `internal/mediaedit/args.go`（CRF 表/jpegQuality/clamp）+ `internal/mediaedit/args_test.go` |
 | 修改 ffmpeg 二进制解析 | `internal/mediaedit/binary.go` |
 | 修改 ffprobe 探针逻辑 | `internal/mediaedit/probe.go` |
-| 修改 job 生命周期/超时 | `internal/mediaedit/manager.go`（Start/runJob/cleanup） |
+| 修改 job 生命周期/超时 | `internal/mediaedit/manager.go`（Start/runJob（`sync.Once` + LIFO defer 先归还 `sem` 再解锁 `job.mu`）/cleanup） |
 | 修改 edit HTTP 端点 | `internal/api/gallery/edit_handlers.go`（handler 方法 + Register 方法） |
-| 修改前端编辑器 UI | `web/playground/static-pg/gallery/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（三文件共享全局作用域，gallery-edit.js 为壳 + 共享变量，operations/batch 分别承载单操作 UI 与批量流程）（`triggerMediaEditor` 对 assetId/grantId（非 zip）直通 `openMediaEditor`，不预先 `getBlob()`+`upload-temp` 全量传文件，打开延迟与文件大小解耦；ffmpeg 仅在 Execute 后运行） |
+| 修改前端编辑器 UI | `web/playground/static-pg/gallery/gallery-edit.js`/`gallery-edit-operations.js`/`gallery-edit-batch.js`（三文件共享全局作用域，gallery-edit.js 为壳 + 共享变量及 `_geResumeActive`/`cleanupMediaEditor` 后台批次持久化，operations/batch 分别承载单操作 UI 与 4 并发 Worker Pool 批量流程；禁止定义覆盖全局的 `runWithConcurrency`）（`triggerMediaEditor` 对 assetId/grantId（非 zip）直通 `openMediaEditor`，不预先 `getBlob()`+`upload-temp` 全量传文件，打开延迟与文件大小解耦；ffmpeg 仅在 Execute 后运行） |
 | 修改加载顺序 | `internal/api/router.go`（pgJSFiles 三文件顺序）+ `web/static/index.html`（三 script 标签顺序） |
 | 修改批量转换兄弟匹配 | `web/playground/static-pg/gallery/gallery-edit.js`（`_getSiblingImages` 按 kind 分组：`backend`→`rootDirPath`/`fs`→`rootDirHandle`/`zip`→`zipAbsPath`/`sessionId`）+ `/edit/extract-zip-entry`+`/edit/upload-temp`（`_resolveBatchInput` 逐条解析临时磁盘路径） |
 | 修改输出文件名 / 压缩包命名 | `internal/mediaedit/types.go`（`StartRequest.OutputName`）+ `internal/mediaedit/manager.go`（OutputDir+OutputName+ext 分支）+ `internal/api/gallery/zip_handlers.go`（`galleryEditZipOutputs` 的 `zipName` 经 `filepath.Base`+`.zip` 强制）+ `web/playground/static-pg/gallery/gallery-edit.js`（`_startBatch` 传 `outputName`、`_batchOriginZipName` 推导原文件夹/压缩包名、`_batchOriginStem`/`_captureBatchCfg` 读取 rename/normalise 开关、`_refreshBatchUXVisibility` 按开关+dest 切换行可见性）+ `web/playground/static-pg/pg-i18n.js`（`geRename*`/`geRenorm*`/`geBatchOpenFolder`/`geNoDiskPath` 等） |
@@ -1011,7 +1011,7 @@ Gallery 提供了通过 ffmpeg 子进程对图片/视频进行转码、裁剪、
 修改视频弹窗 | `web/playground/static-pg/gallery/gallery-edit.js`（标题改 `Video Convert` 居中 + 设置齿轮；移除 `ge-dest` 单选 → `overwrite` 恒 false；`_updateVideoSourceInfo` 双行源信息 + `_editVideoPath`；`_getDestination` 替换为 `_getDestFromSetPath` 仅读 Set Path toggle；`_startJob` 简化移除 overwrite 逻辑，从 Set Name toggle 读 `customRename`；移除 `_zipReplacePending` 声明+`_onCompleted` zip-writeback 分支+`ge-dest` 单选绑定死代码）+ `pg-i18n.js`（`geVideoConvert`） |
 修改下载视频项 | `web/static/download.js`（`playVideo` 的 `videoObj` 新增 `absPath: normalizedPath`，使 `kind:'plain'` 视频项获得磁盘路径，编辑/删除可操作） |
 修改 trim 片段拖动约束 | `web/playground/static-pg/gallery/gallery-edit.js`（`_startTrimDrag.onMove` + `_moveNearestHandle` 新增 prevEnd/nextStart 跨片段约束） |
-| 新增/修改 Tree 顶部 Batch Convert 原地批量 | `web/playground/static-pg/gallery/gallery-tree.js`（标准 Header 左对齐 Batch Convert 按钮 + 点击接 `openTreeBatchConvert`）+ `gallery-edit-batch.js`（`openTreeBatchConvert` 弹窗采用 `renderCustomSelectHtml` 自定义下拉与 `.toggle-switch` 开关，弹窗 body 设置 `overflow:visible; min-height:220px` 防裁剪；`_treeBatchTargets`（backend+grantId 可写过滤）/`_bindTreeBatchDialog`/`_refreshTreeBatchOutputs`（跨格式 rel/path/name 同步、重新绑定 `getBlob` 新后缀 rel + 视图刷新）/`_startBatch` 透传 `dest.overwrite`（覆盖不送 outputName）/`_pollBatchJob` 记 `overwritten`/`_onBatchComplete` 绑定新 `rel` 供 Open Folder 精确定位）+ `web/playground/static-pg/playground.css`（`.gallery-edit-row` 下拉样式）+ `internal/mediaedit/types.go`+`manager.go`（`Job`/`Snapshot` 增加 `Overwrite` 并在 `Start()` 透传）+ `internal/api/gallery/edit_handlers.go`（`galleryEditStatus` 依赖 `!job.Overwrite` 避免跨格式覆盖误移临时目录，保留原地输出目标文件）+ `pg-i18n.js`（`geTreeBatchConvert/geTreeBatchSummary/geTreeBatchSkipped/geTreeBatchNoWritable` en+zh） |
+| 新增/修改 Tree 顶部 Batch Convert 原地批量 | `web/playground/static-pg/gallery/gallery-tree.js`（标准 Header 左对齐 Batch Convert 按钮 + 点击接 `openTreeBatchConvert`）+ `gallery-edit-batch.js`（`openTreeBatchConvert` 弹窗采用 `renderCustomSelectHtml` 自定义下拉与 `.toggle-switch` 开关，弹窗 body 设置 `overflow:visible; min-height:220px` 防裁剪；`_treeBatchTargets`（backend+grantId 可写过滤）/`_bindTreeBatchDialog`/`_refreshTreeBatchOutputs`（跨格式 rel/path/name 同步、重新绑定 `getBlob` 新后缀 rel + 视图刷新）/`_startBatch`（`_BATCH_CONCURRENCY=4` Worker Pool 端到端调度 + `_startBatchItemWithRetry` 429 退避重试 + `_batchSeq` 代数令牌 + 进度条同步 + 透传 `dest.overwrite`）/`_waitBatchJob`（递增轮询 + 终态置 `j.done=true` + 记 `overwritten`）/`_onBatchComplete` 绑定新 `rel` 供 Open Folder 精确定位）+ `gallery-edit-operations.js`（`_cancelJob` 先调 `_cancelBatchScheduler`）+ `gallery-edit.js`（`_geResumeActive` 禁用 `#ge-treebatch-start-btn` 并同步进度而不重复轮询；`cleanupMediaEditor` 保留 batch 调度运行）+ `web/playground/static-pg/playground.css`（`.gallery-edit-row` 下拉样式）+ `internal/mediaedit/types.go`+`manager.go`（`Job`/`Snapshot` 增加 `Overwrite` 并在 `Start()` 透传；`runJob` 先释放 `sem` 槽位再解锁 `job.mu`）+ `internal/api/gallery/edit_handlers.go`（`galleryEditStatus` 依赖 `!job.Overwrite` 避免跨格式覆盖误移临时目录，保留原地输出目标文件）+ `pg-i18n.js`（`geTreeBatchConvert/geTreeBatchSummary/geTreeBatchSkipped/geTreeBatchNoWritable` en+zh） |
 
 ## 17. Editor 模块（File Editor）
 
