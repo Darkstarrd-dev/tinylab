@@ -248,6 +248,23 @@
   // Keybindings (frame navigation + play/pause; Escape is owned by the entry)
   // ------------------------------------------------------------------
 
+  var GIF_LOCAL_SHORTCUTS = {
+    prevFrame:  { key: 'ArrowLeft' },
+    nextFrame:  { key: 'ArrowRight' },
+    firstFrame: { key: 'Home' },
+    lastFrame:  { key: 'End' },
+    togglePlay: { key: ' ' }
+  };
+
+  function matchLocal(b, e) {
+    if (typeof window.Shortcuts !== 'undefined' && typeof window.Shortcuts.matchBinding === 'function') {
+      return window.Shortcuts.matchBinding(b, e);
+    }
+    if (!b || !e) return false;
+    if (b.key === ' ') return e.key === ' ' || e.key === 'Spacebar';
+    return e.key === b.key;
+  }
+
   function onKeyDown(e) {
     var activeEl = document.activeElement;
     var activeTag = activeEl ? activeEl.tagName : '';
@@ -264,19 +281,19 @@
     if (!slices.length) return;
 
     var key = e.key;
-    if (key === 'ArrowLeft' || key === 'PageUp') {
+    if (matchLocal(GIF_LOCAL_SHORTCUTS.prevFrame, e) || key === 'PageUp') {
       e.preventDefault();
       focusFrame(core.state.selectedSliceIdx - 1);
-    } else if (key === 'ArrowRight' || key === 'PageDown') {
+    } else if (matchLocal(GIF_LOCAL_SHORTCUTS.nextFrame, e) || key === 'PageDown') {
       e.preventDefault();
       focusFrame(core.state.selectedSliceIdx + 1);
-    } else if (key === 'Home') {
+    } else if (matchLocal(GIF_LOCAL_SHORTCUTS.firstFrame, e)) {
       e.preventDefault();
       focusFrame(0);
-    } else if (key === 'End') {
+    } else if (matchLocal(GIF_LOCAL_SHORTCUTS.lastFrame, e)) {
       e.preventDefault();
       focusFrame(slices.length - 1);
-    } else if (key === ' ' || key === 'Spacebar') {
+    } else if (matchLocal(GIF_LOCAL_SHORTCUTS.togglePlay, e)) {
       e.preventDefault();
       toggle();
     }
@@ -335,4 +352,17 @@
 
   core.registerModule('playback', playbackApi);
   core.playback = playbackApi;
+
+  if (typeof window.ShortcutHints !== 'undefined' && typeof window.ShortcutHints.register === 'function') {
+    var inGifSlices = function(ctx) {
+      return !ctx.modal && !ctx.dropdown && !!(ctx.gif && ctx.gif.active && ctx.gif.hasSlices);
+    };
+    window.ShortcutHints.register([
+      { id: 'gif.prev-frame',  binding: GIF_LOCAL_SHORTCUTS.prevFrame,  extraKeys: ['PageUp'],   group: 'page', priority: 55, labelKey: 'shActGifPrevFrame',  when: inGifSlices, target: '#gif-timeline-prev' },
+      { id: 'gif.next-frame',  binding: GIF_LOCAL_SHORTCUTS.nextFrame,  extraKeys: ['PageDown'], group: 'page', priority: 55, labelKey: 'shActGifNextFrame',  when: inGifSlices, target: '#gif-timeline-next' },
+      { id: 'gif.first-frame', binding: GIF_LOCAL_SHORTCUTS.firstFrame, group: 'page', priority: 55, labelKey: 'shActGifFirstFrame', when: inGifSlices, target: '#gif-timeline-first' },
+      { id: 'gif.last-frame',  binding: GIF_LOCAL_SHORTCUTS.lastFrame,  group: 'page', priority: 55, labelKey: 'shActGifLastFrame',  when: inGifSlices, target: '#gif-timeline-last' },
+      { id: 'gif.play-pause',  binding: GIF_LOCAL_SHORTCUTS.togglePlay, group: 'page', priority: 55, labelKey: 'shActGifPlayPause',  when: inGifSlices, target: '#gif-timeline-play' }
+    ]);
+  }
 })();

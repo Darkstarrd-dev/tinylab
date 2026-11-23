@@ -31,6 +31,26 @@
     expanded: []
   };
   var shellFind = { visible: false, query: '', replace: '', index: 0, matches: [] };
+  var EDITOR_V1_SHORTCUTS = {
+    save:      { ctrlOrCmd: true, key: 's' },
+    undo:      { ctrlOrCmd: true, key: 'z' },
+    redo:      { ctrlOrCmd: true, key: 'y' },
+    redoShift: { ctrlOrCmd: true, shift: true, key: 'z' },
+    find:      { ctrlOrCmd: true, key: 'f' },
+    indent:    { key: 'Tab' },
+    comment:   { alt: true, key: '/' },
+    dupUp:     { alt: true, shift: true, key: 'ArrowUp', altKeys: ['Up'] },
+    dupDown:   { alt: true, shift: true, key: 'ArrowDown', altKeys: ['Down'] }
+  };
+  var matchEd1 = function (b, ev) {
+    if (global.Shortcuts && typeof global.Shortcuts.matchBinding === 'function') {
+      return global.Shortcuts.matchBinding(b, ev);
+    }
+    var mod = ev.ctrlKey || ev.metaKey;
+    if (!!b.ctrlOrCmd !== mod || !!b.alt !== !!ev.altKey || !!b.shift !== !!ev.shiftKey) return false;
+    if (Array.isArray(b.altKeys) && b.altKeys.indexOf(ev.key) !== -1) return true;
+    return b.key.length === 1 ? (ev.key && ev.key.toLowerCase() === b.key.toLowerCase()) : ev.key === b.key;
+  };
 
   // Input scheduling: per-keystroke work must stay cheap. Heavy preview
   // rendering is debounced (markdown 250ms, html-iframe 700ms), drafts are
@@ -1935,36 +1955,37 @@
         }
         return;
       }
-      if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); saveWorkspace(); }
+      if (matchEd1(EDITOR_V1_SHORTCUTS.save, event)) { event.preventDefault(); saveWorkspace(); }
       // In-session undo/redo belongs to the IME (its own candidate history):
       // applySnapshot would rewrite input.value under the live composition
       // and abort the session. Let the event reach the IME untouched.
       if (shellComposing && (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')) return;
-      else if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) triggerRedo(); else triggerUndo(); }
-      else if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); triggerRedo(); }
-      else if (mod && event.key.toLowerCase() === 'f') { event.preventDefault(); shellFindToggle(); }
-      else if (!imeKey && event.key === 'Tab') {
+      else if (matchEd1(EDITOR_V1_SHORTCUTS.redoShift, event)) { event.preventDefault(); triggerRedo(); }
+      else if (matchEd1(EDITOR_V1_SHORTCUTS.undo, event)) { event.preventDefault(); triggerUndo(); }
+      else if (matchEd1(EDITOR_V1_SHORTCUTS.redo, event)) { event.preventDefault(); triggerRedo(); }
+      else if (matchEd1(EDITOR_V1_SHORTCUTS.find, event)) { event.preventDefault(); shellFindToggle(); }
+      else if (!imeKey && (matchEd1(EDITOR_V1_SHORTCUTS.indent, event) || (event.shiftKey && !mod && !event.altKey && event.key === 'Tab'))) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
           global.EditorCommands.indent(input, event.shiftKey);
         }
       }
-      else if (!imeKey && event.altKey && !mod && event.key === '/') {
+      else if (!imeKey && matchEd1(EDITOR_V1_SHORTCUTS.comment, event)) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {
           global.EditorCommands.toggleComment(input);
         }
       }
-      else if (!imeKey && event.altKey && event.shiftKey && !mod && (event.key === 'ArrowUp' || event.key === 'Up')) {
+      else if (!imeKey && matchEd1(EDITOR_V1_SHORTCUTS.dupUp, event)) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
           global.EditorCommands.duplicateLine(input, 'up');
         }
       }
-      else if (!imeKey && event.altKey && event.shiftKey && !mod && (event.key === 'ArrowDown' || event.key === 'Down')) {
+      else if (!imeKey && matchEd1(EDITOR_V1_SHORTCUTS.dupDown, event)) {
         event.preventDefault();
         event.stopPropagation();
         if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
@@ -2088,4 +2109,17 @@
   global.suspendEditor = suspendEditor;
   global.resumeEditor = function () {};
   global.cleanupEditor = cleanupEditor;
+
+  if (global.ShortcutHints && typeof global.ShortcutHints.register === 'function') {
+    var inEd1 = function (ctx) { return !ctx.modal && !ctx.dropdown && ctx.page === 'editor'; };
+    global.ShortcutHints.register([
+      { id: 'ed1.save',    binding: EDITOR_V1_SHORTCUTS.save,                               group: 'page', priority: 55, labelKey: 'shActEdSave',    when: inEd1, target: '.ed-root [data-action="save"]' },
+      { id: 'ed1.undo',    binding: EDITOR_V1_SHORTCUTS.undo,                               group: 'page', priority: 55, labelKey: 'shActEdUndo',    when: inEd1, target: '.ed-root [data-action="undo"]' },
+      { id: 'ed1.redo',    bindings: [EDITOR_V1_SHORTCUTS.redo, EDITOR_V1_SHORTCUTS.redoShift], group: 'page', priority: 55, labelKey: 'shActEdRedo', when: inEd1, target: '.ed-root [data-action="redo"]' },
+      { id: 'ed1.find',    binding: EDITOR_V1_SHORTCUTS.find,                               group: 'page', priority: 55, labelKey: 'shActEdFind',    when: inEd1, target: '.ed-root [data-action="find"]' },
+      { id: 'ed1.indent',  bindings: [EDITOR_V1_SHORTCUTS.indent, { shift: true, key: 'Tab' }], group: 'page', priority: 55, labelKey: 'shActEdIndent',  when: inEd1 },
+      { id: 'ed1.comment', binding: EDITOR_V1_SHORTCUTS.comment,                            group: 'page', priority: 55, labelKey: 'shActEdComment', when: inEd1 },
+      { id: 'ed1.dupLine', bindings: [EDITOR_V1_SHORTCUTS.dupUp, EDITOR_V1_SHORTCUTS.dupDown], group: 'page', priority: 55, labelKey: 'shActEdDupLine', when: inEd1 }
+    ]);
+  }
 }(typeof window !== 'undefined' ? window : this));

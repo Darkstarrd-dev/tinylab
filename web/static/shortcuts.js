@@ -38,7 +38,8 @@ var SHORTCUT_PRESETS = {
     'global.quickslot-cycle-8': { key: '8', label: 'Quickslot #8' },
     'global.quickslot-cycle-9': { key: '9', label: 'Quickslot #9' },
     'global.shutdown-server':  { key: 'Escape', label: 'Shutdown Server (no modal)' },
-    'global.toggle-fullscreen':{ key: 'f', label: 'Toggle fullscreen' }
+    'global.toggle-fullscreen':{ key: 'f', label: 'Toggle fullscreen' },
+    'global.toggle-shortcut-hints': { key: 'q', label: 'Toggle shortcut hints' }
   },
   playground: {
     'pg.send-message':        { key: 'Enter', label: 'Send message (main input)' },
@@ -88,6 +89,16 @@ var SHORTCUT_REGIONS = [
 // ----- Override storage (in-memory cache; persisted via PATCH /settings) -----
 
 var __scOverrides = {}; // actionID -> binding (only actions explicitly rebound)
+var __scListeners = []; // onChange callbacks
+
+function __scNotifyChange() {
+  for (var i = 0; i < __scListeners.length; i++) {
+    try { __scListeners[i](); } catch (e) {}
+  }
+  if (typeof document !== 'undefined' && typeof CustomEvent === 'function' && typeof document.dispatchEvent === 'function') {
+    try { document.dispatchEvent(new CustomEvent('tinylab:shortcuts-change')); } catch (e2) {}
+  }
+}
 
 // ----- Helpers -----
 
@@ -159,45 +170,49 @@ var Shortcuts = {
     return preset ? __scCloneBinding(preset) : null;
   },
 
-  // True iff the KeyboardEvent matches the effective binding for actionId.
-  // Conservative rules:
-  //  - key must equal (case-sensitive for letters via upper-case compare to
-  //    tolerate Shift state; for single-letter shortcuts 'd' matches both
-  //    'd' and 'D' to match the original gallery literals which matched both)
-  //  - ctrl/cmd, alt, shift modifier flags must match exactly.
-  //  - Tab/Space/Arrow/special keys are compared verbatim.
-  matchEvent: function(actionId, e) {
-    var b = Shortcuts.effective(actionId);
-    if (!b || !b.key) return false;
+  // True iff the KeyboardEvent matches the given binding descriptor
+  // `{key, code, altKeys, ctrlOrCmd, alt, shift}`.
+  matchBinding: function(b, e) {
+    if (!b || (!b.key && !b.code) || !e) return false;
     if (!!b.ctrlOrCmd !== __scIsCtrlOrCmd(e)) return false;
     if (!!b.alt !== !!e.altKey) return false;
     if (!!b.shift !== !!e.shiftKey) return false;
+    if (b.code && e.code === b.code) return true;
     if (e.key == null) return false;
-    // Single-letter/F-key/named keys all compare case-insensitively against
-    // event.key when the binding has no shift modifier requirement.
-    if (b.key.length === 1 && /[a-z0-9]/i.test(b.key)) {
-      if (e.key.toLowerCase() === b.key.toLowerCase() || e.key === b.key) return true;
-      if (e.altKey && /[a-z]/i.test(b.key) && e.code === 'Key' + b.key.toUpperCase()) return true;
-      return false;
-    }
+    if (Array.isArray(b.altKeys) && b.altKeys.indexOf(e.key) !== -1) return true;
     // Arrow keys / 'Tab' / 'Escape' / 'Enter' / 'Space' etc. compare verbatim
     // but tolerate 'Spacebar' (legacy) for ' '.
     if (b.key === ' ') {
       return e.key === ' ' || e.key === 'Spacebar';
     }
+    // Single-letter/digit keys compare case-insensitively and allow dead-key
+    // code fallbacks when Alt/Shift is held.
+    if (b.key && b.key.length === 1 && /[a-z0-9]/i.test(b.key)) {
+      if (e.key.toLowerCase() === b.key.toLowerCase() || e.key === b.key) return true;
+      if ((e.altKey || e.shiftKey) && /[a-z]/i.test(b.key) && e.code === 'Key' + b.key.toUpperCase()) return true;
+      if (e.altKey && /[0-9]/.test(b.key) && e.code === 'Digit' + b.key) return true;
+      return false;
+    }
     return e.key === b.key;
+  },
+
+  // True iff the KeyboardEvent matches the effective binding for actionId.
+  matchEvent: function(actionId, e) {
+    return Shortcuts.matchBinding(Shortcuts.effective(actionId), e);
   },
 
   // Load user overrides from the /api/settings response. Replaces the
   // entire in-memory override map. Pass {} to clear all overrides.
   loadOverrides: function(map) {
     __scOverrides = {};
-    if (!map) return;
-    for (var k in map) {
-      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
-      var b = __scNormalizeBinding(map[k]);
-      if (b) __scOverrides[k] = b;
+    if (map) {
+      for (var k in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+        var b = __scNormalizeBinding(map[k]);
+        if (b) __scOverrides[k] = b;
+      }
     }
+    __scNotifyChange();
   },
 
   // Returns a shallow copy of the current overrides map (for serialization
@@ -220,17 +235,36 @@ var Shortcuts = {
     var b = __scNormalizeBinding(binding);
     if (!b) return false;
     __scOverrides[actionId] = b;
+    __scNotifyChange();
     return true;
   },
 
   // Remove the override for actionId, falling back to the system preset.
   clearOverride: function(actionId) {
     delete __scOverrides[actionId];
+    __scNotifyChange();
   },
 
   // Remove every override.
   clearAll: function() {
     __scOverrides = {};
+    __scNotifyChange();
+  },
+
+  // Subscribe to shortcut binding changes (overrides loaded/set/cleared).
+  // Returns an unsubscribe function.
+  onChange: function(fn) {
+    if (typeof fn !== 'function') return function() {};
+    __scListeners.push(fn);
+    return function() {
+      var idx = __scListeners.indexOf(fn);
+      if (idx !== -1) __scListeners.splice(idx, 1);
+    };
+  },
+
+  // Format an action's effective binding directly.
+  formatAction: function(actionId) {
+    return Shortcuts.formatBinding(Shortcuts.effective(actionId));
   },
 
   // True if an override currently exists for actionId.

@@ -1,3 +1,11 @@
+## 2026-11-23 — 上下文实时快捷键提示 HUD（ShortcutHints / TinyLab / Q）
+
+- **触发**：用户需求——基于当前可见且可用的界面状态动态提示快捷键（隐藏/未打开的弹窗与非当前子模式不显示；与 `Shortcuts` 配置及各模块共享绑定动态联动而非写死）；有可见实体按钮的在按钮旁悬浮显示，无实体按钮或目标被遮挡/隐藏的居中弹窗展示并底部列出 Windows Systray 全局热键；点击左上角 `TinyLab` 或按 `Q` 开关（非阻塞实时随页面/状态更新，不扩充设置页除 `Q` 外的快捷键列表）。
+- **落点**：
+  - 核心引擎与动态联动：`web/static/shortcuts.js`（`global.toggle-shortcut-hints` 默认 `q`、`matchBinding`/`formatAction`/`onChange`）、`web/static/auth.js`（`initApp` 非阻塞预拉 `/settings` 载入快捷键覆盖）、`web/static/index.html` & `index-nopg.html`（`.brand-title-wrap > #shortcut-hints-trigger` + `shortcut-hints.js` 加载顺序）、`web/static/shortcut-hints.js`（上下文采集与词法全局 `currentPage`/`currentProviderId` 读取、z-index 最顶层弹窗探测、同键优先级遮蔽去重、Tier A `pointer-events:none` 悬浮键帽 + `html{zoom}` 校准与 2D 避撞、Tier B 浮层与高弹窗侧栏自适应避让 `.sh-docked-side`/`.sh-docked-bar` + Systray 底栏、capture 阶段防输入法/编辑区误触 `Q` 及 `Esc` `stopImmediatePropagation` 隔离）、`web/static/style-shortcut-hints.css` + `web/static/style.css`（`@import`）、`internal/feature/feature.go`（Core `StaticFiles`）、`web/static/i18n.js`（`sh*` 键 + 移除未接线的 `gmMetaToggle` `(I)` 标记）。
+  - 模块共享常量与按态注册：`web/playground/static-pg/playground/pg-ui-events.js`（`PG_LOCAL_SHORTCUTS`）、`gallery/gallery-fullscreen.js` & `gallery-layout.js`（`GALLERY_LOCAL_SHORTCUTS`、动态 tooltip 格式化、AI Review / Fullscreen / Trim / 视频与动图 / 1–9 遮蔽 QuickSlots）、`gif-editor/gif-editor-playback.js` & `gif-editor-input.js`（`GIF_LOCAL_SHORTCUTS`）、`utility/editor/editor_shell.js`（SSOT `EDITOR_V1_SHORTCUTS`）、`utility/editor-v2/editor-v2-commands.js`（`EDITOR_V2_SHORTCUTS`）、`assistant-demo.js`（`ADEMO_SHORTCUTS`）、`demo-designer.js`（`DGN_SHORTCUTS` + `inDgnEditor` 与预览聚焦/全屏互斥）。
+- **验证**：`web/shortcut-hints.test.js`（12 项）、既有 7 项 JS 回归、`i18n-lint`（0 failures）、`go test ./... && go vet ./...`、default 与 `-tags playground` 双构型无头 Chrome CDP 实机烟测（0 console/page error）。
+
 ## 2026-11-20 — Gallery Hash 排除（excludehash.txt / 广告尾图屏蔽）
 
 - **触发**：用户需求——在 Gallery 中通过极轻量的确定性图片哈希记录（`{configDir}/excludehash.txt`）屏蔽图包末尾广告图，支持包开启时懒检定（全量/前 N/后 N，按自然文件名升序切片），支持 `P`（排除+防重）/ `Alt+P`（关闭状态下移除）/ `Ctrl+Alt+P`（切换开关）快捷键，并将 `galleryExclude` 配置向后兼容地持久化到 `config.yaml`。

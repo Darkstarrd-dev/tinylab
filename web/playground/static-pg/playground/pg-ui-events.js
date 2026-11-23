@@ -266,6 +266,23 @@ function pgIsEditingTarget(el) {
   return tag === 'input';
 }
 
+var PG_LOCAL_SHORTCUTS = {
+  focusInput: { alt: true, key: '`', code: 'Backquote', altKeys: ['~'] },
+  mode1:      { alt: true, key: '1', code: 'Digit1' },
+  mode2:      { alt: true, key: '2', code: 'Digit2' },
+  mode3:      { alt: true, key: '3', code: 'Digit3' },
+  mode4:      { alt: true, key: '4', code: 'Digit4' },
+  clearChat:  { alt: true, key: 'c', code: 'KeyC' },
+  split1:     { ctrlOrCmd: true, key: '1', code: 'Digit1' },
+  split2:     { ctrlOrCmd: true, key: '2', code: 'Digit2' },
+  split3:     { ctrlOrCmd: true, key: '3', code: 'Digit3' },
+  split4:     { ctrlOrCmd: true, key: '4', code: 'Digit4' },
+  win1:       { shift: true, key: '1', code: 'Digit1', altKeys: ['!'] },
+  win2:       { shift: true, key: '2', code: 'Digit2', altKeys: ['@'] },
+  win3:       { shift: true, key: '3', code: 'Digit3', altKeys: ['#'] },
+  win4:       { shift: true, key: '4', code: 'Digit4', altKeys: ['$'] }
+};
+
 function pgInitGlobalShortcuts() {
   if (window._pgGlobalShortcutsBound) return;
   window._pgGlobalShortcutsBound = true;
@@ -278,7 +295,7 @@ function pgInitGlobalShortcuts() {
       var ae = document.activeElement;
       if (ae && ae.closest && ae.closest('.pg-max-editor-host, .ed2-embed-host, .ed2-embed-overlay')) return;
     } catch (err) { /* closest unavailable */ }
-    if (e.altKey && (e.key === '`' || e.key === '~' || e.code === 'Backquote')) {
+    if (Shortcuts.matchBinding(PG_LOCAL_SHORTCUTS.focusInput, e)) {
       e.preventDefault();
       var input = document.getElementById('pg-input');
       if (input) {
@@ -291,63 +308,150 @@ function pgInitGlobalShortcuts() {
     }
 
     // 2. Alt + 1~4 -> switch mode (1: normal, 2: search, 3: image, 4: autochat)
-    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      var modes = ['normal', 'search', 'image', 'autochat'];
-      var digit = null;
-      if (e.code && e.code.startsWith('Digit')) {
-        digit = parseInt(e.code.replace('Digit', ''), 10);
-      } else if (e.key >= '1' && e.key <= '4') {
-        digit = parseInt(e.key, 10);
-      }
-      if (digit >= 1 && digit <= 4) {
+    var modes = ['normal', 'search', 'image', 'autochat'];
+    for (var mi = 0; mi < modes.length; mi++) {
+      if (Shortcuts.matchBinding(PG_LOCAL_SHORTCUTS['mode' + (mi + 1)], e)) {
         e.preventDefault();
-        pgSetMode(modes[digit - 1]);
+        pgSetMode(modes[mi]);
         return;
       }
     }
 
     // 3. Alt + c -> clear chat
-    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'c' || e.key === 'C' || e.code === 'KeyC')) {
+    if (Shortcuts.matchBinding(PG_LOCAL_SHORTCUTS.clearChat, e)) {
       e.preventDefault();
       if (typeof pgClear === 'function') pgClear();
       return;
     }
 
     // 4. Ctrl + 1~4 -> switch splitCount (1~4)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-      var splitNum = null;
-      if (e.code && e.code.startsWith('Digit')) {
-        splitNum = parseInt(e.code.replace('Digit', ''), 10);
-      } else if (e.key >= '1' && e.key <= '4') {
-        splitNum = parseInt(e.key, 10);
-      }
-      if (splitNum >= 1 && splitNum <= 4) {
+    for (var si = 1; si <= 4; si++) {
+      if (Shortcuts.matchBinding(PG_LOCAL_SHORTCUTS['split' + si], e)) {
         e.preventDefault();
         if (typeof pgSetSplitCount === 'function') {
-          pgSetSplitCount(splitNum);
+          pgSetSplitCount(si);
         }
         return;
       }
     }
 
     // 5. Shift + 1~4 -> switch active window (0~3)
-    if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      var winIdx = null;
-      if (e.code && e.code.startsWith('Digit')) {
-        winIdx = parseInt(e.code.replace('Digit', ''), 10) - 1;
-      } else if (['!', '@', '#', '$'].indexOf(e.key) !== -1) {
-        winIdx = ['!', '@', '#', '$'].indexOf(e.key);
-      } else if (e.key >= '1' && e.key <= '4') {
-        winIdx = parseInt(e.key, 10) - 1;
-      }
-      if (winIdx !== null && winIdx >= 0 && winIdx < 4) {
+    for (var wi = 1; wi <= 4; wi++) {
+      if (Shortcuts.matchBinding(PG_LOCAL_SHORTCUTS['win' + wi], e)) {
         if (pgIsEditingTarget(e.target)) return;
         e.preventDefault();
-        if (winIdx < pgState.splitCount && typeof pgSetActiveWin === 'function') {
-          pgSetActiveWin(winIdx);
+        if (wi - 1 < pgState.splitCount && typeof pgSetActiveWin === 'function') {
+          pgSetActiveWin(wi - 1);
         }
         return;
       }
     }
   });
+}
+
+if (typeof ShortcutHints !== 'undefined' && typeof ShortcutHints.register === 'function') {
+  (function registerPgHints() {
+    var isPgActive = function(ctx) {
+      return !ctx.modal && !ctx.dropdown && !!(ctx.playground && ctx.playground.active);
+    };
+    var modes = ['normal', 'search', 'image', 'autochat'];
+    var list = [
+      {
+        id: 'pg.send-message',
+        actionId: 'pg.send-message',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActPgSend',
+        when: function(ctx) {
+          if (!isPgActive(ctx)) return false;
+          var autoRunning = typeof pgState !== 'undefined' && pgState.autoChat && pgState.autoChat.enabled && pgState.autoChat.isRunning;
+          return !(ctx.playground.generating && !autoRunning);
+        },
+        target: '#pg-inputbar .pg-send:not(.stop)'
+      },
+      {
+        id: 'pg.apply-edit',
+        actionId: 'pg.apply-edit',
+        group: 'page',
+        priority: 75,
+        labelKey: 'shActPgApplyEdit',
+        when: function(ctx) { return isPgActive(ctx) && ctx.playground.editingMessage; },
+        target: '#pg-panes .pg-editor-row .pg-btn.active'
+      },
+      {
+        id: 'pg.cancel-edit',
+        actionId: 'pg.cancel-edit',
+        group: 'page',
+        priority: 80,
+        labelKey: 'shActPgCancelEdit',
+        when: function(ctx) { return isPgActive(ctx) && ctx.playground.editingMessage; },
+        target: '#pg-panes .pg-editor-row .pg-btn:first-child'
+      },
+      {
+        id: 'pg.focus-input',
+        binding: PG_LOCAL_SHORTCUTS.focusInput,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActPgFocusInput',
+        when: isPgActive,
+        target: '#pg-input'
+      },
+      {
+        id: 'pg.clear-chat',
+        binding: PG_LOCAL_SHORTCUTS.clearChat,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActPgClear',
+        when: isPgActive,
+        target: '#pg-inputbar .pg-btn.danger[onclick*="pgClear"]'
+      },
+      {
+        id: 'pg.split-count',
+        formatKey: function() {
+          var prefix = (typeof Shortcuts !== 'undefined' && Shortcuts.formatBinding)
+            ? Shortcuts.formatBinding(PG_LOCAL_SHORTCUTS.split1).replace(/1$/, '')
+            : 'Ctrl+';
+          return prefix + '1–4';
+        },
+        group: 'page',
+        priority: 55,
+        allowShare: true,
+        labelKey: 'shActPgSplit',
+        when: function(ctx) {
+          return isPgActive(ctx) && !ctx.playground.batchActive && !ctx.playground.generating;
+        },
+        target: '#pg-split-wrap'
+      }
+    ];
+    for (var mi = 0; mi < modes.length; mi++) {
+      (function(mIdx, mName) {
+        list.push({
+          id: 'pg.mode-' + mName,
+          binding: PG_LOCAL_SHORTCUTS['mode' + (mIdx + 1)],
+          group: 'page',
+          priority: 55,
+          labelKey: 'shActPgMode',
+          when: isPgActive,
+          target: '.pg-mode-btn[data-mode="' + mName + '"]'
+        });
+      })(mi, modes[mi]);
+    }
+    for (var wi = 1; wi <= 4; wi++) {
+      (function(wNum) {
+        list.push({
+          id: 'pg.win-' + wNum,
+          binding: PG_LOCAL_SHORTCUTS['win' + wNum],
+          group: 'page',
+          priority: 55,
+          labelKey: 'shActPgActiveWin',
+          labelArgs: [wNum],
+          when: function(ctx) {
+            return isPgActive(ctx) && !ctx.playground.generating && wNum <= ctx.playground.splitCount;
+          },
+          target: '.pg-winbar-btns .pg-win-btn:nth-child(' + wNum + ')'
+        });
+      })(wi);
+    }
+    ShortcutHints.register(list);
+  })();
 }

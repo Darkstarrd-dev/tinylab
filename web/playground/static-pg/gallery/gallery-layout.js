@@ -123,6 +123,13 @@ function autoBalanceFullscreenSplitRatio() {
   paneVid.style.flex = (ratioVid * 100) + ' 1 0%';
 }
 
+function _galKey(actionId, fallback) {
+  if (typeof Shortcuts !== 'undefined' && typeof Shortcuts.formatAction === 'function') {
+    return Shortcuts.formatAction(actionId) || fallback;
+  }
+  return fallback;
+}
+
 function buildPanelHTML(type, isSplit) {
   var isVid = (type === 'video');
   var panelId = isVid ? 'gallery-pane-video' : 'gallery-pane-image';
@@ -130,19 +137,29 @@ function buildPanelHTML(type, isSplit) {
   var showTree = galleryState.treeOpen && ((galleryState.viewMode === 'split' && galleryState.focus === type) || (galleryState.viewMode === 'single'));
   var treeClass = showTree ? '' : ' hidden';
 
+  var kSplit = _galKey('gallery.toggle-split', 'D');
+  var kMedia = _galKey('gallery.toggle-media', 'M');
+  var kAuto = _galKey('gallery.toggle-autoplay', 'A');
+  var kPrev = _galKey('gallery.prev', 'ArrowLeft');
+  var kNext = _galKey('gallery.next', 'ArrowRight');
+  var kPrevFolder = _galKey('gallery.prev-folder', 'ArrowUp');
+  var kNextFolder = _galKey('gallery.next-folder', 'ArrowDown');
+  var kTree = _galKey('gallery.toggle-tree', 'T');
+  var kFs = _galKey('gallery.toggle-fullscreen', 'F');
+
   var splitIcon = (galleryState.viewMode === 'split') ? GALLERY_ICONS.single : GALLERY_ICONS.dual;
-  var splitBtnTitle = (galleryState.viewMode === 'split') ? 'Single View (D)' : 'Dual View (D)';
+  var splitBtnTitle = ((galleryState.viewMode === 'split') ? 'Single View' : 'Dual View') + ' (' + kSplit + ')';
 
   var modeIcon = (galleryState.mediaType === 'video') ? GALLERY_ICONS.picture : GALLERY_ICONS.video;
-  var modeBtnTitle = (galleryState.mediaType === 'video') ? 'Picture Mode (M)' : 'Video Mode (M)';
+  var modeBtnTitle = ((galleryState.mediaType === 'video') ? 'Picture Mode' : 'Video Mode') + ' (' + kMedia + ')';
 
   // Mode button is hidden in split mode!
-  var modeBtnHTML = isSplit ? '' : '<button class="gallery-btn gallery-btn-icon" id="gallery-mode-btn" type="button" data-tooltip="' + modeBtnTitle + '">' + modeIcon + '</button>';
-  var editBtnTitle = 'Edit (ffmpeg)';
+  var modeBtnHTML = isSplit ? '' : '<button class="gallery-btn gallery-btn-icon" id="gallery-mode-btn" type="button" data-tooltip="' + escapeHtml(modeBtnTitle) + '">' + modeIcon + '</button>';
+  var editBtnTitle = 'Edit (E · ffmpeg)';
 
 
   var autoPlayIcon = galleryState.autoplayOn ? GALLERY_ICONS.stop : GALLERY_ICONS.play;
-  var autoPlayTitle = galleryState.autoplayOn ? 'Stop (A / ■)' : 'Autoplay (A / ▶)';
+  var autoPlayTitle = (galleryState.autoplayOn ? 'Stop (' + kAuto + ' / ■)' : 'Autoplay (' + kAuto + ' / ▶)');
 
   var volCtrl = isVid ?
     '<div class="gallery-vol-wrapper" id="gallery-vol-wrapper">' +
@@ -164,10 +181,10 @@ function buildPanelHTML(type, isSplit) {
     '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-stop" type="button" data-tooltip="Stop">' + GALLERY_ICONS.stop + '</button>' +
     '<button class="gallery-btn gallery-btn-icon" id="gallery-vid-next-btn" type="button" data-tooltip="Next Video (› / Down)">' + GALLERY_ICONS.next + '</button>'
     :
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-folder-btn" type="button" data-tooltip="Prev Folder (&lt;| / Up)">' + GALLERY_ICONS.prevFolder + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-btn" type="button" data-tooltip="Prev (‹ / Left / PageUp)">' + GALLERY_ICONS.prev + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-folder-btn" type="button" data-tooltip="' + escapeHtml('Prev Folder (<| / ' + kPrevFolder + ')') + '">' + GALLERY_ICONS.prevFolder + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-prev-btn" type="button" data-tooltip="' + escapeHtml('Prev (‹ / ' + kPrev + ' / PageUp)') + '">' + GALLERY_ICONS.prev + '</button>' +
     '<div class="gallery-auto-wrapper" id="gallery-auto-wrapper">' +
-      '<button class="gallery-btn gallery-btn-icon" id="gallery-autoplay-btn" type="button" data-tooltip="' + autoPlayTitle + '">' + autoPlayIcon + '</button>' +
+      '<button class="gallery-btn gallery-btn-icon" id="gallery-autoplay-btn" type="button" data-tooltip="' + escapeHtml(autoPlayTitle) + '">' + autoPlayIcon + '</button>' +
       '<div class="gallery-interval-dropdown" id="gallery-interval-dropdown">' +
         AUTOPLAY_LABELS.map(function(l, i) {
           var act = (AUTOPLAY_INTERVALS[i] === galleryState.autoplayInterval) ? ' active' : '';
@@ -178,8 +195,8 @@ function buildPanelHTML(type, isSplit) {
         }).join('') +
       '</div>' +
     '</div>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-btn" type="button" data-tooltip="Next (› / Right / PageDown / Space)">' + GALLERY_ICONS.next + '</button>' +
-    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-folder-btn" type="button" data-tooltip="Next Folder (|&gt; / Down)">' + GALLERY_ICONS.nextFolder + '</button>';
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-btn" type="button" data-tooltip="' + escapeHtml('Next (› / ' + kNext + ' / PageDown / Space)') + '">' + GALLERY_ICONS.next + '</button>' +
+    '<button class="gallery-btn gallery-btn-icon" id="gallery-next-folder-btn" type="button" data-tooltip="' + escapeHtml('Next Folder (|> / ' + kNextFolder + ')') + '">' + GALLERY_ICONS.nextFolder + '</button>';
 
   var extraRight = '';
 
@@ -220,7 +237,7 @@ function buildPanelHTML(type, isSplit) {
              '<div class="gallery-bottom">' +
                 thumbsHTML +
                 '<div class="gallery-controls">' +
-                  '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" data-tooltip="Directory Tree (T)">' + GALLERY_ICONS.tree + '</button>' +
+                  '<button class="gallery-btn gallery-btn-icon" id="' + (isVid ? 'gallery-vid-tree-btn' : 'gallery-tree-btn') + '" type="button" data-tooltip="' + escapeHtml('Directory Tree (' + kTree + ')') + '">' + GALLERY_ICONS.tree + '</button>' +
                   '<button class="gallery-btn gallery-btn-icon bin-button" id="' + (isVid ? 'gallery-vid-clear-btn' : 'gallery-clear-btn') + '" type="button" data-tooltip="' + escapeHtml(T('galleryClearTitle') || 'Clear All & Free Memory') + '" aria-label="' + escapeHtml(T('galleryClearTitle') || 'Clear All & Free Memory') + '">' +
                     '<svg class="bin-top" viewBox="0 0 39 7" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
                       '<line y1="5" x2="39" y2="5" stroke="currentColor" stroke-width="4"></line>' +
@@ -240,11 +257,11 @@ function buildPanelHTML(type, isSplit) {
                  '<div class="gallery-ctrl-right">' +
                    extraRight +
                    '<span class="gallery-info" id="' + infoId + '">0 / 0</span>' +
-                  '<button class="gallery-btn gallery-btn-icon gallery-meta-btn" id="gallery-meta-btn" type="button" data-tooltip="' + escapeHtml(T('gmMetaToggle') || 'Metadata (I)') + '">' + GALLERY_ICONS.metaInfo + '</button>' +
-                   '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" data-tooltip="' + splitBtnTitle + '">' + splitIcon + '</button>' +
+                  '<button class="gallery-btn gallery-btn-icon gallery-meta-btn" id="gallery-meta-btn" type="button" data-tooltip="' + escapeHtml(T('gmMetaToggle') || 'Metadata') + '">' + GALLERY_ICONS.metaInfo + '</button>' +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-split-btn" type="button" data-tooltip="' + escapeHtml(splitBtnTitle) + '">' + splitIcon + '</button>' +
                    modeBtnHTML +
-                   '<button class="gallery-btn gallery-btn-icon" id="gallery-edit-btn" type="button" data-tooltip="' + editBtnTitle + '">' + GALLERY_ICONS.edit + '</button>' +
-                   '<button class="gallery-btn gallery-btn-icon" id="gallery-fs-btn" type="button" data-tooltip="Fullscreen (F)">' + GALLERY_ICONS.fullscreen + '</button>' +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-edit-btn" type="button" data-tooltip="' + escapeHtml(editBtnTitle) + '">' + GALLERY_ICONS.edit + '</button>' +
+                   '<button class="gallery-btn gallery-btn-icon" id="gallery-fs-btn" type="button" data-tooltip="' + escapeHtml('Fullscreen (' + kFs + ')') + '">' + GALLERY_ICONS.fullscreen + '</button>' +
                  '</div>' +
                '</div>' +
              '</div>' +

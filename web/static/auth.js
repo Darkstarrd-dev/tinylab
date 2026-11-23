@@ -228,6 +228,13 @@ function initApp() {
   initLang();
   initHeaderStats();
   setupHeaderResponsive();
+  if (typeof apiGet === 'function' && typeof Shortcuts !== 'undefined' && typeof Shortcuts.loadOverrides === 'function') {
+    apiGet('/settings').then(function(s) {
+      if (!s) return;
+      window.__settings = s;
+      if (s.shortcuts) Shortcuts.loadOverrides(s.shortcuts);
+    }).catch(function() {});
+  }
   if (typeof renderHeaderQuickSlots === 'function') {
     renderHeaderQuickSlots();
   }

@@ -41,7 +41,7 @@ window.__hasPlayground = true;
 <img src="/logo-sm.png" alt="TinyLab" class="sidebar-logo" width="90" height="90">
 </a>
 <div class="sidebar-brand-content">
-<h1>TinyLab</h1>
+<h1 class="brand-title-wrap"><button type="button" id="shortcut-hints-trigger" class="brand-title-btn" aria-pressed="false" data-tooltip="Shortcut Hints (Q)">TinyLab</button></h1>
 <div class="header-controls">
       <label class="theme-switch" id="theme-btn" data-tooltip="Toggle theme" aria-label="Toggle dark/light theme">
         <input type="checkbox" class="theme-switch__checkbox" id="theme-switch-checkbox" onchange="toggleTheme()">
@@ -151,6 +151,7 @@ window.__hasPlayground = true;
 <script src="/app-modal.js"></script>
 <script src="/app-shortcuts.js"></script>
 <script src="/shortcuts.js"></script>
+<script src="/shortcut-hints.js"></script>
 <script src="/music/host.js"></script>
 <script src="/music/player.js"></script>
 <script src="/music/providers/bilibili.js"></script>

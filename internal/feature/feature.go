@@ -146,7 +146,7 @@ func registerDefaults() {
 			"monitor/monitor_quota.js", "monitor/monitor_recent.js", "monitor/monitor_state.js",
 			"providers.js", "providers-detail.js", "providers-keys.js", "providers-models.js", "quickslots.js",
 			"settings/settings.js", "settings/settings_modal.js", "settings/settings_shortcuts.js",
-			"settings/settings_trace.js", "shortcuts.js", "theme.js",
+			"settings/settings_trace.js", "shortcuts.js", "shortcut-hints.js", "style-shortcut-hints.css", "theme.js",
 		},
 	})
 	register(Feature{

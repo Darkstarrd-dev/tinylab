@@ -703,10 +703,24 @@ function ademoInjectGamesToolbar(html) {
   return wrap;
 }
 
+var ADEMO_SHORTCUTS = {
+  fullscreen: { ctrlOrCmd: true, key: 'f' },
+  exitBody:   { key: 'Escape' }
+};
+
+function ademoMatchLocal(b, e) {
+  if (typeof Shortcuts !== 'undefined' && typeof Shortcuts.matchBinding === 'function') {
+    return Shortcuts.matchBinding(b, e);
+  }
+  if (!b || !e) return false;
+  var mod = !!(e.ctrlKey || e.metaKey);
+  if (!!b.ctrlOrCmd !== mod || !!b.alt !== !!e.altKey || !!b.shift !== !!e.shiftKey) return false;
+  return b.key.length === 1 ? (e.key && e.key.toLowerCase() === b.key.toLowerCase()) : e.key === b.key;
+}
+
 function ademoHandleFullscreenShortcut(e) {
   // Ctrl+F toggles fullscreen of the currently visible pane's container.
-  var isCtrlF = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
-  if (!isCtrlF) return false;
+  if (!ademoMatchLocal(ADEMO_SHORTCUTS.fullscreen, e)) return false;
   var shell = document.querySelector('.demo-shell');
   if (!shell || shell.hidden) return false;
   // Ignore when typing.
@@ -870,7 +884,7 @@ function ademoOnKeyDown(e) {
   if (typeof topOpenModal === 'function' && topOpenModal()) return;
   if (ademoIsFormTarget(e)) return;
 
-  if (e.key === 'Escape' && ademoRt.bodyMode) {
+  if (ademoMatchLocal(ADEMO_SHORTCUTS.exitBody, e) && ademoRt.bodyMode) {
     e.preventDefault();
     e.stopPropagation();
     ademoSetBodyMode(false);
@@ -1305,3 +1319,47 @@ window.__ademo = {
   setFullscreen: ademoSetFullscreen,
   toggleFullscreen: ademoToggleFullscreen
 };
+
+if (typeof ShortcutHints !== 'undefined' && typeof ShortcutHints.register === 'function') {
+  (function registerAdemoHints() {
+    var inDemo = function (ctx) { return !ctx.modal && !ctx.dropdown && !!(ctx.demo && ctx.demo.active); };
+    ShortcutHints.register([
+      {
+        id: 'demo.fullscreen',
+        binding: ADEMO_SHORTCUTS.fullscreen,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActDemoFullscreen',
+        when: inDemo,
+        target: '.demo-toolbar .demo-fs-btn'
+      },
+      {
+        id: 'demo.exit-body',
+        binding: ADEMO_SHORTCUTS.exitBody,
+        group: 'page',
+        priority: 85,
+        labelKey: 'shActDemoExitBody',
+        when: function (ctx) { return inDemo(ctx) && ctx.demo.tab === 'ademo' && ctx.demo.bodyMode; },
+        target: '.ademo-add-body'
+      },
+      {
+        id: 'demo.move',
+        formatKey: function (ctx) { return ctx.demo && ctx.demo.type1 === 'topdown' ? 'WASD / ←↑↓→' : '← / →'; },
+        group: 'page',
+        priority: 55,
+        allowShare: true,
+        labelKey: 'shActDemoMove',
+        when: function (ctx) { return inDemo(ctx) && ctx.demo.tab === 'ademo'; }
+      },
+      {
+        id: 'demo.action',
+        formatKey: function (ctx) { return ctx.demo && ctx.demo.type1 === 'topdown' ? 'Space' : '↑ / Space'; },
+        group: 'page',
+        priority: 55,
+        allowShare: true,
+        labelKey: 'shActDemoAction',
+        when: function (ctx) { return inDemo(ctx) && ctx.demo.tab === 'ademo'; }
+      }
+    ]);
+  })();
+}

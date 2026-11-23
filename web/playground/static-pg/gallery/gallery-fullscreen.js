@@ -13,6 +13,26 @@ function goNext() {
   setActive(galleryState.index + 1);
 }
 
+// Local non-configurable bindings shared between Gallery keydown handlers and ShortcutHints.
+var GALLERY_LOCAL_SHORTCUTS = {
+  editMedia:   { key: 'e' },
+  deleteMark:  { key: 'Delete' },
+  deleteItem:  { ctrlOrCmd: true, key: 'Delete' },
+  deleteZip:   { shift: true, key: 'Delete' },
+  vidPlay:     { key: ' ' },
+  vidPrevItem: { key: 'ArrowUp' },
+  vidNextItem: { key: 'ArrowDown' },
+  vidSeekBack: { key: 'ArrowLeft' },
+  vidSeekFwd:  { key: 'ArrowRight' }
+};
+
+function _galMatchLocal(binding, e) {
+  if (typeof Shortcuts !== 'undefined' && typeof Shortcuts.matchBinding === 'function') {
+    return Shortcuts.matchBinding(binding, e);
+  }
+  return false;
+}
+
 function stopAutoplay() {
   if (galleryState.autoplayTimer) {
     clearInterval(galleryState.autoplayTimer);
@@ -23,8 +43,10 @@ function stopAutoplay() {
   galleryState.autoplayOn = false;
   var btn = document.getElementById('gallery-autoplay-btn');
   if (btn) {
+    var kAuto = (typeof Shortcuts !== 'undefined' && typeof Shortcuts.formatAction === 'function')
+      ? (Shortcuts.formatAction('gallery.toggle-autoplay') || 'A') : 'A';
     btn.innerHTML = GALLERY_ICONS.play;
-    btn.setAttribute('data-tooltip', 'Autoplay (A / ▶)');
+    btn.setAttribute('data-tooltip', 'Autoplay (' + kAuto + ' / ▶)');
     btn.setAttribute('aria-label', 'Autoplay');
   }
 }
@@ -36,8 +58,10 @@ function startAutoplay() {
   galleryState.autoplayTimer = setInterval(goNext, galleryState.autoplayInterval);
   var btn = document.getElementById('gallery-autoplay-btn');
   if (btn) {
+    var kAuto = (typeof Shortcuts !== 'undefined' && typeof Shortcuts.formatAction === 'function')
+      ? (Shortcuts.formatAction('gallery.toggle-autoplay') || 'A') : 'A';
     btn.innerHTML = GALLERY_ICONS.stop;
-    btn.setAttribute('data-tooltip', 'Stop (A / ■)');
+    btn.setAttribute('data-tooltip', 'Stop (' + kAuto + ' / ■)');
     btn.setAttribute('aria-label', 'Stop');
   }
 }
@@ -214,28 +238,31 @@ function onFullscreenKey(e) {
   if (Shortcuts.matchEvent('gallery.toggle-media', e)) {
     e.preventDefault(); e.stopPropagation(); toggleMediaType(); return;
   }
-  if (k === 'E' || k === 'e') {
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.editMedia, e)) {
     e.preventDefault(); e.stopPropagation();
     if (typeof window.triggerMediaEditor === 'function') { window.triggerMediaEditor(); }
     return;
   }
 
   // Delete key family: deletion interactions (mark / prompt item / prompt zip)
-  if (k === 'Delete') {
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteZip, e)) {
     e.preventDefault(); e.stopPropagation();
-    if (e.shiftKey) {
-      if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
-        window.showTreeSelDeletePrompt();
-      } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
-    } else if (e.ctrlKey) {
-      if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
+    if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
+      window.showTreeSelDeletePrompt();
+    } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
+    return;
+  }
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteItem, e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
+    return;
+  }
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteMark, e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (galleryState.reviewState.reviewMode) {
+      toggleReviewItemMark();
     } else {
-      // 在 review 模式下：切换删除/保留状态（toggle）
-      if (galleryState.reviewState.reviewMode) {
-        toggleReviewItemMark();
-      } else {
-        deleteItemMark();
-      }
+      deleteItemMark();
     }
     return;
   }
@@ -305,17 +332,17 @@ function onFullscreenKey(e) {
       // Per-video scrubbing / volume controls below are intentionally NOT
       // customizable: they share key space with gallery navigation and
       // would conflict if rebound independently.
-      if (k === 'ArrowLeft') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidSeekBack, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 5);
         return;
       }
-      if (k === 'ArrowRight') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidSeekFwd, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 5);
         return;
       }
-      if (k === 'ArrowUp') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidPrevItem, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
           var newVol = Math.min(100, (galleryState.videoVolume || 0) + 10);
@@ -329,7 +356,7 @@ function onFullscreenKey(e) {
         }
         return;
       }
-      if (k === 'ArrowDown') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidNextItem, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
           var newVol = Math.max(0, (galleryState.videoVolume || 0) - 10);
@@ -343,7 +370,7 @@ function onFullscreenKey(e) {
         }
         return;
       }
-      if (k === ' ' || k === 'Spacebar') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidPlay, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
           if (vidEl.paused) vidEl.play();
@@ -410,28 +437,31 @@ function onGalleryKeyDown(e) {
   if (Shortcuts.matchEvent('gallery.toggle-media', e)) {
     e.preventDefault(); e.stopPropagation(); toggleMediaType(); return;
   }
-  if (k === 'E' || k === 'e') {
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.editMedia, e)) {
     e.preventDefault(); e.stopPropagation();
     if (typeof window.triggerMediaEditor === 'function') { window.triggerMediaEditor(); }
     return;
   }
 
   // Delete key family: deletion interactions (mark / prompt item / prompt zip)
-  if (k === 'Delete') {
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteZip, e)) {
     e.preventDefault(); e.stopPropagation();
-    if (e.shiftKey) {
-      if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
-        window.showTreeSelDeletePrompt();
-      } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
-    } else if (e.ctrlKey) {
-      if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
+    if (galleryState.treeSel && galleryState.treeSel.nodes.length && typeof window.showTreeSelDeletePrompt === 'function') {
+      window.showTreeSelDeletePrompt();
+    } else if (typeof window.deleteZipPrompt === 'function') window.deleteZipPrompt();
+    return;
+  }
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteItem, e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (typeof window.deleteItemPrompt === 'function') window.deleteItemPrompt();
+    return;
+  }
+  if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.deleteMark, e)) {
+    e.preventDefault(); e.stopPropagation();
+    if (galleryState.reviewState.active) {
+      toggleReviewItemMark();
     } else {
-      // 在 review 模式下：切换删除/保留状态（toggle）
-      if (galleryState.reviewState.active) {
-        toggleReviewItemMark();
-      } else {
-        deleteItemMark();
-      }
+      deleteItemMark();
     }
     return;
   }
@@ -532,23 +562,23 @@ function onGalleryKeyDown(e) {
       }
       // Per-video scrubbing controls below are NOT customizable (shared with
       // gallery navigation keys).
-      if (k === 'ArrowUp') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidPrevItem, e)) {
         e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex - 1); return;
       }
-      if (k === 'ArrowDown') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidNextItem, e)) {
         e.preventDefault(); e.stopPropagation(); setVideoActive(galleryState.videoIndex + 1); return;
       }
-      if (k === 'ArrowLeft') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidSeekBack, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) vidEl.currentTime = Math.max(0, vidEl.currentTime - 10);
         return;
       }
-      if (k === 'ArrowRight') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidSeekFwd, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) vidEl.currentTime = Math.min(vidEl.duration || 0, vidEl.currentTime + 10);
         return;
       }
-      if (k === ' ' || k === 'Spacebar') {
+      if (_galMatchLocal(GALLERY_LOCAL_SHORTCUTS.vidPlay, e)) {
         e.preventDefault(); e.stopPropagation();
         if (vidEl) {
           if (vidEl.paused) vidEl.play();
@@ -1253,4 +1283,326 @@ async function deleteNodeFromDisk(nodeType, item, curDir, packId, rootHandle, no
   } else {
     showMsg(T('gfDelRemovedDisk'));
   }
+}
+
+if (typeof ShortcutHints !== 'undefined' && typeof ShortcutHints.register === 'function') {
+  (function registerGalleryHints() {
+    var inGallery = function(ctx) {
+      return !ctx.modal && !ctx.dropdown && !!(ctx.gallery && ctx.gallery.active);
+    };
+    var paneSel = function(ctx, id) {
+      if (typeof document === 'undefined') return null;
+      var paneId = (ctx.gallery && ctx.gallery.isVidActive) ? 'gallery-pane-video' : 'gallery-pane-image';
+      var pane = document.getElementById(paneId);
+      return (pane && pane.querySelector('#' + id)) || document.getElementById(id);
+    };
+    ShortcutHints.register([
+      {
+        id: 'gallery.trim-cancel',
+        binding: { key: 'Escape' },
+        group: 'page',
+        priority: 85,
+        labelKey: 'shActGalTrimCancel',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.trimMode; },
+        target: '#ge-tm-cancel'
+      },
+      {
+        id: 'gallery.close-meta',
+        binding: { key: 'Escape' },
+        group: 'page',
+        priority: 85,
+        labelKey: 'shActGalCloseMeta',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.metaOverlayEnabled; },
+        target: function(ctx) { return paneSel(ctx, 'gallery-meta-btn'); }
+      },
+      {
+        id: 'gallery.exit-fullscreen',
+        actionId: 'gallery.exit-fullscreen',
+        extraKeys: ['Enter'],
+        group: 'page',
+        priority: 65,
+        labelKey: 'shActGalExitFs',
+        when: function(ctx) { return inGallery(ctx) && ctx.fullscreen; }
+      },
+      {
+        id: 'gallery.toggle-split',
+        actionId: 'gallery.toggle-split',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalSplit',
+        when: inGallery,
+        target: function(ctx) { return paneSel(ctx, 'gallery-split-btn'); }
+      },
+      {
+        id: 'gallery.toggle-media',
+        actionId: 'gallery.toggle-media',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalMedia',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.viewMode !== 'split'; },
+        target: '#gallery-mode-btn'
+      },
+      {
+        id: 'gallery.switch-focus',
+        actionId: 'gallery.switch-focus',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalFocus',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.viewMode === 'split'; }
+      },
+      {
+        id: 'gallery.edit-media',
+        binding: GALLERY_LOCAL_SHORTCUTS.editMedia,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalEdit',
+        when: inGallery,
+        target: function(ctx) { return paneSel(ctx, 'gallery-edit-btn'); }
+      },
+      {
+        id: 'gallery.toggle-fullscreen',
+        actionId: 'gallery.toggle-fullscreen',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActFullscreen',
+        when: inGallery,
+        target: function(ctx) { return paneSel(ctx, 'gallery-fs-btn'); }
+      },
+      {
+        id: 'gallery.toggle-tree',
+        actionId: 'gallery.toggle-tree',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalTree',
+        when: inGallery,
+        target: function(ctx) {
+          return paneSel(ctx, (ctx.gallery && ctx.gallery.isVidActive) ? 'gallery-vid-tree-btn' : 'gallery-tree-btn');
+        }
+      },
+      {
+        id: 'gallery.clear-tree',
+        actionId: 'gallery.clear-tree',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalClearTree',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.treeOpen; },
+        target: function(ctx) {
+          return paneSel(ctx, (ctx.gallery && ctx.gallery.isVidActive) ? 'gallery-vid-clear-btn' : 'gallery-clear-btn');
+        }
+      },
+      {
+        id: 'gallery.toggle-exclude',
+        actionId: 'gallery.toggle-exclude',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalToggleExclude',
+        when: inGallery,
+        target: '#gallery-exclude-btn'
+      },
+      {
+        id: 'gallery.exclude-hash',
+        actionId: 'gallery.exclude-hash',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalExclude',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive; }
+      },
+      {
+        id: 'gallery.unexclude-hash',
+        actionId: 'gallery.unexclude-hash',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalUnexclude',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive; }
+      },
+      {
+        id: 'gallery.delete-mark',
+        binding: GALLERY_LOCAL_SHORTCUTS.deleteMark,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalDelMark',
+        when: inGallery
+      },
+      {
+        id: 'gallery.delete-item',
+        binding: GALLERY_LOCAL_SHORTCUTS.deleteItem,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalDelItem',
+        when: inGallery
+      },
+      {
+        id: 'gallery.delete-zip',
+        binding: GALLERY_LOCAL_SHORTCUTS.deleteZip,
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalDelZip',
+        when: inGallery
+      },
+      // AI Review navigation (shadows image arrows & space when active)
+      {
+        id: 'gallery.review-prev',
+        binding: { key: 'ArrowLeft' },
+        group: 'page',
+        priority: 70,
+        labelKey: 'shActGalReviewPrev',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && !ctx.fullscreen && ctx.gallery.reviewNav; },
+        target: '#gallery-prev-btn'
+      },
+      {
+        id: 'gallery.review-next',
+        binding: { key: 'ArrowRight' },
+        group: 'page',
+        priority: 70,
+        labelKey: 'shActGalReviewNext',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && !ctx.fullscreen && ctx.gallery.reviewNav; },
+        target: '#gallery-next-btn'
+      },
+      {
+        id: 'gallery.review-prev-node',
+        binding: { key: 'ArrowUp' },
+        group: 'page',
+        priority: 70,
+        labelKey: 'shActGalReviewPrevNode',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && !ctx.fullscreen && ctx.gallery.reviewNav; },
+        target: '#gallery-prev-folder-btn'
+      },
+      {
+        id: 'gallery.review-next-node',
+        binding: { key: 'ArrowDown' },
+        group: 'page',
+        priority: 70,
+        labelKey: 'shActGalReviewNextNode',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && !ctx.fullscreen && ctx.gallery.reviewNav; },
+        target: '#gallery-next-folder-btn'
+      },
+      {
+        id: 'gallery.review-mark',
+        binding: { key: ' ' },
+        group: 'page',
+        priority: 70,
+        labelKey: 'shActGalReviewMark',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && !ctx.fullscreen && ctx.gallery.reviewNav; }
+      },
+      // Image mode navigation & autoplay
+      {
+        id: 'gallery.prev',
+        actionId: 'gallery.prev',
+        extraKeys: ['PageUp'],
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalPrev',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && (ctx.fullscreen || !ctx.gallery.reviewNav); },
+        target: '#gallery-prev-btn'
+      },
+      {
+        id: 'gallery.next',
+        actionId: 'gallery.next',
+        extraKeys: ['PageDown', 'Space'],
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalNext',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && (ctx.fullscreen || !ctx.gallery.reviewNav); },
+        target: '#gallery-next-btn'
+      },
+      {
+        id: 'gallery.prev-folder',
+        actionId: 'gallery.prev-folder',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalPrevFolder',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && (ctx.fullscreen || !ctx.gallery.reviewNav); },
+        target: '#gallery-prev-folder-btn'
+      },
+      {
+        id: 'gallery.next-folder',
+        actionId: 'gallery.next-folder',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalNextFolder',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive && (ctx.fullscreen || !ctx.gallery.reviewNav); },
+        target: '#gallery-next-folder-btn'
+      },
+      {
+        id: 'gallery.toggle-autoplay',
+        actionId: 'gallery.toggle-autoplay',
+        group: 'page',
+        priority: 55,
+        labelKey: 'shActGalAutoplay',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive; },
+        target: '#gallery-autoplay-btn'
+      },
+      {
+        id: 'gallery.autoplay-interval',
+        keyText: '1–9',
+        group: 'page',
+        priority: 50,
+        shadowKey: 'gallery-digits-1-9',
+        labelKey: 'shActGalAutoplayInt',
+        when: function(ctx) { return inGallery(ctx) && !ctx.gallery.isVidActive; }
+      },
+      // Video / animated-image mode controls
+      {
+        id: 'gallery.vid-play',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidPlay,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalVidPlay',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && !ctx.gallery.isAnimMode; },
+        target: '#gallery-vid-play'
+      },
+      {
+        id: 'gallery.anim-replay',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidPlay,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalAnimReplay',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && ctx.gallery.isAnimMode; }
+      },
+      {
+        id: 'gallery.vid-prev',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidPrevItem,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalVidPrev',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && (!ctx.fullscreen || ctx.gallery.isAnimMode); },
+        target: '#gallery-vid-prev-btn'
+      },
+      {
+        id: 'gallery.vid-next',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidNextItem,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalVidNext',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && (!ctx.fullscreen || ctx.gallery.isAnimMode); },
+        target: '#gallery-vid-next-btn'
+      },
+      {
+        id: 'gallery.vid-seek-back',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidSeekBack,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalVidSeekBack',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && !ctx.gallery.isAnimMode; }
+      },
+      {
+        id: 'gallery.vid-seek-fwd',
+        binding: GALLERY_LOCAL_SHORTCUTS.vidSeekFwd,
+        group: 'page',
+        priority: 60,
+        labelKey: 'shActGalVidSeekFwd',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && !ctx.gallery.isAnimMode; }
+      },
+      {
+        id: 'gallery.vid-volume',
+        formatKey: function(ctx) { return ctx.fullscreen ? '1–9 / ↑ / ↓' : '1–9'; },
+        group: 'page',
+        priority: 60,
+        shadowKey: 'gallery-digits-1-9',
+        labelKey: 'shActGalVidVol',
+        when: function(ctx) { return inGallery(ctx) && ctx.gallery.isVidActive && !ctx.gallery.isAnimMode; },
+        target: '#gallery-vol-btn'
+      }
+    ]);
+  })();
 }

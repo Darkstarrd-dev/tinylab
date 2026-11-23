@@ -760,4 +760,17 @@
   // tools, crop/layers, output/export controls; stage + timeline toolbar)
   // ------------------------------------------------------------------
   shared.fns.bindEvents = bindEvents;
+
+  if (typeof window.ShortcutHints !== 'undefined' && typeof window.ShortcutHints.register === 'function') {
+    window.ShortcutHints.register({
+      id: 'gif.cancel-pick',
+      binding: { key: 'Escape' },
+      group: 'page',
+      priority: 85,
+      labelKey: 'shActGifCancelPick',
+      when: function(ctx) {
+        return !ctx.modal && !ctx.dropdown && !!(ctx.gif && ctx.gif.active && (ctx.gif.pickColorMode || ctx.gif.floodPickMode));
+      }
+    });
+  }
 })();

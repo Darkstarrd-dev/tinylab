@@ -752,6 +752,36 @@
     document.addEventListener('keydown', menubarKeydownHandler);
   }
 
+  const EDITOR_V2_SHORTCUTS = {
+    closeTab:       { alt: true, key: 'w' },
+    closeAll:       { ctrlOrCmd: true, alt: true, key: 'w' },
+    newTextFile:    { alt: true, key: 'n' },
+    newFile:        { ctrlOrCmd: true, alt: true, key: 'n' },
+    save:           { ctrlOrCmd: true, key: 's' },
+    saveAs:         { ctrlOrCmd: true, shift: true, key: 's' },
+    open:           { ctrlOrCmd: true, key: 'o' },
+    prevTab:        { alt: true, key: 'PageUp' },
+    nextTab:        { alt: true, key: 'PageDown' },
+    find:           { ctrlOrCmd: true, key: 'f' },
+    replace:        { ctrlOrCmd: true, key: 'h' },
+    gotoLine:       { ctrlOrCmd: true, key: 'g' },
+    moveLineUp:     { alt: true, key: 'ArrowUp' },
+    moveLineDown:   { alt: true, key: 'ArrowDown' },
+    copyLineUp:     { alt: true, shift: true, key: 'ArrowUp' },
+    copyLineDown:   { alt: true, shift: true, key: 'ArrowDown' },
+    addCursorAbove: { ctrlOrCmd: true, alt: true, key: 'ArrowUp' },
+    addCursorBelow: { ctrlOrCmd: true, alt: true, key: 'ArrowDown' }
+  };
+
+  function matchEd2(b, e) {
+    if (window.Shortcuts && typeof window.Shortcuts.matchBinding === 'function') {
+      return window.Shortcuts.matchBinding(b, e);
+    }
+    const isMod = e.ctrlKey || e.metaKey;
+    if (!!b.ctrlOrCmd !== isMod || !!b.alt !== !!e.altKey || !!b.shift !== !!e.shiftKey) return false;
+    return b.key.length === 1 ? (e.key && e.key.toLowerCase() === b.key.toLowerCase()) : e.key === b.key;
+  }
+
   function bindKeyboardShortcuts(rootEl, editor) {
     if (globalKeydownHandler) {
       window.removeEventListener('keydown', globalKeydownHandler, true);
@@ -762,130 +792,24 @@
       if (!rootEl || !document.body.contains(rootEl)) return;
       if (rootEl.offsetParent === null && rootEl.offsetWidth === 0) return;
 
-      const isMod = e.ctrlKey || e.metaKey;
-      const isShift = e.shiftKey;
-      const isAlt = e.altKey;
-      const key = e.key;
-
-      // 1. Alt+W: Close Tab
-      if (isAlt && !isMod && !isShift && (key === 'w' || key === 'W')) {
-        e.preventDefault();
-        e.stopPropagation();
-        runCommand('file.close');
-        return;
-      }
-
-      // 2. Ctrl+Alt+W: Close All Tabs
-      if (isMod && isAlt && (key === 'w' || key === 'W')) {
-        e.preventDefault();
-        e.stopPropagation();
-        runCommand('file.closeAll');
-        return;
-      }
-
-      // 3. Alt+N: New Text File
-      if (isAlt && !isMod && !isShift && (key === 'n' || key === 'N')) {
-        e.preventDefault();
-        e.stopPropagation();
-        runCommand('file.newTextFile');
-        return;
-      }
-
-      // 4. Ctrl+Alt+N: New File
-      if (isMod && isAlt && !isShift && (key === 'n' || key === 'N')) {
-        e.preventDefault();
-        e.stopPropagation();
-        runCommand('file.newFile');
-        return;
-      }
-
-      // 5. Ctrl+S / Ctrl+Shift+S (Prevent browser save)
-      if (isMod && !isAlt && (key === 's' || key === 'S')) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (isShift) {
-          runCommand('file.saveAs');
-        } else {
-          runCommand('file.save');
-        }
-        return;
-      }
-
-      // 6. Ctrl+O: Open File (Prevent browser open file)
-      if (isMod && !isAlt && !isShift && (key === 'o' || key === 'O')) {
-        e.preventDefault();
-        e.stopPropagation();
-        runCommand('file.open');
-        return;
-      }
-
-      // 7. Alt+PageUp / Alt+PageDown: switch tabs
-      if (isAlt && !isMod && !isShift && key === 'PageUp') {
-        e.preventDefault();
-        e.stopPropagation();
-        if (window.EditorV2 && window.EditorV2.prevTab) window.EditorV2.prevTab();
-        return;
-      }
-      if (isAlt && !isMod && !isShift && key === 'PageDown') {
-        e.preventDefault();
-        e.stopPropagation();
-        if (window.EditorV2 && window.EditorV2.nextTab) window.EditorV2.nextTab();
-        return;
-      }
-
-      // 8. Ctrl+F / Ctrl+H / Ctrl+G
-      if (isMod && !isAlt && !isShift) {
-        if (key === 'f' || key === 'F') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand('edit.find');
-          return;
-        }
-        if (key === 'h' || key === 'H') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand('edit.replace');
-          return;
-        }
-        if (key === 'g' || key === 'G') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand('edit.gotoLine');
-          return;
-        }
-      }
-
-      // 9. Move & Copy lines (Alt+Up/Down, Shift+Alt+Up/Down)
-      if (isAlt && !isMod) {
-        if (key === 'ArrowUp') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand(isShift ? 'selection.copyLineUp' : 'selection.moveLineUp');
-          return;
-        }
-        if (key === 'ArrowDown') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand(isShift ? 'selection.copyLineDown' : 'selection.moveLineDown');
-          return;
-        }
-      }
-
-      // 10. Multi-cursor (Ctrl+Alt+Up/Down)
-      if (isMod && isAlt && !isShift) {
-        if (key === 'ArrowUp') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand('selection.addCursorAbove');
-          return;
-        }
-        if (key === 'ArrowDown') {
-          e.preventDefault();
-          e.stopPropagation();
-          runCommand('selection.addCursorBelow');
-          return;
-        }
-      }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.closeTab, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.close'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.closeAll, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.closeAll'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.newTextFile, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.newTextFile'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.newFile, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.newFile'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.saveAs, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.saveAs'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.save, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.save'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.open, e)) { e.preventDefault(); e.stopPropagation(); runCommand('file.open'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.prevTab, e)) { e.preventDefault(); e.stopPropagation(); if (window.EditorV2 && window.EditorV2.prevTab) window.EditorV2.prevTab(); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.nextTab, e)) { e.preventDefault(); e.stopPropagation(); if (window.EditorV2 && window.EditorV2.nextTab) window.EditorV2.nextTab(); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.find, e)) { e.preventDefault(); e.stopPropagation(); runCommand('edit.find'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.replace, e)) { e.preventDefault(); e.stopPropagation(); runCommand('edit.replace'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.gotoLine, e)) { e.preventDefault(); e.stopPropagation(); runCommand('edit.gotoLine'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.copyLineUp, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.copyLineUp'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.copyLineDown, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.copyLineDown'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.moveLineUp, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.moveLineUp'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.moveLineDown, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.moveLineDown'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.addCursorAbove, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.addCursorAbove'); return; }
+      if (matchEd2(EDITOR_V2_SHORTCUTS.addCursorBelow, e)) { e.preventDefault(); e.stopPropagation(); runCommand('selection.addCursorBelow'); return; }
     };
 
     window.addEventListener('keydown', globalKeydownHandler, true);
@@ -981,4 +905,26 @@
     closeAllMenus,
     renderMenubarLabels,
   };
+
+  if (window.ShortcutHints && typeof window.ShortcutHints.register === 'function') {
+    const inEd2 = (ctx) => !ctx.modal && !ctx.dropdown && ctx.page === 'editorV2';
+    window.ShortcutHints.register([
+      { id: 'ed2.newTextFile', binding: EDITOR_V2_SHORTCUTS.newTextFile, group: 'page', priority: 55, labelKey: 'shActEdNewText',   when: inEd2, target: '#ed2-btn-new-tab' },
+      { id: 'ed2.newFile',     binding: EDITOR_V2_SHORTCUTS.newFile,     group: 'page', priority: 55, labelKey: 'shActEdNewFile',   when: inEd2 },
+      { id: 'ed2.open',        binding: EDITOR_V2_SHORTCUTS.open,        group: 'page', priority: 55, labelKey: 'shActEdOpen',      when: inEd2 },
+      { id: 'ed2.save',        binding: EDITOR_V2_SHORTCUTS.save,        group: 'page', priority: 55, labelKey: 'shActEdSave',      when: inEd2 },
+      { id: 'ed2.saveAs',      binding: EDITOR_V2_SHORTCUTS.saveAs,      group: 'page', priority: 55, labelKey: 'shActEdSaveAs',    when: inEd2 },
+      { id: 'ed2.closeTab',    binding: EDITOR_V2_SHORTCUTS.closeTab,    group: 'page', priority: 55, labelKey: 'shActEdCloseTab',  when: inEd2 },
+      { id: 'ed2.closeAll',    binding: EDITOR_V2_SHORTCUTS.closeAll,    group: 'page', priority: 55, labelKey: 'shActEdCloseAll',  when: inEd2 },
+      { id: 'ed2.switchTab',   bindings: [EDITOR_V2_SHORTCUTS.prevTab, EDITOR_V2_SHORTCUTS.nextTab], group: 'page', priority: 55, labelKey: 'shActEdSwitchTab', when: inEd2 },
+      { id: 'ed2.undo',        binding: { ctrlOrCmd: true, key: 'z' },   group: 'page', priority: 55, labelKey: 'shActEdUndo',      when: inEd2, target: '#ed2-tb-undo' },
+      { id: 'ed2.redo',        binding: { ctrlOrCmd: true, key: 'y' },   group: 'page', priority: 55, labelKey: 'shActEdRedo',      when: inEd2, target: '#ed2-tb-redo' },
+      { id: 'ed2.find',        binding: EDITOR_V2_SHORTCUTS.find,        group: 'page', priority: 55, labelKey: 'shActEdFind',      when: inEd2 },
+      { id: 'ed2.replace',     binding: EDITOR_V2_SHORTCUTS.replace,     group: 'page', priority: 55, labelKey: 'shActEdReplace',   when: inEd2 },
+      { id: 'ed2.gotoLine',    binding: EDITOR_V2_SHORTCUTS.gotoLine,    group: 'page', priority: 55, labelKey: 'shActEdGotoLine',  when: inEd2 },
+      { id: 'ed2.moveLine',    bindings: [EDITOR_V2_SHORTCUTS.moveLineUp, EDITOR_V2_SHORTCUTS.moveLineDown], group: 'page', priority: 55, labelKey: 'shActEdMoveLine', when: inEd2 },
+      { id: 'ed2.copyLine',    bindings: [EDITOR_V2_SHORTCUTS.copyLineUp, EDITOR_V2_SHORTCUTS.copyLineDown], group: 'page', priority: 55, labelKey: 'shActEdDupLine', when: inEd2 },
+      { id: 'ed2.addCursor',   bindings: [EDITOR_V2_SHORTCUTS.addCursorAbove, EDITOR_V2_SHORTCUTS.addCursorBelow], group: 'page', priority: 55, labelKey: 'shActEdAddCursor', when: inEd2 }
+    ]);
+  }
 })();

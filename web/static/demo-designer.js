@@ -993,6 +993,28 @@
         dgnConsolePush('error', [err && (err.stack || err.message) || String(err)]);
       });
   }
+  var DGN_SHORTCUTS = {
+    indent:     { key: 'Tab' },
+    comment:    { alt: true, key: '/' },
+    dupUp:      { alt: true, shift: true, key: 'ArrowUp', altKeys: ['Up'] },
+    dupDown:    { alt: true, shift: true, key: 'ArrowDown', altKeys: ['Down'] },
+    exitModal:  { key: 'Escape' },
+    fullscreen: { ctrlOrCmd: true, key: '+', code: 'Equal', altKeys: ['='] },
+    save:       { ctrlOrCmd: true, key: 's' }
+  };
+
+  function matchDgnKey(b, e) {
+    if (global.Shortcuts && typeof global.Shortcuts.matchBinding === 'function') {
+      return global.Shortcuts.matchBinding(b, e);
+    }
+    if (!b || !e) return false;
+    var mod = !!(e.ctrlKey || e.metaKey);
+    if (!!b.ctrlOrCmd !== mod || !!b.alt !== !!e.altKey || !!b.shift !== !!e.shiftKey) return false;
+    if (b.code && e.code === b.code) return true;
+    if (Array.isArray(b.altKeys) && b.altKeys.indexOf(e.key) !== -1) return true;
+    return b.key.length === 1 ? (e.key && e.key.toLowerCase() === b.key.toLowerCase()) : e.key === b.key;
+  }
+
   function render(container) {
     cleanup();
     if (!container) return;
@@ -1281,28 +1303,27 @@
         syncOverlayScroll();
       });
       ta.addEventListener('keydown', function (e) {
-        var mod = e.ctrlKey || e.metaKey;
         // keyCode 229 = IME composition keystroke: never hijack it.
         var imeKey = e.keyCode === 229 || e.key === 'Process';
-        if (!imeKey && e.key === 'Tab') {
+        if (!imeKey && (matchDgnKey(DGN_SHORTCUTS.indent, e) || (e.shiftKey && !(e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'Tab'))) {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.indent === 'function') {
             global.EditorCommands.indent(ta, e.shiftKey);
           }
-        } else if (!imeKey && e.altKey && !mod && e.key === '/') {
+        } else if (!imeKey && matchDgnKey(DGN_SHORTCUTS.comment, e)) {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.toggleComment === 'function') {
             global.EditorCommands.toggleComment(ta);
           }
-        } else if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowUp' || e.key === 'Up')) {
+        } else if (matchDgnKey(DGN_SHORTCUTS.dupUp, e)) {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
             global.EditorCommands.duplicateLine(ta, 'up');
           }
-        } else if (e.altKey && e.shiftKey && !mod && (e.key === 'ArrowDown' || e.key === 'Down')) {
+        } else if (matchDgnKey(DGN_SHORTCUTS.dupDown, e)) {
           e.preventDefault();
           e.stopPropagation();
           if (global.EditorCommands && typeof global.EditorCommands.duplicateLine === 'function') {
@@ -1314,7 +1335,7 @@
       // Esc must exit focus first before any other shortcut fires.
       dgn.keyHandler = function (e) {
         if (dgn.previewFocused) {
-          if (e.key === 'Escape') {
+          if (matchDgnKey(DGN_SHORTCUTS.exitModal, e)) {
             e.preventDefault(); e.stopImmediatePropagation();
             exitPreviewFocus();
             return;
@@ -1324,7 +1345,7 @@
           return;
         }
         if (dgnIsFullscreen()) {
-          if (e.key === 'Escape') {
+          if (matchDgnKey(DGN_SHORTCUTS.exitModal, e)) {
             e.preventDefault(); e.stopImmediatePropagation();
             dgnSetFullscreen(false);
             return;
@@ -1338,8 +1359,7 @@
           // Let game keys pass; suppress project nav below by returning.
           return;
         }
-        var isCtrlPlus = (e.key === '+' || e.key === '=' || (e.code && e.code === 'Equal')) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
-        if (isCtrlPlus) {
+        if (matchDgnKey(DGN_SHORTCUTS.fullscreen, e)) {
           e.preventDefault(); e.stopImmediatePropagation();
           // Ignore when typing
           var tag = document.activeElement && document.activeElement.tagName;
@@ -1348,7 +1368,7 @@
           dgnToggleFullscreen();
           return;
         }
-        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        if (matchDgnKey(DGN_SHORTCUTS.save, e)) {
           e.preventDefault();
           e.stopPropagation();
           dgnSave();
@@ -1357,15 +1377,14 @@
       document.addEventListener('keydown', dgn.keyHandler, true);
       // Separate capture for Esc when focus is on the stage element itself.
       dgn.previewFocusKey = function (e) {
-        if (dgn.previewFocused && e.key === 'Escape') {
+        if (dgn.previewFocused && matchDgnKey(DGN_SHORTCUTS.exitModal, e)) {
           e.preventDefault(); e.stopImmediatePropagation();
           exitPreviewFocus();
         }
       };
       document.addEventListener('keydown', dgn.previewFocusKey, true);
       dgn.previewFsKey = function (e) {
-        var isCtrlPlus = (e.key === '+' || e.key === '=' || (e.code && e.code === 'Equal')) && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
-        if (!isCtrlPlus) return;
+        if (!matchDgnKey(DGN_SHORTCUTS.fullscreen, e)) return;
         var tag = document.activeElement && document.activeElement.tagName;
         var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (document.activeElement && document.activeElement.isContentEditable);
         if (typing) return;
@@ -1415,4 +1434,21 @@
   global.GameDesigner = { render: render, cleanup: cleanup };
   global.renderGameDesigner = render;
   global.cleanupGameDesigner = cleanup;
+
+  if (global.ShortcutHints && typeof global.ShortcutHints.register === 'function') {
+    var inDgn = function (ctx) { return !ctx.modal && !ctx.dropdown && !!(ctx.designer && ctx.designer.active); };
+    var inDgnEditor = function (ctx) { return inDgn(ctx) && !ctx.designer.previewFocused && !ctx.designer.fullscreen; };
+    var dgnCtrlF = (global.Shortcuts && typeof global.Shortcuts.formatBinding === 'function')
+      ? global.Shortcuts.formatBinding({ ctrlOrCmd: true, key: 'f' })
+      : 'Ctrl+F';
+    global.ShortcutHints.register([
+      { id: 'dgn.exit-focus',      binding: DGN_SHORTCUTS.exitModal,  group: 'page', priority: 85, labelKey: 'shActDgnFocusExit',  when: function (ctx) { return inDgn(ctx) && ctx.designer.previewFocused; }, target: 'button.dgn-preview-focus' },
+      { id: 'dgn.exit-fullscreen', binding: DGN_SHORTCUTS.exitModal,  extraKeys: [dgnCtrlF], group: 'page', priority: 85, labelKey: 'shActGalExitFs', when: function (ctx) { return inDgn(ctx) && ctx.designer.fullscreen; }, target: 'button.dgn-preview-fs' },
+      { id: 'dgn.fullscreen',      binding: DGN_SHORTCUTS.fullscreen, group: 'page', priority: 60, labelKey: 'shActDgnFullscreen', when: inDgnEditor, target: 'button.dgn-preview-fs' },
+      { id: 'dgn.save',            binding: DGN_SHORTCUTS.save,       group: 'page', priority: 55, labelKey: 'shActEdSave',        when: inDgnEditor, target: '.dgn-root [data-action="save"]' },
+      { id: 'dgn.indent',          bindings: [DGN_SHORTCUTS.indent, { shift: true, key: 'Tab' }], group: 'page', priority: 55, labelKey: 'shActEdIndent',  when: inDgnEditor },
+      { id: 'dgn.comment',         binding: DGN_SHORTCUTS.comment,    group: 'page', priority: 55, labelKey: 'shActEdComment',     when: inDgnEditor },
+      { id: 'dgn.dupLine',         bindings: [DGN_SHORTCUTS.dupUp, DGN_SHORTCUTS.dupDown],        group: 'page', priority: 55, labelKey: 'shActEdDupLine', when: inDgnEditor }
+    ]);
+  }
 })(typeof window !== 'undefined' ? window : this);

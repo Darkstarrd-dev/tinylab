@@ -1,0 +1,188 @@
+/* =====================================================================
+   Live Shortcut Hints HUD (style-shortcut-hints.css)
+   Namespaced (.brand-title-*, .sh-*) and built solely on existing theme
+   tokens so dark/light variants, style presets, and font-size scales
+   apply automatically.
+   ===================================================================== */
+
+.brand-title-wrap{display:flex;align-items:center}
+.brand-title-btn{
+  appearance:none;-webkit-appearance:none;
+  background:transparent;border:0;
+  padding:3px 7px;margin:0 -7px;
+  font:inherit;color:inherit;line-height:1;letter-spacing:inherit;
+  cursor:pointer;border-radius:var(--radius-xs);
+  display:inline-flex;align-items:center;gap:4px;
+  transition:color var(--transition-fast),background var(--transition-fast),text-shadow var(--transition-fast);
+}
+.brand-title-btn:hover{color:var(--accent);background:var(--glass-hover)}
+.brand-title-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.brand-title-btn.is-active{
+  color:var(--accent);
+  background:var(--interactive-active-bg,var(--accent-glow));
+  text-shadow:0 0 10px var(--accent-glow);
+}
+
+/* Portal overlay container (inset:0 so zoom.js html{zoom} stays exact) */
+#shortcut-hints-layer.sh-layer{
+  position:fixed;inset:0;
+  z-index:10015;
+  pointer-events:none;
+  overflow:hidden;
+}
+
+/* Tier A: Anchored keycap badge next to visible buttons */
+.sh-badge{
+  position:absolute;left:0;top:0;
+  pointer-events:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:20px;height:19px;padding:0 5px;
+  border-radius:var(--radius-xs);
+  font-family:var(--font-mono,ui-monospace,SFMono-Regular,Consolas,monospace);
+  font-size:10.5px;font-weight:700;line-height:1;
+  white-space:nowrap;letter-spacing:0.2px;
+  background:var(--modal-bg);
+  color:var(--accent);
+  border:1px solid var(--accent);
+  box-shadow:0 2px 8px rgba(0,0,0,0.48),0 0 0 1px rgba(0,0,0,0.28);
+  z-index:2;
+}
+[data-theme="light"] .sh-badge{
+  background:var(--modal-bg);
+  color:var(--accent);
+  border-color:var(--accent);
+  box-shadow:0 2px 8px rgba(15,23,42,0.18),0 0 0 1px rgba(15,23,42,0.08);
+}
+
+/* Tier B: Centered / modal-avoiding overlay card for buttonless/hidden shortcuts */
+.sh-overlay-card{
+  position:absolute;left:0;top:0;
+  pointer-events:auto;
+  box-sizing:border-box;
+  width:min(580px,calc(100% - 24px));
+  max-height:min(72vh,calc(100% - 32px));
+  display:flex;flex-direction:column;
+  background:var(--modal-bg);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border-hover);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-modal),0 0 0 1px var(--accent-glow);
+  color:var(--text);
+  overflow:hidden;
+  z-index:1;
+}
+.sh-overlay-card.sh-docked-bar{
+  width:min(680px,calc(100% - 24px));
+  max-height:min(42vh,calc(100% - 32px));
+}
+.sh-overlay-card.sh-docked-side .sh-grid{grid-template-columns:1fr}
+.sh-overlay-card.sh-docked-side .sh-card-ctx-pill{max-width:140px}
+
+.sh-card-header{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:11px 14px;
+  border-bottom:1px solid var(--glass-border);
+  background:rgba(255,255,255,0.02);
+  flex-shrink:0;
+}
+.sh-card-title-wrap{display:flex;align-items:center;gap:8px;min-width:0}
+.sh-card-title{
+  font-size:var(--font-card-title);font-weight:var(--font-weight-bold);
+  color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sh-card-ctx-pill{
+  font-size:var(--font-badge);font-weight:600;
+  padding:2px 8px;border-radius:999px;
+  background:var(--interactive-active-bg,var(--accent-glow));
+  color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;
+}
+.sh-card-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.sh-card-btn{
+  appearance:none;-webkit-appearance:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  height:26px;padding:0 9px;
+  border-radius:var(--radius-xs);
+  background:var(--glass-hover);
+  border:1px solid var(--glass-border);
+  color:var(--text-secondary);
+  font-family:inherit;font-size:var(--font-badge);font-weight:600;
+  cursor:pointer;
+  transition:color var(--transition-fast),background var(--transition-fast),border-color var(--transition-fast);
+}
+.sh-card-btn:hover{color:var(--accent);border-color:var(--accent);background:var(--glass-active)}
+.sh-card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sh-close-btn{width:26px;padding:0;font-size:15px;line-height:1}
+
+.sh-card-body{
+  flex:1 1 auto;min-height:0;
+  overflow-y:auto;padding:12px 14px;
+  display:flex;flex-direction:column;gap:12px;
+  scrollbar-width:thin;
+}
+.sh-section{display:flex;flex-direction:column;gap:6px}
+.sh-section-title{
+  font-size:var(--font-badge);font-weight:700;
+  text-transform:uppercase;letter-spacing:0.6px;
+  color:var(--text-muted);
+}
+.sh-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px 10px;
+}
+@media (max-width:520px){
+  .sh-grid{grid-template-columns:1fr}
+}
+.sh-item{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:5px 8px;min-width:0;
+  border-radius:var(--radius-sm);
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border);
+}
+.sh-label{
+  font-size:var(--font-log);color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;
+}
+.sh-kbd{
+  flex-shrink:0;
+  font-family:var(--font-mono,ui-monospace,SFMono-Regular,Consolas,monospace);
+  font-size:11px;font-weight:700;line-height:1.2;
+  padding:2px 7px;border-radius:var(--radius-xs);
+  background:var(--code-bg);
+  color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 42%,var(--glass-border));
+  white-space:nowrap;
+}
+.sh-empty-note{
+  font-size:var(--font-log);color:var(--text-secondary);
+  padding:10px 12px;border-radius:var(--radius-sm);
+  background:var(--glass-bg);border:1px dashed var(--glass-border);
+  text-align:center;
+}
+
+.sh-card-footer{
+  flex-shrink:0;
+  border-top:1px solid var(--glass-border);
+  padding:9px 14px;
+  display:flex;flex-direction:column;gap:7px;
+  background:rgba(0,0,0,0.12);
+}
+[data-theme="light"] .sh-card-footer{background:rgba(0,0,0,0.03)}
+
+.sh-systray-bar{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;
+  font-size:var(--font-badge);
+}
+.sh-systray-title{color:var(--text-muted);font-weight:600;white-space:nowrap}
+.sh-systray-list{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px}
+.sh-systray-item{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary)}
+
+.sh-footer-hint{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;
+  font-size:var(--font-badge);color:var(--text-muted);
+}
